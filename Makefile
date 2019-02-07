@@ -12,5 +12,8 @@ $(TOP_V): $(SCALA_FILE)
 test:
 	sbt 'test:runMain core.TestMain -td $(BUILD_DIR) --image $(IMAGE)'
 
+emu:
+	sbt 'test:runMain core.TestMain -td $(BUILD_DIR) --image $(IMAGE) --backend-name verilator --generate-vcd-output off'
+
 clean:
 	rm -rf $(OBJ_DIR)/*
