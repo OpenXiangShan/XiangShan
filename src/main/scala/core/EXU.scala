@@ -41,7 +41,7 @@ class EXU extends Module {
   val aluOut = (new ALU).access(src1 = io.in.data.src1, src2 = io.in.data.src2, func = io.in.ctrl.fuOpType)
 
   io.out.data := DontCare
-  io.out.data.dest := Mux(io.in.ctrl.fuType === FuAlu, aluOut, UInt(0))
+  io.out.data.dest := Mux(io.in.ctrl.fuType === FuAlu, aluOut, 0.U)
 
   io.out.ctrl := DontCare
   (io.out.ctrl, io.in.ctrl) match { case (o, i) =>
