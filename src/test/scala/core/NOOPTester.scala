@@ -36,4 +36,6 @@ class NOOPTester(noop: NOOP) extends PeekPokeTester(noop) {
     case 1 => println(f"\33[1;31mHIT BAD TRAP\33[0m at pc = 0x$pc%08x")
     case 2 => println(f"\33[1;31mINVALID OPCODE\33[0m at pc = 0x$pc%08x, instr = 0x$instr%08x")
   }
+
+  expect(noop.io.trap, 0)
 }
