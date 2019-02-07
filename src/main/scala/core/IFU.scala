@@ -3,13 +3,17 @@ package core
 import chisel3._
 import chisel3.util._
 
-class IFU extends Module {
+trait HasResetVector {
+  val resetVector = 0x100000
+}
+
+class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
     val imem = new MemIO
     val out = new PcInstrIO
   })
 
-  val pc = RegInit(0.U(32.W))
+  val pc = RegInit(resetVector.U(32.W))
   pc := pc + 4.U
 
   io.imem.out.valid := true.B
