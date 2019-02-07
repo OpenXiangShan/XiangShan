@@ -1,9 +1,9 @@
 package core
 
-import chisel3.iotesters
-import chisel3.iotesters.{Driver, PeekPokeTester}
+import chisel3.iotesters.PeekPokeTester
+import top.ALUModule
 
-class ALUUnitTester(alu: ALU) extends PeekPokeTester(alu) {
+class ALUUnitTester(alu: ALUModule) extends PeekPokeTester(alu) {
   def asUnsigned(a: Long) : Long = if (a < 0) a + 0x100000000L else a
 
   def scalaAlu(a: Long, b: Long, func: Int): Long = {
@@ -27,8 +27,8 @@ class ALUUnitTester(alu: ALU) extends PeekPokeTester(alu) {
   for (f <- (0 to 8).toList :+ 13) {
     for (a <- input) {
       for (b <- input) {
-        poke(alu.io.a, a)
-        poke(alu.io.b, b)
+        poke(alu.io.src1, a)
+        poke(alu.io.src2, b)
         poke(alu.io.func, f)
         val ref = scalaAlu(a, b, f)
         val dut = peek(alu.io.out)
@@ -41,8 +41,3 @@ class ALUUnitTester(alu: ALU) extends PeekPokeTester(alu) {
   }
 }
 
-object TestMain extends App {
-  iotesters.Driver.execute(args, () => new ALU) {
-    c => new ALUUnitTester(c)
-  }
-}

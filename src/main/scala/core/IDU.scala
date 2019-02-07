@@ -35,5 +35,5 @@ class IDU extends Module {
 
   io.out.pc := io.in.pc
 
-  io.out.ctrl.isTrap := instr === TRAP
+  io.out.ctrl.isTrap := Cat(instrType === InstrN, instr === TRAP)
 }

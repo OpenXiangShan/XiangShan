@@ -37,5 +37,5 @@ class ISU extends Module {
   }
   io.out.pc := io.in.pc
 
-  io.trap := Mux(io.in.ctrl.isTrap, Mux(rs1Data === 0.U, 0.U, 1.U), 3.U)
+  io.trap := Mux(io.in.ctrl.isTrap(1), 2.U, Mux(io.in.ctrl.isTrap(0), Mux(rs1Data === 0.U, 0.U, 1.U), 3.U))
 }
