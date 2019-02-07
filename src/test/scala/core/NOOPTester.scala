@@ -32,8 +32,8 @@ class NOOPTester(noop: NOOP) extends PeekPokeTester(noop) {
   } while (trap == 3)
 
   trap match {
-    case 0 => println(s"\33[1;32mHIT GOOD TRAP\33[0m at pc = $pc") 
-    case 1 => println(s"\33[1;31mHIT BAD TRAP\33[0m at pc = $pc")
-    case 2 => println(s"\33[1;31mINVALID OPCODE\33[0m at pc = $pc, instr = $instr")
+    case 0 => println(f"\33[1;32mHIT GOOD TRAP\33[0m at pc = 0x$pc%08x")
+    case 1 => println(f"\33[1;31mHIT BAD TRAP\33[0m at pc = 0x$pc%08x")
+    case 2 => println(f"\33[1;31mINVALID OPCODE\33[0m at pc = 0x$pc%08x, instr = 0x$instr%08x")
   }
 }
