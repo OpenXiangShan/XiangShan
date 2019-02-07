@@ -33,7 +33,7 @@ object Decode {
     InstrI -> (Src1Reg, Src2Imm),
     InstrR -> (Src1Reg, Src2Reg),
     InstrS -> (Src1Reg, Src2Imm),
-    InstrB -> (Src1Reg, Src2Reg),
+    InstrB -> (Src1Reg, Src2Imm),
     InstrU -> (Src1Pc , Src2Imm),
     InstrJ -> (Src1Pc , Src2Imm),
     InstrN -> (Src1Pc , Src2Imm)
@@ -48,7 +48,7 @@ object Decode {
   val FuTypeWidth = log2Up(FuTypeNum).W
 
   /* ALU operation type */
-  private val FuOpTypeAluNum  = 10
+  private val FuOpTypeAluNum  = 11
   val AluAdd  = "b0000".U
   val AluSll  = "b0001".U
   val AluSlt  = "b0010".U
@@ -59,14 +59,18 @@ object Decode {
   val AluAnd  = "b0111".U
   val AluSub  = "b1000".U
   val AluSar  = "b1101".U
+  val AluLui  = "b1111".U
 
   /* BRU operation type */
   private val FuOpTypeBruNum  = 10
   val BruJal  = "b1000".U
   val BruJalr = "b1001".U
+  val BruBeq  = "b0000".U
+  val BruBne  = "b0001".U
 
   /* LSU operation type */
   private val FuOpTypeLsuNum  = 10
+  val LsuLw   = "b0010".U
   val LsuSw   = "b1010".U
 
   /* MDU operation type */
@@ -79,12 +83,20 @@ object Decode {
 
   /* instruction pattern */
   val ADDI    = BitPat("b????????????_?????_000_?????_0010011")
+  val SLTIU   = BitPat("b????????????_?????_011_?????_0010011")
+
+  val ADD     = BitPat("b0000000_?????_?????_000_?????_0110011")
 
   val AUIPC   = BitPat("b????????????????????_?????_0010111")
+  val LUI     = BitPat("b????????????????????_?????_0110111")
 
   val JAL     = BitPat("b????????????????????_?????_1101111")
   val JALR    = BitPat("b????????????_?????_000_?????_1100111")
 
+  val BNE     = BitPat("b???????_?????_?????_001_?????_1100011")
+  val BEQ     = BitPat("b???????_?????_?????_000_?????_1100011")
+
+  val LW      = BitPat("b????????????_?????_010_?????_0000011")
   val SW      = BitPat("b???????_?????_?????_010_?????_0100011")
 
   val TRAP    = BitPat("b????????????_?????_000_?????_1101011")
@@ -96,12 +108,20 @@ object Decode {
     /*                     Instr |  FU  | FU OP |
      *                     Type  | Type |  Type | */
     ADDI           -> List(InstrI, FuAlu, AluAdd),
+    SLTIU          -> List(InstrI, FuAlu, AluSltu),
+
+    ADD            -> List(InstrR, FuAlu, AluAdd),
 
     AUIPC          -> List(InstrU, FuAlu, AluAdd),
+    LUI            -> List(InstrU, FuAlu, AluLui),
 
     JAL            -> List(InstrJ, FuBru, BruJal),
     JALR           -> List(InstrI, FuBru, BruJalr),
 
+    BEQ            -> List(InstrB, FuBru, BruBeq),
+    BNE            -> List(InstrB, FuBru, BruBne),
+
+    LW             -> List(InstrI, FuLsu, LsuLw),
     SW             -> List(InstrS, FuLsu, LsuSw),
 
     TRAP           -> List(InstrI, FuAlu, AluAdd)

@@ -6,12 +6,16 @@ import chisel3.util._
 import Decode._
 
 object LookupTree {
+  private val useMuxTree = true
+
   def apply[T <: Data](key: UInt, mapping: Iterable[(UInt, T)]): T =
     Mux1H(mapping.map(p => (p._1 === key, p._2)))
+
+  def apply[T <: Data](key: UInt, default: T, mapping: Iterable[(UInt, T)]): T =
+    if (useMuxTree) apply(key, mapping) else MuxLookup(key, default, mapping.toSeq)
 }
 
 class ALU {
-  private val useMuxTree = true
   def access(src1: UInt, src2: UInt, func: UInt): UInt = {
     val shamt = src2(4, 0)
     val funcList = List(
@@ -24,25 +28,26 @@ class ALU {
       AluOr   -> (src1  |  src2),
       AluAnd  -> (src1  &  src2),
       AluSub  -> (src1  -  src2),
+      AluLui  -> src2,
       AluSar  -> ((src1.asSInt >> shamt).asUInt)
     )
 
-    if (useMuxTree) LookupTree(func, funcList)
-    else MuxLookup(func, 0.U, funcList)
+    LookupTree(func, 0.U, funcList)
   }
 }
 
 class BRU {
   private val useMuxTree = true
-  def access(src1: UInt, src2: UInt, func: UInt): (UInt, Bool) = {
+  def access(pc: UInt, offset: UInt, src1: UInt, src2: UInt, func: UInt): (UInt, Bool) = {
     val funcList = List(
-      BruJal  -> (src1  +  src2),
-      BruJalr -> (src1  +  src2)
+      BruBeq  -> (src1 === src2),
+      BruBne  -> (src1 =/= src2),
+      BruJal  -> true.B,
+      BruJalr -> true.B
     )
 
-    val target = (if (useMuxTree) LookupTree(func, funcList)
-                  else MuxLookup(func, 0.U, funcList))
-    val isTaken = func(3)
+    val target = Mux(func === BruJalr, src1 + src2, pc + offset)
+    val isTaken = LookupTree(func, false.B, funcList)
     (target, isTaken)
   }
 }
@@ -54,8 +59,7 @@ class LSU {
       LsuSw   -> (src1  +  src2)
     )
 
-    val addr = (if (useMuxTree) LookupTree(func, funcList)
-                else MuxLookup(func, 0.U, funcList))
+    val addr = LookupTree(func, 0.U, funcList)
     val wen = func(3)
     (addr, wen)
   }
@@ -72,7 +76,8 @@ class EXU extends Module {
   val (src1, src2, fuType, fuOpType) = (io.in.data.src1, io.in.data.src2, io.in.ctrl.fuType, io.in.ctrl.fuOpType)
   val aluOut = (new ALU).access(src1 = src1, src2 = src2, func = fuOpType)
 
-  val (bruOut, bruIsTaken) = (new BRU).access(src1 = src1, src2 = src2, func = fuOpType)
+  val (bruOut, bruIsTaken) = (new BRU).access(pc = io.in.pc, offset = src2,
+    src1 = src1, src2 = io.in.data.dest, func = fuOpType)
   io.br.isTaken := (fuType === FuBru) && bruIsTaken
   io.br.target := bruOut
 
@@ -93,4 +98,6 @@ class EXU extends Module {
     o.rfDest := i.rfDest
   }
   io.out.pc := io.in.pc
+
+  printf("EXU: src1 = 0x%x, src2 = 0x%x\n", src1, src2)
 }

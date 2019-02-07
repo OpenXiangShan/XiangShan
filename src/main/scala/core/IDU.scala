@@ -27,7 +27,7 @@ class IDU extends Module {
   io.out.data.src2 := LookupTree(instrType, List(
     InstrI -> Cat(Fill(20, instr(31)), instr(31, 20)),
     InstrS -> Cat(Fill(20, instr(31)), instr(31, 25), instr(11, 7)),
-    InstrB -> Cat(Fill(20, instr(31)), instr(7), instr(30, 25), instr(11, 6), 0.U(1.W)),
+    InstrB -> Cat(Fill(20, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)),
     InstrU -> Cat(instr(31, 12), 0.U(12.W)),
     InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
   ))
@@ -37,5 +37,5 @@ class IDU extends Module {
 
   io.out.ctrl.isTrap := Cat(instrType === InstrN, instr === TRAP)
 
-  printf("IDU: pc = 0x%x, instr = 0x%x, src1 = 0x%x, src2 = 0x%x\n", io.in.pc, instr, io.out.data.src1, io.out.data.src2)
+  printf("IDU: pc = 0x%x, instr = 0x%x\n", io.in.pc, instr)
 }
