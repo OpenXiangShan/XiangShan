@@ -24,12 +24,12 @@ class ALU {
       AluSlt  -> ((src1.asSInt < src2.asSInt).asUInt),
       AluSltu -> ((src1 < src2).asUInt),
       AluXor  -> (src1  ^  src2),
-      AluSlr  -> (src1  >> shamt),
+      AluSrl  -> (src1  >> shamt),
       AluOr   -> (src1  |  src2),
       AluAnd  -> (src1  &  src2),
       AluSub  -> (src1  -  src2),
       AluLui  -> src2,
-      AluSar  -> ((src1.asSInt >> shamt).asUInt)
+      AluSra  -> ((src1.asSInt >> shamt).asUInt)
     )
 
     LookupTree(func, 0.U, funcList)
@@ -42,6 +42,8 @@ class BRU {
     val funcList = List(
       BruBeq  -> (src1 === src2),
       BruBne  -> (src1 =/= src2),
+      BruBlt  -> (src1.asSInt  <  src2.asSInt),
+      BruBge  -> (src1.asSInt >=  src2.asSInt),
       BruJal  -> true.B,
       BruJalr -> true.B
     )
