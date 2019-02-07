@@ -38,6 +38,13 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
     instr = mem(pc >> 2)
     poke(noop.io.imem.in.rdata, instr)
 
+    val addr = peek(noop.io.dmem.out.bits.addr).toInt
+    assert((addr & 0x3) == 0)
+    poke(noop.io.dmem.in.rdata, mem(addr >> 2))
+    val wen = peek(noop.io.dmem.out.bits.wen)
+    val wdata = peek(noop.io.dmem.out.bits.wdata).toInt
+    if (wen == 1) { mem(addr >> 2) = wdata }
+
     step(1)
 
     trap = peek(noop.io.trap).toInt

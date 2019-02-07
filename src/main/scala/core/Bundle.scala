@@ -39,3 +39,8 @@ class WriteBackIO extends Bundle {
   val rfDest = Output(UInt(5.W))
   val rfWdata = Output(UInt(32.W))
 }
+
+class BranchIO extends Bundle {
+  val isTaken = Output(Bool())
+  val target = Output(UInt(32.W))
+}

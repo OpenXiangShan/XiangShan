@@ -11,10 +11,11 @@ class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
     val imem = new MemIO
     val out = new PcInstrIO
+    val br = Flipped(new BranchIO)
   })
 
   val pc = RegInit(resetVector.U(32.W))
-  pc := pc + 4.U
+  pc := Mux(io.br.isTaken, io.br.target, pc + 4.U)
 
   io.imem.out.valid := true.B
   io.imem.out.bits.addr := pc

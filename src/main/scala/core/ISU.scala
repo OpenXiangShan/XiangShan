@@ -24,7 +24,7 @@ class ISU extends Module {
   val rs2Data = rf.read(io.in.ctrl.rfSrc2)
   io.out.data.src1 := Mux(io.in.ctrl.src1Type === Src1Pc, io.in.pc, rs1Data)
   io.out.data.src2 := Mux(io.in.ctrl.src2Type === Src2Reg, rs2Data, io.in.data.src2)
-  io.out.data.dest := DontCare
+  io.out.data.dest := rs2Data // for S-type and B-type
 
   when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfWdata) }
 

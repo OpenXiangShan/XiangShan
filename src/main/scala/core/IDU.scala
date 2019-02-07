@@ -21,7 +21,7 @@ class IDU extends Module {
   io.out.ctrl.rfSrc1 := instr(19, 15)
   io.out.ctrl.rfSrc2 := instr(24, 20)
   io.out.ctrl.rfWen := isrfWen(instrType)
-  io.out.ctrl.rfDest := Mux(isrfWen(instrType), instr(11, 7), instr(24, 20))
+  io.out.ctrl.rfDest := instr(11, 7)
 
   io.out.data.src1 := DontCare
   io.out.data.src2 := LookupTree(instrType, List(
@@ -36,4 +36,6 @@ class IDU extends Module {
   io.out.pc := io.in.pc
 
   io.out.ctrl.isTrap := Cat(instrType === InstrN, instr === TRAP)
+
+  printf("IDU: pc = 0x%x, instr = 0x%x, src1 = 0x%x, src2 = 0x%x\n", io.in.pc, instr, io.out.data.src1, io.out.data.src2)
 }
