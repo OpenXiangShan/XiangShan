@@ -6,15 +6,26 @@ import java.nio.{IntBuffer, ByteOrder}
 import java.io.FileInputStream
 import java.nio.channels.FileChannel
 
-class NOOPTester(noop: NOOP) extends PeekPokeTester(noop) {
+class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop) {
   val memSize = 128 * 1024 * 1024
   val mem = {
-    val fc = new FileInputStream("./build/bin").getChannel()
-    println(s"bin size = ${fc.size()}")
+    if (imgPath == "") {
+      Array(
+        0x07b08093,   // addi x1,x1,123
+        0xf8508093,   // addi x1,x1,-123
+        0x0000806b,   // trap x1
+        0, 0, 0, 0
+      )
+    }
+    else {
+      val fc = new FileInputStream(imgPath).getChannel()
+      println(f"bin size = 0x${fc.size()}%08x")
 
-    var mem = Array.fill(memSize / 4)(0)
-    fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size()).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(mem, 0, fc.size() / 4)
-    mem
+      var mem = Array.fill(memSize / 4)(0)
+      fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size()).order(ByteOrder.LITTLE_ENDIAN)
+        .asIntBuffer().get(mem, 0, fc.size() / 4)
+      mem
+    }
   }
 
   var pc = 0
