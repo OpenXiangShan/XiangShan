@@ -64,6 +64,7 @@ class LSU {
   }
   def rdataExt(rdata: UInt, func: UInt): UInt = {
     LookupTree(func, rdata, List(
+      LsuLb   -> Cat(Fill(24, rdata(7)), rdata(7, 0)),
       LsuLh   -> Cat(Fill(16, rdata(15)), rdata(15, 0)),
       LsuLw   -> rdata,
       LsuLbu  -> Cat(0.U(24.W), rdata(7, 0)),
