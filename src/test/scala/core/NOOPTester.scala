@@ -6,12 +6,12 @@ import java.nio.{IntBuffer, ByteOrder}
 import java.io.FileInputStream
 import java.nio.channels.FileChannel
 
-class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
-  with HasResetVector {
-  val memSize = 128 * 1024 * 1024
-  val mem = {
+class SimMem {
+  private val memSize = 128 * 1024 * 1024
+  private var mem: Array[Int] = Array()
+  def init(imgPath: String, resetVector: Int) = {
     if (imgPath == "") {
-      Array.fill(resetVector / 4)(0) ++ Array(
+      mem = Array.fill(resetVector / 4)(0) ++ Array(
         0x07b08093,   // addi x1,x1,123
         0xf8508093,   // addi x1,x1,-123
         0x0000806b,   // trap x1
@@ -22,55 +22,78 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
       val fc = new FileInputStream(imgPath).getChannel()
       println(f"bin size = 0x${fc.size()}%08x")
 
-      var mem = Array.fill(memSize / 4)(0)
+      mem = Array.fill(memSize / 4)(0)
       fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size()).order(ByteOrder.LITTLE_ENDIAN)
-        .asIntBuffer().get(mem, resetVector / 4, fc.size() / 4)
-      mem
+        .asIntBuffer().get(mem, resetVector / 4, fc.size().toInt / 4)
     }
   }
+
+  def getDataMask(sizeEncode: Int): Int = {
+    sizeEncode match {
+      case 0 => 0xff
+      case 1 => 0xffff
+      case 2 => 0xffffffff
+      case _ => 0xffffffff
+    }
+  }
+
+  def checkAddrAlign(addr: Int, sizeEncode: Int) = {
+    val addrMask = sizeEncode match {
+      case 0 => 0
+      case 1 => 0x1
+      case 2 => 0x3
+      case _ => 0xffffffff
+    }
+
+    assert((addr & addrMask) == 0)
+  }
+
+  def read(addr: Int, sizeEncode: Int): Int = {
+    checkAddrAlign(addr, sizeEncode)
+    val idx = addr >> 2
+    val offset = addr & 0x3
+    val data = mem(idx)
+    val rdataAlign = data >> (offset * 8)
+    //println(f"rdataAlign = 0x$rdataAlign%08x")
+    rdataAlign
+  }
+
+  def write(addr: Int, sizeEncode: Int, wdata: Int) = {
+    checkAddrAlign(addr, sizeEncode)
+    val idx = addr >> 2
+    val offset = addr & 0x3
+    val data = mem(idx)
+    val wdataAlign = wdata << (offset * 8)
+    val dataMaskAlign = getDataMask(sizeEncode) << (offset * 8)
+    val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
+    mem(idx) = newData
+    //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x")
+  }
+}
+
+class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
+  with  HasResetVector {
 
   var pc = 0
   var trap = 0
   var instr = 0
+
+  val mem = new SimMem
+  mem.init(imgPath, resetVector)
+
   do {
     pc = peek(noop.io.imem.out.bits.addr).toInt
-    assert((pc & 0x3) == 0)
-    instr = mem(pc >> 2)
+    instr = mem.read(pc, peek(noop.io.imem.out.bits.size).toInt)
     poke(noop.io.imem.in.rdata, instr)
 
     val valid = peek(noop.io.dmem.out.valid)
     if (valid == 1) {
       val dmemAddr = peek(noop.io.dmem.out.bits.addr).toInt
       val size = peek(noop.io.dmem.out.bits.size).toInt
-      val (addrMask, dataMask) = size match {
-        case 0 => (0, 0xff)
-        case 1 => (0x1, 0xffff)
-        case 2 => (0x3, 0xffffffff)
-      }
-
-      assert((dmemAddr & addrMask) == 0)
-
-      val addr = dmemAddr >> 2
-      val offset = dmemAddr & 0x3
-      val data = mem(addr)
-      val rdataAlign = data >> (offset * 8)
-      poke(noop.io.dmem.in.rdata, rdataAlign)
-
-      //println(f"pc = 0x$pc%08x, dmemAddr = 0x$dmemAddr%08x, size = $size, data = 0x$data%08x")
+      poke(noop.io.dmem.in.rdata, mem.read(dmemAddr, size))
 
       val wen = peek(noop.io.dmem.out.bits.wen)
-      if (wen == 1) {
-        val wdata = peek(noop.io.dmem.out.bits.wdata).toInt
-        val wdataAlign = wdata << (offset * 8)
-        val dataMaskAlign = dataMask << (offset * 8)
-        val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
-        mem(addr) = newData
-
-        //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x, offset = $offset")
-      }
-      else {
-        //println(f"rdataAlign = 0x$rdataAlign%08x")
-      }
+      if (wen == 1) mem.write(dmemAddr, size, peek(noop.io.dmem.out.bits.wdata).toInt)
     }
 
     step(1)
