@@ -66,7 +66,11 @@ class SimMem {
     val wdataAlign = wdata << (offset * 8)
     val dataMaskAlign = getDataMask(sizeEncode) << (offset * 8)
     val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
-    mem(idx) = newData
+    if (addr == 0x43f8 && sizeEncode == 0) {
+      // write to uart data
+      print(f"${wdata & 0xff}%c")
+    }
+    else { mem(idx) = newData }
     //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x")
   }
 }
