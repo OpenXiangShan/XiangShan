@@ -5,6 +5,7 @@ import chisel3.util._
 
 class ABundle extends Bundle {
   val addr = Output(UInt(32.W))
+  val size = Output(UInt(2.W))
   val wdata = Output(UInt(32.W))
   val wen = Output(Bool())
 }

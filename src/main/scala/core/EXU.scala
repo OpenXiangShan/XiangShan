@@ -18,7 +18,7 @@ object LookupTree {
 class ALU {
   def access(src1: UInt, src2: UInt, func: UInt): UInt = {
     val shamt = src2(4, 0)
-    val funcList = List(
+    LookupTree(func, 0.U, List(
       AluAdd  -> (src1  +  src2),
       AluSll  -> ((src1  << shamt)(31, 0)),
       AluSlt  -> ((src1.asSInt < src2.asSInt).asUInt),
@@ -30,52 +30,59 @@ class ALU {
       AluSub  -> (src1  -  src2),
       AluLui  -> src2,
       AluSra  -> ((src1.asSInt >> shamt).asUInt)
-    )
-
-    LookupTree(func, 0.U, funcList)
+    ))
   }
 }
 
 class BRU {
-  def access(pc: UInt, offset: UInt, src1: UInt, src2: UInt, func: UInt): (UInt, Bool) = {
-    val funcList = List(
+  def access(isBru: Bool, pc: UInt, offset: UInt, src1: UInt, src2: UInt, func: UInt): BranchIO = {
+    val branch = Wire(new BranchIO)
+    branch.target := Mux(func === BruJalr, src1 + src2, pc + offset)
+    branch.isTaken := isBru && LookupTree(func, false.B, List(
       BruBeq  -> (src1 === src2),
       BruBne  -> (src1 =/= src2),
       BruBlt  -> (src1.asSInt  <  src2.asSInt),
       BruBge  -> (src1.asSInt >=  src2.asSInt),
+      BruBltu -> (src1  <  src2),
+      BruBgeu -> (src1  >= src2),
       BruJal  -> true.B,
       BruJalr -> true.B
-    )
-
-    val target = Mux(func === BruJalr, src1 + src2, pc + offset)
-    val isTaken = LookupTree(func, false.B, funcList)
-    (target, isTaken)
+    ))
+    branch
   }
 }
 
 class LSU {
-  def access(src1: UInt, src2: UInt, func: UInt): (UInt, Bool) = {
-    val funcList = List(
-      LsuSw   -> (src1  +  src2)
-    )
-
-    val addr = LookupTree(func, 0.U, funcList)
-    val wen = func(3)
-    (addr, wen)
+  def access(isLsu: Bool, src1: UInt, src2: UInt, func: UInt, wdata: UInt): MemIO = {
+    val dmem = Wire(new MemIO)
+    dmem.out.bits.addr := src1 + src2
+    dmem.out.valid := isLsu
+    dmem.out.bits.wen := isLsu && func(3)
+    dmem.out.bits.size := func(1, 0)
+    dmem.out.bits.wdata := wdata
+    dmem
+  }
+  def rdataExt(rdata: UInt, func: UInt): UInt = {
+    LookupTree(func, rdata, List(
+      LsuLh   -> Cat(Fill(16, rdata(15)), rdata(15, 0)),
+      LsuLw   -> rdata,
+      LsuLbu  -> Cat(0.U(24.W), rdata(7, 0)),
+      LsuLhu  -> Cat(0.U(16.W), rdata(15, 0))
+    ))
   }
 }
 
 class MDU {
   def access(src1: UInt, src2: UInt, func: UInt): UInt = {
     val mulRes = (src1.asSInt * src2.asSInt).asUInt
-    val funcList = List(
+    LookupTree(func, 0.U, List(
       MduMul  -> mulRes(31, 0),
       MduMulh -> mulRes(63, 32),
       MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
-      MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt
-    )
-
-    LookupTree(func, 0.U, funcList)
+      MduDivu -> (src1  /  src2),
+      MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
+      MduRemu -> (src1  %  src2)
+    ))
   }
 }
 
@@ -90,16 +97,12 @@ class EXU extends Module {
   val (src1, src2, fuType, fuOpType) = (io.in.data.src1, io.in.data.src2, io.in.ctrl.fuType, io.in.ctrl.fuOpType)
   val aluOut = (new ALU).access(src1 = src1, src2 = src2, func = fuOpType)
 
-  val (bruOut, bruIsTaken) = (new BRU).access(pc = io.in.pc, offset = src2,
+  io.br <> (new BRU).access(isBru = fuType === FuBru, pc = io.in.pc, offset = src2,
     src1 = src1, src2 = io.in.data.dest, func = fuOpType)
-  io.br.isTaken := (fuType === FuBru) && bruIsTaken
-  io.br.target := bruOut
 
-  val (dmemAddr, dmemWen) = (new LSU).access(src1 = src1, src2 = src2, func = fuOpType)
-  io.dmem.out.bits.addr := dmemAddr
-  io.dmem.out.valid := fuType === FuLsu
-  io.dmem.out.bits.wen := (fuType === FuLsu) && dmemWen
-  io.dmem.out.bits.wdata := io.in.data.dest
+  val lsu = new LSU
+  io.dmem <> lsu.access(isLsu = fuType === FuLsu, src1 = src1, src2 = src2,
+    func = fuOpType, wdata = io.in.data.dest)
 
   val mduOut = (new MDU).access(src1 = src1, src2 = src2, func = fuOpType)
 
@@ -107,7 +110,7 @@ class EXU extends Module {
   io.out.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
     FuBru -> (io.in.pc + 4.U),
-    FuLsu -> io.dmem.in.rdata,
+    FuLsu -> lsu.rdataExt(io.dmem.in.rdata, fuOpType),
     FuMdu -> mduOut
   ))
 
@@ -118,5 +121,5 @@ class EXU extends Module {
   }
   io.out.pc := io.in.pc
 
-  printf("EXU: src1 = 0x%x, src2 = 0x%x\n", src1, src2)
+  //printf("EXU: src1 = 0x%x, src2 = 0x%x\n", src1, src2)
 }

@@ -37,5 +37,5 @@ class IDU extends Module {
 
   io.out.ctrl.isTrap := Cat(instrType === InstrN, instr === TRAP)
 
-  printf("IDU: pc = 0x%x, instr = 0x%x\n", io.in.pc, instr)
+  //printf("IDU: pc = 0x%x, instr = 0x%x\n", io.in.pc, instr)
 }

@@ -38,13 +38,40 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
     instr = mem(pc >> 2)
     poke(noop.io.imem.in.rdata, instr)
 
-    val addr = peek(noop.io.dmem.out.bits.addr).toInt
     val valid = peek(noop.io.dmem.out.valid)
-    assert((valid != 1) || (addr & 0x3) == 0)
-    poke(noop.io.dmem.in.rdata, if (valid == 1) mem(addr >> 2) else 0)
-    val wen = peek(noop.io.dmem.out.bits.wen)
-    val wdata = peek(noop.io.dmem.out.bits.wdata).toInt
-    if (wen == 1) { mem(addr >> 2) = wdata }
+    if (valid == 1) {
+      val dmemAddr = peek(noop.io.dmem.out.bits.addr).toInt
+      val size = peek(noop.io.dmem.out.bits.size).toInt
+      val (addrMask, dataMask) = size match {
+        case 0 => (0, 0xff)
+        case 1 => (0x1, 0xffff)
+        case 2 => (0x3, 0xffffffff)
+      }
+
+      assert((dmemAddr & addrMask) == 0)
+
+      val addr = dmemAddr >> 2
+      val offset = dmemAddr & 0x3
+      val data = mem(addr)
+      val rdataAlign = data >> (offset * 8)
+      poke(noop.io.dmem.in.rdata, rdataAlign)
+
+      //println(f"pc = 0x$pc%08x, dmemAddr = 0x$dmemAddr%08x, size = $size, data = 0x$data%08x")
+
+      val wen = peek(noop.io.dmem.out.bits.wen)
+      if (wen == 1) {
+        val wdata = peek(noop.io.dmem.out.bits.wdata).toInt
+        val wdataAlign = wdata << (offset * 8)
+        val dataMaskAlign = dataMask << (offset * 8)
+        val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
+        mem(addr) = newData
+
+        //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x, offset = $offset")
+      }
+      else {
+        //println(f"rdataAlign = 0x$rdataAlign%08x")
+      }
+    }
 
     step(1)
 
