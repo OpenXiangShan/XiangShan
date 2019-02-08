@@ -37,7 +37,6 @@ class ALU {
 }
 
 class BRU {
-  private val useMuxTree = true
   def access(pc: UInt, offset: UInt, src1: UInt, src2: UInt, func: UInt): (UInt, Bool) = {
     val funcList = List(
       BruBeq  -> (src1 === src2),
@@ -55,7 +54,6 @@ class BRU {
 }
 
 class LSU {
-  private val useMuxTree = true
   def access(src1: UInt, src2: UInt, func: UInt): (UInt, Bool) = {
     val funcList = List(
       LsuSw   -> (src1  +  src2)
@@ -64,6 +62,20 @@ class LSU {
     val addr = LookupTree(func, 0.U, funcList)
     val wen = func(3)
     (addr, wen)
+  }
+}
+
+class MDU {
+  def access(src1: UInt, src2: UInt, func: UInt): UInt = {
+    val mulRes = (src1.asSInt * src2.asSInt).asUInt
+    val funcList = List(
+      MduMul  -> mulRes(31, 0),
+      MduMulh -> mulRes(63, 32),
+      MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
+      MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt
+    )
+
+    LookupTree(func, 0.U, funcList)
   }
 }
 
@@ -89,10 +101,15 @@ class EXU extends Module {
   io.dmem.out.bits.wen := (fuType === FuLsu) && dmemWen
   io.dmem.out.bits.wdata := io.in.data.dest
 
+  val mduOut = (new MDU).access(src1 = src1, src2 = src2, func = fuOpType)
+
   io.out.data := DontCare
-  io.out.data.dest := Mux(fuType === FuAlu, aluOut,
-                        Mux(fuType === FuBru, io.in.pc + 4.U,
-                          Mux(fuType === FuLsu, io.dmem.in.rdata, 0.U)))
+  io.out.data.dest := LookupTree(fuType, 0.U, List(
+    FuAlu -> aluOut,
+    FuBru -> (io.in.pc + 4.U),
+    FuLsu -> io.dmem.in.rdata,
+    FuMdu -> mduOut
+  ))
 
   io.out.ctrl := DontCare
   (io.out.ctrl, io.in.ctrl) match { case (o, i) =>
