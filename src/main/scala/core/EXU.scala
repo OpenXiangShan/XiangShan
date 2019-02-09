@@ -53,9 +53,9 @@ class BRU {
 }
 
 class LSU {
-  def access(isLsu: Bool, src1: UInt, src2: UInt, func: UInt, wdata: UInt): MemIO = {
+  def access(isLsu: Bool, base: UInt, offset: UInt, func: UInt, wdata: UInt): MemIO = {
     val dmem = Wire(new MemIO)
-    dmem.out.bits.addr := src1 + src2
+    dmem.out.bits.addr := base + offset
     dmem.out.valid := isLsu
     dmem.out.bits.wen := isLsu && func(3)
     dmem.out.bits.size := func(1, 0)
@@ -98,22 +98,30 @@ class EXU extends Module {
   val (src1, src2, fuType, fuOpType) = (io.in.data.src1, io.in.data.src2, io.in.ctrl.fuType, io.in.ctrl.fuOpType)
   val aluOut = (new ALU).access(src1 = src1, src2 = src2, func = fuOpType)
 
-  io.br <> (new BRU).access(isBru = fuType === FuBru, pc = io.in.pc, offset = src2,
+  val bruOut = (new BRU).access(isBru = fuType === FuBru, pc = io.in.pc, offset = src2,
     src1 = src1, src2 = io.in.data.dest, func = fuOpType)
 
   val lsu = new LSU
-  io.dmem <> lsu.access(isLsu = fuType === FuLsu, src1 = src1, src2 = src2,
+  io.dmem <> lsu.access(isLsu = fuType === FuLsu, base = src1, offset = src2,
     func = fuOpType, wdata = io.in.data.dest)
 
   val mduOut = (new MDU).access(src1 = src1, src2 = src2, func = fuOpType)
+
+  val csr = new CSR
+  val csrOut = csr.access(isCsr = fuType === FuCsr, addr = src2(11, 0), src = src1, cmd = fuOpType)
+  val exceptionJmp = csr.jmp(isCsr = fuType === FuCsr, addr = src2(11, 0), pc = io.in.pc, cmd = fuOpType)
 
   io.out.data := DontCare
   io.out.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
     FuBru -> (io.in.pc + 4.U),
     FuLsu -> lsu.rdataExt(io.dmem.in.rdata, fuOpType),
+    FuCsr -> csrOut,
     FuMdu -> mduOut
   ))
+
+  when (exceptionJmp.isTaken) { io.br <> exceptionJmp }
+  .otherwise { io.br <> bruOut }
 
   io.out.ctrl := DontCare
   (io.out.ctrl, io.in.ctrl) match { case (o, i) =>
