@@ -13,7 +13,8 @@ class CtrlPathIO extends Bundle
   val rfSrc2 = Output(UInt(5.W))
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
-  val isTrap = Output(UInt(2.W))
+  val isInvOpcode = Output(Bool())
+  val isNoopTrap = Output(Bool())
 }
 
 class DataPathIO extends Bundle {

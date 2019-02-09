@@ -35,5 +35,8 @@ class ISU extends Module with HasSrcType {
   }
   io.out.pc := io.in.pc
 
-  io.trap := Mux(io.in.ctrl.isTrap(1), 2.U, Mux(io.in.ctrl.isTrap(0), Mux(rs1Data === 0.U, 0.U, 1.U), 3.U))
+  io.trap := Mux(io.in.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
+              Mux(io.in.ctrl.isNoopTrap,
+                Mux(rs1Data === 0.U, NOOPTrap.StateGoodTrap, NOOPTrap.StateBadTrap),
+                NOOPTrap.StateRunning))
 }
