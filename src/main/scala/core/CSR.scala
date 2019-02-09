@@ -12,13 +12,13 @@ trait HasCSROpType {
   def CsrClr  = "b11".U
 }
 
-trait CSRInstr extends HasDecodeConst {
-  val CSRRW   = BitPat("b????????????_?????_001_?????_1110011")
-  val CSRRS   = BitPat("b????????????_?????_010_?????_1110011")
-  val ECALL   = BitPat("b001100000010_00000_000_00000_1110011")
-  val MRET    = BitPat("b000000000000_00000_000_00000_1110011")
+object CSRInstr extends HasDecodeConst {
+  def CSRRW   = BitPat("b????????????_?????_001_?????_1110011")
+  def CSRRS   = BitPat("b????????????_?????_010_?????_1110011")
+  def ECALL   = BitPat("b001100000010_00000_000_00000_1110011")
+  def MRET    = BitPat("b000000000000_00000_000_00000_1110011")
 
-  val CSRInstrTable = Array(
+  val table = Array(
     CSRRW          -> List(InstrI, FuCsr, CsrWrt),
     CSRRS          -> List(InstrI, FuCsr, CsrSet),
     ECALL          -> List(InstrI, FuCsr, CsrJmp),
@@ -32,8 +32,8 @@ trait HasCSRConst {
   val Mepc    = 0x341
   val Mcause  = 0x342
 
-  val privEcall = 0x000.U
-  val privMret  = 0x302.U
+  def privEcall = 0x000.U
+  def privMret  = 0x302.U
 }
 
 class CSR extends HasCSROpType with HasCSRConst {

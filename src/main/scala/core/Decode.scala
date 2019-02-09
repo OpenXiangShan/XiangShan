@@ -52,16 +52,11 @@ trait HasFuType
 
 trait HasDecodeConst extends HasInstrType with HasSrcType with HasFuType
 
-object Instructions
- extends ALUInstr
-    with BRUInstr
-    with LSUInstr
-    with MDUInstr
-    with CSRInstr {
-  val TRAP    = BitPat("b????????????_?????_000_?????_1101011")
+object Instructions extends HasDecodeConst {
+  def TRAP    = BitPat("b????????????_?????_000_?????_1101011")
   val TRAPDecode = (TRAP -> List(InstrI, FuAlu, AluAdd))
 
   val DecodeDefault = List(InstrN, FuAlu, AluAdd)
-  val DecodeTable = ALUInstrTable ++ BRUInstrTable ++ LSUInstrTable ++
-                    MDUInstrTable ++ CSRInstrTable :+ TRAPDecode
+  val DecodeTable = ALUInstr.table ++ BRUInstr.table ++ LSUInstr.table ++
+                    MDUInstr.table ++ CSRInstr.table :+ TRAPDecode
 }
