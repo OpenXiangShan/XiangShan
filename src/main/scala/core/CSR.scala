@@ -6,10 +6,10 @@ import chisel3.util._
 trait HasCSROpType {
   val CsrOpTypeNum  = 4
 
-  val CsrJmp  = "b00".U
-  val CsrWrt  = "b01".U
-  val CsrSet  = "b10".U
-  val CsrClr  = "b11".U
+  def CsrJmp  = "b00".U
+  def CsrWrt  = "b01".U
+  def CsrSet  = "b10".U
+  def CsrClr  = "b11".U
 }
 
 trait CSRInstr extends HasDecodeConst {

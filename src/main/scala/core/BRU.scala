@@ -6,14 +6,14 @@ import chisel3.util._
 trait HasBRUOpType {
   val BruOpTypeNum  = 10
 
-  val BruJal  = "b1000".U
-  val BruJalr = "b1001".U
-  val BruBeq  = "b0000".U
-  val BruBne  = "b0001".U
-  val BruBlt  = "b0100".U
-  val BruBge  = "b0101".U
-  val BruBltu = "b0110".U
-  val BruBgeu = "b0111".U
+  def BruJal  = "b1000".U
+  def BruJalr = "b1001".U
+  def BruBeq  = "b0000".U
+  def BruBne  = "b0001".U
+  def BruBlt  = "b0100".U
+  def BruBge  = "b0101".U
+  def BruBltu = "b0110".U
+  def BruBgeu = "b0111".U
 }
 
 trait BRUInstr extends HasDecodeConst {

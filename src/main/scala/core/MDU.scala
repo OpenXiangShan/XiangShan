@@ -6,12 +6,12 @@ import chisel3.util._
 trait HasMDUOpType {
   val MduOpTypeNum  = 8
 
-  val MduMul  = "b000".U
-  val MduMulh = "b001".U
-  val MduDiv  = "b100".U
-  val MduDivu = "b101".U
-  val MduRem  = "b110".U
-  val MduRemu = "b111".U
+  def MduMul  = "b000".U
+  def MduMulh = "b001".U
+  def MduDiv  = "b100".U
+  def MduDivu = "b101".U
+  def MduRem  = "b110".U
+  def MduRemu = "b111".U
 }
 
 trait MDUInstr extends HasDecodeConst {

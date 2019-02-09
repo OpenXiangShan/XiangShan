@@ -6,17 +6,17 @@ import chisel3.util._
 trait HasALUOpType {
   val AluOpTypeNum  = 11
 
-  val AluAdd  = "b0000".U
-  val AluSll  = "b0001".U
-  val AluSlt  = "b0010".U
-  val AluSltu = "b0011".U
-  val AluXor  = "b0100".U
-  val AluSrl  = "b0101".U
-  val AluOr   = "b0110".U
-  val AluAnd  = "b0111".U
-  val AluSub  = "b1000".U
-  val AluSra  = "b1101".U
-  val AluLui  = "b1111".U
+  def AluAdd  = "b0000".U
+  def AluSll  = "b0001".U
+  def AluSlt  = "b0010".U
+  def AluSltu = "b0011".U
+  def AluXor  = "b0100".U
+  def AluSrl  = "b0101".U
+  def AluOr   = "b0110".U
+  def AluAnd  = "b0111".U
+  def AluSub  = "b1000".U
+  def AluSra  = "b1101".U
+  def AluLui  = "b1111".U
 }
 
 trait ALUInstr extends HasDecodeConst {

@@ -6,14 +6,14 @@ import chisel3.util._
 trait HasLSUOpType {
   val LsuOpTypeNum  = 10
 
-  val LsuLb   = "b0000".U
-  val LsuLh   = "b0001".U
-  val LsuLw   = "b0010".U
-  val LsuLbu  = "b0100".U
-  val LsuLhu  = "b0101".U
-  val LsuSb   = "b1000".U
-  val LsuSh   = "b1001".U
-  val LsuSw   = "b1010".U
+  def LsuLb   = "b0000".U
+  def LsuLh   = "b0001".U
+  def LsuLw   = "b0010".U
+  def LsuLbu  = "b0100".U
+  def LsuLhu  = "b0101".U
+  def LsuSb   = "b1000".U
+  def LsuSh   = "b1001".U
+  def LsuSw   = "b1010".U
 }
 
 trait LSUInstr extends HasDecodeConst {

@@ -5,13 +5,13 @@ import chisel3.util._
 
 trait HasInstrType {
   private val InstrTypeNum = 7
-  val InstrN = "b000".U
-  val InstrI = "b100".U
-  val InstrR = "b101".U
-  val InstrS = "b010".U
-  val InstrB = "b001".U
-  val InstrU = "b110".U
-  val InstrJ = "b111".U
+  def InstrN = "b000".U
+  def InstrI = "b100".U
+  def InstrR = "b101".U
+  def InstrS = "b010".U
+  def InstrB = "b001".U
+  def InstrU = "b110".U
+  def InstrJ = "b111".U
   val InstrTypeWidth = log2Up(InstrTypeNum).W
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
@@ -20,14 +20,14 @@ trait HasInstrType {
 trait HasSrcType {
   /* src1 type */
   private val Src1TypeNum = 2
-  val Src1Reg = "b0".U
-  val Src1Pc  = "b1".U
+  def Src1Reg = "b0".U
+  def Src1Pc  = "b1".U
   val Src1TypeWidth = log2Up(Src1TypeNum).W
 
   /* src2 type */
   private val Src2TypeNum = 2
-  val Src2Imm = "b0".U
-  val Src2Reg = "b1".U
+  def Src2Imm = "b0".U
+  def Src2Reg = "b1".U
   val Src2TypeWidth = log2Up(Src2TypeNum).W
 }
 
@@ -38,11 +38,11 @@ trait HasFuType
     with HasMDUOpType
     with HasCSROpType {
   private val FuTypeNum = 5
-  val FuAlu = "b000".U
-  val FuBru = "b001".U
-  val FuLsu = "b010".U
-  val FuMdu = "b011".U
-  val FuCsr = "b100".U
+  def FuAlu = "b000".U
+  def FuBru = "b001".U
+  def FuLsu = "b010".U
+  def FuMdu = "b011".U
+  def FuCsr = "b100".U
   val FuTypeWidth = log2Up(FuTypeNum).W
 
   private val FuOpTypeMaxNum = List(AluOpTypeNum, BruOpTypeNum,
