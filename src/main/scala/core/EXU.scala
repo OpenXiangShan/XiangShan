@@ -37,7 +37,7 @@ class ALU {
 class BRU {
   def access(isBru: Bool, pc: UInt, offset: UInt, src1: UInt, src2: UInt, func: UInt): BranchIO = {
     val branch = Wire(new BranchIO)
-    branch.target := Mux(func === BruJalr, src1 + src2, pc + offset)
+    branch.target := Mux(func === BruJalr, src1 + offset, pc + offset)
     branch.isTaken := isBru && LookupTree(func, false.B, List(
       BruBeq  -> (src1 === src2),
       BruBne  -> (src1 =/= src2),
