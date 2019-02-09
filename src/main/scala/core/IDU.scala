@@ -3,21 +3,31 @@ package core
 import chisel3._
 import chisel3.util._
 
-import Decode._
-
-class IDU extends Module {
+class IDU extends Module with HasDecodeConst {
   val io = IO(new Bundle {
     val in = Flipped(new PcInstrIO)
     val out = new PcCtrlDataIO
   })
 
   val instr = io.in.instr
-  val instrType :: fuType :: fuOpType :: Nil = ListLookup(instr, DecodeDefault, DecodeTable)
+  val instrType :: fuType :: fuOpType :: Nil =
+    ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
 
   io.out.ctrl.fuType := fuType
   io.out.ctrl.fuOpType := fuOpType
+
+  val SrcTypeTable = List(
+    InstrI -> (Src1Reg, Src2Imm),
+    InstrR -> (Src1Reg, Src2Reg),
+    InstrS -> (Src1Reg, Src2Imm),
+    InstrB -> (Src1Reg, Src2Imm),
+    InstrU -> (Src1Pc , Src2Imm),
+    InstrJ -> (Src1Pc , Src2Imm),
+    InstrN -> (Src1Pc , Src2Imm)
+  )
   io.out.ctrl.src1Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
   io.out.ctrl.src2Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
+
   io.out.ctrl.rfSrc1 := instr(19, 15)
   io.out.ctrl.rfSrc2 := instr(24, 20)
   io.out.ctrl.rfWen := isrfWen(instrType)
@@ -35,7 +45,7 @@ class IDU extends Module {
 
   io.out.pc := io.in.pc
 
-  io.out.ctrl.isTrap := Cat(instrType === InstrN, instr === TRAP)
+  io.out.ctrl.isTrap := Cat(instrType === InstrN, instr === Instructions.TRAP)
 
   //printf("IDU: pc = 0x%x, instr = 0x%x\n", io.in.pc, instr)
 }

@@ -3,7 +3,30 @@ package core
 import chisel3._
 import chisel3.util._
 
-object CSR {
+trait HasCSROpType {
+  val CsrOpTypeNum  = 4
+
+  val CsrJmp  = "b00".U
+  val CsrWrt  = "b01".U
+  val CsrSet  = "b10".U
+  val CsrClr  = "b11".U
+}
+
+trait CSRInstr extends HasDecodeConst {
+  val CSRRW   = BitPat("b????????????_?????_001_?????_1110011")
+  val CSRRS   = BitPat("b????????????_?????_010_?????_1110011")
+  val ECALL   = BitPat("b001100000010_00000_000_00000_1110011")
+  val MRET    = BitPat("b000000000000_00000_000_00000_1110011")
+
+  val CSRInstrTable = Array(
+    CSRRW          -> List(InstrI, FuCsr, CsrWrt),
+    CSRRS          -> List(InstrI, FuCsr, CsrSet),
+    ECALL          -> List(InstrI, FuCsr, CsrJmp),
+    MRET           -> List(InstrI, FuCsr, CsrJmp)
+  )
+}
+
+trait HasCSRConst {
   val Mstatus = 0x300
   val Mtvec   = 0x305
   val Mepc    = 0x341
@@ -13,10 +36,7 @@ object CSR {
   val privMret  = 0x302.U
 }
 
-import CSR._
-import Decode._
-
-class CSR {
+class CSR extends HasCSROpType with HasCSRConst {
   val mtvec = Reg(UInt(32.W))
   val mcause = Reg(UInt(32.W))
   val mstatus = Reg(UInt(32.W))

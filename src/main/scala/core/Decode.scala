@@ -3,8 +3,7 @@ package core
 import chisel3._
 import chisel3.util._
 
-object Decode {
-  /* instruction type */
+trait HasInstrType {
   private val InstrTypeNum = 7
   val InstrN = "b000".U
   val InstrI = "b100".U
@@ -16,7 +15,9 @@ object Decode {
   val InstrTypeWidth = log2Up(InstrTypeNum).W
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
+}
 
+trait HasSrcType {
   /* src1 type */
   private val Src1TypeNum = 2
   val Src1Reg = "b0".U
@@ -28,18 +29,14 @@ object Decode {
   val Src2Imm = "b0".U
   val Src2Reg = "b1".U
   val Src2TypeWidth = log2Up(Src2TypeNum).W
+}
 
-  val SrcTypeTable = List(
-    InstrI -> (Src1Reg, Src2Imm),
-    InstrR -> (Src1Reg, Src2Reg),
-    InstrS -> (Src1Reg, Src2Imm),
-    InstrB -> (Src1Reg, Src2Imm),
-    InstrU -> (Src1Pc , Src2Imm),
-    InstrJ -> (Src1Pc , Src2Imm),
-    InstrN -> (Src1Pc , Src2Imm)
-  )
-
-  /* function unit type */
+trait HasFuType
+ extends HasALUOpType
+    with HasBRUOpType
+    with HasLSUOpType
+    with HasMDUOpType
+    with HasCSROpType {
   private val FuTypeNum = 5
   val FuAlu = "b000".U
   val FuBru = "b001".U
@@ -48,180 +45,23 @@ object Decode {
   val FuCsr = "b100".U
   val FuTypeWidth = log2Up(FuTypeNum).W
 
-  /* ALU operation type */
-  private val FuOpTypeAluNum  = 11
-  val AluAdd  = "b0000".U
-  val AluSll  = "b0001".U
-  val AluSlt  = "b0010".U
-  val AluSltu = "b0011".U
-  val AluXor  = "b0100".U
-  val AluSrl  = "b0101".U
-  val AluOr   = "b0110".U
-  val AluAnd  = "b0111".U
-  val AluSub  = "b1000".U
-  val AluSra  = "b1101".U
-  val AluLui  = "b1111".U
-
-  /* BRU operation type */
-  private val FuOpTypeBruNum  = 10
-  val BruJal  = "b1000".U
-  val BruJalr = "b1001".U
-  val BruBeq  = "b0000".U
-  val BruBne  = "b0001".U
-  val BruBlt  = "b0100".U
-  val BruBge  = "b0101".U
-  val BruBltu = "b0110".U
-  val BruBgeu = "b0111".U
-
-  /* LSU operation type */
-  private val FuOpTypeLsuNum  = 10
-  val LsuLb   = "b0000".U
-  val LsuLh   = "b0001".U
-  val LsuLw   = "b0010".U
-  val LsuLbu  = "b0100".U
-  val LsuLhu  = "b0101".U
-  val LsuSb   = "b1000".U
-  val LsuSh   = "b1001".U
-  val LsuSw   = "b1010".U
-
-  /* MDU operation type */
-  private val FuOpTypeMduNum  = 8
-  val MduMul  = "b000".U
-  val MduMulh = "b001".U
-  val MduDiv  = "b100".U
-  val MduDivu = "b101".U
-  val MduRem  = "b110".U
-  val MduRemu = "b111".U
-
-  /* CSR operation type */
-  private val FuOpTypeCsrNum  = 4
-  val CsrJmp  = "b00".U
-  val CsrWrt  = "b01".U
-  val CsrSet  = "b10".U
-  val CsrClr  = "b11".U
-
-  private val FuOpTypeMaxNum = List(FuOpTypeAluNum, FuOpTypeBruNum,
-    FuOpTypeLsuNum, FuOpTypeMduNum, FuOpTypeCsrNum).reduce(math.max)
+  private val FuOpTypeMaxNum = List(AluOpTypeNum, BruOpTypeNum,
+    LsuOpTypeNum, MduOpTypeNum, CsrOpTypeNum).reduce(math.max)
   val FuOpTypeWidth = log2Up(FuOpTypeMaxNum).W
+}
 
+trait HasDecodeConst extends HasInstrType with HasSrcType with HasFuType
 
-  /* instruction pattern */
-  val ADDI    = BitPat("b????????????_?????_000_?????_0010011")
-  val SLLI    = BitPat("b0000000?????_?????_001_?????_0010011")
-  val SLTI    = BitPat("b????????????_?????_010_?????_0010011")
-  val SLTIU   = BitPat("b????????????_?????_011_?????_0010011")
-  val XORI    = BitPat("b????????????_?????_100_?????_0010011")
-  val SRLI    = BitPat("b0000000?????_?????_101_?????_0010011")
-  val ORI     = BitPat("b????????????_?????_110_?????_0010011")
-  val ANDI    = BitPat("b????????????_?????_111_?????_0010011")
-  val SRAI    = BitPat("b0100000?????_?????_101_?????_0010011")
-
-  val ADD     = BitPat("b0000000_?????_?????_000_?????_0110011")
-  val SLL     = BitPat("b0000000_?????_?????_001_?????_0110011")
-  val SLT     = BitPat("b0000000_?????_?????_010_?????_0110011")
-  val SLTU    = BitPat("b0000000_?????_?????_011_?????_0110011")
-  val XOR     = BitPat("b0000000_?????_?????_100_?????_0110011")
-  val SRL     = BitPat("b0000000_?????_?????_101_?????_0110011")
-  val OR      = BitPat("b0000000_?????_?????_110_?????_0110011")
-  val AND     = BitPat("b0000000_?????_?????_111_?????_0110011")
-  val SUB     = BitPat("b0100000_?????_?????_000_?????_0110011")
-  val SRA     = BitPat("b0100000_?????_?????_101_?????_0110011")
-
-  val AUIPC   = BitPat("b????????????????????_?????_0010111")
-  val LUI     = BitPat("b????????????????????_?????_0110111")
-
-  val JAL     = BitPat("b????????????????????_?????_1101111")
-  val JALR    = BitPat("b????????????_?????_000_?????_1100111")
-
-  val BNE     = BitPat("b???????_?????_?????_001_?????_1100011")
-  val BEQ     = BitPat("b???????_?????_?????_000_?????_1100011")
-  val BLT     = BitPat("b???????_?????_?????_100_?????_1100011")
-  val BGE     = BitPat("b???????_?????_?????_101_?????_1100011")
-  val BLTU    = BitPat("b???????_?????_?????_110_?????_1100011")
-  val BGEU    = BitPat("b???????_?????_?????_111_?????_1100011")
-
-  val LB      = BitPat("b????????????_?????_000_?????_0000011")
-  val LH      = BitPat("b????????????_?????_001_?????_0000011")
-  val LW      = BitPat("b????????????_?????_010_?????_0000011")
-  val LBU     = BitPat("b????????????_?????_100_?????_0000011")
-  val LHU     = BitPat("b????????????_?????_101_?????_0000011")
-  val SB      = BitPat("b???????_?????_?????_000_?????_0100011")
-  val SH      = BitPat("b???????_?????_?????_001_?????_0100011")
-  val SW      = BitPat("b???????_?????_?????_010_?????_0100011")
-
-  val MUL     = BitPat("b0000001_?????_?????_000_?????_0110011")
-  val MULH    = BitPat("b0000001_?????_?????_001_?????_0110011")
-  val DIV     = BitPat("b0000001_?????_?????_100_?????_0110011")
-  val DIVU    = BitPat("b0000001_?????_?????_101_?????_0110011")
-  val REM     = BitPat("b0000001_?????_?????_110_?????_0110011")
-  val REMU    = BitPat("b0000001_?????_?????_111_?????_0110011")
-
-  val CSRRW   = BitPat("b????????????_?????_001_?????_1110011")
-  val CSRRS   = BitPat("b????????????_?????_010_?????_1110011")
-  val ECALL   = BitPat("b001100000010_00000_000_00000_1110011")
-  val MRET    = BitPat("b000000000000_00000_000_00000_1110011")
+object Instructions
+ extends ALUInstr
+    with BRUInstr
+    with LSUInstr
+    with MDUInstr
+    with CSRInstr {
   val TRAP    = BitPat("b????????????_?????_000_?????_1101011")
+  val TRAPDecode = (TRAP -> List(InstrI, FuAlu, AluAdd))
 
-
-  /* decode table */
   val DecodeDefault = List(InstrN, FuAlu, AluAdd)
-  val DecodeTable = Array(
-    /*                     Instr |  FU  | FU OP |
-     *                     Type  | Type |  Type | */
-    ADDI           -> List(InstrI, FuAlu, AluAdd),
-    SLLI           -> List(InstrI, FuAlu, AluSll),
-    SLTI           -> List(InstrI, FuAlu, AluSlt),
-    SLTIU          -> List(InstrI, FuAlu, AluSltu),
-    XORI           -> List(InstrI, FuAlu, AluXor),
-    SRLI           -> List(InstrI, FuAlu, AluSrl),
-    ORI            -> List(InstrI, FuAlu, AluOr ),
-    ANDI           -> List(InstrI, FuAlu, AluAnd),
-    SRAI           -> List(InstrI, FuAlu, AluSra),
-
-    ADD            -> List(InstrR, FuAlu, AluAdd),
-    SLL            -> List(InstrR, FuAlu, AluSll),
-    SLT            -> List(InstrR, FuAlu, AluSlt),
-    SLTU           -> List(InstrR, FuAlu, AluSltu),
-    XOR            -> List(InstrR, FuAlu, AluXor),
-    SRL            -> List(InstrR, FuAlu, AluSrl),
-    OR             -> List(InstrR, FuAlu, AluOr ),
-    AND            -> List(InstrR, FuAlu, AluAnd),
-    SUB            -> List(InstrR, FuAlu, AluSub),
-    SRA            -> List(InstrR, FuAlu, AluSra),
-
-    AUIPC          -> List(InstrU, FuAlu, AluAdd),
-    LUI            -> List(InstrU, FuAlu, AluLui),
-
-    JAL            -> List(InstrJ, FuBru, BruJal),
-    JALR           -> List(InstrI, FuBru, BruJalr),
-
-    BEQ            -> List(InstrB, FuBru, BruBeq),
-    BNE            -> List(InstrB, FuBru, BruBne),
-    BLT            -> List(InstrB, FuBru, BruBlt),
-    BGE            -> List(InstrB, FuBru, BruBge),
-    BLTU           -> List(InstrB, FuBru, BruBltu),
-    BGEU           -> List(InstrB, FuBru, BruBgeu),
-
-    LB             -> List(InstrI, FuLsu, LsuLb ),
-    LH             -> List(InstrI, FuLsu, LsuLh ),
-    LW             -> List(InstrI, FuLsu, LsuLw ),
-    LBU            -> List(InstrI, FuLsu, LsuLbu),
-    LHU            -> List(InstrI, FuLsu, LsuLhu),
-    SB             -> List(InstrS, FuLsu, LsuSb ),
-    SH             -> List(InstrS, FuLsu, LsuSh ),
-    SW             -> List(InstrS, FuLsu, LsuSw),
-
-    MUL            -> List(InstrR, FuMdu, MduMul),
-    MULH           -> List(InstrR, FuMdu, MduMulh),
-    DIV            -> List(InstrR, FuMdu, MduDiv),
-    DIVU           -> List(InstrR, FuMdu, MduDivu),
-    REM            -> List(InstrR, FuMdu, MduRem),
-    REMU           -> List(InstrR, FuMdu, MduRemu),
-
-    CSRRW          -> List(InstrI, FuCsr, CsrWrt),
-    CSRRS          -> List(InstrI, FuCsr, CsrSet),
-    ECALL          -> List(InstrI, FuCsr, CsrJmp),
-    MRET           -> List(InstrI, FuCsr, CsrJmp),
-    TRAP           -> List(InstrI, FuAlu, AluAdd)
-  )
+  val DecodeTable = ALUInstrTable ++ BRUInstrTable ++ LSUInstrTable ++
+                    MDUInstrTable ++ CSRInstrTable :+ TRAPDecode
 }

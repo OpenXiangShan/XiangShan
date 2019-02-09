@@ -3,9 +3,8 @@ package core
 import chisel3._
 import chisel3.util._
 
-import Decode._
-
-class CtrlPathIO extends Bundle {
+class CtrlPathIO extends Bundle
+    with HasDecodeConst {
   val src1Type = Output(UInt(Src1TypeWidth))
   val src2Type = Output(UInt(Src2TypeWidth))
   val fuType = Output(UInt(FuTypeWidth))

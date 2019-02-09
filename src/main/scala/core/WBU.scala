@@ -3,8 +3,6 @@ package core
 import chisel3._
 import chisel3.util._
 
-import Decode._
-
 class WBU extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new PcCtrlDataIO)

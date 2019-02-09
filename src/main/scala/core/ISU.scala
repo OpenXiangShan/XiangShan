@@ -3,15 +3,13 @@ package core
 import chisel3._
 import chisel3.util._
 
-import Decode._
-
 class RegFile {
   val rf = Mem(32, UInt(32.W))
   def read(addr: UInt) : UInt = Mux(addr === 0.U, 0.U, rf(addr))
   def write(addr: UInt, data: UInt) = { rf(addr) := data }
 }
 
-class ISU extends Module {
+class ISU extends Module with HasSrcType {
   val io = IO(new Bundle {
     val in = Flipped(new PcCtrlDataIO)
     val out = new PcCtrlDataIO
