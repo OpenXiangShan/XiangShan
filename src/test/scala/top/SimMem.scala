@@ -25,6 +25,8 @@ class SimMem {
       fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size()).order(ByteOrder.LITTLE_ENDIAN)
         .asIntBuffer().get(mem, resetVector / 4, fc.size().toInt / 4)
     }
+
+    NOOPDevice.call.init_sdl()
   }
 
   def getDataMask(sizeEncode: Int): Int = {
@@ -57,6 +59,8 @@ class SimMem {
 
     // read RTC
     if (addr == 0x4048 && sizeEncode == 2) { UpTime() }
+    // read key
+    else if (addr == 0x4060 && sizeEncode == 2) { NOOPDevice.call.read_key() }
     else { rdataAlign }
   }
 

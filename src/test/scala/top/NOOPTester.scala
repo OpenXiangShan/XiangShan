@@ -12,6 +12,7 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
   var pc = 0
   var trap = 0
   var instr = 0
+  var oldTime = UpTime()
 
   val mem = new SimMem
   mem.init(imgPath, resetVector)
@@ -34,12 +35,21 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
     step(1)
 
     trap = peek(noop.io.trap).toInt
+
+    val newTime = UpTime()
+    if (newTime - oldTime > 100) {
+      val exit = NOOPDevice.call.poll_event()
+      if (trap == 3 && exit == 1) trap = 4
+      oldTime = newTime
+    }
+
   } while (trap == 3)
 
   trap match {
     case 0 => println(f"\33[1;32mHIT GOOD TRAP\33[0m at pc = 0x$pc%08x")
     case 1 => println(f"\33[1;31mHIT BAD TRAP\33[0m at pc = 0x$pc%08x")
     case 2 => println(f"\33[1;31mINVALID OPCODE\33[0m at pc = 0x$pc%08x, instr = 0x$instr%08x")
+    case 4 => println(f"\33[1;34mABORT\33[0m at pc = 0x$pc%08x")
   }
 
   expect(noop.io.trap, 0)
