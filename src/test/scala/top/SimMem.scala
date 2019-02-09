@@ -1,6 +1,4 @@
-package core
-
-import chisel3.iotesters.PeekPokeTester
+package top
 
 import java.nio.{IntBuffer, ByteOrder}
 import java.io.FileInputStream
@@ -9,6 +7,7 @@ import java.nio.channels.FileChannel
 class SimMem {
   private val memSize = 128 * 1024 * 1024
   private var mem: Array[Int] = Array()
+
   def init(imgPath: String, resetVector: Int) = {
     if (imgPath == "") {
       mem = Array.fill(resetVector / 4)(0) ++ Array(
@@ -55,7 +54,10 @@ class SimMem {
     val data = mem(idx)
     val rdataAlign = data >> (offset * 8)
     //println(f"rdataAlign = 0x$rdataAlign%08x")
-    rdataAlign
+
+    // read RTC
+    if (addr == 0x4048 && sizeEncode == 2) { UpTime() }
+    else { rdataAlign }
   }
 
   def write(addr: Int, sizeEncode: Int, wdata: Int) = {
@@ -66,50 +68,10 @@ class SimMem {
     val wdataAlign = wdata << (offset * 8)
     val dataMaskAlign = getDataMask(sizeEncode) << (offset * 8)
     val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
-    if (addr == 0x43f8 && sizeEncode == 0) {
-      // write to uart data
-      print(f"${wdata & 0xff}%c")
-    }
+
+    // write to uart data
+    if (addr == 0x43f8 && sizeEncode == 0) { print(f"${wdata & 0xff}%c") }
     else { mem(idx) = newData }
     //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x")
   }
-}
-
-class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
-  with  HasResetVector {
-
-  var pc = 0
-  var trap = 0
-  var instr = 0
-
-  val mem = new SimMem
-  mem.init(imgPath, resetVector)
-
-  do {
-    pc = peek(noop.io.imem.out.bits.addr).toInt
-    instr = mem.read(pc, peek(noop.io.imem.out.bits.size).toInt)
-    poke(noop.io.imem.in.rdata, instr)
-
-    val valid = peek(noop.io.dmem.out.valid)
-    if (valid == 1) {
-      val dmemAddr = peek(noop.io.dmem.out.bits.addr).toInt
-      val size = peek(noop.io.dmem.out.bits.size).toInt
-      poke(noop.io.dmem.in.rdata, mem.read(dmemAddr, size))
-
-      val wen = peek(noop.io.dmem.out.bits.wen)
-      if (wen == 1) mem.write(dmemAddr, size, peek(noop.io.dmem.out.bits.wdata).toInt)
-    }
-
-    step(1)
-
-    trap = peek(noop.io.trap).toInt
-  } while (trap == 3)
-
-  trap match {
-    case 0 => println(f"\33[1;32mHIT GOOD TRAP\33[0m at pc = 0x$pc%08x")
-    case 1 => println(f"\33[1;31mHIT BAD TRAP\33[0m at pc = 0x$pc%08x")
-    case 2 => println(f"\33[1;31mINVALID OPCODE\33[0m at pc = 0x$pc%08x, instr = 0x$instr%08x")
-  }
-
-  expect(noop.io.trap, 0)
 }
