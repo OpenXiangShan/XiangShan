@@ -1,4 +1,4 @@
-package core
+package noop
 
 import chisel3._
 import chisel3.util._
@@ -43,4 +43,20 @@ class WriteBackIO extends Bundle {
 class BranchIO extends Bundle {
   val isTaken = Output(Bool())
   val target = Output(UInt(32.W))
+}
+
+class MemABundle extends Bundle {
+  val addr = Output(UInt(32.W))
+  val size = Output(UInt(2.W))
+  val wdata = Output(UInt(32.W))
+  val wen = Output(Bool())
+}
+
+class MemRBundle extends Bundle {
+  val rdata = Output(UInt(32.W))
+}
+
+class MemIO extends Bundle {
+  val out = Valid(new MemABundle)
+  val in = Flipped(new MemRBundle)
 }

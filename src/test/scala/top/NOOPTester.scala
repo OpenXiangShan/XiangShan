@@ -4,7 +4,7 @@ import chisel3.iotesters.PeekPokeTester
 import chisel3.iotesters
 import chisel3.iotesters.Driver
 
-import core._
+import noop._
 
 class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
   with HasResetVector {

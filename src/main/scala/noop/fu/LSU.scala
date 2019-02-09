@@ -1,4 +1,4 @@
-package core
+package noop
 
 import chisel3._
 import chisel3.util._
@@ -36,22 +36,6 @@ object LSUInstr extends HasDecodeConst {
     SH             -> List(InstrS, FuLsu, LsuSh ),
     SW             -> List(InstrS, FuLsu, LsuSw)
   )
-}
-
-class ABundle extends Bundle {
-  val addr = Output(UInt(32.W))
-  val size = Output(UInt(2.W))
-  val wdata = Output(UInt(32.W))
-  val wen = Output(Bool())
-}
-
-class RBundle extends Bundle {
-  val rdata = Output(UInt(32.W))
-}
-
-class MemIO extends Bundle {
-  val out = Valid(new ABundle)
-  val in = Flipped(new RBundle)
 }
 
 class LSU extends HasLSUOpType {

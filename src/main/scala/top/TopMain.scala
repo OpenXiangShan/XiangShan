@@ -1,6 +1,6 @@
 package top
 
-import core._
+import noop._
 
 import chisel3._
 
