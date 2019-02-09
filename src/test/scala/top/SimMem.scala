@@ -61,6 +61,8 @@ class SimMem {
     if (addr == 0x4048 && sizeEncode == 2) { UpTime() }
     // read key
     else if (addr == 0x4060 && sizeEncode == 2) { NOOPDevice.call.read_key() }
+    // read screen size
+    else if (addr == 0x4100 && sizeEncode == 2) { (400 << 16) | 300 }
     else { rdataAlign }
   }
 
@@ -75,6 +77,11 @@ class SimMem {
 
     // write to uart data
     if (addr == 0x43f8 && sizeEncode == 0) { print(f"${wdata & 0xff}%c") }
+    else if (addr == 0x4104 && sizeEncode == 2) {
+      // sync vga
+      println(s"sync vga at ${UpTime()}")
+      NOOPDevice.call.update_screen(mem)
+    }
     else { mem(idx) = newData }
     //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x")
   }
