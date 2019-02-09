@@ -7,6 +7,8 @@ SIMTOP = top.TestMain
 IMAGE = ""
 SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE)
 
+.DEFAULT_GOAL = verilog
+
 LIBDEVICE_PATH = ./src/test/cpp/libdevice
 libdevice:
 	make -C $(LIBDEVICE_PATH)
@@ -14,6 +16,8 @@ libdevice:
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	sbt 'runMain top.$(TOP) -td $(@D) --output-file $@'
+
+verilog: $(TOP_V)
 
 test: libdevice
 	sbt '$(SIMCMD)'
@@ -23,3 +27,5 @@ emu: libdevice
 
 clean:
 	rm -rf $(OBJ_DIR)/*
+
+.PHONY: libdevice verilog test emu clean
