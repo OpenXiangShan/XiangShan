@@ -5,12 +5,15 @@ import java.io.FileInputStream
 import java.nio.channels.FileChannel
 
 class SimMem {
-  private val memSize = 128 * 1024 * 1024
+  private val MemBase = 0x80000000
+  private def memOffset(addr: Int) = addr & ~MemBase
+  private val MemSize = 128 * 1024 * 1024
   private var mem: Array[Int] = Array()
 
   def init(imgPath: String, resetVector: Int) = {
+    val base = memOffset(resetVector)
     if (imgPath == "") {
-      mem = Array.fill(resetVector / 4)(0) ++ Array(
+      mem = Array.fill(base / 4)(0) ++ Array(
         0x07b08093,   // addi x1,x1,123
         0xf8508093,   // addi x1,x1,-123
         0x0000806b,   // trap x1
@@ -21,9 +24,9 @@ class SimMem {
       val fc = new FileInputStream(imgPath).getChannel()
       println(f"bin size = 0x${fc.size()}%08x")
 
-      mem = Array.fill(memSize / 4)(0)
+      mem = Array.fill(MemSize / 4)(0)
       fc.map(FileChannel.MapMode.READ_ONLY, 0, fc.size()).order(ByteOrder.LITTLE_ENDIAN)
-        .asIntBuffer().get(mem, resetVector / 4, fc.size().toInt / 4)
+        .asIntBuffer().get(mem, base / 4, fc.size().toInt / 4)
     }
 
     NOOPDevice.call.init_sdl()
@@ -54,23 +57,23 @@ class SimMem {
 
   def read(addr: Int, sizeEncode: Int): Int = {
     checkAddrAlign(addr, sizeEncode)
-    val idx = addr >> 2
+    val idx = memOffset(addr) >> 2
     val offset = addr & 0x3
     val data = mem(idx)
     val rdataAlign = data >> (offset * 8)
 
     // read RTC
-    if (addr == 0x4048 && sizeEncode == 2) { UpTime() }
+    if (memOffset(addr) == 0x4048 && sizeEncode == 2) { UpTime() }
     // read key
-    else if (addr == 0x4060 && sizeEncode == 2) { NOOPDevice.call.read_key() }
+    else if (memOffset(addr) == 0x4060 && sizeEncode == 2) { NOOPDevice.call.read_key() }
     // read screen size
-    else if (addr == 0x4100 && sizeEncode == 2) { (400 << 16) | 320 }
+    else if (memOffset(addr) == 0x4100 && sizeEncode == 2) { (400 << 16) | 320 }
     else { rdataAlign }
   }
 
   def write(addr: Int, sizeEncode: Int, wdata: Int) = {
     checkAddrAlign(addr, sizeEncode)
-    val idx = addr >> 2
+    val idx = memOffset(addr) >> 2
     val offset = addr & 0x3
     val data = mem(idx)
     val wdataAlign = wdata << (offset * 8)
@@ -78,8 +81,8 @@ class SimMem {
     val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
 
     // write to uart data
-    if (addr == 0x43f8 && sizeEncode == 0) { print(f"${wdata & 0xff}%c") }
-    else if (addr == 0x4104 && sizeEncode == 2) {
+    if (memOffset(addr) == 0x43f8 && sizeEncode == 0) { print(f"${wdata & 0xff}%c") }
+    else if (memOffset(addr) == 0x4104 && sizeEncode == 2) {
       // sync vga
       println(s"sync vga at ${UpTime()}")
       NOOPDevice.call.update_screen(mem)
@@ -89,7 +92,7 @@ class SimMem {
 
   def readBig(addr: Int, sizeEncode: Int): BigInt = {
     checkAddrAlign(addr, sizeEncode)
-    val idx = addr >> 2
+    val idx = memOffset(addr) >> 2
     // 32 byte
     var data: BigInt = 0;
     sizeEncode match {
@@ -112,7 +115,7 @@ class SimMem {
 
   def writeBig(addr: Int, sizeEncode: Int, wdata: BigInt) = {
     checkAddrAlign(addr, sizeEncode)
-    val idx = addr >> 2
+    val idx = memOffset(addr) >> 2
     assert(sizeEncode == 5, f"Bad sizeEncode = $sizeEncode")
     // 32 byte
     var data: BigInt = wdata;

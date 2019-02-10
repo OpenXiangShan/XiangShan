@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 trait HasResetVector {
-  val resetVector = 0x100000
+  val resetVector = 0x80100000L
 }
 
 class IFU extends Module with HasResetVector {

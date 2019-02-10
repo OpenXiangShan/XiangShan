@@ -46,7 +46,7 @@ trait GPUConst {
   val TextureMaxNum = 65536 // 0 indicate the end
   val TextureIdBits = log2Up(TextureMaxNum)
   val TextureArrayBytes = TextureMaxNum * TextureBytes
-  val TextureBase = 0x8000000 - TextureArrayBytes * 2
+  val TextureBase = 0x88000000L - TextureArrayBytes * 2
 
   def textureLineAddr(idx: UInt, line: UInt): UInt = TextureBase.U |
     (idx(TextureIdBits - 1, 0) << TextureShift.U) |
@@ -59,7 +59,7 @@ trait GPUConst {
 
   val ScreenW = 400
   val ScreenH = 320
-  val FrameBufBase = 0x40000
+  val FrameBufBase = 0x80040000L
   def fbAddr(x: UInt, y: UInt): UInt = {
     assert(x < ScreenW.U && y < ScreenH.U)
     FrameBufBase.U + ((y * ScreenW.U + x) << 2)
