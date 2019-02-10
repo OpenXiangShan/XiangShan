@@ -34,7 +34,7 @@ class SimMem {
       case 0 => 0xff
       case 1 => 0xffff
       case 2 => 0xffffffff
-      case _ => 0xffffffff
+      case _ => assert(false, f"Bad sizeEncode = $sizeEncode"); 0xffffffff
     }
   }
 
@@ -43,10 +43,13 @@ class SimMem {
       case 0 => 0
       case 1 => 0x1
       case 2 => 0x3
+      case 3 => 0x7
+      case 4 => 0xf
+      case 5 => 0x1f
       case _ => 0xffffffff
     }
 
-    assert((addr & addrMask) == 0)
+    assert((addr & addrMask) == 0, f"addr = 0x$addr%08x, addrMask = 0x$addrMask%08x")
   }
 
   def read(addr: Int, sizeEncode: Int): Int = {
@@ -55,14 +58,13 @@ class SimMem {
     val offset = addr & 0x3
     val data = mem(idx)
     val rdataAlign = data >> (offset * 8)
-    //println(f"rdataAlign = 0x$rdataAlign%08x")
 
     // read RTC
     if (addr == 0x4048 && sizeEncode == 2) { UpTime() }
     // read key
     else if (addr == 0x4060 && sizeEncode == 2) { NOOPDevice.call.read_key() }
     // read screen size
-    else if (addr == 0x4100 && sizeEncode == 2) { (400 << 16) | 300 }
+    else if (addr == 0x4100 && sizeEncode == 2) { (400 << 16) | 320 }
     else { rdataAlign }
   }
 
@@ -83,6 +85,44 @@ class SimMem {
       NOOPDevice.call.update_screen(mem)
     }
     else { mem(idx) = newData }
-    //println(f"wdata = 0x$wdata%08x, realWdata = 0x$newData%08x")
+  }
+
+  def readBig(addr: Int, sizeEncode: Int): BigInt = {
+    checkAddrAlign(addr, sizeEncode)
+    val idx = addr >> 2
+    // 32 byte
+    var data: BigInt = 0;
+    sizeEncode match {
+      case 3 =>
+        data = (data << 32) | BigInt(mem(idx + 1))
+        data = (data << 32) | BigInt(mem(idx + 0))
+      case 5 =>
+        data = (data << 32) | BigInt(mem(idx + 7))
+        data = (data << 32) | BigInt(mem(idx + 6))
+        data = (data << 32) | BigInt(mem(idx + 5))
+        data = (data << 32) | BigInt(mem(idx + 4))
+        data = (data << 32) | BigInt(mem(idx + 3))
+        data = (data << 32) | BigInt(mem(idx + 2))
+        data = (data << 32) | BigInt(mem(idx + 1))
+        data = (data << 32) | BigInt(mem(idx + 0))
+      case _ => assert(false, f"Bad sizeEncode = $sizeEncode")
+    }
+    data
+  }
+
+  def writeBig(addr: Int, sizeEncode: Int, wdata: BigInt) = {
+    checkAddrAlign(addr, sizeEncode)
+    val idx = addr >> 2
+    assert(sizeEncode == 5, f"Bad sizeEncode = $sizeEncode")
+    // 32 byte
+    var data: BigInt = wdata;
+    mem(idx + 0) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 1) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 2) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 3) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 4) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 5) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 6) = (data & 0xffffffff).toInt; data = data >> 32
+    mem(idx + 7) = (data & 0xffffffff).toInt; data = data >> 32
   }
 }

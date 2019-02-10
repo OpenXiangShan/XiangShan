@@ -3,11 +3,16 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import gpu.GPU
+
 class NOOP extends Module {
   val io = IO(new Bundle {
     val imem = new MemIO
     val dmem = new MemIO
     val trap = Output(UInt(2.W))
+
+    val gpuStart = Input(Bool())
+    val gmem = new MemIO(256)
   })
 
   val ifu = Module(new IFU)
@@ -27,4 +32,9 @@ class NOOP extends Module {
   ifu.io.br <> wbu.io.brOut
 
   io.trap := isu.io.trap
+
+
+  val gpu = Module(new GPU)
+  gpu.io.start := io.gpuStart
+  io.gmem <> gpu.io.out
 }

@@ -6,7 +6,7 @@
 
 #define SCREEN_PORT 0x100 // Note that this is not the standard
 #define SCREEN_MMIO 0x4100
-#define SCREEN_H 300
+#define SCREEN_H 320
 #define SCREEN_W 400
 
 //screensize_port_base = ((SCREEN_W) << 16) | (SCREEN_H);
