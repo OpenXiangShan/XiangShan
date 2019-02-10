@@ -41,11 +41,11 @@ object LSUInstr extends HasDecodeConst {
 class LSU extends HasLSUOpType {
   def access(isLsu: Bool, base: UInt, offset: UInt, func: UInt, wdata: UInt): MemIO = {
     val dmem = Wire(new MemIO)
-    dmem.out.bits.addr := base + offset
-    dmem.out.valid := isLsu
-    dmem.out.bits.wen := isLsu && func(3)
-    dmem.out.bits.size := func(1, 0)
-    dmem.out.bits.wdata := wdata
+    dmem.a.bits.addr := base + offset
+    dmem.a.bits.size := func(1, 0)
+    dmem.a.valid := isLsu
+    dmem.w.valid := isLsu && func(3)
+    dmem.w.bits.data := wdata
     dmem
   }
   def rdataExt(rdata: UInt, func: UInt): UInt = {

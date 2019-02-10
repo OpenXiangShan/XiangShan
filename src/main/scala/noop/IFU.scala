@@ -18,11 +18,11 @@ class IFU extends Module with HasResetVector {
   pc := Mux(io.br.isTaken, io.br.target, pc + 4.U)
 
   io.imem := DontCare
-  io.imem.out.valid := true.B
-  io.imem.out.bits.addr := pc
-  io.imem.out.bits.size := "b10".U
-  io.imem.out.bits.wen := false.B
+  io.imem.a.valid := true.B
+  io.imem.a.bits.addr := pc
+  io.imem.a.bits.size := "b10".U
+  io.imem.w.valid := false.B
 
-  io.out.instr := io.imem.in.rdata
+  io.out.instr := io.imem.r.bits.data
   io.out.pc := pc
 }

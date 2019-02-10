@@ -18,18 +18,18 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
   mem.init(imgPath, resetVector)
 
   do {
-    pc = peek(noop.io.imem.out.bits.addr).toInt
-    instr = mem.read(pc, peek(noop.io.imem.out.bits.size).toInt)
-    poke(noop.io.imem.in.rdata, instr)
+    pc = peek(noop.io.imem.a.bits.addr).toInt
+    instr = mem.read(pc, peek(noop.io.imem.a.bits.size).toInt)
+    poke(noop.io.imem.r.bits.data, instr)
 
-    val valid = peek(noop.io.dmem.out.valid)
+    val valid = peek(noop.io.dmem.a.valid)
     if (valid == 1) {
-      val dmemAddr = peek(noop.io.dmem.out.bits.addr).toInt
-      val size = peek(noop.io.dmem.out.bits.size).toInt
-      poke(noop.io.dmem.in.rdata, mem.read(dmemAddr, size))
+      val dmemAddr = peek(noop.io.dmem.a.bits.addr).toInt
+      val size = peek(noop.io.dmem.a.bits.size).toInt
+      poke(noop.io.dmem.r.bits.data, mem.read(dmemAddr, size))
 
-      val wen = peek(noop.io.dmem.out.bits.wen)
-      if (wen == 1) mem.write(dmemAddr, size, peek(noop.io.dmem.out.bits.wdata).toInt)
+      val wen = peek(noop.io.dmem.w.valid)
+      if (wen == 1) mem.write(dmemAddr, size, peek(noop.io.dmem.w.bits.data).toInt)
     }
 
     step(1)

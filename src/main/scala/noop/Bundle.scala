@@ -45,18 +45,17 @@ class BranchIO extends Bundle {
   val target = Output(UInt(32.W))
 }
 
-class MemABundle extends Bundle {
+class MemAddrBundle extends Bundle {
   val addr = Output(UInt(32.W))
-  val size = Output(UInt(2.W))
-  val wdata = Output(UInt(32.W))
-  val wen = Output(Bool())
+  val size = Output(UInt(3.W))
 }
 
-class MemRBundle extends Bundle {
-  val rdata = Output(UInt(32.W))
+class MemDataBundle(val dataBits: Int = 32) extends Bundle {
+  val data = Output(UInt(dataBits.W))
 }
 
-class MemIO extends Bundle {
-  val out = Valid(new MemABundle)
-  val in = Flipped(new MemRBundle)
+class MemIO(val dataBits: Int = 32) extends Bundle {
+  val a = Valid(new MemAddrBundle)
+  val r = Flipped(Valid(new MemDataBundle(dataBits)))
+  val w = Valid(new MemDataBundle(dataBits))
 }
