@@ -39,19 +39,21 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
     }
 
     // GPU
-    poke(noop.io.gpuStart, mem.read(0x4108, 0))
-    if (peek(noop.io.gmem.a.valid) == 1) {
-      val addr = peek(noop.io.gmem.a.bits.addr).toInt
-      val size = peek(noop.io.gmem.a.bits.size).toInt
-      val wen = peek(noop.io.gmem.w.valid)
-      if (wen == 1) {
-        if (size > 2) mem.writeBig(addr, size, peek(noop.io.gmem.w.bits.data))
-        else mem.write(addr, size, peek(noop.io.gmem.w.bits.data).toInt, 0xf)
-      }
-      else {
-        poke(noop.io.gmem.r.bits.data,
-          if (size > 2) mem.readBig(addr, size) else BigInt(mem.read(addr, size))
-        )
+    if (noop.HasGPU) {
+      poke(noop.io.gpuStart, mem.read(0x4108, 0))
+      if (peek(noop.io.gmem.a.valid) == 1) {
+        val addr = peek(noop.io.gmem.a.bits.addr).toInt
+        val size = peek(noop.io.gmem.a.bits.size).toInt
+        val wen = peek(noop.io.gmem.w.valid)
+        if (wen == 1) {
+          if (size > 2) mem.writeBig(addr, size, peek(noop.io.gmem.w.bits.data))
+          else mem.write(addr, size, peek(noop.io.gmem.w.bits.data).toInt, 0xf)
+        }
+        else {
+          poke(noop.io.gmem.r.bits.data,
+            if (size > 2) mem.readBig(addr, size) else BigInt(mem.read(addr, size))
+          )
+        }
       }
     }
 

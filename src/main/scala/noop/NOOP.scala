@@ -5,7 +5,11 @@ import chisel3.util._
 
 import gpu.GPU
 
-class NOOP extends Module {
+trait NOOPConfig {
+  val HasGPU = false
+}
+
+class NOOP extends Module with NOOPConfig {
   val io = IO(new Bundle {
     val imem = new MemIO
     val dmem = new MemIO
@@ -33,8 +37,12 @@ class NOOP extends Module {
 
   io.trap := isu.io.trap
 
-
-  val gpu = Module(new GPU)
-  gpu.io.start := io.gpuStart
-  io.gmem <> gpu.io.out
+  if (HasGPU) {
+    val gpu = Module(new GPU)
+    gpu.io.start := io.gpuStart
+    io.gmem <> gpu.io.out
+  }
+  else {
+    io.gmem := DontCare
+  }
 }
