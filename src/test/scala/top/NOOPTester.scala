@@ -29,7 +29,12 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
       poke(noop.io.dmem.r.bits.data, mem.read(addr, size))
 
       val wen = peek(noop.io.dmem.w.valid)
-      if (wen == 1) mem.write(addr, size, peek(noop.io.dmem.w.bits.data).toInt)
+
+      if (wen == 1) {
+        val wdata = peek(noop.io.dmem.w.bits.data).toInt
+        val wmask = peek(noop.io.dmem.w.bits.mask).toInt
+        mem.write(addr, size, wdata, wmask)
+      }
     }
 
     // GPU
@@ -43,7 +48,7 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
       val wen = peek(noop.io.gmem.w.valid)
       if (wen == 1) {
         if (size > 2) mem.writeBig(addr, size, peek(noop.io.gmem.w.bits.data))
-        else mem.write(addr, size, peek(noop.io.gmem.w.bits.data).toInt)
+        else mem.write(addr, size, peek(noop.io.gmem.w.bits.data).toInt, 0xf)
       }
     }
 

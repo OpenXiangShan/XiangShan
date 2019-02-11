@@ -32,15 +32,6 @@ class SimMem {
     NOOPDevice.call.init_sdl()
   }
 
-  def getDataMask(sizeEncode: Int): Int = {
-    sizeEncode match {
-      case 0 => 0xff
-      case 1 => 0xffff
-      case 2 => 0xffffffff
-      case _ => assert(false, f"Bad sizeEncode = $sizeEncode"); 0xffffffff
-    }
-  }
-
   def checkAddrAlign(addr: Int, sizeEncode: Int) = {
     val addrMask = sizeEncode match {
       case 0 => 0
@@ -57,10 +48,6 @@ class SimMem {
 
   def read(addr: Int, sizeEncode: Int): Int = {
     checkAddrAlign(addr, sizeEncode)
-    val idx = memOffset(addr) >> 2
-    val offset = addr & 0x3
-    val data = mem(idx)
-    val rdataAlign = data >> (offset * 8)
 
     // read RTC
     if (memOffset(addr) == 0x4048 && sizeEncode == 2) { UpTime() }
@@ -68,17 +55,24 @@ class SimMem {
     else if (memOffset(addr) == 0x4060 && sizeEncode == 2) { NOOPDevice.call.read_key() }
     // read screen size
     else if (memOffset(addr) == 0x4100 && sizeEncode == 2) { (400 << 16) | 320 }
-    else { rdataAlign }
+    else { mem(memOffset(addr) >> 2) }
   }
 
-  def write(addr: Int, sizeEncode: Int, wdata: Int) = {
+  def write(addr: Int, sizeEncode: Int, wdata: Int, wmask: Int) = {
     checkAddrAlign(addr, sizeEncode)
     val idx = memOffset(addr) >> 2
-    val offset = addr & 0x3
     val data = mem(idx)
-    val wdataAlign = wdata << (offset * 8)
-    val dataMaskAlign = getDataMask(sizeEncode) << (offset * 8)
-    val newData = (data & ~dataMaskAlign) | (wdataAlign & dataMaskAlign)
+    val wmaskExpand = wmask match {
+      case 0x1 => 0x000000ff
+      case 0x2 => 0x0000ff00
+      case 0x4 => 0x00ff0000
+      case 0x8 => 0xff000000
+      case 0x3 => 0x0000ffff
+      case 0xc => 0xffff0000
+      case 0xf => 0xffffffff
+      case _ => assert(false, f"Bad wmask = 0x$wmask%x"); 0
+    }
+    val newData = (data & ~wmaskExpand) | (wdata & wmaskExpand)
 
     // write to uart data
     if (memOffset(addr) == 0x43f8 && sizeEncode == 0) { print(f"${wdata & 0xff}%c") }

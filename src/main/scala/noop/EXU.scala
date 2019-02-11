@@ -41,7 +41,7 @@ class EXU extends Module with HasFuType {
   io.out.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
     FuBru -> (io.in.pc + 4.U),
-    FuLsu -> lsu.rdataExt(io.dmem.r.bits.data, fuOpType),
+    FuLsu -> lsu.rdataExt(io.dmem.r.bits.data, io.dmem.a.bits.addr, fuOpType),
     FuCsr -> csrOut,
     FuMdu -> mduOut
   ))
