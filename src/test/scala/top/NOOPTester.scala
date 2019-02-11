@@ -20,20 +20,21 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
   do {
     // CPU
     pc = peek(noop.io.imem.a.bits.addr).toInt
-    instr = mem.read(pc, peek(noop.io.imem.a.bits.size).toInt)
+    instr = mem.read(pc, 2)
     poke(noop.io.imem.r.bits.data, instr)
 
     if (peek(noop.io.dmem.a.valid) == 1) {
       val addr = peek(noop.io.dmem.a.bits.addr).toInt
       val size = peek(noop.io.dmem.a.bits.size).toInt
-      poke(noop.io.dmem.r.bits.data, mem.read(addr, size))
-
       val wen = peek(noop.io.dmem.w.valid)
 
       if (wen == 1) {
         val wdata = peek(noop.io.dmem.w.bits.data).toInt
         val wmask = peek(noop.io.dmem.w.bits.mask).toInt
         mem.write(addr, size, wdata, wmask)
+      }
+      else {
+        poke(noop.io.dmem.r.bits.data, mem.read(addr, size))
       }
     }
 
@@ -42,13 +43,15 @@ class NOOPTester(noop: NOOP, imgPath: String) extends PeekPokeTester(noop)
     if (peek(noop.io.gmem.a.valid) == 1) {
       val addr = peek(noop.io.gmem.a.bits.addr).toInt
       val size = peek(noop.io.gmem.a.bits.size).toInt
-      poke(noop.io.gmem.r.bits.data,
-        if (size > 2) mem.readBig(addr, size) else BigInt(mem.read(addr, size)))
-
       val wen = peek(noop.io.gmem.w.valid)
       if (wen == 1) {
         if (size > 2) mem.writeBig(addr, size, peek(noop.io.gmem.w.bits.data))
         else mem.write(addr, size, peek(noop.io.gmem.w.bits.data).toInt, 0xf)
+      }
+      else {
+        poke(noop.io.gmem.r.bits.data,
+          if (size > 2) mem.readBig(addr, size) else BigInt(mem.read(addr, size))
+        )
       }
     }
 
