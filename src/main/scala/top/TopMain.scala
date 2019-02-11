@@ -15,6 +15,21 @@ class ALUModule extends Module {
   io.out := (new ALU).access(src1 = io.src1, src2 = io.src2, func = io.func)
 }
 
+class NOOPFPGA extends Module {
+  val io = IO(new Bundle{
+    val trap = Output(UInt(2.W))
+  })
+
+  val noop = Module(new NOOP)
+  val mem = Module(new DistributedMem)
+  noop.io.imem <> mem.io.imem
+  noop.io.dmem <> mem.io.dmem
+  io.trap := noop.io.trap
+
+  noop.io.gmem := DontCare
+  noop.io.gpuStart := DontCare
+}
+
 object TopMain extends App {
-  Driver.execute(args, () => new NOOP)
+  Driver.execute(args, () => new NOOPFPGA)
 }
