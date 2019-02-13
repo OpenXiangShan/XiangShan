@@ -26,6 +26,6 @@ emu: libdevice
 	sbt '$(SIMCMD) --backend-name verilator --generate-vcd-output off'
 
 clean:
-	rm -rf $(OBJ_DIR)/*
+	rm -rf $(BUILD_DIR)
 
 .PHONY: libdevice verilog test emu clean
