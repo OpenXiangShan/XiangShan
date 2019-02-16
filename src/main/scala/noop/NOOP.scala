@@ -37,6 +37,8 @@ class NOOP extends Module with NOOPConfig {
   ifu.io.br <> wbu.io.brOut
   ifu.io.writeback := wbu.io.writeback
 
+  exu.io.csrCtrl.instrCommit := wbu.io.writeback
+
   io.trap := isu.io.trap
 
   if (HasGPU) {
