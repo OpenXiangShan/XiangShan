@@ -55,16 +55,30 @@ class LSU extends HasLSUOpType {
       "b10".U -> data
     ))
   }
-  def access(isLsu: Bool, base: UInt, offset: UInt, func: UInt, wdata: UInt): MemIO = {
+  def access(isLsu: Bool, base: UInt, offset: UInt, func: UInt, wdata: UInt): (MemIO, Bool) = {
     val dmem = Wire(new MemIO)
+    val s_idle :: s_wait_resp :: Nil = Enum(2)
+    val state = RegInit(s_idle)
+
+    switch (state) {
+      is (s_idle) {
+        when (dmem.a.fire()) { state := Mux(dmem.r.fire(), s_idle, s_wait_resp) }
+      }
+
+      is (s_wait_resp) {
+        when (dmem.r.fire()) { state := s_idle }
+      }
+    }
+
     dmem.a.bits.addr := base + offset
     dmem.a.bits.size := func(1, 0)
-    dmem.a.valid := isLsu
+    dmem.a.valid := isLsu && (state === s_idle)
     dmem.w.valid := isLsu && func(3)
     dmem.w.bits.data := genWdata(wdata, func(1, 0))
     dmem.w.bits.mask := genWmask(base + offset, func(1, 0))
     dmem.r.ready := true.B
-    dmem
+
+    (dmem, Mux(dmem.w.valid, true.B, dmem.r.fire()))
   }
   def rdataExt(rdataFromBus: UInt, addr: UInt, func: UInt): UInt = {
     val rdata = LookupTree(addr(1, 0), List(

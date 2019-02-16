@@ -31,8 +31,9 @@ class EXU extends Module with HasFuType {
     src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
 
   val lsu = new LSU
-  io.dmem <> lsu.access(isLsu = fuType === FuLsu, base = src1, offset = src2,
+  val (dmem, lsuResultValid) = lsu.access(isLsu = fuType === FuLsu, base = src1, offset = src2,
     func = fuOpType, wdata = io.in.bits.data.dest)
+  io.dmem <> dmem
 
   val mduOut = (new MDU).access(src1 = src1, src2 = src2, func = fuOpType)
 
@@ -58,7 +59,7 @@ class EXU extends Module with HasFuType {
     o.rfDest := i.rfDest
   }
   io.out.bits.pc := io.in.bits.pc
-  io.out.valid := io.in.valid
+  io.out.valid := io.in.valid && ((fuType =/= FuLsu) || lsuResultValid)
 
   //printf("EXU: src1 = 0x%x, src2 = 0x%x\n", src1, src2)
 }

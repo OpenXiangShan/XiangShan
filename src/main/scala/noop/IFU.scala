@@ -22,22 +22,22 @@ class IFU extends Module with HasResetVector {
     pc := Mux(io.br.isTaken, io.br.target, pc + 4.U)
   }
 
-  val s_idle :: s_req :: s_wait_resp :: Nil = Enum(3)
+  val s_executing :: s_req :: s_wait_resp :: Nil = Enum(3)
   val state = RegInit(s_req)
 
   switch (state) {
-    is (s_idle) {
+    is (s_executing) {
       when (io.writeback) { state := s_req }
     }
 
     is (s_req) {
       when (io.imem.a.fire()) {
-        state := Mux(io.imem.r.fire(), Mux(io.writeback, s_req, s_idle), s_wait_resp)
+        state := Mux(io.imem.r.fire(), Mux(io.writeback, s_req, s_executing), s_wait_resp)
       }
     }
 
     is (s_wait_resp) {
-      when (io.imem.r.fire()) { state := Mux(io.writeback, s_req, s_idle) }
+      when (io.imem.r.fire()) { state := Mux(io.writeback, s_req, s_executing) }
     }
   }
 
@@ -48,7 +48,11 @@ class IFU extends Module with HasResetVector {
   io.imem.r.ready := true.B
   io.imem.w.valid := false.B
 
-  io.out.valid := io.imem.r.fire()
-  io.out.bits.instr := Mux(io.out.valid, io.imem.r.bits.data, Instructions.NOP)
+  val instrReg = RegInit(Instructions.NOP)
+  when (io.writeback) { instrReg := Instructions.NOP }
+  .elsewhen (io.imem.r.fire()) { instrReg := io.imem.r.bits.data }
+
+  io.out.valid := io.imem.r.fire() || (state === s_executing)
+  io.out.bits.instr := Mux(io.imem.r.fire(), io.imem.r.bits.data, instrReg)
   io.out.bits.pc := pc
 }
