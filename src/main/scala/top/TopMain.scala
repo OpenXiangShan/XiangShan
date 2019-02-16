@@ -1,21 +1,24 @@
 package top
 
-import noop._
+import noop.NOOP
+import memory.AHBLiteIO
 
 import chisel3._
-import chisel3.util._
 
-class ALUModule extends Module {
-  val io = IO(new Bundle {
-    val src1 = Input(UInt(32.W))
-    val src2 = Input(UInt(32.W))
-    val func = Input(UInt(4.W))
-    val out = Output(UInt(32.W))
+class NOOPFPGA extends Module {
+  val io = IO(new Bundle{
+    val imem = new AHBLiteIO
+    val dmem = new AHBLiteIO
   })
 
-  io.out := (new ALU).access(src1 = io.src1, src2 = io.src2, func = io.func)
+  val noop = Module(new NOOP)
+  io.imem <> noop.io.imem.toAHBLite()
+  io.dmem <> noop.io.dmem.toAHBLite()
+
+  noop.io.gmem := DontCare
+  noop.io.gpuStart := DontCare
 }
 
 object TopMain extends App {
-  Driver.execute(args, () => new NOOP)
+  Driver.execute(args, () => new NOOPFPGA)
 }
