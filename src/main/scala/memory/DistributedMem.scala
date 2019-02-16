@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
 
-class DistributedMem(memByte: Int, dualPort: Boolean, dataFile: String = "") extends Module {
+class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, dataFile: String = "") extends Module {
   val io = IO(new Bundle {
     val rw = Flipped(new MemIO)
     val ro = Flipped(new MemIO)
@@ -55,7 +55,7 @@ class DistributedMem(memByte: Int, dualPort: Boolean, dataFile: String = "") ext
   if (dualPort) {
     io.ro.a.ready := true.B
     io.ro.r.bits.data := roData
-    io.ro.r.valid := Counter(io.ro.r.ready, 1)._2
+    io.ro.r.valid := Counter(io.ro.r.ready, delayCycles + 1)._2
   }
   else {
     io.ro := DontCare

@@ -31,7 +31,9 @@ class IFU extends Module with HasResetVector {
     }
 
     is (s_req) {
-      when (io.imem.a.fire()) { state := s_wait_resp }
+      when (io.imem.a.fire()) {
+        state := Mux(io.imem.r.fire(), Mux(io.writeback, s_req, s_idle), s_wait_resp)
+      }
     }
 
     is (s_wait_resp) {
@@ -43,7 +45,7 @@ class IFU extends Module with HasResetVector {
   io.imem.a.valid := (state === s_req)
   io.imem.a.bits.addr := pc
   io.imem.a.bits.size := "b10".U
-  io.imem.r.ready := (state === s_wait_resp)
+  io.imem.r.ready := true.B
   io.imem.w.valid := false.B
 
   io.out.valid := io.imem.r.fire()
