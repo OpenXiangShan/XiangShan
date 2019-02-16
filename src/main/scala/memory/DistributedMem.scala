@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
 
-class DistributedMem(memByte: Int, dualPort: Boolean, dataFile: String = "") extends Module {
+class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, dataFile: String = "") extends Module {
   val io = IO(new Bundle {
     val rw = Flipped(new MemIO)
     val ro = Flipped(new MemIO)
@@ -49,11 +49,26 @@ class DistributedMem(memByte: Int, dualPort: Boolean, dataFile: String = "") ext
     when (wen) { mem.write(rwIdx, wdataVec, wmask) }
   }
 
-  io.rw.r.bits.data := rwData
-  io.rw.r.valid := true.B
+  def readPort(p: MemIO, rdata: UInt) = {
+    val s_idle :: s_reading :: Nil = Enum(2)
+    val state = RegInit(s_idle)
+    switch (state) {
+      is (s_idle) {
+        when (p.a.fire()) { state := Mux(p.r.fire(), s_idle, s_reading) }
+      }
+      is (s_reading) {
+        when (p.r.fire()) { state := s_idle }
+      }
+    }
+
+    p.a.ready := state === s_idle
+    p.r.bits.data := rdata
+    p.r.valid := (if (delayCycles == 0) true.B else Counter(state === s_reading, delayCycles)._2)
+  }
+
+  readPort(io.rw, rwData)
   if (dualPort) {
-    io.ro.r.bits.data := roData
-    io.ro.r.valid := true.B
+    readPort(io.ro, roData)
   }
   else {
     io.ro := DontCare

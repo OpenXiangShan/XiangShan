@@ -56,6 +56,7 @@ class SimMMIO extends Module {
     }
   }
 
+  io.rw.a.ready := true.B
   io.rw.r.bits.data := io.mmioTrap.rdata
   io.rw.r.valid := io.mmioTrap.valid
 }

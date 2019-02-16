@@ -81,6 +81,9 @@ class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
     case 4 => println(f"\33[1;34mABORT\33[0m at pc = 0x$pc%08x")
   }
 
+  val instrCnt = peek(noop.io.instrCnt).toInt
+  val cycleCnt = peek(noop.io.cycleCnt).toInt
+  println(s"instrCnt = $instrCnt, cycleCnt = $cycleCnt, IPC = ${instrCnt.toFloat / cycleCnt.toFloat}")
   //expect(noop.io.trap, 0)
 }
 

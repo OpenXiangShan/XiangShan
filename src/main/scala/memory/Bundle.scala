@@ -17,7 +17,7 @@ class MemMaskDataBundle(dataBits: Int) extends MemDataBundle(dataBits) {
 }
 
 class MemIO(val dataBits: Int = 32) extends Bundle {
-  val a = Valid(new MemAddrBundle)
-  val r = Flipped(Valid(new MemDataBundle(dataBits)))
+  val a = Decoupled(new MemAddrBundle)
+  val r = Flipped(Decoupled(new MemDataBundle(dataBits)))
   val w = Valid(new MemMaskDataBundle(dataBits))
 }

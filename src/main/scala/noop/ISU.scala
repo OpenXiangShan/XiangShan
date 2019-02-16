@@ -11,32 +11,33 @@ class RegFile {
 
 class ISU extends Module with HasSrcType {
   val io = IO(new Bundle {
-    val in = Flipped(new PcCtrlDataIO)
-    val out = new PcCtrlDataIO
+    val in = Flipped(Valid(new PcCtrlDataIO))
+    val out = Valid(new PcCtrlDataIO)
     val wb = Flipped(new WriteBackIO)
     val trap = Output(UInt(2.W))
   })
 
   val rf = new RegFile
-  val rs1Data = rf.read(io.in.ctrl.rfSrc1)
-  val rs2Data = rf.read(io.in.ctrl.rfSrc2)
-  io.out.data.src1 := Mux(io.in.ctrl.src1Type === Src1Pc, io.in.pc, rs1Data)
-  io.out.data.src2 := Mux(io.in.ctrl.src2Type === Src2Reg, rs2Data, io.in.data.src2)
-  io.out.data.dest := rs2Data // for S-type and B-type
+  val rs1Data = rf.read(io.in.bits.ctrl.rfSrc1)
+  val rs2Data = rf.read(io.in.bits.ctrl.rfSrc2)
+  io.out.bits.data.src1 := Mux(io.in.bits.ctrl.src1Type === Src1Pc, io.in.bits.pc, rs1Data)
+  io.out.bits.data.src2 := Mux(io.in.bits.ctrl.src2Type === Src2Reg, rs2Data, io.in.bits.data.src2)
+  io.out.bits.data.dest := rs2Data // for S-type and B-type
 
   when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfWdata) }
 
-  io.out.ctrl := DontCare
-  (io.out.ctrl, io.in.ctrl) match { case (o, i) =>
+  io.out.bits.ctrl := DontCare
+  (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.fuType := i.fuType
     o.fuOpType := i.fuOpType
     o.rfWen := i.rfWen
     o.rfDest := i.rfDest
   }
-  io.out.pc := io.in.pc
+  io.out.bits.pc := io.in.bits.pc
+  io.out.valid := io.in.valid
 
-  io.trap := Mux(io.in.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
-              Mux(io.in.ctrl.isNoopTrap,
+  io.trap := Mux(io.in.bits.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
+              Mux(io.in.bits.ctrl.isNoopTrap,
                 Mux(rs1Data === 0.U, NOOPTrap.StateGoodTrap, NOOPTrap.StateBadTrap),
                 NOOPTrap.StateRunning))
 }
