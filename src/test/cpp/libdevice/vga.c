@@ -9,17 +9,20 @@
 #define SCREEN_H 320
 #define SCREEN_W 400
 
-//screensize_port_base = ((SCREEN_W) << 16) | (SCREEN_H);
 
 static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 
-void update_screen(void *mem_scala) {
-  SDL_UpdateTexture(texture, NULL, mem_scala + VMEM, SCREEN_W * sizeof(uint32_t));
+void update_screen(void *vmem_scala) {
+  SDL_UpdateTexture(texture, NULL, vmem_scala, SCREEN_W * sizeof(uint32_t));
   SDL_RenderClear(renderer);
   SDL_RenderCopy(renderer, texture, NULL, NULL);
   SDL_RenderPresent(renderer);
+}
+
+uint32_t screen_size(void) {
+  return ((SCREEN_W) << 16) | (SCREEN_H);
 }
 
 void init_sdl() {

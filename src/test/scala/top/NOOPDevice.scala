@@ -8,6 +8,7 @@ trait NOOPDevice extends Library {
   def init_sdl(): Unit
   def update_screen(mem: Array[Int]): Unit
   def read_key(): Int
+  def screen_size(): Int
   def poll_event(): Int
 }
 
