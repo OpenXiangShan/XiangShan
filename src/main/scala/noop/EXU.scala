@@ -21,6 +21,9 @@ class EXU extends Module with HasFuType {
     val out = Valid((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new MemIO
+    val csrCtrl = new Bundle {
+      val instrCommit = Input(Bool())
+    }
   })
 
   val (src1, src2, fuType, fuOpType) = (io.in.bits.data.src1, io.in.bits.data.src2,
@@ -61,5 +64,5 @@ class EXU extends Module with HasFuType {
   io.out.bits.pc := io.in.bits.pc
   io.out.valid := io.in.valid && ((fuType =/= FuLsu) || lsuResultValid)
 
-  //printf("EXU: src1 = 0x%x, src2 = 0x%x\n", src1, src2)
+  csr.instrCnt(io.csrCtrl.instrCommit)
 }

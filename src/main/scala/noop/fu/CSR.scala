@@ -27,10 +27,15 @@ object CSRInstr extends HasDecodeConst {
 }
 
 trait HasCSRConst {
-  val Mstatus = 0x300
-  val Mtvec   = 0x305
-  val Mepc    = 0x341
-  val Mcause  = 0x342
+  val Mstatus       = 0x300
+  val Mtvec         = 0x305
+  val Mepc          = 0x341
+  val Mcause        = 0x342
+
+  val Mcycle        = 0xb00
+  val Minstret      = 0xb02
+  val Mcycleh       = 0xb80
+  val Minstreth     = 0xb82
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
@@ -41,12 +46,19 @@ class CSR extends HasCSROpType with HasCSRConst {
   val mcause = Reg(UInt(32.W))
   val mstatus = Reg(UInt(32.W))
   val mepc = Reg(UInt(32.W))
+  val mcycle = Reg(UInt(64.W))
+  val minstret = Reg(UInt(64.W))
 
   val scalaMapping = List(
     Mtvec   -> mtvec,
     Mcause  -> mcause,
     Mepc    -> mepc,
-    Mstatus -> mstatus
+    Mstatus -> mstatus,
+
+    Mcycle  -> mcycle(31, 0),
+    Mcycleh -> mcycle(63, 32),
+    Minstret  -> minstret(31, 0),
+    Minstreth -> minstret(63, 32)
   )
 
   val chiselMapping = scalaMapping.map { case (x, y) => (x.U -> y) }
@@ -86,5 +98,12 @@ class CSR extends HasCSROpType with HasCSRConst {
       mcause := 11.U
     }
     csrjmp
+  }
+
+  mcycle := mcycle + 1.U
+  def instrCnt(instrCommit: Bool) {
+    when (instrCommit) {
+      minstret := minstret + 1.U
+    }
   }
 }
