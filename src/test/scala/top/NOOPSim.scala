@@ -5,6 +5,8 @@ import noop._
 import chisel3._
 import chisel3.util._
 
+import memory.DistributedMem
+
 class NOOPSimTop(memInitFile: String = "") extends Module {
   val io = IO(new Bundle{
     val trap = Output(UInt((3 + 1 + 4 + 32 + 32 + 2).W))

@@ -3,7 +3,7 @@ package gpu
 import chisel3._
 import chisel3.util._
 
-import noop.MemIO
+import memory.MemIO
 
 class PixelBundle extends Bundle {
   val a = UInt(8.W)

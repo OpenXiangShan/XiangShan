@@ -3,6 +3,8 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import memory.MemIO
+
 object LookupTree {
   private val useMuxTree = true
 

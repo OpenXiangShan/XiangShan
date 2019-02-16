@@ -3,6 +3,8 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import memory.MemIO
+
 trait HasResetVector {
   val resetVector = 0x80100000L
 }
