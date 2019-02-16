@@ -20,7 +20,7 @@ $(TOP_V): $(SCALA_FILE)
 verilog: $(TOP_V)
 
 test: libdevice
-	sbt '$(SIMCMD)'
+	sbt '$(SIMCMD) --tr-rollback-buffers 0'
 
 emu: libdevice
 	sbt '$(SIMCMD) --backend-name verilator --generate-vcd-output off'
