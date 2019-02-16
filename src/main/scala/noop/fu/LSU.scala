@@ -63,6 +63,7 @@ class LSU extends HasLSUOpType {
     dmem.w.valid := isLsu && func(3)
     dmem.w.bits.data := genWdata(wdata, func(1, 0))
     dmem.w.bits.mask := genWmask(base + offset, func(1, 0))
+    dmem.r.ready := true.B
     dmem
   }
   def rdataExt(rdataFromBus: UInt, addr: UInt, func: UInt): UInt = {

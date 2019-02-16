@@ -49,11 +49,13 @@ class DistributedMem(memByte: Int, dualPort: Boolean, dataFile: String = "") ext
     when (wen) { mem.write(rwIdx, wdataVec, wmask) }
   }
 
+  io.rw.a.ready := true.B
   io.rw.r.bits.data := rwData
   io.rw.r.valid := true.B
   if (dualPort) {
+    io.ro.a.ready := true.B
     io.ro.r.bits.data := roData
-    io.ro.r.valid := true.B
+    io.ro.r.valid := Counter(io.ro.r.ready, 1)._2
   }
   else {
     io.ro := DontCare

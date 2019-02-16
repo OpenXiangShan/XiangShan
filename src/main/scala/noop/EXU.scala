@@ -17,32 +17,33 @@ object LookupTree {
 
 class EXU extends Module with HasFuType {
   val io = IO(new Bundle {
-    val in = Flipped(new PcCtrlDataIO)
-    val out = new PcCtrlDataIO
+    val in = Flipped(Valid(new PcCtrlDataIO))
+    val out = Valid((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new MemIO
   })
 
-  val (src1, src2, fuType, fuOpType) = (io.in.data.src1, io.in.data.src2, io.in.ctrl.fuType, io.in.ctrl.fuOpType)
+  val (src1, src2, fuType, fuOpType) = (io.in.bits.data.src1, io.in.bits.data.src2,
+    io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
   val aluOut = (new ALU).access(src1 = src1, src2 = src2, func = fuOpType)
 
-  val bruOut = (new BRU).access(isBru = fuType === FuBru, pc = io.in.pc, offset = src2,
-    src1 = src1, src2 = io.in.data.dest, func = fuOpType)
+  val bruOut = (new BRU).access(isBru = fuType === FuBru, pc = io.in.bits.pc, offset = src2,
+    src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
 
   val lsu = new LSU
   io.dmem <> lsu.access(isLsu = fuType === FuLsu, base = src1, offset = src2,
-    func = fuOpType, wdata = io.in.data.dest)
+    func = fuOpType, wdata = io.in.bits.data.dest)
 
   val mduOut = (new MDU).access(src1 = src1, src2 = src2, func = fuOpType)
 
   val csr = new CSR
   val csrOut = csr.access(isCsr = fuType === FuCsr, addr = src2(11, 0), src = src1, cmd = fuOpType)
-  val exceptionJmp = csr.jmp(isCsr = fuType === FuCsr, addr = src2(11, 0), pc = io.in.pc, cmd = fuOpType)
+  val exceptionJmp = csr.jmp(isCsr = fuType === FuCsr, addr = src2(11, 0), pc = io.in.bits.pc, cmd = fuOpType)
 
-  io.out.data := DontCare
-  io.out.data.dest := LookupTree(fuType, 0.U, List(
+  io.out.bits.data := DontCare
+  io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
-    FuBru -> (io.in.pc + 4.U),
+    FuBru -> (io.in.bits.pc + 4.U),
     FuLsu -> lsu.rdataExt(io.dmem.r.bits.data, io.dmem.a.bits.addr, fuOpType),
     FuCsr -> csrOut,
     FuMdu -> mduOut
@@ -51,12 +52,13 @@ class EXU extends Module with HasFuType {
   when (exceptionJmp.isTaken) { io.br <> exceptionJmp }
   .otherwise { io.br <> bruOut }
 
-  io.out.ctrl := DontCare
-  (io.out.ctrl, io.in.ctrl) match { case (o, i) =>
+  io.out.bits.ctrl := DontCare
+  (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.rfWen := i.rfWen
     o.rfDest := i.rfDest
   }
-  io.out.pc := io.in.pc
+  io.out.bits.pc := io.in.bits.pc
+  io.out.valid := io.in.valid
 
   //printf("EXU: src1 = 0x%x, src2 = 0x%x\n", src1, src2)
 }

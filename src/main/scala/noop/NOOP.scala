@@ -35,6 +35,7 @@ class NOOP extends Module with NOOPConfig {
   wbu.io.brIn <> exu.io.br
   isu.io.wb <> wbu.io.wb
   ifu.io.br <> wbu.io.brOut
+  ifu.io.writeback := wbu.io.writeback
 
   io.trap := isu.io.trap
 
