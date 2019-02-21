@@ -36,10 +36,6 @@ set inc_files [list \
 add_files -norecurse -fileset sources_1 $inc_files
 set_property is_global_include true [get_files $inc_files]
 
-lappend src_files "[file normalize "${lib_dir}/jtag/axi4_lite_if.v"]"
-lappend src_files "[file normalize "${lib_dir}/jtag/axi_jtag_v1_0.v"]"
-lappend src_files "[file normalize "${lib_dir}/jtag/jtag_proc.v"]"
-
 # Add files for rocketchip
 lappend src_files "[file normalize "${fpga_dir}/../build/TopMain.v"]"
 
