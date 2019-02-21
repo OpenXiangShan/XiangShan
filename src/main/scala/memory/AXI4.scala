@@ -115,14 +115,21 @@ class MemIO2AXI4Converter extends Module {
   w.last := true.B
   mem.r.bits.data := r.data
 
-  // only issue write requests when aw and w are ready at the same time
-  //val awwReady = axi.aw.ready && axi.w.ready
-  assert(!axi.aw.valid || (axi.aw.ready && axi.w.ready))
+  val awAck = RegInit(false.B)
+  val wAck = RegInit(false.B)
+
+  val wSend = (axi.aw.fire() && axi.w.fire()) || (awAck && wAck)
+  when (wSend) {
+    awAck := false.B
+    wAck := false.B
+  }
+  .elsewhen (axi.aw.fire()) { awAck := true.B }
+  .elsewhen (axi. w.fire()) {  wAck := true.B }
 
   axi.ar.valid := mem.isRead()
-  axi.aw.valid := mem.isWrite()
-  axi.w .valid := mem.isWrite()
-  mem.a.ready  := Mux(mem.w.valid, axi.aw.ready, axi.ar.ready)
+  axi.aw.valid := mem.isWrite() && !awAck
+  axi.w .valid := mem.isWrite() && !wAck
+  mem.a.ready  := Mux(mem.w.valid, wSend, axi.ar.ready)
 
   axi.r.ready  := mem.r.ready
   mem.r.valid  := axi.r.valid
