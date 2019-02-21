@@ -1,0 +1,9 @@
+the_ROM_image:
+{
+  [fsbl_config] a53_x64
+  [bootloader] build/zynqmp/fsbl.elf
+  [pmufw_image] build/zynqmp/pmufw.elf
+//  [destination_device=pl] build/zynqmp/system_top.bit
+  [destination_cpu=a53-0, exception_level=el-3,trustzone] build/zynqmp/bl31.elf
+  [destination_cpu=a53-0, exception_level=el-2] build/zynqmp/u-boot.elf
+}
