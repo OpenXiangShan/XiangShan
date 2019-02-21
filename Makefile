@@ -16,6 +16,7 @@ libdevice:
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	sbt 'runMain top.$(TOP) -td $(@D) --output-file $@'
+	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 
 verilog: $(TOP_V)
 
