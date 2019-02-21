@@ -29,4 +29,10 @@ class MemIO(val dataBits: Int = 32) extends Bundle {
     mem2ahb.io.in <> this
     mem2ahb.io.out
   }
+
+  def toAXI4(): AXI4 = {
+    val mem2axi = Module(new MemIO2AXI4Converter)
+    mem2axi.io.in <> this
+    mem2axi.io.out
+  }
 }
