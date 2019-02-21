@@ -25,6 +25,8 @@ class SimMMIO extends Module {
   when (io.rw.a.valid) {
     switch (io.rw.a.bits.addr) {
       is (0x43f8.U) {
+        io.mmioTrap.valid := true.B
+        io.mmioTrap.cmd := 6.U
         when (wen) { printf("%c", wdataVec(0)) }
       }
       is (0x4048.U) {

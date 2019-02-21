@@ -1,4 +1,4 @@
-package noop
+/*package noop
 
 import chisel3.iotesters.PeekPokeTester
 import top.ALUModule
@@ -40,4 +40,4 @@ class ALUUnitTester(alu: ALUModule) extends PeekPokeTester(alu) {
     }
   }
 }
-
+*/

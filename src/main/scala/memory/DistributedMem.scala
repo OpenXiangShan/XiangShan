@@ -63,7 +63,7 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
 
     p.a.ready := state === s_idle
     p.r.bits.data := rdata
-    p.r.valid := (if (delayCycles == 0) true.B else Counter(state === s_reading, delayCycles)._2)
+    p.r.valid := (if (delayCycles == 0) p.a.fire() else Counter(state === s_reading, delayCycles)._2)
   }
 
   readPort(io.rw, rwData)

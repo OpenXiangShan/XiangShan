@@ -62,7 +62,7 @@ class LSU extends HasLSUOpType {
 
     switch (state) {
       is (s_idle) {
-        when (dmem.a.fire()) { state := Mux(dmem.r.fire(), s_idle, s_wait_resp) }
+        when (dmem.a.fire()) { state := Mux(dmem.w.valid || dmem.r.fire(), s_idle, s_wait_resp) }
       }
 
       is (s_wait_resp) {
@@ -78,7 +78,7 @@ class LSU extends HasLSUOpType {
     dmem.w.bits.mask := genWmask(base + offset, func(1, 0))
     dmem.r.ready := true.B
 
-    (dmem, Mux(dmem.w.valid, true.B, dmem.r.fire()))
+    (dmem, Mux(dmem.w.valid, dmem.a.fire(), dmem.r.fire()))
   }
   def rdataExt(rdataFromBus: UInt, addr: UInt, func: UInt): UInt = {
     val rdata = LookupTree(addr(1, 0), List(

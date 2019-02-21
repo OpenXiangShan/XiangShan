@@ -43,6 +43,7 @@ class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
             }
             val idx = (addr - 0x40000) >> 2
             vmem(idx) = (wdata & wmaskExpand) | (vmem(idx) & ~wmaskExpand)
+          case 6 => // putc()
         }
       }
     }
