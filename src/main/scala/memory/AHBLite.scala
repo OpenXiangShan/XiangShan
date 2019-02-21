@@ -3,8 +3,7 @@ package memory
 import chisel3._
 import chisel3.util._
 
-object AHBParameters
-{
+object AHBParameters {
   // These are all fixed by the AHB standard:
   val transBits = 2
   val burstBits = 3

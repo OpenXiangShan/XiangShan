@@ -21,6 +21,9 @@ class MemIO(val dataBits: Int = 32) extends Bundle {
   val r = Flipped(Decoupled(new MemDataBundle(dataBits)))
   val w = Valid(new MemMaskDataBundle(dataBits))
 
+  def isRead (): Bool = a.valid && !w.valid
+  def isWrite(): Bool = a.valid &&  w.valid
+
   def toAHBLite(): AHBLiteIO = {
     val mem2ahb = Module(new MemIO2AHBLiteConverter)
     mem2ahb.io.in <> this
