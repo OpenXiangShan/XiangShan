@@ -1,0 +1,11 @@
+ifneq ($(MAKECMDGOALS),clean) # ignore check for make clean
+
+BOARD ?= zedboard
+
+BOARDS  = $(shell ls board/)
+
+ifeq ($(filter $(BOARDS), $(BOARD)), ) # BOARD must be valid
+$(error Invalid BOARD. Supported: $(BOARDS))
+endif
+
+endif
