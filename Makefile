@@ -18,7 +18,13 @@ $(TOP_V): $(SCALA_FILE)
 	sbt 'runMain top.$(TOP) -td $(@D) --output-file $@'
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 
-verilog: $(TOP_V)
+TIMER_V = $(BUILD_DIR)/AXI4Timer.v
+$(TIMER_V): $(SCALA_FILE)
+	mkdir -p $(@D)
+	sbt 'runMain device.TopAXI4Timer -td $(@D) --output-file $@'
+	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+
+verilog: $(TOP_V) $(TIMER_V)
 
 test: libdevice
 	sbt '$(SIMCMD) --tr-rollback-buffers 0'
