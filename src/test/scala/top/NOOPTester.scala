@@ -16,9 +16,10 @@ class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
       val mmioWrite = mmioCmd >> 2
       if (mmioWrite == 0) {
         val mmioRdata = mmioCmd match {
-          case 0 => UpTime()
-          case 1 => NOOPDevice.call.read_key()
-          case 2 => NOOPDevice.call.screen_size()
+          case 0 => 0
+          case 1 => UpTime()
+          case 2 => NOOPDevice.call.read_key()
+          case 3 => NOOPDevice.call.screen_size()
         }
         poke(noop.io.mmioRdata, mmioRdata)
       }

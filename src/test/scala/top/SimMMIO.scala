@@ -15,7 +15,7 @@ class SimMMIO extends Module {
     }
   })
 
-  val wen = io.rw.a.valid && io.rw.w.valid
+  val wen = io.rw.isWrite()
   val wdataVec = VecInit.tabulate(4) { i => io.rw.w.bits.data(8 * (i + 1) - 1, 8 * i) }
   val wmask = VecInit.tabulate(4) { i => io.rw.w.bits.mask(i).toBool }
 
@@ -24,7 +24,17 @@ class SimMMIO extends Module {
 
   when (io.rw.a.valid) {
     switch (io.rw.a.bits.addr) {
-      is (0x43f8.U) {
+      is (0x40600008.U) {
+        // read uartlite stat register
+        io.mmioTrap.valid := true.B
+        io.mmioTrap.cmd := 0.U
+      }
+      is (0x4060000c.U) {
+        // read uartlite ctrl register
+        io.mmioTrap.valid := true.B
+        io.mmioTrap.cmd := 0.U
+      }
+      is (0x40600004.U) {
         io.mmioTrap.valid := true.B
         io.mmioTrap.cmd := 6.U
         when (wen) { printf("%c", wdataVec(0)) }
@@ -32,17 +42,17 @@ class SimMMIO extends Module {
       is (0x4048.U) {
         // read RTC
         io.mmioTrap.valid := true.B
-        io.mmioTrap.cmd := 0.U
+        io.mmioTrap.cmd := 1.U
       }
       is (0x4060.U) {
         // read key
         io.mmioTrap.valid := true.B
-        io.mmioTrap.cmd := 1.U
+        io.mmioTrap.cmd := 2.U
       }
       is (0x4100.U) {
         // read screen size
         io.mmioTrap.valid := true.B
-        io.mmioTrap.cmd := 2.U
+        io.mmioTrap.cmd := 3.U
       }
       is (0x4104.U) {
         // write vga sync
