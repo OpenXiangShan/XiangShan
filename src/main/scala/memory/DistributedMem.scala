@@ -18,7 +18,7 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
 
   val rwIdx = Index(io.rw.a.bits.addr)
   val roIdx = Index(io.ro.a.bits.addr)
-  val wen = io.rw.a.valid && io.rw.w.valid
+  val wen = io.rw.isWrite()
   val wdataVec = VecInit.tabulate(4) { i => io.rw.w.bits.data(8 * (i + 1) - 1, 8 * i) }
   val wmask = VecInit.tabulate(4) { i => io.rw.w.bits.mask(i).toBool }
 

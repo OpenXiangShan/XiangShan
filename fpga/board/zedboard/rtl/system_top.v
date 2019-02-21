@@ -25,9 +25,9 @@ module system_top (
   inout FIXED_IO_ps_srstb
 );
 
-  `axi_wire(AXI_MEM_MAPPED, 32, 1);
-  `axi_wire(AXI_MEM, 32, 1);
-  `axi_wire(AXI_MMIO, 32, 1);
+  `axi_wire(AXI_MEM_MAPPED, 32, 8);
+  `axi_wire(AXI_MEM, 32, 8);
+  `axi_wire(AXI_MMIO, 32, 8);
 
   wire coreclk;
   wire corerstn;

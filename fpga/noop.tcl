@@ -131,7 +131,6 @@ set bCheckIPsPassed 1
 set bCheckIPs 1
 if { $bCheckIPs == 1 } {
    set list_check_ips "\ 
-xilinx.com:ip:ahblite_axi_bridge:3.0\
 xilinx.com:ip:axi_clock_converter:2.1\
 xilinx.com:ip:axi_crossbar:2.1\
 xilinx.com:ip:util_vector_logic:2.0\
@@ -272,19 +271,19 @@ proc create_root_design { parentCell } {
      return 1
    }
   
-  # Create instance: ahblite_axi_bridge_0, and set properties
-  set ahblite_axi_bridge_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:ahblite_axi_bridge:3.0 ahblite_axi_bridge_0 ]
   set_property -dict [ list \
-   CONFIG.C_M_AXI_NON_SECURE {0} \
-   CONFIG.C_M_AXI_THREAD_ID_WIDTH {0} \
- ] $ahblite_axi_bridge_0
+   CONFIG.SUPPORTS_NARROW_BURST {1} \
+   CONFIG.NUM_READ_OUTSTANDING {2} \
+   CONFIG.NUM_WRITE_OUTSTANDING {2} \
+   CONFIG.MAX_BURST_LENGTH {256} \
+ ] [get_bd_intf_pins /NOOPFPGA_0/io_dmem]
 
-  # Create instance: ahblite_axi_bridge_1, and set properties
-  set ahblite_axi_bridge_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:ahblite_axi_bridge:3.0 ahblite_axi_bridge_1 ]
   set_property -dict [ list \
-   CONFIG.C_M_AXI_NON_SECURE {0} \
-   CONFIG.C_M_AXI_THREAD_ID_WIDTH {0} \
- ] $ahblite_axi_bridge_1
+   CONFIG.SUPPORTS_NARROW_BURST {1} \
+   CONFIG.NUM_READ_OUTSTANDING {2} \
+   CONFIG.NUM_WRITE_OUTSTANDING {2} \
+   CONFIG.MAX_BURST_LENGTH {256} \
+ ] [get_bd_intf_pins /NOOPFPGA_0/io_imem]
 
   # Create instance: axi_clock_converter_0, and set properties
   set axi_clock_converter_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_clock_converter:2.1 axi_clock_converter_0 ]
@@ -292,20 +291,12 @@ proc create_root_design { parentCell } {
   # Create instance: axi_crossbar_0, and set properties
   set axi_crossbar_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar:2.1 axi_crossbar_0 ]
   set_property -dict [ list \
-   CONFIG.M00_A00_ADDR_WIDTH {32} \
-   CONFIG.M00_A00_BASE_ADDR {0x0000000000000000} \
    CONFIG.NUM_MI {1} \
    CONFIG.NUM_SI {2} \
  ] $axi_crossbar_0
 
   # Create instance: axi_crossbar_1, and set properties
   set axi_crossbar_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar:2.1 axi_crossbar_1 ]
-  set_property -dict [ list \
-   CONFIG.M00_A00_ADDR_WIDTH {31} \
-   CONFIG.M00_A00_BASE_ADDR {0x0000000080000000} \
-   CONFIG.M01_A00_ADDR_WIDTH {30} \
-   CONFIG.M01_A00_BASE_ADDR {0x0000000040000000} \
- ] $axi_crossbar_1
 
   # Create instance: util_vector_logic_0, and set properties
   set util_vector_logic_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 util_vector_logic_0 ]
@@ -316,23 +307,29 @@ proc create_root_design { parentCell } {
  ] $util_vector_logic_0
 
   # Create interface connections
-  connect_bd_intf_net -intf_net NOOPFPGA_0_io_dmem [get_bd_intf_pins NOOPFPGA_0/io_dmem] [get_bd_intf_pins ahblite_axi_bridge_0/AHB_INTERFACE]
-  connect_bd_intf_net -intf_net NOOPFPGA_0_io_imem [get_bd_intf_pins NOOPFPGA_0/io_imem] [get_bd_intf_pins ahblite_axi_bridge_1/AHB_INTERFACE]
-  connect_bd_intf_net -intf_net ahblite_axi_bridge_0_M_AXI [get_bd_intf_pins ahblite_axi_bridge_0/M_AXI] [get_bd_intf_pins axi_crossbar_0/S00_AXI]
-  connect_bd_intf_net -intf_net ahblite_axi_bridge_1_M_AXI [get_bd_intf_pins ahblite_axi_bridge_1/M_AXI] [get_bd_intf_pins axi_crossbar_0/S01_AXI]
+  connect_bd_intf_net -intf_net NOOPFPGA_0_io_dmem [get_bd_intf_pins NOOPFPGA_0/io_dmem] [get_bd_intf_pins axi_crossbar_0/S00_AXI]
+  connect_bd_intf_net -intf_net NOOPFPGA_0_io_imem [get_bd_intf_pins NOOPFPGA_0/io_imem] [get_bd_intf_pins axi_crossbar_0/S01_AXI]
   connect_bd_intf_net -intf_net axi_clock_converter_0_M_AXI [get_bd_intf_pins axi_clock_converter_0/M_AXI] [get_bd_intf_pins axi_crossbar_1/S00_AXI]
   connect_bd_intf_net -intf_net axi_crossbar_0_M00_AXI [get_bd_intf_pins axi_clock_converter_0/S_AXI] [get_bd_intf_pins axi_crossbar_0/M00_AXI]
   connect_bd_intf_net -intf_net axi_crossbar_1_M00_AXI [get_bd_intf_ports AXI_MEM] [get_bd_intf_pins axi_crossbar_1/M00_AXI]
   connect_bd_intf_net -intf_net axi_crossbar_1_M01_AXI [get_bd_intf_ports AXI_MMIO] [get_bd_intf_pins axi_crossbar_1/M01_AXI]
 
   # Create port connections
-  connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPFPGA_0/clock] [get_bd_pins ahblite_axi_bridge_0/s_ahb_hclk] [get_bd_pins ahblite_axi_bridge_1/s_ahb_hclk] [get_bd_pins axi_clock_converter_0/s_axi_aclk] [get_bd_pins axi_crossbar_0/aclk]
+  connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPFPGA_0/clock] [get_bd_pins axi_clock_converter_0/s_axi_aclk] [get_bd_pins axi_crossbar_0/aclk]
   connect_bd_net -net uncoreclk_1 [get_bd_ports uncoreclk] [get_bd_pins axi_clock_converter_0/m_axi_aclk] [get_bd_pins axi_crossbar_1/aclk]
-  connect_bd_net -net uncorerstn_1 [get_bd_ports corerstn] [get_bd_pins ahblite_axi_bridge_0/s_ahb_hresetn] [get_bd_pins ahblite_axi_bridge_1/s_ahb_hresetn] [get_bd_pins axi_clock_converter_0/s_axi_aresetn] [get_bd_pins axi_crossbar_0/aresetn] [get_bd_pins util_vector_logic_0/Op1]
+  connect_bd_net -net uncorerstn_1 [get_bd_ports corerstn] [get_bd_pins axi_clock_converter_0/s_axi_aresetn] [get_bd_pins axi_crossbar_0/aresetn] [get_bd_pins util_vector_logic_0/Op1]
   connect_bd_net -net uncorerstn_2 [get_bd_ports uncorerstn] [get_bd_pins axi_clock_converter_0/m_axi_aresetn] [get_bd_pins axi_crossbar_1/aresetn]
   connect_bd_net -net util_vector_logic_0_Res [get_bd_pins NOOPFPGA_0/reset] [get_bd_pins util_vector_logic_0/Res]
 
   # Create address segments
+  create_bd_addr_seg -range 0x80000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
+  create_bd_addr_seg -range 0x80000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
+  create_bd_addr_seg -range 0x40000000 -offset 0x40000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MMIO/Reg] SEG_AXI_MMIO_Reg
+
+  # Exclude Address Segments
+  create_bd_addr_seg -range 0x00010000 -offset 0x44A10000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MMIO/Reg] SEG_AXI_MMIO_Reg
+  exclude_bd_addr_seg [get_bd_addr_segs NOOPFPGA_0/io_imem/SEG_AXI_MMIO_Reg]
+
 
 
   # Restore current instance
