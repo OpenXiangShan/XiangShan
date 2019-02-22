@@ -349,7 +349,7 @@ proc create_root_design { parentCell } {
   set rstn50 [ create_bd_port -dir O -from 0 -to 0 -type rst rstn50 ]
   set uncoreclk [ create_bd_port -dir O -type clk uncoreclk ]
   set_property -dict [ list \
-   CONFIG.ASSOCIATED_BUSIF {AXI_MEM:AXI_TEST_IN:AXI_TEST_OUT:AXI_MMIO} \
+   CONFIG.ASSOCIATED_BUSIF {AXI_MEM} \
  ] $uncoreclk
   set uncorerstn [ create_bd_port -dir O -from 0 -to 0 -type rst uncorerstn ]
 
