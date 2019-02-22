@@ -21,16 +21,18 @@ class AXI4Timer() extends Module {
   in.ar.ready := true.B
   in.aw.ready := true.B
   in.w.ready := true.B
-  in.b.valid := true.B
-  in.r.valid := true.B
+
+  // should deal with non-ready master
+  in.b.valid := RegNext(in.aw.fire())
+  in.r.valid := RegNext(in.ar.fire())
 
   in.r.bits.data := ms
-  in.r.bits.id := in.ar.bits.id
-  in.r.bits.user := in.ar.bits.user
+  in.r.bits.id := RegNext(in.ar.bits.id)
+  in.r.bits.user := RegNext(in.ar.bits.user)
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
   in.r.bits.last := true.B
-  in.b.bits.id := in.aw.bits.id
-  in.b.bits.user := in.aw.bits.user
+  in.b.bits.id := RegNext(in.aw.bits.id)
+  in.b.bits.user := RegNext(in.aw.bits.user)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 }
 
