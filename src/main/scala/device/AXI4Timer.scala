@@ -18,21 +18,33 @@ class AXI4Timer() extends Module {
   val tick = Counter(true.B, clk)._2
   val ms = Counter(tick, 0x40000000)._1
 
-  in.ar.ready := true.B
-  in.aw.ready := true.B
-  in.w.ready := true.B
+  // deal with non-rready master
+  val rInflight = RegInit(false.B)
+  when (in.ar.fire()) { rInflight := true.B }
+  when (in. r.fire()) { rInflight := false.B }
 
-  // should deal with non-ready master
-  in.b.valid := RegNext(in.aw.fire())
-  in.r.valid := RegNext(in.ar.fire())
-
+  val rId = RegEnable(in.ar.bits.id, in.ar.fire())
+  val rUser = RegEnable(in.ar.bits.user, in.ar.fire())
+  in.ar.ready := in.r.ready || !rInflight
+  in.r.valid := rInflight
+  in.r.bits.id := rId
+  in.r.bits.user := rUser
   in.r.bits.data := ms
-  in.r.bits.id := RegNext(in.ar.bits.id)
-  in.r.bits.user := RegNext(in.ar.bits.user)
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
   in.r.bits.last := true.B
-  in.b.bits.id := RegNext(in.aw.bits.id)
-  in.b.bits.user := RegNext(in.aw.bits.user)
+
+  // deal with non-bready master
+  val wInflight = RegInit(false.B)
+  when (in.aw.fire()) { wInflight := true.B }
+  when (in. b.fire()) { wInflight := false.B }
+
+  val bId = RegEnable(in.aw.bits.id, in.aw.fire())
+  val bUser = RegEnable(in.aw.bits.user, in.aw.fire())
+  in.aw.ready := in.w.valid && (in.b.ready || !wInflight)
+  in.w.ready := in.aw.valid && (in.b.ready || !wInflight)
+  in.b.valid := wInflight
+  in.b.bits.id := bId
+  in.b.bits.user := bUser
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 }
 
