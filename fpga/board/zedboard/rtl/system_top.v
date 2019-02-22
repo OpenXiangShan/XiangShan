@@ -27,12 +27,16 @@ module system_top (
 
   `axi_wire(AXI_MEM_MAPPED, 32, 8);
   `axi_wire(AXI_MEM, 32, 8);
-  `axi_wire(AXI_MMIO, 32, 8);
 
   wire coreclk;
   wire corerstn;
+  wire clk50;
+  wire rstn50;
   wire uncoreclk;
   wire uncorerstn;
+
+  wire noop_uart_tx;
+  wire noop_uart_rx;
 
   zynq_soc zynq_soc_i (
     .DDR_addr(DDR_addr),
@@ -58,12 +62,15 @@ module system_top (
     .FIXED_IO_ps_srstb(FIXED_IO_ps_srstb),
 
     `axi_connect_if(AXI_MEM, AXI_MEM_MAPPED),
-    `axi_connect_if(AXI_MMIO, AXI_MMIO),
 
-//    .led(led[6:0]),
+    // invert connection
+    .uart_txd(noop_uart_rx),
+    .uart_rxd(noop_uart_tx),
 
     .coreclk(coreclk),
     .corerstn(corerstn),
+    .clk50(clk50),
+    .rstn50(rstn50),
     .uncoreclk(uncoreclk),
     .uncorerstn(uncorerstn)
   );
@@ -75,12 +82,14 @@ module system_top (
 
   noop noop_i(
     `axi_connect_if(AXI_MEM, AXI_MEM),
-    `axi_connect_if(AXI_MMIO, AXI_MMIO),
 
-//    .led(led[7]),
+    .uart_txd(noop_uart_tx),
+    .uart_rxd(noop_uart_rx),
 
     .coreclk(coreclk),
     .corerstn(corerstn),
+    .clk50(clk50),
+    .rstn50(rstn50),
     .uncoreclk(uncoreclk),
     .uncorerstn(uncorerstn)
   );

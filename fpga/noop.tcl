@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# NOOPFPGA
+# NOOPFPGA, AXI4Timer
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -133,7 +133,10 @@ if { $bCheckIPs == 1 } {
    set list_check_ips "\ 
 xilinx.com:ip:axi_clock_converter:2.1\
 xilinx.com:ip:axi_crossbar:2.1\
+xilinx.com:ip:system_ila:1.1\
 xilinx.com:ip:util_vector_logic:2.0\
+xilinx.com:ip:axi_protocol_converter:2.1\
+xilinx.com:ip:axi_uartlite:2.0\
 "
 
    set list_ips_missing ""
@@ -160,6 +163,7 @@ set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
 NOOPFPGA\
+AXI4Timer\
 "
 
    set list_mods_missing ""
@@ -187,6 +191,108 @@ if { $bCheckIPsPassed != 1 } {
 # DESIGN PROCs
 ##################################################################
 
+
+# Hierarchical cell: hier_devices
+proc create_hier_cell_hier_devices { parentCell nameHier } {
+
+  variable script_folder
+
+  if { $parentCell eq "" || $nameHier eq "" } {
+     catch {common::send_msg_id "BD_TCL-102" "ERROR" "create_hier_cell_hier_devices() - Empty argument(s)!"}
+     return
+  }
+
+  # Get object for parentCell
+  set parentObj [get_bd_cells $parentCell]
+  if { $parentObj == "" } {
+     catch {common::send_msg_id "BD_TCL-100" "ERROR" "Unable to find parent cell <$parentCell>!"}
+     return
+  }
+
+  # Make sure parentObj is hier blk
+  set parentType [get_property TYPE $parentObj]
+  if { $parentType ne "hier" } {
+     catch {common::send_msg_id "BD_TCL-101" "ERROR" "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."}
+     return
+  }
+
+  # Save current instance; Restore later
+  set oldCurInst [current_bd_instance .]
+
+  # Set parent object as current
+  current_bd_instance $parentObj
+
+  # Create cell and set as current instance
+  set hier_obj [create_bd_cell -type hier $nameHier]
+  current_bd_instance $hier_obj
+
+  # Create interface pins
+  create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 uart
+
+  # Create pins
+  create_bd_pin -dir I -type clk clk50
+  create_bd_pin -dir I -type clk coreclk
+  create_bd_pin -dir I -type rst corerstn
+  create_bd_pin -dir I -type rst rstn50
+
+  # Create instance: AXI4Timer_0, and set properties
+  set block_name AXI4Timer
+  set block_cell_name AXI4Timer_0
+  if { [catch {set AXI4Timer_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $AXI4Timer_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
+  set_property -dict [ list \
+   CONFIG.NUM_READ_OUTSTANDING {2} \
+   CONFIG.NUM_WRITE_OUTSTANDING {2} \
+ ] [get_bd_intf_pins /hier_devices/AXI4Timer_0/io_in]
+
+  # Create instance: axi_clock_converter_1, and set properties
+  set axi_clock_converter_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_clock_converter:2.1 axi_clock_converter_1 ]
+
+  # Create instance: axi_crossbar_2, and set properties
+  set axi_crossbar_2 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar:2.1 axi_crossbar_2 ]
+
+  # Create instance: axi_protocol_converter_0, and set properties
+  set axi_protocol_converter_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_protocol_converter:2.1 axi_protocol_converter_0 ]
+
+  # Create instance: axi_uartlite_0, and set properties
+  set axi_uartlite_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_uartlite:2.0 axi_uartlite_0 ]
+  set_property -dict [ list \
+   CONFIG.C_BAUDRATE {115200} \
+ ] $axi_uartlite_0
+
+  # Create instance: util_vector_logic_0, and set properties
+  set util_vector_logic_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 util_vector_logic_0 ]
+  set_property -dict [ list \
+   CONFIG.C_OPERATION {not} \
+   CONFIG.C_SIZE {1} \
+   CONFIG.LOGO_FILE {data/sym_notgate.png} \
+ ] $util_vector_logic_0
+
+  # Create interface connections
+  connect_bd_intf_net -intf_net Conn1 [get_bd_intf_pins uart] [get_bd_intf_pins axi_uartlite_0/UART]
+  connect_bd_intf_net -intf_net S_AXI_1 [get_bd_intf_pins S_AXI] [get_bd_intf_pins axi_clock_converter_1/S_AXI]
+  connect_bd_intf_net -intf_net axi_clock_converter_1_M_AXI [get_bd_intf_pins axi_clock_converter_1/M_AXI] [get_bd_intf_pins axi_crossbar_2/S00_AXI]
+  connect_bd_intf_net -intf_net axi_crossbar_2_M00_AXI [get_bd_intf_pins AXI4Timer_0/io_in] [get_bd_intf_pins axi_crossbar_2/M00_AXI]
+  connect_bd_intf_net -intf_net axi_crossbar_2_M01_AXI [get_bd_intf_pins axi_crossbar_2/M01_AXI] [get_bd_intf_pins axi_protocol_converter_0/S_AXI]
+  connect_bd_intf_net -intf_net axi_protocol_converter_0_M_AXI [get_bd_intf_pins axi_protocol_converter_0/M_AXI] [get_bd_intf_pins axi_uartlite_0/S_AXI]
+
+  # Create port connections
+  connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Timer_0/clock] [get_bd_pins axi_clock_converter_1/m_axi_aclk] [get_bd_pins axi_crossbar_2/aclk] [get_bd_pins axi_protocol_converter_0/aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk]
+  connect_bd_net -net coreclk_1 [get_bd_pins coreclk] [get_bd_pins axi_clock_converter_1/s_axi_aclk]
+  connect_bd_net -net proc_sys_reset_0_interconnect_aresetn [get_bd_pins rstn50] [get_bd_pins axi_clock_converter_1/m_axi_aresetn] [get_bd_pins axi_crossbar_2/aresetn] [get_bd_pins axi_protocol_converter_0/aresetn] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins util_vector_logic_0/Op1]
+  connect_bd_net -net uncorerstn_1 [get_bd_pins corerstn] [get_bd_pins axi_clock_converter_1/s_axi_aresetn]
+  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins AXI4Timer_0/reset] [get_bd_pins util_vector_logic_0/Res]
+
+  # Restore current instance
+  current_bd_instance $oldCurInst
+}
 
 
 # Procedure to create entire design; Provide argument to make
@@ -232,18 +338,13 @@ proc create_root_design { parentCell } {
    CONFIG.PHASE {0.0} \
    CONFIG.PROTOCOL {AXI4} \
    ] $AXI_MEM
-  set AXI_MMIO [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 AXI_MMIO ]
-  set_property -dict [ list \
-   CONFIG.ADDR_WIDTH {32} \
-   CONFIG.CLK_DOMAIN {/clk_wiz_0_clk_out1} \
-   CONFIG.DATA_WIDTH {32} \
-   CONFIG.NUM_READ_OUTSTANDING {2} \
-   CONFIG.NUM_WRITE_OUTSTANDING {2} \
-   CONFIG.PHASE {0.0} \
-   CONFIG.PROTOCOL {AXI4} \
-   ] $AXI_MMIO
+  set uart [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 uart ]
 
   # Create ports
+  set clk50 [ create_bd_port -dir I -type clk clk50 ]
+  set_property -dict [ list \
+   CONFIG.FREQ_HZ {50000000} \
+ ] $clk50
   set coreclk [ create_bd_port -dir I -type clk coreclk ]
   set_property -dict [ list \
    CONFIG.FREQ_HZ {100000000} \
@@ -252,6 +353,7 @@ proc create_root_design { parentCell } {
   set_property -dict [ list \
    CONFIG.POLARITY {ACTIVE_LOW} \
  ] $corerstn
+  set rstn50 [ create_bd_port -dir I -type rst rstn50 ]
   set uncoreclk [ create_bd_port -dir I -type clk uncoreclk ]
   set_property -dict [ list \
    CONFIG.CLK_DOMAIN {/clk_wiz_0_clk_out1} \
@@ -290,13 +392,34 @@ proc create_root_design { parentCell } {
 
   # Create instance: axi_crossbar_0, and set properties
   set axi_crossbar_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar:2.1 axi_crossbar_0 ]
-  set_property -dict [ list \
-   CONFIG.NUM_MI {1} \
-   CONFIG.NUM_SI {2} \
- ] $axi_crossbar_0
 
   # Create instance: axi_crossbar_1, and set properties
   set axi_crossbar_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar:2.1 axi_crossbar_1 ]
+  set_property -dict [ list \
+   CONFIG.NUM_MI {1} \
+   CONFIG.NUM_SI {2} \
+   CONFIG.S01_BASE_ID {0x00000002} \
+   CONFIG.S02_BASE_ID {0x00000004} \
+   CONFIG.S03_BASE_ID {0x00000006} \
+   CONFIG.S04_BASE_ID {0x00000008} \
+   CONFIG.S05_BASE_ID {0x0000000a} \
+   CONFIG.S06_BASE_ID {0x0000000c} \
+   CONFIG.S07_BASE_ID {0x0000000e} \
+   CONFIG.S08_BASE_ID {0x00000010} \
+   CONFIG.S09_BASE_ID {0x00000012} \
+   CONFIG.S10_BASE_ID {0x00000014} \
+   CONFIG.S11_BASE_ID {0x00000016} \
+   CONFIG.S12_BASE_ID {0x00000018} \
+   CONFIG.S13_BASE_ID {0x0000001a} \
+   CONFIG.S14_BASE_ID {0x0000001c} \
+   CONFIG.S15_BASE_ID {0x0000001e} \
+ ] $axi_crossbar_1
+
+  # Create instance: hier_devices
+  create_hier_cell_hier_devices [current_bd_instance .] hier_devices
+
+  # Create instance: system_ila_0, and set properties
+  set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
 
   # Create instance: util_vector_logic_0, and set properties
   set util_vector_logic_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 util_vector_logic_0 ]
@@ -308,28 +431,28 @@ proc create_root_design { parentCell } {
 
   # Create interface connections
   connect_bd_intf_net -intf_net NOOPFPGA_0_io_dmem [get_bd_intf_pins NOOPFPGA_0/io_dmem] [get_bd_intf_pins axi_crossbar_0/S00_AXI]
-  connect_bd_intf_net -intf_net NOOPFPGA_0_io_imem [get_bd_intf_pins NOOPFPGA_0/io_imem] [get_bd_intf_pins axi_crossbar_0/S01_AXI]
-  connect_bd_intf_net -intf_net axi_clock_converter_0_M_AXI [get_bd_intf_pins axi_clock_converter_0/M_AXI] [get_bd_intf_pins axi_crossbar_1/S00_AXI]
-  connect_bd_intf_net -intf_net axi_crossbar_0_M00_AXI [get_bd_intf_pins axi_clock_converter_0/S_AXI] [get_bd_intf_pins axi_crossbar_0/M00_AXI]
-  connect_bd_intf_net -intf_net axi_crossbar_1_M00_AXI [get_bd_intf_ports AXI_MEM] [get_bd_intf_pins axi_crossbar_1/M00_AXI]
-  connect_bd_intf_net -intf_net axi_crossbar_1_M01_AXI [get_bd_intf_ports AXI_MMIO] [get_bd_intf_pins axi_crossbar_1/M01_AXI]
+  connect_bd_intf_net -intf_net NOOPFPGA_0_io_imem [get_bd_intf_pins NOOPFPGA_0/io_imem] [get_bd_intf_pins axi_crossbar_1/S01_AXI]
+  connect_bd_intf_net -intf_net axi_clock_converter_0_M_AXI [get_bd_intf_ports AXI_MEM] [get_bd_intf_pins axi_clock_converter_0/M_AXI]
+connect_bd_intf_net -intf_net [get_bd_intf_nets axi_clock_converter_0_M_AXI] [get_bd_intf_ports AXI_MEM] [get_bd_intf_pins system_ila_0/SLOT_0_AXI]
+  connect_bd_intf_net -intf_net axi_crossbar_1_M00_AXI [get_bd_intf_pins axi_clock_converter_0/S_AXI] [get_bd_intf_pins axi_crossbar_1/M00_AXI]
+  connect_bd_intf_net -intf_net axi_crossbar_2_M00_AXI [get_bd_intf_pins axi_crossbar_0/M00_AXI] [get_bd_intf_pins hier_devices/S_AXI]
+  connect_bd_intf_net -intf_net axi_crossbar_2_M01_AXI [get_bd_intf_pins axi_crossbar_0/M01_AXI] [get_bd_intf_pins axi_crossbar_1/S00_AXI]
+  connect_bd_intf_net -intf_net hier_devices_uart [get_bd_intf_ports uart] [get_bd_intf_pins hier_devices/uart]
 
   # Create port connections
-  connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPFPGA_0/clock] [get_bd_pins axi_clock_converter_0/s_axi_aclk] [get_bd_pins axi_crossbar_0/aclk]
-  connect_bd_net -net uncoreclk_1 [get_bd_ports uncoreclk] [get_bd_pins axi_clock_converter_0/m_axi_aclk] [get_bd_pins axi_crossbar_1/aclk]
-  connect_bd_net -net uncorerstn_1 [get_bd_ports corerstn] [get_bd_pins axi_clock_converter_0/s_axi_aresetn] [get_bd_pins axi_crossbar_0/aresetn] [get_bd_pins util_vector_logic_0/Op1]
-  connect_bd_net -net uncorerstn_2 [get_bd_ports uncorerstn] [get_bd_pins axi_clock_converter_0/m_axi_aresetn] [get_bd_pins axi_crossbar_1/aresetn]
+  connect_bd_net -net clk50_1 [get_bd_ports clk50] [get_bd_pins hier_devices/clk50]
+  connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPFPGA_0/clock] [get_bd_pins axi_clock_converter_0/s_axi_aclk] [get_bd_pins axi_crossbar_0/aclk] [get_bd_pins axi_crossbar_1/aclk] [get_bd_pins hier_devices/coreclk]
+  connect_bd_net -net rstn50_1 [get_bd_ports rstn50] [get_bd_pins hier_devices/rstn50]
+  connect_bd_net -net uncoreclk_1 [get_bd_ports uncoreclk] [get_bd_pins axi_clock_converter_0/m_axi_aclk] [get_bd_pins system_ila_0/clk]
+  connect_bd_net -net uncorerstn_1 [get_bd_ports corerstn] [get_bd_pins axi_clock_converter_0/s_axi_aresetn] [get_bd_pins axi_crossbar_0/aresetn] [get_bd_pins axi_crossbar_1/aresetn] [get_bd_pins hier_devices/corerstn] [get_bd_pins util_vector_logic_0/Op1]
+  connect_bd_net -net uncorerstn_2 [get_bd_ports uncorerstn] [get_bd_pins axi_clock_converter_0/m_axi_aresetn] [get_bd_pins system_ila_0/resetn]
   connect_bd_net -net util_vector_logic_0_Res [get_bd_pins NOOPFPGA_0/reset] [get_bd_pins util_vector_logic_0/Res]
 
   # Create address segments
-  create_bd_addr_seg -range 0x80000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
-  create_bd_addr_seg -range 0x80000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
-  create_bd_addr_seg -range 0x40000000 -offset 0x40000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MMIO/Reg] SEG_AXI_MMIO_Reg
-
-  # Exclude Address Segments
-  create_bd_addr_seg -range 0x00010000 -offset 0x44A10000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MMIO/Reg] SEG_AXI_MMIO_Reg
-  exclude_bd_addr_seg [get_bd_addr_segs NOOPFPGA_0/io_imem/SEG_AXI_MMIO_Reg]
-
+  create_bd_addr_seg -range 0x00001000 -offset 0x40700000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs hier_devices/AXI4Timer_0/io_in/reg0] SEG_AXI4Timer_0_reg0
+  create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
+  create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
+  create_bd_addr_seg -range 0x00010000 -offset 0x40600000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs hier_devices/axi_uartlite_0/S_AXI/Reg] SEG_axi_uartlite_0_Reg
 
 
   # Restore current instance
