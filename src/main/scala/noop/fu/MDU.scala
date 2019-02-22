@@ -34,6 +34,8 @@ object MDUInstr extends HasDecodeConst {
 
 class MDU extends HasMDUOpType {
   def access(src1: UInt, src2: UInt, func: UInt): UInt = {
+    0.U
+    /*
     val mulRes = (src1.asSInt * src2.asSInt).asUInt
     LookupTree(func, 0.U, List(
       MduMul  -> mulRes(31, 0),
@@ -43,5 +45,6 @@ class MDU extends HasMDUOpType {
       MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
       MduRemu -> (src1  %  src2)
     ))
+    */
   }
 }

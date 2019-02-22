@@ -85,7 +85,7 @@ class CSR extends HasCSROpType with HasCSRConst {
     rdata
   }
 
-  def jmp(isCsr: Bool, addr: UInt, pc: UInt, cmd: UInt): BranchIO = {
+  def jmp(isCsr: Bool, addr: UInt, pc: UInt, cmd: UInt, isException: Bool, exceptionNO: UInt): BranchIO = {
     val csrjmp = Wire(new BranchIO)
     csrjmp.isTaken := isCsr && cmd === CsrJmp
     csrjmp.target := LookupTree(addr, 0.U, List(
@@ -93,9 +93,10 @@ class CSR extends HasCSROpType with HasCSRConst {
       privMret  -> mepc
     ))
 
-    when (csrjmp.isTaken && addr === privEcall) {
+    val isEcall = (addr === privEcall)
+    when (csrjmp.isTaken && (isEcall || isException)) {
       mepc := pc
-      mcause := 11.U
+      mcause := Mux(isException, exceptionNO, 11.U)
     }
     csrjmp
   }
