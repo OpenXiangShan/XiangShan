@@ -32,12 +32,13 @@ class ISU extends Module with HasSrcType {
     o.fuOpType := i.fuOpType
     o.rfWen := i.rfWen
     o.rfDest := i.rfDest
+    o.isInvOpcode := i.isInvOpcode
   }
   io.out.bits.pc := io.in.bits.pc
   io.out.valid := io.in.valid
 
-  io.trap := Mux(io.in.bits.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
+  io.trap := //Mux(io.in.bits.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
               Mux(io.in.bits.ctrl.isNoopTrap,
                 Mux(rs1Data === 0.U, NOOPTrap.StateGoodTrap, NOOPTrap.StateBadTrap),
-                NOOPTrap.StateRunning))
+                NOOPTrap.StateRunning) //)
 }

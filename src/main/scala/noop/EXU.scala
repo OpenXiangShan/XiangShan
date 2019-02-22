@@ -42,7 +42,10 @@ class EXU extends Module with HasFuType {
 
   val csr = new CSR
   val csrOut = csr.access(isCsr = fuType === FuCsr, addr = src2(11, 0), src = src1, cmd = fuOpType)
-  val exceptionJmp = csr.jmp(isCsr = fuType === FuCsr, addr = src2(11, 0), pc = io.in.bits.pc, cmd = fuOpType)
+  val isException = (io.in.bits.ctrl.isInvOpcode)
+  val exceptionNO = Mux(io.in.bits.ctrl.isInvOpcode, 2.U, 0.U)
+  val exceptionJmp = csr.jmp(isCsr = fuType === FuCsr, addr = src2(11, 0),
+    pc = io.in.bits.pc, cmd = fuOpType, isException = isException, exceptionNO = exceptionNO)
 
   io.out.bits.data := DontCare
   io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
