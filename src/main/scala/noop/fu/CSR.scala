@@ -41,7 +41,26 @@ trait HasCSRConst {
   def privMret  = 0x302.U
 }
 
-class CSR extends HasCSROpType with HasCSRConst {
+class CSRIO extends FunctionUnitIO {
+  val pc = Input(UInt(32.W))
+  val isException = Input(Bool())
+  val exceptionNO = Input(UInt(4.W))
+  val csrjmp = new BranchIO
+  val instrCommit = Input(Bool())
+}
+
+class CSR extends Module with HasCSROpType with HasCSRConst {
+  val io = IO(new CSRIO)
+
+  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+    this.valid := valid
+    this.src1 := src1
+    this.src2 := src2
+    this.func := func
+    io.out.bits
+  }
+
   val mtvec = Reg(UInt(32.W))
   val mcause = Reg(UInt(32.W))
   val mstatus = Reg(UInt(32.W))
@@ -67,44 +86,38 @@ class CSR extends HasCSROpType with HasCSRConst {
     scalaMapping.filter { case (x, y) => x == addr } (0)._2
   }
 
-  def access(isCsr: Bool, addr: UInt, src: UInt, cmd: UInt): UInt = {
-    val rdata = LookupTree(addr, 0.U, chiselMapping)
-    val wdata = LookupTree(cmd, 0.U, List(
-      CsrWrt -> src,
-      CsrSet -> (rdata | src),
-      CsrClr -> (rdata & ~src)
-    ))
+  val addr = src2(11, 0)
+  val rdata = LookupTree(addr, 0.U, chiselMapping)
+  val wdata = LookupTree(func, 0.U, List(
+    CsrWrt -> src1,
+    CsrSet -> (rdata | src1),
+    CsrClr -> (rdata & ~src1)
+  ))
 
-    when (isCsr && cmd =/= CsrJmp) {
-      when (addr === Mtvec.U) { mtvec := wdata }
-      when (addr === Mstatus.U) { mstatus := wdata }
-      when (addr === Mepc.U) { mepc := wdata }
-      when (addr === Mcause.U) { mcause := wdata }
-    }
-
-    rdata
+  when (valid && func =/= CsrJmp) {
+    when (addr === Mtvec.U) { mtvec := wdata }
+    when (addr === Mstatus.U) { mstatus := wdata }
+    when (addr === Mepc.U) { mepc := wdata }
+    when (addr === Mcause.U) { mcause := wdata }
   }
 
-  def jmp(isCsr: Bool, addr: UInt, pc: UInt, cmd: UInt, isException: Bool, exceptionNO: UInt): BranchIO = {
-    val csrjmp = Wire(new BranchIO)
-    csrjmp.isTaken := isCsr && cmd === CsrJmp
-    csrjmp.target := LookupTree(addr, 0.U, List(
-      privEcall -> mtvec,
-      privMret  -> mepc
-    ))
+  io.out.bits := rdata
 
-    val isEcall = (addr === privEcall)
-    when (csrjmp.isTaken && (isEcall || isException)) {
-      mepc := pc
-      mcause := Mux(isException, exceptionNO, 11.U)
-    }
-    csrjmp
+  io.csrjmp.isTaken := valid && func === CsrJmp
+  io.csrjmp.target := LookupTree(addr, 0.U, List(
+    privEcall -> mtvec,
+    privMret  -> mepc
+  ))
+
+  val isEcall = (addr === privEcall)
+  when (io.csrjmp.isTaken && (isEcall || io.isException)) {
+    mepc := io.pc
+    mcause := Mux(io.isException, io.exceptionNO, 11.U)
   }
 
   mcycle := mcycle + 1.U
-  def instrCnt(instrCommit: Bool) {
-    when (instrCommit) {
-      minstret := minstret + 1.U
-    }
-  }
+  when (io.instrCommit) { minstret := minstret + 1.U }
+
+  io.in.ready := true.B
+  io.out.valid := valid
 }

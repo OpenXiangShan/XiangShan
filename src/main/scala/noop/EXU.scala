@@ -34,7 +34,7 @@ class EXU extends Module with HasFuType {
   alu.io.out.ready := true.B
 
   val bru = Module(new BRU)
-  val bruOut = bru.access(valid = fuType === FuBru, src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
+  val bruOut = bru.access(valid = (fuType === FuBru), src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := src2
   bru.io.out.ready := true.B
@@ -48,12 +48,12 @@ class EXU extends Module with HasFuType {
   val mduOut = mdu.access(valid = (fuType === FuMdu), src1 = src1, src2 = src2, func = fuOpType)
   mdu.io.out.ready := true.B
 
-  val csr = new CSR
-  val csrOut = csr.access(isCsr = fuType === FuCsr, addr = src2(11, 0), src = src1, cmd = fuOpType)
-  val isException = (io.in.bits.ctrl.isInvOpcode)
-  val exceptionNO = Mux(io.in.bits.ctrl.isInvOpcode, 2.U, 0.U)
-  val exceptionJmp = csr.jmp(isCsr = fuType === FuCsr, addr = src2(11, 0),
-    pc = io.in.bits.pc, cmd = fuOpType, isException = isException, exceptionNO = exceptionNO)
+  val csr = Module(new CSR)
+  val csrOut = csr.access(valid = (fuType === FuCsr), src1 = src1, src2 = src2, func = fuOpType)
+  csr.io.pc := io.in.bits.pc
+  csr.io.isException := (io.in.bits.ctrl.isInvOpcode)
+  csr.io.exceptionNO := Mux(io.in.bits.ctrl.isInvOpcode, 2.U, 0.U)
+  csr.io.out.ready := true.B
 
   io.out.bits.data := DontCare
   io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
@@ -64,7 +64,7 @@ class EXU extends Module with HasFuType {
     FuMdu -> mduOut
   ))
 
-  when (exceptionJmp.isTaken) { io.br <> exceptionJmp }
+  when (csr.io.csrjmp.isTaken) { io.br <> csr.io.csrjmp }
   .otherwise { io.br <> bru.io.branch }
 
   io.out.bits.ctrl := DontCare
@@ -75,5 +75,5 @@ class EXU extends Module with HasFuType {
   io.out.bits.pc := io.in.bits.pc
   io.out.valid := io.in.valid && ((fuType =/= FuLsu) || lsuResultValid)
 
-  csr.instrCnt(io.csrCtrl.instrCommit)
+  csr.io.instrCommit := io.csrCtrl.instrCommit
 }
