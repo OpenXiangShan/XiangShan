@@ -28,7 +28,10 @@ class EXU extends Module with HasFuType {
 
   val (src1, src2, fuType, fuOpType) = (io.in.bits.data.src1, io.in.bits.data.src2,
     io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
-  val aluOut = (new ALU).access(src1 = src1, src2 = src2, func = fuOpType)
+
+  val alu = Module(new ALU)
+  val aluOut = alu.access(valid = (fuType === FuAlu), src1 = src1, src2 = src2, func = fuOpType)
+  alu.io.out.ready := true.B
 
   val bruOut = (new BRU).access(isBru = fuType === FuBru, pc = io.in.bits.pc, offset = src2,
     src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)

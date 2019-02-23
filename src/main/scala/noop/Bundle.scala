@@ -44,3 +44,13 @@ class BranchIO extends Bundle {
   val isTaken = Output(Bool())
   val target = Output(UInt(32.W))
 }
+
+class FunctionUnitIO(extra: Option[Bundle] = null) extends Bundle with HasDecodeConst {
+  val in = Flipped(Decoupled(new Bundle {
+    val src1 = Output(UInt(32.W))
+    val src2 = Output(UInt(32.W))
+    val func = Output(UInt(FuOpTypeWidth))
+//    val extra
+  }))
+  val out = Decoupled(Output(UInt(32.W)))
+}
