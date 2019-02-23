@@ -40,20 +40,37 @@ object BRUInstr extends HasDecodeConst {
   )
 }
 
-class BRU extends HasBRUOpType {
-  def access(isBru: Bool, pc: UInt, offset: UInt, src1: UInt, src2: UInt, func: UInt): BranchIO = {
-    val branch = Wire(new BranchIO)
-    branch.target := Mux(func === BruJalr, src1 + offset, pc + offset)
-    branch.isTaken := isBru && LookupTree(func, false.B, List(
-      BruBeq  -> (src1 === src2),
-      BruBne  -> (src1 =/= src2),
-      BruBlt  -> (src1.asSInt  <  src2.asSInt),
-      BruBge  -> (src1.asSInt >=  src2.asSInt),
-      BruBltu -> (src1  <  src2),
-      BruBgeu -> (src1  >= src2),
-      BruJal  -> true.B,
-      BruJalr -> true.B
-    ))
-    branch
+class BRUIO extends FunctionUnitIO {
+  val pc = Input(UInt(32.W))
+  val offset = Input(UInt(32.W))
+  val branch = new BranchIO
+}
+
+class BRU extends Module with HasBRUOpType {
+  val io = IO(new BRUIO)
+
+  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+    this.valid := valid
+    this.src1 := src1
+    this.src2 := src2
+    this.func := func
+    io.out.bits
   }
+
+  io.branch.target := Mux(func === BruJalr, src1, io.pc) + io.offset
+  io.branch.isTaken := valid && LookupTree(func, false.B, List(
+    BruBeq  -> (src1 === src2),
+    BruBne  -> (src1 =/= src2),
+    BruBlt  -> (src1.asSInt  <  src2.asSInt),
+    BruBge  -> (src1.asSInt >=  src2.asSInt),
+    BruBltu -> (src1  <  src2),
+    BruBgeu -> (src1  >= src2),
+    BruJal  -> true.B,
+    BruJalr -> true.B
+  ))
+  io.out.bits := io.pc + 4.U
+
+  io.in.ready := true.B
+  io.out.valid := valid
 }

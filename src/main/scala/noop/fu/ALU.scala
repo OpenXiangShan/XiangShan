@@ -74,15 +74,15 @@ object ALUInstr extends HasDecodeConst {
 class ALU extends Module with HasALUOpType {
   val io = IO(new FunctionUnitIO)
 
+  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
-    io.in.valid := valid
-    io.in.bits.src1 := src1
-    io.in.bits.src2 := src2
-    io.in.bits.func := func
+    this.valid := valid
+    this.src1 := src1
+    this.src2 := src2
+    this.func := func
     io.out.bits
   }
 
-  val (src1, src2, func) = (io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   val shamt = src2(4, 0)
   io.out.bits := LookupTree(func, 0.U, List(
     AluAdd  -> (src1  +  src2),
@@ -99,5 +99,5 @@ class ALU extends Module with HasALUOpType {
   ))
 
   io.in.ready := true.B
-  io.out.valid := io.in.valid
+  io.out.valid := valid
 }
