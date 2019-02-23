@@ -44,7 +44,9 @@ class EXU extends Module with HasFuType {
     func = fuOpType, wdata = io.in.bits.data.dest)
   io.dmem <> dmem
 
-  val mduOut = (new MDU).access(src1 = src1, src2 = src2, func = fuOpType)
+  val mdu = Module(new MDU)
+  val mduOut = mdu.access(valid = (fuType === FuMdu), src1 = src1, src2 = src2, func = fuOpType)
+  mdu.io.out.ready := true.B
 
   val csr = new CSR
   val csrOut = csr.access(isCsr = fuType === FuCsr, addr = src2(11, 0), src = src1, cmd = fuOpType)
