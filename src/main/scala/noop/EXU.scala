@@ -39,10 +39,11 @@ class EXU extends Module with HasFuType {
   bru.io.offset := src2
   bru.io.out.ready := true.B
 
-  val lsu = new LSU
-  val (dmem, lsuResultValid) = lsu.access(isLsu = fuType === FuLsu, base = src1, offset = src2,
-    func = fuOpType, wdata = io.in.bits.data.dest)
-  io.dmem <> dmem
+  val lsu = Module(new LSU)
+  val lsuOut = lsu.access(valid = (fuType === FuLsu), src1 = src1, src2 = src2, func = fuOpType)
+  lsu.io.wdata := io.in.bits.data.dest
+  io.dmem <> lsu.io.dmem
+  lsu.io.out.ready := true.B
 
   val mdu = Module(new MDU)
   val mduOut = mdu.access(valid = (fuType === FuMdu), src1 = src1, src2 = src2, func = fuOpType)
@@ -59,7 +60,7 @@ class EXU extends Module with HasFuType {
   io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
     FuBru -> bruOut,
-    FuLsu -> lsu.rdataExt(io.dmem.r.bits.data, io.dmem.a.bits.addr, fuOpType),
+    FuLsu -> lsuOut,
     FuCsr -> csrOut,
     FuMdu -> mduOut
   ))
@@ -73,7 +74,7 @@ class EXU extends Module with HasFuType {
     o.rfDest := i.rfDest
   }
   io.out.bits.pc := io.in.bits.pc
-  io.out.valid := io.in.valid && ((fuType =/= FuLsu) || lsuResultValid)
+  io.out.valid := io.in.valid && ((fuType =/= FuLsu) || lsu.io.out.valid)
 
   csr.io.instrCommit := io.csrCtrl.instrCommit
 }
