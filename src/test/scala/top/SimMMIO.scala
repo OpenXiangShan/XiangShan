@@ -39,7 +39,7 @@ class SimMMIO extends Module {
         io.mmioTrap.cmd := 6.U
         when (wen) { printf("%c", wdataVec(0)) }
       }
-      is (0x4048.U) {
+      is (0x40700000.U) {
         // read RTC
         io.mmioTrap.valid := true.B
         io.mmioTrap.cmd := 1.U
