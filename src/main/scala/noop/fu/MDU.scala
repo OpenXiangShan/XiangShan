@@ -24,11 +24,11 @@ object MDUInstr extends HasDecodeConst {
 
   val table = Array(
     MUL            -> List(InstrR, FuMdu, MduMul),
-    MULH           -> List(InstrR, FuMdu, MduMulh),
-    DIV            -> List(InstrR, FuMdu, MduDiv),
-    DIVU           -> List(InstrR, FuMdu, MduDivu),
-    REM            -> List(InstrR, FuMdu, MduRem),
-    REMU           -> List(InstrR, FuMdu, MduRemu)
+    MULH           -> List(InstrR, FuMdu, MduMulh)
+    //DIV            -> List(InstrR, FuMdu, MduDiv),
+    //DIVU           -> List(InstrR, FuMdu, MduDivu),
+    //REM            -> List(InstrR, FuMdu, MduRem),
+    //REMU           -> List(InstrR, FuMdu, MduRemu)
   )
 }
 
@@ -45,15 +45,20 @@ class MDU extends Module with HasMDUOpType {
   }
 
   val mulRes = (src1.asSInt * src2.asSInt).asUInt
+  val mulPipeOut = Pipe(io.in.fire(), mulRes, 4)
   io.out.bits := LookupTree(func, 0.U, List(
-    MduMul  -> mulRes(31, 0),
-    MduMulh -> mulRes(63, 32),
-    MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
-    MduDivu -> (src1  /  src2),
-    MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
-    MduRemu -> (src1  %  src2)
+    MduMul  -> mulPipeOut.bits(31, 0),
+    MduMulh -> mulPipeOut.bits(63, 32)
+    //MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
+    //MduDivu -> (src1  /  src2),
+    //MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
+    //MduRemu -> (src1  %  src2)
   ))
 
-  io.in.ready := true.B
-  io.out.valid := valid
+  val busy = RegInit(false.B)
+  when (io.in.valid && !busy) { busy := true.B }
+  when (mulPipeOut.valid) { busy := false.B }
+
+  io.in.ready := !busy
+  io.out.valid := mulPipeOut.valid
 }
