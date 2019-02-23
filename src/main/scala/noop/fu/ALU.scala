@@ -71,21 +71,33 @@ object ALUInstr extends HasDecodeConst {
   )
 }
 
-class ALU extends HasALUOpType {
-  def access(src1: UInt, src2: UInt, func: UInt): UInt = {
-    val shamt = src2(4, 0)
-    LookupTree(func, 0.U, List(
-      AluAdd  -> (src1  +  src2),
-      AluSll  -> ((src1  << shamt)(31, 0)),
-      AluSlt  -> ((src1.asSInt < src2.asSInt).asUInt),
-      AluSltu -> ((src1 < src2).asUInt),
-      AluXor  -> (src1  ^  src2),
-      AluSrl  -> (src1  >> shamt),
-      AluOr   -> (src1  |  src2),
-      AluAnd  -> (src1  &  src2),
-      AluSub  -> (src1  -  src2),
-      AluLui  -> src2,
-      AluSra  -> ((src1.asSInt >> shamt).asUInt)
-    ))
+class ALU extends Module with HasALUOpType {
+  val io = IO(new FunctionUnitIO)
+
+  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+    this.valid := valid
+    this.src1 := src1
+    this.src2 := src2
+    this.func := func
+    io.out.bits
   }
+
+  val shamt = src2(4, 0)
+  io.out.bits := LookupTree(func, 0.U, List(
+    AluAdd  -> (src1  +  src2),
+    AluSll  -> ((src1  << shamt)(31, 0)),
+    AluSlt  -> ((src1.asSInt < src2.asSInt).asUInt),
+    AluSltu -> ((src1 < src2).asUInt),
+    AluXor  -> (src1  ^  src2),
+    AluSrl  -> (src1  >> shamt),
+    AluOr   -> (src1  |  src2),
+    AluAnd  -> (src1  &  src2),
+    AluSub  -> (src1  -  src2),
+    AluLui  -> src2,
+    AluSra  -> ((src1.asSInt >> shamt).asUInt)
+  ))
+
+  io.in.ready := true.B
+  io.out.valid := valid
 }

@@ -32,19 +32,28 @@ object MDUInstr extends HasDecodeConst {
   )
 }
 
-class MDU extends HasMDUOpType {
-  def access(src1: UInt, src2: UInt, func: UInt): UInt = {
-    0.U
-    /*
-    val mulRes = (src1.asSInt * src2.asSInt).asUInt
-    LookupTree(func, 0.U, List(
-      MduMul  -> mulRes(31, 0),
-      MduMulh -> mulRes(63, 32),
-      MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
-      MduDivu -> (src1  /  src2),
-      MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
-      MduRemu -> (src1  %  src2)
-    ))
-    */
+class MDU extends Module with HasMDUOpType {
+  val io = IO(new FunctionUnitIO)
+
+  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+    this.valid := valid
+    this.src1 := src1
+    this.src2 := src2
+    this.func := func
+    io.out.bits
   }
+
+  val mulRes = (src1.asSInt * src2.asSInt).asUInt
+  io.out.bits := LookupTree(func, 0.U, List(
+    MduMul  -> mulRes(31, 0),
+    MduMulh -> mulRes(63, 32),
+    MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
+    MduDivu -> (src1  /  src2),
+    MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
+    MduRemu -> (src1  %  src2)
+  ))
+
+  io.in.ready := true.B
+  io.out.valid := valid
 }
