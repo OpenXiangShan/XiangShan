@@ -50,6 +50,11 @@ class CSRIO extends FunctionUnitIO {
   val isInvOpcode = Input(Bool())
   // perfcnt
   val instrCommit = Input(Bool())
+
+  val sim = new Bundle {
+    val cycleCnt = Output(UInt(32.W))
+    val instrCnt = Output(UInt(32.W))
+  }
 }
 
 class CSR extends Module with HasCSROpType with HasCSRConst {
@@ -127,4 +132,7 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
 
   io.in.ready := true.B
   io.out.valid := valid
+
+  io.sim.cycleCnt := readWithScala(Mcycle)
+  io.sim.instrCnt := readWithScala(Minstret)
 }
