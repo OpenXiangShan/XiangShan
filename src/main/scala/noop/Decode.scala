@@ -52,10 +52,10 @@ trait HasFuType
 
 trait HasDecodeConst extends HasInstrType with HasSrcType with HasFuType
 
-object Instructions extends HasDecodeConst {
+object Instructions extends HasDecodeConst with NOOPConfig {
   def NOP = 0x00000013.U
   val DecodeDefault = List(InstrN, FuCsr, CsrJmp)
   val DecodeTable = ALUInstr.table ++ BRUInstr.table ++ LSUInstr.table ++
-                    MDUInstr.table ++ CSRInstr.table ++ NOOPTrap.table
-                    //CSRInstr.table ++ NOOPTrap.table
+                    (if (HasMExtension) MDUInstr.table else Nil) ++
+                    CSRInstr.table ++ NOOPTrap.table
 }

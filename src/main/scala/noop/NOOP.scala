@@ -4,10 +4,10 @@ import chisel3._
 import chisel3.util._
 
 import memory.MemIO
-import gpu.GPU
 
 trait NOOPConfig {
-  val HasGPU = false
+  val HasIcache = true
+  val HasMExtension = true
 }
 
 class NOOP extends Module with NOOPConfig {
@@ -15,9 +15,6 @@ class NOOP extends Module with NOOPConfig {
     val imem = new MemIO
     val dmem = new MemIO
     val trap = Output(UInt(2.W))
-
-    val gpuStart = Input(Bool())
-    val gmem = new MemIO(256)
   })
 
   val ifu = Module(new IFU)
@@ -26,7 +23,15 @@ class NOOP extends Module with NOOPConfig {
   val exu = Module(new EXU)
   val wbu = Module(new WBU)
 
-  io.imem <> ifu.io.imem
+  if (HasIcache) {
+    val icache = Module(new ICache)
+    icache.io.in <> ifu.io.imem
+    io.imem <> icache.io.out
+  }
+  else {
+    io.imem <> ifu.io.imem
+  }
+
   idu.io.in <> ifu.io.out
   isu.io.in <> idu.io.out
   exu.io.in <> isu.io.out
@@ -40,13 +45,4 @@ class NOOP extends Module with NOOPConfig {
   exu.io.csrCtrl.instrCommit := wbu.io.writeback
 
   io.trap := isu.io.trap
-
-  if (HasGPU) {
-    val gpu = Module(new GPU)
-    gpu.io.start := io.gpuStart
-    io.gmem <> gpu.io.out
-  }
-  else {
-    io.gmem := DontCare
-  }
 }

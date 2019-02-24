@@ -34,9 +34,9 @@ object MDUInstr extends HasDecodeConst {
   )
 }
 
-class MDU extends Module with HasMDUOpType {
+class MDU extends Module with HasMDUOpType with NOOPConfig {
   val io = IO(new FunctionUnitIO)
-  val mulLatency = 4
+  val mulLatency = if (HasMExtension) 4 else 0
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
@@ -49,14 +49,14 @@ class MDU extends Module with HasMDUOpType {
 
   val mulRes = (src1.asSInt * src2.asSInt).asUInt
   val mulPipeOut = Pipe(io.in.fire(), mulRes, mulLatency)
-  io.out.bits := LookupTree(func, 0.U, List(
+  io.out.bits := (if (!HasMExtension) 0.U else LookupTree(func, 0.U, List(
     MduMul  -> mulPipeOut.bits(31, 0),
     MduMulh -> mulPipeOut.bits(63, 32)
     //MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
     //MduDivu -> (src1  /  src2),
     //MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
     //MduRemu -> (src1  %  src2)
-  ))
+  )))
 
   val busy = RegInit(false.B)
   when (io.in.valid && !busy) { busy := true.B }
