@@ -3,6 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import utils._
 import memory.MemIO
 
 trait HasLSUOpType {

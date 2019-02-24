@@ -3,6 +3,8 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import utils._
+
 class IDU extends Module with HasDecodeConst {
   val io = IO(new Bundle {
     val in = Flipped(Valid(new PcInstrIO))

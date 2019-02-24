@@ -3,6 +3,8 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import utils._
+
 trait HasBRUOpType {
   val BruOpTypeNum  = 10
 
