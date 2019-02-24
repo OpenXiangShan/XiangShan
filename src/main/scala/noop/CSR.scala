@@ -49,7 +49,7 @@ class CSRIO extends FunctionUnitIO {
   // exception
   val isInvOpcode = Input(Bool())
   // perfcnt
-  val instrCommit = Input(Bool())
+  val perfCntCond = Vec(0x80, Input(Bool()))
 
   val sim = new Bundle {
     val cycleCnt = Output(UInt(32.W))
@@ -73,20 +73,17 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
   val mcause = Reg(UInt(32.W))
   val mstatus = Reg(UInt(32.W))
   val mepc = Reg(UInt(32.W))
-  val mcycle = Reg(UInt(64.W))
-  val minstret = Reg(UInt(64.W))
+
+  val perfCnts = List.fill(0x80)(Reg(UInt(64.W)))
+  val perfCntsLoMapping = (0 until 0x80).map { case i => (0xb00 + i, perfCnts(i)) }
+  val perfCntsHiMapping = (0 until 0x80).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
 
   val scalaMapping = List(
     Mtvec   -> mtvec,
     Mcause  -> mcause,
     Mepc    -> mepc,
-    Mstatus -> mstatus,
-
-    Mcycle  -> mcycle(31, 0),
-    Mcycleh -> mcycle(63, 32),
-    Minstret  -> minstret(31, 0),
-    Minstreth -> minstret(63, 32)
-  )
+    Mstatus -> mstatus
+  ) ++ perfCntsLoMapping ++ perfCntsHiMapping
 
   val chiselMapping = scalaMapping.map { case (x, y) => (x.U -> y) }
 
@@ -95,7 +92,7 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
   }
 
   val addr = src2(11, 0)
-  val rdata = LookupTree(addr, 0.U, chiselMapping)
+  val rdata = LookupTree(addr, 0.U, chiselMapping)(31, 0)
   val wdata = LookupTree(func, 0.U, List(
     CsrWrt -> src1,
     CsrSet -> (rdata | src1),
@@ -127,11 +124,13 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
     mcause := exceptionNO
   }
 
-  mcycle := mcycle + 1.U
-  when (io.instrCommit) { minstret := minstret + 1.U }
-
   io.in.ready := true.B
   io.out.valid := valid
+
+  // perfcnt
+  (perfCnts zip io.perfCntCond).map { case (c, e) => { when (e) { c := c + 1.U } } }
+
+  def setPerfCnt(addr: Int, cond: Bool) = { io.perfCntCond((addr & 0x7f).U) := cond }
 
   io.sim.cycleCnt := readWithScala(Mcycle)
   io.sim.instrCnt := readWithScala(Minstret)
