@@ -8,6 +8,7 @@ import gpu.GPU
 
 trait NOOPConfig {
   val HasGPU = false
+  val HasIcache = true
 }
 
 class NOOP extends Module with NOOPConfig {
@@ -26,7 +27,15 @@ class NOOP extends Module with NOOPConfig {
   val exu = Module(new EXU)
   val wbu = Module(new WBU)
 
-  io.imem <> ifu.io.imem
+  if (HasIcache) {
+    val icache = Module(new ICache)
+    icache.io.in <> ifu.io.imem
+    io.imem <> icache.io.out
+  }
+  else {
+    io.imem <> ifu.io.imem
+  }
+
   idu.io.in <> ifu.io.out
   isu.io.in <> idu.io.out
   exu.io.in <> isu.io.out
