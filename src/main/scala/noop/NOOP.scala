@@ -10,7 +10,7 @@ trait NOOPConfig {
   val HasMExtension = true
 }
 
-class NOOP extends Module with NOOPConfig with HasCSRConst {
+class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val io = IO(new Bundle {
     val imem = new MemIO
     val dmem = new MemIO
@@ -64,6 +64,11 @@ class NOOP extends Module with NOOPConfig with HasCSRConst {
   csr.setPerfCnt(Mcycle, true.B)
   csr.setPerfCnt(Minstret, wbu.io.writeback)
   csr.setPerfCnt(MImemStall, ifu.io.imemStall)
+  csr.setPerfCnt(MALUInstr, exu.io.csr.instrType(FuAlu))
+  csr.setPerfCnt(MBRUInstr, exu.io.csr.instrType(FuBru))
+  csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
+  csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
+  csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
 
   io.trap := isu.io.trap
   io.sim <> csr.io.sim
