@@ -42,7 +42,19 @@ class NOOP extends Module with NOOPConfig {
   ifu.io.br <> wbu.io.brOut
   ifu.io.writeback := wbu.io.writeback
 
-  exu.io.csrCtrl.instrCommit := wbu.io.writeback
+  // csr
+  val csr = Module(new CSR)
+  csr.access(
+    valid = exu.io.csr.isCsr,
+    src1 = exu.io.in.bits.data.src1,
+    src2 = exu.io.in.bits.data.src2,
+    func = exu.io.in.bits.ctrl.fuOpType
+  )
+  exu.io.csr.in <> csr.io.out
+  ifu.io.csrjmp <> csr.io.csrjmp
+  csr.io.pc := exu.io.in.bits.pc
+  csr.io.isInvOpcode := exu.io.in.bits.ctrl.isInvOpcode
+  csr.io.instrCommit := wbu.io.writeback
 
   io.trap := isu.io.trap
 }

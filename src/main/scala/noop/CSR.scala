@@ -45,9 +45,10 @@ trait HasCSRConst {
 
 class CSRIO extends FunctionUnitIO {
   val pc = Input(UInt(32.W))
-  val isException = Input(Bool())
-  val exceptionNO = Input(UInt(4.W))
   val csrjmp = new BranchIO
+  // exception
+  val isInvOpcode = Input(Bool())
+  // perfcnt
   val instrCommit = Input(Bool())
 }
 
@@ -105,16 +106,20 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
 
   io.out.bits := rdata
 
-  io.csrjmp.isTaken := valid && func === CsrJmp
-  io.csrjmp.target := LookupTree(addr, 0.U, List(
-    privEcall -> mtvec,
-    privMret  -> mepc
+  val isMret = addr === privMret
+  val isException = io.isInvOpcode
+  val isEcall = (addr === privEcall) && !isException
+  val exceptionNO = Mux1H(List(
+    io.isInvOpcode -> 2.U,
+    isEcall -> 11.U
   ))
 
-  val isEcall = (addr === privEcall)
-  when (io.csrjmp.isTaken && (isEcall || io.isException)) {
+  io.csrjmp.isTaken := (valid && func === CsrJmp) || isException
+  io.csrjmp.target := Mux(isMret, mepc, mtvec)
+
+  when (io.csrjmp.isTaken && !isMret) {
     mepc := io.pc
-    mcause := Mux(io.isException, io.exceptionNO, 11.U)
+    mcause := exceptionNO
   }
 
   mcycle := mcycle + 1.U

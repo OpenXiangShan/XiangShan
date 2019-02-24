@@ -12,8 +12,9 @@ class EXU extends Module with HasFuType {
     val out = Valid((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new MemIO
-    val csrCtrl = new Bundle {
-      val instrCommit = Input(Bool())
+    val csr = new Bundle {
+      val isCsr = Output(Bool())
+      val in = Flipped(Decoupled(UInt(32.W)))
     }
   })
 
@@ -28,6 +29,7 @@ class EXU extends Module with HasFuType {
   val bruOut = bru.access(valid = (fuType === FuBru), src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := src2
+  io.br <> bru.io.branch
   bru.io.out.ready := true.B
 
   val lsu = Module(new LSU)
@@ -40,24 +42,18 @@ class EXU extends Module with HasFuType {
   val mduOut = mdu.access(valid = (fuType === FuMdu), src1 = src1, src2 = src2, func = fuOpType)
   mdu.io.out.ready := true.B
 
-  val csr = Module(new CSR)
-  val csrOut = csr.access(valid = (fuType === FuCsr), src1 = src1, src2 = src2, func = fuOpType)
-  csr.io.pc := io.in.bits.pc
-  csr.io.isException := (io.in.bits.ctrl.isInvOpcode)
-  csr.io.exceptionNO := Mux(io.in.bits.ctrl.isInvOpcode, 2.U, 0.U)
-  csr.io.out.ready := true.B
+  // CSR is instantiated under NOOP
+  io.csr.isCsr := fuType === FuCsr
+  io.csr.in.ready := true.B
 
   io.out.bits.data := DontCare
   io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
     FuBru -> bruOut,
     FuLsu -> lsuOut,
-    FuCsr -> csrOut,
+    FuCsr -> io.csr.in.bits,
     FuMdu -> mduOut
   ))
-
-  when (csr.io.csrjmp.isTaken) { io.br <> csr.io.csrjmp }
-  .otherwise { io.br <> bru.io.branch }
 
   io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -69,6 +65,4 @@ class EXU extends Module with HasFuType {
     FuLsu -> lsu.io.out.valid,
     FuMdu -> mdu.io.out.valid
   ))
-
-  csr.io.instrCommit := io.csrCtrl.instrCommit
 }
