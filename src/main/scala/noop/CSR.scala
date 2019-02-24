@@ -39,6 +39,8 @@ trait HasCSRConst {
   val Mcycleh       = 0xb80
   val Minstreth     = 0xb82
 
+  val MImemStall  = 0xb03
+
   def privEcall = 0x000.U
   def privMret  = 0x302.U
 }

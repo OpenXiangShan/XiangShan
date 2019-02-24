@@ -17,6 +17,7 @@ class IFU extends Module with HasResetVector {
     val br = Flipped(new BranchIO)
     val csrjmp = Flipped(new BranchIO)
     val writeback = Input(Bool())
+    val imemStall = Output(Bool())
   })
 
   val pc = RegInit(resetVector.U(32.W))
@@ -65,4 +66,7 @@ class IFU extends Module with HasResetVector {
   }
 
   io.out.bits.pc := pc
+
+  // perfcnt
+  io.imemStall := BoolStopWatch(io.imem.a.fire(), io.imem.r.fire())
 }

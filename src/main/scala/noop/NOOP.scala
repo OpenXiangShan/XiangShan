@@ -63,6 +63,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst {
   csr.io.perfCntCond.map( _ := false.B )
   csr.setPerfCnt(Mcycle, true.B)
   csr.setPerfCnt(Minstret, wbu.io.writeback)
+  csr.setPerfCnt(MImemStall, ifu.io.imemStall)
 
   io.trap := isu.io.trap
   io.sim <> csr.io.sim
