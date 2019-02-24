@@ -9,6 +9,9 @@ SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE)
 
 .DEFAULT_GOAL = verilog
 
+help:
+	sbt 'runMain top.$(TOP) --help'
+
 LIBDEVICE_PATH = ./src/test/cpp/libdevice
 libdevice:
 	make -C $(LIBDEVICE_PATH)
@@ -29,4 +32,4 @@ emu: libdevice
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: libdevice verilog test emu clean
+.PHONY: libdevice verilog test emu clean help
