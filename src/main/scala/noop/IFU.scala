@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import memory.MemIO
+import utils._
 
 trait HasResetVector {
   val resetVector = 0x80100000L
@@ -54,5 +55,11 @@ class IFU extends Module with HasResetVector {
 
   io.out.valid := io.imem.r.fire() || (state === s_executing)
   io.out.bits.instr := Mux(io.imem.r.fire(), io.imem.r.bits.data, instrReg)
+
+  when (io.out.valid) {
+    assert(io.out.bits.instr(1, 0) === 3.U,
+      "%d: pc = 0x%x, bad instr = 0x%x\n", GTimer(), pc, io.out.bits.instr)
+  }
+
   io.out.bits.pc := pc
 }
