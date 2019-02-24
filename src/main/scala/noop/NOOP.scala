@@ -7,6 +7,7 @@ import memory.MemIO
 
 trait NOOPConfig {
   val HasIcache = true
+  val HasMExtension = true
 }
 
 class NOOP extends Module with NOOPConfig {
