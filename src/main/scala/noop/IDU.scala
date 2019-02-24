@@ -48,6 +48,4 @@ class IDU extends Module with HasDecodeConst {
   io.out.bits.ctrl.isInvOpcode := instrType === InstrN
   io.out.bits.ctrl.isNoopTrap := instr === NOOPTrap.TRAP
   io.out.valid := io.in.valid
-
-  //printf("IDU: pc = 0x%x, instr = 0x%x\n", io.in.pc, instr)
 }
