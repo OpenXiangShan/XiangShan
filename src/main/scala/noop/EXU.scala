@@ -74,7 +74,10 @@ class EXU extends Module with HasFuType {
     o.rfDest := i.rfDest
   }
   io.out.bits.pc := io.in.bits.pc
-  io.out.valid := io.in.valid && ((fuType =/= FuLsu) || lsu.io.out.valid)
+  io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
+    FuLsu -> lsu.io.out.valid,
+    FuMdu -> mdu.io.out.valid
+  ))
 
   csr.io.instrCommit := io.csrCtrl.instrCommit
 }
