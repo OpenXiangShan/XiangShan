@@ -50,9 +50,6 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   io.trapInfo.instr := noop.io.imem.r.bits.data
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
-  noop.io.gmem := DontCare
-  noop.io.gpuStart := DontCare
-
   io.instrCnt := 0.U
   io.cycleCnt := Counter(true.B, 0x7fffffff)._1
 }

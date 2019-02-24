@@ -16,9 +16,6 @@ class NOOPFPGA extends Module {
   val noop = Module(new NOOP)
   io.imem <> noop.io.imem.toAXI4()
   io.dmem <> noop.io.dmem.toAXI4()
-
-  noop.io.gmem := DontCare
-  noop.io.gpuStart := DontCare
 }
 
 class Top extends Module {
