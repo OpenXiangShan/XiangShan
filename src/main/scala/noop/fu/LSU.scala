@@ -17,6 +17,8 @@ trait HasLSUOpType {
   def LsuSb   = "b1000".U
   def LsuSh   = "b1001".U
   def LsuSw   = "b1010".U
+
+  def funcIsStore(func: UInt): Bool = func(3)
 }
 
 object LSUInstr extends HasDecodeConst {
@@ -44,6 +46,9 @@ object LSUInstr extends HasDecodeConst {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
   val dmem = new MemIO
+  val isLoad = Output(Bool())
+  val loadStall = Output(Bool())
+  val storeStall = Output(Bool())
 }
 
 class LSU extends Module with HasLSUOpType {
@@ -75,13 +80,14 @@ class LSU extends Module with HasLSUOpType {
 
   val dmem = io.dmem
   val addr = src1 + src2
+  val isStore = valid && funcIsStore(func)
 
   val s_idle :: s_wait_resp :: Nil = Enum(2)
   val state = RegInit(s_idle)
 
   switch (state) {
     is (s_idle) {
-      when (dmem.a.fire()) { state := Mux(dmem.w.valid || dmem.r.fire(), s_idle, s_wait_resp) }
+      when (dmem.a.fire()) { state := Mux(isStore || dmem.r.fire(), s_idle, s_wait_resp) }
     }
 
     is (s_wait_resp) {
@@ -92,12 +98,12 @@ class LSU extends Module with HasLSUOpType {
   dmem.a.bits.addr := addr
   dmem.a.bits.size := func(1, 0)
   dmem.a.valid := valid && (state === s_idle)
-  dmem.w.valid := valid && func(3)
+  dmem.w.valid := isStore
   dmem.w.bits.data := genWdata(io.wdata, func(1, 0))
   dmem.w.bits.mask := genWmask(addr, func(1, 0))
   dmem.r.ready := true.B
 
-  io.out.valid := Mux(dmem.w.valid, dmem.a.fire(), dmem.r.fire())
+  io.out.valid := Mux(isStore, dmem.a.fire(), dmem.r.fire())
   io.in.ready := (state === s_idle)
 
   val rdataFromBus = io.dmem.r.bits.data
@@ -114,4 +120,9 @@ class LSU extends Module with HasLSUOpType {
       LsuLbu  -> Cat(0.U(24.W), rdata(7, 0)),
       LsuLhu  -> Cat(0.U(16.W), rdata(15, 0))
   ))
+
+  // perfcnt
+  io.isLoad := io.out.fire() && isStore
+  io.loadStall := BoolStopWatch(dmem.a.valid && !isStore, dmem.r.fire())
+  io.storeStall := BoolStopWatch(dmem.a.valid && isStore, dmem.a.fire())
 }

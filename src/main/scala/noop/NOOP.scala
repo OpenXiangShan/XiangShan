@@ -69,6 +69,9 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
   csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
   csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
+  csr.setPerfCnt(MLoadInstr, exu.io.csr.isLoad)
+  csr.setPerfCnt(MLoadStall, exu.io.csr.loadStall)
+  csr.setPerfCnt(MStoreStall, exu.io.csr.storeStall)
 
   io.trap := isu.io.trap
   io.sim <> csr.io.sim
