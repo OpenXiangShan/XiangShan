@@ -68,5 +68,5 @@ class IFU extends Module with HasResetVector {
   io.out.bits.pc := pc
 
   // perfcnt
-  io.imemStall := BoolStopWatch(io.imem.a.fire(), io.imem.r.fire())
+  io.imemStall := BoolStopWatch(io.imem.a.valid, io.imem.r.fire())
 }
