@@ -87,7 +87,7 @@ class LSU extends Module with HasLSUOpType {
 
   switch (state) {
     is (s_idle) {
-      when (dmem.req.fire()) { state := Mux(isStore || dmem.resp.fire(), s_idle, s_wait_resp) }
+      when (dmem.req.fire()) { state := Mux(dmem.resp.fire(), s_idle, s_wait_resp) }
     }
 
     is (s_wait_resp) {
@@ -103,7 +103,7 @@ class LSU extends Module with HasLSUOpType {
   dmem.req.bits.wmask := genWmask(addr, func(1, 0))
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux(isStore, dmem.req.fire(), dmem.resp.fire())
+  io.out.valid := dmem.resp.fire()
   io.in.ready := (state === s_idle)
 
   val rdataFromBus = io.dmem.resp.bits.rdata
@@ -124,5 +124,5 @@ class LSU extends Module with HasLSUOpType {
   // perfcnt
   io.isLoad := io.out.fire() && isStore
   io.loadStall := BoolStopWatch(dmem.req.valid && !isStore, dmem.resp.fire())
-  io.storeStall := BoolStopWatch(dmem.req.valid && isStore, dmem.req.fire())
+  io.storeStall := BoolStopWatch(dmem.req.valid && isStore, dmem.resp.fire())
 }

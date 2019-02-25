@@ -24,14 +24,16 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val imem2axi = Module(new SimpleBus2AXI4Converter)
   val dmem2axi = Module(new SimpleBus2AXI4Converter)
-  val delay = Module(new AXI4Delayer(0.5))
+  val imemdelay = Module(new AXI4Delayer(0.5))
+  val dmemdelay = Module(new AXI4Delayer(0.5))
   val mmio = Module(new SimMMIO)
 
   imem2axi.io.in <> noop.io.imem
-  delay.io.in <> imem2axi.io.out
-  imem.io.in <> delay.io.out
+  imemdelay.io.in <> imem2axi.io.out
+  imem.io.in <> imemdelay.io.out
   dmem2axi.io.in <> noop.io.dmem
-  dmem.io.in <> dmem2axi.io.out
+  dmemdelay.io.in <> dmem2axi.io.out
+  dmem.io.in <> dmemdelay.io.out
 
   io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, noop.io.dmem.req.bits.wmask,
     noop.io.dmem.req.bits.addr, noop.io.dmem.req.bits.wdata, noop.io.trap)

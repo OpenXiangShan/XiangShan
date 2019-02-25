@@ -39,6 +39,7 @@ class SimpleBus2AXI4Converter extends Module {
   val awAck = RegInit(false.B)
   val wAck = RegInit(false.B)
 
+  val wen = RegEnable(mem.req.bits.wen, mem.req.fire())
   val wSend = (axi.aw.fire() && axi.w.fire()) || (awAck && wAck)
   when (wSend) {
     awAck := false.B
@@ -53,7 +54,6 @@ class SimpleBus2AXI4Converter extends Module {
   mem.req.ready  := Mux(mem.req.bits.wen, wSend, axi.ar.ready)
 
   axi.r.ready  := mem.resp.ready
-  mem.resp.valid  := axi.r.valid
-
-  axi.b.ready  := true.B
+  axi.b.ready  := mem.resp.ready
+  mem.resp.valid  := Mux(wen, axi.b.valid, axi.r.valid)
 }
