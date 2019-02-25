@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import memory.MemIO
+import utils._
 
 class ICache extends Module {
   val io = IO(new Bundle {
@@ -25,23 +26,32 @@ class ICache extends Module {
     val byteOffset = UInt(2.W)
   })
 
-  val tagArray = Mem(Sets, UInt(TagBits.W))
-  val valids = RegInit(0.U(Sets.W))
+  val metaBundle = new Bundle {
+      val tag = UInt(TagBits.W)
+      val valid = Bool()
+    }
+  val metaArray = Mem(Sets, UInt(metaBundle.getWidth.W))
   val dataArray = Mem(Sets, UInt((LineSize * 8).W))
+
+  // should reset meta.valid
+  val resetState = RegInit(true.B)
+  val (resetIdx, resetFinish) = Counter(resetState, Sets)
+  when (resetFinish) {
+    resetState := false.B
+  }
 
   val s_idle :: s_metaRead :: s_memReadReq :: s_memReadResp :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
   // read metadata
-  io.in.a.ready := (state === s_idle)
+  io.in.a.ready := (state === s_idle) && !resetState
   val metaReadEnable = io.in.a.fire() && (state === s_idle)
-  val addrReg = RegEnable(addrBundle, metaReadEnable)
-  val tagRead = RegEnable(tagArray.read(addrBundle.index), metaReadEnable)
+  val metaRead = RegEnable(metaArray.read(addrBundle.index), metaReadEnable).asTypeOf(metaBundle)
   val dataRead = RegEnable(dataArray.read(addrBundle.index), metaReadEnable)
   // reading SeqMem has 1 cycle latency, there tag should be compared in the next cycle
   // and the address should be latched
-  val validRead = valids(addrReg.index)
-  val hit = validRead && (addrReg.tag === tagRead)
+  val addrReg = RegEnable(addrBundle, metaReadEnable)
+  val hit = metaRead.valid && (addrReg.tag === metaRead.tag)
 
   // if miss, access memory
   io.out := DontCare
@@ -53,9 +63,11 @@ class ICache extends Module {
 
   // refill
   val metaWriteEnable = (state === s_memReadResp) && io.out.r.fire() && !metaReadEnable
-  when (metaWriteEnable) {
-    tagArray.write(addrReg.index, addrReg.tag)
-    valids := valids | (1.U << addrReg.index)
+  val metaWrite = Wire(metaBundle)
+  metaWrite.tag := addrReg.tag
+  metaWrite.valid := Mux(resetState, false.B, true.B)
+  when (metaWriteEnable || resetState) {
+    metaArray.write(Mux(resetState, resetIdx, addrReg.index), metaWrite.asUInt)
     dataArray.write(addrReg.index, io.out.r.bits.data)
   }
 
