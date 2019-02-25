@@ -10,7 +10,7 @@ SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE)
 .DEFAULT_GOAL = verilog
 
 help:
-	sbt 'runMain top.$(TOP) --help'
+	sbt 'test:runMain gcd.GCDMain --help'
 
 LIBDEVICE_PATH = ./src/test/cpp/libdevice
 libdevice:
