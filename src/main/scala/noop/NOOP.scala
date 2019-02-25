@@ -8,6 +8,7 @@ import memory.MemIO
 trait NOOPConfig {
   val HasIcache = true
   val HasMExtension = true
+  val HasDiv = false
 }
 
 class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {

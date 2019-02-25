@@ -16,7 +16,7 @@ trait HasMDUOpType {
   def MduRemu = "b111".U
 }
 
-object MDUInstr extends HasDecodeConst {
+object MDUInstr extends HasDecodeConst with NOOPConfig {
   def MUL     = BitPat("b0000001_?????_?????_000_?????_0110011")
   def MULH    = BitPat("b0000001_?????_?????_001_?????_0110011")
   def DIV     = BitPat("b0000001_?????_?????_100_?????_0110011")
@@ -24,14 +24,17 @@ object MDUInstr extends HasDecodeConst {
   def REM     = BitPat("b0000001_?????_?????_110_?????_0110011")
   def REMU    = BitPat("b0000001_?????_?????_111_?????_0110011")
 
-  val table = Array(
+  val mulTable = Array(
     MUL            -> List(InstrR, FuMdu, MduMul),
     MULH           -> List(InstrR, FuMdu, MduMulh)
-    //DIV            -> List(InstrR, FuMdu, MduDiv),
-    //DIVU           -> List(InstrR, FuMdu, MduDivu),
-    //REM            -> List(InstrR, FuMdu, MduRem),
-    //REMU           -> List(InstrR, FuMdu, MduRemu)
   )
+  val divTable = Array(
+    DIV            -> List(InstrR, FuMdu, MduDiv),
+    DIVU           -> List(InstrR, FuMdu, MduDivu),
+    REM            -> List(InstrR, FuMdu, MduRem),
+    REMU           -> List(InstrR, FuMdu, MduRemu)
+  )
+  val table = mulTable ++ (if (HasDiv) divTable else Nil)
 }
 
 class MDU extends Module with HasMDUOpType with NOOPConfig {
@@ -49,14 +52,18 @@ class MDU extends Module with HasMDUOpType with NOOPConfig {
 
   val mulRes = (src1.asSInt * src2.asSInt).asUInt
   val mulPipeOut = Pipe(io.in.fire(), mulRes, mulLatency)
-  io.out.bits := (if (!HasMExtension) 0.U else LookupTree(func, 0.U, List(
+
+  val mulFunc = List(
     MduMul  -> mulPipeOut.bits(31, 0),
     MduMulh -> mulPipeOut.bits(63, 32)
-    //MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
-    //MduDivu -> (src1  /  src2),
-    //MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
-    //MduRemu -> (src1  %  src2)
-  )))
+  )
+  val divFunc = (if (HasDiv) List(
+    MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
+    MduDivu -> (src1  /  src2),
+    MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
+    MduRemu -> (src1  %  src2)
+  ) else Nil)
+  io.out.bits := (if (!HasMExtension) 0.U else LookupTree(func, 0.U, mulFunc ++ divFunc))
 
   val busy = RegInit(false.B)
   when (io.in.valid && !busy) { busy := true.B }
