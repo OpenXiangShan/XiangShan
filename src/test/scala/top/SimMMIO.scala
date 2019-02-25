@@ -3,7 +3,7 @@ package top
 import chisel3._
 import chisel3.util._
 
-import memory.SimpleBus
+import bus.simplebus.SimpleBus
 
 class SimMMIO extends Module {
   val io = IO(new Bundle {

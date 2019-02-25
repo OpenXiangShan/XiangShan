@@ -5,7 +5,8 @@ import noop._
 import chisel3._
 import chisel3.util._
 
-import memory.{AXI4RAM, AXI4Parameters, SimpleBus2AXI4Converter, AXI4Delayer}
+import bus.axi4._
+import bus.simplebus.SimpleBus2AXI4Converter
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
   val io = IO(new Bundle{

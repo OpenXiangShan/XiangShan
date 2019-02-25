@@ -1,7 +1,7 @@
 package top
 
 import noop.NOOP
-import memory.AXI4
+import bus.axi4.AXI4
 import device.AXI4Timer
 
 import chisel3._

@@ -3,8 +3,8 @@ package noop
 import chisel3._
 import chisel3.util._
 
-import memory.SimpleBus
 import utils._
+import bus.simplebus.SimpleBus
 
 trait HasResetVector {
   val resetVector = 0x80100000L

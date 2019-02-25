@@ -1,4 +1,4 @@
-package memory
+package bus.simplebus
 
 import chisel3._
 import chisel3.util._
@@ -24,7 +24,7 @@ class SimpleBus(val dataBits: Int = 32) extends Bundle {
   def isRead (): Bool = a.valid && !w.valid
   def isWrite(): Bool = a.valid &&  w.valid
 
-  def toAXI4(): AXI4 = {
+  def toAXI4() = {
     val mem2axi = Module(new SimpleBus2AXI4Converter)
     mem2axi.io.in <> this
     mem2axi.io.out

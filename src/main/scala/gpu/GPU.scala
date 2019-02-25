@@ -3,7 +3,7 @@ package gpu
 import chisel3._
 import chisel3.util._
 
-import memory.SimpleBus
+import bus.simplebus.SimpleBus
 
 class PixelBundle extends Bundle {
   val a = UInt(8.W)

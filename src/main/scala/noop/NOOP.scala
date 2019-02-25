@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 
-import memory.SimpleBus
+import bus.simplebus.SimpleBus
 
 trait NOOPConfig {
   val HasIcache = true

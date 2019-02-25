@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import utils._
-import memory.SimpleBus
+import bus.simplebus.SimpleBus
 
 trait HasLSUOpType {
   val LsuOpTypeNum  = 10
