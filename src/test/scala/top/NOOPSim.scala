@@ -6,7 +6,6 @@ import chisel3._
 import chisel3.util._
 
 import memory.DistributedMem
-import memory.{AHBRAM, AHBParameters, MemIO2AHBLiteConverter}
 import memory.{AXI4RAM, AXI4Parameters, MemIO2AXI4Converter, AXI4Delayer}
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
