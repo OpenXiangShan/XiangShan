@@ -12,7 +12,7 @@ class AXI4RAM(memByte: Int, beatBytes: Int = 4, dataFile: String = "") extends M
   })
 
   val in = io.in
-  val mem = SeqMem(memByte, Vec(beatBytes, UInt(8.W)))
+  val mem = SeqMem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))
   if (dataFile != "") loadMemoryFromFile(mem, dataFile)
 
   val r_addr = in.ar.bits.addr >> log2Ceil(beatBytes)
