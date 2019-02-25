@@ -84,7 +84,7 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
   val mstatus = Reg(UInt(32.W))
   val mepc = Reg(UInt(32.W))
 
-  val perfCnts = List.fill(0x80)(Reg(UInt(64.W)))
+  val perfCnts = List.fill(0x80)(RegInit(0.U(64.W)))
   val perfCntsLoMapping = (0 until 0x80).map { case i => (0xb00 + i, perfCnts(i)) }
   val perfCntsHiMapping = (0 until 0x80).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
 
