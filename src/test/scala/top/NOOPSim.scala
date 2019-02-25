@@ -5,8 +5,7 @@ import noop._
 import chisel3._
 import chisel3.util._
 
-import memory.DistributedMem
-import memory.{AXI4RAM, AXI4Parameters, MemIO2AXI4Converter, AXI4Delayer}
+import memory.{AXI4RAM, AXI4Parameters, SimpleBus2AXI4Converter, AXI4Delayer}
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
   val io = IO(new Bundle{
@@ -22,8 +21,8 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   val noop = Module(new NOOP)
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
-  val imem2axi = Module(new MemIO2AXI4Converter)
-  val dmem2axi = Module(new MemIO2AXI4Converter)
+  val imem2axi = Module(new SimpleBus2AXI4Converter)
+  val dmem2axi = Module(new SimpleBus2AXI4Converter)
   val delay = Module(new AXI4Delayer(0.5))
   val mmio = Module(new SimMMIO)
 

@@ -3,13 +3,13 @@ package noop
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import memory.SimpleBus
 import utils._
 
 class ICache extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(new MemIO)
-    val out = new MemIO
+    val in = Flipped(new SimpleBus)
+    val out = new SimpleBus
   })
 
   val TotalSize = 16 // Kbytes

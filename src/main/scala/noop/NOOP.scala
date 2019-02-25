@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import memory.SimpleBus
 
 trait NOOPConfig {
   val HasIcache = true
@@ -13,8 +13,8 @@ trait NOOPConfig {
 
 class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val io = IO(new Bundle {
-    val imem = new MemIO
-    val dmem = new MemIO
+    val imem = new SimpleBus
+    val dmem = new SimpleBus
     val trap = Output(UInt(2.W))
     val sim = new Bundle {
       val cycleCnt = Output(UInt(32.W))

@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import memory.SimpleBus
 import utils._
 
 trait HasResetVector {
@@ -12,7 +12,7 @@ trait HasResetVector {
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new MemIO
+    val imem = new SimpleBus
     val out = Valid(new PcInstrIO)
     val br = Flipped(new BranchIO)
     val csrjmp = Flipped(new BranchIO)

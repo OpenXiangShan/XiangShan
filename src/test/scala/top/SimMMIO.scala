@@ -3,11 +3,11 @@ package top
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import memory.SimpleBus
 
 class SimMMIO extends Module {
   val io = IO(new Bundle {
-    val rw = Flipped(new MemIO)
+    val rw = Flipped(new SimpleBus)
     val mmioTrap = new Bundle {
       val valid = Output(Bool())
       val cmd = Output(UInt(3.W))

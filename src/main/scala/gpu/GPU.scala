@@ -3,7 +3,7 @@ package gpu
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import memory.SimpleBus
 
 class PixelBundle extends Bundle {
   val a = UInt(8.W)
@@ -69,7 +69,7 @@ trait GPUConst {
 class GPU extends Module with GPUConst {
   val io = IO(new Bundle {
     val start = Input(Bool())
-    val out = new MemIO(256)
+    val out = new SimpleBus(256)
   })
 
   val startCmd = io.start && !RegNext(io.start)

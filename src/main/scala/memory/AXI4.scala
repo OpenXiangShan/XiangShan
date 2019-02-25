@@ -84,9 +84,9 @@ class AXI4 extends Bundle {
   val r  = Flipped(Decoupled(new AXI4BundleR))
 }
 
-class MemIO2AXI4Converter extends Module {
+class SimpleBus2AXI4Converter extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(new MemIO)
+    val in = Flipped(new SimpleBus)
     val out = new AXI4
   })
 

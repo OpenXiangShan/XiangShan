@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import utils._
-import memory.MemIO
+import memory.SimpleBus
 
 trait HasLSUOpType {
   val LsuOpTypeNum  = 10
@@ -45,7 +45,7 @@ object LSUInstr extends HasDecodeConst {
 
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
-  val dmem = new MemIO
+  val dmem = new SimpleBus
   val isLoad = Output(Bool())
   val loadStall = Output(Bool())
   val storeStall = Output(Bool())
