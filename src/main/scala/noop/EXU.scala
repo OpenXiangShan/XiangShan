@@ -12,52 +12,55 @@ class EXU extends Module with HasFuType {
     val out = Valid((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new MemIO
-    val csrCtrl = new Bundle {
-      val instrCommit = Input(Bool())
+    val csr = new Bundle {
+      val isCsr = Output(Bool())
+      val in = Flipped(Decoupled(UInt(32.W)))
+      val instrType = Vec(FuTypeNum, Output(Bool()))
+      val isLoad = Output(Bool())
+      val loadStall = Output(Bool())
+      val storeStall = Output(Bool())
     }
   })
 
   val (src1, src2, fuType, fuOpType) = (io.in.bits.data.src1, io.in.bits.data.src2,
     io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
 
+  val fuValids = Wire(Vec(FuTypeNum, Bool()))
+  (0 until FuTypeNum).map (i => fuValids(i) := (fuType === i.U) && io.in.valid)
+
   val alu = Module(new ALU)
-  val aluOut = alu.access(valid = (fuType === FuAlu), src1 = src1, src2 = src2, func = fuOpType)
+  val aluOut = alu.access(valid = fuValids(FuAlu), src1 = src1, src2 = src2, func = fuOpType)
   alu.io.out.ready := true.B
 
   val bru = Module(new BRU)
-  val bruOut = bru.access(valid = (fuType === FuBru), src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
+  val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := src2
+  io.br <> bru.io.branch
   bru.io.out.ready := true.B
 
   val lsu = Module(new LSU)
-  val lsuOut = lsu.access(valid = (fuType === FuLsu), src1 = src1, src2 = src2, func = fuOpType)
+  val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = src2, func = fuOpType)
   lsu.io.wdata := io.in.bits.data.dest
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
 
   val mdu = Module(new MDU)
-  val mduOut = mdu.access(valid = (fuType === FuMdu), src1 = src1, src2 = src2, func = fuOpType)
+  val mduOut = mdu.access(valid = fuValids(FuMdu), src1 = src1, src2 = src2, func = fuOpType)
   mdu.io.out.ready := true.B
 
-  val csr = Module(new CSR)
-  val csrOut = csr.access(valid = (fuType === FuCsr), src1 = src1, src2 = src2, func = fuOpType)
-  csr.io.pc := io.in.bits.pc
-  csr.io.isException := (io.in.bits.ctrl.isInvOpcode)
-  csr.io.exceptionNO := Mux(io.in.bits.ctrl.isInvOpcode, 2.U, 0.U)
-  csr.io.out.ready := true.B
+  // CSR is instantiated under NOOP
+  io.csr.isCsr := fuValids(FuCsr)
+  io.csr.in.ready := true.B
 
   io.out.bits.data := DontCare
   io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
     FuAlu -> aluOut,
     FuBru -> bruOut,
     FuLsu -> lsuOut,
-    FuCsr -> csrOut,
+    FuCsr -> io.csr.in.bits,
     FuMdu -> mduOut
   ))
-
-  when (csr.io.csrjmp.isTaken) { io.br <> csr.io.csrjmp }
-  .otherwise { io.br <> bru.io.branch }
 
   io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -70,5 +73,13 @@ class EXU extends Module with HasFuType {
     FuMdu -> mdu.io.out.valid
   ))
 
-  csr.io.instrCommit := io.csrCtrl.instrCommit
+  // perfcnt
+  io.csr.instrType(FuAlu) := alu.io.out.fire()
+  io.csr.instrType(FuBru) := bru.io.out.fire()
+  io.csr.instrType(FuLsu) := lsu.io.out.fire()
+  io.csr.instrType(FuMdu) := mdu.io.out.fire()
+  io.csr.instrType(FuCsr) := io.csr.isCsr && io.csr.in.ready
+  io.csr.isLoad := lsu.io.isLoad
+  io.csr.loadStall := lsu.io.loadStall
+  io.csr.storeStall := lsu.io.storeStall
 }

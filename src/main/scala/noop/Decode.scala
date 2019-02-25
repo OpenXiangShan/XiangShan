@@ -37,7 +37,7 @@ trait HasFuType
     with HasLSUOpType
     with HasMDUOpType
     with HasCSROpType {
-  private val FuTypeNum = 5
+  val FuTypeNum = 5
   def FuAlu = "b000".U
   def FuBru = "b001".U
   def FuLsu = "b010".U

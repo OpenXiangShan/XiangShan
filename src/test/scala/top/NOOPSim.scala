@@ -14,8 +14,10 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
     val trap = Output(UInt((3 + 1 + 4 + 32 + 32 + 2).W))
     val mmioRdata = Input(UInt(32.W))
     val trapInfo = new PcInstrIO
-    val cycleCnt = Output(UInt(32.W))
-    val instrCnt = Output(UInt(32.W))
+    val sim = new Bundle {
+      val cycleCnt = Output(UInt(32.W))
+      val instrCnt = Output(UInt(32.W))
+    }
   })
 
   val noop = Module(new NOOP)
@@ -50,6 +52,5 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   io.trapInfo.instr := noop.io.imem.r.bits.data
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
-  io.instrCnt := 0.U
-  io.cycleCnt := Counter(true.B, 0x7fffffff)._1
+  io.sim <> noop.io.sim
 }
