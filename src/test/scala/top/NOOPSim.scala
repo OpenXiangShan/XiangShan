@@ -33,22 +33,22 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   dmem2axi.io.in <> noop.io.dmem
   dmem.io.in <> dmem2axi.io.out
 
-  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, noop.io.dmem.w.bits.mask,
-    noop.io.dmem.a.bits.addr, noop.io.dmem.w.bits.data, noop.io.trap)
+  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, noop.io.dmem.req.bits.wmask,
+    noop.io.dmem.req.bits.addr, noop.io.dmem.req.bits.wdata, noop.io.trap)
 
-  noop.io.dmem.a.ready     := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.a.ready, dmem2axi.io.in.a.ready)
-  noop.io.dmem.r.bits.data := Mux(mmio.io.mmioTrap.valid, io.mmioRdata, dmem2axi.io.in.r.bits.data)
-  noop.io.dmem.r.valid     := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.r.valid, dmem2axi.io.in.r.valid)
-  dmem2axi.io.in.a.valid    := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.a.valid)
-  dmem2axi.io.in.w.valid    := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.w.valid)
 
-  mmio.io.rw.a.bits  := noop.io.dmem.a.bits
-  mmio.io.rw.a.valid := noop.io.dmem.a.valid
-  mmio.io.rw.w       := noop.io.dmem.w
-  mmio.io.rw.r.ready := true.B
+  noop.io.dmem.req.ready       := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.req.ready, dmem2axi.io.in.req.ready)
+  noop.io.dmem.resp.bits.rdata := Mux(mmio.io.mmioTrap.valid, io.mmioRdata, dmem2axi.io.in.resp.bits.rdata)
+  noop.io.dmem.resp.valid      := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.resp.valid, dmem2axi.io.in.resp.valid)
+  dmem2axi.io.in.req.valid     := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.req.valid)
+  dmem2axi.io.in.req.bits.wen  := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.req.bits.wen)
 
-  io.trapInfo.pc := noop.io.imem.a.bits.addr
-  io.trapInfo.instr := noop.io.imem.r.bits.data
+  mmio.io.rw.req.bits  := noop.io.dmem.req.bits
+  mmio.io.rw.req.valid := noop.io.dmem.req.valid
+  mmio.io.rw.resp.ready := true.B
+
+  io.trapInfo.pc := noop.io.imem.req.bits.addr
+  io.trapInfo.instr := noop.io.imem.resp.bits.rdata
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
   io.sim <> noop.io.sim

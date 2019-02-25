@@ -87,26 +87,26 @@ class LSU extends Module with HasLSUOpType {
 
   switch (state) {
     is (s_idle) {
-      when (dmem.a.fire()) { state := Mux(isStore || dmem.r.fire(), s_idle, s_wait_resp) }
+      when (dmem.req.fire()) { state := Mux(isStore || dmem.resp.fire(), s_idle, s_wait_resp) }
     }
 
     is (s_wait_resp) {
-      when (dmem.r.fire()) { state := s_idle }
+      when (dmem.resp.fire()) { state := s_idle }
     }
   }
 
-  dmem.a.bits.addr := addr
-  dmem.a.bits.size := func(1, 0)
-  dmem.a.valid := valid && (state === s_idle)
-  dmem.w.valid := isStore
-  dmem.w.bits.data := genWdata(io.wdata, func(1, 0))
-  dmem.w.bits.mask := genWmask(addr, func(1, 0))
-  dmem.r.ready := true.B
+  dmem.req.bits.addr := addr
+  dmem.req.bits.size := func(1, 0)
+  dmem.req.valid := valid && (state === s_idle)
+  dmem.req.bits.wen := isStore
+  dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
+  dmem.req.bits.wmask := genWmask(addr, func(1, 0))
+  dmem.resp.ready := true.B
 
-  io.out.valid := Mux(isStore, dmem.a.fire(), dmem.r.fire())
+  io.out.valid := Mux(isStore, dmem.req.fire(), dmem.resp.fire())
   io.in.ready := (state === s_idle)
 
-  val rdataFromBus = io.dmem.r.bits.data
+  val rdataFromBus = io.dmem.resp.bits.rdata
   val rdata = LookupTree(addr(1, 0), List(
     "b00".U -> rdataFromBus,
     "b01".U -> rdataFromBus(15, 8),
@@ -123,6 +123,6 @@ class LSU extends Module with HasLSUOpType {
 
   // perfcnt
   io.isLoad := io.out.fire() && isStore
-  io.loadStall := BoolStopWatch(dmem.a.valid && !isStore, dmem.r.fire())
-  io.storeStall := BoolStopWatch(dmem.a.valid && isStore, dmem.a.fire())
+  io.loadStall := BoolStopWatch(dmem.req.valid && !isStore, dmem.resp.fire())
+  io.storeStall := BoolStopWatch(dmem.req.valid && isStore, dmem.req.fire())
 }

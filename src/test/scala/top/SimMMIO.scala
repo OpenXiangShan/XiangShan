@@ -16,14 +16,14 @@ class SimMMIO extends Module {
   })
 
   val wen = io.rw.isWrite()
-  val wdataVec = VecInit.tabulate(4) { i => io.rw.w.bits.data(8 * (i + 1) - 1, 8 * i) }
-  val wmask = VecInit.tabulate(4) { i => io.rw.w.bits.mask(i).toBool }
+  val wdataVec = VecInit.tabulate(4) { i => io.rw.req.bits.wdata(8 * (i + 1) - 1, 8 * i) }
+  val wmask = VecInit.tabulate(4) { i => io.rw.req.bits.wmask(i).toBool }
 
   io.mmioTrap.valid := false.B
   io.mmioTrap.cmd := 0.U
 
-  when (io.rw.a.valid) {
-    switch (io.rw.a.bits.addr) {
+  when (io.rw.req.valid) {
+    switch (io.rw.req.bits.addr) {
       is (0x40600008.U) {
         // read uartlite stat register
         io.mmioTrap.valid := true.B
@@ -61,14 +61,14 @@ class SimMMIO extends Module {
       }
     }
 
-    when (io.rw.a.bits.addr >= 0x40000.U && io.rw.a.bits.addr < 0xc0000.U && wen) {
+    when (io.rw.req.bits.addr >= 0x40000.U && io.rw.req.bits.addr < 0xc0000.U && wen) {
       // write to vmem
       io.mmioTrap.valid := true.B
       io.mmioTrap.cmd := 5.U
     }
   }
 
-  io.rw.a.ready := true.B
-  io.rw.r.bits.data := io.mmioTrap.rdata
-  io.rw.r.valid := io.mmioTrap.valid
+  io.rw.req.ready := true.B
+  io.rw.resp.bits.rdata := io.mmioTrap.rdata
+  io.rw.resp.valid := io.mmioTrap.valid
 }

@@ -21,9 +21,9 @@ class SimpleBus2AXI4Converter extends Module {
   val b  = axi.b.bits
 
   ar.id    := 0.U
-  ar.addr  := mem.a.bits.addr
+  ar.addr  := mem.req.bits.addr
   ar.len   := 0.U  // single beat
-  ar.size  := mem.a.bits.size
+  ar.size  := mem.req.bits.size
   ar.burst := AXI4Parameters.BURST_INCR
   ar.lock  := false.B
   ar.cache := 0.U
@@ -31,10 +31,10 @@ class SimpleBus2AXI4Converter extends Module {
   ar.qos   := 0.U
   ar.user  := 0.U
   aw := ar
-  w.data := mem.w.bits.data
-  w.strb := mem.w.bits.mask
+  w.data := mem.req.bits.wdata
+  w.strb := mem.req.bits.wmask
   w.last := true.B
-  mem.r.bits.data := r.data
+  mem.resp.bits.rdata := r.data
 
   val awAck = RegInit(false.B)
   val wAck = RegInit(false.B)
@@ -50,10 +50,10 @@ class SimpleBus2AXI4Converter extends Module {
   axi.ar.valid := mem.isRead()
   axi.aw.valid := mem.isWrite() && !awAck
   axi.w .valid := mem.isWrite() && !wAck
-  mem.a.ready  := Mux(mem.w.valid, wSend, axi.ar.ready)
+  mem.req.ready  := Mux(mem.req.bits.wen, wSend, axi.ar.ready)
 
-  axi.r.ready  := mem.r.ready
-  mem.r.valid  := axi.r.valid
+  axi.r.ready  := mem.resp.ready
+  mem.resp.valid  := axi.r.valid
 
   axi.b.ready  := true.B
 }

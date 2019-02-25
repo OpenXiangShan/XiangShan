@@ -16,11 +16,11 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
   val memAddrBits = log2Up(wordNum)
   def Index(addr: UInt): UInt = addr(memAddrBits + 2 - 1, 2)
 
-  val rwIdx = Index(io.rw.a.bits.addr)
-  val roIdx = Index(io.ro.a.bits.addr)
+  val rwIdx = Index(io.rw.req.bits.addr)
+  val roIdx = Index(io.ro.req.bits.addr)
   val wen = io.rw.isWrite()
-  val wdataVec = VecInit.tabulate(4) { i => io.rw.w.bits.data(8 * (i + 1) - 1, 8 * i) }
-  val wmask = VecInit.tabulate(4) { i => io.rw.w.bits.mask(i).toBool }
+  val wdataVec = VecInit.tabulate(4) { i => io.rw.req.bits.wdata(8 * (i + 1) - 1, 8 * i) }
+  val wmask = VecInit.tabulate(4) { i => io.rw.req.bits.wmask(i).toBool }
 
   val rwData = Wire(UInt(32.W))
   val roData = Wire(UInt(32.W))
@@ -54,16 +54,16 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
     val state = RegInit(s_idle)
     switch (state) {
       is (s_idle) {
-        when (p.a.fire()) { state := Mux(p.r.fire(), s_idle, s_reading) }
+        when (p.req.fire()) { state := Mux(p.resp.fire(), s_idle, s_reading) }
       }
       is (s_reading) {
-        when (p.r.fire()) { state := s_idle }
+        when (p.resp.fire()) { state := s_idle }
       }
     }
 
-    p.a.ready := state === s_idle
-    p.r.bits.data := rdata
-    p.r.valid := (if (delayCycles == 0) p.a.fire() else Counter(state === s_reading, delayCycles)._2)
+    p.req.ready := state === s_idle
+    p.resp.bits.rdata := rdata
+    p.resp.valid := (if (delayCycles == 0) p.req.fire() else Counter(state === s_reading, delayCycles)._2)
   }
 
   readPort(io.rw, rwData)
