@@ -5,12 +5,13 @@ SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 
 SIMTOP = top.TestMain
 IMAGE = ""
-SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE)
+SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE) \
+	--more-vcs-flags "+define+RANDOMIZE_REG_INIT"
 
 .DEFAULT_GOAL = verilog
 
 help:
-	sbt 'runMain top.$(TOP) --help'
+	sbt 'test:runMain gcd.GCDMain --help'
 
 LIBDEVICE_PATH = ./src/test/cpp/libdevice
 libdevice:
