@@ -31,9 +31,8 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   // bind out.req channel
   (io.out zip outSelVec).map { case (o, v) => {
     o.req.bits := inSel.req.bits
-    o.req.valid := v && (state === s_req)
-    o.resp.ready := v && (state === s_resp)
-    o.req.fire() && v
+    o.req.valid := v && (inSel.req.valid && (state === s_idle)) || (state === s_req)
+    o.resp.ready := v
   }}
 
   val bypass_s_resp = Mux(outSel.resp.fire(), s_idle, s_resp)
