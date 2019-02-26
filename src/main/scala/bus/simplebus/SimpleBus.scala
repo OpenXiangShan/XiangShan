@@ -11,8 +11,8 @@ class SimpleBusReqBundle(val dataBits: Int) extends Bundle {
   val wdata = Output(UInt(dataBits.W))
 
   override def toPrintable: Printable = {
-    p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)} " +
-    p"wen = ${wen}, wmask = 0x${Hexadecimal(addr)}, wdata = 0x${Hexadecimal(wdata)}"
+    p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)}, " +
+    p"wen = ${wen}, wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}"
   }
 }
 
