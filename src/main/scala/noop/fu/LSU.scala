@@ -46,9 +46,6 @@ object LSUInstr extends HasDecodeConst {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
   val dmem = new SimpleBus
-  val isLoad = Output(Bool())
-  val loadStall = Output(Bool())
-  val storeStall = Output(Bool())
 }
 
 class LSU extends Module with HasLSUOpType {
@@ -120,9 +117,4 @@ class LSU extends Module with HasLSUOpType {
       LsuLbu  -> Cat(0.U(24.W), rdata(7, 0)),
       LsuLhu  -> Cat(0.U(16.W), rdata(15, 0))
   ))
-
-  // perfcnt
-  io.isLoad := io.out.fire() && isStore
-  io.loadStall := BoolStopWatch(dmem.req.valid && !isStore, dmem.resp.fire())
-  io.storeStall := BoolStopWatch(dmem.req.valid && isStore, dmem.resp.fire())
 }

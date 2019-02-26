@@ -10,6 +10,7 @@ class Cache(ro: Boolean, name: String) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBus)
     val out = new SimpleBus
+    val hit = Output(Bool())
   })
 
   val debug = false
@@ -102,6 +103,7 @@ class Cache(ro: Boolean, name: String) extends Module {
 
   // return data
   io.in.resp.bits.rdata := inRdata//.asTypeOf(Vec(LineSize / 4, UInt(32.W)))(addrReg.wordIndex)
+  // FIXME: this assume io.in.resp.ready === true.B all the time
   io.in.resp.valid := (hit && (state === s_metaRead)) || ((state === s_outReadResp && io.out.resp.fire()))
 
   switch (state) {
@@ -129,6 +131,9 @@ class Cache(ro: Boolean, name: String) extends Module {
       when (io.out.resp.fire()) { state := s_outReadReq }
     }
   }
+
+  // perfcnt
+  io.hit := hit && (state === s_metaRead)
 
   if (debug) {
     io.in.dump(name + ".in")

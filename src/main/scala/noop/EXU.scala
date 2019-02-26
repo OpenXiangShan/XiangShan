@@ -16,9 +16,6 @@ class EXU extends Module with HasFuType {
       val isCsr = Output(Bool())
       val in = Flipped(Decoupled(UInt(32.W)))
       val instrType = Vec(FuTypeNum, Output(Bool()))
-      val isLoad = Output(Bool())
-      val loadStall = Output(Bool())
-      val storeStall = Output(Bool())
     }
   })
 
@@ -79,7 +76,4 @@ class EXU extends Module with HasFuType {
   io.csr.instrType(FuLsu) := lsu.io.out.fire()
   io.csr.instrType(FuMdu) := mdu.io.out.fire()
   io.csr.instrType(FuCsr) := io.csr.isCsr && io.csr.in.ready
-  io.csr.isLoad := lsu.io.isLoad
-  io.csr.loadStall := lsu.io.loadStall
-  io.csr.storeStall := lsu.io.storeStall
 }
