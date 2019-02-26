@@ -48,6 +48,9 @@ trait HasCSRConst {
   val MLoadInstr  = 0xb09
   val MLoadStall  = 0xb0a
   val MStoreStall = 0xb0b
+  val MmmioInstr  = 0xb0c
+  val MIcacheHit  = 0xb0d
+  val MDcacheHit  = 0xb0e
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
