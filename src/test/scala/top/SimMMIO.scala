@@ -71,4 +71,6 @@ class SimMMIO extends Module {
   io.rw.req.ready := true.B
   io.rw.resp.bits.rdata := io.mmioTrap.rdata
   io.rw.resp.valid := io.mmioTrap.valid
+
+  assert(!io.rw.req.valid || io.mmioTrap.valid, "bad addr = 0x%x", io.rw.req.bits.addr)
 }

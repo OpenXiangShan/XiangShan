@@ -24,6 +24,7 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   val outSel = io.out(outSelIdx)
 
   assert(!inSel.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
+  assert(!(inSel.req.valid && outSelVec.asUInt.andR), "address decode error, bad addr = 0x%x\n", addr)
 
   val s_idle :: s_req :: s_resp :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -31,7 +32,7 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   // bind out.req channel
   (io.out zip outSelVec).map { case (o, v) => {
     o.req.bits := inSel.req.bits
-    o.req.valid := v && (inSel.req.valid && (state === s_idle)) || (state === s_req)
+    o.req.valid := v && ((inSel.req.valid && (state === s_idle)) || (state === s_req))
     o.resp.ready := v
   }}
 
