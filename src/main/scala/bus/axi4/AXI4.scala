@@ -40,46 +40,71 @@ object AXI4Parameters {
   def RESP_DECERR = 3.U(respBits.W)
 }
 
-abstract class AXI4BundleA extends Bundle {
+trait AXI4HasUser {
+  val user  = Output(UInt(AXI4Parameters.userBits.W))
+}
+
+trait AXI4HasData {
+  val data  = Output(UInt(AXI4Parameters.dataBits.W))
+}
+
+trait AXI4HasId {
   val id    = Output(UInt(AXI4Parameters.idBits.W))
+}
+
+trait AXI4HasLast {
+  val last = Output(Bool())
+}
+
+// AXI4-lite
+
+class AXI4LiteBundleA extends Bundle {
   val addr  = Output(UInt(AXI4Parameters.addrBits.W))
+  val prot  = Output(UInt(AXI4Parameters.protBits.W))
+}
+
+class AXI4LiteBundleW extends Bundle with AXI4HasData {
+  val strb = Output(UInt((AXI4Parameters.dataBits/8).W))
+}
+
+class AXI4LiteBundleB extends Bundle {
+  val resp = Output(UInt(AXI4Parameters.respBits.W))
+}
+
+class AXI4LiteBundleR extends AXI4LiteBundleB with AXI4HasData
+
+
+class AXI4Lite extends Bundle {
+  val aw = Decoupled(new AXI4LiteBundleA)
+  val w  = Decoupled(new AXI4LiteBundleW)
+  val b  = Flipped(Decoupled(new AXI4LiteBundleB))
+  val ar = Decoupled(new AXI4LiteBundleA)
+  val r  = Flipped(Decoupled(new AXI4LiteBundleR))
+}
+
+
+// AXI4-full
+
+class AXI4BundleA extends AXI4LiteBundleA with AXI4HasId with AXI4HasUser {
   val len   = Output(UInt(AXI4Parameters.lenBits.W))  // number of beats - 1
   val size  = Output(UInt(AXI4Parameters.sizeBits.W)) // bytes in beat = 2^size
   val burst = Output(UInt(AXI4Parameters.burstBits.W))
   val lock  = Output(Bool())
   val cache = Output(UInt(AXI4Parameters.cacheBits.W))
-  val prot  = Output(UInt(AXI4Parameters.protBits.W))
   val qos   = Output(UInt(AXI4Parameters.qosBits.W))  // 0=no QoS, bigger = higher priority
-  val user  = Output(UInt(AXI4Parameters.userBits.W))
   // val region = UInt(width = 4) // optional
-
 }
 
-class AXI4BundleAW extends AXI4BundleA
-class AXI4BundleAR extends AXI4BundleA
+// id ... removed in AXI4
+class AXI4BundleW extends AXI4LiteBundleW with AXI4HasLast
+class AXI4BundleB extends AXI4LiteBundleB with AXI4HasId with AXI4HasUser
+class AXI4BundleR extends AXI4LiteBundleR with AXI4HasLast with AXI4HasId with AXI4HasUser
 
-class AXI4BundleW extends Bundle {
-  // id ... removed in AXI4
-  val data = Output(UInt(AXI4Parameters.dataBits.W))
-  val strb = Output(UInt((AXI4Parameters.dataBits/8).W))
-  val last = Output(Bool())
-}
 
-class AXI4BundleB extends Bundle {
-  val id   = Output(UInt(AXI4Parameters.idBits.W))
-  val resp = Output(UInt(AXI4Parameters.respBits.W))
-  val user = Output(UInt(AXI4Parameters.userBits.W))
-}
-
-class AXI4BundleR extends AXI4BundleB {
-  val data = Output(UInt(AXI4Parameters.dataBits.W))
-  val last = Output(Bool())
-}
-
-class AXI4 extends Bundle {
-  val aw = Decoupled(new AXI4BundleAW)
-  val w  = Decoupled(new AXI4BundleW)
-  val b  = Flipped(Decoupled(new AXI4BundleB))
-  val ar = Decoupled(new AXI4BundleAR)
-  val r  = Flipped(Decoupled(new AXI4BundleR))
+class AXI4 extends AXI4Lite {
+  override val aw = Decoupled(new AXI4BundleA)
+  override val w  = Decoupled(new AXI4BundleW)
+  override val b  = Flipped(Decoupled(new AXI4BundleB))
+  override val ar = Decoupled(new AXI4BundleA)
+  override val r  = Flipped(Decoupled(new AXI4BundleR))
 }
