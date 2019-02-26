@@ -7,6 +7,7 @@ import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
 
 trait NOOPConfig {
   val HasIcache = true
+  val HasDcache = true
   val HasMExtension = true
   val HasDiv = false
 
@@ -36,7 +37,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val wbu = Module(new WBU)
 
   if (HasIcache) {
-    val icache = Module(new ICache)
+    val icache = Module(new Cache(ro = true, name = "icache"))
     icache.io.in <> ifu.io.imem
     io.imem <> icache.io.out
   }
@@ -55,7 +56,16 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
 
   val xbar = Module(new SimpleBusCrossbar(1, AddressSpace))
   xbar.io.in(0) <> exu.io.dmem
-  io.dmem <> xbar.io.out(0)
+
+  if (HasDcache) {
+    val dcache = Module(new Cache(ro = false, name = "dcache"))
+    dcache.io.in <> xbar.io.out(0)
+    io.dmem <> dcache.io.out
+  }
+  else {
+    io.dmem <> xbar.io.out(0)
+  }
+
   io.mmio <> xbar.io.out(1)
 
   // csr
