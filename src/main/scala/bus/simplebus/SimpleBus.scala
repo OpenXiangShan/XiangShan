@@ -3,6 +3,8 @@ package bus.simplebus
 import chisel3._
 import chisel3.util._
 
+import utils._
+
 class SimpleBusReqBundle(val dataBits: Int) extends Bundle {
   val addr = Output(UInt(32.W))
   val size = Output(UInt(3.W))
@@ -41,5 +43,10 @@ class SimpleBus(val dataBits: Int = 32) extends Bundle {
     val mem2axi = Module(new SimpleBus2AXI4LiteConverter)
     mem2axi.io.in <> this
     mem2axi.io.out
+  }
+
+  def dump(name: String) = {
+    when (req.fire()) { printf(p"${GTimer()},[${name}] ${req.bits}\n") }
+    when (resp.fire()) { printf(p"${GTimer()},[${name}] ${resp.bits}\n") }
   }
 }
