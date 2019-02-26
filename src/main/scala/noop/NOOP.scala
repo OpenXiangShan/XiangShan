@@ -3,18 +3,25 @@ package noop
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
 
 trait NOOPConfig {
   val HasIcache = true
   val HasMExtension = true
   val HasDiv = false
+
+  // [start, end)
+  val AddressSpace = List(
+    (0x80000000L, 0xa0000000L),
+    (0x40000000L, 0x60000000L)
+  )
 }
 
 class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val io = IO(new Bundle {
-    val imem = new MemIO
-    val dmem = new MemIO
+    val imem = new SimpleBus
+    val dmem = new SimpleBus
+    val mmio = new SimpleBus
     val trap = Output(UInt(2.W))
     val sim = new Bundle {
       val cycleCnt = Output(UInt(32.W))
@@ -40,12 +47,16 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   idu.io.in <> ifu.io.out
   isu.io.in <> idu.io.out
   exu.io.in <> isu.io.out
-  io.dmem <> exu.io.dmem
   wbu.io.in <> exu.io.out
   wbu.io.brIn <> exu.io.br
   isu.io.wb <> wbu.io.wb
   ifu.io.br <> wbu.io.brOut
   ifu.io.writeback := wbu.io.writeback
+
+  val xbar = Module(new SimpleBusCrossbar(1, AddressSpace))
+  xbar.io.in(0) <> exu.io.dmem
+  io.dmem <> xbar.io.out(0)
+  io.mmio <> xbar.io.out(1)
 
   // csr
   val csr = Module(new CSR)

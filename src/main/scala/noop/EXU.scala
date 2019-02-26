@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.util._
 
 import utils._
-import memory.MemIO
+import bus.simplebus.SimpleBus
 
 class EXU extends Module with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Valid(new PcCtrlDataIO))
     val out = Valid((new PcCtrlDataIO))
     val br = new BranchIO
-    val dmem = new MemIO
+    val dmem = new SimpleBus
     val csr = new Bundle {
       val isCsr = Output(Bool())
       val in = Flipped(Decoupled(UInt(32.W)))

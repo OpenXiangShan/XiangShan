@@ -3,7 +3,7 @@ package gpu
 import chisel3._
 import chisel3.util._
 
-import memory.MemIO
+import bus.simplebus.SimpleBus
 
 class PixelBundle extends Bundle {
   val a = UInt(8.W)
@@ -69,7 +69,7 @@ trait GPUConst {
 class GPU extends Module with GPUConst {
   val io = IO(new Bundle {
     val start = Input(Bool())
-    val out = new MemIO(256)
+    val out = new SimpleBus(256)
   })
 
   val startCmd = io.start && !RegNext(io.start)
@@ -89,11 +89,11 @@ class GPU extends Module with GPUConst {
   val spriteBuf = Reg(new SpriteBundle)
   val textureLineCnt = Counter(TextureH)
   when (state === s_sprite_read) {
-    io.out.a.bits.addr := spriteAddr(spriteIdx.value)
-    io.out.a.bits.size := log2Up(SpriteBytes).U
+    io.out.req.bits.addr := spriteAddr(spriteIdx.value)
+    io.out.req.bits.size := log2Up(SpriteBytes).U
 
     // assume no read delay
-    val rdata = io.out.r.bits.data.asTypeOf(new SpriteBundle)
+    val rdata = io.out.resp.bits.rdata.asTypeOf(new SpriteBundle)
     spriteBuf := rdata
     textureLineCnt.value := 0.U
 
@@ -103,11 +103,11 @@ class GPU extends Module with GPUConst {
 
   val textureLineBuf = Reg(UInt((TextureLineBytes * 8).W))
   when (state === s_texture_read) {
-    io.out.a.bits.addr := textureLineAddr(spriteBuf.texture, textureLineCnt.value)
-    io.out.a.bits.size := log2Up(TextureLineBytes).U
+    io.out.req.bits.addr := textureLineAddr(spriteBuf.texture, textureLineCnt.value)
+    io.out.req.bits.size := log2Up(TextureLineBytes).U
 
     // assume no read delay
-    textureLineBuf := io.out.r.bits.data
+    textureLineBuf := io.out.resp.bits.rdata
     state := s_render_line
   }
 
@@ -119,9 +119,9 @@ class GPU extends Module with GPUConst {
     // should handle sprite accross a tile
     assert((renderAddr & (TextureLineBytes - 1).U) === 0.U)
 
-    io.out.a.bits.addr := renderAddr
-    io.out.a.bits.size := log2Up(TextureLineBytes).U
-    io.out.w.bits.data := textureLineBuf
+    io.out.req.bits.addr := renderAddr
+    io.out.req.bits.size := log2Up(TextureLineBytes).U
+    io.out.req.bits.wdata := textureLineBuf
 //    io.out.wmask := renderLineMask
 
     val finishOneTexture = textureLineCnt.inc()
@@ -130,13 +130,13 @@ class GPU extends Module with GPUConst {
   }
 
   when (state === s_sync) {
-    io.out.a.bits.addr := 0x4104.U
-    io.out.a.bits.size := 0x2.U
-    io.out.w.bits.data := 1.U
+    io.out.req.bits.addr := 0x4104.U
+    io.out.req.bits.size := 0x2.U
+    io.out.req.bits.wdata := 1.U
 
     state := s_idle
   }
 
-  io.out.a.valid := (state === s_sprite_read || state === s_texture_read || state === s_render_line || state === s_sync)
-  io.out.w.valid := (state === s_render_line || state === s_sync)
+  io.out.req.valid := (state === s_sprite_read || state === s_texture_read || state === s_render_line || state === s_sync)
+  io.out.req.bits.wen := (state === s_render_line || state === s_sync)
 }

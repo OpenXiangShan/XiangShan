@@ -5,9 +5,8 @@ import noop._
 import chisel3._
 import chisel3.util._
 
-import memory.DistributedMem
-import memory.{AHBRAM, AHBParameters, MemIO2AHBLiteConverter}
-import memory.{AXI4RAM, AXI4Parameters, MemIO2AXI4Converter, AXI4Delayer}
+import bus.axi4._
+import bus.simplebus.SimpleBus2AXI4Converter
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
   val io = IO(new Bundle{
@@ -23,33 +22,25 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   val noop = Module(new NOOP)
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
-  val imem2axi = Module(new MemIO2AXI4Converter)
-  val dmem2axi = Module(new MemIO2AXI4Converter)
-  val delay = Module(new AXI4Delayer(0.5))
+  val imem2axi = Module(new SimpleBus2AXI4Converter)
+  val dmem2axi = Module(new SimpleBus2AXI4Converter)
+  val imemdelay = Module(new AXI4Delayer(0.5))
+  val dmemdelay = Module(new AXI4Delayer(0.5))
   val mmio = Module(new SimMMIO)
 
   imem2axi.io.in <> noop.io.imem
-  delay.io.in <> imem2axi.io.out
-  imem.io.in <> delay.io.out
+  imemdelay.io.in <> imem2axi.io.out
+  imem.io.in <> imemdelay.io.out
   dmem2axi.io.in <> noop.io.dmem
-  dmem.io.in <> dmem2axi.io.out
+  dmemdelay.io.in <> dmem2axi.io.out
+  dmem.io.in <> dmemdelay.io.out
 
-  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, noop.io.dmem.w.bits.mask,
-    noop.io.dmem.a.bits.addr, noop.io.dmem.w.bits.data, noop.io.trap)
+  mmio.io.rw <> noop.io.mmio
+  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, mmio.io.rw.req.bits.wmask,
+    mmio.io.rw.req.bits.addr, mmio.io.rw.req.bits.wdata, noop.io.trap)
 
-  noop.io.dmem.a.ready     := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.a.ready, dmem2axi.io.in.a.ready)
-  noop.io.dmem.r.bits.data := Mux(mmio.io.mmioTrap.valid, io.mmioRdata, dmem2axi.io.in.r.bits.data)
-  noop.io.dmem.r.valid     := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.r.valid, dmem2axi.io.in.r.valid)
-  dmem2axi.io.in.a.valid    := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.a.valid)
-  dmem2axi.io.in.w.valid    := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.w.valid)
-
-  mmio.io.rw.a.bits  := noop.io.dmem.a.bits
-  mmio.io.rw.a.valid := noop.io.dmem.a.valid
-  mmio.io.rw.w       := noop.io.dmem.w
-  mmio.io.rw.r.ready := true.B
-
-  io.trapInfo.pc := noop.io.imem.a.bits.addr
-  io.trapInfo.instr := noop.io.imem.r.bits.data
+  io.trapInfo.pc := noop.io.imem.req.bits.addr
+  io.trapInfo.instr := noop.io.imem.resp.bits.rdata
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
   io.sim <> noop.io.sim
