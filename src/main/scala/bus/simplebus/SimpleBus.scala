@@ -36,4 +36,10 @@ class SimpleBus(val dataBits: Int = 32) extends Bundle {
     mem2axi.io.in <> this
     mem2axi.io.out
   }
+
+  def toAXI4Lite() = {
+    val mem2axi = Module(new SimpleBus2AXI4LiteConverter)
+    mem2axi.io.in <> this
+    mem2axi.io.out
+  }
 }
