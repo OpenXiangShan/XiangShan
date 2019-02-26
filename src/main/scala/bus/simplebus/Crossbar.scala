@@ -5,69 +5,72 @@ import chisel3.util._
 
 import utils._
 
-/*
 class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(m, new SimpleBus))
     val out = Vec(addressSpace.length, new SimpleBus)
   })
 
-  // choose an input
-  val aBundleArb = Module(new RRArbiter(chiselTypeOf(io.in(0).a.bits), m))
-  aBundleArb.io.in <> io.in.map(_.a)
-  val busy = RegInit(false.B)
-  val busyStart = aBundleArb.io.out.fire() && !busy
-  when (busyStart) { busy := true.B }
-  aBundleArb.io.out.ready := !busy
+  val debug = false
 
-  val inChosenIdx = Mux(busyStart, aBundleArb.io.chosen, RegNext(aBundleArb.io.chosen, busyStart))
-  // w channel is attached to a channel
-  val wBundle = io.in(inChosenIdx).w
-  val isRead = aBundleArb.io.out.valid && !wBundle.valid
+  require(m == 1, "now we only support 1 input channel")
+  val inSel = io.in(0)
 
-  when (io.out(0).a.fire()) {
-//    printf(p"${GTimer()}: ${io.out(0).a.bits}, wen = ${io.out(0).w.valid}, ${io.out(0).w.bits}\n")
-  }
+  // select the output channel according to the address
+  val addr = inSel.req.bits.addr
+  val outSelVec = VecInit(addressSpace.map(
+    range => (addr >= range._1.U && addr < range._2.U)))
+  val outSelIdx = PriorityEncoder(outSelVec)
+  val outSel = io.out(outSelIdx)
 
-  //printf(p"io.in = ${io.in}")
-  //printf(p"io.out = ${io.out}\n")
+  assert(!inSel.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
 
-  // select the output according to the address
-  val addr = aBundleArb.io.out.bits.addr
-  //val addrLatched = RegEnable(addr, isRead)
-  val outChosenVec_0 = VecInit(addressSpace.map(
-    range => (addr >= range._1.U && addr < range._2.U && aBundleArb.io.out.valid)))
-  val outChosenVec = Mux(busyStart, outChosenVec_0, RegNext(outChosenVec_0, busyStart))
-  val outChosenIdx = PriorityEncoder(outChosenVec)
-  val outChosen = io.out(outChosenIdx)
+  val s_idle :: s_req :: s_resp :: Nil = Enum(3)
+  val state = RegInit(s_idle)
 
-  when (aBundleArb.io.out.fire()) {
-//    printf("addr = %x\n", addr)
-//    printf(p"outChosenVec = ${outChosenVec}, outChosenIdx = ${outChosenIdx}\n")
-//    printf(p"${GTimer()}: arb.out.a: ${aBundleArb.io.out.bits}, wen = ${wBundle.valid}, arb.out.w: ${wBundle.bits}\n")
-  }
-
-
-  // bind a and w channel
-  io.out.map { out => {
-    out.a.bits := aBundleArb.io.out.bits
-    out.w := wBundle
+  // bind out.req channel
+  (io.out zip outSelVec).map { case (o, v) => {
+    o.req.bits := inSel.req.bits
+    o.req.valid := v && (state === s_req)
+    o.resp.ready := v && (state === s_resp)
+    o.req.fire() && v
   }}
 
-  //val busy = BoolStopWatch(isRead, io.out(outChosenIdx).r.fire())
-  val isReadLatched = Mux(busyStart, isRead, RegEnable(isRead, busyStart))
-  val busy = BoolStopWatch(busyStart, Mux(isReadLatched, outChosen.r.fire(), outChosen.a.fire()))
-  (io.out.map(_.a) zip outChosenVec).map { case (a, v) => a.valid := v }
-
-  when (io.in(0).a.valid) {
-    printf(p"${GTimer()}: xbar.in.a.ready = ${io.in(0).a.ready}, busy = ${busy}\n")
+  val bypass_s_resp = Mux(outSel.resp.fire(), s_idle, s_resp)
+  val bypass_s_req = Mux(outSel.req.fire(), bypass_s_resp, s_req)
+  switch (state) {
+    is (s_idle) {
+      when (inSel.req.valid) { state := bypass_s_req }
+    }
+    is (s_req) {
+      when (outSel.req.fire()) { state := bypass_s_resp }
+    }
+    is (s_resp) {
+      when (outSel.resp.fire()) { state := s_idle }
+    }
   }
 
-  // bind r channel
-  (io.out.map(_.r) zip outChosenVec).map { case (r, v) => r.ready := v && busy }
-  io.in.map(_.r).map (_.bits := outChosen.r.bits)
-  io.in.map(_.r).zipWithIndex.map { case (r, i) =>
-    r.valid := outChosen.r.valid && (i.U === inChosenIdx)
+  inSel.resp.valid := outSel.resp.fire()
+  inSel.resp.bits <> outSel.resp.bits
+  outSel.resp.ready := inSel.resp.ready
+
+  // ack in.req when the response is received
+  inSel.req.ready := outSel.resp.fire()
+
+  if (debug) {
+    when (state === s_idle && inSel.req.valid) {
+      printf(p"${GTimer()}: xbar: in.req: ${inSel.req.bits}\n")
+    }
+
+    when (outSel.req.fire()) {
+      printf(p"${GTimer()}: xbar: outSelIdx = ${outSelIdx}, outSel.req: ${outSel.req.bits}\n")
+    }
+    when (outSel.resp.fire()) {
+      printf(p"${GTimer()}: xbar: outSelIdx= ${outSelIdx}, outSel.resp: ${outSel.resp.bits}\n")
+    }
+
+    when (inSel.resp.fire()) {
+      printf(p"${GTimer()}: xbar: in.resp: ${inSel.resp.bits}\n")
+    }
   }
 }
-*/

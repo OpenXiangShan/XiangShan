@@ -35,19 +35,9 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   dmemdelay.io.in <> dmem2axi.io.out
   dmem.io.in <> dmemdelay.io.out
 
-  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, noop.io.dmem.req.bits.wmask,
-    noop.io.dmem.req.bits.addr, noop.io.dmem.req.bits.wdata, noop.io.trap)
-
-
-  noop.io.dmem.req.ready       := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.req.ready, dmem2axi.io.in.req.ready)
-  noop.io.dmem.resp.bits.rdata := Mux(mmio.io.mmioTrap.valid, io.mmioRdata, dmem2axi.io.in.resp.bits.rdata)
-  noop.io.dmem.resp.valid      := Mux(mmio.io.mmioTrap.valid, mmio.io.rw.resp.valid, dmem2axi.io.in.resp.valid)
-  dmem2axi.io.in.req.valid     := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.req.valid)
-  dmem2axi.io.in.req.bits.wen  := Mux(mmio.io.mmioTrap.valid, false.B, noop.io.dmem.req.bits.wen)
-
-  mmio.io.rw.req.bits  := noop.io.dmem.req.bits
-  mmio.io.rw.req.valid := noop.io.dmem.req.valid
-  mmio.io.rw.resp.ready := true.B
+  mmio.io.rw <> noop.io.mmio
+  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, mmio.io.rw.req.bits.wmask,
+    mmio.io.rw.req.bits.addr, mmio.io.rw.req.bits.wdata, noop.io.trap)
 
   io.trapInfo.pc := noop.io.imem.req.bits.addr
   io.trapInfo.instr := noop.io.imem.resp.bits.rdata
