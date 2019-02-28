@@ -101,6 +101,8 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   // cache
   csr.setPerfCnt(MIcacheHit, icacheHit)
   csr.setPerfCnt(MDcacheHit, dcacheHit)
+  // mul
+  csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
 
   io.trap := isu.io.trap
   io.sim <> csr.io.sim

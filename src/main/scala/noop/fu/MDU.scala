@@ -106,8 +106,12 @@ class Divider(len: Int = 32) extends Module with NOOPConfig {
   io.out.valid := (if (HasDiv) finish else io.in.valid) // FIXME: should deal with ready = 0
 }
 
+class MDUIO extends FunctionUnitIO {
+  val isMul = Output(Bool())
+}
+
 class MDU extends Module with HasMDUOpType {
-  val io = IO(new FunctionUnitIO)
+  val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
@@ -141,4 +145,7 @@ class MDU extends Module with HasMDUOpType {
   val isDivReg = Mux(io.in.fire(), isDiv(func), RegNext(isDiv(func)))
   io.in.ready := Mux(isDiv(func), div.io.in.ready, mul.io.in.ready)
   io.out.valid := Mux(isDivReg, div.io.out.valid, mul.io.out.valid)
+
+  // perfcnt
+  io.isMul := mul.io.out.fire()
 }
