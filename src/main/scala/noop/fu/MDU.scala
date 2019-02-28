@@ -14,6 +14,9 @@ trait HasMDUOpType {
   def MduDivu = "b101".U
   def MduRem  = "b110".U
   def MduRemu = "b111".U
+
+  def isDiv(op: UInt) = op(2)
+  def isSign(op: UInt) = isDiv(op) && !op(0)
 }
 
 object MDUInstr extends HasDecodeConst with NOOPConfig {
@@ -37,9 +40,78 @@ object MDUInstr extends HasDecodeConst with NOOPConfig {
   val table = mulTable ++ (if (HasDiv) divTable else Nil)
 }
 
-class MDU extends Module with HasMDUOpType with NOOPConfig {
-  val io = IO(new FunctionUnitIO)
-  val mulLatency = if (HasMExtension) 4 else 0
+class MulDivIO(val len: Int) extends Bundle {
+  val in = Flipped(DecoupledIO(Vec(2, Output(UInt(len.W)))))
+  val sign = Input(Bool())
+  val out = DecoupledIO(Vec(2, Output(UInt(len.W))))
+}
+
+class Multiplier(len: Int) extends Module with NOOPConfig {
+  val io = IO(new MulDivIO(len))
+  val latency = if (HasMExtension) 4 else 0
+
+  val mulRes = (io.in.bits(0).asSInt * io.in.bits(1).asSInt).asUInt
+  val mulPipeOut = Pipe(io.in.fire(), mulRes, latency)
+
+  io.out.bits(0) := (if (!HasMExtension) 0.U else mulPipeOut.bits(len - 1, 0))
+  io.out.bits(1) := (if (!HasMExtension) 0.U else mulPipeOut.bits(2 * len - 1, len))
+
+  val busy = RegInit(false.B)
+  when (io.in.valid && !busy) { busy := true.B }
+  when (mulPipeOut.valid) { busy := false.B }
+
+  io.in.ready := (if (latency == 0) true.B else !busy)
+  io.out.valid := mulPipeOut.valid
+}
+
+class Divider(len: Int = 32) extends Module with NOOPConfig {
+  val io = IO(new MulDivIO(len))
+
+  val shiftReg = Reg(UInt((1 + len * 2).W))
+  val bReg = Reg(UInt(len.W))
+  val aSignReg = Reg(Bool())
+  val bSignReg = Reg(Bool())
+
+  def abs(a: UInt, sign: Bool): (Bool, UInt) = {
+    val s = a(len - 1) && sign
+    (s, Mux(s, -a, a))
+  }
+
+  val next = Wire(Bool())
+  val (state, finish) = Counter(next, len + 2)
+
+  io.in.ready := state === 0.U
+  val (a, b) = (io.in.bits(0), io.in.bits(1))
+  when (state === 0.U && io.in.fire()) {
+    val (aSign, aVal) = abs(a, io.sign)
+    val (bSign, bVal) = abs(b, io.sign)
+    aSignReg := aSign
+    bSignReg := bSign
+    bReg := bVal
+    shiftReg := Cat(0.U(len.W), aVal, 0.U(1.W))
+  }
+
+  val hi = shiftReg(len * 2, len)
+  val lo = shiftReg(len - 1, 0)
+  when (state =/= 0.U) {
+    val enough = hi >= bReg
+    shiftReg := Cat(Mux(enough, hi - bReg, hi)(len - 1, 0), lo, enough)
+  }
+
+  next := (state === 0.U && io.in.fire()) || (state =/= 0.U)
+
+  val r = hi(len, 1)
+  io.out.bits(0) := (if (HasDiv) Mux(aSignReg ^ bSignReg, -lo, lo) else 0.U)
+  io.out.bits(1) := (if (HasDiv) Mux(aSignReg, -r, r) else 0.U)
+  io.out.valid := (if (HasDiv) finish else io.in.valid) // FIXME: should deal with ready = 0
+}
+
+class MDUIO extends FunctionUnitIO {
+  val isMul = Output(Bool())
+}
+
+class MDU extends Module with HasMDUOpType {
+  val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
@@ -50,25 +122,30 @@ class MDU extends Module with HasMDUOpType with NOOPConfig {
     io.out.bits
   }
 
-  val mulRes = (src1.asSInt * src2.asSInt).asUInt
-  val mulPipeOut = Pipe(io.in.fire(), mulRes, mulLatency)
+  val mul = Module(new Multiplier(32))
+  val div = Module(new Divider(32))
+  List(mul.io, div.io).map { case x =>
+    x.in.bits(0) := src1
+    x.in.bits(1) := src2
+    x.sign := isSign(func)
+    x.out.ready := io.out.ready
+  }
+  mul.io.in.valid := io.in.valid && !isDiv(func)
+  div.io.in.valid := io.in.valid && isDiv(func)
 
-  val mulFunc = List(
-    MduMul  -> mulPipeOut.bits(31, 0),
-    MduMulh -> mulPipeOut.bits(63, 32)
-  )
-  val divFunc = (if (HasDiv) List(
-    MduDiv  -> (src1.asSInt  /  src2.asSInt).asUInt,
-    MduDivu -> (src1  /  src2),
-    MduRem  -> (src1.asSInt  %  src2.asSInt).asUInt,
-    MduRemu -> (src1  %  src2)
-  ) else Nil)
-  io.out.bits := (if (!HasMExtension) 0.U else LookupTree(func, 0.U, mulFunc ++ divFunc))
+  io.out.bits := LookupTree(func, 0.U, List(
+    MduMul  -> mul.io.out.bits(0),
+    MduMulh -> mul.io.out.bits(1),
+    MduDiv  -> div.io.out.bits(0),
+    MduDivu -> div.io.out.bits(0),
+    MduRem  -> div.io.out.bits(1),
+    MduRemu -> div.io.out.bits(1)
+  ))
 
-  val busy = RegInit(false.B)
-  when (io.in.valid && !busy) { busy := true.B }
-  when (mulPipeOut.valid) { busy := false.B }
+  val isDivReg = Mux(io.in.fire(), isDiv(func), RegNext(isDiv(func)))
+  io.in.ready := Mux(isDiv(func), div.io.in.ready, mul.io.in.ready)
+  io.out.valid := Mux(isDivReg, div.io.out.valid, mul.io.out.valid)
 
-  io.in.ready := (if (mulLatency == 0) true.B else !busy)
-  io.out.valid := mulPipeOut.valid
+  // perfcnt
+  io.isMul := mul.io.out.fire()
 }

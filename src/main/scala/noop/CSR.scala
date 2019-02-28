@@ -51,6 +51,7 @@ trait HasCSRConst {
   val MmmioInstr  = 0xb0c
   val MIcacheHit  = 0xb0d
   val MDcacheHit  = 0xb0e
+  val MmulInstr  = 0xb0f
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
