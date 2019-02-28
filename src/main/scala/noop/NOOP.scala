@@ -10,7 +10,7 @@ trait NOOPConfig {
   val HasIcache = true
   val HasDcache = true
   val HasMExtension = true
-  val HasDiv = false
+  val HasDiv = true
 
   // [start, end)
   val AddressSpace = List(
