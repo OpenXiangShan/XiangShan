@@ -12,6 +12,7 @@ set src_files [list \
 # Add files for constraint
 set xdc_files [list \
   "[file normalize "${script_dir}/constr/constr.xdc"]" \
+  "[file normalize "${script_dir}/constr/vga.xdc"]" \
 ]
 
 source ${script_dir}/../common.tcl

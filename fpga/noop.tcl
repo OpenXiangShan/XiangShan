@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# NOOPFPGA, AXI4Timer
+# NOOPFPGA, AXI4Timer, VGA
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -164,6 +164,7 @@ if { $bCheckModules == 1 } {
    set list_check_mods "\ 
 NOOPFPGA\
 AXI4Timer\
+VGA\
 "
 
    set list_mods_missing ""
@@ -234,6 +235,11 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   create_bd_pin -dir I -type clk clk50
   create_bd_pin -dir I -type clk coreclk
   create_bd_pin -dir I -from 0 -to 0 -type rst corerstn
+  create_bd_pin -dir O -from 3 -to 0 io_b
+  create_bd_pin -dir O -from 3 -to 0 io_g
+  create_bd_pin -dir O io_hsync
+  create_bd_pin -dir O -from 3 -to 0 io_r
+  create_bd_pin -dir O io_vsync
   create_bd_pin -dir I -type rst rstn50
 
   # Create instance: AXI4Timer_0, and set properties
@@ -252,6 +258,17 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
    CONFIG.NUM_WRITE_OUTSTANDING {1} \
  ] [get_bd_intf_pins /hier_devices/AXI4Timer_0/io_in]
 
+  # Create instance: VGA_0, and set properties
+  set block_name VGA
+  set block_cell_name VGA_0
+  if { [catch {set VGA_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $VGA_0 eq "" } {
+     catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
   # Create instance: axi_clock_converter_1, and set properties
   set axi_clock_converter_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_clock_converter:2.1 axi_clock_converter_1 ]
 
@@ -280,11 +297,16 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   connect_bd_intf_net -intf_net axi_crossbar_2_M01_AXI [get_bd_intf_pins axi_crossbar_2/M01_AXI] [get_bd_intf_pins axi_uartlite_0/S_AXI]
 
   # Create port connections
-  connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Timer_0/clock] [get_bd_pins axi_clock_converter_1/m_axi_aclk] [get_bd_pins axi_crossbar_2/aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk]
+  connect_bd_net -net VGA_0_io_b [get_bd_pins io_b] [get_bd_pins VGA_0/io_b]
+  connect_bd_net -net VGA_0_io_g [get_bd_pins io_g] [get_bd_pins VGA_0/io_g]
+  connect_bd_net -net VGA_0_io_hsync [get_bd_pins io_hsync] [get_bd_pins VGA_0/io_hsync]
+  connect_bd_net -net VGA_0_io_r [get_bd_pins io_r] [get_bd_pins VGA_0/io_r]
+  connect_bd_net -net VGA_0_io_vsync [get_bd_pins io_vsync] [get_bd_pins VGA_0/io_vsync]
+  connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Timer_0/clock] [get_bd_pins VGA_0/clock] [get_bd_pins axi_clock_converter_1/m_axi_aclk] [get_bd_pins axi_crossbar_2/aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk]
   connect_bd_net -net coreclk_1 [get_bd_pins coreclk] [get_bd_pins axi_clock_converter_1/s_axi_aclk]
   connect_bd_net -net proc_sys_reset_0_interconnect_aresetn [get_bd_pins rstn50] [get_bd_pins axi_clock_converter_1/m_axi_aresetn] [get_bd_pins axi_crossbar_2/aresetn] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins util_vector_logic_0/Op1]
   connect_bd_net -net uncorerstn_1 [get_bd_pins corerstn] [get_bd_pins axi_clock_converter_1/s_axi_aresetn]
-  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins AXI4Timer_0/reset] [get_bd_pins util_vector_logic_0/Res]
+  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins AXI4Timer_0/reset] [get_bd_pins VGA_0/reset] [get_bd_pins util_vector_logic_0/Res]
 
   # Restore current instance
   current_bd_instance $oldCurInst
@@ -407,6 +429,11 @@ proc create_root_design { parentCell } {
   set uart [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 uart ]
 
   # Create ports
+  set VGA_b [ create_bd_port -dir O -from 3 -to 0 VGA_b ]
+  set VGA_g [ create_bd_port -dir O -from 3 -to 0 VGA_g ]
+  set VGA_hsync [ create_bd_port -dir O VGA_hsync ]
+  set VGA_r [ create_bd_port -dir O -from 3 -to 0 VGA_r ]
+  set VGA_vsync [ create_bd_port -dir O VGA_vsync ]
   set clk50 [ create_bd_port -dir I -type clk clk50 ]
   set_property -dict [ list \
    CONFIG.FREQ_HZ {50000000} \
@@ -505,6 +532,11 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets axi_clock_converter_0_M_AXI] [ge
   connect_bd_net -net clk50_1 [get_bd_ports clk50] [get_bd_pins hier_devices/clk50]
   connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPFPGA_0/clock] [get_bd_pins axi_clock_converter_0/s_axi_aclk] [get_bd_pins axi_crossbar_1/aclk] [get_bd_pins hier_coreclk_sync/coreclk] [get_bd_pins hier_devices/coreclk]
   connect_bd_net -net corerstn_1 [get_bd_ports corerstn] [get_bd_pins hier_coreclk_sync/sync_in]
+  connect_bd_net -net hier_devices_io_b [get_bd_ports VGA_b] [get_bd_pins hier_devices/io_b]
+  connect_bd_net -net hier_devices_io_g [get_bd_ports VGA_g] [get_bd_pins hier_devices/io_g]
+  connect_bd_net -net hier_devices_io_hsync [get_bd_ports VGA_hsync] [get_bd_pins hier_devices/io_hsync]
+  connect_bd_net -net hier_devices_io_r [get_bd_ports VGA_r] [get_bd_pins hier_devices/io_r]
+  connect_bd_net -net hier_devices_io_vsync [get_bd_ports VGA_vsync] [get_bd_pins hier_devices/io_vsync]
   connect_bd_net -net rstn50_1 [get_bd_ports rstn50] [get_bd_pins hier_devices/rstn50]
   connect_bd_net -net uncoreclk_1 [get_bd_ports uncoreclk] [get_bd_pins axi_clock_converter_0/m_axi_aclk] [get_bd_pins system_ila_0/clk]
   connect_bd_net -net uncorerstn_2 [get_bd_ports uncorerstn] [get_bd_pins axi_clock_converter_0/m_axi_aresetn] [get_bd_pins system_ila_0/resetn]
