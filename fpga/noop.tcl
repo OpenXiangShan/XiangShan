@@ -269,11 +269,19 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
      return 1
    }
   
+  set_property -dict [ list \
+   CONFIG.NUM_READ_OUTSTANDING {1} \
+   CONFIG.NUM_WRITE_OUTSTANDING {1} \
+ ] [get_bd_intf_pins /hier_devices/VGA_0/io_in]
+
   # Create instance: axi_clock_converter_1, and set properties
   set axi_clock_converter_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_clock_converter:2.1 axi_clock_converter_1 ]
 
   # Create instance: axi_crossbar_2, and set properties
   set axi_crossbar_2 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_crossbar:2.1 axi_crossbar_2 ]
+  set_property -dict [ list \
+   CONFIG.NUM_MI {3} \
+ ] $axi_crossbar_2
 
   # Create instance: axi_uartlite_0, and set properties
   set axi_uartlite_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_uartlite:2.0 axi_uartlite_0 ]
@@ -295,13 +303,14 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   connect_bd_intf_net -intf_net axi_clock_converter_1_M_AXI [get_bd_intf_pins axi_clock_converter_1/M_AXI] [get_bd_intf_pins axi_crossbar_2/S00_AXI]
   connect_bd_intf_net -intf_net axi_crossbar_2_M00_AXI [get_bd_intf_pins AXI4Timer_0/io_in] [get_bd_intf_pins axi_crossbar_2/M00_AXI]
   connect_bd_intf_net -intf_net axi_crossbar_2_M01_AXI [get_bd_intf_pins axi_crossbar_2/M01_AXI] [get_bd_intf_pins axi_uartlite_0/S_AXI]
+  connect_bd_intf_net -intf_net axi_crossbar_2_M02_AXI [get_bd_intf_pins VGA_0/io_in] [get_bd_intf_pins axi_crossbar_2/M02_AXI]
 
   # Create port connections
-  connect_bd_net -net VGA_0_io_b [get_bd_pins io_b] [get_bd_pins VGA_0/io_b]
-  connect_bd_net -net VGA_0_io_g [get_bd_pins io_g] [get_bd_pins VGA_0/io_g]
-  connect_bd_net -net VGA_0_io_hsync [get_bd_pins io_hsync] [get_bd_pins VGA_0/io_hsync]
-  connect_bd_net -net VGA_0_io_r [get_bd_pins io_r] [get_bd_pins VGA_0/io_r]
-  connect_bd_net -net VGA_0_io_vsync [get_bd_pins io_vsync] [get_bd_pins VGA_0/io_vsync]
+  connect_bd_net -net VGA_0_io_b [get_bd_pins io_b] [get_bd_pins VGA_0/io_vga_b]
+  connect_bd_net -net VGA_0_io_g [get_bd_pins io_g] [get_bd_pins VGA_0/io_vga_g]
+  connect_bd_net -net VGA_0_io_hsync [get_bd_pins io_hsync] [get_bd_pins VGA_0/io_vga_hsync]
+  connect_bd_net -net VGA_0_io_r [get_bd_pins io_r] [get_bd_pins VGA_0/io_vga_r]
+  connect_bd_net -net VGA_0_io_vsync [get_bd_pins io_vsync] [get_bd_pins VGA_0/io_vga_vsync]
   connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Timer_0/clock] [get_bd_pins VGA_0/clock] [get_bd_pins axi_clock_converter_1/m_axi_aclk] [get_bd_pins axi_crossbar_2/aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk]
   connect_bd_net -net coreclk_1 [get_bd_pins coreclk] [get_bd_pins axi_clock_converter_1/s_axi_aclk]
   connect_bd_net -net proc_sys_reset_0_interconnect_aresetn [get_bd_pins rstn50] [get_bd_pins axi_clock_converter_1/m_axi_aresetn] [get_bd_pins axi_crossbar_2/aresetn] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins util_vector_logic_0/Op1]
@@ -546,6 +555,7 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets axi_clock_converter_0_M_AXI] [ge
   create_bd_addr_seg -range 0x00010000 -offset 0x40700000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4Timer_0/io_in/reg0] SEG_AXI4Timer_0_reg0
   create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
   create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
+  create_bd_addr_seg -range 0x00400000 -offset 0x40000000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/VGA_0/io_in/reg0] SEG_VGA_0_reg0
   create_bd_addr_seg -range 0x00010000 -offset 0x40600000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/axi_uartlite_0/S_AXI/Reg] SEG_axi_uartlite_0_Reg
 
 

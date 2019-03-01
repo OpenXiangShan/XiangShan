@@ -28,6 +28,7 @@ class Top extends Module {
 
   noop.io := DontCare
   timer.io := DontCare
+  vga.io := DontCare
   dontTouch(noop.io)
   dontTouch(timer.io)
   dontTouch(vga.io)
