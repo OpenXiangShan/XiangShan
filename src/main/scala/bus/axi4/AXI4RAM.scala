@@ -12,7 +12,7 @@ class AXI4RAM(memByte: Int, beatBytes: Int = 4, dataFile: String = "") extends M
   })
 
   val in = io.in
-  val mem = SeqMem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))
+  val mem = Mem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))
   if (dataFile != "") loadMemoryFromFile(mem, dataFile)
 
   val r_addr = in.ar.bits.addr >> log2Ceil(beatBytes)
@@ -58,7 +58,7 @@ class AXI4RAM(memByte: Int, beatBytes: Int = 4, dataFile: String = "") extends M
   def holdUnless[T <: Data](x: T, enable: Bool): T = Mux(enable, x, RegEnable(x, enable))
 
   val ren = in.ar.fire()
-  val rdata = holdUnless(mem.read(r_addr, ren), RegNext(ren))
+  val rdata = RegEnable(mem.read(r_addr), ren)
 
   in. r.valid := r_full
   in.ar.ready := in.r.ready || !r_full
