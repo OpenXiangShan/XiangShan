@@ -5,7 +5,7 @@ import chisel3.util._
 
 import bus.axi4._
 
-sealed abstract class Converter[T <: AXI4Lite](_type: T) extends Module {
+class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBus)
     val out = _type
@@ -22,9 +22,24 @@ sealed abstract class Converter[T <: AXI4Lite](_type: T) extends Module {
 
   ar.addr  := mem.req.bits.addr
   ar.prot  := AXI4Parameters.PROT_PRIVILEDGED
-  aw := ar
   w.data := mem.req.bits.wdata
   w.strb := mem.req.bits.wmask
+
+  io.out match {
+    case axi4: AXI4 =>
+      axi4.ar.bits.id    := 0.U
+      axi4.ar.bits.len   := 0.U  // single beat
+      axi4.ar.bits.size  := mem.req.bits.size
+      axi4.ar.bits.burst := AXI4Parameters.BURST_INCR
+      axi4.ar.bits.lock  := false.B
+      axi4.ar.bits.cache := 0.U
+      axi4.ar.bits.qos   := 0.U
+      axi4.ar.bits.user  := 0.U
+      axi4.w.bits.last := true.B
+    case axi4lite: AXI4Lite =>
+  }
+
+  aw := ar
   mem.resp.bits.rdata := r.data
 
   val awAck = RegInit(false.B)
@@ -47,19 +62,4 @@ sealed abstract class Converter[T <: AXI4Lite](_type: T) extends Module {
   axi.r.ready  := mem.resp.ready
   axi.b.ready  := mem.resp.ready
   mem.resp.valid  := Mux(wen, axi.b.valid, axi.r.valid)
-}
-
-class SimpleBus2AXI4LiteConverter extends Converter(new AXI4Lite)
-
-class SimpleBus2AXI4Converter extends Converter(new AXI4) {
-  io.out.ar.bits.id    := 0.U
-  io.out.ar.bits.len   := 0.U  // single beat
-  io.out.ar.bits.size  := mem.req.bits.size
-  io.out.ar.bits.burst := AXI4Parameters.BURST_INCR
-  io.out.ar.bits.lock  := false.B
-  io.out.ar.bits.cache := 0.U
-  io.out.ar.bits.qos   := 0.U
-  io.out.ar.bits.user  := 0.U
-  io.out.aw.bits := io.out.ar.bits
-  io.out.w.bits.last := true.B
 }

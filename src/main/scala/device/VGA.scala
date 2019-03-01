@@ -40,7 +40,7 @@ class VGA extends Module with HasVGAConst {
     val vga = new VGABundle
   })
 
-  val fb = Module(new AXI4LiteRAM(FBPixels * 4))
+  val fb = Module(new AXI4RAM(_type = new AXI4Lite, FBPixels * 4))
   // writable by axi4lite
   fb.io.in.aw <> io.in.aw
   fb.io.in.w <> io.in.w
