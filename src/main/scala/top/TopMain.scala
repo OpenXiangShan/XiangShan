@@ -2,7 +2,7 @@ package top
 
 import noop.NOOP
 import bus.axi4.{AXI4, AXI4Lite}
-import device.{AXI4Timer, VGA}
+import device.{AXI4Timer, AXI4VGA}
 
 import chisel3._
 import chisel3.experimental.dontTouch
@@ -24,7 +24,7 @@ class Top extends Module {
   val io = IO(new Bundle{})
   val noop = Module(new NOOPFPGA)
   val timer = Module(new AXI4Timer)
-  val vga = Module(new VGA)
+  val vga = Module(new AXI4VGA)
 
   noop.io := DontCare
   timer.io := DontCare

@@ -33,28 +33,36 @@ class VGABundle extends Bundle {
   val vsync = Output(Bool())
 }
 
-class VGA extends Module with HasVGAConst {
+class VGACtrl extends AXI4SlaveModule(new AXI4Lite) with HasVGAConst {
+  // actually this is a constant
+  val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
+  // we always return fbSizeReg to axi4lite
+  in.r.bits.data := fbSizeReg
+  val sync = in.aw.fire()
+}
+
+class AXI4VGA extends Module with HasVGAConst {
   // need a 50MHz clock
   val io = IO(new Bundle {
-    val in = Flipped(new AXI4Lite)
+    val in = new Bundle {
+      val fb = Flipped(new AXI4Lite)
+      val ctrl = Flipped(new AXI4Lite)
+    }
     val vga = new VGABundle
   })
 
+  val ctrl = Module(new VGACtrl)
+  io.in.ctrl <> ctrl.io.in
   val fb = Module(new AXI4RAM(_type = new AXI4Lite, FBPixels * 4))
   // writable by axi4lite
-  fb.io.in.aw <> io.in.aw
-  fb.io.in.w <> io.in.w
-  io.in.b <> fb.io.in.b
-
-  // actually this is a constant
-  val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
-
   // but it only readable by the internel controller
-  // we always return fbSizeReg to axi4lite
-  io.in.ar.ready := true.B
-  io.in.r.bits.resp := AXI4Parameters.RESP_OKAY
-  io.in.r.bits.data := fbSizeReg
-  io.in.r.valid := BoolStopWatch(io.in.ar.fire(), io.in.r.fire())
+  fb.io.in.aw <> io.in.fb.aw
+  fb.io.in.w <> io.in.fb.w
+  io.in.fb.b <> fb.io.in.b
+  io.in.fb.ar.ready := true.B
+  io.in.fb.r.bits.data := 0.U
+  io.in.fb.r.bits.resp := AXI4Parameters.RESP_OKAY
+  io.in.fb.r.valid := BoolStopWatch(io.in.fb.ar.fire(), io.in.fb.r.fire(), startHighPriority = true)
 
   def inRange(x: UInt, start: Int, end: Int) = (x >= start.U) && (x < end.U)
 

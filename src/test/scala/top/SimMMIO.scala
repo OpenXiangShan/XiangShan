@@ -44,24 +44,24 @@ class SimMMIO extends Module {
         io.mmioTrap.valid := true.B
         io.mmioTrap.cmd := 1.U
       }
-      is (0x40000060.U) {
+      is (0x40900000.U) {
         // read key
         io.mmioTrap.valid := true.B
         io.mmioTrap.cmd := 2.U
       }
-      is (0x40000100.U) {
+      is (0x40800000.U) {
         // read screen size
         io.mmioTrap.valid := true.B
         io.mmioTrap.cmd := 3.U
       }
-      is (0x40000104.U) {
+      is (0x40800004.U) {
         // write vga sync
         io.mmioTrap.valid := true.B
         io.mmioTrap.cmd := 4.U
       }
     }
 
-    when (io.rw.req.bits.addr >= 0x40040000.U && io.rw.req.bits.addr < 0x400c0000.U && wen) {
+    when (io.rw.req.bits.addr >= 0x40000000.U && io.rw.req.bits.addr < 0x40400000.U && wen) {
       // write to vmem
       io.mmioTrap.valid := true.B
       io.mmioTrap.cmd := 5.U
