@@ -22,7 +22,13 @@ module system_top (
   inout [53:0] FIXED_IO_mio,
   inout FIXED_IO_ps_clk,
   inout FIXED_IO_ps_porb,
-  inout FIXED_IO_ps_srstb
+  inout FIXED_IO_ps_srstb,
+
+  output [3:0] VGA_r,
+  output [3:0] VGA_g,
+  output [3:0] VGA_b,
+  output VGA_hsync,
+  output VGA_vsync
 );
 
   `axi_wire(AXI_MEM_MAPPED, 32, 8);
@@ -85,6 +91,12 @@ module system_top (
 
     .uart_txd(noop_uart_tx),
     .uart_rxd(noop_uart_rx),
+
+    .VGA_b(VGA_b),
+    .VGA_r(VGA_r),
+    .VGA_g(VGA_g),
+    .VGA_hsync(VGA_hsync),
+    .VGA_vsync(VGA_vsync),
 
     .coreclk(coreclk),
     .corerstn(corerstn),
