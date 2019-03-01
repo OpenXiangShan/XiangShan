@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import utils._
+import bus.axi4._
 
 class SimpleBusReqBundle(val dataBits: Int) extends Bundle {
   val addr = Output(UInt(32.W))
@@ -33,14 +34,8 @@ class SimpleBus(val dataBits: Int = 32) extends Bundle {
   def isWrite() = req.valid && req.bits.wen
   def isRead() = req.valid && !req.bits.wen
 
-  def toAXI4() = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter)
-    mem2axi.io.in <> this
-    mem2axi.io.out
-  }
-
-  def toAXI4Lite() = {
-    val mem2axi = Module(new SimpleBus2AXI4LiteConverter)
+  def toAXI4(isLite: Boolean = false) = {
+    val mem2axi = Module(new SimpleBus2AXI4Converter(if (isLite) new AXI4Lite else new AXI4))
     mem2axi.io.in <> this
     mem2axi.io.out
   }

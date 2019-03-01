@@ -7,7 +7,7 @@ import chisel3.util._
 import utils.LFSR64
 
 // q is the probability to delay a request
-sealed abstract class Delayer[T <: AXI4Lite](q: Double, _type: T) extends Module {
+class AXI4Delayer[T <: AXI4Lite](q: Double, _type: T = new AXI4) extends Module {
   val io = IO(new Bundle{
     val in = Flipped(_type)
     val out = _type
@@ -33,6 +33,3 @@ sealed abstract class Delayer[T <: AXI4Lite](q: Double, _type: T) extends Module
   feed(io.in.b,   io.out.b)
   feed(io.in.r,   io.out.r)
 }
-
-class AXI4Delayer(q: Double) extends Delayer(q, new AXI4)
-class AXI4LiteDelayer(q: Double) extends Delayer(q, new AXI4Lite)
