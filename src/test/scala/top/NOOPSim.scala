@@ -6,6 +6,7 @@ import chisel3._
 import chisel3.util._
 
 import bus.axi4._
+import device.AXI4RAM
 import bus.simplebus.SimpleBus2AXI4Converter
 
 class NOOPSimTop(memInitFile: String = "") extends Module {

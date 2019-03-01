@@ -1,10 +1,12 @@
 // See LICENSE.SiFive for license details.
 
-package bus.axi4
+package device
 
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
+
+import bus.axi4._
 
 sealed abstract class RAM[T <: AXI4Lite](_type: T,
   memByte: Int, beatBytes: Int = 4, dataFile: String = "") extends Module {

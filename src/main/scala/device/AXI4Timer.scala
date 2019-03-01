@@ -5,7 +5,7 @@ package device
 import chisel3._
 import chisel3.util._
 
-import bus.axi4.{AXI4Lite, AXI4Parameters}
+import bus.axi4._
 
 class AXI4Timer extends Module {
   val io = IO(new Bundle{
