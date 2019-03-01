@@ -18,8 +18,7 @@ sealed abstract class RAM[T <: AXI4Lite](_type: T,
   val mem = Mem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))
   if (dataFile != "") loadMemoryFromFile(mem, dataFile)
 
-  val r_addr = in.ar.bits.addr >> log2Ceil(beatBytes)
-  val w_addr = in.aw.bits.addr >> log2Ceil(beatBytes)
+  def index(addr: UInt) = addr >> log2Ceil(beatBytes)
 
   val w_full = RegInit(false.B)
   when (in. b.fire()) { w_full := false.B }
@@ -27,7 +26,7 @@ sealed abstract class RAM[T <: AXI4Lite](_type: T,
 
   val wdata = VecInit.tabulate(beatBytes) { i => in.w.bits.data(8*(i+1)-1, 8*i) }
   when (in.aw.fire()) {
-    mem.write(w_addr, wdata, in.w.bits.strb.toBools)
+    mem.write(index(in.ar.bits.addr), wdata, in.w.bits.strb.toBools)
   }
 
   in. b.valid := w_full
@@ -42,7 +41,7 @@ sealed abstract class RAM[T <: AXI4Lite](_type: T,
   def holdUnless[T <: Data](x: T, enable: Bool): T = Mux(enable, x, RegEnable(x, enable))
 
   val ren = in.ar.fire()
-  val rdata = RegEnable(mem.read(r_addr), ren)
+  val rdata = RegEnable(mem.read(index(in.ar.bits.addr)), ren)
 
   in. r.valid := r_full
   in.ar.ready := in.r.ready || !r_full
