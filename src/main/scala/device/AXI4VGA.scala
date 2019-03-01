@@ -41,7 +41,7 @@ class VGACtrl extends AXI4SlaveModule(new AXI4Lite) with HasVGAConst {
   val sync = in.aw.fire()
 }
 
-class VGA extends Module with HasVGAConst {
+class AXI4VGA extends Module with HasVGAConst {
   // need a 50MHz clock
   val io = IO(new Bundle {
     val in = new Bundle {
