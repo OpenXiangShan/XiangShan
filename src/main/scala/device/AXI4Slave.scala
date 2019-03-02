@@ -6,8 +6,11 @@ import chisel3.util._
 import bus.axi4._
 import utils._
 
-abstract class AXI4SlaveModule[T <: AXI4Lite](_type :T = new AXI4) extends Module {
-  val io = IO(new Bundle{ val in = Flipped(_type) })
+abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _extra: Option[B] = None) extends Module {
+  val io = IO(new Bundle{
+    val in = Flipped(_type)
+    val extra = _extra
+  })
   val in = io.in
 
   val w_full = BoolStopWatch(in.aw.fire(), in.b.fire(), startHighPriority = true)
