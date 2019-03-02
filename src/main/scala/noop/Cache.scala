@@ -17,7 +17,8 @@ class Cache(ro: Boolean, name: String) extends Module {
   val debug = false
 
   val TotalSize = 16 // Kbytes
-  val LineSize = 4 //64 // byte
+  val LineSize = 64 // byte
+  val LineBeats = LineSize / 4
   val Sets = TotalSize * 1024 / LineSize
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
@@ -26,7 +27,7 @@ class Cache(ro: Boolean, name: String) extends Module {
   val addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
     val index = UInt(IndexBits.W)
-    //val wordIndex = UInt((OffsetBits - 2).W)
+    val wordIndex = UInt((OffsetBits - 2).W)
     val byteOffset = UInt(2.W)
   }
 
@@ -45,7 +46,7 @@ class Cache(ro: Boolean, name: String) extends Module {
     resetState := false.B
   }
 
-  val s_idle :: s_metaRead :: s_outReadReq :: s_outReadResp :: s_outWriteReq :: s_outWriteResp :: Nil = Enum(6)
+  val s_idle :: s_metaRead :: s_outReadReq :: s_outReadResp :: s_outWriteReq :: s_outWriteResp :: s_metaWrite :: Nil = Enum(7)
   val state = RegInit(s_idle)
 
   // read metadata
@@ -85,7 +86,7 @@ class Cache(ro: Boolean, name: String) extends Module {
   io.out.ar.valid := (state === s_outReadReq)
   io.out.aw.valid := (state === s_outWriteReq)
   io.out.w.valid := (state === s_outWriteReq)
-  io.out.ar.bits.addr := reqReg.addr
+  io.out.ar.bits.addr := reqReg.addr & ~(LineSize - 1).U(32.W)
   io.out.aw.bits.addr := dirtyBlockAddr
   io.out.w.bits.data := dataRead
   io.out.w.bits.strb := 0xf.U
@@ -94,14 +95,14 @@ class Cache(ro: Boolean, name: String) extends Module {
   io.out.b.ready := (state === s_outWriteResp)
 
   // refill
-  val metaWriteEnable = !metaReadEnable && (
-    ((state === s_outReadResp) && io.out.r.fire()) ||
+  val metaWriteEnable = !metaReadEnable && ((state === s_metaWrite) ||
     ((state === s_metaRead) && hit && reqReg.wen) )
   val metaWrite = Wire(metaBundle)
-  val inRdata = Mux(hit && (state === s_metaRead), dataRead, io.out.r.bits.data)
+  val inRdataReg = Reg(Vec(LineBeats, UInt(32.W)))
+  val retData = Mux(hit && (state === s_metaRead), dataRead, inRdataReg.asUInt)
   // FIXME: when burst is supported, should calculate the word index
   val fullMask = Cat(reqReg.wmask.toBools.map(Mux(_, 0xff.U(8.W), 0x0.U(8.W))).reverse)
-  val dataWrite = Mux(reqReg.wen, (inRdata & ~fullMask) | (reqReg.wdata & fullMask), inRdata)
+  val dataWrite = Mux(reqReg.wen, (retData & ~fullMask) | (reqReg.wdata & fullMask), retData)
 
   metaWrite.tag := addrReg.tag
   metaWrite.valid := Mux(resetState, false.B, true.B)
@@ -117,10 +118,10 @@ class Cache(ro: Boolean, name: String) extends Module {
   }
 
   // return data
-  io.in.resp.bits.rdata := inRdata//.asTypeOf(Vec(LineSize / 4, UInt(32.W)))(addrReg.wordIndex)
-  // FIXME: this assume io.in.resp.ready === true.B all the time
-  io.in.resp.valid := (hit && (state === s_metaRead)) || ((state === s_outReadResp && io.out.r.fire()))
+  io.in.resp.bits.rdata := retData.asTypeOf(Vec(LineBeats, UInt(32.W)))(addrReg.wordIndex)
+  io.in.resp.valid := (hit && (state === s_metaRead)) || (state === s_metaWrite)
 
+  val readBeatCnt = Counter(LineBeats)
   switch (state) {
     is (s_idle) {
       when (io.in.req.fire()) { state := s_metaRead }
@@ -135,7 +136,11 @@ class Cache(ro: Boolean, name: String) extends Module {
     }
 
     is (s_outReadResp) {
-      when (io.out.r.fire()) { state := s_idle }
+      when (io.out.r.fire()) {
+        inRdataReg(readBeatCnt.value) := io.out.r.bits.data
+        readBeatCnt.inc()
+        when (io.out.r.bits.last) { state := s_metaWrite }
+      }
     }
 
     is (s_outWriteReq) {
@@ -145,6 +150,8 @@ class Cache(ro: Boolean, name: String) extends Module {
     is (s_outWriteResp) {
       when (io.out.b.fire()) { state := s_outReadReq }
     }
+
+    is (s_metaWrite) { state := s_idle }
   }
 
   // perfcnt
