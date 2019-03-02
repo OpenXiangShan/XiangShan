@@ -14,10 +14,13 @@ class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4,
   val mem = Mem(memByte / beatBytes, Vec(beatBytes, UInt(8.W)))
   if (dataFile != "") loadMemoryFromFile(mem, dataFile)
 
-  def index(addr: UInt) = addr >> log2Ceil(beatBytes)
+  val offsetBits = log2Up(memByte)
+  val offsetMask = (1 << offsetBits) - 1
+  def index(addr: UInt) = (addr & offsetMask.U) >> log2Ceil(beatBytes)
+  def inRange(addr: UInt) = index(addr) < (memByte / 4).U
 
   val wdata = VecInit.tabulate(beatBytes) { i => in.w.bits.data(8*(i+1)-1, 8*i) }
-  when (in.aw.fire()) {
+  when (in.aw.fire() && inRange(in.aw.bits.addr)) {
     mem.write(index(in.aw.bits.addr), wdata, in.w.bits.strb.toBools)
   }
 
