@@ -13,12 +13,14 @@ class NOOPFPGA extends Module {
     val imem = new AXI4
     val dmem = new AXI4
     val mmio = new AXI4Lite
+    val gpuMeta = new AXI4
   })
 
   val noop = Module(new NOOP)
   io.imem <> noop.io.imem.toAXI4()
   io.dmem <> noop.io.dmem.toAXI4()
   io.mmio <> noop.io.mmio.toAXI4(isLite = true)
+  io.gpuMeta <> noop.io.gpuMeta.toAXI4()
 }
 
 class Top extends Module {

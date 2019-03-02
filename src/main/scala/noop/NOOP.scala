@@ -14,8 +14,9 @@ trait NOOPConfig {
 
   // [start, end)
   val AddressSpace = List(
-    (0x80000000L, 0x90000000L),
-    (0x40000000L, 0x50000000L)
+    (0x80000000L, 0x90000000L),  // dram
+    (0x40000000L, 0x50000000L),  // mmio
+    (0x5e000000L, 0x60000000L)  // gpu metadata
   )
 }
 
@@ -24,6 +25,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
     val imem = new SimpleBus
     val dmem = new SimpleBus
     val mmio = new SimpleBus
+    val gpuMeta = new SimpleBus
     val trap = Output(UInt(2.W))
     val sim = new Bundle {
       val cycleCnt = Output(UInt(32.W))
@@ -67,6 +69,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   } else { dmem })
 
   io.mmio <> xbar.io.out(1)
+  io.gpuMeta <> xbar.io.out(2)
 
   // csr
   val csr = Module(new CSR)

@@ -48,7 +48,7 @@ trait GPUConst {
   val TextureMaxNum = 65536 // 0 indicate the end
   val TextureIdBits = log2Up(TextureMaxNum)
   val TextureArrayBytes = TextureMaxNum * TextureBytes
-  val TextureBase = 0x50000000L - TextureArrayBytes * 2
+  val TextureBase = 0x60000000L - TextureArrayBytes * 2
 
   def textureLineAddr(idx: UInt, line: UInt): UInt = TextureBase.U |
     (idx(TextureIdBits - 1, 0) << TextureShift.U) |
@@ -68,11 +68,16 @@ trait GPUConst {
   }
 }
 
-class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new AXI4(dataBits = 256))) with GPUConst {
+class GPUOutBundle extends Bundle {
+  // can use 32 bit after implementing burst
+  val metaData = new AXI4(dataBits = 256)
+  val fb = new AXI4(dataBits = 256)
+}
+
+class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new GPUOutBundle)) with GPUConst {
   val out = io.extra.get
 
   // control registers
-  //val regs = Mem(4, UInt(32.W))
   def index(addr: UInt) = (addr & 0xf.U) >> 2
   val statIdx = 0
   val ctrlIdx = 1
@@ -99,16 +104,16 @@ class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new AXI4(dataBits = 256
   statReg := (state =/= s_idle)
 
   out := DontCare
-  out.ar.bits.prot  := AXI4Parameters.PROT_PRIVILEDGED
-  out.ar.bits.id    := 0.U
-  out.ar.bits.len   := 0.U  // single beat
-  out.ar.bits.burst := AXI4Parameters.BURST_INCR
-  out.ar.bits.lock  := false.B
-  out.ar.bits.cache := 0.U
-  out.ar.bits.qos   := 0.U
-  out.ar.bits.user  := 0.U
-  out.w.bits.last   := true.B
-  out.aw.bits := out.ar.bits
+  out.metaData.ar.bits.prot  := AXI4Parameters.PROT_PRIVILEDGED
+  out.metaData.ar.bits.id    := 0.U
+  out.metaData.ar.bits.len   := 0.U  // single beat
+  out.metaData.ar.bits.burst := AXI4Parameters.BURST_INCR
+  out.metaData.ar.bits.lock  := false.B
+  out.metaData.ar.bits.cache := 0.U
+  out.metaData.ar.bits.qos   := 0.U
+  out.metaData.ar.bits.user  := 0.U
+  out.fb.w.bits.last   := true.B
+  out.fb.aw.bits := out.metaData.ar.bits
 
   val spriteIdx = Counter(65536)
   when (state === s_idle && startCmd) {
@@ -120,14 +125,15 @@ class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new AXI4(dataBits = 256
   val spriteBuf = Reg(new SpriteBundle)
   val textureLineCnt = Counter(TextureH)
   when (state === s_sprite_read) {
-    out.ar.bits.addr := spriteAddr(spriteIdx.value)
-    out.ar.bits.size := log2Up(SpriteBytes).U
+    out.metaData.ar.bits.addr := spriteAddr(spriteIdx.value)
+    out.metaData.ar.bits.size := log2Up(SpriteBytes).U
 
-    when (out.r.fire()) {
+    when (out.metaData.r.fire()) {
       //val rdata = out.r.bits.data.asTypeOf(new SpriteBundle)
       val numOfSpritePerAccess = 256 / (SpriteBytes * 8)
       val spriteIdxOffset = spriteIdx.value(log2Up(numOfSpritePerAccess) - 1, 0)
-      val spriteRead = out.r.bits.data.asTypeOf(Vec(numOfSpritePerAccess, new SpriteBundle))(spriteIdxOffset)
+      val spriteRead = out.metaData.r.bits.data.asTypeOf(
+        Vec(numOfSpritePerAccess, new SpriteBundle))(spriteIdxOffset)
       spriteBuf := spriteRead
       textureLineCnt.value := 0.U
 
@@ -138,11 +144,11 @@ class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new AXI4(dataBits = 256
 
   val textureLineBuf = Reg(UInt((TextureLineBytes * 8).W))
   when (state === s_texture_read) {
-    out.ar.bits.addr := textureLineAddr(spriteBuf.texture, textureLineCnt.value)
-    out.ar.bits.size := log2Up(TextureLineBytes).U
+    out.metaData.ar.bits.addr := textureLineAddr(spriteBuf.texture, textureLineCnt.value)
+    out.metaData.ar.bits.size := log2Up(TextureLineBytes).U
 
-    when (out.r.fire()) {
-      textureLineBuf := out.r.bits.data
+    when (out.metaData.r.fire()) {
+      textureLineBuf := out.metaData.r.bits.data
       state := s_render_line
     }
   }
@@ -156,30 +162,36 @@ class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new AXI4(dataBits = 256
     // should handle sprite accross a tile
     assert((renderAddr & (TextureLineBytes - 1).U) === 0.U)
 
-    out.aw.bits.addr := renderAddr
-    out.aw.bits.size := log2Up(TextureLineBytes).U
-    out.w.bits.data := textureLineBuf
-    out.w.bits.strb := 0xffffffffL.U
+    out.fb.aw.bits.addr := renderAddr
+    out.fb.aw.bits.size := log2Up(TextureLineBytes).U
+    out.fb.w.bits.data := textureLineBuf
+    out.fb.w.bits.strb := 0xffffffffL.U
 
-    when (out.b.fire()) {
+    when (out.fb.b.fire()) {
       val finishOneTexture = textureLineCnt.inc()
       when (finishOneTexture) { spriteIdx.inc() }
       state := Mux(finishOneTexture, s_sprite_read, s_texture_read)
     }
   }
 
-  val rWait = BoolStopWatch(out.ar.fire(), out.r.fire())
-  out.ar.valid := BoolStopWatch((state === s_sprite_read || state === s_texture_read) && !rWait, out.ar.fire())
-  out.r.ready := rWait
+  val rWait = BoolStopWatch(out.metaData.ar.fire(), out.metaData.r.fire())
+  out.metaData.ar.valid := BoolStopWatch(
+    (state === s_sprite_read || state === s_texture_read) && !rWait, out.metaData.ar.fire())
+  out.metaData.r.ready := rWait
+  out.metaData.aw.valid := false.B
+  out.metaData.w.valid := false.B
+  out.metaData.b.ready := true.B
 
   val wSend = Wire(Bool())
-  val awAck = BoolStopWatch(out.aw.fire(), wSend)
-  val wAck = BoolStopWatch(out.w.fire(), wSend)
-  wSend := (out.aw.fire() && out.w.fire()) || (awAck && wAck)
+  val awAck = BoolStopWatch(out.fb.aw.fire(), wSend)
+  val wAck = BoolStopWatch(out.fb.w.fire(), wSend)
+  wSend := (out.fb.aw.fire() && out.fb.w.fire()) || (awAck && wAck)
 
-  val bWait = BoolStopWatch(wSend, out.b.fire())
+  val bWait = BoolStopWatch(wSend, out.fb.b.fire())
   val wInflight = BoolStopWatch((state === s_render_line) && !bWait, wSend)
-  out.aw.valid := wInflight && !awAck
-  out.w .valid := wInflight && !wAck
-  out.b.ready := bWait
+  out.fb.aw.valid := wInflight && !awAck
+  out.fb.w .valid := wInflight && !wAck
+  out.fb.b.ready := bWait
+  out.fb.ar.valid := false.B
+  out.fb.r.ready := true.B
 }
