@@ -13,6 +13,11 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
   })
   val in = io.in
 
+  def genWdata(originData: UInt) = {
+    val fullMask = Cat(in.w.bits.strb.toBools.map(Mux(_, 0xff.U(8.W), 0x0.U(8.W))).reverse)
+    (originData & ~fullMask) | (in.w.bits.data & fullMask)
+  }
+
   val w_full = BoolStopWatch(in.aw.fire(), in.b.fire(), startHighPriority = true)
   in. b.valid := w_full
   in.aw.ready := in. w.valid && (in.b.ready || !w_full)
