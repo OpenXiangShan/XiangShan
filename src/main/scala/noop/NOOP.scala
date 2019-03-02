@@ -14,8 +14,8 @@ trait NOOPConfig {
 
   // [start, end)
   val AddressSpace = List(
-    (0x80000000L, 0xa0000000L),
-    (0x40000000L, 0x60000000L)
+    (0x80000000L, 0x90000000L),
+    (0x40000000L, 0x50000000L)
   )
 }
 
