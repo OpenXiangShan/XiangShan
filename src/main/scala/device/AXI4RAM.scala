@@ -21,5 +21,7 @@ class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4,
     mem.write(index(in.aw.bits.addr), wdata, in.w.bits.strb.toBools)
   }
 
-  in.r.bits.data := Cat(RegEnable(mem.read(index(in.ar.bits.addr)), in.ar.fire()).reverse)
+  val ren = in.ar.fire() || (in.r.fire() && !rLast)
+  in.r.bits.data := RegEnable(Cat(mem.read(index(raddr) + readBeatCnt).reverse), ren)
+  in.r.valid := BoolStopWatch(ren && (in.ar.fire() || r_busy), in.r.fire(), startHighPriority = true)
 }

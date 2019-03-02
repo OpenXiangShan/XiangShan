@@ -16,9 +16,26 @@ abstract class AXI4SlaveModule[T <: AXI4Lite](_type :T = new AXI4) extends Modul
   in. w.ready := in.aw.valid && (in.b.ready || !w_full)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 
-  val r_full = BoolStopWatch(in.ar.fire(), in.r.fire(), startHighPriority = true)
-  in. r.valid := r_full
-  in.ar.ready := in.r.ready || !r_full
+  val raddr = Wire(UInt())
+  val (readBeatCnt, rLast) = in match {
+    case axi4: AXI4 =>
+      val c = Counter(256)
+      val len = Mux(axi4.ar.fire(), axi4.ar.bits.len, RegEnable(axi4.ar.bits.len, axi4.ar.fire()))
+      raddr := Mux(axi4.ar.fire(), axi4.ar.bits.addr, RegEnable(axi4.ar.bits.addr, axi4.ar.fire()))
+      axi4.r.bits.last := (c.value === len)
+      when (axi4.r.fire()) {
+        c.inc()
+        when (axi4.r.bits.last) { c.value := 0.U }
+      }
+      (Mux(axi4.r.fire(), c.value + 1.U, c.value), axi4.r.bits.last)
+
+    case axi4lite: AXI4Lite =>
+      raddr := axi4lite.ar.bits.addr
+      (0.U, true.B)
+  }
+
+  val r_busy = BoolStopWatch(in.ar.fire(), in.r.fire() && rLast, startHighPriority = true)
+  in.ar.ready := in.r.ready || !r_busy
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
 
   in match {
@@ -27,7 +44,6 @@ abstract class AXI4SlaveModule[T <: AXI4Lite](_type :T = new AXI4) extends Modul
       axi4.b.bits.user := RegEnable(axi4.aw.bits.user, axi4.aw.fire())
       axi4.r.bits.id   := RegEnable(axi4.ar.bits.id, axi4.ar.fire())
       axi4.r.bits.user := RegEnable(axi4.ar.bits.user, axi4.ar.fire())
-      axi4.r.bits.last := true.B
     case axi4lite: AXI4Lite =>
   }
 }
