@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
+import bus.axi4._
 import utils._
 
 trait NOOPConfig {
@@ -21,8 +22,8 @@ trait NOOPConfig {
 
 class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val io = IO(new Bundle {
-    val imem = new SimpleBus
-    val dmem = new SimpleBus
+    val imem = new AXI4
+    val dmem = new AXI4
     val mmio = new SimpleBus
     val trap = Output(UInt(2.W))
     val sim = new Bundle {
@@ -43,7 +44,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
     icache.io.out
-  } else { ifu.io.imem })
+  } else { ifu.io.imem.toAXI4() })
 
   idu.io.in <> ifu.io.out
   isu.io.in <> idu.io.out
@@ -64,7 +65,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
     dcacheHit := dcache.io.hit
     dcache.io.in <> dmem
     dcache.io.out
-  } else { dmem })
+  } else { dmem.toAXI4() })
 
   io.mmio <> xbar.io.out(1)
 

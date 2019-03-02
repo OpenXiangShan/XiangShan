@@ -4,12 +4,13 @@ import chisel3._
 import chisel3.util._
 
 import bus.simplebus.SimpleBus
+import bus.axi4._
 import utils._
 
 class Cache(ro: Boolean, name: String) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBus)
-    val out = new SimpleBus
+    val out = new AXI4
     val hit = Output(Bool())
   })
 
@@ -70,20 +71,34 @@ class Cache(ro: Boolean, name: String) extends Module {
   // if miss, access memory
   val dirtyBlockAddr = Cat(metaRead.tag, addrReg.index, 0.U(OffsetBits.W))
   io.out := DontCare
-  io.out.req.valid := (state === s_outReadReq) || (state === s_outWriteReq)
-  io.out.req.bits.addr := Mux(state === s_outWriteReq, dirtyBlockAddr, reqReg.addr)
-  io.out.req.bits.size := "b10".U //"b110".U
-  io.out.req.bits.wen := state === s_outWriteReq
-  io.out.req.bits.wdata := dataRead
-  io.out.req.bits.wmask := 0xf.U
-  io.out.resp.ready := (state === s_outReadResp) || (state === s_outWriteResp)
+  List(io.out.ar.bits, io.out.aw.bits).map { a =>
+    a.size := "b10".U
+    a.id    := 0.U
+    a.len   := (LineBeats - 1).U
+    a.burst := AXI4Parameters.BURST_INCR
+    a.lock  := false.B
+    a.cache := 0.U
+    a.qos   := 0.U
+    a.user  := 0.U
+  }
+
+  io.out.ar.valid := (state === s_outReadReq)
+  io.out.aw.valid := (state === s_outWriteReq)
+  io.out.w.valid := (state === s_outWriteReq)
+  io.out.ar.bits.addr := reqReg.addr
+  io.out.aw.bits.addr := dirtyBlockAddr
+  io.out.w.bits.data := dataRead
+  io.out.w.bits.strb := 0xf.U
+
+  io.out.r.ready := (state === s_outReadResp)
+  io.out.b.ready := (state === s_outWriteResp)
 
   // refill
   val metaWriteEnable = !metaReadEnable && (
-    ((state === s_outReadResp) && io.out.resp.fire()) ||
+    ((state === s_outReadResp) && io.out.r.fire()) ||
     ((state === s_metaRead) && hit && reqReg.wen) )
   val metaWrite = Wire(metaBundle)
-  val inRdata = Mux(hit && (state === s_metaRead), dataRead, io.out.resp.bits.rdata)
+  val inRdata = Mux(hit && (state === s_metaRead), dataRead, io.out.r.bits.data)
   // FIXME: when burst is supported, should calculate the word index
   val fullMask = Cat(reqReg.wmask.toBools.map(Mux(_, 0xff.U(8.W), 0x0.U(8.W))).reverse)
   val dataWrite = Mux(reqReg.wen, (inRdata & ~fullMask) | (reqReg.wdata & fullMask), inRdata)
@@ -104,7 +119,7 @@ class Cache(ro: Boolean, name: String) extends Module {
   // return data
   io.in.resp.bits.rdata := inRdata//.asTypeOf(Vec(LineSize / 4, UInt(32.W)))(addrReg.wordIndex)
   // FIXME: this assume io.in.resp.ready === true.B all the time
-  io.in.resp.valid := (hit && (state === s_metaRead)) || ((state === s_outReadResp && io.out.resp.fire()))
+  io.in.resp.valid := (hit && (state === s_metaRead)) || ((state === s_outReadResp && io.out.r.fire()))
 
   switch (state) {
     is (s_idle) {
@@ -116,19 +131,19 @@ class Cache(ro: Boolean, name: String) extends Module {
     }
 
     is (s_outReadReq) {
-      when (io.out.req.fire()) { state := s_outReadResp }
+      when (io.out.ar.fire()) { state := s_outReadResp }
     }
 
     is (s_outReadResp) {
-      when (io.out.resp.fire()) { state := s_idle }
+      when (io.out.r.fire()) { state := s_idle }
     }
 
     is (s_outWriteReq) {
-      when (io.out.req.fire()) { state := s_outWriteResp }
+      when (io.out.aw.fire()) { state := s_outWriteResp }
     }
 
     is (s_outWriteResp) {
-      when (io.out.resp.fire()) { state := s_outReadReq }
+      when (io.out.b.fire()) { state := s_outReadReq }
     }
   }
 
@@ -137,6 +152,5 @@ class Cache(ro: Boolean, name: String) extends Module {
 
   if (debug) {
     io.in.dump(name + ".in")
-    io.out.dump(name + ".out")
   }
 }
