@@ -42,7 +42,7 @@ class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
               case 0xf => 0xffffffff
               case _ => assert(false, f"Bad wmask = 0x$wmask%x"); 0
             }
-            val idx = (addr - 0x40000) >> 2
+            val idx = (addr - 0x40000000) >> 2
             vmem(idx) = (wdata & wmaskExpand) | (vmem(idx) & ~wmaskExpand)
           case 6 => // putc()
         }
