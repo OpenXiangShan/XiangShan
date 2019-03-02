@@ -45,7 +45,8 @@ trait AXI4HasUser {
 }
 
 trait AXI4HasData {
-  val data  = Output(UInt(AXI4Parameters.dataBits.W))
+  def dataBits = AXI4Parameters.dataBits
+  val data  = Output(UInt(dataBits.W))
 }
 
 trait AXI4HasId {
@@ -63,15 +64,15 @@ class AXI4LiteBundleA extends Bundle {
   val prot  = Output(UInt(AXI4Parameters.protBits.W))
 }
 
-class AXI4LiteBundleW extends Bundle with AXI4HasData {
-  val strb = Output(UInt((AXI4Parameters.dataBits/8).W))
+class AXI4LiteBundleW(override val dataBits: Int = AXI4Parameters.dataBits) extends Bundle with AXI4HasData {
+  val strb = Output(UInt((dataBits/8).W))
 }
 
 class AXI4LiteBundleB extends Bundle {
   val resp = Output(UInt(AXI4Parameters.respBits.W))
 }
 
-class AXI4LiteBundleR extends AXI4LiteBundleB with AXI4HasData
+class AXI4LiteBundleR(override val dataBits: Int = AXI4Parameters.dataBits) extends AXI4LiteBundleB with AXI4HasData
 
 
 class AXI4Lite extends Bundle {
@@ -96,15 +97,15 @@ class AXI4BundleA extends AXI4LiteBundleA with AXI4HasId with AXI4HasUser {
 }
 
 // id ... removed in AXI4
-class AXI4BundleW extends AXI4LiteBundleW with AXI4HasLast
+class AXI4BundleW(override val dataBits: Int) extends AXI4LiteBundleW(dataBits) with AXI4HasLast
 class AXI4BundleB extends AXI4LiteBundleB with AXI4HasId with AXI4HasUser
-class AXI4BundleR extends AXI4LiteBundleR with AXI4HasLast with AXI4HasId with AXI4HasUser
+class AXI4BundleR(override val dataBits: Int) extends AXI4LiteBundleR(dataBits) with AXI4HasLast with AXI4HasId with AXI4HasUser
 
 
-class AXI4 extends AXI4Lite {
+class AXI4(val dataBits: Int = AXI4Parameters.dataBits) extends AXI4Lite {
   override val aw = Decoupled(new AXI4BundleA)
-  override val w  = Decoupled(new AXI4BundleW)
+  override val w  = Decoupled(new AXI4BundleW(dataBits))
   override val b  = Flipped(Decoupled(new AXI4BundleB))
   override val ar = Decoupled(new AXI4BundleA)
-  override val r  = Flipped(Decoupled(new AXI4BundleR))
+  override val r  = Flipped(Decoupled(new AXI4BundleR(dataBits)))
 }
