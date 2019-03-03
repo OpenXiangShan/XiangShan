@@ -45,7 +45,7 @@ class AXI4VGA extends Module with HasVGAConst {
   // need a 50MHz clock
   val io = IO(new Bundle {
     val in = new Bundle {
-      val fb = Flipped(new AXI4Lite)
+      val fb = Flipped(new AXI4)
       val ctrl = Flipped(new AXI4Lite)
     }
     val vga = new VGABundle
@@ -53,7 +53,7 @@ class AXI4VGA extends Module with HasVGAConst {
 
   val ctrl = Module(new VGACtrl)
   io.in.ctrl <> ctrl.io.in
-  val fb = Module(new AXI4RAM(_type = new AXI4Lite, FBPixels * 4))
+  val fb = Module(new AXI4RAM(memByte = FBPixels * 4))
   // writable by axi4lite
   // but it only readable by the internel controller
   fb.io.in.aw <> io.in.fb.aw
@@ -63,6 +63,9 @@ class AXI4VGA extends Module with HasVGAConst {
   io.in.fb.r.bits.data := 0.U
   io.in.fb.r.bits.resp := AXI4Parameters.RESP_OKAY
   io.in.fb.r.valid := BoolStopWatch(io.in.fb.ar.fire(), io.in.fb.r.fire(), startHighPriority = true)
+  io.in.fb.r.bits.id := io.in.fb.ar.bits.id
+  io.in.fb.r.bits.user := io.in.fb.ar.bits.user
+  io.in.fb.r.bits.last := true.B
 
   def inRange(x: UInt, start: Int, end: Int) = (x >= start.U) && (x < end.U)
 
@@ -85,8 +88,8 @@ class AXI4VGA extends Module with HasVGAConst {
   val fbPixelAddrV1 = Counter(nextPixel &&  vCounterIsOdd, FBPixels)._1
 
   // each pixel is 4 bytes
+  fb.io.in.ar := DontCare
   fb.io.in.ar.bits.addr := Cat(Mux(vCounterIsOdd, fbPixelAddrV1, fbPixelAddrV0), 0.U(2.W))
-  fb.io.in.ar.bits.prot := DontCare
   fb.io.in.ar.valid := nextPixel
 
   fb.io.in.r.ready := true.B
