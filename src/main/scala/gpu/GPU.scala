@@ -95,10 +95,10 @@ class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new GPUOutBundle)) with
   ))
   in.r.bits.data := RegEnable(readReg(in.ar.bits.addr), in.ar.fire())
 
-  val waddr = index(in.aw.bits.addr)
+  val wIdx = index(in.aw.bits.addr)
   val wdata = genWdata(readReg(in.aw.bits.addr))
   when (in.aw.fire()) {
-    when (waddr === ctrlIdx.U) { ctrlReg := wdata }
+    when (wIdx === ctrlIdx.U) { ctrlReg := wdata }
   }
 
   val startCmd = ctrlReg(0) && !RegNext(ctrlReg(0))
