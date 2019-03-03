@@ -17,9 +17,9 @@ class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4,
   def index(addr: UInt) = addr >> log2Ceil(beatBytes)
 
   val wdata = VecInit.tabulate(beatBytes) { i => in.w.bits.data(8*(i+1)-1, 8*i) }
-  when (in.aw.fire()) {
-    mem.write(index(in.aw.bits.addr), wdata, in.w.bits.strb.toBools)
+  when (in.w.fire()) {
+    mem.write(index(waddr) + writeBeatCnt, wdata, in.w.bits.strb.toBools)
   }
 
-  in.r.bits.data := Cat(RegEnable(mem.read(index(in.ar.bits.addr)), in.ar.fire()).reverse)
+  in.r.bits.data := RegEnable(Cat(mem.read(index(raddr) + readBeatCnt).reverse), ren)
 }
