@@ -42,10 +42,11 @@ class VGACtrl extends AXI4SlaveModule(new AXI4Lite) with HasVGAConst {
 }
 
 class AXI4VGA extends Module with HasVGAConst {
+  val AXIidBits = 2
   // need a 50MHz clock
   val io = IO(new Bundle {
     val in = new Bundle {
-      val fb = Flipped(new AXI4)
+      val fb = Flipped(new AXI4(idBits = AXIidBits))
       val ctrl = Flipped(new AXI4Lite)
     }
     val vga = new VGABundle
@@ -53,7 +54,7 @@ class AXI4VGA extends Module with HasVGAConst {
 
   val ctrl = Module(new VGACtrl)
   io.in.ctrl <> ctrl.io.in
-  val fb = Module(new AXI4RAM(memByte = FBPixels * 4))
+  val fb = Module(new AXI4RAM(new AXI4(idBits = AXIidBits), memByte = FBPixels * 4))
   // writable by axi4lite
   // but it only readable by the internel controller
   fb.io.in.aw <> io.in.fb.aw
