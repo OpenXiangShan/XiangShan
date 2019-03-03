@@ -50,7 +50,8 @@ trait AXI4HasData {
 }
 
 trait AXI4HasId {
-  val id    = Output(UInt(AXI4Parameters.idBits.W))
+  def idBits = AXI4Parameters.idBits
+  val id    = Output(UInt(idBits.W))
 }
 
 trait AXI4HasLast {
@@ -86,7 +87,7 @@ class AXI4Lite extends Bundle {
 
 // AXI4-full
 
-class AXI4BundleA extends AXI4LiteBundleA with AXI4HasId with AXI4HasUser {
+class AXI4BundleA(override val idBits: Int) extends AXI4LiteBundleA with AXI4HasId with AXI4HasUser {
   val len   = Output(UInt(AXI4Parameters.lenBits.W))  // number of beats - 1
   val size  = Output(UInt(AXI4Parameters.sizeBits.W)) // bytes in beat = 2^size
   val burst = Output(UInt(AXI4Parameters.burstBits.W))
@@ -98,14 +99,14 @@ class AXI4BundleA extends AXI4LiteBundleA with AXI4HasId with AXI4HasUser {
 
 // id ... removed in AXI4
 class AXI4BundleW(override val dataBits: Int) extends AXI4LiteBundleW(dataBits) with AXI4HasLast
-class AXI4BundleB extends AXI4LiteBundleB with AXI4HasId with AXI4HasUser
-class AXI4BundleR(override val dataBits: Int) extends AXI4LiteBundleR(dataBits) with AXI4HasLast with AXI4HasId with AXI4HasUser
+class AXI4BundleB(override val idBits: Int) extends AXI4LiteBundleB with AXI4HasId with AXI4HasUser
+class AXI4BundleR(override val dataBits: Int, override val idBits: Int) extends AXI4LiteBundleR(dataBits) with AXI4HasLast with AXI4HasId with AXI4HasUser
 
 
-class AXI4(val dataBits: Int = AXI4Parameters.dataBits) extends AXI4Lite {
-  override val aw = Decoupled(new AXI4BundleA)
+class AXI4(val dataBits: Int = AXI4Parameters.dataBits, val idBits: Int = AXI4Parameters.idBits) extends AXI4Lite {
+  override val aw = Decoupled(new AXI4BundleA(idBits))
   override val w  = Decoupled(new AXI4BundleW(dataBits))
-  override val b  = Flipped(Decoupled(new AXI4BundleB))
-  override val ar = Decoupled(new AXI4BundleA)
-  override val r  = Flipped(Decoupled(new AXI4BundleR(dataBits)))
+  override val b  = Flipped(Decoupled(new AXI4BundleB(idBits)))
+  override val ar = Decoupled(new AXI4BundleA(idBits))
+  override val r  = Flipped(Decoupled(new AXI4BundleR(dataBits, idBits)))
 }
