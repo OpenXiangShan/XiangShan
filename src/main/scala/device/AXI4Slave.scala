@@ -31,6 +31,8 @@ abstract class AXI4SlaveModule[T <: AXI4Lite](_type :T = new AXI4) extends Modul
   val r_busy = BoolStopWatch(in.ar.fire(), in.r.fire() && rLast, startHighPriority = true)
   in.ar.ready := in.r.ready || !r_busy
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
+  val ren = in.ar.fire() || (in.r.fire() && !rLast)
+  in.r.valid := BoolStopWatch(ren && (in.ar.fire() || r_busy), in.r.fire(), startHighPriority = true)
 
 
   val waddr = Wire(UInt())
@@ -53,6 +55,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite](_type :T = new AXI4) extends Modul
   in.aw.ready := !w_busy
   in. w.ready := in.aw.valid || (w_busy)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
+  in.b.valid := BoolStopWatch(in.w.fire() && wLast, in.b.fire(), startHighPriority = true)
 
   in match {
     case axi4: AXI4 =>

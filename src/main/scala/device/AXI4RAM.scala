@@ -20,9 +20,6 @@ class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4,
   when (in.w.fire()) {
     mem.write(index(waddr) + writeBeatCnt, wdata, in.w.bits.strb.toBools)
   }
-  in.b.valid := BoolStopWatch(in.w.fire() && wLast, in.b.fire(), startHighPriority = true)
 
-  val ren = in.ar.fire() || (in.r.fire() && !rLast)
   in.r.bits.data := RegEnable(Cat(mem.read(index(raddr) + readBeatCnt).reverse), ren)
-  in.r.valid := BoolStopWatch(ren && (in.ar.fire() || r_busy), in.r.fire(), startHighPriority = true)
 }
