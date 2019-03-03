@@ -89,7 +89,7 @@ class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new GPUOutBundle)) with
   val statReg = Reg(UInt(32.W))
   val ctrlReg = Reg(UInt(32.W))
 
-  def readReg(addr: UInt) = LookupTree(addr, List(
+  def readReg(addr: UInt) = LookupTree(index(addr), List(
     statIdx.U -> statReg,
     ctrlIdx.U -> ctrlReg
   ))
