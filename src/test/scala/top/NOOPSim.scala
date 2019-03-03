@@ -23,25 +23,21 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   val noop = Module(new NOOP)
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
-  val imem2axi = Module(new SimpleBus2AXI4Converter)
-  val dmem2axi = Module(new SimpleBus2AXI4Converter)
   val imemdelay = Module(new AXI4Delayer(0.5))
   val dmemdelay = Module(new AXI4Delayer(0.5))
   val mmio = Module(new SimMMIO)
 
-  imem2axi.io.in <> noop.io.imem
-  imemdelay.io.in <> imem2axi.io.out
+  imemdelay.io.in <> noop.io.imem
   imem.io.in <> imemdelay.io.out
-  dmem2axi.io.in <> noop.io.dmem
-  dmemdelay.io.in <> dmem2axi.io.out
+  dmemdelay.io.in <> noop.io.dmem
   dmem.io.in <> dmemdelay.io.out
 
   mmio.io.rw <> noop.io.mmio
   io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, mmio.io.rw.req.bits.wmask,
     mmio.io.rw.req.bits.addr, mmio.io.rw.req.bits.wdata, noop.io.trap)
 
-  io.trapInfo.pc := noop.io.imem.req.bits.addr
-  io.trapInfo.instr := noop.io.imem.resp.bits.rdata
+  io.trapInfo.pc := noop.io.imem.ar.bits.addr
+  io.trapInfo.instr := noop.io.imem.r.bits.data
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
   io.sim <> noop.io.sim
