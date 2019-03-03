@@ -9,7 +9,7 @@ import utils._
 
 trait NOOPConfig {
   val HasIcache = true
-  val HasDcache = false
+  val HasDcache = true
   val HasMExtension = true
   val HasDiv = true
 
