@@ -41,4 +41,6 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
   io.sim <> noop.io.sim
+
+  noop.io.uncacheMem := DontCare
 }

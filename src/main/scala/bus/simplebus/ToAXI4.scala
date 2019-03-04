@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import bus.axi4._
+import utils._
 
 class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4) extends Module {
   val io = IO(new Bundle {
@@ -42,17 +43,11 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4) extends Module
   aw := ar
   mem.resp.bits.rdata := r.data
 
-  val awAck = RegInit(false.B)
-  val wAck = RegInit(false.B)
-
+  val wSend = Wire(Bool())
+  val awAck = BoolStopWatch(axi.aw.fire(), wSend)
+  val wAck = BoolStopWatch(axi.w.fire(), wSend)
+  wSend := (axi.aw.fire() && axi.w.fire()) || (awAck && wAck)
   val wen = RegEnable(mem.req.bits.wen, mem.req.fire())
-  val wSend = (axi.aw.fire() && axi.w.fire()) || (awAck && wAck)
-  when (wSend) {
-    awAck := false.B
-    wAck := false.B
-  }
-  .elsewhen (axi.aw.fire()) { awAck := true.B }
-  .elsewhen (axi. w.fire()) {  wAck := true.B }
 
   axi.ar.valid := mem.isRead()
   axi.aw.valid := mem.isWrite() && !awAck

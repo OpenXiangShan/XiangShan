@@ -15,8 +15,9 @@ trait NOOPConfig {
 
   // [start, end)
   val AddressSpace = List(
-    (0x80000000L, 0xa0000000L),
-    (0x40000000L, 0x60000000L)
+    (0x80000000L, 0x90000000L),  // dram
+    (0x40000000L, 0x50000000L),  // mmio
+    (0x50000000L, 0x60000000L)   // uncache memory: vmem, gpuMetadata
   )
 }
 
@@ -25,6 +26,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
     val imem = new AXI4
     val dmem = new AXI4
     val mmio = new SimpleBus
+    val uncacheMem = new AXI4
     val trap = Output(UInt(2.W))
     val sim = new Bundle {
       val cycleCnt = Output(UInt(32.W))
@@ -68,6 +70,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   } else { dmem.toAXI4() })
 
   io.mmio <> xbar.io.out(1)
+  io.uncacheMem <> xbar.io.out(2).toAXI4()
 
   // csr
   val csr = Module(new CSR)

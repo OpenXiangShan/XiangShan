@@ -6,10 +6,17 @@ import chisel3.util._
 import bus.axi4._
 import utils._
 
-abstract class AXI4SlaveModule[T <: AXI4Lite](_type :T = new AXI4) extends Module {
-  val io = IO(new Bundle{ val in = Flipped(_type) })
+abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _extra: Option[B] = None) extends Module {
+  val io = IO(new Bundle{
+    val in = Flipped(_type)
+    val extra = _extra
+  })
   val in = io.in
 
+  def genWdata(originData: UInt) = {
+    val fullMask = Cat(in.w.bits.strb.toBools.map(Mux(_, 0xff.U(8.W), 0x0.U(8.W))).reverse)
+    (originData & ~fullMask) | (in.w.bits.data & fullMask)
+  }
   val raddr = Wire(UInt())
   val (readBeatCnt, rLast) = in match {
     case axi4: AXI4 =>
