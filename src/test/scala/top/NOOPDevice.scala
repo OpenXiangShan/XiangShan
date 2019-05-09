@@ -10,6 +10,8 @@ trait NOOPDevice extends Library {
   def read_key(): Int
   def screen_size(): Int
   def poll_event(): Int
+  def init_difftest(imgPath: String, reg: Array[Int]): Unit
+  def difftest_step(reg: Array[Int], isMMIO: Int): Int
 }
 
 object NOOPDevice {
