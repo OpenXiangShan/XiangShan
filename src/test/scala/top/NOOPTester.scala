@@ -8,10 +8,12 @@ import noop._
 
 class NOOPTester(noop: NOOPSimTop, imgPath: String) extends PeekPokeTester(noop) {
   val vmem: Array[Int] = Array.fill(0x80000 / 4)(0)
+  var isMMIO: Int = 0
 
   def handleMMIO(trapEncode: BigInt) = {
     val mmioValid = ((trapEncode >> 70) & 0x1).toInt
     if (mmioValid == 1) {
+      isMMIO = 1
       val mmioCmd = ((trapEncode >> 71) & 0x7).toInt
       val mmioWrite = mmioCmd >> 2
       if (mmioWrite == 0) {
@@ -75,7 +77,8 @@ class NOOPTester(noop: NOOPSimTop, imgPath: String) extends PeekPokeTester(noop)
     if (trap == 3) {
       if (peek(noop.io.difftest.commit) == 1) {
         val regs = peek(noop.io.difftest.r).map(_.toInt).toArray
-        if (NOOPDevice.call.difftest_step(regs) != 0) trap = 4
+        if (NOOPDevice.call.difftest_step(regs, isMMIO) != 0) trap = 4
+        isMMIO = 0
       }
       if (pollEvent() == 1) trap = 4
     }

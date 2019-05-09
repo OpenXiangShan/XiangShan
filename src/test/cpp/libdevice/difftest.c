@@ -9,6 +9,7 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
+void (*ref_isa_reg_display)(void) = NULL;
 
 static bool is_skip_ref;
 static bool is_skip_dut;
@@ -73,6 +74,9 @@ void init_difftest(char *img, uint32_t *reg) {
   ref_difftest_exec = dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
 
+  ref_isa_reg_display = dlsym(handle, "isa_reg_display");
+  assert(ref_isa_reg_display);
+
   void (*ref_difftest_init)(void) = dlsym(handle, "difftest_init");
   assert(ref_difftest_init);
 
@@ -81,13 +85,20 @@ void init_difftest(char *img, uint32_t *reg) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint32_t *reg_scala) {
+int difftest_step(uint32_t *reg_scala, int isMMIO) {
   uint32_t ref_r[33];
+
+  if (isMMIO) {
+    // to skip the checking of an instruction, just copy the reg state to reference design
+    ref_difftest_setregs(reg_scala);
+    return 0;
+  }
 
   ref_difftest_exec(1);
   ref_difftest_getregs(&ref_r);
 
   if (memcmp(reg_scala, ref_r, sizeof(ref_r)) != 0) {
+    ref_isa_reg_display();
     int i;
     for (i = 0; i < 33; i ++) {
       if (reg_scala[i] != ref_r[i]) {
