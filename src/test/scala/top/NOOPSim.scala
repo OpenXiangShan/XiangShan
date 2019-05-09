@@ -8,6 +8,7 @@ import chisel3.util._
 import bus.axi4._
 import device.AXI4RAM
 import bus.simplebus.SimpleBus2AXI4Converter
+import utils.DiffTestIO
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
   val io = IO(new Bundle{
@@ -18,6 +19,7 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
       val cycleCnt = Output(UInt(32.W))
       val instrCnt = Output(UInt(32.W))
     }
+    val difftest = new DiffTestIO
   })
 
   val noop = Module(new NOOP)
@@ -41,6 +43,7 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   mmio.io.mmioTrap.rdata := io.mmioRdata
 
   io.sim <> noop.io.sim
+  io.difftest <> noop.io.difftest
 
   noop.io.uncacheMem := DontCare
 }

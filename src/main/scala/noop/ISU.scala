@@ -3,6 +3,8 @@ package noop
 import chisel3._
 import chisel3.util._
 
+import utils.DiffTestIO
+
 class RegFile {
   val rf = Mem(32, UInt(32.W))
   def read(addr: UInt) : UInt = Mux(addr === 0.U, 0.U, rf(addr))
@@ -15,6 +17,7 @@ class ISU extends Module with HasSrcType {
     val out = Valid(new PcCtrlDataIO)
     val wb = Flipped(new WriteBackIO)
     val trap = Output(UInt(2.W))
+    val difftestRegs = Output(Vec(32, UInt(32.W)))
   })
 
   val rf = new RegFile
@@ -41,4 +44,6 @@ class ISU extends Module with HasSrcType {
               Mux(io.in.bits.ctrl.isNoopTrap,
                 Mux(rs1Data === 0.U, NOOPTrap.StateGoodTrap, NOOPTrap.StateBadTrap),
                 NOOPTrap.StateRunning) //)
+
+  io.difftestRegs.zipWithIndex.map{ case (r, i) => r := rf.read(i.U) }
 }

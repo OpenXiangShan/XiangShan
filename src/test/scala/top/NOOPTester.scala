@@ -6,7 +6,7 @@ import chisel3.iotesters.Driver
 
 import noop._
 
-class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
+class NOOPTester(noop: NOOPSimTop, imgPath: String) extends PeekPokeTester(noop) {
   val vmem: Array[Int] = Array.fill(0x80000 / 4)(0)
 
   def handleMMIO(trapEncode: BigInt) = {
@@ -63,6 +63,8 @@ class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
 
   var trap = 0
   NOOPDevice.call.init_sdl()
+  val regs = peek(noop.io.difftest.r).map(_.toInt).toArray
+  NOOPDevice.call.init_difftest(imgPath, regs)
 
   do {
     step(1)
@@ -70,7 +72,13 @@ class NOOPTester(noop: NOOPSimTop) extends PeekPokeTester(noop) {
     val trapEncode = peek(noop.io.trap)
     handleMMIO(trapEncode)
     trap = (trapEncode & 0x3).toInt
-    if (trap == 3 && pollEvent() == 1) trap = 4
+    if (trap == 3) {
+      if (peek(noop.io.difftest.commit) == 1) {
+        val regs = peek(noop.io.difftest.r).map(_.toInt).toArray
+        if (NOOPDevice.call.difftest_step(regs) != 0) trap = 4
+      }
+      if (pollEvent() == 1) trap = 4
+    }
 
   } while (trap == 3)
 
@@ -98,6 +106,6 @@ object TestMain extends App {
   }
 
   iotesters.Driver.execute(newArgs, () => new NOOPSimTop(memInitFile = imgPath)) {
-    c => new NOOPTester(c)
+    c => new NOOPTester(c, imgPath.replaceAll("-readmemh$", ".bin"))
   }
 }

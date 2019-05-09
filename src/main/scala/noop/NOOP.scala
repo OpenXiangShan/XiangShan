@@ -32,6 +32,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
       val cycleCnt = Output(UInt(32.W))
       val instrCnt = Output(UInt(32.W))
     }
+    val difftest = new DiffTestIO
   })
 
   val ifu = Module(new IFU)
@@ -110,4 +111,10 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
 
   io.trap := isu.io.trap
   io.sim <> csr.io.sim
+
+  // difftest
+  // latch writeback signal to let register files and pc update
+  io.difftest.commit := RegNext(wbu.io.writeback)
+  isu.io.difftestRegs.zipWithIndex.map { case(r, i) => io.difftest.r(i) := r }
+  io.difftest.r(32) := ifu.io.out.bits.pc
 }
