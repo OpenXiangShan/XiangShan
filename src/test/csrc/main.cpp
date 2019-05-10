@@ -90,10 +90,13 @@ int main(int argc, const char** argv) {
     return emu.get_cycles();
   };
 
-  struct timeval t0, t1;
-  gettimeofday(&t0, NULL);
+  extern void device_init(void);
+  device_init();
+
   auto timeout = emu.execute();
-  gettimeofday(&t1, NULL);
+
+  extern uint32_t uptime(void);
+  uint32_t ms = uptime();
 
   if (timeout) {
     eprintf(ANSI_COLOR_RED "Timeout after %lld cycles\n" ANSI_COLOR_RESET, (long long)emu.get_max_cycles());
@@ -101,13 +104,7 @@ int main(int argc, const char** argv) {
     extern void display_trapinfo(void);
     display_trapinfo();
 
-    int s = t1.tv_sec - t0.tv_sec;
-    int us = t1.tv_usec - t0.tv_usec;
-    if (us < 0) {
-      s --;
-      us += 1000000;
-    }
-    eprintf(ANSI_COLOR_BLUE "Host time spent: %ds %6dus\n" ANSI_COLOR_RESET, s, us);
+    eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
   }
 
   return timeout;

@@ -5,6 +5,17 @@ import chisel3.util._
 
 import bus.simplebus.SimpleBus
 
+class DeviceHelper extends BlackBox {
+  val io = IO(new Bundle {
+    val clk = Input(Clock())
+    val reqValid = Input(Bool())
+    val reqWen = Input(Bool())
+    val reqAddr = Input(UInt(32.W))
+    val reqWdata = Input(UInt(32.W))
+    val respRdata = Output(UInt(32.W))
+  })
+}
+
 class SimMMIO extends Module {
   val io = IO(new Bundle {
     val rw = Flipped(new SimpleBus)
@@ -22,6 +33,18 @@ class SimMMIO extends Module {
   io.mmioTrap.valid := false.B
   io.mmioTrap.cmd := 0.U
 
+  val helper = Module(new DeviceHelper)
+  helper.io.clk := clock
+  helper.io.reqValid := io.rw.req.valid
+  helper.io.reqWen := wen
+  helper.io.reqAddr := io.rw.req.bits.addr
+  helper.io.reqWdata := io.rw.req.bits.wdata
+  io.rw.resp.bits.rdata := helper.io.respRdata
+
+  io.rw.req.ready := true.B
+  io.rw.resp.valid := io.rw.req.valid
+
+/*
   when (io.rw.req.valid) {
     switch (io.rw.req.bits.addr) {
       is (0x40600008.U) {
@@ -67,10 +90,11 @@ class SimMMIO extends Module {
       io.mmioTrap.cmd := 5.U
     }
   }
+  */
 
-  io.rw.req.ready := true.B
-  io.rw.resp.bits.rdata := io.mmioTrap.rdata
-  io.rw.resp.valid := io.mmioTrap.valid
+  //io.rw.req.ready := true.B
+  //io.rw.resp.bits.rdata := io.mmioTrap.rdata
+  //io.rw.resp.valid := io.mmioTrap.valid
 
-  assert(!io.rw.req.valid || io.mmioTrap.valid, "bad addr = 0x%x", io.rw.req.bits.addr)
+  //assert(!io.rw.req.valid || io.mmioTrap.valid, "bad addr = 0x%x", io.rw.req.bits.addr)
 }

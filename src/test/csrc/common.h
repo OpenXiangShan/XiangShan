@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <stdint.h>
+#include <assert.h>
 
 #ifdef __cplusplus
 # include <stdexcept>
