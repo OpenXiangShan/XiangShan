@@ -6,17 +6,11 @@ SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 SIMTOP = top.TestMain
 EMU_IMAGE = $(BUILD_DIR)/bin-readmemh
 IMAGE ?= temp
-SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(EMU_IMAGE) \
-	--more-vcs-flags "+define+RANDOMIZE_REG_INIT"
 
 .DEFAULT_GOAL = verilog
 
 help:
 	sbt 'test:runMain gcd.GCDMain --help'
-
-LIBDEVICE_PATH = ./src/test/libdevice
-libdevice:
-	make -C $(LIBDEVICE_PATH)
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
@@ -30,9 +24,6 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	sbt 'test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(EMU_IMAGE) --output-file $@'
-
-test: libdevice
-	sbt '$(SIMCMD) --tr-rollback-buffers 0'
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
@@ -72,10 +63,7 @@ emu: $(EMU)
 	@ln -sf $(IMAGE)_3 $(EMU_IMAGE)_3
 	@$(EMU)
 
-#emu: libdevice
-#	sbt '$(SIMCMD) --backend-name verilator --generate-vcd-output off'
-
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: libdevice verilog test emu clean help
+.PHONY: verilog emu clean help

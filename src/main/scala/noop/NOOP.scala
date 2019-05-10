@@ -27,11 +27,6 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
     val dmem = new AXI4
     val mmio = new SimpleBus
     val uncacheMem = new AXI4
-    val trap = Output(UInt(2.W))
-    val sim = new Bundle {
-      val cycleCnt = Output(UInt(32.W))
-      val instrCnt = Output(UInt(32.W))
-    }
     val difftest = new DiffTestIO
   })
 
@@ -108,9 +103,6 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   csr.setPerfCnt(MDcacheHit, dcacheHit)
   // mul
   csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
-
-  io.trap := isu.io.trap
-  io.sim <> csr.io.sim
 
   // monitor
   val mon = Module(new Monitor)

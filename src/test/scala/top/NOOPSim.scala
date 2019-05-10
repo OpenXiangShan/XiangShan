@@ -12,13 +12,6 @@ import utils.DiffTestIO
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
   val io = IO(new Bundle{
-    val trap = Output(UInt((3 + 1 + 4 + 32 + 32 + 2).W))
-    val mmioRdata = Input(UInt(32.W))
-    val trapInfo = new PcInstrIO
-    val sim = new Bundle {
-      val cycleCnt = Output(UInt(32.W))
-      val instrCnt = Output(UInt(32.W))
-    }
     val difftest = new DiffTestIO
   })
 
@@ -35,14 +28,7 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   dmem.io.in <> dmemdelay.io.out
 
   mmio.io.rw <> noop.io.mmio
-  io.trap := Cat(mmio.io.mmioTrap.cmd, mmio.io.mmioTrap.valid, mmio.io.rw.req.bits.wmask,
-    mmio.io.rw.req.bits.addr, mmio.io.rw.req.bits.wdata, noop.io.trap)
 
-  io.trapInfo.pc := noop.io.imem.ar.bits.addr
-  io.trapInfo.instr := noop.io.imem.r.bits.data
-  mmio.io.mmioTrap.rdata := io.mmioRdata
-
-  io.sim <> noop.io.sim
   io.difftest <> noop.io.difftest
 
   noop.io.uncacheMem := DontCare

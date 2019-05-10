@@ -18,7 +18,7 @@ module DeviceHelper(
 );
 
   always @(posedge clk) begin
-    if (reqValid) device_helper(reqWen, reqAddr, reqWdata, reqWmask, respRdata);
+    if (reqValid) device_helper(reqWen, reqAddr, reqWdata, {4'b0, reqWmask}, respRdata);
   end
 
 endmodule

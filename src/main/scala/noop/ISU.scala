@@ -16,7 +16,6 @@ class ISU extends Module with HasSrcType {
     val in = Flipped(Valid(new PcCtrlDataIO))
     val out = Valid(new PcCtrlDataIO)
     val wb = Flipped(new WriteBackIO)
-    val trap = Output(UInt(2.W))
     val difftestRegs = Output(Vec(32, UInt(32.W)))
   })
 
@@ -40,16 +39,6 @@ class ISU extends Module with HasSrcType {
   }
   io.out.bits.pc := io.in.bits.pc
   io.out.valid := io.in.valid
-
-  //val mon = Module(new Monitor)
-  //mon.io.clk := clock
-  //mon.io.isNoopTrap := io.in.bits.ctrl.isNoopTrap
-  //mon.io.trapCode := rs1Data
-
-  io.trap := //Mux(io.in.bits.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
-              Mux(io.in.bits.ctrl.isNoopTrap,
-                Mux(rs1Data === 0.U, NOOPTrap.StateGoodTrap, NOOPTrap.StateBadTrap),
-                NOOPTrap.StateRunning) //)
 
   io.difftestRegs.zipWithIndex.map{ case (r, i) => r := rf.read(i.U) }
 }
