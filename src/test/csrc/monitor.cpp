@@ -3,6 +3,7 @@
 enum {
   STATE_GOODTRAP = 0,
   STATE_BADTRAP,
+  STATE_ABORT,
   STATE_RUNNING = -1
 };
 
@@ -19,6 +20,11 @@ extern "C" void monitor(int trapCode, int trapPC, int cycleCnt, int instrCnt) {
   is_finish = true;
 }
 
+void set_abort(void) {
+  g_trapCode = STATE_ABORT;
+  is_finish = true;
+}
+
 void display_trapinfo(void) {
   switch (g_trapCode) {
     case STATE_GOODTRAP:
@@ -26,6 +32,9 @@ void display_trapinfo(void) {
       break;
     case STATE_BADTRAP:
       eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%08x\n" ANSI_COLOR_RESET, g_trapPC);
+      break;
+    case STATE_ABORT:
+      eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%08x\n" ANSI_COLOR_RESET, g_trapPC);
       break;
   }
 

@@ -1,10 +1,39 @@
 #include "common.h"
 #include <sys/time.h>
+#include <SDL2/SDL.h>
+
+void send_key(uint8_t, bool);
+uint32_t read_key(void);
+void init_sdl(void);
+void update_screen(void *vmem);
+uint32_t screen_size(void);
+void set_abort(void);
 
 static struct timeval boot = {};
+static uint32_t vmem[0x400000 / sizeof(uint32_t)];
 
 void device_init(void) {
+  init_sdl();
   gettimeofday(&boot, NULL);
+}
+
+void poll_event() {
+  SDL_Event event;
+  while (SDL_PollEvent(&event)) {
+    switch (event.type) {
+      case SDL_QUIT: set_abort();
+
+                     // If a key was pressed
+      case SDL_KEYDOWN:
+      case SDL_KEYUP: {
+                        uint8_t k = event.key.keysym.scancode;
+                        bool is_keydown = (event.key.type == SDL_KEYDOWN);
+                        send_key(k, is_keydown);
+                        break;
+                      }
+      default: break;
+    }
+  }
 }
 
 uint32_t uptime(void) {
@@ -22,7 +51,7 @@ uint32_t uptime(void) {
 }
 
 extern "C" void device_helper(
-    uint8_t req_wen, uint32_t req_addr, uint32_t req_wdata, uint32_t *resp_rdata) {
+    uint8_t req_wen, uint32_t req_addr, uint32_t req_wdata, uint8_t req_wmask, uint32_t *resp_rdata) {
   switch (req_addr) {
       // read uartlite stat register
     case 0x40600008:
@@ -33,16 +62,18 @@ extern "C" void device_helper(
       // read RTC
     case 0x40700000: *resp_rdata = uptime(); break;
       // read key
-    case 0x40900000: *resp_rdata = 0; break;
+    case 0x40900000: *resp_rdata = read_key(); break;
       // read screen size
-    case 0x40800000: *resp_rdata = 0; break;
+    case 0x40800000: *resp_rdata = screen_size(); break;
       // write vga sync
-    case 0x40800004: *resp_rdata = 0; break;
+    case 0x40800004: update_screen(vmem); break;
     default:
       if (req_addr >= 0x40000000 && req_addr < 0x40400000 && req_wen) {
         // write to vmem
+        vmem[(req_addr - 0x40000000) / sizeof(uint32_t)] = req_wdata;
       }
       else {
+        eprintf("bad address = 0x%08x, wen = %d\n", req_addr, req_wen);
         assert(0);
       }
   }

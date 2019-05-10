@@ -12,6 +12,7 @@ class DeviceHelper extends BlackBox {
     val reqWen = Input(Bool())
     val reqAddr = Input(UInt(32.W))
     val reqWdata = Input(UInt(32.W))
+    val reqWmask = Input(UInt(4.W))
     val respRdata = Output(UInt(32.W))
   })
 }
@@ -39,10 +40,11 @@ class SimMMIO extends Module {
   helper.io.reqWen := wen
   helper.io.reqAddr := io.rw.req.bits.addr
   helper.io.reqWdata := io.rw.req.bits.wdata
+  helper.io.reqWmask := io.rw.req.bits.wmask
   io.rw.resp.bits.rdata := helper.io.respRdata
 
   io.rw.req.ready := true.B
-  io.rw.resp.valid := io.rw.req.valid
+  io.rw.resp.valid := RegNext(io.rw.req.valid)
 
 /*
   when (io.rw.req.valid) {

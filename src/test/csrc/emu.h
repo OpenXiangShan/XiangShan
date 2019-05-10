@@ -94,9 +94,18 @@ class Emulator {
 
   int execute_cycles(uint64_t n) {
     extern bool is_finish;
+    extern void poll_event(void);
+    extern uint32_t uptime(void);
+    int lasttime = 0;
     while (!is_finish && n > 0) {
       single_cycle();
       n --;
+
+      int t = uptime();
+      if (t - lasttime > 100) {
+        poll_event();
+        lasttime = t;
+      }
     }
 
     return !is_finish;
