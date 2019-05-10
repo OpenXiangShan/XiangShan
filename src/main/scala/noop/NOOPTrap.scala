@@ -12,3 +12,14 @@ object NOOPTrap extends HasDecodeConst {
   def TRAP    = BitPat("b????????????_?????_000_?????_1101011")
   val table = Array(TRAP -> List(InstrI, FuAlu, AluAdd))
 }
+
+class Monitor extends BlackBox {
+  val io = IO(new Bundle {
+    val clk = Input(Clock())
+    val isNoopTrap = Input(Bool())
+    val trapCode = Input(UInt(32.W))
+    val trapPC = Input(UInt(32.W))
+    val cycleCnt = Input(UInt(32.W))
+    val instrCnt = Input(UInt(32.W))
+  })
+}

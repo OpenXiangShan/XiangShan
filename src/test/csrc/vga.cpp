@@ -2,8 +2,6 @@
 
 #include <SDL2/SDL.h>
 
-#define VMEM 0x40000
-
 #define SCREEN_PORT 0x100 // Note that this is not the standard
 #define SCREEN_MMIO 0x4100
 #define SCREEN_H 320
@@ -14,8 +12,8 @@ static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 
-void update_screen(void *vmem_scala) {
-  SDL_UpdateTexture(texture, NULL, vmem_scala, SCREEN_W * sizeof(uint32_t));
+void update_screen(void *vmem) {
+  SDL_UpdateTexture(texture, NULL, vmem, SCREEN_W * sizeof(uint32_t));
   SDL_RenderClear(renderer);
   SDL_RenderCopy(renderer, texture, NULL, NULL);
   SDL_RenderPresent(renderer);

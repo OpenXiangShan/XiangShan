@@ -1,4 +1,5 @@
 #include "common.h"
+#include "difftest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
@@ -62,22 +63,22 @@ void init_difftest(char *img, uint32_t *reg) {
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   assert(handle);
 
-  ref_difftest_memcpy_from_dut = dlsym(handle, "difftest_memcpy_from_dut");
+  ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t))dlsym(handle, "difftest_memcpy_from_dut");
   assert(ref_difftest_memcpy_from_dut);
 
-  ref_difftest_getregs = dlsym(handle, "difftest_getregs");
+  ref_difftest_getregs = (void (*)(void *))dlsym(handle, "difftest_getregs");
   assert(ref_difftest_getregs);
 
-  ref_difftest_setregs = dlsym(handle, "difftest_setregs");
+  ref_difftest_setregs = (void (*)(const void *))dlsym(handle, "difftest_setregs");
   assert(ref_difftest_setregs);
 
-  ref_difftest_exec = dlsym(handle, "difftest_exec");
+  ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
 
-  ref_isa_reg_display = dlsym(handle, "isa_reg_display");
+  ref_isa_reg_display = (void (*)(void))dlsym(handle, "isa_reg_display");
   assert(ref_isa_reg_display);
 
-  void (*ref_difftest_init)(void) = dlsym(handle, "difftest_init");
+  void (*ref_difftest_init)(void) = (void (*)(void))dlsym(handle, "difftest_init");
   assert(ref_difftest_init);
 
   ref_difftest_init();
