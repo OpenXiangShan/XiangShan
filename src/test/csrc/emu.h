@@ -93,20 +93,13 @@ class Emulator {
   }
 
   int execute_cycles(uint64_t n) {
-    //while(!is_finished() && n > 0) {
-    while(n > 0) {
+    extern int monitor_state;
+    while (monitor_state == STATE_RUNNING && n > 0) {
       single_cycle();
       n --;
     }
 
-    //if(is_finished()) {
-    //  // two more cycles to wait instr commit
-    //  single_cycle();
-    //  single_cycle();
-    //  return get_exit_code();
-    //}
-
-    return n == 0 ? -1 : 0;
+    return monitor_state;
   }
 
   int execute() { return execute_cycles(max_cycles); }

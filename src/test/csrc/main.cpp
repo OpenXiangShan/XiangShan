@@ -91,9 +91,9 @@ int main(int argc, const char** argv) {
 
   auto ret = emu.execute();
 
-  if (ret == -1) {
+  if (ret == STATE_RUNNING) {
     eprintf(ANSI_COLOR_RED "Timeout after %lld cycles\n" ANSI_COLOR_RESET, (long long)emu.get_max_cycles());
-  } else if (ret == 0) {
+  } else if (ret == STATE_GOODTRAP) {
     eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP\n" ANSI_COLOR_RESET);
   } else {
     eprintf(ANSI_COLOR_RED "HIT BAD TRAP code: %d\n" ANSI_COLOR_RESET, ret);

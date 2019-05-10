@@ -4,8 +4,9 @@ TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 
 SIMTOP = top.TestMain
-IMAGE = ""
-SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE) \
+EMU_IMAGE = $(BUILD_DIR)/bin-readmemh
+IMAGE ?= temp
+SIMCMD = test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(EMU_IMAGE) \
 	--more-vcs-flags "+define+RANDOMIZE_REG_INIT"
 
 .DEFAULT_GOAL = verilog
@@ -28,7 +29,7 @@ SIM_TOP = NOOPSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	sbt 'test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(IMAGE) --output-file $@'
+	sbt 'test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(EMU_IMAGE) --output-file $@'
 
 test: libdevice
 	sbt '$(SIMCMD) --tr-rollback-buffers 0'
@@ -59,12 +60,16 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	@mkdir -p $(@D)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) \
-		$^ $(EMU_DEPS)
+		-f $(BUILD_DIR)/black_box_verilog_files.f $^ $(EMU_DEPS)
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS)
 	$(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
 emu: $(EMU)
+	ln -sf $(IMAGE)_0 $(EMU_IMAGE)_0
+	ln -sf $(IMAGE)_1 $(EMU_IMAGE)_1
+	ln -sf $(IMAGE)_2 $(EMU_IMAGE)_2
+	ln -sf $(IMAGE)_3 $(EMU_IMAGE)_3
 	$(EMU)
 
 #emu: libdevice

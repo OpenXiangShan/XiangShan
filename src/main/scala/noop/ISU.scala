@@ -40,10 +40,18 @@ class ISU extends Module with HasSrcType {
   io.out.bits.pc := io.in.bits.pc
   io.out.valid := io.in.valid
 
+  val mon = Module(new Monitor)
+  mon.io.clk := clock
+  mon.io.isNoopTrap := io.in.bits.ctrl.isNoopTrap
+  mon.io.trapCode := rs1Data
+
+  io.trap := NOOPTrap.StateRunning
+  /*
   io.trap := //Mux(io.in.bits.ctrl.isInvOpcode, NOOPTrap.StateInvOpcode,
               Mux(io.in.bits.ctrl.isNoopTrap,
                 Mux(rs1Data === 0.U, NOOPTrap.StateGoodTrap, NOOPTrap.StateBadTrap),
                 NOOPTrap.StateRunning) //)
+*/
 
   io.difftestRegs.zipWithIndex.map{ case (r, i) => r := rf.read(i.U) }
 }
