@@ -4,6 +4,7 @@ import chisel3.iotesters.PeekPokeTester
 import chisel3.iotesters
 import chisel3.iotesters.Driver
 
+//import chisel3.Driver
 import noop._
 
 class NOOPTester(noop: NOOPSimTop, imgPath: String) extends PeekPokeTester(noop) {
@@ -108,7 +109,9 @@ object TestMain extends App {
     case Array(a: String, b: String) => newArgs = newArgs :+ a :+ b
   }
 
-  iotesters.Driver.execute(newArgs, () => new NOOPSimTop(memInitFile = imgPath)) {
-    c => new NOOPTester(c, imgPath.replaceAll("-readmemh$", ".bin"))
-  }
+  chisel3.Driver.execute(newArgs, () => new NOOPSimTop(memInitFile = imgPath))
+
+  //iotesters.Driver.execute(newArgs, () => new NOOPSimTop(memInitFile = imgPath)) {
+  //  c => new NOOPTester(c, imgPath.replaceAll("-readmemh$", ".bin"))
+  //}
 }
