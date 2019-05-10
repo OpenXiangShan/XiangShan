@@ -33,8 +33,6 @@ module system_top (
 
   `axi_wire(AXI_MEM_MAPPED, 32, 8);
   `axi_wire(AXI_MEM, 32, 8);
-  `axi_wire(AXI_GPU_METADATA, 32, 8);
-  `axi_wire(AXI_GPU_METADATA_MAPPED, 32, 8);
 
   wire coreclk;
   wire corerstn;
@@ -70,7 +68,6 @@ module system_top (
     .FIXED_IO_ps_srstb(FIXED_IO_ps_srstb),
 
     `axi_connect_if(AXI_MEM, AXI_MEM_MAPPED),
-    `axi_connect_if(AXI_GPU_METADATA, AXI_GPU_METADATA_MAPPED),
 
     // invert connection
     .uart_txd(noop_uart_rx),
@@ -89,14 +86,8 @@ module system_top (
     `axi_connect_if(m_axi, AXI_MEM_MAPPED)
   );
 
-  addr_mapper gpu_addr_mapper_i(
-    `axi_connect_if(s_axi, AXI_GPU_METADATA),
-    `axi_connect_if(m_axi, AXI_GPU_METADATA_MAPPED)
-  );
-
   noop noop_i(
     `axi_connect_if(AXI_MEM, AXI_MEM),
-    `axi_connect_if(AXI_GPU_METADATA, AXI_GPU_METADATA),
 
     .uart_txd(noop_uart_tx),
     .uart_rxd(noop_uart_rx),

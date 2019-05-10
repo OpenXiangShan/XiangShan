@@ -36,6 +36,7 @@ EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lreadline -lSDL2 -ldl
 
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
+  +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
 	+define+RANDOMIZE_REG_INIT \
   --assert --output-split 20000 \

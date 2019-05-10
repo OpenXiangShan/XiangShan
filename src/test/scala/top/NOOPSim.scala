@@ -31,5 +31,5 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
 
   io.difftest <> noop.io.difftest
 
-  noop.io.uncacheMem := DontCare
+//  noop.io.uncacheMem := DontCare
 }
