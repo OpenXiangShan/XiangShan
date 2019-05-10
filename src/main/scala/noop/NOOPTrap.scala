@@ -18,5 +18,8 @@ class Monitor extends BlackBox {
     val clk = Input(Clock())
     val isNoopTrap = Input(Bool())
     val trapCode = Input(UInt(32.W))
+    val trapPC = Input(UInt(32.W))
+    val cycleCnt = Input(UInt(32.W))
+    val instrCnt = Input(UInt(32.W))
   })
 }

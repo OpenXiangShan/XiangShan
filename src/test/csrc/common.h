@@ -35,12 +35,6 @@ int sc(unsigned int ncycle, int *ret_code);
 int si(unsigned int ninstr, int *ret_code);
 unsigned int read_reg(int reg_no);
 
-enum {
-  STATE_GOODTRAP = 0,
-  STATE_BADTRAP,
-  STATE_RUNNING = -1
-};
-
 // device
 void init_device(void);
 bool is_finished(void);

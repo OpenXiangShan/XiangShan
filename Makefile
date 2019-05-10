@@ -66,11 +66,11 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS)
 	$(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
 emu: $(EMU)
-	ln -sf $(IMAGE)_0 $(EMU_IMAGE)_0
-	ln -sf $(IMAGE)_1 $(EMU_IMAGE)_1
-	ln -sf $(IMAGE)_2 $(EMU_IMAGE)_2
-	ln -sf $(IMAGE)_3 $(EMU_IMAGE)_3
-	$(EMU)
+	@ln -sf $(IMAGE)_0 $(EMU_IMAGE)_0
+	@ln -sf $(IMAGE)_1 $(EMU_IMAGE)_1
+	@ln -sf $(IMAGE)_2 $(EMU_IMAGE)_2
+	@ln -sf $(IMAGE)_3 $(EMU_IMAGE)_3
+	@$(EMU)
 
 #emu: libdevice
 #	sbt '$(SIMCMD) --backend-name verilator --generate-vcd-output off'

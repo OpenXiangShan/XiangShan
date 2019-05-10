@@ -4,6 +4,7 @@
 #include <memory>
 #include <getopt.h>
 #include <string.h>
+#include <sys/time.h>
 #include <iomanip>
 #include <fstream>
 #include <functional>
@@ -89,15 +90,25 @@ int main(int argc, const char** argv) {
     return emu.get_cycles();
   };
 
-  auto ret = emu.execute();
+  struct timeval t0, t1;
+  gettimeofday(&t0, NULL);
+  auto timeout = emu.execute();
+  gettimeofday(&t1, NULL);
 
-  if (ret == STATE_RUNNING) {
+  if (timeout) {
     eprintf(ANSI_COLOR_RED "Timeout after %lld cycles\n" ANSI_COLOR_RESET, (long long)emu.get_max_cycles());
-  } else if (ret == STATE_GOODTRAP) {
-    eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP\n" ANSI_COLOR_RESET);
   } else {
-    eprintf(ANSI_COLOR_RED "HIT BAD TRAP code: %d\n" ANSI_COLOR_RESET, ret);
+    extern void display_trapinfo(void);
+    display_trapinfo();
+
+    int s = t1.tv_sec - t0.tv_sec;
+    int us = t1.tv_usec - t0.tv_usec;
+    if (us < 0) {
+      s --;
+      us += 1000000;
+    }
+    eprintf(ANSI_COLOR_BLUE "Host time spent: %ds %6dus\n" ANSI_COLOR_RESET, s, us);
   }
 
-  return ret;
+  return timeout;
 }

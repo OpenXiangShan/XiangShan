@@ -93,13 +93,13 @@ class Emulator {
   }
 
   int execute_cycles(uint64_t n) {
-    extern int monitor_state;
-    while (monitor_state == STATE_RUNNING && n > 0) {
+    extern bool is_finish;
+    while (!is_finish && n > 0) {
       single_cycle();
       n --;
     }
 
-    return monitor_state;
+    return !is_finish;
   }
 
   int execute() { return execute_cycles(max_cycles); }

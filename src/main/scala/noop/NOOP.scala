@@ -112,6 +112,15 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   io.trap := isu.io.trap
   io.sim <> csr.io.sim
 
+  // monitor
+  val mon = Module(new Monitor)
+  mon.io.clk := clock
+  mon.io.isNoopTrap := isu.io.out.bits.ctrl.isNoopTrap
+  mon.io.trapCode := isu.io.out.bits.data.src1
+  mon.io.trapPC := isu.io.out.bits.pc
+  mon.io.cycleCnt := csr.io.sim.cycleCnt
+  mon.io.instrCnt := csr.io.sim.instrCnt
+
   // difftest
   // latch writeback signal to let register files and pc update
   io.difftest.commit := RegNext(wbu.io.writeback)
