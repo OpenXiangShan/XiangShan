@@ -16,6 +16,7 @@ object NOOPTrap extends HasDecodeConst {
 class Monitor extends BlackBox {
   val io = IO(new Bundle {
     val clk = Input(Clock())
+    val reset = Input(Bool())
     val isNoopTrap = Input(Bool())
     val trapCode = Input(UInt(32.W))
     val trapPC = Input(UInt(32.W))

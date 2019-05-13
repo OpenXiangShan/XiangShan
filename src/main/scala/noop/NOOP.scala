@@ -108,6 +108,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val mon = Module(new Monitor)
   mon.io.clk := clock
   mon.io.isNoopTrap := isu.io.out.bits.ctrl.isNoopTrap
+  mon.io.reset := reset
   mon.io.trapCode := isu.io.out.bits.data.src1
   mon.io.trapPC := isu.io.out.bits.pc
   mon.io.cycleCnt := csr.io.sim.cycleCnt
