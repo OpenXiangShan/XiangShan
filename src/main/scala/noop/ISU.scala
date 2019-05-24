@@ -24,6 +24,7 @@ class ISU extends Module with HasSrcType {
     val out = Decoupled(new PcCtrlDataIO)
     val wb = Flipped(new WriteBackIO)
     val flush = Input(Bool())
+    val forward = Flipped(new ForwardIO)
     val difftestRegs = Output(Vec(32, UInt(32.W)))
     val rawStall = Output(Bool())
     val exuBusy = Output(Bool())
@@ -34,9 +35,20 @@ class ISU extends Module with HasSrcType {
   val rfSrc2 = Mux(io.in.bits.ctrl.src2Type === Src2Reg, io.in.bits.ctrl.rfSrc2, 0.U)
   val rfDest = Mux(io.in.bits.ctrl.rfWen, io.in.bits.ctrl.rfDest, 0.U)
 
+
+  val src1ForwardNextCycle = (rfSrc1 =/= 0.U) && (rfSrc1 === io.forward.rfDest) && io.forward.rfWen && io.forward.fire
+  val src2ForwardNextCycle = (rfSrc2 =/= 0.U) && (rfSrc2 === io.forward.rfDest) && io.forward.rfWen && io.forward.fire
+  val src1Forward = (rfSrc1 =/= 0.U) && (rfSrc1 === io.wb.rfDest) && io.wb.rfWen && !src1ForwardNextCycle
+  val src2Forward = (rfSrc2 =/= 0.U) && (rfSrc2 === io.wb.rfDest) && io.wb.rfWen && !src2ForwardNextCycle
+
+  val sb = new ScoreBoard
+  val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward
+  val src2Ready = !sb.isBusy(rfSrc2) || src2ForwardNextCycle || src2Forward
+  io.out.valid := io.in.valid && src1Ready && src2Ready && !io.flush
+
   val rf = new RegFile
-  val rs1Data = rf.read(rfSrc1)
-  val rs2Data = rf.read(rfSrc2)
+  val rs1Data = Mux(src1Forward, io.wb.rfWdata, rf.read(rfSrc1))
+  val rs2Data = Mux(src2Forward, io.wb.rfWdata, rf.read(rfSrc2))
   io.out.bits.data.src1 := Mux(io.in.bits.ctrl.src1Type === Src1Pc, io.in.bits.pc, rs1Data)
   io.out.bits.data.src2 := Mux(io.in.bits.ctrl.src2Type === Src2Reg, rs2Data, io.in.bits.data.imm)
   io.out.bits.data.imm  := io.in.bits.data.imm
@@ -52,9 +64,8 @@ class ISU extends Module with HasSrcType {
     o.isNoopTrap := i.isNoopTrap
   }
   io.out.bits.pc := io.in.bits.pc
-
-  val sb = new ScoreBoard
-  io.out.valid := io.in.valid && !sb.isBusy(rfSrc1) && !sb.isBusy(rfSrc2) && !io.flush
+  io.out.bits.ctrl.isSrc1Forward := src1ForwardNextCycle
+  io.out.bits.ctrl.isSrc2Forward := src2ForwardNextCycle
 
   when (io.wb.rfWen) {
     rf.write(io.wb.rfDest, io.wb.rfWdata)

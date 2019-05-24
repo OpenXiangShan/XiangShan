@@ -91,6 +91,9 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   wbu.io.brIn <> exu.io.br
   isu.io.wb <> wbu.io.wb
   ifu.io.br <> wbu.io.brOut
+  // forward
+  isu.io.forward <> exu.io.forward
+  exu.io.wbData := wbu.io.wb.rfWdata
 
   val xbar = Module(new SimpleBusCrossbar(1, AddressSpace))
   val dmem = xbar.io.out(0)

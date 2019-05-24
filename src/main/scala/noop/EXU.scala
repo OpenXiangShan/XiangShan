@@ -12,6 +12,8 @@ class EXU extends Module with HasFuType {
     val out = Decoupled((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new SimpleBus
+    val forward = new ForwardIO
+    val wbData = Input(UInt(32.W))
     val csr = new Bundle {
       val isCsr = Output(Bool())
       val in = Flipped(Decoupled(UInt(32.W)))
@@ -20,8 +22,9 @@ class EXU extends Module with HasFuType {
     }
   })
 
-  val (src1, src2, fuType, fuOpType) = (io.in.bits.data.src1, io.in.bits.data.src2,
-    io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
+  val src1 = Mux(io.in.bits.ctrl.isSrc1Forward, io.wbData, io.in.bits.data.src1)
+  val src2 = Mux(io.in.bits.ctrl.isSrc2Forward, io.wbData, io.in.bits.data.src2)
+  val (fuType, fuOpType) = (io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
 
   val fuValids = Wire(Vec(FuTypeNum, Bool()))
   (0 until FuTypeNum).map (i => fuValids(i) := (fuType === i.U) && io.in.valid)
@@ -73,6 +76,10 @@ class EXU extends Module with HasFuType {
   ))
 
   io.in.ready := !io.in.valid || io.out.fire()
+
+  io.forward.fire := io.out.fire()
+  io.forward.rfWen := io.in.bits.ctrl.rfWen
+  io.forward.rfDest := io.in.bits.ctrl.rfDest
 
   // perfcnt
   io.csr.instrType(FuAlu) := alu.io.out.fire()

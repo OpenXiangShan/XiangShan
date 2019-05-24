@@ -15,6 +15,8 @@ class CtrlPathIO extends Bundle
   val rfDest = Output(UInt(5.W))
   val isInvOpcode = Output(Bool())
   val isNoopTrap = Output(Bool())
+  val isSrc1Forward = Output(Bool())
+  val isSrc2Forward = Output(Bool())
 }
 
 class DataPathIO extends Bundle {
@@ -53,4 +55,10 @@ class FunctionUnitIO extends Bundle with HasDecodeConst {
     val func = Output(UInt(FuOpTypeWidth))
   }))
   val out = Decoupled(Output(UInt(32.W)))
+}
+
+class ForwardIO extends Bundle {
+  val rfWen = Output(Bool())
+  val rfDest = Output(UInt(5.W))
+  val fire = Output(Bool())
 }

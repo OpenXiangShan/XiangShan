@@ -15,6 +15,8 @@ class IDU extends Module with HasDecodeConst {
   val instrType :: fuType :: fuOpType :: Nil =
     ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
 
+  io.out.bits := DontCare
+
   io.out.bits.ctrl.fuType := fuType
   io.out.bits.ctrl.fuOpType := fuOpType
 
