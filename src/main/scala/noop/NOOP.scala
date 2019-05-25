@@ -142,6 +142,10 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   csr.setPerfCnt(MDcacheHit, dcacheHit)
   // mul
   csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
+  // pipeline wait
+  csr.setPerfCnt(MIFUFlush, ifu.io.flushVec.orR())
+  csr.setPerfCnt(MRAWStall, isu.io.rawStall)
+  csr.setPerfCnt(MEXUBusy, isu.io.exuBusy)
 
   // monitor
   val mon = Module(new Monitor)

@@ -25,6 +25,8 @@ class ISU extends Module with HasSrcType {
     val wb = Flipped(new WriteBackIO)
     val flush = Input(Bool())
     val difftestRegs = Output(Vec(32, UInt(32.W)))
+    val rawStall = Output(Bool())
+    val exuBusy = Output(Bool())
   })
 
   // make non-register addressing to zero, since sb.isBusy(0) === false.B
@@ -64,6 +66,10 @@ class ISU extends Module with HasSrcType {
   when (io.out.fire()) { sb.setBusy(rfDest) }
 
   io.in.ready := !io.in.valid || io.out.fire()
+
+  // read after write
+  io.rawStall := io.in.valid && !io.out.valid
+  io.exuBusy := io.out.valid && !io.out.fire()
 
   io.difftestRegs.zipWithIndex.map{ case (r, i) => r := rf.read(i.U) }
 }
