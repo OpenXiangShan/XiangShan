@@ -8,8 +8,8 @@ import bus.simplebus.SimpleBus
 
 class EXU extends Module with HasFuType {
   val io = IO(new Bundle {
-    val in = Flipped(Valid(new PcCtrlDataIO))
-    val out = Valid((new PcCtrlDataIO))
+    val in = Flipped(Decoupled(new PcCtrlDataIO))
+    val out = Decoupled((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new SimpleBus
     val csr = new Bundle {
@@ -31,15 +31,15 @@ class EXU extends Module with HasFuType {
   alu.io.out.ready := true.B
 
   val bru = Module(new BRU)
-  val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = io.in.bits.data.dest, func = fuOpType)
+  val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = src2, func = fuOpType)
   bru.io.pc := io.in.bits.pc
-  bru.io.offset := src2
+  bru.io.offset := io.in.bits.data.imm
   io.br <> bru.io.branch
   bru.io.out.ready := true.B
 
   val lsu = Module(new LSU)
-  val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = src2, func = fuOpType)
-  lsu.io.wdata := io.in.bits.data.dest
+  val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
+  lsu.io.wdata := src2
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
 
@@ -66,10 +66,13 @@ class EXU extends Module with HasFuType {
     o.rfDest := i.rfDest
   }
   io.out.bits.pc := io.in.bits.pc
+  // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
     FuLsu -> lsu.io.out.valid,
     FuMdu -> mdu.io.out.valid
   ))
+
+  io.in.ready := !io.in.valid || io.out.fire()
 
   // perfcnt
   io.csr.instrType(FuAlu) := alu.io.out.fire()

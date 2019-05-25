@@ -20,6 +20,7 @@ class CtrlPathIO extends Bundle
 class DataPathIO extends Bundle {
   val src1 = Output(UInt(32.W))
   val src2 = Output(UInt(32.W))
+  val imm  = Output(UInt(32.W))
   val dest = Output(UInt(32.W))
 }
 
