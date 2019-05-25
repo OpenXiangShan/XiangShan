@@ -38,7 +38,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
 
   val icacheHit = WireInit(false.B)
   io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache"))
+    val icache = Module(new Cache(ro = true, name = "icache", dataBits = 512))
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
     icache.io.out
@@ -117,5 +117,5 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   // latch writeback signal to let register files and pc update
   io.difftest.commit := RegNext(wbu.io.writeback)
   isu.io.difftestRegs.zipWithIndex.map { case(r, i) => io.difftest.r(i) := r }
-  io.difftest.r(32) := ifu.io.out.bits.pc
+  io.difftest.thisPC := RegNext(wbu.io.in.bits.pc)
 }

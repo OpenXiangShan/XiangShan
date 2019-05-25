@@ -7,9 +7,9 @@ import bus.simplebus.SimpleBus
 import bus.axi4._
 import utils._
 
-class Cache(ro: Boolean, name: String) extends Module {
+class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(new SimpleBus)
+    val in = Flipped(new SimpleBus(dataBits))
     val out = new AXI4
     val hit = Output(Bool())
   })
@@ -125,7 +125,7 @@ class Cache(ro: Boolean, name: String) extends Module {
   }
 
   // return data
-  io.in.resp.bits.rdata := retData.asTypeOf(Vec(LineBeats, UInt(32.W)))(addrReg.wordIndex)
+  io.in.resp.bits.rdata := (if (dataBits == 512) retData else retData.asTypeOf(Vec(LineBeats, UInt(32.W)))(addrReg.wordIndex))
   io.in.resp.valid := (hit && (state === s_metaRead)) || (state === s_metaWrite)
 
   val readBeatCnt = Counter(LineBeats)
