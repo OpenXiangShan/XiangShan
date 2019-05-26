@@ -38,26 +38,6 @@ class IFU extends Module with HasResetVector {
   io.out.valid := ibufHit && !io.flushVec(0)
   io.out.bits.instr := ibuf.asTypeOf(Vec(512 / 32, UInt(32.W)))(pc(5, 2))
 
-  // state machine
-  val s_idle :: s_req :: s_wait_resp :: Nil = Enum(3)
-  val state = RegInit(s_idle)
-
-  switch (state) {
-    is (s_idle) {
-      when (!ibufHit) { state := s_req }
-    }
-
-    is (s_req) {
-      when (io.imem.req.fire()) {
-        state := Mux(io.imem.resp.fire(), Mux(!ibufHit, s_req, s_idle), s_wait_resp)
-      }
-    }
-
-    is (s_wait_resp) {
-      when (io.imem.resp.fire()) { state := Mux(!ibufHit, s_req, s_idle) }
-    }
-  }
-
   io.imem := DontCare
   io.imem.req.valid := !ibufHit
   io.imem.req.bits.addr := pc
@@ -65,11 +45,11 @@ class IFU extends Module with HasResetVector {
   io.imem.req.bits.wen := false.B
   io.imem.resp.ready := true.B
 
-  val pcInflight = RegEnable(pc, io.imem.req.fire())
+  val pcTagInflight = RegEnable(pcTag(pc), io.imem.req.fire())
 
   when (io.imem.resp.fire()) {
     ibuf := io.imem.resp.bits.rdata
-    ibufPcTag := pcTag(pcInflight)
+    ibufPcTag := pcTagInflight
   }
 
   io.out.bits.pc := pc
