@@ -35,11 +35,12 @@ class ISU extends Module with HasSrcType {
   val rfSrc2 = Mux(io.in.bits.ctrl.src2Type === Src2Reg, io.in.bits.ctrl.rfSrc2, 0.U)
   val rfDest = Mux(io.in.bits.ctrl.rfWen, io.in.bits.ctrl.rfDest, 0.U)
 
+  def canForward(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
-  val src1ForwardNextCycle = (rfSrc1 =/= 0.U) && (rfSrc1 === io.forward.rfDest) && io.forward.rfWen && io.forward.fire
-  val src2ForwardNextCycle = (rfSrc2 =/= 0.U) && (rfSrc2 === io.forward.rfDest) && io.forward.rfWen && io.forward.fire
-  val src1Forward = (rfSrc1 =/= 0.U) && (rfSrc1 === io.wb.rfDest) && io.wb.rfWen && !src1ForwardNextCycle
-  val src2Forward = (rfSrc2 =/= 0.U) && (rfSrc2 === io.wb.rfDest) && io.wb.rfWen && !src2ForwardNextCycle
+  val src1ForwardNextCycle = canForward(rfSrc1, io.forward.rfDest, io.forward.rfWen && io.forward.valid)
+  val src2ForwardNextCycle = canForward(rfSrc2, io.forward.rfDest, io.forward.rfWen && io.forward.valid)
+  val src1Forward = canForward(rfSrc1, io.wb.rfDest, io.wb.rfWen)
+  val src2Forward = canForward(rfSrc2, io.wb.rfDest, io.wb.rfWen)
 
   val sb = new ScoreBoard
   val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward

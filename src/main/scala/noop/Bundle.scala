@@ -60,5 +60,5 @@ class FunctionUnitIO extends Bundle with HasDecodeConst {
 class ForwardIO extends Bundle {
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
-  val fire = Output(Bool())
+  val valid = Output(Bool())
 }

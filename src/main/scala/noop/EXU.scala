@@ -77,7 +77,7 @@ class EXU extends Module with HasFuType {
 
   io.in.ready := !io.in.valid || io.out.fire()
 
-  io.forward.fire := io.out.fire()
+  io.forward.valid := io.in.valid
   io.forward.rfWen := io.in.bits.ctrl.rfWen
   io.forward.rfDest := io.in.bits.ctrl.rfDest
 
