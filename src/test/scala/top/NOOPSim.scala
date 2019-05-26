@@ -15,7 +15,7 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
     val difftest = new DiffTestIO
   })
 
-  val noop = Module(new NOOP)
+  val noop = Module(new NOOP(hasPerfCnt = true))
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val imemdelay = Module(new AXI4Delayer(0.5))

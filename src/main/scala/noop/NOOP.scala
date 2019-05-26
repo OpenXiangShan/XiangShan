@@ -22,7 +22,7 @@ trait NOOPConfig {
   )
 }
 
-class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
+class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val io = IO(new Bundle {
     val imem = new AXI4
     val dmem = new AXI4
@@ -113,28 +113,31 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   csr.io.perfCntCond.map( _ := false.B )
   csr.setPerfCnt(Mcycle, true.B)
   csr.setPerfCnt(Minstret, wbu.io.writeback)
-  csr.setPerfCnt(MImemStall, ifu.io.imemStall)
-  // instruction types
-  csr.setPerfCnt(MALUInstr, exu.io.csr.instrType(FuAlu))
-  csr.setPerfCnt(MBRUInstr, exu.io.csr.instrType(FuBru))
-  csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
-  csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
-  csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
-  // load/store before dcache
-  csr.setPerfCnt(MLoadInstr, dmem.isRead() && dmem.req.fire())
-  csr.setPerfCnt(MLoadStall, BoolStopWatch(dmem.isRead(), dmem.resp.fire()))
-  csr.setPerfCnt(MStoreStall, BoolStopWatch(dmem.isWrite(), dmem.resp.fire()))
-  // mmio
-  csr.setPerfCnt(MmmioInstr, io.mmio.req.fire())
-  // cache
-  csr.setPerfCnt(MIcacheHit, icacheHit)
-  csr.setPerfCnt(MDcacheHit, dcacheHit)
-  // mul
-  csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
-  // pipeline wait
-  csr.setPerfCnt(MIFUFlush, ifu.io.flushVec.orR())
-  csr.setPerfCnt(MRAWStall, isu.io.rawStall)
-  csr.setPerfCnt(MEXUBusy, isu.io.exuBusy)
+
+  if (hasPerfCnt) {
+    csr.setPerfCnt(MImemStall, ifu.io.imemStall)
+    // instruction types
+    csr.setPerfCnt(MALUInstr, exu.io.csr.instrType(FuAlu))
+    csr.setPerfCnt(MBRUInstr, exu.io.csr.instrType(FuBru))
+    csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
+    csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
+    csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
+    // load/store before dcache
+    csr.setPerfCnt(MLoadInstr, dmem.isRead() && dmem.req.fire())
+    csr.setPerfCnt(MLoadStall, BoolStopWatch(dmem.isRead(), dmem.resp.fire()))
+    csr.setPerfCnt(MStoreStall, BoolStopWatch(dmem.isWrite(), dmem.resp.fire()))
+    // mmio
+    csr.setPerfCnt(MmmioInstr, io.mmio.req.fire())
+    // cache
+    csr.setPerfCnt(MIcacheHit, icacheHit)
+    csr.setPerfCnt(MDcacheHit, dcacheHit)
+    // mul
+    csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
+    // pipeline wait
+    csr.setPerfCnt(MIFUFlush, ifu.io.flushVec.orR())
+    csr.setPerfCnt(MRAWStall, isu.io.rawStall)
+    csr.setPerfCnt(MEXUBusy, isu.io.exuBusy)
+  }
 
   // monitor
   val mon = Module(new Monitor)
