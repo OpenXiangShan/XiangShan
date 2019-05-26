@@ -44,7 +44,7 @@ class ISU extends Module with HasSrcType {
   val sb = new ScoreBoard
   val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward
   val src2Ready = !sb.isBusy(rfSrc2) || src2ForwardNextCycle || src2Forward
-  io.out.valid := io.in.valid && src1Ready && src2Ready && !io.flush
+  io.out.valid := io.in.valid && src1Ready && src2Ready
 
   val rf = new RegFile
   val rs1Data = Mux(src1Forward, io.wb.rfWdata, rf.read(rfSrc1))
@@ -75,6 +75,7 @@ class ISU extends Module with HasSrcType {
   }
 
   when (io.out.fire()) { sb.setBusy(rfDest) }
+  when (io.flush && io.forward.rfWen) { sb.clearBusy(io.forward.rfDest) }
 
   io.in.ready := !io.in.valid || io.out.fire()
 

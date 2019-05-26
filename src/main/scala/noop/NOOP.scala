@@ -53,7 +53,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
 
     left.ready := right.ready
     right.bits <> RegEnable(left.bits, left.valid && right.ready)
-    right.valid := valid
+    right.valid := valid && !isFlush
   }
 
   pipelineConnect(ifu.io.out, idu.io.in, idu.io.out.fire(), ifu.io.flushVec(0))
@@ -142,10 +142,10 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   // monitor
   val mon = Module(new Monitor)
   mon.io.clk := clock
-  mon.io.isNoopTrap := isu.io.out.bits.ctrl.isNoopTrap
+  mon.io.isNoopTrap := exu.io.in.bits.ctrl.isNoopTrap && exu.io.in.valid
   mon.io.reset := reset
-  mon.io.trapCode := isu.io.out.bits.data.src1
-  mon.io.trapPC := isu.io.out.bits.pc
+  mon.io.trapCode := exu.io.in.bits.data.src1
+  mon.io.trapPC := exu.io.in.bits.pc
   mon.io.cycleCnt := csr.io.sim.cycleCnt
   mon.io.instrCnt := csr.io.sim.instrCnt
 
