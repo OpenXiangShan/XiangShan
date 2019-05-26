@@ -14,7 +14,7 @@ class WBU extends Module {
 
   io.wb.rfWen := io.in.bits.ctrl.rfWen && io.in.valid
   io.wb.rfDest := io.in.bits.ctrl.rfDest
-  io.wb.rfWdata := Mux(io.in.fire(), io.in.bits.data.dest, RegEnable(io.in.bits.data.dest, io.in.fire()))
+  io.wb.rfWdata := io.in.bits.data.dest
   io.in.ready := true.B
 
   io.brOut <> io.brIn

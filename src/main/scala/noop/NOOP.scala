@@ -46,27 +46,13 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   } else { ifu.io.imem.toAXI4() })
 
   def pipelineConnect[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool) = {
-    val zero = 0.U.asTypeOf(chiselTypeOf(left.bits))
     val valid = RegInit(false.B)
-    val bits = RegInit(zero)
-
-    when (isFlush) {
-      valid := false.B
-      bits := zero
-    }
-    .otherwise {
-      when (rightOutFire) {
-        valid := false.B
-        bits := zero
-      }
-      when (left.valid && right.ready) {
-        valid := true.B
-        bits := left.bits
-      }
-    }
+    when (rightOutFire) { valid := false.B }
+    when (left.valid && right.ready) { valid := true.B }
+    when (isFlush) { valid := false.B }
 
     left.ready := right.ready
-    right.bits <> bits
+    right.bits <> RegEnable(left.bits, left.valid && right.ready)
     right.valid := valid
   }
 
