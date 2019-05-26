@@ -126,7 +126,7 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
   io.out.bits := rdata
 
   val isMret = addr === privMret
-  val isException = io.isInvOpcode
+  val isException = io.isInvOpcode && valid
   val isEcall = (addr === privEcall) && !isException
   val exceptionNO = Mux1H(List(
     io.isInvOpcode -> 2.U,
