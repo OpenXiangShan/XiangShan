@@ -97,7 +97,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
 //  io.uncacheMem <> xbar.io.out(2).toAXI4()
 
   // csr
-  val csr = Module(new CSR)
+  val csr = Module(new CSR(hasPerfCnt))
   csr.access(
     valid = exu.io.csr.isCsr,
     src1 = exu.io.in.bits.data.src1,

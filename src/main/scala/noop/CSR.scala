@@ -74,7 +74,7 @@ class CSRIO extends FunctionUnitIO {
   }
 }
 
-class CSR extends Module with HasCSROpType with HasCSRConst {
+class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with HasCSRConst {
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -91,9 +91,10 @@ class CSR extends Module with HasCSROpType with HasCSRConst {
   val mstatus = Reg(UInt(32.W))
   val mepc = Reg(UInt(32.W))
 
-  val perfCnts = List.fill(0x80)(RegInit(0.U(64.W)))
-  val perfCntsLoMapping = (0 until 0x80).map { case i => (0xb00 + i, perfCnts(i)) }
-  val perfCntsHiMapping = (0 until 0x80).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
+  val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
+  val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(64.W)))
+  val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => (0xb00 + i, perfCnts(i)) }
+  val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
 
   val scalaMapping = List(
     Mtvec   -> mtvec,
