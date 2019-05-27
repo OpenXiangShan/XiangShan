@@ -104,7 +104,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
     ((state === s_metaRead) && hit && reqReg.wen) )
   val metaWrite = Wire(metaBundle)
   val inRdataReg = Reg(Vec(LineBeats, UInt(32.W)))
-  val retData = Mux(hit && (state === s_metaRead), dataRead, inRdataReg.asUInt)
+  val retData = Mux(state === s_metaWrite, inRdataReg.asUInt, dataRead)
   // when burst is supported, should calculate the word index
   def wordShift(data: UInt, wordIndex: UInt, step: Int) = data << (wordIndex * step.U)
   val lineWmask = Cat(0.U((4 * (LineBeats - 1)).W), Mux(reqReg.wen, reqReg.wmask, 0.U(4.W)))
