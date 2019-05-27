@@ -12,10 +12,16 @@ class RegFile {
 }
 
 class ScoreBoard {
-  val busy = RegInit(VecInit(Seq.fill(32) { false.B } ))
-  def setBusy(idx: UInt) = { when (idx =/= 0.U) { busy(idx) := true.B }}
-  def clearBusy(idx: UInt) = { when (idx =/= 0.U) { busy(idx) := false.B }}
+  val busy = RegInit(0.U(32.W))
   def isBusy(idx: UInt): Bool = busy(idx)
+  def setMask(idx: UInt) = (1.U(32.W) << idx)(31, 0)
+  def clearMask(idx: UInt) = ~setMask(idx)
+  def update(setMask: UInt, clearMask: UInt) = {
+    // When clearMask(i) and setMask(i) are both set, setMask(i) wins.
+    // This can correctly record the busy bit
+    // when reg(i) is written and issued at the same cycle.
+    busy := Cat(((busy & ~clearMask) | setMask)(31, 1), 0.U(1.W))
+  }
 }
 
 class ISU extends Module with HasSrcType {
@@ -68,15 +74,12 @@ class ISU extends Module with HasSrcType {
   io.out.bits.ctrl.isSrc1Forward := src1ForwardNextCycle
   io.out.bits.ctrl.isSrc2Forward := src2ForwardNextCycle
 
-  when (io.wb.rfWen) {
-    rf.write(io.wb.rfDest, io.wb.rfWdata)
-    when (!(io.out.fire() && rfDest === io.wb.rfDest)) {
-      sb.clearBusy(io.wb.rfDest)
-    }
-  }
+  when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfWdata) }
 
-  when (io.out.fire()) { sb.setBusy(rfDest) }
-  when (io.flush && io.forward.rfWen) { sb.clearBusy(io.forward.rfDest) }
+  val wbClearMask = Mux(io.wb.rfWen && (rfDest === io.wb.rfDest), sb.clearMask(io.wb.rfDest), "hffffffff".U)
+  val isuFireSetMask = Mux(io.out.fire(), sb.setMask(rfDest), 0.U)
+  when (io.flush && io.forward.rfWen) { sb.update(0.U, "hffffffff".U) }
+  .otherwise { sb.update(isuFireSetMask, wbClearMask) }
 
   io.in.ready := !io.in.valid || io.out.fire()
 
