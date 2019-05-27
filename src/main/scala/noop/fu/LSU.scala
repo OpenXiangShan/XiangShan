@@ -79,17 +79,19 @@ class LSU extends Module with HasLSUOpType {
   val addr = src1 + src2
   val isStore = valid && funcIsStore(func)
 
-  val s_idle :: s_wait_resp :: Nil = Enum(2)
+  val s_idle :: s_wait_resp :: s_rdata :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
   switch (state) {
     is (s_idle) {
-      when (dmem.req.fire()) { state := Mux(dmem.resp.fire(), s_idle, s_wait_resp) }
+      when (dmem.req.fire()) { state := Mux(dmem.resp.fire(), s_rdata, s_wait_resp) }
     }
 
     is (s_wait_resp) {
-      when (dmem.resp.fire()) { state := s_idle }
+      when (dmem.resp.fire()) { state := s_rdata }
     }
+
+    is (s_rdata) { state := s_idle }
   }
 
   dmem.req.bits.addr := addr
@@ -100,10 +102,10 @@ class LSU extends Module with HasLSUOpType {
   dmem.req.bits.wmask := genWmask(addr, func(1, 0))
   dmem.resp.ready := true.B
 
-  io.out.valid := dmem.resp.fire()
+  io.out.valid := RegNext(dmem.resp.fire())
   io.in.ready := (state === s_idle)
 
-  val rdataFromBus = io.dmem.resp.bits.rdata
+  val rdataFromBus = RegNext(io.dmem.resp.bits.rdata)
   val rdata = LookupTree(addr(1, 0), List(
     "b00".U -> rdataFromBus,
     "b01".U -> rdataFromBus(15, 8),
