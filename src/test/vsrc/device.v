@@ -9,6 +9,7 @@ import "DPI-C" function void device_helper
 
 module DeviceHelper(
   input         clk,
+  input         reset,
   input         reqValid,
   input         reqWen,
   input  [31:0] reqAddr,
@@ -18,7 +19,7 @@ module DeviceHelper(
 );
 
   always @(posedge clk) begin
-    if (reqValid) device_helper(reqWen, reqAddr, reqWdata, {4'b0, reqWmask}, respRdata);
+    if (reqValid && !reset) device_helper(reqWen, reqAddr, reqWdata, {4'b0, reqWmask}, respRdata);
   end
 
 endmodule

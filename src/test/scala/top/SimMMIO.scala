@@ -8,6 +8,7 @@ import bus.simplebus.SimpleBus
 class DeviceHelper extends BlackBox {
   val io = IO(new Bundle {
     val clk = Input(Clock())
+    val reset = Input(Bool())
     val reqValid = Input(Bool())
     val reqWen = Input(Bool())
     val reqAddr = Input(UInt(32.W))
@@ -24,6 +25,7 @@ class SimMMIO extends Module {
 
   val helper = Module(new DeviceHelper)
   helper.io.clk := clock
+  helper.io.reset := reset
   helper.io.reqValid := io.rw.req.valid
   helper.io.reqWen := io.rw.isWrite()
   helper.io.reqAddr := io.rw.req.bits.addr
