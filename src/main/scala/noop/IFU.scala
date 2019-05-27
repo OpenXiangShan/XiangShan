@@ -35,9 +35,6 @@ class IFU extends Module with HasResetVector {
 
   val ibufHit = (pcTag(pc) === ibufPcTag)
 
-  io.out.valid := ibufHit
-  io.out.bits.instr := ibuf.asTypeOf(Vec(512 / 32, UInt(32.W)))(pc(5, 2))
-
   io.imem := DontCare
   io.imem.req.valid := !ibufHit
   io.imem.req.bits.addr := pc
@@ -51,6 +48,9 @@ class IFU extends Module with HasResetVector {
     ibuf := io.imem.resp.bits.rdata
     ibufPcTag := pcTagInflight
   }
+
+  io.out.valid := ibufHit || (io.imem.resp.fire() && (pcTagInflight === pcTag(pc)))
+  io.out.bits.instr := Mux(!ibufHit, io.imem.resp.bits.rdata, ibuf).asTypeOf(Vec(512 / 32, UInt(32.W)))(pc(5, 2))
 
   io.out.bits.pc := pc
 
