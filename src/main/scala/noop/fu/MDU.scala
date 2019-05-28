@@ -48,10 +48,10 @@ class MulDivIO(val len: Int) extends Bundle {
 
 class Multiplier(len: Int) extends Module with NOOPConfig {
   val io = IO(new MulDivIO(len))
-  val latency = if (HasMExtension) 4 else 0
+  val latency = if (HasMExtension) 1 else 0
 
-  val mulRes = (io.in.bits(0).asSInt * io.in.bits(1).asSInt).asUInt
-  val mulPipeOut = Pipe(io.in.fire(), mulRes, latency)
+  val mulRes = (RegNext(io.in.bits(0)).asSInt * RegNext(io.in.bits(1)).asSInt).asUInt
+  val mulPipeOut = Pipe(RegNext(io.in.fire()), mulRes, latency)
 
   io.out.bits(0) := (if (!HasMExtension) 0.U else mulPipeOut.bits(len - 1, 0))
   io.out.bits(1) := (if (!HasMExtension) 0.U else mulPipeOut.bits(2 * len - 1, len))
