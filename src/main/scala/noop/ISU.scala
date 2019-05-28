@@ -43,10 +43,17 @@ class ISU extends Module with HasSrcType {
 
   def canForward(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
-  val src1ForwardNextCycle = canForward(rfSrc1, io.forward.rfDest, io.forward.rfWen && io.forward.valid)
-  val src2ForwardNextCycle = canForward(rfSrc2, io.forward.rfDest, io.forward.rfWen && io.forward.valid)
-  val src1Forward = canForward(rfSrc1, io.wb.rfDest, io.wb.rfWen)
-  val src2Forward = canForward(rfSrc2, io.wb.rfDest, io.wb.rfWen)
+  val forwardRfWen = io.forward.rfWen && io.forward.valid
+  val dontForward = false.B
+  val src1ForwardNextCycleAllForward = canForward(rfSrc1, io.forward.rfDest, forwardRfWen)
+  val src2ForwardNextCycleAllForward = canForward(rfSrc2, io.forward.rfDest, forwardRfWen)
+  val src1ForwardAllForward = canForward(rfSrc1, io.wb.rfDest, io.wb.rfWen)
+  val src2ForwardAllForward = canForward(rfSrc2, io.wb.rfDest, io.wb.rfWen)
+
+  val src1ForwardNextCycle = src1ForwardNextCycleAllForward && !dontForward
+  val src2ForwardNextCycle = src2ForwardNextCycleAllForward && !dontForward
+  val src1Forward = src1ForwardAllForward && Mux(dontForward, !src1ForwardNextCycleAllForward, true.B)
+  val src2Forward = src2ForwardAllForward && Mux(dontForward, !src2ForwardNextCycleAllForward, true.B)
 
   val sb = new ScoreBoard
   val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward
