@@ -22,8 +22,13 @@ class EXU extends Module with HasFuType {
     }
   })
 
-  val src1 = Mux(io.in.bits.ctrl.isSrc1Forward, io.wbData, io.in.bits.data.src1)
-  val src2 = Mux(io.in.bits.ctrl.isSrc2Forward, io.wbData, io.in.bits.data.src2)
+  val newReq = RegNext(io.in.fire()) || (io.in.valid && !RegNext(io.in.valid))
+
+  val src1FirstIn = Mux(io.in.bits.ctrl.isSrc1Forward, io.wbData, io.in.bits.data.src1)
+  val src2FirstIn = Mux(io.in.bits.ctrl.isSrc2Forward, io.wbData, io.in.bits.data.src2)
+  val src1 = Mux(newReq, src1FirstIn, RegEnable(src1FirstIn, newReq))
+  val src2 = Mux(newReq, src2FirstIn, RegEnable(src2FirstIn, newReq))
+
   val (fuType, fuOpType) = (io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
 
   val fuValids = Wire(Vec(FuTypeNum, Bool()))
