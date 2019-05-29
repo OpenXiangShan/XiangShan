@@ -77,36 +77,32 @@ class LSU extends Module with HasLSUOpType {
 
   val dmem = io.dmem
   val addr = src1 + src2
+  val addrLatch = RegNext(addr)
   val isStore = valid && funcIsStore(func)
 
-  val s_idle :: s_wait_resp :: s_rdata :: Nil = Enum(3)
+  val s_idle :: s_addr :: s_wait_resp :: s_rdata :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
   switch (state) {
-    is (s_idle) {
-      when (dmem.req.fire()) { state := Mux(dmem.resp.fire(), s_rdata, s_wait_resp) }
-    }
-
-    is (s_wait_resp) {
-      when (dmem.resp.fire()) { state := s_rdata }
-    }
-
+    is (s_idle) { when (valid) { state := s_addr } }
+    is (s_addr) { when (dmem.req.fire()) { state := s_wait_resp } }
+    is (s_wait_resp) { when (dmem.resp.fire()) { state := s_rdata } }
     is (s_rdata) { state := s_idle }
   }
 
-  dmem.req.bits.addr := addr
+  dmem.req.bits.addr := addrLatch
   dmem.req.bits.size := func(1, 0)
-  dmem.req.valid := valid && (state === s_idle)
+  dmem.req.valid := valid && (state === s_addr)
   dmem.req.bits.wen := isStore
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
-  dmem.req.bits.wmask := genWmask(addr, func(1, 0))
+  dmem.req.bits.wmask := genWmask(addrLatch, func(1, 0))
   dmem.resp.ready := true.B
 
   io.out.valid := RegNext(dmem.resp.fire())
   io.in.ready := (state === s_idle)
 
   val rdataFromBus = RegNext(io.dmem.resp.bits.rdata)
-  val rdata = LookupTree(addr(1, 0), List(
+  val rdata = LookupTree(addrLatch(1, 0), List(
     "b00".U -> rdataFromBus,
     "b01".U -> rdataFromBus(15, 8),
     "b10".U -> rdataFromBus(31, 16),

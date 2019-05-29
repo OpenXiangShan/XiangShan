@@ -55,7 +55,9 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
   io.in.req.ready := (state === s_idle) && !resetState
   val metaReadEnable = io.in.req.fire() && (state === s_idle)
   val idx = io.in.req.bits.addr.asTypeOf(addrBundle).index
-  val metaRead = RegEnable(metaArray.read(idx), metaReadEnable).asTypeOf(metaBundle)
+
+  val metaRead0 = metaArray.read(idx).asTypeOf(metaBundle)
+  val metaRead = RegEnable(metaRead0, metaReadEnable)
   val dataRead = RegEnable(dataArray.read(idx), metaReadEnable)
   // reading SeqMem has 1 cycle latency, there tag should be compared in the next cycle
   // and the address should be latched
@@ -64,7 +66,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
   val addrReg = reqReg.addr.asTypeOf(addrBundle)
   val mmio = if (!hasMMIO) false.B else MMIOAddressSpace.map(
     range => (io.in.req.bits.addr >= range._1.U && io.in.req.bits.addr < range._2.U)).reduce(_ || _)
-  val hit = metaRead.valid && (addrReg.tag === metaRead.tag) && !mmio
+  val hit = RegNext(metaRead0.valid && (io.in.req.bits.addr.asTypeOf(addrBundle).tag === metaRead0.tag) && !mmio)
   val dirty = metaRead.dirty.getOrElse(false.B)
 
     if (name == "dcache" && debug) {
