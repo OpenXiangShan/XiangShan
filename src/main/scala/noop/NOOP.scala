@@ -15,11 +15,7 @@ trait NOOPConfig {
   val debug = false
 
   // [start, end)
-  val AddressSpace = List(
-    (0x80000000L, 0x90000000L),  // dram
-    (0x40000000L, 0x50000000L)   // mmio
-//    (0x50000000L, 0x60000000L)   // uncache memory: vmem, gpuMetadata
-  )
+  val MMIOAddressSpace = List((0x40000000L, 0x50000000L))
 }
 
 class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
@@ -27,7 +23,6 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     val imem = new AXI4
     val dmem = new AXI4
     val mmio = new SimpleBus
-//    val uncacheMem = new AXI4
     val difftest = new DiffTestIO
   })
 
@@ -42,6 +37,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     val icache = Module(new Cache(ro = true, name = "icache", dataBits = 512))
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
+    icache.io.mmio := DontCare
     icache.io.out
   } else { ifu.io.imem.toAXI4() })
 
@@ -81,20 +77,14 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   isu.io.forward <> exu.io.forward
   exu.io.wbData := wbu.io.wb.rfWdata
 
-  val xbar = Module(new SimpleBusCrossbar(1, AddressSpace))
-  val dmem = xbar.io.out(0)
-  xbar.io.in(0) <> exu.io.dmem
-
   val dcacheHit = WireInit(false.B)
   io.dmem <> (if (HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache"))
+    val dcache = Module(new Cache(ro = false, name = "dcache", hasMMIO = true, MMIOAddressSpace = MMIOAddressSpace))
     dcacheHit := dcache.io.hit
-    dcache.io.in <> dmem
+    dcache.io.in <> exu.io.dmem
+    io.mmio <> dcache.io.mmio
     dcache.io.out
-  } else { dmem.toAXI4() })
-
-  io.mmio <> xbar.io.out(1)
-//  io.uncacheMem <> xbar.io.out(2).toAXI4()
+  } else { exu.io.dmem })
 
   // csr
   val csr = Module(new CSR(hasPerfCnt))
@@ -123,9 +113,9 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
     csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
     // load/store before dcache
-    csr.setPerfCnt(MLoadInstr, dmem.isRead() && dmem.req.fire())
-    csr.setPerfCnt(MLoadStall, BoolStopWatch(dmem.isRead(), dmem.resp.fire()))
-    csr.setPerfCnt(MStoreStall, BoolStopWatch(dmem.isWrite(), dmem.resp.fire()))
+    csr.setPerfCnt(MLoadInstr, exu.io.dmem.isRead() && exu.io.dmem.req.fire())
+    csr.setPerfCnt(MLoadStall, BoolStopWatch(exu.io.dmem.isRead(), exu.io.dmem.resp.fire()))
+    csr.setPerfCnt(MStoreStall, BoolStopWatch(exu.io.dmem.isWrite(), exu.io.dmem.resp.fire()))
     // mmio
     csr.setPerfCnt(MmmioInstr, io.mmio.req.fire())
     // cache
