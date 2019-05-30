@@ -12,6 +12,7 @@ class EXU extends Module with HasFuType {
     val out = Decoupled((new PcCtrlDataIO))
     val br = new BranchIO
     val dmem = new SimpleBus
+    val mmio = new SimpleBus
     val forward = new ForwardIO
     val wbData = Input(UInt(32.W))
     val csr = new Bundle {
@@ -46,6 +47,7 @@ class EXU extends Module with HasFuType {
   val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
   lsu.io.wdata := src2
   io.dmem <> lsu.io.dmem
+  io.mmio <> lsu.io.mmio
   lsu.io.out.ready := true.B
 
   val mdu = Module(new MDU)

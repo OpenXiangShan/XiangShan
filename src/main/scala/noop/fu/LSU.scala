@@ -46,6 +46,7 @@ object LSUInstr extends HasDecodeConst {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
   val dmem = new SimpleBus
+  val mmio = new SimpleBus
 }
 
 class LSU extends Module with HasLSUOpType {
@@ -83,27 +84,34 @@ class LSU extends Module with HasLSUOpType {
   val s_idle :: s_addr :: s_wait_resp :: s_partialLoad :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
+  val mmio = AddressSpace.isMMIO(addrLatch)
   val partialLoad = !isStore && (func =/= LsuLw)
 
   switch (state) {
     is (s_idle) { when (valid) { state := s_addr } }
-    is (s_addr) { when (dmem.req.fire()) { state := s_wait_resp } }
-    is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
+    is (s_addr) { when (Mux(mmio, io.mmio.req.fire(), dmem.req.fire())) { state := s_wait_resp } }
+    is (s_wait_resp) {
+      when (Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire())) { state := Mux(partialLoad, s_partialLoad, s_idle) }
+    }
     is (s_partialLoad) { state := s_idle }
   }
 
   dmem.req.bits.addr := addrLatch
   dmem.req.bits.size := func(1, 0)
-  dmem.req.valid := valid && (state === s_addr)
+  dmem.req.valid := valid && (state === s_addr) && !mmio
   dmem.req.bits.wen := isStore
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
   dmem.req.bits.wmask := genWmask(addrLatch, func(1, 0))
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux(partialLoad, state === s_partialLoad, dmem.resp.fire())
+  io.mmio.req.bits := dmem.req.bits
+  io.mmio.req.valid := valid && (state === s_addr) && mmio
+  io.mmio.resp.ready := true.B
+
+  io.out.valid := Mux(partialLoad, state === s_partialLoad, Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire()))
   io.in.ready := (state === s_idle)
 
-  val rdata = io.dmem.resp.bits.rdata
+  val rdata = Mux(mmio, io.mmio.resp.bits.rdata, dmem.resp.bits.rdata)
   val rdataLatch = RegNext(rdata)
   val rdataSel = LookupTree(addrLatch(1, 0), List(
     "b00".U -> rdataLatch,

@@ -7,13 +7,11 @@ import bus.simplebus.SimpleBus
 import bus.axi4._
 import utils._
 
-class Cache(ro: Boolean, name: String, dataBits: Int = 32,
-  hasMMIO: Boolean = false, MMIOAddressSpace: List[(Long, Long)] = Nil) extends Module {
+class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBus(dataBits))
     val out = new AXI4
     val hit = Output(Bool())
-    val mmio = new SimpleBus(dataBits)
   })
 
   val debug = false
@@ -48,7 +46,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
     resetState := false.B
   }
 
-  val s_idle :: s_metaRead :: s_outReadReq :: s_outReadResp :: s_outWriteReq :: s_outWriteResp :: s_metaWrite :: s_mmioReq :: s_mmioResp :: Nil = Enum(9)
+  val s_idle :: s_metaRead :: s_outReadReq :: s_outReadResp :: s_outWriteReq :: s_outWriteResp :: s_metaWrite :: Nil = Enum(7)
   val state = RegInit(s_idle)
 
   // read metadata
@@ -64,9 +62,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
   val reqReg = RegEnable(io.in.req.bits, metaReadEnable)
   if (ro) when (metaReadEnable) { assert(!io.in.req.bits.wen) }
   val addrReg = reqReg.addr.asTypeOf(addrBundle)
-  val mmio = if (!hasMMIO) false.B else MMIOAddressSpace.map(
-    range => (io.in.req.bits.addr >= range._1.U && io.in.req.bits.addr < range._2.U)).reduce(_ || _)
-  val hit = RegNext(metaRead0.valid && (io.in.req.bits.addr.asTypeOf(addrBundle).tag === metaRead0.tag) && !mmio)
+  val hit = RegNext(metaRead0.valid && (io.in.req.bits.addr.asTypeOf(addrBundle).tag === metaRead0.tag))
   val dirty = metaRead.dirty.getOrElse(false.B)
 
   // if miss, access memory
@@ -132,14 +128,9 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
     metaArray.write(Mux(resetState, resetIdx, addrReg.index), metaWrite.asUInt)
   }
 
-  // mmio
-  io.mmio.req.bits := reqReg
-  io.mmio.req.valid := (state === s_mmioReq)
-  io.mmio.resp.ready := (state === s_mmioResp)
-
   // return data
-  io.in.resp.bits.rdata := Mux(io.mmio.resp.fire(), io.mmio.resp.bits.rdata, retData)
-  io.in.resp.valid := (hit && (state === s_metaRead)) || (state === s_metaWrite) || io.mmio.resp.fire()
+  io.in.resp.bits.rdata := retData
+  io.in.resp.valid := (hit && (state === s_metaRead)) || (state === s_metaWrite)
 
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
@@ -148,7 +139,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
   io.out.w.bits.last := (writeBeatCnt.value === (LineBeats - 1).U)
 
   switch (state) {
-    is (s_idle) { when (io.in.req.fire()) { state := Mux(mmio, s_mmioReq, s_metaRead) } }
+    is (s_idle) { when (io.in.req.fire()) { state := s_metaRead } }
     is (s_metaRead) { state := Mux(hit, s_idle, Mux(metaRead.valid && dirty, s_outWriteReq, s_outReadReq)) }
     is (s_outReadReq) { when (io.out.ar.fire()) { state := s_outReadResp } }
 
@@ -181,9 +172,6 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
 
     is (s_outWriteResp) { when (io.out.b.fire()) { state := s_outReadReq } }
     is (s_metaWrite) { state := s_idle }
-
-    is (s_mmioReq) { when (io.mmio.req.fire()) { state := s_mmioResp } }
-    is (s_mmioResp) { when (io.mmio.resp.fire()) { state := s_idle } }
   }
 
   // perfcnt

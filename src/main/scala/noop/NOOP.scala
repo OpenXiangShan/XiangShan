@@ -13,9 +13,14 @@ trait NOOPConfig {
   val HasMExtension = true
   val HasDiv = true
   val debug = false
+}
 
+object AddressSpace {
   // [start, end)
-  val MMIOAddressSpace = List((0x40000000L, 0x50000000L))
+  def mmio = List((0x40000000L, 0x50000000L))
+  def dram = (0x80000000L, 0x90000000L)
+
+  def isMMIO(addr: UInt) = mmio.map(range => (addr >= range._1.U && addr < range._2.U)).reduce(_ || _)
 }
 
 class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
@@ -37,7 +42,6 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     val icache = Module(new Cache(ro = true, name = "icache", dataBits = 512))
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
-    icache.io.mmio := DontCare
     icache.io.out
   } else { ifu.io.imem.toAXI4() })
 
@@ -79,12 +83,12 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
 
   val dcacheHit = WireInit(false.B)
   io.dmem <> (if (HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache", hasMMIO = true, MMIOAddressSpace = MMIOAddressSpace))
+    val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcacheHit := dcache.io.hit
     dcache.io.in <> exu.io.dmem
-    io.mmio <> dcache.io.mmio
     dcache.io.out
   } else { exu.io.dmem })
+  io.mmio <> exu.io.mmio
 
   // csr
   val csr = Module(new CSR(hasPerfCnt))
