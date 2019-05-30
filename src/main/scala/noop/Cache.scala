@@ -102,25 +102,23 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
   val reqWen = if (ro) false.B else reqReg.wen
   val metaWriteEnable = !metaReadEnable && ((state === s_metaWrite) || ((state === s_metaRead) && hit && reqWen))
   val metaWrite = Wire(metaBundle)
-  val inRdataReg = Reg(Vec(LineBeats, UInt(32.W)))
   val inRdataRegDemand = Reg(UInt(32.W))
 
   val dataReadBlock = RegEnable(dataArray.read(idx), metaReadEnable)
   val dataRead = dataReadBlock(addrReg.wordIndex)
   val retData = Mux(state === s_metaWrite, inRdataRegDemand, dataRead)
 
+  def wordShift(data: UInt, wordIndex: UInt, step: Int) = (data << (wordIndex * step.U))
   def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
   val wmaskExpand = maskExpand(reqReg.wmask)
+  val wordMask = Mux(reqWen, wmaskExpand, 0.U(32.W))
 
   if (!ro) {
-    // when burst is supported, should calculate the word index
-    def wordShift(data: UInt, wordIndex: UInt, step: Int) = (data << (wordIndex * step.U))
-
-    val fullMask = wordShift(maskExpand(Mux(reqWen, reqReg.wmask, 0.U(4.W))), addrReg.wordIndex, 32)
     val dataWriteHitEnable = ~metaReadEnable && ((state === s_metaRead) && hit) && reqWen
-    val dataWriteHitBlock = (Cat(dataReadBlock.reverse) & ~fullMask) | (wordShift(reqReg.wdata, addrReg.wordIndex, 32) & fullMask)
+    val dataWriteHit = (dataRead & ~wordMask) | (reqReg.wdata & wordMask)
+    val dataWriteHitBlock = wordShift(dataWriteHit, addrReg.wordIndex, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
     when (dataWriteHitEnable) {
-      dataArray.write(addrReg.index, dataWriteHitBlock.asTypeOf(Vec(LineBeats, UInt(32.W))))
+      dataArray.write(addrReg.index, dataWriteHitBlock, (1.U << addrReg.wordIndex).toBools)
     }
   }
 
@@ -156,19 +154,16 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
         when (readBeatCnt.value === addrReg.wordIndex) { inRdataRegDemand := rdata }
 
         val inRdata = if (!ro) {
-          val rdataMergeWrite = (rdata & ~wmaskExpand) | (reqReg.wdata & wmaskExpand)
-          val rdataMergeWriteSel = (readBeatCnt.value === addrReg.wordIndex) && reqWen
+          val rdataMergeWrite = (rdata & ~wordMask) | (reqReg.wdata & wordMask)
+          val rdataMergeWriteSel = (readBeatCnt.value === addrReg.wordIndex)
           Mux(rdataMergeWriteSel, rdataMergeWrite, rdata)
         } else rdata
 
-        inRdataReg(readBeatCnt.value) := inRdata
+        val dataWriteBlock = wordShift(inRdata, readBeatCnt.value, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
+        dataArray.write(addrReg.index, dataWriteBlock, (1.U << readBeatCnt.value).toBools)
 
         readBeatCnt.inc()
-        when (io.out.r.bits.last) {
-          val dataRefill = Cat(inRdata, Cat(inRdataReg.reverse)((LineBeats - 1) * 32 - 1, 0))
-          dataArray.write(addrReg.index, dataRefill.asTypeOf(Vec(LineBeats, UInt(32.W))))
-          state := s_metaWrite
-        }
+        when (io.out.r.bits.last) { state := s_metaWrite }
       }
     }
 
