@@ -39,7 +39,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
     val dirty = if (ro) None else Some(Bool())
   }
   val metaArray = Mem(Sets, UInt(metaBundle.getWidth.W))
-  val dataArray = Mem(Sets, UInt((LineSize * 8).W))
+  val dataArray = Mem(Sets, Vec(LineBeats, UInt(32.W)))
 
   // should reset meta.valid
   val resetState = RegInit(true.B)
@@ -107,7 +107,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
   val inRdataRegDemand = Reg(UInt(32.W))
 
   val dataReadBlock = RegEnable(dataArray.read(idx), metaReadEnable)
-  val dataRead = if (dataBits == 512) dataReadBlock else dataReadBlock.asTypeOf(Vec(LineBeats, UInt(32.W)))(addrReg.wordIndex)
+  val dataRead = if (dataBits == 512) Cat(dataReadBlock.reverse) else dataReadBlock(addrReg.wordIndex)
   val retData = Mux(state === s_metaWrite, (if (dataBits == 512) Cat(inRdataReg.reverse) else inRdataRegDemand), dataRead)
 
   def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
@@ -119,9 +119,9 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
 
     val fullMask = wordShift(maskExpand(Mux(reqWen, reqReg.wmask, 0.U(4.W))), addrReg.wordIndex, 32)
     val dataWriteHitEnable = ~metaReadEnable && ((state === s_metaRead) && hit) && reqWen
-    val dataWriteHitBlock = (dataReadBlock & ~fullMask) | (wordShift(reqReg.wdata, addrReg.wordIndex, 32) & fullMask)
+    val dataWriteHitBlock = (Cat(dataReadBlock.reverse) & ~fullMask) | (wordShift(reqReg.wdata, addrReg.wordIndex, 32) & fullMask)
     when (dataWriteHitEnable) {
-      dataArray.write(addrReg.index, dataWriteHitBlock)
+      dataArray.write(addrReg.index, dataWriteHitBlock.asTypeOf(Vec(LineBeats, UInt(32.W))))
     }
   }
 
@@ -143,7 +143,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
 
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
-  io.out.w.bits.data := dataReadBlock.asTypeOf(Vec(LineBeats, UInt(32.W)))(writeBeatCnt.value)
+  io.out.w.bits.data := dataReadBlock(writeBeatCnt.value)
   io.out.w.bits.strb := 0xf.U
   io.out.w.bits.last := (writeBeatCnt.value === (LineBeats - 1).U)
 
@@ -168,7 +168,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32,
         readBeatCnt.inc()
         when (io.out.r.bits.last) {
           val dataRefill = Cat(inRdata, Cat(inRdataReg.reverse)((LineBeats - 1) * 32 - 1, 0))
-          dataArray.write(addrReg.index, dataRefill)
+          dataArray.write(addrReg.index, dataRefill.asTypeOf(Vec(LineBeats, UInt(32.W))))
           state := s_metaWrite
         }
       }
