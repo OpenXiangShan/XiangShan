@@ -50,19 +50,22 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
   val state = RegInit(s_idle)
 
   // read metadata
-  io.in.req.ready := (state === s_idle) && !resetState
-  val metaReadEnable = io.in.req.fire() && (state === s_idle)
+  val metaReadEnable = io.in.req.fire()
   val idx = io.in.req.bits.addr.asTypeOf(addrBundle).index
+  val tag = io.in.req.bits.addr.asTypeOf(addrBundle).tag
 
   val metaRead0 = metaArray.read(idx).asTypeOf(metaBundle)
   val metaRead = RegEnable(metaRead0, metaReadEnable)
+  val hit0 = metaRead0.valid && (tag === metaRead0.tag) && io.in.req.valid
+  val hit = RegEnable(hit0, metaReadEnable)
+
+  io.in.req.ready := ((state === s_idle) || ((state === s_metaRead) && hit && io.in.resp.valid)) && !resetState
 
   // reading SeqMem has 1 cycle latency, there tag should be compared in the next cycle
   // and the address should be latched
   val reqReg = RegEnable(io.in.req.bits, metaReadEnable)
   if (ro) when (metaReadEnable) { assert(!io.in.req.bits.wen) }
   val addrReg = reqReg.addr.asTypeOf(addrBundle)
-  val hit = RegNext(metaRead0.valid && (io.in.req.bits.addr.asTypeOf(addrBundle).tag === metaRead0.tag))
   val dirty = metaRead.dirty.getOrElse(false.B)
 
   // if miss, access memory
@@ -103,8 +106,8 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
   val inRdataRegDemand = Reg(UInt(32.W))
 
   val dataReadBlock = RegEnable(dataArray.read(idx), metaReadEnable)
-  val dataRead = if (dataBits == 512) Cat(dataReadBlock.reverse) else dataReadBlock(addrReg.wordIndex)
-  val retData = Mux(state === s_metaWrite, (if (dataBits == 512) Cat(inRdataReg.reverse) else inRdataRegDemand), dataRead)
+  val dataRead = dataReadBlock(addrReg.wordIndex)
+  val retData = Mux(state === s_metaWrite, inRdataRegDemand, dataRead)
 
   def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
   val wmaskExpand = maskExpand(reqReg.wmask)
@@ -140,13 +143,17 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
 
   switch (state) {
     is (s_idle) { when (io.in.req.fire()) { state := s_metaRead } }
-    is (s_metaRead) { state := Mux(hit, s_idle, Mux(metaRead.valid && dirty, s_outWriteReq, s_outReadReq)) }
+    is (s_metaRead) {
+      when (!hit) { state := Mux(metaRead.valid && dirty, s_outWriteReq, s_outReadReq) }
+      .elsewhen (!io.in.resp.fire()) { state := state }
+      .elsewhen (!io.in.req.fire()) { state := s_idle }
+    }
     is (s_outReadReq) { when (io.out.ar.fire()) { state := s_outReadResp } }
 
     is (s_outReadResp) {
       when (io.out.r.fire()) {
         val rdata = io.out.r.bits.data
-        if (dataBits != 512) { when (readBeatCnt.value === addrReg.wordIndex) { inRdataRegDemand := rdata } }
+        when (readBeatCnt.value === addrReg.wordIndex) { inRdataRegDemand := rdata }
 
         val inRdata = if (!ro) {
           val rdataMergeWrite = (rdata & ~wmaskExpand) | (reqReg.wdata & wmaskExpand)
@@ -171,7 +178,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module {
     }
 
     is (s_outWriteResp) { when (io.out.b.fire()) { state := s_outReadReq } }
-    is (s_metaWrite) { state := s_idle }
+    is (s_metaWrite) { when (io.in.resp.fire()) { state := s_idle } }
   }
 
   // perfcnt

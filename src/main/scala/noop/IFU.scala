@@ -12,7 +12,7 @@ trait HasResetVector {
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBus(512)
+    val imem = new SimpleBus
     val out = Decoupled(new PcInstrIO)
     val br = Flipped(new BranchIO)
     val csrjmp = Flipped(new BranchIO)
@@ -24,35 +24,26 @@ class IFU extends Module with HasResetVector {
   val pc = RegInit(resetVector.U(32.W))
   pc := Mux(io.csrjmp.isTaken, io.csrjmp.target,
           Mux(io.br.isTaken, io.br.target,
-            Mux(io.out.fire(), pc + 4.U, pc)))
+            Mux(io.imem.req.fire(), pc + 4.U, pc)))
 
-  io.flushVec := RegNext(Mux(io.csrjmp.isTaken || io.br.isTaken, "b00110".U, 0.U))
+  io.flushVec := Mux(RegNext(io.csrjmp.isTaken || io.br.isTaken), "b00111".U, 0.U)
 
-  // instruction buffer
-  def pcTag(pc: UInt): UInt = pc(31, 6)
-  val ibuf = Reg(UInt(512.W))
-  val ibufPcTag = RegInit(0.U((32 - 6).W))
-
-  val ibufHit = (pcTag(pc) === ibufPcTag)
+  val pcInflight = RegEnable(pc, io.imem.req.fire())
+  val inflight = RegInit(false.B)
+  when (io.imem.resp.fire() || io.flushVec(0)) { inflight := false.B }
+  when (io.imem.req.fire()) { inflight := true.B }
 
   io.imem := DontCare
-  io.imem.req.valid := !ibufHit
+  io.imem.req.valid := io.out.ready
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
   io.imem.req.bits.wen := false.B
-  io.imem.resp.ready := true.B
+  io.imem.resp.ready := io.out.ready || io.flushVec(0) //true.B
 
-  val pcTagInflight = RegEnable(pcTag(pc), io.imem.req.fire())
+  io.out.valid := io.imem.resp.valid && inflight && !io.flushVec(0)
+  io.out.bits.instr := io.imem.resp.bits.rdata
 
-  when (io.imem.resp.fire()) {
-    ibuf := io.imem.resp.bits.rdata
-    ibufPcTag := pcTagInflight
-  }
-
-  io.out.valid := ibufHit || (io.imem.resp.fire() && (pcTagInflight === pcTag(pc)))
-  io.out.bits.instr := Mux(!ibufHit, io.imem.resp.bits.rdata, ibuf).asTypeOf(Vec(512 / 32, UInt(32.W)))(pc(5, 2))
-
-  io.out.bits.pc := pc
+  io.out.bits.pc := pcInflight
 
   // perfcnt
   io.imemStall := BoolStopWatch(io.imem.req.valid, io.imem.resp.fire())
