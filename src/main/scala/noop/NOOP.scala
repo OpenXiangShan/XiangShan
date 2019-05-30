@@ -56,7 +56,12 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     right.valid := valid && !isFlush
   }
 
-  pipelineConnect(ifu.io.out, idu.io.in, idu.io.out.fire(), ifu.io.flushVec(0))
+  def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
+    isFlush: Bool, entries: Int = 2, pipe: Boolean = false) = {
+    right <> FlushableQueue(left, isFlush,  entries = entries, pipe = pipe)
+  }
+
+  pipelineConnect2(ifu.io.out, idu.io.in, ifu.io.flushVec(0))
   pipelineConnect(idu.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
   pipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
   pipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
