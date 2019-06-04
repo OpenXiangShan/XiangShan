@@ -13,6 +13,7 @@ trait HasResetVector {
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
     val imem = new SimpleBus
+    val pc = Input(UInt(32.W))
     val out = Decoupled(new PcInstrIO)
     val br = Flipped(new BranchIO)
     val flushVec = Output(UInt(4.W))
@@ -25,11 +26,6 @@ class IFU extends Module with HasResetVector {
 
   io.flushVec := Mux(io.br.isTaken, "b1111".U, 0.U)
 
-  val pcInflight = RegEnable(pc, io.imem.req.fire())
-  val inflight = RegInit(false.B)
-  when (io.imem.resp.fire() || io.flushVec(0)) { inflight := false.B }
-  when (io.imem.req.fire()) { inflight := true.B }
-
   io.imem := DontCare
   io.imem.req.valid := io.out.ready
   io.imem.req.bits.addr := pc
@@ -37,10 +33,10 @@ class IFU extends Module with HasResetVector {
   io.imem.req.bits.wen := false.B
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
-  io.out.valid := io.imem.resp.valid && inflight && !io.flushVec(0)
+  io.out.valid := io.imem.resp.valid && !io.flushVec(0)
   io.out.bits.instr := io.imem.resp.bits.rdata
 
-  io.out.bits.pc := pcInflight
+  io.out.bits.pc := io.pc
 
   // perfcnt
   io.imemStall := BoolStopWatch(io.imem.req.valid, io.imem.resp.fire())

@@ -42,7 +42,9 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     val icache = Module(new Cache(ro = true, name = "icache"))
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
-    icache.io.out
+    icache.io.flush := ifu.io.flushVec(0)
+    ifu.io.pc := icache.io.addr
+    icache.io.mem
   } else { ifu.io.imem.toAXI4() })
 
   def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
@@ -81,8 +83,9 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcacheHit := dcache.io.hit
     dcache.io.in <> exu.io.dmem
-    dcache.io.out
-  } else { exu.io.dmem })
+    dcache.io.flush := false.B
+    dcache.io.mem
+  } else { exu.io.dmem.toAXI4() })
   io.mmio <> exu.io.mmio
 
   // csr
