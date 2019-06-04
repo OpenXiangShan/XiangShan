@@ -144,6 +144,7 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
   // read meta array
   io.metaRead.req.idx := idx
   io.out.bits.meta := io.metaRead.resp
+  if (ro) io.out.bits.meta.meta.dirty := false.B
 
   // read data array
   io.dataReadReq.valid := io.out.fire()
@@ -280,7 +281,7 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
   switch (state) {
     is (s_idle) {
       // actually this can use s2 to test
-      when (miss && !io.flush) { state := Mux(meta.dirty, s_memWriteReq, s_memReadReq) }
+      when (miss && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
     }
     is (s_memReadReq) { when (io.mem.ar.fire()) { state := s_memReadResp } }
 
