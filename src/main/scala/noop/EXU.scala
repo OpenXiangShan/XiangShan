@@ -10,7 +10,9 @@ class EXU extends Module with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled((new PcCtrlDataIO))
+    val flush = Input(Bool())
     val br = new BranchIO
+    val csrjmp = Flipped(new BranchIO)
     val dmem = new SimpleBus
     val mmio = new SimpleBus
     val forward = new ForwardIO
@@ -30,7 +32,7 @@ class EXU extends Module with HasFuType {
   val (fuType, fuOpType) = (io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
 
   val fuValids = Wire(Vec(FuTypeNum, Bool()))
-  (0 until FuTypeNum).map (i => fuValids(i) := (fuType === i.U) && io.in.valid)
+  (0 until FuTypeNum).map (i => fuValids(i) := (fuType === i.U) && io.in.valid && !io.flush)
 
   val alu = Module(new ALU)
   val aluOut = alu.access(valid = fuValids(FuAlu), src1 = src1, src2 = src2, func = fuOpType)
@@ -40,7 +42,7 @@ class EXU extends Module with HasFuType {
   val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = src2, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := io.in.bits.data.imm
-  io.br <> bru.io.branch
+  io.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
   bru.io.out.ready := true.B
 
   val lsu = Module(new LSU)

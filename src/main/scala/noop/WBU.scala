@@ -17,7 +17,7 @@ class WBU extends Module {
   io.wb.rfWdata := io.in.bits.data.dest
   io.in.ready := true.B
 
-  io.brOut <> io.brIn
+  io.brOut <> RegNext(io.brIn)
 
   io.writeback := io.in.valid
 }

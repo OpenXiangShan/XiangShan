@@ -15,18 +15,15 @@ class IFU extends Module with HasResetVector {
     val imem = new SimpleBus
     val out = Decoupled(new PcInstrIO)
     val br = Flipped(new BranchIO)
-    val csrjmp = Flipped(new BranchIO)
-    val flushVec = Output(UInt(5.W))
+    val flushVec = Output(UInt(4.W))
     val imemStall = Output(Bool())
   })
 
   // pc
   val pc = RegInit(resetVector.U(32.W))
-  pc := Mux(io.csrjmp.isTaken, io.csrjmp.target,
-          Mux(io.br.isTaken, io.br.target,
-            Mux(io.imem.req.fire(), pc + 4.U, pc)))
+  pc := Mux(io.br.isTaken, io.br.target, Mux(io.imem.req.fire(), pc + 4.U, pc))
 
-  io.flushVec := Mux(RegNext(io.csrjmp.isTaken || io.br.isTaken), "b00111".U, 0.U)
+  io.flushVec := Mux(io.br.isTaken, "b1111".U, 0.U)
 
   val pcInflight = RegEnable(pc, io.imem.req.fire())
   val inflight = RegInit(false.B)
@@ -38,7 +35,7 @@ class IFU extends Module with HasResetVector {
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
   io.imem.req.bits.wen := false.B
-  io.imem.resp.ready := io.out.ready || io.flushVec(0) //true.B
+  io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.valid := io.imem.resp.valid && inflight && !io.flushVec(0)
   io.out.bits.instr := io.imem.resp.bits.rdata

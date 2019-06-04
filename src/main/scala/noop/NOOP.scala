@@ -66,6 +66,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   pipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
   pipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
   isu.io.flush := ifu.io.flushVec(2)
+  exu.io.flush := ifu.io.flushVec(3)
 
   if (debug) {
     printf("%d: flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
@@ -104,7 +105,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     func = exu.io.in.bits.ctrl.fuOpType
   )
   exu.io.csr.in <> csr.io.out
-  ifu.io.csrjmp <> csr.io.csrjmp
+  exu.io.csrjmp <> csr.io.csrjmp
   csr.io.pc := exu.io.in.bits.pc
   csr.io.isInvOpcode := exu.io.in.bits.ctrl.isInvOpcode
 
