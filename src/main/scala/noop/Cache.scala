@@ -97,11 +97,12 @@ sealed class DataReadBus extends Bundle {
   val resp = Flipped(new DataReadRespIO)
 }
 
+// we only support 32-bit write to save resource
 sealed class DataWriteBus extends Bundle with HasCacheConst {
   val req = Valid(new Bundle {
     val idx = Output(UInt(IndexBits.W))
-    val data = Output(Vec(LineBeats, UInt(32.W)))
-    val mask = Output(Vec(LineBeats, Bool()))
+    val data = Output(UInt(32.W))
+    val wordIndex = Output(UInt(WordIndexBits.W))
   })
 }
 
@@ -109,15 +110,18 @@ sealed class DataArray extends Module with HasCacheConst {
   val io = IO(new Bundle {
     val read = Flipped(new DataReadBus)
     val write = Flipped(new DataWriteBus)
+    val s2OutFire = Input(Bool())
   })
 
   val array = Mem(Sets, chiselTypeOf(io.read.resp.data))
 
+  val req = io.write.req.bits
+  val dataBlock = wordShift(req.data, req.wordIndex, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
   when (io.write.req.valid) {
-    array.write(io.write.req.bits.idx, io.write.req.bits.data, io.write.req.bits.mask)
+    array.write(req.idx, dataBlock, (1.U << req.wordIndex).toBools)
   }
 
-  io.read.resp.data := RegEnable(array.read(io.read.req.bits.idx), io.read.req.valid)
+  io.read.resp.data := RegEnable(RegEnable(array.read(io.read.req.bits.idx), io.read.req.valid), io.s2OutFire)
 }
 
 
@@ -162,7 +166,6 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
 sealed class Stage2IO extends Bundle with HasCacheConst {
   val req = new SimpleBusReqBundle(dataBits)
   val meta = new MetaPipelineBundle
-  val dataBlock = new DataReadRespIO
 }
 
 // check
@@ -170,7 +173,6 @@ sealed class CacheStage2(ro: Boolean, name: String) extends Module with HasCache
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Stage1IO))
     val out = Decoupled(new Stage2IO)
-    val dataReadResp = Flipped(new DataReadRespIO)
   })
 
   val req = io.in.bits.req
@@ -184,8 +186,6 @@ sealed class CacheStage2(ro: Boolean, name: String) extends Module with HasCache
   io.out.bits.meta.dirty := dirty && io.in.valid && !io.out.bits.meta.mmio
   io.out.bits.req <> io.in.bits.req
 
-  io.out.bits.dataBlock := io.dataReadResp
-
   io.out.valid := io.in.valid
   io.in.ready := (!io.in.valid || io.out.fire())
 }
@@ -197,6 +197,7 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
     val out = Decoupled(new SimpleBusRespBundle(dataBits))
     val addr = Output(UInt(32.W))
     val flush = Input(Bool())
+    val dataReadResp = Flipped(new DataReadRespIO)
     val dataWrite = new DataWriteBus
     val metaWrite = new MetaWriteBus
     val mem = new AXI4
@@ -204,7 +205,7 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
 
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(new AddrBundle)
-  val dataBlock = io.in.bits.dataBlock.data
+  val dataBlock = io.dataReadResp.data
   val meta = io.in.bits.meta
   val hit = io.in.valid && meta.hit
   val miss = io.in.valid && !meta.hit
@@ -223,8 +224,8 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
     val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
     dataHitWrite.req.valid := update
     dataHitWrite.req.bits.idx := addr.index
-    dataHitWrite.req.bits.data := wordShift(dataMerge, addr.wordIndex, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
-    dataHitWrite.req.bits.mask := (1.U << addr.wordIndex).toBools
+    dataHitWrite.req.bits.data := dataMerge
+    dataHitWrite.req.bits.wordIndex := addr.wordIndex
 
     metaHitWrite.req.valid := update && !meta.dirty
     metaHitWrite.req.bits.idx := addr.index
@@ -299,8 +300,8 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
           Mux(rdataMergeWriteSel, rdataMergeWrite, rdata)
         } else rdata
 
-        dataRefillWrite.req.bits.data := wordShift(inRdata, readBeatCnt.value, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
-        dataRefillWrite.req.bits.mask := (1.U << readBeatCnt.value).toBools
+        dataRefillWrite.req.bits.data := inRdata
+        dataRefillWrite.req.bits.wordIndex := readBeatCnt.value
 
         readBeatCnt.inc()
         when (io.mem.r.bits.last) { state := s_wait_resp }
@@ -375,8 +376,9 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with H
   metaArray.io.read <> s1.io.metaRead
   metaArray.io.write <> s3.io.metaWrite
   dataArray.io.read.req <> s1.io.dataReadReq
-  s2.io.dataReadResp <> dataArray.io.read.resp
   dataArray.io.write <> s3.io.dataWrite
+  dataArray.io.s2OutFire := s2.io.out.fire()
+  s3.io.dataReadResp <> dataArray.io.read.resp
 
   io.in.req.ready := (s1.io.in.ready && metaArray.io.finishReset) || io.flush
   s1.io.in.valid := (io.in.req.valid && metaArray.io.finishReset) || io.flush
