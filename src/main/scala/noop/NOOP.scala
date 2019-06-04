@@ -45,26 +45,15 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     icache.io.out
   } else { ifu.io.imem.toAXI4() })
 
-  def pipelineConnect[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool) = {
-    val valid = RegInit(false.B)
-    when (rightOutFire) { valid := false.B }
-    when (left.valid && right.ready) { valid := true.B }
-    when (isFlush) { valid := false.B }
-
-    left.ready := right.ready
-    right.bits <> RegEnable(left.bits, left.valid && right.ready)
-    right.valid := valid && !isFlush
-  }
-
   def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
     isFlush: Bool, entries: Int = 2, pipe: Boolean = false) = {
     right <> FlushableQueue(left, isFlush,  entries = entries, pipe = pipe)
   }
 
   pipelineConnect2(ifu.io.out, idu.io.in, ifu.io.flushVec(0))
-  pipelineConnect(idu.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
-  pipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
-  pipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
+  PipelineConnect(idu.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
+  PipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
+  PipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
