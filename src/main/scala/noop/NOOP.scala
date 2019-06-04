@@ -16,11 +16,11 @@ trait NOOPConfig {
 }
 
 object AddressSpace {
-  // [start, end)
-  def mmio = List((0x40000000L, 0x50000000L))
-  def dram = (0x80000000L, 0x90000000L)
+  // (start, size)
+  def mmio = List((0x40000000L, 0x10000000L))
+  def dram = (0x80000000L, 0x10000000L)
 
-  def isMMIO(addr: UInt) = mmio.map(range => (addr >= range._1.U && addr < range._2.U)).reduce(_ || _)
+  def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
 }
 
 class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
