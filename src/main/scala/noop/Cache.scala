@@ -14,6 +14,7 @@ sealed trait HasCacheConst {
   val Sets = TotalSize * 1024 / LineSize
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
+  val WordIndexBits = log2Up(LineBeats)
   val TagBits = 32 - OffsetBits - IndexBits
   val dataBits = 32
 
@@ -26,7 +27,7 @@ sealed trait HasCacheConst {
 sealed class AddrBundle extends Bundle with HasCacheConst {
   val tag = UInt(TagBits.W)
   val index = UInt(IndexBits.W)
-  val wordIndex = UInt((OffsetBits - 2).W)
+  val wordIndex = UInt(WordIndexBits.W)
   val byteOffset = UInt(2.W)
 }
 
@@ -208,7 +209,8 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
   val hit = io.in.valid && meta.hit
   val miss = io.in.valid && !meta.hit
 
-  val rdata = dataBlock(addr.wordIndex)
+  val dataBlockIdx = Wire(UInt(WordIndexBits.W))
+  val dataRead = dataBlock(dataBlockIdx)
 
   val wen = if (ro) false.B else req.wen
   val wmaskExpand = maskExpand(req.wmask)
@@ -218,7 +220,7 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
   val metaHitWrite = WireInit(0.U.asTypeOf(new MetaWriteBus))
   if (!ro) {
     val update = hit && wen
-    val dataMerge = (rdata & ~wordMask) | (req.wdata & wordMask)
+    val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
     dataHitWrite.req.valid := update
     dataHitWrite.req.bits.idx := addr.index
     dataHitWrite.req.bits.data := wordShift(dataMerge, addr.wordIndex, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
@@ -269,10 +271,11 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
 
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
-  io.mem.w.bits.data := dataBlock(writeBeatCnt.value)
+  io.mem.w.bits.data := dataRead
   io.mem.w.bits.strb := 0xf.U
   io.mem.w.bits.last := (writeBeatCnt.value === (LineBeats - 1).U)
 
+  dataBlockIdx := Mux(state === s_memWriteReq, writeBeatCnt.value, addr.wordIndex)
 
   val metaRefillWrite = WireInit(0.U.asTypeOf(new MetaWriteBus))
   val dataRefillWrite = WireInit(0.U.asTypeOf(new DataWriteBus))
@@ -327,7 +330,7 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
 
   io.metaWrite := Mux(metaHitWrite.req.valid, metaHitWrite, metaRefillWrite)
 
-  io.out.bits.rdata := Mux(hit, rdata, inRdataRegDemand)
+  io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.valid := io.in.valid && Mux(hit, true.B, state === s_wait_resp)
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
