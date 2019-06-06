@@ -12,51 +12,37 @@
 
 class Emulator {
   const char *bram_image;
+  const char *nemu_image;
   std::shared_ptr<VNOOPSimTop> dut_ptr;
 
   // emu control variable
   uint32_t seed;
   uint64_t max_cycles, cycles;
 
-  void prepare_block_ram(const char *image) {
-    /*std::ofstream ofs(BRAM_BIN_TXT);
-      if(image == NULL) {
-      ofs << "3c088000\n"   // lui t0, 0x8000
-      << "25080000\n"     // addiu t0, t0, 0
-      << "01000008\n"     // jr t0
-      << "00000000\n";    // nop
-
-      for(int i = 0; i < 100; i ++) {
-      ofs << "00000000\n";
-      }
-      } else {
-      std::ifstream ifs(image, std::ios::binary);
-      assert(ifs.good());
-      ofs.fill('0');
-      while(ifs.good()) {
-      uint32_t val;
-      ifs.read(reinterpret_cast<char*>(&val), sizeof(val));
-      ofs << std::hex << std::setw(8) << val << "\n";
-      }
-      }
-      */
-  }
-
   std::vector<const char *> parse_args(int argc, const char *argv[]);
 
   static const struct option long_options[];
   static void print_help(const char *file);
 
+  void read_emu_regs(uint32_t *r) {
+#define macro(x) r[x] = dut_ptr->io_difftest_r_##x
+    macro(0); macro(1); macro(2); macro(3); macro(4); macro(5); macro(6); macro(7);
+    macro(8); macro(9); macro(10); macro(11); macro(12); macro(13); macro(14); macro(15);
+    macro(16); macro(17); macro(18); macro(19); macro(20); macro(21); macro(22); macro(23);
+    macro(24); macro(25); macro(26); macro(27); macro(28); macro(29); macro(30); macro(31);
+    r[32] = dut_ptr->io_difftest_thisPC;
+  }
+
   public:
   // argv decay to the secondary pointer
   Emulator(int argc, const char *argv[]):
     bram_image(nullptr),
+    nemu_image(nullptr),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0)
   {
     // init emu
     auto args = parse_args(argc, argv);
-    prepare_block_ram(bram_image);
 
     // srand
     srand(seed);
@@ -68,6 +54,12 @@ class Emulator {
 
     // init core
     reset_ncycles(10);
+
+    extern void init_difftest(const char *img, uint32_t *reg);
+    uint32_t reg[33];
+    read_emu_regs(reg);
+    reg[32] = 0x80100000;
+    init_difftest(nemu_image, reg);
   }
 
   void reset_ncycles(size_t cycles) {
@@ -96,10 +88,31 @@ class Emulator {
     extern bool is_finish;
     extern void poll_event(void);
     extern uint32_t uptime(void);
+    extern void set_abort(void);
     int lasttime = 0;
+    int lastcommit = n;
+    int hascommit = 0;
     while (!is_finish && n > 0) {
       single_cycle();
       n --;
+
+      if (lastcommit - n > 100 && hascommit) {
+        eprintf("No instruction commits for 100 cycles, maybe get stuck\n");
+        set_abort();
+      }
+
+      // difftest
+      if (dut_ptr->io_difftest_commit) {
+        uint32_t reg[33];
+        read_emu_regs(reg);
+
+        extern int difftest_step(uint32_t *reg_scala, uint32_t this_pc, int isMMIO);
+        if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO)) {
+          set_abort();
+        }
+        lastcommit = n;
+        hascommit = 1;
+      }
 
       int t = uptime();
       if (t - lasttime > 100) {

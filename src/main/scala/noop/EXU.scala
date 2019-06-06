@@ -48,6 +48,7 @@ class EXU extends Module with HasFuType {
   val lsu = Module(new LSU)
   val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
   lsu.io.wdata := src2
+  io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
   io.mmio <> lsu.io.mmio
   lsu.io.out.ready := true.B

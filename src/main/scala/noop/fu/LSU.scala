@@ -47,6 +47,7 @@ class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
   val dmem = new SimpleBus
   val mmio = new SimpleBus
+  val isMMIO = Output(Bool())
 }
 
 class LSU extends Module with HasLSUOpType {
@@ -128,4 +129,5 @@ class LSU extends Module with HasLSUOpType {
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
+  io.isMMIO := mmio && valid
 }

@@ -146,4 +146,5 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   io.difftest.commit := RegNext(wbu.io.writeback)
   isu.io.difftestRegs.zipWithIndex.map { case(r, i) => io.difftest.r(i) := r }
   io.difftest.thisPC := RegNext(wbu.io.in.bits.pc)
+  io.difftest.isMMIO := RegNext(wbu.io.in.bits.isMMIO)
 }

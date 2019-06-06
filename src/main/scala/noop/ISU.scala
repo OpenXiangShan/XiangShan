@@ -36,6 +36,8 @@ class ISU extends Module with HasSrcType {
     val exuBusy = Output(Bool())
   })
 
+  io.out.bits := DontCare
+
   // make non-register addressing to zero, since sb.isBusy(0) === false.B
   val rfSrc1 = Mux(io.in.bits.ctrl.src1Type === Src1Pc, 0.U, io.in.bits.ctrl.rfSrc1)
   val rfSrc2 = Mux(io.in.bits.ctrl.src2Type === Src2Reg, io.in.bits.ctrl.rfSrc2, 0.U)
@@ -68,7 +70,6 @@ class ISU extends Module with HasSrcType {
   io.out.bits.data.imm  := io.in.bits.data.imm
   io.out.bits.data.dest := DontCare
 
-  io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.fuType := i.fuType
     o.fuOpType := i.fuOpType

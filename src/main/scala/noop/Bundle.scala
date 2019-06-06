@@ -35,6 +35,7 @@ class PcCtrlDataIO extends Bundle {
   val pc = Output(UInt(32.W))
   val ctrl = new CtrlPathIO
   val data = new DataPathIO
+  val isMMIO = Output(Bool())
 }
 
 class WriteBackIO extends Bundle {

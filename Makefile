@@ -6,6 +6,7 @@ SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 SIMTOP = top.TestMain
 EMU_IMAGE = $(BUILD_DIR)/bin-readmemh
 IMAGE ?= temp
+NEMU_IMAGE ?= $(IMAGE)
 
 .DEFAULT_GOAL = verilog
 
@@ -62,7 +63,7 @@ emu: $(EMU)
 	@ln -sf $(IMAGE)_1 $(EMU_IMAGE)_1
 	@ln -sf $(IMAGE)_2 $(EMU_IMAGE)_2
 	@ln -sf $(IMAGE)_3 $(EMU_IMAGE)_3
-	@$(EMU)
+	@$(EMU) -u $(NEMU_IMAGE)
 
 clean:
 	rm -rf $(BUILD_DIR)
