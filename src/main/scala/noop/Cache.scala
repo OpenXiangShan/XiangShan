@@ -34,13 +34,6 @@ sealed trait HasCacheConst {
     (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
 
-sealed class AddrBundle extends Bundle with HasCacheConst {
-  val tag = UInt(TagBits.W)
-  val index = UInt(IndexBits.W)
-  val wordIndex = UInt(WordIndexBits.W)
-  val byteOffset = UInt(2.W)
-}
-
 sealed class MetaBundle extends Bundle with HasCacheConst {
   val tag = UInt(TagBits.W)
   val valid = Bool()
@@ -51,7 +44,6 @@ sealed class MetaPipelineBundle extends Bundle with HasCacheConst {
   val tag = Output(UInt(TagBits.W))
   val hit = Output(Bool())
   val dirty = Output(Bool())
-  val mmio = Output(Bool())
 }
 
 sealed class MetaReadReqIO extends Bundle with HasCacheConst {
@@ -155,7 +147,7 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.wen) }
-  val idx = io.in.bits.addr.asTypeOf(new AddrBundle).index
+  val idx = io.in.bits.addr.asTypeOf(addrBundle).index
 
   // read meta array
   io.metaRead.req.idx := idx
@@ -193,18 +185,17 @@ sealed class CacheStage2(ro: Boolean, name: String) extends Module with HasCache
   })
 
   val req = io.in.bits.req
-  val addr = req.addr.asTypeOf(new AddrBundle)
+  val addr = req.addr.asTypeOf(addrBundle)
   val meta = io.in.bits.meta.meta
   val dirty = if (ro) false.B else meta.dirty
 
-  io.out.bits.meta.mmio := AddressSpace.isMMIO(req.addr)
-  io.out.bits.meta.hit := meta.valid && (meta.tag === addr.tag) && io.in.valid && !io.out.bits.meta.mmio
+  io.out.bits.meta.hit := meta.valid && (meta.tag === addr.tag) && io.in.valid
   io.out.bits.meta.tag := meta.tag
-  io.out.bits.meta.dirty := dirty && io.in.valid && !io.out.bits.meta.mmio
+  io.out.bits.meta.dirty := dirty && io.in.valid
   io.out.bits.req <> io.in.bits.req
 
   io.out.valid := io.in.valid
-  io.in.ready := (!io.in.valid || io.out.fire())
+  io.in.ready := !io.in.valid || io.out.fire()
 }
 
 // writeback
@@ -221,7 +212,7 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
   })
 
   val req = io.in.bits.req
-  val addr = req.addr.asTypeOf(new AddrBundle)
+  val addr = req.addr.asTypeOf(addrBundle)
   val dataBlock = io.dataReadResp.data
   val meta = io.in.bits.meta
   val hit = io.in.valid && meta.hit
@@ -405,8 +396,8 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with H
     io.in.dump(name + ".in")
     printf("%d: s1:(%d,%d), s2:(%d,%d), s2:(%d,%d)\n",
       GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
-    when (s1.io.in.valid) { printf("S1: pc = 0x%x\n", s1.io.in.bits.addr) }
-    when (s2.io.in.valid) { printf("S2: pc = 0x%x\n", s2.io.in.bits.req.addr) }
-    when (s3.io.in.valid) { printf("S3: pc = 0x%x\n", s3.io.in.bits.req.addr) }
+    when (s1.io.in.valid) { printf(p"[S1]: ${s1.io.in.bits}\n") }
+    when (s2.io.in.valid) { printf(p"[S2]: ${s2.io.in.bits.req}\n") }
+    when (s3.io.in.valid) { printf(p"[S3]: ${s3.io.in.bits.req}\n") }
   }
 }
