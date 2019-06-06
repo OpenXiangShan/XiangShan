@@ -141,6 +141,7 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
     val s2Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
     val s3Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
     val s2s3Miss = Input(Bool())
+    val metaFinishReset = Input(Bool())
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.wen) }
@@ -159,8 +160,8 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
 
   val s2WriteSameAddr = io.s2Req.valid && (io.s2Req.bits.addr(31,2) === io.in.bits.addr(31,2)) && io.s2Req.bits.wen
   val s3WriteSameAddr = io.s3Req.valid && (io.s3Req.bits.addr(31,2) === io.in.bits.addr(31,2)) && io.s3Req.bits.wen
-  io.out.valid := io.in.valid && !s2WriteSameAddr && !s3WriteSameAddr && !io.s2s3Miss
-  io.in.ready := !io.in.valid || io.out.fire()
+  io.out.valid := io.in.valid && !s2WriteSameAddr && !s3WriteSameAddr && !io.s2s3Miss && io.metaFinishReset
+  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaFinishReset
 }
 
 sealed class Stage2IO extends Bundle with HasCacheConst {
@@ -379,9 +380,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with H
   dataArray.io.write <> s3.io.dataWrite
   dataArray.io.s2OutFire := s2.io.out.fire()
   s3.io.dataReadResp <> dataArray.io.read.resp
-
-  io.in.req.ready := (s1.io.in.ready && metaArray.io.finishReset) || io.flush
-  s1.io.in.valid := (io.in.req.valid && metaArray.io.finishReset) || io.flush
+  s1.io.metaFinishReset := metaArray.io.finishReset
 
   // perfcnt
   io.hit := s3.io.in.valid && s3.io.in.bits.meta.hit
