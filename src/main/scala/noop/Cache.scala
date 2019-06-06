@@ -20,8 +20,18 @@ sealed trait HasCacheConst {
 
   val debug = false
 
+  def addrBundle = new Bundle {
+    val tag = UInt(TagBits.W)
+    val index = UInt(IndexBits.W)
+    val wordIndex = UInt(WordIndexBits.W)
+    val byteOffset = UInt(2.W)
+  }
+
   def wordShift(data: UInt, wordIndex: UInt, step: Int) = (data << (wordIndex * step.U))
   def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
+  def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
+  def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).tag =/= a2.asTypeOf(addrBundle).tag) &&
+    (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
 
 sealed class AddrBundle extends Bundle with HasCacheConst {
@@ -158,9 +168,15 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
 
   io.out.bits.req := io.in.bits
 
-  val s2WriteSameAddr = io.s2Req.valid && (io.s2Req.bits.addr(31,2) === io.in.bits.addr(31,2)) && io.s2Req.bits.wen
-  val s3WriteSameAddr = io.s3Req.valid && (io.s3Req.bits.addr(31,2) === io.in.bits.addr(31,2)) && io.s3Req.bits.wen
-  io.out.valid := io.in.valid && !s2WriteSameAddr && !s3WriteSameAddr && !io.s2s3Miss && io.metaFinishReset
+  val (addr, s2addr, s3addr) = (io.in.bits.addr, io.s2Req.bits.addr, io.s3Req.bits.addr)
+  val s2WriteSameWord = io.s2Req.valid && isSameWord(s2addr, addr) && io.s2Req.bits.wen
+  val s3WriteSameWord = io.s3Req.valid && isSameWord(s3addr, addr) && io.s3Req.bits.wen
+  // set conflict will evict the dirty line, so we should wait
+  // the victim line to be up-to-date, else we may writeback staled data
+  val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, addr) && io.s2Req.bits.wen
+  val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, addr) && io.s3Req.bits.wen
+  val stall = s2WriteSameWord || s3WriteSameWord || s2WriteSetConflict || s3WriteSetConflict
+  io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaFinishReset
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaFinishReset
 }
 
