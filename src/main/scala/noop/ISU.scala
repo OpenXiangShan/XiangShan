@@ -14,8 +14,7 @@ class RegFile {
 class ScoreBoard {
   val busy = RegInit(0.U(32.W))
   def isBusy(idx: UInt): Bool = busy(idx)
-  def setMask(idx: UInt) = (1.U(32.W) << idx)(31, 0)
-  def clearMask(idx: UInt) = ~setMask(idx)
+  def mask(idx: UInt) = (1.U(32.W) << idx)(31, 0)
   def update(setMask: UInt, clearMask: UInt) = {
     // When clearMask(i) and setMask(i) are both set, setMask(i) wins.
     // This can correctly record the busy bit
@@ -84,9 +83,9 @@ class ISU extends Module with HasSrcType {
 
   when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfWdata) }
 
-  val wbClearMask = Mux(io.wb.rfWen && (rfDest === io.wb.rfDest), sb.clearMask(io.wb.rfDest), "hffffffff".U)
-  val isuFireSetMask = Mux(io.out.fire(), sb.setMask(rfDest), 0.U)
-  when (io.flush && io.forward.rfWen) { sb.update(0.U, "hffffffff".U) }
+  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(32.W))
+  val isuFireSetMask = Mux(io.out.fire(), sb.mask(rfDest), 0.U)
+  when (io.flush) { sb.update(0.U, "hffffffff".U) }
   .otherwise { sb.update(isuFireSetMask, wbClearMask) }
 
   io.in.ready := !io.in.valid || io.out.fire()
