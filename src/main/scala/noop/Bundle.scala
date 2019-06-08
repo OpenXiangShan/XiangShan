@@ -35,7 +35,6 @@ class PcCtrlDataIO extends Bundle {
   val pc = Output(UInt(32.W))
   val ctrl = new CtrlPathIO
   val data = new DataPathIO
-  val isMMIO = Output(Bool())
 }
 
 class WriteBackIO extends Bundle {
@@ -47,6 +46,14 @@ class WriteBackIO extends Bundle {
 class BranchIO extends Bundle {
   val isTaken = Output(Bool())
   val target = Output(UInt(32.W))
+}
+
+class CommitIO extends Bundle with HasFuType {
+  val pc = Output(UInt(32.W))
+  val ctrl = new CtrlPathIO
+  val isMMIO = Output(Bool())
+  val commits = Output(Vec(FuTypeNum, new WriteBackIO))
+  val br = new BranchIO
 }
 
 class FunctionUnitIO extends Bundle with HasDecodeConst {

@@ -9,9 +9,8 @@ import bus.simplebus.SimpleBus
 class EXU extends Module with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
-    val out = Decoupled((new PcCtrlDataIO))
+    val out = Decoupled(new CommitIO)
     val flush = Input(Bool())
-    val br = new BranchIO
     val csrjmp = Flipped(new BranchIO)
     val dmem = new SimpleBus
     val mmio = new SimpleBus
@@ -41,7 +40,7 @@ class EXU extends Module with HasFuType {
   val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = src2, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := io.in.bits.data.imm
-  io.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
+  io.out.bits.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
   bru.io.out.ready := true.B
 
   val lsu = Module(new LSU)
@@ -60,19 +59,11 @@ class EXU extends Module with HasFuType {
   io.csr.isCsr := fuValids(FuCsr)
   io.csr.in.ready := true.B
 
-  io.out.bits.data := DontCare
-  io.out.bits.data.dest := LookupTree(fuType, 0.U, List(
-    FuAlu -> aluOut,
-    FuBru -> bruOut,
-    FuLsu -> lsuOut,
-    FuCsr -> io.csr.in.bits,
-    FuMdu -> mduOut
-  ))
-
   io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.rfWen := i.rfWen
     o.rfDest := i.rfDest
+    o.fuType := i.fuType
   }
   io.out.bits.pc := io.in.bits.pc
   // FIXME: should handle io.out.ready == false
@@ -80,6 +71,13 @@ class EXU extends Module with HasFuType {
     FuLsu -> lsu.io.out.valid,
     FuMdu -> mdu.io.out.valid
   ))
+
+  io.out.bits.commits := DontCare
+  io.out.bits.commits(FuAlu).rfWdata := aluOut
+  io.out.bits.commits(FuBru).rfWdata := bruOut
+  io.out.bits.commits(FuLsu).rfWdata := lsuOut
+  io.out.bits.commits(FuCsr).rfWdata := io.csr.in.bits
+  io.out.bits.commits(FuMdu).rfWdata := mduOut
 
   io.in.ready := !io.in.valid || io.out.fire()
 

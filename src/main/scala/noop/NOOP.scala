@@ -71,7 +71,6 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
     when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.pc) }
   }
 
-  wbu.io.brIn <> exu.io.br
   isu.io.wb <> wbu.io.wb
   ifu.io.br <> wbu.io.brOut
   // forward
