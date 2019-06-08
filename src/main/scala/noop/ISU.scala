@@ -60,10 +60,18 @@ class ISU extends Module with HasSrcType with HasFuType {
   io.out.valid := io.in.valid && src1Ready && src2Ready
 
   val rf = new RegFile
-  val rs1Data = Mux(src1ForwardNextCycle, io.forward.rfData, Mux(src1Forward, io.wb.rfWdata, rf.read(rfSrc1)))
-  val rs2Data = Mux(src2ForwardNextCycle, io.forward.rfData, Mux(src2Forward, io.wb.rfWdata, rf.read(rfSrc2)))
-  io.out.bits.data.src1 := Mux(io.in.bits.ctrl.src1Type === Src1Pc, io.in.bits.pc, rs1Data)
-  io.out.bits.data.src2 := Mux(io.in.bits.ctrl.src2Type === Src2Reg, rs2Data, io.in.bits.data.imm)
+  io.out.bits.data.src1 := Mux1H(List(
+    (io.in.bits.ctrl.src1Type === Src1Pc) -> io.in.bits.pc,
+    src1ForwardNextCycle -> io.forward.rfData,
+    (src1Forward && !src1ForwardNextCycle) -> io.wb.rfWdata,
+    ((io.in.bits.ctrl.src1Type =/= Src1Pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
+  ))
+  io.out.bits.data.src2 := Mux1H(List(
+    (io.in.bits.ctrl.src2Type =/= Src2Reg) -> io.in.bits.data.imm,
+    src2ForwardNextCycle -> io.forward.rfData,
+    (src2Forward && !src2ForwardNextCycle) -> io.wb.rfWdata,
+    ((io.in.bits.ctrl.src2Type === Src2Reg) && !src2ForwardNextCycle && !src2Forward) -> rf.read(rfSrc2)
+  ))
   io.out.bits.data.imm  := io.in.bits.data.imm
   io.out.bits.data.dest := DontCare
 
