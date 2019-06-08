@@ -9,7 +9,7 @@ import utils._
 
 sealed trait HasCacheConst {
   val TotalSize = 16 // Kbytes
-  val LineSize = 64 // byte
+  val LineSize = 32 // byte
   val LineBeats = LineSize / 4
   val Sets = TotalSize * 1024 / LineSize
   val OffsetBits = log2Up(LineSize)
