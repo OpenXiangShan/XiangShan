@@ -32,10 +32,11 @@ class IDU extends Module with HasDecodeConst {
   io.out.bits.ctrl.src1Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
   io.out.bits.ctrl.src2Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
 
-  io.out.bits.ctrl.rfSrc1 := instr(19, 15)
-  io.out.bits.ctrl.rfSrc2 := instr(24, 20)
+  // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
+  io.out.bits.ctrl.rfSrc1 := Mux(io.out.bits.ctrl.src1Type === Src1Pc, 0.U, instr(19, 15))
+  io.out.bits.ctrl.rfSrc2 := Mux(io.out.bits.ctrl.src2Type === Src2Reg, instr(24, 20), 0.U)
   io.out.bits.ctrl.rfWen := isrfWen(instrType)
-  io.out.bits.ctrl.rfDest := instr(11, 7)
+  io.out.bits.ctrl.rfDest := Mux(isrfWen(instrType), instr(11, 7), 0.U)
 
   io.out.bits.data := DontCare
   io.out.bits.data.imm  := LookupTree(instrType, List(

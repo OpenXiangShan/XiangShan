@@ -36,11 +36,9 @@ class ISU extends Module with HasSrcType with HasFuType {
   })
 
   io.out.bits := DontCare
-
-  // make non-register addressing to zero, since sb.isBusy(0) === false.B
-  val rfSrc1 = Mux(io.in.bits.ctrl.src1Type === Src1Pc, 0.U, io.in.bits.ctrl.rfSrc1)
-  val rfSrc2 = Mux(io.in.bits.ctrl.src2Type === Src2Reg, io.in.bits.ctrl.rfSrc2, 0.U)
-  val rfDest = Mux(io.in.bits.ctrl.rfWen, io.in.bits.ctrl.rfDest, 0.U)
+  val rfSrc1 = io.in.bits.ctrl.rfSrc1
+  val rfSrc2 = io.in.bits.ctrl.rfSrc2
+  val rfDest = io.in.bits.ctrl.rfDest
 
   def isDepend(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
