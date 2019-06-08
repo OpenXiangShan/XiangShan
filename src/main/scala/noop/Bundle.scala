@@ -58,8 +58,10 @@ class FunctionUnitIO extends Bundle with HasDecodeConst {
   val out = Decoupled(Output(UInt(32.W)))
 }
 
-class ForwardIO extends Bundle {
+class ForwardIO extends Bundle with HasDecodeConst {
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
   val valid = Output(Bool())
+  val fuType = Output(UInt(FuTypeWidth))
+  val rfData = Output(UInt(32.W))
 }

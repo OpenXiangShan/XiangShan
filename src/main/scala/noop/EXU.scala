@@ -25,9 +25,8 @@ class EXU extends Module with HasFuType {
     }
   })
 
-  val wbDataLatch = RegEnable(io.out.bits.data.dest, io.out.fire())
-  val src1 = Mux(io.in.bits.ctrl.isSrc1Forward, wbDataLatch, io.in.bits.data.src1)
-  val src2 = Mux(io.in.bits.ctrl.isSrc2Forward, wbDataLatch, io.in.bits.data.src2)
+  val src1 = io.in.bits.data.src1
+  val src2 = io.in.bits.data.src2
 
   val (fuType, fuOpType) = (io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
 
@@ -87,6 +86,8 @@ class EXU extends Module with HasFuType {
   io.forward.valid := io.in.valid
   io.forward.rfWen := io.in.bits.ctrl.rfWen
   io.forward.rfDest := io.in.bits.ctrl.rfDest
+  io.forward.fuType := io.in.bits.ctrl.fuType
+  io.forward.rfData := aluOut
 
   // perfcnt
   io.csr.instrType(FuAlu) := alu.io.out.fire()

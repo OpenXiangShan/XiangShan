@@ -23,7 +23,7 @@ class ScoreBoard {
   }
 }
 
-class ISU extends Module with HasSrcType {
+class ISU extends Module with HasSrcType with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled(new PcCtrlDataIO)
@@ -45,7 +45,7 @@ class ISU extends Module with HasSrcType {
   def isDepend(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
   val forwardRfWen = io.forward.rfWen && io.forward.valid
-  val dontForward = false.B
+  val dontForward = (io.forward.fuType =/= FuAlu)
   val src1DependEX = isDepend(rfSrc1, io.forward.rfDest, forwardRfWen)
   val src2DependEX = isDepend(rfSrc2, io.forward.rfDest, forwardRfWen)
   val src1DependWB = isDepend(rfSrc1, io.wb.rfDest, io.wb.rfWen)
@@ -62,8 +62,8 @@ class ISU extends Module with HasSrcType {
   io.out.valid := io.in.valid && src1Ready && src2Ready
 
   val rf = new RegFile
-  val rs1Data = Mux(src1Forward, io.wb.rfWdata, rf.read(rfSrc1))
-  val rs2Data = Mux(src2Forward, io.wb.rfWdata, rf.read(rfSrc2))
+  val rs1Data = Mux(src1ForwardNextCycle, io.forward.rfData, Mux(src1Forward, io.wb.rfWdata, rf.read(rfSrc1)))
+  val rs2Data = Mux(src2ForwardNextCycle, io.forward.rfData, Mux(src2Forward, io.wb.rfWdata, rf.read(rfSrc2)))
   io.out.bits.data.src1 := Mux(io.in.bits.ctrl.src1Type === Src1Pc, io.in.bits.pc, rs1Data)
   io.out.bits.data.src2 := Mux(io.in.bits.ctrl.src2Type === Src2Reg, rs2Data, io.in.bits.data.imm)
   io.out.bits.data.imm  := io.in.bits.data.imm
