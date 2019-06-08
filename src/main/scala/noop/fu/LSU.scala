@@ -90,7 +90,7 @@ class LSU extends Module with HasLSUOpType {
 
   switch (state) {
     is (s_idle) { when (valid) { state := s_addr } }
-    is (s_addr) { when (Mux(mmio, io.mmio.req.fire(), dmem.req.fire())) { state := Mux(isStore && !mmio, s_idle, s_wait_resp) } }
+    is (s_addr) { when (Mux(mmio, io.mmio.req.fire(), dmem.req.fire())) { state := Mux(isStore && !mmio, s_partialLoad, s_wait_resp) } }
     is (s_wait_resp) {
       when (Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire())) { state := Mux(partialLoad, s_partialLoad, s_idle) }
     }
@@ -109,7 +109,7 @@ class LSU extends Module with HasLSUOpType {
   io.mmio.req.valid := valid && (state === s_addr) && mmio
   io.mmio.resp.ready := true.B
 
-  io.out.valid := Mux(isStore && !mmio, dmem.req.fire(), Mux(partialLoad, state === s_partialLoad,
+  io.out.valid := Mux(isStore && !mmio, state === s_partialLoad, Mux(partialLoad, state === s_partialLoad,
     Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire() && (state === s_wait_resp))))
   io.in.ready := (state === s_idle)
 
