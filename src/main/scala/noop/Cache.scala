@@ -30,8 +30,7 @@ sealed trait HasCacheConst {
   def wordShift(data: UInt, wordIndex: UInt, step: Int) = (data << (wordIndex * step.U))
   def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
-  def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).tag =/= a2.asTypeOf(addrBundle).tag) &&
-    (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
+  def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
 
 sealed class MetaBundle extends Bundle with HasCacheConst {
@@ -161,13 +160,11 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
   io.out.bits.req := io.in.bits
 
   val (addr, s2addr, s3addr) = (io.in.bits.addr, io.s2Req.bits.addr, io.s3Req.bits.addr)
-  val s2WriteSameWord = io.s2Req.valid && isSameWord(s2addr, addr) && io.s2Req.bits.wen
-  val s3WriteSameWord = io.s3Req.valid && isSameWord(s3addr, addr) && io.s3Req.bits.wen
   // set conflict will evict the dirty line, so we should wait
   // the victim line to be up-to-date, else we may writeback staled data
   val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, addr) && io.s2Req.bits.wen
   val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, addr) && io.s3Req.bits.wen
-  val stall = s2WriteSameWord || s3WriteSameWord || s2WriteSetConflict || s3WriteSetConflict
+  val stall = s2WriteSetConflict || s3WriteSetConflict
   io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaFinishReset
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaFinishReset
 }
@@ -379,7 +376,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with H
   s1.io.s2Req.bits := s2.io.in.bits.req
   s1.io.s3Req.valid := s3.io.in.valid
   s1.io.s3Req.bits := s3.io.in.bits.req
-  s1.io.s2s3Miss := (s2.io.in.valid && !s2.io.out.bits.meta.hit) || (s3.io.in.valid && !s3.io.in.bits.meta.hit)
+  s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.meta.hit
 
   metaArray.io.read <> s1.io.metaRead
   metaArray.io.write <> s3.io.metaWrite
