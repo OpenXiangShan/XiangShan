@@ -85,17 +85,23 @@ class ALU extends Module with HasALUOpType {
     io.out.bits
   }
 
+  val isAdderSub = (func =/= AluAdd)
+  val adderRes = (src1 +& (src2 ^ Fill(32, isAdderSub))) + isAdderSub
+  val xorRes = src1 ^ src2
+  val sltu = !adderRes(32)
+  val slt = xorRes(31) ^ sltu
+
   val shamt = src2(4, 0)
   io.out.bits := LookupTree(func, 0.U, List(
-    AluAdd  -> (src1  +  src2),
+    AluAdd  -> adderRes,
     AluSll  -> ((src1  << shamt)(31, 0)),
-    AluSlt  -> ((src1.asSInt < src2.asSInt).asUInt),
-    AluSltu -> ((src1 < src2).asUInt),
-    AluXor  -> (src1  ^  src2),
+    AluSlt  -> Cat(0.U(31.W), slt),
+    AluSltu -> Cat(0.U(31.W), sltu),
+    AluXor  -> xorRes,
     AluSrl  -> (src1  >> shamt),
     AluOr   -> (src1  |  src2),
     AluAnd  -> (src1  &  src2),
-    AluSub  -> (src1  -  src2),
+    AluSub  -> adderRes,
     AluLui  -> src2,
     AluSra  -> ((src1.asSInt >> shamt).asUInt)
   ))
