@@ -43,19 +43,19 @@ class ISU extends Module with HasSrcType {
   val rfSrc2 = Mux(io.in.bits.ctrl.src2Type === Src2Reg, io.in.bits.ctrl.rfSrc2, 0.U)
   val rfDest = Mux(io.in.bits.ctrl.rfWen, io.in.bits.ctrl.rfDest, 0.U)
 
-  def canForward(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
+  def isDepend(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
   val forwardRfWen = io.forward.rfWen && io.forward.valid
   val dontForward = false.B
-  val src1ForwardNextCycleAllForward = canForward(rfSrc1, io.forward.rfDest, forwardRfWen)
-  val src2ForwardNextCycleAllForward = canForward(rfSrc2, io.forward.rfDest, forwardRfWen)
-  val src1ForwardAllForward = canForward(rfSrc1, io.wb.rfDest, io.wb.rfWen)
-  val src2ForwardAllForward = canForward(rfSrc2, io.wb.rfDest, io.wb.rfWen)
+  val src1DependEX = isDepend(rfSrc1, io.forward.rfDest, forwardRfWen)
+  val src2DependEX = isDepend(rfSrc2, io.forward.rfDest, forwardRfWen)
+  val src1DependWB = isDepend(rfSrc1, io.wb.rfDest, io.wb.rfWen)
+  val src2DependWB = isDepend(rfSrc2, io.wb.rfDest, io.wb.rfWen)
 
-  val src1ForwardNextCycle = src1ForwardNextCycleAllForward && !dontForward
-  val src2ForwardNextCycle = src2ForwardNextCycleAllForward && !dontForward
-  val src1Forward = src1ForwardAllForward && Mux(dontForward, !src1ForwardNextCycleAllForward, true.B)
-  val src2Forward = src2ForwardAllForward && Mux(dontForward, !src2ForwardNextCycleAllForward, true.B)
+  val src1ForwardNextCycle = src1DependEX && !dontForward
+  val src2ForwardNextCycle = src2DependEX && !dontForward
+  val src1Forward = src1DependWB && Mux(dontForward, !src1DependEX, true.B)
+  val src2Forward = src2DependWB && Mux(dontForward, !src2DependEX, true.B)
 
   val sb = new ScoreBoard
   val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward
