@@ -20,7 +20,8 @@ object AddressSpace {
   def mmio = List((0x40000000L, 0x10000000L))
   def dram = (0x80000000L, 0x10000000L)
 
-  def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
+  //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
+  def isMMIO(addr: UInt) = addr(31,28) === "h4".U
 }
 
 class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
