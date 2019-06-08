@@ -80,7 +80,7 @@ class LSU extends Module with HasLSUOpType {
   val dmem = io.dmem
   val addr = src1 + src2
   val addrLatch = RegNext(addr)
-  val isStore = valid && funcIsStore(func)
+  val isStore = funcIsStore(func)
 
   val s_idle :: s_addr :: s_wait_resp :: s_partialLoad :: Nil = Enum(4)
   val state = RegInit(s_idle)
