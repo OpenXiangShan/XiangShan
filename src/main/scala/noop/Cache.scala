@@ -351,7 +351,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with H
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBus(dataBits))
     val addr = Output(UInt(32.W))
-    val flush = Input(Bool())
+    val flush = Input(UInt(2.W))
     val mem = new AXI4
     val hit = Output(Bool())
   })
@@ -363,11 +363,11 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with H
   val dataArray = Module(new DataArray)
 
   s1.io.in <> io.in.req
-  PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush)
-  PipelineConnect(s2.io.out, s3.io.in, s3.io.out.fire(), io.flush)
+  PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
+  PipelineConnect(s2.io.out, s3.io.in, s3.io.out.fire(), io.flush(1))
   io.in.resp <> s3.io.out
 
-  s3.io.flush := io.flush
+  s3.io.flush := io.flush(1)
   io.addr := s3.io.addr
   io.mem <> s3.io.mem
 
