@@ -126,16 +126,18 @@ sealed class DataArray extends Module with HasCacheConst {
 }
 
 
-sealed class Stage1IO extends Bundle with HasCacheConst {
-  val req = new SimpleBusReqBundle(dataBits)
+sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
+  val req = new SimpleBusReqBundle(dataBits = dataBits, userBits = userBits)
   val meta = new MetaReadRespIO
+
+  override def cloneType = new Stage1IO(userBits).asInstanceOf[this.type]
 }
 
 // meta read
-sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCacheConst {
+sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits)))
-    val out = Decoupled(new Stage1IO)
+    val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits, userBits)))
+    val out = Decoupled(new Stage1IO(userBits))
     val metaRead = new MetaReadBus
     val dataReadReq = Valid(new DataReadReqIO)
 
@@ -169,16 +171,18 @@ sealed class CacheStage1(ro: Boolean, name: String) extends Module with HasCache
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaFinishReset
 }
 
-sealed class Stage2IO extends Bundle with HasCacheConst {
-  val req = new SimpleBusReqBundle(dataBits)
+sealed class Stage2IO(userBits: Int = 0) extends Bundle with HasCacheConst {
+  val req = new SimpleBusReqBundle(dataBits, userBits)
   val meta = new MetaPipelineBundle
+
+  override def cloneType = new Stage2IO(userBits).asInstanceOf[this.type]
 }
 
 // check
-sealed class CacheStage2(ro: Boolean, name: String) extends Module with HasCacheConst {
+sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new Stage1IO))
-    val out = Decoupled(new Stage2IO)
+    val in = Flipped(Decoupled(new Stage1IO(userBits)))
+    val out = Decoupled(new Stage2IO(userBits))
   })
 
   val req = io.in.bits.req
@@ -196,10 +200,10 @@ sealed class CacheStage2(ro: Boolean, name: String) extends Module with HasCache
 }
 
 // writeback
-sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCacheConst {
+sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new Stage2IO))
-    val out = Decoupled(new SimpleBusRespBundle(dataBits))
+    val in = Flipped(Decoupled(new Stage2IO(userBits)))
+    val out = Decoupled(new SimpleBusRespBundle(dataBits = dataBits, userBits = userBits))
     val addr = Output(UInt(32.W))
     val flush = Input(Bool())
     val dataReadResp = Flipped(new DataReadRespIO)
@@ -337,6 +341,9 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
   io.metaWrite := Mux(metaHitWrite.req.valid, metaHitWrite, metaRefillWrite)
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
+  if (userBits > 0) {
+    (io.out.bits.user zip io.in.bits.req.user).map{ case (x, y) => x := y }
+  }
   io.out.valid := io.in.valid && Mux(hit, true.B, state === s_wait_resp)
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
@@ -347,18 +354,18 @@ sealed class CacheStage3(ro: Boolean, name: String) extends Module with HasCache
   }
 }
 
-class Cache(ro: Boolean, name: String, dataBits: Int = 32) extends Module with HasCacheConst {
+class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
-    val in = Flipped(new SimpleBus(dataBits))
+    val in = Flipped(new SimpleBus(dataBits, userBits))
     val addr = Output(UInt(32.W))
     val flush = Input(UInt(2.W))
     val mem = new AXI4
     val hit = Output(Bool())
   })
 
-  val s1 = Module(new CacheStage1(ro, name))
-  val s2 = Module(new CacheStage2(ro, name))
-  val s3 = Module(new CacheStage3(ro, name))
+  val s1 = Module(new CacheStage1(ro, name, userBits))
+  val s2 = Module(new CacheStage2(ro, name, userBits))
+  val s3 = Module(new CacheStage3(ro, name, userBits))
   val metaArray = Module(new MetaArray)
   val dataArray = Module(new DataArray)
 

@@ -84,6 +84,7 @@ class ISU extends Module with HasSrcType with HasFuType {
     o.isNoopTrap := i.isNoopTrap
   }
   io.out.bits.pc := io.in.bits.pc
+  io.out.bits.isBranchTaken := io.in.bits.isBranchTaken
   io.out.bits.ctrl.isSrc1Forward := src1ForwardNextCycle
   io.out.bits.ctrl.isSrc2Forward := src2ForwardNextCycle
 

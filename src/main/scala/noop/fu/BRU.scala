@@ -16,6 +16,8 @@ trait HasBRUOpType {
   def BruBge  = "b0101".U
   def BruBltu = "b0110".U
   def BruBgeu = "b0111".U
+
+  def isBranch(func: UInt) = !func(3)
 }
 
 object BRUInstr extends HasDecodeConst {
@@ -45,6 +47,7 @@ object BRUInstr extends HasDecodeConst {
 class BRUIO extends FunctionUnitIO {
   val pc = Input(UInt(32.W))
   val offset = Input(UInt(32.W))
+  val predictTaken = Input(Bool())
   val branch = new BranchIO
 }
 
@@ -73,9 +76,9 @@ class BRU extends Module with HasBRUOpType {
     BruJalr -> (true.B, false.B)
   )
   val actual = LookupTree(func, false.B, table.map(x => (x._1, x._2._1)))
-  val predict = LookupTree(func, false.B, table.map(x => (x._1, x._2._2)))
+  val predict = io.predictTaken
+  io.branch.target := Mux(func === BruJalr, src1 + io.offset, io.pc + Mux(actual, io.offset, 4.U))
   io.branch.isTaken := valid && xorBool(actual, predict)
-  io.branch.target := Mux(func === BruJalr, src1 + io.offset, io.pc + Mux(io.offset(31), 4.U, io.offset))
   io.out.bits := io.pc + 4.U
 
   io.in.ready := true.B

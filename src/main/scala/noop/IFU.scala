@@ -10,7 +10,74 @@ trait HasResetVector {
   val resetVector = 0x80100000L
 }
 
-class BPU extends Module {
+class TableAddr(idxBits: Int) extends Bundle {
+  def tagBits = 32 - 2 - idxBits
+
+  val tag = UInt(tagBits.W)
+  val idx = UInt(idxBits.W)
+  val pad = UInt(2.W)
+
+  override def cloneType = new TableAddr(idxBits).asInstanceOf[this.type]
+}
+
+class BPU1 extends Module with HasBRUOpType {
+  val io = IO(new Bundle {
+    val pc = Input(UInt(32.W))
+    val update = Input(new BRUIO)
+    val out = new BranchIO
+  })
+
+  // BTB
+  val NRbtb = 512
+  val btbAddr = new TableAddr(log2Up(NRbtb))
+  val btbEntry = new Bundle {
+    val tag = UInt(btbAddr.tagBits.W)
+    val offset = UInt(12.W)
+    val isTaken = Bool()
+  }
+
+  val btb = Mem(NRbtb, btbEntry)
+  val btbRead = btb.read(io.pc.asTypeOf(btbAddr).idx)
+  val btbHit = btbRead.tag === io.pc.asTypeOf(btbAddr).tag
+  val btbTarget = io.pc + Cat(Fill(20, btbRead.offset(11)), btbRead.offset)
+  val btbTaken = btbHit && btbRead.isTaken
+
+  // jump table
+  val NRjtb = 128
+  val jtbAddr = new TableAddr(log2Up(NRjtb))
+  val jtbEntry = new Bundle {
+    val tag = UInt(jtbAddr.tagBits.W)
+    val offset = UInt(20.W)
+  }
+
+  val jtb = Mem(NRjtb, jtbEntry)
+  val jtbRead = jtb.read(io.pc.asTypeOf(jtbAddr).idx)
+  val jtbHit = jtbRead.tag === io.pc.asTypeOf(jtbAddr).tag
+  val jtbTarget = io.pc + Cat(Fill(12, jtbRead.offset(19)), jtbRead.offset)
+
+  // update
+  when (io.update.in.valid) {
+    when (io.update.in.bits.func === BruJal) {
+      val jtbWrite = Wire(jtbEntry)
+      jtbWrite.tag := io.update.pc.asTypeOf(jtbAddr).tag
+      jtbWrite.offset := io.update.offset(19, 0)
+      jtb.write(io.update.pc.asTypeOf(jtbAddr).idx, jtbWrite)
+    }
+    when (isBranch(io.update.in.bits.func)) {
+      val btbWrite = Wire(btbEntry)
+      btbWrite.tag := io.update.pc.asTypeOf(btbAddr).tag
+      btbWrite.offset := io.update.offset(11, 0)
+      btbWrite.isTaken := btbWrite.offset(11)  // static prediction
+      btb.write(io.update.pc.asTypeOf(btbAddr).idx, btbWrite)
+    }
+  }
+
+  io.out.target := Mux(jtbHit, jtbTarget, btbTarget)
+  io.out.isTaken := jtbHit || btbTaken
+  assert(!(jtbHit && btbHit), "should not both hit in BTB and JBT")
+}
+
+class BPU2 extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Valid(new PcInstrIO))
     val out = new BranchIO
@@ -37,37 +104,45 @@ class BPU extends Module {
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBus
+    val imem = new SimpleBus(userBits = 1)
     val pc = Input(UInt(32.W))
     val out = Decoupled(new PcInstrIO)
     val br = Flipped(new BranchIO)
+    val bpu1Update = Input(new BRUIO)
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
     val imemStall = Output(Bool())
   })
 
-  val bp = Module(new BPU)
-  bp.io.in.bits := io.out.bits
-  bp.io.in.valid := io.imem.resp.fire()
-
   // pc
   val pc = RegInit(resetVector.U(32.W))
+
+  val bp1 = Module(new BPU1)
+  bp1.io.pc := pc
+  bp1.io.update := io.bpu1Update
+
+  val bp2 = Module(new BPU2)
+  bp2.io.in.bits := io.out.bits
+  bp2.io.in.valid := io.imem.resp.fire()
+
   pc := Mux(io.br.isTaken, io.br.target,
-    Mux(bp.io.out.isTaken, bp.io.out.target,
-      Mux(io.imem.req.fire(), pc + 4.U, pc)))
+      Mux(bp1.io.out.isTaken && io.imem.req.fire(), bp1.io.out.target,
+        Mux(io.imem.req.fire(), pc + 4.U, pc)))//)
 
   io.flushVec := Mux(io.br.isTaken, "b1111".U, 0.U)
-  io.bpFlush := bp.io.out.isTaken
+  io.bpFlush := false.B
 
   io.imem := DontCare
   io.imem.req.valid := io.out.ready
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
   io.imem.req.bits.wen := false.B
+  io.imem.req.bits.user.map(_ := bp1.io.out.isTaken)
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
   io.out.bits.instr := io.imem.resp.bits.rdata
+  io.imem.resp.bits.user.map(io.out.bits.isBranchTaken := _)
 
   io.out.bits.pc := io.pc
 

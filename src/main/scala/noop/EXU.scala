@@ -16,6 +16,7 @@ class EXU extends Module with HasFuType {
     val mmio = new SimpleBus
     val forward = new ForwardIO
     val wbData = Input(UInt(32.W))
+    val bpu1Update = Output(new BRUIO)
     val csr = new Bundle {
       val isCsr = Output(Bool())
       val in = Flipped(Decoupled(UInt(32.W)))
@@ -40,8 +41,10 @@ class EXU extends Module with HasFuType {
   val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = src2, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := io.in.bits.data.imm
+  bru.io.predictTaken := io.in.bits.isBranchTaken
   io.out.bits.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
   bru.io.out.ready := true.B
+  io.bpu1Update := bru.io
 
   val lsu = Module(new LSU)
   val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)

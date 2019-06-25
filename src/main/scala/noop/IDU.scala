@@ -48,6 +48,7 @@ class IDU extends Module with HasDecodeConst {
   ))
 
   io.out.bits.pc := io.in.bits.pc
+  io.out.bits.isBranchTaken := io.in.bits.isBranchTaken
 
   io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid

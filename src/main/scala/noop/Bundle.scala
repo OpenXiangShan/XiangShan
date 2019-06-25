@@ -29,10 +29,12 @@ class DataPathIO extends Bundle {
 class PcInstrIO extends Bundle {
   val instr = Output(UInt(32.W))
   val pc = Output(UInt(32.W))
+  val isBranchTaken = Output(Bool())
 }
 
 class PcCtrlDataIO extends Bundle {
   val pc = Output(UInt(32.W))
+  val isBranchTaken = Output(Bool())
   val ctrl = new CtrlPathIO
   val data = new DataPathIO
 }
