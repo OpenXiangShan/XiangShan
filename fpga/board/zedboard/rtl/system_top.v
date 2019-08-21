@@ -86,6 +86,17 @@ module system_top (
     `axi_connect_if(m_axi, AXI_MEM_MAPPED)
   );
 
+  reg corerstn_ff;
+  always@(posedge uncoreclk) begin
+    corerstn_ff <= corerstn;
+  end
+
+  reg corerstn_sync[1:0];
+  always@(posedge coreclk) begin
+    corerstn_sync[0] <= corerstn_ff;
+    corerstn_sync[1] <= corerstn_sync[0];
+  end
+
   noop noop_i(
     `axi_connect_if(AXI_MEM, AXI_MEM),
 
@@ -99,7 +110,7 @@ module system_top (
     .VGA_vsync(VGA_vsync),
 
     .coreclk(coreclk),
-    .corerstn(corerstn),
+    .corerstn(corerstn_sync[1]),
     .clk50(clk50),
     .rstn50(rstn50),
     .uncoreclk(uncoreclk),

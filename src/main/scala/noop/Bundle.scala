@@ -15,21 +15,26 @@ class CtrlPathIO extends Bundle
   val rfDest = Output(UInt(5.W))
   val isInvOpcode = Output(Bool())
   val isNoopTrap = Output(Bool())
+  val isSrc1Forward = Output(Bool())
+  val isSrc2Forward = Output(Bool())
 }
 
 class DataPathIO extends Bundle {
   val src1 = Output(UInt(32.W))
   val src2 = Output(UInt(32.W))
+  val imm  = Output(UInt(32.W))
   val dest = Output(UInt(32.W))
 }
 
 class PcInstrIO extends Bundle {
   val instr = Output(UInt(32.W))
   val pc = Output(UInt(32.W))
+  val isBranchTaken = Output(Bool())
 }
 
 class PcCtrlDataIO extends Bundle {
   val pc = Output(UInt(32.W))
+  val isBranchTaken = Output(Bool())
   val ctrl = new CtrlPathIO
   val data = new DataPathIO
 }
@@ -45,6 +50,14 @@ class BranchIO extends Bundle {
   val target = Output(UInt(32.W))
 }
 
+class CommitIO extends Bundle with HasFuType {
+  val pc = Output(UInt(32.W))
+  val ctrl = new CtrlPathIO
+  val isMMIO = Output(Bool())
+  val commits = Output(Vec(FuTypeNum, new WriteBackIO))
+  val br = new BranchIO
+}
+
 class FunctionUnitIO extends Bundle with HasDecodeConst {
   val in = Flipped(Decoupled(new Bundle {
     val src1 = Output(UInt(32.W))
@@ -52,4 +65,12 @@ class FunctionUnitIO extends Bundle with HasDecodeConst {
     val func = Output(UInt(FuOpTypeWidth))
   }))
   val out = Decoupled(Output(UInt(32.W)))
+}
+
+class ForwardIO extends Bundle with HasDecodeConst {
+  val rfWen = Output(Bool())
+  val rfDest = Output(UInt(5.W))
+  val valid = Output(Bool())
+  val fuType = Output(UInt(FuTypeWidth))
+  val rfData = Output(UInt(32.W))
 }

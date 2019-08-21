@@ -12,21 +12,23 @@ trait NOOPConfig {
   val HasDcache = true
   val HasMExtension = true
   val HasDiv = true
-
-  // [start, end)
-  val AddressSpace = List(
-    (0x80000000L, 0x90000000L),  // dram
-    (0x40000000L, 0x50000000L)   // mmio
-//    (0x50000000L, 0x60000000L)   // uncache memory: vmem, gpuMetadata
-  )
+  val debug = false
 }
 
-class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
+object AddressSpace {
+  // (start, size)
+  def mmio = List((0x40000000L, 0x10000000L))
+  def dram = (0x80000000L, 0x10000000L)
+
+  //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
+  def isMMIO(addr: UInt) = addr(31,28) === "h4".U
+}
+
+class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val io = IO(new Bundle {
     val imem = new AXI4
     val dmem = new AXI4
     val mmio = new SimpleBus
-//    val uncacheMem = new AXI4
     val difftest = new DiffTestIO
   })
 
@@ -36,40 +38,60 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   val exu = Module(new EXU)
   val wbu = Module(new WBU)
 
+  ifu.io.bpu1Update := exu.io.bpu1Update
+
   val icacheHit = WireInit(false.B)
   io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache"))
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = 1))
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
-    icache.io.out
+    icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
+    ifu.io.pc := icache.io.addr
+    icache.io.mem
   } else { ifu.io.imem.toAXI4() })
 
-  idu.io.in <> ifu.io.out
-  isu.io.in <> idu.io.out
-  exu.io.in <> isu.io.out
-  wbu.io.in <> exu.io.out
-  wbu.io.brIn <> exu.io.br
+  def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
+    isFlush: Bool, entries: Int = 2, pipe: Boolean = false) = {
+    right <> FlushableQueue(left, isFlush,  entries = entries, pipe = pipe)
+  }
+
+  pipelineConnect2(ifu.io.out, idu.io.in, ifu.io.flushVec(0))
+  PipelineConnect(idu.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
+  PipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
+  PipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
+  isu.io.flush := ifu.io.flushVec(2)
+  exu.io.flush := ifu.io.flushVec(3)
+
+  if (debug) {
+    printf("%d: flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
+      GTimer(), ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
+      idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
+      exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
+    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr) }
+    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr) }
+    when (isu.io.in.valid) { printf("ISU: pc = 0x%x\n", isu.io.in.bits.pc) }
+    when (exu.io.in.valid) { printf("EXU: pc = 0x%x\n", exu.io.in.bits.pc) }
+    when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.pc) }
+  }
+
   isu.io.wb <> wbu.io.wb
   ifu.io.br <> wbu.io.brOut
-  ifu.io.writeback := wbu.io.writeback
-
-  val xbar = Module(new SimpleBusCrossbar(1, AddressSpace))
-  val dmem = xbar.io.out(0)
-  xbar.io.in(0) <> exu.io.dmem
+  // forward
+  isu.io.forward <> exu.io.forward
+  exu.io.wbData := wbu.io.wb.rfWdata
 
   val dcacheHit = WireInit(false.B)
   io.dmem <> (if (HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcacheHit := dcache.io.hit
-    dcache.io.in <> dmem
-    dcache.io.out
-  } else { dmem.toAXI4() })
-
-  io.mmio <> xbar.io.out(1)
-//  io.uncacheMem <> xbar.io.out(2).toAXI4()
+    dcache.io.in <> exu.io.dmem
+    dcache.io.flush := Fill(2, false.B)
+    dcache.io.mem
+  } else { exu.io.dmem.toAXI4() })
+  io.mmio <> exu.io.mmio
 
   // csr
-  val csr = Module(new CSR)
+  val csr = Module(new CSR(hasPerfCnt))
   csr.access(
     valid = exu.io.csr.isCsr,
     src1 = exu.io.in.bits.data.src1,
@@ -77,7 +99,7 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
     func = exu.io.in.bits.ctrl.fuOpType
   )
   exu.io.csr.in <> csr.io.out
-  ifu.io.csrjmp <> csr.io.csrjmp
+  exu.io.csrjmp <> csr.io.csrjmp
   csr.io.pc := exu.io.in.bits.pc
   csr.io.isInvOpcode := exu.io.in.bits.ctrl.isInvOpcode
 
@@ -85,31 +107,39 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   csr.io.perfCntCond.map( _ := false.B )
   csr.setPerfCnt(Mcycle, true.B)
   csr.setPerfCnt(Minstret, wbu.io.writeback)
-  csr.setPerfCnt(MImemStall, ifu.io.imemStall)
-  // instruction types
-  csr.setPerfCnt(MALUInstr, exu.io.csr.instrType(FuAlu))
-  csr.setPerfCnt(MBRUInstr, exu.io.csr.instrType(FuBru))
-  csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
-  csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
-  csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
-  // load/store before dcache
-  csr.setPerfCnt(MLoadInstr, dmem.isRead() && dmem.req.fire())
-  csr.setPerfCnt(MLoadStall, BoolStopWatch(dmem.isRead(), dmem.resp.fire()))
-  csr.setPerfCnt(MStoreStall, BoolStopWatch(dmem.isWrite(), dmem.resp.fire()))
-  // mmio
-  csr.setPerfCnt(MmmioInstr, io.mmio.req.fire())
-  // cache
-  csr.setPerfCnt(MIcacheHit, icacheHit)
-  csr.setPerfCnt(MDcacheHit, dcacheHit)
-  // mul
-  csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
+
+  if (hasPerfCnt) {
+    csr.setPerfCnt(MImemStall, ifu.io.imemStall)
+    // instruction types
+    csr.setPerfCnt(MALUInstr, exu.io.csr.instrType(FuAlu))
+    csr.setPerfCnt(MBRUInstr, exu.io.csr.instrType(FuBru))
+    csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
+    csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
+    csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
+    // load/store before dcache
+    csr.setPerfCnt(MLoadInstr, exu.io.dmem.isRead() && exu.io.dmem.req.fire())
+    csr.setPerfCnt(MLoadStall, BoolStopWatch(exu.io.dmem.isRead(), exu.io.dmem.resp.fire()))
+    csr.setPerfCnt(MStoreStall, BoolStopWatch(exu.io.dmem.isWrite(), exu.io.dmem.resp.fire()))
+    // mmio
+    csr.setPerfCnt(MmmioInstr, io.mmio.req.fire())
+    // cache
+    csr.setPerfCnt(MIcacheHit, icacheHit)
+    csr.setPerfCnt(MDcacheHit, dcacheHit)
+    // mul
+    csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
+    // pipeline wait
+    csr.setPerfCnt(MIFUFlush, ifu.io.flushVec.orR())
+    csr.setPerfCnt(MRAWStall, isu.io.rawStall)
+    csr.setPerfCnt(MEXUBusy, isu.io.exuBusy)
+  }
 
   // monitor
   val mon = Module(new Monitor)
   mon.io.clk := clock
-  mon.io.isNoopTrap := isu.io.out.bits.ctrl.isNoopTrap
-  mon.io.trapCode := isu.io.out.bits.data.src1
-  mon.io.trapPC := isu.io.out.bits.pc
+  mon.io.isNoopTrap := exu.io.in.bits.ctrl.isNoopTrap && exu.io.in.valid
+  mon.io.reset := reset
+  mon.io.trapCode := exu.io.in.bits.data.src1
+  mon.io.trapPC := exu.io.in.bits.pc
   mon.io.cycleCnt := csr.io.sim.cycleCnt
   mon.io.instrCnt := csr.io.sim.instrCnt
 
@@ -117,5 +147,6 @@ class NOOP extends Module with NOOPConfig with HasCSRConst with HasFuType {
   // latch writeback signal to let register files and pc update
   io.difftest.commit := RegNext(wbu.io.writeback)
   isu.io.difftestRegs.zipWithIndex.map { case(r, i) => io.difftest.r(i) := r }
-  io.difftest.r(32) := ifu.io.out.bits.pc
+  io.difftest.thisPC := RegNext(wbu.io.in.bits.pc)
+  io.difftest.isMMIO := RegNext(wbu.io.in.bits.isMMIO)
 }

@@ -219,9 +219,9 @@ proc create_hier_cell_hier_clkrst { parentCell nameHier } {
   # Create instance: clk_wiz_0, and set properties
   set clk_wiz_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:5.4 clk_wiz_0 ]
   set_property -dict [ list \
-   CONFIG.CLKOUT1_JITTER {192.113} \
+   CONFIG.CLKOUT1_JITTER {152.070} \
    CONFIG.CLKOUT1_PHASE_ERROR {164.985} \
-   CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {50.000} \
+   CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {133.333333} \
    CONFIG.CLKOUT2_JITTER {162.035} \
    CONFIG.CLKOUT2_PHASE_ERROR {164.985} \
    CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {100.000} \
@@ -236,7 +236,7 @@ proc create_hier_cell_hier_clkrst { parentCell nameHier } {
    CONFIG.CLK_OUT2_PORT {uncoreclk} \
    CONFIG.CLK_OUT3_PORT {clk50} \
    CONFIG.MMCM_CLKFBOUT_MULT_F {20.000} \
-   CONFIG.MMCM_CLKOUT0_DIVIDE_F {20.000} \
+   CONFIG.MMCM_CLKOUT0_DIVIDE_F {7.500} \
    CONFIG.MMCM_CLKOUT1_DIVIDE {10} \
    CONFIG.MMCM_CLKOUT2_DIVIDE {20} \
    CONFIG.MMCM_CLKOUT3_DIVIDE {1} \
@@ -348,9 +348,6 @@ proc create_root_design { parentCell } {
   set corerstn [ create_bd_port -dir O -from 0 -to 0 corerstn ]
   set rstn50 [ create_bd_port -dir O -from 0 -to 0 -type rst rstn50 ]
   set uncoreclk [ create_bd_port -dir O -type clk uncoreclk ]
-  set_property -dict [ list \
-   CONFIG.ASSOCIATED_BUSIF {AXI_MEM:AXI_GPU_METADATA} \
- ] $uncoreclk
   set uncorerstn [ create_bd_port -dir O -from 0 -to 0 -type rst uncorerstn ]
 
   # Create instance: axi3_to_lite_pc, and set properties

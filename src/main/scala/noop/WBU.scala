@@ -5,18 +5,19 @@ import chisel3.util._
 
 class WBU extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Valid(new PcCtrlDataIO))
+    val in = Flipped(Decoupled(new CommitIO))
     val wb = new WriteBackIO
-    val brIn = Flipped(new BranchIO)
     val brOut = new BranchIO
     val writeback = Output(Bool())
   })
 
   io.wb.rfWen := io.in.bits.ctrl.rfWen && io.in.valid
   io.wb.rfDest := io.in.bits.ctrl.rfDest
-  io.wb.rfWdata := io.in.bits.data.dest
+  io.wb.rfWdata := io.in.bits.commits(io.in.bits.ctrl.fuType).rfWdata
+  io.in.ready := true.B
 
-  io.brOut <> io.brIn
+  io.brOut <> io.in.bits.br
+  io.brOut.isTaken := io.in.bits.br.isTaken && io.in.valid
 
   io.writeback := io.in.valid
 }

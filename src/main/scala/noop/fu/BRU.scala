@@ -16,6 +16,8 @@ trait HasBRUOpType {
   def BruBge  = "b0101".U
   def BruBltu = "b0110".U
   def BruBgeu = "b0111".U
+
+  def isBranch(func: UInt) = !func(3)
 }
 
 object BRUInstr extends HasDecodeConst {
@@ -45,6 +47,7 @@ object BRUInstr extends HasDecodeConst {
 class BRUIO extends FunctionUnitIO {
   val pc = Input(UInt(32.W))
   val offset = Input(UInt(32.W))
+  val predictTaken = Input(Bool())
   val branch = new BranchIO
 }
 
@@ -60,17 +63,22 @@ class BRU extends Module with HasBRUOpType {
     io.out.bits
   }
 
-  io.branch.target := Mux(func === BruJalr, src1, io.pc) + io.offset
-  io.branch.isTaken := valid && LookupTree(func, false.B, List(
-    BruBeq  -> (src1 === src2),
-    BruBne  -> (src1 =/= src2),
-    BruBlt  -> (src1.asSInt  <  src2.asSInt),
-    BruBge  -> (src1.asSInt >=  src2.asSInt),
-    BruBltu -> (src1  <  src2),
-    BruBgeu -> (src1  >= src2),
-    BruJal  -> true.B,
-    BruJalr -> true.B
-  ))
+  def xorBool(a: Bool, b: Bool): Bool = (a.asUInt ^ b.asUInt).toBool
+
+  val table = List(
+    BruBeq  -> ((src1 === src2), io.offset(31)),
+    BruBne  -> ((src1 =/= src2), io.offset(31)),
+    BruBlt  -> ((src1.asSInt  <  src2.asSInt), io.offset(31)),
+    BruBge  -> ((src1.asSInt >=  src2.asSInt), io.offset(31)),
+    BruBltu -> ((src1  <  src2), io.offset(31)),
+    BruBgeu -> ((src1  >= src2), io.offset(31)),
+    BruJal  -> (true.B, true.B),
+    BruJalr -> (true.B, false.B)
+  )
+  val actual = LookupTree(func, false.B, table.map(x => (x._1, x._2._1)))
+  val predict = io.predictTaken
+  io.branch.target := Mux(func === BruJalr, src1 + io.offset, io.pc + Mux(actual, io.offset, 4.U))
+  io.branch.isTaken := valid && xorBool(actual, predict)
   io.out.bits := io.pc + 4.U
 
   io.in.ready := true.B

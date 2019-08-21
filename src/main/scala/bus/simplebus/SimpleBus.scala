@@ -6,12 +6,13 @@ import chisel3.util._
 import utils._
 import bus.axi4._
 
-class SimpleBusReqBundle(val dataBits: Int) extends Bundle {
+class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
   val addr = Output(UInt(32.W))
   val size = Output(UInt(3.W))
   val wen = Output(Bool())
   val wmask = Output(UInt((dataBits / 8).W))
   val wdata = Output(UInt(dataBits.W))
+  val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else null
 
   override def toPrintable: Printable = {
     p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)}, " +
@@ -19,17 +20,18 @@ class SimpleBusReqBundle(val dataBits: Int) extends Bundle {
   }
 }
 
-class SimpleBusRespBundle(val dataBits: Int) extends Bundle {
+class SimpleBusRespBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
   val rdata = Output(UInt(dataBits.W))
+  val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else null
 
   override def toPrintable: Printable = {
     p"rdata = ${Hexadecimal(rdata)}"
   }
 }
 
-class SimpleBus(val dataBits: Int = 32) extends Bundle {
-  val req = Decoupled(new SimpleBusReqBundle(dataBits))
-  val resp = Flipped(Decoupled(new SimpleBusRespBundle(dataBits)))
+class SimpleBus(val dataBits: Int = 32, val userBits: Int = 0) extends Bundle {
+  val req = Decoupled(new SimpleBusReqBundle(dataBits, userBits))
+  val resp = Flipped(Decoupled(new SimpleBusRespBundle(dataBits, userBits)))
 
   def isWrite() = req.valid && req.bits.wen
   def isRead() = req.valid && !req.bits.wen

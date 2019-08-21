@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-#define REF_SO "/home/yzh/projectn/nemu/build/riscv32-nemu-so"
+#define REF_SO "/home/yuzihao/projectn/nemu/build/riscv32-nemu-so"
 
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
@@ -31,7 +31,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-static void load_img(char *img_file) {
+static void load_img(const char *img_file) {
   long size;
   int ret;
 
@@ -56,7 +56,7 @@ static void load_img(char *img_file) {
   free(buf);
 }
 
-void init_difftest(char *img, uint32_t *reg) {
+void init_difftest(const char *img, uint32_t *reg) {
   assert(img != NULL);
 
   void *handle;
@@ -86,10 +86,14 @@ void init_difftest(char *img, uint32_t *reg) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint32_t *reg_scala, int isMMIO) {
+int difftest_step(uint32_t *reg_scala, uint32_t this_pc, int isMMIO) {
   uint32_t ref_r[33];
+  static uint32_t nemu_pc = 0x80100000;
 
   if (isMMIO) {
+    // MMIO accessing should not be a branch or jump, just +4 to get the next pc
+    reg_scala[32] += 4;
+    nemu_pc += 4;
     // to skip the checking of an instruction, just copy the reg state to reference design
     ref_difftest_setregs(reg_scala);
     return 0;
@@ -98,13 +102,17 @@ int difftest_step(uint32_t *reg_scala, int isMMIO) {
   ref_difftest_exec(1);
   ref_difftest_getregs(&ref_r);
 
+  uint32_t temp = ref_r[32];
+  ref_r[32] = nemu_pc;
+  nemu_pc = temp;
+
   if (memcmp(reg_scala, ref_r, sizeof(ref_r)) != 0) {
     ref_isa_reg_display();
     int i;
     for (i = 0; i < 33; i ++) {
       if (reg_scala[i] != ref_r[i]) {
         printf("x%2d different at pc = 0x%08x, right= 0x%08x, wrong = 0x%08x\n",
-            i, reg_scala[32], ref_r[i], reg_scala[i]);
+            i, this_pc, ref_r[i], reg_scala[i]);
       }
     }
     return 1;

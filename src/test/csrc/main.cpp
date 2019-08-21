@@ -57,6 +57,7 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
         break;
       case 'C': max_cycles = atoll(optarg);  break;
       case 'u': bram_image = optarg;
+                nemu_image = optarg;
                 args.push_back("-u");
                 args.push_back(optarg);
                 break;

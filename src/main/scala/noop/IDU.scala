@@ -7,13 +7,15 @@ import utils._
 
 class IDU extends Module with HasDecodeConst {
   val io = IO(new Bundle {
-    val in = Flipped(Valid(new PcInstrIO))
-    val out = Valid(new PcCtrlDataIO)
+    val in = Flipped(Decoupled(new PcInstrIO))
+    val out = Decoupled(new PcCtrlDataIO)
   })
 
   val instr = io.in.bits.instr
   val instrType :: fuType :: fuOpType :: Nil =
     ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+
+  io.out.bits := DontCare
 
   io.out.bits.ctrl.fuType := fuType
   io.out.bits.ctrl.fuOpType := fuOpType
@@ -21,8 +23,8 @@ class IDU extends Module with HasDecodeConst {
   val SrcTypeTable = List(
     InstrI -> (Src1Reg, Src2Imm),
     InstrR -> (Src1Reg, Src2Reg),
-    InstrS -> (Src1Reg, Src2Imm),
-    InstrB -> (Src1Reg, Src2Imm),
+    InstrS -> (Src1Reg, Src2Reg),
+    InstrB -> (Src1Reg, Src2Reg),
     InstrU -> (Src1Pc , Src2Imm),
     InstrJ -> (Src1Pc , Src2Imm),
     InstrN -> (Src1Pc , Src2Imm)
@@ -30,24 +32,27 @@ class IDU extends Module with HasDecodeConst {
   io.out.bits.ctrl.src1Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
   io.out.bits.ctrl.src2Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
 
-  io.out.bits.ctrl.rfSrc1 := instr(19, 15)
-  io.out.bits.ctrl.rfSrc2 := instr(24, 20)
+  // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
+  io.out.bits.ctrl.rfSrc1 := Mux(io.out.bits.ctrl.src1Type === Src1Pc, 0.U, instr(19, 15))
+  io.out.bits.ctrl.rfSrc2 := Mux(io.out.bits.ctrl.src2Type === Src2Reg, instr(24, 20), 0.U)
   io.out.bits.ctrl.rfWen := isrfWen(instrType)
-  io.out.bits.ctrl.rfDest := instr(11, 7)
+  io.out.bits.ctrl.rfDest := Mux(isrfWen(instrType), instr(11, 7), 0.U)
 
-  io.out.bits.data.src1 := DontCare
-  io.out.bits.data.src2 := LookupTree(instrType, List(
+  io.out.bits.data := DontCare
+  io.out.bits.data.imm  := LookupTree(instrType, List(
     InstrI -> Cat(Fill(20, instr(31)), instr(31, 20)),
     InstrS -> Cat(Fill(20, instr(31)), instr(31, 25), instr(11, 7)),
     InstrB -> Cat(Fill(20, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)),
     InstrU -> Cat(instr(31, 12), 0.U(12.W)),
     InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
   ))
-  io.out.bits.data.dest := DontCare
 
   io.out.bits.pc := io.in.bits.pc
+  io.out.bits.isBranchTaken := io.in.bits.isBranchTaken
 
-  io.out.bits.ctrl.isInvOpcode := instrType === InstrN
-  io.out.bits.ctrl.isNoopTrap := instr === NOOPTrap.TRAP
+  io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
+  io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
   io.out.valid := io.in.valid
+
+  io.in.ready := !io.in.valid || io.out.fire()
 }
