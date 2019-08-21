@@ -88,7 +88,7 @@ class EXU extends Module with HasFuType {
   io.forward.rfWen := io.in.bits.ctrl.rfWen
   io.forward.rfDest := io.in.bits.ctrl.rfDest
   io.forward.fuType := io.in.bits.ctrl.fuType
-  io.forward.rfData := aluOut
+  io.forward.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
 
   // perfcnt
   io.csr.instrType(FuAlu) := alu.io.out.fire()

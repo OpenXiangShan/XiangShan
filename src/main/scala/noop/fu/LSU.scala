@@ -80,33 +80,34 @@ class LSU extends Module with HasLSUOpType {
   val dmem = io.dmem
   val addr = src1 + src2
   val addrLatch = RegNext(addr)
-  val isStore = funcIsStore(func)
+  val isStore = valid && funcIsStore(func)
 
-  val s_idle :: s_addr :: s_wait_resp :: s_partialLoad :: Nil = Enum(4)
+  val s_idle :: s_wait_resp :: s_partialLoad :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
-  val mmio = AddressSpace.isMMIO(addrLatch)
+  val mmio = AddressSpace.isMMIO(addr)
   val partialLoad = !isStore && (func =/= LsuLw)
 
   switch (state) {
-    is (s_idle) { when (valid) { state := s_addr } }
-    is (s_addr) { when (Mux(mmio, io.mmio.req.fire(), dmem.req.fire())) { state := Mux(isStore && !mmio, s_partialLoad, s_wait_resp) } }
+    is (s_idle) { when (valid) {
+      when (Mux(mmio, io.mmio.req.fire(), dmem.req.fire())) { state := Mux(isStore && !mmio, s_partialLoad, s_wait_resp) }
+    }}
     is (s_wait_resp) {
       when (Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire())) { state := Mux(partialLoad, s_partialLoad, s_idle) }
     }
     is (s_partialLoad) { state := s_idle }
   }
 
-  dmem.req.bits.addr := addrLatch
+  dmem.req.bits.addr := addr
   dmem.req.bits.size := func(1, 0)
-  dmem.req.valid := valid && (state === s_addr) && !mmio
+  dmem.req.valid := valid && (state === s_idle) && !mmio
   dmem.req.bits.wen := isStore
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
-  dmem.req.bits.wmask := genWmask(addrLatch, func(1, 0))
+  dmem.req.bits.wmask := genWmask(addr, func(1, 0))
   dmem.resp.ready := true.B
 
   io.mmio.req.bits := dmem.req.bits
-  io.mmio.req.valid := valid && (state === s_addr) && mmio
+  io.mmio.req.valid := valid && (state === s_idle) && mmio
   io.mmio.resp.ready := true.B
 
   io.out.valid := Mux(isStore && !mmio, state === s_partialLoad, Mux(partialLoad, state === s_partialLoad,
