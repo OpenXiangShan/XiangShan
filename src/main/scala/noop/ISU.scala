@@ -43,7 +43,7 @@ class ISU extends Module with HasSrcType with HasFuType {
   def isDepend(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
   val forwardRfWen = io.forward.rfWen && io.forward.valid
-  val dontForward = (io.forward.fuType =/= FuAlu)
+  val dontForward = (io.forward.fuType =/= FuAlu) && (io.forward.fuType =/= FuLsu)
   val src1DependEX = isDepend(rfSrc1, io.forward.rfDest, forwardRfWen)
   val src2DependEX = isDepend(rfSrc2, io.forward.rfDest, forwardRfWen)
   val src1DependWB = isDepend(rfSrc1, io.wb.rfDest, io.wb.rfWen)

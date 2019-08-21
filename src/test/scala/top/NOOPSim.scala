@@ -18,8 +18,8 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   val noop = Module(new NOOP(hasPerfCnt = true))
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
-  val imemdelay = Module(new AXI4Delayer(0.5))
-  val dmemdelay = Module(new AXI4Delayer(0.5))
+  val imemdelay = Module(new AXI4Delayer(0))
+  val dmemdelay = Module(new AXI4Delayer(0))
   val mmio = Module(new SimMMIO)
 
   imemdelay.io.in <> noop.io.imem

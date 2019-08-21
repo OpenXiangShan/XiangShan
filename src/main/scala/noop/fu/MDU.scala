@@ -50,7 +50,7 @@ class Multiplier(len: Int) extends Module with NOOPConfig {
   val io = IO(new MulDivIO(len))
   val latency = if (HasMExtension) 1 else 0
 
-  def DSPpipe[T <: Data](a: T) = RegNext(RegNext(a))
+  def DSPpipe[T <: Data](a: T) = RegNext(a)
   val mulRes = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(io.in.bits(1)).asSInt).asUInt
   val mulPipeOut = Pipe(DSPpipe(io.in.fire()), mulRes, latency)
 

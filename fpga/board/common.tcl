@@ -36,8 +36,11 @@ set inc_files [list \
 add_files -norecurse -fileset sources_1 $inc_files
 set_property is_global_include true [get_files $inc_files]
 
-# Add files for rocketchip
+# Add files for noop
 lappend src_files "[file normalize "${fpga_dir}/../build/TopMain.v"]"
+
+# Add files for blackbox to pass synthesis
+lappend src_files "[file normalize "${fpga_dir}/../src/test/vsrc/monitor.v"]"
 
 add_files -norecurse -fileset sources_1 $src_files
 add_files -norecurse -fileset constrs_1 $xdc_files
