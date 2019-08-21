@@ -15,7 +15,7 @@ set brd [lindex $s 1]
 set script_dir [file normalize [file dirname [info script]]]
 set build_dir ${script_dir}/build/${project_name}
 
-set device_tree_repo_path "/home/yuzihao/projectn/noop/fpga/xilinx/device-tree-xlnx"
+set device_tree_repo_path "/home/yzh/xilinx/device-tree-xlnx"
 
 set hw_design [open_hw_design ${hdf_file}]
 
@@ -25,7 +25,7 @@ switch -regexp -- $brd {
     set brd_version zedboard
     set arch zynq
   }
-  zcu102|sidewinder {
+  zcu102|sidewinder|ultraZ {
     set processor psu_cortexa53_0
     set brd_version zcu102-rev1.0
     set arch zynqmp
@@ -40,7 +40,12 @@ switch -regexp -- $brd {
   }
 }
 
-generate_app -hw $hw_design -os standalone -proc $processor -app ${arch}_fsbl -compile -sw fsbl -dir ${build_dir}/fsbl
+generate_app -hw $hw_design -os standalone -proc $processor -app ${arch}_fsbl -sw fsbl -dir ${build_dir}/fsbl
+if {$brd == "sidewinder"} {
+  # see bug-list.md
+  exec sed -i -e "s/0x03FFFFFFU, 0x02000FFFU);/0x03FFFFFFU, 0x03FFFFFFU);/g" ${build_dir}/fsbl/psu_init.c
+}
+if { [catch { exec make -C ${build_dir}/fsbl } msg ] } { }
 
 exec mkdir -p ${script_dir}/build/${arch}
 exec ln -sf ${build_dir}/fsbl/executable.elf ${script_dir}/build/${arch}/fsbl.elf
@@ -49,7 +54,9 @@ exec bootgen -arch ${arch} -image ${script_dir}/bootgen-${arch}.bif -w -o i ${bu
 #device tree
 set_repo_path ${device_tree_repo_path}
 create_sw_design device-tree -os device_tree -proc $processor
-set_property CONFIG.periph_type_overrides "{BOARD ${brd_version}}" [get_os]
+if {$brd != "ultraZ"} {
+  set_property CONFIG.periph_type_overrides "{BOARD ${brd_version}}" [get_os]
+}
 generate_target -dir ${build_dir}/dts
 
 exit
