@@ -54,8 +54,10 @@ class FlushableQueue[T <: Data](gen: T, val entries: Int,
   }
 
   when (io.flush) {
-    enq_ptr.value := 0.U
-    deq_ptr.value := 0.U
+    if (entries > 1) {
+      enq_ptr.value := 0.U
+      deq_ptr.value := 0.U
+    }
     maybe_full := false.B
   }
 
