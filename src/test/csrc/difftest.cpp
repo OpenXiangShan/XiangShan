@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-#define REF_SO "/home/yuzihao/projectn/nemu/build/riscv32-nemu-so"
+#define REF_SO "/home/yzh/projectn/nemu/build/riscv32-nemu-so"
 
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
