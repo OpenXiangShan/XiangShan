@@ -10,7 +10,7 @@ import utils.LFSR64
 class AXI4Delayer[T <: AXI4Lite](q: Double, _type: T = new AXI4) extends Module {
   val io = IO(new Bundle{
     val in = Flipped(_type)
-    val out = _type
+    val out = new AXI4 //_type
   })
 
   require (0.0 <= q && q < 1)

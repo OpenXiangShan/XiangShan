@@ -11,11 +11,11 @@ NEMU_IMAGE ?= $(IMAGE)
 .DEFAULT_GOAL = verilog
 
 help:
-	sbt 'test:runMain gcd.GCDMain --help'
+	sbt 'test:runMain top.TopMain --help'
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	sbt 'runMain top.$(TOP) -td $(@D) --output-file $@'
+	sbt 'runMain top.$(TOP) -td $(@D) --output-file $(@F)'
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 
 verilog: $(TOP_V)
@@ -24,7 +24,7 @@ SIM_TOP = NOOPSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	sbt 'test:runMain $(SIMTOP) -td $(BUILD_DIR) --image $(EMU_IMAGE) --output-file $@'
+	sbt 'test:runMain $(SIMTOP) -td $(@D) --image $(EMU_IMAGE) --output-file $(@F)'
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
@@ -53,7 +53,7 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	@mkdir -p $(@D)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) \
-		-f $(BUILD_DIR)/black_box_verilog_files.f $^ $(EMU_DEPS)
+		-f $(BUILD_DIR)/firrtl_black_box_resource_files.f $^ $(EMU_DEPS)
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS)
 	$(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))

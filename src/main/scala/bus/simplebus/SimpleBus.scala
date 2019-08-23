@@ -37,7 +37,8 @@ class SimpleBus(val dataBits: Int = 32, val userBits: Int = 0) extends Bundle {
   def isRead() = req.valid && !req.bits.wen
 
   def toAXI4(isLite: Boolean = false) = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter(if (isLite) new AXI4Lite else new AXI4))
+    val mem2axi = Module(new SimpleBus2AXI4Converter(
+      if (isLite) new AXI4Lite else new AXI4, dataBits, userBits))
     mem2axi.io.in <> this
     mem2axi.io.out
   }
