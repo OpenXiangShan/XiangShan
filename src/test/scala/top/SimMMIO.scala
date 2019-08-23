@@ -25,7 +25,7 @@ class SimMMIO extends Module {
 
   val helper = Module(new DeviceHelper)
   helper.io.clk := clock
-  helper.io.reset := reset
+  helper.io.reset := reset.asBool
   helper.io.reqValid := io.rw.req.valid
   helper.io.reqWen := io.rw.isWrite()
   helper.io.reqAddr := io.rw.req.bits.addr

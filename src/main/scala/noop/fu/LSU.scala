@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 import bus.simplebus.SimpleBus
@@ -132,4 +133,9 @@ class LSU extends Module with HasLSUOpType {
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
   io.isMMIO := mmio && valid
+
+  BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")
+  BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")
+  BoringUtils.addSource(BoolStopWatch(dmem.isWrite(), dmem.resp.fire()), "perfCntCondMstoreStall")
+  BoringUtils.addSource(io.mmio.req.fire(), "perfCntCondMmmioInstr")
 }

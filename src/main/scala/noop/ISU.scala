@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
@@ -23,16 +24,13 @@ class ScoreBoard {
   }
 }
 
-class ISU extends Module with HasSrcType with HasFuType {
+class ISU(implicit val p: NOOPConfig) extends Module with HasSrcType with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled(new PcCtrlDataIO)
     val wb = Flipped(new WriteBackIO)
     val flush = Input(Bool())
     val forward = Flipped(new ForwardIO)
-    val difftestRegs = Output(Vec(32, UInt(32.W)))
-    val rawStall = Output(Bool())
-    val exuBusy = Output(Bool())
   })
 
   io.out.bits := DontCare
@@ -98,8 +96,10 @@ class ISU extends Module with HasSrcType with HasFuType {
   io.in.ready := !io.in.valid || io.out.fire()
 
   // read after write
-  io.rawStall := io.in.valid && !io.out.valid
-  io.exuBusy := io.out.valid && !io.out.fire()
+  BoringUtils.addSource(io.in.valid && !io.out.valid, "perfCntCondMrawStall")
+  BoringUtils.addSource(io.out.valid && !io.out.fire(), "perfCntCondMexuBusy")
 
-  io.difftestRegs.zipWithIndex.map{ case (r, i) => r := rf.read(i.U) }
+  if (!p.FPGAPlatform) {
+    BoringUtils.addSource(VecInit((0 to 31).map(i => rf.read(i.U))), "difftestRegs")
+  }
 }

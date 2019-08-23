@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import bus.simplebus._
 import bus.axi4._
@@ -360,7 +361,6 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
     val addr = Output(UInt(32.W))
     val flush = Input(UInt(2.W))
     val mem = new AXI4
-    val hit = Output(Bool())
   })
 
   val s1 = Module(new CacheStage1(ro, name, userBits))
@@ -393,8 +393,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   s3.io.dataReadResp <> dataArray.io.read.resp
   s1.io.metaFinishReset := metaArray.io.finishReset
 
-  // perfcnt
-  io.hit := s3.io.in.valid && s3.io.in.bits.meta.hit
+  BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 
   if (name == "dcache" && debug) {
     io.in.dump(name + ".in")

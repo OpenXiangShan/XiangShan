@@ -1,6 +1,6 @@
 package top
 
-import noop.NOOP
+import noop.{NOOP, NOOPConfig}
 import bus.axi4.{AXI4, AXI4Lite}
 import device.{AXI4Timer, AXI4VGA}
 import gpu._
@@ -16,7 +16,7 @@ class NOOPFPGA extends Module {
 //    val uncacheMem = new AXI4
   })
 
-  val noop = Module(new NOOP)
+  val noop = Module(new NOOP()(NOOPConfig()))
   io.imem <> noop.io.imem
   io.dmem <> noop.io.dmem
   io.mmio <> noop.io.mmio.toAXI4(isLite = true)

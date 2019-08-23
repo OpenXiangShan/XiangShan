@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
@@ -34,28 +35,6 @@ trait HasCSRConst {
   val Mepc          = 0x341
   val Mcause        = 0x342
 
-  val Mcycle        = 0xb00
-  val Minstret      = 0xb02
-  val Mcycleh       = 0xb80
-  val Minstreth     = 0xb82
-
-  val MImemStall  = 0xb03
-  val MALUInstr   = 0xb04
-  val MBRUInstr   = 0xb05
-  val MLSUInstr   = 0xb06
-  val MMDUInstr   = 0xb07
-  val MCSRInstr   = 0xb08
-  val MLoadInstr  = 0xb09
-  val MLoadStall  = 0xb0a
-  val MStoreStall = 0xb0b
-  val MmmioInstr  = 0xb0c
-  val MIcacheHit  = 0xb0d
-  val MDcacheHit  = 0xb0e
-  val MmulInstr   = 0xb0f
-  val MIFUFlush   = 0xb10
-  val MRAWStall   = 0xb11
-  val MEXUBusy    = 0xb12
-
   def privEcall = 0x000.U
   def privMret  = 0x302.U
 }
@@ -65,16 +44,9 @@ class CSRIO extends FunctionUnitIO {
   val csrjmp = new BranchIO
   // exception
   val isInvOpcode = Input(Bool())
-  // perfcnt
-  val perfCntCond = Vec(0x80, Input(Bool()))
-
-  val sim = new Bundle {
-    val cycleCnt = Output(UInt(32.W))
-    val instrCnt = Output(UInt(32.W))
-  }
 }
 
-class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with HasCSRConst {
+class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasCSRConst {
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -91,12 +63,13 @@ class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with Has
   val mstatus = Reg(UInt(32.W))
   val mepc = Reg(UInt(32.W))
 
+  val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(64.W)))
   val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => (0xb00 + i, perfCnts(i)) }
   val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
 
-  val scalaMapping = List(
+  val scalaMapping = Map(
     Mtvec   -> mtvec,
     Mcause  -> mcause,
     Mepc    -> mepc,
@@ -105,9 +78,7 @@ class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with Has
 
   val chiselMapping = scalaMapping.map { case (x, y) => (x.U -> y) }
 
-  def readWithScala(addr: Int): UInt = {
-    scalaMapping.filter { case (x, y) => x == addr } (0)._2
-  }
+  def readWithScala(addr: Int): UInt = scalaMapping(addr)
 
   val addr = src2(11, 0)
   val rdata = LookupTree(addr, 0.U, chiselMapping)(31, 0)
@@ -146,10 +117,52 @@ class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with Has
   io.out.valid := valid
 
   // perfcnt
-  (perfCnts zip io.perfCntCond).map { case (c, e) => { when (e) { c := c + 1.U } } }
+  val perfCntList = Map(
+    "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
+    "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),
+    "MimemStall"  -> (0xb03, "perfCntCondMimemStall" ),
+    "MaluInstr"   -> (0xb04, "perfCntCondMaluInstr"  ),
+    "MbruInstr"   -> (0xb05, "perfCntCondMbruInstr"  ),
+    "MlsuInstr"   -> (0xb06, "perfCntCondMlsuInstr"  ),
+    "MmduInstr"   -> (0xb07, "perfCntCondMmduInstr"  ),
+    "McsrInstr"   -> (0xb08, "perfCntCondMcsrInstr"  ),
+    "MloadInstr"  -> (0xb09, "perfCntCondMloadInstr" ),
+    "MloadStall"  -> (0xb0a, "perfCntCondMloadStall" ),
+    "MstoreStall" -> (0xb0b, "perfCntCondMstoreStall"),
+    "MmmioInstr"  -> (0xb0c, "perfCntCondMmmioInstr" ),
+    "MicacheHit"  -> (0xb0d, "perfCntCondMicacheHit" ),
+    "MdcacheHit"  -> (0xb0e, "perfCntCondMdcacheHit" ),
+    "MmulInstr"   -> (0xb0f, "perfCntCondMmulInstr"  ),
+    "MifuFlush"   -> (0xb10, "perfCntCondMifuFlush"  ),
+    "MrawStall"   -> (0xb11, "perfCntCondMrawStall"  ),
+    "MexuBusy"    -> (0xb11, "perfCntCondMexuBusy"   )
+  )
 
-  def setPerfCnt(addr: Int, cond: Bool) = { io.perfCntCond((addr & 0x7f).U) := cond }
+  val perfCntCond = List.fill(0x80)(WireInit(false.B))
+  (perfCnts zip perfCntCond).map { case (c, e) => { when (e) { c := c + 1.U } } }
 
-  io.sim.cycleCnt := readWithScala(Mcycle)
-  io.sim.instrCnt := readWithScala(Minstret)
+  BoringUtils.addSource(WireInit(true.B), "perfCntCondMcycle")
+  perfCntList.map { case (name, (addr, boringId)) => {
+    BoringUtils.addSink(perfCntCond(addr & 0x7f), boringId)
+    if (!hasPerfCnt) {
+      // do not enable perfcnts except for Mcycle and Minstret
+      if (addr != perfCntList("Mcycle")._1 && addr != perfCntList("Minstret")._1) {
+        perfCntCond(addr & 0x7f) := false.B
+      }
+    }
+  }}
+
+  val nooptrap = WireInit(false.B)
+  BoringUtils.addSink(nooptrap, "nooptrap")
+  if (!p.FPGAPlatform) {
+    // to monitor
+    BoringUtils.addSource(readWithScala(perfCntList("Mcycle")._1), "simCycleCnt")
+    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")
+
+    // display all perfcnt when nooptrap is executed
+    when (nooptrap) {
+      printf("======== PerfCnt =========\n")
+      perfCntList.map { case (name, (addr, boringId)) => printf("%d <- " + name + "\n", readWithScala(addr)) }
+    }
+  }
 }

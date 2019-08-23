@@ -4,6 +4,7 @@ import noop._
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import bus.axi4._
 import device.AXI4RAM
@@ -15,7 +16,7 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
     val difftest = new DiffTestIO
   })
 
-  val noop = Module(new NOOP(hasPerfCnt = true))
+  val noop = Module(new NOOP()(NOOPConfig(FPGAPlatform = false)))
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val imemdelay = Module(new AXI4Delayer(0))
@@ -29,7 +30,12 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
 
   mmio.io.rw <> noop.io.mmio
 
-  io.difftest <> noop.io.difftest
+  val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
+  BoringUtils.addSink(difftest.commit, "difftestCommit")
+  BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
+  BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
+  BoringUtils.addSink(difftest.r, "difftestRegs")
+  io.difftest := difftest
 
 //  noop.io.uncacheMem := DontCare
 }
