@@ -52,6 +52,7 @@ class BranchIO extends Bundle {
 
 class CommitIO extends Bundle with HasFuType {
   val pc = Output(UInt(32.W))
+  val npc = Output(UInt(32.W))
   val ctrl = new CtrlPathIO
   val isMMIO = Output(Bool())
   val commits = Output(Vec(FuTypeNum, new WriteBackIO))

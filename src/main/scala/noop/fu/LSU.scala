@@ -114,7 +114,8 @@ class LSU extends Module with HasLSUOpType {
     Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire() && (state === s_wait_resp))))
   io.in.ready := (state === s_idle)
 
-  val rdata = Mux(mmio, io.mmio.resp.bits.rdata, dmem.resp.bits.rdata)
+  val mmioLatch = RegNext(mmio)
+  val rdata = Mux(mmioLatch, io.mmio.resp.bits.rdata, dmem.resp.bits.rdata)
   val rdataLatch = RegNext(rdata)
   val rdataSel = LookupTree(addrLatch(1, 0), List(
     "b00".U -> rdataLatch,
