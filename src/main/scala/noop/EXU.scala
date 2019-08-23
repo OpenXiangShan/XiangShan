@@ -7,7 +7,7 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 import bus.simplebus.SimpleBus
 
-class EXU(hasPerfCnt: Boolean = false) extends Module with HasFuType {
+class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled(new CommitIO)
@@ -51,7 +51,7 @@ class EXU(hasPerfCnt: Boolean = false) extends Module with HasFuType {
   val mduOut = mdu.access(valid = fuValids(FuMdu), src1 = src1, src2 = src2, func = fuOpType)
   mdu.io.out.ready := true.B
 
-  val csr = Module(new CSR(hasPerfCnt))
+  val csr = Module(new CSR)
   val csrOut = csr.access(valid = fuValids(FuCsr), src1 = src1, src2 = src2, func = fuOpType)
   csr.io.pc := io.in.bits.pc
   csr.io.isInvOpcode := io.in.bits.ctrl.isInvOpcode

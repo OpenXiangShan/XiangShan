@@ -46,7 +46,7 @@ class CSRIO extends FunctionUnitIO {
   val isInvOpcode = Input(Bool())
 }
 
-class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with HasCSRConst {
+class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasCSRConst {
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -63,6 +63,7 @@ class CSR(hasPerfCnt: Boolean = false) extends Module with HasCSROpType with Has
   val mstatus = Reg(UInt(32.W))
   val mepc = Reg(UInt(32.W))
 
+  val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(64.W)))
   val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => (0xb00 + i, perfCnts(i)) }

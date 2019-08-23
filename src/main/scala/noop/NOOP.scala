@@ -8,13 +8,14 @@ import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
 import bus.axi4._
 import utils._
 
-trait NOOPConfig {
-  val HasIcache = true
-  val HasDcache = true
-  val HasMExtension = true
-  val HasDiv = true
-  val debug = false
-}
+case class NOOPConfig (
+  FPGAPlatform: Boolean = true,
+  HasIcache: Boolean = true,
+  HasDcache: Boolean = true,
+  HasMExtension: Boolean = true,
+  HasDiv: Boolean = true,
+  EnableDebug: Boolean = false
+)
 
 object AddressSpace {
   // (start, size)
@@ -25,7 +26,7 @@ object AddressSpace {
   def isMMIO(addr: UInt) = addr(31,28) === "h4".U
 }
 
-class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasCSRConst with HasFuType {
+class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
   val io = IO(new Bundle {
     val imem = new AXI4
     val dmem = new AXI4
@@ -36,12 +37,12 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   val ifu = Module(new IFU)
   val idu = Module(new IDU)
   val isu = Module(new ISU)
-  val exu = Module(new EXU(hasPerfCnt))
+  val exu = Module(new EXU)
   val wbu = Module(new WBU)
 
   ifu.io.bpu1Update := exu.io.bpu1Update
 
-  io.imem <> (if (HasIcache) {
+  io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
@@ -61,7 +62,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
-  if (debug) {
+  if (p.EnableDebug) {
     printf("%d: flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
       GTimer(), ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
@@ -79,7 +80,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   isu.io.forward <> exu.io.forward
   exu.io.wbData := wbu.io.wb.rfWdata
 
-  io.dmem <> (if (HasDcache) {
+  io.dmem <> (if (p.HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)

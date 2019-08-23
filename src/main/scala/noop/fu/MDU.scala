@@ -20,7 +20,7 @@ trait HasMDUOpType {
   def isSign(op: UInt) = isDiv(op) && !op(0)
 }
 
-object MDUInstr extends HasDecodeConst with NOOPConfig {
+object MDUInstr extends HasDecodeConst {
   def MUL     = BitPat("b0000001_?????_?????_000_?????_0110011")
   def MULH    = BitPat("b0000001_?????_?????_001_?????_0110011")
   def DIV     = BitPat("b0000001_?????_?????_100_?????_0110011")
@@ -38,7 +38,7 @@ object MDUInstr extends HasDecodeConst with NOOPConfig {
     REM            -> List(InstrR, FuMdu, MduRem),
     REMU           -> List(InstrR, FuMdu, MduRemu)
   )
-  val table = mulTable ++ (if (HasDiv) divTable else Nil)
+  def table(implicit p: NOOPConfig) = mulTable ++ (if (p.HasDiv) divTable else Nil)
 }
 
 class MulDivIO(val len: Int) extends Bundle {
@@ -47,16 +47,16 @@ class MulDivIO(val len: Int) extends Bundle {
   val out = DecoupledIO(Vec(2, Output(UInt(len.W))))
 }
 
-class Multiplier(len: Int) extends Module with NOOPConfig {
+class Multiplier(len: Int)(implicit val p: NOOPConfig) extends Module {
   val io = IO(new MulDivIO(len))
-  val latency = if (HasMExtension) 1 else 0
+  val latency = if (p.HasMExtension) 1 else 0
 
   def DSPpipe[T <: Data](a: T) = RegNext(a)
   val mulRes = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(io.in.bits(1)).asSInt).asUInt
   val mulPipeOut = Pipe(DSPpipe(io.in.fire()), mulRes, latency)
 
-  io.out.bits(0) := (if (!HasMExtension) 0.U else mulPipeOut.bits(len - 1, 0))
-  io.out.bits(1) := (if (!HasMExtension) 0.U else mulPipeOut.bits(2 * len - 1, len))
+  io.out.bits(0) := (if (!p.HasMExtension) 0.U else mulPipeOut.bits(len - 1, 0))
+  io.out.bits(1) := (if (!p.HasMExtension) 0.U else mulPipeOut.bits(2 * len - 1, len))
 
   val busy = RegInit(false.B)
   when (io.in.valid && !busy) { busy := true.B }
@@ -66,7 +66,7 @@ class Multiplier(len: Int) extends Module with NOOPConfig {
   io.out.valid := mulPipeOut.valid
 }
 
-class Divider(len: Int = 32) extends Module with NOOPConfig {
+class Divider(len: Int = 32)(implicit val p: NOOPConfig) extends Module {
   val io = IO(new MulDivIO(len))
 
   val shiftReg = Reg(UInt((1 + len * 2).W))
@@ -103,15 +103,15 @@ class Divider(len: Int = 32) extends Module with NOOPConfig {
   next := (state === 0.U && io.in.fire()) || (state =/= 0.U)
 
   val r = hi(len, 1)
-  io.out.bits(0) := (if (HasDiv) Mux(aSignReg ^ bSignReg, -lo, lo) else 0.U)
-  io.out.bits(1) := (if (HasDiv) Mux(aSignReg, -r, r) else 0.U)
-  io.out.valid := (if (HasDiv) finish else io.in.valid) // FIXME: should deal with ready = 0
+  io.out.bits(0) := (if (p.HasDiv) Mux(aSignReg ^ bSignReg, -lo, lo) else 0.U)
+  io.out.bits(1) := (if (p.HasDiv) Mux(aSignReg, -r, r) else 0.U)
+  io.out.valid := (if (p.HasDiv) finish else io.in.valid) // FIXME: should deal with ready = 0
 }
 
 class MDUIO extends FunctionUnitIO {
 }
 
-class MDU extends Module with HasMDUOpType {
+class MDU(implicit val p: NOOPConfig) extends Module with HasMDUOpType {
   val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)

@@ -5,7 +5,7 @@ import chisel3.util._
 
 import utils._
 
-class IDU extends Module with HasDecodeConst {
+class IDU(implicit val p: NOOPConfig) extends Module with HasDecodeConst {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcInstrIO))
     val out = Decoupled(new PcCtrlDataIO)
