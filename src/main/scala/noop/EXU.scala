@@ -43,6 +43,7 @@ class EXU extends Module with HasFuType {
   bru.io.offset := io.in.bits.data.imm
   bru.io.npc := io.in.bits.npc
   io.out.bits.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
+  io.out.bits.npc := io.in.bits.npc
   bru.io.out.ready := true.B
   io.bpu1Update := bru.io
 
