@@ -42,7 +42,7 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
 
   val icacheHit = WireInit(false.B)
   io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = 1))
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)

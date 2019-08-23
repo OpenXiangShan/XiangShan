@@ -55,9 +55,23 @@ class BPU1 extends Module with HasBRUOpType {
   val jtbHit = jtbRead.tag === io.pc.asTypeOf(jtbAddr).tag
   val jtbTarget = io.pc + Cat(Fill(12, jtbRead.offset(19)), jtbRead.offset)
 
+  // RAS
+
+  // store pc table
+  val NRrasPctb = 64
+  val rasPcAddr = new TableAddr(log2Up(NRjtb))
+  val rasPcTable = Mem(NRrasPctb, UInt(32.W))
+  val rasPcTableHit = rasPcTable.read(io.pc.asTypeOf(rasPcAddr).idx) === io.pc
+
+  val NRras = 16
+
+  val ras = Mem(NRras, UInt(32.W))
+  val sp = Counter(NRras)
+  val rasTarget = ras.read(sp.value)
+
   // update
   when (io.update.in.valid) {
-    when (io.update.in.bits.func === BruJal) {
+    when (io.update.in.bits.func === BruJal || io.update.in.bits.func === BruCall) {
       val jtbWrite = Wire(jtbEntry)
       jtbWrite.tag := io.update.pc.asTypeOf(jtbAddr).tag
       jtbWrite.offset := io.update.offset(19, 0)
@@ -70,11 +84,20 @@ class BPU1 extends Module with HasBRUOpType {
       btbWrite.isTaken := btbWrite.offset(11)  // static prediction
       btb.write(io.update.pc.asTypeOf(btbAddr).idx, btbWrite)
     }
+    when (io.update.in.bits.func === BruCall) {
+      ras.write(sp.value + 1.U, io.update.pc + 4.U)
+      sp.value := sp.value + 1.U
+    }
+    when (io.update.in.bits.func === BruRet) {
+      sp.value := sp.value - 1.U
+      rasPcTable.write(io.update.pc.asTypeOf(rasPcAddr).idx, io.update.pc)
+    }
   }
 
-  io.out.target := Mux(jtbHit, jtbTarget, btbTarget)
-  io.out.isTaken := jtbHit || btbTaken
-  assert(!(jtbHit && btbHit), "should not both hit in BTB and JBT")
+
+  io.out.target := Mux(jtbHit, jtbTarget, Mux(rasPcTableHit, rasTarget, btbTarget))
+  io.out.isTaken := jtbHit || btbTaken || rasPcTableHit
+  assert(jtbHit + btbHit + rasPcTableHit <= 1.U, "should not both hit in BTB and JBT")
 }
 
 class BPU2 extends Module {
@@ -104,7 +127,7 @@ class BPU2 extends Module {
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBus(userBits = 1)
+    val imem = new SimpleBus(userBits = 32)
     val pc = Input(UInt(32.W))
     val out = Decoupled(new PcInstrIO)
     val br = Flipped(new BranchIO)
@@ -125,9 +148,10 @@ class IFU extends Module with HasResetVector {
   bp2.io.in.bits := io.out.bits
   bp2.io.in.valid := io.imem.resp.fire()
 
-  pc := Mux(io.br.isTaken, io.br.target,
-      Mux(bp1.io.out.isTaken && io.imem.req.fire(), bp1.io.out.target,
-        Mux(io.imem.req.fire(), pc + 4.U, pc)))//)
+  val npc = Mux(io.br.isTaken, io.br.target, Mux(bp1.io.out.isTaken, bp1.io.out.target, pc + 4.U))
+  when (io.br.isTaken || io.imem.req.fire()) {
+    pc := npc
+  }
 
   io.flushVec := Mux(io.br.isTaken, "b1111".U, 0.U)
   io.bpFlush := false.B
@@ -137,12 +161,12 @@ class IFU extends Module with HasResetVector {
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
   io.imem.req.bits.wen := false.B
-  io.imem.req.bits.user.map(_ := bp1.io.out.isTaken)
+  io.imem.req.bits.user.map(_ := npc)
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
   io.out.bits.instr := io.imem.resp.bits.rdata
-  io.imem.resp.bits.user.map(io.out.bits.isBranchTaken := _)
+  io.imem.resp.bits.user.map(io.out.bits.npc := _)
 
   io.out.bits.pc := io.pc
 
