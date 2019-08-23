@@ -152,13 +152,13 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasC
     }
   }}
 
-  // to monitor
-  BoringUtils.addSource(readWithScala(perfCntList("Mcycle")._1), "simCycleCnt")
-  BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")
-
   val nooptrap = WireInit(false.B)
   BoringUtils.addSink(nooptrap, "nooptrap")
-  if (hasPerfCnt) {
+  if (!p.FPGAPlatform) {
+    // to monitor
+    BoringUtils.addSource(readWithScala(perfCntList("Mcycle")._1), "simCycleCnt")
+    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")
+
     // display all perfcnt when nooptrap is executed
     when (nooptrap) {
       printf("======== PerfCnt =========\n")

@@ -31,7 +31,6 @@ class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
     val imem = new AXI4
     val dmem = new AXI4
     val mmio = new SimpleBus
-    val difftest = new DiffTestIO
   })
 
   val ifu = Module(new IFU)
@@ -87,28 +86,4 @@ class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
     dcache.io.mem
   } else { exu.io.dmem.toAXI4() })
   io.mmio <> exu.io.mmio
-
-  // monitor
-  val mon = Module(new Monitor)
-  val nooptrap = exu.io.in.bits.ctrl.isNoopTrap && exu.io.in.valid
-  val cycleCnt = WireInit(0.U(32.W))
-  val instrCnt = WireInit(0.U(32.W))
-  mon.io.clk := clock
-  mon.io.isNoopTrap := nooptrap
-  mon.io.reset := reset.asBool
-  mon.io.trapCode := exu.io.in.bits.data.src1
-  mon.io.trapPC := exu.io.in.bits.pc
-  mon.io.cycleCnt := cycleCnt
-  mon.io.instrCnt := instrCnt
-
-  BoringUtils.addSink(cycleCnt, "simCycleCnt")
-  BoringUtils.addSink(instrCnt, "simInstrCnt")
-  BoringUtils.addSource(nooptrap, "nooptrap")
-
-  // difftest
-  // latch writeback signal to let register files and pc update
-  io.difftest.commit := RegNext(wbu.io.writeback)
-  isu.io.difftestRegs.zipWithIndex.map { case(r, i) => io.difftest.r(i) := r }
-  io.difftest.thisPC := RegNext(wbu.io.in.bits.pc)
-  io.difftest.isMMIO := RegNext(wbu.io.in.bits.isMMIO)
 }
