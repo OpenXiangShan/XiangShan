@@ -41,7 +41,7 @@ class EXU extends Module with HasFuType {
   val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = src2, func = fuOpType)
   bru.io.pc := io.in.bits.pc
   bru.io.offset := io.in.bits.data.imm
-  bru.io.predictTaken := io.in.bits.isBranchTaken
+  bru.io.npc := io.in.bits.npc
   io.out.bits.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
   bru.io.out.ready := true.B
   io.bpu1Update := bru.io

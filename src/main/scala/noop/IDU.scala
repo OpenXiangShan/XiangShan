@@ -47,8 +47,17 @@ class IDU extends Module with HasDecodeConst {
     InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
   ))
 
+  when (fuType === FuBru) {
+    when (io.out.bits.ctrl.rfDest === 1.U && fuOpType === BruJal) {
+      io.out.bits.ctrl.fuOpType := BruCall
+    }
+    when (io.out.bits.ctrl.rfSrc1 === 1.U && fuOpType === BruJalr) {
+      io.out.bits.ctrl.fuOpType := BruRet
+    }
+  }
+
   io.out.bits.pc := io.in.bits.pc
-  io.out.bits.isBranchTaken := io.in.bits.isBranchTaken
+  io.out.bits.npc := io.in.bits.npc
 
   io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid

@@ -17,6 +17,10 @@ trait HasBRUOpType {
   def BruBltu = "b0110".U
   def BruBgeu = "b0111".U
 
+  // for RAS
+  def BruCall = "b1100".U
+  def BruRet  = "b1101".U
+
   def isBranch(func: UInt) = !func(3)
 }
 
@@ -46,8 +50,8 @@ object BRUInstr extends HasDecodeConst {
 
 class BRUIO extends FunctionUnitIO {
   val pc = Input(UInt(32.W))
+  val npc = Input(UInt(32.W))
   val offset = Input(UInt(32.W))
-  val predictTaken = Input(Bool())
   val branch = new BranchIO
 }
 
@@ -72,13 +76,16 @@ class BRU extends Module with HasBRUOpType {
     BruBge  -> ((src1.asSInt >=  src2.asSInt), io.offset(31)),
     BruBltu -> ((src1  <  src2), io.offset(31)),
     BruBgeu -> ((src1  >= src2), io.offset(31)),
+    BruCall -> (true.B, true.B),
+    BruRet  -> (true.B, false.B),
     BruJal  -> (true.B, true.B),
     BruJalr -> (true.B, false.B)
   )
-  val actual = LookupTree(func, false.B, table.map(x => (x._1, x._2._1)))
-  val predict = io.predictTaken
-  io.branch.target := Mux(func === BruJalr, src1 + io.offset, io.pc + Mux(actual, io.offset, 4.U))
-  io.branch.isTaken := valid && xorBool(actual, predict)
+  val taken = LookupTree(func, false.B, table.map(x => (x._1, x._2._1)))
+  io.branch.target := Mux(func === BruJalr || func === BruRet,
+    src1 + io.offset, io.pc + Mux(taken, io.offset, 4.U))
+  // with branch predictor, this is actually to fix the wrong prediction
+  io.branch.isTaken := valid && (io.branch.target =/= io.npc)
   io.out.bits := io.pc + 4.U
 
   io.in.ready := true.B
