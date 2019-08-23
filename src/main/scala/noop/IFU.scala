@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 import bus.simplebus.SimpleBus
@@ -134,7 +135,6 @@ class IFU extends Module with HasResetVector {
     val bpu1Update = Input(new BRUIO)
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
-    val imemStall = Output(Bool())
   })
 
   // pc
@@ -170,6 +170,6 @@ class IFU extends Module with HasResetVector {
 
   io.out.bits.pc := io.pc
 
-  // perfcnt
-  io.imemStall := BoolStopWatch(io.imem.req.valid, io.imem.resp.fire())
+  BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
+  BoringUtils.addSource(io.flushVec.orR, "perfCntCondMifuFlush")
 }

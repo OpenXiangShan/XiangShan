@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
@@ -108,7 +109,6 @@ class Divider(len: Int = 32) extends Module with NOOPConfig {
 }
 
 class MDUIO extends FunctionUnitIO {
-  val isMul = Output(Bool())
 }
 
 class MDU extends Module with HasMDUOpType {
@@ -147,6 +147,5 @@ class MDU extends Module with HasMDUOpType {
   io.in.ready := Mux(isDiv(func), div.io.in.ready, mul.io.in.ready)
   io.out.valid := Mux(isDivReg, div.io.out.valid, mul.io.out.valid)
 
-  // perfcnt
-  io.isMul := mul.io.out.fire()
+  BoringUtils.addSource(mul.io.out.fire(), "perfCntCondMmulInstr")
 }

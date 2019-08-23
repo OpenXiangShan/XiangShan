@@ -2,27 +2,21 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 import bus.simplebus.SimpleBus
 
-class EXU extends Module with HasFuType {
+class EXU(hasPerfCnt: Boolean = false) extends Module with HasFuType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled(new CommitIO)
     val flush = Input(Bool())
-    val csrjmp = Flipped(new BranchIO)
     val dmem = new SimpleBus
     val mmio = new SimpleBus
     val forward = new ForwardIO
     val wbData = Input(UInt(32.W))
     val bpu1Update = Output(new BRUIO)
-    val csr = new Bundle {
-      val isCsr = Output(Bool())
-      val in = Flipped(Decoupled(UInt(32.W)))
-      val instrType = Vec(FuTypeNum, Output(Bool()))
-      val isMul = Output(Bool())
-    }
   })
 
   val src1 = io.in.bits.data.src1
@@ -42,8 +36,6 @@ class EXU extends Module with HasFuType {
   bru.io.pc := io.in.bits.pc
   bru.io.offset := io.in.bits.data.imm
   bru.io.npc := io.in.bits.npc
-  io.out.bits.br <> Mux(io.csrjmp.isTaken, io.csrjmp, bru.io.branch)
-  io.out.bits.npc := io.in.bits.npc
   bru.io.out.ready := true.B
   io.bpu1Update := bru.io
 
@@ -59,9 +51,14 @@ class EXU extends Module with HasFuType {
   val mduOut = mdu.access(valid = fuValids(FuMdu), src1 = src1, src2 = src2, func = fuOpType)
   mdu.io.out.ready := true.B
 
-  // CSR is instantiated under NOOP
-  io.csr.isCsr := fuValids(FuCsr)
-  io.csr.in.ready := true.B
+  val csr = Module(new CSR(hasPerfCnt))
+  val csrOut = csr.access(valid = fuValids(FuCsr), src1 = src1, src2 = src2, func = fuOpType)
+  csr.io.pc := io.in.bits.pc
+  csr.io.isInvOpcode := io.in.bits.ctrl.isInvOpcode
+  csr.io.out.ready := true.B
+
+  io.out.bits.br <> Mux(csr.io.csrjmp.isTaken, csr.io.csrjmp, bru.io.branch)
+  io.out.bits.npc := io.in.bits.npc
 
   io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -80,7 +77,7 @@ class EXU extends Module with HasFuType {
   io.out.bits.commits(FuAlu).rfWdata := aluOut
   io.out.bits.commits(FuBru).rfWdata := bruOut
   io.out.bits.commits(FuLsu).rfWdata := lsuOut
-  io.out.bits.commits(FuCsr).rfWdata := io.csr.in.bits
+  io.out.bits.commits(FuCsr).rfWdata := csrOut
   io.out.bits.commits(FuMdu).rfWdata := mduOut
 
   io.in.ready := !io.in.valid || io.out.fire()
@@ -91,11 +88,9 @@ class EXU extends Module with HasFuType {
   io.forward.fuType := io.in.bits.ctrl.fuType
   io.forward.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
 
-  // perfcnt
-  io.csr.instrType(FuAlu) := alu.io.out.fire()
-  io.csr.instrType(FuBru) := bru.io.out.fire()
-  io.csr.instrType(FuLsu) := lsu.io.out.fire()
-  io.csr.instrType(FuMdu) := mdu.io.out.fire()
-  io.csr.instrType(FuCsr) := io.csr.isCsr && io.csr.in.ready
-  io.csr.isMul := mdu.io.isMul
+  BoringUtils.addSource(alu.io.out.fire(), "perfCntCondMaluInstr")
+  BoringUtils.addSource(bru.io.out.fire(), "perfCntCondMbruInstr")
+  BoringUtils.addSource(lsu.io.out.fire(), "perfCntCondMlsuInstr")
+  BoringUtils.addSource(mdu.io.out.fire(), "perfCntCondMmduInstr")
+  BoringUtils.addSource(csr.io.out.fire(), "perfCntCondMcsrInstr")
 }

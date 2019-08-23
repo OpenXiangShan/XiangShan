@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
 import bus.axi4._
@@ -35,15 +36,13 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   val ifu = Module(new IFU)
   val idu = Module(new IDU)
   val isu = Module(new ISU)
-  val exu = Module(new EXU)
+  val exu = Module(new EXU(hasPerfCnt))
   val wbu = Module(new WBU)
 
   ifu.io.bpu1Update := exu.io.bpu1Update
 
-  val icacheHit = WireInit(false.B)
   io.imem <> (if (HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
-    icacheHit := icache.io.hit
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
@@ -80,68 +79,30 @@ class NOOP(hasPerfCnt: Boolean = false) extends Module with NOOPConfig with HasC
   isu.io.forward <> exu.io.forward
   exu.io.wbData := wbu.io.wb.rfWdata
 
-  val dcacheHit = WireInit(false.B)
   io.dmem <> (if (HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
-    dcacheHit := dcache.io.hit
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
     dcache.io.mem
   } else { exu.io.dmem.toAXI4() })
   io.mmio <> exu.io.mmio
 
-  // csr
-  val csr = Module(new CSR(hasPerfCnt))
-  csr.access(
-    valid = exu.io.csr.isCsr,
-    src1 = exu.io.in.bits.data.src1,
-    src2 = exu.io.in.bits.data.src2,
-    func = exu.io.in.bits.ctrl.fuOpType
-  )
-  exu.io.csr.in <> csr.io.out
-  exu.io.csrjmp <> csr.io.csrjmp
-  csr.io.pc := exu.io.in.bits.pc
-  csr.io.isInvOpcode := exu.io.in.bits.ctrl.isInvOpcode
-
-  // perfcnt
-  csr.io.perfCntCond.map( _ := false.B )
-  csr.setPerfCnt(Mcycle, true.B)
-  csr.setPerfCnt(Minstret, wbu.io.writeback)
-
-  if (hasPerfCnt) {
-    csr.setPerfCnt(MImemStall, ifu.io.imemStall)
-    // instruction types
-    csr.setPerfCnt(MALUInstr, exu.io.csr.instrType(FuAlu))
-    csr.setPerfCnt(MBRUInstr, exu.io.csr.instrType(FuBru))
-    csr.setPerfCnt(MLSUInstr, exu.io.csr.instrType(FuLsu))
-    csr.setPerfCnt(MMDUInstr, exu.io.csr.instrType(FuMdu))
-    csr.setPerfCnt(MCSRInstr, exu.io.csr.instrType(FuCsr))
-    // load/store before dcache
-    csr.setPerfCnt(MLoadInstr, exu.io.dmem.isRead() && exu.io.dmem.req.fire())
-    csr.setPerfCnt(MLoadStall, BoolStopWatch(exu.io.dmem.isRead(), exu.io.dmem.resp.fire()))
-    csr.setPerfCnt(MStoreStall, BoolStopWatch(exu.io.dmem.isWrite(), exu.io.dmem.resp.fire()))
-    // mmio
-    csr.setPerfCnt(MmmioInstr, io.mmio.req.fire())
-    // cache
-    csr.setPerfCnt(MIcacheHit, icacheHit)
-    csr.setPerfCnt(MDcacheHit, dcacheHit)
-    // mul
-    csr.setPerfCnt(MmulInstr, exu.io.csr.isMul)
-    // pipeline wait
-    csr.setPerfCnt(MIFUFlush, ifu.io.flushVec.orR())
-    csr.setPerfCnt(MRAWStall, isu.io.rawStall)
-    csr.setPerfCnt(MEXUBusy, isu.io.exuBusy)
-  }
-
   // monitor
   val mon = Module(new Monitor)
+  val nooptrap = exu.io.in.bits.ctrl.isNoopTrap && exu.io.in.valid
+  val cycleCnt = WireInit(0.U(32.W))
+  val instrCnt = WireInit(0.U(32.W))
   mon.io.clk := clock
-  mon.io.isNoopTrap := exu.io.in.bits.ctrl.isNoopTrap && exu.io.in.valid
+  mon.io.isNoopTrap := nooptrap
   mon.io.reset := reset.asBool
   mon.io.trapCode := exu.io.in.bits.data.src1
   mon.io.trapPC := exu.io.in.bits.pc
-  mon.io.cycleCnt := csr.io.sim.cycleCnt
-  mon.io.instrCnt := csr.io.sim.instrCnt
+  mon.io.cycleCnt := cycleCnt
+  mon.io.instrCnt := instrCnt
+
+  BoringUtils.addSink(cycleCnt, "simCycleCnt")
+  BoringUtils.addSink(instrCnt, "simInstrCnt")
+  BoringUtils.addSource(nooptrap, "nooptrap")
 
   // difftest
   // latch writeback signal to let register files and pc update

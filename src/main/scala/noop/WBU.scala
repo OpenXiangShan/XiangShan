@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 class WBU extends Module {
   val io = IO(new Bundle {
@@ -20,4 +21,5 @@ class WBU extends Module {
   io.brOut.isTaken := io.in.bits.br.isTaken && io.in.valid && (io.in.bits.br.target =/= io.in.bits.npc)
 
   io.writeback := io.in.valid
+  BoringUtils.addSource(io.in.valid, "perfCntCondMinstret")
 }
