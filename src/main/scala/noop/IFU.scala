@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
 import utils._
-import bus.simplebus.SimpleBus
+import bus.simplebus._
 
 trait HasResetVector {
   val resetVector = 0x80100000L
@@ -48,7 +48,7 @@ class IFU extends Module with HasResetVector {
   io.imem.req.valid := io.out.ready
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
-  io.imem.req.bits.wen := false.B
+  io.imem.req.bits.cmd := SimpleBusCmd.cmdRead
   io.imem.req.bits.user.map(_ := npc)
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 

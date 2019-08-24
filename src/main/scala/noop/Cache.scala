@@ -74,7 +74,7 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
     val s2s3Miss = Input(Bool())
   })
 
-  if (ro) when (io.in.fire()) { assert(!io.in.bits.wen) }
+  if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
 
   // read meta array and data array
   List(io.metaReadBus, io.dataReadBus).map { case x => {
@@ -87,8 +87,8 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   val (addr, s2addr, s3addr) = (io.in.bits.addr, io.s2Req.bits.addr, io.s3Req.bits.addr)
   // set conflict will evict the dirty line, so we should wait
   // the victim line to be up-to-date, else we may writeback staled data
-  val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, addr) && io.s2Req.bits.wen
-  val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, addr) && io.s3Req.bits.wen
+  val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, addr) && io.s2Req.bits.isWrite()
+  val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, addr) && io.s3Req.bits.isWrite()
   val stall = s2WriteSetConflict || s3WriteSetConflict
   io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaReadBus.req.ready && io.dataReadBus.req.ready
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
@@ -146,7 +146,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
 
-  val wen = if (ro) false.B else req.wen
+  val wen = if (ro) false.B else req.isWrite()
   val wmaskExpand = maskExpand(req.wmask)
   val wordMask = Mux(wen, wmaskExpand, 0.U(32.W))
 

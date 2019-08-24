@@ -48,12 +48,12 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
   val awAck = BoolStopWatch(axi.aw.fire(), wSend)
   val wAck = BoolStopWatch(axi.w.fire(), wSend)
   wSend := (axi.aw.fire() && axi.w.fire()) || (awAck && wAck)
-  val wen = RegEnable(mem.req.bits.wen, mem.req.fire())
+  val wen = RegEnable(mem.req.bits.isWrite(), mem.req.fire())
 
   axi.ar.valid := mem.isRead()
   axi.aw.valid := mem.isWrite() && !awAck
   axi.w .valid := mem.isWrite() && !wAck
-  mem.req.ready  := Mux(mem.req.bits.wen, wSend, axi.ar.ready)
+  mem.req.ready  := Mux(mem.req.bits.isWrite(), wSend, axi.ar.ready)
 
   axi.r.ready  := mem.resp.ready
   axi.b.ready  := mem.resp.ready

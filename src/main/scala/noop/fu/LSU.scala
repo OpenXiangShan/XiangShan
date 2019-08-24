@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
 import utils._
-import bus.simplebus.SimpleBus
+import bus.simplebus._
 
 object LSUOpType {
   def lb   = "b0000".U
@@ -100,7 +100,7 @@ class LSU extends Module {
   dmem.req.bits.addr := addr
   dmem.req.bits.size := func(1, 0)
   dmem.req.valid := valid && (state === s_idle) && !mmio
-  dmem.req.bits.wen := isStore
+  dmem.req.bits.cmd := Mux(isStore, SimpleBusCmd.cmdWrite, SimpleBusCmd.cmdRead)
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
   dmem.req.bits.wmask := genWmask(addr, func(1, 0))
   dmem.resp.ready := true.B
