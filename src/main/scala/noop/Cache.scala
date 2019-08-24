@@ -55,7 +55,7 @@ sealed class MetaReadRespIO extends Bundle with HasCacheConst {
 }
 
 sealed class MetaReadBus extends Bundle {
-  val req = new MetaReadReqIO
+  val req = Valid(new MetaReadReqIO)
   val resp = Flipped(new MetaReadRespIO)
 }
 
@@ -73,7 +73,7 @@ sealed class MetaArray extends Module with HasCacheConst {
     val finishReset = Output(Bool())
   })
 
-  val array = Mem(Sets, UInt((new MetaBundle).getWidth.W))
+  val array = SyncReadMem(Sets, UInt((new MetaBundle).getWidth.W))
 
   // should reset meta.valid
   val resetState = RegInit(true.B)
@@ -85,7 +85,7 @@ sealed class MetaArray extends Module with HasCacheConst {
                 Mux(resetState, 0.U, io.write.req.bits.meta.asUInt))
   }
 
-  io.read.resp.meta := array.read(io.read.req.idx).asTypeOf(new MetaBundle)
+  io.read.resp.meta := array.read(io.read.req.bits.idx, io.read.req.valid).asTypeOf(new MetaBundle)
   io.finishReset := !resetState
 }
 
@@ -112,10 +112,9 @@ sealed class DataArray extends Module with HasCacheConst {
   val io = IO(new Bundle {
     val read = Flipped(new DataReadBus)
     val write = Flipped(new DataWriteBus)
-    val s2OutFire = Input(Bool())
   })
 
-  val array = Mem(Sets, chiselTypeOf(io.read.resp.data))
+  val array = SyncReadMem(Sets, chiselTypeOf(io.read.resp.data))
 
   val req = io.write.req.bits
   val dataBlock = wordShift(req.data, req.wordIndex, 32).asTypeOf(Vec(LineBeats, UInt(32.W)))
@@ -123,13 +122,12 @@ sealed class DataArray extends Module with HasCacheConst {
     array.write(req.idx, dataBlock, (1.U << req.wordIndex).toBools)
   }
 
-  io.read.resp.data := RegEnable(RegEnable(array.read(io.read.req.bits.idx), io.read.req.valid), io.s2OutFire)
+  io.read.resp.data := array.read(io.read.req.bits.idx, io.read.req.valid)
 }
 
 
 sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
   val req = new SimpleBusReqBundle(dataBits = dataBits, userBits = userBits)
-  val meta = new MetaReadRespIO
 
   override def cloneType = new Stage1IO(userBits).asInstanceOf[this.type]
 }
@@ -139,7 +137,7 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits, userBits)))
     val out = Decoupled(new Stage1IO(userBits))
-    val metaRead = new MetaReadBus
+    val metaReadReq = Valid(new MetaReadReqIO)
     val dataReadReq = Valid(new DataReadReqIO)
 
     val s2Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
@@ -152,9 +150,8 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   val idx = io.in.bits.addr.asTypeOf(addrBundle).index
 
   // read meta array
-  io.metaRead.req.idx := idx
-  io.out.bits.meta := io.metaRead.resp
-  if (ro) io.out.bits.meta.meta.dirty := false.B
+  io.metaReadReq.valid := io.out.fire()
+  io.metaReadReq.bits.idx := idx
 
   // read data array
   io.dataReadReq.valid := io.out.fire()
@@ -184,11 +181,12 @@ sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends M
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Stage1IO(userBits)))
     val out = Decoupled(new Stage2IO(userBits))
+    val metaReadResp = Flipped(new MetaReadRespIO)
   })
 
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(addrBundle)
-  val meta = io.in.bits.meta.meta
+  val meta = io.metaReadResp.meta
   val dirty = if (ro) false.B else meta.dirty
 
   io.out.bits.meta.hit := meta.valid && (meta.tag === addr.tag) && io.in.valid
@@ -385,12 +383,12 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   s1.io.s3Req.bits := s3.io.in.bits.req
   s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.meta.hit
 
-  metaArray.io.read <> s1.io.metaRead
+  metaArray.io.read.req <> s1.io.metaReadReq
   metaArray.io.write <> s3.io.metaWrite
   dataArray.io.read.req <> s1.io.dataReadReq
   dataArray.io.write <> s3.io.dataWrite
-  dataArray.io.s2OutFire := s2.io.out.fire()
-  s3.io.dataReadResp <> dataArray.io.read.resp
+  s2.io.metaReadResp <> metaArray.io.read.resp
+  s3.io.dataReadResp <> RegEnable(dataArray.io.read.resp, s2.io.out.fire())
   s1.io.metaFinishReset := metaArray.io.finishReset
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
