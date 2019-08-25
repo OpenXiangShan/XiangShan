@@ -9,7 +9,7 @@ import bus.axi4._
 import utils._
 
 sealed trait HasCacheConst {
-  val TotalSize = 16 // Kbytes
+  val TotalSize = 32 // Kbytes
   val LineSize = 32 // byte
   val LineBeats = LineSize / 4
   val Sets = TotalSize * 1024 / LineSize
