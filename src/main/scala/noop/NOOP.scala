@@ -39,8 +39,6 @@ class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
   val exu = Module(new EXU)
   val wbu = Module(new WBU)
 
-  ifu.io.bpu1Update := exu.io.bpu1Update
-
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     icache.io.in <> ifu.io.imem

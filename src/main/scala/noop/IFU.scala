@@ -17,7 +17,6 @@ class IFU extends Module with HasResetVector {
     val pc = Input(UInt(32.W))
     val out = Decoupled(new PcInstrIO)
     val br = Flipped(new BranchIO)
-    val bpu1Update = Input(new BRUIO)
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
   })
@@ -34,7 +33,6 @@ class IFU extends Module with HasResetVector {
 
   bp1.io.in.pc.valid := pcUpdate // only predict when pc is updated
   bp1.io.in.pc.bits := npc  // predict one cycle early
-  bp1.io.update := io.bpu1Update
 
   val bp2 = Module(new BPU2)
   bp2.io.in.bits := io.out.bits

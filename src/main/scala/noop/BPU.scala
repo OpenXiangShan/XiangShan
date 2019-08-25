@@ -20,17 +20,30 @@ class TableAddr(idxBits: Int) extends Bundle {
   override def cloneType = new TableAddr(idxBits).asInstanceOf[this.type]
 }
 
+object BTBtype {
+  def B = "b00".U  // branch
+  def J = "b01".U  // jump
+  def I = "b10".U  // indirect
+  def R = "b11".U  // return
+
+  def apply() = UInt(2.W)
+}
+
+class BPUUpdateReq extends Bundle {
+  val valid = Output(Bool())
+  val pc = Output(UInt(32.W))
+  val isMissPredict = Output(Bool())
+  val actualTarget = Output(UInt(32.W))
+  val actualTaken = Output(Bool())  // for branch
+  val fuOpType = Output(UInt(4.W))
+  val btbType = Output(BTBtype())
+}
+
 class BPU1 extends Module with HasBRUOpType {
   val io = IO(new Bundle {
     val in = new Bundle { val pc = Flipped(Valid((UInt(32.W)))) }
-    val update = Input(new BRUIO)
     val out = new BranchIO
   })
-
-  def btbTypeB = "b00".U  // branch
-  def btbTypeJ = "b01".U  // jump
-  def btbTypeI = "b10".U  // indirect
-  def btbTypeR = "b11".U  // return
 
   // BTB
   val NRbtb = 512
@@ -41,7 +54,7 @@ class BPU1 extends Module with HasBRUOpType {
     val target = UInt(32.W)
   }
 
-  val btb = Module(new ArrayTemplate(btbEntry, set = NRbtb, holdRead = true))
+  val btb = Module(new ArrayTemplate(btbEntry, set = NRbtb, holdRead = true, singlePort = true))
   btb.io.r.req.valid := io.in.pc.valid
   btb.io.r.req.idx := btbAddr.getIdx(io.in.pc.bits)
 
@@ -63,43 +76,39 @@ class BPU1 extends Module with HasBRUOpType {
   val sp = Counter(NRras)
   val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
 
-  val table = List(
-      BruJal  -> btbTypeJ,
-      BruCall -> btbTypeJ,
-      BruJalr -> btbTypeI,
-      BruRet  -> btbTypeR,
-      BruBeq  -> btbTypeB,
-      BruBne  -> btbTypeB,
-      BruBlt  -> btbTypeB,
-      BruBge  -> btbTypeB,
-      BruBltu -> btbTypeB,
-      BruBgeu -> btbTypeB
-  )
   // update
+  val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   val btbWrite = WireInit(0.U.asTypeOf(btbEntry))
-  btbWrite.tag := btbAddr.getTag(io.update.pc)
-  BoringUtils.addSink(btbWrite.target, "btbTarget")
-  btbWrite._type := LookupTree(io.update.in.bits.func, table)
-  btb.io.w.req.valid := io.update.in.valid
-  btb.io.w.req.idx := btbAddr.getIdx(io.update.pc)
+  BoringUtils.addSink(req, "bpuUpdateReq")
+  btbWrite.tag := btbAddr.getTag(req.pc)
+  btbWrite.target := req.actualTarget
+  btbWrite._type := req.btbType
+  // NOTE: We only update BTB at a miss prediction.
+  // If a miss prediction is found, the pipeline will be flushed
+  // in the next cycle. Therefore it is safe to use single-port
+  // SRAM to implement BTB, since write requests have higher priority
+  // than read request. Again, since the pipeline will be flushed
+  // in the next cycle, the read request will be useless.
+  btb.io.w.req.valid := req.isMissPredict && req.valid
+  btb.io.w.req.idx := btbAddr.getIdx(req.pc)
   btb.io.w.wordIndex := 0.U // ???
   btb.io.w.entry := btbWrite
 
-  when (io.update.in.valid) {
-    when (isBranch(io.update.in.bits.func)) {
-      dpt.write(btbAddr.getIdx(io.update.pc), io.update.offset(31))
+  when (req.valid) {
+    when (isBranch(req.fuOpType)) {
+      dpt.write(btbAddr.getIdx(req.pc), req.actualTaken)
     }
-    when (io.update.in.bits.func === BruCall) {
-      ras.write(sp.value + 1.U, io.update.pc + 4.U)
+    when (req.fuOpType === BruCall) {
+      ras.write(sp.value + 1.U, req.pc + 4.U)
       sp.value := sp.value + 1.U
     }
-    .elsewhen (io.update.in.bits.func === BruRet) {
+    .elsewhen (req.fuOpType === BruRet) {
       sp.value := sp.value - 1.U
     }
   }
 
-  io.out.target := Mux(btbRead._type === btbTypeR, rasTarget, btbRead.target)
-  io.out.isTaken := btbHit && Mux(btbRead._type === btbTypeB, dptTaken, true.B)
+  io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
+  io.out.isTaken := btbHit && Mux(btbRead._type === BTBtype.B, dptTaken, true.B)
 }
 
 class BPU2 extends Module {
