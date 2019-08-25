@@ -58,7 +58,6 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   csr.io.out.ready := true.B
 
   io.out.bits.br <> Mux(csr.io.csrjmp.isTaken, csr.io.csrjmp, bru.io.branch)
-  io.out.bits.npc := io.in.bits.npc
 
   io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>

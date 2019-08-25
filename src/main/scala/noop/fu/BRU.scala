@@ -93,8 +93,7 @@ class BRU extends Module with HasBRUOpType {
   val target = Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
   io.branch.target := Mux(!taken && isBranch(func), io.pc + 4.U, target)
   // with branch predictor, this is actually to fix the wrong prediction
-  // to improve timing, we move the prediction checking to WBU statge
-  io.branch.isTaken := valid
+  io.branch.isTaken := valid && (io.branch.target =/= io.npc)
   io.out.bits := io.pc + 4.U
 
   io.in.ready := true.B
