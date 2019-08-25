@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
@@ -70,16 +71,16 @@ class BRU extends Module with HasBRUOpType {
   def xorBool(a: Bool, b: Bool): Bool = (a.asUInt ^ b.asUInt).toBool
 
   val table = List(
-    BruBeq  -> ((src1 === src2), io.offset(31)),
-    BruBne  -> ((src1 =/= src2), io.offset(31)),
-    BruBlt  -> ((src1.asSInt  <  src2.asSInt), io.offset(31)),
-    BruBge  -> ((src1.asSInt >=  src2.asSInt), io.offset(31)),
-    BruBltu -> ((src1  <  src2), io.offset(31)),
-    BruBgeu -> ((src1  >= src2), io.offset(31)),
-    BruCall -> (true.B, true.B),
-    BruRet  -> (true.B, false.B),
-    BruJal  -> (true.B, true.B),
-    BruJalr -> (true.B, false.B)
+    BruBeq  -> ((src1 === src2),               io.offset(31), BTBtype.B),
+    BruBne  -> ((src1 =/= src2),               io.offset(31), BTBtype.B),
+    BruBlt  -> ((src1.asSInt  <  src2.asSInt), io.offset(31), BTBtype.B),
+    BruBge  -> ((src1.asSInt >=  src2.asSInt), io.offset(31), BTBtype.B),
+    BruBltu -> ((src1  <  src2),               io.offset(31), BTBtype.B),
+    BruBgeu -> ((src1  >= src2),               io.offset(31), BTBtype.B),
+    BruCall -> (true.B,                        true.B,        BTBtype.J),
+    BruRet  -> (true.B,                        false.B,       BTBtype.R),
+    BruJal  -> (true.B,                        true.B,        BTBtype.J),
+    BruJalr -> (true.B,                        false.B,       BTBtype.I)
   )
   val taken = LookupTree(func, false.B, table.map(x => (x._1, x._2._1)))
   io.branch.target := Mux(func === BruJalr || func === BruRet,
@@ -91,4 +92,26 @@ class BRU extends Module with HasBRUOpType {
 
   io.in.ready := true.B
   io.out.valid := valid
+
+  val bpuUpdateReq = WireInit(0.U.asTypeOf(new BPUUpdateReq))
+  bpuUpdateReq.valid := valid
+  bpuUpdateReq.pc := io.pc
+  bpuUpdateReq.isMissPredict := io.branch.target =/= io.npc
+  bpuUpdateReq.actualTarget := Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
+  bpuUpdateReq.actualTaken := io.offset(31) // currently we use static prediction for branch
+  bpuUpdateReq.fuOpType := func
+  bpuUpdateReq.btbType := LookupTree(func, table.map(x => (x._1, x._2._3)))
+
+  BoringUtils.addSource(bpuUpdateReq, "bpuUpdateReq")
+
+  val right = valid && (io.npc === io.branch.target)
+  val wrong = valid && (io.npc =/= io.branch.target)
+  BoringUtils.addSource(right && isBranch(func), "MbpBRight")
+  BoringUtils.addSource(wrong && isBranch(func), "MbpBWrong")
+  BoringUtils.addSource(right && (func === BruJal || func === BruCall), "MbpJRight")
+  BoringUtils.addSource(wrong && (func === BruJal || func === BruCall), "MbpJWrong")
+  BoringUtils.addSource(right && func === BruJalr, "MbpIRight")
+  BoringUtils.addSource(wrong && func === BruJalr, "MbpIWrong")
+  BoringUtils.addSource(right && func === BruRet, "MbpRRight")
+  BoringUtils.addSource(wrong && func === BruRet, "MbpRWrong")
 }
