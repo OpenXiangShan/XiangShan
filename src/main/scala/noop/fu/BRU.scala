@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
@@ -91,4 +92,7 @@ class BRU extends Module with HasBRUOpType {
 
   io.in.ready := true.B
   io.out.valid := valid
+
+  val btbTarget = Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
+  BoringUtils.addSource(btbTarget, "btbTarget")
 }
