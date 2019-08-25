@@ -24,7 +24,8 @@ class ArrayWriteBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
   override def cloneType = new ArrayWriteBus(gen, set, way).asInstanceOf[this.type]
 }
 
-class ArrayTemplate[T <: Data](gen: T, set: Int, way: Int = 1, shouldReset: Boolean = false) extends Module {
+class ArrayTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
+  shouldReset: Boolean = false, holdRead: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val r = Flipped(new ArrayReadBus(gen, set, way))
     val w = Flipped(new ArrayWriteBus(gen, set, way))
@@ -53,7 +54,8 @@ class ArrayTemplate[T <: Data](gen: T, set: Int, way: Int = 1, shouldReset: Bool
 
   when (io.w.req.valid || resetState) { array.write(idx, wdata, wmask) }
 
-  val rdata = array.read(io.r.req.idx, io.r.req.valid).map(_.asTypeOf(gen))
+  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.idx, io.r.req.valid)
+              else array.read(io.r.req.idx, io.r.req.valid)).map(_.asTypeOf(gen))
   io.r.entry := (if (way > 1) VecInit(rdata) else rdata(0))
   io.finishReset := !resetState
 }

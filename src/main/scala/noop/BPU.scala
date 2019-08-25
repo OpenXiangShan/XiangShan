@@ -41,20 +41,27 @@ class BPU1 extends Module with HasBRUOpType {
     val target = UInt(32.W)
   }
 
-  val btb = Mem(NRbtb, btbEntry)
-  val btbRead = btb.read(btbAddr.getIdx(io.in.pc.bits))
-  val btbHit = btbRead.tag === btbAddr.getTag(io.in.pc.bits)
+  val btb = Module(new ArrayTemplate(btbEntry, set = NRbtb, holdRead = true))
+  btb.io.r.req.valid := io.in.pc.valid
+  btb.io.r.req.idx := btbAddr.getIdx(io.in.pc.bits)
 
-  // prediction table for branch
-  val pt = Reg(Vec(NRbtb, Bool()))
-  val ptTaken = pt(btbAddr.getIdx(io.in.pc.bits))
+  val btbRead = Wire(btbEntry)
+  btbRead := btb.io.r.entry
+  // since there is one cycle latency to read SyncReadMem,
+  // we should latch the input pc for one cycle
+  val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch)
+
+  // direction prediction table for branch
+  val dpt = Mem(NRbtb, Bool())
+  val dptTaken = dpt.read(btbAddr.getIdx(pcLatch))
 
   // RAS
 
   val NRras = 16
   val ras = Mem(NRras, UInt(32.W))
   val sp = Counter(NRras)
-  val rasTarget = ras.read(sp.value)
+  val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
 
   val table = List(
       BruJal  -> btbTypeJ,
@@ -69,17 +76,19 @@ class BPU1 extends Module with HasBRUOpType {
       BruBgeu -> btbTypeB
   )
   // update
+  val btbWrite = WireInit(0.U.asTypeOf(btbEntry))
+  btbWrite.tag := btbAddr.getTag(io.update.pc)
+  BoringUtils.addSink(btbWrite.target, "btbTarget")
+  btbWrite._type := LookupTree(io.update.in.bits.func, table)
+  btb.io.w.req.valid := io.update.in.valid
+  btb.io.w.req.idx := btbAddr.getIdx(io.update.pc)
+  btb.io.w.wordIndex := 0.U // ???
+  btb.io.w.entry := btbWrite
+
   when (io.update.in.valid) {
-    val btbWrite = WireInit(0.U.asTypeOf(btbEntry))
-    btbWrite.tag := btbAddr.getTag(io.update.pc)
-    BoringUtils.addSink(btbWrite.target, "btbTarget")
-    btbWrite._type := LookupTree(io.update.in.bits.func, table)
-    btb.write(btbAddr.getIdx(io.update.pc), btbWrite)
-
     when (isBranch(io.update.in.bits.func)) {
-      pt(btbAddr.getIdx(io.update.pc)) := io.update.offset(31)
+      dpt.write(btbAddr.getIdx(io.update.pc), io.update.offset(31))
     }
-
     when (io.update.in.bits.func === BruCall) {
       ras.write(sp.value + 1.U, io.update.pc + 4.U)
       sp.value := sp.value + 1.U
@@ -89,8 +98,8 @@ class BPU1 extends Module with HasBRUOpType {
     }
   }
 
-  io.out.target := RegEnable(Mux(btbRead._type === btbTypeR, rasTarget, btbRead.target), io.in.pc.valid)
-  io.out.isTaken := RegEnable(btbHit && Mux(btbRead._type === btbTypeB, ptTaken, true.B), init = false.B, io.in.pc.valid)
+  io.out.target := Mux(btbRead._type === btbTypeR, rasTarget, btbRead.target)
+  io.out.isTaken := btbHit && Mux(btbRead._type === btbTypeB, dptTaken, true.B)
 }
 
 class BPU2 extends Module {
