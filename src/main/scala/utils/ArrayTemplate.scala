@@ -60,5 +60,5 @@ class ArrayTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val rdata = (if (holdRead) ReadAndHold(array, io.r.req.idx, realRen)
               else array.read(io.r.req.idx, realRen)).map(_.asTypeOf(gen))
   io.r.entry := (if (way > 1) VecInit(rdata) else rdata(0))
-  io.r.resp := (if (singlePort) ren && wen else resetState)
+  io.r.resp := resetState || (if (singlePort) ren && wen else true.B)
 }
