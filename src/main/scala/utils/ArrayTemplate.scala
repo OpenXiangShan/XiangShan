@@ -11,10 +11,10 @@ class ArrayReqBus(set: Int) extends Bundle {
 class ArrayReadBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
   val req = new ArrayReqBus(set)
   val entry = if (way > 1) Input(Vec(way, gen)) else Input(gen)
-  val resp = Input(Bool())  // false.B means read OK
+  // may be delayed by a write request
+  val ready = Input(Bool())
 
   override def cloneType = new ArrayReadBus(gen, set, way).asInstanceOf[this.type]
-  def isRrespOk() = resp === false.B
 }
 
 class ArrayWriteBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
@@ -60,5 +60,5 @@ class ArrayTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   val rdata = (if (holdRead) ReadAndHold(array, io.r.req.idx, realRen)
               else array.read(io.r.req.idx, realRen)).map(_.asTypeOf(gen))
   io.r.entry := (if (way > 1) VecInit(rdata) else rdata(0))
-  io.r.resp := resetState || (if (singlePort) ren && wen else true.B)
+  io.r.ready := !resetState && (if (singlePort) !wen else true.B)
 }
