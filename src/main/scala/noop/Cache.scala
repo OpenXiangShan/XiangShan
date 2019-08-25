@@ -70,14 +70,14 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
     val s2Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
     val s3Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
     val s2s3Miss = Input(Bool())
-    val metaFinishReset = Input(Bool())
+    val metaReadOk = Input(Bool())
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.wen) }
 
   // read meta array and data array
   List(io.metaReadReq, io.dataReadReq).map { case x => {
-    x.valid := io.out.fire()
+    x.valid := io.in.valid && io.out.ready
     x.idx := io.in.bits.addr.asTypeOf(addrBundle).index
   }}
 
@@ -89,8 +89,8 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, addr) && io.s2Req.bits.wen
   val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, addr) && io.s3Req.bits.wen
   val stall = s2WriteSetConflict || s3WriteSetConflict
-  io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaFinishReset
-  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaFinishReset
+  io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaReadOk
+  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadOk
 }
 
 sealed class Stage2IO(userBits: Int = 0) extends Bundle with HasCacheConst {
@@ -288,7 +288,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   val s1 = Module(new CacheStage1(ro, name, userBits))
   val s2 = Module(new CacheStage2(ro, name, userBits))
   val s3 = Module(new CacheStage3(ro, name, userBits))
-  val metaArray = Module(new ArrayTemplate(new MetaBundle, set = Sets, shouldReset = true))
+  val metaArray = Module(new ArrayTemplate(new MetaBundle, set = Sets, shouldReset = true, singlePort = true))
   val dataArray = Module(new ArrayTemplate(new DataBundle, set = Sets, way = LineBeats, shouldReset = true))
 
   s1.io.in <> io.in.req
@@ -313,7 +313,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   dataArray.io.w <> s3.io.dataWriteReq
   s2.io.metaReadResp <> metaArray.io.r.entry
   s3.io.dataReadResp <> RegEnable(dataArray.io.r.entry, s2.io.out.fire())
-  s1.io.metaFinishReset := metaArray.io.finishReset
+  s1.io.metaReadOk := metaArray.io.r.isRrespOk()
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 
