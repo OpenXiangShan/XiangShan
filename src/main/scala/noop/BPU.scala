@@ -67,7 +67,7 @@ class BPU1 extends Module with HasBRUOpType {
 
   // direction prediction table for branch
   val dpt = Mem(NRbtb, Bool())
-  val dptTaken = dpt.read(btbAddr.getIdx(pcLatch))
+  val dptTaken = RegEnable(dpt.read(btbAddr.getIdx(io.in.pc.bits)), io.in.pc.valid)
 
   // RAS
 
@@ -94,10 +94,11 @@ class BPU1 extends Module with HasBRUOpType {
   btb.io.w.wordIndex := 0.U // ???
   btb.io.w.entry := btbWrite
 
+  val reqLatch = RegNext(req)
+  when (reqLatch.valid && isBranch(reqLatch.fuOpType)) {
+    dpt.write(btbAddr.getIdx(reqLatch.pc), reqLatch.actualTaken)
+  }
   when (req.valid) {
-    when (isBranch(req.fuOpType)) {
-      dpt.write(btbAddr.getIdx(req.pc), req.actualTaken)
-    }
     when (req.fuOpType === BruCall) {
       ras.write(sp.value + 1.U, req.pc + 4.U)
       sp.value := sp.value + 1.U
