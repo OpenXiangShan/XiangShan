@@ -95,4 +95,15 @@ class BRU extends Module with HasBRUOpType {
 
   val btbTarget = Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
   BoringUtils.addSource(btbTarget, "btbTarget")
+
+  val right = valid && (io.npc === io.branch.target)
+  val wrong = valid && (io.npc =/= io.branch.target)
+  BoringUtils.addSource(right && isBranch(func), "MbpBRight")
+  BoringUtils.addSource(wrong && isBranch(func), "MbpBWrong")
+  BoringUtils.addSource(right && (func === BruJal || func === BruCall), "MbpJRight")
+  BoringUtils.addSource(wrong && (func === BruJal || func === BruCall), "MbpJWrong")
+  BoringUtils.addSource(right && func === BruJalr, "MbpIRight")
+  BoringUtils.addSource(wrong && func === BruJalr, "MbpIWrong")
+  BoringUtils.addSource(right && func === BruRet, "MbpRRight")
+  BoringUtils.addSource(wrong && func === BruRet, "MbpRWrong")
 }

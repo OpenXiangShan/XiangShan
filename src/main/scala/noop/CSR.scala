@@ -135,7 +135,15 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasC
     "MmulInstr"   -> (0xb0f, "perfCntCondMmulInstr"  ),
     "MifuFlush"   -> (0xb10, "perfCntCondMifuFlush"  ),
     "MrawStall"   -> (0xb11, "perfCntCondMrawStall"  ),
-    "MexuBusy"    -> (0xb11, "perfCntCondMexuBusy"   )
+    "MexuBusy"    -> (0xb12, "perfCntCondMexuBusy"   ),
+    "MbpBRight"   -> (0xb13, "MbpBRight"             ),
+    "MbpBWrong"   -> (0xb14, "MbpBWrong"             ),
+    "MbpJRight"   -> (0xb15, "MbpJRight"             ),
+    "MbpJWrong"   -> (0xb16, "MbpJWrong"             ),
+    "MbpIRight"   -> (0xb17, "MbpIRight"             ),
+    "MbpIWrong"   -> (0xb18, "MbpIWrong"             ),
+    "MbpRRight"   -> (0xb19, "MbpRRight"             ),
+    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             )
   )
 
   val perfCntCond = List.fill(0x80)(WireInit(false.B))
