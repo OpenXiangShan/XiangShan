@@ -98,7 +98,7 @@ class BRU extends Module with HasBRUOpType {
   bpuUpdateReq.pc := io.pc
   bpuUpdateReq.isMissPredict := io.branch.target =/= io.npc
   bpuUpdateReq.actualTarget := Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
-  bpuUpdateReq.actualTaken := io.offset(31) // currently we use static prediction for branch
+  bpuUpdateReq.actualTaken := taken
   bpuUpdateReq.fuOpType := func
   bpuUpdateReq.btbType := LookupTree(func, table.map(x => (x._1, x._2._3)))
 
