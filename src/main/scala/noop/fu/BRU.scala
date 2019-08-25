@@ -10,7 +10,7 @@ trait HasBRUOpType {
   val BruOpTypeNum  = 10
 
   def BruJal  = "b1000".U
-  def BruJalr = "b1001".U
+  def BruJalr = "b1010".U
   def BruBeq  = "b0000".U
   def BruBne  = "b0001".U
   def BruBlt  = "b0100".U
@@ -20,9 +20,11 @@ trait HasBRUOpType {
 
   // for RAS
   def BruCall = "b1100".U
-  def BruRet  = "b1101".U
+  def BruRet  = "b1110".U
 
   def isBranch(func: UInt) = !func(3)
+  def getBranchType(func: UInt) = func(2, 1)
+  def isBranchInvert(func: UInt) = func(0)
 }
 
 object BRUInstr extends HasDecodeConst {
@@ -47,6 +49,19 @@ object BRUInstr extends HasDecodeConst {
     BLTU           -> List(InstrB, FuBru, BruBltu),
     BGEU           -> List(InstrB, FuBru, BruBgeu)
   )
+
+  val bruFuncTobtbTypeTable = List(
+    BruBeq  -> BTBtype.B,
+    BruBne  -> BTBtype.B,
+    BruBlt  -> BTBtype.B,
+    BruBge  -> BTBtype.B,
+    BruBltu -> BTBtype.B,
+    BruBgeu -> BTBtype.B,
+    BruCall -> BTBtype.J,
+    BruRet  -> BTBtype.R,
+    BruJal  -> BTBtype.J,
+    BruJalr -> BTBtype.I
+  )
 }
 
 class BRUIO extends FunctionUnitIO {
@@ -68,23 +83,15 @@ class BRU extends Module with HasBRUOpType {
     io.out.bits
   }
 
-  def xorBool(a: Bool, b: Bool): Bool = (a.asUInt ^ b.asUInt).toBool
-
-  val table = List(
-    BruBeq  -> ((src1 === src2),               io.offset(31), BTBtype.B),
-    BruBne  -> ((src1 =/= src2),               io.offset(31), BTBtype.B),
-    BruBlt  -> ((src1.asSInt  <  src2.asSInt), io.offset(31), BTBtype.B),
-    BruBge  -> ((src1.asSInt >=  src2.asSInt), io.offset(31), BTBtype.B),
-    BruBltu -> ((src1  <  src2),               io.offset(31), BTBtype.B),
-    BruBgeu -> ((src1  >= src2),               io.offset(31), BTBtype.B),
-    BruCall -> (true.B,                        true.B,        BTBtype.J),
-    BruRet  -> (true.B,                        false.B,       BTBtype.R),
-    BruJal  -> (true.B,                        true.B,        BTBtype.J),
-    BruJalr -> (true.B,                        false.B,       BTBtype.I)
+  val branchOpTable = List(
+    getBranchType(BruBeq)  -> (src1 === src2),
+    getBranchType(BruBlt)  -> (src1.asSInt < src2.asSInt),
+    getBranchType(BruBltu) -> (src1 < src2)
   )
-  val taken = LookupTree(func, false.B, table.map(x => (x._1, x._2._1)))
-  io.branch.target := Mux(func === BruJalr || func === BruRet,
-    src1 + io.offset, io.pc + Mux(taken, io.offset, 4.U))
+
+  val taken = LookupTree(getBranchType(func), false.B, branchOpTable) ^ isBranchInvert(func)
+  val target = Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
+  io.branch.target := Mux(!taken && isBranch(func), io.pc + 4.U, target)
   // with branch predictor, this is actually to fix the wrong prediction
   // to improve timing, we move the prediction checking to WBU statge
   io.branch.isTaken := valid
@@ -97,10 +104,10 @@ class BRU extends Module with HasBRUOpType {
   bpuUpdateReq.valid := valid
   bpuUpdateReq.pc := io.pc
   bpuUpdateReq.isMissPredict := io.branch.target =/= io.npc
-  bpuUpdateReq.actualTarget := Mux(func === BruJalr || func === BruRet, src1, io.pc) + io.offset
+  bpuUpdateReq.actualTarget := target
   bpuUpdateReq.actualTaken := taken
   bpuUpdateReq.fuOpType := func
-  bpuUpdateReq.btbType := LookupTree(func, table.map(x => (x._1, x._2._3)))
+  bpuUpdateReq.btbType := LookupTree(func, BRUInstr.bruFuncTobtbTypeTable)
 
   BoringUtils.addSource(bpuUpdateReq, "bpuUpdateReq")
 
