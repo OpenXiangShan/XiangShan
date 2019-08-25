@@ -29,9 +29,9 @@ class IFU extends Module with HasResetVector {
   val bp1 = Module(new BPU1)
   // predicted next pc
   val pnpc = bp1.io.out.target
-  val npc = Mux(io.br.isTaken, io.br.target, Mux(bp1.io.out.isTaken, pnpc, snpc))
+  val npc = Mux(io.br.isTaken, io.br.target, Mux(bp1.io.out.isTaken && !RegNext(io.br.isTaken), pnpc, snpc))
 
-  bp1.io.in.pc.valid := pcUpdate // only predict when pc is updated
+  bp1.io.in.pc.valid := io.imem.req.fire() // only predict when Icache accepts a request
   bp1.io.in.pc.bits := npc  // predict one cycle early
 
   val bp2 = Module(new BPU2)

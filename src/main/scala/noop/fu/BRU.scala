@@ -109,7 +109,7 @@ class BRU extends Module with HasBRUOpType {
   bpuUpdateReq.fuOpType := func
   bpuUpdateReq.btbType := LookupTree(func, BRUInstr.bruFuncTobtbTypeTable)
 
-  BoringUtils.addSource(bpuUpdateReq, "bpuUpdateReq")
+  BoringUtils.addSource(RegNext(bpuUpdateReq), "bpuUpdateReq")
 
   val right = valid && (io.npc === io.branch.target)
   val wrong = valid && (io.npc =/= io.branch.target)

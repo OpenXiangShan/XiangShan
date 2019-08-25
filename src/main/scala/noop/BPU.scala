@@ -80,6 +80,7 @@ class BPU1 extends Module with HasBRUOpType {
   val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   val btbWrite = WireInit(0.U.asTypeOf(btbEntry))
   BoringUtils.addSink(req, "bpuUpdateReq")
+
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
   btbWrite._type := req.btbType
@@ -94,9 +95,8 @@ class BPU1 extends Module with HasBRUOpType {
   btb.io.w.wordIndex := 0.U // ???
   btb.io.w.entry := btbWrite
 
-  val reqLatch = RegNext(req)
-  when (reqLatch.valid && isBranch(reqLatch.fuOpType)) {
-    pht.write(btbAddr.getIdx(reqLatch.pc), reqLatch.actualTaken)
+  when (req.valid && isBranch(req.fuOpType)) {
+    pht.write(btbAddr.getIdx(req.pc), req.actualTaken)
   }
   when (req.valid) {
     when (req.fuOpType === BruCall) {
