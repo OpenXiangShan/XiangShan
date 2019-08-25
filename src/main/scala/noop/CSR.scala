@@ -170,7 +170,8 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasC
     // display all perfcnt when nooptrap is executed
     when (nooptrap) {
       printf("======== PerfCnt =========\n")
-      perfCntList.map { case (name, (addr, boringId)) => printf("%d <- " + name + "\n", readWithScala(addr)) }
+      perfCntList.toSeq.sortBy(_._2._1).map { case (name, (addr, boringId)) =>
+        printf("%d <- " + name + "\n", readWithScala(addr)) }
     }
   }
 }
