@@ -66,8 +66,8 @@ class BPU1 extends Module with HasBRUOpType {
   val btbHit = btbRead.tag === btbAddr.getTag(pcLatch)
 
   // PHT
-  val pht = Mem(NRbtb, Bool())
-  val phtTaken = RegEnable(pht.read(btbAddr.getIdx(io.in.pc.bits)), io.in.pc.valid)
+  val pht = Mem(NRbtb, UInt(2.W))
+  val phtTaken = RegEnable(pht.read(btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
 
   // RAS
 
@@ -95,8 +95,15 @@ class BPU1 extends Module with HasBRUOpType {
   btb.io.w.wordIndex := 0.U // ???
   btb.io.w.entry := btbWrite
 
-  when (req.valid && isBranch(req.fuOpType)) {
-    pht.write(btbAddr.getIdx(req.pc), req.actualTaken)
+  val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
+  val reqLatch = RegNext(req)
+  when (reqLatch.valid && isBranch(reqLatch.fuOpType)) {
+    val taken = reqLatch.actualTaken
+    val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
+    val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
+    when (wen) {
+      pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
+    }
   }
   when (req.valid) {
     when (req.fuOpType === BruCall) {
