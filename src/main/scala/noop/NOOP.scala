@@ -26,7 +26,7 @@ object AddressSpace {
   def isMMIO(addr: UInt) = addr(31,28) === "h4".U
 }
 
-class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
+class NOOP(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
     val imem = new AXI4
     val dmem = new AXI4
@@ -38,14 +38,6 @@ class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
   val isu = Module(new ISU)
   val exu = Module(new EXU)
   val wbu = Module(new WBU)
-
-  io.imem <> (if (p.HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
-    icache.io.in <> ifu.io.imem
-    icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
-    ifu.io.pc := icache.io.addr
-    icache.io.mem
-  } else { ifu.io.imem.toAXI4() })
 
   def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
     isFlush: Bool, entries: Int = 2, pipe: Boolean = false) = {
@@ -76,6 +68,14 @@ class NOOP(implicit val p: NOOPConfig) extends Module with HasFuType {
   // forward
   isu.io.forward <> exu.io.forward
   exu.io.wbData := wbu.io.wb.rfWdata
+
+  io.imem <> (if (p.HasIcache) {
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
+    icache.io.in <> ifu.io.imem
+    icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
+    ifu.io.pc := icache.io.addr
+    icache.io.mem
+  } else { ifu.io.imem.toAXI4() })
 
   io.dmem <> (if (p.HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))

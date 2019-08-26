@@ -24,7 +24,7 @@ class ScoreBoard {
   }
 }
 
-class ISU(implicit val p: NOOPConfig) extends Module with HasSrcType with HasFuType {
+class ISU(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled(new PcCtrlDataIO)
@@ -41,7 +41,7 @@ class ISU(implicit val p: NOOPConfig) extends Module with HasSrcType with HasFuT
   def isDepend(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
   val forwardRfWen = io.forward.rfWen && io.forward.valid
-  val dontForward = (io.forward.fuType =/= FuAlu) && (io.forward.fuType =/= FuLsu)
+  val dontForward = (io.forward.fuType =/= FuType.alu) && (io.forward.fuType =/= FuType.lsu)
   val src1DependEX = isDepend(rfSrc1, io.forward.rfDest, forwardRfWen)
   val src2DependEX = isDepend(rfSrc2, io.forward.rfDest, forwardRfWen)
   val src1DependWB = isDepend(rfSrc1, io.wb.rfDest, io.wb.rfWen)
@@ -59,16 +59,16 @@ class ISU(implicit val p: NOOPConfig) extends Module with HasSrcType with HasFuT
 
   val rf = new RegFile
   io.out.bits.data.src1 := Mux1H(List(
-    (io.in.bits.ctrl.src1Type === Src1Pc) -> io.in.bits.pc,
+    (io.in.bits.ctrl.src1Type === SrcType.pc) -> io.in.bits.pc,
     src1ForwardNextCycle -> io.forward.rfData,
     (src1Forward && !src1ForwardNextCycle) -> io.wb.rfWdata,
-    ((io.in.bits.ctrl.src1Type =/= Src1Pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
+    ((io.in.bits.ctrl.src1Type =/= SrcType.pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
   ))
   io.out.bits.data.src2 := Mux1H(List(
-    (io.in.bits.ctrl.src2Type =/= Src2Reg) -> io.in.bits.data.imm,
+    (io.in.bits.ctrl.src2Type =/= SrcType.reg) -> io.in.bits.data.imm,
     src2ForwardNextCycle -> io.forward.rfData,
     (src2Forward && !src2ForwardNextCycle) -> io.wb.rfWdata,
-    ((io.in.bits.ctrl.src2Type === Src2Reg) && !src2ForwardNextCycle && !src2Forward) -> rf.read(rfSrc2)
+    ((io.in.bits.ctrl.src2Type === SrcType.reg) && !src2ForwardNextCycle && !src2Forward) -> rf.read(rfSrc2)
   ))
   io.out.bits.data.imm  := io.in.bits.data.imm
   io.out.bits.data.dest := DontCare

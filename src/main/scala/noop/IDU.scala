@@ -5,7 +5,7 @@ import chisel3.util._
 
 import utils._
 
-class IDU(implicit val p: NOOPConfig) extends Module with HasDecodeConst {
+class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcInstrIO))
     val out = Decoupled(new PcCtrlDataIO)
@@ -21,21 +21,21 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasDecodeConst {
   io.out.bits.ctrl.fuOpType := fuOpType
 
   val SrcTypeTable = List(
-    InstrI -> (Src1Reg, Src2Imm),
-    InstrR -> (Src1Reg, Src2Reg),
-    InstrS -> (Src1Reg, Src2Reg),
-    InstrB -> (Src1Reg, Src2Reg),
-    InstrU -> (Src1Pc , Src2Imm),
-    InstrJ -> (Src1Pc , Src2Imm),
-    InstrN -> (Src1Pc , Src2Imm)
+    InstrI -> (SrcType.reg, SrcType.imm),
+    InstrR -> (SrcType.reg, SrcType.reg),
+    InstrS -> (SrcType.reg, SrcType.reg),
+    InstrB -> (SrcType.reg, SrcType.reg),
+    InstrU -> (SrcType.pc , SrcType.imm),
+    InstrJ -> (SrcType.pc , SrcType.imm),
+    InstrN -> (SrcType.pc , SrcType.imm)
   )
   io.out.bits.ctrl.src1Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
   io.out.bits.ctrl.src2Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
 
   val (rs, rt, rd) = (instr(19, 15), instr(24, 20), instr(11, 7))
   // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
-  io.out.bits.ctrl.rfSrc1 := Mux(io.out.bits.ctrl.src1Type === Src1Pc, 0.U, rs)
-  io.out.bits.ctrl.rfSrc2 := Mux(io.out.bits.ctrl.src2Type === Src2Reg, rt, 0.U)
+  io.out.bits.ctrl.rfSrc1 := Mux(io.out.bits.ctrl.src1Type === SrcType.pc, 0.U, rs)
+  io.out.bits.ctrl.rfSrc2 := Mux(io.out.bits.ctrl.src2Type === SrcType.reg, rt, 0.U)
   io.out.bits.ctrl.rfWen := isrfWen(instrType)
   io.out.bits.ctrl.rfDest := Mux(isrfWen(instrType), rd, 0.U)
 
@@ -48,9 +48,9 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasDecodeConst {
     InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
   ))
 
-  when (fuType === FuBru) {
-    when (rd === 1.U && fuOpType === BruJal) { io.out.bits.ctrl.fuOpType := BruCall }
-    when (rs === 1.U && fuOpType === BruJalr) { io.out.bits.ctrl.fuOpType := BruRet }
+  when (fuType === FuType.alu) {
+    when (rd === 1.U && fuOpType === BRUOpType.jal) { io.out.bits.ctrl.fuOpType := BRUOpType.call }
+    when (rs === 1.U && fuOpType === BRUOpType.jalr) { io.out.bits.ctrl.fuOpType := BRUOpType.ret }
   }
 
   io.out.bits.pc := io.in.bits.pc
