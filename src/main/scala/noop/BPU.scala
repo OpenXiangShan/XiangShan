@@ -48,18 +48,18 @@ class BPU1 extends Module {
   // BTB
   val NRbtb = 512
   val btbAddr = new TableAddr(log2Up(NRbtb))
-  val btbEntry = new Bundle {
+  def btbEntry() = new Bundle {
     val tag = UInt(btbAddr.tagBits.W)
     val _type = UInt(2.W)
     val target = UInt(32.W)
   }
 
-  val btb = Module(new ArrayTemplate(btbEntry, set = NRbtb, holdRead = true, singlePort = true))
+  val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, holdRead = true, singlePort = true))
   btb.io.r.req.valid := io.in.pc.valid
-  btb.io.r.req.idx := btbAddr.getIdx(io.in.pc.bits)
+  btb.io.r.req.bits.idx := btbAddr.getIdx(io.in.pc.bits)
 
-  val btbRead = Wire(btbEntry)
-  btbRead := btb.io.r.entry
+  val btbRead = Wire(btbEntry())
+  btbRead := btb.io.r.resp.data(0)
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
@@ -78,7 +78,7 @@ class BPU1 extends Module {
 
   // update
   val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
-  val btbWrite = WireInit(0.U.asTypeOf(btbEntry))
+  val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
   BoringUtils.addSink(req, "bpuUpdateReq")
 
   btbWrite.tag := btbAddr.getTag(req.pc)
@@ -91,9 +91,9 @@ class BPU1 extends Module {
   // than read request. Again, since the pipeline will be flushed
   // in the next cycle, the read request will be useless.
   btb.io.w.req.valid := req.isMissPredict && req.valid
-  btb.io.w.req.idx := btbAddr.getIdx(req.pc)
-  btb.io.w.wordIndex := 0.U // ???
-  btb.io.w.entry := btbWrite
+  btb.io.w.req.bits.idx := btbAddr.getIdx(req.pc)
+  btb.io.w.req.bits.wordIndex := 0.U // ???
+  btb.io.w.req.bits.data := btbWrite
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
   val reqLatch = RegNext(req)
