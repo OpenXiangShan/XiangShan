@@ -115,9 +115,9 @@ class ALU extends Module {
   ))
 
   val branchOpTable = List(
-    BRUOpType.getBranchType(BRUOpType.beq)  -> (src1 === src2),
-    BRUOpType.getBranchType(BRUOpType.blt)  -> (src1.asSInt < src2.asSInt),
-    BRUOpType.getBranchType(BRUOpType.bltu) -> (src1 < src2)
+    BRUOpType.getBranchType(BRUOpType.beq)  -> !xorRes.orR,
+    BRUOpType.getBranchType(BRUOpType.blt)  -> slt,
+    BRUOpType.getBranchType(BRUOpType.bltu) -> sltu
   )
 
   val isBranch = BRUOpType.isBranch(func)
