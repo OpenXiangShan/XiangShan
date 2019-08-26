@@ -65,9 +65,9 @@ class BPU1 extends Module with HasBRUOpType {
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
   val btbHit = btbRead.tag === btbAddr.getTag(pcLatch)
 
-  // direction prediction table for branch
-  val dpt = Mem(NRbtb, Bool())
-  val dptTaken = dpt.read(btbAddr.getIdx(pcLatch))
+  // PHT
+  val pht = Mem(NRbtb, UInt(2.W))
+  val phtTaken = RegEnable(pht.read(btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
 
   // RAS
 
@@ -80,6 +80,7 @@ class BPU1 extends Module with HasBRUOpType {
   val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   val btbWrite = WireInit(0.U.asTypeOf(btbEntry))
   BoringUtils.addSink(req, "bpuUpdateReq")
+
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
   btbWrite._type := req.btbType
@@ -94,10 +95,17 @@ class BPU1 extends Module with HasBRUOpType {
   btb.io.w.wordIndex := 0.U // ???
   btb.io.w.entry := btbWrite
 
-  when (req.valid) {
-    when (isBranch(req.fuOpType)) {
-      dpt.write(btbAddr.getIdx(req.pc), req.actualTaken)
+  val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
+  val reqLatch = RegNext(req)
+  when (reqLatch.valid && isBranch(reqLatch.fuOpType)) {
+    val taken = reqLatch.actualTaken
+    val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
+    val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
+    when (wen) {
+      pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
     }
+  }
+  when (req.valid) {
     when (req.fuOpType === BruCall) {
       ras.write(sp.value + 1.U, req.pc + 4.U)
       sp.value := sp.value + 1.U
@@ -108,7 +116,7 @@ class BPU1 extends Module with HasBRUOpType {
   }
 
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  io.out.isTaken := btbHit && Mux(btbRead._type === BTBtype.B, dptTaken, true.B)
+  io.out.isTaken := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
 }
 
 class BPU2 extends Module {

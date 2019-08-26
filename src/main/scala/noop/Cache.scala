@@ -70,8 +70,8 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
     val s2Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
     val s3Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
     val s2s3Miss = Input(Bool())
-    val metaReadOk = Input(Bool())
-    val dataReadOk = Input(Bool())
+    val metaReadReady = Input(Bool())
+    val dataReadReady = Input(Bool())
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.wen) }
@@ -90,8 +90,8 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, addr) && io.s2Req.bits.wen
   val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, addr) && io.s3Req.bits.wen
   val stall = s2WriteSetConflict || s3WriteSetConflict
-  io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaReadOk && io.dataReadOk
-  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadOk && io.dataReadOk
+  io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaReadReady && io.dataReadReady
+  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadReady && io.dataReadReady
 }
 
 sealed class Stage2IO(userBits: Int = 0) extends Bundle with HasCacheConst {
@@ -314,8 +314,8 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   dataArray.io.w <> s3.io.dataWriteReq
   s2.io.metaReadResp <> metaArray.io.r.entry
   s3.io.dataReadResp <> RegEnable(dataArray.io.r.entry, s2.io.out.fire())
-  s1.io.metaReadOk := metaArray.io.r.isRrespOk()
-  s1.io.dataReadOk := dataArray.io.r.isRrespOk()
+  s1.io.metaReadReady := metaArray.io.r.ready
+  s1.io.dataReadReady := dataArray.io.r.ready
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 

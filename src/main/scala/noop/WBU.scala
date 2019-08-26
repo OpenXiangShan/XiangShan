@@ -17,7 +17,7 @@ class WBU(implicit val p: NOOPConfig) extends Module {
   io.in.ready := true.B
 
   io.brOut <> io.in.bits.br
-  io.brOut.isTaken := io.in.bits.br.isTaken && io.in.valid && (io.in.bits.br.target =/= io.in.bits.npc)
+  io.brOut.isTaken := io.in.bits.br.isTaken && io.in.valid
 
   BoringUtils.addSource(io.in.valid, "perfCntCondMinstret")
   if (!p.FPGAPlatform) {
