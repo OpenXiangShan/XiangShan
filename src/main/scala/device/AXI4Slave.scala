@@ -18,17 +18,33 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
     (originData & ~fullMask) | (in.w.bits.data & fullMask)
   }
   val raddr = Wire(UInt())
+  val ren = Wire(Bool())
   val (readBeatCnt, rLast) = in match {
     case axi4: AXI4 =>
       val c = Counter(256)
-      val len = Mux(axi4.ar.fire(), axi4.ar.bits.len, RegEnable(axi4.ar.bits.len, axi4.ar.fire()))
-      raddr := Mux(axi4.ar.fire(), axi4.ar.bits.addr, RegEnable(axi4.ar.bits.addr, axi4.ar.fire()))
+      val beatCnt = Counter(256)
+      val len = HoldUnless(axi4.ar.bits.len, axi4.ar.fire())
+      val burst = HoldUnless(axi4.ar.bits.burst, axi4.ar.fire())
+      val wrapAddr = axi4.ar.bits.addr & ~(axi4.ar.bits.len.asTypeOf(UInt(32.W)) << axi4.ar.bits.size)
+      raddr := HoldUnless(wrapAddr, axi4.ar.fire())
       axi4.r.bits.last := (c.value === len)
+      when (ren) {
+        beatCnt.inc()
+        when (burst === AXI4Parameters.BURST_WRAP && beatCnt.value === len) { beatCnt.value := 0.U }
+      }
       when (axi4.r.fire()) {
         c.inc()
         when (axi4.r.bits.last) { c.value := 0.U }
       }
-      (Mux(axi4.r.fire(), c.value + 1.U, c.value), axi4.r.bits.last)
+      when (axi4.ar.fire()) {
+        beatCnt.value := (axi4.ar.bits.addr >> axi4.ar.bits.size) & axi4.ar.bits.len
+        assert(axi4.ar.bits.size === "b10".U)
+        when (axi4.ar.bits.burst === AXI4Parameters.BURST_WRAP) {
+          assert(axi4.ar.bits.len === 1.U || axi4.ar.bits.len === 3.U ||
+            axi4.ar.bits.len === 7.U || axi4.ar.bits.len === 15.U)
+        }
+      }
+      (beatCnt.value, axi4.r.bits.last)
 
     case axi4lite: AXI4Lite =>
       raddr := axi4lite.ar.bits.addr
@@ -38,7 +54,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
   val r_busy = BoolStopWatch(in.ar.fire(), in.r.fire() && rLast, startHighPriority = true)
   in.ar.ready := in.r.ready || !r_busy
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
-  val ren = in.ar.fire() || (in.r.fire() && !rLast)
+  ren := RegNext(in.ar.fire()) || (in.r.fire() && !rLast)
   in.r.valid := BoolStopWatch(ren && (in.ar.fire() || r_busy), in.r.fire(), startHighPriority = true)
 
 
@@ -46,7 +62,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
   val (writeBeatCnt, wLast) = in match {
     case axi4: AXI4 =>
       val c = Counter(256)
-      waddr := Mux(axi4.aw.fire(), axi4.aw.bits.addr, RegEnable(axi4.aw.bits.addr, axi4.aw.fire()))
+      waddr := HoldUnless(axi4.aw.bits.addr, axi4.aw.fire())
       when (axi4.w.fire()) {
         c.inc()
         when (axi4.w.bits.last) { c.value := 0.U }
