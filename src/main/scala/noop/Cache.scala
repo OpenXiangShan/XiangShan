@@ -178,6 +178,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     a.qos   := 0.U
     a.user  := 0.U
   }
+  // critical word first
+  io.mem.ar.bits.burst := AXI4Parameters.BURST_WRAP
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
@@ -195,7 +197,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.mem.aw.valid := (state === s_memWriteReq) && !awAck
   io.mem. w.valid := (state === s_memWriteReq) && !wAck
 
-  io.mem.ar.bits.addr := req.addr & ~(LineSize - 1).U(32.W)
+  // critical word first
+  io.mem.ar.bits.addr := Cat(req.addr(31, 2), 0.U(2.W))
   // dirty block addr
   io.mem.aw.bits.addr := Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
 
@@ -212,31 +215,39 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val metaRefillWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
   val dataRefillWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
-  val inRdataRegDemand = Reg(UInt(32.W))
+  val afterFirstRead = Reg(Bool())
+  val alreadyOutFire = RegEnable(true.B, io.out.fire())
+  val readingFirst = !afterFirstRead && io.mem.r.fire()
+  val inRdataRegDemand = RegEnable(io.mem.r.bits.data, readingFirst)
+
 
   switch (state) {
     is (s_idle) {
+      afterFirstRead := false.B
+      alreadyOutFire := false.B
       // actually this can use s2 to test
       when (miss && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
     }
-    is (s_memReadReq) { when (io.mem.ar.fire()) { state := s_memReadResp } }
+    is (s_memReadReq) { when (io.mem.ar.fire()) {
+      state := s_memReadResp
+      readBeatCnt.value := addr.wordIndex
+    }}
 
     is (s_memReadResp) {
       when (io.mem.r.fire()) {
         val rdata = io.mem.r.bits.data
-        when (readBeatCnt.value === addr.wordIndex) { inRdataRegDemand := rdata }
+        afterFirstRead := true.B
 
         val inRdata = if (!ro) {
           val rdataMergeWrite = (rdata & ~wordMask) | (req.wdata & wordMask)
-          val rdataMergeWriteSel = (readBeatCnt.value === addr.wordIndex)
-          Mux(rdataMergeWriteSel, rdataMergeWrite, rdata)
+          Mux(readingFirst, rdataMergeWrite, rdata)
         } else rdata
 
         dataRefillWriteBus.req.bits.data.data := inRdata
         dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
 
         readBeatCnt.inc()
-        when (io.mem.r.bits.last) { state := s_wait_resp }
+        when (io.mem.r.bits.last) { state := Mux(alreadyOutFire || io.out.fire(), s_idle, s_wait_resp) }
       }
     }
 
@@ -273,12 +284,14 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   if (userBits > 0) {
     (io.out.bits.user zip io.in.bits.req.user).map{ case (x, y) => x := y }
   }
-  io.out.valid := io.in.valid && Mux(hit, true.B, state === s_wait_resp)
+  io.out.valid := io.in.valid && Mux(hit, true.B, Mux(wen, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
 
+  assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
+  assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
   if (name == "dcache" && debug) {
-    printf("%d: cache stage3: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
+    printf("%d: [" + name + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
   }
 }
