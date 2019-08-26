@@ -48,7 +48,7 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasDecodeConst {
     InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
   ))
 
-  when (fuType === FuBru) {
+  when (fuType === FuAlu) {
     when (rd === 1.U && fuOpType === BruJal) { io.out.bits.ctrl.fuOpType := BruCall }
     when (rs === 1.U && fuOpType === BruJalr) { io.out.bits.ctrl.fuOpType := BruRet }
   }

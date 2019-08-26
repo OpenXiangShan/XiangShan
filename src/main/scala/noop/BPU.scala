@@ -35,7 +35,7 @@ class BPUUpdateReq extends Bundle {
   val isMissPredict = Output(Bool())
   val actualTarget = Output(UInt(32.W))
   val actualTaken = Output(Bool())  // for branch
-  val fuOpType = Output(UInt(4.W))
+  val fuOpType = Output(UInt(5.W))
   val btbType = Output(BTBtype())
 }
 

@@ -16,7 +16,6 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
     val mmio = new SimpleBus
     val forward = new ForwardIO
     val wbData = Input(UInt(32.W))
-    val bpu1Update = Output(new BRUIO)
   })
 
   val src1 = io.in.bits.data.src1
@@ -29,15 +28,10 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
 
   val alu = Module(new ALU)
   val aluOut = alu.access(valid = fuValids(FuAlu), src1 = src1, src2 = src2, func = fuOpType)
+  alu.io.pc := io.in.bits.pc
+  alu.io.npc := io.in.bits.npc
+  alu.io.offset := io.in.bits.data.imm
   alu.io.out.ready := true.B
-
-  val bru = Module(new BRU)
-  val bruOut = bru.access(valid = fuValids(FuBru), src1 = src1, src2 = src2, func = fuOpType)
-  bru.io.pc := io.in.bits.pc
-  bru.io.offset := io.in.bits.data.imm
-  bru.io.npc := io.in.bits.npc
-  bru.io.out.ready := true.B
-  io.bpu1Update := bru.io
 
   val lsu = Module(new LSU)
   val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
@@ -57,7 +51,7 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   csr.io.isInvOpcode := io.in.bits.ctrl.isInvOpcode
   csr.io.out.ready := true.B
 
-  io.out.bits.br <> Mux(csr.io.csrjmp.isTaken, csr.io.csrjmp, bru.io.branch)
+  io.out.bits.br <> Mux(csr.io.csrjmp.isTaken, csr.io.csrjmp, alu.io.branch)
 
   io.out.bits.ctrl := DontCare
   (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -74,7 +68,6 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
 
   io.out.bits.commits := DontCare
   io.out.bits.commits(FuAlu).rfWdata := aluOut
-  io.out.bits.commits(FuBru).rfWdata := bruOut
   io.out.bits.commits(FuLsu).rfWdata := lsuOut
   io.out.bits.commits(FuCsr).rfWdata := csrOut
   io.out.bits.commits(FuMdu).rfWdata := mduOut
@@ -87,8 +80,8 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   io.forward.fuType := io.in.bits.ctrl.fuType
   io.forward.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
 
-  BoringUtils.addSource(alu.io.out.fire(), "perfCntCondMaluInstr")
-  BoringUtils.addSource(bru.io.out.fire(), "perfCntCondMbruInstr")
+  BoringUtils.addSource(alu.io.out.fire() && !isBru(fuOpType), "perfCntCondMaluInstr")
+  BoringUtils.addSource(alu.io.out.fire() && isBru(fuOpType), "perfCntCondMbruInstr")
   BoringUtils.addSource(lsu.io.out.fire(), "perfCntCondMlsuInstr")
   BoringUtils.addSource(mdu.io.out.fire(), "perfCntCondMmduInstr")
   BoringUtils.addSource(csr.io.out.fire(), "perfCntCondMcsrInstr")

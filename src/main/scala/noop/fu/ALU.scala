@@ -2,23 +2,24 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
 trait HasALUOpType {
   val AluOpTypeNum  = 11
 
-  def AluAdd  = "b0000".U
-  def AluSll  = "b0001".U
-  def AluSlt  = "b0010".U
-  def AluSltu = "b0011".U
-  def AluXor  = "b0100".U
-  def AluSrl  = "b0101".U
-  def AluOr   = "b0110".U
-  def AluAnd  = "b0111".U
-  def AluSub  = "b1000".U
-  def AluSra  = "b1101".U
-  def AluLui  = "b1111".U
+  def AluAdd  = "b00000".U
+  def AluSll  = "b00001".U
+  def AluSlt  = "b00010".U
+  def AluSltu = "b00011".U
+  def AluXor  = "b00100".U
+  def AluSrl  = "b00101".U
+  def AluOr   = "b00110".U
+  def AluAnd  = "b00111".U
+  def AluSub  = "b01000".U
+  def AluSra  = "b01101".U
+  def AluLui  = "b01111".U
 }
 
 object ALUInstr extends HasDecodeConst {
@@ -73,8 +74,15 @@ object ALUInstr extends HasDecodeConst {
   )
 }
 
-class ALU extends Module with HasALUOpType {
-  val io = IO(new FunctionUnitIO)
+class ALUIO extends FunctionUnitIO {
+  val pc = Input(UInt(32.W))
+  val npc = Input(UInt(32.W))
+  val offset = Input(UInt(32.W))
+  val branch = new BranchIO
+}
+
+class ALU extends Module with HasALUOpType with HasBRUOpType {
+  val io = IO(new ALUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
@@ -85,14 +93,16 @@ class ALU extends Module with HasALUOpType {
     io.out.bits
   }
 
-  val isAdderSub = (func =/= AluAdd)
+  val isAdderSub = (func =/= AluAdd) && !isJump(func)
   val adderRes = (src1 +& (src2 ^ Fill(32, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
   val sltu = !adderRes(32)
   val slt = xorRes(31) ^ sltu
 
   val shamt = src2(4, 0)
-  io.out.bits := LookupTree(func, 0.U, List(
+  val aluRes = LookupTree(func, 0.U, List(
+    BruJal  -> adderRes,
+    BruJalr -> adderRes,
     AluAdd  -> adderRes,
     AluSll  -> ((src1  << shamt)(31, 0)),
     AluSlt  -> Cat(0.U(31.W), slt),
@@ -106,6 +116,42 @@ class ALU extends Module with HasALUOpType {
     AluSra  -> ((src1.asSInt >> shamt).asUInt)
   ))
 
+  val branchOpTable = List(
+    getBranchType(BruBeq)  -> (src1 === src2),
+    getBranchType(BruBlt)  -> (src1.asSInt < src2.asSInt),
+    getBranchType(BruBltu) -> (src1 < src2)
+  )
+
+  val taken = LookupTree(getBranchType(func), false.B, branchOpTable) ^ isBranchInvert(func)
+  val target = Mux(isBranch(func), io.pc + io.offset, adderRes)
+  io.branch.target := Mux(!taken && isBranch(func), io.pc + 4.U, target)
+  // with branch predictor, this is actually to fix the wrong prediction
+  io.branch.isTaken := valid && isBru(func) && (io.branch.target =/= io.npc)
+  // may be can move to ISU to calculate pc + 4
+  io.out.bits := Mux(isBru(func), io.pc + 4.U, aluRes)
+
   io.in.ready := true.B
   io.out.valid := valid
+
+  val bpuUpdateReq = WireInit(0.U.asTypeOf(new BPUUpdateReq))
+  bpuUpdateReq.valid := valid && isBru(func)
+  bpuUpdateReq.pc := io.pc
+  bpuUpdateReq.isMissPredict := io.branch.target =/= io.npc
+  bpuUpdateReq.actualTarget := target
+  bpuUpdateReq.actualTaken := taken
+  bpuUpdateReq.fuOpType := func
+  bpuUpdateReq.btbType := LookupTree(func, BRUInstr.bruFuncTobtbTypeTable)
+
+  BoringUtils.addSource(RegNext(bpuUpdateReq), "bpuUpdateReq")
+
+  val right = valid && isBru(func) && (io.npc === io.branch.target)
+  val wrong = valid && isBru(func) && (io.npc =/= io.branch.target)
+  BoringUtils.addSource(right && isBranch(func), "MbpBRight")
+  BoringUtils.addSource(wrong && isBranch(func), "MbpBWrong")
+  BoringUtils.addSource(right && (func === BruJal || func === BruCall), "MbpJRight")
+  BoringUtils.addSource(wrong && (func === BruJal || func === BruCall), "MbpJWrong")
+  BoringUtils.addSource(right && func === BruJalr, "MbpIRight")
+  BoringUtils.addSource(wrong && func === BruJalr, "MbpIWrong")
+  BoringUtils.addSource(right && func === BruRet, "MbpRRight")
+  BoringUtils.addSource(wrong && func === BruRet, "MbpRWrong")
 }

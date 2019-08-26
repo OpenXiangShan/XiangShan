@@ -9,20 +9,22 @@ import utils._
 trait HasBRUOpType {
   val BruOpTypeNum  = 10
 
-  def BruJal  = "b1000".U
-  def BruJalr = "b1010".U
-  def BruBeq  = "b0000".U
-  def BruBne  = "b0001".U
-  def BruBlt  = "b0100".U
-  def BruBge  = "b0101".U
-  def BruBltu = "b0110".U
-  def BruBgeu = "b0111".U
+  def BruJal  = "b11000".U
+  def BruJalr = "b11010".U
+  def BruBeq  = "b10000".U
+  def BruBne  = "b10001".U
+  def BruBlt  = "b10100".U
+  def BruBge  = "b10101".U
+  def BruBltu = "b10110".U
+  def BruBgeu = "b10111".U
 
   // for RAS
-  def BruCall = "b1100".U
-  def BruRet  = "b1110".U
+  def BruCall = "b11100".U
+  def BruRet  = "b11110".U
 
+  def isBru(func: UInt) = func(4)
   def isBranch(func: UInt) = !func(3)
+  def isJump(func: UInt) = isBru(func) && !isBranch(func)
   def getBranchType(func: UInt) = func(2, 1)
   def isBranchInvert(func: UInt) = func(0)
 }
@@ -39,15 +41,15 @@ object BRUInstr extends HasDecodeConst {
   def BGEU    = BitPat("b???????_?????_?????_111_?????_1100011")
 
   val table = Array(
-    JAL            -> List(InstrJ, FuBru, BruJal),
-    JALR           -> List(InstrI, FuBru, BruJalr),
+    JAL            -> List(InstrJ, FuAlu, BruJal),
+    JALR           -> List(InstrI, FuAlu, BruJalr),
 
-    BEQ            -> List(InstrB, FuBru, BruBeq),
-    BNE            -> List(InstrB, FuBru, BruBne),
-    BLT            -> List(InstrB, FuBru, BruBlt),
-    BGE            -> List(InstrB, FuBru, BruBge),
-    BLTU           -> List(InstrB, FuBru, BruBltu),
-    BGEU           -> List(InstrB, FuBru, BruBgeu)
+    BEQ            -> List(InstrB, FuAlu, BruBeq),
+    BNE            -> List(InstrB, FuAlu, BruBne),
+    BLT            -> List(InstrB, FuAlu, BruBlt),
+    BGE            -> List(InstrB, FuAlu, BruBge),
+    BLTU           -> List(InstrB, FuAlu, BruBltu),
+    BGEU           -> List(InstrB, FuAlu, BruBgeu)
   )
 
   val bruFuncTobtbTypeTable = List(

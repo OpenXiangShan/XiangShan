@@ -37,17 +37,13 @@ trait HasFuType
     with HasLSUOpType
     with HasMDUOpType
     with HasCSROpType {
-  val FuTypeNum = 5
-  def FuAlu = "b000".U
-  def FuBru = "b001".U
-  def FuLsu = "b010".U
-  def FuMdu = "b011".U
-  def FuCsr = "b100".U
+  val FuTypeNum = 4
+  def FuAlu = "b00".U
+  def FuLsu = "b01".U
+  def FuMdu = "b10".U
+  def FuCsr = "b11".U
   val FuTypeWidth = log2Up(FuTypeNum).W
-
-  private val FuOpTypeMaxNum = List(AluOpTypeNum, BruOpTypeNum,
-    LsuOpTypeNum, MduOpTypeNum, CsrOpTypeNum).reduce(math.max)
-  val FuOpTypeWidth = log2Up(FuOpTypeMaxNum).W
+  val FuOpTypeWidth = 5.W
 }
 
 trait HasDecodeConst extends HasInstrType with HasSrcType with HasFuType
