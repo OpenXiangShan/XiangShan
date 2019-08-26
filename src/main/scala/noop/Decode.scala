@@ -12,45 +12,33 @@ trait HasInstrType {
   def InstrB = "b001".U
   def InstrU = "b110".U
   def InstrJ = "b111".U
-  val InstrTypeWidth = log2Up(InstrTypeNum).W
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
 }
 
-trait HasSrcType {
-  /* src1 type */
-  private val Src1TypeNum = 2
-  def Src1Reg = "b0".U
-  def Src1Pc  = "b1".U
-  val Src1TypeWidth = log2Up(Src1TypeNum).W
-
-  /* src2 type */
-  private val Src2TypeNum = 2
-  def Src2Imm = "b0".U
-  def Src2Reg = "b1".U
-  val Src2TypeWidth = log2Up(Src2TypeNum).W
+object SrcType {
+  def reg = "b0".U
+  def pc  = "b1".U
+  def imm = "b1".U
+  def apply() = UInt(1.W)
 }
 
-trait HasFuType
- extends HasALUOpType
-    with HasBRUOpType
-    with HasLSUOpType
-    with HasMDUOpType
-    with HasCSROpType {
-  val FuTypeNum = 4
-  def FuAlu = "b00".U
-  def FuLsu = "b01".U
-  def FuMdu = "b10".U
-  def FuCsr = "b11".U
-  val FuTypeWidth = log2Up(FuTypeNum).W
-  val FuOpTypeWidth = 5.W
+object FuType {
+  def num = 4
+  def alu = "b00".U
+  def lsu = "b01".U
+  def mdu = "b10".U
+  def csr = "b11".U
+  def apply() = UInt(log2Up(num).W)
 }
 
-trait HasDecodeConst extends HasInstrType with HasSrcType with HasFuType
+object FuOpType {
+  def apply() = UInt(5.W)
+}
 
-object Instructions extends HasDecodeConst {
+object Instructions extends HasInstrType {
   def NOP = 0x00000013.U
-  val DecodeDefault = List(InstrN, FuCsr, CsrJmp)
+  val DecodeDefault = List(InstrN, FuType.csr, CSROpType.jmp)
   def DecodeTable(implicit p: NOOPConfig) = ALUInstr.table ++ BRUInstr.table ++ LSUInstr.table ++
                     (if (p.HasMExtension) MDUInstr.table else Nil) ++
                     CSRInstr.table ++ NOOPTrap.table

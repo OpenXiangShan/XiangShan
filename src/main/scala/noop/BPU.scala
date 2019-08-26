@@ -35,11 +35,11 @@ class BPUUpdateReq extends Bundle {
   val isMissPredict = Output(Bool())
   val actualTarget = Output(UInt(32.W))
   val actualTaken = Output(Bool())  // for branch
-  val fuOpType = Output(UInt(5.W))
+  val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
 }
 
-class BPU1 extends Module with HasBRUOpType {
+class BPU1 extends Module {
   val io = IO(new Bundle {
     val in = new Bundle { val pc = Flipped(Valid((UInt(32.W)))) }
     val out = new BranchIO
@@ -97,7 +97,7 @@ class BPU1 extends Module with HasBRUOpType {
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
   val reqLatch = RegNext(req)
-  when (reqLatch.valid && isBranch(reqLatch.fuOpType)) {
+  when (reqLatch.valid && BRUOpType.isBranch(reqLatch.fuOpType)) {
     val taken = reqLatch.actualTaken
     val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
@@ -106,11 +106,11 @@ class BPU1 extends Module with HasBRUOpType {
     }
   }
   when (req.valid) {
-    when (req.fuOpType === BruCall) {
+    when (req.fuOpType === BRUOpType.call) {
       ras.write(sp.value + 1.U, req.pc + 4.U)
       sp.value := sp.value + 1.U
     }
-    .elsewhen (req.fuOpType === BruRet) {
+    .elsewhen (req.fuOpType === BRUOpType.ret) {
       sp.value := sp.value - 1.U
     }
   }

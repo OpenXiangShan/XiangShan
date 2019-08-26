@@ -7,7 +7,7 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 import bus.simplebus.SimpleBus
 
-class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
+class EXU(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new PcCtrlDataIO))
     val out = Decoupled(new CommitIO)
@@ -23,18 +23,18 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
 
   val (fuType, fuOpType) = (io.in.bits.ctrl.fuType, io.in.bits.ctrl.fuOpType)
 
-  val fuValids = Wire(Vec(FuTypeNum, Bool()))
-  (0 until FuTypeNum).map (i => fuValids(i) := (fuType === i.U) && io.in.valid && !io.flush)
+  val fuValids = Wire(Vec(FuType.num, Bool()))
+  (0 until FuType.num).map (i => fuValids(i) := (fuType === i.U) && io.in.valid && !io.flush)
 
   val alu = Module(new ALU)
-  val aluOut = alu.access(valid = fuValids(FuAlu), src1 = src1, src2 = src2, func = fuOpType)
+  val aluOut = alu.access(valid = fuValids(FuType.alu), src1 = src1, src2 = src2, func = fuOpType)
   alu.io.pc := io.in.bits.pc
   alu.io.npc := io.in.bits.npc
   alu.io.offset := io.in.bits.data.imm
   alu.io.out.ready := true.B
 
   val lsu = Module(new LSU)
-  val lsuOut = lsu.access(valid = fuValids(FuLsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
+  val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
   lsu.io.wdata := src2
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
@@ -42,11 +42,11 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   lsu.io.out.ready := true.B
 
   val mdu = Module(new MDU)
-  val mduOut = mdu.access(valid = fuValids(FuMdu), src1 = src1, src2 = src2, func = fuOpType)
+  val mduOut = mdu.access(valid = fuValids(FuType.mdu), src1 = src1, src2 = src2, func = fuOpType)
   mdu.io.out.ready := true.B
 
   val csr = Module(new CSR)
-  val csrOut = csr.access(valid = fuValids(FuCsr), src1 = src1, src2 = src2, func = fuOpType)
+  val csrOut = csr.access(valid = fuValids(FuType.csr), src1 = src1, src2 = src2, func = fuOpType)
   csr.io.pc := io.in.bits.pc
   csr.io.isInvOpcode := io.in.bits.ctrl.isInvOpcode
   csr.io.out.ready := true.B
@@ -62,15 +62,15 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   io.out.bits.pc := io.in.bits.pc
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
-    FuLsu -> lsu.io.out.valid,
-    FuMdu -> mdu.io.out.valid
+    FuType.lsu -> lsu.io.out.valid,
+    FuType.mdu -> mdu.io.out.valid
   ))
 
   io.out.bits.commits := DontCare
-  io.out.bits.commits(FuAlu).rfWdata := aluOut
-  io.out.bits.commits(FuLsu).rfWdata := lsuOut
-  io.out.bits.commits(FuCsr).rfWdata := csrOut
-  io.out.bits.commits(FuMdu).rfWdata := mduOut
+  io.out.bits.commits(FuType.alu).rfWdata := aluOut
+  io.out.bits.commits(FuType.lsu).rfWdata := lsuOut
+  io.out.bits.commits(FuType.csr).rfWdata := csrOut
+  io.out.bits.commits(FuType.mdu).rfWdata := mduOut
 
   io.in.ready := !io.in.valid || io.out.fire()
 
@@ -80,8 +80,9 @@ class EXU(implicit val p: NOOPConfig) extends Module with HasFuType {
   io.forward.fuType := io.in.bits.ctrl.fuType
   io.forward.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
 
-  BoringUtils.addSource(alu.io.out.fire() && !isBru(fuOpType), "perfCntCondMaluInstr")
-  BoringUtils.addSource(alu.io.out.fire() && isBru(fuOpType), "perfCntCondMbruInstr")
+  val isBru = BRUOpType.isBru(fuOpType)
+  BoringUtils.addSource(alu.io.out.fire() && !isBru, "perfCntCondMaluInstr")
+  BoringUtils.addSource(alu.io.out.fire() && isBru, "perfCntCondMbruInstr")
   BoringUtils.addSource(lsu.io.out.fire(), "perfCntCondMlsuInstr")
   BoringUtils.addSource(mdu.io.out.fire(), "perfCntCondMmduInstr")
   BoringUtils.addSource(csr.io.out.fire(), "perfCntCondMcsrInstr")

@@ -3,12 +3,11 @@ package noop
 import chisel3._
 import chisel3.util._
 
-class CtrlPathIO extends Bundle
-    with HasDecodeConst {
-  val src1Type = Output(UInt(Src1TypeWidth))
-  val src2Type = Output(UInt(Src2TypeWidth))
-  val fuType = Output(UInt(FuTypeWidth))
-  val fuOpType = Output(UInt(FuOpTypeWidth))
+class CtrlPathIO extends Bundle {
+  val src1Type = Output(SrcType())
+  val src2Type = Output(SrcType())
+  val fuType = Output(FuType())
+  val fuOpType = Output(FuOpType())
   val rfSrc1 = Output(UInt(5.W))
   val rfSrc2 = Output(UInt(5.W))
   val rfWen = Output(Bool())
@@ -50,27 +49,27 @@ class BranchIO extends Bundle {
   val target = Output(UInt(32.W))
 }
 
-class CommitIO extends Bundle with HasFuType {
+class CommitIO extends Bundle {
   val pc = Output(UInt(32.W))
   val ctrl = new CtrlPathIO
   val isMMIO = Output(Bool())
-  val commits = Output(Vec(FuTypeNum, new WriteBackIO))
+  val commits = Output(Vec(FuType.num, new WriteBackIO))
   val br = new BranchIO
 }
 
-class FunctionUnitIO extends Bundle with HasDecodeConst {
+class FunctionUnitIO extends Bundle {
   val in = Flipped(Decoupled(new Bundle {
     val src1 = Output(UInt(32.W))
     val src2 = Output(UInt(32.W))
-    val func = Output(UInt(FuOpTypeWidth))
+    val func = Output(FuOpType())
   }))
   val out = Decoupled(Output(UInt(32.W)))
 }
 
-class ForwardIO extends Bundle with HasDecodeConst {
+class ForwardIO extends Bundle {
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
   val valid = Output(Bool())
-  val fuType = Output(UInt(FuTypeWidth))
+  val fuType = Output(FuType())
   val rfData = Output(UInt(32.W))
 }

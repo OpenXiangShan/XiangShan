@@ -6,21 +6,19 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-trait HasMDUOpType {
-  val MduOpTypeNum  = 8
-
-  def MduMul  = "b000".U
-  def MduMulh = "b001".U
-  def MduDiv  = "b100".U
-  def MduDivu = "b101".U
-  def MduRem  = "b110".U
-  def MduRemu = "b111".U
+object MDUOpType {
+  def mul  = "b000".U
+  def mulh = "b001".U
+  def div  = "b100".U
+  def divu = "b101".U
+  def rem  = "b110".U
+  def remu = "b111".U
 
   def isDiv(op: UInt) = op(2)
   def isSign(op: UInt) = isDiv(op) && !op(0)
 }
 
-object MDUInstr extends HasDecodeConst {
+object MDUInstr extends HasInstrType {
   def MUL     = BitPat("b0000001_?????_?????_000_?????_0110011")
   def MULH    = BitPat("b0000001_?????_?????_001_?????_0110011")
   def DIV     = BitPat("b0000001_?????_?????_100_?????_0110011")
@@ -29,14 +27,14 @@ object MDUInstr extends HasDecodeConst {
   def REMU    = BitPat("b0000001_?????_?????_111_?????_0110011")
 
   val mulTable = Array(
-    MUL            -> List(InstrR, FuMdu, MduMul),
-    MULH           -> List(InstrR, FuMdu, MduMulh)
+    MUL            -> List(InstrR, FuType.mdu, MDUOpType.mul),
+    MULH           -> List(InstrR, FuType.mdu, MDUOpType.mulh)
   )
   val divTable = Array(
-    DIV            -> List(InstrR, FuMdu, MduDiv),
-    DIVU           -> List(InstrR, FuMdu, MduDivu),
-    REM            -> List(InstrR, FuMdu, MduRem),
-    REMU           -> List(InstrR, FuMdu, MduRemu)
+    DIV            -> List(InstrR, FuType.mdu, MDUOpType.div),
+    DIVU           -> List(InstrR, FuType.mdu, MDUOpType.divu),
+    REM            -> List(InstrR, FuType.mdu, MDUOpType.rem),
+    REMU           -> List(InstrR, FuType.mdu, MDUOpType.remu)
   )
   def table(implicit p: NOOPConfig) = mulTable ++ (if (p.HasDiv) divTable else Nil)
 }
@@ -111,7 +109,7 @@ class Divider(len: Int = 32)(implicit val p: NOOPConfig) extends Module {
 class MDUIO extends FunctionUnitIO {
 }
 
-class MDU(implicit val p: NOOPConfig) extends Module with HasMDUOpType {
+class MDU(implicit val p: NOOPConfig) extends Module {
   val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -128,23 +126,24 @@ class MDU(implicit val p: NOOPConfig) extends Module with HasMDUOpType {
   List(mul.io, div.io).map { case x =>
     x.in.bits(0) := src1
     x.in.bits(1) := src2
-    x.sign := isSign(func)
+    x.sign := MDUOpType.isSign(func)
     x.out.ready := io.out.ready
   }
-  mul.io.in.valid := io.in.valid && !isDiv(func)
-  div.io.in.valid := io.in.valid && isDiv(func)
+  val isDiv = MDUOpType.isDiv(func)
+  mul.io.in.valid := io.in.valid && !isDiv
+  div.io.in.valid := io.in.valid && isDiv
 
   io.out.bits := LookupTree(func, 0.U, List(
-    MduMul  -> mul.io.out.bits(0),
-    MduMulh -> mul.io.out.bits(1),
-    MduDiv  -> div.io.out.bits(0),
-    MduDivu -> div.io.out.bits(0),
-    MduRem  -> div.io.out.bits(1),
-    MduRemu -> div.io.out.bits(1)
+    MDUOpType.mul  -> mul.io.out.bits(0),
+    MDUOpType.mulh -> mul.io.out.bits(1),
+    MDUOpType.div  -> div.io.out.bits(0),
+    MDUOpType.divu -> div.io.out.bits(0),
+    MDUOpType.rem  -> div.io.out.bits(1),
+    MDUOpType.remu -> div.io.out.bits(1)
   ))
 
-  val isDivReg = Mux(io.in.fire(), isDiv(func), RegNext(isDiv(func)))
-  io.in.ready := Mux(isDiv(func), div.io.in.ready, mul.io.in.ready)
+  val isDivReg = Mux(io.in.fire(), isDiv, RegNext(isDiv))
+  io.in.ready := Mux(isDiv, div.io.in.ready, mul.io.in.ready)
   io.out.valid := Mux(isDivReg, div.io.out.valid, mul.io.out.valid)
 
   BoringUtils.addSource(mul.io.out.fire(), "perfCntCondMmulInstr")

@@ -6,26 +6,24 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-trait HasCSROpType {
-  val CsrOpTypeNum  = 4
-
-  def CsrJmp  = "b00".U
-  def CsrWrt  = "b01".U
-  def CsrSet  = "b10".U
-  def CsrClr  = "b11".U
+object CSROpType {
+  def jmp  = "b00".U
+  def wrt  = "b01".U
+  def set  = "b10".U
+  def clr  = "b11".U
 }
 
-object CSRInstr extends HasDecodeConst {
+object CSRInstr extends HasInstrType {
   def CSRRW   = BitPat("b????????????_?????_001_?????_1110011")
   def CSRRS   = BitPat("b????????????_?????_010_?????_1110011")
   def ECALL   = BitPat("b001100000010_00000_000_00000_1110011")
   def MRET    = BitPat("b000000000000_00000_000_00000_1110011")
 
   val table = Array(
-    CSRRW          -> List(InstrI, FuCsr, CsrWrt),
-    CSRRS          -> List(InstrI, FuCsr, CsrSet),
-    ECALL          -> List(InstrI, FuCsr, CsrJmp),
-    MRET           -> List(InstrI, FuCsr, CsrJmp)
+    CSRRW          -> List(InstrI, FuType.csr, CSROpType.wrt),
+    CSRRS          -> List(InstrI, FuType.csr, CSROpType.set),
+    ECALL          -> List(InstrI, FuType.csr, CSROpType.jmp),
+    MRET           -> List(InstrI, FuType.csr, CSROpType.jmp)
   )
 }
 
@@ -46,7 +44,7 @@ class CSRIO extends FunctionUnitIO {
   val isInvOpcode = Input(Bool())
 }
 
-class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasCSRConst {
+class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -83,12 +81,12 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasC
   val addr = src2(11, 0)
   val rdata = LookupTree(addr, 0.U, chiselMapping)(31, 0)
   val wdata = LookupTree(func, 0.U, List(
-    CsrWrt -> src1,
-    CsrSet -> (rdata | src1),
-    CsrClr -> (rdata & ~src1)
+    CSROpType.wrt -> src1,
+    CSROpType.set -> (rdata | src1),
+    CSROpType.clr -> (rdata & ~src1)
   ))
 
-  when (valid && func =/= CsrJmp) {
+  when (valid && func =/= CSROpType.jmp) {
     when (addr === Mtvec.U) { mtvec := wdata }
     when (addr === Mstatus.U) { mstatus := wdata }
     when (addr === Mepc.U) { mepc := wdata }
@@ -105,7 +103,7 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSROpType with HasC
     isEcall -> 11.U
   ))
 
-  io.csrjmp.isTaken := (valid && func === CsrJmp) || isException
+  io.csrjmp.isTaken := (valid && func === CSROpType.jmp) || isException
   io.csrjmp.target := Mux(isMret, mepc, mtvec)
 
   when (io.csrjmp.isTaken && !isMret) {
