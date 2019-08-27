@@ -43,7 +43,10 @@ class BPU1 extends Module {
   val io = IO(new Bundle {
     val in = new Bundle { val pc = Flipped(Valid((UInt(32.W)))) }
     val out = new BranchIO
+    val flush = Input(Bool())
   })
+
+  val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
 
   // BTB
   val NRbtb = 512
@@ -63,7 +66,7 @@ class BPU1 extends Module {
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch)
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush
 
   // PHT
   val pht = Mem(NRbtb, UInt(2.W))
