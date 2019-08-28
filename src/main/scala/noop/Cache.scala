@@ -290,7 +290,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-  if (name == "dcache" && debug) {
+  Debug(debug) {
     printf("%d: [" + name + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
   }
@@ -335,12 +335,12 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 
-  if (name == "dcache" && debug) {
+  Debug(debug) {
     io.in.dump(name + ".in")
     printf("%d: s1:(%d,%d), s2:(%d,%d), s2:(%d,%d)\n",
       GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
-    when (s1.io.in.valid) { printf(p"[S1]: ${s1.io.in.bits}\n") }
-    when (s2.io.in.valid) { printf(p"[S2]: ${s2.io.in.bits.req}\n") }
-    when (s3.io.in.valid) { printf(p"[S3]: ${s3.io.in.bits.req}\n") }
+    when (s1.io.in.valid) { printf(p"[${name}.S1]: ${s1.io.in.bits}\n") }
+    when (s2.io.in.valid) { printf(p"[${name}.S2]: ${s2.io.in.bits.req}\n") }
+    when (s3.io.in.valid) { printf(p"[${name}.S3]: ${s3.io.in.bits.req}\n") }
   }
 }
