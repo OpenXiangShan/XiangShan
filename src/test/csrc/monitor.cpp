@@ -7,22 +7,21 @@ enum {
   STATE_RUNNING = -1
 };
 
-bool is_finish = false;
-static int g_trapCode = 0;
+static int g_trapCode = STATE_RUNNING;
 static int g_trapPC = 0;
 static int g_cycleCnt = 0, g_instrCnt = 0;
+
+bool is_finish() { return g_trapCode != STATE_RUNNING; }
 
 extern "C" void monitor(int trapCode, int trapPC, int cycleCnt, int instrCnt) {
   g_trapCode = trapCode;
   g_trapPC = trapPC;
   g_cycleCnt = cycleCnt;
   g_instrCnt = instrCnt;
-  is_finish = true;
 }
 
 void set_abort(void) {
   g_trapCode = STATE_ABORT;
-  is_finish = true;
 }
 
 void display_trapinfo(void) {

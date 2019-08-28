@@ -85,14 +85,14 @@ class Emulator {
   }
 
   int execute_cycles(uint64_t n) {
-    extern bool is_finish;
+    extern bool is_finish();
     extern void poll_event(void);
     extern uint32_t uptime(void);
     extern void set_abort(void);
     int lasttime = 0;
     int lastcommit = n;
     int hascommit = 0;
-    while (!is_finish && n > 0) {
+    while (!is_finish() && n > 0) {
       single_cycle();
       n --;
 
@@ -121,7 +121,7 @@ class Emulator {
       }
     }
 
-    return !is_finish;
+    return !is_finish();
   }
 
   int execute() { return execute_cycles(max_cycles); }
