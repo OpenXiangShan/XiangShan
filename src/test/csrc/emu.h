@@ -89,8 +89,8 @@ class Emulator {
     extern void poll_event(void);
     extern uint32_t uptime(void);
     extern void set_abort(void);
-    int lasttime = 0;
-    int lastcommit = n;
+    uint32_t lasttime = 0;
+    uint64_t lastcommit = n;
     int hascommit = 0;
     while (!is_finish() && n > 0) {
       single_cycle();
@@ -114,7 +114,7 @@ class Emulator {
         hascommit = 1;
       }
 
-      int t = uptime();
+      uint32_t t = uptime();
       if (t - lasttime > 100) {
         poll_event();
         lasttime = t;
