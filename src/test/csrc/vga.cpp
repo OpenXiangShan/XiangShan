@@ -24,6 +24,7 @@ uint32_t screen_size(void) {
 }
 
 void init_sdl() {
+  return;
   SDL_Init(SDL_INIT_VIDEO);
   SDL_CreateWindowAndRenderer(SCREEN_W * 2, SCREEN_H * 2, 0, &window, &renderer);
   SDL_SetWindowTitle(window, "NOOP");
