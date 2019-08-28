@@ -24,7 +24,7 @@ void set_abort(void) {
   g_trapCode = STATE_ABORT;
 }
 
-void display_trapinfo(void) {
+int display_trapinfo(long long max_cycles) {
   switch (g_trapCode) {
     case STATE_GOODTRAP:
       eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP at pc = 0x%08x\n" ANSI_COLOR_RESET, g_trapPC);
@@ -35,9 +35,13 @@ void display_trapinfo(void) {
     case STATE_ABORT:
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%08x\n" ANSI_COLOR_RESET, g_trapPC);
       break;
+    case STATE_RUNNING:
+      eprintf(ANSI_COLOR_RED "Timeout after %lld cycles\n" ANSI_COLOR_RESET, max_cycles);
+      break;
   }
 
   double ipc = (double)g_instrCnt / g_cycleCnt;
   eprintf(ANSI_COLOR_MAGENTA "instrCnt = %d, cycleCnt = %d, IPC = %lf\n" ANSI_COLOR_RESET,
       g_instrCnt, g_cycleCnt, ipc);
+  return g_trapCode != STATE_GOODTRAP;
 }

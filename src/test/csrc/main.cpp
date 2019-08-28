@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <fstream>
 #include <functional>
+#include <inttypes.h>
 
 #include "emu.h"
 
@@ -94,19 +95,15 @@ int main(int argc, const char** argv) {
   extern void device_init(void);
   device_init();
 
-  auto timeout = emu.execute();
+  emu.execute();
 
   extern uint32_t uptime(void);
   uint32_t ms = uptime();
 
-  if (timeout) {
-    eprintf(ANSI_COLOR_RED "Timeout after %lld cycles\n" ANSI_COLOR_RESET, (long long)emu.get_max_cycles());
-  } else {
-    extern void display_trapinfo(void);
-    display_trapinfo();
+  int display_trapinfo(long long max_cycles);
+  int ret = display_trapinfo(emu.get_max_cycles());
+  eprintf(ANSI_COLOR_BLUE "Guest cycle spent: %" PRIu64 "\n" ANSI_COLOR_RESET, emu.get_cycles());
+  eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
 
-    eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
-  }
-
-  return timeout;
+  return ret;
 }

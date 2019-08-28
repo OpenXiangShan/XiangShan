@@ -84,7 +84,7 @@ class Emulator {
 
   }
 
-  int execute_cycles(uint64_t n) {
+  void execute_cycles(uint64_t n) {
     extern bool is_finish();
     extern void poll_event(void);
     extern uint32_t uptime(void);
@@ -120,11 +120,9 @@ class Emulator {
         lasttime = t;
       }
     }
-
-    return !is_finish();
   }
 
-  int execute() { return execute_cycles(max_cycles); }
-  uint64_t get_cycles() const { return max_cycles; }
+  void execute() { execute_cycles(max_cycles); }
+  uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
 };
