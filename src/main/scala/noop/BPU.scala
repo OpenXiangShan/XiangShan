@@ -57,7 +57,7 @@ class BPU1 extends Module {
     val target = UInt(32.W)
   }
 
-  val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, holdRead = true, singlePort = true))
+  val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
   btb.io.r.req.valid := io.in.pc.valid
   btb.io.r.req.bits.idx := btbAddr.getIdx(io.in.pc.bits)
 
