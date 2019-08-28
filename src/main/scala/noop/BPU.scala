@@ -66,7 +66,7 @@ class BPU1 extends Module {
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B)
 
   // PHT
   val pht = Mem(NRbtb, UInt(2.W))
