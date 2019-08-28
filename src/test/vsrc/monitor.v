@@ -20,10 +20,8 @@ module Monitor(
 
 `ifdef VERILATOR
   always @(posedge clk) begin
-    if (isNoopTrap && !reset) monitor(
-      trapCode, trapPC,
-      cycleCnt, instrCnt
-    );
+     monitor((isNoopTrap && !reset) ? trapCode : -1,
+       trapPC, cycleCnt, instrCnt);
   end
 `endif
 

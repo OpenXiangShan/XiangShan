@@ -84,20 +84,20 @@ class Emulator {
 
   }
 
-  int execute_cycles(uint64_t n) {
-    extern bool is_finish;
+  void execute_cycles(uint64_t n) {
+    extern bool is_finish();
     extern void poll_event(void);
     extern uint32_t uptime(void);
     extern void set_abort(void);
-    int lasttime = 0;
-    int lastcommit = n;
+    uint32_t lasttime = 0;
+    uint64_t lastcommit = n;
     int hascommit = 0;
-    while (!is_finish && n > 0) {
+    while (!is_finish() && n > 0) {
       single_cycle();
       n --;
 
-      if (lastcommit - n > 100 && hascommit) {
-        eprintf("No instruction commits for 100 cycles, maybe get stuck\n");
+      if (lastcommit - n > 200 && hascommit) {
+        eprintf("No instruction commits for 200 cycles, maybe get stuck\n");
         set_abort();
       }
 
@@ -114,17 +114,15 @@ class Emulator {
         hascommit = 1;
       }
 
-      int t = uptime();
+      uint32_t t = uptime();
       if (t - lasttime > 100) {
         poll_event();
         lasttime = t;
       }
     }
-
-    return !is_finish;
   }
 
-  int execute() { return execute_cycles(max_cycles); }
-  uint64_t get_cycles() const { return max_cycles; }
+  void execute() { execute_cycles(max_cycles); }
+  uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
 };

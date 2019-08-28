@@ -4,5 +4,9 @@ import chisel3._
 import chisel3.util._
 
 object GTimer {
-  def apply() = Counter(true.B, 0x7fffffff)._1
+  def apply() = {
+    val c = RegInit(0.U(64.W))
+    c := c + 1.U
+    c
+  }
 }
