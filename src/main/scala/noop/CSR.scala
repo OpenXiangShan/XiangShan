@@ -79,8 +79,8 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   def readWithScala(addr: Int): UInt = scalaMapping(addr)
 
   val addr = src2(11, 0)
-  val rdata = LookupTree(addr, 0.U, chiselMapping)(31, 0)
-  val wdata = LookupTree(func, 0.U, List(
+  val rdata = LookupTree(addr, chiselMapping)(31, 0)
+  val wdata = LookupTree(func, List(
     CSROpType.wrt -> src1,
     CSROpType.set -> (rdata | src1),
     CSROpType.clr -> (rdata & ~src1)

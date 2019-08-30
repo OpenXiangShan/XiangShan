@@ -133,7 +133,7 @@ class MDU(implicit val p: NOOPConfig) extends Module {
   mul.io.in.valid := io.in.valid && !isDiv
   div.io.in.valid := io.in.valid && isDiv
 
-  io.out.bits := LookupTree(func, 0.U, List(
+  io.out.bits := LookupTree(func, List(
     MDUOpType.mul  -> mul.io.out.bits(0),
     MDUOpType.mulh -> mul.io.out.bits(1),
     MDUOpType.div  -> div.io.out.bits(0),

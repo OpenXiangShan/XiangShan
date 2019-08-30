@@ -97,10 +97,7 @@ class ALU extends Module {
   val slt = xorRes(31) ^ sltu
 
   val shamt = src2(4, 0)
-  val aluRes = LookupTree(func, 0.U, List(
-    BRUOpType.jal  -> adderRes,
-    BRUOpType.jalr -> adderRes,
-    ALUOpType.add  -> adderRes,
+  val aluRes = LookupTreeDefault(func, adderRes, List(
     ALUOpType.sll  -> ((src1  << shamt)(31, 0)),
     ALUOpType.slt  -> Cat(0.U(31.W), slt),
     ALUOpType.sltu -> Cat(0.U(31.W), sltu),
@@ -108,7 +105,6 @@ class ALU extends Module {
     ALUOpType.srl  -> (src1  >> shamt),
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
-    ALUOpType.sub  -> adderRes,
     ALUOpType.sra  -> ((src1.asSInt >> shamt).asUInt)
   ))
 
@@ -120,7 +116,7 @@ class ALU extends Module {
 
   val isBranch = BRUOpType.isBranch(func)
   val isBru = BRUOpType.isBru(func)
-  val taken = LookupTree(BRUOpType.getBranchType(func), false.B, branchOpTable) ^ BRUOpType.isBranchInvert(func)
+  val taken = LookupTree(BRUOpType.getBranchType(func), branchOpTable) ^ BRUOpType.isBranchInvert(func)
   val target = Mux(isBranch, io.pc + io.offset, adderRes)
   io.branch.target := Mux(!taken && isBranch, io.pc + 4.U, target)
   // with branch predictor, this is actually to fix the wrong prediction
