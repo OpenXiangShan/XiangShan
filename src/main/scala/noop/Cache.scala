@@ -128,6 +128,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Stage2IO(userBits)))
     val out = Decoupled(new SimpleBusRespBundle(dataBits = dataBits, userBits = userBits))
+    val isFinish = Output(Bool())
     val addr = Output(UInt(32.W))
     val flush = Input(Bool())
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
@@ -247,7 +248,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
         dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
 
         readBeatCnt.inc()
-        when (io.mem.r.bits.last) { state := Mux(alreadyOutFire || io.out.fire(), s_idle, s_wait_resp) }
+        when (io.mem.r.bits.last) { state := s_wait_resp }
       }
     }
 
@@ -257,7 +258,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     }
 
     is (s_memWriteResp) { when (io.mem.b.fire()) { state := s_memReadReq } }
-    is (s_wait_resp) { when (io.out.fire() || needFlush) { state := s_idle } }
+    is (s_wait_resp) { when (io.out.fire() || needFlush || alreadyOutFire) { state := s_idle } }
   }
 
 
@@ -285,6 +286,12 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     (io.out.bits.user zip io.in.bits.req.user).map{ case (x, y) => x := y }
   }
   io.out.valid := io.in.valid && Mux(hit, true.B, Mux(wen, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
+  // With critical-word first, the pipeline registers between
+  // s2 and s3 can not be overwritten before a missing request
+  // is totally handled. We use io.isFinish to indicate when the
+  // request is really end.
+  io.isFinish := Mux(hit || wen, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
+
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
 
@@ -312,7 +319,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
 
   s1.io.in <> io.in.req
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
-  PipelineConnect(s2.io.out, s3.io.in, s3.io.out.fire(), io.flush(1))
+  PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
 
   s3.io.flush := io.flush(1)
