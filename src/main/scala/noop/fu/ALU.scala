@@ -17,7 +17,6 @@ object ALUOpType {
   def and  = "b00111".U
   def sub  = "b01000".U
   def sra  = "b01101".U
-  def lui  = "b01111".U
 }
 
 object ALUInstr extends HasInstrType {
@@ -68,7 +67,7 @@ object ALUInstr extends HasInstrType {
     SRA            -> List(InstrR, FuType.alu, ALUOpType.sra),
 
     AUIPC          -> List(InstrU, FuType.alu, ALUOpType.add),
-    LUI            -> List(InstrU, FuType.alu, ALUOpType.lui)
+    LUI            -> List(InstrU, FuType.alu, ALUOpType.add)
   )
 }
 
@@ -110,7 +109,6 @@ class ALU extends Module {
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
     ALUOpType.sub  -> adderRes,
-    ALUOpType.lui  -> src2,
     ALUOpType.sra  -> ((src1.asSInt >> shamt).asUInt)
   ))
 
