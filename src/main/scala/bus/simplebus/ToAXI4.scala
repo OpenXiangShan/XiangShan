@@ -43,6 +43,7 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
 
   aw := ar
   mem.resp.bits.rdata := r.data
+  mem.resp.bits.user := 0.U
 
   val wSend = Wire(Bool())
   val awAck = BoolStopWatch(axi.aw.fire(), wSend)

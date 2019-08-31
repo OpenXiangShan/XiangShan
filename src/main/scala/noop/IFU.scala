@@ -49,13 +49,13 @@ class IFU extends Module with HasResetVector {
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
   io.imem.req.bits.cmd := SimpleBusCmd.cmdRead
-  io.imem.req.bits.user.map(_ := npc)
+  io.imem.req.bits.user := npc
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
   io.out.bits.instr := io.imem.resp.bits.rdata
-  io.imem.resp.bits.user.map(io.out.bits.pnpc := _)
+  io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")

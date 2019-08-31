@@ -282,9 +282,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.metaWriteBus.req <> metaWriteArb.io.out
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-  if (userBits > 0) {
-    (io.out.bits.user zip io.in.bits.req.user).map{ case (x, y) => x := y }
-  }
+  io.out.bits.user := io.in.bits.req.user
   io.out.valid := io.in.valid && Mux(hit, true.B, Mux(wen, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request

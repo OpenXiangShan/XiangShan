@@ -103,6 +103,7 @@ class LSU extends Module {
   dmem.req.bits.cmd := Mux(isStore, SimpleBusCmd.cmdWrite, SimpleBusCmd.cmdRead)
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
   dmem.req.bits.wmask := genWmask(addr, func(1, 0))
+  dmem.req.bits.user := 0.U
   dmem.resp.ready := true.B
 
   io.mmio.req.bits := dmem.req.bits

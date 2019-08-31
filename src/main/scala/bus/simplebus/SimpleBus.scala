@@ -17,7 +17,7 @@ class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundl
   val cmd = Output(UInt(4.W))
   val wmask = Output(UInt((dataBits / 8).W))
   val wdata = Output(UInt(dataBits.W))
-  val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else null
+  val user = Output(UInt(userBits.W))
 
   override def toPrintable: Printable = {
     p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)}, " +
@@ -30,7 +30,7 @@ class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundl
 
 class SimpleBusRespBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
   val rdata = Output(UInt(dataBits.W))
-  val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else null
+  val user = Output(UInt(userBits.W))
 
   override def toPrintable: Printable = {
     p"rdata = ${Hexadecimal(rdata)}"
