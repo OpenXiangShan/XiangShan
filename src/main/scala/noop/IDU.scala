@@ -7,8 +7,8 @@ import utils._
 
 class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new PcInstrIO))
-    val out = Decoupled(new PcCtrlDataIO)
+    val in = Flipped(Decoupled(new CtrlFlowIO))
+    val out = Decoupled(new DecodeIO)
   })
 
   val instr = io.in.bits.instr
@@ -29,13 +29,13 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
     InstrJ -> (SrcType.pc , SrcType.imm),
     InstrN -> (SrcType.pc , SrcType.imm)
   )
-  io.out.bits.ctrl.src1Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
-  io.out.bits.ctrl.src2Type := LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
+  val src1Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
+  val src2Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
 
   val (rs, rt, rd) = (instr(19, 15), instr(24, 20), instr(11, 7))
   // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
-  io.out.bits.ctrl.rfSrc1 := Mux(io.out.bits.ctrl.src1Type === SrcType.pc, 0.U, rs)
-  io.out.bits.ctrl.rfSrc2 := Mux(io.out.bits.ctrl.src2Type === SrcType.reg, rt, 0.U)
+  io.out.bits.ctrl.rfSrc1 := Mux(src1Type === SrcType.pc, 0.U, rs)
+  io.out.bits.ctrl.rfSrc2 := Mux(src2Type === SrcType.reg, rt, 0.U)
   io.out.bits.ctrl.rfWen := isrfWen(instrType)
   io.out.bits.ctrl.rfDest := Mux(isrfWen(instrType), rd, 0.U)
 
@@ -52,9 +52,11 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
     when (rd === 1.U && fuOpType === BRUOpType.jal) { io.out.bits.ctrl.fuOpType := BRUOpType.call }
     when (rs === 1.U && fuOpType === BRUOpType.jalr) { io.out.bits.ctrl.fuOpType := BRUOpType.ret }
   }
+  // fix LUI
+  io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
+  io.out.bits.ctrl.src2Type := src2Type
 
-  io.out.bits.pc := io.in.bits.pc
-  io.out.bits.npc := io.in.bits.npc
+  io.out.bits.cf <> io.in.bits
 
   io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid

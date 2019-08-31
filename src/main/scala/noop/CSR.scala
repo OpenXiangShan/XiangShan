@@ -38,8 +38,8 @@ trait HasCSRConst {
 }
 
 class CSRIO extends FunctionUnitIO {
-  val pc = Input(UInt(32.W))
-  val csrjmp = new BranchIO
+  val cfIn = Flipped(new CtrlFlowIO)
+  val redirect = new RedirectIO
   // exception
   val isInvOpcode = Input(Bool())
 }
@@ -79,8 +79,8 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   def readWithScala(addr: Int): UInt = scalaMapping(addr)
 
   val addr = src2(11, 0)
-  val rdata = LookupTree(addr, 0.U, chiselMapping)(31, 0)
-  val wdata = LookupTree(func, 0.U, List(
+  val rdata = LookupTree(addr, chiselMapping)(31, 0)
+  val wdata = LookupTree(func, List(
     CSROpType.wrt -> src1,
     CSROpType.set -> (rdata | src1),
     CSROpType.clr -> (rdata & ~src1)
@@ -103,11 +103,11 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
     isEcall -> 11.U
   ))
 
-  io.csrjmp.isTaken := (valid && func === CSROpType.jmp) || isException
-  io.csrjmp.target := Mux(isMret, mepc, mtvec)
+  io.redirect.valid := (valid && func === CSROpType.jmp) || isException
+  io.redirect.target := Mux(isMret, mepc, mtvec)
 
-  when (io.csrjmp.isTaken && !isMret) {
-    mepc := io.pc
+  when (io.redirect.valid && !isMret) {
+    mepc := io.cfIn.pc
     mcause := exceptionNO
   }
 

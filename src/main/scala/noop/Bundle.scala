@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 
-class CtrlPathIO extends Bundle {
+class CtrlSignalIO extends Bundle {
   val src1Type = Output(SrcType())
   val src2Type = Output(SrcType())
   val fuType = Output(FuType())
@@ -18,43 +18,40 @@ class CtrlPathIO extends Bundle {
   val isSrc2Forward = Output(Bool())
 }
 
-class DataPathIO extends Bundle {
+class DataSrcIO extends Bundle {
   val src1 = Output(UInt(32.W))
   val src2 = Output(UInt(32.W))
   val imm  = Output(UInt(32.W))
-  val dest = Output(UInt(32.W))
 }
 
-class PcInstrIO extends Bundle {
+class RedirectIO extends Bundle {
+  val target = Output(UInt(32.W))
+  val valid = Output(Bool())
+}
+
+class CtrlFlowIO extends Bundle {
   val instr = Output(UInt(32.W))
   val pc = Output(UInt(32.W))
-  val npc = Output(UInt(32.W))
+  val pnpc = Output(UInt(32.W))
+  val redirect = new RedirectIO
 }
 
-class PcCtrlDataIO extends Bundle {
-  val pc = Output(UInt(32.W))
-  val npc = Output(UInt(32.W))
-  val ctrl = new CtrlPathIO
-  val data = new DataPathIO
+class DecodeIO extends Bundle {
+  val cf = new CtrlFlowIO
+  val ctrl = new CtrlSignalIO
+  val data = new DataSrcIO
 }
 
 class WriteBackIO extends Bundle {
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
-  val rfWdata = Output(UInt(32.W))
-}
-
-class BranchIO extends Bundle {
-  val isTaken = Output(Bool())
-  val target = Output(UInt(32.W))
+  val rfData = Output(UInt(32.W))
 }
 
 class CommitIO extends Bundle {
-  val pc = Output(UInt(32.W))
-  val ctrl = new CtrlPathIO
+  val decode = new DecodeIO
   val isMMIO = Output(Bool())
-  val commits = Output(Vec(FuType.num, new WriteBackIO))
-  val br = new BranchIO
+  val commits = Output(Vec(FuType.num, UInt(32.W)))
 }
 
 class FunctionUnitIO extends Bundle {
@@ -67,9 +64,7 @@ class FunctionUnitIO extends Bundle {
 }
 
 class ForwardIO extends Bundle {
-  val rfWen = Output(Bool())
-  val rfDest = Output(UInt(5.W))
   val valid = Output(Bool())
+  val wb = new WriteBackIO
   val fuType = Output(FuType())
-  val rfData = Output(UInt(32.W))
 }

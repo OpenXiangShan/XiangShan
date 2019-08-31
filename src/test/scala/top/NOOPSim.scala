@@ -19,8 +19,10 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   val noop = Module(new NOOP()(NOOPConfig(FPGAPlatform = false)))
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
-  val imemdelay = Module(new AXI4Delayer(40))
-  val dmemdelay = Module(new AXI4Delayer(40))
+  // Be careful with the commit checking of emu.
+  // A large delay will make emu incorrectly report getting stuck.
+  val imemdelay = Module(new AXI4Delayer(20))
+  val dmemdelay = Module(new AXI4Delayer(20))
   val mmio = Module(new SimMMIO)
 
   imemdelay.io.in <> noop.io.imem
