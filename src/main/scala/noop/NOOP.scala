@@ -56,18 +56,17 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
       GTimer(), ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
-    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, npc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.npc) }
-    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, npc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.npc) }
-    when (isu.io.in.valid) { printf("ISU: pc = 0x%x, npc = 0x%x\n", isu.io.in.bits.pc, isu.io.in.bits.npc) }
-    when (exu.io.in.valid) { printf("EXU: pc = 0x%x, npc = 0x%x\n", exu.io.in.bits.pc, exu.io.in.bits.npc) }
-    when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.pc) }
+    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) }
+    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.pnpc) }
+    when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) }
+    when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) }
+    when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.decode.cf.pc) }
   }
 
   isu.io.wb <> wbu.io.wb
-  ifu.io.br <> wbu.io.brOut
+  ifu.io.redirect <> wbu.io.redirect
   // forward
   isu.io.forward <> exu.io.forward
-  exu.io.wbData := wbu.io.wb.rfWdata
 
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))

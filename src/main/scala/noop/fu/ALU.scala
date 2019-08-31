@@ -72,10 +72,9 @@ object ALUInstr extends HasInstrType {
 }
 
 class ALUIO extends FunctionUnitIO {
-  val pc = Input(UInt(32.W))
-  val npc = Input(UInt(32.W))
+  val cfIn = Flipped(new CtrlFlowIO)
+  val redirect = new RedirectIO
   val offset = Input(UInt(32.W))
-  val branch = new BranchIO
 }
 
 class ALU extends Module {
@@ -117,20 +116,22 @@ class ALU extends Module {
   val isBranch = BRUOpType.isBranch(func)
   val isBru = BRUOpType.isBru(func)
   val taken = LookupTree(BRUOpType.getBranchType(func), branchOpTable) ^ BRUOpType.isBranchInvert(func)
-  val target = Mux(isBranch, io.pc + io.offset, adderRes)
-  io.branch.target := Mux(!taken && isBranch, io.pc + 4.U, target)
+  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)
+  val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
+  io.redirect.target := Mux(!taken && isBranch, io.cfIn.pc + 4.U, target)
   // with branch predictor, this is actually to fix the wrong prediction
-  io.branch.isTaken := valid && isBru && (io.branch.target =/= io.npc)
+  io.redirect.valid := valid && isBru && predictWrong
   // may be can move to ISU to calculate pc + 4
-  io.out.bits := Mux(isBru, io.pc + 4.U, aluRes)
+  // this is actually for jal and jalr to write pc + 4 to rd
+  io.out.bits := Mux(isBru, io.cfIn.pc + 4.U, aluRes)
 
   io.in.ready := true.B
   io.out.valid := valid
 
   val bpuUpdateReq = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   bpuUpdateReq.valid := valid && isBru
-  bpuUpdateReq.pc := io.pc
-  bpuUpdateReq.isMissPredict := io.branch.target =/= io.npc
+  bpuUpdateReq.pc := io.cfIn.pc
+  bpuUpdateReq.isMissPredict := predictWrong
   bpuUpdateReq.actualTarget := target
   bpuUpdateReq.actualTaken := taken
   bpuUpdateReq.fuOpType := func
@@ -138,8 +139,8 @@ class ALU extends Module {
 
   BoringUtils.addSource(RegNext(bpuUpdateReq), "bpuUpdateReq")
 
-  val right = valid && isBru && (io.npc === io.branch.target)
-  val wrong = valid && isBru && (io.npc =/= io.branch.target)
+  val right = valid && isBru && !predictWrong
+  val wrong = valid && isBru && predictWrong
   BoringUtils.addSource(right && isBranch, "MbpBRight")
   BoringUtils.addSource(wrong && isBranch, "MbpBWrong")
   BoringUtils.addSource(right && (func === BRUOpType.jal || func === BRUOpType.call), "MbpJRight")

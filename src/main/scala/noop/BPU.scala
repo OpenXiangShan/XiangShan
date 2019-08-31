@@ -42,7 +42,7 @@ class BPUUpdateReq extends Bundle {
 class BPU1 extends Module {
   val io = IO(new Bundle {
     val in = new Bundle { val pc = Flipped(Valid((UInt(32.W)))) }
-    val out = new BranchIO
+    val out = new RedirectIO
     val flush = Input(Bool())
   })
 
@@ -119,13 +119,13 @@ class BPU1 extends Module {
   }
 
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  io.out.isTaken := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
+  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
 }
 
 class BPU2 extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Valid(new PcInstrIO))
-    val out = new BranchIO
+    val in = Flipped(Valid(new CtrlFlowIO))
+    val out = new RedirectIO
   })
 
   val instr = io.in.bits.instr
@@ -144,5 +144,5 @@ class BPU2 extends Module {
   val offset :: predict :: Nil = ListLookup(instr, default, table)
 
   io.out.target := io.in.bits.pc + offset
-  io.out.isTaken := io.in.valid && predict(0)
+  io.out.valid := io.in.valid && predict(0)
 }

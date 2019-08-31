@@ -26,8 +26,8 @@ class ScoreBoard {
 
 class ISU(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new PcCtrlDataIO))
-    val out = Decoupled(new PcCtrlDataIO)
+    val in = Flipped(Decoupled(new DecodeIO))
+    val out = Decoupled(new DecodeIO)
     val wb = Flipped(new WriteBackIO)
     val flush = Input(Bool())
     val forward = Flipped(new ForwardIO)
@@ -40,10 +40,10 @@ class ISU(implicit val p: NOOPConfig) extends Module {
 
   def isDepend(rfSrc: UInt, rfDest: UInt, wen: Bool): Bool = (rfSrc =/= 0.U) && (rfSrc === rfDest) && wen
 
-  val forwardRfWen = io.forward.rfWen && io.forward.valid
+  val forwardRfWen = io.forward.wb.rfWen && io.forward.valid
   val dontForward = (io.forward.fuType =/= FuType.alu) && (io.forward.fuType =/= FuType.lsu)
-  val src1DependEX = isDepend(rfSrc1, io.forward.rfDest, forwardRfWen)
-  val src2DependEX = isDepend(rfSrc2, io.forward.rfDest, forwardRfWen)
+  val src1DependEX = isDepend(rfSrc1, io.forward.wb.rfDest, forwardRfWen)
+  val src2DependEX = isDepend(rfSrc2, io.forward.wb.rfDest, forwardRfWen)
   val src1DependWB = isDepend(rfSrc1, io.wb.rfDest, io.wb.rfWen)
   val src2DependWB = isDepend(rfSrc2, io.wb.rfDest, io.wb.rfWen)
 
@@ -59,36 +59,27 @@ class ISU(implicit val p: NOOPConfig) extends Module {
 
   val rf = new RegFile
   io.out.bits.data.src1 := Mux1H(List(
-    (io.in.bits.ctrl.src1Type === SrcType.pc) -> io.in.bits.pc,
-    src1ForwardNextCycle -> io.forward.rfData,
-    (src1Forward && !src1ForwardNextCycle) -> io.wb.rfWdata,
+    (io.in.bits.ctrl.src1Type === SrcType.pc) -> io.in.bits.cf.pc,
+    src1ForwardNextCycle -> io.forward.wb.rfData,
+    (src1Forward && !src1ForwardNextCycle) -> io.wb.rfData,
     ((io.in.bits.ctrl.src1Type =/= SrcType.pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
   ))
   io.out.bits.data.src2 := Mux1H(List(
     (io.in.bits.ctrl.src2Type =/= SrcType.reg) -> io.in.bits.data.imm,
-    src2ForwardNextCycle -> io.forward.rfData,
-    (src2Forward && !src2ForwardNextCycle) -> io.wb.rfWdata,
+    src2ForwardNextCycle -> io.forward.wb.rfData,
+    (src2Forward && !src2ForwardNextCycle) -> io.wb.rfData,
     ((io.in.bits.ctrl.src2Type === SrcType.reg) && !src2ForwardNextCycle && !src2Forward) -> rf.read(rfSrc2)
   ))
   io.out.bits.data.imm  := io.in.bits.data.imm
-  io.out.bits.data.dest := DontCare
 
-  (io.out.bits.ctrl, io.in.bits.ctrl) match { case (o, i) =>
-    o.fuType := i.fuType
-    o.fuOpType := i.fuOpType
-    o.rfWen := i.rfWen
-    o.rfDest := i.rfDest
-    o.isInvOpcode := i.isInvOpcode
-    o.isNoopTrap := i.isNoopTrap
-  }
-  io.out.bits.pc := io.in.bits.pc
-  io.out.bits.npc := io.in.bits.npc
+  io.out.bits.cf <> io.in.bits.cf
+  io.out.bits.ctrl := io.in.bits.ctrl
   io.out.bits.ctrl.isSrc1Forward := src1ForwardNextCycle
   io.out.bits.ctrl.isSrc2Forward := src2ForwardNextCycle
 
-  when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfWdata) }
+  when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfData) }
 
-  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(32.W))
+  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(32.W))
   val isuFireSetMask = Mux(io.out.fire(), sb.mask(rfDest), 0.U)
   when (io.flush) { sb.update(0.U, "hffffffff".U) }
   .otherwise { sb.update(isuFireSetMask, wbClearMask) }

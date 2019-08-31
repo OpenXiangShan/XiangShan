@@ -7,8 +7,8 @@ import utils._
 
 class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new PcInstrIO))
-    val out = Decoupled(new PcCtrlDataIO)
+    val in = Flipped(Decoupled(new CtrlFlowIO))
+    val out = Decoupled(new DecodeIO)
   })
 
   val instr = io.in.bits.instr
@@ -56,8 +56,7 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.bits.ctrl.src2Type := src2Type
 
-  io.out.bits.pc := io.in.bits.pc
-  io.out.bits.npc := io.in.bits.npc
+  io.out.bits.cf <> io.in.bits
 
   io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
