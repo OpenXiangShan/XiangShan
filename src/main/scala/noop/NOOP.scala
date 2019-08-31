@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
-import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
+import bus.simplebus._
 import bus.axi4._
 import utils._
 
@@ -68,11 +68,15 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   // forward
   isu.io.forward <> exu.io.forward
 
+  val cohUpdate = Wire(Decoupled(new SimpleBusReqBundle(dataBits = 32)))
+
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
+    icache.io.updateIn <> cohUpdate
+    icache.io.updateOut := DontCare
     icache.io.mem
   } else { ifu.io.imem.toAXI4() })
 
@@ -80,6 +84,8 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
+    cohUpdate <> dcache.io.updateOut
+    dcache.io.updateIn := DontCare
     dcache.io.mem
   } else { exu.io.dmem.toAXI4() })
   io.mmio <> exu.io.mmio

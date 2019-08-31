@@ -7,8 +7,12 @@ import utils._
 import bus.axi4._
 
 object SimpleBusCmd {
-  def cmdRead  = "b0000".U
-  def cmdWrite = "b0001".U
+                                //   hit    |    miss
+  def cmdRead       = "b0000".U //  read    |   refill
+  def cmdWrite      = "b0001".U //  write   |   refill
+  def cmdProbe      = "b0010".U //  read    | do nothing
+  def cmdUpdate     = "b0011".U //  write   | do nothing
+  def cmdInvalidate = "b0010".U // invalide | do nothing
 }
 
 class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
@@ -26,6 +30,7 @@ class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundl
 
   def isRead() = cmd === SimpleBusCmd.cmdRead
   def isWrite() = cmd === SimpleBusCmd.cmdWrite
+  def isUpdate() = cmd === SimpleBusCmd.cmdUpdate
 }
 
 class SimpleBusRespBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {

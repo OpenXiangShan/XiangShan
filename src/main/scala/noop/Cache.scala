@@ -134,6 +134,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
+    val update = Decoupled(new SimpleBusReqBundle(dataBits = dataBits))
     val mem = new AXI4
   })
 
@@ -145,27 +146,22 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
-
-  val wen = if (ro) false.B else req.isWrite()
-  val wmaskExpand = maskExpand(req.wmask)
-  val wordMask = Mux(wen, wmaskExpand, 0.U(32.W))
+  val wordMask = Mux(req.isWrite() || req.isUpdate(), maskExpand(req.wmask), 0.U(32.W))
 
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
-  if (!ro) {
-    val update = hit && wen
-    val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
-    dataHitWriteBus.req.valid := update
-    dataHitWriteBus.req.bits.idx := addr.index
-    dataHitWriteBus.req.bits.data.data := dataMerge
-    dataHitWriteBus.req.bits.wordIndex := addr.wordIndex
+  val hitWrite = hit && (req.isWrite() || req.isUpdate())
+  val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
+  dataHitWriteBus.req.valid := hitWrite
+  dataHitWriteBus.req.bits.idx := addr.index
+  dataHitWriteBus.req.bits.data.data := dataMerge
+  dataHitWriteBus.req.bits.wordIndex := addr.wordIndex
 
-    metaHitWriteBus.req.valid := update && !meta.dirty
-    metaHitWriteBus.req.bits.idx := addr.index
-    metaHitWriteBus.req.bits.data.valid := true.B
-    metaHitWriteBus.req.bits.data.tag := meta.tag
-    metaHitWriteBus.req.bits.data.dirty := true.B
-  }
+  metaHitWriteBus.req.valid := hitWrite && !meta.dirty
+  metaHitWriteBus.req.bits.idx := addr.index
+  metaHitWriteBus.req.bits.data.valid := true.B
+  metaHitWriteBus.req.bits.data.tag := meta.tag
+  if (!ro) metaHitWriteBus.req.bits.data.dirty := true.B
 
   // if miss, access memory
   io.mem := DontCare
@@ -226,8 +222,9 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     is (s_idle) {
       afterFirstRead := false.B
       alreadyOutFire := false.B
+
       // actually this can use s2 to test
-      when (miss && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
+      when (miss && !req.isUpdate() && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
     }
     is (s_memReadReq) { when (io.mem.ar.fire()) {
       state := s_memReadResp
@@ -274,7 +271,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   metaRefillWriteBus.req.bits.idx := addr.index
   metaRefillWriteBus.req.bits.data.valid := true.B
   metaRefillWriteBus.req.bits.data.tag := addr.tag
-  if (!ro) metaRefillWriteBus.req.bits.data.dirty := wen
+  if (!ro) metaRefillWriteBus.req.bits.data.dirty := req.isWrite()
 
   val metaWriteArb = Module(new Arbiter(CacheMetaArrayWriteBus().req.bits, 2))
   metaWriteArb.io.in(0) <> metaHitWriteBus.req
@@ -283,12 +280,24 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.user := io.in.bits.req.user
-  io.out.valid := io.in.valid && Mux(hit, true.B, Mux(wen, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
+  io.out.valid := io.in.valid && Mux(hit, !req.isUpdate(), Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the
   // request is really end.
-  io.isFinish := Mux(hit || wen, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
+  io.isFinish := Mux(req.isUpdate(), true.B, Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
+
+  if (!ro) {
+    val update = Wire(Decoupled(new SimpleBusReqBundle(dataBits = dataBits)))
+    update.bits := req
+    update.bits.cmd := SimpleBusCmd.cmdUpdate
+    update.valid := io.in.valid && req.isWrite() && !BoolStopWatch(update.fire(), io.isFinish)
+    // FIXME: wait until the update request is enqueued
+    io.update <> Queue(update, entries = 4)
+  } else {
+    io.update := DontCare
+    io.update.valid := false.B
+  }
 
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
@@ -307,6 +316,8 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
     val addr = Output(UInt(32.W))
     val flush = Input(UInt(2.W))
     val mem = new AXI4
+    val updateIn = Flipped(Decoupled(new SimpleBusReqBundle(dataBits = dataBits)))
+    val updateOut = Decoupled(new SimpleBusReqBundle(dataBits = dataBits))
   })
 
   val s1 = Module(new CacheStage1(ro, name, userBits))
@@ -315,7 +326,13 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   val metaArray = Module(new SRAMTemplate(new MetaBundle, set = Sets, way = Ways, shouldReset = true, singlePort = true))
   val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, shouldReset = true, singlePort = true))
 
-  s1.io.in <> io.in.req
+  val inputArb = Module(new Arbiter(chiselTypeOf(io.in.req.bits), 2))
+  inputArb.io.in(0) <> io.updateIn
+  inputArb.io.in(1) <> io.in.req
+  s1.io.in <> inputArb.io.out
+
+  io.updateOut <> s3.io.update
+
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
