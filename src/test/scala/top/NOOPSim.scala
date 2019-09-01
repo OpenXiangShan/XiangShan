@@ -1,6 +1,7 @@
 package top
 
-import noop._
+import system._
+import noop.NOOPConfig
 
 import chisel3._
 import chisel3.util._
@@ -8,7 +9,6 @@ import chisel3.util.experimental.BoringUtils
 
 import bus.axi4._
 import device.AXI4RAM
-import bus.simplebus.SimpleBus2AXI4Converter
 import utils.DiffTestIO
 
 class NOOPSimTop(memInitFile: String = "") extends Module {
@@ -16,7 +16,7 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
     val difftest = new DiffTestIO
   })
 
-  val noop = Module(new NOOP()(NOOPConfig(FPGAPlatform = false)))
+  val noop = Module(new NOOPSoC()(NOOPConfig(FPGAPlatform = false)))
   val imem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   val dmem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
   // Be careful with the commit checking of emu.
@@ -38,6 +38,4 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
   io.difftest := difftest
-
-//  noop.io.uncacheMem := DontCare
 }
