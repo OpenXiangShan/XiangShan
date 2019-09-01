@@ -69,15 +69,9 @@ class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
   val resp = Flipped(Decoupled(new SimpleBusULRespBundle(dataBits, userBits)))
 
   override def cloneType = new SimpleBusUL(dataBits, userBits).asInstanceOf[this.type]
-
   def isWrite() = req.valid && req.bits.isWrite()
   def isRead()  = req.valid && req.bits.isRead()
-
-  def toAXI4() = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter(cloneType, new AXI4Lite))
-    mem2axi.io.in <> this
-    mem2axi.io.out
-  }
+  def toAXI4() = SimpleBus2AXI4Converter(this, new AXI4Lite)
 
   def dump(name: String) = {
     when (req.fire()) { printf(p"${GTimer()},[${name}] ${req.bits}") }
@@ -91,10 +85,5 @@ class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
   override val resp = Flipped(Decoupled(new SimpleBusUHRespBundle(dataBits, userBits)))
 
   override def cloneType = new SimpleBusUH(dataBits, userBits).asInstanceOf[this.type]
-
-  override def toAXI4() = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter(cloneType, new AXI4))
-    mem2axi.io.in <> this
-    mem2axi.io.out
-  }
+  override def toAXI4() = SimpleBus2AXI4Converter(this, new AXI4)
 }

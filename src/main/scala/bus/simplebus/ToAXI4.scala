@@ -14,7 +14,7 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
   require(ULtoAXI4Lite || UHtoAXI4)
 
   val io = IO(new Bundle {
-    val in = Flipped(inType)
+    val in = Flipped(chiselTypeOf(inType))
     val out = Flipped(Flipped(outType))
   })
 
@@ -64,4 +64,12 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
   axi.r.ready  := mem.resp.ready
   axi.b.ready  := mem.resp.ready
   mem.resp.valid  := Mux(wen, axi.b.valid, axi.r.valid)
+}
+
+object SimpleBus2AXI4Converter {
+  def apply[IT <: SimpleBusUL, OT <: AXI4Lite](inType: IT, outType: OT): OT = {
+    val bridge = Module(new SimpleBus2AXI4Converter(inType, outType))
+    bridge.io.in <> inType
+    bridge.io.out
+  }
 }
