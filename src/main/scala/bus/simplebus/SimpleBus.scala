@@ -74,7 +74,7 @@ class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
   def isRead()  = req.valid && req.bits.isRead()
 
   def toAXI4() = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter(new AXI4Lite, dataBits, userBits))
+    val mem2axi = Module(new SimpleBus2AXI4Converter(cloneType, new AXI4Lite))
     mem2axi.io.in <> this
     mem2axi.io.out
   }
@@ -93,7 +93,7 @@ class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
   override def cloneType = new SimpleBusUH(dataBits, userBits).asInstanceOf[this.type]
 
   override def toAXI4() = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter(new AXI4, dataBits, userBits))
+    val mem2axi = Module(new SimpleBus2AXI4Converter(cloneType, new AXI4))
     mem2axi.io.in <> this
     mem2axi.io.out
   }

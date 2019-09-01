@@ -6,11 +6,16 @@ import chisel3.util._
 import bus.axi4._
 import utils._
 
-class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
-  val dataBits: Int = 32, val userBits: Int = 0) extends Module {
+class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
+  (inType: IT, outType: OT) extends Module {
+
+  val ULtoAXI4Lite = (inType.getClass == classOf[SimpleBusUL]) && (outType.getClass == classOf[AXI4Lite])
+  val UHtoAXI4 = (inType.getClass == classOf[SimpleBusUH]) && (outType.getClass == classOf[AXI4])
+  require(ULtoAXI4Lite || UHtoAXI4)
+
   val io = IO(new Bundle {
-    val in = Flipped(new SimpleBusUH(dataBits, userBits))
-    val out = Flipped(Flipped(_type))
+    val in = Flipped(inType)
+    val out = Flipped(Flipped(outType))
   })
 
   val (mem, axi) = (io.in, io.out)
@@ -24,25 +29,25 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
   def LineBeats = 8
   val wlast = WireInit(true.B)
   val rlast = WireInit(true.B)
-  io.out match {
-    case axi4: AXI4 =>
-      axi4.ar.bits.id    := 0.U
-      axi4.ar.bits.len   := Mux(mem.req.bits.burst, (LineBeats - 1).U, 0.U)
-      axi4.ar.bits.size  := mem.req.bits.size
-      axi4.ar.bits.burst := AXI4Parameters.BURST_WRAP
-      axi4.ar.bits.lock  := false.B
-      axi4.ar.bits.cache := 0.U
-      axi4.ar.bits.qos   := 0.U
-      axi4.ar.bits.user  := 0.U
-      axi4.w.bits.last   := mem.req.bits.wlast
-      wlast := mem.req.bits.wlast
-      rlast := axi4.r.bits.last
-    case axi4lite: AXI4Lite =>
+  if (UHtoAXI4) {
+    val axi4 = io.out.asInstanceOf[AXI4]
+    val uh = io.in.asInstanceOf[SimpleBusUH]
+    axi4.ar.bits.id    := 0.U
+    axi4.ar.bits.len   := Mux(uh.req.bits.burst, (LineBeats - 1).U, 0.U)
+    axi4.ar.bits.size  := uh.req.bits.size
+    axi4.ar.bits.burst := AXI4Parameters.BURST_WRAP
+    axi4.ar.bits.lock  := false.B
+    axi4.ar.bits.cache := 0.U
+    axi4.ar.bits.qos   := 0.U
+    axi4.ar.bits.user  := 0.U
+    axi4.w.bits.last   := uh.req.bits.wlast
+    uh.resp.bits.rlast := rlast
+    wlast := uh.req.bits.wlast
+    rlast := axi4.r.bits.last
   }
 
   aw := ar
   mem.resp.bits.rdata := r.data
-  mem.resp.bits.rlast := rlast
   mem.resp.bits.user := 0.U
 
   val wSend = Wire(Bool())
