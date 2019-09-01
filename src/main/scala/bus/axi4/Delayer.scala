@@ -9,7 +9,7 @@ import utils._
 class AXI4Delayer[T <: AXI4Lite](latency: Int = 0, _type: T = new AXI4) extends Module {
   val io = IO(new Bundle{
     val in = Flipped(_type)
-    val out = new AXI4 //_type
+    val out = Flipped(Flipped(_type))
   })
 
   io.out.ar <> LatencyPipe(io.in.ar, latency)

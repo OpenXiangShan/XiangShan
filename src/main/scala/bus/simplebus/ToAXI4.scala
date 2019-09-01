@@ -10,7 +10,7 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
   val dataBits: Int = 32, val userBits: Int = 0) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBus(dataBits, userBits))
-    val out = new AXI4 //_type
+    val out = Flipped(Flipped(_type))
   })
 
   val (mem, axi) = (io.in, io.out)
