@@ -18,14 +18,16 @@ object SimpleBusCmd {
 class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
   val addr = Output(UInt(32.W))
   val size = Output(UInt(3.W))
+  val burst = Output(Bool())
   val cmd = Output(UInt(4.W))
   val wmask = Output(UInt((dataBits / 8).W))
   val wdata = Output(UInt(dataBits.W))
+  val wlast = Output(Bool())
   val user = Output(UInt(userBits.W))
 
   override def toPrintable: Printable = {
-    p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)}, " +
-    p"cmd = ${cmd}, wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}"
+    p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)}, burst = ${burst} " +
+    p"cmd = ${cmd}, wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}, wlast = ${wlast}"
   }
 
   def isRead() = cmd === SimpleBusCmd.cmdRead
@@ -35,10 +37,11 @@ class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundl
 
 class SimpleBusRespBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
   val rdata = Output(UInt(dataBits.W))
+  val rlast = Output(Bool())
   val user = Output(UInt(userBits.W))
 
   override def toPrintable: Printable = {
-    p"rdata = ${Hexadecimal(rdata)}"
+    p"rdata = ${Hexadecimal(rdata)}, rlast = ${rlast}"
   }
 }
 
@@ -51,7 +54,7 @@ class SimpleBus(val dataBits: Int = 32, val userBits: Int = 0) extends Bundle {
 
   def toAXI4(isLite: Boolean = false) = {
     val mem2axi = Module(new SimpleBus2AXI4Converter(
-      if (isLite) new AXI4Lite else new AXI4, dataBits, userBits))
+      new AXI4, dataBits, userBits))
     mem2axi.io.in <> this
     mem2axi.io.out
   }

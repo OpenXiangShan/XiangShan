@@ -27,6 +27,7 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
   w.data := mem.req.bits.wdata
   w.strb := mem.req.bits.wmask
 
+  val rlast = WireInit(true.B)
   io.out match {
     case axi4: AXI4 =>
       axi4.ar.bits.id    := 0.U
@@ -43,6 +44,7 @@ class SimpleBus2AXI4Converter[T <: AXI4Lite](_type: T = new AXI4,
 
   aw := ar
   mem.resp.bits.rdata := r.data
+  mem.resp.bits.rlast := rlast
   mem.resp.bits.user := 0.U
 
   val wSend = Wire(Bool())

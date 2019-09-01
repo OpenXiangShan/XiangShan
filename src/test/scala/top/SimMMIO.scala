@@ -32,6 +32,7 @@ class SimMMIO extends Module {
   helper.io.reqWdata := io.rw.req.bits.wdata
   helper.io.reqWmask := io.rw.req.bits.wmask
   io.rw.resp.bits.rdata := helper.io.respRdata
+  io.rw.resp.bits.rlast := true.B
   io.rw.resp.bits.user := 0.U
 
   io.rw.req.ready := true.B
