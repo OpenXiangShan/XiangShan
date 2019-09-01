@@ -44,8 +44,8 @@ object LSUInstr extends HasInstrType {
 
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
-  val dmem = new SimpleBus
-  val mmio = new SimpleBus
+  val dmem = new SimpleBusUH
+  val mmio = new SimpleBusUL
   val isMMIO = Output(Bool())
 }
 
@@ -108,7 +108,7 @@ class LSU extends Module {
   dmem.req.bits.user := 0.U
   dmem.resp.ready := true.B
 
-  io.mmio.req.bits := dmem.req.bits
+  io.mmio.req.bits := dmem.asInstanceOf[SimpleBusUL].req.bits
   io.mmio.req.valid := valid && (state === s_idle) && mmio
   io.mmio.resp.ready := true.B
 

@@ -28,9 +28,9 @@ object AddressSpace {
 
 class NOOP(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
-    val imem = new SimpleBus
-    val dmem = new SimpleBus
-    val mmio = new SimpleBus
+    val imem = new SimpleBusUH
+    val dmem = new SimpleBusUH
+    val mmio = new SimpleBusUL
   })
 
   val ifu = Module(new IFU)
@@ -68,7 +68,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   // forward
   isu.io.forward <> exu.io.forward
 
-  val cohUpdate = Wire(Decoupled(new SimpleBusReqBundle(dataBits = 32)))
+  val cohUpdate = Wire(Decoupled(new SimpleBusUHReqBundle(dataBits = 32)))
 
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))

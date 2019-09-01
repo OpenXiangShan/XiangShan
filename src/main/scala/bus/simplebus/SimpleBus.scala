@@ -15,51 +15,86 @@ object SimpleBusCmd {
   def cmdInvalidate = "b0010".U // invalide | do nothing
 }
 
-class SimpleBusReqBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
+// Ucache Lightweight
+class SimpleBusULReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
   val addr = Output(UInt(32.W))
-  val size = Output(UInt(3.W))
-  val burst = Output(Bool())
-  val cmd = Output(UInt(4.W))
+  val cmd = Output(UInt(1.W))
   val wmask = Output(UInt((dataBits / 8).W))
   val wdata = Output(UInt(dataBits.W))
-  val wlast = Output(Bool())
   val user = Output(UInt(userBits.W))
 
+  override def cloneType = new SimpleBusULReqBundle(dataBits, userBits).asInstanceOf[this.type]
   override def toPrintable: Printable = {
-    p"addr = 0x${Hexadecimal(addr)}, size = 0x${Hexadecimal(size)}, burst = ${burst} " +
-    p"cmd = ${cmd}, wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}, wlast = ${wlast}"
+    p"addr = 0x${Hexadecimal(addr)}, cmd = ${cmd}, " +
+    p"wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}\n"
   }
 
   def isRead() = cmd === SimpleBusCmd.cmdRead
   def isWrite() = cmd === SimpleBusCmd.cmdWrite
+}
+
+class SimpleBusULRespBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
+  val rdata = Output(UInt(dataBits.W))
+  val user = Output(UInt(userBits.W))
+
+  override def cloneType = new SimpleBusULRespBundle(dataBits, userBits).asInstanceOf[this.type]
+  override def toPrintable: Printable = p"rdata = ${Hexadecimal(rdata)}\n"
+}
+
+// Uncache Heavyweight
+class SimpleBusUHReqBundle(dataBits: Int, userBits: Int = 0)
+  extends SimpleBusULReqBundle(dataBits, userBits) {
+  override val cmd = Output(UInt(4.W))
+  val size = Output(UInt(3.W))
+  val burst = Output(Bool())
+  val wlast = Output(Bool())
+
+  override def cloneType = new SimpleBusUHReqBundle(dataBits, userBits).asInstanceOf[this.type]
+  override def toPrintable: Printable =
+    super.toPrintable + p"size = 0x${Hexadecimal(size)}, burst = ${burst}, wlast = ${wlast}\n"
+
   def isUpdate() = cmd === SimpleBusCmd.cmdUpdate
 }
 
-class SimpleBusRespBundle(val dataBits: Int, val userBits: Int = 0) extends Bundle {
-  val rdata = Output(UInt(dataBits.W))
+class SimpleBusUHRespBundle(dataBits: Int, userBits: Int = 0)
+  extends SimpleBusULRespBundle(dataBits, userBits) {
   val rlast = Output(Bool())
-  val user = Output(UInt(userBits.W))
 
-  override def toPrintable: Printable = {
-    p"rdata = ${Hexadecimal(rdata)}, rlast = ${rlast}"
-  }
+  override def cloneType = new SimpleBusUHRespBundle(dataBits, userBits).asInstanceOf[this.type]
+  override def toPrintable: Printable = super.toPrintable + p"rlast = ${rlast}\n"
 }
 
-class SimpleBus(val dataBits: Int = 32, val userBits: Int = 0) extends Bundle {
-  val req = Decoupled(new SimpleBusReqBundle(dataBits, userBits))
-  val resp = Flipped(Decoupled(new SimpleBusRespBundle(dataBits, userBits)))
+class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
+  val req = Decoupled(new SimpleBusULReqBundle(dataBits, userBits))
+  val resp = Flipped(Decoupled(new SimpleBusULRespBundle(dataBits, userBits)))
+
+  override def cloneType = new SimpleBusUL(dataBits, userBits).asInstanceOf[this.type]
 
   def isWrite() = req.valid && req.bits.isWrite()
   def isRead()  = req.valid && req.bits.isRead()
 
-  def toAXI4[T <: AXI4Lite](_type: T = new AXI4) = {
-    val mem2axi = Module(new SimpleBus2AXI4Converter(_type, dataBits, userBits))
+  def toAXI4() = {
+    val mem2axi = Module(new SimpleBus2AXI4Converter(new AXI4Lite, dataBits, userBits))
     mem2axi.io.in <> this
     mem2axi.io.out
   }
 
   def dump(name: String) = {
-    when (req.fire()) { printf(p"${GTimer()},[${name}] ${req.bits}\n") }
-    when (resp.fire()) { printf(p"${GTimer()},[${name}] ${resp.bits}\n") }
+    when (req.fire()) { printf(p"${GTimer()},[${name}] ${req.bits}") }
+    when (resp.fire()) { printf(p"${GTimer()},[${name}] ${resp.bits}") }
+  }
+}
+
+class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
+  extends SimpleBusUL(dataBits, userBits) {
+  override val req = Decoupled(new SimpleBusUHReqBundle(dataBits, userBits))
+  override val resp = Flipped(Decoupled(new SimpleBusUHRespBundle(dataBits, userBits)))
+
+  override def cloneType = new SimpleBusUH(dataBits, userBits).asInstanceOf[this.type]
+
+  override def toAXI4() = {
+    val mem2axi = Module(new SimpleBus2AXI4Converter(new AXI4, dataBits, userBits))
+    mem2axi.io.in <> this
+    mem2axi.io.out
   }
 }

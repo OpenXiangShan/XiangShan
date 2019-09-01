@@ -56,7 +56,7 @@ sealed class DataBundle extends Bundle {
 }
 
 sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
-  val req = new SimpleBusReqBundle(dataBits = dataBits, userBits = userBits)
+  val req = new SimpleBusUHReqBundle(dataBits = dataBits, userBits = userBits)
 
   override def cloneType = new Stage1IO(userBits).asInstanceOf[this.type]
 }
@@ -64,13 +64,13 @@ sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
 // meta read
 sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits, userBits)))
+    val in = Flipped(Decoupled(new SimpleBusUHReqBundle(dataBits, userBits)))
     val out = Decoupled(new Stage1IO(userBits))
     val metaReadBus = CacheMetaArrayReadBus()
     val dataReadBus = CacheDataArrayReadBus()
 
-    val s2Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
-    val s3Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
+    val s2Req = Flipped(Valid(new SimpleBusUHReqBundle(dataBits)))
+    val s3Req = Flipped(Valid(new SimpleBusUHReqBundle(dataBits)))
     val s2s3Miss = Input(Bool())
   })
 
@@ -95,7 +95,7 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
 }
 
 sealed class Stage2IO(userBits: Int = 0) extends Bundle with HasCacheConst {
-  val req = new SimpleBusReqBundle(dataBits, userBits)
+  val req = new SimpleBusUHReqBundle(dataBits, userBits)
   val meta = new MetaPipelineBundle
 
   override def cloneType = new Stage2IO(userBits).asInstanceOf[this.type]
@@ -127,15 +127,15 @@ sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends M
 sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Stage2IO(userBits)))
-    val out = Decoupled(new SimpleBusRespBundle(dataBits = dataBits, userBits = userBits))
+    val out = Decoupled(new SimpleBusUHRespBundle(dataBits = dataBits, userBits = userBits))
     val isFinish = Output(Bool())
     val addr = Output(UInt(32.W))
     val flush = Input(Bool())
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
-    val update = Decoupled(new SimpleBusReqBundle(dataBits = dataBits))
-    val mem = new SimpleBus(dataBits)
+    val update = Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits))
+    val mem = new SimpleBusUH(dataBits)
   })
 
   val req = io.in.bits.req
@@ -275,7 +275,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.isFinish := Mux(req.isUpdate(), true.B, Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
 
   if (!ro) {
-    val update = Wire(Decoupled(new SimpleBusReqBundle(dataBits = dataBits)))
+    val update = Wire(Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits)))
     update.bits := req
     update.bits.cmd := SimpleBusCmd.cmdUpdate
     update.valid := io.in.valid && req.isWrite() && !BoolStopWatch(update.fire(), io.isFinish)
@@ -299,12 +299,12 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
 class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
-    val in = Flipped(new SimpleBus(dataBits, userBits))
+    val in = Flipped(new SimpleBusUH(dataBits, userBits))
     val addr = Output(UInt(32.W))
     val flush = Input(UInt(2.W))
-    val mem = new SimpleBus(dataBits)
-    val updateIn = Flipped(Decoupled(new SimpleBusReqBundle(dataBits = dataBits)))
-    val updateOut = Decoupled(new SimpleBusReqBundle(dataBits = dataBits))
+    val mem = new SimpleBusUH(dataBits)
+    val updateIn = Flipped(Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits)))
+    val updateOut = Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits))
   })
 
   val s1 = Module(new CacheStage1(ro, name, userBits))

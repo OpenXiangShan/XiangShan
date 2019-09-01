@@ -13,7 +13,7 @@ trait HasResetVector {
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBus(userBits = 32)
+    val imem = new SimpleBusUH(userBits = 32)
     val pc = Input(UInt(32.W))
     val out = Decoupled(new CtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
