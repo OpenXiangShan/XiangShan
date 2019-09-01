@@ -78,7 +78,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
     icache.io.updateIn <> cohUpdate
     icache.io.updateOut := DontCare
     icache.io.mem
-  } else { ifu.io.imem.toAXI4() })
+  } else { ifu.io.imem }).toAXI4()
 
   io.dmem <> (if (p.HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
@@ -87,6 +87,6 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
     cohUpdate <> dcache.io.updateOut
     dcache.io.updateIn := DontCare
     dcache.io.mem
-  } else { exu.io.dmem.toAXI4() })
+  } else { exu.io.dmem }).toAXI4()
   io.mmio <> exu.io.mmio
 }

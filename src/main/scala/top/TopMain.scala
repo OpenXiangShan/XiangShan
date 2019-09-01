@@ -12,7 +12,7 @@ class NOOPFPGA extends Module {
   val io = IO(new Bundle{
     val imem = new AXI4
     val dmem = new AXI4
-    val mmio = new AXI4Lite
+    val mmio = new AXI4//Lite
 //    val uncacheMem = new AXI4
   })
 
