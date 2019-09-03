@@ -87,3 +87,11 @@ class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
   override def cloneType = new SimpleBusUH(dataBits, userBits).asInstanceOf[this.type]
   override def toAXI4() = SimpleBus2AXI4Converter(this, new AXI4)
 }
+
+// Cache
+class SimpleBusC(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
+  val mem = new SimpleBusUH(dataBits, userBits)
+  val coh = Flipped(new SimpleBusUH(dataBits, userBits))
+
+  override def cloneType = new SimpleBusC(dataBits, userBits).asInstanceOf[this.type]
+}

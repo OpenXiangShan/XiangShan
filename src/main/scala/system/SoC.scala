@@ -8,14 +8,15 @@ import chisel3._
 
 class NOOPSoC(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle{
-    val imem = new AXI4
-    val dmem = new AXI4
+    val mem = new AXI4
     val mmio = (if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUL })
   })
 
   val noop = Module(new NOOP)
-  io.imem <> noop.io.imem.toAXI4()
-  io.dmem <> noop.io.dmem.toAXI4()
+  val cohMg = Module(new CoherenceInterconnect)
+  cohMg.io.in(0) <> noop.io.imem
+  cohMg.io.in(1) <> noop.io.dmem
+  io.mem <> cohMg.io.out.toAXI4()
 
   if (p.FPGAPlatform) io.mmio <> noop.io.mmio.toAXI4()
   else io.mmio <> noop.io.mmio

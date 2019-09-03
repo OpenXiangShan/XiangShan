@@ -28,8 +28,8 @@ object AddressSpace {
 
 class NOOP(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
-    val imem = new SimpleBusUH
-    val dmem = new SimpleBusUH
+    val imem = new SimpleBusC
+    val dmem = new SimpleBusC
     val mmio = new SimpleBusUL
   })
 
@@ -68,25 +68,19 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   // forward
   isu.io.forward <> exu.io.forward
 
-  val cohUpdate = Wire(Decoupled(new SimpleBusUHReqBundle(dataBits = 32)))
-
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
-    icache.io.updateIn <> cohUpdate
-    icache.io.updateOut := DontCare
-    icache.io.mem
+    icache.io.out
   } else { ifu.io.imem })
 
   io.dmem <> (if (p.HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
-    cohUpdate <> dcache.io.updateOut
-    dcache.io.updateIn := DontCare
-    dcache.io.mem
+    dcache.io.out
   } else { exu.io.dmem })
   io.mmio <> exu.io.mmio
 }

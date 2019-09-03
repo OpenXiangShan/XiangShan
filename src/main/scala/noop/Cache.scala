@@ -134,8 +134,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
-    val update = Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits))
     val mem = new SimpleBusUH(dataBits)
+    val cohResp = Decoupled(new SimpleBusUHRespBundle(dataBits = dataBits))
   })
 
   val req = io.in.bits.req
@@ -274,17 +274,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   // request is really end.
   io.isFinish := Mux(req.isUpdate(), true.B, Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
 
-  if (!ro) {
-    val update = Wire(Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits)))
-    update.bits := req
-    update.bits.cmd := SimpleBusCmd.cmdUpdate
-    update.valid := io.in.valid && req.isWrite() && !BoolStopWatch(update.fire(), io.isFinish)
-    // FIXME: wait until the update request is enqueued
-    io.update <> Queue(update, entries = 4)
-  } else {
-    io.update := DontCare
-    io.update.valid := false.B
-  }
+  io.cohResp.bits := DontCare
+  io.cohResp.valid := false.B
 
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
@@ -302,9 +293,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
     val in = Flipped(new SimpleBusUH(dataBits, userBits))
     val addr = Output(UInt(32.W))
     val flush = Input(UInt(2.W))
-    val mem = new SimpleBusUH(dataBits)
-    val updateIn = Flipped(Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits)))
-    val updateOut = Decoupled(new SimpleBusUHReqBundle(dataBits = dataBits))
+    val out = new SimpleBusC(dataBits)
   })
 
   val s1 = Module(new CacheStage1(ro, name, userBits))
@@ -314,11 +303,9 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, shouldReset = true, singlePort = true))
 
   val inputArb = Module(new Arbiter(chiselTypeOf(io.in.req.bits), 2))
-  inputArb.io.in(0) <> io.updateIn
+  inputArb.io.in(0) <> io.out.coh.req
   inputArb.io.in(1) <> io.in.req
   s1.io.in <> inputArb.io.out
-
-  io.updateOut <> s3.io.update
 
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
@@ -326,7 +313,8 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
 
   s3.io.flush := io.flush(1)
   io.addr := s3.io.addr
-  io.mem <> s3.io.mem
+  io.out.mem <> s3.io.mem
+  io.out.coh.resp <> s3.io.cohResp
 
   // stalling
   s1.io.s2Req.valid := s2.io.in.valid
