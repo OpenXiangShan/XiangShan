@@ -271,7 +271,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the
-  // request is really end.
+  // request really ends.
   io.isFinish := Mux(req.isUpdate(), true.B, Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
 
   io.cohResp.bits := DontCare
@@ -334,7 +334,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
 
   Debug(debug) {
     io.in.dump(name + ".in")
-    printf("%d: s1:(%d,%d), s2:(%d,%d), s2:(%d,%d)\n",
+    printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
       GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
     when (s1.io.in.valid) { printf(p"[${name}.S1]: ${s1.io.in.bits}\n") }
     when (s2.io.in.valid) { printf(p"[${name}.S2]: ${s2.io.in.bits.req}\n") }

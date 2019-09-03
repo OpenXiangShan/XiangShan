@@ -15,7 +15,7 @@ object SimpleBusCmd {
   def cmdInvalidate = "b0010".U // invalide | do nothing
 }
 
-// Ucache Lightweight
+// Uncache Lightweight
 class SimpleBusULReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
   val addr = Output(UInt(32.W))
   val cmd = Output(UInt(1.W))
