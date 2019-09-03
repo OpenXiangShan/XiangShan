@@ -15,7 +15,7 @@ object SimpleBusCmd {
   def cmdInvalidate = "b0010".U // invalide | do nothing
 }
 
-// Ucache Lightweight
+// Uncache Lightweight
 class SimpleBusULReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
   val addr = Output(UInt(32.W))
   val cmd = Output(UInt(1.W))
@@ -26,7 +26,7 @@ class SimpleBusULReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
   override def cloneType = new SimpleBusULReqBundle(dataBits, userBits).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     p"addr = 0x${Hexadecimal(addr)}, cmd = ${cmd}, " +
-    p"wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}\n"
+    p"wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}"
   }
 
   def isRead() = cmd === SimpleBusCmd.cmdRead
@@ -38,7 +38,7 @@ class SimpleBusULRespBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
   val user = Output(UInt(userBits.W))
 
   override def cloneType = new SimpleBusULRespBundle(dataBits, userBits).asInstanceOf[this.type]
-  override def toPrintable: Printable = p"rdata = ${Hexadecimal(rdata)}\n"
+  override def toPrintable: Printable = p"rdata = ${Hexadecimal(rdata)}"
 }
 
 // Uncache Heavyweight
@@ -51,7 +51,7 @@ class SimpleBusUHReqBundle(dataBits: Int, userBits: Int = 0)
 
   override def cloneType = new SimpleBusUHReqBundle(dataBits, userBits).asInstanceOf[this.type]
   override def toPrintable: Printable =
-    super.toPrintable + p"size = 0x${Hexadecimal(size)}, burst = ${burst}, wlast = ${wlast}\n"
+    super.toPrintable + p", size = 0x${Hexadecimal(size)}, burst = ${burst}, wlast = ${wlast}"
 
   def isUpdate() = cmd === SimpleBusCmd.cmdUpdate
 }
@@ -61,7 +61,7 @@ class SimpleBusUHRespBundle(dataBits: Int, userBits: Int = 0)
   val rlast = Output(Bool())
 
   override def cloneType = new SimpleBusUHRespBundle(dataBits, userBits).asInstanceOf[this.type]
-  override def toPrintable: Printable = super.toPrintable + p"rlast = ${rlast}\n"
+  override def toPrintable: Printable = super.toPrintable + p", rlast = ${rlast}"
 }
 
 class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
@@ -74,8 +74,8 @@ class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
   def toAXI4() = SimpleBus2AXI4Converter(this, new AXI4Lite)
 
   def dump(name: String) = {
-    when (req.fire()) { printf(p"${GTimer()},[${name}] ${req.bits}") }
-    when (resp.fire()) { printf(p"${GTimer()},[${name}] ${resp.bits}") }
+    when (req.fire()) { printf(p"${GTimer()},[${name}] ${req.bits}\n") }
+    when (resp.fire()) { printf(p"${GTimer()},[${name}] ${resp.bits}\n") }
   }
 }
 

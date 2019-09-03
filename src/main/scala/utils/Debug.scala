@@ -9,3 +9,7 @@ object Debug {
   def apply(flag: Boolean = NOOPConfig().EnableDebug, cond: Bool = true.B)(body: => Unit): Any =
     if (flag) { when (cond && GTimer() > 1020.U) { body } }
 }
+
+object ShowType {
+  def apply[T: Manifest](t: T) = println(manifest[T])
+  }
