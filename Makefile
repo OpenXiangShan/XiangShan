@@ -13,11 +13,11 @@ NEMU_IMAGE ?= $(IMAGE)
 .DEFAULT_GOAL = verilog
 
 help:
-	sbt 'test:runMain top.TopMain --help'
+	mill chiselModule.test.runMain top.$(TOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	sbt 'runMain top.$(TOP) -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf'
+	mill chiselModule.runMain top.$(TOP) -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
 	$(MEM_GEN) $(@D)/$(@F).conf >> $@
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 
@@ -27,7 +27,7 @@ SIM_TOP = NOOPSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	sbt 'test:runMain $(SIMTOP) -td $(@D) --image $(EMU_IMAGE) --output-file $(@F)'
+	mill chiselModule.test.runMain $(SIMTOP) -td $(@D) --image $(EMU_IMAGE) --output-file $(@F)
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
