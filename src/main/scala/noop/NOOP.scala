@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
-import bus.simplebus.{SimpleBus, SimpleBusCrossbar}
+import bus.simplebus._
 import bus.axi4._
 import utils._
 
@@ -28,9 +28,9 @@ object AddressSpace {
 
 class NOOP(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
-    val imem = new AXI4
-    val dmem = new AXI4
-    val mmio = new SimpleBus
+    val imem = new SimpleBusC
+    val dmem = new SimpleBusC
+    val mmio = new SimpleBusUL
   })
 
   val ifu = Module(new IFU)
@@ -73,14 +73,14 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
-    icache.io.mem
-  } else { ifu.io.imem.toAXI4() })
+    icache.io.out
+  } else { ifu.io.imem })
 
   io.dmem <> (if (p.HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
-    dcache.io.mem
-  } else { exu.io.dmem.toAXI4() })
+    dcache.io.out
+  } else { exu.io.dmem })
   io.mmio <> exu.io.mmio
 }

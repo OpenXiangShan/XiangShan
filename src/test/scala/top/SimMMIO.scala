@@ -3,7 +3,7 @@ package top
 import chisel3._
 import chisel3.util._
 
-import bus.simplebus.SimpleBus
+import bus.simplebus._
 
 class DeviceHelper extends BlackBox {
   val io = IO(new Bundle {
@@ -20,7 +20,7 @@ class DeviceHelper extends BlackBox {
 
 class SimMMIO extends Module {
   val io = IO(new Bundle {
-    val rw = Flipped(new SimpleBus)
+    val rw = Flipped(new SimpleBusUL)
   })
 
   val helper = Module(new DeviceHelper)
@@ -32,6 +32,7 @@ class SimMMIO extends Module {
   helper.io.reqWdata := io.rw.req.bits.wdata
   helper.io.reqWmask := io.rw.req.bits.wmask
   io.rw.resp.bits.rdata := helper.io.respRdata
+  io.rw.resp.bits.user := 0.U
 
   io.rw.req.ready := true.B
   io.rw.resp.valid := RegNext(io.rw.req.valid)

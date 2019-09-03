@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
 import utils._
-import bus.simplebus.SimpleBus
+import bus.simplebus._
 
 trait HasResetVector {
   val resetVector = 0x80100000L
@@ -13,7 +13,7 @@ trait HasResetVector {
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBus(userBits = 32)
+    val imem = new SimpleBusUH(userBits = 32)
     val pc = Input(UInt(32.W))
     val out = Decoupled(new CtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
@@ -48,14 +48,14 @@ class IFU extends Module with HasResetVector {
   io.imem.req.valid := io.out.ready
   io.imem.req.bits.addr := pc
   io.imem.req.bits.size := "b10".U
-  io.imem.req.bits.wen := false.B
-  io.imem.req.bits.user.map(_ := npc)
+  io.imem.req.bits.cmd := SimpleBusCmd.cmdRead
+  io.imem.req.bits.user := npc
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
   io.out.bits.instr := io.imem.resp.bits.rdata
-  io.imem.resp.bits.user.map(io.out.bits.pnpc := _)
+  io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
