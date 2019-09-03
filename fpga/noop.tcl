@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# NOOPFPGA, AXI4Timer, AXI4VGA
+# NOOPSoC, AXI4Timer, AXI4VGA
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -50,8 +50,8 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 set list_projs [get_projects -quiet]
 if { $list_projs eq "" } {
-   create_project project_1 myproj -part xc7z020clg484-1
-   set_property BOARD_PART em.avnet.com:zed:part0:1.3 [current_project]
+   create_project project_1 myproj -part xczu2eg-sfva625-1-e
+   set_property BOARD_PART interwiser:none:part0:2.0 [current_project]
 }
 
 
@@ -158,7 +158,7 @@ xilinx.com:ip:axi_uartlite:2.0\
 set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
-NOOPFPGA\
+NOOPSoC\
 AXI4Timer\
 AXI4VGA\
 "
@@ -225,7 +225,9 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
 
   # Create interface pins
   create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI
+
   create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 uart
+
 
   # Create pins
   create_bd_pin -dir I -type clk clk50
@@ -249,11 +251,6 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
      return 1
    }
   
-  set_property -dict [ list \
-   CONFIG.NUM_READ_OUTSTANDING {1} \
-   CONFIG.NUM_WRITE_OUTSTANDING {1} \
- ] [get_bd_intf_pins /hier_devices/AXI4Timer_0/io_in]
-
   # Create instance: AXI4VGA_0, and set properties
   set block_name AXI4VGA
   set block_cell_name AXI4VGA_0
@@ -265,16 +262,6 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
      return 1
    }
   
-  set_property -dict [ list \
-   CONFIG.NUM_READ_OUTSTANDING {1} \
-   CONFIG.NUM_WRITE_OUTSTANDING {1} \
- ] [get_bd_intf_pins /hier_devices/AXI4VGA_0/io_in_ctrl]
-
-  set_property -dict [ list \
-   CONFIG.NUM_READ_OUTSTANDING {2} \
-   CONFIG.NUM_WRITE_OUTSTANDING {2} \
- ] [get_bd_intf_pins /hier_devices/AXI4VGA_0/io_in_fb]
-
   # Create instance: axi_interconnect_0, and set properties
   set axi_interconnect_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:2.1 axi_interconnect_0 ]
   set_property -dict [ list \
@@ -364,7 +351,9 @@ proc create_root_design { parentCell } {
    CONFIG.PHASE {0.0} \
    CONFIG.PROTOCOL {AXI4} \
    ] $AXI_MEM
+
   set uart [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:uart_rtl:1.0 uart ]
+
 
   # Create ports
   set VGA_b [ create_bd_port -dir O -from 3 -to 0 VGA_b ]
@@ -390,43 +379,22 @@ proc create_root_design { parentCell } {
  ] $uncoreclk
   set uncorerstn [ create_bd_port -dir I -type rst uncorerstn ]
 
-  # Create instance: NOOPFPGA_0, and set properties
-  set block_name NOOPFPGA
-  set block_cell_name NOOPFPGA_0
-  if { [catch {set NOOPFPGA_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+  # Create instance: NOOPSoC_0, and set properties
+  set block_name NOOPSoC
+  set block_cell_name NOOPSoC_0
+  if { [catch {set NOOPSoC_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
      catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
-   } elseif { $NOOPFPGA_0 eq "" } {
+   } elseif { $NOOPSoC_0 eq "" } {
      catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
   
-  set_property -dict [ list \
-   CONFIG.SUPPORTS_NARROW_BURST {1} \
-   CONFIG.NUM_READ_OUTSTANDING {2} \
-   CONFIG.NUM_WRITE_OUTSTANDING {2} \
-   CONFIG.MAX_BURST_LENGTH {256} \
- ] [get_bd_intf_pins /NOOPFPGA_0/io_dmem]
-
-  set_property -dict [ list \
-   CONFIG.SUPPORTS_NARROW_BURST {1} \
-   CONFIG.NUM_READ_OUTSTANDING {2} \
-   CONFIG.NUM_WRITE_OUTSTANDING {2} \
-   CONFIG.MAX_BURST_LENGTH {256} \
- ] [get_bd_intf_pins /NOOPFPGA_0/io_imem]
-
-  set_property -dict [ list \
-   CONFIG.SUPPORTS_NARROW_BURST {0} \
-   CONFIG.NUM_READ_OUTSTANDING {1} \
-   CONFIG.NUM_WRITE_OUTSTANDING {1} \
-   CONFIG.MAX_BURST_LENGTH {1} \
- ] [get_bd_intf_pins /NOOPFPGA_0/io_mmio]
-
   # Create instance: axi_interconnect_2, and set properties
   set axi_interconnect_2 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:2.1 axi_interconnect_2 ]
   set_property -dict [ list \
    CONFIG.NUM_MI {1} \
-   CONFIG.NUM_SI {2} \
+   CONFIG.NUM_SI {1} \
  ] $axi_interconnect_2
 
   # Create instance: hier_devices
@@ -441,16 +409,15 @@ proc create_root_design { parentCell } {
  ] $util_vector_logic_0
 
   # Create interface connections
-  connect_bd_intf_net -intf_net NOOPFPGA_0_io_mmio [get_bd_intf_pins NOOPFPGA_0/io_mmio] [get_bd_intf_pins hier_devices/S_AXI]
-  connect_bd_intf_net -intf_net S00_AXI_1 [get_bd_intf_pins NOOPFPGA_0/io_dmem] [get_bd_intf_pins axi_interconnect_2/S00_AXI]
-  connect_bd_intf_net -intf_net S01_AXI_1 [get_bd_intf_pins NOOPFPGA_0/io_imem] [get_bd_intf_pins axi_interconnect_2/S01_AXI]
+  connect_bd_intf_net -intf_net NOOPSoC_0_io_mmio [get_bd_intf_pins NOOPSoC_0/io_mmio] [get_bd_intf_pins hier_devices/S_AXI]
+  connect_bd_intf_net -intf_net S00_AXI_1 [get_bd_intf_pins NOOPSoC_0/io_mem] [get_bd_intf_pins axi_interconnect_2/S00_AXI]
   connect_bd_intf_net -intf_net axi_clock_converter_0_M_AXI [get_bd_intf_ports AXI_MEM] [get_bd_intf_pins axi_interconnect_2/M00_AXI]
   connect_bd_intf_net -intf_net hier_devices_uart [get_bd_intf_ports uart] [get_bd_intf_pins hier_devices/uart]
 
   # Create port connections
-  connect_bd_net -net c_shift_ram_0_Q [get_bd_ports corerstn] [get_bd_pins axi_interconnect_2/ARESETN] [get_bd_pins axi_interconnect_2/S00_ARESETN] [get_bd_pins axi_interconnect_2/S01_ARESETN] [get_bd_pins hier_devices/corerstn] [get_bd_pins util_vector_logic_0/Op1]
+  connect_bd_net -net c_shift_ram_0_Q [get_bd_ports corerstn] [get_bd_pins axi_interconnect_2/ARESETN] [get_bd_pins axi_interconnect_2/S00_ARESETN] [get_bd_pins hier_devices/corerstn] [get_bd_pins util_vector_logic_0/Op1]
   connect_bd_net -net clk50_1 [get_bd_ports clk50] [get_bd_pins hier_devices/clk50]
-  connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPFPGA_0/clock] [get_bd_pins axi_interconnect_2/ACLK] [get_bd_pins axi_interconnect_2/S00_ACLK] [get_bd_pins axi_interconnect_2/S01_ACLK] [get_bd_pins hier_devices/coreclk]
+  connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPSoC_0/clock] [get_bd_pins axi_interconnect_2/ACLK] [get_bd_pins axi_interconnect_2/S00_ACLK] [get_bd_pins hier_devices/coreclk]
   connect_bd_net -net hier_devices_io_b [get_bd_ports VGA_b] [get_bd_pins hier_devices/io_b]
   connect_bd_net -net hier_devices_io_g [get_bd_ports VGA_g] [get_bd_pins hier_devices/io_g]
   connect_bd_net -net hier_devices_io_hsync [get_bd_ports VGA_hsync] [get_bd_pins hier_devices/io_hsync]
@@ -459,20 +426,20 @@ proc create_root_design { parentCell } {
   connect_bd_net -net rstn50_1 [get_bd_ports rstn50] [get_bd_pins hier_devices/rstn50]
   connect_bd_net -net uncoreclk_1 [get_bd_ports uncoreclk] [get_bd_pins axi_interconnect_2/M00_ACLK]
   connect_bd_net -net uncorerstn_2 [get_bd_ports uncorerstn] [get_bd_pins axi_interconnect_2/M00_ARESETN]
-  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins NOOPFPGA_0/reset] [get_bd_pins util_vector_logic_0/Res]
+  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins NOOPSoC_0/reset] [get_bd_pins util_vector_logic_0/Res]
 
   # Create address segments
-  create_bd_addr_seg -range 0x00010000 -offset 0x40700000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4Timer_0/io_in/reg0] SEG_AXI4Timer_0_reg0
-  create_bd_addr_seg -range 0x00010000 -offset 0x40800000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_ctrl/reg0] SEG_AXI4VGA_0_reg0
-  create_bd_addr_seg -range 0x00080000 -offset 0x40000000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_fb/reg0] SEG_AXI4VGA_0_reg01
-  create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_dmem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
-  create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPFPGA_0/io_imem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
-  create_bd_addr_seg -range 0x00010000 -offset 0x40600000 [get_bd_addr_spaces NOOPFPGA_0/io_mmio] [get_bd_addr_segs hier_devices/axi_uartlite_0/S_AXI/Reg] SEG_axi_uartlite_0_Reg
+  create_bd_addr_seg -range 0x00010000 -offset 0x40700000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4Timer_0/io_in/reg0] SEG_AXI4Timer_0_reg0
+  create_bd_addr_seg -range 0x00010000 -offset 0x40800000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_ctrl/reg0] SEG_AXI4VGA_0_reg0
+  create_bd_addr_seg -range 0x00080000 -offset 0x40000000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_fb/reg0] SEG_AXI4VGA_0_reg01
+  create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPSoC_0/io_mem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
+  create_bd_addr_seg -range 0x00010000 -offset 0x40600000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/axi_uartlite_0/S_AXI/Reg] SEG_axi_uartlite_0_Reg
 
 
   # Restore current instance
   current_bd_instance $oldCurInst
 
+  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
