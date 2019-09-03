@@ -3,6 +3,7 @@ FPGATOP = FPGANOOP
 BUILD_DIR = ./build
 TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
+TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
 SIMTOP = top.TestMain
@@ -25,7 +26,7 @@ verilog: $(TOP_V)
 
 SIM_TOP = NOOPSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
-$(SIM_TOP_V): $(SCALA_FILE)
+$(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	mill chiselModule.test.runMain $(SIMTOP) -td $(@D) --image $(EMU_IMAGE) --output-file $(@F)
 
