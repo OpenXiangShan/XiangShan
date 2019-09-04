@@ -11,13 +11,13 @@ import bus.axi4._
 import device.AXI4RAM
 import utils.DiffTestIO
 
-class NOOPSimTop(memInitFile: String = "") extends Module {
+class NOOPSimTop extends Module {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
   })
 
   val soc = Module(new NOOPSoC()(NOOPConfig(FPGAPlatform = false)))
-  val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, dataFile = memInitFile))
+  val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
   // Be careful with the commit checking of emu.
   // A large delay will make emu incorrectly report getting stuck.
   val memdelay = Module(new AXI4Delayer(0))
@@ -34,4 +34,8 @@ class NOOPSimTop(memInitFile: String = "") extends Module {
   BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
   io.difftest := difftest
+}
+
+object TestMain extends App {
+  chisel3.Driver.execute(args, () => new NOOPSimTop)
 }

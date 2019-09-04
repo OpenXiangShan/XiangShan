@@ -11,8 +11,7 @@
 
 
 class Emulator {
-  const char *bram_image;
-  const char *nemu_image;
+  const char *image;
   std::shared_ptr<VNOOPSimTop> dut_ptr;
 
   // emu control variable
@@ -36,8 +35,7 @@ class Emulator {
   public:
   // argv decay to the secondary pointer
   Emulator(int argc, const char *argv[]):
-    bram_image(nullptr),
-    nemu_image(nullptr),
+    image(nullptr),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0)
   {
@@ -49,17 +47,22 @@ class Emulator {
     srand48(seed);
     Verilated::randReset(2);
 
+    // init ram
+    extern void init_ram(const char *img);
+    init_ram(image);
+
     // init device
-    //init_device();
+    extern void init_device(void);
+    init_device();
 
     // init core
     reset_ncycles(10);
 
-    extern void init_difftest(const char *img, uint32_t *reg);
+    extern void init_difftest(uint32_t *reg);
     uint32_t reg[33];
     read_emu_regs(reg);
     reg[32] = 0x80100000;
-    init_difftest(nemu_image, reg);
+    init_difftest(reg);
   }
 
   void reset_ncycles(size_t cycles) {
