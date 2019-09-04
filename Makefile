@@ -7,9 +7,7 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 
 SIMTOP = top.TestMain
-EMU_IMAGE = $(BUILD_DIR)/bin-readmemh
 IMAGE ?= temp
-NEMU_IMAGE ?= $(IMAGE)
 
 .DEFAULT_GOAL = verilog
 
@@ -28,7 +26,7 @@ SIM_TOP = NOOPSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	mill chiselModule.test.runMain $(SIMTOP) -td $(@D) --image $(EMU_IMAGE) --output-file $(@F)
+	mill chiselModule.test.runMain $(SIMTOP) -td $(@D) --output-file $(@F)
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
@@ -56,18 +54,17 @@ EMU := $(BUILD_DIR)/emu
 $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	@mkdir -p $(@D)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
-		-o $(abspath $(EMU)) -Mdir $(@D) \
-		-f $(BUILD_DIR)/firrtl_black_box_resource_files.f $^ $(EMU_DEPS)
+		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS)
 	$(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
+ifdef mainargs
+MAINARGS = -a $(mainargs)
+endif
+
 emu: $(EMU)
-	@ln -sf $(IMAGE)_0 $(EMU_IMAGE)_0
-	@ln -sf $(IMAGE)_1 $(EMU_IMAGE)_1
-	@ln -sf $(IMAGE)_2 $(EMU_IMAGE)_2
-	@ln -sf $(IMAGE)_3 $(EMU_IMAGE)_3
-	@$(EMU) -u $(NEMU_IMAGE)
+	@$(EMU) -i $(IMAGE) $(MAINARGS)
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -31,34 +31,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-static void load_img(const char *img_file) {
-  long size;
-  int ret;
-
-  FILE *fp = fopen(img_file, "rb");
-  if (fp == NULL) {
-    printf("Can not open '%s'\n", img_file);
-    assert(0);
-  }
-
-  printf("The image is %s\n", img_file);
-
-  fseek(fp, 0, SEEK_END);
-  size = ftell(fp);
-
-  fseek(fp, 0, SEEK_SET);
-  void *buf = malloc(size);
-  ret = fread(buf, size, 1, fp);
-  assert(ret == 1);
-  fclose(fp);
-
-  ref_difftest_memcpy_from_dut(0x100000, buf, size);
-  free(buf);
-}
-
-void init_difftest(const char *img, uint32_t *reg) {
-  assert(img != NULL);
-
+void init_difftest(uint32_t *reg, const char *mainargs) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   assert(handle);
@@ -82,7 +55,10 @@ void init_difftest(const char *img, uint32_t *reg) {
   assert(ref_difftest_init);
 
   ref_difftest_init();
-  load_img(img);
+  void* get_img_start();
+  long get_img_size();
+  ref_difftest_memcpy_from_dut(0x100000, get_img_start(), get_img_size());
+  ref_difftest_memcpy_from_dut(0x0, (void *)mainargs, strlen(mainargs) + 1);
   ref_difftest_setregs(reg);
 }
 

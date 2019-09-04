@@ -12,7 +12,7 @@ void set_abort(void);
 static struct timeval boot = {};
 static uint32_t vmem[0x400000 / sizeof(uint32_t)];
 
-void device_init(void) {
+void init_device(void) {
   init_sdl();
   gettimeofday(&boot, NULL);
 }
