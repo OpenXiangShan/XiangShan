@@ -31,7 +31,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-void init_difftest(uint32_t *reg) {
+void init_difftest(uint32_t *reg, const char *mainargs) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   assert(handle);
@@ -58,6 +58,7 @@ void init_difftest(uint32_t *reg) {
   void* get_img_start();
   long get_img_size();
   ref_difftest_memcpy_from_dut(0x100000, get_img_start(), get_img_size());
+  ref_difftest_memcpy_from_dut(0x0, (void *)mainargs, strlen(mainargs) + 1);
   ref_difftest_setregs(reg);
 }
 

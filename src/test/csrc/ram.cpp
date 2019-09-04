@@ -7,7 +7,7 @@ static long img_size = 0;
 void* get_img_start() { return &ram[0x100000 / sizeof(uint32_t)]; }
 long get_img_size() { return img_size; }
 
-void init_ram(const char *img) {
+void init_ram(const char *img, const char *mainargs) {
   assert(img != NULL);
   FILE *fp = fopen(img, "rb");
   if (fp == NULL) {
@@ -24,6 +24,8 @@ void init_ram(const char *img) {
   int ret = fread(get_img_start(), img_size, 1, fp);
   assert(ret == 1);
   fclose(fp);
+
+  strcpy((char *)ram, mainargs);
 }
 
 extern "C" void ram_helper(

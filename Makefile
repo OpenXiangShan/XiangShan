@@ -59,8 +59,12 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS)
 	$(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
+ifdef mainargs
+MAINARGS = -a $(mainargs)
+endif
+
 emu: $(EMU)
-	@$(EMU) -i $(IMAGE)
+	@$(EMU) -i $(IMAGE) $(MAINARGS)
 
 clean:
 	rm -rf $(BUILD_DIR)

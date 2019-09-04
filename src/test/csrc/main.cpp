@@ -20,6 +20,7 @@ const struct option Emulator::long_options[] = {
   { "seed",           1, NULL, 's' },
   { "max-cycles",     1, NULL, 'C' },
   { "image",          1, NULL, 'i' },
+  { "mainargs",       1, NULL, 'a' },
   { "help",           0, NULL, 'h' }
 };
 
@@ -37,7 +38,7 @@ void Emulator::print_help(const char *file) {
 std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
   std::vector<const char *> args = { argv[0] };
   int o;
-  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:", long_options, NULL)) != -1) {
+  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:a:", long_options, NULL)) != -1) {
     switch (o) {
       case 's': 
         if(std::string(optarg) != "NO_SEED")
@@ -46,6 +47,10 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
       case 'C': max_cycles = atoll(optarg);  break;
       case 'i': image = optarg;
                 args.push_back("-i");
+                args.push_back(optarg);
+                break;
+      case 'a': mainargs = optarg;
+                args.push_back("-a");
                 args.push_back(optarg);
                 break;
       default:
