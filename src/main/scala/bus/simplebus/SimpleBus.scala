@@ -13,12 +13,13 @@ object SimpleBusCmd {
   def cmdProbe      = "b0010".U //  read    | do nothing
   def cmdUpdate     = "b0011".U //  write   | do nothing
   def cmdInvalidate = "b0010".U // invalide | do nothing
+  def apply() = UInt(4.W)
 }
 
 // Uncache Lightweight
 class SimpleBusULReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
   val addr = Output(UInt(32.W))
-  val cmd = Output(UInt(1.W))
+  val cmd = Output(SimpleBusCmd())
   val wmask = Output(UInt((dataBits / 8).W))
   val wdata = Output(UInt(dataBits.W))
   val user = Output(UInt(userBits.W))
@@ -44,7 +45,6 @@ class SimpleBusULRespBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
 // Uncache Heavyweight
 class SimpleBusUHReqBundle(dataBits: Int, userBits: Int = 0)
   extends SimpleBusULReqBundle(dataBits, userBits) {
-  override val cmd = Output(UInt(4.W))
   val size = Output(UInt(3.W))
   val burst = Output(Bool())
   val wlast = Output(Bool())
