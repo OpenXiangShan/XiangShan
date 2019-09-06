@@ -12,6 +12,7 @@ Currently it only supports riscv32.
 
 ## Run programs by simulation
 
+* Set a new environment variable `NEMU_HOME` to the **absolute path** of the NEMU project.
 * Set a new environment variable `NOOP_HOME` to the **absolute path** of the NOOP project.
 * Clone the [AM project](https://github.com/NJU-ProjectN/nexus-am.git).
 * Set a new environment variable `AM_HOME` to the **absolute path** of the AM project.
