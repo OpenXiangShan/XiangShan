@@ -135,7 +135,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
     val mem = new SimpleBusUH(dataBits)
-    val cohResp = Decoupled(new SimpleBusUHRespBundle(dataBits = dataBits))
+    val cohResp = Decoupled(new SimpleBusCRespBundle(dataBits = dataBits))
   })
 
   val req = io.in.bits.req
@@ -143,14 +143,15 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val meta = io.in.bits.meta
   val hit = io.in.valid && meta.hit
   val miss = io.in.valid && !meta.hit
+  val isProbe = req.isProbe()
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
-  val wordMask = Mux(req.isWrite() || req.isUpdate(), maskExpand(req.wmask), 0.U(32.W))
+  val wordMask = Mux(req.isWrite(), maskExpand(req.wmask), 0.U(32.W))
 
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
-  val hitWrite = hit && (req.isWrite() || req.isUpdate())
+  val hitWrite = hit && req.isWrite()
   val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
   dataHitWriteBus.req.valid := hitWrite
   dataHitWriteBus.req.bits.idx := addr.index
@@ -210,7 +211,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
       alreadyOutFire := false.B
 
       // actually this can use s2 to test
-      when (miss && !req.isUpdate() && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
+      when (miss && !isProbe && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
     }
     is (s_memReadReq) { when (io.mem.req.fire()) {
       state := s_memReadResp
@@ -267,15 +268,17 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.rlast := true.B
   io.out.bits.user := io.in.bits.req.user
-  io.out.valid := io.in.valid && Mux(hit, !req.isUpdate(), Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
+  io.out.valid := io.in.valid && !isProbe && Mux(hit, true.B, Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the
   // request really ends.
-  io.isFinish := Mux(req.isUpdate(), true.B, Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
+  io.isFinish := Mux(isProbe, io.cohResp.fire(), Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
 
+  assert(!(io.in.valid && isProbe && hit))
   io.cohResp.bits := DontCare
-  io.cohResp.valid := false.B
+  io.cohResp.bits.hit := false.B
+  io.cohResp.valid := isProbe
 
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss

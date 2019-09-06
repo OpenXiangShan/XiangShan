@@ -12,6 +12,15 @@ class CoherenceInterconnect extends Module {
     val out = new SimpleBusUH
   })
 
+  // state transition:
+  // write: s_idle -> s_memWriteResp -> s_idle
+  // read from Dcache: s_idle -> s_memResp -> s_idle
+  // read from Icache: s_idle -> s_probeResp -> (hit) s_probeForward -> s_idle
+  //                                         +> (miss) s_memReadReq -> s_memReadResp -> s_idle
+
+  val s_idle :: s_probeResp :: s_probeForward :: s_memReadReq :: s_memReadResp :: s_memWriteResp :: Nil = Enum(6)
+  val state = RegInit(s_idle)
+
   val inflight = RegInit(false.B)
   val inflightSrc = Reg(UInt(1.W)) // 0 - icache, 1 - dcache
 
@@ -19,9 +28,33 @@ class CoherenceInterconnect extends Module {
   val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 8, Some(lockWriteFun)))
   (inputArb.io.in zip io.in.map(_.mem.req)).map{ case (arb, in) => arb <> in }
 
-  io.out.req.valid := inputArb.io.out.valid && !inflight
-  io.out.req.bits := inputArb.io.out.bits
-  inputArb.io.out.ready := io.out.req.ready && !inflight
+  val thisReq = inputArb.io.out
+  assert(!(thisReq.valid && !thisReq.bits.isRead() && !thisReq.bits.isWrite()))
+
+  // when read, we should first probe another master
+  val reqLatch = RegEnable(thisReq.bits, !inflight && thisReq.bits.isRead())
+  io.in.map(_.coh).map { case c => {
+    c.req.bits := thisReq.bits
+    c.req.bits.cmd := SimpleBusCmd.cmdProbe
+    c.resp.ready := true.B
+  }}
+
+  io.out.req.bits := thisReq.bits
+
+  def anotherMaster(thisMaster: UInt) = Mux(thisMaster === 1.U, 0.U, 1.U)
+  def isDcache() = inputArb.io.chosen === 1.U
+
+  // bind correct valid and ready signals
+  io.out.req.valid := false.B
+  thisReq.ready := false.B
+  io.in.map(_.coh.req.valid).map { _ := false.B }
+  when (thisReq.bits.isWrite() || isDcache()) {
+    io.out.req.valid := thisReq.valid && !inflight
+    thisReq.ready := io.out.req.ready && !inflight
+  } .elsewhen (thisReq.bits.isRead()) {
+    io.in(anotherMaster(inputArb.io.chosen)).coh.req.valid := thisReq.valid && !inflight
+    thisReq.ready := io.in(anotherMaster(inputArb.io.chosen)).coh.req.ready && !inflight
+  }
 
   io.in.map(_.mem.resp.bits := io.out.resp.bits)
   io.in.map(_.mem.resp.valid := false.B)
@@ -30,27 +63,39 @@ class CoherenceInterconnect extends Module {
     r.ready := l.ready
   }}
 
-  io.in.map(_.coh).map { case coh => {
-    coh.req.bits := DontCare
-    coh.req.valid := false.B
-    coh.resp.ready := true.B
-  }}
-
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
-  val state = RegInit(s_idle)
-
   switch (state) {
     is (s_idle) {
-      when (inputArb.io.out.fire()) {
+      when (thisReq.fire()) {
         inflightSrc := inputArb.io.chosen
-        when (!inputArb.io.out.bits.isWrite()) {
+        when (thisReq.bits.isRead()) {
           inflight := true.B
-          state := s_memReadResp
-        } .elsewhen (inputArb.io.out.bits.wlast) {
+          state := Mux(isDcache(), s_memReadResp, s_probeResp)
+        } .elsewhen (thisReq.bits.wlast) {
           inflight := true.B
           state := s_memWriteResp
         }
       }
+    }
+    is (s_probeResp) {
+      when (io.in(anotherMaster(inflightSrc)).coh.resp.fire()) {
+        state := Mux(io.in(anotherMaster(inflightSrc)).coh.resp.bits.hit, s_probeForward, s_memReadReq)
+      }
+    }
+    is (s_probeForward) {
+      val thisResp = io.in(inflightSrc).mem.resp
+      val anotherCohResp = io.in(anotherMaster(inflightSrc)).coh.resp
+      thisResp.bits := anotherCohResp.bits.asInstanceOf[SimpleBusUHRespBundle]
+      thisResp.valid := anotherCohResp.valid
+      anotherCohResp.ready := thisResp.ready
+      when (thisResp.fire() && thisResp.bits.rlast) {
+        inflight := false.B
+        state := s_idle
+      }
+    }
+    is (s_memReadReq) {
+      io.out.req.bits := reqLatch
+      io.out.req.valid := true.B
+      when (io.out.req.fire()) { state := s_memReadResp }
     }
     is (s_memReadResp) {
       when (io.out.resp.fire() && io.out.resp.bits.rlast) {

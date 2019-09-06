@@ -54,6 +54,7 @@ class SimpleBusUHReqBundle(dataBits: Int, userBits: Int = 0)
     super.toPrintable + p", size = 0x${Hexadecimal(size)}, burst = ${burst}, wlast = ${wlast}"
 
   def isUpdate() = cmd === SimpleBusCmd.cmdUpdate
+  def isProbe() = cmd === SimpleBusCmd.cmdProbe
 }
 
 class SimpleBusUHRespBundle(dataBits: Int, userBits: Int = 0)
@@ -89,9 +90,20 @@ class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
 }
 
 // Cache
+class SimpleBusCRespBundle(dataBits: Int, userBits: Int = 0)
+  extends SimpleBusUHRespBundle(dataBits, userBits) {
+  val hit = Output(Bool())
+
+  override def cloneType = new SimpleBusCRespBundle(dataBits, userBits).asInstanceOf[this.type]
+  override def toPrintable: Printable = super.toPrintable + p", hit = ${hit}"
+}
+
 class SimpleBusC(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
   val mem = new SimpleBusUH(dataBits, userBits)
-  val coh = Flipped(new SimpleBusUH(dataBits, userBits))
+  val coh = Flipped(new Bundle {
+    val req = Decoupled(new SimpleBusUHReqBundle(dataBits, userBits))
+    val resp = Flipped(Decoupled(new SimpleBusCRespBundle(dataBits, userBits)))
+  })
 
   override def cloneType = new SimpleBusC(dataBits, userBits).asInstanceOf[this.type]
 }
