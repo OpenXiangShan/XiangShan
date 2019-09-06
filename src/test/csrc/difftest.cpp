@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-#define REF_SO "/home/yzh/projectn/nemu/build/riscv32-nemu-so"
+#ifndef REF_SO
+# error Please define REF_SO to the path of NEMU shared object file
+#endif
 
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
