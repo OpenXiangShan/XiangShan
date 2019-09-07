@@ -13,7 +13,7 @@ trait HasCoherenceConst {
 class CoherenceInterconnect extends Module with HasCoherenceConst {
   val io = IO(new Bundle {
     val in = Flipped(Vec(2, new SimpleBusC))
-    val out = new SimpleBusUH
+    val out = new SimpleBusUC
   })
 
   def anotherMaster(thisMaster: UInt) = Mux(thisMaster === 1.U, 0.U, 1.U)
@@ -31,7 +31,7 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
   val inflight = RegInit(false.B)
   val inflightSrc = Reg(UInt(1.W)) // 0 - icache, 1 - dcache
 
-  val lockWriteFun = ((x: SimpleBusUHReqBundle) => x.isWrite())
+  val lockWriteFun = ((x: SimpleBusReqBundle) => x.isWrite())
   val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 8, Some(lockWriteFun)))
   (inputArb.io.in zip io.in.map(_.mem.req)).map{ case (arb, in) => arb <> in }
 
@@ -42,7 +42,7 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
   val reqLatch = RegEnable(thisReq.bits, !inflight && thisReq.bits.isRead())
   io.in.map(_.coh).map { case c => {
     c.req.bits := thisReq.bits
-    c.req.bits.cmd := SimpleBusCmd.cmdProbe
+    c.req.bits.cmd := SimpleBusCmd.probe
     c.resp.ready := true.B
   }}
 
@@ -73,7 +73,7 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
         when (thisReq.bits.isRead()) {
           inflight := true.B
           state := Mux(if (supportCoh) isDcache() else true.B, s_memReadResp, s_probeResp)
-        } .elsewhen (thisReq.bits.wlast) {
+        } .elsewhen (thisReq.bits.isWriteLast()) {
           inflight := true.B
           state := s_memWriteResp
         }
@@ -81,16 +81,16 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
     }
     is (s_probeResp) {
       when (io.in(anotherMaster(inflightSrc)).coh.resp.fire()) {
-        state := Mux(io.in(anotherMaster(inflightSrc)).coh.resp.bits.hit, s_probeForward, s_memReadReq)
+        state := Mux(io.in(anotherMaster(inflightSrc)).coh.resp.bits.isProbeHit(), s_probeForward, s_memReadReq)
       }
     }
     is (s_probeForward) {
       val thisResp = io.in(inflightSrc).mem.resp
       val anotherCohResp = io.in(anotherMaster(inflightSrc)).coh.resp
-      thisResp.bits := anotherCohResp.bits.asInstanceOf[SimpleBusUHRespBundle]
+      thisResp.bits := anotherCohResp.bits
       thisResp.valid := anotherCohResp.valid
       anotherCohResp.ready := thisResp.ready
-      when (thisResp.fire() && thisResp.bits.rlast) {
+      when (thisResp.fire() && thisResp.bits.isReadLast()) {
         inflight := false.B
         state := s_idle
       }
@@ -101,7 +101,7 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
       when (io.out.req.fire()) { state := s_memReadResp }
     }
     is (s_memReadResp) {
-      when (io.out.resp.fire() && io.out.resp.bits.rlast) {
+      when (io.out.resp.fire() && io.out.resp.bits.isReadLast()) {
         inflight := false.B
         state := s_idle
       }

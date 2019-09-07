@@ -44,8 +44,8 @@ object LSUInstr extends HasInstrType {
 
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(32.W))
-  val dmem = new SimpleBusUH
-  val mmio = new SimpleBusUL
+  val dmem = new SimpleBusUC
+  val mmio = new SimpleBusUC
   val isMMIO = Output(Bool())
 }
 
@@ -98,17 +98,15 @@ class LSU extends Module {
   }
 
   dmem.req.bits.addr := addr
-  dmem.req.bits.burst := false.B
   dmem.req.bits.size := func(1, 0)
   dmem.req.valid := valid && (state === s_idle) && !mmio
-  dmem.req.bits.cmd := Mux(isStore, SimpleBusCmd.cmdWrite, SimpleBusCmd.cmdRead)
+  dmem.req.bits.cmd := Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read)
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
   dmem.req.bits.wmask := genWmask(addr, func(1, 0))
-  dmem.req.bits.wlast := true.B
   dmem.req.bits.user := 0.U
   dmem.resp.ready := true.B
 
-  io.mmio.req.bits := dmem.asInstanceOf[SimpleBusUL].req.bits
+  io.mmio.req.bits := dmem.req.bits
   io.mmio.req.valid := valid && (state === s_idle) && mmio
   io.mmio.resp.ready := true.B
 

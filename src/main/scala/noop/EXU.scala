@@ -12,8 +12,8 @@ class EXU(implicit val p: NOOPConfig) extends Module {
     val in = Flipped(Decoupled(new DecodeIO))
     val out = Decoupled(new CommitIO)
     val flush = Input(Bool())
-    val dmem = new SimpleBusUH
-    val mmio = new SimpleBusUL
+    val dmem = new SimpleBusUC
+    val mmio = new SimpleBusUC
     val forward = new ForwardIO
     //val wbData = Input(UInt(32.W))
   })

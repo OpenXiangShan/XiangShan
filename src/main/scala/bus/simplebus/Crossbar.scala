@@ -5,10 +5,10 @@ import chisel3.util._
 
 import utils._
 
-class SimpleBusCrossbar[T <: SimpleBusUL](_type: T, m: Int, addressSpace: List[(Long, Long)]) extends Module {
+class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Vec(m, _type))
-    val out = Flipped(Flipped(Vec(addressSpace.length, _type)))
+    val in = Flipped(Vec(m, new SimpleBusUC))
+    val out = Vec(addressSpace.length, new SimpleBusUC)
   })
 
   val debug = false
