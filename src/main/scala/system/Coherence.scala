@@ -6,11 +6,18 @@ import chisel3.util._
 import utils._
 import bus.simplebus._
 
-class CoherenceInterconnect extends Module {
+trait HasCoherenceConst {
+  val supportCoh = false
+}
+
+class CoherenceInterconnect extends Module with HasCoherenceConst {
   val io = IO(new Bundle {
     val in = Flipped(Vec(2, new SimpleBusC))
     val out = new SimpleBusUH
   })
+
+  def anotherMaster(thisMaster: UInt) = Mux(thisMaster === 1.U, 0.U, 1.U)
+  def isDcache() = inputArb.io.chosen === 1.U
 
   // state transition:
   // write: s_idle -> s_memWriteResp -> s_idle
@@ -40,15 +47,11 @@ class CoherenceInterconnect extends Module {
   }}
 
   io.out.req.bits := thisReq.bits
-
-  def anotherMaster(thisMaster: UInt) = Mux(thisMaster === 1.U, 0.U, 1.U)
-  def isDcache() = inputArb.io.chosen === 1.U
-
   // bind correct valid and ready signals
   io.out.req.valid := false.B
   thisReq.ready := false.B
   io.in.map(_.coh.req.valid).map { _ := false.B }
-  when (thisReq.bits.isWrite() || isDcache()) {
+  when (if (supportCoh) (thisReq.bits.isWrite() || isDcache()) else true.B) {
     io.out.req.valid := thisReq.valid && !inflight
     thisReq.ready := io.out.req.ready && !inflight
   } .elsewhen (thisReq.bits.isRead()) {
@@ -69,7 +72,7 @@ class CoherenceInterconnect extends Module {
         inflightSrc := inputArb.io.chosen
         when (thisReq.bits.isRead()) {
           inflight := true.B
-          state := Mux(isDcache(), s_memReadResp, s_probeResp)
+          state := Mux(if (supportCoh) isDcache() else true.B, s_memReadResp, s_probeResp)
         } .elsewhen (thisReq.bits.wlast) {
           inflight := true.B
           state := s_memWriteResp
