@@ -135,7 +135,6 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
     val mem = new SimpleBusUC(dataBits)
-    val cohResp = Decoupled(new SimpleBusRespBundle(dataBits = dataBits))
   })
 
   val req = io.in.bits.req
@@ -143,7 +142,6 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val meta = io.in.bits.meta
   val hit = io.in.valid && meta.hit
   val miss = io.in.valid && !meta.hit
-  val isProbe = req.isProbe()
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
@@ -209,7 +207,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
       alreadyOutFire := false.B
 
       // actually this can use s2 to test
-      when (miss && !isProbe && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
+      when (miss && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
     }
     is (s_memReadReq) { when (io.mem.req.fire()) {
       state := s_memReadResp
@@ -266,17 +264,12 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.cmd := DontCare
   io.out.bits.user := io.in.bits.req.user
-  io.out.valid := io.in.valid && !isProbe && Mux(hit, true.B, Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
+  io.out.valid := io.in.valid && Mux(hit, true.B, Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the
   // request really ends.
-  io.isFinish := Mux(isProbe, io.cohResp.fire(), Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)))
-
-  assert(!(io.in.valid && isProbe && hit))
-  io.cohResp.bits := DontCare
-  io.cohResp.bits.cmd := SimpleBusCmd.probeMiss
-  io.cohResp.valid := isProbe
+  io.isFinish := Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
 
   io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
@@ -289,6 +282,55 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   }
 }
 
+// probe
+sealed class CacheProbeStage(ro: Boolean, name: String) extends Module with HasCacheConst {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits = 32)))
+    val out = Decoupled(new SimpleBusRespBundle(dataBits = 32))
+    val metaReadBus = CacheMetaArrayReadBus()
+    val dataReadBus = CacheDataArrayReadBus()
+    //val metaWriteBus = CacheMetaArrayWriteBus()
+  })
+
+  val s_idle :: s_arrayRead :: s_arrayReadWait :: s_check :: s_release :: Nil = Enum(5)
+  val state = RegInit(s_idle)
+
+  io.in.ready := (state === s_idle)
+  val req = RegEnable(io.in.bits, io.in.fire())
+
+  // read meta array and data array
+  List(io.metaReadBus, io.dataReadBus).map { case x => {
+    x.req.valid := (state === s_arrayRead)
+    x.req.bits.idx := req.addr.asTypeOf(addrBundle).index
+  }}
+
+  // Latching meta and data
+  val meta = RegEnable(io.metaReadBus.resp.data(0), state === s_arrayReadWait)
+  val data = RegEnable(io.dataReadBus.resp.data, state === s_arrayReadWait)
+
+  // check
+  val addr = req.addr.asTypeOf(addrBundle)
+  val hit = meta.valid && (meta.tag === addr.tag)
+
+  switch (state) {
+    is (s_idle) { when (io.in.fire()) { state := s_arrayRead } }
+    is (s_arrayRead) {
+      when (io.metaReadBus.req.ready && io.dataReadBus.req.ready) { state := s_arrayReadWait }
+      assert(req.isProbe())
+    }
+    is (s_arrayReadWait) { state := s_check }
+    is (s_check) {
+      when (io.out.fire()) { state := Mux(hit, s_release, s_idle) }
+      assert(!hit)
+    }
+    is (s_release) { assert(false.B) }
+  }
+
+  io.out.bits := DontCare
+  io.out.bits.cmd := Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss)
+  io.out.valid := (state === s_check)
+}
+
 class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBusUC(dataBits, userBits))
@@ -297,17 +339,14 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
     val out = new SimpleBusC(dataBits)
   })
 
+  // cpu pipeline
   val s1 = Module(new CacheStage1(ro, name, userBits))
   val s2 = Module(new CacheStage2(ro, name, userBits))
   val s3 = Module(new CacheStage3(ro, name, userBits))
   val metaArray = Module(new SRAMTemplate(new MetaBundle, set = Sets, way = Ways, shouldReset = true, singlePort = true))
   val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, shouldReset = true, singlePort = true))
 
-  val inputArb = Module(new Arbiter(chiselTypeOf(io.in.req.bits), 2))
-  inputArb.io.in(0) <> io.out.coh.req
-  inputArb.io.in(1) <> io.in.req
-  s1.io.in <> inputArb.io.out
-
+  s1.io.in <> io.in.req
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
@@ -315,7 +354,6 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   s3.io.flush := io.flush(1)
   io.addr := s3.io.addr
   io.out.mem <> s3.io.mem
-  io.out.coh.resp <> s3.io.cohResp
 
   // stalling
   s1.io.s2Req.valid := s2.io.in.valid
@@ -324,10 +362,30 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   s1.io.s3Req.bits := s3.io.in.bits.req
   s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.meta.hit
 
-  metaArray.io.r <> s1.io.metaReadBus
+  // coherence state machine
+  val coh = Module(new CacheProbeStage(ro, name))
+  coh.io.in <> io.out.coh.req
+  io.out.coh.resp <> coh.io.out
+
+  // Since SRAMTemplate are synchronous bus, read data will be returned
+  // one cycle later read request is accepted. Therefore we do not need
+  // to use ID bit to distribute the read data to the correct master.
+  val metaReadArb = Module(new Arbiter(chiselTypeOf(metaArray.io.r.req.bits), 2))
+  metaReadArb.io.in(0) <> coh.io.metaReadBus.req
+  metaReadArb.io.in(1) <> s1.io.metaReadBus.req
+  metaArray.io.r.req <> metaReadArb.io.out
+  coh.io.metaReadBus.resp := metaArray.io.r.resp
+  s1.io.metaReadBus.resp := metaArray.io.r.resp
   metaArray.io.w <> s3.io.metaWriteBus
-  dataArray.io.r <> s1.io.dataReadBus
+
+  val dataReadArb = Module(new Arbiter(chiselTypeOf(dataArray.io.r.req.bits), 2))
+  dataReadArb.io.in(0) <> coh.io.dataReadBus.req
+  dataReadArb.io.in(1) <> s1.io.dataReadBus.req
+  dataArray.io.r.req <> dataReadArb.io.out
+  coh.io.dataReadBus.resp := dataArray.io.r.resp
+  s1.io.dataReadBus.resp := dataArray.io.r.resp
   dataArray.io.w <> s3.io.dataWriteBus
+
   s2.io.metaReadResp := metaArray.io.r.resp.data
   s3.io.dataBlock := RegEnable(dataArray.io.r.resp.data, s2.io.out.fire())
 
