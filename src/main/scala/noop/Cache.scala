@@ -312,6 +312,11 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends Module with HasC
   val addr = req.addr.asTypeOf(addrBundle)
   val hit = meta.valid && (meta.tag === addr.tag)
 
+  // release
+  val beatCnt = Counter(LineBeats)
+  val idxCnt = Counter(LineBeats)
+  val last = WireInit(false.B)
+
   switch (state) {
     is (s_idle) { when (io.in.fire()) { state := s_arrayRead } }
     is (s_arrayRead) {
@@ -320,15 +325,29 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends Module with HasC
     }
     is (s_arrayReadWait) { state := s_check }
     is (s_check) {
-      when (io.out.fire()) { state := Mux(hit, s_release, s_idle) }
-      assert(!hit)
+      when (io.out.fire()) {
+        state := Mux(hit, s_release, s_idle)
+        idxCnt.value := addr.wordIndex
+      }
     }
-    is (s_release) { assert(false.B) }
+    is (s_release) {
+      when (io.out.fire()) {
+        idxCnt.inc()
+        when (beatCnt.inc()) {
+          state := s_idle
+          last := true.B
+        }
+      }
+    }
   }
 
-  io.out.bits := DontCare
-  io.out.bits.cmd := Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss)
-  io.out.valid := (state === s_check)
+  io.out.valid := (state === s_check) || (state === s_release)
+  io.out.bits.rdata := data(idxCnt.value).data
+  io.out.bits.user := 0.U
+  io.out.bits.cmd := Mux(state === s_release, Mux(last, SimpleBusCmd.readLast, 0.U),
+    Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
+
+  // FIXME: should invalidate the meta array
 }
 
 class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) extends Module with HasCacheConst {
