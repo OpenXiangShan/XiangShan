@@ -64,7 +64,7 @@ class Multiplier(len: Int)(implicit val p: NOOPConfig) extends Module {
   io.out.valid := mulPipeOut.valid
 }
 
-class Divider(len: Int = 32)(implicit val p: NOOPConfig) extends Module {
+class Divider(len: Int = 64)(implicit val p: NOOPConfig) extends Module {
   val io = IO(new MulDivIO(len))
 
   val shiftReg = Reg(UInt((1 + len * 2).W))
@@ -121,8 +121,8 @@ class MDU(implicit val p: NOOPConfig) extends Module {
     io.out.bits
   }
 
-  val mul = Module(new Multiplier(32))
-  val div = Module(new Divider(32))
+  val mul = Module(new Multiplier(64))
+  val div = Module(new Divider(64))
   List(mul.io, div.io).map { case x =>
     x.in.bits(0) := src1
     x.in.bits(1) := src2

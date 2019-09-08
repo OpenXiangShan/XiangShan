@@ -69,7 +69,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   isu.io.forward <> exu.io.forward
 
   io.imem <> (if (p.HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = 64))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
@@ -77,7 +77,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   } else { ifu.io.imem })
 
   io.dmem <> (if (p.HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache"))
+    val dcache = Module(new Cache(ro = false, name = "dcache", userBits = 64))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
     dcache.io.out

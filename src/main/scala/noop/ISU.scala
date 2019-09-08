@@ -7,10 +7,10 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 class RegFile {
-  val rf = Mem(32, UInt(32.W))
+  val rf = Mem(32, UInt(64.W))
   def read(addr: UInt) : UInt = Mux(addr === 0.U, 0.U, rf(addr))
   def write(addr: UInt, data: UInt) = { rf(addr) := data }
-}
+} 
 
 class ScoreBoard {
   val busy = RegInit(0.U(32.W))
@@ -79,7 +79,7 @@ class ISU(implicit val p: NOOPConfig) extends Module {
 
   when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfData) }
 
-  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(32.W))
+  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(64.W))
   val isuFireSetMask = Mux(io.out.fire(), sb.mask(rfDest), 0.U)
   when (io.flush) { sb.update(0.U, "hffffffff".U) }
   .otherwise { sb.update(isuFireSetMask, wbClearMask) }

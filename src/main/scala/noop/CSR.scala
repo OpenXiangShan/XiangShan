@@ -55,7 +55,7 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
     this.func := func
     io.out.bits
   }
-
+   
   val mtvec = Reg(UInt(32.W))
   val mcause = Reg(UInt(32.W))
   val mstatus = Reg(UInt(32.W))

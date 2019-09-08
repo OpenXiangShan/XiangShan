@@ -1,5 +1,5 @@
 package noop
-
+//TODO(rv64)
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
@@ -43,7 +43,7 @@ object LSUInstr extends HasInstrType {
 }
 
 class LSUIO extends FunctionUnitIO {
-  val wdata = Input(UInt(32.W))
+  val wdata = Input(UInt(64.W))
   val dmem = new SimpleBusUH
   val mmio = new SimpleBusUL
   val isMMIO = Output(Bool())

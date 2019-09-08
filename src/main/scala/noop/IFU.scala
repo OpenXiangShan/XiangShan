@@ -8,13 +8,13 @@ import utils._
 import bus.simplebus._
 
 trait HasResetVector {
-  val resetVector = 0x80100000L
+  val resetVector = 0x80100000L//TODO: set reset vec
 }
 
 class IFU extends Module with HasResetVector {
   val io = IO(new Bundle {
     val imem = new SimpleBusUH(userBits = 32)
-    val pc = Input(UInt(32.W))
+    val pc = Input(UInt(64.W))
     val out = Decoupled(new CtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
     val flushVec = Output(UInt(4.W))
@@ -22,7 +22,7 @@ class IFU extends Module with HasResetVector {
   })
 
   // pc
-  val pc = RegInit(resetVector.U(32.W))
+  val pc = RegInit(resetVector.U(64.W))
   val pcUpdate = io.redirect.valid || io.imem.req.fire()
   val snpc = pc + 4.U  // sequential next pc
 
@@ -54,7 +54,7 @@ class IFU extends Module with HasResetVector {
 
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
-  io.out.bits.instr := io.imem.resp.bits.rdata
+  io.out.bits.instr := Mux(io.pc(2), io.imem.resp.bits.rdata(63,32), io.imem.resp.bits.rdata(31,0))//inst path only uses 32bit inst
   io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

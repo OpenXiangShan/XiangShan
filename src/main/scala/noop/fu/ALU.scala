@@ -74,7 +74,7 @@ object ALUInstr extends HasInstrType {
 class ALUIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
   val redirect = new RedirectIO
-  val offset = Input(UInt(32.W))
+  val offset = Input(UInt(64.W))
 }
 
 class ALU extends Module {
@@ -90,16 +90,17 @@ class ALU extends Module {
   }
 
   val isAdderSub = (func =/= ALUOpType.add) && !BRUOpType.isJump(func)
-  val adderRes = (src1 +& (src2 ^ Fill(32, isAdderSub))) + isAdderSub
+  val adderRes = (src1 +& (src2 ^ Fill(64, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
-  val sltu = !adderRes(32)
-  val slt = xorRes(31) ^ sltu
+  val sltu = !adderRes(64)
+  val slt = xorRes(63) ^ sltu
 
   val shamt = src2(4, 0)
+  val shamt64 = src2(5, 0)//TODO
   val aluRes = LookupTreeDefault(func, adderRes, List(
-    ALUOpType.sll  -> ((src1  << shamt)(31, 0)),
-    ALUOpType.slt  -> Cat(0.U(31.W), slt),
-    ALUOpType.sltu -> Cat(0.U(31.W), sltu),
+    ALUOpType.sll  -> ((src1  << shamt)(63, 0)),
+    ALUOpType.slt  -> Cat(0.U(63.W), slt),
+    ALUOpType.sltu -> Cat(0.U(63.W), sltu),
     ALUOpType.xor  -> xorRes,
     ALUOpType.srl  -> (src1  >> shamt),
     ALUOpType.or   -> (src1  |  src2),

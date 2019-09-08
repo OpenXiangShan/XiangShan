@@ -17,7 +17,7 @@ object SimpleBusCmd {
 
 // Uncache Lightweight
 class SimpleBusULReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
-  val addr = Output(UInt(32.W))
+  val addr = Output(UInt(64.W))
   val cmd = Output(UInt(1.W))
   val wmask = Output(UInt((dataBits / 8).W))
   val wdata = Output(UInt(dataBits.W))
@@ -64,7 +64,7 @@ class SimpleBusUHRespBundle(dataBits: Int, userBits: Int = 0)
   override def toPrintable: Printable = super.toPrintable + p", rlast = ${rlast}"
 }
 
-class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
+class SimpleBusUL(dataBits: Int = 64, userBits: Int = 0) extends Bundle {
   val req = Decoupled(new SimpleBusULReqBundle(dataBits, userBits))
   val resp = Flipped(Decoupled(new SimpleBusULRespBundle(dataBits, userBits)))
 
@@ -79,7 +79,7 @@ class SimpleBusUL(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
   }
 }
 
-class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
+class SimpleBusUH(dataBits: Int = 64, userBits: Int = 0)
   extends SimpleBusUL(dataBits, userBits) {
   override val req = Decoupled(new SimpleBusUHReqBundle(dataBits, userBits))
   override val resp = Flipped(Decoupled(new SimpleBusUHRespBundle(dataBits, userBits)))
@@ -89,7 +89,7 @@ class SimpleBusUH(dataBits: Int = 32, userBits: Int = 0)
 }
 
 // Cache
-class SimpleBusC(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
+class SimpleBusC(dataBits: Int = 64, userBits: Int = 0) extends Bundle {
   val mem = new SimpleBusUH(dataBits, userBits)
   val coh = Flipped(new SimpleBusUH(dataBits, userBits))
 

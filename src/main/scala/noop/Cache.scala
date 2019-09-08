@@ -17,8 +17,8 @@ sealed trait HasCacheConst {
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
   val WordIndexBits = log2Up(LineBeats)
-  val TagBits = 32 - OffsetBits - IndexBits
-  val dataBits = 32
+  val TagBits = 64 - OffsetBits - IndexBits
+  val dataBits = 64
 
   val debug = false
 
@@ -52,7 +52,7 @@ sealed class MetaPipelineBundle extends Bundle with HasCacheConst {
 }
 
 sealed class DataBundle extends Bundle {
-  val data = Output(UInt(32.W))
+  val data = Output(UInt(64.W))
 }
 
 sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
@@ -129,7 +129,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     val in = Flipped(Decoupled(new Stage2IO(userBits)))
     val out = Decoupled(new SimpleBusUHRespBundle(dataBits = dataBits, userBits = userBits))
     val isFinish = Output(Bool())
-    val addr = Output(UInt(32.W))
+    val addr = Output(UInt(64.W))
     val flush = Input(Bool())
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
@@ -146,7 +146,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
-  val wordMask = Mux(req.isWrite() || req.isUpdate(), maskExpand(req.wmask), 0.U(32.W))
+  val wordMask = Mux(req.isWrite() || req.isUpdate(), maskExpand(req.wmask), 0.U(64.W))
 
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
@@ -181,7 +181,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.mem.req.bits.cmd := Mux(state === s_memReadReq, SimpleBusCmd.cmdRead, SimpleBusCmd.cmdWrite)
 
   // critical word first
-  val raddr = Cat(req.addr(31, 2), 0.U(2.W))
+  val raddr = Cat(req.addr(63, 2), 0.U(2.W))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
   io.mem.req.bits.addr := Mux(state === s_memReadReq, raddr, waddr)
@@ -288,10 +288,10 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   }
 }
 
-class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) extends Module with HasCacheConst {
+class Cache(ro: Boolean, name: String, dataBits: Int = 64, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBusUH(dataBits, userBits))
-    val addr = Output(UInt(32.W))
+    val addr = Output(UInt(64.W))
     val flush = Input(UInt(2.W))
     val out = new SimpleBusC(dataBits)
   })
