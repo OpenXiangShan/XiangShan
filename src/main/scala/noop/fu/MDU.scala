@@ -123,6 +123,8 @@ class MDU(implicit val p: NOOPConfig) extends Module {
 
   val mul = Module(new Multiplier(64))
   val div = Module(new Divider(64))
+  val mul32 = Module(new Multiplier(32))
+  val div32 = Module(new Divider(32))
   List(mul.io, div.io).map { case x =>
     x.in.bits(0) := src1
     x.in.bits(1) := src2
