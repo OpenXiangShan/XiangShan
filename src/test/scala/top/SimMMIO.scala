@@ -20,7 +20,7 @@ class DeviceHelper extends BlackBox {
 
 class SimMMIO extends Module {
   val io = IO(new Bundle {
-    val rw = Flipped(new SimpleBusUL)
+    val rw = Flipped(new SimpleBusUC)
   })
 
   val helper = Module(new DeviceHelper)
@@ -32,6 +32,7 @@ class SimMMIO extends Module {
   helper.io.reqWdata := io.rw.req.bits.wdata
   helper.io.reqWmask := io.rw.req.bits.wmask
   io.rw.resp.bits.rdata := helper.io.respRdata
+  io.rw.resp.bits.cmd := 0.U
   io.rw.resp.bits.user := 0.U
 
   io.rw.req.ready := true.B
