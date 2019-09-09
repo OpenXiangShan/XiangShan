@@ -78,7 +78,7 @@ class GPUOutBundle extends Bundle {
   val fb = new AXI4
 }
 
-class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, Some(new GPUOutBundle)) with GPUConst {
+class AXI4GPU extends AXI4SlaveModule(new AXI4Lite, new GPUOutBundle) with GPUConst {
   val out = io.extra.get
 
   // control registers

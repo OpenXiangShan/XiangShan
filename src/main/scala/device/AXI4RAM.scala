@@ -1,5 +1,3 @@
-// See LICENSE.SiFive for license details.
-
 package device
 
 import chisel3._
