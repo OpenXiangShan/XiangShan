@@ -7,15 +7,22 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object MDUOpType {
-  def mul  = "b000".U
-  def mulh = "b001".U
-  def div  = "b100".U
-  def divu = "b101".U
-  def rem  = "b110".U
-  def remu = "b111".U
+  def mul  = "b0000".U
+  def mulh = "b0001".U
+  def div  = "b0100".U
+  def divu = "b0101".U
+  def rem  = "b0110".U
+  def remu = "b0111".U
+
+  def mulw  = "b1000".U
+  def divw  = "b1100".U
+  def divuw = "b1101".U
+  def remw  = "b1110".U
+  def remuw = "b1111".U
 
   def isDiv(op: UInt) = op(2)
   def isSign(op: UInt) = isDiv(op) && !op(0)
+  def isW(op: UInt) = op(3)
 }
 
 object MDUInstr extends HasInstrType {
@@ -25,16 +32,25 @@ object MDUInstr extends HasInstrType {
   def DIVU    = BitPat("b0000001_?????_?????_101_?????_0110011")
   def REM     = BitPat("b0000001_?????_?????_110_?????_0110011")
   def REMU    = BitPat("b0000001_?????_?????_111_?????_0110011")
+  def DIVW    = BitPat("b0100000_?????_?????_101_?????_0111011")
+  def DIVUW   = BitPat("b0100000_?????_?????_101_?????_0111011")
+  def REMW    = BitPat("b0100000_?????_?????_101_?????_0111011")
+  def REMUW   = BitPat("b0100000_?????_?????_101_?????_0111011")
 
   val mulTable = Array(
     MUL            -> List(InstrR, FuType.mdu, MDUOpType.mul),
-    MULH           -> List(InstrR, FuType.mdu, MDUOpType.mulh)
+    MULH           -> List(InstrR, FuType.mdu, MDUOpType.mulh),
+    MULW           -> List(InstrR, FuType.mdu, MDUOpType.mulw)
   )
   val divTable = Array(
     DIV            -> List(InstrR, FuType.mdu, MDUOpType.div),
     DIVU           -> List(InstrR, FuType.mdu, MDUOpType.divu),
     REM            -> List(InstrR, FuType.mdu, MDUOpType.rem),
-    REMU           -> List(InstrR, FuType.mdu, MDUOpType.remu)
+    REMU           -> List(InstrR, FuType.mdu, MDUOpType.remu),
+    DIVW           -> List(InstrR, FuType.mdu, MDUOpType.divw),
+    DIVUW          -> List(InstrR, FuType.mdu, MDUOpType.divuw),
+    REMW           -> List(InstrR, FuType.mdu, MDUOpType.remw),
+    REMUW          -> List(InstrR, FuType.mdu, MDUOpType.remuw)
   )
   def table(implicit p: NOOPConfig) = mulTable ++ (if (p.HasDiv) divTable else Nil)
 }
@@ -131,9 +147,18 @@ class MDU(implicit val p: NOOPConfig) extends Module {
     x.sign := MDUOpType.isSign(func)
     x.out.ready := io.out.ready
   }
+  List(mul32.io, div32.io).map { case x =>
+    x.in.bits(0) := src1(31:0)
+    x.in.bits(1) := src2(31:0)
+    x.sign := MDUOpType.isSign(func)
+    x.out.ready := io.out.ready
+  }
   val isDiv = MDUOpType.isDiv(func)
-  mul.io.in.valid := io.in.valid && !isDiv
-  div.io.in.valid := io.in.valid && isDiv
+  val isW   = MDUOpType.isW(func)
+  mul.io.in.valid := io.in.valid && !isDiv && !isW
+  div.io.in.valid := io.in.valid && isDiv && !isW
+  mul32.io.in.valid := io.in.valid && !isDiv && isW
+  div32.io.in.valid := io.in.valid && isDiv && isW
 
   io.out.bits := LookupTree(func, List(
     MDUOpType.mul  -> mul.io.out.bits(0),
@@ -141,12 +166,18 @@ class MDU(implicit val p: NOOPConfig) extends Module {
     MDUOpType.div  -> div.io.out.bits(0),
     MDUOpType.divu -> div.io.out.bits(0),
     MDUOpType.rem  -> div.io.out.bits(1),
-    MDUOpType.remu -> div.io.out.bits(1)
+    MDUOpType.remu -> div.io.out.bits(1),
+
+    MDUOpType.mulw -> Cat(Fill(32, mul32.io.out.bits(0)(31)), mul32.io.out.bits(0)),
+    MDUOpType.divw -> Cat(Fill(32, div32.io.out.bits(0)(31)), div32.io.out.bits(0)),
+    MDUOpType.divuw-> Cat(Fill(32, div32.io.out.bits(0)(31)), div32.io.out.bits(0)),//not sure: spec used "signed ext to describe this inst"
+    MDUOpType.remw -> Cat(Fill(32, div32.io.out.bits(1)(31)), div32.io.out.bits(1)),
+    MDUOpType.remuw-> Cat(Fill(32, div32.io.out.bits(1)(31)), div32.io.out.bits(1))
   ))
 
   val isDivReg = Mux(io.in.fire(), isDiv, RegNext(isDiv))
   io.in.ready := Mux(isDiv, div.io.in.ready, mul.io.in.ready)
-  io.out.valid := Mux(isDivReg, div.io.out.valid, mul.io.out.valid)
+  io.out.valid := Mux(isDivReg, div.io.out.valid || div32.io.out.valid, mul.io.out.valid || mul32.io.out.valid)
 
   BoringUtils.addSource(mul.io.out.fire(), "perfCntCondMmulInstr")
 }

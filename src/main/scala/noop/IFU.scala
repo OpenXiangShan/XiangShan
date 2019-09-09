@@ -46,7 +46,7 @@ class IFU extends Module with HasResetVector {
 
   io.imem := DontCare
   io.imem.req.valid := io.out.ready
-  io.imem.req.bits.addr := pc
+  io.imem.req.bits.addr := Cat(pc(63:3), Fill(3, "b0".U))//inst is 32 bit in length, the right inst will be picked out at stage 3
   io.imem.req.bits.size := "b10".U
   io.imem.req.bits.cmd := SimpleBusCmd.cmdRead
   io.imem.req.bits.user := npc
@@ -54,7 +54,7 @@ class IFU extends Module with HasResetVector {
 
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
-  io.out.bits.instr := Mux(io.pc(2), io.imem.resp.bits.rdata(63,32), io.imem.resp.bits.rdata(31,0))//inst path only uses 32bit inst
+  io.out.bits.instr := Mux(io.pc(2), io.imem.resp.bits.rdata(63,32), io.imem.resp.bits.rdata(31,0))//inst path only uses 32bit inst, get the right inst according to pc(2)
   io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

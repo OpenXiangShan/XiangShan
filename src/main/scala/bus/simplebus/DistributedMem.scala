@@ -22,8 +22,8 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
   val wdataVec = VecInit.tabulate(4) { i => io.rw.req.bits.wdata(8 * (i + 1) - 1, 8 * i) }
   val wmask = VecInit.tabulate(4) { i => io.rw.req.bits.wmask(i).toBool }
 
-  val rwData = Wire(UInt(32.W))
-  val roData = Wire(UInt(32.W))
+  val rwData = Wire(UInt(64.W))
+  val roData = Wire(UInt(64.W))
 
   if (useTreadle) {
     val mem = Mem(memByte, UInt(8.W))
