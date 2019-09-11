@@ -12,15 +12,15 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
 
   val useTreadle = false
 
-  val wordNum = memByte / 4
+  val wordNum = memByte / 8 
   val memAddrBits = log2Up(wordNum)
   def Index(addr: UInt): UInt = addr(memAddrBits + 2 - 1, 2)
 
   val rwIdx = Index(io.rw.req.bits.addr)
   val roIdx = Index(io.ro.req.bits.addr)
   val wen = io.rw.isWrite()
-  val wdataVec = VecInit.tabulate(4) { i => io.rw.req.bits.wdata(8 * (i + 1) - 1, 8 * i) }
-  val wmask = VecInit.tabulate(4) { i => io.rw.req.bits.wmask(i).toBool }
+  val wdataVec = VecInit.tabulate(8) { i => io.rw.req.bits.wdata(8 * (i + 1) - 1, 8 * i) }
+  val wmask = VecInit.tabulate(8) { i => io.rw.req.bits.wmask(i).toBool }
 
   val rwData = Wire(UInt(64.W))
   val roData = Wire(UInt(64.W))
@@ -29,18 +29,18 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
     val mem = Mem(memByte, UInt(8.W))
     if (dataFile != "")
       loadMemoryFromFile(mem, dataFile)
-    def read(idx: UInt) = Cat(mem(idx + 3.U), mem(idx + 2.U), mem(idx + 1.U), mem(idx + 0.U))
+    def read(idx: UInt) = Cat(mem(idx + 7.U), mem(idx + 6.U), mem(idx + 5.U), mem(idx + 4.U), mem(idx + 3.U), mem(idx + 2.U), mem(idx + 1.U), mem(idx + 0.U))
 
-    rwData := read(rwIdx << 2)
-    roData := read(roIdx << 2)
+    rwData := read(rwIdx << 3)
+    roData := read(roIdx << 3)
     wmask.zipWithIndex.map { case(m, i) => {
       when (m && wen) {
-        mem((rwIdx << 2) + i.U) := wdataVec(i)
+        mem((rwIdx << 3) + i.U) := wdataVec(i)
       }
     }}
   }
   else {
-    val mem = Mem(wordNum, Vec(4, UInt(8.W)))
+    val mem = Mem(wordNum, Vec(8,  UInt(8.W)))
     if (dataFile != "")
       loadMemoryFromFile(mem, dataFile)
 

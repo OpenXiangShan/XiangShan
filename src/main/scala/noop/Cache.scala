@@ -26,7 +26,7 @@ sealed trait HasCacheConst {
     val tag = UInt(TagBits.W)
     val index = UInt(IndexBits.W)
     val wordIndex = UInt(WordIndexBits.W)
-    val byteOffset = UInt(2.W)
+    val byteOffset = UInt(3.W)//rv32: byteOffset = UInt(2.W)
   }
 
   def CacheMetaArrayReadBus() = new SRAMReadBus(new MetaBundle, set = Sets, way = Ways)
@@ -181,7 +181,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.mem.req.bits.cmd := Mux(state === s_memReadReq, SimpleBusCmd.cmdRead, SimpleBusCmd.cmdWrite)
 
   // critical word first
-  val raddr = Cat(req.addr(63, 2), 0.U(2.W))
+  val raddr = Cat(req.addr(63, 3), 0.U(3.W))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
   io.mem.req.bits.addr := Mux(state === s_memReadReq, raddr, waddr)
@@ -203,6 +203,9 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst)
 
+  when(io.mem.req.valid && io.mem.req.ready){
+    printf("[L1$] mem access addr: %x\n", io.mem.req.bits.addr)
+  }
 
   switch (state) {
     is (s_idle) {
@@ -210,7 +213,9 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
       alreadyOutFire := false.B
 
       // actually this can use s2 to test
-      when (miss && !req.isUpdate() && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
+      when (miss && !req.isUpdate() && !io.flush) { 
+        state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) 
+        }
     }
     is (s_memReadReq) { when (io.mem.req.fire()) {
       state := s_memReadResp
@@ -229,6 +234,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
         dataRefillWriteBus.req.bits.data.data := inRdata
         dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
+        printf("[L1$] mem access data : %x\n", dataRefillWriteBus.req.bits.data.data)
 
         readBeatCnt.inc()
         when (io.mem.resp.bits.rlast) { state := s_wait_resp }
@@ -268,6 +274,10 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.out.bits.rlast := true.B
   io.out.bits.user := io.in.bits.req.user
   io.out.valid := io.in.valid && Mux(hit, !req.isUpdate(), Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
+
+  when(io.out.fire()){
+    printf("[L1$] cache return: data:%x\n", io.out.bits.rdata)
+  }
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the

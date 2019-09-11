@@ -8,12 +8,12 @@ enum {
 };
 
 static int g_trapCode = STATE_RUNNING;
-static int g_trapPC = 0;
+static uint64_t g_trapPC = 0;
 static int g_cycleCnt = 0, g_instrCnt = 0;
 
 bool is_finish() { return g_trapCode != STATE_RUNNING; }
 
-extern "C" void monitor(int trapCode, int trapPC, int cycleCnt, int instrCnt) {
+extern "C" void monitor(int trapCode, uint64_t trapPC, int cycleCnt, int instrCnt) {
   g_trapCode = trapCode;
   g_trapPC = trapPC;
   g_cycleCnt = cycleCnt;

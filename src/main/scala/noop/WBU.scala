@@ -18,7 +18,10 @@ class WBU(implicit val p: NOOPConfig) extends Module {
 
   io.redirect := io.in.bits.decode.cf.redirect
   io.redirect.valid := io.in.bits.decode.cf.redirect.valid && io.in.valid
-
+  
+  when(io.wb.rfWen){
+    printf("[WBU] pc:%x reg: %d, data: %x\n", io.in.bits.decode.cf.pc, io.wb.rfDest, io.wb.rfData)
+  }
   BoringUtils.addSource(io.in.valid, "perfCntCondMinstret")
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(RegNext(io.in.valid), "difftestCommit")

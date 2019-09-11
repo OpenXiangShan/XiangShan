@@ -56,9 +56,9 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 
-REF_SO := $(NEMU_HOME)/build/riscv32-nemu-so
+REF_SO := $(NEMU_HOME)/build/riscv64-nemu-so
 $(REF_SO):
-	$(MAKE) -C $(NEMU_HOME) ISA=riscv32 SHARE=1
+	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))

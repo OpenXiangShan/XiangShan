@@ -101,7 +101,7 @@ object ALUInstr extends HasInstrType {
     SRLW           -> List(InstrR, FuType.alu, ALUOpType.srlw),
     SRAW           -> List(InstrR, FuType.alu, ALUOpType.sraw),
     ADDW            -> List(InstrR, FuType.alu, ALUOpType.addw),
-    SUBW            -> List(InstrR, FuType.alu, ALUOpType.subw),
+    SUBW            -> List(InstrR, FuType.alu, ALUOpType.subw)
 
   )
 }
@@ -124,8 +124,8 @@ class ALU extends Module {
     io.out.bits
   }
 
-  val src132 = src1(31:0)
-  val src232 = src2(31:0)
+  val src132 = src1(31,0)
+  val src232 = src2(31,0)
 
   val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !BRUOpType.isJump(func)
   val adderRes = (src1 +& (src2 ^ Fill(64, isAdderSub))) + isAdderSub
@@ -143,11 +143,11 @@ class ALU extends Module {
     ALUOpType.sllw -> Cat(Fill(32, (src132  << shamt)(31)), (src132  << shamt)(31, 0)),
     ALUOpType.xor  -> xorRes,
     ALUOpType.srl  -> (src1  >> shamt64),
-    ALUOpType.srlw -> Cat(Fill(32, (src132  >> shamt)(31)), (src132  >> shamt)(31:0)),
+    ALUOpType.srlw -> Cat(Fill(32, (src132  >> shamt)(31)), (src132  >> shamt)(31,0)),
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
     ALUOpType.sra  -> ((src1.asSInt >> shamt64).asUInt),
-    ALUOpType.sraw -> Cat(Fill(32, ((src132.asSInt >> shamt).asUInt)(31)), ((src132.asSInt >> shamt).asUInt)(31:0)),
+    ALUOpType.sraw -> Cat(Fill(32, (src132.asSInt >> shamt)(31)), ((src132.asSInt >> shamt).asUInt)),
     ALUOpType.addw -> adderWRes
   ))
 

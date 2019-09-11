@@ -46,7 +46,7 @@ object LSUInstr extends HasInstrType {
     LHU            -> List(InstrI, FuType.lsu, LSUOpType.lwu),
     SB             -> List(InstrS, FuType.lsu, LSUOpType.sb ),
     SH             -> List(InstrS, FuType.lsu, LSUOpType.sh ),
-    SW             -> List(InstrS, FuType.lsu, LSUOpType.sw)
+    SW             -> List(InstrS, FuType.lsu, LSUOpType.sw),
     SD             -> List(InstrS, FuType.lsu, LSUOpType.sd)
   )
 }
@@ -123,6 +123,9 @@ class LSU extends Module {
   io.mmio.req.valid := valid && (state === s_idle) && mmio
   io.mmio.resp.ready := true.B
 
+  when(dmem.req.fire()){
+    printf("[LSU] addr:%x data:%x wen:%b\n",addr, dmem.req.bits.wdata, isStore)
+  } 
   io.out.valid := Mux(isStore && !mmio, state === s_partialLoad, Mux(partialLoad, state === s_partialLoad,
     Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire() && (state === s_wait_resp))))
   io.in.ready := (state === s_idle)
@@ -134,7 +137,7 @@ class LSU extends Module {
     "b000".U -> rdataLatch(63, 0),
     "b001".U -> rdataLatch(63, 8),
     "b010".U -> rdataLatch(63, 16),
-    "b011".U -> rdataLatch(63, 24)
+    "b011".U -> rdataLatch(63, 24),
     "b100".U -> rdataLatch(63, 32),
     "b101".U -> rdataLatch(63, 40),
     "b110".U -> rdataLatch(63, 48),
@@ -145,7 +148,7 @@ class LSU extends Module {
       LSUOpType.lh   -> Cat(Fill(16+32, rdataSel(15)), rdataSel(15, 0)),
       LSUOpType.lw   -> Cat(Fill(32, rdataSel(31)), rdataSel(32, 0)),
       LSUOpType.lbu  -> Cat(0.U((24+32).W), rdataSel(7, 0)),
-      LSUOpType.lhu  -> Cat(0.U((16+32).W), rdataSel(15, 0))
+      LSUOpType.lhu  -> Cat(0.U((16+32).W), rdataSel(15, 0)),
       LSUOpType.lwu  -> Cat(0.U((32).W), rdataSel(32, 0))
   ))
 

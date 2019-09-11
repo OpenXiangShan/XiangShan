@@ -92,5 +92,9 @@ class ISU(implicit val p: NOOPConfig) extends Module {
 
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(VecInit((0 to 31).map(i => rf.read(i.U))), "difftestRegs")
+
+  when(io.out.fire()){
+      printf("[ISU] pc=%x, inst=%x rfwen=%b\n", io.out.bits.cf.pc, io.out.bits.cf.instr, io.out.bits.ctrl.rfWen)
+    }
   }
 }

@@ -26,7 +26,7 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
   w.data := mem.req.bits.wdata
   w.strb := mem.req.bits.wmask
 
-  def LineBeats = 8
+  def LineBeats = 4 //Note: LineBeats = 8 while using rv32 inst set 
   val wlast = WireInit(true.B)
   val rlast = WireInit(true.B)
   if (UHtoAXI4) {

@@ -2,9 +2,9 @@
 
 #define RAMSIZE (128 * 1024 * 1024)
 
-static uint32_t ram[RAMSIZE / sizeof(uint32_t)];
+static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
 static long img_size = 0;
-void* get_img_start() { return &ram[0x100000 / sizeof(uint32_t)]; }
+void* get_img_start() { return &ram[0x100000 / sizeof(uint64_t)]; }
 long get_img_size() { return img_size; }
 
 void init_ram(const char *img, const char *mainargs) {
@@ -29,7 +29,7 @@ void init_ram(const char *img, const char *mainargs) {
 }
 
 extern "C" void ram_helper(
-    uint32_t rIdx, uint32_t *rdata, uint32_t wIdx, uint32_t wdata, uint32_t wmask, uint8_t wen) {
+    uint64_t rIdx, uint64_t *rdata, uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
   *rdata = ram[rIdx];
   if (wen) { ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask); }
 }
