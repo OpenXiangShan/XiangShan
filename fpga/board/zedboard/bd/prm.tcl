@@ -20,7 +20,7 @@ set script_folder [_tcl::get_script_folder]
 ################################################################
 # Check if script is running in correct Vivado version.
 ################################################################
-set scripts_vivado_version 2017.4
+set scripts_vivado_version 2019.1
 set current_vivado_version [version -short]
 
 if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
@@ -130,7 +130,7 @@ xilinx.com:ip:axi_uartlite:2.0\
 xilinx.com:ip:processing_system7:5.5\
 xilinx.com:ip:xlconcat:2.1\
 xilinx.com:ip:axi_gpio:2.0\
-xilinx.com:ip:clk_wiz:5.4\
+xilinx.com:ip:clk_wiz:6.0\
 xilinx.com:ip:proc_sys_reset:5.0\
 "
 
@@ -217,7 +217,7 @@ proc create_hier_cell_hier_clkrst { parentCell nameHier } {
  ] $axi_gpio_0
 
   # Create instance: clk_wiz_0, and set properties
-  set clk_wiz_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:5.4 clk_wiz_0 ]
+  set clk_wiz_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 clk_wiz_0 ]
   set_property -dict [ list \
    CONFIG.CLKOUT1_JITTER {152.070} \
    CONFIG.CLKOUT1_PHASE_ERROR {164.985} \
