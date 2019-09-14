@@ -7,20 +7,20 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object BRUOpType {
-  def jal  = "b11000".U
-  def jalr = "b11010".U
-  def beq  = "b10000".U
-  def bne  = "b10001".U
-  def blt  = "b10100".U
-  def bge  = "b10101".U
-  def bltu = "b10110".U
-  def bgeu = "b10111".U
+  def jal  = "b011000".U
+  def jalr = "b011010".U
+  def beq  = "b010000".U
+  def bne  = "b010001".U
+  def blt  = "b010100".U
+  def bge  = "b010101".U
+  def bltu = "b010110".U
+  def bgeu = "b010111".U
 
   // for RAS
-  def call = "b11100".U
-  def ret  = "b11110".U
+  def call = "b011100".U
+  def ret  = "b011110".U
 
-  def isBru(func: UInt) = func(4)
+  def isBru(func: UInt) = func(4)//[important]
   def isBranch(func: UInt) = !func(3)
   def isJump(func: UInt) = isBru(func) && !isBranch(func)
   def getBranchType(func: UInt) = func(2, 1)

@@ -16,7 +16,7 @@ class CoherenceInterconnect extends Module {
   val inflightSrc = Reg(UInt(1.W)) // 0 - icache, 1 - dcache
 
   val lockWriteFun = ((x: SimpleBusUHReqBundle) => x.isWrite())
-  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 8, Some(lockWriteFun)))
+  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 4, Some(lockWriteFun)))
   (inputArb.io.in zip io.in.map(_.mem.req)).map{ case (arb, in) => arb <> in }
 
   io.out.req.valid := inputArb.io.out.valid && !inflight
@@ -38,6 +38,11 @@ class CoherenceInterconnect extends Module {
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
+
+  Debug(false){
+    printf("[COH] state: %x, io.out.req.ready: %x, inputArb.io.out.valid: %x, inflight: %x\n", state, io.out.req.ready, inputArb.io.out.valid, inflight)
+    printf("[COH] valid io.in(0).mem.req.valid: %x, io.in(1).mem.req.valid: %x inputArb.io.chosen: %x\n", io.in(0).mem.req.valid, io.in(1).mem.req.valid, inputArb.io.chosen)
+  }
 
   switch (state) {
     is (s_idle) {

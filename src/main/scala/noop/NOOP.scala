@@ -13,8 +13,8 @@ case class NOOPConfig (
   HasIcache: Boolean = true,
   HasDcache: Boolean = true,
   HasMExtension: Boolean = true,
-  HasDiv: Boolean = true,
-  EnableDebug: Boolean = false
+  HasDiv: Boolean = true, 
+  EnableDebug: Boolean = true
 )
 
 object AddressSpace {
@@ -40,7 +40,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   val wbu = Module(new WBU)
 
   def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
-    isFlush: Bool, entries: Int = 2, pipe: Boolean = false) = {
+    isFlush: Bool, entries: Int = 4, pipe: Boolean = false) = {
     right <> FlushableQueue(left, isFlush,  entries = entries, pipe = pipe)
   }
 
@@ -51,7 +51,11 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
-  Debug() {
+  Debug(){
+    printf("------------------------ TIMER: %d ------------------------\n", GTimer())
+  }
+  val debug_pipeline = false
+  Debug(debug_pipeline) {
     printf("%d: flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
       GTimer(), ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,

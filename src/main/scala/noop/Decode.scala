@@ -35,7 +35,7 @@ object FuType {
 }
 
 object FuOpType {
-  def apply() = UInt(5.W)
+  def apply() = UInt(6.W)
 }
 
 object Instructions extends HasInstrType {

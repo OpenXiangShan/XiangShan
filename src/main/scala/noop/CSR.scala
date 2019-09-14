@@ -103,6 +103,12 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
     isEcall -> 11.U
   ))
 
+  Debug(){
+    when(io.isInvOpcode && valid){
+      printf("[CSR] Invalid Op at %x\n", io.cfIn.pc)
+    }
+  }
+
   io.redirect.valid := (valid && func === CSROpType.jmp) || isException
   io.redirect.target := Mux(isMret, mepc, mtvec)
 

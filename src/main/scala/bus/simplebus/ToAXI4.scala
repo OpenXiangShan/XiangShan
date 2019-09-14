@@ -32,6 +32,28 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
   if (UHtoAXI4) {
     val axi4 = io.out.asInstanceOf[AXI4]
     val uh = io.in.asInstanceOf[SimpleBusUH]
+
+  Debug(true){
+    when(axi.ar.valid && axi.ar.ready){
+      printf("[AXI] araddr: %x len: %x size: %x\n", ar.addr, axi4.ar.bits.len, axi4.ar.bits.size)
+    }
+    when(axi.ar.valid){
+      printf("[AXI] ar_req araddr: %x len: %x size: %x\n", ar.addr, axi4.ar.bits.len, axi4.ar.bits.size)
+    }
+
+    when(axi.aw.valid && axi.aw.ready){
+      printf("[AXI] awaddr: %x len: %x size: %x\n", aw.addr, axi4.aw.bits.len, axi4.aw.bits.size)
+    }
+
+    when(axi.r.ready && axi.r.valid){
+      printf("[AXI] rdata: %x rlast: %b\n", r.data,axi4.r.bits.last)
+    }
+
+    when(axi.w.ready && axi.w.valid){
+      printf("[AXI] wdata: %x wstrb: %x wlast: %b\n", w.data, w.strb, axi4.w.bits.last)
+    }
+  }
+
     axi4.ar.bits.id    := 0.U
     axi4.ar.bits.len   := Mux(uh.req.bits.burst, (LineBeats - 1).U, 0.U)
     axi4.ar.bits.size  := uh.req.bits.size
@@ -60,6 +82,25 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
   axi.aw.valid := mem.isWrite() && !awAck
   axi.w .valid := mem.isWrite() && !wAck
   mem.req.ready  := Mux(mem.req.bits.isWrite(), !wAck && axi.w.ready, axi.ar.ready)
+
+  Debug(false){
+    printf("[CVT] isWrite %x wAck %x wr %x arr %x addr %x\n", mem.req.bits.isWrite(), wAck, axi.w.ready, axi.ar.ready, mem.req.bits.addr)
+  }
+
+  Debug(true){
+    when((ar.addr(31,4) === "h8010f00".U)&&(axi.ar.valid || axi.aw.valid)){
+      printf("[AXI] TIME %d addr: %x arv %x awv %x\n", GTimer(), ar.addr, axi.ar.valid, axi.aw.valid)
+    }
+  }
+
+  Debug(true){
+    when((w.data(31,0) === "h18be6784".U)&& axi.w.valid){
+      printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
+    }
+    when((w.data(63,32) === "h18be6784".U)&& axi.w.valid){
+      printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
+    }
+  }
 
   axi.r.ready  := mem.resp.ready
   axi.b.ready  := mem.resp.ready

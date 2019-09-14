@@ -34,7 +34,7 @@ sealed trait HasCacheConst {
   def CacheMetaArrayWriteBus() = new SRAMWriteBus(new MetaBundle, set = Sets, way = Ways)
   def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets, way = Ways * LineBeats)
 
-  def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
+  def maskExpand(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
   def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
@@ -75,6 +75,11 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
+  Debug(false){
+    when(io.in.fire()){
+      printf("[L1$] cache stage1, addr in: %x\n", io.in.bits.addr)
+    }
+  }
 
   // read meta array and data array
   List(io.metaReadBus, io.dataReadBus).map { case x => {
@@ -118,7 +123,9 @@ sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.out.bits.meta.tag := meta.tag
   io.out.bits.meta.dirty := dirty && io.in.valid
   io.out.bits.req <> io.in.bits.req
-
+  Debug(){
+    printf("[L1$] stage 2: addr %x, io.in.valid: %x, io.in.ready: %x, io.out.valid: %x, io.out.ready: %x\n", req.addr, io.in.valid, io.in.ready, io.out.valid, io.out.ready)
+  }
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
 }
@@ -166,7 +173,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   // if miss, access memory
   io.mem := DontCare
   List(io.mem.req.bits).map { a =>
-    a.size := "b10".U
+    a.size := "b11".U //10 when 32
     a.burst := true.B
     a.user  := 0.U
   }
@@ -191,7 +198,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
   io.mem.req.bits.wdata := dataRead
-  io.mem.req.bits.wmask := 0xf.U
+  io.mem.req.bits.wmask := 0xff.U
   io.mem.req.bits.wlast := (writeBeatCnt.value === (LineBeats - 1).U)
 
   dataBlockIdx := Mux(state === s_memWriteReq, writeBeatCnt.value, addr.wordIndex)
@@ -203,8 +210,10 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst)
 
-  when(io.mem.req.valid && io.mem.req.ready){
-    printf("[L1$] mem access addr: %x\n", io.mem.req.bits.addr)
+  Debug(){
+    when(io.mem.req.valid && io.mem.req.ready){
+      printf("[L1$] mem access addr: %x\n", io.mem.req.bits.addr)
+    }
   }
 
   switch (state) {
@@ -234,7 +243,9 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
         dataRefillWriteBus.req.bits.data.data := inRdata
         dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
-        printf("[L1$] mem access data : %x\n", dataRefillWriteBus.req.bits.data.data)
+        Debug(){
+          printf("[L1$] mem access data : %x index: %x\n", dataRefillWriteBus.req.bits.data.data, dataRefillWriteBus.req.bits.wordIndex)
+        }
 
         readBeatCnt.inc()
         when (io.mem.resp.bits.rlast) { state := s_wait_resp }
@@ -275,8 +286,11 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.out.bits.user := io.in.bits.req.user
   io.out.valid := io.in.valid && Mux(hit, !req.isUpdate(), Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
 
-  when(io.out.fire()){
-    printf("[L1$] cache return: data:%x\n", io.out.bits.rdata)
+  Debug(){
+    when(io.out.fire()){
+      printf("[L1$] cache return: data:%x\n", io.out.bits.rdata)
+    }
+    printf("[L1$] stage 3: addr %x, io.in.valid: %x, io.in.ready: %x, io.out.valid: %x, io.out.ready: %x, state: %x, needFlush: %x\n", req.addr, io.in.valid, io.in.ready, io.out.valid, io.out.ready, state, needFlush)
   }
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
@@ -320,7 +334,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 64, userBits: Int = 0) ex
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
-
+  // printf("io.flush(0): %x io.flush(1): %x\n", io.flush(0), io.flush(1))
   s3.io.flush := io.flush(1)
   io.addr := s3.io.addr
   io.out.mem <> s3.io.mem

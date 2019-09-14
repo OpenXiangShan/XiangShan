@@ -123,9 +123,27 @@ class LSU extends Module {
   io.mmio.req.valid := valid && (state === s_idle) && mmio
   io.mmio.resp.ready := true.B
 
-  when(dmem.req.fire()){
-    printf("[LSU] addr:%x data:%x wen:%b\n",addr, dmem.req.bits.wdata, isStore)
-  } 
+  Debug(true){
+    when(isStore && (addr(31,4) === "h8010f00".U)){
+      printf("TIME %d addr: %x dmem.req.bits.wdata %x, dmem.req.bits.wmask %x\n", GTimer(), addr, dmem.req.bits.wdata, dmem.req.bits.wmask)
+    }
+  }
+  Debug(){
+    when(dmem.req.fire()){
+      printf("[LSU] (req) addr:%x data:%x wen:%b\n",addr, dmem.req.bits.wdata, isStore)
+    } 
+  
+  
+    when(dmem.resp.fire()){
+      printf("[LSU] (resp) addr:%x data:%x wen:%b\n",addr, io.out.bits, isStore)
+      // printf("%x\n", rdata)
+    }
+  
+    when(state===s_partialLoad){
+      printf("[LSU] (partialLoad) addr:%x data:%x wen:%b\n",addr, io.out.bits, isStore)
+    }
+  }
+  
   io.out.valid := Mux(isStore && !mmio, state === s_partialLoad, Mux(partialLoad, state === s_partialLoad,
     Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire() && (state === s_wait_resp))))
   io.in.ready := (state === s_idle)
@@ -146,10 +164,10 @@ class LSU extends Module {
   val rdataPartialLoad = LookupTree(func, List(
       LSUOpType.lb   -> Cat(Fill(24+32, rdataSel(7)), rdataSel(7, 0)),
       LSUOpType.lh   -> Cat(Fill(16+32, rdataSel(15)), rdataSel(15, 0)),
-      LSUOpType.lw   -> Cat(Fill(32, rdataSel(31)), rdataSel(32, 0)),
+      LSUOpType.lw   -> Cat(Fill(32, rdataSel(31)), rdataSel(31, 0)),
       LSUOpType.lbu  -> Cat(0.U((24+32).W), rdataSel(7, 0)),
       LSUOpType.lhu  -> Cat(0.U((16+32).W), rdataSel(15, 0)),
-      LSUOpType.lwu  -> Cat(0.U((32).W), rdataSel(32, 0))
+      LSUOpType.lwu  -> Cat(0.U((32).W), rdataSel(31, 0))
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)

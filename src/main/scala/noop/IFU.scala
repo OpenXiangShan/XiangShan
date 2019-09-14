@@ -65,8 +65,10 @@ class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
   io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
-  when (io.out.fire()) {
-        printf("[IF1] pc=%x inst=%x\n", io.out.bits.pc, io.out.bits.instr)
+  Debug(){
+    when (io.out.fire()) {
+          printf("[IF1] pc=%x inst=%x\n", io.out.bits.pc, io.out.bits.instr)
+    }
   }
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
