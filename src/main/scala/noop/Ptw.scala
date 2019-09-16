@@ -67,6 +67,7 @@ class PtwSv32 extends Module with pteSv32Const{
   val s_ready :: s_walk :: s_mem :: s_error :: Nil = Enum(4)
   val state = RegInit(s_ready)
   val phyNum = Reg(UInt(32.W))
+  val alreadyOutFire = RegEnable(true.B, io.out.req.fire())
 
   //connect begin
   //out     <<      ptw     >>     in
@@ -77,7 +78,7 @@ class PtwSv32 extends Module with pteSv32Const{
   io.in.resp.bits.user  := io.out.resp.bits.user  //an question, what does the user mean?
   io.in.resp.bits.cmd   := io.out.resp.bits.cmd   //but maybe unused
   io.in.resp.valid      := io.out.resp.valid && (state===s_mem || !io.satp(31).asBool)
-  io.out.resp.ready     := /*io.in.resp.ready && */(state===s_walk || state===s_mem || !io.satp(31).asBool)
+  io.out.resp.ready     := io.in.resp.ready && (state===s_walk || state===s_mem || !io.satp(31).asBool)
   //out      <<     ptw     >>    in
   //out.req.valid    <<     in.req.valid
   //out.req.ready    >>     in.req.ready
@@ -90,7 +91,7 @@ class PtwSv32 extends Module with pteSv32Const{
   io.out.req.bits.size  := io.in.req.bits.size
   //io.out.req.bits.burst := io.in.req.bits.burst //maybe unused
   //io.out.req.bits.wlast := io.in.req.bits.wlast //maybe unused
-  io.out.req.valid      := io.in.req.valid && (state===s_walk || state===s_mem || !io.satp(31).asBool)//need add state machine
+  io.out.req.valid      := io.in.req.valid && (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire || !io.satp(31).asBool)//need add state machine
   io.in.req.ready       := io.out.req.ready && (state===s_ready || !io.satp(31).asBool)
   //connect end
 
@@ -119,17 +120,19 @@ class PtwSv32 extends Module with pteSv32Const{
         state := s_walk
         phyNum := Cat(io.satp(19,0), Cat(io.in.req.bits.addr(31,22), 0.U(2.W)))
         //level := level - 1.U
+        alreadyOutFire := false.B
       }
     }
     is (s_walk) {
       when(level =/= 0.U && io.out.resp.valid && last_rdata=/=io.out.resp.bits.rdata/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
         level := level - 1.U
+        alreadyOutFire := false.B
         //需要进行权限检查,权限不符，state := s_error
         //Sv32 page table entry: 0:V 1:R 2:W 3:X 4:U 5:G 6:A 7:D
         //val is_error = !getPa.io.out.bits(0).asBool || !getPa.io.out.bits(1).asBool&&io.in.bits.op(1).asBool || ...
         //state := Mux(is_error, s_error, s_walk)
         state := Mux(level===1.U, s_mem, s_walk)
-        phytNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), io.in.req.bits.addr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(io.in.req.bits.addr(21,12), 0.U(2.W)))) 
+        phyNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), io.in.req.bits.addr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(io.in.req.bits.addr(21,12), 0.U(2.W)))) 
         last_rdata := io.out.resp.bits.rdata //debug
       }.elsewhen(level===0.U) {
         //也需要权限检查
@@ -147,6 +150,7 @@ class PtwSv32 extends Module with pteSv32Const{
         state := s_ready
         level := 2.U
         last_rdata := 0.U
+        alreadyOutFire := false.B
       }
     }
   }
