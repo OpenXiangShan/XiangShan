@@ -70,7 +70,13 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
 
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
-    icache.io.in <> ifu.io.imem
+    
+    val iptw   = Module(new PtwSv32())
+    iptw.io.satp := "h80080101".U
+    icache.io.in <> iptw.io.out
+    iptw.io.in <> ifu.io.imem
+
+    //icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
     icache.io.out
