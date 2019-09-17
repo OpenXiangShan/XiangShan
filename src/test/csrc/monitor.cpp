@@ -41,6 +41,7 @@ int display_trapinfo(long long max_cycles) {
   }
 
   double ipc = (double)g_instrCnt / g_cycleCnt;
+  eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %d\n" ANSI_COLOR_RESET, g_instrCnt);
   eprintf(ANSI_COLOR_MAGENTA "instrCnt = %d, cycleCnt = %d, IPC = %lf\n" ANSI_COLOR_RESET,
       g_instrCnt, g_cycleCnt, ipc);
   return g_trapCode != STATE_GOODTRAP;
