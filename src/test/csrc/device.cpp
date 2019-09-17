@@ -73,7 +73,7 @@ extern "C" void device_helper(
         vmem[(req_addr - 0x40000000) / sizeof(uint64_t)] = req_wdata;
       }
       else {
-        eprintf("bad address = 0x%08x, wen = %d\n", req_addr, req_wen);
+        eprintf("bad address = 0x%08x, wen = %d\n", (uint32_t)req_addr, req_wen);
         assert(0);
       }
   }
