@@ -77,6 +77,31 @@ class Divider(len: Int = 64) extends NOOPModule {
     shiftReg := Cat(0.U(len.W), aVal, 0.U(1.W))
   }
 
+  //Division by zero
+  val divisionByZero = b === 0.U(len.W)
+
+  //Overflow
+  val bit1 = 1.U(1.W)
+  val overflow = (a === Fill(len, bit1)) && io.sign 
+
+  val specialResult = divisionByZero || overflow
+  val earlyFinish = RegInit(false.B)
+  val specialResultDIV = Mux(overflow, Cat(1.U(1.W), 0.U((len-1).W)), Fill(len, bit1))
+  val specialResultDIVU = Fill(len, bit1)
+  val specialResultREM = Mux(overflow, 0.U(len.W), a)
+  val specialResultREMU = a
+  val specialResultLo = Reg(UInt(len.W))
+  val specialResultR = Reg(UInt(len.W))
+  //early finish
+  when(state === 0.U && io.in.fire()){
+    earlyFinish := specialResult 
+    specialResultLo := Mux(io.sign, specialResultDIV, specialResultDIVU)
+    specialResultR := Mux(io.sign, specialResultREM, specialResultREMU)
+  }
+  when(io.out.fire){
+    earlyFinish := false.B
+  }
+
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
   when (state =/= 0.U) {
@@ -87,9 +112,9 @@ class Divider(len: Int = 64) extends NOOPModule {
   next := (state === 0.U && io.in.fire()) || (state =/= 0.U)
 
   val r = hi(len, 1)
-  io.out.bits(0) := (if (HasDiv) Mux(aSignReg ^ bSignReg, -lo, lo) else 0.U)
-  io.out.bits(1) := (if (HasDiv) Mux(aSignReg, -r, r) else 0.U)
-  io.out.valid := (if (HasDiv) finish else io.in.valid) // FIXME: should deal with ready = 0
+  io.out.bits(0) := (if (HasDiv) Mux(earlyFinish, specialResultLo, Mux(aSignReg ^ bSignReg, -lo, lo)) else 0.U)
+  io.out.bits(1) := (if (HasDiv) Mux(earlyFinish, specialResultR, Mux(aSignReg, -r, r)) else 0.U)
+  io.out.valid := (if (HasDiv) (finish || earlyFinish) else io.in.valid) // FIXME: should deal with ready = 0
 }
 
 class MDUIO extends FunctionUnitIO {
