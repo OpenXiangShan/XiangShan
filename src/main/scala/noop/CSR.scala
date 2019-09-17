@@ -18,16 +18,23 @@ object CSRInstr extends HasInstrType {
   def CSRRS   = BitPat("b????????????_?????_010_?????_1110011")
   def ECALL   = BitPat("b001100000010_00000_000_00000_1110011")
   def MRET    = BitPat("b000000000000_00000_000_00000_1110011")
+  def SRET    = BitPat("b000100000010_00000_000_00000_1110011")
+
 
   val table = Array(
     CSRRW          -> List(InstrI, FuType.csr, CSROpType.wrt),
     CSRRS          -> List(InstrI, FuType.csr, CSROpType.set),
     ECALL          -> List(InstrI, FuType.csr, CSROpType.jmp),
-    MRET           -> List(InstrI, FuType.csr, CSROpType.jmp)
+    MRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
+    SRET           -> List(InstrI, FuType.csr, CSROpType.jmp)
   )
 }
 
 trait HasCSRConst {
+  // val Mstatus       = 0x100
+  // val Mtvec         = 0x105
+  // val Mepc          = 0x141
+  // val Mcause        = 0x142
   val Mstatus       = 0x300
   val Mtvec         = 0x305
   val Mepc          = 0x341
@@ -35,6 +42,7 @@ trait HasCSRConst {
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
+  // def privMret  = 0x102.U
 }
 
 class CSRIO extends FunctionUnitIO {
@@ -58,7 +66,8 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
    
   val mtvec = Reg(UInt(32.W))
   val mcause = Reg(UInt(32.W))
-  val mstatus = Reg(UInt(32.W))
+  // val mstatus = Reg(UInt(32.W))
+  val mstatus = RegInit("h000c0100".U)
   val mepc = Reg(UInt(32.W))
 
   val hasPerfCnt = !p.FPGAPlatform
@@ -87,11 +96,18 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   ))
 
   when (valid && func =/= CSROpType.jmp) {
-    when (addr === Mtvec.U) { mtvec := wdata }
-    when (addr === Mstatus.U) { mstatus := wdata }
-    when (addr === Mepc.U) { mepc := wdata }
-    when (addr === Mcause.U) { mcause := wdata }
+    when (addr === Mtvec.U) { mtvec := wdata(31, 0) }
+    when (addr === Mstatus.U) { mstatus := wdata(31, 0) }
+    when (addr === Mepc.U) { mepc := wdata(31, 0) }
+    when (addr === Mcause.U) { mcause := wdata(31, 0) }
   }
+
+  // when (valid && func =/= CSROpType.jmp){
+  //   when (addr === Mtvec.U) {printf("[CSR] %x pc: %x inst: %x\n", GTimer(), io.cfIn.pc, io.cfIn.instr)}
+  // }
+  // when (valid && func =/= CSROpType.jmp){
+  //   when (addr === Mcause.U) {printf("[CSR] %x pc: %x inst: %x mcause: r %x w %x\n", GTimer(), io.cfIn.pc, io.cfIn.instr, rdata, wdata)}
+  // }
 
   io.out.bits := rdata
 
@@ -101,6 +117,7 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   val exceptionNO = Mux1H(List(
     io.isInvOpcode -> 2.U,
     isEcall -> 11.U
+    // isEcall -> 9.U
   ))
 
   Debug(){

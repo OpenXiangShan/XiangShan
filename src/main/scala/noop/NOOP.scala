@@ -14,13 +14,13 @@ case class NOOPConfig (
   HasDcache: Boolean = true,
   HasMExtension: Boolean = true,
   HasDiv: Boolean = true, 
-  EnableDebug: Boolean = true
+  EnableDebug: Boolean = false
 )
 
 object AddressSpace {
   // (start, size)
-  def mmio = List((0x40000000L, 0x10000000L))
-  def dram = (0x80000000L, 0x10000000L)
+  def mmio = List((0x0000000040000000L, 0x0000000010000000L))
+  def dram = (0x0000000080000000L, 0x0000000010000000L)
 
   //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
   def isMMIO(addr: UInt) = addr(31,28) === "h4".U
@@ -51,13 +51,10 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
-  Debug(){
+  Debug() {
     printf("------------------------ TIMER: %d ------------------------\n", GTimer())
-  }
-  val debug_pipeline = false
-  Debug(debug_pipeline) {
-    printf("%d: flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
-      GTimer(), ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
+    printf("flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
+      ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
     when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) }

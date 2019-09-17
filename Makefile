@@ -43,6 +43,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+PRINTF_COND=1 \
 	+define+RANDOMIZE_REG_INIT \
   --assert --output-split 20000 \
+  --trace  \
   --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
    -LDFLAGS "$(EMU_LDFLAGS)"
 

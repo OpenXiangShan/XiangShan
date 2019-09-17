@@ -33,7 +33,7 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
     val axi4 = io.out.asInstanceOf[AXI4]
     val uh = io.in.asInstanceOf[SimpleBusUH]
 
-  Debug(true){
+  Debug(){
     when(axi.ar.valid && axi.ar.ready){
       printf("[AXI] araddr: %x len: %x size: %x\n", ar.addr, axi4.ar.bits.len, axi4.ar.bits.size)
     }
@@ -53,6 +53,13 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
       printf("[AXI] wdata: %x wstrb: %x wlast: %b\n", w.data, w.strb, axi4.w.bits.last)
     }
   }
+
+  // when((ar.addr(31,28) === "h4".U) && axi.ar.valid && axi.ar.ready){
+  //     printf("[AXI] araddr: %x len: %x size: %x\n", ar.addr, axi4.ar.bits.len, axi4.ar.bits.size)
+  // }
+  // when((ar.addr(31,28) === "h4".U) && axi.aw.valid && axi.aw.ready){
+  //   printf("[AXI] awaddr: %x len: %x size: %x\n", aw.addr, axi4.aw.bits.len, axi4.aw.bits.size)
+  // }
 
     axi4.ar.bits.id    := 0.U
     axi4.ar.bits.len   := Mux(uh.req.bits.burst, (LineBeats - 1).U, 0.U)
@@ -87,13 +94,13 @@ class SimpleBus2AXI4Converter[IT <: SimpleBusUL, OT <: AXI4Lite]
     printf("[CVT] isWrite %x wAck %x wr %x arr %x addr %x\n", mem.req.bits.isWrite(), wAck, axi.w.ready, axi.ar.ready, mem.req.bits.addr)
   }
 
-  Debug(true){
+  Debug(false){
     when((ar.addr(31,4) === "h8010f00".U)&&(axi.ar.valid || axi.aw.valid)){
       printf("[AXI] TIME %d addr: %x arv %x awv %x\n", GTimer(), ar.addr, axi.ar.valid, axi.aw.valid)
     }
   }
 
-  Debug(true){
+  Debug(false){
     when((w.data(31,0) === "h18be6784".U)&& axi.w.valid){
       printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
     }
