@@ -7,18 +7,20 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object MDUOpType {
-  def mul  = "b0000".U
-  def mulh = "b0001".U
-  def div  = "b0100".U
-  def divu = "b0101".U
-  def rem  = "b0110".U
-  def remu = "b0111".U
+  def mul    = "b00000".U
+  def mulh   = "b00001".U
+  def mulhu  = "b10001".U
+  def mulhsu = "b10011".U
+  def div    = "b00100".U
+  def divu   = "b00101".U
+  def rem    = "b00110".U
+  def remu   = "b00111".U
 
-  def mulw  = "b1000".U
-  def divw  = "b1100".U
-  def divuw = "b1101".U
-  def remw  = "b1110".U
-  def remuw = "b1111".U
+  def mulw   = "b01000".U
+  def divw   = "b01100".U
+  def divuw  = "b01101".U
+  def remw   = "b01110".U
+  def remuw  = "b01111".U
 
   def isDiv(op: UInt) = op(2)
   def isSign(op: UInt) = isDiv(op) && !op(0)
@@ -28,7 +30,7 @@ object MDUOpType {
 class MulDivIO(val len: Int) extends Bundle {
   val in = Flipped(DecoupledIO(Vec(2, Output(UInt(len.W)))))
   val sign = Input(Bool())
-  val out = DecoupledIO(Vec(2, Output(UInt(len.W))))
+  val out = DecoupledIO(Vec(4, Output(UInt(len.W))))
 }
 
 class Multiplier(len: Int) extends NOOPModule {
@@ -36,11 +38,18 @@ class Multiplier(len: Int) extends NOOPModule {
   val latency = if (HasMExtension) 1 else 0
 
   def DSPpipe[T <: Data](a: T) = RegNext(a)
-  val mulRes = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(io.in.bits(1)).asSInt).asUInt
-  val mulPipeOut = Pipe(DSPpipe(io.in.fire()), mulRes, latency)
+  //TODO: refactor needed
+  val mulRes   = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(io.in.bits(1)).asSInt).asUInt
+  val mulResU  = (DSPpipe(io.in.bits(0)).asUInt * DSPpipe(io.in.bits(1)).asUInt).asUInt
+  val mulResSU = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(Cat(0.U(1.W), io.in.bits(1))).asSInt).asUInt
+  val mulPipeOut   = Pipe(DSPpipe(io.in.fire()), mulRes, latency)
+  val mulPipeOutU  = Pipe(DSPpipe(io.in.fire()), mulResU, latency)
+  val mulPipeOutSU = Pipe(DSPpipe(io.in.fire()), mulResSU, latency)
 
   io.out.bits(0) := (if (!HasMExtension) 0.U else mulPipeOut.bits(len - 1, 0))
   io.out.bits(1) := (if (!HasMExtension) 0.U else mulPipeOut.bits(2 * len - 1, len))
+  io.out.bits(2) := (if (!HasMExtension) 0.U else mulPipeOutU.bits(2 * len - 1, len))
+  io.out.bits(3) := (if (!HasMExtension) 0.U else mulPipeOutSU.bits(2 * len - 1, len))
 
   val busy = RegInit(false.B)
   when (io.in.valid && !busy) { busy := true.B }
@@ -66,23 +75,14 @@ class Divider(len: Int = 64) extends NOOPModule {
   val next = Wire(Bool())
   val (state, finish) = Counter(next, len + 2)
 
-  io.in.ready := state === 0.U
   val (a, b) = (io.in.bits(0), io.in.bits(1))
-  when (state === 0.U && io.in.fire()) {
-    val (aSign, aVal) = abs(a, io.sign)
-    val (bSign, bVal) = abs(b, io.sign)
-    aSignReg := aSign
-    bSignReg := bSign
-    bReg := bVal
-    shiftReg := Cat(0.U(len.W), aVal, 0.U(1.W))
-  }
 
   //Division by zero
   val divisionByZero = b === 0.U(len.W)
 
   //Overflow
   val bit1 = 1.U(1.W)
-  val overflow = (a === Fill(len, bit1)) && io.sign 
+  val overflow = (a === Cat(1.U(1.W),0.U((len-1).W))) && (b === Fill(len, bit1)) && io.sign
 
   val specialResult = divisionByZero || overflow
   val earlyFinish = RegInit(false.B)
@@ -93,27 +93,47 @@ class Divider(len: Int = 64) extends NOOPModule {
   val specialResultLo = Reg(UInt(len.W))
   val specialResultR = Reg(UInt(len.W))
   //early finish
-  when(state === 0.U && io.in.fire()){
-    earlyFinish := specialResult 
+
+  io.in.ready := state === 0.U && !earlyFinish
+  val newReqIn = state === 0.U && io.in.fire()
+  when(newReqIn){
+    earlyFinish := specialResult
     specialResultLo := Mux(io.sign, specialResultDIV, specialResultDIVU)
     specialResultR := Mux(io.sign, specialResultREM, specialResultREMU)
   }
-  when(io.out.fire){
+  when(io.out.fire && !newReqIn ){
     earlyFinish := false.B
+  }
+  // when(io.out.fire){
+    // printf(name + " DIV result: Lo %x R %x\n", io.out.bits(0), io.out.bits(1))
+  // }
+
+  when (state === 0.U && io.in.fire()) {
+    val (aSign, aVal) = abs(a, io.sign)
+    val (bSign, bVal) = abs(b, io.sign)
+    aSignReg := aSign
+    bSignReg := bSign
+    bReg := bVal
+    shiftReg := Cat(0.U(len.W), aVal, 0.U(1.W))
+    // printf(name + " Input %x %x %x\n", io.in.bits(0), io.in.bits(1), specialResult)
+    // printf(name + " ABS %x %x \n", aVal, bVal)
   }
 
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
   when (state =/= 0.U) {
-    val enough = hi >= bReg
+    val enough = hi.asUInt >= bReg.asUInt
     shiftReg := Cat(Mux(enough, hi - bReg, hi)(len - 1, 0), lo, enough)
+    // printf(name + " DIVing state %d hi %x lo %x earlyFinish %x\n", state, hi, lo, earlyFinish)
   }
 
-  next := (state === 0.U && io.in.fire()) || (state =/= 0.U)
+  next := (state === 0.U && io.in.fire() && !specialResult) || (state =/= 0.U)
 
   val r = hi(len, 1)
   io.out.bits(0) := (if (HasDiv) Mux(earlyFinish, specialResultLo, Mux(aSignReg ^ bSignReg, -lo, lo)) else 0.U)
   io.out.bits(1) := (if (HasDiv) Mux(earlyFinish, specialResultR, Mux(aSignReg, -r, r)) else 0.U)
+  io.out.bits(2) := DontCare
+  io.out.bits(3) := DontCare
   io.out.valid := (if (HasDiv) (finish || earlyFinish) else io.in.valid) // FIXME: should deal with ready = 0
 }
 
@@ -124,6 +144,9 @@ class MDU extends NOOPModule {
   val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  // when(io.in.fire()){
+  //   printf(name + "%x %x\n", src1, src2)
+  // }
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
     this.valid := valid
     this.src1 := src1
@@ -158,6 +181,8 @@ class MDU extends NOOPModule {
   io.out.bits := LookupTree(func, List(
     MDUOpType.mul  -> mul.io.out.bits(0),
     MDUOpType.mulh -> mul.io.out.bits(1),
+    MDUOpType.mulhu -> mul.io.out.bits(2),
+    MDUOpType.mulhsu -> mul.io.out.bits(3),
     MDUOpType.div  -> div.io.out.bits(0),
     MDUOpType.divu -> div.io.out.bits(0),
     MDUOpType.rem  -> div.io.out.bits(1),
