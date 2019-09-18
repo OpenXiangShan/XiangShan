@@ -6,10 +6,10 @@ import chisel3.util._
 import bus.axi4._
 import utils._
 
-abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _extra: Option[B] = None) extends Module {
+abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _extra: B = null) extends Module {
   val io = IO(new Bundle{
     val in = Flipped(_type)
-    val extra = _extra
+    val extra = if (_extra != null) Some(Flipped(Flipped(_extra))) else None
   })
   val in = io.in
 

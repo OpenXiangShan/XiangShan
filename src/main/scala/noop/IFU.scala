@@ -13,7 +13,7 @@ trait HasResetVector {
 
 class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBusUH(userBits = 32)
+    val imem = new SimpleBusUC(userBits = 32)
     val pc = Input(UInt(64.W))
     val out = Decoupled(new CtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
@@ -51,7 +51,7 @@ class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
   io.imem.req.valid := io.out.ready
   io.imem.req.bits.addr := Cat(pc(63,2),0.U(2.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
   io.imem.req.bits.size := "b11".U
-  io.imem.req.bits.cmd := SimpleBusCmd.cmdRead
+  io.imem.req.bits.cmd := SimpleBusCmd.read
   io.imem.req.bits.user := npc
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 

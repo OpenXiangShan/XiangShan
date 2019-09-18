@@ -30,7 +30,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
-    val mmio = new SimpleBusUL
+    val mmio = new SimpleBusUC
   })
 
   val ifu = Module(new IFU)

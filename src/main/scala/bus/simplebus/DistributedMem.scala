@@ -6,8 +6,8 @@ import chisel3.util.experimental.loadMemoryFromFile
 
 class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, dataFile: String = "") extends Module {
   val io = IO(new Bundle {
-    val rw = Flipped(new SimpleBusUL)
-    val ro = Flipped(new SimpleBusUL)
+    val rw = Flipped(new SimpleBusUC)
+    val ro = Flipped(new SimpleBusUC)
   })
 
   val useTreadle = false
@@ -49,7 +49,7 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
     when (wen) { mem.write(rwIdx, wdataVec, wmask) }
   }
 
-  def readPort(p: SimpleBusUL, rdata: UInt) = {
+  def readPort(p: SimpleBusUC, rdata: UInt) = {
     val s_idle :: s_reading :: Nil = Enum(2)
     val state = RegInit(s_idle)
     switch (state) {

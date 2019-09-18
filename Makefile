@@ -74,4 +74,4 @@ emu: $(EMU)
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: verilog emu clean help
+.PHONY: verilog emu clean help $(REF_SO)
