@@ -35,7 +35,6 @@ sealed trait HasCacheConst {
   def CacheMetaArrayWriteBus() = new SRAMWriteBus(new MetaBundle, set = Sets, way = Ways)
   def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets, way = Ways * LineBeats)
 
-  def maskExpand(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
   def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
@@ -156,7 +155,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
-  val wordMask = Mux(req.isWrite(), maskExpand(req.wmask), 0.U(DataBits.W))
+  val wordMask = Mux(req.isWrite(), MaskExpand(req.wmask), 0.U(DataBits.W))
 
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))

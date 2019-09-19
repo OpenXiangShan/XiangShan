@@ -15,10 +15,9 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
   })
   val in = io.in
 
-  def genWdata(originData: UInt) = {
-    val fullMask = Cat(in.w.bits.strb.toBools.map(Fill(8, _)).reverse)
-    (originData & ~fullMask) | (in.w.bits.data & fullMask)
-  }
+  val fullMask = MaskExpand(in.w.bits.strb)
+  def genWdata(originData: UInt) = (originData & ~fullMask) | (in.w.bits.data & fullMask)
+
   val raddr = Wire(UInt())
   val ren = Wire(Bool())
   val (readBeatCnt, rLast) = in match {

@@ -38,7 +38,7 @@ class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4, memByte: Int,
     mem.io.rIdx := rIdx
     mem.io.wIdx := wIdx
     mem.io.wdata := in.w.bits.data
-    mem.io.wmask := Cat(in.w.bits.strb.asBools.map(Fill(8, _)).reverse)
+    mem.io.wmask := fullMask
     mem.io.wen := wen
     mem.io.rdata
   } else {
