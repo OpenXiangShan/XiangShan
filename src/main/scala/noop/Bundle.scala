@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 
-class CtrlSignalIO extends Bundle {
+class CtrlSignalIO extends NOOPBundle {
   val src1Type = Output(SrcType())
   val src2Type = Output(SrcType())
   val fuType = Output(FuType())
@@ -18,52 +18,52 @@ class CtrlSignalIO extends Bundle {
   val isSrc2Forward = Output(Bool())
 }
 
-class DataSrcIO extends Bundle {
-  val src1 = Output(UInt(64.W))
-  val src2 = Output(UInt(64.W))
-  val imm  = Output(UInt(64.W))
+class DataSrcIO extends NOOPBundle {
+  val src1 = Output(UInt(XLEN.W))
+  val src2 = Output(UInt(XLEN.W))
+  val imm  = Output(UInt(XLEN.W))
 }
 
-class RedirectIO extends Bundle {
-  val target = Output(UInt(64.W))
+class RedirectIO extends NOOPBundle {
+  val target = Output(UInt(XLEN.W))
   val valid = Output(Bool())
 }
 
-class CtrlFlowIO extends Bundle {
+class CtrlFlowIO extends NOOPBundle {
   val instr = Output(UInt(32.W))
-  val pc = Output(UInt(64.W))
-  val pnpc = Output(UInt(64.W))
+  val pc = Output(UInt(AddrBits.W))
+  val pnpc = Output(UInt(AddrBits.W))
   val redirect = new RedirectIO
 }
 
-class DecodeIO extends Bundle {
+class DecodeIO extends NOOPBundle {
   val cf = new CtrlFlowIO
   val ctrl = new CtrlSignalIO
   val data = new DataSrcIO
 }
 
-class WriteBackIO extends Bundle {
+class WriteBackIO extends NOOPBundle {
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
-  val rfData = Output(UInt(64.W))
+  val rfData = Output(UInt(XLEN.W))
 }
 
-class CommitIO extends Bundle {
+class CommitIO extends NOOPBundle {
   val decode = new DecodeIO
   val isMMIO = Output(Bool())
-  val commits = Output(Vec(FuType.num, UInt(64.W)))
+  val commits = Output(Vec(FuType.num, UInt(XLEN.W)))
 }
 
-class FunctionUnitIO extends Bundle {
+class FunctionUnitIO extends NOOPBundle {
   val in = Flipped(Decoupled(new Bundle {
-    val src1 = Output(UInt(64.W))
-    val src2 = Output(UInt(64.W))
+    val src1 = Output(UInt(XLEN.W))
+    val src2 = Output(UInt(XLEN.W))
     val func = Output(FuOpType())
   }))
-  val out = Decoupled(Output(UInt(64.W)))
+  val out = Decoupled(Output(UInt(XLEN.W)))
 }
 
-class ForwardIO extends Bundle {
+class ForwardIO extends NOOPBundle {
   val valid = Output(Bool())
   val wb = new WriteBackIO
   val fuType = Output(FuType())

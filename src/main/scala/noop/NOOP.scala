@@ -8,6 +8,15 @@ import bus.simplebus._
 import bus.axi4._
 import utils._
 
+trait HasNOOPParameter {
+  val XLEN = 64
+  val AddrBits = 64
+  val DataBits = XLEN
+}
+
+abstract class NOOPModule extends Module with HasNOOPParameter
+abstract class NOOPBundle extends Bundle with HasNOOPParameter
+
 case class NOOPConfig (
   FPGAPlatform: Boolean = true,
   HasIcache: Boolean = true,
@@ -26,7 +35,7 @@ object AddressSpace {
   def isMMIO(addr: UInt) = addr(31,28) === "h4".U
 }
 
-class NOOP(implicit val p: NOOPConfig) extends Module {
+class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
@@ -70,7 +79,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   isu.io.forward <> exu.io.forward
 
   io.imem <> (if (p.HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = 64))
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = XLEN))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
@@ -78,7 +87,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   } else { ifu.io.imem })
 
   io.dmem <> (if (p.HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache", userBits = 64))
+    val dcache = Module(new Cache(ro = false, name = "dcache", userBits = XLEN))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
     dcache.io.out

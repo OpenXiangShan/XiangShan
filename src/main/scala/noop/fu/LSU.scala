@@ -52,7 +52,7 @@ object LSUInstr extends HasInstrType {
 }
 
 class LSUIO extends FunctionUnitIO {
-  val wdata = Input(UInt(64.W))
+  val wdata = Input(UInt(XLEN.W))
   val dmem = new SimpleBusUC
   val mmio = new SimpleBusUC
   val isMMIO = Output(Bool())

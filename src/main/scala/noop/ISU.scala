@@ -6,25 +6,29 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class RegFile {
-  val rf = Mem(32, UInt(64.W))
+trait HasRegFileParameter {
+  val NRReg = 32
+}
+
+class RegFile extends HasRegFileParameter with HasNOOPParameter {
+  val rf = Mem(NRReg, UInt(XLEN.W))
   def read(addr: UInt) : UInt = Mux(addr === 0.U, 0.U, rf(addr))
   def write(addr: UInt, data: UInt) = { rf(addr) := data }
 } 
 
-class ScoreBoard {
-  val busy = RegInit(0.U(32.W))
+class ScoreBoard extends HasRegFileParameter {
+  val busy = RegInit(0.U(NRReg.W))
   def isBusy(idx: UInt): Bool = busy(idx)
-  def mask(idx: UInt) = (1.U(32.W) << idx)(31, 0)
+  def mask(idx: UInt) = (1.U(NRReg.W) << idx)(NRReg-1, 0)
   def update(setMask: UInt, clearMask: UInt) = {
     // When clearMask(i) and setMask(i) are both set, setMask(i) wins.
     // This can correctly record the busy bit
     // when reg(i) is written and issued at the same cycle.
-    busy := Cat(((busy & ~clearMask) | setMask)(31, 1), 0.U(1.W))
+    busy := Cat(((busy & ~clearMask) | setMask)(NRReg-1, 1), 0.U(1.W))
   }
 }
 
-class ISU(implicit val p: NOOPConfig) extends Module {
+class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParameter {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new DecodeIO))
     val out = Decoupled(new DecodeIO)
@@ -79,9 +83,9 @@ class ISU(implicit val p: NOOPConfig) extends Module {
 
   when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfData) }
 
-  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(64.W))
+  val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(NRReg.W))
   val isuFireSetMask = Mux(io.out.fire(), sb.mask(rfDest), 0.U)
-  when (io.flush) { sb.update(0.U, "hffffffff".U) }
+  when (io.flush) { sb.update(0.U, Fill(NRReg, 1.U(1.W))) }
   .otherwise { sb.update(isuFireSetMask, wbClearMask) }
 
   io.in.ready := !io.in.valid || io.out.fire()
@@ -91,7 +95,7 @@ class ISU(implicit val p: NOOPConfig) extends Module {
   BoringUtils.addSource(io.out.valid && !io.out.fire(), "perfCntCondMexuBusy")
 
   if (!p.FPGAPlatform) {
-    BoringUtils.addSource(VecInit((0 to 31).map(i => rf.read(i.U))), "difftestRegs")
+    BoringUtils.addSource(VecInit((0 to NRReg-1).map(i => rf.read(i.U))), "difftestRegs")
 
   Debug(){
     when(io.out.fire()){

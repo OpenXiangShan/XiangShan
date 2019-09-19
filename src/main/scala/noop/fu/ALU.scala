@@ -109,10 +109,10 @@ object ALUInstr extends HasInstrType {
 class ALUIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
   val redirect = new RedirectIO
-  val offset = Input(UInt(64.W))
+  val offset = Input(UInt(XLEN.W))
 }
 
-class ALU extends Module {
+class ALU extends NOOPModule {
   val io = IO(new ALUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -128,18 +128,18 @@ class ALU extends Module {
   val src232 = src2(31,0)
 
   val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !BRUOpType.isJump(func)
-  val adderRes = (src1 +& (src2 ^ Fill(64, isAdderSub))) + isAdderSub
+  val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
   val adderWRes = (src132 +& (src232 ^ Fill(32, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
-  val sltu = !adderRes(64)
-  val slt = xorRes(63) ^ sltu
+  val sltu = !adderRes(XLEN)
+  val slt = xorRes(XLEN-1) ^ sltu
 
   val shamt = src2(4, 0)
   val shamt64 = src2(5, 0)//TODO
   val aluRes = LookupTreeDefault(func, adderRes, List(
-    ALUOpType.sll  -> ((src1  << shamt64)(63, 0)),
-    ALUOpType.slt  -> Cat(0.U(63.W), slt),
-    ALUOpType.sltu -> Cat(0.U(63.W), sltu),
+    ALUOpType.sll  -> ((src1  << shamt64)(XLEN-1, 0)),
+    ALUOpType.slt  -> Cat(0.U((XLEN-1).W), slt),
+    ALUOpType.sltu -> Cat(0.U((XLEN-1).W), sltu),
     ALUOpType.sllw -> Cat(Fill(32, (src132  << shamt)(31)), (src132  << shamt)(31, 0)),
     ALUOpType.xor  -> xorRes,
     ALUOpType.srl  -> (src1  >> shamt64),

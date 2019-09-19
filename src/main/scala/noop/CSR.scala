@@ -46,7 +46,7 @@ class CSRIO extends FunctionUnitIO {
   val isInvOpcode = Input(Bool())
 }
 
-class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
+class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -58,14 +58,14 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
     io.out.bits
   }
    
-  val mtvec = Reg(UInt(32.W))
-  val mcause = Reg(UInt(32.W))
-  val mstatus = RegInit("h000c0100".U)
-  val mepc = Reg(UInt(32.W))
+  val mtvec = Reg(UInt(XLEN.W))
+  val mcause = Reg(UInt(XLEN.W))
+  val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
+  val mepc = Reg(UInt(XLEN.W))
 
   val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
-  val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(64.W)))
+  val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => (0xb00 + i, perfCnts(i)) }
   val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
 
@@ -74,14 +74,14 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
     Mcause  -> mcause,
     Mepc    -> mepc,
     Mstatus -> mstatus
-  ) ++ perfCntsLoMapping ++ perfCntsHiMapping
+  ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
   val chiselMapping = scalaMapping.map { case (x, y) => (x.U -> y) }
 
   def readWithScala(addr: Int): UInt = scalaMapping(addr)
 
   val addr = src2(11, 0)
-  val rdata = LookupTree(addr, chiselMapping)(31, 0)
+  val rdata = LookupTree(addr, chiselMapping)
   val wdata = LookupTree(func, List(
     CSROpType.wrt -> src1,
     CSROpType.set -> (rdata | src1),
@@ -89,10 +89,10 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   ))
 
   when (valid && func =/= CSROpType.jmp) {
-    when (addr === Mtvec.U) { mtvec := wdata(31, 0) }
-    when (addr === Mstatus.U) { mstatus := wdata(31, 0) }
-    when (addr === Mepc.U) { mepc := wdata(31, 0) }
-    when (addr === Mcause.U) { mcause := wdata(31, 0) }
+    when (addr === Mtvec.U) { mtvec := wdata }
+    when (addr === Mstatus.U) { mstatus := wdata }
+    when (addr === Mepc.U) { mepc := wdata }
+    when (addr === Mcause.U) { mcause := wdata }
   }
 
   // when (valid && func =/= CSROpType.jmp){
