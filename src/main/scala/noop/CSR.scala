@@ -109,7 +109,7 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   val isEcall = (addr === privEcall) && !isException
   val exceptionNO = Mux1H(List(
     io.isInvOpcode -> 2.U,
-    isEcall -> 9.U
+    isEcall -> 11.U
   ))
 
   Debug(){
