@@ -3,10 +3,12 @@ package device
 import chisel3._
 import chisel3.util._
 
+import noop.HasNOOPParameter
 import bus.axi4._
 import utils._
 
-abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _extra: B = null) extends Module {
+abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _extra: B = null)
+  extends Module with HasNOOPParameter {
   val io = IO(new Bundle{
     val in = Flipped(_type)
     val extra = if (_extra != null) Some(Flipped(Flipped(_extra))) else None
@@ -14,7 +16,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
   val in = io.in
 
   def genWdata(originData: UInt) = {
-    val fullMask = Cat(in.w.bits.strb.toBools.map(Mux(_, 0xff.U(8.W), 0x0.U(8.W))).reverse)
+    val fullMask = Cat(in.w.bits.strb.toBools.map(Fill(8, _)).reverse)
     (originData & ~fullMask) | (in.w.bits.data & fullMask)
   }
   val raddr = Wire(UInt())
@@ -25,7 +27,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
       val beatCnt = Counter(256)
       val len = HoldUnless(axi4.ar.bits.len, axi4.ar.fire())
       val burst = HoldUnless(axi4.ar.bits.burst, axi4.ar.fire())
-      val wrapAddr = axi4.ar.bits.addr & ~(axi4.ar.bits.len.asTypeOf(UInt(64.W)) << axi4.ar.bits.size)
+      val wrapAddr = axi4.ar.bits.addr & ~(axi4.ar.bits.len.asTypeOf(UInt(AddrBits.W)) << axi4.ar.bits.size)
       raddr := HoldUnless(wrapAddr, axi4.ar.fire())
       axi4.r.bits.last := (c.value === len)
       when (ren) {

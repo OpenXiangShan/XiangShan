@@ -11,7 +11,9 @@ import utils._
 trait HasNOOPParameter {
   val XLEN = 64
   val AddrBits = 64
+  val AddrBytes = AddrBits / 8
   val DataBits = XLEN
+  val DataBytes = DataBits / 8
 }
 
 abstract class NOOPModule extends Module with HasNOOPParameter
