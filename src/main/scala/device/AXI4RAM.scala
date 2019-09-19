@@ -10,22 +10,22 @@ import utils._
 class RAMHelper(memByte: Int) extends BlackBox {
   val io = IO(new Bundle {
     val clk = Input(Clock())
-    val rIdx = Input(UInt(32.W))
-    val rdata = Output(UInt(32.W))
-    val wIdx = Input(UInt(32.W))
-    val wdata = Input(UInt(32.W))
-    val wmask = Input(UInt(32.W))
+    val rIdx = Input(UInt(64.W))
+    val rdata = Output(UInt(64.W))
+    val wIdx = Input(UInt(64.W))
+    val wdata = Input(UInt(64.W))
+    val wmask = Input(UInt(64.W))
     val wen = Input(Bool())
   })
 }
 
-class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4, memByte: Int, beatBytes: Int = 4,
+class AXI4RAM[T <: AXI4Lite](_type: T = new AXI4, memByte: Int, beatBytes: Int = 8,
   useBlackBox: Boolean = false) extends AXI4SlaveModule(_type) {
 
   val offsetBits = log2Up(memByte)
   val offsetMask = (1 << offsetBits) - 1
   def index(addr: UInt) = (addr & offsetMask.U) >> log2Ceil(beatBytes)
-  def inRange(idx: UInt) = idx < (memByte / 4).U
+  def inRange(idx: UInt) = idx < (memByte / 8).U
 
   val wIdx = index(waddr) + writeBeatCnt
   val rIdx = index(raddr) + readBeatCnt

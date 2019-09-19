@@ -7,28 +7,35 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object ALUOpType {
-  def add  = "b00000".U
-  def sll  = "b00001".U
-  def slt  = "b00010".U
-  def sltu = "b00011".U
-  def xor  = "b00100".U
-  def srl  = "b00101".U
-  def or   = "b00110".U
-  def and  = "b00111".U
-  def sub  = "b01000".U
-  def sra  = "b01101".U
+  def add  = "b000000".U
+  def sll  = "b000001".U
+  def slt  = "b000010".U
+  def sltu = "b000011".U
+  def xor  = "b000100".U
+  def srl  = "b000101".U
+  def or   = "b000110".U
+  def and  = "b000111".U
+  def sub  = "b001000".U
+  def sra  = "b001101".U
+  def sllw = "b100000".U  
+  def srlw  = "b100001".U
+  def sraw  = "b100010".U
+  def addw  = "b100011".U
+  def subw  = "b100100".U
 }
 
 object ALUInstr extends HasInstrType {
+
+  //RV32I
   def ADDI    = BitPat("b????????????_?????_000_?????_0010011")
-  def SLLI    = BitPat("b0000000?????_?????_001_?????_0010011")
+  // def SLLI    = BitPat("b0000000?????_?????_001_?????_0010011")
   def SLTI    = BitPat("b????????????_?????_010_?????_0010011")
   def SLTIU   = BitPat("b????????????_?????_011_?????_0010011")
   def XORI    = BitPat("b????????????_?????_100_?????_0010011")
-  def SRLI    = BitPat("b0000000?????_?????_101_?????_0010011")
+  // def SRLI    = BitPat("b0000000?????_?????_101_?????_0010011")
   def ORI     = BitPat("b????????????_?????_110_?????_0010011")
   def ANDI    = BitPat("b????????????_?????_111_?????_0010011")
-  def SRAI    = BitPat("b0100000?????_?????_101_?????_0010011")
+  // def SRAI    = BitPat("b0100000?????_?????_101_?????_0010011")
 
   def ADD     = BitPat("b0000000_?????_?????_000_?????_0110011")
   def SLL     = BitPat("b0000000_?????_?????_001_?????_0110011")
@@ -44,16 +51,30 @@ object ALUInstr extends HasInstrType {
   def AUIPC   = BitPat("b????????????????????_?????_0010111")
   def LUI     = BitPat("b????????????????????_?????_0110111")
 
+  //RV64I
+  def ADDIW   = BitPat("b???????_?????_?????_000_?????_0011011")
+  def SLLI    = BitPat("b000000?_?????_?????_001_?????_0010011")
+  def SRLI    = BitPat("b000000?_?????_?????_101_?????_0010011")
+  def SRAI    = BitPat("b010000?_?????_?????_101_?????_0010011")
+  def SLLIW   = BitPat("b0000000_?????_?????_001_?????_0011011")
+  def SRLIW   = BitPat("b0000000_?????_?????_101_?????_0011011")
+  def SRAIW   = BitPat("b0100000_?????_?????_101_?????_0011011")
+  def SLLW    = BitPat("b0000000_?????_?????_001_?????_0111011")
+  def SRLW    = BitPat("b0000000_?????_?????_101_?????_0111011")
+  def SRAW    = BitPat("b0100000_?????_?????_101_?????_0111011")
+  def ADDW    = BitPat("b0000000_?????_?????_000_?????_0111011")
+  def SUBW    = BitPat("b0100000_?????_?????_000_?????_0111011")
+
   val table = Array(
     ADDI           -> List(InstrI, FuType.alu, ALUOpType.add),
-    SLLI           -> List(InstrI, FuType.alu, ALUOpType.sll),
+    // SLLI           -> List(InstrI, FuType.alu, ALUOpType.sll),
     SLTI           -> List(InstrI, FuType.alu, ALUOpType.slt),
     SLTIU          -> List(InstrI, FuType.alu, ALUOpType.sltu),
     XORI           -> List(InstrI, FuType.alu, ALUOpType.xor),
-    SRLI           -> List(InstrI, FuType.alu, ALUOpType.srl),
+    // SRLI           -> List(InstrI, FuType.alu, ALUOpType.srl),
     ORI            -> List(InstrI, FuType.alu, ALUOpType.or ),
     ANDI           -> List(InstrI, FuType.alu, ALUOpType.and),
-    SRAI           -> List(InstrI, FuType.alu, ALUOpType.sra),
+    // SRAI           -> List(InstrI, FuType.alu, ALUOpType.sra),
 
     ADD            -> List(InstrR, FuType.alu, ALUOpType.add),
     SLL            -> List(InstrR, FuType.alu, ALUOpType.sll),
@@ -67,14 +88,28 @@ object ALUInstr extends HasInstrType {
     SRA            -> List(InstrR, FuType.alu, ALUOpType.sra),
 
     AUIPC          -> List(InstrU, FuType.alu, ALUOpType.add),
-    LUI            -> List(InstrU, FuType.alu, ALUOpType.add)
+    LUI            -> List(InstrU, FuType.alu, ALUOpType.add),
+
+    ADDIW          -> List(InstrI, FuType.alu, ALUOpType.addw),
+    SLLI           -> List(InstrI, FuType.alu, ALUOpType.sll),
+    SRLI           -> List(InstrI, FuType.alu, ALUOpType.srl),
+    SRAI           -> List(InstrI, FuType.alu, ALUOpType.sra),
+    SLLIW          -> List(InstrI, FuType.alu, ALUOpType.sllw),
+    SRLIW          -> List(InstrI, FuType.alu, ALUOpType.srlw),
+    SRAIW          -> List(InstrI, FuType.alu, ALUOpType.sraw),
+    SLLW           -> List(InstrR, FuType.alu, ALUOpType.sllw),
+    SRLW           -> List(InstrR, FuType.alu, ALUOpType.srlw),
+    SRAW           -> List(InstrR, FuType.alu, ALUOpType.sraw),
+    ADDW           -> List(InstrR, FuType.alu, ALUOpType.addw),
+    SUBW           -> List(InstrR, FuType.alu, ALUOpType.subw)
+
   )
 }
 
 class ALUIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
   val redirect = new RedirectIO
-  val offset = Input(UInt(32.W))
+  val offset = Input(UInt(64.W))
 }
 
 class ALU extends Module {
@@ -89,22 +124,32 @@ class ALU extends Module {
     io.out.bits
   }
 
-  val isAdderSub = (func =/= ALUOpType.add) && !BRUOpType.isJump(func)
-  val adderRes = (src1 +& (src2 ^ Fill(32, isAdderSub))) + isAdderSub
+  val src132 = src1(31,0)
+  val src232 = src2(31,0)
+
+  val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !BRUOpType.isJump(func)
+  val adderRes = (src1 +& (src2 ^ Fill(64, isAdderSub))) + isAdderSub
+  val adderWRes = (src132 +& (src232 ^ Fill(32, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
-  val sltu = !adderRes(32)
-  val slt = xorRes(31) ^ sltu
+  val sltu = !adderRes(64)
+  val slt = xorRes(63) ^ sltu
 
   val shamt = src2(4, 0)
+  val shamt64 = src2(5, 0)//TODO
   val aluRes = LookupTreeDefault(func, adderRes, List(
-    ALUOpType.sll  -> ((src1  << shamt)(31, 0)),
-    ALUOpType.slt  -> Cat(0.U(31.W), slt),
-    ALUOpType.sltu -> Cat(0.U(31.W), sltu),
+    ALUOpType.sll  -> ((src1  << shamt64)(63, 0)),
+    ALUOpType.slt  -> Cat(0.U(63.W), slt),
+    ALUOpType.sltu -> Cat(0.U(63.W), sltu),
+    ALUOpType.sllw -> Cat(Fill(32, (src132  << shamt)(31)), (src132  << shamt)(31, 0)),
     ALUOpType.xor  -> xorRes,
-    ALUOpType.srl  -> (src1  >> shamt),
+    ALUOpType.srl  -> (src1  >> shamt64),
+    ALUOpType.srlw -> Cat(Fill(32, (src132  >> shamt)(31)), (src132  >> shamt)(31,0)),
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
-    ALUOpType.sra  -> ((src1.asSInt >> shamt).asUInt)
+    ALUOpType.sra  -> ((src1.asSInt >> shamt64).asUInt),
+    ALUOpType.sraw -> Cat(Fill(32, (src132.asSInt >> shamt)(31)), ((src132.asSInt >> shamt).asUInt)),
+    ALUOpType.addw -> Cat(Fill(32, adderWRes(31)), adderWRes(31,0)),
+    ALUOpType.subw -> Cat(Fill(32, adderWRes(31)), adderWRes(31,0))
   ))
 
   val branchOpTable = List(
@@ -127,6 +172,12 @@ class ALU extends Module {
 
   io.in.ready := true.B
   io.out.valid := valid
+
+  Debug(){
+    when(io.out.valid){
+      printf("[ALU] func: %b 1: %x, 2: %x, out: %x\n", func, src1, src2, io.out.bits)
+    }
+  }
 
   val bpuUpdateReq = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   bpuUpdateReq.valid := valid && isBru

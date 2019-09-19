@@ -4,14 +4,16 @@ import chisel3._
 import chisel3.util._
 
 trait HasInstrType {
-  private val InstrTypeNum = 7
-  def InstrN = "b000".U
-  def InstrI = "b100".U
-  def InstrR = "b101".U
-  def InstrS = "b010".U
-  def InstrB = "b001".U
-  def InstrU = "b110".U
-  def InstrJ = "b111".U
+  private val InstrTypeNum = 9
+  def InstrN  = "b0000".U
+  def InstrI  = "b0100".U
+  def InstrR  = "b0101".U
+  def InstrS  = "b0010".U
+  def InstrB  = "b0001".U
+  def InstrU  = "b0110".U
+  def InstrJ  = "b0111".U
+
+  def InstrIW = "b1100".U
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
 }
@@ -33,7 +35,7 @@ object FuType {
 }
 
 object FuOpType {
-  def apply() = UInt(5.W)
+  def apply() = UInt(6.W)
 }
 
 object Instructions extends HasInstrType {

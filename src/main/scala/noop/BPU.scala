@@ -7,13 +7,13 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 class TableAddr(idxBits: Int) extends Bundle {
-  def tagBits = 32 - 2 - idxBits
+  def tagBits = 64 - 2 - idxBits
 
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
   val pad = UInt(2.W)
 
-  def fromUInt(x: UInt) = x.asTypeOf(UInt(32.W)).asTypeOf(this)
+  def fromUInt(x: UInt) = x.asTypeOf(UInt(64.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
 
@@ -31,9 +31,9 @@ object BTBtype {
 
 class BPUUpdateReq extends Bundle {
   val valid = Output(Bool())
-  val pc = Output(UInt(32.W))
+  val pc = Output(UInt(64.W))
   val isMissPredict = Output(Bool())
-  val actualTarget = Output(UInt(32.W))
+  val actualTarget = Output(UInt(64.W))
   val actualTaken = Output(Bool())  // for branch
   val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
@@ -41,7 +41,7 @@ class BPUUpdateReq extends Bundle {
 
 class BPU1 extends Module {
   val io = IO(new Bundle {
-    val in = new Bundle { val pc = Flipped(Valid((UInt(32.W)))) }
+    val in = new Bundle { val pc = Flipped(Valid((UInt(64.W)))) }
     val out = new RedirectIO
     val flush = Input(Bool())
   })
@@ -54,7 +54,7 @@ class BPU1 extends Module {
   def btbEntry() = new Bundle {
     val tag = UInt(btbAddr.tagBits.W)
     val _type = UInt(2.W)
-    val target = UInt(32.W)
+    val target = UInt(64.W)
   }
 
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
@@ -75,7 +75,7 @@ class BPU1 extends Module {
   // RAS
 
   val NRras = 16
-  val ras = Mem(NRras, UInt(32.W))
+  val ras = Mem(NRras, UInt(64.W))//???
   val sp = Counter(NRras)
   val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
 

@@ -2,7 +2,7 @@
 import "DPI-C" function void monitor
 (
   input  int  trapCode,
-  input  int  trapPC,
+  input  longint  trapPC,
   input  int  cycleCnt,
   input  int  instrCnt
 );
@@ -13,7 +13,7 @@ module Monitor(
   input         reset,
   input         isNoopTrap,
   input  [31:0] trapCode,
-  input  [31:0] trapPC,
+  input  [63:0] trapPC,
   input  [31:0] cycleCnt,
   input  [31:0] instrCnt
 );

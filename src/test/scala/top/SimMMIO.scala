@@ -11,10 +11,10 @@ class DeviceHelper extends BlackBox {
     val reset = Input(Bool())
     val reqValid = Input(Bool())
     val reqWen = Input(Bool())
-    val reqAddr = Input(UInt(32.W))
-    val reqWdata = Input(UInt(32.W))
-    val reqWmask = Input(UInt(4.W))
-    val respRdata = Output(UInt(32.W))
+    val reqAddr = Input(UInt(64.W))
+    val reqWdata = Input(UInt(64.W))
+    val reqWmask = Input(UInt(8.W))
+    val respRdata = Output(UInt(64.W))
   })
 }
 

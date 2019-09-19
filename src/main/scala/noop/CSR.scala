@@ -30,14 +30,13 @@ object CSRInstr extends HasInstrType {
 }
 
 trait HasCSRConst {
-  // these are actually S-mode CSRs to match riscv32-nemu
-  val Mstatus       = 0x100
-  val Mtvec         = 0x105
-  val Mepc          = 0x141
-  val Mcause        = 0x142
+  val Mstatus       = 0x300
+  val Mtvec         = 0x305
+  val Mepc          = 0x341
+  val Mcause        = 0x342
 
   def privEcall = 0x000.U
-  def privMret  = 0x102.U
+  def privMret  = 0x302.U
 }
 
 class CSRIO extends FunctionUnitIO {
@@ -58,7 +57,7 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
     this.func := func
     io.out.bits
   }
-
+   
   val mtvec = Reg(UInt(32.W))
   val mcause = Reg(UInt(32.W))
   val mstatus = RegInit("h000c0100".U)
@@ -90,11 +89,18 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   ))
 
   when (valid && func =/= CSROpType.jmp) {
-    when (addr === Mtvec.U) { mtvec := wdata }
-    when (addr === Mstatus.U) { mstatus := wdata }
-    when (addr === Mepc.U) { mepc := wdata }
-    when (addr === Mcause.U) { mcause := wdata }
+    when (addr === Mtvec.U) { mtvec := wdata(31, 0) }
+    when (addr === Mstatus.U) { mstatus := wdata(31, 0) }
+    when (addr === Mepc.U) { mepc := wdata(31, 0) }
+    when (addr === Mcause.U) { mcause := wdata(31, 0) }
   }
+
+  // when (valid && func =/= CSROpType.jmp){
+  //   when (addr === Mtvec.U) {printf("[CSR] %x pc: %x inst: %x\n", GTimer(), io.cfIn.pc, io.cfIn.instr)}
+  // }
+  // when (valid && func =/= CSROpType.jmp){
+  //   when (addr === Mcause.U) {printf("[CSR] %x pc: %x inst: %x mcause: r %x w %x\n", GTimer(), io.cfIn.pc, io.cfIn.instr, rdata, wdata)}
+  // }
 
   io.out.bits := rdata
 
@@ -103,8 +109,14 @@ class CSR(implicit val p: NOOPConfig) extends Module with HasCSRConst {
   val isEcall = (addr === privEcall) && !isException
   val exceptionNO = Mux1H(List(
     io.isInvOpcode -> 2.U,
-    isEcall -> 9.U //11.U
+    isEcall -> 11.U
   ))
+
+  Debug(){
+    when(io.isInvOpcode && valid){
+      printf("[CSR] Invalid Op at %x\n", io.cfIn.pc)
+    }
+  }
 
   io.redirect.valid := (valid && func === CSROpType.jmp) || isException
   io.redirect.target := Mux(isMret, mepc, mtvec)

@@ -25,7 +25,7 @@ object SimpleBusCmd {
 }
 
 class SimpleBusReqBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
-  val addr = Output(UInt(32.W))
+  val addr = Output(UInt(64.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
   val wmask = Output(UInt((dataBits / 8).W))
@@ -59,7 +59,7 @@ class SimpleBusRespBundle(dataBits: Int, userBits: Int = 0) extends Bundle {
 }
 
 // Uncache
-class SimpleBusUC(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
+class SimpleBusUC(dataBits: Int = 64, userBits: Int = 0) extends Bundle {
   val req = Decoupled(new SimpleBusReqBundle(dataBits, userBits))
   val resp = Flipped(Decoupled(new SimpleBusRespBundle(dataBits, userBits)))
 
@@ -76,7 +76,7 @@ class SimpleBusUC(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
 }
 
 // Cache
-class SimpleBusC(dataBits: Int = 32, userBits: Int = 0) extends Bundle {
+class SimpleBusC(dataBits: Int = 64, userBits: Int = 0) extends Bundle {
   val mem = new SimpleBusUC(dataBits, userBits)
   val coh = Flipped(new SimpleBusUC(dataBits, userBits))
 

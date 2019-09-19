@@ -7,7 +7,7 @@ import utils._
 import bus.simplebus._
 
 trait HasCoherenceConst {
-  val supportCoh = true
+  val supportCoh = false
 }
 
 class CoherenceInterconnect extends Module with HasCoherenceConst {
@@ -32,7 +32,7 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
   val inflightSrc = Reg(UInt(1.W)) // 0 - icache, 1 - dcache
 
   val lockWriteFun = ((x: SimpleBusReqBundle) => x.isWrite())
-  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 8, Some(lockWriteFun)))
+  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 4, Some(lockWriteFun)))
   (inputArb.io.in zip io.in.map(_.mem.req)).map{ case (arb, in) => arb <> in }
 
   val thisReq = inputArb.io.out

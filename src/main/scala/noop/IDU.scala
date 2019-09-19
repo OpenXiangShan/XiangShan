@@ -15,6 +15,12 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
   val instrType :: fuType :: fuOpType :: Nil =
     ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
 
+  Debug(){
+    when(io.out.valid){
+      printf("[IDU] pc: %x instrType: %x fuType: %x fuOpType: %x\n", io.in.bits.pc, instrType, fuType, fuOpType)
+    }
+  }
+
   io.out.bits := DontCare
 
   io.out.bits.ctrl.fuType := fuType
@@ -41,11 +47,12 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
 
   io.out.bits.data := DontCare
   io.out.bits.data.imm  := LookupTree(instrType, List(
-    InstrI -> Cat(Fill(20, instr(31)), instr(31, 20)),
-    InstrS -> Cat(Fill(20, instr(31)), instr(31, 25), instr(11, 7)),
-    InstrB -> Cat(Fill(20, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)),
-    InstrU -> Cat(instr(31, 12), 0.U(12.W)),
-    InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
+    InstrIW -> Cat(Fill(20+32, instr(31)), instr(31, 20)),//fixed
+    InstrI  -> Cat(Fill(20+32, instr(31)), instr(31, 20)),
+    InstrS  -> Cat(Fill(20+32, instr(31)), instr(31, 25), instr(11, 7)),
+    InstrB  -> Cat(Fill(20+32, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)),
+    InstrU  -> Cat(Fill(32, instr(31)), instr(31, 12), 0.U(12.W)),//fixed
+    InstrJ  -> Cat(Fill(12+32, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
   ))
 
   when (fuType === FuType.alu) {

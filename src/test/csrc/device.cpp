@@ -10,7 +10,7 @@ uint32_t screen_size(void);
 void set_abort(void);
 
 static struct timeval boot = {};
-static uint32_t vmem[0x400000 / sizeof(uint32_t)];
+static uint64_t vmem[0x400000 / sizeof(uint64_t)];
 
 void init_device(void) {
   init_sdl();
@@ -51,7 +51,7 @@ uint32_t uptime(void) {
 }
 
 extern "C" void device_helper(
-    uint8_t req_wen, uint32_t req_addr, uint32_t req_wdata, uint8_t req_wmask, uint32_t *resp_rdata) {
+    uint8_t req_wen, uint64_t req_addr, uint64_t req_wdata, uint8_t req_wmask, uint64_t *resp_rdata) {
   switch (req_addr) {
       // read uartlite stat register
     case 0x40600008:
@@ -70,10 +70,10 @@ extern "C" void device_helper(
     default:
       if (req_addr >= 0x40000000 && req_addr < 0x40400000 && req_wen) {
         // write to vmem
-        vmem[(req_addr - 0x40000000) / sizeof(uint32_t)] = req_wdata;
+        vmem[(req_addr - 0x40000000) / sizeof(uint64_t)] = req_wdata;
       }
       else {
-        eprintf("bad address = 0x%08x, wen = %d\n", req_addr, req_wen);
+        eprintf("bad address = 0x%08x, wen = %d\n", (uint32_t)req_addr, req_wen);
         assert(0);
       }
   }

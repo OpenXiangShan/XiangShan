@@ -8,12 +8,12 @@ enum {
 };
 
 static int g_trapCode = STATE_RUNNING;
-static int g_trapPC = 0;
+static uint64_t g_trapPC = 0;
 static int g_cycleCnt = 0, g_instrCnt = 0;
 
 bool is_finish() { return g_trapCode != STATE_RUNNING; }
 
-extern "C" void monitor(int trapCode, int trapPC, int cycleCnt, int instrCnt) {
+extern "C" void monitor(int trapCode, uint64_t trapPC, int cycleCnt, int instrCnt) {
   g_trapCode = trapCode;
   g_trapPC = trapPC;
   g_cycleCnt = cycleCnt;
@@ -41,6 +41,7 @@ int display_trapinfo(long long max_cycles) {
   }
 
   double ipc = (double)g_instrCnt / g_cycleCnt;
+  eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %d\n" ANSI_COLOR_RESET, g_instrCnt);
   eprintf(ANSI_COLOR_MAGENTA "instrCnt = %d, cycleCnt = %d, IPC = %lf\n" ANSI_COLOR_RESET,
       g_instrCnt, g_cycleCnt, ipc);
   return g_trapCode != STATE_GOODTRAP;

@@ -11,14 +11,14 @@ import utils._
 sealed trait HasCacheConst {
   val TotalSize = 32 // Kbytes
   val LineSize = 32 // byte
-  val LineBeats = LineSize / 4
+  val LineBeats = LineSize / 8 //DATA WIDTH 64
   val Ways = 1
   val Sets = TotalSize * 1024 / LineSize / Ways
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
   val WordIndexBits = log2Up(LineBeats)
-  val TagBits = 32 - OffsetBits - IndexBits
-  val dataBits = 32
+  val TagBits = 64 - OffsetBits - IndexBits
+  val dataBits = 64
 
   val debug = false
 
@@ -26,7 +26,7 @@ sealed trait HasCacheConst {
     val tag = UInt(TagBits.W)
     val index = UInt(IndexBits.W)
     val wordIndex = UInt(WordIndexBits.W)
-    val byteOffset = UInt(2.W)
+    val byteOffset = UInt(3.W)//rv32: byteOffset = UInt(2.W)
   }
 
   def CacheMetaArrayReadBus() = new SRAMReadBus(new MetaBundle, set = Sets, way = Ways)
@@ -34,7 +34,7 @@ sealed trait HasCacheConst {
   def CacheMetaArrayWriteBus() = new SRAMWriteBus(new MetaBundle, set = Sets, way = Ways)
   def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets, way = Ways * LineBeats)
 
-  def maskExpand(m: UInt): UInt = Cat(m.toBools.map(Fill(8, _)).reverse)
+  def maskExpand(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
   def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
@@ -52,7 +52,7 @@ sealed class MetaPipelineBundle extends Bundle with HasCacheConst {
 }
 
 sealed class DataBundle extends Bundle {
-  val data = Output(UInt(32.W))
+  val data = Output(UInt(64.W))
 }
 
 sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
@@ -75,6 +75,11 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
+  Debug(false){
+    when(io.in.fire()){
+      printf("[L1$] cache stage1, addr in: %x\n", io.in.bits.addr)
+    }
+  }
 
   // read meta array and data array
   List(io.metaReadBus, io.dataReadBus).map { case x => {
@@ -118,7 +123,9 @@ sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.out.bits.meta.tag := meta.tag
   io.out.bits.meta.dirty := dirty && io.in.valid
   io.out.bits.req <> io.in.bits.req
-
+  Debug(){
+    printf("[L1$] stage 2: addr %x, io.in.valid: %x, io.in.ready: %x, io.out.valid: %x, io.out.ready: %x\n", req.addr, io.in.valid, io.in.ready, io.out.valid, io.out.ready)
+  }
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
 }
@@ -129,7 +136,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
     val in = Flipped(Decoupled(new Stage2IO(userBits)))
     val out = Decoupled(new SimpleBusRespBundle(dataBits = dataBits, userBits = userBits))
     val isFinish = Output(Bool())
-    val addr = Output(UInt(32.W))
+    val addr = Output(UInt(64.W))
     val flush = Input(Bool())
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
@@ -145,7 +152,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
-  val wordMask = Mux(req.isWrite(), maskExpand(req.wmask), 0.U(32.W))
+  val wordMask = Mux(req.isWrite(), maskExpand(req.wmask), 0.U(64.W))
 
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
@@ -165,7 +172,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   // if miss, access memory
   io.mem := DontCare
   List(io.mem.req.bits).map { a =>
-    a.size := "b10".U
+    a.size := "b11".U //"b10" with rv32
     a.user  := 0.U
   }
 
@@ -180,12 +187,12 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   dataBlockIdx := Mux(state === s_memWriteReq, writeBeatCnt.value, addr.wordIndex)
 
   io.mem.req.bits.wdata := dataRead
-  io.mem.req.bits.wmask := 0xf.U
+  io.mem.req.bits.wmask := 0xff.U
   io.mem.req.bits.cmd := Mux(state === s_memReadReq, SimpleBusCmd.readBurst,
     Mux((writeBeatCnt.value === (LineBeats - 1).U), SimpleBusCmd.writeLast, SimpleBusCmd.writeBurst))
 
   // critical word first
-  val raddr = Cat(req.addr(31, 2), 0.U(2.W))
+  val raddr = Cat(req.addr(63, 3), 0.U(3.W))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
   io.mem.req.bits.addr := Mux(state === s_memReadReq, raddr, waddr)
@@ -200,6 +207,11 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst)
 
+  Debug(){
+    when(io.mem.req.valid && io.mem.req.ready){
+      printf("[L1$] mem access addr: %x\n", io.mem.req.bits.addr)
+    }
+  }
 
   switch (state) {
     is (s_idle) {
@@ -207,7 +219,9 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
       alreadyOutFire := false.B
 
       // actually this can use s2 to test
-      when (miss && !io.flush) { state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) }
+      when (miss && !io.flush) { 
+        state := Mux(if (ro) false.B else meta.dirty, s_memWriteReq, s_memReadReq) 
+        }
     }
     is (s_memReadReq) { when (io.mem.req.fire()) {
       state := s_memReadResp
@@ -226,6 +240,9 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
         dataRefillWriteBus.req.bits.data.data := inRdata
         dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
+        Debug(){
+          printf("[L1$] mem access data : %x index: %x\n", dataRefillWriteBus.req.bits.data.data, dataRefillWriteBus.req.bits.wordIndex)
+        }
 
         readBeatCnt.inc()
         when (io.mem.resp.bits.isReadLast()) { state := s_wait_resp }
@@ -350,10 +367,10 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends Module with HasC
   // FIXME: should invalidate the meta array
 }
 
-class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) extends Module with HasCacheConst {
+class Cache(ro: Boolean, name: String, dataBits: Int = 64, userBits: Int = 0) extends Module with HasCacheConst {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBusUC(dataBits, userBits))
-    val addr = Output(UInt(32.W))
+    val addr = Output(UInt(64.W))
     val flush = Input(UInt(2.W))
     val out = new SimpleBusC(dataBits)
   })
@@ -369,7 +386,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
-
+  // printf("io.flush(0): %x io.flush(1): %x\n", io.flush(0), io.flush(1))
   s3.io.flush := io.flush(1)
   io.addr := s3.io.addr
   io.out.mem <> s3.io.mem
