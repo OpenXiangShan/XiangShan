@@ -60,6 +60,7 @@ trait pteSv32Const {
 class PtwSv32 extends Module with pteSv32Const{
   val io = IO(new Bundle {
     val satp = Input(UInt(32.W))
+    val flush = Input(Bool())
     val in   = Flipped(new SimpleBusUC(dataBits=32, userBits=32))
     val out  = new SimpleBusUC(dataBits=32, userBits=32)
   })
@@ -68,43 +69,46 @@ class PtwSv32 extends Module with pteSv32Const{
   val state = RegInit(s_ready)
   val phyNum = Reg(UInt(32.W))
   val alreadyOutFire = RegEnable(true.B, io.out.req.fire())
+  val _isWork = RegEnable(io.satp(31).asBool, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
+  val isWork = Mux(state===s_ready, io.satp(31).asBool, _isWork) //isWork control the 
+  val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
+  when (io.flush && (state =/= s_ready)) { needFlush := true.B }
+
+  //reg to store in.req.bits at s_ready when ptw works
+  val updateStore = state===s_ready && io.in.req.fire() && io.satp(31).asBool
+  val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
+  val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
+  val inReqBitsWmask = RegEnable(io.in.req.bits.wmask, updateStore)
+  val inReqBitsWdata = RegEnable(io.in.req.bits.wdata, updateStore)
+  val inReqBitsUser = RegEnable(io.in.req.bits.user, updateStore)
+  val inReqBitsSize = RegEnable(io.in.req.bits.size, updateStore)
+  //store end
 
   //connect begin
-  //out     <<      ptw     >>     in
+  //out      <<     ptw     >>     in
   //out.resp.valid   >>     in.resp.valid
   //out.resp.ready   <<     in.resp.ready
   //out.resp.bits    >>     in.resp.bits
   io.in.resp.bits.rdata := io.out.resp.bits.rdata
-  io.in.resp.bits.user  := io.out.resp.bits.user  //an question, what does the user mean?
-  io.in.resp.bits.cmd   := io.out.resp.bits.cmd   //but maybe unused
-  io.in.resp.valid      := io.out.resp.valid && (state===s_mem || !io.satp(31).asBool)
-  io.out.resp.ready     := io.in.resp.ready && (state===s_walk || state===s_mem || !io.satp(31).asBool)
+  io.in.resp.bits.user  := io.out.resp.bits.user 
+  io.in.resp.bits.cmd   := io.out.resp.bits.cmd  
+  io.in.resp.valid      := Mux(isWork, state===s_mem && !needFlush && io.out.resp.valid, io.out.resp.valid)
+  io.out.resp.ready     := Mux(isWork, (state===s_walk || state===s_mem), io.in.resp.ready)
   //out      <<     ptw     >>    in
   //out.req.valid    <<     in.req.valid
   //out.req.ready    >>     in.req.ready
   //out.req.bits     <<     in.req.bits
-  io.out.req.bits.addr  := Mux(io.satp(31).asBool, phyNum, io.in.req.bits.addr)
-  io.out.req.bits.cmd   := Mux(state===s_walk, SimpleBusCmd.read, io.in.req.bits.cmd) //need to be read when ptw workes
-  io.out.req.bits.wmask := io.in.req.bits.wmask //unused in ifu, maybe need change in data access
-  io.out.req.bits.wdata := io.in.req.bits.wdata //unused in ifu
-  io.out.req.bits.user  := io.in.req.bits.user //what is user, the pc??
-  io.out.req.bits.size  := io.in.req.bits.size
-  //io.out.req.bits.burst := io.in.req.bits.burst //maybe unused
-  //io.out.req.bits.wlast := io.in.req.bits.wlast //maybe unused
+  io.out.req.bits.addr  := Mux(isWork, phyNum, io.in.req.bits.addr)
+  io.out.req.bits.cmd   := Mux(isWork, Mux(state===s_walk, SimpleBusCmd.read, inReqBitsCmd), io.in.req.bits.cmd)
+  io.out.req.bits.wmask := Mux(isWork, inReqBitsWmask, io.in.req.bits.wmask)
+  io.out.req.bits.wdata := Mux(isWork, inReqBitsWdata, io.in.req.bits.wdata)
+  io.out.req.bits.user  := Mux(isWork, inReqBitsUser, io.in.req.bits.user)
+  io.out.req.bits.size  := Mux(isWork, inReqBitsSize, io.in.req.bits.size)
   io.out.req.valid      := io.in.req.valid && (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire || !io.satp(31).asBool)//need add state machine
   io.in.req.ready       := io.out.req.ready && (state===s_ready || !io.satp(31).asBool)
   //connect end
 
   val level = RegInit(2.U)
-
-  //val phyNum = UInt(32.W) //is reg necessary
-  //when(level===2.U) {
-  //  phyNum := Cat(io.satp(19,0), Cat(io.in.req.bits.addr(31,22), 0.U(2.W)))
-  //} .elsewhen(level===1.U) {
-  //  phyNum := Cat(io.out.resp.bits.rdata(29,10), Cat(io.in.req.bits.addr(21,12), 0.U(2.W)))
-  //} .otherwise {
-  //  phyNum := Cat(io.out.resp.bits.rdata(29,10), io.in.req.bits.addr(11,0))
-  //}
 
   //state machine: does instr and data need two ptw?? maybe one is enough, so how to handle two input
   //s_ready : free state
@@ -112,31 +116,37 @@ class PtwSv32 extends Module with pteSv32Const{
   //s_mem   : already get the paddr, then access the mem to get the data, maybe just 
   //s_error : error state, raise an exception, unknown how to do
 
-  val last_rdata = RegInit(0.U) //debug
+  val last_rdata = RegInit(0.U) //no use, debug
   
   switch (state) {
     is (s_ready) {
-      when(io.in.req.valid && io.satp(31).asBool) {
+      when(io.in.req.fire() && io.satp(31).asBool && !io.flush) {
         state := s_walk
         phyNum := Cat(io.satp(19,0), Cat(io.in.req.bits.addr(31,22), 0.U(2.W)))
-        //level := level - 1.U
         alreadyOutFire := false.B
       }
     }
     is (s_walk) {
-      when(level =/= 0.U && io.out.resp.valid && last_rdata=/=io.out.resp.bits.rdata/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
-        level := level - 1.U
-        alreadyOutFire := false.B
-        //需要进行权限检查,权限不符，state := s_error
-        //Sv32 page table entry: 0:V 1:R 2:W 3:X 4:U 5:G 6:A 7:D
-        //val is_error = !getPa.io.out.bits(0).asBool || !getPa.io.out.bits(1).asBool&&io.in.bits.op(1).asBool || ...
-        //state := Mux(is_error, s_error, s_walk)
-        state := Mux(level===1.U, s_mem, s_walk)
-        phyNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), io.in.req.bits.addr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(io.in.req.bits.addr(21,12), 0.U(2.W)))) 
-        last_rdata := io.out.resp.bits.rdata //debug
+      when(level =/= 0.U && io.out.resp.fire() && last_rdata=/=io.out.resp.bits.rdata/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
+        when(needFlush) {
+          needFlush := false.B
+          state := s_ready
+          level := 2.U
+          alreadyOutFire := false.B
+          last_rdata := 0.U
+        }.otherwise {
+          level := level - 1.U
+          alreadyOutFire := false.B
+          //需要进行权限检查,权限不符，state := s_error
+          //Sv32 page table entry: 0:V 1:R 2:W 3:X 4:U 5:G 6:A 7:D
+          state := Mux(level===1.U, s_mem, s_walk)
+          phyNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), vaddr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(vaddr(21,12), 0.U(2.W)))) 
+          last_rdata := io.out.resp.bits.rdata //debug
+        }
       }.elsewhen(level===0.U) {
         //也需要权限检查
         //检查level是否为0，如果为0，证明查询了两层页表，如果为1/2，说明出错/superpage
+        //will not get there
         state := s_mem
       }
     }
@@ -146,12 +156,22 @@ class PtwSv32 extends Module with pteSv32Const{
     }
     
     is (s_mem) {
-      when(io.out.resp.valid) {
+      when(io.out.resp.fire()) {
         state := s_ready
         level := 2.U
         last_rdata := 0.U
         alreadyOutFire := false.B
+        needFlush := false.B
       }
     }
+  }
+  
+  val count = RegInit(0.U(32.W))
+  val isCount = RegInit(false.B)
+
+  when(count <= 300.U && isCount || vaddr === "h80100000".U) {
+    printf("state:%d vaddr:%x phyNum:%x needFlush:%d rdata:%x outRespFire:%d\n",state,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.fire())
+    when(isCount===false.B) {isCount := true.B}
+    count := count+1.U
   }
 }

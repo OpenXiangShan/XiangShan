@@ -73,6 +73,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
     
     val iptw   = Module(new PtwSv32())
     iptw.io.satp := "h80080101".U
+    iptw.io.flush := ifu.io.flushVec(0).asBool
     icache.io.in <> iptw.io.out
     iptw.io.in <> ifu.io.imem
 
