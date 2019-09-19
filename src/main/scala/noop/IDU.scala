@@ -5,7 +5,7 @@ import chisel3.util._
 
 import utils._
 
-class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
+class IDU(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
@@ -47,12 +47,12 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
 
   io.out.bits.data := DontCare
   io.out.bits.data.imm  := LookupTree(instrType, List(
-    InstrIW -> Cat(Fill(20+32, instr(31)), instr(31, 20)),//fixed
-    InstrI  -> Cat(Fill(20+32, instr(31)), instr(31, 20)),
-    InstrS  -> Cat(Fill(20+32, instr(31)), instr(31, 25), instr(11, 7)),
-    InstrB  -> Cat(Fill(20+32, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)),
-    InstrU  -> Cat(Fill(32, instr(31)), instr(31, 12), 0.U(12.W)),//fixed
-    InstrJ  -> Cat(Fill(12+32, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
+    InstrIW -> SignExt(instr(31, 20), XLEN),//fixed
+    InstrI  -> SignExt(instr(31, 20), XLEN),
+    InstrS  -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
+    InstrB  -> SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN),
+    InstrU  -> SignExt(Cat(instr(31, 12), 0.U(12.W)), XLEN),//fixed
+    InstrJ  -> SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
   ))
 
   when (fuType === FuType.alu) {

@@ -122,15 +122,15 @@ class BPU1 extends NOOPModule {
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
 }
 
-class BPU2 extends Module {
+class BPU2 extends NOOPModule {
   val io = IO(new Bundle {
     val in = Flipped(Valid(new CtrlFlowIO))
     val out = new RedirectIO
   })
 
   val instr = io.in.bits.instr
-  val immJ = Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
-  val immB = Cat(Fill(20, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W))
+  val immJ = SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
+  val immB = SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN)
   val table = Array(
     BRUInstr.JAL  -> List(immJ, true.B),
     BRUInstr.BNE  -> List(immB, instr(31)),

@@ -126,7 +126,7 @@ class Divider(len: Int = 64)(implicit val p: NOOPConfig) extends Module {
 class MDUIO extends FunctionUnitIO {
 }
 
-class MDU(implicit val p: NOOPConfig) extends Module {
+class MDU(implicit val p: NOOPConfig) extends NOOPModule {
   val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -169,11 +169,11 @@ class MDU(implicit val p: NOOPConfig) extends Module {
     MDUOpType.rem  -> div.io.out.bits(1),
     MDUOpType.remu -> div.io.out.bits(1),
 
-    MDUOpType.mulw -> Cat(Fill(32, mul32.io.out.bits(0)(31)), mul32.io.out.bits(0)),
-    MDUOpType.divw -> Cat(Fill(32, div32.io.out.bits(0)(31)), div32.io.out.bits(0)),
-    MDUOpType.divuw-> Cat(Fill(32, div32.io.out.bits(0)(31)), div32.io.out.bits(0)),//not sure: spec used "signed ext to describe this inst"
-    MDUOpType.remw -> Cat(Fill(32, div32.io.out.bits(1)(31)), div32.io.out.bits(1)),
-    MDUOpType.remuw-> Cat(Fill(32, div32.io.out.bits(1)(31)), div32.io.out.bits(1))
+    MDUOpType.mulw -> SignExt(mul32.io.out.bits(0), XLEN),
+    MDUOpType.divw -> SignExt(div32.io.out.bits(0), XLEN),
+    MDUOpType.divuw-> SignExt(div32.io.out.bits(0), XLEN),//not sure: spec used "signed ext to describe this inst"
+    MDUOpType.remw -> SignExt(div32.io.out.bits(1), XLEN),
+    MDUOpType.remuw-> SignExt(div32.io.out.bits(1), XLEN)
   ))
 
   val isDivReg = Mux(io.in.fire(), isDiv, RegNext(isDiv))

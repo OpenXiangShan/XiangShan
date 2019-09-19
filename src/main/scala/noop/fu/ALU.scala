@@ -138,18 +138,18 @@ class ALU extends NOOPModule {
   val shamt64 = src2(5, 0)//TODO
   val aluRes = LookupTreeDefault(func, adderRes, List(
     ALUOpType.sll  -> ((src1  << shamt64)(XLEN-1, 0)),
-    ALUOpType.slt  -> Cat(0.U((XLEN-1).W), slt),
-    ALUOpType.sltu -> Cat(0.U((XLEN-1).W), sltu),
-    ALUOpType.sllw -> Cat(Fill(32, (src132  << shamt)(31)), (src132  << shamt)(31, 0)),
+    ALUOpType.slt  -> ZeroExt(slt, XLEN),
+    ALUOpType.sltu -> ZeroExt(sltu, XLEN),
+    ALUOpType.sllw -> SignExt((src132  << shamt)(31, 0), XLEN),
     ALUOpType.xor  -> xorRes,
     ALUOpType.srl  -> (src1  >> shamt64),
-    ALUOpType.srlw -> Cat(Fill(32, (src132  >> shamt)(31)), (src132  >> shamt)(31,0)),
+    ALUOpType.srlw -> SignExt((src132  >> shamt)(31,0), XLEN),
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
     ALUOpType.sra  -> ((src1.asSInt >> shamt64).asUInt),
-    ALUOpType.sraw -> Cat(Fill(32, (src132.asSInt >> shamt)(31)), ((src132.asSInt >> shamt).asUInt)),
-    ALUOpType.addw -> Cat(Fill(32, adderWRes(31)), adderWRes(31,0)),
-    ALUOpType.subw -> Cat(Fill(32, adderWRes(31)), adderWRes(31,0))
+    ALUOpType.sraw -> SignExt((src132.asSInt >> shamt).asUInt, XLEN),
+    ALUOpType.addw -> SignExt(adderWRes(31,0), XLEN),
+    ALUOpType.subw -> SignExt(adderWRes(31,0), XLEN)
   ))
 
   val branchOpTable = List(

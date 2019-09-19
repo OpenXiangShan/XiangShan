@@ -58,7 +58,7 @@ class LSUIO extends FunctionUnitIO {
   val isMMIO = Output(Bool())
 }
 
-class LSU extends Module {
+class LSU extends NOOPModule {
   val io = IO(new LSUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -179,12 +179,12 @@ class LSU extends Module {
     "b111".U -> rdataLatch(63, 56)
   ))
   val rdataPartialLoad = LookupTree(func, List(
-      LSUOpType.lb   -> Cat(Fill(24+32, rdataSel(7)), rdataSel(7, 0)),
-      LSUOpType.lh   -> Cat(Fill(16+32, rdataSel(15)), rdataSel(15, 0)),
-      LSUOpType.lw   -> Cat(Fill(32, rdataSel(31)), rdataSel(31, 0)),
-      LSUOpType.lbu  -> Cat(0.U((24+32).W), rdataSel(7, 0)),
-      LSUOpType.lhu  -> Cat(0.U((16+32).W), rdataSel(15, 0)),
-      LSUOpType.lwu  -> Cat(0.U((32).W), rdataSel(31, 0))
+      LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
+      LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
+      LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
+      LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)

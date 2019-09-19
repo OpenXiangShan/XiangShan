@@ -22,8 +22,9 @@ class ScoreBoard extends HasRegFileParameter {
   def mask(idx: UInt) = (1.U(NRReg.W) << idx)(NRReg-1, 0)
   def update(setMask: UInt, clearMask: UInt) = {
     // When clearMask(i) and setMask(i) are both set, setMask(i) wins.
-    // This can correctly record the busy bit
-    // when reg(i) is written and issued at the same cycle.
+    // This can correctly record the busy bit when reg(i) is written
+    // and issued at the same cycle.
+    // Note that rf(0) is always free.
     busy := Cat(((busy & ~clearMask) | setMask)(NRReg-1, 1), 0.U(1.W))
   }
 }
