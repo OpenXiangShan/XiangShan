@@ -24,6 +24,8 @@ object ALUOpType {
   def srlw = "b100101".U
   def sraw = "b101101".U
 
+  def isWordOp(func: UInt) = func(5)
+
   def jal  = "b011000".U
   def jalr = "b011010".U
   def beq  = "b010000".U
@@ -62,33 +64,28 @@ class ALU extends NOOPModule {
     io.out.bits
   }
 
-  val src132 = src1(31,0)
-  val src232 = src2(31,0)
-
   val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !ALUOpType.isJump(func)
   val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
-  val adderWRes = (src132 +& (src232 ^ Fill(32, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
   val sltu = !adderRes(XLEN)
   val slt = xorRes(XLEN-1) ^ sltu
 
-  val shamt = src2(4, 0)
-  val shamt64 = src2(5, 0)//TODO
-  val aluRes = LookupTreeDefault(func, adderRes, List(
-    ALUOpType.sll  -> ((src1  << shamt64)(XLEN-1, 0)),
+  val shsrc1 = LookupTreeDefault(func, src1, List(
+    ALUOpType.srlw -> ZeroExt(src1(31,0), 64),
+    ALUOpType.sraw -> SignExt(src1(31,0), 64)
+  ))
+  val shamt = Mux(ALUOpType.isWordOp(func), src2(4, 0), src2(5, 0))
+  val res = LookupTreeDefault(func(3, 0), adderRes, List(
+    ALUOpType.sll  -> ((shsrc1  << shamt)(XLEN-1, 0)),
     ALUOpType.slt  -> ZeroExt(slt, XLEN),
     ALUOpType.sltu -> ZeroExt(sltu, XLEN),
-    ALUOpType.sllw -> SignExt((src132  << shamt)(31, 0), XLEN),
     ALUOpType.xor  -> xorRes,
-    ALUOpType.srl  -> (src1  >> shamt64),
-    ALUOpType.srlw -> SignExt((src132  >> shamt)(31,0), XLEN),
+    ALUOpType.srl  -> (shsrc1  >> shamt),
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
-    ALUOpType.sra  -> ((src1.asSInt >> shamt64).asUInt),
-    ALUOpType.sraw -> SignExt((src132.asSInt >> shamt).asUInt, XLEN),
-    ALUOpType.addw -> SignExt(adderWRes(31,0), XLEN),
-    ALUOpType.subw -> SignExt(adderWRes(31,0), XLEN)
+    ALUOpType.sra  -> ((shsrc1.asSInt >> shamt).asUInt)
   ))
+  val aluRes = Mux(ALUOpType.isWordOp(func), SignExt(res(31,0), 64), res)
 
   val branchOpTable = List(
     ALUOpType.getBranchType(ALUOpType.beq)  -> !xorRes.orR,
