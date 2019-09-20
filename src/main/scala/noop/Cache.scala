@@ -10,9 +10,10 @@ import utils._
 
 sealed trait HasCacheConst {
   val AddrBits: Int
+  val XLEN: Int
 
   val TotalSize = 32 // Kbytes
-  val LineSize = 32 // byte
+  val LineSize = XLEN // byte
   val LineBeats = LineSize / 8 //DATA WIDTH 64
   val Ways = 1
   val Sets = TotalSize * 1024 / LineSize / Ways
@@ -27,7 +28,7 @@ sealed trait HasCacheConst {
     val tag = UInt(TagBits.W)
     val index = UInt(IndexBits.W)
     val wordIndex = UInt(WordIndexBits.W)
-    val byteOffset = UInt(3.W)//rv32: byteOffset = UInt(2.W)
+    val byteOffset = UInt((if (XLEN == 64) 3 else 2).W)
   }
 
   def CacheMetaArrayReadBus() = new SRAMReadBus(new MetaBundle, set = Sets, way = Ways)
@@ -175,7 +176,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   // if miss, access memory
   io.mem := DontCare
   List(io.mem.req.bits).map { a =>
-    a.size := "b11".U //"b10" with rv32
+    a.size := (if (XLEN == 64) "b11".U else "b10".U)
     a.user  := 0.U
   }
 

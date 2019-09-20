@@ -24,7 +24,7 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
   w.data := mem.req.bits.wdata
   w.strb := mem.req.bits.wmask
 
-  def LineBeats = 4 //Note: LineBeats = 8 while using rv32 inst set 
+  def LineBeats = 8
   val wlast = WireInit(true.B)
   val rlast = WireInit(true.B)
   if (outType.getClass == classOf[AXI4]) {
