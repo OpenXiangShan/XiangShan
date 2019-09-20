@@ -47,7 +47,6 @@ class IDU extends NOOPModule with HasInstrType {
 
   io.out.bits.data := DontCare
   io.out.bits.data.imm  := LookupTree(instrType, List(
-    InstrIW -> SignExt(instr(31, 20), XLEN),//fixed
     InstrI  -> SignExt(instr(31, 20), XLEN),
     InstrS  -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
     InstrB  -> SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN),
