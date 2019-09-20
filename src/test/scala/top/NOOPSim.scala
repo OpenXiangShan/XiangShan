@@ -16,7 +16,8 @@ class NOOPSimTop extends Module {
     val difftest = new DiffTestIO
   })
 
-  val soc = Module(new NOOPSoC()(NOOPConfig(FPGAPlatform = false)))
+  lazy val config = NOOPConfig(FPGAPlatform = false)
+  val soc = Module(new NOOPSoC()(config))
   val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
   // Be careful with the commit checking of emu.
   // A large delay will make emu incorrectly report getting stuck.

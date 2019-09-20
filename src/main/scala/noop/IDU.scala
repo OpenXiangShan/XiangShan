@@ -5,7 +5,7 @@ import chisel3.util._
 
 import utils._
 
-class IDU(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
+class IDU extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
@@ -56,8 +56,8 @@ class IDU(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   ))
 
   when (fuType === FuType.alu) {
-    when (rd === 1.U && fuOpType === BRUOpType.jal) { io.out.bits.ctrl.fuOpType := BRUOpType.call }
-    when (rs === 1.U && fuOpType === BRUOpType.jalr) { io.out.bits.ctrl.fuOpType := BRUOpType.ret }
+    when (rd === 1.U && fuOpType === ALUOpType.jal) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
+    when (rs === 1.U && fuOpType === ALUOpType.jalr) { io.out.bits.ctrl.fuOpType := ALUOpType.ret }
   }
   // fix LUI
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)

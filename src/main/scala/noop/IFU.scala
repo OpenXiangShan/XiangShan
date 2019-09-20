@@ -11,7 +11,7 @@ trait HasResetVector {
   val resetVector = 0x80100000L//TODO: set reset vec
 }
 
-class IFU(implicit val p: NOOPConfig) extends NOOPModule with HasResetVector {
+class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
     val imem = new SimpleBusUC(userBits = AddrBits)
     val pc = Input(UInt(AddrBits.W))

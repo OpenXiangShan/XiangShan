@@ -81,7 +81,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.forward.wb.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
   io.forward.fuType := io.in.bits.ctrl.fuType
 
-  val isBru = BRUOpType.isBru(fuOpType)
+  val isBru = ALUOpType.isBru(fuOpType)
   BoringUtils.addSource(alu.io.out.fire() && !isBru, "perfCntCondMaluInstr")
   BoringUtils.addSource(alu.io.out.fire() && isBru, "perfCntCondMbruInstr")
   BoringUtils.addSource(lsu.io.out.fire(), "perfCntCondMlsuInstr")

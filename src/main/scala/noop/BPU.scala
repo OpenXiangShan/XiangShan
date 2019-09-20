@@ -100,7 +100,7 @@ class BPU1 extends NOOPModule {
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
   val reqLatch = RegNext(req)
-  when (reqLatch.valid && BRUOpType.isBranch(reqLatch.fuOpType)) {
+  when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
     val taken = reqLatch.actualTaken
     val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
@@ -109,11 +109,11 @@ class BPU1 extends NOOPModule {
     }
   }
   when (req.valid) {
-    when (req.fuOpType === BRUOpType.call) {
+    when (req.fuOpType === ALUOpType.call) {
       ras.write(sp.value + 1.U, req.pc + 4.U)
       sp.value := sp.value + 1.U
     }
-    .elsewhen (req.fuOpType === BRUOpType.ret) {
+    .elsewhen (req.fuOpType === ALUOpType.ret) {
       sp.value := sp.value - 1.U
     }
   }
@@ -132,13 +132,13 @@ class BPU2 extends NOOPModule {
   val immJ = SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
   val immB = SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN)
   val table = Array(
-    BRUInstr.JAL  -> List(immJ, true.B),
-    BRUInstr.BNE  -> List(immB, instr(31)),
-    BRUInstr.BEQ  -> List(immB, instr(31)),
-    BRUInstr.BLT  -> List(immB, instr(31)),
-    BRUInstr.BGE  -> List(immB, instr(31)),
-    BRUInstr.BLTU -> List(immB, instr(31)),
-    BRUInstr.BGEU -> List(immB, instr(31))
+    RV32I_BRUInstr.JAL  -> List(immJ, true.B),
+    RV32I_BRUInstr.BNE  -> List(immB, instr(31)),
+    RV32I_BRUInstr.BEQ  -> List(immB, instr(31)),
+    RV32I_BRUInstr.BLT  -> List(immB, instr(31)),
+    RV32I_BRUInstr.BGE  -> List(immB, instr(31)),
+    RV32I_BRUInstr.BLTU -> List(immB, instr(31)),
+    RV32I_BRUInstr.BGEU -> List(immB, instr(31))
   )
   val default = List(immB, false.B)
   val offset :: predict :: Nil = ListLookup(instr, default, table)

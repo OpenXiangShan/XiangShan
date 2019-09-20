@@ -10,6 +10,10 @@ import utils._
 
 trait HasNOOPParameter {
   val XLEN = 64
+  val HasMExtension = true
+  val HasDiv = true
+  val HasIcache = true
+  val HasDcache = true
   val AddrBits = 64
   val AddrBytes = AddrBits / 8
   val DataBits = XLEN
@@ -21,10 +25,6 @@ abstract class NOOPBundle extends Bundle with HasNOOPParameter
 
 case class NOOPConfig (
   FPGAPlatform: Boolean = true,
-  HasIcache: Boolean = true,
-  HasDcache: Boolean = true,
-  HasMExtension: Boolean = true,
-  HasDiv: Boolean = true, 
   EnableDebug: Boolean = false
 )
 
@@ -80,7 +80,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
-  io.imem <> (if (p.HasIcache) {
+  io.imem <> (if (HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = XLEN))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
@@ -88,7 +88,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     icache.io.out
   } else { ifu.io.imem })
 
-  io.dmem <> (if (p.HasDcache) {
+  io.dmem <> (if (HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache", userBits = XLEN))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
