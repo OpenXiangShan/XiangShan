@@ -7,7 +7,7 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 import bus.simplebus._
 
-class EXU(implicit val p: NOOPConfig) extends Module {
+class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new DecodeIO))
     val out = Decoupled(new CommitIO)
@@ -81,7 +81,7 @@ class EXU(implicit val p: NOOPConfig) extends Module {
   io.forward.wb.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
   io.forward.fuType := io.in.bits.ctrl.fuType
 
-  val isBru = BRUOpType.isBru(fuOpType)
+  val isBru = ALUOpType.isBru(fuOpType)
   BoringUtils.addSource(alu.io.out.fire() && !isBru, "perfCntCondMaluInstr")
   BoringUtils.addSource(alu.io.out.fire() && isBru, "perfCntCondMbruInstr")
   BoringUtils.addSource(lsu.io.out.fire(), "perfCntCondMlsuInstr")
@@ -90,8 +90,8 @@ class EXU(implicit val p: NOOPConfig) extends Module {
 
   if (!p.FPGAPlatform) {
     val mon = Module(new Monitor)
-    val cycleCnt = WireInit(0.U(32.W))
-    val instrCnt = WireInit(0.U(32.W))
+    val cycleCnt = WireInit(0.U(XLEN.W))
+    val instrCnt = WireInit(0.U(XLEN.W))
     val nooptrap = io.in.bits.ctrl.isNoopTrap && io.in.valid
     mon.io.clk := clock
     mon.io.reset := reset.asBool

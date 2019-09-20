@@ -11,10 +11,10 @@ trait HasResetVector {
   val resetVector = 0x80100000L//TODO: set reset vec
 }
 
-class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
+class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBusUC(userBits = 32)
-    val pc = Input(UInt(64.W))
+    val imem = new SimpleBusUC(userBits = AddrBits)
+    val pc = Input(UInt(AddrBits.W))
     val out = Decoupled(new CtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
     val flushVec = Output(UInt(4.W))
@@ -22,7 +22,7 @@ class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
   })
 
   // pc
-  val pc = RegInit(resetVector.U(64.W))
+  val pc = RegInit(resetVector.U(AddrBits.W))
   val pcUpdate = io.redirect.valid || io.imem.req.fire()
   val snpc = pc + 4.U  // sequential next pc
 
@@ -49,7 +49,7 @@ class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
 
   io.imem := DontCare
   io.imem.req.valid := io.out.ready
-  io.imem.req.bits.addr := Cat(pc(63,2),0.U(2.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
+  io.imem.req.bits.addr := Cat(pc(AddrBits-1,2),0.U(2.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
   io.imem.req.bits.size := "b11".U
   io.imem.req.bits.cmd := SimpleBusCmd.read
   io.imem.req.bits.user := npc
@@ -57,11 +57,9 @@ class IFU(implicit val p: NOOPConfig) extends Module with HasResetVector {
 
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
-  if (p.HasIcache) {
-    io.out.bits.instr := Mux(io.pc(2), io.imem.resp.bits.rdata(63,32), io.imem.resp.bits.rdata(31,0))//inst path only uses 32bit inst, get the right inst according to pc(2)
-  }else{
-    io.out.bits.instr := io.imem.resp.bits.rdata(31,0)
-  }
+    //inst path only uses 32bit inst, get the right inst according to pc(2)
+  io.out.bits.instr := (if (XLEN == 64) io.imem.resp.bits.rdata.asTypeOf(Vec(2, UInt(32.W)))(io.pc(2))
+                       else io.imem.resp.bits.rdata)
   io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

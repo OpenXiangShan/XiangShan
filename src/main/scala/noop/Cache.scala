@@ -9,16 +9,18 @@ import bus.axi4._
 import utils._
 
 sealed trait HasCacheConst {
+  val AddrBits: Int
+  val XLEN: Int
+
   val TotalSize = 32 // Kbytes
-  val LineSize = 32 // byte
+  val LineSize = XLEN // byte
   val LineBeats = LineSize / 8 //DATA WIDTH 64
   val Ways = 1
   val Sets = TotalSize * 1024 / LineSize / Ways
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
   val WordIndexBits = log2Up(LineBeats)
-  val TagBits = 64 - OffsetBits - IndexBits
-  val dataBits = 64
+  val TagBits = AddrBits - OffsetBits - IndexBits
 
   val debug = false
 
@@ -26,7 +28,7 @@ sealed trait HasCacheConst {
     val tag = UInt(TagBits.W)
     val index = UInt(IndexBits.W)
     val wordIndex = UInt(WordIndexBits.W)
-    val byteOffset = UInt(3.W)//rv32: byteOffset = UInt(2.W)
+    val byteOffset = UInt((if (XLEN == 64) 3 else 2).W)
   }
 
   def CacheMetaArrayReadBus() = new SRAMReadBus(new MetaBundle, set = Sets, way = Ways)
@@ -34,43 +36,45 @@ sealed trait HasCacheConst {
   def CacheMetaArrayWriteBus() = new SRAMWriteBus(new MetaBundle, set = Sets, way = Ways)
   def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets, way = Ways * LineBeats)
 
-  def maskExpand(m: UInt): UInt = Cat(m.asBools.map(Fill(8, _)).reverse)
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
   def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
 
-sealed class MetaBundle extends Bundle with HasCacheConst {
+sealed abstract class CacheBundle extends Bundle with HasNOOPParameter with HasCacheConst
+sealed abstract class CacheModule extends Module with HasNOOPParameter with HasCacheConst
+
+sealed class MetaBundle extends CacheBundle {
   val tag = Output(UInt(TagBits.W))
   val valid = Output(Bool())
   val dirty = Output(Bool())
 }
 
-sealed class MetaPipelineBundle extends Bundle with HasCacheConst {
+sealed class MetaPipelineBundle extends CacheBundle {
   val tag = Output(UInt(TagBits.W))
   val hit = Output(Bool())
   val dirty = Output(Bool())
 }
 
-sealed class DataBundle extends Bundle {
-  val data = Output(UInt(64.W))
+sealed class DataBundle extends CacheBundle {
+  val data = Output(UInt(DataBits.W))
 }
 
-sealed class Stage1IO(userBits: Int = 0) extends Bundle with HasCacheConst {
-  val req = new SimpleBusReqBundle(dataBits = dataBits, userBits = userBits)
+sealed class Stage1IO(userBits: Int = 0) extends CacheBundle {
+  val req = new SimpleBusReqBundle(userBits = userBits)
 
   override def cloneType = new Stage1IO(userBits).asInstanceOf[this.type]
 }
 
 // meta read
-sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
+sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits, userBits)))
+    val in = Flipped(Decoupled(new SimpleBusReqBundle(userBits = userBits)))
     val out = Decoupled(new Stage1IO(userBits))
     val metaReadBus = CacheMetaArrayReadBus()
     val dataReadBus = CacheDataArrayReadBus()
 
-    val s2Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
-    val s3Req = Flipped(Valid(new SimpleBusReqBundle(dataBits)))
+    val s2Req = Flipped(Valid(new SimpleBusReqBundle))
+    val s3Req = Flipped(Valid(new SimpleBusReqBundle))
     val s2s3Miss = Input(Bool())
   })
 
@@ -99,15 +103,15 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends M
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 }
 
-sealed class Stage2IO(userBits: Int = 0) extends Bundle with HasCacheConst {
-  val req = new SimpleBusReqBundle(dataBits, userBits)
+sealed class Stage2IO(userBits: Int = 0) extends CacheBundle {
+  val req = new SimpleBusReqBundle(userBits = userBits)
   val meta = new MetaPipelineBundle
 
   override def cloneType = new Stage2IO(userBits).asInstanceOf[this.type]
 }
 
 // check
-sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
+sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Stage1IO(userBits)))
     val out = Decoupled(new Stage2IO(userBits))
@@ -131,17 +135,17 @@ sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends M
 }
 
 // writeback
-sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends Module with HasCacheConst {
+sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new Stage2IO(userBits)))
-    val out = Decoupled(new SimpleBusRespBundle(dataBits = dataBits, userBits = userBits))
+    val out = Decoupled(new SimpleBusRespBundle(userBits = userBits))
     val isFinish = Output(Bool())
-    val addr = Output(UInt(64.W))
+    val addr = Output(UInt(AddrBits.W))
     val flush = Input(Bool())
     val dataBlock = Flipped(Vec(Ways * LineBeats, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
-    val mem = new SimpleBusUC(dataBits)
+    val mem = new SimpleBusUC
   })
 
   val req = io.in.bits.req
@@ -152,7 +156,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val dataBlockIdx = Wire(UInt(WordIndexBits.W))
   val dataRead = io.dataBlock(dataBlockIdx).data
-  val wordMask = Mux(req.isWrite(), maskExpand(req.wmask), 0.U(64.W))
+  val wordMask = Mux(req.isWrite(), MaskExpand(req.wmask), 0.U(DataBits.W))
 
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
@@ -172,7 +176,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   // if miss, access memory
   io.mem := DontCare
   List(io.mem.req.bits).map { a =>
-    a.size := "b11".U //"b10" with rv32
+    a.size := (if (XLEN == 64) "b11".U else "b10".U)
     a.user  := 0.U
   }
 
@@ -187,12 +191,12 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
   dataBlockIdx := Mux(state === s_memWriteReq, writeBeatCnt.value, addr.wordIndex)
 
   io.mem.req.bits.wdata := dataRead
-  io.mem.req.bits.wmask := 0xff.U
+  io.mem.req.bits.wmask := Fill(DataBytes, 1.U)
   io.mem.req.bits.cmd := Mux(state === s_memReadReq, SimpleBusCmd.readBurst,
     Mux((writeBeatCnt.value === (LineBeats - 1).U), SimpleBusCmd.writeLast, SimpleBusCmd.writeBurst))
 
   // critical word first
-  val raddr = Cat(req.addr(63, 3), 0.U(3.W))
+  val raddr = req.addr //Cat(req.addr(63, 3), 0.U(3.W))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
   io.mem.req.bits.addr := Mux(state === s_memReadReq, raddr, waddr)
@@ -300,10 +304,10 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 }
 
 // probe
-sealed class CacheProbeStage(ro: Boolean, name: String) extends Module with HasCacheConst {
+sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new SimpleBusReqBundle(dataBits = 32)))
-    val out = Decoupled(new SimpleBusRespBundle(dataBits = 32))
+    val in = Flipped(Decoupled(new SimpleBusReqBundle))
+    val out = Decoupled(new SimpleBusRespBundle)
     val metaReadBus = CacheMetaArrayReadBus()
     val dataReadBus = CacheDataArrayReadBus()
     //val metaWriteBus = CacheMetaArrayWriteBus()
@@ -367,12 +371,12 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends Module with HasC
   // FIXME: should invalidate the meta array
 }
 
-class Cache(ro: Boolean, name: String, dataBits: Int = 64, userBits: Int = 0) extends Module with HasCacheConst {
+class Cache(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val io = IO(new Bundle {
-    val in = Flipped(new SimpleBusUC(dataBits, userBits))
-    val addr = Output(UInt(64.W))
+    val in = Flipped(new SimpleBusUC(userBits = userBits))
+    val addr = Output(UInt(AddrBits.W))
     val flush = Input(UInt(2.W))
-    val out = new SimpleBusC(dataBits)
+    val out = new SimpleBusC
   })
 
   // cpu pipeline

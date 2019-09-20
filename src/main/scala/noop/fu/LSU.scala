@@ -10,8 +10,8 @@ import bus.simplebus._
 object LSUOpType {
   def lb   = "b0000".U
   def lh   = "b0001".U
-  def lw   = "b0111".U
-  def ld   = "b0010".U
+  def lw   = "b0010".U
+  def ld   = "b0011".U
   def lbu  = "b0100".U
   def lhu  = "b0101".U
   def lwu  = "b0110".U
@@ -23,42 +23,14 @@ object LSUOpType {
   def isStore(func: UInt): Bool = func(3)
 }
 
-object LSUInstr extends HasInstrType {
-  def LB      = BitPat("b????????????_?????_000_?????_0000011")
-  def LH      = BitPat("b????????????_?????_001_?????_0000011")
-  def LW      = BitPat("b????????????_?????_010_?????_0000011")
-  def LBU     = BitPat("b????????????_?????_100_?????_0000011")
-  def LHU     = BitPat("b????????????_?????_101_?????_0000011")
-  def SB      = BitPat("b???????_?????_?????_000_?????_0100011")
-  def SH      = BitPat("b???????_?????_?????_001_?????_0100011")
-  def SW      = BitPat("b???????_?????_?????_010_?????_0100011")
-  def LWU     = BitPat("b???????_?????_?????_110_?????_0000011")
-  def LD      = BitPat("b???????_?????_?????_011_?????_0000011")
-  def SD      = BitPat("b???????_?????_?????_011_?????_0100011")
-
-  val table = Array(
-    LB             -> List(InstrI, FuType.lsu, LSUOpType.lb ),
-    LH             -> List(InstrI, FuType.lsu, LSUOpType.lh ),
-    LW             -> List(InstrI, FuType.lsu, LSUOpType.lw ),
-    LD             -> List(InstrI, FuType.lsu, LSUOpType.ld ),
-    LBU            -> List(InstrI, FuType.lsu, LSUOpType.lbu),
-    LHU            -> List(InstrI, FuType.lsu, LSUOpType.lhu),
-    LWU            -> List(InstrI, FuType.lsu, LSUOpType.lwu),
-    SB             -> List(InstrS, FuType.lsu, LSUOpType.sb ),
-    SH             -> List(InstrS, FuType.lsu, LSUOpType.sh ),
-    SW             -> List(InstrS, FuType.lsu, LSUOpType.sw),
-    SD             -> List(InstrS, FuType.lsu, LSUOpType.sd)
-  )
-}
-
 class LSUIO extends FunctionUnitIO {
-  val wdata = Input(UInt(64.W))
+  val wdata = Input(UInt(XLEN.W))
   val dmem = new SimpleBusUC
   val mmio = new SimpleBusUC
   val isMMIO = Output(Bool())
 }
 
-class LSU extends Module {
+class LSU extends NOOPModule {
   val io = IO(new LSUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -179,12 +151,12 @@ class LSU extends Module {
     "b111".U -> rdataLatch(63, 56)
   ))
   val rdataPartialLoad = LookupTree(func, List(
-      LSUOpType.lb   -> Cat(Fill(24+32, rdataSel(7)), rdataSel(7, 0)),
-      LSUOpType.lh   -> Cat(Fill(16+32, rdataSel(15)), rdataSel(15, 0)),
-      LSUOpType.lw   -> Cat(Fill(32, rdataSel(31)), rdataSel(31, 0)),
-      LSUOpType.lbu  -> Cat(0.U((24+32).W), rdataSel(7, 0)),
-      LSUOpType.lhu  -> Cat(0.U((16+32).W), rdataSel(15, 0)),
-      LSUOpType.lwu  -> Cat(0.U((32).W), rdataSel(31, 0))
+      LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
+      LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
+      LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+      LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
+      LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
