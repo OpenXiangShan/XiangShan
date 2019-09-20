@@ -18,6 +18,12 @@ object ALUOpType {
   def sub  = "b001000".U
   def sra  = "b001101".U
 
+  def addw = "b100000".U
+  def subw = "b101000".U
+  def sllw = "b100001".U
+  def srlw = "b100101".U
+  def sraw = "b101101".U
+
   def jal  = "b011000".U
   def jalr = "b011010".U
   def beq  = "b010000".U
@@ -30,12 +36,6 @@ object ALUOpType {
   // for RAS
   def call = "b011100".U
   def ret  = "b011110".U
-
-  def sllw = "b100000".U  
-  def srlw  = "b100001".U
-  def sraw  = "b100010".U
-  def addw  = "b100011".U
-  def subw  = "b100100".U
 
   def isBru(func: UInt) = func(4)//[important]
   def isBranch(func: UInt) = !func(3)

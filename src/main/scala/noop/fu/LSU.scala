@@ -10,8 +10,8 @@ import bus.simplebus._
 object LSUOpType {
   def lb   = "b0000".U
   def lh   = "b0001".U
-  def lw   = "b0111".U
-  def ld   = "b0010".U
+  def lw   = "b0010".U
+  def ld   = "b0011".U
   def lbu  = "b0100".U
   def lhu  = "b0101".U
   def lwu  = "b0110".U
