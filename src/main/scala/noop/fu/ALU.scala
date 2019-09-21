@@ -111,6 +111,12 @@ class ALU extends NOOPModule {
   //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
   // }
 
+  Debug(){
+    when(valid && isBru){
+      printf("[BRU] tgt %x, npc: %x, pdwrong: %x\n", io.redirect.target, io.cfIn.pnpc, predictWrong)
+    }
+  }
+
   io.in.ready := true.B
   io.out.valid := valid
 

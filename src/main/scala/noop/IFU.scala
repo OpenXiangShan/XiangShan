@@ -24,7 +24,7 @@ class IFU extends NOOPModule with HasResetVector {
   // pc
   val pc = RegInit(resetVector.U(AddrBits.W))
   val pcUpdate = io.redirect.valid || io.imem.req.fire()
-  val snpc = pc + 4.U  // sequential next pc
+  val snpc = Mux(pc(1), pc + 2.U, pc + 4.U)  // sequential next pc
 
   val bp1 = Module(new BPU1)
   // predicted next pc
@@ -49,7 +49,7 @@ class IFU extends NOOPModule with HasResetVector {
 
   io.imem := DontCare
   io.imem.req.valid := io.out.ready
-  io.imem.req.bits.addr := Cat(pc(AddrBits-1,2),0.U(2.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
+  io.imem.req.bits.addr := Cat(pc(AddrBits-1,1),0.U(1.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
   io.imem.req.bits.size := "b11".U
   io.imem.req.bits.cmd := SimpleBusCmd.read
   io.imem.req.bits.user := npc

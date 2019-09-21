@@ -91,21 +91,21 @@ class IDU extends NOOPModule with HasInstrType {
   ))
   val immrvc = LookupTree(rvcImmType, List(
     // InstrIW -> Cat(Fill(20+32, instr(31)), instr(31, 20)),//fixed
-    RVCInstr.ImmLWSP  -> Cat(0.U((63-7).W), instr(3,2), instr(12), instr(6,4), 0.U(2.W)),
-    RVCInstr.ImmLDSP  -> Cat(0.U((63-8).W), instr(4,2), instr(12), instr(6,5), 0.U(3.W)),
-    RVCInstr.ImmSWSP  -> Cat(0.U((63-7).W), instr(8,7), instr(12,9), 0.U(2.W)),
-    RVCInstr.ImmSDSP  -> Cat(0.U((63-8).W), instr(9,7), instr(12,10), 0.U(3.W)),
-    RVCInstr.ImmSW    -> Cat(0.U((63-7).W), instr(5), instr(12,10), instr(6), 0.U(2.W)),
-    RVCInstr.ImmSD    -> Cat(0.U((63-8).W), instr(6,5), instr(12,10), 0.U(3.W)),
-    RVCInstr.ImmLW    -> Cat(0.U((63-7).W), instr(5), instr(12,10), instr(6), 0.U(2.W)),
-    RVCInstr.ImmLD    -> Cat(0.U((63-8).W), instr(6,5), instr(12,10), 0.U(3.W)),
-    RVCInstr.ImmJ     -> Cat(0.U((63-11).W), instr(12), instr(8), instr(10,9), instr(6), instr(7), instr(2), instr(11), instr(5,3), 0.U(1.W)),
-    RVCInstr.ImmB     -> Cat(0.U((63-8).W), instr(12), instr(6,5), instr(2), instr(11,10), instr(4,3), 0.U(1.W)),
-    RVCInstr.ImmLI    -> Cat(0.U((63-5).W), instr(12), instr(6,2)),
-    RVCInstr.ImmLUI   -> Cat(Fill(63-17, instr(12)), instr(12), instr(6,2), 0.U(12.W)),
-    RVCInstr.ImmADDI  -> Cat(0.U((63-5).W), instr(12), instr(6,2)),
-    RVCInstr.ImmADDI16SP-> Cat(0.U((63-9).W), instr(12), instr(4,3), instr(5), instr(2), instr(6), 0.U(4.W)),
-    RVCInstr.ImmADD4SPN-> Cat(0.U((63-9).W), instr(10,7), instr(12,11), instr(5), instr(6), 0.U(2.W))
+    RVCInstr.ImmLWSP  -> ZeroExt(Cat(instr(3,2), instr(12), instr(6,4), 0.U(2.W)), XLEN),
+    RVCInstr.ImmLDSP  -> ZeroExt(Cat(instr(4,2), instr(12), instr(6,5), 0.U(3.W)), XLEN),
+    RVCInstr.ImmSWSP  -> ZeroExt(Cat(instr(8,7), instr(12,9), 0.U(2.W)), XLEN),
+    RVCInstr.ImmSDSP  -> ZeroExt(Cat(instr(9,7), instr(12,10), 0.U(3.W)), XLEN),
+    RVCInstr.ImmSW    -> ZeroExt(Cat(instr(5), instr(12,10), instr(6), 0.U(2.W)), XLEN),
+    RVCInstr.ImmSD    -> ZeroExt(Cat(instr(6,5), instr(12,10), 0.U(3.W)), XLEN),
+    RVCInstr.ImmLW    -> ZeroExt(Cat(instr(5), instr(12,10), instr(6), 0.U(2.W)), XLEN),
+    RVCInstr.ImmLD    -> ZeroExt(Cat(instr(6,5), instr(12,10), 0.U(3.W)), XLEN),
+    RVCInstr.ImmJ     -> SignExt(Cat(instr(12), instr(8), instr(10,9), instr(6), instr(7), instr(2), instr(11), instr(5,3), 0.U(1.W)), XLEN),
+    RVCInstr.ImmB     -> SignExt(Cat(instr(12), instr(6,5), instr(2), instr(11,10), instr(4,3), 0.U(1.W)), XLEN),
+    RVCInstr.ImmLI    -> SignExt(Cat(instr(12), instr(6,2)), XLEN),
+    RVCInstr.ImmLUI   -> SignExt(Cat(instr(12), instr(6,2), 0.U(12.W)), XLEN),
+    RVCInstr.ImmADDI  -> SignExt(Cat(instr(12), instr(6,2)), XLEN),
+    RVCInstr.ImmADDI16SP-> SignExt(Cat(instr(12), instr(4,3), instr(5), instr(2), instr(6), 0.U(4.W)), XLEN),
+    RVCInstr.ImmADD4SPN-> ZeroExt(Cat(instr(10,7), instr(12,11), instr(5), instr(6), 0.U(2.W)), XLEN)
     // ImmFLWSP  -> 
     // ImmFLDSP  -> 
   ))
