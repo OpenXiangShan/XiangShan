@@ -1,6 +1,6 @@
 module addr_mapper (
-   `axi_slave_if(s_axi, 32, 8),
-   `axi_master_if(m_axi, 32, 8)
+   `axi_slave_if(s_axi, 64, 8),
+   `axi_master_if(m_axi, 64, 8)
 );
 
     assign  m_axi_awaddr = {4'd0, 2'b01, s_axi_awaddr[29:0]};

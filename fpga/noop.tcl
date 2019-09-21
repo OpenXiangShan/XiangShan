@@ -345,7 +345,7 @@ proc create_root_design { parentCell } {
   set_property -dict [ list \
    CONFIG.ADDR_WIDTH {32} \
    CONFIG.CLK_DOMAIN {/clk_wiz_0_clk_out1} \
-   CONFIG.DATA_WIDTH {32} \
+   CONFIG.DATA_WIDTH {64} \
    CONFIG.NUM_READ_OUTSTANDING {2} \
    CONFIG.NUM_WRITE_OUTSTANDING {2} \
    CONFIG.PHASE {0.0} \
