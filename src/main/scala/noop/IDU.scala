@@ -9,9 +9,12 @@ class IDU extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
+    val flush = Input(Bool())
   })
 
-  val instr = io.in.bits.instr
+  val compInstIsWaiting = RegInit(false.B) //for RV64C
+  val compInstWaiting = Wire(UInt(32.W))
+  val instr = Mux(compInstIsWaiting, compInstWaiting, io.in.bits.instr)
   val instrType :: fuType :: fuOpType :: Nil =
     ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
 
@@ -62,11 +65,30 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.bits.ctrl.src2Type := src2Type
 
-  io.out.bits.cf <> io.in.bits
+  io.out.bits.cf.pc := Mux(compInstIsWaiting, io.in.bits.pc+2.U, io.in.bits.pc)
+  io.out.bits.cf.pnpc := Mux(compInstIsWaiting, io.in.bits.pnpc+2.U, io.in.bits.pnpc)
+  io.out.bits.cf.instr := instr
 
   io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
   io.out.valid := io.in.valid
 
-  io.in.ready := !io.in.valid || io.out.fire()
+  //RVC support
+  compInstWaiting := Cat(0.U(16.W),io.in.bits.instr(31,16))
+  val isCompInst = instr(1,0) === "b01".U
+  val firstCompInst = isCompInst && (!compInstIsWaiting)
+  when(io.out.fire() && firstCompInst && (!io.flush)){
+    compInstIsWaiting := true.B
+    // printf("Comp inst: %x %x pc %x\n", instr, io.in.bits.instr, io.in.bits.pc)
+  }
+  when((io.out.fire() && compInstIsWaiting) || io.flush){//RVC inst with align 2
+    compInstIsWaiting := false.B
+  }
+
+  io.in.ready := !io.in.valid || (io.out.fire() && (!firstCompInst))
+
 }
+
+// Note
+// C.LWSP is only valid when rd̸=x0; the code points with rd=x0 are reserved
+// C.LDSP is only valid when rd̸=x0; the code points with rd=x0 are reserved.

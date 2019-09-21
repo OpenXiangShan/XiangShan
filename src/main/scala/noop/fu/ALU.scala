@@ -28,6 +28,7 @@ object ALUOpType {
 
   def jal  = "b011000".U
   def jalr = "b011010".U
+  def cjalr= "b111010".U // pc + 2 instead of 4
   def beq  = "b010000".U
   def bne  = "b010001".U
   def blt  = "b010100".U
@@ -40,6 +41,7 @@ object ALUOpType {
   def ret  = "b011110".U
 
   def isBru(func: UInt) = func(4)//[important]
+  def pcPlus2(func: UInt) = func(5)//[important]
   def isBranch(func: UInt) = !func(3)
   def isJump(func: UInt) = isBru(func) && !isBranch(func)
   def getBranchType(func: UInt) = func(2, 1)
@@ -95,10 +97,11 @@ class ALU extends NOOPModule {
 
   val isBranch = ALUOpType.isBranch(func)
   val isBru = ALUOpType.isBru(func)
+  val pcPlus2 = ALUOpType.pcPlus2(func)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)
   val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
-  io.redirect.target := Mux(!taken && isBranch, io.cfIn.pc + 4.U, target)
+  io.redirect.target := Mux(!taken && isBranch, io.cfIn.pc + Mux(pcPlus2, 2.U, 4.U), target)
   // with branch predictor, this is actually to fix the wrong prediction
   io.redirect.valid := valid && isBru && predictWrong
   // may be can move to ISU to calculate pc + 4
