@@ -14,7 +14,7 @@ trait HasNOOPParameter {
   val HasDiv = true
   val HasIcache = true
   val HasDcache = true
-  val AddrBits = 64
+  val AddrBits = 32
   val AddrBytes = AddrBits / 8
   val DataBits = XLEN
   val DataBytes = DataBits / 8
@@ -81,7 +81,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.forward <> exu.io.forward
 
   io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = XLEN))
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = AddrBits))
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr
@@ -89,7 +89,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   } else { ifu.io.imem })
 
   io.dmem <> (if (HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache", userBits = XLEN))
+    val dcache = Module(new Cache(ro = false, name = "dcache"))
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
     dcache.io.out

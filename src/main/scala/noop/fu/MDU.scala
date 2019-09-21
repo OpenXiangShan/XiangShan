@@ -37,18 +37,16 @@ class Multiplier(len: Int) extends NOOPModule {
   val io = IO(new MulDivIO(len))
   val latency = 1
 
-  def DSPpipe[T <: Data](a: T) = RegNext(a)
-  val mulRes   = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(io.in.bits(1)).asSInt).asUInt
-  val mulPipeOut   = Pipe(DSPpipe(io.in.fire()), mulRes, latency)
-
-  io.out.bits := mulPipeOut.bits
+  def DSPInPipe[T <: Data](a: T) = RegNext(a)
+  def DSPOutPipe[T <: Data](a: T) = RegNext(RegNext(RegNext(a)))
+  val mulRes = (DSPInPipe(io.in.bits(0)).asSInt * DSPInPipe(io.in.bits(1)).asSInt)
+  io.out.bits := DSPOutPipe(mulRes).asUInt
+  io.out.valid := DSPOutPipe(DSPInPipe(io.in.fire()))
 
   val busy = RegInit(false.B)
   when (io.in.valid && !busy) { busy := true.B }
-  when (mulPipeOut.valid) { busy := false.B }
-
+  when (io.out.valid) { busy := false.B }
   io.in.ready := (if (latency == 0) true.B else !busy)
-  io.out.valid := mulPipeOut.valid
 }
 
 class Divider(len: Int = 64) extends NOOPModule {
