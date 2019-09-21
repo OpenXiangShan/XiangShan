@@ -30,26 +30,18 @@ object MDUOpType {
 class MulDivIO(val len: Int) extends Bundle {
   val in = Flipped(DecoupledIO(Vec(2, Output(UInt(len.W)))))
   val sign = Input(Bool())
-  val out = DecoupledIO(Vec(4, Output(UInt(len.W))))
+  val out = DecoupledIO(Output(UInt((len * 2).W)))
 }
 
 class Multiplier(len: Int) extends NOOPModule {
   val io = IO(new MulDivIO(len))
-  val latency = if (HasMExtension) 1 else 0
+  val latency = 1
 
   def DSPpipe[T <: Data](a: T) = RegNext(a)
-  //TODO: refactor needed
   val mulRes   = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(io.in.bits(1)).asSInt).asUInt
-  val mulResU  = (DSPpipe(io.in.bits(0)).asUInt * DSPpipe(io.in.bits(1)).asUInt).asUInt
-  val mulResSU = (DSPpipe(io.in.bits(0)).asSInt * DSPpipe(Cat(0.U(1.W), io.in.bits(1))).asSInt).asUInt
   val mulPipeOut   = Pipe(DSPpipe(io.in.fire()), mulRes, latency)
-  val mulPipeOutU  = Pipe(DSPpipe(io.in.fire()), mulResU, latency)
-  val mulPipeOutSU = Pipe(DSPpipe(io.in.fire()), mulResSU, latency)
 
-  io.out.bits(0) := (if (!HasMExtension) 0.U else mulPipeOut.bits(len - 1, 0))
-  io.out.bits(1) := (if (!HasMExtension) 0.U else mulPipeOut.bits(2 * len - 1, len))
-  io.out.bits(2) := (if (!HasMExtension) 0.U else mulPipeOutU.bits(2 * len - 1, len))
-  io.out.bits(3) := (if (!HasMExtension) 0.U else mulPipeOutSU.bits(2 * len - 1, len))
+  io.out.bits := mulPipeOut.bits
 
   val busy = RegInit(false.B)
   when (io.in.valid && !busy) { busy := true.B }
@@ -130,10 +122,9 @@ class Divider(len: Int = 64) extends NOOPModule {
   next := (state === 0.U && io.in.fire() && !specialResult) || (state =/= 0.U)
 
   val r = hi(len, 1)
-  io.out.bits(0) := (if (HasDiv) Mux(earlyFinish, specialResultLo, Mux(aSignReg ^ bSignReg, -lo, lo)) else 0.U)
-  io.out.bits(1) := (if (HasDiv) Mux(earlyFinish, specialResultR, Mux(aSignReg, -r, r)) else 0.U)
-  io.out.bits(2) := DontCare
-  io.out.bits(3) := DontCare
+  val resQ = Mux(earlyFinish, specialResultLo, Mux(aSignReg ^ bSignReg, -lo, lo))
+  val resR = Mux(earlyFinish, specialResultR, Mux(aSignReg, -r, r))
+  io.out.bits := Cat(resR, resQ)
   io.out.valid := (if (HasDiv) (finish || earlyFinish) else io.in.valid) // FIXME: should deal with ready = 0
 }
 
@@ -155,7 +146,7 @@ class MDU extends NOOPModule {
     io.out.bits
   }
 
-  val mul = Module(new Multiplier(64))
+  val mul = Module(new Multiplier(XLEN + 1))
   val div = Module(new Divider(64))
   val mul32 = Module(new Multiplier(32))
   val div32 = Module(new Divider(32))
@@ -165,6 +156,18 @@ class MDU extends NOOPModule {
     x.sign := MDUOpType.isSign(func)
     x.out.ready := io.out.ready
   }
+
+  val signext = SignExt(_: UInt, XLEN+1)
+  val zeroext = ZeroExt(_: UInt, XLEN+1)
+  val mulInputFuncTable = List(
+    MDUOpType.mul    -> (zeroext, zeroext),
+    MDUOpType.mulh   -> (signext, signext),
+    MDUOpType.mulhsu -> (signext, zeroext),
+    MDUOpType.mulhu  -> (zeroext, zeroext)
+  )
+  mul.io.in.bits(0) := LookupTree(func(1,0), mulInputFuncTable.map(p => (p._1(1,0), p._2._1(src1))))
+  mul.io.in.bits(1) := LookupTree(func(1,0), mulInputFuncTable.map(p => (p._1(1,0), p._2._2(src2))))
+
   List(mul32.io, div32.io).map { case x =>
     x.in.bits(0) := src1(31,0)
     x.in.bits(1) := src2(31,0)
@@ -179,20 +182,20 @@ class MDU extends NOOPModule {
   div32.io.in.valid := io.in.valid && isDiv && isW
 
   io.out.bits := LookupTree(func, List(
-    MDUOpType.mul  -> mul.io.out.bits(0),
-    MDUOpType.mulh -> mul.io.out.bits(1),
-    MDUOpType.mulhu -> mul.io.out.bits(2),
-    MDUOpType.mulhsu -> mul.io.out.bits(3),
-    MDUOpType.div  -> div.io.out.bits(0),
-    MDUOpType.divu -> div.io.out.bits(0),
-    MDUOpType.rem  -> div.io.out.bits(1),
-    MDUOpType.remu -> div.io.out.bits(1),
+    MDUOpType.mul  -> mul.io.out.bits(XLEN-1,0),
+    MDUOpType.mulh -> mul.io.out.bits(2*XLEN-1,XLEN),
+    MDUOpType.mulhu -> mul.io.out.bits(2*XLEN-1,XLEN),
+    MDUOpType.mulhsu -> mul.io.out.bits(2*XLEN-1,XLEN),
+    MDUOpType.div  -> div.io.out.bits(XLEN-1,0),
+    MDUOpType.divu -> div.io.out.bits(XLEN-1,0),
+    MDUOpType.rem  -> div.io.out.bits(2*XLEN-1,XLEN),
+    MDUOpType.remu -> div.io.out.bits(2*XLEN-1,XLEN),
 
-    MDUOpType.mulw -> SignExt(mul32.io.out.bits(0), XLEN),
-    MDUOpType.divw -> SignExt(div32.io.out.bits(0), XLEN),
-    MDUOpType.divuw-> SignExt(div32.io.out.bits(0), XLEN),//not sure: spec used "signed ext to describe this inst"
-    MDUOpType.remw -> SignExt(div32.io.out.bits(1), XLEN),
-    MDUOpType.remuw-> SignExt(div32.io.out.bits(1), XLEN)
+    MDUOpType.mulw -> SignExt(mul32.io.out.bits(31,0), XLEN),
+    MDUOpType.divw -> SignExt(div32.io.out.bits(31,0), XLEN),
+    MDUOpType.divuw-> SignExt(div32.io.out.bits(31,0), XLEN),
+    MDUOpType.remw -> SignExt(div32.io.out.bits(63,32), XLEN),
+    MDUOpType.remuw-> SignExt(div32.io.out.bits(63,32), XLEN)
   ))
 
   val isDivReg = Mux(io.in.fire(), isDiv, RegNext(isDiv))
