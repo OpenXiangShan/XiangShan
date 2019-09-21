@@ -101,12 +101,15 @@ class ALU extends NOOPModule {
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(AddrBits-1,0)
   val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
-  io.redirect.target := Mux(!taken && isBranch, io.cfIn.pc + Mux(pcPlus2, 2.U, 4.U), target)
+  io.redirect.target := Mux(!taken && isBranch, Mux(io.cfIn.pc(1), io.cfIn.pc + 2.U, io.cfIn.pc + 4.U), target)
   // with branch predictor, this is actually to fix the wrong prediction
   io.redirect.valid := valid && isBru && predictWrong
   // may be can move to ISU to calculate pc + 4
   // this is actually for jal and jalr to write pc + 4 to rd
-  io.out.bits := Mux(isBru, io.cfIn.pc + 4.U, aluRes)
+  io.out.bits := Mux(isBru, Mux(pcPlus2, io.cfIn.pc + 2.U, io.cfIn.pc + 4.U), aluRes)
+  // when(pcPlus2 && isBru){
+  //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
+  // }
 
   io.in.ready := true.B
   io.out.valid := valid

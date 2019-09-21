@@ -11,6 +11,7 @@ import utils._
 trait HasNOOPParameter {
   val XLEN = 64
   val HasMExtension = true
+  val HasCExtension = true
   val HasDiv = true
   val HasIcache = true
   val HasDcache = true
