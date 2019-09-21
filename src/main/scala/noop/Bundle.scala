@@ -25,7 +25,7 @@ class DataSrcIO extends NOOPBundle {
 }
 
 class RedirectIO extends NOOPBundle {
-  val target = Output(UInt(XLEN.W))
+  val target = Output(UInt(AddrBits.W))
   val valid = Output(Bool())
 }
 
