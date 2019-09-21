@@ -24,6 +24,8 @@ trait pteSv32Const {
   val PPN0Len = 10
   val PageSizeLen = 12 //4K
 
+  val debug = true
+
   def pteBundle = new Bundle {
   val PPN1  = UInt(12.W)
   val PPN2  = UInt(10.W)
@@ -72,9 +74,8 @@ class PtwSv32 extends Module with pteSv32Const{
   val _isWork = RegEnable(io.satp(31).asBool, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
   val isWork = Mux(state===s_ready, io.satp(31).asBool, _isWork) //isWork control the 
   val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
-  when (io.flush && (state =/= s_ready)) { needFlush := true.B }
+  //when (io.flush && (state =/= s_ready)) { needFlush := true.B }
 
-  //reg to store in.req.bits at s_ready when ptw works
   val updateStore = state===s_ready && io.in.req.fire() && io.satp(31).asBool
   val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
   val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
@@ -128,7 +129,7 @@ class PtwSv32 extends Module with pteSv32Const{
     }
     is (s_walk) {
       when(level =/= 0.U && io.out.resp.fire() && last_rdata=/=io.out.resp.bits.rdata/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
-        when(needFlush) {
+        when(needFlush || io.flush) {
           needFlush := false.B
           state := s_ready
           level := 2.U
@@ -137,17 +138,14 @@ class PtwSv32 extends Module with pteSv32Const{
         }.otherwise {
           level := level - 1.U
           alreadyOutFire := false.B
-          //需要进行权限检查,权限不符，state := s_error
           //Sv32 page table entry: 0:V 1:R 2:W 3:X 4:U 5:G 6:A 7:D
           state := Mux(level===1.U, s_mem, s_walk)
           phyNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), vaddr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(vaddr(21,12), 0.U(2.W)))) 
           last_rdata := io.out.resp.bits.rdata //debug
         }
-      }.elsewhen(level===0.U) {
-        //也需要权限检查
-        //检查level是否为0，如果为0，证明查询了两层页表，如果为1/2，说明出错/superpage
-        //will not get there
-        state := s_mem
+        //state := s_mem
+      }.elsewhen(io.flush) {
+        needFlush := true.B
       }
     }
     is (s_error) {
@@ -162,16 +160,19 @@ class PtwSv32 extends Module with pteSv32Const{
         last_rdata := 0.U
         alreadyOutFire := false.B
         needFlush := false.B
+      }.elsewhen(io.flush) {
+        needFlush := true.B
       }
     }
   }
   
-  val count = RegInit(0.U(32.W))
+  val count = RegInit(0.U(16.W))
   val isCount = RegInit(false.B)
 
-  when(count <= 300.U && isCount || vaddr === "h80100000".U) {
-    printf("state:%d vaddr:%x phyNum:%x needFlush:%d rdata:%x outRespFire:%d\n",state,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.fire())
-    when(isCount===false.B) {isCount := true.B}
-    count := count+1.U
+  Debug(debug) {
+    when( GTimer() <= 1500.U && (isCount || vaddr === "h80100000".U)) {
+      printf("icache cnt:%d state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d\n",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
+      when(isCount===false.B) {isCount := true.B}
+    }
   }
 }
