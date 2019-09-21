@@ -42,14 +42,7 @@ class LSU extends NOOPModule {
     io.out.bits
   }
 
-  def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
-    LookupTree(sizeEncode, List(
-      "b00".U -> 0x1.U, //0001 << addr(2:0)
-      "b01".U -> 0x3.U, //0011
-      "b10".U -> 0xf.U, //1111
-      "b11".U -> 0xff.U //11111111
-    )) << addr(2, 0)
-  }
+  def genWmask(sizeEncode: UInt) = VecInit((0 to 3).map((i: Int) => Fill((1 << i), 1.U)))(sizeEncode)
   def genWdata(data: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
       "b00".U -> Fill(8, data(7, 0)),
@@ -85,7 +78,7 @@ class LSU extends NOOPModule {
   dmem.req.valid := valid && (state === s_idle) && !mmio
   dmem.req.bits.cmd := Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read)
   dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
-  dmem.req.bits.wmask := genWmask(addr, func(1, 0))
+  dmem.req.bits.wmask := genWmask(func(1, 0))
   dmem.req.bits.user := 0.U
   dmem.resp.ready := true.B
 
