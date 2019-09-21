@@ -7,20 +7,20 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object MDUOpType {
-  def mul    = "b00000".U
-  def mulh   = "b00001".U
-  def mulhu  = "b10001".U
-  def mulhsu = "b10011".U
-  def div    = "b00100".U
-  def divu   = "b00101".U
-  def rem    = "b00110".U
-  def remu   = "b00111".U
+  def mul    = "b0000".U
+  def mulh   = "b0001".U
+  def mulhsu = "b0010".U
+  def mulhu  = "b0011".U
+  def div    = "b0100".U
+  def divu   = "b0101".U
+  def rem    = "b0110".U
+  def remu   = "b0111".U
 
-  def mulw   = "b01000".U
-  def divw   = "b01100".U
-  def divuw  = "b01101".U
-  def remw   = "b01110".U
-  def remuw  = "b01111".U
+  def mulw   = "b1000".U
+  def divw   = "b1100".U
+  def divuw  = "b1101".U
+  def remw   = "b1110".U
+  def remuw  = "b1111".U
 
   def isDiv(op: UInt) = op(2)
   def isSign(op: UInt) = isDiv(op) && !op(0)
