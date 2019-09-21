@@ -196,7 +196,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
     Mux((writeBeatCnt.value === (LineBeats - 1).U), SimpleBusCmd.writeLast, SimpleBusCmd.writeBurst))
 
   // critical word first
-  val raddr = req.addr //Cat(req.addr(63, 3), 0.U(3.W))
+  val raddr = (if (XLEN == 64) Cat(req.addr(AddrBits-1,3), 0.U(3.W))
+                          else Cat(req.addr(AddrBits-1,2), 0.U(2.W)))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
   io.mem.req.bits.addr := Mux(state === s_memReadReq, raddr, waddr)
