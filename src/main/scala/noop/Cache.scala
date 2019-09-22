@@ -387,6 +387,13 @@ class Cache(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val metaArray = Module(new SRAMTemplate(new MetaBundle, set = Sets, way = Ways, shouldReset = true, singlePort = true))
   val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, shouldReset = true, singlePort = true))
 
+  if (name == "icache") {
+    // flush icache when executing fence.i
+    val flushICache = WireInit(false.B)
+    BoringUtils.addSink(flushICache, "MOUFlushICache")
+    metaArray.reset := reset.asBool || flushICache
+  }
+
   s1.io.in <> io.in.req
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))

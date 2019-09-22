@@ -23,11 +23,12 @@ object SrcType {
 }
 
 object FuType {
-  def num = 4
-  def alu = "b00".U
-  def lsu = "b01".U
-  def mdu = "b10".U
-  def csr = "b11".U
+  def num = 5
+  def alu = "b000".U
+  def lsu = "b001".U
+  def mdu = "b010".U
+  def csr = "b011".U
+  def mou = "b100".U
   def apply() = UInt(log2Up(num).W)
 }
 
@@ -40,5 +41,5 @@ object Instructions extends HasInstrType with HasNOOPParameter {
   val DecodeDefault = List(InstrN, FuType.csr, CSROpType.jmp)
   def DecodeTable = RVIInstr.table ++ NOOPTrap.table ++
     (if (HasMExtension) RVMInstr.table else Nil) ++
-    RVZicsrInstr.table
+    RVZicsrInstr.table ++ RVZifenceiInstr.table
 }
