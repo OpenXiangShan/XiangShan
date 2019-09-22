@@ -128,7 +128,7 @@ class PtwSv32 extends Module with pteSv32Const{
       }
     }
     is (s_walk) {
-      when(level =/= 0.U && io.out.resp.fire() && last_rdata=/=io.out.resp.bits.rdata/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
+      when(level =/= 0.U && io.out.resp.fire()/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
         when(needFlush || io.flush) {
           needFlush := false.B
           state := s_ready
@@ -170,9 +170,17 @@ class PtwSv32 extends Module with pteSv32Const{
   val isCount = RegInit(false.B)
 
   Debug(debug) {
-    when( GTimer() <= 1500.U && (isCount || vaddr === "h80100000".U)) {
-      printf("icache cnt:%d state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d\n",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
-      when(isCount===false.B) {isCount := true.B}
+    when(vaddr === "h80100000".U) {
+      isCount := true.B
     }
+    when( GTimer() >= 111500.U && isCount || (vaddr>="h80100170".U && vaddr<="h80100250".U )) {
+      printf("%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d\n",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
+      //when(isCount===false.B) {isCount := true.B}
+    }
+    when(isCount && !(state===s_mem && io.out.req.fire().asBool && vaddr===phyNum)) {
+      //printf(p"${GTimer()}, state:${state}, out.resp.fire:${io.out.resp.fire()}, vaddr:${vaddr}, rdata:${io.out.resp.bits.rdata}\n")
+      printf("%d: state:%d, out.resp.fire:%d, vaddr:%x, rdata:%x\n",GTimer(),state,io.out.resp.fire(),vaddr,io.out.resp.bits.rdata)
+    }
+    assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
   }
 }

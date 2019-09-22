@@ -20,7 +20,7 @@ sealed trait HasCacheConst {
   val TagBits = 32 - OffsetBits - IndexBits
   val dataBits = 32
 
-  val debug = true
+  val debug = false
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -171,7 +171,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
-  val needFlush = Reg(Bool())
+  val needFlush = RegInit(false.B)
+  //val needFlush = Reg(Bool())
   when (io.flush && (state =/= s_idle)) { needFlush := true.B }
   when (io.out.fire() && needFlush) { needFlush := false.B }
 
@@ -195,7 +196,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val metaRefillWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
   val dataRefillWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
-  val afterFirstRead = Reg(Bool())
+  //val afterFirstRead = Reg(Bool())
+  val afterFirstRead = RegInit(false.B)
   val alreadyOutFire = RegEnable(true.B, io.out.fire())
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst)
@@ -276,10 +278,15 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-  //Debug(debug) {
-    //printf("%d: [" + name + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
-      //GTimer(), io.in.ready, io.in.valid, state, req.addr)
-  //}
+  Debug(debug) {
+    when(GTimer()<=1100.U) {
+      if(name=="icache") {
+        printf("%d: [" + name + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x out.fire= %d alreadyOutFire=%d needFlush=%d in.valid:%d hit:%d req.isWrite():%d afterFirstRead:%d",
+      GTimer(), io.in.ready, io.in.valid, state, req.addr, io.out.fire(), alreadyOutFire,needFlush, io.in.valid, hit, req.isWrite(), afterFirstRead)
+        printf(p"io.flush:${io.flush} io.mem.resp.fire:${io.mem.resp.fire}, io.mem.resp.bits.rdata:${io.mem.resp.bits.rdata}\n")
+      }
+    }
+  }
 }
 
 // probe
@@ -411,10 +418,12 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 
   Debug(debug) {
-    when(GTimer()<=1600.U) {
+    when(GTimer()<=1100.U) {
       io.in.dump(name + ".in")
-    printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
+    if(name=="icache") {
+      printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
       GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
+    }
     when (s1.io.in.valid) { printf(p"[${name}.S1]: ${s1.io.in.bits}\n") }
     when (s2.io.in.valid) { printf(p"[${name}.S2]: ${s2.io.in.bits.req}\n") }
     when (s3.io.in.valid) { printf(p"[${name}.S3]: ${s3.io.in.bits.req}\n") }
