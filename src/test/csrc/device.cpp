@@ -9,11 +9,16 @@ void update_screen(void *vmem);
 uint32_t screen_size(void);
 void set_abort(void);
 
+int uart_getc(void);
+void uart_putc(char c);
+void init_uart(void);
+
 static struct timeval boot = {};
 static uint64_t vmem[0x400000 / sizeof(uint64_t)];
 
 void init_device(void) {
   init_sdl();
+  init_uart();
   gettimeofday(&boot, NULL);
 }
 
@@ -54,11 +59,13 @@ extern "C" void device_helper(
     uint8_t req_wen, uint64_t req_addr, uint64_t req_wdata, uint8_t req_wmask, uint64_t *resp_rdata) {
   switch (req_addr) {
       // read uartlite stat register
-    case 0x40600008:
+    case 0x40600008: *resp_rdata = 0x01; break; // set UARTLITE_RX_VALID
       // read uartlite ctrl register
     case 0x4060000c: *resp_rdata = 0; break;
-      // write uartlite data register
-    case 0x40600004: if (req_wen) eprintf("%c", (uint8_t)req_wdata); break;
+      // write uartlite tx fifo
+    case 0x40600004: if (req_wen) uart_putc((char)req_wdata); break;
+      // read uartlite rx fifo
+    case 0x40600000: *resp_rdata = uart_getc(); break;
       // read RTC
     case 0x40700000: *resp_rdata = uptime(); break;
       // read key
