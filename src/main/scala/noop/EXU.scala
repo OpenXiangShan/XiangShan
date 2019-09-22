@@ -54,6 +54,12 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   csr.io.isInvOpcode := io.in.bits.ctrl.isInvOpcode
   csr.io.out.ready := true.B
 
+  val mou = Module(new MOU)
+  // mou does not write register
+  mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
+  mou.io.cfIn := io.in.bits.cf
+  mou.io.out.ready := true.B
+
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.rfWen := i.rfWen
@@ -61,7 +67,10 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     o.fuType := i.fuType
   }
   io.out.bits.decode.cf.pc := io.in.bits.cf.pc
-  io.out.bits.decode.cf.redirect <> Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect)
+  io.out.bits.decode.cf.redirect <>
+    Mux(mou.io.redirect.valid, mou.io.redirect,
+      Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect))
+
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
     FuType.lsu -> lsu.io.out.valid,
@@ -72,6 +81,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.commits(FuType.lsu) := lsuOut
   io.out.bits.commits(FuType.csr) := csrOut
   io.out.bits.commits(FuType.mdu) := mduOut
+  io.out.bits.commits(FuType.mou) := 0.U
 
   io.in.ready := !io.in.valid || io.out.fire()
 

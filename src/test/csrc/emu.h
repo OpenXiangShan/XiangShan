@@ -101,8 +101,8 @@ class Emulator {
       single_cycle();
       n --;
 
-      if (lastcommit - n > 200 && hascommit) {
-        eprintf("No instruction commits for 200 cycles, maybe get stuck\n");
+      if (lastcommit - n > 700 && hascommit) {
+        eprintf("No instruction commits for 700 cycles, maybe get stuck\n");
         set_abort();
       }
 
