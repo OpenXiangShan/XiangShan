@@ -154,7 +154,7 @@ object RVCInstr extends HasInstrType with HasRVCConst {
     C_JR         -> List(InstrI, FuType.alu, ALUOpType.jalr),
     C_MV         -> List(InstrR, FuType.alu, ALUOpType.add),
     C_EBREAK     -> List(InstrI, FuType.alu, ALUOpType.add),
-    C_JALR       -> List(InstrI, FuType.alu, ALUOpType.cjalr),
+    C_JALR       -> List(InstrI, FuType.alu, ALUOpType.jalr),
     C_ADD        -> List(InstrR, FuType.alu, ALUOpType.add),
     // C_FSDSP      -> List(InstrI, FuType.alu, ALUOpType.add),
     C_SWSP       -> List(InstrS, FuType.lsu, LSUOpType.sw),
@@ -195,7 +195,7 @@ object RVCInstr extends HasInstrType with HasRVCConst {
     C_LWSP       -> List(ImmLWSP, DtCare, DtCare, REGrd),
     // C_FLWSP      -> List(),
     C_LDSP       -> List(ImmLDSP, DtCare, DtCare, REGrd),
-    C_JR         -> List(ImmNone, REGrs2, DtCare, DtCare),
+    C_JR         -> List(ImmNone, REGrs1, DtCare, DtCare),
     C_MV         -> List(ImmNone, REGrs2, DtCare, REGrd),
     C_EBREAK     -> List(ImmNone, DtCare, DtCare, DtCare), //not implemented
     C_JALR       -> List(ImmNone, REGrs2, DtCare, REGx1),

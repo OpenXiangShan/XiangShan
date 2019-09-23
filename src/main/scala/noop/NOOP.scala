@@ -26,7 +26,7 @@ abstract class NOOPBundle extends Bundle with HasNOOPParameter
 
 case class NOOPConfig (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = true
+  EnableDebug: Boolean = false
 )
 
 object AddressSpace {
@@ -79,6 +79,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   isu.io.wb <> wbu.io.wb
   ifu.io.redirect <> wbu.io.redirect
+  ifu.io.redirectRVC <> idu.io.redirect
   // forward
   isu.io.forward <> exu.io.forward
 

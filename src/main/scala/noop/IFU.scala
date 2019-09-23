@@ -15,25 +15,27 @@ class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
     val imem = new SimpleBusUC(userBits = AddrBits)
     val pc = Input(UInt(AddrBits.W))
-    val out = Decoupled(new CtrlFlowIO)
+    val out = Decoupled(new IRIDCtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
+    val redirectRVC = Flipped(new RedirectIO)//priority: redirect > redirectRVC
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
   })
 
   // pc
   val pc = RegInit(resetVector.U(AddrBits.W))
-  val pcUpdate = io.redirect.valid || io.imem.req.fire()
+  val pcUpdate = io.redirect.valid || io.imem.req.fire() || io.redirectRVC.valid
   val snpc = Mux(pc(1), pc + 2.U, pc + 4.U)  // sequential next pc
 
   val bp1 = Module(new BPU1)
   // predicted next pc
   val pnpc = bp1.io.out.target
-  val npc = Mux(io.redirect.valid, io.redirect.target, Mux(bp1.io.out.valid, pnpc, snpc))
+  val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(bp1.io.out.valid, pnpc, snpc)))
 
   bp1.io.in.pc.valid := io.imem.req.fire() // only predict when Icache accepts a request
   bp1.io.in.pc.bits := npc  // predict one cycle early
-  bp1.io.flush := io.redirect.valid
+  bp1.io.flush := io.redirect.valid 
+  // bp1.io.flush := io.redirect.valid || io.redirectRVC.valid
 
   //val bp2 = Module(new BPU2)
   //bp2.io.in.bits := io.out.bits
@@ -44,7 +46,7 @@ class IFU extends NOOPModule with HasResetVector {
     // printf("[IF1] pc=%x\n", pc)
   }
 
-  io.flushVec := Mux(io.redirect.valid, "b1111".U, 0.U)
+  io.flushVec := Mux(io.redirect.valid, "b1111".U, Mux(io.redirectRVC.valid, "b0001".U, 0.U))
   io.bpFlush := false.B
 
   io.imem := DontCare
@@ -58,8 +60,7 @@ class IFU extends NOOPModule with HasResetVector {
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
     //inst path only uses 32bit inst, get the right inst according to pc(2)
-  io.out.bits.instr := (if (XLEN == 64) io.imem.resp.bits.rdata.asTypeOf(Vec(2, UInt(32.W)))(io.pc(2))
-                       else io.imem.resp.bits.rdata)
+  io.out.bits.instr := io.imem.resp.bits.rdata
   io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

@@ -29,6 +29,13 @@ class RedirectIO extends NOOPBundle {
   val valid = Output(Bool())
 }
 
+class IRIDCtrlFlowIO extends NOOPBundle {
+  val instr = Output(UInt(64.W))
+  val pc = Output(UInt(AddrBits.W))
+  val pnpc = Output(UInt(AddrBits.W))
+  val redirect = new RedirectIO
+}
+
 class CtrlFlowIO extends NOOPBundle {
   val instr = Output(UInt(32.W))
   val pc = Output(UInt(AddrBits.W))

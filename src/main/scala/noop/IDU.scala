@@ -7,25 +7,19 @@ import utils._
 
 class IDU extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new CtrlFlowIO))
+    val in = Flipped(Decoupled(new IRIDCtrlFlowIO))
     val out = Decoupled(new DecodeIO)
     val flush = Input(Bool())
+    val redirect = new RedirectIO
   })
 
-  val compInstIsWaiting = RegInit(false.B) //for RV64C
-  val compInstWaiting = Wire(UInt(32.W))
-  val instr = Mux(compInstIsWaiting || io.in.bits.pc(1), compInstWaiting, io.in.bits.instr) //pc 0 -> 2 or jump to pc 2
+  val instr = Wire(UInt(32.W))
   val instrType :: fuType :: fuOpType :: Nil =
     ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val isRVC = instr(1,0) =/= "b11".U
   val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
     ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable) 
 
-  Debug(){
-    when(io.out.valid){
-      printf("[IDU] pc: %x instrType: %x fuType: %x fuOpType: %x\n", io.in.bits.pc, instrType, fuType, fuOpType)
-    }
-  }
 
   io.out.bits := DontCare
 
@@ -119,28 +113,123 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.bits.ctrl.src2Type := src2Type
 
-  io.out.bits.cf.pc := Mux(compInstIsWaiting, io.in.bits.pc+2.U, io.in.bits.pc)
-  io.out.bits.cf.pnpc := Mux(compInstIsWaiting, io.in.bits.pnpc+2.U, io.in.bits.pnpc)
+  io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
+  io.out.bits.ctrl.isNoopTrap := (instr(31,0) === NOOPTrap.TRAP) && io.in.valid
+
+  //RVC support FSM
+  //only ensure pnpc given by this FSM is right. May need flush after 6 offset 32 bit inst
+  val s_idle :: s_extra :: s_waitnext :: s_cachereq :: Nil = Enum(4) 
+  val state = RegInit(UInt(2.W), s_idle)
+  val pcOffsetR = RegInit(UInt(3.W), 0.U)
+  val pcOffset = Mux(state === s_idle, io.in.bits.pc(2,0), pcOffsetR)
+  val instIn = Cat(0.U(16.W), io.in.bits.instr)
+  // val nextState = WireInit(0.U(2.W))
+  val canGo = WireInit(false.B)
+  val canIn = WireInit(false.B)
+  val rvcFinish = pcOffset === 0.U && !isRVC || pcOffset === 4.U && !isRVC || pcOffset === 2.U && isRVC || pcOffset === 6.U && isRVC  
+  val rvcNext = pcOffset === 0.U && isRVC || pcOffset === 4.U && isRVC || pcOffset === 2.U && !isRVC
+  val rvcSpecial = pcOffset === 6.U && !isRVC
+  val flushIFU = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid
+  val pcOut = WireInit(0.U(AddrBits.W))
+  val pnpcOut = WireInit(0.U(AddrBits.W))
+  val specialPCR = Reg(UInt(AddrBits.W))
+  val specialInstR = Reg(UInt(16.W))
+  val redirectPC = Cat(io.in.bits.pc(31,3), 0.U(3.W))+"b1010".U
+  val rvcForceLoadNext = pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U 
+  //------------------------------------------------------
+  // rvcForceLoadNext is used to deal with: 
+  // 8010004a:	406007b7          	lui	a5,0x40600
+  // 8010004e:	470d                	li	a4,3
+  // 80100050:	00e78623          	sb	a4,12(a5) # 4060000c <_start-0x3faffff4>
+  // For icache req inst in seq, if there is no rvcForceLoadNext, 
+  // after 8010004e there will be 8010004c instead of 80100050
+  //------------------------------------------------------
+  // val flush = rvcSpecial
+  instr := Mux(state === s_waitnext, Cat(instIn(15,0), specialInstR), LookupTree(pcOffset, List(
+    "b000".U -> instIn(31,0),
+    "b010".U -> instIn(31+16,16),
+    "b100".U -> instIn(63,32),
+    "b110".U -> instIn(63+16,32+16)
+  )))
+
+  io.redirect.target := redirectPC
+  io.redirect.valid := flushIFU
+
+  when(!io.flush){
+    switch(state){
+      is(s_idle){//decode current pc in pipeline
+        canGo := rvcFinish || rvcNext
+        canIn := rvcFinish || rvcForceLoadNext
+        pcOut := io.in.bits.pc
+        pnpcOut := Mux(rvcFinish, io.in.bits.pnpc, Mux(isRVC, io.in.bits.pc+2.U, io.in.bits.pc+4.U))
+        when(io.out.fire() && rvcFinish){state := s_idle}
+        when(io.out.fire() && rvcNext){
+          state := s_extra
+          pcOffsetR := pcOffset + Mux(isRVC, 2.U, 4.U)
+        }
+        when(rvcSpecial && io.in.valid){
+          state := s_waitnext
+          specialPCR := pcOut
+          specialInstR := io.in.bits.instr(63,63-16+1) 
+          // redirectpc = Cat(io.in.pc(31,3), 0.(3.W))+"b1010".U
+          // flush
+        }
+      }
+      is(s_extra){//get 16 aligned inst, pc controled by this FSM
+        canGo := rvcFinish || rvcNext
+        canIn := rvcFinish || rvcForceLoadNext
+        pcOut := Cat(io.in.bits.pc(31,3), pcOffsetR(2,0))
+        pnpcOut := Mux(rvcFinish, io.in.bits.pnpc, Mux(isRVC, pcOut+2.U, pcOut+4.U))
+        when(io.out.fire() && rvcFinish){state := s_idle}
+        when(io.out.fire() && rvcNext){
+          state := s_extra
+          pcOffsetR := pcOffset + Mux(isRVC, 2.U, 4.U)
+        }
+        when(rvcSpecial && io.in.valid){
+          state := s_waitnext
+          specialPCR := pcOut
+          specialInstR := io.in.bits.instr(63,63-16+1) 
+          // redirectpc = Cat(io.in.pc(31,3), 0.(3.W))+"b1010".U
+          // flush
+        }
+      }
+      is(s_waitnext){//require next 64bits, for this inst has size 32 and offset 6
+        //ignore bp result, use pc+4 instead
+        pcOut := specialPCR
+        pnpcOut := specialPCR+4.U
+        // pnpcOut := Mux(rvcFinish, io.in.bits.pnpc, Mux(isRVC, pcOut+2.U, pcOut+4.U))
+        canGo := io.in.valid
+        canIn := false.B
+        when(io.out.fire()){
+          state := s_extra
+          pcOffsetR := "b010".U
+        }
+      }
+      // is_(s_cachereq){//flush pipeline to get next 64 inst bits
+
+      // }
+    }
+  }.otherwise{
+    state := s_idle
+    canGo := DontCare
+    canIn := DontCare
+    pcOut := DontCare
+    pnpcOut := DontCare
+  }
+
+  //output signals
+  io.out.bits.cf.pc := pcOut
+  io.out.bits.cf.pnpc := pnpcOut
   io.out.bits.cf.instr := instr
 
-  io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
-  io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
-  io.out.valid := io.in.valid
+  io.out.valid := io.in.valid && canGo
+  io.in.ready := !io.in.valid || (io.out.fire() && canIn)
 
-  //RVC support
-  compInstWaiting := Cat(0.U(16.W),io.in.bits.instr(31,16))
-  val isCompInst = instr(1,0) =/= "b11".U
-  val firstCompInst = isCompInst && (!compInstIsWaiting) && io.in.bits.pc(1) === 0.U //c inst aligned with 4
-  when(io.out.fire() && firstCompInst && (!io.flush)){
-    compInstIsWaiting := true.B
-    // printf("Comp inst: %x %x pc %x\n", instr, io.in.bits.instr, io.in.bits.pc)
+  Debug(){
+    when(io.out.valid){
+      printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType)
+    }
   }
-  when((io.out.fire() && compInstIsWaiting) || io.flush){//RVC inst with align 2
-    compInstIsWaiting := false.B
-  }
-
-  io.in.ready := !io.in.valid || (io.out.fire() && (!firstCompInst)) 
-
 }
 
 // Note  
