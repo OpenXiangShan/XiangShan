@@ -173,13 +173,13 @@ class PtwSv32 extends Module with pteSv32Const{
     when(vaddr === "h80100000".U) {
       isCount := true.B
     }
-    when( GTimer() >= 111500.U && isCount || (vaddr>="h80100170".U && vaddr<="h80100250".U )) {
+    when( isCount || (vaddr>="h80100048".U && vaddr<="h8010025c".U )) {
       printf("%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d\n",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
       //when(isCount===false.B) {isCount := true.B}
     }
-    when(isCount && !(state===s_mem && io.out.req.fire().asBool && vaddr===phyNum)) {
+    when(isCount && (state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum)) {
       //printf(p"${GTimer()}, state:${state}, out.resp.fire:${io.out.resp.fire()}, vaddr:${vaddr}, rdata:${io.out.resp.bits.rdata}\n")
-      printf("%d: state:%d, out.resp.fire:%d, vaddr:%x, rdata:%x\n",GTimer(),state,io.out.resp.fire(),vaddr,io.out.resp.bits.rdata)
+      printf("%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
     }
     assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
   }

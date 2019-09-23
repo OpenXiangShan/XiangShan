@@ -72,7 +72,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     
     val iptw   = Module(new PtwSv32())
-    iptw.io.satp := "h80080102".U
+    iptw.io.satp := "h00080101".U
     iptw.io.flush := ifu.io.flushVec(0).asBool | ifu.io.bpFlush
     icache.io.in <> iptw.io.out
     iptw.io.in <> ifu.io.imem

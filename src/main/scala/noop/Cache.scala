@@ -171,8 +171,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
-  val needFlush = RegInit(false.B)
-  //val needFlush = Reg(Bool())
+  //val needFlush = RegInit(false.B)
+  val needFlush = Reg(Bool())
   when (io.flush && (state =/= s_idle)) { needFlush := true.B }
   when (io.out.fire() && needFlush) { needFlush := false.B }
 
@@ -196,8 +196,8 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   val metaRefillWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
   val dataRefillWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
-  //val afterFirstRead = Reg(Bool())
-  val afterFirstRead = RegInit(false.B)
+  val afterFirstRead = Reg(Bool())
+  //val afterFirstRead = RegInit(false.B)
   val alreadyOutFire = RegEnable(true.B, io.out.fire())
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst)
