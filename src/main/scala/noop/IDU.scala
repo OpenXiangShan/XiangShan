@@ -226,7 +226,7 @@ class IDU extends NOOPModule with HasInstrType {
   io.in.ready := !io.in.valid || (io.out.fire() && canIn)
 
   Debug(){
-    when(io.out.valid){
+    when(io.out.fire()){
       printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType)
     }
   }

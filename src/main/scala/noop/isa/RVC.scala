@@ -192,9 +192,9 @@ object RVCInstr extends HasInstrType with HasRVCConst {
     C_SLLI       -> List(ImmLI, REGrd, DtCare, REGrd),
     // C_FLDSP      -> List(),
     // C_LQSP       -> List(),
-    C_LWSP       -> List(ImmLWSP, DtCare, DtCare, REGrd),
+    C_LWSP       -> List(ImmLWSP, REGx2, DtCare, REGrd),
     // C_FLWSP      -> List(),
-    C_LDSP       -> List(ImmLDSP, DtCare, DtCare, REGrd),
+    C_LDSP       -> List(ImmLDSP, REGx2, DtCare, REGrd),
     C_JR         -> List(ImmNone, REGrs1, DtCare, DtCare),
     C_MV         -> List(ImmNone, REGrs2, DtCare, REGrd),
     C_EBREAK     -> List(ImmNone, DtCare, DtCare, DtCare), //not implemented
@@ -202,9 +202,9 @@ object RVCInstr extends HasInstrType with HasRVCConst {
     C_ADD        -> List(ImmNone, REGrs2, REGrd, REGrd),
     // C_FSDSP      -> List(),
     // C_SQSP       -> List(),
-    C_SWSP       -> List(ImmSWSP, REGrs2, DtCare, DtCare),
+    C_SWSP       -> List(ImmSWSP, REGx2, REGrs2, DtCare),
     // C_FSWSP      -> List(),
-    C_SDSP       -> List(ImmSDSP, REGrs2, DtCare, DtCare)
+    C_SDSP       -> List(ImmSDSP, REGx2, REGrs2, DtCare)
    )
 
    //TODO: support pc = 2 aligned address
