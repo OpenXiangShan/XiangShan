@@ -13,3 +13,6 @@ cpu:
 
 xj:
 	$(MAKE) -C $(NANOS_HOME) $(ARCH) run
+
+# xjnemu:
+# 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
