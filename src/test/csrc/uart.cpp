@@ -14,29 +14,29 @@ static void uart_enqueue(char ch) {
   }
 }
 
-// generate a random key every 1s for pal
-static int rand_key(void) {
-  uint32_t uptime(void);
-  static uint32_t lasttime = 0;
-  uint32_t now = uptime();
-
-  if (now - lasttime > 1000) {
-    lasttime = now;
-    return "uiojkl"[rand()% 6];
-  } else {
-    return 0;
-  }
-}
-
-int uart_getc(void) {
+static int uart_dequeue(void) {
   int k = 0;
   if (f != r) {
     k = queue[f];
     f = (f + 1) % QUEUE_SIZE;
   } else {
-    k = rand_key();
+    // generate a random key every 1s for pal
+    k = "uiojkl"[rand()% 6];
   }
   return k;
+}
+
+int uart_getc(void) {
+  uint32_t uptime(void);
+  static uint32_t lasttime = 0;
+  uint32_t now = uptime();
+
+  if (now - lasttime > 30000) {
+    lasttime = now;
+    return uart_dequeue();
+  } else {
+    return 0;
+  }
 }
 
 void uart_putc(char c) {
@@ -45,7 +45,9 @@ void uart_putc(char c) {
 
 static void preset_input() {
   char rtthread_cmd[128] = "memtrace\n";
-  char init_cmd[128] = "2";     // choose PAL
+  char init_cmd[128] = "2" // choose PAL
+    "jjjjjjjkkkkkk" // walk to enemy
+    ;
   char *buf = init_cmd;
   int i;
   for (i = 0; i < strlen(buf); i ++) {
