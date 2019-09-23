@@ -101,7 +101,7 @@ class ALU extends NOOPModule {
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(AddrBits-1,0)
   val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
-  io.redirect.target := Mux(!taken && isBranch, Mux(io.cfIn.pc(1), io.cfIn.pc + 2.U, io.cfIn.pc + 4.U), target)
+  io.redirect.target := Mux(!taken && isBranch, Mux(io.cfIn.instr(1,0)=/="b11".U, io.cfIn.pc + 2.U, io.cfIn.pc + 4.U), target)
   // with branch predictor, this is actually to fix the wrong prediction
   io.redirect.valid := valid && isBru && predictWrong
   // may be can move to ISU to calculate pc + 4
