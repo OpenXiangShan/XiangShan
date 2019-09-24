@@ -81,20 +81,25 @@ class AXI4VGA extends Module with HasVGAConst {
   val videoValid = hInRange && vInRange
 
   val hCounterIsOdd = hCounter(0)
+  val hCounterIs2 = hCounter(1,0) === 2.U
   val vCounterIsOdd = vCounter(0)
-  // there is 1 cycle latency to read block memory,
-  // so we should issue the read request 1 cycle eariler
+  // there is 2 cycle latency to read block memory,
+  // so we should issue the read request 2 cycle eariler
   val nextPixel = inRange(hCounter, HActive - 1, HBackPorch - 1) && vInRange && hCounterIsOdd
   val fbPixelAddrV0 = Counter(nextPixel && !vCounterIsOdd, FBPixels)._1
   val fbPixelAddrV1 = Counter(nextPixel &&  vCounterIsOdd, FBPixels)._1
 
   // each pixel is 4 bytes
-  fb.io.in.ar := DontCare
+  fb.io.in.ar.bits := DontCare
+  fb.io.in.ar.bits.len   := 0.U
+  fb.io.in.ar.bits.size  := "b11".U
+  fb.io.in.ar.bits.burst := AXI4Parameters.BURST_INCR
   fb.io.in.ar.bits.addr := Cat(Mux(vCounterIsOdd, fbPixelAddrV1, fbPixelAddrV0), 0.U(2.W))
-  fb.io.in.ar.valid := nextPixel
+  fb.io.in.ar.valid := RegNext(nextPixel) && hCounterIs2
 
   fb.io.in.r.ready := true.B
-  val color = fb.io.in.r.bits.data
+  val data = HoldUnless(fb.io.in.r.bits.data, fb.io.in.r.fire())
+  val color = Mux(hCounter(1), data(63, 32), data(31, 0))
   io.vga.r := Mux(videoValid, color(23, 20), 0.U)
   io.vga.g := Mux(videoValid, color(15, 12), 0.U)
   io.vga.b := Mux(videoValid, color(7, 4), 0.U)
