@@ -132,6 +132,10 @@ class LSU extends Module {
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
   io.isMMIO := mmio && valid
+  
+  //when(dmem.req.fire() && isStore) {
+    //printf("addr:%x, dmem.req.bits.wdata:%x, isStore:%d wmask:%b\n",addr, dmem.req.bits.wdata, isStore, dmem.req.bits.wmask)
+  //}
 
   BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")
   BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")

@@ -24,7 +24,7 @@ trait pteSv32Const {
   val PPN0Len = 10
   val PageSizeLen = 12 //4K
 
-  val debug = true
+  val debug = false
 
   def pteBundle = new Bundle {
   val PPN1  = UInt(12.W)
@@ -173,7 +173,7 @@ class PtwSv32 extends Module with pteSv32Const{
     when(vaddr === "h80100000".U) {
       isCount := true.B
     }
-    when( isCount || (vaddr>="h80100048".U && vaddr<="h8010025c".U )) {
+    when( isCount ) {
       printf("%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d\n",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
       //when(isCount===false.B) {isCount := true.B}
     }

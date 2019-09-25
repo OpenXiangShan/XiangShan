@@ -283,7 +283,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
       if(name=="icache") {
         printf("%d: [" + name + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x out.fire= %d alreadyOutFire=%d needFlush=%d in.valid:%d hit:%d req.isWrite():%d afterFirstRead:%d",
       GTimer(), io.in.ready, io.in.valid, state, req.addr, io.out.fire(), alreadyOutFire,needFlush, io.in.valid, hit, req.isWrite(), afterFirstRead)
-        printf(p"io.flush:${io.flush} io.mem.resp.fire:${io.mem.resp.fire}, io.mem.resp.bits.rdata:${io.mem.resp.bits.rdata}\n")
+        printf(" io.flush:%d io.mem.resp.fire:%d io.mem.resp.bits.rdata:%x\n", io.flush, io.mem.resp.fire, io.mem.resp.bits.rdata)
       }
     }
   }
@@ -418,7 +418,7 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 
   Debug(debug) {
-    when(GTimer()<=1100.U) {
+    when(true.B) {
       io.in.dump(name + ".in")
     if(name=="icache") {
       printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
