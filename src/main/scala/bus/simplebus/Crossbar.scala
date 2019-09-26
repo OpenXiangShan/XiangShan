@@ -53,9 +53,7 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   inSel.resp.valid := outSel.resp.fire()
   inSel.resp.bits <> outSel.resp.bits
   outSel.resp.ready := inSel.resp.ready
-
-  // ack in.req when the response is received
-  inSel.req.ready := outSel.resp.fire()
+  inSel.req.ready := outSel.req.ready
 
   if (debug) {
     when (state === s_idle && inSel.req.valid) {
