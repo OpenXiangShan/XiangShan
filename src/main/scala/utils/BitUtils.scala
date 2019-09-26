@@ -11,6 +11,12 @@ object MaskExpand {
  def apply(m: UInt) = Cat(m.asBools.map(Fill(8, _)).reverse)
 }
 
+object MaskData {
+ def apply(oldData: UInt, newData: UInt, fullmask: UInt) = {
+   (newData & fullmask) | (oldData & ~fullmask)
+ }
+}
+
 object SignExt {
   def apply(a: UInt, len: Int) = {
     val aLen = a.getWidth
