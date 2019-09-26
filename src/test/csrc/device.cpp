@@ -65,7 +65,7 @@ extern "C" void device_helper(
       // write uartlite tx fifo
     case 0x40600004: if (req_wen) uart_putc((char)req_wdata); break;
       // read uartlite rx fifo
-    case 0x40600000: *resp_rdata = uart_getc(); break;
+    //case 0x40600000: *resp_rdata = uart_getc(); break;
       // read RTC
     case 0x40700000: *resp_rdata = uptime(); break;
       // read key

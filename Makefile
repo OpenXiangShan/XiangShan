@@ -44,6 +44,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
 	+define+RANDOMIZE_REG_INIT \
   --assert --output-split 20000 \
   --trace  \
+  -I$(abspath $(BUILD_DIR)) \
   --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
    -LDFLAGS "$(EMU_LDFLAGS)"
 
