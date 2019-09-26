@@ -11,8 +11,6 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
     val out = Vec(addressSpace.length, new SimpleBusUC)
   })
 
-  val debug = false
-
   require(m == 1, "now we only support 1 input channel")
   val inSel = io.in(0)
 
@@ -55,7 +53,7 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   outSel.resp.ready := inSel.resp.ready
   inSel.req.ready := outSel.req.ready
 
-  if (debug) {
+  Debug() {
     when (state === s_idle && inSel.req.valid) {
       printf(p"${GTimer()}: xbar: in.req: ${inSel.req.bits}\n")
     }
