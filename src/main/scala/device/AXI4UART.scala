@@ -40,12 +40,12 @@ class AXI4UART extends AXI4SlaveModule(new AXI4Lite) {
   val getcHelper = Module(new UARTGetc)
   getcHelper.io.clk := clock
   getcHelper.io.getc := (raddr(3,0) === 0.U && ren)
-  when (getcHelper.io.getc) { rxfifo := getcHelper.io.ch }
 
   def putc(c: UInt): UInt = { printf("%c", c(7,0)); c }
+  def getc = getcHelper.io.ch
 
   val mapping = Map(
-    RegMap(0x0, rxfifo),
+    RegMap(0x0, getc, RegMap.Unwritable),
     RegMap(0x4, txfifo, putc),
     RegMap(0x8, stat),
     RegMap(0xc, ctrl)
