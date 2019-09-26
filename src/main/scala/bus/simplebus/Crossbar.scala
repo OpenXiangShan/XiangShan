@@ -19,7 +19,7 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   // select the output channel according to the address
   val addr = inSel.req.bits.addr
   val outSelVec = VecInit(addressSpace.map(
-    range => (addr >= range._1.U && addr < range._2.U)))
+    range => (addr >= range._1.U && addr < (range._1 + range._2).U)))
   val outSelIdx = PriorityEncoder(outSelVec)
   val outSel = io.out(outSelIdx)
 
