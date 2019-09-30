@@ -52,7 +52,36 @@ class VGACtrl extends AXI4SlaveModule(new AXI4Lite, new VGACtrlBundle) with HasV
   io.extra.get.sync := sync
 }
 
-class AXI4VGA extends Module with HasVGAConst {
+class FBHelper extends BlackBox with HasBlackBoxInline {
+  val io = IO(new Bundle {
+    val clk = Input(Clock())
+    val valid = Input(Bool())
+    val pixel = Input(UInt(32.W))
+    val sync = Input(Bool())
+  })
+
+  setInline("FBHelper.v",
+    s"""
+      |import "DPI-C" function void put_pixel(input int pixel);
+      |import "DPI-C" function void vmem_sync();
+      |
+      |module FBHelper (
+      |  input clk,
+      |  input valid,
+      |  input [31:0] pixel,
+      |  input sync
+      |);
+      |
+      |  always@(posedge clk) begin
+      |    if (valid) put_pixel(pixel);
+      |    if (sync) vmem_sync();
+      |  end
+      |
+      |endmodule
+     """.stripMargin)
+}
+
+class AXI4VGA(sim: Boolean = false) extends Module with HasVGAConst {
   val AXIidBits = 2
   // need a 50MHz clock
   val io = IO(new Bundle {
@@ -108,4 +137,12 @@ class AXI4VGA extends Module with HasVGAConst {
   io.vga.r := Mux(videoValid, color(23, 20), 0.U)
   io.vga.g := Mux(videoValid, color(15, 12), 0.U)
   io.vga.b := Mux(videoValid, color(7, 4), 0.U)
+
+  if (sim) {
+    val fbHelper = Module(new FBHelper)
+    fbHelper.io.clk := clock
+    fbHelper.io.valid := videoValid
+    fbHelper.io.pixel := color
+    fbHelper.io.sync := ctrl.io.extra.get.sync
+  }
 }

@@ -36,7 +36,7 @@ class SimMMIO extends Module {
 
   val uart = Module(new AXI4UART)
   val timer = Module(new AXI4Timer)
-  val vga = Module(new AXI4VGA)
+  val vga = Module(new AXI4VGA(sim = true))
   uart.io.in <> xbar.io.out(0).toAXI4Lite()
   timer.io.in <> xbar.io.out(1).toAXI4Lite()
   vga.io.in.fb <> xbar.io.out(2).toAXI4Lite()
