@@ -33,12 +33,23 @@ class VGABundle extends Bundle {
   val vsync = Output(Bool())
 }
 
-class VGACtrl extends AXI4SlaveModule(new AXI4Lite) with HasVGAConst {
-  // actually this is a constant
+class VGACtrlBundle extends Bundle {
+  val sync = Output(Bool())
+}
+
+class VGACtrl extends AXI4SlaveModule(new AXI4Lite, new VGACtrlBundle) with HasVGAConst {
   val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
-  // we always return fbSizeReg to axi4lite
-  in.r.bits.data := fbSizeReg
   val sync = in.aw.fire()
+
+  val mapping = Map(
+    RegMap(0x0, fbSizeReg, RegMap.Unwritable),
+    RegMap(0x4, sync, RegMap.Unwritable)
+  )
+
+  RegMap.generate(mapping, raddr(3,0), in.r.bits.data,
+    waddr(3,0), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+
+  io.extra.get.sync := sync
 }
 
 class AXI4VGA extends Module with HasVGAConst {
