@@ -26,16 +26,15 @@ static int uart_dequeue(void) {
   return k;
 }
 
-int uart_getc(void) {
-  uint32_t uptime(void);
+uint32_t uptime(void);
+extern "C" void uart_getc(uint8_t *ch) {
   static uint32_t lasttime = 0;
   uint32_t now = uptime();
 
+  *ch = 0;
   if (now - lasttime > 30000) {
     lasttime = now;
-    return uart_dequeue();
-  } else {
-    return 0;
+    *ch = uart_dequeue();
   }
 }
 

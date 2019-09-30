@@ -50,42 +50,26 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
-  val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => (0xb00 + i, perfCnts(i)) }
-  val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => (0xb80 + i, perfCnts(i)(63, 32)) }
+  val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb00 + i, perfCnts(i)) }
+  val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb80 + i, perfCnts(i)(63, 32)) }
 
-  val scalaMapping = Map(
-    Mtvec   -> mtvec,
-    Mcause  -> mcause,
-    Mepc    -> mepc,
-    Mstatus -> mstatus
+  val mapping = Map(
+    RegMap(Mtvec   ,mtvec   ),
+    RegMap(Mcause  ,mcause  ),
+    RegMap(Mepc    ,mepc    ),
+    RegMap(Mstatus ,mstatus )
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
-  val chiselMapping = scalaMapping.map { case (x, y) => (x.U -> y) }
-
-  def readWithScala(addr: Int): UInt = scalaMapping(addr)
-
   val addr = src2(11, 0)
-  val rdata = LookupTree(addr, chiselMapping)
+  val rdata = Wire(UInt(XLEN.W))
   val wdata = LookupTree(func, List(
     CSROpType.wrt -> src1,
     CSROpType.set -> (rdata | src1),
     CSROpType.clr -> (rdata & ~src1)
   ))
 
-  when (valid && func =/= CSROpType.jmp) {
-    when (addr === Mtvec.U) { mtvec := wdata }
-    when (addr === Mstatus.U) { mstatus := wdata }
-    when (addr === Mepc.U) { mepc := wdata }
-    when (addr === Mcause.U) { mcause := wdata }
-  }
-
-  // when (valid && func =/= CSROpType.jmp){
-  //   when (addr === Mtvec.U) {printf("[CSR] %x pc: %x inst: %x\n", GTimer(), io.cfIn.pc, io.cfIn.instr)}
-  // }
-  // when (valid && func =/= CSROpType.jmp){
-  //   when (addr === Mcause.U) {printf("[CSR] %x pc: %x inst: %x mcause: r %x w %x\n", GTimer(), io.cfIn.pc, io.cfIn.instr, rdata, wdata)}
-  // }
-
+  val wen = (valid && func =/= CSROpType.jmp)
+  RegMap.generate(mapping, addr, rdata, wen, wdata, wmask = Fill(XLEN, true.B))
   io.out.bits := rdata
 
   val isMret = addr === privMret
@@ -160,6 +144,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val nooptrap = WireInit(false.B)
   BoringUtils.addSink(nooptrap, "nooptrap")
   if (!p.FPGAPlatform) {
+    def readWithScala(addr: Int): UInt = mapping(addr)._1
+
     // to monitor
     BoringUtils.addSource(readWithScala(perfCntList("Mcycle")._1), "simCycleCnt")
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")

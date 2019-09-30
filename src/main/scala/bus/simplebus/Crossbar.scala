@@ -11,15 +11,13 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
     val out = Vec(addressSpace.length, new SimpleBusUC)
   })
 
-  val debug = false
-
   require(m == 1, "now we only support 1 input channel")
   val inSel = io.in(0)
 
   // select the output channel according to the address
   val addr = inSel.req.bits.addr
   val outSelVec = VecInit(addressSpace.map(
-    range => (addr >= range._1.U && addr < range._2.U)))
+    range => (addr >= range._1.U && addr < (range._1 + range._2).U)))
   val outSelIdx = PriorityEncoder(outSelVec)
   val outSel = io.out(outSelIdx)
 
@@ -53,11 +51,9 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
   inSel.resp.valid := outSel.resp.fire()
   inSel.resp.bits <> outSel.resp.bits
   outSel.resp.ready := inSel.resp.ready
+  inSel.req.ready := outSel.req.ready
 
-  // ack in.req when the response is received
-  inSel.req.ready := outSel.resp.fire()
-
-  if (debug) {
+  Debug() {
     when (state === s_idle && inSel.req.valid) {
       printf(p"${GTimer()}: xbar: in.req: ${inSel.req.bits}\n")
     }

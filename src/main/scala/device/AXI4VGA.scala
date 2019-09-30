@@ -33,20 +33,60 @@ class VGABundle extends Bundle {
   val vsync = Output(Bool())
 }
 
-class VGACtrl extends AXI4SlaveModule(new AXI4Lite) with HasVGAConst {
-  // actually this is a constant
-  val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
-  // we always return fbSizeReg to axi4lite
-  in.r.bits.data := fbSizeReg
-  val sync = in.aw.fire()
+class VGACtrlBundle extends Bundle {
+  val sync = Output(Bool())
 }
 
-class AXI4VGA extends Module with HasVGAConst {
+class VGACtrl extends AXI4SlaveModule(new AXI4Lite, new VGACtrlBundle) with HasVGAConst {
+  val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
+  val sync = in.aw.fire()
+
+  val mapping = Map(
+    RegMap(0x0, fbSizeReg, RegMap.Unwritable),
+    RegMap(0x4, sync, RegMap.Unwritable)
+  )
+
+  RegMap.generate(mapping, raddr(3,0), in.r.bits.data,
+    waddr(3,0), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+
+  io.extra.get.sync := sync
+}
+
+class FBHelper extends BlackBox with HasBlackBoxInline {
+  val io = IO(new Bundle {
+    val clk = Input(Clock())
+    val valid = Input(Bool())
+    val pixel = Input(UInt(32.W))
+    val sync = Input(Bool())
+  })
+
+  setInline("FBHelper.v",
+    s"""
+      |import "DPI-C" function void put_pixel(input int pixel);
+      |import "DPI-C" function void vmem_sync();
+      |
+      |module FBHelper (
+      |  input clk,
+      |  input valid,
+      |  input [31:0] pixel,
+      |  input sync
+      |);
+      |
+      |  always@(posedge clk) begin
+      |    if (valid) put_pixel(pixel);
+      |    if (sync) vmem_sync();
+      |  end
+      |
+      |endmodule
+     """.stripMargin)
+}
+
+class AXI4VGA(sim: Boolean = false) extends Module with HasVGAConst {
   val AXIidBits = 2
   // need a 50MHz clock
   val io = IO(new Bundle {
     val in = new Bundle {
-      val fb = Flipped(new AXI4(idBits = AXIidBits))
+      val fb = Flipped(new AXI4Lite)
       val ctrl = Flipped(new AXI4Lite)
     }
     val vga = new VGABundle
@@ -54,7 +94,7 @@ class AXI4VGA extends Module with HasVGAConst {
 
   val ctrl = Module(new VGACtrl)
   io.in.ctrl <> ctrl.io.in
-  val fb = Module(new AXI4RAM(new AXI4(idBits = AXIidBits), memByte = FBPixels * 4))
+  val fb = Module(new AXI4RAM(new AXI4Lite, memByte = FBPixels * 4))
   // writable by axi4lite
   // but it only readable by the internel controller
   fb.io.in.aw <> io.in.fb.aw
@@ -64,9 +104,6 @@ class AXI4VGA extends Module with HasVGAConst {
   io.in.fb.r.bits.data := 0.U
   io.in.fb.r.bits.resp := AXI4Parameters.RESP_OKAY
   io.in.fb.r.valid := BoolStopWatch(io.in.fb.ar.fire(), io.in.fb.r.fire(), startHighPriority = true)
-  io.in.fb.r.bits.id := io.in.fb.ar.bits.id
-  io.in.fb.r.bits.user := io.in.fb.ar.bits.user
-  io.in.fb.r.bits.last := true.B
 
   def inRange(x: UInt, start: Int, end: Int) = (x >= start.U) && (x < end.U)
 
@@ -90,10 +127,7 @@ class AXI4VGA extends Module with HasVGAConst {
   val fbPixelAddrV1 = Counter(nextPixel &&  vCounterIsOdd, FBPixels)._1
 
   // each pixel is 4 bytes
-  fb.io.in.ar.bits := DontCare
-  fb.io.in.ar.bits.len   := 0.U
-  fb.io.in.ar.bits.size  := "b11".U
-  fb.io.in.ar.bits.burst := AXI4Parameters.BURST_INCR
+  fb.io.in.ar.bits.prot := 0.U
   fb.io.in.ar.bits.addr := Cat(Mux(vCounterIsOdd, fbPixelAddrV1, fbPixelAddrV0), 0.U(2.W))
   fb.io.in.ar.valid := RegNext(nextPixel) && hCounterIs2
 
@@ -103,4 +137,12 @@ class AXI4VGA extends Module with HasVGAConst {
   io.vga.r := Mux(videoValid, color(23, 20), 0.U)
   io.vga.g := Mux(videoValid, color(15, 12), 0.U)
   io.vga.b := Mux(videoValid, color(7, 4), 0.U)
+
+  if (sim) {
+    val fbHelper = Module(new FBHelper)
+    fbHelper.io.clk := clock
+    fbHelper.io.valid := videoValid
+    fbHelper.io.pixel := color
+    fbHelper.io.sync := ctrl.io.extra.get.sync
+  }
 }
