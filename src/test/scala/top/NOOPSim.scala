@@ -28,6 +28,7 @@ class NOOPSimTop extends Module {
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio
+  soc.io.mtip := mmio.io.mtip
 
   val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
   BoringUtils.addSink(difftest.commit, "difftestCommit")

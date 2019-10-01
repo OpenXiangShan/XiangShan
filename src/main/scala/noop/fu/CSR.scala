@@ -18,6 +18,8 @@ trait HasCSRConst {
   val Mtvec         = 0x305
   val Mepc          = 0x341
   val Mcause        = 0x342
+  val Mie           = 0x304
+  val Mip           = 0x344
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
@@ -41,12 +43,59 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     this.func := func
     io.out.bits
   }
+
+  class Priv extends Bundle {
+    val m = Output(Bool())
+    val h = Output(Bool())
+    val s = Output(Bool())
+    val u = Output(Bool())
+  }
    
+  // exceptions
+  class MstatusStruct extends Bundle {
+    val sd = Output(UInt(1.W))
+    val pad1 = Output(UInt(37.W))
+    val sxl = Output(UInt(2.W))
+    val uxl = Output(UInt(2.W))
+    val pad0 = Output(UInt(9.W))
+    val tsr = Output(UInt(1.W))
+    val tw = Output(UInt(1.W))
+    val tvm = Output(UInt(1.W))
+    val mxr = Output(UInt(1.W))
+    val sum = Output(UInt(1.W))
+    val mprv = Output(UInt(1.W))
+    val xs = Output(UInt(2.W))
+    val fs = Output(UInt(2.W))
+    val mpp = Output(UInt(2.W))
+    val hpp = Output(UInt(2.W))
+    val spp = Output(UInt(1.W))
+    val pie = new Priv
+    val ie = new Priv
+  }
   val mtvec = Reg(UInt(XLEN.W))
   val mcause = Reg(UInt(XLEN.W))
   val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
   val mepc = Reg(UInt(XLEN.W))
 
+  val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
+
+  // interrupts
+  class Interrupt extends Bundle {
+    val e = new Priv
+    val t = new Priv
+    val s = new Priv
+  }
+  val mie = RegInit(0.U(XLEN.W))
+  val mip = WireInit(0.U.asTypeOf(new Interrupt))
+
+  val mtip = WireInit(false.B)
+  BoringUtils.addSink(mtip, "mtip")
+  mip.t.m := mtip
+
+  val intrVec = mie & mip.asUInt
+  val raiseIntr = intrVec.orR && mstatusStruct.ie.m
+
+  // perfcnt
   val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
@@ -57,7 +106,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     RegMap(Mtvec   ,mtvec   ),
     RegMap(Mcause  ,mcause  ),
     RegMap(Mepc    ,mepc    ),
-    RegMap(Mstatus ,mstatus )
+    RegMap(Mstatus ,mstatus ),
+    RegMap(Mie     ,mie     ),
+    RegMap(Mip     ,mip.asUInt, RegMap.Unwritable)
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
   val addr = src2(11, 0)
@@ -73,25 +124,21 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   io.out.bits := rdata
 
   val isMret = addr === privMret
-  val isException = io.isInvOpcode && valid
-  val isEcall = (addr === privEcall) && !isException
+  val raiseException = (io.isInvOpcode && valid) || raiseIntr
+  val isEcall = (addr === privEcall) && !raiseException
   val exceptionNO = Mux1H(List(
     io.isInvOpcode -> 2.U,
     isEcall -> 11.U
   ))
+  val intrNO = PriorityEncoder(intrVec) // FIXME: check this
+  val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
 
-  Debug(){
-    when(io.isInvOpcode && valid){
-      printf("[CSR] Invalid Op at %x\n", io.cfIn.pc)
-    }
-  }
-
-  io.redirect.valid := (valid && func === CSROpType.jmp) || isException
+  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseException
   io.redirect.target := Mux(isMret, mepc, mtvec)
 
   when (io.redirect.valid && !isMret) {
-    mepc := io.cfIn.pc
-    mcause := exceptionNO
+    mepc := io.cfIn.pc  // FIXME: what if interrupt comes when io.cfIn.pc is not valid?
+    mcause := causeNO
   }
 
   io.in.ready := true.B
