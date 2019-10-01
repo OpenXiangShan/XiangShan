@@ -7,7 +7,6 @@ import bus.axi4._
 import utils._
 
 trait HasVGAConst {
-  // these are only fit for 800x600
   val ScreenW = 800
   val ScreenH = 600
 
@@ -19,25 +18,40 @@ trait HasVGAConst {
   val VActive = VFrontPorch + 6
   val VBackPorch = VActive + ScreenH
   val VTotal = VBackPorch + 23
+}
 
+trait HasHDMIConst {
+  val ScreenW = 800
+  val ScreenH = 600
+
+  val HFrontPorch = 40
+  val HActive = HFrontPorch + 128
+  val HBackPorch = HActive + ScreenW
+  val HTotal = HBackPorch + 88
+  val VFrontPorch = 1
+  val VActive = VFrontPorch + 4
+  val VBackPorch = VActive + ScreenH
+  val VTotal = VBackPorch + 23
+}
+
+trait HasVGAParameter extends HasHDMIConst {
   val FBWidth = ScreenW / 2
   val FBHeight = ScreenH / 2
   val FBPixels = FBWidth * FBHeight
 }
 
 class VGABundle extends Bundle {
-  val r = Output(UInt(4.W))
-  val g = Output(UInt(4.W))
-  val b = Output(UInt(4.W))
+  val rgb = Output(UInt(24.W))
   val hsync = Output(Bool())
   val vsync = Output(Bool())
+  val valid = Output(Bool())
 }
 
 class VGACtrlBundle extends Bundle {
   val sync = Output(Bool())
 }
 
-class VGACtrl extends AXI4SlaveModule(new AXI4Lite, new VGACtrlBundle) with HasVGAConst {
+class VGACtrl extends AXI4SlaveModule(new AXI4Lite, new VGACtrlBundle) with HasVGAParameter {
   val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
   val sync = in.aw.fire()
 
@@ -81,9 +95,8 @@ class FBHelper extends BlackBox with HasBlackBoxInline {
      """.stripMargin)
 }
 
-class AXI4VGA(sim: Boolean = false) extends Module with HasVGAConst {
+class AXI4VGA(sim: Boolean = false) extends Module with HasVGAParameter {
   val AXIidBits = 2
-  // need a 50MHz clock
   val io = IO(new Bundle {
     val in = new Bundle {
       val fb = Flipped(new AXI4Lite)
@@ -115,7 +128,7 @@ class AXI4VGA(sim: Boolean = false) extends Module with HasVGAConst {
 
   val hInRange = inRange(hCounter, HActive, HBackPorch)
   val vInRange = inRange(vCounter, VActive, VBackPorch)
-  val videoValid = hInRange && vInRange
+  io.vga.valid := hInRange && vInRange
 
   val hCounterIsOdd = hCounter(0)
   val hCounterIs2 = hCounter(1,0) === 2.U
@@ -134,14 +147,12 @@ class AXI4VGA(sim: Boolean = false) extends Module with HasVGAConst {
   fb.io.in.r.ready := true.B
   val data = HoldUnless(fb.io.in.r.bits.data, fb.io.in.r.fire())
   val color = Mux(hCounter(1), data(63, 32), data(31, 0))
-  io.vga.r := Mux(videoValid, color(23, 20), 0.U)
-  io.vga.g := Mux(videoValid, color(15, 12), 0.U)
-  io.vga.b := Mux(videoValid, color(7, 4), 0.U)
+  io.vga.rgb := Mux(io.vga.valid, color(23, 0), 0.U)
 
   if (sim) {
     val fbHelper = Module(new FBHelper)
     fbHelper.io.clk := clock
-    fbHelper.io.valid := videoValid
+    fbHelper.io.valid := io.vga.valid
     fbHelper.io.pixel := color
     fbHelper.io.sync := ctrl.io.extra.get.sync
   }
