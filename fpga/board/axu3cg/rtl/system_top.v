@@ -1,6 +1,14 @@
 `include "axi.vh"
 
 module system_top (
+  inout  hdmi_scl,
+  inout  hdmi_sda,
+  output hdmi_nreset,
+  output hdmi_clk,
+  output hdmi_hsync,
+  output hdmi_vsync,
+  output hdmi_videovalid,
+  output [23:0] hdmi_rgb
   //output [7:0] led
 );
 
@@ -10,6 +18,7 @@ module system_top (
   wire coreclk;
   wire corerstn;
   wire clk50;
+  wire clk27;
   wire rstn50;
   wire uncoreclk;
   wire uncorerstn;
@@ -27,6 +36,7 @@ module system_top (
     .coreclk(coreclk),
     .corerstn(corerstn),
     .clk50(clk50),
+    .clk27(clk27),
     .rstn50(rstn50),
     .uncoreclk(uncoreclk),
     .uncorerstn(uncorerstn)
@@ -54,11 +64,10 @@ module system_top (
     .uart_txd(noop_uart_tx),
     .uart_rxd(noop_uart_rx),
 
-    //.VGA_b(VGA_b),
-    //.VGA_r(VGA_r),
-    //.VGA_g(VGA_g),
-    //.VGA_hsync(VGA_hsync),
-    //.VGA_vsync(VGA_vsync),
+    .VGA_rgb(hdmi_rgb),
+    .VGA_hsync(hdmi_hsync),
+    .VGA_vsync(hdmi_vsync),
+    .VGA_videovalid(hdmi_videovalid),
 
     .coreclk(coreclk),
     .corerstn(corerstn_sync[1]),
@@ -68,5 +77,14 @@ module system_top (
     .uncorerstn(uncorerstn)
   );
 
+  i2c_config hdmi_i2c_config(
+    .rst(!uncorerstn),
+    .clk(clk27),
+    .i2c_scl(hdmi_scl),
+    .i2c_sda(hdmi_sda)
+  );
+
+  assign hdmi_nreset = uncorerstn;
+  assign hdmi_clk = clk50;
 
 endmodule
