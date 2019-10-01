@@ -199,6 +199,7 @@ proc create_hier_cell_hier_clkrst { parentCell nameHier } {
 
 
   # Create pins
+  create_bd_pin -dir O -type clk clk27
   create_bd_pin -dir O -type clk clk50
   create_bd_pin -dir I -type clk clk_in1
   create_bd_pin -dir O -type clk coreclk
@@ -230,29 +231,32 @@ proc create_hier_cell_hier_clkrst { parentCell nameHier } {
    CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {100.000} \
    CONFIG.CLKOUT2_USED {true} \
    CONFIG.CLKOUT3_DRIVES {BUFG} \
-   CONFIG.CLKOUT3_JITTER {132.685} \
+   CONFIG.CLKOUT3_JITTER {139.035} \
    CONFIG.CLKOUT3_PHASE_ERROR {87.181} \
-   CONFIG.CLKOUT3_REQUESTED_OUT_FREQ {50} \
+   CONFIG.CLKOUT3_REQUESTED_OUT_FREQ {40} \
    CONFIG.CLKOUT3_USED {true} \
    CONFIG.CLKOUT4_DRIVES {Buffer} \
-   CONFIG.CLKOUT4_REQUESTED_OUT_FREQ {100.000} \
-   CONFIG.CLKOUT4_USED {false} \
+   CONFIG.CLKOUT4_JITTER {151.083} \
+   CONFIG.CLKOUT4_PHASE_ERROR {87.181} \
+   CONFIG.CLKOUT4_REQUESTED_OUT_FREQ {27} \
+   CONFIG.CLKOUT4_USED {true} \
    CONFIG.CLKOUT5_DRIVES {Buffer} \
    CONFIG.CLKOUT6_DRIVES {Buffer} \
    CONFIG.CLKOUT7_DRIVES {Buffer} \
    CONFIG.CLK_OUT1_PORT {coreclk} \
    CONFIG.CLK_OUT2_PORT {uncoreclk} \
    CONFIG.CLK_OUT3_PORT {clk50} \
+   CONFIG.CLK_OUT4_PORT {clk27} \
    CONFIG.MMCM_CLKFBOUT_MULT_F {12.000} \
    CONFIG.MMCM_CLKIN1_PERIOD {10.000} \
    CONFIG.MMCM_CLKIN2_PERIOD {10.000} \
    CONFIG.MMCM_CLKOUT0_DIVIDE_F {4.000} \
    CONFIG.MMCM_CLKOUT1_DIVIDE {12} \
-   CONFIG.MMCM_CLKOUT2_DIVIDE {24} \
-   CONFIG.MMCM_CLKOUT3_DIVIDE {1} \
+   CONFIG.MMCM_CLKOUT2_DIVIDE {30} \
+   CONFIG.MMCM_CLKOUT3_DIVIDE {44} \
    CONFIG.MMCM_COMPENSATION {AUTO} \
    CONFIG.MMCM_DIVCLK_DIVIDE {1} \
-   CONFIG.NUM_OUT_CLKS {3} \
+   CONFIG.NUM_OUT_CLKS {4} \
    CONFIG.PHASESHIFT_MODE {WAVEFORM} \
    CONFIG.RESET_PORT {resetn} \
    CONFIG.RESET_TYPE {ACTIVE_LOW} \
@@ -271,6 +275,7 @@ proc create_hier_cell_hier_clkrst { parentCell nameHier } {
   # Create port connections
   connect_bd_net -net armv7_processing_system_FCLK_RESET0_N [get_bd_pins resetn] [get_bd_pins clk_wiz_0/resetn] [get_bd_pins proc_sys_reset_0/ext_reset_in] [get_bd_pins uncorerst/ext_reset_in]
   connect_bd_net -net axi_gpio_0_gpio_io_o [get_bd_pins corerstn] [get_bd_pins axi_gpio_0/gpio_io_o]
+  connect_bd_net -net clk_wiz_0_clk27 [get_bd_pins clk27] [get_bd_pins clk_wiz_0/clk27]
   connect_bd_net -net clk_wiz_0_clk50 [get_bd_pins clk50] [get_bd_pins clk_wiz_0/clk50] [get_bd_pins proc_sys_reset_0/slowest_sync_clk]
   connect_bd_net -net clk_wiz_0_coreclk [get_bd_pins coreclk] [get_bd_pins clk_wiz_0/coreclk]
   connect_bd_net -net clk_wiz_0_locked [get_bd_pins clk_wiz_0/locked] [get_bd_pins proc_sys_reset_0/dcm_locked] [get_bd_pins uncorerst/dcm_locked]
@@ -353,6 +358,7 @@ proc create_root_design { parentCell } {
 
 
   # Create ports
+  set clk27 [ create_bd_port -dir O -type clk clk27 ]
   set clk50 [ create_bd_port -dir O -type clk clk50 ]
   set coreclk [ create_bd_port -dir O -type clk coreclk ]
   set_property -dict [ list \
@@ -984,7 +990,7 @@ proc create_root_design { parentCell } {
    CONFIG.PSU_MIO_43_POLARITY {Default} \
    CONFIG.PSU_MIO_43_PULLUPDOWN {pullup} \
    CONFIG.PSU_MIO_43_SLEW {fast} \
-   CONFIG.PSU_MIO_44_DIRECTION {in} \
+   CONFIG.PSU_MIO_44_DIRECTION {inout} \
    CONFIG.PSU_MIO_44_DRIVE_STRENGTH {12} \
    CONFIG.PSU_MIO_44_INPUT_TYPE {cmos} \
    CONFIG.PSU_MIO_44_POLARITY {Default} \
@@ -2269,6 +2275,7 @@ proc create_root_design { parentCell } {
   connect_bd_net -net clk_wiz_0_clk50 [get_bd_ports clk50] [get_bd_pins hier_clkrst/clk50]
   connect_bd_net -net clk_wiz_0_coreclk [get_bd_ports coreclk] [get_bd_pins hier_clkrst/coreclk]
   connect_bd_net -net clk_wiz_0_uncoreclk [get_bd_ports uncoreclk] [get_bd_pins axi3_to_lite_pc/aclk] [get_bd_pins axi_crossbar_0/aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk] [get_bd_pins hier_clkrst/uncoreclk] [get_bd_pins zynq_ultra_ps_e_0/maxihpm0_lpd_aclk] [get_bd_pins zynq_ultra_ps_e_0/saxihp0_fpd_aclk]
+  connect_bd_net -net hier_clkrst_clk27 [get_bd_ports clk27] [get_bd_pins hier_clkrst/clk27]
   connect_bd_net -net proc_sys_reset_0_peripheral_aresetn [get_bd_ports rstn50] [get_bd_pins hier_clkrst/rstn50]
   connect_bd_net -net proc_sys_reset_1_interconnect_aresetn [get_bd_pins axi3_to_lite_pc/aresetn] [get_bd_pins axi_crossbar_0/aresetn] [get_bd_pins hier_clkrst/interconnect_aresetn]
   connect_bd_net -net proc_sys_reset_1_peripheral_aresetn [get_bd_ports uncorerstn] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins hier_clkrst/uncorerstn]
