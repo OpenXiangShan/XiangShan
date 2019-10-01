@@ -25,11 +25,28 @@ trait HasCSRConst {
   def privMret  = 0x302.U
 }
 
+trait HasExceptionNO {
+  def instrAddrMisaligned = 0
+  def instrAccessFault    = 1
+  def illegalInstr        = 2
+  def breakPoint          = 3
+  def loadAddrMisaligned  = 4
+  def loadAccessFault     = 5
+  def storeAddrMisaligned = 6
+  def storeAccessFault    = 7
+  def ecallU              = 8
+  def ecallS              = 9
+  def ecallM              = 11
+  def instrPageFault      = 12
+  def loadPageFault       = 13
+  def storePageFault      = 15
+}
+
 class CSRIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
   val redirect = new RedirectIO
-  // exception
-  val isInvOpcode = Input(Bool())
+  // for exception check
+  val instrValid = Input(Bool())
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
@@ -124,16 +141,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   io.out.bits := rdata
 
   val isMret = addr === privMret
-  val raiseException = (io.isInvOpcode && valid) || raiseIntr
-  val isEcall = (addr === privEcall) && !raiseException
-  val exceptionNO = Mux1H(List(
-    io.isInvOpcode -> 2.U,
-    isEcall -> 11.U
-  ))
+  val raiseException = io.cfIn.exceptionVec.asUInt.orR && io.instrValid
+  val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
   val intrNO = PriorityEncoder(intrVec) // FIXME: check this
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
 
-  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseException
+  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseException || raiseIntr
   io.redirect.target := Mux(isMret, mepc, mtvec)
 
   when (io.redirect.valid && !isMret) {

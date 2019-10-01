@@ -12,7 +12,6 @@ class CtrlSignalIO extends NOOPBundle {
   val rfSrc2 = Output(UInt(5.W))
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
-  val isInvOpcode = Output(Bool())
   val isNoopTrap = Output(Bool())
   val isSrc1Forward = Output(Bool())
   val isSrc2Forward = Output(Bool())
@@ -34,6 +33,7 @@ class CtrlFlowIO extends NOOPBundle {
   val pc = Output(UInt(AddrBits.W))
   val pnpc = Output(UInt(AddrBits.W))
   val redirect = new RedirectIO
+  val exceptionVec = Output(Vec(16, Bool()))
 }
 
 class DecodeIO extends NOOPBundle {
