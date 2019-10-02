@@ -141,18 +141,32 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   RegMap.generate(mapping, addr, rdata, wen, wdata, wmask = Fill(XLEN, true.B))
   io.out.bits := rdata
 
-  val isMret = addr === privMret
-  val raiseException = io.cfIn.exceptionVec.asUInt.orR && io.instrValid
+  val raiseException = io.cfIn.exceptionVec.asUInt.orR
   val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
-  val intrNO = PriorityEncoder(intrVec) // FIXME: check this
+  val intrNO = PriorityEncoder(intrVec)
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
 
-  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseException || raiseIntr
-  io.redirect.target := Mux(isMret, mepc, mtvec)
+  val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
+  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
+  io.redirect.target := Mux(raiseExceptionIntr, mtvec, mepc)
 
-  when (io.redirect.valid && !isMret) {
-    mepc := io.cfIn.pc  // FIXME: what if interrupt comes when io.cfIn.pc is not valid?
+  val isMret = addr === privMret
+  when (valid && isMret) {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    mstatusNew.pie.m := true.B
+    mstatusNew.ie.m := mstatusOld.pie.m
+    mstatus := mstatusNew.asUInt
+  }
+
+  when (raiseExceptionIntr) {
+    mepc := io.cfIn.pc
     mcause := causeNO
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    mstatusNew.pie.m := mstatusOld.ie.m
+    mstatusNew.ie.m := false.B
+    mstatus := mstatusNew.asUInt
   }
 
   io.in.ready := true.B
@@ -212,7 +226,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")
 
     // display all perfcnt when nooptrap is executed
-    when (nooptrap) {
+    when (nooptrap && false.B) {
       printf("======== PerfCnt =========\n")
       perfCntList.toSeq.sortBy(_._2._1).map { case (name, (addr, boringId)) =>
         printf("%d <- " + name + "\n", readWithScala(addr)) }
