@@ -38,7 +38,7 @@ object FuOpType {
 
 object Instructions extends HasInstrType with HasNOOPParameter {
   def NOP = 0x00000013.U
-  val DecodeDefault = List(InstrN, FuType.alu, ALUOpType.add)
+  val DecodeDefault = List(InstrN, FuType.csr, CSROpType.jmp)
   def DecodeTable = RVIInstr.table ++ NOOPTrap.table ++
     (if (HasMExtension) RVMInstr.table else Nil) ++
     RVZicsrInstr.table ++ RVZifenceiInstr.table

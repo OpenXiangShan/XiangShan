@@ -2,6 +2,7 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
@@ -11,9 +12,11 @@ class IDU extends NOOPModule with HasInstrType {
     val out = Decoupled(new DecodeIO)
   })
 
+  val hasIntr = Wire(Bool())
   val instr = io.in.bits.instr
-  val instrType :: fuType :: fuOpType :: Nil =
-    ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
+    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr, intr, dec)}
 
   Debug(){
     when(io.out.valid){
@@ -64,11 +67,17 @@ class IDU extends NOOPModule with HasInstrType {
 
   io.out.bits.cf <> io.in.bits
 
+  val intrVec = WireInit(0.U(12.W))
+  BoringUtils.addSink(intrVec, "intrVecIDU")
+  io.out.bits.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
+  hasIntr := intrVec.orR
+
   io.out.bits.cf.exceptionVec.map(_ := false.B)
-  io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN) && io.in.valid
+  io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
   io.out.bits.cf.exceptionVec(ecallM) := (instr === RVZicsrInstr.ECALL) && io.in.valid
+
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
   io.out.valid := io.in.valid
 
-  io.in.ready := !io.in.valid || io.out.fire()
+  io.in.ready := (!io.in.valid || io.out.fire()) && !hasIntr
 }

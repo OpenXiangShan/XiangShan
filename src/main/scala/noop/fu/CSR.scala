@@ -109,8 +109,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   BoringUtils.addSink(mtip, "mtip")
   mip.t.m := mtip
 
-  val intrVec = mie & mip.asUInt
-  val raiseIntr = intrVec.orR && mstatusStruct.ie.m
+  val intrVec = mie(11,0) & mip.asUInt & Fill(12, mstatusStruct.ie.m)
+  BoringUtils.addSource(intrVec, "intrVecIDU")
+  val raiseIntr = io.cfIn.intrVec.asUInt.orR
 
   // perfcnt
   val hasPerfCnt = !p.FPGAPlatform

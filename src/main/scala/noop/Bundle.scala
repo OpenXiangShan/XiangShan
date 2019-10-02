@@ -34,6 +34,7 @@ class CtrlFlowIO extends NOOPBundle {
   val pnpc = Output(UInt(AddrBits.W))
   val redirect = new RedirectIO
   val exceptionVec = Output(Vec(16, Bool()))
+  val intrVec = Output(Vec(12, Bool()))
 }
 
 class DecodeIO extends NOOPBundle {
