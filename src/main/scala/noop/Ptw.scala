@@ -49,7 +49,29 @@ trait pteSv32Const {
   }
 }
 
-class PtwSv32(name : String = "default") extends Module with pteSv32Const{
+trait tlbSv32Const {
+  val VPNLen = 20
+  val PPNLen = 22
+  val PPNNum = 1 //1
+  val tlbEntryNum = 1 //tmp
+  val tlbEntryLen = 59 //
+  
+  def tlbBundle = new Bundle {
+    val VPN = UInt(20.W)
+    val ASID = UInt(9.W)
+    val PPN = UInt(22.W)
+    val D   = UInt(1.W)
+    val A   = UInt(1.W)
+    val G   = UInt(1.W)
+    val U   = UInt(1.W)
+    val X   = UInt(1.W)
+    val W   = UInt(1.W)
+    val R   = UInt(1.W)
+    val V   = UInt(1.W)
+  }
+}
+
+class PtwSv32(name : String = "default") extends Module with pteSv32Const with tlbSv32Const {
   val io = IO(new Bundle {
     val satp = Input(UInt(32.W))
     val flush = Input(Bool())
@@ -57,15 +79,14 @@ class PtwSv32(name : String = "default") extends Module with pteSv32Const{
     val out  = new SimpleBusUC(dataBits=32, userBits=32)
   })
 
-  val s_ready :: s_walk :: s_mem :: s_error :: Nil = Enum(4)
+  val s_ready :: s_walk :: s_mem :: s_error :: s_tran :: Nil = Enum(5)
   val state = RegInit(s_ready)
   val phyNum = Reg(UInt(32.W))
   val alreadyOutFire = RegEnable(true.B, io.out.req.fire())
   val _isWork = RegEnable(io.satp(31).asBool, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
   val isWork = Mux(state===s_ready, io.satp(31).asBool, _isWork) //isWork control the 
   val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
-  //when (io.flush && (state =/= s_ready)) { needFlush := true.B }
-
+  
   val updateStore = state===s_ready && io.in.req.fire() && io.satp(31).asBool
   val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
   val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
@@ -74,6 +95,9 @@ class PtwSv32(name : String = "default") extends Module with pteSv32Const{
   val inReqBitsUser = RegEnable(io.in.req.bits.user, updateStore)
   val inReqBitsSize = RegEnable(io.in.req.bits.size, updateStore)
   //store end
+
+  val tlbEntry = RegInit(0.U(59.W))
+  val tlbHit = (state===s_ready && io.in.req.fire()) && (vaddr(31,12)===tlbEntry.asTypeOf(tlbBundle).VPN && tlbEntry.asTypeOf(tlbBundle).V.asBool)
 
   //connect begin
   //out      <<     ptw     >>     in
@@ -111,10 +135,16 @@ class PtwSv32(name : String = "default") extends Module with pteSv32Const{
   
   switch (state) {
     is (s_ready) {
-      when(io.in.req.fire() && io.satp(31).asBool && !io.flush) {
-        state := s_walk
-        phyNum := Cat(io.satp(19,0), Cat(io.in.req.bits.addr(31,22), 0.U(2.W)))
-        alreadyOutFire := false.B
+      when(io.in.req.fire() && io.satp(31).asBool && !io.flush ) {
+        when(tlbHit) {
+          state := s_mem
+          phyNum := Cat(tlbEntry.asTypeOf(tlbBundle).PPN(19,0), io.in.req.bits.addr(11,0))
+          alreadyOutFire := false.B
+        }.otherwise {
+          state := s_walk
+          phyNum := Cat(io.satp(19,0), Cat(io.in.req.bits.addr(31,22), 0.U(2.W)))
+          alreadyOutFire := false.B
+        }
       }
     }
     is (s_walk) {
@@ -131,7 +161,12 @@ class PtwSv32(name : String = "default") extends Module with pteSv32Const{
           //Sv32 page table entry: 0:V 1:R 2:W 3:X 4:U 5:G 6:A 7:D
           state := Mux(level===1.U, s_mem, s_walk)
           phyNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), vaddr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(vaddr(21,12), 0.U(2.W)))) 
-          last_rdata := io.out.resp.bits.rdata //debug
+          when(level===1.U) {
+            tlbEntry := Cat( Cat(vaddr(31,12), 0.U(9.W)), Cat(io.out.resp.bits.rdata(31,10), io.out.resp.bits.rdata(7,0)))
+            //tlbEntry(58,39) := vaddr(31,12)
+            //tlbEntry(29,8) := io.out.resp.bits.rdata(31,10)
+            //tlbEntry(7,0) := io.out.resp.bits.rdata(7,0)
+          }
         }
         //state := s_mem
       }.elsewhen(io.flush) {
