@@ -278,13 +278,11 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends M
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-  Debug(debug) {
-    when(GTimer()<=1100.U) {
-      if(name=="icache") {
+  Debug(debug && name == "icache") {
+    when(true.B) {
         printf("%d: [" + name + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x out.fire= %d alreadyOutFire=%d needFlush=%d in.valid:%d hit:%d req.isWrite():%d afterFirstRead:%d",
       GTimer(), io.in.ready, io.in.valid, state, req.addr, io.out.fire(), alreadyOutFire,needFlush, io.in.valid, hit, req.isWrite(), afterFirstRead)
         printf(" io.flush:%d io.mem.resp.fire:%d io.mem.resp.bits.rdata:%x\n", io.flush, io.mem.resp.fire, io.mem.resp.bits.rdata)
-      }
     }
   }
 }
@@ -417,17 +415,15 @@ class Cache(ro: Boolean, name: String, dataBits: Int = 32, userBits: Int = 0) ex
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 
-  Debug(debug) {
+  Debug(debug && name == "icache") {
     when(true.B) {
       io.in.dump(name + ".in")
-    if(name=="icache") {
-      printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
-      GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
-    }
-    when (s1.io.in.valid) { printf(p"[${name}.S1]: ${s1.io.in.bits}\n") }
-    when (s2.io.in.valid) { printf(p"[${name}.S2]: ${s2.io.in.bits.req}\n") }
-    when (s3.io.in.valid) { printf(p"[${name}.S3]: ${s3.io.in.bits.req}\n") }
-    s3.io.mem.dump(name + ".mem")
+        printf(name + "%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
+        GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
+        when (s1.io.in.valid) { printf(p"[${name}.S1]: ${s1.io.in.bits}\n") }
+        when (s2.io.in.valid) { printf(p"[${name}.S2]: ${s2.io.in.bits.req}\n") }
+        when (s3.io.in.valid) { printf(p"[${name}.S3]: ${s3.io.in.bits.req}\n") }
+        s3.io.mem.dump(name + ".mem")
     }
   }
 }

@@ -71,8 +71,8 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   io.imem <> (if (p.HasIcache) {
     val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
     
-    val iptw   = Module(new PtwSv32())
-    iptw.io.satp := "h80080103".U
+    val iptw   = Module(new PtwSv32(name = "iptw"))
+    iptw.io.satp := "h80087fdf".U
     iptw.io.flush := ifu.io.flushVec(0).asBool | ifu.io.bpFlush
     icache.io.in <> iptw.io.out
     iptw.io.in <> ifu.io.imem
@@ -88,7 +88,14 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
 
   io.dmem <> (if (p.HasDcache) {
     val dcache = Module(new Cache(ro = false, name = "dcache"))
-    dcache.io.in <> exu.io.dmem
+    
+    val dptw = Module(new PtwSv32(name = "dptw"))
+    dptw.io.satp := "h80087fdf".U
+    dptw.io.flush := false.B
+    dcache.io.in <> dptw.io.out
+    dptw.io.in <> exu.io.dmem
+    
+    //dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
     dcache.io.out
   } else { exu.io.dmem })

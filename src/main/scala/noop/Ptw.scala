@@ -8,16 +8,6 @@ import bus.simplebus._
 import bus.axi4._
 import utils._
 
-class PTWIn extends Bundle {
-  val va        = UInt(32.W)
-  val op        = UInt(32.W)
-  val satp      = UInt(32.W)
-}
-
-class PTWOut extends Bundle {
-  val pa        = UInt(32.W)
-}
-
 trait pteSv32Const {
   val Level = 2 //Sv32 two layer page tree
   val PPN1Len = 12 //12???
@@ -59,7 +49,7 @@ trait pteSv32Const {
   }
 }
 
-class PtwSv32 extends Module with pteSv32Const{
+class PtwSv32(name : String = "default") extends Module with pteSv32Const{
   val io = IO(new Bundle {
     val satp = Input(UInt(32.W))
     val flush = Input(Bool())
@@ -105,8 +95,8 @@ class PtwSv32 extends Module with pteSv32Const{
   io.out.req.bits.wdata := Mux(isWork, inReqBitsWdata, io.in.req.bits.wdata)
   io.out.req.bits.user  := Mux(isWork, inReqBitsUser, io.in.req.bits.user)
   io.out.req.bits.size  := Mux(isWork, inReqBitsSize, io.in.req.bits.size)
-  io.out.req.valid      := io.in.req.valid && (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire || !io.satp(31).asBool)//need add state machine
-  io.in.req.ready       := io.out.req.ready && (state===s_ready || !io.satp(31).asBool)
+  io.out.req.valid      := Mux(isWork, (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire), io.in.req.valid)//need add state machine
+  io.in.req.ready       := Mux(isWork, state===s_ready && io.out.req.ready, io.out.req.ready)
   //connect end
 
   val level = RegInit(2.U)
@@ -169,18 +159,27 @@ class PtwSv32 extends Module with pteSv32Const{
   val count = RegInit(0.U(16.W))
   val isCount = RegInit(false.B)
 
-  Debug(debug) {
+  Debug(debug && name == "iptw") {
     when(vaddr === "h80100000".U) {
       isCount := true.B
     }
-    when( isCount ) {
-      printf("%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d\n",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
+    when( true.B/* && state===s_mem && io.out.req.fire().asBool*/) {
+      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d ",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
+     printf("\n")
+        // printf("inReqValid:%d inReqReady:%d isWork:%d\n",io.in.req.valid, io.in.req.ready, isWork)
       //when(isCount===false.B) {isCount := true.B}
     }
     when(isCount && (state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum)) {
       //printf(p"${GTimer()}, state:${state}, out.resp.fire:${io.out.resp.fire()}, vaddr:${vaddr}, rdata:${io.out.resp.bits.rdata}\n")
-      printf("%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
+      printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
     }
     assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
   }
+
+  Debug(debug && name == "dptw" && false) {
+    when(GTimer()>=1300.U) {
+      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d ",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
+      printf("alreadyOutFire:%d\n", alreadyOutFire)
+    }
+  }  
 }

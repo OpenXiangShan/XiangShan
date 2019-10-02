@@ -60,7 +60,7 @@ class ISU(implicit val p: NOOPConfig) extends Module {
   val rf = new RegFile
   io.out.bits.data.src1 := Mux1H(List(
     (io.in.bits.ctrl.src1Type === SrcType.pc) -> io.in.bits.cf.pc,
-    src1ForwardNextCycle -> io.forward.wb.rfData,
+    src1ForwardNextCycle -> io.forward  .wb.rfData,
     (src1Forward && !src1ForwardNextCycle) -> io.wb.rfData,
     ((io.in.bits.ctrl.src1Type =/= SrcType.pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
   ))
