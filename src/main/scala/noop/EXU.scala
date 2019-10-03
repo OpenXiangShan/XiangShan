@@ -52,6 +52,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val csrOut = csr.access(valid = fuValids(FuType.csr), src1 = src1, src2 = src2, func = fuOpType)
   csr.io.cfIn := io.in.bits.cf
   csr.io.instrValid := io.in.valid && !io.flush
+  io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
 
   val mou = Module(new MOU)

@@ -47,6 +47,8 @@ class CSRIO extends FunctionUnitIO {
   val redirect = new RedirectIO
   // for exception check
   val instrValid = Input(Bool())
+  // for differential testing
+  val intrNO = Output(UInt(XLEN.W))
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
@@ -145,6 +147,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
   val intrNO = PriorityEncoder(intrVec)
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
+  io.intrNO := Mux(raiseIntr, causeNO, 0.U)
 
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr

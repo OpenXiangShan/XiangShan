@@ -12,6 +12,7 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
+void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 void (*ref_isa_reg_display)(void) = NULL;
 
 static bool is_skip_ref;
@@ -50,6 +51,9 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
 
+  ref_difftest_raise_intr = (void (*)(uint64_t))dlsym(handle, "difftest_raise_intr");
+  assert(ref_difftest_raise_intr);
+
   ref_isa_reg_display = (void (*)(void))dlsym(handle, "isa_reg_display");
   assert(ref_isa_reg_display);
 
@@ -64,8 +68,7 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO) {
-  return 0;
+int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, uint64_t intrNO) {
   uint64_t ref_r[33];
   static uint64_t nemu_pc = 0x80100000;
   if (isMMIO) {
@@ -78,7 +81,12 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO) {
     return 0;
   }
 
-  ref_difftest_exec(1);
+  if (intrNO) {
+    ref_difftest_raise_intr(intrNO);
+  } else {
+    ref_difftest_exec(1);
+  }
+
   ref_difftest_getregs(&ref_r);
 
   uint64_t temp = ref_r[32];
