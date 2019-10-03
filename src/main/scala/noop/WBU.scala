@@ -34,5 +34,6 @@ class WBU(implicit val p: NOOPConfig) extends Module {
     BoringUtils.addSource(RegNext(io.in.valid), "difftestCommit")
     BoringUtils.addSource(RegNext(io.in.bits.decode.cf.pc), "difftestThisPC")
     BoringUtils.addSource(RegNext(io.in.bits.isMMIO), "difftestIsMMIO")
+    BoringUtils.addSource(RegNext(io.in.bits.intrNO), "difftestIntrNO")
   }
 }

@@ -22,6 +22,7 @@ class DeviceHelper extends BlackBox {
 class SimMMIO extends Module {
   val io = IO(new Bundle {
     val rw = Flipped(new SimpleBusUC)
+    val mtip = Output(Bool())
   })
 
   val devAddrSpace = List(
@@ -35,13 +36,15 @@ class SimMMIO extends Module {
   xbar.io.in(0) <> io.rw
 
   val uart = Module(new AXI4UART)
-  val timer = Module(new AXI4Timer)
+  val timer = Module(new AXI4Timer(sim = true))
   val vga = Module(new AXI4VGA(sim = true))
   uart.io.in <> xbar.io.out(0).toAXI4Lite()
   timer.io.in <> xbar.io.out(1).toAXI4Lite()
   vga.io.in.fb <> xbar.io.out(2).toAXI4Lite()
   vga.io.in.ctrl <> xbar.io.out(3).toAXI4Lite()
   vga.io.vga := DontCare
+
+  io.mtip := timer.io.extra.get.mtip
 
   //val helper = Module(new DeviceHelper)
   //val helperIO = xbar.io.out(0)

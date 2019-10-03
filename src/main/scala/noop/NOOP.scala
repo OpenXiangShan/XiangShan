@@ -20,7 +20,7 @@ trait HasNOOPParameter {
   val DataBytes = DataBits / 8
 }
 
-abstract class NOOPModule extends Module with HasNOOPParameter
+abstract class NOOPModule extends Module with HasNOOPParameter with HasExceptionNO
 abstract class NOOPBundle extends Bundle with HasNOOPParameter
 
 case class NOOPConfig (
