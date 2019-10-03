@@ -9,7 +9,14 @@ import chisel3.util.experimental.BoringUtils
 
 import bus.axi4._
 import device.AXI4RAM
-import utils.DiffTestIO
+
+class DiffTestIO extends Bundle {
+  val r = Output(Vec(32, UInt(64.W)))
+  val commit = Output(Bool())
+  val thisPC = Output(UInt(64.W))
+  val isMMIO = Output(Bool())
+  val intrNO = Output(UInt(64.W))
+}
 
 class NOOPSimTop extends Module {
   val io = IO(new Bundle{
