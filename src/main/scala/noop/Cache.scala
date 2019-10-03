@@ -79,11 +79,6 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends C
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
-  Debug(false){
-    when(io.in.fire()){
-      printf("[L1$] cache stage1, addr in: %x\n", io.in.bits.addr)
-    }
-  }
 
   // read meta array and data array
   List(io.metaReadBus, io.dataReadBus).map { case x => {
@@ -127,9 +122,6 @@ sealed class CacheStage2(ro: Boolean, name: String, userBits: Int = 0) extends C
   io.out.bits.meta.tag := meta.tag
   io.out.bits.meta.dirty := dirty && io.in.valid
   io.out.bits.req <> io.in.bits.req
-  Debug(){
-    printf("[L1$] stage 2: addr %x, io.in.valid: %x, io.in.ready: %x, io.out.valid: %x, io.out.ready: %x\n", req.addr, io.in.valid, io.in.ready, io.out.valid, io.out.ready)
-  }
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
 }
@@ -161,7 +153,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
   val hitWrite = hit && req.isWrite()
-  val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
+  val dataMerge = MaskData(dataRead, req.wdata, wordMask)
   dataHitWriteBus.req.valid := hitWrite
   dataHitWriteBus.req.bits.idx := addr.index
   dataHitWriteBus.req.bits.data.data := dataMerge
@@ -212,12 +204,6 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst)
 
-  Debug(){
-    when(io.mem.req.valid && io.mem.req.ready){
-      printf("[L1$] mem access addr: %x\n", io.mem.req.bits.addr)
-    }
-  }
-
   switch (state) {
     is (s_idle) {
       afterFirstRead := false.B
@@ -239,15 +225,12 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
         afterFirstRead := true.B
 
         val inRdata = if (!ro) {
-          val rdataMergeWrite = (rdata & ~wordMask) | (req.wdata & wordMask)
+          val rdataMergeWrite = MaskData(rdata, req.wdata, wordMask)
           Mux(readingFirst, rdataMergeWrite, rdata)
         } else rdata
 
         dataRefillWriteBus.req.bits.data.data := inRdata
         dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
-        Debug(){
-          printf("[L1$] mem access data : %x index: %x\n", dataRefillWriteBus.req.bits.data.data, dataRefillWriteBus.req.bits.wordIndex)
-        }
 
         readBeatCnt.inc()
         when (io.mem.resp.bits.isReadLast()) { state := s_wait_resp }

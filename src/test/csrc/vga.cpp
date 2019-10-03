@@ -7,20 +7,23 @@
 #define SCREEN_H 600
 #define SCREEN_W 800
 
+static uint32_t vmem[800 * 600];
 
 static SDL_Window *window;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 
-void update_screen(void *vmem) {
+extern "C" void put_pixel(uint32_t pixel) {
+  static int i = 0;
+  vmem[i++] = pixel;
+  if (i >= 800 * 600) i = 0;
+}
+
+extern "C" void vmem_sync(void) {
   SDL_UpdateTexture(texture, NULL, vmem, SCREEN_W * sizeof(uint32_t));
   SDL_RenderClear(renderer);
   SDL_RenderCopy(renderer, texture, NULL, NULL);
   SDL_RenderPresent(renderer);
-}
-
-uint32_t screen_size(void) {
-  return ((SCREEN_W) << 16) | (SCREEN_H);
 }
 
 void init_sdl() {

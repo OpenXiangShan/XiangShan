@@ -93,46 +93,6 @@ class LSU extends NOOPModule {
   io.mmio.req.valid := valid && (state === s_idle) && mmio
   io.mmio.resp.ready := true.B
 
-  Debug(true){
-    // when(isStore && (dmem.req.bits.wdata(31,0) === "h00003f00".U)){
-    //   printf("TIME %d addr: %x dmem.req.bits.wdata %x, dmem.req.bits.wmask %x\n", GTimer(), addr, dmem.req.bits.wdata, dmem.req.bits.wmask)
-    // }
-    // when(isStore && (dmem.req.bits.wdata(31,0) === "h8018b120".U)){
-    //   printf("TIME %d addr: %x dmem.req.bits.wdata %x, dmem.req.bits.wmask %x\n", GTimer(), addr, dmem.req.bits.wdata, dmem.req.bits.wmask)
-    // }
-
-    // when(isStore && (addr(31,0) === "h40600000".U)){
-    //   printf("TIME %d addr: %x dmem.req.bits.wdata %x, dmem.req.bits.wmask %x im %x\n", GTimer(), addr, dmem.req.bits.wdata, dmem.req.bits.wmask, mmio)
-    // }
-
-  }
-
-  Debug(){
-    when(dmem.req.fire()){
-      printf("[LSU] (req) addr:%x data:%x wen:%b\n",addr, dmem.req.bits.wdata, isStore)
-    } 
-  
-  
-    when(dmem.resp.fire()){
-      printf("[LSU] (resp) addr:%x data:%x wen:%b\n",addr, io.out.bits, isStore)
-      // printf("%x\n", rdata)
-    }
-  
-    when(io.mmio.req.fire()){
-      printf("[LSU] (mmio req) addr:%x data:%x wen:%b\n",addr, dmem.req.bits.wdata, isStore)
-    } 
-  
-  
-    when(io.mmio.resp.fire()){
-      printf("[LSU] (mmio resp) addr:%x data:%x wen:%b\n",addr, io.out.bits, isStore)
-      // printf("%x\n", rdata)
-    }
-  
-    when(state===s_partialLoad){
-      printf("[LSU] (partialLoad) addr:%x data:%x wen:%b\n",addr, io.out.bits, isStore)
-    }
-  }
-  
   io.out.valid := Mux(isStore && !mmio, state === s_partialLoad, Mux(partialLoad, state === s_partialLoad,
     Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire() && (state === s_wait_resp))))
   io.in.ready := (state === s_idle)

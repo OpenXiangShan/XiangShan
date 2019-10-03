@@ -26,10 +26,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val fuValids = Wire(Vec(FuType.num, Bool()))
   (0 until FuType.num).map (i => fuValids(i) := (fuType === i.U) && io.in.valid && !io.flush)
 
-  // when(io.in.valid){
-  //   printf("EXv %b %b %b %b %x %x\n", fuValids(0), fuValids(1), fuValids(2), fuValids(3), fuType, io.flush)
-  // }
-
   val alu = Module(new ALU)
   val aluOut = alu.access(valid = fuValids(FuType.alu), src1 = src1, src2 = src2, func = fuOpType)
   alu.io.cfIn := io.in.bits.cf

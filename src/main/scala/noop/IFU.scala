@@ -35,14 +35,7 @@ class IFU extends NOOPModule with HasResetVector {
   bp1.io.in.pc.bits := npc  // predict one cycle early
   bp1.io.flush := io.redirect.valid
 
-  //val bp2 = Module(new BPU2)
-  //bp2.io.in.bits := io.out.bits
-  //bp2.io.in.valid := io.imem.resp.fire()
-
-  when (pcUpdate) { 
-    pc := npc 
-    // printf("[IF1] pc=%x\n", pc)
-  }
+  when (pcUpdate) { pc := npc }
 
   io.flushVec := Mux(io.redirect.valid, "b1111".U, 0.U)
   io.bpFlush := false.B
@@ -62,12 +55,6 @@ class IFU extends NOOPModule with HasResetVector {
                        else io.imem.resp.bits.rdata)
   io.out.bits.pnpc := io.imem.resp.bits.user
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
-
-  Debug(){
-    when (io.out.fire()) {
-          printf("[IF1] pc=%x inst=%x\n", io.out.bits.pc, io.out.bits.instr)
-    }
-  }
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
   BoringUtils.addSource(io.flushVec.orR, "perfCntCondMifuFlush")
