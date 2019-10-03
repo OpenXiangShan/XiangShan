@@ -31,3 +31,11 @@ object ZeroExt {
     if (aLen == len) a else Cat(0.U((len - aLen).W), a)
   }
 }
+
+object CountLeadingZero {
+  def apply(a: UInt, len: Int) = {
+    val aLen = a.getWidth
+    require(aLen == len && len == 64)
+    PriorityEncoder(a.asBools.reverse)
+  }
+}

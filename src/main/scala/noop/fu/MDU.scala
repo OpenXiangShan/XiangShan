@@ -62,8 +62,8 @@ class Divider(len: Int = 64) extends NOOPModule {
     (s, Mux(s, -a, a))
   }
 
-  val next = Wire(Bool())
-  val (state, finish) = Counter(next, len + 2)
+  val stateCnt = Counter(len + 2)
+  val busy = stateCnt.value =/= 0.U
 
   val (a, b) = (io.in.bits(0), io.in.bits(1))
 
@@ -84,8 +84,8 @@ class Divider(len: Int = 64) extends NOOPModule {
   val specialResultR = Reg(UInt(len.W))
   //early finish
 
-  io.in.ready := state === 0.U && !earlyFinish
-  val newReqIn = state === 0.U && io.in.fire()
+  io.in.ready := !busy && !earlyFinish
+  val newReqIn = !busy && io.in.fire()
   when(newReqIn){
     earlyFinish := specialResult
     specialResultLo := Mux(io.sign, specialResultDIV, specialResultDIVU)
@@ -94,30 +94,32 @@ class Divider(len: Int = 64) extends NOOPModule {
   when(io.out.fire && !newReqIn ){
     earlyFinish := false.B
   }
-  // when(io.out.fire){
-    // printf(name + " DIV result: Lo %x R %x\n", io.out.bits(0), io.out.bits(1))
-  // }
 
-  when (state === 0.U && io.in.fire()) {
+  when (!busy && io.in.fire() && !specialResult) {
     val (aSign, aVal) = abs(a, io.sign)
     val (bSign, bVal) = abs(b, io.sign)
     aSignReg := aSign
     bSignReg := bSign
     bReg := bVal
-    shiftReg := Cat(0.U(len.W), aVal, 0.U(1.W))
+    val skipShift = CountLeadingZero(aVal, XLEN)
+    shiftReg := Cat(aVal, 0.U(1.W)) << skipShift
+    stateCnt.value := skipShift +& 1.U
+
     // printf(name + " Input %x %x %x\n", io.in.bits(0), io.in.bits(1), specialResult)
     // printf(name + " ABS %x %x \n", aVal, bVal)
+  } .elsewhen (busy) {
+    stateCnt.inc()
   }
 
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
-  when (state =/= 0.U) {
+  when (busy) {
     val enough = hi.asUInt >= bReg.asUInt
     shiftReg := Cat(Mux(enough, hi - bReg, hi)(len - 1, 0), lo, enough)
-    // printf(name + " DIVing state %d hi %x lo %x earlyFinish %x\n", state, hi, lo, earlyFinish)
+    //printf(" DIVing state %d hi %x lo %x earlyFinish %x\n", stateCnt.value, hi, lo, earlyFinish)
   }
 
-  next := (state === 0.U && io.in.fire() && !specialResult) || (state =/= 0.U)
+  val finish = (stateCnt.value === (stateCnt.n-1).U) && busy
 
   val r = hi(len, 1)
   val resQ = Mux(earlyFinish, specialResultLo, Mux(aSignReg ^ bSignReg, -lo, lo))
