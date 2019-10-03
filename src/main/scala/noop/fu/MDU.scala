@@ -102,11 +102,11 @@ class Divider(len: Int = 64) extends NOOPModule {
     bSignReg := bSign
     bReg := bVal
     val aLeadingZero = CountLeadingZero(aVal, XLEN)
-    val bEffectiveBit = CountEffectiveBit(bVal, XLEN)
-    val canSkipShift = aLeadingZero +& bEffectiveBit - 1.U
-    val skipShift = Mux(canSkipShift >= len.U, len.U, canSkipShift)
-    shiftReg := Cat(aVal, 0.U(1.W)) << skipShift
-    stateCnt.value := skipShift +& 1.U
+    val bEffectiveBit = CountEffectiveBit(bVal, XLEN) // this is at least 1, else divide by 0
+    val canSkipShift = aLeadingZero +& bEffectiveBit
+    val skipShift = Mux(canSkipShift >= (len + 1).U, (len + 1).U, canSkipShift)
+    shiftReg := aVal << skipShift
+    stateCnt.value := skipShift
 
     // printf(name + " Input %x %x %x\n", io.in.bits(0), io.in.bits(1), specialResult)
     // printf(name + " ABS %x %x \n", aVal, bVal)
