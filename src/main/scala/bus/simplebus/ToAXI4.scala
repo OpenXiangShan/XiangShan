@@ -58,25 +58,6 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
   axi.w .valid := mem.isWrite() && !wAck
   mem.req.ready  := Mux(mem.req.bits.isWrite(), !wAck && axi.w.ready, axi.ar.ready)
 
-  Debug(false){
-    printf("[CVT] isWrite %x wAck %x wr %x arr %x addr %x\n", mem.req.bits.isWrite(), wAck, axi.w.ready, axi.ar.ready, mem.req.bits.addr)
-  }
-
-  Debug(false){
-    when((ar.addr(31,4) === "h8010f00".U)&&(axi.ar.valid || axi.aw.valid)){
-      printf("[AXI] TIME %d addr: %x arv %x awv %x\n", GTimer(), ar.addr, axi.ar.valid, axi.aw.valid)
-    }
-  }
-
-  Debug(false){
-    when((w.data(31,0) === "h18be6784".U)&& axi.w.valid){
-      printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
-    }
-    when((w.data(63,32) === "h18be6784".U)&& axi.w.valid){
-      printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
-    }
-  }
-
   axi.r.ready  := mem.resp.ready
   axi.b.ready  := mem.resp.ready
   mem.resp.valid  := Mux(wen, axi.b.valid, axi.r.valid)

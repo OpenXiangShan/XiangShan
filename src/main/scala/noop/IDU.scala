@@ -18,12 +18,6 @@ class IDU extends NOOPModule with HasInstrType {
   val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
     Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr, intr, dec)}
 
-  Debug(){
-    when(io.out.valid){
-      printf("[IDU] pc: %x instrType: %x fuType: %x fuOpType: %x\n", io.in.bits.pc, instrType, fuType, fuOpType)
-    }
-  }
-
   io.out.bits := DontCare
 
   io.out.bits.ctrl.fuType := fuType

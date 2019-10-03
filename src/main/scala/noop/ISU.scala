@@ -97,11 +97,5 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
 
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(VecInit((0 to NRReg-1).map(i => rf.read(i.U))), "difftestRegs")
-
-  Debug(){
-    when(io.out.fire()){
-        printf("[ISU] pc=%x, inst=%x rfwen=%b\n", io.out.bits.cf.pc, io.out.bits.cf.instr, io.out.bits.ctrl.rfWen)
-      }
-    }
   }
 }

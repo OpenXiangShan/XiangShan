@@ -108,12 +108,6 @@ class ALU extends NOOPModule {
   io.in.ready := true.B
   io.out.valid := valid
 
-  Debug(){
-    when(io.out.valid){
-      printf("[ALU] func: %b 1: %x, 2: %x, out: %x\n", func, src1, src2, io.out.bits)
-    }
-  }
-
   val bpuUpdateReq = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   bpuUpdateReq.valid := valid && isBru
   bpuUpdateReq.pc := io.cfIn.pc
