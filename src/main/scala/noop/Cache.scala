@@ -153,7 +153,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   val dataHitWriteBus = WireInit(0.U.asTypeOf(CacheDataArrayWriteBus()))
   val metaHitWriteBus = WireInit(0.U.asTypeOf(CacheMetaArrayWriteBus()))
   val hitWrite = hit && req.isWrite()
-  val dataMerge = (dataRead & ~wordMask) | (req.wdata & wordMask)
+  val dataMerge = MaskData(dataRead, req.wdata, wordMask)
   dataHitWriteBus.req.valid := hitWrite
   dataHitWriteBus.req.bits.idx := addr.index
   dataHitWriteBus.req.bits.data.data := dataMerge
@@ -225,7 +225,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
         afterFirstRead := true.B
 
         val inRdata = if (!ro) {
-          val rdataMergeWrite = (rdata & ~wordMask) | (req.wdata & wordMask)
+          val rdataMergeWrite = MaskData(rdata, req.wdata, wordMask)
           Mux(readingFirst, rdataMergeWrite, rdata)
         } else rdata
 
