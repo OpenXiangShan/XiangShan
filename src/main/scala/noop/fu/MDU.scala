@@ -101,7 +101,10 @@ class Divider(len: Int = 64) extends NOOPModule {
     aSignReg := aSign
     bSignReg := bSign
     bReg := bVal
-    val skipShift = CountLeadingZero(aVal, XLEN)
+    val aLeadingZero = CountLeadingZero(aVal, XLEN)
+    val bEffectiveBit = CountEffectiveBit(bVal, XLEN)
+    val canSkipShift = aLeadingZero +& bEffectiveBit - 1.U
+    val skipShift = Mux(canSkipShift >= len.U, len.U, canSkipShift)
     shiftReg := Cat(aVal, 0.U(1.W)) << skipShift
     stateCnt.value := skipShift +& 1.U
 

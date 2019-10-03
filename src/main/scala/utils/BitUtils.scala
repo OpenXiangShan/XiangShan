@@ -39,3 +39,7 @@ object CountLeadingZero {
     PriorityEncoder(a.asBools.reverse)
   }
 }
+
+object CountEffectiveBit {
+  def apply(a: UInt, len: Int) = len.U - CountLeadingZero(a, len)
+}
