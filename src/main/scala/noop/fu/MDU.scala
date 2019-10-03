@@ -57,9 +57,9 @@ class Divider(len: Int = 64) extends NOOPModule {
     (s, Mux(s, -a, a))
   }
 
-  val stateCnt = Counter(len + 2)
-  val busy = stateCnt.value =/= 0.U
-  val newReq = !busy && io.in.fire()
+  val s_idle :: s_shift :: s_compute :: s_finish :: Nil = Enum(4)
+  val state = RegInit(s_idle)
+  val newReq = (state === s_idle) && io.in.fire()
 
   val (a, b) = (io.in.bits(0), io.in.bits(1))
   val divBy0 = b === 0.U(len.W)
@@ -74,6 +74,7 @@ class Divider(len: Int = 64) extends NOOPModule {
   val bSignReg = RegEnable(bSign, newReq)
   val bReg = RegEnable(bVal, newReq)
 
+  val cnt = Counter(len + 2)
   when (newReq) {
     val aLeadingZero = CountLeadingZero(aVal, XLEN)
     val bEffectiveBit = CountEffectiveBit(bVal, XLEN) // this is at least 1, else divide by 0
@@ -81,13 +82,19 @@ class Divider(len: Int = 64) extends NOOPModule {
     // When divide by 0, the quotient should be all 1's.
     // Therefore we can not shift in 0s here.
     // We do not skip any shift to avoid this.
-    val skipShift = Mux(divBy0, 1.U, Mux(canSkipShift >= (len + 1).U, (len + 1).U, canSkipShift))
-    shiftReg := aVal << skipShift
-    stateCnt.value := skipShift
-  } .elsewhen (busy) {
+    cnt.value := Mux(divBy0, 1.U, Mux(canSkipShift >= (len + 1).U, (len + 1).U, canSkipShift))
+    shiftReg := aVal
+    state := s_shift
+  } .elsewhen (state === s_shift) {
+    shiftReg := shiftReg << cnt.value
+    state := Mux(cnt.value === (len+1).U, s_finish, s_compute)
+  } .elsewhen (state === s_compute) {
     val enough = hi.asUInt >= bReg.asUInt
     shiftReg := Cat(Mux(enough, hi - bReg, hi)(len - 1, 0), lo, enough)
-    stateCnt.inc()
+    cnt.inc()
+    when (cnt.value === (len).U) { state := s_finish }
+  } .elsewhen (state === s_finish) {
+    state := s_idle
   }
 
   val r = hi(len, 1)
@@ -95,9 +102,8 @@ class Divider(len: Int = 64) extends NOOPModule {
   val resR = Mux(aSignReg, -r, r)
   io.out.bits := Cat(resR, resQ)
 
-  val finish = (stateCnt.value === (stateCnt.n-1).U) && busy
-  io.out.valid := (if (HasDiv) finish else io.in.valid) // FIXME: should deal with ready = 0
-  io.in.ready := !busy
+  io.out.valid := (if (HasDiv) (state === s_finish) else io.in.valid) // FIXME: should deal with ready = 0
+  io.in.ready := (state === s_idle)
 }
 
 class MDUIO extends FunctionUnitIO {
