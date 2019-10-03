@@ -3,18 +3,12 @@
 #include <SDL2/SDL.h>
 
 void send_key(uint8_t, bool);
-uint32_t read_key(void);
 void init_sdl(void);
-void update_screen(void *vmem);
-uint32_t screen_size(void);
 void set_abort(void);
 
-int uart_getc(void);
-void uart_putc(char c);
 void init_uart(void);
 
 static struct timeval boot = {};
-static uint32_t vmem[800 * 600];
 
 void init_device(void) {
   init_sdl();
@@ -53,45 +47,4 @@ uint32_t uptime(void) {
   }
 
   return s * 1000 + (us + 500) / 1000;
-}
-
-extern "C" void put_pixel(uint32_t pixel) {
-  static int i = 0;
-  vmem[i++] = pixel;
-  if (i >= 800 * 600) i = 0;
-}
-
-extern "C" void vmem_sync(void) {
-  update_screen(vmem);
-}
-
-extern "C" void device_helper(
-    uint8_t req_wen, uint64_t req_addr, uint64_t req_wdata, uint8_t req_wmask, uint64_t *resp_rdata) {
-  switch (req_addr) {
-      // read uartlite stat register
-    case 0x40600008: *resp_rdata = 0x01; break; // set UARTLITE_RX_VALID
-      // read uartlite ctrl register
-    case 0x4060000c: *resp_rdata = 0; break;
-      // write uartlite tx fifo
-    case 0x40600004: if (req_wen) uart_putc((char)req_wdata); break;
-      // read uartlite rx fifo
-    //case 0x40600000: *resp_rdata = uart_getc(); break;
-      // read RTC
-    case 0x40700000: *resp_rdata = uptime(); break;
-      // read key
-    case 0x40900000: *resp_rdata = read_key(); break;
-      // read screen size
-    case 0x40800000: *resp_rdata = screen_size(); break;
-      // write vga sync
-    case 0x40800004: update_screen(vmem); break;
-    default:
-      if (req_addr >= 0x40000000 && req_addr < 0x40400000 && req_wen) {
-        // write to vmem
-        vmem[(req_addr - 0x40000000) / sizeof(uint64_t)] = req_wdata;
-      }
-      else {
-        eprintf("bad address = 0x%08x, wen = %d\n", (uint32_t)req_addr, req_wen);
-        assert(0);
-      }
-  }
 }

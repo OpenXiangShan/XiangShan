@@ -6,19 +6,6 @@ import chisel3.util._
 import bus.simplebus._
 import device._
 
-class DeviceHelper extends BlackBox {
-  val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val reset = Input(Bool())
-    val reqValid = Input(Bool())
-    val reqWen = Input(Bool())
-    val reqAddr = Input(UInt(64.W))
-    val reqWdata = Input(UInt(64.W))
-    val reqWmask = Input(UInt(8.W))
-    val respRdata = Output(UInt(64.W))
-  })
-}
-
 class SimMMIO extends Module {
   val io = IO(new Bundle {
     val rw = Flipped(new SimpleBusUC)
@@ -45,20 +32,4 @@ class SimMMIO extends Module {
   vga.io.vga := DontCare
 
   io.mtip := timer.io.extra.get.mtip
-
-  //val helper = Module(new DeviceHelper)
-  //val helperIO = xbar.io.out(0)
-  //helper.io.clk := clock
-  //helper.io.reset := reset.asBool
-  //helper.io.reqValid := helperIO.req.valid
-  //helper.io.reqWen := helperIO.isWrite()
-  //helper.io.reqAddr := helperIO.req.bits.addr
-  //helper.io.reqWdata := helperIO.req.bits.wdata
-  //helper.io.reqWmask := helperIO.req.bits.wmask
-  //helperIO.resp.bits.rdata := helper.io.respRdata
-  //helperIO.resp.bits.cmd := 0.U
-  //helperIO.resp.bits.user := 0.U
-
-  //helperIO.req.ready := true.B
-  //helperIO.resp.valid := RegNext(helperIO.req.valid)
 }
