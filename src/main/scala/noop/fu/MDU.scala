@@ -76,9 +76,14 @@ class Divider(len: Int = 64) extends NOOPModule {
 
   val cnt = Counter(len + 2)
   when (newReq) {
-    val aLeadingZero = CountLeadingZero(aVal, XLEN)
-    val bEffectiveBit = CountEffectiveBit(bVal, XLEN) // this is at least 1, else divide by 0
-    val canSkipShift = aLeadingZero +& bEffectiveBit
+    // `canSkipShift` is calculated as following:
+    //   bEffectiveBit = Log2(bVal, XLEN) + 1.U
+    //   aLeadingZero = 64.U - aEffectiveBit = 64.U - (Log2(aVal, XLEN) + 1.U)
+    //   canSkipShift = aLeadingZero + bEffectiveBit
+    //     = 64.U - (Log2(aVal, XLEN) + 1.U) + Log2(bVal, XLEN) + 1.U
+    //     = 64.U + Log2(bVal, XLEN) - Log2(aVal, XLEN)
+    //     = (64.U | Log2(bVal, XLEN)) - Log2(aVal, XLEN)  // since Log2(bVal, XLEN) < 64.U
+    val canSkipShift = (64.U | Log2(bVal, XLEN)) - Log2(aVal, XLEN)
     // When divide by 0, the quotient should be all 1's.
     // Therefore we can not shift in 0s here.
     // We do not skip any shift to avoid this.
