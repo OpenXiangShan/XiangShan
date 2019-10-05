@@ -23,5 +23,6 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
   if (p.FPGAPlatform) io.mmio <> noop.io.mmio.toAXI4Lite()
   else io.mmio <> noop.io.mmio
 
-  BoringUtils.addSource(io.mtip, "mtip")
+  val mtipSync = RegNext(RegNext(io.mtip))
+  BoringUtils.addSource(mtipSync, "mtip")
 }
