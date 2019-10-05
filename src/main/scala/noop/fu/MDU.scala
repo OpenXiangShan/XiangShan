@@ -52,78 +52,65 @@ class Multiplier(len: Int) extends NOOPModule {
 class Divider(len: Int = 64) extends NOOPModule {
   val io = IO(new MulDivIO(len))
 
-  val shiftReg = Reg(UInt((1 + len * 2).W))
-  val bReg = Reg(UInt(len.W))
-  val aSignReg = Reg(Bool())
-  val bSignReg = Reg(Bool())
-
   def abs(a: UInt, sign: Bool): (Bool, UInt) = {
     val s = a(len - 1) && sign
     (s, Mux(s, -a, a))
   }
 
-  val next = Wire(Bool())
-  val (state, finish) = Counter(next, len + 2)
+  val s_idle :: s_log2 :: s_shift :: s_compute :: s_finish :: Nil = Enum(5)
+  val state = RegInit(s_idle)
+  val newReq = (state === s_idle) && io.in.fire()
 
   val (a, b) = (io.in.bits(0), io.in.bits(1))
+  val divBy0 = b === 0.U(len.W)
 
-  //Division by zero
-  val divisionByZero = b === 0.U(len.W)
-
-  //Overflow
-  val bit1 = 1.U(1.W)
-  val overflow = (a === Cat(1.U(1.W),0.U((len-1).W))) && (b === Fill(len, bit1)) && io.sign
-
-  val specialResult = divisionByZero || overflow
-  val earlyFinish = RegInit(false.B)
-  val specialResultDIV = Mux(overflow, Cat(1.U(1.W), 0.U((len-1).W)), Fill(len, bit1))
-  val specialResultDIVU = Fill(len, bit1)
-  val specialResultREM = Mux(overflow, 0.U(len.W), a)
-  val specialResultREMU = a
-  val specialResultLo = Reg(UInt(len.W))
-  val specialResultR = Reg(UInt(len.W))
-  //early finish
-
-  io.in.ready := state === 0.U && !earlyFinish
-  val newReqIn = state === 0.U && io.in.fire()
-  when(newReqIn){
-    earlyFinish := specialResult
-    specialResultLo := Mux(io.sign, specialResultDIV, specialResultDIVU)
-    specialResultR := Mux(io.sign, specialResultREM, specialResultREMU)
-  }
-  when(io.out.fire && !newReqIn ){
-    earlyFinish := false.B
-  }
-  // when(io.out.fire){
-    // printf(name + " DIV result: Lo %x R %x\n", io.out.bits(0), io.out.bits(1))
-  // }
-
-  when (state === 0.U && io.in.fire()) {
-    val (aSign, aVal) = abs(a, io.sign)
-    val (bSign, bVal) = abs(b, io.sign)
-    aSignReg := aSign
-    bSignReg := bSign
-    bReg := bVal
-    shiftReg := Cat(0.U(len.W), aVal, 0.U(1.W))
-    // printf(name + " Input %x %x %x\n", io.in.bits(0), io.in.bits(1), specialResult)
-    // printf(name + " ABS %x %x \n", aVal, bVal)
-  }
-
+  val shiftReg = Reg(UInt((1 + len * 2).W))
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
-  when (state =/= 0.U) {
+
+  val (aSign, aVal) = abs(a, io.sign)
+  val (bSign, bVal) = abs(b, io.sign)
+  val aSignReg = RegEnable(aSign, newReq)
+  val qSignReg = RegEnable((aSign ^ bSign) && !divBy0, newReq)
+  val bReg = RegEnable(bVal, newReq)
+  val aValx2Reg = RegEnable(Cat(aVal, "b0".U), newReq)
+
+  val cnt = Counter(len)
+  when (newReq) {
+    state := s_log2
+  } .elsewhen (state === s_log2) {
+    // `canSkipShift` is calculated as following:
+    //   bEffectiveBit = Log2(bVal, XLEN) + 1.U
+    //   aLeadingZero = 64.U - aEffectiveBit = 64.U - (Log2(aVal, XLEN) + 1.U)
+    //   canSkipShift = aLeadingZero + bEffectiveBit
+    //     = 64.U - (Log2(aVal, XLEN) + 1.U) + Log2(bVal, XLEN) + 1.U
+    //     = 64.U + Log2(bVal, XLEN) - Log2(aVal, XLEN)
+    //     = (64.U | Log2(bVal, XLEN)) - Log2(aVal, XLEN)  // since Log2(bVal, XLEN) < 64.U
+    val canSkipShift = (64.U | Log2(bReg)) - Log2(aValx2Reg)
+    // When divide by 0, the quotient should be all 1's.
+    // Therefore we can not shift in 0s here.
+    // We do not skip any shift to avoid this.
+    cnt.value := Mux(divBy0, 0.U, Mux(canSkipShift >= (len-1).U, (len-1).U, canSkipShift))
+    state := s_shift
+  } .elsewhen (state === s_shift) {
+    shiftReg := aValx2Reg << cnt.value
+    state := s_compute
+  } .elsewhen (state === s_compute) {
     val enough = hi.asUInt >= bReg.asUInt
     shiftReg := Cat(Mux(enough, hi - bReg, hi)(len - 1, 0), lo, enough)
-    // printf(name + " DIVing state %d hi %x lo %x earlyFinish %x\n", state, hi, lo, earlyFinish)
+    cnt.inc()
+    when (cnt.value === (len-1).U) { state := s_finish }
+  } .elsewhen (state === s_finish) {
+    state := s_idle
   }
 
-  next := (state === 0.U && io.in.fire() && !specialResult) || (state =/= 0.U)
-
   val r = hi(len, 1)
-  val resQ = Mux(earlyFinish, specialResultLo, Mux(aSignReg ^ bSignReg, -lo, lo))
-  val resR = Mux(earlyFinish, specialResultR, Mux(aSignReg, -r, r))
+  val resQ = Mux(qSignReg, -lo, lo)
+  val resR = Mux(aSignReg, -r, r)
   io.out.bits := Cat(resR, resQ)
-  io.out.valid := (if (HasDiv) (finish || earlyFinish) else io.in.valid) // FIXME: should deal with ready = 0
+
+  io.out.valid := (if (HasDiv) (state === s_finish) else io.in.valid) // FIXME: should deal with ready = 0
+  io.in.ready := (state === s_idle)
 }
 
 class MDUIO extends FunctionUnitIO {
@@ -133,9 +120,6 @@ class MDU extends NOOPModule {
   val io = IO(new MDUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
-  // when(io.in.fire()){
-  //   printf(name + "%x %x\n", src1, src2)
-  // }
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
     this.valid := valid
     this.src1 := src1
