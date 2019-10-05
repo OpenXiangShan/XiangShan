@@ -57,7 +57,7 @@ class Divider(len: Int = 64) extends NOOPModule {
     (s, Mux(s, -a, a))
   }
 
-  val s_idle :: s_shift :: s_compute :: s_finish :: Nil = Enum(4)
+  val s_idle :: s_log2 :: s_shift :: s_compute :: s_finish :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val newReq = (state === s_idle) && io.in.fire()
 
@@ -73,10 +73,12 @@ class Divider(len: Int = 64) extends NOOPModule {
   val aSignReg = RegEnable(aSign, newReq)
   val bSignReg = RegEnable(bSign, newReq)
   val bReg = RegEnable(bVal, newReq)
+  val aValx2Reg = RegEnable(Cat(aVal, "b0".U), newReq)
 
   val cnt = Counter(len)
-  val aValx2 = Cat(aVal, "b0".U)
   when (newReq) {
+    state := s_log2
+  } .elsewhen (state === s_log2) {
     // `canSkipShift` is calculated as following:
     //   bEffectiveBit = Log2(bVal, XLEN) + 1.U
     //   aLeadingZero = 64.U - aEffectiveBit = 64.U - (Log2(aVal, XLEN) + 1.U)
@@ -84,14 +86,14 @@ class Divider(len: Int = 64) extends NOOPModule {
     //     = 64.U - (Log2(aVal, XLEN) + 1.U) + Log2(bVal, XLEN) + 1.U
     //     = 64.U + Log2(bVal, XLEN) - Log2(aVal, XLEN)
     //     = (64.U | Log2(bVal, XLEN)) - Log2(aVal, XLEN)  // since Log2(bVal, XLEN) < 64.U
-    val canSkipShift = (64.U | Log2(bVal)) - Log2(aValx2)
+    val canSkipShift = (64.U | Log2(bReg)) - Log2(aValx2Reg)
     // When divide by 0, the quotient should be all 1's.
     // Therefore we can not shift in 0s here.
     // We do not skip any shift to avoid this.
     cnt.value := Mux(divBy0, 0.U, Mux(canSkipShift >= (len-1).U, (len-1).U, canSkipShift))
     state := s_shift
   } .elsewhen (state === s_shift) {
-    shiftReg := aValx2 << cnt.value
+    shiftReg := aValx2Reg << cnt.value
     state := s_compute
   } .elsewhen (state === s_compute) {
     val enough = hi.asUInt >= bReg.asUInt
