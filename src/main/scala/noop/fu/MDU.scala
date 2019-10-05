@@ -71,7 +71,7 @@ class Divider(len: Int = 64) extends NOOPModule {
   val (aSign, aVal) = abs(a, io.sign)
   val (bSign, bVal) = abs(b, io.sign)
   val aSignReg = RegEnable(aSign, newReq)
-  val bSignReg = RegEnable(bSign, newReq)
+  val qSignReg = RegEnable((aSign ^ bSign) && !divBy0, newReq)
   val bReg = RegEnable(bVal, newReq)
   val aValx2Reg = RegEnable(Cat(aVal, "b0".U), newReq)
 
@@ -105,7 +105,7 @@ class Divider(len: Int = 64) extends NOOPModule {
   }
 
   val r = hi(len, 1)
-  val resQ = Mux((aSignReg ^ bSignReg) && !divBy0, -lo, lo)
+  val resQ = Mux(qSignReg, -lo, lo)
   val resR = Mux(aSignReg, -r, r)
   io.out.bits := Cat(resR, resQ)
 
