@@ -368,7 +368,7 @@ class Cache(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val s2 = Module(new CacheStage2(ro, name, userBits))
   val s3 = Module(new CacheStage3(ro, name, userBits))
   val metaArray = Module(new SRAMTemplate(new MetaBundle, set = Sets, way = Ways, shouldReset = true, singlePort = true))
-  val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, shouldReset = true, singlePort = true))
+  val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, singlePort = true))
 
   if (name == "icache") {
     // flush icache when executing fence.i
