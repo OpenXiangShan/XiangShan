@@ -32,9 +32,9 @@ sealed trait HasCacheConst {
   }
 
   def CacheMetaArrayReadBus() = new SRAMReadBus(new MetaBundle, set = Sets, way = Ways)
-  def CacheDataArrayReadBus() = new SRAMReadBus(new DataBundle, set = Sets, way = Ways * LineBeats)
+  def CacheDataArrayReadBus() = new SRAMReadBus(new DataBundle, set = Sets, way = Ways, subarray = LineBeats)
   def CacheMetaArrayWriteBus() = new SRAMWriteBus(new MetaBundle, set = Sets, way = Ways)
-  def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets, way = Ways * LineBeats)
+  def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets, way = Ways, subarray = LineBeats)
 
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
   def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
@@ -153,7 +153,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   dataHitWriteBus.req.valid := hitWrite
   dataHitWriteBus.req.bits.idx := addr.index
   dataHitWriteBus.req.bits.data.data := dataMerge
-  dataHitWriteBus.req.bits.wordIndex := addr.wordIndex
+  dataHitWriteBus.req.bits.subarrayMask.map(_ := (1.U << addr.wordIndex))
 
   metaHitWriteBus.req.valid := hitWrite && !meta.dirty
   metaHitWriteBus.req.bits.idx := addr.index
@@ -226,7 +226,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
         } else rdata
 
         dataRefillWriteBus.req.bits.data.data := inRdata
-        dataRefillWriteBus.req.bits.wordIndex := readBeatCnt.value
+        dataRefillWriteBus.req.bits.subarrayMask.map(_ := 1.U << readBeatCnt.value)
 
         readBeatCnt.inc()
         when (io.mem.resp.bits.isReadLast()) { state := s_wait_resp }
@@ -306,8 +306,8 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
   }}
 
   // Latching meta and data
-  val meta = RegEnable(io.metaReadBus.resp.data(0), state === s_arrayReadWait)
-  val data = RegEnable(io.dataReadBus.resp.data, state === s_arrayReadWait)
+  val meta = RegEnable(io.metaReadBus.resp.data(0)(0), state === s_arrayReadWait)
+  val data = RegEnable(io.dataReadBus.resp.data(0), state === s_arrayReadWait)
 
   // check
   val addr = req.addr.asTypeOf(addrBundle)
@@ -364,7 +364,7 @@ class Cache(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   val s2 = Module(new CacheStage2(ro, name, userBits))
   val s3 = Module(new CacheStage3(ro, name, userBits))
   val metaArray = Module(new SRAMTemplate(new MetaBundle, set = Sets, way = Ways, shouldReset = true, singlePort = true))
-  val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways * LineBeats, singlePort = true))
+  val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets, way = Ways, subarray = LineBeats, singlePort = true))
 
   if (name == "icache") {
     // flush icache when executing fence.i
@@ -413,8 +413,8 @@ class Cache(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
   s1.io.dataReadBus.resp := dataArray.io.r.resp
   dataArray.io.w <> s3.io.dataWriteBus
 
-  s2.io.metaReadResp := metaArray.io.r.resp.data
-  s3.io.dataBlock := RegEnable(dataArray.io.r.resp.data, s2.io.out.fire())
+  s2.io.metaReadResp := metaArray.io.r.resp.data(0)
+  s3.io.dataBlock := RegEnable(dataArray.io.r.resp.data(0), s2.io.out.fire())
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.meta.hit, "perfCntCondM" + name + "Hit")
 

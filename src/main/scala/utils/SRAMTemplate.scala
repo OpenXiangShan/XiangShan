@@ -7,34 +7,38 @@ class SRAMBundleA(val set: Int) extends Bundle {
   val idx = Output(UInt(log2Up(set).W))
 }
 
-class SRAMBundleAW[T <: Data](private val gen: T, set: Int, val way: Int = 1) extends SRAMBundleA(set) {
+class SRAMBundleAW[T <: Data](private val gen: T,
+  set: Int, val way: Int = 1, val subarray: Int = 1) extends SRAMBundleA(set) {
   val data = Output(gen)
-  val wordIndex = Output(UInt(log2Up(way).W))
+  val subarrayMask = if (subarray > 1) Some(Output(UInt(subarray.W))) else None
+  val wayMask = if (way > 1) Some(Output(Vec(way, Bool()))) else None
 }
 
-class SRAMBundleR[T <: Data](private val gen: T, val way: Int = 1) extends Bundle {
-  val data = Output(Vec(way, gen))
+class SRAMBundleR[T <: Data](private val gen: T,
+  val way: Int = 1, val subarray: Int = 1) extends Bundle {
+  val data = Output(Vec(way, Vec(subarray, gen)))
 }
 
-class SRAMReadBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
+class SRAMReadBus[T <: Data](private val gen: T,
+  val set: Int, val way: Int = 1, val subarray: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleA(set))
-  val resp = Flipped(new SRAMBundleR(gen, way))
+  val resp = Flipped(new SRAMBundleR(gen, way, subarray))
 }
 
-class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
-  val req = Decoupled(new SRAMBundleAW(gen, set, way))
+class SRAMWriteBus[T <: Data](private val gen: T,
+  val set: Int, val way: Int = 1, val subarray: Int = 1) extends Bundle {
+  val req = Decoupled(new SRAMBundleAW(gen, set, way, subarray))
 }
 
-class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
+class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1, subarray: Int = 1,
   shouldReset: Boolean = false, holdRead: Boolean = false, singlePort: Boolean = false) extends Module {
   val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(gen, set, way))
-    val w = Flipped(new SRAMWriteBus(gen, set, way))
+    val r = Flipped(new SRAMReadBus(gen, set, way, subarray))
+    val w = Flipped(new SRAMWriteBus(gen, set, way, subarray))
   })
 
   val wordType = UInt(gen.getWidth.W)
-  val wayType = Vec(way, wordType)
-  val array = SyncReadMem(set, wayType)
+  val arrays = Seq.tabulate(subarray) { i => SyncReadMem(set, Vec(way, wordType)) }
   val (resetState, resetIdx) = (WireInit(false.B), WireInit(0.U))
 
   if (shouldReset) {
@@ -48,17 +52,20 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
 
   val idx = Mux(resetState, resetIdx, io.w.req.bits.idx)
   val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
-  val wordIndex = if (way > 1) io.w.req.bits.wordIndex else 0.U
-  val wdata = WordShift(wdataword, wordIndex, gen.getWidth).asTypeOf(wayType)
-  val wmask = if (way > 1) (1.U << wordIndex).asBools else Seq(true.B)
+  val subarrayMask = Mux(resetState, Fill(subarray, "b1".U), io.w.req.bits.subarrayMask.getOrElse("b1".U))
+  val wayMask = io.w.req.bits.wayMask.getOrElse("b1".U.asBools)
+  val wdata = VecInit(Seq.fill(way)(wdataword))
 
   val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
   val realRen = (if (singlePort) ren && !wen else ren)
-  when (wen) { array.write(idx, wdata, wmask) }
 
-  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.idx, realRen)
-              else array.read(io.r.req.bits.idx, realRen)).map(_.asTypeOf(gen))
-  io.r.resp.data := VecInit(rdata)
+  val rdatas = for ((array, i) <- arrays.zipWithIndex) yield {
+    when (wen & subarrayMask(i)) { array.write(idx, wdata, wayMask) }
+    (if (holdRead) ReadAndHold(array, io.r.req.bits.idx, realRen)
+      else array.read(io.r.req.bits.idx, realRen)).map(_.asTypeOf(gen))
+  }
+
+  io.r.resp.data := VecInit(rdatas.transpose.map(VecInit(_)))
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
 }
