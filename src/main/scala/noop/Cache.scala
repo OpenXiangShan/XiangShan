@@ -59,10 +59,8 @@ sealed class DataBundle extends CacheBundle {
   val data = Output(UInt(DataBits.W))
 }
 
-sealed class Stage1IO(userBits: Int = 0) extends CacheBundle {
+sealed class Stage1IO(val userBits: Int = 0) extends CacheBundle {
   val req = new SimpleBusReqBundle(userBits = userBits)
-
-  override def cloneType = new Stage1IO(userBits).asInstanceOf[this.type]
 }
 
 // meta read
@@ -98,11 +96,9 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends C
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 }
 
-sealed class Stage2IO(userBits: Int = 0) extends CacheBundle {
+sealed class Stage2IO(val userBits: Int = 0) extends CacheBundle {
   val req = new SimpleBusReqBundle(userBits = userBits)
   val meta = new MetaPipelineBundle
-
-  override def cloneType = new Stage2IO(userBits).asInstanceOf[this.type]
 }
 
 // check

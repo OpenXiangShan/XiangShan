@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class TableAddr(idxBits: Int) extends NOOPBundle {
+class TableAddr(val idxBits: Int) extends NOOPBundle {
   def tagBits = AddrBits - 2 - idxBits
 
   val tag = UInt(tagBits.W)
@@ -16,8 +16,6 @@ class TableAddr(idxBits: Int) extends NOOPBundle {
   def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
-
-  override def cloneType = new TableAddr(idxBits).asInstanceOf[this.type]
 }
 
 object BTBtype {

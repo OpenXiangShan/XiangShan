@@ -3,31 +3,26 @@ package utils
 import chisel3._
 import chisel3.util._
 
-class SRAMBundleA(set: Int) extends Bundle {
+class SRAMBundleA(val set: Int) extends Bundle {
   val idx = Output(UInt(log2Up(set).W))
-  override def cloneType = new SRAMBundleA(set).asInstanceOf[this.type]
 }
 
-class SRAMBundleAW[T <: Data](gen: T, set: Int, way: Int = 1) extends SRAMBundleA(set) {
+class SRAMBundleAW[T <: Data](private val gen: T, set: Int, val way: Int = 1) extends SRAMBundleA(set) {
   val data = Output(gen)
   val wordIndex = Output(UInt(log2Up(way).W))
-  override def cloneType = new SRAMBundleAW(gen, set, way).asInstanceOf[this.type]
 }
 
-class SRAMBundleR[T <: Data](gen: T, way: Int = 1) extends Bundle {
+class SRAMBundleR[T <: Data](private val gen: T, val way: Int = 1) extends Bundle {
   val data = Output(Vec(way, gen))
-  override def cloneType = new SRAMBundleR(gen, way).asInstanceOf[this.type]
 }
 
-class SRAMReadBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
+class SRAMReadBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleA(set))
   val resp = Flipped(new SRAMBundleR(gen, way))
-  override def cloneType = new SRAMReadBus(gen, set, way).asInstanceOf[this.type]
 }
 
-class SRAMWriteBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
+class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleAW(gen, set, way))
-  override def cloneType = new SRAMWriteBus(gen, set, way).asInstanceOf[this.type]
 }
 
 class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
