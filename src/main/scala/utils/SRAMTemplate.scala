@@ -11,7 +11,7 @@ class SRAMBundleAW[T <: Data](private val gen: T,
   set: Int, val way: Int = 1, val subarray: Int = 1) extends SRAMBundleA(set) {
   val data = Output(gen)
   val subarrayMask = if (subarray > 1) Some(Output(UInt(subarray.W))) else None
-  val wayMask = if (way > 1) Some(Output(Vec(way, Bool()))) else None
+  val waymask = if (way > 1) Some(Output(UInt(way.W))) else None
 }
 
 class SRAMBundleR[T <: Data](private val gen: T,
@@ -53,14 +53,14 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1, subarray: Int = 1,
   val idx = Mux(resetState, resetIdx, io.w.req.bits.idx)
   val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
   val subarrayMask = Mux(resetState, Fill(subarray, "b1".U), io.w.req.bits.subarrayMask.getOrElse("b1".U))
-  val wayMask = io.w.req.bits.wayMask.getOrElse("b1".U.asBools)
+  val waymask = io.w.req.bits.waymask.getOrElse("b1".U)
   val wdata = VecInit(Seq.fill(way)(wdataword))
 
   val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
   val realRen = (if (singlePort) ren && !wen else ren)
 
   val rdatas = for ((array, i) <- arrays.zipWithIndex) yield {
-    when (wen & subarrayMask(i)) { array.write(idx, wdata, wayMask) }
+    when (wen & subarrayMask(i)) { array.write(idx, wdata, waymask.asBools) }
     (if (holdRead) ReadAndHold(array, io.r.req.bits.idx, realRen)
       else array.read(io.r.req.bits.idx, realRen)).map(_.asTypeOf(gen))
   }
