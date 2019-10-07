@@ -3,31 +3,26 @@ package utils
 import chisel3._
 import chisel3.util._
 
-class SRAMBundleA(set: Int) extends Bundle {
-  val idx = Output(UInt(log2Up(set).W))
-  override def cloneType = new SRAMBundleA(set).asInstanceOf[this.type]
+class SRAMBundleA(val set: Int) extends Bundle {
+  val setIdx = Output(UInt(log2Up(set).W))
 }
 
-class SRAMBundleAW[T <: Data](gen: T, set: Int, way: Int = 1) extends SRAMBundleA(set) {
+class SRAMBundleAW[T <: Data](private val gen: T, set: Int, val way: Int = 1) extends SRAMBundleA(set) {
   val data = Output(gen)
-  val wordIndex = Output(UInt(log2Up(way).W))
-  override def cloneType = new SRAMBundleAW(gen, set, way).asInstanceOf[this.type]
+  val waymask = if (way > 1) Some(Output(UInt(way.W))) else None
 }
 
-class SRAMBundleR[T <: Data](gen: T, way: Int = 1) extends Bundle {
+class SRAMBundleR[T <: Data](private val gen: T, val way: Int = 1) extends Bundle {
   val data = Output(Vec(way, gen))
-  override def cloneType = new SRAMBundleR(gen, way).asInstanceOf[this.type]
 }
 
-class SRAMReadBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
+class SRAMReadBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleA(set))
   val resp = Flipped(new SRAMBundleR(gen, way))
-  override def cloneType = new SRAMReadBus(gen, set, way).asInstanceOf[this.type]
 }
 
-class SRAMWriteBus[T <: Data](gen: T, set: Int, way: Int = 1) extends Bundle {
+class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleAW(gen, set, way))
-  override def cloneType = new SRAMWriteBus(gen, set, way).asInstanceOf[this.type]
 }
 
 class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
@@ -38,32 +33,31 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   })
 
   val wordType = UInt(gen.getWidth.W)
-  val wayType = Vec(way, wordType)
-  val array = SyncReadMem(set, wayType)
-  val (resetState, resetIdx) = (WireInit(false.B), WireInit(0.U))
+  val array = SyncReadMem(set, Vec(way, wordType))
+  val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
 
   if (shouldReset) {
     val _resetState = RegInit(true.B)
-    val (_resetIdx, resetFinish) = Counter(_resetState, set)
+    val (_resetSet, resetFinish) = Counter(_resetState, set)
     when (resetFinish) { _resetState := false.B }
 
     resetState := _resetState
-    resetIdx := _resetIdx
+    resetSet := _resetSet
   }
-
-  val idx = Mux(resetState, resetIdx, io.w.req.bits.idx)
-  val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
-  val wordIndex = if (way > 1) io.w.req.bits.wordIndex else 0.U
-  val wdata = WordShift(wdataword, wordIndex, gen.getWidth).asTypeOf(wayType)
-  val wmask = if (way > 1) (1.U << wordIndex).asBools else Seq(true.B)
 
   val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
   val realRen = (if (singlePort) ren && !wen else ren)
-  when (wen) { array.write(idx, wdata, wmask) }
 
-  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.idx, realRen)
-              else array.read(io.r.req.bits.idx, realRen)).map(_.asTypeOf(gen))
+  val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
+  val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
+  val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
+  val wdata = VecInit(Seq.fill(way)(wdataword))
+  when (wen) { array.write(setIdx, wdata, waymask.asBools) }
+
+  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.setIdx, realRen)
+               else array.read(io.r.req.bits.setIdx, realRen)).map(_.asTypeOf(gen))
   io.r.resp.data := VecInit(rdata)
+
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
 }

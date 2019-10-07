@@ -97,12 +97,13 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
+    const int stuck_limit = 200;
     while (!is_finish() && n > 0) {
       single_cycle();
       n --;
 
-      if (lastcommit - n > 700 && hascommit) {
-        eprintf("No instruction commits for 700 cycles, maybe get stuck\n");
+      if (lastcommit - n > stuck_limit && hascommit) {
+        eprintf("No instruction commits for %d cycles, maybe get stuck\n", stuck_limit);
         set_abort();
       }
 

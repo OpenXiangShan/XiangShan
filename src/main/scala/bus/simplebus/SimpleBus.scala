@@ -27,7 +27,7 @@ object SimpleBusCmd {
   def apply() = UInt(4.W)
 }
 
-class SimpleBusReqBundle(userBits: Int = 0) extends SimpleBusBundle {
+class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
   val addr = Output(UInt(64.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
@@ -35,7 +35,6 @@ class SimpleBusReqBundle(userBits: Int = 0) extends SimpleBusBundle {
   val wdata = Output(UInt(DataBits.W))
   val user = Output(UInt(userBits.W))
 
-  override def cloneType = new SimpleBusReqBundle(userBits).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     p"addr = 0x${Hexadecimal(addr)}, cmd = ${cmd}, size = ${size}, " +
     p"wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}"
@@ -48,12 +47,11 @@ class SimpleBusReqBundle(userBits: Int = 0) extends SimpleBusBundle {
   def isProbe() = cmd === SimpleBusCmd.probe
 }
 
-class SimpleBusRespBundle(userBits: Int = 0) extends SimpleBusBundle {
+class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
   val cmd = Output(SimpleBusCmd())
   val rdata = Output(UInt(DataBits.W))
   val user = Output(UInt(userBits.W))
 
-  override def cloneType = new SimpleBusRespBundle(userBits).asInstanceOf[this.type]
   override def toPrintable: Printable = p"rdata = ${Hexadecimal(rdata)}, cmd = ${cmd}"
 
   def isReadLast() = cmd === SimpleBusCmd.readLast
@@ -62,11 +60,10 @@ class SimpleBusRespBundle(userBits: Int = 0) extends SimpleBusBundle {
 }
 
 // Uncache
-class SimpleBusUC(userBits: Int = 0) extends SimpleBusBundle {
+class SimpleBusUC(val userBits: Int = 0) extends SimpleBusBundle {
   val req = Decoupled(new SimpleBusReqBundle(userBits))
   val resp = Flipped(Decoupled(new SimpleBusRespBundle(userBits)))
 
-  override def cloneType = new SimpleBusUC(userBits).asInstanceOf[this.type]
   def isWrite() = req.valid && req.bits.isWrite()
   def isRead()  = req.valid && req.bits.isRead()
   def toAXI4Lite() = SimpleBus2AXI4Converter(this, new AXI4Lite)
@@ -79,9 +76,7 @@ class SimpleBusUC(userBits: Int = 0) extends SimpleBusBundle {
 }
 
 // Cache
-class SimpleBusC(userBits: Int = 0) extends SimpleBusBundle {
+class SimpleBusC(val userBits: Int = 0) extends SimpleBusBundle {
   val mem = new SimpleBusUC(userBits)
   val coh = Flipped(new SimpleBusUC(userBits))
-
-  override def cloneType = new SimpleBusC(userBits).asInstanceOf[this.type]
 }

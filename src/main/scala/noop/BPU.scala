@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class TableAddr(idxBits: Int) extends NOOPBundle {
+class TableAddr(val idxBits: Int) extends NOOPBundle {
   def tagBits = AddrBits - 2 - idxBits
 
   val tag = UInt(tagBits.W)
@@ -16,8 +16,6 @@ class TableAddr(idxBits: Int) extends NOOPBundle {
   def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
-
-  override def cloneType = new TableAddr(idxBits).asInstanceOf[this.type]
 }
 
 object BTBtype {
@@ -64,7 +62,7 @@ class BPU1 extends NOOPModule {
   btb.reset := reset.asBool || flushBTB
 
   btb.io.r.req.valid := io.in.pc.valid
-  btb.io.r.req.bits.idx := btbAddr.getIdx(io.in.pc.bits)
+  btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
 
   val btbRead = Wire(btbEntry())
   btbRead := btb.io.r.resp.data(0)
@@ -99,8 +97,7 @@ class BPU1 extends NOOPModule {
   // than read request. Again, since the pipeline will be flushed
   // in the next cycle, the read request will be useless.
   btb.io.w.req.valid := req.isMissPredict && req.valid
-  btb.io.w.req.bits.idx := btbAddr.getIdx(req.pc)
-  btb.io.w.req.bits.wordIndex := 0.U // ???
+  btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
   btb.io.w.req.bits.data := btbWrite
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
