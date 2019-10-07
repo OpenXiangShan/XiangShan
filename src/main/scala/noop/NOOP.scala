@@ -93,6 +93,13 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     dcache.io.in <> exu.io.dmem
     dcache.io.flush := Fill(2, false.B)
     dcache.io.out
-  } else { exu.io.dmem })
+  } else {
+    val busC = Wire(new SimpleBusC)
+    busC.mem <> exu.io.dmem
+    busC.coh := DontCare
+    busC.coh.req.valid := false.B
+    busC.coh.resp.ready := true.B
+    busC
+  })
   io.mmio <> exu.io.mmio
 }
