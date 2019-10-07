@@ -26,5 +26,5 @@ class AXI4Timer(sim: Boolean = false) extends AXI4SlaveModule(new AXI4Lite, new 
   RegMap.generate(mapping, raddr(3,0), in.r.bits.data,
     waddr(3,0), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
 
-  io.extra.get.mtip := mtime >= mtimecmp
+  io.extra.get.mtip := RegNext(mtime >= mtimecmp)
 }
