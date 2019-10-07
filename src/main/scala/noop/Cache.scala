@@ -321,7 +321,7 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
     val dataReadBus = CacheDataArrayReadBus()
   })
 
-  val s_idle :: s_metaRead :: s_check :: s_dataRead :: s_dataReadWait :: s_release :: Nil = Enum(6)
+  val s_idle :: s_metaRead :: s_metaReadWait :: s_check :: s_dataRead :: s_dataReadWait :: s_release :: Nil = Enum(7)
   val state = RegInit(s_idle)
 
   io.in.ready := (state === s_idle)
@@ -329,10 +329,10 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
   val addr = req.addr.asTypeOf(addrBundle)
   io.metaReadBus.req.valid := (state === s_metaRead)
   io.metaReadBus.req.bits.setIdx := addr.index
+  val metaWay = RegEnable(io.metaReadBus.resp.data, state === s_metaReadWait)
 
-  val hitVec = VecInit(io.metaReadBus.resp.data.map(m => m.valid && (m.tag === addr.tag))).asUInt
-  val hitVecLatch = HoldUnless(hitVec, state === s_check)
-  val hit = hitVecLatch.orR
+  val hitVec = VecInit(metaWay.map(m => m.valid && (m.tag === addr.tag))).asUInt
+  val hit = hitVec.orR
   val idxCnt = Counter(LineBeats)
 
   io.dataReadBus.req.valid := (state === s_dataRead)
@@ -343,9 +343,10 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
   switch (state) {
     is (s_idle) { when (io.in.fire()) { state := s_metaRead } }
     is (s_metaRead) {
-      when (io.metaReadBus.req.ready) { state := s_check }
+      when (io.metaReadBus.req.ready) { state := s_metaReadWait }
       assert(req.isProbe())
     }
+    is (s_metaReadWait) { state := s_check }
     is (s_check) {
       when (io.out.fire()) {
         state := Mux(hit, s_dataRead, s_idle)
@@ -363,7 +364,7 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
   }
 
   io.out.valid := (state === s_check) || (state === s_release)
-  io.out.bits.rdata := Mux1H(hitVecLatch, dataWay).data
+  io.out.bits.rdata := Mux1H(hitVec, dataWay).data
   io.out.bits.user := 0.U
   io.out.bits.cmd := Mux(state === s_release, Mux(last, SimpleBusCmd.readLast, 0.U),
     Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
