@@ -189,7 +189,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
 
-  val s2_idle :: s2_dataReadReq :: s2_dataReadWait :: s2_memWriteReq :: Nil = Enum(4)
+  val s2_idle :: s2_dataReadWait :: s2_memWriteReq :: Nil = Enum(3)
   val state2 = RegInit(s2_idle)
 
   val dataWriteBackReadBus = Wire(CacheDataArrayReadBus())
@@ -197,12 +197,10 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
   dataWriteBackReadBus.req.valid := (state === s_memWriteReq) && (state2 === s2_idle)
   dataWriteBackReadBus.req.bits.setIdx := Cat(addr.index, writeBeatCnt.value)
   io.dataReadBus <> dataWriteBackReadBus
-
   val dataWay = RegEnable(dataWriteBackReadBus.resp.data, state2 === s2_dataReadWait)
 
   switch (state2) {
-    is (s2_idle) { when (state === s_memWriteReq) { state2 := s2_dataReadReq } }
-    is (s2_dataReadReq) { state2 := s2_dataReadWait }
+    is (s2_idle) { when (state === s_memWriteReq) { state2 := s2_dataReadWait } }
     is (s2_dataReadWait) { state2 := s2_memWriteReq }
     is (s2_memWriteReq) { when (io.mem.req.fire()) { state2 := s2_idle } }
   }
