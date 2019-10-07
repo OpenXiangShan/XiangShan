@@ -43,6 +43,7 @@ class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isRead() = !cmd(0) && !cmd(3)
   def isWrite() = cmd(0)
   def isBurst() = cmd(1)
+  def isWriteSingle() = cmd === SimpleBusCmd.write
   def isWriteLast() = cmd === SimpleBusCmd.writeLast
   def isProbe() = cmd === SimpleBusCmd.probe
 }
