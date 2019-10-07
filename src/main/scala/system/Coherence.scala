@@ -7,7 +7,7 @@ import utils._
 import bus.simplebus._
 
 trait HasCoherenceConst {
-  val supportCoh = true
+  val supportCoh = false //true
 }
 
 class CoherenceInterconnect extends Module with HasCoherenceConst {

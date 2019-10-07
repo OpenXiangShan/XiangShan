@@ -62,10 +62,10 @@ class BPU1 extends NOOPModule {
   btb.reset := reset.asBool || flushBTB
 
   btb.io.r.req.valid := io.in.pc.valid
-  btb.io.r.req.bits.idx := btbAddr.getIdx(io.in.pc.bits)
+  btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
 
   val btbRead = Wire(btbEntry())
-  btbRead := btb.io.r.resp.data(0)(0)
+  btbRead := btb.io.r.resp.data(0)
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
@@ -97,7 +97,7 @@ class BPU1 extends NOOPModule {
   // than read request. Again, since the pipeline will be flushed
   // in the next cycle, the read request will be useless.
   btb.io.w.req.valid := req.isMissPredict && req.valid
-  btb.io.w.req.bits.idx := btbAddr.getIdx(req.pc)
+  btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
   btb.io.w.req.bits.data := btbWrite
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
