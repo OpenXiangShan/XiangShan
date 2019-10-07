@@ -319,66 +319,54 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
     val out = Decoupled(new SimpleBusRespBundle)
     val metaReadBus = CacheMetaArrayReadBus()
     val dataReadBus = CacheDataArrayReadBus()
-    //val metaWriteBus = CacheMetaArrayWriteBus()
   })
 
-  val s_idle :: s_arrayRead :: s_arrayReadWait :: s_check :: s_release :: Nil = Enum(5)
+  val s_idle :: s_metaRead :: s_check :: s_dataRead :: s_dataReadWait :: s_release :: Nil = Enum(6)
   val state = RegInit(s_idle)
 
   io.in.ready := (state === s_idle)
   val req = RegEnable(io.in.bits, io.in.fire())
   val addr = req.addr.asTypeOf(addrBundle)
+  io.metaReadBus.req.valid := (state === s_metaRead)
+  io.metaReadBus.req.bits.setIdx := addr.index
 
-  // read meta array and data array
-  List(io.metaReadBus, io.dataReadBus).map { case x => {
-    x.req.valid := (state === s_arrayRead)
-    x.req.bits.setIdx := addr.index
-  }}
-  //io.dataReadBus.req.bits.subarrayIdx.map(_ := addr.wordIndex) // FIXME
-
-  // Latching meta and data
-  val meta = RegEnable(io.metaReadBus.resp.data(0), state === s_arrayReadWait)
-  val data = RegEnable(io.dataReadBus.resp.data(0), state === s_arrayReadWait)
-
-  // check
-  val hit = meta.valid && (meta.tag === addr.tag)
-
-  // release
-  val beatCnt = Counter(LineBeats)
+  val hitVec = VecInit(io.metaReadBus.resp.data.map(m => m.valid && (m.tag === addr.tag))).asUInt
+  val hitVecLatch = HoldUnless(hitVec, state === s_check)
+  val hit = hitVecLatch.orR
   val idxCnt = Counter(LineBeats)
-  val last = WireInit(false.B)
+
+  io.dataReadBus.req.valid := (state === s_dataRead)
+  io.dataReadBus.req.bits.setIdx := Cat(addr.index, idxCnt.value)
+  val dataWay = RegEnable(io.dataReadBus.resp.data, state === s_dataReadWait)
+  val last = Counter(state === s_release && io.out.fire(), LineBeats)._2
 
   switch (state) {
-    is (s_idle) { when (io.in.fire()) { state := s_arrayRead } }
-    is (s_arrayRead) {
-      when (io.metaReadBus.req.ready && io.dataReadBus.req.ready) { state := s_arrayReadWait }
+    is (s_idle) { when (io.in.fire()) { state := s_metaRead } }
+    is (s_metaRead) {
+      when (io.metaReadBus.req.ready) { state := s_check }
       assert(req.isProbe())
     }
-    is (s_arrayReadWait) { state := s_check }
     is (s_check) {
       when (io.out.fire()) {
-        state := Mux(hit, s_release, s_idle)
+        state := Mux(hit, s_dataRead, s_idle)
         idxCnt.value := addr.wordIndex
       }
     }
+    is (s_dataRead) { when (io.dataReadBus.req.ready) { state := s_dataReadWait } }
+    is (s_dataReadWait) { state := s_release }
     is (s_release) {
       when (io.out.fire()) {
         idxCnt.inc()
-        when (beatCnt.inc()) {
-          state := s_idle
-          last := true.B
-        }
+        state := Mux(last, s_idle, s_dataRead)
       }
     }
   }
 
   io.out.valid := (state === s_check) || (state === s_release)
-  io.out.bits.rdata := data.data // FIXME
+  io.out.bits.rdata := Mux1H(hitVecLatch, dataWay).data
   io.out.bits.user := 0.U
   io.out.bits.cmd := Mux(state === s_release, Mux(last, SimpleBusCmd.readLast, 0.U),
     Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
-
-  // FIXME: should invalidate the meta array
 }
 
 class Cache(ro: Boolean, name: String, userBits: Int = 0) extends CacheModule {
