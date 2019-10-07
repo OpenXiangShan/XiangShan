@@ -45,7 +45,6 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
   aw := ar
   mem.resp.bits.rdata := r.data
   mem.resp.bits.cmd  := Mux(rlast, SimpleBusCmd.readLast, 0.U)
-  mem.resp.bits.user := 0.U
 
   val wSend = Wire(Bool())
   val awAck = BoolStopWatch(axi.aw.fire(), wSend)

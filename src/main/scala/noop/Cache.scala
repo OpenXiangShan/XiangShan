@@ -175,10 +175,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
 
   // if miss, access memory
   io.mem := DontCare
-  List(io.mem.req.bits).map { a =>
-    a.size := (if (XLEN == 64) "b11".U else "b10".U)
-    a.user  := 0.U
-  }
+  io.mem.req.bits.size := (if (XLEN == 64) "b11".U else "b10".U)
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
@@ -293,7 +290,7 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.cmd := DontCare
-  io.out.bits.user := io.in.bits.req.user
+  io.out.bits.user.zip(io.in.bits.req.user).map { case (o,i) => o := i }
   io.out.valid := io.in.valid && Mux(hit, true.B, Mux(req.isWrite(), state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
@@ -365,7 +362,6 @@ sealed class CacheProbeStage(ro: Boolean, name: String) extends CacheModule {
 
   io.out.valid := (state === s_check) || (state === s_release)
   io.out.bits.rdata := Mux1H(hitVec, dataWay).data
-  io.out.bits.user := 0.U
   io.out.bits.cmd := Mux(state === s_release, Mux(last, SimpleBusCmd.readLast, 0.U),
     Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
 }

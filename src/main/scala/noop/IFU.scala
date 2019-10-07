@@ -45,7 +45,7 @@ class IFU extends NOOPModule with HasResetVector {
   io.imem.req.bits.addr := Cat(pc(AddrBits-1,2),0.U(2.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
   io.imem.req.bits.size := "b11".U
   io.imem.req.bits.cmd := SimpleBusCmd.read
-  io.imem.req.bits.user := npc
+  io.imem.req.bits.user.map(_ := npc)
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare
@@ -53,7 +53,7 @@ class IFU extends NOOPModule with HasResetVector {
     //inst path only uses 32bit inst, get the right inst according to pc(2)
   io.out.bits.instr := (if (XLEN == 64) io.imem.resp.bits.rdata.asTypeOf(Vec(2, UInt(32.W)))(io.pc(2))
                        else io.imem.resp.bits.rdata)
-  io.out.bits.pnpc := io.imem.resp.bits.user
+  io.imem.resp.bits.user.map(io.out.bits.pnpc := _)
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
