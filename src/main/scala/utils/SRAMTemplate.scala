@@ -5,11 +5,23 @@ import chisel3.util._
 
 class SRAMBundleA(val set: Int) extends Bundle {
   val setIdx = Output(UInt(log2Up(set).W))
+
+  def apply(setIdx: UInt) = {
+    this.setIdx := setIdx
+    this
+  }
 }
 
 class SRAMBundleAW[T <: Data](private val gen: T, set: Int, val way: Int = 1) extends SRAMBundleA(set) {
   val data = Output(gen)
   val waymask = if (way > 1) Some(Output(UInt(way.W))) else None
+
+  def apply(data: T, setIdx: UInt, waymask: UInt) = {
+    super.apply(setIdx)
+    this.data := data
+    this.waymask.map(_ := waymask)
+    this
+  }
 }
 
 class SRAMBundleR[T <: Data](private val gen: T, val way: Int = 1) extends Bundle {
@@ -19,10 +31,22 @@ class SRAMBundleR[T <: Data](private val gen: T, val way: Int = 1) extends Bundl
 class SRAMReadBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleA(set))
   val resp = Flipped(new SRAMBundleR(gen, way))
+
+  def apply(valid: Bool, setIdx: UInt) = {
+    this.req.bits.apply(setIdx)
+    this.req.valid := valid
+    this
+  }
 }
 
 class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1) extends Bundle {
   val req = Decoupled(new SRAMBundleAW(gen, set, way))
+
+  def apply(valid: Bool, data: T, setIdx: UInt, waymask: UInt) = {
+    this.req.bits.apply(data = data, setIdx = setIdx, waymask = waymask)
+    this.req.valid := valid
+    this
+  }
 }
 
 class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
