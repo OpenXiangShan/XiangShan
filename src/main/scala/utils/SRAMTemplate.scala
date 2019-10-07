@@ -50,7 +50,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
 
   val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
   val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
-  val waymask = io.w.req.bits.waymask.getOrElse("b1".U)
+  val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
   val wdata = VecInit(Seq.fill(way)(wdataword))
   when (wen) { array.write(setIdx, wdata, waymask.asBools) }
 
