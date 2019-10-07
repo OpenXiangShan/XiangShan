@@ -108,8 +108,11 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val mip = WireInit(0.U.asTypeOf(new Interrupt))
 
   val mtip = WireInit(false.B)
+  val meip = WireInit(false.B)
   BoringUtils.addSink(mtip, "mtip")
+  BoringUtils.addSink(meip, "meip")
   mip.t.m := mtip
+  mip.e.m := meip
 
   val intrVec = mie(11,0) & mip.asUInt & Fill(12, mstatusStruct.ie.m)
   BoringUtils.addSource(intrVec, "intrVecIDU")
