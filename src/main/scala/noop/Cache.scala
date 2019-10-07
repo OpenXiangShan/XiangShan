@@ -15,7 +15,7 @@ sealed trait HasCacheConst {
   val TotalSize = 32 // Kbytes
   val LineSize = XLEN // byte
   val LineBeats = LineSize / 8 //DATA WIDTH 64
-  val Ways = 1
+  val Ways = 4
   val Sets = TotalSize * 1024 / LineSize / Ways
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
