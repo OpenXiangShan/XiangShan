@@ -14,7 +14,7 @@ class AXI4Timer(sim: Boolean = false) extends AXI4SlaveModule(new AXI4Lite, new 
   val mtime = RegInit(0.U(64.W))  // unit: ms
   val mtimecmp = RegInit(0.U(64.W))
 
-  val clk = (if (!sim) 40000 /* 40MHz / 1000 */ else 2000)
+  val clk = (if (!sim) 40000 /* 40MHz / 1000 */ else 10000)
   val tick = Counter(true.B, clk)._2
   when (tick) { mtime := mtime + 1.U }
 

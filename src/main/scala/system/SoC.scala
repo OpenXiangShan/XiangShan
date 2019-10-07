@@ -12,6 +12,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
     val mem = new AXI4
     val mmio = (if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC })
     val mtip = Input(Bool())
+    val meip = Input(Bool())
   })
 
   val noop = Module(new NOOP)
@@ -24,5 +25,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
   else io.mmio <> noop.io.mmio
 
   val mtipSync = RegNext(RegNext(io.mtip))
+  val meipSync = RegNext(RegNext(io.meip))
   BoringUtils.addSource(mtipSync, "mtip")
+  BoringUtils.addSource(meipSync, "meip")
 }
