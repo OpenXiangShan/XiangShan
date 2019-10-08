@@ -13,7 +13,7 @@ trait HasResetVector {
 
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBusUC(userBits = AddrBits)
+    val imem = new SimpleBusUC(userBits = AddrBits + 2)
     val pc = Input(UInt(AddrBits.W))
     val out = Decoupled(new IRIDCtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
@@ -30,8 +30,14 @@ class IFU extends NOOPModule with HasResetVector {
   val bp1 = Module(new BPU1)
   // predicted next pc
   val pnpc = bp1.io.out.target
+  val pbrIdx = bp1.io.out.brIdx
   // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(bp1.io.out.valid, pnpc, snpc)))
   val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
+  val brIdx = Wire(UInt(2.W)) 
+  // brIdx(0) -> branch at pc offset 0 (mod 4)
+  // brIdx(1) -> branch at pc offset 2 (mod 4)
+  brIdx := Mux(io.redirect.valid, 0.U, Mux(io.redirectRVC.valid, 0.U, pbrIdx))
+  //TODO: BP will be disabled shortly after a redirect request
 
   bp1.io.in.pc.valid := io.imem.req.fire() // only predict when Icache accepts a request
   bp1.io.in.pc.bits := npc  // predict one cycle early
@@ -55,14 +61,15 @@ class IFU extends NOOPModule with HasResetVector {
   io.imem.req.bits.addr := Cat(pc(AddrBits-1,1),0.U(1.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
   io.imem.req.bits.size := "b11".U
   io.imem.req.bits.cmd := SimpleBusCmd.read
-  io.imem.req.bits.user := npc
+  io.imem.req.bits.user := Cat(brIdx, npc)
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare
   io.out.bits.pc := io.pc
     //inst path only uses 32bit inst, get the right inst according to pc(2)
   io.out.bits.instr := io.imem.resp.bits.rdata
-  io.out.bits.pnpc := io.imem.resp.bits.user
+  io.out.bits.pnpc := io.imem.resp.bits.user(AddrBits-1,0)
+  io.out.bits.brIdx := io.imem.resp.bits.user(AddrBits+1,AddrBits)
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   Debug(){

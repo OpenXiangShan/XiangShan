@@ -104,6 +104,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   io.redirect.valid := (valid && func === CSROpType.jmp) || isException
   io.redirect.target := Mux(isMret, mepc, mtvec)
+  io.redirect.brIdx := DontCare
 
   when (io.redirect.valid && !isMret) {
     mepc := io.cfIn.pc

@@ -84,7 +84,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.forward <> exu.io.forward
 
   io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = AddrBits))
+    val icache = Module(new Cache(ro = true, name = "icache", userBits = AddrBits + 2)) // userBits = AddrBits + BrIdxBits
     icache.io.in <> ifu.io.imem
     icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
     ifu.io.pc := icache.io.addr

@@ -11,7 +11,7 @@ class TableAddr(idxBits: Int) extends NOOPBundle {
 
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
-  val pad = UInt(2.W)
+  val pad = UInt(1.W)
 
   def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
@@ -37,6 +37,7 @@ class BPUUpdateReq extends NOOPBundle {
   val actualTaken = Output(Bool())  // for branch
   val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
+  val isRVC = Output(Bool()) // for ras, save PC+2 to stack if is RVC
 }
 
 class BPU1 extends NOOPModule {
@@ -55,6 +56,7 @@ class BPU1 extends NOOPModule {
     val tag = UInt(btbAddr.tagBits.W)
     val _type = UInt(2.W)
     val target = UInt(AddrBits.W)
+    val brIdx = UInt(2.W)
   }
 
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
@@ -67,6 +69,7 @@ class BPU1 extends NOOPModule {
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
   val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B)
+  // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
 
   // PHT
   val pht = Mem(NRbtb, UInt(2.W))
@@ -76,8 +79,10 @@ class BPU1 extends NOOPModule {
 
   val NRras = 16
   val ras = Mem(NRras, UInt(AddrBits.W))
+  val raBrIdxs = Mem(NRras, UInt(2.W))
   val sp = Counter(NRras)
   val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
+  val rasBrIdx = RegEnable(raBrIdxs.read(sp.value), io.in.pc.valid)
 
   // update
   val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
@@ -87,6 +92,7 @@ class BPU1 extends NOOPModule {
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
   btbWrite._type := req.btbType
+  btbWrite.brIdx := Cat(req.pc(1), ~req.pc(1))
   // NOTE: We only update BTB at a miss prediction.
   // If a miss prediction is found, the pipeline will be flushed
   // in the next cycle. Therefore it is safe to use single-port
@@ -109,8 +115,9 @@ class BPU1 extends NOOPModule {
     }
   }
   when (req.valid) {
-    when (req.fuOpType === ALUOpType.call) {
-      ras.write(sp.value + 1.U, req.pc + 4.U)
+    when (req.fuOpType === ALUOpType.call)  {
+      ras.write(sp.value + 1.U, Mux(req.isRVC, req.pc + 2.U, req.pc + 4.U))
+      raBrIdxs.write(sp.value + 1.U, Mux(req.pc(1), 2.U, 1.U))
       sp.value := sp.value + 1.U
     }
     .elsewhen (req.fuOpType === ALUOpType.ret) {
@@ -119,6 +126,7 @@ class BPU1 extends NOOPModule {
   }
 
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
+  io.out.brIdx  := Mux(btbRead._type === BTBtype.R, rasBrIdx, btbRead.brIdx)
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
 }
 
