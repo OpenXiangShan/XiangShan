@@ -80,13 +80,10 @@ class LSU extends NOOPModule {
     is (s_partialLoad) { state := s_idle }
   }
 
-  dmem.req.bits.addr := addr
-  dmem.req.bits.size := func(1, 0)
+  val size = func(1,0)
+  dmem.req.bits.apply(addr = addr, size = size, wdata = genWdata(io.wdata, size),
+    wmask = genWmask(addr, size), cmd = Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read))
   dmem.req.valid := valid && (state === s_idle) && !mmio
-  dmem.req.bits.cmd := Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read)
-  dmem.req.bits.wdata := genWdata(io.wdata, func(1, 0))
-  dmem.req.bits.wmask := genWmask(addr, func(1, 0))
-  dmem.req.bits.user := 0.U
   dmem.resp.ready := true.B
 
   io.mmio.req.bits := dmem.req.bits
