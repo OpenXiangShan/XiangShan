@@ -127,12 +127,12 @@ class IDU extends NOOPModule with HasInstrType {
   // val nextState = WireInit(0.U(2.W))
   val canGo = WireInit(false.B)
   val canIn = WireInit(false.B)
-  // val brIdx = io.in.bits.brIdx
-  val brIdx = 0.U
-  val rvcFinish = pcOffset === 0.U && (!isRVC || brIdx(0)) || pcOffset === 4.U && (!isRVC || brIdx(0)) || pcOffset === 2.U && isRVC || pcOffset === 6.U && isRVC  
+  val brIdx = io.in.bits.brIdx
+  // val brIdx = 0.U
+  val rvcFinish = pcOffset === 0.U && (!isRVC || brIdx(0)) || pcOffset === 4.U && (!isRVC || brIdx(0)) || pcOffset === 2.U && (isRVC || brIdx(1)) || pcOffset === 6.U && isRVC  
   // if brIdx(0) (branch taken at inst with offest 0), ignore the rest part of this instline
   // just get next pc and instline from IFU
-  val rvcNext = pcOffset === 0.U && isRVC || pcOffset === 4.U && isRVC || pcOffset === 2.U && !isRVC
+  val rvcNext = pcOffset === 0.U && (isRVC && !brIdx(0)) || pcOffset === 4.U && (isRVC && !brIdx(0)) || pcOffset === 2.U && !isRVC && !brIdx(1)
   val rvcSpecial = pcOffset === 6.U && !isRVC
   val flushIFU = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid
   val pcOut = WireInit(0.U(AddrBits.W))
@@ -140,7 +140,7 @@ class IDU extends NOOPModule with HasInstrType {
   val specialPCR = Reg(UInt(AddrBits.W)) // reg for full inst taht cross 2 inst line
   val specialInstR = Reg(UInt(16.W))
   val redirectPC = Cat(io.in.bits.pc(31,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line
-  val rvcForceLoadNext = pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U 
+  val rvcForceLoadNext = pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U && !brIdx(1)
   //------------------------------------------------------
   // rvcForceLoadNext is used to deal with: 
   // 8010004a:	406007b7          	lui	a5,0x40600
@@ -150,6 +150,7 @@ class IDU extends NOOPModule with HasInstrType {
   // after 8010004e there will be 8010004c instead of 80100050
   //------------------------------------------------------
   // if there is a j inst in current inst line, a redirect req will be sent by ALU before invalid inst exception being committed
+  // when brIdx(1), next instline will just be branch target, eatline is no longer needed 
 
   // only for test, add this to pipeline when do real implementation
   // val predictBranch = io.in.valid && Mux(io.in.bits.pc(1), io.in.bits.pc + 2.U === io.in.bits.pnpc, io.in.bits.pc + 4.U === io.in.bits.pnpc)
@@ -242,7 +243,7 @@ class IDU extends NOOPModule with HasInstrType {
 
   Debug(){
     when(io.out.fire()){
-      printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType)
+      printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x brIdx: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType, brIdx)
     }
   }
 }

@@ -70,6 +70,11 @@ class BPU1 extends NOOPModule {
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
   val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B)
   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
+  Debug(){
+  when(btbHit){
+      printf("[BTB] tag=%x, bridx=%x, tgt=%x\n", Cat(btbRead.tag, 0.U(2.W)), btbRead.brIdx, btbRead.target)
+    }
+  }
 
   // PHT
   val pht = Mem(NRbtb, UInt(2.W))
@@ -126,7 +131,7 @@ class BPU1 extends NOOPModule {
   }
 
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  io.out.brIdx  := Mux(btbRead._type === BTBtype.R, rasBrIdx, btbRead.brIdx)
+  io.out.brIdx  := Mux(btbRead._type === BTBtype.R, rasBrIdx & Fill(2, io.out.valid), btbRead.brIdx & Fill(2, io.out.valid))
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
 }
 

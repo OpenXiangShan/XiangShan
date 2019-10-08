@@ -31,8 +31,8 @@ class IFU extends NOOPModule with HasResetVector {
   // predicted next pc
   val pnpc = bp1.io.out.target
   val pbrIdx = bp1.io.out.brIdx
-  // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(bp1.io.out.valid, pnpc, snpc)))
-  val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
+  val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(bp1.io.out.valid, pnpc, snpc)))
+  // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
   val brIdx = Wire(UInt(2.W)) 
   // brIdx(0) -> branch at pc offset 0 (mod 4)
   // brIdx(1) -> branch at pc offset 2 (mod 4)
@@ -41,8 +41,8 @@ class IFU extends NOOPModule with HasResetVector {
 
   bp1.io.in.pc.valid := io.imem.req.fire() // only predict when Icache accepts a request
   bp1.io.in.pc.bits := npc  // predict one cycle early
-  bp1.io.flush := io.redirect.valid 
-  // bp1.io.flush := io.redirect.valid || io.redirectRVC.valid
+  // bp1.io.flush := io.redirect.valid 
+  bp1.io.flush := io.redirect.valid || io.redirectRVC.valid
 
   //val bp2 = Module(new BPU2)
   //bp2.io.in.bits := io.out.bits
