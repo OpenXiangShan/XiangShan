@@ -40,12 +40,9 @@ class IFU extends NOOPModule with HasResetVector {
   io.flushVec := Mux(io.redirect.valid, "b1111".U, 0.U)
   io.bpFlush := false.B
 
-  io.imem := DontCare
+  io.imem.req.bits.apply(addr = Cat(pc(AddrBits-1,2),0.U(2.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
+    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = npc)
   io.imem.req.valid := io.out.ready
-  io.imem.req.bits.addr := Cat(pc(AddrBits-1,2),0.U(2.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
-  io.imem.req.bits.size := "b11".U
-  io.imem.req.bits.cmd := SimpleBusCmd.read
-  io.imem.req.bits.user.map(_ := npc)
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare

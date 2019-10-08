@@ -170,10 +170,6 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
     data = Wire(new MetaBundle).apply(tag = meta.tag, valid = true.B, dirty = (!ro).B)
   )
 
-  // if miss, access memory
-  io.mem := DontCare
-  io.mem.req.bits.size := (if (XLEN == 64) "b11".U else "b10".U)
-
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
   val needFlush = RegInit(false.B)
@@ -198,17 +194,16 @@ sealed class CacheStage3(ro: Boolean, name: String, userBits: Int = 0) extends C
     is (s2_memWriteReq) { when (io.mem.req.fire()) { state2 := s2_idle } }
   }
 
-  io.mem.req.bits.wdata := Mux1H(io.in.bits.waymask, dataWay).data
-  io.mem.req.bits.wmask := Fill(DataBytes, 1.U)
-  io.mem.req.bits.cmd := Mux(state === s_memReadReq, SimpleBusCmd.readBurst,
-    Mux((writeBeatCnt.value === (LineBeats - 1).U), SimpleBusCmd.writeLast, SimpleBusCmd.writeBurst))
-
-  // critical word first
+  // critical word first read
   val raddr = (if (XLEN == 64) Cat(req.addr(AddrBits-1,3), 0.U(3.W))
                           else Cat(req.addr(AddrBits-1,2), 0.U(2.W)))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
-  io.mem.req.bits.addr := Mux(state === s_memReadReq, raddr, waddr)
+  val cmd = Mux(state === s_memReadReq, SimpleBusCmd.readBurst,
+    Mux((writeBeatCnt.value === (LineBeats - 1).U), SimpleBusCmd.writeLast, SimpleBusCmd.writeBurst))
+  io.mem.req.bits.apply(addr = Mux(state === s_memReadReq, raddr, waddr),
+    cmd = cmd, size = (if (XLEN == 64) "b11".U else "b10".U),
+    wdata = Mux1H(io.in.bits.waymask, dataWay).data, wmask = Fill(DataBytes, 1.U))
 
   io.mem.resp.ready := true.B
   io.mem.req.valid := (state === s_memReadReq) || ((state === s_memWriteReq) && (state2 === s2_memWriteReq))

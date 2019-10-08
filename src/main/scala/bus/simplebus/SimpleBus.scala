@@ -40,6 +40,15 @@ class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
     p"wmask = 0x${Hexadecimal(wmask)}, wdata = 0x${Hexadecimal(wdata)}"
   }
 
+  def apply(addr: UInt, cmd: UInt, size: UInt, wdata: UInt, wmask: UInt, user: UInt = 0.U) {
+    this.addr := addr
+    this.cmd := cmd
+    this.size := size
+    this.wdata := wdata
+    this.wmask := wmask
+    this.user.map(_ := user)
+  }
+
   def isRead() = !cmd(0) && !cmd(3)
   def isWrite() = cmd(0)
   def isBurst() = cmd(1)
