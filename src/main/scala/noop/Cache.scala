@@ -158,7 +158,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     val in = Flipped(Decoupled(new Stage2IO))
     val out = Decoupled(new SimpleBusRespBundle(userBits = userBits))
     val isFinish = Output(Bool())
-    val addr = Output(UInt(AddrBits.W))
     val flush = Input(Bool())
     val dataWriteBus = CacheDataArrayWriteBus()
     val dataReadBus = CacheDataArrayReadBus()
@@ -289,7 +288,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   // request really ends.
   io.isFinish := Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
 
-  io.addr := req.addr
   io.in.ready := io.out.ready && (state === s_idle) && !miss
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
@@ -358,7 +356,6 @@ sealed class CacheProbeStage(implicit val cacheConfig: CacheConfig) extends Cach
 class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   val io = IO(new Bundle {
     val in = Flipped(new SimpleBusUC(userBits = userBits))
-    val addr = Output(UInt(AddrBits.W))
     val flush = Input(UInt(2.W))
     val out = new SimpleBusC
   })
@@ -382,7 +379,6 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
   s3.io.flush := io.flush(1)
-  io.addr := s3.io.addr
   io.out.mem <> s3.io.mem
 
   // stalling
