@@ -11,18 +11,20 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
     val out = Vec(addressSpace.length, new SimpleBusUC)
   })
 
+  val s_idle :: s_resp :: Nil = Enum(2)
+  val state = RegInit(s_idle)
+
   // select the output channel according to the address
   val addr = io.in.req.bits.addr
   val outSelVec = VecInit(addressSpace.map(
     range => (addr >= range._1.U && addr < (range._1 + range._2).U)))
   val outSelIdx = PriorityEncoder(outSelVec)
   val outSel = io.out(outSelIdx)
+  val outSelIdxResp = RegEnable(outSelIdx, outSel.req.fire() && (state === s_idle))
+  val outSelResp = io.out(outSelIdxResp)
 
   assert(!io.in.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
   assert(!(io.in.req.valid && outSelVec.asUInt.andR), "address decode error, bad addr = 0x%x\n", addr)
-
-  val s_idle :: s_resp :: Nil = Enum(2)
-  val state = RegInit(s_idle)
 
   // bind out.req channel
   (io.out zip outSelVec).map { case (o, v) => {
@@ -33,12 +35,12 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
 
   switch (state) {
     is (s_idle) { when (outSel.req.fire()) { state := s_resp } }
-    is (s_resp) { when (outSel.resp.fire()) { state := s_idle } }
+    is (s_resp) { when (outSelResp.resp.fire()) { state := s_idle } }
   }
 
-  io.in.resp.valid := outSel.resp.fire()
-  io.in.resp.bits <> outSel.resp.bits
-  outSel.resp.ready := io.in.resp.ready
+  io.in.resp.valid := outSelResp.resp.fire()
+  io.in.resp.bits <> outSelResp.resp.bits
+  outSelResp.resp.ready := io.in.resp.ready
   io.in.req.ready := outSel.req.ready
 
   Debug() {
