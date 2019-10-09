@@ -5,57 +5,45 @@ import chisel3.util._
 
 import utils._
 
-class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module {
+class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(Vec(m, new SimpleBusUC))
+    val in = Flipped(new SimpleBusUC)
     val out = Vec(addressSpace.length, new SimpleBusUC)
   })
 
-  require(m == 1, "now we only support 1 input channel")
-  val inSel = io.in(0)
-
   // select the output channel according to the address
-  val addr = inSel.req.bits.addr
+  val addr = io.in.req.bits.addr
   val outSelVec = VecInit(addressSpace.map(
     range => (addr >= range._1.U && addr < (range._1 + range._2).U)))
   val outSelIdx = PriorityEncoder(outSelVec)
   val outSel = io.out(outSelIdx)
 
-  assert(!inSel.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
-  assert(!(inSel.req.valid && outSelVec.asUInt.andR), "address decode error, bad addr = 0x%x\n", addr)
+  assert(!io.in.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
+  assert(!(io.in.req.valid && outSelVec.asUInt.andR), "address decode error, bad addr = 0x%x\n", addr)
 
-  val s_idle :: s_req :: s_resp :: Nil = Enum(3)
+  val s_idle :: s_resp :: Nil = Enum(2)
   val state = RegInit(s_idle)
 
   // bind out.req channel
   (io.out zip outSelVec).map { case (o, v) => {
-    o.req.bits := inSel.req.bits
-    o.req.valid := v && ((inSel.req.valid && (state === s_idle)) || (state === s_req))
+    o.req.bits := io.in.req.bits
+    o.req.valid := v && (io.in.req.valid && (state === s_idle))
     o.resp.ready := v
   }}
 
-  val bypass_s_resp = Mux(outSel.resp.fire(), s_idle, s_resp)
-  val bypass_s_req = Mux(outSel.req.fire(), bypass_s_resp, s_req)
   switch (state) {
-    is (s_idle) {
-      when (inSel.req.valid) { state := bypass_s_req }
-    }
-    is (s_req) {
-      when (outSel.req.fire()) { state := bypass_s_resp }
-    }
-    is (s_resp) {
-      when (outSel.resp.fire()) { state := s_idle }
-    }
+    is (s_idle) { when (outSel.req.fire()) { state := s_resp } }
+    is (s_resp) { when (outSel.resp.fire()) { state := s_idle } }
   }
 
-  inSel.resp.valid := outSel.resp.fire()
-  inSel.resp.bits <> outSel.resp.bits
-  outSel.resp.ready := inSel.resp.ready
-  inSel.req.ready := outSel.req.ready
+  io.in.resp.valid := outSel.resp.fire()
+  io.in.resp.bits <> outSel.resp.bits
+  outSel.resp.ready := io.in.resp.ready
+  io.in.req.ready := outSel.req.ready
 
   Debug() {
-    when (state === s_idle && inSel.req.valid) {
-      printf(p"${GTimer()}: xbar: in.req: ${inSel.req.bits}\n")
+    when (state === s_idle && io.in.req.valid) {
+      printf(p"${GTimer()}: xbar: in.req: ${io.in.req.bits}\n")
     }
 
     when (outSel.req.fire()) {
@@ -65,8 +53,62 @@ class SimpleBusCrossbar(m: Int, addressSpace: List[(Long, Long)]) extends Module
       printf(p"${GTimer()}: xbar: outSelIdx= ${outSelIdx}, outSel.resp: ${outSel.resp.bits}\n")
     }
 
-    when (inSel.resp.fire()) {
-      printf(p"${GTimer()}: xbar: in.resp: ${inSel.resp.bits}\n")
+    when (io.in.resp.fire()) {
+      printf(p"${GTimer()}: xbar: in.resp: ${io.in.resp.bits}\n")
     }
   }
+}
+
+class SimpleBusCrossbarNto1(n: Int) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(n, new SimpleBusUC))
+    val out = new SimpleBusUC
+  })
+
+  val s_idle :: s_readResp :: s_writeResp :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+
+  val lockWriteFun = ((x: SimpleBusReqBundle) => x.isWrite() && x.isBurst())
+  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).req.bits), n, 8, Some(lockWriteFun)))
+  (inputArb.io.in zip io.in.map(_.req)).map{ case (arb, in) => arb <> in }
+  val thisReq = inputArb.io.out
+  assert(!(thisReq.valid && !thisReq.bits.isRead() && !thisReq.bits.isWrite()))
+  val inflightSrc = Reg(UInt(log2Up(n).W))
+
+  io.out.req.bits := thisReq.bits
+  // bind correct valid and ready signals
+  io.out.req.valid := thisReq.valid && (state === s_idle)
+  thisReq.ready := io.out.req.ready && (state === s_idle)
+
+  io.in.map(_.resp.bits := io.out.resp.bits)
+  io.in.map(_.resp.valid := false.B)
+  (io.in(inflightSrc).resp, io.out.resp) match { case (l, r) => {
+    l.valid := r.valid
+    r.ready := l.ready
+  }}
+
+  switch (state) {
+    is (s_idle) {
+      when (thisReq.fire()) {
+        inflightSrc := inputArb.io.chosen
+        when (thisReq.bits.isRead()) { state := s_readResp }
+        .elsewhen (thisReq.bits.isWriteLast()) { state := s_writeResp }
+      }
+    }
+    is (s_readResp) { when (io.out.resp.fire() && io.out.resp.bits.isReadLast()) { state := s_idle } }
+    is (s_writeResp) { when (io.out.resp.fire()) { state := s_idle } }
+  }
+}
+
+class SimpleBusCrossbar(n: Int, addressSpace: List[(Long, Long)]) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(n, new SimpleBusUC))
+    val out = Vec(addressSpace.length, new SimpleBusUC)
+  })
+
+  val inXbar = Module(new SimpleBusCrossbarNto1(n))
+  val outXbar = Module(new SimpleBusCrossbar1toN(addressSpace))
+  inXbar.io.in <> io.in
+  outXbar.io.in <> inXbar.io.out
+  io.out <> outXbar.io.out
 }

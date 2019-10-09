@@ -19,8 +19,8 @@ class SimMMIO extends Module {
     (0x40800000L, 0x8L)  // vga ctrl
   )
 
-  val xbar = Module(new SimpleBusCrossbar(1, devAddrSpace))
-  xbar.io.in(0) <> io.rw
+  val xbar = Module(new SimpleBusCrossbar1toN(devAddrSpace))
+  xbar.io.in <> io.rw
 
   val uart = Module(new AXI4UART)
   val timer = Module(new AXI4Timer(sim = true))
