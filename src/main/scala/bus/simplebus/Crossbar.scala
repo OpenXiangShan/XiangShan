@@ -94,7 +94,7 @@ class SimpleBusCrossbarNto1(n: Int) extends Module {
       when (thisReq.fire()) {
         inflightSrc := inputArb.io.chosen
         when (thisReq.bits.isRead()) { state := s_readResp }
-        .elsewhen (thisReq.bits.isWriteLast()) { state := s_writeResp }
+        .elsewhen (thisReq.bits.isWriteLast() || thisReq.bits.isWriteSingle()) { state := s_writeResp }
       }
     }
     is (s_readResp) { when (io.out.resp.fire() && io.out.resp.bits.isReadLast()) { state := s_idle } }
