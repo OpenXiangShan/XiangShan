@@ -1,5 +1,4 @@
 package noop
-//TODO(rv64)
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
@@ -26,7 +25,6 @@ object LSUOpType {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(XLEN.W))
   val dmem = new SimpleBusUC
-  val mmio = new SimpleBusUC
   val isMMIO = Output(Bool())
 }
 
@@ -63,39 +61,27 @@ class LSU extends NOOPModule {
   val addr = src1 + src2
   val addrLatch = RegNext(addr)
   val isStore = valid && LSUOpType.isStore(func)
+  val partialLoad = !isStore && (func =/= LSUOpType.ld)
 
   val s_idle :: s_wait_resp :: s_partialLoad :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
-  val mmio = AddressSpace.isMMIO(addr)
-  val partialLoad = !isStore && (func =/= LSUOpType.ld)
-
   switch (state) {
-    is (s_idle) { when (valid) {
-      when (Mux(mmio, io.mmio.req.fire(), dmem.req.fire())) { state := Mux(isStore && !mmio, s_partialLoad, s_wait_resp) }
-    }}
-    is (s_wait_resp) {
-      when (Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire())) { state := Mux(partialLoad, s_partialLoad, s_idle) }
-    }
+    is (s_idle) { when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) } }
+    is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
   }
 
   val size = func(1,0)
   dmem.req.bits.apply(addr = addr, size = size, wdata = genWdata(io.wdata, size),
     wmask = genWmask(addr, size), cmd = Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read))
-  dmem.req.valid := valid && (state === s_idle) && !mmio
+  dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B
 
-  io.mmio.req.bits := dmem.req.bits
-  io.mmio.req.valid := valid && (state === s_idle) && mmio
-  io.mmio.resp.ready := true.B
-
-  io.out.valid := Mux(isStore && !mmio, state === s_partialLoad, Mux(partialLoad, state === s_partialLoad,
-    Mux(mmio, io.mmio.resp.fire(), dmem.resp.fire() && (state === s_wait_resp))))
+  io.out.valid := Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp))
   io.in.ready := (state === s_idle)
 
-  val mmioLatch = RegNext(mmio)
-  val rdata = Mux(mmioLatch, io.mmio.resp.bits.rdata, dmem.resp.bits.rdata)
+  val rdata = dmem.resp.bits.rdata
   val rdataLatch = RegNext(rdata)
   val rdataSel = LookupTree(addrLatch(2, 0), List(
     "b000".U -> rdataLatch(63, 0),
@@ -117,10 +103,10 @@ class LSU extends NOOPModule {
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
-  io.isMMIO := mmio && valid
+  io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
 
   BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")
   BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")
   BoringUtils.addSource(BoolStopWatch(dmem.isWrite(), dmem.resp.fire()), "perfCntCondMstoreStall")
-  BoringUtils.addSource(io.mmio.req.fire(), "perfCntCondMmmioInstr")
+  BoringUtils.addSource(io.isMMIO, "perfCntCondMmmioInstr")
 }

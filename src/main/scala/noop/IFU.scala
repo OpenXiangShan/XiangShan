@@ -13,8 +13,7 @@ trait HasResetVector {
 
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBusUC(userBits = AddrBits)
-    val pc = Input(UInt(AddrBits.W))
+    val imem = new SimpleBusUC(userBits = AddrBits*2)
     val out = Decoupled(new CtrlFlowIO)
     val redirect = Flipped(new RedirectIO)
     val flushVec = Output(UInt(4.W))
@@ -41,16 +40,18 @@ class IFU extends NOOPModule with HasResetVector {
   io.bpFlush := false.B
 
   io.imem.req.bits.apply(addr = Cat(pc(AddrBits-1,2),0.U(2.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
-    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = npc)
+    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(npc, pc))
   io.imem.req.valid := io.out.ready
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare
-  io.out.bits.pc := io.pc
     //inst path only uses 32bit inst, get the right inst according to pc(2)
-  io.out.bits.instr := (if (XLEN == 64) io.imem.resp.bits.rdata.asTypeOf(Vec(2, UInt(32.W)))(io.pc(2))
+  io.out.bits.instr := (if (XLEN == 64) io.imem.resp.bits.rdata.asTypeOf(Vec(2, UInt(32.W)))(io.out.bits.pc(2))
                        else io.imem.resp.bits.rdata)
-  io.imem.resp.bits.user.map(io.out.bits.pnpc := _)
+  io.imem.resp.bits.user.map{ case x =>
+    io.out.bits.pc := x(AddrBits-1,0)
+    io.out.bits.pnpc := x(AddrBits*2-1,AddrBits)
+  }
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")

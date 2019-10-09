@@ -13,9 +13,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val out = Decoupled(new CommitIO)
     val flush = Input(Bool())
     val dmem = new SimpleBusUC
-    val mmio = new SimpleBusUC
     val forward = new ForwardIO
-    //val wbData = Input(UInt(32.W))
   })
 
   val src1 = io.in.bits.data.src1
@@ -37,7 +35,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   lsu.io.wdata := src2
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
-  io.mmio <> lsu.io.mmio
   lsu.io.out.ready := true.B
 
   val mdu = Module(new MDU)
