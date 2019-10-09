@@ -80,25 +80,9 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
-  io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache()(CacheConfig(ro = true, name = "icache", userBits = AddrBits*2)))
-    icache.io.in <> ifu.io.imem
-    icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
-    icache.io.out
-  } else { ifu.io.imem })
-
-  io.dmem <> (if (HasDcache) {
-    val dcache = Module(new Cache()(CacheConfig(ro = false, name = "dcache")))
-    dcache.io.in <> exu.io.dmem
-    dcache.io.flush := Fill(2, false.B)
-    dcache.io.out
-  } else {
-    val busC = Wire(new SimpleBusC)
-    busC.mem <> exu.io.dmem
-    busC.coh := DontCare
-    busC.coh.req.valid := false.B
-    busC.coh.resp.ready := true.B
-    busC
-  })
-  io.mmio <> exu.io.mmio
+  val immio = Wire(new SimpleBusUC)
+  immio := DontCare
+  io.imem <> Cache(ifu.io.imem, immio, Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+  io.dmem <> Cache(exu.io.dmem, io.mmio, "b00".U)(CacheConfig(ro = false, name = "dcache"))
 }
