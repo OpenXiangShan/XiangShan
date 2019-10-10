@@ -81,7 +81,7 @@ sealed class CacheStage1(ro: Boolean, name: String, userBits: Int = 0) extends C
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
   Debug(){
     when(io.in.fire()){
-      printf("[L1$] " +name+" cache stage1, addr in: %x\n", io.in.bits.addr)
+      printf("[L1$] " +name+" cache stage1, addr in: %x, user: %x\n", io.in.bits.addr, io.in.bits.user)
     }
   }
 

@@ -61,7 +61,7 @@ class IFU extends NOOPModule with HasResetVector {
   io.imem.req.bits.addr := Cat(pc(AddrBits-1,1),0.U(1.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
   io.imem.req.bits.size := "b11".U
   io.imem.req.bits.cmd := SimpleBusCmd.read
-  io.imem.req.bits.user := Cat(brIdx, npc)
+  io.imem.req.bits.user := Cat(brIdx(1,0), npc(31,0))
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   io.out.bits := DontCare

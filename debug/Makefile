@@ -2,9 +2,8 @@ ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=recursion
 
-microbench:
-	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=test run 2>&1 | tee > microbench.log
-	cat microbench.log | grep IPC
+cpu:
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
 
 cputest:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) run 2>&1 | tee > cpu.log
@@ -15,8 +14,21 @@ test:
 	cat test.log | grep different
 	cat test.log | grep ISU > isu.log
 
-cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
+microbench:
+	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=test run 2>&1 | tee > microbench.log
+	cat microbench.log | grep IPC
+
+microbencht:
+	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=train run 2>&1 | tee > microbench.log
+	cat microbench.log | grep IPC
+
+coremark:
+	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) mainargs=test run 2>&1 | tee > coremark.log
+	cat coremark.log | grep IPC
+
+dhrystone:
+	$(MAKE) -C $(AM_HOME)/apps/dhrystone $(ARCH) mainargs=test run 2>&1 | tee > dhrystone.log
+	cat dhrystone.log | grep IPC
 
 xj:
 	$(MAKE) -C $(NANOS_HOME) $(ARCH) run

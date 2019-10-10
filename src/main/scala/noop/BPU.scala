@@ -11,7 +11,7 @@ class TableAddr(idxBits: Int) extends NOOPBundle {
 
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
-  val pad = UInt(1.W)
+  val pad = UInt(2.W)//TODO
 
   def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
@@ -68,11 +68,16 @@ class BPU1 extends NOOPModule {
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B)
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
+  // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
+  // -------------------------------------------------
+  // 0 jump rvc // marked as "take branch" in BTB
+  // 2 xxx  rvc <-- jump to here
+  // -------------------------------------------------
   Debug(){
   when(btbHit){
-      printf("[BTB] tag=%x, bridx=%x, tgt=%x\n", Cat(btbRead.tag, 0.U(2.W)), btbRead.brIdx, btbRead.target)
+      printf("[BTBHT] pc=%x tag=%x index=%x bridx=%x tgt=%x\n", pcLatch, btbRead.tag, btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target)
     }
   }
 
@@ -93,6 +98,12 @@ class BPU1 extends NOOPModule {
   val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
   BoringUtils.addSink(req, "bpuUpdateReq")
+
+  Debug(){
+  when(req.valid){
+      printf("[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
+    }
+  }
 
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
@@ -131,7 +142,8 @@ class BPU1 extends NOOPModule {
   }
 
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  io.out.brIdx  := Mux(btbRead._type === BTBtype.R, rasBrIdx & Fill(2, io.out.valid), btbRead.brIdx & Fill(2, io.out.valid))
+  // io.out.brIdx  := Mux(btbRead._type === BTBtype.R, rasBrIdx & Fill(2, io.out.valid), btbRead.brIdx & Fill(2, io.out.valid))
+  io.out.brIdx  := btbRead.brIdx & Fill(2, io.out.valid)
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
 }
 
