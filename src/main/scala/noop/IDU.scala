@@ -119,7 +119,7 @@ class IDU extends NOOPModule with HasInstrType {
 
   //RVC support FSM
   //only ensure pnpc given by this FSM is right. May need flush after 6 offset 32 bit inst
-  val s_idle :: s_extra :: s_waitnext :: s_cachereq :: Nil = Enum(4) 
+  val s_idle :: s_extra :: s_waitnext :: s_readnext :: Nil = Enum(4) 
   val state = RegInit(UInt(2.W), s_idle)
   val pcOffsetR = RegInit(UInt(3.W), 0.U)
   val pcOffset = Mux(state === s_idle, io.in.bits.pc(2,0), pcOffsetR)
@@ -134,20 +134,29 @@ class IDU extends NOOPModule with HasInstrType {
   // just get next pc and instline from IFU
   val rvcNext = pcOffset === 0.U && (isRVC && !brIdx(0)) || pcOffset === 4.U && (isRVC && !brIdx(0)) || pcOffset === 2.U && !isRVC && !brIdx(1)
   val rvcSpecial = pcOffset === 6.U && !isRVC
-  val flushIFU = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid
+  val pnpcIsSeq = io.in.bits.pnpc === (Cat(io.in.bits.pc(AddrBits-1,2), 0.U(2.W)) + 4.U) // TODO: add a new user bit bpRight to do this 
+  val flushIFU = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid && !pnpcIsSeq
+  val loadNextInstline = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid && pnpcIsSeq
+  // val loadNextInstline =false.B
   val pcOut = WireInit(0.U(AddrBits.W))
   val pnpcOut = WireInit(0.U(AddrBits.W))
-  val specialPCR = Reg(UInt(AddrBits.W)) // reg for full inst taht cross 2 inst line
+  val specialPCR = Reg(UInt(AddrBits.W)) // reg for full inst that cross 2 inst line
   val specialInstR = Reg(UInt(16.W))
   val redirectPC = Cat(io.in.bits.pc(31,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line
-  val rvcForceLoadNext = pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U && !brIdx(1)
+  val rvcForceLoadNext = (pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U && !brIdx(1))
   //------------------------------------------------------
   // rvcForceLoadNext is used to deal with: 
+  // case 1:
   // 8010004a:	406007b7          	lui	a5,0x40600
   // 8010004e:	470d                	li	a4,3
   // 80100050:	00e78623          	sb	a4,12(a5) # 4060000c <_start-0x3faffff4>
   // For icache req inst in seq, if there is no rvcForceLoadNext, 
   // after 8010004e there will be 8010004c instead of 80100050
+  //------------------------------------------------------
+  // case 2:
+  // 80100046:	406007b7          	lui	a5,0x40600
+  // 8010004a:	470d              	li	a4,3
+  // force load next instline into ID stage, if bp wrong, it will be flushed by flushIFU
   //------------------------------------------------------
   // if there is a j inst in current inst line, a redirect req will be sent by ALU before invalid inst exception being committed
   // when brIdx(1), next instline will just be branch target, eatline is no longer needed 
@@ -179,6 +188,7 @@ class IDU extends NOOPModule with HasInstrType {
           pcOffsetR := pcOffset + Mux(isRVC, 2.U, 4.U)
         }
         when(rvcSpecial && io.in.valid){
+          // state := Mux(pnpcIsSeq, s_readnext, s_waitnext)
           state := s_waitnext
           specialPCR := pcOut
           specialInstR := io.in.bits.instr(63,63-16+1) 
@@ -197,6 +207,7 @@ class IDU extends NOOPModule with HasInstrType {
           pcOffsetR := pcOffset + Mux(isRVC, 2.U, 4.U)
         }
         when(rvcSpecial && io.in.valid){
+          // state := Mux(pnpcIsSeq, s_readnext, s_waitnext)
           state := s_waitnext
           specialPCR := pcOut
           specialInstR := io.in.bits.instr(63,63-16+1) 
@@ -216,8 +227,17 @@ class IDU extends NOOPModule with HasInstrType {
           pcOffsetR := "b010".U
         }
       }
-      // is_(s_cachereq){//flush pipeline to get next 64 inst bits
-
+      // is(s_readnext){//npc right, get next 64 inst bits, flush pipeline is not needed 
+      //   //ignore bp result, use pc+4 instead
+      //   pcOut := specialPCR
+      //   pnpcOut := specialPCR + 4.U
+      //   // pnpcOut := Mux(rvcFinish, io.in.bits.pnpc, Mux(isRVC, pcOut+2.U, pcOut+4.U))
+      //   canGo := io.in.valid
+      //   canIn := false.B
+      //   when(io.out.fire()){
+      //     state := s_extra
+      //     pcOffsetR := "b010".U
+      //   }
       // }
     }
   }.otherwise{
@@ -234,7 +254,7 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.cf.instr := instr
 
   io.out.valid := io.in.valid && canGo
-  io.in.ready := !io.in.valid || (io.out.fire() && canIn)
+  io.in.ready := !io.in.valid || (io.out.fire() && canIn) || loadNextInstline
 
   // NOTE:
   // we did not do special opt for cross-line jump inst, hopefully there will not be too much such inst 
