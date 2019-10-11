@@ -1,3 +1,4 @@
+/*
 package noop
 
 import chisel3._
@@ -76,12 +77,12 @@ trait tlbSv32Const {
   //}
 }
 
-class PtwSv32(name : String = "default") extends Module with pteSv32Const with tlbSv32Const {
+class PtwSv32(name : String = "default", userBits:Int) extends Module with pteSv32Const with tlbSv32Const {
   val io = IO(new Bundle {
     val satp = Input(UInt(32.W))
     val flush = Input(Bool())
-    val in   = Flipped(new SimpleBusUC(dataBits=32, userBits=32))
-    val out  = new SimpleBusUC(dataBits=32, userBits=32)
+    val in   = Flipped(new SimpleBusUC(userBits))
+    val out  = new SimpleBusUC(userBits)
   })
 
   val s_ready :: s_tran :: s_walk :: s_mem :: s_error :: Nil = Enum(5)
@@ -251,3 +252,4 @@ class PtwSv32(name : String = "default") extends Module with pteSv32Const with t
     }
   }  
 }
+*/
