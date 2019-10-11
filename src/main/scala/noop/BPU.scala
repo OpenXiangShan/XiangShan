@@ -133,7 +133,7 @@ class BPU1 extends NOOPModule {
   when (req.valid) {
     when (req.fuOpType === ALUOpType.call)  {
       ras.write(sp.value + 1.U, Mux(req.isRVC, req.pc + 2.U, req.pc + 4.U))
-      raBrIdxs.write(sp.value + 1.U, Mux(req.pc(1), 2.U, 1.U))
+      // raBrIdxs.write(sp.value + 1.U, Mux(req.pc(1), 2.U, 1.U))
       sp.value := sp.value + 1.U
     }
     .elsewhen (req.fuOpType === ALUOpType.ret) {

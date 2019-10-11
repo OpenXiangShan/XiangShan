@@ -107,8 +107,8 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.data.imm  := Mux(isRVC, immrvc, imm)
 
   when (fuType === FuType.alu) {
-    when (rd === 1.U && fuOpType === ALUOpType.jal) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
-    when (rs === 1.U && fuOpType === ALUOpType.jalr) { io.out.bits.ctrl.fuOpType := ALUOpType.ret }
+    when (rfDest === 1.U && fuOpType === ALUOpType.jal) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
+    when (rfSrc1 === 1.U && fuOpType === ALUOpType.jalr) { io.out.bits.ctrl.fuOpType := ALUOpType.ret }
   }
   // fix LUI
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
