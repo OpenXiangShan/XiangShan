@@ -103,11 +103,8 @@ class LSU extends NOOPModule {
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
-<<<<<<< HEAD
 
-=======
   io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
->>>>>>> master
 
   BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")
   BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")

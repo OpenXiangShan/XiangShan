@@ -191,11 +191,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_mmioReq :: s_mmioResp :: s_wait_resp :: Nil = Enum(8)
   val state = RegInit(s_idle)
-<<<<<<< HEAD
-
-=======
   val needFlush = RegInit(false.B)
->>>>>>> master
+
   when (io.flush && (state =/= s_idle)) { needFlush := true.B }
   when (io.out.fire() && needFlush) { needFlush := false.B }
 
@@ -231,14 +228,10 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.mem.resp.ready := true.B
   io.mem.req.valid := (state === s_memReadReq) || ((state === s_memWriteReq) && (state2 === s2_memWriteReq))
 
-<<<<<<< HEAD
-
-=======
   // mmio
   io.mmio.req.bits := io.in.bits.req
   io.mmio.resp.ready := true.B
   io.mmio.req.valid := (state === s_mmioReq)
->>>>>>> master
 
   val afterFirstRead = RegInit(false.B)
   val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire())
@@ -317,13 +310,9 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-<<<<<<< HEAD
-
-=======
   Debug(debug) {
     printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
->>>>>>> master
   }
 }
 
@@ -450,9 +439,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
-<<<<<<< HEAD
 
-=======
   Debug(debug) {
     io.in.dump(cacheName + ".in")
     printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
@@ -480,7 +467,6 @@ object Cache {
       xbar.io.in <> in
       mmio <> xbar.io.out(1)
       busC
->>>>>>> master
     }
   }
 }
