@@ -5,7 +5,9 @@ package bus.axi4
 import chisel3._
 import chisel3.util._
 
-object AXI4Parameters {
+import noop.HasNOOPParameter
+
+object AXI4Parameters extends HasNOOPParameter {
   // These are all fixed by the AXI4 standard:
   val lenBits   = 8
   val sizeBits  = 3
@@ -17,8 +19,8 @@ object AXI4Parameters {
 
   // These are not fixed:
   val idBits    = 1
-  val addrBits  = 32
-  val dataBits  = 32
+  val addrBits  = AddrBits
+  val dataBits  = DataBits
   val userBits  = 1
 
   def CACHE_RALLOCATE  = 8.U(cacheBits.W)

@@ -4,14 +4,13 @@ import chisel3._
 import chisel3.util._
 
 trait HasInstrType {
-  private val InstrTypeNum = 7
-  def InstrN = "b000".U
-  def InstrI = "b100".U
-  def InstrR = "b101".U
-  def InstrS = "b010".U
-  def InstrB = "b001".U
-  def InstrU = "b110".U
-  def InstrJ = "b111".U
+  def InstrN  = "b000".U
+  def InstrI  = "b100".U
+  def InstrR  = "b101".U
+  def InstrS  = "b010".U
+  def InstrB  = "b001".U
+  def InstrU  = "b110".U
+  def InstrJ  = "b111".U
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
 }
@@ -24,22 +23,23 @@ object SrcType {
 }
 
 object FuType {
-  def num = 4
-  def alu = "b00".U
-  def lsu = "b01".U
-  def mdu = "b10".U
-  def csr = "b11".U
+  def num = 5
+  def alu = "b000".U
+  def lsu = "b001".U
+  def mdu = "b010".U
+  def csr = "b011".U
+  def mou = "b100".U
   def apply() = UInt(log2Up(num).W)
 }
 
 object FuOpType {
-  def apply() = UInt(5.W)
+  def apply() = UInt(6.W)
 }
 
-object Instructions extends HasInstrType {
+object Instructions extends HasInstrType with HasNOOPParameter {
   def NOP = 0x00000013.U
   val DecodeDefault = List(InstrN, FuType.csr, CSROpType.jmp)
-  def DecodeTable(implicit p: NOOPConfig) = ALUInstr.table ++ BRUInstr.table ++ LSUInstr.table ++
-                    (if (p.HasMExtension) MDUInstr.table else Nil) ++
-                    CSRInstr.table ++ NOOPTrap.table
+  def DecodeTable = RVIInstr.table ++ NOOPTrap.table ++
+    (if (HasMExtension) RVMInstr.table else Nil) ++
+    RVZicsrInstr.table ++ RVZifenceiInstr.table
 }

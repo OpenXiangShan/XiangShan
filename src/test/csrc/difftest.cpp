@@ -12,6 +12,7 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
+void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 void (*ref_isa_reg_display)(void) = NULL;
 
 static bool is_skip_ref;
@@ -33,7 +34,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-void init_difftest(uint32_t *reg, const char *mainargs) {
+void init_difftest(uint64_t *reg, const char *mainargs) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   assert(handle);
@@ -50,6 +51,9 @@ void init_difftest(uint32_t *reg, const char *mainargs) {
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
 
+  ref_difftest_raise_intr = (void (*)(uint64_t))dlsym(handle, "difftest_raise_intr");
+  assert(ref_difftest_raise_intr);
+
   ref_isa_reg_display = (void (*)(void))dlsym(handle, "isa_reg_display");
   assert(ref_isa_reg_display);
 
@@ -64,11 +68,11 @@ void init_difftest(uint32_t *reg, const char *mainargs) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint32_t *reg_scala, uint32_t this_pc, int isMMIO) {
-  uint32_t ref_r[33];
-  static uint32_t nemu_pc = 0x80100000;
-
+int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, uint64_t intrNO) {
+  uint64_t ref_r[33];
+  static uint64_t nemu_pc = 0x80100000;
   if (isMMIO) {
+    // printf("diff pc: %x\n", this_pc);
     // MMIO accessing should not be a branch or jump, just +4 to get the next pc
     reg_scala[32] += 4;
     nemu_pc += 4;
@@ -77,10 +81,15 @@ int difftest_step(uint32_t *reg_scala, uint32_t this_pc, int isMMIO) {
     return 0;
   }
 
-  ref_difftest_exec(1);
+  if (intrNO) {
+    ref_difftest_raise_intr(intrNO);
+  } else {
+    ref_difftest_exec(1);
+  }
+
   ref_difftest_getregs(&ref_r);
 
-  uint32_t temp = ref_r[32];
+  uint64_t temp = ref_r[32];
   ref_r[32] = nemu_pc;
   nemu_pc = temp;
 
@@ -89,7 +98,7 @@ int difftest_step(uint32_t *reg_scala, uint32_t this_pc, int isMMIO) {
     int i;
     for (i = 0; i < 33; i ++) {
       if (reg_scala[i] != ref_r[i]) {
-        printf("x%2d different at pc = 0x%08x, right= 0x%08x, wrong = 0x%08x\n",
+        printf("x%2d different at pc = 0x%08lx, right= 0x%016lx, wrong = 0x%016lx\n",
             i, this_pc, ref_r[i], reg_scala[i]);
       }
     }

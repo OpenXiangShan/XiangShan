@@ -2,18 +2,21 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
+class IDU extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
   })
 
+  val hasIntr = Wire(Bool())
   val instr = io.in.bits.instr
-  val instrType :: fuType :: fuOpType :: Nil =
-    ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
+    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr, intr, dec)}
 
   io.out.bits := DontCare
 
@@ -41,16 +44,16 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
 
   io.out.bits.data := DontCare
   io.out.bits.data.imm  := LookupTree(instrType, List(
-    InstrI -> Cat(Fill(20, instr(31)), instr(31, 20)),
-    InstrS -> Cat(Fill(20, instr(31)), instr(31, 25), instr(11, 7)),
-    InstrB -> Cat(Fill(20, instr(31)), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)),
-    InstrU -> Cat(instr(31, 12), 0.U(12.W)),
-    InstrJ -> Cat(Fill(12, instr(31)), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W))
+    InstrI  -> SignExt(instr(31, 20), XLEN),
+    InstrS  -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
+    InstrB  -> SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN),
+    InstrU  -> SignExt(Cat(instr(31, 12), 0.U(12.W)), XLEN),//fixed
+    InstrJ  -> SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
   ))
 
   when (fuType === FuType.alu) {
-    when (rd === 1.U && fuOpType === BRUOpType.jal) { io.out.bits.ctrl.fuOpType := BRUOpType.call }
-    when (rs === 1.U && fuOpType === BRUOpType.jalr) { io.out.bits.ctrl.fuOpType := BRUOpType.ret }
+    when (rd === 1.U && fuOpType === ALUOpType.jal) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
+    when (rs === 1.U && fuOpType === ALUOpType.jalr) { io.out.bits.ctrl.fuOpType := ALUOpType.ret }
   }
   // fix LUI
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
@@ -58,9 +61,17 @@ class IDU(implicit val p: NOOPConfig) extends Module with HasInstrType {
 
   io.out.bits.cf <> io.in.bits
 
-  io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
+  val intrVec = WireInit(0.U(12.W))
+  BoringUtils.addSink(intrVec, "intrVecIDU")
+  io.out.bits.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
+  hasIntr := intrVec.orR
+
+  io.out.bits.cf.exceptionVec.map(_ := false.B)
+  io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
+  io.out.bits.cf.exceptionVec(ecallM) := (instr === RVZicsrInstr.ECALL) && io.in.valid
+
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
   io.out.valid := io.in.valid
 
-  io.in.ready := !io.in.valid || io.out.fire()
+  io.in.ready := (!io.in.valid || io.out.fire()) && !hasIntr
 }

@@ -8,25 +8,36 @@ import bus.simplebus._
 import bus.axi4._
 import utils._
 
+trait HasNOOPParameter {
+  val XLEN = 64
+  val HasMExtension = true
+  val HasDiv = true
+  val HasIcache = true
+  val HasDcache = true
+  val AddrBits = 32
+  val AddrBytes = AddrBits / 8
+  val DataBits = XLEN
+  val DataBytes = DataBits / 8
+}
+
+abstract class NOOPModule extends Module with HasNOOPParameter with HasExceptionNO
+abstract class NOOPBundle extends Bundle with HasNOOPParameter
+
 case class NOOPConfig (
   FPGAPlatform: Boolean = true,
-  HasIcache: Boolean = true,
-  HasDcache: Boolean = true,
-  HasMExtension: Boolean = true,
-  HasDiv: Boolean = true,
   EnableDebug: Boolean = false
 )
 
 object AddressSpace {
   // (start, size)
-  def mmio = List((0x40000000L, 0x10000000L))
-  def dram = (0x80000000L, 0x10000000L)
+  def mmio = List((0x0000000040000000L, 0x0000000010000000L))
+  def dram = (0x0000000080000000L, 0x0000000010000000L)
 
   //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
   def isMMIO(addr: UInt) = addr(31,28) === "h4".U
 }
 
-class NOOP(implicit val p: NOOPConfig) extends Module {
+class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
@@ -40,7 +51,7 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   val wbu = Module(new WBU)
 
   def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
-    isFlush: Bool, entries: Int = 2, pipe: Boolean = false) = {
+    isFlush: Bool, entries: Int = 4, pipe: Boolean = false) = {
     right <> FlushableQueue(left, isFlush,  entries = entries, pipe = pipe)
   }
 
@@ -52,8 +63,9 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   exu.io.flush := ifu.io.flushVec(3)
 
   Debug() {
-    printf("%d: flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
-      GTimer(), ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
+    printf("------------------------ TIMER: %d ------------------------\n", GTimer())
+    printf("flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
+      ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
     when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) }
@@ -68,36 +80,13 @@ class NOOP(implicit val p: NOOPConfig) extends Module {
   // forward
   isu.io.forward <> exu.io.forward
 
-  io.imem <> (if (p.HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = 32))
-    
-    val iptw   = Module(new PtwSv32(name = "iptw"))
-    iptw.io.satp := "h80087fdf".U
-    iptw.io.flush := ifu.io.flushVec(0).asBool | ifu.io.bpFlush
-    icache.io.in <> iptw.io.out
-    iptw.io.in <> ifu.io.imem
+<<<<<<< HEAD
 
-    //icache.io.in <> ifu.io.imem
-    //icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
-    
-    icache.io.flush := Mux(iptw.io.satp(31).asBool,Fill(2, false.B), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))
-
-    ifu.io.pc := icache.io.addr
-    icache.io.out
-  } else { ifu.io.imem })
-
-  io.dmem <> (if (p.HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache"))
-    
-    val dptw = Module(new PtwSv32(name = "dptw"))
-    dptw.io.satp := "h80087fdf".U
-    dptw.io.flush := false.B
-    dcache.io.in <> dptw.io.out
-    dptw.io.in <> exu.io.dmem
-    
-    //dcache.io.in <> exu.io.dmem
-    dcache.io.flush := Fill(2, false.B)
-    dcache.io.out
-  } else { exu.io.dmem })
-  io.mmio <> exu.io.mmio
+=======
+  val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
+  io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+  io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  io.mmio <> mmioXbar.io.out
+>>>>>>> master
 }

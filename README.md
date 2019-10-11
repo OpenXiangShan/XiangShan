@@ -5,10 +5,10 @@ Currently it only supports riscv32.
 
 ## Compile chisel code
 
-* Install `mill`. Refer to [this guide][mill].
+* Install `mill`. Refer to [the Manual section in this guide][mill].
 * Run `make` to generate verilog code. The output file is `build/TopMain.v`.
 
-[mill]: lihaoyi.com/mill
+[mill]: http://lihaoyi.com/mill#manual
 
 ## Run programs by simulation
 

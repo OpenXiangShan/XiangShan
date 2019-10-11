@@ -7,77 +7,52 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object ALUOpType {
-  def add  = "b00000".U
-  def sll  = "b00001".U
-  def slt  = "b00010".U
-  def sltu = "b00011".U
-  def xor  = "b00100".U
-  def srl  = "b00101".U
-  def or   = "b00110".U
-  def and  = "b00111".U
-  def sub  = "b01000".U
-  def sra  = "b01101".U
-}
+  def add  = "b000000".U
+  def sll  = "b000001".U
+  def slt  = "b000010".U
+  def sltu = "b000011".U
+  def xor  = "b000100".U
+  def srl  = "b000101".U
+  def or   = "b000110".U
+  def and  = "b000111".U
+  def sub  = "b001000".U
+  def sra  = "b001101".U
 
-object ALUInstr extends HasInstrType {
-  def ADDI    = BitPat("b????????????_?????_000_?????_0010011")
-  def SLLI    = BitPat("b0000000?????_?????_001_?????_0010011")
-  def SLTI    = BitPat("b????????????_?????_010_?????_0010011")
-  def SLTIU   = BitPat("b????????????_?????_011_?????_0010011")
-  def XORI    = BitPat("b????????????_?????_100_?????_0010011")
-  def SRLI    = BitPat("b0000000?????_?????_101_?????_0010011")
-  def ORI     = BitPat("b????????????_?????_110_?????_0010011")
-  def ANDI    = BitPat("b????????????_?????_111_?????_0010011")
-  def SRAI    = BitPat("b0100000?????_?????_101_?????_0010011")
+  def addw = "b100000".U
+  def subw = "b101000".U
+  def sllw = "b100001".U
+  def srlw = "b100101".U
+  def sraw = "b101101".U
 
-  def ADD     = BitPat("b0000000_?????_?????_000_?????_0110011")
-  def SLL     = BitPat("b0000000_?????_?????_001_?????_0110011")
-  def SLT     = BitPat("b0000000_?????_?????_010_?????_0110011")
-  def SLTU    = BitPat("b0000000_?????_?????_011_?????_0110011")
-  def XOR     = BitPat("b0000000_?????_?????_100_?????_0110011")
-  def SRL     = BitPat("b0000000_?????_?????_101_?????_0110011")
-  def OR      = BitPat("b0000000_?????_?????_110_?????_0110011")
-  def AND     = BitPat("b0000000_?????_?????_111_?????_0110011")
-  def SUB     = BitPat("b0100000_?????_?????_000_?????_0110011")
-  def SRA     = BitPat("b0100000_?????_?????_101_?????_0110011")
+  def isWordOp(func: UInt) = func(5)
 
-  def AUIPC   = BitPat("b????????????????????_?????_0010111")
-  def LUI     = BitPat("b????????????????????_?????_0110111")
+  def jal  = "b011000".U
+  def jalr = "b011010".U
+  def beq  = "b010000".U
+  def bne  = "b010001".U
+  def blt  = "b010100".U
+  def bge  = "b010101".U
+  def bltu = "b010110".U
+  def bgeu = "b010111".U
 
-  val table = Array(
-    ADDI           -> List(InstrI, FuType.alu, ALUOpType.add),
-    SLLI           -> List(InstrI, FuType.alu, ALUOpType.sll),
-    SLTI           -> List(InstrI, FuType.alu, ALUOpType.slt),
-    SLTIU          -> List(InstrI, FuType.alu, ALUOpType.sltu),
-    XORI           -> List(InstrI, FuType.alu, ALUOpType.xor),
-    SRLI           -> List(InstrI, FuType.alu, ALUOpType.srl),
-    ORI            -> List(InstrI, FuType.alu, ALUOpType.or ),
-    ANDI           -> List(InstrI, FuType.alu, ALUOpType.and),
-    SRAI           -> List(InstrI, FuType.alu, ALUOpType.sra),
+  // for RAS
+  def call = "b011100".U
+  def ret  = "b011110".U
 
-    ADD            -> List(InstrR, FuType.alu, ALUOpType.add),
-    SLL            -> List(InstrR, FuType.alu, ALUOpType.sll),
-    SLT            -> List(InstrR, FuType.alu, ALUOpType.slt),
-    SLTU           -> List(InstrR, FuType.alu, ALUOpType.sltu),
-    XOR            -> List(InstrR, FuType.alu, ALUOpType.xor),
-    SRL            -> List(InstrR, FuType.alu, ALUOpType.srl),
-    OR             -> List(InstrR, FuType.alu, ALUOpType.or ),
-    AND            -> List(InstrR, FuType.alu, ALUOpType.and),
-    SUB            -> List(InstrR, FuType.alu, ALUOpType.sub),
-    SRA            -> List(InstrR, FuType.alu, ALUOpType.sra),
-
-    AUIPC          -> List(InstrU, FuType.alu, ALUOpType.add),
-    LUI            -> List(InstrU, FuType.alu, ALUOpType.add)
-  )
+  def isBru(func: UInt) = func(4)//[important]
+  def isBranch(func: UInt) = !func(3)
+  def isJump(func: UInt) = isBru(func) && !isBranch(func)
+  def getBranchType(func: UInt) = func(2, 1)
+  def isBranchInvert(func: UInt) = func(0)
 }
 
 class ALUIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
   val redirect = new RedirectIO
-  val offset = Input(UInt(32.W))
+  val offset = Input(UInt(XLEN.W))
 }
 
-class ALU extends Module {
+class ALU extends NOOPModule {
   val io = IO(new ALUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -89,34 +64,39 @@ class ALU extends Module {
     io.out.bits
   }
 
-  val isAdderSub = (func =/= ALUOpType.add) && !BRUOpType.isJump(func)
-  val adderRes = (src1 +& (src2 ^ Fill(32, isAdderSub))) + isAdderSub
+  val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !ALUOpType.isJump(func)
+  val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
-  val sltu = !adderRes(32)
-  val slt = xorRes(31) ^ sltu
+  val sltu = !adderRes(XLEN)
+  val slt = xorRes(XLEN-1) ^ sltu
 
-  val shamt = src2(4, 0)
-  val aluRes = LookupTreeDefault(func, adderRes, List(
-    ALUOpType.sll  -> ((src1  << shamt)(31, 0)),
-    ALUOpType.slt  -> Cat(0.U(31.W), slt),
-    ALUOpType.sltu -> Cat(0.U(31.W), sltu),
+  val shsrc1 = LookupTreeDefault(func, src1, List(
+    ALUOpType.srlw -> ZeroExt(src1(31,0), 64),
+    ALUOpType.sraw -> SignExt(src1(31,0), 64)
+  ))
+  val shamt = Mux(ALUOpType.isWordOp(func), src2(4, 0), src2(5, 0))
+  val res = LookupTreeDefault(func(3, 0), adderRes, List(
+    ALUOpType.sll  -> ((shsrc1  << shamt)(XLEN-1, 0)),
+    ALUOpType.slt  -> ZeroExt(slt, XLEN),
+    ALUOpType.sltu -> ZeroExt(sltu, XLEN),
     ALUOpType.xor  -> xorRes,
-    ALUOpType.srl  -> (src1  >> shamt),
+    ALUOpType.srl  -> (shsrc1  >> shamt),
     ALUOpType.or   -> (src1  |  src2),
     ALUOpType.and  -> (src1  &  src2),
-    ALUOpType.sra  -> ((src1.asSInt >> shamt).asUInt)
+    ALUOpType.sra  -> ((shsrc1.asSInt >> shamt).asUInt)
   ))
+  val aluRes = Mux(ALUOpType.isWordOp(func), SignExt(res(31,0), 64), res)
 
   val branchOpTable = List(
-    BRUOpType.getBranchType(BRUOpType.beq)  -> !xorRes.orR,
-    BRUOpType.getBranchType(BRUOpType.blt)  -> slt,
-    BRUOpType.getBranchType(BRUOpType.bltu) -> sltu
+    ALUOpType.getBranchType(ALUOpType.beq)  -> !xorRes.orR,
+    ALUOpType.getBranchType(ALUOpType.blt)  -> slt,
+    ALUOpType.getBranchType(ALUOpType.bltu) -> sltu
   )
 
-  val isBranch = BRUOpType.isBranch(func)
-  val isBru = BRUOpType.isBru(func)
-  val taken = LookupTree(BRUOpType.getBranchType(func), branchOpTable) ^ BRUOpType.isBranchInvert(func)
-  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)
+  val isBranch = ALUOpType.isBranch(func)
+  val isBru = ALUOpType.isBru(func)
+  val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
+  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(AddrBits-1,0)
   val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
   io.redirect.target := Mux(!taken && isBranch, io.cfIn.pc + 4.U, target)
   // with branch predictor, this is actually to fix the wrong prediction
@@ -135,7 +115,7 @@ class ALU extends Module {
   bpuUpdateReq.actualTarget := target
   bpuUpdateReq.actualTaken := taken
   bpuUpdateReq.fuOpType := func
-  bpuUpdateReq.btbType := LookupTree(func, BRUInstr.bruFuncTobtbTypeTable)
+  bpuUpdateReq.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
 
   BoringUtils.addSource(RegNext(bpuUpdateReq), "bpuUpdateReq")
 
@@ -143,10 +123,10 @@ class ALU extends Module {
   val wrong = valid && isBru && predictWrong
   BoringUtils.addSource(right && isBranch, "MbpBRight")
   BoringUtils.addSource(wrong && isBranch, "MbpBWrong")
-  BoringUtils.addSource(right && (func === BRUOpType.jal || func === BRUOpType.call), "MbpJRight")
-  BoringUtils.addSource(wrong && (func === BRUOpType.jal || func === BRUOpType.call), "MbpJWrong")
-  BoringUtils.addSource(right && func === BRUOpType.jalr, "MbpIRight")
-  BoringUtils.addSource(wrong && func === BRUOpType.jalr, "MbpIWrong")
-  BoringUtils.addSource(right && func === BRUOpType.ret, "MbpRRight")
-  BoringUtils.addSource(wrong && func === BRUOpType.ret, "MbpRWrong")
+  BoringUtils.addSource(right && (func === ALUOpType.jal || func === ALUOpType.call), "MbpJRight")
+  BoringUtils.addSource(wrong && (func === ALUOpType.jal || func === ALUOpType.call), "MbpJWrong")
+  BoringUtils.addSource(right && func === ALUOpType.jalr, "MbpIRight")
+  BoringUtils.addSource(wrong && func === ALUOpType.jalr, "MbpIWrong")
+  BoringUtils.addSource(right && func === ALUOpType.ret, "MbpRRight")
+  BoringUtils.addSource(wrong && func === ALUOpType.ret, "MbpRWrong")
 }

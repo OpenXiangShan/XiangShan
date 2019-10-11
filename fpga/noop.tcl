@@ -50,8 +50,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 set list_projs [get_projects -quiet]
 if { $list_projs eq "" } {
-   create_project project_1 myproj -part xczu2eg-sfva625-1-e
-   set_property BOARD_PART interwiser:none:part0:2.0 [current_project]
+   create_project project_1 myproj -part xczu3cg-sfvc784-1-e
 }
 
 
@@ -233,10 +232,10 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   create_bd_pin -dir I -type clk clk50
   create_bd_pin -dir I -type clk coreclk
   create_bd_pin -dir I -from 0 -to 0 -type rst corerstn
-  create_bd_pin -dir O -from 3 -to 0 io_b
-  create_bd_pin -dir O -from 3 -to 0 io_g
+  create_bd_pin -dir O io_extra_mtip
   create_bd_pin -dir O io_hsync
-  create_bd_pin -dir O -from 3 -to 0 io_r
+  create_bd_pin -dir O -from 23 -to 0 io_rgb
+  create_bd_pin -dir O io_videovalid
   create_bd_pin -dir O io_vsync
   create_bd_pin -dir I -type rst rstn50
 
@@ -292,10 +291,10 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   connect_bd_intf_net -intf_net axi_interconnect_0_M03_AXI [get_bd_intf_pins AXI4VGA_0/io_in_fb] [get_bd_intf_pins axi_interconnect_0/M03_AXI]
 
   # Create port connections
-  connect_bd_net -net AXI4VGA_0_io_vga_b [get_bd_pins io_b] [get_bd_pins AXI4VGA_0/io_vga_b]
-  connect_bd_net -net AXI4VGA_0_io_vga_g [get_bd_pins io_g] [get_bd_pins AXI4VGA_0/io_vga_g]
+  connect_bd_net -net AXI4Timer_0_io_extra_mtip [get_bd_pins io_extra_mtip] [get_bd_pins AXI4Timer_0/io_extra_mtip]
   connect_bd_net -net AXI4VGA_0_io_vga_hsync [get_bd_pins io_hsync] [get_bd_pins AXI4VGA_0/io_vga_hsync]
-  connect_bd_net -net AXI4VGA_0_io_vga_r [get_bd_pins io_r] [get_bd_pins AXI4VGA_0/io_vga_r]
+  connect_bd_net -net AXI4VGA_0_io_vga_rgb [get_bd_pins io_rgb] [get_bd_pins AXI4VGA_0/io_vga_rgb]
+  connect_bd_net -net AXI4VGA_0_io_vga_valid [get_bd_pins io_videovalid] [get_bd_pins AXI4VGA_0/io_vga_valid]
   connect_bd_net -net AXI4VGA_0_io_vga_vsync [get_bd_pins io_vsync] [get_bd_pins AXI4VGA_0/io_vga_vsync]
   connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Timer_0/clock] [get_bd_pins AXI4VGA_0/clock] [get_bd_pins axi_interconnect_0/ACLK] [get_bd_pins axi_interconnect_0/M00_ACLK] [get_bd_pins axi_interconnect_0/M01_ACLK] [get_bd_pins axi_interconnect_0/M02_ACLK] [get_bd_pins axi_interconnect_0/M03_ACLK] [get_bd_pins axi_uartlite_0/s_axi_aclk]
   connect_bd_net -net coreclk_1 [get_bd_pins coreclk] [get_bd_pins axi_interconnect_0/S00_ACLK]
@@ -345,7 +344,7 @@ proc create_root_design { parentCell } {
   set_property -dict [ list \
    CONFIG.ADDR_WIDTH {32} \
    CONFIG.CLK_DOMAIN {/clk_wiz_0_clk_out1} \
-   CONFIG.DATA_WIDTH {32} \
+   CONFIG.DATA_WIDTH {64} \
    CONFIG.NUM_READ_OUTSTANDING {2} \
    CONFIG.NUM_WRITE_OUTSTANDING {2} \
    CONFIG.PHASE {0.0} \
@@ -356,14 +355,13 @@ proc create_root_design { parentCell } {
 
 
   # Create ports
-  set VGA_b [ create_bd_port -dir O -from 3 -to 0 VGA_b ]
-  set VGA_g [ create_bd_port -dir O -from 3 -to 0 VGA_g ]
   set VGA_hsync [ create_bd_port -dir O VGA_hsync ]
-  set VGA_r [ create_bd_port -dir O -from 3 -to 0 VGA_r ]
+  set VGA_rgb [ create_bd_port -dir O -from 23 -to 0 VGA_rgb ]
+  set VGA_videovalid [ create_bd_port -dir O VGA_videovalid ]
   set VGA_vsync [ create_bd_port -dir O VGA_vsync ]
   set clk50 [ create_bd_port -dir I -type clk clk50 ]
   set_property -dict [ list \
-   CONFIG.FREQ_HZ {50000000} \
+   CONFIG.FREQ_HZ {40000000} \
  ] $clk50
   set coreclk [ create_bd_port -dir I -type clk coreclk ]
   set_property -dict [ list \
@@ -418,10 +416,10 @@ proc create_root_design { parentCell } {
   connect_bd_net -net c_shift_ram_0_Q [get_bd_ports corerstn] [get_bd_pins axi_interconnect_2/ARESETN] [get_bd_pins axi_interconnect_2/S00_ARESETN] [get_bd_pins hier_devices/corerstn] [get_bd_pins util_vector_logic_0/Op1]
   connect_bd_net -net clk50_1 [get_bd_ports clk50] [get_bd_pins hier_devices/clk50]
   connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPSoC_0/clock] [get_bd_pins axi_interconnect_2/ACLK] [get_bd_pins axi_interconnect_2/S00_ACLK] [get_bd_pins hier_devices/coreclk]
-  connect_bd_net -net hier_devices_io_b [get_bd_ports VGA_b] [get_bd_pins hier_devices/io_b]
-  connect_bd_net -net hier_devices_io_g [get_bd_ports VGA_g] [get_bd_pins hier_devices/io_g]
+  connect_bd_net -net hier_devices_io_extra_mtip [get_bd_pins NOOPSoC_0/io_mtip] [get_bd_pins hier_devices/io_extra_mtip]
   connect_bd_net -net hier_devices_io_hsync [get_bd_ports VGA_hsync] [get_bd_pins hier_devices/io_hsync]
-  connect_bd_net -net hier_devices_io_r [get_bd_ports VGA_r] [get_bd_pins hier_devices/io_r]
+  connect_bd_net -net hier_devices_io_rgb [get_bd_ports VGA_rgb] [get_bd_pins hier_devices/io_rgb]
+  connect_bd_net -net hier_devices_io_videovalid [get_bd_ports VGA_videovalid] [get_bd_pins hier_devices/io_videovalid]
   connect_bd_net -net hier_devices_io_vsync [get_bd_ports VGA_vsync] [get_bd_pins hier_devices/io_vsync]
   connect_bd_net -net rstn50_1 [get_bd_ports rstn50] [get_bd_pins hier_devices/rstn50]
   connect_bd_net -net uncoreclk_1 [get_bd_ports uncoreclk] [get_bd_pins axi_interconnect_2/M00_ACLK]

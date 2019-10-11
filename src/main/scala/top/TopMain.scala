@@ -6,7 +6,10 @@ import device.{AXI4Timer, AXI4VGA}
 import gpu._
 
 import chisel3._
-//import chisel3.experimental.dontTouch
+<<<<<<< HEAD
+
+=======
+>>>>>>> master
 
 class Top extends Module {
   val io = IO(new Bundle{})

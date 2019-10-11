@@ -24,7 +24,7 @@ class Emulator {
   static const struct option long_options[];
   static void print_help(const char *file);
 
-  void read_emu_regs(uint32_t *r) {
+  void read_emu_regs(uint64_t *r) {
 #define macro(x) r[x] = dut_ptr->io_difftest_r_##x
     macro(0); macro(1); macro(2); macro(3); macro(4); macro(5); macro(6); macro(7);
     macro(8); macro(9); macro(10); macro(11); macro(12); macro(13); macro(14); macro(15);
@@ -60,8 +60,8 @@ class Emulator {
     // init core
     reset_ncycles(10);
 
-    extern void init_difftest(uint32_t *reg, const char *mainargs);
-    uint32_t reg[33];
+    extern void init_difftest(uint64_t *reg, const char *mainargs);
+    uint64_t reg[33];
     read_emu_regs(reg);
     reg[32] = 0x80100000;
     init_difftest(reg, mainargs);
@@ -97,22 +97,24 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
+    const int stuck_limit = 200;
     while (!is_finish() && n > 0) {
       single_cycle();
       n --;
 
-      if (lastcommit - n > 200 && hascommit) {
-        eprintf("No instruction commits for 200 cycles, maybe get stuck\n");
+      if (lastcommit - n > stuck_limit && hascommit) {
+        eprintf("No instruction commits for %d cycles, maybe get stuck\n", stuck_limit);
         set_abort();
       }
 
       // difftest
       if (dut_ptr->io_difftest_commit) {
-        uint32_t reg[33];
+        uint64_t reg[33];
         read_emu_regs(reg);
 
-        extern int difftest_step(uint32_t *reg_scala, uint32_t this_pc, int isMMIO);
-        if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO)) {
+        extern int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, uint64_t intrNO);
+        if (difftest_step(reg, dut_ptr->io_difftest_thisPC,
+              dut_ptr->io_difftest_isMMIO, dut_ptr->io_difftest_intrNO)) {
           set_abort();
         }
         lastcommit = n;
