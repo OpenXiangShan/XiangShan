@@ -1,4 +1,3 @@
-/*
 package noop
 
 import chisel3._
@@ -77,7 +76,7 @@ trait tlbSv32Const {
   //}
 }
 
-class PtwSv32(name : String = "default", userBits:Int) extends Module with pteSv32Const with tlbSv32Const {
+class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pteSv32Const with tlbSv32Const {
   val io = IO(new Bundle {
     val satp = Input(UInt(32.W))
     val flush = Input(Bool())
@@ -93,12 +92,14 @@ class PtwSv32(name : String = "default", userBits:Int) extends Module with pteSv
   val isWork = Mux(state===s_ready, io.satp(31).asBool, _isWork) //isWork control the 
   val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
   
+  val wire_tmp = Wire(UInt(34.W))
+
   val updateStore = state===s_ready && io.in.req.fire() && io.satp(31).asBool && !io.flush
   val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
   val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
   val inReqBitsWmask = RegEnable(io.in.req.bits.wmask, updateStore)
   val inReqBitsWdata = RegEnable(io.in.req.bits.wdata, updateStore)
-  val inReqBitsUser = RegEnable(io.in.req.bits.user, updateStore)
+  val inReqBitsUser = RegEnable(io.in.req.bits.user.getOrElse(wire_tmp), updateStore)
   val inReqBitsSize = RegEnable(io.in.req.bits.size, updateStore)
   //store end
 
@@ -122,7 +123,7 @@ class PtwSv32(name : String = "default", userBits:Int) extends Module with pteSv
   //out.resp.ready   <<     in.resp.ready
   //out.resp.bits    >>     in.resp.bits
   io.in.resp.bits.rdata := io.out.resp.bits.rdata
-  io.in.resp.bits.user  := io.out.resp.bits.user 
+  io.in.resp.bits.user.getOrElse(wire_tmp)  := io.out.resp.bits.user.getOrElse(wire_tmp) 
   io.in.resp.bits.cmd   := io.out.resp.bits.cmd  
   io.in.resp.valid      := Mux(isWork, state===s_mem && !needFlush && io.out.resp.valid, io.out.resp.valid)
   io.out.resp.ready     := Mux(isWork, (state===s_walk || state===s_mem), io.in.resp.ready)
@@ -134,7 +135,7 @@ class PtwSv32(name : String = "default", userBits:Int) extends Module with pteSv
   io.out.req.bits.cmd   := Mux(isWork, Mux(state===s_walk, SimpleBusCmd.read, inReqBitsCmd), io.in.req.bits.cmd)
   io.out.req.bits.wmask := Mux(isWork, inReqBitsWmask, io.in.req.bits.wmask)
   io.out.req.bits.wdata := Mux(isWork, inReqBitsWdata, io.in.req.bits.wdata)
-  io.out.req.bits.user  := Mux(isWork, inReqBitsUser, io.in.req.bits.user)
+  io.out.req.bits.user.getOrElse(wire_tmp)  := Mux(isWork, inReqBitsUser, io.in.req.bits.user.getOrElse(wire_tmp))
   io.out.req.bits.size  := Mux(isWork, inReqBitsSize, io.in.req.bits.size)
   io.out.req.valid      := Mux(isWork, (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire), io.in.req.valid)//need add state machine
   io.in.req.ready       := Mux(isWork, state===s_ready && io.out.req.ready, io.out.req.ready)
@@ -252,4 +253,3 @@ class PtwSv32(name : String = "default", userBits:Int) extends Module with pteSv
     }
   }  
 }
-*/
