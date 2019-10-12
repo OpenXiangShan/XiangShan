@@ -9,13 +9,15 @@ import bus.simplebus._
 import bus.axi4._
 import utils._
 
-trait pteSv32Const {
+trait pteConstTemp {
+  val debug = true
+}
+
+trait pteSv32Const extends pteConstTemp{
   val Level = 2 //Sv32 two layer page tree
   val PPN1Len = 12 //12???
   val PPN0Len = 10
   val PageSizeLen = 12 //4K
-
-  val debug = true
 
   def pteBundle = new Bundle {
     val PPN1  = UInt(12.W)
@@ -50,6 +52,49 @@ trait pteSv32Const {
   }
 }
 
+trait pteSv39Const extends pteConstTemp{
+  Level = 3
+  val PPN1Len = 
+
+  def vaBundle = new Bundle {
+    val vpn2 = UInt(9.W)
+    val vpn1 = UInt(9.W)
+    val vpn0 = UInt(9.W)
+    val off  = UInt(12.W)
+  }
+
+  def paBundle = new Bundle {
+    val ppn2 = UInt(26.W)
+    val ppn1 = UInt(9.W)
+    val ppn0 = UInt(9.W)
+    val off  = UInt(9.W)
+  }
+
+  def ptEntry = new Bundle {
+    val reserved  = UInt(10.W)
+    val ppn2 = UInt(26.W)
+    val ppn1 = UInt(9)
+    val ppn0 = UInt(9)
+    val rsw  = UInt(2.W)
+    val D    = UInt(1.W)
+    val A    = UInt(1.W)
+    val G    = UInt(1.W)
+    val U    = UInt(1.W)
+    val X    = UInt(1.W)
+    val W    = UInt(1.W)
+    val R    = UInt(1.W)
+    val V    = UInt(1.W)
+  }
+
+  def satpBundle = new Bundle {
+    val mode = UInt(4.W)
+    val asid = UInt(16.W)
+    val ppn  = UInt(44.W)
+  }
+}
+
+trait pteConst extends pteSv39Const
+
 trait tlbSv32Const {
   val VPNLen = 20
   val PPNLen = 22
@@ -70,13 +115,27 @@ trait tlbSv32Const {
     val R   = UInt(1.W)
     val V   = UInt(1.W)
   }
-
-  //def isTlbEntryHit(tlbEntry:tlbBundle, vaddr:UInt) : UInt = {
-  //  tlbEntry.VPN===vaddr(31,12) && tlbEntry.V.asBool
-  //}
 }
 
-class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pteSv32Const with tlbSv32Const {
+trait tlbSv39Const {
+  def tlbBundle = new Bundle {
+    val vpn  = UInt(27.W)
+    val asid = UInt(16.W)
+    val ppn  = UInt(44.W)
+    val D    = UInt(1.W) 
+    val A    = UInt(1.W)
+    val G    = UInt(1.W)
+    val U    = UInt(1.W)
+    val X    = UInt(1.W)
+    val W    = UInt(1.W)
+    val R    = UInt(1.W)
+    val V    = UInt(1.W)
+  }
+}
+
+trait tlbConst extends tlbSv39Const
+
+class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pteConst with tlbConst {
   val io = IO(new Bundle {
     val satp = Input(UInt(32.W))
     val flush = Input(Bool())
