@@ -51,27 +51,32 @@ void addpageSv39() {
 #define PDDEADDR (0x88000000 - (PAGESIZE * (PTENUM + 2))) //0x88000000 - 0x1000*66
 #define PDEADDR (0x88000000 - (PAGESIZE * (PTENUM + 1))) //0x88000000 - 0x1000*65
 #define PTEADDR(i) (0x88000000 - (PAGESIZE * PTENUM) + (PAGESIZE * i)) //0x88000000 - 0x100*64
+#define PTEMMIONUM 128
+#define PDEMMIONUM 1
 
   uint64_t pdde[ENTRYNUM];
   uint64_t pde[ENTRYNUM];
   uint64_t pte[PTENUM][ENTRYNUM];
   
-  //special addr for mmio 0x40600000+
+  //special addr for mmio 0x40000000 - 0x4fffffff
   uint64_t pdemmio[ENTRYNUM];
-  uint64_t ptemmio[ENTRYNUM];
-  pdde[2] = ((PDEADDR & 0xfffff000) >> 2) | 0x1b;
-  pdemmio[3] = (((PDDEADDR-PAGESIZE*2) & 0xfffff000) >> 2) | 0x1b;
-  ptemmio[0] = (((0x40600000 & 0xfffff000) >> 2) | 0x1b);
+  uint64_t ptemmio[PTEMMIONUM][ENTRYNUM];
+  
+  pdde[1] = (((PDDEADDR-PAGESIZE*1) & 0xfffff000) >> 2) | 0x1b;
 
-  //special addr for mmio map clint // but no add is also right
-  uint64_t pteclint[ENTRYNUM];
-  pde[0x110] = (((PDDEADDR-PAGESIZE*3) & 0xfffff000) >> 2) | 0x1b;
-  for(int i = 0; i < 16; i++) {
-    pteclint[i] = (((0xa2000000 + PAGESIZE*i) * 0xfffff000) >> 2) | 0x1b;
+  for(int i = 0; i < PTEMMIONUM; i++) {
+    pdemmio[i] = (((PDDEADDR-PAGESIZE*(PTEMMIONUM+PDEMMIONUM-i)) & 0xfffff000) >> 2) | 0x1b;
   }
-
-  pdde[1] = (((PDDEADDR-PAGESIZE) & 0xfffff000) >> 2) | 0x1b;
-
+  
+  for(int outidx = 0; outidx < PTEMMIONUM; outidx++) {
+    for(int inidx = 0; inidx < ENTRYNUM; inidx++) {
+      ptemmio[outidx][inidx] = (((0x40000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000) >> 2) | 0x1b;
+    }
+  }
+  
+  //0x800000000 - 0x87ffffff
+  pdde[2] = ((PDEADDR & 0xfffff000) >> 2) | 0x1b;
+  
   for(int i = 0; i < PTENUM ;i++) {
     pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0x1b ;
   }
@@ -81,10 +86,9 @@ void addpageSv39() {
       pte[outidx][inidx] = (((0x80000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000)>>2) | 0x1b;
     }
   }
-  
-  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+3)),pteclint,PAGESIZE);
-  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+2)),ptemmio,PAGESIZE);
-  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+1)),pdemmio,PAGESIZE);
+
+  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM)),ptemmio, PAGESIZE*PTEMMIONUM);
+  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM)), pdemmio, PAGESIZE*PDEMMIONUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM)), pdde, PAGESIZE*PDDENUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDENUM)), pde, PAGESIZE*PDENUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*PTENUM), pte, PAGESIZE*PTENUM);
