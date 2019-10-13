@@ -119,11 +119,11 @@ class ALU extends NOOPModule {
     }
   }
 
-  // Debug(true){
-  //   when(valid && isBru){
-  //     printf("[BPW] pc %x tgt %x, npc: %x, pdwrong: %x type: %x%x%x%x\n", io.cfIn.pc, io.redirect.target, io.cfIn.pnpc, predictWrong, isBranch, (func === ALUOpType.jal || func === ALUOpType.call), func === ALUOpType.jalr, func === ALUOpType.ret)
-  //   }
-  // }
+  Debug(){
+    when(valid && isBru){
+      printf("[BPW] pc %x tgt %x, npc: %x, pdwrong: %x type: %x%x%x%x\n", io.cfIn.pc, io.redirect.target, io.cfIn.pnpc, predictWrong, isBranch, (func === ALUOpType.jal || func === ALUOpType.call), func === ALUOpType.jalr, func === ALUOpType.ret)
+    }
+  }
 
   io.in.ready := true.B
   io.out.valid := valid

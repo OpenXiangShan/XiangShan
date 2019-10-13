@@ -1,6 +1,6 @@
 ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
-SINGLETEST = ALL=recursion
+SINGLETEST = ALL=to-lower-case
 
 cpu:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
