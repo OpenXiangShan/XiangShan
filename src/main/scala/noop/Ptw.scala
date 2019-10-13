@@ -9,20 +9,34 @@ import bus.simplebus._
 import bus.axi4._
 import utils._
 
-trait pteConstTemp {
-  val debug = true
+trait Sv32Const {
+  val debug = false
+
+  val vpnLen = 20
+  val ppnLen = 22
 }
 
-trait pteSv32Const extends pteConstTemp{
-  val Level = 2 //Sv32 two layer page tree
-  val PPN1Len = 12 //12???
+trait Sv39Const {
+  val debug = true
+
+  val vpnLen = 27
+  val ppnLen = 44
+}
+
+trait pteSv32Const extends Sv32Const{
+  val Level = 2 
+  val PPN1Len = 12 
   val PPN0Len = 10
   val PageSizeLen = 12 //4K
+  val satpLen = 32
+  val paddrLen = 34
+  val vaddrLen = 32
+  val ptEntryLen = 32
 
   def pteBundle = new Bundle {
-    val PPN1  = UInt(12.W)
-    val PPN2  = UInt(10.W)
-    val RSW   = UInt(2.W)
+    val ppn1  = UInt(12.W)
+    val ppn0  = UInt(10.W)
+    val rsw   = UInt(2.W)
     val D     = UInt(1.W)
     val A     = UInt(1.W)
     val G     = UInt(1.W)
@@ -34,9 +48,9 @@ trait pteSv32Const extends pteConstTemp{
   }
 
   def vaBundle = new Bundle {
-    val VPN1  = UInt(10.W)
-    val VPN0  = UInt(10.W)
-    val pgoff = UInt(12.W)
+    val vpn1  = UInt(10.W)
+    val vpn0  = UInt(10.W)
+    val off = UInt(12.W)
   }
 
   def paBundle = new Bundle {
@@ -52,29 +66,56 @@ trait pteSv32Const extends pteConstTemp{
   }
 }
 
-trait pteSv39Const extends pteConstTemp{
-  Level = 3
-  val PPN1Len = 
+trait pteSv39Const extends Sv39Const{
+  val Level = 3
+  val ppn2Len = 26
+  val ppn1Len = 9
+  val ppn0Len = 9
+  val offLen  = 12
+  val vpn2Len = 9
+  val vpn1Len = 9
+  val vpn0Len = 9
+  val vaResLen= 25
+  val paResLen= 8
+
+  val paddrLen = 64
+  val vaddrLen = 64
+  val satpLen = 64
+  val satpModeLen = 4
+  val asidLen = 16
+  val ptEntryLen = 64
 
   def vaBundle = new Bundle {
-    val vpn2 = UInt(9.W)
-    val vpn1 = UInt(9.W)
-    val vpn0 = UInt(9.W)
-    val off  = UInt(12.W)
+    val reserverd = UInt(vaResLen.W)
+    val vpn2 = UInt(vpn2Len.W)
+    val vpn1 = UInt(vpn1Len.W)
+    val vpn0 = UInt(vpn0Len.W)
+    val off  = UInt( offLen.W)
+  }
+
+  def vaBundle2 = new Bundle {
+    val reserverd = UInt(vaResLen.W)
+    val vpn  = UInt(vpnLen.W)
+    val off  = UInt(offLen.W)
   }
 
   def paBundle = new Bundle {
-    val ppn2 = UInt(26.W)
-    val ppn1 = UInt(9.W)
-    val ppn0 = UInt(9.W)
-    val off  = UInt(9.W)
+    val reserved = UInt(paResLen.W)
+    val ppn2 = UInt(ppn2Len.W)
+    val ppn1 = UInt(ppn1Len.W)
+    val ppn0 = UInt(ppn0Len.W)
+    val off  = UInt( offLen.W)
   }
 
-  def ptEntry = new Bundle {
+  def paBundle2 = new Bundle {
+    val reserved = UInt(paResLen.W)
+    val ppn  = UInt(ppnLen.W)
+    val off  = UInt(offLen.W)
+  }
+
+  def pteBundle = new Bundle {
     val reserved  = UInt(10.W)
-    val ppn2 = UInt(26.W)
-    val ppn1 = UInt(9)
-    val ppn0 = UInt(9)
+    val ppn  = UInt(ppnLen.W)
     val rsw  = UInt(2.W)
     val D    = UInt(1.W)
     val A    = UInt(1.W)
@@ -87,25 +128,24 @@ trait pteSv39Const extends pteConstTemp{
   }
 
   def satpBundle = new Bundle {
-    val mode = UInt(4.W)
-    val asid = UInt(16.W)
-    val ppn  = UInt(44.W)
+    val mode = UInt(satpModeLen.W)
+    val asid = UInt(asidLen.W)
+    val ppn  = UInt(ppnLen.W)
   }
 }
 
 trait pteConst extends pteSv39Const
 
-trait tlbSv32Const {
-  val VPNLen = 20
-  val PPNLen = 22
-  val PPNNum = 1 //1
-  val tlbEntryNum = 8 //tmp
-  val tlbEntryLen = 59 //
-  
+trait tlbSv32Const extends Sv32Const{
+  val tlbEntryNum = 8
+  val tlbEntryNumLen = 3
+  val tlbEntryLen = 59
+  val tlbAsidLen = 9
+
   def tlbBundle = new Bundle {
-    val VPN = UInt(20.W)
-    val ASID = UInt(9.W)
-    val PPN = UInt(22.W)
+    val vpn = UInt(vpnLen.W)
+    val asid = UInt(tlbAsidLen.W)
+    val ppn = UInt(ppnLen.W)
     val D   = UInt(1.W)
     val A   = UInt(1.W)
     val G   = UInt(1.W)
@@ -117,11 +157,15 @@ trait tlbSv32Const {
   }
 }
 
-trait tlbSv39Const {
+trait tlbSv39Const extends Sv39Const{
+  val tlbEntryNum = 8
+  val tlbEntryLen = 95
+  val tlbAsidLen = 16
+
   def tlbBundle = new Bundle {
-    val vpn  = UInt(27.W)
-    val asid = UInt(16.W)
-    val ppn  = UInt(44.W)
+    val vpn  = UInt(vpnLen.W)
+    val asid = UInt(tlbAsidLen.W)
+    val ppn  = UInt(ppnLen.W)
     val D    = UInt(1.W) 
     val A    = UInt(1.W)
     val G    = UInt(1.W)
@@ -135,9 +179,9 @@ trait tlbSv39Const {
 
 trait tlbConst extends tlbSv39Const
 
-class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pteConst with tlbConst {
+class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteConst with tlbConst {
   val io = IO(new Bundle {
-    val satp = Input(UInt(32.W))
+    val satp = Input(UInt(satpLen.W))
     val flush = Input(Bool())
     val in   = Flipped(new SimpleBusUC(userBits))
     val out  = new SimpleBusUC(userBits)
@@ -145,15 +189,16 @@ class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pt
 
   val s_ready :: s_tran :: s_walk :: s_mem :: s_error :: Nil = Enum(5)
   val state = RegInit(s_ready)
-  val phyNum = Reg(UInt(32.W))
+  val phyNum = RegInit(0.U(paddrLen.W))
   val alreadyOutFire = RegEnable(true.B, io.out.req.fire())
-  val _isWork = RegEnable(io.satp(31).asBool, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
-  val isWork = Mux(state===s_ready, io.satp(31).asBool, _isWork) //isWork control the 
+  val __isWork = io.satp.asTypeOf(satpBundle).mode =/= 0.U
+  val _isWork = RegEnable(__isWork, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
+  val isWork = Mux(state===s_ready, __isWork, _isWork) //isWork control the 
   val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
   
-  val wire_tmp = Wire(UInt(34.W))
+  val wire_tmp = 0.U(32.W)//Wire(0.U(34.W))
 
-  val updateStore = state===s_ready && io.in.req.fire() && io.satp(31).asBool && !io.flush
+  val updateStore = state===s_ready && io.in.req.fire() && __isWork && !io.flush
   val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
   val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
   val inReqBitsWmask = RegEnable(io.in.req.bits.wmask, updateStore)
@@ -162,59 +207,41 @@ class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pt
   val inReqBitsSize = RegEnable(io.in.req.bits.size, updateStore)
   //store end
 
-  val tlbEntry = Mem(tlbEntryNum, UInt(tlbEntryLen.W))/*Seq(tlbEntryNum, RegInit(0.U(59.W))) *//*Seq.fill(tlbEntryNum)(RegInit(0.U(tlbEntryLen.W)))*/
-  val tlbHitAll = (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).VPN===vaddr(31,12) && tlbEntry(i).asTypeOf(tlbBundle).V.asBool)
-  //val tlbHitAll = tlbEntry.map(a => (a(58,39)===vaddr(31,12)&&a(0).asBool))
-  //val tlbHitAll = tlbEntry.map(a:UInt => a.asTypeOf(tlbBundle).VPN===vaddr(31.12) && a.asTypeOf(tlbBundle).V.asBool)
+  val tlbEntry = Mem(tlbEntryNum, UInt(tlbEntryLen.W))
+  val tlbHitAll = (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).vpn===vaddr.asTypeOf(vaBundle2).vpn && tlbEntry(i).asTypeOf(tlbBundle).V.asBool)
   val tlbHit = (state===s_tran) && tlbHitAll.reduce(_||_)
   val tlbHitIndex = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(_.U))
-  val tlbPPageNum = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).PPN))
+  val tlbHitPPN = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).ppn))
   val rand3Bit = RegInit(0.U(3.W))
-  //val rand3Bit = RegNext(GaloisLFSR.maxPeriod(3))
-  //val tlbHit = state===s_tran && tlbEntry.map(this.asTypeOf(tlbBundle).VPN===vaddr(31,12) && this.asTypeOf(tlbBundle).V.asBool).reduce(_ | _)
-  //val tlbHitIndex = tlbEntry.map(this.asTypeOf(tlbBundle
-  //val tlbEntry = RegInit(0.U(59.W))
-  //val tlbHit = state===s_tran && (vaddr(31,12)===tlbEntry.asTypeOf(tlbBundle).VPN && tlbEntry.asTypeOf(tlbBundle).V.asBool)
 
-  //connect begin
-  //out      <<     ptw     >>     in
-  //out.resp.valid   >>     in.resp.valid
-  //out.resp.ready   <<     in.resp.ready
-  //out.resp.bits    >>     in.resp.bits
   io.in.resp.bits.rdata := io.out.resp.bits.rdata
-  io.in.resp.bits.user.getOrElse(wire_tmp)  := io.out.resp.bits.user.getOrElse(wire_tmp) 
+  io.in.resp.bits.user.map(_ := io.out.resp.bits.user.getOrElse(wire_tmp))
   io.in.resp.bits.cmd   := io.out.resp.bits.cmd  
   io.in.resp.valid      := Mux(isWork, state===s_mem && !needFlush && io.out.resp.valid, io.out.resp.valid)
   io.out.resp.ready     := Mux(isWork, (state===s_walk || state===s_mem), io.in.resp.ready)
-  //out      <<     ptw     >>    in
-  //out.req.valid    <<     in.req.valid
-  //out.req.ready    >>     in.req.ready
-  //out.req.bits     <<     in.req.bits
+  
   io.out.req.bits.addr  := Mux(isWork, phyNum, io.in.req.bits.addr)
   io.out.req.bits.cmd   := Mux(isWork, Mux(state===s_walk, SimpleBusCmd.read, inReqBitsCmd), io.in.req.bits.cmd)
   io.out.req.bits.wmask := Mux(isWork, inReqBitsWmask, io.in.req.bits.wmask)
   io.out.req.bits.wdata := Mux(isWork, inReqBitsWdata, io.in.req.bits.wdata)
-  io.out.req.bits.user.getOrElse(wire_tmp)  := Mux(isWork, inReqBitsUser, io.in.req.bits.user.getOrElse(wire_tmp))
+  io.out.req.bits.user.map(_ := Mux(isWork, inReqBitsUser, io.in.req.bits.user.getOrElse(wire_tmp)))
   io.out.req.bits.size  := Mux(isWork, inReqBitsSize, io.in.req.bits.size)
   io.out.req.valid      := Mux(isWork, (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire), io.in.req.valid)//need add state machine
   io.in.req.ready       := Mux(isWork, state===s_ready && io.out.req.ready, io.out.req.ready)
   //connect end
 
-  val level = RegInit(2.U)
-
-  //state machine: does instr and data need two ptw?? maybe one is enough, so how to handle two input
   //s_ready : free state
   //s_tran  : judge if tlbhit or not
   //s_walk  : the work stage(go and get the pte). In Sv39..., have the third state or else
   //s_mem   : already get the paddr, then access the mem to get the data, maybe just 
   //s_error : error state, raise an exception, unknown how to do
-
-  val last_rdata = RegInit(0.U) //no use, debug
   
+  val level = RegInit(Level.U)
   switch (state) {
     is (s_ready) {
-      when(io.in.req.fire() && io.satp(31).asBool && !io.flush ) {
+      when(io.in.req.fire() && __isWork && !io.flush ) {
         state := s_tran
+        level := Level.U
       }
     }
 
@@ -225,11 +252,12 @@ class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pt
       }.elsewhen(tlbHit) {
         state := s_mem
         //phyNum := Cat(tlbEntry.asTypeOf(tlbBundle).PPN(19,0), vaddr(11,0))
-        phyNum := Cat(tlbPPageNum(19,0), vaddr(11,0))
+        phyNum := Cat(0.U(paResLen.W), Cat(tlbHitPPN, vaddr.asTypeOf(vaBundle).off))
         alreadyOutFire := false.B
       }.otherwise {
         state := s_walk
-        phyNum := Cat(io.satp(19,0), Cat(vaddr(31,22), 0.U(2.W)))
+        level := Level.U
+        phyNum := Cat(0.U(paResLen.W), Cat(io.satp.asTypeOf(satpBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn2, 0.U(3.W))))
         alreadyOutFire := false.B
       }
     }
@@ -241,36 +269,33 @@ class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pt
           state := s_ready
           level := 2.U
           alreadyOutFire := false.B
-          last_rdata := 0.U
         }.otherwise {
+          when(level === 3.U) {
+            phyNum := Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn1, 0.U(3.W))))
+          }.elsewhen(level === 2.U) {
+            phyNum := Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn0, 0.U(3.W)))) //maybe wrong ,for page table has 2^9 entry not 2^10
+          }.elsewhen(level === 1.U) {
+            state := s_mem
+            phyNum:= Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, vaddr.asTypeOf(vaBundle).off))
+            rand3Bit := rand3Bit+1.U
+            tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, 0.U(tlbAsidLen.W)), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
+          }
           level := level - 1.U
           alreadyOutFire := false.B
           //Sv32 page table entry: 0:V 1:R 2:W 3:X 4:U 5:G 6:A 7:D
-          state := Mux(level===1.U, s_mem, s_walk)
-          phyNum := Mux(level===1.U, Cat(io.out.resp.bits.rdata(29,10), vaddr(11,0)), Cat(io.out.resp.bits.rdata(29,10), Cat(vaddr(21,12), 0.U(2.W)))) 
-          when(level===1.U) {
-            rand3Bit := rand3Bit+1.U
-            tlbEntry(rand3Bit) := Cat( Cat(vaddr(31,12), 0.U(9.W)), Cat(io.out.resp.bits.rdata(31,10), io.out.resp.bits.rdata(7,0)))
-            //tlbEntry(58,39) := vaddr(31,12)
-            //tlbEntry(29,8) := io.out.resp.bits.rdata(31,10)
-            //tlbEntry(7,0) := io.out.resp.bits.rdata(7,0)
-          }
         }
-        //state := s_mem
       }.elsewhen(io.flush) {
         needFlush := true.B
       }
     }
     is (s_error) {
-      //raise an exception
       state := s_ready
     }
     
     is (s_mem) {
       when(io.out.resp.fire()) {
         state := s_ready
-        level := 2.U
-        last_rdata := 0.U
+        level := 3.U
         alreadyOutFire := false.B
         needFlush := false.B
       }.elsewhen(io.flush) {
@@ -278,28 +303,23 @@ class PtwSv32(name : String = "default", userBits:Int=32) extends Module with pt
       }
     }
   }
-  
-  val count = RegInit(0.U(16.W))
-  val isCount = RegInit(false.B)
 
   Debug(debug && name=="iptw" && false) {
-    when( true.B/* && state===s_mem && io.out.req.fire().asBool*/) {
-      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x needFlush:%d io.flush:%d rdata:%x inRespFire:%d outReqFire:%d outRespFire:%d ",GTimer(),state,level,vaddr,phyNum,needFlush,io.flush,io.out.resp.bits.rdata,io.in.resp.fire(),io.out.req.fire(),io.out.resp.fire())
-      printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex)(58,39), tlbEntry(tlbHitIndex)(27,8))
+    when( true.B) {
+      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x needFlush:%d io.flush:%d rdata:%x",GTimer(),state,level,vaddr,phyNum,needFlush,io.flush,io.out.resp.bits.rdata)
+      printf(" inReqFire:%d inRespFire:%d outReqFire:%d outRespFire:%d", io.in.req.fire(), io.in.resp.fire(),io.out.req.fire(),io.out.resp.fire())
+      //printf(" updateStore:%d __isWork:%d _isWork:%d isWork:%d",updateStore,__isWork,_isWork,isWork)
+      printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
       printf("\n")
-        // printf("inReqValid:%d inReqReady:%d isWork:%d\n",io.in.req.valid, io.in.req.ready, isWork)
-      //when(isCount===false.B) {isCount := true.B}
     }
-    when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
-      //printf(p"${GTimer()}, state:${state}, out.resp.fire:${io.out.resp.fire()}, vaddr:${vaddr}, rdata:${io.out.resp.bits.rdata}\n")
-      printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
-    }
-    assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
+    //when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
+      //printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
+    //}
+    //assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
   }
   
   Debug(debug) {
     when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
-      //printf(p"${GTimer()}, state:${state}, out.resp.fire:${io.out.resp.fire()}, vaddr:${vaddr}, rdata:${io.out.resp.bits.rdata}\n")
       printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
     }
     assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
