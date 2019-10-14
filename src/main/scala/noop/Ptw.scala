@@ -208,7 +208,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   //store end
 
   val tlbEntry = Mem(tlbEntryNum, UInt(tlbEntryLen.W))
-  val tlbHitAll = (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).vpn===vaddr.asTypeOf(vaBundle2).vpn && tlbEntry(i).asTypeOf(tlbBundle).V.asBool)
+  val tlbHitAll = (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).vpn===vaddr.asTypeOf(vaBundle2).vpn && tlbEntry(i).asTypeOf(tlbBundle).V.asBool && tlbEntry(i).asTypeOf(tlbBundle).asid===io.satp.asTypeOf(tlbBundle).asid)
   val tlbHit = (state===s_tran) && tlbHitAll.reduce(_||_)
   val tlbHitIndex = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(_.U))
   val tlbHitPPN = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).ppn))
@@ -280,7 +280,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
               state := s_mem
               phyNum:= Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, vaddr.asTypeOf(vaBundle).off))
               rand3Bit := rand3Bit+1.U
-              tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, 0.U(tlbAsidLen.W)), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
+              tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, io.satp.asTypeOf(tlbBundle).asid), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
             }
             is (0.U) {
               state := s_error
