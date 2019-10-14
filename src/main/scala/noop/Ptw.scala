@@ -309,17 +309,33 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
       }
     }
   }
+  
+  Debug(debug && name=="iptw") {
+    
+    val alreadyWork = RegInit(false.B)
 
-  Debug(debug && name=="iptw" && false) {
-    when( true.B) {
-      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x needFlush:%d io.flush:%d rdata:%x",GTimer(),state,level,vaddr,phyNum,needFlush,io.flush,io.out.resp.bits.rdata)
+    when( __isWork || alreadyWork) {
+      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x rdata:%x",GTimer(),state,level,vaddr,phyNum,io.out.resp.bits.rdata)
+      //printf(" needFlush:%d io.flush:%d ",,needFlush,io.flush)
+      //printf(" inReqAddr: %x ", io.in.req.bits.addr)
       printf(" inReqFire:%d inRespFire:%d outReqFire:%d outRespFire:%d", io.in.req.fire(), io.in.resp.fire(),io.out.req.fire(),io.out.resp.fire())
+      printf(" satp:%x ", io.satp)
       //printf(" updateStore:%d __isWork:%d _isWork:%d isWork:%d",updateStore,__isWork,_isWork,isWork)
       printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
       printf("\n")
     }
+    when(__isWork && !alreadyWork) {
+      printf(name + "%d: alreadyWork", GTimer())
+      printf("\n")
+      alreadyWork := true.B
+    }
   }
   
+  
+  Debug(debug) {
+    
+  }
+
   Debug(debug) {
     when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
       printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)

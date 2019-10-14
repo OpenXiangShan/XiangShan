@@ -142,7 +142,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst with H
   val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb80 + i, perfCnts(i)(63, 32)) }
 
   //new add by lemover-zhangzifei
-  val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
+  //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
+  val satp = RegInit(UInt(XLEN.W), 0.U)
+  //val satp = Reg(UInt(XLEN.W))
   val mappingSuper = Map(
     RegMap(Satp    ,satp    )
   )
