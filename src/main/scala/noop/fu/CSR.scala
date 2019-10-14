@@ -25,6 +25,21 @@ trait HasCSRConst {
   def privMret  = 0x302.U
 }
 
+//new add by lemover-zhangzifei
+trait HasSupervisorCSRConst {
+  val Sstatus       = 0x100
+  val Stvec         = 0x105
+  val Sepc          = 0x141
+  val Scause        = 0x142
+  val Sie           = 0x104
+  val Sip           = 0x144
+
+  val Satp          = 0x180
+
+  //unknown : privEcall and privMret
+}
+//add end by lemover-zhangzifei
+
 trait HasExceptionNO {
   def instrAddrMisaligned = 0
   def instrAccessFault    = 1
@@ -49,9 +64,10 @@ class CSRIO extends FunctionUnitIO {
   val instrValid = Input(Bool())
   // for differential testing
   val intrNO = Output(UInt(XLEN.W))
+  val satp = Output(UInt(XLEN.W))
 }
 
-class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
+class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst with HasSupervisorCSRConst {
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -125,6 +141,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb00 + i, perfCnts(i)) }
   val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb80 + i, perfCnts(i)(63, 32)) }
 
+  //new add by lemover-zhangzifei
+  val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
+  val mappingSuper = Map(
+    RegMap(Satp    ,satp    )
+  )
+  io.satp := satp
+  //new end by lemover-zhangzifei
+
   val mapping = Map(
     RegMap(Mtvec   ,mtvec   ),
     RegMap(Mcause  ,mcause  ),
@@ -132,7 +156,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     RegMap(Mstatus ,mstatus ),
     RegMap(Mie     ,mie     ),
     RegMap(Mip     ,mip.asUInt, RegMap.Unwritable)
-  ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
+  ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil) ++ mappingSuper
 
   val addr = src2(11, 0)
   val rdata = Wire(UInt(XLEN.W))

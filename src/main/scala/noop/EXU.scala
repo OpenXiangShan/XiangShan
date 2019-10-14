@@ -14,6 +14,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val flush = Input(Bool())
     val dmem = new SimpleBusUC
     val forward = new ForwardIO
+    val satp = Output(UInt(XLEN.W))
   })
 
   val src1 = io.in.bits.data.src1
@@ -47,6 +48,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   csr.io.instrValid := io.in.valid && !io.flush
   io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
+  io.satp := csr.io.satp
 
   val mou = Module(new MOU)
   // mou does not write register

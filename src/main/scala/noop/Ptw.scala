@@ -251,7 +251,6 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
         alreadyOutFire := false.B
       }.elsewhen(tlbHit) {
         state := s_mem
-        //phyNum := Cat(tlbEntry.asTypeOf(tlbBundle).PPN(19,0), vaddr(11,0))
         phyNum := Cat(0.U(paResLen.W), Cat(tlbHitPPN, vaddr.asTypeOf(vaBundle).off))
         alreadyOutFire := false.B
       }.otherwise {
@@ -263,22 +262,29 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
 
     is (s_walk) {
-      when(level =/= 0.U && io.out.resp.fire()/*访存page握手结束*/ /*&& phyNum(3,1)=/= 0.U(3.W)*/) {
+      when(/*level =/= 0.U && */io.out.resp.fire()) {
         when(needFlush || io.flush) {
           needFlush := false.B
           state := s_ready
           level := 2.U
           alreadyOutFire := false.B
         }.otherwise {
-          when(level === 3.U) {
-            phyNum := Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn1, 0.U(3.W))))
-          }.elsewhen(level === 2.U) {
-            phyNum := Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn0, 0.U(3.W)))) //maybe wrong ,for page table has 2^9 entry not 2^10
-          }.elsewhen(level === 1.U) {
-            state := s_mem
-            phyNum:= Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, vaddr.asTypeOf(vaBundle).off))
-            rand3Bit := rand3Bit+1.U
-            tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, 0.U(tlbAsidLen.W)), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
+          switch(level) {
+            is (3.U) {
+              phyNum := Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn1, 0.U(3.W))))
+            }
+            is (2.U) {
+              phyNum := Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn0, 0.U(3.W)))) //maybe wrong ,for page table has 2^9 entry not 2^10
+            }
+            is (1.U) {
+              state := s_mem
+              phyNum:= Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, vaddr.asTypeOf(vaBundle).off))
+              rand3Bit := rand3Bit+1.U
+              tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, 0.U(tlbAsidLen.W)), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
+            }
+            is (0.U) {
+              state := s_error
+            }
           }
           level := level - 1.U
           alreadyOutFire := false.B
@@ -312,10 +318,6 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
       printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
       printf("\n")
     }
-    //when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
-      //printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
-    //}
-    //assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
   }
   
   Debug(debug) {
@@ -324,11 +326,4 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
     assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
   }
-
-  Debug(debug && name == "dptw" && false) {
-    when(GTimer()>=1300.U) {
-      printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x flush:%d rdata:%x inRespValid:%d inRespReady:%d outReqValid:%d outReqReady:%d outRespValid:%d outRespReady:%d ",GTimer(),state,level,vaddr,phyNum,needFlush,io.out.resp.bits.rdata,io.in.resp.valid,io.in.resp.ready,io.out.req.valid,io.out.req.ready,io.out.resp.valid,io.out.resp.ready)
-      printf("alreadyOutFire:%d\n", alreadyOutFire)
-    }
-  }  
 }
