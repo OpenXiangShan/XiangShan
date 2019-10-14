@@ -34,7 +34,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-void init_difftest(uint64_t *reg, const char *mainargs) {
+void init_difftest(uint64_t *reg) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   assert(handle);
@@ -63,14 +63,13 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
   ref_difftest_init();
   void* get_img_start();
   long get_img_size();
-  ref_difftest_memcpy_from_dut(0x100000, get_img_start(), get_img_size());
-  ref_difftest_memcpy_from_dut(0x0, (void *)mainargs, strlen(mainargs) + 1);
+  ref_difftest_memcpy_from_dut(0x0, get_img_start(), get_img_size());
   ref_difftest_setregs(reg);
 }
 
 int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, uint64_t intrNO) {
   uint64_t ref_r[33];
-  static uint64_t nemu_pc = 0x80100000;
+  static uint64_t nemu_pc = 0x80000000;
   if (isMMIO) {
     // printf("diff pc: %x\n", this_pc);
     // MMIO accessing should not be a branch or jump, just +4 to get the next pc
