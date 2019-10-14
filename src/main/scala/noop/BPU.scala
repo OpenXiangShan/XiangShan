@@ -45,6 +45,7 @@ class BPU1 extends NOOPModule {
     val in = new Bundle { val pc = Flipped(Valid((UInt(AddrBits.W)))) }
     val out = new RedirectIO
     val flush = Input(Bool())
+    val lateJump = Output(Bool())
   })
 
   val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
@@ -69,20 +70,21 @@ class BPU1 extends NOOPModule {
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
   val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
-  val lateJump = btbRead.brIdx(2) && btbHit
-  val lateJumpLatch = RegNext(lateJump)
-  val lateJumpTarget = RegEnable(btbRead.target, lateJump)
-  printf("[BTBHT] %x %x %x\n", lateJump, lateJumpLatch, lateJumpTarget)
   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
   // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
   // -------------------------------------------------
   // 0 jump rvc // marked as "take branch" in BTB
   // 2 xxx  rvc <-- jump to here
   // -------------------------------------------------
+  val lateJump = btbRead.brIdx(2) && btbHit
+  io.lateJump := lateJump
+  // val lateJumpLatch = RegNext(lateJump)
+  // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
   Debug(){
+  // printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
   when(btbHit){
-      printf("[BTBHT] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x flush %x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, flush)
-      printf("[BTBHT] btbRead.brIdx %x Cat(1.U, Fill(2, io.out.valid)) %x\n", btbRead.brIdx, Cat(1.U, Fill(2, io.out.valid)))
+      printf("[BTBHT] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush)
+      // printf("[BTBHT] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
     }
   }
 
@@ -149,12 +151,18 @@ class BPU1 extends NOOPModule {
     }
   }
 
-  io.out.target := Mux(lateJumpLatch && !flush, lateJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
-  // io.out.brIdx  := Mux(btbRead._type === BTBtype.R, rasBrIdx & Fill(2, io.out.valid), btbRead.brIdx & Fill(2, io.out.valid))
-  // io.out.brIdx  := btbRead.brIdx & Cat(1.U, Fill(2, io.out.valid))
+  io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
+  // io.out.target := Mux(lateJumpLatch && !flush, lateJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
   // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
   io.out.brIdx  := btbRead.brIdx & Cat(lateJump, Fill(2, io.out.valid))
-  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump || lateJumpLatch && !flush
+  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
+  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump || lateJumpLatch && !flush && !lateJump
+  // Note: 
+  // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump : normal branch predict
+  // lateJumpLatch && !flush && !lateJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
+  // `&& !lateJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
+  // by using `instline`, we mean a 64 bit instfetch result from imem
+  // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
 }
 
 class BPU2 extends NOOPModule {

@@ -33,6 +33,7 @@ class NOOPSimTop extends Module {
   BoringUtils.addSink(difftest.commit, "difftestCommit")
   BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
   BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
+  BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
   BoringUtils.addSink(difftest.r, "difftestRegs")
   io.difftest := difftest
 }

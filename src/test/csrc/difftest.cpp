@@ -64,14 +64,14 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO) {
+int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC) {
   uint64_t ref_r[33];
   static uint64_t nemu_pc = 0x80100000;
   if (isMMIO) {
-    // printf("diff pc: %x\n", this_pc);
-    // MMIO accessing should not be a branch or jump, just +4 to get the next pc
-    reg_scala[32] += 4;
-    nemu_pc += 4;
+    // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
+    // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
+    reg_scala[32] += isRVC ? 2 : 4;
+    nemu_pc += isRVC ? 2 : 4;
     // to skip the checking of an instruction, just copy the reg state to reference design
     ref_difftest_setregs(reg_scala);
     return 0;

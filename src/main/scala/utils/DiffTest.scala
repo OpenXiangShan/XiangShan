@@ -8,4 +8,5 @@ class DiffTestIO extends Bundle {
   val commit = Output(Bool())
   val thisPC = Output(UInt(64.W))
   val isMMIO = Output(Bool())
+  val isRVC = Output(Bool())
 }

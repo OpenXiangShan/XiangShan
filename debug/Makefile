@@ -1,6 +1,6 @@
 ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
-SINGLETEST = ALL=to-lower-case
+SINGLETEST = ALL=min3
 
 cpu:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
@@ -8,6 +8,13 @@ cpu:
 cputest:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) run 2>&1 | tee > cpu.log
 	cat cpu.log | grep different
+
+# bputest:
+# 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
+# 	cat bpu.log | grep different
+bputest:
+	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) ALL=forcall2 run 2>&1 | tee > bpu.log
+	cat bpu.log | grep Mbp
 
 test:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(SINGLETEST) run 2>&1 | tee > test.log

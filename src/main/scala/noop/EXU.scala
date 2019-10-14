@@ -61,6 +61,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     o.fuType := i.fuType
   }
   io.out.bits.decode.cf.pc := io.in.bits.cf.pc
+  io.out.bits.decode.cf.instr := io.in.bits.cf.instr
   io.out.bits.decode.cf.redirect <> Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect)
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(

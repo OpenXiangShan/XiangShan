@@ -111,8 +111,8 @@ class Emulator {
         uint64_t reg[33];
         read_emu_regs(reg);
 
-        extern int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO);
-        if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO)) {
+        extern int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC);
+        if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO, dut_ptr->io_difftest_isRVC)) {
           set_abort();
         }
         lastcommit = n;

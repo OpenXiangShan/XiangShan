@@ -141,7 +141,15 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     "MbpIRight"   -> (0xb17, "MbpIRight"             ),
     "MbpIWrong"   -> (0xb18, "MbpIWrong"             ),
     "MbpRRight"   -> (0xb19, "MbpRRight"             ),
-    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             )
+    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             ),
+    "Custom1"     -> (0xb1b, "Custom1"             ),
+    "Custom2"     -> (0xb1c, "Custom2"             ),
+    "Custom3"     -> (0xb1d, "Custom3"             ),
+    "Custom4"     -> (0xb1e, "Custom4"             ),
+    "Custom5"     -> (0xb1f, "Custom5"             ),
+    "Custom6"     -> (0xb20, "Custom6"             ),
+    "Custom7"     -> (0xb21, "Custom7"             ),
+    "Custom8"     -> (0xb22, "Custom8"             )
   )
 
   val perfCntCond = List.fill(0x80)(WireInit(false.B))
