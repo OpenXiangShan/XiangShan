@@ -67,6 +67,9 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
 int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC) {
   uint64_t ref_r[33];
   static uint64_t nemu_pc = 0x80100000;
+  static uint64_t pc_retire_queue[8] = {0};
+  static int pc_retire_pointer = 7;
+
   if (isMMIO) {
     // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
     // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
@@ -74,17 +77,27 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC) 
     nemu_pc += isRVC ? 2 : 4;
     // to skip the checking of an instruction, just copy the reg state to reference design
     ref_difftest_setregs(reg_scala);
+    pc_retire_pointer = (pc_retire_pointer+1) % 8;
+    pc_retire_queue[pc_retire_pointer] = nemu_pc;
     return 0;
   }
 
   ref_difftest_exec(1);
   ref_difftest_getregs(&ref_r);
 
+  pc_retire_pointer = (pc_retire_pointer+1) % 8;
+  pc_retire_queue[pc_retire_pointer] = nemu_pc;
+  
   uint64_t temp = ref_r[32];
   ref_r[32] = nemu_pc;
   nemu_pc = temp;
 
   if (memcmp(reg_scala, ref_r, sizeof(ref_r)) != 0) {
+    printf("=========Retire Trace=========\n");
+    int j;
+    for(j = 0; j < 8; j++){
+      printf("retire pc [%x]: %lx %s\n", j, pc_retire_queue[j], (j==pc_retire_pointer)?"<--":"");
+    }
     ref_isa_reg_display();
     int i;
     for (i = 0; i < 33; i ++) {

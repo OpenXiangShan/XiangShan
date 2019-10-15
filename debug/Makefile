@@ -16,7 +16,7 @@ bputest:
 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) ALL=forcall2 run 2>&1 | tee > bpu.log
 	cat bpu.log | grep Mbp
 
-test:
+unittest:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(SINGLETEST) run 2>&1 | tee > test.log
 	cat test.log | grep different
 	cat test.log | grep ISU > isu.log
@@ -25,7 +25,7 @@ microbench:
 	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=test run 2>&1 | tee > microbench.log
 	cat microbench.log | grep IPC
 
-microbencht:
+microbench_train:
 	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=train run 2>&1 | tee > microbench.log
 	cat microbench.log | grep IPC
 
@@ -39,6 +39,9 @@ dhrystone:
 
 xj:
 	$(MAKE) -C $(NANOS_HOME) $(ARCH) run
+
+rttos:
+	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run
 
 # xjnemu:
 # 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
