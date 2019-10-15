@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class TableAddr(idxBits: Int) extends NOOPBundle {
+class TableAddr(val idxBits: Int) extends NOOPBundle {
   def tagBits = AddrBits - 2 - idxBits
 
   val tag = UInt(tagBits.W)
@@ -16,8 +16,6 @@ class TableAddr(idxBits: Int) extends NOOPBundle {
   def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
-
-  override def cloneType = new TableAddr(idxBits).asInstanceOf[this.type]
 }
 
 object BTBtype {
@@ -45,6 +43,7 @@ class BPU1 extends NOOPModule {
     val in = new Bundle { val pc = Flipped(Valid((UInt(AddrBits.W)))) }
     val out = new RedirectIO
     val flush = Input(Bool())
+    val brIdx = Output(UInt(3.W))
     val lateJump = Output(Bool())
   })
 
@@ -61,8 +60,13 @@ class BPU1 extends NOOPModule {
   }
 
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
+  // flush BTB when executing fence.i
+  val flushBTB = WireInit(false.B)
+  BoringUtils.addSink(flushBTB, "MOUFlushICache")
+  btb.reset := reset.asBool || flushBTB
+
   btb.io.r.req.valid := io.in.pc.valid
-  btb.io.r.req.bits.idx := btbAddr.getIdx(io.in.pc.bits)
+  btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
 
   val btbRead = Wire(btbEntry())
   btbRead := btb.io.r.resp.data(0)
@@ -123,8 +127,7 @@ class BPU1 extends NOOPModule {
   // than read request. Again, since the pipeline will be flushed
   // in the next cycle, the read request will be useless.
   btb.io.w.req.valid := req.isMissPredict && req.valid
-  btb.io.w.req.bits.idx := btbAddr.getIdx(req.pc)
-  btb.io.w.req.bits.wordIndex := 0.U // ???
+  btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
   btb.io.w.req.bits.data := btbWrite
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
@@ -154,7 +157,7 @@ class BPU1 extends NOOPModule {
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
   // io.out.target := Mux(lateJumpLatch && !flush, lateJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
   // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
-  io.out.brIdx  := btbRead.brIdx & Cat(lateJump, Fill(2, io.out.valid))
+  io.brIdx  := btbRead.brIdx & Cat(lateJump, Fill(2, io.out.valid))
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
   // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump || lateJumpLatch && !flush && !lateJump
   // Note: 

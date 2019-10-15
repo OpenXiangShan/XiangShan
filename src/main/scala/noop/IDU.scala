@@ -2,24 +2,28 @@ package noop
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 
 import utils._
 
 class IDU extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new IRIDCtrlFlowIO))
+    val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
     val flush = Input(Bool())
     val redirect = new RedirectIO
   })
 
+  val hasIntr = Wire(Bool())
+
   val instr = Wire(UInt(32.W))
-  val instrType :: fuType :: fuOpType :: Nil =
-    ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
+    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr, intr, dec)}
+  // val instrType :: fuType :: fuOpType :: Nil = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val isRVC = instr(1,0) =/= "b11".U
   val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
     ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable) 
-
 
   io.out.bits := DontCare
 
@@ -114,7 +118,7 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.bits.ctrl.src2Type := src2Type
 
-  io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
+  // io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr(31,0) === NOOPTrap.TRAP) && io.in.valid
 
   //RVC support FSM
@@ -175,7 +179,6 @@ class IDU extends NOOPModule with HasInstrType {
 
   io.redirect.target := redirectPC
   io.redirect.valid := flushIFU
-  io.redirect.brIdx := DontCare
 
   when(!io.flush){
     switch(state){
@@ -273,7 +276,7 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.cf.instr := instr
 
   io.out.valid := io.in.valid && canGo
-  io.in.ready := !io.in.valid || (io.out.fire() && canIn) || loadNextInstline
+  io.in.ready := (!io.in.valid || (io.out.fire() && canIn) || loadNextInstline) && !hasIntr
 
   // NOTE:
   // we did not do special opt for cross-line jump inst, hopefully there will not be too much such inst 
@@ -285,6 +288,18 @@ class IDU extends NOOPModule with HasInstrType {
       printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x brIdx: %x npcin: %x npcout: %x valid: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType, brIdx, io.in.bits.pnpc, pnpcOut, io.out.fire())
     // }
   }
+  // io.out.bits.cf <> io.in.bits
+
+  val intrVec = WireInit(0.U(12.W))
+  BoringUtils.addSink(intrVec, "intrVecIDU")
+  io.out.bits.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
+  hasIntr := intrVec.orR
+
+  io.out.bits.cf.exceptionVec.map(_ := false.B)
+  io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
+  io.out.bits.cf.exceptionVec(ecallM) := (instr === RVZicsrInstr.ECALL) && io.in.valid
+
+  io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
 }
 
 // Note  

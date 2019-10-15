@@ -13,9 +13,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val out = Decoupled(new CommitIO)
     val flush = Input(Bool())
     val dmem = new SimpleBusUC
-    val mmio = new SimpleBusUC
     val forward = new ForwardIO
-    //val wbData = Input(UInt(32.W))
   })
 
   val src1 = io.in.bits.data.src1
@@ -25,10 +23,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
 
   val fuValids = Wire(Vec(FuType.num, Bool()))
   (0 until FuType.num).map (i => fuValids(i) := (fuType === i.U) && io.in.valid && !io.flush)
-
-  // when(io.in.valid){
-  //   printf("EXv %b %b %b %b %x %x\n", fuValids(0), fuValids(1), fuValids(2), fuValids(3), fuType, io.flush)
-  // }
 
   val alu = Module(new ALU)
   val aluOut = alu.access(valid = fuValids(FuType.alu), src1 = src1, src2 = src2, func = fuOpType)
@@ -41,7 +35,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   lsu.io.wdata := src2
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
-  io.mmio <> lsu.io.mmio
   lsu.io.out.ready := true.B
 
   val mdu = Module(new MDU)
@@ -51,8 +44,15 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val csr = Module(new CSR)
   val csrOut = csr.access(valid = fuValids(FuType.csr), src1 = src1, src2 = src2, func = fuOpType)
   csr.io.cfIn := io.in.bits.cf
-  csr.io.isInvOpcode := io.in.bits.ctrl.isInvOpcode
+  csr.io.instrValid := io.in.valid && !io.flush
+  io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
+
+  val mou = Module(new MOU)
+  // mou does not write register
+  mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
+  mou.io.cfIn := io.in.bits.cf
+  mou.io.out.ready := true.B
 
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -61,8 +61,12 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     o.fuType := i.fuType
   }
   io.out.bits.decode.cf.pc := io.in.bits.cf.pc
+
   io.out.bits.decode.cf.instr := io.in.bits.cf.instr
-  io.out.bits.decode.cf.redirect <> Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect)
+  io.out.bits.decode.cf.redirect <>
+    Mux(mou.io.redirect.valid, mou.io.redirect,
+      Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect))
+
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
     FuType.lsu -> lsu.io.out.valid,
@@ -73,6 +77,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.commits(FuType.lsu) := lsuOut
   io.out.bits.commits(FuType.csr) := csrOut
   io.out.bits.commits(FuType.mdu) := mduOut
+  io.out.bits.commits(FuType.mou) := 0.U
 
   io.in.ready := !io.in.valid || io.out.fire()
 

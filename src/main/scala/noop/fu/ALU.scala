@@ -107,7 +107,6 @@ class ALU extends NOOPModule {
   io.redirect.valid := valid && isBru && predictWrong
   // may be can be moved to ISU to calculate pc + 4
   // this is actually for jal and jalr to write pc + 4/2 to rd
-  io.redirect.brIdx := DontCare  
   io.out.bits := Mux(isBru, Mux(!isRVC, io.cfIn.pc + 4.U, io.cfIn.pc + 2.U), aluRes)
   // when(pcPlus2 && isBru){
   //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
@@ -127,12 +126,6 @@ class ALU extends NOOPModule {
 
   io.in.ready := true.B
   io.out.valid := valid
-
-  Debug(){
-    when(io.out.valid){
-      printf("[ALU] func: %b 1: %x, 2: %x, out: %x\n", func, src1, src2, io.out.bits)
-    }
-  }
 
   val bpuUpdateReq = WireInit(0.U.asTypeOf(new BPUUpdateReq))
   bpuUpdateReq.valid := valid && isBru

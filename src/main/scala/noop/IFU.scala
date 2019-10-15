@@ -8,14 +8,16 @@ import utils._
 import bus.simplebus._
 
 trait HasResetVector {
-  val resetVector = 0x80100000L//TODO: set reset vec
+  val resetVector = 0x80000000L//TODO: set reset vec
 }
 
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
-    val imem = new SimpleBusUC(userBits = AddrBits + 3)
-    val pc = Input(UInt(AddrBits.W))
-    val out = Decoupled(new IRIDCtrlFlowIO)
+
+    val imem = new SimpleBusUC(userBits = AddrBits*2 + 3)
+    // val pc = Input(UInt(AddrBits.W))
+    val out = Decoupled(new CtrlFlowIO)
+
     val redirect = Flipped(new RedirectIO)
     val redirectRVC = Flipped(new RedirectIO)//priority: redirect > redirectRVC
     val flushVec = Output(UInt(4.W))
@@ -41,7 +43,7 @@ class IFU extends NOOPModule with HasResetVector {
 
   // predicted next pc
   val pnpc = bp1.io.out.target
-  val pbrIdx = bp1.io.out.brIdx
+  val pbrIdx = bp1.io.brIdx
   val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(lateJumpLatch, lateJumpTarget, Mux(lateJump, snpc, Mux(bp1.io.out.valid, pnpc, snpc)))))
   // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
   val brIdx = Wire(UInt(3.W)) 
@@ -67,33 +69,36 @@ class IFU extends NOOPModule with HasResetVector {
   io.flushVec := Mux(io.redirect.valid, "b1111".U, Mux(io.redirectRVC.valid, "b0001".U, 0.U))
   io.bpFlush := false.B
 
-  io.imem := DontCare
+  io.imem.req.bits.apply(addr = Cat(pc(AddrBits-1,1),0.U(1.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
+    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(brIdx(2,0), npc, pc))
   io.imem.req.valid := io.out.ready
-  io.imem.req.bits.addr := Cat(pc(AddrBits-1,1),0.U(1.W))//cache will treat it as Cat(pc(63,3),0.U(3.W)) 
-  io.imem.req.bits.size := "b11".U
-  io.imem.req.bits.cmd := SimpleBusCmd.read
-  io.imem.req.bits.user := Cat(brIdx(2,0), npc(31,0))
+
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   Debug(){
     when(io.imem.req.fire()){
-      printf("[IFI] pc=%x user=%x %x %x %x %x\n", io.imem.req.bits.addr, io.imem.req.bits.user, io.redirect.valid, io.redirectRVC.valid, pbrIdx, brIdx)
+      printf("[IFI] pc=%x user=%x %x %x %x %x\n", io.imem.req.bits.addr, io.imem.req.bits.user.getOrElse(0.U), io.redirect.valid, io.redirectRVC.valid, pbrIdx, brIdx)
     }
   }
 
   io.out.bits := DontCare
-  io.out.bits.pc := io.pc
     //inst path only uses 32bit inst, get the right inst according to pc(2)
-  io.out.bits.instr := io.imem.resp.bits.rdata
-  io.out.bits.pnpc := io.imem.resp.bits.user(AddrBits-1,0)
-  io.out.bits.brIdx := io.imem.resp.bits.user(AddrBits+2,AddrBits)
-  io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   Debug(){
     when (io.out.fire()) {
           printf("[IFO] pc=%x inst=%x\n", io.out.bits.pc, io.out.bits.instr)
     }
   }
+
+  // io.out.bits.instr := (if (XLEN == 64) io.imem.resp.bits.rdata.asTypeOf(Vec(2, UInt(32.W)))(io.out.bits.pc(2))
+                      //  else io.imem.resp.bits.rdata)
+  io.out.bits.instr := io.imem.resp.bits.rdata
+  io.imem.resp.bits.user.map{ case x =>
+    io.out.bits.pc := x(AddrBits-1,0)
+    io.out.bits.pnpc := x(AddrBits*2-1,AddrBits)
+    io.out.bits.brIdx := x(AddrBits*2 + 2, AddrBits*2)
+  }
+  io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
   BoringUtils.addSource(io.flushVec.orR, "perfCntCondMifuFlush")

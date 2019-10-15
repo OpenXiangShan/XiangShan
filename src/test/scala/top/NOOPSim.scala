@@ -9,7 +9,15 @@ import chisel3.util.experimental.BoringUtils
 
 import bus.axi4._
 import device.AXI4RAM
-import utils.DiffTestIO
+
+class DiffTestIO extends Bundle {
+  val r = Output(Vec(32, UInt(64.W)))
+  val commit = Output(Bool())
+  val thisPC = Output(UInt(64.W))
+  val isMMIO = Output(Bool())
+  val isRVC = Output(Bool())
+  val intrNO = Output(UInt(64.W))
+}
 
 class NOOPSimTop extends Module {
   val io = IO(new Bundle{
@@ -28,12 +36,16 @@ class NOOPSimTop extends Module {
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio
+  soc.io.mtip := mmio.io.mtip
+
+  soc.io.meip := Counter(true.B, 9973)._2  // use prime here to not overlapped by mtip
 
   val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
   BoringUtils.addSink(difftest.commit, "difftestCommit")
   BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
   BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
   BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
+  BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
   io.difftest := difftest
 }

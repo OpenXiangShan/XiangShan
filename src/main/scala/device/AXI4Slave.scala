@@ -39,8 +39,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
       }
       when (axi4.ar.fire()) {
         beatCnt.value := (axi4.ar.bits.addr >> axi4.ar.bits.size) & axi4.ar.bits.len
-        assert(axi4.ar.bits.size === "b11".U)
-        when (axi4.ar.bits.burst === AXI4Parameters.BURST_WRAP) {
+        when (axi4.ar.bits.len =/= 0.U && axi4.ar.bits.burst === AXI4Parameters.BURST_WRAP) {
           assert(axi4.ar.bits.len === 1.U || axi4.ar.bits.len === 3.U ||
             axi4.ar.bits.len === 7.U || axi4.ar.bits.len === 15.U)
         }

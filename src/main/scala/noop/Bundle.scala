@@ -12,7 +12,6 @@ class CtrlSignalIO extends NOOPBundle {
   val rfSrc2 = Output(UInt(5.W))
   val rfWen = Output(Bool())
   val rfDest = Output(UInt(5.W))
-  val isInvOpcode = Output(Bool())
   val isNoopTrap = Output(Bool())
   val isSrc1Forward = Output(Bool())
   val isSrc2Forward = Output(Bool())
@@ -26,7 +25,7 @@ class DataSrcIO extends NOOPBundle {
 
 class RedirectIO extends NOOPBundle {
   val target = Output(UInt(AddrBits.W))
-  val brIdx = Output(UInt(3.W)) // for RVC
+  // val brIdx = Output(UInt(3.W)) // for RVC
   val valid = Output(Bool())
 }
 
@@ -39,11 +38,13 @@ class IRIDCtrlFlowIO extends NOOPBundle {
 }
 
 class CtrlFlowIO extends NOOPBundle {
-  val instr = Output(UInt(32.W))
+  val instr = Output(UInt(64.W))
   val pc = Output(UInt(AddrBits.W))
   val pnpc = Output(UInt(AddrBits.W))
-  val brIdx = Output(UInt(2.W))
   val redirect = new RedirectIO
+  val exceptionVec = Output(Vec(16, Bool()))
+  val intrVec = Output(Vec(12, Bool()))
+  val brIdx = Output(UInt(3.W))
 }
 
 class DecodeIO extends NOOPBundle {
@@ -61,6 +62,7 @@ class WriteBackIO extends NOOPBundle {
 class CommitIO extends NOOPBundle {
   val decode = new DecodeIO
   val isMMIO = Output(Bool())
+  val intrNO = Output(UInt(XLEN.W))
   val commits = Output(Vec(FuType.num, UInt(XLEN.W)))
 }
 

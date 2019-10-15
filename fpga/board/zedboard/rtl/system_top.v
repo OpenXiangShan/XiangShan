@@ -31,8 +31,8 @@ module system_top (
   output VGA_vsync
 );
 
-  `axi_wire(AXI_MEM_MAPPED, 32, 8);
-  `axi_wire(AXI_MEM, 32, 8);
+  `axi_wire(AXI_MEM_MAPPED, 64, 8);
+  `axi_wire(AXI_MEM, 64, 8);
 
   wire coreclk;
   wire corerstn;

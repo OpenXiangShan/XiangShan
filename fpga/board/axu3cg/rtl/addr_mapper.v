@@ -3,8 +3,8 @@ module addr_mapper (
    `axi_master_if(m_axi, 64, 8)
 );
 
-    assign  m_axi_awaddr = {4'b0001, s_axi_awaddr[27:0]};
-    assign  m_axi_araddr = {4'b0001, s_axi_araddr[27:0]};
+    assign  m_axi_awaddr = {4'd0, 2'b01, s_axi_awaddr[29:0]};
+    assign  m_axi_araddr = {4'd0, 2'b01, s_axi_araddr[29:0]};
     assign  m_axi_arburst = s_axi_arburst;
     assign  m_axi_arcache = s_axi_arcache;
     assign  m_axi_arid    = s_axi_arid   ;
@@ -42,4 +42,5 @@ module addr_mapper (
     assign  m_axi_wvalid  = s_axi_wvalid ;
     assign  m_axi_arqos   = s_axi_arqos  ;
     assign  m_axi_awqos   = s_axi_awqos  ;
+
 endmodule

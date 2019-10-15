@@ -12,6 +12,7 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
+void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 void (*ref_isa_reg_display)(void) = NULL;
 
 static bool is_skip_ref;
@@ -33,7 +34,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-void init_difftest(uint64_t *reg, const char *mainargs) {
+void init_difftest(uint64_t *reg) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   assert(handle);
@@ -50,6 +51,9 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
 
+  ref_difftest_raise_intr = (void (*)(uint64_t))dlsym(handle, "difftest_raise_intr");
+  assert(ref_difftest_raise_intr);
+
   ref_isa_reg_display = (void (*)(void))dlsym(handle, "isa_reg_display");
   assert(ref_isa_reg_display);
 
@@ -59,14 +63,13 @@ void init_difftest(uint64_t *reg, const char *mainargs) {
   ref_difftest_init();
   void* get_img_start();
   long get_img_size();
-  ref_difftest_memcpy_from_dut(0x100000, get_img_start(), get_img_size());
-  ref_difftest_memcpy_from_dut(0x0, (void *)mainargs, strlen(mainargs) + 1);
+  ref_difftest_memcpy_from_dut(0x0, get_img_start(), get_img_size());
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC) {
+int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, uint64_t intrNO) {
   uint64_t ref_r[33];
-  static uint64_t nemu_pc = 0x80100000;
+  static uint64_t nemu_pc = 0x80000000;
   static uint64_t pc_retire_queue[8] = {0};
   static int pc_retire_pointer = 7;
 
@@ -82,7 +85,12 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC) 
     return 0;
   }
 
-  ref_difftest_exec(1);
+  if (intrNO) {
+    ref_difftest_raise_intr(intrNO);
+  } else {
+    ref_difftest_exec(1);
+  }
+
   ref_difftest_getregs(&ref_r);
 
   pc_retire_pointer = (pc_retire_pointer+1) % 8;

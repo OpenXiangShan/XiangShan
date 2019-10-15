@@ -5,12 +5,13 @@ import chisel3.util._
 
 import utils._
 import bus.simplebus._
+import noop.HasNOOPParameter
 
-trait HasCoherenceConst {
-  val supportCoh = false
+trait HasCoherenceParameter extends HasNOOPParameter {
+  val supportCoh = HasDcache
 }
 
-class CoherenceInterconnect extends Module with HasCoherenceConst {
+class CoherenceInterconnect extends Module with HasCoherenceParameter {
   val io = IO(new Bundle {
     val in = Flipped(Vec(2, new SimpleBusC))
     val out = new SimpleBusUC
@@ -31,8 +32,8 @@ class CoherenceInterconnect extends Module with HasCoherenceConst {
   val inflight = RegInit(false.B)
   val inflightSrc = Reg(UInt(1.W)) // 0 - icache, 1 - dcache
 
-  val lockWriteFun = ((x: SimpleBusReqBundle) => x.isWrite())
-  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 4, Some(lockWriteFun)))
+  val lockWriteFun = ((x: SimpleBusReqBundle) => x.isWrite() && x.isBurst())
+  val inputArb = Module(new LockingArbiter(chiselTypeOf(io.in(0).mem.req.bits), 2, 8, Some(lockWriteFun)))
   (inputArb.io.in zip io.in.map(_.mem.req)).map{ case (arb, in) => arb <> in }
 
   val thisReq = inputArb.io.out

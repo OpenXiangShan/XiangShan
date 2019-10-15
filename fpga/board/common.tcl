@@ -27,7 +27,9 @@ set data_dir    ${script_dir}/data
 set ip_dir      ${script_dir}/ip
 
 create_project $project_name -force -dir $project_dir/ -part ${device}
-set_property board_part $board [current_project]
+if {[info exists board]} {
+  set_property board_part $board [current_project]
+}
 
 # lib files
 set inc_files [list \
@@ -40,7 +42,9 @@ set_property is_global_include true [get_files $inc_files]
 lappend src_files "[file normalize "${fpga_dir}/../build/TopMain.v"]"
 
 add_files -norecurse -fileset sources_1 $src_files
-add_files -norecurse -fileset constrs_1 $xdc_files
+if {[info exists xdc_files]} {
+  add_files -norecurse -fileset constrs_1 $xdc_files
+}
 
 # Block Designs
 add_bd ${fpga_dir}/noop.tcl

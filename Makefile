@@ -44,6 +44,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
 	+define+RANDOMIZE_REG_INIT \
   --assert --output-split 20000 \
   --trace  \
+  -I$(abspath $(BUILD_DIR)) \
   --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
    -LDFLAGS "$(EMU_LDFLAGS)"
 
@@ -65,7 +66,7 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
 ifdef mainargs
-MAINARGS = -a $(mainargs)
+MAINARGS = -m $(mainargs)
 endif
 
 emu: $(EMU)

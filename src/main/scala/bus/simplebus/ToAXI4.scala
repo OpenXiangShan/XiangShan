@@ -13,7 +13,7 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
   })
 
   val toAXI4Lite = !(io.in.req.valid && io.in.req.bits.isBurst()) && (outType.getClass == classOf[AXI4Lite]).B
-  val toAXI4 = !(io.in.req.valid && !io.in.req.bits.isBurst()) && (outType.getClass == classOf[AXI4]).B
+  val toAXI4 = (outType.getClass == classOf[AXI4]).B
   assert(toAXI4Lite || toAXI4)
 
   val (mem, axi) = (io.in, io.out)
@@ -37,7 +37,7 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
     axi4.ar.bits.cache := 0.U
     axi4.ar.bits.qos   := 0.U
     axi4.ar.bits.user  := 0.U
-    axi4.w.bits.last   := mem.req.bits.isWriteLast()
+    axi4.w.bits.last   := mem.req.bits.isWriteLast() || mem.req.bits.isWriteSingle()
     wlast := axi4.w.bits.last
     rlast := axi4.r.bits.last
   }
@@ -45,7 +45,6 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
   aw := ar
   mem.resp.bits.rdata := r.data
   mem.resp.bits.cmd  := Mux(rlast, SimpleBusCmd.readLast, 0.U)
-  mem.resp.bits.user := 0.U
 
   val wSend = Wire(Bool())
   val awAck = BoolStopWatch(axi.aw.fire(), wSend)
@@ -57,25 +56,6 @@ class SimpleBus2AXI4Converter[OT <: AXI4Lite](outType: OT) extends Module {
   axi.aw.valid := mem.isWrite() && !awAck
   axi.w .valid := mem.isWrite() && !wAck
   mem.req.ready  := Mux(mem.req.bits.isWrite(), !wAck && axi.w.ready, axi.ar.ready)
-
-  Debug(false){
-    printf("[CVT] isWrite %x wAck %x wr %x arr %x addr %x\n", mem.req.bits.isWrite(), wAck, axi.w.ready, axi.ar.ready, mem.req.bits.addr)
-  }
-
-  Debug(false){
-    when((ar.addr(31,4) === "h8010f00".U)&&(axi.ar.valid || axi.aw.valid)){
-      printf("[AXI] TIME %d addr: %x arv %x awv %x\n", GTimer(), ar.addr, axi.ar.valid, axi.aw.valid)
-    }
-  }
-
-  Debug(false){
-    when((w.data(31,0) === "h18be6784".U)&& axi.w.valid){
-      printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
-    }
-    when((w.data(63,32) === "h18be6784".U)&& axi.w.valid){
-      printf("[AXI] TIME %d wdata: %x wr: %x\n", GTimer(), w.data, axi.w.ready)
-    }
-  }
 
   axi.r.ready  := mem.resp.ready
   axi.b.ready  := mem.resp.ready

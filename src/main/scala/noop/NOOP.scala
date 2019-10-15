@@ -21,7 +21,7 @@ trait HasNOOPParameter {
   val DataBytes = DataBits / 8
 }
 
-abstract class NOOPModule extends Module with HasNOOPParameter
+abstract class NOOPModule extends Module with HasNOOPParameter with HasExceptionNO
 abstract class NOOPBundle extends Bundle with HasNOOPParameter
 
 case class NOOPConfig (
@@ -83,19 +83,9 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
-  io.imem <> (if (HasIcache) {
-    val icache = Module(new Cache(ro = true, name = "icache", userBits = AddrBits + 3)) // userBits = AddrBits + BrIdxBits
-    icache.io.in <> ifu.io.imem
-    icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
-    ifu.io.pc := icache.io.addr
-    icache.io.out
-  } else { ifu.io.imem })
-
-  io.dmem <> (if (HasDcache) {
-    val dcache = Module(new Cache(ro = false, name = "dcache"))
-    dcache.io.in <> exu.io.dmem
-    dcache.io.flush := Fill(2, false.B)
-    dcache.io.out
-  } else { exu.io.dmem })
-  io.mmio <> exu.io.mmio
+  val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
+  io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 3)) // userBits = AddrBits + BrIdxBits
+  io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  io.mmio <> mmioXbar.io.out
 }
