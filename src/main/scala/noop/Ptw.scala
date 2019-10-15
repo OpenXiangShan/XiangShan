@@ -187,7 +187,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     val out  = new SimpleBusUC(userBits)
   })
 
-  val s_ready :: s_tran :: s_walk :: s_mem :: s_error :: Nil = Enum(5)
+  val s_ready :: s_tran :: s_walk :: s_mem :: s_error :: s_notran :: Nil = Enum(6)
   val state = RegInit(s_ready)
   val phyNum = RegInit(0.U(paddrLen.W))
   val alreadyOutFire = RegEnable(true.B, io.out.req.fire())
@@ -195,10 +195,11 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   val _isWork = RegEnable(__isWork, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
   val isWork = Mux(state===s_ready, __isWork, _isWork) //isWork control the 
   val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
-  
+  val flushEnable = needFlush || io.flush //use in s_walk s_mem s_notran, which needs several cycles
+
   val wire_tmp = 0.U(32.W)//Wire(0.U(34.W))
 
-  val updateStore = state===s_ready && io.in.req.fire() && __isWork && !io.flush
+  val updateStore = state===s_ready && io.in.req.fire() && !io.flush
   val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
   val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
   val inReqBitsWmask = RegEnable(io.in.req.bits.wmask, updateStore)
@@ -217,17 +218,17 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   io.in.resp.bits.rdata := io.out.resp.bits.rdata
   io.in.resp.bits.user.map(_ := io.out.resp.bits.user.getOrElse(wire_tmp))
   io.in.resp.bits.cmd   := io.out.resp.bits.cmd  
-  io.in.resp.valid      := Mux(isWork, state===s_mem && !needFlush && io.out.resp.valid, io.out.resp.valid)
-  io.out.resp.ready     := Mux(isWork, (state===s_walk || state===s_mem), io.in.resp.ready)
+  io.in.resp.valid      := Mux(isWork, state===s_mem && !flushEnable && io.out.resp.valid, io.out.resp.valid && state===s_notran && !flushEnable)
+  io.out.resp.ready     := Mux(isWork, (state===s_walk || state===s_mem), state===s_notran)
   
-  io.out.req.bits.addr  := Mux(isWork, phyNum, io.in.req.bits.addr)
-  io.out.req.bits.cmd   := Mux(isWork, Mux(state===s_walk, SimpleBusCmd.read, inReqBitsCmd), io.in.req.bits.cmd)
-  io.out.req.bits.wmask := Mux(isWork, inReqBitsWmask, io.in.req.bits.wmask)
-  io.out.req.bits.wdata := Mux(isWork, inReqBitsWdata, io.in.req.bits.wdata)
-  io.out.req.bits.user.map(_ := Mux(isWork, inReqBitsUser, io.in.req.bits.user.getOrElse(wire_tmp)))
-  io.out.req.bits.size  := Mux(isWork, inReqBitsSize, io.in.req.bits.size)
-  io.out.req.valid      := Mux(isWork, (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire), io.in.req.valid)//need add state machine
-  io.in.req.ready       := Mux(isWork, state===s_ready && io.out.req.ready, io.out.req.ready)
+  io.out.req.bits.addr  := Mux(isWork, phyNum, vaddr)
+  io.out.req.bits.cmd   := Mux(isWork, Mux(state===s_walk, SimpleBusCmd.read, inReqBitsCmd), inReqBitsCmd)
+  io.out.req.bits.wmask := Mux(isWork, inReqBitsWmask, inReqBitsWmask)
+  io.out.req.bits.wdata := Mux(isWork, inReqBitsWdata, inReqBitsWdata)
+  io.out.req.bits.user.map(_ := Mux(isWork, inReqBitsUser, inReqBitsUser))
+  io.out.req.bits.size  := Mux(isWork, inReqBitsSize, inReqBitsSize)
+  io.out.req.valid      := Mux(isWork, (state===s_walk && !alreadyOutFire|| state===s_mem && !alreadyOutFire), state===s_notran && !alreadyOutFire)//need add state machine
+  io.in.req.ready       := Mux(isWork, state===s_ready && io.out.req.ready, io.out.req.ready && state===s_ready)
   //connect end
 
   //s_ready : free state
@@ -242,6 +243,9 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
       when(io.in.req.fire() && __isWork && !io.flush ) {
         state := s_tran
         level := Level.U
+      }.elsewhen(io.in.req.fire() && !__isWork && !io.flush) {
+        state := s_notran
+        alreadyOutFire := false.B
       }
     }
 
@@ -263,7 +267,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
 
     is (s_walk) {
       when(/*level =/= 0.U && */io.out.resp.fire()) {
-        when(needFlush || io.flush) {
+        when(flushEnable) {
           needFlush := false.B
           state := s_ready
           level := 2.U
@@ -308,20 +312,31 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
         needFlush := true.B
       }
     }
+
+    is (s_notran) {
+      when(io.out.resp.fire()) {
+        alreadyOutFire := false.B
+        state := s_ready
+        needFlush := false.B
+      }.elsewhen(io.flush) {
+        needFlush := true.B
+      }
+    }
   }
   
   Debug(debug && name=="iptw") {
     
     val alreadyWork = RegInit(false.B)
-
+    
     when( __isWork || alreadyWork) {
       printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x rdata:%x",GTimer(),state,level,vaddr,phyNum,io.out.resp.bits.rdata)
-      //printf(" needFlush:%d io.flush:%d ",,needFlush,io.flush)
-      //printf(" inReqAddr: %x ", io.in.req.bits.addr)
+      printf(" needFlush:%d io.flush:%d ",needFlush,io.flush)
+      printf(" inReqAddr: %x ", io.in.req.bits.addr)
       printf(" inReqFire:%d inRespFire:%d outReqFire:%d outRespFire:%d", io.in.req.fire(), io.in.resp.fire(),io.out.req.fire(),io.out.resp.fire())
-      printf(" satp:%x ", io.satp)
-      //printf(" updateStore:%d __isWork:%d _isWork:%d isWork:%d",updateStore,__isWork,_isWork,isWork)
-      printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
+      printf(" alreadyOutFire:%d", alreadyOutFire)
+      //printf(" satp:%x ", io.satp)
+      printf(" updateStore:%d __isWork:%d _isWork:%d isWork:%d",updateStore,__isWork,_isWork,isWork)
+      //printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
       printf("\n")
     }
     when(__isWork && !alreadyWork) {
@@ -329,11 +344,6 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
       printf("\n")
       alreadyWork := true.B
     }
-  }
-  
-  
-  Debug(debug) {
-    
   }
 
   Debug(debug) {
