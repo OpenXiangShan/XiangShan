@@ -324,11 +324,11 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
   }
   
-  Debug(debug && name=="iptw") {
+  Debug(debug && name=="iptw" && false) {
     
     val alreadyWork = RegInit(false.B)
     
-    when( __isWork || alreadyWork) {
+    when( (__isWork || alreadyWork) && false.B) {
       printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x rdata:%x",GTimer(),state,level,vaddr,phyNum,io.out.resp.bits.rdata)
       printf(" needFlush:%d io.flush:%d ",needFlush,io.flush)
       printf(" inReqAddr: %x ", io.in.req.bits.addr)
@@ -346,10 +346,8 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
   }
 
-  Debug(debug) {
-    when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
-      printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
-    }
-    assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
-  }
+  //when(state===s_mem && io.out.req.fire().asBool && vaddr=/=phyNum) {
+    //printf(name + "%d: state:%d, out.req.fire:%d, vaddr:%x, phyNum:%x\n",GTimer(),state,io.out.req.fire(),vaddr,io.out.req.bits.addr)
+  //}
+  //assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
 }
