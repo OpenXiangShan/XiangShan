@@ -9,7 +9,6 @@
 #include "common.h"
 #include "VNOOPSimTop.h"
 
-
 class Emulator {
   const char *image;
   const char *mainargs;
@@ -37,7 +36,7 @@ class Emulator {
   // argv decay to the secondary pointer
   Emulator(int argc, const char *argv[]):
     image(nullptr),
-    mainargs(""),
+    mainargs(NULL),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0)
   {
@@ -60,11 +59,11 @@ class Emulator {
     // init core
     reset_ncycles(10);
 
-    extern void init_difftest(uint64_t *reg, const char *mainargs);
+    extern void init_difftest(uint64_t *reg);
     uint64_t reg[33];
     read_emu_regs(reg);
-    reg[32] = 0x80100000;
-    init_difftest(reg, mainargs);
+    reg[32] = 0x80000000;
+    init_difftest(reg);
   }
 
   void reset_ncycles(size_t cycles) {

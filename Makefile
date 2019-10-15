@@ -66,7 +66,7 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
 ifdef mainargs
-MAINARGS = -a $(mainargs)
+MAINARGS = -m $(mainargs)
 endif
 
 emu: $(EMU)
