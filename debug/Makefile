@@ -2,8 +2,16 @@ ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
+# ------------------------------------------------------------------
+# bulid CPU and run dummy test
+# ------------------------------------------------------------------
+
 cpu:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
+
+# ------------------------------------------------------------------
+# run different test sets
+# ------------------------------------------------------------------
 
 cputest:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) run 2>&1 | tee > cpu.log
@@ -40,8 +48,22 @@ dhrystone:
 xj:
 	$(MAKE) -C $(NANOS_HOME) $(ARCH) run
 
+# xjnemu:
+# 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
+
 rttos:
 	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run
 
-# xjnemu:
-# 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
+freertos:
+	$(MAKE) -C $(FREERTOS_HOME)/Demo/riscv64-nemu noop_run
+
+# ------------------------------------------------------------------
+# get disassembled test src
+# ------------------------------------------------------------------
+
+disassemble-rttos:
+	cp $(RTTOS_HOME)/bsp/riscv64-noop/build/code.txt ./d-rttos.log
+
+disassemble-freertos:
+	cp $(FREERTOS_HOME)/Demo/riscv64-nemu/build/FreeRTOS-simple.elf.txt ./d-freertos.log
+

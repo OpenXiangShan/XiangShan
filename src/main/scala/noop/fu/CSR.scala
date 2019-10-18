@@ -7,10 +7,13 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object CSROpType {
-  def jmp  = "b00".U
-  def wrt  = "b01".U
-  def set  = "b10".U
-  def clr  = "b11".U
+  def jmp  = "b000".U
+  def wrt  = "b001".U
+  def set  = "b010".U
+  def clr  = "b011".U
+  def wrti = "b101".U
+  def seti = "b110".U
+  def clri = "b111".U
 }
 
 trait HasCSRConst {
@@ -91,7 +94,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     val pie = new Priv
     val ie = new Priv
   }
-  val mtvec = Reg(UInt(XLEN.W))
+  val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcause = Reg(UInt(XLEN.W))
   val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
   val mepc = Reg(UInt(XLEN.W))
@@ -136,10 +139,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   val addr = src2(11, 0)
   val rdata = Wire(UInt(XLEN.W))
+  val csri = ZeroExt(io.cfIn.instr(19,15), XLEN) //unsigned imm for csri. [TODO]
   val wdata = LookupTree(func, List(
-    CSROpType.wrt -> src1,
-    CSROpType.set -> (rdata | src1),
-    CSROpType.clr -> (rdata & ~src1)
+    CSROpType.wrt  -> src1,
+    CSROpType.set  -> (rdata | src1),
+    CSROpType.clr  -> (rdata & ~src1),
+    CSROpType.wrti -> csri,//TODO: csri --> src2
+    CSROpType.seti -> (rdata | csri),
+    CSROpType.clri -> (rdata & ~csri)
   ))
 
   val wen = (valid && func =/= CSROpType.jmp)
