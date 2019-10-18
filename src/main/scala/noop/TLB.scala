@@ -1,4 +1,3 @@
-/*
 package noop
 
 import chisel3._
@@ -22,29 +21,7 @@ import utils._
 //| VPN | ASID |  G  | PFN | D/A/U/X/W/R/V |
 //| 20b | 9b   |  1b | 22b | 7b            |
 
-trait tlbSv32Const {
-  val debug = false
-
-  val numEntry = 1
-  
-  val PPN1Len = 12
-  val PPN0Len = 10
-  val PageSizeLen = 12
-
-  def tlbBundle = new Bundle {
-    val VPN  = UInt(20.W)
-    val ASID = UInt(9.W)
-    val G    = UInt(1.W)
-    val PFN  = UInt(22.W)
-    val D    = UInt(1.W)
-    val A    = UInt(1.W)
-    val U    = UInt(1.W)
-    val X    = UInt(1.W)
-    val W    = UInt(1.W)
-    val R    = UInt(1.W)
-    val V    = UInt(1.W)
-  }
+object TLBOpType {
+  def vma = "b0".U
 }
-*/
-
 

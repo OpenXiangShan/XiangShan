@@ -14,7 +14,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val flush = Input(Bool())
     val dmem = new SimpleBusUC
     val forward = new ForwardIO
-    val satp = Output(UInt(XLEN.W))
+    val tlb = new TLBExuIO
   })
 
   val src1 = io.in.bits.data.src1
@@ -48,13 +48,18 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   csr.io.instrValid := io.in.valid && !io.flush
   io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
-  io.satp := csr.io.satp
+  
+  //io.satp := csr.io.satp
 
   val mou = Module(new MOU)
   // mou does not write register
   mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
   mou.io.cfIn := io.in.bits.cf
   mou.io.out.ready := true.B
+
+  //tlb: tlb is implemented outside - added by lemover-zhangzifei
+  io.tlb.access(valid = fuValids(FuType.tlb), src1 = src1, src2 = src2) //func no use here
+  val tlb.redirect = 
 
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -65,7 +70,8 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.decode.cf.pc := io.in.bits.cf.pc
   io.out.bits.decode.cf.redirect <>
     Mux(mou.io.redirect.valid, mou.io.redirect,
-      Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect))
+      Mux(csr.io.redirect.valid, csr.io.redirect, 
+        Mux(alu.io.redirect.valid, io.tlb.tlb.redirect))) //add tlb
 
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(

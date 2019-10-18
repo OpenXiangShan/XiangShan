@@ -136,6 +136,10 @@ trait pteSv39Const extends Sv39Const{
 
 trait pteConst extends pteSv39Const
 
+object TLBOpType {
+  def vma = "b0".U
+}
+
 trait tlbSv32Const extends Sv32Const{
   val tlbEntryNum = 8
   val tlbEntryNumLen = 3
@@ -181,21 +185,24 @@ trait tlbConst extends tlbSv39Const
 
 class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteConst with tlbConst {
   val io = IO(new Bundle {
-    val satp = Input(UInt(satpLen.W))
+    val exu = Flipped(new TLBExuIO)
     val flush = Input(Bool())
     val in   = Flipped(new SimpleBusUC(userBits))
     val out  = new SimpleBusUC(userBits)
   })
 
+  val satp = io.exu.satp
+  
+
   val s_ready :: s_tran :: s_walk :: s_mem :: s_error :: s_notran :: Nil = Enum(6)
   val state = RegInit(s_ready)
   val phyNum = RegInit(0.U(paddrLen.W))
   val alreadyOutFire = RegEnable(true.B, io.out.req.fire())
-  val __isWork = io.satp.asTypeOf(satpBundle).mode =/= 0.U
-  val _isWork = RegEnable(__isWork, state===s_ready && io.in.req.fire()) //hold the satp(31) to aviod sudden change.
-  val isWork = Mux(state===s_ready, __isWork, _isWork) //isWork control the 
-  val needFlush = RegInit(false.B) // needFlush: set when encounter a io.flush; work when after an access memory series ends; reset when return to s_ready. the io.in.resp.valid is true at mem, so we can jump to s_ready directly or low down the valid.
-  val flushEnable = needFlush || io.flush //use in s_walk s_mem s_notran, which needs several cycles
+  val __isWork = satp.asTypeOf(satpBundle).mode =/= 0.U
+  val _isWork = RegEnable(__isWork, state===s_ready && io.in.req.fire()) 
+  val isWork = Mux(state===s_ready, __isWork, _isWork) 
+  val needFlush = RegInit(false.B) 
+  val flushEnable = needFlush || io.flush /
 
   val wire_tmp = 0.U(32.W)//Wire(0.U(34.W))
 
@@ -209,7 +216,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   //store end
 
   val tlbEntry = Mem(tlbEntryNum, UInt(tlbEntryLen.W))
-  val tlbHitAll = (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).vpn===vaddr.asTypeOf(vaBundle2).vpn && tlbEntry(i).asTypeOf(tlbBundle).V.asBool && tlbEntry(i).asTypeOf(tlbBundle).asid===io.satp.asTypeOf(tlbBundle).asid)
+  val tlbHitAll = (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).vpn===vaddr.asTypeOf(vaBundle2).vpn && tlbEntry(i).asTypeOf(tlbBundle).V.asBool && tlbEntry(i).asTypeOf(tlbBundle).asid===satp.asTypeOf(tlbBundle).asid)
   val tlbHit = (state===s_tran) && tlbHitAll.reduce(_||_)
   val tlbHitIndex = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(_.U))
   val tlbHitPPN = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).ppn))
@@ -260,7 +267,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
       }.otherwise {
         state := s_walk
         level := Level.U
-        phyNum := Cat(0.U(paResLen.W), Cat(io.satp.asTypeOf(satpBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn2, 0.U(3.W))))
+        phyNum := Cat(0.U(paResLen.W), Cat(satp.asTypeOf(satpBundle).ppn, Cat(vaddr.asTypeOf(vaBundle).vpn2, 0.U(3.W))))
         alreadyOutFire := false.B
       }
     }
@@ -284,7 +291,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
               state := s_mem
               phyNum:= Cat(0.U(paResLen.W), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, vaddr.asTypeOf(vaBundle).off))
               rand3Bit := rand3Bit+1.U
-              tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, io.satp.asTypeOf(tlbBundle).asid), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
+              tlbEntry(rand3Bit) := Cat( Cat(vaddr.asTypeOf(vaBundle2).vpn, satp.asTypeOf(tlbBundle).asid), Cat(io.out.resp.bits.rdata.asTypeOf(pteBundle).ppn, io.out.resp.bits.rdata(7,0))) //need change
             }
             is (0.U) {
               state := s_error
@@ -324,25 +331,20 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
   }
   
-  Debug(debug && name=="iptw" && false) {
+  Debug(debug && name=="iptw") {
     
     val alreadyWork = RegInit(false.B)
     
-    when( (__isWork || alreadyWork) && false.B) {
+    when( GTimer() >= 145012000.U ) {
       printf(name + "%d: PTW state:%d lev:%d vaddr:%x phy:%x rdata:%x",GTimer(),state,level,vaddr,phyNum,io.out.resp.bits.rdata)
       printf(" needFlush:%d io.flush:%d ",needFlush,io.flush)
       printf(" inReqAddr: %x ", io.in.req.bits.addr)
       printf(" inReqFire:%d inRespFire:%d outReqFire:%d outRespFire:%d", io.in.req.fire(), io.in.resp.fire(),io.out.req.fire(),io.out.resp.fire())
-      printf(" alreadyOutFire:%d", alreadyOutFire)
-      //printf(" satp:%x ", io.satp)
-      printf(" updateStore:%d __isWork:%d _isWork:%d isWork:%d",updateStore,__isWork,_isWork,isWork)
-      //printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
+      //printf(" alreadyOutFire:%d", alreadyOutFire)
+      printf(" satp:%x ", satp)
+      //printf(" updateStore:%d __isWork:%d _isWork:%d isWork:%d",updateStore,__isWork,_isWork,isWork)
+      printf(" tlbEntry(%d):%x tlbHit:%d tlbvaddr:%x tlbpaddr:%x ", tlbHitIndex, tlbEntry(tlbHitIndex), tlbHit, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).vpn, tlbEntry(tlbHitIndex).asTypeOf(tlbBundle).ppn)
       printf("\n")
-    }
-    when(__isWork && !alreadyWork) {
-      printf(name + "%d: alreadyWork", GTimer())
-      printf("\n")
-      alreadyWork := true.B
     }
   }
 

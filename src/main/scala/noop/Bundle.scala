@@ -70,3 +70,18 @@ class ForwardIO extends NOOPBundle {
   val wb = new WriteBackIO
   val fuType = Output(FuType())
 }
+
+class TLBExuIO extends NOOPBundle with tlbConst{
+  val satp = Output(UInt(XLEN.W))
+  val sfence = new Bundle {
+    val valid = Output(Bool())
+    val asid  = Output(UInt(tlbAsidLen.W))
+    val vaddr = Output(UInt(XLEN.W))
+  }
+
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+    this.sfence.valid := valid
+    this.sfence.vaddr := src1
+    this.sfence.asid  := src2(tlbAsidLen-1,0)
+  }
+}
