@@ -21,7 +21,4 @@ import utils._
 //| VPN | ASID |  G  | PFN | D/A/U/X/W/R/V |
 //| 20b | 9b   |  1b | 22b | 7b            |
 
-object TLBOpType {
-  def vma = "b0".U
-}
 

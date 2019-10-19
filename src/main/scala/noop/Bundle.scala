@@ -79,9 +79,10 @@ class TLBExuIO extends NOOPBundle with tlbConst{
     val vaddr = Output(UInt(XLEN.W))
   }
 
-  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt, satp: UInt) = {//func no use here for just sfence.vma only
     this.sfence.valid := valid
     this.sfence.vaddr := src1
     this.sfence.asid  := src2(tlbAsidLen-1,0)
+    this.satp := satp
   }
 }

@@ -58,9 +58,9 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   mou.io.out.ready := true.B
 
   //tlb: tlb is implemented outside - added by lemover-zhangzifei
-  io.tlb.access(valid = fuValids(FuType.tlb), src1 = src1, src2 = src2) //func no use here
-  val tlb.redirect = 
-
+  io.tlb.access(valid = fuValids(FuType.tlb), src1 = src1, src2 = src2, func = fuOpType, satp = csr.io.satp) //func no use here
+  val tlbRedirect = fuTlb(cf = io.in.bits.cf, valid = fuValids(FuType.tlb))
+  
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.rfWen := i.rfWen
@@ -71,7 +71,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.decode.cf.redirect <>
     Mux(mou.io.redirect.valid, mou.io.redirect,
       Mux(csr.io.redirect.valid, csr.io.redirect, 
-        Mux(alu.io.redirect.valid, io.tlb.tlb.redirect))) //add tlb
+        Mux(alu.io.redirect.valid, alu.io.redirect, tlbRedirect))) //add tlb
 
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
@@ -84,6 +84,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.commits(FuType.csr) := csrOut
   io.out.bits.commits(FuType.mdu) := mduOut
   io.out.bits.commits(FuType.mou) := 0.U
+  io.out.bits.commits(FuType.tlb) := 0.U
 
   io.in.ready := !io.in.valid || io.out.fire()
 

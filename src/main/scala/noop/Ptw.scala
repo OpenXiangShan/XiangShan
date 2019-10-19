@@ -193,7 +193,6 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
 
   val satp = io.exu.satp
   
-
   val s_ready :: s_tran :: s_walk :: s_mem :: s_error :: s_notran :: Nil = Enum(6)
   val state = RegInit(s_ready)
   val phyNum = RegInit(0.U(paddrLen.W))
@@ -202,12 +201,12 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   val _isWork = RegEnable(__isWork, state===s_ready && io.in.req.fire()) 
   val isWork = Mux(state===s_ready, __isWork, _isWork) 
   val needFlush = RegInit(false.B) 
-  val flushEnable = needFlush || io.flush /
+  val flushEnable = needFlush || io.flush 
 
-  val wire_tmp = 0.U(32.W)//Wire(0.U(34.W))
+  val wire_tmp = 0.U(32.W)
 
   val updateStore = state===s_ready && io.in.req.fire() && !io.flush
-  val vaddr = RegEnable(io.in.req.bits.addr, updateStore) // maybe just need the fire() signal
+  val vaddr = RegEnable(io.in.req.bits.addr, updateStore) 
   val inReqBitsCmd  = RegEnable(io.in.req.bits.cmd, updateStore)
   val inReqBitsWmask = RegEnable(io.in.req.bits.wmask, updateStore)
   val inReqBitsWdata = RegEnable(io.in.req.bits.wdata, updateStore)
@@ -221,6 +220,18 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   val tlbHitIndex = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(_.U))
   val tlbHitPPN = Mux1H(tlbHitAll, (0 until tlbEntryNum).map(i => tlbEntry(i).asTypeOf(tlbBundle).ppn))
   val rand3Bit = RegInit(0.U(3.W))
+
+  //tlb flush - simply flush all
+  val sfence = io.exu.sfence
+  val sfenceUpdate = (state =/= s_ready && state =/= s_tran) && sfence.valid
+  val flushAsid = RegEnable(sfence.asid,sfenceUpdate)
+  val flushVaddr = RegEnable(sfence.vaddr,sfenceUpdate)
+  val flushValid = RegEnable(sfence.valid,sfenceUpdate)
+  when((state===s_ready || state===s_tran) && (flushValid || sfence.valid)) {
+    flushValid := false.B
+    (0 until tlbEntryNum).map(i => tlbEntry(i) := 0.U(tlbEntryLen.W))
+  }
+  //
 
   io.in.resp.bits.rdata := io.out.resp.bits.rdata
   io.in.resp.bits.user.map(_ := io.out.resp.bits.user.getOrElse(wire_tmp))
@@ -257,7 +268,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
 
     is (s_tran) {
-      when (io.flush) {
+      when (io.flush || sfence.valid) {
         state := s_ready
         alreadyOutFire := false.B
       }.elsewhen(tlbHit) {
@@ -331,7 +342,7 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
     }
   }
   
-  Debug(debug && name=="iptw") {
+  Debug(debug && name=="iptw" && false) {
     
     val alreadyWork = RegInit(false.B)
     
@@ -353,3 +364,23 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   //}
   //assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
 }
+
+class fuTlb extends NOOPModule {
+  val io = IO(new Bundle{
+    val cfIn = Flipped(new CtrlFlowIO)
+    val redirect = new RedirectIO
+    val valid = Input(Bool())
+  }) // MOUIO is the same as what we need cf and redirect 
+
+  io.redirect.valid := io.valid
+  io.redirect.target := io.cfIn.pc + 4.U
+}
+object fuTlb {
+  def apply(cf : CtrlFlowIO, valid : Bool) = {
+    val futlb = Module(new fuTlb)
+    futlb.io.cfIn <> cf
+    futlb.io.valid := valid
+    futlb.io.redirect
+  }
+}
+

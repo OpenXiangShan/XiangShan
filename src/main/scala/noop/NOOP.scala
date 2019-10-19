@@ -87,7 +87,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   iptw.io.exu <> exu.io.tlb
   iptw.io.flush := ifu.io.flushVec(0) | ifu.io.bpFlush
   iptw.io.in <> ifu.io.imem
-  val ptwWork = exu.io.satp(63,60) =/= 0.U || true.B
+  val ptwWork = exu.io.tlb.satp(63,60) =/= 0.U || true.B
   val inCacheFlush = Mux(ptwWork, Fill(2,false.B), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))
   io.imem <> Cache(iptw.io.out, mmioXbar.io.in(0), inCacheFlush)(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
