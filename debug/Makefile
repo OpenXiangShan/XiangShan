@@ -54,6 +54,9 @@ xj:
 rttos:
 	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run
 
+rttos-debug:
+	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run 2>&1 | tee > rttos.log
+
 freertos:
 	$(MAKE) -C $(FREERTOS_HOME)/Demo/riscv64-nemu noop_run
 

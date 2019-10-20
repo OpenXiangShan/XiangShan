@@ -153,9 +153,16 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   RegMap.generate(mapping, addr, rdata, wen, wdata, wmask = Fill(XLEN, true.B))
   io.out.bits := rdata
 
+  Debug(false){
+    when(wen){
+      printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x\n", io.cfIn.pc, addr, rdata, wdata)
+    }
+  }
+
   val raiseException = io.cfIn.exceptionVec.asUInt.orR
   val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
-  val intrNO = PriorityEncoder(intrVec)
+  // val intrNO = PriorityEncoder(intrVec)
+  val intrNO = PriorityEncoder(io.cfIn.intrVec)
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
 
@@ -163,6 +170,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, mtvec, mepc)
 
+  Debug(false){
+    when(raiseExceptionIntr){
+      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, io.cfIn.exceptionVec.asUInt)
+    }
+  }
+  
   val isMret = addr === privMret
   when (valid && isMret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
