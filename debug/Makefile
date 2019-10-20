@@ -58,7 +58,7 @@ rttos-debug:
 	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run 2>&1 | tee > rttos.log
 
 freertos:
-	$(MAKE) -C $(FREERTOS_HOME)/Demo/riscv64-nemu noop_run
+	$(MAKE) -C $(FREERTOS_HOME)/Demo/riscv64-noop noop_run
 
 # ------------------------------------------------------------------
 # get disassembled test src
@@ -68,5 +68,5 @@ disassemble-rttos:
 	cp $(RTTOS_HOME)/bsp/riscv64-noop/build/code.txt ./d-rttos.log
 
 disassemble-freertos:
-	cp $(FREERTOS_HOME)/Demo/riscv64-nemu/build/FreeRTOS-simple.elf.txt ./d-freertos.log
+	cp $(FREERTOS_HOME)/Demo/riscv64-noop/build/FreeRTOS-simple.elf.txt ./d-freertos.log
 
