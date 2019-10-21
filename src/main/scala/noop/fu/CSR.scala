@@ -97,6 +97,13 @@ trait HasCSRConst {
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
+  def privSret  = 0x102.U
+  def privUret  = 0x002.U
+
+  def ModeM     = 0x3.U
+  def ModeH     = 0x2.U
+  def ModeS     = 0x1.U
+  def ModeU     = 0x0.U
 }
 
 trait HasExceptionNO {
@@ -194,7 +201,36 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), 0.U) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
+  // val mstatus = RegInit(UInt(XLEN.W), "h8000c0100".U)
+  // mstatus Value Table
+  // | sd   |
+  // | pad1 |
+  // | sxl  | hardlinked to 10
+  // | uxl  | hardlinked to 00
+  // | pad0 |
+  // | tsr  |
+  // | tw   |
+  // | tvm  |
+  // | mxr  |
+  // | sum  |
+  // | mprv |
+  // | xs   | 01 |
+  // | fs   | 10 |
+  // | mpp  | 00 |
+  // | hpp  | 00 |
+  // | spp  | 1 |
+  // | pie  | 0000 |
+  // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
+
+  val priviledgeMode = RegInit(UInt(2.W), ModeM)
+  val newPriviledgeMode = ModeM
+  // val globalInterruptEnable = LookupTree(priviledgeMode, List(
+  //   ModeM -> mstatusStruct.ie.m,
+  //   ModeH -> mstatusStruct.ie.h,
+  //   ModeS -> mstatusStruct.ie.s,
+  //   ModeU -> mstatusStruct.ie.u
+  // ))
 
   // perfcnt
   val hasPerfCnt = !p.FPGAPlatform
@@ -208,7 +244,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
     // User Trap Setup
     // MaskedRegMap(Ustatus, ustatus), 
-    // MaskedRegMap(Uie, uie),
+    // MaskedRegMap(Uie, uie, 0.U, MaskedRegMap.Unwritable),
     // MaskedRegMap(Utvec, utvec),
     
     // User Trap Handling
@@ -253,7 +289,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     MaskedRegMap(Mhartid, mhartid, 0.U, MaskedRegMap.Unwritable), 
 
     // Machine Trap Setup
-    MaskedRegMap(Mstatus, mstatus),
+    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U),
     MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
     // MaskedRegMap(Medeleg, medeleg),
     // MaskedRegMap(Mideleg, mideleg),
@@ -304,7 +340,16 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   // interrupts
 
-  val intrVec = mie(11,0) & mip.asUInt & Fill(12, mstatusStruct.ie.m)
+  val intrVecMEnable = Mux(priviledgeMode < ModeM, true.B, mstatusStruct.ie.m)
+  // val intrVecSEnable = Mux(priviledgeMode > ModeS, false.B, Mux(priviledgeMode < ModeS, true.B, sstatusStruct.ie.s))
+  // val intrVecUEnable = Mux(priviledgeMode > ModeU, false.B, ustatusStruct.ie.u)
+  val intrVecM = mie(11,0) & mip.asUInt & (Fill(12, intrVecMEnable))
+  // val intrVecS = sie(11,0) & sip.asUInt
+  // val intrVecU = uie(11,0) & uip.asUInt
+  // val raiseIntrM = intrVecM.asUint.orR & intrVecMEnable
+  // val raiseIntrS = intrVecS.asUint.orR & intrVecSEnable
+  // val raiseIntrU = intrVecU.asUint.orR & intrVecUEnable
+  val intrVec = intrVecM
   BoringUtils.addSource(intrVec, "intrVecIDU")
   val raiseIntr = io.cfIn.intrVec.asUInt.orR
 
@@ -334,12 +379,43 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   // Branch control
   
+  val ret = Wire(Bool())
   val isMret = addr === privMret
+  val isSret = addr === privSret
+  val isUret = addr === privUret
+
+  ret := isMret || isSret || isUret
+  // val illegalEret = TODO
+
   when (valid && isMret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.pie.m := true.B
+    // mstatusNew.mpp.m := ModeU //TODO: add mode U
     mstatusNew.ie.m := mstatusOld.pie.m
+    priviledgeMode := mstatusOld.mpp
+    mstatusNew.pie.m := true.B
+    mstatusNew.mpp := ModeM
+    mstatus := mstatusNew.asUInt
+  }
+
+  when (valid && isSret) {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    // mstatusNew.mpp.m := ModeU //TODO: add mode U
+    mstatusNew.ie.s := mstatusOld.pie.s
+    priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
+    mstatusNew.pie.s := true.B
+    mstatusNew.spp := ModeU(0)
+    mstatus := mstatusNew.asUInt
+  }
+
+  when (valid && isUret) {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    // mstatusNew.mpp.m := ModeU //TODO: add mode U
+    mstatusNew.ie.u := mstatusOld.pie.u
+    priviledgeMode := 0.U //ModeU
+    mstatusNew.pie.m := true.B
     mstatus := mstatusNew.asUInt
   }
 
@@ -348,8 +424,35 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     mcause := causeNO
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.pie.m := mstatusOld.ie.m
-    mstatusNew.ie.m := false.B
+    when(newPriviledgeMode === ModeM){
+      mstatusNew.pie.m := LookupTree(priviledgeMode, List(
+        ModeM -> mstatusOld.ie.m,
+        ModeH -> mstatusOld.ie.h, //ERROR
+        ModeS -> mstatusOld.ie.s,
+        ModeU -> mstatusOld.ie.u
+      ))
+      mstatusNew.ie.m := false.B
+      mstatusNew.mpp := priviledgeMode
+    }
+    when(newPriviledgeMode === ModeS){
+      mstatusNew.pie.s := LookupTree(priviledgeMode, List(
+        ModeM -> mstatusOld.ie.m,
+        ModeH -> mstatusOld.ie.h, //ERROR
+        ModeS -> mstatusOld.ie.s,
+        ModeU -> mstatusOld.ie.u
+      ))
+      mstatusNew.ie.s := false.B
+      mstatusNew.spp := priviledgeMode(0)
+    }
+    when(newPriviledgeMode === ModeU){
+      mstatusNew.pie.u := LookupTree(priviledgeMode, List(
+        ModeM -> mstatusOld.ie.m,
+        ModeH -> mstatusOld.ie.h, //ERROR
+        ModeS -> mstatusOld.ie.s,
+        ModeU -> mstatusOld.ie.u
+      ))
+      mstatusNew.ie.u := false.B
+    }
     mstatus := mstatusNew.asUInt
   }
 
