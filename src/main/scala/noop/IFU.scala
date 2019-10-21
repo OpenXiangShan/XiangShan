@@ -14,7 +14,7 @@ trait HasResetVector {
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
 
-    val imem = new SimpleBusUC(userBits = AddrBits*2 + 3)
+    val imem = new SimpleBusUC(userBits = AddrBits*2 + 4)
     // val pc = Input(UInt(AddrBits.W))
     val out = Decoupled(new CtrlFlowIO)
 
@@ -45,12 +45,13 @@ class IFU extends NOOPModule with HasResetVector {
   val pnpc = bp1.io.out.target
   val pbrIdx = bp1.io.brIdx
   val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(lateJumpLatch, lateJumpTarget, Mux(lateJump, snpc, Mux(bp1.io.out.valid, pnpc, snpc)))))
+  val npcIsSeq = Mux(io.redirect.valid || io.redirectRVC.valid, false.B, Mux(lateJumpLatch, false.B, Mux(lateJump, true.B, Mux(bp1.io.out.valid, false.B, true.B))))
   // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
-  val brIdx = Wire(UInt(3.W)) 
+  val brIdx = Wire(UInt(4.W)) 
   // brIdx(0) -> branch at pc offset 0 (mod 4)
   // brIdx(1) -> branch at pc offset 2 (mod 4)
   // brIdx(2) -> branch at pc offset 6 (mod 8), and this inst is not rvc inst
-  brIdx := Mux(io.redirect.valid, 0.U, Mux(io.redirectRVC.valid, 0.U, pbrIdx))
+  brIdx := Cat(npcIsSeq, Mux(io.redirect.valid, 0.U, Mux(io.redirectRVC.valid, 0.U, pbrIdx)))
   //TODO: BP will be disabled shortly after a redirect request
 
   bp1.io.in.pc.valid := io.imem.req.fire() // only predict when Icache accepts a request
@@ -70,7 +71,7 @@ class IFU extends NOOPModule with HasResetVector {
   io.bpFlush := false.B
 
   io.imem.req.bits.apply(addr = Cat(pc(AddrBits-1,1),0.U(1.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
-    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(brIdx(2,0), npc, pc))
+    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(brIdx(3,0), npc, pc))
   io.imem.req.valid := io.out.ready
 
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
@@ -96,7 +97,7 @@ class IFU extends NOOPModule with HasResetVector {
   io.imem.resp.bits.user.map{ case x =>
     io.out.bits.pc := x(AddrBits-1,0)
     io.out.bits.pnpc := x(AddrBits*2-1,AddrBits)
-    io.out.bits.brIdx := x(AddrBits*2 + 2, AddrBits*2)
+    io.out.bits.brIdx := x(AddrBits*2 + 3, AddrBits*2)
   }
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

@@ -17,12 +17,83 @@ object CSROpType {
 }
 
 trait HasCSRConst {
+  // User Trap Setup
+  val Ustatus       = 0x000 
+  val Uie           = 0x004
+  val Utvec         = 0x005
+  
+  // User Trap Handling
+  val Uscratch      = 0x040
+  val Uepc          = 0x041
+  val Ucause        = 0x042
+  val Utval         = 0x043
+  val Uip           = 0x044
+
+  // User Floating-Point CSRs (not implemented)
+  val Fflags        = 0x001
+  val Frm           = 0x002
+  val Fcsr          = 0x003
+
+  // User Counter/Timers
+  val Cycle         = 0xC00
+  val Time          = 0xC01
+  val Instret       = 0xC02
+  
+  // Supervisor Trap Setup
+  val Sstatus       = 0x100
+  val Sedeleg       = 0x102
+  val Sideleg       = 0x103
+  val Sie           = 0x104
+  val Stvec         = 0x105
+  val Scounteren    = 0x106
+
+  // Supervisor Trap Handling
+  val Sscratch      = 0x140
+  val Sepc          = 0x141
+  val Scause        = 0x142
+  val Stval         = 0x143
+  val Sip           = 0x144
+
+  // Supervisor Protection and Translation
+  val Satp          = 0x180
+
+  // Machine Information Registers 
+  val Mvendorid     = 0xF11 
+  val Marchid       = 0xF12 
+  val Mimpid        = 0xF13 
+  val Mhartid       = 0xF14 
+
+  // Machine Trap Setup
   val Mstatus       = 0x300
+  val Misa          = 0x301
+  val Medeleg       = 0x302
+  val Mideleg       = 0x303
+  val Mie           = 0x304
   val Mtvec         = 0x305
+  val Mcounteren    = 0x306 
+
+  // Machine Trap Handling
+  val Mscratch      = 0x340 
   val Mepc          = 0x341
   val Mcause        = 0x342
-  val Mie           = 0x304
+  val Mtval         = 0x343
   val Mip           = 0x344
+
+  // Machine Memory Protection
+  // TBD
+  val Pmpcfg0       = 0x3A0
+  val Pmpcfg1       = 0x3A1
+  val Pmpcfg2       = 0x3A2
+  val Pmpcfg3       = 0x3A3
+  val PmpaddrBase   = 0x3B0 
+
+  // Machine Counter/Timers 
+  // Currently, NOOP uses perfcnt csr set instead of standard Machine Counter/Timers 
+  // 0xB80 - 0x89F are also used as perfcnt csr
+
+  // Machine Counter Setup (not implemented)
+  // Debug/Trace Registers (shared with Debug Mode) (not implemented)
+  // Debug Mode Registers (not implemented)
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
@@ -128,13 +199,77 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb00 + i, perfCnts(i)) }
   val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb80 + i, perfCnts(i)(63, 32)) }
 
+  // CSR reg map
   val mapping = Map(
-    RegMap(Mtvec   ,mtvec   ),
-    RegMap(Mcause  ,mcause  ),
-    RegMap(Mepc    ,mepc    ),
-    RegMap(Mstatus ,mstatus ),
-    RegMap(Mie     ,mie     ),
-    RegMap(Mip     ,mip.asUInt, RegMap.Unwritable)
+
+    // User Trap Setup
+    // RegMap(Ustatus, ustatus), 
+    // RegMap(Uie, uie),
+    // RegMap(Utvec, utvec),
+    
+    // User Trap Handling
+    // RegMap(Uscratch, uscratch),
+    // RegMap(Uepc, uepc),
+    // RegMap(Ucause, ucause),
+    // RegMap(Utval, utval),
+    // RegMap(Uip, uip),
+
+    // User Floating-Point CSRs (not implemented)
+    // RegMap(Fflags, fflags),
+    // RegMap(Frm, frm),
+    // RegMap(Fcsr, fcsr),
+
+    // User Counter/Timers
+    // RegMap(Cycle, cycle),
+    // RegMap(Time, time),
+    // RegMap(Instret, instret),
+    
+    // Supervisor Trap Setup
+    // RegMap(Sstatus, Sstatus),
+    // RegMap(Sedeleg, Sedeleg),
+    // RegMap(Sideleg, Sideleg),
+    // RegMap(Sie, Sie),
+    // RegMap(Stvec, Stvec),
+    // RegMap(Scounteren, Scounteren),
+
+    // Supervisor Trap Handling
+    // RegMap(Sscratch, sscratch),
+    // RegMap(Sepc, sepc),
+    // RegMap(Scause, scause),
+    // RegMap(Stval, stval),
+    // RegMap(Sip, sip),
+
+    // Supervisor Protection and Translation
+    // RegMap(Satp, satp),
+
+    // Machine Information Registers 
+    // RegMap(Mvendorid, mvendorid), 
+    // RegMap(Marchid, marchid), 
+    // RegMap(Mimpid, mimpid), 
+    // RegMap(Mhartid, mhartid), 
+
+    // Machine Trap Setup
+    RegMap(Mstatus, mstatus),
+    // RegMap(Misa, misa),
+    // RegMap(Medeleg, medeleg),
+    // RegMap(Mideleg, mideleg),
+    RegMap(Mie, mie),
+    RegMap(Mtvec, mtvec),
+    // RegMap(Mcounteren, mcounteren), 
+
+    // Machine Trap Handling
+    // RegMap(Mscratch, mscratch) 
+    RegMap(Mepc, mepc),
+    RegMap(Mcause, mcause),
+    // RegMap(Mtval, mtval)
+    RegMap(Mip, mip.asUInt, RegMap.Unwritable)
+
+    // Machine Memory Protection
+    // RegMap(Pmpcfg0, Pmpcfg0),
+    // RegMap(Pmpcfg1, Pmpcfg1),
+    // RegMap(Pmpcfg2, Pmpcfg2),
+    // RegMap(Pmpcfg3, Pmpcfg3),
+
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
   val addr = src2(11, 0)

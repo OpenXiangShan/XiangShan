@@ -157,7 +157,7 @@ class BPU1 extends NOOPModule {
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
   // io.out.target := Mux(lateJumpLatch && !flush, lateJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
   // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
-  io.brIdx  := btbRead.brIdx & Cat(lateJump, Fill(2, io.out.valid))
+  io.brIdx  := btbRead.brIdx & Cat(true.B, lateJump, Fill(2, io.out.valid))
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
   // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump || lateJumpLatch && !flush && !lateJump
   // Note: 
