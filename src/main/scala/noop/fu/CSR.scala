@@ -137,6 +137,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     io.out.bits
   }
 
+  // CSR define
+
   class Priv extends Bundle {
     val m = Output(Bool())
     val h = Output(Bool())
@@ -146,7 +148,6 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   val csrNotImplemented = RegInit(UInt(XLEN.W), 0.U)
    
-  // exceptions
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
     val pad1 = Output(UInt(37.W))
@@ -167,14 +168,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     val pie = new Priv
     val ie = new Priv
   }
+
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcause = Reg(UInt(XLEN.W))
-  val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
   val mepc = Reg(UInt(XLEN.W))
 
-  val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
 
-  // interrupts
   class Interrupt extends Bundle {
     val e = new Priv
     val t = new Priv
@@ -183,16 +182,6 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val mie = RegInit(0.U(XLEN.W))
   val mip = WireInit(0.U.asTypeOf(new Interrupt))
 
-  val mtip = WireInit(false.B)
-  val meip = WireInit(false.B)
-  BoringUtils.addSink(mtip, "mtip")
-  BoringUtils.addSink(meip, "meip")
-  mip.t.m := mtip
-  mip.e.m := meip
-
-  val intrVec = mie(11,0) & mip.asUInt & Fill(12, mstatusStruct.ie.m)
-  BoringUtils.addSource(intrVec, "intrVecIDU")
-  val raiseIntr = io.cfIn.intrVec.asUInt.orR
 
   // Machine-Level CSRs
 
@@ -200,7 +189,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
-  val mvendorid = 0.U // this is a non-commercial implementation
+  val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
+  val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
+  val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
+  val mhartid = RegInit(UInt(XLEN.W), 0.U) // the hardware thread running the code
+  val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
+  val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
 
   // perfcnt
   val hasPerfCnt = !p.FPGAPlatform
@@ -253,14 +247,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     // MaskedRegMap(Satp, satp),
 
     // Machine Information Registers 
-    // MaskedRegMap(Mvendorid, mvendorid), 
-    // MaskedRegMap(Marchid, marchid), 
-    // MaskedRegMap(Mimpid, mimpid), 
-    // MaskedRegMap(Mhartid, mhartid), 
+    MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable), 
+    MaskedRegMap(Marchid, marchid, 0.U, MaskedRegMap.Unwritable), 
+    MaskedRegMap(Mimpid, mimpid, 0.U, MaskedRegMap.Unwritable), 
+    MaskedRegMap(Mhartid, mhartid, 0.U, MaskedRegMap.Unwritable), 
 
     // Machine Trap Setup
     MaskedRegMap(Mstatus, mstatus),
-    MaskedRegMap(Misa, misa),
+    MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
     // MaskedRegMap(Medeleg, medeleg),
     // MaskedRegMap(Mideleg, mideleg),
     MaskedRegMap(Mie, mie),
@@ -305,6 +299,21 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   }
 
   // Exception and Intr
+
+  // exceptions
+
+  // interrupts
+
+  val intrVec = mie(11,0) & mip.asUInt & Fill(12, mstatusStruct.ie.m)
+  BoringUtils.addSource(intrVec, "intrVecIDU")
+  val raiseIntr = io.cfIn.intrVec.asUInt.orR
+
+  val mtip = WireInit(false.B)
+  val meip = WireInit(false.B)
+  BoringUtils.addSink(mtip, "mtip")
+  BoringUtils.addSink(meip, "meip")
+  mip.t.m := mtip
+  mip.e.m := meip
 
   val raiseException = io.cfIn.exceptionVec.asUInt.orR
   val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
