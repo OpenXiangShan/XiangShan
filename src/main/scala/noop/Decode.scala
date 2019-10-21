@@ -55,6 +55,7 @@ object Instructions extends HasInstrType with HasNOOPParameter {
   def DecodeTable = RVIInstr.table ++ NOOPTrap.table ++
     (if (HasMExtension) RVMInstr.table else Nil) ++
     (if (HasCExtension) RVCInstr.table else Nil) ++
+    Priviledged.table ++
     RVZicsrInstr.table ++ RVZifenceiInstr.table
 }
 

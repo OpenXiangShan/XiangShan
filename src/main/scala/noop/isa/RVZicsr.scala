@@ -10,9 +10,6 @@ object RVZicsrInstr extends HasInstrType {
   def CSRRWI  = BitPat("b????????????_?????_101_?????_1110011")
   def CSRRSI  = BitPat("b????????????_?????_110_?????_1110011")
   def CSRRCI  = BitPat("b????????????_?????_111_?????_1110011")
-  def ECALL   = BitPat("b000000000000_00000_000_00000_1110011")
-  def MRET    = BitPat("b001100000010_00000_000_00000_1110011")
-  def SRET    = BitPat("b000100000010_00000_000_00000_1110011")
 
   val table = Array(
     CSRRW          -> List(InstrI, FuType.csr, CSROpType.wrt),
@@ -20,9 +17,6 @@ object RVZicsrInstr extends HasInstrType {
     CSRRC          -> List(InstrI, FuType.csr, CSROpType.clr),
     CSRRWI         -> List(InstrI, FuType.csr, CSROpType.wrti),
     CSRRSI         -> List(InstrI, FuType.csr, CSROpType.seti),
-    CSRRCI         -> List(InstrI, FuType.csr, CSROpType.clri),
-    ECALL          -> List(InstrI, FuType.csr, CSROpType.jmp),
-    MRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
-    SRET           -> List(InstrI, FuType.csr, CSROpType.jmp)
+    CSRRCI         -> List(InstrI, FuType.csr, CSROpType.clri)
   )
 }
