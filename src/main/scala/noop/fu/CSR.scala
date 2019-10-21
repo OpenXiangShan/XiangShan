@@ -143,6 +143,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     val s = Output(Bool())
     val u = Output(Bool())
   }
+
+  val csrNotImplemented = RegInit(UInt(XLEN.W), 0.U)
    
   // exceptions
   class MstatusStruct extends Bundle {
@@ -192,83 +194,91 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   BoringUtils.addSource(intrVec, "intrVecIDU")
   val raiseIntr = io.cfIn.intrVec.asUInt.orR
 
+  // Machine-Level CSRs
+
+  val misa = RegInit(UInt(XLEN.W), "h8000000000141101".U) 
+  // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
+  // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
+
+  val mvendorid = 0.U // this is a non-commercial implementation
+
   // perfcnt
   val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
-  val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb00 + i, perfCnts(i)) }
-  val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb80 + i, perfCnts(i)(63, 32)) }
+  val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => MaskedRegMap(0xb00 + i, perfCnts(i)) }
+  val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => MaskedRegMap(0xb80 + i, perfCnts(i)(63, 32)) }
 
   // CSR reg map
   val mapping = Map(
 
     // User Trap Setup
-    // RegMap(Ustatus, ustatus), 
-    // RegMap(Uie, uie),
-    // RegMap(Utvec, utvec),
+    // MaskedRegMap(Ustatus, ustatus), 
+    // MaskedRegMap(Uie, uie),
+    // MaskedRegMap(Utvec, utvec),
     
     // User Trap Handling
-    // RegMap(Uscratch, uscratch),
-    // RegMap(Uepc, uepc),
-    // RegMap(Ucause, ucause),
-    // RegMap(Utval, utval),
-    // RegMap(Uip, uip),
+    // MaskedRegMap(Uscratch, uscratch),
+    // MaskedRegMap(Uepc, uepc),
+    // MaskedRegMap(Ucause, ucause),
+    // MaskedRegMap(Utval, utval),
+    // MaskedRegMap(Uip, uip),
 
     // User Floating-Point CSRs (not implemented)
-    // RegMap(Fflags, fflags),
-    // RegMap(Frm, frm),
-    // RegMap(Fcsr, fcsr),
+    // MaskedRegMap(Fflags, fflags),
+    // MaskedRegMap(Frm, frm),
+    // MaskedRegMap(Fcsr, fcsr),
 
     // User Counter/Timers
-    // RegMap(Cycle, cycle),
-    // RegMap(Time, time),
-    // RegMap(Instret, instret),
+    // MaskedRegMap(Cycle, cycle),
+    // MaskedRegMap(Time, time),
+    // MaskedRegMap(Instret, instret),
     
     // Supervisor Trap Setup
-    // RegMap(Sstatus, Sstatus),
-    // RegMap(Sedeleg, Sedeleg),
-    // RegMap(Sideleg, Sideleg),
-    // RegMap(Sie, Sie),
-    // RegMap(Stvec, Stvec),
-    // RegMap(Scounteren, Scounteren),
+    // MaskedRegMap(Sstatus, Sstatus),
+    // MaskedRegMap(Sedeleg, Sedeleg),
+    // MaskedRegMap(Sideleg, Sideleg),
+    // MaskedRegMap(Sie, Sie),
+    // MaskedRegMap(Stvec, Stvec),
+    // MaskedRegMap(Scounteren, Scounteren),
 
     // Supervisor Trap Handling
-    // RegMap(Sscratch, sscratch),
-    // RegMap(Sepc, sepc),
-    // RegMap(Scause, scause),
-    // RegMap(Stval, stval),
-    // RegMap(Sip, sip),
+    // MaskedRegMap(Sscratch, sscratch),
+    // MaskedRegMap(Sepc, sepc),
+    // MaskedRegMap(Scause, scause),
+    // MaskedRegMap(Stval, stval),
+    // MaskedRegMap(Sip, sip),
 
     // Supervisor Protection and Translation
-    // RegMap(Satp, satp),
+    // MaskedRegMap(Satp, satp),
 
     // Machine Information Registers 
-    // RegMap(Mvendorid, mvendorid), 
-    // RegMap(Marchid, marchid), 
-    // RegMap(Mimpid, mimpid), 
-    // RegMap(Mhartid, mhartid), 
+    // MaskedRegMap(Mvendorid, mvendorid), 
+    // MaskedRegMap(Marchid, marchid), 
+    // MaskedRegMap(Mimpid, mimpid), 
+    // MaskedRegMap(Mhartid, mhartid), 
 
     // Machine Trap Setup
-    RegMap(Mstatus, mstatus),
-    // RegMap(Misa, misa),
-    // RegMap(Medeleg, medeleg),
-    // RegMap(Mideleg, mideleg),
-    RegMap(Mie, mie),
-    RegMap(Mtvec, mtvec),
-    // RegMap(Mcounteren, mcounteren), 
+    MaskedRegMap(Mstatus, mstatus),
+    MaskedRegMap(Misa, misa),
+    // MaskedRegMap(Medeleg, medeleg),
+    // MaskedRegMap(Mideleg, mideleg),
+    MaskedRegMap(Mie, mie),
+    MaskedRegMap(Mtvec, mtvec),
+    // MaskedRegMap(Mcounteren, mcounteren), 
 
     // Machine Trap Handling
-    // RegMap(Mscratch, mscratch) 
-    RegMap(Mepc, mepc),
-    RegMap(Mcause, mcause),
-    // RegMap(Mtval, mtval)
-    RegMap(Mip, mip.asUInt, RegMap.Unwritable)
+    // MaskedRegMap(Mscratch, mscratch) 
+    MaskedRegMap(Mepc, mepc),
+    MaskedRegMap(Mcause, mcause),
+    // MaskedRegMap(Mtval, mtval)
+    MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable)
 
     // Machine Memory Protection
-    // RegMap(Pmpcfg0, Pmpcfg0),
-    // RegMap(Pmpcfg1, Pmpcfg1),
-    // RegMap(Pmpcfg2, Pmpcfg2),
-    // RegMap(Pmpcfg3, Pmpcfg3),
+    // MaskedRegMap(Pmpcfg0, Pmpcfg0),
+    // MaskedRegMap(Pmpcfg1, Pmpcfg1),
+    // MaskedRegMap(Pmpcfg2, Pmpcfg2),
+    // MaskedRegMap(Pmpcfg3, Pmpcfg3),
 
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
@@ -285,7 +295,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   ))
 
   val wen = (valid && func =/= CSROpType.jmp)
-  RegMap.generate(mapping, addr, rdata, wen, wdata, wmask = Fill(XLEN, true.B))
+  MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   io.out.bits := rdata
 
   Debug(false){
@@ -293,6 +303,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
       printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x\n", io.cfIn.pc, addr, rdata, wdata)
     }
   }
+
+  // Exception and Intr
 
   val raiseException = io.cfIn.exceptionVec.asUInt.orR
   val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
@@ -310,6 +322,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
       printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, io.cfIn.exceptionVec.asUInt)
     }
   }
+
+  // Branch control
   
   val isMret = addr === privMret
   when (valid && isMret) {
@@ -334,6 +348,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   io.out.valid := valid
 
   // perfcnt
+
   val perfCntList = Map(
     "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
     "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),

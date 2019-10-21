@@ -17,3 +17,20 @@ object RegMap {
   def generate(mapping: Map[Int, (UInt, UInt => UInt)], addr: UInt, rdata: UInt,
     wen: Bool, wdata: UInt, wmask: UInt):Unit = generate(mapping, addr, rdata, addr, wen, wdata, wmask)
 }
+
+object MaskedRegMap {
+  def Unwritable = null
+  def WritableMask = Fill(64, true.B)
+  def UnwritableMask = 0.U(64.W)
+  def apply(addr: Int, reg: UInt, wmask: UInt = WritableMask, wfn: UInt => UInt = (x => x)) = (addr, (reg, wmask, wfn))
+  def generate(mapping: Map[Int, (UInt, UInt, UInt => UInt)], raddr: UInt, rdata: UInt,
+    waddr: UInt, wen: Bool, wdata: UInt):Unit = {
+    val chiselMapping = mapping.map { case (a, (r, m, w)) => (a.U, r, m, w) }
+    rdata := LookupTree(raddr, chiselMapping.map { case (a, r, m, w) => (a, r) })
+    chiselMapping.map { case (a, r, m, w) =>
+      if (w != null && m != UnwritableMask) when (wen && waddr === a) { r := w(MaskData(r, wdata, m)) }
+    }
+  }
+  def generate(mapping: Map[Int, (UInt, UInt, UInt => UInt)], addr: UInt, rdata: UInt,
+    wen: Bool, wdata: UInt):Unit = generate(mapping, addr, rdata, addr, wen, wdata)
+}
