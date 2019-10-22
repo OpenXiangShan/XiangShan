@@ -89,4 +89,6 @@ class SimpleBusUC(val userBits: Int = 0) extends SimpleBusBundle {
 class SimpleBusC(val userBits: Int = 0) extends SimpleBusBundle {
   val mem = new SimpleBusUC(userBits)
   val coh = Flipped(new SimpleBusUC(userBits))
+
+	def memtoAXI4() = this.mem.toAXI4
 }
