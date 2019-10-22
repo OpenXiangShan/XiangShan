@@ -46,6 +46,31 @@ class LSUIO extends FunctionUnitIO {
 
 class LSU extends NOOPModule {
   val io = IO(new LSUIO)
+  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+    this.valid := valid
+    this.src1 := src1
+    this.src2 := src2
+    this.func := func
+    io.out.bits
+  }
+    val lsExecUnit = Module(new LSExecUnit)
+    
+    io.dmem <> lsExecUnit.io.dmem
+
+    val lsExecUnitOut = lsExecUnit.access(valid = io.in.valid, src1 = src1, src2 = src2, func = func)
+    
+    lsExecUnit.io.wdata := io.wdata
+    io.out.bits <> lsExecUnit.io.out.bits
+    lsExecUnit.io.out.ready := io.out.ready 
+    io.out.valid := lsExecUnit.io.out.valid 
+    io.isMMIO := lsExecUnit.io.isMMIO
+    io.in.ready := lsExecUnit.io.in.ready
+
+}
+
+class LSExecUnit extends NOOPModule {
+  val io = IO(new LSUIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {

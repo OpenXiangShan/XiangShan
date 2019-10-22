@@ -18,6 +18,16 @@ object RVAInstr extends HasInstrType {
   def AMOMAXU = BitPat("b11100??00000_?????_???_?????_0101111")
 
   val table = Array(
-    LR          -> List(InstrI, FuType.lsu, LSUOpType.lr)
+    LR          -> List(InstrI, FuType.lsu, LSUOpType.lr),
+    SC          -> List(InstrS, FuType.lsu, LSUOpType.sc),
+    AMOSWAP     -> List(InstrA, FuType.lsu, LSUOpType.amoswap),
+    AMOADD      -> List(InstrA, FuType.lsu, LSUOpType.amoadd),
+    AMOXOR      -> List(InstrA, FuType.lsu, LSUOpType.amoxor),
+    AMOAND      -> List(InstrA, FuType.lsu, LSUOpType.amoand),
+    AMOOR       -> List(InstrA, FuType.lsu, LSUOpType.amoor),
+    AMOMIN      -> List(InstrA, FuType.lsu, LSUOpType.amomin),
+    AMOMAX      -> List(InstrA, FuType.lsu, LSUOpType.amomax),
+    AMOMINU     -> List(InstrA, FuType.lsu, LSUOpType.amominu),
+    AMOMAXU     -> List(InstrA, FuType.lsu, LSUOpType.amomaxu)
   )
 }

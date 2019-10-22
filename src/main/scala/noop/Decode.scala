@@ -11,6 +11,7 @@ trait HasInstrType {
   def InstrB  = "b001".U
   def InstrU  = "b110".U
   def InstrJ  = "b111".U
+  def InstrA  = "b010".U
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
 }
