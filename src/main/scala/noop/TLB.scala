@@ -61,7 +61,13 @@ trait pteSv39Const extends Sv39Const{
     val ppn  = UInt(ppnLen.W)
     val off  = UInt(offLen.W)
   }
-
+  
+  def paddrApply(ppn: UInt, off: UInt) = {
+    acquire(ppn.getWidth==ppnLen)
+    acquire(off.getWidth==offLen)
+    Cat(0.U(paResLen.W), Cat(ppn, off))
+  }
+  
   def pteBundle = new Bundle {
     val reserved  = UInt(10.W)
     val ppn  = UInt(ppnLen.W)
@@ -75,6 +81,8 @@ trait pteSv39Const extends Sv39Const{
     val R    = UInt(1.W)
     val V    = UInt(1.W)
   }
+
+  
 
   def satpBundle = new Bundle {
     val mode = UInt(satpModeLen.W)
@@ -93,6 +101,7 @@ trait tlbSv39Const extends Sv39Const{
   val tlbEntryNum = 8
   val tlbEntryLen = 95
   val tlbAsidLen = 16
+  val flagLen = 8
 
   def tlbBundle = new Bundle {
     val vpn  = UInt(vpnLen.W)
@@ -106,6 +115,14 @@ trait tlbSv39Const extends Sv39Const{
     val W    = UInt(1.W)
     val R    = UInt(1.W)
     val V    = UInt(1.W)
+  }
+
+  def tlbEntryApply(vpn: UInt, asid: UInt, ppn: UInt, flag: UInt) {
+    acquire(vpn.getWidth==vpnLen)
+    acquire(asid.getWidth==tlbAsidLen)
+    acquire(ppn.getWidth==ppnLen)
+    acquire(ppn.getWidth==flagLen)
+    Cat(Cat(vpn, asid), Cat(ppn, flag))
   }
 }
 
@@ -169,13 +186,17 @@ sealed class MetaBundle(implicit val tlbConfig: TlbConfig) extends TlbBundle {
   }
 }
 
-sealed class DataBundle(implicit val tlbConfig: CacheConfig) extends CacheBundle {
+sealed class DataBundle(implicit val tlbConfig: TlbConfig) extends TlbBundle {
   val ppn = Output(UInt(DataBits.W))
 
   def apply(ppn: UInt) = {
     this.ppn = ppn
     this
   }
+}
+
+sealed class PaddrBundle(implicit val tlbConfig: TlbConfig) extends TlbBundle {
+  val 
 }
 
 trait tlbConst with tlbSv32Const
@@ -210,13 +231,13 @@ class TlbStage1(implicit val tlbConfig: TlbConfig) extends Module with tlbConst 
   })
 
   val vpn = io.in.bits.vpn
-  val readBusValid = io.in.valid && io.out.ready /*&& !io.s2s3Miss*/ //io.s2s3Miss ??
+  val readBusValid = io.in.valid && io.out.ready && !io.s2s3Miss //io.s2s3Miss ??
   
   io.metaReadBus.apply(valid = readBusValid, setIdx = addr.index)
   io.dataReadBus.apply(valid = readBusValid, setIdx = Cat(addr.index, addr.wordIndex))
   
   io.out.bits := io.in.bits
-  io.out.valid := io.in.valid /*&&s2s3Miss*/ && io.metaReadBus.req.ready && io.dataReadBus.req.ready //change req.ready to req.fire()??
+  io.out.valid := io.in.valid && io.s2s3Miss && io.metaReadBus.req.ready && io.dataReadBus.req.ready //change req.ready to req.fire()??
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 }
 
@@ -297,6 +318,8 @@ sealed class TlbStage3(implicit val tlbConfig: TlbConfig) extends TlbModule {
   val inRdataRegDemand = RegEnable(io.mem.resp.bits.rdata, readingFirst) //??
 
   val level = RegInit(Level.U(log2Up(Level).W))
+  val ptwFinish = (level === 1.U) && io.mem.resp.fire()
+
   switch (state) {
     is (s_idle) {
       afterFirstRead := false.B
@@ -352,7 +375,7 @@ sealed class TlbStage3(implicit val tlbConfig: TlbConfig) extends TlbModule {
 class TLB(dataBits: Int = 32, userBits: Int = 32, name: String = "default") extends Module with tlbConst {
   val io = IO(new Bundle {
     val flush = Input(UInt(2.W)) //flush for bp fail
-    val exu = Input(new TlbFlushBundle) //flush the tlb entry by instr SFENCE.VMA or so, should do at s_check
+    val exu = Input(new TlbFlushBundle) 
     val in = Flipped(Decoupled(TlbIO))
     val out = SimpleBusC
   }
@@ -373,6 +396,7 @@ class TLB(dataBits: Int = 32, userBits: Int = 32, name: String = "default") exte
   io.out.mem <> s3.io.mem
 
   //stalling ??? unknown what means
+  s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
 
   //meta-data read. for coh is useles so the Arbiter is useless
   metaArray.io.r.req <> s1.io.metaReadBus.req
