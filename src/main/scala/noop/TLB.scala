@@ -327,7 +327,7 @@ sealed class TlbStage3(implicit val tlbConfig: TlbConfig) extends TlbModule {
 
       when (miss && !io.flush) {
         state := s_memReadReq
-        raddr := phyaddr.apply(...)
+        raddr := paddrApply.apply(satp.ppn, io.in.bits.vpn()) //
         level := (Level-1).U
       }
     }
@@ -340,7 +340,7 @@ sealed class TlbStage3(implicit val tlbConfig: TlbConfig) extends TlbModule {
     is (s_memReadResp) { when (io.mem.resp.fire()) {
       afterFirstRead := true.B
       readBeatCnt.inc()
-      when (level === 2.U) {state := s_memReadReq ; raddr := phyBundle.apply(...)}
+      when (level === 2.U) {state := s_memReadReq ; raddr := paddrApply.apply(...)}
       when (level === 1.U) {state := s_wait_resp}
       //need judge the flag: valid,,,
     }}
