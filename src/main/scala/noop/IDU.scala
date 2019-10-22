@@ -143,6 +143,8 @@ class IDU extends NOOPModule with HasInstrType {
   // val pnpcIsSeqRight = io.in.bits.pnpc === (Cat(io.in.bits.pc(AddrBits-1,2), 0.U(2.W)) + 4.U) // TODO: add a new user bit bpRight to do this 
   // assert(pnpcIsSeq === pnpcIsSeqRight)
   val flushIFU = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid && !pnpcIsSeq
+  when(flushIFU){printf("flushIFU at pc %x offset %x\n", io.in.bits.pc, pcOffset)}
+  assert(!flushIFU)
   val loadNextInstline = (state === s_idle || state === s_extra) && (rvcSpecial || rvcSpecialJump) && io.in.valid && pnpcIsSeq
   // val loadNextInstline =false.B
   val pcOut = WireInit(0.U(AddrBits.W))

@@ -42,9 +42,9 @@ class IFU extends NOOPModule with HasResetVector {
   val lateJumpForceTgt = lateJumpLatch && !bp1.io.flush
 
   // predicted next pc
-  val pnpc = bp1.io.out.target
+  val pnpc = Mux(lateJump, snpc, bp1.io.out.target)
   val pbrIdx = bp1.io.brIdx
-  val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(lateJumpLatch, lateJumpTarget, Mux(lateJump, snpc, Mux(bp1.io.out.valid, pnpc, snpc)))))
+  val npc = Mux(io.redirect.valid, io.redirect.target, Mux(lateJumpLatch, lateJumpTarget, Mux(bp1.io.out.valid, pnpc, snpc)))
   val npcIsSeq = Mux(io.redirect.valid || io.redirectRVC.valid, false.B, Mux(lateJumpLatch, false.B, Mux(lateJump, true.B, Mux(bp1.io.out.valid, false.B, true.B))))
   // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
   val brIdx = Wire(UInt(4.W)) 
