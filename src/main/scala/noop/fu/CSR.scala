@@ -200,7 +200,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), 0.U) // the hardware thread running the code
-  val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
+  val mstatus = RegInit(UInt(XLEN.W), "h00000000".U)
   // val mstatus = RegInit(UInt(XLEN.W), "h8000c0100".U)
   // mstatus Value Table
   // | sd   |

@@ -34,8 +34,8 @@ class IFU extends NOOPModule with HasResetVector {
   //
   val lateJump = bp1.io.lateJump
   val lateJumpLatch = RegInit(false.B) 
-  when(io.out.fire() || bp1.io.flush) {
-    lateJumpLatch := Mux(bp1.io.flush, false.B, lateJump)
+  when(pcUpdate || bp1.io.flush) {
+    lateJumpLatch := Mux(bp1.io.flush, false.B, lateJump && !lateJumpLatch)
   }
   val lateJumpTarget = RegEnable(bp1.io.out.target, lateJump)
   val lateJumpForceSeq = lateJump && bp1.io.out.valid
