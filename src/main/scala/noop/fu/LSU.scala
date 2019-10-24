@@ -112,7 +112,6 @@ class LSU extends NOOPModule {
     val atomWidthW = !funct3(0)
     val atomWidthD = funct3(0)
 
-
     // LSU control FSM state
     val s_idle :: s_load :: s_lr :: s_sc :: s_amo_l :: s_amo_a :: s_amo_s :: Nil = Enum(7)
 

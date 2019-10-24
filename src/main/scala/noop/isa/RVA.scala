@@ -5,8 +5,12 @@ import chisel3.util._
 
 object RVAInstr extends HasInstrType {
   // Note: use instr(14,12) to distinguish D/W inst
-  def LR      = BitPat("b00010??00000_?????_???_?????_0101111")
-  def SC      = BitPat("b00011??00000_?????_???_?????_0101111")
+  // def LR      = BitPat("b00010??00000_?????_???_?????_0101111")
+  // def SC      = BitPat("b00011??00000_?????_???_?????_0101111")
+  // def LR_D      = BitPat("b00010??00000_?????_011_?????_0101111")
+  // def SC_D      = BitPat("b00011??00000_?????_011_?????_0101111")
+  // def LR_W      = BitPat("b00010??00000_?????_010_?????_0101111")
+  // def SC_W      = BitPat("b00011??00000_?????_010_?????_0101111")
 
   def AMOSWAP = BitPat("b00001??00000_?????_01?_?????_0101111")
   def AMOADD  = BitPat("b00000??00000_?????_01?_?????_0101111")
@@ -20,8 +24,12 @@ object RVAInstr extends HasInstrType {
   // funct3 === 010 or 011
   
   val table = Array(
-    LR          -> List(InstrI, FuType.lsu, LSUOpType.lr),
-    SC          -> List(InstrS, FuType.lsu, LSUOpType.sc),
+    // LR          -> List(InstrI, FuType.lsu, LSUOpType.lr),
+    // LR_D        -> List(InstrI, FuType.lsu, LSUOpType.ld),
+    // LR_W        -> List(InstrI, FuType.lsu, LSUOpType.lw),
+    // SC          -> List(InstrS, FuType.lsu, LSUOpType.sc),
+    // SC_D        -> List(InstrS, FuType.lsu, LSUOpType.sd),
+    // SC_W        -> List(InstrS, FuType.lsu, LSUOpType.sw),
     AMOSWAP     -> List(InstrR, FuType.lsu, LSUOpType.amoswap),
     AMOADD      -> List(InstrR, FuType.lsu, LSUOpType.amoadd),
     AMOXOR      -> List(InstrR, FuType.lsu, LSUOpType.amoxor),
