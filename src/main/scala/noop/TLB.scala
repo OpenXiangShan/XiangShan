@@ -38,16 +38,16 @@ trait Sv39Const{
     val off  = UInt( offLen.W)
   }
 
-  def vpnBundle = new Bundle {
-    val vpn2 = UInt(vpn2Len.W)
-    val vpn1 = UInt(vpn1Len.W)
-    val vpn0 = UInt(vpn0Len.W)
-  }
-
   def vaBundle2 = new Bundle {
     val reserverd = UInt(vaResLen.W)
     val vpn  = UInt(vpnLen.W)
     val off  = UInt(offLen.W)
+  }
+
+  def vpnBundle = new Bundle {
+    val vpn2 = UInt(vpn2Len.W)
+    val vpn1 = UInt(vpn1Len.W)
+    val vpn0 = UInt(vpn0Len.W)
   }
 
   def paBundle = new Bundle {
@@ -152,15 +152,9 @@ sealed class TLBDataBundle(implicit val tlbConfig: TLBConfig) extends TlbBundle 
   }
 }
 
-class TlbReq extends Bundle with Sv39Const {
-  val vpn = Output(UInt(vpnLen.W))
-  val flag = Output(UInt(flagLen.W))
-}
+class TlbReq extends SimpleBusReqBundle with Sv39Const
 
-class TlbResp extends Bundle with Sv39Const {
-  val ppn = Output(UInt(ppnLen.W))
-  val flag = Output(UInt(flagLen.W))
-}
+class TlbResp extends SimpleBusReqBundle with Sv39Const
 
 class TLBIO extends Bundle {
   val req = Flipped(Decoupled(new TlbReq))
@@ -181,7 +175,7 @@ class TlbStage1(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val s2s3Miss = Input(Bool()) //
   })
 
-  val vpn = io.in.bits.vpn
+  val vpn = io.in.bits.addr.asTypeOf(vaBundle2).vpn
   val readBusValid = io.in.valid && io.out.ready && !io.s2s3Miss //io.s2s3Miss ??
   
   io.metaReadBus.apply(valid = readBusValid, setIdx = 0.U)
@@ -211,7 +205,7 @@ class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
   })
   
   val req = io.in.bits
-  val vpn = req.vpn
+  val vpn = req.addr.asTypeOf(vaBundle2).vpn
 
   val hitVec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).V.asBool && (m.vpn === vpn) && io.in.valid)).asUInt
   val victimWaymask = (if (Ways > 1) (1.U(log2Up(Ways).W) << LFSR64()(log2Up(Ways)-1,0)) else 1.U(1.W))
@@ -243,7 +237,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   val req = io.in.bits.req
   val satp = io.satp.asTypeOf(satpBundle)
-  val vpn = req.vpn.asTypeOf(vpnBundle)
+  val vpn = req.addr.asTypeOf(vaBundle2).vpn.asTypeOf(vpnBundle)
   val hit = io.in.valid && io.in.bits.hit
   val miss = io.in.valid && !io.in.bits.hit
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
@@ -317,8 +311,12 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   io.metaWriteBus.req <> metaRefillWriteBus.req
 
-  io.out.bits.ppn := Mux(hit, dataRead, memRdata.ppn)
-  io.out.bits.flag := Mux(hit, meta.asTypeOf(new TLBMetaBundle).flag, memRdata.flag)
+  io.out.bits.addr := paddrApply(Mux(hit, dataRead, memRdata.ppn), req.addr.asTypeOf(vaBundle2).off)
+  io.out.bits.size := req.size
+  io.out.bits.cmd := req.cmd
+  io.out.bits.wmask := req.wmask
+  io.out.bits.wdata := req.wdata
+  io.out.bits.user.map(_:=req.user.getOrElse(0.U))
   //io.out.valid := io.in.valid /*???*/ && Mux(hit, true.B, state === s_wait_resp)
   io.out.valid := Mux(hit, true.B, state === s_wait_resp)
 
@@ -332,7 +330,6 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
     val out = new SimpleBusUC
     val flush = Input(UInt(2.W)) //flush for bp fail
     val exu = Flipped(new TLBExuIO) 
-    
   })
 
   val s1 = Module(new TlbStage1)
