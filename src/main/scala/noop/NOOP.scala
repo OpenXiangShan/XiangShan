@@ -80,7 +80,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
-  val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
+  val mmioXbar = Module(new SimpleBusCrossbarNto1(4))
   
 /*
   val iptw = Module(new Ptw(name = "iptw", userBits = AddrBits*2))
@@ -102,10 +102,38 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   io.mmio <> mmioXbar.io.out
 */
+  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2)))
+  val itran = Module(new TLBIOTran(userBits = AddrBits*2))
+  itlb.io.exu <> exu.io.tlb
+  itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
+  itlb.io.in.req <> ifu.io.imem.req
+  itran.io.in.req <> itlb.io.in.resp
+  ifu.io.imem.resp <> itran.io.in.resp
+  val imemXbar = Module(new SimpleBusCrossbarNto1(2))
+  imemXbar.io.in(0) <> Cache(itlb.io.mem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "itcache", userBits = AddrBits*2))
+  imemXbar.io.in(1) <> Cache(itran.io.out, mmioXbar.io.in(1), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+  io.imem <> imemXbar.io.out
 
+  val dtlb = Module(new TLB()(TLBConfig(name = "dtlb", userBits = AddrBits*2)))
+  val dtran = Module(new TLBIOTran(userBits = AddrBits*2))
+  dtlb.io.exu <> exu.io.tlb
+  dtlb.io.flush := "b00".U //flush must be wrong
+  dtlb.io.in.req <> exu.io.dmem.req
+  dtran.io.in.req <> dtlb.io.in.resp
+  exu.io.dmem.resp <> dtran.io.in.resp
+  val dmemXbar = Module(new SimpleBusCrossbarNto1(2))
+  dmemXbar.io.in(0) <> Cache(dtlb.io.mem, mmioXbar.io.in(2), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  dmemXbar.io.in(1) <> Cache(dtran.io.out, mmioXbar.io.in(3), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  io.dmem <> dmemXbar.io.out
+
+  io.mmio <> mmioXbar.io.out
+
+/*
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
   io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
   io.mmio <> mmioXbar.io.out
-
+*/
 }

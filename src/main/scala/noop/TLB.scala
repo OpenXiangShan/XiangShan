@@ -65,7 +65,7 @@ trait Sv39Const{
   }
   
   def paddrApply(ppn: UInt, off: UInt) = {
-    require(ppn.getWidth==ppnLen)
+    require(ppn.getWidth==ppn0Len)
     require(off.getWidth==offLen)
     Cat(0.U(paResLen.W), Cat(ppn, off))
   }
@@ -152,22 +152,22 @@ sealed class TLBDataBundle(implicit val tlbConfig: TLBConfig) extends TlbBundle 
   }
 }
 
-class TlbReq extends SimpleBusReqBundle with Sv39Const
+class TlbReq(userBits: Int) extends SimpleBusReqBundle(userBits = userBits) with Sv39Const
 
-class TlbResp extends SimpleBusReqBundle with Sv39Const
+class TlbResp(userBits: Int) extends SimpleBusReqBundle(userBits = userBits) with Sv39Const
 
-class TLBIO extends Bundle {
-  val req = Flipped(Decoupled(new TlbReq))
-  val resp = Decoupled(new TlbResp)
+class TLBIO(userBits: Int) extends Bundle {
+  val req = Flipped(Decoupled(new TlbReq(userBits = userBits)))
+  val resp = Decoupled(new TlbResp(userBits = userBits))
 }
 
-class TlbStage1IO extends TlbReq
+class TlbStage1IO(userBits: Int) extends TlbReq(userBits)
 
 class TlbStage1(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
     val flush = Input(Bool())
-    val in = Flipped(Decoupled(new TlbReq))
-    val out = Decoupled(new TlbStage1IO)
+    val in = Flipped(Decoupled(new TlbReq(userBits)))
+    val out = Decoupled(new TlbStage1IO(userBits))
 
     val metaReadBus = TlbMetaArrayReadBus()
     val dataReadBus = TlbDataArrayReadBus()
@@ -187,7 +187,7 @@ class TlbStage1(implicit val tlbConfig: TLBConfig) extends TlbModule{
 }
 
 sealed class TlbStage2IO(implicit val tlbConfig: TLBConfig) extends TlbBundle {
-  val req = new TlbReq
+  val req = new TlbReq(userBits)
   val metas = Vec(Ways, new TLBMetaBundle)
   val datas = Vec(Ways, new TLBDataBundle)
   val hit = Output(Bool())
@@ -197,7 +197,7 @@ sealed class TlbStage2IO(implicit val tlbConfig: TLBConfig) extends TlbBundle {
 class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
     val flush = Input(Bool())
-    val in = Flipped(Decoupled(new TlbStage1IO))
+    val in = Flipped(Decoupled(new TlbStage1IO(userBits)))
     val out = Decoupled(new TlbStage2IO)
 
     val metaReadResp = Flipped(Vec(Ways, new TLBMetaBundle))
@@ -225,12 +225,11 @@ class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
 sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new TlbStage2IO))
-    val out = Decoupled(new TlbResp)
+    val out = Decoupled(new TlbResp(userBits))
     val isFinish = Output(Bool())
     val flush = Input(Bool())
     val satp = Input(UInt(satpLen.W))
     val dataWriteBus = TlbDataArrayWriteBus()
-    val dataReadBus = TlbDataArrayReadBus()
     val metaWriteBus = TlbMetaArrayWriteBus()
     val mem = new SimpleBusUC
   })
@@ -326,8 +325,8 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
 class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val io = IO(new Bundle {
-    val in = new TLBIO
-    val out = new SimpleBusUC
+    val in = new TLBIO(userBits = userBits)
+    val mem = new SimpleBusUC(userBits = userBits)
     val flush = Input(UInt(2.W)) //flush for bp fail
     val exu = Flipped(new TLBExuIO) 
   })
@@ -335,7 +334,6 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val s1 = Module(new TlbStage1)
   val s2 = Module(new TlbStage2)
   val s3 = Module(new TlbStage3)
-
   val metaArray = Module(new SRAMTemplate(new TLBMetaBundle, set = Sets, way = Ways, shouldReset = true, singlePort = true))
   val dataArray = Module(new SRAMTemplate(new TLBDataBundle, set = Sets, way = Ways, singlePort = true))
   metaArray.reset := reset.asBool || io.exu.sfence.valid
@@ -347,8 +345,8 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   s2.io.flush := io.flush(1)
   s3.satp := io.exu.satp
 
-  io.out.req <> s3.io.mem.req
-  s3.io.mem.resp <> io.out.resp
+  io.mem.req <> s3.io.mem.req
+  s3.io.mem.resp <> io.mem.resp
 
   //stalling ??? unknown what means
   s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
@@ -358,18 +356,43 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   s1.io.metaReadBus.resp := metaArray.io.r.resp
   metaArray.io.w <> s3.io.metaWriteBus
 
-  val dataReadArb = Module(new Arbiter(chiselTypeOf(dataArray.io.r.req.bits), 2))
-  dataReadArb.io.in(0) <> s1.io.dataReadBus.req
-  dataReadArb.io.in(1) <> s3.io.dataReadBus.req
-  dataArray.io.r.req <> dataReadArb.io.out
+  dataArray.io.r.req <> s1.io.dataReadBus.req
   s1.io.dataReadBus.resp := dataArray.io.r.resp
-  s3.io.dataReadBus.resp := dataArray.io.r.resp
   dataArray.io.w <> s3.io.dataWriteBus
 
   s2.io.metaReadResp := metaArray.io.r.resp.data
   s2.io.dataReadResp := dataArray.io.r.resp.data
 }
+/*
+object TLB {
+  def apply(flush: UInt, exu: TLBExuIO)(implicit tlbConfig: TLBConfig) {
+    val tlb = new TLB(userBits = AddrBits*2)
+    tlb.in.req <> req
+    resp <> tlb.in.resp
+    tlb.flush := flush
+    tlb.exu <> exu
+    tlb
+  }
+}
+*/
+class TLBIOTran(userBits: Int) extends NOOPModule {
+  val io = IO(new Bundle{
+    val in = Flipped(new SimpleBusUC(userBits = userBits))
+    val out = new SimpleBusUC(userBits = userBits)
+  })
 
+  io.out.req <> io.in.req
+  io.in.resp <> io.out.resp
+}
+/*
+object TLBIOTran {
+  def apply(resp: Decoupled(new SimpleBusRespBundle)) {
+    val tran = new TLBIOTran(userBits = AddrBits*2)
+    resp <> tran.in.resp
+    tran
+  }
+}
+*/
 object TLBOpType {
   def vma = "b0".U
 }
@@ -393,3 +416,5 @@ object fuTlb {
     futlb.io.redirect
   }
 }
+
+class TLBCacheMemConnect()
