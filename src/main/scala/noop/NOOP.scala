@@ -82,6 +82,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
   
+/*
   val iptw = Module(new Ptw(name = "iptw", userBits = AddrBits*2))
   //iptw.io.satp := exu.io.satp//"h8000000000087fbe".U//"h80087fbe".U
   iptw.io.exu <> exu.io.tlb
@@ -100,10 +101,11 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   io.dmem <> Cache(dptw.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
 
   io.mmio <> mmioXbar.io.out
-/*
+*/
+
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
   io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
   io.mmio <> mmioXbar.io.out
-*/
+
 }
