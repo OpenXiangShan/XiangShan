@@ -64,9 +64,7 @@ trait Sv39Const{
     val off  = UInt(offLen.W)
   }
   
-  def paddrApply(ppn: UInt, off: UInt) = {
-    require(ppn.getWidth==ppn0Len)
-    require(off.getWidth==offLen)
+  def paddrApply(ppn: UInt, off: UInt):UInt = {
     Cat(0.U(paResLen.W), Cat(ppn, off))
   }
   
@@ -228,10 +226,10 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
     val out = Decoupled(new TlbResp(userBits))
     val isFinish = Output(Bool())
     val flush = Input(Bool())
-    val satp = Input(UInt(satpLen.W))
+    val satp = Input(UInt(XLEN.W))
     val dataWriteBus = TlbDataArrayWriteBus()
     val metaWriteBus = TlbMetaArrayWriteBus()
-    val mem = new SimpleBusUC
+    val mem = new SimpleBusUC(userBits = userBits)
   })
 
   val req = io.in.bits.req
@@ -343,7 +341,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
   s2.io.flush := io.flush(1)
-  s3.satp := io.exu.satp
+  s3.io.satp := io.exu.satp
 
   io.mem.req <> s3.io.mem.req
   s3.io.mem.resp <> io.mem.resp
