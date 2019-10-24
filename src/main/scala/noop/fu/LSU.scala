@@ -41,6 +41,7 @@ object LSUOpType {
 
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(XLEN.W))
+  val instr = Input(UInt(32.W)) // Atom insts need aq rl funct3 bit from instr
   val dmem = new SimpleBusUC
   val isMMIO = Output(Bool())
 }
@@ -50,6 +51,41 @@ class StoreQueueEntry extends NOOPBundle{
   val src2  = UInt(XLEN.W)
   val wdata = UInt(XLEN.W)
   val func  = UInt(6.W)
+}
+
+class AtomALU extends NOOPModule {
+  val io = IO(new NOOPBundle{
+    val src1 = Input(UInt(XLEN.W))
+    val src2 = Input(UInt(XLEN.W))
+    val func = Input(UInt(6.W))
+    val isWordOp = Input(Bool())
+    val result = Output(UInt(XLEN.W))
+  })
+
+  // src1: load result
+  // src2: reg  result
+  val src1 = io.src1
+  val src2 = io.src2
+  val func = io.func
+  val isAdderSub = (func =/= LSUOpType.amoadd) 
+  val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
+  val xorRes = src1 ^ src2
+  val sltu = !adderRes(XLEN)
+  val slt = xorRes(XLEN-1) ^ sltu
+
+  val res = LookupTreeDefault(func(3, 0), adderRes, List(
+    LSUOpType.amoswap -> src2,
+    LSUOpType.amoadd  -> adderRes,
+    LSUOpType.amoxor  -> xorRes,
+    LSUOpType.amoand  -> (src1 & src2),
+    LSUOpType.amoor   -> (src1 | src2),
+    LSUOpType.amomin  -> Mux(slt(0), src1, src2),
+    LSUOpType.amomax  -> Mux(slt(0), src2, src1),
+    LSUOpType.amominu -> Mux(sltu(0), src1, src2),
+    LSUOpType.amomaxu -> Mux(sltu(0), src2, src1)
+  ))
+
+  io.result :=  Mux(io.isWordOp, SignExt(res(31,0), 64), res)
 }
 
 class LSU extends NOOPModule {
@@ -63,13 +99,19 @@ class LSU extends NOOPModule {
     io.out.bits
   }
     val lsExecUnit = Module(new LSExecUnit)
+    lsExecUnit.io.instr := DontCare
     
     val storeReq = valid & LSUOpType.isStore(func)
     val loadReq = valid  & LSUOpType.isLoad(func)
     val atomReq = valid  & LSUOpType.isAtom(func)
 
-    val atomWidthW = true.B  //TODO: should be funct3 === w
-    val atomWidthD = false.B //TODO: should be funct3 === d
+    val aq = io.instr(26)
+    val rl = io.instr(25)
+    val funct3 = io.instr(14, 12)
+
+    val atomWidthW = !funct3(0)
+    val atomWidthD = funct3(0)
+
 
     // LSU control FSM state
     val s_idle :: s_load :: s_lr :: s_sc :: s_amo_l :: s_amo_a :: s_amo_s :: Nil = Enum(7)
@@ -77,6 +119,11 @@ class LSU extends NOOPModule {
     // LSU control FSM
     val state = RegInit(s_idle)
     val atomReg = Reg(UInt(XLEN.W))
+    val atomALU = Module(new AtomALU)
+    atomALU.io.src1 := atomReg
+    atomALU.io.src2 := src2
+    atomALU.io.func := func
+    atomALU.io.isWordOp := atomWidthW
     
     // StoreQueue
     // TODO: inst fence needs storeQueue to be finished
@@ -139,7 +186,9 @@ class LSU extends NOOPModule {
         lsExecUnit.io.in.bits.func := Mux(atomWidthD, LSUOpType.ld, LSUOpType.lw)
         lsExecUnit.io.wdata        := DontCare
         io.in.ready                := false.B
-        io.out.valid               := false.B
+        io.out.valid               := lsExecUnit.io.out.valid //write result to rd after amo_l state
+        // Note: atom inst is commited here, but atom op has not finished yet
+        // As we only have 1 hart now, atom inst early commit will not cause trouble 
         when(lsExecUnit.io.out.fire()){state := s_amo_a}
         atomReg := lsExecUnit.io.out.bits
       }
@@ -154,7 +203,7 @@ class LSU extends NOOPModule {
         io.in.ready                := false.B
         io.out.valid               := false.B
         state := s_amo_s
-        // atomReg := AtomALU(atomReg, src2, func) [TODO]
+        atomReg := atomALU.io.result
       }
 
       is(s_amo_s){
@@ -165,7 +214,7 @@ class LSU extends NOOPModule {
         lsExecUnit.io.in.bits.func := Mux(atomWidthD, LSUOpType.sd, LSUOpType.sw)
         lsExecUnit.io.wdata        := atomReg
         io.in.ready                := lsExecUnit.io.out.fire()
-        io.out.valid               := lsExecUnit.io.out.valid
+        io.out.valid               := false.B
         when(lsExecUnit.io.out.fire()){state := s_idle}
       }
     }

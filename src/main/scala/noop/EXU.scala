@@ -33,6 +33,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val lsu = Module(new LSU)
   val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
   lsu.io.wdata := src2
+  lsu.io.instr := io.in.bits.cf.instr
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
