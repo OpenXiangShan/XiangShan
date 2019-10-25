@@ -18,7 +18,7 @@ object RegMap {
     wen: Bool, wdata: UInt, wmask: UInt):Unit = generate(mapping, addr, rdata, addr, wen, wdata, wmask)
 }
 
-object MaskedRegMap {
+object MaskedRegMap { // TODO: add read mask
   def Unwritable = null
   def WritableMask = Fill(64, true.B)
   def UnwritableMask = 0.U(64.W)
