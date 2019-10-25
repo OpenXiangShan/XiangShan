@@ -243,7 +243,6 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   // Hart Priviledge Mode
 
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
-  val newPriviledgeMode = ModeM
   // val globalInterruptEnable = LookupTree(priviledgeMode, List(
   //   ModeM -> mstatusStruct.ie.m,
   //   ModeH -> mstatusStruct.ie.h,
@@ -404,8 +403,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   val retTarget = Wire(UInt(AddrBits.W))
+  val trapTarget = Wire(UInt(AddrBits.W))
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
-  io.redirect.target := Mux(raiseExceptionIntr, mtvec, retTarget)
+  io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
 
   Debug(false){
     when(raiseExceptionIntr){
@@ -415,7 +415,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   // Branch control
 
+  val deleg = Mux(raiseIntr, mideleg , medeleg)
+  // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
+  val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
+
   ret := isMret || isSret || isUret
+  trapTarget := Mux(delegS, stvec, mtvec)
   retTarget := DontCare
   // TODO redircet target
   // val illegalEret = TODO
@@ -456,39 +461,33 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   }
 
   when (raiseExceptionIntr) {
-    mepc := io.cfIn.pc
-    mcause := causeNO
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    when(newPriviledgeMode === ModeM){
-      mstatusNew.pie.m := LookupTree(priviledgeMode, List(
-        ModeM -> mstatusOld.ie.m,
-        ModeH -> mstatusOld.ie.h, //ERROR
-        ModeS -> mstatusOld.ie.s,
-        ModeU -> mstatusOld.ie.u
-      ))
-      mstatusNew.ie.m := false.B
-      mstatusNew.mpp := priviledgeMode
-    }
-    when(newPriviledgeMode === ModeS){
-      mstatusNew.pie.s := LookupTree(priviledgeMode, List(
-        ModeM -> mstatusOld.ie.m,
-        ModeH -> mstatusOld.ie.h, //ERROR
-        ModeS -> mstatusOld.ie.s,
-        ModeU -> mstatusOld.ie.u
-      ))
+
+    when (delegS) {
+      scause := causeNO
+      sepc := io.cfIn.pc
+      mstatusNew.spp := priviledgeMode
+      mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
-      mstatusNew.spp := priviledgeMode(0)
+      priviledgeMode := ModeS
+      // trapTarget := stvec
+    }.otherwise {
+      mcause := causeNO
+      mepc := io.cfIn.pc
+      mstatusNew.mpp := priviledgeMode
+      mstatusNew.pie.m := mstatusOld.ie.m
+      mstatusNew.ie.m := false.B
+      priviledgeMode := ModeM
+      // trapTarget := mtvec
     }
-    when(newPriviledgeMode === ModeU){
-      mstatusNew.pie.u := LookupTree(priviledgeMode, List(
-        ModeM -> mstatusOld.ie.m,
-        ModeH -> mstatusOld.ie.h, //ERROR
-        ModeS -> mstatusOld.ie.s,
-        ModeU -> mstatusOld.ie.u
-      ))
-      mstatusNew.ie.u := false.B
-    }
+    // mstatusNew.pie.m := LookupTree(priviledgeMode, List(
+    //   ModeM -> mstatusOld.ie.m,
+    //   ModeH -> mstatusOld.ie.h, //ERROR
+    //   ModeS -> mstatusOld.ie.s,
+    //   ModeU -> mstatusOld.ie.u
+    // ))
+
     mstatus := mstatusNew.asUInt
   }
 
