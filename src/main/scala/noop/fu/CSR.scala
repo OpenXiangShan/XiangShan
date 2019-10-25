@@ -233,8 +233,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val sie = RegInit(0.U(XLEN.W))
   val satp = RegInit(UInt(XLEN.W), 0.U)
   val sepc = Reg(UInt(XLEN.W))
+  val scause = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val sstatusStruct = sstatus.asTypeOf(new MstatusStruct)
+
+  // User-Level CSRs
+  val uepc = Reg(UInt(XLEN.W))
 
   // Hart Priviledge Mode
 
@@ -290,7 +294,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     // Supervisor Trap Handling
     MaskedRegMap(Sscratch, sscratch),
     MaskedRegMap(Sepc, sepc),
-    // MaskedRegMap(Scause, scause),
+    MaskedRegMap(Scause, scause),
     // MaskedRegMap(Stval, stval),
     // MaskedRegMap(Sip, sip),
 
@@ -343,6 +347,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   io.out.bits := rdata
 
+  // CSR inst decode
+  val ret = Wire(Bool())
+  val isEcall = addr === privEcall
+  val isMret = addr === privMret
+  val isSret = addr === privSret
+  val isUret = addr === privUret
+
   Debug(false){
     when(wen){
       printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x\n", io.cfIn.pc, addr, rdata, wdata)
@@ -350,8 +361,6 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   }
 
   // Exception and Intr
-
-  // exceptions
 
   // interrupts
 
@@ -366,6 +375,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   // val raiseIntrU = intrVecU.asUint.orR & intrVecUEnable
   val intrVec = intrVecM
   BoringUtils.addSource(intrVec, "intrVecIDU")
+  // val intrNO = PriorityEncoder(intrVec)
+  val intrNO = PriorityEncoder(io.cfIn.intrVec)
   val raiseIntr = io.cfIn.intrVec.asUInt.orR
 
   val mtip = WireInit(false.B)
@@ -375,10 +386,19 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   mip.t.m := mtip
   mip.e.m := meip
 
-  val raiseException = io.cfIn.exceptionVec.asUInt.orR
-  val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
-  // val intrNO = PriorityEncoder(intrVec)
-  val intrNO = PriorityEncoder(io.cfIn.intrVec)
+  // exceptions
+
+  // TODO: merge iduExceptionVec, csrExceptionVec as raiseExceptionVec
+  val csrExceptionVec = Wire(Vec(16, Bool()))
+  csrExceptionVec.map(_ := false.B)
+  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
+  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
+  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
+  val iduExceptionVec = io.cfIn.exceptionVec
+  val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
+  val raiseException = raiseExceptionVec.orR
+  val exceptionNO = PriorityEncoder(raiseExceptionVec)
+
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
 
@@ -389,21 +409,11 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   Debug(false){
     when(raiseExceptionIntr){
-      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, io.cfIn.exceptionVec.asUInt)
+      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
     }
   }
 
   // Branch control
-  
-  // CSR inst decode
-  val ret = Wire(Bool())
-  val isEcall = addr === privEcall
-  val isMret = addr === privMret
-  val isSret = addr === privSret
-  val isUret = addr === privUret
-
-  // TODO ECALL
-  assert(!isEcall)
 
   ret := isMret || isSret || isUret
   retTarget := DontCare
@@ -417,7 +427,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     mstatusNew.ie.m := mstatusOld.pie.m
     priviledgeMode := mstatusOld.mpp
     mstatusNew.pie.m := true.B
-    mstatusNew.mpp := ModeM
+    mstatusNew.mpp := ModeU
     mstatus := mstatusNew.asUInt
     retTarget := mepc
   }
@@ -429,21 +439,21 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     mstatusNew.ie.s := mstatusOld.pie.s
     priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
     mstatusNew.pie.s := true.B
-    mstatusNew.spp := ModeU(0)
+    mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
     retTarget := sepc
   }
 
-  // when (valid && isUret) {
-  //   val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-  //   val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-  //   // mstatusNew.mpp.m := ModeU //TODO: add mode U
-  //   mstatusNew.ie.u := mstatusOld.pie.u
-  //   priviledgeMode := 0.U //ModeU
-  //   mstatusNew.pie.m := true.B
-  //   mstatus := mstatusNew.asUInt
-  //   retTarget := uepc
-  // }
+  when (valid && isUret) {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    // mstatusNew.mpp.m := ModeU //TODO: add mode U
+    mstatusNew.ie.u := mstatusOld.pie.u
+    priviledgeMode := 0.U //ModeU
+    mstatusNew.pie.m := true.B
+    mstatus := mstatusNew.asUInt
+    retTarget := uepc
+  }
 
   when (raiseExceptionIntr) {
     mepc := io.cfIn.pc

@@ -301,7 +301,7 @@ class IDU extends NOOPModule with HasInstrType {
 
   io.out.bits.cf.exceptionVec.map(_ := false.B)
   io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
-  io.out.bits.cf.exceptionVec(ecallM) := (instr === Priviledged.ECALL) && io.in.valid
+  // io.out.bits.cf.exceptionVec(ecallM) := (instr === Priviledged.ECALL) && io.in.valid
 
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
 }
