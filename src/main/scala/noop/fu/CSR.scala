@@ -383,8 +383,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
 
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
+  val retTarget = Wire(UInt(AddrBits.W))
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
-  io.redirect.target := Mux(raiseExceptionIntr, mtvec, mepc)
+  io.redirect.target := Mux(raiseExceptionIntr, mtvec, retTarget)
 
   Debug(false){
     when(raiseExceptionIntr){
@@ -394,12 +395,19 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   // Branch control
   
+  // CSR inst decode
   val ret = Wire(Bool())
+  val isEcall = addr === privEcall
   val isMret = addr === privMret
   val isSret = addr === privSret
   val isUret = addr === privUret
 
+  // TODO ECALL
+  assert(!isEcall)
+
   ret := isMret || isSret || isUret
+  retTarget := DontCare
+  // TODO redircet target
   // val illegalEret = TODO
 
   when (valid && isMret) {
@@ -411,6 +419,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     mstatusNew.pie.m := true.B
     mstatusNew.mpp := ModeM
     mstatus := mstatusNew.asUInt
+    retTarget := mepc
   }
 
   when (valid && isSret) {
@@ -422,17 +431,19 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     mstatusNew.pie.s := true.B
     mstatusNew.spp := ModeU(0)
     mstatus := mstatusNew.asUInt
+    retTarget := sepc
   }
 
-  when (valid && isUret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    // mstatusNew.mpp.m := ModeU //TODO: add mode U
-    mstatusNew.ie.u := mstatusOld.pie.u
-    priviledgeMode := 0.U //ModeU
-    mstatusNew.pie.m := true.B
-    mstatus := mstatusNew.asUInt
-  }
+  // when (valid && isUret) {
+  //   val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+  //   val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+  //   // mstatusNew.mpp.m := ModeU //TODO: add mode U
+  //   mstatusNew.ie.u := mstatusOld.pie.u
+  //   priviledgeMode := 0.U //ModeU
+  //   mstatusNew.pie.m := true.B
+  //   mstatus := mstatusNew.asUInt
+  //   retTarget := uepc
+  // }
 
   when (raiseExceptionIntr) {
     mepc := io.cfIn.pc
