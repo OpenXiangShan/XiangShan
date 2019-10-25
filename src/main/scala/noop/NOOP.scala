@@ -103,7 +103,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   io.mmio <> mmioXbar.io.out
 */
   val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2)))
-  val itran = Module(new TLBIOTran(userBits = AddrBits*2))
+  val itran = Module(new TLBIOTran(userBits = AddrBits*2, name = "itran"))
   itlb.io.exu <> exu.io.tlb
   itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
   itlb.io.in.req <> ifu.io.imem.req

@@ -65,7 +65,7 @@ trait Sv39Const{
   }
   
   def paddrApply(ppn: UInt, off: UInt):UInt = {
-    Cat(0.U(paResLen.W), Cat(ppn, off))
+    Cat(Cat(0.U(paResLen.W), Cat(ppn, off)), 0.U(3.W))
   }
   
   def pteBundle = new Bundle {
@@ -107,7 +107,7 @@ sealed trait HasTlbConst {
   val AddrBits: Int
   val XLEN: Int
 
-  val tlbName = tlbConfig.name
+  val tlbname = tlbConfig.name
   val userBits = tlbConfig.userBits
 
   val TotalSize = tlbConfig.totalSize
@@ -179,7 +179,7 @@ class TlbStage1(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.dataReadBus.apply(valid = readBusValid, setIdx = 0.U)
   
   io.out.bits := io.in.bits
-  io.out.valid := io.in.valid && io.s2s3Miss && io.metaReadBus.req.ready && io.dataReadBus.req.ready //change req.ready to req.fire()??
+  io.out.valid := io.in.valid && !io.s2s3Miss && io.metaReadBus.req.ready && io.dataReadBus.req.ready //change req.ready to req.fire()??
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 }
 
@@ -228,6 +228,11 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
     val dataWriteBus = TlbDataArrayWriteBus()
     val metaWriteBus = TlbMetaArrayWriteBus()
     val mem = new SimpleBusUC(userBits = userBits)
+    val print = new Bundle{
+      val state = Output(UInt(2.W))
+      val level = Output(UInt(2.W))
+      val alreadyOutFire = Output(UInt(1.W))
+    }
   })
 
   val req = io.in.bits.req
@@ -250,7 +255,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val cmd = SimpleBusCmd.read
   io.mem.req.bits.apply(addr = raddr, cmd = cmd, size = (if (XLEN == 64) "b11".U else "b10".U), wdata = 0.U, wmask = Fill(DataBytes, 0.U))
   io.mem.req.valid := (state === s_memReadReq)
-  io.mem.resp.ready := true.B
+  io.mem.resp.ready := (state === s_memReadResp)//(true.B)
 
   val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire())
 
@@ -317,9 +322,13 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   io.isFinish := Mux(hit, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
   io.in.ready := io.out.ready && (state === s_idle) && !miss
+
+  io.print.state := state
+  io.print.level := level
+  io.print.alreadyOutFire := alreadyOutFire
 }
 
-class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
+class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
     val in = new TLBIO(userBits = userBits)
     val mem = new SimpleBusUC(userBits = userBits)
@@ -356,6 +365,30 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   s2.io.metaReadResp := metaArray.io.r.resp.data
   s2.io.dataReadResp := dataArray.io.r.resp.data
+
+  Debug(debug && tlbname=="itlb") {
+    when(true.B && GTimer()<=200.U ) {
+      printf("-----------------------------------------------------------------------------------------------\n")
+      printf("%d "+ tlbname + " ",GTimer())
+      printf("ioInReqValid:%d ioInReqReady:%d ioInRespValid:%d ioInRespReady:%d ioInReqAddr:%x ", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr)
+      printf("ioMemReqValid:%d ioMemReqReady:%d ioMemRespValid:%d ioMemRespReady:%d ", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready)
+      printf("io")
+      
+      printf("{IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
+      printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
+      printf("satp:%x ", s3.io.satp)
+      printf("s3State:%d s3MemAddr:%x s3MemRdata:%x level:%d s3MemRespFire:%d s3alreadOutFire:%d ", s3.io.print.state, s3.io.mem.req.bits.addr, s3.io.mem.resp.bits.rdata, s3.io.print.level, s3.io.mem.resp.fire(), s3.io.print.alreadyOutFire)
+      printf("s1MetaReadReqReady:%d s1DataReadReqReady:%d ", s1.io.metaReadBus.req.ready, s1.io.dataReadBus.req.ready)
+      //printf("s1ReqFire:%d s2ReqFire:%d s3ReqFire:%d ", s1.io.in.fire(), s2.io.in.fire(), s3.io.in.fire())
+      printf("s2Hit:%d s2Waymask:%x ", s2.io.out.bits.hit, s2.io.out.bits.waymask)
+      printf("s2s3Miss:%d ", s1.io.s2s3Miss)
+      printf("s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x ", s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr)
+      printf("flush:%x ", io.flush)
+
+      printf("\n")
+      
+    }
+  }
 }
 /*
 object TLB {
@@ -369,7 +402,7 @@ object TLB {
   }
 }
 */
-class TLBIOTran(userBits: Int = 0) extends NOOPModule {
+class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule {
   val io = IO(new Bundle{
     val in = Flipped(new SimpleBusUC(userBits = userBits))
     val out = new SimpleBusUC(userBits = userBits)
@@ -377,6 +410,15 @@ class TLBIOTran(userBits: Int = 0) extends NOOPModule {
 
   io.out.req <> io.in.req
   io.in.resp <> io.out.resp
+
+  Debug(true && name=="itran") {
+    when(GTimer() <= 200.U) {
+      printf("%d:" + name + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
+      printf("\n")
+      //io.in.dump(name + ".in")
+      //io.out.dump(name + ".out")
+    }
+  }
 }
 /*
 object TLBIOTran {
@@ -410,5 +452,3 @@ object fuTlb {
     futlb.io.redirect
   }
 }
-
-class TLBCacheMemConnect()
