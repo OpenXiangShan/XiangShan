@@ -176,21 +176,20 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     val ie = new Priv
   }
 
-  val mtvec = RegInit(UInt(XLEN.W), 0.U)
-  val mcause = Reg(UInt(XLEN.W))
-  val mepc = Reg(UInt(XLEN.W))
-
-
   class Interrupt extends Bundle {
     val e = new Priv
     val t = new Priv
     val s = new Priv
   }
-  val mie = RegInit(0.U(XLEN.W))
-  val mip = WireInit(0.U.asTypeOf(new Interrupt))
-
 
   // Machine-Level CSRs
+  
+  val mtvec = RegInit(UInt(XLEN.W), 0.U)
+  val mcause = Reg(UInt(XLEN.W))
+  val mepc = Reg(UInt(XLEN.W))
+
+  val mie = RegInit(0.U(XLEN.W))
+  val mip = WireInit(0.U.asTypeOf(new Interrupt))
 
   val misa = RegInit(UInt(XLEN.W), "h8000000000141101".U) 
   // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
@@ -205,7 +204,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   // mstatus Value Table
   // | sd   |
   // | pad1 |
-  // | sxl  | hardlinked to 10
+  // | sxl  | hardlinked to 10, use 00 to pass xv6 test  
   // | uxl  | hardlinked to 00
   // | pad0 |
   // | tsr  |
@@ -214,14 +213,30 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   // | mxr  |
   // | sum  |
   // | mprv |
-  // | xs   | 01 |
-  // | fs   | 10 |
+  // | xs   | 00 |
+  // | fs   | 00 |
   // | mpp  | 00 |
   // | hpp  | 00 |
-  // | spp  | 1 |
+  // | spp  | 0 |
   // | pie  | 0000 |
   // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
+
+  val medeleg = RegInit(UInt(XLEN.W), 0.U)
+  val mideleg = RegInit(UInt(XLEN.W), 0.U)
+  val mscratch = RegInit(UInt(XLEN.W), 0.U)
+
+  // Superviser-Level CSRs
+
+  val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
+  val stvec = RegInit(UInt(XLEN.W), 0.U)
+  val sie = RegInit(0.U(XLEN.W))
+  val satp = RegInit(UInt(XLEN.W), 0.U)
+  val sepc = Reg(UInt(XLEN.W))
+  val sscratch = RegInit(UInt(XLEN.W), 0.U)
+  val sstatusStruct = sstatus.asTypeOf(new MstatusStruct)
+
+  // Hart Priviledge Mode
 
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
   val newPriviledgeMode = ModeM
@@ -265,22 +280,22 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     // MaskedRegMap(Instret, instret),
     
     // Supervisor Trap Setup
-    // MaskedRegMap(Sstatus, Sstatus),
+    MaskedRegMap(Sstatus, sstatus),
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
-    // MaskedRegMap(Sie, Sie),
-    // MaskedRegMap(Stvec, Stvec),
+    MaskedRegMap(Sie, sie),
+    MaskedRegMap(Stvec, stvec),
     // MaskedRegMap(Scounteren, Scounteren),
 
     // Supervisor Trap Handling
-    // MaskedRegMap(Sscratch, sscratch),
-    // MaskedRegMap(Sepc, sepc),
+    MaskedRegMap(Sscratch, sscratch),
+    MaskedRegMap(Sepc, sepc),
     // MaskedRegMap(Scause, scause),
     // MaskedRegMap(Stval, stval),
     // MaskedRegMap(Sip, sip),
 
     // Supervisor Protection and Translation
-    // MaskedRegMap(Satp, satp),
+    MaskedRegMap(Satp, satp),
 
     // Machine Information Registers 
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable), 
@@ -291,14 +306,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     // Machine Trap Setup
     MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U),
     MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
-    // MaskedRegMap(Medeleg, medeleg),
-    // MaskedRegMap(Mideleg, mideleg),
+    MaskedRegMap(Medeleg, medeleg),
+    MaskedRegMap(Mideleg, mideleg),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
     // MaskedRegMap(Mcounteren, mcounteren), 
 
     // Machine Trap Handling
-    // MaskedRegMap(Mscratch, mscratch) 
+    MaskedRegMap(Mscratch, mscratch),
     MaskedRegMap(Mepc, mepc),
     MaskedRegMap(Mcause, mcause),
     // MaskedRegMap(Mtval, mtval)
