@@ -61,7 +61,7 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
   }
 }
 
-class SimpleBusCrossbarNto1(n: Int, userBits:Int = 0) extends Module {
+class SimpleBusCrossbarNto1(n: Int, userBits:Int = 0, name: String = "default") extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, new SimpleBusUC(userBits)))
     val out = new SimpleBusUC(userBits)
@@ -99,6 +99,15 @@ class SimpleBusCrossbarNto1(n: Int, userBits:Int = 0) extends Module {
     }
     is (s_readResp) { when (io.out.resp.fire() && io.out.resp.bits.isReadLast()) { state := s_idle } }
     is (s_writeResp) { when (io.out.resp.fire()) { state := s_idle } }
+  }
+
+  Debug(true && name=="itlbXbar") {
+    when(true.B && GTimer()<=200.U) {
+      printf("%d:" + name + " state:%d inflightSrc:%d ThisReqReady:%d ThisReqValid:%d ", GTimer(), state, inflightSrc, thisReq.ready, thisReq.valid)
+      printf(p"ThisReqBits:${thisReq.bits}\n")
+      printf("%d:" + name + " OutReqValid:%d OutReqReady:%d OutRespValid:%d OutRespReady:%d ", GTimer(), io.out.req.valid, io.out.req.ready, io.out.resp.valid, io.out.resp.ready)
+      printf(p"OutReqBits:${io.out.req.bits}, OutRespBits:${io.out.resp.bits}\n")
+    }
   }
 }
 

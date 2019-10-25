@@ -297,7 +297,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.metaWriteBus.req <> metaWriteArb.io.out
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-  io.out.bits.cmd := DontCare
+  io.out.bits.cmd := Mux(io.in.bits.req.cmd===SimpleBusCmd.read, SimpleBusCmd.readLast, DontCare)//DontCare, added by lemover
   io.out.bits.user.zip(io.in.bits.req.user).map { case (o,i) => o := i }
   io.out.valid := io.in.valid && Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
