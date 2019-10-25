@@ -163,7 +163,6 @@ class TlbStage1IO(userBits: Int) extends TlbReq(userBits)
 
 class TlbStage1(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
-    val flush = Input(Bool())
     val in = Flipped(Decoupled(new TlbReq(userBits)))
     val out = Decoupled(new TlbStage1IO(userBits))
 
@@ -194,7 +193,6 @@ sealed class TlbStage2IO(implicit val tlbConfig: TLBConfig) extends TlbBundle {
 
 class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
-    val flush = Input(Bool())
     val in = Flipped(Decoupled(new TlbStage1IO(userBits)))
     val out = Decoupled(new TlbStage2IO)
 
@@ -325,7 +323,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val io = IO(new Bundle {
     val in = new TLBIO(userBits = userBits)
     val mem = new SimpleBusUC(userBits = userBits)
-    val flush = Input(UInt(2.W)) //flush for bp fail
+    val flush = Input(UInt(2.W)) 
     val exu = Flipped(new TLBExuIO) 
   })
 
@@ -340,11 +338,9 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule {
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
   io.in.resp <> s3.io.out
-  s2.io.flush := io.flush(1)
+  s3.io.flush := io.flush(1)
   s3.io.satp := io.exu.satp
-
-  io.mem.req <> s3.io.mem.req
-  s3.io.mem.resp <> io.mem.resp
+  io.mem <> s3.io.mem
 
   //stalling ??? unknown what means
   s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
@@ -373,7 +369,7 @@ object TLB {
   }
 }
 */
-class TLBIOTran(userBits: Int) extends NOOPModule {
+class TLBIOTran(userBits: Int = 0) extends NOOPModule {
   val io = IO(new Bundle{
     val in = Flipped(new SimpleBusUC(userBits = userBits))
     val out = new SimpleBusUC(userBits = userBits)
