@@ -91,6 +91,17 @@ trait Sv39Const{
     val R    = UInt(1.W)
     val V    = UInt(1.W)
   }
+
+  def vmMux(userBits: Int = 0, en: Bool, enYes: SimpleBusReqBundle, enNo: SimpleBusReqBundle) = {
+    val res = Wire(new SimpleBusReqBundle(userBits))
+    res.addr := Mux(en, enYes.addr, enNo.addr)
+    res.size := Mux(en, enYes.size, enNo.size)
+    res.cmd  := Mux(en,  enYes.cmd,  enNo.cmd)
+    res.wmask:= Mux(en,enYes.wmask,enNo.wmask)
+    res.wdata:= Mux(en,enYes.wdata,enNo.wdata)
+    res.user.map(_ := Mux(en, enYes.user.getOrElse(0.U),enNo.user.getOrElse(0.U)))
+    res
+  }
 }
 
 case class TLBConfig (
@@ -347,10 +358,19 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val dataArray = Module(new SRAMTemplate(new TLBDataBundle, set = Sets, way = Ways, singlePort = true))
   metaArray.reset := reset.asBool || io.exu.sfence.valid
 
+  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode =/= 0.U
   s1.io.in <> io.in.req
+  s1.io.in.bits := io.in.req.bits
+  s1.io.in.valid :=  Mux(vmEnable, io.in.req.valid, false.B)
+  io.in.req.ready := Mux(vmEnable, s1.io.in.ready, io.in.resp.ready)
+
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
   PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1))
-  io.in.resp <> s3.io.out
+  //io.in.resp <> s3.io.out
+  io.in.resp.bits := vmMux(userBits, vmEnable, s3.io.out.bits, io.in.req.bits)
+  io.in.resp.valid := Mux(vmEnable, s3.io.out.valid, io.in.req.valid)
+  s3.io.out.ready := Mux(vmEnable, io.in.resp.ready, false.B)
+  
   s3.io.flush := io.flush(1)
   s3.io.satp := io.exu.satp
   io.mem <> s3.io.mem
@@ -408,9 +428,15 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   val io = IO(new Bundle{
     val in = Flipped(new SimpleBusUC(userBits = userBits))
     val out = new SimpleBusUC(userBits = userBits)
+    //val rawReq = Flipped(Decoupled(SimpleBusReqBundle(userBits = userBits)))
+    //val vmEnable = Input(Bool())
   })
 
   io.out.req <> io.in.req
+  //io.out.req.valid := Mux(vmEnable, io.in.req.valid, io.rawReq.valid)
+  //io.out.req.bits := Mux(vmEnable, io.in.req.bits, io.rawReq.bits)
+  
+
   //io.in.resp <> io.out.resp
 
   io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp()
