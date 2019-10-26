@@ -246,10 +246,10 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
-  val needFlush = RegInit(false.B)
+  //val needFlush = RegInit(false.B)
 
-  when (io.flush && (state =/= s_idle)) { needFlush := true.B}
-  when (io.out.fire() && needFlush) { needFlush := false.B}
+  //when (io.flush && (state =/= s_idle)) { needFlush := true.B}
+  //when (io.out.fire() && needFlush) { needFlush := false.B}
 
   val raddr = Reg(UInt(AddrBits.W))
   val cmd = SimpleBusCmd.read
@@ -274,11 +274,13 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
       }
     }
 
-    is (s_memReadReq) { when (io.mem.req.fire()) {
-      state := s_memReadResp
-    }}
+    is (s_memReadReq) { 
+      when(io.flush) { state := s_idle}
+      .elsewhen (io.mem.req.fire()) { state := s_memReadResp}
+    }
 
-    is (s_memReadResp) { when (io.mem.resp.fire()) {
+    is (s_memReadResp) { when(io.flush) { state := s_idle }
+      .elsewhen (io.mem.resp.fire()) {
       when (level === 3.U) {
         state := s_memReadReq
         raddr := paddrApply(memRdata.ppn, vpn.vpn1)
@@ -291,9 +293,8 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
       level := level - 1.U
     }}
 
-    is (s_wait_resp) { when (io.out.fire() || needFlush || alreadyOutFire){
+    is (s_wait_resp) { when (io.out.fire() || /*needFlush*/ io.flush || alreadyOutFire){
       state := s_idle
-      level := Level.U
     }}
   }
 
@@ -311,7 +312,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   io.metaWriteBus.req <> metaRefillWriteBus.req
 
-  io.out.bits.addr := paddrApply(Mux(hit, dataRead, memRdata.ppn), req.addr.asTypeOf(vaBundle2).off)
+  io.out.bits.addr := Cat(0.U(paResLen.W), Cat(Mux(hit, dataRead, memRdata.ppn), req.addr.asTypeOf(vaBundle2).off))
   io.out.bits.size := req.size
   io.out.bits.cmd := req.cmd
   io.out.bits.wmask := req.wmask
@@ -367,20 +368,20 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   s2.io.dataReadResp := dataArray.io.r.resp.data
 
   Debug(debug && tlbname=="itlb") {
-    when(true.B && GTimer()<=200.U ) {
-      printf("-----------------------------------------------------------------------------------------------\n")
+    when(true.B && GTimer()<=500.U ) {
+      //printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d "+ tlbname + " ",GTimer())
       printf("ioInReqValid:%d ioInReqReady:%d ioInRespValid:%d ioInRespReady:%d ioInReqAddr:%x ", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr)
       printf("ioMemReqValid:%d ioMemReqReady:%d ioMemRespValid:%d ioMemRespReady:%d ", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready)
-      printf("\n%d "+ tlbname + "{IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ",GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
+      printf("\n%d:"+ tlbname + " {IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ",GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
       printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
       printf("satp:%x ", s3.io.satp)
-      printf("\n%d "+ tlbname + "s3State:%d s3MemAddr:%x s3MemRdata:%x level:%d s3MemRespFire:%d s3alreadOutFire:%d ", GTimer(), s3.io.print.state, s3.io.mem.req.bits.addr, s3.io.mem.resp.bits.rdata, s3.io.print.level, s3.io.mem.resp.fire(), s3.io.print.alreadyOutFire)
-      printf("s1MetaReadReqReady:%d s1DataReadReqReady:%d ", s1.io.metaReadBus.req.ready, s1.io.dataReadBus.req.ready)
+      printf("\n%d:"+ tlbname + " s3State:%d level:%d s3MemAddr:%x s3MemRdata:%x s3MemRespFire:%d s3alreadOutFire:%d ", GTimer(), s3.io.print.state, s3.io.print.level, s3.io.mem.req.bits.addr, s3.io.mem.resp.bits.rdata, s3.io.mem.resp.fire(), s3.io.print.alreadyOutFire)
+      printf("\n%d:"+ tlbname + " s1MetaReadReqReady:%d s1DataReadReqReady:%d ", GTimer(), s1.io.metaReadBus.req.ready, s1.io.dataReadBus.req.ready)
       //printf("s1ReqFire:%d s2ReqFire:%d s3ReqFire:%d ", s1.io.in.fire(), s2.io.in.fire(), s3.io.in.fire())
       printf("s2Hit:%d s2Waymask:%x ", s2.io.out.bits.hit, s2.io.out.bits.waymask)
       printf("s2s3Miss:%d ", s1.io.s2s3Miss)
-      printf("s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x ", s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr)
+      printf("\n%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x ", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
       printf("flush:%x ", io.flush)
 
       printf("\n")
@@ -410,8 +411,11 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   io.in.resp <> io.out.resp
 
   Debug(true && name=="itran") {
-    when(GTimer() <= 200.U) {
+    when(GTimer() <= 500.U) {
+      printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d:" + name + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
+      printf("\n%d:" + name, GTimer())
+      printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")
       printf("\n")
       //io.in.dump(name + ".in")
       //io.out.dump(name + ".out")

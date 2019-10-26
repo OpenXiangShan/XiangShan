@@ -311,7 +311,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
   Debug(debug  && cacheName=="icache") {
-    when(GTimer() <= 200.U) {
+    when(GTimer() <= 500.U) {
       printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
     }
@@ -443,7 +443,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 
 
   Debug(debug && cacheName=="icache") {
-    when(GTimer() <= 200.U) {
+    when(GTimer() <= 500.U) {
       io.in.dump(cacheName + ".in")
       printf("%d:" + cacheName + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d\n", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("%d:" + cacheName + " s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
