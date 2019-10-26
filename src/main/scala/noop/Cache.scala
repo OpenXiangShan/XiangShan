@@ -453,7 +453,7 @@ object Cache {
   def apply(in: SimpleBusUC, mmio: SimpleBusUC, flush: UInt, enable: Boolean = true)(implicit cacheConfig: CacheConfig) = {
     if (enable) {
       val cache = Module(new Cache)
-        cache.io.flush := flush
+      cache.io.flush := flush
       cache.io.in <> in
       mmio <> cache.io.mmio
       cache.io.out
@@ -461,7 +461,7 @@ object Cache {
       val addrspace = List(AddressSpace.dram) ++ AddressSpace.mmio
       val xbar = Module(new SimpleBusCrossbar1toN(addrspace))
       val busC = WireInit(0.U.asTypeOf(new SimpleBusC))
-      busC.mem <>xbar.io.out(0)
+      busC.mem <> xbar.io.out(0)
       xbar.io.in <> in
       mmio <> xbar.io.out(1)
       busC

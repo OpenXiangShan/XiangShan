@@ -72,6 +72,9 @@ endif
 emu: $(EMU)
 	@$(EMU) -i $(IMAGE) $(MAINARGS)
 
+cache:
+	$(MAKE) emu IMAGE=Makefile #SIMTOP=top.CacheTestMain SIM_TOP=CacheTestTop IMAGE=Makefile
+
 clean:
 	rm -rf $(BUILD_DIR)
 
