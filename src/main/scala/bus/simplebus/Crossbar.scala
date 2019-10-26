@@ -102,7 +102,7 @@ class SimpleBusCrossbarNto1Special(n: Int, userBits:Int = 0, name: String = "def
     is (s_writeResp) { when ((io.out.resp.fire()) || io.flush) { state := s_idle } }
   }
 
-  Debug(true && name=="dtlbXbar") {
+  Debug(false /*&& name=="dtlbXbar"*/) {
     when(true.B && GTimer()<=500.U) {
       printf("%d:" + name + " state:%d inflightSrc:%d ThisReqReady:%d ThisReqValid:%d flush:%d ", GTimer(), state, inflightSrc, thisReq.ready, thisReq.valid, io.flush)
       printf(p"ThisReqBits:${thisReq.bits}\n")

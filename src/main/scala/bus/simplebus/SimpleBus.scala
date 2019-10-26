@@ -21,6 +21,7 @@ object SimpleBusCmd {
 
   // resp
   def readLast       = "b0110".U
+  def writeResp      = "b0101".U
   def probeHit       = "b1100".U
   def probeMiss      = "b1000".U
 
@@ -67,6 +68,7 @@ class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isReadLast() = cmd === SimpleBusCmd.readLast
   def isProbeHit() = cmd === SimpleBusCmd.probeHit
   def isProbeMiss() = cmd === SimpleBusCmd.probeMiss
+  def isWriteResp() = cmd === SimpleBusCmd.writeResp
 }
 
 // Uncache

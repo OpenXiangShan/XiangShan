@@ -37,7 +37,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = true
+  val debug = false
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -297,7 +297,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.metaWriteBus.req <> metaWriteArb.io.out
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-  io.out.bits.cmd := Mux(io.in.bits.req.cmd===SimpleBusCmd.read, SimpleBusCmd.readLast, DontCare)//DontCare, added by lemover
+  io.out.bits.cmd := Mux(io.in.bits.req.isRead(), SimpleBusCmd.readLast, Mux(io.in.bits.req.isWrite(), SimpleBusCmd.writeResp, DontCare))//DontCare, added by lemover
   io.out.bits.user.zip(io.in.bits.req.user).map { case (o,i) => o := i }
   io.out.valid := io.in.valid && Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
   // With critical-word first, the pipeline registers between
@@ -310,7 +310,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-  Debug(debug  && cacheName=="dcache") {
+  Debug(debug /* && cacheName=="dcache"*/) {
     when(GTimer() <= 500.U) {
       printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
@@ -442,7 +442,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
 
-  Debug(debug && cacheName=="dcache") {
+  Debug(debug /*&& cacheName=="dcache"*/) {
     when(GTimer() <= 500.U) {
       io.in.dump(cacheName + ".in")
       printf("%d:" + cacheName + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d\n", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)

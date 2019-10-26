@@ -114,7 +114,7 @@ sealed trait HasTlbConst {
   val Ways = tlbConfig.ways
   val Sets = 1
 
-  val debug = true
+  val debug = false
 
   def TlbMetaArrayReadBus() = new SRAMReadBus(new TLBMetaBundle, set = Sets, way = Ways)
   def TlbDataArrayReadBus() = new SRAMReadBus(new TLBDataBundle, set = Sets, way = Ways)
@@ -370,7 +370,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   s2.io.metaReadResp := metaArray.io.r.resp.data
   s2.io.dataReadResp := dataArray.io.r.resp.data
 
-  Debug(debug && tlbname=="dtlb") {
+  Debug(debug /*&& tlbname=="dtlb"*/) {
     when(true.B && GTimer()<=500.U ) {
       //printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d "+ tlbname + " ",GTimer())
@@ -411,9 +411,13 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   })
 
   io.out.req <> io.in.req
-  io.in.resp <> io.out.resp
+  //io.in.resp <> io.out.resp
 
-  Debug(true && name=="dtran") {
+  io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp()
+  io.in.resp.bits := io.out.resp.bits
+  io.out.resp.ready := io.in.resp.ready
+
+  Debug(false /*&& name=="dtran"*/) {
     when(GTimer() <= 500.U) {
       printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d:" + name + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
