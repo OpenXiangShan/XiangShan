@@ -37,7 +37,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = false
+  val debug = true
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -310,7 +310,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-  Debug(debug  && cacheName=="icache") {
+  Debug(debug  && cacheName=="dcache") {
     when(GTimer() <= 500.U) {
       printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
@@ -442,16 +442,16 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
 
-  Debug(debug && cacheName=="icache") {
+  Debug(debug && cacheName=="dcache") {
     when(GTimer() <= 500.U) {
       io.in.dump(cacheName + ".in")
       printf("%d:" + cacheName + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d\n", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
-      printf("%d:" + cacheName + " s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
-        GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
+      printf("%d:" + cacheName + " {IN s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)} {OUT s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)}\n",
+        GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready, s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
       when (s1.io.in.valid) { printf(p"[${cacheName}.S1]: ${s1.io.in.bits}\n") }
       when (s2.io.in.valid) { printf(p"[${cacheName}.S2]: ${s2.io.in.bits.req}\n") }
       when (s3.io.in.valid) { printf(p"[${cacheName}.S3]: ${s3.io.in.bits.req}\n") }
-      s3.io.mem.dump(cacheName + ".mem")
+      //s3.io.mem.dump(cacheName + ".mem")
     }
   }
 }

@@ -117,7 +117,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
 
   val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
-  val dtran = Module(new TLBIOTran())
+  val dtran = Module(new TLBIOTran(name = "dtran"))
   dtlb.io.exu <> exu.io.tlb
   dtlb.io.flush := "b00".U //flush must be wrong
   dtlb.io.in.req <> exu.io.dmem.req
