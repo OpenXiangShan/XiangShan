@@ -379,17 +379,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   // Exception and Intr
 
   // interrupts
+  
+  val ideleg =  (mideleg & mip.asUInt)
+  def priorityEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
+                                   ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
-  val intrVecMEnable = Mux(priviledgeMode < ModeM, true.B, mstatusStruct.ie.m)
-  // val intrVecSEnable = Mux(priviledgeMode > ModeS, false.B, Mux(priviledgeMode < ModeS, true.B, sstatusStruct.ie.s))
-  // val intrVecUEnable = Mux(priviledgeMode > ModeU, false.B, ustatusStruct.ie.u)
-  val intrVecM = mie(11,0) & mip.asUInt & (Fill(12, intrVecMEnable))
-  // val intrVecS = sie(11,0) & sip.asUInt
-  // val intrVecU = uie(11,0) & uip.asUInt
-  // val raiseIntrM = intrVecM.asUint.orR & intrVecMEnable
-  // val raiseIntrS = intrVecS.asUint.orR & intrVecSEnable
-  // val raiseIntrU = intrVecU.asUint.orR & intrVecUEnable
-  val intrVec = intrVecM
+  val intrVecEnable = Wire(Vec(12, Bool()))
+  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priorityEnableDetect(y)}
+  val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
   BoringUtils.addSource(intrVec, "intrVecIDU")
   // val intrNO = PriorityEncoder(intrVec)
   val intrNO = PriorityEncoder(io.cfIn.intrVec)
