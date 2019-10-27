@@ -49,6 +49,13 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
 
+  csr.io.dmemMMU.loadPF := false.B
+  csr.io.dmemMMU.storePF := false.B
+  csr.io.dmemMMU.addr := 0.U
+  csr.io.imemMMU.loadPF := false.B
+  csr.io.imemMMU.storePF := false.B
+  csr.io.imemMMU.addr := 0.U
+
   val mou = Module(new MOU)
   // mou does not write register
   mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)

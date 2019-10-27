@@ -130,6 +130,8 @@ class CSRIO extends FunctionUnitIO {
   val instrValid = Input(Bool())
   // for differential testing
   val intrNO = Output(UInt(XLEN.W))
+  val imemMMU = Flipped(new MMUIO)
+  val dmemMMU = Flipped(new MMUIO)
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
@@ -376,16 +378,58 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     }
   }
 
+  // MMU Permission Check
+
+  // def MMUPermissionCheck(ptev: Bool, pteu: Bool): Bool = ptev && !(priviledgeMode === ModeU && !pteu) && !(priviledgeMode === ModeS && pteu && mstatusStruct.sum.asBool)
+  // def MMUPermissionCheckLoad(ptev: Bool, pteu: Bool): Bool = ptev && !(priviledgeMode === ModeU && !pteu) && !(priviledgeMode === ModeS && pteu && mstatusStruct.sum.asBool) && (pter || (mstatusStruct.mxr && ptex))
+  // imem
+  // val imemPtev = true.B
+  // val imemPteu = true.B
+  // val imemPtex = true.B
+  // val imemReq = true.B
+  // val imemPermissionCheckPassed = MMUPermissionCheck(imemPtev, imemPteu)
+  // val hasInstrPageFault = imemReq && !(imemPermissionCheckPassed && imemPtex) 
+  // assert(!hasInstrPageFault)
+
+  // dmem
+  // val dmemPtev = true.B
+  // val dmemPteu = true.B
+  // val dmemReq = true.B
+  // val dmemPermissionCheckPassed = MMUPermissionCheck(dmemPtev, dmemPteu)
+  // val dmemIsStore = true.B
+
+  // val hasLoadPageFault  = dmemReq && !dmemIsStore && !(dmemPermissionCheckPassed) 
+  // val hasStorePageFault = dmemReq &&  dmemIsStore && !(dmemPermissionCheckPassed) 
+  // assert(!hasLoadPageFault)
+  // assert(!hasStorePageFault)
+
+  io.imemMMU.priviledgeMode := priviledgeMode
+  io.dmemMMU.priviledgeMode := priviledgeMode
+  io.imemMMU.status_sum := mstatusStruct.sum.asBool
+  io.dmemMMU.status_sum := mstatusStruct.sum.asBool
+  io.imemMMU.status_mxr := DontCare
+  io.dmemMMU.status_mxr := mstatusStruct.mxr.asBool
+
+  val hasInstrPageFault = io.imemMMU.loadPF   
+  val hasLoadPageFault = io.dmemMMU.loadPF   
+  val hasStorePageFault = io.dmemMMU.storePF 
+
+  val imemPFvaddr = io.imemMMU.addr
+  val dmemPFvaddr = io.dmemMMU.addr
+  when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
+    stval := Mux(hasInstrPageFault, imemPFvaddr, dmemPFvaddr)
+  }
+
   // Exception and Intr
 
   // interrupts
   
   val ideleg =  (mideleg & mip.asUInt)
-  def priorityEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
+  def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
                                    ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
 
   val intrVecEnable = Wire(Vec(12, Bool()))
-  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priorityEnableDetect(y)}
+  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
   BoringUtils.addSource(intrVec, "intrVecIDU")
   // val intrNO = PriorityEncoder(intrVec)
@@ -407,6 +451,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
+  csrExceptionVec(instrPageFault) := hasInstrPageFault
+  csrExceptionVec(loadPageFault) := hasLoadPageFault
+  csrExceptionVec(storePageFault) := hasStorePageFault
   val iduExceptionVec = io.cfIn.exceptionVec
   val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   val raiseException = raiseExceptionVec.orR

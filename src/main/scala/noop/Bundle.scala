@@ -80,3 +80,19 @@ class ForwardIO extends NOOPBundle {
   val wb = new WriteBackIO
   val fuType = Output(FuType())
 }
+
+class MMUIO extends NOOPBundle {
+  // val ptev = Output(Bool())
+  // val pteu = Output(Bool())
+  // val ptex = Output(Bool())
+  // val valid = Output(Bool())
+  // val isStore = Output(Bool())
+
+  val priviledgeMode = Input(UInt(2.W))
+  val status_sum = Input(Bool())
+  val status_mxr = Input(Bool())
+
+  val loadPF = Output(Bool())
+  val storePF = Output(Bool())
+  val addr = Output(UInt(AddrBits.W)) // reserved for further use
+}
