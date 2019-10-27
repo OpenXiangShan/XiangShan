@@ -60,6 +60,9 @@ rttos-debug:
 freertos:
 	$(MAKE) -C $(FREERTOS_HOME)/Demo/riscv64-noop noop_run
 
+xv6:
+	$(MAKE) -C $(XV6_HOME) noop
+
 # ------------------------------------------------------------------
 # get disassembled test src
 # ------------------------------------------------------------------
@@ -69,4 +72,7 @@ disassemble-rttos:
 
 disassemble-freertos:
 	cp $(FREERTOS_HOME)/Demo/riscv64-noop/build/FreeRTOS-simple.elf.txt ./d-freertos.log
+
+disassemble-xv6:
+	cp $(XV6_HOME)/build/code.txt ./d-xv6.log
 
