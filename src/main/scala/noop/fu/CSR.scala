@@ -132,9 +132,10 @@ class CSRIO extends FunctionUnitIO {
   val intrNO = Output(UInt(XLEN.W))
   val imemMMU = Flipped(new MMUIO)
   val dmemMMU = Flipped(new MMUIO)
+  val satp = Output(UInt(XLEN.W))
 }
 
-class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
+class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val io = IO(new CSRIO)
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
@@ -250,6 +251,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val sieWmask = "h333".U
   val sieRmask = "h333".U
   val satp = RegInit(UInt(XLEN.W), 0.U)
+  io.satp := satp
   val sepc = Reg(UInt(XLEN.W))
   val scause = Reg(UInt(XLEN.W))
   val stval = Reg(UInt(XLEN.W))

@@ -321,6 +321,7 @@ class LSExecUnit extends NOOPModule {
   ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
+
   io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
 
   BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")

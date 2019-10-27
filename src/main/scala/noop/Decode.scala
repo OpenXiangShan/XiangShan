@@ -37,12 +37,13 @@ object SrcType {
 }
 
 object FuType {
-  def num = 5
+  def num = 6
   def alu = "b000".U
   def lsu = "b001".U
   def mdu = "b010".U
   def csr = "b011".U
   def mou = "b100".U
+  def tlb = "b101".U
   def apply() = UInt(log2Up(num).W)
 }
 

@@ -85,8 +85,29 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.forward <> exu.io.forward
 
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
+  
+  val iptw = Module(new Ptw(name = "iptw", userBits = AddrBits*2))
+  //iptw.io.satp := exu.io.satp//"h8000000000087fbe".U//"h80087fbe".U
+  iptw.io.exu <> exu.io.tlb
+  iptw.io.flush := ifu.io.flushVec(0) | ifu.io.bpFlush
+  iptw.io.in <> ifu.io.imem
+  val ptwWork = exu.io.tlb.satp(63,60) =/= 0.U || true.B
+  val inCacheFlush = Mux(ptwWork, Fill(2,false.B), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))
+  io.imem <> Cache(iptw.io.out, mmioXbar.io.in(0), inCacheFlush)(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+
+  val dptw = Module(new Ptw(name = "dptw"))
+  //dptw.io.satp := exu.io.satp//"h8000000000087fbe".U//"h80087fbe".U
+  dptw.io.exu   <> exu.io.tlb
+  dptw.io.flush := false.B
+  dptw.io.in <> exu.io.dmem
+  io.dmem <> Cache(dptw.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+
+  io.mmio <> mmioXbar.io.out
+/*
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4)) // userBits = AddrBits + BrIdxBits
   io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
   io.mmio <> mmioXbar.io.out
+*/
 }

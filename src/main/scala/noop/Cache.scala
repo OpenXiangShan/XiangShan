@@ -197,6 +197,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_mmioReq :: s_mmioResp :: s_wait_resp :: Nil = Enum(8)
   val state = RegInit(s_idle)
   val needFlush = RegInit(false.B)
+
   when (io.flush && (state =/= s_idle)) { needFlush := true.B }
   when (io.out.fire() && needFlush) { needFlush := false.B }
 
@@ -442,6 +443,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s2.io.dataReadResp := dataArray.io.r.resp.data
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
+
 
   Debug(debug) {
     io.in.dump(cacheName + ".in")
