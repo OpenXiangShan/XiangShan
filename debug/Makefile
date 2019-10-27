@@ -48,8 +48,8 @@ dhrystone:
 xj:
 	$(MAKE) -C $(NANOS_HOME) $(ARCH) run
 
-# xjnemu:
-# 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
+xjnemu:
+	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
 
 rttos:
 	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run
