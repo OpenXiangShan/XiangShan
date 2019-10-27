@@ -126,6 +126,7 @@ class LSU extends NOOPModule {
     
     // StoreQueue
     // TODO: inst fence needs storeQueue to be finished
+    val enableStoreQueue = EnableStoreQueue // StoreQueue is disabled for page fault detection
     val storeQueue = Module(new Queue(new StoreQueueEntry, 4))
     storeQueue.io.enq.valid := state === s_idle && storeReq
     storeQueue.io.enq.bits.src1 := src1
@@ -145,20 +146,33 @@ class LSU extends NOOPModule {
 
     switch (state) {
       is(s_idle){
-        lsExecUnit.io.in.valid     := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.valid, io.in.valid)
-        lsExecUnit.io.out.ready    := io.out.ready 
-        lsExecUnit.io.in.bits.src1 := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.src1, src1)
-        lsExecUnit.io.in.bits.src2 := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.src2, src2)
-        lsExecUnit.io.in.bits.func := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.func, func)
-        lsExecUnit.io.wdata        := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.wdata, io.wdata)
-        io.in.ready                := Mux(storeReq, storeQueue.io.enq.ready, false.B)
-        io.out.valid               := Mux(storeReq, storeQueue.io.enq.ready, false.B)
+        if(enableStoreQueue){
+          lsExecUnit.io.in.valid     := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.valid, io.in.valid)
+          lsExecUnit.io.out.ready    := io.out.ready 
+          lsExecUnit.io.in.bits.src1 := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.src1, src1)
+          lsExecUnit.io.in.bits.src2 := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.src2, src2)
+          lsExecUnit.io.in.bits.func := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.func, func)
+          lsExecUnit.io.wdata        := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.wdata, io.wdata)
+          io.in.ready                := Mux(storeReq, storeQueue.io.enq.ready, false.B)
+          io.out.valid               := Mux(storeReq, storeQueue.io.enq.ready, false.B)
+        }else{
+          lsExecUnit.io.in.valid     := io.in.valid
+          lsExecUnit.io.out.ready    := io.out.ready 
+          lsExecUnit.io.in.bits.src1 := src1
+          lsExecUnit.io.in.bits.src2 := src2
+          lsExecUnit.io.in.bits.func := func
+          lsExecUnit.io.wdata        := io.wdata
+          io.in.ready                := lsExecUnit.io.out.fire()
+          io.out.valid               := lsExecUnit.io.out.valid
+        }
 
         when(storeReq){
           state := s_idle
         }
-        when(loadReq){
-          state := Mux(storeQueue.io.deq.valid, s_idle, s_load)
+        if(enableStoreQueue){
+          when(loadReq){
+            state := Mux(storeQueue.io.deq.valid, s_idle, s_load)
+          }
         }
         when(atomReq){
           state := Mux(storeQueue.io.deq.valid, s_idle, s_amo_l)
