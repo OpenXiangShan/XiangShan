@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.util._
 
 trait HasInstrType {
-  def InstrN  = "b000".U
-  def InstrI  = "b100".U
-  def InstrR  = "b101".U
-  def InstrS  = "b010".U
-  def InstrB  = "b001".U
-  def InstrU  = "b110".U
-  def InstrJ  = "b111".U
-  def InstrA  = "b010".U
+  def InstrN  = "b0000".U
+  def InstrI  = "b0100".U
+  def InstrR  = "b0101".U
+  def InstrS  = "b0010".U
+  def InstrB  = "b0001".U
+  def InstrU  = "b0110".U
+  def InstrJ  = "b0111".U
+  def InstrA  = "b1110".U
 
   def isrfWen(instrType : UInt): Bool = instrType(2)
 }
@@ -57,6 +57,7 @@ object Instructions extends HasInstrType with HasNOOPParameter {
     (if (HasMExtension) RVMInstr.table else Nil) ++
     (if (HasCExtension) RVCInstr.table else Nil) ++
     Priviledged.table ++
+    RVAInstr.table ++
     RVZicsrInstr.table ++ RVZifenceiInstr.table
 }
 

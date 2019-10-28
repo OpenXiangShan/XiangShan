@@ -202,7 +202,7 @@ class LSU extends NOOPModule {
         io.out.valid               := lsExecUnit.io.out.valid //write result to rd after amo_l state
         // Note: atom inst is commited here, but atom op has not finished yet
         // As we only have 1 hart now, atom inst early commit will not cause trouble 
-        when(lsExecUnit.io.out.fire()){state := s_amo_a}
+        when(lsExecUnit.io.out.fire()){state := s_amo_a; printf("[AMO-L] lsExecUnit.io.out.bits %x\n", lsExecUnit.io.out.bits)}
         atomReg := lsExecUnit.io.out.bits
       }
 
