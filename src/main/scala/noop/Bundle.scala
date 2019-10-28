@@ -97,6 +97,11 @@ class MMUIO extends NOOPBundle {
   val addr = Output(UInt(AddrBits.W)) // reserved for further use
 }
 
+class MemMMUIO extends NOOPBundle {
+  val imem = new MMUIO
+  val dmem = new MMUIO
+}
+
 class TLBExuIO extends NOOPBundle {
   val satp = Output(UInt(XLEN.W))
   val sfence = new Bundle {

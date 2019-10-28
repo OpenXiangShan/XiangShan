@@ -109,6 +109,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2)))
   val itran = Module(new TLBIOTran(userBits = AddrBits*2, name = "itran"))
   itlb.io.exu <> exu.io.tlb
+  itlb.io.csrMMU <> exu.io.memMMU.imem
   itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
   itlb.io.in.req <> ifu.io.imem.req
   itran.io.in.req <> itlb.io.in.resp
@@ -123,6 +124,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
   val dtran = Module(new TLBIOTran(name = "dtran"))
   dtlb.io.exu <> exu.io.tlb
+  dtlb.io.csrMMU <> exu.io.memMMU.dmem
   dtlb.io.flush := "b00".U //flush must be wrong
   dtlb.io.in.req <> exu.io.dmem.req
   dtran.io.in.req <> dtlb.io.in.resp
