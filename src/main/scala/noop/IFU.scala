@@ -19,7 +19,6 @@ class IFU extends NOOPModule with HasResetVector {
     val out = Decoupled(new CtrlFlowIO)
 
     val redirect = Flipped(new RedirectIO)
-    val redirectRVC = Flipped(new RedirectIO)//priority: redirect > redirectRVC
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
   })
