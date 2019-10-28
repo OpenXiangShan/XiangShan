@@ -104,27 +104,17 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 */
   val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2)))
   val itran = Module(new TLBIOTran(userBits = AddrBits*2, name = "itran"))
-  val icache = Module(new Cache()(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2)))
-  val itlbXbar = Module(new SimpleBusCrossbarNto1Special(2, userBits = AddrBits*2, name = "itlbXbar"))
   itlb.io.exu <> exu.io.tlb
   itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
   itlb.io.in.req <> ifu.io.imem.req
   itran.io.in.req <> itlb.io.in.resp
   ifu.io.imem.resp <> itran.io.in.resp
-  
-  icache.io.in <> itran.io.out
-  icache.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
-  mmioXbar.io.in(0) <> icache.io.mmio
-
-  itlbXbar.io.flush := false.B//ifu.io.flushVec(0) | ifu.io.bpFlush
-  itlbXbar.io.in(0) <> itlb.io.mem
-  itlbXbar.io.in(1) <> icache.io.out.mem
-  io.imem.mem <> itlbXbar.io.out
-  io.imem.coh <> icache.io.out.coh
-  //itlbXbar.io.in(1) <> itlb.io.mem
-  //io.imem <> Cache(/*itlbXbar.io.out*/itran.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
-  //  CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+  val itlbXbar = Module(new SimpleBusCrossbarNto1Special(2, userBits = AddrBits*2, name = "itlbXbar"))
+  itlbXbar.io.flush := ifu.io.flushVec(0) | ifu.io.bpFlush
+  itlbXbar.io.in(0) <> itran.io.out
+  itlbXbar.io.in(1) <> itlb.io.mem
+  io.imem <> Cache(itlbXbar.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
 
   val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
   val dtran = Module(new TLBIOTran(name = "dtran"))
