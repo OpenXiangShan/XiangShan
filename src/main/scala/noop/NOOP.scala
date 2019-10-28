@@ -86,6 +86,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
   
+/*
   val iptw = Module(new Ptw(name = "iptw", userBits = AddrBits*2))
   //iptw.io.satp := exu.io.satp//"h8000000000087fbe".U//"h80087fbe".U
   iptw.io.exu <> exu.io.tlb
@@ -104,6 +105,35 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   io.dmem <> Cache(dptw.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
 
   io.mmio <> mmioXbar.io.out
+*/
+  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2)))
+  val itran = Module(new TLBIOTran(userBits = AddrBits*2, name = "itran"))
+  itlb.io.exu <> exu.io.tlb
+  itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
+  itlb.io.in.req <> ifu.io.imem.req
+  itran.io.in.req <> itlb.io.in.resp
+  ifu.io.imem.resp <> itran.io.in.resp
+  val itlbXbar = Module(new SimpleBusCrossbarNto1Special(2, userBits = AddrBits*2, name = "itlbXbar"))
+  itlbXbar.io.flush := ifu.io.flushVec(0) | ifu.io.bpFlush
+  itlbXbar.io.in(0) <> itran.io.out
+  itlbXbar.io.in(1) <> itlb.io.mem
+  io.imem <> Cache(itlbXbar.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+
+  val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
+  val dtran = Module(new TLBIOTran(name = "dtran"))
+  dtlb.io.exu <> exu.io.tlb
+  dtlb.io.flush := "b00".U //flush must be wrong
+  dtlb.io.in.req <> exu.io.dmem.req
+  dtran.io.in.req <> dtlb.io.in.resp
+  exu.io.dmem.resp <> dtran.io.in.resp
+  val dtlbXbar = Module(new SimpleBusCrossbarNto1(2))
+  dtlbXbar.io.in(0) <> dtran.io.out
+  dtlbXbar.io.in(1) <> dtlb.io.mem
+  io.dmem <> Cache(dtlbXbar.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+
+  io.mmio <> mmioXbar.io.out
+
 /*
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4)) // userBits = AddrBits + BrIdxBits

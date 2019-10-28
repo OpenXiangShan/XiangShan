@@ -1,4 +1,4 @@
-package noop
+/*package noop
 
 import chisel3._
 import chisel3.util._
@@ -365,22 +365,5 @@ class Ptw(name : String = "default", userBits:Int = 0) extends Module with pteCo
   //assert((state===s_mem && io.out.req.fire().asBool && vaddr===phyNum) || state=/=s_mem || !io.out.req.fire().asBool)
 }
 
-class fuTlb extends NOOPModule {
-  val io = IO(new Bundle{
-    val cfIn = Flipped(new CtrlFlowIO)
-    val redirect = new RedirectIO
-    val valid = Input(Bool())
-  }) // MOUIO is the same as what we need cf and redirect 
-
-  io.redirect.valid := io.valid
-  io.redirect.target := io.cfIn.pc + 4.U
-}
-object fuTlb {
-  def apply(cf : CtrlFlowIO, valid : Bool) = {
-    val futlb = Module(new fuTlb)
-    futlb.io.cfIn <> cf
-    futlb.io.valid := valid
-    futlb.io.redirect
-  }
-}
+*/
 
