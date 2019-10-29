@@ -73,7 +73,7 @@ class AtomALU extends NOOPModule {
   val sltu = !adderRes(XLEN)
   val slt = xorRes(XLEN-1) ^ sltu
 
-  val res = LookupTreeDefault(func(3, 0), adderRes, List(
+  val res = LookupTreeDefault(func(5, 0), adderRes, List(
     LSUOpType.amoswap -> src2,
     LSUOpType.amoadd  -> adderRes,
     LSUOpType.amoxor  -> xorRes,
@@ -117,10 +117,11 @@ class LSU extends NOOPModule {
 
     // LSU control FSM
     val state = RegInit(s_idle)
-    val atomReg = Reg(UInt(XLEN.W))
+    val atomMemReg = Reg(UInt(XLEN.W))
+    val atomRegReg = Reg(UInt(XLEN.W))
     val atomALU = Module(new AtomALU)
-    atomALU.io.src1 := atomReg
-    atomALU.io.src2 := src2
+    atomALU.io.src1 := atomMemReg
+    atomALU.io.src2 := io.wdata
     atomALU.io.func := func
     atomALU.io.isWordOp := atomWidthW
     
@@ -156,7 +157,7 @@ class LSU extends NOOPModule {
           io.in.ready                := Mux(storeReq, storeQueue.io.enq.ready, false.B)
           io.out.valid               := Mux(storeReq, storeQueue.io.enq.ready, false.B)
         }else{
-          lsExecUnit.io.in.valid     := io.in.valid
+          lsExecUnit.io.in.valid     := io.in.valid && !atomReq
           lsExecUnit.io.out.ready    := io.out.ready 
           lsExecUnit.io.in.bits.src1 := src1
           lsExecUnit.io.in.bits.src2 := src2
@@ -166,16 +167,20 @@ class LSU extends NOOPModule {
           io.out.valid               := lsExecUnit.io.out.valid
         }
 
-        when(storeReq){
-          state := s_idle
-        }
+        // when(storeReq){
+        //   state := s_idle
+        // }
         if(enableStoreQueue){
           when(loadReq){
             state := Mux(storeQueue.io.deq.valid, s_idle, s_load)
           }
-        }
-        when(atomReq){
-          state := Mux(storeQueue.io.deq.valid, s_idle, s_amo_l)
+          when(atomReq){
+            state := Mux(storeQueue.io.deq.valid, s_idle, s_amo_l)
+          }
+        }else{
+          when(atomReq){
+            state := s_amo_l
+          }
         }
       }
 
@@ -199,11 +204,13 @@ class LSU extends NOOPModule {
         lsExecUnit.io.in.bits.func := Mux(atomWidthD, LSUOpType.ld, LSUOpType.lw)
         lsExecUnit.io.wdata        := DontCare
         io.in.ready                := false.B
-        io.out.valid               := lsExecUnit.io.out.valid //write result to rd after amo_l state
-        // Note: atom inst is commited here, but atom op has not finished yet
-        // As we only have 1 hart now, atom inst early commit will not cause trouble 
-        when(lsExecUnit.io.out.fire()){state := s_amo_a; printf("[AMO-L] lsExecUnit.io.out.bits %x\n", lsExecUnit.io.out.bits)}
-        atomReg := lsExecUnit.io.out.bits
+        io.out.valid               := false.B
+        when(lsExecUnit.io.out.fire()){
+          state := s_amo_a; 
+          Debug(){printf("[AMO-L] lsExecUnit.io.out.bits %x addr %x src2 %x\n", lsExecUnit.io.out.bits, lsExecUnit.io.in.bits.src1, io.wdata)}
+        }
+        atomMemReg := lsExecUnit.io.out.bits
+        atomRegReg := lsExecUnit.io.out.bits
       }
 
       is(s_amo_a){
@@ -216,7 +223,8 @@ class LSU extends NOOPModule {
         io.in.ready                := false.B
         io.out.valid               := false.B
         state := s_amo_s
-        atomReg := atomALU.io.result
+        atomMemReg := atomALU.io.result
+        Debug(){printf("[AMO-A] src1 %x src2 %x res %x\n", atomMemReg, io.wdata, atomALU.io.result)}
       }
 
       is(s_amo_s){
@@ -225,13 +233,15 @@ class LSU extends NOOPModule {
         lsExecUnit.io.in.bits.src1 := src1
         lsExecUnit.io.in.bits.src2 := 0.U
         lsExecUnit.io.in.bits.func := Mux(atomWidthD, LSUOpType.sd, LSUOpType.sw)
-        lsExecUnit.io.wdata        := atomReg
+        lsExecUnit.io.wdata        := atomMemReg
         io.in.ready                := lsExecUnit.io.out.fire()
-        io.out.valid               := false.B
-        when(lsExecUnit.io.out.fire()){state := s_idle}
+        io.out.valid               := lsExecUnit.io.out.fire()
+        when(lsExecUnit.io.out.fire()){
+          state := s_idle; 
+          Debug(){printf("[AMO-S] atomRegReg %x addr %x\n", atomRegReg, lsExecUnit.io.in.bits.src1)}
+        }
       }
     }
-
 
     // controled by FSM 
     // io.in.ready := lsExecUnit.io.in.ready
@@ -239,7 +249,7 @@ class LSU extends NOOPModule {
     // io.out.valid := lsExecUnit.io.out.valid 
 
     io.dmem <> lsExecUnit.io.dmem
-    io.out.bits <> lsExecUnit.io.out.bits
+    io.out.bits := Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits)
 
     val addr = Mux(atomReq, src1, src1 + src2)
     io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
@@ -288,6 +298,12 @@ class LSExecUnit extends NOOPModule {
     is (s_idle) { when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) } }
     is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
+  }
+
+  Debug(){
+    when (dmem.req.fire()){
+      printf("[LSU] addr %x, size %x, wdata_raw %x, isStore %x\n",  addr, func(1,0), io.wdata, isStore)
+    }
   }
 
   val size = func(1,0)
