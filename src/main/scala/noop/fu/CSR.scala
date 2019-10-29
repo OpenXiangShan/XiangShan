@@ -328,6 +328,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Mhartid, mhartid, 0.U, MaskedRegMap.Unwritable), 
 
     // Machine Trap Setup
+    // MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U, (x=>{printf("mstatus write: %x time: %d\n", x, GTimer()); x})),
     MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U),
     MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg),
@@ -364,20 +365,22 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   ))
 
   val wen = (valid && func =/= CSROpType.jmp)
+  // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   io.out.bits := rdata
 
   // CSR inst decode
   val ret = Wire(Bool())
-  val isEcall = addr === privEcall
-  val isMret = addr === privMret
-  val isSret = addr === privSret
-  val isUret = addr === privUret
+  val isEcall = addr === privEcall && func === CSROpType.jmp
+  val isMret = addr === privMret   && func === CSROpType.jmp
+  val isSret = addr === privSret   && func === CSROpType.jmp
+  val isUret = addr === privUret   && func === CSROpType.jmp
 
-  Debug(false){
+  Debug(){
     when(wen){
-      printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x\n", io.cfIn.pc, addr, rdata, wdata)
+      printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.cfIn.pc, addr, rdata, wdata, func)
     }
+    printf("[MST] pc %x mstatus %x\n", io.cfIn.pc, mstatus)
   }
 
   // MMU Permission Check
@@ -470,9 +473,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
 
-  Debug(false){
+  Debug(){
     when(raiseExceptionIntr){
-      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[CSR] raiseExceptionIntr! int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
     }
   }
 
