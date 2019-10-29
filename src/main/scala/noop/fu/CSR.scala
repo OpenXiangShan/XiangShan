@@ -250,6 +250,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // val sie = RegInit(0.U(XLEN.W))
   val sieWmask = "h333".U
   val sieRmask = "h333".U
+  val sipMask  = "h103".U
   val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp
   val sepc = Reg(UInt(XLEN.W))
@@ -316,7 +317,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Sepc, sepc),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    // MaskedRegMap(Sip, sip),
+    // MaskedRegMap(Sip, mip, sipMask),
 
     // Supervisor Protection and Translation
     MaskedRegMap(Satp, satp),
@@ -329,10 +330,10 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
     // Machine Trap Setup
     // MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U, (x=>{printf("mstatus write: %x time: %d\n", x, GTimer()); x})),
-    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U),
+    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffff".U),
     MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
-    MaskedRegMap(Medeleg, medeleg),
-    MaskedRegMap(Mideleg, mideleg),
+    MaskedRegMap(Medeleg, medeleg, "hbbff".U),
+    MaskedRegMap(Mideleg, mideleg, "h222".U),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
     // MaskedRegMap(Mcounteren, mcounteren), 
