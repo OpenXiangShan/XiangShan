@@ -18,6 +18,7 @@ object SimpleBusCmd {
   def writeBurst     = "b0011".U //  write   |   refill
   def writeLast      = "b0111".U //  write   |   refill
   def probe          = "b1000".U //  read    | do nothing
+	def prefetch			 = "b0100".U //  read    |   refill
 
   // resp
   def readLast       = "b0110".U
@@ -55,6 +56,7 @@ class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isWriteSingle() = cmd === SimpleBusCmd.write
   def isWriteLast() = cmd === SimpleBusCmd.writeLast
   def isProbe() = cmd === SimpleBusCmd.probe
+	def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
 class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
@@ -67,6 +69,7 @@ class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isReadLast() = cmd === SimpleBusCmd.readLast
   def isProbeHit() = cmd === SimpleBusCmd.probeHit
   def isProbeMiss() = cmd === SimpleBusCmd.probeMiss
+	def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
 // Uncache

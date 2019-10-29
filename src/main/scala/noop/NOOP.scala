@@ -42,6 +42,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
     val mmio = new SimpleBusUC
+		// val prefetchReq = Decoupled(new SimpleBusReqBundle)
   })
 
   val ifu = Module(new IFU)
@@ -84,5 +85,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
   io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+	// io.prefetchReq.bits := exu.io.dmem.req.bits
+	// io.prefetchReq.valid := exu.io.dmem.req.valid
   io.mmio <> mmioXbar.io.out
 }
