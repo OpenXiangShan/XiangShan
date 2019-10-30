@@ -37,7 +37,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = false
+  val debug = false && cacheName == "dcache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -315,8 +315,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
-  Debug(debug /* && cacheName=="dcache"*/) {
-    when(GTimer() <= 500.U) {
+  Debug(debug) {
+    when(true.B) {
       printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
     }
@@ -447,8 +447,8 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
 
-  Debug(debug /*&& cacheName=="dcache"*/) {
-    when(GTimer() <= 500.U) {
+  Debug(debug) {
+    when(true.B) {
       io.in.dump(cacheName + ".in")
       printf("%d:" + cacheName + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d\n", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("%d:" + cacheName + " {IN s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)} {OUT s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)}\n",

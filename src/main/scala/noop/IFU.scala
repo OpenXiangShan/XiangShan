@@ -80,6 +80,10 @@ class IFU extends NOOPModule with HasResetVector {
     when(io.imem.req.fire()){
       printf("[IFI] pc=%x user=%x %x %x %x %x\n", io.imem.req.bits.addr, io.imem.req.bits.user.getOrElse(0.U), io.redirect.valid, io.redirectRVC.valid, pbrIdx, brIdx)
     }
+    when(true.B) {
+      printf("[IFUPC] pc:%x pcUpdate:%d npc:%x RedValid:%d RedTarget:%x RedCValid:%d RedCTarget:%x LJL:%d LJTarget:%x LJ:%d snpc:%x bpValid:%d pnpn:%x \n",pc, pcUpdate, npc, io.redirect.valid,io.redirect.target,io.redirectRVC.valid,io.redirectRVC.target,lateJumpLatch,lateJumpTarget,lateJump,snpc,bp1.io.out.valid,pnpc)
+      printf(p"[IFUIN] redirect: ${io.redirect} \n")
+    }
   }
 
   io.out.bits := DontCare

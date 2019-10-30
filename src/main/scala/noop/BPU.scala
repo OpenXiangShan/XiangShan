@@ -62,8 +62,10 @@ class BPU1 extends NOOPModule {
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
   // flush BTB when executing fence.i
   val flushBTB = WireInit(false.B)
+  val changeProcess = WireInit(false.B)
   BoringUtils.addSink(flushBTB, "MOUFlushICache")
-  btb.reset := reset.asBool || flushBTB
+  BoringUtils.addSink(changeProcess, "TLBSFENCEVMA")
+  btb.reset := reset.asBool || (flushBTB || changeProcess)
 
   btb.io.r.req.valid := io.in.pc.valid
   btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
@@ -86,11 +88,25 @@ class BPU1 extends NOOPModule {
   // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
   Debug(){
   // printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
-  when(btbHit){
-      printf("[BTBHT] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush)
-      // printf("[BTBHT] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
+    when(btbHit || true.B){
+      printf("[BTBHT1] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
+      printf("[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
+      printf(p"[BTBHT3] rasTarget:${rasTarget} pht:${pht} phtTaken:${phtTaken}\n")
+      printf(p"[BTBHT4] io.out:${io.out} btbRead:${btbRead} btbWrite:${btbWrite}\n")
+      printf("[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setIdx)
     }
+
+    //when(true.B) {
+    //  when(req.btbType === 3.U) {
+    //    printf("[BTBHT5] btbWrite.type is BTBtype.R/RET!!!\n")
+    //  }
+    //  printf(p"[BTBHT5] req:${req} \n")
+      
+      //printf("[BTBHT5] tag: target:%x type:%d brIdx:%d\n", req.actualTarget, req.btbType, Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)))
+    //}
   }
+  
+  
 
   // PHT
   val pht = Mem(NRbtb, UInt(2.W))
@@ -115,6 +131,15 @@ class BPU1 extends NOOPModule {
       printf("[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
     }
   }
+
+    //val fflag = req.btbType===3.U && btb.io.w.req.valid && btb.io.w.req.bits.setIdx==="hc9".U
+    //when(fflag && GTimer()>2888000.U) {
+    //  printf("%d\n", GTimer())
+    //  printf("[BTBHT6] btbWrite.type is BTBtype.R/RET!!! Inpc:%x btbWrite.brIdx:%x setIdx:%x\n", io.in.pc.bits, btbWrite.brIdx, btb.io.w.req.bits.setIdx)
+    //  printf("[BTBHT6] tag:%x target:%x _type:%x bridx:%x\n", btbWrite.tag,btbWrite.target,btbWrite._type,btbWrite.brIdx)
+    //  printf(p"[BTBHT6] req:${req} \n")
+    //} 
+    //printf("[BTBHT5] tag: target:%x type:%d brIdx:%d\n", req.actualTarget, req.btbType, Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)))
 
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
@@ -150,7 +175,11 @@ class BPU1 extends NOOPModule {
       sp.value := sp.value + 1.U
     }
     .elsewhen (req.fuOpType === ALUOpType.ret) {
+      when(sp.value === 0.U) {
+        //printf("ATTTTT: sp.value is 0.U\n")
+      }
       sp.value := sp.value - 1.U
+      
     }
   }
 
@@ -158,7 +187,7 @@ class BPU1 extends NOOPModule {
   // io.out.target := Mux(lateJumpLatch && !flush, lateJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
   // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
   io.brIdx  := btbRead.brIdx & Cat(true.B, lateJump, Fill(2, io.out.valid))
-  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
+  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
   // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump || lateJumpLatch && !flush && !lateJump
   // Note: 
   // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump : normal branch predict
