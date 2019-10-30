@@ -141,7 +141,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   val hitVec = VecInit(io.metaReadResp.map(m => m.valid && (m.tag === addr.tag) && io.in.valid)).asUInt
   val victimWaymask = if (Ways > 1) (1.U << LFSR64()(log2Up(Ways)-1,0)) else "b1".U
   val waymask = Mux(io.out.bits.hit, hitVec, victimWaymask)
-  assert(PopCount(waymask) <= 1.U)
+  assert(!(io.in.valid && PopCount(waymask) > 1.U))
 
   io.out.bits.metas := io.metaReadResp
   io.out.bits.hit := io.in.valid && hitVec.orR
@@ -433,8 +433,20 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s3.io.dataReadBus.resp := dataArray.io.r.resp
   dataArray.io.w <> s3.io.dataWriteBus
 
-  s2.io.metaReadResp := metaArray.io.r.resp.data
-  s2.io.dataReadResp := dataArray.io.r.resp.data
+  // forward new meta and data from s3
+  val s2Addr = s2.io.in.bits.req.addr.asTypeOf(addrBundle)
+  val s2MetaSetIdx = s2Addr.index
+  val s2DataSetIdx = Cat(s2Addr.index, s2Addr.wordIndex)
+  val isForwardS3Meta = s3.io.metaWriteBus.req.valid && (s3.io.metaWriteBus.req.bits.setIdx === s2MetaSetIdx)
+  val isForwardS3Data = s3.io.dataWriteBus.req.valid && (s3.io.dataWriteBus.req.bits.setIdx === s2DataSetIdx)
+  // FIXME: should consider set-associate
+  val s3MetaWay = VecInit(List.fill(Ways)(s3.io.metaWriteBus.req.bits.data))
+  val s3DataWay = VecInit(List.fill(Ways)(s3.io.dataWriteBus.req.bits.data))
+  val forwardMeta = Mux(isForwardS3Meta, s3MetaWay, metaArray.io.r.resp.data)
+  val forwardData = Mux(isForwardS3Data, s3DataWay, dataArray.io.r.resp.data)
+  // latch meta and data for s2, since they may interfered by any reads
+  s2.io.metaReadResp := HoldUnless(forwardMeta, RegNext(s1.io.out.fire()) || isForwardS3Meta)
+  s2.io.dataReadResp := HoldUnless(forwardData, RegNext(s1.io.out.fire()) || isForwardS3Data)
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
