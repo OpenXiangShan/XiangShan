@@ -340,7 +340,7 @@ sealed class CacheProbeStage(implicit val cacheConfig: CacheConfig) extends Cach
   switch (state) {
     is (s_idle) { when (io.in.fire()) { state := s_metaRead } }
     is (s_metaRead) {
-      when (io.metaReadBus.req.ready) { state := s_metaReadWait }
+      when (io.metaReadBus.req.fire()) { state := s_metaReadWait }
       assert(req.isProbe())
     }
     is (s_metaReadWait) { state := s_check }
@@ -350,7 +350,7 @@ sealed class CacheProbeStage(implicit val cacheConfig: CacheConfig) extends Cach
         idxCnt.value := addr.wordIndex
       }
     }
-    is (s_dataRead) { when (io.dataReadBus.req.ready) { state := s_dataReadWait } }
+    is (s_dataRead) { when (io.dataReadBus.req.fire()) { state := s_dataReadWait } }
     is (s_dataReadWait) { state := s_release }
     is (s_release) {
       when (io.out.fire()) {

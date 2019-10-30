@@ -113,6 +113,17 @@ class NOOPSimTop extends Module {
       GTimer(), cacheOut.mem.req.bits.wdata, addr)
   }
 
+  // check rdata from cohIn
+  val cohAddr = RegEnable(cohIn.req.bits.addr(31,0), cohIn.req.fire())
+  when (cohIn.resp.valid) {
+    val resp = cohIn.resp.bits
+    val isRead = resp.cmd === SimpleBusCmd.readLast || resp.cmd === SimpleBusCmd.read
+    val isProbeResp = resp.isProbeHit() || resp.isProbeMiss()
+    assert(isRead || isProbeResp)
+    assert(!(isRead && !checkDataMask(cohAddr, cohIn.resp.bits.rdata)), "%d: bad rdata = %x at addr = %x",
+      GTimer(), cohIn.resp.bits.rdata, cohAddr)
+  }
+
   // only use to keep consistent with NOOPSimTop
   io.difftest := DontCare
   dontTouch(io.difftest)
