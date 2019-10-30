@@ -84,7 +84,7 @@ class NOOPSimTop extends Module {
   cohIn.resp.ready := true.B
 
   when (Counter((state === s_test) && in.resp.fire(), 100000)._2) { printf(".") }
-  when (cohIn.req.fire()) { printf("@") }
+  when (Counter((state === s_test) && cohIn.req.fire(), 100000)._2) { printf("@") }
 
   Debug(false) {
     when (in.req.fire()) { printf(p"${GTimer()},[in.req] ${in.req.bits}\n") }

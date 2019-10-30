@@ -208,7 +208,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val dataWay = RegEnable(dataWriteBackReadBus.resp.data, state2 === s2_dataReadWait)
 
   switch (state2) {
-    is (s2_idle) { when (state === s_memWriteReq) { state2 := s2_dataReadWait } }
+    is (s2_idle) { when (dataWriteBackReadBus.req.fire()) { state2 := s2_dataReadWait } }
     is (s2_dataReadWait) { state2 := s2_memWriteReq }
     is (s2_memWriteReq) { when (io.mem.req.fire()) { state2 := s2_idle } }
   }
