@@ -60,6 +60,8 @@ class NOOPSimTop extends Module {
     val isWrite = Bool()
     val wmask = UInt(8.W)
     val addr = UInt(log2Up(NRmemBlock).W)
+    val cohChoose = UInt(4.W)
+    val cohAddr = UInt(log2Up(NRmemBlock).W)
   }
   val rand = LFSR64(true.B).asTypeOf(randBundle)
   val randAddr = memBase.U + rand.addr * 8.U
@@ -73,13 +75,16 @@ class NOOPSimTop extends Module {
   val user = Cat(addr, Mux(state === s_test, rand.isWrite, true.B))
   in.req.bits.apply(addr = addr, size = "b11".U, user = user,
     wdata = wdata, wmask = wmask, cmd = cmd)
-
   in.req.valid := (state === s_init_req) || (state === s_test)
   in.resp.ready := true.B
 
-  when (Counter((state === s_test) && in.resp.fire(), 100000)._2) {
-    printf(".")
-  }
+  cohIn.req.bits.apply(addr = rand.cohAddr * 8.U + memBase.U, size = "b11".U,
+    wdata = 0.U, wmask = 0.U, cmd = SimpleBusCmd.probe)
+  cohIn.req.valid := (state === s_test) && rand.cohChoose === 0.U
+  cohIn.resp.ready := true.B
+
+  when (Counter((state === s_test) && in.resp.fire(), 100000)._2) { printf(".") }
+  when (cohIn.req.fire()) { printf("@") }
 
   Debug(false) {
     when (in.req.fire()) { printf(p"${GTimer()},[in.req] ${in.req.bits}\n") }
