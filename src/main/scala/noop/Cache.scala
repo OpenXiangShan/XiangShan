@@ -24,6 +24,8 @@ sealed trait HasCacheConst {
   val XLEN: Int
 
   val ro = cacheConfig.ro
+  val hasCoh = !ro
+  val hasCohInt = (if (hasCoh) 1 else 0)
   val cacheName = cacheConfig.name
   val userBits = cacheConfig.userBits
 
@@ -392,8 +394,10 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   val s1 = Module(new CacheStage1)
   val s2 = Module(new CacheStage2)
   val s3 = Module(new CacheStage3)
-  val metaArray = Module(new SRAMTemplateWithArbiter(nRead = 2, nWrite = 2, new MetaBundle, set = Sets, way = Ways, shouldReset = true))
-  val dataArray = Module(new SRAMTemplateWithArbiter(nRead = 3, nWrite = 2, new DataBundle, set = Sets * LineBeats, way = Ways))
+  val metaArray = Module(new SRAMTemplateWithArbiter(nRead = 1 + hasCohInt, nWrite = 2,
+    new MetaBundle, set = Sets, way = Ways, shouldReset = true))
+  val dataArray = Module(new SRAMTemplateWithArbiter(nRead = 2 + hasCohInt, nWrite = 2,
+    new DataBundle, set = Sets * LineBeats, way = Ways))
 
   if (cacheName == "icache") {
     // flush icache when executing fence.i
@@ -417,22 +421,30 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s1.io.s3Req.bits := s3.io.in.bits.req
   s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
 
-  // coherence state machine
-  val coh = Module(new CacheProbeStage)
-  coh.io.in <> io.out.coh.req
-  io.out.coh.resp <> coh.io.out
+  if (hasCoh) {
+    // coherence state machine
+    val coh = Module(new CacheProbeStage)
+    coh.io.in <> io.out.coh.req
+    io.out.coh.resp <> coh.io.out
 
-  val arrayLock = Module(new Lock(2))
-  arrayLock.io.bundle(0) <> coh.io.lock
-  arrayLock.io.bundle(1) <> s3.io.lock
+    val arrayLock = Module(new Lock(2))
+    arrayLock.io.bundle(0) <> coh.io.lock
+    arrayLock.io.bundle(1) <> s3.io.lock
 
-  metaArray.io.r(0) <> coh.io.metaReadBus
-  metaArray.io.r(1) <> s1.io.metaReadBus
+    metaArray.io.r(0) <> coh.io.metaReadBus
+    dataArray.io.r(0) <> coh.io.dataReadBus
+  } else {
+    s3.io.lock.holding := true.B
+    io.out.coh.req.ready := true.B
+    io.out.coh.resp := DontCare
+    io.out.coh.resp.valid := false.B
+  }
+
+  metaArray.io.r(hasCohInt + 0) <> s1.io.metaReadBus
+  dataArray.io.r(hasCohInt + 0) <> s1.io.dataReadBus
+  dataArray.io.r(hasCohInt + 1) <> s3.io.dataReadBus
+
   metaArray.io.w <> s3.io.metaWriteBus
-
-  dataArray.io.r(0) <> coh.io.dataReadBus
-  dataArray.io.r(1) <> s1.io.dataReadBus
-  dataArray.io.r(2) <> s3.io.dataReadBus
   dataArray.io.w <> s3.io.dataWriteBus
 
   s2.io.metaReadResp := s1.io.metaReadBus.resp.data
