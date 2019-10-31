@@ -101,7 +101,7 @@ class SimpleBusCrossbarNto1Special(n: Int, userBits:Int = 0, name: String = "def
     is (s_writeResp) { when ((io.out.resp.fire())) { state := s_idle } }
   }
 
-  Debug(/*&& name=="dtlbXbar"*/) {
+  Debug(false.B/*&& name=="dtlbXbar"*/) {
     when(true.B) {
       printf("%d:" + name + " state:%d inflightSrc:%d chosen:%d ThisReqReady:%d ThisReqValid:%d ", GTimer(), state, inflightSrc, inputArb.io.chosen, thisReq.ready, thisReq.valid)
       printf(p"ThisReqBits:${thisReq.bits}\n")

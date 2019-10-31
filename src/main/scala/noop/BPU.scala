@@ -88,12 +88,12 @@ class BPU1 extends NOOPModule {
   // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
   Debug(){
   // printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
-    when(btbHit || true.B){
+    when(btbHit){
       printf("[BTBHT1] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
-      printf("[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
-      printf(p"[BTBHT3] rasTarget:${rasTarget} pht:${pht} phtTaken:${phtTaken}\n")
-      printf(p"[BTBHT4] io.out:${io.out} btbRead:${btbRead} btbWrite:${btbWrite}\n")
-      printf("[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setIdx)
+      //printf("[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
+      //printf(p"[BTBHT3] rasTarget:${rasTarget} pht:${pht} phtTaken:${phtTaken}\n")
+      //printf(p"[BTBHT4] io.out:${io.out} btbRead:${btbRead} btbWrite:${btbWrite}\n")
+      //printf("[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setIdx)
     }
 
     //when(true.B) {
@@ -176,10 +176,9 @@ class BPU1 extends NOOPModule {
     }
     .elsewhen (req.fuOpType === ALUOpType.ret) {
       when(sp.value === 0.U) {
-        //printf("ATTTTT: sp.value is 0.U\n")
+        //printf("ATTTTT: sp.value is 0.U\n") //TODO: sp.value may equal to 0.U
       }
-      sp.value := sp.value - 1.U
-      
+      sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U) //TODO: sp.value may less than 0.U
     }
   }
 

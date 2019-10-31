@@ -16,7 +16,7 @@ trait HasNOOPParameter {
   val HasIcache = true
   val HasDcache = true
   val EnableStoreQueue = false
-  val AddrBits = 32
+  val AddrBits = 64//32 //TODO: fix by lemover-zhangzifei 32->64
   val AddrBytes = AddrBits / 8
   val DataBits = XLEN
   val DataBytes = DataBits / 8

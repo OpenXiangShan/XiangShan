@@ -134,7 +134,7 @@ sealed trait HasTlbConst {
   val Ways = tlbConfig.ways
   val Sets = 1
 
-  val debug = true && tlbname == "itlb"
+  val debug = false && tlbname == "itlb"
 
   def TlbMetaArrayReadBus() = new SRAMReadBus(new TLBMetaBundle, set = Sets, way = Ways)
   def TlbDataArrayReadBus() = new SRAMReadBus(new TLBDataBundle, set = Sets, way = Ways)
@@ -322,11 +322,13 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
           io.pf.loadPF := req.isRead()
           io.pf.storePF := req.isWrite()
           io.pf.instrPF := true.B
-          printf("%d" + tlbname +"tlbException", GTimer())
-          printf(p" req:${req}  \nMemreq:${io.mem.req}  \nMemResp:${io.mem.resp}")
-          printf(" level:%d",level)
-          printf("\n")
+          Debug() {
+            printf("%d" + tlbname +"tlbException", GTimer())
+            printf(p" req:${req}  \nMemreq:${io.mem.req}  \nMemResp:${io.mem.resp}")
+            printf(" level:%d",level)
+            printf("\n")
           //assert(false.B)
+          }
         }.otherwise {
           state := s_memReadReq
           raddr := paddrApply(memRdata.ppn, Mux(level === 3.U, vpn.vpn1, vpn.vpn0))
@@ -440,18 +442,19 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     when(true.B ) {
       //printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d "+ tlbname + " ",GTimer())
-      printf("ioInReqValid:%d ioInReqReady:%d ioInRespValid:%d ioInRespReady:%d ioInReqAddr:%x ", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr)
-     // printf("ioMemReqValid:%d ioMemReqReady:%d ioMemRespValid:%d ioMemRespReady:%d ", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready)
+      printf("InReq(%d, %d) ioInResp(%d, %d) InReqAddr:%x InRespAddr:%x ", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr, io.in.resp.bits.addr)
+     
+      printf("MemReq(%d, %d) ioMemResp(%d, %d) ReqAddr:%x RespData:%x", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.resp.bits.rdata) 
+      printf("\n%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x ", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
       printf("\n%d:"+ tlbname + " {IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ",GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
-      //printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
+      printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
       printf("satp:%x ", s3.io.satp)
-      //printf("\n%d:"+ tlbname + " s3State:%d level:%d s3MemAddr:%x s3MemRdata:%x s3MemRespFire:%d s3alreadOutFire:%d s3memStoreAddr:%x s3Hit:%d s3WayMask:%x ", GTimer(), s3.io.print.state, s3.io.print.level, s3.io.mem.req.bits.addr, s3.io.mem.resp.bits.rdata, s3.io.mem.resp.fire(), s3.io.print.alreadyOutFire, s3.io.print.memStoreAddr, s3.io.in.bits.hit, s3.io.in.bits.waymask)
-      //printf("\n%d:"+ tlbname + " s1MetaReadReqReady:%d s1DataReadReqReady:%d ", GTimer(), s1.io.metaReadBus.req.ready, s1.io.dataReadBus.req.ready)
-      //printf("s1ReqFire:%d s2ReqFire:%d s3ReqFire:%d ", s1.io.in.fire(), s2.io.in.fire(), s3.io.in.fire())
-      //printf("s2Hit:%d s2Waymask:%x ", s2.io.out.bits.hit, s2.io.out.bits.waymask)
-      //printf("s2s3Miss:%d ", s1.io.s2s3Miss)
-      //printf("\n%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x ", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
-      //printf("flush:%x ", io.flush)
+      printf("\n%d:"+ tlbname + " s3State:%d level:%d s3alreadOutFire:%d s3memStoreAddr:%x s3Hit:%d s3WayMask:%x ", GTimer(), s3.io.print.state, s3.io.print.level, s3.io.print.alreadyOutFire, s3.io.print.memStoreAddr, s3.io.in.bits.hit, s3.io.in.bits.waymask)
+      printf("\n%d:"+ tlbname + " s1MetaReadReqReady:%d s1DataReadReqReady:%d ", GTimer(), s1.io.metaReadBus.req.ready, s1.io.dataReadBus.req.ready)
+      printf("s1ReqFire:%d s2ReqFire:%d s3ReqFire:%d ", s1.io.in.fire(), s2.io.in.fire(), s3.io.in.fire())
+      printf("s2Hit:%d s2Waymask:%x ", s2.io.out.bits.hit, s2.io.out.bits.waymask)
+      printf("s2s3Miss:%d ", s1.io.s2s3Miss)
+      printf("flush:%x ", io.flush)
 
       printf("\n")
       
@@ -489,12 +492,13 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   io.in.resp.bits := io.out.resp.bits
   io.out.resp.ready := io.in.resp.ready
 
-  Debug( false) {
+  Debug(false) {
     when(true.B) {
       printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d:" + name + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("\n%d:" + name, GTimer())
       printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")
+      if(userBits>0) {printf("user:%x ", io.in.resp.bits.user.getOrElse(0.U))}
       printf("\n")
       //io.in.dump(name + ".in")
       //io.out.dump(name + ".out")
