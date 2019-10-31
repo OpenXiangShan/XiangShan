@@ -15,6 +15,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val dmem = new SimpleBusUC
     val forward = new ForwardIO
     val tlb = new TLBExuIO
+    val memMMU = Flipped(new MemMMUIO)
   })
 
   val src1 = io.in.bits.data.src1
@@ -34,6 +35,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val lsu = Module(new LSU)
   val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
   lsu.io.wdata := src2
+  lsu.io.instr := io.in.bits.cf.instr
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
@@ -48,9 +50,17 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   csr.io.instrValid := io.in.valid && !io.flush
   io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
-  
-  //io.satp := csr.io.satp
 
+  csr.io.imemMMU <> io.memMMU.imem
+  csr.io.dmemMMU <> io.memMMU.dmem
+/*
+  csr.io.dmemMMU.loadPF := false.B
+  csr.io.dmemMMU.storePF := false.B
+  csr.io.dmemMMU.addr := 0.U
+  csr.io.imemMMU.loadPF := false.B
+  csr.io.imemMMU.storePF := false.B
+  csr.io.imemMMU.addr := 0.U
+*/
   val mou = Module(new MOU)
   // mou does not write register
   mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
@@ -68,6 +78,8 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     o.fuType := i.fuType
   }
   io.out.bits.decode.cf.pc := io.in.bits.cf.pc
+
+  io.out.bits.decode.cf.instr := io.in.bits.cf.instr
   io.out.bits.decode.cf.redirect <>
     Mux(mou.io.redirect.valid, mou.io.redirect,
       Mux(csr.io.redirect.valid, csr.io.redirect, 

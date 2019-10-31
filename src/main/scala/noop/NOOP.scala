@@ -11,10 +11,12 @@ import utils._
 trait HasNOOPParameter {
   val XLEN = 64
   val HasMExtension = true
+  val HasCExtension = true
   val HasDiv = true
   val HasIcache = true
   val HasDcache = true
-  val AddrBits = 32
+  val EnableStoreQueue = false
+  val AddrBits = 64//32 //TODO: fix by lemover-zhangzifei 32->64
   val AddrBytes = AddrBits / 8
   val DataBits = XLEN
   val DataBytes = DataBits / 8
@@ -25,7 +27,7 @@ abstract class NOOPBundle extends Bundle with HasNOOPParameter
 
 case class NOOPConfig (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = true
 )
 
 object AddressSpace {
@@ -59,6 +61,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   PipelineConnect(idu.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
   PipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
   PipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
+  idu.io.flush := ifu.io.flushVec(1)
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
@@ -68,15 +71,16 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
       ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
-    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) }
-    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.pnpc) }
-    when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) }
-    when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) }
+    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) ; printf(p"IFUO: redirectIO:${ifu.io.out.bits.redirect}\n")}
+    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.pnpc) ; printf(p"IDUO: redirectIO:${idu.io.out.bits.cf.redirect} redirectIOC:${idu.io.redirect}\n")}
+    when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) ; printf(p"ISUO: ${isu.io.out.bits.cf.redirect}\n")}
+    when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) ; printf(p"EXUO: ${exu.io.out.bits.decode.cf.redirect}\n")}
     when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.decode.cf.pc) }
   }
 
   isu.io.wb <> wbu.io.wb
   ifu.io.redirect <> wbu.io.redirect
+  ifu.io.redirectRVC <> idu.io.redirect
   // forward
   isu.io.forward <> exu.io.forward
 
@@ -102,37 +106,36 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   io.mmio <> mmioXbar.io.out
 */
-  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2)))
-  val itran = Module(new TLBIOTran(userBits = AddrBits*2, name = "itran"))
+  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2 + 4)))
+  val itran = Module(new TLBIOTran(userBits = AddrBits*2 + 4, name = "itran"))
   itlb.io.exu <> exu.io.tlb
+  itlb.io.csrMMU <> exu.io.memMMU.imem
   itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
   itlb.io.in.req <> ifu.io.imem.req
   itran.io.in.req <> itlb.io.in.resp
   ifu.io.imem.resp <> itran.io.in.resp
-  val itlbXbar = Module(new SimpleBusCrossbarNto1Special(2, userBits = AddrBits*2, name = "itlbXbar"))
-  itlbXbar.io.flush := ifu.io.flushVec(0) | ifu.io.bpFlush
-  itlbXbar.io.in(0) <> itran.io.out
-  itlbXbar.io.in(1) <> itlb.io.mem
-  io.imem <> Cache(itlbXbar.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+  io.imem <> Cache(itran.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4))
 
   val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
   val dtran = Module(new TLBIOTran(name = "dtran"))
   dtlb.io.exu <> exu.io.tlb
+  dtlb.io.csrMMU <> exu.io.memMMU.dmem
   dtlb.io.flush := "b00".U //flush must be wrong
   dtlb.io.in.req <> exu.io.dmem.req
   dtran.io.in.req <> dtlb.io.in.resp
   exu.io.dmem.resp <> dtran.io.in.resp
-  val dtlbXbar = Module(new SimpleBusCrossbarNto1(2))
-  dtlbXbar.io.in(0) <> dtran.io.out
-  dtlbXbar.io.in(1) <> dtlb.io.mem
-  io.dmem <> Cache(dtlbXbar.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  val tlbXbar = Module(new SimpleBusCrossbarNto1Special(3, name = "tlbXbar"))
+  tlbXbar.io.in(0) <> dtran.io.out
+  tlbXbar.io.in(1) <> dtlb.io.mem
+  tlbXbar.io.in(2) <> itlb.io.mem
+  io.dmem <> Cache(tlbXbar.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
 
   io.mmio <> mmioXbar.io.out
 
 /*
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4)) // userBits = AddrBits + BrIdxBits
   io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
   io.mmio <> mmioXbar.io.out
 */

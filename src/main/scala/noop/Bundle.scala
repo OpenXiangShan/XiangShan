@@ -25,16 +25,26 @@ class DataSrcIO extends NOOPBundle {
 
 class RedirectIO extends NOOPBundle {
   val target = Output(UInt(AddrBits.W))
+  // val brIdx = Output(UInt(3.W)) // for RVC
   val valid = Output(Bool())
 }
 
+// class IRIDCtrlFlowIO extends NOOPBundle {
+//   val instr = Output(UInt(64.W))
+//   val pc = Output(UInt(AddrBits.W))
+//   val pnpc = Output(UInt(AddrBits.W))
+//   val brIdx = Output(UInt(3.W))
+//   val redirect = new RedirectIO
+// }
+
 class CtrlFlowIO extends NOOPBundle {
-  val instr = Output(UInt(32.W))
+  val instr = Output(UInt(64.W))
   val pc = Output(UInt(AddrBits.W))
   val pnpc = Output(UInt(AddrBits.W))
   val redirect = new RedirectIO
   val exceptionVec = Output(Vec(16, Bool()))
   val intrVec = Output(Vec(12, Bool()))
+  val brIdx = Output(UInt(4.W))
 }
 
 class DecodeIO extends NOOPBundle {
@@ -69,6 +79,28 @@ class ForwardIO extends NOOPBundle {
   val valid = Output(Bool())
   val wb = new WriteBackIO
   val fuType = Output(FuType())
+}
+
+class MMUIO extends NOOPBundle {
+  // val ptev = Output(Bool())
+  // val pteu = Output(Bool())
+  // val ptex = Output(Bool())
+  // val valid = Output(Bool())
+  // val isStore = Output(Bool())
+
+  val priviledgeMode = Input(UInt(2.W))
+  val status_sum = Input(Bool())
+  val status_mxr = Input(Bool())
+
+  val loadPF = Output(Bool())
+  val storePF = Output(Bool())
+  val instrPF = Output(Bool())
+  val addr = Output(UInt(AddrBits.W)) // reserved for further use
+}
+
+class MemMMUIO extends NOOPBundle {
+  val imem = new MMUIO
+  val dmem = new MMUIO
 }
 
 class TLBExuIO extends NOOPBundle {

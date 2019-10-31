@@ -64,7 +64,6 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
 class SimpleBusCrossbarNto1Special(n: Int, userBits:Int = 0, name: String = "default") extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(n, new SimpleBusUC(userBits)))
-    val flush = Input(Bool())
     val out = new SimpleBusUC(userBits)
   })
 
@@ -92,19 +91,19 @@ class SimpleBusCrossbarNto1Special(n: Int, userBits:Int = 0, name: String = "def
 
   switch (state) {
     is (s_idle) {
-      when (thisReq.fire() && !io.flush) {
+      when (thisReq.fire()) {
         inflightSrc := inputArb.io.chosen
         when (thisReq.bits.isRead()) { state := s_readResp }
         .elsewhen (thisReq.bits.isWriteLast() || thisReq.bits.isWriteSingle()) { state := s_writeResp }
       }
     }
-    is (s_readResp) { when ((io.out.resp.fire() && io.out.resp.bits.isReadLast()) || io.flush) { state := s_idle } }
-    is (s_writeResp) { when ((io.out.resp.fire()) || io.flush) { state := s_idle } }
+    is (s_readResp) { when ((io.out.resp.fire() && io.out.resp.bits.isReadLast())) { state := s_idle } }
+    is (s_writeResp) { when ((io.out.resp.fire())) { state := s_idle } }
   }
 
-  Debug(false /*&& name=="dtlbXbar"*/) {
-    when(true.B && GTimer()<=500.U) {
-      printf("%d:" + name + " state:%d inflightSrc:%d ThisReqReady:%d ThisReqValid:%d flush:%d ", GTimer(), state, inflightSrc, thisReq.ready, thisReq.valid, io.flush)
+  Debug(false/*&& name=="dtlbXbar"*/) {
+    when(true.B) {
+      printf("%d:" + name + " state:%d inflightSrc:%d chosen:%d ThisReqReady:%d ThisReqValid:%d ", GTimer(), state, inflightSrc, inputArb.io.chosen, thisReq.ready, thisReq.valid)
       printf(p"ThisReqBits:${thisReq.bits}\n")
       printf("%d:" + name + " OutReqValid:%d OutReqReady:%d OutRespValid:%d OutRespReady:%d ", GTimer(), io.out.req.valid, io.out.req.ready, io.out.resp.valid, io.out.resp.ready)
       printf(p"OutReqBits:${io.out.req.bits}, OutRespBits:${io.out.resp.bits}\n")
