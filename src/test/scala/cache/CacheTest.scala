@@ -19,14 +19,13 @@ class NOOPSimTop extends Module {
   val cacheSizeKB = 1 // Bytes
   val memSizeB = 4096 // Bytes
   val NRmemBlock = memSizeB / 8
-  //val NRcacheBlock = cacheSizeKB * 1024 / 64
 
   val Name = "dcache"
   val in = WireInit(0.U.asTypeOf(new SimpleBusUC(userBits = 33)))
   val cohIn = WireInit(0.U.asTypeOf(new SimpleBusUC))
   val mmioOut = WireInit(0.U.asTypeOf(new SimpleBusUC))
 
-  val cacheOut = Cache(in, mmioOut, "b00".U)(CacheConfig(name = Name, totalSize = cacheSizeKB, userBits = 33, ways = 1))
+  val cacheOut = Cache(in, mmioOut, "b00".U)(CacheConfig(name = Name, totalSize = cacheSizeKB, userBits = 33, ways = 4))
   val mem = Module(new AXI4RAM(memByte = memSizeB, useBlackBox = false))
   mem.io.in <> cacheOut.mem.toAXI4()
   cacheOut.coh <> cohIn

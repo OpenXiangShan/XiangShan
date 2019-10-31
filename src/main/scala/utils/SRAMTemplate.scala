@@ -107,8 +107,17 @@ class SRAMTemplateWithArbiter[T <: Data](nRead: Int, nWrite: Int, gen: T, set: I
   io.r.map{ case r => {
     val rSetIdx = HoldUnless(r.req.bits.setIdx, r.req.fire())
     val isForward = writeArb.io.out.fire() && (writeArb.io.out.bits.setIdx === rSetIdx)
-    val forwardData = Mux(isForward, VecInit(List.fill(way)(writeArb.io.out.bits.data)), ram.io.r.resp.data)
-    r.resp.data := HoldUnless(forwardData, RegNext(r.req.fire()) || isForward)
-  }}
 
+    val rdataReg = Reg(chiselTypeOf(r.resp.data))
+    val latching = RegNext(r.req.fire())
+    val rdata = Mux(latching, ram.io.r.resp.data, rdataReg)
+
+    val forwardData = Wire(Vec(way, chiselTypeOf(writeArb.io.out.bits.data)))
+    writeArb.io.out.bits.waymask.getOrElse("1b".U).asBools.zipWithIndex.map { case (w, i) =>
+      forwardData(i) := Mux(isForward && w, writeArb.io.out.bits.data, rdata(i))
+    }
+
+    when (isForward || latching) { rdataReg := forwardData }
+    r.resp.data := Mux(isForward || latching, forwardData, rdataReg)
+  }}
 }
