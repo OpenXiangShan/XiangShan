@@ -152,7 +152,7 @@ class IDU extends NOOPModule with HasInstrType {
   val specialPCR = Reg(UInt(AddrBits.W)) // reg for full inst that cross 2 inst line
   val specialNPCR = Reg(UInt(AddrBits.W)) // reg for pnc for full inst jump that cross 2 inst line
   val specialInstR = Reg(UInt(16.W))
-  val redirectPC = Cat(io.in.bits.pc(31,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line
+  val redirectPC = Cat(io.in.bits.pc(63,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line  //TODO: fix by lemover-zhangzifei pc(31,3) -> pc(63,3)
   val rvcForceLoadNext = (pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U && !brIdx(1))
   //------------------------------------------------------
   // rvcForceLoadNext is used to deal with: 
@@ -211,7 +211,7 @@ class IDU extends NOOPModule with HasInstrType {
       is(s_extra){//get 16 aligned inst, pc controled by this FSM
         canGo := rvcFinish || rvcNext
         canIn := rvcFinish || rvcForceLoadNext
-        pcOut := Cat(io.in.bits.pc(31,3), pcOffsetR(2,0))
+        pcOut := Cat(io.in.bits.pc(63,3), pcOffsetR(2,0)) //TODO: fix by lemover-zhangzifei pc(31,3) -> pc(63,3)
         pnpcOut := Mux(rvcFinish, io.in.bits.pnpc, Mux(isRVC, pcOut+2.U, pcOut+4.U))
         when(io.out.fire() && rvcFinish){state := s_idle}
         when(io.out.fire() && rvcNext){
