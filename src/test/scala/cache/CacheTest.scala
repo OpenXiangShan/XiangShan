@@ -9,7 +9,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
-//class CacheTestTop extends Module {
+/*
 class NOOPSimTop extends Module {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
@@ -131,3 +131,4 @@ class NOOPSimTop extends Module {
 object TestMain extends App {
   chisel3.Driver.execute(args, () => new NOOPSimTop)
 }
+*/

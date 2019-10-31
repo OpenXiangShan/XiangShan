@@ -18,7 +18,6 @@ class DiffTestIO extends Bundle {
   val intrNO = Output(UInt(64.W))
 }
 
-/*
 class NOOPSimTop extends Module {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
@@ -52,4 +51,3 @@ class NOOPSimTop extends Module {
 object TestMain extends App {
   chisel3.Driver.execute(args, () => new NOOPSimTop)
 }
-*/

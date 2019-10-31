@@ -423,8 +423,8 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   io.out.coh.resp <> coh.io.out
 
   val arrayLock = Module(new Lock(2))
-  arrayLock.io.bundle(0) <> s3.io.lock
-  arrayLock.io.bundle(1) <> coh.io.lock
+  arrayLock.io.bundle(0) <> coh.io.lock
+  arrayLock.io.bundle(1) <> s3.io.lock
 
   metaArray.io.r(0) <> coh.io.metaReadBus
   metaArray.io.r(1) <> s1.io.metaReadBus

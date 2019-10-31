@@ -136,7 +136,7 @@ class Emulator {
   }
 
   void execute() {
-#define CACHE_TEST
+//#define CACHE_TEST
 
 #ifdef CACHE_TEST
     eprintf(ANSI_COLOR_MAGENTA "This is random test for cache.\n" ANSI_COLOR_RESET);

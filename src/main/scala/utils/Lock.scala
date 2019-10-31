@@ -35,4 +35,9 @@ class Lock(n: Int) extends Module {
   val holding = Mux(lockEmpty && hasLockReq, lockNext, lock)
   io.bundle.map(_.holding).zip(holding.asBools).map{ case (l, r) => l := r }
   assert(PopCount(io.bundle.map(_.holding)) <= 1.U, "there should be only one lock holder")
+
+  Debug() {
+    when (lockEmpty && hasLockReq) { printf("%d: %d acquire lock\n", GTimer(), PriorityEncoder(lockNext)) }
+    when (!lockEmpty && hasUnlockReq) { printf("%d: %d release lock\n", GTimer(), PriorityEncoder(lock)) }
+  }
 }
