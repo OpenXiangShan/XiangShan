@@ -16,10 +16,17 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
   })
 
   val noop = Module(new NOOP)
-  val cohMg = Module(new CoherenceInterconnect)
-  cohMg.io.in(0) <> noop.io.imem
-  cohMg.io.in(1) <> noop.io.dmem
-  io.mem <> cohMg.io.out.toAXI4()
+  val cohMg = Module(new CoherenceManager)
+  val xbar = Module(new SimpleBusCrossbarNto1(2))
+  cohMg.io.in <> noop.io.imem.mem
+  noop.io.dmem.coh <> cohMg.io.out.coh
+  xbar.io.in(0) <> cohMg.io.out.mem
+  xbar.io.in(1) <> noop.io.dmem.mem
+  io.mem <> xbar.io.out.toAXI4()
+
+  noop.io.imem.coh.resp.ready := true.B
+  noop.io.imem.coh.req.valid := false.B
+  noop.io.imem.coh.req.bits := DontCare
 
   if (p.FPGAPlatform) io.mmio <> noop.io.mmio.toAXI4Lite()
   else io.mmio <> noop.io.mmio
