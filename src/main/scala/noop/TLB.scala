@@ -134,7 +134,7 @@ sealed trait HasTlbConst {
   val Ways = tlbConfig.ways
   val Sets = 1
 
-  val debug = false && tlbname == "itlb"
+  val debug = true//false && tlbname == "itlb"
 
   def TlbMetaArrayReadBus() = new SRAMReadBus(new TLBMetaBundle, set = Sets, way = Ways)
   def TlbDataArrayReadBus() = new SRAMReadBus(new TLBDataBundle, set = Sets, way = Ways)
@@ -289,8 +289,8 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
   io.pf.loadPF := false.B
   io.pf.storePF := false.B
-  io.pf.instrPF := false.B
   io.pf.addr := req.addr
+  val instrPF = RegInit(false.B)
 
   switch (state) {
     is (s_idle) {
@@ -318,10 +318,9 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
           needFlush := false.B
         }.elsewhen (level === 3.U || level === 2.U) {
         when(!memRdata.flag.V.asBool || (!memRdata.flag.R.asBool && memRdata.flag.W.asBool)) {
-          state := s_idle
-          io.pf.loadPF := req.isRead()
-          io.pf.storePF := req.isWrite()
-          io.pf.instrPF := true.B
+          if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
+          if(tlbname == "dtlb") { io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite() }
+          if(tlbname == "itlb") { instrPF := true.B }
           Debug() {
             printf("%d" + tlbname +"tlbException", GTimer())
             printf(p" req:${req}  \nMemreq:${io.mem.req}  \nMemResp:${io.mem.resp}")
@@ -346,6 +345,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
     is (s_wait_resp) { when (io.out.fire() || /*needFlush*/ io.flush || alreadyOutFire){
       state := s_idle
+      instrPF := false.B
     }}
   }
 
@@ -368,11 +368,14 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
   io.out.bits.cmd := req.cmd
   io.out.bits.wmask := req.wmask
   io.out.bits.wdata := req.wdata
-  io.out.bits.user.map(_:=req.user.getOrElse(0.U))
+  if(tlbname == "itlb") { io.out.bits.user.map(_:= Cat(instrPF, req.user.getOrElse(0.U)(AddrBits*2 + 3, 0))) } 
+  else { io.out.bits.user.map(_:=req.user.getOrElse(0.U)) }
   //io.out.valid := io.in.valid /*???*/ && Mux(hit, true.B, state === s_wait_resp)
   io.out.valid := Mux(hit, true.B, state === s_wait_resp)
 
-  io.isFinish := Mux(hit, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
+  if (tlbname == "dtlb"){ io.isFinish := Mux(hit, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
+  else/*if(tlbname == "itlb")*/ { io.isFinish := Mux(hit, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)) }
+  
   io.in.ready := io.out.ready && (state === s_idle) && !miss
 
   io.print.state := state
@@ -387,7 +390,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val mem = new SimpleBusUC()
     val flush = Input(UInt(2.W)) 
     val exu = Flipped(new TLBExuIO)
-    val csrMMU = new MMUIO 
+    val csrMMU = new MMUIO
   })
 
   val s1 = Module(new TlbStage1)
@@ -404,7 +407,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     }
   }
 
-  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode =/= 0.U
+  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode === 8.U //how to constrict to 0/8
   s1.io.in <> io.in.req
   s1.io.in.bits := io.in.req.bits
   s1.io.in.valid :=  Mux(vmEnable, io.in.req.valid, false.B)
@@ -437,6 +440,15 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   s2.io.dataReadResp := dataArray.io.r.resp.data
 
   io.csrMMU <> s3.io.pf
+
+  if(tlbname == "dtlb") {
+    val alreadyOutFinish = RegEnable(true.B, init=false.B, io.in.resp.valid && !io.in.resp.ready)
+    when(alreadyOutFinish && io.in.resp.fire()) { alreadyOutFinish := false.B}
+    val tlbFinish = (io.in.resp.valid && !alreadyOutFinish) || s3.io.pf.isPF()
+    BoringUtils.addSource(tlbFinish, "DTLBFINISH")
+    BoringUtils.addSource(s3.io.pf.isPF, "DTLBPF")
+    BoringUtils.addSource(vmEnable, "DTLBENABLE")
+  }
 
   Debug( debug /*&& tlbname == "itlb"*/) {
     when(true.B ) {
@@ -492,10 +504,10 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   io.in.resp.bits := io.out.resp.bits
   io.out.resp.ready := io.in.resp.ready
 
-  Debug(false) {
+  Debug() {
     when(true.B) {
-      printf("-----------------------------------------------------------------------------------------------\n")
-      printf("%d:" + name + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
+      if(name == "dtran") { printf("-----------------------------------------------------------------------------------------------\n")}
+      printf("%d:" + name + "InReq(%d, %d) InResp(%d, %d) ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("\n%d:" + name, GTimer())
       printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")
       if(userBits>0) {printf("user:%x ", io.in.resp.bits.user.getOrElse(0.U))}

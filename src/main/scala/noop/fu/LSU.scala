@@ -291,11 +291,26 @@ class LSExecUnit extends NOOPModule {
   val isStore = valid && LSUOpType.isStore(func)
   val partialLoad = !isStore && (func =/= LSUOpType.ld)
 
-  val s_idle :: s_wait_resp :: s_partialLoad :: Nil = Enum(3)
+  val s_idle :: s_wait_tlb :: s_wait_resp :: s_partialLoad :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
+  val dtlbFinish = WireInit(false.B)
+  val dtlbPF = WireInit(false.B)
+  val dtlbEnable = WireInit(false.B)
+  BoringUtils.addSink(dtlbFinish, "DTLBFINISH")
+  BoringUtils.addSink(dtlbPF, "DTLBPF")
+  BoringUtils.addSink(dtlbEnable, "DTLBENABLE")
+
   switch (state) {
-    is (s_idle) { when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) } }
+    is (s_idle) { 
+      when (dmem.req.fire() && dtlbEnable)  { state := s_wait_tlb  }
+      when (dmem.req.fire() && !dtlbEnable) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+      //when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) }
+    }
+    is (s_wait_tlb) {
+      when (dtlbFinish && dtlbPF ) { state := s_idle }
+      when (dtlbFinish && !dtlbPF) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+    }
     is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
   }

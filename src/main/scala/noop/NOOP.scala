@@ -65,7 +65,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
-  Debug() {
+  Debug(false) {
     printf("------------------------ TIMER: %d ------------------------\n", GTimer())
     printf("flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
       ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
@@ -106,8 +106,8 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   io.mmio <> mmioXbar.io.out
 */
-  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2 + 4)))
-  val itran = Module(new TLBIOTran(userBits = AddrBits*2 + 4, name = "itran"))
+  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2 + 4 + 1)))
+  val itran = Module(new TLBIOTran(userBits = AddrBits*2 + 4 + 1, name = "itran"))
   itlb.io.exu <> exu.io.tlb
   itlb.io.csrMMU <> exu.io.memMMU.imem
   itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
@@ -115,7 +115,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   itran.io.in.req <> itlb.io.in.resp
   ifu.io.imem.resp <> itran.io.in.resp
   io.imem <> Cache(itran.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4))
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4 + 1))
 
   val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
   val dtran = Module(new TLBIOTran(name = "dtran"))

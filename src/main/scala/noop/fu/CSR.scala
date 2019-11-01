@@ -251,8 +251,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val sieWmask = "h333".U
   val sieRmask = "h333".U
   val sipMask  = "h103".U
-  //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
-  val satp = RegInit(UInt(XLEN.W), 0.U)
+  val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
+  //val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp
   val sepc = Reg(UInt(XLEN.W))
   val scause = Reg(UInt(XLEN.W))
