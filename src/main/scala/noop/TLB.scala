@@ -73,14 +73,14 @@ trait Sv39Const{
     val ppn  = UInt(ppnLen.W)
     val rsw  = UInt(2.W)
     val flag = new Bundle {
-      val D    = UInt(1.W)
-      val A    = UInt(1.W)
-      val G    = UInt(1.W)
-      val U    = UInt(1.W)
-      val X    = UInt(1.W)
-      val W    = UInt(1.W)
-      val R    = UInt(1.W)
-      val V    = UInt(1.W)
+      val d    = UInt(1.W)
+      val a    = UInt(1.W)
+      val g    = UInt(1.W)
+      val u    = UInt(1.W)
+      val x    = UInt(1.W)
+      val w    = UInt(1.W)
+      val r    = UInt(1.W)
+      val v    = UInt(1.W)
     }
   }
 
@@ -91,14 +91,14 @@ trait Sv39Const{
   }
 
   def flagBundle = new Bundle {
-    val D    = UInt(1.W)
-    val A    = UInt(1.W)
-    val G    = UInt(1.W)
-    val U    = UInt(1.W)
-    val X    = UInt(1.W)
-    val W    = UInt(1.W)
-    val R    = UInt(1.W)
-    val V    = UInt(1.W)
+    val d    = Bool()//UInt(1.W)
+    val a    = Bool()//UInt(1.W)
+    val g    = Bool()//UInt(1.W)
+    val u    = Bool()//UInt(1.W)
+    val x    = Bool()//UInt(1.W)
+    val w    = Bool()//UInt(1.W)
+    val r    = Bool()//UInt(1.W)
+    val v    = Bool()//UInt(1.W)
   }
 
   def vmMux(userBits: Int = 0, en: Bool, enYes: SimpleBusReqBundle, enNo: SimpleBusReqBundle) = {
@@ -223,7 +223,7 @@ class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val req = io.in.bits
   val vpn = req.addr.asTypeOf(vaBundle2).vpn
 
-  val hitVec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).V.asBool && (m.vpn === vpn) && io.in.valid)).asUInt
+  val hitVec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).v.asBool && (m.vpn === vpn) && io.in.valid)).asUInt
   val victimWaymask = (if (Ways > 1) (1.U(log2Up(Ways).W) << LFSR64()(log2Up(Ways)-1,0)) else 1.U(1.W))
   val waymask = Mux(io.out.bits.hit, hitVec, victimWaymask)
   assert(PopCount(waymask) <= 1.U)
@@ -238,7 +238,7 @@ class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.in.ready := !io.in.valid || io.out.fire()
 }
 
-sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
+sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with HasCSRConst{
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new TlbStage2IO))
     val out = Decoupled(new TlbResp(userBits))
@@ -312,12 +312,14 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
     }
 
     is (s_memReadResp) { 
+      val flag = memRdata.flag
+      val pf = io.pf
       when (io.mem.resp.fire()) {
         when (isFlush) {
           state := s_idle
           needFlush := false.B
         }.elsewhen (level === 3.U || level === 2.U) {
-        when(!memRdata.flag.V.asBool || (!memRdata.flag.R.asBool && memRdata.flag.W.asBool)) {
+        when(!memRdata.flag.v.asBool || (!memRdata.flag.r.asBool && memRdata.flag.w.asBool)) {
           if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
           if(tlbname == "dtlb") { io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite() }
           if(tlbname == "itlb") { instrPF := true.B }
@@ -334,8 +336,20 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule {
         }
       }
       when (level === 1.U) {
-        when(false.B) { //here use the SUM/MXR/privilege bit
-          state := s_wait_resp; memStoreAddr := io.mem.resp.bits.rdata
+        val permCheck = flag.v.asBool && !(pf.priviledgeMode === ModeU && flag.u.asBool) && !(pf.priviledgeMode === ModeS && flag.u.asBool && pf.status_sum)
+        val permLoad = permCheck && (flag.r.asBool || pf.status_mxr && flag.x.asBool)
+        val permStore = permCheck && flag.w.asBool
+        when((!permLoad && req.isRead()) || (!permStore && req.isWrite())) { 
+          if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
+          if(tlbname == "dtlb") { io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite() }
+          if(tlbname == "itlb") { instrPF := true.B }
+          Debug() {
+            printf("%d" + tlbname +"tlbException", GTimer())
+            printf(p" req:${req}  \nMemreq:${io.mem.req}  \nMemResp:${io.mem.resp}")
+            printf(" level:%d",level)
+            printf("\n")
+          //assert(false.B)
+          }
         }.otherwise {
           state := s_wait_resp; memStoreAddr := io.mem.resp.bits.rdata
         }
