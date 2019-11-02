@@ -59,7 +59,7 @@ class NOOPSimTop extends Module {
     val isWrite = Bool()
     val wmask = UInt(8.W)
     val addr = UInt(log2Up(NRmemBlock).W)
-    val cohChoose = UInt(4.W)
+    val cohChoose = UInt(1.W)
     val cohAddr = UInt(log2Up(NRmemBlock).W)
   }
   val rand = LFSR64(true.B).asTypeOf(randBundle)
@@ -77,9 +77,17 @@ class NOOPSimTop extends Module {
   in.req.valid := (state === s_init_req) || (state === s_test)
   in.resp.ready := true.B
 
+  val cohInflight = RegInit(false.B)
+  when (cohIn.resp.fire()) {
+    val resp = cohIn.resp.bits
+    val isProbeEnd = resp.isProbeMiss() || (resp.cmd === SimpleBusCmd.readLast)
+    when (isProbeEnd) { cohInflight := false.B }
+  }
+  when (cohIn.req.fire()) { cohInflight := true.B }
+
   cohIn.req.bits.apply(addr = rand.cohAddr * 8.U + memBase.U, size = "b11".U,
     wdata = 0.U, wmask = 0.U, cmd = SimpleBusCmd.probe)
-  cohIn.req.valid := (state === s_test) && rand.cohChoose === 0.U
+  cohIn.req.valid := (state === s_test) && rand.cohChoose === 0.U && !cohInflight
   cohIn.resp.ready := true.B
 
   when (Counter((state === s_test) && in.resp.fire(), 100000)._2) { printf(".") }
@@ -126,9 +134,5 @@ class NOOPSimTop extends Module {
   // only use to keep consistent with NOOPSimTop
   io.difftest := DontCare
   dontTouch(io.difftest)
-}
-
-object TestMain extends App {
-  chisel3.Driver.execute(args, () => new NOOPSimTop)
 }
 */
