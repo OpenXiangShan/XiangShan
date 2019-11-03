@@ -65,17 +65,17 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
-  Debug(false) {
+  Debug() {
     printf("------------------------ TIMER: %d ------------------------\n", GTimer())
     printf("flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
       ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
       idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
-    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) ; printf(p"IFUO: redirectIO:${ifu.io.out.bits.redirect}\n")}
-    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.pnpc) ; printf(p"IDUO: redirectIO:${idu.io.out.bits.cf.redirect} redirectIOC:${idu.io.redirect}\n")}
-    when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) ; printf(p"ISUO: ${isu.io.out.bits.cf.redirect}\n")}
-    when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) ; printf(p"EXUO: ${exu.io.out.bits.decode.cf.redirect}\n")}
-    when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.decode.cf.pc) }
+    when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) ; printf(p"IFUO: redirectIO:${ifu.io.out.bits.redirect}\n") ; printf("IFUO: exceptionVec: %x\n", ifu.io.out.bits.exceptionVec.asUInt)} 
+    when (idu.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.pnpc) ; printf(p"IDUO: redirectIO:${idu.io.out.bits.cf.redirect} redirectIOC:${idu.io.redirect}\n") ; printf("IDUO: exceptionVec:%x\n", idu.io.out.bits.cf.exceptionVec.asUInt)}
+    when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) ; printf(p"ISUO: ${isu.io.out.bits.cf.redirect}\n") ; printf("ISUO: exceptionVec:%x\n", isu.io.out.bits.cf.exceptionVec.asUInt)}
+    when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) ; printf(p"EXUO: ${exu.io.out.bits.decode.cf.redirect}\n") ; printf("EXUO: exceptionVecIn:%x\n", exu.io.in.bits.cf.exceptionVec.asUInt)}
+    when (wbu.io.in.valid) { printf("WBU: pc = 0x%x rfWen:%d rfDest:%d rfData:%x Futype:%x commits(0):%x commits(1):%x \n", wbu.io.in.bits.decode.cf.pc, wbu.io.in.bits.decode.ctrl.rfWen, wbu.io.in.bits.decode.ctrl.rfDest, wbu.io.wb.rfData, wbu.io.in.bits.decode.ctrl.fuType, wbu.io.in.bits.commits(0), wbu.io.in.bits.commits(1)) }
   }
 
   isu.io.wb <> wbu.io.wb

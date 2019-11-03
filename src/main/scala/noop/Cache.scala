@@ -37,7 +37,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = true//false && cacheName == "dcache"
+  val debug = false //true && cacheName == "dcache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -236,7 +236,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     wdata = Mux1H(io.in.bits.waymask, dataWay).data, wmask = Fill(DataBytes, 1.U))
 
   io.mem.resp.ready := true.B
-  io.mem.req.valid := (state === s_memReadReq) || ((state === s_memWriteReq) && (state2 === s2_memWriteReq))
+  io.mem.req.valid := (state === s_memReadReq && !isIPF) || ((state === s_memWriteReq) && (state2 === s2_memWriteReq))
 
   // mmio
   io.mmio.req.bits := io.in.bits.req

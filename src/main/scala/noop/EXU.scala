@@ -33,7 +33,8 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   alu.io.out.ready := true.B
 
   val lsu = Module(new LSU)
-  val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
+  val lsuTlbPF = WireInit(false.B)
+  val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType, dtlbPF = lsuTlbPF)
   lsu.io.wdata := src2
   lsu.io.instr := io.in.bits.cf.instr
   io.out.bits.isMMIO := lsu.io.isMMIO
@@ -73,7 +74,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
-    o.rfWen := i.rfWen
+    o.rfWen := i.rfWen && (!lsuTlbPF || !fuValids(FuType.lsu))
     o.rfDest := i.rfDest
     o.fuType := i.fuType
   }
