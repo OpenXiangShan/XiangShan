@@ -93,29 +93,18 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
     val out = Decoupled(new Stage1IO)
     val metaReadBus = CacheMetaArrayReadBus()
     val dataReadBus = CacheDataArrayReadBus()
-
-    val s2Req = Flipped(Valid(new SimpleBusReqBundle))
-    val s3Req = Flipped(Valid(new SimpleBusReqBundle))
-    val s2s3Miss = Input(Bool())
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
 
   // read meta array and data array
   val addr = io.in.bits.addr.asTypeOf(addrBundle)
-  val readBusValid = io.in.valid && io.out.ready && !io.s2s3Miss
+  val readBusValid = io.in.valid && io.out.ready
   io.metaReadBus.apply(valid = readBusValid, setIdx = addr.index)
   io.dataReadBus.apply(valid = readBusValid, setIdx = Cat(addr.index, addr.wordIndex))
 
-  val (s1addr, s2addr, s3addr) = (io.in.bits.addr, io.s2Req.bits.addr, io.s3Req.bits.addr)
-  // set conflict will evict the dirty line, so we should wait
-  // the victim line to be up-to-date, else we may writeback staled data
-  val s2WriteSetConflict = io.s2Req.valid && isSetConflict(s2addr, s1addr) && io.s2Req.bits.isWrite()
-  val s3WriteSetConflict = io.s3Req.valid && isSetConflict(s3addr, s1addr) && io.s3Req.bits.isWrite()
-  val stall = s2WriteSetConflict || s3WriteSetConflict
-
   io.out.bits.req := io.in.bits
-  io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaReadBus.req.ready && io.dataReadBus.req.ready
+  io.out.valid := io.in.valid && io.metaReadBus.req.ready && io.dataReadBus.req.ready
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 }
 
@@ -368,13 +357,6 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s3.io.flush := io.flush(1)
   io.out.mem <> s3.io.mem
   io.mmio <> s3.io.mmio
-
-  // stalling
-  s1.io.s2Req.valid := s2.io.in.valid
-  s1.io.s2Req.bits := s2.io.in.bits.req
-  s1.io.s3Req.valid := s3.io.in.valid
-  s1.io.s3Req.bits := s3.io.in.bits.req
-  s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
 
   if (hasCoh) {
     val cohReq = io.out.coh.req.bits
