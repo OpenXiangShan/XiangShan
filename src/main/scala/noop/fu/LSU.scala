@@ -67,7 +67,7 @@ class LSU extends NOOPModule {
   val state = RegInit(s_idle)
 
   switch (state) {
-    is (s_idle) { when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) } }
+    is (s_idle) { when (dmem.req.fire()) { state := s_wait_resp } }
     is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
   }
@@ -78,7 +78,7 @@ class LSU extends NOOPModule {
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp))
+  io.out.valid := Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp))
   io.in.ready := (state === s_idle)
 
   val rdata = dmem.resp.bits.rdata
