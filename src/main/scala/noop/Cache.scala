@@ -163,7 +163,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     val out = Decoupled(new SimpleBusRespBundle(userBits = userBits))
     val isFinish = Output(Bool())
     val flush = Input(Bool())
-    val lock = Flipped(new LockBundle)
     val dataReadBus = CacheDataArrayReadBus()
     val dataWriteBus = Vec(2, CacheDataArrayWriteBus())
     val metaWriteBus = Vec(2, CacheMetaArrayWriteBus())
@@ -250,8 +249,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.cohResp.bits.cmd := Mux(state === s_release, Mux(releaseLast, SimpleBusCmd.readLast, 0.U),
     Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
 
-  io.lock.lock := miss && !mmio && !io.flush && (state === s_idle)
-
   switch (state) {
     is (s_idle) {
       afterFirstRead := false.B
@@ -263,10 +260,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
           readBeatCnt.value := addr.wordIndex
         }
       } .elsewhen ((miss || mmio) && !io.flush) {
-        when (mmio) { state := s_mmioReq }
-        .elsewhen (io.lock.holding) {
-          state := Mux(!ro.B && meta.dirty, s_memWriteReq, s_memReadReq)
-        }
+        state := Mux(mmio, s_mmioReq, Mux(!ro.B && meta.dirty, s_memWriteReq, s_memReadReq))
       }
     }
 
@@ -317,8 +311,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.metaWriteBus(0) <> metaHitWriteBus
   io.metaWriteBus(1) <> metaRefillWriteBus
 
-  io.lock.unlock := (state === s_memReadResp) && io.mem.resp.fire() && io.mem.resp.bits.isReadLast()
-
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.cmd := DontCare
   io.out.bits.user.zip(req.user).map { case (o,i) => o := i }
@@ -340,68 +332,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, state = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
   }
-}
-
-// probe
-sealed class CacheProbeStage(implicit val cacheConfig: CacheConfig) extends CacheModule {
-  val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new SimpleBusReqBundle))
-    val out = Decoupled(new SimpleBusRespBundle)
-    val lock = Flipped(new LockBundle)
-    val metaReadBus = CacheMetaArrayReadBus()
-    val dataReadBus = CacheDataArrayReadBus()
-  })
-
-  val s_idle :: s_waitLock :: s_metaRead :: s_metaReadWait :: s_check :: s_dataRead :: s_dataReadWait :: s_release :: Nil = Enum(8)
-  val state = RegInit(s_idle)
-
-  io.in.ready := (state === s_idle)
-  val req = RegEnable(io.in.bits, io.in.fire())
-  val addr = req.addr.asTypeOf(addrBundle)
-  io.metaReadBus.apply(valid = (state === s_metaRead), setIdx = addr.index)
-
-  val metaWay = RegEnable(io.metaReadBus.resp.data, state === s_metaReadWait)
-  val hitVec = VecInit(metaWay.map(m => m.valid && (m.tag === addr.tag))).asUInt
-  val hit = hitVec.orR
-  val idxCnt = Counter(LineBeats)
-
-  io.dataReadBus.apply(valid = (state === s_dataRead), setIdx = Cat(addr.index, idxCnt.value))
-  val dataWay = RegEnable(io.dataReadBus.resp.data, state === s_dataReadWait)
-  val last = Counter(state === s_release && io.out.fire(), LineBeats)._2
-
-  io.lock.lock := ((state === s_idle) && io.in.fire()) || (state === s_waitLock)
-
-  switch (state) {
-    is (s_idle) { when (io.in.fire()) { state := Mux(io.lock.holding, s_metaRead, s_waitLock) } }
-    is (s_waitLock) { when (io.lock.holding) { state := s_metaRead } }
-    is (s_metaRead) {
-      when (io.metaReadBus.req.fire()) { state := s_metaReadWait }
-      assert(req.isProbe())
-    }
-    is (s_metaReadWait) { state := s_check }
-    is (s_check) {
-      when (io.out.fire()) {
-        state := Mux(hit, s_dataRead, s_idle)
-        idxCnt.value := addr.wordIndex
-      }
-    }
-    is (s_dataRead) { when (io.dataReadBus.req.fire()) { state := s_dataReadWait } }
-    is (s_dataReadWait) { state := s_release }
-    is (s_release) {
-      when (io.out.fire()) {
-        idxCnt.inc()
-        state := Mux(last, s_idle, s_dataRead)
-      }
-    }
-  }
-
-  io.lock.unlock := ((state === s_check) && !hit && io.out.fire()) ||
-                    ((state === s_release) && last && io.out.fire())
-
-  io.out.valid := (state === s_check) || (state === s_release)
-  io.out.bits.rdata := Mux1H(hitVec, dataWay).data
-  io.out.bits.cmd := Mux(state === s_release, Mux(last, SimpleBusCmd.readLast, 0.U),
-    Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
 }
 
 class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
@@ -447,10 +377,6 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
 
   if (hasCoh) {
-    //// coherence state machine
-    //val coh = Module(new CacheProbeStage)
-    //coh.io.in <> io.out.coh.req
-
     val cohReq = io.out.coh.req.bits
     // coh does not have user signal, any better code?
     val coh = Wire(new SimpleBusReqBundle(userBits = userBits))
@@ -459,16 +385,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
     arb.io.in(0).valid := io.out.coh.req.valid
     io.out.coh.req.ready := arb.io.in(0).ready
     io.out.coh.resp <> s3.io.cohResp
-
-    //val arrayLock = Module(new Lock(2))
-    //arrayLock.io.bundle(0) <> coh.io.lock
-    //arrayLock.io.bundle(1) <> s3.io.lock
-    s3.io.lock.holding := true.B
-
-    //metaArray.io.r(0) <> coh.io.metaReadBus
-    //dataArray.io.r(0) <> coh.io.dataReadBus
   } else {
-    s3.io.lock.holding := true.B
     io.out.coh.req.ready := true.B
     io.out.coh.resp := DontCare
     io.out.coh.resp.valid := false.B
