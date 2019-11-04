@@ -134,7 +134,7 @@ sealed trait HasTlbConst {
   val Ways = tlbConfig.ways
   val Sets = 1
 
-  val debug = false//true //&& tlbname == "dtlb"
+  val debug = true && tlbname == "itlb"
 
   def TlbMetaArrayReadBus() = new SRAMReadBus(new TLBMetaBundle, set = Sets, way = Ways)
   def TlbDataArrayReadBus() = new SRAMReadBus(new TLBDataBundle, set = Sets, way = Ways)
@@ -379,6 +379,14 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
   io.metaWriteBus.req <> metaRefillWriteBus.req
 
   io.out.bits.addr := Cat(0.U(paResLen.W), Cat(Mux(hit, dataRead, memStoreAddr.asTypeOf(pteBundle).ppn), req.addr.asTypeOf(vaBundle2).off))
+  
+  when(io.out.bits.addr === "h800027ac".U || io.out.bits.addr === "h800029e2".U) {
+    printf("%d find csrw sepc: vaddr:%x \n", GTimer(), req.addr)
+  }
+  when(io.out.bits.addr === "h800028d8".U || io.out.bits.addr === "h800029b8".U || io.out.bits.addr === "h80002a2a".U) {
+    printf("%d find csrr sepc: vaddr:%x \n", GTimer(), req.addr)
+  }
+
   io.out.bits.size := req.size
   io.out.bits.cmd := req.cmd
   io.out.bits.wmask := req.wmask
@@ -520,7 +528,7 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
 
   Debug() {
     when(true.B) {
-      if(name == "dtran") { printf("-----------------------------------------------------------------------------------------------\n")}
+      if(/*name == "dtran"*/ true) { printf("-----------------------------------------------------------------------------------------------\n")}
       printf("%d:" + name + "InReq(%d, %d) InResp(%d, %d) ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("\n%d:" + name, GTimer())
       printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")

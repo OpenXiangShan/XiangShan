@@ -479,7 +479,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     when(raiseExceptionIntr){
       printf("[CSR] raiseExceptionIntr! int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
     }
-    //printf("[CSR] Red(%d, %x) raiseExcepIntr:%d valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, valid, io.instrValid)
+    //printf("[CSR] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegs, io.cfIn.pc, valid, io.instrValid)
   }
 
   // Branch control
@@ -562,6 +562,15 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
   io.in.ready := true.B
   io.out.valid := valid
+
+  Debug() {
+    printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+  }
+
+  when(raiseExceptionIntr && delegS ) {
+    printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+    printf("[CSR3] sepc is writen!!! pc:%x time:%d\n", io.cfIn.pc, GTimer())
+  }
 
   // perfcnt
 
