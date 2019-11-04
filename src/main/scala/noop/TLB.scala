@@ -134,7 +134,7 @@ sealed trait HasTlbConst {
   val Ways = tlbConfig.ways
   val Sets = 1
 
-  val debug = true //&& tlbname == "dtlb"
+  val debug = false//true //&& tlbname == "dtlb"
 
   def TlbMetaArrayReadBus() = new SRAMReadBus(new TLBMetaBundle, set = Sets, way = Ways)
   def TlbDataArrayReadBus() = new SRAMReadBus(new TLBDataBundle, set = Sets, way = Ways)
