@@ -235,25 +235,19 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
-  val sstatusWmask = "h180142".U
+  val sstatusWmask = "hc0122".U
   // Sstatus Write Mask
   // -------------------------------------------------------
-  // 20 19           9  6     2
-  // 1  1000 0000 0001 0100 0010
-  // 1  8    0    1    4    2
+  //    19           9   5     2
+  // 0  1100 0000 0001 0010 0010
+  // 0  c    0    1    2    2
   // -------------------------------------------------------
-  val sstatusRmask = "h100000030019d142".U
-  // Sstatus Read Mask
-  // -------------------------------------------------------
-  //               32        20 19           9  6     2
-  // 1 0 0 0 0 0 0 3  0 0 0001  1001 1110 0001 0100 0010
-  // 1 0 0 0 0 0 0 3  0 0 1     9    d    1    4    2
-  // -------------------------------------------------------
+  val sstatusRmask = "h80000003000de122".U
+  // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
-  val sieWmask = "h333".U
-  val sieRmask = "h333".U
-  val sipMask  = "h103".U
+  val sieMask = "h333".U & mideleg
+  val sipMask  = "h103".U & mideleg
   //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
   val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp
@@ -312,7 +306,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
-    MaskedRegMap(Sie, mie, sieWmask & mideleg, MaskedRegMap.NoSideEffect, sieRmask),
+    MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec),
     // MaskedRegMap(Scounteren, Scounteren),
 
