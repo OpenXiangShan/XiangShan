@@ -327,9 +327,6 @@ class LSExecUnit extends NOOPModule {
     //when (dtlbFinish) {
       printf("[LSU] dtlbFinish:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
     //}
-    //when (dmem.resp.fire()) {
-      //printf("[LSU] \n")
-    //}
   }
 
   val size = func(1,0)
