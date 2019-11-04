@@ -192,7 +192,10 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val mepc = Reg(UInt(XLEN.W))
 
   val mie = RegInit(0.U(XLEN.W))
-  val mip = WireInit(0.U.asTypeOf(new Interrupt))
+  val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
+  val mipReg  = RegInit(0.U.asTypeOf(new Interrupt).asUInt)
+  val mipFixMask = "h777".U
+  val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   val misa = RegInit(UInt(XLEN.W), "h8000000000141101".U) 
   // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
@@ -318,7 +321,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Sepc, sepc),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    // MaskedRegMap(Sip, mip, sipMask),
+    MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable),
 
     // Supervisor Protection and Translation
     MaskedRegMap(Satp, satp),
@@ -370,6 +373,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   io.out.bits := rdata
+
+  // Fix Mip/Sip write
+  val fixMapping = Map(
+    MaskedRegMap(Mip, mipReg.asUInt, mipFixMask),
+    MaskedRegMap(Sip, mipReg.asUInt, sipMask, MaskedRegMap.NoSideEffect, sipMask)
+  )
+  val rdataDummy = Wire(UInt(XLEN.W))
+  MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
 
   // CSR inst decode
   val ret = Wire(Bool())
@@ -447,8 +458,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val meip = WireInit(false.B)
   BoringUtils.addSink(mtip, "mtip")
   BoringUtils.addSink(meip, "meip")
-  mip.t.m := mtip
-  mip.e.m := meip
+  mipWire.t.m := mtip
+  mipWire.e.m := meip
 
   // exceptions
 
