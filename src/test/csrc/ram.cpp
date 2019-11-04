@@ -8,34 +8,6 @@ static long img_size = 0;
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
 
-inline uint32_t tran(int ptenum, int pteidx) {
-  return (((0x80000000+4*1024*1024*ptenum+4*1024*pteidx)&0xfffff000)>>2) | 0x1b;
-}
-/*
-void addpageSv32() {
-#define PAGESIZE (4 * 1024)  // 4KB = 2^12B
-#define PTEVOLUME (PAGESIZE * 1024) // 4MB = 2^22B
-#define PTENUM (RAMSIZE / PTEVOLUME) // 128MB / 4MB = 32
-#define PDEADDR (0x88000000 - (PAGESIZE * (PTENUM + 1))) //0x88000000-0x1000*33 = 0x87fdf000
-#define PTEADDR(i) (PDEADDR + 0x1000*(i+1))
-  uint32_t pde[1024];
-  uint32_t pte[PTENUM][1024];
-  
-  for(int addr = 0; addr < PTENUM ;addr++) {
-    pde[addr + (0x80000000/PTEVOLUME)] = ((PTEADDR(addr)&0xfffff000)>>2) | 0x1b ;
-  }
-
-  for(int outidx = 0; outidx < PTENUM; outidx++ ) {
-    for(int inidx = 0; inidx < 1024; inidx++ ) {
-      pte[outidx][inidx] = tran(outidx, inidx);
-    }
-  }
-  
-  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+1)), pde, PAGESIZE);
-  memcpy((char *)ram+(RAMSIZE-PAGESIZE*PTENUM), pte, PAGESIZE*PTENUM);
-}
-*/
-
 void addpageSv39() {
 //three layers
 //addr range: 0x0000000080000000 - 0x0000000088000000 for 128MB from 2GB - 2GB128MB
@@ -63,28 +35,28 @@ void addpageSv39() {
   uint64_t pdemmio[ENTRYNUM];
   uint64_t ptemmio[PTEMMIONUM][ENTRYNUM];
   
-  pdde[1] = (((PDDEADDR-PAGESIZE*1) & 0xfffff000) >> 2) | 0x1b;
+  pdde[1] = (((PDDEADDR-PAGESIZE*1) & 0xfffff000) >> 2) | 0xf;
 
   for(int i = 0; i < PTEMMIONUM; i++) {
-    pdemmio[i] = (((PDDEADDR-PAGESIZE*(PTEMMIONUM+PDEMMIONUM-i)) & 0xfffff000) >> 2) | 0x1b;
+    pdemmio[i] = (((PDDEADDR-PAGESIZE*(PTEMMIONUM+PDEMMIONUM-i)) & 0xfffff000) >> 2) | 0xf;
   }
   
   for(int outidx = 0; outidx < PTEMMIONUM; outidx++) {
     for(int inidx = 0; inidx < ENTRYNUM; inidx++) {
-      ptemmio[outidx][inidx] = (((0x40000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000) >> 2) | 0x1b;
+      ptemmio[outidx][inidx] = (((0x40000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000) >> 2) | 0xf;
     }
   }
   
   //0x800000000 - 0x87ffffff
-  pdde[2] = ((PDEADDR & 0xfffff000) >> 2) | 0x1b;
+  pdde[2] = ((PDEADDR & 0xfffff000) >> 2) | 0xf;
   
   for(int i = 0; i < PTENUM ;i++) {
-    pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0x1b ;
+    pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0xf ;
   }
 
   for(int outidx = 0; outidx < PTENUM; outidx++ ) {
     for(int inidx = 0; inidx < ENTRYNUM; inidx++ ) {
-      pte[outidx][inidx] = (((0x80000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000)>>2) | 0x1b;
+      pte[outidx][inidx] = (((0x80000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000)>>2) | 0xf;
     }
   }
 

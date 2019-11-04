@@ -289,7 +289,7 @@ class IDU extends NOOPModule with HasInstrType {
 
   Debug(){
     // when(io.out.fire()){
-      printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x brIdx: %x npcin: %x npcout: %x valid: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType, brIdx, io.in.bits.pnpc, pnpcOut, io.out.fire())
+      //printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x brIdx: %x npcin: %x npcout: %x valid: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType, brIdx, io.in.bits.pnpc, pnpcOut, io.out.fire())
     // }
   }
   // io.out.bits.cf <> io.in.bits
@@ -299,7 +299,7 @@ class IDU extends NOOPModule with HasInstrType {
   io.out.bits.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
   hasIntr := intrVec.orR
 
-  io.out.bits.cf.exceptionVec.map(_ := false.B)
+  io.out.bits.cf.exceptionVec := io.in.bits.exceptionVec/*.map(_ := false.B)*/ //Fix by zhangzifei from false.B
   io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
   // io.out.bits.cf.exceptionVec(ecallM) := (instr === Priviledged.ECALL) && io.in.valid
 

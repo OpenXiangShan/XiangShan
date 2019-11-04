@@ -94,8 +94,9 @@ class MMUIO extends NOOPBundle {
 
   val loadPF = Output(Bool())
   val storePF = Output(Bool())
-  val instrPF = Output(Bool())
   val addr = Output(UInt(AddrBits.W)) // reserved for further use
+  
+  def isPF() = loadPF || storePF
 }
 
 class MemMMUIO extends NOOPBundle {

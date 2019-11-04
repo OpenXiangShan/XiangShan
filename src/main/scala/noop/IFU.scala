@@ -14,7 +14,7 @@ trait HasResetVector {
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
 
-    val imem = new SimpleBusUC(userBits = AddrBits*2 + 4)
+    val imem = new SimpleBusUC(userBits = AddrBits*2 + 4 + 1)
     // val pc = Input(UInt(AddrBits.W))
     val out = Decoupled(new CtrlFlowIO)
 
@@ -71,9 +71,9 @@ class IFU extends NOOPModule with HasResetVector {
   io.bpFlush := false.B
 
   io.imem.req.bits.apply(addr = Cat(pc(AddrBits-1,1),0.U(1.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
-    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(brIdx(3,0), npc, pc))
+    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(0.U(1.W), brIdx(3,0), npc, pc))
   io.imem.req.valid := io.out.ready
-
+  //TODO: add ctrlFlow.exceptionVec
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   Debug(){
@@ -102,6 +102,7 @@ class IFU extends NOOPModule with HasResetVector {
     io.out.bits.pc := x(AddrBits-1,0)
     io.out.bits.pnpc := x(AddrBits*2-1,AddrBits)
     io.out.bits.brIdx := x(AddrBits*2 + 3, AddrBits*2)
+    io.out.bits.exceptionVec(instrPageFault) := x(AddrBits*2 + 4)
   }
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

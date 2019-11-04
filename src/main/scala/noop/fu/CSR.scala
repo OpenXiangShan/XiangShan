@@ -490,6 +490,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     when(raiseExceptionIntr){
       printf("[CSR] raiseExceptionIntr! int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
     }
+    //printf("[CSR] Red(%d, %x) raiseExcepIntr:%d valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, valid, io.instrValid)
   }
 
   // Branch control
@@ -501,7 +502,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   ret := isMret || isSret || isUret
   trapTarget := Mux(delegS, stvec, mtvec)
   retTarget := DontCare
-  // TODO redircet target
+  // TODO redirect target
   // val illegalEret = TODO
 
   when (valid && isMret) {

@@ -44,6 +44,7 @@ class LSUIO extends FunctionUnitIO {
   val instr = Input(UInt(32.W)) // Atom insts need aq rl funct3 bit from instr
   val dmem = new SimpleBusUC
   val isMMIO = Output(Bool())
+  val dtlbPF = Output(Bool())
 }
 
 class StoreQueueEntry extends NOOPBundle{
@@ -91,16 +92,18 @@ class AtomALU extends NOOPModule {
 class LSU extends NOOPModule {
   val io = IO(new LSUIO)
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
-  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt, dtlbPF: Bool): UInt = {
     this.valid := valid
     this.src1 := src1
     this.src2 := src2
     this.func := func
+    dtlbPF := io.dtlbPF
     io.out.bits
   }
     val lsExecUnit = Module(new LSExecUnit)
     lsExecUnit.io.instr := DontCare
-    
+    io.dtlbPF := lsExecUnit.io.dtlbPF
+
     val storeReq = valid & LSUOpType.isStore(func)
     val loadReq = valid  & LSUOpType.isLoad(func)
     val atomReq = valid  & LSUOpType.isAtom(func)
@@ -291,19 +294,39 @@ class LSExecUnit extends NOOPModule {
   val isStore = valid && LSUOpType.isStore(func)
   val partialLoad = !isStore && (func =/= LSUOpType.ld)
 
-  val s_idle :: s_wait_resp :: s_partialLoad :: Nil = Enum(3)
+  val s_idle :: s_wait_tlb :: s_wait_resp :: s_partialLoad :: Nil = Enum(4)
   val state = RegInit(s_idle)
 
+  val dtlbFinish = WireInit(false.B)
+  val dtlbPF = WireInit(false.B)
+  val dtlbEnable = WireInit(false.B)
+  BoringUtils.addSink(dtlbFinish, "DTLBFINISH")
+  BoringUtils.addSink(dtlbPF, "DTLBPF")
+  BoringUtils.addSink(dtlbEnable, "DTLBENABLE")
+
+  io.dtlbPF := dtlbPF
+
   switch (state) {
-    is (s_idle) { when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) } }
+    is (s_idle) { 
+      when (dmem.req.fire() && dtlbEnable)  { state := s_wait_tlb  }
+      when (dmem.req.fire() && !dtlbEnable) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+      //when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) }
+    }
+    is (s_wait_tlb) {
+      when (dtlbFinish && dtlbPF ) { state := s_idle }
+      when (dtlbFinish && !dtlbPF) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+    }
     is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
   }
 
   Debug(){
-    when (dmem.req.fire()){
-      printf("[LSU] addr %x, size %x, wdata_raw %x, isStore %x\n",  addr, func(1,0), io.wdata, isStore)
-    }
+    //when (dmem.req.fire()){
+      printf("[LSU] IN(%d, %d) OUT(%d, %d) addr %x, size %x, wdata_raw %x, isStore %x \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, addr, func(1,0), io.wdata, isStore)
+    //}
+    //when (dtlbFinish) {
+      printf("[LSU] dtlbFinish:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
+    //}
   }
 
   val size = func(1,0)
@@ -312,8 +335,8 @@ class LSExecUnit extends NOOPModule {
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp))
-  io.in.ready := (state === s_idle)
+  io.out.valid := Mux( dtlbPF, true.B, Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
+  io.in.ready := (state === s_idle) || dtlbPF
 
   val rdata = dmem.resp.bits.rdata
   val rdataLatch = RegNext(rdata)

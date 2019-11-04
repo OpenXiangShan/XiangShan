@@ -37,7 +37,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = false && cacheName == "dcache"
+  val debug = false //true && cacheName == "dcache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -172,12 +172,17 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     val mem = new SimpleBusUC
     val mmio = new SimpleBusUC
   })
-
+  
+  val isIPF = WireInit(false.B)
+  if (cacheName == "icache") {
+    isIPF := io.in.bits.req.user.getOrElse(0.U)(AddrBits*2 + 4)
+  }
+  
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(addrBundle)
-  val mmio = io.in.valid && io.in.bits.mmio
-  val hit = io.in.valid && io.in.bits.hit
-  val miss = io.in.valid && !io.in.bits.hit
+  val mmio = io.in.valid && io.in.bits.mmio && !isIPF
+  val hit = io.in.valid && io.in.bits.hit && !isIPF
+  val miss = io.in.valid && !io.in.bits.hit && !isIPF
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
 
@@ -231,7 +236,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     wdata = Mux1H(io.in.bits.waymask, dataWay).data, wmask = Fill(DataBytes, 1.U))
 
   io.mem.resp.ready := true.B
-  io.mem.req.valid := (state === s_memReadReq) || ((state === s_memWriteReq) && (state2 === s2_memWriteReq))
+  io.mem.req.valid := (state === s_memReadReq && !isIPF) || ((state === s_memWriteReq) && (state2 === s2_memWriteReq))
 
   // mmio
   io.mmio.req.bits := io.in.bits.req
@@ -243,6 +248,10 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val readingFirst = !afterFirstRead && io.mem.resp.fire() && (state === s_memReadResp)
   val inRdataRegDemand = RegEnable(Mux(mmio, io.mmio.resp.bits.rdata, io.mem.resp.bits.rdata),
                                    Mux(mmio, state === s_mmioResp, readingFirst))
+
+  if (cacheName == "icache") {
+    val isIPF = req.user.getOrElse(0.U)(AddrBits*2 + 4)
+  }
 
   switch (state) {
     is (s_idle) {
@@ -301,10 +310,10 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   metaWriteArb.io.in(1) <> metaRefillWriteBus.req
   io.metaWriteBus.req <> metaWriteArb.io.out
 
-  io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
+  io.out.bits.rdata := Mux(isIPF, 0.U, Mux(hit, dataRead, inRdataRegDemand))
   io.out.bits.cmd := Mux(io.in.bits.req.isRead(), SimpleBusCmd.readLast, Mux(io.in.bits.req.isWrite(), SimpleBusCmd.writeResp, DontCare))//DontCare, added by lemover
   io.out.bits.user.zip(io.in.bits.req.user).map { case (o,i) => o := i }
-  io.out.valid := io.in.valid && Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire))
+  io.out.valid := io.in.valid && ( Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)) || isIPF)
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the
@@ -450,7 +459,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   Debug(debug) {
     when(true.B) {
       io.in.dump(cacheName + ".in")
-      printf("%d:" + cacheName + "InReqValid:%d InReqReady:%d InRespValid:%d InRespReady:%d\n", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
+      printf("%d:" + cacheName + "InReq(%d, %d) InResp(%d, %d) \n", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("%d:" + cacheName + " {IN s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)} {OUT s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)}\n",
         GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready, s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
       when (s1.io.in.valid) { printf(p"[${cacheName}.S1]: ${s1.io.in.bits}\n") }
