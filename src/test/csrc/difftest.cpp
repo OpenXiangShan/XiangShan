@@ -67,10 +67,14 @@ void init_difftest(uint64_t *reg) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, uint64_t intrNO) {
+int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int this_inst, int isMMIO, int isRVC, uint64_t intrNO) {
+
+  #define DEBUG_RETIRE_TRACE_SIZE 16
+
   uint64_t ref_r[33];
   static uint64_t nemu_pc = 0x80000000;
-  static uint64_t pc_retire_queue[8] = {0};
+  static uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
+  static int inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static int pc_retire_pointer = 7;
 
   if (isMMIO) {
@@ -82,6 +86,7 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, 
     ref_difftest_setregs(reg_scala);
     pc_retire_pointer = (pc_retire_pointer+1) % 8;
     pc_retire_queue[pc_retire_pointer] = nemu_pc;
+    inst_retire_queue[pc_retire_pointer] = this_inst;
     return 0;
   }
 
@@ -93,24 +98,26 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, 
 
   ref_difftest_getregs(&ref_r);
 
-  pc_retire_pointer = (pc_retire_pointer+1) % 8;
-  pc_retire_queue[pc_retire_pointer] = nemu_pc;
+  pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
+  pc_retire_queue[pc_retire_pointer] = this_pc;
+  inst_retire_queue[pc_retire_pointer] = this_inst;
   
   uint64_t temp = ref_r[32];
   ref_r[32] = nemu_pc;
   nemu_pc = temp;
 
   if (memcmp(reg_scala, ref_r, sizeof(ref_r)) != 0) {
-    printf("=========Retire Trace=========\n");
+    printf("\n==============Retire Trace==============\n");
     int j;
-    for(j = 0; j < 8; j++){
-      printf("retire pc [%x]: %lx %s\n", j, pc_retire_queue[j], (j==pc_retire_pointer)?"<--":"");
+    for(j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++){
+      printf("retire trace [%x]: pc %010lx inst %08x %s\n", j, pc_retire_queue[j], inst_retire_queue[j], (j==pc_retire_pointer)?"<--":"");
     }
+    printf("\n==============  Reg Diff  ==============\n");
     ref_isa_reg_display();
     int i;
     for (i = 0; i < 33; i ++) {
       if (reg_scala[i] != ref_r[i]) {
-        printf("x%2d different at pc = 0x%08lx, right= 0x%016lx, wrong = 0x%016lx\n",
+        printf("x%2d different at pc = 0x%010lx, right= 0x%016lx, wrong = 0x%016lx\n",
             i, this_pc, ref_r[i], reg_scala[i]);
       }
     }
