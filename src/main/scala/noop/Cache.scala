@@ -37,7 +37,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = false //true && cacheName == "dcache"
+  val debug = true && cacheName == "dcache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)

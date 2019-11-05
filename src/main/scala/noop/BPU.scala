@@ -163,9 +163,9 @@ class BPU1 extends NOOPModule {
     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
     when (wen) {
       pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
-      Debug(){
-        printf("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
-      }
+      //Debug(){
+        //printf("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
+      //}
     }
   }
   when (req.valid) {
