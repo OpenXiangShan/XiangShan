@@ -73,7 +73,7 @@ emu: $(EMU)
 	@$(EMU) -i $(IMAGE) $(MAINARGS)
 
 cache:
-	$(MAKE) emu IMAGE=Makefile #SIMTOP=top.CacheTestMain SIM_TOP=CacheTestTop IMAGE=Makefile
+	$(MAKE) emu IMAGE=Makefile
 
 clean:
 	rm -rf $(BUILD_DIR)

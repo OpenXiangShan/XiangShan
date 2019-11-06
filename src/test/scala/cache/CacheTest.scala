@@ -9,6 +9,12 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
+// To run the following cache random test, do the following:
+// * uncomment the following class
+// * comment the NOOPSimTop class in noop/src/test/scala/top/NOOPSim.scala
+// * define the macro CACHE_TEST in noop/src/test/csrc/emu.h:141
+// * run 'make cache' under noop/
+
 /*
 class NOOPSimTop extends Module {
   val io = IO(new Bundle{
