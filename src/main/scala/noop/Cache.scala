@@ -53,6 +53,9 @@ sealed trait HasCacheConst {
   def CacheMetaArrayWriteBus() = new SRAMWriteBus(new MetaBundle, set = Sets, way = Ways)
   def CacheDataArrayWriteBus() = new SRAMWriteBus(new DataBundle, set = Sets * LineBeats, way = Ways)
 
+  def getMetaIdx(addr: UInt) = addr.asTypeOf(addrBundle).index
+  def getDataIdx(addr: UInt) = Cat(addr.asTypeOf(addrBundle).index, addr.asTypeOf(addrBundle).wordIndex)
+
   def isSameWord(a1: UInt, a2: UInt) = ((a1 >> 2) === (a2 >> 2))
   def isSetConflict(a1: UInt, a2: UInt) = (a1.asTypeOf(addrBundle).index === a2.asTypeOf(addrBundle).index)
 }
@@ -98,10 +101,9 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
 
   // read meta array and data array
-  val addr = io.in.bits.addr.asTypeOf(addrBundle)
   val readBusValid = io.in.valid && io.out.ready
-  io.metaReadBus.apply(valid = readBusValid, setIdx = addr.index)
-  io.dataReadBus.apply(valid = readBusValid, setIdx = Cat(addr.index, addr.wordIndex))
+  io.metaReadBus.apply(valid = readBusValid, setIdx = getMetaIdx(io.in.bits.addr))
+  io.dataReadBus.apply(valid = readBusValid, setIdx = getDataIdx(io.in.bits.addr))
 
   io.out.bits.req := io.in.bits
   io.out.valid := io.in.valid && io.metaReadBus.req.ready && io.dataReadBus.req.ready
@@ -115,6 +117,8 @@ sealed class Stage2IO(implicit val cacheConfig: CacheConfig) extends CacheBundle
   val hit = Output(Bool())
   val waymask = Output(UInt(Ways.W))
   val mmio = Output(Bool())
+  val isForwardData = Output(Bool())
+  val forwardData = Output(CacheDataArrayWriteBus().req.bits)
 }
 
 // check
@@ -124,21 +128,44 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
     val out = Decoupled(new Stage2IO)
     val metaReadResp = Flipped(Vec(Ways, new MetaBundle))
     val dataReadResp = Flipped(Vec(Ways, new DataBundle))
+    val metaWriteBus = Input(CacheMetaArrayWriteBus())
+    val dataWriteBus = Input(CacheDataArrayWriteBus())
   })
 
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(addrBundle)
 
-  val hitVec = VecInit(io.metaReadResp.map(m => m.valid && (m.tag === addr.tag) && io.in.valid)).asUInt
+  val isForwardMeta = io.in.valid && io.metaWriteBus.req.valid && io.metaWriteBus.req.bits.setIdx === getMetaIdx(req.addr)
+  val isForwardMetaReg = RegInit(false.B)
+  when (isForwardMeta) { isForwardMetaReg := true.B }
+  .elsewhen (io.in.fire() || !io.in.valid) { isForwardMetaReg := false.B }
+  val forwardMetaReg = RegEnable(io.metaWriteBus.req.bits, isForwardMeta)
+
+  val metaWay = Wire(Vec(Ways, chiselTypeOf(forwardMetaReg.data)))
+  forwardMetaReg.waymask.getOrElse("1b".U).asBools.zipWithIndex.map { case (w, i) =>
+    metaWay(i) := Mux(isForwardMetaReg && w, forwardMetaReg.data, io.metaReadResp(i))
+  }
+
+  val hitVec = VecInit(metaWay.map(m => m.valid && (m.tag === addr.tag) && io.in.valid)).asUInt
   val victimWaymask = if (Ways > 1) (1.U << LFSR64()(log2Up(Ways)-1,0)) else "b1".U
   val waymask = Mux(io.out.bits.hit, hitVec, victimWaymask)
   assert(!(io.in.valid && PopCount(waymask) > 1.U))
 
-  io.out.bits.metas := io.metaReadResp
+  io.out.bits.metas := metaWay
   io.out.bits.hit := io.in.valid && hitVec.orR
   io.out.bits.waymask := waymask
   io.out.bits.datas := io.dataReadResp
   io.out.bits.mmio := AddressSpace.isMMIO(req.addr)
+
+  val isForwardData = io.in.valid && (io.dataWriteBus.req match { case r =>
+    r.valid && r.bits.setIdx === getDataIdx(req.addr)
+  })
+  val isForwardDataReg = RegInit(false.B)
+  when (isForwardData) { isForwardDataReg := true.B }
+  .elsewhen (io.in.fire() || !io.in.valid) { isForwardDataReg := false.B }
+  val forwardDataReg = RegEnable(io.dataWriteBus.req.bits, isForwardData)
+  io.out.bits.isForwardData := isForwardDataReg
+  io.out.bits.forwardData := forwardDataReg
 
   io.out.bits.req <> req
   io.out.valid := io.in.valid
@@ -153,12 +180,16 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     val isFinish = Output(Bool())
     val flush = Input(Bool())
     val dataReadBus = CacheDataArrayReadBus()
-    val dataWriteBus = Vec(2, CacheDataArrayWriteBus())
-    val metaWriteBus = Vec(2, CacheMetaArrayWriteBus())
+    val dataWriteBus = CacheDataArrayWriteBus()
+    val metaWriteBus = CacheMetaArrayWriteBus()
+
     val mem = new SimpleBusUC
     val mmio = new SimpleBusUC
     val cohResp = Decoupled(new SimpleBusRespBundle)
   })
+
+  val metaWriteArb = Module(new Arbiter(CacheMetaArrayWriteBus().req.bits, 2))
+  val dataWriteArb = Module(new Arbiter(CacheDataArrayWriteBus().req.bits, 2))
 
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(addrBundle)
@@ -169,16 +200,18 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
 
-  val dataRead = Mux1H(io.in.bits.waymask, io.in.bits.datas).data
+  val useForwardData = io.in.bits.isForwardData && io.in.bits.waymask === io.in.bits.forwardData.waymask.getOrElse("1b".U)
+  val dataReadArray = Mux1H(io.in.bits.waymask, io.in.bits.datas).data
+  val dataRead = Mux(useForwardData, io.in.bits.forwardData.data.data, dataReadArray)
   val wordMask = Mux(!ro.B && req.isWrite(), MaskExpand(req.wmask), 0.U(DataBits.W))
 
   val hitWrite = hit && req.isWrite()
   val dataHitWriteBus = Wire(CacheDataArrayWriteBus()).apply(
     data = Wire(new DataBundle).apply(MaskData(dataRead, req.wdata, wordMask)),
-    valid = hitWrite, setIdx = Cat(addr.index, addr.wordIndex), waymask = io.in.bits.waymask)
+    valid = hitWrite, setIdx = getDataIdx(req.addr), waymask = io.in.bits.waymask)
 
   val metaHitWriteBus = Wire(CacheMetaArrayWriteBus()).apply(
-    valid = hitWrite && !meta.dirty, setIdx = addr.index, waymask = io.in.bits.waymask,
+    valid = hitWrite && !meta.dirty, setIdx = getMetaIdx(req.addr), waymask = io.in.bits.waymask,
     data = Wire(new MetaBundle).apply(tag = meta.tag, valid = true.B, dirty = (!ro).B)
   )
 
@@ -288,17 +321,19 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     valid = (state === s_memReadResp) && io.mem.resp.fire(), setIdx = Cat(addr.index, readBeatCnt.value),
     data = Wire(new DataBundle).apply(dataRefill), waymask = io.in.bits.waymask)
 
-  io.dataWriteBus(0) <> dataHitWriteBus
-  io.dataWriteBus(1) <> dataRefillWriteBus
+  dataWriteArb.io.in(0) <> dataHitWriteBus.req
+  dataWriteArb.io.in(1) <> dataRefillWriteBus.req
+  io.dataWriteBus.req <> dataWriteArb.io.out
 
   val metaRefillWriteBus = Wire(CacheMetaArrayWriteBus()).apply(
     valid = (state === s_memReadResp) && io.mem.resp.fire() && io.mem.resp.bits.isReadLast(),
     data = Wire(new MetaBundle).apply(valid = true.B, tag = addr.tag, dirty = !ro.B && req.isWrite()),
-    setIdx = addr.index, waymask = io.in.bits.waymask
+    setIdx = getMetaIdx(req.addr), waymask = io.in.bits.waymask
   )
 
-  io.metaWriteBus(0) <> metaHitWriteBus
-  io.metaWriteBus(1) <> metaRefillWriteBus
+  metaWriteArb.io.in(0) <> metaHitWriteBus.req
+  metaWriteArb.io.in(1) <> metaRefillWriteBus.req
+  io.metaWriteBus.req <> metaWriteArb.io.out
 
   io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.cmd := DontCare
@@ -335,10 +370,8 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   val s1 = Module(new CacheStage1)
   val s2 = Module(new CacheStage2)
   val s3 = Module(new CacheStage3)
-  val metaArray = Module(new SRAMTemplateWithArbiter(nRead = 1, nWrite = 2,
-    new MetaBundle, set = Sets, way = Ways, shouldReset = true))
-  val dataArray = Module(new SRAMTemplateWithArbiter(nRead = 2, nWrite = 2,
-    new DataBundle, set = Sets * LineBeats, way = Ways))
+  val metaArray = Module(new SRAMTemplateWithArbiter(nRead = 1, new MetaBundle, set = Sets, way = Ways, shouldReset = true))
+  val dataArray = Module(new SRAMTemplateWithArbiter(nRead = 2, new DataBundle, set = Sets * LineBeats, way = Ways))
 
   if (cacheName == "icache") {
     // flush icache when executing fence.i
@@ -383,6 +416,8 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 
   s2.io.metaReadResp := s1.io.metaReadBus.resp.data
   s2.io.dataReadResp := s1.io.dataReadBus.resp.data
+  s2.io.dataWriteBus := s3.io.dataWriteBus
+  s2.io.metaWriteBus := s3.io.metaWriteBus
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 

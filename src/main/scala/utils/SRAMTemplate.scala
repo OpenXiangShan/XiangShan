@@ -84,40 +84,33 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
 
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
+
+  Debug(false) {
+    when (wen) {
+      printf("%d: SRAMTemplate: write %x to idx = %d\n", GTimer(), wdata.asUInt, setIdx)
+    }
+    when (RegNext(realRen)) {
+      printf("%d: SRAMTemplate: read %x at idx = %d\n", GTimer(), VecInit(rdata).asUInt, RegNext(io.r.req.bits.setIdx))
+    }
+  }
 }
 
-class SRAMTemplateWithArbiter[T <: Data](nRead: Int, nWrite: Int, gen: T, set: Int, way: Int = 1,
+class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
   shouldReset: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val r = Flipped(Vec(nRead, new SRAMReadBus(gen, set, way)))
-    val w = Flipped(Vec(nWrite, new SRAMWriteBus(gen, set, way)))
+    val w = Flipped(new SRAMWriteBus(gen, set, way))
   })
 
   val ram = Module(new SRAMTemplate(gen, set, way, shouldReset, holdRead = false, singlePort = true))
-
-  val writeArb = Module(new Arbiter(chiselTypeOf(io.w(0).req.bits), nWrite))
-  writeArb.io.in <> io.w.map(_.req)
-  ram.io.w.req <> writeArb.io.out
+  ram.io.w <> io.w
 
   val readArb = Module(new Arbiter(chiselTypeOf(io.r(0).req.bits), nRead))
   readArb.io.in <> io.r.map(_.req)
   ram.io.r.req <> readArb.io.out
 
-  // forward and latch read results
+  // latch read results
   io.r.map{ case r => {
-    val rSetIdx = HoldUnless(r.req.bits.setIdx, r.req.fire())
-    val isForward = writeArb.io.out.fire() && (writeArb.io.out.bits.setIdx === rSetIdx)
-
-    val rdataReg = Reg(chiselTypeOf(r.resp.data))
-    val latching = RegNext(r.req.fire())
-    val rdata = Mux(latching, ram.io.r.resp.data, rdataReg)
-
-    val forwardData = Wire(Vec(way, chiselTypeOf(writeArb.io.out.bits.data)))
-    writeArb.io.out.bits.waymask.getOrElse("1b".U).asBools.zipWithIndex.map { case (w, i) =>
-      forwardData(i) := Mux(isForward && w, writeArb.io.out.bits.data, rdata(i))
-    }
-
-    when (isForward || latching) { rdataReg := forwardData }
-    r.resp.data := Mux(isForward || latching, forwardData, rdataReg)
+    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
   }}
 }
