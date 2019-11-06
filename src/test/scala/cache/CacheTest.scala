@@ -57,10 +57,12 @@ class NOOPSimTop extends Module {
 
   val randBundle = new Bundle {
     val isWrite = Bool()
+    val readyChoose = UInt(2.W)
     val wmask = UInt(8.W)
     val addr = UInt(log2Up(NRmemBlock).W)
     val cohChoose = UInt(1.W)
     val cohAddr = UInt(log2Up(NRmemBlock).W)
+    val cohReadyChoose = UInt(2.W)
   }
   val rand = LFSR64(true.B).asTypeOf(randBundle)
   val randAddr = memBase.U + rand.addr * 8.U
@@ -75,7 +77,7 @@ class NOOPSimTop extends Module {
   in.req.bits.apply(addr = addr, size = "b11".U, user = user,
     wdata = wdata, wmask = wmask, cmd = cmd)
   in.req.valid := (state === s_init_req) || (state === s_test)
-  in.resp.ready := true.B
+  in.resp.ready := rand.readyChoose =/= 0.U
 
   val cohInflight = RegInit(false.B)
   when (cohIn.resp.fire()) {
@@ -88,7 +90,7 @@ class NOOPSimTop extends Module {
   cohIn.req.bits.apply(addr = rand.cohAddr * 8.U + memBase.U, size = "b11".U,
     wdata = 0.U, wmask = 0.U, cmd = SimpleBusCmd.probe)
   cohIn.req.valid := (state === s_test) && rand.cohChoose === 0.U && !cohInflight
-  cohIn.resp.ready := true.B
+  cohIn.resp.ready := rand.cohReadyChoose =/= 0.U
 
   when (Counter((state === s_test) && in.resp.fire(), 100000)._2) { printf(".") }
   when (Counter((state === s_test) && cohIn.req.fire(), 100000)._2) { printf("@") }
