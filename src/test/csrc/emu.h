@@ -128,7 +128,23 @@ class Emulator {
     }
   }
 
-  void execute() { execute_cycles(max_cycles); }
+  void cache_test(uint64_t n) {
+    while (n > 0) {
+      single_cycle();
+      n --;
+    }
+  }
+
+  void execute() {
+//#define CACHE_TEST
+
+#ifdef CACHE_TEST
+    eprintf(ANSI_COLOR_MAGENTA "This is random test for cache.\n" ANSI_COLOR_RESET);
+    cache_test(max_cycles);
+#else
+    execute_cycles(max_cycles);
+#endif
+  }
   uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
 };
