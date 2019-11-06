@@ -136,7 +136,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   val isForwardMeta = io.in.valid && io.metaWriteBus.req.valid && io.metaWriteBus.req.bits.setIdx === getMetaIdx(req.addr)
   val isForwardMetaReg = RegInit(false.B)
   when (isForwardMeta) { isForwardMetaReg := true.B }
-  .elsewhen (io.in.fire() || !io.in.valid) { isForwardMetaReg := false.B }
+  when (io.in.fire() || !io.in.valid) { isForwardMetaReg := false.B }
   val forwardMetaReg = RegEnable(io.metaWriteBus.req.bits, isForwardMeta)
 
   val metaWay = Wire(Vec(Ways, chiselTypeOf(forwardMetaReg.data)))
@@ -159,7 +159,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   })
   val isForwardDataReg = RegInit(false.B)
   when (isForwardData) { isForwardDataReg := true.B }
-  .elsewhen (io.in.fire() || !io.in.valid) { isForwardDataReg := false.B }
+  when (io.in.fire() || !io.in.valid) { isForwardDataReg := false.B }
   val forwardDataReg = RegEnable(io.dataWriteBus.req.bits, isForwardData)
   io.out.bits.isForwardData := isForwardDataReg
   io.out.bits.forwardData := forwardDataReg
