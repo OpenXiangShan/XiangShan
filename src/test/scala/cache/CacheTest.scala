@@ -19,6 +19,7 @@ class NOOPSimTop extends Module {
   val cacheSizeKB = 1 // Bytes
   val memSizeB = 4096 // Bytes
   val NRmemBlock = memSizeB / 8
+  val printCnt = 100000
 
   val Name = "dcache"
   val in = WireInit(0.U.asTypeOf(new SimpleBusUC(userBits = 33)))
@@ -47,6 +48,10 @@ class NOOPSimTop extends Module {
       when (in.resp.fire()) {
         val wrap = initCnt.inc()
         state := Mux(wrap, s_test, s_init_req)
+        when (wrap) {
+          printf("One '.' for handling %d requests from CPU, and one '@' for handling %d coherence requests\n",
+            printCnt.U, printCnt.U)
+        }
       }
     }
   }
@@ -92,8 +97,8 @@ class NOOPSimTop extends Module {
   cohIn.req.valid := (state === s_test) && rand.cohChoose === 0.U && !cohInflight
   cohIn.resp.ready := rand.cohReadyChoose =/= 0.U
 
-  when (Counter((state === s_test) && in.resp.fire(), 100000)._2) { printf(".") }
-  when (Counter((state === s_test) && cohIn.req.fire(), 100000)._2) { printf("@") }
+  when (Counter((state === s_test) && in.resp.fire(), printCnt)._2) { printf(".") }
+  when (Counter((state === s_test) && cohIn.req.fire(), printCnt)._2) { printf("@") }
 
   Debug(false) {
     when (in.req.fire()) { printf(p"${GTimer()},[in.req] ${in.req.bits}\n") }
