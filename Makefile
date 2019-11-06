@@ -41,12 +41,13 @@ EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
-	+define+RANDOMIZE_REG_INIT \
-  --assert --output-split 20000 \
-  --trace  \
+  +define+RANDOMIZE_REG_INIT \
+  --assert \
+  --output-split 5000 \
+  --output-split-cfuncs 5000 \
   -I$(abspath $(BUILD_DIR)) \
   --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
-   -LDFLAGS "$(EMU_LDFLAGS)"
+  -LDFLAGS "$(EMU_LDFLAGS)"
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(SIM_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
@@ -73,7 +74,7 @@ emu: $(EMU)
 	@$(EMU) -i $(IMAGE) $(MAINARGS)
 
 cache:
-	$(MAKE) emu IMAGE=Makefile #SIMTOP=top.CacheTestMain SIM_TOP=CacheTestTop IMAGE=Makefile
+	$(MAKE) emu IMAGE=Makefile
 
 clean:
 	rm -rf $(BUILD_DIR)

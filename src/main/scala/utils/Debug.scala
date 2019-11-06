@@ -12,4 +12,4 @@ object Debug {
 
 object ShowType {
   def apply[T: Manifest](t: T) = println(manifest[T])
-  }
+}
