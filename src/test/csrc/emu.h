@@ -102,7 +102,9 @@ class Emulator {
       n --;
 
       if (lastcommit - n > stuck_limit && hascommit) {
-        eprintf("No instruction commits for %d cycles, maybe get stuck\n", stuck_limit);
+        eprintf("No instruction commits for %d cycles, maybe get stuck\n"
+            "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
+            stuck_limit, stuck_limit);
         set_abort();
       }
 
