@@ -76,7 +76,7 @@ class IFU extends NOOPModule with HasResetVector {
   //TODO: add ctrlFlow.exceptionVec
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
-  Debug(){
+  Debug(false){
     when(io.imem.req.fire()){
       printf("[IFI] pc=%x user=%x %x %x %x %x\n", io.imem.req.bits.addr, io.imem.req.bits.user.getOrElse(0.U), io.redirect.valid, io.redirectRVC.valid, pbrIdx, brIdx)
     }

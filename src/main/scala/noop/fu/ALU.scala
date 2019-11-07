@@ -112,14 +112,14 @@ class ALU extends NOOPModule {
   //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
   // }
 
-  Debug(){
+  Debug(false){
     when(valid && isBru){
       printf("[BRU]tgt %x, npc: %x, pdwrong: %x\n", io.redirect.target, io.cfIn.pnpc, predictWrong)
       printf("[BRU2]taken:%d addrRes:%x src1:%x src2:%x func:%x\n", taken, adderRes, src1, src2, func) 
     }
   }
 
-  Debug(){
+  Debug(false){
     when(valid && isBru){
       printf("[BPW] pc %x tgt %x, npc: %x, pdwrong: %x type: %x%x%x%x\n", io.cfIn.pc, io.redirect.target, io.cfIn.pnpc, predictWrong, isBranch, (func === ALUOpType.jal || func === ALUOpType.call), func === ALUOpType.jalr, func === ALUOpType.ret)
     }

@@ -65,7 +65,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
-  Debug(false) {
+  Debug() {
     printf("------------------------ TIMER: %d ------------------------\n", GTimer())
     printf("flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
       ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,

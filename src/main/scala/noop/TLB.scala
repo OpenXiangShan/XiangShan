@@ -118,7 +118,7 @@ case class TLBConfig (
   userBits: Int = 0,
 
   totalSize: Int = 128, 
-  ways: Int = 128 
+  ways: Int = 64
 )
 
 sealed trait HasTlbConst {
@@ -206,32 +206,55 @@ sealed class TlbStage2IO(implicit val tlbConfig: TLBConfig) extends TlbBundle {
   val req = new TlbReq(userBits)
   val metas = Vec(Ways, new TLBMetaBundle)
   val datas = Vec(Ways, new TLBDataBundle)
-  val hit = Output(Bool())
+  val hit = new Bundle {
+    val hit = Output(Bool())
+    val hitWB = Output(Bool())
+    val hitExec = Output(Bool())
+    val hitLoad = Output(Bool())
+    val hitStore = Output(Bool())
+  }
   val waymask = Output(UInt(Ways.W))
 } 
 
-class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule{
+class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule with HasCSRConst{
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new TlbStage1IO(userBits)))
     val out = Decoupled(new TlbStage2IO)
 
+    val pf = new Bundle {
+      val priviledgeMode = Input(UInt(2.W))
+      val status_sum = Input(Bool())
+      val status_mxr = Input(Bool())
+    }
     val metaReadResp = Flipped(Vec(Ways, new TLBMetaBundle))
     val dataReadResp = Flipped(Vec(Ways, new TLBDataBundle))
   })
   
   val req = io.in.bits
   val vpn = req.addr.asTypeOf(vaBundle2).vpn
+  val pf = io.pf
 
-  val hitVec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).v.asBool && (m.vpn === vpn) && io.in.valid)).asUInt
+  val hitVec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).v && (m.vpn === vpn) && io.in.valid)).asUInt
+  val hitVecWB = VecInit(io.metaReadResp.map(m => !m.flag.asTypeOf(flagBundle).a || (!m.flag.asTypeOf(flagBundle).d && req.isWrite()))).asUInt & hitVec
   val victimWaymask = (if (Ways > 1) (1.U(log2Up(Ways).W) << LFSR64()(log2Up(Ways)-1,0)) else 1.U(1.W))
-  val waymask = Mux(io.out.bits.hit, hitVec, victimWaymask)
+  val waymask = Mux(io.out.bits.hit.hit, hitVec, victimWaymask)
   assert(PopCount(waymask) <= 1.U)
+
+  val hitVecDirty = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).d)).asUInt & hitVec
+  val hitVecCheck = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).v && !(pf.priviledgeMode === ModeU && !m.flag.asTypeOf(flagBundle).u) && !(pf.priviledgeMode === ModeS && m.flag.asTypeOf(flagBundle).u && pf.status_sum))).asUInt & hitVec
+  val hitVecExec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).x)).asUInt & hitVecCheck
+  val hitVecLoad = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).r || pf.status_mxr && m.flag.asTypeOf(flagBundle).x)).asUInt & hitVecCheck
+  val hitVecStore = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).w)).asUInt & hitVecCheck
 
   io.out.bits.metas := io.metaReadResp
   io.out.bits.datas := io.dataReadResp
-  io.out.bits.hit := io.in.valid && hitVec.orR
+  io.out.bits.hit.hit := io.in.valid && hitVec.orR
+  io.out.bits.hit.hitWB := io.in.valid && hitVecWB.orR
+  io.out.bits.hit.hitExec := io.in.valid && hitVecExec.orR
+  io.out.bits.hit.hitLoad := io.in.valid && hitVecLoad.orR
+  io.out.bits.hit.hitStore := io.in.valid && hitVecStore.orR
   io.out.bits.waymask := waymask
-  
+
   io.out.bits.req <> req
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
@@ -253,10 +276,12 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
         val state = Output(UInt(3.W))
         val level = Output(UInt(2.W))
         val alreadyOutFire = Output(UInt(1.W))
-        val memStoreAddr = Output(UInt(XLEN.W))
-        val state2 = Output(UInt(2.W))
-        val hitWB = Output(Bool())
+        val memRespStore = Output(UInt(XLEN.W))
+        val hitFlag = Output(UInt(8.W))
         val refillFlag = Output(UInt(8.W))
+        val instrPF = Output(Bool())
+        val hitinstrPF = Output(Bool())
+        val pfWire = Output(Bool())
       }
     //}
   })
@@ -265,76 +290,35 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
   val req = io.in.bits.req
   val satp = io.satp.asTypeOf(satpBundle)
   val vpn = req.addr.asTypeOf(vaBundle2).vpn.asTypeOf(vpnBundle)
-  val hit = io.in.valid && io.in.bits.hit
-  val miss = io.in.valid && !io.in.bits.hit
+  val hit = io.in.valid && io.in.bits.hit.hit
+  val miss = io.in.valid && !io.in.bits.hit.hit
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
-
+  val hitFlag = meta.flag
   val dataRead = Mux1H(io.in.bits.waymask, io.in.bits.datas).ppn
 
   val raddr = Reg(UInt(AddrBits.W))
   val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire())
+  val refillFlag = WireInit(0.U(8.W))
 
-  val hitWB = Wire(Bool()) //hit pte write back check
-  val hitinstrPF = Wire(Bool())
-  hitinstrPF := false.B
-  val hitFlag = meta.flag.asTypeOf(flagBundle)
-  val hitCheck = hitFlag.v.asBool && !(pf.priviledgeMode === ModeU && !hitFlag.u.asBool) && !(pf.priviledgeMode === ModeS && hitFlag.u.asBool && pf.status_sum)
-  val hitExec = hitCheck && hitFlag.x.asBool
-  val hitLoad = hitCheck && (hitFlag.r.asBool || pf.status_mxr && hitFlag.x.asBool)
-  val hitStore = hitCheck && hitFlag.w.asBool
-  val hitUpdateAD = WireInit(false.B)
-  val hitUpdateData = WireInit(0.U(XLEN.W))
-  val refillFlag = Wire(UInt(8.W))
-  refillFlag := 0.U
-  hitWB := hitUpdateAD
-  when(hit) {
-  if(tlbname == "itlb") { 
-    when (!hitExec) { hitinstrPF := true.B }
-    .otherwise {
-      hitUpdateAD := !hitFlag.a.asBool || (!hitFlag.d && req.isWrite())
-      refillFlag := Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)).asUInt | meta.flag
-      hitUpdateData := Cat(0.U(10.W), dataRead, 0.U(2.W), refillFlag)
-    }
-  }
-  else if(tlbname == "dtlb") { 
-    when ((!hitLoad && req.isRead()) || (!hitStore && req.isWrite())) {
-      io.pf.loadPF := req.isRead()
-      io.pf.storePF := req.isWrite()
-    }.otherwise {
-      hitUpdateAD := !hitFlag.a.asBool || (!hitFlag.d && req.isWrite())
-      refillFlag := Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | meta.flag.asUInt
-      hitUpdateData := Cat(0.U(10.W), dataRead, 0.U(2.W), refillFlag)
-    }
-  }}
+  val hitinstrPF = WireInit(false.B)
+  val hitloadPF = WireInit(false.B)
+  val hitstorePF = WireInit(false.B)
+  val hitPF = (hitinstrPF || hitloadPF || hitstorePF)
+  val hitWB = io.in.valid && io.in.bits.hit.hitWB && !hitinstrPF//hit pte write back check
+  val hitExec = io.in.valid && io.in.bits.hit.hitExec
+  val hitLoad = io.in.valid && io.in.bits.hit.hitLoad
+  val hitStore = io.in.valid && io.in.bits.hit.hitStore
+  val hitRefillFlag = Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | hitFlag
+  val hitWBStore = RegEnable(Cat(0.U(10.W), dataRead, 0.U(2.W), hitRefillFlag), hitWB)
 
-  val s2_idle :: s2_req :: s2_wait_resp :: Nil = Enum(3)
-  val state2 = RegInit(s2_idle)
-  switch (state2) {
-    is (s2_idle) {
-      when (hitWB && !io.flush) {
-        state2 := s2_wait_resp
-        alreadyOutFire := false.B
-      }
-    }
-
-    is (s2_req) {
-      when (io.mem.req.fire() || io.flush) {
-        state2 := s2_idle
-      }
-    }
-
-    is (s2_wait_resp) {
-      when (io.out.fire() || /*needFlush*/ io.flush || alreadyOutFire) {
-        state2 := s2_idle
-      }
-    }
-  }
+  if (tlbname == "itlb") { hitinstrPF := !hitExec  && hit}
+  if (tlbname == "dtlb") { hitloadPF := !hitLoad && req.isRead() && hit; hitstorePF := !hitStore && req.isWrite() && hit }
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_write_pte :: s_wait_resp :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val needFlush = RegInit(false.B)
   val isFlush = needFlush || io.flush
-  val memStoreAddr = Reg(UInt(XLEN.W))
+  val memRespStore = Reg(UInt(XLEN.W))
 
   when (io.flush && (state =/= s_idle)) { needFlush := true.B}
   when (io.out.fire() && needFlush) { needFlush := false.B}
@@ -347,13 +331,15 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
   io.pf.storePF := false.B
   io.pf.addr := req.addr
   val instrPF = RegInit(false.B)
-  val instrPFWire = Wire(Bool()) ; instrPFWire := false.B
+  val pfWire = WireInit(false.B)
 
   switch (state) {
     is (s_idle) {
       alreadyOutFire := false.B
-
-      when (miss && !io.flush) {
+      when (!io.flush && hitWB) {
+        state := s_write_pte
+        needFlush := false.B
+      }.elsewhen (miss && !io.flush) {
         state := s_memReadReq
         raddr := paddrApply(satp.ppn, vpn.vpn2) //
         level := Level.U
@@ -370,7 +356,6 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
 
     is (s_memReadResp) { 
       val flag = memRdata.flag
-      
       when (io.mem.resp.fire()) {
         when (isFlush) {
           state := s_idle
@@ -379,7 +364,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
         when(!memRdata.flag.v.asBool || (!memRdata.flag.r.asBool && memRdata.flag.w.asBool)) {
           if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
           if(tlbname == "dtlb") { io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite() }
-          if(tlbname == "itlb") { instrPF := true.B ; instrPFWire := true.B}
+          if(tlbname == "itlb") { instrPF := true.B }
           Debug() {
             printf("%d " + tlbname +" tlbException!!! ", GTimer())
             printf(p" req:${req}  Memreq:${io.mem.req}  MemResp:${io.mem.resp}")
@@ -397,26 +382,22 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
         val permExec = permCheck && flag.x.asBool
         val permLoad = permCheck && (flag.r.asBool || pf.status_mxr && flag.x.asBool)
         val permStore = permCheck && flag.w.asBool
+        val updateAD = !flag.a.asBool || (!flag.d && req.isWrite())
+        val updateData = Cat( 0.U(56.W), req.isWrite(), 1.U(1.W), 0.U(6.W) )
+        refillFlag := Cat(req.isWrite(), 1.U(1.W), 0.U(6.W)) | flag.asUInt
+        memRespStore := io.mem.resp.bits.rdata | updateData 
         if(tlbname == "itlb") {
-          when (!permExec) { instrPF := true.B ; state := s_wait_resp }
+          when (!permExec) { instrPF := true.B ; state := s_wait_resp ; pfWire := true.B }
           .otherwise { 
-            val updateAD = !flag.a.asBool || (!flag.d && req.isWrite())
-            val updateData = Cat( 0.U(56.W), req.isWrite().asUInt, 1.U(1.W), 0.U(6.W) )
-            refillFlag := Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | flag.asUInt
             state := Mux(updateAD, s_write_pte, s_wait_resp)
-            memStoreAddr := Mux(updateAD, io.mem.resp.bits.rdata | updateData, io.mem.resp.bits.rdata) 
           }
         }
         if(tlbname == "dtlb") {
           when((!permLoad && req.isRead()) || (!permStore && req.isWrite())) { 
-            state := s_idle
+            state := s_idle ; pfWire := true.B
             io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite()
           }.otherwise {
-            val updateAD = !flag.a.asBool || (!flag.d && req.isWrite())
-            val updateData = Cat( 0.U(56.W), req.isWrite().asUInt, 1.U(1.W), 0.U(6.W) )
-            refillFlag := Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | flag.asUInt
             state := Mux(updateAD, s_write_pte, s_wait_resp)
-            memStoreAddr := Mux(updateAD, io.mem.resp.bits.rdata | updateData, io.mem.resp.bits.rdata) 
           }
         }
       }
@@ -433,53 +414,53 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
     is (s_wait_resp) { when (io.out.fire() || /*needFlush*/ io.flush || alreadyOutFire){
       state := s_idle
       instrPF := false.B
-      //Debug(debug) {
-        //printf("%d " + tlbname + "S3PTE/memStoreAddr:%x \n", GTimer(), memStoreAddr)
-      //}
     }}
   }
 
-  val cmd = Mux(state === s_write_pte || hitWB, SimpleBusCmd.write, SimpleBusCmd.read)
-  io.mem.req.bits.apply(addr = Mux(hitWB, meta.addr, raddr), cmd = cmd, size = (if (XLEN == 64) "b11".U else "b10".U), wdata = Mux(hitWB, hitUpdateData, memStoreAddr), wmask = 0xff.U)
-  io.mem.req.valid := ((state === s_memReadReq || state === s_write_pte || (hitWB && state2===s2_req)) && !isFlush)
+  val cmd = Mux(state === s_write_pte, SimpleBusCmd.write, SimpleBusCmd.read)
+  io.mem.req.bits.apply(addr = Mux(hitWB, meta.addr, raddr), cmd = cmd, size = (if (XLEN == 64) "b11".U else "b10".U), wdata =  Mux( hitWB, hitWBStore, memRespStore), wmask = 0xff.U)
+  io.mem.req.valid := ((state === s_memReadReq || state === s_write_pte) && !isFlush)
   io.mem.resp.ready := true.B//(state === s_memReadResp)//()
 
   val dataRefill = memRdata.ppn
   val dataRefillWriteBus = Wire(TlbDataArrayWriteBus).apply(
-    valid = (state === s_memReadResp) && io.mem.resp.fire() && level===1.U && !instrPFWire, setIdx = 0.U,
+    valid = (state === s_memReadResp) && io.mem.resp.fire() && level===1.U && !pfWire, setIdx = 0.U,
     data = Wire(new TLBDataBundle).apply(dataRefill), waymask = io.in.bits.waymask) //need change
 
   io.dataWriteBus.req <> dataRefillWriteBus.req
 
   val metaRefillWriteBus = Wire(TlbMetaArrayWriteBus()).apply(
-    valid = (state === s_memReadResp) && io.mem.resp.fire() && (level === 1.U) && !instrPFWire || (hitWB && (state2 === s2_idle)),
-    data = Wire(new TLBMetaBundle).apply(vpn = vpn.asUInt, asid = satp.asid, flag = refillFlag, addr = raddr), //need change
+    valid = ((state === s_memReadResp) && io.mem.resp.fire() && (level === 1.U) && !pfWire && !isFlush) || (hitWB && state === s_idle && !isFlush),
+    data = Wire(new TLBMetaBundle).apply(vpn = vpn.asUInt, asid = satp.asid, flag = Mux(hitWB, hitRefillFlag, refillFlag), addr = Mux(hitWB, meta.addr , raddr)), //need change
     setIdx = 0.U, waymask = io.in.bits.waymask)
 
   io.metaWriteBus.req <> metaRefillWriteBus.req
 
-  io.out.bits.addr := Cat(0.U(paResLen.W), Cat(Mux(hit, dataRead, memStoreAddr.asTypeOf(pteBundle).ppn), req.addr.asTypeOf(vaBundle2).off))
+  io.out.bits.addr := Cat(0.U(paResLen.W), Cat(Mux(hit, dataRead, memRespStore.asTypeOf(pteBundle).ppn), req.addr.asTypeOf(vaBundle2).off))
   io.out.bits.size := req.size
   io.out.bits.cmd := req.cmd
   io.out.bits.wmask := req.wmask
   io.out.bits.wdata := req.wdata
-  if(tlbname == "itlb") { io.out.bits.user.map(_:= Cat(Mux(hitWB, hitinstrPF, instrPF), req.user.getOrElse(0.U)(AddrBits*2 + 3, 0))) } 
+  if(tlbname == "itlb") { io.out.bits.user.map(_:= Cat( instrPF || hitinstrPF, req.user.getOrElse(0.U)(AddrBits*2 + 3, 0))) } 
   else { io.out.bits.user.map(_:=req.user.getOrElse(0.U)) }
   //io.out.valid := io.in.valid /*???*/ && Mux(hit, true.B, state === s_wait_resp)
-  io.out.valid := Mux(hit, Mux(hitWB, state2 === s2_wait_resp, true.B), state === s_wait_resp)
+  io.out.valid := Mux(hit && !hitWB, true.B, state === s_wait_resp)
 
-  if (tlbname == "dtlb"){ io.isFinish := Mux(hit, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
-  else/*if(tlbname == "itlb")*/ { io.isFinish := Mux(hit, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)) }
+  if (tlbname == "dtlb"){ io.isFinish := Mux(hit && !hitWB, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
+  else/*if(tlbname == "itlb")*/ { io.isFinish := Mux(hit && !hitWB, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)) }
   
-  io.in.ready := io.out.ready && ((state === s_idle) && !miss) && Mux(hitWB, state2===s2_idle, true.B)
+  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB
+
   //if(debug) {
     io.print.state := state
     io.print.level := level
     io.print.alreadyOutFire := alreadyOutFire
-    io.print.memStoreAddr := memStoreAddr
-    io.print.state2 := state2
-    io.print.hitWB := hitWB
+    io.print.memRespStore := memRespStore
     io.print.refillFlag := refillFlag
+    io.print.instrPF := instrPF
+    io.print.hitinstrPF := hitinstrPF
+    io.print.pfWire := pfWire
+    io.print.hitFlag := hitFlag
   //}
 }
 
@@ -524,7 +505,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.mem <> s3.io.mem
 
   //stalling ??? unknown what means
-  s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
+  s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit.hit
 
   //meta-data read. for coh is useles so the Arbiter is useless
   metaArray.io.r.req <> s1.io.metaReadBus.req
@@ -539,6 +520,9 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   s2.io.dataReadResp := dataArray.io.r.resp.data
 
   io.csrMMU <> s3.io.pf
+  s2.io.pf.priviledgeMode := io.csrMMU.priviledgeMode
+  s2.io.pf.status_sum := io.csrMMU.status_sum
+  s2.io.pf.status_mxr := io.csrMMU.status_mxr
 
   if(tlbname == "dtlb") {
     val alreadyOutFinish = RegEnable(true.B, init=false.B, io.in.resp.valid && !io.in.resp.ready)
@@ -553,21 +537,25 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     when(true.B ) {
       //printf("-----------------------------------------------------------------------------------------------\n")
       printf("%d "+ tlbname + " ",GTimer())
-      printf("InReq(%d, %d) ioInResp(%d, %d) InReqAddr:%x InRespAddr:%x ", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr, io.in.resp.bits.addr)
-      printf("MemReq(%d, %d) ioMemResp(%d, %d) ReqAddr:%x RespData:%x", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.resp.bits.rdata) 
-      printf("\n%d:"+ tlbname + " {IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ",GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
+      printf("InReq(%d, %d) ioInResp(%d, %d) InReqAddr:%x InRespAddr:%x \n", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr, io.in.resp.bits.addr)
+      printf("%d:"+ tlbname + " {IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ",GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
       printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
-      printf("\n%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x ", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
+      printf("\n%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
+      if (tlbname == "itlb") { printf(" user:%x ", s3.io.out.bits.user.getOrElse(0.U))}
+      printf("\n%d:"+ tlbname + " s3State:%d level:%d s3alreadOutFire:%d s3memRespStore:%x s3Hit:%d s3WayMask:%x iPF:%d hiPF:%d pfwire:%d ", GTimer(), s3.io.print.state, s3.io.print.level, s3.io.print.alreadyOutFire, s3.io.print.memRespStore, s3.io.in.bits.hit.hit, s3.io.in.bits.waymask, s3.io.print.instrPF, s3.io.print.hitinstrPF, s3.io.print.pfWire)
+      printf("\n%d:"+ tlbname + " s3 hitflag:%x refillFlag:%x hitWB:%d hitExec:%d hitLoad:%d hitStore:%d isWrite:%d ", GTimer(), s3.io.print.hitFlag, s3.io.print.refillFlag, s3.io.in.bits.hit.hitWB,  s3.io.in.bits.hit.hitExec,  s3.io.in.bits.hit.hitLoad,  s3.io.in.bits.hit.hitStore, s3.io.in.bits.req.isWrite())
       printf("satp:%x ", s3.io.satp)
-      printf("\n%d:"+ tlbname + " s3State:%d level:%d s3alreadOutFire:%d s3memStoreAddr:%x s3Hit:%d s3WayMask:%x ", GTimer(), s3.io.print.state, s3.io.print.level, s3.io.print.alreadyOutFire, s3.io.print.memStoreAddr, s3.io.in.bits.hit, s3.io.in.bits.waymask)
-      printf("\n%d:"+ tlbname + " s3State2:%d hitWB:%d refillFlag:%x ", GTimer(), s3.io.print.state2, s3.io.print.hitWB, s3.io.print.refillFlag)
+      printf("flush:%x \n", io.flush)
+      printf("%d "+ tlbname + " ",GTimer())
+      printf("MemReq(%d, %d) ioMemResp(%d, %d) addr:%x rdata:%x cmd:%d wdata:%x\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.resp.bits.rdata, io.mem.req.bits.cmd, io.mem.req.bits.wdata)
+      printf("%d "+ tlbname + " ",GTimer())
+      printf("s3Meta(%d, %d) vpn:%x flag:%x addr:%x\n", s3.io.metaWriteBus.req.valid, s3.io.metaWriteBus.req.ready, s3.io.metaWriteBus.req.bits.data.vpn ,s3.io.metaWriteBus.req.bits.data.flag, s3.io.metaWriteBus.req.bits.data.addr)
+      printf("%d "+ tlbname + " ",GTimer())
+      printf("s3Data(%d, %d) ppn:%x\n", s3.io.dataWriteBus.req.valid, s3.io.dataWriteBus.req.ready, s3.io.dataWriteBus.req.bits.data.ppn)
       //printf("\n%d:"+ tlbname + " s1MetaReadReqReady:%d s1DataReadReqReady:%d ", GTimer(), s1.io.metaReadBus.req.ready, s1.io.dataReadBus.req.ready)
       //printf("s1ReqFire:%d s2ReqFire:%d s3ReqFire:%d ", s1.io.in.fire(), s2.io.in.fire(), s3.io.in.fire())
-      printf("s2Hit:%d s2Waymask:%x ", s2.io.out.bits.hit, s2.io.out.bits.waymask)
-      printf("s2s3Miss:%d ", s1.io.s2s3Miss)
-      printf("flush:%x ", io.flush)
-
-      printf("\n")
+      //printf("s2Hit:%d s2Waymask:%x ", s2.io.out.bits.hit.hit, s2.io.out.bits.waymask)
+      //printf("s2s3Miss:%d ", s1.io.s2s3Miss)
       
     }
   }
@@ -603,13 +591,13 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   io.in.resp.bits := io.out.resp.bits
   io.out.resp.ready := io.in.resp.ready
 
-  Debug() {
+  Debug(false) {
     when(true.B) {
-      if(name == "dtran") { printf("-----------------------------------------------------------------------------------------------\n")}
+      if(name == "itran") { printf("-----------------------------------------------------------------------------------------------\n")}
       printf("%d:" + name + "InReq(%d, %d) InResp(%d, %d) ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
-      printf("\n%d:" + name, GTimer())
-      printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")
-      if(userBits>0) {printf("user:%x ", io.in.resp.bits.user.getOrElse(0.U))}
+      //printf("\n%d:" + name, GTimer())
+      //printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")
+      //if(userBits>0) {printf("user:%x ", io.in.resp.bits.user.getOrElse(0.U))}
       printf("\n")
       //io.in.dump(name + ".in")
       //io.out.dump(name + ".out")

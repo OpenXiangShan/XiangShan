@@ -383,7 +383,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val isSret = addr === privSret   && func === CSROpType.jmp
   val isUret = addr === privUret   && func === CSROpType.jmp
 
-  Debug(){
+  Debug(false){
     when(wen){
       printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.cfIn.pc, addr, rdata, wdata, func)
     }
@@ -480,7 +480,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
 
-  Debug(){
+  Debug(false){
     when(raiseExceptionIntr){
       printf("[CSR] raiseExceptionIntr! int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
     }

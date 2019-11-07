@@ -86,7 +86,7 @@ class BPU1 extends NOOPModule {
   io.lateJump := lateJump
   // val lateJumpLatch = RegNext(lateJump)
   // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
-  Debug(){
+  Debug(false){
   // printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
     when(btbHit){
       printf("[BTBHT1] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
@@ -126,7 +126,7 @@ class BPU1 extends NOOPModule {
   val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
   BoringUtils.addSink(req, "bpuUpdateReq")
 
-  Debug(){
+  Debug(false){
   when(req.valid){
       printf("[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
     }

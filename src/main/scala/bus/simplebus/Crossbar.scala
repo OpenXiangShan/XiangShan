@@ -94,11 +94,11 @@ class SimpleBusCrossbarNto1Special(n: Int, userBits:Int = 0, name: String = "def
       when (thisReq.fire()) {
         inflightSrc := inputArb.io.chosen
         when (thisReq.bits.isRead()) { state := s_readResp }
-        .elsewhen (thisReq.bits.isWriteLast() || thisReq.bits.isWriteSingle()) { state := s_writeResp }
+        .elsewhen (thisReq.bits.isWriteLast() || thisReq.bits.isWriteSingle()) { state := s_writeResp } ///
       }
     }
     is (s_readResp) { when ((io.out.resp.fire() && io.out.resp.bits.isReadLast())) { state := s_idle } }
-    is (s_writeResp) { when ((io.out.resp.fire())) { state := s_idle } }
+    is (s_writeResp) { when (true.B/*(io.out.resp.fire())*/) { state := s_idle } } //could change to true.B for write not need resp.fire()
   }
 
   Debug(false/*&& name=="dtlbXbar"*/) {
