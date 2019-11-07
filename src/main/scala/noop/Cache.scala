@@ -142,7 +142,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   val forwardMetaReg = RegEnable(io.metaWriteBus.req.bits, isForwardMeta)
 
   val metaWay = Wire(Vec(Ways, chiselTypeOf(forwardMetaReg.data)))
-  forwardMetaReg.waymask.getOrElse("1b".U).asBools.zipWithIndex.map { case (w, i) =>
+  forwardMetaReg.waymask.getOrElse("b1".U).asBools.zipWithIndex.map { case (w, i) =>
     metaWay(i) := Mux(isForwardMetaReg && w, forwardMetaReg.data, io.metaReadResp(i))
   }
 
@@ -200,7 +200,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
 
-  val useForwardData = io.in.bits.isForwardData && io.in.bits.waymask === io.in.bits.forwardData.waymask.getOrElse("1b".U)
+  val useForwardData = io.in.bits.isForwardData && io.in.bits.waymask === io.in.bits.forwardData.waymask.getOrElse("b1".U)
   val dataReadArray = Mux1H(io.in.bits.waymask, io.in.bits.datas).data
   val dataRead = Mux(useForwardData, io.in.bits.forwardData.data.data, dataReadArray)
   val wordMask = Mux(!ro.B && req.isWrite(), MaskExpand(req.wmask), 0.U(DataBits.W))
