@@ -117,6 +117,11 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.bits.req := io.in.bits
   io.out.valid := io.in.valid && !stall && !io.s2s3Miss && io.metaReadBus.req.ready && io.dataReadBus.req.ready
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
+
+	Debug(debug) {
+    printf("%d: [" + cacheName + " stage1]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, addr = %x, cmd = %x, dataReadBus.req.valid = %d\n",
+      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, io.in.bits.addr, io.in.bits.cmd, io.dataReadBus.req.valid)
+  }
 }
 
 sealed class Stage2IO(implicit val cacheConfig: CacheConfig) extends CacheBundle {
@@ -154,6 +159,12 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.bits.req <> req
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
+
+	Debug(debug) {
+    printf("%d: [" + cacheName + " stage2]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, addr = %x, dataReadResp = %x %x %x %x, waymask = %d\n",
+      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, req.addr, io.dataReadResp(3).data, io.dataReadResp(2).data, io.dataReadResp(1).data, io.dataReadResp(0).data, waymask)
+  }
+
 }
 
 // writeback
@@ -391,14 +402,13 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
       GTimer(), io.in.ready, io.in.valid, state, req.addr)
   }
 	Debug(debug) {
-    printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, hit = %d, req.cmd = %d, state = %d, addr = %x, mem.req.fire() = %d, mem.req.bits.cmd = %d, mem.resp.fire() = %d, mem.resp.bits.cmd = %d\n",
-      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, hit, req.cmd, state, req.addr, io.mem.req.fire(), io.mem.req.bits.cmd, io.mem.resp.fire(), io.mem.resp.bits.cmd)
+    printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, hit = %d, req.cmd = %d, state = %d, addr = %x, tag = %x, index = %x, wordIndex = %d, rdata = %x, io.in.bits.datas = %x %x %x %x, io.in.bits.waymask = %d, out.rdata = %x, out.cmd = %d, dataRespToL1ReadBus.(valid = %d, setIdx = %x, rdata = %x %x %x %x), state3 = %d, readL2BeatCnt = %d, dataWriteBackReadBus.req.valid = %d, dataWriteBus.req.data = %x, mem.req.fire() = %d, mem.req.bits.cmd = %d, mem.resp.fire() = %d, mem.resp.bits.cmd = %d, mem.resp.bits.rdata = %x\n",
+      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, hit, req.cmd, state, req.addr, addr.tag, addr.index, addr.wordIndex, io.out.bits.rdata, io.in.bits.datas(3).data, io.in.bits.datas(2).data, io.in.bits.datas(1).data, io.in.bits.datas(0).data, io.in.bits.waymask, io.out.bits.rdata, io.out.bits.cmd, dataRespToL1ReadBus.req.valid, dataRespToL1ReadBus.req.bits.setIdx, dataRespToL1ReadBus.resp.data(3).data, dataRespToL1ReadBus.resp.data(2).data, dataRespToL1ReadBus.resp.data(1).data, dataRespToL1ReadBus.resp.data(0).data, state3, readL2BeatCnt.value, dataWriteBackReadBus.req.valid, io.dataWriteBus.req.bits.data.data, io.mem.req.fire(), io.mem.req.bits.cmd, io.mem.resp.fire(), io.mem.resp.bits.cmd, io.mem.resp.bits.rdata)
   }
 	Debug(debug) {
     printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, hit = %d, req.cmd = %d, state = %d, state3 = %d, addr = %x\n",
       GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, hit, req.cmd, state, state3, req.addr)
   }
-
 }
 
 // probe
@@ -496,7 +506,7 @@ class L2Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s1.io.s2Req.bits := s2.io.in.bits.req
   s1.io.s3Req.valid := s3.io.in.valid
   s1.io.s3Req.bits := s3.io.in.bits.req
-  s1.io.s2s3Miss := s3.io.in.valid && !s3.io.in.bits.hit
+  s1.io.s2s3Miss := s3.io.in.valid && (!s3.io.in.bits.hit || s3.io.dataReadRespToL1)
 
   // coherence state machine
 	/*
@@ -619,6 +629,12 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
     when (s3.io.in.valid) { printf(p"[${cacheName}.S3]: ${s3.io.in.bits.req}\n") }
     s3.io.mem.dump(cacheName + ".mem")
   }
+	
+	Debug(debug) {
+    printf("%d: [" + cacheName + "]: coh.io.dataReadBus.req.valid = %d\n\n",
+      GTimer(), coh.io.dataReadBus.req.valid)
+  }
+
 }
 
 object Cache {

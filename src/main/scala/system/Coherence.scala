@@ -8,7 +8,7 @@ import bus.simplebus._
 import noop.HasNOOPParameter
 
 trait HasCoherenceParameter extends HasNOOPParameter {
-  val supportCoh = false // HasDcache
+  val supportCoh = HasDcache
 }
 
 class CoherenceInterconnect extends Module with HasCoherenceParameter {

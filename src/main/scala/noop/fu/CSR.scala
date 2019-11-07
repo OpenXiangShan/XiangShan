@@ -93,7 +93,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   }
   val mtvec = Reg(UInt(XLEN.W))
   val mcause = Reg(UInt(XLEN.W))
-  val mstatus = RegInit(UInt(XLEN.W), "h000c0100".U)
+  val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)
   val mepc = Reg(UInt(XLEN.W))
 
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)

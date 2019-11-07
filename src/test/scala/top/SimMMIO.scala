@@ -13,10 +13,13 @@ class SimMMIO extends Module {
   })
 
   val devAddrSpace = List(
-    (0x40600000L, 0x10L), // uart
-    (0x40700000L, 0x10L), // timer
+    // (0x40600000L, 0x10L), // uart
+		(0x40600000L, 0x100L),
+    // (0x40700000L, 0x10L), // timer
+		(0x40700000L, 0x100L),
     (0x40000000L, 0x400000L), // vmem
-    (0x40800000L, 0x8L)  // vga ctrl
+    // (0x40800000L, 0x8L)  // vga ctrl
+		(0x40800000L, 0x80L)
   )
 
   val xbar = Module(new SimpleBusCrossbar1toN(devAddrSpace))

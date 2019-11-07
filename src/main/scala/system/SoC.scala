@@ -21,13 +21,14 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
   cohMg.io.in(0) <> noop.io.imem
   cohMg.io.in(1) <> noop.io.dmem
 	
-	/*
+	
 	// add L2 Cache and Dcache Prefetcher
+	/*
 	val prefetcher = Module(new Prefetcher)
 	prefetcher.io.in <> noop.io.prefetchReq
 
 	val l2cacheIn = Wire(new SimpleBusUC)
-	val l2cacheInReqArb = Module(new Arbiter(noop.io.prefetchReq, 2))
+	val l2cacheInReqArb = Module(new Arbiter(chiselTypeOf(noop.io.prefetchReq.bits), 2))
 	l2cacheInReqArb.io.in(0) <> cohMg.io.out.req
 	l2cacheInReqArb.io.in(1) <> prefetcher.io.out
 	l2cacheIn.req <> l2cacheInReqArb.io.out
@@ -45,6 +46,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
 	*/
 	
 	// add L2 Cache
+	/*
 	val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
 	
 	val l2cacheOut = Wire(new SimpleBusUC)
@@ -54,14 +56,16 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module {
 	mmioXbar.io.in(1) <> noop.io.mmio
 	if (p.FPGAPlatform) io.mmio <> mmioXbar.io.out.toAXI4Lite()
   else io.mmio <> mmioXbar.io.out
+	*/
 	
-	/*
 	// no L2 Cache
+	
 	io.mem <> cohMg.io.out.toAXI4()
 
   if (p.FPGAPlatform) io.mmio <> noop.io.mmio.toAXI4Lite()
   else io.mmio <> noop.io.mmio
-	*/
+	
+
   val mtipSync = RegNext(RegNext(io.mtip))
   val meipSync = RegNext(RegNext(io.meip))
   BoringUtils.addSource(mtipSync, "mtip")
