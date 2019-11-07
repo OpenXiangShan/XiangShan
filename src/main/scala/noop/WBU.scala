@@ -26,5 +26,11 @@ class WBU(implicit val p: NOOPConfig) extends Module {
     BoringUtils.addSource(RegNext(io.in.bits.decode.cf.pc), "difftestThisPC")
     BoringUtils.addSource(RegNext(io.in.bits.isMMIO), "difftestIsMMIO")
     BoringUtils.addSource(RegNext(io.in.bits.intrNO), "difftestIntrNO")
+  } else {
+    BoringUtils.addSource(io.in.valid, "ilaWBUvalid")
+    BoringUtils.addSource(io.in.bits.decode.cf.pc, "ilaWBUpc")
+    BoringUtils.addSource(io.wb.rfWen, "ilaWBUrfWen")
+    BoringUtils.addSource(io.wb.rfDest, "ilaWBUrfDest")
+    BoringUtils.addSource(io.wb.rfData, "ilaWBUrfData")
   }
 }

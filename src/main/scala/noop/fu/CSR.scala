@@ -224,9 +224,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
 
   val nooptrap = WireInit(false.B)
   BoringUtils.addSink(nooptrap, "nooptrap")
-  if (!p.FPGAPlatform) {
-    def readWithScala(addr: Int): UInt = mapping(addr)._1
+  def readWithScala(addr: Int): UInt = mapping(addr)._1
 
+  if (!p.FPGAPlatform) {
     // to monitor
     BoringUtils.addSource(readWithScala(perfCntList("Mcycle")._1), "simCycleCnt")
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")
@@ -237,5 +237,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
       perfCntList.toSeq.sortBy(_._2._1).map { case (name, (addr, boringId)) =>
         printf("%d <- " + name + "\n", readWithScala(addr)) }
     }
+  } else {
+    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
 }
