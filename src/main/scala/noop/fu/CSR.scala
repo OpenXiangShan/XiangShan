@@ -246,8 +246,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
-  val sieMask = "h333".U & mideleg
-  val sipMask  = "h103".U & mideleg
+  val sieMask = "h222".U & mideleg
+  val sipMask  = "h222".U & mideleg
   //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
   val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp

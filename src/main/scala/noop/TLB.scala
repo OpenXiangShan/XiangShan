@@ -118,7 +118,7 @@ case class TLBConfig (
   userBits: Int = 0,
 
   totalSize: Int = 128, 
-  ways: Int = 64
+  ways: Int = 4
 )
 
 sealed trait HasTlbConst {
