@@ -25,16 +25,26 @@ class DataSrcIO extends NOOPBundle {
 
 class RedirectIO extends NOOPBundle {
   val target = Output(UInt(AddrBits.W))
+  // val brIdx = Output(UInt(3.W)) // for RVC
   val valid = Output(Bool())
 }
 
+// class IRIDCtrlFlowIO extends NOOPBundle {
+//   val instr = Output(UInt(64.W))
+//   val pc = Output(UInt(AddrBits.W))
+//   val pnpc = Output(UInt(AddrBits.W))
+//   val brIdx = Output(UInt(3.W))
+//   val redirect = new RedirectIO
+// }
+
 class CtrlFlowIO extends NOOPBundle {
-  val instr = Output(UInt(32.W))
+  val instr = Output(UInt(64.W))
   val pc = Output(UInt(AddrBits.W))
   val pnpc = Output(UInt(AddrBits.W))
   val redirect = new RedirectIO
   val exceptionVec = Output(Vec(16, Bool()))
   val intrVec = Output(Vec(12, Bool()))
+  val brIdx = Output(UInt(4.W))
 }
 
 class DecodeIO extends NOOPBundle {

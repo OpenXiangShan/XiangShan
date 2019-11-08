@@ -58,3 +58,71 @@ REMUW   |BitPat("b0100000_?????_?????_101_?????_0111011")|1
 其他要调整的指令
 * LX/SX
 * ALUI
+
+# RVC指令集及流水线变动
+
+检查下列指令的nemu实现
+```
+    8010074a:	80fd                	srli	s1,s1,0x1f
+```
+
+
+# BPU, RVC基本完工, 系统调试中 2019.10.9-
+
+TODO:
+
+* 优化调试基础设施
+* 合并分支
+* 原子指令
+* RTT
+* freert
+* ucasos-lite
+* BPU优化
+* BPU flush
+* xv6
+
+---
+
+主要进展及遇到问题如下:
+
+## 0.1. 切换到新版本的AM之后, microbench测试时出现了奇怪的现象:
+
+```
+======= Running MicroBench [input *ref*] =======
+[] : cpu.pc 80003898
+emu: src/isa/riscv64/decode.c:331: decode_C_ADDI4SPN: Assertion `imm != 0' failed.
+```
+
+对应代码段如下:
+
+```
+    80103894:	02d00793          	li	a5,45
+    80103898:	0cfb8263          	beq	s7,a5,8010395c <vprintdec+0x12a>
+    8010389c:	0a904963          	bgtz	s1,8010394e <vprintdec+0x11c>
+```
+
+## 0.2. RTThread
+
+有bug, WIP
+
+## 0.3. FreeRTOS
+
+链接库时存在问题, 需要调整环境.
+
+```
+/opt/riscv-toolchain-2018.08.17/bin/../lib/gcc/riscv64-unknown-elf/7.2.0/../../../../riscv64-unknown-elf/bin/ld: 
+/opt/riscv-toolchain-2018.08.17/bin/../lib/gcc/riscv64-unknown-elf/7.2.0/libgcc.a(_clzsi2.o): 
+can't link hard-float modules with soft-float modules
+```
+
+## 0.4. Merge & Test
+
+WIP
+
+## 0.5. UCASOS
+
+切换到较简洁的 `UCASOS-lite` (未使用am, 主要为简单调度/同步功能), 需要最新分支中更改和原子指令, 暂未测试
+
+## 0.6. BPU
+
+一种特殊情况还需优化, WIP

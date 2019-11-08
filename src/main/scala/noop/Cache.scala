@@ -99,6 +99,11 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
+  Debug(){
+    when(io.in.fire()){
+      printf("[L1$] " +name+" cache stage1, addr in: %x, user: %x\n", io.in.bits.addr, io.in.bits.user.getOrElse(0.U))
+    }
+  }
 
   // read meta array and data array
   val readBusValid = io.in.valid && io.out.ready

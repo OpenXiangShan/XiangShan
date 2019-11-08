@@ -7,19 +7,93 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 object CSROpType {
-  def jmp  = "b00".U
-  def wrt  = "b01".U
-  def set  = "b10".U
-  def clr  = "b11".U
+  def jmp  = "b000".U
+  def wrt  = "b001".U
+  def set  = "b010".U
+  def clr  = "b011".U
+  def wrti = "b101".U
+  def seti = "b110".U
+  def clri = "b111".U
 }
 
 trait HasCSRConst {
+  // User Trap Setup
+  val Ustatus       = 0x000 
+  val Uie           = 0x004
+  val Utvec         = 0x005
+  
+  // User Trap Handling
+  val Uscratch      = 0x040
+  val Uepc          = 0x041
+  val Ucause        = 0x042
+  val Utval         = 0x043
+  val Uip           = 0x044
+
+  // User Floating-Point CSRs (not implemented)
+  val Fflags        = 0x001
+  val Frm           = 0x002
+  val Fcsr          = 0x003
+
+  // User Counter/Timers
+  val Cycle         = 0xC00
+  val Time          = 0xC01
+  val Instret       = 0xC02
+  
+  // Supervisor Trap Setup
+  val Sstatus       = 0x100
+  val Sedeleg       = 0x102
+  val Sideleg       = 0x103
+  val Sie           = 0x104
+  val Stvec         = 0x105
+  val Scounteren    = 0x106
+
+  // Supervisor Trap Handling
+  val Sscratch      = 0x140
+  val Sepc          = 0x141
+  val Scause        = 0x142
+  val Stval         = 0x143
+  val Sip           = 0x144
+
+  // Supervisor Protection and Translation
+  val Satp          = 0x180
+
+  // Machine Information Registers 
+  val Mvendorid     = 0xF11 
+  val Marchid       = 0xF12 
+  val Mimpid        = 0xF13 
+  val Mhartid       = 0xF14 
+
+  // Machine Trap Setup
   val Mstatus       = 0x300
+  val Misa          = 0x301
+  val Medeleg       = 0x302
+  val Mideleg       = 0x303
+  val Mie           = 0x304
   val Mtvec         = 0x305
+  val Mcounteren    = 0x306 
+
+  // Machine Trap Handling
+  val Mscratch      = 0x340 
   val Mepc          = 0x341
   val Mcause        = 0x342
-  val Mie           = 0x304
+  val Mtval         = 0x343
   val Mip           = 0x344
+
+  // Machine Memory Protection
+  // TBD
+  val Pmpcfg0       = 0x3A0
+  val Pmpcfg1       = 0x3A1
+  val Pmpcfg2       = 0x3A2
+  val Pmpcfg3       = 0x3A3
+  val PmpaddrBase   = 0x3B0 
+
+  // Machine Counter/Timers 
+  // Currently, NOOP uses perfcnt csr set instead of standard Machine Counter/Timers 
+  // 0xB80 - 0x89F are also used as perfcnt csr
+
+  // Machine Counter Setup (not implemented)
+  // Debug/Trace Registers (shared with Debug Mode) (not implemented)
+  // Debug Mode Registers (not implemented)
 
   def privEcall = 0x000.U
   def privMret  = 0x302.U
@@ -91,7 +165,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     val pie = new Priv
     val ie = new Priv
   }
-  val mtvec = Reg(UInt(XLEN.W))
+  val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcause = Reg(UInt(XLEN.W))
   val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)
   val mepc = Reg(UInt(XLEN.W))
@@ -125,30 +199,105 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb00 + i, perfCnts(i)) }
   val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => RegMap(0xb80 + i, perfCnts(i)(63, 32)) }
 
+  // CSR reg map
   val mapping = Map(
-    RegMap(Mtvec   ,mtvec   ),
-    RegMap(Mcause  ,mcause  ),
-    RegMap(Mepc    ,mepc    ),
-    RegMap(Mstatus ,mstatus ),
-    RegMap(Mie     ,mie     ),
-    RegMap(Mip     ,mip.asUInt, RegMap.Unwritable)
+
+    // User Trap Setup
+    // RegMap(Ustatus, ustatus), 
+    // RegMap(Uie, uie),
+    // RegMap(Utvec, utvec),
+    
+    // User Trap Handling
+    // RegMap(Uscratch, uscratch),
+    // RegMap(Uepc, uepc),
+    // RegMap(Ucause, ucause),
+    // RegMap(Utval, utval),
+    // RegMap(Uip, uip),
+
+    // User Floating-Point CSRs (not implemented)
+    // RegMap(Fflags, fflags),
+    // RegMap(Frm, frm),
+    // RegMap(Fcsr, fcsr),
+
+    // User Counter/Timers
+    // RegMap(Cycle, cycle),
+    // RegMap(Time, time),
+    // RegMap(Instret, instret),
+    
+    // Supervisor Trap Setup
+    // RegMap(Sstatus, Sstatus),
+    // RegMap(Sedeleg, Sedeleg),
+    // RegMap(Sideleg, Sideleg),
+    // RegMap(Sie, Sie),
+    // RegMap(Stvec, Stvec),
+    // RegMap(Scounteren, Scounteren),
+
+    // Supervisor Trap Handling
+    // RegMap(Sscratch, sscratch),
+    // RegMap(Sepc, sepc),
+    // RegMap(Scause, scause),
+    // RegMap(Stval, stval),
+    // RegMap(Sip, sip),
+
+    // Supervisor Protection and Translation
+    // RegMap(Satp, satp),
+
+    // Machine Information Registers 
+    // RegMap(Mvendorid, mvendorid), 
+    // RegMap(Marchid, marchid), 
+    // RegMap(Mimpid, mimpid), 
+    // RegMap(Mhartid, mhartid), 
+
+    // Machine Trap Setup
+    RegMap(Mstatus, mstatus),
+    // RegMap(Misa, misa),
+    // RegMap(Medeleg, medeleg),
+    // RegMap(Mideleg, mideleg),
+    RegMap(Mie, mie),
+    RegMap(Mtvec, mtvec),
+    // RegMap(Mcounteren, mcounteren), 
+
+    // Machine Trap Handling
+    // RegMap(Mscratch, mscratch) 
+    RegMap(Mepc, mepc),
+    RegMap(Mcause, mcause),
+    // RegMap(Mtval, mtval)
+    RegMap(Mip, mip.asUInt, RegMap.Unwritable)
+
+    // Machine Memory Protection
+    // RegMap(Pmpcfg0, Pmpcfg0),
+    // RegMap(Pmpcfg1, Pmpcfg1),
+    // RegMap(Pmpcfg2, Pmpcfg2),
+    // RegMap(Pmpcfg3, Pmpcfg3),
+
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
   val addr = src2(11, 0)
   val rdata = Wire(UInt(XLEN.W))
+  val csri = ZeroExt(io.cfIn.instr(19,15), XLEN) //unsigned imm for csri. [TODO]
   val wdata = LookupTree(func, List(
-    CSROpType.wrt -> src1,
-    CSROpType.set -> (rdata | src1),
-    CSROpType.clr -> (rdata & ~src1)
+    CSROpType.wrt  -> src1,
+    CSROpType.set  -> (rdata | src1),
+    CSROpType.clr  -> (rdata & ~src1),
+    CSROpType.wrti -> csri,//TODO: csri --> src2
+    CSROpType.seti -> (rdata | csri),
+    CSROpType.clri -> (rdata & ~csri)
   ))
 
   val wen = (valid && func =/= CSROpType.jmp)
   RegMap.generate(mapping, addr, rdata, wen, wdata, wmask = Fill(XLEN, true.B))
   io.out.bits := rdata
 
+  Debug(false){
+    when(wen){
+      printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x\n", io.cfIn.pc, addr, rdata, wdata)
+    }
+  }
+
   val raiseException = io.cfIn.exceptionVec.asUInt.orR
   val exceptionNO = PriorityEncoder(io.cfIn.exceptionVec)
-  val intrNO = PriorityEncoder(intrVec)
+  // val intrNO = PriorityEncoder(intrVec)
+  val intrNO = PriorityEncoder(io.cfIn.intrVec)
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
 
@@ -156,6 +305,15 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, mtvec, mepc)
 
+  Debug(){
+    when(raiseExceptionIntr){
+      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, io.cfIn.exceptionVec.asUInt)
+    }
+    when(io.redirect.valid){
+      printf("[CSR] redirect to %x\n", io.redirect.target)
+    }
+  }
+  
   val isMret = addr === privMret
   when (valid && isMret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -205,7 +363,15 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     "MbpIRight"   -> (0xb17, "MbpIRight"             ),
     "MbpIWrong"   -> (0xb18, "MbpIWrong"             ),
     "MbpRRight"   -> (0xb19, "MbpRRight"             ),
-    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             )
+    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             ),
+    "Custom1"     -> (0xb1b, "Custom1"             ),
+    "Custom2"     -> (0xb1c, "Custom2"             ),
+    "Custom3"     -> (0xb1d, "Custom3"             ),
+    "Custom4"     -> (0xb1e, "Custom4"             ),
+    "Custom5"     -> (0xb1f, "Custom5"             ),
+    "Custom6"     -> (0xb20, "Custom6"             ),
+    "Custom7"     -> (0xb21, "Custom7"             ),
+    "Custom8"     -> (0xb22, "Custom8"             )
   )
 
   val perfCntCond = List.fill(0x80)(WireInit(false.B))
@@ -232,7 +398,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "simInstrCnt")
 
     // display all perfcnt when nooptrap is executed
-    when (nooptrap && false.B) {
+    when (nooptrap) {
       printf("======== PerfCnt =========\n")
       perfCntList.toSeq.sortBy(_._2._1).map { case (name, (addr, boringId)) =>
         printf("%d <- " + name + "\n", readWithScala(addr)) }
