@@ -315,7 +315,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Sepc, sepc),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable),
+    MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable, sipMask),
 
     // Supervisor Protection and Translation
     MaskedRegMap(Satp, satp),
@@ -386,8 +386,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   Debug(false){
     when(wen){
       printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.cfIn.pc, addr, rdata, wdata, func)
+      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
     }
-    printf("[MST] pc %x mstatus %x\n", io.cfIn.pc, mstatus)
   }
 
   // MMU Permission Check
@@ -480,12 +480,23 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
 
-  Debug(false){
+  // Debug(false){
     when(raiseExceptionIntr){
-      printf("[CSR] raiseExceptionIntr! int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[CSR] raiseExceptionIntr!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+    }
+
+    when(valid && isMret){
+      printf("[CSR] Mret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+    }
+
+    when(valid && isSret){
+      printf("[CSR] Sret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
     }
     //printf("[CSR] Red(%d, %x) raiseExcepIntr:%d valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, valid, io.instrValid)
-  }
+  // }
 
   // Branch control
 
@@ -518,7 +529,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.ie.s := mstatusOld.pie.s
     priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
     mstatusNew.pie.s := true.B
-    mstatusNew.spp := ModeU
+    mstatusNew.mpp := ModeU
     mstatus := mstatusNew.asUInt
     retTarget := sepc
   }
@@ -545,6 +556,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
+      // printf("[*] mstatusNew.spp %x\n", mstatusNew.spp)
       // trapTarget := stvec
     }.otherwise {
       mcause := causeNO
