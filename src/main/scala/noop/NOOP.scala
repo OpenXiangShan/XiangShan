@@ -74,8 +74,8 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
       idu1.io.in.valid, idu1.io.in.ready, idu2.io.in.valid, idu2.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
     when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc) }
-    when (idu1.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu1.io.in.bits.pc, idu1.io.in.bits.instr, idu1.io.in.bits.pnpc) }
-    when (idu2.io.in.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu2.io.in.bits.pc, idu2.io.in.bits.instr, idu2.io.in.bits.pnpc) }
+    when (idu1.io.in.valid) { printf("ID1: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu1.io.in.bits.pc, idu1.io.in.bits.instr, idu1.io.in.bits.pnpc) }
+    when (idu2.io.in.valid) { printf("ID2: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu2.io.in.bits.pc, idu2.io.in.bits.instr, idu2.io.in.bits.pnpc) }
     when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) }
     when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) }
     when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.decode.cf.pc) }

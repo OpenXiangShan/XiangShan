@@ -122,8 +122,7 @@ class IDU2 extends NOOPModule with HasInstrType {
   //output signals
 
   io.out.valid := io.in.valid
-  io.in.ready := (!io.in.valid || (io.out.fire())) && !hasIntr
-
+  io.in.ready := !io.in.valid || io.out.fire() && !hasIntr
   io.out.bits.cf <> io.in.bits
 
   val intrVec = WireInit(0.U(12.W))
