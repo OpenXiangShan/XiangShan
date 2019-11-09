@@ -192,7 +192,10 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val mepc = Reg(UInt(XLEN.W))
 
   val mie = RegInit(0.U(XLEN.W))
-  val mip = WireInit(0.U.asTypeOf(new Interrupt))
+  val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
+  val mipReg  = RegInit(0.U.asTypeOf(new Interrupt).asUInt)
+  val mipFixMask = "h777".U
+  val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   val misa = RegInit(UInt(XLEN.W), "h8000000000141101".U) 
   // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
@@ -232,25 +235,19 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
-  val sstatusWmask = "h180142".U
+  val sstatusWmask = "hc0122".U
   // Sstatus Write Mask
   // -------------------------------------------------------
-  // 20 19           9  6     2
-  // 1  1000 0000 0001 0100 0010
-  // 1  8    0    1    4    2
+  //    19           9   5     2
+  // 0  1100 0000 0001 0010 0010
+  // 0  c    0    1    2    2
   // -------------------------------------------------------
-  val sstatusRmask = "h100000030019d142".U
-  // Sstatus Read Mask
-  // -------------------------------------------------------
-  //               32        20 19           9  6     2
-  // 1 0 0 0 0 0 0 3  0 0 0001  1001 1110 0001 0100 0010
-  // 1 0 0 0 0 0 0 3  0 0 1     9    d    1    4    2
-  // -------------------------------------------------------
+  val sstatusRmask = "h80000003000de122".U
+  // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
-  val sieWmask = "h333".U
-  val sieRmask = "h333".U
-  val sipMask  = "h103".U
+  val sieMask = "h333".U & mideleg
+  val sipMask  = "h103".U & mideleg
   //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
   val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp
@@ -309,7 +306,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
-    MaskedRegMap(Sie, mie, sieWmask & mideleg, MaskedRegMap.NoSideEffect, sieRmask),
+    MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec),
     // MaskedRegMap(Scounteren, Scounteren),
 
@@ -318,7 +315,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Sepc, sepc),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    // MaskedRegMap(Sip, mip, sipMask),
+    MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable),
 
     // Supervisor Protection and Translation
     MaskedRegMap(Satp, satp),
@@ -371,6 +368,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   io.out.bits := rdata
 
+  // Fix Mip/Sip write
+  val fixMapping = Map(
+    MaskedRegMap(Mip, mipReg.asUInt, mipFixMask),
+    MaskedRegMap(Sip, mipReg.asUInt, sipMask, MaskedRegMap.NoSideEffect, sipMask)
+  )
+  val rdataDummy = Wire(UInt(XLEN.W))
+  MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
+
   // CSR inst decode
   val ret = Wire(Bool())
   val isEcall = addr === privEcall && func === CSROpType.jmp
@@ -378,7 +383,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val isSret = addr === privSret   && func === CSROpType.jmp
   val isUret = addr === privUret   && func === CSROpType.jmp
 
-  Debug(){
+  Debug(false){
     when(wen){
       printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.cfIn.pc, addr, rdata, wdata, func)
     }
@@ -447,8 +452,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val meip = WireInit(false.B)
   BoringUtils.addSink(mtip, "mtip")
   BoringUtils.addSink(meip, "meip")
-  mip.t.m := mtip
-  mip.e.m := meip
+  mipWire.t.m := mtip
+  mipWire.e.m := meip
 
   // exceptions
 
@@ -475,7 +480,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
 
-  Debug(){
+  Debug(false){
     when(raiseExceptionIntr){
       printf("[CSR] raiseExceptionIntr! int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
     }

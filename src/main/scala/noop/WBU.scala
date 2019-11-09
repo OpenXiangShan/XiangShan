@@ -26,6 +26,7 @@ class WBU(implicit val p: NOOPConfig) extends Module {
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(RegNext(io.in.valid), "difftestCommit")
     BoringUtils.addSource(RegNext(io.in.bits.decode.cf.pc), "difftestThisPC")
+    BoringUtils.addSource(RegNext(io.in.bits.decode.cf.instr), "difftestThisINST")
     BoringUtils.addSource(RegNext(io.in.bits.isMMIO), "difftestIsMMIO")
     BoringUtils.addSource(RegNext(io.in.bits.decode.cf.instr(1,0)=/="b11".U), "difftestIsRVC")
     BoringUtils.addSource(RegNext(io.in.bits.intrNO), "difftestIntrNO")
