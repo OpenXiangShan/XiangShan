@@ -45,6 +45,10 @@ class IFU extends NOOPModule with HasResetVector {
   val pnpc = bp1.io.out.target
   val pbrIdx = bp1.io.brIdx
   val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, Mux(lateJumpLatch, lateJumpTarget, Mux(lateJump, snpc, Mux(bp1.io.out.valid, pnpc, snpc)))))
+  Debug(){
+    printf("[FOO] %x %x %x %x %x %x\n",lateJumpLatch, lateJumpTarget, lateJump, bp1.io.out.valid, pnpc, snpc)
+  }
+
   val npcIsSeq = Mux(io.redirect.valid || io.redirectRVC.valid, false.B, Mux(lateJumpLatch, false.B, Mux(lateJump, true.B, Mux(bp1.io.out.valid, false.B, true.B))))
   // val npc = Mux(io.redirect.valid, io.redirect.target, Mux(io.redirectRVC.valid, io.redirectRVC.target, snpc))
   val brIdx = Wire(UInt(4.W)) 
@@ -77,9 +81,6 @@ class IFU extends NOOPModule with HasResetVector {
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
 
   Debug(false){
-    when(io.imem.req.fire()){
-      printf("[IFI] pc=%x user=%x %x %x %x %x\n", io.imem.req.bits.addr, io.imem.req.bits.user.getOrElse(0.U), io.redirect.valid, io.redirectRVC.valid, pbrIdx, brIdx)
-    }
     when(pcUpdate) {
       printf("[IFUPC] pc:%x pcUpdate:%d npc:%x RedValid:%d RedTarget:%x RedCValid:%d RedCTarget:%x LJL:%d LJTarget:%x LJ:%d snpc:%x bpValid:%d pnpn:%x \n",pc, pcUpdate, npc, io.redirect.valid,io.redirect.target,io.redirectRVC.valid,io.redirectRVC.target,lateJumpLatch,lateJumpTarget,lateJump,snpc,bp1.io.out.valid,pnpc)
       printf(p"[IFUIN] redirect: ${io.redirect} \n")
@@ -90,6 +91,9 @@ class IFU extends NOOPModule with HasResetVector {
     //inst path only uses 32bit inst, get the right inst according to pc(2)
 
   Debug(){
+    when(io.imem.req.fire()){
+      printf("[IFI] pc=%x user=%x %x %x %x %x\n", io.imem.req.bits.addr, io.imem.req.bits.user.getOrElse(0.U), io.redirect.valid, io.redirectRVC.valid, pbrIdx, brIdx)
+    }
     when (io.out.fire()) {
           printf("[IFO] pc=%x inst=%x\n", io.out.bits.pc, io.out.bits.instr)
     }

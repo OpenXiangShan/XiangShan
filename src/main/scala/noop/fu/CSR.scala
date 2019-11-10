@@ -104,6 +104,12 @@ trait HasCSRConst {
   def ModeH     = 0x2.U
   def ModeS     = 0x1.U
   def ModeU     = 0x0.U
+
+//  IntPriority = {
+//     IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
+//     IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
+//     IRQ_UEIP, IRQ_USIP, IRQ_UTIP
+//   };
 }
 
 trait HasExceptionNO {
@@ -122,6 +128,7 @@ trait HasExceptionNO {
   def loadPageFault       = 13
   def storePageFault      = 15
 }
+
 
 class CSRIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
@@ -480,21 +487,27 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
   io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
 
+  Debug(){
+    when(io.redirect.valid){
+      printf("[CSR] csr redirect to %x\n", io.redirect.target)
+    }
+  }
+
   // Debug(false){
-    when(raiseExceptionIntr){
-      printf("[CSR] raiseExceptionIntr!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-    }
+    // when(raiseExceptionIntr){
+    //   printf("[CSR] raiseExceptionIntr!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+    //   printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+    // }
 
-    when(valid && isMret){
-      printf("[CSR] Mret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-    }
+    // when(valid && isMret){
+    //   printf("[CSR] Mret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+    //   printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+    // }
 
-    when(valid && isSret){
-      printf("[CSR] Sret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-    }
+    // when(valid && isSret){
+    //   printf("[CSR] Sret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+    //   printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+    // }
     //printf("[CSR] Red(%d, %x) raiseExcepIntr:%d valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, valid, io.instrValid)
   // }
 
@@ -539,8 +552,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     // mstatusNew.mpp.m := ModeU //TODO: add mode U
     mstatusNew.ie.u := mstatusOld.pie.u
-    priviledgeMode := 0.U //ModeU
-    mstatusNew.pie.m := true.B
+    priviledgeMode := ModeU
+    mstatusNew.pie.u := true.B
     mstatus := mstatusNew.asUInt
     retTarget := uepc
   }

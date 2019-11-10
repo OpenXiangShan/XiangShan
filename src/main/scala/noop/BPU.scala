@@ -57,6 +57,7 @@ class BPU1 extends NOOPModule {
     val _type = UInt(2.W)
     val target = UInt(AddrBits.W)
     val brIdx = UInt(3.W)
+    val valid = Bool()
   }
 
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
@@ -75,7 +76,7 @@ class BPU1 extends NOOPModule {
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B) && !(pcLatch(1) && btbRead.brIdx(0)) && btbRead.valid
   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
   // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
   // -------------------------------------------------
@@ -86,7 +87,7 @@ class BPU1 extends NOOPModule {
   io.lateJump := lateJump
   // val lateJumpLatch = RegNext(lateJump)
   // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
-  Debug(false){
+  Debug(){
   // printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
     when(btbHit){
       printf("[BTBHT1] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
@@ -145,6 +146,7 @@ class BPU1 extends NOOPModule {
   btbWrite.target := req.actualTarget
   btbWrite._type := req.btbType
   btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1))
+  btbWrite.valid := true.B 
   // NOTE: We only update BTB at a miss prediction.
   // If a miss prediction is found, the pipeline will be flushed
   // in the next cycle. Therefore it is safe to use single-port

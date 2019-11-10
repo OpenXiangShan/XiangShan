@@ -112,10 +112,10 @@ class ALU extends NOOPModule {
   //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
   // }
 
-  Debug(false){
+  Debug(){
     when(valid && isBru){
-      printf("[BRU]tgt %x, npc: %x, pdwrong: %x\n", io.redirect.target, io.cfIn.pnpc, predictWrong)
-      printf("[BRU2]taken:%d addrRes:%x src1:%x src2:%x func:%x\n", taken, adderRes, src1, src2, func) 
+      printf("[BRU] tgt %x, npc: %x, pdwrong: %x\n", io.redirect.target, io.cfIn.pnpc, predictWrong)
+      printf("[BRU] taken:%d addrRes:%x src1:%x src2:%x func:%x\n", taken, adderRes, src1, src2, func) 
     }
   }
 
