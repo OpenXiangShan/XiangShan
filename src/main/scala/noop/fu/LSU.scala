@@ -320,7 +320,7 @@ class LSExecUnit extends NOOPModule {
     is (s_partialLoad) { state := s_idle }
   }
 
-  Debug(){
+  Debug(false){
     when (dmem.req.fire()){
       printf("[LSU] IN(%d, %d) OUT(%d, %d) addr %x, size %x, wdata_raw %x, isStore %x \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, addr, func(1,0), io.wdata, isStore)
     }

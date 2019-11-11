@@ -35,10 +35,10 @@ void addpageSv39() {
   uint64_t pdemmio[ENTRYNUM];
   uint64_t ptemmio[PTEMMIONUM][ENTRYNUM];
   
-  pdde[1] = (((PDDEADDR-PAGESIZE*1) & 0xfffff000) >> 2) | 0xf;
+  pdde[1] = (((PDDEADDR-PAGESIZE*1) & 0xfffff000) >> 2) | 0x1;
 
   for(int i = 0; i < PTEMMIONUM; i++) {
-    pdemmio[i] = (((PDDEADDR-PAGESIZE*(PTEMMIONUM+PDEMMIONUM-i)) & 0xfffff000) >> 2) | 0xf;
+    pdemmio[i] = (((PDDEADDR-PAGESIZE*(PTEMMIONUM+PDEMMIONUM-i)) & 0xfffff000) >> 2) | 0x1;
   }
   
   for(int outidx = 0; outidx < PTEMMIONUM; outidx++) {
@@ -48,10 +48,12 @@ void addpageSv39() {
   }
   
   //0x800000000 - 0x87ffffff
-  pdde[2] = ((PDEADDR & 0xfffff000) >> 2) | 0xf;
-  
+  pdde[2] = ((PDEADDR & 0xfffff000) >> 2) | 0x1;
+  //pdde[2] = ((0x80000000&0xc0000000) >> 2) | 0xf;
+
   for(int i = 0; i < PTENUM ;i++) {
-    pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0xf ;
+    pde[i] = ((PTEADDR(i)&0xfffff000)>>2) | 0x1;
+    //pde[i] = (((0x8000000+i*2*1024*1024)&0xffe00000)>>2) | 0xf;
   }
 
   for(int outidx = 0; outidx < PTENUM; outidx++ ) {
