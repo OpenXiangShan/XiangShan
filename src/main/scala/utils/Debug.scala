@@ -7,9 +7,9 @@ import noop.NOOPConfig
 
 object Debug {
   def apply(flag: Boolean = NOOPConfig().EnableDebug, cond: Bool = true.B)(body: => Unit): Any =
-    if (flag) { when (cond && GTimer() > 88379000.U) { body } }
+    if (flag) { when (cond && GTimer() > 35800.U) { body } }
 }
 
 object ShowType {
   def apply[T: Manifest](t: T) = println(manifest[T])
-  }
+}

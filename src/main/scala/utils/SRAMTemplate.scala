@@ -84,4 +84,33 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
 
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
+
+  Debug(false) {
+    when (wen) {
+      printf("%d: SRAMTemplate: write %x to idx = %d\n", GTimer(), wdata.asUInt, setIdx)
+    }
+    when (RegNext(realRen)) {
+      printf("%d: SRAMTemplate: read %x at idx = %d\n", GTimer(), VecInit(rdata).asUInt, RegNext(io.r.req.bits.setIdx))
+    }
+  }
+}
+
+class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
+  shouldReset: Boolean = false) extends Module {
+  val io = IO(new Bundle {
+    val r = Flipped(Vec(nRead, new SRAMReadBus(gen, set, way)))
+    val w = Flipped(new SRAMWriteBus(gen, set, way))
+  })
+
+  val ram = Module(new SRAMTemplate(gen, set, way, shouldReset, holdRead = false, singlePort = true))
+  ram.io.w <> io.w
+
+  val readArb = Module(new Arbiter(chiselTypeOf(io.r(0).req.bits), nRead))
+  readArb.io.in <> io.r.map(_.req)
+  ram.io.r.req <> readArb.io.out
+
+  // latch read results
+  io.r.map{ case r => {
+    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
+  }}
 }

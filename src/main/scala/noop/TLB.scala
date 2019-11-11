@@ -140,7 +140,7 @@ sealed trait HasTlbConst {
   val Ways = tlbConfig.ways
   val Sets = 1
 
-  val debug = true //&& tlbname == "itlb"
+  val debug = false//true && tlbname == "dtlb"
 
   def TlbMetaArrayReadBus() = new SRAMReadBus(new TLBMetaBundle, set = Sets, way = Ways)
   def TlbDataArrayReadBus() = new SRAMReadBus(new TLBDataBundle, set = Sets, way = Ways)
@@ -555,14 +555,15 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     BoringUtils.addSource(vmEnable, "DTLBENABLE")
   }
 
-  Debug(false /*&& tlbname == "itlb"*/) {
+  Debug() {
+    if (debug) {
     when(true.B ) {
       //printf("-----------------------------------------------------------------------------------------------\n")
-      printf("%d "+ tlbname + " ",GTimer())
+      //printf("%d "+ tlbname + " ",GTimer())
       //printf("InReq(%d, %d) ioInResp(%d, %d) InReqAddr:%x InRespAddr:%x \n", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.in.req.bits.addr, io.in.resp.bits.addr)
       printf("%d:"+ tlbname + " {IN: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ",GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)
-      printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} ", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
-      printf("\n%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
+      printf("{OUT: s1(%d, %d) s2(%d, %d) s3(%d, %d)} \n", s1.io.out.valid, s1.io.out.ready, s2.io.out.valid, s2.io.out.ready, s3.io.out.valid, s3.io.out.ready)
+      printf("%d:"+ tlbname + " s1ReqAddr:%x s2ReqAddr:%x s3ReqAddr:%x s3RespAddr:%x \n", GTimer(), s1.io.in.bits.addr, s2.io.in.bits.addr, s3.io.in.bits.req.addr, s3.io.out.bits.addr)
       //if (tlbname == "itlb") { printf(" user:%x ", s3.io.out.bits.user.getOrElse(0.U))}
       //printf("\n%d:"+ tlbname + " s3State:%d level:%d s3alreadOutFire:%d s3memRespStore:%x s3Hit:%d s3WayMask:%x iPF:%d hiPF:%d pfwire:%d ", GTimer(), s3.io.print.state, s3.io.print.level, s3.io.print.alreadyOutFire, s3.io.print.memRespStore, s3.io.in.bits.hit.hit, s3.io.in.bits.waymask, s3.io.print.instrPF, s3.io.print.hitinstrPF, s3.io.print.pfWire)
       //printf("\n%d:"+ tlbname + " s3 hitflag:%x refillFlag:%x hitWB:%d hitExec:%d hitLoad:%d hitStore:%d isWrite:%d ", GTimer(), s3.io.print.hitFlag, s3.io.print.refillFlag, s3.io.in.bits.hit.hitWB,  s3.io.in.bits.hit.hitExec,  s3.io.in.bits.hit.hitLoad,  s3.io.in.bits.hit.hitStore, s3.io.in.bits.req.isWrite())
@@ -580,6 +581,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
       //printf("s2s3Miss:%d ", s1.io.s2s3Miss)
       
     }
+  }
   }
 }
 /*
@@ -614,8 +616,9 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
   io.out.resp.ready := io.in.resp.ready
 
   Debug() {
+    if (name == "dtran") {
     when(true.B) {
-      // if(name == "itran") { printf("-----------------------------------------------------------------------------------------------\n")}
+      if (name == "dtran") { printf("-----------------------------------------------------------------------------------------------\n")}
       printf("%d:" + name + "InReq(%d, %d) InResp(%d, %d) ", GTimer(), io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready)
       printf("\n%d:" + name, GTimer())
       printf(p"InReqBits:${io.in.req.bits}, InRespBits:${io.in.resp.bits}")
@@ -623,7 +626,8 @@ class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule 
       printf("\n")
       //io.in.dump(name + ".in")
       //io.out.dump(name + ".out")
-    }
+      //if(name == "dtran") { printf("-----------------------------------------------------------------------------------------------\n")}
+    }}
   }
 }
 /*

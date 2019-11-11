@@ -102,7 +102,9 @@ class Emulator {
       n --;
 
       if (lastcommit - n > stuck_limit && hascommit) {
-        eprintf("No instruction commits for %d cycles, maybe get stuck\n", stuck_limit);
+        eprintf("No instruction commits for %d cycles, maybe get stuck\n"
+            "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
+            stuck_limit, stuck_limit);
         set_abort();
       }
 
@@ -128,7 +130,23 @@ class Emulator {
     }
   }
 
-  void execute() { execute_cycles(max_cycles); }
+  void cache_test(uint64_t n) {
+    while (n > 0) {
+      single_cycle();
+      n --;
+    }
+  }
+
+  void execute() {
+//#define CACHE_TEST
+
+#ifdef CACHE_TEST
+    eprintf(ANSI_COLOR_MAGENTA "This is random test for cache.\n" ANSI_COLOR_RESET);
+    cache_test(max_cycles);
+#else
+    execute_cycles(max_cycles);
+#endif
+  }
   uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
 };

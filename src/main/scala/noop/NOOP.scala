@@ -27,7 +27,7 @@ abstract class NOOPBundle extends Bundle with HasNOOPParameter
 
 case class NOOPConfig (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = true
 )
 
 object AddressSpace {
@@ -46,34 +46,37 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     val mmio = new SimpleBusUC
   })
 
-  val ifu = Module(new IFU)
-  val idu = Module(new IDU)
-  val isu = Module(new ISU)
-  val exu = Module(new EXU)
-  val wbu = Module(new WBU)
+  val ifu  = Module(new IFU)
+  val idu1 = Module(new IDU1)
+  val idu2 = Module(new IDU2)
+  val isu  = Module(new ISU)
+  val exu  = Module(new EXU)
+  val wbu  = Module(new WBU)
 
   def pipelineConnect2[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T],
     isFlush: Bool, entries: Int = 4, pipe: Boolean = false) = {
     right <> FlushableQueue(left, isFlush,  entries = entries, pipe = pipe)
   }
 
-  pipelineConnect2(ifu.io.out, idu.io.in, ifu.io.flushVec(0))
-  PipelineConnect(idu.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
+  pipelineConnect2(ifu.io.out, idu1.io.in, ifu.io.flushVec(0))
+  PipelineConnect(idu1.io.out, idu2.io.in, idu2.io.out.fire(), ifu.io.flushVec(1))
+  PipelineConnect(idu2.io.out, isu.io.in, isu.io.out.fire(), ifu.io.flushVec(1))
   PipelineConnect(isu.io.out, exu.io.in, exu.io.out.fire(), ifu.io.flushVec(2))
   PipelineConnect(exu.io.out, wbu.io.in, true.B, ifu.io.flushVec(3))
-  idu.io.flush := ifu.io.flushVec(1)
+  idu1.io.flush := ifu.io.flushVec(1)
+  idu2.io.flush := ifu.io.flushVec(1)
   isu.io.flush := ifu.io.flushVec(2)
   exu.io.flush := ifu.io.flushVec(3)
 
   Debug(false) {
     printf("------------------------ TIMER: %d ------------------------\n", GTimer())
-    printf("flush = %b, ifu:(%d,%d), idu:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
+    printf("flush = %b, ifu:(%d,%d), idu1:(%d,%d), idu2:(%d,%d), isu:(%d,%d), exu:(%d,%d), wbu: (%d,%d)\n",
       ifu.io.flushVec.asUInt, ifu.io.out.valid, ifu.io.out.ready,
-      idu.io.in.valid, idu.io.in.ready, isu.io.in.valid, isu.io.in.ready,
+      idu1.io.in.valid, idu1.io.in.ready, idu2.io.in.valid, idu2.io.in.ready, isu.io.in.valid, isu.io.in.ready,
       exu.io.in.valid, exu.io.in.ready, wbu.io.in.valid, wbu.io.in.ready)
     when (ifu.io.out.valid) { printf("IFU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", ifu.io.out.bits.pc, ifu.io.out.bits.instr, ifu.io.out.bits.pnpc)} ; 
-    when (idu.io.in.valid)  { printf("IBF: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.in.bits.pc, idu.io.in.bits.instr, idu.io.in.bits.pnpc)} ; 
-    when (idu.io.out.valid) { printf("IDU: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu.io.out.bits.cf.pc, idu.io.out.bits.cf.instr, idu.io.out.bits.cf.pnpc)} ; 
+    when (idu1.io.in.valid) { printf("ID1: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu1.io.in.bits.pc, idu1.io.in.bits.instr, idu1.io.in.bits.pnpc) }
+    when (idu2.io.in.valid) { printf("ID2: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu2.io.in.bits.pc, idu2.io.in.bits.instr, idu2.io.in.bits.pnpc) }
     when (isu.io.in.valid)  { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc)} ;
     when (exu.io.in.valid)  { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc)} ;
     when (wbu.io.in.valid)  { printf("WBU: pc = 0x%x rfWen:%d rfDest:%d rfData:%x Futype:%x\n", wbu.io.in.bits.decode.cf.pc, wbu.io.in.bits.decode.ctrl.rfWen, wbu.io.in.bits.decode.ctrl.rfDest, wbu.io.wb.rfData, wbu.io.in.bits.decode.ctrl.fuType )}
@@ -89,7 +92,6 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
 
   isu.io.wb <> wbu.io.wb
   ifu.io.redirect <> wbu.io.redirect
-  ifu.io.redirectRVC <> idu.io.redirect
   // forward
   isu.io.forward <> exu.io.forward
 

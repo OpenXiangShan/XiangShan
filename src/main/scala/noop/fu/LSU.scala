@@ -320,12 +320,13 @@ class LSExecUnit extends NOOPModule {
     is (s_partialLoad) { state := s_idle }
   }
 
-  Debug(false){
-    when (dmem.req.fire()){
+  Debug(){
+    //when (dmem.req.fire()){
       printf("[LSU] IN(%d, %d) OUT(%d, %d) addr %x, size %x, wdata_raw %x, isStore %x \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, addr, func(1,0), io.wdata, isStore)
-    }
-    when (dtlbFinish) {
-      printf("[LSU] dtlbFinish:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
+      printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
+    //}
+    when (dtlbFinish && dtlbEnable) {
+      printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
     }
   }
 
