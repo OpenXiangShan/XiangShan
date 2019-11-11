@@ -287,7 +287,7 @@ class IDU extends NOOPModule with HasInstrType {
   // for perf counter:
   // val crossLineJump = state === s_waitnext && fuType === FuType.alu && fuOpType.isBru()
 
-  Debug(){
+  Debug(false){
     when(io.out.fire()){
       printf("[IDU] pc %x pcin: %x instr %x instrin %x state %x instrType: %x fuType: %x fuOpType: %x brIdx: %x npcin: %x npcout: %x valid: %x\n", pcOut, io.in.bits.pc, instr, io.in.bits.instr, state, instrType, fuType, fuOpType, brIdx, io.in.bits.pnpc, pnpcOut, io.out.fire())
     }

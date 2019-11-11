@@ -568,13 +568,15 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.in.ready := true.B
   io.out.valid := valid
 
-  Debug() {
+  Debug(false) {
     printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
   }
 
-  when(raiseExceptionIntr && delegS ) {
-    printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
-    printf("[CSR3] sepc is writen!!! pc:%x time:%d\n", io.cfIn.pc, GTimer())
+  Debug(false) {
+    when(raiseExceptionIntr && delegS ) {
+      printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+      printf("[CSR3] sepc is writen!!! pc:%x time:%d\n", io.cfIn.pc, GTimer())
+    }
   }
 
   // perfcnt

@@ -89,7 +89,7 @@ class IFU extends NOOPModule with HasResetVector {
   io.out.bits := DontCare
     //inst path only uses 32bit inst, get the right inst according to pc(2)
 
-  Debug(){
+  Debug(false){
     when (io.out.fire()) {
           printf("[IFO] pc=%x inst=%x\n", io.out.bits.pc, io.out.bits.instr)
     }
