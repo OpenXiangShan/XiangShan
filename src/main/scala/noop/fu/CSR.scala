@@ -257,6 +257,15 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
+  val pmpcfg0 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpcfg1 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpcfg2 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpcfg3 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpaddr0 = RegInit(UInt(XLEN.W), 0.U) 
+  val pmpaddr1 = RegInit(UInt(XLEN.W), 0.U) 
+  val pmpaddr2 = RegInit(UInt(XLEN.W), 0.U) 
+  val pmpaddr3 = RegInit(UInt(XLEN.W), 0.U) 
+
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
@@ -366,13 +375,17 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Mepc, mepc),
     MaskedRegMap(Mcause, mcause),
     // MaskedRegMap(Mtval, mtval)
-    MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable)
+    MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
 
     // Machine Memory Protection
-    // MaskedRegMap(Pmpcfg0, Pmpcfg0),
-    // MaskedRegMap(Pmpcfg1, Pmpcfg1),
-    // MaskedRegMap(Pmpcfg2, Pmpcfg2),
-    // MaskedRegMap(Pmpcfg3, Pmpcfg3),
+    MaskedRegMap(Pmpcfg0, pmpcfg0),
+    MaskedRegMap(Pmpcfg1, pmpcfg1),
+    MaskedRegMap(Pmpcfg2, pmpcfg2),
+    MaskedRegMap(Pmpcfg3, pmpcfg3),
+    MaskedRegMap(PmpaddrBase + 0, pmpaddr0),
+    MaskedRegMap(PmpaddrBase + 1, pmpaddr1),
+    MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
+    MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
 
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
