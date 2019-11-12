@@ -125,6 +125,10 @@ class IDU2 extends NOOPModule with HasInstrType {
   io.in.ready := !io.in.valid || io.out.fire() && !hasIntr
   io.out.bits.cf <> io.in.bits
 
+  Debug(){
+    when(io.out.fire()){printf("[IDU] issue: pc %x npc %x instr %x\n", io.out.bits.cf.pc, io.out.bits.cf.pnpc, io.out.bits.cf.instr)}
+  }
+
   val intrVec = WireInit(0.U(12.W))
   BoringUtils.addSink(intrVec, "intrVecIDU")
   io.out.bits.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }

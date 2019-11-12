@@ -20,7 +20,9 @@ class WBU(implicit val p: NOOPConfig) extends Module {
   io.redirect := io.in.bits.decode.cf.redirect
   io.redirect.valid := io.in.bits.decode.cf.redirect.valid && io.in.valid
 
-  // when (io.in.valid) { printf("TIMER: %d WBU: pc = 0x%x wen %x wdata %x mmio %x intrNO %x\n", GTimer(), io.in.bits.decode.cf.pc, io.wb.rfWen, io.wb.rfData, io.in.bits.isMMIO, io.in.bits.intrNO) }
+  Debug(){
+    when (io.in.valid) { printf("[COMMIT] TIMER: %d WBU: pc = 0x%x inst %x wen %x wdata %x mmio %x intrNO %x\n", GTimer(), io.in.bits.decode.cf.pc, io.in.bits.decode.cf.instr, io.wb.rfWen, io.wb.rfData, io.in.bits.isMMIO, io.in.bits.intrNO) }
+  }
 
   BoringUtils.addSource(io.in.valid, "perfCntCondMinstret")
   if (!p.FPGAPlatform) {

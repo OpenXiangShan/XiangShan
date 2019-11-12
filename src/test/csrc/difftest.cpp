@@ -84,8 +84,8 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int this_inst, int isMM
     nemu_pc += isRVC ? 2 : 4;
     // to skip the checking of an instruction, just copy the reg state to reference design
     ref_difftest_setregs(reg_scala);
-    pc_retire_pointer = (pc_retire_pointer+1) % 8;
-    pc_retire_queue[pc_retire_pointer] = nemu_pc;
+    pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
+    pc_retire_queue[pc_retire_pointer] = this_pc;
     inst_retire_queue[pc_retire_pointer] = this_inst;
     return 0;
   }
