@@ -216,8 +216,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val mipFixMask = "h777".U
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
-  val misa = RegInit(UInt(XLEN.W), "h8000000000141101".U) 
-  // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
+  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}
+  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)} 
+  var extList = List('a', 's', 'i')
+  if(HasMExtension){ extList = extList :+ 'm'}
+  if(HasCExtension){ extList = extList :+ 'c'}
+  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i))
+  val misa = RegInit(UInt(XLEN.W), misaInitVal) 
+  // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
