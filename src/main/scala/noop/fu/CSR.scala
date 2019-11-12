@@ -207,7 +207,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Machine-Level CSRs
   
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
+  val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   val mcause = Reg(UInt(XLEN.W))
+  val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mepc = Reg(UInt(XLEN.W))
 
   val mie = RegInit(0.U(XLEN.W))
@@ -369,13 +371,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(Mideleg, mideleg, "h222".U),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
-    // MaskedRegMap(Mcounteren, mcounteren), 
+    MaskedRegMap(Mcounteren, mcounteren), 
 
     // Machine Trap Handling
     MaskedRegMap(Mscratch, mscratch),
     MaskedRegMap(Mepc, mepc),
     MaskedRegMap(Mcause, mcause),
-    // MaskedRegMap(Mtval, mtval)
+    MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
 
     // Machine Memory Protection
