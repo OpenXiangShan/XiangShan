@@ -289,6 +289,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val scause = Reg(UInt(XLEN.W))
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
+  val scounteren = RegInit(UInt(XLEN.W), 0.U)
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -342,7 +343,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec),
-    // MaskedRegMap(Scounteren, Scounteren),
+    MaskedRegMap(Scounteren, scounteren),
 
     // Supervisor Trap Handling
     MaskedRegMap(Sscratch, sscratch),
