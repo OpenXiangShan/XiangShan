@@ -517,6 +517,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
   // csrExceptionVec(instrPageFault) := hasInstrPageFault
+  csrExceptionVec(illegalInstr) := addr === Time.U && wen // Trigger an illegal Instrexception when CSR Time is being read
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
   val iduExceptionVec = io.cfIn.exceptionVec
@@ -620,6 +621,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
+      when(exceptionNO === illegalInstr.U && !raiseIntr){stval := 0.U}
       // printf("[*] mstatusNew.spp %x\n", mstatusNew.spp)
       // trapTarget := stvec
     }.otherwise {
@@ -629,6 +631,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
+      when(exceptionNO === illegalInstr.U && !raiseIntr){mtval := 0.U}
       // trapTarget := mtvec
     }
     // mstatusNew.pie.m := LookupTree(priviledgeMode, List(
