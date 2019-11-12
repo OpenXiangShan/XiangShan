@@ -466,8 +466,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // assert(!hasLoadPageFault)
   // assert(!hasStorePageFault)
 
+  //TODO: Havn't test if io.dmemMMU.priviledgeMode is correct yet
   io.imemMMU.priviledgeMode := priviledgeMode
-  io.dmemMMU.priviledgeMode := priviledgeMode
+  io.dmemMMU.priviledgeMode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
   io.imemMMU.status_sum := mstatusStruct.sum.asBool
   io.dmemMMU.status_sum := mstatusStruct.sum.asBool
   io.imemMMU.status_mxr := DontCare
