@@ -271,14 +271,14 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
-  val sstatusWmask = "hc0122".U
+  val sstatusWmask = "hc6122".U
   // Sstatus Write Mask
   // -------------------------------------------------------
   //    19           9   5     2
   // 0  1100 0000 0001 0010 0010
   // 0  c    0    1    2    2
   // -------------------------------------------------------
-  val sstatusRmask = "h80000003000de122".U
+  val sstatusRmask = sstatusWmask | "h8000000300018000".U
   // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
