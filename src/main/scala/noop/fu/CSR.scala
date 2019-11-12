@@ -296,15 +296,25 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
 
-  // Hart Priviledge Mode
+  // Atom LR/SC Control Bits
+  val setLr = WireInit(Bool(), false.B)
+  val setLrVal = WireInit(Bool(), false.B)
+  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare)
+  val lr = RegInit(Bool(), false.B)
+  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
+  BoringUtils.addSink(setLr, "set_lr")
+  BoringUtils.addSink(setLrVal, "set_lr_val")
+  BoringUtils.addSink(setLrAddr, "set_lr_addr")
+  BoringUtils.addSource(lr, "lr")
+  BoringUtils.addSource(lrAddr, "lr_addr")
 
+  when(setLr){
+    lr := setLrVal
+    lrAddr := setLrAddr
+  }
+
+  // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
-  // val globalInterruptEnable = LookupTree(priviledgeMode, List(
-  //   ModeM -> mstatusStruct.ie.m,
-  //   ModeH -> mstatusStruct.ie.h,
-  //   ModeS -> mstatusStruct.ie.s,
-  //   ModeU -> mstatusStruct.ie.u
-  // ))
 
   // perfcnt
   val hasPerfCnt = !p.FPGAPlatform
@@ -571,6 +581,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.pie.m := true.B
     mstatusNew.mpp := ModeU
     mstatus := mstatusNew.asUInt
+    lr := false.B
     retTarget := mepc
   }
 
@@ -583,6 +594,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.pie.s := true.B
     mstatusNew.mpp := ModeU
     mstatus := mstatusNew.asUInt
+    lr := false.B
     retTarget := sepc
   }
 

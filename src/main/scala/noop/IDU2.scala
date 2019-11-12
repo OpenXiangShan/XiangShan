@@ -32,6 +32,7 @@ class IDU2 extends NOOPModule with HasInstrType {
     InstrI -> (SrcType.reg, SrcType.imm),
     InstrR -> (SrcType.reg, SrcType.reg),
     InstrS -> (SrcType.reg, SrcType.reg),
+    InstrSA-> (SrcType.reg, SrcType.reg),
     InstrB -> (SrcType.reg, SrcType.reg),
     InstrU -> (SrcType.pc , SrcType.imm),
     InstrJ -> (SrcType.pc , SrcType.imm),
@@ -81,6 +82,7 @@ class IDU2 extends NOOPModule with HasInstrType {
   val imm = LookupTree(instrType, List(
     InstrI  -> SignExt(instr(31, 20), XLEN),
     InstrS  -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
+    InstrSA -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
     InstrB  -> SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN),
     InstrU  -> SignExt(Cat(instr(31, 12), 0.U(12.W)), XLEN),//fixed
     InstrJ  -> SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
