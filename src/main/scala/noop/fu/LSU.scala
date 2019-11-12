@@ -122,7 +122,7 @@ class LSU extends NOOPModule {
     val atomWidthD = funct3(0)
 
     // Atom LR/SC Control Bits
-    val setLr = WireInit(Bool())
+    val setLr = Wire(Bool())
     val setLrVal = Wire(Bool())
     val setLrAddr = Wire(UInt(AddrBits.W))
     val lr = WireInit(Bool(), false.B)
@@ -177,8 +177,8 @@ class LSU extends NOOPModule {
           lsExecUnit.io.in.bits.src2 := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.src2, src2)
           lsExecUnit.io.in.bits.func := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.func, func)
           lsExecUnit.io.wdata        := Mux(storeQueue.io.deq.valid, storeQueue.io.deq.bits.wdata, io.wdata)
-          io.in.ready                := Mux(storeReq, storeQueue.io.enq.ready, false.B) && scInvalid
-          io.out.valid               := Mux(storeReq, storeQueue.io.enq.ready, false.B) && scInvalid
+          io.in.ready                := Mux(storeReq, storeQueue.io.enq.ready, false.B) || scInvalid
+          io.out.valid               := Mux(storeReq, storeQueue.io.enq.ready, false.B) || scInvalid
         }else{
           lsExecUnit.io.in.valid     := io.in.valid && !atomReq
           lsExecUnit.io.out.ready    := io.out.ready 
@@ -186,8 +186,8 @@ class LSU extends NOOPModule {
           lsExecUnit.io.in.bits.src2 := src2
           lsExecUnit.io.in.bits.func := func
           lsExecUnit.io.wdata        := io.wdata
-          io.in.ready                := lsExecUnit.io.out.fire() && scInvalid
-          io.out.valid               := lsExecUnit.io.out.valid && scInvalid
+          io.in.ready                := lsExecUnit.io.out.fire() || scInvalid
+          io.out.valid               := lsExecUnit.io.out.valid  || scInvalid
         }
 
         // when(storeReq){
