@@ -169,8 +169,8 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   when (isForwardData) { isForwardDataReg := true.B }
   when (io.in.fire() || !io.in.valid) { isForwardDataReg := false.B }
   val forwardDataReg = RegEnable(io.dataWriteBus.req.bits, isForwardData)
-  io.out.bits.isForwardData := isForwardDataReg
-  io.out.bits.forwardData := forwardDataReg
+  io.out.bits.isForwardData := isForwardDataReg || isForwardData
+  io.out.bits.forwardData := Mux(isForwardData, io.dataWriteBus.req.bits, forwardDataReg)
 
   io.out.bits.req <> req
   io.out.valid := io.in.valid
