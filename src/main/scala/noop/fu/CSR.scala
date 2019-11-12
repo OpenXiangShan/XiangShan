@@ -594,7 +594,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.ie.s := mstatusOld.pie.s
     priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
     mstatusNew.pie.s := true.B
-    mstatusNew.mpp := ModeU
+    mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
     lr := false.B
     retTarget := sepc
