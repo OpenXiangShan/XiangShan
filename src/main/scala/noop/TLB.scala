@@ -248,7 +248,7 @@ class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule with HasCSR
   val waymask = Mux(io.out.bits.hit.hit, hitVec, victimWaymask)
   assert(PopCount(waymask) <= 1.U)
 
-  val hitVecCheck = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).v && !(pf.priviledgeMode === ModeU && !m.flag.asTypeOf(flagBundle).u) && !(pf.priviledgeMode === ModeS && m.flag.asTypeOf(flagBundle).u && pf.status_sum))).asUInt & hitVec
+  val hitVecCheck = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).v && !(pf.priviledgeMode === ModeU && !m.flag.asTypeOf(flagBundle).u) && !(pf.priviledgeMode === ModeS && m.flag.asTypeOf(flagBundle).u && !pf.status_sum))).asUInt & hitVec
   val hitVecExec = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).x)).asUInt & hitVecCheck
   val hitVecLoad = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).r || pf.status_mxr && m.flag.asTypeOf(flagBundle).x)).asUInt & hitVecCheck
   val hitVecStore = VecInit(io.metaReadResp.map(m => m.flag.asTypeOf(flagBundle).w)).asUInt & hitVecCheck
@@ -391,7 +391,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
             raddr := paddrApply(memRdata.ppn, Mux(level === 3.U, vpn.vpn1, vpn.vpn0))
           }
         }.elsewhen (level =/= 0.U) {
-          val permCheck = missflag.v && !(pf.priviledgeMode === ModeU && !missflag.u) && !(pf.priviledgeMode === ModeS && missflag.u && pf.status_sum)
+          val permCheck = missflag.v && !(pf.priviledgeMode === ModeU && !missflag.u) && !(pf.priviledgeMode === ModeS && missflag.u && !pf.status_sum)
           val permExec = permCheck && missflag.x
           val permLoad = permCheck && (missflag.r || pf.status_mxr && missflag.x)
           val permStore = permCheck && missflag.w
