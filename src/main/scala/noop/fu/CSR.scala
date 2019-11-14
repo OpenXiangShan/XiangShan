@@ -194,21 +194,21 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst {
     "MmmioInstr"  -> (0xb0c, "perfCntCondMmmioInstr" ),
     "MicacheHit"  -> (0xb0d, "perfCntCondMicacheHit" ),
     "MdcacheHit"  -> (0xb0e, "perfCntCondMdcacheHit" ),
-    "MmulInstr"   -> (0xb0f, "perfCntCondMmulInstr"  ),
-    "MifuFlush"   -> (0xb10, "perfCntCondMifuFlush"  ),
-    "MrawStall"   -> (0xb11, "perfCntCondMrawStall"  ),
-    "MexuBusy"    -> (0xb12, "perfCntCondMexuBusy"   ),
-    "MbpBRight"   -> (0xb13, "MbpBRight"             ),
-    "MbpBWrong"   -> (0xb14, "MbpBWrong"             ),
-    "MbpJRight"   -> (0xb15, "MbpJRight"             ),
-    "MbpJWrong"   -> (0xb16, "MbpJWrong"             ),
-    "MbpIRight"   -> (0xb17, "MbpIRight"             ),
-    "MbpIWrong"   -> (0xb18, "MbpIWrong"             ),
-    "MbpRRight"   -> (0xb19, "MbpRRight"             ),
-    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             )
+		"Ml2cacheHit" -> (0xb0f, "perfCntCondMl2cacheHit"),
+    "MmulInstr"   -> (0xb10, "perfCntCondMmulInstr"  ),
+    "MifuFlush"   -> (0xb11, "perfCntCondMifuFlush"  ),
+    "MrawStall"   -> (0xb12, "perfCntCondMrawStall"  ),
+    "MexuBusy"    -> (0xb13, "perfCntCondMexuBusy"   ),
+    "MbpBRight"   -> (0xb14, "MbpBRight"             ),
+    "MbpBWrong"   -> (0xb15, "MbpBWrong"             ),
+    "MbpJRight"   -> (0xb16, "MbpJRight"             ),
+    "MbpJWrong"   -> (0xb17, "MbpJWrong"             ),
+    "MbpIRight"   -> (0xb18, "MbpIRight"             ),
+    "MbpIWrong"   -> (0xb19, "MbpIWrong"             ),
+    "MbpRRight"   -> (0xb1a, "MbpRRight"             ),
+    "MbpRWrong"   -> (0xb1b, "MbpRWrong"             )
   )
-
-  val perfCntCond = List.fill(0x80)(WireInit(false.B))
+	val perfCntCond = List.fill(0x80)(WireInit(false.B))
   (perfCnts zip perfCntCond).map { case (c, e) => { when (e) { c := c + 1.U } } }
 
   BoringUtils.addSource(WireInit(true.B), "perfCntCondMcycle")

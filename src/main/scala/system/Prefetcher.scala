@@ -1,6 +1,6 @@
 package system
 
-import noop.{NOOP, NOOPConfig, HasNOOPParameter, Cache, L2Cache, CacheConfig}
+import noop.{NOOP, NOOPConfig, HasNOOPParameter, Cache, CacheConfig}
 import bus.axi4.{AXI4, AXI4Lite}
 import bus.simplebus._
 
