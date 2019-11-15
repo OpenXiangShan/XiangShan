@@ -8,8 +8,10 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
-trait HasILAParameter {
-  val enableILA = false
+trait HasSoCParameter {
+  val EnableILA = false
+  val HasL2cache = false
+  val HasPrefetch = false
 }
 
 class ILABundle extends Bundle {
@@ -21,13 +23,13 @@ class ILABundle extends Bundle {
   val InstrCnt = UInt(64.W)
 }
 
-class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasILAParameter {
+class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   val io = IO(new Bundle{
     val mem = new AXI4
     val mmio = (if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC })
     val mtip = Input(Bool())
     val meip = Input(Bool())
-    val ila = if (p.FPGAPlatform && enableILA) Some(Output(new ILABundle)) else None
+    val ila = if (p.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
   })
 
   val noop = Module(new NOOP)
