@@ -8,6 +8,8 @@
 # error Please define REF_SO to the path of NEMU shared object file
 #endif
 
+#define printCSR(x) printf(""#x": 0x%016lx    ", x)
+
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
@@ -67,7 +69,21 @@ void init_difftest(uint64_t *reg) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int this_inst, int isMMIO, int isRVC, uint64_t intrNO) {
+int difftest_step(
+  uint64_t *reg_scala, 
+  uint64_t this_pc, 
+  int this_inst, 
+  int isMMIO, 
+  int isRVC, 
+  uint64_t intrNO,
+  int priviledgeMode,
+  uint64_t mstatus,
+  uint64_t sstatus,
+  uint64_t mepc,
+  uint64_t sepc,
+  uint64_t mcause,
+  uint64_t scause
+) {
 
   #define DEBUG_RETIRE_TRACE_SIZE 16
 
@@ -114,6 +130,17 @@ int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int this_inst, int isMM
     }
     printf("\n==============  Reg Diff  ==============\n");
     ref_isa_reg_display();
+    printf("\n==============  Csr Diff  ==============\n");
+    printCSR(priviledgeMode);
+    puts("");
+    printCSR(mstatus);
+    printCSR(mcause);
+    printCSR(mepc);
+    puts("");
+    printCSR(sstatus);
+    printCSR(scause);
+    printCSR(sepc);
+    puts("");
     int i;
     for (i = 0; i < 33; i ++) {
       if (reg_scala[i] != ref_r[i]) {

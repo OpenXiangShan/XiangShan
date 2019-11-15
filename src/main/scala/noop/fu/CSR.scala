@@ -208,7 +208,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
-  val mcause = Reg(UInt(XLEN.W))
+  val mcause = RegInit(UInt(XLEN.W), 0.U)
   val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mepc = Reg(UInt(XLEN.W))
 
@@ -287,8 +287,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
   val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp
-  val sepc = Reg(UInt(XLEN.W))
-  val scause = Reg(UInt(XLEN.W))
+  val sepc = RegInit(UInt(XLEN.W), 0.U)
+  val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
@@ -730,4 +730,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   } else {
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
+
+  // for differential testing  
+  BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
+  BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
+  BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus") 
+  BoringUtils.addSource(RegNext(mepc), "difftestMepc")
+  BoringUtils.addSource(RegNext(sepc), "difftestSepc")
+  BoringUtils.addSource(RegNext(mcause), "difftestMcause")
+  BoringUtils.addSource(RegNext(scause), "difftestScause")
 }
