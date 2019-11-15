@@ -387,19 +387,16 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
       io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
       io.out.bits.cmd := req.cmd
     }
-
-    when (req.isBurst()) {
-      io.out.valid := io.in.valid && (Mux(req.isWrite() && (hit || !hit && state === s_wait_resp), true.B, (state === s_memReadResp && io.mem.resp.fire() && req.cmd === SimpleBusCmd.readBurst)) || (respToL1Fire && respToL1Last && state === s_release))
-    }.otherwise {
-      io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
-    }
-
   } else {
     io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
     io.out.bits.cmd := DontCare
-    io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
   }
   io.out.bits.user.zip(req.user).map { case (o,i) => o := i }
+
+  io.out.valid := io.in.valid && Mux(req.isBurst() && (cacheLevel == 2).B,
+    Mux(req.isWrite() && (hit || !hit && state === s_wait_resp), true.B, (state === s_memReadResp && io.mem.resp.fire() && req.cmd === SimpleBusCmd.readBurst)) || (respToL1Fire && respToL1Last && state === s_release),
+    Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
+  )
 
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request

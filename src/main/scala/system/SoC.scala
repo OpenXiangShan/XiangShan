@@ -43,7 +43,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
 
   if (HasL2cache) {
     val l2cacheOut = Wire(new SimpleBusC)
-    if (HasPrefetch) {
+    val l2cacheIn = if (HasPrefetch) {
       val prefetcher = Module(new Prefetcher)
       prefetcher.io.in <> noop.io.prefetchReq
       val l2cacheIn = Wire(new SimpleBusUC)
@@ -52,12 +52,10 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
       l2cacheInReqArb.io.in(1) <> prefetcher.io.out
       l2cacheIn.req <> l2cacheInReqArb.io.out
       xbar.io.out.resp <> l2cacheIn.resp
-      l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(
-        CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
-    } else {
-      l2cacheOut <> Cache(in = xbar.io.out, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(
-        CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
-    }
+      l2cacheIn
+    } else xbar.io.out
+    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(
+      CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
     io.mem <> l2cacheOut.mem.toAXI4()
     l2cacheOut.coh.resp.ready := true.B
     l2cacheOut.coh.req.valid := false.B
