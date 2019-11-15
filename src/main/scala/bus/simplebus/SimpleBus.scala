@@ -18,7 +18,7 @@ object SimpleBusCmd {
   def writeBurst     = "b0011".U //  write   |   refill
   def writeLast      = "b0111".U //  write   |   refill
   def probe          = "b1000".U //  read    | do nothing
-  def prefetch			 = "b0100".U //  read    |   refill
+  def prefetch       = "b0100".U //  read    |   refill
 
   // resp
   def readLast       = "b0110".U

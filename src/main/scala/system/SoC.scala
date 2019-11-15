@@ -33,8 +33,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   })
 
   val noop = Module(new NOOP)
-
-	val cohMg = Module(new CoherenceManager)
+  val cohMg = Module(new CoherenceManager)
   val xbar = Module(new SimpleBusCrossbarNto1(2))
   cohMg.io.in <> noop.io.imem.mem
   noop.io.dmem.coh <> cohMg.io.out.coh
