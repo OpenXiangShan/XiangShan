@@ -86,11 +86,7 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.forward.wb.rfDest := io.in.bits.ctrl.rfDest
   io.forward.wb.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
   io.forward.fuType := io.in.bits.ctrl.fuType
-	/*
-	Debug(true) {
-		printf("[EXU] dmem.req.valid = %d, dmem.req.bits.addr = %x\n", io.dmem.req.valid, io.dmem.req.bits.addr)
-	}
-	*/
+
   val isBru = ALUOpType.isBru(fuOpType)
   BoringUtils.addSource(alu.io.out.fire() && !isBru, "perfCntCondMaluInstr")
   BoringUtils.addSource(alu.io.out.fire() && isBru, "perfCntCondMbruInstr")

@@ -43,7 +43,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
     val mmio = new SimpleBusUC
-		val prefetchReq = Decoupled(new SimpleBusReqBundle)
+    val prefetchReq = Decoupled(new SimpleBusReqBundle)
   })
 
   val ifu  = Module(new IFU)
@@ -79,7 +79,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     when (idu2.io.in.valid) { printf("ID2: pc = 0x%x, instr = 0x%x, pnpc = 0x%x\n", idu2.io.in.bits.pc, idu2.io.in.bits.instr, idu2.io.in.bits.pnpc) }
     when (isu.io.in.valid) { printf("ISU: pc = 0x%x, pnpc = 0x%x\n", isu.io.in.bits.cf.pc, isu.io.in.bits.cf.pnpc) }
     when (exu.io.in.valid) { printf("EXU: pc = 0x%x, pnpc = 0x%x\n", exu.io.in.bits.cf.pc, exu.io.in.bits.cf.pnpc) }
-		when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.decode.cf.pc) }
+    when (wbu.io.in.valid) { printf("WBU: pc = 0x%x\n", wbu.io.in.bits.decode.cf.pc) }
   }
 
   isu.io.wb <> wbu.io.wb
@@ -91,7 +91,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4)) // userBits = AddrBits + BrIdxBits
   io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
-	io.prefetchReq.bits := exu.io.dmem.req.bits
-	io.prefetchReq.valid := exu.io.dmem.req.valid
+  io.prefetchReq.bits := exu.io.dmem.req.bits
+  io.prefetchReq.valid := exu.io.dmem.req.valid
   io.mmio <> mmioXbar.io.out
 }

@@ -12,7 +12,7 @@ case class CacheConfig (
   ro: Boolean = false,
   name: String = "cache",
   userBits: Int = 0,
-	cacheLevel: Int = 1,
+  cacheLevel: Int = 1,
 
   totalSize: Int = 32, // Kbytes
   ways: Int = 4
@@ -32,7 +32,7 @@ sealed trait HasCacheConst {
   val hasCohInt = (if (hasCoh) 1 else 0)
   val hasPrefetch = cacheName == "l2cache"
 	
-	val cacheLevel = cacheConfig.cacheLevel
+  val cacheLevel = cacheConfig.cacheLevel
   val TotalSize = cacheConfig.totalSize
   val Ways = cacheConfig.ways
   val LineSize = XLEN // byte
@@ -118,7 +118,7 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.valid := io.in.valid && io.metaReadBus.req.ready && io.dataReadBus.req.ready
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 
-	Debug(debug) {
+  Debug(debug) {
     printf("%d: [" + cacheName + " stage1]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, addr = %x, cmd = %x, dataReadBus.req.valid = %d\n",
       GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, io.in.bits.addr, io.in.bits.cmd, io.dataReadBus.req.valid)
   }
@@ -185,7 +185,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
 
-	Debug(debug) {
+  Debug(debug) {
     printf("%d: [" + cacheName + " stage2]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, addr = %x, waymask = %d\n",
       GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, req.addr, waymask)
   }
@@ -207,7 +207,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     val cohResp = Decoupled(new SimpleBusRespBundle)
 
     // use to distinguish prefetch request and normal request
-		val dataReadRespToL1 = Output(Bool())
+    val dataReadRespToL1 = Output(Bool())
   })
 
   val metaWriteArb = Module(new Arbiter(CacheMetaArrayWriteBus().req.bits, 2))
@@ -219,7 +219,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val hit = io.in.valid && io.in.bits.hit
   val miss = io.in.valid && !io.in.bits.hit
   val probe = io.in.valid && hasCoh.B && req.isProbe()
-	val hitReadBurst = hit && req.isReadBurst()
+  val hitReadBurst = hit && req.isReadBurst()
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
 
@@ -228,10 +228,10 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val dataRead = Mux(useForwardData, io.in.bits.forwardData.data.data, dataReadArray)
   val wordMask = Mux(!ro.B && req.isWrite(), MaskExpand(req.wmask), 0.U(DataBits.W))
 
-	val writeL2BeatCnt = Counter(LineBeats)
-	when(io.out.fire() && (req.cmd === SimpleBusCmd.writeBurst || req.isWriteLast())) {
-		writeL2BeatCnt.inc()
-	}
+  val writeL2BeatCnt = Counter(LineBeats)
+  when(io.out.fire() && (req.cmd === SimpleBusCmd.writeBurst || req.isWriteLast())) {
+    writeL2BeatCnt.inc()
+  }
 
   val hitWrite = hit && req.isWrite()
   val dataHitWriteBus = Wire(CacheDataArrayWriteBus()).apply(
@@ -251,8 +251,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
-	
-	val s2_idle :: s2_dataReadWait :: s2_dataOK :: Nil = Enum(3)
+
+  val s2_idle :: s2_dataReadWait :: s2_dataOK :: Nil = Enum(3)
   val state2 = RegInit(s2_idle)
 
   io.dataReadBus.apply(valid = (state === s_memWriteReq || state === s_release) && (state2 === s2_idle),
@@ -296,12 +296,12 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
                       ((state === s_release) && (state2 === s2_dataOK))
   io.cohResp.bits.rdata := dataHitWay
   val releaseLast = Counter(state === s_release && io.cohResp.fire(), LineBeats)._2
-	io.cohResp.bits.cmd := Mux(state === s_release, Mux(releaseLast, SimpleBusCmd.readLast, 0.U),
+  io.cohResp.bits.cmd := Mux(state === s_release, Mux(releaseLast, SimpleBusCmd.readLast, 0.U),
     Mux(hit, SimpleBusCmd.probeHit, SimpleBusCmd.probeMiss))
-	
-	val respToL1Fire = hitReadBurst && io.out.ready && state2 === s2_dataOK
-	val respToL1Last = Counter((state === s_idle || state === s_release && state2 === s2_dataOK) && hitReadBurst && io.out.ready, LineBeats)._2
-	
+
+  val respToL1Fire = hitReadBurst && io.out.ready && state2 === s2_dataOK
+  val respToL1Last = Counter((state === s_idle || state === s_release && state2 === s2_dataOK) && hitReadBurst && io.out.ready, LineBeats)._2
+
   switch (state) {
     is (s_idle) {
       afterFirstRead := false.B
@@ -312,10 +312,10 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
           state := Mux(hit, s_release, s_idle)
           readBeatCnt.value := addr.wordIndex
         }
-      }.elsewhen (hitReadBurst && io.out.ready) {
-				state := s_release
-				readBeatCnt.value := Mux(addr.wordIndex === (LineBeats - 1).U, 0.U, (addr.wordIndex + 1.U))
-			}.elsewhen ((miss || mmio) && !io.flush) {
+      } .elsewhen (hitReadBurst && io.out.ready) {
+        state := s_release
+        readBeatCnt.value := Mux(addr.wordIndex === (LineBeats - 1).U, 0.U, (addr.wordIndex + 1.U))
+      } .elsewhen ((miss || mmio) && !io.flush) {
         state := Mux(mmio, s_mmioReq, Mux(!ro.B && meta.dirty, s_memWriteReq, s_memReadReq))
       }
     }
@@ -326,7 +326,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     is (s_release) {
       when (io.cohResp.fire() || respToL1Fire) { readBeatCnt.inc() }
       when (probe && io.cohResp.fire() && releaseLast || respToL1Fire && respToL1Last) { state := s_idle }
-		}
+    }
 
     is (s_memReadReq) { when (io.mem.req.fire()) {
       state := s_memReadResp
@@ -337,7 +337,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
       when (io.mem.resp.fire()) {
         afterFirstRead := true.B
         readBeatCnt.inc()
-				when (req.cmd === SimpleBusCmd.writeBurst) { writeL2BeatCnt.value := 0.U }
+        when (req.cmd === SimpleBusCmd.writeBurst) { writeL2BeatCnt.value := 0.U }
         when (io.mem.resp.bits.isReadLast()) { state := s_wait_resp }
       }
     }
@@ -371,34 +371,34 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.metaWriteBus.req <> metaWriteArb.io.out
 
   if (cacheLevel == 2) {
-		when ((state === s_memReadResp) && io.mem.resp.fire() && req.isReadBurst()) {
-			// readBurst request miss
-			io.out.bits.rdata := dataRefill
-			io.out.bits.cmd := Mux(io.mem.resp.bits.isReadLast(), SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
-		}.elsewhen (req.isWriteLast() || req.cmd === SimpleBusCmd.writeBurst) {
-			// writeBurst/writeLast request, no matter hit or miss
-			io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-			io.out.bits.cmd := DontCare
-		}.elsewhen (hitReadBurst && state === s_release) {
-			// readBurst request hit
-			io.out.bits.rdata := dataHitWay
-			io.out.bits.cmd := Mux(respToL1Last, SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
-		}.otherwise {
-			io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-			io.out.bits.cmd := req.cmd
-		}
+    when ((state === s_memReadResp) && io.mem.resp.fire() && req.isReadBurst()) {
+      // readBurst request miss
+      io.out.bits.rdata := dataRefill
+      io.out.bits.cmd := Mux(io.mem.resp.bits.isReadLast(), SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
+    }.elsewhen (req.isWriteLast() || req.cmd === SimpleBusCmd.writeBurst) {
+      // writeBurst/writeLast request, no matter hit or miss
+      io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
+      io.out.bits.cmd := DontCare
+    }.elsewhen (hitReadBurst && state === s_release) {
+      // readBurst request hit
+      io.out.bits.rdata := dataHitWay
+      io.out.bits.cmd := Mux(respToL1Last, SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
+    }.otherwise {
+      io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
+      io.out.bits.cmd := req.cmd
+    }
 
-		when (req.isBurst()) {
-			io.out.valid := io.in.valid && (Mux(req.isWrite() && (hit || !hit && state === s_wait_resp), true.B, (state === s_memReadResp && io.mem.resp.fire() && req.cmd === SimpleBusCmd.readBurst)) || (respToL1Fire && respToL1Last && state === s_release))
-		}.otherwise {
-			io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
-		}
+    when (req.isBurst()) {
+      io.out.valid := io.in.valid && (Mux(req.isWrite() && (hit || !hit && state === s_wait_resp), true.B, (state === s_memReadResp && io.mem.resp.fire() && req.cmd === SimpleBusCmd.readBurst)) || (respToL1Fire && respToL1Last && state === s_release))
+    }.otherwise {
+      io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
+    }
 
-	} else {
-		io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
+  } else {
+    io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
     io.out.bits.cmd := DontCare
     io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
-	}
+  }
   io.out.bits.user.zip(req.user).map { case (o,i) => o := i }
 
   // With critical-word first, the pipeline registers between
@@ -410,9 +410,9 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   )
 
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !probe
-	io.dataReadRespToL1 := hitReadBurst && (state === s_idle && io.out.ready || state === s_release && state2 === s2_dataOK)
+  io.dataReadRespToL1 := hitReadBurst && (state === s_idle && io.out.ready || state === s_release && state2 === s2_dataOK)
 
-	assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
+  assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
   assert(!(!ro.B && io.flush), "only allow to flush icache")
   Debug(debug) {
@@ -486,7 +486,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
- 	Debug(debug) {
+  Debug(debug) {
     io.in.dump(cacheName + ".in")
     printf("%d: s1:(%d,%d), s2:(%d,%d), s3:(%d,%d)\n",
       GTimer(), s1.io.in.valid, s1.io.in.ready, s2.io.in.valid, s2.io.in.ready, s3.io.in.valid, s3.io.in.ready)

@@ -41,32 +41,34 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   xbar.io.in(0) <> cohMg.io.out.mem
   xbar.io.in(1) <> noop.io.dmem.mem
 
-	if (HasL2cache) {
+  if (HasL2cache) {
     val l2cacheOut = Wire(new SimpleBusC)
     if (HasPrefetch) {
-			val prefetcher = Module(new Prefetcher)
-			prefetcher.io.in <> noop.io.prefetchReq
-			val l2cacheIn = Wire(new SimpleBusUC)
-			val l2cacheInReqArb = Module(new Arbiter(chiselTypeOf(noop.io.prefetchReq.bits), 2))
-			l2cacheInReqArb.io.in(0) <> xbar.io.out.req
-			l2cacheInReqArb.io.in(1) <> prefetcher.io.out
-			l2cacheIn.req <> l2cacheInReqArb.io.out
-			xbar.io.out.resp <> l2cacheIn.resp
-			l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(CacheConfig(ro = false, name = "l2cache", cacheLevel = 2))
-		} else {
-			l2cacheOut <> Cache(in = xbar.io.out, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(CacheConfig(ro = false, name = "l2cache", cacheLevel = 2))
-		}
+      val prefetcher = Module(new Prefetcher)
+      prefetcher.io.in <> noop.io.prefetchReq
+      val l2cacheIn = Wire(new SimpleBusUC)
+      val l2cacheInReqArb = Module(new Arbiter(chiselTypeOf(noop.io.prefetchReq.bits), 2))
+      l2cacheInReqArb.io.in(0) <> xbar.io.out.req
+      l2cacheInReqArb.io.in(1) <> prefetcher.io.out
+      l2cacheIn.req <> l2cacheInReqArb.io.out
+      xbar.io.out.resp <> l2cacheIn.resp
+      l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(
+        CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
+    } else {
+      l2cacheOut <> Cache(in = xbar.io.out, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(
+        CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
+    }
     io.mem <> l2cacheOut.mem.toAXI4()
-		l2cacheOut.coh.resp.ready := true.B
-		l2cacheOut.coh.req.valid := false.B
-		l2cacheOut.coh.req.bits := DontCare
+    l2cacheOut.coh.resp.ready := true.B
+    l2cacheOut.coh.req.valid := false.B
+    l2cacheOut.coh.req.bits := DontCare
   } else {
     io.mem <> xbar.io.out.toAXI4()
   }
 
-	if (!HasPrefetch) {
-		noop.io.prefetchReq.ready := true.B
-	}
+  if (!HasPrefetch) {
+    noop.io.prefetchReq.ready := true.B
+  }
 
   noop.io.imem.coh.resp.ready := true.B
   noop.io.imem.coh.req.valid := false.B
