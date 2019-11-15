@@ -368,4 +368,9 @@ class LSExecUnit extends NOOPModule {
   BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")
   BoringUtils.addSource(BoolStopWatch(dmem.isWrite(), dmem.resp.fire()), "perfCntCondMstoreStall")
   BoringUtils.addSource(io.isMMIO, "perfCntCondMmmioInstr")
+  Debug() {
+    when (dmem.req.fire() && (addr === "h80104708".U || genWdata(io.wdata, size)(31,0) === "h80000218".U)){
+      printf("[LSUBP] time %d, addr %x, size %x, wdata_raw %x, wdata %x, isStore %x \n", GTimer(), addr, func(1,0), io.wdata, genWdata(io.wdata, size), isStore)
+    }
+  }
 }
