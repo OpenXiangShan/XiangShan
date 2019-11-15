@@ -15,6 +15,19 @@ trait HasInstrType {
   def isrfWen(instrType : UInt): Bool = instrType(2)
 }
 
+// trait CompInstConst {
+//   val RVCRegNumTable = Array(
+//     BitPat("b000") -> 8.U,
+//     BitPat("b001") -> 9.U,
+//     BitPat("b010") -> 10.U,
+//     BitPat("b011") -> 11.U,
+//     BitPat("b100") -> 12.U,
+//     BitPat("b101") -> 13.U,
+//     BitPat("b110") -> 14.U,
+//     BitPat("b111") -> 15.U
+//   )
+// }
+
 object SrcType {
   def reg = "b0".U
   def pc  = "b1".U
@@ -41,5 +54,14 @@ object Instructions extends HasInstrType with HasNOOPParameter {
   val DecodeDefault = List(InstrN, FuType.csr, CSROpType.jmp)
   def DecodeTable = RVIInstr.table ++ NOOPTrap.table ++
     (if (HasMExtension) RVMInstr.table else Nil) ++
+    (if (HasCExtension) RVCInstr.table else Nil) ++
+    Priviledged.table ++
     RVZicsrInstr.table ++ RVZifenceiInstr.table
+}
+
+object CInstructions extends HasInstrType with HasNOOPParameter{
+  def NOP = 0x00000013.U
+  val DecodeDefault = List(RVCInstr.ImmNone, RVCInstr.DtCare, RVCInstr.DtCare, RVCInstr.DtCare)
+  // val DecodeDefault = List(InstrN, FuType.csr, CSROpType.jmp)
+  def CExtraDecodeTable = RVCInstr.cExtraTable
 }

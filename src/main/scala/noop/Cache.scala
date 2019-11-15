@@ -103,6 +103,11 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
+  Debug(){
+    when(io.in.fire()){
+      printf("[L1$] " +name+" cache stage1, addr in: %x, user: %x\n", io.in.bits.addr, io.in.bits.user.getOrElse(0.U))
+    }
+  }
 
   // read meta array and data array
   val readBusValid = io.in.valid && io.out.ready
@@ -122,6 +127,7 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
 sealed class Stage2IO(implicit val cacheConfig: CacheConfig) extends CacheBundle {
   val req = new SimpleBusReqBundle(userBits = userBits)
   val metas = Vec(Ways, new MetaBundle)
+  val datas = Vec(Ways, new DataBundle)
   val hit = Output(Bool())
   val waymask = Output(UInt(Ways.W))
   val mmio = Output(Bool())
@@ -135,6 +141,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
     val in = Flipped(Decoupled(new Stage1IO))
     val out = Decoupled(new Stage2IO)
     val metaReadResp = Flipped(Vec(Ways, new MetaBundle))
+    val dataReadResp = Flipped(Vec(Ways, new DataBundle))
     val metaWriteBus = Input(CacheMetaArrayWriteBus())
     val dataWriteBus = Input(CacheDataArrayWriteBus())
   })
@@ -161,6 +168,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.bits.metas := metaWay
   io.out.bits.hit := io.in.valid && hitVec.orR
   io.out.bits.waymask := waymask
+  io.out.bits.datas := io.dataReadResp
   io.out.bits.mmio := AddressSpace.isMMIO(req.addr)
 
   val isForwardData = io.in.valid && (io.dataWriteBus.req match { case r =>
@@ -191,7 +199,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     val isFinish = Output(Bool())
     val flush = Input(Bool())
     val dataReadBus = CacheDataArrayReadBus()
-    val dataReadFromS1 = Flipped(Vec(Ways, new DataBundle))
     val dataWriteBus = CacheDataArrayWriteBus()
     val metaWriteBus = CacheMetaArrayWriteBus()
 
@@ -216,20 +223,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
 
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_mmioReq :: s_mmioResp :: s_wait_resp :: s_release :: Nil = Enum(9)
-  val state = RegInit(s_idle)
-
-  val needFlush = RegInit(false.B)
-  when (io.flush && (state =/= s_idle)) { needFlush := true.B }
-  when (io.out.fire() && needFlush) { needFlush := false.B }
-
-  val firstCycle = RegInit(true.B)
-  when (io.isFinish || io.flush || needFlush) { firstCycle := true.B }
-  .elsewhen (io.in.valid) { firstCycle := false.B }
-
-  // latch the data array result to avoid being overwritten by new s1 request
-  val dataReadArray = HoldUnless(Mux1H(io.in.bits.waymask, io.dataReadFromS1).data, firstCycle)
   val useForwardData = io.in.bits.isForwardData && io.in.bits.waymask === io.in.bits.forwardData.waymask.getOrElse("b1".U)
+  val dataReadArray = Mux1H(io.in.bits.waymask, io.in.bits.datas).data
   val dataRead = Mux(useForwardData, io.in.bits.forwardData.data.data, dataReadArray)
   val wordMask = Mux(!ro.B && req.isWrite(), MaskExpand(req.wmask), 0.U(DataBits.W))
 
@@ -247,6 +242,12 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     valid = hitWrite && !meta.dirty, setIdx = getMetaIdx(req.addr), waymask = io.in.bits.waymask,
     data = Wire(new MetaBundle).apply(tag = meta.tag, valid = true.B, dirty = (!ro).B)
   )
+
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_memWriteReq :: s_memWriteResp :: s_mmioReq :: s_mmioResp :: s_wait_resp :: s_release :: Nil = Enum(9)
+  val state = RegInit(s_idle)
+  val needFlush = RegInit(false.B)
+  when (io.flush && (state =/= s_idle)) { needFlush := true.B }
+  when (io.out.fire() && needFlush) { needFlush := false.B }
 
   val readBeatCnt = Counter(LineBeats)
   val writeBeatCnt = Counter(LineBeats)
@@ -437,7 +438,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   val s2 = Module(new CacheStage2)
   val s3 = Module(new CacheStage3)
   val metaArray = Module(new SRAMTemplateWithArbiter(nRead = 1, new MetaBundle, set = Sets, way = Ways, shouldReset = true))
-  val dataArray = Module(new SRAMTemplate(new DataBundle, set = Sets * LineBeats, way = Ways))
+  val dataArray = Module(new SRAMTemplateWithArbiter(nRead = 2, new DataBundle, set = Sets * LineBeats, way = Ways))
 
   if (cacheName == "icache") {
     // flush icache when executing fence.i
@@ -476,20 +477,14 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   }
 
   metaArray.io.r(0) <> s1.io.metaReadBus
-
-  val dataArrayReadArb = Module(new Arbiter(chiselTypeOf(dataArray.io.r.req.bits), 2))
-  dataArrayReadArb.io.in(0) <> s3.io.dataReadBus.req
-  dataArrayReadArb.io.in(1) <> s1.io.dataReadBus.req
-  dataArray.io.r.req <> dataArrayReadArb.io.out
-  s3.io.dataReadBus.resp := dataArray.io.r.resp
-  s1.io.dataReadBus.resp := dataArray.io.r.resp
+  dataArray.io.r(0) <> s1.io.dataReadBus
+  dataArray.io.r(1) <> s3.io.dataReadBus
 
   metaArray.io.w <> s3.io.metaWriteBus
   dataArray.io.w <> s3.io.dataWriteBus
 
   s2.io.metaReadResp := s1.io.metaReadBus.resp.data
-  s3.io.dataReadFromS1 := RegEnable(s1.io.dataReadBus.resp.data, RegNext(s1.io.dataReadBus.req.fire()))
-
+  s2.io.dataReadResp := s1.io.dataReadBus.resp.data
   s2.io.dataWriteBus := s3.io.dataWriteBus
   s2.io.metaWriteBus := s3.io.metaWriteBus
 
