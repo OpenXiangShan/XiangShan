@@ -39,7 +39,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = true && cacheName == "dcache"
+  val debug = true// && cacheName == "dcache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -211,9 +211,9 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(addrBundle)
-  val mmio = io.in.valid && io.in.bits.mmio
-  val hit = io.in.valid && io.in.bits.hit
-  val miss = io.in.valid && !io.in.bits.hit
+  val mmio = io.in.valid && io.in.bits.mmio && !isIPF
+  val hit = io.in.valid && io.in.bits.hit && !isIPF
+  val miss = io.in.valid && !io.in.bits.hit && !isIPF
   val probe = io.in.valid && hasCoh.B && req.isProbe()
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
@@ -377,8 +377,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   Debug() {
     if(debug) {
     when(true.B) {
-      printf("%d: [" + cacheName + " S3]: in.ready = %d, in.valid = %d, state = %d, addr = %x cmd:%d isIPF:%d probe:%d isFinish:%d\n",
-      GTimer(), io.in.ready, io.in.valid, state, req.addr, req.cmd, isIPF, probe, io.isFinish)
+      printf("%d: [" + cacheName + " S3]: in.ready = %d, in.valid = %d, hit = %x, state = %d, addr = %x cmd:%d isIPF:%d probe:%d isFinish:%d\n",
+      GTimer(), io.in.ready, io.in.valid, hit, state, req.addr, req.cmd, isIPF, probe, io.isFinish)
       printf("%d: [" + cacheName + " S3]: out.valid:%d rdata:%x cmd:%d user:%x \n", 
       GTimer(), io.out.valid, io.out.bits.rdata, io.out.bits.cmd, io.out.bits.user.getOrElse(0.U))
       printf("%d: [" + cacheName + " S3]: DHW: (%d, %d), data:%x MHW:(%d, %d)\n", 
