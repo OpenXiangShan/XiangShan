@@ -351,10 +351,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     is (s_wait_resp) { when (io.out.fire() || needFlush || alreadyOutFire) { state := s_idle } }
   }
 
-	when (!io.in.valid) {
-		state := s_idle
-	}
-
   val dataRefill = MaskData(io.mem.resp.bits.rdata, req.wdata, Mux(readingFirst, wordMask, 0.U(DataBits.W)))
   val dataRefillWriteBus = Wire(CacheDataArrayWriteBus).apply(
     valid = (state === s_memReadResp) && io.mem.resp.fire(), setIdx = Cat(addr.index, readBeatCnt.value),
@@ -413,7 +409,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
   )
 
-  io.in.ready := io.out.ready && !hitReadBurst && !miss && !probe
+  io.in.ready := io.out.ready && (state === s_idle) && !miss && !probe
 	io.dataReadRespToL1 := hitReadBurst && (state === s_idle && io.out.ready || state === s_release && state2 === s2_dataOK)
 
 	assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
