@@ -32,6 +32,13 @@ object MaskedRegMap { // TODO: add read mask
       if (w != null && wm != UnwritableMask) when (wen && waddr === a) { r := w(MaskData(r, wdata, wm)) }
     }
   }
+  def isIllegalAddr(mapping: Map[Int, (UInt, UInt, UInt => UInt, UInt)], addr: UInt):Bool = {
+    val illegalAddr = Wire(Bool())
+    illegalAddr := true.B
+    val chiselMapping = mapping.map { case (a, (r, wm, w, rm)) => (a.U, r, wm, w, rm) }
+    illegalAddr := LookupTree(addr, chiselMapping.map { case (a, r, wm, w, rm) => (a, false.B) })
+    illegalAddr
+  }
   def generate(mapping: Map[Int, (UInt, UInt, UInt => UInt, UInt)], addr: UInt, rdata: UInt,
     wen: Bool, wdata: UInt):Unit = generate(mapping, addr, rdata, addr, wen, wdata)
 }
