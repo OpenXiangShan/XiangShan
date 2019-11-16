@@ -487,7 +487,11 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val imemPFvaddr = io.imemMMU.addr
   val dmemPFvaddr = io.dmemMMU.addr
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
-    stval := Mux(hasInstrPageFault, imemPFvaddr, dmemPFvaddr)
+    when(priviledgeMode === ModeM){
+      mtval := Mux(hasInstrPageFault, imemPFvaddr, dmemPFvaddr)
+    }.otherwise{
+      stval := Mux(hasInstrPageFault, imemPFvaddr, dmemPFvaddr)
+    }
   }
 
   // Exception and Intr
