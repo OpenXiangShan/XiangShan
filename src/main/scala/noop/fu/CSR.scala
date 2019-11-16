@@ -254,6 +254,11 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // | pie  | 0000 |
   // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
+  def mstatusUpdateSideEffect(mstatus: UInt): UInt = {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = Cat(mstatusOld.fs === "b11".U, mstatus(XLEN-2, 0))
+    mstatusNew
+  }
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
@@ -349,7 +354,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     // MaskedRegMap(Instret, instret),
     
     // Supervisor Trap Setup
-    MaskedRegMap(Sstatus, mstatus, sstatusWmask, MaskedRegMap.NoSideEffect, sstatusRmask),
+    MaskedRegMap(Sstatus, mstatus, sstatusWmask, mstatusUpdateSideEffect, sstatusRmask),
 
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
@@ -375,7 +380,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
     // Machine Trap Setup
     // MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U, (x=>{printf("mstatus write: %x time: %d\n", x, GTimer()); x})),
-    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffff".U),
+    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffff".U, mstatusUpdateSideEffect),
     MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg, "hbbff".U),
     MaskedRegMap(Mideleg, mideleg, "h222".U),
