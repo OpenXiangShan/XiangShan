@@ -36,7 +36,7 @@ object LSUOpType {
   def isLoad(func: UInt): Bool = !isStore(func) & !isAtom(func)
   def isLR(func: UInt): Bool = func === lr
   def isSC(func: UInt): Bool = func === sc
-  def isAMO(func: UInt): Bool = isAtom(func) && !isAtom(lr) && !isAtom(sc)
+  def isAMO(func: UInt): Bool = isAtom(func) && !isLR(func) && !isSC(func)
 
   def atomW = "010".U
   def atomD = "011".U
