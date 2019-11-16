@@ -422,6 +422,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val wen = (valid && func =/= CSROpType.jmp)
   // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
+  val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
   io.out.bits := rdata
 
   // Fix Mip/Sip write
@@ -523,7 +524,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
   // csrExceptionVec(instrPageFault) := hasInstrPageFault
-  csrExceptionVec(illegalInstr) := addr === Time.U && wen // Trigger an illegal Instrexception when CSR Time is being read
+  csrExceptionVec(illegalInstr) := isIllegalAddr && wen // Trigger an illegal instr exception when unimplemented csr is being read/written
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
   val iduExceptionVec = io.cfIn.exceptionVec
