@@ -18,6 +18,14 @@ class DiffTestIO extends Bundle {
   val isMMIO = Output(Bool())
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
+  
+  val priviledgeMode = Output(UInt(2.W))
+  val mstatus = Output(UInt(64.W))
+  val sstatus = Output(UInt(64.W))
+  val mepc = Output(UInt(64.W))
+  val sepc = Output(UInt(64.W))
+  val mcause = Output(UInt(64.W))
+  val scause = Output(UInt(64.W))
 }
 
 class NOOPSimTop extends Module {
@@ -50,6 +58,13 @@ class NOOPSimTop extends Module {
   BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
   BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
+  BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
+  BoringUtils.addSink(difftest.mstatus, "difftestMstatus")
+  BoringUtils.addSink(difftest.sstatus, "difftestSstatus") 
+  BoringUtils.addSink(difftest.mepc, "difftestMepc")
+  BoringUtils.addSink(difftest.sepc, "difftestSepc")
+  BoringUtils.addSink(difftest.mcause, "difftestMcause")
+  BoringUtils.addSink(difftest.scause, "difftestScause")
   io.difftest := difftest
 }
 

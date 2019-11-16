@@ -105,11 +105,23 @@ trait HasCSRConst {
   def ModeS     = 0x1.U
   def ModeU     = 0x0.U
 
-//  IntPriority = {
-//     IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
-//     IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
-//     IRQ_UEIP, IRQ_USIP, IRQ_UTIP
-//   };
+  def IRQ_UEIP  = 0 
+  def IRQ_SEIP  = 1
+  def IRQ_MEIP  = 3 
+
+  def IRQ_UTIP  = 4 
+  def IRQ_STIP  = 5 
+  def IRQ_MTIP  = 7 
+
+  def IRQ_USIP  = 8 
+  def IRQ_SSIP  = 9 
+  def IRQ_MSIP  = 11 
+
+ val IntPriority = Seq(
+    IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
+    IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
+    IRQ_UEIP, IRQ_USIP, IRQ_UTIP
+ )
 }
 
 trait HasExceptionNO {
@@ -195,7 +207,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Machine-Level CSRs
   
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
-  val mcause = Reg(UInt(XLEN.W))
+  val mcounteren = RegInit(UInt(XLEN.W), 0.U)
+  val mcause = RegInit(UInt(XLEN.W), 0.U)
+  val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mepc = Reg(UInt(XLEN.W))
 
   val mie = RegInit(0.U(XLEN.W))
@@ -204,15 +218,21 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val mipFixMask = "h777".U
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
-  val misa = RegInit(UInt(XLEN.W), "h8000000000141101".U) 
-  // MXL = 2          | 0 | EXT = b 00 0001 0100 0001 0001 0000 0100
+  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}
+  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)} 
+  var extList = List('a', 's', 'i')
+  if(HasMExtension){ extList = extList :+ 'm'}
+  if(HasCExtension){ extList = extList :+ 'c'}
+  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i))
+  val misa = RegInit(UInt(XLEN.W), misaInitVal) 
+  // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartid = RegInit(UInt(XLEN.W), 0.U) // the hardware thread running the code
-  val mstatus = RegInit(UInt(XLEN.W), "h00000000".U)
+  val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)
   // val mstatus = RegInit(UInt(XLEN.W), "h8000c0100".U)
   // mstatus Value Table
   // | sd   |
@@ -234,22 +254,36 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // | pie  | 0000 |
   // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
+  def mstatusUpdateSideEffect(mstatus: UInt): UInt = {
+    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    val mstatusNew = Cat(mstatusOld.fs === "b11".U, mstatus(XLEN-2, 0))
+    mstatusNew
+  }
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
+  val pmpcfg0 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpcfg1 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpcfg2 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpcfg3 = RegInit(UInt(XLEN.W), 0.U)
+  val pmpaddr0 = RegInit(UInt(XLEN.W), 0.U) 
+  val pmpaddr1 = RegInit(UInt(XLEN.W), 0.U) 
+  val pmpaddr2 = RegInit(UInt(XLEN.W), 0.U) 
+  val pmpaddr3 = RegInit(UInt(XLEN.W), 0.U) 
+
   // Superviser-Level CSRs
 
   // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
-  val sstatusWmask = "hc0122".U
+  val sstatusWmask = "hc6122".U
   // Sstatus Write Mask
   // -------------------------------------------------------
   //    19           9   5     2
   // 0  1100 0000 0001 0010 0010
   // 0  c    0    1    2    2
   // -------------------------------------------------------
-  val sstatusRmask = "h80000003000de122".U
+  val sstatusRmask = sstatusWmask | "h8000000300018000".U
   // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
@@ -258,23 +292,34 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
   val satp = RegInit(UInt(XLEN.W), 0.U)
   io.satp := satp
-  val sepc = Reg(UInt(XLEN.W))
-  val scause = Reg(UInt(XLEN.W))
+  val sepc = RegInit(UInt(XLEN.W), 0.U)
+  val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
+  val scounteren = RegInit(UInt(XLEN.W), 0.U)
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
 
-  // Hart Priviledge Mode
+  // Atom LR/SC Control Bits
+  val setLr = WireInit(Bool(), false.B)
+  val setLrVal = WireInit(Bool(), false.B)
+  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare)
+  val lr = RegInit(Bool(), false.B)
+  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
+  BoringUtils.addSink(setLr, "set_lr")
+  BoringUtils.addSink(setLrVal, "set_lr_val")
+  BoringUtils.addSink(setLrAddr, "set_lr_addr")
+  BoringUtils.addSource(lr, "lr")
+  BoringUtils.addSource(lrAddr, "lr_addr")
 
+  when(setLr){
+    lr := setLrVal
+    lrAddr := setLrAddr
+  }
+
+  // Hart Priviledge Mode
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
-  // val globalInterruptEnable = LookupTree(priviledgeMode, List(
-  //   ModeM -> mstatusStruct.ie.m,
-  //   ModeH -> mstatusStruct.ie.h,
-  //   ModeS -> mstatusStruct.ie.s,
-  //   ModeU -> mstatusStruct.ie.u
-  // ))
 
   // perfcnt
   val hasPerfCnt = !p.FPGAPlatform
@@ -309,13 +354,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     // MaskedRegMap(Instret, instret),
     
     // Supervisor Trap Setup
-    MaskedRegMap(Sstatus, mstatus, sstatusWmask, MaskedRegMap.NoSideEffect, sstatusRmask),
+    MaskedRegMap(Sstatus, mstatus, sstatusWmask, mstatusUpdateSideEffect, sstatusRmask),
 
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec),
-    // MaskedRegMap(Scounteren, Scounteren),
+    MaskedRegMap(Scounteren, scounteren),
 
     // Supervisor Trap Handling
     MaskedRegMap(Sscratch, sscratch),
@@ -335,26 +380,30 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
     // Machine Trap Setup
     // MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U, (x=>{printf("mstatus write: %x time: %d\n", x, GTimer()); x})),
-    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffff".U),
+    MaskedRegMap(Mstatus, mstatus, "hffffffffffffffff".U, mstatusUpdateSideEffect),
     MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg, "hbbff".U),
     MaskedRegMap(Mideleg, mideleg, "h222".U),
     MaskedRegMap(Mie, mie),
     MaskedRegMap(Mtvec, mtvec),
-    // MaskedRegMap(Mcounteren, mcounteren), 
+    MaskedRegMap(Mcounteren, mcounteren), 
 
     // Machine Trap Handling
     MaskedRegMap(Mscratch, mscratch),
     MaskedRegMap(Mepc, mepc),
     MaskedRegMap(Mcause, mcause),
-    // MaskedRegMap(Mtval, mtval)
-    MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable)
+    MaskedRegMap(Mtval, mtval),
+    MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
 
     // Machine Memory Protection
-    // MaskedRegMap(Pmpcfg0, Pmpcfg0),
-    // MaskedRegMap(Pmpcfg1, Pmpcfg1),
-    // MaskedRegMap(Pmpcfg2, Pmpcfg2),
-    // MaskedRegMap(Pmpcfg3, Pmpcfg3),
+    MaskedRegMap(Pmpcfg0, pmpcfg0),
+    MaskedRegMap(Pmpcfg1, pmpcfg1),
+    MaskedRegMap(Pmpcfg2, pmpcfg2),
+    MaskedRegMap(Pmpcfg3, pmpcfg3),
+    MaskedRegMap(PmpaddrBase + 0, pmpaddr0),
+    MaskedRegMap(PmpaddrBase + 1, pmpaddr1),
+    MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
+    MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
 
   ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
 
@@ -422,8 +471,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // assert(!hasLoadPageFault)
   // assert(!hasStorePageFault)
 
+  //TODO: Havn't test if io.dmemMMU.priviledgeMode is correct yet
   io.imemMMU.priviledgeMode := priviledgeMode
-  io.dmemMMU.priviledgeMode := priviledgeMode
+  io.dmemMMU.priviledgeMode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
   io.imemMMU.status_sum := mstatusStruct.sum.asBool
   io.dmemMMU.status_sum := mstatusStruct.sum.asBool
   io.imemMMU.status_mxr := DontCare
@@ -452,7 +502,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
   BoringUtils.addSource(intrVec, "intrVecIDU")
   // val intrNO = PriorityEncoder(intrVec)
-  val intrNO = PriorityEncoder(io.cfIn.intrVec)
+  
+  val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(io.cfIn.intrVec(i), i.U, sum))
+  // val intrNO = PriorityEncoder(io.cfIn.intrVec)
   val raiseIntr = io.cfIn.intrVec.asUInt.orR
 
   val mtip = WireInit(false.B)
@@ -471,6 +523,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
   // csrExceptionVec(instrPageFault) := hasInstrPageFault
+  csrExceptionVec(illegalInstr) := addr === Time.U && wen // Trigger an illegal Instrexception when CSR Time is being read
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
   val iduExceptionVec = io.cfIn.exceptionVec
@@ -535,6 +588,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.pie.m := true.B
     mstatusNew.mpp := ModeU
     mstatus := mstatusNew.asUInt
+    lr := false.B
     retTarget := mepc
   }
 
@@ -545,8 +599,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.ie.s := mstatusOld.pie.s
     priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
     mstatusNew.pie.s := true.B
-    mstatusNew.mpp := ModeU
+    mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
+    lr := false.B
     retTarget := sepc
   }
 
@@ -572,6 +627,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
+      when(exceptionNO === illegalInstr.U && !raiseIntr){stval := 0.U}
       // printf("[*] mstatusNew.spp %x\n", mstatusNew.spp)
       // trapTarget := stvec
     }.otherwise {
@@ -581,6 +637,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
+      when(exceptionNO === illegalInstr.U && !raiseIntr){mtval := 0.U}
       // trapTarget := mtvec
     }
     // mstatusNew.pie.m := LookupTree(priviledgeMode, List(
@@ -678,4 +735,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   } else {
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
+
+  // for differential testing  
+  BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
+  BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
+  BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus") 
+  BoringUtils.addSource(RegNext(mepc), "difftestMepc")
+  BoringUtils.addSource(RegNext(sepc), "difftestSepc")
+  BoringUtils.addSource(RegNext(mcause), "difftestMcause")
+  BoringUtils.addSource(RegNext(scause), "difftestScause")
 }
