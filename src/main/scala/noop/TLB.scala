@@ -458,40 +458,15 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
 }
 
 object TLB {
-  def apply(flush: UInt, exu: TLBExuIO)(implicit tlbConfig: TLBConfig) {
-    val tlb = new TLB(userBits = AddrBits*2)
-    tlb.in.req <> req
-    resp <> tlb.in.resp
-    tlb.flush := flush
-    tlb.exu <> exu
+  def apply(in: SimpleBusUC, out: SimpleBusUC, mem: SimpleBusUC, flush: Bool, exu: TLBExuIO, csrMMU = MMUIO)(implicit tlbConfig: TLBConfig) {
+    val tlb = Module(new TLB())
+    tlb.io.in <> in
+    out <> tlb.io.out
+    tlb.io.mem <> mem
+    tlb.io.flush := flush
+    tlb.io.exu <> exu
+    tlb.io.csrMMU <> csrMMU
     tlb
-  }
-}
-
-class TLBIOTran(userBits: Int = 0, name: String = "default") extends NOOPModule {
-  val io = IO(new Bundle{
-    val in = Flipped(new SimpleBusUC(userBits = userBits))
-    val out = new SimpleBusUC(userBits = userBits)
-    //val rawReq = Flipped(Decoupled(SimpleBusReqBundle(userBits = userBits)))
-    //val vmEnable = Input(Bool())
-  })
-
-  io.out.req <> io.in.req
-  //io.out.req.valid := Mux(vmEnable, io.in.req.valid, io.rawReq.valid)
-  //io.out.req.bits := Mux(vmEnable, io.in.req.bits, io.rawReq.bits)
-  
-
-  //io.in.resp <> io.out.resp
-
-  io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp()
-  io.in.resp.bits := io.out.resp.bits
-  io.out.resp.ready := io.in.resp.ready
-
-  Debug() {
-    if (true) {
-    when(true.B) {
-      //
-    }}
   }
 }
 
