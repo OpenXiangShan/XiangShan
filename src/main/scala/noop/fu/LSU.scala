@@ -113,6 +113,7 @@ class LSU extends NOOPModule {
     val amoReq   = valid & LSUOpType.isAMO(func)
     val lrReq   = valid & LSUOpType.isLR(func)
     val scReq   = valid & LSUOpType.isSC(func)
+    BoringUtils.addSource(amoReq, "ISAMO")
 
     val aq = io.instr(26)
     val rl = io.instr(25)
