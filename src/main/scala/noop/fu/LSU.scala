@@ -134,7 +134,7 @@ class LSU extends NOOPModule {
     BoringUtils.addSink(lr, "lr")
     BoringUtils.addSink(lrAddr, "lr_addr")
 
-    val scInvalid = lr && src1 === lrAddr && scReq
+    val scInvalid = !(lr && src1 === lrAddr) && scReq
 
     // LSU control FSM state
     val s_idle :: s_load :: s_lr :: s_sc :: s_amo_l :: s_amo_a :: s_amo_s :: Nil = Enum(7)
