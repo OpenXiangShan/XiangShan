@@ -283,7 +283,7 @@ class LSU extends NOOPModule {
         lsExecUnit.io.in.bits.src1 := src1
         lsExecUnit.io.in.bits.src2 := 0.U
         lsExecUnit.io.in.bits.func := Mux(atomWidthD, LSUOpType.sd, LSUOpType.sw)
-        lsExecUnit.io.wdata        := src2
+        lsExecUnit.io.wdata        := io.wdata
         io.in.ready                := lsExecUnit.io.out.fire()
         io.out.valid               := lsExecUnit.io.out.fire()
         when(lsExecUnit.io.out.fire()){
@@ -306,7 +306,7 @@ class LSU extends NOOPModule {
     io.dmem <> lsExecUnit.io.dmem
     io.out.bits := Mux(scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
 
-    val addr = Mux(amoReq, src1, src1 + src2)
+    val addr = Mux(atomReq, src1, src1 + src2)
     io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
     // io.isMMIO := lsExecUnit.io.isMMIO
 }
