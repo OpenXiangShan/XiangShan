@@ -149,7 +149,7 @@ sealed trait HasTlbConst {
 }
 
 sealed abstract class TlbBundle(implicit tlbConfig: TLBConfig) extends Bundle with HasNOOPParameter with HasTlbConst with Sv39Const
-sealed abstract class TlbModule(implicit tlbConfig: TLBConfig) extends Module with HasNOOPParameter with HasTlbConst with Sv39Const
+sealed abstract class TlbModule(implicit tlbConfig: TLBConfig) extends Module with HasNOOPParameter with HasTlbConst with Sv39Const with HasCSRConst
 
 sealed class TLBMetaBundle(implicit val tlbConfig: TLBConfig) extends TlbBundle {
   val vpn = Output(UInt(vpnLen.W))
@@ -267,7 +267,7 @@ class TlbStage2(implicit val tlbConfig: TLBConfig) extends TlbModule with HasCSR
   io.in.ready := !io.in.valid || io.out.fire()
 }
 
-sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with HasCSRConst{
+sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new TlbStage2IO))
     val out = Decoupled(new TlbResp(userBits))
@@ -306,6 +306,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
   val hitFlag = meta.flag
   val hitMask = meta.mask
   val hitppn = Mux1H(io.in.bits.waymask, io.in.bits.datas).ppn
+  val isAMO = WireInit(false.B)
 
   val raddr = Reg(UInt(AddrBits.W))
   val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire())
@@ -323,7 +324,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
   val hitWBStore = RegEnable(Cat(0.U(10.W), hitppn, 0.U(2.W), hitRefillFlag), hitWB)
 
   if (tlbname == "itlb") { hitinstrPF := !hitExec  && hit}
-  if (tlbname == "dtlb") { hitloadPF := !hitLoad && req.isRead() && hit; hitstorePF := !hitStore && req.isWrite() && hit }
+  if (tlbname == "dtlb") { hitloadPF := !hitLoad && req.isRead() && hit && !isAMO; hitstorePF := !hitStore && req.isWrite() && hit || (!hitLoad && req.isRead() && hit && isAMO)}
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_write_pte :: s_wait_resp :: Nil = Enum(5)
   val state = RegInit(s_idle)
@@ -346,6 +347,10 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
   io.pf.addr := req.addr
   val instrPF = RegInit(false.B)
   val pfWire = WireInit(false.B)
+  if (tlbname == "dtlb") {
+    //val isAMO = Wire(Bool())
+    BoringUtils.addSink(isAMO, "ISAMO")
+  }
 
   switch (state) {
     is (s_idle) {
@@ -377,7 +382,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
         }.elsewhen (!(missflag.r || missflag.x)/*!missflag.r && !missflag.x && !missflag.w*/ && (level===3.U || level===2.U)) {
           when(!missflag.v || (!missflag.r && missflag.w)) {
             if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
-            if(tlbname == "dtlb") { io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite() }
+            if(tlbname == "dtlb") { io.pf.loadPF := req.isRead() && !isAMO ; io.pf.storePF := req.isWrite() || isAMO }
             if(tlbname == "itlb") { instrPF := true.B }
             Debug() {
               if(debug) {
@@ -411,7 +416,8 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule with
           if(tlbname == "dtlb") {
             when((!permLoad && req.isRead()) || (!permStore && req.isWrite())) { 
               state := s_idle ; pfWire := true.B
-              io.pf.loadPF := req.isRead() ; io.pf.storePF := req.isWrite()
+              io.pf.loadPF := req.isRead() && !isAMO
+              io.pf.storePF := req.isWrite() || isAMO
             }.otherwise {
               state := Mux(updateAD, s_write_pte, s_wait_resp)
               missMetaRF := true.B
@@ -517,7 +523,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     }
   }
 
-  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode === 8.U //how to constrict to 0/8
+  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode === 8.U && (io.csrMMU.priviledgeMode < ModeM)//how to constrict to 0/8
   s1.io.in <> io.in.req
   s1.io.in.bits := io.in.req.bits
   s1.io.in.valid :=  Mux(vmEnable, io.in.req.valid, false.B)

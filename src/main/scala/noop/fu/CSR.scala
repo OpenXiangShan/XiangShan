@@ -167,6 +167,7 @@ class CSRIO extends FunctionUnitIO {
   val imemMMU = Flipped(new MMUIO)
   val dmemMMU = Flipped(new MMUIO)
   val satp = Output(UInt(XLEN.W))
+  val wenFix = Output(Bool())
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
@@ -496,17 +497,16 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.imemMMU.status_mxr := DontCare
   io.dmemMMU.status_mxr := mstatusStruct.mxr.asBool
 
-  val hasInstrPageFault = io.cfIn.exceptionVec(instrPageFault)
+  val hasInstrPageFault = io.cfIn.exceptionVec(instrPageFault) && valid
   val hasLoadPageFault = io.dmemMMU.loadPF   
   val hasStorePageFault = io.dmemMMU.storePF 
 
-  val imemPFvaddr = io.imemMMU.addr
-  val dmemPFvaddr = io.dmemMMU.addr
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
+    val tval = Mux(hasInstrPageFault, io.cfIn.pc, io.dmemMMU.addr)
     when(priviledgeMode === ModeM){
-      mtval := Mux(hasInstrPageFault, imemPFvaddr, dmemPFvaddr)
+      mtval := tval
     }.otherwise{
-      stval := Mux(hasInstrPageFault, imemPFvaddr, dmemPFvaddr)
+      stval := tval
     }
   }
 
@@ -547,6 +547,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   csrExceptionVec(illegalInstr) := isIllegalAddr && wen // Trigger an illegal instr exception when unimplemented csr is being read/written
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
+  io.wenFix := isIllegalAddr && wen
   val iduExceptionVec = io.cfIn.exceptionVec
   val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   val raiseException = raiseExceptionVec.orR

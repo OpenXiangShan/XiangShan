@@ -113,6 +113,7 @@ class LSU extends NOOPModule {
     val amoReq   = valid & LSUOpType.isAMO(func)
     val lrReq   = valid & LSUOpType.isLR(func)
     val scReq   = valid & LSUOpType.isSC(func)
+    BoringUtils.addSource(amoReq, "ISAMO")
 
     val aq = io.instr(26)
     val rl = io.instr(25)
@@ -133,7 +134,7 @@ class LSU extends NOOPModule {
     BoringUtils.addSink(lr, "lr")
     BoringUtils.addSink(lrAddr, "lr_addr")
 
-    val scInvalid = lr && src1 === lrAddr && scReq
+    val scInvalid = !(lr && src1 === lrAddr) && scReq
 
     // LSU control FSM state
     val s_idle :: s_load :: s_lr :: s_sc :: s_amo_l :: s_amo_a :: s_amo_s :: Nil = Enum(7)
@@ -282,7 +283,7 @@ class LSU extends NOOPModule {
         lsExecUnit.io.in.bits.src1 := src1
         lsExecUnit.io.in.bits.src2 := 0.U
         lsExecUnit.io.in.bits.func := Mux(atomWidthD, LSUOpType.sd, LSUOpType.sw)
-        lsExecUnit.io.wdata        := src2
+        lsExecUnit.io.wdata        := io.wdata
         io.in.ready                := lsExecUnit.io.out.fire()
         io.out.valid               := lsExecUnit.io.out.fire()
         when(lsExecUnit.io.out.fire()){
@@ -298,14 +299,14 @@ class LSU extends NOOPModule {
     // io.out.valid := lsExecUnit.io.out.valid 
 
     //Set LR/SC bits
-    setLr := (state === s_idle && (lrReq || scReq))
+    setLr := io.out.fire() && (lrReq || scReq)
     setLrVal := lrReq
     setLrAddr := src1
 
     io.dmem <> lsExecUnit.io.dmem
-    io.out.bits := Mux(lrReq|scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
+    io.out.bits := Mux(scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
 
-    val addr = Mux(amoReq, src1, src1 + src2)
+    val addr = Mux(atomReq, src1, src1 + src2)
     io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
     // io.isMMIO := lsExecUnit.io.isMMIO
 }
