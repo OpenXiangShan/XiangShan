@@ -96,51 +96,16 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.forward <> exu.io.forward
 
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
-  
-/*
-  val iptw = Module(new Ptw(name = "iptw", userBits = AddrBits*2))
-  //iptw.io.satp := exu.io.satp//"h8000000000087fbe".U//"h80087fbe".U
-  iptw.io.exu <> exu.io.tlb
-  iptw.io.flush := ifu.io.flushVec(0) | ifu.io.bpFlush
-  iptw.io.in <> ifu.io.imem
-  val ptwWork = exu.io.tlb.satp(63,60) =/= 0.U || true.B
-  val inCacheFlush = Mux(ptwWork, Fill(2,false.B), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))
-  io.imem <> Cache(iptw.io.out, mmioXbar.io.in(0), inCacheFlush)(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2))
-
-  val dptw = Module(new Ptw(name = "dptw"))
-  //dptw.io.satp := exu.io.satp//"h8000000000087fbe".U//"h80087fbe".U
-  dptw.io.exu   <> exu.io.tlb
-  dptw.io.flush := false.B
-  dptw.io.in <> exu.io.dmem
-  io.dmem <> Cache(dptw.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
-
-  io.mmio <> mmioXbar.io.out
-*/
-  val itlb = Module(new TLB()(TLBConfig(name = "itlb", userBits = AddrBits*2 + 4 + 1)))
-  val itran = Module(new TLBIOTran(userBits = AddrBits*2 + 4 + 1, name = "itran"))
-  itlb.io.exu <> exu.io.tlb
-  itlb.io.csrMMU <> exu.io.memMMU.imem
-  itlb.io.flush := Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush)
-  itlb.io.in.req <> ifu.io.imem.req
-  itran.io.in.req <> itlb.io.in.resp
-  ifu.io.imem.resp <> itran.io.in.resp
-  io.imem <> Cache(itran.io.out, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4 + 1))
-
-  val dtlb = Module(new TLB()(TLBConfig(name = "dtlb")))
-  val dtran = Module(new TLBIOTran(name = "dtran"))
-  dtlb.io.exu <> exu.io.tlb
-  dtlb.io.csrMMU <> exu.io.memMMU.dmem
-  dtlb.io.flush := "b00".U //flush must be wrong
-  dtlb.io.in.req <> exu.io.dmem.req
-  dtran.io.in.req <> dtlb.io.in.resp
-  exu.io.dmem.resp <> dtran.io.in.resp
   val tlbXbar = Module(new SimpleBusCrossbarNto1Special(3, name = "tlbXbar"))
-  tlbXbar.io.in(0) <> dtran.io.out
-  tlbXbar.io.in(1) <> dtlb.io.mem
-  tlbXbar.io.in(2) <> itlb.io.mem
-  io.dmem <> Cache(tlbXbar.io.out, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+
+  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, exu = exu.io.tlb, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb"))
+  ifu.io.ipf := itlb.io.ipf
+  io.imem <> Cache(in = itlb.io.out, mmio = mmioXbar.io.in(0), flush = Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush), empty = itlb.io.cacheEmpty)(
+    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4))
+  
+  val dtlb = TLB(in = exu.io.dmem, mem = tlbXbar.io.in(1), flush = false.B, exu = exu.io.tlb, csrMMU = exu.io.memMMU.dmem)(TLBConfig(name = "dtlb"))
+  tlbXbar.io.in(0) <> dtlb.io.out
+  io.dmem <> Cache(in = tlbXbar.io.out, mmio = mmioXbar.io.in(1), flush = "b00".U, empty = dtlb.io.cacheEmpty, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
 
   io.mmio <> mmioXbar.io.out
 

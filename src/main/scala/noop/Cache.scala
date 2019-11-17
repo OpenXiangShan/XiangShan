@@ -204,16 +204,11 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val metaWriteArb = Module(new Arbiter(CacheMetaArrayWriteBus().req.bits, 2))
   val dataWriteArb = Module(new Arbiter(CacheDataArrayWriteBus().req.bits, 2))
 
-  val isIPF = WireInit(false.B)
-  if (cacheName == "icache") {
-    isIPF := io.in.bits.req.user.getOrElse(0.U)(AddrBits*2 + 4)
-  }
-
   val req = io.in.bits.req
   val addr = req.addr.asTypeOf(addrBundle)
-  val mmio = io.in.valid && io.in.bits.mmio && !isIPF
-  val hit = io.in.valid && io.in.bits.hit && !isIPF
-  val miss = io.in.valid && !io.in.bits.hit && !isIPF
+  val mmio = io.in.valid && io.in.bits.mmio
+  val hit = io.in.valid && io.in.bits.hit
+  val miss = io.in.valid && !io.in.bits.hit
   val probe = io.in.valid && hasCoh.B && req.isProbe()
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
@@ -269,7 +264,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     wdata = dataHitWay, wmask = Fill(DataBytes, 1.U))
 
   io.mem.resp.ready := true.B
-  io.mem.req.valid := (state === s_memReadReq && !isIPF) || ((state === s_memWriteReq) && (state2 === s2_dataOK))
+  io.mem.req.valid := (state === s_memReadReq) || ((state === s_memWriteReq) && (state2 === s2_dataOK))
 
   // mmio
   io.mmio.req.bits := req
@@ -282,9 +277,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val inRdataRegDemand = RegEnable(Mux(mmio, io.mmio.resp.bits.rdata, io.mem.resp.bits.rdata),
                                    Mux(mmio, state === s_mmioResp, readingFirst))
 
-  if (cacheName == "icache") {
-    val isIPF = req.user.getOrElse(0.U)(AddrBits*2 + 4)
-  }
   // probe
   io.cohResp.valid := ((state === s_idle) && probe) ||
                       ((state === s_release) && (state2 === s2_dataOK))
@@ -357,16 +349,16 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   metaWriteArb.io.in(1) <> metaRefillWriteBus.req
   io.metaWriteBus.req <> metaWriteArb.io.out
 
-  io.out.bits.rdata := Mux(isIPF, 0.U, Mux(hit, dataRead, inRdataRegDemand))
+  io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
   io.out.bits.cmd := Mux(io.in.bits.req.isRead(), SimpleBusCmd.readLast, Mux(io.in.bits.req.isWrite(), SimpleBusCmd.writeResp, DontCare))//DontCare, added by lemover
   io.out.bits.user.zip(req.user).map { case (o,i) => o := i }
-  io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)) || isIPF)
+  io.out.valid := io.in.valid && Mux(probe, false.B, Mux(hit, true.B, Mux(req.isWrite() || mmio, state === s_wait_resp, afterFirstRead && !alreadyOutFire)))
   // With critical-word first, the pipeline registers between
   // s2 and s3 can not be overwritten before a missing request
   // is totally handled. We use io.isFinish to indicate when the
   // request really ends.
   io.isFinish := Mux(probe, io.cohResp.fire() && Mux(miss, state === s_idle, (state === s_release) && releaseLast),
-    Mux(hit || req.isWrite(), io.out.fire(), isIPF || (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
+    Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
   )
 
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !probe
@@ -377,8 +369,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   Debug() {
     if(debug) {
     when(true.B) {
-      printf("%d: [" + cacheName + " S3]: in.ready = %d, in.valid = %d, hit = %x, state = %d, addr = %x cmd:%d isIPF:%d probe:%d isFinish:%d\n",
-      GTimer(), io.in.ready, io.in.valid, hit, state, req.addr, req.cmd, isIPF, probe, io.isFinish)
       printf("%d: [" + cacheName + " S3]: out.valid:%d rdata:%x cmd:%d user:%x \n", 
       GTimer(), io.out.valid, io.out.bits.rdata, io.out.bits.cmd, io.out.bits.user.getOrElse(0.U))
       printf("%d: [" + cacheName + " S3]: DHW: (%d, %d), data:%x MHW:(%d, %d)\n", 
@@ -395,6 +385,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
     val flush = Input(UInt(2.W))
     val out = new SimpleBusC
     val mmio = new SimpleBusUC
+    val empty = Output(Bool())
   })
 
   // cpu pipeline
@@ -421,6 +412,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s3.io.flush := io.flush(1)
   io.out.mem <> s3.io.mem
   io.mmio <> s3.io.mmio
+  io.empty := !s2.io.in.valid && !s3.io.in.valid
 
   if (hasCoh) {
     val cohReq = io.out.coh.req.bits
@@ -469,12 +461,13 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 }
 
 object Cache {
-  def apply(in: SimpleBusUC, mmio: SimpleBusUC, flush: UInt, enable: Boolean = true)(implicit cacheConfig: CacheConfig) = {
+  def apply(in: SimpleBusUC, mmio: SimpleBusUC, flush: UInt, empty: Bool, enable: Boolean = true)(implicit cacheConfig: CacheConfig) = {
     if (enable) {
       val cache = Module(new Cache)
       cache.io.flush := flush
       cache.io.in <> in
       mmio <> cache.io.mmio
+      empty := cache.io.empty
       cache.io.out
     } else {
       val addrspace = List(AddressSpace.dram) ++ AddressSpace.mmio
@@ -483,6 +476,7 @@ object Cache {
       busC.mem <> xbar.io.out(0)
       xbar.io.in <> in
       mmio <> xbar.io.out(1)
+      empty := false.B
       busC
     }
   }

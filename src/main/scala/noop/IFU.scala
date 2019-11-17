@@ -14,13 +14,14 @@ trait HasResetVector {
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
 
-    val imem = new SimpleBusUC(userBits = AddrBits*2 + 4 + 1)
+    val imem = new SimpleBusUC(userBits = AddrBits*2 + 4)
     // val pc = Input(UInt(AddrBits.W))
     val out = Decoupled(new CtrlFlowIO)
 
     val redirect = Flipped(new RedirectIO)
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
+    val ipf = Input(Bool())
   })
 
   // pc
@@ -98,7 +99,7 @@ class IFU extends NOOPModule with HasResetVector {
     io.out.bits.pc := x(AddrBits-1,0)
     io.out.bits.pnpc := x(AddrBits*2-1,AddrBits)
     io.out.bits.brIdx := x(AddrBits*2 + 3, AddrBits*2)
-    io.out.bits.exceptionVec(instrPageFault) := x(AddrBits*2 + 4)
+    io.out.bits.exceptionVec(instrPageFault) := io.ipf
   }
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 

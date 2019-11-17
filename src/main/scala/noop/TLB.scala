@@ -246,13 +246,15 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   }
 
   // instruction page fault
-  when (tlbExec.io.ipf && vmEnable) {
-    tlbExec.io.out.ready := io.cacheEmpty && io.in.resp.ready
-    io.out.req.valid := false.B
-    io.in.resp.valid := true.B
-    io.in.resp.bits.rdata := 0.U
-    io.in.resp.bits.cmd := SimpleBusCmd.readLast
-    io.in.resp.bits.user.map(_ := io.in.req.bits.uesr.getOrElse(0.U))
+  if (tlbname == "itlb") {
+    when (tlbExec.io.ipf && vmEnable) {
+      tlbExec.io.out.ready := io.cacheEmpty && io.in.resp.ready
+      io.out.req.valid := false.B
+      io.in.resp.valid := true.B
+      io.in.resp.bits.rdata := 0.U
+      io.in.resp.bits.cmd := SimpleBusCmd.readLast
+      io.in.resp.bits.user.map(_ := io.in.req.bits.uesr.getOrElse(0.U))
+    }
   }
 }
 
@@ -458,10 +460,9 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
 }
 
 object TLB {
-  def apply(in: SimpleBusUC, out: SimpleBusUC, mem: SimpleBusUC, flush: Bool, exu: TLBExuIO, csrMMU = MMUIO)(implicit tlbConfig: TLBConfig) {
+  def apply(in: SimpleBusUC, mem: SimpleBusUC, flush: Bool, exu: TLBExuIO, csrMMU = MMUIO)(implicit tlbConfig: TLBConfig) {
     val tlb = Module(new TLB())
     tlb.io.in <> in
-    out <> tlb.io.out
     tlb.io.mem <> mem
     tlb.io.flush := flush
     tlb.io.exu <> exu
