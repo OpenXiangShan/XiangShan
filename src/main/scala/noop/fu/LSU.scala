@@ -304,7 +304,7 @@ class LSU extends NOOPModule {
     setLrAddr := src1
 
     io.dmem <> lsExecUnit.io.dmem
-    io.out.bits := Mux(lrReq|scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
+    io.out.bits := Mux(scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
 
     val addr = Mux(amoReq, src1, src1 + src2)
     io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
