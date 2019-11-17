@@ -366,7 +366,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   // is totally handled. We use io.isFinish to indicate when the
   // request really ends.
   io.isFinish := Mux(probe, io.cohResp.fire() && Mux(miss, state === s_idle, (state === s_release) && releaseLast),
-    Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
+    Mux(hit || req.isWrite(), io.out.fire(), isIPF || (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
   )
 
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !probe

@@ -66,6 +66,8 @@ xv6:
 xv6-debug:
 	$(MAKE) -C $(XV6_HOME) noop 2>&1 | tee > xv6.log
 
+linux:
+	$(MAKE) -C $(BBL_LINUX_HOME) noop
 # ------------------------------------------------------------------
 # get disassembled test src
 # ------------------------------------------------------------------
