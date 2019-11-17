@@ -167,6 +167,7 @@ class CSRIO extends FunctionUnitIO {
   val imemMMU = Flipped(new MMUIO)
   val dmemMMU = Flipped(new MMUIO)
   val satp = Output(UInt(XLEN.W))
+  val wenFix = Output(Bool())
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
@@ -546,6 +547,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   csrExceptionVec(illegalInstr) := isIllegalAddr && wen // Trigger an illegal instr exception when unimplemented csr is being read/written
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
+  io.wenFix := isIllegalAddr && wen
   val iduExceptionVec = io.cfIn.exceptionVec
   val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   val raiseException = raiseExceptionVec.orR
