@@ -547,11 +547,11 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   csrExceptionVec(illegalInstr) := isIllegalAddr && wen // Trigger an illegal instr exception when unimplemented csr is being read/written
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
-  io.wenFix := isIllegalAddr && wen
   val iduExceptionVec = io.cfIn.exceptionVec
   val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   val raiseException = raiseExceptionVec.orR
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  io.wenFix := raiseException
 
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
