@@ -299,7 +299,7 @@ class LSU extends NOOPModule {
     // io.out.valid := lsExecUnit.io.out.valid 
 
     //Set LR/SC bits
-    setLr := (state === s_idle && (lrReq || scReq))
+    setLr := io.out.fire() && (lrReq || scReq)
     setLrVal := lrReq
     setLrAddr := src1
 
