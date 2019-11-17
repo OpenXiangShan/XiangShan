@@ -139,6 +139,21 @@ trait HasExceptionNO {
   def instrPageFault      = 12
   def loadPageFault       = 13
   def storePageFault      = 15
+
+  val ExcPriority = Seq(
+      breakPoint, // TODO: different BP has different priority
+      instrPageFault,
+      instrAccessFault,
+      illegalInstr,
+      instrAddrMisaligned,
+      ecallM, ecallS, ecallU,
+      storeAddrMisaligned,
+      loadAddrMisaligned,
+      storePageFault,
+      loadPageFault,
+      storeAccessFault,
+      loadAccessFault
+  )
 }
 
 
@@ -220,10 +235,10 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
   def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}
   def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)} 
-  var extList = List('a', 's', 'i')
+  var extList = List('a', 's', 'i', 'u')
   if(HasMExtension){ extList = extList :+ 'm'}
   if(HasCExtension){ extList = extList :+ 'c'}
-  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i))
+  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U 
   val misa = RegInit(UInt(XLEN.W), misaInitVal) 
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
@@ -381,7 +396,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     // Machine Trap Setup
     // MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U, (x=>{printf("mstatus write: %x time: %d\n", x, GTimer()); x})),
     MaskedRegMap(Mstatus, mstatus, "hffffffffffffffff".U, mstatusUpdateSideEffect),
-    MaskedRegMap(Misa, misa, "h6ffffffffc000000".U), // now MXL, EXT is not changeable
+    MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg, "hbbff".U),
     MaskedRegMap(Mideleg, mideleg, "h222".U),
     MaskedRegMap(Mie, mie),
@@ -423,6 +438,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
+  val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.out.bits := rdata
 
   // Fix Mip/Sip write
@@ -534,7 +550,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val iduExceptionVec = io.cfIn.exceptionVec
   val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   val raiseException = raiseExceptionVec.orR
-  val exceptionNO = PriorityEncoder(raiseExceptionVec)
+  val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
 
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
@@ -542,8 +558,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   val retTarget = Wire(UInt(AddrBits.W))
   val trapTarget = Wire(UInt(AddrBits.W))
-  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
-  io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
+  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr || resetSatp
+  io.redirect.target := Mux(resetSatp, io.cfIn.pnpc, Mux(raiseExceptionIntr, trapTarget, retTarget))
 
   Debug(){
     when(raiseExceptionIntr){
