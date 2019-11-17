@@ -19,12 +19,13 @@ class AXI4Timer(sim: Boolean = false) extends AXI4SlaveModule(new AXI4Lite, new 
   when (tick) { mtime := mtime + 1.U }
 
   val mapping = Map(
-    RegMap(0x0, mtime),
-    RegMap(0x8, mtimecmp)
+    RegMap(0x4000, mtimecmp),
+    RegMap(0xbff8, mtime)
   )
+  def getOffset(addr: UInt) = addr(15,0)
 
-  RegMap.generate(mapping, raddr(3,0), in.r.bits.data,
-    waddr(3,0), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+  RegMap.generate(mapping, getOffset(raddr), in.r.bits.data,
+    getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
 
   io.extra.get.mtip := RegNext(mtime >= mtimecmp)
 }
