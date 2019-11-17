@@ -423,6 +423,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
   val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
+  val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.out.bits := rdata
 
   // Fix Mip/Sip write
@@ -542,8 +543,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   val retTarget = Wire(UInt(AddrBits.W))
   val trapTarget = Wire(UInt(AddrBits.W))
-  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr
-  io.redirect.target := Mux(raiseExceptionIntr, trapTarget, retTarget)
+  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr || resetSatp
+  io.redirect.target := Mux(resetSatp, io.cfIn.pnpc, Mux(raiseExceptionIntr, trapTarget, retTarget))
 
   Debug(){
     when(raiseExceptionIntr){
