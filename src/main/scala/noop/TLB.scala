@@ -146,7 +146,7 @@ sealed trait HasTlbConst extends Sv39Const{
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69
   val dataLen = ppnLen + AddrBits // 44 + 64 = 108
 
-  val debug = true// && tlbname == "dtlb"
+  val debug = true && tlbname == "itlb"
 
   def metaBundle = new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -246,21 +246,37 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
   // tlb exec
   val tlbExec = Module(new TLBExec)
-  tlbExec.io.in <> io.in.req
-  io.out.req <> tlbExec.io.out
-  io.in.resp <> io.out.resp
+  Debug() {
+    if (debug) {
+      printf("[TLB-"  + tlbname+ "]: %d tlbExecIn(%d, %d), IOInReq(%d, %d), isFinish:%d, flush:%d\n", GTimer(), tlbExec.io.in.valid, tlbExec.io.in.ready, io.in.req.valid, io.in.req.ready, tlbExec.io.isFinish, io.flush)
+    }
+  }
+
   tlbExec.io.flush := io.flush
   tlbExec.io.mem <> io.mem
   tlbExec.io.exu <> io.exu
   tlbExec.io.pf <> io.csrMMU
-  io.ipf := tlbExec.io.ipf
+  //io.ipf := tlbExec.io.ipf && vmEnable
 
   // VM enable && io
-  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode === 8.U && (io.csrMMU.priviledgeMode < ModeM)
-  tlbExec.io.in.valid := Mux(vmEnable, io.in.req.valid, false.B)
-  io.out.req.valid := Mux(vmEnable, tlbExec.io.out.valid, io.in.req.valid)
-  io.in.req.ready := Mux(vmEnable, tlbExec.io.in.ready, io.out.req.ready)
-  io.out.req.bits := vmMux(userBits, vmEnable, tlbExec.io.out.bits, io.in.req.bits)
+  val vmEnable = io.exu.satp.asTypeOf(satpBundle).mode === 8.U //&& (io.csrMMU.priviledgeMode < ModeM)
+  when(!vmEnable) {
+    tlbExec.io.in.valid := false.B
+    tlbExec.io.out.ready := true.B // let existed request go out
+    tlbExec.io.in.bits := DontCare
+    io.ipf := false.B
+    io.out.req <> io.in.req
+  }.otherwise {
+    PipelineConnect(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush)
+    io.out.req <> tlbExec.io.out
+    io.in.resp <> io.out.resp
+    io.ipf := tlbExec.io.ipf
+  }
+  io.out.resp <> io.in.resp
+  //tlbExec.io.in.valid := Mux(vmEnable, io.in.req.valid, false.B)
+  //io.out.req.valid := Mux(vmEnable, tlbExec.io.out.valid, io.in.req.valid)
+  //io.in.req.ready := Mux(vmEnable, tlbExec.io.in.ready, io.out.req.ready)
+  //io.out.req.bits := vmMux(userBits, vmEnable, tlbExec.io.out.bits, io.in.req.bits)
 
   // lsu need dtlb signals
   if(tlbname == "dtlb") {
@@ -283,6 +299,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
       io.in.resp.bits.user.map(_ := io.in.req.bits.user.getOrElse(0.U))
     }
   }
+
 }
 
 class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
@@ -295,13 +312,14 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val exu = Flipped(new TLBExuIO)
     val pf = new MMUIO
     val ipf = Output(Bool())
+    val isFinish = Output(Bool())
   })
 
   // meta & data
   val metasTLB = Module(new TLBMeta)
   val datasTLB = Module(new TLBData)
-  val metas = metasTLB.io.metas
-  val datas = datasTLB.io.datas
+  val metas = RegEnable(metasTLB.io.metas, io.in.ready)
+  val datas = RegEnable(datasTLB.io.datas, io.in.ready)
 
   // meta reset
   metasTLB.reset := reset.asBool || io.exu.sfence.valid
@@ -328,6 +346,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   //val hitVec = 0.U(NTLB.W)
   val hit = io.in.valid && hitVec.orR
   val miss = io.in.valid && !hitVec.orR
+
   val victimWaymask = if (NTLB > 1) (1.U << LFSR64()(log2Up(NTLB)-1,0)) else "b1".U
   val waymask = Mux(hit, hitVec, victimWaymask)
 
@@ -342,6 +361,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hitWB = hit && (!hitFlag.a || !hitFlag.d && req.isWrite())
   val hitRefillFlag = Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | hitFlag.asUInt
   val hitWBStore = RegEnable(Cat(0.U(10.W), hitData.ppn, 0.U(2.W), hitRefillFlag), hitWB)
+
   // hit permission check
   val hitCheck = hit /*&& hitFlag.v */&& !(pf.priviledgeMode === ModeU && !hitFlag.u) && !(pf.priviledgeMode === ModeS && hitFlag.u && !pf.status_sum)
   val hitExec = hitCheck && hitFlag.x
@@ -372,7 +392,15 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val missRefillFlag = WireInit(0.U(8.W))
   val memRdata = io.mem.resp.bits.rdata.asTypeOf(pteBundle)
   val raddr = Reg(UInt(AddrBits.W))
-  
+  val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire)
+
+  val hitReg = RegEnable(true.B, init = false.B, hit && state === s_idle)
+  val missReg = RegEnable(true.B, init = false.B, miss && state === s_idle)
+  val hitWBReg = RegEnable(true.B, init = false.B, hitWB && state === s_idle)
+  when ((io.out.fire() || io.isFinish) && hitReg) { hitReg := false.B }
+  when ((io.out.fire() || io.isFinish) && missReg) { missReg := false.B }
+  when ((io.out.fire() || io.isFinish) && hitWBReg) { hitWBReg := false.B }
+
   //handle flush
   val needFlush = RegInit(false.B)
   val isFlush = needFlush || io.flush
@@ -387,11 +415,13 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
       when (!io.flush && hitWB) {
         state := s_write_pte
         needFlush := false.B
+        alreadyOutFire := false.B
       }.elsewhen (miss && !io.flush) {
         state := s_memReadReq
         raddr := paddrApply(satp.ppn, vpn.vpn2) //
         level := Level.U
         needFlush := false.B
+        alreadyOutFire := false.B
       }
     }
 
@@ -468,9 +498,10 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
       }.elsewhen (io.mem.req.fire()) { state := s_wait_resp }
     }
 
-    is (s_wait_resp) { when (io.out.fire() || io.flush){
+    is (s_wait_resp) { when (io.out.fire() || io.flush || alreadyOutFire){
       state := s_idle
       missIPF := false.B
+      alreadyOutFire := false.B
     }}
   }
 
@@ -498,11 +529,12 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   // io
   io.out.bits := req
   io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr, hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr, missMaskStore))
-  io.out.valid := Mux(hit && !hitWB, true.B, state === s_wait_resp)
+  io.out.valid := io.in.valid && Mux(hit && !hitWB, true.B , state === s_wait_resp)// && !alreadyOutFire
   
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB //must be wrong, but unknown how to do
 
   io.ipf := Mux(hit, hitinstrPF, missIPF)
+  io.isFinish := io.out.fire() || io.pf.isPF()
 }
 
 object TLB {
