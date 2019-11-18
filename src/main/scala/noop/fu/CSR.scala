@@ -649,7 +649,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
-      when(exceptionNO =/= instrPageFault.U && exceptionNO =/= loadPageFault.U && exceptionNO =/= storePageFault.U && !raiseIntr){stval := 0.U}
+      when(causeNO =/= instrPageFault.U && causeNO =/= loadPageFault.U && causeNO =/= storePageFault.U){stval := 0.U} // TODO: should not use =/=
       // printf("[*] mstatusNew.spp %x\n", mstatusNew.spp)
       // trapTarget := stvec
     }.otherwise {
@@ -659,7 +659,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
-      when(exceptionNO =/= instrPageFault.U && exceptionNO =/= loadPageFault.U && exceptionNO =/= storePageFault.U && !raiseIntr){mtval := 0.U}
+      when(causeNO =/= instrPageFault.U && causeNO =/= loadPageFault.U && causeNO =/= storePageFault.U){mtval := 0.U} // TODO: should not use =/=
       // trapTarget := mtvec
     }
     // mstatusNew.pie.m := LookupTree(priviledgeMode, List(
