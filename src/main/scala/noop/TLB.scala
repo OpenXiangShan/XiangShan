@@ -317,7 +317,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.pf.addr := req.addr
 
   val hitinstrPF = WireInit(false.B)
-  val hitWB = io.in.valid && io.in.bits.hit.hitWB && !hitinstrPF//hit pte write back check
+  val hitWB = io.in.valid && io.in.bits.hit.hitWB && !hitinstrPF && !io.pf.isPF()//hit pte write back check
   val hitExec = io.in.valid && io.in.bits.hit.hitExec
   val hitLoad = io.in.valid && io.in.bits.hit.hitLoad
   val hitStore = io.in.valid && io.in.bits.hit.hitStore
@@ -469,9 +469,9 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   if(tlbname == "itlb") { io.out.bits.user.map(_:= Cat( instrPF || hitinstrPF, req.user.getOrElse(0.U)(AddrBits*2 + 3, 0))) } 
   else { io.out.bits.user.map(_:=req.user.getOrElse(0.U)) }
   //io.out.valid := io.in.valid /*???*/ && Mux(hit, true.B, state === s_wait_resp)
-  io.out.valid := Mux(hit && !hitWB, true.B, state === s_wait_resp)
+  io.out.valid := Mux(hit && !hitWB, !io.pf.isPF(), state === s_wait_resp)
 
-  if (tlbname == "dtlb"){ io.isFinish := Mux(hit && !hitWB, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
+  if (tlbname == "dtlb"){ io.isFinish := Mux(hit && !hitWB, io.out.fire() || io.pf.isPF(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
   else/*if(tlbname == "itlb")*/ { io.isFinish := Mux(hit && !hitWB, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)) }
   
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB
