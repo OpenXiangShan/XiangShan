@@ -31,11 +31,12 @@ case class NOOPConfig (
 
 object AddressSpace {
   // (start, size)
-  def mmio = List((0x0000000040000000L, 0x0000000010000000L))
+  def mmio = List((0x0000000040000000L, 0x0000000010000000L),
+                  (0x00000000a0000000L, 0x0000000010000000L))
   def dram = (0x0000000080000000L, 0x0000000010000000L)
 
   //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
-  def isMMIO(addr: UInt) = addr(31,28) === "h4".U
+  def isMMIO(addr: UInt) = addr(31,28) === "h4".U || addr(31,28) === "ha".U
 }
 
 class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
@@ -87,10 +88,10 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
-  val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
-  io.imem <> Cache(ifu.io.imem, mmioXbar.io.in(0), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
+  val mmioXbar = Module(new SimpleBusCrossbarNto1(if (HasDcache) 2 else 3))
+  io.imem <> Cache(ifu.io.imem, mmioXbar.io.in.take(1), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4)) // userBits = AddrBits + BrIdxBits
-  io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in.drop(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
   io.prefetchReq.bits := exu.io.dmem.req.bits
   io.prefetchReq.valid := exu.io.dmem.req.valid
   io.mmio <> mmioXbar.io.out
