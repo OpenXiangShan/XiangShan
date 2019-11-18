@@ -8,7 +8,7 @@ import utils._
 import bus.simplebus._
 
 trait HasResetVector {
-  val resetVector = 0x80000000L//TODO: set reset vec
+  val resetVector = 0x40000000L//TODO: set reset vec
 }
 
 class IFU extends NOOPModule with HasResetVector {
