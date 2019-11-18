@@ -31,8 +31,8 @@ extern "C" void uart_getc(uint8_t *ch) {
   static uint32_t lasttime = 0;
   uint32_t now = uptime();
 
-  *ch = 0;
-  if (now - lasttime > 30000) {
+  *ch = -1;
+  if (now - lasttime > 3000) {
     lasttime = now;
     *ch = uart_dequeue();
   }
@@ -47,7 +47,8 @@ static void preset_input() {
   char init_cmd[128] = "2" // choose PAL
     "jjjjjjjkkkkkk" // walk to enemy
     ;
-  char *buf = init_cmd;
+  char busybox_cmd[128] = "ls\necho 123\nls\n";
+  char *buf = busybox_cmd;
   int i;
   for (i = 0; i < strlen(buf); i ++) {
     uart_enqueue(buf[i]);
