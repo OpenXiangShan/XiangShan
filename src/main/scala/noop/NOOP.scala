@@ -45,6 +45,7 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     val dmem = new SimpleBusC
     val mmio = new SimpleBusUC
     val prefetchReq = Decoupled(new SimpleBusReqBundle)
+    val frontend = Flipped(new SimpleBusUC)
   })
 
   val ifu  = Module(new IFU)
@@ -88,10 +89,15 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
+  // Make DMA access through L1 DCache to keep coherence
+  val dmemXbar = Module(new SimpleBusCrossbarNto1(2))
+  dmemXbar.io.in(0) <> exu.io.dmem
+  dmemXbar.io.in(1) <> io.frontend
+
   val mmioXbar = Module(new SimpleBusCrossbarNto1(if (HasDcache) 2 else 3))
   io.imem <> Cache(ifu.io.imem, mmioXbar.io.in.take(1), Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush))(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4)) // userBits = AddrBits + BrIdxBits
-  io.dmem <> Cache(exu.io.dmem, mmioXbar.io.in.drop(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  io.dmem <> Cache(dmemXbar.io.out, mmioXbar.io.in.drop(1), "b00".U, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
   io.prefetchReq.bits := exu.io.dmem.req.bits
   io.prefetchReq.valid := exu.io.dmem.req.valid
   io.mmio <> mmioXbar.io.out
