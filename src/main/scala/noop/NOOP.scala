@@ -96,9 +96,9 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   isu.io.forward <> exu.io.forward
 
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
-  val tlbXbar = Module(new SimpleBusCrossbarNto1Special(3, name = "tlbXbar"))
+  val tlbXbar = Module(new SimpleBusCrossbarNto1(3))
 
-  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, exu = exu.io.tlb, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = 2*AddrBits + 4))
+  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, exu = exu.io.tlb, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = AddrBits*2 + 4))
   ifu.io.ipf := itlb.io.ipf
   io.imem <> Cache(in = itlb.io.out, mmio = mmioXbar.io.in(0), flush = Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush), empty = itlb.io.cacheEmpty)(
     CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4))
