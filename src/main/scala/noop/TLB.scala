@@ -312,11 +312,12 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire())
   val refillFlag = WireInit(0.U(8.W))
 
+  io.pf.loadPF := false.B
+  io.pf.storePF := false.B
+  io.pf.addr := req.addr
+
   val hitinstrPF = WireInit(false.B)
-  val hitloadPF = WireInit(false.B)
-  val hitstorePF = WireInit(false.B)
-  val hitPF = (hitinstrPF || hitloadPF || hitstorePF)
-  val hitWB = io.in.valid && io.in.bits.hit.hitWB && !hitinstrPF//hit pte write back check
+  val hitWB = io.in.valid && io.in.bits.hit.hitWB && !hitinstrPF && !io.pf.isPF()//hit pte write back check
   val hitExec = io.in.valid && io.in.bits.hit.hitExec
   val hitLoad = io.in.valid && io.in.bits.hit.hitLoad
   val hitStore = io.in.valid && io.in.bits.hit.hitStore
@@ -324,7 +325,7 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hitWBStore = RegEnable(Cat(0.U(10.W), hitppn, 0.U(2.W), hitRefillFlag), hitWB)
 
   if (tlbname == "itlb") { hitinstrPF := !hitExec  && hit}
-  if (tlbname == "dtlb") { hitloadPF := !hitLoad && req.isRead() && hit && !isAMO; hitstorePF := !hitStore && req.isWrite() && hit || (!hitLoad && req.isRead() && hit && isAMO)}
+  if (tlbname == "dtlb") { io.pf.loadPF := !hitLoad && req.isRead() && hit && !isAMO; io.pf.storePF := !hitStore && req.isWrite() && hit || (!hitLoad && req.isRead() && hit && isAMO)}
 
   val s_idle :: s_memReadReq :: s_memReadResp :: s_write_pte :: s_wait_resp :: Nil = Enum(5)
   val state = RegInit(s_idle)
@@ -342,9 +343,6 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val ptwFinish = (level === 1.U) && io.mem.resp.fire()
   val memRdata = io.mem.resp.bits.rdata.asTypeOf(pteBundle)
 
-  io.pf.loadPF := false.B
-  io.pf.storePF := false.B
-  io.pf.addr := req.addr
   val instrPF = RegInit(false.B)
   val pfWire = WireInit(false.B)
   if (tlbname == "dtlb") {
@@ -471,9 +469,9 @@ sealed class TlbStage3(implicit val tlbConfig: TLBConfig) extends TlbModule{
   if(tlbname == "itlb") { io.out.bits.user.map(_:= Cat( instrPF || hitinstrPF, req.user.getOrElse(0.U)(AddrBits*2 + 3, 0))) } 
   else { io.out.bits.user.map(_:=req.user.getOrElse(0.U)) }
   //io.out.valid := io.in.valid /*???*/ && Mux(hit, true.B, state === s_wait_resp)
-  io.out.valid := Mux(hit && !hitWB, true.B, state === s_wait_resp)
+  io.out.valid := Mux(hit && !hitWB, !io.pf.isPF(), state === s_wait_resp)
 
-  if (tlbname == "dtlb"){ io.isFinish := Mux(hit && !hitWB, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
+  if (tlbname == "dtlb"){ io.isFinish := Mux(hit && !hitWB, io.out.fire() || io.pf.isPF(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire) || io.pf.isPF()) } 
   else/*if(tlbname == "itlb")*/ { io.isFinish := Mux(hit && !hitWB, io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire)) }
   
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB
