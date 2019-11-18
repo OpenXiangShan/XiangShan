@@ -32,7 +32,7 @@ extern "C" void uart_getc(uint8_t *ch) {
   uint32_t now = uptime();
 
   *ch = -1;
-  if (now - lasttime > 1) {
+  if (now - lasttime > 3000) {
     lasttime = now;
     *ch = uart_dequeue();
   }
