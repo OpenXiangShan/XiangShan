@@ -31,7 +31,7 @@ extern "C" void uart_getc(uint8_t *ch) {
   static uint32_t lasttime = 0;
   uint32_t now = uptime();
 
-  *ch = 0;
+  *ch = -1;
   if (now - lasttime > 30000) {
     lasttime = now;
     *ch = uart_dequeue();
