@@ -20,6 +20,21 @@ $(TOP_V): $(SCALA_FILE)
 	$(MEM_GEN) $(@D)/$(@F).conf >> $@
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 
+deploy: build/top.zip
+
+
+build/top.zip: $(TOP_V)
+	@git log -n 1 >> .__head__
+	@git diff >> .__diff__
+	@sed -i 's/^/\/\// ' .__head__
+	@sed -i 's/^/\/\//' .__diff__
+	@cat .__head__ .__diff__ $< > .__out__
+	@mv .__out__ $<
+	@rm .__head__ .__diff__
+	@zip -r $@ $< $<.conf build/*.anno.json
+
+.PHONY: deploy build/top.zip
+
 verilog: $(TOP_V)
 
 SIM_TOP = NOOPSimTop
