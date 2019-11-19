@@ -146,7 +146,7 @@ sealed trait HasTlbConst extends Sv39Const{
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69
   val dataLen = ppnLen + AddrBits // 44 + 64 = 108
 
-  val debug = true && tlbname == "itlb"
+  val debug = true && tlbname == "dtlb"
 
   def metaBundle = new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -261,13 +261,16 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     tlbExec.io.in.bits := DontCare
     //io.ipf := false.B
     io.out.req <> io.in.req
+    io.out.resp <> io.in.resp
+    io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp() // optimization: lsu-sotre doesn't need cache-store-resp, just need dtlb-sigal
   }.otherwise {
     PipelineConnect(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush)
     io.out.req <> tlbExec.io.out
     io.in.resp <> io.out.resp
+    io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp() // optimization: lsu-sotre doesn't need cache-store-resp, just need dtlb-sigal
     //io.ipf := tlbExec.io.ipf
   }
-  io.out.resp <> io.in.resp
+  //
   //tlbExec.io.in.valid := Mux(vmEnable, io.in.req.valid, false.B)
   //io.out.req.valid := Mux(vmEnable, tlbExec.io.out.valid, io.in.req.valid)
   //io.in.req.ready := Mux(vmEnable, tlbExec.io.in.ready, io.out.req.ready)
