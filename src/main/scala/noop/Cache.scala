@@ -370,27 +370,23 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   metaWriteArb.io.in(1) <> metaRefillWriteBus.req
   io.metaWriteBus.req <> metaWriteArb.io.out
 
-  if (cacheLevel == 2) {
-    when ((state === s_memReadResp) && io.mem.resp.fire() && req.isReadBurst()) {
-      // readBurst request miss
-      io.out.bits.rdata := dataRefill
-      io.out.bits.cmd := Mux(io.mem.resp.bits.isReadLast(), SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
-    }.elsewhen (req.isWriteLast() || req.cmd === SimpleBusCmd.writeBurst) {
-      // writeBurst/writeLast request, no matter hit or miss
-      io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-      io.out.bits.cmd := DontCare
-    }.elsewhen (hitReadBurst && state === s_release) {
-      // readBurst request hit
-      io.out.bits.rdata := dataHitWay
-      io.out.bits.cmd := Mux(respToL1Last, SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
-    }.otherwise {
-      io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-      io.out.bits.cmd := req.cmd
-    }
-  } else {
+  when ((state === s_memReadResp) && io.mem.resp.fire() && req.isReadBurst()) {
+    // readBurst request miss
+    io.out.bits.rdata := dataRefill
+    io.out.bits.cmd := Mux(io.mem.resp.bits.isReadLast(), SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
+  }.elsewhen (req.isWriteLast() || req.cmd === SimpleBusCmd.writeBurst) {
+    // writeBurst/writeLast request, no matter hit or miss
     io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
     io.out.bits.cmd := DontCare
+  }.elsewhen (hitReadBurst && state === s_release) {
+    // readBurst request hit
+    io.out.bits.rdata := dataHitWay
+    io.out.bits.cmd := Mux(respToL1Last, SimpleBusCmd.readLast, SimpleBusCmd.readBurst)
+  }.otherwise {
+    io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
+    io.out.bits.cmd := Mux(req.isRead, SimpleBusCmd.readLast, 0.U)
   }
+
   io.out.bits.user.zip(req.user).map { case (o,i) => o := i }
 
   io.out.valid := io.in.valid && Mux(req.isBurst() && (cacheLevel == 2).B,
