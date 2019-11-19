@@ -71,6 +71,13 @@ class IFU extends NOOPModule with HasResetVector {
     // printf("[IF1] pc=%x\n", pc)
   }
 
+  Debug(){
+    when(pcUpdate) {
+      printf("[IFUPC] pc:%x pcUpdate:%d npc:%x RedValid:%d RedTarget:%x LJL:%d LJTarget:%x LJ:%d snpc:%x bpValid:%d pnpn:%x \n",pc, pcUpdate, npc, io.redirect.valid,io.redirect.target,lateJumpLatch,lateJumpTarget,lateJump,snpc,bp1.io.out.valid,pnpc)
+      //printf(p"[IFUIN] redirect: ${io.redirect} \n")
+    }
+  }
+
   io.flushVec := Mux(io.redirect.valid, "b1111".U, 0.U)
   io.bpFlush := false.B
 
