@@ -166,6 +166,7 @@ class CSRIO extends FunctionUnitIO {
   val intrNO = Output(UInt(XLEN.W))
   val imemMMU = Flipped(new MMUIO)
   val dmemMMU = Flipped(new MMUIO)
+  val wenFix = Output(Bool())
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
@@ -549,6 +550,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   val raiseException = raiseExceptionVec.orR
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  io.wenFix := raiseException
 
   val causeNO = (raiseIntr << (XLEN-1)) | Mux(raiseIntr, intrNO, exceptionNO)
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
@@ -561,7 +563,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
   Debug(){
     when(raiseExceptionIntr){
-      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, io.cfIn.exceptionVec.asUInt)
+      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
     }
     when(io.redirect.valid){
       printf("[CSR] redirect to %x\n", io.redirect.target)
@@ -646,7 +649,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
-      when(exceptionNO =/= instrPageFault.U && exceptionNO =/= loadPageFault.U && exceptionNO =/= storePageFault.U && !raiseIntr){stval := 0.U}
+      when(causeNO =/= instrPageFault.U && causeNO =/= loadPageFault.U && causeNO =/= storePageFault.U){stval := 0.U} // TODO: should not use =/=
       // printf("[*] mstatusNew.spp %x\n", mstatusNew.spp)
       // trapTarget := stvec
     }.otherwise {
@@ -656,7 +659,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
-      when(exceptionNO =/= instrPageFault.U && exceptionNO =/= loadPageFault.U && exceptionNO =/= storePageFault.U && !raiseIntr){mtval := 0.U}
+      when(causeNO =/= instrPageFault.U && causeNO =/= loadPageFault.U && causeNO =/= storePageFault.U){mtval := 0.U} // TODO: should not use =/=
       // trapTarget := mtvec
     }
     // mstatusNew.pie.m := LookupTree(priviledgeMode, List(

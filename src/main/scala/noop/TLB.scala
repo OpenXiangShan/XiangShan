@@ -367,6 +367,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hitFlag = hitMeta.flag.asTypeOf(flagBundle)
   val hitMask = hitMeta.mask
   // hit write back pte.flag
+  val hitinstrPF = WireInit(false.B)
   val hitWB = hit && (!hitFlag.a || !hitFlag.d && req.isWrite()) && !hitinstrPF && !io.pf.isPF()
   val hitRefillFlag = Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | hitFlag.asUInt
   val hitWBStore = RegEnable(Cat(0.U(10.W), hitData.ppn, 0.U(2.W), hitRefillFlag), hitWB)
@@ -382,7 +383,10 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     BoringUtils.addSink(isAMO, "ISAMO")
   }
 
-  val hitinstrPF = WireInit(false.B)
+  io.pf.loadPF := false.B
+  io.pf.storePF := false.B
+  io.pf.addr := req.addr
+
   if (tlbname == "itlb") { hitinstrPF := !hitExec  && hit}
   if (tlbname == "dtlb") { 
     pf.loadPF := !hitLoad && req.isRead() && hit && !isAMO
