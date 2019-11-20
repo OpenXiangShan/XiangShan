@@ -14,7 +14,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val flush = Input(Bool())
     val dmem = new SimpleBusUC
     val forward = new ForwardIO
-    val tlb = new TLBExuIO
     val memMMU = Flipped(new MemMMUIO)
   })
 
@@ -54,23 +53,12 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
 
   csr.io.imemMMU <> io.memMMU.imem
   csr.io.dmemMMU <> io.memMMU.dmem
-/*
-  csr.io.dmemMMU.loadPF := false.B
-  csr.io.dmemMMU.storePF := false.B
-  csr.io.dmemMMU.addr := 0.U
-  csr.io.imemMMU.loadPF := false.B
-  csr.io.imemMMU.storePF := false.B
-  csr.io.imemMMU.addr := 0.U
-*/
+
   val mou = Module(new MOU)
   // mou does not write register
   mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
   mou.io.cfIn := io.in.bits.cf
   mou.io.out.ready := true.B
-
-  //tlb: tlb is implemented outside - added by lemover-zhangzifei
-  io.tlb.access(valid = fuValids(FuType.tlb), src1 = src1, src2 = src2, func = fuOpType, satp = csr.io.satp) //func no use here
-  val tlbRedirect = fuTlb(cf = io.in.bits.cf, valid = fuValids(FuType.tlb))
   
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
@@ -83,11 +71,10 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.decode.cf.instr := io.in.bits.cf.instr
   io.out.bits.decode.cf.redirect <>
     Mux(mou.io.redirect.valid, mou.io.redirect,
-      Mux(csr.io.redirect.valid, csr.io.redirect, 
-        Mux(alu.io.redirect.valid, alu.io.redirect, tlbRedirect))) //add tlb
+      Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect))
   Debug(){
-    when(mou.io.redirect.valid || csr.io.redirect.valid || alu.io.redirect.valid || tlbRedirect.valid){
-      printf("[REDIRECT] mou %x csr %x alu %x tlb %x", mou.io.redirect.valid, csr.io.redirect.valid, alu.io.redirect.valid, tlbRedirect.valid)
+    when(mou.io.redirect.valid || csr.io.redirect.valid || alu.io.redirect.valid){
+      printf("[REDIRECT] mou %x csr %x alu %x", mou.io.redirect.valid, csr.io.redirect.valid, alu.io.redirect.valid)
     }
   }
 
@@ -102,7 +89,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.commits(FuType.csr) := csrOut
   io.out.bits.commits(FuType.mdu) := mduOut
   io.out.bits.commits(FuType.mou) := 0.U
-  io.out.bits.commits(FuType.tlb) := 0.U
 
   io.in.ready := !io.in.valid || io.out.fire()
 

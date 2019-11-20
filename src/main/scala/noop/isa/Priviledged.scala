@@ -15,7 +15,7 @@ object Priviledged extends HasInstrType {
     ECALL          -> List(InstrI, FuType.csr, CSROpType.jmp),
     MRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
     SRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
-    SFANCE_VMA     -> List(InstrR, FuType.tlb, TLBOpType.vma),
+    SFANCE_VMA     -> List(InstrR, FuType.mou, MOUOpType.sfence_vma),
     FENCE          -> List(InstrS, FuType.alu, ALUOpType.add), // nop    InstrS -> !wen
     WFI            -> List(InstrI, FuType.alu, ALUOpType.add) // nop
     // FENCE          -> List(InstrB, FuType.mou, MOUOpType.fencei)

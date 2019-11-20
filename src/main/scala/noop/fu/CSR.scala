@@ -166,7 +166,6 @@ class CSRIO extends FunctionUnitIO {
   val intrNO = Output(UInt(XLEN.W))
   val imemMMU = Flipped(new MMUIO)
   val dmemMMU = Flipped(new MMUIO)
-  val satp = Output(UInt(XLEN.W))
 }
 
 class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
@@ -306,12 +305,12 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val sipMask  = "h222".U & mideleg
   //val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U)
   val satp = RegInit(UInt(XLEN.W), 0.U)
-  io.satp := satp
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
+  BoringUtils.addSource(satp, "CSRSATP")
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))

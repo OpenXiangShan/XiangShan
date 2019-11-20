@@ -63,10 +63,10 @@ class BPU1 extends NOOPModule {
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
   // flush BTB when executing fence.i
   val flushBTB = WireInit(false.B)
-  val changeProcess = WireInit(false.B)
+  val flushTLB = WireInit(false.B)
   BoringUtils.addSink(flushBTB, "MOUFlushICache")
-  BoringUtils.addSink(changeProcess, "TLBSFENCEVMA")
-  btb.reset := reset.asBool || (flushBTB || changeProcess)
+  BoringUtils.addSink(flushTLB, "MOUFlushTLB")
+  btb.reset := reset.asBool || (flushBTB || flushTLB)
 
   btb.io.r.req.valid := io.in.pc.valid
   btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
