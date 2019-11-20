@@ -564,7 +564,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
   Debug(){
     when(raiseExceptionIntr){
-      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, io.cfIn.exceptionVec.asUInt)
+      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
     }
     when(io.redirect.valid){
       printf("[CSR] redirect to %x\n", io.redirect.target)

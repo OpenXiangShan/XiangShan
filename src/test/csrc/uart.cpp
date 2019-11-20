@@ -21,7 +21,7 @@ static int uart_dequeue(void) {
     f = (f + 1) % QUEUE_SIZE;
   } else {
     // generate a random key every 1s for pal
-    k = "uiojkl"[rand()% 6];
+    k = -1;//"uiojkl"[rand()% 6];
   }
   return k;
 }
@@ -32,10 +32,10 @@ extern "C" void uart_getc(uint8_t *ch) {
   uint32_t now = uptime();
 
   *ch = -1;
-  if (now - lasttime > 3000) {
-    lasttime = now;
+  // if (now - lasttime > 3000) {
+    // lasttime = now;
     *ch = uart_dequeue();
-  }
+  // }
 }
 
 void uart_putc(char c) {

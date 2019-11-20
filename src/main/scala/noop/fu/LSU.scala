@@ -136,6 +136,14 @@ class LSU extends NOOPModule {
 
     val scInvalid = !(src1 === lrAddr) && scReq
 
+    // PF signal from TLB
+    val dtlbFinish = WireInit(false.B)
+    val dtlbPF = WireInit(false.B)
+    val dtlbEnable = WireInit(false.B)
+    BoringUtils.addSink(dtlbFinish, "DTLBFINISH")
+    BoringUtils.addSink(dtlbPF, "DTLBPF")
+    BoringUtils.addSink(dtlbEnable, "DTLBENABLE")
+
     // LSU control FSM state
     val s_idle :: s_load :: s_lr :: s_sc :: s_amo_l :: s_amo_a :: s_amo_s :: Nil = Enum(7)
 
@@ -291,6 +299,11 @@ class LSU extends NOOPModule {
           Debug(){printf("[SC] \n")}
         }
       }
+    }
+    when(dtlbPF){
+      state := s_idle
+      io.out.valid := true.B
+      io.in.ready := true.B
     }
 
     // controled by FSM 
