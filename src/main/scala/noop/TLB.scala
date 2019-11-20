@@ -146,7 +146,7 @@ sealed trait HasTlbConst extends Sv39Const{
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69
   val dataLen = ppnLen + AddrBits // 44 + 64 = 108
 
-  val debug = true && tlbname == "dtlb"
+  val debug = true && tlbname == "itlb"
 
   def metaBundle = new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -177,6 +177,8 @@ class TLBMeta(implicit val tlbConfig: TLBConfig) extends TlbModule { //TODO: ano
       val mask = Input(UInt(maskLen.W))
       val flag = Input(UInt(flagLen.W))
     }
+
+    val ready = Output(Bool())
   })
 
   val metas = Reg(Vec(NTLB, UInt(metaLen.W)))
@@ -202,6 +204,7 @@ class TLBMeta(implicit val tlbConfig: TLBConfig) extends TlbModule { //TODO: ano
 
   when (wen) { metas(dest) := data }
 
+  io.ready := !resetState
   def rready() = !resetState
   def wready() = !resetState
 }
@@ -297,7 +300,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
       io.in.resp.valid := true.B
       io.in.resp.bits.rdata := 0.U
       io.in.resp.bits.cmd := SimpleBusCmd.readLast
-      io.in.resp.bits.user.map(_ := io.in.req.bits.user.getOrElse(0.U))
+      io.in.resp.bits.user.map(_ := tlbExec.io.in.bits.user.getOrElse(0.U))
       io.ipf := tlbExec.io.ipf
     }
   }
@@ -543,7 +546,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr, hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr, missMaskStore))
   io.out.valid := io.in.valid && Mux(hit && !hitWB, true.B , state === s_wait_resp)// && !alreadyOutFire
   
-  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB //maybe be optimized
+  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && metasTLB.io.ready//maybe be optimized
 
   io.ipf := Mux(hit, hitinstrPF, missIPF)
   io.isFinish := io.out.fire() || io.pf.isPF()

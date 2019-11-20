@@ -39,7 +39,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = true && cacheName == "dcache"
+  val debug = true //&& cacheName == "icache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -369,8 +369,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   Debug() {
     if(debug) {
     when(true.B) {
-      printf("%d: [" + cacheName + " S3]: out.valid:%d rdata:%x cmd:%d user:%x \n", 
-      GTimer(), io.out.valid, io.out.bits.rdata, io.out.bits.cmd, io.out.bits.user.getOrElse(0.U))
+      when(io.in.valid) { printf("%d: [" + cacheName + " S3]: out.valid:%d rdata:%x cmd:%d user:%x \n", 
+      GTimer(), io.out.valid, io.out.bits.rdata, io.out.bits.cmd, io.out.bits.user.getOrElse(0.U)) }
       //printf("%d: [" + cacheName + " S3]: DHW: (%d, %d), data:%x MHW:(%d, %d)\n", 
       //GTimer(), dataHitWriteBus.req.valid, dataHitWriteBus.req.ready, dataHitWriteBus.req.bits.data.asUInt, metaHitWriteBus.req.valid, metaHitWriteBus.req.ready)
       //printf("%d: [" + cacheName + " S3]: useFD:%d isFD:%d FD:%x DreadArray:%x dataRead:%x inwaymask:%x FDwaymask:%x \n", 
