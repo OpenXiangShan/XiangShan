@@ -367,7 +367,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hitFlag = hitMeta.flag.asTypeOf(flagBundle)
   val hitMask = hitMeta.mask
   // hit write back pte.flag
-  val hitWB = hit && (!hitFlag.a || !hitFlag.d && req.isWrite())
+  val hitWB = hit && (!hitFlag.a || !hitFlag.d && req.isWrite()) && !hitinstrPF && !io.pf.isPF()
   val hitRefillFlag = Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | hitFlag.asUInt
   val hitWBStore = RegEnable(Cat(0.U(10.W), hitData.ppn, 0.U(2.W), hitRefillFlag), hitWB)
 
@@ -441,7 +441,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
         when (isFlush) {
           state := s_idle
           needFlush := false.B
-        }.elsewhen (!(missflag.r || missflag.x)/*!missflag.r && !missflag.x && !missflag.w*/ && (level===3.U || level===2.U)) {
+        }.elsewhen (!(missflag.r || missflag.x) && (level===3.U || level===2.U)) {
           when(!missflag.v || (!missflag.r && missflag.w)) { //TODO: fix needflush
             if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
             if(tlbname == "itlb") { missIPF := true.B }
@@ -532,13 +532,12 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   // io
   io.out.bits := req
   io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr, hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr, missMaskStore))
-  io.out.valid := io.in.valid && Mux(hit && !hitWB, true.B , state === s_wait_resp)// && !alreadyOutFire
+  io.out.valid := io.in.valid && Mux(hit && !hitWB, !io.pf.isPF() , state === s_wait_resp)// && !alreadyOutFire
   
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && metasTLB.io.ready//maybe be optimized
 
   io.ipf := Mux(hit, hitinstrPF, missIPF)
   io.isFinish := io.out.fire() || io.pf.isPF()
-
 
   Debug() {
     if (debug) {
