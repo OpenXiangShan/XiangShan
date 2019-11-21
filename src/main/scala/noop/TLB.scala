@@ -315,7 +315,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
       printf("[TLB-"  + tlbname+ "]: InReq(%d, %d) InResp(%d, %d) OutReq(%d, %d) OutResp(%d, %d) vmEnable:%d mode:%d\n", io.in.req.valid, io.in.req.ready, io.in.resp.valid, io.in.resp.ready, io.out.req.valid, io.out.req.ready, io.out.resp.valid, io.out.resp.ready, vmEnable, io.csrMMU.priviledgeMode)
       printf("[TLB-"  + tlbname+ "]: InReq: addr:%x cmd:%d wdata:%x OutReq: addr:%x cmd:%x wdata:%x\n", io.in.req.bits.addr, io.in.req.bits.cmd, io.in.req.bits.wdata, io.out.req.bits.addr, io.out.req.bits.cmd, io.out.req.bits.wdata)
       printf("[TLB-"  + tlbname+ "]: OutResp: rdata:%x cmd:%x Inresp: rdata:%x cmd:%x\n", io.out.resp.bits.rdata, io.out.resp.bits.cmd, io.in.resp.bits.rdata, io.in.resp.bits.cmd)
-      printf("[TLB-"  + tlbname+ "]: satp:%x flush:%d cacheEmpty:%d instrPF:%d loadPF:%d storePF:%d \n", satp, io.flush, io.cacheEmpty, io.ipf, io.csrMMU.loadPF, io.csrMMU.storePF)
+      //printf("[TLB-"  + tlbname+ "]: satp:%x flush:%d cacheEmpty:%d instrPF:%d loadPF:%d storePF:%d \n", satp, io.flush, io.cacheEmpty, io.ipf, io.csrMMU.loadPF, io.csrMMU.storePF)
     }
   }  
 
@@ -344,9 +344,9 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val flushTLB = WireInit(false.B)
   BoringUtils.addSink(flushTLB, "MOUFlushTLB")
   metasTLB.reset := reset.asBool || flushTLB
-  Debug(false) {
-    when(flushTLB) {
-      printf("%d sfence_vma\n", GTimer())
+  Debug() {
+    when(flushTLB && GTimer() > 77437080.U) {
+      printf("%d sfence_vma req.pc:%x valid:%d\n", GTimer(), io.in.bits.addr, io.in.valid)
     }
   }
 
@@ -555,13 +555,13 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     if (debug) {
       printf("[TLBExec-"  + tlbname+ "]: Timer:%d---------\n", GTimer())
       printf("[TLBExec-"  + tlbname+ "]: In(%d, %d) Out(%d, %d) InAddr:%x OutAddr:%x cmd:%d \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, req.addr, io.out.bits.addr, req.cmd)
-      printf("[TLBExec-"  + tlbname+ "]: isAMO:%d io.Flush:%d FlushTLB:%d needFlush:%d alreadyOutFire:%d isFinish:%d\n",isAMO, io.flush, flushTLB, needFlush, alreadyOutFire, io.isFinish)
-      printf("[TLBExec-"  + tlbname+ "]: hit:%d hitWB:%d hitVPN:%x hitFlag:%x hitPPN:%x hitRefillFlag:%x hitWBStore:%x hitCheck:%d hitExec:%d hitLoad:%d hitStore:%d\n", hit, hitWB, hitMeta.vpn, hitFlag.asUInt, hitData.ppn, hitRefillFlag, hitWBStore, hitCheck, hitExec, hitLoad, hitStore)
-      printf("[TLBExec-"  + tlbname+ "]: miss:%d state:%d level:%d raddr:%x memRdata:%x missMask:%x missRefillFlag:%x missMetaRefill:%d\n", miss, state, level, raddr, memRdata.asUInt, missMask, missRefillFlag, missMetaRefill)
-      printf("[TLBExec-"  + tlbname+ "]: meta/data: (0)%x|%b|%x (1)%x|%b|%x (2)%x|%b|%x (3)%x|%b|%x rread:%d\n", metas(0).asTypeOf(metaBundle).vpn, metas(0).asTypeOf(metaBundle).flag, datas(0).asTypeOf(dataBundle).ppn, metas(1).asTypeOf(metaBundle).vpn, metas(1).asTypeOf(metaBundle).flag, datas(1).asTypeOf(dataBundle).ppn, metas(2).asTypeOf(metaBundle).vpn, metas(2).asTypeOf(metaBundle).flag, datas(2).asTypeOf(dataBundle).ppn, metas(3).asTypeOf(metaBundle).vpn, metas(3).asTypeOf(metaBundle).flag, datas(3).asTypeOf(dataBundle).ppn, metasTLB.io.ready)
-      printf("[TLBExec-"  + tlbname+ "]: meta: wen:%d dest:%x vpn:%x asid:%x mask:%x flag:%x\n", metasTLB.io.write.wen, metasTLB.io.write.dest, metasTLB.io.write.vpn, metasTLB.io.write.asid, metasTLB.io.write.mask, metasTLB.io.write.flag)
-      printf("[TLBExec-"  + tlbname+ "]: data: wen:%d dest:%x ppn:%x pteaddr:%x\n", datasTLB.io.write.wen, datasTLB.io.write.dest, datasTLB.io.write.ppn, datasTLB.io.write.pteaddr)
-      printf("[TLBExec-"  + tlbname+ "]: MemReq(%d, %d) MemResp(%d, %d) addr:%x cmd:%d rdata:%x cmd:%d\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.req.bits.cmd, io.mem.resp.bits.rdata, io.mem.resp.bits.cmd)
+      //printf("[TLBExec-"  + tlbname+ "]: isAMO:%d io.Flush:%d FlushTLB:%d needFlush:%d alreadyOutFire:%d isFinish:%d\n",isAMO, io.flush, flushTLB, needFlush, alreadyOutFire, io.isFinish)
+      //printf("[TLBExec-"  + tlbname+ "]: hit:%d hitWB:%d hitVPN:%x hitFlag:%x hitPPN:%x hitRefillFlag:%x hitWBStore:%x hitCheck:%d hitExec:%d hitLoad:%d hitStore:%d\n", hit, hitWB, hitMeta.vpn, hitFlag.asUInt, hitData.ppn, hitRefillFlag, hitWBStore, hitCheck, hitExec, hitLoad, hitStore)
+      //printf("[TLBExec-"  + tlbname+ "]: miss:%d state:%d level:%d raddr:%x memRdata:%x missMask:%x missRefillFlag:%x missMetaRefill:%d\n", miss, state, level, raddr, memRdata.asUInt, missMask, missRefillFlag, missMetaRefill)
+      //printf("[TLBExec-"  + tlbname+ "]: meta/data: (0)%x|%b|%x (1)%x|%b|%x (2)%x|%b|%x (3)%x|%b|%x rread:%d\n", metas(0).asTypeOf(metaBundle).vpn, metas(0).asTypeOf(metaBundle).flag, datas(0).asTypeOf(dataBundle).ppn, metas(1).asTypeOf(metaBundle).vpn, metas(1).asTypeOf(metaBundle).flag, datas(1).asTypeOf(dataBundle).ppn, metas(2).asTypeOf(metaBundle).vpn, metas(2).asTypeOf(metaBundle).flag, datas(2).asTypeOf(dataBundle).ppn, metas(3).asTypeOf(metaBundle).vpn, metas(3).asTypeOf(metaBundle).flag, datas(3).asTypeOf(dataBundle).ppn, metasTLB.io.ready)
+      //printf("[TLBExec-"  + tlbname+ "]: meta: wen:%d dest:%x vpn:%x asid:%x mask:%x flag:%x\n", metasTLB.io.write.wen, metasTLB.io.write.dest, metasTLB.io.write.vpn, metasTLB.io.write.asid, metasTLB.io.write.mask, metasTLB.io.write.flag)
+      //printf("[TLBExec-"  + tlbname+ "]: data: wen:%d dest:%x ppn:%x pteaddr:%x\n", datasTLB.io.write.wen, datasTLB.io.write.dest, datasTLB.io.write.ppn, datasTLB.io.write.pteaddr)
+      //printf("[TLBExec-"  + tlbname+ "]: MemReq(%d, %d) MemResp(%d, %d) addr:%x cmd:%d rdata:%x cmd:%d\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.req.bits.cmd, io.mem.resp.bits.rdata, io.mem.resp.bits.cmd)
       printf("[TLBExec-"  + tlbname+ "]: io.ipf:%d hitinstrPF:%d missIPF:%d loadPF:%d storePF:%d\n", io.ipf, hitinstrPF, missIPF, io.pf.loadPF, io.pf.storePF)
     }
   }
