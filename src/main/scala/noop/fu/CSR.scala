@@ -755,16 +755,16 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
       perfCntList.toSeq.sortBy(_._2._1).map { case (name, (addr, boringId)) =>
         printf("%d <- " + name + "\n", readWithScala(addr)) }
     }
+
+    // for differential testing
+    BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
+    BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
+    BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus")
+    BoringUtils.addSource(RegNext(mepc), "difftestMepc")
+    BoringUtils.addSource(RegNext(sepc), "difftestSepc")
+    BoringUtils.addSource(RegNext(mcause), "difftestMcause")
+    BoringUtils.addSource(RegNext(scause), "difftestScause")
   } else {
     BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
-
-  // for differential testing  
-  BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
-  BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
-  BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus") 
-  BoringUtils.addSource(RegNext(mepc), "difftestMepc")
-  BoringUtils.addSource(RegNext(sepc), "difftestSepc")
-  BoringUtils.addSource(RegNext(mcause), "difftestMcause")
-  BoringUtils.addSource(RegNext(scause), "difftestScause")
 }
