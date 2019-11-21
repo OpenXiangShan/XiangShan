@@ -261,20 +261,28 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
   // VM enable && io
   val vmEnable = satp.asTypeOf(satpBundle).mode === 8.U && (io.csrMMU.priviledgeMode < ModeM)
-  when(!vmEnable) {
-    tlbExec.io.in.valid := false.B
-    tlbExec.io.out.ready := true.B // let existed request go out
-    tlbExec.io.in.bits := DontCare
-    io.out.req <> io.in.req
-    io.out.resp <> io.in.resp
-    io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp() // optimization: lsu-store doesn't need cache-store-resp, just need dtlb-signal
-  }.otherwise {
-    PipelineConnect(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush)
-    io.out.req <> tlbExec.io.out
-    io.in.resp <> io.out.resp
-    io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp() // optimization: lsu-store doesn't need cache-store-resp, just need dtlb-signal
+
+  def PipelineConnectTLB[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool, vmEnable: Bool) = {
+    val valid = RegInit(false.B)
+    when (rightOutFire) { valid := false.B }
+    when (left.valid && right.ready && vmEnable) { valid := true.B }
+    when (isFlush) { valid := false.B }
+
+    left.ready := right.ready
+    right.bits <> RegEnable(left.bits, left.valid && right.ready)
+    right.valid := valid //&& !isFlush
   }
 
+  PipelineConnectTLB(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush, vmEnable)
+  when(!vmEnable) {
+    tlbExec.io.out.ready := true.B // let existed request go out
+    io.out.req <> io.in.req
+    io.out.resp <> io.in.resp
+  }.otherwise {
+    io.out.req <> tlbExec.io.out
+    io.in.resp <> io.out.resp
+  }
+  io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp() // optimization: lsu-store doesn't need cache-store-resp, just need dtlb-signal
   // lsu need dtlb signals
   if(tlbname == "dtlb") {
     val alreadyOutFinish = RegEnable(true.B, init=false.B, tlbExec.io.out.valid && !tlbExec.io.out.ready)
@@ -550,10 +558,10 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
       printf("[TLBExec-"  + tlbname+ "]: isAMO:%d io.Flush:%d FlushTLB:%d needFlush:%d alreadyOutFire:%d isFinish:%d\n",isAMO, io.flush, flushTLB, needFlush, alreadyOutFire, io.isFinish)
       printf("[TLBExec-"  + tlbname+ "]: hit:%d hitWB:%d hitVPN:%x hitFlag:%x hitPPN:%x hitRefillFlag:%x hitWBStore:%x hitCheck:%d hitExec:%d hitLoad:%d hitStore:%d\n", hit, hitWB, hitMeta.vpn, hitFlag.asUInt, hitData.ppn, hitRefillFlag, hitWBStore, hitCheck, hitExec, hitLoad, hitStore)
       printf("[TLBExec-"  + tlbname+ "]: miss:%d state:%d level:%d raddr:%x memRdata:%x missMask:%x missRefillFlag:%x missMetaRefill:%d\n", miss, state, level, raddr, memRdata.asUInt, missMask, missRefillFlag, missMetaRefill)
-      printf("[TLBExec-"  + tlbname+ "]: meta/data: (0)%x|%b|%x (1)%x|%b|%x (2)%x|%b|%x (3)%x|%b|%x\n", metas(0).asTypeOf(metaBundle).vpn, metas(0).asTypeOf(metaBundle).flag, datas(0).asTypeOf(dataBundle).ppn, metas(1).asTypeOf(metaBundle).vpn, metas(1).asTypeOf(metaBundle).flag, datas(1).asTypeOf(dataBundle).ppn, metas(2).asTypeOf(metaBundle).vpn, metas(2).asTypeOf(metaBundle).flag, datas(2).asTypeOf(dataBundle).ppn, metas(3).asTypeOf(metaBundle).vpn, metas(3).asTypeOf(metaBundle).flag, datas(3).asTypeOf(dataBundle).ppn)
+      printf("[TLBExec-"  + tlbname+ "]: meta/data: (0)%x|%b|%x (1)%x|%b|%x (2)%x|%b|%x (3)%x|%b|%x rread:%d\n", metas(0).asTypeOf(metaBundle).vpn, metas(0).asTypeOf(metaBundle).flag, datas(0).asTypeOf(dataBundle).ppn, metas(1).asTypeOf(metaBundle).vpn, metas(1).asTypeOf(metaBundle).flag, datas(1).asTypeOf(dataBundle).ppn, metas(2).asTypeOf(metaBundle).vpn, metas(2).asTypeOf(metaBundle).flag, datas(2).asTypeOf(dataBundle).ppn, metas(3).asTypeOf(metaBundle).vpn, metas(3).asTypeOf(metaBundle).flag, datas(3).asTypeOf(dataBundle).ppn, metasTLB.io.ready)
       printf("[TLBExec-"  + tlbname+ "]: meta: wen:%d dest:%x vpn:%x asid:%x mask:%x flag:%x\n", metasTLB.io.write.wen, metasTLB.io.write.dest, metasTLB.io.write.vpn, metasTLB.io.write.asid, metasTLB.io.write.mask, metasTLB.io.write.flag)
       printf("[TLBExec-"  + tlbname+ "]: data: wen:%d dest:%x ppn:%x pteaddr:%x\n", datasTLB.io.write.wen, datasTLB.io.write.dest, datasTLB.io.write.ppn, datasTLB.io.write.pteaddr)
-      printf("[TLBExec-"  + tlbname+ "]: MemReq(%d, %d) MemResp(%d, %d) addr:%x cmd:%d rdata:%x\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.req.bits.cmd, io.mem.resp.bits.rdata)
+      printf("[TLBExec-"  + tlbname+ "]: MemReq(%d, %d) MemResp(%d, %d) addr:%x cmd:%d rdata:%x cmd:%d\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.req.bits.cmd, io.mem.resp.bits.rdata, io.mem.resp.bits.cmd)
       printf("[TLBExec-"  + tlbname+ "]: io.ipf:%d hitinstrPF:%d missIPF:%d loadPF:%d storePF:%d\n", io.ipf, hitinstrPF, missIPF, io.pf.loadPF, io.pf.storePF)
     }
   }

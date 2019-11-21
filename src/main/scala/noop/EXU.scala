@@ -39,6 +39,10 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
+  
+  Debug() {
+    printf("[EXU-flush] %d flush:%d inValid:%d lsuValid:%d\n", GTimer(), io.flush, io.in.valid, lsu.io.in.valid)
+  }
 
   val mdu = Module(new MDU)
   val mduOut = mdu.access(valid = fuValids(FuType.mdu), src1 = src1, src2 = src2, func = fuOpType)
