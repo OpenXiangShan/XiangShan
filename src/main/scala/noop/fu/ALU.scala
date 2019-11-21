@@ -113,10 +113,10 @@ class ALU extends NOOPModule {
   // }
 
   Debug(){
-    //when(valid && isBru){
+    when(valid && isBru){
       printf("[BRU] tgt %x, valid:%d, npc: %x, pdwrong: %x\n", io.redirect.target, io.redirect.valid, io.cfIn.pnpc, predictWrong)
       printf("[BRU] taken:%d addrRes:%x src1:%x src2:%x func:%x\n", taken, adderRes, src1, src2, func) 
-    //}
+    }
   }
 
   Debug(false){
@@ -146,12 +146,6 @@ class ALU extends NOOPModule {
   bpuUpdateReq.fuOpType := func
   bpuUpdateReq.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   bpuUpdateReq.isRVC := isRVC
-
-  //Debug() {
-    when (valid && isBru && target=== "hffffffff803542d4".U) {
-      printf("[ALU-BPU] %d pc:%x target:%x valid:%d fuOptype:%x isMissPredict:%x\n", GTimer(), io.cfIn.pc, target, valid&&isBru, func, predictWrong)
-    }
-  //}
 
   BoringUtils.addSource(RegNext(bpuUpdateReq), "bpuUpdateReq")
 

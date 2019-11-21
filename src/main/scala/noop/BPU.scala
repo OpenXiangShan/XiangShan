@@ -68,7 +68,7 @@ class BPU1 extends NOOPModule {
   BoringUtils.addSink(flushTLB, "MOUFlushTLB")
   btb.reset := reset.asBool || (flushBTB || flushTLB)
 
-  Debug() {
+  Debug(false) {
     when (reset.asBool || (flushBTB || flushTLB)) {
       printf("[BPU-RESET] %d bpu-reset flushBTB:%d flushTLB:%d\n", GTimer(), flushBTB, flushTLB)
     }
@@ -77,18 +77,13 @@ class BPU1 extends NOOPModule {
   btb.io.r.req.valid := io.in.pc.valid
   btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
 
-  Debug() {
-    when (btb.io.r.req.valid) {
-      printf("[BTB-read] %d pc:%x setIdx:%x\n", GTimer(), io.in.pc.bits, btbAddr.getIdx(io.in.pc.bits))
-    }
-  }
 
   val btbRead = Wire(btbEntry())
   btbRead := btb.io.r.resp.data(0)
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B) && !(pcLatch(1) && btbRead.brIdx(0)) && btbRead.valid
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.fire(), init = false.B) && !(pcLatch(1) && btbRead.brIdx(0)) && btbRead.valid
   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
   // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
   // -------------------------------------------------
@@ -99,27 +94,12 @@ class BPU1 extends NOOPModule {
   io.lateJump := lateJump
   // val lateJumpLatch = RegNext(lateJump)
   // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
-  Debug(){
+  Debug(false){
     //printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
     when(btbHit){
       printf("[BTBHT1] %d pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", GTimer(), pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
       printf("[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
-      printf(p"[BTBHT3] rasTarget:${rasTarget} pht:${pht} phtTaken:${phtTaken}\n")
-      printf(p"[BTBHT4] io.out:${io.out} btbRead:${btbRead} btbWrite:${btbWrite}\n")
       printf("[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setIdx)
-    }
-
-    when(true.B) {
-      //when(req.btbType === BTBtype.R) {
-      //  printf("[BTBHT5] btbWrite.type is BTBtype.R/RET!!!\n")
-      //}
-      printf(p"[BTBHT5] req:${req} \n")
-      
-      //printf("[BTBHT5] tag: target:%x type:%d brIdx:%d\n", req.actualTarget, req.btbType, Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)))
-    }
-
-    when (true.B) {
-      printf("[BTB-read2] %d btbValid:%x pc:%x tag:%x target:%x brIdx:%x\n", GTimer(), btbRead.valid, io.in.pc.bits, btbRead.tag, btbRead.target, btbRead.brIdx)
     }
   }
   
@@ -172,14 +152,14 @@ class BPU1 extends NOOPModule {
   btb.io.w.req.bits.data := btbWrite
 
   //Debug(true) {
-    when (btb.io.w.req.valid && btbWrite.tag === btbAddr.getTag("hffffffff803541a4".U)) {
-      printf("[BTBWrite] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
-    }
+    //when (btb.io.w.req.valid && btbWrite.tag === btbAddr.getTag("hffffffff803541a4".U)) {
+    //  printf("[BTBWrite] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
+    //}
   //}
 
-  when (GTimer() > 77437484.U) {
-    printf("[BTBWrite-ALL] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
-  }
+  //when (GTimer() > 77437484.U && btb.io.w.req.valid) {
+  //  printf("[BTBWrite-ALL] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
+  //}
 
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
   val reqLatch = RegNext(req)
