@@ -723,10 +723,10 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     "Custom5"     -> (0xb1f, "Custom5"             ),
     "Custom6"     -> (0xb20, "Custom6"             ),
     "Custom7"     -> (0xb21, "Custom7"             ),
-    "Custom8"     -> (0xb22, "Custom8"             )
+    "Custom8"     -> (0xb22, "Custom8"             ),
+    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
   )
-
-  val perfCntCond = List.fill(0x80)(WireInit(false.B))
+	val perfCntCond = List.fill(0x80)(WireInit(false.B))
   (perfCnts zip perfCntCond).map { case (c, e) => { when (e) { c := c + 1.U } } }
 
   BoringUtils.addSource(WireInit(true.B), "perfCntCondMcycle")

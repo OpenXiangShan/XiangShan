@@ -18,6 +18,7 @@ object SimpleBusCmd {
   def writeBurst     = "b0011".U //  write   |   refill
   def writeLast      = "b0111".U //  write   |   refill
   def probe          = "b1000".U //  read    | do nothing
+  def prefetch       = "b0100".U //  read    |   refill
 
   // resp
   def readLast       = "b0110".U
@@ -53,9 +54,11 @@ class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isRead() = !cmd(0) && !cmd(3)
   def isWrite() = cmd(0)
   def isBurst() = cmd(1)
+  def isReadBurst() = cmd === SimpleBusCmd.readBurst
   def isWriteSingle() = cmd === SimpleBusCmd.write
   def isWriteLast() = cmd === SimpleBusCmd.writeLast
   def isProbe() = cmd === SimpleBusCmd.probe
+  def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
 class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
@@ -69,6 +72,7 @@ class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isProbeHit() = cmd === SimpleBusCmd.probeHit
   def isProbeMiss() = cmd === SimpleBusCmd.probeMiss
   def isWriteResp() = cmd === SimpleBusCmd.writeResp
+  def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
 // Uncache
@@ -91,4 +95,6 @@ class SimpleBusUC(val userBits: Int = 0) extends SimpleBusBundle {
 class SimpleBusC(val userBits: Int = 0) extends SimpleBusBundle {
   val mem = new SimpleBusUC(userBits)
   val coh = Flipped(new SimpleBusUC(userBits))
+
+  def memtoAXI4() = this.mem.toAXI4
 }
