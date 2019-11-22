@@ -99,7 +99,7 @@ class ALU extends NOOPModule {
   val isBru = ALUOpType.isBru(func)
   // val pcPlus2 = ALUOpType.pcPlus2(func)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
-  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(AddrBits-1,0)
+  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(VAddrBits-1,0)
   val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
   val isRVC = (io.cfIn.instr(1,0) =/= "b11".U)
   io.redirect.target := Mux(!taken && isBranch, Mux(isRVC, io.cfIn.pc + 2.U, io.cfIn.pc + 4.U), target)

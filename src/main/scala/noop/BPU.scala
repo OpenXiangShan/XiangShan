@@ -7,13 +7,13 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 class TableAddr(val idxBits: Int) extends NOOPBundle {
-  def tagBits = AddrBits - 2 - idxBits
+  def tagBits = VAddrBits - 2 - idxBits
 
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
   val pad = UInt(2.W)//TODO
 
-  def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
+  def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
 }
@@ -29,9 +29,9 @@ object BTBtype {
 
 class BPUUpdateReq extends NOOPBundle {
   val valid = Output(Bool())
-  val pc = Output(UInt(AddrBits.W))
+  val pc = Output(UInt(VAddrBits.W))
   val isMissPredict = Output(Bool())
-  val actualTarget = Output(UInt(AddrBits.W))
+  val actualTarget = Output(UInt(VAddrBits.W))
   val actualTaken = Output(Bool())  // for branch
   val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
@@ -40,7 +40,7 @@ class BPUUpdateReq extends NOOPBundle {
 
 class BPU1 extends NOOPModule {
   val io = IO(new Bundle {
-    val in = new Bundle { val pc = Flipped(Valid((UInt(AddrBits.W)))) }
+    val in = new Bundle { val pc = Flipped(Valid((UInt(VAddrBits.W)))) }
     val out = new RedirectIO
     val flush = Input(Bool())
     val brIdx = Output(UInt(3.W))
@@ -55,7 +55,7 @@ class BPU1 extends NOOPModule {
   def btbEntry() = new Bundle {
     val tag = UInt(btbAddr.tagBits.W)
     val _type = UInt(2.W)
-    val target = UInt(AddrBits.W)
+    val target = UInt(VAddrBits.W)
     val brIdx = UInt(3.W)
     val valid = Bool()
   }
@@ -110,7 +110,7 @@ class BPU1 extends NOOPModule {
   // RAS
 
   val NRras = 16
-  val ras = Mem(NRras, UInt(AddrBits.W))
+  val ras = Mem(NRras, UInt(VAddrBits.W))
   // val raBrIdxs = Mem(NRras, UInt(2.W))
   val sp = Counter(NRras)
   val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)

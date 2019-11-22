@@ -10,28 +10,28 @@ import utils._
 
 trait Sv39Const extends HasNOOPParameter{
   val Level = 3
-  val ppn2Len = 9
-  val ppn1Len = 9
+  val offLen  = 12
   val ppn0Len = 9
+  val ppn1Len = 9
+  val ppn2Len = PAddrBits - offLen - ppn0Len - ppn1Len // 2
   val ppnLen = ppn2Len + ppn1Len + ppn0Len
   val vpn2Len = 9
   val vpn1Len = 9
   val vpn0Len = 9
   val vpnLen = vpn2Len + vpn1Len + vpn0Len
-  val offLen  = 12
   
   val paddrLen = PAddrBits
-  val vaddrLen = AddrBits
+  val vaddrLen = VAddrBits
   val satpLen = XLEN
   val satpModeLen = 4
   val asidLen = 16
   val flagLen = 8
 
   val ptEntryLen = XLEN
-  val ppnResLen = XLEN - ppnLen - satpModeLen - asidLen
-  val vaResLen = 25 // unused
-  val paResLen = 25 // unused 
-  val pteResLen = XLEN -ppnLen - 2 - flagLen
+  val satpResLen = XLEN - ppnLen - satpModeLen - asidLen
+  //val vaResLen = 25 // unused
+  //val paResLen = 25 // unused 
+  val pteResLen = XLEN - ppnLen - 2 - flagLen
 
   def vaBundle = new Bundle {
     val vpn2 = UInt(vpn2Len.W)
@@ -98,7 +98,7 @@ trait Sv39Const extends HasNOOPParameter{
   def satpBundle = new Bundle {
     val mode = UInt(satpModeLen.W)
     val asid = UInt(asidLen.W)
-    val ppnRes = UInt(ppnResLen.W)
+    val res = UInt(satpResLen.W)
     val ppn  = UInt(ppnLen.W)
   }
 
@@ -125,11 +125,11 @@ trait Sv39Const extends HasNOOPParameter{
   }
 
   def maskPaddr(ppn:UInt, vaddr:UInt, mask:UInt) = {
-    MaskData(vaddr, Cat(ppn, 0.U(offLen.W)), Cat("h1ff".U(vpn2Len.W), mask, 0.U(offLen.W)))
+    MaskData(vaddr, Cat(ppn, 0.U(offLen.W)), Cat("h3".U(ppn2Len.W), mask, 0.U(offLen.W)))
   }
 
   def MaskEQ(mask: UInt, pattern: UInt, vpn: UInt) = {
-    (Cat("h1ff".U(vpn2Len.W), mask) & pattern) === (Cat("h1ff".U(vpn2Len.W), mask) & vpn)
+    (Cat("h1ff".U(vpn2Len.W), mask) & pattern) === (Cat("h3".U(vpn2Len.W), mask) & vpn)
   }
 
 }
@@ -147,6 +147,7 @@ sealed trait HasTlbConst extends Sv39Const{
 
   val AddrBits: Int
   val PAddrBits: Int
+  val VAddrBits: Int
   val XLEN: Int
 
   val tlbname = tlbConfig.name
@@ -156,7 +157,7 @@ sealed trait HasTlbConst extends Sv39Const{
   val NTLBBits = log2Up(NTLB)
 
   val maskLen = vpn0Len + vpn1Len  // 18
-  val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69
+  val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69, is asid necessary 
   val dataLen = ppnLen + PAddrBits // 
 
   val debug = true && tlbname == "dtlb"
@@ -556,7 +557,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
   // io
   io.out.bits := req
-  io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr, hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr, missMaskStore))
+  io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr(PAddrBits-1, 0), hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr(PAddrBits-1, 0), missMaskStore))
   io.out.valid := io.in.valid && Mux(hit && !hitWB, !io.pf.isPF() , state === s_wait_resp)// && !alreadyOutFire
   
   io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && metasTLB.io.ready//maybe be optimized

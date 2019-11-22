@@ -21,7 +21,7 @@ case class CacheConfig (
 sealed trait HasCacheConst {
   implicit val cacheConfig: CacheConfig
 
-  val AddrBits: Int
+  val PAddrBits: Int
   val XLEN: Int
 
   val cacheName = cacheConfig.name
@@ -41,7 +41,7 @@ sealed trait HasCacheConst {
   val OffsetBits = log2Up(LineSize)
   val IndexBits = log2Up(Sets)
   val WordIndexBits = log2Up(LineBeats)
-  val TagBits = AddrBits - OffsetBits - IndexBits
+  val TagBits = PAddrBits - OffsetBits - IndexBits
 
   val debug = false
 
@@ -267,8 +267,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   }
 
   // critical word first read
-  val raddr = (if (XLEN == 64) Cat(req.addr(AddrBits-1,3), 0.U(3.W))
-                          else Cat(req.addr(AddrBits-1,2), 0.U(2.W)))
+  val raddr = (if (XLEN == 64) Cat(req.addr(PAddrBits-1,3), 0.U(3.W))
+                          else Cat(req.addr(PAddrBits-1,2), 0.U(2.W)))
   // dirty block addr
   val waddr = Cat(meta.tag, addr.index, 0.U(OffsetBits.W))
   val cmd = Mux(state === s_memReadReq, SimpleBusCmd.readBurst,

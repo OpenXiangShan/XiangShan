@@ -319,9 +319,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Atom LR/SC Control Bits
   val setLr = WireInit(Bool(), false.B)
   val setLrVal = WireInit(Bool(), false.B)
-  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare)
+  val setLrAddr = WireInit(UInt(VAddrBits.W), DontCare) //TODO : need check
   val lr = RegInit(Bool(), false.B)
-  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
+  val lrAddr = RegInit(UInt(VAddrBits.W), 0.U)
   BoringUtils.addSink(setLr, "set_lr")
   BoringUtils.addSink(setLrVal, "set_lr_val")
   BoringUtils.addSink(setLrAddr, "set_lr_addr")
@@ -556,8 +556,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   io.intrNO := Mux(raiseIntr, causeNO, 0.U)
 
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
-  val retTarget = Wire(UInt(AddrBits.W))
-  val trapTarget = Wire(UInt(AddrBits.W))
+  val retTarget = Wire(UInt(VAddrBits.W))
+  val trapTarget = Wire(UInt(VAddrBits.W))
   io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr || resetSatp
   io.redirect.target := Mux(resetSatp, io.cfIn.pnpc, Mux(raiseExceptionIntr, trapTarget, retTarget))
 
