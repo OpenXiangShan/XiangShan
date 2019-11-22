@@ -374,12 +374,12 @@ class LSExecUnit extends NOOPModule {
   switch (state) {
     is (s_idle) { 
       when (dmem.req.fire() && dtlbEnable)  { state := s_wait_tlb  }
-      when (dmem.req.fire() && !dtlbEnable) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+      when (dmem.req.fire() && !dtlbEnable) { state := s_wait_resp } 
       //when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) }
     }
     is (s_wait_tlb) {
       when (dtlbFinish && dtlbPF ) { state := s_idle }
-      when (dtlbFinish && !dtlbPF) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+      when (dtlbFinish && !dtlbPF) { state := s_wait_resp/*Mux(isStore, s_partialLoad, s_wait_resp) */} 
     }
     is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
@@ -401,7 +401,7 @@ class LSExecUnit extends NOOPModule {
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux( dtlbPF, true.B, Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
+  io.out.valid := Mux( dtlbPF, true.B, Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
   io.in.ready := (state === s_idle) || dtlbPF
 
   val rdata = dmem.resp.bits.rdata

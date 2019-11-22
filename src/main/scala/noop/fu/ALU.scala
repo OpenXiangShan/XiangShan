@@ -114,7 +114,7 @@ class ALU extends NOOPModule {
 
   Debug(){
     when(valid && isBru){
-      printf("[BRU] tgt %x, npc: %x, pdwrong: %x\n", io.redirect.target, io.cfIn.pnpc, predictWrong)
+      printf("[BRU] tgt %x, valid:%d, npc: %x, pdwrong: %x\n", io.redirect.target, io.redirect.valid, io.cfIn.pnpc, predictWrong)
       printf("[BRU] taken:%d addrRes:%x src1:%x src2:%x func:%x\n", taken, adderRes, src1, src2, func) 
     }
   }

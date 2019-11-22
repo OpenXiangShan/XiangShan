@@ -39,10 +39,6 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
-  
-  Debug() {
-    printf("[EXU-flush] %d flush:%d inValid:%d lsuValid:%d\n", GTimer(), io.flush, io.in.valid, lsu.io.in.valid)
-  }
 
   val mdu = Module(new MDU)
   val mduOut = mdu.access(valid = fuValids(FuType.mdu), src1 = src1, src2 = src2, func = fuOpType)
@@ -77,9 +73,10 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     Mux(mou.io.redirect.valid, mou.io.redirect,
       Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect))
   Debug(){
-    when(mou.io.redirect.valid || csr.io.redirect.valid || alu.io.redirect.valid){
-      printf("[REDIRECT] mou %x csr %x alu %x", mou.io.redirect.valid, csr.io.redirect.valid, alu.io.redirect.valid)
-    }
+    //when(mou.io.redirect.valid || csr.io.redirect.valid || alu.io.redirect.valid){
+      printf("[REDIRECT] inValid:%d mou %x csr %x alu %x \n", io.in.valid, mou.io.redirect.valid, csr.io.redirect.valid, alu.io.redirect.valid)
+      printf("[REDIRECT] flush: %d mou %x csr %x alu %x\n", io.flush, mou.io.redirect.target, csr.io.redirect.target, alu.io.redirect.target)
+    //}
   }
 
   // FIXME: should handle io.out.ready == false

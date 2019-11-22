@@ -444,7 +444,6 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
 
-
   Debug() {
     if (debug) {
     when(true.B) {

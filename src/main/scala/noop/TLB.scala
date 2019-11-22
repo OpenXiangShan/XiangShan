@@ -146,7 +146,7 @@ sealed trait HasTlbConst extends Sv39Const{
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69
   val dataLen = ppnLen + AddrBits // 44 + 64 = 108
 
-  val debug = true && tlbname == "itlb"
+  val debug = true && tlbname == "dtlb"
 
   def metaBundle = new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -282,7 +282,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     io.out.req <> tlbExec.io.out
     io.in.resp <> io.out.resp
   }
-  io.in.resp.valid := io.out.resp.valid && !io.out.resp.bits.isWriteResp() // optimization: lsu-store doesn't need cache-store-resp, just need dtlb-signal
+  
   // lsu need dtlb signals
   if(tlbname == "dtlb") {
     val alreadyOutFinish = RegEnable(true.B, init=false.B, tlbExec.io.out.valid && !tlbExec.io.out.ready)
@@ -344,9 +344,9 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val flushTLB = WireInit(false.B)
   BoringUtils.addSink(flushTLB, "MOUFlushTLB")
   metasTLB.reset := reset.asBool || flushTLB
-  Debug(false) {
-    when(flushTLB) {
-      printf("%d sfence_vma\n", GTimer())
+  Debug() {
+    when(flushTLB && GTimer() > 77437080.U) {
+      printf("%d sfence_vma req.pc:%x valid:%d\n", GTimer(), io.in.bits.addr, io.in.valid)
     }
   }
 
