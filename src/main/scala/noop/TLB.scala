@@ -8,30 +8,32 @@ import bus.simplebus._
 import bus.axi4._
 import utils._
 
-trait Sv39Const{
-  val vpnLen = 27
-  val ppnLen = 44
+trait Sv39Const extends HasNOOPParameter{
   val Level = 3
-  val ppn2Len = 26
+  val ppn2Len = 9
   val ppn1Len = 9
   val ppn0Len = 9
-  val offLen  = 12
+  val ppnLen = ppn2Len + ppn1Len + ppn0Len
   val vpn2Len = 9
   val vpn1Len = 9
   val vpn0Len = 9
-  val vaResLen= 25
-  val paResLen= 8
-
-  val paddrLen = 64
-  val vaddrLen = 64
-  val satpLen = 64
+  val vpnLen = vpn2Len + vpn1Len + vpn0Len
+  val offLen  = 12
+  
+  val paddrLen = PAddrBits
+  val vaddrLen = AddrBits
+  val satpLen = XLEN
   val satpModeLen = 4
   val asidLen = 16
   val flagLen = 8
-  val ptEntryLen = 64
+
+  val ptEntryLen = XLEN
+  val ppnResLen = XLEN - ppnLen - satpModeLen - asidLen
+  val vaResLen = 25 // unused
+  val paResLen = 25 // unused 
+  val pteResLen = XLEN -ppnLen - 2 - flagLen
 
   def vaBundle = new Bundle {
-    val reserverd = UInt(vaResLen.W)
     val vpn2 = UInt(vpn2Len.W)
     val vpn1 = UInt(vpn1Len.W)
     val vpn0 = UInt(vpn0Len.W)
@@ -39,9 +41,13 @@ trait Sv39Const{
   }
 
   def vaBundle2 = new Bundle {
-    val reserverd = UInt(vaResLen.W)
     val vpn  = UInt(vpnLen.W)
     val off  = UInt(offLen.W)
+  }
+
+  def vaBundle3 = new Bundle {
+    val vpn = UInt(vpnLen.W)
+    val off = UInt(offLen.W)
   }
 
   def vpnBundle = new Bundle {
@@ -51,7 +57,6 @@ trait Sv39Const{
   }
 
   def paBundle = new Bundle {
-    val reserved = UInt(paResLen.W)
     val ppn2 = UInt(ppn2Len.W)
     val ppn1 = UInt(ppn1Len.W)
     val ppn0 = UInt(ppn0Len.W)
@@ -59,17 +64,23 @@ trait Sv39Const{
   }
 
   def paBundle2 = new Bundle {
-    val reserved = UInt(paResLen.W)
     val ppn  = UInt(ppnLen.W)
     val off  = UInt(offLen.W)
   }
   
-  def paddrApply(ppn: UInt, off: UInt):UInt = {
-    Cat(Cat(0.U(paResLen.W), Cat(ppn, off)), 0.U(3.W))
+  def paBundle3 = new Bundle {
+    val ppn2 = UInt(ppn2Len.W)
+    val ppn1 = UInt(ppn1Len.W)
+    val ppn0 = UInt(ppn0Len.W)
+    val off  = UInt( offLen.W)
+  }
+
+  def paddrApply(ppn: UInt, vpnn: UInt):UInt = {
+    Cat(Cat(ppn, vpnn), 0.U(3.W))
   }
   
   def pteBundle = new Bundle {
-    val reserved  = UInt(10.W)
+    val reserved  = UInt(pteResLen.W)
     val ppn  = UInt(ppnLen.W)
     val rsw  = UInt(2.W)
     val flag = new Bundle {
@@ -87,6 +98,7 @@ trait Sv39Const{
   def satpBundle = new Bundle {
     val mode = UInt(satpModeLen.W)
     val asid = UInt(asidLen.W)
+    val ppnRes = UInt(ppnResLen.W)
     val ppn  = UInt(ppnLen.W)
   }
 
@@ -113,7 +125,7 @@ trait Sv39Const{
   }
 
   def maskPaddr(ppn:UInt, vaddr:UInt, mask:UInt) = {
-    MaskData(vaddr, Cat(0.U(paResLen.W), ppn, 0.U(offLen.W)), Cat("h1ffffff".U(25.W), "h1ff".U(vpn2Len.W), mask, 0.U(offLen.W)))
+    MaskData(vaddr, Cat(ppn, 0.U(offLen.W)), Cat("h1ff".U(vpn2Len.W), mask, 0.U(offLen.W)))
   }
 
   def MaskEQ(mask: UInt, pattern: UInt, vpn: UInt) = {
@@ -134,6 +146,7 @@ sealed trait HasTlbConst extends Sv39Const{
   implicit val tlbConfig: TLBConfig
 
   val AddrBits: Int
+  val PAddrBits: Int
   val XLEN: Int
 
   val tlbname = tlbConfig.name
@@ -144,7 +157,7 @@ sealed trait HasTlbConst extends Sv39Const{
 
   val maskLen = vpn0Len + vpn1Len  // 18
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69
-  val dataLen = ppnLen + AddrBits // 44 + 64 = 108
+  val dataLen = ppnLen + PAddrBits // 
 
   val debug = true && tlbname == "dtlb"
 
@@ -157,7 +170,7 @@ sealed trait HasTlbConst extends Sv39Const{
 
   def dataBundle = new Bundle {
     val ppn = UInt(ppnLen.W)
-    val addr = UInt(AddrBits.W) // pte addr, used to write back pte when flag changes (flag.d, flag.v)
+    val addr = UInt(PAddrBits.W) // pte addr, used to write back pte when flag changes (flag.d, flag.v)
   }
 
 }
@@ -218,7 +231,7 @@ class TLBData(implicit val tlbConfig: TLBConfig) extends TlbModule {
       val wen = Input(Bool())
       val dest = Input(UInt(NTLBBits.W))
       val ppn = Input(UInt(ppnLen.W))
-      val pteaddr = Input(UInt(AddrBits.W))
+      val pteaddr = Input(UInt(PAddrBits.W))
     }
   })
   
@@ -282,7 +295,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     io.out.req <> tlbExec.io.out
     io.in.resp <> io.out.resp
   }
-  
+
   // lsu need dtlb signals
   if(tlbname == "dtlb") {
     val alreadyOutFinish = RegEnable(true.B, init=false.B, tlbExec.io.out.valid && !tlbExec.io.out.ready)
@@ -412,7 +425,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val missMetaRefill = WireInit(false.B)
   val missRefillFlag = WireInit(0.U(8.W))
   val memRdata = io.mem.resp.bits.rdata.asTypeOf(pteBundle)
-  val raddr = Reg(UInt(AddrBits.W))
+  val raddr = Reg(UInt(PAddrBits.W))
   val alreadyOutFire = RegEnable(true.B, init = false.B, io.out.fire)
 
   //handle flush

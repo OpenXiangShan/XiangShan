@@ -30,7 +30,7 @@ object SimpleBusCmd {
 }
 
 class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
-  val addr = Output(UInt(64.W))
+  val addr = Output(UInt(39.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
   val wmask = Output(UInt((DataBits / 8).W))
