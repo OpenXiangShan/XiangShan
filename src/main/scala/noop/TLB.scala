@@ -112,7 +112,7 @@ trait Sv39Const extends HasNOOPParameter{
     val r    = Bool()//UInt(1.W)
     val v    = Bool()//UInt(1.W)
   }
-
+/*
   def vmMux(userBits: Int = 0, en: Bool, enYes: SimpleBusReqBundle, enNo: SimpleBusReqBundle) = {
     val res = Wire(new SimpleBusReqBundle(userBits))
     res.addr := Mux(en, enYes.addr, enNo.addr)
@@ -123,7 +123,7 @@ trait Sv39Const extends HasNOOPParameter{
     if(userBits > 0) { res.user.map(_ := Mux(en, enYes.user.getOrElse(0.U),enNo.user.getOrElse(0.U))) }
     res
   }
-
+*/
   def maskPaddr(ppn:UInt, vaddr:UInt, mask:UInt) = {
     MaskData(vaddr, Cat(ppn, 0.U(offLen.W)), Cat("h3".U(ppn2Len.W), mask, 0.U(offLen.W)))
   }
@@ -250,7 +250,7 @@ class TLBData(implicit val tlbConfig: TLBConfig) extends TlbModule {
 
 class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
-    val in = Flipped(new SimpleBusUC(userBits = userBits))
+    val in = Flipped(new SimpleBusUC(userBits = userBits, addrBits = VAddrBits))
     val out = new SimpleBusUC(userBits = userBits)
 
     val mem = new SimpleBusUC()
@@ -337,8 +337,8 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
 class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val io = IO(new Bundle {
-    val in = Flipped(Decoupled(new SimpleBusReqBundle(userBits)))
-    val out = Decoupled(new SimpleBusReqBundle(userBits))
+    val in = Flipped(Decoupled(new SimpleBusReqBundle(userBits = userBits, addrBits = VAddrBits)))
+    val out = Decoupled(new SimpleBusReqBundle(userBits = userBits))
 
     val mem = new SimpleBusUC()
     val flush = Input(Bool()) 

@@ -45,7 +45,7 @@ object LSUOpType {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(XLEN.W))
   val instr = Input(UInt(32.W)) // Atom insts need aq rl funct3 bit from instr
-  val dmem = new SimpleBusUC
+  val dmem = new SimpleBusUC(addrBits = VAddrBits)
   val isMMIO = Output(Bool())
   val dtlbPF = Output(Bool())
 }
@@ -396,7 +396,7 @@ class LSExecUnit extends NOOPModule {
   }
 
   val size = func(1,0)
-  dmem.req.bits.apply(addr = addr, size = size, wdata = genWdata(io.wdata, size),
+  dmem.req.bits.apply(addr = addr(VAddrBits-1, 0), size = size, wdata = genWdata(io.wdata, size),
     wmask = genWmask(addr, size), cmd = Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read))
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B

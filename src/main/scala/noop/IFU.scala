@@ -14,7 +14,7 @@ trait HasResetVector {
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
 
-    val imem = new SimpleBusUC(userBits = VAddrBits*2 + 4)
+    val imem = new SimpleBusUC(userBits = VAddrBits*2 + 4, addrBits = VAddrBits)
     // val pc = Input(UInt(VAddrBits.W))
     val out = Decoupled(new CtrlFlowIO)
 
