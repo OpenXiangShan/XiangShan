@@ -39,7 +39,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = AddrBits - OffsetBits - IndexBits
 
-  val debug = false//true && cacheName == "dcache"
+  val debug = true && cacheName == "dcache"
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -443,7 +443,6 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   s2.io.metaWriteBus := s3.io.metaWriteBus
 
   BoringUtils.addSource(s3.io.in.valid && s3.io.in.bits.hit, "perfCntCondM" + cacheName + "Hit")
-
 
   Debug() {
     if (debug) {
