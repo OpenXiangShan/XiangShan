@@ -406,15 +406,15 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
   )
 
-  io.in.ready := io.out.ready && (state === s_idle) && !miss && !probe
+  io.in.ready := io.out.ready && (state === s_idle && !hitReadBurst) && !miss && !probe
   io.dataReadRespToL1 := hitReadBurst && (state === s_idle && io.out.ready || state === s_release && state2 === s2_dataOK)
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
   assert(!(!ro.B && io.flush), "only allow to flush icache")
   Debug(debug) {
-    printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, state = %d, addr = %x, mem.req.valid = %d, mem.req.ready = %d\n\n",
-      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, state, req.addr, io.mem.req.valid, io.mem.req.ready)
+    printf("%d: [" + cacheName + " stage3]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, state = %d, cmd = %x, addr = %x, mem.req.valid = %d, mem.req.ready = %d\n\n",
+      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, state, req.cmd, req.addr, io.mem.req.valid, io.mem.req.ready)
   }
 }
 
@@ -451,7 +451,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   io.out.mem <> s3.io.mem
   io.mmio <> s3.io.mmio
 
-  io.in.resp.valid := Mux(s3.io.out.bits.isPrefetch(), false.B, s3.io.out.valid || s3.io.dataReadRespToL1)
+  io.in.resp.valid := Mux(s3.io.out.valid && s3.io.out.bits.isPrefetch(), false.B, s3.io.out.valid || s3.io.dataReadRespToL1)
 
   if (hasCoh) {
     val cohReq = io.out.coh.req.bits
