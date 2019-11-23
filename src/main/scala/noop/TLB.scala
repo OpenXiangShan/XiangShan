@@ -547,7 +547,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.mem.resp.ready := true.B
 
   // meta & data refill . TODO: try to wrap the below by a method
-  val wdest = 0.U//OHToUInt(waymask)
+  val wdest = OHToUInt(waymask)
   //metasTLB.write(addr = wdest, en = (missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush), vpn = vpn.asUInt, asid = Mux(hitWB, hitMeta.asid, satp.asid), mask = Mux(hitWB, hitMask, missMask), flag = Mux(hitWB, hitRefillFlag, missRefillFlag))
   metasTLB.io.write.wen := (missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush)
   metasTLB.io.write.dest := wdest

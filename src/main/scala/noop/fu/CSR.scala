@@ -624,7 +624,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
     lr := false.B
-    retTarget := sepc(VAddrBits-1. 0)
+    retTarget := sepc(VAddrBits-1, 0)
   }
 
   when (valid && isUret) {
@@ -635,7 +635,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     priviledgeMode := ModeU
     mstatusNew.pie.u := true.B
     mstatus := mstatusNew.asUInt
-    retTarget := uepc(VAddrBits-1. 0)
+    retTarget := uepc(VAddrBits-1, 0)
   }
 
   when (raiseExceptionIntr) {
