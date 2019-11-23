@@ -99,7 +99,7 @@ class ALU extends NOOPModule {
   val isBru = ALUOpType.isBru(func)
   // val pcPlus2 = ALUOpType.pcPlus2(func)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
-  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(AddrBits-1,0)
+  val target = Mux(isBranch, io.cfIn.pc + io.offset, adderRes)(VAddrBits-1,0)
   val predictWrong = (io.redirect.target =/= io.cfIn.pnpc)
   val isRVC = (io.cfIn.instr(1,0) =/= "b11".U)
   io.redirect.target := Mux(!taken && isBranch, Mux(isRVC, io.cfIn.pc + 2.U, io.cfIn.pc + 4.U), target)
@@ -107,7 +107,7 @@ class ALU extends NOOPModule {
   io.redirect.valid := valid && isBru && predictWrong
   // may be can be moved to ISU to calculate pc + 4
   // this is actually for jal and jalr to write pc + 4/2 to rd
-  io.out.bits := Mux(isBru, Mux(!isRVC, io.cfIn.pc + 4.U, io.cfIn.pc + 2.U), aluRes)
+  io.out.bits := Mux(isBru, Mux(!isRVC, SignExt(io.cfIn.pc, AddrBits) + 4.U, SignExt(io.cfIn.pc, AddrBits) + 2.U), aluRes)
   // when(pcPlus2 && isBru){
   //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
   // }

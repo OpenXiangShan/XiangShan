@@ -29,8 +29,8 @@ object SimpleBusCmd {
   def apply() = UInt(4.W)
 }
 
-class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
-  val addr = Output(UInt(64.W))
+class SimpleBusReqBundle(val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+  val addr = Output(UInt(addrBits.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
   val wmask = Output(UInt((DataBits / 8).W))
@@ -76,8 +76,8 @@ class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
 }
 
 // Uncache
-class SimpleBusUC(val userBits: Int = 0) extends SimpleBusBundle {
-  val req = Decoupled(new SimpleBusReqBundle(userBits))
+class SimpleBusUC(val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+  val req = Decoupled(new SimpleBusReqBundle(userBits, addrBits))
   val resp = Flipped(Decoupled(new SimpleBusRespBundle(userBits)))
 
   def isWrite() = req.valid && req.bits.isWrite()

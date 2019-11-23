@@ -45,7 +45,7 @@ object LSUOpType {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(XLEN.W))
   val instr = Input(UInt(32.W)) // Atom insts need aq rl funct3 bit from instr
-  val dmem = new SimpleBusUC
+  val dmem = new SimpleBusUC(addrBits = VAddrBits)
   val isMMIO = Output(Bool())
   val dtlbPF = Output(Bool())
 }
@@ -386,17 +386,17 @@ class LSExecUnit extends NOOPModule {
   }
 
   Debug(){
-    when (dmem.req.fire()){
+    //when (dmem.req.fire()){
       printf("[LSU] IN(%d, %d) OUT(%d, %d) addr %x, size %x, wdata_raw %x, isStore %x \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, addr, func(1,0), io.wdata, isStore)
       printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
-    }
-    when (dtlbFinish && dtlbEnable) {
+    //}
+    //when (dtlbFinish && dtlbEnable) {
       printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
-    }
+    //}
   }
 
   val size = func(1,0)
-  dmem.req.bits.apply(addr = addr, size = size, wdata = genWdata(io.wdata, size),
+  dmem.req.bits.apply(addr = addr(VAddrBits-1, 0), size = size, wdata = genWdata(io.wdata, size),
     wmask = genWmask(addr, size), cmd = Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read))
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B

@@ -16,8 +16,10 @@ trait HasNOOPParameter {
   val HasIcache = true
   val HasDcache = true
   val EnableStoreQueue = false
-  val AddrBits = 64//32 //TODO: fix by lemover-zhangzifei 32->64
-  val AddrBytes = AddrBits / 8
+  val AddrBits = 64 // AddrBits is used in some cases
+  val VAddrBits = 39 // VAddrBits is Virtual Memory addr bits
+  val PAddrBits = 32 // PAddrBits is Phyical Memory addr bits
+  val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
 }
@@ -99,10 +101,10 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
   val tlbXbar = Module(new SimpleBusCrossbarNto1(3))
 
-  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = AddrBits*2 + 4))
+  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = VAddrBits*2 + 4))
   ifu.io.ipf := itlb.io.ipf
   io.imem <> Cache(in = itlb.io.out, mmio = mmioXbar.io.in(0), flush = Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush), empty = itlb.io.cacheEmpty)(
-    CacheConfig(ro = true, name = "icache", userBits = AddrBits*2 + 4))
+    CacheConfig(ro = true, name = "icache", userBits = VAddrBits*2 + 4))
   
   val dtlb = TLB(in = exu.io.dmem, mem = tlbXbar.io.in(1), flush = false.B, csrMMU = exu.io.memMMU.dmem)(TLBConfig(name = "dtlb"))
   tlbXbar.io.in(0) <> dtlb.io.out
