@@ -20,8 +20,8 @@ trait Sv39Const extends HasNOOPParameter{
   val vpn0Len = 9
   val vpnLen = vpn2Len + vpn1Len + vpn0Len
   
-  val paddrLen = PAddrBits
-  val vaddrLen = VAddrBits
+  //val paddrLen = PAddrBits
+  //val vaddrLen = VAddrBits
   val satpLen = XLEN
   val satpModeLen = 4
   val asidLen = 16
@@ -125,7 +125,7 @@ trait Sv39Const extends HasNOOPParameter{
   }
 */
   def maskPaddr(ppn:UInt, vaddr:UInt, mask:UInt) = {
-    MaskData(vaddr, Cat(ppn, 0.U(offLen.W)), Cat("h3".U(ppn2Len.W), mask, 0.U(offLen.W)))
+    MaskData(vaddr, Cat(ppn, 0.U(offLen.W)), Cat(Fill(ppn2Len, 1.U(1.W)), mask, 0.U(offLen.W)))
   }
 
   def MaskEQ(mask: UInt, pattern: UInt, vpn: UInt) = {
@@ -290,12 +290,18 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   PipelineConnectTLB(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush, vmEnable)
   when(!vmEnable) {
     tlbExec.io.out.ready := true.B // let existed request go out
-    io.out.req <> io.in.req
-    io.out.resp <> io.in.resp
+    io.out.req.valid := io.in.req.valid
+    io.in.req.ready := io.out.req.ready
+    io.out.req.bits.addr := io.in.req.bits.addr(PAddrBits-1, 0)
+    io.out.req.bits.size := io.in.req.bits.size
+    io.out.req.bits.cmd := io.in.req.bits.cmd
+    io.out.req.bits.wmask := io.in.req.bits.wmask
+    io.out.req.bits.wdata := io.in.req.bits.wdata
+    io.out.req.bits.user.map(_ := io.in.req.bits.user.getOrElse(0.U))
   }.otherwise {
     io.out.req <> tlbExec.io.out
-    io.in.resp <> io.out.resp
   }
+  io.out.resp <> io.in.resp
 
   // lsu need dtlb signals
   if(tlbname == "dtlb") {

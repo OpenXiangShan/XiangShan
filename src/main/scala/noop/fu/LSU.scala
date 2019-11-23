@@ -125,9 +125,9 @@ class LSU extends NOOPModule {
     // Atom LR/SC Control Bits
     val setLr = Wire(Bool())
     val setLrVal = Wire(Bool())
-    val setLrAddr = Wire(UInt(VAddrBits.W))
+    val setLrAddr = Wire(UInt(AddrBits.W))
     val lr = WireInit(Bool(), false.B)
-    val lrAddr = WireInit(UInt(VAddrBits.W), DontCare)
+    val lrAddr = WireInit(UInt(AddrBits.W), DontCare)
     BoringUtils.addSource(setLr, "set_lr")
     BoringUtils.addSource(setLrVal, "set_lr_val")
     BoringUtils.addSource(setLrAddr, "set_lr_addr")

@@ -319,9 +319,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // Atom LR/SC Control Bits
   val setLr = WireInit(Bool(), false.B)
   val setLrVal = WireInit(Bool(), false.B)
-  val setLrAddr = WireInit(UInt(VAddrBits.W), DontCare) //TODO : need check
+  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare) //TODO : need check
   val lr = RegInit(Bool(), false.B)
-  val lrAddr = RegInit(UInt(VAddrBits.W), 0.U)
+  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
   BoringUtils.addSink(setLr, "set_lr")
   BoringUtils.addSink(setLrVal, "set_lr_val")
   BoringUtils.addSink(setLrAddr, "set_lr_addr")
@@ -501,7 +501,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val hasStorePageFault = io.dmemMMU.storePF 
 
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
-    val tval = Mux(hasInstrPageFault, io.cfIn.pc, io.dmemMMU.addr)
+    val tval = Mux(hasInstrPageFault, SignExt(io.cfIn.pc, XLEN), SignExt(io.dmemMMU.addr, XLEN))
     when(priviledgeMode === ModeM){
       mtval := tval
     }.otherwise{
@@ -596,7 +596,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
 
   ret := isMret || isSret || isUret
-  trapTarget := Mux(delegS, stvec, mtvec)
+  trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   retTarget := DontCare
   // TODO redirect target
   // val illegalEret = TODO
@@ -611,7 +611,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.mpp := ModeU
     mstatus := mstatusNew.asUInt
     lr := false.B
-    retTarget := mepc
+    retTarget := mepc(VAddrBits-1, 0)
   }
 
   when (valid && isSret) {
@@ -624,7 +624,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
     lr := false.B
-    retTarget := sepc
+    retTarget := sepc(VAddrBits-1. 0)
   }
 
   when (valid && isUret) {
@@ -635,7 +635,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     priviledgeMode := ModeU
     mstatusNew.pie.u := true.B
     mstatus := mstatusNew.asUInt
-    retTarget := uepc
+    retTarget := uepc(VAddrBits-1. 0)
   }
 
   when (raiseExceptionIntr) {
@@ -644,23 +644,23 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
 
     when (delegS) {
       scause := causeNO
-      sepc := io.cfIn.pc
+      sepc := SignExt(io.cfIn.pc, XLEN)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
       when(causeNO =/= instrPageFault.U && causeNO =/= loadPageFault.U && causeNO =/= storePageFault.U){stval := 0.U} // TODO: should not use =/=
       // printf("[*] mstatusNew.spp %x\n", mstatusNew.spp)
-      // trapTarget := stvec
+      // trapTarget := stvec(VAddrBits-1. 0)
     }.otherwise {
       mcause := causeNO
-      mepc := io.cfIn.pc
+      mepc := SignExt(io.cfIn.pc, XLEN)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
       when(causeNO =/= instrPageFault.U && causeNO =/= loadPageFault.U && causeNO =/= storePageFault.U){mtval := 0.U} // TODO: should not use =/=
-      // trapTarget := mtvec
+      // trapTarget := mtvec(VAddrBits-1. 0)
     }
     // mstatusNew.pie.m := LookupTree(priviledgeMode, List(
     //   ModeM -> mstatusOld.ie.m,

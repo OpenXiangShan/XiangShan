@@ -9,6 +9,7 @@ import utils._
 class TableAddr(val idxBits: Int) extends NOOPBundle {
   def tagBits = VAddrBits - 2 - idxBits
 
+  //val res = UInt((AddrBits - VAddrBits).W)
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
   val pad = UInt(2.W)//TODO

@@ -107,7 +107,7 @@ class ALU extends NOOPModule {
   io.redirect.valid := valid && isBru && predictWrong
   // may be can be moved to ISU to calculate pc + 4
   // this is actually for jal and jalr to write pc + 4/2 to rd
-  io.out.bits := Mux(isBru, Mux(!isRVC, io.cfIn.pc + 4.U, io.cfIn.pc + 2.U), aluRes)
+  io.out.bits := Mux(isBru, Mux(!isRVC, SignExt(io.cfIn.pc, AddrBits) + 4.U, SignExt(io.cfIn.pc, AddrBits) + 2.U), aluRes)
   // when(pcPlus2 && isBru){
   //   printf("CJALR %x %x \n ", io.cfIn.instr, io.cfIn.pc)
   // }

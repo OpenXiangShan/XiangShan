@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import utils._
 
-class WBU(implicit val p: NOOPConfig) extends Module {
+class WBU(implicit val p: NOOPConfig) extends NOOPModule{
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CommitIO))
     val wb = new WriteBackIO
@@ -27,7 +27,7 @@ class WBU(implicit val p: NOOPConfig) extends Module {
   BoringUtils.addSource(io.in.valid, "perfCntCondMinstret")
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(RegNext(io.in.valid), "difftestCommit")
-    BoringUtils.addSource(RegNext(io.in.bits.decode.cf.pc), "difftestThisPC")
+    BoringUtils.addSource(RegNext(SignExt(io.in.bits.decode.cf.pc, AddrBits)), "difftestThisPC")
     BoringUtils.addSource(RegNext(io.in.bits.decode.cf.instr), "difftestThisINST")
     BoringUtils.addSource(RegNext(io.in.bits.isMMIO), "difftestIsMMIO")
     BoringUtils.addSource(RegNext(io.in.bits.decode.cf.instr(1,0)=/="b11".U), "difftestIsRVC")
