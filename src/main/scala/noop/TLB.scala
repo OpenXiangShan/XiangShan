@@ -382,6 +382,9 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val victimWaymask = if (NTLB > 1) (1.U << LFSR64()(log2Up(NTLB)-1,0)) else "b1".U
   val waymask = Mux(hit, hitVec, victimWaymask)
 
+  val loadPF = WireInit(false.B)
+  val storePF = WireInit(false.B)
+
   // hit
   val hitMeta = Mux1H(waymask, metas).asTypeOf(metaBundle)
   val hitData = Mux1H(waymask, datas).asTypeOf(dataBundle)
@@ -389,7 +392,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hitMask = hitMeta.mask
   // hit write back pte.flag
   val hitinstrPF = WireInit(false.B)
-  val hitWB = hit && (!hitFlag.a || !hitFlag.d && req.isWrite()) && !hitinstrPF && !io.pf.isPF()
+  val hitWB = hit && (!hitFlag.a || !hitFlag.d && req.isWrite()) && !hitinstrPF && !(loadPF || storePF || io.pf.isPF())
   val hitRefillFlag = Cat(req.isWrite().asUInt, 1.U(1.W), 0.U(6.W)) | hitFlag.asUInt
   val hitWBStore = RegEnable(Cat(0.U(10.W), hitData.ppn, 0.U(2.W), hitRefillFlag), hitWB)
 
@@ -407,15 +410,17 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.pf.loadPF := false.B
   io.pf.storePF := false.B
   io.pf.addr := req.addr
+  io.pf.loadPF := RegNext(loadPF, init =false.B)
+  io.pf.storePF := RegNext(storePF, init = false.B)
 
   if (tlbname == "itlb") { hitinstrPF := !hitExec  && hit}
   if (tlbname == "dtlb") { 
-    pf.loadPF := !hitLoad && req.isRead() && hit && !isAMO
-    pf.storePF := (!hitStore && req.isWrite() && hit) || (!hitLoad && req.isRead() && hit && isAMO)
+    loadPF := !hitLoad && req.isRead() && hit && !isAMO
+    storePF := (!hitStore && req.isWrite() && hit) || (!hitLoad && req.isRead() && hit && isAMO)
   }
 
   // miss
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_write_pte :: s_wait_resp :: Nil = Enum(5)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_write_pte :: s_wait_resp :: s_miss_slpf :: Nil = Enum(6)
   val state = RegInit(s_idle)
   val level = RegInit(Level.U(log2Up(Level).W))
   
@@ -468,11 +473,11 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
           needFlush := false.B
         }.elsewhen (!(missflag.r || missflag.x) && (level===3.U || level===2.U)) {
           when(!missflag.v || (!missflag.r && missflag.w)) { //TODO: fix needflush
-            if(tlbname == "itlb") { state := s_wait_resp } else { state := s_idle }
+            if(tlbname == "itlb") { state := s_wait_resp } else { state := s_miss_slpf }
             if(tlbname == "itlb") { missIPF := true.B }
             if(tlbname == "dtlb") { 
-              pf.loadPF := req.isRead() && !isAMO 
-              pf.storePF := req.isWrite() || isAMO 
+              loadPF := req.isRead() && !isAMO 
+              storePF := req.isWrite() || isAMO 
             }  
             Debug() {
               if(debug) {
@@ -504,9 +509,9 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
           }
           if(tlbname == "dtlb") {
             when((!permLoad && req.isRead()) || (!permStore && req.isWrite())) { 
-              state := s_idle
-              pf.loadPF := req.isRead() && !isAMO
-              pf.storePF := req.isWrite() || isAMO
+              state := s_miss_slpf
+              loadPF := req.isRead() && !isAMO
+              storePF := req.isWrite() || isAMO
             }.otherwise {
               state := Mux(updateAD, s_write_pte, s_wait_resp)
               missMetaRefill := true.B
@@ -531,6 +536,10 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
       missIPF := false.B
       alreadyOutFire := false.B
     }}
+
+    is (s_miss_slpf) {
+      state := s_idle
+    }
   }
 
   // mem
@@ -557,9 +566,9 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   // io
   io.out.bits := req
   io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr(PAddrBits-1, 0), hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr(PAddrBits-1, 0), missMaskStore))
-  io.out.valid := io.in.valid && Mux(hit && !hitWB, !io.pf.isPF() , state === s_wait_resp)// && !alreadyOutFire
+  io.out.valid := io.in.valid && Mux(hit && !hitWB, !(io.pf.isPF() || loadPF || storePF), state === s_wait_resp)// && !alreadyOutFire
   
-  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && metasTLB.io.ready//maybe be optimized
+  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && metasTLB.io.ready && (!io.pf.isPF() && !loadPF && !storePF)//maybe be optimized
 
   io.ipf := Mux(hit, hitinstrPF, missIPF)
   io.isFinish := io.out.fire() || io.pf.isPF()
@@ -575,7 +584,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
       printf("[TLBExec-"  + tlbname+ "]: meta: wen:%d dest:%x vpn:%x asid:%x mask:%x flag:%x asid:%x\n", metasTLB.io.write.wen, metasTLB.io.write.dest, metasTLB.io.write.vpn, metasTLB.io.write.asid, metasTLB.io.write.mask, metasTLB.io.write.flag, metasTLB.io.write.asid)
       printf("[TLBExec-"  + tlbname+ "]: data: wen:%d dest:%x ppn:%x pteaddr:%x\n", datasTLB.io.write.wen, datasTLB.io.write.dest, datasTLB.io.write.ppn, datasTLB.io.write.pteaddr)
       printf("[TLBExec-"  + tlbname+ "]: MemReq(%d, %d) MemResp(%d, %d) addr:%x cmd:%d rdata:%x cmd:%d\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.req.bits.cmd, io.mem.resp.bits.rdata, io.mem.resp.bits.cmd)
-      printf("[TLBExec-"  + tlbname+ "]: io.ipf:%d hitinstrPF:%d missIPF:%d loadPF:%d storePF:%d\n", io.ipf, hitinstrPF, missIPF, io.pf.loadPF, io.pf.storePF)
+      printf("[TLBExec-"  + tlbname+ "]: io.ipf:%d hitinstrPF:%d missIPF:%d pf.loadPF:%d pf.storePF:%d loadPF:%d storePF:%d\n", io.ipf, hitinstrPF, missIPF, io.pf.loadPF, io.pf.storePF, loadPF, storePF)
     }
   }
 }
