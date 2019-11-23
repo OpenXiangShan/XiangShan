@@ -43,7 +43,7 @@ sealed trait HasCacheConst {
   val WordIndexBits = log2Up(LineBeats)
   val TagBits = PAddrBits - OffsetBits - IndexBits
 
-  val debug = false
+  val debug = true
 
   def addrBundle = new Bundle {
     val tag = UInt(TagBits.W)
@@ -104,8 +104,10 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
   Debug(){
-    when(io.in.fire()){
-      printf("[L1$] " +name+" cache stage1, addr in: %x, user: %x\n", io.in.bits.addr, io.in.bits.user.getOrElse(0.U))
+    if (debug) {
+      when(io.in.fire()){
+        printf("[L1$] " +name+" cache stage1, addr in: %x, user: %x\n", io.in.bits.addr, io.in.bits.user.getOrElse(0.U))
+      }
     }
   }
 
@@ -118,9 +120,11 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.valid := io.in.valid && io.metaReadBus.req.ready && io.dataReadBus.req.ready
   io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
 
-  Debug(debug) {
-    printf("%d: [" + cacheName + " stage1]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, addr = %x, cmd = %x, dataReadBus.req.valid = %d\n",
-      GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, io.in.bits.addr, io.in.bits.cmd, io.dataReadBus.req.valid)
+  Debug() {
+    if (debug) {
+      printf("%d: [" + cacheName + " stage1]: in.ready = %d, in.valid = %d, out.valid = %d, out.ready = %d, addr = %x, cmd = %x, dataReadBus.req.valid = %d\n",
+        GTimer(), io.in.ready, io.in.valid, io.out.valid, io.out.ready, io.in.bits.addr, io.in.bits.cmd, io.dataReadBus.req.valid)
+    }
   }
 }
 
@@ -185,8 +189,10 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.valid := io.in.valid
   io.in.ready := !io.in.valid || io.out.fire()
 
-  Debug(debug) {
-    printf("%d: [" + cacheName + " S2]: isFD:%d isFDreg:%d inFire:%d invalid:%d \n", GTimer(), isForwardData, isForwardDataReg, io.in.fire(), io.in.valid)
+  Debug() {
+    if (debug) {
+      printf("%d: [" + cacheName + " S2]: isFD:%d isFDreg:%d inFire:%d invalid:%d \n", GTimer(), isForwardData, isForwardDataReg, io.in.fire(), io.in.valid)
+    }
   }
 }
 
@@ -412,7 +418,8 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
   assert(!(dataHitWriteBus.req.valid && dataRefillWriteBus.req.valid))
   assert(!(!ro.B && io.flush), "only allow to flush icache")
-  Debug(debug) {
+  Debug() {
+    if (debug) {
     printf("%d: [" + cacheName + " S3]: in.ready = %d, in.valid = %d, hit = %x, state = %d, addr = %x cmd:%d probe:%d isFinish:%d\n",
     GTimer(), io.in.ready, io.in.valid, hit, state, req.addr, req.cmd, probe, io.isFinish)
     printf("%d: [" + cacheName + " S3]: out.valid:%d rdata:%x cmd:%d user:%x \n", 
@@ -421,6 +428,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     GTimer(), dataHitWriteBus.req.valid, dataHitWriteBus.req.ready, dataHitWriteBus.req.bits.data.asUInt, metaHitWriteBus.req.valid, metaHitWriteBus.req.ready)
     printf("%d: [" + cacheName + " S3]: useFD:%d isFD:%d FD:%x DreadArray:%x dataRead:%x inwaymask:%x FDwaymask:%x \n", 
     GTimer(), useForwardData, io.in.bits.isForwardData, io.in.bits.forwardData.data.data, dataReadArray, dataRead, io.in.bits.waymask, io.in.bits.forwardData.waymask.getOrElse("b1".U))
+    }
   }
 }
 

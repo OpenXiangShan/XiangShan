@@ -386,13 +386,13 @@ class LSExecUnit extends NOOPModule {
   }
 
   Debug(){
-    when (dmem.req.fire()){
+    //when (dmem.req.fire()){
       printf("[LSU] IN(%d, %d) OUT(%d, %d) addr %x, size %x, wdata_raw %x, isStore %x \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, addr, func(1,0), io.wdata, isStore)
       printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
-    }
-    when (dtlbFinish && dtlbEnable) {
+    //}
+    //when (dtlbFinish && dtlbEnable) {
       printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
-    }
+    //}
   }
 
   val size = func(1,0)
