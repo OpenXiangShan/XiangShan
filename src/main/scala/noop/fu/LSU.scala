@@ -45,7 +45,7 @@ object LSUOpType {
 class LSUIO extends FunctionUnitIO {
   val wdata = Input(UInt(XLEN.W))
   val instr = Input(UInt(32.W)) // Atom insts need aq rl funct3 bit from instr
-  val dmem = new SimpleBusUC
+  val dmem = new SimpleBusUC(addrBits = VAddrBits)
   val isMMIO = Output(Bool())
   val dtlbPF = Output(Bool())
 }
@@ -374,12 +374,12 @@ class LSExecUnit extends NOOPModule {
   switch (state) {
     is (s_idle) { 
       when (dmem.req.fire() && dtlbEnable)  { state := s_wait_tlb  }
-      when (dmem.req.fire() && !dtlbEnable) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+      when (dmem.req.fire() && !dtlbEnable) { state := s_wait_resp } 
       //when (dmem.req.fire()) { state := Mux(isStore, s_partialLoad, s_wait_resp) }
     }
     is (s_wait_tlb) {
       when (dtlbFinish && dtlbPF ) { state := s_idle }
-      when (dtlbFinish && !dtlbPF) { state := Mux(isStore, s_partialLoad, s_wait_resp) } 
+      when (dtlbFinish && !dtlbPF) { state := s_wait_resp/*Mux(isStore, s_partialLoad, s_wait_resp) */} 
     }
     is (s_wait_resp) { when (dmem.resp.fire()) { state := Mux(partialLoad, s_partialLoad, s_idle) } }
     is (s_partialLoad) { state := s_idle }
@@ -390,18 +390,18 @@ class LSExecUnit extends NOOPModule {
       printf("[LSU] IN(%d, %d) OUT(%d, %d) addr %x, size %x, wdata_raw %x, isStore %x \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, addr, func(1,0), io.wdata, isStore)
       printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
     //}
-    when (dtlbFinish && dtlbEnable) {
+    //when (dtlbFinish && dtlbEnable) {
       printf("[LSU] dtlbFinish:%d dtlbEnable:%d dtlbPF:%d state:%d addr:%x dmemReqFire:%d dmemRespFire:%d dmemRdata:%x \n",dtlbFinish, dtlbEnable, dtlbPF, state,  dmem.req.bits.addr, dmem.req.fire(), dmem.resp.fire(), dmem.resp.bits.rdata)
-    }
+    //}
   }
 
   val size = func(1,0)
-  dmem.req.bits.apply(addr = addr, size = size, wdata = genWdata(io.wdata, size),
+  dmem.req.bits.apply(addr = addr(VAddrBits-1, 0), size = size, wdata = genWdata(io.wdata, size),
     wmask = genWmask(addr, size), cmd = Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read))
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux( dtlbPF, true.B, Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
+  io.out.valid := Mux( dtlbPF, true.B, Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
   io.in.ready := (state === s_idle) || dtlbPF
 
   val rdata = dmem.resp.bits.rdata
@@ -435,7 +435,7 @@ class LSExecUnit extends NOOPModule {
   BoringUtils.addSource(io.isMMIO, "perfCntCondMmmioInstr")
   Debug() {
     when (dmem.req.fire() && (addr === "h80104708".U || genWdata(io.wdata, size)(31,0) === "h80000218".U)){
-      printf("[LSUBP] time %d, addr %x, size %x, wdata_raw %x, wdata %x, isStore %x \n", GTimer(), addr, func(1,0), io.wdata, genWdata(io.wdata, size), isStore)
+      //printf("[LSUBP] time %d, addr %x, size %x, wdata_raw %x, wdata %x, isStore %x \n", GTimer(), addr, func(1,0), io.wdata, genWdata(io.wdata, size), isStore)
     }
   }
 }

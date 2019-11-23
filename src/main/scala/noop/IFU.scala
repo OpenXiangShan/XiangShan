@@ -14,13 +14,14 @@ trait HasResetVector {
 class IFU extends NOOPModule with HasResetVector {
   val io = IO(new Bundle {
 
-    val imem = new SimpleBusUC(userBits = AddrBits*2 + 4 + 1)
-    // val pc = Input(UInt(AddrBits.W))
+    val imem = new SimpleBusUC(userBits = VAddrBits*2 + 4, addrBits = VAddrBits)
+    // val pc = Input(UInt(VAddrBits.W))
     val out = Decoupled(new CtrlFlowIO)
 
     val redirect = Flipped(new RedirectIO)
     val flushVec = Output(UInt(4.W))
     val bpFlush = Output(Bool())
+    val ipf = Input(Bool())
   })
 
   // pc
@@ -70,11 +71,18 @@ class IFU extends NOOPModule with HasResetVector {
     // printf("[IF1] pc=%x\n", pc)
   }
 
+  Debug(){
+    when(pcUpdate) {
+      printf("[IFUPC] pc:%x pcUpdate:%d npc:%x RedValid:%d RedTarget:%x LJL:%d LJTarget:%x LJ:%d snpc:%x bpValid:%d pnpn:%x \n",pc, pcUpdate, npc, io.redirect.valid,io.redirect.target,lateJumpLatch,lateJumpTarget,lateJump,snpc,bp1.io.out.valid,pnpc)
+      //printf(p"[IFUIN] redirect: ${io.redirect} \n")
+    }
+  }
+
   io.flushVec := Mux(io.redirect.valid, "b1111".U, 0.U)
   io.bpFlush := false.B
 
-  io.imem.req.bits.apply(addr = Cat(pc(AddrBits-1,1),0.U(1.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
-    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(0.U(1.W), brIdx(3,0), npc, pc))
+  io.imem.req.bits.apply(addr = Cat(pc(VAddrBits-1,1),0.U(1.W)), //cache will treat it as Cat(pc(63,3),0.U(3.W))
+    size = "b11".U, cmd = SimpleBusCmd.read, wdata = 0.U, wmask = 0.U, user = Cat(brIdx(3,0), npc(VAddrBits-1, 0), pc(VAddrBits-1, 0)))
   io.imem.req.valid := io.out.ready
   //TODO: add ctrlFlow.exceptionVec
   io.imem.resp.ready := io.out.ready || io.flushVec(0)
@@ -95,11 +103,11 @@ class IFU extends NOOPModule with HasResetVector {
                       //  else io.imem.resp.bits.rdata)
   io.out.bits.instr := io.imem.resp.bits.rdata
   io.imem.resp.bits.user.map{ case x =>
-    io.out.bits.pc := x(AddrBits-1,0)
-    io.out.bits.pnpc := x(AddrBits*2-1,AddrBits)
-    io.out.bits.brIdx := x(AddrBits*2 + 3, AddrBits*2)
-    io.out.bits.exceptionVec(instrPageFault) := x(AddrBits*2 + 4)
+    io.out.bits.pc := x(VAddrBits-1,0)
+    io.out.bits.pnpc := x(VAddrBits*2-1,VAddrBits)
+    io.out.bits.brIdx := x(VAddrBits*2 + 3, VAddrBits*2)
   }
+  io.out.bits.exceptionVec(instrPageFault) := io.ipf
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")

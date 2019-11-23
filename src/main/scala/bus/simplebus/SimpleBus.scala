@@ -18,6 +18,7 @@ object SimpleBusCmd {
   def writeBurst     = "b0011".U //  write   |   refill
   def writeLast      = "b0111".U //  write   |   refill
   def probe          = "b1000".U //  read    | do nothing
+  def prefetch       = "b0100".U //  read    |   refill
 
   // resp
   def readLast       = "b0110".U
@@ -28,8 +29,8 @@ object SimpleBusCmd {
   def apply() = UInt(4.W)
 }
 
-class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
-  val addr = Output(UInt(64.W))
+class SimpleBusReqBundle(val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+  val addr = Output(UInt(addrBits.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
   val wmask = Output(UInt((DataBits / 8).W))
@@ -53,9 +54,11 @@ class SimpleBusReqBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isRead() = !cmd(0) && !cmd(3)
   def isWrite() = cmd(0)
   def isBurst() = cmd(1)
+  def isReadBurst() = cmd === SimpleBusCmd.readBurst
   def isWriteSingle() = cmd === SimpleBusCmd.write
   def isWriteLast() = cmd === SimpleBusCmd.writeLast
   def isProbe() = cmd === SimpleBusCmd.probe
+  def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
 class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
@@ -69,11 +72,12 @@ class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
   def isProbeHit() = cmd === SimpleBusCmd.probeHit
   def isProbeMiss() = cmd === SimpleBusCmd.probeMiss
   def isWriteResp() = cmd === SimpleBusCmd.writeResp
+  def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
 // Uncache
-class SimpleBusUC(val userBits: Int = 0) extends SimpleBusBundle {
-  val req = Decoupled(new SimpleBusReqBundle(userBits))
+class SimpleBusUC(val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+  val req = Decoupled(new SimpleBusReqBundle(userBits, addrBits))
   val resp = Flipped(Decoupled(new SimpleBusRespBundle(userBits)))
 
   def isWrite() = req.valid && req.bits.isWrite()
@@ -91,4 +95,6 @@ class SimpleBusUC(val userBits: Int = 0) extends SimpleBusBundle {
 class SimpleBusC(val userBits: Int = 0) extends SimpleBusBundle {
   val mem = new SimpleBusUC(userBits)
   val coh = Flipped(new SimpleBusUC(userBits))
+
+  def memtoAXI4() = this.mem.toAXI4
 }

@@ -24,23 +24,23 @@ class DataSrcIO extends NOOPBundle {
 }
 
 class RedirectIO extends NOOPBundle {
-  val target = Output(UInt(AddrBits.W))
+  val target = Output(UInt(VAddrBits.W))
   // val brIdx = Output(UInt(3.W)) // for RVC
   val valid = Output(Bool())
 }
 
 // class IRIDCtrlFlowIO extends NOOPBundle {
 //   val instr = Output(UInt(64.W))
-//   val pc = Output(UInt(AddrBits.W))
-//   val pnpc = Output(UInt(AddrBits.W))
+//   val pc = Output(UInt(VAddrBits.W))
+//   val pnpc = Output(UInt(VAddrBits.W))
 //   val brIdx = Output(UInt(3.W))
 //   val redirect = new RedirectIO
 // }
 
 class CtrlFlowIO extends NOOPBundle {
   val instr = Output(UInt(64.W))
-  val pc = Output(UInt(AddrBits.W))
-  val pnpc = Output(UInt(AddrBits.W))
+  val pc = Output(UInt(VAddrBits.W))
+  val pnpc = Output(UInt(VAddrBits.W))
   val redirect = new RedirectIO
   val exceptionVec = Output(Vec(16, Bool()))
   val intrVec = Output(Vec(12, Bool()))
@@ -94,7 +94,7 @@ class MMUIO extends NOOPBundle {
 
   val loadPF = Output(Bool())
   val storePF = Output(Bool())
-  val addr = Output(UInt(AddrBits.W)) // reserved for further use
+  val addr = Output(UInt(VAddrBits.W)) 
   
   def isPF() = loadPF || storePF
 }
