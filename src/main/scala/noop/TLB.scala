@@ -551,17 +551,17 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   // meta & data refill . TODO: try to wrap the below by a method
   val wdest = OHToUInt(waymask)
   //metasTLB.write(addr = wdest, en = (missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush), vpn = vpn.asUInt, asid = Mux(hitWB, hitMeta.asid, satp.asid), mask = Mux(hitWB, hitMask, missMask), flag = Mux(hitWB, hitRefillFlag, missRefillFlag))
-  metasTLB.io.write.wen := (missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush)
-  metasTLB.io.write.dest := wdest
-  metasTLB.io.write.vpn := vpn.asUInt
-  metasTLB.io.write.asid := Mux(hitWB, hitMeta.asid, satp.asid)
-  metasTLB.io.write.mask := Mux(hitWB, hitMask, missMask)
-  metasTLB.io.write.flag := Mux(hitWB, hitRefillFlag, missRefillFlag)
+  metasTLB.io.write.wen := RegNext((missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush), init = false.B)
+  metasTLB.io.write.dest := RegNext(wdest)
+  metasTLB.io.write.vpn := RegNext(vpn.asUInt)
+  metasTLB.io.write.asid := RegNext(Mux(hitWB, hitMeta.asid, satp.asid))
+  metasTLB.io.write.mask := RegNext(Mux(hitWB, hitMask, missMask))
+  metasTLB.io.write.flag := RegNext(Mux(hitWB, hitRefillFlag, missRefillFlag))
   //datasTLB.write(addr = wdest, en = missMetaRefill && !isFlush, ppn = memRdata.ppn, pteaddr = raddr)
-  datasTLB.io.write.wen :=  missMetaRefill && !isFlush
-  datasTLB.io.write.dest := wdest
-  datasTLB.io.write.ppn := memRdata.ppn
-  datasTLB.io.write.pteaddr := raddr
+  datasTLB.io.write.wen :=  RegNext(missMetaRefill && !isFlush)
+  datasTLB.io.write.dest := RegNext(wdest)
+  datasTLB.io.write.ppn := RegNext(memRdata.ppn)
+  datasTLB.io.write.pteaddr := RegNext(raddr)
 
   // io
   io.out.bits := req
