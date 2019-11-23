@@ -11,16 +11,16 @@ class Top extends Module {
   val io = IO(new Bundle{})
   val noop = Module(new NOOPSoC()(NOOPConfig()))
   val timer = Module(new AXI4Timer)
-  val vga = Module(new AXI4VGA)
+//  val vga = Module(new AXI4VGA)
 //  val gpu = Module(new AXI4GPU)
 
   noop.io := DontCare
   timer.io := DontCare
-  vga.io := DontCare
+//  vga.io := DontCare
 //  gpu.io := DontCare
   dontTouch(noop.io)
   dontTouch(timer.io)
-  dontTouch(vga.io)
+//  dontTouch(vga.io)
 //  dontTouch(gpu.io)
 }
 
