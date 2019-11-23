@@ -760,11 +760,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   }
 
   // for differential testing  
-  BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
-  BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
-  BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus") 
-  BoringUtils.addSource(RegNext(mepc), "difftestMepc")
-  BoringUtils.addSource(RegNext(sepc), "difftestSepc")
-  BoringUtils.addSource(RegNext(mcause), "difftestMcause")
-  BoringUtils.addSource(RegNext(scause), "difftestScause")
+  if (!p.FPGAPlatform) {
+    BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
+    BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
+    BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus") 
+    BoringUtils.addSource(RegNext(mepc), "difftestMepc")
+    BoringUtils.addSource(RegNext(sepc), "difftestSepc")
+    BoringUtils.addSource(RegNext(mcause), "difftestMcause")
+    BoringUtils.addSource(RegNext(scause), "difftestScause")
+  }
 }
