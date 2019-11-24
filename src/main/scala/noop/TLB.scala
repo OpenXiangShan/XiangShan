@@ -256,9 +256,11 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     right.valid := valid //&& !isFlush
   }
 
+  tlbEmpty.io.in <> DontCare
+  tlbEmpty.io.out.ready := DontCare
   PipelineConnectTLB(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush, vmEnable)
   if(tlbname == "dtlb") {
-    PipelineConnect(tlbEmpty.io.in, tlbExec.io.out, tlbEmpty.io.out.fire(), io.flush)
+    PipelineConnect(tlbExec.io.out, tlbEmpty.io.in, tlbEmpty.io.out.fire(), io.flush)
   }
   when(!vmEnable) {
     tlbExec.io.out.ready := true.B // let existed request go out
