@@ -120,8 +120,8 @@ case class TLBConfig (
   name: String = "tlb",
   userBits: Int = 0,
 
-  totalSize: Int = 128, 
-  entryNum: Int = 4
+  totalEntry: Int = 4,
+  ways: Int = 4
 )
 
 sealed trait HasTlbConst extends Sv39Const{
@@ -135,15 +135,25 @@ sealed trait HasTlbConst extends Sv39Const{
   val tlbname = tlbConfig.name
   val userBits = tlbConfig.userBits
 
-  val NTLB = tlbConfig.entryNum
-  val NTLBBits = log2Up(NTLB)
+  
 
   val maskLen = vpn0Len + vpn1Len  // 18
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69, is asid necessary 
   val dataLen = ppnLen + PAddrBits // 
   val tlbLen = metaLen + dataLen
+  val Ways = tlbConfig.ways
+  val TotalEntry = tlbConfig.totalEntry
+  val Sets = TotalEntry / Ways
+  val IndexBits = log2Up(Sets)
+  val TagBits = vpnLen - IndexBits
 
   val debug = true //&& tlbname == "dtlb"
+
+  def vaddrTlbBundle = new Bundle {
+    val tag = UInt(TagBits.W)
+    val index = UInt(IndexBits.W)
+    val off = UInt(offLen.W)
+  }
 
   def metaBundle = new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -177,11 +187,12 @@ sealed abstract class TlbModule(implicit tlbConfig: TLBConfig) extends Module wi
 
 class TLBMD(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val io = IO(new Bundle {
-    val tlbmd = Output(Vec(NTLB, UInt(tlbLen.W)))
+    val tlbmd = Output(Vec(Ways, UInt(tlbLen.W)))
 
     val write = new Bundle {
       val wen = Input(Bool())
-      val dest = Input(UInt(NTLBBits.W))
+      val dest = Input(UInt(log2Up(Ways).W))
+      //val data = Input(UInt(tlbLen.W))
       val vpn = Input(UInt(vpnLen.W))
       val asid = Input(UInt(asidLen.W))
       val mask = Input(UInt(maskLen.W))
@@ -193,23 +204,24 @@ class TLBMD(implicit val tlbConfig: TLBConfig) extends TlbModule {
     val ready = Output(Bool())
   })
 
-  val tlbmd = Reg(Vec(NTLB, UInt(tlbLen.W)))
-  io.tlbmd := tlbmd
+  //val tlbmd = Reg(Vec(Ways, UInt(tlbLen.W)))
+  val tlbmd = Mem(Sets, Vec(Ways, UInt(tlbLen.W)))
+  io.tlbmd := tlbmd(0)
 
   //val reset = WireInit(false.B)
   val resetState = RegInit(true.B)//RegEnable(true.B, init = true.B, reset)
-  val (resetSet, resetFinish) = Counter(resetState, NTLB)
+  val (resetSet, resetFinish) = Counter(resetState, Ways)
   when (resetFinish) { resetState := false.B }
 
   val writeWen = io.write.wen//WireInit(false.B)
-  val writeDest = io.write.dest//WireInit(0.U(NTLBBits.W))
+  val writeDest = io.write.dest
   val writeData = Cat(io.write.vpn, io.write.asid, io.write.mask, io.write.flag, io.write.ppn, io.write.pteaddr)//WireInit(0.U(metaLen.W))
 
   val wen = Mux(resetState, true.B, writeWen)
   val dest = Mux(resetState, resetSet, writeDest)
   val data = Mux(resetState, 0.U, writeData)
 
-  when (wen) { tlbmd(dest) := data }
+  when (wen) { tlbmd(0)(dest) := data }
 
   io.ready := !resetState
   def rready() = !resetState
@@ -322,6 +334,8 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val in = Flipped(Decoupled(new SimpleBusReqBundle(userBits = userBits, addrBits = VAddrBits)))
     val out = Decoupled(new SimpleBusReqBundle(userBits = userBits))
 
+    //val md = Input(Vec())
+
     val mem = new SimpleBusUC()
     val flush = Input(Bool()) 
     val satp = Input(UInt(XLEN.W))
@@ -360,7 +374,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hit = io.in.valid && hitVec.orR
   val miss = io.in.valid && !hitVec.orR
 
-  val victimWaymask = if (NTLB > 1) (1.U << LFSR64()(log2Up(NTLB)-1,0)) else "b1".U
+  val victimWaymask = if (Ways > 1) (1.U << LFSR64()(log2Up(Ways)-1,0)) else "b1".U
   val waymask = Mux(hit, hitVec, victimWaymask)
 
   val loadPF = WireInit(false.B)
