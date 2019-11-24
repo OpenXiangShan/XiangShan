@@ -233,12 +233,13 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
   // tlb exec
   val tlbExec = Module(new TLBExec)
+  val tlbEmpty = Module(new TLBEmpty)
 
   tlbExec.io.flush := io.flush
   tlbExec.io.satp := satp
   tlbExec.io.mem <> io.mem
   tlbExec.io.pf <> io.csrMMU
-  
+
   io.ipf := false.B
 
   // VM enable && io
@@ -256,8 +257,12 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   }
 
   PipelineConnectTLB(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush, vmEnable)
+  if(tlbname == "dtlb") {
+    PipelineConnect(tlbEmpty.io.in, tlbExec.io.out, tlbEmpty.io.out.fire(), io.flush)
+  }
   when(!vmEnable) {
     tlbExec.io.out.ready := true.B // let existed request go out
+    if( tlbname == "dtlb") { tlbEmpty.io.out.ready := true.B }
     io.out.req.valid := io.in.req.valid
     io.in.req.ready := io.out.req.ready
     io.out.req.bits.addr := io.in.req.bits.addr(PAddrBits-1, 0)
@@ -267,7 +272,8 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     io.out.req.bits.wdata := io.in.req.bits.wdata
     io.out.req.bits.user.map(_ := io.in.req.bits.user.getOrElse(0.U))
   }.otherwise {
-    io.out.req <> tlbExec.io.out
+    if (tlbname == "dtlb") { io.out.req <> tlbEmpty.io.out}
+    else { io.out.req <> tlbExec.io.out }
   }
   io.out.resp <> io.in.resp
 
@@ -555,6 +561,15 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
       printf("[TLBExec-"  + tlbname+ "]: io.ipf:%d hitinstrPF:%d missIPF:%d pf.loadPF:%d pf.storePF:%d loadPF:%d storePF:%d\n", io.ipf, hitinstrPF, missIPF, io.pf.loadPF, io.pf.storePF, loadPF, storePF)
     }
   }
+}
+
+class TLBEmpty(implicit val tlbConfig: TLBConfig) extends TlbModule {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new SimpleBusReqBundle(userBits = userBits)))
+    val out = Decoupled(new SimpleBusReqBundle(userBits = userBits))
+  })
+
+  io.out <> io.in
 }
 
 object TLB {
