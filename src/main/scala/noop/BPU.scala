@@ -7,13 +7,14 @@ import chisel3.util.experimental.BoringUtils
 import utils._
 
 class TableAddr(val idxBits: Int) extends NOOPBundle {
-  def tagBits = AddrBits - 2 - idxBits
+  def tagBits = VAddrBits - 2 - idxBits
 
+  //val res = UInt((AddrBits - VAddrBits).W)
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
   val pad = UInt(2.W)//TODO
 
-  def fromUInt(x: UInt) = x.asTypeOf(UInt(AddrBits.W)).asTypeOf(this)
+  def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
   def getIdx(x: UInt) = fromUInt(x).idx
 }
@@ -29,9 +30,9 @@ object BTBtype {
 
 class BPUUpdateReq extends NOOPBundle {
   val valid = Output(Bool())
-  val pc = Output(UInt(AddrBits.W))
+  val pc = Output(UInt(VAddrBits.W))
   val isMissPredict = Output(Bool())
-  val actualTarget = Output(UInt(AddrBits.W))
+  val actualTarget = Output(UInt(VAddrBits.W))
   val actualTaken = Output(Bool())  // for branch
   val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
@@ -40,7 +41,7 @@ class BPUUpdateReq extends NOOPBundle {
 
 class BPU1 extends NOOPModule {
   val io = IO(new Bundle {
-    val in = new Bundle { val pc = Flipped(Valid((UInt(AddrBits.W)))) }
+    val in = new Bundle { val pc = Flipped(Valid((UInt(VAddrBits.W)))) }
     val out = new RedirectIO
     val flush = Input(Bool())
     val brIdx = Output(UInt(3.W))
@@ -55,25 +56,35 @@ class BPU1 extends NOOPModule {
   def btbEntry() = new Bundle {
     val tag = UInt(btbAddr.tagBits.W)
     val _type = UInt(2.W)
-    val target = UInt(AddrBits.W)
+    val target = UInt(VAddrBits.W)
     val brIdx = UInt(3.W)
+    val valid = Bool()
   }
 
   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
   // flush BTB when executing fence.i
   val flushBTB = WireInit(false.B)
+  val flushTLB = WireInit(false.B)
   BoringUtils.addSink(flushBTB, "MOUFlushICache")
-  btb.reset := reset.asBool || flushBTB
+  BoringUtils.addSink(flushTLB, "MOUFlushTLB")
+  btb.reset := reset.asBool || (flushBTB || flushTLB)
+
+  Debug(false) {
+    when (reset.asBool || (flushBTB || flushTLB)) {
+      printf("[BPU-RESET] %d bpu-reset flushBTB:%d flushTLB:%d\n", GTimer(), flushBTB, flushTLB)
+    }
+  }
 
   btb.io.r.req.valid := io.in.pc.valid
   btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
+
 
   val btbRead = Wire(btbEntry())
   btbRead := btb.io.r.resp.data(0)
   // since there is one cycle latency to read SyncReadMem,
   // we should latch the input pc for one cycle
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.ready, init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
+  val btbHit = btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.fire(), init = false.B) && !(pcLatch(1) && btbRead.brIdx(0)) && btbRead.valid
   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
   // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
   // -------------------------------------------------
@@ -84,14 +95,15 @@ class BPU1 extends NOOPModule {
   io.lateJump := lateJump
   // val lateJumpLatch = RegNext(lateJump)
   // val lateJumpTarget = RegEnable(btbRead.target, lateJump)
-  Debug(){
-  // printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
-  when(btbHit){
-      printf("[BTBHT] pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x\n", pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush)
-      // printf("[BTBHT] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
+  Debug(false){
+    //printf("[BTBHT] lateJump %x lateJumpLatch %x lateJumpTarget %x\n", lateJump, lateJumpLatch, lateJumpTarget)
+    when(btbHit){
+      printf("[BTBHT1] %d pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", GTimer(), pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
+      printf("[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(lateJump, Fill(2, io.out.valid)))
+      printf("[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setIdx)
     }
   }
-
+  
   // PHT
   val pht = Mem(NRbtb, UInt(2.W))
   val phtTaken = RegEnable(pht.read(btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
@@ -99,7 +111,7 @@ class BPU1 extends NOOPModule {
   // RAS
 
   val NRras = 16
-  val ras = Mem(NRras, UInt(AddrBits.W))
+  val ras = Mem(NRras, UInt(VAddrBits.W))
   // val raBrIdxs = Mem(NRras, UInt(2.W))
   val sp = Counter(NRras)
   val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
@@ -110,16 +122,26 @@ class BPU1 extends NOOPModule {
   val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
   BoringUtils.addSink(req, "bpuUpdateReq")
 
-  Debug(){
-  when(req.valid){
-      printf("[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
-    }
+  Debug(false){
+    when(req.valid){
+        printf("[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
+      }
   }
+
+    //val fflag = req.btbType===3.U && btb.io.w.req.valid && btb.io.w.req.bits.setIdx==="hc9".U
+    //when(fflag && GTimer()>2888000.U) {
+    //  printf("%d\n", GTimer())
+    //  printf("[BTBHT6] btbWrite.type is BTBtype.R/RET!!! Inpc:%x btbWrite.brIdx:%x setIdx:%x\n", io.in.pc.bits, btbWrite.brIdx, btb.io.w.req.bits.setIdx)
+    //  printf("[BTBHT6] tag:%x target:%x _type:%x bridx:%x\n", btbWrite.tag,btbWrite.target,btbWrite._type,btbWrite.brIdx)
+    //  printf(p"[BTBHT6] req:${req} \n")
+    //} 
+    //printf("[BTBHT5] tag: target:%x type:%d brIdx:%d\n", req.actualTarget, req.btbType, Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)))
 
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
   btbWrite._type := req.btbType
   btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1))
+  btbWrite.valid := true.B 
   // NOTE: We only update BTB at a miss prediction.
   // If a miss prediction is found, the pipeline will be flushed
   // in the next cycle. Therefore it is safe to use single-port
@@ -130,6 +152,16 @@ class BPU1 extends NOOPModule {
   btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
   btb.io.w.req.bits.data := btbWrite
 
+  //Debug(true) {
+    //when (btb.io.w.req.valid && btbWrite.tag === btbAddr.getTag("hffffffff803541a4".U)) {
+    //  printf("[BTBWrite] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
+    //}
+  //}
+
+  //when (GTimer() > 77437484.U && btb.io.w.req.valid) {
+  //  printf("[BTBWrite-ALL] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
+  //}
+
   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
   val reqLatch = RegNext(req)
   when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
@@ -138,9 +170,9 @@ class BPU1 extends NOOPModule {
     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
     when (wen) {
       pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
-      Debug(){
-        printf("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
-      }
+      //Debug(){
+        //printf("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
+      //}
     }
   }
   when (req.valid) {
@@ -150,7 +182,10 @@ class BPU1 extends NOOPModule {
       sp.value := sp.value + 1.U
     }
     .elsewhen (req.fuOpType === ALUOpType.ret) {
-      sp.value := sp.value - 1.U
+      when(sp.value === 0.U) {
+        //printf("ATTTTT: sp.value is 0.U\n") //TODO: sp.value may equal to 0.U
+      }
+      sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U) //TODO: sp.value may less than 0.U
     }
   }
 
@@ -158,7 +193,7 @@ class BPU1 extends NOOPModule {
   // io.out.target := Mux(lateJumpLatch && !flush, lateJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
   // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
   io.brIdx  := btbRead.brIdx & Cat(true.B, lateJump, Fill(2, io.out.valid))
-  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B)
+  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
   // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump || lateJumpLatch && !flush && !lateJump
   // Note: 
   // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !lateJump : normal branch predict

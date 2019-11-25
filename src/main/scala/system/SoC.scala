@@ -53,7 +53,8 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
       xbar.io.out.resp <> l2cacheIn.resp
       l2cacheIn
     } else xbar.io.out
-    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, enable = true)(
+    val l2Empty = Wire(Bool())
+    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, empty = l2Empty, enable = true)(
       CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
     io.mem <> l2cacheOut.mem.toAXI4()
     l2cacheOut.coh.resp.ready := true.B

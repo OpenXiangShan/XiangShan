@@ -48,8 +48,8 @@ dhrystone:
 xj:
 	$(MAKE) -C $(NANOS_HOME) $(ARCH) run
 
-# xjnemu:
-# 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
+xjnemu:
+	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
 
 rttos:
 	$(MAKE) -C $(RTTOS_HOME)/bsp/riscv64-noop run
@@ -60,6 +60,14 @@ rttos-debug:
 freertos:
 	$(MAKE) -C $(FREERTOS_HOME)/Demo/riscv64-noop noop_run
 
+xv6:
+	$(MAKE) -C $(XV6_HOME) noop
+
+xv6-debug:
+	$(MAKE) -C $(XV6_HOME) noop 2>&1 | tee > xv6.log
+
+linux:
+	$(MAKE) -C $(BBL_LINUX_HOME) noop
 # ------------------------------------------------------------------
 # get disassembled test src
 # ------------------------------------------------------------------
@@ -69,4 +77,7 @@ disassemble-rttos:
 
 disassemble-freertos:
 	cp $(FREERTOS_HOME)/Demo/riscv64-noop/build/FreeRTOS-simple.elf.txt ./d-freertos.log
+
+disassemble-xv6:
+	cp $(XV6_HOME)/build/code.txt ./d-xv6.log
 

@@ -32,6 +32,7 @@ class IDU2 extends NOOPModule with HasInstrType {
     InstrI -> (SrcType.reg, SrcType.imm),
     InstrR -> (SrcType.reg, SrcType.reg),
     InstrS -> (SrcType.reg, SrcType.reg),
+    InstrSA-> (SrcType.reg, SrcType.reg),
     InstrB -> (SrcType.reg, SrcType.reg),
     InstrU -> (SrcType.pc , SrcType.imm),
     InstrJ -> (SrcType.pc , SrcType.imm),
@@ -81,6 +82,7 @@ class IDU2 extends NOOPModule with HasInstrType {
   val imm = LookupTree(instrType, List(
     InstrI  -> SignExt(instr(31, 20), XLEN),
     InstrS  -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
+    InstrSA -> SignExt(Cat(instr(31, 25), instr(11, 7)), XLEN),
     InstrB  -> SignExt(Cat(instr(31), instr(7), instr(30, 25), instr(11, 8), 0.U(1.W)), XLEN),
     InstrU  -> SignExt(Cat(instr(31, 12), 0.U(12.W)), XLEN),//fixed
     InstrJ  -> SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
@@ -125,6 +127,10 @@ class IDU2 extends NOOPModule with HasInstrType {
   io.in.ready := !io.in.valid || io.out.fire() && !hasIntr
   io.out.bits.cf <> io.in.bits
 
+  Debug(){
+    when(io.out.fire()){printf("[IDU] issue: pc %x npc %x instr %x\n", io.out.bits.cf.pc, io.out.bits.cf.pnpc, io.out.bits.cf.instr)}
+  }
+
   val intrVec = WireInit(0.U(12.W))
   BoringUtils.addSink(intrVec, "intrVecIDU")
   io.out.bits.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
@@ -132,7 +138,7 @@ class IDU2 extends NOOPModule with HasInstrType {
 
   io.out.bits.cf.exceptionVec.map(_ := false.B)
   io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
-  io.out.bits.cf.exceptionVec(ecallM) := (instr === Priviledged.ECALL) && io.in.valid
+  io.out.bits.cf.exceptionVec(instrPageFault) := io.in.bits.exceptionVec(instrPageFault)
 
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
 }

@@ -19,7 +19,7 @@ object AXI4Parameters extends HasNOOPParameter {
 
   // These are not fixed:
   val idBits    = 1
-  val addrBits  = AddrBits
+  val addrBits  = PAddrBits
   val dataBits  = DataBits
   val userBits  = 1
 
