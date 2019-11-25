@@ -101,12 +101,12 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
   val tlbXbar = Module(new SimpleBusCrossbarNto1(3))
 
-  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = VAddrBits*2 + 4))
+  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = VAddrBits*2 + 4, totalEntry = 64))
   ifu.io.ipf := itlb.io.ipf
   io.imem <> Cache(in = itlb.io.out, mmio = mmioXbar.io.in(0), flush = Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush), empty = itlb.io.cacheEmpty)(
-    CacheConfig(ro = true, name = "icache", userBits = VAddrBits*2 + 4))
+    CacheConfig(ro = true, name = "icache", userBits = VAddrBits*2 + 64))
   
-  val dtlb = TLB(in = exu.io.dmem, mem = tlbXbar.io.in(1), flush = false.B, csrMMU = exu.io.memMMU.dmem)(TLBConfig(name = "dtlb"))
+  val dtlb = TLB(in = exu.io.dmem, mem = tlbXbar.io.in(1), flush = false.B, csrMMU = exu.io.memMMU.dmem)(TLBConfig(name = "dtlb", totalEntry = 4))
   tlbXbar.io.in(0) <> dtlb.io.out
   io.dmem <> Cache(in = tlbXbar.io.out, mmio = mmioXbar.io.in(1), flush = "b00".U, empty = dtlb.io.cacheEmpty, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
 

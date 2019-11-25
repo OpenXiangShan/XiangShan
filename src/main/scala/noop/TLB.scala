@@ -187,7 +187,7 @@ sealed trait HasTlbConst extends Sv39Const{
 sealed abstract class TlbBundle(implicit tlbConfig: TLBConfig) extends Bundle with HasNOOPParameter with HasTlbConst with Sv39Const
 sealed abstract class TlbModule(implicit tlbConfig: TLBConfig) extends Module with HasNOOPParameter with HasTlbConst with Sv39Const with HasCSRConst
 
-class TLBMDWriteBundle (IndexBits: Int, Ways: Int, tlbLen: Int) extends Bundle with HasNOOPParameter with Sv39Const {
+class TLBMDWriteBundle (val IndexBits: Int, val Ways: Int, val tlbLen: Int) extends Bundle with HasNOOPParameter with Sv39Const {
   val wen = Output(Bool())
   val windex = Output(UInt(IndexBits.W))
   val waymask = Output(UInt(Ways.W))
@@ -255,7 +255,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val tlbExec = Module(new TLBExec)
   val tlbEmpty = Module(new TLBEmpty)
   val mdTLB = Module(new TLBMD)
-  val mdUpdate = Bool()
+  val mdUpdate = Wire(Bool())
   
   tlbExec.io.flush := io.flush
   tlbExec.io.satp := satp
@@ -558,7 +558,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
   // tlb refill
   io.mdWrite.apply(wen = RegNext((missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush), init = false.B), 
-    windex = RegNext(0.U), waymask = RegNext(waymask), vpn = RegNext(vpn.asUInt), 
+    windex = RegNext(getIndex(req.addr)), waymask = RegNext(waymask), vpn = RegNext(vpn.asUInt), 
     asid = RegNext(Mux(hitWB, hitMeta.asid, satp.asid)), mask = RegNext(Mux(hitWB, hitMask, missMask)), 
     flag = RegNext(Mux(hitWB, hitRefillFlag, missRefillFlag)), ppn = RegNext(Mux(hitWB, hitData.ppn, memRdata.ppn)), 
     pteaddr = RegNext((Mux(hitWB, hitData.pteaddr, raddr))))
