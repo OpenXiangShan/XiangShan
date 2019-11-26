@@ -96,7 +96,7 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 200;
+    const int stuck_limit = 600;
     while (!is_finish() && n > 0) {
       single_cycle();
       n --;

@@ -29,7 +29,7 @@ class NOOPSimTop extends Module {
   val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
   // Be careful with the commit checking of emu.
   // A large delay will make emu incorrectly report getting stuck.
-  val memdelay = Module(new AXI4Delayer(0))
+  val memdelay = Module(new AXI4Delayer(60))
   val mmio = Module(new SimMMIO)
 
   memdelay.io.in <> soc.io.mem
