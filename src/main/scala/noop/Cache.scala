@@ -166,7 +166,15 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
 
   val hitVec = VecInit(metaWay.map(m => m.valid && (m.tag === addr.tag) && io.in.valid)).asUInt
   val victimWaymask = if (Ways > 1) (1.U << LFSR64()(log2Up(Ways)-1,0)) else "b1".U
-  val waymask = Mux(io.out.bits.hit, hitVec, victimWaymask)
+   
+  val invalidVec = VecInit(metaWay.map(m => !m.valid)).asUInt
+  val hasInvalidWay = invalidVec.orR
+  val refillInvalidWaymask = Mux(invalidVec >= 8.U, "b1000".U,
+    Mux(invalidVec >= 4.U, "b0100".U,
+    Mux(invalidVec >= 2.U, "b0010".U, "b0001".U)))
+  
+  // val waymask = Mux(io.out.bits.hit, hitVec, victimWaymask)
+  val waymask = Mux(io.out.bits.hit, hitVec, Mux(hasInvalidWay, refillInvalidWaymask, victimWaymask))
   assert(!(io.in.valid && PopCount(waymask) > 1.U))
 
   io.out.bits.metas := metaWay
@@ -412,7 +420,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     Mux(hit || req.isWrite(), io.out.fire(), (state === s_wait_resp) && (io.out.fire() || alreadyOutFire))
   )
 
-  io.in.ready := io.out.ready && (state === s_idle) && !miss && !probe
+  io.in.ready := io.out.ready && (state === s_idle && !hitReadBurst) && !miss && !probe
   io.dataReadRespToL1 := hitReadBurst && (state === s_idle && io.out.ready || state === s_release && state2 === s2_dataOK)
 
   assert(!(metaHitWriteBus.req.valid && metaRefillWriteBus.req.valid))
@@ -459,15 +467,20 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   arb.io.in(hasCohInt + 0) <> io.in.req
 
   s1.io.in <> arb.io.out
+  /*
+  val s2BlockByPrefetch = if (cacheLevel == 2) {
+      s2.io.out.valid && s3.io.in.valid && s3.io.in.bits.req.isPrefetch() && !s3.io.in.ready
+    } else { false.B }
+  */
   PipelineConnect(s1.io.out, s2.io.in, s2.io.out.fire(), io.flush(0))
-  PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1) || s2.io.out.bits.mmio && s2.io.out.bits.req.isPrefetch())
+  PipelineConnect(s2.io.out, s3.io.in, s3.io.isFinish, io.flush(1) || s2.io.out.bits.mmio && s2.io.out.bits.req.isPrefetch()/* || s2BlockByPrefetch*/)
   io.in.resp <> s3.io.out
   s3.io.flush := io.flush(1)
   io.out.mem <> s3.io.mem
   io.mmio <> s3.io.mmio
   io.empty := !s2.io.in.valid && !s3.io.in.valid
 
-  io.in.resp.valid := Mux(s3.io.out.bits.isPrefetch(), false.B, s3.io.out.valid || s3.io.dataReadRespToL1)
+  io.in.resp.valid := Mux(s3.io.out.valid && s3.io.out.bits.isPrefetch(), false.B, s3.io.out.valid || s3.io.dataReadRespToL1)
 
   if (hasCoh) {
     val cohReq = io.out.coh.req.bits
