@@ -26,7 +26,7 @@ abstract class AXI4SlaveModule[T <: AXI4Lite, B <: Data](_type :T = new AXI4, _e
       val beatCnt = Counter(256)
       val len = HoldUnless(axi4.ar.bits.len, axi4.ar.fire())
       val burst = HoldUnless(axi4.ar.bits.burst, axi4.ar.fire())
-      val wrapAddr = axi4.ar.bits.addr & ~(axi4.ar.bits.len.asTypeOf(UInt(AddrBits.W)) << axi4.ar.bits.size)
+      val wrapAddr = axi4.ar.bits.addr & ~(axi4.ar.bits.len.asTypeOf(UInt(PAddrBits.W)) << axi4.ar.bits.size)
       raddr := HoldUnless(wrapAddr, axi4.ar.fire())
       axi4.r.bits.last := (c.value === len)
       when (ren) {

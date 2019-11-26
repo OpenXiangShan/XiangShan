@@ -21,7 +21,7 @@ static int uart_dequeue(void) {
     f = (f + 1) % QUEUE_SIZE;
   } else {
     // generate a random key every 1s for pal
-    k = "uiojkl"[rand()% 6];
+    k = -1;//"uiojkl"[rand()% 6];
   }
   return k;
 }
@@ -31,11 +31,11 @@ extern "C" void uart_getc(uint8_t *ch) {
   static uint32_t lasttime = 0;
   uint32_t now = uptime();
 
-  *ch = 0;
-  if (now - lasttime > 30000) {
-    lasttime = now;
+  *ch = -1;
+  // if (now - lasttime > 3000) {
+    // lasttime = now;
     *ch = uart_dequeue();
-  }
+  // }
 }
 
 void uart_putc(char c) {
@@ -47,7 +47,18 @@ static void preset_input() {
   char init_cmd[128] = "2" // choose PAL
     "jjjjjjjkkkkkk" // walk to enemy
     ;
-  char *buf = init_cmd;
+  char busybox_cmd[128] =
+    "ls\n"
+    "echo 123\n"
+    "cd /root/benchmark\n"
+    "ls\n"
+    "./stream\n"
+    "ls\n"
+    "cd /root/redis\n"
+    "ls\n"
+    "ifconfig -a\n"
+    "./redis-server\n";
+  char *buf = busybox_cmd;
   int i;
   for (i = 0; i < strlen(buf); i ++) {
     uart_enqueue(buf[i]);

@@ -24,23 +24,23 @@ class DataSrcIO extends NOOPBundle {
 }
 
 class RedirectIO extends NOOPBundle {
-  val target = Output(UInt(AddrBits.W))
+  val target = Output(UInt(VAddrBits.W))
   // val brIdx = Output(UInt(3.W)) // for RVC
   val valid = Output(Bool())
 }
 
 // class IRIDCtrlFlowIO extends NOOPBundle {
 //   val instr = Output(UInt(64.W))
-//   val pc = Output(UInt(AddrBits.W))
-//   val pnpc = Output(UInt(AddrBits.W))
+//   val pc = Output(UInt(VAddrBits.W))
+//   val pnpc = Output(UInt(VAddrBits.W))
 //   val brIdx = Output(UInt(3.W))
 //   val redirect = new RedirectIO
 // }
 
 class CtrlFlowIO extends NOOPBundle {
   val instr = Output(UInt(64.W))
-  val pc = Output(UInt(AddrBits.W))
-  val pnpc = Output(UInt(AddrBits.W))
+  val pc = Output(UInt(VAddrBits.W))
+  val pnpc = Output(UInt(VAddrBits.W))
   val redirect = new RedirectIO
   val exceptionVec = Output(Vec(16, Bool()))
   val intrVec = Output(Vec(12, Bool()))
@@ -79,4 +79,43 @@ class ForwardIO extends NOOPBundle {
   val valid = Output(Bool())
   val wb = new WriteBackIO
   val fuType = Output(FuType())
+}
+
+class MMUIO extends NOOPBundle {
+  // val ptev = Output(Bool())
+  // val pteu = Output(Bool())
+  // val ptex = Output(Bool())
+  // val valid = Output(Bool())
+  // val isStore = Output(Bool())
+
+  val priviledgeMode = Input(UInt(2.W))
+  val status_sum = Input(Bool())
+  val status_mxr = Input(Bool())
+
+  val loadPF = Output(Bool())
+  val storePF = Output(Bool())
+  val addr = Output(UInt(VAddrBits.W)) 
+  
+  def isPF() = loadPF || storePF
+}
+
+class MemMMUIO extends NOOPBundle {
+  val imem = new MMUIO
+  val dmem = new MMUIO
+}
+
+class TLBExuIO extends NOOPBundle {
+  val satp = Output(UInt(XLEN.W))
+  val sfence = new Bundle {
+    val valid = Output(Bool())
+    val asid  = Output(UInt(9.W))
+    val vaddr = Output(UInt(XLEN.W))
+  }
+
+  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt, satp: UInt) = {//func no use here for just sfence.vma only
+    this.sfence.valid := valid
+    this.sfence.vaddr := src1
+    this.sfence.asid  := src2(8,0)
+    this.satp := satp
+  }
 }

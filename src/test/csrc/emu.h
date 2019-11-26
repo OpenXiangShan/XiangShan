@@ -96,7 +96,7 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 600;
+    const int stuck_limit = 500;
     while (!is_finish() && n > 0) {
       single_cycle();
       n --;
@@ -113,9 +113,36 @@ class Emulator {
         uint64_t reg[33];
         read_emu_regs(reg);
 
-        extern int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, uint64_t intrNO);
-        if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO, 
-          dut_ptr->io_difftest_isRVC, dut_ptr->io_difftest_intrNO)) {
+        extern int difftest_step(
+          uint64_t *reg_scala, 
+          uint64_t this_pc, 
+          int this_inst, 
+          int isMMIO, 
+          int isRVC, 
+          uint64_t intrNO,
+          int priviledgeMode,
+          uint64_t mstatus,
+          uint64_t sstatus,
+          uint64_t mepc,
+          uint64_t sepc,
+          uint64_t mcause,
+          uint64_t scause
+        );
+        if (difftest_step(
+            reg, 
+            dut_ptr->io_difftest_thisPC, 
+            dut_ptr->io_difftest_thisINST, 
+            dut_ptr->io_difftest_isMMIO, 
+            dut_ptr->io_difftest_isRVC, 
+            dut_ptr->io_difftest_intrNO,
+            dut_ptr->io_difftest_priviledgeMode,
+            dut_ptr->io_difftest_mstatus,
+            dut_ptr->io_difftest_sstatus,
+            dut_ptr->io_difftest_mepc,
+            dut_ptr->io_difftest_sepc,
+            dut_ptr->io_difftest_mcause,
+            dut_ptr->io_difftest_scause
+            )) {
           set_abort();
         }
         lastcommit = n;
