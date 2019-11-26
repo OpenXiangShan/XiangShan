@@ -14,9 +14,18 @@ class DiffTestIO extends Bundle {
   val r = Output(Vec(32, UInt(64.W)))
   val commit = Output(Bool())
   val thisPC = Output(UInt(64.W))
+  val thisINST = Output(UInt(32.W))
   val isMMIO = Output(Bool())
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
+  
+  val priviledgeMode = Output(UInt(2.W))
+  val mstatus = Output(UInt(64.W))
+  val sstatus = Output(UInt(64.W))
+  val mepc = Output(UInt(64.W))
+  val sepc = Output(UInt(64.W))
+  val mcause = Output(UInt(64.W))
+  val scause = Output(UInt(64.W))
 }
 
 class NOOPSimTop extends Module {
@@ -36,7 +45,7 @@ class NOOPSimTop extends Module {
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio
-  soc.io.mtip := mmio.io.mtip
+  soc.io.mtip := false.B//mmio.io.mtip
 
   // soc.io.meip := Counter(true.B, 9973)._2  // use prime here to not overlapped by mtip
   soc.io.meip := false.B  // use prime here to not overlapped by mtip
@@ -44,10 +53,18 @@ class NOOPSimTop extends Module {
   val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
   BoringUtils.addSink(difftest.commit, "difftestCommit")
   BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
+  BoringUtils.addSink(difftest.thisINST, "difftestThisINST")
   BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
   BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
   BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
+  BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
+  BoringUtils.addSink(difftest.mstatus, "difftestMstatus")
+  BoringUtils.addSink(difftest.sstatus, "difftestSstatus") 
+  BoringUtils.addSink(difftest.mepc, "difftestMepc")
+  BoringUtils.addSink(difftest.sepc, "difftestSepc")
+  BoringUtils.addSink(difftest.mcause, "difftestMcause")
+  BoringUtils.addSink(difftest.scause, "difftestScause")
   io.difftest := difftest
 }
 

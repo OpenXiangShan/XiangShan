@@ -8,8 +8,9 @@ import utils._
 
 // memory order unit
 object MOUOpType {
-  def fence  = "b0".U
-  def fencei = "b1".U
+  def fence  = "b00".U
+  def fencei = "b01".U
+  def sfence_vma = "b10".U
 }
 
 class MOUIO extends FunctionUnitIO {
@@ -36,6 +37,14 @@ class MOU extends NOOPModule {
   Debug(true){
     when(flushICache){
       printf("[MOU] Flush I$ at %x\n", io.cfIn.pc)
+    }
+  }
+
+  val flushTLB = valid && (func === MOUOpType.sfence_vma)
+  BoringUtils.addSource(flushTLB, "MOUFlushTLB")
+  Debug(false) {
+    when (flushTLB) {
+      printf("[MOU] Flush TLB at %x\n", io.cfIn.pc)
     }
   }
 
