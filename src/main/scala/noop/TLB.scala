@@ -120,8 +120,8 @@ case class TLBConfig (
   name: String = "tlb",
   userBits: Int = 0,
 
-  totalSize: Int = 128, 
-  entryNum: Int = 4
+  totalEntry: Int = 4,
+  ways: Int = 4
 )
 
 sealed trait HasTlbConst extends Sv39Const{
@@ -135,15 +135,23 @@ sealed trait HasTlbConst extends Sv39Const{
   val tlbname = tlbConfig.name
   val userBits = tlbConfig.userBits
 
-  val NTLB = tlbConfig.entryNum
-  val NTLBBits = log2Up(NTLB)
-
   val maskLen = vpn0Len + vpn1Len  // 18
   val metaLen = vpnLen + asidLen + maskLen + flagLen // 27 + 16 + 18 + 8 = 69, is asid necessary 
   val dataLen = ppnLen + PAddrBits // 
   val tlbLen = metaLen + dataLen
+  val Ways = tlbConfig.ways
+  val TotalEntry = tlbConfig.totalEntry
+  val Sets = TotalEntry / Ways
+  val IndexBits = log2Up(Sets)
+  val TagBits = vpnLen - IndexBits
 
   val debug = true //&& tlbname == "dtlb"
+
+  def vaddrTlbBundle = new Bundle {
+    val tag = UInt(TagBits.W)
+    val index = UInt(IndexBits.W)
+    val off = UInt(offLen.W)
+  }
 
   def metaBundle = new Bundle {
     val vpn = UInt(vpnLen.W)
@@ -163,53 +171,65 @@ sealed trait HasTlbConst extends Sv39Const{
     val mask = UInt(maskLen.W)
     val flag = UInt(flagLen.W)
     val ppn = UInt(ppnLen.W)
-    val addr = UInt(PAddrBits.W)
+    val pteaddr = UInt(PAddrBits.W)
   }
 
   def tlbBundle2 = new Bundle {
     val meta = UInt(metaLen.W)
     val data = UInt(dataLen.W)
   }
+
+  def getIndex(vaddr: UInt) : UInt = {
+    vaddr.asTypeOf(vaddrTlbBundle).index
+  }
 }
 
 sealed abstract class TlbBundle(implicit tlbConfig: TLBConfig) extends Bundle with HasNOOPParameter with HasTlbConst with Sv39Const
 sealed abstract class TlbModule(implicit tlbConfig: TLBConfig) extends Module with HasNOOPParameter with HasTlbConst with Sv39Const with HasCSRConst
 
+class TLBMDWriteBundle (val IndexBits: Int, val Ways: Int, val tlbLen: Int) extends Bundle with HasNOOPParameter with Sv39Const {
+  val wen = Output(Bool())
+  val windex = Output(UInt(IndexBits.W))
+  val waymask = Output(UInt(Ways.W))
+  val wdata = Output(UInt(tlbLen.W))
+  
+  def apply(wen: UInt, windex: UInt, waymask: UInt, vpn: UInt, asid: UInt, mask: UInt, flag: UInt, ppn: UInt, pteaddr: UInt) {
+    this.wen := wen
+    this.windex := windex
+    this.waymask := waymask
+    this.wdata := Cat(vpn, asid, mask, flag, ppn, pteaddr)
+  }
+}
+
 class TLBMD(implicit val tlbConfig: TLBConfig) extends TlbModule {
   val io = IO(new Bundle {
-    val tlbmd = Output(Vec(NTLB, UInt(tlbLen.W)))
-
-    val write = new Bundle {
-      val wen = Input(Bool())
-      val dest = Input(UInt(NTLBBits.W))
-      val vpn = Input(UInt(vpnLen.W))
-      val asid = Input(UInt(asidLen.W))
-      val mask = Input(UInt(maskLen.W))
-      val flag = Input(UInt(flagLen.W))
-      val ppn = Input(UInt(ppnLen.W))
-      val pteaddr = Input(UInt(PAddrBits.W))
-    }
-
+    val tlbmd = Output(Vec(Ways, UInt(tlbLen.W)))
+    val write = Flipped(new TLBMDWriteBundle(IndexBits = IndexBits, Ways = Ways, tlbLen = tlbLen))
+    val rindex = Input(UInt(IndexBits.W))
     val ready = Output(Bool())
   })
 
-  val tlbmd = Reg(Vec(NTLB, UInt(tlbLen.W)))
-  io.tlbmd := tlbmd
+  //val tlbmd = Reg(Vec(Ways, UInt(tlbLen.W)))
+  val tlbmd = Mem(Sets, Vec(Ways, UInt(tlbLen.W)))
+  io.tlbmd := tlbmd(io.rindex)
 
   //val reset = WireInit(false.B)
   val resetState = RegInit(true.B)//RegEnable(true.B, init = true.B, reset)
-  val (resetSet, resetFinish) = Counter(resetState, NTLB)
+  val (resetSet, resetFinish) = Counter(resetState, Sets)
   when (resetFinish) { resetState := false.B }
 
   val writeWen = io.write.wen//WireInit(false.B)
-  val writeDest = io.write.dest//WireInit(0.U(NTLBBits.W))
-  val writeData = Cat(io.write.vpn, io.write.asid, io.write.mask, io.write.flag, io.write.ppn, io.write.pteaddr)//WireInit(0.U(metaLen.W))
+  val writeSetIdx = io.write.windex
+  val writeWayMask = io.write.waymask
+  val writeData = io.write.wdata
 
   val wen = Mux(resetState, true.B, writeWen)
-  val dest = Mux(resetState, resetSet, writeDest)
-  val data = Mux(resetState, 0.U, writeData)
+  val setIdx = Mux(resetState, resetSet, writeSetIdx)
+  val waymask = Mux(resetState, Fill(Ways, "b1".U), writeWayMask)
+  val dataword = Mux(resetState, 0.U, writeData)
+  val wdata = VecInit(Seq.fill(Ways)(dataword))
 
-  when (wen) { tlbmd(dest) := data }
+  when (wen) { tlbmd.write(setIdx, wdata, waymask.asBools) }
 
   io.ready := !resetState
   def rready() = !resetState
@@ -234,18 +254,34 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   // tlb exec
   val tlbExec = Module(new TLBExec)
   val tlbEmpty = Module(new TLBEmpty)
-
+  val mdTLB = Module(new TLBMD)
+  val mdUpdate = Wire(Bool())
+  
   tlbExec.io.flush := io.flush
   tlbExec.io.satp := satp
   tlbExec.io.mem <> io.mem
   tlbExec.io.pf <> io.csrMMU
-
+  tlbExec.io.md <> RegEnable(mdTLB.io.tlbmd, mdUpdate)
+  tlbExec.io.mdReady := mdTLB.io.ready
+  mdTLB.io.rindex := getIndex(io.in.req.bits.addr)
+  mdTLB.io.write <> tlbExec.io.mdWrite
+  
   io.ipf := false.B
+  
+  // meta reset
+  val flushTLB = WireInit(false.B)
+  BoringUtils.addSink(flushTLB, "MOUFlushTLB")
+  mdTLB.reset := reset.asBool || flushTLB
+  Debug() {
+    when(flushTLB && GTimer() > 77437080.U) {
+      printf("%d sfence_vma req.pc:%x valid:%d\n", GTimer(), io.in.req.bits.addr, io.in.req.valid)
+    }
+  }
 
   // VM enable && io
   val vmEnable = satp.asTypeOf(satpBundle).mode === 8.U && (io.csrMMU.priviledgeMode < ModeM)
 
-  def PipelineConnectTLB[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool, vmEnable: Bool) = {
+  def PipelineConnectTLB[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], update: Bool, rightOutFire: Bool, isFlush: Bool, vmEnable: Bool) = {
     val valid = RegInit(false.B)
     when (rightOutFire) { valid := false.B }
     when (left.valid && right.ready && vmEnable) { valid := true.B }
@@ -254,11 +290,13 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     left.ready := right.ready
     right.bits <> RegEnable(left.bits, left.valid && right.ready)
     right.valid := valid //&& !isFlush
+
+    update := left.valid && right.ready
   }
 
   tlbEmpty.io.in <> DontCare
   tlbEmpty.io.out.ready := DontCare
-  PipelineConnectTLB(io.in.req, tlbExec.io.in, tlbExec.io.isFinish, io.flush, vmEnable)
+  PipelineConnectTLB(io.in.req, tlbExec.io.in, mdUpdate, tlbExec.io.isFinish, io.flush, vmEnable)
   if(tlbname == "dtlb") {
     PipelineConnect(tlbExec.io.out, tlbEmpty.io.in, tlbEmpty.io.out.fire(), io.flush)
   }
@@ -322,6 +360,10 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val in = Flipped(Decoupled(new SimpleBusReqBundle(userBits = userBits, addrBits = VAddrBits)))
     val out = Decoupled(new SimpleBusReqBundle(userBits = userBits))
 
+    val md = Input(Vec(Ways, UInt(tlbLen.W)))
+    val mdWrite = new TLBMDWriteBundle(IndexBits = IndexBits, Ways = Ways, tlbLen = tlbLen)
+    val mdReady = Input(Bool())
+
     val mem = new SimpleBusUC()
     val flush = Input(Bool()) 
     val satp = Input(UInt(XLEN.W))
@@ -330,20 +372,8 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val isFinish = Output(Bool())
   })
 
-  // meta & data
-  val mdTLB = Module(new TLBMD) // meta and data
-  val md = RegEnable(mdTLB.io.tlbmd, io.in.ready)
-
-  // meta reset
-  val flushTLB = WireInit(false.B)
-  BoringUtils.addSink(flushTLB, "MOUFlushTLB")
-  mdTLB.reset := reset.asBool || flushTLB
-  Debug() {
-    when(flushTLB && GTimer() > 77437080.U) {
-      printf("%d sfence_vma req.pc:%x valid:%d\n", GTimer(), io.in.bits.addr, io.in.valid)
-    }
-  }
-
+  val md = io.md//RegEnable(mdTLB.io.tlbmd, io.in.ready)
+  
   // lazy renaming
   val req = io.in.bits
   val vpn = req.addr.asTypeOf(vaBundle2).vpn.asTypeOf(vpnBundle)
@@ -360,7 +390,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   val hit = io.in.valid && hitVec.orR
   val miss = io.in.valid && !hitVec.orR
 
-  val victimWaymask = if (NTLB > 1) (1.U << LFSR64()(log2Up(NTLB)-1,0)) else "b1".U
+  val victimWaymask = if (Ways > 1) (1.U << LFSR64()(log2Up(Ways)-1,0)) else "b1".U
   val waymask = Mux(hit, hitVec, victimWaymask)
 
   val loadPF = WireInit(false.B)
@@ -388,9 +418,6 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     BoringUtils.addSink(isAMO, "ISAMO")
   }
 
-  io.pf.loadPF := false.B
-  io.pf.storePF := false.B
-  io.pf.addr := req.addr
   io.pf.loadPF := RegNext(loadPF, init =false.B)
   io.pf.storePF := RegNext(storePF, init = false.B)
 
@@ -416,7 +443,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
 
   //handle flush
   val needFlush = RegInit(false.B)
-  val ioFlush = io.flush || flushTLB
+  val ioFlush = io.flush
   val isFlush = needFlush || ioFlush
   when (ioFlush && (state =/= s_idle)) { needFlush := true.B}
   when (io.out.fire() && needFlush) { needFlush := false.B}
@@ -529,23 +556,19 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
   io.mem.req.valid := ((state === s_memReadReq || state === s_write_pte) && !isFlush)
   io.mem.resp.ready := true.B
 
-  // meta & data refill . TODO: try to wrap the below by a method
-  val wdest = OHToUInt(waymask)
-  mdTLB.io.write.wen := RegNext((missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush), init = false.B)
-  mdTLB.io.write.dest := RegNext(wdest)
-  mdTLB.io.write.vpn := RegNext(vpn.asUInt)
-  mdTLB.io.write.asid := RegNext(Mux(hitWB, hitMeta.asid, satp.asid))
-  mdTLB.io.write.mask := RegNext(Mux(hitWB, hitMask, missMask))
-  mdTLB.io.write.flag := RegNext(Mux(hitWB, hitRefillFlag, missRefillFlag))
-  mdTLB.io.write.ppn := RegNext(Mux(hitWB, hitData.ppn, memRdata.ppn))
-  mdTLB.io.write.pteaddr := RegNext((Mux(hitWB, hitData.pteaddr, raddr)))
+  // tlb refill
+  io.mdWrite.apply(wen = RegNext((missMetaRefill && !isFlush) || (hitWB && state === s_idle && !isFlush), init = false.B), 
+    windex = RegNext(getIndex(req.addr)), waymask = RegNext(waymask), vpn = RegNext(vpn.asUInt), 
+    asid = RegNext(Mux(hitWB, hitMeta.asid, satp.asid)), mask = RegNext(Mux(hitWB, hitMask, missMask)), 
+    flag = RegNext(Mux(hitWB, hitRefillFlag, missRefillFlag)), ppn = RegNext(Mux(hitWB, hitData.ppn, memRdata.ppn)), 
+    pteaddr = RegNext((Mux(hitWB, hitData.pteaddr, raddr))))
 
   // io
   io.out.bits := req
   io.out.bits.addr := Mux(hit, maskPaddr(hitData.ppn, req.addr(PAddrBits-1, 0), hitMask), maskPaddr(memRespStore.asTypeOf(pteBundle).ppn, req.addr(PAddrBits-1, 0), missMaskStore))
   io.out.valid := io.in.valid && Mux(hit && !hitWB, !(io.pf.isPF() || loadPF || storePF), state === s_wait_resp)// && !alreadyOutFire
   
-  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && mdTLB.io.ready && (!io.pf.isPF() && !loadPF && !storePF)//maybe be optimized
+  io.in.ready := io.out.ready && (state === s_idle) && !miss && !hitWB && io.mdReady && (!io.pf.isPF() && !loadPF && !storePF)//maybe be optimized
 
   io.ipf := Mux(hit, hitinstrPF, missIPF)
   io.isFinish := io.out.fire() || io.pf.isPF()
@@ -554,11 +577,11 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     if (debug) {
       printf("[TLBExec-"  + tlbname+ "]: Timer:%d---------\n", GTimer())
       printf("[TLBExec-"  + tlbname+ "]: In(%d, %d) Out(%d, %d) InAddr:%x OutAddr:%x cmd:%d \n", io.in.valid, io.in.ready, io.out.valid, io.out.ready, req.addr, io.out.bits.addr, req.cmd)
-      printf("[TLBExec-"  + tlbname+ "]: isAMO:%d io.Flush:%d FlushTLB:%d needFlush:%d alreadyOutFire:%d isFinish:%d\n",isAMO, io.flush, flushTLB, needFlush, alreadyOutFire, io.isFinish)
+      printf("[TLBExec-"  + tlbname+ "]: isAMO:%d io.Flush:%d needFlush:%d alreadyOutFire:%d isFinish:%d\n",isAMO, io.flush, needFlush, alreadyOutFire, io.isFinish)
       printf("[TLBExec-"  + tlbname+ "]: hit:%d hitWB:%d hitVPN:%x hitFlag:%x hitPPN:%x hitRefillFlag:%x hitWBStore:%x hitCheck:%d hitExec:%d hitLoad:%d hitStore:%d\n", hit, hitWB, hitMeta.vpn, hitFlag.asUInt, hitData.ppn, hitRefillFlag, hitWBStore, hitCheck, hitExec, hitLoad, hitStore)
       printf("[TLBExec-"  + tlbname+ "]: miss:%d state:%d level:%d raddr:%x memRdata:%x missMask:%x missRefillFlag:%x missMetaRefill:%d\n", miss, state, level, raddr, memRdata.asUInt, missMask, missRefillFlag, missMetaRefill)
-      printf("[TLBExec-"  + tlbname+ "]: meta/data: (0)%x|%b|%x (1)%x|%b|%x (2)%x|%b|%x (3)%x|%b|%x rread:%d\n", md(0).asTypeOf(tlbBundle).vpn, md(0).asTypeOf(tlbBundle).flag, md(0).asTypeOf(tlbBundle).ppn, md(1).asTypeOf(tlbBundle).vpn, md(1).asTypeOf(tlbBundle).flag, md(1).asTypeOf(tlbBundle).ppn, md(2).asTypeOf(tlbBundle).vpn, md(2).asTypeOf(tlbBundle).flag, md(2).asTypeOf(tlbBundle).ppn, md(3).asTypeOf(tlbBundle).vpn, md(3).asTypeOf(tlbBundle).flag, md(3).asTypeOf(tlbBundle).ppn, mdTLB.io.ready)
-      printf("[TLBExec-"  + tlbname+ "]: md: wen:%d dest:%x vpn:%x asid:%x mask:%x flag:%x asid:%x ppn:%x pteaddr:%x\n", mdTLB.io.write.wen, mdTLB.io.write.dest, mdTLB.io.write.vpn, mdTLB.io.write.asid, mdTLB.io.write.mask, mdTLB.io.write.flag, mdTLB.io.write.asid, mdTLB.io.write.ppn, mdTLB.io.write.pteaddr)
+      printf("[TLBExec-"  + tlbname+ "]: meta/data: (0)%x|%b|%x (1)%x|%b|%x (2)%x|%b|%x (3)%x|%b|%x rread:%d\n", md(0).asTypeOf(tlbBundle).vpn, md(0).asTypeOf(tlbBundle).flag, md(0).asTypeOf(tlbBundle).ppn, md(1).asTypeOf(tlbBundle).vpn, md(1).asTypeOf(tlbBundle).flag, md(1).asTypeOf(tlbBundle).ppn, md(2).asTypeOf(tlbBundle).vpn, md(2).asTypeOf(tlbBundle).flag, md(2).asTypeOf(tlbBundle).ppn, md(3).asTypeOf(tlbBundle).vpn, md(3).asTypeOf(tlbBundle).flag, md(3).asTypeOf(tlbBundle).ppn, io.mdReady)
+      printf("[TLBExec-"  + tlbname+ "]: md: wen:%d windex:%x waymask:%x vpn:%x asid:%x mask:%x flag:%x asid:%x ppn:%x pteaddr:%x\n", io.mdWrite.wen, io.mdWrite.windex, io.mdWrite.waymask, io.mdWrite.wdata.asTypeOf(tlbBundle).vpn, io.mdWrite.wdata.asTypeOf(tlbBundle).asid, io.mdWrite.wdata.asTypeOf(tlbBundle).mask, io.mdWrite.wdata.asTypeOf(tlbBundle).flag, io.mdWrite.wdata.asTypeOf(tlbBundle).asid, io.mdWrite.wdata.asTypeOf(tlbBundle).ppn, io.mdWrite.wdata.asTypeOf(tlbBundle).pteaddr)
       printf("[TLBExec-"  + tlbname+ "]: MemReq(%d, %d) MemResp(%d, %d) addr:%x cmd:%d rdata:%x cmd:%d\n", io.mem.req.valid, io.mem.req.ready, io.mem.resp.valid, io.mem.resp.ready, io.mem.req.bits.addr, io.mem.req.bits.cmd, io.mem.resp.bits.rdata, io.mem.resp.bits.cmd)
       printf("[TLBExec-"  + tlbname+ "]: io.ipf:%d hitinstrPF:%d missIPF:%d pf.loadPF:%d pf.storePF:%d loadPF:%d storePF:%d\n", io.ipf, hitinstrPF, missIPF, io.pf.loadPF, io.pf.storePF, loadPF, storePF)
     }
