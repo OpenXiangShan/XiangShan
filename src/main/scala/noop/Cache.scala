@@ -528,12 +528,12 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
 }
 
 object Cache {
-  def apply(in: SimpleBusUC, mmio: SimpleBusUC, flush: UInt, empty: Bool, enable: Boolean = true)(implicit cacheConfig: CacheConfig) = {
+  def apply(in: SimpleBusUC, mmio: Seq[SimpleBusUC], flush: UInt, empty: Bool, enable: Boolean = true)(implicit cacheConfig: CacheConfig) = {
     if (enable) {
       val cache = Module(new Cache)
       cache.io.flush := flush
       cache.io.in <> in
-      mmio <> cache.io.mmio
+      mmio(0) <> cache.io.mmio
       empty := cache.io.empty
       cache.io.out
     } else {
@@ -542,7 +542,9 @@ object Cache {
       val busC = WireInit(0.U.asTypeOf(new SimpleBusC))
       busC.mem <> xbar.io.out(0)
       xbar.io.in <> in
-      mmio <> xbar.io.out(1)
+      (mmio zip xbar.io.out.drop(1)) foreach { case (mmio_in, xbar_out) =>
+        mmio_in <> xbar_out
+      }
       empty := false.B
       busC
     }

@@ -27,6 +27,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   val io = IO(new Bundle{
     val mem = new AXI4
     val mmio = (if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC })
+    val frontend = Flipped(new AXI4)
     val mtip = Input(Bool())
     val meip = Input(Bool())
     val ila = if (p.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
@@ -40,6 +41,10 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   xbar.io.in(0) <> cohMg.io.out.mem
   xbar.io.in(1) <> noop.io.dmem.mem
 
+  val axi2sb = Module(new AXI42SimpleBusConverter())
+  axi2sb.io.in <> io.frontend
+  noop.io.frontend <> axi2sb.io.out
+
   if (HasL2cache) {
     val l2cacheOut = Wire(new SimpleBusC)
     val l2cacheIn = if (HasPrefetch) {
@@ -51,7 +56,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
       l2cacheIn
     } else xbar.io.out
     val l2Empty = Wire(Bool())
-    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC), flush = "b00".U, empty = l2Empty, enable = true)(
+    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC) :: Nil, flush = "b00".U, empty = l2Empty, enable = true)(
       CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
     io.mem <> l2cacheOut.mem.toAXI4()
     l2cacheOut.coh.resp.ready := true.B

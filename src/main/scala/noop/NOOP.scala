@@ -34,11 +34,12 @@ case class NOOPConfig (
 
 object AddressSpace {
   // (start, size)
-  def mmio = List((0x0000000040000000L, 0x0000000010000000L))
+  def mmio = List((0x0000000040000000L, 0x0000000010000000L),
+                  (0x00000000a0000000L, 0x0000000010000000L))
   def dram = (0x0000000080000000L, 0x0000000010000000L)
 
   //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
-  def isMMIO(addr: UInt) = addr(31,28) === "h4".U
+  def isMMIO(addr: UInt) = addr(31,28) === "h4".U || addr(31,28) === "ha".U
 }
 
 class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
@@ -46,7 +47,8 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
     val mmio = new SimpleBusUC
-})
+    val frontend = Flipped(new SimpleBusUC)
+  })
 
   val ifu  = Module(new IFU)
   val idu1 = Module(new IDU1)
@@ -97,17 +99,20 @@ class NOOP(implicit val p: NOOPConfig) extends NOOPModule {
   // forward
   isu.io.forward <> exu.io.forward
 
-  val mmioXbar = Module(new SimpleBusCrossbarNto1(2))
-  val tlbXbar = Module(new SimpleBusCrossbarNto1(3))
+  val mmioXbar = Module(new SimpleBusCrossbarNto1(if (HasDcache) 2 else 3))
+  val dmemXbar = Module(new SimpleBusCrossbarNto1(4))
 
-  val itlb = TLB(in = ifu.io.imem, mem = tlbXbar.io.in(2), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = VAddrBits*2 + 4, totalEntry = 4))
+  val itlb = TLB(in = ifu.io.imem, mem = dmemXbar.io.in(1), flush = ifu.io.flushVec(0) | ifu.io.bpFlush, csrMMU = exu.io.memMMU.imem)(TLBConfig(name = "itlb", userBits = VAddrBits*2 + 4, totalEntry = 4))
   ifu.io.ipf := itlb.io.ipf
-  io.imem <> Cache(in = itlb.io.out, mmio = mmioXbar.io.in(0), flush = Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush), empty = itlb.io.cacheEmpty)(
+  io.imem <> Cache(in = itlb.io.out, mmio = mmioXbar.io.in.take(1), flush = Fill(2, ifu.io.flushVec(0) | ifu.io.bpFlush), empty = itlb.io.cacheEmpty)(
     CacheConfig(ro = true, name = "icache", userBits = VAddrBits*2 + 4))
   
-  val dtlb = TLB(in = exu.io.dmem, mem = tlbXbar.io.in(1), flush = false.B, csrMMU = exu.io.memMMU.dmem)(TLBConfig(name = "dtlb", totalEntry = 64))
-  tlbXbar.io.in(0) <> dtlb.io.out
-  io.dmem <> Cache(in = tlbXbar.io.out, mmio = mmioXbar.io.in(1), flush = "b00".U, empty = dtlb.io.cacheEmpty, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+  val dtlb = TLB(in = exu.io.dmem, mem = dmemXbar.io.in(2), flush = false.B, csrMMU = exu.io.memMMU.dmem)(TLBConfig(name = "dtlb", totalEntry = 64))
+  dmemXbar.io.in(0) <> dtlb.io.out
+  io.dmem <> Cache(in = dmemXbar.io.out, mmio = mmioXbar.io.in.drop(1), flush = "b00".U, empty = dtlb.io.cacheEmpty, enable = HasDcache)(CacheConfig(ro = false, name = "dcache"))
+
+  // Make DMA access through L1 DCache to keep coherence
+  dmemXbar.io.in(3) <> io.frontend
 
   io.mmio <> mmioXbar.io.out
 }
