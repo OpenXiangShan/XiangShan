@@ -53,6 +53,7 @@ EMU_CXXFLAGS  = -O3 -std=c++11 -static -g -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 
+# dump vcd: --debug --trace
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \

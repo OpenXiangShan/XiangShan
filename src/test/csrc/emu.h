@@ -8,11 +8,18 @@
 //#include "VSimTop__Dpi.h"
 #include "common.h"
 #include "VNOOPSimTop.h"
+#if VM_TRACE
+#include <verilated_vcd_c.h>	// Trace file format header
+#endif
+
 
 class Emulator {
   const char *image;
   const char *mainargs;
   std::shared_ptr<VNOOPSimTop> dut_ptr;
+#if VM_TRACE
+  VerilatedVcdC* tfp;
+#endif
 
   // emu control variable
   uint32_t seed;
@@ -84,6 +91,10 @@ class Emulator {
     dut_ptr->clock = 1;
     dut_ptr->eval();
 
+#if VM_TRACE
+    tfp->dump(cycles);
+#endif
+
     cycles ++;
 
   }
@@ -97,6 +108,15 @@ class Emulator {
     uint64_t lastcommit = n;
     int hascommit = 0;
     const int stuck_limit = 200;
+
+#if VM_TRACE
+    Verilated::traceEverOn(true);	// Verilator must compute traced signals
+    VL_PRINTF("Enabling waves...\n");
+    tfp = new VerilatedVcdC;
+    dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+    tfp->open("vlt_dump.vcd");	// Open the dump file
+#endif
+
     while (!is_finish() && n > 0) {
       single_cycle();
       n --;
@@ -105,6 +125,7 @@ class Emulator {
         eprintf("No instruction commits for %d cycles, maybe get stuck\n"
             "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
             stuck_limit, stuck_limit);
+        tfp->close();
         set_abort();
       }
 
@@ -116,6 +137,7 @@ class Emulator {
         extern int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, uint64_t intrNO);
         if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO, 
           dut_ptr->io_difftest_isRVC, dut_ptr->io_difftest_intrNO)) {
+          tfp->close();
           set_abort();
         }
         lastcommit = n;
