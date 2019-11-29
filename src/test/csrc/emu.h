@@ -125,7 +125,9 @@ class Emulator {
         eprintf("No instruction commits for %d cycles, maybe get stuck\n"
             "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
             stuck_limit, stuck_limit);
+#if VM_TRACE
         tfp->close();
+#endif
         set_abort();
       }
 
@@ -137,7 +139,9 @@ class Emulator {
         extern int difftest_step(uint64_t *reg_scala, uint64_t this_pc, int isMMIO, int isRVC, uint64_t intrNO);
         if (difftest_step(reg, dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_isMMIO, 
           dut_ptr->io_difftest_isRVC, dut_ptr->io_difftest_intrNO)) {
+#if VM_TRACE
           tfp->close();
+#endif
           set_abort();
         }
         lastcommit = n;
