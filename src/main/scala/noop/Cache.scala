@@ -389,7 +389,7 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
     }
   } else {
     io.out.bits.rdata := Mux(hit, dataRead, inRdataRegDemand)
-    io.out.bits.cmd := DontCare
+    io.out.bits.cmd := SimpleBusCmd.readLast
   }
   io.out.bits.user.zip(req.user).map { case (o,i) => o := i }
 
