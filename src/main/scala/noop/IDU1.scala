@@ -36,19 +36,19 @@ class IDU1 extends NOOPModule with HasInstrType {
   val rvcSpecial = pcOffset === 6.U && !isRVC && !brIdx(2)
   val rvcSpecialJump = pcOffset === 6.U && !isRVC && brIdx(2)
   val pnpcIsSeq = brIdx(3)
-  // val pnpcIsSeqRight = io.in.bits.pnpc === (Cat(io.in.bits.pc(AddrBits-1,2), 0.U(2.W)) + 4.U) // TODO: add a new user bit bpRight to do this 
+  // val pnpcIsSeqRight = io.in.bits.pnpc === (Cat(io.in.bits.pc(VAddrBits-1,2), 0.U(2.W)) + 4.U) // TODO: add a new user bit bpRight to do this 
   // assert(pnpcIsSeq === pnpcIsSeqRight)
   val flushIFU = (state === s_idle || state === s_extra) && rvcSpecial && io.in.valid && !pnpcIsSeq
-  when(flushIFU){printf("flushIFU at pc %x offset %x\n", io.in.bits.pc, pcOffset)}
+  when(flushIFU){printf("flushIFU at pc %x offset %x timer:%d\n", io.in.bits.pc, pcOffset, GTimer())}
   assert(!flushIFU)
   val loadNextInstline = (state === s_idle || state === s_extra) && (rvcSpecial || rvcSpecialJump) && io.in.valid && pnpcIsSeq
   // val loadNextInstline =false.B
-  val pcOut = WireInit(0.U(AddrBits.W))
-  val pnpcOut = WireInit(0.U(AddrBits.W))
-  val specialPCR = Reg(UInt(AddrBits.W)) // reg for full inst that cross 2 inst line
-  val specialNPCR = Reg(UInt(AddrBits.W)) // reg for pnc for full inst jump that cross 2 inst line
+  val pcOut = WireInit(0.U(VAddrBits.W))
+  val pnpcOut = WireInit(0.U(VAddrBits.W))
+  val specialPCR = Reg(UInt(VAddrBits.W)) // reg for full inst that cross 2 inst line
+  val specialNPCR = Reg(UInt(VAddrBits.W)) // reg for pnc for full inst jump that cross 2 inst line
   val specialInstR = Reg(UInt(16.W))
-  val redirectPC = Cat(io.in.bits.pc(31,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line
+  val redirectPC = Cat(io.in.bits.pc(VAddrBits-1,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line  
   val rvcForceLoadNext = (pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U && !brIdx(1))
   //------------------------------------------------------
   // rvcForceLoadNext is used to deal with: 
@@ -107,7 +107,7 @@ class IDU1 extends NOOPModule with HasInstrType {
       is(s_extra){//get 16 aligned inst, pc controled by this FSM
         canGo := rvcFinish || rvcNext
         canIn := rvcFinish || rvcForceLoadNext
-        pcOut := Cat(io.in.bits.pc(31,3), pcOffsetR(2,0))
+        pcOut := Cat(io.in.bits.pc(VAddrBits-1,3), pcOffsetR(2,0)) 
         pnpcOut := Mux(rvcFinish, io.in.bits.pnpc, Mux(isRVC, pcOut+2.U, pcOut+4.U))
         when(io.out.fire() && rvcFinish){state := s_idle}
         when(io.out.fire() && rvcNext){
@@ -181,5 +181,6 @@ class IDU1 extends NOOPModule with HasInstrType {
   io.out.valid := io.in.valid && canGo
   io.in.ready := (!io.in.valid || (io.out.fire() && canIn) || loadNextInstline)
 
-  // io.out.bits.cf <> io.in.bits
+  io.out.bits.exceptionVec := io.in.bits.exceptionVec/*.map(_ := false.B)*/ //Fix by zhangzifei from false.B
+
 }

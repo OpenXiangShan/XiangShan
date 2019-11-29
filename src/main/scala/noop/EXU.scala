@@ -12,8 +12,9 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
     val in = Flipped(Decoupled(new DecodeIO))
     val out = Decoupled(new CommitIO)
     val flush = Input(Bool())
-    val dmem = new SimpleBusUC
+    val dmem = new SimpleBusUC(addrBits = VAddrBits)
     val forward = new ForwardIO
+    val memMMU = Flipped(new MemMMUIO)
   })
 
   val src1 = io.in.bits.data.src1
@@ -31,8 +32,10 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   alu.io.out.ready := true.B
 
   val lsu = Module(new LSU)
-  val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType)
+  val lsuTlbPF = WireInit(false.B)
+  val lsuOut = lsu.access(valid = fuValids(FuType.lsu), src1 = src1, src2 = io.in.bits.data.imm, func = fuOpType, dtlbPF = lsuTlbPF)
   lsu.io.wdata := src2
+  lsu.io.instr := io.in.bits.cf.instr
   io.out.bits.isMMIO := lsu.io.isMMIO
   io.dmem <> lsu.io.dmem
   lsu.io.out.ready := true.B
@@ -48,15 +51,18 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.intrNO := csr.io.intrNO
   csr.io.out.ready := true.B
 
+  csr.io.imemMMU <> io.memMMU.imem
+  csr.io.dmemMMU <> io.memMMU.dmem
+
   val mou = Module(new MOU)
   // mou does not write register
   mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
   mou.io.cfIn := io.in.bits.cf
   mou.io.out.ready := true.B
-
+  
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
-    o.rfWen := i.rfWen
+    o.rfWen := i.rfWen && (!lsuTlbPF || !fuValids(FuType.lsu)) && !(csr.io.wenFix && fuValids(FuType.csr))
     o.rfDest := i.rfDest
     o.fuType := i.fuType
   }
@@ -66,6 +72,12 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.decode.cf.redirect <>
     Mux(mou.io.redirect.valid, mou.io.redirect,
       Mux(csr.io.redirect.valid, csr.io.redirect, alu.io.redirect))
+  Debug(){
+    //when(mou.io.redirect.valid || csr.io.redirect.valid || alu.io.redirect.valid){
+      printf("[REDIRECT] inValid:%d mou %x csr %x alu %x \n", io.in.valid, mou.io.redirect.valid, csr.io.redirect.valid, alu.io.redirect.valid)
+      printf("[REDIRECT] flush: %d mou %x csr %x alu %x\n", io.flush, mou.io.redirect.target, csr.io.redirect.target, alu.io.redirect.target)
+    //}
+  }
 
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(

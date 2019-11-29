@@ -11,7 +11,7 @@ import chisel3.util.experimental.BoringUtils
 trait HasSoCParameter {
   val EnableILA = false
   val HasL2cache = true
-  val HasPrefetch = false
+  val HasPrefetch = true
 }
 
 class ILABundle extends Bundle {
@@ -49,16 +49,14 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
     val l2cacheOut = Wire(new SimpleBusC)
     val l2cacheIn = if (HasPrefetch) {
       val prefetcher = Module(new Prefetcher)
-      prefetcher.io.in <> noop.io.prefetchReq
       val l2cacheIn = Wire(new SimpleBusUC)
-      val l2cacheInReqArb = Module(new Arbiter(chiselTypeOf(noop.io.prefetchReq.bits), 2))
-      l2cacheInReqArb.io.in(0) <> xbar.io.out.req
-      l2cacheInReqArb.io.in(1) <> prefetcher.io.out
-      l2cacheIn.req <> l2cacheInReqArb.io.out
+      prefetcher.io.in <> xbar.io.out.req
+      l2cacheIn.req <> prefetcher.io.out
       xbar.io.out.resp <> l2cacheIn.resp
       l2cacheIn
     } else xbar.io.out
-    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC) :: Nil, flush = "b00".U, enable = true)(
+    val l2Empty = Wire(Bool())
+    l2cacheOut <> Cache(in = l2cacheIn, mmio = 0.U.asTypeOf(new SimpleBusUC) :: Nil, flush = "b00".U, empty = l2Empty, enable = true)(
       CacheConfig(name = "l2cache", totalSize = 128, cacheLevel = 2))
     io.mem <> l2cacheOut.mem.toAXI4()
     l2cacheOut.coh.resp.ready := true.B
@@ -67,11 +65,7 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   } else {
     io.mem <> xbar.io.out.toAXI4()
   }
-
-  if (!HasPrefetch) {
-    noop.io.prefetchReq.ready := true.B
-  }
-
+  
   noop.io.imem.coh.resp.ready := true.B
   noop.io.imem.coh.req.valid := false.B
   noop.io.imem.coh.req.bits := DontCare
