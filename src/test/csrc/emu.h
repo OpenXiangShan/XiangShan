@@ -65,12 +65,6 @@ class Emulator {
 
     // init core
     reset_ncycles(10);
-
-    extern void init_difftest(uint64_t *reg);
-    uint64_t reg[33];
-    read_emu_regs(reg);
-    reg[32] = 0x80000000;
-    init_difftest(reg);
   }
 
   void reset_ncycles(size_t cycles) {
@@ -131,8 +125,16 @@ class Emulator {
         set_abort();
       }
 
+      if (!hascommit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
+        hascommit = 1;
+        extern void init_difftest(uint64_t *reg);
+        uint64_t reg[33];
+        read_emu_regs(reg);
+        init_difftest(reg);
+      }
+
       // difftest
-      if (dut_ptr->io_difftest_commit) {
+      if (dut_ptr->io_difftest_commit && hascommit) {
         uint64_t reg[33];
         read_emu_regs(reg);
 
@@ -172,7 +174,6 @@ class Emulator {
           set_abort();
         }
         lastcommit = n;
-        hascommit = 1;
       }
 
       uint32_t t = uptime();
