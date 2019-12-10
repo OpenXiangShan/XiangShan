@@ -319,9 +319,13 @@ class LSU extends NOOPModule {
     io.dmem <> lsExecUnit.io.dmem
     io.out.bits := Mux(scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
 
-    val addr = Mux(atomReq, src1, src1 + src2)
-    io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
-    // io.isMMIO := lsExecUnit.io.isMMIO
+    val lsuMMIO = WireInit(false.B)
+    BoringUtils.addSink(lsuMMIO, "lsuMMIO")
+
+    val mmioReg = RegInit(false.B)
+    when (!mmioReg) { mmioReg := lsuMMIO }
+    when (io.out.valid) { mmioReg := false.B }
+    io.isMMIO := mmioReg && io.out.valid
 }
 
 class LSExecUnit extends NOOPModule {
@@ -427,7 +431,7 @@ class LSExecUnit extends NOOPModule {
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
 
-  io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
+  io.isMMIO := DontCare
 
   BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")
   BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")
