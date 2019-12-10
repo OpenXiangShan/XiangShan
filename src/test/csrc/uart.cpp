@@ -20,8 +20,11 @@ static int uart_dequeue(void) {
     k = queue[f];
     f = (f + 1) % QUEUE_SIZE;
   } else {
+    static int last = 0;
+    k = "root\n"[last ++];
+    if (last == 5) last = 0;
     // generate a random key every 1s for pal
-    k = -1;//"uiojkl"[rand()% 6];
+    //k = -1;//"uiojkl"[rand()% 6];
   }
   return k;
 }
@@ -32,10 +35,14 @@ extern "C" void uart_getc(uint8_t *ch) {
   uint32_t now = uptime();
 
   *ch = -1;
-  // if (now - lasttime > 3000) {
-    // lasttime = now;
+  if (now - lasttime > 60 * 1000) {
+    // 1 minute
+    eprintf(ANSI_COLOR_RED "now = %ds\n" ANSI_COLOR_RESET, now / 1000);
+    lasttime = now;
+  }
+  if (now > 4 * 3600 * 1000) { // 4 hours
     *ch = uart_dequeue();
-  // }
+  }
 }
 
 void uart_putc(char c) {
@@ -58,7 +65,8 @@ static void preset_input() {
     "ls\n"
     "ifconfig -a\n"
     "./redis-server\n";
-  char *buf = busybox_cmd;
+  char debian_cmd[128] = "root\n";
+  char *buf = debian_cmd;
   int i;
   for (i = 0; i < strlen(buf); i ++) {
     uart_enqueue(buf[i]);
