@@ -15,7 +15,7 @@ class UARTGetc extends BlackBox with HasBlackBoxInline {
 
   setInline("UARTGetc.v",
     s"""
-      |import "DPI-C" function byte uart_getc(output byte ch);
+      |import "DPI-C" function void uart_getc(output byte ch);
       |
       |module UARTGetc (
       |  input clk,
