@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class IDU2 extends NOOPModule with HasInstrType {
+class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
@@ -141,6 +141,11 @@ class IDU2 extends NOOPModule with HasInstrType {
   io.out.bits.cf.exceptionVec(instrPageFault) := io.in.bits.exceptionVec(instrPageFault)
 
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
+
+  if (!p.FPGAPlatform) {
+    val isWFI = (instr === Priviledged.WFI) && io.in.valid
+    BoringUtils.addSource(isWFI, "isWFI")
+  }
 }
 
 // Note  
