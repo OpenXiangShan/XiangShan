@@ -101,7 +101,7 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 500;
+    const int stuck_limit = 2000;
 
 #if VM_TRACE
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
