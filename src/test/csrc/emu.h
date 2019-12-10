@@ -141,7 +141,7 @@ class Emulator {
         extern int difftest_step(
           uint64_t *reg_scala, 
           uint64_t this_pc, 
-          int this_inst, 
+          uint32_t this_inst, 
           int isMMIO, 
           int isRVC, 
           uint64_t intrNO,

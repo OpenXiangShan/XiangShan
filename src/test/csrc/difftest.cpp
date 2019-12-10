@@ -72,7 +72,7 @@ void init_difftest(uint64_t *reg) {
 int difftest_step(
   uint64_t *reg_scala, 
   uint64_t this_pc, 
-  int this_inst, 
+  uint32_t this_inst, 
   int isMMIO, 
   int isRVC, 
   uint64_t intrNO,
@@ -90,7 +90,7 @@ int difftest_step(
   uint64_t ref_r[33];
   static uint64_t nemu_pc = 0x80000000;
   static uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
-  static int inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
+  static uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static int pc_retire_pointer = 7;
 
   if (isMMIO) {
@@ -118,6 +118,18 @@ int difftest_step(
   pc_retire_queue[pc_retire_pointer] = this_pc;
   inst_retire_queue[pc_retire_pointer] = this_inst;
   
+  int isCSR = ((this_inst & 0x7f) ==  0x73);
+  int isCSRMip = ((this_inst >> 20) == 0x344) && isCSR;
+  if (isCSRMip) {
+    // We can not handle NEMU.mip.mtip since it is driven by CLINT,
+    // which is not accessed in NEMU due to MMIO.
+    // Just sync the state of NEMU from NOOP.
+    reg_scala[32] = ref_r[32];
+    nemu_pc = ref_r[32];
+    ref_difftest_setregs(reg_scala);
+    return 0;
+  }
+
   uint64_t temp = ref_r[32];
   ref_r[32] = nemu_pc;
   nemu_pc = temp;
