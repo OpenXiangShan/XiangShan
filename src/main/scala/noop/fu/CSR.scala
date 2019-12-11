@@ -499,6 +499,8 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val hasInstrPageFault = io.cfIn.exceptionVec(instrPageFault) && valid
   val hasLoadPageFault = io.dmemMMU.loadPF   
   val hasStorePageFault = io.dmemMMU.storePF 
+  val hasStoreAddrMisaligned = io.cfIn.exceptionVec(storeAddrMisaligned)
+  val hasLoadAddrMisaligned = io.cfIn.exceptionVec(loadAddrMisaligned)
 
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(hasInstrPageFault, SignExt(io.cfIn.pc, XLEN), SignExt(io.dmemMMU.addr, XLEN))
@@ -507,6 +509,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     }.otherwise{
       stval := tval
     }
+  }
+
+  val lsuAddr = WireInit(0.U(64.W))
+  BoringUtils.addSink(lsuAddr, "LSUADDR")
+  when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
+  {
+      mtval := SignExt(lsuAddr, XLEN)
   }
 
   // Exception and Intr
@@ -594,7 +603,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val deleg = Mux(raiseIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
-  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault) || raiseIntr // in noop-riscv64, no exception will come together with PF
+  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // in noop-riscv64, no exception will come together with PF
 
   ret := isMret || isSret || isUret
   trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
