@@ -69,26 +69,26 @@ void init_difftest(uint64_t *reg) {
   ref_difftest_setregs(reg);
 }
 
-int difftest_step(
-  uint64_t *reg_scala, 
-  uint64_t this_pc, 
-  uint32_t this_inst, 
-  int isMMIO, 
-  int isRVC, 
-  uint64_t intrNO,
-  int priviledgeMode,
-  uint64_t mstatus,
-  uint64_t sstatus,
-  uint64_t mepc,
-  uint64_t sepc,
-  uint64_t mcause,
-  uint64_t scause
-) {
+static const char *reg_name[DIFFTEST_NR_REG] = {
+  "$0", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
+  "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
+  "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
+  "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6",
+  "this_pc",
+  "mstatus", "mcause", "mepc",
+  "sstatus", "scause", "sepc"
+};
+
+int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
+  int isMMIO, int isRVC, uint64_t intrNO, int priviledgeMode) {
 
   #define DEBUG_RETIRE_TRACE_SIZE 16
 
-  uint64_t ref_r[33];
-  static uint64_t nemu_pc = 0x80000000;
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  uint64_t this_pc = reg_scala[DIFFTEST_THIS_PC];
+  // ref_difftest_getregs() will get the next pc,
+  // therefore we must keep track this one
+  static uint64_t nemu_this_pc = 0x80000000;
   static uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static int pc_retire_pointer = 7;
@@ -96,8 +96,8 @@ int difftest_step(
   if (isMMIO) {
     // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
     // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-    reg_scala[32] += isRVC ? 2 : 4;
-    nemu_pc += isRVC ? 2 : 4;
+    reg_scala[DIFFTEST_THIS_PC] += isRVC ? 2 : 4;
+    nemu_this_pc += isRVC ? 2 : 4;
     // to skip the checking of an instruction, just copy the reg state to reference design
     ref_difftest_setregs(reg_scala);
     pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
@@ -114,6 +114,7 @@ int difftest_step(
 
   ref_difftest_getregs(&ref_r);
 
+  uint64_t next_pc = ref_r[32];
   pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
   pc_retire_queue[pc_retire_pointer] = this_pc;
   inst_retire_queue[pc_retire_pointer] = this_inst;
@@ -124,15 +125,15 @@ int difftest_step(
     // We can not handle NEMU.mip.mtip since it is driven by CLINT,
     // which is not accessed in NEMU due to MMIO.
     // Just sync the state of NEMU from NOOP.
-    reg_scala[32] = ref_r[32];
-    nemu_pc = ref_r[32];
+    reg_scala[DIFFTEST_THIS_PC] = next_pc;
+    nemu_this_pc = next_pc;
     ref_difftest_setregs(reg_scala);
     return 0;
   }
 
-  uint64_t temp = ref_r[32];
-  ref_r[32] = nemu_pc;
-  nemu_pc = temp;
+  // replace with "this pc" for checking
+  ref_r[DIFFTEST_THIS_PC] = nemu_this_pc;
+  nemu_this_pc = next_pc;
 
   if (memcmp(reg_scala, ref_r, sizeof(ref_r)) != 0) {
     printf("\n==============Retire Trace==============\n");
@@ -142,22 +143,13 @@ int difftest_step(
     }
     printf("\n==============  Reg Diff  ==============\n");
     ref_isa_reg_display();
-    printf("\n==============  Csr Diff  ==============\n");
     printCSR(priviledgeMode);
     puts("");
-    printCSR(mstatus);
-    printCSR(mcause);
-    printCSR(mepc);
-    puts("");
-    printCSR(sstatus);
-    printCSR(scause);
-    printCSR(sepc);
-    puts("");
     int i;
-    for (i = 0; i < 33; i ++) {
+    for (i = 0; i < DIFFTEST_NR_REG; i ++) {
       if (reg_scala[i] != ref_r[i]) {
-        printf("x%2d different at pc = 0x%010lx, right= 0x%016lx, wrong = 0x%016lx\n",
-            i, this_pc, ref_r[i], reg_scala[i]);
+        printf("%s different at pc = 0x%010lx, right= 0x%016lx, wrong = 0x%016lx\n",
+            reg_name[i], this_pc, ref_r[i], reg_scala[i]);
       }
     }
     return 1;
