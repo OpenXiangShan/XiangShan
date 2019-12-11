@@ -121,12 +121,14 @@ class IDU1 extends NOOPModule with HasInstrType with HasExceptionNO {
           state := s_waitnext
           specialPCR := pcOut
           specialInstR := io.in.bits.instr(63,63-16+1) 
+          specialIPFR := io.in.bits.exceptionVec(instrPageFault)
         }
         when(rvcSpecialJump && io.in.valid){
           state := s_waitnext_thenj
           specialPCR := pcOut
           specialNPCR := io.in.bits.pnpc
           specialInstR := io.in.bits.instr(63,63-16+1) 
+          specialIPFR := io.in.bits.exceptionVec(instrPageFault)
         }
       }
       is(s_waitnext){//require next 64bits, for this inst has size 32 and offset 6
