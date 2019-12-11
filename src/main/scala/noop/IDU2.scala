@@ -17,7 +17,7 @@ class IDU2 extends NOOPModule with HasInstrType {
   val instr = io.in.bits.instr(31, 0)
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
-    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr, intr, dec)}
+    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr || io.in.bits.exceptionVec(instrPageFault), intr, dec)}
   // val instrType :: fuType :: fuOpType :: Nil = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val isRVC = instr(1,0) =/= "b11".U
   val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
