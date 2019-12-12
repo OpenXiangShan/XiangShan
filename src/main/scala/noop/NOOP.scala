@@ -34,12 +34,11 @@ case class NOOPConfig (
 
 object AddressSpace {
   // (start, size)
-  def mmio = List((0x0000000040000000L, 0x0000000010000000L),
-                  (0x00000000a0000000L, 0x0000000010000000L))
+  def mmio = List((0x0000000040000000L, 0x0000000010000000L))
   def dram = (0x0000000080000000L, 0x0000000010000000L)
 
   //def isMMIO(addr: UInt) = mmio.map(range => ((addr & ~((range._2 - 1).U(32.W))) === range._1.U)).reduce(_ || _)
-  def isMMIO(addr: UInt) = addr(31,28) === "h4".U || addr(31,28) === "ha".U
+  def isMMIO(addr: UInt) = addr(31,28) === "h4".U
 }
 
 class NOOP(implicit val p: NOOPConfig) extends NOOPModule {

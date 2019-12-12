@@ -45,6 +45,7 @@ class CtrlFlowIO extends NOOPBundle {
   val exceptionVec = Output(Vec(16, Bool()))
   val intrVec = Output(Vec(12, Bool()))
   val brIdx = Output(UInt(4.W))
+  val crossPageIPFFix = Output(Bool())
 }
 
 class DecodeIO extends NOOPBundle {

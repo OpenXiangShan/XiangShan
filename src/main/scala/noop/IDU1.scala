@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class IDU1 extends NOOPModule with HasInstrType {
+class IDU1 extends NOOPModule with HasInstrType with HasExceptionNO {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new CtrlFlowIO)
@@ -48,6 +48,7 @@ class IDU1 extends NOOPModule with HasInstrType {
   val specialPCR = Reg(UInt(VAddrBits.W)) // reg for full inst that cross 2 inst line
   val specialNPCR = Reg(UInt(VAddrBits.W)) // reg for pnc for full inst jump that cross 2 inst line
   val specialInstR = Reg(UInt(16.W))
+  val specialIPFR = RegInit(Bool(), false.B)
   val redirectPC = Cat(io.in.bits.pc(VAddrBits-1,3), 0.U(3.W))+"b1010".U // IDU can got get full inst from a single inst line  
   val rvcForceLoadNext = (pcOffset === 2.U && !isRVC && io.in.bits.pnpc(2,0) === 4.U && !brIdx(1))
   //------------------------------------------------------
@@ -96,12 +97,14 @@ class IDU1 extends NOOPModule with HasInstrType {
           state := s_waitnext
           specialPCR := pcOut
           specialInstR := io.in.bits.instr(63,63-16+1) 
+          specialIPFR := io.in.bits.exceptionVec(instrPageFault)
         }
         when(rvcSpecialJump && io.in.valid){
           state := s_waitnext_thenj
           specialPCR := pcOut
           specialNPCR := io.in.bits.pnpc
           specialInstR := io.in.bits.instr(63,63-16+1) 
+          specialIPFR := io.in.bits.exceptionVec(instrPageFault)
         }
       }
       is(s_extra){//get 16 aligned inst, pc controled by this FSM
@@ -118,12 +121,14 @@ class IDU1 extends NOOPModule with HasInstrType {
           state := s_waitnext
           specialPCR := pcOut
           specialInstR := io.in.bits.instr(63,63-16+1) 
+          specialIPFR := io.in.bits.exceptionVec(instrPageFault)
         }
         when(rvcSpecialJump && io.in.valid){
           state := s_waitnext_thenj
           specialPCR := pcOut
           specialNPCR := io.in.bits.pnpc
           specialInstR := io.in.bits.instr(63,63-16+1) 
+          specialIPFR := io.in.bits.exceptionVec(instrPageFault)
         }
       }
       is(s_waitnext){//require next 64bits, for this inst has size 32 and offset 6
@@ -182,5 +187,6 @@ class IDU1 extends NOOPModule with HasInstrType {
   io.in.ready := (!io.in.valid || (io.out.fire() && canIn) || loadNextInstline)
 
   io.out.bits.exceptionVec := io.in.bits.exceptionVec/*.map(_ := false.B)*/ //Fix by zhangzifei from false.B
-
+  io.out.bits.exceptionVec(instrPageFault) := io.in.bits.exceptionVec(instrPageFault) || specialIPFR && (state === s_waitnext_thenj || state === s_waitnext)
+  io.out.bits.crossPageIPFFix := io.in.bits.exceptionVec(instrPageFault) && (state === s_waitnext_thenj || state === s_waitnext) && !specialIPFR
 }

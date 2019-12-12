@@ -504,7 +504,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
           val permExec = permCheck && missflag.x
           val permLoad = permCheck && (missflag.r || pf.status_mxr && missflag.x)
           val permStore = permCheck && missflag.w
-          val updateAD = !missflag.a || (!missflag.d && req.isWrite())
+          val updateAD = false.B //!missflag.a || (!missflag.d && req.isWrite())
           val updateData = Cat( 0.U(56.W), req.isWrite(), 1.U(1.W), 0.U(6.W) )
           missRefillFlag := Cat(req.isWrite(), 1.U(1.W), 0.U(6.W)) | missflag.asUInt
           memRespStore := io.mem.resp.bits.rdata | updateData 

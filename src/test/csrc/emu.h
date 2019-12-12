@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <fstream>
 #include <vector>
+#include "difftest.h"
 
 //#include "VSimTop__Dpi.h"
 #include "common.h"
@@ -36,7 +37,13 @@ class Emulator {
     macro(8); macro(9); macro(10); macro(11); macro(12); macro(13); macro(14); macro(15);
     macro(16); macro(17); macro(18); macro(19); macro(20); macro(21); macro(22); macro(23);
     macro(24); macro(25); macro(26); macro(27); macro(28); macro(29); macro(30); macro(31);
-    r[32] = dut_ptr->io_difftest_thisPC;
+    r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest_thisPC;
+    r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest_mstatus;
+    r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest_sstatus;
+    r[DIFFTEST_MEPC   ] = dut_ptr->io_difftest_mepc;
+    r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest_sepc;
+    r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest_mcause;
+    r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest_scause;
   }
 
   public:
@@ -101,7 +108,7 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 500;
+    const int stuck_limit = 2000;
 
 #if VM_TRACE
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -128,46 +135,21 @@ class Emulator {
       if (!hascommit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
         hascommit = 1;
         extern void init_difftest(uint64_t *reg);
-        uint64_t reg[33];
+        uint64_t reg[DIFFTEST_NR_REG];
         read_emu_regs(reg);
         init_difftest(reg);
       }
 
       // difftest
       if (dut_ptr->io_difftest_commit && hascommit) {
-        uint64_t reg[33];
+        uint64_t reg[DIFFTEST_NR_REG];
         read_emu_regs(reg);
 
-        extern int difftest_step(
-          uint64_t *reg_scala, 
-          uint64_t this_pc, 
-          int this_inst, 
-          int isMMIO, 
-          int isRVC, 
-          uint64_t intrNO,
-          int priviledgeMode,
-          uint64_t mstatus,
-          uint64_t sstatus,
-          uint64_t mepc,
-          uint64_t sepc,
-          uint64_t mcause,
-          uint64_t scause
-        );
-        if (difftest_step(
-            reg, 
-            dut_ptr->io_difftest_thisPC, 
-            dut_ptr->io_difftest_thisINST, 
-            dut_ptr->io_difftest_isMMIO, 
-            dut_ptr->io_difftest_isRVC, 
-            dut_ptr->io_difftest_intrNO,
-            dut_ptr->io_difftest_priviledgeMode,
-            dut_ptr->io_difftest_mstatus,
-            dut_ptr->io_difftest_sstatus,
-            dut_ptr->io_difftest_mepc,
-            dut_ptr->io_difftest_sepc,
-            dut_ptr->io_difftest_mcause,
-            dut_ptr->io_difftest_scause
-            )) {
+        extern int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
+          int isMMIO, int isRVC, uint64_t intrNO, int priviledgeMode);
+        if (difftest_step(reg, dut_ptr->io_difftest_thisINST,
+              dut_ptr->io_difftest_isMMIO, dut_ptr->io_difftest_isRVC,
+              dut_ptr->io_difftest_intrNO, dut_ptr->io_difftest_priviledgeMode)) {
 #if VM_TRACE
           tfp->close();
 #endif

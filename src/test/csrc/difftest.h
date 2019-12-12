@@ -14,4 +14,16 @@ typedef uint16_t ioaddr_t;
 
 #include "macro.h"
 
+// 0~31: GPRs
+enum {
+  DIFFTEST_THIS_PC = 32,
+  DIFFTEST_MSTATUS,
+  DIFFTEST_MCAUSE,
+  DIFFTEST_MEPC,
+  DIFFTEST_SSTATUS,
+  DIFFTEST_SCAUSE,
+  DIFFTEST_SEPC,
+  DIFFTEST_NR_REG
+};
+
 #endif

@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 
 import utils._
 
-class IDU2 extends NOOPModule with HasInstrType {
+class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new CtrlFlowIO))
     val out = Decoupled(new DecodeIO)
@@ -17,7 +17,7 @@ class IDU2 extends NOOPModule with HasInstrType {
   val instr = io.in.bits.instr(31, 0)
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
-    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr, intr, dec)}
+    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr || io.in.bits.exceptionVec(instrPageFault), intr, dec)}
   // val instrType :: fuType :: fuOpType :: Nil = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val isRVC = instr(1,0) =/= "b11".U
   val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
@@ -141,6 +141,11 @@ class IDU2 extends NOOPModule with HasInstrType {
   io.out.bits.cf.exceptionVec(instrPageFault) := io.in.bits.exceptionVec(instrPageFault)
 
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid
+
+  if (!p.FPGAPlatform) {
+    val isWFI = (instr === Priviledged.WFI) && io.in.valid
+    BoringUtils.addSource(isWFI, "isWFI")
+  }
 }
 
 // Note  

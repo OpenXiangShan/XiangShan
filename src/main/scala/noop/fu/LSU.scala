@@ -48,6 +48,8 @@ class LSUIO extends FunctionUnitIO {
   val dmem = new SimpleBusUC(addrBits = VAddrBits)
   val isMMIO = Output(Bool())
   val dtlbPF = Output(Bool())
+  val loadAddrMisaligned = Output(Bool())
+  val storeAddrMisaligned = Output(Bool())
 }
 
 class StoreQueueEntry extends NOOPBundle{
@@ -114,6 +116,7 @@ class LSU extends NOOPModule {
     val lrReq   = valid & LSUOpType.isLR(func)
     val scReq   = valid & LSUOpType.isSC(func)
     BoringUtils.addSource(amoReq, "ISAMO")
+    BoringUtils.addSource(amoReq, "ISAMO2")
 
     val aq = io.instr(26)
     val rl = io.instr(25)
@@ -300,7 +303,7 @@ class LSU extends NOOPModule {
         }
       }
     }
-    when(dtlbPF){
+    when(dtlbPF || io.loadAddrMisaligned || io.storeAddrMisaligned){
       state := s_idle
       io.out.valid := true.B
       io.in.ready := true.B
@@ -319,9 +322,16 @@ class LSU extends NOOPModule {
     io.dmem <> lsExecUnit.io.dmem
     io.out.bits := Mux(scReq, scInvalid, Mux(state === s_amo_s, atomRegReg, lsExecUnit.io.out.bits))
 
-    val addr = Mux(atomReq, src1, src1 + src2)
-    io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
-    // io.isMMIO := lsExecUnit.io.isMMIO
+    val lsuMMIO = WireInit(false.B)
+    BoringUtils.addSink(lsuMMIO, "lsuMMIO")
+
+    val mmioReg = RegInit(false.B)
+    when (!mmioReg) { mmioReg := lsuMMIO }
+    when (io.out.valid) { mmioReg := false.B }
+    io.isMMIO := mmioReg && io.out.valid
+
+    io.loadAddrMisaligned := lsExecUnit.io.loadAddrMisaligned
+    io.storeAddrMisaligned := lsExecUnit.io.storeAddrMisaligned
 }
 
 class LSExecUnit extends NOOPModule {
@@ -398,10 +408,10 @@ class LSExecUnit extends NOOPModule {
   val size = func(1,0)
   dmem.req.bits.apply(addr = addr(VAddrBits-1, 0), size = size, wdata = genWdata(io.wdata, size),
     wmask = genWmask(addr, size), cmd = Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read))
-  dmem.req.valid := valid && (state === s_idle)
+  dmem.req.valid := valid && (state === s_idle) && !io.loadAddrMisaligned && !io.storeAddrMisaligned
   dmem.resp.ready := true.B
 
-  io.out.valid := Mux( dtlbPF, true.B, Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
+  io.out.valid := Mux( dtlbPF || io.loadAddrMisaligned || io.storeAddrMisaligned, true.B, Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)))
   io.in.ready := (state === s_idle) || dtlbPF
 
   val rdata = dmem.resp.bits.rdata
@@ -424,10 +434,27 @@ class LSExecUnit extends NOOPModule {
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
   ))
+  val addrAligned = LookupTree(func(1,0), List(
+    "b00".U   -> true.B,            //b
+    "b01".U   -> (addr(0) === 0.U),   //h
+    "b10".U   -> (addr(1,0) === 0.U), //w
+    "b11".U   -> (addr(2,0) === 0.U)  //d
+  ))
 
   io.out.bits := Mux(partialLoad, rdataPartialLoad, rdata)
 
-  io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
+  io.isMMIO := DontCare
+
+  val isAMO = WireInit(false.B)
+  BoringUtils.addSink(isAMO, "ISAMO2")
+  BoringUtils.addSource(addr, "LSUADDR")
+
+  io.loadAddrMisaligned :=  valid && !isStore && !isAMO && !addrAligned
+  io.storeAddrMisaligned := valid && (isStore || isAMO) && !addrAligned
+
+  when(io.loadAddrMisaligned || io.storeAddrMisaligned) {
+    //printf("[LSU] misaligned addr detected\n")
+  }
 
   BoringUtils.addSource(dmem.isRead() && dmem.req.fire(), "perfCntCondMloadInstr")
   BoringUtils.addSource(BoolStopWatch(dmem.isRead(), dmem.resp.fire()), "perfCntCondMloadStall")

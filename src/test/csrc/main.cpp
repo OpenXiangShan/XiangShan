@@ -75,7 +75,7 @@ int main(int argc, const char** argv) {
   extern uint32_t uptime(void);
   uint32_t ms = uptime();
 
-  int display_trapinfo(long long max_cycles);
+  int display_trapinfo(uint64_t max_cycles);
   int ret = display_trapinfo(emu.get_max_cycles());
   eprintf(ANSI_COLOR_BLUE "Guest cycle spent: %" PRIu64 "\n" ANSI_COLOR_RESET, emu.get_cycles());
   eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);

@@ -3,8 +3,8 @@ import "DPI-C" function void monitor
 (
   input  int  trapCode,
   input  longint  trapPC,
-  input  int  cycleCnt,
-  input  int  instrCnt
+  input  longint  cycleCnt,
+  input  longint  instrCnt
 );
 `endif
 
@@ -14,8 +14,8 @@ module Monitor(
   input         isNoopTrap,
   input  [31:0] trapCode,
   input  [63:0] trapPC,
-  input  [31:0] cycleCnt,
-  input  [31:0] instrCnt
+  input  [63:0] cycleCnt,
+  input  [63:0] instrCnt
 );
 
 `ifdef VERILATOR

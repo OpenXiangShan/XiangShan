@@ -7,12 +7,14 @@ void init_sdl(void);
 void set_abort(void);
 
 void init_uart(void);
+extern "C" void init_sd(void);
 
 static struct timeval boot = {};
 
 void init_device(void) {
   init_sdl();
   init_uart();
+  init_sd();
   gettimeofday(&boot, NULL);
 }
 
