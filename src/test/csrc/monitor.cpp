@@ -28,16 +28,16 @@ void set_abort(void) {
 int display_trapinfo(uint64_t max_cycles) {
   switch (g_trapCode) {
     case STATE_GOODTRAP:
-      eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP at pc = 0x%" PRIu64 "\n" ANSI_COLOR_RESET, g_trapPC);
+      eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, g_trapPC);
       break;
     case STATE_BADTRAP:
-      eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%" PRIu64 "\n" ANSI_COLOR_RESET, g_trapPC);
+      eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, g_trapPC);
       break;
     case STATE_ABORT:
-      eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIu64 "\n" ANSI_COLOR_RESET, g_trapPC);
+      eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, g_trapPC);
       break;
     case STATE_RUNNING:
-      eprintf(ANSI_COLOR_RED "Timeout after %" PRIu64 " cycles\n" ANSI_COLOR_RESET, max_cycles);
+      eprintf(ANSI_COLOR_RED "Timeout after %" PRIx64 " cycles\n" ANSI_COLOR_RESET, max_cycles);
       break;
   }
 
