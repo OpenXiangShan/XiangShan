@@ -18,7 +18,10 @@ void sd_read(uint32_t *data) {
 
 void init_sd(void) {
   fp = fopen("/home/yzh/projectn/debian.img", "r");
-  assert(fp);
+  if(!fp)
+  {
+    eprintf(ANSI_COLOR_MAGENTA "[warning] sdcard img not found\n");
+  }
 }
 
 }
