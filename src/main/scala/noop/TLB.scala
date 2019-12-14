@@ -299,6 +299,8 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
   PipelineConnectTLB(io.in.req, tlbExec.io.in, mdUpdate, tlbExec.io.isFinish, io.flush, vmEnable)
   if(tlbname == "dtlb") {
     PipelineConnect(tlbExec.io.out, tlbEmpty.io.in, tlbEmpty.io.out.fire(), io.flush)
+    val mmio = AddressSpace.isMMIO(io.out.req.bits.addr)
+    BoringUtils.addSource(mmio, "lsuMMIO")
   }
   when(!vmEnable) {
     tlbExec.io.out.ready := true.B // let existed request go out
