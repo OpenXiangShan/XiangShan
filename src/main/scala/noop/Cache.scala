@@ -236,11 +236,6 @@ sealed class CacheStage3(implicit val cacheConfig: CacheConfig) extends CacheMod
   val meta = Mux1H(io.in.bits.waymask, io.in.bits.metas)
   assert(!(mmio && hit), "MMIO request should not hit in cache")
 
-  // this is ugly
-  if (cacheName == "dcache") {
-    BoringUtils.addSource(mmio, "lsuMMIO")
-  }
-
   val useForwardData = io.in.bits.isForwardData && io.in.bits.waymask === io.in.bits.forwardData.waymask.getOrElse("b1".U)
   val dataReadArray = Mux1H(io.in.bits.waymask, io.in.bits.datas).data
   val dataRead = Mux(useForwardData, io.in.bits.forwardData.data.data, dataReadArray)
