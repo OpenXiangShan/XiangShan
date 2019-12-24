@@ -10,7 +10,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
 trait HasSoCParameter {
-  val EnableILA = false
+  val EnableILA = true
   val HasL2cache = true
   val HasPrefetch = true
 }
