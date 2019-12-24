@@ -11,8 +11,8 @@ This step is only needed for zynqmp. If your target board is zynq, skip this ste
 git clone --depth 1 https://github.com/xilinx/arm-trusted-firmware
 cd arm-trusted-firmware
 make PLAT=zynqmp RESET_TO_BL31=1 CROSS_COMPILE=aarch64-none-elf-
-mkdir -p path-to-labeled-RISC-V/fpga/boot/build/zynqmp
-cp build/zynqmp/release/bl31/bl31.elf path-to-labeled-RISC-V/fpga/boot/build/zynqmp/
+mkdir -p $(NOOP_HOME)/fpga/boot/build/zynqmp
+cp build/zynqmp/release/bl31/bl31.elf $(NOOP_HOME)/fpga/boot/build/zynqmp/
 ```
 
 To clean, run
@@ -23,33 +23,33 @@ make PLAT=zynqmp RESET_TO_BL31=1 clean
 ## Build u-boot
 
 ```
-git clone --depth 1 -b xilinx-v2017.4 https://github.com/xilinx/u-boot-xlnx
+git clone --depth 1 -b xilinx-v2019.1 https://github.com/xilinx/u-boot-xlnx
 cd u-boot-xlnx
 
 # for zynqmp
 make xilinx_zynqmp_zcu102_rev1_0_defconfig  # can be found under u-boot-xlnx/configs/
 make CROSS_COMPILE=aarch64-linux-gnu-
-mkdir -p path-to-labeled-RISC-V/fpga/boot/build/zynqmp
-cp u-boot-xlnx/u-boot.elf path-to-labeled-RISC-V/fpga/boot/build/zynqmp/
+mkdir -p $(NOOP_HOME)/fpga/boot/build/zynqmp
+cp u-boot-xlnx/u-boot.elf $(NOOP_HOME)/fpga/boot/build/zynqmp/
 
 # for zynq
 make zynq_zed_defconfig  # can be found under u-boot-xlnx/configs/
 make CROSS_COMPILE=arm-linux-gnueabihf-
-mkdir -p path-to-labeled-RISC-V/fpga/boot/build/zynq
-cp u-boot-xlnx/u-boot.elf path-to-labeled-RISC-V/fpga/boot/build/zynq/
+mkdir -p $(NOOP_HOME)/fpga/boot/build/zynq
+cp u-boot-xlnx/u-boot.elf $(NOOP_HOME)/fpga/boot/build/zynq/
 ```
 
 ## Build BOOT.BIN and Device Tree Source
 
 * (Optional) If you want to download the bitstream in fsbl,
-also put the bitstream under `path-to-labeled-RISC-V/fpga/boot/build/{zynqmp,zynq}`,
+also put the bitstream under `$(NOOP_HOME)/fpga/boot/build/{zynqmp,zynq}`,
 and uncomment the description about bitstream in `bootgen-{zynqmp,zynq}.bif`.
 
 ```
 # for zynqmp
-path-to-labeled-RISC-V/fpga/boot $ ls build/zynqmp
+$(NOOP_HOME)/fpga/boot $ ls build/zynqmp
 bl31.elf   system_top.bit   u-boot.elf
-path-to-labeled-RISC-V/fpga/boot $ cat bootgen-zynqmp.bif
+$(NOOP_HOME)/fpga/boot $ cat bootgen-zynqmp.bif
 the_ROM_image:
 {
   [fsbl_config] a53_x64
@@ -61,9 +61,9 @@ the_ROM_image:
 }
 
 # for zynq
-path-to-labeled-RISC-V/fpga/boot $ ls build/zynq
+$(NOOP_HOME)/fpga/boot $ ls build/zynq
 system_top.bit   u-boot.elf
-path-to-labeled-RISC-V/fpga/boot $ cat bootgen-zynq.bif
+$(NOOP_HOME)/fpga/boot $ cat bootgen-zynq.bif
 the_ROM_image:
 {
   [bootloader] build/zynq/fsbl.elf
@@ -82,35 +82,34 @@ git clone --depth 1 https://github.com/xilinx/device-tree-xlnx
 ```
 * generate BOOT.BIN and device tree source
 ```
-cd path-to-labeled-RISC-V/fpga
+cd $(NOOP_HOME)/fpga
 make bootgen PRJ=my-project BOARD=your-target-board
 ```
 
-Find `BOOT.BIN` and `dts` under `path-to-labeled-RISC-V/fpga/boot/build/myproject-your-target-board/`.
+Find `BOOT.BIN` and `dts` under `$(NOOP_HOME)/fpga/boot/build/myproject-your-target-board/`.
 
 ## Build linux kernel
 
 ```
-git clone --depth 1 -b xilinx-v2017.4 https://github.com/xilinx/linux-xlnx
+git clone --depth 1 -b xilinx-v2019.1 https://github.com/xilinx/linux-xlnx
 cd linux-xlnx
 
 # for zynqmp
 make ARCH=arm64 xilinx_zynqmp_defconfig # can be found under linux-xlnx/arch/arm64/configs/
-make ARCH=arm64 menuconfig
-  General setup -> Cross-compiler tool prefix: `aarch64-linux-gnu-`
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- menuconfig
   General setup -> unchoose `Initial RAM filesystem and RAM disk (initramfs/initrd) support`
-make ARCH=arm64 -j16
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j16
 # Find `Image` under `linux-xlnx/arch/arm64/boot/`
 
 
 # for zynq
 make ARCH=arm xilinx_zynq_defconfig # can be found under linux-xlnx/arch/arm/configs/
-make ARCH=arm menuconfig
-  General setup -> Cross-compiler tool prefix: `arm-linux-gnueabihf-`
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- menuconfig
+  Kernel hacking -> unchoose `Fliter access to /dev/mem`
   General setup -> unchoose `Initial RAM filesystem and RAM disk (initramfs/initrd) support`
   Devices Drivers -> Character devices -> Serial drivers -> choose `Xilinx uartilite serial port support`
                                                          -> then choose `Support for console on Xilinx uartlite serial port`
-make ARCH=arm -j16
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j16
 # Find `Image` under `linux-xlnx/arch/arm/boot/`
 ```
 
@@ -119,8 +118,8 @@ make ARCH=arm -j16
 * create a new file `top.dts` to set bootargs and reserved-memory for the RISC-V subsystem
 ```
 # for zynqmp
-path-to-labeled-RISC-V/fpga/boot/build/myproject-your-target-board/dts $ cat top.dts
-/include/ "system-top.dts"
+$(NOOP_HOME)/fpga/boot/build/myproject-your-target-board/dts $ cat top.dts
+#include "system-top.dts"
 / {
   chosen {
     bootargs = "root=/dev/mmcblk0p2 rootfstype=ext4 rootwait earlycon clk_ignore_unused cpuidle.off=1";
@@ -138,8 +137,8 @@ path-to-labeled-RISC-V/fpga/boot/build/myproject-your-target-board/dts $ cat top
 ```
 ```
 # for zynq
-path-to-labeled-RISC-V/fpga/boot/build/myproject-your-target-board/dts $ cat top.dts
-/include/ "system-top.dts"
+$(NOOP_HOME)/fpga/boot/build/myproject-your-target-board/dts $ cat top.dts
+#include "system-top.dts"
 / {
   chosen {
     bootargs = "root=/dev/mmcblk0p2 rootfstype=ext4 rootwait earlycon clk_ignore_unused";
@@ -150,14 +149,15 @@ path-to-labeled-RISC-V/fpga/boot/build/myproject-your-target-board/dts $ cat top
     ranges;
 
     mem_reserved: buffer@100000000 {
-      reg = <0x10000008 0x10000000>;
+      reg = <0x10000000 0x10000000>;
     };
 	};
 };
 ```
 * compile the dts to dtb
 ```
-dtc -I dts -O dtb -o system.dtb top.dts
+cpp -nostdinc -I include -undef -x assembler-with-cpp top.dts top.dts.preprocessed
+dtc -I dts -O dtb -o system.dtb top.dts.preprocessed
 ```
 
 ## Build rootfs in SD card
@@ -174,8 +174,8 @@ sudo chroot /mnt /bin/bash
 passwd
 apt-get update
 apt-get install net-tools openssh-server vim build-essential minicom tmux libreadline-dev
-# for nfs
-apt-get install nfs-common autofs
+# fix long delay of openssh server
+apt-get install haveged
 exit
 ```
 * Add a line of `ttyPS0` in `/mnt/etc/securetty` to allow login debian via `ttyPS0`. See [here](http://www.linuxquestions.org/questions/linux-newbie-8/login-incorrect-error-after-boot-no-password-prompted-881131/) for more details.
@@ -195,6 +195,7 @@ Finally, insert the SD card into the board. It should be ready to boot debian.
 
 ### Some useful build-in commands under u-boot
 
+* `help`
 * `load mmc 0:auto <addr> <file>` - load `file` in SD card into memory `addr`
 * `fatls mmc 0 <path>` - list files under `path` in SD card
 * `fatwrite mmc 0 <addr> <file> <byte_in_hex>` - write `file` of size `byte_in_hex` from memory `addr` into SD card

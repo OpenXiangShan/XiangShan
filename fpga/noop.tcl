@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# NOOPSoC, AXI4Timer, AXI4VGA
+# NOOPSoC, AXI4Flash, AXI4VGA
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -130,6 +130,7 @@ set bCheckIPsPassed 1
 set bCheckIPs 1
 if { $bCheckIPs == 1 } {
    set list_check_ips "\ 
+xilinx.com:ip:system_ila:1.1\
 xilinx.com:ip:util_vector_logic:2.0\
 xilinx.com:ip:axi_uartlite:2.0\
 "
@@ -158,7 +159,7 @@ set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
 NOOPSoC\
-AXI4Timer\
+AXI4Flash\
 AXI4VGA\
 "
 
@@ -232,20 +233,19 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   create_bd_pin -dir I -type clk clk50
   create_bd_pin -dir I -type clk coreclk
   create_bd_pin -dir I -from 0 -to 0 -type rst corerstn
-  create_bd_pin -dir O io_extra_mtip
   create_bd_pin -dir O io_hsync
   create_bd_pin -dir O -from 23 -to 0 io_rgb
   create_bd_pin -dir O io_videovalid
   create_bd_pin -dir O io_vsync
   create_bd_pin -dir I -type rst rstn50
 
-  # Create instance: AXI4Timer_0, and set properties
-  set block_name AXI4Timer
-  set block_cell_name AXI4Timer_0
-  if { [catch {set AXI4Timer_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+  # Create instance: AXI4Flash_0, and set properties
+  set block_name AXI4Flash
+  set block_cell_name AXI4Flash_0
+  if { [catch {set AXI4Flash_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
      catch {common::send_msg_id "BD_TCL-105" "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
-   } elseif { $AXI4Timer_0 eq "" } {
+   } elseif { $AXI4Flash_0 eq "" } {
      catch {common::send_msg_id "BD_TCL-106" "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
@@ -286,21 +286,20 @@ proc create_hier_cell_hier_devices { parentCell nameHier } {
   connect_bd_intf_net -intf_net Conn1 [get_bd_intf_pins uart] [get_bd_intf_pins axi_uartlite_0/UART]
   connect_bd_intf_net -intf_net S_AXI_1 [get_bd_intf_pins S_AXI] [get_bd_intf_pins axi_interconnect_0/S00_AXI]
   connect_bd_intf_net -intf_net axi_interconnect_0_M00_AXI [get_bd_intf_pins axi_interconnect_0/M00_AXI] [get_bd_intf_pins axi_uartlite_0/S_AXI]
-  connect_bd_intf_net -intf_net axi_interconnect_0_M01_AXI [get_bd_intf_pins AXI4Timer_0/io_in] [get_bd_intf_pins axi_interconnect_0/M01_AXI]
   connect_bd_intf_net -intf_net axi_interconnect_0_M02_AXI [get_bd_intf_pins AXI4VGA_0/io_in_ctrl] [get_bd_intf_pins axi_interconnect_0/M02_AXI]
   connect_bd_intf_net -intf_net axi_interconnect_0_M03_AXI [get_bd_intf_pins AXI4VGA_0/io_in_fb] [get_bd_intf_pins axi_interconnect_0/M03_AXI]
+  connect_bd_intf_net -intf_net axi_interconnect_0_M04_AXI [get_bd_intf_pins AXI4Flash_0/io_in] [get_bd_intf_pins axi_interconnect_0/M01_AXI]
 
   # Create port connections
-  connect_bd_net -net AXI4Timer_0_io_extra_mtip [get_bd_pins io_extra_mtip] [get_bd_pins AXI4Timer_0/io_extra_mtip]
   connect_bd_net -net AXI4VGA_0_io_vga_hsync [get_bd_pins io_hsync] [get_bd_pins AXI4VGA_0/io_vga_hsync]
   connect_bd_net -net AXI4VGA_0_io_vga_rgb [get_bd_pins io_rgb] [get_bd_pins AXI4VGA_0/io_vga_rgb]
   connect_bd_net -net AXI4VGA_0_io_vga_valid [get_bd_pins io_videovalid] [get_bd_pins AXI4VGA_0/io_vga_valid]
   connect_bd_net -net AXI4VGA_0_io_vga_vsync [get_bd_pins io_vsync] [get_bd_pins AXI4VGA_0/io_vga_vsync]
-  connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Timer_0/clock] [get_bd_pins AXI4VGA_0/clock] [get_bd_pins axi_interconnect_0/ACLK] [get_bd_pins axi_interconnect_0/M00_ACLK] [get_bd_pins axi_interconnect_0/M01_ACLK] [get_bd_pins axi_interconnect_0/M02_ACLK] [get_bd_pins axi_interconnect_0/M03_ACLK] [get_bd_pins axi_uartlite_0/s_axi_aclk]
+  connect_bd_net -net clk50_1 [get_bd_pins clk50] [get_bd_pins AXI4Flash_0/clock] [get_bd_pins AXI4VGA_0/clock] [get_bd_pins axi_interconnect_0/ACLK] [get_bd_pins axi_interconnect_0/M00_ACLK] [get_bd_pins axi_interconnect_0/M01_ACLK] [get_bd_pins axi_interconnect_0/M02_ACLK] [get_bd_pins axi_interconnect_0/M03_ACLK] [get_bd_pins axi_uartlite_0/s_axi_aclk]
   connect_bd_net -net coreclk_1 [get_bd_pins coreclk] [get_bd_pins axi_interconnect_0/S00_ACLK]
   connect_bd_net -net proc_sys_reset_0_interconnect_aresetn [get_bd_pins rstn50] [get_bd_pins axi_interconnect_0/ARESETN] [get_bd_pins axi_interconnect_0/M00_ARESETN] [get_bd_pins axi_interconnect_0/M01_ARESETN] [get_bd_pins axi_interconnect_0/M02_ARESETN] [get_bd_pins axi_interconnect_0/M03_ARESETN] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins util_vector_logic_0/Op1]
   connect_bd_net -net uncorerstn_1 [get_bd_pins corerstn] [get_bd_pins axi_interconnect_0/S00_ARESETN]
-  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins AXI4Timer_0/reset] [get_bd_pins AXI4VGA_0/reset] [get_bd_pins util_vector_logic_0/Res]
+  connect_bd_net -net util_vector_logic_0_Res [get_bd_pins AXI4Flash_0/reset] [get_bd_pins AXI4VGA_0/reset] [get_bd_pins util_vector_logic_0/Res]
 
   # Restore current instance
   current_bd_instance $oldCurInst
@@ -398,6 +397,15 @@ proc create_root_design { parentCell } {
   # Create instance: hier_devices
   create_hier_cell_hier_devices [current_bd_instance .] hier_devices
 
+  # Create instance: system_ila_0, and set properties
+  set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
+  set_property -dict [ list \
+   CONFIG.C_BRAM_CNT {0.5} \
+   CONFIG.C_MON_TYPE {NATIVE} \
+   CONFIG.C_NUM_MONITOR_SLOTS {1} \
+   CONFIG.C_NUM_OF_PROBES {6} \
+ ] $system_ila_0
+
   # Create instance: util_vector_logic_0, and set properties
   set util_vector_logic_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 util_vector_logic_0 ]
   set_property -dict [ list \
@@ -413,10 +421,15 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net hier_devices_uart [get_bd_intf_ports uart] [get_bd_intf_pins hier_devices/uart]
 
   # Create port connections
+  connect_bd_net -net NOOPSoC_0_io_ila_InstrCnt [get_bd_pins NOOPSoC_0/io_ila_InstrCnt] [get_bd_pins system_ila_0/probe5]
+  connect_bd_net -net NOOPSoC_0_io_ila_WBUpc [get_bd_pins NOOPSoC_0/io_ila_WBUpc] [get_bd_pins system_ila_0/probe0]
+  connect_bd_net -net NOOPSoC_0_io_ila_WBUrfData [get_bd_pins NOOPSoC_0/io_ila_WBUrfData] [get_bd_pins system_ila_0/probe4]
+  connect_bd_net -net NOOPSoC_0_io_ila_WBUrfDest [get_bd_pins NOOPSoC_0/io_ila_WBUrfDest] [get_bd_pins system_ila_0/probe3]
+  connect_bd_net -net NOOPSoC_0_io_ila_WBUrfWen [get_bd_pins NOOPSoC_0/io_ila_WBUrfWen] [get_bd_pins system_ila_0/probe2]
+  connect_bd_net -net NOOPSoC_0_io_ila_WBUvalid [get_bd_pins NOOPSoC_0/io_ila_WBUvalid] [get_bd_pins system_ila_0/probe1]
   connect_bd_net -net c_shift_ram_0_Q [get_bd_ports corerstn] [get_bd_pins axi_interconnect_2/ARESETN] [get_bd_pins axi_interconnect_2/S00_ARESETN] [get_bd_pins hier_devices/corerstn] [get_bd_pins util_vector_logic_0/Op1]
-  connect_bd_net -net clk50_1 [get_bd_ports clk50] [get_bd_pins hier_devices/clk50]
+  connect_bd_net -net clk50_1 [get_bd_ports clk50] [get_bd_pins hier_devices/clk50] [get_bd_pins system_ila_0/clk]
   connect_bd_net -net coreclk_1 [get_bd_ports coreclk] [get_bd_pins NOOPSoC_0/clock] [get_bd_pins axi_interconnect_2/ACLK] [get_bd_pins axi_interconnect_2/S00_ACLK] [get_bd_pins hier_devices/coreclk]
-  connect_bd_net -net hier_devices_io_extra_mtip [get_bd_pins NOOPSoC_0/io_mtip] [get_bd_pins hier_devices/io_extra_mtip]
   connect_bd_net -net hier_devices_io_hsync [get_bd_ports VGA_hsync] [get_bd_pins hier_devices/io_hsync]
   connect_bd_net -net hier_devices_io_rgb [get_bd_ports VGA_rgb] [get_bd_pins hier_devices/io_rgb]
   connect_bd_net -net hier_devices_io_videovalid [get_bd_ports VGA_videovalid] [get_bd_pins hier_devices/io_videovalid]
@@ -427,9 +440,9 @@ proc create_root_design { parentCell } {
   connect_bd_net -net util_vector_logic_0_Res [get_bd_pins NOOPSoC_0/reset] [get_bd_pins util_vector_logic_0/Res]
 
   # Create address segments
-  create_bd_addr_seg -range 0x00010000 -offset 0x40700000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4Timer_0/io_in/reg0] SEG_AXI4Timer_0_reg0
+  create_bd_addr_seg -range 0x00010000 -offset 0x40000000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4Flash_0/io_in/reg0] SEG_AXI4Flash_0_reg0
   create_bd_addr_seg -range 0x00010000 -offset 0x40800000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_ctrl/reg0] SEG_AXI4VGA_0_reg0
-  create_bd_addr_seg -range 0x00080000 -offset 0x40000000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_fb/reg0] SEG_AXI4VGA_0_reg01
+  create_bd_addr_seg -range 0x00080000 -offset 0x41000000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/AXI4VGA_0/io_in_fb/reg0] SEG_AXI4VGA_0_reg01
   create_bd_addr_seg -range 0x10000000 -offset 0x80000000 [get_bd_addr_spaces NOOPSoC_0/io_mem] [get_bd_addr_segs AXI_MEM/Reg] SEG_AXI_MEM_Reg
   create_bd_addr_seg -range 0x00010000 -offset 0x40600000 [get_bd_addr_spaces NOOPSoC_0/io_mmio] [get_bd_addr_segs hier_devices/axi_uartlite_0/S_AXI/Reg] SEG_axi_uartlite_0_Reg
 
