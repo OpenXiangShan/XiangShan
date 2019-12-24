@@ -29,7 +29,6 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
     val mem = new AXI4
     val mmio = (if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC })
     val frontend = Flipped(new AXI4)
-    val mtip = Input(Bool())
     val meip = Input(Bool())
     val ila = if (p.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
   })
@@ -84,7 +83,6 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   if (p.FPGAPlatform) io.mmio <> extDev.toAXI4Lite()
   else io.mmio <> extDev
 
-  //val mtipSync = RegNext(RegNext(io.mtip))
   val mtipSync = clint.io.extra.get.mtip
   val meipSync = RegNext(RegNext(io.meip))
   BoringUtils.addSource(mtipSync, "mtip")
