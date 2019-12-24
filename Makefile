@@ -58,6 +58,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
+  +define+RANDOMIZE_MEM_INIT \
   --assert \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
@@ -86,8 +87,10 @@ ifdef mainargs
 MAINARGS = -m $(mainargs)
 endif
 
+SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
+
 emu: $(EMU)
-	@$(EMU) -i $(IMAGE) $(MAINARGS)
+	@$(EMU) -i $(IMAGE) $(SEED) $(MAINARGS)
 
 cache:
 	$(MAKE) emu IMAGE=Makefile

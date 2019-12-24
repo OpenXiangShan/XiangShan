@@ -3,6 +3,7 @@ package system
 import noop._
 import bus.axi4.{AXI4, AXI4Lite}
 import bus.simplebus._
+import device.AXI4Timer
 
 import chisel3._
 import chisel3.util._
@@ -28,7 +29,6 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
     val mem = new AXI4
     val mmio = (if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC })
     val frontend = Flipped(new AXI4)
-    val mtip = Input(Bool())
     val meip = Input(Bool())
     val ila = if (p.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
   })
@@ -70,10 +70,20 @@ class NOOPSoC(implicit val p: NOOPConfig) extends Module with HasSoCParameter {
   noop.io.imem.coh.req.valid := false.B
   noop.io.imem.coh.req.bits := DontCare
 
-  if (p.FPGAPlatform) io.mmio <> noop.io.mmio.toAXI4Lite()
-  else io.mmio <> noop.io.mmio
+  val addrSpace = List(
+    (0x40000000L, 0x08000000L), // external devices
+    (0x48000000L, 0x00010000L)  // CLINT
+  )
+  val mmioXbar = Module(new SimpleBusCrossbar1toN(addrSpace))
+  mmioXbar.io.in <> noop.io.mmio
 
-  val mtipSync = RegNext(RegNext(io.mtip))
+  val extDev = mmioXbar.io.out(0)
+  val clint = Module(new AXI4Timer(sim = !p.FPGAPlatform))
+  clint.io.in <> mmioXbar.io.out(1).toAXI4Lite()
+  if (p.FPGAPlatform) io.mmio <> extDev.toAXI4Lite()
+  else io.mmio <> extDev
+
+  val mtipSync = clint.io.extra.get.mtip
   val meipSync = RegNext(RegNext(io.meip))
   BoringUtils.addSource(mtipSync, "mtip")
   BoringUtils.addSource(meipSync, "meip")

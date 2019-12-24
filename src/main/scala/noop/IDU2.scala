@@ -111,8 +111,12 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   io.out.bits.data.imm  := Mux(isRVC, immrvc, imm)
 
   when (fuType === FuType.alu) {
-    when (rfDest === 1.U && fuOpType === ALUOpType.jal) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
-    when (rfSrc1 === 1.U && fuOpType === ALUOpType.jalr) { io.out.bits.ctrl.fuOpType := ALUOpType.ret }
+    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
+    when (isLink(rfDest) && fuOpType === ALUOpType.jal) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
+    when (fuOpType === ALUOpType.jalr) {
+      when (isLink(rfSrc1)) { io.out.bits.ctrl.fuOpType := ALUOpType.ret }
+      when (isLink(rfDest)) { io.out.bits.ctrl.fuOpType := ALUOpType.call }
+    }
   }
   // fix LUI
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)

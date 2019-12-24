@@ -47,7 +47,6 @@ class NOOPSimTop extends Module {
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio
-  soc.io.mtip := mmio.io.mtip
 
   // soc.io.meip := Counter(true.B, 9973)._2  // use prime here to not overlapped by mtip
   soc.io.meip := false.B  // use prime here to not overlapped by mtip

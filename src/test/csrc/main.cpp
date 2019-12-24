@@ -42,8 +42,10 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
   while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:", long_options, NULL)) != -1) {
     switch (o) {
       case 's': 
-        if(std::string(optarg) != "NO_SEED")
+        if(std::string(optarg) != "NO_SEED") {
           seed = atoll(optarg);
+          printf("Using seed = %d\n", seed);
+        }
         break;
       case 'C': max_cycles = atoll(optarg);  break;
       case 'i': image = optarg;
