@@ -1,14 +1,18 @@
 `include "axi.vh"
 
+//`define HAS_HDMI
+
 module system_top (
-  //inout  hdmi_scl,
-  //inout  hdmi_sda,
-  //output hdmi_nreset,
-  //output hdmi_clk,
-  //output hdmi_hsync,
-  //output hdmi_vsync,
-  //output hdmi_videovalid,
-  //output [23:0] hdmi_rgb
+`ifdef HAS_HDMI
+  inout  hdmi_scl,
+  inout  hdmi_sda,
+  output hdmi_nreset,
+  output hdmi_clk,
+  output hdmi_hsync,
+  output hdmi_vsync,
+  output hdmi_videovalid,
+  output [23:0] hdmi_rgb
+`endif
   //output [7:0] led
 );
 
@@ -64,10 +68,12 @@ module system_top (
     .uart_txd(noop_uart_tx),
     .uart_rxd(noop_uart_rx),
 
-    //.VGA_rgb(hdmi_rgb),
-    //.VGA_hsync(hdmi_hsync),
-    //.VGA_vsync(hdmi_vsync),
-    //.VGA_videovalid(hdmi_videovalid),
+`ifdef HAS_HDMI
+    .VGA_rgb(hdmi_rgb),
+    .VGA_hsync(hdmi_hsync),
+    .VGA_vsync(hdmi_vsync),
+    .VGA_videovalid(hdmi_videovalid),
+`endif
 
     .coreclk(coreclk),
     .corerstn(corerstn_sync[1]),
@@ -77,14 +83,16 @@ module system_top (
     .uncorerstn(uncorerstn)
   );
 
-  //i2c_config hdmi_i2c_config(
-  //  .rst(!uncorerstn),
-  //  .clk(clk27),
-  //  .i2c_scl(hdmi_scl),
-  //  .i2c_sda(hdmi_sda)
-  //);
+`ifdef HAS_HDMI
+  i2c_config hdmi_i2c_config(
+    .rst(!uncorerstn),
+    .clk(clk27),
+    .i2c_scl(hdmi_scl),
+    .i2c_sda(hdmi_sda)
+  );
 
-  //assign hdmi_nreset = uncorerstn;
-  //assign hdmi_clk = clk50;
+  assign hdmi_nreset = uncorerstn;
+  assign hdmi_clk = clk50;
+`endif
 
 endmodule

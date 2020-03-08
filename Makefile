@@ -83,14 +83,10 @@ $(REF_SO):
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
-ifdef mainargs
-MAINARGS = -m $(mainargs)
-endif
-
 SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
 
 emu: $(EMU)
-	@$(EMU) -i $(IMAGE) $(SEED) $(MAINARGS)
+	@$(EMU) -i $(IMAGE) $(SEED)
 
 cache:
 	$(MAKE) emu IMAGE=Makefile

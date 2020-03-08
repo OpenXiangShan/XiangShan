@@ -1,7 +1,6 @@
 #include "common.h"
 
 #define RAMSIZE (256 * 1024 * 1024)
-#define MAINARGS_START 0x1000
 
 static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
 static long img_size = 0;
@@ -69,7 +68,7 @@ void addpageSv39() {
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*PTENUM), pte, PAGESIZE*PTENUM);
 }
 
-void init_ram(const char *img, const char *mainargs) {
+void init_ram(const char *img) {
   assert(img != NULL);
   FILE *fp = fopen(img, "rb");
   if (fp == NULL) {
@@ -90,9 +89,6 @@ void init_ram(const char *img, const char *mainargs) {
   //new add
   addpageSv39();
   //new end
-  if (mainargs != NULL) {
-    strcpy((char *)ram + MAINARGS_START, mainargs);
-  }
 }
 
 extern "C" void ram_helper(
