@@ -16,7 +16,6 @@
 
 class Emulator {
   const char *image;
-  const char *mainargs;
   std::shared_ptr<VNOOPSimTop> dut_ptr;
 #if VM_TRACE
   VerilatedVcdC* tfp;
@@ -50,7 +49,6 @@ class Emulator {
   // argv decay to the secondary pointer
   Emulator(int argc, const char *argv[]):
     image(nullptr),
-    mainargs(NULL),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0)
   {
@@ -63,8 +61,8 @@ class Emulator {
     Verilated::randReset(2);
 
     // init ram
-    extern void init_ram(const char *img, const char *mainargs);
-    init_ram(image, mainargs);
+    extern void init_ram(const char *img);
+    init_ram(image);
 
     // init device
     extern void init_device(void);
