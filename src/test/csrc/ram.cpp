@@ -1,7 +1,6 @@
 #include "common.h"
 
 #define RAMSIZE (256 * 1024 * 1024)
-#define MAINARGS_START 0x1000
 
 static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
 static long img_size = 0;
