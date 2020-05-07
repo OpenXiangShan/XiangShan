@@ -2,9 +2,9 @@ package noop
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
 import utils._
 import bus.simplebus._
+import fpu.boxF32ToF64
 
 object LSUOpType {
   def lb   = "b000000".U
@@ -14,6 +14,7 @@ object LSUOpType {
   def lbu  = "b000100".U
   def lhu  = "b000101".U
   def lwu  = "b000110".U
+  def flw  = "b010110".U // box 32-bit data to 64-bit with 1s
   def sb   = "b001000".U
   def sh   = "b001001".U
   def sw   = "b001010".U
@@ -432,7 +433,8 @@ class LSExecUnit extends NOOPModule {
       LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+      LSUOpType.flw  -> boxF32ToF64(rdataSel(31,0))
   ))
   val addrAligned = LookupTree(func(1,0), List(
     "b00".U   -> true.B,            //b

@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
+import noop.fu.FpuCsrIO
 import utils._
 
 object CSROpType {
@@ -160,6 +160,7 @@ trait HasExceptionNO {
 class CSRIO extends FunctionUnitIO {
   val cfIn = Flipped(new CtrlFlowIO)
   val redirect = new RedirectIO
+  val fpu_csr = Flipped(new FpuCsrIO)
   // for exception check
   val instrValid = Input(Bool())
   // for differential testing
@@ -194,7 +195,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
    
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
-    val pad1 = Output(UInt(37.W))
+    val pad1 = Output(UInt((XLEN-37).W))
     val sxl = Output(UInt(2.W))
     val uxl = Output(UInt(2.W))
     val pad0 = Output(UInt(9.W))
@@ -211,6 +212,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     val spp = Output(UInt(1.W))
     val pie = new Priv
     val ie = new Priv
+    assert(this.getWidth == XLEN)
   }
 
   class Interrupt extends Bundle {
@@ -220,7 +222,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   }
 
   // Machine-Level CSRs
-  
+
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   val mcause = RegInit(UInt(XLEN.W), 0.U)
@@ -234,12 +236,13 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}
-  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)} 
+  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}
   var extList = List('a', 's', 'i', 'u')
   if(HasMExtension){ extList = extList :+ 'm'}
   if(HasCExtension){ extList = extList :+ 'c'}
-  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U 
-  val misa = RegInit(UInt(XLEN.W), misaInitVal) 
+  if(HasFPU){ extList = extList ++ List('f', 'd')}
+  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
+  val misa = RegInit(UInt(XLEN.W), misaInitVal)
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
@@ -262,7 +265,7 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // | sum  |
   // | mprv |
   // | xs   | 00 |
-  // | fs   | 00 |
+  // | fs   |
   // | mpp  | 00 |
   // | hpp  | 00 |
   // | spp  | 0 |
@@ -316,6 +319,45 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
 
+  // fcsr
+  class FcsrStruct extends Bundle{
+    val reserved = UInt((XLEN-3-5).W)
+    val frm = UInt(3.W)
+    val fflags = UInt(5.W)
+    assert(this.getWidth == XLEN)
+  }
+  val fcsr = RegInit(0.U(XLEN.W))
+  // set mstatus->sd and mstatus->fs when true
+  val csrw_dirty_fp_state = WireInit(false.B)
+
+  def frm_wfn(wdata: UInt): UInt = {
+    val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
+    csrw_dirty_fp_state := true.B
+    fcsrOld.frm := wdata(2,0)
+    fcsrOld.asUInt()
+  }
+  def frm_rfn(rdata: UInt): UInt = rdata(7,5)
+
+  def fflags_wfn(wdata: UInt): UInt = {
+    val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
+    csrw_dirty_fp_state := true.B
+    fcsrOld.fflags := wdata(4,0)
+    fcsrOld.asUInt()
+  }
+  def fflags_rfn(rdata:UInt): UInt = rdata(4,0)
+
+  def fcsr_wfn(wdata: UInt): UInt = {
+    val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
+    csrw_dirty_fp_state := true.B
+    Cat(fcsrOld.reserved, wdata.asTypeOf(fcsrOld).frm, wdata.asTypeOf(fcsrOld).fflags)
+  }
+
+  val fcsrMapping = Map(
+    MaskedRegMap(Fflags, fcsr, wfn = fflags_wfn, rfn = fflags_rfn),
+    MaskedRegMap(Frm, fcsr, wfn = frm_wfn, rfn = frm_rfn),
+    MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
+  )
+
   // Atom LR/SC Control Bits
   val setLr = WireInit(Bool(), false.B)
   val setLrVal = WireInit(Bool(), false.B)
@@ -357,11 +399,6 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     // MaskedRegMap(Ucause, ucause),
     // MaskedRegMap(Utval, utval),
     // MaskedRegMap(Uip, uip),
-
-    // User Floating-Point CSRs (not implemented)
-    // MaskedRegMap(Fflags, fflags),
-    // MaskedRegMap(Frm, frm),
-    // MaskedRegMap(Fcsr, fcsr),
 
     // User Counter/Timers
     // MaskedRegMap(Cycle, cycle),
@@ -420,7 +457,9 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
     MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
     MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
 
-  ) ++ perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil)
+  ) ++
+    perfCntsLoMapping ++ (if (XLEN == 32) perfCntsHiMapping else Nil) ++
+    (if(HasFPU) fcsrMapping else Nil)
 
   val addr = src2(11, 0)
   val rdata = Wire(UInt(XLEN.W))
@@ -448,6 +487,18 @@ class CSR(implicit val p: NOOPConfig) extends NOOPModule with HasCSRConst{
   )
   val rdataDummy = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
+
+  when(io.fpu_csr.fflags.asUInt() =/= 0.U){
+    fcsr := fflags_wfn(io.fpu_csr.fflags.asUInt())
+  }
+  // set fs and sd in mstatus
+  when(csrw_dirty_fp_state || io.fpu_csr.dirty_fs){
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    mstatusNew.fs := "b11".U
+    mstatusNew.sd := true.B
+    mstatus := mstatusNew.asUInt()
+  }
+  io.fpu_csr.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
   // CSR inst decode
   val ret = Wire(Bool())
