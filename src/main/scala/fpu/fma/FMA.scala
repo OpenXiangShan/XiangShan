@@ -9,7 +9,7 @@ import fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, ShiftRightJam}
 class FMA extends FPUSubModule with HasPipelineReg {
   def latency = 5
 
-  def UseRealArraryMult = false
+  def UseRealArraryMult = true
 
   def SEXP_WIDTH: Int = Float64.expWidth + 2
   def D_MANT_WIDTH: Int = Float64.mantWidth + 1
@@ -159,7 +159,7 @@ class FMA extends FPUSubModule with HasPipelineReg {
 
 
   /******************************************************************
-    * Stage 2: prodSum + prodCarry + alignedMantA => (sum, carry)
+    * Stage 2: align A | compute product (B*C)
     *****************************************************************/
 
   val alignedAMant = Wire(UInt((ADD_WIDTH+4).W))
@@ -167,25 +167,26 @@ class FMA extends FPUSubModule with HasPipelineReg {
     0.U(1.W), // sign bit
     ShiftRightJam(s1_aMant, Mux(s1_discardProdMant, 0.U, s1_expDiff.asUInt()), ADD_WIDTH+3)
   )
-  val alignedAMantNeg = ~alignedAMant
+  val alignedAMantNeg = (~alignedAMant).asUInt()
   val effSub = s1_prodSign ^ s1_aSign
 
-  val csa = Module(new CSA3_2(ADD_WIDTH+4))
-  csa.io.in(0) := Mux(effSub, alignedAMantNeg, alignedAMant)
-  csa.io.in(1) := Cat(mult.io.sum.tail(1), 0.U(2.W), effSub)
-  csa.io.in(2) := Cat(mult.io.carry.tail(1), 0.U(3.W))
+  val mul_prod = mult.io.carry.tail(1) + mult.io.sum.tail(1)
 
   val s2_isDouble = S2Reg(s1_isDouble)
   val s2_rm = S2Reg(s1_rm)
   val s2_zeroSign = S2Reg(s1_zeroSign)
   val s2_specialCaseHappen = S2Reg(s1_specialCaseHappen)
   val s2_specialOutput = S2Reg(s1_specialOutput)
-  val s2_sum = S2Reg(csa.io.out(0))
-  val s2_carry = S2Reg(Cat(csa.io.out(1).tail(1), 0.U(1.W)))
   val s2_aSign = S2Reg(s1_aSign)
   val s2_prodSign = S2Reg(s1_prodSign)
   val s2_expPreNorm = S2Reg(Mux(s1_discardAMant || !s1_discardProdMant, s1_prodExpAdj, s1_aExpRaw))
   val s2_invalid = S2Reg(s1_invalid)
+
+  val s2_prod = S2Reg(mul_prod)
+  val s2_aMantNeg = S2Reg(alignedAMantNeg)
+  val s2_aMant = S2Reg(alignedAMant)
+  val s2_effSub = S2Reg(effSub)
+
 
   FPUDebug(){
     when(valids(1) && ready){
@@ -194,26 +195,40 @@ class FMA extends FPUSubModule with HasPipelineReg {
   }
 
   /******************************************************************
-    * Stage 3: sum + carry => adder result
+    * Stage 3: A + Prod => adder result
     *****************************************************************/
 
-  val sum = s2_sum + s2_carry // +/-a + (b*c)
-  val sumNeg = -sum
-  val sumSign = sum.head(1).asBool()
+  val prodMinusA = Cat(s2_prod, 0.U(3.W)) + s2_aMantNeg
+  val prodMinusA_Sign = prodMinusA.head(1).asBool()
+  val aMinusProd = -prodMinusA
+  val prodAddA = Cat(s2_prod, 0.U(3.W)) + s2_aMant
 
+  val lza = Module(new LZA(ADD_WIDTH+4))
+  lza.io.a := s2_aMant
+  lza.io.b := Cat(s2_prod, 0.U(3.W))
+
+  val effSubLez = lza.io.out - 1.U
+  val effAddLez = PriorityEncoder(prodAddA.tail(1).asBools().reverse)
+  val res = Mux(s2_effSub,
+    Mux(prodMinusA_Sign,
+      aMinusProd,
+      prodMinusA
+    ),
+    prodAddA
+  )
   val resSign = Mux(s2_prodSign,
     Mux(s2_aSign,
       true.B, // -(b*c) - a
-      !sumSign        // -(b*c) + a
+      !prodMinusA_Sign        // -(b*c) + a
     ),
     Mux(s2_aSign,
-      sumSign, // b*c - a
+      prodMinusA_Sign, // b*c - a
       false.B         // b*c + a
     )
   )
+  val mantPreNorm = res.tail(1)
+  val normShift = Mux(s2_effSub, effSubLez, effAddLez)
 
-  val mantPreNorm = Mux(sumSign, sumNeg, sum).tail(1)
-  val normShift = PriorityEncoder(mantPreNorm.asBools().reverse)
   val roundingInc = MuxLookup(s2_rm, "b10".U(2.W), Seq(
     RoudingMode.RDN -> Mux(resSign, "b11".U, "b00".U),
     RoudingMode.RUP -> Mux(resSign, "b00".U, "b11".U),
