@@ -167,7 +167,7 @@ class FMA extends FPUSubModule with HasPipelineReg {
     0.U(1.W), // sign bit
     ShiftRightJam(s1_aMant, Mux(s1_discardProdMant, 0.U, s1_expDiff.asUInt()), ADD_WIDTH+3)
   )
-  val alignedAMantNeg = (~alignedAMant).asUInt()
+  val alignedAMantNeg = -alignedAMant
   val effSub = s1_prodSign ^ s1_aSign
 
   val mul_prod = mult.io.carry.tail(1) + mult.io.sum.tail(1)
