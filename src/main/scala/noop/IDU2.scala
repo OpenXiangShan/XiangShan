@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-import noop.isa.{RVFInstr, RVDInstr}
+import noop.isa.{RVDInstr, RVFInstr, RVF_LSUInstr, RVD_LSUInstr}
 import utils._
 
 class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
@@ -25,8 +25,29 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   val fpExtraDecodeTable = RVFInstr.extraTable ++ RVDInstr.extraTable
   val isFp :: fpSrc1Type :: fpSrc2Type :: fpSrc3Type :: fpRfWen :: fpWen :: fpFuOpType :: fpInputFunc :: fpOutputFunc :: Nil =
     if(HasFPU) ListLookup(instr, RVFInstr.extraTableDefault, fpExtraDecodeTable) else RVFInstr.extraTableDefault
-  // flw/fsw/fld/fsd
-  val isFloatLdSd = if(HasFPU) instr(6,0)==="b0000111".U || instr(6,0)==="b0100111".U else false.B
+
+  val floatLdStInstrs = List(
+    RVF_LSUInstr.FLW,
+    RVF_LSUInstr.FSW,
+    RVD_LSUInstr.FLD,
+    RVCInstr.C_FLD,
+    RVCInstr.C_FLDSP,
+    RVD_LSUInstr.FSD,
+    RVCInstr.C_FSD,
+    RVCInstr.C_FSDSP
+  )
+
+  def treeCmp(key: UInt, cmpList: List[BitPat]): Bool = {
+    cmpList.size match {
+      case 1 =>
+        key === cmpList.head
+      case n =>
+        treeCmp(key, cmpList take n/2) || treeCmp(key, cmpList drop n/2)
+    }
+  }
+
+  val isFloatLdSd = if(HasFPU) treeCmp(instr, floatLdStInstrs) else false.B
+
   val isRVFD = isFp.asBool()
   val instrType = Mux(hasIntrOrExceptino,
     intrInstrType,
@@ -111,7 +132,7 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   // TODO: refactor decode logic
   // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
   io.out.bits.ctrl.rfSrc1 := Mux(src1Type === SrcType.pc, 0.U, rfSrc1)
-  io.out.bits.ctrl.rfSrc2 := Mux(src2Type === SrcType.reg, rfSrc2, 0.U)
+  io.out.bits.ctrl.rfSrc2 := Mux(src2Type === SrcType.imm, 0.U, rfSrc2)
   io.out.bits.ctrl.rfWen  := rfWen
   io.out.bits.ctrl.fpWen := fpWen.asBool()
   io.out.bits.ctrl.rfDest := Mux(fpWen.asBool() || rfWen, rfDest, 0.U)

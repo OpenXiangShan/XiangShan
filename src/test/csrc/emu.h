@@ -37,6 +37,10 @@ class Emulator {
     macro(8); macro(9); macro(10); macro(11); macro(12); macro(13); macro(14); macro(15);
     macro(16); macro(17); macro(18); macro(19); macro(20); macro(21); macro(22); macro(23);
     macro(24); macro(25); macro(26); macro(27); macro(28); macro(29); macro(30); macro(31);
+    macro(32); macro(33); macro(34); macro(35); macro(36); macro(37); macro(38); macro(39);
+    macro(40); macro(41); macro(42); macro(43); macro(44); macro(45); macro(46); macro(47);
+    macro(48); macro(49); macro(50); macro(51); macro(52); macro(53); macro(54); macro(55);
+    macro(56); macro(57); macro(58); macro(59); macro(60); macro(61); macro(62); macro(63);
     r[DIFFTEST_THIS_PC] = dut_ptr->io_difftest_thisPC;
     r[DIFFTEST_MSTATUS] = dut_ptr->io_difftest_mstatus;
     r[DIFFTEST_SSTATUS] = dut_ptr->io_difftest_sstatus;

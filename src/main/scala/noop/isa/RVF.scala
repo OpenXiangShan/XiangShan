@@ -2,7 +2,6 @@ package noop.isa
 
 import Chisel.BitPat
 import chisel3._
-import fpu.FPUIOFunc
 import noop._
 import noop.SrcType._
 import fpu.FPUOpType._

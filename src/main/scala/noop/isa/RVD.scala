@@ -4,6 +4,7 @@ import Chisel.BitPat
 import noop._
 import noop.SrcType.{fp, imm, reg}
 import RVF_FPUInstr.{Y, N}
+import RVCInstr._
 import fpu.FPUIOFunc._
 import fpu.FPUOpType._
 
@@ -12,7 +13,11 @@ object RVD_LSUInstr extends HasInstrType{
   def FSD = BitPat("b?????????????????011?????0100111")
   val table = Array(
     FLD -> List(InstrI, FuType.lsu, LSUOpType.ld),
-    FSD -> List(InstrS, FuType.lsu, LSUOpType.sd)
+    C_FLD -> List(InstrI, FuType.lsu, LSUOpType.ld),
+    C_FLDSP -> List(InstrI, FuType.lsu, LSUOpType.ld),
+    FSD -> List(InstrS, FuType.lsu, LSUOpType.sd),
+    C_FSD -> List(InstrS, FuType.lsu, LSUOpType.sd),
+    C_FSDSP -> List(InstrS, FuType.lsu, LSUOpType.sd)
   )
 }
 
@@ -52,7 +57,11 @@ object RVD_FPUInstr extends HasNOOPParameter {
   //  (isFp, src1Type, src2Type, src3Type, rfWen, fpWen, fuOpType, inputFunc, outputFunc)
   val table = Array(
     FLD -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
+    C_FLD -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
+    C_FLDSP -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
     FSD -> List(Y, reg, fp, imm, N, N, LSUOpType.sd, in_raw, out_raw),
+    C_FSD -> List(Y, reg, fp, imm, N, N, LSUOpType.sd, in_raw, out_raw),
+    C_FSDSP -> List(Y, reg, fp, imm, N, N, LSUOpType.sd, in_raw, out_raw),
     // fp fp -> fp
     FADD_D   -> List(Y, fp, fp, imm, N, Y, fadd, in_raw, out_raw),
     FSUB_D   -> List(Y, fp, fp, imm, N, Y, fsub, in_raw, out_raw),

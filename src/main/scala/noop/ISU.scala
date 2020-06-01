@@ -62,17 +62,14 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
   val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward
   val src2Ready = !sb.isBusy(rfSrc2) || src2ForwardNextCycle || src2Forward
 
+  val fpr = new RegFile(width = XLEN, hasZero = false)
+
   val (fprSrcReady,fprSrcData):(Bool,Array[UInt]) = if(HasFPU){
-    val fpr = new RegFile(width = XLEN, hasZero = false)
     val fsb = new ScoreBoard(hasZero = false)
     val forwardFpWen = io.forward.wb.fpWen && io.forward.valid
 
     when (io.wb.fpWen) {
       fpr.write(io.wb.rfDest, io.wb.rfData)
-      Debug(){
-        printf(p"[isu] write fpr:${io.wb.rfDest} value=${Hexadecimal(io.wb.rfData)} " +
-          p"at pc=${Hexadecimal(io.in.bits.cf.pc)}\n")
-      }
     }
 
     val fsbClearMask = Mux(io.wb.fpWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardFpWen),
@@ -82,7 +79,8 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
       .otherwise { fsb.update(fsbSetMask, fsbClearMask) }
 
     val instr = io.in.bits.cf.instr
-    val (fpSrc1,fpSrc2,fpSrc3) = (instr(19, 15), instr(24, 20), instr(31, 27))
+
+    val (fpSrc1,fpSrc2,fpSrc3) = (rfSrc1, rfSrc2, instr(31, 27))
     val srcs = Seq(fpSrc1, fpSrc2, fpSrc3).zip(Seq(
       io.in.bits.ctrl.src1Type,
       io.in.bits.ctrl.src2Type,
@@ -154,6 +152,8 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
   BoringUtils.addSource(io.out.valid && !io.out.fire(), "perfCntCondMexuBusy")
 
   if (!p.FPGAPlatform) {
-    BoringUtils.addSource(VecInit((0 until NRReg).map(i => rf.read(i.U))), "difftestRegs")
+    val gRegs = (0 until NRReg).map(i => rf.read(i.U))
+    val fRegs = (0 until NRReg).map(i => if(HasFPU) fpr.read(i.U) else  0.U)
+    BoringUtils.addSource(VecInit(gRegs ++ fRegs), "difftestRegs")
   }
 }

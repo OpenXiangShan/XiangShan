@@ -11,7 +11,7 @@ import bus.axi4._
 import device.AXI4RAM
 
 class DiffTestIO extends Bundle {
-  val r = Output(Vec(32, UInt(64.W)))
+  val r = Output(Vec(64, UInt(64.W)))
   val commit = Output(Bool())
   val thisPC = Output(UInt(64.W))
   val thisINST = Output(UInt(32.W))
