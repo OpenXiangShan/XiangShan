@@ -9,7 +9,7 @@ import fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, ShiftRightJam}
 class FMA extends FPUSubModule with HasPipelineReg {
   def latency = 5
 
-  def UseRealArraryMult = true
+  def UseRealArraryMult = false
 
   def SEXP_WIDTH: Int = Float64.expWidth + 2
   def D_MANT_WIDTH: Int = Float64.mantWidth + 1
