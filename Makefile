@@ -37,7 +37,7 @@ build/top.zip: $(TOP_V)
 
 verilog: $(TOP_V)
 
-SIM_TOP = NOOPSimTop
+SIM_TOP = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)

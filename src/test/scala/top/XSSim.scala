@@ -1,14 +1,12 @@
 package top
 
 import system._
-import noop.NOOPConfig
-
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
 import bus.axi4._
 import device.AXI4RAM
+import xiangshan._
 
 class DiffTestIO extends Bundle {
   val r = Output(Vec(64, UInt(64.W)))
@@ -28,14 +26,14 @@ class DiffTestIO extends Bundle {
   val scause = Output(UInt(64.W))
 }
 
-class NOOPSimTop extends Module {
+class XSSimTop extends Module {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
   })
 
-  lazy val config = NOOPConfig(FPGAPlatform = false)
-  val soc = Module(new NOOPSoC()(config))
-  val mem = Module(new AXI4RAM(memByte = 256 * 1024 * 1024, useBlackBox = true))
+  lazy val config = XSConfig(FPGAPlatform = false)
+  val soc = Module(new XSSoc()(config))
+  val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
   // Be careful with the commit checking of emu.
   // A large delay will make emu incorrectly report getting stuck.
   val memdelay = Module(new AXI4Delayer(0))
@@ -70,5 +68,5 @@ class NOOPSimTop extends Module {
 }
 
 object TestMain extends App {
-  chisel3.Driver.execute(args, () => new NOOPSimTop)
+  chisel3.Driver.execute(args, () => new XSSimTop)
 }
