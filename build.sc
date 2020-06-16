@@ -33,8 +33,7 @@ trait HasChiselTests extends CrossSbtModule  {
   object test extends Tests {
     override def ivyDeps = Agg(
       ivy"org.scalatest::scalatest:3.0.4",
-      ivy"edu.berkeley.cs::chisel-iotesters:1.2+",
-      ivy"edu.berkeley.cs::chiseltest:0.2-SNAPSHOT"
+      ivy"edu.berkeley.cs::chisel-iotesters:1.2+"
     )
     def testFrameworks = Seq("org.scalatest.tools.Framework")
   }
