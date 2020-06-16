@@ -1,4 +1,4 @@
-package xiangshan.ifu
+package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -46,13 +46,11 @@ class FakeCache extends XSModule with HasIFUConst {
   }
 }
 
-class FakeIFUtoBackendIO extends Bundle {
-  val fetchPacket = DecoupledIO(new FetchPacket)
-  val redirect = Flipped(ValidIO(new Redirect))
-}
-
 class FakeIFU extends XSModule with HasIFUConst {
-  val io = IO(new FakeIFUtoBackendIO)
+  val io = IO(new Bundle() {
+    val fetchPacket = DecoupledIO(new FetchPacket)
+    val redirect = Flipped(ValidIO(new Redirect))
+  })
 
   val pc = RegInit(resetVector.U(VAddrBits.W))
   val pcUpdate = io.redirect.valid || io.fetchPacket.fire()

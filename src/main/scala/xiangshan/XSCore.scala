@@ -4,9 +4,9 @@ import chisel3._
 import chisel3.util._
 import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
-import utils.PipelineConnect
 import xiangshan.backend._
-import xiangshan.ifu.FakeIFU
+import xiangshan.backend.exu.ExuConfig
+import xiangshan.frontend.Frontend
 
 trait HasXSParameter {
   val XLEN = 64
@@ -24,12 +24,44 @@ trait HasXSParameter {
   val DataBytes = DataBits / 8
   val HasFPU = true
   val FetchWidth = 8
+  val IBufSize = 64
+  val DecodeWidth = 6
   val CommitWidth = 6
+  val BrqSize = 16
+  val BrTagWidth = log2Up(BrqSize)
+  val NRPhyRegs = 96
+  val PhyRegIdxWidth = log2Up(NRPhyRegs)
+  val NRReadPorts = 14
+  val NRWritePorts = 8
+  val RoqSize = 128
+  val RoqIdxWidth = log2Up(RoqSize)
+  val IntDqDeqWidth = 4
+  val FpDqDeqWidth = 4
+  val LsDqDeqWidth = 4
+  val exuConfig = ExuConfig(
+    AluCnt = 4,
+    BruCnt = 1,
+    MulCnt = 1,
+    MduCnt = 1,
+    FmacCnt = 4,
+    FmiscCnt = 1,
+    FmiscDivSqrtCnt = 1,
+    LsuCnt = 1
+  )
 }
 
 abstract class XSModule extends Module
   with HasXSParameter
   with HasExceptionNO
+
+//remove this trait after impl module logic
+trait NeedImpl { this: Module =>
+  override protected def IO[T <: Data](iodef: T): T = {
+    val io = chisel3.experimental.IO(iodef)
+    io <> DontCare
+    io
+  }
+}
 
 abstract class XSBundle extends Bundle
   with HasXSParameter
@@ -52,11 +84,10 @@ class XSCore(implicit val p: XSConfig) extends XSModule {
 
   val dmemXbar = Module(new SimpleBusCrossbarNto1(3))
 
-  val ifu = Module(new FakeIFU)
+  val front = Module(new Frontend)
   val backend = Module(new Backend)
 
-  ifu.io.redirect := backend.io.redirect
-  PipelineConnect(ifu.io.fetchPacket, backend.io.fetchPacket, true.B, false.B)
+  front.io.backend <> backend.io.frontend
 
   backend.io.memMMU.imem <> DontCare
 
