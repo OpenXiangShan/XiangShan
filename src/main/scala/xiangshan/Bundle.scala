@@ -16,25 +16,36 @@ class CtrlFlow extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val exceptionVec = Vec(16, Bool())
   val intrVec = Vec(12, Bool())
+  val isRVC = Bool()
+  val isBr = Bool()
 }
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals extends XSBundle {
-
+  val src1Type, src2Type, src3Type = SrcType()
+  val lsrc1, lsrc2, lsrc3 = UInt(5.W)
+  val ldest = UInt(5.W)
+  val fuType = FuType()
+  val fuOpType = FuOpType()
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val isXSTrap = Bool()
+  val noSpecExec = Bool()  // This inst can not be speculated
+  val isBlocked  = Bool()  // This inst requires pipeline to be blocked
 }
 
 class CfCtrl extends XSBundle {
   val cf = new CtrlFlow
   val ctrl = new CtrlSignals
+  val brMask = UInt(BrqSize.W)
+  val brTag = UInt(BrTagWidth.W)
 }
 
 // CfCtrl -> MicroOp at Rename Stage
 class MicroOp extends CfCtrl {
 
-  val psrc1, psrc2, psrc3, pdst, old_pdst = UInt(PhyRegIdxWidth.W)
-
-  val brMask = UInt(BrqSize.W)
-  val brTag = UInt(BrTagWidth.W)
+  val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
+  val src1State, src2State, src3State = SrcState()
 
   val roqIdx = UInt(RoqIdxWidth.W)
 }

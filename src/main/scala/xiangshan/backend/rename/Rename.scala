@@ -8,7 +8,7 @@ class Rename extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
-    val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
-    val out = Vec(DecodeWidth, DecoupledIO(new MicroOp))
+    val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
+    val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
 }

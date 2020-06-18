@@ -12,18 +12,12 @@ class Dispatch1 extends XSModule with NeedImpl {
     val redirect = Flipped(ValidIO(new Redirect))
 
     // from rename
-    val in = Vec(DecodeWidth, Flipped(DecoupledIO(new MicroOp)))
+    val in = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
 
     // enq Roq
-    val toRoq =  Vec(DecodeWidth, DecoupledIO(new MicroOp))
+    val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
-    val roqIdxs = Input(Vec(DecodeWidth, UInt(RoqIdxWidth.W)))
-
-    // enq Brq
-    val toBrq = Vec(DecodeWidth, DecoupledIO(new MicroOp))
-    // get brMask/brTag
-    val brTags = Input(Vec(DecodeWidth, UInt(BrTagWidth.W)))
-    val brMasks = Input(Vec(DecodeWidth, UInt(BrqSize.W)))
+    val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
 
     // to Dp2
     val out = new Dp1ToDp2IO

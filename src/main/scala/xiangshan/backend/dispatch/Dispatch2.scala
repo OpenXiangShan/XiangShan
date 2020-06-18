@@ -15,6 +15,7 @@ class Dispatch2 extends XSModule with NeedImpl {
     val readFpRf = Vec(NRReadPorts, Flipped(new RfReadPort))
 
     // enq Issue Queue
-    val out = Vec(exuConfig.ExuCnt, DecoupledIO(new ExuInput))
+    val enqIQCtrl = Vec(exuConfig.ExuCnt, DecoupledIO(new MicroOp))
+    val enqIQData = Vec(exuConfig.ExuCnt, ValidIO(new ExuInput))
   })
 }

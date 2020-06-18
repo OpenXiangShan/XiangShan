@@ -3,85 +3,111 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.FuType._
 import xiangshan.backend.regfile.RfWritePort
 
 case class ExuConfig
 (
-  AluCnt: Int,
   BruCnt: Int,
+  AluCnt: Int,
   MulCnt: Int,
   MduCnt: Int,
   FmacCnt: Int,
   FmiscCnt: Int,
   FmiscDivSqrtCnt: Int,
-  LsuCnt: Int
+  LduCnt: Int,
+  StuCnt: Int
 ){
   assert(BruCnt == 1, "Only support 1 Bru now!")
   def IntExuCnt = AluCnt + MulCnt + MduCnt + BruCnt
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
-  def ExuCnt = IntExuCnt + FpExuCnt + LsuCnt
+  def ExuCnt = IntExuCnt + FpExuCnt + LduCnt
+  def NRFuType = 9
+  def FuOpWidth = 7
 }
 
-abstract class Exu extends Module {
+abstract class Exu
+(
+  val fuTypeInt: BigInt,
+  val readIntRf: Boolean = true,
+  val readFpRf: Boolean = false,
+  val writeIntRf: Boolean = true,
+  val writeFpRf: Boolean = false
+) extends Module {
   val io = IO(new ExuIO)
 }
 
-class Alu extends Exu with NeedImpl
-class Bru extends Exu with NeedImpl
-class Mul extends Exu with NeedImpl
-class Mdu extends Exu with NeedImpl
-class Fmac extends Exu with NeedImpl
-class Fmisc extends Exu with NeedImpl
-class FmiscDivSqrt extends Exu with NeedImpl
-class Lsu extends Exu with NeedImpl
 
-class ExeUnits extends XSModule with NeedImpl {
-  val io = IO(new Bundle() {
-    val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
-    val redirect = Flipped(ValidIO(new Redirect))
-    val in = Vec(exuConfig.ExuCnt, Flipped(DecoupledIO(new ExuInput)))
-    val wbReqs = Vec(exuConfig.ExuCnt, DecoupledIO(new ExuOutput))
-    val wbResults = Vec(exuConfig.ExuCnt, ValidIO(new ExuOutput))
-  })
+
+class Alu extends Exu(alu.litValue()) with NeedImpl {
+  override def toString: String = "Alu"
 }
 
-// TODO: refactor exu io logic, this is ugly...
-trait HasExuHelper extends HasXSParameter {
-  implicit class ExuHelper[T <: Data](xs: Vec[T]){
-    private val bruIdx = 0
-    private val aluIdx = bruIdx + 1
-    private val mulIdx = aluIdx + exuConfig.AluCnt
-    private val mduIdx = mulIdx + exuConfig.MulCnt
-    private val fmacIdx = mduIdx + exuConfig.MduCnt
-    private val fmiscIdx = fmacIdx + exuConfig.FmacCnt
-    private val fmiscDivSqrtIdx = fmiscIdx + exuConfig.FmiscDivSqrtCnt
-    private val lsuIdx = fmiscDivSqrtIdx + exuConfig.LsuCnt
+class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true) with NeedImpl{
+  override def toString: String = "Bru"
+}
 
-    def getBru: T = {
-      xs(bruIdx)
-    }
-    def getAluVec: Vec[T] = {
-      VecInit(xs.slice(aluIdx, mulIdx))
-    }
-    def getMulVec: Vec[T] = {
-      VecInit(xs.slice(mulIdx, mduIdx))
-    }
-    def getMduVec: Vec[T] = {
-      VecInit(xs.slice(mduIdx, fmacIdx))
-    }
-    def getFmacVec: Vec[T] = {
-      VecInit(xs.slice(fmacIdx, fmiscIdx))
-    }
-    def getFmiscVec: Vec[T] = {
-      VecInit(xs.slice(fmiscIdx, fmiscDivSqrtIdx))
-    }
-    def getFmiscDivSqrtVec: Vec[T] = {
-      VecInit(xs.slice(fmiscDivSqrtIdx, lsuIdx))
-    }
-    def getLsuVec: Vec[T] = {
-      VecInit(xs.drop(lsuIdx))
-    }
-  }
+class Mul extends Exu(FuType.mul.litValue()) with NeedImpl{
+  override def toString: String = "Mul"
+}
+
+class Mdu extends Exu(FuType.mdu.litValue()) with NeedImpl{
+  override def toString: String = "MulDiv"
+}
+
+class Fmac extends Exu(
+  FuType.fmac.litValue(),
+  readIntRf = false,
+  readFpRf = true,
+  writeIntRf = false,
+  writeFpRf = true
+) with NeedImpl {
+  override def toString: String = "Fmac"
+}
+
+class Fmisc extends Exu(
+  FuType.fmisc.litValue(),
+  readIntRf = false,
+  readFpRf = true,
+  writeIntRf = true,
+  writeFpRf = true
+) with NeedImpl {
+  override def toString: String = "Fmisc"
+}
+
+class FmiscDivSqrt extends Exu(
+  FuType.fmiscDivSqrt.litValue(),
+  readIntRf = false,
+  readFpRf = true,
+  writeIntRf = false,
+  writeFpRf = true
+) with NeedImpl {
+  override def toString: String = "FmiscDivSqrt"
+}
+
+class Lsu extends Exu(
+  FuType.ldu.litValue(),
+  readIntRf = true,
+  readFpRf = true,
+  writeIntRf = true,
+  writeFpRf = true
+) with NeedImpl {
+  override def toString: String = "Lsu"
+}
+
+trait HasExeUnits{
+
+  val aluExeUnits = Array.tabulate(exuConfig.AluCnt)(_ => Module(new Alu))
+  val bruExeUnit = Module(new Bru)
+  val mulExeUnits = Array.tabulate(exuConfig.MulCnt)(_ => Module(new Mul))
+  val mduExeUnits = Array.tabulate(exuConfig.MduCnt)(_ => Module(new Mdu))
+  val fmacExeUnits = Array.tabulate(exuConfig.FmacCnt)(_ => Module(new Fmac))
+  val fmiscExeUnits = Array.tabulate(exuConfig.FmiscCnt)(_ => Module(new Fmisc))
+  val fmiscDivSqrtExeUnits = Array.tabulate(exuConfig.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
+  val lsuExeUnits = Array.tabulate(exuConfig.LduCnt)(_ => Module(new Lsu))
+
+  val exeUnits = bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++
+    fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits ++ lsuExeUnits)
 }
 
 class WriteBackArbMtoN(m: Int, n: Int) extends XSModule with NeedImpl {
