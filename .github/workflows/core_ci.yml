@@ -12,10 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     name: Generate Verilog
     steps:
+       - uses: actions/checkout@v2
+        
        - name: Set Up Mill
-       - uses: jodersky/setup-mill@master
+         uses: jodersky/setup-mill@master
          with:
            mill-version: 0.7.3
-       
+         
        - name: Complile
          run: make verilog
