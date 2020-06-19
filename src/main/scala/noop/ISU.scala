@@ -10,13 +10,13 @@ trait HasRegFileParameter {
   val NRReg = 32
 }
 
-class RegFile extends HasRegFileParameter with HasNOOPParameter {
-  val rf = Mem(NRReg, UInt(XLEN.W))
-  def read(addr: UInt) : UInt = Mux(addr === 0.U, 0.U, rf(addr))
+class RegFile(width:Int, hasZero:Boolean = true) extends HasRegFileParameter with HasNOOPParameter {
+  val rf = Mem(NRReg, UInt(width.W))
+  def read(addr: UInt) : UInt = if(hasZero) Mux(addr === 0.U, 0.U, rf(addr)) else rf(addr)
   def write(addr: UInt, data: UInt) = { rf(addr) := data }
 } 
 
-class ScoreBoard extends HasRegFileParameter {
+class ScoreBoard(hasZero:Boolean = true) extends HasRegFileParameter {
   val busy = RegInit(0.U(NRReg.W))
   def isBusy(idx: UInt): Bool = busy(idx)
   def mask(idx: UInt) = (1.U(NRReg.W) << idx)(NRReg-1, 0)
@@ -24,8 +24,9 @@ class ScoreBoard extends HasRegFileParameter {
     // When clearMask(i) and setMask(i) are both set, setMask(i) wins.
     // This can correctly record the busy bit when reg(i) is written
     // and issued at the same cycle.
-    // Note that rf(0) is always free.
-    busy := Cat(((busy & ~clearMask) | setMask)(NRReg-1, 1), 0.U(1.W))
+    // Note that rf(0) is always free when hasZero==true.
+    if(hasZero) busy := Cat(((busy & ~clearMask) | setMask)(NRReg-1, 1), 0.U(1.W))
+    else busy := ((busy & ~clearMask) | setMask)
   }
 }
 
@@ -60,22 +61,77 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
   val sb = new ScoreBoard
   val src1Ready = !sb.isBusy(rfSrc1) || src1ForwardNextCycle || src1Forward
   val src2Ready = !sb.isBusy(rfSrc2) || src2ForwardNextCycle || src2Forward
-  io.out.valid := io.in.valid && src1Ready && src2Ready
 
-  val rf = new RegFile
-  io.out.bits.data.src1 := Mux1H(List(
+  val fpr = new RegFile(width = XLEN, hasZero = false)
+
+  val (fprSrcReady,fprSrcData):(Bool,Array[UInt]) = if(HasFPU){
+    val fsb = new ScoreBoard(hasZero = false)
+    val forwardFpWen = io.forward.wb.fpWen && io.forward.valid
+
+    when (io.wb.fpWen) {
+      fpr.write(io.wb.rfDest, io.wb.rfData)
+    }
+
+    val fsbClearMask = Mux(io.wb.fpWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardFpWen),
+      fsb.mask(io.wb.rfDest), 0.U(NRReg.W))
+    val fsbSetMask = Mux(io.out.fire() && io.in.bits.ctrl.fpWen, fsb.mask(rfDest), 0.U)
+    when (io.flush) { fsb.update(0.U, Fill(NRReg, 1.U(1.W))) }
+      .otherwise { fsb.update(fsbSetMask, fsbClearMask) }
+
+    val instr = io.in.bits.cf.instr
+
+    val (fpSrc1,fpSrc2,fpSrc3) = (rfSrc1, rfSrc2, instr(31, 27))
+    val srcs = Seq(fpSrc1, fpSrc2, fpSrc3).zip(Seq(
+      io.in.bits.ctrl.src1Type,
+      io.in.bits.ctrl.src2Type,
+      io.in.bits.ctrl.src3Type
+    ))
+    val dataVec = Array.fill(3)(Wire(UInt(XLEN.W)))
+    // result
+    (srcs.zipWithIndex.map({
+      case ((src, t),i) =>
+        val dependEX = isDepend(src, io.forward.wb.rfDest, forwardFpWen)
+        val dependWB = isDepend(src, io.wb.rfDest, io.wb.fpWen)
+        val forwardEX = dependEX && !dontForward
+        val forwardWB = dependWB && Mux(dontForward, !dependEX, true.B)
+        dataVec(i) := MuxCase(fpr.read(src), Seq(
+          forwardEX -> io.forward.wb.rfData,
+          forwardWB -> io.wb.rfData
+        ))
+        (!fsb.busy(src) || forwardEX || forwardWB) || (t =/= SrcType.fp)
+    }).reduceLeft(_ && _), dataVec)
+  } else (true.B, Array.fill(3)(0.U))
+
+  io.out.valid := io.in.valid && src1Ready && src2Ready && fprSrcReady
+
+  val rf = new RegFile(XLEN)
+//  io.out.bits.data.src1 := Mux1H(List(
+//    (io.in.bits.ctrl.src1Type === SrcType.pc) -> SignExt(io.in.bits.cf.pc, AddrBits),
+//    src1ForwardNextCycle -> io.forward  .wb.rfData,
+//    (src1Forward && !src1ForwardNextCycle) -> io.wb.rfData,
+//    ((io.in.bits.ctrl.src1Type =/= SrcType.pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
+//  ))
+//  io.out.bits.data.src2 := Mux1H(List(
+//    (io.in.bits.ctrl.src2Type =/= SrcType.reg) -> io.in.bits.data.imm,
+//    src2ForwardNextCycle -> io.forward.wb.rfData,
+//    (src2Forward && !src2ForwardNextCycle) -> io.wb.rfData,
+//    ((io.in.bits.ctrl.src2Type === SrcType.reg) && !src2ForwardNextCycle && !src2Forward) -> rf.read(rfSrc2)
+//  ))
+
+  io.out.bits.data.src1 := MuxCase(rf.read(rfSrc1), Seq(
+    (io.in.bits.ctrl.src1Type === SrcType.fp) -> fprSrcData(0),
     (io.in.bits.ctrl.src1Type === SrcType.pc) -> SignExt(io.in.bits.cf.pc, AddrBits),
-    src1ForwardNextCycle -> io.forward  .wb.rfData,
-    (src1Forward && !src1ForwardNextCycle) -> io.wb.rfData,
-    ((io.in.bits.ctrl.src1Type =/= SrcType.pc) && !src1ForwardNextCycle && !src1Forward) -> rf.read(rfSrc1)
+    src1ForwardNextCycle -> io.forward.wb.rfData,
+    src1Forward -> io.wb.rfData
   ))
-  io.out.bits.data.src2 := Mux1H(List(
+  io.out.bits.data.src2 := MuxCase(rf.read(rfSrc2), Seq(
+    (io.in.bits.ctrl.src2Type === SrcType.fp) -> fprSrcData(1),
     (io.in.bits.ctrl.src2Type =/= SrcType.reg) -> io.in.bits.data.imm,
     src2ForwardNextCycle -> io.forward.wb.rfData,
-    (src2Forward && !src2ForwardNextCycle) -> io.wb.rfData,
-    ((io.in.bits.ctrl.src2Type === SrcType.reg) && !src2ForwardNextCycle && !src2Forward) -> rf.read(rfSrc2)
+    src2Forward -> io.wb.rfData
   ))
-  io.out.bits.data.imm  := io.in.bits.data.imm
+
+  io.out.bits.data.imm  := Mux(io.in.bits.ctrl.src3Type===SrcType.fp, fprSrcData(2), io.in.bits.data.imm)
 
   io.out.bits.cf <> io.in.bits.cf
   io.out.bits.ctrl := io.in.bits.ctrl
@@ -85,7 +141,7 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
   when (io.wb.rfWen) { rf.write(io.wb.rfDest, io.wb.rfData) }
 
   val wbClearMask = Mux(io.wb.rfWen && !isDepend(io.wb.rfDest, io.forward.wb.rfDest, forwardRfWen), sb.mask(io.wb.rfDest), 0.U(NRReg.W))
-  val isuFireSetMask = Mux(io.out.fire(), sb.mask(rfDest), 0.U)
+  val isuFireSetMask = Mux(io.out.fire() && io.in.bits.ctrl.rfWen, sb.mask(rfDest), 0.U)
   when (io.flush) { sb.update(0.U, Fill(NRReg, 1.U(1.W))) }
   .otherwise { sb.update(isuFireSetMask, wbClearMask) }
 
@@ -96,6 +152,8 @@ class ISU(implicit val p: NOOPConfig) extends NOOPModule with HasRegFileParamete
   BoringUtils.addSource(io.out.valid && !io.out.fire(), "perfCntCondMexuBusy")
 
   if (!p.FPGAPlatform) {
-    BoringUtils.addSource(VecInit((0 to NRReg-1).map(i => rf.read(i.U))), "difftestRegs")
+    val gRegs = (0 until NRReg).map(i => rf.read(i.U))
+    val fRegs = (0 until NRReg).map(i => if(HasFPU) fpr.read(i.U) else  0.U)
+    BoringUtils.addSource(VecInit(gRegs ++ fRegs), "difftestRegs")
   }
 }

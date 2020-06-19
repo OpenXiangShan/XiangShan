@@ -13,6 +13,7 @@ class WBU(implicit val p: NOOPConfig) extends NOOPModule{
   })
 
   io.wb.rfWen := io.in.bits.decode.ctrl.rfWen && io.in.valid
+  io.wb.fpWen := io.in.bits.decode.ctrl.fpWen && io.in.valid
   io.wb.rfDest := io.in.bits.decode.ctrl.rfDest
   io.wb.rfData := io.in.bits.commits(io.in.bits.decode.ctrl.fuType)
   io.in.ready := true.B

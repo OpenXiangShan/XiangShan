@@ -3,7 +3,7 @@ package noop
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
+import noop.isa.{RVDInstr, RVFInstr, RVF_LSUInstr, RVD_LSUInstr}
 import utils._
 
 class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
@@ -14,11 +14,58 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   })
 
   val hasIntr = Wire(Bool())
+  val hasIntrOrExceptino = hasIntr || io.in.bits.exceptionVec(instrPageFault)
   val instr = io.in.bits.instr(31, 0)
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
-  val instrType :: fuType :: fuOpType :: Nil = // insert Instructions.DecodeDefault when interrupt comes
-    Instructions.DecodeDefault.zip(decodeList).map{case (intr, dec) => Mux(hasIntr || io.in.bits.exceptionVec(instrPageFault), intr, dec)}
-  // val instrType :: fuType :: fuOpType :: Nil = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
+  val commonInstrType :: commonFuType :: commonFuOpType :: Nil = decodeList
+
+  val intrInstrType :: intrFuType :: intrFuOpType :: Nil = Instructions.DecodeDefault
+
+  //(isFp, src1Type, src2Type, src3Type, rfWen, fpWen, fuOpType, inputFunc, outputFunc)
+  val fpExtraDecodeTable = RVFInstr.extraTable ++ RVDInstr.extraTable
+  val isFp :: fpSrc1Type :: fpSrc2Type :: fpSrc3Type :: fpRfWen :: fpWen :: fpFuOpType :: fpInputFunc :: fpOutputFunc :: Nil =
+    if(HasFPU) ListLookup(instr, RVFInstr.extraTableDefault, fpExtraDecodeTable) else RVFInstr.extraTableDefault
+
+  val floatLdStInstrs = List(
+    RVF_LSUInstr.FLW,
+    RVF_LSUInstr.FSW,
+    RVD_LSUInstr.FLD,
+    RVCInstr.C_FLD,
+    RVCInstr.C_FLDSP,
+    RVD_LSUInstr.FSD,
+    RVCInstr.C_FSD,
+    RVCInstr.C_FSDSP
+  )
+
+  def treeCmp(key: UInt, cmpList: List[BitPat]): Bool = {
+    cmpList.size match {
+      case 1 =>
+        key === cmpList.head
+      case n =>
+        treeCmp(key, cmpList take n/2) || treeCmp(key, cmpList drop n/2)
+    }
+  }
+
+  val isFloatLdSd = if(HasFPU) treeCmp(instr, floatLdStInstrs) else false.B
+
+  val isRVFD = isFp.asBool()
+  val instrType = Mux(hasIntrOrExceptino,
+    intrInstrType,
+    commonInstrType
+  )
+  val fuType = Mux(hasIntrOrExceptino,
+    intrFuType,
+    Mux(isRVFD && !isFloatLdSd,
+      FuType.fpu,
+      commonFuType
+    )
+  )
+  val fuOpType = Mux(hasIntrOrExceptino,
+    intrFuOpType,
+    Mux(isRVFD, fpFuOpType, commonFuOpType)
+  )
+
+
   val isRVC = instr(1,0) =/= "b11".U
   val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
     ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable) 
@@ -27,6 +74,8 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
 
   io.out.bits.ctrl.fuType := fuType
   io.out.bits.ctrl.fuOpType := fuOpType
+  io.out.bits.ctrl.fpInputFunc := fpInputFunc
+  io.out.bits.ctrl.fpOutputFunc := fpOutputFunc
 
   val SrcTypeTable = List(
     InstrI -> (SrcType.reg, SrcType.imm),
@@ -38,8 +87,14 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
     InstrJ -> (SrcType.pc , SrcType.imm),
     InstrN -> (SrcType.pc , SrcType.imm)
   )
-  val src1Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
-  val src2Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
+  val src1Type = Mux(isRVFD,
+    fpSrc1Type,
+    LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
+  )
+  val src2Type = Mux(isRVFD,
+    fpSrc2Type,
+    LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
+  )
 
   val (rs, rt, rd) = (instr(19, 15), instr(24, 20), instr(11, 7))
   // see riscv-spec vol1, Table 16.1: Compressed 16-bit RVC instruction formats.
@@ -71,12 +126,16 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   val rfSrc1 = Mux(isRVC, rvc_src1, rs)
   val rfSrc2 = Mux(isRVC, rvc_src2, rt)
   val rfDest = Mux(isRVC, rvc_dest, rd)
+
+  val rfWen = !hasIntrOrExceptino && Mux(isRVFD, fpRfWen.asBool(), isrfWen(instrType))
+
   // TODO: refactor decode logic
   // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
   io.out.bits.ctrl.rfSrc1 := Mux(src1Type === SrcType.pc, 0.U, rfSrc1)
-  io.out.bits.ctrl.rfSrc2 := Mux(src2Type === SrcType.reg, rfSrc2, 0.U)
-  io.out.bits.ctrl.rfWen  := isrfWen(instrType)
-  io.out.bits.ctrl.rfDest := Mux(isrfWen(instrType), rfDest, 0.U)
+  io.out.bits.ctrl.rfSrc2 := Mux(src2Type === SrcType.imm, 0.U, rfSrc2)
+  io.out.bits.ctrl.rfWen  := rfWen
+  io.out.bits.ctrl.fpWen := fpWen.asBool()
+  io.out.bits.ctrl.rfDest := Mux(fpWen.asBool() || rfWen, rfDest, 0.U)
 
   io.out.bits.data := DontCare
   val imm = LookupTree(instrType, List(
@@ -121,6 +180,7 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   // fix LUI
   io.out.bits.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.bits.ctrl.src2Type := src2Type
+  io.out.bits.ctrl.src3Type := fpSrc3Type
 
   // io.out.bits.ctrl.isInvOpcode := (instrType === InstrN) && io.in.valid
   io.out.bits.ctrl.isNoopTrap := (instr(31,0) === NOOPTrap.TRAP) && io.in.valid
@@ -141,7 +201,7 @@ class IDU2(implicit val p: NOOPConfig) extends NOOPModule with HasInstrType {
   hasIntr := intrVec.orR
 
   io.out.bits.cf.exceptionVec.map(_ := false.B)
-  io.out.bits.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr) && io.in.valid
+  io.out.bits.cf.exceptionVec(illegalInstr) := (!isRVFD && instrType === InstrN && !hasIntr) && io.in.valid
   io.out.bits.cf.exceptionVec(instrPageFault) := io.in.bits.exceptionVec(instrPageFault)
 
   io.out.bits.ctrl.isNoopTrap := (instr === NOOPTrap.TRAP) && io.in.valid

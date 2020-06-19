@@ -80,4 +80,3 @@ disassemble-freertos:
 
 disassemble-xv6:
 	cp $(XV6_HOME)/build/code.txt ./d-xv6.log
-

@@ -3,9 +3,9 @@ package noop
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
 import utils._
 import bus.simplebus._
+import noop.fu.FPU
 
 class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   val io = IO(new Bundle {
@@ -61,12 +61,35 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   mou.access(valid = fuValids(FuType.mou), src1 = src1, src2 = src2, func = fuOpType)
   mou.io.cfIn := io.in.bits.cf
   mou.io.out.ready := true.B
+
+  val (fpuOut,fpuOutValid) = if(HasFPU){
+    val fpu = Module(new FPU)
+    Debug(){
+      when(io.in.valid){
+        printf(p"[EXU] at pc=${Hexadecimal(io.in.bits.cf.pc)} " +
+          p"fpu in valid=${fpu.io.in.valid} " +
+          p"fpu out valid=${fpu.io.out.valid}\n")
+      }
+    }
+    fpu.io.out.ready := true.B
+    csr.io.fpu_csr <> fpu.io.fpu_csr
+    fpu.io.fpWen := io.in.bits.ctrl.fpWen
+    fpu.io.inputFunc := io.in.bits.ctrl.fpInputFunc
+    fpu.io.outputFunc := io.in.bits.ctrl.fpOutputFunc
+    fpu.io.instr := io.in.bits.cf.instr
+    (fpu.access(fuValids(FuType.fpu), src1, src2, io.in.bits.data.imm, io.in.bits.ctrl.fuOpType), fpu.io.out.valid)
+  } else {
+    csr.io.fpu_csr <> DontCare
+    (0.U,false.B)
+  }
+
   
   io.out.bits.decode := DontCare
   (io.out.bits.decode.ctrl, io.in.bits.ctrl) match { case (o, i) =>
     o.rfWen := i.rfWen && (!lsuTlbPF && !lsu.io.loadAddrMisaligned && !lsu.io.storeAddrMisaligned || !fuValids(FuType.lsu)) && !(csr.io.wenFix && fuValids(FuType.csr))
     o.rfDest := i.rfDest
     o.fuType := i.fuType
+    o.fpWen := i.fpWen && (!lsuTlbPF && !lsu.io.loadAddrMisaligned && !lsu.io.storeAddrMisaligned || !fuValids(FuType.lsu)) && !(csr.io.wenFix && fuValids(FuType.csr))
   }
   io.out.bits.decode.cf.pc := io.in.bits.cf.pc
 
@@ -84,7 +107,8 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   // FIXME: should handle io.out.ready == false
   io.out.valid := io.in.valid && MuxLookup(fuType, true.B, List(
     FuType.lsu -> lsu.io.out.valid,
-    FuType.mdu -> mdu.io.out.valid
+    FuType.mdu -> mdu.io.out.valid,
+    FuType.fpu -> fpuOutValid
   ))
 
   io.out.bits.commits(FuType.alu) := aluOut
@@ -92,11 +116,13 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   io.out.bits.commits(FuType.csr) := csrOut
   io.out.bits.commits(FuType.mdu) := mduOut
   io.out.bits.commits(FuType.mou) := 0.U
+  io.out.bits.commits(FuType.fpu) := fpuOut
 
   io.in.ready := !io.in.valid || io.out.fire()
 
   io.forward.valid := io.in.valid
   io.forward.wb.rfWen := io.in.bits.ctrl.rfWen
+  io.forward.wb.fpWen := io.in.bits.ctrl.fpWen
   io.forward.wb.rfDest := io.in.bits.ctrl.rfDest
   io.forward.wb.rfData := Mux(alu.io.out.fire(), aluOut, lsuOut)
   io.forward.fuType := io.in.bits.ctrl.fuType
