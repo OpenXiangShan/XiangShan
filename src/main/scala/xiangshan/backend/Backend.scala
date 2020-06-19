@@ -57,12 +57,15 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.enqCtrl <> dispatch2.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch2.io.enqIQData(i)
     iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
-    if(eu.fuTypeInt == FuType.alu.litValue()){
-      iq.io.bypassPorts <> aluExeUnits.map(_.io.out)
-    }
-    println(s"[$i] $eu wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
+    println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
     iq
+  })
+
+  val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
+  aluQueues.foreach(aluQ => {
+    aluQ.io.bypassUops <> aluQueues.map(_.io.selectedUop)
+    aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
   })
 
   io.frontend.redirect <> redirect

@@ -80,6 +80,7 @@ class ExuIO extends XSBundle {
 
 class RoqCommit extends XSBundle {
   val uop = new MicroOp
+  val isWalk = Bool()
 }
 
 class FrontendToBackendIO extends XSBundle {
