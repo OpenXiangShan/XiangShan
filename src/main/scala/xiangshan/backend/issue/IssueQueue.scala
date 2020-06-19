@@ -17,8 +17,17 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
     // enq Data at next cycle (regfile has 1 cycle latency)
     val enqData = Flipped(ValidIO(new ExuInput))
 
+    //  broadcast selected uop to other issue queues which has bypasses
+    val selectedUop = if(useBypass) DecoupledIO(new MicroOp) else null
+
+    // send to exu
     val deq = DecoupledIO(new ExuInput)
+
+    // listen to write back bus
     val wakeUpPorts = Vec(wakeupCnt, Flipped(DecoupledIO(new ExuOutput)))
-    val bypassPorts = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new ExuOutput))) else null
+
+    // use bypass uops to speculative wake-up
+    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new MicroOp))) else null
+    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new ExuOutput))) else null
   })
 }
