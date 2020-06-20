@@ -48,7 +48,7 @@ class MicroOp extends CfCtrl {
 
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-
+  val freelistAllocPtr = UInt(PhyRegIdxWidth.W)
   val roqIdx = UInt(RoqIdxWidth.W)
 }
 
