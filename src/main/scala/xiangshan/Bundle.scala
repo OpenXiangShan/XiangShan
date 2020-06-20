@@ -53,6 +53,7 @@ class MicroOp extends CfCtrl {
 class Redirect extends XSBundle {
   val target = UInt(VAddrBits.W)
   val brTag = UInt(BrTagWidth.W)
+  val isException = Bool()
 }
 
 class Dp1ToDp2IO extends XSBundle {
