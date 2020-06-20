@@ -68,11 +68,13 @@ class Dp1ToDp2IO extends XSBundle {
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
+  val redirect = new Redirect
   val src1, src2, src3 = UInt(XLEN.W)
 }
 
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
+  val redirect = new Redirect
   val data = UInt(XLEN.W)
 }
 
