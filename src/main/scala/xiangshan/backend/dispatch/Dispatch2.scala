@@ -8,7 +8,10 @@ import xiangshan.backend.regfile.RfReadPort
 class Dispatch2 extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
     // from dispatch1
-    val in = Flipped(new Dp1ToDp2IO)
+//    val in = Flipped(new Dp1ToDp2IO)
+    val fromIntDq = Flipped(Vec(IntDqDeqWidth, DecoupledIO(new MicroOp)))
+    val fromFpDq = Flipped(Vec(FpDqDeqWidth, DecoupledIO(new MicroOp)))
+    val fromLsDq = Flipped(Vec(LsDqDeqWidth, DecoupledIO(new MicroOp)))
 
     // read regfile
     val readIntRf = Vec(NRReadPorts, Flipped(new RfReadPort))
