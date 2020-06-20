@@ -92,7 +92,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
   dispatch2.io.intPregRdy <> rename.io.intPregRdy
   dispatch2.io.fpPregRdy <> rename.io.fpPregRdy
   intRf.io.readPorts <> dispatch2.io.readIntRf
+  rename.io.intRfReadAddr <> dispatch2.io.readIntRf.map(_.addr)
   fpRf.io.readPorts <> dispatch2.io.readFpRf
+  rename.io.fpRfReadAddr <> dispatch2.io.readFpRf.map(_.addr)
 
 
   val exeWbReqs = exeUnits.map(_.io.out)
