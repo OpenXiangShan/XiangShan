@@ -16,6 +16,7 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int) exte
 
   // queue data array
   val entries = Reg(Vec(size, gen))
+  val entriesValid = Reg(Vec(size, Bool()))
   val head = RegInit(0.U(index_width.W))
   val tail = RegInit(0.U(index_width.W))
   val enq_index = Wire(Vec(enqnum, UInt(index_width.W)))
@@ -32,10 +33,16 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int) exte
     enq_index(i) := (tail + enq_count(i) - 1.U) % size.U
     when (io.enq(i).fire()) {
       entries(enq_index(i)) := io.enq(i).bits
+      entriesValid(enq_index(i)) := true.B
     }
   }
 
-  (0 until deqnum).map(i => deq_index(i) := ((head + i.U) % size.U).asUInt())
+  for (i <- 0 until deqnum) {
+    deq_index(i) := ((head + i.U) % size.U).asUInt()
+    when (io.deq(i).fire()) {
+      entriesValid(deq_index(i)) := false.B
+    }
+  }
 
   // enqueue
   val num_enq_try = enq_count(enqnum - 1)
@@ -46,9 +53,11 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int) exte
 
   // dequeue
   val num_deq_try = Mux(valid_entries > deqnum.U, deqnum.U, valid_entries)
-  val num_deq = PopCount(io.deq.map(_.fire()))
+  val num_deq = PriorityEncoder(true.B +: (io.deq.zipWithIndex map { case (deq, i) =>
+    !deq.fire() && entriesValid(deq_index(i))
+  }))
   (0 until deqnum).map(i => io.deq(i).bits := entries(deq_index(i)))
-  (0 until deqnum).map(i => io.deq(i).valid := i.U < num_deq_try)
+  (0 until deqnum).map(i => io.deq(i).valid := (i.U < num_deq_try) && entriesValid(deq_index(i)))
   head := (head + num_deq) % size.U
   head_direction := ((Cat(0.U(1.W), head) + num_deq) >= size.U).asUInt() ^ head_direction
 }
