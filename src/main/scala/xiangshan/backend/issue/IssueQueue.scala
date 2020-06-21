@@ -9,7 +9,6 @@ trait IQConst{
   val idIdxWidth = log2Up(iqSize)
   val layer1Size = iqSize
   val layer2Size = iqSize/2
-  val layer3Size = iqSize/4
 }
 
 sealed class CmpInputBundle extends XSBundle {
@@ -153,7 +152,7 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
   // Select Circuit
   //---------------------------------------------------------
   //layer 1
-  val layer1CCUs = (i <- 0 to layer1Size-1 by +2) map {
+  val layer1CCUs = (0 to layer1Size-1 by +2) map { i =>
     val CCU_1 = Module(new CompareCircuitUnit(layer = 1, id = i))
     CCU_1.io.input_1.instRdy := instRdy(i)
     CCU_1.io.input_1.roqIdx  := roqIdx(i)
@@ -167,7 +166,7 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
   }
 
   //layer 2
-  val layer2CCUs = (i <- 0 to layer2Size-1 by +2) map {
+  val layer2CCUs = (0 to layer2Size-1 by +2) map { i =>
     val CCU_2 = Module(new CompareCircuitUnit(layer = 2, id = i))
     CCU_2.io.input_1.instRdy := layer1CCUs(i).io.output.instRdy
     CCU_2.io.input_1.roqIdx  := layer1CCUs(i).io.output.roqIdx
