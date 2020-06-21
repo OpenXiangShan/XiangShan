@@ -70,7 +70,7 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
 
 }
 
-class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) extends IQModule {
+class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) extends IQModule {
 
   val useBypass = bypassCnt > 0
 
@@ -107,10 +107,10 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
   val valid   = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val src1Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val src2Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
-  //val src3Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
+  val src3Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val prfSrc1 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfSrc2 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
-  //val prfSrc3 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
+  val prfSrc3 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val oldPDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val freelistAllocPrt = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
@@ -136,10 +136,10 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
     valid(enqueueSelect) := true.B
     src1Rdy(enqueueSelect) := io.enqCtrl.bits.src1State === SrcState.rdy
     src2Rdy(enqueueSelect) := io.enqCtrl.bits.src2State === SrcState.rdy
-    // src3Rdy(enqueueSelect) := io.enqCtrl.bits.src3State === SrcState.rdy
+    src3Rdy(enqueueSelect) := io.enqCtrl.bits.src3State === SrcState.rdy
     prfSrc1(enqueueSelect) := io.enqCtrl.bits.psrc1
     prfSrc2(enqueueSelect) := io.enqCtrl.bits.psrc2
-    //prfSrc3(enqueueSelect) := io.enqCtrl.bits.psrc3
+    prfSrc3(enqueueSelect) := io.enqCtrl.bits.psrc3
     prfDest(enqueueSelect) := io.enqCtrl.bits.pdest
     oldPDest(enqueueSelect) := io.enqCtrl.bits.old_pdest
     freelistAllocPrt(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
@@ -148,8 +148,48 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
   }
 
   //Data Queue
-  val src1Data    = Reg(Vec(iqSize, UInt(XLEN.W)))
-  val src2Data    = Reg(Vec(iqSize, UInt(XLEN.W)))
+  val src1Data = Reg(Vec(iqSize, UInt(XLEN.W)))
+  val src2Data = Reg(Vec(iqSize, UInt(XLEN.W)))
+  val src3Data = Reg(Vec(iqSize, UInt(XLEN.W)))
+
+  val enqSelNext = RegNext(enqueueSelect)
+  val enqFireNext = RegNext(io.enqCtrl.fire())
+
+  // Read RegFile
+  when (enqFireNext) {
+    src1Data(enqSelNext) := io.enqData.bits.src1
+    src2Data(enqSelNext) := io.enqData.bits.src2
+    src3Data(enqSelNext) := io.enqData.bits.src3
+  }
+  // From Common Data Bus(wakeUpPort)
+  val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
+  val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
+  val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
+  List.tabulate(iqSize)(i =>
+    when (valid(i)) {
+      List.tabulate(wakeupCnt)(j =>
+        when(!src1Rdy(i) && prfSrc1(i) === cdbPdest(j) && cdbValid(j)) {
+          src1Rdy(i) := true.B
+          src1Data(i) := cdbData(j)
+        }
+      )
+      List.tabulate(wakeupCnt)(j =>
+        when(!src2Rdy(i) && prfSrc2(i) === cdbPdest(j) && cdbValid(j)) {
+          src2Rdy(i) := true.B
+          src2Data(i) := cdbData(j)
+        }
+      )
+      List.tabulate(wakeupCnt)(j =>
+        when(!src3Rdy(i) && prfSrc3(i) === cdbPdest(j) && cdbValid(j)) {
+          src3Rdy(i) := true.B
+          src3Data(i) := cdbData(j)
+        }
+      )
+    }
+  )
+
+  // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
+  // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
 
 
   //---------------------------------------------------------
