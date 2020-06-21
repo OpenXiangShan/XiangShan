@@ -12,7 +12,7 @@ import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.{Dispatch1, Dispatch2}
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.IssueQueue
-import xiangshan.backend.regfile.Regfile
+import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 
 
@@ -89,8 +89,12 @@ class Backend(implicit val p: XSConfig) extends XSModule
   dispatch1.io.roqIdxs <> roq.io.roqIdxs
 
   dispatch2.io.in <> dispatch1.io.out
+  dispatch2.io.intPregRdy <> rename.io.intPregRdy
+  dispatch2.io.fpPregRdy <> rename.io.fpPregRdy
   intRf.io.readPorts <> dispatch2.io.readIntRf
+  rename.io.intRfReadAddr <> dispatch2.io.readIntRf.map(_.addr)
   fpRf.io.readPorts <> dispatch2.io.readFpRf
+  rename.io.fpRfReadAddr <> dispatch2.io.readFpRf.map(_.addr)
 
 
   val exeWbReqs = exeUnits.map(_.io.out)
@@ -98,12 +102,25 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val wbFpReqs = (fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits).map(_.io.out)
   val intWbArb = Module(new WriteBackArbMtoN(wbIntReqs.length, NRWritePorts))
   val fpWbArb = Module(new WriteBackArbMtoN(wbFpReqs.length, NRWritePorts))
+  val wbIntResults = intWbArb.io.out
+  val wbFpResults = fpWbArb.io.out
+
+  def exuOutToRfWrite(x: Valid[ExuOutput]) = {
+    val rfWrite = Wire(new RfWritePort)
+    rfWrite.wen := x.valid
+    rfWrite.addr := x.bits.uop.pdest
+    rfWrite.data := x.bits.data
+    rfWrite
+  }
 
   intWbArb.io.in <> wbIntReqs
-  intRf.io.writePorts <> intWbArb.io.out
+  intRf.io.writePorts <> wbIntResults.map(exuOutToRfWrite)
 
   fpWbArb.io.in <> wbFpReqs
-  fpRf.io.writePorts <> fpWbArb.io.out
+  fpRf.io.writePorts <> wbFpResults.map(exuOutToRfWrite)
+
+  rename.io.wbIntResults <> wbIntResults
+  rename.io.wbFpResults <> wbFpResults
 
   roq.io.exeWbResults <> exeWbReqs
 
