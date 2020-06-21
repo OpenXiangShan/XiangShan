@@ -57,6 +57,7 @@ class Redirect extends XSBundle {
   val brTag = UInt(BrTagWidth.W)
   val isException = Bool()
   val roqIdx = UInt(RoqIdxWidth.W)
+  val freelistAllocPtr = UInt(PhyRegIdxWidth.W)
 }
 
 class Dp1ToDp2IO extends XSBundle {
