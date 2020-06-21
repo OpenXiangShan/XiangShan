@@ -6,33 +6,36 @@ import xiangshan._
 
 trait IQConst{
   val iqSize = 8
-  val idIdxWidth = log2Up(iqSize)
+  val iqIdxWidth = log2Up(iqSize)
   val layer1Size = iqSize
   val layer2Size = iqSize/2
   val layer3Size = iqSize/4
 }
 
-sealed class CmpInputBundle extends XSBundle {
+sealed abstract class IQBundle extends XSBundle with IQConst
+sealed abstract class IQModule extends XSModule with IQConst with NeedImpl
+
+sealed class CmpInputBundle extends IQBundle{
   val instRdy = Input(Bool())
   val roqIdx  = Input(UInt(RoqIdxWidth.W))
-  val iqIdx   = Input(UInt(idIdxWidth.W))
+  val iqIdx   = Input(UInt(iqIdxWidth.W))
 }
 
 
-sealed class CompareCircuitUnit(layer: Int, id: Int) extends XSModule with NeedImpl {
+sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
   val io = IO(new Bundle(){
-    val input_1 = new CmpInputBundle
-    val input_2 = new CmpInputBundle
-    val output = new Flipped(CmpInputBundle)
+    val in1 = new CmpInputBundle
+    val in2 = new CmpInputBundle
+    val out = Flipped(new CmpInputBundle)
   })
 
-  val roqIdx1 = io.input_1.roqIdx
-  val roqIdx2 = io.input_2.roqIdx
-  val iqIdx1  = io.input_1.iqIdx
-  val iqIdx2  = io.input_2.iqIdx
+  val roqIdx1 = io.in1.roqIdx
+  val roqIdx2 = io.in2.roqIdx
+  val iqIdx1  = io.in1.iqIdx
+  val iqIdx2  = io.in2.iqIdx
 
-  val inst1Rdy = io.input_1.instRdy
-  val inst2Rdy = io.input_2.instRdy
+  val inst1Rdy = io.in1.instRdy
+  val inst2Rdy = io.in2.instRdy
 
   val readySignal = Cat(inst1Rdy,inst2Rdy)
 
@@ -67,7 +70,7 @@ sealed class CompareCircuitUnit(layer: Int, id: Int) extends XSModule with NeedI
 
 }
 
-class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) extends XSModule with NeedImpl {
+class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) extends IQModule {
 
   val useBypass = bypassCnt > 0
 
@@ -153,42 +156,42 @@ class IssueQueue(val fuTypeInt: BigInt, wakeupCnt: Int, val bypassCnt: Int) exte
   // Select Circuit
   //---------------------------------------------------------
   //layer 1
-  val layer1CCUs = (i <- 0 to layer1Size-1 by +2) map {
-    val CCU_1 = Module(new CompareCircuitUnit(layer = 1, id = i))
-    CCU_1.io.input_1.instRdy := instRdy(i)
-    CCU_1.io.input_1.roqIdx  := roqIdx(i)
-    CCU_1.io.input_1.iqIdx   := i.U
+  val layer1CCUs = (0 until layer1Size by 2) map { i =>
+    val CCU_1 = Module(new CompareCircuitUnit(layer = 1, id = i/2))
+    CCU_1.io.in1.instRdy := instRdy(i)
+    CCU_1.io.in1.roqIdx  := roqIdx(i)
+    CCU_1.io.in1.iqIdx   := i.U
 
-    CCU_1.io.input_2.instRdy := instRdy(i+1)
-    CCU_1.io.input_2.roqIdx  := roqIdx(i+1)
-    CCU_1.io.input_2.iqIdx   := (i+1).U
+    CCU_1.io.in2.instRdy := instRdy(i+1)
+    CCU_1.io.in2.roqIdx  := roqIdx(i+1)
+    CCU_1.io.in2.iqIdx   := (i+1).U
     
     CCU_1
   }
 
   //layer 2
-  val layer2CCUs = (i <- 0 to layer2Size-1 by +2) map {
-    val CCU_2 = Module(new CompareCircuitUnit(layer = 2, id = i))
-    CCU_2.io.input_1.instRdy := layer1CCUs(i).io.output.instRdy
-    CCU_2.io.input_1.roqIdx  := layer1CCUs(i).io.output.roqIdx
-    CCU_2.io.input_1.iqIdx   := layer1CCUs(i).io.output.iqIdx
+  val layer2CCUs = (0 until layer2Size by 2) map { i =>
+    val CCU_2 = Module(new CompareCircuitUnit(layer = 2, id = i/2))
+    CCU_2.io.in1.instRdy := layer1CCUs(i).io.out.instRdy
+    CCU_2.io.in1.roqIdx  := layer1CCUs(i).io.out.roqIdx
+    CCU_2.io.in1.iqIdx   := layer1CCUs(i).io.out.iqIdx
 
-    CCU_2.io.input_2.instRdy := layer1CCUs(i+1).io.output.instRdy
-    CCU_2.io.input_2.roqIdx  := layer1CCUs(i+1).io.output.roqIdx
-    CCU_2.io.input_2.iqIdx   := layer1CCUs(i+1).io.output.iqIdx
+    CCU_2.io.in2.instRdy := layer1CCUs(i+1).io.out.instRdy
+    CCU_2.io.in2.roqIdx  := layer1CCUs(i+1).io.out.roqIdx
+    CCU_2.io.in2.iqIdx   := layer1CCUs(i+1).io.out.iqIdx
     
     CCU_2
   }
 
   //layer 3
-  val CCU_3 = Module(new CompareCircuitUnit(layer = 2, id = i))
-  CCU_3.io.input_1.instRdy := layer2CCUs(0).io.output.instRdy
-  CCU_3.io.input_1.roqIdx  := layer2CCUs(0).io.output.roqIdx
-  CCU_3.io.input_1.iqIdx   := layer2CCUs(0).io.output.iqIdx
+  val CCU_3 = Module(new CompareCircuitUnit(layer = 3, id = 0))
+  CCU_3.io.in1.instRdy := layer2CCUs(0).io.out.instRdy
+  CCU_3.io.in1.roqIdx  := layer2CCUs(0).io.out.roqIdx
+  CCU_3.io.in1.iqIdx   := layer2CCUs(0).io.out.iqIdx
 
-  CCU_3.io.input_2.instRdy := layer2CCUs(1).io.output.instRdy
-  CCU_3.io.input_2.roqIdx  := layer2CCUs(1).io.output.roqIdx
-  CCU_3.io.input_2.iqIdx   := layer2CCUs(1).io.output.iqIdx
+  CCU_3.io.in2.instRdy := layer2CCUs(1).io.out.instRdy
+  CCU_3.io.in2.roqIdx  := layer2CCUs(1).io.out.roqIdx
+  CCU_3.io.in2.iqIdx   := layer2CCUs(1).io.out.iqIdx
 
   
 
