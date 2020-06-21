@@ -35,6 +35,7 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val NRReadPorts = 14
   val NRWritePorts = 8
+  val BrqReceiveSize = 1
   val RoqSize = 128
   val RoqIdxWidth = log2Up(RoqSize)
   val IntDqDeqWidth = 4

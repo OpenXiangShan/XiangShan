@@ -75,7 +75,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.enqReqs <> decode.io.toBrq
-  brq.io.exuRedirect <> (bruExeUnit +: aluExeUnits).map(exu => exu.io.out.bits.redirect)
+  val red2BrqArb = Module(new WriteBackArbMtoN(exuConfig.BruCnt + exuConfig.AluCnt, BrqReceiveSize))
+  red2BrqArb.io.in <>  (bruExeUnit +: aluExeUnits).map(exu => exu.io.out)
+  brq.io.exuRedirect <> red2BrqArb.io.out
   decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
   decBuf.io.in <> decode.io.out
