@@ -101,6 +101,7 @@ trait HasExeUnits{
 
   val exeUnits = bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++
     fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits ++ lsuExeUnits)
+  val bjUnits = bruExeUnit +: aluExeUnits
 }
 
 class WriteBackArbMtoN(m: Int, n: Int) extends XSModule with NeedImpl {
