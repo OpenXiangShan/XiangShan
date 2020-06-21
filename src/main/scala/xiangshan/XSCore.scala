@@ -37,6 +37,7 @@ trait HasXSParameter {
   val NRWritePorts = 8
   val RoqSize = 128
   val RoqIdxWidth = log2Up(RoqSize)
+  val ExtendedRoqIdxWidth = RoqIdxWidth + 1
   val IntDqDeqWidth = 4
   val FpDqDeqWidth = 4
   val LsDqDeqWidth = 4
