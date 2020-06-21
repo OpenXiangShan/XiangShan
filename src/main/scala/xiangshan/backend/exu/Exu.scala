@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
-import xiangshan.backend.regfile.RfWritePort
 
 case class ExuConfig
 (
@@ -113,7 +112,7 @@ trait HasExeUnits{
 class WriteBackArbMtoN(m: Int, n: Int) extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
     val in = Vec(m, Flipped(DecoupledIO(new ExuOutput)))
-    val out = Vec(n, Flipped(new RfWritePort))
+    val out = Vec(n, ValidIO(new ExuOutput))
   })
 }
 

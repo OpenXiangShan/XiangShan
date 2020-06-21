@@ -13,6 +13,9 @@ class Dispatch2 extends XSModule with NeedImpl {
     // read regfile
     val readIntRf = Vec(NRReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRReadPorts, Flipped(new RfReadPort))
+    // read reg status (busy/ready)
+    val intPregRdy = Vec(NRReadPorts, Input(Bool()))
+    val fpPregRdy = Vec(NRReadPorts, Input(Bool()))
 
     // enq Issue Queue
     val enqIQCtrl = Vec(exuConfig.ExuCnt, DecoupledIO(new MicroOp))
