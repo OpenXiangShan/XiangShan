@@ -59,6 +59,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
     println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
+    eu.io.redirect <> redirect
     iq
   })
 

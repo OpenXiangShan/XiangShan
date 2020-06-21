@@ -68,18 +68,18 @@ class Dp1ToDp2IO extends XSBundle {
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
-  val redirect = new Redirect
   val src1, src2, src3 = UInt(XLEN.W)
 }
 
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
-  val redirect = new Redirect
   val data = UInt(XLEN.W)
+  val target = UInt(XLEN.W) // used by BRU/ALU.bj to return target to Brq, may need Valid()
 }
 
 class ExuIO extends XSBundle {
   val in = Flipped(DecoupledIO(new ExuInput))
+  val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
 }
 
