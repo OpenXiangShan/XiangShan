@@ -32,6 +32,8 @@ class CtrlSignals extends XSBundle {
   val isXSTrap = Bool()
   val noSpecExec = Bool()  // This inst can not be speculated
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
+  val isRVF = Bool()
+  val imm = UInt(XLEN.W)
 }
 
 class CfCtrl extends XSBundle {
@@ -46,7 +48,7 @@ class MicroOp extends CfCtrl {
 
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-
+  val freelistAllocPtr = UInt(PhyRegIdxWidth.W)
   val roqIdx = UInt(RoqIdxWidth.W)
 }
 
@@ -54,6 +56,8 @@ class Redirect extends XSBundle {
   val target = UInt(VAddrBits.W)
   val brTag = UInt(BrTagWidth.W)
   val isException = Bool()
+  val roqIdx = UInt(RoqIdxWidth.W)
+  val freelistAllocPtr = UInt(PhyRegIdxWidth.W)
 }
 
 class Dp1ToDp2IO extends XSBundle {
@@ -65,12 +69,13 @@ class Dp1ToDp2IO extends XSBundle {
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
+  val redirect = new Redirect
   val src1, src2, src3 = UInt(XLEN.W)
-  val isRVF = Bool()
 }
 
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
+  val redirect = new Redirect
   val data = UInt(XLEN.W)
 }
 
