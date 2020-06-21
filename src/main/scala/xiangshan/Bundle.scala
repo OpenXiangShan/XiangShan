@@ -74,7 +74,7 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt(XLEN.W)
-  val target = UInt(XLEN.W) // used by BRU/ALU.bj to return target to Brq, may need Valid()
+  val redirect = Valid(new Redirect)
 }
 
 class ExuIO extends XSBundle {

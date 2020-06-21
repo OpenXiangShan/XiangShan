@@ -75,6 +75,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.enqReqs <> decode.io.toBrq
+  brq.io.exuRedirect <> (bruExeUnit +: aluExeUnits).map(exu => exu.io.out.bits.redirect)
   decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
   decBuf.io.in <> decode.io.out

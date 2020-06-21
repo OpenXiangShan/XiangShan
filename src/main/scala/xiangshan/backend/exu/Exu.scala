@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
+import xiangshan.utils._
 import xiangshan.backend.regfile.RfWritePort
 
 case class ExuConfig
@@ -35,12 +36,6 @@ abstract class Exu
   val writeFpRf: Boolean = false
 ) extends Module {
   val io = IO(new ExuIO)
-}
-
-
-
-class Alu extends Exu(alu.litValue()) with NeedImpl {
-  override def toString: String = "Alu"
 }
 
 class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true) with NeedImpl{

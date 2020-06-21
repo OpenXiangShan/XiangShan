@@ -10,7 +10,8 @@ class Brq extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
     // interrupt/exception happen, flush Brq
     val roqRedirect = Input(Valid(new Redirect))
-
+    // receive branch/jump calculated target
+    val exuRedirect = Vec(exuConfig.BruCnt + exuConfig.AluCnt, Flipped(ValidIO(new Redirect)))
     // from decode, branch insts enq
     val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new MicroOp)))
     // to decode
