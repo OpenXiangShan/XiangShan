@@ -168,26 +168,26 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
   val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
   val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
-  val src1HitVec = List.tabulate(iqSize)(i => List.tabulate(wakeupCnt)(j => (prfSrc1(i) === cdbPdest(j)) && cdbValid(j)))
-  val src2HitVec = List.tabulate(iqSize)(i => List.tabulate(wakeupCnt)(j => (prfSrc2(i) === cdbPdest(j)) && cdbValid(j)))
-  val src3HitVec = List.tabulate(iqSize)(i => List.tabulate(wakeupCnt)(j => (prfSrc3(i) === cdbPdest(j)) && cdbValid(j)))
-  val src1Hit = List.tabulate(iqSize)(i => ParallelOR(src1HitVec(i)).asBool())
-  val src2Hit = List.tabulate(iqSize)(i => ParallelOR(src2HitVec(i)).asBool())
-  val src3Hit = List.tabulate(iqSize)(i => ParallelOR(src3HitVec(i)).asBool())
-  List.tabulate(iqSize)(i => when (valid(i)) {
-    when(!src1Rdy(i) && src1Hit(i)) {
-      src1Rdy(i) := true.B
-      src1Data(i) := ParallelMux(src1HitVec(i) zip cdbData)
-    }
-    when(!src2Rdy(i) && src2Hit(i)) {
-      src2Rdy(i) := true.B
-      src2Data(i) := ParallelMux(src2HitVec(i) zip cdbData)
-    }
-    when(!src3Rdy(i) && src3Hit(i)) {
-      src3Rdy(i) := true.B
-      src3Data(i) := ParallelMux(src3HitVec(i) zip cdbData)
-    }
-  })
+
+  val srcNum = 3
+  val prfSrc = List(prfSrc1, prfSrc2, prfSrc3)
+  val srcRdy = List(src1Rdy, src2Rdy, src3Rdy)
+  val srcData = List(src1Data, src2Data, src3Data)
+  val srcHitVec = List.tabulate(srcNum)(k =>
+                    List.tabulate(iqSize)(i =>
+                      List.tabulate(wakeupCnt)(j =>
+                        (prfSrc(k)(i) === cdbPdest(j)) && cdbValid(j))))
+  val srcHit =  List.tabulate(srcNum)(k =>
+                  List.tabulate(iqSize)(i =>
+                    ParallelOR(srcHitVec(k)(i)).asBool()))
+  for(k <- 0 until srcNum){
+    for(i <- 0 until iqSize)( when (valid(i)) {
+      when(!srcRdy(k)(i) && srcHit(k)(i)) {
+        srcRdy(k)(i) := true.B
+        srcData(k)(i) := ParallelMux(srcHitVec(k)(i) zip cdbData)
+      }
+    })
+  }
 
   // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
   // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
@@ -195,17 +195,18 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   if (bypassCnt > 0) {
     val bypassPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
     val bypassValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
-    val src1bpHitVec = List.tabulate(iqSize)(i => List.tabulate(bypassCnt)(j => (prfSrc1(i) === bypassPdest(j)) && bypassValid(j)))
-    val src2bpHitVec = List.tabulate(iqSize)(i => List.tabulate(bypassCnt)(j => (prfSrc2(i) === bypassPdest(j)) && bypassValid(j)))
-    val src3bpHitVec = List.tabulate(iqSize)(i => List.tabulate(bypassCnt)(j => (prfSrc3(i) === bypassPdest(j)) && bypassValid(j)))
-    val src1bpHit = List.tabulate(iqSize)(i => ParallelOR(src1bpHitVec(i)).asBool())
-    val src2bpHit = List.tabulate(iqSize)(i => ParallelOR(src2bpHitVec(i)).asBool())
-    val src3bpHit = List.tabulate(iqSize)(i => ParallelOR(src3bpHitVec(i)).asBool())
-    List.tabulate(iqSize)(i  => when (valid(i)) {
-      when(!src1Rdy(i) && src1bpHit(i)) { src1Rdy(i) := true.B}
-      when(!src2Rdy(i) && src2bpHit(i)) { src2Rdy(i) := true.B}
-      when(!src3Rdy(i) && src3bpHit(i)) { src3Rdy(i) := true.B}
-    })
+    val srcBpHitVec = List.tabulate(srcNum)(k =>
+                        List.tabulate(iqSize)(i =>
+                          List.tabulate(bypassCnt)(j =>
+                            (prfSrc(k)(i) === bypassPdest(j)) && bypassValid(j))))
+    val srcBpHit =  List.tabulate(srcNum)(k =>
+                      List.tabulate(iqSize)(i =>
+                        ParallelOR(srcBpHitVec(k)(i)).asBool()))
+    for(k <- 0 until srcNum){
+      for(i <- 0 until iqSize){ when (valid(i)) {
+        when(valid(i) && !srcRdy(k)(i) && srcBpHit(k)(i)) { srcRdy(k)(i) := true.B }
+      }}
+    }
   }
   //---------------------------------------------------------
   // Select Circuit
