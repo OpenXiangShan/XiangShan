@@ -104,6 +104,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   //enqueue pointer
   val emptySlot = ~valid.asUInt
   val enqueueSelect = PriorityEncoder(emptySlot)
+  assert(io.enqCtrl.valid && io.redirect.valid,"enqueue valid should be false when redirect valid")
 
   when(io.enqCtrl.fire()){
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
@@ -229,18 +230,14 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
 
   //Dequeue Logic
   //hold the sel-index to wait for data
-  val selInstIdx = RegInit(0.U(iqIdxWidth.W))
-  val selInstRdy = RegInit(false.B)
-
-
-  selInstRdy := CCU_3.io.out.instRdy
-  selInstIdx := CCU_3.io.out.iqIdx
+  val selInstIdx = RegNext(CCU_3.io.out.iqIdx)
+  val selInstRdy = RegNext(CCU_3.io.out.instRdy)
 
   //issue the select instruction
   val dequeueSelect = Wire(UInt(iqIdxWidth.W))
   dequeueSelect := selInstIdx
 
-  val IQreadyGo = selInstRdy && enqFireNext
+  val IQreadyGo = selInstRdy 
 
   io.deq.valid := IQreadyGo
 
@@ -262,6 +259,26 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   io.deq.bits.src2 := src2Data(dequeueSelect)
   io.deq.bits.src3 := src3Data(dequeueSelect)
 
+  //clear the validBit of dequeued instruction in issuequeue
+  when(io.deq.fire()){
+    valid(dequeueSelect) := false.B
+  }
+
+  //---------------------------------------------------------
+  // Redirect Logic
+  //---------------------------------------------------------
+  val expRedirect = io.redirect.valid && io.redirect.bits.isException
+  val brRedirect = io.redirect.valid && !io.redirect.bits.isException
+
+  UIntToOH(io.redirect.bits.brTag)
+  List.tabulate(iqSize)(
+    when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
+        valid(i) := false.B
+    } .elsewhen(expRedirect) {
+        valid(i) := false.B
+    }
+  )
+  
 
 
   
