@@ -10,7 +10,6 @@ trait IQConst{
   val iqIdxWidth = log2Up(iqSize)
   val layer1Size = iqSize
   val layer2Size = iqSize/2
-  val layer3Size = iqSize/4
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
@@ -38,35 +37,13 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
   val inst1Rdy = io.in1.instRdy
   val inst2Rdy = io.in2.instRdy
 
-  val readySignal = Cat(inst1Rdy,inst2Rdy)
+  io.out.instRdy := inst1Rdy | inst2Rdy
+  io.out.roqIdx := roqIdx2
+  io.out.iqIdx := iqIdx2
 
-  switch (readySignal) {
-    is ("b00".U) { 
-      io.out.instRdy := false.B
-      io.out.roqIdx := DontCare
-      io.out.iqIdx := DontCare
-    }
-    is ("b01".U) { 
-      io.out.instRdy := inst2Rdy
-      io.out.roqIdx := roqIdx2
-      io.out.iqIdx := iqIdx2
-     }
-    is ("b10".U) { 
-      io.out.instRdy := inst1Rdy
-      io.out.roqIdx := roqIdx1
-      io.out.iqIdx := iqIdx1
-    }
-    is ("b11".U) { 
-      when(roqIdx1 < roqIdx2) {
-        io.out.instRdy := inst1Rdy
-        io.out.roqIdx := roqIdx1
-        io.out.iqIdx := iqIdx1
-      } .otherwise {
-        io.out.instRdy := inst2Rdy
-        io.out.roqIdx := roqIdx2
-        io.out.iqIdx := iqIdx2
-      }
-    }
+  when((inst1Rdy && !inst2Rdy) || (inst1Rdy && inst2Rdy && (roqIdx1 < roqIdx2))){
+    io.out.roqIdx := roqIdx1
+    io.out.iqIdx := iqIdx1
   }
 
 }
@@ -114,12 +91,12 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val prfSrc3 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val oldPDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
-  val freelistAllocPrt = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
+  val freelistAllocPtr = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val roqIdx  = Reg(Vec(iqSize, UInt(RoqIdxWidth.W)))
 
   val instRdy = WireInit(VecInit(List.tabulate(iqSize)(i => src1Rdy(i) && src2Rdy(i) && valid(i))))
 
-
+  
   //tag enqueue
   val iqEmty = !valid.asUInt.orR
   val iqFull =  valid.asUInt.andR
@@ -129,6 +106,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //enqueue pointer
   val emptySlot = ~valid.asUInt
   val enqueueSelect = PriorityEncoder(emptySlot)
+  assert(io.enqCtrl.valid && io.redirect.valid,"enqueue valid should be false when redirect valid")
 
   when(io.enqCtrl.fire()){
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
@@ -143,7 +121,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     prfSrc3(enqueueSelect) := io.enqCtrl.bits.psrc3
     prfDest(enqueueSelect) := io.enqCtrl.bits.pdest
     oldPDest(enqueueSelect) := io.enqCtrl.bits.old_pdest
-    freelistAllocPrt(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
+    freelistAllocPtr(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
     roqIdx(enqueueSelect) := io.enqCtrl.bits.roqIdx
 
   }
@@ -261,5 +239,59 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   CCU_3.io.in2.roqIdx  := layer2CCUs(1).io.out.roqIdx
   CCU_3.io.in2.iqIdx   := layer2CCUs(1).io.out.iqIdx
 
+
+  //Dequeue Logic
+  //hold the sel-index to wait for data
+  val selInstIdx = RegInit(0.U(iqIdxWidth.W))
+  val selInstRdy = RegInit(false.B)
+
+  //issue the select instruction
+  val dequeueSelect = Wire(UInt(iqIdxWidth.W))
+  dequeueSelect := selInstIdx
+
+  val IQreadyGo = selInstRdy 
+
+  io.deq.valid := IQreadyGo
+
+  io.deq.bits.uop.psrc1 := prfSrc1(dequeueSelect)
+  io.deq.bits.uop.psrc2 := prfSrc2(dequeueSelect)
+  io.deq.bits.uop.psrc3 := prfSrc3(dequeueSelect)
+  io.deq.bits.uop.pdest := prfDest(dequeueSelect)
+  io.deq.bits.uop.old_pdest := oldPDest(dequeueSelect)
+  io.deq.bits.uop.src1State := SrcState.rdy
+  io.deq.bits.uop.src2State := SrcState.rdy
+  io.deq.bits.uop.src3State := SrcState.rdy
+  io.deq.bits.uop.freelistAllocPtr := freelistAllocPtr(dequeueSelect)
+  io.deq.bits.uop.roqIdx := roqIdx(dequeueSelect)
+
+  //TODO
+  io.deq.bits.redirect := DontCare
+
+  io.deq.bits.src1 := src1Data(dequeueSelect)
+  io.deq.bits.src2 := src2Data(dequeueSelect)
+  io.deq.bits.src3 := src3Data(dequeueSelect)
+
+  //update the index register of instruction that can be issue, unless function unit not allow in
+  //then the issue will be stopped to wait the function unit 
+  //clear the validBit of dequeued instruction in issuequeue
+  when(io.deq.fire()){
+    selInstRdy := CCU_3.io.out.instRdy
+    selInstIdx := CCU_3.io.out.iqIdx
+    valid(dequeueSelect) := false.B
+  }
+
+  //---------------------------------------------------------
+  // Redirect Logic
+  //---------------------------------------------------------
+  val expRedirect = io.redirect.valid && io.redirect.bits.isException
+  val brRedirect = io.redirect.valid && !io.redirect.bits.isException
+
+  List.tabulate(iqSize)( i =>
+    when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
+        valid(i) := false.B
+    } .elsewhen(expRedirect) {
+        valid(i) := false.B
+    }
+  )
 
 }
