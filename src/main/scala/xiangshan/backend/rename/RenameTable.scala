@@ -49,10 +49,3 @@ class RenameTable(float: Boolean) extends XSModule {
   }
 
 }
-
-object Gen extends App {
-//  chisel3.Driver.execute(Array[String]("-td", "build"), () => new RenameTable(true))
-//  chisel3.Driver.execute(Array[String]("-td", "build"), () => new FreeList)
-  //chisel3.Driver.execute(Array[String]("-td", "build"), () => new BusyTable)
-  chisel3.Driver.execute(Array[String]("-td", "build"), () => new Rename)
-}
