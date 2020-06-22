@@ -192,11 +192,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   //layer 1
   val layer1CCUs = (0 until layer1Size by 2) map { i =>
     val CCU_1 = Module(new CompareCircuitUnit(layer = 1, id = i/2))
-    CCU_1.io.in1.instRdy := instRdy(i)
+    CCU_1.io.in1.instRdy := instRdy(i) && valid(i)
     CCU_1.io.in1.roqIdx  := roqIdx(i)
     CCU_1.io.in1.iqIdx   := i.U
 
-    CCU_1.io.in2.instRdy := instRdy(i+1)
+    CCU_1.io.in2.instRdy := instRdy(i+1) && valid(i+1)
     CCU_1.io.in2.roqIdx  := roqIdx(i+1)
     CCU_1.io.in2.iqIdx   := (i+1).U
     
@@ -228,6 +228,20 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   CCU_3.io.in2.iqIdx   := layer2CCUs(1).io.out.iqIdx
 
 
+  //---------------------------------------------------------
+  // Redirect Logic
+  //---------------------------------------------------------
+  val expRedirect = io.redirect.valid && io.redirect.bits.isException
+  val brRedirect = io.redirect.valid && !io.redirect.bits.isException
+
+  List.tabulate(iqSize)( i =>
+    when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
+        valid(i) := false.B
+    } .elsewhen(expRedirect) {
+        valid(i) := false.B
+    }
+  )
+
   //Dequeue Logic
   //hold the sel-index to wait for data
   val selInstIdx = RegInit(0.U(iqIdxWidth.W))
@@ -237,7 +251,8 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   val dequeueSelect = Wire(UInt(iqIdxWidth.W))
   dequeueSelect := selInstIdx
 
-  val IQreadyGo = selInstRdy 
+  val brRedirectMaskMatch = (UIntToOH(io.redirect.bits.brTag) & brMask(dequeueSelect)).orR
+  val IQreadyGo = selInstRdy && !expRedirect && (!brRedirect || !brRedirectMaskMatch)
 
   io.deq.valid := IQreadyGo
 
@@ -267,19 +282,5 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
     selInstIdx := CCU_3.io.out.iqIdx
     valid(dequeueSelect) := false.B
   }
-
-  //---------------------------------------------------------
-  // Redirect Logic
-  //---------------------------------------------------------
-  val expRedirect = io.redirect.valid && io.redirect.bits.isException
-  val brRedirect = io.redirect.valid && !io.redirect.bits.isException
-
-  List.tabulate(iqSize)( i =>
-    when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
-        valid(i) := false.B
-    } .elsewhen(expRedirect) {
-        valid(i) := false.B
-    }
-  )
 
 }
