@@ -37,18 +37,13 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
   val inst2Rdy = io.in2.instRdy
 
   io.out.instRdy := inst1Rdy | inst2Rdy
-  io.out.iqIdx   := Mux(inst1Rdy,Mux(inst2Rdy,iqIdx2,iqIdx1)
+  io.out.roqIdx := roqIdx2
+  io.out.iqIdx := iqIdx2
 
   when((inst1Rdy && !inst2Rdy) || (inst1Rdy && inst2Rdy && (roqIdx1 < roqIdx2))){
     io.out.roqIdx := roqIdx1
     io.out.iqIdx := iqIdx1
   }
-
-  when((inst2Rdy && !inst1Rdy) || (inst2Rdy && inst1Rdy && (roqIdx2 < roqIdx1))){
-    io.out.roqIdx := roqIdx2
-    io.out.iqIdx := iqIdx2
-  }
-
 
 }
 
@@ -95,12 +90,12 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   val prfSrc3 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val oldPDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
-  val freelistAllocPrt = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
+  val freelistAllocPtr = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val roqIdx  = Reg(Vec(iqSize, UInt(RoqIdxWidth.W)))
 
   val instRdy = WireInit(VecInit(List.tabulate(iqSize)(i => src1Rdy(i) && src2Rdy(i) && valid(i))))
 
-
+  
   //tag enqueue
   val iqEmty = !valid.asUInt.orR
   val iqFull =  valid.asUInt.andR
@@ -124,7 +119,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
     prfSrc3(enqueueSelect) := io.enqCtrl.bits.psrc3
     prfDest(enqueueSelect) := io.enqCtrl.bits.pdest
     oldPDest(enqueueSelect) := io.enqCtrl.bits.old_pdest
-    freelistAllocPrt(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
+    freelistAllocPtr(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
     roqIdx(enqueueSelect) := io.enqCtrl.bits.roqIdx
 
   }
@@ -215,7 +210,43 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   CCU_3.io.in2.roqIdx  := layer2CCUs(1).io.out.roqIdx
   CCU_3.io.in2.iqIdx   := layer2CCUs(1).io.out.iqIdx
 
-  
+
+  //Dequeue Logic
+  //hold the sel-index to wait for data
+  val selInstIdx = RegInit(0.U(iqIdxWidth.W))
+  val selInstRdy = RegInit(false.B)
+
+
+  selInstRdy := CCU_3.io.out.instRdy
+  selInstIdx := CCU_3.io.out.iqIdx
+
+  //issue the select instruction
+  val dequeueSelect = Wire(UInt(iqIdxWidth.W))
+  dequeueSelect := selInstIdx
+
+  val IQreadyGo = selInstRdy && enqFireNext
+
+  io.deq.valid := IQreadyGo
+
+  io.deq.bits.uop.psrc1 := prfSrc1(dequeueSelect)
+  io.deq.bits.uop.psrc2 := prfSrc2(dequeueSelect)
+  io.deq.bits.uop.psrc3 := prfSrc3(dequeueSelect)
+  io.deq.bits.uop.pdest := prfDest(dequeueSelect)
+  io.deq.bits.uop.old_pdest := oldPDest(dequeueSelect)
+  io.deq.bits.uop.src1State := SrcState.rdy
+  io.deq.bits.uop.src2State := SrcState.rdy
+  io.deq.bits.uop.src3State := SrcState.rdy
+  io.deq.bits.uop.freelistAllocPtr := freelistAllocPtr(dequeueSelect)
+  io.deq.bits.uop.roqIdx := roqIdx(dequeueSelect)
+
+  //TODO
+  io.deq.bits.redirect := DontCare
+
+  io.deq.bits.src1 := src1Data(dequeueSelect)
+  io.deq.bits.src2 := src2Data(dequeueSelect)
+  io.deq.bits.src3 := src3Data(dequeueSelect)
+
+
 
   
 
