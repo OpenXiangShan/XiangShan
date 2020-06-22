@@ -65,7 +65,6 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
   aluQueues.foreach(aluQ => {
     aluQ.io.bypassUops <> aluQueues.map(_.io.selectedUop)
-    aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
   })
 
   io.frontend.redirect <> redirect
