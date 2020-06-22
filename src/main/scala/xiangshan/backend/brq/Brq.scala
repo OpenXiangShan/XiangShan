@@ -13,7 +13,7 @@ class Brq extends XSModule with NeedImpl {
     // receive branch/jump calculated target
     val exuRedirect = Vec(exuConfig.AluCnt + exuConfig.BruCnt, Flipped(ValidIO(new ExuOutput)))
     // from decode, branch insts enq
-    val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new MicroOp)))
+    val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to decode
     val brTags = Output(Vec(DecodeWidth, UInt(BrTagWidth.W)))
     val brMasks = Output(Vec(DecodeWidth, UInt(BrqSize.W)))
