@@ -36,36 +36,19 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
   val inst1Rdy = io.in1.instRdy
   val inst2Rdy = io.in2.instRdy
 
-  val readySignal = Cat(inst1Rdy,inst2Rdy)
+  io.out.instRdy := inst1Rdy | inst2Rdy
+  io.out.iqIdx   := Mux(inst1Rdy,Mux(inst2Rdy,iqIdx2,iqIdx1)
 
-  switch (readySignal) {
-    is ("b00".U) { 
-      io.out.instRdy := false.B
-      io.out.roqIdx := DontCare
-      io.out.iqIdx := DontCare
-    }
-    is ("b01".U) { 
-      io.out.instRdy := inst2Rdy
-      io.out.roqIdx := roqIdx2
-      io.out.iqIdx := iqIdx2
-     }
-    is ("b10".U) { 
-      io.out.instRdy := inst1Rdy
-      io.out.roqIdx := roqIdx1
-      io.out.iqIdx := iqIdx1
-    }
-    is ("b11".U) { 
-      when(roqIdx1 < roqIdx2) {
-        io.out.instRdy := inst1Rdy
-        io.out.roqIdx := roqIdx1
-        io.out.iqIdx := iqIdx1
-      } .otherwise {
-        io.out.instRdy := inst2Rdy
-        io.out.roqIdx := roqIdx2
-        io.out.iqIdx := iqIdx2
-      }
-    }
+  when((inst1Rdy && !inst2Rdy) || (inst1Rdy && inst2Rdy && (roqIdx1 < roqIdx2))){
+    io.out.roqIdx := roqIdx1
+    io.out.iqIdx := iqIdx1
   }
+
+  when((inst2Rdy && !inst1Rdy) || (inst2Rdy && inst1Rdy && (roqIdx2 < roqIdx1))){
+    io.out.roqIdx := roqIdx2
+    io.out.iqIdx := iqIdx2
+  }
+
 
 }
 
