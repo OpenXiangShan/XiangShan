@@ -20,34 +20,33 @@ class FreeList extends XSModule {
   })
 
   val freeList = RegInit(VecInit(Seq.tabulate(NRPhyRegs)(i => i.U(PhyRegIdxWidth.W))))
-  val headPtr = RegInit(0.U(PhyRegIdxWidth.W))
-  val tailPtr = RegInit(0.U(PhyRegIdxWidth.W))
-  val full = RegInit(true.B)
+  val headPtr, tailPtr = RegInit(0.U((PhyRegIdxWidth+1).W))
+
+  def ptrToIndex(ptr: UInt): UInt = ptr.tail(1)
+  def isEmpty(ptr1: UInt, ptr2: UInt): Bool = ptr1 === ptr2
 
   // dealloc: commited instructions's 'old_pdest' enqueue
   var tailPtrNext = WireInit(tailPtr)
   for((deallocValid, deallocReg) <- io.deallocReqs.zip(io.deallocPregs)){
     when(deallocValid){
-      freeList(tailPtrNext) := deallocReg
+      freeList(ptrToIndex(tailPtrNext)) := deallocReg
     }
     tailPtrNext = tailPtrNext + deallocValid
   }
   tailPtr := tailPtrNext
 
   // allocate new pregs to rename instructions
-  var empty = WireInit(!full && (headPtr === tailPtr))
+  var empty = WireInit(isEmpty(headPtr, tailPtr))
   var headPtrNext = WireInit(headPtr)
   for(
     (((allocReq, canAlloc),pdest),allocPtr) <- io.allocReqs.zip(io.canAlloc).zip(io.pdests).zip(io.allocPtrs)
   ){
     canAlloc := !empty
-    pdest := freeList(headPtrNext)
+    pdest := freeList(ptrToIndex(headPtrNext))
     allocPtr := headPtrNext
     headPtrNext = headPtrNext + (allocReq && canAlloc)
-    empty = empty && (headPtrNext === tailPtr)
+    empty = isEmpty(headPtrNext, tailPtr)
   }
-
-  full := !empty && (headPtrNext === tailPtrNext)
 
   headPtr := Mux(io.redirect.valid,
     io.redirect.bits.freelistAllocPtr, // mispredict or exception happen
