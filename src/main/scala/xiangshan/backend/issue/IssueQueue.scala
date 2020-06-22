@@ -3,6 +3,7 @@ package xiangshan.backend.issue
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.utils._
 
 trait IQConst{
   val iqSize = 8
@@ -162,52 +163,50 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   }
 
   // From Common Data Bus(wakeUpPort)
-  // TODO: the when-style may causes long-long-long Mux(which means long latency)
+  // chisel claims that firrtl will optimize Mux1H to and/or tree
   // TODO: ignore ALU'cdb srcRdy, for byPass has done it
   val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
   val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
   val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
-  List.tabulate(iqSize)(i =>
-    when (valid(i)) {
-      List.tabulate(wakeupCnt)(j => {
-        when(!src1Rdy(i) && prfSrc1(i) === cdbPdest(j) && cdbValid(j)) {
-          src1Rdy(i) := true.B
-          src1Data(i) := cdbData(j)
-        }
-        when(!src2Rdy(i) && prfSrc2(i) === cdbPdest(j) && cdbValid(j)) {
-          src2Rdy(i) := true.B
-          src2Data(i) := cdbData(j)
-        }
-        when(!src3Rdy(i) && prfSrc3(i) === cdbPdest(j) && cdbValid(j)) {
-          src3Rdy(i) := true.B
-          src3Data(i) := cdbData(j)
-        }
-      })
+  val src1HitVec = List.tabulate(iqSize)(i => List.tabulate(wakeupCnt)(j => (prfSrc1(i) === cdbPdest(j)) && cdbValid(j)))
+  val src2HitVec = List.tabulate(iqSize)(i => List.tabulate(wakeupCnt)(j => (prfSrc2(i) === cdbPdest(j)) && cdbValid(j)))
+  val src3HitVec = List.tabulate(iqSize)(i => List.tabulate(wakeupCnt)(j => (prfSrc3(i) === cdbPdest(j)) && cdbValid(j)))
+  val src1Hit = List.tabulate(iqSize)(i => ParallelOR(src1HitVec(i)).asBool())
+  val src2Hit = List.tabulate(iqSize)(i => ParallelOR(src2HitVec(i)).asBool())
+  val src3Hit = List.tabulate(iqSize)(i => ParallelOR(src3HitVec(i)).asBool())
+  List.tabulate(iqSize)(i => when (valid(i)) {
+    when(!src1Rdy(i) && src1Hit(i)) {
+      src1Rdy(i) := true.B
+      src1Data(i) := ParallelMux(src1HitVec(i) zip cdbData)
     }
-  )
+    when(!src2Rdy(i) && src2Hit(i)) {
+      src2Rdy(i) := true.B
+      src2Data(i) := ParallelMux(src2HitVec(i) zip cdbData)
+    }
+    when(!src3Rdy(i) && src3Hit(i)) {
+      src3Rdy(i) := true.B
+      src3Data(i) := ParallelMux(src3HitVec(i) zip cdbData)
+    }
+  })
 
   // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
   // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
   // byPassUops is one cycle before byPassDatas
-  // TODO: the when-style may causes long-long-long Mux(which means long latency)
-  val selUopPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
-  val selUopValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
-  List.tabulate(iqSize)(i  => 
-    when (valid(i)) {
-      List.tabulate(bypassCnt)(j => {
-        when(!src1Rdy(i) && prfSrc1(i) === selUopPdest(j) && selUopValid(j)) {
-          src1Rdy(i) := true.B
-        }
-        when(!src2Rdy(i) && prfSrc2(i) === selUopPdest(j) && selUopValid(j)) {
-          src2Rdy(i) := true.B
-        }
-        when(!src3Rdy(i) && prfSrc3(i) === selUopPdest(j) && selUopValid(j)) {
-          src3Rdy(i) := true.B
-        }
-      })
-    }
-  )
-
+  if (bypassCnt > 0) {
+    val bypassPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
+    val bypassValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
+    val src1bpHitVec = List.tabulate(iqSize)(i => List.tabulate(bypassCnt)(j => (prfSrc1(i) === bypassPdest(j)) && bypassValid(j)))
+    val src2bpHitVec = List.tabulate(iqSize)(i => List.tabulate(bypassCnt)(j => (prfSrc2(i) === bypassPdest(j)) && bypassValid(j)))
+    val src3bpHitVec = List.tabulate(iqSize)(i => List.tabulate(bypassCnt)(j => (prfSrc3(i) === bypassPdest(j)) && bypassValid(j)))
+    val src1bpHit = List.tabulate(iqSize)(i => ParallelOR(src1bpHitVec(i)).asBool())
+    val src2bpHit = List.tabulate(iqSize)(i => ParallelOR(src2bpHitVec(i)).asBool())
+    val src3bpHit = List.tabulate(iqSize)(i => ParallelOR(src3bpHitVec(i)).asBool())
+    List.tabulate(iqSize)(i  => when (valid(i)) {
+      when(!src1Rdy(i) && src1bpHit(i)) { src1Rdy(i) := true.B}
+      when(!src2Rdy(i) && src2bpHit(i)) { src2Rdy(i) := true.B}
+      when(!src3Rdy(i) && src3bpHit(i)) { src3Rdy(i) := true.B}
+    })
+  }
   //---------------------------------------------------------
   // Select Circuit
   //---------------------------------------------------------
