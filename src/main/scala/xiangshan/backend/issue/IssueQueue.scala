@@ -294,4 +294,14 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     }
   )
 
+  // SelectedUop (bypass / speculative)
+  if(useBypass) {
+    val sel = io.selectedUop
+    val selIQIdx = CCU_3.io.out.iqIdx
+    sel.valid := CCU_3.io.out.instRdy
+    sel.bits := DontCare
+    sel.bits.psrc1 := prfSrc1(selIQIdx)
+    sel.bits.psrc2 := prfSrc2(selIQIdx)
+    sel.bits.psrc3 := prfSrc3(selIQIdx)
+  }
 }
