@@ -270,8 +270,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   val expRedirect = io.redirect.valid && io.redirect.bits.isException
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
 
-  UIntToOH(io.redirect.bits.brTag)
-  List.tabulate(iqSize)(
+  List.tabulate(iqSize)( i =>
     when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
         valid(i) := false.B
     } .elsewhen(expRedirect) {
