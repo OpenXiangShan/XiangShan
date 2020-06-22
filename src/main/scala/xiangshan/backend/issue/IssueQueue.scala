@@ -161,36 +161,53 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
     src2Data(enqSelNext) := io.enqData.bits.src2
     src3Data(enqSelNext) := io.enqData.bits.src3
   }
+
   // From Common Data Bus(wakeUpPort)
+  // TODO: the when-style may causes long-long-long Mux(which means long latency)
+  // TODO: ignore ALU'cdb srcRdy, for byPass has done it
   val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
   val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
   val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
   List.tabulate(iqSize)(i =>
     when (valid(i)) {
-      List.tabulate(wakeupCnt)(j =>
+      List.tabulate(wakeupCnt)(j => {
         when(!src1Rdy(i) && prfSrc1(i) === cdbPdest(j) && cdbValid(j)) {
           src1Rdy(i) := true.B
           src1Data(i) := cdbData(j)
         }
-      )
-      List.tabulate(wakeupCnt)(j =>
         when(!src2Rdy(i) && prfSrc2(i) === cdbPdest(j) && cdbValid(j)) {
           src2Rdy(i) := true.B
           src2Data(i) := cdbData(j)
         }
-      )
-      List.tabulate(wakeupCnt)(j =>
         when(!src3Rdy(i) && prfSrc3(i) === cdbPdest(j) && cdbValid(j)) {
           src3Rdy(i) := true.B
           src3Data(i) := cdbData(j)
         }
-      )
+      })
     }
   )
 
   // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
   // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
-
+  // byPassUops is one cycle before byPassDatas
+  // TODO: the when-style may causes long-long-long Mux(which means long latency)
+  val selUopPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
+  val selUopValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
+  List.tabulate(iqSize)(i  => 
+    when (valid(i)) {
+      List.tabulate(bypassCnt)(j => {
+        when(!src1Rdy(i) && prfSrc1(i) === selUopPdest(j) && selUopValid(j)) {
+          src1Rdy(i) := true.B
+        }
+        when(!src2Rdy(i) && prfSrc2(i) === selUopPdest(j) && selUopValid(j)) {
+          src2Rdy(i) := true.B
+        }
+        when(!src3Rdy(i) && prfSrc3(i) === selUopPdest(j) && selUopValid(j)) {
+          src3Rdy(i) := true.B
+        }
+      })
+    }
+  )
 
   //---------------------------------------------------------
   // Select Circuit
@@ -232,10 +249,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   CCU_3.io.in2.instRdy := layer2CCUs(1).io.out.instRdy
   CCU_3.io.in2.roqIdx  := layer2CCUs(1).io.out.roqIdx
   CCU_3.io.in2.iqIdx   := layer2CCUs(1).io.out.iqIdx
-
-  
-
-  
 
 
 }
