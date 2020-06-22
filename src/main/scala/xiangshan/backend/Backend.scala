@@ -49,23 +49,32 @@ class Backend(implicit val p: XSConfig) extends XSModule
   ))
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
   val issueQueues = exeUnits.zipWithIndex.map({ case(eu, i) =>
+    def needBypass(x: Exu): Boolean = (eu.enableBypass)
+    val bypassCnt = exeUnits.count(needBypass)//if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
     def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
-    val wakeupCnt = exeUnits.count(needWakeup)
-    val bypassCnt = if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
-    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt))
+    val wakeupCnt = exeUnits.count(needWakeup) - (if(eu.enableBypass) bypassCnt else 0)
+    assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
+    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch2.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch2.io.enqIQData(i)
-    iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
+    iq.io.wakeUpPorts <> exeUnits.filter(e => needWakeup(e) && !needBypass(e)).map(_.io.out)
     println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
     iq
   })
 
-  val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
-  aluQueues.foreach(aluQ => {
-    aluQ.io.bypassUops <> aluQueues.map(_.io.selectedUop)
+  val bypassQueues = issueQueues.filter(_.bypassCnt > 0)
+  val bypassUnits = exeUnits.filter(_.enableBypass)
+  bypassQueues.foreach(iq => {
+    iq.io.bypassUops <> bypassQueues.map(_.io.selectedUop)
+    iq.io.bypassData <> bypassUnits.map(_.io.out)
   })
+  // val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
+  // aluQueues.foreach(aluQ => {
+  //   aluQ.io.bypassUops <> aluQueues.map(_.io.selectedUop)
+  //   aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
+  // })
 
   io.frontend.redirect <> redirect
   io.frontend.commits <> roq.io.commits

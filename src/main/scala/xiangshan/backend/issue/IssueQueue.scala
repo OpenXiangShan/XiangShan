@@ -71,7 +71,7 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
 
 }
 
-class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) extends IQModule {
+class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: BigInt = 1) extends IQModule {
 
   val useBypass = bypassCnt > 0
 
@@ -95,6 +95,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
 
     // use bypass uops to speculative wake-up
     val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new MicroOp))) else null
+    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new ExuOutput))) else null
   })
   //---------------------------------------------------------
   // Issue Queue
@@ -195,6 +196,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   if (bypassCnt > 0) {
     val bypassPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
     val bypassValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
+    val bypassData = List.tabulate(bypassCnt)(i => io.bypassData(i).bits.data)
     val srcBpHitVec = List.tabulate(srcNum)(k =>
                         List.tabulate(iqSize)(i =>
                           List.tabulate(bypassCnt)(j =>
@@ -202,9 +204,19 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
     val srcBpHit =  List.tabulate(srcNum)(k =>
                       List.tabulate(iqSize)(i =>
                         ParallelOR(srcBpHitVec(k)(i)).asBool()))
+    val srcBpHitVecNext = List.tabulate(srcNum)(k =>
+                            List.tabulate(iqSize)(i =>
+                              List.tabulate(bypassCnt)(j => RegNext(srcBpHitVec(k)(i)(j)))))
+    val srcBpHitNext = List.tabulate(srcNum)(k =>
+                         List.tabulate(iqSize)(i =>
+                           RegNext(srcBpHit(k)(i))))
+    val srcBpData = List.tabulate(srcNum)(k =>
+                      List.tabulate(iqSize)(i => 
+                        ParallelMux(srcBpHitVecNext(k)(i) zip bypassData)))
     for(k <- 0 until srcNum){
       for(i <- 0 until iqSize){ when (valid(i)) {
         when(valid(i) && !srcRdy(k)(i) && srcBpHit(k)(i)) { srcRdy(k)(i) := true.B }
+        when(srcBpHitNext(k)(i)) { srcData(k)(i) := srcBpData(k)(i)}
       }}
     }
   }
