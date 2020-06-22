@@ -230,8 +230,8 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
 
   //Dequeue Logic
   //hold the sel-index to wait for data
-  val selInstIdx = RegNext(CCU_3.io.out.iqIdx)
-  val selInstRdy = RegNext(CCU_3.io.out.instRdy)
+  val selInstIdx = RegInit(0.U(iqIdxWidth.W))
+  val selInstRdy = RegInit(false.B)
 
   //issue the select instruction
   val dequeueSelect = Wire(UInt(iqIdxWidth.W))
@@ -259,8 +259,12 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   io.deq.bits.src2 := src2Data(dequeueSelect)
   io.deq.bits.src3 := src3Data(dequeueSelect)
 
+  //update the index register of instruction that can be issue, unless function unit not allow in
+  //then the issue will be stopped to wait the function unit 
   //clear the validBit of dequeued instruction in issuequeue
   when(io.deq.fire()){
+    selInstRdy := CCU_3.io.out.instRdy
+    selInstIdx := CCU_3.io.out.iqIdx
     valid(dequeueSelect) := false.B
   }
 
@@ -277,10 +281,5 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
         valid(i) := false.B
     }
   )
-  
-
-
-  
-
 
 }
