@@ -35,9 +35,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
-//  val dispatch1 = Module(new Dispatch1)
   val roq = Module(new Roq)
-//  val dispatch2 = Module(new Dispatch2)
   val intRf = Module(new Regfile(
     numReadPorts = NRReadPorts,
     numWirtePorts = NRWritePorts,
@@ -55,8 +53,6 @@ class Backend(implicit val p: XSConfig) extends XSModule
     val bypassCnt = if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
     val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt))
     iq.io.redirect <> redirect
-//    iq.io.enqCtrl <> dispatch2.io.enqIQCtrl(i)
-//    iq.io.enqData <> dispatch2.io.enqIQData(i)
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
     iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
