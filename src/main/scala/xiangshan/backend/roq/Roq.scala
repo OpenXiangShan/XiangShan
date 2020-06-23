@@ -11,7 +11,7 @@ class Roq extends XSModule {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(ExtendedRoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
-    val exeWbResults = Vec(exuConfig.ExuCnt, Flipped(DecoupledIO(new ExuOutput)))
+    val exeWbResults = Vec(exuConfig.ExuCnt, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
   })
 
@@ -56,7 +56,6 @@ class Roq extends XSModule {
     when(io.exeWbResults(i).fire()){
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
     }
-    io.exeWbResults(i).ready := true.B
   }
 
   // Commit uop to Rename

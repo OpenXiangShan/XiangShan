@@ -127,7 +127,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   rename.io.wbIntResults <> wbIntResults
   rename.io.wbFpResults <> wbFpResults
 
-  roq.io.exeWbResults <> exeWbReqs
+  roq.io.exeWbResults.zip(exeWbReqs).foreach({case (x,y) => {
+    x.bits := y.bits
+    x.valid := y.fire()
+  }})
 
 
   // TODO: Remove sink and source
