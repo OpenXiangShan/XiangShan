@@ -62,17 +62,17 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val enqData = Flipped(ValidIO(new ExuInput))
 
     //  broadcast selected uop to other issue queues which has bypasses
-    val selectedUop = if(useBypass) DecoupledIO(new MicroOp) else null
+    val selectedUop = if(useBypass) ValidIO(new MicroOp) else null
 
     // send to exu
     val deq = DecoupledIO(new ExuInput)
 
     // listen to write back bus
-    val wakeUpPorts = Vec(wakeupCnt, Flipped(DecoupledIO(new ExuOutput)))
+    val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
 
     // use bypass uops to speculative wake-up
-    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new MicroOp))) else null
-    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new ExuOutput))) else null
+    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new MicroOp))) else null
+    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
   })
   //---------------------------------------------------------
   // Issue Queue

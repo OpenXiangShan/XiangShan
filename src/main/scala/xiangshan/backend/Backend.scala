@@ -58,7 +58,11 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch2.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch2.io.enqIQData(i)
-    iq.io.wakeUpPorts <> exeUnits.filter(e => needWakeup(e)).map(_.io.out)
+    val wuUnitsOut = exeUnits.filter(e => needWakeup(e)).map(_.io.out)
+    for(i <- iq.io.wakeUpPorts.indices) {
+      iq.io.wakeUpPorts(i).bits <> wuUnitsOut(i).bits
+      iq.io.wakeUpPorts(i).valid := wuUnitsOut(i).valid
+    }
     println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
     iq
@@ -67,8 +71,11 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val bypassQueues = issueQueues.filter(_.bypassCnt > 0)
   val bypassUnits = exeUnits.filter(_.enableBypass)
   bypassQueues.foreach(iq => {
+    for(i <- iq.io.bypassUops.indices) {
+      iq.io.bypassData(i).bits := bypassUnits(i).io.out.bits
+      iq.io.bypassData(i).valid := bypassUnits(i).io.out.valid
+    }
     iq.io.bypassUops <> bypassQueues.map(_.io.selectedUop)
-    iq.io.bypassData <> bypassUnits.map(_.io.out)
   })
   // val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
   // aluQueues.foreach(aluQ => {
