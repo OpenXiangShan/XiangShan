@@ -32,9 +32,9 @@ class Dispatch extends XSModule {
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
   }
-  val intDq = Module(new DispatchQueue(new MicroOp, dp1Config.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
-  val fpDq = Module(new DispatchQueue(new MicroOp, dp1Config.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
-  val lsDq = Module(new DispatchQueue(new MicroOp, dp1Config.LsDqSize, RenameWidth, LsDqDeqWidth, "LsDpQ"))
+  val intDq = Module(new DispatchQueue(dp1Config.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
+  val fpDq = Module(new DispatchQueue(dp1Config.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
+  val lsDq = Module(new DispatchQueue(dp1Config.LsDqSize, RenameWidth, LsDqDeqWidth, "LsDpQ"))
   val dispatch2 = Module(new Dispatch2())
 
   dispatch1.io.redirect <> io.redirect
@@ -44,6 +44,12 @@ class Dispatch extends XSModule {
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq
 
+  // dispatch queue cancels the uops
+  intDq.io.redirect <> io.redirect
+  fpDq.io.redirect <> io.redirect
+  lsDq.io.redirect <> io.redirect
+
+  // dispatch2 only receives valid uops from dispatch queue
   dispatch2.io.fromIntDq <> intDq.io.deq
   dispatch2.io.fromFpDq <> fpDq.io.deq
   dispatch2.io.fromLsDq <> lsDq.io.deq
@@ -57,7 +63,7 @@ class Dispatch extends XSModule {
 
 class DispatchWrapper extends XSModule {
   val io = IO(new Bundle() {
-//    val redirect = Flipped(ValidIO(new Redirect))
+    val redirect = Flipped(ValidIO(new Redirect))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     // enq Roq
@@ -79,6 +85,7 @@ class DispatchWrapper extends XSModule {
   val dispatch = Module(new Dispatch())
   dispatch.io <> DontCare
 
+  dispatch.io.redirect <> io.redirect
   for (i <- 0 until RenameWidth) {
     dispatch.io.fromRename(i).valid := io.fromRename(i).valid
     dispatch.io.fromRename(i).bits.cf.pc := io.fromRename(i).bits.cf.pc

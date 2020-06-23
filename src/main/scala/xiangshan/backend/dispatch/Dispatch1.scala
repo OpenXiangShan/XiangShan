@@ -28,6 +28,12 @@ class Dispatch1 extends XSModule{
     val toFpDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val toLsDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
+  // check whether valid uops are canceled
+  val cancelled = Wire(Vec(RenameWidth, Bool()))
+  for (i <- 0 until RenameWidth) {
+    cancelled(i) := ((io.fromRename(i).bits.brMask & UIntToOH(io.redirect.bits.brTag)) =/= 0.U) && io.redirect.valid
+  }
+
   // enqueue handshake
   val enq_ready = Wire(Vec(RenameWidth, Bool()))
   val enq_valid = Wire(Vec(RenameWidth, Bool()))
@@ -36,10 +42,14 @@ class Dispatch1 extends XSModule{
                     (io.toFpDq(i).ready  && FuType.isFpExu(io.fromRename(i).bits.ctrl.fuType )) ||
                     (io.toLsDq(i).ready  && FuType.isMemExu(io.fromRename(i).bits.ctrl.fuType))
     enq_valid(i) := io.toIntDq(i).valid || io.toFpDq(i).valid || io.toLsDq(i).valid
-    io.recv(i) := enq_ready(i) && enq_valid(i)
-    when (io.recv(i)) {
-      printf("[Cycle:%d][Dispatch1] instruction 0x%x accepted by queue %x %x %x\n", GTimer(), io.fromRename(i).bits.cf.pc,
-        io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
+    io.recv(i) := (enq_ready(i) && enq_valid(i)) || cancelled(i)
+    when (io.recv(i) && !cancelled(i)) {
+      printf("[Cycle:%d][Dispatch1] instruction 0x%x accepted by queue %x %x %x\n",
+        GTimer(), io.fromRename(i).bits.cf.pc, io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
+    }
+    when (io.recv(i) && cancelled(i)) {
+      printf("[Cycle:%d][Dispatch1] instruction 0x%x with brMask %x brTag %x cancelled\n",
+        GTimer(), io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.brMask, io.redirect.bits.brTag)
     }
   }
 
@@ -74,7 +84,7 @@ class Dispatch1 extends XSModule{
   // uop can enqueue when rename.valid and roq.valid
   val can_enqueue = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
-    can_enqueue(i) := io.fromRename(i).valid && (io.toRoq(i).ready || roqIndexRegValid(i))
+    can_enqueue(i) := io.fromRename(i).valid && (io.toRoq(i).ready || roqIndexRegValid(i)) && !cancelled(i)
     io.toIntDq(i).valid := can_enqueue(i) && FuType.isIntExu(io.fromRename(i).bits.ctrl.fuType)
     io.toIntDq(i).bits := uop_nroq(i)
     io.toFpDq(i).valid := can_enqueue(i) && FuType.isFpExu(io.fromRename(i).bits.ctrl.fuType)

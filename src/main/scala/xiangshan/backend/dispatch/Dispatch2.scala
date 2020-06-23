@@ -8,8 +8,7 @@ import xiangshan.utils.GTimer
 
 class Dispatch2 extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
-    // from dispatch1
-//    val in = Flipped(new Dp1ToDp2IO)
+    // from dispatch queues
     val fromIntDq = Flipped(Vec(IntDqDeqWidth, DecoupledIO(new MicroOp)))
     val fromFpDq = Flipped(Vec(FpDqDeqWidth, DecoupledIO(new MicroOp)))
     val fromLsDq = Flipped(Vec(LsDqDeqWidth, DecoupledIO(new MicroOp)))
@@ -61,7 +60,7 @@ class Dispatch2 extends XSModule with NeedImpl {
   }) :+ true.B)
 
   // TODO: currently there's only one LSU
-  //  val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => (deq.bits.ctrl.fuType === FuType.ldu || deq.bits.ctrl.fuType === FuType.stu)) :+ true.B)
+  // val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => (deq.bits.ctrl.fuType === FuType.ldu)) :+ true.B)
   val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)) :+ true.B)
   val load1InstIdx = PriorityEncoder((io.fromLsDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.ldu && i.U > load0InstIdx

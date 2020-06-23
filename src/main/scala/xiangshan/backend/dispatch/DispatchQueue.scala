@@ -3,20 +3,21 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan.utils.GTimer
-import xiangshan.{XSBundle, XSModule}
+import xiangshan.{MicroOp, Redirect, XSBundle, XSModule}
 
 
-class DispatchQueueIO[T <: Data](gen: T, enqnum: Int, deqnum: Int) extends XSBundle {
-  val enq = Vec(enqnum, Flipped(DecoupledIO(gen)))
-  val deq = Vec(deqnum, DecoupledIO(gen))
+class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
+  val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
+  val deq = Vec(deqnum, DecoupledIO(new MicroOp))
+  val redirect = Flipped(ValidIO(new Redirect))
 }
 
-class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
-  val io = IO(new DispatchQueueIO(gen, enqnum, deqnum))
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
+  val io = IO(new DispatchQueueIO(enqnum, deqnum))
   val index_width = log2Ceil(size)
 
   // queue data array
-  val entries = Reg(Vec(size, gen))
+  val entries = Reg(Vec(size, new MicroOp))
   val entriesValid = Reg(Vec(size, Bool()))
   val head = RegInit(0.U(index_width.W))
   val tail = RegInit(0.U(index_width.W))
@@ -29,6 +30,14 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int, name
   val valid_entries = Mux(head_direction === tail_direction, tail - head, size.U + tail - head)
   val empty_entries = size.U - valid_entries
 
+  // check whether valid uops are canceled
+  val cancelled = Wire(Vec(size, Bool()))
+  for (i <- 0 until size) {
+    cancelled(i) := ((entries(i).brMask & UIntToOH(io.redirect.bits.brTag)) =/= 0.U) && io.redirect.valid
+  }
+
+  // calcelled uops should be set to invalid from enqueue input
+  // we don't need to compare their brTags here
   for (i <- 0 until enqnum) {
     enq_count(i) := PopCount(io.enq.slice(0, i + 1).map(_.valid))
     enq_index(i) := (tail + enq_count(i) - 1.U) % size.U
@@ -45,6 +54,15 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int, name
     }
   }
 
+  // cancel uops currently in the queue
+  for (i <- 0 until size) {
+    when (cancelled(i) && entriesValid(i)) {
+      entriesValid(i) := false.B
+      printf("[Cycle:%d][" + name + "] valid entry(%d)(pc = %x) cancelled with brMask %x brTag %x\n",
+        GTimer(), i.U, entries(i).cf.pc, entries(i).brMask, io.redirect.bits.brTag)
+    }
+  }
+
   // enqueue
   val num_enq_try = enq_count(enqnum - 1)
   val num_enq = Mux(empty_entries > num_enq_try, num_enq_try, empty_entries)
@@ -55,11 +73,14 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int, name
   // dequeue
   val num_deq_try = Mux(valid_entries > deqnum.U, deqnum.U, valid_entries)
   val num_deq_fire = PriorityEncoder((io.deq.zipWithIndex map { case (deq, i) =>
-    !(deq.fire() || (!entriesValid(deq_index(i)) && (i.U =/= 0.U)))
+    !deq.fire() && entriesValid(deq_index(i))
   }) :+ true.B)
   val num_deq = Mux(num_deq_try > num_deq_fire, num_deq_fire, num_deq_try)
-  (0 until deqnum).map(i => io.deq(i).bits := entries(deq_index(i)))
-  (0 until deqnum).map(i => io.deq(i).valid := (i.U < num_deq_try) && entriesValid(deq_index(i)))
+  for (i <- 0 until deqnum) {
+    io.deq(i).bits := entries(deq_index(i))
+    // needs to cancel uops trying to dequeue
+    io.deq(i).valid := (i.U < num_deq_try) && entriesValid(deq_index(i)) && !cancelled(deq_index(i))
+  }
   head := (head + num_deq) % size.U
   head_direction := ((Cat(0.U(1.W), head) + num_deq) >= size.U).asUInt() ^ head_direction
 
@@ -78,5 +99,5 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int, name
 }
 
 object DispatchQueueTop extends App {
-  Driver.execute(args, () => new DispatchQueue(UInt(32.W), 16, 6, 4, "Test"))
+  Driver.execute(args, () => new DispatchQueue(16, 6, 4, "Test"))
 }
