@@ -118,7 +118,7 @@ class MIMOQueue[T <: Data]
     if(perf) when(deq.fire()){ valids(deq_idx) := false.B }
   }
 
-  deq_ptr := Mux(io.flush, deqPtrInitVal, deq_ptrs.last + io.deq(outCnt-1).fire())
+  deq_ptr := deq_ptrs.last + io.deq(outCnt-1).fire()
 
   // enqueue
   val enq_ptrs = genPtrs(enq_ptr, io.enq)
@@ -137,7 +137,13 @@ class MIMOQueue[T <: Data]
     }
   }
 
-  enq_ptr := Mux(io.flush, enqPtrInitVal, enq_ptrs.last + io.enq(inCnt-1).fire())
+  enq_ptr := enq_ptrs.last + io.enq(inCnt-1).fire()
+
+  when(io.flush){
+    deq_ptr := 0.U
+    enq_ptr := 0.U
+    valids.foreach(_ := false.B)
+  }
 
   Debug(){
     val cnt = RegInit((if(init.nonEmpty) entries else 0).U(32.W))
