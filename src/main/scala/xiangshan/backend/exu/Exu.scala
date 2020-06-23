@@ -78,15 +78,15 @@ class FmiscDivSqrt extends Exu(
   override def toString: String = "FmiscDivSqrt"
 }
 
-class Lsu extends Exu(
-  FuType.ldu.litValue(),
-  readIntRf = true,
-  readFpRf = true,
-  writeIntRf = true,
-  writeFpRf = true
-) with NeedImpl {
-  override def toString: String = "Lsu"
-}
+// class Lsu extends Exu(
+//   FuType.ldu.litValue(),
+//   readIntRf = true,
+//   readFpRf = true,
+//   writeIntRf = true,
+//   writeFpRf = true
+// ) with NeedImpl {
+//   override def toString: String = "Lsu"
+// }
 
 trait HasExeUnits{
 
