@@ -20,7 +20,8 @@ class FreeList extends XSModule {
   })
 
   val freeList = RegInit(VecInit(Seq.tabulate(NRPhyRegs)(i => i.U(PhyRegIdxWidth.W))))
-  val headPtr, tailPtr = RegInit(0.U((PhyRegIdxWidth+1).W))
+  val headPtr = RegInit(0.U((PhyRegIdxWidth+1).W))
+  val tailPtr = RegInit((1 << PhyRegIdxWidth).U((PhyRegIdxWidth+1).W))
 
   def ptrToIndex(ptr: UInt): UInt = ptr.tail(1)
   def isEmpty(ptr1: UInt, ptr2: UInt): Bool = ptr1 === ptr2
