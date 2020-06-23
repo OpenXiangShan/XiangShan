@@ -6,7 +6,7 @@ import xiangshan._
 
 
 
-class Brq extends XSModule with NeedImpl {
+class Brq extends XSModule {
   val io = IO(new Bundle() {
     // interrupt/exception happen, flush Brq
     val roqRedirect = Input(Valid(new Redirect))
