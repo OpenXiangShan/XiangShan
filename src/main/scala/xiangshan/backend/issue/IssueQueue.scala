@@ -48,7 +48,7 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
 
 }
 
-class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) extends IQModule {
+class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
 
   val useBypass = bypassCnt > 0
 
@@ -62,16 +62,17 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
     val enqData = Flipped(ValidIO(new ExuInput))
 
     //  broadcast selected uop to other issue queues which has bypasses
-    val selectedUop = if(useBypass) DecoupledIO(new MicroOp) else null
+    val selectedUop = if(useBypass) ValidIO(new MicroOp) else null
 
     // send to exu
     val deq = DecoupledIO(new ExuInput)
 
     // listen to write back bus
-    val wakeUpPorts = Vec(wakeupCnt, Flipped(DecoupledIO(new ExuOutput)))
+    val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
 
     // use bypass uops to speculative wake-up
-    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(DecoupledIO(new MicroOp))) else null
+    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new MicroOp))) else null
+    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
   })
   //---------------------------------------------------------
   // Issue Queue
@@ -105,7 +106,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   //enqueue pointer
   val emptySlot = ~valid.asUInt
   val enqueueSelect = PriorityEncoder(emptySlot)
-  assert(io.enqCtrl.valid && io.redirect.valid,"enqueue valid should be false when redirect valid")
+  //assert(!io.enqCtrl.valid && io.redirect.valid,"enqueue valid should be false when redirect valid")
 
   when(io.enqCtrl.fire()){
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
@@ -143,49 +144,67 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
   // From Common Data Bus(wakeUpPort)
   // chisel claims that firrtl will optimize Mux1H to and/or tree
   // TODO: ignore ALU'cdb srcRdy, for byPass has done it
-  val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
-  val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
-  val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
+  if(wakeupCnt > 0) {
+    val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
+    val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
+    val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
 
-  val srcNum = 3
-  val prfSrc = List(prfSrc1, prfSrc2, prfSrc3)
-  val srcRdy = List(src1Rdy, src2Rdy, src3Rdy)
-  val srcData = List(src1Data, src2Data, src3Data)
-  val srcHitVec = List.tabulate(srcNum)(k =>
-                    List.tabulate(iqSize)(i =>
-                      List.tabulate(wakeupCnt)(j =>
-                        (prfSrc(k)(i) === cdbPdest(j)) && cdbValid(j))))
-  val srcHit =  List.tabulate(srcNum)(k =>
-                  List.tabulate(iqSize)(i =>
-                    ParallelOR(srcHitVec(k)(i)).asBool()))
-  for(k <- 0 until srcNum){
-    for(i <- 0 until iqSize)( when (valid(i)) {
-      when(!srcRdy(k)(i) && srcHit(k)(i)) {
-        srcRdy(k)(i) := true.B
-        srcData(k)(i) := ParallelMux(srcHitVec(k)(i) zip cdbData)
-      }
-    })
-  }
-
-  // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
-  // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
-  // byPassUops is one cycle before byPassDatas
-  if (bypassCnt > 0) {
-    val bypassPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
-    val bypassValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
-    val srcBpHitVec = List.tabulate(srcNum)(k =>
-                        List.tabulate(iqSize)(i =>
-                          List.tabulate(bypassCnt)(j =>
-                            (prfSrc(k)(i) === bypassPdest(j)) && bypassValid(j))))
-    val srcBpHit =  List.tabulate(srcNum)(k =>
+    val srcNum = 3
+    val prfSrc = List(prfSrc1, prfSrc2, prfSrc3)
+    val srcRdy = List(src1Rdy, src2Rdy, src3Rdy)
+    val srcData = List(src1Data, src2Data, src3Data)
+    val srcHitVec = List.tabulate(srcNum)(k =>
                       List.tabulate(iqSize)(i =>
-                        ParallelOR(srcBpHitVec(k)(i)).asBool()))
+                        List.tabulate(wakeupCnt)(j =>
+                          (prfSrc(k)(i) === cdbPdest(j)) && cdbValid(j))))
+    val srcHit =  List.tabulate(srcNum)(k =>
+                    List.tabulate(iqSize)(i =>
+                      ParallelOR(srcHitVec(k)(i)).asBool()))
+                      // VecInit(srcHitVec(k)(i)).asUInt.orR))
     for(k <- 0 until srcNum){
-      for(i <- 0 until iqSize){ when (valid(i)) {
-        when(valid(i) && !srcRdy(k)(i) && srcBpHit(k)(i)) { srcRdy(k)(i) := true.B }
-      }}
+      for(i <- 0 until iqSize)( when (valid(i)) {
+        when(!srcRdy(k)(i) && srcHit(k)(i)) {
+          srcRdy(k)(i) := true.B
+          // srcData(k)(i) := Mux1H(srcHitVec(k)(i), cdbData)
+          srcData(k)(i) := ParallelMux(srcHitVec(k)(i) zip cdbData)
+        }
+      })
+    }
+    // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
+    // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
+    // byPassUops is one cycle before byPassDatas
+    if (bypassCnt > 0) {
+      val bypassPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
+      val bypassValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
+      val bypassData = List.tabulate(bypassCnt)(i => io.bypassData(i).bits.data)
+      val srcBpHitVec = List.tabulate(srcNum)(k =>
+                          List.tabulate(iqSize)(i =>
+                            List.tabulate(bypassCnt)(j =>
+                              (prfSrc(k)(i) === bypassPdest(j)) && bypassValid(j))))
+      val srcBpHit =  List.tabulate(srcNum)(k =>
+                        List.tabulate(iqSize)(i =>
+                          ParallelOR(srcBpHitVec(k)(i)).asBool()))
+                          // VecInit(srcBpHitVec(k)(i)).asUInt.orR))
+      val srcBpHitVecNext = List.tabulate(srcNum)(k =>
+                              List.tabulate(iqSize)(i =>
+                                List.tabulate(bypassCnt)(j => RegNext(srcBpHitVec(k)(i)(j)))))
+      val srcBpHitNext = List.tabulate(srcNum)(k =>
+                          List.tabulate(iqSize)(i =>
+                            RegNext(srcBpHit(k)(i))))
+      val srcBpData = List.tabulate(srcNum)(k =>
+                        List.tabulate(iqSize)(i => 
+                          ParallelMux(srcBpHitVecNext(k)(i) zip bypassData)))
+                          // Mux1H(srcBpHitVecNext(k)(i), bypassData)))
+      for(k <- 0 until srcNum){
+        for(i <- 0 until iqSize){ when (valid(i)) {
+          when(valid(i) && !srcRdy(k)(i) && srcBpHit(k)(i)) { srcRdy(k)(i) := true.B }
+          when(srcBpHitNext(k)(i)) { srcData(k)(i) := srcBpData(k)(i)}
+        }}
+      }
     }
   }
+
+
   //---------------------------------------------------------
   // Select Circuit
   //---------------------------------------------------------
@@ -283,4 +302,21 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int) 
     valid(dequeueSelect) := false.B
   }
 
+  // SelectedUop (bypass / speculative)
+  if(useBypass) {
+    def DelayPipe[T <: Data](a: T, delay: Int = 0) = {
+      val storage = Wire(VecInit(Seq.fill(delay+1)(a)))
+      // storage(0) := a
+      for(i <- 1 until delay) {
+        storage(i) := RegNext(storage(i-1))
+      }
+      storage(delay)
+    }
+    val sel = io.selectedUop
+    val selIQIdx = CCU_3.io.out.iqIdx
+    val delayPipe = DelayPipe(VecInit(CCU_3.io.out.instRdy, prfDest(selIQIdx)), fixedDelay-1)
+    sel.valid := delayPipe(fixedDelay-1)(0)
+    sel.bits := DontCare
+    sel.bits.pdest := delayPipe(fixedDelay-1)(1)
+  }
 }
