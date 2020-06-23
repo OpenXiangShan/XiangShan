@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 
 // A "just-enough" Roq
-class Roq extends XSModule with NeedImpl {
+class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
@@ -56,6 +56,7 @@ class Roq extends XSModule with NeedImpl {
     when(io.exeWbResults(i).fire()){
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
     }
+    io.exeWbResults(i).ready := true.B
   }
 
   // Commit uop to Rename
