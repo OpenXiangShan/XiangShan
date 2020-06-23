@@ -2,6 +2,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import bus.simplebus._
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -66,6 +67,9 @@ class Dp1ToDp2IO extends XSBundle {
   val lsDqToDp2 = Vec(LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
+class DebugBundle extends XSBundle{
+  val isMMIO = Output(Bool())
+}
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
@@ -76,12 +80,16 @@ class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt(XLEN.W)
   val redirect = Valid(new Redirect)
+  val debug = new DebugBundle
 }
 
 class ExuIO extends XSBundle {
   val in = Flipped(DecoupledIO(new ExuInput))
   val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
+
+  // for Lsu
+  val dmem = new SimpleBusUC
 }
 
 class RoqCommit extends XSBundle {
