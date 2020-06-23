@@ -36,12 +36,6 @@ abstract class Exu
   val io = IO(new ExuIO)
 }
 
-
-
-class Alu extends Exu(alu.litValue()) with NeedImpl {
-  override def toString: String = "Alu"
-}
-
 class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true) with NeedImpl{
   override def toString: String = "Bru"
 }
@@ -107,6 +101,7 @@ trait HasExeUnits{
 
   val exeUnits = bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++
     fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits ++ lsuExeUnits)
+  val bjUnits = bruExeUnit +: aluExeUnits
 }
 
 class WriteBackArbMtoN(m: Int, n: Int) extends XSModule with NeedImpl {

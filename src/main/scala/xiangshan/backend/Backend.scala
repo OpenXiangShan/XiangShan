@@ -62,6 +62,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
     println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
+    eu.io.redirect <> redirect
     iq
   })
 
@@ -77,6 +78,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.enqReqs <> decode.io.toBrq
+  for(i <- bjUnits.indices){
+    brq.io.exuRedirect(i).bits := bjUnits(i).io.out.bits
+    brq.io.exuRedirect(i).valid := bjUnits(i).io.out.fire()
+  }
   decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
   decBuf.io.in <> decode.io.out
