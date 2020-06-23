@@ -42,12 +42,6 @@ object LSUOpType {
   def atomD = "011".U
 }
 
-class LsuIO extends ExuIO {
-  val wdata = Input(UInt(XLEN.W))
-  val dmem = new SimpleBusUC
-  val isMMIO = Output(Bool())
-}
-
 class Lsu extends Exu(
   FuType.ldu.litValue(),
   readIntRf = true,
@@ -57,7 +51,6 @@ class Lsu extends Exu(
 ) with NeedImpl {
   override def toString: String = "Lsu"
 
-  // override val io = IO(new LsuIO)
   val (valid, src1, src2, wdata, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.src3, io.in.bits.uop.ctrl.fuOpType)
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
@@ -77,8 +70,7 @@ class Lsu extends Exu(
     ))
   }
 
-  val dmem = Wire(new SimpleBusUC) //io.dmem
-  dmem := DontCare
+  val dmem = io.dmem
   val addr = src1 + src2
   val addrLatch = RegNext(addr)
   val isStore = valid && LSUOpType.isStore(func)
@@ -125,7 +117,7 @@ class Lsu extends Exu(
   io.out.valid := Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp))
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
-  // io.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
-  // io.isMMIO := false.B //for debug
+  // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
+  io.out.bits.debug.isMMIO := false.B //for debug
 
 }

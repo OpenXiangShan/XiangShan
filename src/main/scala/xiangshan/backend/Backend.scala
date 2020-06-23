@@ -69,6 +69,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
     aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
   })
 
+  lsuExeUnits.foreach(_.io.dmem <> io.dmem)
+
   io.frontend.redirect <> redirect
   io.frontend.commits <> roq.io.commits
 
