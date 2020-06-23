@@ -25,7 +25,7 @@ trait HasXsource211 extends ScalaModule {
 
 trait HasChisel3 extends ScalaModule {
   override def ivyDeps = Agg(
-    ivy"edu.berkeley.cs::chisel3:3.2.0-RC1"
+    ivy"edu.berkeley.cs::chisel3:3.3.1"
  )
 }
 
