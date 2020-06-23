@@ -142,7 +142,7 @@ class MIMOQueue[T <: Data]
   when(io.flush){
     deq_ptr := 0.U
     enq_ptr := 0.U
-    valids.foreach(_ := false.B)
+    if(perf) valids.foreach(_ := false.B)
   }
 
   Debug(){
