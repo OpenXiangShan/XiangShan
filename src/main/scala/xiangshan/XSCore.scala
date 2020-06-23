@@ -5,6 +5,7 @@ import chisel3.util._
 import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
+import xiangshan.backend.dispatch.DP1Config
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.Frontend
 
@@ -41,6 +42,11 @@ trait HasXSParameter {
   val IntDqDeqWidth = 4
   val FpDqDeqWidth = 4
   val LsDqDeqWidth = 4
+  val dp1Config = DP1Config(
+    IntDqSize = 16,
+    FpDqSize = 16,
+    LsDqSize = 16
+  )
   val exuConfig = ExuConfig(
     AluCnt = 4,
     BruCnt = 1,
