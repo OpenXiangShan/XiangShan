@@ -10,6 +10,7 @@ trait IQConst{
   val iqIdxWidth = log2Up(iqSize)
   val layer1Size = iqSize
   val layer2Size = iqSize/2
+  val debug = true
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
@@ -45,6 +46,10 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
     io.out.roqIdx := roqIdx1
     io.out.iqIdx := iqIdx1
   }
+  if(debug && (layer==3)) {
+    printf("(%d)[CCU(L%did%d)] in1.ready:%d in1.index:%d || in1.ready:%d in1.index:%d || out.ready:%d out.index:%d\n",GTimer(),layer.asUInt,id.asUInt,inst1Rdy,iqIdx1,inst2Rdy,iqIdx2,io.out.instRdy,io.out.iqIdx)
+  }
+
 
 }
 
@@ -106,7 +111,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //enqueue pointer
   val emptySlot = ~valid.asUInt
   val enqueueSelect = PriorityEncoder(emptySlot)
-  //assert(!io.enqCtrl.valid && io.redirect.valid,"enqueue valid should be false when redirect valid")
+  assert(!(io.enqCtrl.valid && io.redirect.valid),"enqueue valid should be false when redirect valid")
 
   when(io.enqCtrl.fire()){
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
@@ -123,6 +128,10 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     oldPDest(enqueueSelect) := io.enqCtrl.bits.old_pdest
     freelistAllocPtr(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
     roqIdx(enqueueSelect) := io.enqCtrl.bits.roqIdx
+    if(debug) {printf("(%d)[IQ enq]: enqSelect:%d | s1Rd:%d s2Rd:%d s3Rd:%d\n",GTimer(),enqueueSelect.asUInt,
+                                                                        (io.enqCtrl.bits.src1State === SrcState.rdy),
+                                                                        (io.enqCtrl.bits.src2State === SrcState.rdy),
+                                                                        (io.enqCtrl.bits.src3State === SrcState.rdy))}
 
   }
 
@@ -141,6 +150,15 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     src3Data(enqSelNext) := io.enqData.bits.src3
   }
 
+  if(debug) {
+    printf("(%d)[Reg info] enqSelNext:%d | enqFireNext:%d \n",GTimer(),enqSelNext,enqFireNext)
+    printf("(%d)[IQ content] valid    src1rdy  src1   src2Rdy  src2   pdest  \n",GTimer())
+    for(i <- 0 to (iqSize -1)){
+      printf("(%d)[IQ content][%d] %d %x %x %x %x %d",GTimer(),i.asUInt,valid(i), src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))
+      when(valid(i)){printf("  valid")}
+      printf(" |\n")
+    }
+  }
   // From Common Data Bus(wakeUpPort)
   // chisel claims that firrtl will optimize Mux1H to and/or tree
   // TODO: ignore ALU'cdb srcRdy, for byPass has done it
@@ -211,11 +229,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //layer 1
   val layer1CCUs = (0 until layer1Size by 2) map { i =>
     val CCU_1 = Module(new CompareCircuitUnit(layer = 1, id = i/2))
-    CCU_1.io.in1.instRdy := instRdy(i) && valid(i)
+    CCU_1.io.in1.instRdy := instRdy(i)
     CCU_1.io.in1.roqIdx  := roqIdx(i)
     CCU_1.io.in1.iqIdx   := i.U
 
-    CCU_1.io.in2.instRdy := instRdy(i+1) && valid(i+1)
+    CCU_1.io.in2.instRdy := instRdy(i+1)
     CCU_1.io.in2.roqIdx  := roqIdx(i+1)
     CCU_1.io.in2.iqIdx   := (i+1).U
     
@@ -260,8 +278,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
         valid(i) := false.B
     }
   )
-
-  //Dequeue Logic
+  //---------------------------------------------------------
+  // Dequeue Logic
+  //---------------------------------------------------------
   //hold the sel-index to wait for data
   val selInstIdx = RegInit(0.U(iqIdxWidth.W))
   val selInstRdy = RegInit(false.B)
@@ -293,15 +312,23 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   io.deq.bits.src2 := src2Data(dequeueSelect)
   io.deq.bits.src3 := src3Data(dequeueSelect)
 
+  if(debug) {
+    printf("(%d)[Sel Reg] selInstRdy:%d || selIdx:%d\n",GTimer(),selInstRdy,selInstIdx.asUInt)
+    when(IQreadyGo){printf("(%d)[IQ dequeue] dequeueSel:%d | src1Rd:%d src1:%d | src2Rd:%d src2:%d\n",GTimer(),dequeueSelect.asUInt,
+                              (io.deq.bits.uop.src1State === SrcState.rdy), io.deq.bits.uop.psrc1,
+                              (io.deq.bits.uop.src2State === SrcState.rdy), io.deq.bits.uop.psrc2
+                              )}
+  }
+
   //update the index register of instruction that can be issue, unless function unit not allow in
   //then the issue will be stopped to wait the function unit 
   //clear the validBit of dequeued instruction in issuequeue
   when(io.deq.fire()){
-    selInstRdy := CCU_3.io.out.instRdy
-    selInstIdx := CCU_3.io.out.iqIdx
     valid(dequeueSelect) := false.B
   }
 
+  selInstRdy := CCU_3.io.out.instRdy
+  selInstIdx := CCU_3.io.out.iqIdx
   // SelectedUop (bypass / speculative)
   if(useBypass) {
     def DelayPipe[T <: Data](a: T, delay: Int = 0) = {
