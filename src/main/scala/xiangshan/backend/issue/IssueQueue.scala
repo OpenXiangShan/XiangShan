@@ -141,6 +141,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val src1Data = Reg(Vec(iqSize, UInt(XLEN.W)))
   val src2Data = Reg(Vec(iqSize, UInt(XLEN.W)))
   val src3Data = Reg(Vec(iqSize, UInt(XLEN.W)))
+  
 
   val enqSelNext = RegNext(enqueueSelect)
   val enqFireNext = RegNext(io.enqCtrl.fire())
@@ -330,8 +331,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     validFire(dequeueSelect) := true.B
   }
 
-  selInstRdy := CCU_3.io.out.instRdy
-  selInstIdx := CCU_3.io.out.iqIdx
+  val selRegflush = expRedirect || (brRedirect && brRedirectMaskMatch)
+  selInstRdy := Mux(selRegflush,false.B,CCU_3.io.out.instRdy)
+  selInstIdx := Mux(selRegflush,0.U,CCU_3.io.out.iqIdx)
   // SelectedUop (bypass / speculative)
   if(useBypass) {
     def DelayPipe[T <: Data](a: T, delay: Int = 0) = {
