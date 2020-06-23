@@ -48,7 +48,7 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
 
 }
 
-class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: BigInt = 1) extends IQModule {
+class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
 
   val useBypass = bypassCnt > 0
 
@@ -296,12 +296,19 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
 
   // SelectedUop (bypass / speculative)
   if(useBypass) {
+    def DelayPipe[T <: Data](a: T, delay: Int = 0) = {
+      val storage = Wire(VecInit(Seq.fill(delay+1)(a)))
+      // storage(0) := a
+      for(i <- 1 until delay) {
+        storage(i) := RegNext(storage(i-1))
+      }
+      storage(delay)
+    }
     val sel = io.selectedUop
     val selIQIdx = CCU_3.io.out.iqIdx
-    sel.valid := CCU_3.io.out.instRdy
+    val delayPipe = DelayPipe(VecInit(CCU_3.io.out.instRdy, prfDest(selIQIdx)), fixedDelay-1)
+    sel.valid := delayPipe(fixedDelay-1)(0)
     sel.bits := DontCare
-    sel.bits.psrc1 := prfSrc1(selIQIdx)
-    sel.bits.psrc2 := prfSrc2(selIQIdx)
-    sel.bits.psrc3 := prfSrc3(selIQIdx)
+    sel.bits.pdest := delayPipe(fixedDelay-1)(1)
   }
 }
