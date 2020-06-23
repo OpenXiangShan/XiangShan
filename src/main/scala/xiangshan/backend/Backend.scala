@@ -89,36 +89,20 @@ class Backend(implicit val p: XSConfig) extends XSModule
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.in <> decBuf.io.out
+  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr)
+  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr)
+  rename.io.intPregRdy <> dispatch.io.intPregRdy
+  rename.io.fpPregRdy <> dispatch.io.fpPregRdy
 
-//  dispatch1.io.redirect <> redirect
-//  dispatch1.io.in <> rename.io.out
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
+
   roq.io.brqRedirect <> brq.io.redirect
-//<<<<<<< HEAD
-//  roq.io.dp1Req <> dispatch1.io.toRoq
-//  dispatch1.io.roqIdxs <> roq.io.roqIdxs
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs
 
-//  dispatch2.io.in <> dispatch1.io.out
-//  intRf.io.readPorts <> dispatch2.io.readIntRf
-//  fpRf.io.readPorts <> dispatch2.io.readFpRf
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf
-//=======
-//  roq.io.dp1Req <> dispatch1.io.toRoq
-//  dispatch1.io.roqIdxs <> roq.io.roqIdxs
-//
-//  dispatch2.io.in <> dispatch1.io.out
-//  dispatch2.io.intPregRdy <> rename.io.intPregRdy
-//  dispatch2.io.fpPregRdy <> rename.io.fpPregRdy
-//  intRf.io.readPorts <> dispatch2.io.readIntRf
-//  rename.io.intRfReadAddr <> dispatch2.io.readIntRf.map(_.addr)
-//  fpRf.io.readPorts <> dispatch2.io.readFpRf
-//  rename.io.fpRfReadAddr <> dispatch2.io.readFpRf.map(_.addr)
-//
-//>>>>>>> d43dd6a5febdaa239b3a31d11582e3adbaa3014d
 
   val exeWbReqs = exeUnits.map(_.io.out)
   val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)).map(_.io.out)
