@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.regfile.RfReadPort
+import xiangshan.utils.GTimer
 
 class Dispatch2 extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
@@ -24,50 +25,51 @@ class Dispatch2 extends XSModule with NeedImpl {
     val enqIQCtrl = Vec(exuConfig.ExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuConfig.ExuCnt, ValidIO(new ExuInput))
   })
-  // disp
 
   // inst indexes for reservation stations
   // append a true.B to avoid PriorityEncode(0000) -> 3
   // if find a target uop, index[2] == 0, else index[2] == 1
-  val bruInstIdx = PriorityEncoder(true.B +: io.fromIntDq.map(_.bits.ctrl.fuType === FuType.bru))
-  val alu0InstIdx = PriorityEncoder(true.B +: io.fromIntDq.map(_.bits.ctrl.fuType === FuType.alu))
-  val alu1InstIdx = PriorityEncoder(true.B +: (io.fromIntDq.zipWithIndex map { case (uop, i) =>
+  val bruInstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.bru) :+ true.B)
+  val alu0InstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.alu) :+ true.B)
+  val alu1InstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.alu && i.U > alu0InstIdx
-  }))
-  val alu2InstIdx = PriorityEncoder(true.B +: (io.fromIntDq.zipWithIndex map { case (uop, i) =>
+  }) :+ true.B)
+  val alu2InstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.alu && i.U > alu1InstIdx
-  }))
-  val alu3InstIdx = PriorityEncoder(true.B +: (io.fromIntDq.zipWithIndex map { case (uop, i) =>
+  }) :+ true.B)
+  val alu3InstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.alu && i.U > alu2InstIdx
-  }))
-  val mulInstIdx = PriorityEncoder(true.B +: (io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mul)))
-  val muldivInstIdx = PriorityEncoder(true.B +: (io.fromIntDq.zipWithIndex map { case (uop, i) =>
+  }) :+ true.B)
+  val mulInstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mul) :+ true.B)
+  val muldivInstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
     (uop.bits.ctrl.fuType === FuType.mul && i.U > mulInstIdx) || uop.bits.ctrl.fuType === FuType.mdu
-  }))
+  }) :+ true.B)
 
-  val fmac0InstIdx = PriorityEncoder(true.B +: io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmac))
-  val fmac1InstIdx = PriorityEncoder(true.B +: (io.fromFpDq.zipWithIndex map { case (uop, i) =>
+  val fmac0InstIdx = PriorityEncoder(io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmac) :+ true.B)
+  val fmac1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.fmac && i.U > fmac0InstIdx
-  }))
-  val fmac2InstIdx = PriorityEncoder(true.B +: (io.fromFpDq.zipWithIndex map { case (uop, i) =>
+  }) :+ true.B)
+  val fmac2InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.fmac && i.U > fmac1InstIdx
-  }))
-  val fmac3InstIdx = PriorityEncoder(true.B +: (io.fromFpDq.zipWithIndex map { case (uop, i) =>
+  }) :+ true.B)
+  val fmac3InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.fmac && i.U > fmac2InstIdx
-  }))
-  val fmisc0InstIdx = PriorityEncoder(true.B +: io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmisc))
-  val fmisc1InstIdx = PriorityEncoder(true.B +: (io.fromFpDq.zipWithIndex map { case (uop, i) =>
+  }) :+ true.B)
+  val fmisc0InstIdx = PriorityEncoder(io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmisc) :+ true.B)
+  val fmisc1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
     (uop.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || uop.bits.ctrl.fuType === FuType.fmiscDivSqrt
-  }))
+  }) :+ true.B)
 
-  val load0InstIdx = PriorityEncoder(io.fromLsDq.map(_.bits.ctrl.fuType === FuType.ldu))
-  val load1InstIdx = PriorityEncoder(io.fromLsDq.zipWithIndex map { case (uop, i) =>
+  // TODO: currently there's only one LSU
+  //  val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => (deq.bits.ctrl.fuType === FuType.ldu || deq.bits.ctrl.fuType === FuType.stu)) :+ true.B)
+  val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)) :+ true.B)
+  val load1InstIdx = PriorityEncoder((io.fromLsDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.ldu && i.U > load0InstIdx
-  })
+  }) :+ true.B)
   val store0InstIdx = PriorityEncoder(io.fromLsDq.map(_.bits.ctrl.fuType === FuType.stu))
-  val store1InstIdx = PriorityEncoder(io.fromLsDq.zipWithIndex map { case (uop, i) =>
+  val store1InstIdx = PriorityEncoder((io.fromLsDq.zipWithIndex map { case (uop, i) =>
     uop.bits.ctrl.fuType === FuType.stu && i.U > store0InstIdx
-  })
+  }) :+ true.B)
 
   // regfile read ports
   // regfile is sync-read, data can used at the next cycle
@@ -106,26 +108,54 @@ class Dispatch2 extends XSModule with NeedImpl {
       enq.valid := !instIdxes(i)(2) && io.fromLsDq(instIdxes(i)(1, 0)).valid
       enq.bits := io.fromLsDq(instIdxes(i)(1, 0)).bits
     }
+
+    when (enq.fire()) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x with type %b enters reservation station %d from %d\n",
+        GTimer(), enq.bits.cf.pc, enq.bits.ctrl.fuType, i.U, instIdxes(i))
+    }
   }
 
   // responds to dispatch queue
-  val portIndexMapping
   for (i <- 0 until IntDqDeqWidth) {
     io.fromIntDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
-      (rs.ready && instIdxes(j) === i.U && (i < exuConfig.IntExuCnt).asBool())
+      (rs.ready && instIdxes(j) === i.U && (j < exuConfig.IntExuCnt).asBool())
     }).reduce((l, r) => l || r)
+    when (io.fromIntDq(i).fire()) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x leaves Int dispatch queue with nroq %d\n",
+        GTimer(), io.fromIntDq(i).bits.cf.pc, io.fromIntDq(i).bits.roqIdx)
+    }
+    when (io.fromIntDq(i).valid && !io.fromIntDq(i).ready) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x waits at Int dispatch queue with index %d\n",
+        GTimer(), io.fromIntDq(i).bits.cf.pc, i.U)
+    }
   }
   for (i <- 0 until FpDqDeqWidth) {
     io.fromFpDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
       (rs.ready && instIdxes(j) === i.U
-        && (i > exuConfig.IntExuCnt && i < exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
+        && (j >= exuConfig.IntExuCnt && j < exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
     }).reduce((l, r) => l || r)
+    when (io.fromFpDq(i).fire()) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x leaves Fp dispatch queue with nroq %d\n",
+        GTimer(), io.fromFpDq(i).bits.cf.pc, io.fromFpDq(i).bits.roqIdx)
+    }
+    when (io.fromFpDq(i).valid && !io.fromFpDq(i).ready) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x waits at Fp dispatch queue with index %d\n",
+        GTimer(), io.fromFpDq(i).bits.cf.pc, i.U)
+    }
   }
   for (i <- 0 until LsDqDeqWidth) {
     io.fromLsDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
       (rs.ready && instIdxes(j) === i.U
-        && (i > exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
+        && (j >= exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
     }).reduce((l, r) => l || r)
+    when (io.fromLsDq(i).fire()) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x leaves Ls dispatch queue with nroq %d\n",
+        GTimer(), io.fromLsDq(i).bits.cf.pc, io.fromLsDq(i).bits.roqIdx)
+    }
+    when (io.fromLsDq(i).valid && !io.fromLsDq(i).ready) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x waits at Ls dispatch queue with index %d\n",
+        GTimer(), io.fromLsDq(i).bits.cf.pc, i.U)
+    }
   }
 
   // next stage: insert data
@@ -133,21 +163,72 @@ class Dispatch2 extends XSModule with NeedImpl {
   val uop_reg = Reg(Vec(exuConfig.ExuCnt, new MicroOp))
   // indexes can be one-hot to reduce overhead
   val index_reg = Reg(Vec(exuConfig.ExuCnt, UInt(instIdxes(0).getWidth.W)))
+  // types: 0 for Int, 1 for Fp, 2 for empty
+  // TODO: store needs data from FpRegfile
+  val src1Type = (0 until exuConfig.ExuCnt).map(i =>
+    if (i < exuConfig.IntExuCnt) 0.U
+    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) 1.U
+    else if (i == exuConfig.IntExuCnt + exuConfig.FpExuCnt) 0.U
+    else 0.U // TODO: Mux(uop_reg(i).ctrl)
+  )
+  val src2Type = (0 until exuConfig.ExuCnt).map(i =>
+    if (i < exuConfig.IntExuCnt) 0.U
+    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) 1.U
+    else if (i == exuConfig.IntExuCnt + exuConfig.FpExuCnt) 2.U
+    else 0.U
+  )
+  val src3Type = (0 until exuConfig.ExuCnt).map(i =>
+    if (i < exuConfig.IntExuCnt) 2.U
+    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) 1.U
+    else if (i == exuConfig.IntExuCnt + exuConfig.FpExuCnt) 2.U
+    else 2.U
+  )
+  val src1Index = (0 until exuConfig.ExuCnt).map(i =>
+    if (i < exuConfig.IntExuCnt) (index_reg(i) << 1).asUInt()
+    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) (index_reg(i) * 3.U).asUInt()
+    else if (i == exuConfig.IntExuCnt + exuConfig.FpExuCnt) 8.U
+    else 10.U
+  )
+  val src2Index = (0 until exuConfig.ExuCnt).map(i =>
+    if (i < exuConfig.IntExuCnt) (index_reg(i) << 1).asUInt() + 1.U
+    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) index_reg(i) * 3.U + 1.U
+    else if (i == exuConfig.IntExuCnt + exuConfig.FpExuCnt) 0.U
+    else 11.U
+  )
+  val src3Index = (0 until exuConfig.ExuCnt).map(i =>
+    if (i < exuConfig.IntExuCnt) 0.U
+    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) index_reg(i) * 3.U + 2.U
+    else if (i == exuConfig.IntExuCnt + exuConfig.FpExuCnt) 0.U
+    else 0.U
+  )
   for (i <- 0 until exuConfig.ExuCnt) {
     data_valid(i) := io.enqIQCtrl(i).fire()
-    uop_reg := io.enqIQCtrl(i).bits
+    uop_reg(i) := io.enqIQCtrl(i).bits
     index_reg(i) := instIdxes(i)
 
     io.enqIQData(i).valid := data_valid(i)
     io.enqIQData(i).bits.uop := uop_reg(i)
-    val intSrc1 = io.readIntRf((index_reg(i) << 1).asUInt()).data
-    val fpSrc1 = io.readFpRf((index_reg(i) * 3.U).asUInt()).data
-    io.enqIQData(i).bits.src1 := Mux(index_reg(i)(2), 0.U, if (i < exuConfig.IntExuCnt) intSrc1
-    else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt)
-    io.enqIQData(i).bits.src2 :=
-    io.enqIQData(i).bits.src3 :=
-    io.enqIQData(i).bits.isRVF =
-  }
+    io.enqIQData(i).bits.uop.src1State := Mux(src1Type(i)(1), SrcState.rdy,
+      Mux(src1Type(i)(0), io.intPregRdy(src1Index(i)), io.fpPregRdy(src1Index(i))))
+    io.enqIQData(i).bits.uop.src2State := Mux(src2Type(i)(1), SrcState.rdy,
+      Mux(src2Type(i)(0), io.intPregRdy(src2Index(i)), io.fpPregRdy(src2Index(i))))
+    io.enqIQData(i).bits.uop.src3State := Mux(src3Type(i)(1), SrcState.rdy,
+      Mux(src3Type(i)(0), io.intPregRdy(src3Index(i)), io.fpPregRdy(src3Index(i))))
+    val src1 = Mux(src1Type(i)(1), 0.U,
+      Mux(src1Type(i)(0), io.readFpRf(src1Index(i)).data, io.readIntRf(src1Index(i)).data))
+    io.enqIQData(i).bits.src1 := Mux(index_reg(i)(2), 0.U, src1)
+    val src2 = Mux(src2Type(i)(1), 0.U,
+      Mux(src2Type(i)(0), io.readFpRf(src2Index(i)).data, io.readIntRf(src2Index(i)).data))
+    io.enqIQData(i).bits.src2 := Mux(index_reg(i)(2), 0.U, src2)
+    val src3 = Mux(src3Type(i)(1), 0.U,
+      Mux(src3Type(i)(0), io.readFpRf(src3Index(i)).data, io.readIntRf(src3Index(i)).data))
+    io.enqIQData(i).bits.src3 := Mux(index_reg(i)(2), 0.U, src3)
 
+    when (io.enqIQData(i).valid) {
+      printf("[Cycle:%d][Dispatch2] instruction 0x%x reads operands from (%d, %d, %x), (%d, %d, %x), (%d, %d, %x)\n",
+        GTimer(), io.enqIQData(i).bits.uop.cf.pc,
+        src1Type(i), src1Index(i), src1, src2Type(i), src2Index(i), src2, src3Type(i), src3Index(i), src3)
+    }
+  }
 
 }

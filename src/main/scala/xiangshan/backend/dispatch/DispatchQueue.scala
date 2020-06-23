@@ -2,6 +2,7 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
+import xiangshan.utils.GTimer
 import xiangshan.{XSBundle, XSModule}
 
 
@@ -10,7 +11,7 @@ class DispatchQueueIO[T <: Data](gen: T, enqnum: Int, deqnum: Int) extends XSBun
   val deq = Vec(deqnum, DecoupledIO(gen))
 }
 
-class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int) extends XSModule {
+class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
   val io = IO(new DispatchQueueIO(gen, enqnum, deqnum))
   val index_width = log2Ceil(size)
 
@@ -53,15 +54,29 @@ class DispatchQueue[T <: Data](gen: T, size: Int, enqnum: Int, deqnum: Int) exte
 
   // dequeue
   val num_deq_try = Mux(valid_entries > deqnum.U, deqnum.U, valid_entries)
-  val num_deq = PriorityEncoder(true.B +: (io.deq.zipWithIndex map { case (deq, i) =>
-    !deq.fire() && entriesValid(deq_index(i))
-  }))
+  val num_deq_fire = PriorityEncoder((io.deq.zipWithIndex map { case (deq, i) =>
+    !(deq.fire() || (!entriesValid(deq_index(i)) && (i.U =/= 0.U)))
+  }) :+ true.B)
+  val num_deq = Mux(num_deq_try > num_deq_fire, num_deq_fire, num_deq_try)
   (0 until deqnum).map(i => io.deq(i).bits := entries(deq_index(i)))
   (0 until deqnum).map(i => io.deq(i).valid := (i.U < num_deq_try) && entriesValid(deq_index(i)))
   head := (head + num_deq) % size.U
   head_direction := ((Cat(0.U(1.W), head) + num_deq) >= size.U).asUInt() ^ head_direction
+
+  when (num_deq > 0.U) {
+    printf("[Cycle:%d][" + name + "] num_deq = %d, head = (%d -> %d)\n",
+      GTimer(), num_deq, head, (head + num_deq) % size.U)
+  }
+  when (num_enq > 0.U) {
+    printf("[Cycle:%d][" + name + "] num_enq = %d, tail = (%d -> %d)\n",
+      GTimer(), num_enq, tail, (tail + num_enq) % size.U)
+  }
+  when (valid_entries > 0.U) {
+    printf("[Cycle:%d][" + name + "] valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
+      GTimer(), valid_entries, head_direction, head, tail_direction, tail)
+  }
 }
 
 object DispatchQueueTop extends App {
-  Driver.execute(args, () => new DispatchQueue(UInt(32.W), 16, 6, 4))
+  Driver.execute(args, () => new DispatchQueue(UInt(32.W), 16, 6, 4, "Test"))
 }
