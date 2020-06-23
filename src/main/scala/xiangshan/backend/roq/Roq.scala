@@ -38,15 +38,17 @@ class Roq extends XSModule {
   val state = RegInit(s_idle)
 
   // Dispatch
+  val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
   for(i <- 0 until RenameWidth){
+    val offset = if(i==0) 0.U else PopCount(validDispatch(i-1,0))
     when(io.dp1Req(i).fire()){
-      microOp(ringBufferHead+i.U) := io.dp1Req(i).bits
-      valid(ringBufferHead+i.U) := true.B
+      microOp(ringBufferHead+offset) := io.dp1Req(i).bits
+      valid(ringBufferHead+offset) := true.B
     }
-    io.dp1Req(i).ready := ringBufferAllowin && !valid(ringBufferHead+i.U) && state === s_idle
-    io.roqIdxs(i) := ringBufferHeadExtended+i.U
+    io.dp1Req(i).ready := ringBufferAllowin && !valid(ringBufferHead+offset) && state === s_idle
+    io.roqIdxs(i) := ringBufferHeadExtended+offset
   }
-  val validDispatch = VecInit((0 until CommitWidth).map(i => io.dp1Req(i).fire())).asUInt
+  val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
   when(validDispatch.orR){
     ringBufferHeadExtended := ringBufferHeadExtended + PopCount(validDispatch)
   }
