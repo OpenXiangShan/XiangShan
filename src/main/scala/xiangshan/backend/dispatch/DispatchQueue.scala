@@ -10,6 +10,9 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
+
+  override def cloneType: DispatchQueueIO.this.type =
+    new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
 
 class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
@@ -96,8 +99,4 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
     printf("[Cycle:%d][" + name + "] valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
       GTimer(), valid_entries, head_direction, head, tail_direction, tail)
   }
-}
-
-object DispatchQueueTop extends App {
-  Driver.execute(args, () => new DispatchQueue(16, 6, 4, "Test"))
 }
