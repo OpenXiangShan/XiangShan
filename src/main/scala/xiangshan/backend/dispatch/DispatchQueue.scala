@@ -2,7 +2,7 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import xiangshan.utils.GTimer
+import xiangshan.utils.{XSDebug, XSInfo}
 import xiangshan.{MicroOp, Redirect, XSBundle, XSModule}
 
 
@@ -61,9 +61,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   for (i <- 0 until size) {
     when (cancelled(i) && entriesValid(i)) {
       entriesValid(i) := false.B
-      printf("[Cycle:%d][" + name + "] valid entry(%d)(pc = %x) cancelled with brMask %x brTag %x\n",
-        GTimer(), i.U, entries(i).cf.pc, entries(i).brMask, io.redirect.bits.brTag)
     }
+    XSInfo(cancelled(i) && entriesValid(i),
+      name + ": valid entry(%d)(pc = %x) cancelled with brMask %x brTag %x\n",
+      i.U, entries(i).cf.pc, entries(i).brMask, io.redirect.bits.brTag)
   }
 
   // enqueue
@@ -87,16 +88,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   head := (head + num_deq) % size.U
   head_direction := ((Cat(0.U(1.W), head) + num_deq) >= size.U).asUInt() ^ head_direction
 
-  when (num_deq > 0.U) {
-    printf("[Cycle:%d][" + name + "] num_deq = %d, head = (%d -> %d)\n",
-      GTimer(), num_deq, head, (head + num_deq) % size.U)
-  }
-  when (num_enq > 0.U) {
-    printf("[Cycle:%d][" + name + "] num_enq = %d, tail = (%d -> %d)\n",
-      GTimer(), num_enq, tail, (tail + num_enq) % size.U)
-  }
-  when (valid_entries > 0.U) {
-    printf("[Cycle:%d][" + name + "] valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
-      GTimer(), valid_entries, head_direction, head, tail_direction, tail)
-  }
+  XSDebug(num_deq > 0.U, name + ": num_deq = %d, head = (%d -> %d)\n",
+      num_deq, head, (head + num_deq) % size.U)
+  XSDebug(num_enq > 0.U, name + "] num_enq = %d, tail = (%d -> %d)\n",
+      num_enq, tail, (tail + num_enq) % size.U)
+  XSDebug(valid_entries > 0.U, name + "] valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
+      valid_entries, head_direction, head, tail_direction, tail)
 }

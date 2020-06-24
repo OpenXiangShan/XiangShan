@@ -3,7 +3,7 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{GTimer}
+import xiangshan.utils.{XSDebug, XSInfo}
 
 case class DP1Config
 (
@@ -43,14 +43,10 @@ class Dispatch1 extends XSModule{
                     (io.toLsDq(i).ready  && FuType.isMemExu(io.fromRename(i).bits.ctrl.fuType))
     enq_valid(i) := io.toIntDq(i).valid || io.toFpDq(i).valid || io.toLsDq(i).valid
     io.recv(i) := (enq_ready(i) && enq_valid(i)) || cancelled(i)
-    when (io.recv(i) && !cancelled(i)) {
-      printf("[Cycle:%d][Dispatch1] instruction 0x%x accepted by queue %x %x %x\n",
-        GTimer(), io.fromRename(i).bits.cf.pc, io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
-    }
-    when (io.recv(i) && cancelled(i)) {
-      printf("[Cycle:%d][Dispatch1] instruction 0x%x with brMask %x brTag %x cancelled\n",
-        GTimer(), io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.brMask, io.redirect.bits.brTag)
-    }
+    XSInfo(io.recv(i) && !cancelled(i), "instruction 0x%x accepted by queue %x %x %x\n",
+      io.fromRename(i).bits.cf.pc, io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
+    XSInfo(io.recv(i) && cancelled(i), "instruction 0x%x with brMask %x brTag %x cancelled\n",
+      io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.brMask, io.redirect.bits.brTag)
   }
 
   // latch indexes from roq in case of DQ not fire
@@ -62,13 +58,13 @@ class Dispatch1 extends XSModule{
     when (io.toRoq(i).fire() && !io.recv(i)) {
       roqIndexReg(i) := io.roqIdxs(i)
       roqIndexRegValid(i) := true.B
-      printf("[Cycle:%d][Dispatch1] instruction 0x%x receives nboq %x but not accepted by queue (and it waits)\n",
-        GTimer(), io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
     }
     .elsewhen (io.recv(i)) {
       roqIndexRegValid(i) := false.B
-      printf("[Cycle:%d][Dispatch1] waiting instruction 0x%x is accepted by queue\n", GTimer(), io.fromRename(i).bits.cf.pc)
     }
+    XSDebug(io.toRoq(i).fire() && !io.recv(i),
+      "instruction 0x%x receives nboq %x but not accepted by queue (and it waits)\n",
+      io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
   }
 
   // append nroq to uop
@@ -76,9 +72,7 @@ class Dispatch1 extends XSModule{
   for (i <- 0 until RenameWidth) {
     uop_nroq(i) := io.fromRename(i).bits
     uop_nroq(i).roqIdx := Mux(io.toRoq(i).ready, io.roqIdxs(i), roqIndexReg(i))
-    when (io.toRoq(i).fire()) {
-      printf("[Cycle:%d][Dispatch1] instruction 0x%x receives nroq %d\n", GTimer(), io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
-    }
+    XSDebug(io.toRoq(i).fire(), "instruction 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
   }
 
   // uop can enqueue when rename.valid and roq.valid
@@ -100,9 +94,7 @@ class Dispatch1 extends XSModule{
     io.toRoq(i).bits <> io.fromRename(i).bits
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.fromRename(i).ready := all_recv
-    when (io.fromRename(i).valid) {
-      printf("[Cycle:%d][Dispatch1] instruction 0x%x of type %b is in %d-th slot\n",
-        GTimer(), io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
-    }
+    XSDebug(io.fromRename(i).valid, "instruction 0x%x of type %b is in %d-th slot\n",
+      io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
 }
