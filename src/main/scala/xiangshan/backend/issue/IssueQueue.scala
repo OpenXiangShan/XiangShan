@@ -14,7 +14,7 @@ trait IQConst{
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
-sealed abstract class IQModule extends XSModule with IQConst with NeedImpl
+sealed abstract class IQModule extends XSModule with IQConst //with NeedImpl
 
 sealed class CmpInputBundle extends IQBundle{
   val instRdy = Input(Bool())
@@ -87,6 +87,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val ctrlFlow = Mem(iqSize,new CtrlFlow)
   val ctrlSig = Mem(iqSize,new CtrlSignals)
   val brMask  = RegInit(VecInit(Seq.fill(iqSize)(0.U(BrqSize.W))))
+  val brTag  = RegInit(VecInit(Seq.fill(iqSize)(0.U(BrTagWidth.W))))
   val validReg = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val validFire= WireInit(VecInit(Seq.fill(iqSize)(false.B)))
   val valid = validReg.asUInt & ~validFire.asUInt
@@ -119,6 +120,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
     ctrlSig(enqueueSelect) := io.enqCtrl.bits.ctrl
     brMask(enqueueSelect) := io.enqCtrl.bits.brMask
+    brTag(enqueueSelect) := io.enqCtrl.bits.brTag
     validReg(enqueueSelect) := true.B
     src1Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src1Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src1State === SrcState.rdy)
     src2Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src2Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src2State === SrcState.rdy)
@@ -297,6 +299,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val IQreadyGo = selInstRdy && !expRedirect && (!brRedirect || !brRedirectMaskMatch)
 
   io.deq.valid := IQreadyGo
+
+  io.deq.bits.uop.cf := ctrlFlow(dequeueSelect)
+  io.deq.bits.uop.ctrl := ctrlSig(dequeueSelect)
+  io.deq.bits.uop.brMask := brMask(dequeueSelect)
+  io.deq.bits.uop.brTag := brTag(dequeueSelect)
 
   io.deq.bits.uop.psrc1 := prfSrc1(dequeueSelect)
   io.deq.bits.uop.psrc2 := prfSrc2(dequeueSelect)

@@ -119,7 +119,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf
 
   val exeWbReqs = exeUnits.map(_.io.out)
-  val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)).map(_.io.out)
+  val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)).map(_.io.out)
   val wbFpReqs = (fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits).map(_.io.out)
   val intWbArb = Module(new WriteBackArbMtoN(wbIntReqs.length, NRWritePorts))
   val fpWbArb = Module(new WriteBackArbMtoN(wbFpReqs.length, NRWritePorts))
