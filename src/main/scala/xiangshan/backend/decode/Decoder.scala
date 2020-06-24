@@ -3,6 +3,7 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
+import noop.NOOPTrap
 import xiangshan._
 import utils.{LookupTree, SignExt, ZeroExt}
 import xiangshan.backend._
@@ -133,7 +134,7 @@ class Decoder extends XSModule with HasInstrType {
   val BlockList = Seq(
   )
 
-//  io.out.ctrl.isXSTrap := (instr(31,0) === NOOPTrap.TRAP)
+  io.out.ctrl.isXSTrap := (instr(31,0) === NOOPTrap.TRAP)
   io.out.ctrl.noSpecExec := NoSpecList.map(j => io.out.ctrl.fuType === j).foldRight(false.B)((sum, i) => sum | i)
   io.out.ctrl.isBlocked := DontCare
 //    (
@@ -162,7 +163,7 @@ class Decoder extends XSModule with HasInstrType {
   io.out.cf.exceptionVec(instrPageFault) := io.in.exceptionVec(instrPageFault)
   io.out.cf.exceptionVec(instrAccessFault) := io.in.pc(VAddrBits - 1, PAddrBits).orR && !vmEnable
 
-//  io.out.ctrl.isXSTrap := (instr === NOOPTrap.TRAP) && io.in.valid
+  io.out.ctrl.isXSTrap := (instr === NOOPTrap.TRAP)
 //  io.isWFI := (instr === Priviledged.WFI) && io.in.valid
 
 }
