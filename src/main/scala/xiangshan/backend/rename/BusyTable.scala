@@ -3,6 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.utils.ParallelOR
 
 class BusyTable extends XSModule {
   val io = IO(new Bundle() {
@@ -19,7 +20,7 @@ class BusyTable extends XSModule {
   val table = RegInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
-    rdy := !table(raddr)
+    rdy := !table(raddr) || ParallelOR(io.wbPregs.map(wb => wb.valid && (wb.bits===raddr))).asBool()
   }
 
   for((alloc, i) <- io.allocPregs.zipWithIndex){
