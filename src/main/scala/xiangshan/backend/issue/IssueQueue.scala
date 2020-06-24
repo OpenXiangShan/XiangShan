@@ -341,6 +341,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   selInstIdx := Mux(selRegflush,0.U,CCU_3.io.out.iqIdx)
   // SelectedUop (bypass / speculative)
   if(useBypass) {
+    assert(fixedDelay==1) // only support fixedDelay is 1 now
     def DelayPipe[T <: Data](a: T, delay: Int = 0) = {
       // println(delay)
       if(delay == 0) a
@@ -356,7 +357,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val sel = io.selectedUop
     val selIQIdx = CCU_3.io.out.iqIdx
     val delayPipe = DelayPipe(VecInit(CCU_3.io.out.instRdy, prfDest(selIQIdx)), fixedDelay-1)
-    sel.valid := delayPipe(fixedDelay-1)(0)
+    sel.valid := delayPipe(fixedDelay-1)(0) && io.deq.ready
     sel.bits := DontCare
     sel.bits.pdest := delayPipe(fixedDelay-1)(1)
   }
