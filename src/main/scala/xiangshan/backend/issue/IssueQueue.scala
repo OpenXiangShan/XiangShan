@@ -116,15 +116,21 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val enqueueSelect = PriorityEncoder(emptySlot)
   assert(!(io.enqCtrl.valid && io.redirect.valid),"enqueue valid should be false when redirect valid")
 
-  when(io.enqCtrl.fire()){
+  val srcEnqRdy = WireInit(VecInit(false.B, false.B, false.B))
+
+  srcEnqRdy(0) := Mux(io.enqCtrl.bits.ctrl.src1Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src1State === SrcState.rdy)
+  srcEnqRdy(1) := Mux(io.enqCtrl.bits.ctrl.src2Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src2State === SrcState.rdy)
+  srcEnqRdy(2) := Mux(io.enqCtrl.bits.ctrl.src3Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src3State === SrcState.rdy)
+
+  when (io.enqCtrl.fire()) {
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
     ctrlSig(enqueueSelect) := io.enqCtrl.bits.ctrl
     brMask(enqueueSelect) := io.enqCtrl.bits.brMask
     brTag(enqueueSelect) := io.enqCtrl.bits.brTag
     validReg(enqueueSelect) := true.B
-    src1Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src1Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src1State === SrcState.rdy)
-    src2Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src2Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src2State === SrcState.rdy)
-    src3Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src3Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src3State === SrcState.rdy)
+    src1Rdy(enqueueSelect) := srcEnqRdy(0)
+    src2Rdy(enqueueSelect) := srcEnqRdy(1)
+    src3Rdy(enqueueSelect) := srcEnqRdy(2)
     prfSrc1(enqueueSelect) := io.enqCtrl.bits.psrc1
     prfSrc2(enqueueSelect) := io.enqCtrl.bits.psrc2
     prfSrc3(enqueueSelect) := io.enqCtrl.bits.psrc3
@@ -225,7 +231,24 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
           when(srcBpHitNext(k)(i)) { srcData(k)(i) := srcBpData(k)(i)}
         }}
       }
+
+      // Enqueue Bypass
+      val enqBypass = WireInit(VecInit(false.B, false.B, false.B))
+      val enqBypassHitVec = List(List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc1 === bypassPdest(j) && bypassValid(j) && io.enqCtrl.fire()),
+                                 List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc2 === bypassPdest(j) && bypassValid(j) && io.enqCtrl.fire()),
+                                 List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc3 === bypassPdest(j) && bypassValid(j) && io.enqCtrl.fire()))
+      val enqBypassHitVecNext = enqBypassHitVec.map(i => i.map(j => RegNext(j)))
+      enqBypass(0) := ParallelOR(enqBypassHitVec(0))
+      enqBypass(1) := ParallelOR(enqBypassHitVec(1))
+      enqBypass(2) := ParallelOR(enqBypassHitVec(2))
+      when(enqBypass(0)) { src1Rdy(enqueueSelect) := true.B }
+      when(enqBypass(1)) { src2Rdy(enqueueSelect) := true.B }
+      when(enqBypass(2)) { src3Rdy(enqueueSelect) := true.B }
+      when(RegNext(enqBypass(0))) { src1Data(enqSelNext) := ParallelMux(enqBypassHitVecNext(0) zip bypassData)}
+      when(RegNext(enqBypass(1))) { src2Data(enqSelNext) := ParallelMux(enqBypassHitVecNext(1) zip bypassData)}
+      when(RegNext(enqBypass(2))) { src3Data(enqSelNext) := ParallelMux(enqBypassHitVecNext(2) zip bypassData)}
     }
+    
   }
 
 
