@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import bus.axi4._
+import chisel3.stage.ChiselGeneratorAnnotation
 import device.AXI4RAM
 import xiangshan._
 
@@ -68,5 +69,8 @@ class XSSimTop extends Module {
 }
 
 object TestMain extends App {
-  chisel3.Driver.execute(args, () => new XSSimTop)
+  (new chisel3.stage.ChiselStage).execute(
+    args,
+    Seq(ChiselGeneratorAnnotation(() => new XSSimTop))
+  )
 }

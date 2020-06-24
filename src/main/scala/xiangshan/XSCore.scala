@@ -5,10 +5,13 @@ import chisel3.util._
 import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
+import xiangshan.backend.dispatch.DP1Config
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.Frontend
+import xiangshan.utils._
 
 trait HasXSParameter {
+  val LogLevel = XSLogLevel.ALL
   val XLEN = 64
   val HasMExtension = true
   val HasCExtension = true
@@ -41,6 +44,11 @@ trait HasXSParameter {
   val IntDqDeqWidth = 4
   val FpDqDeqWidth = 4
   val LsDqDeqWidth = 4
+  val dp1Config = DP1Config(
+    IntDqSize = 16,
+    FpDqSize = 16,
+    LsDqSize = 16
+  )
   val exuConfig = ExuConfig(
     AluCnt = 4,
     BruCnt = 1,
@@ -54,9 +62,14 @@ trait HasXSParameter {
   )
 }
 
+trait HasXSLog { this: Module =>
+  implicit val _implict_module = this
+}
+
 abstract class XSModule extends Module
   with HasXSParameter
   with HasExceptionNO
+  with HasXSLog
 
 //remove this trait after impl module logic
 trait NeedImpl { this: Module =>

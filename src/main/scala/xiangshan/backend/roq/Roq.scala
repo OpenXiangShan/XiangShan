@@ -16,7 +16,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
   })
 
-  val microOp = Reg(Vec(RoqSize, new MicroOp))
+  val microOp = Mem(RoqSize, new MicroOp)
   // val brMask = Reg(Vec(RoqSize, UInt(BrqSize.W)))
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
