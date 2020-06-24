@@ -120,9 +120,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     ctrlSig(enqueueSelect) := io.enqCtrl.bits.ctrl
     brMask(enqueueSelect) := io.enqCtrl.bits.brMask
     validReg(enqueueSelect) := true.B
-    src1Rdy(enqueueSelect) := io.enqCtrl.bits.src1State === SrcState.rdy
-    src2Rdy(enqueueSelect) := io.enqCtrl.bits.src2State === SrcState.rdy
-    src3Rdy(enqueueSelect) := io.enqCtrl.bits.src3State === SrcState.rdy
+    src1Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src1Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src1State === SrcState.rdy)
+    src2Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src2Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src2State === SrcState.rdy)
+    src3Rdy(enqueueSelect) := Mux(io.enqCtrl.bits.ctrl.src3Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src3State === SrcState.rdy)
     prfSrc1(enqueueSelect) := io.enqCtrl.bits.psrc1
     prfSrc2(enqueueSelect) := io.enqCtrl.bits.psrc2
     prfSrc3(enqueueSelect) := io.enqCtrl.bits.psrc3
@@ -147,10 +147,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val enqFireNext = RegNext(io.enqCtrl.fire())
 
   // Read RegFile
+  //Ready data will written at next cycle
   when (enqFireNext) {
-    src1Data(enqSelNext) := io.enqData.bits.src1
-    src2Data(enqSelNext) := io.enqData.bits.src2
-    src3Data(enqSelNext) := io.enqData.bits.src3
+    when(src1Rdy(enqSelNext)){src1Data(enqSelNext) := io.enqData.bits.src1}
+    when(src2Rdy(enqSelNext)){src2Data(enqSelNext) := io.enqData.bits.src2}
+    when(src3Rdy(enqSelNext)){src3Data(enqSelNext) := io.enqData.bits.src3}
   }
 
   if(debug) {
