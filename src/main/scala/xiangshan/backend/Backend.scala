@@ -55,8 +55,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
     assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
     val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
     iq.io.redirect <> redirect
-    iq.io.enqCtrl <> dispatch2.io.enqIQCtrl(i)
-    iq.io.enqData <> dispatch2.io.enqIQData(i)
+    iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
+    iq.io.enqData <> dispatch.io.enqIQData(i)
     val wuUnitsOut = exeUnits.filter(e => needWakeup(e)).map(_.io.out)
     for(i <- iq.io.wakeUpPorts.indices) {
       iq.io.wakeUpPorts(i).bits <> wuUnitsOut(i).bits

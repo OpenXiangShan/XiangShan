@@ -309,9 +309,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   io.deq.bits.uop.freelistAllocPtr := freelistAllocPtr(dequeueSelect)
   io.deq.bits.uop.roqIdx := roqIdx(dequeueSelect)
 
-  //TODO
-  io.deq.bits.redirect := DontCare
-
   io.deq.bits.src1 := src1Data(dequeueSelect)
   io.deq.bits.src2 := src2Data(dequeueSelect)
   io.deq.bits.src3 := src3Data(dequeueSelect)
