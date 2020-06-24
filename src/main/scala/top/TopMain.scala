@@ -4,6 +4,7 @@ import system.XSSoc
 import device.{AXI4Flash, AXI4Timer, AXI4VGA}
 import gpu._
 import chisel3._
+import chisel3.stage.ChiselGeneratorAnnotation
 import xiangshan.XSConfig
 
 class Top extends Module {
@@ -27,5 +28,8 @@ class Top extends Module {
 }
 
 object TopMain extends App {
-  Driver.execute(args, () => new Top)
+  (new chisel3.stage.ChiselStage).execute(
+    args,
+    Seq(ChiselGeneratorAnnotation(() => new Top))
+  )
 }

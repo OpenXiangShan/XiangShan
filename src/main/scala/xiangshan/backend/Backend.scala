@@ -9,7 +9,7 @@ import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.Rename
 import xiangshan.backend.brq.Brq
-import xiangshan.backend.dispatch.{Dispatch1, Dispatch2}
+import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.IssueQueue
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
@@ -34,9 +34,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch1 = Module(new Dispatch1)
+  val dispatch = Module(new Dispatch)
   val roq = Module(new Roq)
-  val dispatch2 = Module(new Dispatch2)
   val intRf = Module(new Regfile(
     numReadPorts = NRReadPorts,
     numWirtePorts = NRWritePorts,
@@ -54,11 +53,12 @@ class Backend(implicit val p: XSConfig) extends XSModule
     val bypassCnt = if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
     val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt))
     iq.io.redirect <> redirect
-    iq.io.enqCtrl <> dispatch2.io.enqIQCtrl(i)
-    iq.io.enqData <> dispatch2.io.enqIQData(i)
+    iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
+    iq.io.enqData <> dispatch.io.enqIQData(i)
     iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
     println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
+    eu.io.redirect <> redirect
     iq
   })
 
@@ -68,34 +68,40 @@ class Backend(implicit val p: XSConfig) extends XSModule
     aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
   })
 
+  lsuExeUnits.foreach(_.io.dmem <> io.dmem)
+
   io.frontend.redirect <> redirect
   io.frontend.commits <> roq.io.commits
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.enqReqs <> decode.io.toBrq
+  for(i <- bjUnits.indices){
+    brq.io.exuRedirect(i).bits := bjUnits(i).io.out.bits
+    brq.io.exuRedirect(i).valid := bjUnits(i).io.out.fire()
+  }
   decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
+  decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
 
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.in <> decBuf.io.out
+  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr)
+  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr)
+  rename.io.intPregRdy <> dispatch.io.intPregRdy
+  rename.io.fpPregRdy <> dispatch.io.fpPregRdy
 
-  dispatch1.io.redirect <> redirect
-  dispatch1.io.in <> rename.io.out
+  dispatch.io.redirect <> redirect
+  dispatch.io.fromRename <> rename.io.out
+
   roq.io.brqRedirect <> brq.io.redirect
-  roq.io.dp1Req <> dispatch1.io.toRoq
-  dispatch1.io.roqIdxs <> roq.io.roqIdxs
+  roq.io.dp1Req <> dispatch.io.toRoq
+  dispatch.io.roqIdxs <> roq.io.roqIdxs
 
-  dispatch2.io.in <> dispatch1.io.out
-  dispatch2.io.intPregRdy <> rename.io.intPregRdy
-  dispatch2.io.fpPregRdy <> rename.io.fpPregRdy
-  intRf.io.readPorts <> dispatch2.io.readIntRf
-  rename.io.intRfReadAddr <> dispatch2.io.readIntRf.map(_.addr)
-  fpRf.io.readPorts <> dispatch2.io.readFpRf
-  rename.io.fpRfReadAddr <> dispatch2.io.readFpRf.map(_.addr)
-
+  intRf.io.readPorts <> dispatch.io.readIntRf
+  fpRf.io.readPorts <> dispatch.io.readFpRf
 
   val exeWbReqs = exeUnits.map(_.io.out)
   val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)).map(_.io.out)
@@ -122,7 +128,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   rename.io.wbIntResults <> wbIntResults
   rename.io.wbFpResults <> wbFpResults
 
-  roq.io.exeWbResults <> exeWbReqs
+  roq.io.exeWbResults.zip(exeWbReqs).foreach({case (x,y) => {
+    x.bits := y.bits
+    x.valid := y.fire()
+  }})
 
 
   // TODO: Remove sink and source
