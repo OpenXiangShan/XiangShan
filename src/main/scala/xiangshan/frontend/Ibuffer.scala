@@ -45,7 +45,7 @@ class Ibuffer extends XSModule {
   val full = head_ptr === tail_ptr && last_enq
   val empty = head_ptr === tail_ptr && !last_enq
   val enqValid = !io.flush && io.in.valid && !full && !ibuf_valid(tail_ptr + (FetchWidth*2).U)
-  val deqValid = !io.flush && !empty && io.out.map(x => x.ready).reduce(_||_)
+  val deqValid = !io.flush && !empty //&& io.out.map(_.ready).reduce(_||_)
 
   io.in.ready := enqValid
 
