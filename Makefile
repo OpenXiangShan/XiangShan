@@ -41,7 +41,7 @@ SIM_TOP = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	mill chiselModule.test.runMain $(SIMTOP) -td $(@D) --output-file $(@F)
+	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
