@@ -18,7 +18,7 @@ object XSLogLevel extends Enumeration {
 object XSLog extends HasXSParameter{
   def apply(debugLevel: XSLogLevel)
            (cond: Bool, pable: Printable)
-           (implicit m: Module = null): Any = {
+           (implicit m: Module): Any = {
     if (debugLevel >= LogLevel) {
       when (cond) {
         val commonInfo = p"[$debugLevel][time=${GTimer()}] ${m.name}: "
