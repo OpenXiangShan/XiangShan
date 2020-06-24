@@ -97,6 +97,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   }
   decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
+  decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
 
   rename.io.redirect <> redirect
