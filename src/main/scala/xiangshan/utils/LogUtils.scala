@@ -34,6 +34,9 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) {
     apply(cond, Printable.pack(fmt, data:_*))
 
   def apply(cond: Bool, pable: Printable)(implicit m: Module): Any = XSLog(logLevel)(cond, pable)
+  def apply(fmt: String, data: Bits*)(implicit m: Module): Any =
+    apply(true.B, Printable.pack(fmt, data:_*))
+  def apply(pable: Printable)(implicit m: Module): Any = XSLog(logLevel)(true.B, pable)
 }
 
 object XSDebug extends LogHelper(XSLogLevel.DEBUG)
