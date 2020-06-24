@@ -11,10 +11,10 @@ import xiangshan._
 
 class DiffTestIO extends Bundle {
   val r = Output(Vec(64, UInt(64.W)))
-  val commit = Output(Bool())
+  val commit = Output(UInt(32.W))
   val thisPC = Output(UInt(64.W))
   val thisINST = Output(UInt(32.W))
-  val isMMIO = Output(Bool())
+  val skip = Output(Bool())
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
   
@@ -54,7 +54,7 @@ class XSSimTop extends Module {
   BoringUtils.addSink(difftest.commit, "difftestCommit")
   BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
   BoringUtils.addSink(difftest.thisINST, "difftestThisINST")
-  BoringUtils.addSink(difftest.isMMIO, "difftestIsMMIO")
+  BoringUtils.addSink(difftest.skip, "difftestSkip")
   BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
   BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
