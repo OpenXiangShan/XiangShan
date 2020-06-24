@@ -68,7 +68,7 @@ class Dp1ToDp2IO extends XSBundle {
 }
 
 class DebugBundle extends XSBundle{
-  val isMMIO = Output(Bool())
+  val isMMIO = Bool()
 }
 
 class ExuInput extends XSBundle {
