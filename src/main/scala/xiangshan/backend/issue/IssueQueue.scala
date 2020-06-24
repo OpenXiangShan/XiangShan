@@ -10,7 +10,7 @@ trait IQConst{
   val iqIdxWidth = log2Up(iqSize)
   val layer1Size = iqSize
   val layer2Size = iqSize/2
-  val debug = true
+  val debug = false
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
