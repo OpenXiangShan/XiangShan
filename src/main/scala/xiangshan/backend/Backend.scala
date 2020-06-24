@@ -153,27 +153,4 @@ class Backend(implicit val p: XSConfig) extends XSModule
   )
   for (s <- sinks){ BoringUtils.addSink(tmp, s) }
 
-  // A fake commit
-  // TODO: difftest 6 insts per cycle
-  val commit = RegNext(RegNext(RegNext(true.B)))
-  val pc = WireInit("h80000000".U)
-  val inst = WireInit("h66666666".U)
-
-  if(!p.FPGAPlatform){
-    BoringUtils.addSource(commit, "difftestCommit")
-    BoringUtils.addSource(pc, "difftestThisPC")
-    BoringUtils.addSource(inst, "difftestThisINST")
-    BoringUtils.addSource(tmp, "difftestIsMMIO")
-    BoringUtils.addSource(tmp, "difftestIsRVC")
-    BoringUtils.addSource(tmp, "difftestIntrNO")
-    BoringUtils.addSource(VecInit(Seq.fill(64)(tmp)), "difftestRegs")
-    BoringUtils.addSource(tmp, "difftestMode")
-    BoringUtils.addSource(tmp, "difftestMstatus")
-    BoringUtils.addSource(tmp, "difftestSstatus")
-    BoringUtils.addSource(tmp, "difftestMepc")
-    BoringUtils.addSource(tmp, "difftestSepc")
-    BoringUtils.addSource(tmp, "difftestMcause")
-    BoringUtils.addSource(tmp, "difftestScause")
-  }
-
 }
