@@ -13,11 +13,10 @@ class Ibuffer extends XSModule {
     val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   })
 
-  val debug = true.B
   when(io.in.valid) {
-    XSDebug(debug, "cache data\n")
+    XSDebug("cache data\n")
     for (i <- 0 until FetchWidth) {
-      XSDebug(debug, "%b\n", io.in.bits.instrs(i))
+      XSDebug("%b\n", io.in.bits.instrs(i))
     }
   }
 
@@ -47,7 +46,7 @@ class Ibuffer extends XSModule {
 
   // enque
   when(enqValid) {
-    XSInfo(debug, "Enque start\n")
+    XSInfo("Enque start\n")
 
     var enq_idx = 0.U(log2Up(FetchWidth*2+1).W)
     for(i <- 0 until FetchWidth) {
@@ -60,8 +59,8 @@ class Ibuffer extends XSModule {
         ibuf_pc(tail_ptr + enq_idx+1.U) := io.in.bits.pc + enq_idx + enq_idx + 2.U
         ibuf_valid(tail_ptr + enq_idx+1.U) := true.B
 
-        XSDebug(debug, "Enque: %b\n", io.in.bits.instrs(i)(15,0))
-        XSDebug(debug, "Enque: %b\n", io.in.bits.instrs(i)(31,16))
+        XSDebug("Enque: %b\n", io.in.bits.instrs(i)(15,0))
+        XSDebug("Enque: %b\n", io.in.bits.instrs(i)(31,16))
       }
       enq_idx = enq_idx + io.in.bits.mask(i) + io.in.bits.mask(i)
     }
@@ -69,12 +68,12 @@ class Ibuffer extends XSModule {
     tail_ptr := tail_ptr + enq_idx
     last_enq := true.B
 
-    XSInfo(debug, "Enque finished, tail_ptr=%d\n", tail_ptr + enq_idx)
+    XSInfo("Enque finished, tail_ptr=%d\n", tail_ptr + enq_idx)
   }
 
   // deque
   when(deqValid) {
-    XSInfo(debug, "Deque start\n")
+    XSInfo("Deque start\n")
 
     var deq_idx = 0.U(log2Up(DecodeWidth*2+1).W)
     for(i <- 0 until DecodeWidth) {
@@ -83,7 +82,7 @@ class Ibuffer extends XSModule {
           // is RVC
           io.out(i).bits.instr := Cat(0.U(16.W), ibuf(head_ptr + deq_idx))
           io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          XSDebug(debug, "%b[RVC]\nPC=%d\n", Cat(0.U(16.W), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
+          XSDebug("%b[RVC]\nPC=%d\n", Cat(0.U(16.W), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
 
           io.out(i).bits.isRVC := true.B
           io.out(i).valid := true.B
@@ -92,7 +91,7 @@ class Ibuffer extends XSModule {
           // isn't RVC
           io.out(i).bits.instr := Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx))
           io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          XSDebug(debug, "%b[NORVC]\nPC=%d\n", Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
+          XSDebug("%b[NORVC]\nPC=%d\n", Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
 
           io.out(i).bits.isRVC := false.B
           io.out(i).valid := true.B
@@ -101,14 +100,14 @@ class Ibuffer extends XSModule {
         }.otherwise {
           // half inst keep in buffer
           io.out(i).bits.instr := 0.U(32.W)
-          XSWarn(debug, "This is half inst\n")
+          XSWarn("This is half inst\n")
 
           io.out(i).bits.pc := 0.U(VAddrBits.W)
           io.out(i).bits.isRVC := false.B
           io.out(i).valid := false.B
         }
       }.otherwise {
-        XSWarn(debug, "This output is not ready, or buffer is empty\n")
+        XSWarn("This output is not ready, or buffer is empty\n")
 
         io.out(i).bits.instr := 0.U
         io.out(i).bits.pc := 0.U
@@ -127,8 +126,8 @@ class Ibuffer extends XSModule {
     }
     head_ptr := head_ptr + deq_idx
 
-    XSInfo(debug, "Deque finished\n")
-    XSInfo(debug, "head_prt=%d, tail_ptr=%d\n", head_ptr + deq_idx, tail_ptr)
+    XSInfo("Deque finished\n")
+    XSInfo("head_prt=%d, tail_ptr=%d\n", head_ptr + deq_idx, tail_ptr)
     last_enq := false.B
   }.otherwise {
     for(i <- 0 until DecodeWidth) {
@@ -141,7 +140,7 @@ class Ibuffer extends XSModule {
 
   // flush
   when(io.flush) {
-    XSInfo(debug, "Flush signal received, clear buffer\n")
+    XSInfo("Flush signal received, clear buffer\n")
     for(i <- 0 until IBufSize) {
       ibuf_valid(i) := false.B
       head_ptr := 0.U
