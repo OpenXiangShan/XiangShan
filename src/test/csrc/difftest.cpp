@@ -86,7 +86,7 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
 int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   int skip, int isRVC, uint64_t intrNO, int priviledgeMode) {
 
-  assert(!skip && !isRVC && intrNO == 0)
+  assert(!skip && !isRVC && intrNO == 0);
   #define DEBUG_RETIRE_TRACE_SIZE 16
 
   uint64_t ref_r[DIFFTEST_NR_REG];
@@ -116,7 +116,7 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
     ref_difftest_exec(1);//TODO
   }
 
-  assert(commit > 0 && commit <= 6)
+  assert(commit > 0 && commit <= 6);
   ref_difftest_exec(commit);
   ref_difftest_getregs(&ref_r);
 
