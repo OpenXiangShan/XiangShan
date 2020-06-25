@@ -14,7 +14,7 @@ trait IQConst{
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
-sealed abstract class IQModule extends XSModule with IQConst with NeedImpl
+sealed abstract class IQModule extends XSModule with IQConst //with NeedImpl
 
 sealed class CmpInputBundle extends IQBundle{
   val instRdy = Input(Bool())
@@ -53,10 +53,6 @@ sealed class CompareCircuitUnit extends IQModule {
     io.out.roqIdx := roqIdx1
     io.out.iqIdx := iqIdx1
   }
-  // if(debug && (layer==3)) {
-  //   printf("(%d)[CCU(L%did%d)] in1.ready:%d in1.index:%d || in1.ready:%d in1.index:%d || out.ready:%d out.index:%d\n",GTimer(),layer.asUInt,id.asUInt,inst1Rdy,iqIdx1,inst2Rdy,iqIdx2,io.out.instRdy,io.out.iqIdx)
-  // }
-
 
 }
 
