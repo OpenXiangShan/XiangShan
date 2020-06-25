@@ -14,16 +14,23 @@ trait IQConst{
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
-sealed abstract class IQModule extends XSModule with IQConst //with NeedImpl
+sealed abstract class IQModule extends XSModule with IQConst with NeedImpl
 
 sealed class CmpInputBundle extends IQBundle{
   val instRdy = Input(Bool())
   val roqIdx  = Input(UInt(RoqIdxWidth.W))
   val iqIdx   = Input(UInt(iqIdxWidth.W))
+
+  def apply(instRdy: Bool,roqIdx: UInt,iqIdx: UInt ) = {
+    this.instRdy := instRdy
+    this.roqIdx := roqIdx
+    this.iqIdx := iqIdx
+    this
+  }
 }
 
 
-sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
+sealed class CompareCircuitUnit extends IQModule {
   val io = IO(new Bundle(){
     val in1 = new CmpInputBundle
     val in2 = new CmpInputBundle
@@ -46,11 +53,31 @@ sealed class CompareCircuitUnit(layer: Int = 0, id: Int = 0) extends IQModule {
     io.out.roqIdx := roqIdx1
     io.out.iqIdx := iqIdx1
   }
-  if(debug && (layer==3)) {
-    printf("(%d)[CCU(L%did%d)] in1.ready:%d in1.index:%d || in1.ready:%d in1.index:%d || out.ready:%d out.index:%d\n",GTimer(),layer.asUInt,id.asUInt,inst1Rdy,iqIdx1,inst2Rdy,iqIdx2,io.out.instRdy,io.out.iqIdx)
+  // if(debug && (layer==3)) {
+  //   printf("(%d)[CCU(L%did%d)] in1.ready:%d in1.index:%d || in1.ready:%d in1.index:%d || out.ready:%d out.index:%d\n",GTimer(),layer.asUInt,id.asUInt,inst1Rdy,iqIdx1,inst2Rdy,iqIdx2,io.out.instRdy,io.out.iqIdx)
+  // }
+
+
+}
+
+object CCU{
+  def apply(in1: CmpInputBundle, in2: CmpInputBundle) = {
+    val CCU = Module(new CompareCircuitUnit)
+    CCU.io.in1 <> in1
+    CCU.io.in2 <> in2
+    CCU.io.out
   }
+}
 
-
+object ParallelSel {
+  def apply(iq: Seq[CmpInputBundle]):  CmpInputBundle = {
+    iq match {
+      case Seq(a) => a
+      case Seq(a, b) => CCU(a, b)
+      case _ =>
+        apply(Seq(apply(iq take iq.size/2), apply(iq drop iq.size/2)))
+    }
+  }
 }
 
 class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
@@ -89,8 +116,8 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val brMask  = RegInit(VecInit(Seq.fill(iqSize)(0.U(BrqSize.W))))
   val brTag  = RegInit(VecInit(Seq.fill(iqSize)(0.U(BrTagWidth.W))))
   val validReg = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
-  val validFire= WireInit(VecInit(Seq.fill(iqSize)(false.B)))
-  val valid = validReg.asUInt & ~validFire.asUInt
+  val validWillFalse= WireInit(VecInit(Seq.fill(iqSize)(false.B)))
+  val valid = validReg.asUInt & ~validWillFalse.asUInt
   val src1Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val src2Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val src3Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
@@ -114,8 +141,8 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //enqueue pointer
   val emptySlot = ~valid.asUInt
   val enqueueSelect = PriorityEncoder(emptySlot)
-  assert(!(io.enqCtrl.valid && io.redirect.valid),"enqueue valid should be false when redirect valid")
-
+  //assert(!(io.enqCtrl.valid && io.redirect.valid),"enqueue valid should be false when redirect valid")
+  XSError(io.enqCtrl.valid && io.redirect.valid,"enqueue valid should be false when redirect valid")
   val srcEnqRdy = WireInit(VecInit(false.B, false.B, false.B))
 
   srcEnqRdy(0) := Mux(io.enqCtrl.bits.ctrl.src1Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src1State === SrcState.rdy)
@@ -138,7 +165,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     oldPDest(enqueueSelect) := io.enqCtrl.bits.old_pdest
     freelistAllocPtr(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
     roqIdx(enqueueSelect) := io.enqCtrl.bits.roqIdx
-    if(debug) {printf("(%d)[IQ enq]: enqSelect:%d | s1Rd:%d s2Rd:%d s3Rd:%d\n",GTimer(),enqueueSelect.asUInt,
+    if(debug) {XSDebug("[IQ enq]: enqSelect:%d | s1Rd:%d s2Rd:%d s3Rd:%d\n",enqueueSelect.asUInt,
                                                                         (io.enqCtrl.bits.src1State === SrcState.rdy),
                                                                         (io.enqCtrl.bits.src2State === SrcState.rdy),
                                                                         (io.enqCtrl.bits.src3State === SrcState.rdy))}
@@ -163,12 +190,16 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   }
 
   if(debug) {
-    printf("(%d)[Reg info] enqSelNext:%d | enqFireNext:%d \n",GTimer(),enqSelNext,enqFireNext)
-    printf("(%d)[IQ content] valid |   src1rdy  src1 |  src2Rdy  src2   pdest  \n",GTimer())
+    
+    XSDebug("[Reg info-ENQ] enqSelNext:%d | enqFireNext:%d \n",enqSelNext,enqFireNext)
+    XSDebug("[IQ content] valid vr vf| pc  insruction |   src1rdy  src1 |  src2Rdy  src2   pdest  \n")
     for(i <- 0 to (iqSize -1)){
-      printf("(%d)[IQ content][%d] %d%d%d | %x %x | %x %x | %d",GTimer(),i.asUInt, valid(i), validReg(i), validFire(i), src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))
-      when(valid(i)){printf("  valid")}
-      printf(" |\n")
+      val ins = ctrlFlow(i).instr
+      val pc = ctrlFlow(i).pc
+      when(valid(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i), pc,ins,src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
+      .elsewhen(validReg(i) && validWillFalse(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid will be False|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
+      .otherwise {XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
+
     }
   }
   // From Common Data Bus(wakeUpPort)
@@ -255,45 +286,13 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //---------------------------------------------------------
   // Select Circuit
   //---------------------------------------------------------
-  //layer 1
-  val layer1CCUs = (0 until layer1Size by 2) map { i =>
-    val CCU_1 = Module(new CompareCircuitUnit(layer = 1, id = i/2))
-    CCU_1.io.in1.instRdy := instRdy(i)
-    CCU_1.io.in1.roqIdx  := roqIdx(i)
-    CCU_1.io.in1.iqIdx   := i.U
-
-    CCU_1.io.in2.instRdy := instRdy(i+1)
-    CCU_1.io.in2.roqIdx  := roqIdx(i+1)
-    CCU_1.io.in2.iqIdx   := (i+1).U
-    
-    CCU_1
+  val selVec = List.tabulate(iqSize){ i =>
+    Wire(new CmpInputBundle).apply(instRdy(i),roqIdx(i),i.U)
   }
-
-  //layer 2
-  val layer2CCUs = (0 until layer2Size by 2) map { i =>
-    val CCU_2 = Module(new CompareCircuitUnit(layer = 2, id = i/2))
-    CCU_2.io.in1.instRdy := layer1CCUs(i).io.out.instRdy
-    CCU_2.io.in1.roqIdx  := layer1CCUs(i).io.out.roqIdx
-    CCU_2.io.in1.iqIdx   := layer1CCUs(i).io.out.iqIdx
-
-    CCU_2.io.in2.instRdy := layer1CCUs(i+1).io.out.instRdy
-    CCU_2.io.in2.roqIdx  := layer1CCUs(i+1).io.out.roqIdx
-    CCU_2.io.in2.iqIdx   := layer1CCUs(i+1).io.out.iqIdx
-    
-    CCU_2
+  val selResult = ParallelSel(selVec)
+  if(debug) {
+    XSDebug("[Sel Result] ResReady:%d || ResultId:%d\n",selResult.instRdy,selResult.iqIdx.asUInt)
   }
-
-  //layer 3
-  val CCU_3 = Module(new CompareCircuitUnit(layer = 3, id = 0))
-  CCU_3.io.in1.instRdy := layer2CCUs(0).io.out.instRdy
-  CCU_3.io.in1.roqIdx  := layer2CCUs(0).io.out.roqIdx
-  CCU_3.io.in1.iqIdx   := layer2CCUs(0).io.out.iqIdx
-
-  CCU_3.io.in2.instRdy := layer2CCUs(1).io.out.instRdy
-  CCU_3.io.in2.roqIdx  := layer2CCUs(1).io.out.roqIdx
-  CCU_3.io.in2.iqIdx   := layer2CCUs(1).io.out.iqIdx
-
-
   //---------------------------------------------------------
   // Redirect Logic
   //---------------------------------------------------------
@@ -301,14 +300,13 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
 
   List.tabulate(iqSize)( i =>
-    when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
+    when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && validReg(i) ){
         validReg(i) := false.B
-        validFire(dequeueSelect) := true.B
+        validWillFalse(i) := true.B
 
     } .elsewhen(expRedirect) {
         validReg(i) := false.B
-        validFire(dequeueSelect) := true.B
-
+        validWillFalse(i) := true.B
     }
   )
   //---------------------------------------------------------
@@ -348,11 +346,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   io.deq.bits.src3 := src3Data(dequeueSelect)
 
   if(debug) {
-    printf("(%d)[Sel Reg] selInstRdy:%d || selIdx:%d\n",GTimer(),selInstRdy,selInstIdx.asUInt)
-    when(IQreadyGo){printf("(%d)[IQ dequeue] **fire:%d** roqIdx:%d dequeueSel:%d | src1Rd:%d src1:%d | src2Rd:%d src2:%d\n",GTimer(), io.deq.fire(), io.deq.bits.uop.roqIdx, dequeueSelect.asUInt,
+    XSDebug("[Reg Info-Sel] selInstRdy:%d || selIdx:%d\n",selInstRdy,selInstIdx.asUInt)
+    XSDebug(IQreadyGo,"[IQ dequeue] **dequeue fire:%d** roqIdx:%d dequeueSel:%d | src1Rd:%d src1:%d | src2Rd:%d src2:%d\n", io.deq.fire(), io.deq.bits.uop.roqIdx, dequeueSelect.asUInt,
                               (io.deq.bits.uop.src1State === SrcState.rdy), io.deq.bits.uop.psrc1,
                               (io.deq.bits.uop.src2State === SrcState.rdy), io.deq.bits.uop.psrc2
-                              )}
+                              )
   }
 
   //update the index register of instruction that can be issue, unless function unit not allow in
@@ -360,12 +358,13 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //clear the validBit of dequeued instruction in issuequeue
   when(io.deq.fire()){
     validReg(dequeueSelect) := false.B
-    validFire(dequeueSelect) := true.B
+    validWillFalse(dequeueSelect) := true.B
   }
 
   val selRegflush = expRedirect || (brRedirect && brRedirectMaskMatch)
-  selInstRdy := Mux(selRegflush,false.B,CCU_3.io.out.instRdy)
-  selInstIdx := Mux(selRegflush,0.U,CCU_3.io.out.iqIdx)
+
+  selInstRdy := Mux(selRegflush,false.B,selResult.instRdy)
+  selInstIdx := Mux(selRegflush,0.U,selResult.iqIdx)
   // SelectedUop (bypass / speculative)
   if(useBypass) {
     assert(fixedDelay==1) // only support fixedDelay is 1 now
@@ -382,9 +381,8 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
       }
     }
     val sel = io.selectedUop
-    val selIQIdx = CCU_3.io.out.iqIdx
-    val delayPipe = DelayPipe(VecInit(CCU_3.io.out.instRdy, prfDest(selIQIdx)), fixedDelay-1)
-    sel.valid := delayPipe(fixedDelay-1)(0) && io.deq.ready
+    val selIQIdx = selResult.iqIdx
+    val delayPipe = DelayPipe(VecInit(selResult.instRdy, prfDest(selIQIdx)), fixedDelay-1)
     sel.bits := DontCare
     sel.bits.pdest := delayPipe(fixedDelay-1)(1)
   }
