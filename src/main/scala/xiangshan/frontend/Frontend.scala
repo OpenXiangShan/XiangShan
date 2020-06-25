@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils.PipelineConnect
 import xiangshan._
+import xiangshan.utils.XSInfo
 
 class Frontend extends XSModule {
   val io = IO(new Bundle() {
@@ -19,4 +20,11 @@ class Frontend extends XSModule {
   ibuffer.io.flush := io.backend.redirect.valid
 
   io.backend.cfVec <> ibuffer.io.out
+
+  for(out <- ibuffer.io.out){
+    XSInfo(out.fire(),
+      p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
+    )
+  }
+
 }

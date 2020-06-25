@@ -83,9 +83,10 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
   "sstatus", "scause", "sepc"
 };
 
-int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
-  int isMMIO, int isRVC, uint64_t intrNO, int priviledgeMode) {
+int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
+  int skip, int isRVC, uint64_t intrNO, int priviledgeMode) {
 
+  assert(!skip && !isRVC && intrNO == 0);
   #define DEBUG_RETIRE_TRACE_SIZE 16
 
   uint64_t ref_r[DIFFTEST_NR_REG];
@@ -97,7 +98,7 @@ int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
   static uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static int pc_retire_pointer = 7;
 
-  if (isMMIO) {
+  if (skip) {
     // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
     // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
     reg_scala[DIFFTEST_THIS_PC] += isRVC ? 2 : 4;
@@ -112,10 +113,11 @@ int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
 
   if (intrNO) {
     ref_difftest_raise_intr(intrNO);
-  } else {
-    ref_difftest_exec(1);
+    ref_difftest_exec(1);//TODO
   }
 
+  assert(commit > 0 && commit <= 6);
+  ref_difftest_exec(commit);
   ref_difftest_getregs(&ref_r);
 
   uint64_t next_pc = ref_r[DIFFTEST_THIS_PC];
@@ -123,17 +125,18 @@ int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
   pc_retire_queue[pc_retire_pointer] = this_pc;
   inst_retire_queue[pc_retire_pointer] = this_inst;
   
-  int isCSR = ((this_inst & 0x7f) ==  0x73);
-  int isCSRMip = ((this_inst >> 20) == 0x344) && isCSR;
-  if (isCSRMip) {
-    // We can not handle NEMU.mip.mtip since it is driven by CLINT,
-    // which is not accessed in NEMU due to MMIO.
-    // Just sync the state of NEMU from NOOP.
-    reg_scala[DIFFTEST_THIS_PC] = next_pc;
-    nemu_this_pc = next_pc;
-    ref_difftest_setregs(reg_scala);
-    return 0;
-  }
+  // TODO: fix mip.mtip
+  // int isCSR = ((this_inst & 0x7f) ==  0x73);
+  // int isCSRMip = ((this_inst >> 20) == 0x344) && isCSR;
+  // if (isCSRMip) {
+  //   // We can not handle NEMU.mip.mtip since it is driven by CLINT,
+  //   // which is not accessed in NEMU due to MMIO.
+  //   // Just sync the state of NEMU from NOOP.
+  //   reg_scala[DIFFTEST_THIS_PC] = next_pc;
+  //   nemu_this_pc = next_pc;
+  //   ref_difftest_setregs(reg_scala);
+  //   return 0;
+  // }
 
   // replace with "this pc" for checking
   ref_r[DIFFTEST_THIS_PC] = nemu_this_pc;

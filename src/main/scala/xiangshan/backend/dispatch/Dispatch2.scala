@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.utils.GTimer
+import xiangshan.utils.{XSDebug, XSInfo}
 
 class Dispatch2 extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
@@ -59,7 +59,7 @@ class Dispatch2 extends XSModule with NeedImpl {
     (uop.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || uop.bits.ctrl.fuType === FuType.fmiscDivSqrt
   }) :+ true.B)
 
-  // TODO: currently there's only one LSU
+  // TODO: currently there's only one load/store reservation station
   // val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => (deq.bits.ctrl.fuType === FuType.ldu)) :+ true.B)
   val load0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)) :+ true.B)
   val load1InstIdx = PriorityEncoder((io.fromLsDq.zipWithIndex map { case (uop, i) =>
@@ -93,25 +93,31 @@ class Dispatch2 extends XSModule with NeedImpl {
   // insert into reservation station
   val instIdxes = Seq(bruInstIdx, alu0InstIdx, alu1InstIdx, alu2InstIdx, alu3InstIdx, mulInstIdx, muldivInstIdx,
     fmac0InstIdx, fmac1InstIdx, fmac2InstIdx, fmac3InstIdx, fmisc0InstIdx, fmisc1InstIdx,
-    load0InstIdx, store0InstIdx)
+    load0InstIdx)//, store0InstIdx)
   io.enqIQCtrl.zipWithIndex map { case (enq, i) =>
     if (i < exuConfig.IntExuCnt) {
       enq.valid := !instIdxes(i)(2) && io.fromIntDq(instIdxes(i)(1, 0)).valid
       enq.bits := io.fromIntDq(instIdxes(i)(1, 0)).bits
+      enq.bits.src1State := io.intPregRdy((instIdxes(i) << 1).asUInt())
+      enq.bits.src2State := io.intPregRdy((instIdxes(i) << 1).asUInt() + 1.U)
     }
     else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) {
       enq.valid := !instIdxes(i)(2) && io.fromFpDq(instIdxes(i)(1, 0)).valid
       enq.bits := io.fromFpDq(instIdxes(i)(1, 0)).bits
+      enq.bits.src1State := io.fpPregRdy(instIdxes(i) * 3.U)
+      enq.bits.src2State := io.fpPregRdy(instIdxes(i) * 3.U + 1.U)
+      enq.bits.src3State := io.fpPregRdy(instIdxes(i) * 3.U + 2.U)
     }
     else {
       enq.valid := !instIdxes(i)(2) && io.fromLsDq(instIdxes(i)(1, 0)).valid
       enq.bits := io.fromLsDq(instIdxes(i)(1, 0)).bits
+      // TODO load and store
+      enq.bits.src1State := Mux(enq.bits.ctrl.fuType === FuType.ldu, io.intPregRdy(8), io.intPregRdy(10))
+      enq.bits.src2State := io.intPregRdy(11)
     }
 
-    when (enq.fire()) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x with type %b enters reservation station %d from %d\n",
-        GTimer(), enq.bits.cf.pc, enq.bits.ctrl.fuType, i.U, instIdxes(i))
-    }
+    XSInfo(enq.fire(), "instruction 0x%x with type %b enters reservation station %d from %d\n",
+      enq.bits.cf.pc, enq.bits.ctrl.fuType, i.U, instIdxes(i))
   }
 
   // responds to dispatch queue
@@ -119,42 +125,33 @@ class Dispatch2 extends XSModule with NeedImpl {
     io.fromIntDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
       (rs.ready && instIdxes(j) === i.U && (j < exuConfig.IntExuCnt).asBool())
     }).reduce((l, r) => l || r)
-    when (io.fromIntDq(i).fire()) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x leaves Int dispatch queue with nroq %d\n",
-        GTimer(), io.fromIntDq(i).bits.cf.pc, io.fromIntDq(i).bits.roqIdx)
-    }
-    when (io.fromIntDq(i).valid && !io.fromIntDq(i).ready) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x waits at Int dispatch queue with index %d\n",
-        GTimer(), io.fromIntDq(i).bits.cf.pc, i.U)
-    }
+    XSInfo(io.fromIntDq(i).fire(), "instruction 0x%x leaves Int dispatch queue with nroq %d\n",
+      io.fromIntDq(i).bits.cf.pc, io.fromIntDq(i).bits.roqIdx)
+    XSDebug(io.fromIntDq(i).valid && !io.fromIntDq(i).ready,
+      "instruction 0x%x waits at Int dispatch queue with index %d\n",
+      io.fromIntDq(i).bits.cf.pc, i.U)
   }
   for (i <- 0 until FpDqDeqWidth) {
     io.fromFpDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
       (rs.ready && instIdxes(j) === i.U
         && (j >= exuConfig.IntExuCnt && j < exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
     }).reduce((l, r) => l || r)
-    when (io.fromFpDq(i).fire()) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x leaves Fp dispatch queue with nroq %d\n",
-        GTimer(), io.fromFpDq(i).bits.cf.pc, io.fromFpDq(i).bits.roqIdx)
-    }
-    when (io.fromFpDq(i).valid && !io.fromFpDq(i).ready) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x waits at Fp dispatch queue with index %d\n",
-        GTimer(), io.fromFpDq(i).bits.cf.pc, i.U)
-    }
+    XSInfo(io.fromFpDq(i).fire(), "instruction 0x%x leaves Fp dispatch queue with nroq %d\n",
+      io.fromFpDq(i).bits.cf.pc, io.fromFpDq(i).bits.roqIdx)
+    XSDebug(io.fromFpDq(i).valid && !io.fromFpDq(i).ready,
+      "instruction 0x%x waits at Fp dispatch queue with index %d\n",
+      io.fromFpDq(i).bits.cf.pc, i.U)
   }
   for (i <- 0 until LsDqDeqWidth) {
     io.fromLsDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
       (rs.ready && instIdxes(j) === i.U
         && (j >= exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
     }).reduce((l, r) => l || r)
-    when (io.fromLsDq(i).fire()) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x leaves Ls dispatch queue with nroq %d\n",
-        GTimer(), io.fromLsDq(i).bits.cf.pc, io.fromLsDq(i).bits.roqIdx)
-    }
-    when (io.fromLsDq(i).valid && !io.fromLsDq(i).ready) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x waits at Ls dispatch queue with index %d\n",
-        GTimer(), io.fromLsDq(i).bits.cf.pc, i.U)
-    }
+    XSInfo(io.fromLsDq(i).fire(), "instruction 0x%x leaves Ls dispatch queue with nroq %d\n",
+      io.fromLsDq(i).bits.cf.pc, io.fromLsDq(i).bits.roqIdx)
+    XSDebug(io.fromLsDq(i).valid && !io.fromLsDq(i).ready,
+      "instruction 0x%x waits at Ls dispatch queue with index %d\n",
+      io.fromLsDq(i).bits.cf.pc, i.U)
   }
 
   // next stage: insert data
@@ -207,12 +204,12 @@ class Dispatch2 extends XSModule with NeedImpl {
 
     io.enqIQData(i).valid := data_valid(i)
     io.enqIQData(i).bits.uop := uop_reg(i)
-    io.enqIQData(i).bits.uop.src1State := Mux(src1Type(i)(1), SrcState.rdy,
-      Mux(src1Type(i)(0), io.intPregRdy(src1Index(i)), io.fpPregRdy(src1Index(i))))
-    io.enqIQData(i).bits.uop.src2State := Mux(src2Type(i)(1), SrcState.rdy,
-      Mux(src2Type(i)(0), io.intPregRdy(src2Index(i)), io.fpPregRdy(src2Index(i))))
-    io.enqIQData(i).bits.uop.src3State := Mux(src3Type(i)(1), SrcState.rdy,
-      Mux(src3Type(i)(0), io.intPregRdy(src3Index(i)), io.fpPregRdy(src3Index(i))))
+//    io.enqIQData(i).bits.uop.src1State := Mux(src1Type(i)(1), SrcState.rdy,
+//      Mux(src1Type(i)(0), io.intPregRdy(src1Index(i)), io.fpPregRdy(src1Index(i))))
+//    io.enqIQData(i).bits.uop.src2State := Mux(src2Type(i)(1), SrcState.rdy,
+//      Mux(src2Type(i)(0), io.intPregRdy(src2Index(i)), io.fpPregRdy(src2Index(i))))
+//    io.enqIQData(i).bits.uop.src3State := Mux(src3Type(i)(1), SrcState.rdy,
+//      Mux(src3Type(i)(0), io.intPregRdy(src3Index(i)), io.fpPregRdy(src3Index(i))))
     val src1 = Mux(src1Type(i)(1), 0.U,
       Mux(src1Type(i)(0), io.readFpRf(src1Index(i)).data, io.readIntRf(src1Index(i)).data))
     io.enqIQData(i).bits.src1 := Mux(index_reg(i)(2), 0.U, src1)
@@ -223,11 +220,10 @@ class Dispatch2 extends XSModule with NeedImpl {
       Mux(src3Type(i)(0), io.readFpRf(src3Index(i)).data, io.readIntRf(src3Index(i)).data))
     io.enqIQData(i).bits.src3 := Mux(index_reg(i)(2), 0.U, src3)
 
-    when (io.enqIQData(i).valid) {
-      printf("[Cycle:%d][Dispatch2] instruction 0x%x reads operands from (%d, %d, %x), (%d, %d, %x), (%d, %d, %x)\n",
-        GTimer(), io.enqIQData(i).bits.uop.cf.pc,
-        src1Type(i), src1Index(i), src1, src2Type(i), src2Index(i), src2, src3Type(i), src3Index(i), src3)
-    }
+    XSDebug(io.enqIQData(i).valid,
+      "instruction 0x%x reads operands from (%d, %d, %x), (%d, %d, %x), (%d, %d, %x)\n",
+      io.enqIQData(i).bits.uop.cf.pc, src1Type(i), src1Index(i), src1,
+      src2Type(i), src2Index(i), src2, src3Type(i), src3Index(i), src3)
   }
 
 }

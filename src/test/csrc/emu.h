@@ -148,10 +148,10 @@ class Emulator {
         uint64_t reg[DIFFTEST_NR_REG];
         read_emu_regs(reg);
 
-        extern int difftest_step(uint64_t *reg_scala, uint32_t this_inst,
-          int isMMIO, int isRVC, uint64_t intrNO, int priviledgeMode);
-        if (difftest_step(reg, dut_ptr->io_difftest_thisINST,
-              dut_ptr->io_difftest_isMMIO, dut_ptr->io_difftest_isRVC,
+        extern int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
+          int skip, int isRVC, uint64_t intrNO, int priviledgeMode);
+        if (difftest_step(dut_ptr->io_difftest_commit, reg, dut_ptr->io_difftest_thisINST,
+              dut_ptr->io_difftest_skip, dut_ptr->io_difftest_isRVC,
               dut_ptr->io_difftest_intrNO, dut_ptr->io_difftest_priviledgeMode)) {
 #if VM_TRACE
           tfp->close();
