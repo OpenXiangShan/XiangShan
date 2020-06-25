@@ -3,6 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.utils.XSInfo
 
 class Rename extends XSModule {
   val io = IO(new Bundle() {
@@ -19,6 +20,26 @@ class Rename extends XSModule {
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
+
+  val debug_exception = io.redirect.valid && io.redirect.bits.isException
+  val debug_walk = io.roqCommits.map(_.bits.isWalk).reduce(_ || _)
+  val debug_norm = !(debug_exception || debug_walk)
+
+  def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
+    XSInfo(
+      debug_norm,
+      p"pc:${Hexadecimal(in.bits.cf.pc)} v:${in.valid} rdy:${in.ready} " +
+        p"lsrc1:${in.bits.ctrl.lsrc1} -> psrc1:${out.bits.psrc1} " +
+        p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
+        p"lsrc3:${in.bits.ctrl.lsrc3} -> psrc3:${out.bits.psrc3} " +
+        p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
+        p"old_pdest:${out.bits.old_pdest}\n"
+    )
+  }
+
+  for((x,y) <- io.in.zip(io.out)){
+    printRenameInfo(x, y)
+  }
 
   val fpFreeList, intFreeList = Module(new FreeList).io
   val fpRat = Module(new RenameTable(float = true)).io
@@ -85,9 +106,19 @@ class Rename extends XSModule {
       rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
       rat.specWritePorts(i).wdata := Mux(specWen, freeList.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
 
+      XSInfo(walkWen,
+        {if(fp) "fp" else "int "} + p"walk: pc:${Hexadecimal(uops(i).cf.pc)}" +
+          p" ldst:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
+      )
+
       rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits(i).bits.isWalk
       rat.archWritePorts(i).addr := io.roqCommits(i).bits.uop.ctrl.ldest
       rat.archWritePorts(i).wdata := io.roqCommits(i).bits.uop.pdest
+
+      XSInfo(rat.archWritePorts(i).wen,
+        {if(fp) "fp" else "int "} + p" rat arch: ldest:${rat.archWritePorts(i).addr}" +
+          p" pdest:${rat.archWritePorts(i).wdata}\n"
+      )
 
       freeList.deallocReqs(i) := rat.archWritePorts(i).wen
       freeList.deallocPregs(i) := io.roqCommits(i).bits.uop.old_pdest
