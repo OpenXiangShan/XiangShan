@@ -20,6 +20,8 @@ const struct option Emulator::long_options[] = {
   { "seed",           1, NULL, 's' },
   { "max-cycles",     1, NULL, 'C' },
   { "image",          1, NULL, 'i' },
+  { "log-begin",      1, NULL, 'b'},
+  { "log-end",        1, NULL, 'e'},
   { "help",           0, NULL, 'h' },
   { 0,                0, NULL,  0  }
 };
@@ -30,6 +32,8 @@ void Emulator::print_help(const char *file) {
   printf("  -s, --seed=NUM        use this seed\n");
   printf("  -C, --max-cycles=NUM  execute at most NUM cycles\n");
   printf("  -i, --image=FILE      run with this image file\n");
+  printf("  -b, --log-begin=NUM   display log from NUM th cycle\n");
+  printf("  -e, --log-end=NUM     stop display log at NUM th cycle\n");
   printf("  -h, --help            print program help info\n");
   printf("\n");
 }
@@ -37,7 +41,7 @@ void Emulator::print_help(const char *file) {
 std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
   std::vector<const char *> args = { argv[0] };
   int o;
-  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:", long_options, NULL)) != -1) {
+  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:b:e:", long_options, NULL)) != -1) {
     switch (o) {
       case 's': 
         if(std::string(optarg) != "NO_SEED") {
@@ -50,6 +54,8 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
                 args.push_back("-i");
                 args.push_back(optarg);
                 break;
+      case 'b': log_begin = atoll(optarg);  break;
+      case 'e': log_end = atoll(optarg); break;
       default:
                 print_help(argv[0]);
                 exit(0);
