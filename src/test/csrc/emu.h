@@ -25,6 +25,7 @@ class Emulator {
   // emu control variable
   uint32_t seed;
   uint64_t max_cycles, cycles;
+  uint64_t log_begin, log_end;
 
   std::vector<const char *> parse_args(int argc, const char *argv[]);
 
@@ -55,7 +56,8 @@ class Emulator {
   Emulator(int argc, const char *argv[]):
     image(nullptr),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
-    seed(0), max_cycles(-1), cycles(0)
+    seed(0), max_cycles(-1), cycles(0),
+    log_begin(0), log_end(-1)
   {
     // init emu
     auto args = parse_args(argc, argv);
@@ -64,6 +66,10 @@ class Emulator {
     srand(seed);
     srand48(seed);
     Verilated::randReset(2);
+
+    // set log time range
+    dut_ptr->io_logCtrl_log_begin = log_begin;
+    dut_ptr->io_logCtrl_log_end = log_end;
 
     // init ram
     extern void init_ram(const char *img);
