@@ -7,12 +7,12 @@ import xiangshan.utils.XSLogLevel.XSLogLevel
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
 
-  val ALL   = Value("ALL")
+  val ALL   = Value("ALL  ")
   val DEBUG = Value("DEBUG")
-  val INFO  = Value("INFO")
-  val WARN  = Value("WARN")
+  val INFO  = Value("INFO ")
+  val WARN  = Value("WARN ")
   val ERROR = Value("ERROR")
-  val OFF   = Value("OFF")
+  val OFF   = Value("OFF  ")
 }
 
 object XSLog extends HasXSParameter{
