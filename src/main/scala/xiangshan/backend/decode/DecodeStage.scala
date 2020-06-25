@@ -34,7 +34,7 @@ class DecodeStage extends XSModule {
     decoders(i).io.in <> io.in(i).bits
     decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
     // send CfCtrl without brTags and brMasks to brq
-    io.toBrq(i).valid := io.in(i).valid
+    io.toBrq(i).valid := io.in(i).valid & io.out(i).ready & decoders(i).io.out.cf.isBr
     decoderToBrq(i).brMask := DontCare
     decoderToBrq(i).brTag := DontCare
     io.toBrq(i).bits := decoderToBrq(i)
