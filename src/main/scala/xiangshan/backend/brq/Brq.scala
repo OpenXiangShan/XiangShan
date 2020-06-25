@@ -3,6 +3,7 @@ package xiangshan.backend.brq
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.utils.XSInfo
 
 
 
@@ -78,4 +79,23 @@ class Brq extends XSModule {
     headPtr := 0.U
     tailPtr := 0.U
   }
+
+
+
+
+  // Debug info
+  val debug_roq_redirect = io.roqRedirect.valid
+  val debug_brq_redirect = io.redirect.valid && !debug_roq_redirect
+  val debug_normal_mode = !(debug_roq_redirect || debug_brq_redirect)
+
+  for(i <- 0 until DecodeWidth){
+    XSInfo(
+      debug_normal_mode,
+      p"enq v:${io.enqReqs(i).valid} rdy:${io.enqReqs(i).ready} pc:${Hexadecimal(io.enqReqs(i).bits.cf.pc)}" +
+        p" brMask:${Binary(io.brMasks(i))} brTag:${io.brTags(i)}\n"
+    )
+  }
+
+  XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
+  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
 }
