@@ -31,7 +31,9 @@ abstract class Exu
   val readIntRf: Boolean = true,
   val readFpRf: Boolean = false,
   val writeIntRf: Boolean = true,
-  val writeFpRf: Boolean = false
+  val writeFpRf: Boolean = false,
+  val enableBypass: Boolean = false, // join bypass group or not, require readIntRf & writeIntRf now
+  val fixedDelay: Int = 1 // IssueQueue's selectUop's delay
 ) extends Module {
   val io = IO(new ExuIO)
 }

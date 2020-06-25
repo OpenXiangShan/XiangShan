@@ -8,8 +8,10 @@ import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Config
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.Frontend
+import xiangshan.utils._
 
 trait HasXSParameter {
+  val LogLevel = XSLogLevel.ALL
   val XLEN = 64
   val HasMExtension = true
   val HasCExtension = true
@@ -60,9 +62,14 @@ trait HasXSParameter {
   )
 }
 
+trait HasXSLog { this: Module =>
+  implicit val _implict_module = this
+}
+
 abstract class XSModule extends Module
   with HasXSParameter
   with HasExceptionNO
+  with HasXSLog
 
 //remove this trait after impl module logic
 trait NeedImpl { this: Module =>

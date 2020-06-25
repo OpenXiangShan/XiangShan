@@ -48,25 +48,40 @@ class Backend(implicit val p: XSConfig) extends XSModule
   ))
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
   val issueQueues = exeUnits.zipWithIndex.map({ case(eu, i) =>
+    def needBypass(x: Exu): Boolean = (eu.enableBypass)
+    val bypassCnt = exeUnits.count(needBypass)//if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
     def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
     val wakeupCnt = exeUnits.count(needWakeup)
-    val bypassCnt = if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
-    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt))
+    assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
+    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
-    iq.io.wakeUpPorts <> exeUnits.filter(needWakeup).map(_.io.out)
+    val wuUnitsOut = exeUnits.filter(e => needWakeup(e)).map(_.io.out)
+    for(i <- iq.io.wakeUpPorts.indices) {
+      iq.io.wakeUpPorts(i).bits <> wuUnitsOut(i).bits
+      iq.io.wakeUpPorts(i).valid := wuUnitsOut(i).valid
+    }
     println(s"[$i] $eu Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt")
     eu.io.in <> iq.io.deq
     eu.io.redirect <> redirect
     iq
   })
 
-  val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
-  aluQueues.foreach(aluQ => {
-    aluQ.io.bypassUops <> aluQueues.map(_.io.selectedUop)
-    aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
+  val bypassQueues = issueQueues.filter(_.bypassCnt > 0)
+  val bypassUnits = exeUnits.filter(_.enableBypass)
+  bypassQueues.foreach(iq => {
+    for(i <- iq.io.bypassUops.indices) {
+      iq.io.bypassData(i).bits := bypassUnits(i).io.out.bits
+      iq.io.bypassData(i).valid := bypassUnits(i).io.out.valid
+    }
+    iq.io.bypassUops <> bypassQueues.map(_.io.selectedUop)
   })
+  // val aluQueues = issueQueues.filter(_.fuTypeInt == FuType.alu.litValue())
+  // aluQueues.foreach(aluQ => {
+  //   aluQ.io.bypassUops <> aluQueues.map(_.io.selectedUop)
+  //   aluQ.io.bypassData <> aluExeUnits.map(_.io.out)
+  // })
 
   lsuExeUnits.foreach(_.io.dmem <> io.dmem)
 
@@ -104,7 +119,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf
 
   val exeWbReqs = exeUnits.map(_.io.out)
-  val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)).map(_.io.out)
+  val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)).map(_.io.out)
   val wbFpReqs = (fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits).map(_.io.out)
   val intWbArb = Module(new WriteBackArbMtoN(wbIntReqs.length, NRWritePorts))
   val fpWbArb = Module(new WriteBackArbMtoN(wbFpReqs.length, NRWritePorts))
@@ -151,28 +166,5 @@ class Backend(implicit val p: XSConfig) extends XSModule
     "meip"
   )
   for (s <- sinks){ BoringUtils.addSink(tmp, s) }
-
-  // A fake commit
-  // TODO: difftest 6 insts per cycle
-  val commit = RegNext(RegNext(RegNext(true.B)))
-  val pc = WireInit("h80000000".U)
-  val inst = WireInit("h66666666".U)
-
-  if(!p.FPGAPlatform){
-    BoringUtils.addSource(commit, "difftestCommit")
-    BoringUtils.addSource(pc, "difftestThisPC")
-    BoringUtils.addSource(inst, "difftestThisINST")
-    BoringUtils.addSource(tmp, "difftestIsMMIO")
-    BoringUtils.addSource(tmp, "difftestIsRVC")
-    BoringUtils.addSource(tmp, "difftestIntrNO")
-    BoringUtils.addSource(VecInit(Seq.fill(64)(tmp)), "difftestRegs")
-    BoringUtils.addSource(tmp, "difftestMode")
-    BoringUtils.addSource(tmp, "difftestMstatus")
-    BoringUtils.addSource(tmp, "difftestSstatus")
-    BoringUtils.addSource(tmp, "difftestMepc")
-    BoringUtils.addSource(tmp, "difftestSepc")
-    BoringUtils.addSource(tmp, "difftestMcause")
-    BoringUtils.addSource(tmp, "difftestScause")
-  }
 
 }
