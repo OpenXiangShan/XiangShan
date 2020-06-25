@@ -21,6 +21,9 @@ class Decoder extends XSModule with HasInstrType {
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val instrType :: fuType :: fuOpType :: Nil = decodeList
 
+  // todo: remove this when fetch stage can decide if an instr is br
+  io.out.cf.isBr := (instrType === InstrB)
+
 //  val isRVC = instr(1, 0) =/= "b11".U
 //  val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
 //    ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable)
