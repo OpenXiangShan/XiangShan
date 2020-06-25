@@ -303,8 +303,12 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   List.tabulate(iqSize)( i =>
     when(brRedirect && (UIntToOH(io.redirect.bits.brTag) & brMask(i)).orR && valid(i) ){
         validReg(i) := false.B
+        validFire(dequeueSelect) := true.B
+
     } .elsewhen(expRedirect) {
         validReg(i) := false.B
+        validFire(dequeueSelect) := true.B
+
     }
   )
   //---------------------------------------------------------
