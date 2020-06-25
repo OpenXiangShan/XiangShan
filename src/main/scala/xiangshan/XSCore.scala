@@ -11,7 +11,6 @@ import xiangshan.frontend.Frontend
 import xiangshan.utils._
 
 trait HasXSParameter {
-  val LogLevel = XSLogLevel.ALL
   val XLEN = 64
   val HasMExtension = true
   val HasCExtension = true
