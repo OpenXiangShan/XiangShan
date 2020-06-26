@@ -108,11 +108,24 @@ trait HasExeUnits{
   exeUnits.foreach(_.io.dmem := DontCare)
 }
 
-class WriteBackArbMtoN(m: Int, n: Int) extends XSModule with NeedImpl {
+class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(m, Flipped(DecoupledIO(new ExuOutput)))
     val out = Vec(n, ValidIO(new ExuOutput))
   })
+
+  // TODO: arbiter logic
+
+  for (i <- 0 until m) {
+    io.in(i).ready := false.B
+  }
+  io.out <> DontCare
+
+  for (i <- 0 until 4) {
+    io.out(i).valid := io.in(i+1).valid
+    io.out(i).bits := io.in(i+1).bits
+    io.in(i+1).ready := true.B
+  }
 }
 
 

@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils.ParallelOR
+import xiangshan.utils.{ParallelOR, XSDebug}
 
 class BusyTable extends XSModule {
   val io = IO(new Bundle() {
@@ -27,15 +27,21 @@ class BusyTable extends XSModule {
     when(alloc.valid){
       table(alloc.bits) := true.B
     }
+    XSDebug(alloc.valid, "Allocate %d\n", alloc.bits)
   }
 
   for((wb, i) <- io.wbPregs.zipWithIndex){
     when(wb.valid){
       table(wb.bits) := false.B
     }
+    XSDebug(wb.valid, "writeback %d\n", wb.bits)
   }
 
   when(io.flush){
     table.foreach(_ := false.B)
+  }
+
+  for (i <- 0 until NRPhyRegs) {
+    XSDebug(table(i), "%d is busy\n", i.U)
   }
 }
