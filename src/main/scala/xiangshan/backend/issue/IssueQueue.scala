@@ -8,9 +8,6 @@ import xiangshan.utils._
 trait IQConst{
   val iqSize = 8
   val iqIdxWidth = log2Up(iqSize)
-  val layer1Size = iqSize
-  val layer2Size = iqSize/2
-  val debug = false
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
@@ -109,14 +106,14 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //Tag Queue
   val ctrlFlow = Mem(iqSize,new CtrlFlow)
   val ctrlSig = Mem(iqSize,new CtrlSignals)
-  val brMask  = RegInit(VecInit(Seq.fill(iqSize)(0.U(BrqSize.W))))
-  val brTag  = RegInit(VecInit(Seq.fill(iqSize)(0.U(BrTagWidth.W))))
+  val brMask  = Reg(Vec(iqSize, UInt(BrqSize.W)))
+  val brTag  =  Reg(Vec(iqSize, UInt(BrTagWidth.W)))
   val validReg = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val validWillFalse= WireInit(VecInit(Seq.fill(iqSize)(false.B)))
   val valid = validReg.asUInt & ~validWillFalse.asUInt
-  val src1Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
-  val src2Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
-  val src3Rdy = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
+  val src1Rdy = Reg(Vec(iqSize, Bool()))
+  val src2Rdy = Reg(Vec(iqSize, Bool()))
+  val src3Rdy = Reg(Vec(iqSize, Bool()))
   val prfSrc1 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfSrc2 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfSrc3 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
@@ -143,7 +140,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
 
   srcEnqRdy(0) := Mux(io.enqCtrl.bits.ctrl.src1Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src1State === SrcState.rdy)
   srcEnqRdy(1) := Mux(io.enqCtrl.bits.ctrl.src2Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src2State === SrcState.rdy)
-  srcEnqRdy(2) := Mux(io.enqCtrl.bits.ctrl.src3Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src3State === SrcState.rdy)
+  //TODO:
+  if(fuTypeInt != FuType.fmac.litValue()){ srcEnqRdy(2) := true.B}
+  else{srcEnqRdy(2) := Mux(io.enqCtrl.bits.ctrl.src3Type =/= SrcType.reg , true.B ,io.enqCtrl.bits.src3State === SrcState.rdy)}
 
   when (io.enqCtrl.fire()) {
     ctrlFlow(enqueueSelect) := io.enqCtrl.bits.cf
@@ -161,10 +160,10 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     oldPDest(enqueueSelect) := io.enqCtrl.bits.old_pdest
     freelistAllocPtr(enqueueSelect) := io.enqCtrl.bits.freelistAllocPtr
     roqIdx(enqueueSelect) := io.enqCtrl.bits.roqIdx
-    if(debug) {XSDebug("[IQ enq]: enqSelect:%d | s1Rd:%d s2Rd:%d s3Rd:%d\n",enqueueSelect.asUInt,
+    XSDebug("[IQ enq]: enqSelect:%d | s1Rd:%d s2Rd:%d s3Rd:%d\n",enqueueSelect.asUInt,
                                                                         (io.enqCtrl.bits.src1State === SrcState.rdy),
                                                                         (io.enqCtrl.bits.src2State === SrcState.rdy),
-                                                                        (io.enqCtrl.bits.src3State === SrcState.rdy))}
+                                                                        (io.enqCtrl.bits.src3State === SrcState.rdy))
 
   }
 
@@ -184,19 +183,15 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     when(src2Rdy(enqSelNext)){src2Data(enqSelNext) := io.enqData.bits.src2}
     when(src3Rdy(enqSelNext)){src3Data(enqSelNext) := io.enqData.bits.src3}
   }
-
-  if(debug) {
     
-    XSDebug("[Reg info-ENQ] enqSelNext:%d | enqFireNext:%d \n",enqSelNext,enqFireNext)
-    XSDebug("[IQ content] valid vr vf| pc  insruction |   src1rdy  src1 |  src2Rdy  src2   pdest  \n")
-    for(i <- 0 to (iqSize -1)){
-      val ins = ctrlFlow(i).instr
-      val pc = ctrlFlow(i).pc
-      when(valid(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i), pc,ins,src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
-      .elsewhen(validReg(i) && validWillFalse(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid will be False|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
-      .otherwise {XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
-
-    }
+  XSDebug("[Reg info-ENQ] enqSelNext:%d | enqFireNext:%d \n",enqSelNext,enqFireNext)
+  XSDebug("[IQ content] valid vr vf| pc  insruction |   src1rdy  src1 |  src2Rdy  src2   pdest  \n")
+  for(i <- 0 to (iqSize -1)){
+    val ins = ctrlFlow(i).instr
+    val pc = ctrlFlow(i).pc
+    XSDebug(valid(i),"[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i), pc,ins,src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))
+    XSDebug(validReg(i) && validWillFalse(i),"[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid will be False|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))
+    XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))
   }
   // From Common Data Bus(wakeUpPort)
   // chisel claims that firrtl will optimize Mux1H to and/or tree
@@ -286,9 +281,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     Wire(new CmpInputBundle).apply(instRdy(i),roqIdx(i),i.U)
   }
   val selResult = ParallelSel(selVec)
-  if(debug) {
-    XSDebug("[Sel Result] ResReady:%d || ResultId:%d\n",selResult.instRdy,selResult.iqIdx.asUInt)
-  }
+  XSDebug("[Sel Result] ResReady:%d || ResultId:%d\n",selResult.instRdy,selResult.iqIdx.asUInt)
   //---------------------------------------------------------
   // Redirect Logic
   //---------------------------------------------------------
@@ -340,14 +333,12 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   io.deq.bits.src1 := src1Data(dequeueSelect)
   io.deq.bits.src2 := src2Data(dequeueSelect)
   io.deq.bits.src3 := src3Data(dequeueSelect)
-
-  if(debug) {
-    XSDebug("[Reg Info-Sel] selInstRdy:%d || selIdx:%d\n",selInstRdy,selInstIdx.asUInt)
-    XSDebug(IQreadyGo,"[IQ dequeue] **dequeue fire:%d** roqIdx:%d dequeueSel:%d | src1Rd:%d src1:%d | src2Rd:%d src2:%d\n", io.deq.fire(), io.deq.bits.uop.roqIdx, dequeueSelect.asUInt,
-                              (io.deq.bits.uop.src1State === SrcState.rdy), io.deq.bits.uop.psrc1,
-                              (io.deq.bits.uop.src2State === SrcState.rdy), io.deq.bits.uop.psrc2
-                              )
-  }
+  
+  XSDebug("[Reg Info-Sel] selInstRdy:%d || selIdx:%d\n",selInstRdy,selInstIdx.asUInt)
+  XSDebug(IQreadyGo,"[IQ dequeue] **dequeue fire:%d** roqIdx:%d dequeueSel:%d | src1Rd:%d src1:%d | src2Rd:%d src2:%d\n", io.deq.fire(), io.deq.bits.uop.roqIdx, dequeueSelect.asUInt,
+                            (io.deq.bits.uop.src1State === SrcState.rdy), io.deq.bits.uop.psrc1,
+                            (io.deq.bits.uop.src2State === SrcState.rdy), io.deq.bits.uop.psrc2
+                            )
 
   //update the index register of instruction that can be issue, unless function unit not allow in
   //then the issue will be stopped to wait the function unit 
