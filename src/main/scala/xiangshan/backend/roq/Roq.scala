@@ -139,13 +139,13 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val emptyCsr = WireInit(0.U(64.W))
 
   if(!p.FPGAPlatform){
-    BoringUtils.addSink(RegNext(retireCounter), "difftestCommit")
-    BoringUtils.addSink(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
-    BoringUtils.addSink(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
-    BoringUtils.addSink(archRF, "difftestRegs")//arch RegFile
-    BoringUtils.addSink(RegNext(false.B), "difftestSkip")//SKIP
-    BoringUtils.addSink(RegNext(false.B), "difftestIsRVC")//FIXIT
-    BoringUtils.addSink(RegNext(0.U), "difftestIntrNO")
+    BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
+    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
+    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
+    BoringUtils.addSource(archRF, "difftestRegs")//arch RegFile
+    BoringUtils.addSource(RegNext(false.B), "difftestSkip")//SKIP
+    BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
+    BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
     //TODO: skip insts that commited in the same cycle ahead of exception
 
     //csr debug signals
