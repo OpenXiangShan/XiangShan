@@ -27,9 +27,14 @@ class DiffTestIO extends Bundle {
   val scause = Output(UInt(64.W))
 }
 
+class LogCtrlIO extends Bundle {
+  val log_begin, log_end = Input(UInt(32.W))
+}
+
 class XSSimTop extends Module {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
+    val logCtrl = new LogCtrlIO
   })
 
   lazy val config = XSConfig(FPGAPlatform = false)
@@ -66,6 +71,13 @@ class XSSimTop extends Module {
   BoringUtils.addSink(difftest.mcause, "difftestMcause")
   BoringUtils.addSink(difftest.scause, "difftestScause")
   io.difftest := difftest
+
+  val log_begin, log_end = Wire(UInt(32.W))
+  log_begin := io.logCtrl.log_begin
+  log_end := io.logCtrl.log_end
+
+  BoringUtils.addSource(log_begin, "DISPALY_LOG_START")
+  BoringUtils.addSource(log_end, "DISPLAY_LOG_END")
 }
 
 object TestMain extends App {
