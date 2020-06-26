@@ -2,12 +2,17 @@ ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
+B ?= 0
+E ?= -1
+L ?= ALL
+EMU_ARGS = B=$(B) E=$(E) L=$(L)
+
 # ------------------------------------------------------------------
 # bulid CPU and run dummy test
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run
 
 # ------------------------------------------------------------------
 # run different test sets

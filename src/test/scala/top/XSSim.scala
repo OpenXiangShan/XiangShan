@@ -28,7 +28,8 @@ class DiffTestIO extends Bundle {
 }
 
 class LogCtrlIO extends Bundle {
-  val log_begin, log_end = Input(UInt(32.W))
+  val log_begin, log_end = Input(UInt(64.W))
+  val log_level = Input(UInt(64.W)) // a cpp uint
 }
 
 class XSSimTop extends Module {
@@ -72,12 +73,14 @@ class XSSimTop extends Module {
   BoringUtils.addSink(difftest.scause, "difftestScause")
   io.difftest := difftest
 
-  val log_begin, log_end = Wire(UInt(32.W))
+  val log_begin, log_end, log_level = Wire(UInt(64.W))
   log_begin := io.logCtrl.log_begin
   log_end := io.logCtrl.log_end
+  log_level := io.logCtrl.log_level
 
   BoringUtils.addSource(log_begin, "DISPALY_LOG_START")
   BoringUtils.addSource(log_end, "DISPLAY_LOG_END")
+  BoringUtils.addSource(log_level, "DISPLAY_LOG_LEVEL")
 }
 
 object TestMain extends App {
