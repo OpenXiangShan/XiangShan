@@ -72,7 +72,6 @@ class Dispatch1 extends XSModule{
   for (i <- 0 until RenameWidth) {
     uop_nroq(i) := io.fromRename(i).bits
     uop_nroq(i).roqIdx := Mux(io.toRoq(i).ready, io.roqIdxs(i), roqIndexReg(i))
-
   }
 
   // uop can enqueue when rename.valid and roq.valid
