@@ -22,7 +22,7 @@ const struct option Emulator::long_options[] = {
   { "image",          1, NULL, 'i' },
   { "log-begin",      1, NULL, 'b' },
   { "log-end",        1, NULL, 'e' },
-  { "log-level",      1, NULL, 'l' },
+  { "verbose",        1, NULL, 'v' },
   { "help",           0, NULL, 'h' },
   { 0,                0, NULL,  0  }
 };
@@ -35,7 +35,7 @@ void Emulator::print_help(const char *file) {
   printf("  -i, --image=FILE      run with this image file\n");
   printf("  -b, --log-begin=NUM   display log from NUM th cycle\n");
   printf("  -e, --log-end=NUM     stop display log at NUM th cycle\n");
-  printf("  -l, --log-level=STR   log level, can be one of [ALL, DEBUG, INFO, WARN, ERROR]\n");
+  printf("  -v, --verbose=STR     verbosity level, can be one of [ALL, DEBUG, INFO, WARN, ERROR]\n");
   printf("  -h, --help            print program help info\n");
   printf("\n");
 }
@@ -58,7 +58,7 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
                 break;
       case 'b': log_begin = atoll(optarg);  break;
       case 'e': log_end = atoll(optarg); break;
-      case 'l': log_level = getLogLevel(optarg); break;
+      case 'v': log_level = getLogLevel(optarg); break;
       default:
                 print_help(argv[0]);
                 exit(0);
