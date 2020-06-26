@@ -188,13 +188,13 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   if(debug) {
     
     XSDebug("[Reg info-ENQ] enqSelNext:%d | enqFireNext:%d \n",enqSelNext,enqFireNext)
-    XSDebug("[IQ content] valid vr vf| pc  insruction |   src1rdy  src1 |  src2Rdy  src2   pdest  \n")
+    XSDebug("[IQ content] valid vr vf| pc  insruction |   src1rdy  src1 |  src2Rdy  src2  |  src3Rdy  src3  |  pdest  \n")
     for(i <- 0 to (iqSize -1)){
       val ins = ctrlFlow(i).instr
       val pc = ctrlFlow(i).pc
-      when(valid(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i), pc,ins,src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
-      .elsewhen(validReg(i) && validWillFalse(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d  valid will be False|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
-      .otherwise {XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %d\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),prfDest(i))}
+      when(valid(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %x %x | %d  valid|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i), pc,ins,src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),src3Rdy(i), src3Data(i),prfDest(i))}
+      .elsewhen(validReg(i) && validWillFalse(i)){XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %x %x | %d  valid will be False|\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),src3Rdy(i), src3Data(i),prfDest(i))}
+      .otherwise {XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %x %x | %d\n",i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i), src2Rdy(i), src2Data(i),src3Rdy(i), src3Data(i),prfDest(i))}
 
     }
   }
