@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.utils._
 
-class DecodeBuffer extends XSModule with NeedImpl {
+class DecodeBuffer extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val in  = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))

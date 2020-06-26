@@ -8,7 +8,7 @@ import xiangshan.utils.XSLogLevel.XSLogLevel
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
 
-  val ALL   = Value("ALL  ")
+  val ALL   = Value(0, "ALL  ")
   val DEBUG = Value("DEBUG")
   val INFO  = Value("INFO ")
   val WARN  = Value("WARN ")
@@ -16,9 +16,9 @@ object XSLogLevel extends Enumeration {
   val OFF   = Value("OFF  ")
 }
 
-object XSLog extends HasXSParameter {
+object XSLog {
 
-  def displayLog(): Bool = {
+  def displayLog: Bool = {
     val disp_begin, disp_end = WireInit(0.U(64.W))
     BoringUtils.addSink(disp_begin, "DISPALY_LOG_START")
     BoringUtils.addSink(disp_end, "DISPLAY_LOG_END")
@@ -26,14 +26,19 @@ object XSLog extends HasXSParameter {
     (GTimer() >= disp_begin) && (GTimer() <= disp_end)
   }
 
+  def xsLogLevel: UInt = {
+    val log_level = WireInit(0.U(64.W))
+    BoringUtils.addSink(log_level, "DISPLAY_LOG_LEVEL")
+    assert(log_level < XSLogLevel.maxId.U)
+    log_level
+  }
+
   def apply(debugLevel: XSLogLevel)
            (cond: Bool, pable: Printable)
            (implicit m: Module): Any = {
-    if (debugLevel >= LogLevel) {
-      when (cond && displayLog()) {
-        val commonInfo = p"[$debugLevel][time=${GTimer()}] ${m.name}: "
-        printf(commonInfo + pable)
-      }
+    val commonInfo = p"[$debugLevel][time=${GTimer()}] ${m.name}: "
+    when (debugLevel.id.U >= xsLogLevel && cond && displayLog) {
+      printf(commonInfo + pable)
     }
   }
 }
@@ -49,7 +54,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
 
   // Do not use that unless you have valid reasons
   def apply(cond: Bool = true.B)(body: => Unit): Any =
-    if (logLevel >= LogLevel) { when (cond && XSLog.displayLog()) { body } }
+    when (logLevel.id.U >= XSLog.xsLogLevel && cond && XSLog.displayLog) { body }
 }
 
 object XSDebug extends LogHelper(XSLogLevel.DEBUG)

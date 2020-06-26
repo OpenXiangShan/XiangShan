@@ -83,7 +83,9 @@ class Ibuffer extends XSModule {
           // is RVC
           io.out(i).bits.instr := Cat(0.U(16.W), ibuf(head_ptr + deq_idx))
           io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          XSDebug("%b[RVC]    PC=%d\n", Cat(0.U(16.W), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
+
+          XSDebug("%b[RVC] PC=%d\n", Cat(0.U(16.W), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
+
 
           io.out(i).bits.isRVC := true.B
           io.out(i).valid := true.B
@@ -92,7 +94,9 @@ class Ibuffer extends XSModule {
           // isn't RVC
           io.out(i).bits.instr := Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx))
           io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          XSDebug("%b[NORVC]  PC=%d\n", Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
+
+          XSDebug("%b[NORVC] PC=%d\n", Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx)), ibuf_pc(head_ptr + deq_idx))
+
 
           io.out(i).bits.isRVC := false.B
           io.out(i).valid := true.B

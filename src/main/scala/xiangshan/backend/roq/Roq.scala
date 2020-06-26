@@ -99,6 +99,14 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
   // TODO: commit store
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
+  XSInfo("")
+  XSInfo(){
+    printf("retired pcs are: ")
+    for(i <- 0 until CommitWidth){
+      when(io.commits(i).valid){ printf("%d:0x%x ", ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc) }
+    }
+    printf("\n")
+  }
 
   val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_)
 
@@ -133,19 +141,30 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     }
     printf("\n")
   }
+  
+  XSDebug(){
+    for(i <- 0 until RoqSize){
+      if(i % 4 == 0) XSDebug("")
+      printf("%x ", microOp(i).cf.pc)
+      when(!valid(i)){printf("- ")}
+      when(valid(i) && writebacked(i)){printf("w ")}
+      when(valid(i) && !writebacked(i)){printf("v ")}
+      if(i % 4 == 3) printf("\n")
+    }
+  }
 
   //difftest signals
   val firstValidCommit = ringBufferTail + PriorityMux(validCommit, VecInit(List.tabulate(CommitWidth)(_.U)))
   val emptyCsr = WireInit(0.U(64.W))
 
   if(!p.FPGAPlatform){
-    BoringUtils.addSink(RegNext(retireCounter), "difftestCommit")
-    BoringUtils.addSink(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
-    BoringUtils.addSink(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
-    BoringUtils.addSink(archRF, "difftestRegs")//arch RegFile
-    BoringUtils.addSink(RegNext(false.B), "difftestSkip")//SKIP
-    BoringUtils.addSink(RegNext(false.B), "difftestIsRVC")//FIXIT
-    BoringUtils.addSink(RegNext(0.U), "difftestIntrNO")
+    BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
+    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
+    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
+    BoringUtils.addSource(archRF, "difftestRegs")//arch RegFile
+    BoringUtils.addSource(RegNext(false.B), "difftestSkip")//SKIP
+    BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
+    BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
     //TODO: skip insts that commited in the same cycle ahead of exception
 
     //csr debug signals

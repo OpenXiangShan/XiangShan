@@ -6,7 +6,7 @@ import xiangshan._
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.utils.{XSDebug, XSInfo}
 
-class Dispatch2 extends XSModule with NeedImpl {
+class Dispatch2 extends XSModule {
   val io = IO(new Bundle() {
     // from dispatch queues
     val fromIntDq = Flipped(Vec(IntDqDeqWidth, DecoupledIO(new MicroOp)))
@@ -116,8 +116,8 @@ class Dispatch2 extends XSModule with NeedImpl {
       enq.bits.src2State := io.intPregRdy(11)
     }
 
-    XSInfo(enq.fire(), "instruction 0x%x with type %b enters reservation station %d from %d\n",
-      enq.bits.cf.pc, enq.bits.ctrl.fuType, i.U, instIdxes(i))
+    XSInfo(enq.fire(), "instruction 0x%x with type %b srcState(%d %d %d) enters reservation station %d from %d\n",
+      enq.bits.cf.pc, enq.bits.ctrl.fuType, enq.bits.src1State, enq.bits.src2State, enq.bits.src3State, i.U, instIdxes(i))
   }
 
   // responds to dispatch queue
@@ -221,9 +221,10 @@ class Dispatch2 extends XSModule with NeedImpl {
     io.enqIQData(i).bits.src3 := Mux(index_reg(i)(2), 0.U, src3)
 
     XSDebug(io.enqIQData(i).valid,
-      "instruction 0x%x reads operands from (%d, %d, %x), (%d, %d, %x), (%d, %d, %x)\n",
-      io.enqIQData(i).bits.uop.cf.pc, src1Type(i), src1Index(i), src1,
-      src2Type(i), src2Index(i), src2, src3Type(i), src3Index(i), src3)
+      "instruction 0x%x reads operands from (%d, %d, %d, %x), (%d, %d, %d, %x), (%d, %d, %d, %x)\n",
+      io.enqIQData(i).bits.uop.cf.pc, src1Type(i), src1Index(i), io.enqIQData(i).bits.uop.psrc1, src1,
+      src2Type(i), src2Index(i), io.enqIQData(i).bits.uop.psrc2, src2,
+      src3Type(i), src3Index(i), io.enqIQData(i).bits.uop.psrc3, src3)
   }
 
 }

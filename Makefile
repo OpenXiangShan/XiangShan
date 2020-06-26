@@ -86,11 +86,14 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
 
 
+# log will only be printed when (B<=GTimer<=E) && (L < loglevel)
+# use 'emu -h' to see more details
 B ?= 0
 E ?= -1
+L ?= ALL
 
 emu: $(EMU)
-	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
+	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -l $(L)
 
 cache:
 	$(MAKE) emu IMAGE=Makefile

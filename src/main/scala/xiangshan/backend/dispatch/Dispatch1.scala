@@ -3,7 +3,7 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils.{XSDebug, XSInfo}
+import xiangshan.utils.{XSDebug, XSInfo, XSWarn}
 
 case class DP1Config
 (
@@ -72,7 +72,6 @@ class Dispatch1 extends XSModule{
   for (i <- 0 until RenameWidth) {
     uop_nroq(i) := io.fromRename(i).bits
     uop_nroq(i).roqIdx := Mux(io.toRoq(i).ready, io.roqIdxs(i), roqIndexReg(i))
-    XSDebug(io.toRoq(i).fire(), "instruction 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
   }
 
   // uop can enqueue when rename.valid and roq.valid
@@ -93,6 +92,11 @@ class Dispatch1 extends XSModule{
   for (i <- 0 until RenameWidth) {
     io.toRoq(i).bits <> io.fromRename(i).bits
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
+    XSDebug(io.toRoq(i).fire(), "instruction 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
+    if (i > 0) {
+      XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid,
+        "roq handshake not continuous %d", i.U)
+    }
     io.fromRename(i).ready := all_recv
     XSDebug(io.fromRename(i).valid, "instruction 0x%x of type %b is in %d-th slot\n",
       io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)

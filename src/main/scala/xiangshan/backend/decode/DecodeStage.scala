@@ -36,16 +36,16 @@ class DecodeStage extends XSModule {
     decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
     // send CfCtrl without brTags and brMasks to brq
     io.toBrq(i).valid := io.in(i).valid && io.out(i).ready && decoders(i).io.out.cf.isBr
-    XSDebug(io.toBrq(i).valid && io.toBrq(i).ready, p"Branch instr detected. Sending it to BRQ.")
-    XSDebug(io.toBrq(i).valid && !io.toBrq(i).ready, p"Branch instr detected. BRQ full...waiting")
-    XSDebug(io.in(i).valid && !io.out(i).ready, p"DecBuf full...waiting")
+    XSDebug(io.toBrq(i).valid && io.toBrq(i).ready, p"Branch instr detected. Sending it to BRQ.\n")
+    XSDebug(io.toBrq(i).valid && !io.toBrq(i).ready, p"Branch instr detected. BRQ full...waiting\n")
+    XSDebug(io.in(i).valid && !io.out(i).ready, p"DecBuf full...waiting\n")
     decoderToBrq(i).brMask := DontCare
     decoderToBrq(i).brTag := DontCare
     io.toBrq(i).bits := decoderToBrq(i)
     // if brq returns ready, then assert valid and send CfCtrl with bfTag and brMask to DecBuffer
     io.out(i).valid := io.toBrq(i).ready && io.in(i).valid
-    XSDebug(io.out(i).valid && decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending branch instr to DecBuf")
-    XSDebug(io.out(i).valid && !decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending non-branch instr to DecBuf")
+    XSDebug(io.out(i).valid && decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending branch instr to DecBuf\n")
+    XSDebug(io.out(i).valid && !decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending non-branch instr to DecBuf\n")
     decoderToDecBuffer(i) := decoders(i).io.out
     decoderToDecBuffer(i).brTag := io.brTags(i)
     decoderToDecBuffer(i).brMask := io.brMasks(i)
