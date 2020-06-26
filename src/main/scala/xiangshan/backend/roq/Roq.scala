@@ -99,6 +99,14 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
   // TODO: commit store
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
+  XSInfo("")
+  XSInfo(){
+    printf("retired pcs are: ")
+    for(i <- 0 until CommitWidth){
+      when(io.commits(i).valid){ printf("%d:0x%x ", ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc) }
+    }
+    printf("\n")
+  }
 
   val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_)
 
@@ -132,6 +140,17 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       when(valid(i) && !writebacked(i)){printf("v")}
     }
     printf("\n")
+  }
+  
+  XSDebug(){
+    for(i <- 0 until RoqSize){
+      if(i % 4 == 0) XSDebug("")
+      printf("%x ", microOp(i).cf.pc)
+      when(!valid(i)){printf("- ")}
+      when(valid(i) && writebacked(i)){printf("w ")}
+      when(valid(i) && !writebacked(i)){printf("v ")}
+      if(i % 4 == 3) printf("\n")
+    }
   }
 
   //difftest signals
