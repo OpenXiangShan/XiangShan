@@ -85,8 +85,12 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 
 SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
 
+
+B ?= 0
+E ?= -1
+
 emu: $(EMU)
-	@$(EMU) -i $(IMAGE) $(SEED)
+	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
