@@ -6,7 +6,7 @@ import xiangshan._
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.utils.{XSDebug, XSInfo}
 
-class Dispatch2 extends XSModule with NeedImpl {
+class Dispatch2 extends XSModule {
   val io = IO(new Bundle() {
     // from dispatch queues
     val fromIntDq = Flipped(Vec(IntDqDeqWidth, DecoupledIO(new MicroOp)))
