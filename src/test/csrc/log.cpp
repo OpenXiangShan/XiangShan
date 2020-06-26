@@ -16,7 +16,7 @@ uint64_t getLogLevel(const char * str) {
   } else if(!strcmp("OFF", str)){
     return LOG_OFF;
   } else {
-    printf("Unknown log level!\n");
+    printf("Unknown verbosity level!\n");
     exit(-1);
   }
 }
