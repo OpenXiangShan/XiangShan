@@ -69,7 +69,7 @@ class FakeIFU extends XSModule with HasIFUConst {
   fakeCache.io.addr := pc
 
   io.fetchPacket.valid := !io.redirect.valid
-  io.fetchPacket.bits.mask := Fill(FetchWidth, 1.U(1.W)) << pc(2+log2Up(FetchWidth)-1, 2)
+  io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << pc(log2Up(FetchWidth*2), 1)
   io.fetchPacket.bits.pc := pc
   io.fetchPacket.bits.instrs := fakeCache.io.rdata
 
