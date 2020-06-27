@@ -4,8 +4,8 @@ SINGLETEST = ALL=min3
 
 B ?= 0
 E ?= -1
-L ?= ALL
-EMU_ARGS = B=$(B) E=$(E) L=$(L)
+V ?= ALL
+EMU_ARGS = B=$(B) E=$(E) V=$(V)
 
 # ------------------------------------------------------------------
 # bulid CPU and run dummy test

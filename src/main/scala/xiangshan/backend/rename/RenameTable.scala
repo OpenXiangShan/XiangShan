@@ -24,10 +24,10 @@ class RenameTable(float: Boolean) extends XSModule {
   })
 
   // speculative rename table
-  val spec_table = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(PhyRegIdxWidth.W))))
+  val spec_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
 
   // arch state rename table
-  val arch_table = RegInit(VecInit(Seq.fill(NRPhyRegs)(0.U(PhyRegIdxWidth.W))))
+  val arch_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
 
   for(w <- io.specWritePorts){
     when(w.wen){ spec_table(w.addr) := w.wdata }

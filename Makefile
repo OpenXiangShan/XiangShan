@@ -90,10 +90,10 @@ SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
 # use 'emu -h' to see more details
 B ?= 0
 E ?= -1
-L ?= ALL
+V ?= ALL
 
 emu: $(EMU)
-	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -l $(L)
+	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
