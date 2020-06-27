@@ -3,6 +3,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import bus.simplebus._
+import xiangshan.backend.rename.FreeListPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -49,7 +50,7 @@ class MicroOp extends CfCtrl {
 
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-  val freelistAllocPtr = UInt(PhyRegIdxWidth.W)
+  val freelistAllocPtr = new FreeListPtr
   val roqIdx = UInt(RoqIdxWidth.W)
 }
 
@@ -58,7 +59,7 @@ class Redirect extends XSBundle {
   val brTag = UInt(BrTagWidth.W)
   val isException = Bool()
   val roqIdx = UInt(ExtendedRoqIdxWidth.W)
-  val freelistAllocPtr = UInt((PhyRegIdxWidth+1).W)
+  val freelistAllocPtr = new FreeListPtr
 }
 
 class Dp1ToDp2IO extends XSBundle {

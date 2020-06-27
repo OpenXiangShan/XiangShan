@@ -4,14 +4,45 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 
-class FreeList extends XSModule {
+trait HasFreeListConsts extends HasXSParameter {
+  def FL_SIZE: Int = NRPhyRegs-32
+  def PTR_WIDTH = log2Up(FL_SIZE)
+}
+
+class FreeListPtr extends Bundle with HasFreeListConsts {
+
+  val flag = Bool()
+  val value = UInt(PTR_WIDTH.W)
+
+  final def +(inc: Bool): FreeListPtr = {
+    Mux(inc && (value ===  (FL_SIZE-1).U),
+      FreeListPtr(!flag, 0.U),
+      FreeListPtr(flag, value + inc)
+    )
+  }
+
+  final def ===(that: FreeListPtr): Bool = {
+    (this.value===that.value) && (this.flag===that.flag)
+  }
+}
+
+object FreeListPtr {
+  def apply(f: Bool, v:UInt): FreeListPtr = {
+    val ptr = Wire(new FreeListPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
+
+class FreeList extends XSModule with HasFreeListConsts {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
 
     // alloc new phy regs
     val allocReqs = Input(Vec(RenameWidth, Bool()))
     val pdests = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-    val allocPtrs = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
+    val allocPtrs = Output(Vec(RenameWidth, new FreeListPtr))
     val canAlloc = Output(Vec(RenameWidth, Bool()))
 
     // dealloc phy regs
@@ -19,18 +50,18 @@ class FreeList extends XSModule {
     val deallocPregs = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
   })
 
-  val freeList = RegInit(VecInit(Seq.tabulate(NRPhyRegs-1)(i => (i+1).U(PhyRegIdxWidth.W))))
-  val headPtr = RegInit(0.U((PhyRegIdxWidth+1).W))
-  val tailPtr = RegInit((1 << PhyRegIdxWidth).U((PhyRegIdxWidth+1).W))
+  // init: [32, 127]
+  val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE)(i => (i+32).U(PhyRegIdxWidth.W))))
+  val headPtr = RegInit(FreeListPtr(false.B, 0.U))
+  val tailPtr = RegInit(FreeListPtr(true.B, 0.U))
 
-  def ptrToIndex(ptr: UInt): UInt = ptr.tail(1)
-  def isEmpty(ptr1: UInt, ptr2: UInt): Bool = ptr1 === ptr2
+  def isEmpty(ptr1: FreeListPtr, ptr2: FreeListPtr): Bool = ptr1===ptr2
 
   // dealloc: commited instructions's 'old_pdest' enqueue
   var tailPtrNext = WireInit(tailPtr)
   for((deallocValid, deallocReg) <- io.deallocReqs.zip(io.deallocPregs)){
     when(deallocValid){
-      freeList(ptrToIndex(tailPtrNext)) := deallocReg
+      freeList(tailPtrNext.value) := deallocReg
     }
     tailPtrNext = tailPtrNext + deallocValid
   }
@@ -43,7 +74,7 @@ class FreeList extends XSModule {
     (((allocReq, canAlloc),pdest),allocPtr) <- io.allocReqs.zip(io.canAlloc).zip(io.pdests).zip(io.allocPtrs)
   ){
     canAlloc := !empty
-    pdest := freeList(ptrToIndex(headPtrNext))
+    pdest := freeList(headPtrNext.value)
     allocPtr := headPtrNext
     headPtrNext = headPtrNext + (allocReq && canAlloc)
     empty = isEmpty(headPtrNext, tailPtr)

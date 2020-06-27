@@ -3,6 +3,7 @@ package xiangshan.backend.issue
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.rename.FreeListPtr
 import xiangshan.utils._
 
 trait IQConst{
@@ -119,7 +120,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val prfSrc3 = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val prfDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
   val oldPDest = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
-  val freelistAllocPtr = Reg(Vec(iqSize, UInt(PhyRegIdxWidth.W)))
+  val freelistAllocPtr = Reg(Vec(iqSize, new FreeListPtr))
   val roqIdx  = Reg(Vec(iqSize, UInt(RoqIdxWidth.W)))
 
   val instRdy = WireInit(VecInit(List.tabulate(iqSize)(i => src1Rdy(i) && src2Rdy(i) && src3Rdy(i)&& valid(i))))
