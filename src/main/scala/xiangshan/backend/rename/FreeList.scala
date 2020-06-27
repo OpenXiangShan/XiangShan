@@ -19,7 +19,7 @@ class FreeList extends XSModule {
     val deallocPregs = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
   })
 
-  val freeList = RegInit(VecInit(Seq.tabulate(NRPhyRegs)(i => i.U(PhyRegIdxWidth.W))))
+  val freeList = RegInit(VecInit(Seq.tabulate(NRPhyRegs-1)(i => (i+1).U(PhyRegIdxWidth.W))))
   val headPtr = RegInit(0.U((PhyRegIdxWidth+1).W))
   val tailPtr = RegInit((1 << PhyRegIdxWidth).U((PhyRegIdxWidth+1).W))
 
