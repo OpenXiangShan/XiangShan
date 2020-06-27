@@ -20,7 +20,7 @@ object XSLog {
 
   def displayLog: Bool = {
     val disp_begin, disp_end = WireInit(0.U(64.W))
-    BoringUtils.addSink(disp_begin, "DISPALY_LOG_START")
+    BoringUtils.addSink(disp_begin, "DISPLAY_LOG_START")
     BoringUtils.addSink(disp_end, "DISPLAY_LOG_END")
     assert(disp_begin <= disp_end)
     (GTimer() >= disp_begin) && (GTimer() <= disp_end)
