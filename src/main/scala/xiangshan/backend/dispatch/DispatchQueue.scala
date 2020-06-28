@@ -90,8 +90,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   XSDebug(num_deq > 0.U, name + ": num_deq = %d, head = (%d -> %d)\n",
       num_deq, head, (head + num_deq) % size.U)
-  XSDebug(num_enq > 0.U, name + "] num_enq = %d, tail = (%d -> %d)\n",
+  XSDebug(num_enq > 0.U, name + ": num_enq = %d, tail = (%d -> %d)\n",
       num_enq, tail, (tail + num_enq) % size.U)
-  XSDebug(valid_entries > 0.U, name + "] valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
+  XSDebug(valid_entries > 0.U, name + ": valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
       valid_entries, head_direction, head, tail_direction, tail)
 }

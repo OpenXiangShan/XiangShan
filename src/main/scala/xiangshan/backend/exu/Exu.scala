@@ -107,6 +107,7 @@ trait HasExeUnits{
   val bjUnits = bruExeUnit +: aluExeUnits
 
   exeUnits.foreach(_.io.dmem := DontCare)
+  exeUnits.foreach(_.io.scommit := DontCare)
 }
 
 class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {

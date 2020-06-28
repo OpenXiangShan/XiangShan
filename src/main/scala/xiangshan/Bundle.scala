@@ -91,6 +91,7 @@ class ExuIO extends XSBundle {
 
   // for Lsu
   val dmem = new SimpleBusUC
+  val scommit = Input(UInt(3.W))
 }
 
 class RoqCommit extends XSBundle {
