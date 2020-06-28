@@ -32,7 +32,7 @@ class Brq extends XSModule {
   val brMask = RegInit(0.U(BrqSize.W))
   val wbFlags = RegInit(VecInit(Seq.fill(BrqSize)(false.B)))
 
-  val headPtr, tailPtr = RegInit(0.U((BrqSize+1).W))
+  val headPtr, tailPtr = RegInit(0.U((BrTagWidth+1).W))
 
   def ptrToIndex(ptr: UInt): UInt = ptr.tail(1)
   def isEmpty(ptr1: UInt, ptr2: UInt): Bool = ptr1 === ptr2
