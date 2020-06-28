@@ -16,6 +16,11 @@ class Decoder extends XSModule with HasInstrType {
     val in = Input(new CtrlFlow)
     val out = Output(new CfCtrl)
   })
+
+
+  io.out := DontCare // FIXME: remove me!!!
+  io.out.cf := io.in
+
   val hasIntr = Wire(Bool())
   val instr: UInt = io.in.instr
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
@@ -30,9 +35,6 @@ class Decoder extends XSModule with HasInstrType {
 //  val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
 //    ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable)
 
-  io.out := DontCare
-
-  io.out.cf := io.in
   io.out.ctrl.fuOpType := fuOpType
   io.out.ctrl.fuType := fuType
 
@@ -149,12 +151,11 @@ class Decoder extends XSModule with HasInstrType {
 
   //output signals
 
-  io.out.cf <> io.in
-
 //  Debug(){
 //    when(io.out.fire()){printf("[IDU] issue: pc %x npc %x instr %x\n", io.out.bits.cf.pc, io.out.bits.cf.pnpc, io.out.bits.cf.instr)}
 //  }
 
+  //FIXME: move it to ROB
   val intrVec = WireInit(0.U(12.W))
   BoringUtils.addSink(intrVec, "intrVecIDU")
   io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
