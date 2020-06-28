@@ -23,11 +23,16 @@ class Brq extends XSModule {
     val redirect = Output(Valid(new Redirect))
   })
 
-  val brQueue = Reg(Vec(BrqSize, Valid(new Redirect)))
+  class BrqEntry extends Bundle {
+    val npc = UInt(VAddrBits.W)
+    val redirect = new Redirect
+  }
+
+  val brQueue = Reg(Vec(BrqSize, new BrqEntry))
   val brMask = RegInit(0.U(BrqSize.W))
   val wbFlags = RegInit(VecInit(Seq.fill(BrqSize)(false.B)))
 
-  val headPtr, tailPtr = RegInit(0.U((BrqSize+1).W))
+  val headPtr, tailPtr = RegInit(0.U((BrTagWidth+1).W))
 
   def ptrToIndex(ptr: UInt): UInt = ptr.tail(1)
   def isEmpty(ptr1: UInt, ptr2: UInt): Bool = ptr1 === ptr2
@@ -45,8 +50,8 @@ class Brq extends XSModule {
     wbFlags(headIdx) := false.B
   }
   headPtr := headPtrNext
-  io.redirect.valid := deqValid && deqEntry.valid
-  io.redirect.bits := deqEntry.bits
+  io.redirect.valid := deqValid && (deqEntry.npc =/= deqEntry.redirect.target)
+  io.redirect.bits := deqEntry.redirect
 
   // branch insts enq
   var full = WireInit(isFull(headPtrNext, tailPtr))
@@ -56,6 +61,8 @@ class Brq extends XSModule {
     val tailIdx = ptrToIndex(tailPtrNext)
     enq.ready := !full
     brTag := tailIdx
+    // TODO: check rvc and use predict npc
+    when(enq.fire()){ brQueue(tailIdx).npc := enq.bits.cf.pc + 4.U }
     brMaskNext = brMaskNext | Mux(enq.fire(), UIntToOH(tailIdx), 0.U)
     brMask := brMaskNext
     tailPtrNext = tailPtrNext + enq.fire()
@@ -66,9 +73,9 @@ class Brq extends XSModule {
 
   // exu write back
   for(exuWb <- io.exuRedirect){
-    when(exuWb.valid){
+    when(exuWb.valid && exuWb.bits.redirect.valid){
       wbFlags(exuWb.bits.uop.brTag) := true.B
-      brQueue(exuWb.bits.uop.brTag) := exuWb.bits.redirect
+      brQueue(exuWb.bits.uop.brTag).redirect := exuWb.bits.redirect.bits
     }
   }
 
