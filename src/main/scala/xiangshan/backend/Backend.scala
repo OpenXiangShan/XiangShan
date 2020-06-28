@@ -84,6 +84,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   // })
 
   lsuExeUnits.foreach(_.io.dmem <> io.dmem)
+  lsuExeUnits.foreach(_.io.scommit <> roq.io.scommit)
 
   io.frontend.redirect <> redirect
   io.frontend.commits <> roq.io.commits
