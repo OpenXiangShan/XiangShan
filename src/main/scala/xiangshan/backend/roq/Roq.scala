@@ -69,12 +69,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
       exuData(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.data
       exuDebug(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.debug
+      XSInfo("0x%x writebacks 0x%x\n", io.exeWbResults(i).bits.uop.cf.pc, io.exeWbResults(i).bits.data)
     }
   }
   val firedWriteback = VecInit((0 until exuConfig.ExuCnt).map(io.exeWbResults(_).fire())).asUInt
-  when(PopCount(firedWriteback) > 0.U){
-    XSInfo("writebacked %d insts\n", PopCount(firedWriteback))
-  }
+  XSInfo(PopCount(firedWriteback) > 0.U, "writebacked %d insts\n", PopCount(firedWriteback))
 
   // Commit uop to Rename
   for(i <- 0 until CommitWidth){
@@ -103,7 +102,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   XSInfo(){
     printf("retired pcs are: ")
     for(i <- 0 until CommitWidth){
-      when(io.commits(i).valid){ printf("%d:0x%x ", ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc) }
+      when(io.commits(i).valid){ printf("%d: 0x%x ", ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc) }
     }
     printf("\n")
   }

@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
+import xiangshan.utils.XSInfo
 
 case class ExuConfig
 (
@@ -125,5 +126,10 @@ class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {
     io.out(i).valid := io.in(i).valid
     io.out(i).bits := io.in(i).bits
     io.in(i).ready := true.B
+  }
+
+  for (i <- 0 until n) {
+    XSInfo(io.out(i).valid, "out(%d) pc(0x%x) writebacks 0x%x to pdest(%d) ldest(%d)\n", i.U, io.out(i).bits.data,
+      io.out(i).bits.uop.cf.pc, io.out(i).bits.uop.pdest, io.out(i).bits.uop.ctrl.ldest)
   }
 }
