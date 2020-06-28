@@ -121,13 +121,9 @@ class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {
   }
   io.out <> DontCare
 
-  for (i <- 0 until 4) {
-    io.out(i).valid := io.in(i+1).valid
-    io.out(i).bits := io.in(i+1).bits
-    io.in(i+1).ready := true.B
+  for (i <- 0 until m) {
+    io.out(i).valid := io.in(i).valid
+    io.out(i).bits := io.in(i).bits
+    io.in(i).ready := true.B
   }
 }
-
-
-
-
