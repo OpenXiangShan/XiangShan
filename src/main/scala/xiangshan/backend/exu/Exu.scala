@@ -39,10 +39,6 @@ abstract class Exu
   val io = IO(new ExuIO)
 }
 
-class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true) with NeedImpl{
-  override def toString: String = "Bru"
-}
-
 class Mul extends Exu(FuType.mul.litValue()) with NeedImpl{
   override def toString: String = "Mul"
 }
