@@ -8,7 +8,7 @@ import xiangshan.backend.rename.FreeListPtr
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
   val instrs = Vec(FetchWidth, UInt(32.W))
-  val mask = UInt(FetchWidth.W)
+  val mask = UInt((FetchWidth*2).W)
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
 }
 
