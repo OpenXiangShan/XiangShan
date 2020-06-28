@@ -216,7 +216,7 @@ class Dispatch2 extends XSModule {
         io.enqIQData(i).bits.uop.cf.pc, Mux(index_reg(i)(2), 0.U, src1))
     val src2 = Mux(src2Type(i)(1), 0.U,
       Mux(src2Type(i)(0), io.readFpRf(src2Index(i)).data, io.readIntRf(src2Index(i)).data))
-    io.enqIQData(i).bits.src2 := Mux(io.enqIQData(i).bits.uop.ctrl.src1Type === SrcType.imm,
+    io.enqIQData(i).bits.src2 := Mux(io.enqIQData(i).bits.uop.ctrl.src2Type === SrcType.imm,
       io.enqIQData(i).bits.uop.ctrl.imm, Mux(index_reg(i)(2), 0.U, src2))
     val src3 = Mux(src3Type(i)(1), 0.U,
       Mux(src3Type(i)(0), io.readFpRf(src3Index(i)).data, io.readIntRf(src3Index(i)).data))
