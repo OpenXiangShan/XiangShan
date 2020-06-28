@@ -15,6 +15,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val redirect = Output(Valid(new Redirect))
     val exeWbResults = Vec(exuConfig.ExuCnt, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
+    val scommit = Output(UInt(3.W))
   })
 
   val microOp = Mem(RoqSize, new MicroOp)
@@ -97,7 +98,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     ringBufferTailExtended := ringBufferTailExtended + PopCount(validCommit)
   }
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
-  // TODO: commit store
+
+  // commit store
+  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.ldu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
+  io.scommit := PopCount(validScommit.asUInt)
+
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
   XSInfo("")
   XSInfo(){
