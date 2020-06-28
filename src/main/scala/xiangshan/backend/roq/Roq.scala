@@ -65,19 +65,19 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
 
   // Writeback
+  val firedWriteback = VecInit((0 until exuConfig.ExuCnt).map(io.exeWbResults(_).fire())).asUInt
+  XSInfo(PopCount(firedWriteback) > 0.U, "writebacked %d insts\n", PopCount(firedWriteback))
   for(i <- 0 until exuConfig.ExuCnt){
     when(io.exeWbResults(i).fire()){
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
       exuData(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.data
       exuDebug(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.debug
+      XSInfo(io.exeWbResults(i).valid, "writebacked pc 0x%x wen %d data 0x%x\n", 
+        microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc,
+        microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, 
+        io.exeWbResults(i).bits.data
+      )
     }
-  }
-  val firedWriteback = VecInit((0 until exuConfig.ExuCnt).map(io.exeWbResults(_).fire())).asUInt
-  when(PopCount(firedWriteback) > 0.U){
-    XSInfo("writebacked %d insts\n", PopCount(firedWriteback))
-  }
-  for(i <- 0 until exuConfig.ExuCnt){
-    XSInfo(io.exeWbResults(i).fire(), "writebacked pc %x wen %d data %x\n", microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc, microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, io.exeWbResults(i).bits.data)
   }
 
   // Commit uop to Rename
@@ -86,7 +86,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       val canCommit = if(i!=0) io.commits(i-1).valid else true.B
       io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
       io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-      when(io.commits(ringBufferTail+i.U).valid && microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
+      when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
     }.otherwise{//state === s_walk
       io.commits(i).valid := valid(ringBufferWalk+i.U) && writebacked(ringBufferWalk+i.U)
@@ -113,20 +113,16 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   io.scommit := PopCount(validScommit.asUInt)
 
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
-  XSInfo("")
-  XSInfo(){
-    printf("retired pcs are: ")
-    for(i <- 0 until CommitWidth){
-      when(io.commits(i).valid){ printf("%d:0x%x ", ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc) }
-    }
-    printf("\n")
+  for(i <- 0 until CommitWidth) {
+      XSInfo(io.commits(i).valid, "retired pc at commmit(%d) is: %d 0x%x\n",
+        i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
   }
 
   val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_)
 
-  when(state===s_walk){
+  when(state===s_walk) {
     //exit walk state when all roq entry is commited
-    when(walkFinished){
+    when(walkFinished) {
       state := s_idle
     }
     ringBufferWalkExtended := ringBufferWalkExtended + CommitWidth.U

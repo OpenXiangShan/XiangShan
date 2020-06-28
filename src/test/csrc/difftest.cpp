@@ -39,7 +39,6 @@ void difftest_skip_dut() {
 void init_difftest(uint64_t *reg) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
-  printf("REF_SO\n");
   assert(handle);
 
   ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t))dlsym(handle, "difftest_memcpy_from_dut");
