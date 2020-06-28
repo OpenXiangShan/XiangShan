@@ -39,6 +39,7 @@ void difftest_skip_dut() {
 void init_difftest(uint64_t *reg) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
+  printf("REF_SO\n");
   assert(handle);
 
   ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t))dlsym(handle, "difftest_memcpy_from_dut");
@@ -96,6 +97,7 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   static uint64_t nemu_this_pc = 0x80000000;
   static uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
+  static uint32_t retire_cnt_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static int pc_retire_pointer = 7;
 
   if (skip) {
@@ -108,6 +110,7 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
     pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
     pc_retire_queue[pc_retire_pointer] = this_pc;
     inst_retire_queue[pc_retire_pointer] = this_inst;
+    retire_cnt_queue[pc_retire_pointer] = commit;
     return 0;
   }
 
@@ -124,6 +127,7 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
   pc_retire_queue[pc_retire_pointer] = this_pc;
   inst_retire_queue[pc_retire_pointer] = this_inst;
+  retire_cnt_queue[pc_retire_pointer] = commit;
   
   // TODO: fix mip.mtip
   // int isCSR = ((this_inst & 0x7f) ==  0x73);
@@ -146,7 +150,7 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
     printf("\n==============Retire Trace==============\n");
     int j;
     for(j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++){
-      printf("retire trace [%x]: pc %010lx inst %08x %s\n", j, pc_retire_queue[j], inst_retire_queue[j], (j==pc_retire_pointer)?"<--":"");
+      printf("retire trace [%x]: pc %010lx inst %08x cmtcnt %d %s\n", j, pc_retire_queue[j], inst_retire_queue[j], retire_cnt_queue[j], (j==pc_retire_pointer)?"<--":"");
     }
     printf("\n==============  Reg Diff  ==============\n");
     ref_isa_reg_display();

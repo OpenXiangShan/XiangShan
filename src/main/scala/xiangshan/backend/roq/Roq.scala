@@ -77,7 +77,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     XSInfo("writebacked %d insts\n", PopCount(firedWriteback))
   }
   for(i <- 0 until exuConfig.ExuCnt){
-    XSInfo("writebacked pc %x wen %d data %d\n", microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc, microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, io.exeWbResults(i).bits.data)
+    XSInfo(io.exeWbResults(i).fire(), "writebacked pc %x wen %d data %x\n", microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc, microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, io.exeWbResults(i).bits.data)
   }
 
   // Commit uop to Rename
@@ -86,7 +86,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       val canCommit = if(i!=0) io.commits(i-1).valid else true.B
       io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
       io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-      when(microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
+      when(io.commits(ringBufferTail+i.U).valid && microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
     }.otherwise{//state === s_walk
       io.commits(i).valid := valid(ringBufferWalk+i.U) && writebacked(ringBufferWalk+i.U)
@@ -94,6 +94,12 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       valid(ringBufferWalk+i.U) := false.B
     }
     io.commits(i).bits.isWalk := state === s_walk
+  }
+  for(i <- 0 until CommitWidth){
+    XSInfo(io.commits(i).valid && state =/= s_walk, "retired pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
+  }
+  for(i <- 0 until CommitWidth){
+    XSInfo(io.commits(i).valid && state === s_walk, "walked pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
   }
 
   val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
