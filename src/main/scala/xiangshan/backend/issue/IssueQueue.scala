@@ -28,38 +28,26 @@ sealed class CmpInputBundle extends IQBundle{
 }
 
 
-sealed class CompareCircuitUnit extends IQModule {
-  val io = IO(new Bundle(){
-    val in1 = new CmpInputBundle
-    val in2 = new CmpInputBundle
-    val out = Flipped(new CmpInputBundle)
-  })
-
-  val roqIdx1 = io.in1.roqIdx
-  val roqIdx2 = io.in2.roqIdx
-  val iqIdx1  = io.in1.iqIdx
-  val iqIdx2  = io.in2.iqIdx
-
-  val inst1Rdy = io.in1.instRdy
-  val inst2Rdy = io.in2.instRdy
-
-  io.out.instRdy := inst1Rdy | inst2Rdy
-  io.out.roqIdx := roqIdx2
-  io.out.iqIdx := iqIdx2
-
-  when((inst1Rdy && !inst2Rdy) || (inst1Rdy && inst2Rdy && (roqIdx1 < roqIdx2))){
-    io.out.roqIdx := roqIdx1
-    io.out.iqIdx := iqIdx1
-  }
-
-}
-
-object CCU{
+object CompareCircuitUnit{
   def apply(in1: CmpInputBundle, in2: CmpInputBundle) = {
-    val CCU = Module(new CompareCircuitUnit)
-    CCU.io.in1 <> in1
-    CCU.io.in2 <> in2
-    CCU.io.out
+    val out = Wire(new CmpInputBundle)
+    val roqIdx1 = in1.roqIdx
+    val roqIdx2 = in2.roqIdx
+    val iqIdx1  = in1.iqIdx
+    val iqIdx2  = in2.iqIdx
+
+    val inst1Rdy = in1.instRdy
+    val inst2Rdy = in2.instRdy
+
+    out.instRdy := inst1Rdy | inst2Rdy
+    out.roqIdx := roqIdx2
+    out.iqIdx := iqIdx2
+
+    when((inst1Rdy && !inst2Rdy) || (inst1Rdy && inst2Rdy && (roqIdx1 < roqIdx2))){
+      out.roqIdx := roqIdx1
+      out.iqIdx := iqIdx1
+    }
+    out
   }
 }
 
@@ -67,7 +55,7 @@ object ParallelSel {
   def apply(iq: Seq[CmpInputBundle]):  CmpInputBundle = {
     iq match {
       case Seq(a) => a
-      case Seq(a, b) => CCU(a, b)
+      case Seq(a, b) => CompareCircuitUnit(a, b)
       case _ =>
         apply(Seq(apply(iq take iq.size/2), apply(iq drop iq.size/2)))
     }
