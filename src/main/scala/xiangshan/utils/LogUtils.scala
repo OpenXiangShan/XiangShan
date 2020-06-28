@@ -20,7 +20,7 @@ object XSLog {
 
   def displayLog: Bool = {
     val disp_begin, disp_end = WireInit(0.U(64.W))
-    BoringUtils.addSink(disp_begin, "DISPALY_LOG_START")
+    BoringUtils.addSink(disp_begin, "DISPLAY_LOG_START")
     BoringUtils.addSink(disp_end, "DISPLAY_LOG_END")
     assert(disp_begin <= disp_end)
     (GTimer() >= disp_begin) && (GTimer() <= disp_end)
@@ -35,8 +35,8 @@ object XSLog {
 
   def apply(debugLevel: XSLogLevel)
            (cond: Bool, pable: Printable)
-           (implicit m: Module): Any = {
-    val commonInfo = p"[$debugLevel][time=${GTimer()}] ${m.name}: "
+           (implicit name: String): Any = {
+    val commonInfo = p"[$debugLevel][time=${GTimer()}] $name: "
     when (debugLevel.id.U >= xsLogLevel && cond && displayLog) {
       printf(commonInfo + pable)
     }
@@ -45,12 +45,12 @@ object XSLog {
 
 sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter {
 
-  def apply(cond: Bool, fmt: String, data: Bits*)(implicit m: Module): Any =
+  def apply(cond: Bool, fmt: String, data: Bits*)(implicit name: String): Any =
     apply(cond, Printable.pack(fmt, data:_*))
-  def apply(cond: Bool, pable: Printable)(implicit m: Module): Any = XSLog(logLevel)(cond, pable)
-  def apply(fmt: String, data: Bits*)(implicit m: Module): Any =
+  def apply(cond: Bool, pable: Printable)(implicit name: String): Any = XSLog(logLevel)(cond, pable)
+  def apply(fmt: String, data: Bits*)(implicit name: String): Any =
     apply(true.B, Printable.pack(fmt, data:_*))
-  def apply(pable: Printable)(implicit m: Module): Any = XSLog(logLevel)(true.B, pable)
+  def apply(pable: Printable)(implicit name: String): Any = XSLog(logLevel)(true.B, pable)
 
   // Do not use that unless you have valid reasons
   def apply(cond: Bool = true.B)(body: => Unit): Any =

@@ -78,7 +78,7 @@ class XSSimTop extends Module {
   log_end := io.logCtrl.log_end
   log_level := io.logCtrl.log_level
 
-  BoringUtils.addSource(log_begin, "DISPALY_LOG_START")
+  BoringUtils.addSource(log_begin, "DISPLAY_LOG_START")
   BoringUtils.addSource(log_end, "DISPLAY_LOG_END")
   BoringUtils.addSource(log_level, "DISPLAY_LOG_LEVEL")
 }

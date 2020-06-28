@@ -69,7 +69,7 @@ trait HasXSParameter {
 }
 
 trait HasXSLog { this: Module =>
-  implicit val _implict_module = this
+  implicit val moduleName: String = this.name
 }
 
 abstract class XSModule extends Module

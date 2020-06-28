@@ -43,7 +43,7 @@ void Emulator::print_help(const char *file) {
 std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
   std::vector<const char *> args = { argv[0] };
   int o;
-  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:b:e:l:", long_options, NULL)) != -1) {
+  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:b:e:v:", long_options, NULL)) != -1) {
     switch (o) {
       case 's': 
         if(std::string(optarg) != "NO_SEED") {

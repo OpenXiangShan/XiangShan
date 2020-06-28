@@ -51,7 +51,7 @@ class Dispatch1 extends XSModule{
 
   // latch indexes from roq in case of DQ not fire
   val roqIndexReg = Reg(Vec(RenameWidth, UInt((1 + RoqIdxWidth).W)))
-  val roqIndexRegValid = Reg(Vec(RenameWidth, Bool()))
+  val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   for (i <- 0 until RenameWidth) {
     // dispatch queue does not accept the MicroOp
     // however, ROQ has fired
