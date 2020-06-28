@@ -130,7 +130,7 @@ class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {
   }
 
   for (i <- 0 until n) {
-    XSInfo(io.out(i).valid, "out(%d) pc(0x%x) writebacks 0x%x to pdest(%d) ldest(%d)\n", i.U, io.out(i).bits.data,
-      io.out(i).bits.uop.cf.pc, io.out(i).bits.uop.pdest, io.out(i).bits.uop.ctrl.ldest)
+    XSInfo(io.out(i).valid, "out(%d) pc(0x%x) writebacks 0x%x to pdest(%d) ldest(%d)\n", i.U, io.out(i).bits.uop.cf.pc,
+      io.out(i).bits.data, io.out(i).bits.uop.pdest, io.out(i).bits.uop.ctrl.ldest)
   }
 }
