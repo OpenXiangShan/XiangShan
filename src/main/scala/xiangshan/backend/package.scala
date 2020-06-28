@@ -16,7 +16,7 @@ package object backend {
     def wrti = "b00_101".U
     def seti = "b00_110".U
     def clri = "b00_111".U
-    
+
     // 1. move(x2f)
     // FIXME: temp decode, should be fixed when use it
     def fmv_w_x = "b01_000".U
@@ -27,7 +27,7 @@ package object backend {
     def fencei = "b01_001".U
     def sfence_vma = "b01_010".U
 
-    // 3. jal
+    // 3. jump
     def jal  = "b11_000".U
     def jalr = "b11_010".U
     def call = "b11_011".U
