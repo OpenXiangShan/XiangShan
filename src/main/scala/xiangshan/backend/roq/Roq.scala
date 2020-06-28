@@ -15,6 +15,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val redirect = Output(Valid(new Redirect))
     val exeWbResults = Vec(exuConfig.ExuCnt, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
+    val scommit = Output(UInt(3.W))
   })
 
   val microOp = Mem(RoqSize, new MicroOp)
@@ -75,6 +76,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   when(PopCount(firedWriteback) > 0.U){
     XSInfo("writebacked %d insts\n", PopCount(firedWriteback))
   }
+  for(i <- 0 until exuConfig.ExuCnt){
+    XSInfo("writebacked pc %x wen %d data %d\n", microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc, microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, io.exeWbResults(i).bits.data)
+  }
 
   // Commit uop to Rename
   for(i <- 0 until CommitWidth){
@@ -82,7 +86,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       val canCommit = if(i!=0) io.commits(i-1).valid else true.B
       io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
       io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-      when(microOp(i).ctrl.rfWen){ archRF(microOp(i).ctrl.ldest) := exuData(i) }
+      when(microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
     }.otherwise{//state === s_walk
       io.commits(i).valid := valid(ringBufferWalk+i.U) && writebacked(ringBufferWalk+i.U)
@@ -97,7 +101,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     ringBufferTailExtended := ringBufferTailExtended + PopCount(validCommit)
   }
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
-  // TODO: commit store
+
+  // commit store
+  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.ldu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
+  io.scommit := PopCount(validScommit.asUInt)
+
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
   XSInfo("")
   XSInfo(){
