@@ -23,5 +23,9 @@ class DecodeBuffer extends XSModule {
 
   q.io.flush := io.redirect.valid
   q.io.enq <> io.in
-  io.out <> q.io.deq
+  for((out, deq) <- io.out.zip(q.io.deq)){
+    out.bits := deq.bits
+    out.valid := deq.valid && !io.redirect.valid
+    deq.ready := out.ready
+  }
 }

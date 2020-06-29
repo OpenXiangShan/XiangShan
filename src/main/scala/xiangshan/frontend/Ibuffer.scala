@@ -117,9 +117,9 @@ class Ibuffer extends XSModule {
   when(io.flush) {
     for(i <- 0 until IBufSize) {
       ibuf_valid(i) := false.B
-      head_ptr := 0.U
-      tail_ptr := 0.U
     }
+    head_ptr := 0.U
+    tail_ptr := 0.U
 
     for(i <- 0 until DecodeWidth) {
       io.out(i).valid := false.B

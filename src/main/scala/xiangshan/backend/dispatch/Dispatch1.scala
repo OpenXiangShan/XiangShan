@@ -32,6 +32,7 @@ class Dispatch1 extends XSModule{
   val cancelled = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
     cancelled(i) := ((io.fromRename(i).bits.brMask & UIntToOH(io.redirect.bits.brTag)) =/= 0.U) && io.redirect.valid
+    XSDebug(io.redirect.valid, p"pc=${Hexadecimal(io.fromRename(i).bits.cf.pc)} brMask:${Binary(io.fromRename(i).bits.brMask)} brTag:${io.redirect.bits.brTag}\n")
   }
 
   // enqueue handshake
@@ -51,7 +52,7 @@ class Dispatch1 extends XSModule{
 
   // latch indexes from roq in case of DQ not fire
   val roqIndexReg = Reg(Vec(RenameWidth, UInt((1 + RoqIdxWidth).W)))
-  val roqIndexRegValid = Reg(Vec(RenameWidth, Bool()))
+  val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   for (i <- 0 until RenameWidth) {
     // dispatch queue does not accept the MicroOp
     // however, ROQ has fired
@@ -91,7 +92,7 @@ class Dispatch1 extends XSModule{
   val all_recv = recv_vector.reduce((x, y) => x && y).asBool()
   for (i <- 0 until RenameWidth) {
     io.toRoq(i).bits <> io.fromRename(i).bits
-    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
+    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i) && !cancelled(i)
     XSDebug(io.toRoq(i).fire(), "instruction 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
     if (i > 0) {
       XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid,
