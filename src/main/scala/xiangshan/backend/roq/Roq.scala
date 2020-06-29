@@ -118,7 +118,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
   }
 
-  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_)
+  //TODO: add walkFin Vec, io.commits(i).valid depends on it
+  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
 
   when(state===s_walk) {
     //exit walk state when all roq entry is commited
@@ -129,11 +130,12 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     XSInfo("rolling back: head %d tail %d walk %d\n", ringBufferHead, ringBufferTail, ringBufferWalk)
   }
 
+  val newHead = io.brqRedirect.bits.roqIdx + 1.U
   when(io.brqRedirect.valid){
     state := s_walk
-    ringBufferWalkExtended := io.brqRedirect.bits.roqIdx
+    ringBufferWalkExtended := newHead
     ringBufferWalkTarget := ringBufferHeadExtended
-    ringBufferHeadExtended := io.brqRedirect.bits.roqIdx
+    ringBufferHeadExtended := newHead
   }
 
   // roq redirect only used for exception
