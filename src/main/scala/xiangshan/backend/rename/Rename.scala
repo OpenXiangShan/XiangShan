@@ -62,8 +62,8 @@ class Rename extends XSModule {
   val uops = Wire(Vec(RenameWidth, new MicroOp))
 
   uops.foreach( uop => {
-    uop.brMask := DontCare
-    uop.brTag := DontCare
+//    uop.brMask := DontCare
+//    uop.brTag := DontCare
     uop.src1State := DontCare
     uop.src2State := DontCare
     uop.src3State := DontCare
@@ -71,9 +71,11 @@ class Rename extends XSModule {
   })
 
   var last_can_alloc = WireInit(true.B)
-  for(i <- 0 until RenameWidth){
+  for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
+    uops(i).brMask := io.in(i).bits.brMask
+    uops(i).brTag := io.in(i).bits.brTag
 
     // alloc a new phy reg
     val needFpDest = io.in(i).valid && needDestReg(fp = true, io.in(i).bits)
