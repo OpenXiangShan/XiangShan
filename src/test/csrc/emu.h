@@ -142,7 +142,7 @@ class Emulator {
         set_abort();
       }
 
-      printf("xsstatus pc=%lx commit=%d\n", dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_commit);//FIXIT: delete me when dummy test is passed
+      // printf("xsstatus pc=%lx commit=%d\n", dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_commit);//FIXIT: delete me when dummy test is passed
 
       if (!hascommit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
         hascommit = 1;

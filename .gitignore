@@ -340,3 +340,6 @@ hs_err_pid*
 
 # vscode environment
 .vscode
+
+stale_outputs_checked
+

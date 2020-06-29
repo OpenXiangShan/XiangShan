@@ -26,4 +26,6 @@ enum {
   DIFFTEST_NR_REG
 };
 
+#define DEBUG_SHOW_COMMIT_PC
+
 #endif

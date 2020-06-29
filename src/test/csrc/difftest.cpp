@@ -8,7 +8,7 @@
 # error Please define REF_SO to the path of NEMU shared object file
 #endif
 
-#define printCSR(x) printf(""#x": 0x%016lx    ", x)
+#define printCSR(x) printf(""#x": 0x%016lx    ", (long unsigned int)(x))
 
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
@@ -119,8 +119,28 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   }
 
   assert(commit > 0 && commit <= 6);
+  #ifdef DEBUG_SHOW_COMMIT_PC
+  static uint64_t last_step_r[DIFFTEST_NR_REG];
+  static uint64_t last_step_pc = 0x80000000;
+  uint64_t intermediate_r[DIFFTEST_NR_REG];
+  for (int i = 0; i < commit; i++) {
+    ref_difftest_exec(1);
+    ref_difftest_getregs(&intermediate_r);
+    printf("ref: commit_pc = 0x%010lx", last_step_pc);
+    for (int j = 0; j < DIFFTEST_NR_REG; j++) {
+      if (intermediate_r[j] != last_step_r[j] && j != DIFFTEST_THIS_PC) {
+        printf(", %s = 0x%016lx", reg_name[j], intermediate_r[j]);
+      }
+    }
+    printf("\n");
+    memcpy(last_step_r, intermediate_r, sizeof(ref_r));
+    last_step_pc = last_step_r[DIFFTEST_THIS_PC];
+  }
+  memcpy(ref_r, last_step_r, sizeof(ref_r));
+  #else
   ref_difftest_exec(commit);
   ref_difftest_getregs(&ref_r);
+  #endif
 
   uint64_t next_pc = ref_r[DIFFTEST_THIS_PC];
   pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
@@ -147,18 +167,17 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
 
   if (memcmp(reg_scala, ref_r, sizeof(ref_r)) != 0) {
     printf("\n==============Retire Trace==============\n");
-    int j;
-    for(j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++){
-      printf("retire trace [%x]: pc %010lx inst %08x cmtcnt %d %s\n", j, pc_retire_queue[j], inst_retire_queue[j], retire_cnt_queue[j], (j==pc_retire_pointer)?"<--":"");
+    for (int i = 0; i < DEBUG_RETIRE_TRACE_SIZE; i++) {
+      printf("retire trace [%x]: pc %010lx inst %08x cmtcnt %d %s\n", i, pc_retire_queue[i],
+        inst_retire_queue[i], retire_cnt_queue[i], (i == pc_retire_pointer) ? "<--" : "");
     }
     printf("\n==============  Reg Diff  ==============\n");
     ref_isa_reg_display();
     printCSR(priviledgeMode);
     puts("");
-    int i;
-    for (i = 0; i < DIFFTEST_NR_REG; i ++) {
-      if (reg_scala[i] != ref_r[i]) {
-        printf("%s different at pc = 0x%010lx, right= 0x%016lx, wrong = 0x%016lx\n",
+    for (int i = 0; i < DIFFTEST_NR_REG; i ++) {
+      if (reg_scala[i] != ref_r[i] && i != DIFFTEST_THIS_PC) {
+        printf("%4s different at pc = 0x%010lx, right= 0x%016lx, wrong = 0x%016lx\n",
             reg_name[i], this_pc, ref_r[i], reg_scala[i]);
       }
     }
