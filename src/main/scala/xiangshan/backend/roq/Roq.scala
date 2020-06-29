@@ -118,8 +118,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
   }
 
-  //TODO: add walkFin Vec, io.commits(i).valid depends on it
-  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
+  val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
+  shouldWalkVec(0) := ringBufferWalk =/= ringBufferWalkTarget
+  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk + i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
+  val walkFinished = !shouldWalkVec(CommitWidth - 1)
+  // val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
 
   when(state===s_walk) {
     //exit walk state when all roq entry is commited
