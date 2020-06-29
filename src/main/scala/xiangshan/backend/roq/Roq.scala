@@ -86,7 +86,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       val canCommit = if(i!=0) io.commits(i-1).valid else true.B
       io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
       io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-      when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
+      when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U){ 
+        archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
+      } // for difftest
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
     }.otherwise{//state === s_walk
       io.commits(i).valid := valid(ringBufferWalk+i.U) && writebacked(ringBufferWalk+i.U)
@@ -116,6 +118,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   for(i <- 0 until CommitWidth) {
       XSInfo(io.commits(i).valid, "retired pc at commmit(%d) is: %d 0x%x\n",
         i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
+      XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO, "difftest skiped pc0x%x\n", microOp(ringBufferTail+i.U).cf.pc)
   }
 
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
@@ -172,13 +175,31 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val firstValidCommit = ringBufferTail + PriorityMux(validCommit, VecInit(List.tabulate(CommitWidth)(_.U)))
   val emptyCsr = WireInit(0.U(64.W))
 
+  val skip = Wire(Vec(CommitWidth, Bool()))
+  val wen = Wire(Vec(CommitWidth, Bool()))
+  val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+  val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
+  val wpc = Wire(Vec(CommitWidth, UInt(VAddrBits.W)))
+  for(i <- 0 until CommitWidth){
+      // io.commits(i).valid
+      skip(i) := exuDebug(ringBufferTail+i.U).isMMIO && io.commits(i).valid
+      wen(i) := io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U
+      wdata(i) := exuData(ringBufferTail+i.U)
+      wdst(i) := microOp(ringBufferTail+i.U).ctrl.ldest
+      wpc(i) := microOp(ringBufferTail+i.U).cf.pc
+  }
+
   if(!p.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
     BoringUtils.addSource(archRF, "difftestRegs")//arch RegFile
-    BoringUtils.addSource(RegNext(false.B), "difftestSkip")//SKIP
+    BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
     BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
+    BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
+    BoringUtils.addSource(RegNext(wpc), "difftestWpc")
+    BoringUtils.addSource(RegNext(wdata), "difftestWdata")
+    BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
     //TODO: skip insts that commited in the same cycle ahead of exception
 
