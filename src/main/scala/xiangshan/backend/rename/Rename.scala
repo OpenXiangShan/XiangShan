@@ -112,6 +112,9 @@ class Rename extends XSModule {
       rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
       rat.specWritePorts(i).wdata := Mux(specWen, freeList.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
 
+      busyTable.wbPregs(NRWritePorts + i).valid := walkWen
+      busyTable.wbPregs(NRWritePorts + i).bits := io.roqCommits(i).bits.uop.pdest
+
       XSInfo(walkWen,
         {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
           p" ldst:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
@@ -169,7 +172,7 @@ class Rename extends XSModule {
   def updateBusyTable(fp: Boolean) = {
     val wbResults = if(fp) io.wbFpResults else io.wbIntResults
     val busyTable = if(fp) fpBusyTable else intBusyTable
-    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs)){
+    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs.take(NRWritePorts))){
       setPhyRegRdy.valid := wb.valid && needDestReg(fp, wb.bits.uop)
       setPhyRegRdy.bits := wb.bits.uop.pdest
     }
