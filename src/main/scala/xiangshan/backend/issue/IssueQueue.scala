@@ -372,3 +372,92 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     sel.bits.pdest := delayPipe(fixedDelay-1)(1)
   }
 }
+
+class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1)
+  extends IQModule {
+  
+  val useBypass = bypassCnt > 0
+  val src2Use = true
+  val src3Use = true
+  val src2Listen = true
+  val src3Listen = true
+
+  val io = IO(new Bundle() {
+    // flush Issue Queue
+    val redirect = Flipped(ValidIO(new Redirect))
+
+    // enq Ctrl sigs at dispatch-2
+    val enqCtrl = Flipped(DecoupledIO(new MicroOp))
+    // enq Data at next cycle (regfile has 1 cycle latency)
+    val enqData = Flipped(ValidIO(new ExuInput))
+
+    //  broadcast selected uop to other issue queues which has bypasses
+    val selectedUop = if(useBypass) ValidIO(new MicroOp) else null
+
+    // send to exu
+    val deq = DecoupledIO(new ExuInput)
+
+    // listen to write back bus
+    val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
+
+    // use bypass uops to speculative wake-up
+    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new MicroOp))) else null
+    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
+  })
+
+  val srcNum = 1 + (if(src2Use) 1 else 0) + (if(src3Use) 1 else 0)// when src2Use is false, then src3Use must be false
+  val srcListenNUm = 1 + (if(src2Listen) 1 else 0) + (if(src3Listen) 1 else 0) // when src2Listen is false, then src3Listen must be false
+  // when use is false, Listen must be false
+  require(!(!src2Use && src2Listen))
+  require(!(!src3Use && src3Listen))
+  require(!(!src2Use && src3Use))
+  require(!(!src2Listen && src3Listen))
+
+  // Issue Queue
+  val issQue = Mem(iqSize, new ExuInput)
+  val validQue = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
+  val idQue = RegInit(VecInit(List.tabulate(iqSize)(_.U(iqIdxWidth.W))))
+  val idQue = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
+  val tailAll = RegInit(0.U((iqIdxWidth+1).W))
+  val tail = tailAll(iqIdxWidth-1, 0)
+  val full = tailAll(iqIdxWidth)
+  // alias
+  val src1Rdy = List.tabulate(iqSize)(i => issQue(i).uop.src1State)
+  val src2Rdy = List.tabulate(iqSize)(i => issQue(i).uop.src2State)
+  val src3Rdy = List.tabulate(iqSize)(i => issQue(i).uop.src3State)
+  val src1Data = List.tabulate(iqSize)(i => issQue(i).src1)
+  val src2Data = List.tabulate(iqSize)(i => issQue(i).src2)
+  val src3Data = List.tabulate(iqSize)(i => issQue(i).src3)
+  val srcRdyVec = List.tabulate(iqSize)(i => List(src1Rdy(i), if(src2Listen) src2Rdy(i) else null, if(src3Listen) src3Rdy(i) else null))
+  val srcLisDataVec = List.tabulate(iqSize)(i => List(src1Data(i), if(src2Listen) src2Data(i) else null, if(src3Listen) src3Data(i) else null))
+  val srcDataVec = VecInit(List.tabulate(iqSize)(i => VecInit(List(src1Data(i), if(src2Use) src2Data(i) else null, if(src3Use) src3Data(i) else null))))
+  val srcRdy = srcRdyVec.map(i => ParallelAND(i))
+  println((srcRdyVec.length, srcRdy.length, srcDataVec.length))
+
+  // Enqueue
+  val enqFire = io.enqCtrl.fire()
+  val deqFire = io.enqCtrl.fire()
+  val isPop   = WireInit(false.B) // Wire(Bool())
+  io.enqCtrl.ready := !tailAll || io.deq.fire() || isPop
+  val enqSel = idQue(tail)
+
+  // state
+  when (io.enqCtrl.fire()) {
+    issQue(enqSel).uop := io.enqCtrl.bits
+    validQue(enqSel) := true.B
+  }
+
+  // data
+  val enqSelNext = RegEnable(enqSel, enqFire)
+  // val enqSelNext = RegNext(enqSel)
+  val enqFireNext = RegInit(false.B)
+  when (enqFireNext) { enqFireNext := false.B }
+  when (enqFire) { enqFireNext := true.B }
+
+  val enqDataVec = List(io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
+  when (enqFireNext) {
+    for(i <- srcDataVec.indices) {
+      srcDataVec(enqSelNext)(i) := enqDataVec(i)
+    }
+  }
+}
