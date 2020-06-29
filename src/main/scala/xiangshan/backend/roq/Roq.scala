@@ -89,7 +89,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen){ archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) }
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
     }.otherwise{//state === s_walk
-      io.commits(i).valid := valid(ringBufferWalk+i.U) && writebacked(ringBufferWalk+i.U)
+      io.commits(i).valid := valid(ringBufferWalk+i.U)
       io.commits(i).bits.uop := microOp(ringBufferWalk+i.U)
       valid(ringBufferWalk+i.U) := false.B
     }
