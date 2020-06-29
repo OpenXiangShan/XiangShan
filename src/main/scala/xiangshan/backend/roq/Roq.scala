@@ -81,6 +81,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
 
   // Commit uop to Rename
+  val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
+  shouldWalkVec(0) := ringBufferWalk =/= ringBufferWalkTarget
+  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk + i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
+  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
+
   for(i <- 0 until CommitWidth){
     when(state === s_idle){
       val canCommit = if(i!=0) io.commits(i-1).valid else true.B
@@ -90,42 +95,15 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
       } // for difftest
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
+      XSInfo(io.commits(i).valid, "retired pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
     }.otherwise{//state === s_walk
-      io.commits(i).valid := valid(ringBufferWalk+i.U) && writebacked(ringBufferWalk+i.U)
+      io.commits(i).valid := valid(ringBufferWalk+i.U) && shouldWalkVec(i)
       io.commits(i).bits.uop := microOp(ringBufferWalk+i.U)
       valid(ringBufferWalk+i.U) := false.B
+      XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
     }
     io.commits(i).bits.isWalk := state === s_walk
   }
-  for(i <- 0 until CommitWidth){
-    XSInfo(io.commits(i).valid && state =/= s_walk, "retired pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
-  }
-  for(i <- 0 until CommitWidth){
-    XSInfo(io.commits(i).valid && state === s_walk, "walked pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
-  }
-
-  val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
-  when(state === s_idle){
-    ringBufferTailExtended := ringBufferTailExtended + PopCount(validCommit)
-  }
-  val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
-
-  // commit store
-  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.ldu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
-  io.scommit := PopCount(validScommit.asUInt)
-
-  XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
-  for(i <- 0 until CommitWidth) {
-      XSInfo(io.commits(i).valid, "retired pc at commmit(%d) is: %d 0x%x\n",
-        i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
-      XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO, "difftest skiped pc0x%x\n", microOp(ringBufferTail+i.U).cf.pc)
-  }
-
-  val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
-  shouldWalkVec(0) := ringBufferWalk =/= ringBufferWalkTarget
-  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk + i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
-  val walkFinished = !shouldWalkVec(CommitWidth - 1)
-  // val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
 
   when(state===s_walk) {
     //exit walk state when all roq entry is commited
@@ -136,6 +114,25 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     XSInfo("rolling back: head %d tail %d walk %d\n", ringBufferHead, ringBufferTail, ringBufferWalk)
   }
 
+  // move tail ptr
+  val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
+  when(state === s_idle){
+    ringBufferTailExtended := ringBufferTailExtended + PopCount(validCommit)
+  }
+  val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
+
+  XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
+  for(i <- 0 until CommitWidth) {
+      XSInfo(io.commits(i).valid, "retired pc at commmit(%d) is: %d 0x%x\n",
+        i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
+      XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO, "difftest skiped pc0x%x\n", microOp(ringBufferTail+i.U).cf.pc)
+  }
+
+  // commit store to lsu
+  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.ldu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
+  io.scommit := PopCount(validScommit.asUInt)
+
+  // when redirect, walk back roq entries
   val newHead = io.brqRedirect.bits.roqIdx + 1.U
   when(io.brqRedirect.valid){
     state := s_walk
