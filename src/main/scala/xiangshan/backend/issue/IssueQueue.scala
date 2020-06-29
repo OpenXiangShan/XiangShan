@@ -370,5 +370,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val delayPipe = DelayPipe(VecInit(selResult.instRdy, prfDest(selIQIdx)), fixedDelay-1)
     sel.bits := DontCare
     sel.bits.pdest := delayPipe(fixedDelay-1)(1)
+    sel.valid := DelayPipe(selResult.instRdy, fixedDelay-1)
   }
 }
