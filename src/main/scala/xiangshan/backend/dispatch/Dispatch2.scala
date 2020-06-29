@@ -210,21 +210,21 @@ class Dispatch2 extends XSModule {
 //      Mux(src2Type(i)(0), io.intPregRdy(src2Index(i)), io.fpPregRdy(src2Index(i))))
 //    io.enqIQData(i).bits.uop.src3State := Mux(src3Type(i)(1), SrcState.rdy,
 //      Mux(src3Type(i)(0), io.intPregRdy(src3Index(i)), io.fpPregRdy(src3Index(i))))
-    val src1 = Mux(src1Type(i)(1), 0.U,
-      Mux(src1Type(i)(0), io.readFpRf(src1Index(i)).data, io.readIntRf(src1Index(i)).data))
-    io.enqIQData(i).bits.src1 := Mux(index_reg(i)(2), 0.U, src1)
-    val src2 = Mux(src2Type(i)(1), 0.U,
-      Mux(src2Type(i)(0), io.readFpRf(src2Index(i)).data, io.readIntRf(src2Index(i)).data))
-    io.enqIQData(i).bits.src2 := Mux(index_reg(i)(2), 0.U, src2)
-    val src3 = Mux(src3Type(i)(1), 0.U,
-      Mux(src3Type(i)(0), io.readFpRf(src3Index(i)).data, io.readIntRf(src3Index(i)).data))
+    val src1 = Mux(src1Type(i)(1), io.readFpRf(src1Index(i)).data, io.readIntRf(src1Index(i)).data)
+    io.enqIQData(i).bits.src1 := Mux(io.enqIQData(i).bits.uop.ctrl.src1Type === SrcType.pc,
+        io.enqIQData(i).bits.uop.cf.pc, Mux(index_reg(i)(2), 0.U, src1))
+    val src2 = Mux(src2Type(i)(1), io.readFpRf(src2Index(i)).data, io.readIntRf(src2Index(i)).data)
+    io.enqIQData(i).bits.src2 := Mux(io.enqIQData(i).bits.uop.ctrl.src2Type === SrcType.imm,
+      io.enqIQData(i).bits.uop.ctrl.imm, Mux(index_reg(i)(2), 0.U, src2))
+    val src3 = Mux(src3Type(i)(1), io.readFpRf(src3Index(i)).data, io.readIntRf(src3Index(i)).data)
     io.enqIQData(i).bits.src3 := Mux(index_reg(i)(2), 0.U, src3)
 
     XSDebug(io.enqIQData(i).valid,
       "instruction 0x%x reads operands from (%d, %d, %d, %x), (%d, %d, %d, %x), (%d, %d, %d, %x)\n",
-      io.enqIQData(i).bits.uop.cf.pc, src1Type(i), src1Index(i), io.enqIQData(i).bits.uop.psrc1, src1,
-      src2Type(i), src2Index(i), io.enqIQData(i).bits.uop.psrc2, src2,
-      src3Type(i), src3Index(i), io.enqIQData(i).bits.uop.psrc3, src3)
+      io.enqIQData(i).bits.uop.cf.pc,
+      src1Type(i), src1Index(i), io.enqIQData(i).bits.uop.psrc1, io.enqIQData(i).bits.src1,
+      src2Type(i), src2Index(i), io.enqIQData(i).bits.uop.psrc2, io.enqIQData(i).bits.src2,
+      src3Type(i), src3Index(i), io.enqIQData(i).bits.uop.psrc3, io.enqIQData(i).bits.src3)
   }
 
 }

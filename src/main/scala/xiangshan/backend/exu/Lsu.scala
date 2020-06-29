@@ -42,6 +42,15 @@ object LSUOpType {
   def atomD = "011".U
 }
 
+class StoreQueueEntry extends XSBundle{
+  val src1  = UInt(XLEN.W)
+  val src2  = UInt(XLEN.W)
+  val src3  = UInt(XLEN.W)
+  val wdata = UInt(XLEN.W)
+  val func  = UInt(6.W)
+  val brMask = UInt(BrqSize.W) //FIXIT
+}
+
 class Lsu extends Exu(
   FuType.ldu.litValue(),
   readIntRf = true,
@@ -51,7 +60,29 @@ class Lsu extends Exu(
 ) with NeedImpl {
   override def toString: String = "Lsu"
 
-  val (valid, src1, src2, wdata, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.src3, io.in.bits.uop.ctrl.fuOpType)
+  // store buffer
+  val stqData = Reg(Vec(8, new StoreQueueEntry))
+  val stqValid = RegInit(VecInit(List.fill(8)(false.B)))
+  val stqPtr = Reg(Vec(8, UInt(3.W)))
+  val stqHead = RegInit(0.U(3.W))
+  val stqTail = stqPtr(0)
+  val stqCommited = RegInit(0.U(3.W))
+  val stqFull = stqHead === 7.U //stq_valid.reduce(_.valid && _.valid)
+  val emptySlot = PriorityMux(~stqValid.asUInt, VecInit(List.tabulate(CommitWidth)(_.U)))
+
+  // when retiringStore, block all input insts
+  val isStoreIn = io.in.valid && LSUOpType.isStore(io.in.bits.uop.ctrl.fuOpType)
+  val retiringStore = Wire(Bool()) //RegInit(false.B)
+  val (validIn, src1In, src2In, src3In, funcIn) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.src3, io.in.bits.uop.ctrl.fuOpType)
+  val (valid, src1, src2, wdata, func) = 
+  (
+    Mux(retiringStore, stqValid(stqTail), validIn && !isStoreIn),
+    Mux(retiringStore, stqData(stqTail).src1, src1In),
+    Mux(retiringStore, stqData(stqTail).src2, src2In),
+    Mux(retiringStore, stqData(stqTail).src3, src3In),
+    Mux(retiringStore, stqData(stqTail).func, funcIn)
+  )
+  assert(!(retiringStore && !stqValid(stqTail)))
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -112,12 +143,41 @@ class Lsu extends Exu(
       LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
   ))
 
-  io.in.ready := (state === s_idle) && io.out.ready
+  io.in.ready := io.out.fire()
 
-  io.out.valid := Mux(isStore || partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp))
+  io.out.valid := !retiringStore && (Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)) || isStoreIn)
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
   // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
   io.out.bits.debug.isMMIO := false.B //for debug
 
+  // if store, add it to store queue
+  val stqEnqueue = valid && isStore && !stqFull
+  when(stqEnqueue){
+    stqPtr(stqHead) := emptySlot
+    stqData(emptySlot).src1 := src1In
+    stqData(emptySlot).src2 := src2In
+    stqData(emptySlot).src3 := src3In
+    stqData(emptySlot).func := funcIn
+    stqValid(emptySlot) := true.B
+  }
+
+  // if store insts have been commited, send dmem req
+  retiringStore := stqCommited > 0.U
+
+  // pop store queue if insts have been commited and dmem req fired successfully
+  val stqDequeue = retiringStore && state === s_partialLoad
+  when(stqDequeue){
+    stqValid(stqTail) := false.B
+  }
+
+  // update stqTail, stqCommited
+  stqCommited := stqCommited + io.scommit - stqDequeue
+  stqTail := stqTail + stqEnqueue - stqDequeue
+
+  XSDebug("state: %d (valid, ready): in (%d,%d) out (%d,%d)\n", state, io.in.valid, io.in.ready, io.out.valid, io.out.ready)
+  XSDebug("stqinfo: stqValid.asUInt %b stqHead %d stqTail %d stqCommited %d emptySlot %d\n", stqValid.asUInt, stqHead, stqTail, stqCommited, emptySlot)
+  XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd =/= SimpleBusCmd.write, "[DMEM LOAD  REQ] addr 0x%x wdata 0x%x size %d\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size)
+  XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd === SimpleBusCmd.write, "[DMEM STORE REQ] addr 0x%x wdata 0x%x size %d\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size)
+  XSInfo(io.dmem.resp.fire(), "[DMEM RESP] data %x\n", rdata)
 }
