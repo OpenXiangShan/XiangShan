@@ -432,7 +432,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   // |Enq:get state|Deq: select/get data| fire stage   |
   // |-------------|--------------------|--------------|
 
+  //-----------------------------------------
   // Enqueue
+  //-----------------------------------------
   val enqFire = io.enqCtrl.fire()
   val deqFire = io.deq.fire()
   val popOne = Wire(Bool())
@@ -463,7 +465,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     }
   }
 
+  //-----------------------------------------
   // tail
+  //-----------------------------------------
   val tailInc = enqFire
   val tailDec = popOne
   val tailKeep = tailInc ^ tailDec
@@ -475,7 +479,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
   val has1Rdy = ParallelOR(validQue).asBool()
 
+  //-----------------------------------------
   // idQue Move
+  //-----------------------------------------
   def UIntToMHP(in: UInt) = {
     // UInt to Multi-Hot plus 1: 1.U -> "11".U; 2.U(2.W) -> "0111".U; 3.U(3.W) -> "00001111".W
     val a = Seq.fill(in.getWidth)(2).product
@@ -509,7 +515,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     }
   }
 
+  //-----------------------------------------
   // Dequeue (or to Issue Stage)
+  //-----------------------------------------
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
   val deqCanIn = !issueToExuValid || deqFire
@@ -533,7 +541,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   io.deq.valid := issueToExuValid && !deqFlushHit
   io.deq.bits := issueToExu
 
+  //-----------------------------------------
   // Wakeup and Bypass
+  //-----------------------------------------
   if (wakeupCnt > 0) {
     val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
     val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
