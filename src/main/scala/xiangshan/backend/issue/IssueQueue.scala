@@ -427,6 +427,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   val srcRdy = VecInit(srcRdyVec.map(i => ParallelAND(i)))
   val srcIdRdy = VecInit((0 until iqSize).map(i => srcRdy(idQue(i)))).asUInt
 
+  val srcDataWire = srcData
+  srcData := srcDataWire
+
   // there is three stage
   // |-------------|--------------------|--------------|
   // |Enq:get state|Deq: select/get data| fire stage   |
@@ -461,7 +464,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   val enqDataVec = List(io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
   when (enqFireNext) {
     for(i <- 0 until srcUseNum) {
-      srcData(enqSelNext)(i) := enqDataVec(i)
+      srcDataWire(enqSelNext)(i) := enqDataVec(i)
     }
   }
 
@@ -530,9 +533,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     issueToExu := issQue(deqSel)
     issueToExuValid := toIssFire
 
-    issueToExu.src1 := srcData(deqSel)(0)
-    if (src2Use) { issueToExu.src2 := srcData(deqSel)(1) } else { issueToExu.src2 := DontCare }
-    if (src3Use) { issueToExu.src3 := srcData(deqSel)(2) } else { issueToExu.src3 := DontCare }
+    issueToExu.src1 := srcDataWire(deqSel)(0)
+    if (src2Use) { issueToExu.src2 := srcDataWire(deqSel)(1) } else { issueToExu.src2 := DontCare }
+    if (src3Use) { issueToExu.src3 := srcDataWire(deqSel)(2) } else { issueToExu.src3 := DontCare }
   }
   when (deqFire || deqFlushHit) {
     issueToExuValid := false.B
@@ -555,7 +558,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
         val hit = ParallelOR(hitVec).asBool
         val data = ParallelMux(hitVec zip cdbData)
         when (validQue(i) && !srcRdyVec(i)(j) && hit) { 
-          srcData(i)(j) := data
+          srcDataWire(i)(j) := data
           srcRdyVec(i)(j) := true.B
         }
       }
@@ -575,7 +578,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
           srcRdyVec(i)(j) := true.B // FIXME: if uncomment the up comment, will cause combiantional loop, but it is Mem type??
         }
         when (RegNext(validQue(i) && !srcRdyVec(i)(j) && hit)) {
-          srcData(i)(j) := PriorityMux(hitVecNext zip bpData)
+          srcDataWire(i)(j) := PriorityMux(hitVecNext zip bpData)
         }
       }
     }
@@ -591,7 +594,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
         srcRdyVec(enqSel)(i) := true.B
       }
       when (RegNext(enqFire && hit)) {
-        srcData(enqSelNext)(i) := ParallelMux(hitVecNext zip bpData)
+        srcDataWire(enqSelNext)(i) := ParallelMux(hitVecNext zip bpData)
       }
     }
   }
