@@ -354,7 +354,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   if(useBypass) {
     assert(fixedDelay==1) // only support fixedDelay is 1 now
     def DelayPipe[T <: Data](a: T, delay: Int = 0) = {
-      // println(delay)
       if(delay == 0) a
       else {
         val storage = Wire(VecInit(Seq.fill(delay+1)(a)))
@@ -373,9 +372,8 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   }
 }
 
-class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1)
-  extends IQModule {
-  
+class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
+
   val useBypass = bypassCnt > 0
   val src2Use = true
   val src3Use = true
@@ -405,8 +403,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
   })
 
-  val srcNum = 1 + (if(src2Use) 1 else 0) + (if(src3Use) 1 else 0)// when src2Use is false, then src3Use must be false
-  val srcListenNUm = 1 + (if(src2Listen) 1 else 0) + (if(src3Listen) 1 else 0) // when src2Listen is false, then src3Listen must be false
+  val srcAllNum = 3
+  val srcUseNum = 1 + (if(src2Use) 1 else 0) + (if(src3Use) 1 else 0)// when src2Use is false, then src3Use must be false
+  val srcListenNum = 1 + (if(src2Listen) 1 else 0) + (if(src3Listen) 1 else 0) // when src2Listen is false, then src3Listen must be false
   // when use is false, Listen must be false
   require(!(!src2Use && src2Listen))
   require(!(!src3Use && src3Listen))
@@ -414,40 +413,43 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   require(!(!src2Listen && src3Listen))
 
   // Issue Queue
-  val issQue = Mem(iqSize, new ExuInput)
+  val issQue = IndexableMem(iqSize, new ExuInput, mem = false, init = None)
   val validQue = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
-  val idQue = RegInit(VecInit(List.tabulate(iqSize)(_.U(iqIdxWidth.W))))
   val idQue = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
+  val idValidQue = VecInit((0 until iqIdxWidth).map(i => validQue(idQue(i)))).asUInt
   val tailAll = RegInit(0.U((iqIdxWidth+1).W))
   val tail = tailAll(iqIdxWidth-1, 0)
   val full = tailAll(iqIdxWidth)
-  // alias
-  val src1Rdy = List.tabulate(iqSize)(i => issQue(i).uop.src1State)
-  val src2Rdy = List.tabulate(iqSize)(i => issQue(i).uop.src2State)
-  val src3Rdy = List.tabulate(iqSize)(i => issQue(i).uop.src3State)
-  val src1Data = List.tabulate(iqSize)(i => issQue(i).src1)
-  val src2Data = List.tabulate(iqSize)(i => issQue(i).src2)
-  val src3Data = List.tabulate(iqSize)(i => issQue(i).src3)
-  val srcRdyVec = List.tabulate(iqSize)(i => List(src1Rdy(i), if(src2Listen) src2Rdy(i) else null, if(src3Listen) src3Rdy(i) else null))
-  val srcLisDataVec = List.tabulate(iqSize)(i => List(src1Data(i), if(src2Listen) src2Data(i) else null, if(src3Listen) src3Data(i) else null))
-  val srcDataVec = VecInit(List.tabulate(iqSize)(i => VecInit(List(src1Data(i), if(src2Use) src2Data(i) else null, if(src3Use) src3Data(i) else null))))
-  val srcRdy = srcRdyVec.map(i => ParallelAND(i))
-  println((srcRdyVec.length, srcRdy.length, srcDataVec.length))
+  // alias failed, turn to independent storage(Reg)
+  val psrc = List.tabulate(iqSize)(i => List(issQue(i.U).uop.psrc1, issQue(i.U).uop.psrc2, issQue(i.U).uop.psrc3)) // TODO: why issQue can not use Int as index, but idQue is ok??
+  val srcRdyVec = Reg(Vec(iqSize, Vec(srcListenNum, Bool())))
+  val srcData = Reg(Vec(iqSize, Vec(srcUseNum, UInt(XLEN.W)))) // NOTE: Bundle/MicroOp need merge "src1/src2/src3" into a Vec. so that IssueQueue could have Vec
+  val srcRdy = VecInit(srcRdyVec.map(i => ParallelAND(i)))
+  val srcIdRdy = VecInit((0 until iqSize).map(i => srcRdy(idQue(i)))).asUInt
+
+  // there is three stage
+  // |-------------|--------------------|--------------|
+  // |Enq:get state|Deq: select/get data| fire stage   |
+  // |-------------|--------------------|--------------|
 
   // Enqueue
   val enqFire = io.enqCtrl.fire()
-  val deqFire = io.enqCtrl.fire()
-  val isPop   = WireInit(false.B) // Wire(Bool())
-  io.enqCtrl.ready := !tailAll || io.deq.fire() || isPop
+  val deqFire = io.deq.fire()
+  val popOne = Wire(Bool())
+  io.enqCtrl.ready := !tailAll || popOne
   val enqSel = idQue(tail)
 
-  // state
+  // state enq
   when (io.enqCtrl.fire()) {
     issQue(enqSel).uop := io.enqCtrl.bits
     validQue(enqSel) := true.B
+
+    srcRdyVec(enqSel)(0) := io.enqCtrl.bits.src1State
+    if(src2Listen) { srcRdyVec(enqSel)(1) := io.enqCtrl.bits.src2State }
+    if(src3Listen) { srcRdyVec(enqSel)(2) := io.enqCtrl.bits.src3State }
   }
 
-  // data
+  // data enq
   val enqSelNext = RegEnable(enqSel, enqFire)
   // val enqSelNext = RegNext(enqSel)
   val enqFireNext = RegInit(false.B)
@@ -456,8 +458,131 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
 
   val enqDataVec = List(io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
   when (enqFireNext) {
-    for(i <- srcDataVec.indices) {
-      srcDataVec(enqSelNext)(i) := enqDataVec(i)
+    for(i <- 0 until srcUseNum) {
+      srcData(enqSelNext)(i) := enqDataVec(i)
+    }
+  }
+
+  // tail
+  val tailInc = enqFire
+  val tailDec = popOne
+  val tailKeep = tailInc ^ tailDec
+  val tailAdd = tailAll + 1.U
+  val tailSub = tailAll - 1.U
+  tailAll := ParallelMux(VecInit(tailKeep, tailInc, tailDec) zip VecInit(tailAll, tailAdd, tailDec))
+
+  // Select to Dequeue
+  val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
+  val has1Rdy = ParallelOR(validQue).asBool()
+
+  // idQue Move
+  def UIntToMHP(in: UInt) = {
+    // UInt to Multi-Hot plus 1: 1.U -> "11".U; 2.U(2.W) -> "0111".U; 3.U(3.W) -> "00001111".W
+    val a = Seq.fill(in.getWidth)(2).product
+    val s = (1 << (a-1)).S
+    Reverse((s(a-1,0).asSInt >> in)(a-1,0).asUInt)
+  }
+  def UIntToMH(in: UInt) = {
+    val a = Seq.fill(in.getWidth)(2).product
+    val s = (1 << (a-1)).S
+    Reverse((s(a-1,0).asSInt >> in)(a-1,0).asUInt) ^ UIntToOH(in)
+  }
+  def PriorityDot(in: UInt) = {
+    // "1100".U -> "0111".U; "1010".U -> "0011".U; "0000".U -> "0000".U
+    val a = Array.fill(iqSize)(1)
+    for(i <- 1 until in.getWidth) {
+      a(i) = a(i-1)*2 + 1
+    }
+    Mux(in===0.U, 0.U(in.getWidth.W), PriorityMux(in, a.map(_.U(in.getWidth.W))))
+  }
+  val tailDot = Mux(full, VecInit(Seq.fill(iqSize)(true.B)).asUInt, UIntToMHP(tail))
+  val tailDot2 = Mux(full, VecInit(Seq.fill(iqSize)(true.B)).asUInt, UIntToMH(tail))
+  val selDot = UIntToMHP(deqSel) // FIXIT: PriorityEncoder -> UIntToMHP means long latency
+  val nonValid = ~(idValidQue | ~tailDot2)
+  val popDot = PriorityDot(nonValid)
+  val isPop = ParallelOR(nonValid.asBools).asBool()
+  val moveDot = Mux(isPop, tailDot ^ popDot, tailDot ^ selDot)
+
+  when (popOne) {
+    for(i <- 1 until iqSize) {
+      when (moveDot(i)) { idQue(i-1) := idQue(i) }
+    }
+  }
+
+  // Dequeue (or to Issue Stage)
+  val issueToExu = Reg(new ExuInput)
+  val issueToExuValid = RegInit(false.B)
+  val deqCanIn = !issueToExuValid || deqFire
+  val deqFlushHit = io.redirect.valid && (io.redirect.bits.isException ||
+                 ParallelOR((issueToExu.uop.brMask & UIntToOH(io.redirect.bits.brTag)).asBools).asBool)
+  val toIssFire = deqCanIn && has1Rdy && !isPop
+  popOne := deqCanIn && (has1Rdy || isPop) // send a empty or valid term to issueStage
+
+  when (toIssFire) {
+    issueToExu := issQue(deqSel)
+    issueToExuValid := toIssFire
+
+    issueToExu.src1 := srcData(deqSel)(0)
+    if (src2Use) { issueToExu.src2 := srcData(deqSel)(1) } else { issueToExu.src2 := DontCare }
+    if (src3Use) { issueToExu.src3 := srcData(deqSel)(2) } else { issueToExu.src3 := DontCare }
+  }
+  when (deqFire || deqFlushHit) {
+    issueToExuValid := false.B
+  }
+
+  io.deq.valid := issueToExuValid && !deqFlushHit
+  io.deq.bits := issueToExu
+
+  // Wakeup and Bypass
+  if (wakeupCnt > 0) {
+    val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
+    val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
+    val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
+
+    for(i <- 0 until iqSize) {
+      for(j <- 0 until srcListenNum) {
+        val hitVec = List.tabulate(wakeupCnt)(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k))
+        val hit = ParallelOR(hitVec).asBool
+        val data = ParallelMux(hitVec zip cdbData)
+        when (validQue(i) && !srcRdyVec(i)(j) && hit) { 
+          srcData(i)(j) := data
+          srcRdyVec(i)(j) := true.B
+        }
+      }
+    }
+  }
+  if (useBypass) {
+    val bpPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
+    val bpValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid)
+    val bpData = List.tabulate(bypassCnt)(i => io.bypassData(i).bits.data)
+
+    for (i <- 0 until iqSize) {
+      for (j <- 0 until srcListenNum) {
+        val hitVec = List.tabulate(bypassCnt)(k => psrc(i)(j) === bpPdest(k) && bpValid(k))
+        val hitVecNext = hitVec.map(RegNext(_))
+        val hit = ParallelOR(hitVec).asBool
+        when (validQue(i) && !srcRdyVec(i)(j) && hit) {
+          srcRdyVec(i)(j) := true.B // FIXME: if uncomment the up comment, will cause combiantional loop, but it is Mem type??
+        }
+        when (RegNext(validQue(i) && !srcRdyVec(i)(j) && hit)) {
+          srcData(i)(j) := PriorityMux(hitVecNext zip bpData)
+        }
+      }
+    }
+
+    // Enqueue Bypass
+    val enqCtrl = io.enqCtrl
+    val enqPsrc = List(enqCtrl.bits.psrc1, if(src2Listen) enqCtrl.bits.psrc2 else null, if(src3Listen) enqCtrl.bits.psrc3 else null)
+    for (i <- 0 until srcListenNum) {
+      val hitVec = List.tabulate(bypassCnt)(j => enqPsrc(i)===bpPdest(j) && bpValid(j))
+      val hitVecNext = hitVec.map(RegNext(_))
+      val hit = ParallelOR(hitVec).asBool
+      when (enqFire && hit) {
+        srcRdyVec(enqSel)(i) := true.B
+      }
+      when (RegNext(enqFire && hit)) {
+        srcData(enqSelNext)(i) := ParallelMux(hitVecNext zip bpData)
+      }
     }
   }
 }
