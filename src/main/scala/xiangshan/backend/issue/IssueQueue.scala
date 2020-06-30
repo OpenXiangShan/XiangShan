@@ -519,8 +519,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     for(i <- 1 until iqSize) {
       when (moveDot(i)) { idQue(i-1) := idQue(i) }
     }
+    val ptr_tmp = Mux(full, VecInit(Seq.fill(iqIdxWidth)(true.B)).asUInt, tail)
+    idQue(ptr_tmp) := deqSel
   }
-
   //-----------------------------------------
   // Redirect
   //-----------------------------------------
