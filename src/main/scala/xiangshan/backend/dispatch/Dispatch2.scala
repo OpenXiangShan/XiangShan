@@ -198,7 +198,12 @@ class Dispatch2 extends XSModule {
   val fpExuIndexReg = Reg(Vec(2, UInt(2.W)))
   (0 until 3).map(i => intExuIndexReg(i) := intExuIndex(i))
   (0 until 2).map(i => fpExuIndexReg(i) := fpExuIndex(i))
+  // TODO: remove uop when reservation stations deal with imme
+  val uop_reg = Reg(Vec(exuConfig.ExuCnt, new MicroOp))
+  val data_valid = Reg(Vec(exuConfig.ExuCnt, Bool()))
   for (i <- 0 until exuConfig.ExuCnt) {
+    data_valid(i) := io.enqIQCtrl(i).fire()
+    uop_reg(i) := io.enqIQCtrl(i).bits
     io.enqIQData(i).valid := DontCare
     io.enqIQData(i).bits := DontCare
 
@@ -207,8 +212,10 @@ class Dispatch2 extends XSModule {
       val startIndex = if (i == 0)2.U * intExuIndexReg(0)
         else if (i > 4) 2.U * intExuIndexReg(i - 4)
         else (2 * (i - 1)).U
-      io.enqIQData(i).bits.src1 := io.readIntRf(startIndex).data
-      io.enqIQData(i).bits.src2 := io.readIntRf(startIndex + 1.U).data
+      io.enqIQData(i).bits.src1 := Mux(uop_reg(i).ctrl.src1Type === SrcType.pc,
+        uop_reg(i).cf.pc, io.readIntRf(startIndex).data)
+      io.enqIQData(i).bits.src2 := Mux(uop_reg(i).ctrl.src2Type === SrcType.imm,
+        uop_reg(i).ctrl.imm, io.readIntRf(startIndex + 1.U).data)
       srcIndex(0) := startIndex
       srcIndex(1) := startIndex + 1.U
       srcIndex(2) := 0.U
@@ -224,18 +231,20 @@ class Dispatch2 extends XSModule {
       srcIndex(2) := startIndex + 2.U
     }
     else {
-      io.enqIQData(i).bits.src1 := io.readIntRf(10).data
-      io.enqIQData(i).bits.src2 := io.readIntRf(11).data
+      io.enqIQData(i).bits.src1 := Mux(uop_reg(i).ctrl.src1Type === SrcType.pc,
+        uop_reg(i).cf.pc, io.readIntRf(10).data)
+      io.enqIQData(i).bits.src2 := Mux(uop_reg(i).ctrl.src2Type === SrcType.imm,
+        uop_reg(i).ctrl.imm, io.readIntRf(11).data)
       srcIndex(0) := 10.U
       srcIndex(1) := 11.U
       srcIndex(2) := 0.U
     }
 
-    XSDebug(io.enqIQData(i).valid,
+    XSDebug(data_valid(i),
       "pc 0x%x reads operands from (%d, %d, %x), (%d, %d, %x), (%d, %d, %x)\n",
-      io.enqIQData(i).bits.uop.cf.pc,
-      srcIndex(0), io.enqIQData(i).bits.uop.psrc1, io.enqIQData(i).bits.src1,
-      srcIndex(1), io.enqIQData(i).bits.uop.psrc2, io.enqIQData(i).bits.src2,
-      srcIndex(2), io.enqIQData(i).bits.uop.psrc3, io.enqIQData(i).bits.src3)
+      uop_reg(i).cf.pc,
+      srcIndex(0), uop_reg(i).psrc1, io.enqIQData(i).bits.src1,
+      srcIndex(1), uop_reg(i).psrc2, io.enqIQData(i).bits.src2,
+      srcIndex(2), uop_reg(i).psrc3, io.enqIQData(i).bits.src3)
   }
 }
