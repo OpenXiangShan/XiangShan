@@ -416,7 +416,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   val issQue = IndexableMem(iqSize, new ExuInput, mem = false, init = None)
   val validQue = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val idQue = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
-  val idValidQue = VecInit((0 until iqIdxWidth).map(i => validQue(idQue(i)))).asUInt
+  val idValidQue = VecInit((0 until iqSize).map(i => validQue(idQue(i)))).asUInt
   val tailAll = RegInit(0.U((iqIdxWidth+1).W))
   val tail = tailAll(iqIdxWidth-1, 0)
   val full = tailAll(iqIdxWidth)
@@ -561,6 +561,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
           srcDataWire(i)(j) := data
           srcRdyVec(i)(j) := true.B
         }
+        XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "WakeUp: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b Data:%x\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt, data) 
       }
     }
   }
@@ -580,12 +581,14 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
         when (RegNext(validQue(i) && !srcRdyVec(i)(j) && hit)) {
           srcDataWire(i)(j) := PriorityMux(hitVecNext zip bpData)
         }
+        XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "BypassCtrl: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt)
+        XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit), "BypassData: Sel:%d Src:%d HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", i.U, j.U, VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
       }
     }
 
     // Enqueue Bypass
     val enqCtrl = io.enqCtrl
-    val enqPsrc = List(enqCtrl.bits.psrc1, if(src2Listen) enqCtrl.bits.psrc2 else null, if(src3Listen) enqCtrl.bits.psrc3 else null)
+    val enqPsrc = List(enqCtrl.bits.psrc1, enqCtrl.bits.psrc2, enqCtrl.bits.psrc3)
     for (i <- 0 until srcListenNum) {
       val hitVec = List.tabulate(bypassCnt)(j => enqPsrc(i)===bpPdest(j) && bpValid(j))
       val hitVecNext = hitVec.map(RegNext(_))
@@ -596,6 +599,25 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
       when (RegNext(enqFire && hit)) {
         srcDataWire(enqSelNext)(i) := ParallelMux(hitVecNext zip bpData)
       }
+      XSDebug(enqFire && hit, "EnqBypassCtrl: enqSel:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSel, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
+      XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelNext:%d Src:%d HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelNext, i.U, VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
     }
   }
+
+  XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d\n", io.enqCtrl.valid, io.enqCtrl.ready
+    , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest)
+  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
+  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag)
+  XSInfo(deqFire, "Deq:(%d %d) src1:%d|%x src2:%d|%x src3:%d|%x pdest:%d old_pdest:%d\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.old_pdest)
+  XSDebug("tailAll:%d tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailDot, tailDot2, selDot, popDot, moveDot)
+  XSDebug("isPop:%d nonValid:%b popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d\n", isPop, nonValid, popOne, deqCanIn, toIssFire, has1Rdy)
+  XSDebug("[ID  ]idQue|v|r|srcRdy\n")
+  for (i <- 0 until iqSize) {
+    when (i.U===tail && tailAll=/=8.U) {
+      XSDebug("[ID%d] %d |%d|%d|%b    <- tail\n", i.U, idQue(i), idValidQue(i), srcRdy(i), srcRdyVec(i).asUInt)
+    }.otherwise {
+      XSDebug("[ID%d] %d |%d|%d|%b\n", i.U, idQue(i), idValidQue(i), srcRdy(i), srcRdyVec(i).asUInt)
+    }
+  }
+
 }
