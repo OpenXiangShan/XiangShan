@@ -13,6 +13,7 @@
 #include <verilated_vcd_c.h>	// Trace file format header
 #endif
 
+#define DIFFTEST_WIDTH 6
 
 class Emulator {
   const char *image;
@@ -49,6 +50,19 @@ class Emulator {
     r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest_sepc;
     r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest_mcause;
     r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest_scause;
+  }
+
+  void read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {
+#define dut_ptr_wpc(x)  wpc[x] = dut_ptr->io_difftest_wpc_##x
+#define dut_ptr_wdata(x) wdata[x] = dut_ptr->io_difftest_wdata_##x
+#define dut_ptr_wdst(x)  wdst[x] = dut_ptr->io_difftest_wdst_##x
+    dut_ptr_wpc(0); dut_ptr_wdata(0); dut_ptr_wdst(0); 
+    dut_ptr_wpc(1); dut_ptr_wdata(1); dut_ptr_wdst(1); 
+    dut_ptr_wpc(2); dut_ptr_wdata(2); dut_ptr_wdst(2); 
+    dut_ptr_wpc(3); dut_ptr_wdata(3); dut_ptr_wdst(3); 
+    dut_ptr_wpc(4); dut_ptr_wdata(4); dut_ptr_wdst(4); 
+    dut_ptr_wpc(5); dut_ptr_wdata(5); dut_ptr_wdst(5); 
+    return;
   }
 
   public:
@@ -119,6 +133,10 @@ class Emulator {
     uint64_t lastcommit = n;
     int hascommit = 0;
     const int stuck_limit = 2000;
+    
+    static uint32_t wdst[DIFFTEST_WIDTH];
+    static uint64_t wdata[DIFFTEST_WIDTH];
+    static uint64_t wpc[DIFFTEST_WIDTH];
 
 #if VM_TRACE
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -156,11 +174,13 @@ class Emulator {
       if (dut_ptr->io_difftest_commit && hascommit) {
         uint64_t reg[DIFFTEST_NR_REG];
         read_emu_regs(reg);
+        read_wb_info(wpc, wdata, wdst);
 
         extern int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
-          int skip, int isRVC, uint64_t intrNO, int priviledgeMode);
+          int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode);
         if (difftest_step(dut_ptr->io_difftest_commit, reg, dut_ptr->io_difftest_thisINST,
               dut_ptr->io_difftest_skip, dut_ptr->io_difftest_isRVC,
+              wpc, wdata, wdst, dut_ptr->io_difftest_wen,
               dut_ptr->io_difftest_intrNO, dut_ptr->io_difftest_priviledgeMode)) {
 #if VM_TRACE
           tfp->close();
