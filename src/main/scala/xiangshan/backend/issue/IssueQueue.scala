@@ -44,7 +44,8 @@ object CompareCircuitUnit{
     out.iqIdx := iqIdx2
 
     val positionNotSame = roqIdx1.head(1) ^ roqIdx2.head(1)
-    val choose1 = (positionNotSame & (roqIdx1.tail(1) > roqIdx2.tail(1))) | ((~positionNotSame) & (roqIdx1.tail(1) < roqIdx2.tail(1)))
+    val roqIdx1lt2 = roqIdx1.tail(1) < roqIdx2.tail(1)
+    val choose1 = (positionNotSame & ~roqIdx1lt2) | ((~positionNotSame) & roqIdx1lt2)
 
     when((inst1Rdy && !inst2Rdy) || (inst1Rdy && inst2Rdy && choose1.asBool)){
       out.roqIdx := roqIdx1
