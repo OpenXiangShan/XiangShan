@@ -9,6 +9,7 @@ import xiangshan.utils._
 import xiangshan.backend.regfile.RfWritePort
 import utils._
 import bus.simplebus._
+import noop.AddressSpace
 
 object LSUOpType {
   def lb   = "b000000".U
@@ -149,7 +150,7 @@ class Lsu extends Exu(
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
   // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
-  io.out.bits.debug.isMMIO := false.B //for debug
+  io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) //for debug
 
   // if store, add it to store queue
   val stqEnqueue = valid && isStore && !stqFull
