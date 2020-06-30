@@ -413,7 +413,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   require(!(!src2Listen && src3Listen))
 
   // Issue Queue
-  val issQue = IndexableMem(iqSize, new ExuInput, mem = false, init = None)
+  // val issQue = IndexableMem(iqSize, new ExuInput, mem = false, init = None)
+  val issQue = Mem(iqSize, new ExuInput)
+  // val issQue = Reg(Vec(iqSize, new ExuInput))
   val validQue = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
   val idQue = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val idValidQue = VecInit((0 until iqSize).map(i => validQue(idQue(i)))).asUInt
@@ -480,6 +482,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
 
   // Select to Dequeue
   val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
+  val deqSelOH = PriorityEncoderOH(idValidQue & srcIdRdy)
   val has1Rdy = ParallelOR(validQue).asBool()
 
   //-----------------------------------------
@@ -519,6 +522,27 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   }
 
   //-----------------------------------------
+  // Redirect
+  //-----------------------------------------
+  // redirect enq
+  val enqRedHit = io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & io.enqCtrl.bits.brMask).asBools).asBool)
+  when (enqRedHit) {
+    validQue(enqSel) := false.B
+    enqFireNext := false.B
+  }
+
+  // redirect issQue
+  val redHitVec = List.tabulate(iqSize)(i => io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & issQue(i).uop.brMask).asBools).asBool))
+  for (i <- 0 until iqSize) {
+    when (redHitVec(i)) {
+      validQue(i) := false.B
+    }
+  }
+  // reditect deq(issToExu)
+  val redIdHitVec = List.tabulate(iqSize)(i => io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & issQue(idQue(i)).uop.brMask).asBools).asBool))
+  val selIsRed = ParallelOR((deqSelOH & VecInit(redIdHitVec).asUInt).asBools).asBool
+
+  //-----------------------------------------
   // Dequeue (or to Issue Stage)
   //-----------------------------------------
   val issueToExu = Reg(new ExuInput)
@@ -531,7 +555,7 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
 
   when (toIssFire) {
     issueToExu := issQue(deqSel)
-    issueToExuValid := toIssFire
+    issueToExuValid := toIssFire && selIsRed
 
     issueToExu.src1 := srcDataWire(deqSel)(0)
     if (src2Use) { issueToExu.src2 := srcDataWire(deqSel)(1) } else { issueToExu.src2 := DontCare }
@@ -607,10 +631,10 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d\n", io.enqCtrl.valid, io.enqCtrl.ready
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest)
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
-  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag)
+  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt)
   XSInfo(deqFire, "Deq:(%d %d) src1:%d|%x src2:%d|%x src3:%d|%x pdest:%d old_pdest:%d\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.old_pdest)
   XSDebug("tailAll:%d tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailDot, tailDot2, selDot, popDot, moveDot)
-  XSDebug("isPop:%d nonValid:%b popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d\n", isPop, nonValid, popOne, deqCanIn, toIssFire, has1Rdy)
+  XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b \n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   XSDebug("[ID  ]idQue|v|r|srcRdy\n")
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
