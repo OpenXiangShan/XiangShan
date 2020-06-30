@@ -75,10 +75,13 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
       exuData(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.data
       exuDebug(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.debug
-      XSInfo(io.exeWbResults(i).valid, "writebacked pc 0x%x wen %d data 0x%x\n", 
+      XSInfo(io.exeWbResults(i).valid, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x\n", 
         microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc,
         microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, 
-        io.exeWbResults(i).bits.data
+        microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.ldest, 
+        io.exeWbResults(i).bits.uop.pdest,
+        io.exeWbResults(i).bits.data,
+        io.exeWbResults(i).bits.debug.isMMIO
       )
     }
   }
@@ -86,8 +89,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // Commit uop to Rename
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
   shouldWalkVec(0) := ringBufferWalk =/= ringBufferWalkTarget
-  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk + i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
-  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk + i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
+  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk - i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
+  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk - i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
 
   for(i <- 0 until CommitWidth){
     when(state === s_idle){
@@ -110,12 +113,17 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         microOp(ringBufferTail+i.U).cf.pc
       )
     }.otherwise{//state === s_walk
-      io.commits(i).valid := valid(ringBufferWalk+i.U) && shouldWalkVec(i)
-      io.commits(i).bits.uop := microOp(ringBufferWalk+i.U)
+      io.commits(i).valid := valid(ringBufferWalk-i.U) && shouldWalkVec(i)
+      io.commits(i).bits.uop := microOp(ringBufferWalk-i.U)
       when(shouldWalkVec(i)){
-        valid(ringBufferWalk+i.U) := false.B
+        valid(ringBufferWalk-i.U) := false.B
       }
-      XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
+      XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n", 
+        microOp(ringBufferWalk-i.U).cf.pc, 
+        microOp(ringBufferWalk-i.U).ctrl.rfWen, 
+        microOp(ringBufferWalk-i.U).ctrl.ldest, 
+        exuData(ringBufferWalk-i.U)
+      )
     }
     io.commits(i).bits.isWalk := state === s_walk
   }
@@ -125,7 +133,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     when(walkFinished) {
       state := s_idle
     }
-    ringBufferWalkExtended := ringBufferWalkExtended + CommitWidth.U
+    ringBufferWalkExtended := ringBufferWalkExtended - CommitWidth.U
     XSInfo("rolling back: head %d tail %d walk %d\n", ringBufferHead, ringBufferTail, ringBufferWalk)
   }
 
@@ -143,12 +151,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   io.scommit := PopCount(validScommit.asUInt)
 
   // when redirect, walk back roq entries
-  val newHead = io.brqRedirect.bits.roqIdx + 1.U
   when(io.brqRedirect.valid){
     state := s_walk
-    ringBufferWalkExtended := newHead
-    ringBufferWalkTarget := ringBufferHeadExtended
-    ringBufferHeadExtended := newHead
+    ringBufferWalkExtended := ringBufferHeadExtended - 1.U
+    ringBufferWalkTarget := io.brqRedirect.bits.roqIdx
+    ringBufferHeadExtended := io.brqRedirect.bits.roqIdx + 1.U
   }
 
   // roq redirect only used for exception

@@ -196,6 +196,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   // TODO: ignore ALU'cdb srcRdy, for byPass has done it
   if(wakeupCnt > 0) {
     val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
+    val cdbrfWen = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.ctrl.rfWen) // FIXME: handle fpWen
     val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
     val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
 
@@ -206,7 +207,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val srcHitVec = List.tabulate(srcNum)(k =>
                       List.tabulate(iqSize)(i =>
                         List.tabulate(wakeupCnt)(j =>
-                          (prfSrc(k)(i) === cdbPdest(j)) && cdbValid(j))))
+                          (prfSrc(k)(i) === cdbPdest(j)) && (cdbValid(j) && cdbrfWen(i)))))
     val srcHit =  List.tabulate(srcNum)(k =>
                     List.tabulate(iqSize)(i =>
                       ParallelOR(srcHitVec(k)(i)).asBool()))
@@ -218,19 +219,26 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
           // srcData(k)(i) := Mux1H(srcHitVec(k)(i), cdbData)
           srcData(k)(i) := ParallelMux(srcHitVec(k)(i) zip cdbData)
         }
+        XSDebug(srcHit(k)(i), "Wakeup: Sel:%d Src:%d|%d data:%x srcHitVec:%b cdbValid:%b cdbrfWen:%b\n", 
+          i.U, k.U, prfSrc(k)(i), ParallelMux(srcHitVec(k)(i) zip cdbData), VecInit(srcHitVec(k)(i)).asUInt, VecInit(cdbValid).asUInt, VecInit(cdbrfWen).asUInt)
+        for (j <- 0 until wakeupCnt) {
+          XSDebug(srcHitVec(k)(i)(j), "WakeUpHit: Sel:%d Src:%d|%d Wake:%d data:%x valid:%d rfWen:%d roqIdx:%x\n", i.U, k.U, prfSrc(k)(i), j.U, cdbData(j), cdbValid(j), cdbrfWen(j), io.wakeUpPorts(j).bits.uop.roqIdx)
+        }
       })
     }
+
     // From byPass [speculative] (just for ALU to listen to other ALU's res, include itself)
     // just need Tag(Ctrl). send out Tag when Tag is decided. other ALUIQ listen to them and decide Tag
     // byPassUops is one cycle before byPassDatas
     if (bypassCnt > 0) {
       val bypassPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
+      val bypassrfWen = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.ctrl.rfWen)
       val bypassValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid) // may only need valid not fire()
       val bypassData = List.tabulate(bypassCnt)(i => io.bypassData(i).bits.data)
       val srcBpHitVec = List.tabulate(srcNum)(k =>
                           List.tabulate(iqSize)(i =>
                             List.tabulate(bypassCnt)(j =>
-                              (prfSrc(k)(i) === bypassPdest(j)) && bypassValid(j))))
+                              (prfSrc(k)(i) === bypassPdest(j)) && (bypassValid(j) && bypassrfWen(i)))))
       val srcBpHit =  List.tabulate(srcNum)(k =>
                         List.tabulate(iqSize)(i =>
                           ParallelOR(srcBpHitVec(k)(i)).asBool()))
@@ -254,9 +262,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
 
       // Enqueue Bypass
       val enqBypass = WireInit(VecInit(false.B, false.B, false.B))
-      val enqBypassHitVec = List(List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc1 === bypassPdest(j) && bypassValid(j) && io.enqCtrl.fire()),
-                                 List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc2 === bypassPdest(j) && bypassValid(j) && io.enqCtrl.fire()),
-                                 List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc3 === bypassPdest(j) && bypassValid(j) && io.enqCtrl.fire()))
+      val enqBypassHitVec = List(List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc1 === bypassPdest(j) && bypassValid(j) && bypassrfWen(j) && io.enqCtrl.fire()),
+                                 List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc2 === bypassPdest(j) && bypassValid(j) && bypassrfWen(j) && io.enqCtrl.fire()),
+                                 List.tabulate(bypassCnt)(j => io.enqCtrl.bits.psrc3 === bypassPdest(j) && bypassValid(j) && bypassrfWen(j) && io.enqCtrl.fire()))
       val enqBypassHitVecNext = enqBypassHitVec.map(i => i.map(j => RegNext(j)))
       enqBypass(0) := ParallelOR(enqBypassHitVec(0))
       enqBypass(1) := ParallelOR(enqBypassHitVec(1))

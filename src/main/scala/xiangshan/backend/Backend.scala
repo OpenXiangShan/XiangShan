@@ -135,6 +135,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     rfWrite
   }
 
+  //FIXME: only write back when "wen"
   intWbArb.io.in <> wbIntReqs
   intRf.io.writePorts <> wbIntResults.map(exuOutToRfWrite)
 
