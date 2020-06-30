@@ -99,7 +99,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     }.otherwise{//state === s_walk
       io.commits(i).valid := valid(ringBufferWalk+i.U) && shouldWalkVec(i)
       io.commits(i).bits.uop := microOp(ringBufferWalk+i.U)
-      valid(ringBufferWalk+i.U) := false.B
+      when(shouldWalkVec(i)){
+        valid(ringBufferWalk+i.U) := false.B
+      }
       XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
     }
     io.commits(i).bits.isWalk := state === s_walk
