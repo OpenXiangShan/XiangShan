@@ -7,6 +7,12 @@ package object xiangshan {
     def pc  = "b01".U
     def imm = "b01".U
     def fp  = "b10".U
+
+    def isReg(srcType: UInt) = srcType===reg
+    def isPc(srcType: UInt) = srcType===pc
+    def isImm(srcType: UInt) = srcType===imm
+    def isFp(srcType: UInt) = srcType===fp 
+
     def apply() = UInt(2.W)
   }
 
