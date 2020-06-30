@@ -9,6 +9,9 @@
 #endif
 
 #define printCSR(x) printf(""#x": 0x%016lx    ", x)
+#define selectBit(src, x) (src & (1 << x))
+#define _str(x)  #x
+#define micro2str(x)  _str(x)
 
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
@@ -39,6 +42,7 @@ void difftest_skip_dut() {
 void init_difftest(uint64_t *reg) {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
+  printf("Using %s for difftest\n", micro2str(REF_SO));
   assert(handle);
 
   ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t))dlsym(handle, "difftest_memcpy_from_dut");
@@ -84,10 +88,11 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
 };
 
 int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
-  int skip, int isRVC, uint64_t intrNO, int priviledgeMode) {
+  int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode) {
 
-  assert(!skip && !isRVC && intrNO == 0);
+  assert(!isRVC && intrNO == 0);
   #define DEBUG_RETIRE_TRACE_SIZE 16
+  #define DEBUG_WB_TRACE_SIZE 16
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   uint64_t this_pc = reg_scala[DIFFTEST_THIS_PC];
@@ -97,21 +102,26 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   static uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static uint32_t retire_cnt_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
-  static int pc_retire_pointer = 7;
+  static int pc_retire_pointer = DEBUG_RETIRE_TRACE_SIZE-1;
+  static uint64_t pc_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  static uint64_t wen_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  static uint32_t wdst_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  static uint64_t wdata_wb_queue[DEBUG_WB_TRACE_SIZE] = {0};
+  static int wb_pointer = 0;
 
-  if (skip) {
-    // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
-    // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-    reg_scala[DIFFTEST_THIS_PC] += isRVC ? 2 : 4;
-    nemu_this_pc += isRVC ? 2 : 4;
-    // to skip the checking of an instruction, just copy the reg state to reference design
-    ref_difftest_setregs(reg_scala);
-    pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
-    pc_retire_queue[pc_retire_pointer] = this_pc;
-    inst_retire_queue[pc_retire_pointer] = this_inst;
-    retire_cnt_queue[pc_retire_pointer] = commit;
-    return 0;
-  }
+  // if (skip) {
+  //   // printf("diff pc: %x isRVC %x\n", this_pc, isRVC);
+  //   // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
+  //   reg_scala[DIFFTEST_THIS_PC] += isRVC ? 2 : 4;
+  //   nemu_this_pc += isRVC ? 2 : 4;
+  //   // to skip the checking of an instruction, just copy the reg state to reference design
+  //   ref_difftest_setregs(reg_scala);
+  //   pc_retire_pointer = (pc_retire_pointer+1) % DEBUG_RETIRE_TRACE_SIZE;
+  //   pc_retire_queue[pc_retire_pointer] = this_pc;
+  //   inst_retire_queue[pc_retire_pointer] = this_inst;
+  //   retire_cnt_queue[pc_retire_pointer] = commit;
+  //   return 0;
+  // }
 
   if (intrNO) {
     ref_difftest_raise_intr(intrNO);
@@ -119,7 +129,26 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   }
 
   assert(commit > 0 && commit <= 6);
-  ref_difftest_exec(commit);
+  for(int i = 0; i < commit; i++){
+    pc_wb_queue[wb_pointer] = wpc[i];
+    wen_wb_queue[wb_pointer] = selectBit(wen, i);
+    wdst_wb_queue[wb_pointer] = wdst[i];
+    wdata_wb_queue[wb_pointer] = wdata[i];
+    wb_pointer = (wb_pointer+1) % DEBUG_WB_TRACE_SIZE;
+    if(selectBit(skip, i)){
+      // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
+      printf("SKIP %d\n", i);
+      // to skip the checking of an instruction, just copy the reg state to reference design
+      ref_difftest_getregs(&ref_r);
+      ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
+      if(selectBit(wen, i)){
+        ref_r[wdst[i]] = wdata[i];
+      }
+      ref_difftest_setregs(ref_r);
+    }else{
+      ref_difftest_exec(1);
+    }
+  }
   ref_difftest_getregs(&ref_r);
 
   uint64_t next_pc = ref_r[DIFFTEST_THIS_PC];
@@ -150,6 +179,10 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
     int j;
     for(j = 0; j < DEBUG_RETIRE_TRACE_SIZE; j++){
       printf("retire trace [%x]: pc %010lx inst %08x cmtcnt %d %s\n", j, pc_retire_queue[j], inst_retire_queue[j], retire_cnt_queue[j], (j==pc_retire_pointer)?"<--":"");
+    }
+    printf("\n==============  WB Trace  ==============\n");
+    for(j = 0; j < DEBUG_WB_TRACE_SIZE; j++){
+      printf("wb trace [%x]: pc %010lx wen %x dst %08x data %016lx %s\n", j, pc_wb_queue[j], wen_wb_queue[j]!=0, wdst_wb_queue[j], wdata_wb_queue[j], (j==((wb_pointer-1)%DEBUG_WB_TRACE_SIZE))?"<--":"");
     }
     printf("\n==============  Reg Diff  ==============\n");
     ref_isa_reg_display();

@@ -10,8 +10,8 @@ class BusyTable extends XSModule {
     val flush = Input(Bool())
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
-    // set preg state to ready
-    val wbPregs = Vec(NRWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    // set preg state to ready (write back regfile + roq walk)
+    val wbPregs = Vec(NRWritePorts + CommitWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
     val rfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val pregRdy = Vec(NRReadPorts, Output(Bool()))
