@@ -550,12 +550,12 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   val deqCanIn = !issueToExuValid || deqFire
   val deqFlushHit = io.redirect.valid && (io.redirect.bits.isException ||
                  ParallelOR((issueToExu.uop.brMask & UIntToOH(io.redirect.bits.brTag)).asBools).asBool)
-  val toIssFire = deqCanIn && has1Rdy && !isPop
+  val toIssFire = deqCanIn && has1Rdy && !isPop && selIsRed
   popOne := deqCanIn && (has1Rdy || isPop) // send a empty or valid term to issueStage
 
   when (toIssFire) {
     issueToExu := issQue(deqSel)
-    issueToExuValid := toIssFire && selIsRed
+    issueToExuValid := true.B
 
     issueToExu.src1 := srcDataWire(deqSel)(0)
     if (src2Use) { issueToExu.src2 := srcDataWire(deqSel)(1) } else { issueToExu.src2 := DontCare }
@@ -626,15 +626,25 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
       XSDebug(enqFire && hit, "EnqBypassCtrl: enqSel:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSel, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
       XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelNext:%d Src:%d HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelNext, i.U, VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
     }
-  }
 
+    // send out bypass
+    assert(fixedDelay==1) // only support fixedDelay is 1 now
+    val sel = io.selectedUop
+    sel.valid := toIssFire
+    sel.bits := DontCare
+    sel.bits.pdest := issQue(deqSel).uop.pdest
+  }
+  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
   XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d\n", io.enqCtrl.valid, io.enqCtrl.ready
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest)
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
-  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt)
   XSInfo(deqFire, "Deq:(%d %d) src1:%d|%x src2:%d|%x src3:%d|%x pdest:%d old_pdest:%d\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.old_pdest)
   XSDebug("tailAll:%d tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailDot, tailDot2, selDot, popDot, moveDot)
-  XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b \n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
+  if(useBypass) {
+    XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
+  } else {
+    XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
+  }
   XSDebug("[ID  ]idQue|v|r|srcRdy\n")
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
