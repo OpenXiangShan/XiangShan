@@ -453,9 +453,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     issQue(enqSel).uop := io.enqCtrl.bits
     validQue(enqSel) := true.B
 
-    srcRdyVec(enqSel)(0) := io.enqCtrl.bits.src1State
-    if(src2Listen) { srcRdyVec(enqSel)(1) := io.enqCtrl.bits.src2State }
-    if(src3Listen) { srcRdyVec(enqSel)(2) := io.enqCtrl.bits.src3State }
+    srcRdyVec(enqSel)(0) := io.enqCtrl.bits.src1State === SrcState.rdy
+    if(src2Listen) { srcRdyVec(enqSel)(1) := io.enqCtrl.bits.src2State === SrcState.rdy }
+    if(src3Listen) { srcRdyVec(enqSel)(2) := io.enqCtrl.bits.src3State === SrcState.rdy }
   }
 
   // data enq
@@ -591,6 +591,9 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
           srcRdyVec(i)(j) := true.B
         }
         XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "WakeUp: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b Data:%x\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt, data)
+        for (k <- 0 until wakeupCnt) {
+          XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k), "WakeUpHit: Ports:%d Data:%x Pc:%x RoqIdx:%x\n", k.U, cdbData(k), io.wakeUpPorts(k).bits.uop.cf.pc, io.wakeUpPorts(k).bits.uop.roqIdx)
+        }
       }
     }
   }
@@ -613,26 +616,39 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
           srcDataWire(i)(j) := PriorityMux(hitVecNext zip bpData)
         }
         XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "BypassCtrl: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt)
-        XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit), "BypassData: Sel:%d Src:%d HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", i.U, j.U, VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
+        for (k <- 0 until wakeupCnt) {
+          XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k), "BypassCtrlHit: Ports:%d Pc:%x RoqIdx:%x\n", k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+        }
+        XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit), "BypassData: Sel:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", i.U, j.U, psrc(i)(j), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
+        for (k <- 0 until wakeupCnt) {
+          XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k)), "BypassDataHit: Ports:%d Data:%x Pc:%x RoqIdx:%x\n", k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+        }
       }
     }
 
     // Enqueue Bypass
     val enqCtrl = io.enqCtrl
     val enqPsrc = List(enqCtrl.bits.psrc1, enqCtrl.bits.psrc2, enqCtrl.bits.psrc3)
+    val enqSrcRdy = List(enqCtrl.bits.src1State===SrcState.rdy, enqCtrl.bits.src2State===SrcState.rdy, enqCtrl.bits.src3State===SrcState.rdy)
     val enqSrcType = List(enqCtrl.bits.ctrl.src1Type, enqCtrl.bits.ctrl.src2Type, enqCtrl.bits.ctrl.src3Type)
     for (i <- 0 until srcListenNum) {
       val hitVec = List.tabulate(bypassCnt)(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
       val hitVecNext = hitVec.map(RegNext(_))
       val hit = ParallelOR(hitVec).asBool
-      when (enqFire && hit) {
+      when (enqFire && hit && enqSrcRdy(i)) {
         srcRdyVec(enqSel)(i) := true.B
       }
-      when (RegNext(enqFire && hit)) {
+      when (RegNext(enqFire && hit && enqSrcRdy(i))) {
         srcDataWire(enqSelNext)(i) := ParallelMux(hitVecNext zip bpData)
       }
       XSDebug(enqFire && hit, "EnqBypassCtrl: enqSel:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSel, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
-      XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelNext:%d Src:%d HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelNext, i.U, VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
+      for (k <- 0 until wakeupCnt) {
+        XSDebug(enqFire && hit && enqSrcRdy(i) && hitVec(k), "EnqBypassCtrlHit: Ports:%d Pc:%x RoqIdx:%x\n", k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+      }
+      XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelNext:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelNext, i.U, enqPsrc(i), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
+      for (k <- 0 until wakeupCnt) {
+        XSDebug(RegNext(enqFire && hit && enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: Ports:%d Data:%x Pc:%x RoqIdx:%x\n", k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+      }
     }
 
     // send out bypass
@@ -641,6 +657,8 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     sel.valid := toIssFire
     sel.bits := DontCare
     sel.bits.pdest := issQue(deqSel).uop.pdest
+    sel.bits.cf.pc := issQue(deqSel).uop.cf.pc
+    sel.bits.roqIdx := issQue(deqSel).uop.roqIdx
     sel.bits.ctrl.rfWen := issQue(deqSel).uop.ctrl.rfWen
     sel.bits.ctrl.fpWen := issQue(deqSel).uop.ctrl.fpWen
   }
