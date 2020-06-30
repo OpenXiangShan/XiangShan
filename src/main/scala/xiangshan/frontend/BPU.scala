@@ -23,7 +23,9 @@ class BPU extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
-    val out = new Bundle { val redirect = Valid(UInt(VAddrBits.W)) }
+    // val out = new Bundle { val redirect = Valid(UInt(VAddrBits.W)) }
+    val predMask = Output(Vec(FetchWidth, Bool()))
+    val predTargets = Output(Vec(FetchWidth, UInt(VAddrBits.W)))
   })
 
   val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
@@ -115,11 +117,15 @@ class BPU extends XSModule {
   }
 
   // redirect based on BTB and JBTAC
+  /*
   val redirectMask = Wire(Vec(FetchWidth, Bool()))
   val redirectTarget = Wire(Vec(FetchWidth, UInt(VAddrBits.W)))
   (0 until FetchWidth).map(i => redirectMask(i) := btbHits(i) && Mux(btbTypes(i) === BTBtype.B, btbTakens(i), true.B) || jbtacHits(i))
   (0 until FetchWidth).map(i => redirectTarget(i) := Mux(btbHits(i) && !(btbTypes(i) === BTBtype.B && !btbTakens(i)), btbTargets(i), jbtacTargets(i)))
   io.out.redirect.valid := redirectMask.asUInt.orR
   io.out.redirect.bits := PriorityMux(redirectMask, redirectTarget)
+  */
+  (0 until FetchWidth).map(i => io.predMask(i) := btbHits(i) && Mux(btbTypes(i) === BTBtype.B, btbTakens(i), true.B) || jbtacHits(i))
+  (0 until FetchWidth).map(i => io.predTargets(i) := Mux(btbHits(i) && !(btbTypes(i) === BTBtype.B && !btbTakens(i)), btbTargets(i), jbtacTargets(i)))
 
 }
