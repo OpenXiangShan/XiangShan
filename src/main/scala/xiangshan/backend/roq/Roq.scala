@@ -13,7 +13,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(ExtendedRoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
-    val exeWbResults = Vec(exuConfig.ExuCnt, Flipped(ValidIO(new ExuOutput)))
+    // exu + brq
+    val exeWbResults = Vec(exuConfig.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val scommit = Output(UInt(3.W))
   })

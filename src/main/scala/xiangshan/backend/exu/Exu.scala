@@ -34,7 +34,8 @@ abstract class Exu
   val writeIntRf: Boolean = true,
   val writeFpRf: Boolean = false,
   val enableBypass: Boolean = false, // join bypass group or not, require readIntRf & writeIntRf now
-  val fixedDelay: Int = 1 // IssueQueue's selectUop's delay
+  val fixedDelay: Int = 1, // IssueQueue's selectUop's delay
+  val hasRedirect: Boolean = false
 ) extends XSModule {
   val io = IO(new ExuIO)
 }
@@ -100,7 +101,6 @@ trait HasExeUnits{
 
   val exeUnits = bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++
     fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits ++ lsuExeUnits)
-  val bjUnits = bruExeUnit +: aluExeUnits
 
   exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.scommit := DontCare)
@@ -112,18 +112,25 @@ class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {
     val out = Vec(n, ValidIO(new ExuOutput))
   })
 
-  // TODO: arbiter logic
+  require(m >= n, "m < n! Why use an arbiter???")
 
-  for (i <- 0 until m) {
-    io.in(i).ready := false.B
+  // first n-1 ports, direct connect
+  for((i, o) <- io.in.take(n-1).zip(io.out)){
+    o.valid := i.valid
+    o.bits := i.bits
+    i.ready := true.B
   }
-  io.out <> DontCare
 
-  for (i <- 0 until m) {
-    io.out(i).valid := io.in(i).valid
-    io.out(i).bits := io.in(i).bits
-    io.in(i).ready := true.B
+  // last m-(n-1) ports, rr arb
+  val arb = Module(new RRArbiter[ExuOutput](new ExuOutput, m-n+1))
+
+  for((arbIn, ioIn) <- arb.io.in.zip(io.in.drop(n-1))){
+    arbIn <> ioIn
   }
+
+  io.out.last.bits := arb.io.out.bits
+  io.out.last.valid := arb.io.out.valid
+  arb.io.out.ready := true.B
 
   for (i <- 0 until n) {
     XSInfo(io.out(i).valid, "out(%d) pc(0x%x) writebacks 0x%x to pdest(%d) ldest(%d)\n", i.U, io.out(i).bits.uop.cf.pc,

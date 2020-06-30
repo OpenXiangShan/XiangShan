@@ -50,7 +50,7 @@ object ALUOpType {
   def isBranchInvert(func: UInt) = func(0)
 }
 
-class Alu extends Exu(alu.litValue()) {
+class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   override def toString: String = "Alu"
 
   val (iovalid, src1, src2, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, 
@@ -99,12 +99,12 @@ class Alu extends Exu(alu.litValue()) {
 
   io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
-  io.out.bits.redirect.valid := io.out.valid && isBru//isBranch
-  io.out.bits.redirect.bits.target := Mux(!taken && isBranch, pcLatchSlot, target)
-  io.out.bits.redirect.bits.brTag := uop.brTag
-  io.out.bits.redirect.bits.isException := DontCare // false.B
-  io.out.bits.redirect.bits.roqIdx := uop.roqIdx
-  io.out.bits.redirect.bits.freelistAllocPtr := uop.freelistAllocPtr
+  io.out.bits.redirectValid := io.out.valid && isBru//isBranch
+  io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
+  io.out.bits.redirect.brTag := uop.brTag
+  io.out.bits.redirect.isException := DontCare // false.B
+  io.out.bits.redirect.roqIdx := uop.roqIdx
+  io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
 
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
