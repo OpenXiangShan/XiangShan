@@ -57,9 +57,6 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := res
 
-  io.dmem <> DontCare
-  io.out.bits.debug.isMMIO := DontCare
-
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
   XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x, brMask:%x\n",
     io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag, uop.brMask)

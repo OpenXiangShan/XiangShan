@@ -19,6 +19,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val scommit = Output(UInt(3.W))
   })
 
+  val numWbPorts = io.exeWbResults.length
+
   val microOp = Mem(RoqSize, new MicroOp)
   // val brMask = Reg(Vec(RoqSize, UInt(BrqSize.W)))
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
@@ -66,9 +68,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
 
   // Writeback
-  val firedWriteback = VecInit((0 until exuConfig.ExuCnt).map(io.exeWbResults(_).fire())).asUInt
+  val firedWriteback = VecInit((0 until numWbPorts).map(io.exeWbResults(_).fire())).asUInt
   XSInfo(PopCount(firedWriteback) > 0.U, "writebacked %d insts\n", PopCount(firedWriteback))
-  for(i <- 0 until exuConfig.ExuCnt){
+  for(i <- 0 until numWbPorts){
     when(io.exeWbResults(i).fire()){
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
       exuData(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.data
@@ -96,7 +98,17 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
       } // for difftest
       when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
-      XSInfo(io.commits(i).valid, "retired pc %x wen %d ldst %d data %x\n", microOp(ringBufferTail+i.U).cf.pc, microOp(ringBufferTail+i.U).ctrl.rfWen, microOp(ringBufferTail+i.U).ctrl.ldest, exuData(ringBufferTail+i.U))
+      XSInfo(io.commits(i).valid,
+        "retired pc %x wen %d ldst %d data %x\n",
+        microOp(ringBufferTail+i.U).cf.pc,
+        microOp(ringBufferTail+i.U).ctrl.rfWen,
+        microOp(ringBufferTail+i.U).ctrl.ldest,
+        exuData(ringBufferTail+i.U)
+      )
+      XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO,
+        "difftest skiped pc0x%x\n",
+        microOp(ringBufferTail+i.U).cf.pc
+      )
     }.otherwise{//state === s_walk
       io.commits(i).valid := valid(ringBufferWalk+i.U) && shouldWalkVec(i)
       io.commits(i).bits.uop := microOp(ringBufferWalk+i.U)
@@ -125,11 +137,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
 
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
-  for(i <- 0 until CommitWidth) {
-      XSInfo(io.commits(i).valid, "retired pc at commmit(%d) is: %d 0x%x\n",
-        i.U, ringBufferTail+i.U, microOp(ringBufferTail+i.U).cf.pc)
-      XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO, "difftest skiped pc0x%x\n", microOp(ringBufferTail+i.U).cf.pc)
-  }
 
   // commit store to lsu
   val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.ldu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT

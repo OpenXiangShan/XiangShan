@@ -38,6 +38,8 @@ abstract class Exu
   val hasRedirect: Boolean = false
 ) extends XSModule {
   val io = IO(new ExuIO)
+  io.dmem <> DontCare
+  io.out.bits.debug.isMMIO := false.B
 }
 
 class Mul extends Exu(FuType.mul.litValue()) with NeedImpl{
