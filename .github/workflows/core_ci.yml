@@ -21,3 +21,5 @@ jobs:
          
        - name: Complile
          run: make verilog
+
+runs-on: self-hosted
