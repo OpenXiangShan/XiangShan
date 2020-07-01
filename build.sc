@@ -49,6 +49,6 @@ trait HasMacroParadise extends ScalaModule {
 object chiselModule extends CrossSbtModule with HasChisel3 with HasChiselTests with HasXsource211 with HasMacroParadise {
   def zincWorker = CustomZincWorkerModule
   def crossScalaVersion = "2.11.12"
-  def forkArgs = Seq("-Xmx3G", "-XX:MaxPermSize=1G")
+  def forkArgs = Seq("-Xmx3G")
 }
 
