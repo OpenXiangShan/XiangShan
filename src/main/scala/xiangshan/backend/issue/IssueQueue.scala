@@ -368,11 +368,12 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val selIQIdx = selResult.iqIdx
     val delayPipe = DelayPipe(VecInit(selResult.instRdy, prfDest(selIQIdx)), fixedDelay-1)
     sel.bits := DontCare
+    sel.valid := selResult.instRdy
     sel.bits.pdest := delayPipe(fixedDelay-1)(1)
   }
 }
 
-class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
+class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
 
   val useBypass = bypassCnt > 0
   val src2Use = true
@@ -424,7 +425,8 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   val full = tailAll(iqIdxWidth)
   // alias failed, turn to independent storage(Reg)
   val psrc = List.tabulate(iqSize)(i => List(issQue(i.U).uop.psrc1, issQue(i.U).uop.psrc2, issQue(i.U).uop.psrc3)) // TODO: why issQue can not use Int as index, but idQue is ok??
-  val srcRdyVec = Reg(Vec(iqSize, Vec(srcListenNum, Bool())))
+  // val srcRdyVec = Reg(Vec(iqSize, Vec(srcListenNum, Bool())))
+  val srcRdyVec = Reg(Vec(iqSize, Vec(srcAllNum, Bool())))
   // val srcData = Reg(Vec(iqSize, Vec(srcUseNum, UInt(XLEN.W)))) // NOTE: Bundle/MicroOp need merge "src1/src2/src3" into a Vec. so that IssueQueue could have Vec
   val srcData = Reg(Vec(iqSize, Vec(srcAllNum, UInt(XLEN.W))))
   val srcRdy = VecInit(srcRdyVec.map(i => ParallelAND(i)))
@@ -477,15 +479,15 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
   //-----------------------------------------
   val tailInc = enqFire
   val tailDec = popOne
-  val tailKeep = tailInc ^ tailDec
+  val tailKeep = tailInc === tailDec
   val tailAdd = tailAll + 1.U
   val tailSub = tailAll - 1.U
-  tailAll := ParallelMux(VecInit(tailKeep, tailInc, tailDec) zip VecInit(tailAll, tailAdd, tailDec))
+  tailAll := ParallelMux(VecInit(tailKeep, tailInc, tailDec) zip VecInit(tailAll, tailAdd, tailSub))
 
   // Select to Dequeue
   val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
   val deqSelOH = PriorityEncoderOH(idValidQue & srcIdRdy)
-  val has1Rdy = ParallelOR(validQue).asBool()
+  val has1Rdy = ParallelOR((validQue.asUInt & srcRdy.asUInt).asBools).asBool()
 
   //-----------------------------------------
   // idQue Move
@@ -663,22 +665,22 @@ class IssueQueueCompact(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt
     sel.bits.ctrl.fpWen := issQue(deqSel).uop.ctrl.fpWen
   }
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
-  XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d\n", io.enqCtrl.valid, io.enqCtrl.ready
-    , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest)
+  XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready
+    , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
-  XSInfo(deqFire, "Deq:(%d %d) src1:%d|%x src2:%d|%x src3:%d|%x pdest:%d old_pdest:%d\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.old_pdest)
-  XSDebug("tailAll:%d tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailDot, tailDot2, selDot, popDot, moveDot)
+  XSInfo(deqFire, "Deq:(%d %d) src1:%d|%x src2:%d|%x src3:%d|%x pdest:%d old_pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.old_pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
+  XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot)
   if(useBypass) {
     XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
   } else {
     XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
-  XSDebug("[ID  ]idQue|v|r|srcRdy|pc|roqIdx|src1|src2|src3\n")
+  XSDebug("id| v|r |   pc   |roqIdx|[psrc|r]   src1|[psrc|rdy]     src2|[psrc|rdy]    src3\n")
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
-      XSDebug("[ID%d] %d |%d|%d|%b|%x|%x|%x|%x|%x|    <- tail\n", i.U, idQue(i), idValidQue(i), srcRdy(i), srcRdyVec(i).asUInt, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx, srcData(i)(0), srcData(i)(1), srcData(i)(2))
+      XSDebug("%d|%d|%d|%x| %x |[%d|%b]%x|[%d|%b]%x|[%d|%b]%x| <-\n", idQue(i), idValidQue(i), srcRdy(i), issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx, psrc(i)(0), srcRdyVec(i)(0), srcData(i)(0), psrc(i)(1), srcRdyVec(i)(1), srcData(i)(1), psrc(i)(2), srcRdyVec(i)(2), srcData(i)(2))
     }.otherwise {
-      XSDebug("[ID%d] %d |%d|%d|%b|%x|%x|%x|%x|%x|\n", i.U, idQue(i), idValidQue(i), srcRdy(i), srcRdyVec(i).asUInt, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx, srcData(i)(0), srcData(i)(1), srcData(i)(2))
+      XSDebug("%d|%d|%d|%x| %x |[%d|%b]%x|[%d|%b]%x|[%d|%b]%x|\n", idQue(i), idValidQue(i), srcRdy(i), issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx, psrc(i)(0), srcRdyVec(i)(0), srcData(i)(0), psrc(i)(1), srcRdyVec(i)(1), srcData(i)(1), psrc(i)(2), srcRdyVec(i)(2), srcData(i)(2))
     }
   }
 

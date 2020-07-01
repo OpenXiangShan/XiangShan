@@ -11,7 +11,7 @@ import xiangshan.backend.rename.Rename
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.{IssueQueue, IssueQueueCompact}
+import xiangshan.backend.issue.{IssueQueue, IssueQueueCpt}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 
@@ -53,7 +53,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
     val wakeupCnt = exeUnits.count(needWakeup)
     assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
-    val iq = Module(new IssueQueueCompact(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
+    val iq = Module(new IssueQueueCpt(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
