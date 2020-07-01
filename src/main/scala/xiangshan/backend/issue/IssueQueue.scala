@@ -564,6 +564,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   when (toIssFire) {
     issueToExu := issQue(deqSel)
     issueToExuValid := true.B
+    validQue(deqSel) := false.B
 
     issueToExu.src1 := srcDataWire(deqSel)(0)
     if (src2Use) { issueToExu.src2 := srcDataWire(deqSel)(1) } else { issueToExu.src2 := DontCare }
