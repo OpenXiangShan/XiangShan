@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     name: Generate Verilog
     steps:
        - uses: actions/checkout@v2
@@ -21,5 +21,3 @@ jobs:
          
        - name: Complile
          run: make verilog
-
-runs-on: self-hosted
