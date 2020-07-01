@@ -91,7 +91,7 @@ class Rename extends XSModule {
     val this_can_alloc = Mux(needIntDest, intCanAlloc, fpCanAlloc)
     io.in(i).ready := this_can_alloc && !isWalk
     last_can_alloc = last_can_alloc && this_can_alloc
-    uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), fpFreeList.pdests(i))
+    uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U, fpFreeList.pdests(i)))
     uops(i).freelistAllocPtr := Mux(needIntDest, intFreeList.allocPtrs(i), fpFreeList.allocPtrs(i))
 
     io.out(i).valid := io.in(i).fire()

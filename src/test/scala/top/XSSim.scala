@@ -14,7 +14,11 @@ class DiffTestIO extends Bundle {
   val commit = Output(UInt(32.W))
   val thisPC = Output(UInt(64.W))
   val thisINST = Output(UInt(32.W))
-  val skip = Output(Bool())
+  val skip = Output(UInt(32.W))
+  val wen = Output(UInt(32.W))
+  val wdata = Output(Vec(6, UInt(64.W))) // set difftest width to 6
+  val wdst = Output(Vec(6, UInt(32.W))) // set difftest width to 6
+  val wpc = Output(Vec(6, UInt(39.W))) // set difftest width to 6
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
   
@@ -62,6 +66,10 @@ class XSSimTop extends Module {
   BoringUtils.addSink(difftest.thisINST, "difftestThisINST")
   BoringUtils.addSink(difftest.skip, "difftestSkip")
   BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
+  BoringUtils.addSink(difftest.wen, "difftestWen")
+  BoringUtils.addSink(difftest.wdata, "difftestWdata")
+  BoringUtils.addSink(difftest.wdst, "difftestWdst")
+  BoringUtils.addSink(difftest.wpc, "difftestWpc")
   BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
   BoringUtils.addSink(difftest.r, "difftestRegs")
   BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
