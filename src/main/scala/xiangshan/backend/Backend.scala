@@ -48,7 +48,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   ))
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
   val issueQueues = exeUnits.zipWithIndex.map({ case(eu, i) =>
-    def needBypass(x: Exu): Boolean = (eu.enableBypass)
+    def needBypass(x: Exu): Boolean = eu.enableBypass
     val bypassCnt = exeUnits.count(needBypass)//if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
     def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
     val wakeupCnt = exeUnits.count(needWakeup)
@@ -92,9 +92,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.enqReqs <> decode.io.toBrq
-  for(i <- bjUnits.indices){
-    brq.io.exuRedirect(i).bits := bjUnits(i).io.out.bits
-    brq.io.exuRedirect(i).valid := bjUnits(i).io.out.fire()
+  for((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.hasRedirect))){
+    x.bits := y.io.out.bits
+    x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
   decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
@@ -120,14 +120,17 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf
 
   val exeWbReqs = exeUnits.map(_.io.out)
-  val wbIntReqs = (bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)).map(_.io.out)
-  val wbFpReqs = (fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits).map(_.io.out)
-  val intWbArb = Module(new WriteBackArbMtoN(wbIntReqs.length, NRWritePorts))
-  val fpWbArb = Module(new WriteBackArbMtoN(wbFpReqs.length, NRWritePorts))
-  val wbIntResults = intWbArb.io.out
-  val wbFpResults = fpWbArb.io.out
 
-  def exuOutToRfWrite(x: Valid[ExuOutput]) = {
+  val wbIntIdx = exeUnits.zipWithIndex.filter(_._1.writeIntRf).map(_._2)
+  val wbFpIdx = exeUnits.zipWithIndex.filter(_._1.writeFpRf).map(_._2)
+
+  val wbu = Module(new Wbu(wbIntIdx, wbFpIdx))
+  wbu.io.in <> exeWbReqs
+
+  val wbIntResults = wbu.io.toIntRf
+  val wbFpResults = wbu.io.toFpRf
+
+  def exuOutToRfWrite(x: Valid[ExuOutput]): RfWritePort = {
     val rfWrite = Wire(new RfWritePort)
     rfWrite.wen := x.valid
     rfWrite.addr := x.bits.uop.pdest
@@ -135,19 +138,14 @@ class Backend(implicit val p: XSConfig) extends XSModule
     rfWrite
   }
 
-  intWbArb.io.in <> wbIntReqs
   intRf.io.writePorts <> wbIntResults.map(exuOutToRfWrite)
-
-  fpWbArb.io.in <> wbFpReqs
   fpRf.io.writePorts <> wbFpResults.map(exuOutToRfWrite)
 
   rename.io.wbIntResults <> wbIntResults
   rename.io.wbFpResults <> wbFpResults
 
-  roq.io.exeWbResults.zip(exeWbReqs).foreach({case (x,y) => {
-    x.bits := y.bits
-    x.valid := y.fire()
-  }})
+  roq.io.exeWbResults.take(exeWbReqs.length).zip(wbu.io.toRoq).foreach(x => x._1 := x._2)
+  roq.io.exeWbResults.last := brq.io.out
 
 
   // TODO: Remove sink and source

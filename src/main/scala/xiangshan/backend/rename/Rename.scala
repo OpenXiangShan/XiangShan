@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils.XSInfo
+import xiangshan.utils.{ParallelOR, XSInfo}
 
 class Rename extends XSModule {
   val io = IO(new Bundle() {
@@ -21,8 +21,10 @@ class Rename extends XSModule {
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
 
+  val isWalk = ParallelOR(io.roqCommits.map(x => x.valid && x.bits.isWalk)).asBool()
+
   val debug_exception = io.redirect.valid && io.redirect.bits.isException
-  val debug_walk = io.roqCommits.map(_.bits.isWalk).reduce(_ || _)
+  val debug_walk = isWalk
   val debug_norm = !(debug_exception || debug_walk)
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -62,8 +64,8 @@ class Rename extends XSModule {
   val uops = Wire(Vec(RenameWidth, new MicroOp))
 
   uops.foreach( uop => {
-    uop.brMask := DontCare
-    uop.brTag := DontCare
+//    uop.brMask := DontCare
+//    uop.brTag := DontCare
     uop.src1State := DontCare
     uop.src2State := DontCare
     uop.src3State := DontCare
@@ -71,21 +73,25 @@ class Rename extends XSModule {
   })
 
   var last_can_alloc = WireInit(true.B)
-  for(i <- 0 until RenameWidth){
+  for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
+    uops(i).brMask := io.in(i).bits.brMask
+    uops(i).brTag := io.in(i).bits.brTag
+
+    val inValid = io.in(i).valid && !isWalk
 
     // alloc a new phy reg
-    val needFpDest = io.in(i).valid && needDestReg(fp = true, io.in(i).bits)
-    val needIntDest = io.in(i).valid && needDestReg(fp = false, io.in(i).bits)
+    val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
+    val needIntDest = inValid && needDestReg(fp = false, io.in(i).bits)
     fpFreeList.allocReqs(i) := needFpDest && last_can_alloc && io.out(i).ready
     intFreeList.allocReqs(i) := needIntDest && last_can_alloc && io.out(i).ready
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
     val this_can_alloc = Mux(needIntDest, intCanAlloc, fpCanAlloc)
-    io.in(i).ready := this_can_alloc
+    io.in(i).ready := this_can_alloc && !isWalk
     last_can_alloc = last_can_alloc && this_can_alloc
-    uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), fpFreeList.pdests(i))
+    uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U, fpFreeList.pdests(i)))
     uops(i).freelistAllocPtr := Mux(needIntDest, intFreeList.allocPtrs(i), fpFreeList.allocPtrs(i))
 
     io.out(i).valid := io.in(i).fire()
@@ -106,8 +112,11 @@ class Rename extends XSModule {
       rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
       rat.specWritePorts(i).wdata := Mux(specWen, freeList.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
 
+      busyTable.wbPregs(NRWritePorts + i).valid := walkWen
+      busyTable.wbPregs(NRWritePorts + i).bits := io.roqCommits(i).bits.uop.pdest
+
       XSInfo(walkWen,
-        {if(fp) "fp" else "int "} + p"walk: pc:${Hexadecimal(uops(i).cf.pc)}" +
+        {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
           p" ldst:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
       )
 
@@ -116,7 +125,7 @@ class Rename extends XSModule {
       rat.archWritePorts(i).wdata := io.roqCommits(i).bits.uop.pdest
 
       XSInfo(rat.archWritePorts(i).wen,
-        {if(fp) "fp" else "int "} + p" rat arch: ldest:${rat.archWritePorts(i).addr}" +
+        {if(fp) p"fp" else p"int "} + p" rat arch: ldest:${rat.archWritePorts(i).addr}" +
           p" pdest:${rat.archWritePorts(i).wdata}\n"
       )
 
@@ -163,7 +172,7 @@ class Rename extends XSModule {
   def updateBusyTable(fp: Boolean) = {
     val wbResults = if(fp) io.wbFpResults else io.wbIntResults
     val busyTable = if(fp) fpBusyTable else intBusyTable
-    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs)){
+    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs.take(NRWritePorts))){
       setPhyRegRdy.valid := wb.valid && needDestReg(fp, wb.bits.uop)
       setPhyRegRdy.bits := wb.bits.uop.pdest
     }

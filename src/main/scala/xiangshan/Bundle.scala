@@ -80,7 +80,8 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt(XLEN.W)
-  val redirect = Valid(new Redirect)
+  val redirectValid = Bool()
+  val redirect = new Redirect
   val debug = new DebugBundle
 }
 

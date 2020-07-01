@@ -32,6 +32,7 @@ class Dispatch1 extends XSModule{
   val cancelled = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
     cancelled(i) := ((io.fromRename(i).bits.brMask & UIntToOH(io.redirect.bits.brTag)) =/= 0.U) && io.redirect.valid
+    XSDebug(io.redirect.valid, p"pc=${Hexadecimal(io.fromRename(i).bits.cf.pc)} brMask:${Binary(io.fromRename(i).bits.brMask)} brTag:${io.redirect.bits.brTag}\n")
   }
 
   // enqueue handshake
@@ -43,9 +44,9 @@ class Dispatch1 extends XSModule{
                     (io.toLsDq(i).ready  && FuType.isMemExu(io.fromRename(i).bits.ctrl.fuType))
     enq_valid(i) := io.toIntDq(i).valid || io.toFpDq(i).valid || io.toLsDq(i).valid
     io.recv(i) := (enq_ready(i) && enq_valid(i)) || cancelled(i)
-    XSInfo(io.recv(i) && !cancelled(i), "instruction 0x%x accepted by queue %x %x %x\n",
+    XSInfo(io.recv(i) && !cancelled(i), "pc 0x%x accepted by queue %x %x %x\n",
       io.fromRename(i).bits.cf.pc, io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
-    XSInfo(io.recv(i) && cancelled(i), "instruction 0x%x with brMask %x brTag %x cancelled\n",
+    XSInfo(io.recv(i) && cancelled(i), "pc 0x%x with brMask %x brTag %x cancelled\n",
       io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.brMask, io.redirect.bits.brTag)
   }
 
@@ -63,7 +64,7 @@ class Dispatch1 extends XSModule{
       roqIndexRegValid(i) := false.B
     }
     XSDebug(io.toRoq(i).fire() && !io.recv(i),
-      "instruction 0x%x receives nboq %x but not accepted by queue (and it waits)\n",
+      "pc 0x%x receives nboq %x but not accepted by queue (and it waits)\n",
       io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
   }
 
@@ -91,14 +92,14 @@ class Dispatch1 extends XSModule{
   val all_recv = recv_vector.reduce((x, y) => x && y).asBool()
   for (i <- 0 until RenameWidth) {
     io.toRoq(i).bits <> io.fromRename(i).bits
-    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
-    XSDebug(io.toRoq(i).fire(), "instruction 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
+    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)// && !cancelled(i)
+    XSDebug(io.toRoq(i).fire(), "pc 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
     if (i > 0) {
       XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid,
         "roq handshake not continuous %d", i.U)
     }
     io.fromRename(i).ready := all_recv
-    XSDebug(io.fromRename(i).valid, "instruction 0x%x of type %b is in %d-th slot\n",
+    XSDebug(io.fromRename(i).valid, "pc 0x%x of type %b is in %d-th slot\n",
       io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
 }

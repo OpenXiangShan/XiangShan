@@ -9,6 +9,7 @@ import xiangshan.utils._
 import xiangshan.backend.regfile.RfWritePort
 import utils._
 import bus.simplebus._
+import noop.AddressSpace
 
 object LSUOpType {
   def lb   = "b000000".U
@@ -143,16 +144,9 @@ class Lsu extends Exu(
       LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
   ))
 
-  io.in.ready := io.out.fire()
-
-  io.out.valid := !retiringStore && (Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)) || isStoreIn)
-  io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
-  // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
-  io.out.bits.debug.isMMIO := false.B //for debug
 
   // if store, add it to store queue
-  val stqEnqueue = valid && isStore && !stqFull
+  val stqEnqueue = validIn && isStoreIn && !stqFull
   when(stqEnqueue){
     stqPtr(stqHead) := emptySlot
     stqData(emptySlot).src1 := src1In
@@ -173,8 +167,29 @@ class Lsu extends Exu(
 
   // update stqTail, stqCommited
   stqCommited := stqCommited + io.scommit - stqDequeue
-  stqTail := stqTail + stqEnqueue - stqDequeue
+  stqHead := stqHead + stqEnqueue - stqDequeue
 
+  io.in.ready := io.out.fire()
+
+  io.out.valid := (!isStoreIn && !retiringStore && Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)) || stqEnqueue) && io.in.valid
+  io.out.bits.uop <> io.in.bits.uop
+  io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
+  // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
+  io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) //for debug
+  when(io.out.fire()){
+    XSDebug("LSU fire: addr %x mmio %x isStoreIn %x retiringStore %x partialLoad %x dmem %x stqEnqueue %x state %x \n",
+      addr,
+      io.out.bits.debug.isMMIO,
+      isStoreIn,
+      retiringStore,
+      partialLoad,
+      dmem.resp.fire(),
+      stqEnqueue,
+      state
+    )
+  }
+
+  // debug
   XSDebug("state: %d (valid, ready): in (%d,%d) out (%d,%d)\n", state, io.in.valid, io.in.ready, io.out.valid, io.out.ready)
   XSDebug("stqinfo: stqValid.asUInt %b stqHead %d stqTail %d stqCommited %d emptySlot %d\n", stqValid.asUInt, stqHead, stqTail, stqCommited, emptySlot)
   XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd =/= SimpleBusCmd.write, "[DMEM LOAD  REQ] addr 0x%x wdata 0x%x size %d\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size)

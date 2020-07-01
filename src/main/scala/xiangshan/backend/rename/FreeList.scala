@@ -75,8 +75,8 @@ class FreeList extends XSModule with HasFreeListConsts {
   ){
     canAlloc := !empty
     pdest := freeList(headPtrNext.value)
-    allocPtr := headPtrNext
     headPtrNext = headPtrNext + (allocReq && canAlloc)
+    allocPtr := headPtrNext
     empty = isEmpty(headPtrNext, tailPtr)
   }
 
