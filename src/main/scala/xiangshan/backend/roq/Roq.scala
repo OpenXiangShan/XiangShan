@@ -77,10 +77,10 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       exuDebug(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.debug
       XSInfo(io.exeWbResults(i).valid, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x\n", 
         microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.pc,
-        microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen, 
+        microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.rfWen,
+        io.exeWbResults(i).bits.data,
         microOp(io.exeWbResults(i).bits.uop.roqIdx).ctrl.ldest, 
         io.exeWbResults(i).bits.uop.pdest,
-        io.exeWbResults(i).bits.data,
         io.exeWbResults(i).bits.debug.isMMIO
       )
     }
