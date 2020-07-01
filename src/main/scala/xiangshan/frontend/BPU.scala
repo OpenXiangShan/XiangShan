@@ -121,4 +121,81 @@ class BPU extends XSModule {
   (0 until FetchWidth).map(i => io.predMask(i) := btbHits(i) && Mux(btbTypes(i) === BTBtype.B, btbTakens(i), true.B) || jbtacHits(i))
   (0 until FetchWidth).map(i => io.predTargets(i) := Mux(btbHits(i) && !(btbTypes(i) === BTBtype.B && !btbTakens(i)), btbTargets(i), jbtacTargets(i)))
 
+
+  // update bpu, including BTB, JBTAC...
+  // 1. update BTB
+  // 1.1 read the selected bank
+  for (b <- 0 until BtbBanks) {
+    for (w <- 0 until BtbWays) {
+      btb(b)(w).io.r.req.valid := io.redirect.valid && btbAddr.getBank(io.redirect.bits.pc) === b.U
+      btb(b)(w).io.r.req.bits.setIdx := btbAddr.getBankIdx(io.redirect.bits.pc)
+    }
+  }
+
+  // 1.2 match redirect pc tag with the 4 tags in a btb line, find a way to write
+  val redirectLatch = RegEnable(io.redirect.bits, io.redirect.valid)
+  val bankLatch = btbAddr.getBank(redirectLatch.pc)
+  val btbUpdateRead = Wire(Vec(BtbWays, btbEntry()))
+  val btbValids = Wire(Vec(BtbWays, Bool()))
+  val btbUpdateTagHits = Wire(Vec(BtbWays, Bool()))
+  for (b <- 0 until BtbBanks) {
+    when (b.U === bankLatch) {
+      for (w <- 0 until BtbWays) {
+        btbUpdateRead(w) := btb(b)(w).io.r.resp.data(0)
+        btbValids(w) := btbUpdateRead(w).valid && RegNext(btb(b)(w).io.r.req.fire(), init = false.B)
+      }
+    }
+  }
+  (0 until BtbWays).map(w => btbUpdateTagHits(w) := btbValids(w) && btbUpdateRead(w).tag === btbAddr.getTag(redirectLatch.pc))
+  // val btbWriteWay = Wire(Vec(BtbWays, Bool()))
+  val btbWriteWay = Wire(UInt(BtbWays.W))
+  val btbInvalids = ~ btbValids.asUInt
+  when (btbUpdateTagHits.asUInt.orR) {
+    // tag hits
+    btbWriteWay := btbUpdateTagHits.asUInt
+  }.elsewhen (!btbValids.asUInt.andR) {
+    // no tag hits but there are free entries
+    btbWriteWay := Mux(btbInvalids >= 8.U, "b1000".U,
+      Mux(btbInvalids >= 4.U, "b0100".U,
+      Mux(btbInvalids >= 2.U, "b0010".U, "b0001".U)))
+  }.otherwise {
+    // no tag hits and no free entry, select a victim way
+    btbWriteWay := UIntToOH(LFSR64()(log2Up(BtbWays) - 1, 0))
+  }
+
+  // 1.3 calculate new 2-bit counter value
+  val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
+  btbWrite.valid := true.B
+  btbWrite.tag := btbAddr.getTag(redirectLatch.pc)
+  btbWrite._type := redirectLatch._type
+  btbWrite.target := redirectLatch.target
+  val oldPred = PriorityMux(btbWriteWay.asTypeOf(Vec(BtbWays, Bool())), btbUpdateRead.map{ e => e.pred })
+  val newPred = Mux(redirectLatch.taken, Mux(oldPred === "b11".U, "b11".U, oldPred + 1.U),
+    Mux(oldPred === "b00".U, "b00".U, oldPred - 1.U))
+  btbWrite.pred := Mux(btbUpdateTagHits.asUInt.orR && redirectLatch._type === BTBtype.B, newPred, "b01".U)
+  
+  // 1.4 write BTB
+  for (b <- 0 until BtbBanks) {
+    when (b.U === bankLatch) {
+      for (w <- 0 until BtbWays) {
+        btb(b)(w).io.w.req.valid := OHToUInt(btbWriteWay) === w.U &&
+          RegNext(io.redirect.valid, init = false.B) &&
+          (redirectLatch._type === BTBtype.B || redirectLatch._type === BTBtype.J)
+        btb(b)(w).io.w.req.bits.setIdx := btbAddr.getBankIdx(redirectLatch.pc)
+        btb(b)(w).io.w.req.bits.data := btbWrite
+      }
+    }
+  }
+
+  // 2. update JBTAC
+  val jbtacWrite = WireInit(0.U.asTypeOf(jbtacEntry()))
+  jbtacWrite.valid := true.B
+  jbtacWrite.tag := jbtacAddr.getTag(io.redirect.bits.pc)
+  jbtacWrite.target := io.redirect.bits.target
+  (0 until JbtacBanks).map(b =>
+    jbtac(b).io.w.req.valid := io.redirect.valid &&
+      b.U === jbtacAddr.getBank(io.redirect.bits.pc) &&
+      io.redirect.bits._type === BTBtype.I)
+  (0 until JbtacBanks).map(b => jbtac(b).io.w.req.bits.setIdx := jbtacAddr.getBankIdx(io.redirect.bits.pc))
+  (0 until JbtacBanks).map(b => jbtac(b).io.w.req.bits.data := jbtacWrite)
 }
