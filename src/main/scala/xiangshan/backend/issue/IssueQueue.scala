@@ -444,14 +444,15 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   //-----------------------------------------
   // Enqueue
   //-----------------------------------------
-  val enqFire = io.enqCtrl.fire()
+  val enqRedHit = Wire(Bool())
+  val enqFire = io.enqCtrl.fire() && !enqRedHit
   val deqFire = io.deq.fire()
   val popOne = Wire(Bool())
   io.enqCtrl.ready := !full || popOne
   val enqSel = idQue(tail)
 
   // state enq
-  when (io.enqCtrl.fire()) {
+  when (enqFire) {
     issQue(enqSel).uop := io.enqCtrl.bits
     validQue(enqSel) := true.B
 
@@ -516,6 +517,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val tailDot2 = Mux(full, VecInit(Seq.fill(iqSize)(true.B)).asUInt, UIntToMH(tail))
   val selDot = UIntToMHP(deqSel) // FIXIT: PriorityEncoder -> UIntToMHP means long latency
   val nonValid = ~(idValidQue | ~tailDot2)
+  val popSel = PriorityEncoder(nonValid) // Note: idxed by IDque's index
   val popDot = PriorityDot(nonValid)
   val isPop = ParallelOR(nonValid.asBools).asBool()
   val moveDot = Mux(isPop, tailDot ^ popDot, tailDot ^ selDot)
@@ -526,7 +528,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
       when (moveDot(i)) { idQue(i-1) := idQue(i) }
     }
     val ptr_tmp = Mux(full, VecInit(Seq.fill(iqIdxWidth)(true.B)).asUInt, tail)
-    idQue(ptr_tmp) := idQue(deqSel)
+    idQue(ptr_tmp) := idQue(Mux(isPop, popSel, deqSel))
   }
   assert(ParallelAND(List.tabulate(iqSize)(i => ParallelOR(List.tabulate(iqSize)(j => j.U === idQue(i))))).asBool)
 
@@ -534,11 +536,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   // Redirect
   //-----------------------------------------
   // redirect enq
-  val enqRedHit = io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & io.enqCtrl.bits.brMask).asBools).asBool)
-  when (enqRedHit) {
-    validQue(enqSel) := false.B
-    enqFireNext := false.B
-  }
+  enqRedHit := io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & io.enqCtrl.bits.brMask).asBools).asBool)
 
   // redirect issQue
   val redHitVec = List.tabulate(iqSize)(i => io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & issQue(i).uop.brMask).asBools).asBool))
@@ -670,15 +668,15 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
     sel.bits.ctrl.fpWen := issQue(deqSelIq).uop.ctrl.fpWen
   }
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
-  XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) enqSel:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSel
+  XSInfo(enqFire, "EnqCtrl(%d %d) enqSel:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSel
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot)
   if(useBypass) {
-    XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
+    XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
   } else {
-    XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
+    XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
   XSDebug("id| v|r |psrc|r|   src1          |psrc|r|   src2          |psrc|r|   src3          |   pc   |roqIdx\n")
   for (i <- 0 until iqSize) {
