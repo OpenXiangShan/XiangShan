@@ -66,7 +66,8 @@ class FakeIFU extends XSModule with HasIFUConst {
   // val npc = Mux(io.redirect.valid, io.redirect.bits.target, snpc) // next pc
   val npc = Mux(io.redirect.valid, io.redirect.bits.target, Mux(predRedirect, predTarget, snpc))
 
-  bpu.io.flush := io.fetchPacket.fire()
+  // bpu.io.flush := io.redirect.valid
+  bpu.io.redirect := io.redirect
   bpu.io.in.pc.valid := io.fetchPacket.fire()
   bpu.io.in.pc.bits := npc
 
@@ -81,6 +82,7 @@ class FakeIFU extends XSModule with HasIFUConst {
   io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << pc(2+log2Up(FetchWidth)-1, 1)
   io.fetchPacket.bits.pc := pc
   io.fetchPacket.bits.instrs := fakeCache.io.rdata
+  io.fetchPacket.bits.pnpc := bpu.io.predTargets
 
   Debug(cond=io.fetchPacket.fire()){
     printf(p"==========FetchGroup==========\nfirst pc:${Hexadecimal(pc)}\n")

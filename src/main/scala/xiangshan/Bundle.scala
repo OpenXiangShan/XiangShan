@@ -10,12 +10,14 @@ class FetchPacket extends XSBundle {
   val instrs = Vec(FetchWidth, UInt(32.W))
   val mask = UInt((FetchWidth*2).W)
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
+  val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
 class CtrlFlow extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
+  val pnpc = UInt(VAddrBits.W)
   val exceptionVec = Vec(16, Bool())
   val intrVec = Vec(12, Bool())
   val isRVC = Bool()
@@ -55,12 +57,26 @@ class MicroOp extends CfCtrl {
 }
 
 class Redirect extends XSBundle {
+  val pc = UInt(VAddrBits.W) // wrongly predicted pc
   val target = UInt(VAddrBits.W)
   val brTag = UInt(BrTagWidth.W)
+  val _type = UInt(2.W)
+  val taken = Bool()
   val isException = Bool()
   val roqIdx = UInt(ExtendedRoqIdxWidth.W)
   val freelistAllocPtr = new FreeListPtr
 }
+
+// class BpuUpdateReq extends XSBundle {
+  // val pc = UInt(VAddrBits.W)
+  // val isMissPred = Bool()
+  // val _type = UInt(2.W)
+  // val actualTarget = UInt(VAddrBits.W)
+  // val actualTaken = Bool()
+  // val redirect = new Redirect
+  // TODO:
+  // val isRVC = Bool()
+//}
 
 class Dp1ToDp2IO extends XSBundle {
   val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))

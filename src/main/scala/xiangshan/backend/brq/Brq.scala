@@ -24,8 +24,10 @@ class Brq extends XSModule {
   })
 
   class BrqEntry extends Bundle {
+    // val pc = UInt(VAddrBits.W)
     val npc = UInt(VAddrBits.W)
     val redirect = new Redirect
+    // val _type = UInt(2.W)
   }
 
   val brQueue = Reg(Vec(BrqSize, new BrqEntry))
@@ -62,7 +64,10 @@ class Brq extends XSModule {
     enq.ready := !full
     brTag := tailIdx
     // TODO: check rvc and use predict npc
-    when(enq.fire()){ brQueue(tailIdx).npc := enq.bits.cf.pc + 4.U }
+    // when(enq.fire()){ brQueue(tailIdx).npc := enq.bits.cf.pc + 4.U }
+    when (enq.fire()) {
+      brQueue(tailIdx).npc := enq.bits.cf.pnpc
+    }
     brMaskNext = brMaskNext | Mux(enq.fire(), UIntToOH(tailIdx), 0.U)
     brMask := brMaskNext
     tailPtrNext = tailPtrNext + enq.fire()

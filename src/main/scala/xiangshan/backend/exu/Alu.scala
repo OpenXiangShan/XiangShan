@@ -6,6 +6,7 @@ import xiangshan._
 import xiangshan.FuType._
 import xiangshan.utils._
 import xiangshan.backend.regfile.RfWritePort
+import xiangshan.backend.decode.isa.RV32I_BRUInstr
 
 object ALUOpType {
   def add  = "b000000".U
@@ -100,8 +101,11 @@ class Alu extends Exu(alu.litValue()) {
   io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   io.out.bits.redirect.valid := io.out.valid && isBru//isBranch
+  io.out.bits.redirect.bits.pc := uop.cf.pc
   io.out.bits.redirect.bits.target := Mux(!taken && isBranch, pcLatchSlot, target)
   io.out.bits.redirect.bits.brTag := uop.brTag
+  io.out.bits.redirect.bits._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  io.out.bits.redirect.bits.taken := taken
   io.out.bits.redirect.bits.isException := DontCare // false.B
   io.out.bits.redirect.bits.roqIdx := uop.roqIdx
   io.out.bits.redirect.bits.freelistAllocPtr := uop.freelistAllocPtr

@@ -27,6 +27,7 @@ class Ibuffer extends XSModule {
   // ibuf define
   val ibuf = Reg(Vec(IBufSize*2, UInt(16.W)))
   val ibuf_pc = Reg(Vec(IBufSize*2, UInt(VAddrBits.W)))
+  val ibuf_pnpc = Reg(Vec(IBufSize*2, UInt(VAddrBits.W)))
   val ibuf_valid = RegInit(VecInit(Seq.fill(IBufSize*2)(false.B)))
   val head_ptr = RegInit(0.U(log2Up(IBufSize*2).W))
   val tail_ptr = RegInit(0.U(log2Up(IBufSize*2).W))
@@ -48,6 +49,7 @@ class Ibuffer extends XSModule {
       when(io.in.bits.mask(i)) {
         ibuf(tail_ptr + enq_idx) := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
         ibuf_pc(tail_ptr + enq_idx) := io.in.bits.pc + (enq_idx<<1).asUInt
+        ibuf_pnpc(tail_ptr + enq_idx) := io.in.bits.pnpc(i>>1)
         ibuf_valid(tail_ptr + enq_idx) := true.B
       }
       enq_idx = enq_idx + io.in.bits.mask(i)
@@ -66,6 +68,7 @@ class Ibuffer extends XSModule {
           // is RVC
           io.out(i).bits.instr := Cat(0.U(16.W), ibuf(head_ptr + deq_idx))
           io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
+          io.out(i).bits.pnpc := ibuf_pnpc(head_ptr + deq_idx)
           io.out(i).bits.isRVC := true.B
           io.out(i).valid := true.B
           ibuf_valid(head_ptr + deq_idx) := false.B
@@ -73,6 +76,7 @@ class Ibuffer extends XSModule {
           // isn't RVC
           io.out(i).bits.instr := Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx))
           io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
+          io.out(i).bits.pnpc := ibuf_pnpc(head_ptr + deq_idx)
           io.out(i).bits.isRVC := false.B
           io.out(i).valid := true.B
           ibuf_valid(head_ptr + deq_idx) := false.B
@@ -81,12 +85,14 @@ class Ibuffer extends XSModule {
           // half inst keep in buffer
           io.out(i).bits.instr := 0.U(32.W)
           io.out(i).bits.pc := 0.U(VAddrBits.W)
+          io.out(i).bits.pnpc := 0.U(VAddrBits.W)
           io.out(i).bits.isRVC := false.B
           io.out(i).valid := false.B
         }
       }.otherwise {
         io.out(i).bits.instr := 0.U
         io.out(i).bits.pc := 0.U
+        io.out(i).bits.pnpc := 0.U
         io.out(i).bits.isRVC := false.B
         io.out(i).valid := false.B
       }
@@ -108,6 +114,7 @@ class Ibuffer extends XSModule {
     for(i <- 0 until DecodeWidth) {
       io.out(i).bits.instr := 0.U
       io.out(i).bits.pc := 0.U
+      io.out(i).bits.pnpc := 0.U
       io.out(i).bits.isRVC := false.B
       io.out(i).valid := false.B
     }
