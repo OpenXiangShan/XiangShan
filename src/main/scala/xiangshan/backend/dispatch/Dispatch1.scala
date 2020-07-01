@@ -92,7 +92,7 @@ class Dispatch1 extends XSModule{
   val all_recv = recv_vector.reduce((x, y) => x && y).asBool()
   for (i <- 0 until RenameWidth) {
     io.toRoq(i).bits <> io.fromRename(i).bits
-    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i) && !cancelled(i)
+    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)// && !cancelled(i)
     XSDebug(io.toRoq(i).fire(), "pc 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
     if (i > 0) {
       XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid,
