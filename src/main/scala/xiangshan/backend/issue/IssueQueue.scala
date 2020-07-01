@@ -447,7 +447,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val enqFire = io.enqCtrl.fire()
   val deqFire = io.deq.fire()
   val popOne = Wire(Bool())
-  io.enqCtrl.ready := !tailAll || popOne
+  io.enqCtrl.ready := !full || popOne
   val enqSel = idQue(tail)
 
   // state enq
