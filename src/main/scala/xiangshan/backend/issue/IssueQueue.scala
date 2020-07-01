@@ -173,23 +173,23 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     when(src3Rdy(enqSelNext)){src3Data(enqSelNext) := io.enqData.bits.src3}
   }
     
-
+  val psrc = List.tabulate(iqSize)(i => List(prfSrc1(i), prfSrc2(i), prfSrc3(i)))
   XSDebug("[Reg info-ENQ] enqSelNext:%d | enqFireNext:%d \n",enqSelNext,enqFireNext)
-  XSDebug("[IQ content] valid vr vf| pc  insruction |   src1rdy  src1 |  src2Rdy  src2 |  src3Rdy  src3  |  pdest  \n")
+  XSDebug("[IQ content] valid vr vf| pc  insruction |[rdy|psrc]  src1 |  [rdy|psrc]  src2 |  [rdy|psrc]  src3  |  pdest  \n")
   for(i <- 0 to (iqSize -1)) {
     val ins = ctrlFlow(i).instr
     val pc = ctrlFlow(i).pc
     XSDebug(valid(i),
-      "[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %x %x | %d  valid|\n",
-      i.asUInt, valid(i), validReg(i), validWillFalse(i), pc,ins,src1Rdy(i), src1Data(i),
-      src2Rdy(i), src2Data(i),src3Rdy(i), src3Data(i),prfDest(i))
+      "[IQ content][%d] %d%d%d |%x  %x|[%d|%d]%x|[%d|%d]%x|[%d|%d]%x| %d  valid|\n",
+      i.asUInt, valid(i), validReg(i), validWillFalse(i), pc, ins, src1Rdy(i), psrc(i)(0), src1Data(i),
+      src2Rdy(i), psrc(i)(1), src2Data(i), src3Rdy(i), psrc(i)(2), src3Data(i),prfDest(i))
     XSDebug(validReg(i) && validWillFalse(i),
-      "[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %x %x | %d  valid will be False|\n",
-      i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i),
-      src2Rdy(i), src2Data(i),src3Rdy(i), src3Data(i),prfDest(i))
-    XSDebug("[IQ content][%d] %d%d%d |%x  %x| %x %x | %x %x | %x %x | %d\n",
-      i.asUInt, valid(i), validReg(i), validWillFalse(i),pc,ins, src1Rdy(i), src1Data(i),
-      src2Rdy(i), src2Data(i),src3Rdy(i), src3Data(i),prfDest(i))
+      "[IQ content][%d] %d%d%d |%x  %x|[%d|%d]%x|[%d|%d]%x|[%d|%d]%x| %d  valid will be False|\n",
+      i.asUInt, valid(i), validReg(i), validWillFalse(i), pc, ins, src1Rdy(i), psrc(i)(0), src1Data(i),
+      src2Rdy(i), psrc(i)(1), src2Data(i), src3Rdy(i), psrc(i)(2), src3Data(i), prfDest(i))
+    XSDebug("[IQ content][%d] %d%d%d |%x  %x|[%d|%d]%x|[%d|%d]%x|[%d|%d]%x| %d\n",
+      i.asUInt, valid(i), validReg(i), validWillFalse(i), pc, ins, src1Rdy(i), psrc(i)(0), src1Data(i),
+      src2Rdy(i), psrc(i)(1), src2Data(i), src3Rdy(i), psrc(i)(2), src3Data(i),prfDest(i))
   }
   // From Common Data Bus(wakeUpPort)
   // chisel claims that firrtl will optimize Mux1H to and/or tree
