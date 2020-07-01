@@ -168,7 +168,7 @@ class BPU extends XSModule {
   btbWrite.valid := true.B
   btbWrite.tag := btbAddr.getTag(redirectLatch.pc)
   btbWrite._type := redirectLatch._type
-  btbWrite.target := redirectLatch.target
+  btbWrite.target := redirectLatch.brTarget
   val oldPred = PriorityMux(btbWriteWay.asTypeOf(Vec(BtbWays, Bool())), btbUpdateRead.map{ e => e.pred })
   val newPred = Mux(redirectLatch.taken, Mux(oldPred === "b11".U, "b11".U, oldPred + 1.U),
     Mux(oldPred === "b00".U, "b00".U, oldPred - 1.U))

@@ -103,6 +103,7 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   io.out.bits.redirectValid := io.out.valid && isBru//isBranch
   io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
+  io.out.bits.redirect.brTarget := target
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   io.out.bits.redirect.taken := taken

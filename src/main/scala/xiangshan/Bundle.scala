@@ -59,6 +59,7 @@ class MicroOp extends CfCtrl {
 class Redirect extends XSBundle {
   val pc = UInt(VAddrBits.W) // wrongly predicted pc
   val target = UInt(VAddrBits.W)
+  val brTarget = UInt(VAddrBits.W)
   val brTag = UInt(BrTagWidth.W)
   val _type = UInt(2.W)
   val taken = Bool()
