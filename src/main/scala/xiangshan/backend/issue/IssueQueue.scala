@@ -424,13 +424,13 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val tail = tailAll(iqIdxWidth-1, 0)
   val full = tailAll(iqIdxWidth)
   // alias failed, turn to independent storage(Reg)
-  val psrc = List.tabulate(iqSize)(i => List(issQue(i.U).uop.psrc1, issQue(i.U).uop.psrc2, issQue(i.U).uop.psrc3)) // TODO: why issQue can not use Int as index, but idQue is ok??
+  val psrc = VecInit(List.tabulate(iqSize)(i => VecInit(List(issQue(i.U).uop.psrc1, issQue(i.U).uop.psrc2, issQue(i.U).uop.psrc3)))) // TODO: why issQue can not use Int as index, but idQue is ok?? // NOTE: indexed by IssQue's idx
   // val srcRdyVec = Reg(Vec(iqSize, Vec(srcListenNum, Bool())))
-  val srcRdyVec = Reg(Vec(iqSize, Vec(srcAllNum, Bool())))
+  val srcRdyVec = Reg(Vec(iqSize, Vec(srcAllNum, Bool()))) // NOTE: indexed by IssQue's idx
   // val srcData = Reg(Vec(iqSize, Vec(srcUseNum, UInt(XLEN.W)))) // NOTE: Bundle/MicroOp need merge "src1/src2/src3" into a Vec. so that IssueQueue could have Vec
-  val srcData = Reg(Vec(iqSize, Vec(srcAllNum, UInt(XLEN.W))))
-  val srcRdy = VecInit(srcRdyVec.map(i => ParallelAND(i)))
-  val srcIdRdy = VecInit((0 until iqSize).map(i => srcRdy(idQue(i)))).asUInt
+  val srcData = Reg(Vec(iqSize, Vec(srcAllNum, UInt(XLEN.W)))) // NOTE: indexed by IssQue's idx
+  val srcRdy = VecInit(srcRdyVec.map(i => ParallelAND(i))) // NOTE: indexed by IssQue's idx
+  val srcIdRdy = VecInit((0 until iqSize).map(i => srcRdy(idQue(i)))).asUInt // NOTE: indexed by IdQue's idx
   val srcType = List.tabulate(iqSize)(i => List(issQue(i).uop.ctrl.src1Type, issQue(i).uop.ctrl.src2Type, issQue(i).uop.ctrl.src3Type))
 
   val srcDataWire = srcData
@@ -483,7 +483,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val tailAdd = tailAll + 1.U
   val tailSub = tailAll - 1.U
   tailAll := Mux(tailKeep, tailAll, Mux(tailInc, tailAdd, tailSub))
-
+  assert(tailAll < 9.U)
   // Select to Dequeue
   val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
   val deqSelOH = PriorityEncoderOH(idValidQue & srcIdRdy)
@@ -519,6 +519,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val isPop = ParallelOR(nonValid.asBools).asBool()
   val moveDot = Mux(isPop, tailDot ^ popDot, tailDot ^ selDot)
 
+  assert(!(popOne&&moveDot(0)))
   when (popOne) {
     for(i <- 1 until iqSize) {
       when (moveDot(i)) { idQue(i-1) := idQue(i) }
@@ -526,6 +527,8 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
     val ptr_tmp = Mux(full, VecInit(Seq.fill(iqIdxWidth)(true.B)).asUInt, tail)
     idQue(ptr_tmp) := deqSel
   }
+  assert(ParallelAND(List.tabulate(iqSize)(i => ParallelOR(List.tabulate(iqSize)(j => j.U === idQue(i))))).asBool)
+
   //-----------------------------------------
   // Redirect
   //-----------------------------------------
@@ -665,7 +668,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
     sel.bits.ctrl.fpWen := issQue(deqSel).uop.ctrl.fpWen
   }
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
-  XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready
+  XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) enqSel:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSel
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
@@ -675,12 +678,12 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   } else {
     XSDebug("isPop:%d popOne:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", isPop, popOne, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
-  XSDebug("id| v|r |   pc   |roqIdx|[psrc|r]   src1|[psrc|rdy]     src2|[psrc|rdy]    src3\n")
+  XSDebug("id| v|r |psrc|r|   src1          |psrc|r|   src2          |psrc|r|   src3          |   pc   |roqIdx\n")
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
-      XSDebug("%d|%d|%d|%x| %x |[%d|%b]%x|[%d|%b]%x|[%d|%b]%x| <-\n", idQue(i), idValidQue(i), srcRdy(i), issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx, psrc(i)(0), srcRdyVec(i)(0), srcData(i)(0), psrc(i)(1), srcRdyVec(i)(1), srcData(i)(1), psrc(i)(2), srcRdyVec(i)(2), srcData(i)(2))
+      XSDebug("%d|%d|%d|%d|%b|%x|%d|%b|%x|%d|%b|%x|%x| %x  <-\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
     }.otherwise {
-      XSDebug("%d|%d|%d|%x| %x |[%d|%b]%x|[%d|%b]%x|[%d|%b]%x|\n", idQue(i), idValidQue(i), srcRdy(i), issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx, psrc(i)(0), srcRdyVec(i)(0), srcData(i)(0), psrc(i)(1), srcRdyVec(i)(1), srcData(i)(1), psrc(i)(2), srcRdyVec(i)(2), srcData(i)(2))
+      XSDebug("%d|%d|%d|%d|%b|%x|%d|%b|%x|%d|%b|%x|%x| %x \n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
     }
   }
 
