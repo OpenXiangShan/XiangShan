@@ -482,7 +482,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val tailKeep = tailInc === tailDec
   val tailAdd = tailAll + 1.U
   val tailSub = tailAll - 1.U
-  tailAll := ParallelMux(VecInit(tailKeep, tailInc, tailDec) zip VecInit(tailAll, tailAdd, tailSub))
+  tailAll := Mux(tailKeep, tailAll, Mux(tailInc, tailAdd, tailSub))
 
   // Select to Dequeue
   val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
