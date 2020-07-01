@@ -18,7 +18,8 @@ class Brq extends XSModule {
     // to decode
     val brTags = Output(Vec(DecodeWidth, UInt(BrTagWidth.W)))
     val brMasks = Output(Vec(DecodeWidth, UInt(BrqSize.W)))
-
+    // to roq
+    val out = ValidIO(new ExuOutput)
     // misprediction, flush pipeline
     val redirect = Output(Valid(new Redirect))
   })
@@ -26,8 +27,7 @@ class Brq extends XSModule {
   class BrqEntry extends Bundle {
     // val pc = UInt(VAddrBits.W)
     val npc = UInt(VAddrBits.W)
-    val redirect = new Redirect
-    // val _type = UInt(2.W)
+    val exuOut = new ExuOutput
   }
 
   val brQueue = Reg(Vec(BrqSize, new BrqEntry))
@@ -52,8 +52,10 @@ class Brq extends XSModule {
     wbFlags(headIdx) := false.B
   }
   headPtr := headPtrNext
-  io.redirect.valid := deqValid && (deqEntry.npc =/= deqEntry.redirect.target)
-  io.redirect.bits := deqEntry.redirect
+  io.redirect.valid := deqValid && (deqEntry.npc =/= deqEntry.exuOut.redirect.target)
+  io.redirect.bits := deqEntry.exuOut.redirect
+  io.out.valid := deqValid
+  io.out.bits := deqEntry.exuOut
 
   // branch insts enq
   var full = WireInit(isFull(headPtrNext, tailPtr))
@@ -78,9 +80,9 @@ class Brq extends XSModule {
 
   // exu write back
   for(exuWb <- io.exuRedirect){
-    when(exuWb.valid && exuWb.bits.redirect.valid){
+    when(exuWb.valid){
       wbFlags(exuWb.bits.uop.brTag) := true.B
-      brQueue(exuWb.bits.uop.brTag).redirect := exuWb.bits.redirect.bits
+      brQueue(exuWb.bits.uop.brTag).exuOut := exuWb.bits
     }
   }
 

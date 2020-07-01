@@ -67,17 +67,6 @@ class Redirect extends XSBundle {
   val freelistAllocPtr = new FreeListPtr
 }
 
-// class BpuUpdateReq extends XSBundle {
-  // val pc = UInt(VAddrBits.W)
-  // val isMissPred = Bool()
-  // val _type = UInt(2.W)
-  // val actualTarget = UInt(VAddrBits.W)
-  // val actualTaken = Bool()
-  // val redirect = new Redirect
-  // TODO:
-  // val isRVC = Bool()
-//}
-
 class Dp1ToDp2IO extends XSBundle {
   val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))
   val fpDqToDp2 = Vec(FpDqDeqWidth, DecoupledIO(new MicroOp))
@@ -96,7 +85,8 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt(XLEN.W)
-  val redirect = Valid(new Redirect)
+  val redirectValid = Bool()
+  val redirect = new Redirect
   val debug = new DebugBundle
 }
 
