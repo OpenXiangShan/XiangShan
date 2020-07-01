@@ -14,10 +14,10 @@ jobs:
     steps:
        - uses: actions/checkout@v2
         
-       - name: Set Up Mill
-         uses: jodersky/setup-mill@master
-         with:
-           mill-version: 0.7.3
+#       - name: Set Up Mill
+#         uses: jodersky/setup-mill@master
+#         with:
+#           mill-version: 0.7.3
          
        - name: Complile
          run: make verilog
