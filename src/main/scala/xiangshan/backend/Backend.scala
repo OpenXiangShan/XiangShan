@@ -120,14 +120,17 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf
 
   val exeWbReqs = exeUnits.map(_.io.out)
-  val wbIntReqs = exeUnits.filter(_.writeIntRf).map(_.io.out)
-  val wbFpReqs = exeUnits.filter(_.writeFpRf).map(_.io.out)
-  val intWbArb = Module(new WriteBackArbMtoN(wbIntReqs.length, NRWritePorts))
-  val fpWbArb = Module(new WriteBackArbMtoN(wbFpReqs.length, NRWritePorts))
-  val wbIntResults = intWbArb.io.out
-  val wbFpResults = fpWbArb.io.out
 
-  def exuOutToRfWrite(x: Valid[ExuOutput]) = {
+  val wbIntIdx = exeUnits.zipWithIndex.filter(_._1.writeIntRf).map(_._2)
+  val wbFpIdx = exeUnits.zipWithIndex.filter(_._1.writeFpRf).map(_._2)
+
+  val wbu = Module(new Wbu(wbIntIdx, wbFpIdx))
+  wbu.io.in <> exeWbReqs
+
+  val wbIntResults = wbu.io.toIntRf
+  val wbFpResults = wbu.io.toFpRf
+
+  def exuOutToRfWrite(x: Valid[ExuOutput]): RfWritePort = {
     val rfWrite = Wire(new RfWritePort)
     rfWrite.wen := x.valid
     rfWrite.addr := x.bits.uop.pdest
@@ -135,20 +138,13 @@ class Backend(implicit val p: XSConfig) extends XSModule
     rfWrite
   }
 
-  //FIXME: only write back when "wen"
-  intWbArb.io.in <> wbIntReqs
   intRf.io.writePorts <> wbIntResults.map(exuOutToRfWrite)
-
-  fpWbArb.io.in <> wbFpReqs
   fpRf.io.writePorts <> wbFpResults.map(exuOutToRfWrite)
 
   rename.io.wbIntResults <> wbIntResults
   rename.io.wbFpResults <> wbFpResults
 
-  roq.io.exeWbResults.take(exeWbReqs.length).zip(exeWbReqs).foreach({case (x,y) =>
-    x.bits := y.bits
-    x.valid := y.fire() && !y.bits.redirectValid
-  })
+  roq.io.exeWbResults.take(exeWbReqs.length).zip(wbu.io.toRoq).foreach(x => x._1 := x._2)
   roq.io.exeWbResults.last := brq.io.out
 
 
