@@ -7,6 +7,7 @@ import xiangshan.FuType._
 import xiangshan.utils._
 import xiangshan.backend.regfile.RfWritePort
 import xiangshan.backend.BRUOpType
+import xiangshan.backend.decode.isa.RV32I_BRUInstr
 
 // NOTE: BRUOpType is at backend/package.scala
 
@@ -36,8 +37,12 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   io.out.bits.redirectValid := valid && isJUMP
+  io.out.bits.redirect.pc := io.in.bits.uop.cf.pc
   io.out.bits.redirect.target := target
+  io.out.bits.redirect.brTarget := target // DontCare
   io.out.bits.redirect.brTag := uop.brTag
+  io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  io.out.bits.redirect.taken := false.B // DontCare
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
   io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr

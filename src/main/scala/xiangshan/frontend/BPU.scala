@@ -72,15 +72,18 @@ class BPU extends XSModule {
   for (i <- 0 until FetchWidth) {
     btbHits(i) := false.B
     for (b <- 0 until BtbBanks) {
-      when (b.U === btbAddr.getBank(pcLatch)) {
-        for (w <- 0 until BtbWays) {
-          when (btbRead(b)(w).valid && btbRead(b)(w).tag === btbAddr.getTag(Cat(pcLatch(VAddrBits - 1, 2), 0.U(2.W)) + i.U << 2)) {
-            btbHits(i) := !flush && RegNext(btb(b)(w).io.r.req.fire(), init = false.B)
-            btbTargets(i) := btbRead(b)(w).target
-            btbTypes(i) := btbRead(b)(w)._type
-            // btbPreds(i) := btbRead(b)(w).pred
-            btbTakens(i) := (btbRead(b)(w).pred)(1).asBool
-          }
+      for (w <- 0 until BtbWays) {
+        when (b.U === btbAddr.getBank(pcLatch) && btbRead(b)(w).valid && btbRead(b)(w).tag === btbAddr.getTag(Cat(pcLatch(VAddrBits - 1, 2), 0.U(2.W)) + i.U << 2)) {
+          btbHits(i) := !flush && RegNext(btb(b)(w).io.r.req.fire(), init = false.B)
+          btbTargets(i) := btbRead(b)(w).target
+          btbTypes(i) := btbRead(b)(w)._type
+          // btbPreds(i) := btbRead(b)(w).pred
+          btbTakens(i) := (btbRead(b)(w).pred)(1).asBool
+        }.otherwise {
+          btbHits(i) := false.B
+          btbTargets(i) := DontCare
+          btbTypes(i) := DontCare
+          btbTakens(i) := DontCare
         }
       }
     }
@@ -113,6 +116,9 @@ class BPU extends XSModule {
         jbtacHits(i) := jbtacRead(b).valid && jbtacRead(b).tag === jbtacAddr.getTag(Cat(pcLatch(VAddrBits - 1, 2), 0.U(2.W)) + i.U << 2) &&
           !flush && RegNext(jbtac(b).io.r.req.fire(), init = false.B)
         jbtacTargets(i) := jbtacRead(b).target
+      }.otherwise {
+        jbtacHits(i) := false.B
+        jbtacTargets(i) := DontCare
       }
     }
   }
@@ -133,16 +139,20 @@ class BPU extends XSModule {
   }
 
   // 1.2 match redirect pc tag with the 4 tags in a btb line, find a way to write
-  val redirectLatch = RegEnable(io.redirect.bits, io.redirect.valid)
+  // val redirectLatch = RegEnable(io.redirect.bits, io.redirect.valid)
+  val redirectLatch = RegNext(io.redirect.bits, init = 0.U.asTypeOf(new Redirect))
   val bankLatch = btbAddr.getBank(redirectLatch.pc)
   val btbUpdateRead = Wire(Vec(BtbWays, btbEntry()))
   val btbValids = Wire(Vec(BtbWays, Bool()))
   val btbUpdateTagHits = Wire(Vec(BtbWays, Bool()))
   for (b <- 0 until BtbBanks) {
-    when (b.U === bankLatch) {
-      for (w <- 0 until BtbWays) {
+    for (w <- 0 until BtbWays) {
+      when (b.U === bankLatch) {
         btbUpdateRead(w) := btb(b)(w).io.r.resp.data(0)
         btbValids(w) := btbUpdateRead(w).valid && RegNext(btb(b)(w).io.r.req.fire(), init = false.B)
+      }.otherwise {
+        btbUpdateRead(w) := 0.U.asTypeOf(btbEntry())
+        btbValids(w) := false.B
       }
     }
   }
@@ -169,20 +179,25 @@ class BPU extends XSModule {
   btbWrite.tag := btbAddr.getTag(redirectLatch.pc)
   btbWrite._type := redirectLatch._type
   btbWrite.target := redirectLatch.brTarget
-  val oldPred = PriorityMux(btbWriteWay.asTypeOf(Vec(BtbWays, Bool())), btbUpdateRead.map{ e => e.pred })
+  val oldPred = WireInit("b01".U)
+  oldPred := PriorityMux(btbWriteWay.asTypeOf(Vec(BtbWays, Bool())), btbUpdateRead.map{ e => e.pred })
   val newPred = Mux(redirectLatch.taken, Mux(oldPred === "b11".U, "b11".U, oldPred + 1.U),
     Mux(oldPred === "b00".U, "b00".U, oldPred - 1.U))
   btbWrite.pred := Mux(btbUpdateTagHits.asUInt.orR && redirectLatch._type === BTBtype.B, newPred, "b01".U)
   
   // 1.4 write BTB
   for (b <- 0 until BtbBanks) {
-    when (b.U === bankLatch) {
-      for (w <- 0 until BtbWays) {
+    for (w <- 0 until BtbWays) {
+      when (b.U === bankLatch) {
         btb(b)(w).io.w.req.valid := OHToUInt(btbWriteWay) === w.U &&
           RegNext(io.redirect.valid, init = false.B) &&
           (redirectLatch._type === BTBtype.B || redirectLatch._type === BTBtype.J)
         btb(b)(w).io.w.req.bits.setIdx := btbAddr.getBankIdx(redirectLatch.pc)
         btb(b)(w).io.w.req.bits.data := btbWrite
+      }.otherwise {
+        btb(b)(w).io.w.req.valid := false.B
+        btb(b)(w).io.w.req.bits.setIdx := DontCare
+        btb(b)(w).io.w.req.bits.data := DontCare
       }
     }
   }
