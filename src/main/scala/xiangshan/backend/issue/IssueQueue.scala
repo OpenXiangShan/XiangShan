@@ -485,7 +485,8 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   tailAll := Mux(tailKeep, tailAll, Mux(tailInc, tailAdd, tailSub))
   assert(tailAll < 9.U)
   // Select to Dequeue
-  val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot
+  val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot, idx by IdQue's idx
+  val deqSelIq = idQue(deqSel)
   val deqSelOH = PriorityEncoderOH(idValidQue & srcIdRdy)
   val has1Rdy = ParallelOR((validQue.asUInt & srcRdy.asUInt).asBools).asBool()
 
@@ -525,7 +526,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
       when (moveDot(i)) { idQue(i-1) := idQue(i) }
     }
     val ptr_tmp = Mux(full, VecInit(Seq.fill(iqIdxWidth)(true.B)).asUInt, tail)
-    idQue(ptr_tmp) := deqSel
+    idQue(ptr_tmp) := idQue(deqSel)
   }
   assert(ParallelAND(List.tabulate(iqSize)(i => ParallelOR(List.tabulate(iqSize)(j => j.U === idQue(i))))).asBool)
 
@@ -562,13 +563,13 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   popOne := deqCanIn && (has1Rdy || isPop) // send a empty or valid term to issueStage
 
   when (toIssFire) {
-    issueToExu := issQue(deqSel)
+    issueToExu := issQue(deqSelIq)
     issueToExuValid := true.B
-    validQue(deqSel) := false.B
+    validQue(deqSelIq) := false.B
 
-    issueToExu.src1 := srcDataWire(deqSel)(0)
-    if (src2Use) { issueToExu.src2 := srcDataWire(deqSel)(1) } else { issueToExu.src2 := DontCare }
-    if (src3Use) { issueToExu.src3 := srcDataWire(deqSel)(2) } else { issueToExu.src3 := DontCare }
+    issueToExu.src1 := srcDataWire(deqSelIq)(0)
+    if (src2Use) { issueToExu.src2 := srcDataWire(deqSelIq)(1) } else { issueToExu.src2 := DontCare }
+    if (src3Use) { issueToExu.src3 := srcDataWire(deqSelIq)(2) } else { issueToExu.src3 := DontCare }
   }
   when (deqFire || deqFlushHit) {
     issueToExuValid := false.B
@@ -662,11 +663,11 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
     val sel = io.selectedUop
     sel.valid := toIssFire
     sel.bits := DontCare
-    sel.bits.pdest := issQue(deqSel).uop.pdest
-    sel.bits.cf.pc := issQue(deqSel).uop.cf.pc
-    sel.bits.roqIdx := issQue(deqSel).uop.roqIdx
-    sel.bits.ctrl.rfWen := issQue(deqSel).uop.ctrl.rfWen
-    sel.bits.ctrl.fpWen := issQue(deqSel).uop.ctrl.fpWen
+    sel.bits.pdest := issQue(deqSelIq).uop.pdest
+    sel.bits.cf.pc := issQue(deqSelIq).uop.cf.pc
+    sel.bits.roqIdx := issQue(deqSelIq).uop.roqIdx
+    sel.bits.ctrl.rfWen := issQue(deqSelIq).uop.ctrl.rfWen
+    sel.bits.ctrl.fpWen := issQue(deqSelIq).uop.ctrl.fpWen
   }
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
   XSInfo(io.enqCtrl.fire(), "EnqCtrl(%d %d) enqSel:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSel
