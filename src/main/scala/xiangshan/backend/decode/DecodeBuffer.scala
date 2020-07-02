@@ -12,20 +12,32 @@ class DecodeBuffer extends XSModule {
     val out = Vec(RenameWidth, DecoupledIO(new CfCtrl))
   })
 
-  val q = Module(new MIMOQueue[CfCtrl](
-    gen = new CfCtrl,
-    entries = DecBufSize,
-    inCnt = io.in.size,
-    outCnt = io.out.size,
-    mem = true,
-    perf = false
-  ))
+  require(DecodeWidth == RenameWidth)
 
-  q.io.flush := io.redirect.valid
-  q.io.enq <> io.in
-  for((out, deq) <- io.out.zip(q.io.deq)){
-    out.bits := deq.bits
-    out.valid := deq.valid && !io.redirect.valid
-    deq.ready := out.ready
+  val validVec = RegInit(VecInit(Seq.fill(DecodeWidth)(false.B)))
+
+  val leftCanIn = ParallelAND(
+    validVec.zip(io.out.map(_.fire())).map({
+      case (v, fire) =>
+        !v || fire
+    })
+  ).asBool()
+
+  val rightRdyVec = io.out.map(_.ready && leftCanIn)
+
+  for( i <- 0 until RenameWidth){
+    when(io.out(i).fire()){
+      validVec(i) := false.B
+    }
+    when(io.in(i).fire()){
+      validVec(i) := true.B
+    }
+    when(io.redirect.valid){
+      validVec(i) := false.B
+    }
+
+    io.in(i).ready := rightRdyVec(i)
+    io.out(i).bits <> RegEnable(io.in(i).bits, io.in(i).fire())
+    io.out(i).valid := validVec(i) && !io.redirect.valid
   }
 }

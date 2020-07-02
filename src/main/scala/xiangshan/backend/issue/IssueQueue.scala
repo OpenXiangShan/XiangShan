@@ -206,8 +206,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val srcData = List(src1Data, src2Data, src3Data)
     val srcHitVec = List.tabulate(srcNum)(k =>
                       List.tabulate(iqSize)(i =>
-                        List.tabulate(wakeupCnt)(j =>
-                          (prfSrc(k)(i) === cdbPdest(j)) && (cdbValid(j) && cdbrfWen(i)))))
+                        List.tabulate(wakeupCnt)(j =>{
+                          (prfSrc(k)(i) === cdbPdest(j)) && (cdbValid(j) && cdbrfWen(j))
+                        })))
     val srcHit =  List.tabulate(srcNum)(k =>
                     List.tabulate(iqSize)(i =>
                       ParallelOR(srcHitVec(k)(i)).asBool()))
@@ -238,7 +239,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
       val srcBpHitVec = List.tabulate(srcNum)(k =>
                           List.tabulate(iqSize)(i =>
                             List.tabulate(bypassCnt)(j =>
-                              (prfSrc(k)(i) === bypassPdest(j)) && (bypassValid(j) && bypassrfWen(i)))))
+                              (prfSrc(k)(i) === bypassPdest(j)) && (bypassValid(j) && bypassrfWen(j)))))
       val srcBpHit =  List.tabulate(srcNum)(k =>
                         List.tabulate(iqSize)(i =>
                           ParallelOR(srcBpHitVec(k)(i)).asBool()))
