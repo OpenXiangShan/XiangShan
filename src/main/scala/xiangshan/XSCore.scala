@@ -27,8 +27,7 @@ trait HasXSParameter {
   val HasFPU = true
   val FetchWidth = 8
   val IBufSize = 64
-  val DecodeWidth = 8
-  val DecBufSize = 8
+  val DecodeWidth = 6
   val RenameWidth = 6
   val CommitWidth = 6
   val BrqSize = 16
