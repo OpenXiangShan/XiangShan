@@ -145,14 +145,14 @@ class MIMOQueue[T <: Data]
     if(perf) valids.foreach(_ := false.B)
   }
 
-  Debug(){
-    val cnt = RegInit((if(init.nonEmpty) entries else 0).U(32.W))
-    val enqCnt = PopCount(io.enq.map(_.fire()))
-    val deqCnt = PopCount(io.deq.map(_.fire()))
-    cnt := cnt + enqCnt - deqCnt
-    assert(cnt > deqCnt, "MIMOQueue underflow!")
-    assert(cnt + enqCnt < entries.U(32.W), "MIMOQueue overflow!")
-    printf(p"cnt: $cnt enqCnt:$enqCnt deqCnt:$deqCnt\n")
-  }
+  // Debug(false){
+  //   val cnt = RegInit((if(init.nonEmpty) entries else 0).U(32.W))
+  //   val enqCnt = PopCount(io.enq.map(_.fire()))
+  //   val deqCnt = PopCount(io.deq.map(_.fire()))
+  //   cnt := cnt + enqCnt - deqCnt
+  //   assert(cnt > deqCnt, "MIMOQueue underflow!")
+  //   assert(cnt + enqCnt < entries.U(32.W), "MIMOQueue overflow!")
+  //   printf(p"cnt: $cnt enqCnt:$enqCnt deqCnt:$deqCnt\n")
+  // }
 
 }

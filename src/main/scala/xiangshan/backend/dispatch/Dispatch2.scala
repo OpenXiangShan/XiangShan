@@ -125,8 +125,7 @@ class Dispatch2 extends XSModule {
   io.readFpRf(3*FpDqDeqWidth + 1).addr := io.fromLsDq(store1InstIdx).bits.psrc1
 
   // insert into reservation station
-  val instIdxes = Seq(bruInstIdx, alu0InstIdx, alu1InstIdx, alu2InstIdx, alu3InstIdx, mulInstIdx, muldivInstIdx,
-    fmac0InstIdx, fmac1InstIdx, fmac2InstIdx, fmac3InstIdx, fmisc0InstIdx, fmisc1InstIdx,
+  val instIdxes = Seq(bruInstIdx, alu0InstIdx, alu1InstIdx, alu2InstIdx, alu3InstIdx,
     /*load0InstIdx, */store0InstIdx)
   io.enqIQCtrl.zipWithIndex map { case (enq, i) =>
     if (i < exuConfig.IntExuCnt) {
@@ -183,7 +182,7 @@ class Dispatch2 extends XSModule {
   }
   for (i <- 0 until LsDqDeqWidth) {
     io.fromLsDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
-      (rs.ready && instIdxes(j) === i.U
+      (rs.ready && 0.U === i.U
         && (j >= exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
     }).reduce((l, r) => l || r)
     XSInfo(io.fromLsDq(i).fire(), "pc 0x%x leaves Ls dispatch queue with nroq %d\n",
