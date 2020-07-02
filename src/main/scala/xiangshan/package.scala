@@ -11,7 +11,9 @@ package object xiangshan {
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
-    def isFp(srcType: UInt) = srcType===fp 
+    def isFp(srcType: UInt) = srcType===fp
+    def isPcImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
+    def isRegFp(srcType: UInt) = isReg(srcType) || isFp(srcType)
 
     def apply() = UInt(2.W)
   }
