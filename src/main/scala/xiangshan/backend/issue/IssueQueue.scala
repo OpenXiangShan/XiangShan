@@ -198,9 +198,10 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //-----------------------------------------
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
-  val deqCanIn = !issueToExuValid || deqFire
   val deqFlushHit = io.redirect.valid && (io.redirect.bits.isException ||
                  ParallelOR((issueToExu.uop.brMask & UIntToOH(io.redirect.bits.brTag)).asBools).asBool)
+  val deqCanIn = !issueToExuValid || deqFire || deqFlushHit
+  
   val toIssFire = deqCanIn && has1Rdy && !isPop && !selIsRed
   popOne := deqCanIn && (has1Rdy || isPop) // send a empty or valid term to issueStage
 
@@ -213,7 +214,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     if (src2Use) { issueToExu.src2 := srcDataWire(deqSelIq)(1) } else { issueToExu.src2 := DontCare }
     if (src3Use) { issueToExu.src3 := srcDataWire(deqSelIq)(2) } else { issueToExu.src3 := DontCare }
   }
-  when (deqFire || deqFlushHit) {
+  when ((deqFire || deqFlushHit) && !toIssFire) {
     issueToExuValid := false.B
   }
 
@@ -316,6 +317,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx)
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b In(%d %d) Out(%d %d)\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot, io.enqCtrl.valid, io.enqCtrl.ready, io.deq.valid, io.deq.ready)
+  XSInfo(issueToExuValid, "FireStage:Out(%d %d) src1(%d|%x) src2(%d|%x) src3(%d|%x) deqFlush:%d pc:%x roqIdx:%d\n", io.deq.valid, io.deq.ready, issueToExu.uop.psrc1, issueToExu.src1, issueToExu.uop.psrc2, issueToExu.src2, issueToExu.uop.psrc3, issueToExu.src3, deqFlushHit, issueToExu.uop.cf.pc, issueToExu.uop.roqIdx)
   if(useBypass) {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
   } else {
