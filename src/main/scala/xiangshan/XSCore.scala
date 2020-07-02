@@ -85,7 +85,7 @@ abstract class XSBundle extends Bundle
 case class XSConfig
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = true
 )
 
 class XSCore(implicit val p: XSConfig) extends XSModule {
@@ -123,4 +123,28 @@ class XSCore(implicit val p: XSConfig) extends XSModule {
     empty = dtlb.io.cacheEmpty,
     enable = HasDcache
   )(CacheConfig(name = "dcache"))
+
+  XSDebug("(req valid, ready | resp valid, ready) \n")
+  XSDebug("c-mem(%x %x %x| %x %x) c-coh(%x %x %x| %x %x) cache (%x %x %x| %x %x) tlb (%x %x %x| %x %x)\n",
+    io.dmem.mem.req.valid,
+    io.dmem.mem.req.ready,
+    io.dmem.mem.req.bits.addr,
+    io.dmem.mem.resp.valid,
+    io.dmem.mem.resp.ready,
+    io.dmem.coh.req.valid,
+    io.dmem.coh.req.ready,
+    io.dmem.coh.req.bits.addr,
+    io.dmem.coh.resp.valid,
+    io.dmem.coh.resp.ready,
+    dmemXbar.io.out.req.valid,
+    dmemXbar.io.out.req.ready,
+    dmemXbar.io.out.req.bits.addr,
+    dmemXbar.io.out.resp.valid,
+    dmemXbar.io.out.resp.ready,
+    backend.io.dmem.req.valid,
+    backend.io.dmem.req.ready,
+    backend.io.dmem.req.bits.addr,
+    backend.io.dmem.resp.valid,
+    backend.io.dmem.resp.ready
+  )
 }

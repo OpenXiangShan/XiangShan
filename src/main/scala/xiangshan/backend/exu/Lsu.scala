@@ -54,6 +54,7 @@ class StoreQueueEntry extends XSBundle{
   val brMask = UInt(BrqSize.W) //FIXIT
 }
 
+// Multi-cycle LSU ported from NOOP
 class Lsu extends Exu(
   FuType.ldu.litValue(),
   readIntRf = true,
@@ -76,7 +77,7 @@ class Lsu extends Exu(
   // when retiringStore, block all input insts
   val isStoreIn = io.in.valid && LSUOpType.isStore(io.in.bits.uop.ctrl.fuOpType)
   val retiringStore = RegInit(false.B)
-  val (validIn, src1In, src2In, src3In, funcIn) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.src3, io.in.bits.uop.ctrl.fuOpType)
+  val (validIn, src1In, src2In, src3In, funcIn) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType)
   val (valid, src1, src2, wdata, func) = 
   (
     Mux(retiringStore, stqValid(stqTail), validIn && !isStoreIn),
@@ -162,7 +163,7 @@ class Lsu extends Exu(
   }
 
   // if store, add it to store queue
-  val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore
+  val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore && !io.redirect.valid
   when(stqEnqueue){
     stqPtr(stqHead) := emptySlot
     stqData(emptySlot).src1 := src1In
