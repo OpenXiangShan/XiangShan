@@ -42,7 +42,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(RoqIdxWidth)=/=ringBufferTailExtended(RoqIdxWidth)
   val ringBufferAllowin = !ringBufferFull 
 
-  val s_idle :: s_walk :: Nil = Enum(2)
+  val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
   // Dispatch
@@ -92,38 +92,60 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk - i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
   val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk - i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
 
+  // extra space is used weh roq has no enough space, but mispredict recovery needs such info to walk regmap
+  val needExtraSpaceForMPR = WireInit(VecInit(List.tabulate(RenameWidth)(i => io.brqRedirect.valid && io.dp1Req(i).valid && !io.dp1Req(i).ready)))
+  val extraSpaceForMPR = Reg(Vec(RenameWidth, new MicroOp))
+  val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
+
   for(i <- 0 until CommitWidth){
-    when(state === s_idle){
-      val canCommit = if(i!=0) io.commits(i-1).valid else true.B
-      io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
-      io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-      when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U){ 
-        archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
-      } // for difftest
-      when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
-      XSInfo(io.commits(i).valid,
-        "retired pc %x wen %d ldst %d data %x\n",
-        microOp(ringBufferTail+i.U).cf.pc,
-        microOp(ringBufferTail+i.U).ctrl.rfWen,
-        microOp(ringBufferTail+i.U).ctrl.ldest,
-        exuData(ringBufferTail+i.U)
-      )
-      XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO,
-        "difftest skiped pc0x%x\n",
-        microOp(ringBufferTail+i.U).cf.pc
-      )
-    }.otherwise{//state === s_walk
-      io.commits(i).valid := valid(ringBufferWalk-i.U) && shouldWalkVec(i)
-      io.commits(i).bits.uop := microOp(ringBufferWalk-i.U)
-      when(shouldWalkVec(i)){
-        valid(ringBufferWalk-i.U) := false.B
+    io.commits(i) := DontCare
+    switch(state){
+      is(s_idle){
+        val canCommit = if(i!=0) io.commits(i-1).valid else true.B
+        io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
+        io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
+        when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U){ 
+          archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
+        } // for difftest
+        when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
+        XSInfo(io.commits(i).valid,
+          "retired pc %x wen %d ldst %d data %x\n",
+          microOp(ringBufferTail+i.U).cf.pc,
+          microOp(ringBufferTail+i.U).ctrl.rfWen,
+          microOp(ringBufferTail+i.U).ctrl.ldest,
+          exuData(ringBufferTail+i.U)
+        )
+        XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO,
+          "difftest skiped pc0x%x\n",
+          microOp(ringBufferTail+i.U).cf.pc
+        )
       }
-      XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n", 
-        microOp(ringBufferWalk-i.U).cf.pc, 
-        microOp(ringBufferWalk-i.U).ctrl.rfWen, 
-        microOp(ringBufferWalk-i.U).ctrl.ldest, 
-        exuData(ringBufferWalk-i.U)
-      )
+
+      is(s_walk){
+        io.commits(i).valid := valid(ringBufferWalk-i.U) && shouldWalkVec(i)
+        io.commits(i).bits.uop := microOp(ringBufferWalk-i.U)
+        when(shouldWalkVec(i)){
+          valid(ringBufferWalk-i.U) := false.B
+        }
+        XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n", 
+          microOp(ringBufferWalk-i.U).cf.pc, 
+          microOp(ringBufferWalk-i.U).ctrl.rfWen, 
+          microOp(ringBufferWalk-i.U).ctrl.ldest, 
+          exuData(ringBufferWalk-i.U)
+        )
+      }
+
+      is(s_extrawalk){
+        io.commits(i).valid := needExtraSpaceForMPR(RenameWidth-i-1)
+        io.commits(i).bits.uop := extraSpaceForMPR(RenameWidth-i-1)
+        state := s_walk
+        XSInfo(io.commits(i).valid && shouldWalkVec(i), "use extra space walked pc %x wen %d ldst %d data %x\n", 
+          microOp(ringBufferWalk-i.U).cf.pc, 
+          microOp(ringBufferWalk-i.U).ctrl.rfWen, 
+          microOp(ringBufferWalk-i.U).ctrl.ldest, 
+          exuData(ringBufferWalk-i.U)
+        )
+      }
     }
     io.commits(i).bits.isWalk := state === s_walk
   }
@@ -147,7 +169,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
   // commit store to lsu
-  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.ldu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
+  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
   io.scommit := PopCount(validScommit.asUInt)
 
   // when redirect, walk back roq entries
@@ -156,6 +178,15 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     ringBufferWalkExtended := ringBufferHeadExtended - 1.U + PopCount(firedDispatch)
     ringBufferWalkTarget := io.brqRedirect.bits.roqIdx
     ringBufferHeadExtended := io.brqRedirect.bits.roqIdx + 1.U
+  }
+
+  // no enough space for walk, allocate extra space
+  when(io.brqRedirect.valid){
+    when(needExtraSpaceForMPR.asUInt.orR){
+      usedSpaceForMPR := needExtraSpaceForMPR
+      (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
+      state := s_extrawalk
+    }
   }
 
   // roq redirect only used for exception
