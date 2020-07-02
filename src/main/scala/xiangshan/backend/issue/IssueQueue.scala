@@ -14,7 +14,7 @@ trait IQConst{
 sealed abstract class IQBundle extends XSBundle with IQConst
 sealed abstract class IQModule extends XSModule with IQConst
 
-class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1) extends IQModule {
+class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1, val fifo: Boolean = false) extends IQModule {
 
   val useBypass = bypassCnt > 0
   val src2Use = true
@@ -91,23 +91,23 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val deqFire = io.deq.fire()
   val popOne = Wire(Bool())
   io.enqCtrl.ready := !full || popOne
-  val enqSel = idQue(tail)
+  val enqSelIq = idQue(tail) // Note: direct by IQue's idx, different from deqSel
   val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.src1State), true.B, io.enqCtrl.bits.src1State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src2State), true.B, io.enqCtrl.bits.src2State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src3State), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
 
   // state enq
   when (enqFire) {
-    issQue(enqSel).uop := io.enqCtrl.bits
-    validQue(enqSel) := true.B
-    assert(!validQue(enqSel))
+    issQue(enqSelIq).uop := io.enqCtrl.bits
+    validQue(enqSelIq) := true.B
+    assert(!validQue(enqSelIq) || popOne/* && idQue(deqSel)===enqSelIq*/)
 
-    srcRdyVec(enqSel)(0) := enqSrcRdy(0)
-    if(src2Listen) { srcRdyVec(enqSel)(1) := enqSrcRdy(1) }
-    if(src3Listen) { srcRdyVec(enqSel)(2) := enqSrcRdy(2) }
+    srcRdyVec(enqSelIq)(0) := enqSrcRdy(0)
+    if(src2Listen) { srcRdyVec(enqSelIq)(1) := enqSrcRdy(1) }
+    if(src3Listen) { srcRdyVec(enqSelIq)(2) := enqSrcRdy(2) }
   }
 
   // data enq
-  val enqSelNext = RegEnable(enqSel, enqFire)
-  // val enqSelNext = RegNext(enqSel)
+  val enqSelIqNext = RegEnable(enqSelIq, enqFire)
+  // val enqSelIqNext = RegNext(enqSelIq)
   val enqFireNext = RegInit(false.B)
   when (enqFireNext) { enqFireNext := false.B }
   when (enqFire) { enqFireNext := true.B }
@@ -115,7 +115,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val enqDataVec = List(io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
   when (enqFireNext) {
     for(i <- 0 until srcUseNum) {
-      srcDataWire(enqSelNext)(i) := enqDataVec(i)
+      srcDataWire(enqSelIqNext)(i) := enqDataVec(i)
     }
   }
 
@@ -130,10 +130,10 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   tailAll := Mux(tailKeep, tailAll, Mux(tailInc, tailAdd, tailSub))
   assert(tailAll < 9.U)
   // Select to Dequeue
-  val deqSel = PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot, idx by IdQue's idx
+  val deqSel = if (fifo) 0.U else PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot, idx by IdQue's idx
   val deqSelIq = idQue(deqSel)
   val deqSelOH = PriorityEncoderOH(idValidQue & srcIdRdy)
-  val has1Rdy = ParallelOR((validQue.asUInt & srcRdy.asUInt).asBools).asBool()
+  val has1Rdy = if (fifo) idValidQue(deqSel) && srcIdRdy(deqSel) else ParallelOR((validQue.asUInt & srcRdy.asUInt).asBools).asBool()
 
   //-----------------------------------------
   // idQue Move
@@ -207,7 +207,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   when (toIssFire) {
     issueToExu := issQue(deqSelIq)
     issueToExuValid := true.B
-    validQue(deqSelIq) := false.B
+    validQue(deqSelIq) := enqFire && enqSelIq===deqSelIq
     assert(validQue(deqSelIq))
     issueToExu.src1 := srcDataWire(deqSelIq)(0)
     if (src2Use) { issueToExu.src2 := srcDataWire(deqSelIq)(1) } else { issueToExu.src2 := DontCare }
@@ -284,18 +284,18 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
       val hitVecNext = hitVec.map(RegNext(_))
       val hit = ParallelOR(hitVec).asBool
       when (enqFire && hit && !enqSrcRdy(i)) {
-        srcRdyVec(enqSel)(i) := true.B
+        srcRdyVec(enqSelIq)(i) := true.B
       }
       when (RegNext(enqFire && hit && !enqSrcRdy(i))) {
-        srcDataWire(enqSelNext)(i) := ParallelMux(hitVecNext zip bpData)
+        srcDataWire(enqSelIqNext)(i) := ParallelMux(hitVecNext zip bpData)
       }
-      // XSDebug(enqFire && hit, "EnqBypassCtrl: enqSel:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSel, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
+      // XSDebug(enqFire && hit, "EnqBypassCtrl: enqSelIq:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSelIq, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
       for (k <- 0 until bypassCnt) {
-        XSDebug(enqFire && hit && !enqSrcRdy(i) && hitVec(k), "EnqBypassCtrlHit: enqSel:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n", enqSel, i.U, enqPsrc(i), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+        XSDebug(enqFire && hit && !enqSrcRdy(i) && hitVec(k), "EnqBypassCtrlHit: enqSelIq:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
-      // XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelNext:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelNext, i.U, enqPsrc(i), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
+      // XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelIqNext:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelIqNext, i.U, enqPsrc(i), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
       for (k <- 0 until bypassCnt) {
-        XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSel:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSel, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+        XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
     }
 
@@ -311,9 +311,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     sel.bits.ctrl.fpWen := issQue(deqSelIq).uop.ctrl.fpWen
   }
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
-  XSInfo(enqFire, "EnqCtrl(%d %d) enqSel:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSel
+  XSInfo(enqFire, "EnqCtrl(%d %d) enqSelIq:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSelIq
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
-  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3, issQue(enqSelNext).uop.cf.pc, issQue(enqSelNext).uop.roqIdx)
+  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx)
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b In(%d %d) Out(%d %d)\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot, io.enqCtrl.valid, io.enqCtrl.ready, io.deq.valid, io.deq.ready)
   if(useBypass) {
