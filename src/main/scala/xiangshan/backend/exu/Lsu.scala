@@ -60,7 +60,7 @@ class Lsu extends Exu(
   readFpRf = true,
   writeIntRf = true,
   writeFpRf = true
-) with NeedImpl {
+){
   override def toString: String = "Lsu"
 
   // store buffer
@@ -75,7 +75,7 @@ class Lsu extends Exu(
 
   // when retiringStore, block all input insts
   val isStoreIn = io.in.valid && LSUOpType.isStore(io.in.bits.uop.ctrl.fuOpType)
-  val retiringStore = Wire(Bool()) //RegInit(false.B)
+  val retiringStore = RegInit(false.B)
   val (validIn, src1In, src2In, src3In, funcIn) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.src3, io.in.bits.uop.ctrl.fuOpType)
   val (valid, src1, src2, wdata, func) = 
   (
@@ -125,6 +125,11 @@ class Lsu extends Exu(
   dmem.req.valid := valid && (state === s_idle)
   dmem.resp.ready := true.B
 
+  XSDebug("state %x req.valid/ready %x/%x resp.valid/ready %x/%x addr %x size %x data %x mask %x cmd %x\n", 
+    state, dmem.req.valid, dmem.req.ready, dmem.resp.valid, dmem.resp.ready, 
+    addr, size, genWdata(wdata, size), genWmask(addr, size), Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read)
+  )
+
   val rdata = dmem.resp.bits.rdata
   val rdataLatch = RegNext(rdata)
   val rdataSel = LookupTree(addrLatch(2, 0), List(
@@ -170,7 +175,13 @@ class Lsu extends Exu(
   }
 
   // if store insts have been commited, send dmem req
-  retiringStore := stqCommited > 0.U && stqValid(stqTail)
+  val needRetireStore = stqCommited > 0.U && stqValid(stqTail)
+  when(needRetireStore && state === s_idle && !retiringStore && !io.in.valid){
+    retiringStore := true.B
+  }
+  when(state === s_partialLoad && retiringStore){
+    retiringStore := false.B
+  }
 
   // update stqTail, stqCommited
   stqCommited := stqCommited + io.scommit - stqDequeue
@@ -219,6 +230,9 @@ class Lsu extends Exu(
   io.out.bits.data := dataBackVec.asUInt
   // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
   io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) //for debug
+  io.out.bits.redirect := DontCare
+  io.out.bits.redirectValid := false.B
+
   when(io.out.fire()){
     XSDebug("LSU fire: pc %x addr %x mmio %x isStoreIn %x retiringStore %x partialLoad %x dmem %x stqEnqueue %x state %x dmemres %x fwdres %x\n",
       io.in.bits.uop.cf.pc,

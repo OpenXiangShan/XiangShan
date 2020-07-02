@@ -169,7 +169,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
   // commit store to lsu
-  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
+  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
   io.scommit := PopCount(validScommit.asUInt)
 
   // when redirect, walk back roq entries
