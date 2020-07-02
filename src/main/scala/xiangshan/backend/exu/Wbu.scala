@@ -12,9 +12,6 @@ class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
     val toIntRf, toFpRf = Vec(NRWritePorts, ValidIO(new ExuOutput))
   })
 
-  val intArb = Module(new WriteBackArbMtoN(wbIntIdx.size, NRWritePorts))
-  val fpArb = Module(new WriteBackArbMtoN(wbFpIdx.size, NRWritePorts))
-
   def exuOutToRfReq
   (exuOutVec: Vec[DecoupledIO[ExuOutput]], fp: Boolean): Seq[(DecoupledIO[ExuOutput], Int)] = {
     val wbIdxSet = if(fp) wbFpIdx else wbIntIdx
@@ -59,11 +56,31 @@ class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
     }
   }
 
-  intArb.io.in <> wbIntReq.map(_._1)
-  io.toIntRf <> intArb.io.out
+  if(wbIntIdx.length < NRWritePorts){
+    io.toIntRf.take(wbIntIdx.length).zip(wbIntReq.map(_._1)).foreach(x => {
+      x._1.bits := x._2.bits
+      x._1.valid := x._2.valid
+      x._2.ready := true.B
+    })
+    io.toIntRf.drop(wbIntIdx.length).foreach(_ <> DontCare)
+  } else {
+    val intArb = Module(new WriteBackArbMtoN(wbIntIdx.length, NRWritePorts))
+    intArb.io.in <> wbIntReq.map(_._1)
+    io.toIntRf <> intArb.io.out
+  }
 
-  fpArb.io.in <> wbFpReq.map(_._1)
-  io.toFpRf <> fpArb.io.out
+  if(wbFpIdx.length < NRWritePorts){
+    io.toFpRf.take(wbFpIdx.length).zip(wbFpReq.map(_._1)).foreach(x => {
+      x._1.bits := x._2.bits
+      x._1.valid := x._2.valid
+      x._2.ready := true.B
+    })
+    io.toFpRf.drop(wbFpIdx.length).foreach(_ <> DontCare)
+  } else {
+    val fpArb = Module(new WriteBackArbMtoN(wbFpIdx.length, NRWritePorts))
+    fpArb.io.in <> wbFpReq.map(_._1)
+    io.toFpRf <> fpArb.io.out
+  }
 
   io.toRoq.zip(io.in).foreach({
     case(roq, in) =>
