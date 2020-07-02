@@ -385,9 +385,9 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
 
   val useBypass = bypassCnt > 0
   val src2Use = true
-  val src3Use = true
+  val src3Use = fuTypeInt==FuType.fmac
   val src2Listen = true
-  val src3Listen = true
+  val src3Listen = fuTypeInt==FuType.fmac
 
   val io = IO(new Bundle() {
     // flush Issue Queue
@@ -458,6 +458,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val popOne = Wire(Bool())
   io.enqCtrl.ready := !full || popOne
   val enqSel = idQue(tail)
+  val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.src1State), true.B, io.enqCtrl.bits.src1State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src2State), true.B, io.enqCtrl.bits.src2State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src3State), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
 
   // state enq
   when (enqFire) {
@@ -465,9 +466,9 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
     validQue(enqSel) := true.B
     assert(!validQue(enqSel))
 
-    srcRdyVec(enqSel)(0) := io.enqCtrl.bits.src1State === SrcState.rdy
-    if(src2Listen) { srcRdyVec(enqSel)(1) := io.enqCtrl.bits.src2State === SrcState.rdy }
-    if(src3Listen) { srcRdyVec(enqSel)(2) := io.enqCtrl.bits.src3State === SrcState.rdy }
+    srcRdyVec(enqSel)(0) := enqSrcRdy(0)
+    if(src2Listen) { srcRdyVec(enqSel)(1) := enqSrcRdy(1) }
+    if(src3Listen) { srcRdyVec(enqSel)(2) := enqSrcRdy(2) }
   }
 
   // data enq
@@ -643,7 +644,6 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
     // Enqueue Bypass
     val enqCtrl = io.enqCtrl
     val enqPsrc = List(enqCtrl.bits.psrc1, enqCtrl.bits.psrc2, enqCtrl.bits.psrc3)
-    val enqSrcRdy = List(enqCtrl.bits.src1State===SrcState.rdy, enqCtrl.bits.src2State===SrcState.rdy, enqCtrl.bits.src3State===SrcState.rdy)
     val enqSrcType = List(enqCtrl.bits.ctrl.src1Type, enqCtrl.bits.ctrl.src2Type, enqCtrl.bits.ctrl.src3Type)
     for (i <- 0 until srcListenNum) {
       val hitVec = List.tabulate(bypassCnt)(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
@@ -687,12 +687,12 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   } else {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
-  XSDebug("id| v|r |psrc|r|   src1          |psrc|r|   src2          |psrc|r|   src3          |brMask|  pc  |roqIdx\n")
+  XSDebug("id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brMask|    pc    |roqIdx FuType:%x\n", fuTypeInt.U)
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
-      XSDebug("%d|%d|%d|%d|%b|%x|%d|%b|%x|%d|%b|%x| %x|%x|%x <-\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
+      XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x <-\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
     }.otherwise {
-      XSDebug("%d|%d|%d|%d|%b|%x|%d|%b|%x|%d|%b|%x| %x|%x|%x\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
+      XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
     }
   }
 
