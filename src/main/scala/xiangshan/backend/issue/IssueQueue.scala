@@ -329,8 +329,4 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
       XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
     }
   }
-  XSDebug("IQIdx| src1Wire | src2Wire | src3Wire | This Debug Info should be removed later\n")
-  for (i <- 0 until iqSize) {
-    XSDebug("%d  |%x|%x|%x|\n",i.U, srcDataWire(i)(0), srcDataWire(i)(1), srcDataWire(i)(2))
-  }
 }
