@@ -385,9 +385,9 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
 
   val useBypass = bypassCnt > 0
   val src2Use = true
-  val src3Use = fuTypeInt==FuType.fmac
+  val src3Use = fuTypeInt==FuType.fmac.litValue()
   val src2Listen = true
-  val src3Listen = fuTypeInt==FuType.fmac
+  val src3Listen = fuTypeInt==FuType.fmac.litValue()
 
   val io = IO(new Bundle() {
     // flush Issue Queue
@@ -431,15 +431,14 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val tailAll = RegInit(0.U((iqIdxWidth+1).W))
   val tail = tailAll(iqIdxWidth-1, 0)
   val full = tailAll(iqIdxWidth)
+
   // alias failed, turn to independent storage(Reg)
-  val psrc = VecInit(List.tabulate(iqSize)(i => VecInit(List(issQue(i.U).uop.psrc1, issQue(i.U).uop.psrc2, issQue(i.U).uop.psrc3)))) // TODO: why issQue can not use Int as index, but idQue is ok?? // NOTE: indexed by IssQue's idx
-  // val srcRdyVec = Reg(Vec(iqSize, Vec(srcListenNum, Bool())))
+  val psrc = VecInit(List.tabulate(iqSize)(i => VecInit(List(issQue(i.U).uop.psrc1, issQue(i.U).uop.psrc2, issQue(i.U).uop.psrc3)))) // NOTE: indexed by IssQue's idx
   val srcRdyVec = Reg(Vec(iqSize, Vec(srcAllNum, Bool()))) // NOTE: indexed by IssQue's idx
-  // val srcData = Reg(Vec(iqSize, Vec(srcUseNum, UInt(XLEN.W)))) // NOTE: Bundle/MicroOp need merge "src1/src2/src3" into a Vec. so that IssueQueue could have Vec
   val srcData = Reg(Vec(iqSize, Vec(srcAllNum, UInt(XLEN.W)))) // NOTE: indexed by IssQue's idx
-  val srcRdy = VecInit(srcRdyVec.map(i => ParallelAND(i))) // NOTE: indexed by IssQue's idx
+  val srcRdy = VecInit(srcRdyVec.map(a => if(src3Listen) { if(src2Listen) a(0)&&a(1)&&a(2) else a(0)&&a(2) } else  { if(src2Listen) a(0)&&a(1) else a(0) }))// NOTE: indexed by IssQue's idx
   val srcIdRdy = VecInit((0 until iqSize).map(i => srcRdy(idQue(i)))).asUInt // NOTE: indexed by IdQue's idx
-  val srcType = List.tabulate(iqSize)(i => List(issQue(i).uop.ctrl.src1Type, issQue(i).uop.ctrl.src2Type, issQue(i).uop.ctrl.src3Type))
+  val srcType = List.tabulate(iqSize)(i => List(issQue(i).uop.ctrl.src1Type, issQue(i).uop.ctrl.src2Type, issQue(i).uop.ctrl.src3Type)) // NOTE: indexed by IssQue's idx
 
   val srcDataWire = srcData
   srcData := srcDataWire
