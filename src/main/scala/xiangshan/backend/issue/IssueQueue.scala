@@ -440,7 +440,9 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   val srcIdRdy = VecInit((0 until iqSize).map(i => srcRdy(idQue(i)))).asUInt // NOTE: indexed by IdQue's idx
   val srcType = List.tabulate(iqSize)(i => List(issQue(i).uop.ctrl.src1Type, issQue(i).uop.ctrl.src2Type, issQue(i).uop.ctrl.src3Type)) // NOTE: indexed by IssQue's idx
 
-  val srcDataWire = srcData
+  // val srcDataWire = Wire(srcData)
+  val srcDataWire = Wire(Vec(iqSize, Vec(srcAllNum, UInt(XLEN.W)))) // NOTE: indexed by IssQue's idx
+  srcDataWire := srcData
   srcData := srcDataWire
 
   // there is three stage
@@ -678,7 +680,7 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
   XSInfo(enqFire, "EnqCtrl(%d %d) enqSel:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSel
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
-  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x (for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
+  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3, issQue(enqSelNext).uop.cf.pc, issQue(enqSelNext).uop.roqIdx)
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot)
   if(useBypass) {
@@ -694,5 +696,8 @@ class IssueQueueCpt(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: In
       XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
     }
   }
-
+  XSDebug("IQIdx| src1Wire | src2Wire | src3Wire | This Debug Info should be removed later\n")
+  for (i <- 0 until iqSize) {
+    XSDebug("%d  |%x|%x|%x|\n",i.U, srcDataWire(i)(0), srcDataWire(i)(1), srcDataWire(i)(2))
+  }
 }
