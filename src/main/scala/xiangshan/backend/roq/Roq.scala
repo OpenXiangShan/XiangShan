@@ -153,7 +153,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){
     state := s_walk
-    ringBufferWalkExtended := ringBufferHeadExtended - 1.U
+    ringBufferWalkExtended := ringBufferHeadExtended - 1.U + PopCount(firedDispatch)
     ringBufferWalkTarget := io.brqRedirect.bits.roqIdx
     ringBufferHeadExtended := io.brqRedirect.bits.roqIdx + 1.U
   }
