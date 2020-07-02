@@ -153,7 +153,8 @@ class Lsu extends Exu(
   ))
 
   // pop store queue if insts have been commited and dmem req fired successfully
-  val stqDequeue = retiringStore && state === s_partialLoad || !stqValid(stqTail) && stqHead > 0.U
+  val storeFinish = retiringStore && state === s_partialLoad
+  val stqDequeue = storeFinish || !stqValid(stqTail) && stqHead > 0.U
   when(stqDequeue){
     stqValid(stqTail) := false.B
     // update stq ptr
@@ -176,8 +177,12 @@ class Lsu extends Exu(
   }
 
   // if store insts have been commited, send dmem req
+  // have to say it seems better to rebuild FSM instead of using such ugly wrapper
   val needRetireStore = stqCommited > 0.U && stqValid(stqTail)
-  when(needRetireStore && state === s_idle && !retiringStore && !io.in.valid){
+  when(
+    needRetireStore && !retiringStore && state === s_idle  && !io.in.valid ||
+    needRetireStore && !retiringStore && io.in.valid && isStoreIn
+  ){
     retiringStore := true.B
   }
   when(state === s_partialLoad && retiringStore){
@@ -185,7 +190,7 @@ class Lsu extends Exu(
   }
 
   // update stqTail, stqCommited
-  stqCommited := stqCommited + io.scommit - stqDequeue
+  stqCommited := stqCommited + io.scommit - storeFinish
   stqHead := stqHead + stqEnqueue - stqDequeue
 
   // Store addr forward match
