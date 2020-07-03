@@ -136,18 +136,17 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       }
 
       is(s_extrawalk){
-        io.commits(i).valid := needExtraSpaceForMPR(RenameWidth-i-1)
+        io.commits(i).valid := usedSpaceForMPR(RenameWidth-i-1)
         io.commits(i).bits.uop := extraSpaceForMPR(RenameWidth-i-1)
         state := s_walk
-        XSInfo(io.commits(i).valid && shouldWalkVec(i), "use extra space walked pc %x wen %d ldst %d data %x\n", 
-          microOp(ringBufferWalk-i.U).cf.pc, 
-          microOp(ringBufferWalk-i.U).ctrl.rfWen, 
-          microOp(ringBufferWalk-i.U).ctrl.ldest, 
-          exuData(ringBufferWalk-i.U)
+        XSInfo(io.commits(i).valid, "use extra space walked pc %x wen %d ldst %d\n", 
+          extraSpaceForMPR((RenameWidth-i-1).U).cf.pc, 
+          extraSpaceForMPR((RenameWidth-i-1).U).ctrl.rfWen, 
+          extraSpaceForMPR((RenameWidth-i-1).U).ctrl.ldest
         )
       }
     }
-    io.commits(i).bits.isWalk := state === s_walk
+    io.commits(i).bits.isWalk := state =/= s_idle
   }
 
   val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
@@ -182,12 +181,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
 
   // no enough space for walk, allocate extra space
-  when(io.brqRedirect.valid){
-    when(needExtraSpaceForMPR.asUInt.orR){
-      usedSpaceForMPR := needExtraSpaceForMPR
-      (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
-      state := s_extrawalk
-    }
+  when(needExtraSpaceForMPR.asUInt.orR && io.brqRedirect.valid){
+    usedSpaceForMPR := needExtraSpaceForMPR
+    (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
+    state := s_extrawalk
+    XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
   }
 
   // roq redirect only used for exception
