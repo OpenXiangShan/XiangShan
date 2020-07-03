@@ -34,11 +34,11 @@ object XSLog {
   }
 
   def apply(debugLevel: XSLogLevel)
-           (cond: Bool, pable: Printable)
+           (prefix: Boolean, cond: Bool, pable: Printable)
            (implicit name: String): Any = {
     val commonInfo = p"[$debugLevel][time=${GTimer()}] $name: "
     when (debugLevel.id.U >= xsLogLevel && cond && displayLog) {
-      printf(commonInfo + pable)
+      printf((if (prefix) commonInfo else p"") + pable)
     }
   }
 }
@@ -47,14 +47,14 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
 
   def apply(cond: Bool, fmt: String, data: Bits*)(implicit name: String): Any =
     apply(cond, Printable.pack(fmt, data:_*))
-  def apply(cond: Bool, pable: Printable)(implicit name: String): Any = XSLog(logLevel)(cond, pable)
+  def apply(cond: Bool, pable: Printable)(implicit name: String): Any = apply(true, cond, pable)
   def apply(fmt: String, data: Bits*)(implicit name: String): Any =
-    apply(true.B, Printable.pack(fmt, data:_*))
-  def apply(pable: Printable)(implicit name: String): Any = XSLog(logLevel)(true.B, pable)
-
-  // Do not use that unless you have valid reasons
-  def apply(cond: Bool = true.B)(body: => Unit): Any =
-    when (logLevel.id.U >= XSLog.xsLogLevel && cond && XSLog.displayLog) { body }
+    apply(Printable.pack(fmt, data:_*))
+  def apply(pable: Printable)(implicit name: String): Any = apply(true.B, pable)
+  def apply(prefix: Boolean, cond: Bool, fmt: String, data: Bits*)(implicit name: String): Any =
+    apply(prefix, cond, Printable.pack(fmt, data:_*))
+  def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit name: String): Any =
+    XSLog(logLevel)(prefix, cond, pable)
 }
 
 object XSDebug extends LogHelper(XSLogLevel.DEBUG)
