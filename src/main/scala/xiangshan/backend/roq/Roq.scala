@@ -11,7 +11,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val roqIdxs = Output(Vec(RenameWidth, UInt(ExtendedRoqIdxWidth.W)))
+    val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
     // exu + brq
     val exeWbResults = Vec(exuConfig.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
@@ -31,15 +31,15 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
   val archRF = RegInit(VecInit(List.fill(64)(0.U(32.W))))//for debug, fp regs included
 
-  val ringBufferHeadExtended = RegInit(0.U(ExtendedRoqIdxWidth.W))
-  val ringBufferTailExtended = RegInit(0.U(ExtendedRoqIdxWidth.W))
-  val ringBufferWalkExtended = Reg(UInt(ExtendedRoqIdxWidth.W))
-  val ringBufferWalkTarget = Reg(UInt(ExtendedRoqIdxWidth.W))
-  val ringBufferHead = ringBufferHeadExtended(RoqIdxWidth-1,0)
-  val ringBufferTail = ringBufferTailExtended(RoqIdxWidth-1,0)
-  val ringBufferWalk = ringBufferWalkExtended(RoqIdxWidth-1,0)
-  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferHeadExtended(RoqIdxWidth)===ringBufferTailExtended(RoqIdxWidth)
-  val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(RoqIdxWidth)=/=ringBufferTailExtended(RoqIdxWidth)
+  val ringBufferHeadExtended = RegInit(0.U(RoqIdxWidth.W))
+  val ringBufferTailExtended = RegInit(0.U(RoqIdxWidth.W))
+  val ringBufferWalkExtended = Reg(UInt(RoqIdxWidth.W))
+  val ringBufferWalkTarget = Reg(UInt(RoqIdxWidth.W))
+  val ringBufferHead = ringBufferHeadExtended(InnerRoqIdxWidth-1,0)
+  val ringBufferTail = ringBufferTailExtended(InnerRoqIdxWidth-1,0)
+  val ringBufferWalk = ringBufferWalkExtended(InnerRoqIdxWidth-1,0)
+  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerRoqIdxWidth)===ringBufferTailExtended(InnerRoqIdxWidth)
+  val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerRoqIdxWidth)=/=ringBufferTailExtended(InnerRoqIdxWidth)
   val ringBufferAllowin = !ringBufferFull 
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
@@ -88,9 +88,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   // Commit uop to Rename
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
-  shouldWalkVec(0) := ringBufferWalk =/= ringBufferWalkTarget
-  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalk - i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
-  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalk - i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
+  shouldWalkVec(0) := ringBufferWalkExtended =/= ringBufferWalkTarget
+  (1 until CommitWidth).map(i => shouldWalkVec(i) := (ringBufferWalkExtended - i.U) =/= ringBufferWalkTarget && shouldWalkVec(i - 1))
+  val walkFinished = (0 until CommitWidth).map(i => (ringBufferWalkExtended - i.U) === ringBufferWalkTarget).reduce(_||_) //FIXIT!!!!!!
 
   // extra space is used weh roq has no enough space, but mispredict recovery needs such info to walk regmap
   val needExtraSpaceForMPR = WireInit(VecInit(List.tabulate(RenameWidth)(i => io.brqRedirect.valid && io.dp1Req(i).valid && !io.dp1Req(i).ready)))
@@ -150,17 +150,18 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     io.commits(i).bits.isWalk := state === s_walk
   }
 
+  val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
   when(state===s_walk) {
     //exit walk state when all roq entry is commited
     when(walkFinished) {
       state := s_idle
     }
     ringBufferWalkExtended := ringBufferWalkExtended - CommitWidth.U
-    XSInfo("rolling back: head %d tail %d walk %d\n", ringBufferHead, ringBufferTail, ringBufferWalk)
+    // ringBufferWalkExtended := ringBufferWalkExtended - validCommit
+    XSInfo("rolling back: head %d tail %d walk %d:%d\n", ringBufferHead, ringBufferTail, ringBufferWalkExtended(InnerRoqIdxWidth), ringBufferWalk)
   }
 
   // move tail ptr
-  val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
   when(state === s_idle){
     ringBufferTailExtended := ringBufferTailExtended + PopCount(validCommit)
   }
@@ -194,7 +195,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   io.redirect.valid := false.B //TODO
 
   // debug info
-  XSDebug("head %d tail %d\n", ringBufferHead, ringBufferTail)
+  XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerRoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerRoqIdxWidth), ringBufferTail)
   XSDebug("")
   XSDebug(){
     for(i <- 0 until RoqSize){
