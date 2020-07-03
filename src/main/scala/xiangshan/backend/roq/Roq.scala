@@ -48,7 +48,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // Dispatch
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
   XSDebug("(ready, valid): ")
-  for(i <- 0 until RenameWidth){
+  for (i <- 0 until RenameWidth) {
     val offset = if(i==0) 0.U else PopCount(validDispatch(i-1,0))
     when(io.dp1Req(i).fire()){
       microOp(ringBufferHead+offset) := io.dp1Req(i).bits
@@ -57,9 +57,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     }
     io.dp1Req(i).ready := ringBufferAllowin && !valid(ringBufferHead+offset) && state === s_idle
     io.roqIdxs(i) := ringBufferHeadExtended+offset
-    XSDebug(){printf("(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)}
+    XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
-  XSDebug(){printf("\n")}
+  XSDebug(false, true.B, "\n")
 
   val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
   when(firedDispatch.orR){
@@ -196,24 +196,20 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // debug info
   XSDebug("head %d tail %d\n", ringBufferHead, ringBufferTail)
   XSDebug("")
-  XSDebug(){
-    for(i <- 0 until RoqSize){
-      when(!valid(i)){printf("-")}
-      when(valid(i) && writebacked(i)){printf("w")}
-      when(valid(i) && !writebacked(i)){printf("v")}
-    }
-    printf("\n")
+  for(i <- 0 until RoqSize){
+    XSDebug(false, !valid(i), "-")
+    XSDebug(false, valid(i) && writebacked(i), "w")
+    XSDebug(false, valid(i) && !writebacked(i), "v")
   }
-  
-  XSDebug(){
-    for(i <- 0 until RoqSize){
-      if(i % 4 == 0) XSDebug("")
-      printf("%x ", microOp(i).cf.pc)
-      when(!valid(i)){printf("- ")}
-      when(valid(i) && writebacked(i)){printf("w ")}
-      when(valid(i) && !writebacked(i)){printf("v ")}
-      if(i % 4 == 3) printf("\n")
-    }
+  XSDebug(false, true.B, "\n")
+
+  for(i <- 0 until RoqSize){
+    if(i % 4 == 0) XSDebug("")
+    XSDebug(false, true.B, "%x ", microOp(i).cf.pc)
+    XSDebug(false, !valid(i), "- ")
+    XSDebug(false, valid(i) && writebacked(i), "w ")
+    XSDebug(false, valid(i) && !writebacked(i), "v ")
+    if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
   //difftest signals
