@@ -132,11 +132,14 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 2000;
+    const int stuck_limit = 100;
     
     static uint32_t wdst[DIFFTEST_WIDTH];
     static uint64_t wdata[DIFFTEST_WIDTH];
     static uint64_t wpc[DIFFTEST_WIDTH];
+
+    extern int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
+      int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode);
 
 #if VM_TRACE
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -157,6 +160,9 @@ class Emulator {
 #if VM_TRACE
         tfp->close();
 #endif
+        // commit a fake inst to trigger error
+        uint64_t reg[DIFFTEST_NR_REG];
+        difftest_step(1, reg, 0, 0, 0, wpc, wdata, wdst, 0, 0, 0);
         set_abort();
       }
 
@@ -176,8 +182,6 @@ class Emulator {
         read_emu_regs(reg);
         read_wb_info(wpc, wdata, wdst);
 
-        extern int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
-          int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode);
         if (difftest_step(dut_ptr->io_difftest_commit, reg, dut_ptr->io_difftest_thisINST,
               dut_ptr->io_difftest_skip, dut_ptr->io_difftest_isRVC,
               wpc, wdata, wdst, dut_ptr->io_difftest_wen,

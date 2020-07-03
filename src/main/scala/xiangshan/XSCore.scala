@@ -36,8 +36,7 @@ trait HasXSParameter {
   val JbtacSize = 1024
   val JbtacBanks = 8
   val IBufSize = 64
-  val DecodeWidth = 8
-  val DecBufSize = 8
+  val DecodeWidth = 6
   val RenameWidth = 6
   val CommitWidth = 6
   val BrqSize = 16
@@ -60,13 +59,13 @@ trait HasXSParameter {
   val exuConfig = ExuConfig(
     AluCnt = 4,
     BruCnt = 1,
-    MulCnt = 1,
-    MduCnt = 1,
-    FmacCnt = 4,
-    FmiscCnt = 1,
-    FmiscDivSqrtCnt = 1,
+    MulCnt = 0,
+    MduCnt = 0,
+    FmacCnt = 0,
+    FmiscCnt = 0,
+    FmiscDivSqrtCnt = 0,
     LduCnt = 1,
-    StuCnt = 1
+    StuCnt = 0
   )
 }
 
@@ -94,7 +93,7 @@ abstract class XSBundle extends Bundle
 case class XSConfig
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = true
 )
 
 class XSCore(implicit val p: XSConfig) extends XSModule {
@@ -132,4 +131,28 @@ class XSCore(implicit val p: XSConfig) extends XSModule {
     empty = dtlb.io.cacheEmpty,
     enable = HasDcache
   )(CacheConfig(name = "dcache"))
+
+  XSDebug("(req valid, ready | resp valid, ready) \n")
+  XSDebug("c-mem(%x %x %x| %x %x) c-coh(%x %x %x| %x %x) cache (%x %x %x| %x %x) tlb (%x %x %x| %x %x)\n",
+    io.dmem.mem.req.valid,
+    io.dmem.mem.req.ready,
+    io.dmem.mem.req.bits.addr,
+    io.dmem.mem.resp.valid,
+    io.dmem.mem.resp.ready,
+    io.dmem.coh.req.valid,
+    io.dmem.coh.req.ready,
+    io.dmem.coh.req.bits.addr,
+    io.dmem.coh.resp.valid,
+    io.dmem.coh.resp.ready,
+    dmemXbar.io.out.req.valid,
+    dmemXbar.io.out.req.ready,
+    dmemXbar.io.out.req.bits.addr,
+    dmemXbar.io.out.resp.valid,
+    dmemXbar.io.out.resp.ready,
+    backend.io.dmem.req.valid,
+    backend.io.dmem.req.ready,
+    backend.io.dmem.req.bits.addr,
+    backend.io.dmem.resp.valid,
+    backend.io.dmem.resp.ready
+  )
 }

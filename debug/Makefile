@@ -29,7 +29,7 @@ bputest:
 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) ALL=forcall2 run 2>&1 | tee > bpu.log
 	cat bpu.log | grep Mbp
 
-unittest:
+amtest:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(SINGLETEST) run 2>&1 | tee > test.log
 	cat test.log | grep different
 	cat test.log | grep ISU > isu.log
@@ -85,3 +85,13 @@ disassemble-freertos:
 
 disassemble-xv6:
 	cp $(XV6_HOME)/build/code.txt ./d-xv6.log
+
+
+P = 4
+SUITE = xiangshan.backend.exu.AluTest
+
+unit-test:
+	cd .. && mill chiselModule.test.testOnly -o -s $(SUITE) -P$(P)
+
+unit-test-all:
+	cd .. && mill chiselModule.test.test -P$(P)

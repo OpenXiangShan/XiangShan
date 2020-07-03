@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import device.RAMHelper
 import xiangshan._
-import utils.Debug
+import utils.{Debug, GTimer}
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -78,7 +78,7 @@ class FakeIFU extends XSModule with HasIFUConst {
   val fakeCache = Module(new FakeCache)
   fakeCache.io.addr := pc
 
-  io.fetchPacket.valid := !io.redirect.valid
+  io.fetchPacket.valid := !io.redirect.valid && (GTimer() > 500.U)
   io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << pc(2+log2Up(FetchWidth)-1, 1)
   io.fetchPacket.bits.pc := pc
   io.fetchPacket.bits.instrs := fakeCache.io.rdata

@@ -122,7 +122,7 @@ class Ibuffer extends XSModule {
 
   // flush
   when(io.flush) {
-    for(i <- 0 until IBufSize) {
+    for(i <- 0 until IBufSize*2) {
       ibuf_valid(i) := false.B
     }
     head_ptr := 0.U
