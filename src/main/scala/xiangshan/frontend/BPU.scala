@@ -19,16 +19,119 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
   def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
-class BPU extends XSModule {
+class Stage1To2IO extends XSBundle {
+  val pc = Output(UInt(VAddrBits.W))
+  val btb = new Bundle {
+    val hits = Output(UInt(FetchWidth.W))
+    val targets = Output(Vec(FetchWidth, UInt(VAddrBits.B)))
+  }
+  val jbtac = new Bundle {
+    val hitIdx = Output(UInt(FetchWidth.W))
+    val target = Output(UInt(VAddrBits.W))
+  }
+  val tage = new Bundle {
+    val hits = Output(UInt(FetchWidth.W))
+    val takens = Output(Vec(FetchWidth, Bool()))
+  }
+  val hist = Output(UInt(HistoryLength.W))
+}
+
+class BPUStage1 extends XSModule {
   val io = IO(new Bundle() {
-    // val flush = Input(Bool())
-    // update bpu based on redirect signals from brq
+    val in = new Bundle { val pc = Flipped(Decoupled(UInt(VAddrBits.W))) }
+    // from backend
     val redirect = Flipped(ValidIO(new Redirect))
-    val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
-    val predMask = Output(Vec(FetchWidth, Bool()))
-    val predTargets = Output(Vec(FetchWidth, UInt(VAddrBits.W)))
+    // from Stage3
+    val flush = Input(Bool())
+    // to ifu, quick prediction result
+    val btbOut = ValidIO(new BranchPrediction)
+    // to Stage2
+    val out = Decoupled(new Stage1To2IO)
   })
 
+  // TODO: delete this!!!
+  io.in.pc.ready := true.B
+  io.btbOut.valid := false.B
+  io.btbOut.bits := DontCare
+  io.out.valid := false.B
+  io.out.bits := DontCare
+
+}
+
+class Stage2To3IO extends Stage1To2IO {
+}
+
+class BPUStage2 extends XSModule {
+  val io = IO(new Bundle() {
+    // flush from Stage3
+    val flush = Input(Bool())
+    val in = Flipped(Decoupled(new Stage1To2IO))
+    val out = Decoupled(new Stage2To3IO)
+  })
+
+  // TODO: delete this!!!
+  io.in.ready := false.B
+  io.out.valid := false.B
+  io.out.bits := DontCare
+
+}
+
+class BPUStage3 extends XSModule {
+  val io = IO(new Bundle() {
+    val flush = Input(Bool())
+    val in = Flipped(Decoupled(new Stage2To3IO))
+    val predecode = Flipped(ValidIO(new Predecode))
+    val out = ValidIO(new BranchPrediction)
+    // from backend
+    val redirect = Flipped(ValidIO(new Redirect)) // only need isCall here
+    // to Stage1 and Stage2
+    val flushBPU = Output(Bool())
+  })
+
+  // TODO: delete this!!!
+  io.in.ready := false.B
+  io.out.valid := false.B
+  io.out.bits := DontCare
+  io.flushBPU := false.B
+
+}
+
+class BPU extends XSModule {
+  val io = IO(new Bundle() {
+    // flush pipeline and update bpu based on redirect signals from brq
+    val redirect = Flipped(ValidIO(new Redirect))
+    val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
+    // val predMask = Output(Vec(FetchWidth, Bool()))
+    // val predTargets = Output(Vec(FetchWidth, UInt(VAddrBits.W)))
+    val btbOut = ValidIO(new BranchPrediction)
+    val tageOut = ValidIO(new BranchPrediction)
+
+    // predecode info from icache
+    // TODO: simplify this after implement predecode unit
+    val predecode = Flipped(ValidIO(new Predecode))
+  })
+
+  val s1 = Module(new BPUStage1)
+  val s2 = Module(new BPUStage2)
+  val s3 = Module(new BPUStage3)
+
+  s1.io.redirect <> io.redirect
+  s1.io.flush := s3.io.flushBPU || io.redirect.valid
+  s1.io.in.pc.valid := io.in.pc.valid
+  s1.io.in.pc.bits <> io.in.pc.bits
+  io.btbOut <> s1.io.btbOut
+
+  s1.io.out <> s2.io.in
+  s2.io.flush := s3.io.flushBPU || io.redirect.valid
+
+  s2.io.out <> s3.io.in
+  s3.io.flush := io.redirect.valid
+  s3.io.predecode <> io.predecode
+  io.tageOut <> s3.io.out
+  s3.io.redirect <> io.redirect
+
+  // TODO: delete this and put BTB and JBTAC into Stage1
+  /*
   val flush = BoolStopWatch(io.redirect.valid, io.in.pc.valid, startHighPriority = true)
   
   // BTB makes a quick prediction for branch and direct jump, which is
@@ -213,4 +316,5 @@ class BPU extends XSModule {
       io.redirect.bits._type === BTBtype.I)
   (0 until JbtacBanks).map(b => jbtac(b).io.w.req.bits.setIdx := jbtacAddr.getBankIdx(io.redirect.bits.pc))
   (0 until JbtacBanks).map(b => jbtac(b).io.w.req.bits.data := jbtacWrite)
+  */
 }

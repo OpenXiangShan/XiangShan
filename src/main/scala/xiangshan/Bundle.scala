@@ -13,6 +13,21 @@ class FetchPacket extends XSBundle {
   val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
 }
 
+class BranchPrediction extends XSBundle {
+  // mask off all the instrs after the first redirect instr
+  val instrValid = Vec(FetchWidth, Bool())
+  // target and BTBtype of the first redirect instr in a fetch package
+  val target = UInt(VAddrBits.W)
+  val _type = UInt(2.W)
+  val hist = UInt(HistoryLength.W)
+}
+
+// Save predecode info in icache
+class Predecode extends XSBundle {
+  val fuTypes = Vec(FetchWidth, FuType())
+  val fuOpTypes = Vec(FetchWidth, FuOpType())
+}
+
 // Dequeue DecodeWidth insts from Ibuffer
 class CtrlFlow extends XSBundle {
   val instr = UInt(32.W)
@@ -62,7 +77,9 @@ class Redirect extends XSBundle {
   val brTarget = UInt(VAddrBits.W)
   val brTag = UInt(BrTagWidth.W)
   val _type = UInt(2.W)
+  val isCall = Bool()
   val taken = Bool()
+  val hist = UInt(HistoryLength.W)
   val isException = Bool()
   val roqIdx = UInt(ExtendedRoqIdxWidth.W)
   val freelistAllocPtr = new FreeListPtr

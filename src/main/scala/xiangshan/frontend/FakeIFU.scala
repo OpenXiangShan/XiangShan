@@ -59,17 +59,16 @@ class FakeIFU extends XSModule with HasIFUConst {
 
   val snpc = Cat(pc(VAddrBits-1, groupAlign) + 1.U, 0.U(groupAlign.W))  // sequential next pc
 
-  val bpu = Module(new BPU)
-  val predRedirect = bpu.io.predMask.asUInt.orR
-  val predTarget = PriorityMux(bpu.io.predMask, bpu.io.predTargets)
+  // val bpu = Module(new BPU)
+  // val predRedirect = bpu.io.predMask.asUInt.orR
+  // val predTarget = PriorityMux(bpu.io.predMask, bpu.io.predTargets)
 
-  // val npc = Mux(io.redirect.valid, io.redirect.bits.target, snpc) // next pc
-  val npc = Mux(io.redirect.valid, io.redirect.bits.target, Mux(predRedirect, predTarget, snpc))
+  val npc = Mux(io.redirect.valid, io.redirect.bits.target, snpc) // next pc
+  // val npc = Mux(io.redirect.valid, io.redirect.bits.target, Mux(predRedirect, predTarget, snpc))
 
-  // bpu.io.flush := io.redirect.valid
-  bpu.io.redirect := io.redirect
-  bpu.io.in.pc.valid := io.fetchPacket.fire()
-  bpu.io.in.pc.bits := npc
+  // bpu.io.redirect := io.redirect
+  // bpu.io.in.pc.valid := io.fetchPacket.fire()
+  // bpu.io.in.pc.bits := npc
 
   when(pcUpdate){
     pc := npc
@@ -82,7 +81,8 @@ class FakeIFU extends XSModule with HasIFUConst {
   io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << pc(2+log2Up(FetchWidth)-1, 1)
   io.fetchPacket.bits.pc := pc
   io.fetchPacket.bits.instrs := fakeCache.io.rdata
-  io.fetchPacket.bits.pnpc := bpu.io.predTargets
+  // io.fetchPacket.bits.pnpc := bpu.io.predTargets
+  io.fetchPacket.bits.pnpc := DontCare
 
   Debug(cond=io.fetchPacket.fire()){
     printf(p"==========FetchGroup==========\nfirst pc:${Hexadecimal(pc)}\n")

@@ -26,9 +26,7 @@ trait HasXSParameter {
   val DataBytes = DataBits / 8
   val HasFPU = true
   val FetchWidth = 8
-  // val BtbSets = 128
-  // val BtbLineBanks = 2
-  // val BtbWayBanks = 8
+  val HistoryLength = 64
   val BtbSize = 128
   val BtbWays = 4
   val BtbBanks = 4
