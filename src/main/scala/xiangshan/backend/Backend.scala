@@ -165,4 +165,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   )
   for (s <- sinks){ BoringUtils.addSink(tmp, s) }
 
+  val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
+  BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
+  BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
+  val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
+  BoringUtils.addSource(debugArchReg, "difftestRegs")
+
 }
