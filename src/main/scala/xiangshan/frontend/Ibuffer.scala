@@ -127,16 +127,16 @@ class Ibuffer extends XSModule {
   }
 
   //Debug Info
-//  XSDebug(enqValid, "Enque:\n")
-//  for(i <- 0 until FetchWidth) {
-//    XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
-//  }
+  XSDebug(enqValid, "Enque:\n")
+  for(i <- 0 until FetchWidth) {
+    XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
+  }
 
   XSInfo(io.flush, "Flush signal received, clear buffer\n")
   XSDebug(deqValid, "Deque:\n")
   for(i <- 0 until DecodeWidth) {
     XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}\n")
   }
-//  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
 //  XSInfo(full, "Queue is full\n")
 }

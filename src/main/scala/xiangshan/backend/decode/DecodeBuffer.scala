@@ -40,4 +40,10 @@ class DecodeBuffer extends XSModule {
     io.out(i).bits <> RegEnable(io.in(i).bits, io.in(i).fire())
     io.out(i).valid := validVec(i) && !io.redirect.valid
   }
+
+  for((in, out) <- io.in.zip(io.out)){
+    XSInfo(p"in v:${in.valid} r:${in.ready} pc=${Hexadecimal(in.bits.cf.pc)}\n")
+    XSInfo(p"out v:${out.valid} r:${out.ready} pc=${Hexadecimal(out.bits.cf.pc)}\n")
+  }
+  XSDebug(p"validVec: ${Binary(validVec.asUInt())}\n")
 }

@@ -114,6 +114,6 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
     io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag, uop.brMask)
   XSDebug(io.in.valid, "src1:%x src2:%x offset:%x func:%b pc:%x\n",
     src1, src2, offset, func, pc)
-  XSDebug(io.in.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d\n",
-     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken)
+  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d flptr:%x\n",
+     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken, io.out.bits.uop.freelistAllocPtr.value)
 }
