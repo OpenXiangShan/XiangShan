@@ -11,8 +11,7 @@ class Mul extends Exu(FuType.mul.litValue()){
   val (iovalid, src1, src2, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2,
     SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 
-  val redirectHit = (io.redirect.valid &&
-    ((UIntToOH(io.redirect.bits.brTag) & uop.brMask).orR || io.redirect.bits.isException))
+  val redirectHit = uop.brTag.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
   val mulResult = src1 * src2;
@@ -30,8 +29,7 @@ class Mul extends Exu(FuType.mul.litValue()){
     else {
       uopReg(i) := uopReg(i - 1)
       resultReg(i) := resultReg(i - 1)
-      val cancel = (io.redirect.valid &&
-        ((UIntToOH(io.redirect.bits.brTag) & uopReg(i - 1).brMask).orR || io.redirect.bits.isException))
+      val cancel = uopReg(i - 1).brTag.needFlush(io.redirect)
       validReg(i) := validReg(i - 1) && !cancel
     }
   }
@@ -40,14 +38,13 @@ class Mul extends Exu(FuType.mul.litValue()){
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
 
-  val cancelResult = (io.redirect.valid &&
-    ((UIntToOH(io.redirect.bits.brTag) & uopReg(mulLatency - 2).brMask).orR || io.redirect.bits.isException))
+  val cancelResult = uopReg(mulLatency - 2).brTag.needFlush(io.redirect)
   io.out.valid := validReg(mulLatency - 2) && !cancelResult
   io.out.bits.uop := uopReg(mulLatency - 2)
   io.out.bits.data := resultReg(mulLatency - 2)
 
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x, brMask:%x\n",
-    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag, uop.brMask)
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag.value)
   XSDebug(io.in.valid, "src1:%x src2:%xpc:%x\n", src1, src2, pc)
   XSDebug(io.out.valid, "Out(%d %d) res:%x\n", io.out.valid, io.out.ready, io.out.bits.data)
 }
@@ -58,8 +55,7 @@ class Mdu extends Exu(FuType.mdu.litValue()) {
   val (iovalid, src1, src2, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2,
     SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 
-  val redirectHit = (io.redirect.valid &&
-    ((UIntToOH(io.redirect.bits.brTag) & uop.brMask).orR || io.redirect.bits.isException))
+  val redirectHit = uop.brTag.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
   val divResult = src1 / src2;
@@ -77,8 +73,7 @@ class Mdu extends Exu(FuType.mdu.litValue()) {
     else {
       uopReg(i) := uopReg(i - 1)
       resultReg(i) := resultReg(i - 1)
-      val cancel = (io.redirect.valid &&
-        ((UIntToOH(io.redirect.bits.brTag) & uopReg(i - 1).brMask).orR || io.redirect.bits.isException))
+      val cancel = uopReg(i - 1).brTag.needFlush(io.redirect)
       validReg(i) := validReg(i - 1) && !cancel
     }
   }
@@ -87,14 +82,13 @@ class Mdu extends Exu(FuType.mdu.litValue()) {
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
 
-  val cancelResult = (io.redirect.valid &&
-    ((UIntToOH(io.redirect.bits.brTag) & uopReg(divLatency - 2).brMask).orR || io.redirect.bits.isException))
+  val cancelResult = uopReg(divLatency - 2).brTag.needFlush(io.redirect)
   io.out.valid := validReg(divLatency - 2) && !cancelResult
   io.out.bits.uop := uopReg(divLatency - 2)
   io.out.bits.data := resultReg(divLatency - 2)
 
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x, brMask:%x\n",
-    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag, uop.brMask)
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag.value)
   XSDebug(io.in.valid, "src1:%x src2:%xpc:%x\n", src1, src2, pc)
   XSDebug(io.out.valid, "Out(%d %d) res:%x\n", io.out.valid, io.out.ready, io.out.bits.data)
 }
