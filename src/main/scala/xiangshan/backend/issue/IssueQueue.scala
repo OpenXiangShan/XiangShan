@@ -180,17 +180,17 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   // Redirect
   //-----------------------------------------
   // redirect enq
-  enqRedHit := io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & io.enqCtrl.bits.brMask).asBools).asBool)
+  enqRedHit := io.redirect.valid && io.enqCtrl.bits.brTag.needFlush(io.redirect)
 
   // redirect issQue
-  val redHitVec = List.tabulate(iqSize)(i => io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & issQue(i).uop.brMask).asBools).asBool))
+  val redHitVec = List.tabulate(iqSize)(i => issQue(i).uop.brTag.needFlush(io.redirect))
   for (i <- 0 until iqSize) {
     when (redHitVec(i) && validQue(i)) {
       validQue(i) := false.B
     }
   }
   // reditect deq(issToExu)
-  val redIdHitVec = List.tabulate(iqSize)(i => io.redirect.valid && (io.redirect.bits.isException || ParallelOR((UIntToOH(io.redirect.bits.brTag) & issQue(idQue(i)).uop.brMask).asBools).asBool))
+  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.brTag.needFlush(io.redirect))
   val selIsRed = ParallelOR((deqSelOH & VecInit(redIdHitVec).asUInt).asBools).asBool
 
   //-----------------------------------------
@@ -198,8 +198,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //-----------------------------------------
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
-  val deqFlushHit = io.redirect.valid && (io.redirect.bits.isException ||
-                 ParallelOR((issueToExu.uop.brMask & UIntToOH(io.redirect.bits.brTag)).asBools).asBool)
+  val deqFlushHit = issueToExu.uop.brTag.needFlush(io.redirect)
   val deqCanIn = !issueToExuValid || deqFire || deqFlushHit
   
   val toIssFire = deqCanIn && has1Rdy && !isPop && !selIsRed
@@ -311,7 +310,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     sel.bits.ctrl.rfWen := issQue(deqSelIq).uop.ctrl.rfWen
     sel.bits.ctrl.fpWen := issQue(deqSelIq).uop.ctrl.fpWen
   }
-  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
+  XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag.value, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
   XSInfo(enqFire, s"EnqCtrl(%d %d) enqSelIq:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x flptr:%d\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSelIq
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx, io.enqCtrl.bits.freelistAllocPtr.value)
   XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx)
@@ -323,12 +322,44 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   } else {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
-  XSDebug("id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brMask|    pc    |roqIdx FuType:%x\n", fuTypeInt.U)
+  XSDebug("id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx FuType:%x\n", fuTypeInt.U)
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
-      XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x <-\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
+      XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x <-\n",
+        idQue(i),
+        idValidQue(i),
+        srcRdy(idQue(i)),
+        psrc(idQue(i))(0),
+        srcRdyVec(idQue(i))(0),
+        srcData(idQue(i))(0),
+        psrc(idQue(i))(1),
+        srcRdyVec(idQue(i))(1),
+        srcData(idQue(i))(1),
+        psrc(idQue(i))(2),
+        srcRdyVec(idQue(i))(2),
+        srcData(idQue(i))(2),
+        issQue(idQue(i)).uop.brTag.value,
+        issQue(idQue(i)).uop.cf.pc,
+        issQue(idQue(i)).uop.roqIdx
+      )
     }.otherwise {
-      XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x\n", idQue(i), idValidQue(i), srcRdy(idQue(i)), psrc(idQue(i))(0), srcRdyVec(idQue(i))(0), srcData(idQue(i))(0), psrc(idQue(i))(1), srcRdyVec(idQue(i))(1), srcData(idQue(i))(1), psrc(idQue(i))(2), srcRdyVec(idQue(i))(2), srcData(idQue(i))(2), issQue(idQue(i)).uop.brMask, issQue(idQue(i)).uop.cf.pc, issQue(idQue(i)).uop.roqIdx)
+      XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x\n",
+        idQue(i),
+        idValidQue(i),
+        srcRdy(idQue(i)),
+        psrc(idQue(i))(0),
+        srcRdyVec(idQue(i))(0),
+        srcData(idQue(i))(0),
+        psrc(idQue(i))(1),
+        srcRdyVec(idQue(i))(1),
+        srcData(idQue(i))(1),
+        psrc(idQue(i))(2),
+        srcRdyVec(idQue(i))(2),
+        srcData(idQue(i))(2),
+        issQue(idQue(i)).uop.brTag.value,
+        issQue(idQue(i)).uop.cf.pc,
+        issQue(idQue(i)).uop.roqIdx
+      )
     }
   }
 }

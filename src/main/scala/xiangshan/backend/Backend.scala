@@ -96,7 +96,6 @@ class Backend(implicit val p: XSConfig) extends XSModule
     x.bits := y.io.out.bits
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
-  decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
   decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
