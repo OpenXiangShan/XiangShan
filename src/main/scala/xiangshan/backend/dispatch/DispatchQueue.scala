@@ -36,7 +36,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    cancelled(i) := ((entries(i).brMask & UIntToOH(io.redirect.bits.brTag)) =/= 0.U) && io.redirect.valid
+    cancelled(i) := entries(i).brTag.needFlush(io.redirect)
   }
 
   // calcelled uops should be set to invalid from enqueue input
@@ -63,8 +63,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
       entriesValid(i) := false.B
     }
     XSInfo(cancelled(i) && entriesValid(i),
-      name + ": valid entry(%d)(pc = %x) cancelled with brMask %x brTag %x\n",
-      i.U, entries(i).cf.pc, entries(i).brMask, io.redirect.bits.brTag)
+      name + ": valid entry(%d)(pc = %x) cancelled with brTag %x\n",
+      i.U, entries(i).cf.pc, io.redirect.bits.brTag.value)
   }
 
   // enqueue

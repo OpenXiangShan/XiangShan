@@ -30,12 +30,13 @@ class Rename extends XSModule {
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
     XSInfo(
       debug_norm,
-      p"pc:${Hexadecimal(in.bits.cf.pc)} v:${in.valid} rdy:${in.ready} " +
+      p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
         p"lsrc1:${in.bits.ctrl.lsrc1} -> psrc1:${out.bits.psrc1} " +
         p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
         p"lsrc3:${in.bits.ctrl.lsrc3} -> psrc3:${out.bits.psrc3} " +
         p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
-        p"old_pdest:${out.bits.old_pdest}\n"
+        p"old_pdest:${out.bits.old_pdest} flptr:${out.bits.freelistAllocPtr} " +
+        p"out v:${out.valid} r:${out.ready}\n"
     )
   }
 
@@ -48,7 +49,7 @@ class Rename extends XSModule {
   val intRat = Module(new RenameTable(float = false)).io
   val fpBusyTable, intBusyTable = Module(new BusyTable).io
 
-  fpFreeList.redirect := io.redirect
+  fpFreeList.redirect := DontCare
   intFreeList.redirect := io.redirect
 
   val flush = io.redirect.valid && io.redirect.bits.isException
@@ -72,11 +73,10 @@ class Rename extends XSModule {
     uop.roqIdx := DontCare
   })
 
-  var last_can_alloc = WireInit(true.B)
+  var lastReady = WireInit(true.B)
   for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
-    uops(i).brMask := io.in(i).bits.brMask
     uops(i).brTag := io.in(i).bits.brTag
 
     val inValid = io.in(i).valid && !isWalk
@@ -84,15 +84,17 @@ class Rename extends XSModule {
     // alloc a new phy reg
     val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
     val needIntDest = inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocReqs(i) := needFpDest && last_can_alloc && io.out(i).ready
-    intFreeList.allocReqs(i) := needIntDest && last_can_alloc && io.out(i).ready
+    fpFreeList.allocReqs(i) := needFpDest && lastReady && io.out(i).ready
+    intFreeList.allocReqs(i) := needIntDest && lastReady && io.out(i).ready
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
     val this_can_alloc = Mux(needIntDest, intCanAlloc, fpCanAlloc)
-    io.in(i).ready := this_can_alloc && !isWalk
-    last_can_alloc = last_can_alloc && this_can_alloc
+    io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc && !isWalk
+
+    lastReady = io.in(i).ready
+
     uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U, fpFreeList.pdests(i)))
-    uops(i).freelistAllocPtr := Mux(needIntDest, intFreeList.allocPtrs(i), fpFreeList.allocPtrs(i))
+    uops(i).freelistAllocPtr := intFreeList.allocPtrs(i)
 
     io.out(i).valid := io.in(i).fire()
     io.out(i).bits := uops(i)

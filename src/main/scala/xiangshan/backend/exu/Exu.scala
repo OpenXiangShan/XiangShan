@@ -42,14 +42,6 @@ abstract class Exu
   io.out.bits.debug.isMMIO := false.B
 }
 
-class Mul extends Exu(FuType.mul.litValue()) with NeedImpl{
-  override def toString: String = "Mul"
-}
-
-class Mdu extends Exu(FuType.mdu.litValue()) with NeedImpl{
-  override def toString: String = "MulDiv"
-}
-
 class Fmac extends Exu(
   FuType.fmac.litValue(),
   readIntRf = false,

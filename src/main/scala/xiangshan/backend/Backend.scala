@@ -53,7 +53,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
     val wakeupCnt = exeUnits.count(needWakeup)
     assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
-    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
+    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay, fifo = eu.fuTypeInt == FuType.ldu.litValue()))
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
@@ -96,7 +96,6 @@ class Backend(implicit val p: XSConfig) extends XSModule
     x.bits := y.io.out.bits
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
-  decode.io.brMasks <> brq.io.brMasks
   decode.io.brTags <> brq.io.brTags
   decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
@@ -165,5 +164,13 @@ class Backend(implicit val p: XSConfig) extends XSModule
     "meip"
   )
   for (s <- sinks){ BoringUtils.addSink(tmp, s) }
+
+  val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
+  BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
+  BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
+  val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
+  if(!p.FPGAPlatform){
+    BoringUtils.addSource(debugArchReg, "difftestRegs")
+  }
 
 }

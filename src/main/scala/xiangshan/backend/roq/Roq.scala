@@ -29,7 +29,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
-  val archRF = RegInit(VecInit(List.fill(64)(0.U(32.W))))//for debug, fp regs included
 
   val ringBufferHeadExtended = RegInit(0.U(RoqIdxWidth.W))
   val ringBufferTailExtended = RegInit(0.U(RoqIdxWidth.W))
@@ -104,9 +103,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         val canCommit = if(i!=0) io.commits(i-1).valid else true.B
         io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
         io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-        when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U){ 
-          archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
-        } // for difftest
         when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
         XSInfo(io.commits(i).valid,
           "retired pc %x wen %d ldst %d data %x\n",
@@ -233,7 +229,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
-    BoringUtils.addSource(archRF, "difftestRegs")//arch RegFile
     BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
     BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
     BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
