@@ -169,6 +169,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
   BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
   val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
-  BoringUtils.addSource(debugArchReg, "difftestRegs")
+  if(!p.FPGAPlatform){
+    BoringUtils.addSource(debugArchReg, "difftestRegs")
+  }
 
 }
