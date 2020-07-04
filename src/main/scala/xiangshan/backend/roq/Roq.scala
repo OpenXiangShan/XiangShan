@@ -29,7 +29,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
-  val archRF = RegInit(VecInit(List.fill(64)(0.U(32.W))))//for debug, fp regs included
+  val archRF = RegInit(VecInit(List.fill(64)(0.U(XLEN.W))))//for debug, fp regs included
 
   val ringBufferHeadExtended = RegInit(0.U(RoqIdxWidth.W))
   val ringBufferTailExtended = RegInit(0.U(RoqIdxWidth.W))
