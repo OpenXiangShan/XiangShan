@@ -72,7 +72,7 @@ class Dispatch1 extends XSModule{
   val uop_nroq = Wire(Vec(RenameWidth, new MicroOp))
   for (i <- 0 until RenameWidth) {
     uop_nroq(i) := io.fromRename(i).bits
-    uop_nroq(i).roqIdx := Mux(io.toRoq(i).ready, io.roqIdxs(i), roqIndexReg(i))
+    uop_nroq(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
   }
 
   // uop can enqueue when rename.valid and roq.valid
