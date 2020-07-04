@@ -53,7 +53,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
     val wakeupCnt = exeUnits.count(needWakeup)
     assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
-    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay))
+    val iq = Module(new IssueQueue(eu.fuTypeInt, wakeupCnt, bypassCnt, eu.fixedDelay, fifo = eu.fuTypeInt == FuType.ldu.litValue()))
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)

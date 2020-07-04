@@ -27,19 +27,19 @@ class Dispatch2 extends XSModule {
   // inst indexes for reservation stations
   // append a true.B to avoid PriorityEncode(0000) -> 3
   // if find a target uop, index[2] == 0, else index[2] == 1
-  val bruInstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.bru) :+ true.B)
+  val bruInstIdx = PriorityEncoder(io.fromIntDq.map(deq => deq.bits.ctrl.fuType === FuType.bru && deq.valid) :+ true.B)
   val aluInstIdxsTry = RegInit(VecInit(Seq.tabulate(exuConfig.AluCnt)(i => i.U(2.W))))
   val aluInstIdxs = Wire(Vec(exuConfig.AluCnt, UInt(3.W)))
   for (i <- 0 until exuConfig.AluCnt) {
     assert(exuConfig.AluCnt == IntDqDeqWidth)
     // 0 -> 1 -> 2 -> 3 -> 0
     aluInstIdxsTry(i) := aluInstIdxsTry(i) + 1.U
-    val deqAluInvalid = io.fromIntDq(aluInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.alu
+    val deqAluInvalid = io.fromIntDq(aluInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.alu || !io.fromIntDq(aluInstIdxsTry(i)).valid
     aluInstIdxs(i) := Cat(deqAluInvalid.asUInt(), aluInstIdxsTry(i))
   }
-  val mulInstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mul) :+ true.B)
-  val muldivInstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
-    (uop.bits.ctrl.fuType === FuType.mul && i.U > mulInstIdx) || uop.bits.ctrl.fuType === FuType.mdu
+  val mulInstIdx = PriorityEncoder(io.fromIntDq.map(deq => deq.bits.ctrl.fuType === FuType.mul && deq.valid) :+ true.B)
+  val muldivInstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (deq, i) =>
+    ((deq.bits.ctrl.fuType === FuType.mul && i.U > mulInstIdx) || deq.bits.ctrl.fuType === FuType.mdu) && deq.valid
   }) :+ true.B)
 
   // TODO uncomment when FmacCnt > 0
@@ -51,12 +51,12 @@ class Dispatch2 extends XSModule {
     assert(exuConfig.FmacCnt == FpDqDeqWidth)
     // 0 -> 1 -> 2 -> 3 -> 0
     fmacInstIdxsTry(i) := fmacInstIdxsTry(i) + 1.U
-    val deqFmacInvalid = io.fromFpDq(fmacInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.fmac
+    val deqFmacInvalid = io.fromFpDq(fmacInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.fmac || !io.fromFpDq(fmacInstIdxsTry(i)).valid
     fmacInstIdxs(i) := Cat(deqFmacInvalid.asUInt(), fmacInstIdxsTry(i))
   }
-  val fmisc0InstIdx = PriorityEncoder(io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmisc) :+ true.B)
-  val fmisc1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
-    (uop.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || uop.bits.ctrl.fuType === FuType.fmiscDivSqrt
+  val fmisc0InstIdx = PriorityEncoder(io.fromFpDq.map(deq => deq.bits.ctrl.fuType === FuType.fmisc && deq.valid) :+ true.B)
+  val fmisc1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (deq, i) =>
+    ((deq.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || deq.bits.ctrl.fuType === FuType.fmiscDivSqrt) && deq.valid
   }) :+ true.B)
 
   // TODO: currently there's only one load/store reservation station
@@ -70,12 +70,15 @@ class Dispatch2 extends XSModule {
     uop.bits.ctrl.fuType === FuType.stu && i.U > store0InstIdx
   }) :+ true.B)
 
+  XSDebug("%d %d %d %d %d %d %d %d\n", bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2),
+    aluInstIdxs(3), mulInstIdx, muldivInstIdx, store0InstIdx)
+
   // regfile read ports
   // regfile is sync-read, data can used at the next cycle
   // BRU, MUL0, MUL1 can use the 8 read ports
   // priority: ALU > BRU > MUL
   val intExuIndex = WireInit(VecInit(Seq.fill(3)(0.U(2.W))))
-  for (i <- 0 until 4) {
+  for (i <- (0 until 4).reverse) {
     val readPortSrc = Seq(aluInstIdxs(i), bruInstIdx, mulInstIdx, muldivInstIdx)
     val wantReadPort = readPortSrc.map(a => !a(2))
     val readIdxVec = Wire(Vec(4, UInt(2.W)))
@@ -83,6 +86,7 @@ class Dispatch2 extends XSModule {
       readIdxVec(j) := readPortSrc(j)(1, 0)
     }
     val deqChoice = PriorityEncoder(wantReadPort)
+    XSDebug("%d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), deqChoice)
     val target = readIdxVec(deqChoice)
     io.readIntRf(2 * i).addr := io.fromIntDq(target).bits.psrc1
     io.readIntRf(2 * i + 1).addr := io.fromIntDq(target).bits.psrc2
@@ -93,6 +97,7 @@ class Dispatch2 extends XSModule {
       }
     }
   }
+  XSDebug("intExuIndex: %d %d %d\n", intExuIndex(0), intExuIndex(1), intExuIndex(2))
 
   // FMAC, FMISC can use the 12 read ports
   // priority: FMAC > FMISC
