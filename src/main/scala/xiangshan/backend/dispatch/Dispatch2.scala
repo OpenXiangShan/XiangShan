@@ -127,7 +127,7 @@ class Dispatch2 extends XSModule {
   io.readFpRf(3*FpDqDeqWidth + 1).addr := io.fromLsDq(store1InstIdx).bits.psrc1
 
   // insert into reservation station
-  val instIdxes = Seq(bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2), aluInstIdxs(3),
+  val instIdxes = Seq(bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2), aluInstIdxs(3), mulInstIdx, muldivInstIdx,
     /*load0InstIdx, */store0InstIdx)
   io.enqIQCtrl.zipWithIndex map { case (enq, i) =>
     if (i < exuConfig.IntExuCnt) {

@@ -50,8 +50,8 @@ trait HasXSParameter {
   val exuConfig = ExuConfig(
     AluCnt = 4,
     BruCnt = 1,
-    MulCnt = 0,
-    MduCnt = 0,
+    MulCnt = 1,
+    MduCnt = 1,
     FmacCnt = 0,
     FmiscCnt = 0,
     FmiscDivSqrtCnt = 0,
