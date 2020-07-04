@@ -2,6 +2,7 @@ package xiangshan.backend.regfile
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 
 class RfReadPort extends XSBundle {
@@ -38,4 +39,9 @@ class Regfile
       mem(w.addr) := w.data
     }
   }
+  val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+  BoringUtils.addSink(debugArchRat, if(hasZero) "DEBUG_INI_ARCH_RAT" else "DEBUG_FP_ARCH_RAT")
+
+  val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(x => if(hasZero && x._2==0) 0.U else mem(x._1))))
+  BoringUtils.addSource(debugArchReg, if(hasZero) "DEBUG_INT_ARCH_REG" else "DEBUG_FP_ARCH_REG")
 }

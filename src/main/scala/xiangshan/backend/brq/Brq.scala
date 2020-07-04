@@ -6,6 +6,57 @@ import xiangshan._
 import xiangshan.utils.XSInfo
 
 
+class BrqPtr extends XSBundle {
+
+  val flag = Bool()
+  val value = UInt(BrTagWidth.W)
+
+  final def + (inc: Bool): BrqPtr = {
+    Mux(inc && (value === (BrqSize-1).U),
+      BrqPtr(!flag, 0.U),
+      BrqPtr(flag, value + inc)
+    )
+  }
+
+  final def === (that: BrqPtr): Bool = {
+    (this.value===that.value) && (this.flag===that.flag)
+  }
+
+  // this.age <= that.age
+  final def <= (that: BrqPtr): Bool = {
+    Mux(this.flag === that.flag,
+      this.value > that.value,
+      this.value < that.value
+    )
+  }
+
+  def needBrFlush(redirectTag: BrqPtr): Bool = this <= redirectTag
+
+  def needFlush(redirect: Valid[Redirect]): Bool = {
+    val redirectTag = redirect.bits.brTag
+//    assert(!(
+//      redirect.valid &&
+//        !redirect.bits.isException &&
+//        (flag=/=redirectTag.flag) &&
+//        (this.value===redirectTag.value)
+//      )
+//    )
+    redirect.valid && (redirect.bits.isException || needBrFlush(redirect.bits.brTag))
+  }
+
+  override def toPrintable: Printable = p"f:$flag v:$value"
+
+}
+
+object BrqPtr {
+  def apply(f: Bool, v: UInt): BrqPtr = {
+    val ptr = Wire(new BrqPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
+
 
 class Brq extends XSModule {
   val io = IO(new Bundle() {
@@ -16,8 +67,7 @@ class Brq extends XSModule {
     // from decode, branch insts enq
     val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to decode
-    val brTags = Output(Vec(DecodeWidth, UInt(BrTagWidth.W)))
-    val brMasks = Output(Vec(DecodeWidth, UInt(BrqSize.W)))
+    val brTags = Output(Vec(DecodeWidth, new BrqPtr))
     // to roq
     val out = ValidIO(new ExuOutput)
     // misprediction, flush pipeline
@@ -30,22 +80,19 @@ class Brq extends XSModule {
   }
 
   val brQueue = Reg(Vec(BrqSize, new BrqEntry))
-  val brMask = RegInit(0.U(BrqSize.W))
   val wbFlags = RegInit(VecInit(Seq.fill(BrqSize)(false.B)))
 
-  val headPtr, tailPtr = RegInit(0.U((BrTagWidth+1).W))
+  val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
 
-  def ptrToIndex(ptr: UInt): UInt = ptr.tail(1)
-  def isEmpty(ptr1: UInt, ptr2: UInt): Bool = ptr1 === ptr2
-  def isFull(ptr1: UInt, ptr2: UInt): Bool = (ptr1.head(1)=/=ptr2.head(1)) && (ptr1.tail(1)===ptr2.tail(1))
+  def isEmpty(ptr1: BrqPtr, ptr2: BrqPtr): Bool = ptr1 === ptr2
+  def isFull(ptr1: BrqPtr, ptr2: BrqPtr): Bool = (ptr1.flag=/=ptr2.flag) && (ptr1.value===ptr2.value)
 
 
   // dequeue
-  val headIdx = ptrToIndex(headPtr)
+  val headIdx = headPtr.value
   val deqValid = wbFlags(headIdx)
   val deqEntry = brQueue(headIdx)
 
-  val deqMask = (~Mux(deqValid, UIntToOH(headIdx), 0.U)).asUInt()
   val headPtrNext = WireInit(headPtr + deqValid)
   when(deqValid){
     wbFlags(headIdx) := false.B
@@ -59,35 +106,29 @@ class Brq extends XSModule {
   // branch insts enq
   var full = WireInit(isFull(headPtrNext, tailPtr))
   var tailPtrNext = WireInit(tailPtr)
-  var brMaskNext = WireInit(brMask & deqMask)
-  for(((enq, brMask), brTag) <- io.enqReqs.zip(io.brMasks).zip(io.brTags)){
-    val tailIdx = ptrToIndex(tailPtrNext)
+  for((enq, brTag) <- io.enqReqs.zip(io.brTags)){
     enq.ready := !full
-    brTag := tailIdx
+    brTag := tailPtrNext
     // TODO: check rvc and use predict npc
-    when(enq.fire()){ brQueue(tailIdx).npc := enq.bits.cf.pc + 4.U }
-    brMaskNext = brMaskNext | Mux(enq.fire(), UIntToOH(tailIdx), 0.U)
-    brMask := brMaskNext
+    when(enq.fire()){ brQueue(tailPtrNext.value).npc := enq.bits.cf.pc + 4.U }
     tailPtrNext = tailPtrNext + enq.fire()
     full = isFull(tailPtrNext, headPtrNext)
   }
-  brMask := brMaskNext
   tailPtr := tailPtrNext
 
   // exu write back
   for(exuWb <- io.exuRedirect){
     when(exuWb.valid){
-      wbFlags(exuWb.bits.uop.brTag) := true.B
-      brQueue(exuWb.bits.uop.brTag).exuOut := exuWb.bits
+      wbFlags(exuWb.bits.uop.brTag.value) := true.B
+      brQueue(exuWb.bits.uop.brTag.value).exuOut := exuWb.bits
     }
   }
 
   // when redirect, reset all regs
   when(io.roqRedirect.valid || io.redirect.valid){
-    brMask := 0.U
     wbFlags.foreach(_ := false.B)
-    headPtr := 0.U
-    tailPtr := 0.U
+    headPtr := BrqPtr(false.B, 0.U)
+    tailPtr := BrqPtr(false.B, 0.U)
   }
 
 
@@ -102,10 +143,10 @@ class Brq extends XSModule {
     XSInfo(
       debug_normal_mode,
       p"enq v:${io.enqReqs(i).valid} rdy:${io.enqReqs(i).ready} pc:${Hexadecimal(io.enqReqs(i).bits.cf.pc)}" +
-        p" brMask:${Binary(io.brMasks(i))} brTag:${io.brTags(i)}\n"
+        p" brTag:${io.brTags(i)}\n"
     )
   }
 
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
-  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
+  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)} flptr:${io.redirect.bits.freelistAllocPtr}\n")
 }
