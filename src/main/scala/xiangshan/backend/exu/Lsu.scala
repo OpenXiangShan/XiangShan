@@ -10,6 +10,7 @@ import xiangshan.backend.regfile.RfWritePort
 import utils._
 import bus.simplebus._
 import noop.AddressSpace
+import xiangshan.backend.brq.BrqPtr
 
 object LSUOpType {
   def lb   = "b000000".U
@@ -51,7 +52,7 @@ class StoreQueueEntry extends XSBundle{
   val wdata = UInt(XLEN.W)
   val func  = UInt(6.W)
   val pc  = UInt(VAddrBits.W) //for debug
-  val brMask = UInt(BrqSize.W) //FIXIT
+  val brTag = new BrqPtr //FIXIT
 }
 
 // Multi-cycle LSU ported from NOOP
@@ -173,6 +174,7 @@ class Lsu extends Exu(
     stqData(emptySlot).src3 := src3In
     stqData(emptySlot).pc := io.in.bits.uop.cf.pc
     stqData(emptySlot).func := funcIn
+    stqData(emptySlot).brTag := io.in.bits.uop.brTag
     stqValid(emptySlot) := true.B
   }
 
@@ -219,7 +221,7 @@ class Lsu extends Exu(
   val expRedirect = io.redirect.valid && io.redirect.bits.isException
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
   for(i <- 0 until 8){
-    when(expRedirect || brRedirect && (UIntToOH(io.redirect.bits.brTag) & stqData(i).brMask(i)).orR && stqValid(i)){
+    when(expRedirect || brRedirect && stqData(i).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(i)){
       stqValid(i) := false.B
     }
     XSDebug("sptrtable: id %d ptr %d valid  %d\n", i.U, stqPtr(i), stqValid(stqPtr(i)))
