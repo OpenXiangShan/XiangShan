@@ -69,11 +69,13 @@ class BPUStage2 extends XSModule {
     val out = Decoupled(new Stage2To3IO)
   })
 
-  // TODO: delete this!!!
-  io.in.ready := false.B
-  io.out.valid := false.B
-  io.out.bits := DontCare
+  // flush Stage2 when Stage3 or banckend redirects
+  val flushS2 = BoolStopWatch(io.flush, io.in.valid, startHighPriority = true)
+  io.out.valid := !flushS2 && RegNext(io.in.valid)
+  io.in.ready := !io.out.valid || io.out.fire()
 
+  // do nothing
+  io.out.bits := RegEnable(io.in.bits, io.in.valid)
 }
 
 class BPUStage3 extends XSModule {
@@ -89,10 +91,20 @@ class BPUStage3 extends XSModule {
   })
 
   // TODO: delete this!!!
-  io.in.ready := false.B
-  io.out.valid := false.B
+  // io.in.ready := false.B
+  // io.out.valid := false.B
   io.out.bits := DontCare
   io.flushBPU := false.B
+
+  val flushS3 = BoolStopWatch(io.flush, io.in.valid, startHighPriority = true)
+  val inLatch = RegInit(0.U.asTypeOf(io.in.bits))
+  val validLatch = RegInit(false.B)
+  when (io.in.fire()) { inLatch := io.in.bits }
+  when (io.in.fire()) {
+    validLatch := !io.in.flush
+  }
+  io.out.valid := validLatch && io.predecode.valid && !flushS3
+  io.in.ready := !validLatch || io.out.valid
 
 }
 
