@@ -90,9 +90,9 @@ class Ibuffer extends XSModule {
           io.out(i).valid := false.B
         }
       }.otherwise {
-        io.out(i).bits.instr := 0.U
-        io.out(i).bits.pc := 0.U
-        io.out(i).bits.pnpc := 0.U
+        io.out(i).bits.instr := Cat(ibuf(head_ptr + (i<<1).U + 1.U), ibuf(head_ptr + (i<<1).U))
+        io.out(i).bits.pc := ibuf_pc(head_ptr + (i<<1).U)
+        io.out(i).bits.pnpc := ibuf_pnpc(head_ptr + (i<<1).U)
         io.out(i).bits.isRVC := false.B
         io.out(i).valid := false.B
       }
@@ -134,16 +134,16 @@ class Ibuffer extends XSModule {
   }
 
   //Debug Info
-//  XSDebug(enqValid, "Enque:\n")
-//  for(i <- 0 until FetchWidth) {
-//    XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
-//  }
+  XSDebug(enqValid, "Enque:\n")
+  for(i <- 0 until FetchWidth) {
+    XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
+  }
 
   XSInfo(io.flush, "Flush signal received, clear buffer\n")
   XSDebug(deqValid, "Deque:\n")
   for(i <- 0 until DecodeWidth) {
-    XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}\n")
+    XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
   }
-//  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
 //  XSInfo(full, "Queue is full\n")
 }

@@ -57,8 +57,7 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   val (iovalid, src1, src2, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, 
     io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 
-  val redirectHit = (io.redirect.valid && 
-    ((UIntToOH(io.redirect.bits.brTag) & uop.brMask).orR || io.redirect.bits.isException))
+  val redirectHit = uop.brTag.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
   val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !ALUOpType.isJump(func)
@@ -114,10 +113,20 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(isJump, pcLatchSlot, aluRes)
   
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x, brMask:%x\n",
-    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag, uop.brMask)
+  XSDebug(io.in.valid,
+    "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:f:%d v:%d\n",
+    io.in.valid,
+    io.in.ready,
+    io.out.valid,
+    io.out.ready,
+    io.redirect.valid,
+    io.redirect.bits.isException,
+    redirectHit,
+    io.redirect.bits.brTag.flag,
+    io.redirect.bits.brTag.value
+  )
   XSDebug(io.in.valid, "src1:%x src2:%x offset:%x func:%b pc:%x\n",
     src1, src2, offset, func, pc)
-  XSDebug(io.in.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d\n",
-     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken)
+  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d flptr:%x\n",
+     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken, io.out.bits.uop.freelistAllocPtr.value)
 }

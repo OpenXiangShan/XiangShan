@@ -29,7 +29,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
-  val archRF = RegInit(VecInit(List.fill(64)(0.U(32.W))))//for debug, fp regs included
 
   val ringBufferHeadExtended = RegInit(0.U(RoqIdxWidth.W))
   val ringBufferTailExtended = RegInit(0.U(RoqIdxWidth.W))
@@ -104,9 +103,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
         val canCommit = if(i!=0) io.commits(i-1).valid else true.B
         io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
         io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-        when(io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U){ 
-          archRF(microOp(ringBufferTail+i.U).ctrl.ldest) := exuData(ringBufferTail+i.U) 
-        } // for difftest
         when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
         XSInfo(io.commits(i).valid,
           "retired pc %x wen %d ldst %d data %x\n",
@@ -136,18 +132,17 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       }
 
       is(s_extrawalk){
-        io.commits(i).valid := needExtraSpaceForMPR(RenameWidth-i-1)
+        io.commits(i).valid := usedSpaceForMPR(RenameWidth-i-1)
         io.commits(i).bits.uop := extraSpaceForMPR(RenameWidth-i-1)
         state := s_walk
-        XSInfo(io.commits(i).valid && shouldWalkVec(i), "use extra space walked pc %x wen %d ldst %d data %x\n", 
-          microOp(ringBufferWalk-i.U).cf.pc, 
-          microOp(ringBufferWalk-i.U).ctrl.rfWen, 
-          microOp(ringBufferWalk-i.U).ctrl.ldest, 
-          exuData(ringBufferWalk-i.U)
+        XSInfo(io.commits(i).valid, "use extra space walked pc %x wen %d ldst %d\n", 
+          extraSpaceForMPR((RenameWidth-i-1).U).cf.pc, 
+          extraSpaceForMPR((RenameWidth-i-1).U).ctrl.rfWen, 
+          extraSpaceForMPR((RenameWidth-i-1).U).ctrl.ldest
         )
       }
     }
-    io.commits(i).bits.isWalk := state === s_walk
+    io.commits(i).bits.isWalk := state =/= s_idle
   }
 
   val validCommit = VecInit((0 until CommitWidth).map(i => io.commits(i).valid)).asUInt
@@ -182,12 +177,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
 
   // no enough space for walk, allocate extra space
-  when(io.brqRedirect.valid){
-    when(needExtraSpaceForMPR.asUInt.orR){
-      usedSpaceForMPR := needExtraSpaceForMPR
-      (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
-      state := s_extrawalk
-    }
+  when(needExtraSpaceForMPR.asUInt.orR && io.brqRedirect.valid){
+    usedSpaceForMPR := needExtraSpaceForMPR
+    (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
+    state := s_extrawalk
+    XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
   }
 
   // roq redirect only used for exception
@@ -235,7 +229,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
-    BoringUtils.addSource(archRF, "difftestRegs")//arch RegFile
     BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
     BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
     BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")

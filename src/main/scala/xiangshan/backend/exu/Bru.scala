@@ -16,8 +16,7 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
 
   val (iovalid, src1, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 
-  val redirectHit = (io.redirect.valid &&
-    ((UIntToOH(io.redirect.bits.brTag) & uop.brMask).orR || io.redirect.bits.isException))
+  val redirectHit = uop.brTag.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
   val isCSR = BRUOpType.isCSR(func)
@@ -63,8 +62,8 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   io.out.bits.data := res
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x, brMask:%x\n",
-    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag, uop.brMask)
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+    io.in.valid, io.in.ready, io.out.valid, io.out.ready, io.redirect.valid, io.redirect.bits.isException, redirectHit, io.redirect.bits.brTag.value)
   XSDebug(io.in.valid && isCSR, "src1:%x offset:%x func:%b type:CSR pc:%x\n", src1, offset, func, pc)
   XSDebug(io.in.valid && isFMV, "src1:%x offset:%x func:%b type:FMV pc:%x\n", src1, offset, func, pc)
   XSDebug(io.in.valid && isMOU, "src1:%x offset:%x func:%b type:MOU pc:%x\n", src1, offset, func, pc)

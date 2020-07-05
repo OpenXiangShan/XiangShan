@@ -10,6 +10,7 @@ import xiangshan.backend.regfile.RfWritePort
 import utils._
 import bus.simplebus._
 import noop.AddressSpace
+import xiangshan.backend.brq.BrqPtr
 
 object LSUOpType {
   def lb   = "b000000".U
@@ -51,7 +52,7 @@ class StoreQueueEntry extends XSBundle{
   val wdata = UInt(XLEN.W)
   val func  = UInt(6.W)
   val pc  = UInt(VAddrBits.W) //for debug
-  val brMask = UInt(BrqSize.W) //FIXIT
+  val brTag = new BrqPtr //FIXIT
 }
 
 // Multi-cycle LSU ported from NOOP
@@ -131,7 +132,7 @@ class Lsu extends Exu(
     addr, size, genWdata(wdata, size), genWmask(addr, size), Mux(isStore, SimpleBusCmd.write, SimpleBusCmd.read)
   )
 
-  val rdata = dmem.resp.bits.rdata
+  val rdata = Wire(UInt(XLEN.W))
   val rdataLatch = RegNext(rdata)
   val rdataSel = LookupTree(addrLatch(2, 0), List(
     "b000".U -> rdataLatch(63, 0),
@@ -170,9 +171,10 @@ class Lsu extends Exu(
     stqData(emptySlot).src1 := src1In
     stqData(emptySlot).src2 := src2In
     stqData(emptySlot).addr := src1In + src2In
-    stqData(emptySlot).src3 := src3In
+    stqData(emptySlot).src3 := genWdata(src3In, funcIn(1, 0))
     stqData(emptySlot).pc := io.in.bits.uop.cf.pc
     stqData(emptySlot).func := funcIn
+    stqData(emptySlot).brTag := io.in.bits.uop.brTag
     stqValid(emptySlot) := true.B
   }
 
@@ -195,10 +197,9 @@ class Lsu extends Exu(
 
   // Store addr forward match
   // If match, get data from store queue
-  val loadResult = Mux(partialLoad, rdataPartialLoad, rdata)
   val dataBackVec = Wire(Vec(XLEN/8, (UInt((XLEN/8).W))))
   for(j <- (0 to (XLEN/8 - 1))){
-    dataBackVec(j) := loadResult(8*(j+1)-1, 8*j)
+    dataBackVec(j) := dmem.resp.bits.rdata(8*(j+1)-1, 8*j)
   }
   
   for(i <- 0 until 8){
@@ -207,6 +208,7 @@ class Lsu extends Exu(
         for(j <- (0 to (XLEN/8 - 1))){
           when(genWmask(stqData(stqPtr(i)).addr, stqData(stqPtr(i)).func(1, 0))(j)){
             dataBackVec(j) := stqData(stqPtr(i)).src3(8*(j+1)-1, 8*j)
+            XSDebug("forwarding data from stq, addr %x stqpos %d bitpos %d data %x\n", addr, i.U, j.U, stqData(stqPtr(i)).src3(8*(j+1)-1, 8*j))
           }
         }
       }
@@ -215,11 +217,12 @@ class Lsu extends Exu(
       )
     }
   }
+  rdata := dataBackVec.asUInt
 
   val expRedirect = io.redirect.valid && io.redirect.bits.isException
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
   for(i <- 0 until 8){
-    when(expRedirect || brRedirect && (UIntToOH(io.redirect.bits.brTag) & stqData(i).brMask(i)).orR && stqValid(i)){
+    when(expRedirect || brRedirect && stqData(i).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(i)){
       stqValid(i) := false.B
     }
     XSDebug("sptrtable: id %d ptr %d valid  %d\n", i.U, stqPtr(i), stqValid(stqPtr(i)))
@@ -233,7 +236,7 @@ class Lsu extends Exu(
 
   io.out.valid := (!isStoreIn && !retiringStore && Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)) || stqEnqueue) && io.in.valid
   io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := dataBackVec.asUInt
+  io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
   // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
   io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) //for debug
   io.out.bits.redirect := DontCare
@@ -250,7 +253,7 @@ class Lsu extends Exu(
       dmem.resp.fire(),
       stqEnqueue,
       state,
-      loadResult,
+      dmem.resp.bits.rdata,
       io.out.bits.data
     )
   }

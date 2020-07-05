@@ -3,6 +3,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import bus.simplebus._
+import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
@@ -58,8 +59,7 @@ class CtrlSignals extends XSBundle {
 class CfCtrl extends XSBundle {
   val cf = new CtrlFlow
   val ctrl = new CtrlSignals
-  val brMask = UInt(BrqSize.W)
-  val brTag = UInt(BrTagWidth.W)
+  val brTag = new BrqPtr
 }
 
 // CfCtrl -> MicroOp at Rename Stage
@@ -75,7 +75,7 @@ class Redirect extends XSBundle {
   val pc = UInt(VAddrBits.W) // wrongly predicted pc
   val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
-  val brTag = UInt(BrTagWidth.W)
+  val brTag = new BrqPtr
   val _type = UInt(2.W)
   val isCall = Bool()
   val taken = Bool()
