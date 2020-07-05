@@ -33,7 +33,7 @@ class Stage1To2IO extends XSBundle {
     val hits = Output(UInt(FetchWidth.W))
     val takens = Output(Vec(FetchWidth, Bool()))
   }
-  val hist = Output(UInt(HistoryLength.W))
+  val hist = Output(Vec(FetchWidth, UInt(HistoryLength.W)))
 }
 
 class BPUStage1 extends XSModule {

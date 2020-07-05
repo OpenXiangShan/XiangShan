@@ -19,7 +19,7 @@ class BranchPrediction extends XSBundle {
   // target and BTBtype of the first redirect instr in a fetch package
   val target = UInt(VAddrBits.W)
   val _type = UInt(2.W)
-  val hist = UInt(HistoryLength.W)
+  val hist = Vec(FetchWidth, UInt(HistoryLength.W))
 }
 
 // Save predecode info in icache
