@@ -128,8 +128,9 @@ class Brq extends XSModule {
   // when redirect, reset all regs
   when(io.roqRedirect.valid || io.redirect.valid){
     wbFlags.foreach(_ := false.B)
-    headPtr := BrqPtr(false.B, 0.U)
-    tailPtr := BrqPtr(false.B, 0.U)
+    val resetPtr  = io.redirect.bits.brTag + true.B
+    headPtr := resetPtr
+    tailPtr := resetPtr
   }
 
 
