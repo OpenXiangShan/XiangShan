@@ -137,7 +137,7 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
     wb_pointer = (wb_pointer+1) % DEBUG_WB_TRACE_SIZE;
     if(selectBit(skip, i)){
       // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-      printf("SKIP %d\n", i);
+      // printf("SKIP %d\n", i);
       // to skip the checking of an instruction, just copy the reg state to reference design
       ref_difftest_getregs(&ref_r);
       ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
