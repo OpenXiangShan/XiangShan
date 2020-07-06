@@ -93,6 +93,12 @@ package object backend {
   }
 
   object MDUOpType {
+    def mul    = "b0000".U
+    def mulh   = "b0001".U
+    def mulhsu = "b0010".U
+    def mulhu  = "b0011".U
+    def mulw   = "b1000".U
+
     def div    = "b0100".U
     def divu   = "b0101".U
     def rem    = "b0110".U
