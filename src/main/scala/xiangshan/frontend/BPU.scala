@@ -51,6 +51,8 @@ class BPUStage1 extends XSModule {
     val out = Decoupled(new Stage1To2IO)
   })
 
+  // flush Stage1 when io.flush || io.redirect.valid
+
   // TODO: delete this!!!
   io.in.pc.ready := true.B
   io.btbOut.valid := false.B
@@ -191,10 +193,12 @@ class BPU extends XSModule {
   val s3 = Module(new BPUStage3)
 
   s1.io.redirect <> io.redirect
-  s1.io.flush := s3.io.flushBPU || io.redirect.valid
+  // flush Stage1 when s1.io.flush || s1.io.redirect.valid
+  s1.io.flush := s3.io.flushBPU// || io.redirect.valid
   s1.io.in.pc.valid := io.in.pc.valid
   s1.io.in.pc.bits <> io.in.pc.bits
   io.btbOut <> s1.io.btbOut
+  s1.io.s3RollBackHist := s3.io.s1RollBackHist
 
   s1.io.out <> s2.io.in
   s2.io.flush := s3.io.flushBPU || io.redirect.valid
