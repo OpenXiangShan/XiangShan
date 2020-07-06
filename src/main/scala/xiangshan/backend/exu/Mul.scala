@@ -2,7 +2,6 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils.{LookupTree, SignExt, ZeroExt, _}
 import xiangshan.backend.{MDUOpType, MULOpType}
@@ -14,11 +13,6 @@ class Mul extends Exu(FuType.mul.litValue()){
     (io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType)
 
   val mul = Module(new ArrayMultiplier(XLEN+1))
-
-  val disp_begin = WireInit(0.S(64.W).asUInt())
-  val disp_end = WireInit(1111.S(64.W).asUInt())
-  BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
-  BoringUtils.addSource(disp_end, "DISPLAY_LOG_END")
 
   val signext = SignExt(_: UInt, XLEN+1)
   val zeroext = ZeroExt(_: UInt, XLEN+1)
