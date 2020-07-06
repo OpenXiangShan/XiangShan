@@ -91,7 +91,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val deqFire = io.deq.fire()
   val popOne = Wire(Bool())
   io.enqCtrl.ready := !full || popOne
-  val enqSelIq = idQue(tail) // Note: direct by IQue's idx, different from deqSel
+  val enqSelIq = Wire(UInt(iqIdxWidth.W))
   val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.src1State), true.B, io.enqCtrl.bits.src1State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src2State), true.B, io.enqCtrl.bits.src2State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src3State), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
 
   // state enq
@@ -219,6 +219,15 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
 
   io.deq.valid := issueToExuValid && !deqFlushHit
   io.deq.bits := issueToExu
+
+
+  enqSelIq := Mux(full,
+    Mux(isPop,
+      idQue(popSel),
+      deqSelIq
+    ),
+    idQue(tail)
+  ) // Note: direct by IQue's idx, different from deqSel
 
   //-----------------------------------------
   // Wakeup and Bypass

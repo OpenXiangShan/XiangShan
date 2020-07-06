@@ -78,48 +78,55 @@ class Dispatch2 extends XSModule {
   // BRU, MUL0, MUL1 can use the 8 read ports
   // priority: ALU > BRU > MUL
   val intExuIndex = WireInit(VecInit(Seq.fill(3)(0.U(2.W))))
-  for (i <- (0 until 4).reverse) {
+  val intDeqChoice = Wire(Vec(4, UInt(2.W)))
+  for (i <- 0 until 4) {
     val readPortSrc = Seq(aluInstIdxs(i), bruInstIdx, mulInstIdx, muldivInstIdx)
-    val wantReadPort = readPortSrc.map(a => !a(2))
+    val wantReadPort = (0 until 4).map(j => (
+      if (i == 0) !readPortSrc(j)(2)
+      else !readPortSrc(j)(2) && (j.U > intDeqChoice(i-1) || j.U === 0.U)))
     val readIdxVec = Wire(Vec(4, UInt(2.W)))
     for (j <- 0 until 4) {
       readIdxVec(j) := readPortSrc(j)(1, 0)
     }
-    val deqChoice = PriorityEncoder(wantReadPort)
-    XSDebug("%d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), deqChoice)
-    val target = readIdxVec(deqChoice)
+    intDeqChoice(i) := PriorityEncoder(wantReadPort)
+    XSDebug("int %d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), intDeqChoice(i))
+    val target = readIdxVec(intDeqChoice(i)(1, 0))
     io.readIntRf(2 * i).addr := io.fromIntDq(target).bits.psrc1
     io.readIntRf(2 * i + 1).addr := io.fromIntDq(target).bits.psrc2
-    // intExuIndex: which regfile read ports are assigned to BRU, MUL, MULDIV
-    for (j <- 0 until 3) {
-      when (deqChoice === (j + 1).U) {
-        intExuIndex(j) := i.U
-      }
-    }
+  }
+  // intExuIndex: which regfile read ports are assigned to BRU, MUL, MULDIV
+  for (j <- 0 until 3) {
+    intExuIndex(j) := PriorityEncoder((0 until 4).map(i => intDeqChoice(i) === (j + 1).U))
   }
   XSDebug("intExuIndex: %d %d %d\n", intExuIndex(0), intExuIndex(1), intExuIndex(2))
 
   // FMAC, FMISC can use the 12 read ports
   // priority: FMAC > FMISC
   val fpExuIndex = WireInit(VecInit(Seq.fill(2)(0.U(2.W))))
+  val fpDeqChoice = Wire(Vec(4, UInt(2.W)))
+  fpDeqChoice := DontCare
   for (i <- 0 until exuConfig.FmacCnt) {
     val readPortSrc = Seq(fmacInstIdxs(i), fmisc0InstIdx, fmisc1InstIdx)
-    val wantReadPort = readPortSrc.map(a => !a(2))
+    val wantReadPort = (0 until 3).map(j => (
+      if (i == 0) !readPortSrc(j)(2)
+      else !readPortSrc(j)(2) && (j.U > fpDeqChoice(i-1) || j.U === 0.U)))
     val readIdxVec = Wire(Vec(3, UInt(2.W)))
     for (j <- 0 until 3) {
       readIdxVec(j) := readPortSrc(j)(1, 0)
     }
-    val deqChoice = PriorityEncoder(wantReadPort)
-    val target = readIdxVec(deqChoice)
+    fpDeqChoice(i) := PriorityEncoder(wantReadPort)
+    XSDebug("fp %d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), fpDeqChoice(i))
+    val target = readIdxVec(fpDeqChoice(i))
     io.readFpRf(3 * i).addr := io.fromFpDq(target).bits.psrc1
     io.readFpRf(3 * i + 1).addr := io.fromFpDq(target).bits.psrc2
     io.readFpRf(3 * i + 2).addr := io.fromFpDq(target).bits.psrc3
-    for (j <- 0 until 2) {
-      when (deqChoice === (j + 1).U) {
-        fpExuIndex(j) := i.U
-      }
-    }
   }
+  // fpExuIndex: which regfile read ports are assigned to FMISC0 FMISC1
+  for (j <- 0 until (exuConfig.FmiscCnt + exuConfig.FmiscDivSqrtCnt)) {
+    fpExuIndex(j) := PriorityEncoder((0 until 4).map(i => fpDeqChoice(i) === (j + 1).U))
+  }
+  XSDebug("fpExuIndex: %d %d\n", fpExuIndex(0), fpExuIndex(1))
+
   // TODO uncomment me when fmac > 0
   io.readFpRf <> DontCare
   io.readIntRf(2*IntDqDeqWidth).addr := io.fromLsDq(load0InstIdx).bits.psrc1
