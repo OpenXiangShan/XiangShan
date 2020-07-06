@@ -33,6 +33,7 @@ trait HasXSParameter {
   val BtbSets = BtbSize / BtbWays
   val JbtacSize = 1024
   val JbtacBanks = 8
+  val RasSize = 16
   val IBufSize = 64
   val DecodeWidth = 6
   val RenameWidth = 6

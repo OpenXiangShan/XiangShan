@@ -34,6 +34,7 @@ class Stage1To2IO extends XSBundle {
     val takens = Output(Vec(FetchWidth, Bool()))
   }
   val hist = Output(Vec(FetchWidth, UInt(HistoryLength.W)))
+  val btbPred = ValidIO(new BranchPrediction)
 }
 
 class BPUStage1 extends XSModule {
@@ -43,6 +44,7 @@ class BPUStage1 extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     // from Stage3
     val flush = Input(Bool())
+    val s3RollBackHist = Input(UInt(HistoryLength.W))
     // to ifu, quick prediction result
     val btbOut = ValidIO(new BranchPrediction)
     // to Stage2
@@ -70,7 +72,7 @@ class BPUStage2 extends XSModule {
   })
 
   // flush Stage2 when Stage3 or banckend redirects
-  val flushS2 = BoolStopWatch(io.flush, io.in.valid, startHighPriority = true)
+  val flushS2 = BoolStopWatch(io.flush, io.in.fire(), startHighPriority = true)
   io.out.valid := !flushS2 && RegNext(io.in.valid)
   io.in.ready := !io.out.valid || io.out.fire()
 
@@ -88,24 +90,85 @@ class BPUStage3 extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect)) // only need isCall here
     // to Stage1 and Stage2
     val flushBPU = Output(Bool())
+    // to Stage1, restore ghr in stage1 when flushBPU is valid
+    val s1RollBackHist = Output(UInt(HistoryLength.W))
   })
 
-  // TODO: delete this!!!
-  // io.in.ready := false.B
-  // io.out.valid := false.B
-  io.out.bits := DontCare
-  io.flushBPU := false.B
-
-  val flushS3 = BoolStopWatch(io.flush, io.in.valid, startHighPriority = true)
+  val flushS3 = BoolStopWatch(io.flush, io.in.fire(), startHighPriority = true)
   val inLatch = RegInit(0.U.asTypeOf(io.in.bits))
   val validLatch = RegInit(false.B)
   when (io.in.fire()) { inLatch := io.in.bits }
   when (io.in.fire()) {
     validLatch := !io.in.flush
+  }.elsewhen (validLatch && io.predecode.valid && !flushS3) {
+    validLatch := false.B
   }
-  io.out.valid := validLatch && io.predecode.valid && !flushS3
-  io.in.ready := !validLatch || io.out.valid
+  io.in.ready := !validLatch || validLatch && io.predecode.valid && !flushS3
 
+  // RAS
+  def rasEntry() = new Bundle {
+    val retAddr = UInt(VAddrBits.W)
+    val ctr = UInt(8.W) // layer of nested call functions
+  }
+  val ras = Mem(RasSize, rasEntry())
+  val sp = Counter(RasSize)
+  val rasTop = ras.read(sp.value)
+  val rasTopAddr = rasTop.retAddr
+
+  // get the first taken branch/jal/call/jalr/ret in a fetch line
+  // for example, getLowerMask("b00101100".U, 8) = "b00111111", getLowestBit("b00101100".U, 8) = "b00000100".U
+  def getLowerMask(idx: UInt, len: Int) = (0 until len).map(i => idx >> i.U).reduce(_|_)
+  def getLowestBit(idx: UInt, len: Int) = Mux(idx(0), 1.U(len.W), Reverse(((0 until len).map(i => Reverse(idx(len - 1, 0)) >> i.U).reduce(_|_) + 1.U) >> 1.U))
+
+  val brIdx = inLatch.btb.hits & io.predecode.bits.fuTypes.map { t => ALUOpType.isBranch(t) }.asUInt & io.predecode.bits.mask
+  val brTakenIdx = getLowestBit(brIdx & inLatch.tage.takens.asUInt, FetchWidth)
+  val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & getLowerMask(brTakenIdx, FetchWidth)
+  val jalIdx = getLowestBit(inLatch.btb.hits & io.predecode.bits.fuTypes.map { t => t === ALUOpType.jal }.asUInt & io.predecode.bits.mask, FetchWidth)
+  val callIdx = getLowestBit(inLatch.btb.hits & io.predecode.bits.mask & io.predecode.bits.fuTypes.map { t => t === ALUOpType.call }.asUInt, FetchWidth)
+  val jalrIdx = getLowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & io.predecode.bits.fuTypes.map { t => t === ALUOpType.jalr }.asUInt, FetchWidth)
+  val retIdx = getLowestBit(io.predecode.bits.mask & io.predecode.bits.fuTypes.map { t => t === ALUOpType.ret }.asUInt, FetchWidth)
+
+  val jmpIdx = getLowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth)
+  io.out.bits.target := Mux(jmpIdx === retIdx, rasTopAddr,
+    Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
+    PriorityMux(jmpIdx, inLatch.btb.targets)))
+  io.out.bits.instrValid := getLowerMask(jmpIdx, FetchWidth).asTypeOf(Vec(FetchWidth, Bool()))
+  io.out.bits._type := Mux(jmpIdx === retIdx, BTBtype.R,
+    Mux(jmpIdx === jalrIdx, BTBtype.I,
+    Mux(jmpIdx === brTakenIdx, BTBtype.B, BTBtype.J)))
+  val firstHist = inLatch.btbPred.bits.hist
+  // there may be several notTaken branches before the first jump instruction,
+  // so we need to calculate how many zeroes should each instruction shift in its global history.
+  // each history is exclusive of instruction's own jump direction.
+  val histShift = WireInit(VecInit(FetchWidth, 0.U(log2Up(FetchWidth).W)))
+  histShift := (0 until FetchWidth).map(i => Mux(!brNotTakenIdx(i), 0.U, ~getLowerMask(UIntToOH(i.U), FetchWidth))).reduce(_+_)
+  (0 until FetchWidth).map(i => io.out.bits.hist(i) := firstHist << histShift)
+  // flush BPU and redirect when target differs from the target predicted in Stage1
+  val isTargetDiff = !inLatch.btbPred.valid || io.out.bits.target =/= inLatch.btbPred.bits.target
+  io.out.valid := jmpIdx.orR && validLatch && io.predecode.valid && !flushS3 && isTargetDiff
+  io.flushBPU := io.out.valid
+
+  // update RAS
+  val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
+  rasWrite.retAddr := inLatch.pc + OHToUInt(callIdx) << 2.U + 4.U
+  val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
+  rasWrite.ctr := Mux(allocNewEntry, 1.U, rasTop.ctr + 1.U)
+  when (io.out.valid) {
+    when (jmpIdx === callIdx) {
+      ras.write(Mux(allocNewEntry, sp.value + 1.U, sp.value), rasWrite)
+      when (allocNewEntry) { sp.value := sp.value + 1.U }
+    }.elsewhen (jmpIdx === retIdx) {
+      when (rasTop.ctr === 1.U) {
+        sp.value := Mux(sp.value === 0.U, 0.U, sp.value - 1.U)
+      }.otherwise {
+        ras.write(sp.value, Cat(rasTop.ctr - 1.U, rasTopAddr).asTypeOf(rasEntry()))
+      }
+    }
+  }
+  // TODO: back-up stack for ras
+
+  // roll back global history in S1 if S3 redirects
+  io.s1RollBackHist := PriorityMux(jmpIdx, io.out.bits.hist)
 }
 
 class BPU extends XSModule {
