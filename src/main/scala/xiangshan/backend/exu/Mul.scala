@@ -59,6 +59,8 @@ class Mul extends Exu(FuType.mul.litValue()){
   XSDebug(io.out.valid, "Out(%d %d) res:%x pc:%x\n",
     io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc
   )
+  XSDebug(io.redirect.valid, p"redirect: ${io.redirect.bits.brTag}\n")
+
 }
 
 // A wrapper of Divider
@@ -187,7 +189,7 @@ trait HasPipelineReg { this: ArrayMultiplier =>
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
   val ctrlVec = io.in.bits.ctrl +: Array.fill(latency)(Reg(new MulDivCtrl))
-  val flushVec = ctrlVec.map(_.uop.brTag.needFlush(io.redirect))
+  val flushVec = ctrlVec.zip(validVec).map(x => x._2 && x._1.uop.brTag.needFlush(io.redirect))
 
   for(i <- 0 until latency){
     rdyVec(i) := !validVec(i+1) || rdyVec(i+1)
@@ -242,6 +244,8 @@ class ArrayMultiplier
   val xlen = io.out.bits.data.getWidth
   val res = Mux(ctrlVec.last.isHi, dataVec.last.head(xlen), dataVec.last.tail(xlen))
   io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
+
+  XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")(this.name)
 
 //  printf(p"t=${GTimer()} in: v${io.in.valid} r:${io.in.ready}\n")
 //  printf(p"t=${GTimer()} out: v:${io.out.valid} r:${io.out.ready} vec:${Binary(Cat(validVec))}\n")
