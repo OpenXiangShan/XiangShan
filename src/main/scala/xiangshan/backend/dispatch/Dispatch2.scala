@@ -83,7 +83,10 @@ class Dispatch2 extends XSModule {
     val readPortSrc = Seq(aluInstIdxs(i), bruInstIdx, mulInstIdx, muldivInstIdx)
     val wantReadPort = (0 until 4).map(j => (
       if (i == 0) !readPortSrc(j)(2)
-      else !readPortSrc(j)(2) && (j.U > intDeqChoice(i-1) || j.U === 0.U)))
+      else {
+        val prevMax = (0 until i).map(intDeqChoice(_)).reduce((a, b) => Mux(a > b, a, b))
+        !readPortSrc(j)(2) && (j.U > prevMax || j.U === 0.U)
+      }))
     val readIdxVec = Wire(Vec(4, UInt(2.W)))
     for (j <- 0 until 4) {
       readIdxVec(j) := readPortSrc(j)(1, 0)
@@ -109,7 +112,10 @@ class Dispatch2 extends XSModule {
     val readPortSrc = Seq(fmacInstIdxs(i), fmisc0InstIdx, fmisc1InstIdx)
     val wantReadPort = (0 until 3).map(j => (
       if (i == 0) !readPortSrc(j)(2)
-      else !readPortSrc(j)(2) && (j.U > fpDeqChoice(i-1) || j.U === 0.U)))
+      else {
+        val prevMax = (0 until i).map(fpDeqChoice(_)).reduce((a, b) => Mux(a > b, a, b))
+        !readPortSrc(j)(2) && (j.U > prevMax || j.U === 0.U)
+      }))
     val readIdxVec = Wire(Vec(3, UInt(2.W)))
     for (j <- 0 until 3) {
       readIdxVec(j) := readPortSrc(j)(1, 0)
