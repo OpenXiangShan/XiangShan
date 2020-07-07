@@ -14,17 +14,27 @@ class FetchPacket extends XSBundle {
   val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
 }
 
+// Branch prediction result from BPU Stage1 & 3
 class BranchPrediction extends XSBundle {
+  val redirect = Bool()
+
   // mask off all the instrs after the first redirect instr
   val instrValid = Vec(FetchWidth, Bool())
-  // target and BTBtype of the first redirect instr in a fetch package
+  // target of the first redirect instr in a fetch package
   val target = UInt(VAddrBits.W)
-  val _type = UInt(2.W)
+  // val _type = UInt(2.W)
+
+  // save these info in brq!
+  // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
   val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  // ras checkpoint, only used in Stage3
+  val rasSp = UInt(log2Up(RasSize).W)
+  val rasTopCtr = UInt(8.W)
 }
 
 // Save predecode info in icache
 class Predecode extends XSBundle {
+  val mask = UInt(FetchWidth.W)
   val fuTypes = Vec(FetchWidth, FuType())
   val fuOpTypes = Vec(FetchWidth, FuOpType())
 }
@@ -85,6 +95,15 @@ class Redirect extends XSBundle {
   val freelistAllocPtr = new FreeListPtr
 }
 
+class RedirectInfo extends XSBundle {
+
+  val valid = Bool() // a valid commit form brq/roq
+  val misPred = Bool() // a branch miss prediction ?
+  val redirect = new Redirect
+
+  def flush():Bool = valid && (redirect.isException || misPred)
+}
+
 class Dp1ToDp2IO extends XSBundle {
   val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))
   val fpDqToDp2 = Vec(FpDqDeqWidth, DecoupledIO(new MicroOp))
@@ -127,6 +146,6 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirectInfo = Input(new RedirectInfo)
   val commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit))) // update branch pred
 }

@@ -22,25 +22,17 @@ class BrqPtr extends XSBundle {
     (this.value===that.value) && (this.flag===that.flag)
   }
 
-  // this.age <= that.age
-  final def <= (that: BrqPtr): Bool = {
+  // this.age < that.age
+  final def < (that: BrqPtr): Bool = {
     Mux(this.flag === that.flag,
       this.value > that.value,
       this.value < that.value
     )
   }
 
-  def needBrFlush(redirectTag: BrqPtr): Bool = this <= redirectTag
+  def needBrFlush(redirectTag: BrqPtr): Bool = this < redirectTag
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    val redirectTag = redirect.bits.brTag
-//    assert(!(
-//      redirect.valid &&
-//        !redirect.bits.isException &&
-//        (flag=/=redirectTag.flag) &&
-//        (this.value===redirectTag.value)
-//      )
-//    )
     redirect.valid && (redirect.bits.isException || needBrFlush(redirect.bits.brTag))
   }
 
