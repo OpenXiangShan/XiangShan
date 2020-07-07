@@ -84,13 +84,6 @@ class FakeIFU extends XSModule with HasIFUConst {
   // io.fetchPacket.bits.pnpc := bpu.io.predTargets
   io.fetchPacket.bits.pnpc := DontCare
 
-  Debug(cond=io.fetchPacket.fire()){
-    printf(p"==========FetchGroup==========\nfirst pc:${Hexadecimal(pc)}\n")
-    for(i <- io.fetchPacket.bits.instrs.indices){
-      printf(p"inst$i: ${Hexadecimal(io.fetchPacket.bits.instrs(i))} v:${io.fetchPacket.bits.mask(i)} isRVC:${io.fetchPacket.bits.instrs(i)(1,0)=/="b11".U}\n")
-    }
-  }
-
   XSDebug(p"pc=${Hexadecimal(pc)}\n")
 
 }

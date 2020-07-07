@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils.{LookupTree, SignExt, ZeroExt, _}
-import xiangshan.backend.{MULOpType, MDUOpType}
+import xiangshan.backend.{MDUOpType, MULOpType}
 
 class Mul extends Exu(FuType.mul.litValue()){
   override def toString: String = "Mul"
@@ -59,6 +59,8 @@ class Mul extends Exu(FuType.mul.litValue()){
   XSDebug(io.out.valid, "Out(%d %d) res:%x pc:%x\n",
     io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc
   )
+  XSDebug(io.redirect.valid, p"redirect: ${io.redirect.bits.brTag}\n")
+
 }
 
 // A wrapper of Divider
@@ -187,23 +189,16 @@ trait HasPipelineReg { this: ArrayMultiplier =>
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
   val ctrlVec = io.in.bits.ctrl +: Array.fill(latency)(Reg(new MulDivCtrl))
-  val flushVec = ctrlVec.map(_.uop.brTag.needFlush(io.redirect))
+  val flushVec = ctrlVec.zip(validVec).map(x => x._2 && x._1.uop.brTag.needFlush(io.redirect))
 
   for(i <- 0 until latency){
     rdyVec(i) := !validVec(i+1) || rdyVec(i+1)
   }
 
-  when(io.out.fire()){
-    validVec.last := false.B
-  }
-
   for(i <- 1 to latency){
-    when(flushVec(i)){
+    when(flushVec(i) || rdyVec(i) && !validVec(i-1)){
       validVec(i) := false.B
-    }
-
-    when(rdyVec(i-1) && validVec(i-1) && !flushVec(i-1)){
-      if(i-1 !=0 ) validVec(i-1) := false.B
+    }.elsewhen(rdyVec(i-1) && validVec(i-1) && !flushVec(i-1)){
       validVec(i) := validVec(i-1)
       ctrlVec(i) := ctrlVec(i-1)
     }
@@ -247,8 +242,10 @@ class ArrayMultiplier
   }
 
   val xlen = io.out.bits.data.getWidth
-  val res = Mux(ctrlVec.last.isHi, dataVec.last.head(xlen), dataVec.last.tail(xlen))
+  val res = Mux(ctrlVec.last.isHi, dataVec.last(2*xlen-1, xlen), dataVec.last(xlen-1,0))
   io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
+
+  XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")(this.name)
 
 //  printf(p"t=${GTimer()} in: v${io.in.valid} r:${io.in.ready}\n")
 //  printf(p"t=${GTimer()} out: v:${io.out.valid} r:${io.out.ready} vec:${Binary(Cat(validVec))}\n")

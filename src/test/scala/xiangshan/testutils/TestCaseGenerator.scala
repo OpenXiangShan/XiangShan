@@ -4,10 +4,30 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
 import chiseltest._
+import noop.MDUOpType
 import xiangshan._
 import xiangshan.backend.exu.{ALUOpType, LSUOpType}
 
 object TestCaseGenerator {
+
+
+  /*
+      Generate MUL/DIV Input
+   */
+
+  def genMul(x: => ExuInput, pc: Long): ExuInput = {
+    chiselTypeOf(x).Lit(
+      _.uop.ctrl.fuOpType -> MDUOpType.mulw,
+      _.uop.cf.pc -> pc.U
+    )
+  }
+
+  def genDiv(x: => ExuInput, pc: Long): ExuInput = {
+    chiselTypeOf(x).Lit(
+      _.uop.ctrl.fuOpType -> MDUOpType.div,
+      _.uop.cf.pc -> pc.U
+    )
+  }
 
 
   /*
