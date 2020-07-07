@@ -21,19 +21,10 @@ class IFUIO extends IFUBundle
 {
     val fetchPacket = DecoupledIO(new FetchPacket)
     val redirect = Flipped(ValidIO(new Redirect))
+    val toIcache = DecoupledIO(UInt(VAddrBits.W)
+    val fromIcache = Flipped(ValidIO(new IcacheResp))
 }
 
-class IF1IO extends IFUBundle
-{
-    val pc = UInt(VAddrBits.W)
-}
-
-class IF2IO extends IFUBundle
-{
-    val pc = UInt(VAddrBits.W)
-    val btbOut = new BranchPrediction
-    val taken  = Bool()
-}
 
 
 class IFU(implicit val p: XSConfig) extends IFUModule
