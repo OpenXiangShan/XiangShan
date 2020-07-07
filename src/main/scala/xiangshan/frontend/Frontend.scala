@@ -14,10 +14,13 @@ class Frontend extends XSModule {
   val fakeIFU = Module(new FakeIFU)
   val ibuffer=  Module(new Ibuffer)
 
-  fakeIFU.io.redirect := io.backend.redirect
+  val needFlush = io.backend.redirectInfo.flush()
+
+  fakeIFU.io.redirect.valid := needFlush
+  fakeIFU.io.redirect.bits := io.backend.redirectInfo.redirect
 
   ibuffer.io.in <> fakeIFU.io.fetchPacket
-  ibuffer.io.flush := io.backend.redirect.valid
+  ibuffer.io.flush := needFlush
 
   io.backend.cfVec <> ibuffer.io.out
 
