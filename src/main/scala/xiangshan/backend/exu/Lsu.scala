@@ -234,7 +234,10 @@ class Lsu extends Exu(
 
   io.in.ready := io.out.fire()
 
-  io.out.valid := (!isStoreIn && !retiringStore && Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)) || stqEnqueue) && io.in.valid
+  val validLoad = RegInit(false.B)
+  when(state =/= s_idle && !io.in.valid) { validLoad := false.B }
+  when(state === s_idle && io.in.valid && !retiringStore && dmem.req.fire()) { validLoad := true.B }
+  io.out.valid := (!isStoreIn && !retiringStore && validLoad && Mux(partialLoad, state === s_partialLoad, dmem.resp.fire() && (state === s_wait_resp)) || stqEnqueue) && io.in.valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
   // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
