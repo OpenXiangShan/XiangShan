@@ -20,16 +20,16 @@ class BranchPrediction extends XSBundle {
 
   // mask off all the instrs after the first redirect instr
   val instrValid = Vec(FetchWidth, Bool())
-  // target and BTBtype of the first redirect instr in a fetch package
+  // target of the first redirect instr in a fetch package
   val target = UInt(VAddrBits.W)
-  val _type = UInt(2.W)
+  // val _type = UInt(2.W)
 
   // save these info in brq!
   // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
   val hist = Vec(FetchWidth, UInt(HistoryLength.W))
   // ras checkpoint, only used in Stage3
-  val rasSp = Vec(FetchWidth, UInt(log2Up(RasSize).W))
-  val rasTopCtr = Vec(FetchWidth, UInt(8.W))
+  val rasSp = UInt(log2Up(RasSize).W)
+  val rasTopCtr = UInt(8.W)
 }
 
 // Save predecode info in icache
