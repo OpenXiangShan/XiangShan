@@ -242,7 +242,7 @@ class ArrayMultiplier
   }
 
   val xlen = io.out.bits.data.getWidth
-  val res = Mux(ctrlVec.last.isHi, dataVec.last.head(xlen), dataVec.last.tail(xlen))
+  val res = Mux(ctrlVec.last.isHi, dataVec.last(2*xlen-1, xlen), dataVec.last(xlen-1,0))
   io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
 
   XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")(this.name)
