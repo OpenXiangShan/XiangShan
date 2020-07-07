@@ -90,6 +90,8 @@ class Redirect extends XSBundle {
   val isCall = Bool()
   val taken = Bool()
   val hist = UInt(HistoryLength.W)
+  val rasSp = UInt(log2Up(RasSize).W)
+  val rasTopCtr = UInt(8.W)
   val isException = Bool()
   val roqIdx = UInt(RoqIdxWidth.W)
   val freelistAllocPtr = new FreeListPtr
