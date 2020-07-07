@@ -17,12 +17,14 @@ trait HasIFUConst { this: XSModule =>
 sealed abstract IFUBundle extends XSBundle with HasIFUConst
 sealed abstract IFUModule extends XSModule with HasIFUConst with NeedImpl
 
+
+
 class IFUIO extends IFUBundle
 {
     val fetchPacket = DecoupledIO(new FetchPacket)
     val redirect = Flipped(ValidIO(new Redirect))
-    val toIcache = DecoupledIO(UInt(VAddrBits.W)
-    val fromIcache = Flipped(ValidIO(new IcacheResp))
+    val icacheReq = DecoupledIO(UInt(VAddrBits.W)
+    val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
 
@@ -81,10 +83,10 @@ class IFU(implicit val p: XSConfig) extends IFUModule
 
     //pipe fire
     val if2_fire = if2_valid && if3_ready 
-    val if2_ready = (if2_fire && icache.io.in.fire()) || !if2_valid
+    val if2_ready = (if2_fire && io.icacheReq.fire()) || !if2_valid
 
-    icache.io.in.valid := if2_fire
-    icahce.io.in.bits := if2_pc
+    io.icacheReq.valid := if2_fire
+    io.icacheReq.bits := groupPC(if2_pc)
 
     when(if2_valid && if2_btb_taken)
     {
@@ -124,20 +126,9 @@ class IFU(implicit val p: XSConfig) extends IFUModule
     val if4_btb_target = RegEnable(if3_btb_target,if4_update)
     val if4_btb_taken = RegEnable(if3_btb_taken,if4_update)
 
-    //TAGE
-    val tage_taken = bpu.io.tageOut.valid
-
-    //TODO: icache predecode info
-    val predecode = icache.io.out.bits.predecode
-
-    val icache_isBR = tage_taken
-    val icache_isDirectJmp = icache_isBR && 
-    val icache_isCall = icache_isDirectJmp &&
-    val icache_isReturn = !icache_isDirectJmp &&
-    val icache_isOtherNDJmp = !icache_isDirectJmp && !icache_isReturn
 
 
-    when(if4_valid && icahe.io.out.fire())
+    when(if4_valid && io.icacheResp.fire())
     {
       if1_npc := if4_btb_target
     }
@@ -155,9 +146,15 @@ class IFU(implicit val p: XSConfig) extends IFUModule
     //Output -> iBuffer
     if4_ready := io.fetchPacket.ready
     io.fetchPacket.valid := if4_valid && !if4_flush
-    io.fetchPacket.instrs := io.icache.out.bits.rdata
-    io.fetchPacket.mask := Fill(FetchWidth*2, 1.U(1.W)) << pc(2+log2Up(FetchWidth)-1, 1)
+    io.fetchPacket.instrs := io.icacheResp.bits.icacheOut
+    io.fetchPacket.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
     io.fetchPacket.pc := if4_pc
+
+    //to BPU
+    bpu.io.predecode.valid := if4_valid
+    bpu.io.predecode.bits <> io.icacheResp.bits.predecode
+    bpu.io.predecode.bits.mask := ?
+
 
 
 }
