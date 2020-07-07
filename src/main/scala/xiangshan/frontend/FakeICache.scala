@@ -5,6 +5,8 @@ import chisel3.util._
 import device.RAMHelper
 import xiangshan._
 import utils.{Debug, GTimer, XSDebug}
+import xiangshan.backend.decode.isa
+import package xiangshan.backend.decode
 
 trait HasICacheConst { this: XSModule =>
   // 4-byte align * FetchWidth-inst
@@ -12,11 +14,35 @@ trait HasICacheConst { this: XSModule =>
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
 }
 
+class FakeIcacheResp extends XSBundle {
+  val icacheOut = Vec(FetchWidth, UInt(32.W))
+  val predecode = new Predecode
+}
+
+class TempPreDecoder extends XSModule  {
+  val io = IO(new Bundle() {
+    val in = Input(Vec(FetchWidth,UInt(32.W)))
+    val out = Output(new Predecode)
+  })
+  val tempPreDecoders = Seq.fill(FetchWidth)(Module(new Decoder))
+
+  for (i <- 0 until FetchWidth) {
+    tempPreDecoders(i).io.in <> DontCare
+    tempPreDecoders(i).io.in.instr <> io.in.bits(i)
+    io.out.bits.fuTypes(i) := tempPreDecoders(i).io.out.fuType
+    io.out.bits.fuOpType(i) := tempPreDecoders(i).io.out.fuOpType
+  }
+
+  io.out.mask := DontCare
+  io.in.ready := io.out.ready
+
+}
+
 
 class FakeCache extends XSModule with HasICacheConst {
   val io = IO(new Bundle {
     val in = Fipped(DecoupledIO(UInt(VAddrBits.W))
-    val out = DecoupledIO(Vec(FetchWidth, UInt(32.W)))
+    val out = DecoupledIO(new FakeIcacheResp)
   })
 
   val memByte = 128 * 1024 * 1024
@@ -52,7 +78,11 @@ class FakeCache extends XSModule with HasICacheConst {
   val ramOut_delay1 = RegEnable(ramOut,io.in.valid)
   val ramOut_delay2 = RegEnable(ramOut_delay1,in_valid_delay1)
 
+  val tempPredecode = Module(new TempPreDecoder)
+  tempPredecode.io.in := ramOut_delay2
+
   io.in.ready := true.B
   io.out.valid := in_valid_delay2
-  io.out.bits := ramOut_delay2
+  io.out.bits.icacheOut := ramOut_delay2
+  io.out.bits.predecode := tempPredecode.io.out
 }
