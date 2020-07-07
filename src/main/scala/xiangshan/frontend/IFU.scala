@@ -27,12 +27,27 @@ class IFUIO extends IFUBundle
     val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
+class FakeBPU extends XSModule {
+  val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
+    val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
+    val btbOut = ValidIO(new BranchPrediction)
+    val tageOut = ValidIO(new BranchPrediction)
+    val predecode = Flipped(ValidIO(new Predecode))
+  })
+
+  io.btbOut.valid := false.B
+  io.btbOut.bits <> DontCare
+  io.tageOut.valid := false.B
+  io.tageOut.bits <> DontCare
+}
+
 
 
 class IFU(implicit val p: XSConfig) extends IFUModule
 {
     val io = IO(new IFUIO)
-    val bpu = Module(new BPU)
+    val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
@@ -43,7 +58,7 @@ class IFU(implicit val p: XSConfig) extends IFUModule
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
-    val if1_ready = bpu.io.in.ready &&  if2_ready
+    val if1_ready = if2_ready
 
     //pipe fire
     val if1_fire = if1_valid && if1_ready 
@@ -120,7 +135,7 @@ class IFU(implicit val p: XSConfig) extends IFUModule
     //           taget generate
     //-------------------------
     val if4_flush = WireInit(false.B)
-    val if4_update = if3_fire && !if4_flush
+    val if4_update = if3_fire && !if4_flush 
     val if4_valid = RegNext(if4_update)
     val if4_pc = RegEnable(if3_pc,if4_update)
     val if4_btb_target = RegEnable(if3_btb_target,if4_update)
@@ -144,7 +159,7 @@ class IFU(implicit val p: XSConfig) extends IFUModule
 
 
     //Output -> iBuffer
-    if4_ready := io.fetchPacket.ready
+    if4_ready := io.fetchPacket.ready && io.icacheResp.valid
     io.fetchPacket.valid := if4_valid && !if4_flush
     io.fetchPacket.instrs := io.icacheResp.bits.icacheOut
     io.fetchPacket.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
@@ -153,9 +168,9 @@ class IFU(implicit val p: XSConfig) extends IFUModule
     //to BPU
     bpu.io.predecode.valid := if4_valid
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
-    bpu.io.predecode.bits.mask := ?
+    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 2) //TODO: consider RVC
 
-
+    io.icacheResp.ready := io.fetchPacket.ready 
 
 }
 
