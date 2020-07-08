@@ -90,7 +90,6 @@ class IFU extends XSModule with HasIFUConst
     //           icache visit
     //-------------------------
     //local
-    //val if2_flush = WireInit(false.B)
     val if2_valid = RegEnable(next=if1_valid,init=false.B,enable=if1_fire)
     val if2_pc = if1_pc
     val if2_btb_taken = bpu.io.btbOut.valid
