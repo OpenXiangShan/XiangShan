@@ -49,7 +49,7 @@ class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
     //-------------------------
     //local
     val if1_npc = WireInit(0.U(VAddrBits.W))
-    val if1_valid = WireInit(false.B)
+    val if1_valid = !reset.asBool
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
@@ -62,7 +62,6 @@ class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
     when(RegNext(reset.asBool) && !reset.asBool)
     {
       if1_npc := resetVector.U(VAddrBits.W)
-      if1_valid := true.B
     }
 
     when(if1_pcUpdate)
