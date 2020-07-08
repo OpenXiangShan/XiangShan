@@ -3,6 +3,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import bus.simplebus._
+import xiangshan.frontend.HasTageParameter
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 
@@ -12,6 +13,14 @@ class FetchPacket extends XSBundle {
   val mask = UInt((FetchWidth*2).W)
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
   val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
+}
+
+class TageMeta extends XSBundle {
+  val provider = Valid(UInt(log2Ceil(TageNTables).W))
+  val altDiffers = Bool()
+  val providerU = UInt(2.W)
+  val providerCtr = UInt(3.W)
+  val allocate = Valid(UInt(log2Ceil(TageNTables).W))
 }
 
 // Branch prediction result from BPU Stage1 & 3
@@ -27,6 +36,8 @@ class BranchPrediction extends XSBundle {
   // save these info in brq!
   // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
   val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  // tage meta info
+  val tageMeta = Vec(FetchWidth, (new TageMeta))
   // ras checkpoint, only used in Stage3
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
@@ -90,6 +101,7 @@ class Redirect extends XSBundle {
   val isCall = Bool()
   val taken = Bool()
   val hist = UInt(HistoryLength.W)
+  val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val isException = Bool()

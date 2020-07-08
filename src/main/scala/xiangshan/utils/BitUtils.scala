@@ -31,3 +31,15 @@ object ZeroExt {
     if (aLen == len) a else Cat(0.U((len - aLen).W), a)
   }
 }
+
+object LowerMask {
+  def apply(a: UInt, len: Int) = {
+    (0 until len).map(i => a >> i.U).reduce(_|_)
+  }
+}
+
+object LowestBit {
+  def apply(a: UInt, len: Int) = {
+    Mux(a(0), 1.U(len.W), Reverse(((0 until len).map(i => Reverse(a(len - 1, 0)) >> i.U).reduce(_|_) + 1.U) >> 1.U))
+  }
+}
