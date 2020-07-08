@@ -26,6 +26,8 @@ class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
       //Cycle 1
       //-----------------
       c.clock.step()
+      c.clock.step()
+      c.clock.step()
       //-----------------
       // Cycle 2
       //-----------------
@@ -43,10 +45,15 @@ class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
       //-----------------
       // Cycle 5
       //-----------------
+      c.io.redirectInfo.valid.poke(true.B)
+      c.io.redirectInfo.misPred.poke(true.B)
+      c.io.redirectInfo.redirect.target.poke("h80002800".U)
       c.clock.step()
       //-----------------
       // Cycle 6
       //-----------------
+      c.io.redirectInfo.valid.poke(false.B)
+      c.io.redirectInfo.misPred.poke(false.B)
       c.clock.step()
       //-----------------
       // Cycle 7
