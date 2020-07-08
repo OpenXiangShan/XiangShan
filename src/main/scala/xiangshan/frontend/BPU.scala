@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.utils._
+import xiangshan.backend.ALUOpType
 import utils._
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -24,7 +25,7 @@ class Stage1To2IO extends XSBundle {
   val pc = Output(UInt(VAddrBits.W))
   val btb = new Bundle {
     val hits = Output(UInt(FetchWidth.W))
-    val targets = Output(Vec(FetchWidth, UInt(VAddrBits.B)))
+    val targets = Output(Vec(FetchWidth, UInt(VAddrBits.W)))
   }
   val jbtac = new Bundle {
     val hitIdx = Output(UInt(FetchWidth.W))
@@ -51,6 +52,13 @@ class BPUStage1 extends XSModule {
     // to Stage2
     val out = Decoupled(new Stage1To2IO)
   })
+
+  // TODO: delete this!!!
+  io.in.pc.ready := true.B
+  io.btbOut.valid := false.B
+  io.btbOut.bits := DontCare
+  io.out.valid := false.B
+  io.out.bits := DontCare
 
   // flush Stage1 when io.flush
   val flushS1 = BoolStopWatch(io.flush, io.in.pc.fire(), startHighPriority = true)
@@ -115,7 +123,7 @@ class BPUStage3 extends XSModule {
   val validLatch = RegInit(false.B)
   when (io.in.fire()) { inLatch := io.in.bits }
   when (io.in.fire()) {
-    validLatch := !io.in.flush
+    validLatch := !io.flush
   }.elsewhen (io.out.valid) {
     validLatch := false.B
   }
@@ -128,7 +136,7 @@ class BPUStage3 extends XSModule {
     val retAddr = UInt(VAddrBits.W)
     val ctr = UInt(8.W) // layer of nested call functions
   }
-  val ras = RegInit(VecInit(RasSize, 0.U.asTypeOf(rasEntry())))
+  val ras = RegInit(VecInit(Seq.fill(RasSize)(0.U.asTypeOf(rasEntry()))))
   val sp = Counter(RasSize)
   val rasTop = ras(sp.value)
   val rasTopAddr = rasTop.retAddr
@@ -136,12 +144,12 @@ class BPUStage3 extends XSModule {
   // get the first taken branch/jal/call/jalr/ret in a fetch line
   // brTakenIdx/jalIdx/callIdx/jalrIdx/retIdx/jmpIdx is one-hot encoded.
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction.
-  val brIdx = inLatch.btb.hits & io.predecode.bits.fuTypes.map { t => ALUOpType.isBranch(t) }.asUInt & io.predecode.bits.mask
+  val brIdx = inLatch.btb.hits & Cat(io.predecode.bits.fuTypes.map { t => ALUOpType.isBranch(t) }).asUInt & io.predecode.bits.mask
   val brTakenIdx = LowestBit(brIdx & inLatch.tage.takens.asUInt, FetchWidth)
-  val jalIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.fuTypes.map { t => t === ALUOpType.jal }.asUInt & io.predecode.bits.mask, FetchWidth)
-  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & io.predecode.bits.fuTypes.map { t => t === ALUOpType.call }.asUInt, FetchWidth)
-  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & io.predecode.bits.fuTypes.map { t => t === ALUOpType.jalr }.asUInt, FetchWidth)
-  val retIdx = LowestBit(io.predecode.bits.mask & io.predecode.bits.fuTypes.map { t => t === ALUOpType.ret }.asUInt, FetchWidth)
+  val jalIdx = LowestBit(inLatch.btb.hits & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.jal }).asUInt & io.predecode.bits.mask, FetchWidth)
+  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.call }).asUInt, FetchWidth)
+  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.jalr }).asUInt, FetchWidth)
+  val retIdx = LowestBit(io.predecode.bits.mask & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.ret }).asUInt, FetchWidth)
 
   val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth)
   val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & LowerMask(jmpIdx, FetchWidth)
@@ -156,13 +164,21 @@ class BPUStage3 extends XSModule {
   //io.out.bits._type := Mux(jmpIdx === retIdx, BTBtype.R,
   //  Mux(jmpIdx === jalrIdx, BTBtype.I,
   //  Mux(jmpIdx === brTakenIdx, BTBtype.B, BTBtype.J)))
-  val firstHist = inLatch.btbPred.bits.hist
+  val firstHist = inLatch.btbPred.bits.hist(0)
   // there may be several notTaken branches before the first jump instruction,
   // so we need to calculate how many zeroes should each instruction shift in its global history.
   // each history is exclusive of instruction's own jump direction.
-  val histShift = WireInit(VecInit(FetchWidth, 0.U(log2Up(FetchWidth).W)))
-  histShift := (0 until FetchWidth).map(i => Mux(!brNotTakenIdx(i), 0.U, ~LowerMask(UIntToOH(i.U), FetchWidth))).reduce(_+_)
-  (0 until FetchWidth).map(i => io.out.bits.hist(i) := firstHist << histShift)
+  val histShift = Wire(Vec(FetchWidth, UInt(log2Up(FetchWidth).W)))
+  val shift = Wire(Vec(FetchWidth, Vec(FetchWidth, UInt(1.W))))
+  (0 until FetchWidth).map(i => shift(i) := Mux(!brNotTakenIdx(i), 0.U, ~LowerMask(UIntToOH(i.U), FetchWidth)).asTypeOf(Vec(FetchWidth, UInt(1.W))))
+  for (j <- 0 until FetchWidth) {
+    var tmp = 0.U
+    for (i <- 0 until FetchWidth) {
+      tmp = tmp + shift(i)(j)
+    }
+    histShift(j) := tmp
+  }
+  (0 until FetchWidth).map(i => io.out.bits.hist(i) := firstHist << histShift(i))
   // save ras checkpoint info
   io.out.bits.rasSp := sp.value
   io.out.bits.rasTopCtr := rasTop.ctr
@@ -238,7 +254,7 @@ class BPU extends XSModule {
   s3.io.redirectInfo <> io.redirectInfo
 
   // TODO: delete this and put BTB and JBTAC into Stage1
-  
+  /*
   val flush = BoolStopWatch(io.redirect.valid, io.in.pc.valid, startHighPriority = true)
   
   // BTB makes a quick prediction for branch and direct jump, which is

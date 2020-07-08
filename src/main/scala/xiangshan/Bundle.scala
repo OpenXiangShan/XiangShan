@@ -3,7 +3,6 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import bus.simplebus._
-import xiangshan.frontend.HasTageParameter
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 

@@ -14,8 +14,8 @@ trait HasIFUConst { this: XSModule =>
   
 }
 
-sealed abstract IFUBundle extends XSBundle with HasIFUConst
-sealed abstract IFUModule extends XSModule with HasIFUConst with NeedImpl
+sealed abstract class IFUBundle extends XSBundle with HasIFUConst
+sealed abstract class IFUModule extends XSModule with HasIFUConst with NeedImpl
 
 class IFUIO extends IFUBundle
 {
@@ -64,7 +64,7 @@ class IFU(implicit val p: XSConfig) extends IFUModule
 
     when(if1_pcUpdate)
     { 
-      if1_pc ：= if1_npc
+      if1_pc := if1_npc
     }
 
     bpu.io.in.valid := if1_valid

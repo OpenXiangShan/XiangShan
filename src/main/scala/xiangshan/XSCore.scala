@@ -7,7 +7,7 @@ import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Config
 import xiangshan.backend.exu.ExuConfig
-import xiangshan.frontend.Frontend
+import xiangshan.frontend.{Frontend, HasTageParameter}
 import xiangshan.utils._
 
 trait HasXSParameter {
@@ -88,6 +88,7 @@ trait NeedImpl { this: Module =>
 
 abstract class XSBundle extends Bundle
   with HasXSParameter
+  with HasTageParameter
 
 case class XSConfig
 (
