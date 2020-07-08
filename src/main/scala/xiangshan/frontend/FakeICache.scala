@@ -69,7 +69,7 @@ class FakeCache extends XSModule with HasICacheConst {
   def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt()
   def inRange(idx: UInt): Bool = idx < (memByte / 8).U
 
-  val ramOut = Wire(VecInit(Seq.fill(FetchWidth)(0.U(32.W))))
+  val ramOut = Wire(Vec(FetchWidth,UInt(32.W)))
   for(i <- ramHelpers.indices) {
     val rIdx = index(gpc) + i.U
     ramHelpers(i).rIdx := rIdx
