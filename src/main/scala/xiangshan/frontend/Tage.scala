@@ -15,7 +15,7 @@ trait HasTageParameter {
                       ( 128,   64,    9))
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
-  val BankWidth = FetchWidth // 8
+  val BankWidth = 8 // FetchWidth
 }
 
 abstract class TageBundle extends XSBundle with HasTageParameter
@@ -44,7 +44,7 @@ class TageUpdate extends TageBundle {
   val u = Vec(BankWidth, UInt(2.W))
 }
 
-class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val UBitPeriod: Int) extends TageModule {
+class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int) extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(BankWidth, Valid(new TageResp)))
@@ -123,7 +123,7 @@ class Tage extends TageModule {
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
     val allocatableSlots = (VecInit(resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
-      ~(LowerMask(UIntToOH(provider)) & Fill(TageNTables, provided.asUInt))
+      ~(LowerMask(UIntToOH(provider), TageNTables) & Fill(TageNTables, provided.asUInt))
     )
     val allocLFSR = LFSR64()(TageNTables - 1, 0)
     val firstEntry = PriorityEncoder(allocatableSlots)
@@ -163,7 +163,7 @@ class Tage extends TageModule {
       updateU(allocate.bits)(idx) := 0.U
     }.otherwise {
       val provider = updateMeta.provider
-      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits)), 0.U)
+      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U)
       for (i <- 0 until TageNTables) {
         when (decrMask(i)) {
           updateUMask(i)(idx) := true.B
@@ -184,8 +184,8 @@ class Tage extends TageModule {
       tables(i).io.update.u(w) := updateU(i)(w)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.pc := io.RedirectInfo.redirect.pc - io.RedirectInfo.redirect.fetchIdx << 2.U
-    tables(i).io.update.hist := io.RedirectInfo.redirect.hist
+    tables(i).io.update.pc := io.redirectInfo.redirect.pc - io.redirectInfo.redirect.fetchIdx << 2.U
+    tables(i).io.update.hist := io.redirectInfo.redirect.hist
   }
 
   io.out.hits := outHits.asUInt
