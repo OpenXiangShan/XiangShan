@@ -35,6 +35,9 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   val pcDelaySlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
+  //TODO fix me
+  io.out.bits.redirect := DontCare
+
   io.out.bits.redirectValid := valid && isJUMP
   io.out.bits.redirect.pc := io.in.bits.uop.cf.pc
   io.out.bits.redirect.target := target

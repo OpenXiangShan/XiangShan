@@ -2,9 +2,9 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import chisel3.core.{withReset}
 import device.RAMHelper
 import xiangshan._
+import xiangshan.utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -14,52 +14,57 @@ trait HasIFUConst { this: XSModule =>
   
 }
 
-sealed abstract class IFUBundle extends XSBundle with HasIFUConst
-sealed abstract class IFUModule extends XSModule with HasIFUConst with NeedImpl
-
-class IFUIO extends IFUBundle
+class IFUIO extends XSBundle
 {
     val fetchPacket = DecoupledIO(new FetchPacket)
-    val redirect = Flipped(ValidIO(new Redirect))
+    val redirectInfo = Input(new RedirectInfo)
+    val icacheReq = DecoupledIO(new FakeIcacheReq)
+    val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
-class IF1IO extends IFUBundle
-{
-    val pc = UInt(VAddrBits.W)
+class FakeBPU extends XSModule{
+  val io = IO(new Bundle() {
+    val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
+    val btbOut = ValidIO(new BranchPrediction)
+    val tageOut = ValidIO(new BranchPrediction)
+    val predecode = Flipped(ValidIO(new Predecode))
+  })
+
+  io.btbOut.valid := false.B
+  io.btbOut.bits <> DontCare
+  io.tageOut.valid := false.B
+  io.tageOut.bits <> DontCare
 }
 
-class IF2IO extends IFUBundle
-{
-    val pc = UInt(VAddrBits.W)
-    val btbOut = new BranchPrediction
-    val taken  = Bool()
-}
 
 
-class IFU(implicit val p: XSConfig) extends IFUModule
+class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
-    val bpu = Module(new BPU)
+    //val bpu = Module(new BPU)
+    val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
     //-------------------------
     //local
     val if1_npc = WireInit(0.U(VAddrBits.W))
-    val if1_valid = WireInit(false.B)
+    val if1_valid = !reset.asBool //TODO:this is ugly
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
-    val if1_ready = bpu.io.in.ready &&  if2_ready
+    val if2_snpc = Cat(if1_pc(VAddrBits-1, groupAlign) + 1.U, 0.U(groupAlign.W))
+    val if1_ready = if2_ready
 
     //pipe fire
     val if1_fire = if1_valid && if1_ready 
-    val if1_pcUpdate = io.redirect.valid || if1_fire
+    val if1_pcUpdate = io.redirectInfo.flush() || if1_fire
 
-    when(RegNext(reset.asBool) && !reset.asBool)
-    {
-      if1_npc := resetVector
-      if1_valid := true.B
+    when(RegNext(reset.asBool) && !reset.asBool){
+      XSDebug("RESET....\n")
+      if1_npc := resetVector.U(VAddrBits.W)
+    } .otherwise{
+      if1_npc := if2_snpc
     }
 
     when(if1_pcUpdate)
@@ -67,107 +72,111 @@ class IFU(implicit val p: XSConfig) extends IFUModule
       if1_pc := if1_npc
     }
 
-    bpu.io.in.valid := if1_valid
-    bpu.io.in.pc := if1_npc
+    bpu.io.in.pc.valid := if1_valid
+    bpu.io.in.pc.bits := if1_npc
+
+    XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
+    XSDebug(false,if1_fire,"------IF1->fire!!!")
+    XSDebug(false,true.B,"\n")
 
     //-------------------------
     //      IF2  btb resonse 
     //           icache visit
     //-------------------------
     //local
-    val if2_flush = WireInit(false.B)
-    val if2_update = if1_fire && !if2_flush
-    val if2_valid = RegNext(if2_update)
+    val if2_valid = RegEnable(next=if1_valid,init=false.B,enable=if1_fire)
     val if2_pc = if1_pc
     val if2_btb_taken = bpu.io.btbOut.valid
     val if2_btb_insMask = bpu.io.btbOut.bits.instrValid
     val if2_btb_target = bpu.io.btbOut.bits.target
-    val if2_snpc = Cat(if2_pc(VAddrBits-1, groupAlign) + 1.U, 0.U(groupAlign.W))
-    val if2_flush = WireInit(false.B)
 
     //next
     val if3_ready = WireInit(false.B)
 
     //pipe fire
-    val if2_fire = if2_valid && if3_ready 
-    val if2_ready = (if2_fire && icache.io.in.fire()) || !if2_valid
+    val if2_fire = if2_valid && if3_ready && io.icacheReq.fire()
+    if2_ready := (if2_fire) || !if2_valid
 
-    icache.io.in.valid := if2_fire
-    icahce.io.in.bits := if2_pc
+    io.icacheReq.valid := if2_valid
+    io.icacheReq.bits.addr := groupPC(if2_pc)
+    io.icacheReq.bits.flush := io.redirectInfo.flush()
 
     when(if2_valid && if2_btb_taken)
     {
       if1_npc := if2_btb_target
-    } .otherwise 
-    {
-      if1_npc := if2_snpc
     }
+
+    XSDebug("[IF2]if2_valid:%d  ||  if2_pc:0x%x   || if3_ready:%d                                       ",if2_valid,if2_pc,if3_ready)
+    //XSDebug("[IF2-BPU-out]if2_btbTaken:%d || if2_btb_insMask:%b || if2_btb_target:0x%x \n",if2_btb_taken,if2_btb_insMask.asUInt,if2_btb_target)
+    XSDebug(false,if2_fire,"------IF2->fire!!!")
+    XSDebug(false,true.B,"\n")
+    XSDebug("[IF2-Icache-Req] icache_in_valid:%d  icache_in_ready:%d\n",io.icacheReq.valid,io.icacheReq.ready)
 
     //-------------------------
     //      IF3  icache hit check
     //-------------------------
     //local
-    val if3_flush = WireInit(false.B)
-    val if3_update = if2_fire && !if3_flush
-    val if3_valid = RegNext(if3_update)
-    val if3_pc = RegEnable(if2_pc,if3_update)
-    val if3_btb_target = RegEnable(if2_btb_target,if3_update)
-    val if3_btb_taken = RegEnable(if2_btb_taken,if3_update)
+    val if3_valid = RegEnable(next=if2_valid,init=false.B,enable=if2_fire)
+    val if3_pc = RegEnable(if2_pc,if2_fire)
+    val if3_btb_target = RegEnable(if2_btb_target,if2_fire)
+    val if3_btb_taken = RegEnable(if2_btb_taken,if2_fire)
 
     //next
     val if4_ready = WireInit(false.B)
 
     //pipe fire
     val if3_fire = if3_valid && if4_ready
-    val if3_ready = if3_fire  || !if3_valid
+    if3_ready := if3_fire  || !if3_valid
+
+
+    XSDebug("[IF3]if3_valid:%d  ||  if3_pc:0x%x   || if4_ready:%d                                       ",if3_valid,if3_pc,if4_ready)
+    XSDebug(false,if3_fire,"------IF3->fire!!!")
+    XSDebug(false,true.B,"\n")
 
     //-------------------------
     //      IF4  icache resonse   
     //           RAS result
     //           taget generate
     //-------------------------
-    val if4_flush = WireInit(false.B)
-    val if4_update = if3_fire && !if4_flush
-    val if4_valid = RegNext(if4_update)
-    val if4_pc = RegEnable(if3_pc,if4_update)
-    val if4_btb_target = RegEnable(if3_btb_target,if4_update)
-    val if4_btb_taken = RegEnable(if3_btb_taken,if4_update)
+    val if4_valid = RegEnable(next=if3_valid,init=false.B,enable=if3_fire)
+    val if4_pc = RegEnable(if3_pc,if3_fire)
+    val if4_btb_target = RegEnable(if3_btb_target,if3_fire)
+    val if4_btb_taken = RegEnable(if3_btb_taken,if3_fire)
+    val if4_tage_target = bpu.io.tageOut.bits.target
+    val if4_tage_taken = bpu.io.tageOut.valid
+    val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
+    XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x  \n",if4_valid,if4_pc)
+    //XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
+    XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 
-    //TAGE
-    val tage_taken = bpu.io.tageOut.valid
-
-    //TODO: icache predecode info
-    val predecode = icache.io.out.bits.predecode
-
-    val icache_isBR = tage_taken
-    val icache_isDirectJmp = icache_isBR && 
-    val icache_isCall = icache_isDirectJmp &&
-    val icache_isReturn = !icache_isDirectJmp &&
-    val icache_isOtherNDJmp = !icache_isDirectJmp && !icache_isReturn
-
-
-    when(if4_valid && icahe.io.out.fire())
+    when(if4_valid && io.icacheResp.fire() && if4_tage_taken)
     {
-      if1_npc := if4_btb_target
+      if1_npc := if4_tage_target
     }
     
 
-    //redirect
-    when(io.redirect.valid){
-      if1_npc := io.redirect.bits.target
-      if2_flush := true.B
-      if3_flush := true.B
-      if4_flush := true.B
+    //redirect: miss predict
+    when(io.redirectInfo.flush()){
+      if1_npc := io.redirectInfo.redirect.target
+      if3_valid := false.B
+      if4_valid := false.B
     }
-
+    XSDebug(io.redirectInfo.flush(),"[IFU-REDIRECT] target:0x%x  \n",io.redirectInfo.redirect.target.asUInt)
 
     //Output -> iBuffer
-    if4_ready := io.fetchPacket.ready
-    io.fetchPacket.valid := if4_valid && !if4_flush
-    io.fetchPacket.instrs := io.icache.out.bits.rdata
-    io.fetchPacket.mask := Fill(FetchWidth*2, 1.U(1.W)) << pc(2+log2Up(FetchWidth)-1, 1)
-    io.fetchPacket.pc := if4_pc
+    io.fetchPacket <> DontCare
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid)
+    io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
+    io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
+    io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+    io.fetchPacket.bits.pc := if4_pc
 
+    //to BPU
+    bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid
+    bpu.io.predecode.bits <> io.icacheResp.bits.predecode
+    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 2) //TODO: consider RVC
+
+    io.icacheResp.ready := io.fetchPacket.ready 
 
 }
 
