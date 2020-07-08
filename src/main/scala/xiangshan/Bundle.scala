@@ -14,12 +14,25 @@ class FetchPacket extends XSBundle {
   val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
 }
 
+
+class ValidND[T <: Data](gen: T) extends Bundle {
+  val valid = Bool()
+  val bits = gen.asInstanceOf[T]
+  override def cloneType = new ValidND(gen).asInstanceOf[this.type]
+}
+
+object ValidND {
+  def apply[T<:Data](in: T) = {
+    new ValidND[T](in)
+  }
+}
+
 class TageMeta extends XSBundle {
-  val provider = Valid(UInt(log2Ceil(TageNTables).W))
+  val provider = ValidND(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
-  val allocate = Valid(UInt(log2Ceil(TageNTables).W))
+  val allocate = ValidND(UInt(log2Ceil(TageNTables).W))
 }
 
 // Branch prediction result from BPU Stage1 & 3
