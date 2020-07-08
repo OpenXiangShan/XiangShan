@@ -1,4 +1,4 @@
-//package xiangshan.frontend
+package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -33,9 +33,9 @@ class TempPreDecoder extends XSModule  {
 
   for (i <- 0 until FetchWidth) {
     tempPreDecoders(i).io.in <> DontCare
-    tempPreDecoders(i).io.in.instr <> io.in.bits(i)
-    io.out.fuTypes(i) := tempPreDecoders(i).io.out.fuType
-    io.out.fuOpType(i) := tempPreDecoders(i).io.out.fuOpType
+    tempPreDecoders(i).io.in.instr <> io.in(i)
+    io.out.fuTypes(i) := tempPreDecoders(i).io.out.ctrl.fuType
+    io.out.fuOpTypes(i) := tempPreDecoders(i).io.out.ctrl.fuOpType
   }
 
   io.out.mask := DontCare
@@ -61,7 +61,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val s1_valid = io.in.valid
   val s2_ready = WireInit(false.B)
   val s1_fire = s1_valid && s2_ready
-  val gpc = groupPC(io.in.bits)
+  val gpc = groupPC(io.in.bits.addr)
   io.in.ready := s2_ready
 
   val offsetBits = log2Up(memByte)
@@ -69,7 +69,7 @@ class FakeCache extends XSModule with HasICacheConst {
   def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt()
   def inRange(idx: UInt): Bool = idx < (memByte / 8).U
 
-  val ramOut = Wire(Seq.fill(FetchWidth)(0.U(32.W)))
+  val ramOut = Wire(VecInit(Seq.fill(FetchWidth)(0.U(32.W))))
   for(i <- ramHelpers.indices) {
     val rIdx = index(gpc) + i.U
     ramHelpers(i).rIdx := rIdx
@@ -100,6 +100,13 @@ class FakeCache extends XSModule with HasICacheConst {
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
 
   s3_ready := io.out.ready
+
+  val needflush = io.in.bits.flush
+
+  when(needflush){
+      s2_valid := false.B
+      s3_valid := false.B
+  }
 
   val tempPredecode = Module(new TempPreDecoder)
   tempPredecode.io.in := s3_ram_out

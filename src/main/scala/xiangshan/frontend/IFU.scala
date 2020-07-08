@@ -14,17 +14,11 @@ trait HasIFUConst { this: XSModule =>
   
 }
 
-class FakeIcacheResp extends XSBundle {
-  val icacheOut = Vec(FetchWidth, UInt(32.W))
-  val predecode = new Predecode
-}
-
-
 class IFUIO extends XSBundle
 {
     val fetchPacket = DecoupledIO(new FetchPacket)
     val redirectInfo = Input(new RedirectInfo)
-    val icacheReq = DecoupledIO(UInt(VAddrBits.W))
+    val icacheReq = DecoupledIO(new FakeIcacheReq)
     val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
@@ -104,7 +98,8 @@ class IFU extends XSModule with HasIFUConst
     if2_ready := (if2_fire) || !if2_valid
 
     io.icacheReq.valid := if2_valid
-    io.icacheReq.bits := groupPC(if2_pc)
+    io.icacheReq.bits.addr := groupPC(if2_pc)
+    io.icacheReq.bits.flush := io.redirectInfo.flush()
 
     when(if2_valid && if2_btb_taken)
     {
