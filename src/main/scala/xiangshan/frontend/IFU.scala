@@ -54,6 +54,8 @@ class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
     //next
     val if2_ready = WireInit(false.B)
     val if1_ready = if2_ready
+    val if2_snpc = Cat(if1_pc(VAddrBits-1, groupAlign) + 1.U, 0.U(groupAlign.W))
+
 
     //pipe fire
     val if1_fire = if1_valid && if1_ready 
@@ -62,6 +64,9 @@ class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
     when(RegNext(reset.asBool) && !reset.asBool)
     {
       if1_npc := resetVector.U(VAddrBits.W)
+    } .otherwise 
+    {
+      if1_npc := if2_snpc
     }
 
     when(if1_pcUpdate)
@@ -84,7 +89,6 @@ class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
     val if2_btb_taken = bpu.io.btbOut.valid
     val if2_btb_insMask = bpu.io.btbOut.bits.instrValid
     val if2_btb_target = bpu.io.btbOut.bits.target
-    val if2_snpc = Cat(if2_pc(VAddrBits-1, groupAlign) + 1.U, 0.U(groupAlign.W))
     val if2_flush = WireInit(false.B)
 
     //next
@@ -100,9 +104,6 @@ class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
     when(if2_valid && if2_btb_taken)
     {
       if1_npc := if2_btb_target
-    } .otherwise 
-    {
-      if1_npc := if2_snpc
     }
 
     //-------------------------
