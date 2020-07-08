@@ -48,17 +48,10 @@ class BPUStage1 extends XSModule {
     val flush = Input(Bool())
     val s3RollBackHist = Input(UInt(HistoryLength.W))
     // to ifu, quick prediction result
-    val btbOut = ValidIO(new BranchPrediction)
+    val s1OutPred = ValidIO(new BranchPrediction)
     // to Stage2
     val out = Decoupled(new Stage1To2IO)
   })
-
-  // TODO: delete this!!!
-  io.in.pc.ready := true.B
-  io.btbOut.valid := false.B
-  io.btbOut.bits := DontCare
-  io.out.valid := false.B
-  io.out.bits := DontCare
 
   // flush Stage1 when io.flush
   val flushS1 = BoolStopWatch(io.flush, io.in.pc.fire(), startHighPriority = true)
