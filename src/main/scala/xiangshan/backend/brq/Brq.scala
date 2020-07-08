@@ -77,25 +77,17 @@ class Brq extends XSModule {
     val exuOut = new ExuOutput
   }
 
-  val s_idle :: s_wb :: s_commited :: Nil = Enum(3)
+  val s_idle :: s_wb :: s_commited :: Nil  =
+    List.tabulate(3)(i => (1 << i).U(3.W).asTypeOf(new StateQueueEntry))
+
   class StateQueueEntry extends Bundle{
-    val state = UInt(s_idle.getWidth.W)
-
-    def hasWrittenBack: Bool = state=/=s_idle
-    def isCommited: Bool = state===s_commited
-    def isWrittenBack: Bool = state===s_wb
-
-    def update(s: UInt): Unit ={
-      state := s
-    }
-
-    override def toPrintable: Printable = p"$state"
+    val isCommit = Bool()
+    val isWb = Bool()
+    val isIdle = Bool()
   }
 
   val brQueue = Reg(Vec(BrqSize, new BrqEntry))
-  val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(
-    s_idle.asTypeOf(new StateQueueEntry)
-  )))
+  val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
 
   val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
 
@@ -106,42 +98,45 @@ class Brq extends XSModule {
   // dequeue
   val headIdx = headPtr.value
   var commitIdx = WireInit(headIdx)
-  var prevWb = WireInit(
-    (stateQueue(headIdx).isWrittenBack && !brQueue(headIdx).misPred) ||
-    stateQueue(headIdx).isCommited
-  )
+
+  def needCheckNext(idx: UInt): Bool = {
+    (stateQueue(idx).isWb && !brQueue(idx).misPred) || stateQueue(idx).isCommit
+  }
+
+  var checkNext = WireInit(needCheckNext(headIdx))
 
   for(i <- 1 until redirctWindowSize){
     val idx = commitIdx + i.U
-    val commitThis = prevWb && stateQueue(idx).isWrittenBack && brQueue(idx).misPred
+    val commitThis = checkNext && stateQueue(idx).isWb && brQueue(idx).misPred
     commitIdx = Mux(commitThis,
       idx,
       commitIdx
     )
-    prevWb = prevWb && (
-      (stateQueue(idx).isWrittenBack && !brQueue(idx).misPred) ||
-      stateQueue(idx).isCommited
-      )
+    checkNext = checkNext && needCheckNext(idx)
   }
 
   val commitIsHead = commitIdx===headIdx
-  val deqValid = stateQueue(headIdx).hasWrittenBack && commitIsHead
-  val commitValid = stateQueue(commitIdx).isWrittenBack
+  val deqValid = !stateQueue(headIdx).isIdle && commitIsHead
+  val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
 
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
-  XSDebug(stateQueue.map(_.toPrintable).reduce((a,b) => a+b)+"\n")
+  XSDebug("")
+  stateQueue.map(s =>{
+    XSDebug(false, s.isIdle, "-")
+    XSDebug(false, s.isWb, "w")
+    XSDebug(false, s.isCommit, "c")
+  })
+  XSDebug(false, true.B, "\n")
 
   val headPtrNext = WireInit(headPtr + deqValid)
-  stateQueue(commitIdx).update(
-    Mux(deqValid,
-      s_idle,
-      Mux(commitValid,
-        s_commited,
-        stateQueue(commitIdx).state
-      )
+  stateQueue(commitIdx):= Mux(deqValid,
+    s_idle,
+    Mux(commitValid,
+      s_commited,
+      stateQueue(commitIdx)
     )
   )
 
@@ -178,7 +173,7 @@ class Brq extends XSModule {
         p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
           p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)}\n"
       )
-      stateQueue(wbIdx).update(s_wb)
+      stateQueue(wbIdx) := s_wb
       brQueue(wbIdx).exuOut := exuWb.bits
       brQueue(wbIdx).misPred := brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
     }
@@ -186,7 +181,7 @@ class Brq extends XSModule {
 
   when(io.roqRedirect.valid){
     // exception
-    stateQueue.foreach(_.update(s_idle))
+    stateQueue.foreach(_ := s_idle)
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
   }.elsewhen(io.redirect.valid){
@@ -194,7 +189,7 @@ class Brq extends XSModule {
     stateQueue.zipWithIndex.foreach({case(s, i) =>
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
       when(ptr.needBrFlush(io.redirect.bits.brTag)){
-        s.update(s_idle)
+        s := s_idle
       }
     })
     tailPtr := io.redirect.bits.brTag + true.B
