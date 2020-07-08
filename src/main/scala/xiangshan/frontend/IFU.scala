@@ -14,11 +14,6 @@ trait HasIFUConst { this: XSModule =>
   
 }
 
-sealed abstract IFUBundle extends XSBundle with HasIFUConst
-sealed abstract IFUModule extends XSModule with HasIFUConst with NeedImpl
-
-
-
 class IFUIO extends IFUBundle
 {
     val fetchPacket = DecoupledIO(new FetchPacket)
@@ -44,7 +39,7 @@ class FakeBPU extends XSModule {
 
 
 
-class IFU(implicit val p: XSConfig) extends IFUModule
+class IFU(implicit val p: XSConfig) extends IFUModule with HasIFUConst
 {
     val io = IO(new IFUIO)
     val bpu = Module(new FakeBPU)
@@ -66,13 +61,13 @@ class IFU(implicit val p: XSConfig) extends IFUModule
 
     when(RegNext(reset.asBool) && !reset.asBool)
     {
-      if1_npc := resetVector
+      if1_npc := resetVector.U(VAddrBits.W)
       if1_valid := true.B
     }
 
     when(if1_pcUpdate)
     { 
-      if1_pc ：= if1_npc
+      if1_pc := if1_npc
     }
 
     bpu.io.in.valid := if1_valid
