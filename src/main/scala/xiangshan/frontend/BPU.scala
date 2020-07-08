@@ -238,7 +238,7 @@ class BPU extends XSModule {
   s3.io.redirectInfo <> io.redirectInfo
 
   // TODO: delete this and put BTB and JBTAC into Stage1
-  /*
+  
   val flush = BoolStopWatch(io.redirect.valid, io.in.pc.valid, startHighPriority = true)
   
   // BTB makes a quick prediction for branch and direct jump, which is

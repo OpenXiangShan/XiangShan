@@ -102,6 +102,7 @@ class Redirect extends XSBundle {
   val taken = Bool()
   val hist = UInt(HistoryLength.W)
   val tageMeta = new TageMeta
+  val fetchIdx = UInt(log2Up(FetchWidth).W)
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val isException = Bool()
