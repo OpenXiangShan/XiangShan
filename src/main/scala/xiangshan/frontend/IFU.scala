@@ -81,7 +81,7 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.in.pc.valid := if1_valid
     bpu.io.in.pc.bits := if1_npc
 
-    XSDebug("[IF1]if1_valid:%d  ||  if1_npc: 0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
+    XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
     XSDebug(false,if1_fire,"------IF1->fire!!!")
     XSDebug(false,true.B,"\n")
 
@@ -112,7 +112,7 @@ class IFU extends XSModule with HasIFUConst
       if1_npc := if2_btb_target
     }
 
-    XSDebug("[IF2]if2_valid:%d  ||  if2_pc:0x%x  || if3_ready:%d",if2_valid,if2_pc,if3_ready)
+    XSDebug("[IF2]if2_valid:%d  ||  if2_pc:0x%x   || if3_ready:%d                                       ",if2_valid,if2_pc,if3_ready)
     //XSDebug("[IF2-BPU-out]if2_btbTaken:%d || if2_btb_insMask:%b || if2_btb_target:0x%x \n",if2_btb_taken,if2_btb_insMask.asUInt,if2_btb_target)
     XSDebug(false,if2_fire,"------IF2->fire!!!")
     XSDebug(false,true.B,"\n")
@@ -135,7 +135,7 @@ class IFU extends XSModule with HasIFUConst
     if3_ready := if3_fire  || !if3_valid
 
 
-    XSDebug("[IF3]if3_valid:%d  ||  if3_pc:0x%x  || if4_ready:%d",if3_valid,if3_pc,if4_ready)
+    XSDebug("[IF3]if3_valid:%d  ||  if3_pc:0x%x   || if4_ready:%d                                       ",if3_valid,if3_pc,if4_ready)
     XSDebug(false,if3_fire,"------IF3->fire!!!")
     XSDebug(false,true.B,"\n")
 
@@ -151,7 +151,7 @@ class IFU extends XSModule with HasIFUConst
     val if4_tage_target = bpu.io.tageOut.bits.target
     val if4_tage_taken = bpu.io.tageOut.valid
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
-    XSDebug("[IF4]if4_valid:%d ||  if4_pc:0x%x  \n",if4_valid,if4_pc)
+    XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x  \n",if4_valid,if4_pc)
     //XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
     XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 
@@ -167,8 +167,7 @@ class IFU extends XSModule with HasIFUConst
       if3_valid := false.B
       if4_valid := false.B
     }
-
-
+    XSDebug(io.redirectInfo.flush(),"[IFU-REDIRECT] target:0x%x  \n",io.redirectInfo.redirect.target.asUInt)
 
     //Output -> iBuffer
     io.fetchPacket <> DontCare
