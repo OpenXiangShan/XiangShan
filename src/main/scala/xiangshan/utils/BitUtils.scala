@@ -43,3 +43,9 @@ object LowestBit {
     Mux(a(0), 1.U(len.W), Reverse(((0 until len).map(i => Reverse(a(len - 1, 0)) >> i.U).reduce(_|_) + 1.U) >> 1.U))
   }
 }
+
+object HighestBit {
+  def apply(a: UInt, len: Int) = {
+    Reverse(LowestBit(Reverse(a), len))
+  }
+}

@@ -74,31 +74,30 @@ class BPUStage1 extends XSModule {
   io.out.bits.tage <> tage.io.out
   io.s1OutPred.bits.tageMeta := tage.io.meta
 
-  // flush Stage1 when io.flush || io.redirect.valid
-  val flush = flushS1 || io.redirectInfo.valid
-
+  // BTB
   val btbAddr = new TableAddr(log2Up(BtbSets), BtbBanks)
   val predictWidth = FetchWidth
-  def btbTarget = new Bundle {
-    val addr = UInt(VAddrBits.W)
+  def btbDataEntry() = new Bundle {
+    val valid = Bool()
+    val target = UInt(VAddrBits.W)
     val pred = UInt(2.W) // 2-bit saturated counter as a quick predictor
     val _type = UInt(2.W)
     val offset = UInt(offsetBits().W) // Could be zero
 
     def offsetBits() = log2Up(FetchWidth / predictWidth)
   }
-
-  def btbEntry() = new Bundle {
+  def btbMetaEntry() = new Bundle {
     val valid = Bool()
-    // TODO: don't need full length of tag and target
+    // TODO: don't need full length of tag
     val tag = UInt(btbAddr.tagBits.W)
-    val target = Vec(predictWidth, btbTarget)
   }
 
-  val btb = List.fill(BtbWays)(List.fill(BtbBanks)(
-    Module(new SRAMTemplate(btbEntry(), set = BtbSets / BtbBanks, shouldReset = true, holdRead = true, singlePort = false))))
-  
-  // val btbReadBank = btbAddr.getBank(io.in.pc.bits)
+  val btbMeta = List.fill(BtbWays)(List.fill(BtbBanks)(
+    Module(new SRAMTemplate(btbMetaEntry(), set = BtbSets / BtbBanks, way = 1, shouldReset = true, holdRead = true))
+  ))
+  val btbData = List.fill(BtbWays)(List.fill(BtbBanks)(
+    Module(new SRAMTemplate(btbDataEntry(), set = BtbSets / BtbBanks, way = predictWidth, shouldReset = true, holdRead = true))
+  ))
 
   // BTB read requests
   // read addr comes from pc[6:2]
@@ -106,65 +105,72 @@ class BPUStage1 extends XSModule {
   (0 until BtbWays).map(
     w => (0 until BtbBanks).map(
       b => {
-        btb(w)(b).reset := reset.asBool
-        btb(w)(b).io.r.req.valid := io.in.pc.valid && b.U === btbAddr.getBank(io.in.pc.bits)
-        btb(w)(b).io.r.req.bits.setIdx := btbAddr.getBankIdx(io.in.pc.bits)
-      }))
+        btbMeta(w)(b).reset := reset.asBool
+        btbMeta(w)(b).io.r.req.valid := io.in.pc.fire() && b.U === btbAddr.getBank(io.in.pc.bits)
+        btbMeta(w)(b).io.r.req.bits.setIdx := btbAddr.getBankIdx(io.in.pc.bits)
+        btbData(w)(b).reset := reset.asBool
+        btbData(w)(b).io.r.req.valid := io.in.pc.fire() && b.U === btbAddr.getBank(io.in.pc.bits)
+        btbData(w)(b).io.r.req.bits.setIdx := btbAddr.getBankIdx(io.in.pc.bits)
+      }
+    )
+  )
 
   // latch pc for 1 cycle latency when reading SRAM
-  val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
+  val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.fire())
   // Entries read from SRAM
-  val btbRead = Wire(Vec(BtbWays, Vec(BtbBanks, btbEntry())))
+  val btbMetaRead = Wire(Vec(BtbWays, btbMetaEntry()))
+  val btbDataRead = Wire(Vec(BtbWays, Vec(predictWidth, btbDataEntry())))
+  val btbReadFire = Wire(Vec(BtbWays, Vec(BtbBanks, Bool())))
   // 1/4 hit
-  val btbHits = Wire(Vec(BtbWays, Bool()))
+  val btbWayHits = Wire(Vec(BtbWays, Bool()))
 
   // #(predictWidth) results
   val btbTargets = Wire(Vec(predictWidth, UInt(VAddrBits.W)))
   val btbTypes = Wire(Vec(predictWidth, UInt(2.W)))
   // val btbPreds = Wire(Vec(FetchWidth, UInt(2.W)))
   val btbTakens = Wire(Vec(predictWidth, Bool()))
+  val btbValids = Wire(Vec(predictWidth, Bool()))
 
   val btbHitWay = Wire(UInt(log2Up(BtbWays).W))
+  val btbHitBank = btbAddr.getBank(pcLatch)
 
   (0 until BtbWays).map(
-    w => (0 until BtbBanks).map(
-      b => btbRead(w)(b) := btb(w)(b).io.r.resp.data(0)
-    )
+    w => {
+      btbMetaRead(w) := btbMeta(w)(btbHitBank).io.r.resp.data(0)
+      (0 until predictWidth).map(i => btbDataRead(w)(i) := btbData(w)(btbHitBank).io.r.resp.data(i))
+    }
   )
 
-  
+  btbWayHits := 0.U.asTypeOf(Vec(BtbWays, Bool()))
+  btbValids := 0.U.asTypeOf(Vec(predictWidth, Bool()))
+  btbTargets := DontCare
+  btbTakens := DontCare
+  btbTypes := DontCare
   for (w <- 0 until BtbWays) {
-    for (b <- 0 until BtbBanks) {
-      when (b.U === btbAddr.getBank(pcLatch) && btbRead(w)(b).valid && btbRead(w)(b).tag === btbAddr.getTag(pcLatch)) {
-        btbHits(w) := !flush && RegNext(btb(w)(b).io.r.req.fire(), init = false.B)
-        btbHitWay := w.U
-        for (i <- 0 until predictWidth) {
-          btbTargets(i) := btbRead(w)(b).target(i).addr
-          btbTypes(i) := btbRead(w)(b).target(i)._type
-          btbTakens(i) := (btbRead(b)(w).target(i).pred)(1).asBool
-        }
-      }.otherwise {
-        btbHits(w) := false.B
-        btbHitWay := DontCare
-        for (i <- 0 until predictWidth) {
-          btbTargets(i) := DontCare
-          btbTypes(i) := DontCare
-          btbTakens(i) := DontCare
-        }
+    for (b <- 0 until BtbBanks) { btbReadFire(w)(b) := btbMeta(w)(b).io.r.req.fire() && btbData(w)(b).io.r.req.fire() }
+    when (btbMetaRead(w).valid && btbMetaRead(w).tag === btbAddr.getTag(pcLatch)) {
+      btbWayHits(w) := !flushS1 && RegNext(btbReadFire(w)(btbHitBank), init = false.B)
+      for (i <- until predictWidth) {
+        btbValids(i) := btbDataRead(w)(i).valid
+        btbTargets(i) := btbDataRead(w)(i).target
+        btbTakens(i) := (btbDataRead(w)(i).pred)(1).asBool
+        btbTypes(i) := btbDataRead(w)(i)._type
       }
     }
   }
 
-
-  val btbHit = btbHits.reduce(_|_)
+  val btbHit = btbWayHits.reduce(_|_)
+  btbHitWay := OHToUInt(HighestBit(btbWayHits.asUInt, BtbWays))
 
   // Priority mux which corresponds with inst orders
   // BTB only produce one single prediction
-  val btbTakenTarget = MuxCase(0.U, btbTakens zip btbTargets)
-  val btbTakenType   = MuxCase(0.U, btbTakens zip btbTypes)
-  val btbTaken       = btbTakens.reduce(_|_)
+  val btbJumps = Wire(Vec(predictWidth, Bool()))
+  (0 until predictWidth).map(i => btbJumps(i) := btbValids(i) && (btbTypes(i) === BTBtype.J || btbTypes(i) === BTBtype.B && btbTakens(i)))
+  val btbTakenTarget = MuxCase(0.U, btbJumps zip btbTargets)
+  val btbTakenType   = MuxCase(0.U, btbJumps zip btbTypes)
+  val btbTaken       = btbJumps.reduce(_|_)
   // Record which inst is predicted taken
-  val btbTakenIdx = MuxCase(0.U, btbTakens zip (0 until predictWidth).map(_.U))
+  val btbTakenIdx = MuxCase(0.U, btbJumps zip (0 until predictWidth).map(_.U))
 
   // JBTAC, divided into 8 banks, makes prediction for indirect jump except ret.
   val jbtacAddr = new TableAddr(log2Up(JbtacSize), JbtacBanks)
@@ -180,49 +186,45 @@ class BPUStage1 extends XSModule {
 
   val jbtacRead = Wire(Vec(JbtacBanks, jbtacEntry()))
 
-  val jbtacFire = Wire(Vec(JbtacBanks, RegInit(Bool(), init=false.B)))
+  val jbtacFire = Reg(Vec(JbtacBanks, Bool()))
   // Only read one bank
+  val histXORAddr = io.in.pc.bits ^ Cat(hist, 0.U(2.W))(VAddrBits - 1, 0)
+  val histXORAddrLatch = RegEnable(histXORAddr, io.in.pc.valid)
+  jbtacFire := 0.U.asTypeOf(Vec(JbtacBanks, Bool()))
   (0 until JbtacBanks).map(
-    b=>{
+    b => {
       jbtac(b).reset := reset.asBool
-      jbtac(b).io.r.req.valid := io.in.pc.valid && b.U === jbtacAddr.getBank(io.in.pc.bits)
-      jbtac(b).io.r.req.bits.setIdx := jbtacAddr.getBankIdx(io.in.pc.bits)
+      jbtac(b).io.r.req.valid := io.in.pc.fire() && b.U === jbtacAddr.getBank(histXORAddr)
+      jbtac(b).io.r.req.bits.setIdx := jbtacAddr.getBankIdx(histXORAddr)
       jbtacFire(b) := jbtac(b).io.r.req.fire()
       jbtacRead(b) := jbtac(b).io.r.resp.data(0)
     }
   )
 
-  val jbtacBank = jbtacAddr.getBank(pcLatch)
-  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !flush && jbtacFire(jbtacBank)
+  val jbtacBank = jbtacAddr.getBank(histXORAddrLatch)
+  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(histXORAddrLatch) && !flushS1 && jbtacFire(jbtacBank)
   val jbtacHitIdx = jbtacRead(jbtacBank).offset
   val jbtacTarget = jbtacRead(jbtacBank).target
 
-
   // redirect based on BTB and JBTAC
-  // (0 until FetchWidth).map(i => io.predMask(i) := btbHits(i) && Mux(btbTypes(i) === BTBtype.B, btbTakens(i), true.B) || jbtacHits(i))
-  // (0 until FetchWidth).map(i => io.predTargets(i) := Mux(btbHits(i) && !(btbTypes(i) === BTBtype.B && !btbTakens(i)), btbTargets(i), jbtacTargets(i)))
+  io.out.valid := RegNext(io.in.pc.fire()) && !flushS1
 
-  io.out.valid := RegNext(io.in.pc.valid) && !flush
-
-  io.s1OutPred.valid := RegNext(io.in.pc.valid)
+  io.s1OutPred.valid := io.out.valid
   io.s1OutPred.bits.redirect := btbHit && btbTaken || jbtacHit
-  io.s1OutPred.bits.instrValid := ~LowerMask(btbTakenIdx, FetchWidth) & ~LowerMask(jbtacHitIdx, FetchWidth)
+  io.s1OutPred.bits.instrValid := LowerMask(UIntToOH(btbTakenIdx), FetchWidth) & LowerMask(UIntToOH(jbtacHitIdx), FetchWidth)
   io.s1OutPred.bits.target := Mux(btbTakenIdx < jbtacHitIdx, btbTakenTarget, jbtacTarget)
-  io.s1OutPred.bits.hist := DontCare
+  io.s1OutPred.bits.hist := DontCare  //////////////////////TODO
   io.s1OutPred.bits.rasSp := DontCare
   io.s1OutPred.bits.rasTopCtr := DontCare
 
   io.out.bits.pc := pcLatch
-  io.out.bits.btb.hits := btbHit
-  (0 until FetchWidth).map(i=>io.out.bits.btb.targets(i) := btbTargets(i))
-  io.out.bits.jbtac.hitIdx := jbtacHitIdx
+  io.out.bits.btb.hits := btbValids.asUInt
+  (0 until FetchWidth).map(i => io.out.bits.btb.targets(i) := btbTargets(i))
+  io.out.bits.jbtac.hitIdx := UIntToOH(jbtacHitIdx)
   io.out.bits.jbtac.target := jbtacTarget
-  io.out.bits.tage := DontCare
-  io.out.bits.hist := DontCare
+  io.out.bits.hist := DontCare  //////////////////////TODO
   io.out.bits.btbPred := io.s1OutPred
 
-
-  // TODO: delete this!!!
   io.in.pc.ready := true.B
 
 }
