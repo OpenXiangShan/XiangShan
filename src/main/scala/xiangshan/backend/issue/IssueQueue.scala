@@ -6,8 +6,8 @@ import xiangshan._
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.utils._
 
-trait IQConst{
-  val iqSize = 8
+trait IQConst extends HasXSParameter{
+  val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
 }
 
@@ -43,6 +43,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     // use bypass uops to speculative wake-up
     val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new MicroOp))) else null
     val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
+
+    // to Dispatch
+    val numExist = Output(UInt((iqIdxWidth+1).W))
   })
 
   val srcAllNum = 3
@@ -230,6 +233,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     ),
     idQue(tail)
   ) // Note: direct by IQue's idx, different from deqSel
+
+  io.numExist := tailAll
+  assert(tailAll < 9.U)
 
   //-----------------------------------------
   // Wakeup and Bypass
