@@ -39,18 +39,17 @@ class Dispatch2 extends XSModule {
   }
 
   // inst indexes for reservation stations
-  val indexGen = Module(new DispatchGen())
-  indexGen.io.fromIntDq := io.fromIntDq
-  indexGen.io.fromFpDq := io.fromFpDq
-  indexGen.io.fromLsDq := io.fromLsDq
-  indexGen.io.emptySlots := DontCare // TODO: from issue queue
+  val rsIndexGen = Module(new DispatchGen())
+  rsIndexGen.io.fromIntDq := io.fromIntDq
+  rsIndexGen.io.fromFpDq := io.fromFpDq
+  rsIndexGen.io.fromLsDq := io.fromLsDq
+  rsIndexGen.io.busyIQ := DontCare // TODO: from issue queue
 
-  val instValid = indexGen.io.enqIQIndex.map(_.valid)
-  val allIndex = indexGen.io.enqIQIndex.map(_.bits)
+  val instValid = rsIndexGen.io.enqIQIndex.map(_.valid)
+  val allIndex = rsIndexGen.io.enqIQIndex.map(_.bits)
 
-  allIndex.zipWithIndex.map({case(index, i) => XSDebug(p"dispatch to iq index $i: ${instValid(i)}, $index\n")})
-//  XSDebug("%d %d %d %d %d %d %d %d\n", bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2),
-//    aluInstIdxs(3), mulInstIdx, muldivInstIdx, store0InstIdx)
+  allIndex.zipWithIndex.map({case(index, i) => XSDebug(instValid(i), p"dispatch to iq index $i: $index\n")})
+
   val bruInstIdx = Cat(!instValid(0), allIndex(0))
   val aluInstIdx = (0 until exuConfig.AluCnt).map(i => Cat(!instValid(1+i), allIndex(1+i)))
   val mulInstIdx = Cat(!instValid(5), allIndex(5))
@@ -62,34 +61,13 @@ class Dispatch2 extends XSModule {
   val storeInstIdx = Seq(Cat(!instValid(7), allIndex(7)), 4.U) //TODO: 15+i
 
   // regfile read ports
-  // regfile is sync-read, data can used at the next cycle
-  // BRU, MUL0, MUL1 can use the 8 read ports
-  // priority: ALU > BRU > MUL
-  val intExuIndex = WireInit(VecInit(Seq.fill(3)(0.U(2.W))))
-  val intDeqChoice = Wire(Vec(4, UInt(2.W)))
+  val regfileRPGen = Module(new RegfileReadPortGen())
+  regfileRPGen.io.enqIQIndex := rsIndexGen.io.enqIQIndex
   for (i <- 0 until 4) {
-    val readPortSrc = Seq(aluInstIdx(i), bruInstIdx, mulInstIdx, muldivInstIdx)
-    val wantReadPort = (0 until 4).map(j => (
-      if (i == 0) !readPortSrc(j)(2)
-      else {
-        val prevMax = (0 until i).map(intDeqChoice(_)).reduce((a, b) => Mux(a > b, a, b))
-        !readPortSrc(j)(2) && (j.U > prevMax || j.U === 0.U)
-      }))
-    val readIdxVec = Wire(Vec(4, UInt(2.W)))
-    for (j <- 0 until 4) {
-      readIdxVec(j) := readPortSrc(j)(1, 0)
-    }
-    intDeqChoice(i) := PriorityEncoder(wantReadPort)
-    XSDebug("int %d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), intDeqChoice(i))
-    val target = readIdxVec(intDeqChoice(i)(1, 0))
-    io.readIntRf(2 * i).addr := io.fromIntDq(target).bits.psrc1
-    io.readIntRf(2 * i + 1).addr := io.fromIntDq(target).bits.psrc2
+    io.readIntRf(2*i).addr := io.fromIntDq(regfileRPGen.io.readIntRf(i)).bits.psrc1
+    io.readIntRf(2*i+1).addr := io.fromIntDq(regfileRPGen.io.readIntRf(i)).bits.psrc2
+    XSDebug(p"regfile $i from ${regfileRPGen.io.readIntRf(i)}\n")
   }
-  // intExuIndex: which regfile read ports are assigned to BRU, MUL, MULDIV
-  for (j <- 0 until 3) {
-    intExuIndex(j) := PriorityEncoder((0 until 4).map(i => intDeqChoice(i) === (j + 1).U))
-  }
-  XSDebug("intExuIndex: %d %d %d\n", intExuIndex(0), intExuIndex(1), intExuIndex(2))
 
   // FMAC, FMISC can use the 12 read ports
   // priority: FMAC > FMISC
@@ -132,6 +110,10 @@ class Dispatch2 extends XSModule {
   io.readFpRf(3*FpDqDeqWidth).addr := io.fromLsDq(storeInstIdx(0)).bits.psrc1
   io.readFpRf(3*FpDqDeqWidth + 1).addr := io.fromLsDq(storeInstIdx(1)).bits.psrc1//TODO
 
+  for (i <- 0 until NRReadPorts) {
+    XSDebug(p"regfile $i: addr ${io.readIntRf(i).addr}, state ${io.intPregRdy(i)}\n")
+  }
+
   // insert into reservation station
   val instIdxes = Seq(bruInstIdx, aluInstIdx(0), aluInstIdx(1), aluInstIdx(2), aluInstIdx(3), mulInstIdx, muldivInstIdx,
     /*load0InstIdx, */storeInstIdx(0))
@@ -139,9 +121,7 @@ class Dispatch2 extends XSModule {
     if (i < exuConfig.IntExuCnt) {
       enq.valid := !instIdxes(i)(2) && io.fromIntDq(instIdxes(i)(1, 0)).valid
       enq.bits := io.fromIntDq(instIdxes(i)(1, 0)).bits
-      val startIndex = if (i == 0) 2.U * intExuIndex(0)
-        else if (i > 4) 2.U * intExuIndex(i - 4)
-        else (2 * (i - 1)).U
+      val startIndex = regfileRPGen.io.intIQRfSrc(i)
       enq.bits.src1State := io.intPregRdy(startIndex)
       enq.bits.src2State := io.intPregRdy(startIndex + 1.U)
     }
@@ -201,9 +181,9 @@ class Dispatch2 extends XSModule {
   }
 
   // TODO: store needs data from FpRegfile
-  val intExuIndexReg = Reg(Vec(3, UInt(2.W)))
+  val intExuIndexReg = Reg(Vec(exuConfig.IntExuCnt, UInt(2.W)))
   val fpExuIndexReg = Reg(Vec(2, UInt(2.W)))
-  (0 until 3).map(i => intExuIndexReg(i) := intExuIndex(i))
+  (0 until exuConfig.IntExuCnt).map(i => intExuIndexReg(i) := regfileRPGen.io.intIQRfSrc(i))
   (0 until 2).map(i => fpExuIndexReg(i) := fpExuIndex(i))
   // TODO: remove uop when reservation stations deal with imme
   val uop_reg = Reg(Vec(exuConfig.ExuCnt, new MicroOp))
@@ -216,9 +196,7 @@ class Dispatch2 extends XSModule {
 
     val srcIndex = Wire(Vec(3, UInt(4.W)))
     if (i < exuConfig.IntExuCnt) {
-      val startIndex = if (i == 0)2.U * intExuIndexReg(0)
-        else if (i > 4) 2.U * intExuIndexReg(i - 4)
-        else (2 * (i - 1)).U
+      val startIndex = intExuIndexReg(i)
       io.enqIQData(i).bits.src1 := Mux(uop_reg(i).ctrl.src1Type === SrcType.pc,
         uop_reg(i).cf.pc, io.readIntRf(startIndex).data)
       io.enqIQData(i).bits.src2 := Mux(uop_reg(i).ctrl.src2Type === SrcType.imm,

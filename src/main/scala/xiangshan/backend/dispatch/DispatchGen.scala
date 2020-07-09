@@ -3,8 +3,7 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.regfile.RfReadPort
-import xiangshan.utils.{XSDebug, XSInfo}
+import xiangshan.utils.{XSDebug}
 
 class DispatchGen extends XSModule {
   val io = IO(new Bundle() {
@@ -14,9 +13,12 @@ class DispatchGen extends XSModule {
     val fromLsDq = Flipped(Vec(LsDqDeqWidth, ValidIO(new MicroOp)))
 
     // enq Issue Queue
-    val emptySlots = Input(Vec(exuConfig.ExuCnt, UInt(3.W)))//TODO
-    val enqIQIndex = Vec(exuConfig.ExuCnt, ValidIO(UInt(2.W)))//TODO
+    val busyIQ = Input(Vec(exuConfig.ExuCnt, UInt(3.W)))//
+    val enqIQIndex = Vec(exuConfig.ExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W)))
   })
+
+  assert(IntDqDeqWidth >= FpDqDeqWidth)
+  assert(IntDqDeqWidth >= LsDqDeqWidth)
 
   def genIQIndex(exunum: Int, deqnum: Int, deq: Seq[Bool]) = {
     assert(isPow2(deqnum))
@@ -52,10 +54,9 @@ class DispatchGen extends XSModule {
   var startIndex = 0
   for (i <- 0 until allIndex.length) {
     for (j <- 0 until allCnt(i)) {
-      println(i, j, allIndex.length)
       io.enqIQIndex(startIndex + j).valid := !allIndex(i)(j)(2)
       io.enqIQIndex(startIndex + j).bits := allIndex(i)(j)(1, 0)
-      XSDebug(p"$i $j ${startIndex + j}: ${allIndex(i)(j)}\n")
+//      XSDebug(p"$i $j ${startIndex + j}: ${allIndex(i)(j)}\n")
     }
     startIndex += allCnt(i)
   }
