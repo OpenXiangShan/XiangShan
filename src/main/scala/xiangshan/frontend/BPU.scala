@@ -47,6 +47,7 @@ class BPUStage1 extends XSModule {
     // from Stage3
     val flush = Input(Bool())
     val s3RollBackHist = Input(UInt(HistoryLength.W))
+    val s3Taken = Input(Bool())
     // to ifu, quick prediction result
     val s1OutPred = ValidIO(new BranchPrediction)
     // to Stage2
@@ -128,6 +129,7 @@ class BPUStage1 extends XSModule {
   val btbTargets = Wire(Vec(predictWidth, UInt(VAddrBits.W)))
   val btbTypes = Wire(Vec(predictWidth, UInt(2.W)))
   // val btbPreds = Wire(Vec(FetchWidth, UInt(2.W)))
+  val btbCtrs = Wire(Vec(predictWidth, UInt(2.W)))
   val btbTakens = Wire(Vec(predictWidth, Bool()))
   val btbValids = Wire(Vec(predictWidth, Bool()))
 
@@ -144,6 +146,7 @@ class BPUStage1 extends XSModule {
   btbWayHits := 0.U.asTypeOf(Vec(BtbWays, Bool()))
   btbValids := 0.U.asTypeOf(Vec(predictWidth, Bool()))
   btbTargets := DontCare
+  btbCtrs := DontCare
   btbTakens := DontCare
   btbTypes := DontCare
   for (w <- 0 until BtbWays) {
@@ -153,6 +156,7 @@ class BPUStage1 extends XSModule {
       for (i <- until predictWidth) {
         btbValids(i) := btbDataRead(w)(i).valid
         btbTargets(i) := btbDataRead(w)(i).target
+        btbCtrs(i) := btbDataRead(w)(i).pred
         btbTakens(i) := (btbDataRead(w)(i).pred)(1).asBool
         btbTypes(i) := btbDataRead(w)(i)._type
       }
@@ -202,18 +206,109 @@ class BPUStage1 extends XSModule {
   )
 
   val jbtacBank = jbtacAddr.getBank(histXORAddrLatch)
-  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(histXORAddrLatch) && !flushS1 && jbtacFire(jbtacBank)
+  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !flushS1 && jbtacFire(jbtacBank)
   val jbtacHitIdx = jbtacRead(jbtacBank).offset
   val jbtacTarget = jbtacRead(jbtacBank).target
+
+  // choose one way as victim way
+  val btbWayInvalids = Cat(btbMetaRead.map(e => !e.valid)).asUInt
+  val victim = Mux(btbHit, btbHitWay, Mux(btbWayInvalids.orR, OHToUInt(LowestBit(btbWayInvalids)), LFSR64()(log2Up(BtbWays) - 1, 0)))
+
+  // calculate global history of each instr
+  val firstHist = RegNext(hist)
+  val histShift = Wire(Vec(FetchWidth, UInt(log2Up(FetchWidth).W)))
+  val btbNotTakens = Wire(Vec(FetchWidth, Bool()))
+  (0 until FetchWidth).map(i => btbNotTakens(i) := btbValids(i) && btbTypes(i) === BTBtype.B && !btbCtrs(1))
+  val shift = Wire(Vec(FetchWidth, Vec(FetchWidth, UInt(1.W))))
+  (0 until FetchWidth).map(i => shift(i) := Mux(!btbNotTakens(i), 0.U, ~LowerMask(UIntToOH(i.U), FetchWidth)).asTypeOf(Vec(FetchWidth, UInt(1.W))))
+  for (j <- 0 until FetchWidth) {
+    var tmp = 0.U
+    for (i <- 0 until FetchWidth) {
+      tmp = tmp + shift(i)(j)
+    }
+    histShift(j) := tmp
+  }
+  (0 until FetchWidth).map(i => io.s1OutPred.bits.hist(i) := firstHist << histShift(i))
+
+  // update btb, jbtac, ghr
+  val r = io.RedirectInfo.redirect
+  val updateFetchpc = r.pc - r.fetchIdx << 2.U
+  val updateMisPred = io.RedirectInfo.misPred
+  val updateFetchIdx = r.fetchIdx
+  val updateVictimWay = r.btbVictimWay
+  val updateOldCtr = r.btbPredCtr
+  // 1. update btb
+  // 1.1 calculate new 2-bit saturated counter value
+  val newPredCtr = Mux(!r.btbHitWay, "b01".U, Mux(r.taken, Mux(updateOldCtr === "b11".U, "b11".U, updateOldCtr + 1.U),
+                                                           Mux(updateOldCtr === "b00".U, "b00".U, updateOldCtr - 1.U)))
+  // 1.2 write btb
+  val updateBank = btbAddr.getBank(updateFetchpc)
+  val updateBankIdx = btbAddr.getBankIdx(updateFetchpc)
+  val updateWaymask = UIntToOH(updateFetchIdx)
+  val btbMetaWrite = Wire(btbMetaEntry())
+  btbMetaWrite.valid := true.B
+  btbMetaWrite.tag := btbAddr.getTag(updateFetchpc)
+  val btbDataWrite = Wire(btbDataEntry())
+  btbDataWrite.valid := true.B
+  btbDataWrite.target := r.brTarget
+  btbDataWrite.pred := newPredCtr
+  btbDataWrite._type := r._type
+  btbDataWrite.offset := DontCare
+  val btbWriteValid = io.redirectInfo.valid && (r._type === BTBtype.B || r._type === BTBtype.J)
+
+  for (w <- 0 until BtbWays) {
+    for (b <- 0 until BtbBanks) {
+      when (b.U === updateBank && w.U === updateVictimWay) {
+        btbMeta(w)(b).io.w.req.valid := btbWriteValid
+        btbMeta(w)(b).io.w.req.bits.setIdx := updateBankIdx
+        btbMeta(w)(b).io.w.req.bits.data := btbMetaWrite
+        btbData(w)(b).io.w.req.valid := btbWriteValid
+        btbData(w)(b).io.w.req.bits.setIdx := updateBankIdx
+        btbData(w)(b).io.w.req.bits.waymask := updateWaymask
+        btbData(w)(b).io.w.req.bits.data := btbDataWrite
+      }.otherwise {
+        btbMeta(w)(b).io.w.req.valid := false.B
+        btbData(w)(b).io.w.req.valid := false.B
+      }
+    }
+  }
+
+  // 2. update jbtac
+  val jbtacWrite = Wire(jbtacEntry())
+  val updateHistXORAddr = updateFetchpc ^ Cat(r.hist, 0.U(2.W))(VAddrBits - 1, 0)
+  jbtacWrite.valid := true.B
+  jbtacWrite.tag := jbtacAddr.getTag(updateFetchpc)
+  jbtacWrite.target := r.target
+  jbtacWrite.offset := updateFetchIdx
+  for (b <- 0 until JbtacBanks) {
+    when (b.U === jbtacAddr.getBank(updateHistXORAddr)) {
+      jbtac(b).io.w.req.valid := io.redirectInfo.valid && updateMisPred && r._type === BTBtype.I
+      jbtac(b).io.w.req.bits.setIdx := jbtacAddr.getBankIdx(updateHistXORAddr)
+      jbtac(b).io.w.req.bits.data := jbtacWrite
+    }
+  }
+
+  // 3. update ghr
+  updateGhr := io.s1OutPred.bits.redirect || io.flush
+  val brJumpIdx = Mux(!(btbHit && btbTaken), 0.U, UIntToOH(btbTakenIdx))
+  val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
+  //val newTaken = Mux(io.redirectInfo.flush(), !(r._type === BTBtype.B && !r.taken), )
+  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r._type === BTBtype.B && !r.taken),
+            Mux(io.flush,                   Mux(io.s3Taken, io.s3RollBackHist << 1.U | 1.U, io.s3RollBackHist),
+            Mux(io.s1OutPred.bits.redirect, PriorityMux(brJumpIdx | indirectIdx, io.s1OutPred.bits.hist) << 1.U | 1.U,
+                                            io.s1OutPred.bits.hist(0) << PopCount(btbNotTakens))))
 
   // redirect based on BTB and JBTAC
   io.out.valid := RegNext(io.in.pc.fire()) && !flushS1
 
   io.s1OutPred.valid := io.out.valid
   io.s1OutPred.bits.redirect := btbHit && btbTaken || jbtacHit
-  io.s1OutPred.bits.instrValid := LowerMask(UIntToOH(btbTakenIdx), FetchWidth) & LowerMask(UIntToOH(jbtacHitIdx), FetchWidth)
-  io.s1OutPred.bits.target := Mux(btbTakenIdx < jbtacHitIdx, btbTakenTarget, jbtacTarget)
-  io.s1OutPred.bits.hist := DontCare  //////////////////////TODO
+  // io.s1OutPred.bits.instrValid := LowerMask(UIntToOH(btbTakenIdx), FetchWidth) & LowerMask(UIntToOH(jbtacHitIdx), FetchWidth)
+  io.s1OutPred.bits.instrValid := Mux(io.s1OutPred.bits.redirect, LowerMask(LowestBit(brJumpIdx | indirectIdx)), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
+  io.s1OutPred.bits.target := Mux(brJumpIdx === LowestBit(brJumpIdx | indirectIdx), btbTakenTarget, jbtacTarget)
+  io.s1OutPred.bits.btbVictimWay := victim
+  io.s1OutPred.bits.predCtr := btbCtrs
+  io.s1OutPred.bits.btbHitWay := btbHit
   io.s1OutPred.bits.rasSp := DontCare
   io.s1OutPred.bits.rasTopCtr := DontCare
 
@@ -222,7 +317,8 @@ class BPUStage1 extends XSModule {
   (0 until FetchWidth).map(i => io.out.bits.btb.targets(i) := btbTargets(i))
   io.out.bits.jbtac.hitIdx := UIntToOH(jbtacHitIdx)
   io.out.bits.jbtac.target := jbtacTarget
-  io.out.bits.hist := DontCare  //////////////////////TODO
+  // TODO: we don't need this repeatedly!
+  io.out.bits.hist := io.s1OutPred.bits.hist
   io.out.bits.btbPred := io.s1OutPred
 
   io.in.pc.ready := true.B
@@ -262,6 +358,7 @@ class BPUStage3 extends XSModule {
     val flushBPU = Output(Bool())
     // to Stage1, restore ghr in stage1 when flushBPU is valid
     val s1RollBackHist = Output(UInt(HistoryLength.W))
+    val s3Taken = Output(Bool())
   })
 
   val flushS3 = BoolStopWatch(io.flush, io.in.fire(), startHighPriority = true)
@@ -303,9 +400,12 @@ class BPUStage3 extends XSModule {
   io.out.bits.redirect := jmpIdx.orR.asBool
   io.out.bits.target := Mux(jmpIdx === retIdx, rasTopAddr,
     Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
-    Mux(jmpIdx === 0.U, inLatch.pc + 4.U, // TODO: RVC
+    Mux(jmpIdx === 0.U, inLatch.pc + 32.U, // TODO: RVC
     PriorityMux(jmpIdx, inLatch.btb.targets))))
-  io.out.bits.instrValid := LowerMask(jmpIdx, FetchWidth).asTypeOf(Vec(FetchWidth, Bool()))
+  io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth).asTypeOf(Vec(FetchWidth, Bool())), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
+  io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
+  io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
+  io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
   io.out.bits.tageMeta := inLatch.btbPred.bits.tageMeta
   //io.out.bits._type := Mux(jmpIdx === retIdx, BTBtype.R,
   //  Mux(jmpIdx === jalrIdx, BTBtype.I,
@@ -360,7 +460,9 @@ class BPUStage3 extends XSModule {
   }
 
   // roll back global history in S1 if S3 redirects
-  io.s1RollBackHist := PriorityMux(jmpIdx, io.out.bits.hist)
+  io.s1RollBackHist := Mux(io.s3Taken, PriorityMux(jmpIdx, io.out.bits.hist), io.out.bits.hist(0) << PopCount(brIdx & ~inLatch.tage.takens.asUInt))
+  // whether Stage3 has a taken jump
+  io.s3Taken := jmpIdx.orR.asBool
 }
 
 class BPU extends XSModule {
@@ -389,6 +491,7 @@ class BPU extends XSModule {
   s1.io.in.pc.bits <> io.in.pc.bits
   io.btbOut <> s1.io.s1OutPred
   s1.io.s3RollBackHist := s3.io.s1RollBackHist
+  s1.io.s3Taken := s3.io.s3Taken
 
   s1.io.out <> s2.io.in
   s2.io.flush := s3.io.flushBPU || io.redirectInfo.flush()

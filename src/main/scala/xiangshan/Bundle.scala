@@ -43,11 +43,15 @@ class BranchPrediction extends XSBundle {
   val instrValid = Vec(FetchWidth, Bool())
   // target of the first redirect instr in a fetch package
   val target = UInt(VAddrBits.W)
-  // val _type = UInt(2.W)
 
   // save these info in brq!
   // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
   val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  // victim way when updating btb
+  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  // 2-bit saturated counter 
+  val predCtr = Vec(FetchWidth, UInt(2.W))
+  val btbHitWay = Bool()
   // tage meta info
   val tageMeta = Vec(FetchWidth, (new TageMeta))
   // ras checkpoint, only used in Stage3
@@ -115,6 +119,9 @@ class Redirect extends XSBundle {
   val hist = UInt(HistoryLength.W)
   val tageMeta = new TageMeta
   val fetchIdx = UInt(log2Up(FetchWidth).W)
+  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  val btbPredCtr = UInt(2.W)
+  val btbHitWay = Bool()
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val isException = Bool()
