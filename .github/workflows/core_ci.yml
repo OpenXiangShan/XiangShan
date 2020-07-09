@@ -8,16 +8,25 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    name: Generate Verilog
+   build-emu:
+    runs-on: self-hosted
+    name: Make EMU
     steps:
        - uses: actions/checkout@v2
-        
-       - name: Set Up Mill
-         uses: jodersky/setup-mill@master
-         with:
-           mill-version: 0.7.3
-         
-       - name: Complile
-         run: make verilog
+       
+       - name: Build EMU
+         run: make ./build/emu -j80
+
+  cputest:
+    runs-on: self-hosted
+    name: Run cputest
+    needs: [build-emu]
+    steps:
+      - uses: actions/checkout@v2
+      - env:
+          AM_HOME: /home/ci-runner/xsenv/nexus-am
+          NEMU_HOME: /home/ci-runner/xsenv/NEMU
+          NOOP_HOME: $(PWD)
+      - name: Run cpu test
+        run: make -C $(AM_HOME)/tests/cputest/ ARCH=riscv64-noop V=OFF run
+
