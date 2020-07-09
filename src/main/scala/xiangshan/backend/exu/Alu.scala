@@ -53,6 +53,9 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   val target = Mux(isBranch, pc + offset, adderRes)(VAddrBits-1,0)
   val isRVC = uop.cf.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
 
+  //TODO fix me
+  io.out.bits.redirect := DontCare
+
   io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   io.out.bits.redirectValid := io.out.valid && isBru//isBranch
