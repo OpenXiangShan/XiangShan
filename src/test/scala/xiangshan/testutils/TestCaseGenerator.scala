@@ -6,7 +6,7 @@ import chisel3.experimental.BundleLiterals._
 import chiseltest._
 import noop.MDUOpType
 import xiangshan._
-import xiangshan.backend.exu.{ALUOpType, LSUOpType}
+import xiangshan.backend._
 
 object TestCaseGenerator {
 
@@ -61,15 +61,15 @@ object TestCaseGenerator {
   }
 
   def genLsuLd(x: => ExuInput, base: Long, offset: Long) =
-    genLsuInput(LSUOpType.ld)(x, base, offset, 0)
+    genLsuInput(LDUOpType.ld)(x, base, offset, 0)
 
   def genLsuLw(x: => ExuInput, base: Long, offset: Long) =
-    genLsuInput(LSUOpType.lw)(x, base, offset, 0)
+    genLsuInput(LDUOpType.lw)(x, base, offset, 0)
 
   def genLsuSd(x: => ExuInput, base: Long, offset: Long, stData: Long) =
-    genLsuInput(LSUOpType.sd)(x, base, offset, stData)
+    genLsuInput(STUOpType.sd)(x, base, offset, stData)
 
   def genLsuSw(x: => ExuInput, base: Long, offset: Long, stData: Long) =
-    genLsuInput(LSUOpType.sw)(x, base, offset, stData)
+    genLsuInput(STUOpType.sw)(x, base, offset, stData)
 
 }
