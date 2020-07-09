@@ -27,35 +27,36 @@ class Dispatch2 extends XSModule {
   // inst indexes for reservation stations
   // append a true.B to avoid PriorityEncode(0000) -> 3
   // if find a target uop, index[2] == 0, else index[2] == 1
-  val bruInstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.bru) :+ true.B)
-  val alu0InstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.alu) :+ true.B)
-  val alu1InstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.alu && i.U > alu0InstIdx
-  }) :+ true.B)
-  val alu2InstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.alu && i.U > alu1InstIdx
-  }) :+ true.B)
-  val alu3InstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.alu && i.U > alu2InstIdx
-  }) :+ true.B)
-  val mulInstIdx = PriorityEncoder(io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mul) :+ true.B)
-  val muldivInstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (uop, i) =>
-    (uop.bits.ctrl.fuType === FuType.mul && i.U > mulInstIdx) || uop.bits.ctrl.fuType === FuType.mdu
+  val bruInstIdx = PriorityEncoder(io.fromIntDq.map(deq => deq.bits.ctrl.fuType === FuType.bru && deq.valid) :+ true.B)
+  val aluInstIdxsTry = RegInit(VecInit(Seq.tabulate(exuConfig.AluCnt)(i => i.U(2.W))))
+  val aluInstIdxs = Wire(Vec(exuConfig.AluCnt, UInt(3.W)))
+  for (i <- 0 until exuConfig.AluCnt) {
+    assert(exuConfig.AluCnt == IntDqDeqWidth)
+    // 0 -> 1 -> 2 -> 3 -> 0
+    aluInstIdxsTry(i) := aluInstIdxsTry(i) + 1.U
+    val deqAluInvalid = io.fromIntDq(aluInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.alu || !io.fromIntDq(aluInstIdxsTry(i)).valid
+    aluInstIdxs(i) := Cat(deqAluInvalid.asUInt(), aluInstIdxsTry(i))
+  }
+  val mulInstIdx = PriorityEncoder(io.fromIntDq.map(deq => deq.bits.ctrl.fuType === FuType.mul && deq.valid) :+ true.B)
+  val muldivInstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (deq, i) =>
+    ((deq.bits.ctrl.fuType === FuType.mul && i.U > mulInstIdx) || deq.bits.ctrl.fuType === FuType.mdu) && deq.valid
   }) :+ true.B)
 
-  val fmac0InstIdx = PriorityEncoder(io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmac) :+ true.B)
-  val fmac1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.fmac && i.U > fmac0InstIdx
-  }) :+ true.B)
-  val fmac2InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.fmac && i.U > fmac1InstIdx
-  }) :+ true.B)
-  val fmac3InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.fmac && i.U > fmac2InstIdx
-  }) :+ true.B)
-  val fmisc0InstIdx = PriorityEncoder(io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmisc) :+ true.B)
-  val fmisc1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (uop, i) =>
-    (uop.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || uop.bits.ctrl.fuType === FuType.fmiscDivSqrt
+  // TODO uncomment when FmacCnt > 0
+  val fmacInstIdxsTry = Reg(Vec(exuConfig.FmacCnt, UInt(2.W)))
+//  val fmacInstIdxsTry = RegInit(VecInit(Seq.tabulate(exuConfig.FmacCnt)(i => i.U(2.W))))
+  val fmacInstIdxs = Wire(Vec(exuConfig.FmacCnt, UInt(3.W)))
+//  val deqFmacInstIdxs = RegInit(VecInit(Seq.tabulate(exuConfig.FmacCnt)(i => i.U(2.W))))
+  for (i <- 0 until exuConfig.FmacCnt) {
+    assert(exuConfig.FmacCnt == FpDqDeqWidth)
+    // 0 -> 1 -> 2 -> 3 -> 0
+    fmacInstIdxsTry(i) := fmacInstIdxsTry(i) + 1.U
+    val deqFmacInvalid = io.fromFpDq(fmacInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.fmac || !io.fromFpDq(fmacInstIdxsTry(i)).valid
+    fmacInstIdxs(i) := Cat(deqFmacInvalid.asUInt(), fmacInstIdxsTry(i))
+  }
+  val fmisc0InstIdx = PriorityEncoder(io.fromFpDq.map(deq => deq.bits.ctrl.fuType === FuType.fmisc && deq.valid) :+ true.B)
+  val fmisc1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (deq, i) =>
+    ((deq.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || deq.bits.ctrl.fuType === FuType.fmiscDivSqrt) && deq.valid
   }) :+ true.B)
 
   // TODO: currently there's only one load/store reservation station
@@ -69,52 +70,71 @@ class Dispatch2 extends XSModule {
     uop.bits.ctrl.fuType === FuType.stu && i.U > store0InstIdx
   }) :+ true.B)
 
+  XSDebug("%d %d %d %d %d %d %d %d\n", bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2),
+    aluInstIdxs(3), mulInstIdx, muldivInstIdx, store0InstIdx)
+
   // regfile read ports
   // regfile is sync-read, data can used at the next cycle
   // BRU, MUL0, MUL1 can use the 8 read ports
   // priority: ALU > BRU > MUL
   val intExuIndex = WireInit(VecInit(Seq.fill(3)(0.U(2.W))))
-  val aluInstIdxs = Seq(alu0InstIdx, alu1InstIdx, alu2InstIdx, alu3InstIdx)
+  val intDeqChoice = Wire(Vec(4, UInt(2.W)))
   for (i <- 0 until 4) {
     val readPortSrc = Seq(aluInstIdxs(i), bruInstIdx, mulInstIdx, muldivInstIdx)
-    val wantReadPort = readPortSrc.map(a => !a(2))
+    val wantReadPort = (0 until 4).map(j => (
+      if (i == 0) !readPortSrc(j)(2)
+      else {
+        val prevMax = (0 until i).map(intDeqChoice(_)).reduce((a, b) => Mux(a > b, a, b))
+        !readPortSrc(j)(2) && (j.U > prevMax || j.U === 0.U)
+      }))
     val readIdxVec = Wire(Vec(4, UInt(2.W)))
     for (j <- 0 until 4) {
       readIdxVec(j) := readPortSrc(j)(1, 0)
     }
-    val deqChoice = PriorityEncoder(wantReadPort)
-    val target = readIdxVec(deqChoice)
+    intDeqChoice(i) := PriorityEncoder(wantReadPort)
+    XSDebug("int %d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), intDeqChoice(i))
+    val target = readIdxVec(intDeqChoice(i)(1, 0))
     io.readIntRf(2 * i).addr := io.fromIntDq(target).bits.psrc1
     io.readIntRf(2 * i + 1).addr := io.fromIntDq(target).bits.psrc2
-    for (j <- 0 until 3) {
-      when (deqChoice === (j + 1).U) {
-        intExuIndex(j) := i.U
-      }
-    }
   }
+  // intExuIndex: which regfile read ports are assigned to BRU, MUL, MULDIV
+  for (j <- 0 until 3) {
+    intExuIndex(j) := PriorityEncoder((0 until 4).map(i => intDeqChoice(i) === (j + 1).U))
+  }
+  XSDebug("intExuIndex: %d %d %d\n", intExuIndex(0), intExuIndex(1), intExuIndex(2))
 
   // FMAC, FMISC can use the 12 read ports
   // priority: FMAC > FMISC
   val fpExuIndex = WireInit(VecInit(Seq.fill(2)(0.U(2.W))))
-  val fmacInstIdxs = Seq(fmac0InstIdx, fmac1InstIdx, fmac2InstIdx, fmac3InstIdx)
-  for (i <- 0 until 4) {
+  val fpDeqChoice = Wire(Vec(4, UInt(2.W)))
+  fpDeqChoice := DontCare
+  for (i <- 0 until exuConfig.FmacCnt) {
     val readPortSrc = Seq(fmacInstIdxs(i), fmisc0InstIdx, fmisc1InstIdx)
-    val wantReadPort = readPortSrc.map(a => !a(2))
+    val wantReadPort = (0 until 3).map(j => (
+      if (i == 0) !readPortSrc(j)(2)
+      else {
+        val prevMax = (0 until i).map(fpDeqChoice(_)).reduce((a, b) => Mux(a > b, a, b))
+        !readPortSrc(j)(2) && (j.U > prevMax || j.U === 0.U)
+      }))
     val readIdxVec = Wire(Vec(3, UInt(2.W)))
     for (j <- 0 until 3) {
       readIdxVec(j) := readPortSrc(j)(1, 0)
     }
-    val deqChoice = PriorityEncoder(wantReadPort)
-    val target = readIdxVec(deqChoice)
+    fpDeqChoice(i) := PriorityEncoder(wantReadPort)
+    XSDebug("fp %d: want %b, deqChoice: %d\n", i.U, Cat(wantReadPort), fpDeqChoice(i))
+    val target = readIdxVec(fpDeqChoice(i))
     io.readFpRf(3 * i).addr := io.fromFpDq(target).bits.psrc1
     io.readFpRf(3 * i + 1).addr := io.fromFpDq(target).bits.psrc2
     io.readFpRf(3 * i + 2).addr := io.fromFpDq(target).bits.psrc3
-    for (j <- 0 until 2) {
-      when (deqChoice === (j + 1).U) {
-        fpExuIndex(j) := i.U
-      }
-    }
   }
+  // fpExuIndex: which regfile read ports are assigned to FMISC0 FMISC1
+  for (j <- 0 until (exuConfig.FmiscCnt + exuConfig.FmiscDivSqrtCnt)) {
+    fpExuIndex(j) := PriorityEncoder((0 until 4).map(i => fpDeqChoice(i) === (j + 1).U))
+  }
+  XSDebug("fpExuIndex: %d %d\n", fpExuIndex(0), fpExuIndex(1))
+
+  // TODO uncomment me when fmac > 0
+  io.readFpRf <> DontCare
   io.readIntRf(2*IntDqDeqWidth).addr := io.fromLsDq(load0InstIdx).bits.psrc1
   io.readIntRf(2*IntDqDeqWidth + 1).addr := io.fromLsDq(load1InstIdx).bits.psrc1
   io.readIntRf(2*IntDqDeqWidth + 2).addr := io.fromLsDq(store0InstIdx).bits.psrc1
@@ -125,7 +145,7 @@ class Dispatch2 extends XSModule {
   io.readFpRf(3*FpDqDeqWidth + 1).addr := io.fromLsDq(store1InstIdx).bits.psrc1
 
   // insert into reservation station
-  val instIdxes = Seq(bruInstIdx, alu0InstIdx, alu1InstIdx, alu2InstIdx, alu3InstIdx,
+  val instIdxes = Seq(bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2), aluInstIdxs(3), mulInstIdx, muldivInstIdx,
     /*load0InstIdx, */store0InstIdx)
   io.enqIQCtrl.zipWithIndex map { case (enq, i) =>
     if (i < exuConfig.IntExuCnt) {
@@ -220,7 +240,7 @@ class Dispatch2 extends XSModule {
       srcIndex(2) := 0.U
     }
     else if (i < exuConfig.IntExuCnt + exuConfig.FpExuCnt) {
-      val startIndex = if (i < exuConfig.IntExuCnt + 4) (3 * (i-exuConfig.IntExuCnt)).U
+      val startIndex = if (i < exuConfig.IntExuCnt + 4) (3 * (i - exuConfig.IntExuCnt)).U
         else 3.U * fpExuIndexReg(i - exuConfig.IntExuCnt - 4)
       io.enqIQData(i).bits.src1 := io.readFpRf(startIndex).data
       io.enqIQData(i).bits.src2 := io.readFpRf(startIndex + 1.U).data

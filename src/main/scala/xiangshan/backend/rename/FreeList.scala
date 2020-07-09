@@ -3,6 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.utils.XSDebug
 
 trait HasFreeListConsts extends HasXSParameter {
   def FL_SIZE: Int = NRPhyRegs-32
@@ -24,6 +25,11 @@ class FreeListPtr extends Bundle with HasFreeListConsts {
   final def ===(that: FreeListPtr): Bool = {
     (this.value===that.value) && (this.flag===that.flag)
   }
+
+  override def toPrintable: Printable = {
+    p"$flag:$value"
+  }
+
 }
 
 object FreeListPtr {
@@ -62,6 +68,7 @@ class FreeList extends XSModule with HasFreeListConsts {
   for((deallocValid, deallocReg) <- io.deallocReqs.zip(io.deallocPregs)){
     when(deallocValid){
       freeList(tailPtrNext.value) := deallocReg
+      XSDebug(p"dealloc preg: $deallocReg\n")
     }
     tailPtrNext = tailPtrNext + deallocValid
   }
@@ -78,11 +85,18 @@ class FreeList extends XSModule with HasFreeListConsts {
     headPtrNext = headPtrNext + (allocReq && canAlloc)
     allocPtr := headPtrNext
     empty = isEmpty(headPtrNext, tailPtr)
+    XSDebug(p"req:$allocReq canAlloc:$canAlloc pdest:$pdest headNext:$headPtrNext\n")
   }
 
   headPtr := Mux(io.redirect.valid,
     io.redirect.bits.freelistAllocPtr, // mispredict or exception happen
     headPtrNext
   )
+
+  XSDebug(p"head:$headPtr tail:$tailPtr\n")
+
+  XSDebug(io.redirect.valid, p"redirect: ptr=${io.redirect.bits.freelistAllocPtr}\n")
+
+
 
 }

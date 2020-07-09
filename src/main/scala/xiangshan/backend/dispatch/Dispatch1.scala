@@ -31,8 +31,8 @@ class Dispatch1 extends XSModule{
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
-    cancelled(i) := ((io.fromRename(i).bits.brMask & UIntToOH(io.redirect.bits.brTag)) =/= 0.U) && io.redirect.valid
-    XSDebug(io.redirect.valid, p"pc=${Hexadecimal(io.fromRename(i).bits.cf.pc)} brMask:${Binary(io.fromRename(i).bits.brMask)} brTag:${io.redirect.bits.brTag}\n")
+    cancelled(i) := io.fromRename(i).bits.brTag.needFlush(io.redirect)
+    XSDebug(io.redirect.valid, p"pc=${Hexadecimal(io.fromRename(i).bits.cf.pc)} brTag:${io.redirect.bits.brTag}\n")
   }
 
   // enqueue handshake
@@ -46,12 +46,12 @@ class Dispatch1 extends XSModule{
     io.recv(i) := (enq_ready(i) && enq_valid(i)) || cancelled(i)
     XSInfo(io.recv(i) && !cancelled(i), "pc 0x%x accepted by queue %x %x %x\n",
       io.fromRename(i).bits.cf.pc, io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
-    XSInfo(io.recv(i) && cancelled(i), "pc 0x%x with brMask %x brTag %x cancelled\n",
-      io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.brMask, io.redirect.bits.brTag)
+    XSInfo(io.recv(i) && cancelled(i), "pc 0x%x with brTag %x cancelled\n",
+      io.fromRename(i).bits.cf.pc, io.redirect.bits.brTag.value)
   }
 
   // latch indexes from roq in case of DQ not fire
-  val roqIndexReg = Reg(Vec(RenameWidth, UInt((1 + RoqIdxWidth).W)))
+  val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   for (i <- 0 until RenameWidth) {
     // dispatch queue does not accept the MicroOp
@@ -72,7 +72,7 @@ class Dispatch1 extends XSModule{
   val uop_nroq = Wire(Vec(RenameWidth, new MicroOp))
   for (i <- 0 until RenameWidth) {
     uop_nroq(i) := io.fromRename(i).bits
-    uop_nroq(i).roqIdx := Mux(io.toRoq(i).ready, io.roqIdxs(i), roqIndexReg(i))
+    uop_nroq(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
   }
 
   // uop can enqueue when rename.valid and roq.valid
@@ -99,7 +99,7 @@ class Dispatch1 extends XSModule{
         "roq handshake not continuous %d", i.U)
     }
     io.fromRename(i).ready := all_recv
-    XSDebug(io.fromRename(i).valid, "pc 0x%x of type %b is in %d-th slot\n",
-      io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
+    XSDebug("v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
+      io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
 }

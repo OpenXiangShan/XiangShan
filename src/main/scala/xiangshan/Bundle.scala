@@ -3,6 +3,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import bus.simplebus._
+import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 
 // Fetch FetchWidth x 32-bit insts from Icache
@@ -41,8 +42,7 @@ class CtrlSignals extends XSBundle {
 class CfCtrl extends XSBundle {
   val cf = new CtrlFlow
   val ctrl = new CtrlSignals
-  val brMask = UInt(BrqSize.W)
-  val brTag = UInt(BrTagWidth.W)
+  val brTag = new BrqPtr
 }
 
 // CfCtrl -> MicroOp at Rename Stage
@@ -56,10 +56,19 @@ class MicroOp extends CfCtrl {
 
 class Redirect extends XSBundle {
   val target = UInt(VAddrBits.W)
-  val brTag = UInt(BrTagWidth.W)
+  val brTag = new BrqPtr
   val isException = Bool()
-  val roqIdx = UInt(ExtendedRoqIdxWidth.W)
+  val roqIdx = UInt(RoqIdxWidth.W)
   val freelistAllocPtr = new FreeListPtr
+}
+
+class RedirectInfo extends XSBundle {
+
+  val valid = Bool() // a valid commit form brq/roq
+  val misPred = Bool() // a branch miss prediction ?
+  val redirect = new Redirect
+
+  def flush():Bool = valid && (redirect.isException || misPred)
 }
 
 class Dp1ToDp2IO extends XSBundle {
@@ -104,6 +113,6 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirectInfo = Input(new RedirectInfo)
   val commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit))) // update branch pred
 }
