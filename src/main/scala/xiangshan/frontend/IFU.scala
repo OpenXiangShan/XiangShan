@@ -61,6 +61,7 @@ class IFU extends XSModule with HasIFUConst
     val if1_pcUpdate = io.redirectInfo.flush() || if1_fire
 
     when(RegNext(reset.asBool) && !reset.asBool){
+    //when((GTimer() === 501.U)){ //TODO:this is ugly
       XSDebug("RESET....\n")
       if1_npc := resetVector.U(VAddrBits.W)
     } .otherwise{
@@ -165,7 +166,7 @@ class IFU extends XSModule with HasIFUConst
 
     //Output -> iBuffer
     //io.fetchPacket <> DontCare
-    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid)
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
@@ -183,7 +184,7 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
     bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 2) //TODO: consider RVC
 
-    io.icacheResp.ready := io.fetchPacket.ready 
+    io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }
 
