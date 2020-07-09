@@ -95,9 +95,9 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val popOne = Wire(Bool())
   io.enqCtrl.ready := !full || popOne
   val enqSelIq = Wire(UInt(iqIdxWidth.W))
-  val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.src1State), true.B, io.enqCtrl.bits.src1State === SrcState.rdy),
-                       Mux(SrcType.isPcImm(io.enqCtrl.bits.src2State), true.B, io.enqCtrl.bits.src2State === SrcState.rdy),
-                       Mux(SrcType.isPcImm(io.enqCtrl.bits.src3State), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
+  val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.ctrl.src1Type), true.B, io.enqCtrl.bits.src1State === SrcState.rdy),
+                       Mux(SrcType.isPcImm(io.enqCtrl.bits.ctrl.src2Type), true.B, io.enqCtrl.bits.src2State === SrcState.rdy),
+                       Mux(SrcType.isPcImm(io.enqCtrl.bits.ctrl.src3Type), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
 
   // state enq
   when (enqFire) {
