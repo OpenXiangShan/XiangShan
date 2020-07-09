@@ -83,6 +83,12 @@ class FakeCache extends XSModule with HasICacheConst {
     ).foreach(_ := 0.U)
   }
 
+  XSDebug("[ICache-Stage1] s1_valid:%d || s2_ready:%d || s1_pc:%d",s1_valid,s2_ready,gpc)
+  XSDebug(s1_fire,"------> s1 fire!!!")
+  XSDebug(false,true.B,"\n")
+
+  XSDebug("[Stage1_data] instr1:0x%x   instr2:0x%x\n",ramOut(0).asUInt,ramOut(1).asUInt)
+
   //----------------
   //  ICache Stage2
   //----------------
@@ -92,7 +98,11 @@ class FakeCache extends XSModule with HasICacheConst {
   val s2_fire  = s2_valid && s3_ready
 
   s2_ready := s2_fire || !s2_valid
+  XSDebug("[ICache-Stage2] s2_valid:%d || s3_ready:%d ",s2_valid,s3_ready)
+  XSDebug(s2_fire,"------> s2 fire!!!")
+  XSDebug(false,true.B,"\n")
 
+  XSDebug("[Stage2_data] instr1:0x%x   instr2:0x%x\n",s2_ram_out(0).asUInt,s2_ram_out(1).asUInt)
   //----------------
   //  ICache Stage3
   //----------------
@@ -102,6 +112,11 @@ class FakeCache extends XSModule with HasICacheConst {
   s3_ready := io.out.ready
 
   val needflush = io.in.bits.flush
+  XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
+  XSDebug(false,true.B,"\n")
+
+  XSDebug("[Stage3_data] instr1:0x%x   instr2:0x%x\n",s3_ram_out(0).asUInt,s3_ram_out(1).asUInt)
+  XSDebug("[needFlush]] flush:%d\n",needflush)
 
   when(needflush){
       s2_valid := false.B
