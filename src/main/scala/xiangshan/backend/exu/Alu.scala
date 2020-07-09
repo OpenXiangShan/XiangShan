@@ -5,51 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
 import xiangshan.utils._
-import xiangshan.backend.regfile.RfWritePort
-import xiangshan.backend.decode.isa.RV32I_BRUInstr
-
-object ALUOpType {
-  def add  = "b000000".U
-  def sll  = "b000001".U
-  def slt  = "b000010".U
-  def sltu = "b000011".U
-  def xor  = "b000100".U
-  def srl  = "b000101".U
-  def or   = "b000110".U
-  def and  = "b000111".U
-  def sub  = "b001000".U
-  def sra  = "b001101".U
-
-  def addw = "b100000".U
-  def subw = "b101000".U
-  def sllw = "b100001".U
-  def srlw = "b100101".U
-  def sraw = "b101101".U
-
-  def isWordOp(func: UInt) = func(5)
-
-  // TODO: move jal/jalr/call/ret from ALU to BRU&CSR
-  def jal  = "b011000".U
-  def jalr = "b011010".U
-  // def cjalr= "b111010".U // pc + 2 instead of 4
-  def beq  = "b010000".U
-  def bne  = "b010001".U
-  def blt  = "b010100".U
-  def bge  = "b010101".U
-  def bltu = "b010110".U
-  def bgeu = "b010111".U
-
-  // for RAS
-  def call = "b011100".U
-  def ret  = "b011110".U
-
-  // def pcPlus2(func: UInt) = func(5)//[important]
-  def isBranch(func: UInt) = func(4,3)===2.U
-  def isBru(func: UInt) = func(4)
-  def isJump(func: UInt) = func(4,3)===3.U//isBru(func) && !isBranch(func)
-  def getBranchType(func: UInt) = func(2, 1)
-  def isBranchInvert(func: UInt) = func(0)
-}
+import xiangshan.backend._
 
 class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   override def toString: String = "Alu"
@@ -99,19 +55,13 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
 
   io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
-  //TODO fix me
-  io.out.bits.redirect := DontCare
-
   io.out.bits.redirectValid := io.out.valid && isBru//isBranch
-  io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
-  io.out.bits.redirect.brTarget := target
   io.out.bits.redirect.brTag := uop.brTag
-  io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
-  io.out.bits.redirect.taken := taken
   io.out.bits.redirect.isException := DontCare // false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
   io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
+
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(isJump, pcLatchSlot, aluRes)
