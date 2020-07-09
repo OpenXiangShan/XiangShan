@@ -21,7 +21,7 @@ case class ExuConfig
   assert(BruCnt == 1, "Only support 1 Bru now!")
   def IntExuCnt = AluCnt + MulCnt + MduCnt + BruCnt
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
-  def ExuCnt = IntExuCnt + FpExuCnt + LduCnt
+  def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
   def NRFuType = 9
   def FuOpWidth = 7
 }
@@ -91,7 +91,7 @@ trait HasExeUnits{
   val fmacExeUnits = Array.tabulate(exuConfig.FmacCnt)(_ => Module(new Fmac))
   val fmiscExeUnits = Array.tabulate(exuConfig.FmiscCnt)(_ => Module(new Fmisc))
   val fmiscDivSqrtExeUnits = Array.tabulate(exuConfig.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val lsuExeUnits = Array.tabulate(exuConfig.LduCnt)(_ => Module(new Lsu))
+  val lsuExeUnits = Array.tabulate(exuConfig.StuCnt)(_ => Module(new Lsu))
 
   val exeUnits = bruExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++
     fmacExeUnits ++ fmiscExeUnits ++ fmiscDivSqrtExeUnits ++ lsuExeUnits)

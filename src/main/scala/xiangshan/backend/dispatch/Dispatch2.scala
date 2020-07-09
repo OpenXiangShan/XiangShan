@@ -24,54 +24,42 @@ class Dispatch2 extends XSModule {
     val enqIQCtrl = Vec(exuConfig.ExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuConfig.ExuCnt, ValidIO(new ExuInput))
   })
+
+  for (i <- 0 until IntDqDeqWidth) {
+    XSDebug(io.fromIntDq(i).valid,
+      p"int dp queue $i: ${Hexadecimal(io.fromIntDq(i).bits.cf.pc)} type ${Binary(io.fromIntDq(i).bits.ctrl.fuType)}\n")
+  }
+  for (i <- 0 until FpDqDeqWidth) {
+    XSDebug(io.fromFpDq(i).valid,
+      p"fp dp queue $i: ${Hexadecimal(io.fromFpDq(i).bits.cf.pc)} type ${Binary(io.fromFpDq(i).bits.ctrl.fuType)}\n")
+  }
+  for (i <- 0 until LsDqDeqWidth) {
+    XSDebug(io.fromLsDq(i).valid,
+      p"ls dp queue $i: ${Hexadecimal(io.fromLsDq(i).bits.cf.pc)} type ${Binary(io.fromLsDq(i).bits.ctrl.fuType)}\n")
+  }
+
   // inst indexes for reservation stations
-  // append a true.B to avoid PriorityEncode(0000) -> 3
-  // if find a target uop, index[2] == 0, else index[2] == 1
-  val bruInstIdx = PriorityEncoder(io.fromIntDq.map(deq => deq.bits.ctrl.fuType === FuType.bru && deq.valid) :+ true.B)
-  val aluInstIdxsTry = RegInit(VecInit(Seq.tabulate(exuConfig.AluCnt)(i => i.U(2.W))))
-  val aluInstIdxs = Wire(Vec(exuConfig.AluCnt, UInt(3.W)))
-  for (i <- 0 until exuConfig.AluCnt) {
-    assert(exuConfig.AluCnt == IntDqDeqWidth)
-    // 0 -> 1 -> 2 -> 3 -> 0
-    aluInstIdxsTry(i) := aluInstIdxsTry(i) + 1.U
-    val deqAluInvalid = io.fromIntDq(aluInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.alu || !io.fromIntDq(aluInstIdxsTry(i)).valid
-    aluInstIdxs(i) := Cat(deqAluInvalid.asUInt(), aluInstIdxsTry(i))
-  }
-  val mulInstIdx = PriorityEncoder(io.fromIntDq.map(deq => deq.bits.ctrl.fuType === FuType.mul && deq.valid) :+ true.B)
-  val muldivInstIdx = PriorityEncoder((io.fromIntDq.zipWithIndex map { case (deq, i) =>
-    ((deq.bits.ctrl.fuType === FuType.mul && i.U > mulInstIdx) || deq.bits.ctrl.fuType === FuType.mdu) && deq.valid
-  }) :+ true.B)
+  val indexGen = Module(new DispatchGen())
+  indexGen.io.fromIntDq := io.fromIntDq
+  indexGen.io.fromFpDq := io.fromFpDq
+  indexGen.io.fromLsDq := io.fromLsDq
+  indexGen.io.emptySlots := DontCare // TODO: from issue queue
 
-  // TODO uncomment when FmacCnt > 0
-  val fmacInstIdxsTry = Reg(Vec(exuConfig.FmacCnt, UInt(2.W)))
-//  val fmacInstIdxsTry = RegInit(VecInit(Seq.tabulate(exuConfig.FmacCnt)(i => i.U(2.W))))
-  val fmacInstIdxs = Wire(Vec(exuConfig.FmacCnt, UInt(3.W)))
-//  val deqFmacInstIdxs = RegInit(VecInit(Seq.tabulate(exuConfig.FmacCnt)(i => i.U(2.W))))
-  for (i <- 0 until exuConfig.FmacCnt) {
-    assert(exuConfig.FmacCnt == FpDqDeqWidth)
-    // 0 -> 1 -> 2 -> 3 -> 0
-    fmacInstIdxsTry(i) := fmacInstIdxsTry(i) + 1.U
-    val deqFmacInvalid = io.fromFpDq(fmacInstIdxsTry(i)).bits.ctrl.fuType =/= FuType.fmac || !io.fromFpDq(fmacInstIdxsTry(i)).valid
-    fmacInstIdxs(i) := Cat(deqFmacInvalid.asUInt(), fmacInstIdxsTry(i))
-  }
-  val fmisc0InstIdx = PriorityEncoder(io.fromFpDq.map(deq => deq.bits.ctrl.fuType === FuType.fmisc && deq.valid) :+ true.B)
-  val fmisc1InstIdx = PriorityEncoder((io.fromFpDq.zipWithIndex map { case (deq, i) =>
-    ((deq.bits.ctrl.fuType === FuType.fmisc && i.U > fmisc0InstIdx) || deq.bits.ctrl.fuType === FuType.fmiscDivSqrt) && deq.valid
-  }) :+ true.B)
+  val instValid = indexGen.io.enqIQIndex.map(_.valid)
+  val allIndex = indexGen.io.enqIQIndex.map(_.bits)
 
-  // TODO: currently there's only one load/store reservation station
-  val load0InstIdx = PriorityEncoder(io.fromLsDq.map(_.bits.ctrl.fuType === FuType.ldu) :+ true.B)
-  val load1InstIdx = PriorityEncoder((io.fromLsDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.ldu && i.U > load0InstIdx
-  }) :+ true.B)
-//  val store0InstIdx = PriorityEncoder(io.fromLsDq.map(_.bits.ctrl.fuType === FuType.stu) :+ true.B)
-  val store0InstIdx = PriorityEncoder(io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)) :+ true.B)
-  val store1InstIdx = PriorityEncoder((io.fromLsDq.zipWithIndex map { case (uop, i) =>
-    uop.bits.ctrl.fuType === FuType.stu && i.U > store0InstIdx
-  }) :+ true.B)
-
-  XSDebug("%d %d %d %d %d %d %d %d\n", bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2),
-    aluInstIdxs(3), mulInstIdx, muldivInstIdx, store0InstIdx)
+  allIndex.zipWithIndex.map({case(index, i) => XSDebug(p"dispatch to iq index $i: ${instValid(i)}, $index\n")})
+//  XSDebug("%d %d %d %d %d %d %d %d\n", bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2),
+//    aluInstIdxs(3), mulInstIdx, muldivInstIdx, store0InstIdx)
+  val bruInstIdx = Cat(!instValid(0), allIndex(0))
+  val aluInstIdx = (0 until exuConfig.AluCnt).map(i => Cat(!instValid(1+i), allIndex(1+i)))
+  val mulInstIdx = Cat(!instValid(5), allIndex(5))
+  val muldivInstIdx = Cat(!instValid(6), allIndex(6))
+  val fmacInstIdx = (0 until exuConfig.FmacCnt).map(i => Cat(!instValid(7+i), allIndex(7+i)))
+  val fmisc0InstIdx = 4.U//TODO: Cat(instValid(11), allIndex(11))
+  val fmisc1InstIdx = 4.U// TODO: Cat(instValid(12), allIndex(12))
+  val loadInstIdx = Seq(4.U, 0.U)//TODO: (0 until exuConfig.LduCnt).map(i => Cat(instValid(13+i), allIndex(13+i)))
+  val storeInstIdx = Seq(Cat(!instValid(7), allIndex(7)), 4.U) //TODO: 15+i
 
   // regfile read ports
   // regfile is sync-read, data can used at the next cycle
@@ -80,7 +68,7 @@ class Dispatch2 extends XSModule {
   val intExuIndex = WireInit(VecInit(Seq.fill(3)(0.U(2.W))))
   val intDeqChoice = Wire(Vec(4, UInt(2.W)))
   for (i <- 0 until 4) {
-    val readPortSrc = Seq(aluInstIdxs(i), bruInstIdx, mulInstIdx, muldivInstIdx)
+    val readPortSrc = Seq(aluInstIdx(i), bruInstIdx, mulInstIdx, muldivInstIdx)
     val wantReadPort = (0 until 4).map(j => (
       if (i == 0) !readPortSrc(j)(2)
       else {
@@ -109,7 +97,7 @@ class Dispatch2 extends XSModule {
   val fpDeqChoice = Wire(Vec(4, UInt(2.W)))
   fpDeqChoice := DontCare
   for (i <- 0 until exuConfig.FmacCnt) {
-    val readPortSrc = Seq(fmacInstIdxs(i), fmisc0InstIdx, fmisc1InstIdx)
+    val readPortSrc = Seq(fmacInstIdx(i), fmisc0InstIdx, fmisc1InstIdx)
     val wantReadPort = (0 until 3).map(j => (
       if (i == 0) !readPortSrc(j)(2)
       else {
@@ -135,18 +123,18 @@ class Dispatch2 extends XSModule {
 
   // TODO uncomment me when fmac > 0
   io.readFpRf <> DontCare
-  io.readIntRf(2*IntDqDeqWidth).addr := io.fromLsDq(load0InstIdx).bits.psrc1
-  io.readIntRf(2*IntDqDeqWidth + 1).addr := io.fromLsDq(load1InstIdx).bits.psrc1
-  io.readIntRf(2*IntDqDeqWidth + 2).addr := io.fromLsDq(store0InstIdx).bits.psrc1
-  io.readIntRf(2*IntDqDeqWidth + 3).addr := io.fromLsDq(store0InstIdx).bits.psrc2
-  io.readIntRf(2*IntDqDeqWidth + 4).addr := io.fromLsDq(store1InstIdx).bits.psrc1
-  io.readIntRf(2*IntDqDeqWidth + 5).addr := io.fromLsDq(store1InstIdx).bits.psrc2
-  io.readFpRf(3*FpDqDeqWidth).addr := io.fromLsDq(store0InstIdx).bits.psrc1
-  io.readFpRf(3*FpDqDeqWidth + 1).addr := io.fromLsDq(store1InstIdx).bits.psrc1
+  io.readIntRf(2*IntDqDeqWidth).addr := io.fromLsDq(loadInstIdx(0)).bits.psrc1
+  io.readIntRf(2*IntDqDeqWidth + 1).addr := io.fromLsDq(loadInstIdx(1)).bits.psrc1
+  io.readIntRf(2*IntDqDeqWidth + 2).addr := io.fromLsDq(storeInstIdx(0)).bits.psrc1
+  io.readIntRf(2*IntDqDeqWidth + 3).addr := io.fromLsDq(storeInstIdx(0)).bits.psrc2
+  io.readIntRf(2*IntDqDeqWidth + 4).addr := io.fromLsDq(storeInstIdx(1)).bits.psrc1//TODO
+  io.readIntRf(2*IntDqDeqWidth + 5).addr := io.fromLsDq(storeInstIdx(1)).bits.psrc2//TODO
+  io.readFpRf(3*FpDqDeqWidth).addr := io.fromLsDq(storeInstIdx(0)).bits.psrc1
+  io.readFpRf(3*FpDqDeqWidth + 1).addr := io.fromLsDq(storeInstIdx(1)).bits.psrc1//TODO
 
   // insert into reservation station
-  val instIdxes = Seq(bruInstIdx, aluInstIdxs(0), aluInstIdxs(1), aluInstIdxs(2), aluInstIdxs(3), mulInstIdx, muldivInstIdx,
-    /*load0InstIdx, */store0InstIdx)
+  val instIdxes = Seq(bruInstIdx, aluInstIdx(0), aluInstIdx(1), aluInstIdx(2), aluInstIdx(3), mulInstIdx, muldivInstIdx,
+    /*load0InstIdx, */storeInstIdx(0))
   io.enqIQCtrl.zipWithIndex map { case (enq, i) =>
     if (i < exuConfig.IntExuCnt) {
       enq.valid := !instIdxes(i)(2) && io.fromIntDq(instIdxes(i)(1, 0)).valid
@@ -202,7 +190,7 @@ class Dispatch2 extends XSModule {
   }
   for (i <- 0 until LsDqDeqWidth) {
     io.fromLsDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
-      (rs.ready && 0.U === i.U
+      (rs.ready && instIdxes(j) === i.U
         && (j >= exuConfig.IntExuCnt + exuConfig.FpExuCnt).asBool())
     }).reduce((l, r) => l || r)
     XSInfo(io.fromLsDq(i).fire(), "pc 0x%x leaves Ls dispatch queue with nroq %d\n",
