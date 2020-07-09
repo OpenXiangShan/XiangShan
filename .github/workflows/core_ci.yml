@@ -16,8 +16,8 @@ jobs:
        
        - name: Build EMU
          run: make ./build/emu -j80
-
-  cputest:
+         
+   cputest:
     runs-on: self-hosted
     name: Run cputest
     needs: [build-emu]
