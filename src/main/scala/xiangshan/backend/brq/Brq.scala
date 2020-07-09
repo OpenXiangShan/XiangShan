@@ -155,15 +155,11 @@ class Brq extends XSModule {
   for((enq, brTag) <- io.enqReqs.zip(io.brTags)){
     enq.ready := !full
     brTag := tailPtrNext
-    // TODO: check rvc and use predict npc
-<<<<<<< HEAD
-    when(enq.fire()){ brQueue(tailPtrNext.value).npc := enq.bits.cf.pnpc }
-=======
     when(enq.fire()){
-      brQueue(tailPtrNext.value).npc := enq.bits.cf.pc + 4.U
+      brQueue(tailPtrNext.value).npc := enq.bits.cf.pnpc
       brQueue(tailPtrNext.value).ptrFlag := tailPtrNext.flag
     }
->>>>>>> master
+
     tailPtrNext = tailPtrNext + enq.fire()
     full = isFull(tailPtrNext, headPtrNext)
   }

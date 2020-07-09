@@ -53,21 +53,18 @@ class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   val target = Mux(isBranch, pc + offset, adderRes)(VAddrBits-1,0)
   val isRVC = uop.cf.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
 
-  io.in.ready := io.out.ready
-  val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   //TODO fix me
   io.out.bits.redirect := DontCare
 
+  io.in.ready := io.out.ready
+  val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   io.out.bits.redirectValid := io.out.valid && isBru//isBranch
-  io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
-  io.out.bits.redirect.brTarget := target
   io.out.bits.redirect.brTag := uop.brTag
-  io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
-  io.out.bits.redirect.taken := taken
   io.out.bits.redirect.isException := DontCare // false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
   io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
+
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(isJump, pcLatchSlot, aluRes)
