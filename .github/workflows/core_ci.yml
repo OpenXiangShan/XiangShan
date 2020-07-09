@@ -53,4 +53,4 @@ jobs:
           echo $NEMU_HOME
           echo $NOOP_HOME
           echo $RVTEST_HOME
-          make -C RVTEST_HOME/isa/ ARCH=riscv64-noop V=OFF NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run
+          make -C RVTEST_HOME/isa/ V=OFF NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
