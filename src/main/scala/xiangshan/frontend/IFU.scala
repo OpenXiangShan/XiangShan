@@ -164,12 +164,19 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(io.redirectInfo.flush(),"[IFU-REDIRECT] target:0x%x  \n",io.redirectInfo.redirect.target.asUInt)
 
     //Output -> iBuffer
-    io.fetchPacket <> DontCare
+    //io.fetchPacket <> DontCare
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
     io.fetchPacket.bits.pc := if4_pc
+
+    XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
+    XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
+    for(i <- 0 until FetchWidth){
+      io.fetchPacket.bits.pnpc(i) := if1_npc
+      XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,if1_npc.asUInt)
+    }    
 
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid

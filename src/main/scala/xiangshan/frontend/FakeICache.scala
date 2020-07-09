@@ -84,7 +84,7 @@ class FakeCache extends XSModule with HasICacheConst {
   }
 
   XSDebug("[ICache-Stage1] s1_valid:%d || s2_ready:%d || s1_pc:%d",s1_valid,s2_ready,gpc)
-  XSDebug(s1_fire,"------> s1 fire!!!")
+  XSDebug(false,s1_fire,"------> s1 fire!!!")
   XSDebug(false,true.B,"\n")
 
   XSDebug("[Stage1_data] instr1:0x%x   instr2:0x%x\n",ramOut(0).asUInt,ramOut(1).asUInt)
@@ -99,7 +99,7 @@ class FakeCache extends XSModule with HasICacheConst {
 
   s2_ready := s2_fire || !s2_valid
   XSDebug("[ICache-Stage2] s2_valid:%d || s3_ready:%d ",s2_valid,s3_ready)
-  XSDebug(s2_fire,"------> s2 fire!!!")
+  XSDebug(false,s2_fire,"------> s2 fire!!!")
   XSDebug(false,true.B,"\n")
 
   XSDebug("[Stage2_data] instr1:0x%x   instr2:0x%x\n",s2_ram_out(0).asUInt,s2_ram_out(1).asUInt)
