@@ -48,7 +48,7 @@ jobs:
           echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
           echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
           echo ::set-env name=RVTEST_HOME::/home/ci-runner/xsenv/riscv-tests
-      - name: Run cputest
+      - name: Run riscv-test
         run: |
           echo $NEMU_HOME
           echo $NOOP_HOME
