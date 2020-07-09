@@ -5,50 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
 import xiangshan.utils._
-import xiangshan.backend.regfile.RfWritePort
-
-object ALUOpType {
-  def add  = "b000000".U
-  def sll  = "b000001".U
-  def slt  = "b000010".U
-  def sltu = "b000011".U
-  def xor  = "b000100".U
-  def srl  = "b000101".U
-  def or   = "b000110".U
-  def and  = "b000111".U
-  def sub  = "b001000".U
-  def sra  = "b001101".U
-
-  def addw = "b100000".U
-  def subw = "b101000".U
-  def sllw = "b100001".U
-  def srlw = "b100101".U
-  def sraw = "b101101".U
-
-  def isWordOp(func: UInt) = func(5)
-
-  // TODO: move jal/jalr/call/ret from ALU to BRU&CSR
-  def jal  = "b011000".U
-  def jalr = "b011010".U
-  // def cjalr= "b111010".U // pc + 2 instead of 4
-  def beq  = "b010000".U
-  def bne  = "b010001".U
-  def blt  = "b010100".U
-  def bge  = "b010101".U
-  def bltu = "b010110".U
-  def bgeu = "b010111".U
-
-  // for RAS
-  def call = "b011100".U
-  def ret  = "b011110".U
-
-  // def pcPlus2(func: UInt) = func(5)//[important]
-  def isBranch(func: UInt) = func(4,3)===2.U
-  def isBru(func: UInt) = func(4)
-  def isJump(func: UInt) = func(4,3)===3.U//isBru(func) && !isBranch(func)
-  def getBranchType(func: UInt) = func(2, 1)
-  def isBranchInvert(func: UInt) = func(0)
-}
+import xiangshan.backend._
 
 class Alu extends Exu(alu.litValue(), hasRedirect = true) {
   override def toString: String = "Alu"

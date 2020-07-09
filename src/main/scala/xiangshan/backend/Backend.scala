@@ -46,7 +46,16 @@ class Backend(implicit val p: XSConfig) extends XSModule
     numWirtePorts = NRWritePorts,
     hasZero = false
   ))
+
+  // backend redirect, flush pipeline
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
+
+  val redirectInfo = Wire(new RedirectInfo)
+  // exception or misprediction
+  redirectInfo.valid := roq.io.redirect.valid || brq.io.out.valid
+  redirectInfo.misPred := !roq.io.redirect.valid && brq.io.redirect.valid
+  redirectInfo.redirect := redirect.bits
+
   val issueQueues = exeUnits.zipWithIndex.map({ case(eu, i) =>
     def needBypass(x: Exu): Boolean = eu.enableBypass
     val bypassCnt = exeUnits.count(needBypass)//if(eu.fuTypeInt == FuType.alu.litValue()) exuConfig.AluCnt else 0
@@ -86,7 +95,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   lsuExeUnits.foreach(_.io.dmem <> io.dmem)
   lsuExeUnits.foreach(_.io.scommit <> roq.io.scommit)
 
-  io.frontend.redirect <> redirect
+  io.frontend.redirectInfo <> redirectInfo
   io.frontend.commits <> roq.io.commits
 
   decode.io.in <> io.frontend.cfVec

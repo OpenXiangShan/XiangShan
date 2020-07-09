@@ -62,6 +62,15 @@ class Redirect extends XSBundle {
   val freelistAllocPtr = new FreeListPtr
 }
 
+class RedirectInfo extends XSBundle {
+
+  val valid = Bool() // a valid commit form brq/roq
+  val misPred = Bool() // a branch miss prediction ?
+  val redirect = new Redirect
+
+  def flush():Bool = valid && (redirect.isException || misPred)
+}
+
 class Dp1ToDp2IO extends XSBundle {
   val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))
   val fpDqToDp2 = Vec(FpDqDeqWidth, DecoupledIO(new MicroOp))
@@ -104,6 +113,6 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirectInfo = Input(new RedirectInfo)
   val commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit))) // update branch pred
 }

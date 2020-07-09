@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.utils._
 import chisel3.util.experimental.BoringUtils
+import xiangshan.backend.decode.XSTrap
 
 // A "just-enough" Roq
 class Roq(implicit val p: XSConfig) extends XSModule {
@@ -216,14 +217,23 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
   val wpc = Wire(Vec(CommitWidth, UInt(VAddrBits.W)))
+  val trapVec = Wire(Vec(CommitWidth, Bool()))
   for(i <- 0 until CommitWidth){
-      // io.commits(i).valid
-      skip(i) := exuDebug(ringBufferTail+i.U).isMMIO && io.commits(i).valid
-      wen(i) := io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.rfWen && microOp(ringBufferTail+i.U).ctrl.ldest =/= 0.U
-      wdata(i) := exuData(ringBufferTail+i.U)
-      wdst(i) := microOp(ringBufferTail+i.U).ctrl.ldest
-      wpc(i) := microOp(ringBufferTail+i.U).cf.pc
+    // io.commits(i).valid
+    val idx = ringBufferTail+i.U
+    val uop = microOp(idx)
+    skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
+    wen(i) := io.commits(i).valid && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
+    wdata(i) := exuData(idx)
+    wdst(i) := uop.ctrl.ldest
+    wpc(i) := uop.cf.pc
+    trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
   }
+  val instrCnt = RegInit(0.U(64.W))
+  instrCnt := instrCnt + retireCounter
+  val hitTrap = trapVec.reduce(_||_)
+  val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+  val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
   if(!p.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
@@ -247,5 +257,26 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(emptyCsr, "difftestSepc")
     BoringUtils.addSource(emptyCsr, "difftestMcause")
     BoringUtils.addSource(emptyCsr, "difftestScause")
+
+    class Monitor extends BlackBox {
+      val io = IO(new Bundle {
+        val clk = Input(Clock())
+        val reset = Input(Reset())
+        val isNoopTrap = Input(Bool())
+        val trapCode = Input(UInt(32.W))
+        val trapPC = Input(UInt(64.W))
+        val cycleCnt = Input(UInt(64.W))
+        val instrCnt = Input(UInt(64.W))
+      })
+    }
+
+    val debugMonitor =  Module(new Monitor)
+    debugMonitor.io.clk := this.clock
+    debugMonitor.io.reset := this.reset
+    debugMonitor.io.isNoopTrap := hitTrap
+    debugMonitor.io.trapCode := trapCode
+    debugMonitor.io.trapPC := trapPC
+    debugMonitor.io.cycleCnt := GTimer()
+    debugMonitor.io.instrCnt := instrCnt
   }
 }
