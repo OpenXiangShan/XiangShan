@@ -272,7 +272,12 @@ class BPUStage1 extends XSModule {
         btbData(w)(b).io.w.req.bits.data := btbDataWrite
       }.otherwise {
         btbMeta(w)(b).io.w.req.valid := false.B
+        btbMeta(w)(b).io.w.req.bits.setIdx := DontCare
+        btbMeta(w)(b).io.w.req.bits.data := DontCare
         btbData(w)(b).io.w.req.valid := false.B
+        btbData(w)(b).io.w.req.bits.setIdx := DontCare
+        btbData(w)(b).io.w.req.bits.waymask.map(_ := 0.U)
+        btbData(w)(b).io.w.req.bits.data := DontCare
       }
     }
   }
@@ -289,6 +294,10 @@ class BPUStage1 extends XSModule {
       jbtac(b).io.w.req.valid := io.redirectInfo.valid && updateMisPred && r._type === BTBtype.I
       jbtac(b).io.w.req.bits.setIdx := jbtacAddr.getBankIdx(updateHistXORAddr)
       jbtac(b).io.w.req.bits.data := jbtacWrite
+    }.otherwise {
+      jbtac(b).io.w.req.valid := false.B
+      jbtac(b).io.w.req.bits.setIdx := DontCare
+      jbtac(b).io.w.req.bits.data := DontCare
     }
   }
 
