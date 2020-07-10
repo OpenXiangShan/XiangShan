@@ -43,7 +43,7 @@ class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
     val bpu = Module(new BPU)
-    //val bpu = Module(new FakeBPU)
+    // val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update

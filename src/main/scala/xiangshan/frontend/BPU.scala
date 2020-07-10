@@ -67,6 +67,7 @@ class BPUStage1 extends XSModule {
   val hist = Mux(updateGhr, newGhr, ghr)
 
   // Tage predictor
+  // val tage = Module(new FakeTAGE)
   val tage = Module(new Tage)
   tage.io.req.valid := io.in.pc.fire()
   tage.io.req.bits.pc := io.in.pc.bits
