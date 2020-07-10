@@ -262,6 +262,7 @@ class BPUStage1 extends XSModule {
 
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
+      // println(s"${btbData(w)(b).io.w.req.bits.waymask.nonEmpty}")
       when (b.U === updateBank && w.U === updateVictimWay) {
         btbMeta(w)(b).io.w.req.valid := btbWriteValid
         btbMeta(w)(b).io.w.req.bits.setIdx := updateBankIdx

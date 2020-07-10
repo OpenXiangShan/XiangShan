@@ -61,7 +61,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   // bypass entries for tage update
   val wrBypassEntries = 8
-
+/*
   def compute_folded_hist(hist: UInt, l: Int) = {
     val nChunks = (histLen + l - 1) / l
     val hist_chunks = (0 until nChunks) map {i =>
@@ -210,6 +210,11 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
     }
   }
+  */
+  (0 until BankWidth).map(b => {
+    io.resp(b).valid := false.B
+    io.resp(b).bits := DontCare
+  })
 }
 
 class Tage extends TageModule {
