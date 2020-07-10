@@ -22,7 +22,7 @@ class RegfileReadPortGen extends XSModule {
     val choiceCount = dynamicMappedValid.length + 1
     // read port is assigned to readPortSrc
     val readPortSrc = Wire(Vec(staticMappedValid.length, UInt(log2Ceil(choiceCount).W)))
-    var hasAssigned = (0 until choiceCount).map(i => false.B)
+    var hasAssigned = (0 until choiceCount).map(_ => false.B)
     for (i <- 0 until staticMappedValid.length) {
       val valid = staticMappedValid(i) +: dynamicMappedValid
       val wantReadPort = (0 until choiceCount).map(j => valid(j) && ((j == 0).asBool() || !hasAssigned(j)))
@@ -48,7 +48,7 @@ class RegfileReadPortGen extends XSModule {
 
   val intStaticMapped = intStaticIndex.map(i => io.enqIQIndex(i).bits)
   val intDynamicMapped = intDynamicIndex.map(i => io.enqIQIndex(i).bits)
-  for (i <- 0 until intStaticMappedValid.length) {
+  for (i <- 0 until intStaticIndex.length) {
     val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
     io.readIntRf(i) := index(intReadPortSrc(i))
   }

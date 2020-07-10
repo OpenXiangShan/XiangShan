@@ -181,7 +181,7 @@ class Dispatch2 extends XSModule {
   }
 
   // TODO: store needs data from FpRegfile
-  val intExuIndexReg = Reg(Vec(exuConfig.IntExuCnt, UInt(2.W)))
+  val intExuIndexReg = Reg(Vec(exuConfig.IntExuCnt, UInt(log2Ceil(NRReadPorts).W)))
   val fpExuIndexReg = Reg(Vec(2, UInt(2.W)))
   (0 until exuConfig.IntExuCnt).map(i => intExuIndexReg(i) := regfileRPGen.io.intIQRfSrc(i))
   (0 until 2).map(i => fpExuIndexReg(i) := fpExuIndex(i))
