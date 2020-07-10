@@ -149,9 +149,11 @@ class Emulator {
     tfp->open("vlt_dump.vcd");	// Open the dump file
 #endif
 
-    while (!is_finish() && n > 0) {
+    while (n > 0) {
       single_cycle();
       n --;
+
+      if(is_finish()) return;
 
       if (lastcommit - n > stuck_limit && hascommit) {
         eprintf("No instruction commits for %d cycles, maybe get stuck\n"

@@ -39,6 +39,8 @@ int display_trapinfo(uint64_t max_cycles) {
     case STATE_RUNNING:
       eprintf(ANSI_COLOR_RED "Timeout after %" PRIx64 " cycles\n" ANSI_COLOR_RESET, max_cycles);
       break;
+    default:
+      eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", g_trapCode);
   }
 
   double ipc = (double)g_instrCnt / g_cycleCnt;
