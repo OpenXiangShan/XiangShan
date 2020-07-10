@@ -14,6 +14,15 @@ trait IQConst extends HasXSParameter{
 sealed abstract class IQBundle extends XSBundle with IQConst
 sealed abstract class IQModule extends XSModule with IQConst
 
+object OneCycleFire {
+  def apply(fire: Bool) = {
+    val valid = RegInit(false.B)
+    when (valid) { valid := false.B }
+    when (fire) { valid := true.B }
+    valid
+  }
+}
+
 class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1, val fifo: Boolean = false) extends IQModule {
 
   val useBypass = bypassCnt > 0
@@ -81,7 +90,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   srcDataWire := srcData
   srcData := srcDataWire
 
-  // there is three stage
+  // there are three stages
   // |-------------|--------------------|--------------|
   // |Enq:get state|Deq: select/get data| fire stage   |
   // |-------------|--------------------|--------------|
@@ -204,7 +213,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
   val deqFlushHit = issueToExu.uop.brTag.needFlush(io.redirect)
-  val deqCanIn = !issueToExuValid || deqFire || deqFlushHit
+  val deqCanIn = !issueToExuValid || io.deq.ready || deqFlushHit
   
   val toIssFire = deqCanIn && has1Rdy && !isPop && !selIsRed
   popOne := deqCanIn && (has1Rdy || isPop) // send a empty or valid term to issueStage
@@ -225,7 +234,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   io.deq.valid := issueToExuValid && !deqFlushHit
   io.deq.bits := issueToExu
 
-
   enqSelIq := Mux(full,
     Mux(isPop,
       idQue(popSel),
@@ -236,6 +244,27 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
 
   io.numExist := tailAll
   assert(tailAll < 9.U)
+
+  //-----------------------------------------
+  // Issue with No Delay
+  //-----------------------------------------
+  // when enq is ready && no other rdy && no pop &&  fireStage is ready && no flush
+  // send out directly without store the data
+  val enqAlreadyRdy = if(src3Listen) { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1)&&enqSrcRdy(2) else enqSrcRdy(0)&&enqSrcRdy(2) } else  { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1) else enqSrcRdy(0) }
+  val enqALRdyNext = OneCycleFire(enqAlreadyRdy && enqFire)
+  val enqSendFlushHit = issQue(enqSelIqNext).uop.brTag.needFlush(io.redirect)
+  val enqSendEnable = enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ // FIXME: has1Rdy has combination loop
+  when (enqSendEnable) {
+    io.deq.valid := true.B
+    io.deq.bits := issQue(enqSelIqNext)
+    io.deq.bits.src1 := enqDataVec(0)
+    if (src2Use) { io.deq.bits.src2 := enqDataVec(1) }
+    if (src3Use) { io.deq.bits.src3 := enqDataVec(2) }
+    issueToExuValid := false.B
+    when (!io.deq.ready) { // if Func Unit is not ready, store it to FireStage
+      issueToExuValid := true.B
+    }
+  }
 
   //-----------------------------------------
   // Wakeup and Bypass
@@ -339,6 +368,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   } else {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
+  XSDebug(enqSendEnable, p"NoDelayIss: enqALRdy:${enqAlreadyRdy} *Next:${enqALRdyNext} En:${enqSendEnable} flush:${enqSendFlushHit} enqSelIqNext:${enqSelIqNext} deqSelIq:${deqSelIq} deqReady:${io.deq.ready}\n")
   XSDebug("id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx FuType:%x\n", fuTypeInt.U)
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
