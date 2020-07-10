@@ -42,6 +42,7 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   io.out.bits.redirect.pc := io.in.bits.uop.cf.pc
   io.out.bits.redirect.target := target
   io.out.bits.redirect.brTarget := target // DontCare
+  io.out.bits.redirect.taken := true.B
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   io.out.bits.redirect.taken := false.B // DontCare

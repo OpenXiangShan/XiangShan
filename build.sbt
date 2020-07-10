@@ -53,3 +53,6 @@ libraryDependencies += "net.java.dev.jna" % "jna" % "4.0.0"
 scalacOptions ++= scalacOptionsVersion(scalaVersion.value)
 
 javacOptions ++= javacOptionsVersion(scalaVersion.value)
+
+libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "0.2.1"
+

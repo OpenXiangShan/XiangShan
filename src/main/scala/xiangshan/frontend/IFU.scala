@@ -184,6 +184,13 @@ class IFU extends XSModule with HasIFUConst
       }
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,if1_npc.asUInt)
     }    
+    io.fetchPacket.bits.hist := bpu.io.tageOut.bits.hist
+    io.fetchPacket.bits.btbVictimWay := bpu.io.tageOut.bits.btbVictimWay
+    io.fetchPacket.bits.predCtr := bpu.io.tageOut.bits.predCtr
+    io.fetchPacket.bits.btbHitWay := bpu.io.tageOut.bits.btbHitWay
+    io.fetchPacket.bits.tageMeta := bpu.io.tageOut.bits.tageMeta
+    io.fetchPacket.bits.rasSp := bpu.io.tageOut.bits.rasSp
+    io.fetchPacket.bits.rasTopCtr := bpu.io.tageOut.bits.rasTopCtr
 
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid

@@ -54,6 +54,10 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   // bypass entries for tage update
   val wrBypassEntries = 4
 
+
+  // TODO: delete this
+  io.resp := DontCare
+
 }
 
 class Tage extends TageModule {

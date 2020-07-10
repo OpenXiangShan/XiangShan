@@ -12,6 +12,13 @@ class FetchPacket extends XSBundle {
   val mask = UInt((FetchWidth*2).W)
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
   val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
+  val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  val predCtr = Vec(FetchWidth, UInt(2.W))
+  val btbHitWay = Bool()
+  val tageMeta = Vec(FetchWidth, (new TageMeta))
+  val rasSp = UInt(log2Up(RasSize).W)
+  val rasTopCtr = UInt(8.W)
 }
 
 
@@ -70,7 +77,15 @@ class Predecode extends XSBundle {
 class CtrlFlow extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
+  val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
   val pnpc = UInt(VAddrBits.W)
+  val hist = UInt(HistoryLength.W)
+  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  val btbPredCtr = UInt(2.W)
+  val btbHitWay = Bool()
+  val tageMeta = new TageMeta
+  val rasSp = UInt(log2Up(RasSize).W)
+  val rasTopCtr = UInt(8.W)
   val exceptionVec = Vec(16, Bool())
   val intrVec = Vec(12, Bool())
   val isRVC = Bool()
