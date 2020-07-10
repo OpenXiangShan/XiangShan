@@ -101,7 +101,11 @@ E ?= -1
 V ?= ALL
 
 emu: $(EMU)
+ifeq ($(REMOTE),localhost)
 	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)
+else
+	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && $(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)"
+endif
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
