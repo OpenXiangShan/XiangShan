@@ -43,7 +43,7 @@ class BPUStage1 extends XSModule {
   val io = IO(new Bundle() {
     val in = new Bundle { val pc = Flipped(Decoupled(UInt(VAddrBits.W))) }
     // from backend
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
     // from Stage3
     val flush = Input(Bool())
     val s3RollBackHist = Input(UInt(HistoryLength.W))
@@ -357,7 +357,7 @@ class BPUStage3 extends XSModule {
     // from icache
     val predecode = Flipped(ValidIO(new Predecode))
     // from backend
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
     // to Stage1 and Stage2
     val flushBPU = Output(Bool())
     // to Stage1, restore ghr in stage1 when flushBPU is valid
@@ -406,7 +406,7 @@ class BPUStage3 extends XSModule {
     Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
     Mux(jmpIdx === 0.U, inLatch.pc + 32.U, // TODO: RVC
     PriorityMux(jmpIdx, inLatch.btb.targets))))
-  io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth).asTypeOf(Vec(FetchWidth, Bool())), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
+  io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth).asTypeOf(Vec(FetchWidth, Bool())), Fill(FetchWidth, 1.U(1.W)).asTypeOf(Vec(FetchWidth, Bool())))
   io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
@@ -473,7 +473,7 @@ class BPU extends XSModule {
   val io = IO(new Bundle() {
     // from backend
     // flush pipeline if misPred and update bpu based on redirect signals from brq
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
 
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
 

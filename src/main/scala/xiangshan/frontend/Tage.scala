@@ -59,6 +59,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val update = Input(new TageUpdate)
   })
 
+  // bypass entries for tage update
+  val wrBypassEntries = 8
+
   def compute_folded_hist(hist: UInt, l: Int) = {
     val nChunks = (histLen + l - 1) / l
     val hist_chunks = (0 until nChunks) map {i =>
@@ -86,7 +89,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   reset_idx := reset_idx + doing_reset
   when (reset_idx === (nRows-1).U) { doing_reset := false.B }
 
-  class TageEntry extends TageBundle {
+  class TageEntry() extends TageBundle {
     val valid = Bool()
     val tag = UInt(tagLen.W)
     val ctr = UInt(3.W)
@@ -98,12 +101,12 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val hi_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
   val lo_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
-  val table = List.fill(BankWidth)(Module(new SRAMTemplate(new TageEntry(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
+  val table = List.fill(BankWidth)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
 
   class ReadBundle extends TageBundle{
     val hi_us = Wire(Vec(BankWidth, Bool()))
     val lo_us = Wire(Vec(BankWidth, Bool()))
-    val table = Wire(Vec(BankWidth, new TageEntry()))
+    val table = Wire(Vec(BankWidth, new TageEntry))
   }
 
   val tageRead = new ReadBundle()
@@ -151,7 +154,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   (0 until BankWidth).map(b => {
     table(b).io.w.req.valid := io.update.mask(b) || doing_reset
     table(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
-    table(b).io.w.req.bits.data := Mux(doing_reset, 0.U(tageEntrySz.W), update_wdata(b))
+    table(b).io.w.req.bits.data := Mux(doing_reset, 0.U.asTypeOf(new TageEntry), update_wdata(b))
   })
 
   val update_hi_wdata = Wire(Vec(BankWidth, Bool()))
@@ -207,11 +210,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
     }
   }
-  
-  // bypass entries for tage update
-  val wrBypassEntries = 8
-  
-
 }
 
 class Tage extends TageModule {
@@ -222,7 +220,7 @@ class Tage extends TageModule {
       val takens = Output(Vec(FetchWidth, Bool()))
     }
     val meta = Output(Vec(FetchWidth, (new TageMeta)))
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
   })
 
   val tables = TableInfo.map {
@@ -251,7 +249,7 @@ class Tage extends TageModule {
   updateU := DontCare
 
   // access tag tables and output meta info
-  val outHits = Vec(FetchWidth, Bool())
+  val outHits = Wire(Vec(FetchWidth, Bool()))
   for (w <- 0 until BankWidth) {
     var altPred = false.B
     val finalAltPred = WireInit(false.B)

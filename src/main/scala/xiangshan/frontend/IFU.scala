@@ -170,7 +170,7 @@ class IFU extends XSModule with HasIFUConst
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
-    io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(Fill(2, _.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+    io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)
     io.fetchPacket.bits.pc := if4_pc
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
