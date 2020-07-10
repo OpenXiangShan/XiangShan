@@ -1,5 +1,5 @@
 # This file describes the GitHub Actions workflow for continuous integration of XS Core.
-name: XS Core CI
+name: CI
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     name: Generate Verilog
     steps:
        - run: echo "Do nothing!"
