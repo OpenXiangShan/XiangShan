@@ -160,7 +160,7 @@ class IFU extends XSModule with HasIFUConst
     
 
     //redirect: miss predict
-    when(io.redirectInfo.flush()){
+    when(io..flush()){
       if1_npc := io.redirectInfo.redirect.target
       if3_valid := false.B
       if4_valid := false.B
@@ -169,7 +169,7 @@ class IFU extends XSModule with HasIFUConst
 
     //Output -> iBuffer
     //io.fetchPacket <> DontCare
-    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) //&& (GTimer() > 500.U)
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(Fill(2, _.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)
@@ -178,7 +178,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
     for(i <- 0 until FetchWidth){
-      io.fetchPacket.bits.pnpc(i) := if1_npc
+      io.fetchPacket.bits.pnpc(i) := if4_npc  //TODO: fix out pnpc
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,if1_npc.asUInt)
     }    
 
@@ -187,7 +187,9 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
     bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 2) //TODO: consider RVC
 
-    io.icacheResp.ready := io.fetchPacket.ready //&& (GTimer() > 500.U)
+    bpu.io.redirectInfo := io.redirectInfo
+
+    io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }
 
