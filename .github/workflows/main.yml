@@ -1,5 +1,5 @@
 # This file describes the GitHub Actions workflow for continuous integration of XS Core.
-name: XS Core CI
+name: CI
 
 on:
   push:
