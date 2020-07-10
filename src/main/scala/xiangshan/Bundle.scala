@@ -114,7 +114,7 @@ class Redirect extends XSBundle {
   val brTarget = UInt(VAddrBits.W)
   val brTag = new BrqPtr
   val _type = UInt(2.W)
-  val isCall = Bool()
+  //val isCall = Bool()
   val taken = Bool()
   val hist = UInt(HistoryLength.W)
   val tageMeta = new TageMeta
