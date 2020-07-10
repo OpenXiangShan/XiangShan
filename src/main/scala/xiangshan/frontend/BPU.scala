@@ -43,7 +43,7 @@ class BPUStage1 extends XSModule {
   val io = IO(new Bundle() {
     val in = new Bundle { val pc = Flipped(Decoupled(UInt(VAddrBits.W))) }
     // from backend
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
     // from Stage3
     val flush = Input(Bool())
     val s3RollBackHist = Input(UInt(HistoryLength.W))
@@ -327,6 +327,16 @@ class BPUStage1 extends XSModule {
 
   io.in.pc.ready := true.B
 
+  // debug info
+  XSDebug(true.B, "[BPUS1]in:(%d %d)   pc=%x ghr=%b\n", io.in.pc.valid, io.in.pc.ready, io.in.pc.bits, hist)
+  XSDebug(true.B, "[BPUS1]outPred:(%d) redirect=%d instrValid=%b tgt=%x\n",
+    io.s1OutPred.valid, io.s1OutPred.bits.redirect, io.s1OutPred.bits.instrValid.asUInt, io.s1OutPred.bits.target)
+  XSDebug(io.flush && io.redirectInfo.flush(),
+    "[BPUS1]flush from backend: pc=%x tgt=%x brTgt=%x _type=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
+    r.pc, r.target, r.brTarget, r._type, r.taken, r.hist, r.fetchIdx, r.isException)
+  XSDebug(io.flush && !io.redirectInfo.flush(),
+    "[BPUS1]flush from Stage3:  s3Taken=%d s3RollBackHist=%b\n", io.s3Taken, io.s3RollBackHist)
+
 }
 
 class Stage2To3IO extends Stage1To2IO {
@@ -347,6 +357,11 @@ class BPUStage2 extends XSModule {
 
   // do nothing
   io.out.bits := RegEnable(io.in.bits, io.in.fire())
+
+  // debug info
+  XSDebug(true.B, "[BPUS2]in:(%d %d) pc=%x out:(%d %d) pc=%x\n",
+    io.in.valid, io.in.ready, io.in.bits.pc, io.out.valid, io.out.ready, io.out.bits.pc)
+  XSDebug(io.flush, "[BPUS2]flush!!!\n")
 }
 
 class BPUStage3 extends XSModule {
@@ -357,7 +372,7 @@ class BPUStage3 extends XSModule {
     // from icache
     val predecode = Flipped(ValidIO(new Predecode))
     // from backend
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
     // to Stage1 and Stage2
     val flushBPU = Output(Bool())
     // to Stage1, restore ghr in stage1 when flushBPU is valid
@@ -391,22 +406,22 @@ class BPUStage3 extends XSModule {
   // get the first taken branch/jal/call/jalr/ret in a fetch line
   // brTakenIdx/jalIdx/callIdx/jalrIdx/retIdx/jmpIdx is one-hot encoded.
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction.
-  val brIdx = inLatch.btb.hits & Cat(io.predecode.bits.fuTypes.map { t => ALUOpType.isBranch(t) }).asUInt & io.predecode.bits.mask
+  val brIdx = inLatch.btb.hits & Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt & io.predecode.bits.mask
   val brTakenIdx = LowestBit(brIdx & inLatch.tage.takens.asUInt, FetchWidth)
-  val jalIdx = LowestBit(inLatch.btb.hits & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.jal }).asUInt & io.predecode.bits.mask, FetchWidth)
-  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.call }).asUInt, FetchWidth)
-  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.jalr }).asUInt, FetchWidth)
-  val retIdx = LowestBit(io.predecode.bits.mask & Cat(io.predecode.bits.fuTypes.map { t => t === ALUOpType.ret }).asUInt, FetchWidth)
+  val jalIdx = LowestBit(inLatch.btb.hits & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.jal }).asUInt & io.predecode.bits.mask, FetchWidth)
+  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.call }).asUInt, FetchWidth)
+  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.jalr }).asUInt, FetchWidth)
+  val retIdx = LowestBit(io.predecode.bits.mask & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.ret }).asUInt, FetchWidth)
 
   val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth)
-  val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & LowerMask(jmpIdx, FetchWidth)
+  val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & LowerMask(jmpIdx, FetchWidth) & io.predecode.bits.mask
 
   io.out.bits.redirect := jmpIdx.orR.asBool
   io.out.bits.target := Mux(jmpIdx === retIdx, rasTopAddr,
     Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
     Mux(jmpIdx === 0.U, inLatch.pc + 32.U, // TODO: RVC
     PriorityMux(jmpIdx, inLatch.btb.targets))))
-  io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth).asTypeOf(Vec(FetchWidth, Bool())), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
+  io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
   io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
@@ -467,13 +482,18 @@ class BPUStage3 extends XSModule {
   io.s1RollBackHist := Mux(io.s3Taken, PriorityMux(jmpIdx, io.out.bits.hist), io.out.bits.hist(0) << PopCount(brIdx & ~inLatch.tage.takens.asUInt))
   // whether Stage3 has a taken jump
   io.s3Taken := jmpIdx.orR.asBool
+
+  // debug info
+  XSDebug(true.B, "[BPUS3]in:(%d %d) pc=%x\n", io.in.valid, io.in.ready, io.in.bits.pc)
+  XSDebug(true.B, "[BPUS3]out:%d pc=%x redirect=%d predcdMask=%b instrValid=%b tgt=%x\n",
+    io.out.valid, inLatch.pc, io.out.bits.redirect, io.predecode.bits.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
 }
 
 class BPU extends XSModule {
   val io = IO(new Bundle() {
     // from backend
     // flush pipeline if misPred and update bpu based on redirect signals from brq
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
 
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
 

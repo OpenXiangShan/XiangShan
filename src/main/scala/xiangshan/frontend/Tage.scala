@@ -64,7 +64,7 @@ class Tage extends TageModule {
       val takens = Output(Vec(FetchWidth, Bool()))
     }
     val meta = Output(Vec(FetchWidth, (new TageMeta)))
-    val redirectInfo = Flipped(new RedirectInfo)
+    val redirectInfo = Input(new RedirectInfo)
   })
 
   val tables = TableInfo.map {
@@ -93,7 +93,7 @@ class Tage extends TageModule {
   updateU := DontCare
 
   // access tag tables and output meta info
-  val outHits = Vec(FetchWidth, Bool())
+  val outHits = Wire(Vec(FetchWidth, Bool()))
   for (w <- 0 until BankWidth) {
     var altPred = false.B
     val finalAltPred = WireInit(false.B)

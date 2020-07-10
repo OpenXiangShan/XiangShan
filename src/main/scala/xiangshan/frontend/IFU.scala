@@ -170,13 +170,18 @@ class IFU extends XSModule with HasIFUConst
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
-    io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(Fill(2, _.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+    io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(m => Fill(2, m.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)
     io.fetchPacket.bits.pc := if4_pc
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
     for(i <- 0 until FetchWidth){
-      io.fetchPacket.bits.pnpc(i) := if1_npc
+      //io.fetchPacket.bits.pnpc(i) := if1_npc
+      when (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
+        io.fetchPacket.bits.pnpc(i) := if1_npc
+      }.otherwise {
+        io.fetchPacket.bits.pnpc(i) := if4_pc + (i + 1).U << 2.U // TODO: consider rvc
+      }
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,if1_npc.asUInt)
     }    
 
