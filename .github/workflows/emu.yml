@@ -25,7 +25,6 @@ jobs:
     name: Run cputest
     needs: [build-emu]
     steps:
-      - uses: actions/checkout@v2
       - name: Set env
         run: |
           echo ::set-env name=AM_HOME::/home/ci-runner/xsenv/nexus-am
@@ -44,7 +43,6 @@ jobs:
     name: Run riscv-tests
     needs: [build-emu]
     steps:
-      - uses: actions/checkout@v2
       - name: Set env
         run: |
           echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
