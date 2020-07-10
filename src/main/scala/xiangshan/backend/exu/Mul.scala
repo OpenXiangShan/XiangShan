@@ -208,7 +208,10 @@ trait HasPipelineReg { this: ArrayMultiplier =>
   io.out.valid := validVec.last && !flushVec.last
   io.out.bits.uop := ctrlVec.last.uop
 
-  def PipelineReg[T<:Data](i: Int)(next: T) = RegEnable(next, enable = validVec(i-1) && rdyVec(i-1))
+  def PipelineReg[T<:Data](i: Int)(next: T) = RegEnable(
+    next,
+    enable = validVec(i-1) && rdyVec(i-1) && !flushVec(i-1)
+  )
 
   def S1Reg[T<:Data](next: T):T = PipelineReg[T](1)(next)
   def S2Reg[T<:Data](next: T):T = PipelineReg[T](2)(next)
