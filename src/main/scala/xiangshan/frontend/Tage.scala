@@ -5,6 +5,8 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
+import scala.math.min
+
 trait HasTageParameter {
   //                   Sets  Hist   Tag
   val TableInfo = Seq(( 128,    2,    7),
@@ -16,6 +18,12 @@ trait HasTageParameter {
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
   val BankWidth = 8 // FetchWidth
+
+  val TotalBits = TableInfo.map {
+    case (s, h, t) => {
+      s * (1+t+3) * BankWidth
+    }
+  }.reduce(_+_)
 }
 
 abstract class TageBundle extends XSBundle with HasTageParameter
@@ -51,8 +59,158 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val update = Input(new TageUpdate)
   })
 
+  def compute_folded_hist(hist: UInt, l: Int) = {
+    val nChunks = (histLen + l - 1) / l
+    val hist_chunks = (0 until nChunks) map {i =>
+      hist(min((i+1)*l, histLen)-1, i*l)
+    }
+    hist_chunks.reduce(_^_)
+  }
+
+  def compute_tag_and_hash(unhashed_idx: UInt, hist: UInt) = {
+    val idx_history = compute_folded_hist(hist, log2Ceil(nRows))
+    val idx = (unhashed_idx ^ idx_history)(log2Ceil(nRows)-1,0)
+    val tag_history = compute_folded_hist(hist, tagLen)
+    // Use another part of pc to make tags
+    val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_history)(tagLen-1,0)
+    (idx, tag)
+  }
+
+  def inc_ctr(ctr: UInt, taken: Bool): UInt = {
+    Mux(!taken, Mux(ctr === 0.U, 0.U, ctr - 1.U),
+                Mux(ctr === 7.U, 7.U, ctr + 1.U))
+  }
+
+  val doing_reset = RegInit(true.B)
+  val reset_idx = RegInit(0.U(log2Ceil(nRows).W))
+  reset_idx := reset_idx + doing_reset
+  when (reset_idx === (nRows-1).U) { doing_reset := false.B }
+
+  class TageEntry extends TageBundle {
+    val valid = Bool()
+    val tag = UInt(tagLen.W)
+    val ctr = UInt(3.W)
+  }
+
+  val tageEntrySz = 1 + tagLen + 3
+
+  val (hashed_idx, tag) = compute_tag_and_hash(io.req.bits.pc >> (2 + log2Ceil(FetchWidth)), io.req.bits.hist)
+
+  val hi_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
+  val lo_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
+  val table = List.fill(BankWidth)(Module(new SRAMTemplate(new TageEntry(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
+
+  class ReadBundle extends TageBundle{
+    val hi_us = Wire(Vec(BankWidth, Bool()))
+    val lo_us = Wire(Vec(BankWidth, Bool()))
+    val table = Wire(Vec(BankWidth, new TageEntry()))
+  }
+
+  val tageRead = new ReadBundle()
+
+  (0 until BankWidth).map(
+    b => {
+      // (hi_us, lo_us, table).map(_=>{
+      //   _(b).reset := reset.asBool
+      //   _(b).io.r.req.valid := io.req.valid
+      //   _(b).io.r.req.bits.setIdx := hashedIdx
+      // })
+      hi_us(b).reset := reset.asBool
+      lo_us(b).reset := reset.asBool
+      table(b).reset := reset.asBool
+      hi_us(b).io.r.req.valid := io.req.valid
+      lo_us(b).io.r.req.valid := io.req.valid
+      table(b).io.r.req.valid := io.req.valid
+      hi_us(b).io.r.req.bits.setIdx := hashed_idx
+      lo_us(b).io.r.req.bits.setIdx := hashed_idx
+      table(b).io.r.req.bits.setIdx := hashed_idx
+      
+      tageRead.hi_us(b) := hi_us(b).io.r.resp.data(0)
+      tageRead.lo_us(b) := lo_us(b).io.r.resp.data(0)
+      tageRead.table(b) := table(b).io.r.resp.data(0)
+
+      io.resp(b).valid := tageRead.table(b).valid && tageRead.table(b).tag === tag // Missing reset logic
+      io.resp(b).bits.ctr := tageRead.table(b).ctr
+      io.resp(b).bits.u := Cat(tageRead.hi_us(b),tageRead.lo_us(b))
+    }
+  )
+
+  val clear_u_ctr = RegInit(0.U((log2Ceil(uBitPeriod) + log2Ceil(nRows) + 1).W))
+  when (doing_reset) { clear_u_ctr := 1.U } .otherwise { clear_u_ctr := clear_u_ctr + 1.U }
+
+  val doing_clear_u = clear_u_ctr(log2Ceil(uBitPeriod)-1,0) === 0.U
+  val doing_clear_u_hi = doing_clear_u && clear_u_ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 1.U
+  val doing_clear_u_lo = doing_clear_u && clear_u_ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 0.U
+  val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
+
+  val (update_idx, update_tag) = compute_tag_and_hash(io.update.pc, io.update.hist)
+
+  val update_wdata = Wire(Vec(BankWidth, new TageEntry))
+
+  
+  (0 until BankWidth).map(b => {
+    table(b).io.w.req.valid := io.update.mask(b) || doing_reset
+    table(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
+    table(b).io.w.req.bits.data := Mux(doing_reset, 0.U(tageEntrySz.W), update_wdata(b))
+  })
+
+  val update_hi_wdata = Wire(Vec(BankWidth, Bool()))
+  (0 until BankWidth).map(b => {
+    hi_us(b).io.w.req.valid := io.update.uMask(b) || doing_reset || doing_clear_u_hi
+    hi_us(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, Mux(doing_clear_u_hi, clear_u_idx, update_idx))
+    hi_us(b).io.w.req.bits.data := Mux(doing_reset || doing_clear_u_hi, 0.U, update_hi_wdata(b))
+  })
+
+  val update_lo_wdata = Wire(Vec(BankWidth, Bool()))
+  (0 until BankWidth).map(b => {
+    lo_us(b).io.w.req.valid := io.update.uMask(b) || doing_reset || doing_clear_u_lo
+    lo_us(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, Mux(doing_clear_u_lo, clear_u_idx, update_idx))
+    lo_us(b).io.w.req.bits.data := Mux(doing_reset || doing_clear_u_lo, 0.U, update_lo_wdata(b))
+  })
+
+  val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
+  val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
+  val wrbypass         = Reg(Vec(wrBypassEntries, Vec(BankWidth, UInt(3.W))))
+  val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
+
+  val wrbypass_hits    = VecInit((0 until wrBypassEntries) map { i =>
+    !doing_reset &&
+    wrbypass_tags(i) === update_tag &&
+    wrbypass_idxs(i) === update_idx
+  })
+  val wrbypass_hit     = wrbypass_hits.reduce(_||_)
+  val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
+
+  for (w <- 0 until BankWidth) {
+    update_wdata(w).ctr   := Mux(io.update.alloc(w),
+      Mux(io.update.taken(w), 4.U,
+                              3.U
+      ),
+      Mux(wrbypass_hit,       inc_ctr(wrbypass(wrbypass_hit_idx)(w), io.update.taken(w)),
+                              inc_ctr(io.update.oldCtr(w), io.update.taken(w))
+      )
+    )
+    update_wdata(w).valid := true.B
+    update_wdata(w).tag   := update_tag
+
+    update_hi_wdata(w)    := io.update.u(w)(1)
+    update_lo_wdata(w)    := io.update.u(w)(0)
+  }
+
+  when (io.update.mask.reduce(_||_)) {
+    when (wrbypass_hits.reduce(_||_)) {
+      wrbypass(wrbypass_hit_idx) := VecInit(update_wdata.map(_.ctr))
+    } .otherwise {
+      wrbypass     (wrbypass_enq_idx) := VecInit(update_wdata.map(_.ctr))
+      wrbypass_tags(wrbypass_enq_idx) := update_tag
+      wrbypass_idxs(wrbypass_enq_idx) := update_idx
+      wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
+    }
+  }
+  
   // bypass entries for tage update
-  val wrBypassEntries = 4
+  val wrBypassEntries = 8
+  
 
 }
 
@@ -106,12 +264,12 @@ class Tage extends TageModule {
       val hit = resps(i)(w).valid
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
-        io.out.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2))
+        io.out.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
         finalAltPred := altPred
       }
-      provided = provided || hit
-      provider = Mux(hit, i.U, provider)
-      altPred = Mux(hit, ctr(2), altPred)
+      provided = provided || hit          // Once hit then provide
+      provider = Mux(hit, i.U, provider)  // Use the last hit as provider
+      altPred = Mux(hit, ctr(2), altPred) // Save current pred as potential altpred
     }
     outHits(w) := provided
     io.meta(w).provider.valid := provided
