@@ -1,5 +1,5 @@
 # This file describes the GitHub Actions workflow for continuous integration of XS Core.
-name: XS Core CI
+name: CI
 
 on:
   push:
@@ -8,16 +8,50 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    name: Generate Verilog
+  build-emu:
+    runs-on: self-hosted
+    name: Make EMU
     steps:
-       - uses: actions/checkout@v2
-        
-       - name: Set Up Mill
-         uses: jodersky/setup-mill@master
-         with:
-           mill-version: 0.7.3
-         
-       - name: Complile
-         run: make verilog
+      - uses: actions/checkout@v2
+      - name: Set env
+        run: |
+          echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
+          echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
+      - name: Build EMU
+        run: make ./build/emu NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j40
+
+  cputest:
+    runs-on: self-hosted
+    name: Run cputest
+    needs: [build-emu]
+    steps:
+      - name: Set env
+        run: |
+          echo ::set-env name=AM_HOME::/home/ci-runner/xsenv/nexus-am
+          echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
+          echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
+
+      - name: Run cputest
+        run: |
+          echo $AM_HOME
+          echo $NEMU_HOME
+          echo $NOOP_HOME
+          make -C $AM_HOME/tests/cputest/ ARCH=riscv64-noop V=OFF AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run
+
+  riscv-tests:
+    runs-on: self-hosted
+    name: Run riscv-tests
+    needs: [build-emu]
+    steps:
+      - name: Set env
+        run: |
+          echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
+          echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
+          echo ::set-env name=RVTEST_HOME::/home/ci-runner/xsenv/riscv-tests
+      - name: Run riscv-test
+        run: |
+          echo $NEMU_HOME
+          echo $NOOP_HOME
+          echo $RVTEST_HOME
+          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um V=OFF NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
+
