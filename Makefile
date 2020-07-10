@@ -9,6 +9,10 @@ MEM_GEN = ./scripts/vlsi_mem_gen
 SIMTOP = top.TestMain
 IMAGE ?= temp
 
+# remote machine with high frequency to speedup verilog generation
+REMOTE ?= localhost
+REMOTE_PREFIX ?= /nfs/24/$(abspath .)/
+
 .DEFAULT_GOAL = verilog
 
 help:
@@ -41,7 +45,11 @@ SIM_TOP = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
+ifeq ($(REMOTE),localhost)
 	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)
+else
+	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)"
+endif
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
@@ -93,7 +101,11 @@ E ?= -1
 V ?= ALL
 
 emu: $(EMU)
+ifeq ($(REMOTE),localhost)
 	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)
+else
+	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && $(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)"
+endif
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
