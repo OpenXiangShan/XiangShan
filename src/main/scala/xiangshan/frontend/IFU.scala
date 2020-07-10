@@ -22,6 +22,7 @@ class IFUIO extends XSBundle
     val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
+/*
 class FakeBPU extends XSModule{
   val io = IO(new Bundle() {
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
@@ -35,14 +36,14 @@ class FakeBPU extends XSModule{
   io.tageOut.valid := false.B
   io.tageOut.bits <> DontCare
 }
-
+*/
 
 
 class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
-    //val bpu = Module(new BPU)
-    val bpu = Module(new FakeBPU)
+    val bpu = Module(new BPU)
+    //val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
@@ -73,7 +74,7 @@ class IFU extends XSModule with HasIFUConst
       if1_pc := if1_npc
     }
 
-    bpu.io.in.pc.valid := if1_valid
+    bpu.io.in.pc.valid := if1_fire
     bpu.io.in.pc.bits := if1_npc
 
     XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
@@ -81,13 +82,13 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(false,true.B,"\n")
 
     //-------------------------
-    //      IF2  btb resonse 
+    //      IF2  btb response 
     //           icache visit
     //-------------------------
     //local
     val if2_valid = RegEnable(next=if1_valid,init=false.B,enable=if1_fire)
     val if2_pc = if1_pc
-    val if2_btb_taken = bpu.io.btbOut.valid
+    val if2_btb_taken = bpu.io.btbOut.valid && bpu.io.btbOut.bits.redirect
     val if2_btb_insMask = bpu.io.btbOut.bits.instrValid
     val if2_btb_target = bpu.io.btbOut.bits.target
 
@@ -136,7 +137,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(false,true.B,"\n")
 
     //-------------------------
-    //      IF4  icache resonse   
+    //      IF4  icache response   
     //           RAS result
     //           taget generate
     //-------------------------
@@ -146,7 +147,7 @@ class IFU extends XSModule with HasIFUConst
     val if4_btb_target = RegEnable(if3_btb_target,if3_fire)
     val if4_btb_taken = RegEnable(if3_btb_taken,if3_fire)
     val if4_tage_target = bpu.io.tageOut.bits.target
-    val if4_tage_taken = bpu.io.tageOut.valid
+    val if4_tage_taken = bpu.io.tageOut.valid && bpu.io.tageOut.bits.redirect
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
     XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x   if4_npc:0x%x\n",if4_valid,if4_pc,if4_npc)
     //XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
@@ -171,7 +172,7 @@ class IFU extends XSModule with HasIFUConst
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) //&& (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
-    io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+    io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(Fill(2, _.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)
     io.fetchPacket.bits.pc := if4_pc
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
