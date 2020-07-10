@@ -253,7 +253,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   val enqAlreadyRdy = if(src3Listen) { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1)&&enqSrcRdy(2) else enqSrcRdy(0)&&enqSrcRdy(2) } else  { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1) else enqSrcRdy(0) }
   val enqALRdyNext = OneCycleFire(enqAlreadyRdy && enqFire)
   val enqSendFlushHit = issQue(enqSelIqNext).uop.brTag.needFlush(io.redirect)
-  val enqSendEnable = enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ // FIXME: has1Rdy has combination loop
+  val enqSendEnable = if(fifo) { false.B } else { enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } // FIXME: has1Rdy has combination loop
   when (enqSendEnable) {
     io.deq.valid := true.B
     io.deq.bits := issQue(enqSelIqNext)
