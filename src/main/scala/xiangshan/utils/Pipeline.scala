@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 object PipelineConnect {
-  def apply[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool) = {
+  def apply[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool): Any = {
     val valid = RegInit(false.B)
     when (rightOutFire) { valid := false.B }
     when (left.valid && right.ready) { valid := true.B }
@@ -13,5 +13,12 @@ object PipelineConnect {
     left.ready := right.ready
     right.bits <> RegEnable(left.bits, left.valid && right.ready)
     right.valid := valid //&& !isFlush
+  }
+
+  def apply[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool, brIdx: UInt, recIdx: UInt): Any = {
+    val brIdxReg = RegEnable(brIdx, left.valid && right.ready)
+    val mprFlush = false.B //TODO
+    apply(left, right, rightOutFire, isFlush || mprFlush)
+    brIdxReg
   }
 }
