@@ -157,7 +157,8 @@ class BPUStage1 extends XSModule {
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) { btbReadFire(w)(b) := btbMeta(w)(b).io.r.req.fire() && btbData(w)(b).io.r.req.fire() }
     when (btbMetaRead(w).valid && btbMetaRead(w).tag === btbAddr.getTag(pcLatch)) {
-      btbWayHits(w) := !flushS1 && RegNext(btbReadFire(w)(btbHitBank), init = false.B)
+      // btbWayHits(w) := !flushS1 && RegNext(btbReadFire(w)(btbHitBank), init = false.B)
+      btbWayHits(w) := !io.flush && RegNext(btbReadFire(w)(btbHitBank), init = false.B)
       for (i <- 0 until predictWidth) {
         btbValids(i) := btbDataRead(w)(i).valid
         btbTargets(i) := btbDataRead(w)(i).target
@@ -211,7 +212,8 @@ class BPUStage1 extends XSModule {
   )
 
   val jbtacBank = jbtacAddr.getBank(histXORAddrLatch)
-  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !flushS1 && jbtacFire(jbtacBank)
+  // val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !flushS1 && jbtacFire(jbtacBank)
+  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !io.flush && jbtacFire(jbtacBank)
   val jbtacHitIdx = jbtacRead(jbtacBank).offset
   val jbtacTarget = jbtacRead(jbtacBank).target
 
@@ -314,7 +316,8 @@ class BPUStage1 extends XSModule {
                                             io.s1OutPred.bits.hist(0) << PopCount(btbNotTakens))))
 
   // redirect based on BTB and JBTAC
-  io.out.valid := RegNext(io.in.pc.fire()) && !flushS1
+  // io.out.valid := RegNext(io.in.pc.fire()) && !flushS1
+  io.out.valid := RegNext(io.in.pc.fire()) && !io.flush
 
   io.s1OutPred.valid := io.out.valid
   io.s1OutPred.bits.redirect := btbHit && btbTaken || jbtacHit
@@ -363,7 +366,7 @@ class BPUStage2 extends XSModule {
 
   // flush Stage2 when Stage3 or banckend redirects
   val flushS2 = BoolStopWatch(io.flush, io.in.fire(), startHighPriority = true)
-  io.out.valid := !flushS2 && RegNext(io.in.fire())
+  io.out.valid := !io.flush && !flushS2 && RegNext(io.in.fire())
   io.in.ready := !io.out.valid || io.out.fire()
 
   // do nothing
