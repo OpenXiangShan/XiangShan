@@ -460,7 +460,7 @@ class BPUStage3 extends XSModule {
   io.out.bits.rasTopCtr := rasTop.ctr
 
   // flush BPU and redirect when target differs from the target predicted in Stage1
-  io.out.bits.redirect := !inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
+  io.out.bits.redirect := inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
     inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target
   io.flushBPU := io.out.bits.redirect && io.out.valid
 
@@ -495,9 +495,13 @@ class BPUStage3 extends XSModule {
   io.s3Taken := jmpIdx.orR.asBool
 
   // debug info
-  XSDebug(true.B, "[BPUS3]in:(%d %d) pc=%x\n", io.in.valid, io.in.ready, io.in.bits.pc)
-  XSDebug(true.B, "[BPUS3]out:%d pc=%x redirect=%d predcdMask=%b instrValid=%b tgt=%x\n",
+  XSDebug(io.in.fire(), "[BPUS3]in:(%d %d) pc=%x\n", io.in.valid, io.in.ready, io.in.bits.pc)
+  XSDebug(io.out.valid, "[BPUS3]out:%d pc=%x redirect=%d predcdMask=%b instrValid=%b tgt=%x\n",
     io.out.valid, inLatch.pc, io.out.bits.redirect, io.predecode.bits.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
+  XSDebug(true.B, "[BPUS3]flushS3=%d\n", flushS3)
+  XSDebug(true.B, "[BPUS3]validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
+  XSDebug(true.B, "[BPUS3]brIdx=%b brTakenIdx=%b brNTakenIdx=%b jalIdx=%d jalrIdx=%d callIdx=%d retIdx=%b\n",
+    brIdx, brTakenIdx, brNotTakenIdx, jalIdx, jalrIdx, callIdx, retIdx)
 }
 
 class BPU extends XSModule {
