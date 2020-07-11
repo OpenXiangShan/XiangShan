@@ -20,8 +20,33 @@ class DispatchGen extends XSModule {
   assert(IntDqDeqWidth >= FpDqDeqWidth)
   assert(IntDqDeqWidth >= LsDqDeqWidth)
 
+  def PriorityGen(numExist: Seq[UInt]) = {
+    assert(numExist.length > 1)
+    val sortedIndex = Wire(Vec(numExist.length, UInt(log2Ceil(numExist.length).W)))
+    val priority = WireInit(VecInit(Seq.tabulate(numExist.length)(i => 0.U(log2Ceil(numExist.length).W))))
+    for (i <- 0 until numExist.length) {
+      sortedIndex(i) := PriorityEncoder((0 until numExist.length).map(each => {
+        // itself should not be found yet
+        val equalPrevious = (if (i == 0) false.B else Cat((0 until i).map(l => each.U === sortedIndex(l))).orR())
+        val largerThanAnyOther = Cat((0 until numExist.length).map(another => {
+          // no need to be compared with the larger ones
+          val anotherEqualPrevious = (if (i == 0) false.B else Cat((0 until i).map(l => another.U === sortedIndex(l))).orR())
+          // need to be no smaller than any other numbers except the previoud found larger ones
+          (numExist(each) <= numExist(another)) || anotherEqualPrevious
+        })).andR()
+        largerThanAnyOther && !equalPrevious
+      }))
+      priority(sortedIndex(i)) := i.U
+    }
+    for (i <- 0 until numExist.length) {
+      XSDebug(p"priority: data($i) = ${numExist(i)}, priority = ${priority(i)}\n")
+    }
+    priority
+  }
+
   def genIQIndex(exunum: Int, deqnum: Int, deq: Seq[Bool], numExist: Seq[UInt]) = {
     assert(isPow2(deqnum))
+    assert(exunum == numExist.length)
     // index without priority
     val IQIndex = Wire(Vec(exunum, UInt((log2Ceil(deqnum) + 1).W)))
     var last_deq = deq
@@ -31,8 +56,8 @@ class DispatchGen extends XSModule {
       last_deq = (0 until deqnum).map(i => !onehot(i) && last_deq(i))
     }
     // now consider the IQ priority with numExist
-//    var currMax = (0 until numExist.length)
-    IQIndex
+    val priority = (if (numExist.length > 1) PriorityGen(numExist) else Seq(0.U))
+    (0 until exunum).map(i => IQIndex(priority(i)))
   }
 
   val bruIQIndex = genIQIndex(exuConfig.BruCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.bru),
