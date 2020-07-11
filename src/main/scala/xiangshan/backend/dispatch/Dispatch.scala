@@ -21,7 +21,8 @@ class Dispatch extends XSModule {
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRReadPorts, Input(Bool()))
-    // ro reservation stations
+    // to reservation stations
+    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.ExuCnt, ValidIO(new ExuInput))
   })
@@ -57,4 +58,5 @@ class Dispatch extends XSModule {
   dispatch2.io.fpPregRdy <> io.fpPregRdy
   dispatch2.io.enqIQCtrl <> io.enqIQCtrl
   dispatch2.io.enqIQData <> io.enqIQData
+  dispatch2.io.numExist <> io.numExist
 }

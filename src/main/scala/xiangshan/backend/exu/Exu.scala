@@ -23,7 +23,8 @@ case class ExuParameters
   assert(JmpCnt == 1, "Only support 1 JmpUnit now!")
   def IntExuCnt = AluCnt + MulCnt + MduCnt + JmpCnt
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
-  def ExuCnt = IntExuCnt + FpExuCnt + LduCnt
+  def LsExuCnt = LduCnt + StuCnt
+  def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
   def NRFuType = 9
   def FuOpWidth = 7
 }
@@ -65,14 +66,14 @@ object Exu {
 
 trait HasExeUnits{
 
-  val jmpExeUnit = Module(new JmpExeUnit)
   val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
+  val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
-//  val fmacExeUnits = Array.tabulate(exuConfig.FmacCnt)(_ => Module(new Fmac))
-//  val fmiscExeUnits = Array.tabulate(exuConfig.FmiscCnt)(_ => Module(new Fmisc))
-//  val fmiscDivSqrtExeUnits = Array.tabulate(exuConfig.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val lsuExeUnits = Array.tabulate(exuParameters.LduCnt)(_ => Module(new LsExeUnit))
+//  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
+//  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
+//  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
+  val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
 
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
 

@@ -73,6 +73,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
       fifo = eu.config.supportedFuncUnits.contains(FunctionUnit.lsuCfg)
     ))
     iq.io.redirect <> redirect
+    iq.io.numExist <> dispatch.io.numExist(i)
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
     val wuUnitsOut = exeUnits.filter(e => needWakeup(e.config)).map(_.io.out)

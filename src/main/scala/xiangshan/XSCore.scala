@@ -56,8 +56,8 @@ trait HasXSParameter {
     FmacCnt = 0,
     FmiscCnt = 0,
     FmiscDivSqrtCnt = 0,
-    LduCnt = 1,
-    StuCnt = 0
+    LduCnt = 0,
+    StuCnt = 1
   )
 }
 
