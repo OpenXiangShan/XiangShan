@@ -6,6 +6,7 @@ import xiangshan._
 import xiangshan.FuType._
 import xiangshan.backend.fu.FuConfig
 import xiangshan.utils.ParallelOR
+import xiangshan.backend.fu.FunctionUnit._
 
 case class ExuParameters
 (
@@ -27,17 +28,13 @@ case class ExuParameters
   def FuOpWidth = 7
 }
 
-abstract class Exu
+case class ExuConfig
 (
-  val supportedFuncUnits: Array[FuConfig],
-  val enableBypass: Boolean
-) extends XSModule {
-  val io = IO(new ExuIO)
-  io.dmem <> DontCare
-  io.out.bits.debug.isMMIO := false.B
-
+  name: String,
+  supportedFuncUnits: Array[FuConfig],
+  enableBypass: Boolean
+){
   def max(in: Seq[Int]): Int = in.reduce((x, y) => if(x > y) x else y)
-
   val intSrcCnt = max(supportedFuncUnits.map(_.numIntSrc))
   val fpSrcCnt = max(supportedFuncUnits.map(_.numFpSrc))
   val readIntRf = intSrcCnt > 0
@@ -49,6 +46,21 @@ abstract class Exu
   def canAccept(fuType: UInt): Bool = {
     ParallelOR(supportedFuncUnits.map(_.fuType === fuType)).asBool()
   }
+}
+
+abstract class Exu(val config: ExuConfig) extends XSModule {
+  val io = IO(new ExuIO)
+  io.dmem <> DontCare
+  io.out.bits.debug.isMMIO := false.B
+}
+
+object Exu {
+  val jmpExeUnitCfg = ExuConfig("JmpExu", Array(jmpCfg, i2fCfg), enableBypass = false)
+  val aluExeUnitCfg = ExuConfig("AluExu", Array(aluCfg), enableBypass = false)
+  val mulExeUnitCfg = ExuConfig("MulExu", Array(mulCfg), enableBypass = false)
+  val divExeUnitCfg = ExuConfig("DivExu",Array(divCfg), enableBypass = false)
+  val mulDivExeUnitCfg = ExuConfig("MulDivExu", Array(mulCfg, divCfg), enableBypass = false)
+  val lsuExeUnitCfg = ExuConfig("LsExu", Array(lsuCfg), enableBypass = false)
 }
 
 trait HasExeUnits{

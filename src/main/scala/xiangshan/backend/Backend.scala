@@ -57,23 +57,24 @@ class Backend(implicit val p: XSConfig) extends XSModule
   redirectInfo.redirect := redirect.bits
 
   val issueQueues = exeUnits.zipWithIndex.map({ case (eu, i) =>
-    def needBypass(x: Exu): Boolean = x.enableBypass
+    def needBypass(cfg: ExuConfig): Boolean = cfg.enableBypass
 
-    val bypassCnt = if(eu.enableBypass) exeUnits.count(needBypass) else 0
-    def needWakeup(x: Exu): Boolean = (eu.readIntRf && x.writeIntRf) || (eu.readFpRf && x.writeFpRf)
+    val bypassCnt = if(eu.config.enableBypass) exeUnits.map(_.config).count(needBypass) else 0
+    def needWakeup(cfg: ExuConfig): Boolean =
+      (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
 
-    val wakeupCnt = exeUnits.count(needWakeup)
-    assert(!(needBypass(eu) && !needWakeup(eu))) // needBypass but dont needWakeup is not allowed
+    val wakeupCnt = exeUnits.map(_.config).count(needWakeup)
+    assert(!(needBypass(eu.config) && !needWakeup(eu.config))) // needBypass but dont needWakeup is not allowed
     val iq = Module(new IssueQueue(
-      eu,
+      eu.config,
       wakeupCnt,
       bypassCnt,
-      fifo = eu.supportedFuncUnits.contains(FunctionUnit.lsuCfg)
+      fifo = eu.config.supportedFuncUnits.contains(FunctionUnit.lsuCfg)
     ))
     iq.io.redirect <> redirect
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
-    val wuUnitsOut = exeUnits.filter(e => needWakeup(e)).map(_.io.out)
+    val wuUnitsOut = exeUnits.filter(e => needWakeup(e.config)).map(_.io.out)
     for (i <- iq.io.wakeUpPorts.indices) {
       iq.io.wakeUpPorts(i).bits <> wuUnitsOut(i).bits
       iq.io.wakeUpPorts(i).valid := wuUnitsOut(i).valid
@@ -81,7 +82,11 @@ class Backend(implicit val p: XSConfig) extends XSModule
     println(
       s"[$i] ${eu.name} Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt" +
         s" Supported Function:[" +
-        s"${eu.supportedFuncUnits.map(fu => FuType.functionNameMap(fu.fuType.litValue())).mkString(", ")}]"
+        s"${
+          eu.config.supportedFuncUnits.map(
+            fu => FuType.functionNameMap(fu.fuType.litValue())).mkString(", "
+          )
+        }]"
     )
     eu.io.in <> iq.io.deq
     eu.io.redirect <> redirect
@@ -89,7 +94,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   })
 
   val bypassQueues = issueQueues.filter(_.bypassCnt > 0)
-  val bypassUnits = exeUnits.filter(_.enableBypass)
+  val bypassUnits = exeUnits.filter(_.config.enableBypass)
   bypassQueues.foreach(iq => {
     for (i <- iq.io.bypassUops.indices) {
       iq.io.bypassData(i).bits := bypassUnits(i).io.out.bits
@@ -107,7 +112,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.enqReqs <> decode.io.toBrq
-  for ((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.hasRedirect))) {
+  for ((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.config.hasRedirect))) {
     x.bits := y.io.out.bits
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
@@ -135,8 +140,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
 
   val exeWbReqs = exeUnits.map(_.io.out)
 
-  val wbIntIdx = exeUnits.zipWithIndex.filter(_._1.writeIntRf).map(_._2)
-  val wbFpIdx = exeUnits.zipWithIndex.filter(_._1.writeFpRf).map(_._2)
+  val wbIntIdx = exeUnits.zipWithIndex.filter(_._1.config.writeIntRf).map(_._2)
+  val wbFpIdx = exeUnits.zipWithIndex.filter(_._1.config.writeFpRf).map(_._2)
 
   val wbu = Module(new Wbu(wbIntIdx, wbFpIdx))
   wbu.io.in <> exeWbReqs

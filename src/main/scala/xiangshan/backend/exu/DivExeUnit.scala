@@ -7,8 +7,7 @@ import utils._
 import xiangshan.backend.fu.Divider
 import xiangshan.backend.MDUOpType
 
-class DivExeUnit extends XSModule {
-  val io = IO(new ExuIO)
+class DivExeUnit extends Exu(Exu.divExeUnitCfg) {
 
   val (src1, src2, uop, func) =
     (io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType)

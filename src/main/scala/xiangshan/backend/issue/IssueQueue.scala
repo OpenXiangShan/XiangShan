@@ -3,27 +3,39 @@ package xiangshan.backend.issue
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu
+import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.utils._
 import xiangshan.backend.fu.FunctionUnit._
 
 
-trait IQConst{
-  val iqSize = 8
+trait IQConst extends HasXSParameter{
+  val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
 }
 
 sealed abstract class IQBundle extends XSBundle with IQConst
 sealed abstract class IQModule extends XSModule with IQConst
 
-class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo: Boolean = false) extends IQModule {
+object OneCycleFire {
+  def apply(fire: Bool) = {
+    val valid = RegInit(false.B)
+    when (valid) { valid := false.B }
+    when (fire) { valid := true.B }
+    valid
+  }
+}
+
+class IssueQueue
+(
+  exuCfg: ExuConfig, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo: Boolean = false
+) extends IQModule {
 
   val useBypass = bypassCnt > 0
   val src2Use = true
-  val src3Use = exu.supportedFuncUnits.contains(fmacCfg)
+  val src3Use = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
   val src2Listen = true
-  val src3Listen = exu.supportedFuncUnits.contains(fmacCfg)
+  val src3Listen = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
 
   val io = IO(new Bundle() {
     // flush Issue Queue
@@ -46,6 +58,9 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
     // use bypass uops to speculative wake-up
     val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new MicroOp))) else null
     val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
+
+    // to Dispatch
+    val numExist = Output(UInt((iqIdxWidth+1).W))
   })
 
   val srcAllNum = 3
@@ -81,7 +96,7 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
   srcDataWire := srcData
   srcData := srcDataWire
 
-  // there is three stage
+  // there are three stages
   // |-------------|--------------------|--------------|
   // |Enq:get state|Deq: select/get data| fire stage   |
   // |-------------|--------------------|--------------|
@@ -95,7 +110,9 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
   val popOne = Wire(Bool())
   io.enqCtrl.ready := !full || popOne
   val enqSelIq = Wire(UInt(iqIdxWidth.W))
-  val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.src1State), true.B, io.enqCtrl.bits.src1State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src2State), true.B, io.enqCtrl.bits.src2State === SrcState.rdy), Mux(SrcType.isPcImm(io.enqCtrl.bits.src3State), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
+  val enqSrcRdy = List(Mux(SrcType.isPcImm(io.enqCtrl.bits.ctrl.src1Type), true.B, io.enqCtrl.bits.src1State === SrcState.rdy),
+                       Mux(SrcType.isPcImm(io.enqCtrl.bits.ctrl.src2Type), true.B, io.enqCtrl.bits.src2State === SrcState.rdy),
+                       Mux(SrcType.isPcImm(io.enqCtrl.bits.ctrl.src3Type), true.B, io.enqCtrl.bits.src3State === SrcState.rdy))
 
   // state enq
   when (enqFire) {
@@ -187,7 +204,7 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
 
   // redirect issQue
   val redHitVec = List.tabulate(iqSize)(i => issQue(i).uop.brTag.needFlush(io.redirect))
-  for (i <- 0 until iqSize) {
+  for (i <- validQue.indices) {
     when (redHitVec(i) && validQue(i)) {
       validQue(i) := false.B
     }
@@ -202,7 +219,7 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
   val deqFlushHit = issueToExu.uop.brTag.needFlush(io.redirect)
-  val deqCanIn = !issueToExuValid || deqFire || deqFlushHit
+  val deqCanIn = !issueToExuValid || io.deq.ready || deqFlushHit
   
   val toIssFire = deqCanIn && has1Rdy && !isPop && !selIsRed
   popOne := deqCanIn && (has1Rdy || isPop) // send a empty or valid term to issueStage
@@ -223,7 +240,6 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
   io.deq.valid := issueToExuValid && !deqFlushHit
   io.deq.bits := issueToExu
 
-
   enqSelIq := Mux(full,
     Mux(isPop,
       idQue(popSel),
@@ -232,19 +248,43 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
     idQue(tail)
   ) // Note: direct by IQue's idx, different from deqSel
 
+  io.numExist := tailAll
+  assert(tailAll < 9.U)
+
+  //-----------------------------------------
+  // Issue with No Delay
+  //-----------------------------------------
+  // when enq is ready && no other rdy && no pop &&  fireStage is ready && no flush
+  // send out directly without store the data
+  val enqAlreadyRdy = if(src3Listen) { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1)&&enqSrcRdy(2) else enqSrcRdy(0)&&enqSrcRdy(2) } else  { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1) else enqSrcRdy(0) }
+  val enqALRdyNext = OneCycleFire(enqAlreadyRdy && enqFire)
+  val enqSendFlushHit = issQue(enqSelIqNext).uop.brTag.needFlush(io.redirect)
+  val enqSendEnable = if(fifo) { RegNext(tailAll===0.U) && enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } else { enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } // FIXME: has1Rdy has combination loop
+  when (enqSendEnable) {
+    io.deq.valid := true.B
+    io.deq.bits := issQue(enqSelIqNext)
+    io.deq.bits.src1 := enqDataVec(0)
+    if (src2Use) { io.deq.bits.src2 := enqDataVec(1) }
+    if (src3Use) { io.deq.bits.src3 := enqDataVec(2) }
+    issueToExuValid := false.B
+    when (!io.deq.ready) { // if Func Unit is not ready, store it to FireStage
+      issueToExuValid := true.B
+    }
+  }
+
   //-----------------------------------------
   // Wakeup and Bypass
   //-----------------------------------------
   if (wakeupCnt > 0) {
-    val cdbValid = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).valid)
-    val cdbData = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.data)
-    val cdbPdest = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.pdest)
-    val cdbrfWen = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.ctrl.rfWen)
-    val cdbfpWen = List.tabulate(wakeupCnt)(i => io.wakeUpPorts(i).bits.uop.ctrl.fpWen)
+    val cdbValid = io.wakeUpPorts.map(_.valid)
+    val cdbData  = io.wakeUpPorts.map(_.bits.data)
+    val cdbPdest = io.wakeUpPorts.map(_.bits.uop.pdest)
+    val cdbrfWen = io.wakeUpPorts.map(_.bits.uop.ctrl.rfWen)
+    val cdbfpWen = io.wakeUpPorts.map(_.bits.uop.ctrl.fpWen)
 
-    for(i <- 0 until iqSize) {
+    for(i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for(j <- 0 until srcListenNum) {
-        val hitVec = List.tabulate(wakeupCnt)(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
+        val hitVec = cdbValid.indices.map(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
         val hit = ParallelOR(hitVec).asBool
         val data = ParallelMux(hitVec zip cdbData)
         when (validQue(i) && !srcRdyVec(i)(j) && hit) { 
@@ -252,36 +292,36 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
           srcRdyVec(i)(j) := true.B
         }
         // XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "WakeUp: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b Data:%x\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt, data)
-        for (k <- 0 until wakeupCnt) {
+        for (k <- cdbValid.indices) {
           XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k), "WakeUpHit: IQIdx:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", i.U, j.U, psrc(i)(j), k.U, cdbData(k), io.wakeUpPorts(k).bits.uop.cf.pc, io.wakeUpPorts(k).bits.uop.roqIdx)
         }
       }
     }
   }
   if (useBypass) {
-    val bpPdest = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.pdest)
-    val bpValid = List.tabulate(bypassCnt)(i => io.bypassUops(i).valid)
-    val bpData = List.tabulate(bypassCnt)(i => io.bypassData(i).bits.data)
-    val bprfWen = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.ctrl.rfWen)
-    val bpfpWen = List.tabulate(bypassCnt)(i => io.bypassUops(i).bits.ctrl.fpWen)
+    val bpPdest = io.bypassUops.map(_.bits.pdest)
+    val bpValid = io.bypassUops.map(_.valid)
+    val bpData  = io.bypassData.map(_.bits.data)
+    val bprfWen = io.bypassUops.map(_.bits.ctrl.rfWen)
+    val bpfpWen = io.bypassUops.map(_.bits.ctrl.fpWen)
 
-    for (i <- 0 until iqSize) {
+    for (i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for (j <- 0 until srcListenNum) {
-        val hitVec = List.tabulate(bypassCnt)(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
+        val hitVec = bpValid.indices.map(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
         val hitVecNext = hitVec.map(RegNext(_))
         val hit = ParallelOR(hitVec).asBool
         when (validQue(i) && !srcRdyVec(i)(j) && hit) {
-          srcRdyVec(i)(j) := true.B // FIXME: if uncomment the up comment, will cause combiantional loop, but it is Mem type??
+          srcRdyVec(i)(j) := true.B
         }
         when (RegNext(validQue(i) && !srcRdyVec(i)(j) && hit)) {
           srcDataWire(i)(j) := PriorityMux(hitVecNext zip bpData)
         }
         // XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "BypassCtrl: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt)
-        for (k <- 0 until bypassCnt) {
+        for (k <- bpValid.indices) {
           XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k), "BypassCtrlHit: IQIdx:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n", i.U, j.U, psrc(i)(j), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
         }
         // XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit), "BypassData: Sel:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", i.U, j.U, psrc(i)(j), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
-        for (k <- 0 until bypassCnt) {
+        for (k <- bpValid.indices) {
           XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k)), "BypassDataHit: IQIdx:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", i.U, j.U, psrc(i)(j), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
         }
       }
@@ -292,7 +332,7 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
     val enqPsrc = List(enqCtrl.bits.psrc1, enqCtrl.bits.psrc2, enqCtrl.bits.psrc3)
     val enqSrcType = List(enqCtrl.bits.ctrl.src1Type, enqCtrl.bits.ctrl.src2Type, enqCtrl.bits.ctrl.src3Type)
     for (i <- 0 until srcListenNum) {
-      val hitVec = List.tabulate(bypassCnt)(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
+      val hitVec = bpValid.indices.map(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
       val hitVecNext = hitVec.map(RegNext(_))
       val hit = ParallelOR(hitVec).asBool
       when (enqFire && hit && !enqSrcRdy(i)) {
@@ -302,11 +342,11 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
         srcDataWire(enqSelIqNext)(i) := ParallelMux(hitVecNext zip bpData)
       }
       // XSDebug(enqFire && hit, "EnqBypassCtrl: enqSelIq:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSelIq, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
-      for (k <- 0 until bypassCnt) {
+      for (k <- bpValid.indices) {
         XSDebug(enqFire && hit && !enqSrcRdy(i) && hitVec(k), "EnqBypassCtrlHit: enqSelIq:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
       // XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelIqNext:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelIqNext, i.U, enqPsrc(i), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
-      for (k <- 0 until bypassCnt) {
+      for (k <- bpValid.indices) {
         XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
     }
@@ -333,7 +373,10 @@ class IssueQueue(exu: Exu, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo:
   } else {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
-  XSDebug(p"id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx ExuType:${exu.name}\n")
+
+  XSDebug(enqSendEnable, p"NoDelayIss: enqALRdy:${enqAlreadyRdy} *Next:${enqALRdyNext} En:${enqSendEnable} flush:${enqSendFlushHit} enqSelIqNext:${enqSelIqNext} deqSelIq:${deqSelIq} deqReady:${io.deq.ready}\n")
+  XSDebug(s"id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx Exu:${exuCfg.name}\n")
+
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
       XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x <-\n",

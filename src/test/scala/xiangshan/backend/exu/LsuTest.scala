@@ -18,9 +18,7 @@ import xiangshan.testutils.TestCaseGenerator._
 
 import scala.util.Random
 
-class LsuDut(dispBegin: Int, dispEnd: Int) extends Exu(
-  Array(lsuCfg), false
-) {
+class LsuDut(dispBegin: Int, dispEnd: Int) extends Exu(Exu.lsuExeUnitCfg) {
 
   io.dmem <> DontCare
 

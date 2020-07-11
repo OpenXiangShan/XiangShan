@@ -7,7 +7,7 @@ import xiangshan.utils._
 import xiangshan.backend.MDUOpType
 import xiangshan.backend.fu.FunctionUnit._
 
-class MulDivExeUnit extends Exu(Array(mulCfg, divCfg), enableBypass = false){
+class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
   val (src1, src2, uop, func) =
     (io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType)
 

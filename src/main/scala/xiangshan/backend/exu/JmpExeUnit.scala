@@ -12,7 +12,7 @@ import xiangshan.backend.BRUOpType
 // NOTE: BRUOpType is at backend/package.scala
 
 // TODO: add csr
-class JmpExeUnit extends Exu(Array(jmpCfg, i2fCfg), enableBypass = false) {
+class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
 
   val (iovalid, src1, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 

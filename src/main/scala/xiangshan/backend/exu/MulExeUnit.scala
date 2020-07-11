@@ -9,7 +9,7 @@ import xiangshan.backend.fu.FunctionUnit._
 import xiangshan.backend.fu.ArrayMultiplier
 
 
-class MulExeUnit extends Exu(Array(mulCfg), enableBypass = false){
+class MulExeUnit extends Exu(Exu.mulExeUnitCfg){
   val (src1, src2, uop, func) =
     (io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType)
 

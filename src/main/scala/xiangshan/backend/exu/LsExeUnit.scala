@@ -28,7 +28,7 @@ class StoreQueueEntry extends XSBundle{
 }
 
 // Multi-cycle LSU ported from NOOP
-class LsExeUnit extends Exu(Array(lsuCfg), enableBypass = false){
+class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
 
   // store buffer
   val stqData = Reg(Vec(8, new StoreQueueEntry))
