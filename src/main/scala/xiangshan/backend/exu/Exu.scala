@@ -21,6 +21,7 @@ case class ExuConfig
   assert(BruCnt == 1, "Only support 1 Bru now!")
   def IntExuCnt = AluCnt + MulCnt + MduCnt + BruCnt
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
+  def LsExuCnt = LduCnt + StuCnt
   def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
   def NRFuType = 9
   def FuOpWidth = 7

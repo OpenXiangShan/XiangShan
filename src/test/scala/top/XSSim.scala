@@ -97,3 +97,7 @@ object TestMain extends App {
     Seq(ChiselGeneratorAnnotation(() => new XSSimTop))
   )
 }
+
+object FirMain extends App{
+  firrtl.stage.FirrtlMain.stage.execute(args, Seq(ChiselGeneratorAnnotation(() => new XSSimTop)))
+}

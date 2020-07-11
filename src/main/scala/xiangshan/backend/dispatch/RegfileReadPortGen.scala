@@ -8,15 +8,17 @@ import xiangshan.utils.{XSDebug}
 class RegfileReadPortGen extends XSModule {
   val io = IO(new Bundle() {
     // from dispatch queues
-    val enqIQIndex = Flipped(Vec(exuConfig.ExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W))))
-
+    val intIQEnqIndex = Flipped(Vec(exuConfig.IntExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W))))
+    val fpIQEnqIndex = Flipped(Vec(exuConfig.FpExuCnt, ValidIO(UInt(log2Ceil(FpDqDeqWidth).W))))
+    val lsIQEnqIndex = Flipped(Vec(exuConfig.LduCnt + exuConfig.StuCnt, ValidIO(UInt(log2Ceil(LsDqDeqWidth).W))))
+    // chooses dispatch queue dequeue indexs for regfile read ports
     val readIntRf = Output(Vec(NRReadPorts, UInt(log2Ceil(IntDqDeqWidth).W)))
-    val intIQRfSrc = Output(Vec(exuConfig.ExuCnt, UInt(log2Ceil(NRReadPorts).W)))
     val readFpRf = Output(Vec(NRReadPorts, UInt(log2Ceil(IntDqDeqWidth).W)))
+    // chooses regfile read ports for reservation stations
+    val intIQRfSrc = Output(Vec(exuConfig.IntExuCnt, UInt(log2Ceil(NRReadPorts).W)))
+    val fpIQRfSrc = Output(Vec(exuConfig.FpExuCnt, UInt(log2Ceil(NRReadPorts).W)))
+    val lsIQRfSrc = Output(Vec(exuConfig.LsExuCnt, UInt(log2Ceil(NRReadPorts).W)))
   })
-  io.readIntRf <> DontCare
-  io.readFpRf <> DontCare
-  io.intIQRfSrc <> DontCare
 
   def RegfileReadPortArbiter(staticMappedValid: Seq[Bool], dynamicMappedValid: Seq[Bool]) = {
     val choiceCount = dynamicMappedValid.length + 1
@@ -42,21 +44,64 @@ class RegfileReadPortGen extends XSModule {
 
   val intStaticIndex = Seq(1, 2, 3, 4)
   val intDynamicIndex = Seq(0, 5, 6)
-  val intStaticMappedValid = intStaticIndex.map(i => io.enqIQIndex(i).valid)
-  val intDynamicMappedValid = intDynamicIndex.map(i => io.enqIQIndex(i).valid)
+  val intStaticMappedValid = intStaticIndex.map(i => io.intIQEnqIndex(i).valid)
+  val intDynamicMappedValid = intDynamicIndex.map(i => io.intIQEnqIndex(i).valid)
   val (intReadPortSrc, intDynamicExuSrc) = RegfileReadPortArbiter(intStaticMappedValid, intDynamicMappedValid)
-
-  val intStaticMapped = intStaticIndex.map(i => io.enqIQIndex(i).bits)
-  val intDynamicMapped = intDynamicIndex.map(i => io.enqIQIndex(i).bits)
+  val intStaticMapped = intStaticIndex.map(i => io.intIQEnqIndex(i).bits)
+  val intDynamicMapped = intDynamicIndex.map(i => io.intIQEnqIndex(i).bits)
   for (i <- 0 until intStaticIndex.length) {
     val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
-    io.readIntRf(i) := index(intReadPortSrc(i))
+    io.readIntRf(2*i) := index(intReadPortSrc(i))
+    io.readIntRf(2*i + 1) := index(intReadPortSrc(i))
   }
-  io.intIQRfSrc(0) := 2.U * intDynamicExuSrc(0)
-  io.intIQRfSrc(1) := 2.U * 0.U
-  io.intIQRfSrc(2) := 2.U * 1.U
-  io.intIQRfSrc(3) := 2.U * 2.U
-  io.intIQRfSrc(4) := 2.U * 3.U
-  io.intIQRfSrc(5) := 2.U * intDynamicExuSrc(1)
-  io.intIQRfSrc(6) := 2.U * intDynamicExuSrc(2)
+  intStaticIndex.zipWithIndex.map({case (index, i) => io.intIQRfSrc(index) := (2*i).U})
+  intDynamicIndex.zipWithIndex.map({case (index, i) => io.intIQRfSrc(index) := 2.U * intDynamicExuSrc(i)})
+
+  if (exuConfig.FpExuCnt > 0) {
+    val fpStaticIndex = 0 until exuConfig.FmacCnt
+    val fpDynamicIndex = exuConfig.FmacCnt until exuConfig.FpExuCnt
+    val fpStaticMappedValid = fpStaticIndex.map(i => io.fpIQEnqIndex(i).valid)
+    val fpDynamicMappedValid = fpDynamicIndex.map(i => io.fpIQEnqIndex(i).valid)
+    val (fpReadPortSrc, fpDynamicExuSrc) = RegfileReadPortArbiter(fpStaticMappedValid, fpDynamicMappedValid)
+    val fpStaticMapped = fpStaticIndex.map(i => io.fpIQEnqIndex(i).bits)
+    val fpDynamicMapped = fpDynamicIndex.map(i => io.fpIQEnqIndex(i).bits)
+    for (i <- 0 until fpStaticIndex.length) {
+      val index = WireInit(VecInit(fpStaticMapped(i) +: fpDynamicMapped))
+      io.readFpRf(i) := index(fpReadPortSrc(i))
+      io.fpIQRfSrc(fpStaticIndex(i)) := (3 * i).U
+    }
+    fpDynamicIndex.zipWithIndex.map({ case (index, i) => io.fpIQRfSrc(index) := 3.U * fpDynamicExuSrc(i) })
+  }
+  else {
+    io.fpIQRfSrc <> DontCare
+    io.readFpRf <> DontCare
+  }
+
+  val lsStaticIndex = 0 until exuConfig.LsExuCnt
+  val lsDynamicIndex = 0 until 0
+  val lsStaticMappedValid = lsStaticIndex.map(i => io.lsIQEnqIndex(i).valid)
+  val lsDynamicMappedValid = lsDynamicIndex.map(i => io.lsIQEnqIndex(i).valid)
+  val (lsReadPortSrc, lsDynamicExuSrc) = RegfileReadPortArbiter(lsStaticMappedValid, lsDynamicMappedValid)
+  val lsStaticMapped = lsStaticIndex.map(i => io.lsIQEnqIndex(i).bits)
+  val lsDynamicMapped = lsDynamicIndex.map(i => io.lsIQEnqIndex(i).bits)
+  for (i <- 0 until lsStaticIndex.length) {
+    val index = WireInit(VecInit(lsStaticMapped(i) +: lsDynamicMapped))
+    if (i < exuConfig.LduCnt) {
+      val start = intStaticIndex.length*2
+      io.readIntRf(start+i) := index(lsReadPortSrc(i))
+      io.lsIQRfSrc(lsStaticIndex(i)) := (start + i).U
+    }
+    else {
+      val start = intStaticIndex.length*2 + exuConfig.LduCnt
+      io.readIntRf(start + 2 * i) := index(lsReadPortSrc(i))
+      io.readIntRf(start + 2 * i + 1) := index(lsReadPortSrc(i))
+      io.lsIQRfSrc(lsStaticIndex(i)) := (start + 2 * i).U
+    }
+  }
+  assert(lsDynamicIndex.length == 0)
+
+  val usedPorts = intStaticIndex.length*2 +exuConfig.LduCnt +exuConfig.StuCnt*2
+  for (i <- usedPorts until NRReadPorts) {
+    io.readIntRf(i) := DontCare
+  }
 }
