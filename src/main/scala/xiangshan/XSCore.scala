@@ -31,6 +31,7 @@ trait HasXSParameter {
   val RenameWidth = 6
   val CommitWidth = 6
   val BrqSize = 16
+  val IssQueSize = 8
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = 128
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
