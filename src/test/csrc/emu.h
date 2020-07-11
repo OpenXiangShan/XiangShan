@@ -149,7 +149,7 @@ class Emulator {
     tfp->open("vlt_dump.vcd");	// Open the dump file
 #endif
 
-    while (n > 0) {
+    while (!is_finish() && n > 0) {
       single_cycle();
       n --;
 

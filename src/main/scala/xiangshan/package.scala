@@ -26,25 +26,45 @@ package object xiangshan {
   }
 
   object FuType extends HasXSParameter {
-    def num           = exuConfig.NRFuType
-    def bru          = "b0000".U
-    def alu          = "b0001".U
-    def mul          = "b0010".U
-    def mdu          = "b0011".U
-    def fmac         = "b0100".U
-    def fmisc        = "b0101".U
-    def fmiscDivSqrt = "b0110".U
-    def ldu          = "b1001".U
-    def stu          = "b1000".U
+    def num           = exuParameters.NRFuType
+
+    def jmp          = "b0000".U
+    def i2f          = "b0001".U
+    def csr          = "b0010".U
+    def alu          = "b0011".U
+    def mul          = "b0100".U
+    def div          = "b0101".U
+
+    def fmac         = "b1000".U
+    def fmisc        = "b1001".U
+    def fDivSqrt     = "b1010".U
+
+    def ldu          = "b1100".U
+    def stu          = "b1101".U
 
     def apply() = UInt(log2Up(num).W)
 
-    def isIntExu(fuType: UInt) =  fuType(3, 2) === "b00".U
-    def isFpExu(fuType: UInt) = fuType(2)
-    def isMemExu(fuType: UInt) = fuType(3)
+    def isIntExu(fuType: UInt) =  !fuType(3)
+    def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
+    def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
+
+    val functionNameMap = Map(
+      jmp.litValue() -> "jmp",
+      i2f.litValue() -> "int to float",
+      csr.litValue() -> "csr",
+      alu.litValue() -> "alu",
+      mul.litValue() -> "mul",
+      div.litValue() -> "div",
+      fmac.litValue() -> "fmac",
+      fmisc.litValue() -> "fmisc",
+      fDivSqrt.litValue() -> "fdiv/fsqrt",
+      ldu.litValue() -> "load",
+      stu.litValue() -> "store"
+    )
+
   }
 
   object FuOpType extends HasXSParameter {
-    def apply() = UInt(exuConfig.FuOpWidth.W)
+    def apply() = UInt(exuParameters.FuOpWidth.W)
   }
 }

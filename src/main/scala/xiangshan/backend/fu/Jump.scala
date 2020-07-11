@@ -1,16 +1,15 @@
-package xiangshan.backend.exu
+package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.FuType._
 import xiangshan.utils._
-import xiangshan.backend.regfile.RfWritePort
-import xiangshan.backend.BRUOpType
+import xiangshan.backend._
+import xiangshan.backend.fu.FunctionUnit._
 
-// NOTE: BRUOpType is at backend/package.scala
+class Jump extends FunctionUnit(jmpCfg){
+  val io = IO(new ExuIO)
 
-class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = true) {
   override def toString: String = "Bru"
 
   val (iovalid, src1, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
@@ -22,12 +21,6 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   val isFMV = BRUOpType.isFMV(func)
   val isMOU = BRUOpType.isMOU(func)
   val isJUMP = BRUOpType.isJUMP(func)
-
-  // CSR
-
-  // FMV
-
-  // MOU
 
   // JUMP
   val isRVC = uop.cf.isRVC
@@ -48,7 +41,7 @@ class Bru extends Exu(FuType.bru.litValue(), writeFpRf = true, hasRedirect = tru
   val resJMP = pcDelaySlot
   val res = ParallelMux(
     VecInit(isCSR,  isFMV,  isMOU,  isJUMP) zip
-    VecInit(resCSR, resFMV, resMOU, resJMP)
+      VecInit(resCSR, resFMV, resMOU, resJMP)
   )
 
   io.in.ready := io.out.ready

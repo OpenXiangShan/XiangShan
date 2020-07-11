@@ -53,7 +53,7 @@ class BrqIO extends XSBundle{
   // interrupt/exception happen, flush Brq
   val roqRedirect = Input(Valid(new Redirect))
   // receive branch/jump calculated target
-  val exuRedirect = Vec(exuConfig.AluCnt + exuConfig.BruCnt, Flipped(ValidIO(new ExuOutput)))
+  val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
   // from decode, branch insts enq
   val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
   // to decode
@@ -171,7 +171,7 @@ class Brq extends XSModule {
       val wbIdx = exuWb.bits.redirect.brTag.value
       XSInfo(
         p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
-          p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)}\n"
+          p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
       )
       stateQueue(wbIdx) := s_wb
       brQueue(wbIdx).exuOut := exuWb.bits

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.{FuType, HasXSParameter}
 import xiangshan.backend.decode._
-import xiangshan.backend.{ALUOpType, BTBtype, BRUOpType, LDUOpType, STUOpType}
+import xiangshan.backend._
 
 object RV32I_ALUInstr extends HasInstrType with HasXSParameter {
   def ADDI    = BitPat("b????????????_?????_000_?????_0010011")
@@ -73,8 +73,8 @@ object RV32I_BRUInstr extends HasInstrType {
   def BGEU    = BitPat("b???????_?????_?????_111_?????_1100011")
 
   val table = Array(
-    JAL            -> List(InstrJ, FuType.bru, BRUOpType.jal),
-    JALR           -> List(InstrI, FuType.bru, BRUOpType.jalr),
+    JAL            -> List(InstrJ, FuType.jmp, BRUOpType.jal),
+    JALR           -> List(InstrI, FuType.jmp, BRUOpType.jalr),
 
     BEQ            -> List(InstrB, FuType.alu, ALUOpType.beq),
     BNE            -> List(InstrB, FuType.alu, ALUOpType.bne),
@@ -109,15 +109,15 @@ object RV32I_LSUInstr extends HasInstrType {
   def SW      = BitPat("b???????_?????_?????_010_?????_0100011")
 
   val table = Array(
-    LB             -> List(InstrI, FuType.ldu, LDUOpType.lb ),
-    LH             -> List(InstrI, FuType.ldu, LDUOpType.lh ),
-    LW             -> List(InstrI, FuType.ldu, LDUOpType.lw ),
-    LBU            -> List(InstrI, FuType.ldu, LDUOpType.lbu),
-    LHU            -> List(InstrI, FuType.ldu, LDUOpType.lhu),
+    LB             -> List(InstrI, FuType.ldu, LSUOpType.lb ),
+    LH             -> List(InstrI, FuType.ldu, LSUOpType.lh ),
+    LW             -> List(InstrI, FuType.ldu, LSUOpType.lw ),
+    LBU            -> List(InstrI, FuType.ldu, LSUOpType.lbu),
+    LHU            -> List(InstrI, FuType.ldu, LSUOpType.lhu),
 
-    SB             -> List(InstrS, FuType.stu, STUOpType.sb ),
-    SH             -> List(InstrS, FuType.stu, STUOpType.sh ),
-    SW             -> List(InstrS, FuType.stu, STUOpType.sw )
+    SB             -> List(InstrS, FuType.stu, LSUOpType.sb ),
+    SH             -> List(InstrS, FuType.stu, LSUOpType.sh ),
+    SW             -> List(InstrS, FuType.stu, LSUOpType.sw )
   )
 }
 
@@ -147,9 +147,9 @@ object RV64IInstr extends HasInstrType {
     ADDW           -> List(InstrR, FuType.alu, ALUOpType.addw),
     SUBW           -> List(InstrR, FuType.alu, ALUOpType.subw),
 
-    LWU            -> List(InstrI, FuType.ldu, LDUOpType.lwu),
-    LD             -> List(InstrI, FuType.ldu, LDUOpType.ld ),
-    SD             -> List(InstrS, FuType.stu, STUOpType.sd)
+    LWU            -> List(InstrI, FuType.ldu, LSUOpType.lwu),
+    LD             -> List(InstrI, FuType.ldu, LSUOpType.ld ),
+    SD             -> List(InstrS, FuType.stu, LSUOpType.sd)
   )
 }
 

@@ -21,18 +21,19 @@ class Dispatch extends XSModule {
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRReadPorts, Input(Bool()))
-    // ro reservation stations
-    val enqIQCtrl = Vec(exuConfig.ExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuConfig.ExuCnt, ValidIO(new ExuInput))
+    // to reservation stations
+    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
+    val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
+    val enqIQData = Vec(exuParameters.ExuCnt, ValidIO(new ExuInput))
   })
   // pipeline between rename and dispatch
   val dispatch1 = Module(new Dispatch1())
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
   }
-  val intDq = Module(new DispatchQueue(dp1Config.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
-  val fpDq = Module(new DispatchQueue(dp1Config.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
-  val lsDq = Module(new DispatchQueue(dp1Config.LsDqSize, RenameWidth, LsDqDeqWidth, "LsDpQ"))
+  val intDq = Module(new DispatchQueue(dp1Paremeters.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
+  val fpDq = Module(new DispatchQueue(dp1Paremeters.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
+  val lsDq = Module(new DispatchQueue(dp1Paremeters.LsDqSize, RenameWidth, LsDqDeqWidth, "LsDpQ"))
   val dispatch2 = Module(new Dispatch2())
 
   dispatch1.io.redirect <> io.redirect
@@ -57,4 +58,5 @@ class Dispatch extends XSModule {
   dispatch2.io.fpPregRdy <> io.fpPregRdy
   dispatch2.io.enqIQCtrl <> io.enqIQCtrl
   dispatch2.io.enqIQData <> io.enqIQData
+  dispatch2.io.numExist <> io.numExist
 }
