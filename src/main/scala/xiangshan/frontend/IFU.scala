@@ -8,7 +8,7 @@ import xiangshan.utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
-  val enableBPU = true
+  val enableBPU = false
   val groupAlign = log2Up(FetchWidth * 4)
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
   
