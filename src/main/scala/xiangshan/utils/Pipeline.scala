@@ -11,14 +11,14 @@ object PipelineConnect {
     when (isFlush) { valid := false.B }
 
     left.ready := right.ready
-    right.bits <> RegEnable(left.bits, left.valid && right.ready)
+    right.bits := RegEnable(left.bits, left.valid && right.ready)
     right.valid := valid //&& !isFlush
   }
 
-  def apply[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool, brIdx: UInt, recIdx: UInt): Any = {
-    val brIdxReg = RegEnable(brIdx, left.valid && right.ready)
-    val mprFlush = false.B //TODO
-    apply(left, right, rightOutFire, isFlush || mprFlush)
-    brIdxReg
-  }
+  // def apply[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool, brIdx: UInt, recIdx: UInt): Any = {
+  //   val brIdxReg = RegEnable(brIdx, left.valid && right.ready)
+  //   val mprFlush = false.B //TODO
+  //   apply(left, right, rightOutFire, isFlush || mprFlush)
+  //   brIdxReg
+  // }
 }
