@@ -353,7 +353,7 @@ class IssueQueue
 
     // send out bypass
     val sel = io.selectedUop
-    sel.valid := toIssFire
+    sel.valid := toIssFire && !enqSendEnable
     sel.bits := DontCare
     sel.bits.pdest := issQue(deqSelIq).uop.pdest
     sel.bits.cf.pc := issQue(deqSelIq).uop.cf.pc
