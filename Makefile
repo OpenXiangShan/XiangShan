@@ -84,7 +84,12 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 
+ifeq ($(REMOTE),localhost)
 REF_SO := $(NEMU_HOME)/build/riscv64-nemu-so
+else
+REF_SO := /home/pcl/NEMU/build/riscv64-nemu-so
+endif
+
 $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
