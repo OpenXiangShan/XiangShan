@@ -13,8 +13,8 @@ class DispatchGen extends XSModule {
     val fromLsDq = Flipped(Vec(LsDqDeqWidth, ValidIO(new MicroOp)))
 
     // enq Issue Queue
-    val numExist = Input(Vec(exuConfig.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
-    val enqIQIndex = Vec(exuConfig.ExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W)))
+    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
+    val enqIQIndex = Vec(exuParameters.ExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W)))
   })
 
   assert(IntDqDeqWidth >= FpDqDeqWidth)
@@ -60,31 +60,31 @@ class DispatchGen extends XSModule {
     (0 until exunum).map(i => IQIndex(priority(i)))
   }
 
-  val bruIQIndex = genIQIndex(exuConfig.BruCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.bru),
-    (0 until exuConfig.BruCnt).map(i => io.numExist(i)))
-  val aluIQIndex = genIQIndex(exuConfig.AluCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.alu),
-    (0 until exuConfig.AluCnt).map(i => io.numExist(exuConfig.BruCnt+i)))
-  val mulIQIndex = genIQIndex(exuConfig.MulCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mul),
-    (0 until exuConfig.MulCnt).map(i => io.numExist(exuConfig.BruCnt+exuConfig.AluCnt+i)))
-  val muldivIQIndex = genIQIndex(exuConfig.MduCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mdu),
-    (0 until exuConfig.MduCnt).map(i => io.numExist(exuConfig.BruCnt+exuConfig.AluCnt+exuConfig.MulCnt+i)))
-  val fmacIQIndex = genIQIndex(exuConfig.FmacCnt, FpDqDeqWidth, io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmac),
-    (0 until exuConfig.FmacCnt).map(i => io.numExist(exuConfig.IntExuCnt+i)))
-  val fmiscIQIndex = genIQIndex(exuConfig.FmiscCnt, FpDqDeqWidth, io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmisc),
-    (0 until exuConfig.FmiscCnt).map(i => io.numExist(exuConfig.IntExuCnt+exuConfig.FmacCnt+i)))
-  val lduIQIndex = genIQIndex(exuConfig.LduCnt, LsDqDeqWidth, io.fromLsDq.map(_.bits.ctrl.fuType === FuType.ldu),
-    (0 until exuConfig.LduCnt).map(i => io.numExist(exuConfig.IntExuCnt+exuConfig.FpExuCnt+i)))
-//  val stuIQIndex = genIQIndex(exuConfig.StuCnt, LsDqDeqWidth, io.fromLsDq.map(_.bits.ctrl.fuType === FuType.stu))
-  val stuIQIndex = genIQIndex(exuConfig.StuCnt, LsDqDeqWidth, io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)),
-    (0 until exuConfig.StuCnt).map(i => io.numExist(exuConfig.IntExuCnt+exuConfig.FpExuCnt+exuConfig.LduCnt+i)))
+  val bruIQIndex = genIQIndex(exuParameters.JmpCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.jmp),
+    (0 until exuParameters.JmpCnt).map(i => io.numExist(i)))
+  val aluIQIndex = genIQIndex(exuParameters.AluCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.alu),
+    (0 until exuParameters.AluCnt).map(i => io.numExist(exuParameters.JmpCnt+i)))
+  val mulIQIndex = genIQIndex(exuParameters.MulCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.mul),
+    (0 until exuParameters.MulCnt).map(i => io.numExist(exuParameters.JmpCnt+exuParameters.AluCnt+i)))
+  val muldivIQIndex = genIQIndex(exuParameters.MduCnt, IntDqDeqWidth, io.fromIntDq.map(_.bits.ctrl.fuType === FuType.div),
+    (0 until exuParameters.MduCnt).map(i => io.numExist(exuParameters.JmpCnt+exuParameters.AluCnt+exuParameters.MulCnt+i)))
+  val fmacIQIndex = genIQIndex(exuParameters.FmacCnt, FpDqDeqWidth, io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmac),
+    (0 until exuParameters.FmacCnt).map(i => io.numExist(exuParameters.IntExuCnt+i)))
+  val fmiscIQIndex = genIQIndex(exuParameters.FmiscCnt, FpDqDeqWidth, io.fromFpDq.map(_.bits.ctrl.fuType === FuType.fmisc),
+    (0 until exuParameters.FmiscCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FmacCnt+i)))
+  val lduIQIndex = genIQIndex(exuParameters.LduCnt, LsDqDeqWidth, io.fromLsDq.map(_.bits.ctrl.fuType === FuType.ldu),
+    (0 until exuParameters.LduCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FpExuCnt+i)))
+//  val stuIQIndex = genIQIndex(exuParameters.StuCnt, LsDqDeqWidth, io.fromLsDq.map(_.bits.ctrl.fuType === FuType.stu))
+  val stuIQIndex = genIQIndex(exuParameters.StuCnt, LsDqDeqWidth, io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)),
+    (0 until exuParameters.StuCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FpExuCnt+exuParameters.LduCnt+i)))
 
   val allIndex = Seq(bruIQIndex, aluIQIndex, mulIQIndex, muldivIQIndex,
     fmacIQIndex, fmiscIQIndex,
     lduIQIndex, stuIQIndex
   )
-  val allCnt = Seq(exuConfig.BruCnt, exuConfig.AluCnt, exuConfig.MulCnt, exuConfig.MduCnt,
-    exuConfig.FmacCnt, exuConfig.FmiscCnt,
-    exuConfig.LduCnt, exuConfig.StuCnt
+  val allCnt = Seq(exuParameters.JmpCnt, exuParameters.AluCnt, exuParameters.MulCnt, exuParameters.MduCnt,
+    exuParameters.FmacCnt, exuParameters.FmiscCnt,
+    exuParameters.LduCnt, exuParameters.StuCnt
   )
   assert(allIndex.length == allCnt.length)
   var startIndex = 0

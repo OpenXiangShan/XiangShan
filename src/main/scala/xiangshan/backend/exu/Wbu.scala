@@ -2,13 +2,47 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import xiangshan.{ExuOutput, XSModule}
+import xiangshan._
+import xiangshan.utils._
+
+class WriteBackArbMtoN(m: Int, n: Int) extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Vec(m, Flipped(DecoupledIO(new ExuOutput)))
+    val out = Vec(n, ValidIO(new ExuOutput))
+  })
+
+  require(m >= n, "m < n! Why use an arbiter???")
+
+  // first n-1 ports, direct connect
+  for((i, o) <- io.in.take(n-1).zip(io.out)){
+    o.valid := i.valid
+    o.bits := i.bits
+    i.ready := true.B
+  }
+
+  // last m-(n-1) ports, rr arb
+  val arb = Module(new RRArbiter[ExuOutput](new ExuOutput, m-n+1))
+
+  for((arbIn, ioIn) <- arb.io.in.zip(io.in.drop(n-1))){
+    arbIn <> ioIn
+  }
+
+  io.out.last.bits := arb.io.out.bits
+  io.out.last.valid := arb.io.out.valid
+  arb.io.out.ready := true.B
+
+  for (i <- 0 until n) {
+    XSInfo(io.out(i).valid, "out(%d) pc(0x%x) writebacks 0x%x to pdest(%d) ldest(%d)\n", i.U, io.out(i).bits.uop.cf.pc,
+      io.out(i).bits.data, io.out(i).bits.uop.pdest, io.out(i).bits.uop.ctrl.ldest)
+  }
+
+}
 
 class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
 
   val io = IO(new Bundle() {
-    val in  = Vec(exuConfig.ExuCnt, Flipped(DecoupledIO(new ExuOutput)))
-    val toRoq = Vec(exuConfig.ExuCnt, ValidIO(new ExuOutput))
+    val in  = Vec(exuParameters.ExuCnt, Flipped(DecoupledIO(new ExuOutput)))
+    val toRoq = Vec(exuParameters.ExuCnt, ValidIO(new ExuOutput))
     val toIntRf, toFpRf = Vec(NRWritePorts, ValidIO(new ExuOutput))
   })
 

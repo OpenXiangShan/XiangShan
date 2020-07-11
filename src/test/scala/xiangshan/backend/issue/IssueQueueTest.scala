@@ -8,6 +8,7 @@ import chisel3.experimental.BundleLiterals._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
 import xiangshan._
+import xiangshan.backend.exu.Exu
 import xiangshan.testutils._
 import xiangshan.testutils.TestCaseGenerator._
 
@@ -20,7 +21,7 @@ class IssueQueueTest extends FlatSpec
   with HasPartialDecoupledDriver
 {
   it should "do enq issue with no delay correctly" in {
-    test(new IssueQueue(fuTypeInt = 0, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
+    test(new IssueQueue(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
       AddSinks()
     }) { c =>
 

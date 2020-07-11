@@ -8,16 +8,16 @@ import xiangshan.utils.{XSDebug}
 class RegfileReadPortGen extends XSModule {
   val io = IO(new Bundle() {
     // from dispatch queues
-    val intIQEnqIndex = Flipped(Vec(exuConfig.IntExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W))))
-    val fpIQEnqIndex = Flipped(Vec(exuConfig.FpExuCnt, ValidIO(UInt(log2Ceil(FpDqDeqWidth).W))))
-    val lsIQEnqIndex = Flipped(Vec(exuConfig.LduCnt + exuConfig.StuCnt, ValidIO(UInt(log2Ceil(LsDqDeqWidth).W))))
+    val intIQEnqIndex = Flipped(Vec(exuParameters.IntExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W))))
+    val fpIQEnqIndex = Flipped(Vec(exuParameters.FpExuCnt, ValidIO(UInt(log2Ceil(FpDqDeqWidth).W))))
+    val lsIQEnqIndex = Flipped(Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(UInt(log2Ceil(LsDqDeqWidth).W))))
     // chooses dispatch queue dequeue indexs for regfile read ports
     val readIntRf = Output(Vec(NRReadPorts, UInt(log2Ceil(IntDqDeqWidth).W)))
     val readFpRf = Output(Vec(NRReadPorts, UInt(log2Ceil(IntDqDeqWidth).W)))
     // chooses regfile read ports for reservation stations
-    val intIQRfSrc = Output(Vec(exuConfig.IntExuCnt, UInt(log2Ceil(NRReadPorts).W)))
-    val fpIQRfSrc = Output(Vec(exuConfig.FpExuCnt, UInt(log2Ceil(NRReadPorts).W)))
-    val lsIQRfSrc = Output(Vec(exuConfig.LsExuCnt, UInt(log2Ceil(NRReadPorts).W)))
+    val intIQRfSrc = Output(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRReadPorts).W)))
+    val fpIQRfSrc = Output(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(NRReadPorts).W)))
+    val lsIQRfSrc = Output(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(NRReadPorts).W)))
   })
 
   def RegfileReadPortArbiter(staticMappedValid: Seq[Bool], dynamicMappedValid: Seq[Bool]) = {
@@ -57,9 +57,9 @@ class RegfileReadPortGen extends XSModule {
   intStaticIndex.zipWithIndex.map({case (index, i) => io.intIQRfSrc(index) := (2*i).U})
   intDynamicIndex.zipWithIndex.map({case (index, i) => io.intIQRfSrc(index) := 2.U * intDynamicExuSrc(i)})
 
-  if (exuConfig.FpExuCnt > 0) {
-    val fpStaticIndex = 0 until exuConfig.FmacCnt
-    val fpDynamicIndex = exuConfig.FmacCnt until exuConfig.FpExuCnt
+  if (exuParameters.FpExuCnt > 0) {
+    val fpStaticIndex = 0 until exuParameters.FmacCnt
+    val fpDynamicIndex = exuParameters.FmacCnt until exuParameters.FpExuCnt
     val fpStaticMappedValid = fpStaticIndex.map(i => io.fpIQEnqIndex(i).valid)
     val fpDynamicMappedValid = fpDynamicIndex.map(i => io.fpIQEnqIndex(i).valid)
     val (fpReadPortSrc, fpDynamicExuSrc) = RegfileReadPortArbiter(fpStaticMappedValid, fpDynamicMappedValid)
@@ -77,7 +77,7 @@ class RegfileReadPortGen extends XSModule {
     io.readFpRf <> DontCare
   }
 
-  val lsStaticIndex = 0 until exuConfig.LsExuCnt
+  val lsStaticIndex = 0 until exuParameters.LsExuCnt
   val lsDynamicIndex = 0 until 0
   val lsStaticMappedValid = lsStaticIndex.map(i => io.lsIQEnqIndex(i).valid)
   val lsDynamicMappedValid = lsDynamicIndex.map(i => io.lsIQEnqIndex(i).valid)
@@ -86,13 +86,13 @@ class RegfileReadPortGen extends XSModule {
   val lsDynamicMapped = lsDynamicIndex.map(i => io.lsIQEnqIndex(i).bits)
   for (i <- 0 until lsStaticIndex.length) {
     val index = WireInit(VecInit(lsStaticMapped(i) +: lsDynamicMapped))
-    if (i < exuConfig.LduCnt) {
+    if (i < exuParameters.LduCnt) {
       val start = intStaticIndex.length*2
       io.readIntRf(start+i) := index(lsReadPortSrc(i))
       io.lsIQRfSrc(lsStaticIndex(i)) := (start + i).U
     }
     else {
-      val start = intStaticIndex.length*2 + exuConfig.LduCnt
+      val start = intStaticIndex.length*2 + exuParameters.LduCnt
       io.readIntRf(start + 2 * i) := index(lsReadPortSrc(i))
       io.readIntRf(start + 2 * i + 1) := index(lsReadPortSrc(i))
       io.lsIQRfSrc(lsStaticIndex(i)) := (start + 2 * i).U
@@ -100,7 +100,7 @@ class RegfileReadPortGen extends XSModule {
   }
   assert(lsDynamicIndex.length == 0)
 
-  val usedPorts = intStaticIndex.length*2 +exuConfig.LduCnt +exuConfig.StuCnt*2
+  val usedPorts = intStaticIndex.length*2 +exuParameters.LduCnt +exuParameters.StuCnt*2
   for (i <- usedPorts until NRReadPorts) {
     io.readIntRf(i) := DontCare
   }
