@@ -8,6 +8,7 @@ import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Config
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.frontend.Frontend
+import xiangshan.mem._
 import xiangshan.utils._
 
 trait HasXSParameter {
@@ -101,6 +102,9 @@ class XSCore(implicit val p: XSConfig) extends XSModule {
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
+  val mem = Module(new MemPipeline)
+
+  mem.io := DontCare // FIXME
 
   front.io.backend <> backend.io.frontend
 

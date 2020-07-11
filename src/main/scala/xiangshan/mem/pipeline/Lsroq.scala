@@ -6,6 +6,9 @@ import xiangshan._
 import xiangshan.utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
+import xiangshan.mem._
+import xiangshan.mem.cache._
+import bus.simplebus._
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
@@ -18,15 +21,19 @@ class LsRoqEntry extends XSBundle {
 }
 
 // Load/Store Roq for XiangShan Out of Order LSU
-class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst{
+class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    // val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val brqRedirect = Input(Valid(new Redirect))
-    val redirect = Output(Valid(new Redirect))
-    val out = Vec(2, DecoupledIO(new ExuOutput))
+    val loadIn = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
+    val storeIn = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle)))
+    val out = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val scommit = Input(UInt(3.W))
+    val forward = new LoadForwardQueryIO
+    // val rollback = TODO
+    val miss = new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth)
   })
 
   val data = Mem(LSRoqSize, new LsRoqEntry)
@@ -46,9 +53,14 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst{
   
   // misprediction recovery
 
-  // commit
+  // writeback store
+
+  // commit store
 
   // cache miss request
 
-  // store writeback
+  // load forward query
+
+  // store backward query and rollback
+
 }
