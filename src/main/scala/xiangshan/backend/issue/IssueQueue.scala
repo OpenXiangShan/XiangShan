@@ -54,7 +54,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
 
     // to Dispatch
-    val numExist = Output(UInt((iqIdxWidth+1).W))
+    val numExist = Output(UInt(iqIdxWidth.W))
   })
 
   val srcAllNum = 3
@@ -242,7 +242,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     idQue(tail)
   ) // Note: direct by IQue's idx, different from deqSel
 
-  io.numExist := tailAll
+  io.numExist := Mux(tailAll === iqSize.U, (iqSize-1).U, tailAll)
   assert(tailAll < 9.U)
 
   //-----------------------------------------

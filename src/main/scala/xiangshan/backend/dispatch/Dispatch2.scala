@@ -21,6 +21,7 @@ class Dispatch2 extends XSModule {
     val fpPregRdy = Vec(NRReadPorts, Input(Bool()))
 
     // enq Issue Queue
+    val numExist = Input(Vec(exuConfig.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuConfig.ExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuConfig.ExuCnt, ValidIO(new ExuInput))
   })
@@ -43,7 +44,7 @@ class Dispatch2 extends XSModule {
   rsIndexGen.io.fromIntDq := io.fromIntDq
   rsIndexGen.io.fromFpDq := io.fromFpDq
   rsIndexGen.io.fromLsDq := io.fromLsDq
-  rsIndexGen.io.busyIQ := DontCare // TODO: from issue queue
+  rsIndexGen.io.numExist := io.numExist
 
   val instValid = rsIndexGen.io.enqIQIndex.map(_.valid)
   val allIndex = rsIndexGen.io.enqIQIndex.map(_.bits)
