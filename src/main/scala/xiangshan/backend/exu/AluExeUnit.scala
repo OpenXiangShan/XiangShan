@@ -6,9 +6,10 @@ import xiangshan._
 import xiangshan.FuType._
 import xiangshan.utils._
 import xiangshan.backend._
+import xiangshan.backend.fu.FunctionUnit._
 
-class Alu extends Exu(alu.litValue(), hasRedirect = true) {
-  override def toString: String = "Alu"
+
+class AluExeUnit extends Exu(Array(aluCfg), enableBypass = false) {
 
   val (iovalid, src1, src2, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, 
     io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)

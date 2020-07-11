@@ -53,7 +53,7 @@ class BrqIO extends XSBundle{
   // interrupt/exception happen, flush Brq
   val roqRedirect = Input(Valid(new Redirect))
   // receive branch/jump calculated target
-  val exuRedirect = Vec(exuConfig.AluCnt + exuConfig.BruCnt, Flipped(ValidIO(new ExuOutput)))
+  val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
   // from decode, branch insts enq
   val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
   // to decode

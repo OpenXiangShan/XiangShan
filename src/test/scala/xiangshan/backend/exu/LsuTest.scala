@@ -6,30 +6,25 @@ import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
-
 import bus.axi4.AXI4Delayer
 import bus.simplebus.{SimpleBusCrossbarNto1, SimpleBusUC}
 import device.AXI4RAM
 import noop.{Cache, CacheConfig, MemMMUIO, TLB, TLBConfig}
 import system.CoherenceManager
-
 import xiangshan._
+import xiangshan.backend.fu.FunctionUnit.lsuCfg
 import xiangshan.testutils._
 import xiangshan.testutils.TestCaseGenerator._
 
 import scala.util.Random
 
 class LsuDut(dispBegin: Int, dispEnd: Int) extends Exu(
-  FuType.ldu.litValue(),
-  readIntRf = true,
-  readFpRf = true,
-  writeIntRf = true,
-  writeFpRf = true
+  Array(lsuCfg), false
 ) {
 
   io.dmem <> DontCare
 
-  val lsu = Module(new Lsu)
+  val lsu = Module(new LsExeUnit)
 
   lsu.io.in <> io.in
   lsu.io.redirect <> io.redirect
