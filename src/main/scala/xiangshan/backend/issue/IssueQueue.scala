@@ -3,8 +3,11 @@ package xiangshan.backend.issue
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.utils._
+import xiangshan.backend.fu.FunctionUnit._
+
 
 trait IQConst extends HasXSParameter{
   val iqSize = IssQueSize
@@ -23,13 +26,16 @@ object OneCycleFire {
   }
 }
 
-class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1, val fifo: Boolean = false) extends IQModule {
+class IssueQueue
+(
+  exuCfg: ExuConfig, val wakeupCnt: Int, val bypassCnt: Int = 0, val fifo: Boolean = false
+) extends IQModule {
 
   val useBypass = bypassCnt > 0
   val src2Use = true
-  val src3Use = fuTypeInt==FuType.fmac.litValue()
+  val src3Use = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
   val src2Listen = true
-  val src3Listen = fuTypeInt==FuType.fmac.litValue()
+  val src3Listen = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
 
   val io = IO(new Bundle() {
     // flush Issue Queue
@@ -54,7 +60,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
 
     // to Dispatch
-    val numExist = Output(UInt((iqIdxWidth+1).W))
+    val numExist = Output(UInt(iqIdxWidth.W))
   })
 
   val srcAllNum = 3
@@ -242,7 +248,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     idQue(tail)
   ) // Note: direct by IQue's idx, different from deqSel
 
-  io.numExist := tailAll
+  io.numExist := Mux(tailAll === iqSize.U, (iqSize-1).U, tailAll)
   assert(tailAll < 9.U)
 
   //-----------------------------------------
@@ -346,7 +352,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     }
 
     // send out bypass
-    require(fixedDelay==1) // only support fixedDelay is 1 now
     val sel = io.selectedUop
     sel.valid := toIssFire
     sel.bits := DontCare
@@ -368,8 +373,10 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   } else {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
+
   XSDebug(enqSendEnable, p"NoDelayIss: enqALRdy:${enqAlreadyRdy} *Next:${enqALRdyNext} En:${enqSendEnable} flush:${enqSendFlushHit} enqSelIqNext:${enqSelIqNext} deqSelIq:${deqSelIq} deqReady:${io.deq.ready}\n")
-  XSDebug("id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx FuType:%x\n", fuTypeInt.U)
+  XSDebug(s"id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx Exu:${exuCfg.name}\n")
+
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
       XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x <-\n",
