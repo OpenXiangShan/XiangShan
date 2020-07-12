@@ -1,4 +1,4 @@
-package xiangshan.frontend
+ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -8,7 +8,7 @@ import xiangshan.utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
-  val enableBPU = false
+  val enableBPU = true
   val groupAlign = log2Up(FetchWidth * 4)
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
   
@@ -41,8 +41,10 @@ class FakeBPU extends XSModule{
 class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
-    //val bpu = Module(new BPU)
-    val bpu = Module(new FakeBPU)
+    //if(enableBPU){val bpu = Module(new BPU)}
+    //else{val bpu = Module(new FakeBPU)}
+    val bpu = Module(new BPU)
+    //val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
@@ -174,7 +176,12 @@ class IFU extends XSModule with HasIFUConst
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
-    if(enableBPU){io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)}
+    if(enableBPU){
+      io.fetchPacket.bits.mask := Mux( if4_tage_taken,
+        (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1),
+        Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+      )
+    }
     else{io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)}    
     io.fetchPacket.bits.pc := if4_pc
 
