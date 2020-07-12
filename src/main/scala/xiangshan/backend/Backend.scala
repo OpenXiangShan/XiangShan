@@ -34,7 +34,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch)
+  val dispatch = Module(new Dispatch(exeUnits.map(_.config)))
   val roq = Module(new Roq)
   val intRf = Module(new Regfile(
     numReadPorts = NRReadPorts,
@@ -59,7 +59,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val issueQueues = exeUnits.zipWithIndex.map({ case (eu, i) =>
     def needBypass(cfg: ExuConfig): Boolean = cfg.enableBypass
 
-    val bypassCnt = if(eu.config.enableBypass) exeUnits.map(_.config).count(needBypass) else 0
+    val bypassCnt = exeUnits.map(_.config).count(needBypass)
     def needWakeup(cfg: ExuConfig): Boolean =
       (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
 
@@ -69,6 +69,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
       eu.config,
       wakeupCnt,
       bypassCnt,
+      eu.config.enableBypass,
       fifo = eu.config.supportedFuncUnits.contains(FunctionUnit.lsuCfg)
     ))
     iq.io.redirect <> redirect
@@ -94,9 +95,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq
   })
 
-  val bypassQueues = issueQueues.filter(_.bypassCnt > 0)
+  val bypassQueues = issueQueues.filter(_.enableBypass)
   val bypassUnits = exeUnits.filter(_.config.enableBypass)
-  bypassQueues.foreach(iq => {
+  issueQueues.foreach(iq => {
     for (i <- iq.io.bypassUops.indices) {
       iq.io.bypassData(i).bits := bypassUnits(i).io.out.bits
       iq.io.bypassData(i).valid := bypassUnits(i).io.out.valid
