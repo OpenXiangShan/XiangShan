@@ -3,10 +3,11 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.exu.ExuConfig
 import xiangshan.utils._
 import xiangshan.backend.regfile.RfReadPort
 
-class Dispatch extends XSModule {
+class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     // from rename
@@ -27,14 +28,14 @@ class Dispatch extends XSModule {
     val enqIQData = Vec(exuParameters.ExuCnt, ValidIO(new ExuInput))
   })
   // pipeline between rename and dispatch
-  val dispatch1 = Module(new Dispatch1())
+  val dispatch1 = Module(new Dispatch1)
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
   }
   val intDq = Module(new DispatchQueue(dp1Paremeters.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
   val fpDq = Module(new DispatchQueue(dp1Paremeters.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
   val lsDq = Module(new DispatchQueue(dp1Paremeters.LsDqSize, RenameWidth, LsDqDeqWidth, "LsDpQ"))
-  val dispatch2 = Module(new Dispatch2())
+  val dispatch2 = Module(new Dispatch2(exuCfg))
 
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.toRoq <> io.toRoq
