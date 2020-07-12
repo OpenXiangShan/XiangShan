@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.utils.{XSDebug, XSInfo, XSWarn}
 
-case class DP1Config
+case class DP1Parameters
 (
   IntDqSize: Int,
   FpDqSize: Int,

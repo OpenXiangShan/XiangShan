@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.{FuType, HasXSParameter}
 import xiangshan.backend.decode._
-import xiangshan.backend.{MDUOpType, MULOpType}
+import xiangshan.backend.MDUOpType
 
 object RV32MInstr extends HasInstrType with HasXSParameter {
   def MUL     = BitPat("b0000001_?????_?????_000_?????_0110011")
@@ -22,16 +22,16 @@ object RV32MInstr extends HasInstrType with HasXSParameter {
   def REMUW   = BitPat("b0000001_?????_?????_111_?????_0111011")
 
   val mulTable = Array(
-    MUL            -> List(InstrR, FuType.mul, MULOpType.mul),
-    MULH           -> List(InstrR, FuType.mul, MULOpType.mulh),
-    MULHSU         -> List(InstrR, FuType.mul, MULOpType.mulhsu),
-    MULHU          -> List(InstrR, FuType.mul, MULOpType.mulhu)
+    MUL            -> List(InstrR, FuType.mul, MDUOpType.mul),
+    MULH           -> List(InstrR, FuType.mul, MDUOpType.mulh),
+    MULHSU         -> List(InstrR, FuType.mul, MDUOpType.mulhsu),
+    MULHU          -> List(InstrR, FuType.mul, MDUOpType.mulhu)
   )
   val divTable = Array(
-    DIV            -> List(InstrR, FuType.mdu, MDUOpType.div),
-    DIVU           -> List(InstrR, FuType.mdu, MDUOpType.divu),
-    REM            -> List(InstrR, FuType.mdu, MDUOpType.rem),
-    REMU           -> List(InstrR, FuType.mdu, MDUOpType.remu)
+    DIV            -> List(InstrR, FuType.div, MDUOpType.div),
+    DIVU           -> List(InstrR, FuType.div, MDUOpType.divu),
+    REM            -> List(InstrR, FuType.div, MDUOpType.rem),
+    REMU           -> List(InstrR, FuType.div, MDUOpType.remu)
   )
   val table = mulTable ++ (if (HasDiv) divTable else Nil)
 }
@@ -44,13 +44,13 @@ object RV64MInstr extends HasInstrType with HasXSParameter {
   def REMUW   = BitPat("b0000001_?????_?????_111_?????_0111011")
 
   val mulTable = Array(
-    MULW           -> List(InstrR, FuType.mul, MULOpType.mulw)
+    MULW           -> List(InstrR, FuType.mul, MDUOpType.mulw)
   )
   val divTable = Array(
-    DIVW           -> List(InstrR, FuType.mdu, MDUOpType.divw),
-    DIVUW          -> List(InstrR, FuType.mdu, MDUOpType.divuw),
-    REMW           -> List(InstrR, FuType.mdu, MDUOpType.remw),
-    REMUW          -> List(InstrR, FuType.mdu, MDUOpType.remuw)
+    DIVW           -> List(InstrR, FuType.div, MDUOpType.divw),
+    DIVUW          -> List(InstrR, FuType.div, MDUOpType.divuw),
+    REMW           -> List(InstrR, FuType.div, MDUOpType.remw),
+    REMUW          -> List(InstrR, FuType.div, MDUOpType.remuw)
   )
   val table = mulTable ++ (if (HasDiv) divTable else Nil)
 }
