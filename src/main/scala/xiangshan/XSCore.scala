@@ -7,7 +7,7 @@ import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.frontend.Frontend
+import xiangshan.frontend.{Frontend, HasTageParameter}
 import xiangshan.utils._
 
 trait HasXSParameter {
@@ -26,6 +26,8 @@ trait HasXSParameter {
   val DataBytes = DataBits / 8
   val HasFPU = true
   val FetchWidth = 8
+  val EnableBPU = true
+  val EnableBPD = true // enable backing predictor(like Tage) in BPUStage3
   val HistoryLength = 64
   val BtbSize = 128
   val BtbWays = 4

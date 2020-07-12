@@ -41,10 +41,7 @@ class FakeBPU extends XSModule{
 class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
-    //if(enableBPU){val bpu = Module(new BPU)}
-    //else{val bpu = Module(new FakeBPU)}
-    val bpu = Module(new BPU)
-    //val bpu = Module(new FakeBPU)
+    val bpu = if(EnableBPU) Module(new BPU) else Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
