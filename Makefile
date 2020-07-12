@@ -85,9 +85,9 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 
 ifeq ($(REMOTE),localhost)
-REF_SO := $(NEMU_HOME)/build/riscv64-nemu-so
+REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 else
-REF_SO := /home/pcl/NEMU/build/riscv64-nemu-so
+REF_SO := /home/pcl/NEMU/build/riscv64-nemu-interpreter-so
 endif
 
 $(REF_SO):
