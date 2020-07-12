@@ -26,15 +26,8 @@ class BTBPred extends XSBundle {
   val target = UInt(VAddrBits.W)
 
   val writeWay = UInt(log2Up(BtbWays).W)
-  // val ctrs = Vec(FetchWidth, UInt(2.W))
   val notTakens = Vec(FetchWidth, Bool())
-  // val valids = Vec(FetchWidth, Bool())
   val dEntries = Vec(FetchWidth, btbDataEntry())
-
-  // val toS2 = new Bundle{
-    // val hits = UInt(FetchWidth.W)
-    // val targets = Vec(FetchWidth, UInt(VAddrBits.W))
-  // }
 }
 
 case class btbDataEntry() extends XSBundle {
@@ -68,9 +61,6 @@ class BTB extends XSModule {
 
 
   val btbAddr = new TableAddr(log2Up(BtbSets), BtbBanks)
-
-  // val predictWidth = FetchWidth
-
 
   // SRAMs to store BTB meta & data
   val btbMeta = List.fill(BtbWays)(List.fill(BtbBanks)(
@@ -129,15 +119,11 @@ class BTB extends XSModule {
   dataEntries.map(_.pred := DontCare)
   dataEntries.map(_.target := DontCare)
   dataEntries.map(_._type := DontCare)
-  // btbTargets := DontCare
-  // btbCtrs := DontCare
-  // btbTakens := DontCare
-  // btbTypes := DontCare
+
 
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) { readFire(w)(b) := btbMeta(w)(b).io.r.req.fire() && btbData(w)(b).io.r.req.fire() }
     when (metaRead(w).valid && metaRead(w).tag === btbAddr.getTag(pcLatch)) {
-      // btbWayHits(w) := !flushS1 && RegNext(btbReadFire(w)(btbHitBank), init = false.B)
       wayHits(w) := !io.flush && RegNext(readFire(w)(readBankIdx), init = false.B)
       for (i <- 0 until FetchWidth) {
         dataEntries(i).valid := dataRead(w)(i).valid
@@ -193,7 +179,6 @@ class BTB extends XSModule {
   btbDataWrite.target := u.target
   btbDataWrite.pred := newCtr
   btbDataWrite._type := u._type
-  // btbDataWrite.offset := DontCare
 
   val isBr = u._type === BTBtype.B
   val isJ = u._type === BTBtype.J
@@ -233,10 +218,6 @@ class BTB extends XSModule {
   io.out.takenIdx := takenIdx
   io.out.target := takenTarget
   io.out.writeWay := writeWay
-  // io.out.ctrs := VecInit(dataEntries.map(_.pred))
   io.out.notTakens := notTakenBranches
   io.out.dEntries := dataEntries
-  // io.out.valids := VecInit(dataEntries.map(_.valid))
-  // io.toS2.hits := Cat(dataEntries.map(_.valid))
-  // io.toS2.targets := VecInit(dataEntries.map(_.target))
 }

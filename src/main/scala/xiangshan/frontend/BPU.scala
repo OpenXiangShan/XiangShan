@@ -111,40 +111,24 @@ class BPUStage1 extends XSModule {
   val btbTargets = VecInit(btb.io.out.dEntries.map(_.target))
   val btbTypes = VecInit(btb.io.out.dEntries.map(_._type))
 
-  // JBTAC, divided into 8 banks, makes prediction for indirect jump except ret.
-  val jbtacAddr = new TableAddr(log2Up(JbtacSize), JbtacBanks)
-  def jbtacEntry() = new Bundle {
-    val valid = Bool()
-    // TODO: don't need full length of tag and target
-    val tag = UInt(jbtacAddr.tagBits.W)
-    val target = UInt(VAddrBits.W)
-    val offset = UInt(log2Up(FetchWidth).W)
-  }
 
-  val jbtac = List.fill(JbtacBanks)(Module(new SRAMTemplate(jbtacEntry(), set = JbtacSize / JbtacBanks, shouldReset = true, holdRead = true, singlePort = false)))
+  val jbtac = Module(new JBTAC)
+  jbtac.io.in.pc <> io.in.pc
+  jbtac.io.in.pcLatch := pcLatch
+  jbtac.io.in.hist := hist
+  jbtac.io.redirectValid := io.redirectInfo.valid
+  jbtac.io.flush := io.flush
 
-  val jbtacRead = Wire(Vec(JbtacBanks, jbtacEntry()))
+  jbtac.io.update.fetchPC := updateFetchpc
+  jbtac.io.update.fetchIdx := r.fetchIdx
+  jbtac.io.update.misPred := io.redirectInfo.misPred
+  jbtac.io.update._type := r._type
+  jbtac.io.update.target := r.target
+  jbtac.io.update.hist := r.hist
 
-  val jbtacFire = Reg(Vec(JbtacBanks, Bool()))
-  // Only read one bank
-  val histXORAddr = io.in.pc.bits ^ Cat(hist, 0.U(2.W))(VAddrBits - 1, 0)
-  val histXORAddrLatch = RegEnable(histXORAddr, io.in.pc.valid)
-  jbtacFire := 0.U.asTypeOf(Vec(JbtacBanks, Bool()))
-  (0 until JbtacBanks).map(
-    b => {
-      jbtac(b).reset := reset.asBool
-      jbtac(b).io.r.req.valid := io.in.pc.fire() && b.U === jbtacAddr.getBank(histXORAddr)
-      jbtac(b).io.r.req.bits.setIdx := jbtacAddr.getBankIdx(histXORAddr)
-      jbtacFire(b) := jbtac(b).io.r.req.fire()
-      jbtacRead(b) := jbtac(b).io.r.resp.data(0)
-    }
-  )
-
-  val jbtacBank = jbtacAddr.getBank(histXORAddrLatch)
-  // val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !flushS1 && jbtacFire(jbtacBank)
-  val jbtacHit = jbtacRead(jbtacBank).valid && jbtacRead(jbtacBank).tag === jbtacAddr.getTag(pcLatch) && !io.flush && jbtacFire(jbtacBank)
-  val jbtacHitIdx = jbtacRead(jbtacBank).offset
-  val jbtacTarget = jbtacRead(jbtacBank).target
+  val jbtacHit = jbtac.io.out.hit
+  val jbtacTarget = jbtac.io.out.target
+  val jbtacHitIdx = jbtac.io.out.hitIdx
 
   // calculate global history of each instr
   val firstHist = RegNext(hist)
@@ -160,32 +144,7 @@ class BPUStage1 extends XSModule {
   }
   (0 until FetchWidth).map(i => io.s1OutPred.bits.hist(i) := firstHist << histShift(i))
 
-  // update btb, jbtac, ghr
-
-
-  // 2. update jbtac
-  val jbtacWrite = Wire(jbtacEntry())
-  // val updateHistXORAddr = updateFetchpc ^ Cat(r.hist, 0.U(2.W))(VAddrBits - 1, 0)
-  val updateHistXORAddr = updateFetchpc ^ Cat(r.hist, 0.U(2.W))(VAddrBits - 1, 0)
-  jbtacWrite.valid := true.B
-  // jbtacWrite.tag := jbtacAddr.getTag(updateFetchpc)
-  jbtacWrite.tag := jbtacAddr.getTag(updateFetchpc)
-  jbtacWrite.target := r.target
-  // jbtacWrite.offset := updateFetchIdx
-  jbtacWrite.offset := r.fetchIdx
-  for (b <- 0 until JbtacBanks) {
-    when (b.U === jbtacAddr.getBank(updateHistXORAddr)) {
-      jbtac(b).io.w.req.valid := io.redirectInfo.valid && io.redirectInfo.misPred && r._type === BTBtype.I
-      jbtac(b).io.w.req.bits.setIdx := jbtacAddr.getBankIdx(updateHistXORAddr)
-      jbtac(b).io.w.req.bits.data := jbtacWrite
-    }.otherwise {
-      jbtac(b).io.w.req.valid := false.B
-      jbtac(b).io.w.req.bits.setIdx := DontCare
-      jbtac(b).io.w.req.bits.data := DontCare
-    }
-  }
-
-  // 3. update ghr
+  // update ghr
   updateGhr := io.s1OutPred.bits.redirect || io.flush
   val brJumpIdx = Mux(!(btbHit && btbTaken), 0.U, UIntToOH(btbTakenIdx))
   val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
