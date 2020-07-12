@@ -16,6 +16,10 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    // check if roq is empty for 'noSpecExec' inst
+    val roqIsEmpty = Input(Bool())
+    // the 'noSpecExec' inst is commiting?
+    val isNoSpecExecCommit =Input(Bool())
     // read regfile
     val readIntRf = Vec(NRReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRReadPorts, Flipped(new RfReadPort))
@@ -29,13 +33,62 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {
   })
   // pipeline between rename and dispatch
   val dispatch1 = Module(new Dispatch1)
+
+  val s_idle :: s_waitRoqEmpty :: s_waitCommit :: Nil = Enum(3)
+
+  val state = RegInit(s_idle)
+
+  val noSpecVec = io.fromRename.map(x => x.valid && x.bits.ctrl.noSpecExec)
+  assert(PopCount(noSpecVec)<=1.U, "Error: multi noSpecExec inst in Dispatch\n")
+
+  val hasNoSpecInst = ParallelOR(noSpecVec).asBool()
+
+  switch(state){
+    is(s_idle){
+      when(hasNoSpecInst){
+        state := s_waitRoqEmpty
+      }
+    }
+    is(s_waitRoqEmpty){
+      when(io.roqIsEmpty){
+        state := s_waitCommit
+      }
+    }
+    is(s_waitCommit){
+      when(io.isNoSpecExecCommit){
+        state := s_idle
+      }
+    }
+  }
+  when(io.redirect.valid){ state := s_idle }
+
+  XSDebug(p"state=$state roqEmpty:${io.roqIsEmpty} noSpecCmt:${io.isNoSpecExecCommit}\n")
+
+  XSDebug(
+    (state===s_idle) && hasNoSpecInst,
+    p"a noSpec inst in\n"
+  )
+
+  XSDebug(
+    (state===s_waitRoqEmpty) && io.roqIsEmpty,
+    p"roq is empty, switch state to waitCommit\n"
+  )
+
+  XSDebug(
+    (state===s_waitCommit) && io.isNoSpecExecCommit,
+    p"the noSpec inst commited, switch state to idle\n"
+  )
+
   for (i <- 0 until RenameWidth) {
     val valid = RegInit(false.B)
     when(dispatch1.io.recv(i)){ valid := false.B  }
     when(io.fromRename(i).fire()){ valid := true.B }
-    io.fromRename(i).ready := dispatch1.io.fromRename(i).ready
+    dispatch1.io.fromRename(i).valid := Mux(state===s_idle,
+      valid,
+      valid && state===s_waitCommit
+    )
+    io.fromRename(i).ready := dispatch1.io.fromRename(i).ready && state===s_idle
     dispatch1.io.fromRename(i).bits <> RegEnable(io.fromRename(i).bits, io.fromRename(i).fire())
-    dispatch1.io.fromRename(i).valid := valid
   }
   val intDq = Module(new DispatchQueue(dp1Paremeters.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
   val fpDq = Module(new DispatchQueue(dp1Paremeters.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))

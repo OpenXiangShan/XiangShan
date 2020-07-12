@@ -135,6 +135,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs
+  dispatch.io.roqIsEmpty := roq.io.roqIsEmpty
+  dispatch.io.isNoSpecExecCommit := roq.io.commits.head.valid
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf

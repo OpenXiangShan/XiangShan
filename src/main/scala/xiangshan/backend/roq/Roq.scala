@@ -13,6 +13,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val brqRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    val roqIsEmpty = Output(Bool())
     val redirect = Output(Valid(new Redirect))
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
@@ -44,6 +45,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
   val state = RegInit(s_idle)
+
+  io.roqIsEmpty := ringBufferEmpty
 
   // Dispatch
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
