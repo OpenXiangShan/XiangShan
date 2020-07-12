@@ -42,8 +42,8 @@ class DecodeBuffer extends XSModule {
       io.out(i).valid := validVec(i) &&
         !io.redirect.valid &&
         Mux(r.ctrl.noSpecExec,
-          !ParallelOR(io.out.take(i).map(_.valid)).asBool(),
-          !ParallelOR(io.out.take(i).map(_.bits.ctrl.noSpecExec)).asBool()
+          !ParallelOR(validVec.take(i)).asBool(),
+          !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec)).asBool()
         )
     } else {
       require( i == 0)
@@ -51,7 +51,7 @@ class DecodeBuffer extends XSModule {
     }
   }
 
-  for(in<- io.in){
+  for(in <- io.in){
     XSInfo(p"in v:${in.valid} r:${in.ready} pc=${Hexadecimal(in.bits.cf.pc)}\n")
   }
   for(out <- io.out){
