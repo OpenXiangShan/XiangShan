@@ -1,4 +1,4 @@
-package xiangshan.frontend
+ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -8,7 +8,7 @@ import xiangshan.utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
-  val enableBPU = false
+  val enableBPU = true
   val groupAlign = log2Up(FetchWidth * 4)
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
   
@@ -41,15 +41,17 @@ class FakeBPU extends XSModule{
 class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
+    //if(enableBPU){val bpu = Module(new BPU)}
+    //else{val bpu = Module(new FakeBPU)}
     val bpu = Module(new BPU)
-    // val bpu = Module(new FakeBPU)
+    //val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
     //-------------------------
     //local
     val if1_npc = WireInit(0.U(VAddrBits.W))
-    val if1_valid = !reset.asBool //TODO:this is ugly
+    val if1_valid = !reset.asBool  && (GTimer() > 500.U)//TODO:this is ugly
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
@@ -63,6 +65,8 @@ class IFU extends XSModule with HasIFUConst
     when(RegNext(reset.asBool) && !reset.asBool){
     //when((GTimer() === 501.U)){ //TODO:this is ugly
       XSDebug("RESET....\n")
+      if1_npc := resetVector.U(VAddrBits.W)
+    } .elsewhen(GTimer() === 501.U){
       if1_npc := resetVector.U(VAddrBits.W)
     } .otherwise{
       if1_npc := if2_snpc
@@ -169,10 +173,15 @@ class IFU extends XSModule with HasIFUConst
 
     //Output -> iBuffer
     //io.fetchPacket <> DontCare
-    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
-    if(enableBPU){io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)}
+    if(enableBPU){
+      io.fetchPacket.bits.mask := Mux( if4_tage_taken,
+        (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1),
+        Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+      )
+    }
     else{io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)}    
     io.fetchPacket.bits.pc := if4_pc
 
@@ -183,7 +192,7 @@ class IFU extends XSModule with HasIFUConst
       when (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
-        io.fetchPacket.bits.pnpc(i) := groupPC(if4_pc) + (i + 1).U << 2.U // TODO: has bug
+        io.fetchPacket.bits.pnpc(i) := groupPC(if4_pc) + ((i + 1).U << 2.U) // TODO: has bug
       }
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,io.fetchPacket.bits.pnpc(i).asUInt)
     }    
@@ -202,7 +211,7 @@ class IFU extends XSModule with HasIFUConst
 
     bpu.io.redirectInfo := io.redirectInfo
 
-    io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
+    io.icacheResp.ready := io.fetchPacket.ready 
 
 }
 
