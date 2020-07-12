@@ -251,16 +251,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
     //TODO: skip insts that commited in the same cycle ahead of exception
 
-    //csr debug signals
-    val ModeM = WireInit(0x3.U)
-    BoringUtils.addSource(ModeM, "difftestMode")
-    BoringUtils.addSource(emptyCsr, "difftestMstatus")
-    BoringUtils.addSource(emptyCsr, "difftestSstatus") 
-    BoringUtils.addSource(emptyCsr, "difftestMepc")
-    BoringUtils.addSource(emptyCsr, "difftestSepc")
-    BoringUtils.addSource(emptyCsr, "difftestMcause")
-    BoringUtils.addSource(emptyCsr, "difftestScause")
-
     class Monitor extends BlackBox {
       val io = IO(new Bundle {
         val clk = Input(Clock())

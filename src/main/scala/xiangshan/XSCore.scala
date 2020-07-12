@@ -88,6 +88,12 @@ case class XSConfig
   EnableDebug: Boolean = true
 )
 
+object XSCoreConfig {
+  val config: XSConfig = XSConfig()
+}
+
+
+
 class XSCore(implicit val p: XSConfig) extends XSModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
