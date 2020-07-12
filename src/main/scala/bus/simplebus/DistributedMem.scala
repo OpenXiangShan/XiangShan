@@ -22,7 +22,7 @@ class DistributedMem(memByte: Int, dualPort: Boolean, delayCycles: Int = 0, data
   val roIdx = Index(io.ro.req.bits.addr)
   val wen = io.rw.isWrite()
   val wdataVec = VecInit.tabulate(nBank) { i => io.rw.req.bits.wdata(8 * (i + 1) - 1, 8 * i) }
-  val wmask = VecInit.tabulate(nBank) { i => io.rw.req.bits.wmask(i).toBool }
+  val wmask = VecInit.tabulate(nBank) { i => io.rw.req.bits.wmask(i).asBool() }
 
   val rwData = Wire(UInt(XLEN.W))
   val roData = Wire(UInt(XLEN.W))

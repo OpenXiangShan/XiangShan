@@ -3,8 +3,11 @@ package xiangshan.backend.issue
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.utils._
+import xiangshan.backend.fu.FunctionUnit._
+
 
 trait IQConst extends HasXSParameter{
   val iqSize = IssQueSize
@@ -23,13 +26,15 @@ object OneCycleFire {
   }
 }
 
-class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int = 0, val fixedDelay: Int = 1, val fifo: Boolean = false) extends IQModule {
+class IssueQueue
+(
+  exuCfg: ExuConfig, val wakeupCnt: Int, val bypassCnt: Int = 0, val enableBypass: Boolean = false, val fifo: Boolean = false
+) extends IQModule {
 
-  val useBypass = bypassCnt > 0
   val src2Use = true
-  val src3Use = fuTypeInt==FuType.fmac.litValue()
+  val src3Use = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
   val src2Listen = true
-  val src3Listen = fuTypeInt==FuType.fmac.litValue()
+  val src3Listen = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
 
   val io = IO(new Bundle() {
     // flush Issue Queue
@@ -41,7 +46,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val enqData = Flipped(ValidIO(new ExuInput))
 
     //  broadcast selected uop to other issue queues which has bypasses
-    val selectedUop = if(useBypass) ValidIO(new MicroOp) else null
+    val selectedUop = if(enableBypass) ValidIO(new MicroOp) else null
 
     // send to exu
     val deq = DecoupledIO(new ExuInput)
@@ -50,11 +55,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
 
     // use bypass uops to speculative wake-up
-    val bypassUops = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new MicroOp))) else null
-    val bypassData = if(useBypass) Vec(bypassCnt, Flipped(ValidIO(new ExuOutput))) else null
+    val bypassUops = Vec(bypassCnt, Flipped(ValidIO(new MicroOp)))
+    val bypassData = Vec(bypassCnt, Flipped(ValidIO(new ExuOutput)))
 
     // to Dispatch
-    val numExist = Output(UInt((iqIdxWidth+1).W))
+    val numExist = Output(UInt(iqIdxWidth.W))
   })
 
   val srcAllNum = 3
@@ -242,7 +247,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
     idQue(tail)
   ) // Note: direct by IQue's idx, different from deqSel
 
-  io.numExist := tailAll
+  io.numExist := Mux(tailAll === iqSize.U, (iqSize-1).U, tailAll)
   assert(tailAll < 9.U)
 
   //-----------------------------------------
@@ -269,7 +274,6 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   //-----------------------------------------
   // Wakeup and Bypass
   //-----------------------------------------
-  if (wakeupCnt > 0) {
     val cdbValid = io.wakeUpPorts.map(_.valid)
     val cdbData  = io.wakeUpPorts.map(_.bits.data)
     val cdbPdest = io.wakeUpPorts.map(_.bits.uop.pdest)
@@ -291,8 +295,7 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
         }
       }
     }
-  }
-  if (useBypass) {
+  
     val bpPdest = io.bypassUops.map(_.bits.pdest)
     val bpValid = io.bypassUops.map(_.valid)
     val bpData  = io.bypassData.map(_.bits.data)
@@ -344,11 +347,11 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
         XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
     }
-
+  
+  if (enableBypass) {
     // send out bypass
-    require(fixedDelay==1) // only support fixedDelay is 1 now
     val sel = io.selectedUop
-    sel.valid := toIssFire
+    sel.valid := toIssFire && !enqSendEnable
     sel.bits := DontCare
     sel.bits.pdest := issQue(deqSelIq).uop.pdest
     sel.bits.cf.pc := issQue(deqSelIq).uop.cf.pc
@@ -363,13 +366,15 @@ class IssueQueue(val fuTypeInt: BigInt, val wakeupCnt: Int, val bypassCnt: Int =
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x flptr:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx, io.deq.bits.uop.freelistAllocPtr.value)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b In(%d %d) Out(%d %d)\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot, io.enqCtrl.valid, io.enqCtrl.ready, io.deq.valid, io.deq.ready)
   XSInfo(issueToExuValid, "FireStage:Out(%d %d) src1(%d|%x) src2(%d|%x) src3(%d|%x) deqFlush:%d pc:%x roqIdx:%d\n", io.deq.valid, io.deq.ready, issueToExu.uop.psrc1, issueToExu.src1, issueToExu.uop.psrc2, issueToExu.src2, issueToExu.uop.psrc3, issueToExu.src3, deqFlushHit, issueToExu.uop.cf.pc, issueToExu.uop.roqIdx)
-  if(useBypass) {
+  if(enableBypass) {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
   } else {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid)
   }
+
   XSDebug(enqSendEnable, p"NoDelayIss: enqALRdy:${enqAlreadyRdy} *Next:${enqALRdyNext} En:${enqSendEnable} flush:${enqSendFlushHit} enqSelIqNext:${enqSelIqNext} deqSelIq:${deqSelIq} deqReady:${io.deq.ready}\n")
-  XSDebug("id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx FuType:%x\n", fuTypeInt.U)
+  XSDebug(s"id|v|r|psrc|r|   src1         |psrc|r|   src2         |psrc|r|   src3         |brTag|    pc    |roqIdx Exu:${exuCfg.name}\n")
+
   for (i <- 0 until iqSize) {
     when (i.U===tail && tailAll=/=8.U) {
       XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x <-\n",

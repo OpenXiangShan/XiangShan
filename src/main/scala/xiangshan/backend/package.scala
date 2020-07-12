@@ -83,15 +83,6 @@ package object backend {
     def isBranchInvert(func: UInt) = func(0)
   }
 
-  object MULOpType {
-    def mul    = "b0000".U
-    def mulh   = "b0001".U
-    def mulhsu = "b0010".U
-    def mulhu  = "b0011".U
-    def mulw   = "b1000".U
-
-  }
-
   object MDUOpType {
     def mul    = "b0000".U
     def mulh   = "b0001".U
@@ -114,7 +105,7 @@ package object backend {
     def isW(op: UInt) = op(3)
   }
 
-  object LDUOpType {
+  object LSUOpType {
     def lb   = "b000000".U
     def lh   = "b000001".U
     def lw   = "b000010".U
@@ -122,37 +113,28 @@ package object backend {
     def lbu  = "b000100".U
     def lhu  = "b000101".U
     def lwu  = "b000110".U
-    def flw  = "b010110".U // box 32-bit data to 64-bit with 1s
-
-//    def lr      = "b100000".U
-//    def sc      = "b100001".U
-//    def amoswap = "b100010".U
-//    def amoadd  = "b100011".U
-//    def amoxor  = "b100100".U
-//    def amoand  = "b100101".U
-//    def amoor   = "b100110".U
-//    def amomin  = "b110111".U
-//    def amomax  = "b110000".U
-//    def amominu = "b110001".U
-//    def amomaxu = "b110010".U
-
-    def isStore(func: UInt): Bool = func(3)
-    def isAtom(func: UInt): Bool = func(5)
-    def isLoad(func: UInt): Bool = !isStore(func) & !isAtom(func)
-//    def isLR(func: UInt): Bool = func === lr
-//    def isSC(func: UInt): Bool = func === sc
-//    def isAMO(func: UInt): Bool = isAtom(func) && !isLR(func) && !isSC(func)
-
-//    def atomW = "010".U
-//    def atomD = "011".U
-  }
-
-  object STUOpType {
     def sb   = "b001000".U
     def sh   = "b001001".U
     def sw   = "b001010".U
     def sd   = "b001011".U
 
+    def lr      = "b100010".U
+    def sc      = "b100011".U
+    def amoswap = "b100001".U
+    def amoadd  = "b100000".U
+    def amoxor  = "b100100".U
+    def amoand  = "b101100".U
+    def amoor   = "b101000".U
+    def amomin  = "b110000".U
+    def amomax  = "b110100".U
+    def amominu = "b111000".U
+    def amomaxu = "b111100".U
+
+    def isStore(func: UInt): Bool = func(3)
+    def isAtom(func: UInt): Bool = func(5)
+
+    def atomW = "010".U
+    def atomD = "011".U
   }
 
 
