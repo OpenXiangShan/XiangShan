@@ -41,8 +41,7 @@ class FakeBPU extends XSModule{
 class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
-    val bpu = Module(new BPU)
-    // val bpu = Module(new FakeBPU)
+    val bpu = if(EnableBPU) Module(new BPU) else Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
@@ -172,7 +171,7 @@ class IFU extends XSModule with HasIFUConst
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
-    if(enableBPU){io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1)}
+    if(enableBPU){io.fetchPacket.bits.mask := (Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt)) << if4_pc(2+log2Up(FetchWidth)-1, 1)}
     else{io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)}    
     io.fetchPacket.bits.pc := if4_pc
 
