@@ -51,7 +51,7 @@ class FakeCache extends XSModule with HasICacheConst {
 
   val memByte = 128 * 1024 * 1024
 
-  val ramHelpers = Array.fill(FetchWidth/2)(Module(new RAMHelper(memByte)).io)
+  val ramHelpers = Array.fill(FetchWidth/2 + 1)(Module(new RAMHelper(memByte)).io) 
   ramHelpers.foreach(_.clk := clock)
 
   //fake instruction fetch pipeline
@@ -61,7 +61,8 @@ class FakeCache extends XSModule with HasICacheConst {
   val s1_valid = io.in.valid
   val s2_ready = WireInit(false.B)
   val s1_fire = s1_valid && s2_ready
-  val gpc = groupPC(io.in.bits.addr)
+  //val gpc = groupPC(io.in.bits.addr)
+  val gpc = (io.in.bits.addr) //use fetch pc
   io.in.ready := s2_ready
 
   val offsetBits = log2Up(memByte)
@@ -73,8 +74,27 @@ class FakeCache extends XSModule with HasICacheConst {
   for(i <- ramHelpers.indices) {
     val rIdx = index(gpc) + i.U
     ramHelpers(i).rIdx := rIdx
-    ramOut(2*i) := ramHelpers(i).rdata.tail(32)
-    ramOut(2*i+1) := ramHelpers(i).rdata.head(32)
+    when(gpc(2) === "b0".U){
+      //little ending
+      ramOut(0) := ramHelpers(0).rdata.tail(32)
+      ramOut(1) := ramHelpers(0).rdata.head(32)
+      ramOut(2) := ramHelpers(1).rdata.tail(32)
+      ramOut(3) := ramHelpers(1).rdata.head(32)
+      ramOut(4) := ramHelpers(2).rdata.tail(32)
+      ramOut(5) := ramHelpers(2).rdata.head(32)
+      ramOut(6) := ramHelpers(3).rdata.tail(32)
+      ramOut(7) := ramHelpers(3).rdata.head(32)
+    } .otherwise {
+      ramOut(0) := ramHelpers(0).rdata.head(32)
+      ramOut(1) := ramHelpers(1).rdata.tail(32)
+      ramOut(2) := ramHelpers(1).rdata.head(32)
+      ramOut(3) := ramHelpers(2).rdata.tail(32)
+      ramOut(4) := ramHelpers(2).rdata.head(32)
+      ramOut(5) := ramHelpers(3).rdata.tail(32)
+      ramOut(6) := ramHelpers(3).rdata.head(32)
+      ramOut(7) := ramHelpers(4).rdata.tail(32)
+
+    }
     Seq(
       ramHelpers(i).wmask,
       ramHelpers(i).wdata,
