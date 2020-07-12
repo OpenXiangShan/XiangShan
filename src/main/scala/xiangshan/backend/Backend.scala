@@ -34,7 +34,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch)
+  val dispatch = Module(new Dispatch(exeUnits.map(_.config)))
   val roq = Module(new Roq)
   val intRf = Module(new Regfile(
     numReadPorts = NRReadPorts,

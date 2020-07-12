@@ -3,10 +3,11 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.utils.{XSDebug, XSInfo}
 
-class Dispatch2 extends XSModule{
+class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
   val io = IO(new Bundle() {
     // from dispatch queues
     val fromIntDq = Flipped(Vec(IntDqDeqWidth, DecoupledIO(new MicroOp)))
@@ -21,9 +22,9 @@ class Dispatch2 extends XSModule{
     val fpPregRdy = Vec(NRReadPorts, Input(Bool()))
 
     // enq Issue Queue
-    val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
-    val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.ExuCnt, ValidIO(new ExuInput))
+    val numExist = Input(Vec(exuCfg.length, UInt(log2Ceil(IssQueSize).W)))
+    val enqIQCtrl = Vec(exuCfg.length, DecoupledIO(new MicroOp))
+    val enqIQData = Vec(exuCfg.length, ValidIO(new ExuInput))
   })
 
   for (i <- 0 until IntDqDeqWidth) {
@@ -40,7 +41,7 @@ class Dispatch2 extends XSModule{
   }
 
   // inst indexes for reservation stations
-  val rsIndexGen = Module(new DispatchGen())
+  val rsIndexGen = Module(new DispatchGen(exuCfg))
   rsIndexGen.io.fromIntDq := io.fromIntDq
   rsIndexGen.io.fromFpDq := io.fromFpDq
   rsIndexGen.io.fromLsDq := io.fromLsDq
