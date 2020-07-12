@@ -52,7 +52,7 @@ class TageUpdate extends TageBundle {
   val u = Vec(BankWidth, UInt(2.W))
 }
 
-class FakeTageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int) extends TageModule {
+class FakeTageTable() extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val resp = Output(Vec(BankWidth, Valid(new TageResp)))
