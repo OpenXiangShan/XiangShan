@@ -5,9 +5,9 @@ import chisel3.util._
 import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
-import xiangshan.backend.dispatch.DP1Config
-import xiangshan.backend.exu.ExuConfig
-import xiangshan.frontend.{Frontend, HasTageParameter}
+import xiangshan.backend.dispatch.DP1Parameters
+import xiangshan.backend.exu.ExuParameters
+import xiangshan.frontend.Frontend
 import xiangshan.utils._
 
 trait HasXSParameter {
@@ -51,21 +51,21 @@ trait HasXSParameter {
   val IntDqDeqWidth = 4
   val FpDqDeqWidth = 4
   val LsDqDeqWidth = 4
-  val dp1Config = DP1Config(
+  val dp1Paremeters = DP1Parameters(
     IntDqSize = 16,
     FpDqSize = 16,
     LsDqSize = 16
   )
-  val exuConfig = ExuConfig(
+  val exuParameters = ExuParameters(
+    JmpCnt = 1,
     AluCnt = 4,
-    BruCnt = 1,
     MulCnt = 1,
     MduCnt = 1,
     FmacCnt = 0,
     FmiscCnt = 0,
     FmiscDivSqrtCnt = 0,
-    LduCnt = 1,
-    StuCnt = 0
+    LduCnt = 0,
+    StuCnt = 1
   )
 }
 
@@ -96,6 +96,22 @@ case class XSConfig
   FPGAPlatform: Boolean = true,
   EnableDebug: Boolean = true
 )
+
+object AddressSpace extends HasXSParameter {
+  // (start, size)
+  // address out of MMIO will be considered as DRAM
+  def mmio = List(
+    (0x30000000L, 0x10000000L),  // internal devices, such as CLINT and PLIC
+    (0x40000000L, 0x40000000L) // external devices
+  )
+
+  def isMMIO(addr: UInt): Bool = mmio.map(range => {
+    require(isPow2(range._2))
+    val bits = log2Up(range._2)
+    (addr ^ range._1.U)(PAddrBits-1, bits) === 0.U
+  }).reduce(_ || _)
+}
+
 
 class XSCore(implicit val p: XSConfig) extends XSModule {
   val io = IO(new Bundle {

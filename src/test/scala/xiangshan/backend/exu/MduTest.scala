@@ -24,7 +24,7 @@ class MduTest extends FlatSpec
   with HasPartialDecoupledDriver
 {
   "MUL" should "random enq and deq correctly" in {
-    test(new Mul{
+    test(new MulExeUnit{
       val disp_begin = WireInit(0.S(64.W).asUInt())
       val disp_end = WireInit((-1).S(64.W).asUInt())
       BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
@@ -52,7 +52,7 @@ class MduTest extends FlatSpec
 
 
   "MUL" should "dont flush same br tag" in {
-    test(new Mul{
+    test(new MulExeUnit{
       val disp_begin = WireInit(0.S(64.W).asUInt())
       val disp_end = WireInit((-1).S(64.W).asUInt())
       BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
@@ -93,7 +93,7 @@ class MduTest extends FlatSpec
 
 
   "MDU" should "random enq and deq correctly" in {
-    test(new Mdu{
+    test(new MulDivExeUnit{
       val disp_begin = WireInit(0.S(64.W).asUInt())
       val disp_end = WireInit((-1).S(64.W).asUInt())
       BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
