@@ -6,6 +6,8 @@ import xiangshan._
 import xiangshan.utils._
 import xiangshan.backend.ALUOpType
 import utils._
+import chisel3.util.experimental.BoringUtils
+import xiangshan.backend.decode.XSTrap
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
   def tagBits = VAddrBits - idxBits - 2
@@ -543,4 +545,39 @@ class BPU extends XSModule {
   s3.io.predecode <> io.predecode
   io.tageOut <> s3.io.out
   s3.io.redirectInfo <> io.redirectInfo
+
+  // TODO: temp and ugly code, when perf counters is added( may after adding CSR), please mv the below counter
+  val bpuPerfCntList = List(
+    "MbpInstr",
+    "MbpRight",
+    "MbpWrong",
+    "MbpBRight",
+    "MbpBWrong",
+    "MbpJRight",
+    "MbpJWrong",
+    "MbpIRight",
+    "MbpIWrong",
+    "MbpRRight",
+    "MbpRWrong"
+  )
+
+  val bpuPerfCnts = List.fill(bpuPerfCntList.length)(RegInit(0.U(XLEN.W)))
+  val bpuPerfCntConds = List.fill(bpuPerfCntList.length)(WireInit(false.B))
+  (bpuPerfCnts zip bpuPerfCntConds) map { case (cnt, cond) => { when (cond) { cnt := cnt + 1.U }}}
+
+  for(i <- bpuPerfCntList.indices) {
+    BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i))
+  }
+
+  val xsTrap = WireInit(false.B)
+  BoringUtils.addSink(xsTrap, "XSTRAP_BPU")
+
+  // if (!p.FPGAPlatform) {
+    when (xsTrap) {
+      printf("=================BPU's PerfCnt================\n")
+      for(i <- bpuPerfCntList.indices) {
+        printf(bpuPerfCntList(i) + " <- " + "%d\n", bpuPerfCnts(i))
+      }
+    }
+  // }
 }
