@@ -6,6 +6,24 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.utils._
 
+// Branch prediction result from BPU Stage1 & 3
+class BranchPrediction extends XSBundle {
+  val redirect = Bool()
+
+  // mask off all the instrs after the first redirect instr
+  val instrValid = Vec(FetchWidth, Bool())
+  // target of the first redirect instr in a fetch package
+  val target = UInt(VAddrBits.W)
+  // val _type = UInt(2.W)
+
+  // save these info in brq!
+  // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
+  //  val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  // ras checkpoint, only used in Stage3
+  //  val rasSp = UInt(log2Up(RasSize).W)
+  //  val rasTopCtr = UInt(8.W)
+}
+
 class LbufEntry extends XSBundle {
   val inst = UInt(32.W)
   val pc = UInt(VAddrBits.W)
