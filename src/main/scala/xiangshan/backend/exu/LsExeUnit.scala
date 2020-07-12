@@ -4,16 +4,11 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import xiangshan._
-import xiangshan.FuType._
-import xiangshan.utils._
-import xiangshan.backend.regfile.RfWritePort
 import utils._
 import bus.simplebus._
-import noop.AddressSpace
+import xiangshan.AddressSpace
 import xiangshan.backend._
 import xiangshan.backend.brq.BrqPtr
-import xiangshan.backend.fu.FunctionUnit._
-
 
 
 class StoreQueueEntry extends XSBundle{
