@@ -130,8 +130,6 @@ class Decoder extends XSModule with HasInstrType {
   // fix LUI
   io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type
-
-  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr
 //    (
 //      io.out.ctrl.fuType === (FuType.ldu | FuType.stu) && LSUOpType.isAtom(io.out.ctrl.fuOpType) ||
 //        BlockList.map(j => io.out.ctrl.fuType === j).foldRight(false.B)((sum, i) => sum | i)
@@ -161,6 +159,7 @@ class Decoder extends XSModule with HasInstrType {
   when(io.out.ctrl.isXSTrap){
     io.out.ctrl.lsrc1 := 10.U // a0
   }
+  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr
 //  io.isWFI := (instr === Priviledged.WFI) && io.in.valid
 
 }

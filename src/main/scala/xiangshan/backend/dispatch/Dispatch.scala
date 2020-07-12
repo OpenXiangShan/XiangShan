@@ -30,7 +30,12 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {
   // pipeline between rename and dispatch
   val dispatch1 = Module(new Dispatch1)
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
+    val valid = RegInit(false.B)
+    when(dispatch1.io.recv(i)){ valid := false.B  }
+    when(io.fromRename(i).fire()){ valid := true.B }
+    io.fromRename(i).ready := dispatch1.io.fromRename(i).ready
+    dispatch1.io.fromRename(i).bits <> RegEnable(io.fromRename(i).bits, io.fromRename(i).fire())
+    dispatch1.io.fromRename(i).valid := valid
   }
   val intDq = Module(new DispatchQueue(dp1Paremeters.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
   val fpDq = Module(new DispatchQueue(dp1Paremeters.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
