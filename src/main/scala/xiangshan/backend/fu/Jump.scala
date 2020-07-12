@@ -17,10 +17,10 @@ class Jump extends FunctionUnit(jmpCfg){
   val redirectHit = uop.brTag.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
-  val isCSR = BRUOpType.isCSR(func)
-  val isFMV = BRUOpType.isFMV(func)
-  val isMOU = BRUOpType.isMOU(func)
-  val isJUMP = BRUOpType.isJUMP(func)
+  val isCSR = JumpOpType.isCSR(func)
+  val isFMV = JumpOpType.isFMV(func)
+  val isMOU = JumpOpType.isMOU(func)
+  val isJUMP = JumpOpType.isJUMP(func)
 
   // JUMP
   val isRVC = uop.cf.isRVC

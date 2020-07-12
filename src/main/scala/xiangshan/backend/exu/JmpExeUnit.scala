@@ -7,7 +7,7 @@ import xiangshan.FuType._
 import xiangshan.utils._
 import xiangshan.backend.regfile.RfWritePort
 import xiangshan.backend.fu.FunctionUnit._
-import xiangshan.backend.BRUOpType
+import xiangshan.backend.JumpOpType
 
 // NOTE: BRUOpType is at backend/package.scala
 
@@ -19,10 +19,10 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val redirectHit = uop.brTag.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
-  val isCSR = BRUOpType.isCSR(func)
-  val isFMV = BRUOpType.isFMV(func)
-  val isMOU = BRUOpType.isMOU(func)
-  val isJUMP = BRUOpType.isJUMP(func)
+  val isCSR = JumpOpType.isCSR(func)
+  val isFMV = JumpOpType.isFMV(func)
+  val isMOU = JumpOpType.isMOU(func)
+  val isJUMP = JumpOpType.isJUMP(func)
 
   // CSR
 
