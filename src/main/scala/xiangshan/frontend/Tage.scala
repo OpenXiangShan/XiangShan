@@ -253,7 +253,7 @@ class Tage extends TageModule {
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {
-      val t = Module(new TageTable(nRows, histLen, tagLen, UBitPeriod))
+      val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       t.io.req <> io.req
       t
     }

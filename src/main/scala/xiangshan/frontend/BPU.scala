@@ -68,7 +68,7 @@ class BPUStage1 extends XSModule {
 
   // Tage predictor
   // val tage = Module(new FakeTAGE)
-  val tage = Module(new Tage)
+  val tage = if(EnableBPD) Module(new Tage) else Module(new FakeTAGE)
   tage.io.req.valid := io.in.pc.fire()
   tage.io.req.bits.pc := io.in.pc.bits
   tage.io.req.bits.hist := hist
@@ -218,7 +218,7 @@ class BPUStage1 extends XSModule {
   val jbtacTarget = jbtacRead(jbtacBank).target
 
   // choose one way as victim way
-  val btbWayInvalids = Cat(btbMetaRead.map(e => !e.valid)).asUInt
+  val btbWayInvalids = Reverse(Cat(btbMetaRead.map(e => !e.valid)).asUInt)
   val victim = Mux(btbHit, btbHitWay, Mux(btbWayInvalids.orR, OHToUInt(LowestBit(btbWayInvalids, BtbWays)), LFSR64()(log2Up(BtbWays) - 1, 0)))
 
   // calculate global history of each instr
@@ -420,12 +420,12 @@ class BPUStage3 extends XSModule {
   // get the first taken branch/jal/call/jalr/ret in a fetch line
   // brTakenIdx/jalIdx/callIdx/jalrIdx/retIdx/jmpIdx is one-hot encoded.
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction.
-  val brIdx = inLatch.btb.hits & Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt & io.predecode.bits.mask
+  val brIdx = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & io.predecode.bits.mask
   val brTakenIdx = LowestBit(brIdx & inLatch.tage.takens.asUInt, FetchWidth)
-  val jalIdx = LowestBit(inLatch.btb.hits & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.jal }).asUInt & io.predecode.bits.mask, FetchWidth)
-  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.call }).asUInt, FetchWidth)
-  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.jalr }).asUInt, FetchWidth)
-  val retIdx = LowestBit(io.predecode.bits.mask & Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.ret }).asUInt, FetchWidth)
+  val jalIdx = LowestBit(inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.jal }).asUInt) & io.predecode.bits.mask, FetchWidth)
+  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.call }).asUInt), FetchWidth)
+  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.jalr }).asUInt), FetchWidth)
+  val retIdx = LowestBit(io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === ALUOpType.ret }).asUInt), FetchWidth)
 
   val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth)
   val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & LowerMask(jmpIdx, FetchWidth) & io.predecode.bits.mask
