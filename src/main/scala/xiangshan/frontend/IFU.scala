@@ -8,7 +8,7 @@ import xiangshan.utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
-  val enableBPU = true
+  val enableBPU = false
   val groupAlign = log2Up(FetchWidth * 4)
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
   
@@ -52,7 +52,7 @@ class IFU extends XSModule with HasIFUConst
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
-    val if2_snpc = Cat(if1_pc(VAddrBits-1, groupAlign) + 1.U, 0.U(groupAlign.W))
+    val if2_snpc = if1_pc + 32.U //TODO: this is ugly
     val if1_ready = if2_ready
 
     //pipe fire
@@ -63,7 +63,7 @@ class IFU extends XSModule with HasIFUConst
     //when((GTimer() === 501.U)){ //TODO:this is ugly
       XSDebug("RESET....\n")
       if1_npc := resetVector.U(VAddrBits.W)
-    } .elsewhen(GTimer() === 501.U){
+    } .elsewhen(GTimer() === 501.U){ //TODO: this may cause bug
       if1_npc := resetVector.U(VAddrBits.W)
     } .otherwise{
       if1_npc := if2_snpc
@@ -101,7 +101,7 @@ class IFU extends XSModule with HasIFUConst
     if2_ready := (if2_fire) || !if2_valid
 
     io.icacheReq.valid := if2_valid
-    io.icacheReq.bits.addr := groupPC(if2_pc)
+    io.icacheReq.bits.addr := if2_pc
     io.icacheReq.bits.flush := io.redirectInfo.flush()
 
     when(if2_valid && if2_btb_taken)
@@ -179,7 +179,10 @@ class IFU extends XSModule with HasIFUConst
         Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
       )
     }
-    else{io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)}    
+    else{
+      //io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+      io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) //TODO : consider cross cacheline fetch
+    }    
     io.fetchPacket.bits.pc := if4_pc
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
@@ -189,7 +192,7 @@ class IFU extends XSModule with HasIFUConst
       when (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
-        io.fetchPacket.bits.pnpc(i) := groupPC(if4_pc) + ((i + 1).U << 2.U) // TODO: has bug
+        io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) //use fetch PC
       }
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,io.fetchPacket.bits.pnpc(i).asUInt)
     }    
@@ -204,7 +207,7 @@ class IFU extends XSModule with HasIFUConst
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
-    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 2) //TODO: consider RVC
+    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) //TODO: consider RVC && consider cross cacheline fetch
 
     bpu.io.redirectInfo := io.redirectInfo
 
