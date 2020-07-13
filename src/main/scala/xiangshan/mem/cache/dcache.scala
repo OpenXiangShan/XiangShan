@@ -14,7 +14,7 @@ import bus.simplebus._
 //   def load   = "b00".U
 //   def store  = "b01".U
 //   def refill = "b11".U
-//   def probe  = "b10".U
+//   def empty  = "b10".U
 
 //   def width  = load.getWidth
 // }

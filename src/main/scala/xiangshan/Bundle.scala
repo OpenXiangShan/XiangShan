@@ -52,6 +52,7 @@ class MicroOp extends CfCtrl {
   val src1State, src2State, src3State = SrcState()
   val freelistAllocPtr = new FreeListPtr
   val roqIdx = UInt(RoqIdxWidth.W)
+  val moqIdx = UInt(MoqIdxWidth.W)
 }
 
 class Redirect extends XSBundle {

@@ -48,10 +48,11 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
   val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
-  val pc = UInt(VAddrBits.W) //for debug
+  // val moqIdx = UInt(log2Up(LSRoqSize).W)
+  val uop = new MicroOp
 
   val miss = Bool()
+  val mmio = Bool()
   val rollback = Bool()
 
   val forwardMask = UInt(8.W)
@@ -61,7 +62,7 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
 class LoadForwardQueryIO extends XSBundle with HasMEMConst {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  val lsroqId = Output(UInt(log2Up(LSRoqSize).W))
+  val moqIdx = Output(UInt(log2Up(LSRoqSize).W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
 
   val forwardMask = Input(UInt(8.W))
@@ -73,8 +74,9 @@ class LduReq extends XSBundle with HasMEMConst {
   val src2 = UInt(VAddrBits.W)
   val func = UInt(6.W)
   val data = UInt(XLEN.W)
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
-  val pc = UInt(VAddrBits.W) //for debug
+  val uop = new MicroOp
+  // val moqIdx = UInt(log2Up(LSRoqSize).W)
+  // val pc = UInt(VAddrBits.W) //for debug
 }
 
 class StuReq extends XSBundle with HasMEMConst {
@@ -82,8 +84,9 @@ class StuReq extends XSBundle with HasMEMConst {
   val src2 = UInt(VAddrBits.W)
   val func = UInt(6.W)
   val data = UInt(XLEN.W)
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
-  val pc = UInt(VAddrBits.W) //for debug
+  val uop = new MicroOp
+  // val moqIdx = UInt(log2Up(LSRoqSize).W)
+  // val pc = UInt(VAddrBits.W) //for debug
 }
 
 class LsuIO extends XSBundle with HasMEMConst {
@@ -149,8 +152,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src2
     // l2_out(i).bits.data := io.ldin(i).bits.data
     l2_out(i).bits.func := io.ldin(i).bits.func
-    l2_out(i).bits.pc := io.ldin(i).bits.pc
-    l2_out(i).bits.lsroqId := io.ldin(i).bits.lsroqId
+    l2_out(i).bits.uop.cf.pc := io.ldin(i).bits.uop.cf.pc
+    l2_out(i).bits.uop.moqIdx := io.ldin(i).bits.uop.moqIdx
     l2_out(i).valid := io.ldin(i).valid
   })
 
@@ -158,7 +161,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   // (0 until LoadPipelineWidth).map(i => {
   //   io.dmem.req(i).bits.vaddr := l2_out(i).bits.vaddr
   //   io.dmem.req(i).bits.func := l2_out(i).bits.func
-  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.lsroqId)
+  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.moqIdx)
   //   io.dmem.req(i).valid := l2_out(i).valid
   // } // TODO
 
@@ -181,7 +184,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     // l4_out(i).bits.data := io.dmem.resp(i).bits.data
     // l4_out(i).bits.func := io.dmem.resp(i).bits.user ...
     // l4_out(i).bits.pc := io.dmem.resp(i).bits.user ...
-    // l4_out(i).lsroqId := io.dmem.resp(i).bits.user ...
+    // l4_out(i).moqIdx := io.dmem.resp(i).bits.user ...
     // l4_out(i).valid := io.dmem(i).resp.valid
   })
 
@@ -272,6 +275,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
     // if hit, writeback result to CDB
     // val ldout = Vec(2, Decoupled(new ExuOutput))
+    // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
+
 
     // writeback to LSROQ
   })
@@ -296,21 +301,21 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 // Generate addr, use addr to query DTLB
 //-------------------------------------------------------
 
-  (0 until StorePipelineWidth).map(i => {
-    s2_out(i).bits := DontCare
-    s2_out(i).bits.vaddr := io.stin(i).bits.src1 + io.stin(i).bits.src2
-    s2_out(i).bits.data := io.stin(i).bits.data
-    s2_out(i).bits.func := io.stin(i).bits.func
-    s2_out(i).bits.pc := io.stin(i).bits.pc
-    s2_out(i).bits.lsroqId := io.stin(i).bits.lsroqId
-    s2_out(i).valid := io.stin(i).valid
-  })
+  // (0 until StorePipelineWidth).map(i => {
+  //   s2_out(i).bits := DontCare
+  //   s2_out(i).bits.vaddr := io.stin(i).bits.src1 + io.stin(i).bits.src2
+  //   s2_out(i).bits.data := io.stin(i).bits.data
+  //   s2_out(i).bits.func := io.stin(i).bits.func
+  //   s2_out(i).bits.pc := io.stin(i).bits.pc
+  //   s2_out(i).bits.moqIdx := io.stin(i).bits.moqIdx
+  //   s2_out(i).valid := io.stin(i).valid
+  // })
 
   // send req to dtlb
   // (0 until LoadPipelineWidth).map(i => {
   //   io.dmem.req(i).bits.vaddr := l2_out(i).bits.vaddr
   //   io.dmem.req(i).bits.func := l2_out(i).bits.func
-  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.lsroqId)
+  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.moqIdx)
   //   io.dmem.req(i).valid := l2_out(i).valid
   // } // TODO
 
@@ -327,7 +332,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     // s3_in(i).bits.data := io.dtlb.store(i).resp.bits.user.get
     // s3_in(i).bits.func := io.dtlb.store(i).resp.bits.user.get
     // s3_in(i).bits.pc := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.lsroqId := io.dtlb.store(i).resp.bits.user.get
+    // s3_in(i).bits.moqIdx := io.dtlb.store(i).resp.bits.user.get
     // s3_in(i).valid := io.dtlb.store(i).resp.valid
   })
 

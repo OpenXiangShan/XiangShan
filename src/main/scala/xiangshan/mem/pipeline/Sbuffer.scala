@@ -20,7 +20,7 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(new SimpleBusUC(addrBits = PAddrBits, userBits = (new SbufferUserBundle).getWidth)))
     val dcache = new SimpleBusUC(dataBits = L1CacheLineSize, addrBits = PAddrBits, userBits = (new SbufferUserBundle).getWidth)
-    val loadForwardQuery = Flipped(new LoadForwardQueryIO)
+    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
   
 }
