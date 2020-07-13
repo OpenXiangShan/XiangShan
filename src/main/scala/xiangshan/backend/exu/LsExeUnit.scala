@@ -182,8 +182,8 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   val expRedirect = io.redirect.valid && io.redirect.bits.isException
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
   for(i <- 0 until 8){
-    when(expRedirect || brRedirect && stqData(i).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(i)){
-      stqValid(i) := false.B
+    when((i.U >= stqCommited) && (expRedirect || brRedirect && stqData(stqPtr(i)).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(stqPtr(i)))){
+      stqValid(stqPtr(i)) := false.B
     }
     XSDebug("sptrtable: id %d ptr %d valid  %d\n", i.U, stqPtr(i), stqValid(stqPtr(i)))
   }
