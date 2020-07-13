@@ -11,7 +11,8 @@ IMAGE ?= temp
 
 # remote machine with high frequency to speedup verilog generation
 REMOTE ?= localhost
-REMOTE_PREFIX ?= /nfs/24/$(abspath .)/
+REMOTE_PREFIX ?= /nfs/24
+REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 
 .DEFAULT_GOAL = verilog
 
@@ -48,7 +49,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 ifeq ($(REMOTE),localhost)
 	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)"
+	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)"
 endif
 
 
@@ -103,13 +104,12 @@ SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
 # use 'emu -h' to see more details
 B ?= 0
 E ?= -1
-V ?= ALL
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)
+	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && $(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)"
+	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(SEED) -b $(B) -e $(E)"
 endif
 
 cache:

@@ -26,7 +26,7 @@ class Emulator {
   // emu control variable
   uint32_t seed;
   uint64_t max_cycles, cycles;
-  uint64_t log_begin, log_end, log_level;
+  uint64_t log_begin, log_end;
 
   std::vector<const char *> parse_args(int argc, const char *argv[]);
 
@@ -71,7 +71,7 @@ class Emulator {
     image(nullptr),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0),
-    log_begin(0), log_end(-1), log_level(LOG_ALL)
+    log_begin(0), log_end(-1)
   {
     // init emu
     auto args = parse_args(argc, argv);
@@ -84,7 +84,6 @@ class Emulator {
     // set log time range and log level
     dut_ptr->io_logCtrl_log_begin = log_begin;
     dut_ptr->io_logCtrl_log_end = log_end;
-    dut_ptr->io_logCtrl_log_level = log_level;
 
     // init ram
     extern void init_ram(const char *img);
@@ -132,7 +131,7 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 100;
+    const int stuck_limit = 500;
     
     static uint32_t wdst[DIFFTEST_WIDTH];
     static uint64_t wdata[DIFFTEST_WIDTH];

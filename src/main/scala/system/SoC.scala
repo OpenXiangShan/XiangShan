@@ -10,9 +10,9 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.{XSConfig, XSCore}
 
 trait HasSoCParameter {
-  val EnableILA = true
-  val HasL2cache = true
-  val HasPrefetch = true
+  val EnableILA = false
+  val HasL2cache = false
+  val HasPrefetch = false
 }
 
 class ILABundle extends Bundle {}
