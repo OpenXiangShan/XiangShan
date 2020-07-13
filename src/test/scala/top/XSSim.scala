@@ -82,7 +82,7 @@ class XSSimTop extends Module {
   BoringUtils.addSink(difftest.scause, "difftestScause")
   io.difftest := difftest
 
-  val logEnable = (GTimer() >= io.logCtrl.log_begin) && (GTimer() <= io.logCtrl.log_end)
+  val logEnable = (GTimer() >= io.logCtrl.log_begin) && (GTimer() < io.logCtrl.log_end)
   BoringUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
 }
 
