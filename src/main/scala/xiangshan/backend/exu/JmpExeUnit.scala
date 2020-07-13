@@ -37,7 +37,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.data := csrOut
   csrExuOut.redirectValid := csr.io.redirectValid
   csrExuOut.redirect.brTag := io.in.bits.uop.brTag
-  csrExuOut.redirect.isException := true.B
+  csrExuOut.redirect.isException := false.B
   csrExuOut.redirect.roqIdx := io.in.bits.uop.roqIdx
   csrExuOut.redirect.freelistAllocPtr := io.in.bits.uop.freelistAllocPtr
   csrExuOut.redirect.target := csr.io.redirect.target
