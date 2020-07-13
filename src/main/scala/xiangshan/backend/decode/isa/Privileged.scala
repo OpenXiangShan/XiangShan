@@ -3,6 +3,7 @@ package xiangshan.backend.decode.isa
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
+import xiangshan.backend._
 import xiangshan.backend.decode.HasInstrType
 
 
@@ -15,5 +16,14 @@ object Privileged extends HasInstrType {
   def WFI     = BitPat("b0001000_00101_00000_000_00000_1110011") 
 
   // fixme: add privilege inst
-  val table = Array()
+  val table = Array(
+    ECALL          -> List(InstrI, FuType.csr, CSROpType.jmp),
+    MRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
+    SRET           -> List(InstrI, FuType.csr, CSROpType.jmp)
+//    SFANCE_VMA     -> List(InstrR, FuType.mou, MOUOpType.sfence_vma),
+//    FENCE          -> List(InstrS, FuType.alu, ALUOpType.add), // nop    InstrS -> !wen
+//    WFI            -> List(InstrI, FuType.alu, ALUOpType.add) // nop
+    // FENCE          -> List(InstrB, FuType.mou, MOUOpType.fencei)
+
+  )
 }

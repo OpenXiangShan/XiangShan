@@ -9,6 +9,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
+import xiangshan.utils.XSDebug
 
 trait HasCSRConst {
   // User Trap Setup
@@ -159,6 +160,8 @@ class FpuCsrIO extends XSBundle {
 
 class CSRIO extends FunctionUnitIO {
   val cfIn = Input(new CtrlFlow)
+  val redirect = Output(new Redirect)
+  val redirectValid = Output(Bool())
   val fpu_csr = Flipped(new FpuCsrIO)
   // for exception check
   val instrValid = Input(Bool())
@@ -626,8 +629,25 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   val retTarget = Wire(UInt(VAddrBits.W))
   val trapTarget = Wire(UInt(VAddrBits.W))
-//  io.redirect.valid := (valid && func === CSROpType.jmp) || raiseExceptionIntr || resetSatp
-//  io.redirect.target := Mux(resetSatp, io.cfIn.pnpc, Mux(raiseExceptionIntr, trapTarget, retTarget))
+  io.redirect := DontCare
+  io.redirectValid := (valid && func === CSROpType.jmp) || raiseExceptionIntr || resetSatp
+  //TODO: use pred pc instead pc+4
+  io.redirect.target := Mux(
+    resetSatp,
+    io.cfIn.pc+4.U,
+    Mux(
+      raiseExceptionIntr,
+      trapTarget,
+      retTarget
+    )
+  )
+
+  XSDebug(
+    io.redirectValid,
+    "redirect to %x, pc=%x\n",
+    io.redirect.target,
+    io.cfIn.pc
+  )
 
 //  Debug(){
 //    when(raiseExceptionIntr){

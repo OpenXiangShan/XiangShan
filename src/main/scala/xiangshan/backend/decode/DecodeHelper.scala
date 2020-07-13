@@ -40,6 +40,7 @@ object Instructions extends HasInstrType with HasXSParameter {
     RVIInstr.table ++
       XSTrap.table ++
       RVZicsrInstr.table ++
+      Privileged.table ++
       (if (HasMExtension) RVMInstr.table else Nil) // ++
 //    (if (HasCExtension) RVCInstr.table else Nil) ++
 //    (if (HasFPU) RVFInstr.table ++ RVDInstr.table else Nil) ++

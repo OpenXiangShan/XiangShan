@@ -35,8 +35,12 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val csrExuOut = Wire(new ExuOutput)
   csrExuOut.uop := io.in.bits.uop
   csrExuOut.data := csrOut
-  csrExuOut.redirectValid := false.B
-  csrExuOut.redirect := DontCare
+  csrExuOut.redirectValid := csr.io.redirectValid
+  csrExuOut.redirect.brTag := io.in.bits.uop.brTag
+  csrExuOut.redirect.isException := true.B
+  csrExuOut.redirect.roqIdx := io.in.bits.uop.roqIdx
+  csrExuOut.redirect.freelistAllocPtr := io.in.bits.uop.freelistAllocPtr
+  csrExuOut.redirect.target := csr.io.redirect.target
   csrExuOut.debug := DontCare
 
   jmp.io.in.bits := io.in.bits
