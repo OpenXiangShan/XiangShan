@@ -207,15 +207,25 @@ class BPUStage2 extends XSModule {
 
   // flush Stage2 when Stage3 or banckend redirects
   val flushS2 = BoolStopWatch(io.flush, io.in.fire(), startHighPriority = true)
-  io.out.valid := !io.flush && !flushS2 && RegNext(io.in.fire())
-  io.in.ready := !io.out.valid || io.out.fire()
+  val inLatch = RegInit(0.U.asTypeOf(io.in.bits))
+  when (io.in.fire()) { inLatch := io.in.bits }
+  val validLatch = RegInit(false.B)
+  when (io.in.fire()) {
+    validLatch := !io.flush
+  }.elsewhen (io.out.fire()) {
+    validLatch := false.B
+  }
+
+  io.out.valid := !io.flush && !flushS2 && validLatch
+  io.in.ready := !validLatch || io.out.fire()
 
   // do nothing
-  io.out.bits := RegEnable(io.in.bits, io.in.fire())
+  io.out.bits := inLatch
 
   // debug info
   XSDebug(true.B, "[BPUS2]in:(%d %d) pc=%x out:(%d %d) pc=%x\n",
     io.in.valid, io.in.ready, io.in.bits.pc, io.out.valid, io.out.ready, io.out.bits.pc)
+  XSDebug(true.B, "[BPUS2]validLatch=%d pc=%x\n", validLatch, inLatch.pc)
   XSDebug(io.flush, "[BPUS2]flush!!!\n")
 }
 
@@ -344,7 +354,7 @@ class BPUStage3 extends XSModule {
     io.out.valid, inLatch.pc, io.out.bits.redirect, io.predecode.bits.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
   XSDebug(true.B, "[BPUS3]flushS3=%d\n", flushS3)
   XSDebug(true.B, "[BPUS3]validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
-  XSDebug(true.B, "[BPUS3]brIdx=%b brTakenIdx=%b brNTakenIdx=%b jalIdx=%d jalrIdx=%d callIdx=%d retIdx=%b\n",
+  XSDebug(true.B, "[BPUS3]brIdx=%b brTakenIdx=%b brNTakenIdx=%b jalIdx=%b jalrIdx=%b callIdx=%b retIdx=%b\n",
     brIdx, brTakenIdx, brNotTakenIdx, jalIdx, jalrIdx, callIdx, retIdx)
 
   // BPU's TEMP Perf Cnt

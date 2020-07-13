@@ -172,8 +172,8 @@ class IFU extends XSModule with HasIFUConst
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     if(EnableBPU){
       io.fetchPacket.bits.mask := Mux( if4_tage_taken,
-        (Fill(FetchWidth*2, 1.U(1.W)) & Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt) << if4_pc(2+log2Up(FetchWidth)-1, 1),
-        Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
+        (Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt))/* << if4_pc(2+log2Up(FetchWidth)-1, 1)*/,
+        Fill(FetchWidth*2, 1.U(1.W))// << if4_pc(2+log2Up(FetchWidth)-1, 1)
       )
     }
     else{
