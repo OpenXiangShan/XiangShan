@@ -131,7 +131,7 @@ class Emulator {
     uint32_t lasttime = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
-    const int stuck_limit = 100;
+    const int stuck_limit = 500;
     
     static uint32_t wdst[DIFFTEST_WIDTH];
     static uint64_t wdata[DIFFTEST_WIDTH];
