@@ -22,7 +22,6 @@ trait HasXSParameter {
   val AddrBits = 64 // AddrBits is used in some cases
   val VAddrBits = 39 // VAddrBits is Virtual Memory addr bits
   val PAddrBits = 32 // PAddrBits is Phyical Memory addr bits
-  val L1CacheLineSize = 512
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8

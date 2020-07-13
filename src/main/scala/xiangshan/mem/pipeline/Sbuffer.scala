@@ -19,9 +19,8 @@ class SbufferUserBundle extends XSBundle with HasMEMConst {
 class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(new SimpleBusUC(addrBits = PAddrBits, userBits = (new SbufferUserBundle).getWidth)))
-    val dcache = new SimpleBusUC(dataBits = L1CacheLineSize, addrBits = PAddrBits, userBits = (new SbufferUserBundle).getWidth)
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val dcache = new SimpleBusUC(userBits = (new SbufferUserBundle).getWidth)
+    val loadForwardQuery = Flipped(new LoadForwardQueryIO)
   })
-  
 }
   
