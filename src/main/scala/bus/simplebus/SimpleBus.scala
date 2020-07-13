@@ -29,12 +29,12 @@ object SimpleBusCmd {
   def apply() = UInt(4.W)
 }
 
-class SimpleBusReqBundle(val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+class SimpleBusReqBundle(val dataBits: Int = DataBits, val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
   val addr = Output(UInt(addrBits.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
-  val wmask = Output(UInt((DataBits / 8).W))
-  val wdata = Output(UInt(DataBits.W))
+  val wmask = Output(UInt((dataBits / 8).W))
+  val wdata = Output(UInt(dataBits.W))
   val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else None
 
   override def toPrintable: Printable = {
@@ -61,9 +61,9 @@ class SimpleBusReqBundle(val userBits: Int = 0, val addrBits: Int = 32) extends 
   def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
-class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
+class SimpleBusRespBundle(val dataBits: Int = DataBits, val userBits: Int = 0) extends SimpleBusBundle {
   val cmd = Output(SimpleBusCmd())
-  val rdata = Output(UInt(DataBits.W))
+  val rdata = Output(UInt(dataBits.W))
   val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else None
 
   override def toPrintable: Printable = p"rdata = ${Hexadecimal(rdata)}, cmd = ${cmd}"
@@ -76,9 +76,9 @@ class SimpleBusRespBundle(val userBits: Int = 0) extends SimpleBusBundle {
 }
 
 // Uncache
-class SimpleBusUC(val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
-  val req = Decoupled(new SimpleBusReqBundle(userBits, addrBits))
-  val resp = Flipped(Decoupled(new SimpleBusRespBundle(userBits)))
+class SimpleBusUC(val dataBits: Int = DataBits, val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+  val req = Decoupled(new SimpleBusReqBundle(dataBits, userBits, addrBits))
+  val resp = Flipped(Decoupled(new SimpleBusRespBundle(dataBits, userBits)))
 
   def isWrite() = req.valid && req.bits.isWrite()
   def isRead()  = req.valid && req.bits.isRead()

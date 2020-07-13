@@ -26,8 +26,8 @@ class DcacheUserBundle extends XSBundle with HasMEMConst {
 
 class DcacheIO extends XSBundle with HasMEMConst {
   val load = Vec(LoadPipelineWidth, Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth)))
-  val store = Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth))
-  val refill = Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth))
+  val store = Flipped(new SimpleBusUC(dataBits = L1CacheLineSize, addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth))
+  val refill = Flipped(new SimpleBusUC(dataBits = L1CacheLineSize, addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth))
   val tlbload = Vec(LoadPipelineWidth, Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth))) // dcache controls 2 dtlb ports
 //   val dmem = TODO
 }
