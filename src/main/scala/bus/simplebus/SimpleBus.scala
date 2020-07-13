@@ -29,7 +29,7 @@ object SimpleBusCmd {
   def apply() = UInt(4.W)
 }
 
-class SimpleBusReqBundle(val dataBits: Int = 64, val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+class SimpleBusReqBundle(val dataBits: Int = DataBits, val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
   val addr = Output(UInt(addrBits.W))
   val size = Output(UInt(3.W))
   val cmd = Output(SimpleBusCmd())
@@ -61,7 +61,7 @@ class SimpleBusReqBundle(val dataBits: Int = 64, val userBits: Int = 0, val addr
   def isPrefetch() = cmd === SimpleBusCmd.prefetch
 }
 
-class SimpleBusRespBundle(val dataBits: Int = 64, val userBits: Int = 0) extends SimpleBusBundle {
+class SimpleBusRespBundle(val dataBits: Int = DataBits, val userBits: Int = 0) extends SimpleBusBundle {
   val cmd = Output(SimpleBusCmd())
   val rdata = Output(UInt(dataBits.W))
   val user = if (userBits > 0) Some(Output(UInt(userBits.W))) else None
@@ -76,7 +76,7 @@ class SimpleBusRespBundle(val dataBits: Int = 64, val userBits: Int = 0) extends
 }
 
 // Uncache
-class SimpleBusUC(val dataBits: Int = 64, val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
+class SimpleBusUC(val dataBits: Int = DataBits, val userBits: Int = 0, val addrBits: Int = 32) extends SimpleBusBundle {
   val req = Decoupled(new SimpleBusReqBundle(dataBits, userBits, addrBits))
   val resp = Flipped(Decoupled(new SimpleBusRespBundle(dataBits, userBits)))
 
