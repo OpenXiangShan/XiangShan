@@ -47,7 +47,7 @@ class IFU extends XSModule with HasIFUConst
     //-------------------------
     //local
     val if1_npc = WireInit(0.U(VAddrBits.W))
-    val if1_valid = !reset.asBool  && (GTimer() > 500.U)//TODO:this is ugly
+    val if1_valid = !reset.asBool 
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
@@ -61,8 +61,6 @@ class IFU extends XSModule with HasIFUConst
     when(RegNext(reset.asBool) && !reset.asBool){
     //when((GTimer() === 501.U)){ //TODO:this is ugly
       XSDebug("RESET....\n")
-      if1_npc := resetVector.U(VAddrBits.W)
-    } .elsewhen(GTimer() === 501.U){ //TODO: this may cause bug
       if1_npc := resetVector.U(VAddrBits.W)
     } .otherwise{
       if1_npc := if2_snpc
@@ -169,7 +167,7 @@ class IFU extends XSModule with HasIFUConst
 
     //Output -> iBuffer
     //io.fetchPacket <> DontCare
-    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid)
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     if(EnableBPU){
@@ -210,7 +208,7 @@ class IFU extends XSModule with HasIFUConst
 
     bpu.io.redirectInfo := io.redirectInfo
 
-    io.icacheResp.ready := io.fetchPacket.ready 
+    io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }
 
