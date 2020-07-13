@@ -67,7 +67,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.hist := uop.cf.hist
   io.out.bits.redirect.tageMeta := uop.cf.tageMeta
   io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
-  io.out.bits.redirect.btbVictimWay := uop.cf.btbVictimWay
+  // io.out.bits.redirect.btbVictimWay := uop.cf.btbVictimWay
   io.out.bits.redirect.btbPredCtr := uop.cf.btbPredCtr
   io.out.bits.redirect.btbHitWay := uop.cf.btbHitWay
   io.out.bits.redirect.rasSp := uop.cf.rasSp

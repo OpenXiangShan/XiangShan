@@ -182,13 +182,13 @@ class IFU extends XSModule with HasIFUConst
     io.icacheReq.bits.flush := needflush
 
     //Output -> iBuffer
-    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) //&& (GTimer() > 500.U)
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()   //if4_miss_pred should not disable out valid
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     if(EnableBPU){
       io.fetchPacket.bits.mask := Mux( if4_tage_taken,
-        Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt)))).asUInt ,
-        Fill(FetchWidth*2, 1.U(1.W))
+        (Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt))/* << if4_pc(2+log2Up(FetchWidth)-1, 1)*/,
+        Fill(FetchWidth*2, 1.U(1.W))// << if4_pc(2+log2Up(FetchWidth)-1, 1)
       )
     }
     else{
@@ -221,7 +221,7 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.redirectInfo := io.redirectInfo
     
     
-    io.icacheResp.ready := io.fetchPacket.ready //&& (GTimer() > 500.U)
+    io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }
 

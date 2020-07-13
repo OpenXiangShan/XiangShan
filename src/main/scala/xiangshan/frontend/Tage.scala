@@ -368,7 +368,7 @@ class Tage extends TageModule {
       tables(i).io.update.u(w) := updateU(i)(w)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.pc := io.redirectInfo.redirect.pc - io.redirectInfo.redirect.fetchIdx << 2.U
+    tables(i).io.update.pc := io.redirectInfo.redirect.pc - (io.redirectInfo.redirect.fetchIdx << 2.U)
     tables(i).io.update.hist := io.redirectInfo.redirect.hist
   }
 

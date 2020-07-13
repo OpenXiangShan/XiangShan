@@ -28,7 +28,7 @@ trait HasXSParameter {
   val FetchWidth = 8
   val PredictWidth = FetchWidth * 2
   val EnableBPU = true
-  val EnableBPD = true // enable backing predictor(like Tage) in BPUStage3
+  val EnableBPD = false // enable backing predictor(like Tage) in BPUStage3
   val HistoryLength = 64
   val BtbSize = 256
   // val BtbWays = 4
