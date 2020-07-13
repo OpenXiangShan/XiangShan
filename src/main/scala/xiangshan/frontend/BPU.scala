@@ -346,6 +346,13 @@ class BPUStage3 extends XSModule {
   XSDebug(true.B, "[BPUS3]validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
   XSDebug(true.B, "[BPUS3]brIdx=%b brTakenIdx=%b brNTakenIdx=%b jalIdx=%d jalrIdx=%d callIdx=%d retIdx=%b\n",
     brIdx, brTakenIdx, brNotTakenIdx, jalIdx, jalrIdx, callIdx, retIdx)
+
+  // BPU's TEMP Perf Cnt
+  BoringUtils.addSource(io.out.valid, "MbpS3Cnt")
+  BoringUtils.addSource(io.out.valid && io.out.bits.redirect, "MbpS3TageRed")
+  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool), "MbpS3TageRedDir")
+  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect 
+              && jmpIdx.orR.asBool && (io.out.bits.target =/= inLatch.btbPred.bits.target)), "MbpS3TageRedTar")
 }
 
 class BPU extends XSModule {
@@ -387,17 +394,21 @@ class BPU extends XSModule {
 
   // TODO: temp and ugly code, when perf counters is added( may after adding CSR), please mv the below counter
   val bpuPerfCntList = List(
-    "MbpInstr",
-    "MbpRight",
-    "MbpWrong",
-    "MbpBRight",
-    "MbpBWrong",
-    "MbpJRight",
-    "MbpJWrong",
-    "MbpIRight",
-    "MbpIWrong",
-    "MbpRRight",
-    "MbpRWrong"
+    ("MbpInstr","         "),
+    ("MbpRight","         "),
+    ("MbpWrong","         "),
+    ("MbpBRight","        "),
+    ("MbpBWrong","        "),
+    ("MbpJRight","        "),
+    ("MbpJWrong","        "),
+    ("MbpIRight","        "),
+    ("MbpIWrong","        "),
+    ("MbpRRight","        "),
+    ("MbpRWrong","        "),
+    ("MbpS3Cnt","         "),
+    ("MbpS3TageRed","     "),
+    ("MbpS3TageRedDir","  "),
+    ("MbpS3TageRedTar","  ")
   )
 
   val bpuPerfCnts = List.fill(bpuPerfCntList.length)(RegInit(0.U(XLEN.W)))
@@ -405,7 +416,7 @@ class BPU extends XSModule {
   (bpuPerfCnts zip bpuPerfCntConds) map { case (cnt, cond) => { when (cond) { cnt := cnt + 1.U }}}
 
   for(i <- bpuPerfCntList.indices) {
-    BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i))
+    BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i)._1)
   }
 
   val xsTrap = WireInit(false.B)
@@ -415,7 +426,7 @@ class BPU extends XSModule {
     when (xsTrap) {
       printf("=================BPU's PerfCnt================\n")
       for(i <- bpuPerfCntList.indices) {
-        printf(bpuPerfCntList(i) + " <- " + "%d\n", bpuPerfCnts(i))
+        printf(bpuPerfCntList(i)._1 + bpuPerfCntList(i)._2 + " <- " + "%d\n", bpuPerfCnts(i))
       }
     }
   // }
