@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.utils._
-
+import chisel3.util.experimental.BoringUtils
 
 class BrqPtr extends XSBundle {
 
@@ -222,4 +222,16 @@ class Brq extends XSModule {
 
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
   XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)} flptr:${io.redirect.bits.freelistAllocPtr}\n")
+
+  BoringUtils.addSource(io.out.fire(), "MbpInstr")
+  BoringUtils.addSource(io.out.fire() && !commitEntry.misPred, "MbpRight")
+  BoringUtils.addSource(io.out.fire() && commitEntry.misPred, "MbpWrong")
+  BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B, "MbpBRight")
+  BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B, "MbpBWrong")
+  BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J, "MbpJRight")
+  BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J, "MbpJWrong")
+  BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I, "MbpIRight")
+  BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I, "MbpIWrong")
+  BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R, "MbpRRight")
+  BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R, "MbpRWrong")
 }
