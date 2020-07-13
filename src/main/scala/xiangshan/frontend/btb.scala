@@ -201,6 +201,8 @@ class BTB extends XSModule {
         btbData(w)(b).io.w.req.bits.setIdx := updateBankIdx
         btbData(w)(b).io.w.req.bits.waymask.map(_ := updateWaymask)
         btbData(w)(b).io.w.req.bits.data := btbDataWrite
+        XSDebug(btbWriteValid, "write btb: setIdx=%x meta.tag=%x updateWaymask=%d target=%x _type=%b predCtr=%b\n",
+          updateBankIdx, btbMetaWrite.tag, updateWaymask, btbDataWrite.target, btbDataWrite._type, btbDataWrite.pred)
       }.otherwise {
         btbMeta(w)(b).io.w.req.valid := false.B
         btbMeta(w)(b).io.w.req.bits.setIdx := DontCare
@@ -209,6 +211,20 @@ class BTB extends XSModule {
         btbData(w)(b).io.w.req.bits.setIdx := DontCare
         btbData(w)(b).io.w.req.bits.waymask.map(_ := 0.U)
         btbData(w)(b).io.w.req.bits.data := DontCare
+      }
+    }
+  }
+
+  // write and read bypass
+  for ( w <- 0 until BtbWays) {
+    for (b <- 0 until BtbBanks) {
+      when (RegNext(updateBank) === btbAddr.getBank(io.in.pcLatch) && RegNext(updateBankIdx) === btbAddr.getBankIdx(io.in.pcLatch)) {
+        when (RegNext(btbWriteValid && io.in.pc.valid) && w.U === RegNext(u.writeWay) && b.U === RegNext(updateBank)) {
+          metaRead(u.writeWay) := RegNext(btbMetaWrite)
+          (0 until FetchWidth).map(i => dataRead(RegNext(u.writeWay))(i.U) := Mux(RegNext(updateWaymask(i)), RegNext(btbDataWrite), btbData(w)(b).io.r.resp.data(i)))
+
+          XSDebug(true.B, "BTB write & read bypass hit!\n")
+        }
       }
     }
   }

@@ -210,8 +210,10 @@ class BPUStage2 extends XSModule {
   val inLatch = RegInit(0.U.asTypeOf(io.in.bits))
   when (io.in.fire()) { inLatch := io.in.bits }
   val validLatch = RegInit(false.B)
-  when (io.in.fire()) {
-    validLatch := !io.flush
+  when (io.flush) {
+    validLatch := false.B
+  }.elsewhen (io.in.fire()) {
+    validLatch := true.B
   }.elsewhen (io.out.fire()) {
     validLatch := false.B
   }
@@ -249,12 +251,14 @@ class BPUStage3 extends XSModule {
   val inLatch = RegInit(0.U.asTypeOf(io.in.bits))
   val validLatch = RegInit(false.B)
   when (io.in.fire()) { inLatch := io.in.bits }
-  when (io.in.fire()) {
-    validLatch := !io.flush
+  when (io.flush) {
+    validLatch := false.B
+  }.elsewhen (io.in.fire()) {
+    validLatch := true.B
   }.elsewhen (io.out.valid) {
     validLatch := false.B
   }
-  io.out.valid := validLatch && io.predecode.valid && !flushS3
+  io.out.valid := validLatch && io.predecode.valid && !flushS3 && !io.flush
   io.in.ready := !validLatch || io.out.valid
 
   // RAS
