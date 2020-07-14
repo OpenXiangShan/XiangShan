@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.utils.{XSDebug, XSInfo}
+import utils.{XSDebug, XSInfo}
 
 class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
   val io = IO(new Bundle() {

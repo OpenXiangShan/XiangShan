@@ -27,9 +27,8 @@ class Decoder extends XSModule with HasInstrType {
 
   // todo: remove this when fetch stage can decide if an instr is br/jmp
   io.out.cf.isBr := (instrType === InstrB ||
-                    (fuOpType === BRUOpType.jal && instrType === InstrJ && fuType === FuType.jmp) ||
-                    (fuOpType === BRUOpType.jalr && instrType === InstrI && fuType === FuType.jmp))
-
+                    (fuOpType === JumpOpType.jal && instrType === InstrJ && fuType === FuType.jmp) ||
+                    (fuOpType === JumpOpType.jalr && instrType === InstrI && fuType === FuType.jmp))
 //  val isRVC = instr(1, 0) =/= "b11".U
 //  val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
 //    ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable)
@@ -131,17 +130,6 @@ class Decoder extends XSModule with HasInstrType {
   // fix LUI
   io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type
-
-  val NoSpecList = Seq(
-//    FuType.csr,
-//    FuType.mou
-  )
-
-  val BlockList = Seq(
-  )
-
-  io.out.ctrl.noSpecExec := NoSpecList.map(j => io.out.ctrl.fuType === j).foldRight(false.B)((sum, i) => sum | i)
-  io.out.ctrl.isBlocked := DontCare
 //    (
 //      io.out.ctrl.fuType === (FuType.ldu | FuType.stu) && LSUOpType.isAtom(io.out.ctrl.fuOpType) ||
 //        BlockList.map(j => io.out.ctrl.fuType === j).foldRight(false.B)((sum, i) => sum | i)
@@ -171,6 +159,7 @@ class Decoder extends XSModule with HasInstrType {
   when(io.out.ctrl.isXSTrap){
     io.out.ctrl.lsrc1 := 10.U // a0
   }
+  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr
 //  io.isWFI := (instr === Priviledged.WFI) && io.in.valid
 
 }

@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.brq.BrqPtr
-import xiangshan.utils._
+import utils._
 
 class DecodeStage extends XSModule {
   val io = IO(new Bundle() {
@@ -36,18 +36,17 @@ class DecodeStage extends XSModule {
     decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
     // send CfCtrl without brTags and brMasks to brq
     io.toBrq(i).valid := io.in(i).valid && io.out(i).ready && decoders(i).io.out.cf.isBr
-    XSDebug(io.toBrq(i).valid && io.toBrq(i).ready, p"Branch instr detected. Sending it to BRQ.\n")
-    XSDebug(io.toBrq(i).valid && !io.toBrq(i).ready, p"Branch instr detected. BRQ full...waiting\n")
-    XSDebug(io.in(i).valid && !io.out(i).ready, p"DecBuf full...waiting\n")
     decoderToBrq(i).brTag := DontCare
     io.toBrq(i).bits := decoderToBrq(i)
     // if brq returns ready, then assert valid and send CfCtrl with bfTag and brMask to DecBuffer
     io.out(i).valid := io.toBrq(i).ready && io.in(i).valid
-    XSDebug(io.out(i).valid && decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending branch instr to DecBuf\n")
-    XSDebug(io.out(i).valid && !decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending non-branch instr to DecBuf\n")
     decoderToDecBuffer(i) := decoders(i).io.out
     decoderToDecBuffer(i).brTag := io.brTags(i)
     io.out(i).bits := decoderToDecBuffer(i)
+    XSDebug(
+      io.out(i).valid && io.out(i).bits.ctrl.noSpecExec,
+      p"noSpecExec inst: pc=${Hexadecimal(io.out(i).bits.cf.pc)}\n"
+    )
 
     // If an instruction i is received by DecBuffer,
     // then assert in(i).ready, waiting for new instructions

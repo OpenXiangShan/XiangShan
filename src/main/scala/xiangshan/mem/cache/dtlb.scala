@@ -3,7 +3,7 @@ package xiangshan.mem.cache
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._

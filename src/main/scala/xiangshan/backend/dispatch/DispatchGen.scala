@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 
 class DispatchGen(exuCfg: Array[ExuConfig]) extends XSModule {
   val io = IO(new Bundle() {

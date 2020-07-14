@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.rename.FreeListPtr
-import xiangshan.utils._
+import utils._
 import xiangshan.backend.fu.FunctionUnit._
 
 

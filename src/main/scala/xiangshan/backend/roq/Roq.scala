@@ -3,7 +3,7 @@ package xiangshan.backend.roq
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
@@ -46,6 +46,10 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val state = RegInit(s_idle)
 
   // Dispatch
+  val csrEnRoq = io.dp1Req.map(i => i.bits.ctrl.fuType === FuType.csr)
+  val hasCsr = RegInit(false.B)
+  XSError(!(hasCsr && state === s_idle), "CSR block should only happen in s_idle")
+  when(ringBufferEmpty){ hasCsr:= false.B }
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
@@ -54,8 +58,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       microOp(ringBufferHead+offset) := io.dp1Req(i).bits
       valid(ringBufferHead+offset) := true.B
       writebacked(ringBufferHead+offset) := false.B
+      when(csrEnRoq(i)){ hasCsr := true.B }
     }
-    io.dp1Req(i).ready := ringBufferAllowin && !valid(ringBufferHead+offset) && state === s_idle
+    io.dp1Req(i).ready := (ringBufferAllowin && !valid(ringBufferHead+offset) && state === s_idle) &&
+      (!csrEnRoq(i) || ringBufferEmpty) &&
+      !hasCsr
     io.roqIdxs(i) := ringBufferHeadExtended+offset
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
@@ -247,16 +254,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
     //TODO: skip insts that commited in the same cycle ahead of exception
-
-    //csr debug signals
-    val ModeM = WireInit(0x3.U)
-    BoringUtils.addSource(ModeM, "difftestMode")
-    BoringUtils.addSource(emptyCsr, "difftestMstatus")
-    BoringUtils.addSource(emptyCsr, "difftestSstatus") 
-    BoringUtils.addSource(emptyCsr, "difftestMepc")
-    BoringUtils.addSource(emptyCsr, "difftestSepc")
-    BoringUtils.addSource(emptyCsr, "difftestMcause")
-    BoringUtils.addSource(emptyCsr, "difftestScause")
 
     class Monitor extends BlackBox {
       val io = IO(new Bundle {

@@ -44,12 +44,13 @@ verilog: $(TOP_V)
 
 SIM_TOP = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 ifeq ($(REMOTE),localhost)
-	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)
+	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)"
+	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
 endif
 
 

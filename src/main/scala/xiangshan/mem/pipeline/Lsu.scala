@@ -3,7 +3,7 @@ package xiangshan.mem.pipeline
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
@@ -333,7 +333,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   (0 until StorePipelineWidth).map(i => {
     PipelineConnect(s2_out(i), s3_in(i), s3_out(i).fire(), s3_in(i).bits.uop.brTag.needFlush(io.redirect))
   })
-  
+
 //-------------------------------------------------------
 // ST Pipeline Stage 3
 // Write paddr to LSROQ

@@ -2,7 +2,7 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import xiangshan.utils.{XSDebug, XSInfo}
+import utils.{XSDebug, XSInfo}
 import xiangshan.{MicroOp, Redirect, XSBundle, XSModule}
 
 

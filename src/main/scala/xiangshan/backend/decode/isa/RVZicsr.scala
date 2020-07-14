@@ -3,6 +3,7 @@ package xiangshan.backend.decode.isa
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
+import xiangshan.backend._
 import xiangshan.backend.decode.HasInstrType
 
 object RVZicsrInstr extends HasInstrType {
@@ -13,6 +14,12 @@ object RVZicsrInstr extends HasInstrType {
   def CSRRSI  = BitPat("b????????????_?????_110_?????_1110011")
   def CSRRCI  = BitPat("b????????????_?????_111_?????_1110011")
 
-  // fixme: add rvzicsr inst
-  val table = Array()
+  val table = Array(
+    CSRRW          -> List(InstrI, FuType.csr, CSROpType.wrt),
+    CSRRS          -> List(InstrI, FuType.csr, CSROpType.set),
+    CSRRC          -> List(InstrI, FuType.csr, CSROpType.clr),
+    CSRRWI         -> List(InstrI, FuType.csr, CSROpType.wrti),
+    CSRRSI         -> List(InstrI, FuType.csr, CSROpType.seti),
+    CSRRCI         -> List(InstrI, FuType.csr, CSROpType.clri)
+  )
 }

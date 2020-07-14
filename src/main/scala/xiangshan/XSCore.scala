@@ -9,7 +9,7 @@ import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend.Frontend
 import xiangshan.mem._
-import xiangshan.utils._
+import utils._
 
 trait HasXSParameter {
   val XLEN = 64
@@ -110,7 +110,7 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class XSCore(implicit val p: XSConfig) extends XSModule {
+class XSCore(implicit p: XSConfig) extends XSModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
