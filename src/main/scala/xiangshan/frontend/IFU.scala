@@ -10,6 +10,7 @@ trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
   val groupAlign = log2Up(FetchWidth * 4)
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  def snpc(pc: UInt): UInt = pc + (1 << groupAlign).U
   
 }
 
@@ -30,8 +31,10 @@ class FakeBPU extends XSModule{
     val predecode = Flipped(ValidIO(new Predecode))
   })
 
-  io.btbOut.valid := false.B
+  io.btbOut.valid := true.B
   io.btbOut.bits <> DontCare
+  io.btbOut.bits.redirect := GTimer() === 1.U
+  io.btbOut.bits.target := "h080001234".U
   io.tageOut.valid := false.B
   io.tageOut.bits <> DontCare
 }
@@ -51,12 +54,12 @@ class IFU extends XSModule with HasIFUConst
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
-    val if2_snpc = if1_pc + 32.U //TODO: this is ugly
-    val if1_ready = if2_ready
+    val if2_snpc = snpc(if1_pc) //TODO: this is ugly
+    val needflush = WireInit(false.B)
 
     //pipe fire
-    val if1_fire = if1_valid && if1_ready 
-    val if1_pcUpdate = io.redirectInfo.flush() || if1_fire
+    val if1_fire = if1_valid && if2_ready 
+    val if1_pcUpdate = if1_fire || needflush
 
     when(RegNext(reset.asBool) && !reset.asBool){
     //when((GTimer() === 501.U)){ //TODO:this is ugly
@@ -99,7 +102,6 @@ class IFU extends XSModule with HasIFUConst
 
     io.icacheReq.valid := if2_valid
     io.icacheReq.bits.addr := if2_pc
-    io.icacheReq.bits.flush := io.redirectInfo.flush()
 
     when(if2_valid && if2_btb_taken)
     {
@@ -107,11 +109,10 @@ class IFU extends XSModule with HasIFUConst
     }
 
     XSDebug("[IF2]if2_valid:%d  ||  if2_pc:0x%x   || if3_ready:%d                                        ",if2_valid,if2_pc,if3_ready)
-    //XSDebug("[IF2-BPU-out]if2_btbTaken:%d || if2_btb_insMask:%b || if2_btb_target:0x%x \n",if2_btb_taken,if2_btb_insMask.asUInt,if2_btb_target)
     XSDebug(false,if2_fire,"------IF2->fire!!!")
     XSDebug(false,true.B,"\n")
     XSDebug("[IF2-Icache-Req] icache_in_valid:%d  icache_in_ready:%d\n",io.icacheReq.valid,io.icacheReq.ready)
-
+    XSDebug("[IF2-BPU-out]if2_btbTaken:%d || if2_btb_insMask:%b || if2_btb_target:0x%x \n",if2_btb_taken,if2_btb_insMask.asUInt,if2_btb_target)
     //-------------------------
     //      IF3  icache hit check
     //-------------------------
@@ -147,28 +148,42 @@ class IFU extends XSModule with HasIFUConst
     val if4_tage_target = bpu.io.tageOut.bits.target
     val if4_tage_taken = bpu.io.tageOut.valid && bpu.io.tageOut.bits.redirect
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
+    val if4_btb_missPre = WireInit(false.B)
+
     XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x   if4_npc:0x%x\n",if4_valid,if4_pc,if4_npc)
-    //XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
+    XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
     XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 
     when(if4_valid && io.icacheResp.fire() && if4_tage_taken)
     {
       if1_npc := if4_tage_target
     }
-    
+    //redirect: tage result differ btb
+    if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
+
+    when(!if4_tage_taken && if4_btb_taken){
+      if1_npc := snpc(if4_pc)
+    }
 
     //redirect: miss predict
     when(io.redirectInfo.flush()){
       if1_npc := io.redirectInfo.redirect.target
+    }
+    XSDebug(io.redirectInfo.flush(),"[IFU-REDIRECT] target:0x%x  \n",io.redirectInfo.redirect.target.asUInt)
+    
+  
+    //flush pipline
+    needflush := if4_btb_missPre || io.redirectInfo.flush()
+    when(needflush){
       if3_valid := false.B
       if4_valid := false.B
     }
-    XSDebug(io.redirectInfo.flush(),"[IFU-REDIRECT] target:0x%x  \n",io.redirectInfo.redirect.target.asUInt)
+    //flush ICache
+    io.icacheReq.bits.flush := needflush
 
     //Output -> iBuffer
-    //io.fetchPacket <> DontCare
-    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
-    io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
+    if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) //&& (GTimer() > 500.U)
+    io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()   //if4_miss_pred should not disable out valid
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     if(EnableBPU){
       io.fetchPacket.bits.mask := Mux( if4_tage_taken,
@@ -177,7 +192,6 @@ class IFU extends XSModule with HasIFUConst
       )
     }
     else{
-      //io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) << if4_pc(2+log2Up(FetchWidth)-1, 1)
       io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) //TODO : consider cross cacheline fetch
     }    
     io.fetchPacket.bits.pc := if4_pc
@@ -185,7 +199,6 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
     for(i <- 0 until FetchWidth){
-      //io.fetchPacket.bits.pnpc(i) := if1_npc
       when (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
@@ -205,10 +218,10 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
     bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) //TODO: consider RVC && consider cross cacheline fetch
-
     bpu.io.redirectInfo := io.redirectInfo
-
-    io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
+    
+    
+    io.icacheResp.ready := io.fetchPacket.ready //&& (GTimer() > 500.U)
 
 }
 
