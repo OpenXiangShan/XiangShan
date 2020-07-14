@@ -18,6 +18,7 @@ class Ibuffer extends XSModule {
     io.out(i).bits.exceptionVec := DontCare
     io.out(i).bits.intrVec := DontCare
     io.out(i).bits.isBr := DontCare
+    io.out(i).bits.crossPageIPFFix := DontCare
   }
 
   //mask initial

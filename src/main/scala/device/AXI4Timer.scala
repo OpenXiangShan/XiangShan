@@ -3,7 +3,6 @@ package device
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
 import bus.axi4._
 import utils._
 
@@ -17,7 +16,7 @@ class AXI4Timer(sim: Boolean = false) extends AXI4SlaveModule(new AXI4Lite, new 
 
   val clk = (if (!sim) 40 /* 40MHz / 1000000 */ else 10000)
   val freq = RegInit(clk.U(16.W))
-  val inc = RegInit(1.U(16.W))
+  val inc = RegInit(1000.U(16.W))
 
   val cnt = RegInit(0.U(16.W))
   val nextCnt = cnt + 1.U

@@ -24,7 +24,6 @@ class DecodeBuffer extends XSModule {
   ).asBool()
 
   val rightRdyVec = io.out.map(_.ready && leftCanIn)
-
   for( i <- 0 until RenameWidth){
     when(io.out(i).fire()){
       validVec(i) := false.B
@@ -36,17 +35,27 @@ class DecodeBuffer extends XSModule {
       validVec(i) := false.B
     }
 
+    val r = RegEnable(io.in(i).bits, io.in(i).fire())
     io.in(i).ready := rightRdyVec(i)
-    io.out(i).bits <> RegEnable(io.in(i).bits, io.in(i).fire())
-    io.out(i).valid := validVec(i) && !io.redirect.valid
+    io.out(i).bits <> r
+    if(i > 0 ){
+      io.out(i).valid := validVec(i) &&
+        !io.redirect.valid &&
+        Mux(r.ctrl.noSpecExec,
+          !ParallelOR(validVec.take(i)).asBool(),
+          !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec)).asBool()
+        )
+    } else {
+      require( i == 0)
+      io.out(i).valid := validVec(i) && !io.redirect.valid
+    }
   }
 
-  for(in<- io.in){
+  for(in <- io.in){
     XSInfo(p"in v:${in.valid} r:${in.ready} pc=${Hexadecimal(in.bits.cf.pc)}\n")
   }
   for(out <- io.out){
     XSInfo(p"out v:${out.valid} r:${out.ready} pc=${Hexadecimal(out.bits.cf.pc)}\n")
   }
 
-  XSDebug(p"validVec: ${Binary(validVec.asUInt())}\n")
 }

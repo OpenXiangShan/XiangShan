@@ -104,7 +104,7 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class XSCore(implicit val p: XSConfig) extends XSModule {
+class XSCore(implicit p: XSConfig) extends XSModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC

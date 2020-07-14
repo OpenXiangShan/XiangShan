@@ -56,27 +56,10 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
 }
 
 object Exu {
-  val jmpExeUnitCfg = ExuConfig("JmpExu", Array(jmpCfg, i2fCfg), enableBypass = false)
+  val jmpExeUnitCfg = ExuConfig("JmpExu", Array(jmpCfg, i2fCfg, csrCfg), enableBypass = false)
   val aluExeUnitCfg = ExuConfig("AluExu", Array(aluCfg), enableBypass = true)
   val mulExeUnitCfg = ExuConfig("MulExu", Array(mulCfg), enableBypass = false)
   val divExeUnitCfg = ExuConfig("DivExu",Array(divCfg), enableBypass = false)
   val mulDivExeUnitCfg = ExuConfig("MulDivExu", Array(mulCfg, divCfg), enableBypass = false)
   val lsuExeUnitCfg = ExuConfig("LsExu", Array(lsuCfg), enableBypass = false)
-}
-
-trait HasExeUnits{
-
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
-  val jmpExeUnit = Module(new JmpExeUnit)
-  val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
-  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
-//  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
-//  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
-//  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
-
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
-
-  exeUnits.foreach(_.io.dmem := DontCare)
-  exeUnits.foreach(_.io.scommit := DontCare)
 }

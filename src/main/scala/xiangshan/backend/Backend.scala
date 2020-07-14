@@ -21,7 +21,6 @@ import xiangshan.backend.roq.Roq
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
   */
 class Backend(implicit val p: XSConfig) extends XSModule
-  with HasExeUnits
   with NeedImpl {
   val io = IO(new Bundle {
     val dmem = new SimpleBusUC(addrBits = VAddrBits)
@@ -29,6 +28,18 @@ class Backend(implicit val p: XSConfig) extends XSModule
     val frontend = Flipped(new FrontendToBackendIO)
   })
 
+
+  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
+  val jmpExeUnit = Module(new JmpExeUnit)
+  val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
+  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
+  //  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
+  //  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
+  //  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
+  val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
+  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
+  exeUnits.foreach(_.io.dmem := DontCare)
+  exeUnits.foreach(_.io.scommit := DontCare)
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)

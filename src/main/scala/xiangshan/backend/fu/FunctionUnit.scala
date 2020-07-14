@@ -23,9 +23,23 @@ case class FuConfig
   hasRedirect: Boolean
 )
 
+class FunctionUnitIO extends XSBundle {
+  val in = Flipped(Decoupled(new Bundle {
+    val src1 = Output(UInt(XLEN.W))
+    val src2 = Output(UInt(XLEN.W))
+    val src3 = Output(UInt(XLEN.W))
+    val func = Output(FuOpType())
+  }))
+  val out = Decoupled(Output(UInt(XLEN.W)))
+}
+
 abstract class FunctionUnit(cfg: FuConfig) extends XSModule
 
 object FunctionUnit {
+
+  val csrCfg =
+    FuConfig(FuType.csr, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false)
+
   val jmpCfg =
     FuConfig(FuType.jmp, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = true)
 
