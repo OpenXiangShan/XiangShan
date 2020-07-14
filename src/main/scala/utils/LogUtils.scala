@@ -24,7 +24,7 @@ object XSLog {
   {
     val commonInfo = p"[$debugLevel][time=${GTimer()}] $name: "
     val logEnable = WireInit(false.B)
-    BoringUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+    ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
     if(generateLog){
       when (cond && logEnable) {
         printf((if (prefix) commonInfo else p"") + pable)
