@@ -42,18 +42,6 @@ void init_device(void);
 bool is_finished(void);
 int get_exit_code(void);
 
-// log
-enum {
-  LOG_ALL = 0,
-  LOG_DEBUG,
-  LOG_INFO,
-  LOG_WARN,
-  LOG_ERROR,
-  LOG_OFF
-};
-
-uint64_t getLogLevel(const char * str);
-
 void app_error(const char *fmt, ...);
 
 int monitor(void);

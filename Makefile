@@ -103,13 +103,12 @@ SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
 # use 'emu -h' to see more details
 B ?= 0
 E ?= -1
-V ?= ALL
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)
+	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && $(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)"
+	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && $(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)"
 endif
 
 cache:

@@ -3,8 +3,9 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= -1
+E ?= 0
 V ?= ALL
+#V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
 
 # ------------------------------------------------------------------
@@ -12,14 +13,15 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 | tee cpu.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=add-longlong $(EMU_ARGS) run 2>&1 | tee > cpu.log
 
 # ------------------------------------------------------------------
 # run different test sets
 # ------------------------------------------------------------------
 
 cputest:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) run 2>&1 | tee cpu.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2>&1 | tee > cpu.log
+	cat cpu.log | grep different
 
 # bputest:
 # 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
