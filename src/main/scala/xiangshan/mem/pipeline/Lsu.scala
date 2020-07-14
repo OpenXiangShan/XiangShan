@@ -94,7 +94,7 @@ class LsuIO extends XSBundle with HasMEMConst {
   val stin = Vec(2, Flipped(Decoupled(new StuReq)))
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
-  val dcache = Flipped(new DcacheIO)
+  val dcache = Flipped(new DCacheIO)
   val dtlb = Flipped(new DtlbIO)
   // lsroq
   // sbuffer

@@ -25,6 +25,8 @@ trait HasXSParameter {
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
+  val CacheLineSize = 512
+  val SbufferSize = 16
   val HasFPU = true
   val FetchWidth = 8
   val IBufSize = 64
