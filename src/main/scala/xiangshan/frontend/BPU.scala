@@ -10,11 +10,11 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
-  def tagBits = VAddrBits - idxBits - 2
+  def tagBits = VAddrBits - idxBits - 1
 
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
-  val offset = UInt(2.W)
+  val offset = UInt(1.W)
 
   def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
@@ -71,8 +71,8 @@ class BPUStage1 extends XSModule {
   val hist = Mux(updateGhr, newGhr, ghr)
 
   // Tage predictor
-  // val tage = Module(new FakeTAGE)
-  val tage = if(EnableBPD) Module(new Tage) else Module(new FakeTAGE)
+  val tage = Module(new FakeTAGE)
+  // val tage = if(EnableBPD) Module(new Tage) else Module(new FakeTAGE)
   tage.io.req.valid := io.in.pc.fire()
   tage.io.req.bits.pc := io.in.pc.bits
   tage.io.req.bits.hist := hist
@@ -84,32 +84,37 @@ class BPUStage1 extends XSModule {
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.fire())
 
   val r = io.redirectInfo.redirect
-  val updateFetchpc = r.pc - r.fetchIdx << 2.U
+  val updateFetchpc = r.pc - (r.fetchIdx << 2.U)
   // BTB
   val btb = Module(new BTB)
   btb.io.in.pc <> io.in.pc
   btb.io.in.pcLatch := pcLatch
+  // TODO: pass real mask in
+  btb.io.in.mask := "b1111111111111111".asUInt
   btb.io.redirectValid := io.redirectInfo.valid
   btb.io.flush := io.flush
 
-  btb.io.update.fetchPC := updateFetchpc
-  btb.io.update.fetchIdx := r.fetchIdx
+  // btb.io.update.fetchPC := updateFetchpc
+  // btb.io.update.fetchIdx := r.fetchIdx
+  btb.io.update.pc := r.pc
   btb.io.update.hit := r.btbHitWay
   btb.io.update.misPred := io.redirectInfo.misPred
-  btb.io.update.writeWay := r.btbVictimWay
+  // btb.io.update.writeWay := r.btbVictimWay
   btb.io.update.oldCtr := r.btbPredCtr
   btb.io.update.taken := r.taken
   btb.io.update.target := r.brTarget
   btb.io.update._type := r._type
+  // TODO: add RVC logic
+  btb.io.update.isRVC := DontCare
 
   val btbHit = btb.io.out.hit
   val btbTaken = btb.io.out.taken
   val btbTakenIdx = btb.io.out.takenIdx
   val btbTakenTarget = btb.io.out.target
-  val btbWriteWay = btb.io.out.writeWay
+  // val btbWriteWay = btb.io.out.writeWay
   val btbNotTakens = btb.io.out.notTakens
   val btbCtrs = VecInit(btb.io.out.dEntries.map(_.pred))
-  val btbValids = VecInit(btb.io.out.dEntries.map(_.valid))
+  val btbValids = btb.io.out.hits
   val btbTargets = VecInit(btb.io.out.dEntries.map(_.target))
   val btbTypes = VecInit(btb.io.out.dEntries.map(_._type))
 
@@ -122,7 +127,7 @@ class BPUStage1 extends XSModule {
   jbtac.io.flush := io.flush
 
   jbtac.io.update.fetchPC := updateFetchpc
-  jbtac.io.update.fetchIdx := r.fetchIdx
+  jbtac.io.update.fetchIdx := r.fetchIdx << 1
   jbtac.io.update.misPred := io.redirectInfo.misPred
   jbtac.io.update._type := r._type
   jbtac.io.update.target := r.target
@@ -165,7 +170,7 @@ class BPUStage1 extends XSModule {
   // io.s1OutPred.bits.instrValid := LowerMask(UIntToOH(btbTakenIdx), FetchWidth) & LowerMask(UIntToOH(jbtacHitIdx), FetchWidth)
   io.s1OutPred.bits.instrValid := Mux(io.s1OutPred.bits.redirect, LowerMask(LowestBit(brJumpIdx | indirectIdx, FetchWidth), FetchWidth), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
   io.s1OutPred.bits.target := Mux(brJumpIdx === LowestBit(brJumpIdx | indirectIdx, FetchWidth), btbTakenTarget, jbtacTarget)
-  io.s1OutPred.bits.btbVictimWay := btbWriteWay
+  // io.s1OutPred.bits.btbVictimWay := btbWriteWay
   io.s1OutPred.bits.predCtr := btbCtrs
   io.s1OutPred.bits.btbHitWay := btbHit
   io.s1OutPred.bits.rasSp := DontCare
@@ -277,7 +282,7 @@ class BPUStage3 extends XSModule {
     Mux(jmpIdx === 0.U, inLatch.pc + 32.U, // TODO: RVC
     PriorityMux(jmpIdx, inLatch.btb.targets))))
   io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
-  io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
+  // io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
   io.out.bits.tageMeta := inLatch.btbPred.bits.tageMeta
