@@ -87,8 +87,13 @@ class XSSimTop extends Module {
 }
 
 object TestMain extends App {
+  if (args.contains("--disable-log"))
+    XSLog.generateLog = false
+  else
+    XSLog.generateLog = true
+
   (new chisel3.stage.ChiselStage).execute(
-    args,
+    args.filterNot(_ == "--disable-log"),
     Seq(ChiselGeneratorAnnotation(() => new XSSimTop))
   )
 }

@@ -5,6 +5,8 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.HasXSParameter
 import xiangshan.utils.XSLogLevel.XSLogLevel
 
+import scala.io.StdIn
+
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
 
@@ -17,14 +19,18 @@ object XSLogLevel extends Enumeration {
 }
 
 object XSLog {
+  var generateLog: Boolean = false
   def apply(debugLevel: XSLogLevel)
            (prefix: Boolean, cond: Bool, pable: Printable)
-           (implicit name: String): Any = {
+           (implicit name: String): Any =
+  {
     val commonInfo = p"[$debugLevel][time=${GTimer()}] $name: "
     val logEnable = WireInit(false.B)
     BoringUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
-    when (cond && logEnable) {
-      printf((if (prefix) commonInfo else p"") + pable)
+    if(generateLog){
+      when (cond && logEnable) {
+        printf((if (prefix) commonInfo else p"") + pable)
+      }
     }
   }
 }
