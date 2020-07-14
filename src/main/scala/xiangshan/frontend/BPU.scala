@@ -152,8 +152,8 @@ class BPUStage1 extends XSModule {
   val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
   //val newTaken = Mux(io.redirectInfo.flush(), !(r._type === BTBtype.B && !r.taken), )
   newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r._type === BTBtype.B && !r.taken),
-            Mux(io.flush,                   Mux(io.s3Taken, io.s3RollBackHist << 1.U | 1.U, io.s3RollBackHist),
-            Mux(io.s1OutPred.bits.redirect, PriorityMux(brJumpIdx | indirectIdx, io.s1OutPred.bits.hist) << 1.U | 1.U,
+            Mux(io.flush,                   Mux(io.s3Taken, (io.s3RollBackHist << 1.U) | 1.U, io.s3RollBackHist),
+            Mux(io.s1OutPred.bits.redirect, (PriorityMux(brJumpIdx | indirectIdx, io.s1OutPred.bits.hist) << 1.U) | 1.U,
                                             io.s1OutPred.bits.hist(0) << PopCount(btbNotTakens))))
 
   // redirect based on BTB and JBTAC
@@ -318,13 +318,14 @@ class BPUStage3 extends XSModule {
   io.out.bits.rasTopCtr := rasTop.ctr
 
   // flush BPU and redirect when target differs from the target predicted in Stage1
-  io.out.bits.redirect := inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
-    inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target
+  io.out.bits.redirect := (if(EnableBPD) (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
+    inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target)
+    else false.B)
   io.flushBPU := io.out.bits.redirect && io.out.valid
 
   // speculative update RAS
   val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
-  rasWrite.retAddr := inLatch.pc + OHToUInt(callIdx) << 2.U + 4.U
+  rasWrite.retAddr := inLatch.pc + (OHToUInt(callIdx) << 2.U) + 4.U
   val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
   rasWrite.ctr := Mux(allocNewEntry, 1.U, rasTop.ctr + 1.U)
   when (io.out.valid) {
