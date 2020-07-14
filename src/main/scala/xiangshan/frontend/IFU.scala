@@ -122,6 +122,7 @@ class IFU extends XSModule with HasIFUConst
     val if3_npc = RegEnable(if1_npc,if2_fire)
     val if3_btb_target = RegEnable(if2_btb_target,if2_fire)
     val if3_btb_taken = RegEnable(if2_btb_taken,if2_fire)
+    val if3_btb_insMask = RegEnable(if2_btb_insMask, if2_fire)
 
     //next
     val if4_ready = WireInit(false.B)
@@ -145,6 +146,7 @@ class IFU extends XSModule with HasIFUConst
     val if4_npc = RegEnable(if3_npc,if3_fire)
     val if4_btb_target = RegEnable(if3_btb_target,if3_fire)
     val if4_btb_taken = RegEnable(if3_btb_taken,if3_fire)
+    val if4_btb_insMask = RegEnable(if3_btb_insMask, if3_fire)
     val if4_tage_target = bpu.io.tageOut.bits.target
     val if4_tage_taken = bpu.io.tageOut.valid && bpu.io.tageOut.bits.redirect
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
@@ -186,9 +188,9 @@ class IFU extends XSModule with HasIFUConst
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()   //if4_miss_pred should not disable out valid
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     if(EnableBPU){
-      io.fetchPacket.bits.mask := Mux( if4_tage_taken,
-        (Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt))/* << if4_pc(2+log2Up(FetchWidth)-1, 1)*/,
-        Fill(FetchWidth*2, 1.U(1.W))// << if4_pc(2+log2Up(FetchWidth)-1, 1)
+      io.fetchPacket.bits.mask := Mux(if4_tage_taken,(Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt)),
+        Mux(if4_btb_taken, Reverse(Cat(if4_btb_insMask.map(i => Fill(2, i.asUInt))).asUInt),
+        Fill(FetchWidth*2, 1.U(1.W)))
       )
     }
     else{
@@ -199,7 +201,10 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
     for(i <- 0 until FetchWidth){
-      when (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
+      //io.fetchPacket.bits.pnpc(i) := if1_npc
+      when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth))) {
+        io.fetchPacket.bits.pnpc(i) := if4_btb_target
+      }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
         io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) //use fetch PC
