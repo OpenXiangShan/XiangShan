@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.ExuConfig
-import xiangshan.utils._
+import utils._
 import xiangshan.backend.regfile.RfReadPort
 
 class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {

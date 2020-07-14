@@ -1,11 +1,9 @@
-package xiangshan.utils
+package utils
 
 import chisel3._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.HasXSParameter
-import xiangshan.utils.XSLogLevel.XSLogLevel
-
-import scala.io.StdIn
+import utils.XSLogLevel.XSLogLevel
 
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value

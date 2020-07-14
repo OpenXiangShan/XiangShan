@@ -8,7 +8,7 @@ import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend.Frontend
-import xiangshan.utils._
+import utils._
 
 trait HasXSParameter {
   val XLEN = 64

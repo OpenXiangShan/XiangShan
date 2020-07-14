@@ -1,11 +1,13 @@
-package xiangshan.utils
+package utils
 
 import chisel3._
-import xiangshan.XSConfig
+import chisel3.util._
+
+import noop.NOOPConfig
 
 object Debug {
-  def apply(flag: Boolean = XSConfig().EnableDebug, cond: Bool = true.B)(body: => Unit): Any =
-    if (flag) { when (cond) { body } }
+  def apply(flag: Boolean = NOOPConfig().EnableDebug, cond: Bool = true.B)(body: => Unit): Any =
+    if (flag) { when (cond && GTimer() > 100.U) { body } }
 }
 
 object ShowType {

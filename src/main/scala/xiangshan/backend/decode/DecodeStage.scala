@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.brq.BrqPtr
-import xiangshan.utils._
+import utils._
 
 class DecodeStage extends XSModule {
   val io = IO(new Bundle() {
