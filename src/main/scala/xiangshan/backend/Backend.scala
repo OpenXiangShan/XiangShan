@@ -67,6 +67,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   redirectInfo.misPred := !roq.io.redirect.valid && brq.io.redirect.valid
   redirectInfo.redirect := redirect.bits
 
+  var iqInfo = new StringBuilder
   val issueQueues = exeUnits.zipWithIndex.map({ case (eu, i) =>
     def needBypass(cfg: ExuConfig): Boolean = cfg.enableBypass
 
@@ -87,20 +88,22 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.numExist <> dispatch.io.numExist(i)
     iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
     iq.io.enqData <> dispatch.io.enqIQData(i)
-    val wuUnitsOut = exeUnits.filter(e => needWakeup(e.config)).map(_.io.out)
-    for (i <- iq.io.wakeUpPorts.indices) {
-      iq.io.wakeUpPorts(i).bits <> wuUnitsOut(i).bits
-      iq.io.wakeUpPorts(i).valid := wuUnitsOut(i).valid
+    for(
+      (wakeUpPort, exuOut) <-
+      iq.io.wakeUpPorts.zip(exeUnits.filter(e => needWakeup(e.config)).map(_.io.out))
+    ){
+      wakeUpPort.bits := exuOut.bits
+      wakeUpPort.valid := exuOut.valid
     }
-    println(
+    iqInfo ++= {
       s"[$i] ${eu.name} Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt" +
         s" Supported Function:[" +
         s"${
           eu.config.supportedFuncUnits.map(
             fu => FuType.functionNameMap(fu.fuType.litValue())).mkString(", "
           )
-        }]"
-    )
+        }]\n"
+    }
     eu.io.in <> iq.io.deq
     eu.io.redirect <> redirect
     iq
@@ -207,5 +210,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(debugArchReg, "difftestRegs")
   }
+
+  print(iqInfo)
 
 }
