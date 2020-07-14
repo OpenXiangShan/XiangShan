@@ -21,24 +21,31 @@ object CacheOp {
 
 class DcacheUserBundle extends XSBundle with HasMEMConst {
   val uop = Output(new MicroOp) //FIXME: opt data width
+  val mmio = Output(Bool())
+  // val tlbmiss = Output(Bool())
 }
 
 class DCacheLoadReq extends XSBundle
 {
   val paddr  = UInt(PAddrBits.W)
   val vaddr  = UInt(PAddrBits.W)
-  val data  = Bits(CacheLineSize.W)
+  val miss = Bool()
+  val user = new DcacheUserBundle
 }
 
 class DCacheStoreReq extends XSBundle
 {
   val paddr  = UInt(PAddrBits.W)
-  val data  = Bits(CacheLineSize.W)
-  val mask  = Bits((CacheLineSize/8).W)
+  val data  = UInt(CacheLineSize.W)
+  val mask  = UInt((CacheLineSize/8).W)
+  val miss = Bool()
+  val user = new DcacheUserBundle
 }
 
 class DCacheResp extends XSBundle {
-  val data = Bits(XLEN.W)
+  val paddr = UInt(PAddrBits.W)
+  val data = UInt(XLEN.W)
+  val user = new DcacheUserBundle
 }
 
 class DCacheLoadIO extends XSBundle
@@ -56,6 +63,7 @@ class DCacheStoreIO extends XSBundle
 class DCacheIO extends XSBundle with HasMEMConst {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
+  val redirect = Flipped(ValidIO(new Redirect))
 }
 
 class Dcache extends XSModule with NeedImpl{

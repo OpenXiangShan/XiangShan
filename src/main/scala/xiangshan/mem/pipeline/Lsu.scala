@@ -72,7 +72,7 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
 class LduReq extends XSBundle with HasMEMConst {
   val src1 = UInt(VAddrBits.W)
   val src2 = UInt(VAddrBits.W)
-  val func = UInt(6.W)
+  // val func = UInt(6.W)
   val data = UInt(XLEN.W)
   val uop = new MicroOp
   // val moqIdx = UInt(log2Up(LSRoqSize).W)
@@ -82,7 +82,7 @@ class LduReq extends XSBundle with HasMEMConst {
 class StuReq extends XSBundle with HasMEMConst {
   val src1 = UInt(VAddrBits.W)
   val src2 = UInt(VAddrBits.W)
-  val func = UInt(6.W)
+  // val func = UInt(6.W)
   val data = UInt(XLEN.W)
   val uop = new MicroOp
   // val moqIdx = UInt(log2Up(LSRoqSize).W)
@@ -150,20 +150,26 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   (0 until LoadPipelineWidth).map(i => {
     l2_out(i).bits := DontCare
     l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src2
-    // l2_out(i).bits.data := io.ldin(i).bits.data
-    l2_out(i).bits.func := io.ldin(i).bits.func
-    l2_out(i).bits.uop.cf.pc := io.ldin(i).bits.uop.cf.pc
-    l2_out(i).bits.uop.moqIdx := io.ldin(i).bits.uop.moqIdx
+    l2_out(i).bits.uop := io.ldin(i).bits.uop
     l2_out(i).valid := io.ldin(i).valid
   })
 
-  // send req to d$tag and dtlb
-  // (0 until LoadPipelineWidth).map(i => {
-  //   io.dmem.req(i).bits.vaddr := l2_out(i).bits.vaddr
-  //   io.dmem.req(i).bits.func := l2_out(i).bits.func
-  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.moqIdx)
-  //   io.dmem.req(i).valid := l2_out(i).valid
-  // } // TODO
+  // send req to dtlb
+  (0 until LoadPipelineWidth).map(i => {
+    io.dtlb.req(i).valid := l2_out(i).valid
+    io.dtlb.req(i).bits.vaddr := l2_out(i).bits.vaddr
+  })
+  
+  // send result to dcache
+  (0 until LoadPipelineWidth).map(i => {
+    io.dcache.load(i).req.valid := io.dtlb.resp(i).valid && !io.dtlb.resp(i).bits.miss
+    io.dcache.load(i).req.bits.vaddr := l2_out(i).bits.vaddr
+    io.dcache.load(i).req.bits.paddr := io.dtlb.resp(i).bits.paddr
+    io.dcache.load(i).req.bits.miss := io.dtlb.resp(i).bits.miss
+    io.dcache.load(i).req.bits.user.uop := l2_out(i).bits.uop
+  })
+
+  // TODO: TLB miss to load/store issue queue
 
 //-------------------------------------------------------
 // LD Pipeline Stage 3
@@ -180,12 +186,11 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   // result from dcache
   (0 until LoadPipelineWidth).map(i => {
     l4_out(i).bits := DontCare
-    // l4_out(i).bits.paddr := io.dmem.resp(i).bits.addr
-    // l4_out(i).bits.data := io.dmem.resp(i).bits.data
-    // l4_out(i).bits.func := io.dmem.resp(i).bits.user ...
-    // l4_out(i).bits.pc := io.dmem.resp(i).bits.user ...
-    // l4_out(i).moqIdx := io.dmem.resp(i).bits.user ...
-    // l4_out(i).valid := io.dmem(i).resp.valid
+    l4_out(i).bits.paddr := io.dcache.load(i).resp.bits.paddr
+    l4_out(i).bits.data := io.dcache.load(i).resp.bits.data
+    l4_out(i).bits.uop := io.dcache.load(i).resp.bits.user.uop
+    l4_out(i).bits.mmio := io.dcache.load(i).resp.bits.user.mmio
+    l4_out(i).valid := io.dcache.load(i).resp.valid
   })
 
   // Store addr forward match
@@ -201,7 +206,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     0.U // TODO
   }
 
-  // TODO: update forwardVec/forwardWmask accoring to store buffer
+  // TODO: update forwardVec/forwardWmask accoring to lsroq
   // forwardVec := VecInit(List.tabulate(storeQueueSize)(i => {
   //   i.U < storeHeadPtr && io.dmem.req.bits.addr(PAddrBits-1, log2Up(XLEN/8)) === storeQueue(i).paddr(PAddrBits-1, log2Up(XLEN/8)) && storeQueue(i).valid
   // }))
@@ -228,9 +233,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   //   }
   // })
 
-  // TODO: add brIdx
   (0 until LoadPipelineWidth).map(i => {
-    PipelineConnect(l4_out(i), l5_in(i), l5_out(i).fire(), io.redirect.valid)
+    PipelineConnect(l4_out(i), l5_in(i), l5_out(i).fire(), l5_in(i).bits.uop.brTag.needFlush(io.redirect))
   })
 
 //-------------------------------------------------------
@@ -241,15 +245,13 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
   (0 until LoadPipelineWidth).map(i => {
     // data merge
-    val rdata = Wire(UInt(XLEN.W))
-    rdata := DontCare // TODO
-    // val rdata = VecInit((0 until 8).map(j => {
-    //   Mux(l5_in(i).bits.forwardMask(j), 
-    //     l5_in(i).bits.forwardData(8*(j+1)-1, 8*j), 
-    //     l5_in(i).bits.data(8*(j+1)-1, 8*j)
-    //   )
-    // })).asUInt
-    val func = l5_in(i).bits.func
+    val rdata = VecInit((0 until 8).map(j => {
+      Mux(l5_in(i).bits.forwardMask(j), 
+        l5_in(i).bits.forwardData(8*(j+1)-1, 8*j), 
+        l5_in(i).bits.data(8*(j+1)-1, 8*j)
+      )
+    })).asUInt
+    val func = l5_in(i).bits.uop.ctrl.fuOpType
     val raddr = l5_in(i).bits.paddr
     val rdataSel = LookupTree(raddr(2, 0), List(
       "b000".U -> rdata(63, 0),
@@ -276,9 +278,15 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     // if hit, writeback result to CDB
     // val ldout = Vec(2, Decoupled(new ExuOutput))
     // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
-
+    io.out(i).bits.uop := l5_in(i).bits.uop
+    io.out(i).bits.data := rdataPartialLoad
+    io.out(i).bits.redirectValid := false.B
+    io.out(i).bits.redirect := DontCare
+    io.out(i).bits.debug.isMMIO := l5_in(i).bits.mmio
+    io.out(i).valid := l5_in(i).valid
 
     // writeback to LSROQ
+    // Current dcache use MSHR
   })
 
 //-------------------------------------------------------
@@ -295,30 +303,37 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   s3_out := DontCare
   s4_in := DontCare
   s4_out := DontCare
-
-//-------------------------------------------------------
-// ST Pipeline Stage 2
-// Generate addr, use addr to query DTLB
-//-------------------------------------------------------
-
-  // (0 until StorePipelineWidth).map(i => {
-  //   s2_out(i).bits := DontCare
-  //   s2_out(i).bits.vaddr := io.stin(i).bits.src1 + io.stin(i).bits.src2
-  //   s2_out(i).bits.data := io.stin(i).bits.data
-  //   s2_out(i).bits.func := io.stin(i).bits.func
-  //   s2_out(i).bits.pc := io.stin(i).bits.pc
-  //   s2_out(i).bits.moqIdx := io.stin(i).bits.moqIdx
-  //   s2_out(i).valid := io.stin(i).valid
-  // })
-
+  
+  //-------------------------------------------------------
+  // ST Pipeline Stage 2
+  // Generate addr, use addr to query DTLB
+  //-------------------------------------------------------
+  
   // send req to dtlb
-  // (0 until LoadPipelineWidth).map(i => {
-  //   io.dmem.req(i).bits.vaddr := l2_out(i).bits.vaddr
-  //   io.dmem.req(i).bits.func := l2_out(i).bits.func
-  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.moqIdx)
-  //   io.dmem.req(i).valid := l2_out(i).valid
-  // } // TODO
+  val saddr = VecInit((0 until StorePipelineWidth).map(i => {
+    io.stin(i).bits.src1 + io.stin(i).bits.src2
+  }))
 
+  (0 until StorePipelineWidth).map(i => {
+    io.dtlb.req(LoadPipelineWidth + i).bits.vaddr := saddr(i)
+    io.dtlb.req(LoadPipelineWidth + i).valid := io.stin(i).valid
+  })
+
+  (0 until StorePipelineWidth).map(i => {
+    s2_out(i).bits := DontCare
+    s2_out(i).bits.vaddr := saddr(i)
+    s2_out(i).bits.paddr := io.dtlb.resp(LoadPipelineWidth + i).bits.paddr
+    s2_out(i).bits.data := io.stin(i).bits.data
+    s2_out(i).bits.uop := io.stin(i).bits.uop
+    s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
+  })
+
+  //TODO: tlb miss to store issue queue
+
+  (0 until StorePipelineWidth).map(i => {
+    PipelineConnect(s2_out(i), s3_in(i), s3_out(i).fire(), s3_in(i).bits.uop.brTag.needFlush(io.redirect))
+  })
+  
 //-------------------------------------------------------
 // ST Pipeline Stage 3
 // Write paddr to LSROQ
@@ -349,9 +364,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     s3_out(i).bits.rollback := rollback
   })
 
-  // TODO: add brIdx
   (0 until StorePipelineWidth).map(i => {
-    PipelineConnect(s3_out(i), s4_in(i), s4_out(i).fire(), io.redirect.valid)
+    PipelineConnect(s3_out(i), s4_in(i), s4_out(i).fire(), s4_in(i).bits.uop.brTag.needFlush(io.redirect))
   })
 
 //-------------------------------------------------------
