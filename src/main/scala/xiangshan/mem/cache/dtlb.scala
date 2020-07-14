@@ -10,10 +10,19 @@ import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 
+class DtlbReq extends XSBundle with HasMEMConst {
+  val vaddr = UInt(VAddrBits.W)
+}
+
+class DtlbResp extends XSBundle with HasMEMConst {
+  val paddr = UInt(PAddrBits.W)
+  val miss = Bool()
+}
+
 class DtlbIO extends XSBundle with HasMEMConst {
-  val tlbload = Vec(LoadPipelineWidth, Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth)))
-  val tlbstore = Vec(LoadPipelineWidth, Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth)))
-//   val l2cache = TODO
+  val req = Vec(LoadPipelineWidth + StorePipelineWidth, Flipped(Valid(new DtlbReq)))
+  val resp = Vec(LoadPipelineWidth + StorePipelineWidth, Valid(new DtlbResp))
+  // val l2 = TODO
 }
 
 class Dtlb extends XSModule with NeedImpl{
