@@ -1,8 +1,7 @@
-package utils
+package xiangshan.utils
 
 import chisel3._
-import chisel3.util._
-import chisel3.internal.naming._  // can't use chisel3_ version because of compile order
+import chisel3.util._  // can't use chisel3_ version because of compile order
 
 class FlushableQueueIO[T <: Data](private val gen: T, entries: Int) extends QueueIO(gen, entries) {
   val flush = Input(Bool())

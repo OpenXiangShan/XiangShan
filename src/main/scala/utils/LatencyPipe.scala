@@ -1,6 +1,6 @@
 // See LICENSE.Berkeley for license details.
 
-package utils
+package xiangshan.utils
 
 import Chisel._
 
