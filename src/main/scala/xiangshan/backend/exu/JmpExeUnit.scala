@@ -4,7 +4,7 @@ import chisel3._
 import xiangshan.{ExuOutput, FuType, XSConfig}
 import xiangshan.backend.fu.{CSR, Jump}
 
-class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
+class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
 
   val jmp = Module(new Jump)
 
@@ -13,11 +13,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jmp.io.scommit := DontCare
   jmp.io.redirect := io.redirect
 
-  lazy val p = XSConfig(
-    FPGAPlatform = false
-  )
-
-  val csr = Module(new CSR()(p))
+  val csr = Module(new CSR)
   csr.io.cfIn := io.in.bits.uop.cf
   csr.io.fpu_csr := DontCare
   csr.io.instrValid := DontCare
