@@ -83,7 +83,10 @@ class XSSimTop extends Module {
   io.difftest := difftest
 
   val logEnable = (GTimer() >= io.logCtrl.log_begin) && (GTimer() < io.logCtrl.log_end)
-  BoringUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+  ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+
+  // Check and dispaly all source and sink connections
+  ExcitingUtils.checkAndDisplay()
 }
 
 object TestMain extends App {
