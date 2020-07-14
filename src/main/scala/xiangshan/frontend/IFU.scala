@@ -156,14 +156,14 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
     XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 
-    when(if4_valid && io.icacheResp.fire() && if4_tage_taken)
+    when(io.icacheResp.fire() && if4_tage_taken &&if4_valid)
     {
       if1_npc := if4_tage_target
     }
     //redirect: tage result differ btb
     if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
 
-    when(!if4_tage_taken && if4_btb_taken){
+    when(!if4_tage_taken && if4_btb_taken && if4_valid){
       if1_npc := snpc(if4_pc)
     }
 
@@ -175,7 +175,7 @@ class IFU extends XSModule with HasIFUConst
     
   
     //flush pipline
-    needflush := if4_btb_missPre || io.redirectInfo.flush()
+    needflush := (if4_valid && if4_btb_missPre) || io.redirectInfo.flush()
     when(needflush){
       if3_valid := false.B
       if4_valid := false.B
@@ -204,7 +204,8 @@ class IFU extends XSModule with HasIFUConst
     for(i <- 0 until FetchWidth){
       //io.fetchPacket.bits.pnpc(i) := if1_npc
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth))) {
-        io.fetchPacket.bits.pnpc(i) := if4_btb_target
+        //io.fetchPacket.bits.pnpc(i) := if4_btb_target     has bug: redirect won't flush invalid instruction
+        io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) //use fetch PC
       }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
