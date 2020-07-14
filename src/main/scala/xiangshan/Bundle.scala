@@ -13,7 +13,7 @@ class FetchPacket extends XSBundle {
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
   val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
   val hist = Vec(FetchWidth, UInt(HistoryLength.W))
-  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val predCtr = Vec(FetchWidth, UInt(2.W))
   val btbHitWay = Bool()
   val tageMeta = Vec(FetchWidth, (new TageMeta))
@@ -55,7 +55,7 @@ class BranchPrediction extends XSBundle {
   // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
   val hist = Vec(FetchWidth, UInt(HistoryLength.W))
   // victim way when updating btb
-  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  // val btbVictimWay = UInt(log2Up(BtbWays).W)
   // 2-bit saturated counter 
   val predCtr = Vec(FetchWidth, UInt(2.W))
   val btbHitWay = Bool()
@@ -80,7 +80,7 @@ class CtrlFlow extends XSBundle {
   val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
   val pnpc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
-  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val btbPredCtr = UInt(2.W)
   val btbHitWay = Bool()
   val tageMeta = new TageMeta
@@ -134,7 +134,7 @@ class Redirect extends XSBundle {
   val hist = UInt(HistoryLength.W)
   val tageMeta = new TageMeta
   val fetchIdx = UInt(log2Up(FetchWidth).W)
-  val btbVictimWay = UInt(log2Up(BtbWays).W)
+  // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val btbPredCtr = UInt(2.W)
   val btbHitWay = Bool()
   val rasSp = UInt(log2Up(RasSize).W)

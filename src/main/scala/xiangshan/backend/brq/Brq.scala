@@ -177,7 +177,7 @@ class Brq extends XSModule {
       brQueue(wbIdx).exuOut := exuWb.bits
       brQueue(wbIdx).misPred := brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
       brQueue(wbIdx).exuOut.redirect.hist := exuWb.bits.uop.cf.hist
-      brQueue(wbIdx).exuOut.redirect.btbVictimWay := exuWb.bits.uop.cf.btbVictimWay
+      // brQueue(wbIdx).exuOut.redirect.btbVictimWay := exuWb.bits.uop.cf.btbVictimWay
       brQueue(wbIdx).exuOut.redirect.btbPredCtr := exuWb.bits.uop.cf.btbPredCtr
       brQueue(wbIdx).exuOut.redirect.btbHitWay := exuWb.bits.uop.cf.btbHitWay
       brQueue(wbIdx).exuOut.redirect.tageMeta := exuWb.bits.uop.cf.tageMeta
