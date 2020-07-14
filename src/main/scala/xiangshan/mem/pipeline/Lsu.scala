@@ -65,7 +65,7 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
   val moqIdx = Output(UInt(log2Up(LSRoqSize).W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
 
-  val forwardMask = Input(UInt(8.W))
+  val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
 }
 
