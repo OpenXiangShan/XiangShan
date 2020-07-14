@@ -84,7 +84,7 @@ class BPUStage1 extends XSModule {
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.fire())
 
   val r = io.redirectInfo.redirect
-  val updateFetchpc = r.pc - r.fetchIdx << 2.U
+  val updateFetchpc = r.pc - (r.fetchIdx << 2.U)
   // BTB
   val btb = Module(new BTB)
   btb.io.in.pc <> io.in.pc
