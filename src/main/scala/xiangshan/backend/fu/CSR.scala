@@ -9,7 +9,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 
 trait HasCSRConst {
   // User Trap Setup

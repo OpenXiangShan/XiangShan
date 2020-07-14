@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
 import xiangshan.backend.fu.FuConfig
-import xiangshan.utils.ParallelOR
+import utils.ParallelOR
 import xiangshan.backend.fu.FunctionUnit._
 
 case class ExuParameters

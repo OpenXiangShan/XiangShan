@@ -3,7 +3,7 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import xiangshan.backend.MDUOpType
 import xiangshan.backend.fu.FunctionUnit._
 

@@ -1,4 +1,4 @@
-package xiangshan.utils
+package utils
 
 import chisel3._
 

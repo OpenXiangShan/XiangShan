@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 
 trait HasFreeListConsts extends HasXSParameter {
   def FL_SIZE: Int = NRPhyRegs-32

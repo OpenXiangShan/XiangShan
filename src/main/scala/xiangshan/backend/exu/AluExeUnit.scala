@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
-import xiangshan.utils._
+import utils._
 import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
