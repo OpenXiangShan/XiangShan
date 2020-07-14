@@ -109,7 +109,7 @@ class BPUStage1 extends XSModule {
   val btbWriteWay = btb.io.out.writeWay
   val btbNotTakens = btb.io.out.notTakens
   val btbCtrs = VecInit(btb.io.out.dEntries.map(_.pred))
-  val btbValids = VecInit(btb.io.out.dEntries.map(_.valid))
+  val btbValids = btb.io.out.dEntriesValid
   val btbTargets = VecInit(btb.io.out.dEntries.map(_.target))
   val btbTypes = VecInit(btb.io.out.dEntries.map(_._type))
 
@@ -186,6 +186,7 @@ class BPUStage1 extends XSModule {
   XSDebug(true.B, "[BPUS1]in:(%d %d)   pc=%x ghr=%b\n", io.in.pc.valid, io.in.pc.ready, io.in.pc.bits, hist)
   XSDebug(true.B, "[BPUS1]outPred:(%d) redirect=%d instrValid=%b tgt=%x\n",
     io.s1OutPred.valid, io.s1OutPred.bits.redirect, io.s1OutPred.bits.instrValid.asUInt, io.s1OutPred.bits.target)
+  XSDebug(true.B, "[BPUS1]btbHit=%d btbTaken=%d brJumpIdx=%b jbtacHit=%d indirectIdx=%b\n", btbHit, btbTaken, brJumpIdx, jbtacHit, indirectIdx)
   XSDebug(io.flush && io.redirectInfo.flush(),
     "[BPUS1]flush from backend: pc=%x tgt=%x brTgt=%x _type=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
     r.pc, r.target, r.brTarget, r._type, r.taken, r.hist, r.fetchIdx, r.isException)
