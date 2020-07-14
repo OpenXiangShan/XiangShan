@@ -201,6 +201,9 @@ class BTB extends XSModule {
         btbData(w)(b).io.w.req.bits.setIdx := updateBankIdx
         btbData(w)(b).io.w.req.bits.waymask.map(_ := updateWaymask)
         btbData(w)(b).io.w.req.bits.data := btbDataWrite
+        XSDebug(btbWriteValid, "write btb: fetchpc=%x fetchIdx=%d setIdx=%d meta.tag=%x updateWaymask=%d target=%x _type=%b predCtr=%b\n",
+          u.fetchPC, u.fetchIdx, updateBankIdx, btbMetaWrite.tag, updateWaymask, btbDataWrite.target, btbDataWrite._type, btbDataWrite.pred)
+        XSDebug(btbWriteValid, "write btb: update:hit=%d updateBank=%d updateBankIdx=%d writeWay=%d\n", u.hit, updateBank, updateBankIdx, u.writeWay)
       }.otherwise {
         btbMeta(w)(b).io.w.req.valid := false.B
         btbMeta(w)(b).io.w.req.bits.setIdx := DontCare
@@ -212,6 +215,41 @@ class BTB extends XSModule {
       }
     }
   }
+
+  // write and read bypass
+  for ( w <- 0 until BtbWays) {
+    for (b <- 0 until BtbBanks) {
+      when (RegNext(updateBank) === btbAddr.getBank(io.in.pcLatch) && RegNext(updateBankIdx) === btbAddr.getBankIdx(io.in.pcLatch)) {
+        when (RegNext(btbWriteValid && io.in.pc.valid) && w.U === RegNext(u.writeWay) && b.U === RegNext(updateBank)) {
+          metaRead(u.writeWay) := RegNext(btbMetaWrite)
+          (0 until FetchWidth).map(i => dataRead(RegNext(u.writeWay))(i.U) := Mux(RegNext(updateWaymask(i)), RegNext(btbDataWrite), btbData(w)(b).io.r.resp.data(i)))
+          
+          when (RegNext(btbMetaWrite).valid && RegNext(btbMetaWrite).tag === btbAddr.getTag(io.in.pcLatch)) {
+            wayHits(u.writeWay) := !io.flush
+          }
+          
+          XSDebug(true.B, "BTB write & read bypass hit!\n")
+        }
+      }
+    }
+  }
+
+  XSDebug(true.B, "pcLatch=%x readBank=%d readBankIdx=%d wayHits=%b\n",
+    io.in.pcLatch, btbAddr.getBank(io.in.pcLatch), btbAddr.getBankIdx(io.in.pcLatch), wayHits.asUInt)
+  XSDebug(true.B, "metaRead: ")
+  for (w <- 0 until BtbWays) {
+    XSDebug(true.B, "%d %x  ", metaRead(w).valid, metaRead(w).tag)
+  }
+  XSDebug(true.B, "\n")
+  for (w <- 0 until BtbWays) {
+    XSDebug(true.B, "dataRead: ")
+    for (i <- 0 until FetchWidth) {
+      XSDebug(true.B, "%d:%d %x %b %b  ", i.U,
+        dataRead(w)(i).valid, dataRead(w)(i).target, dataRead(w)(i).pred, dataRead(w)(i)._type)
+    }
+    XSDebug(true.B, "\n")
+  }
+
 
   io.out.hit := hit
   io.out.taken := isTaken
