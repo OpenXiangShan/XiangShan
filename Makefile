@@ -110,7 +110,7 @@ emu: $(EMU)
 ifeq ($(REMOTE),localhost)
 	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(SEED) -b $(B) -e $(E)"
+	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) $(SEED) -b $(B) -e $(E)"
 endif
 
 cache:
