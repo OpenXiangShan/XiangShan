@@ -165,7 +165,7 @@ class IFU extends XSModule with HasIFUConst
 
     if(EnableBPD){
       when(!if4_tage_taken && if4_btb_taken && if4_valid){
-        if1_npc := snpc(if4_pc)
+        if1_npc := if4_pc + (PopCount(io.fetchPacket.bits.mask) >> 2.U)
       }
     }
 
