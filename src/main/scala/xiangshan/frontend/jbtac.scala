@@ -47,7 +47,7 @@ class JBTAC extends XSModule {
   def jbtacEntry() = new Bundle {
     val valid = Bool()
     // TODO: don't need full length of tag and target
-    val tag = UInt(jbtacAddr.tagBits.W)
+    val tag = UInt(jbtacAddr.tagBits.W + jbtacAddr.idxBits.W)
     val target = UInt(VAddrBits.W)
     val offset = UInt(log2Up(PredictWidth).W)
   }
@@ -77,7 +77,7 @@ class JBTAC extends XSModule {
   val readBankLatch = jbtacAddr.getBank(histXORAddrLatch)
   val readRowLatch = jbtacAddr.getBankIdx(histXORAddrLatch)
 
-  val outHit = readEntries(readBankLatch).valid && readEntries(readBankLatch).tag === jbtacAddr.getTag(io.in.pcLatch) && !io.flush && readFire(readBankLatch)
+  val outHit = readEntries(bank).valid && readEntries(bank).tag === Cat(jbtacAddr.getTag(io.in.pcLatch), jbtacAddr.getIdx(io.in.pcLatch)) && !io.flush && readFire(bank)
 
   io.out.hit := outHit
   io.out.hitIdx := readEntries(readBankLatch).offset(log2Up(PredictWidth)-1, 1)
@@ -89,7 +89,7 @@ class JBTAC extends XSModule {
   val updateHistXORAddr = io.update.fetchPC ^ Cat(io.update.hist, 0.U(1.W))(VAddrBits - 1, 0)
   writeEntry.valid := true.B
   // writeEntry.tag := jbtacAddr.getTag(updatefetchPC)
-  writeEntry.tag := jbtacAddr.getTag(io.update.fetchPC)
+  writeEntry.tag := Cat(jbtacAddr.getTag(io.update.fetchPC), jbtacAddr.getIdx(io.update.fetchPC))
   writeEntry.target := io.update.target
   // writeEntry.offset := updateFetchIdx
   writeEntry.offset := io.update.fetchIdx
