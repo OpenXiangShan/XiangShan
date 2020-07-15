@@ -61,22 +61,26 @@ class JBTAC extends XSModule {
   // Only read one bank
   val histXORAddr = io.in.pc.bits ^ Cat(io.in.hist, 0.U(1.W))(VAddrBits - 1, 0)
   val histXORAddrLatch = RegEnable(histXORAddr, io.in.pc.valid)
+
+  val readBank = jbtacAddr.getBank(histXORAddr)
+  val readRow = jbtacAddr.getBankIdx(histXORAddr)
   readFire := 0.U.asTypeOf(Vec(JbtacBanks, Bool()))
   (0 until JbtacBanks).map(
     b => {
       jbtac(b).reset := reset.asBool
-      jbtac(b).io.r.req.valid := io.in.pc.fire() && b.U === jbtacAddr.getBank(histXORAddr)
-      jbtac(b).io.r.req.bits.setIdx := jbtacAddr.getBankIdx(histXORAddr)
+      jbtac(b).io.r.req.valid := io.in.pc.fire() && b.U === readBank
+      jbtac(b).io.r.req.bits.setIdx := readRow
       readFire(b) := jbtac(b).io.r.req.fire()
       readEntries(b) := jbtac(b).io.r.resp.data(0)
     }
   )
 
-  val bank = jbtacAddr.getBank(histXORAddrLatch)
+  val readBankLatch = jbtacAddr.getBank(histXORAddrLatch)
+  val readRowLatch = jbtacAddr.getBankIdx(histXORAddrLatch)
 
-  io.out.hit := readEntries(bank).valid && readEntries(bank).tag === jbtacAddr.getTag(io.in.pcLatch) && !io.flush && readFire(bank)
-  io.out.hitIdx := readEntries(bank).offset(log2Up(PredictWidth)-1, 1)
-  io.out.target := readEntries(bank).target
+  io.out.hit := readEntries(readBankLatch).valid && readEntries(readBankLatch).tag === jbtacAddr.getTag(io.in.pcLatch) && !io.flush && readFire(readBankLatch)
+  io.out.hitIdx := readEntries(readBankLatch).offset(log2Up(PredictWidth)-1, 1)
+  io.out.target := readEntries(readBankLatch).target
 
     // 2. update jbtac
   val writeEntry = Wire(jbtacEntry())
@@ -88,10 +92,14 @@ class JBTAC extends XSModule {
   writeEntry.target := io.update.target
   // writeEntry.offset := updateFetchIdx
   writeEntry.offset := io.update.fetchIdx
+
+  val writeBank = jbtacAddr.getBank(updateHistXORAddr)
+  val writeRow = jbtacAddr.getBankIdx(updateHistXORAddr)
+  val writeValid = io.redirectValid && io.update.misPred && io.update._type === BTBtype.I
   for (b <- 0 until JbtacBanks) {
-    when (b.U === jbtacAddr.getBank(updateHistXORAddr)) {
-      jbtac(b).io.w.req.valid := io.redirectValid && io.update.misPred && io.update._type === BTBtype.I
-      jbtac(b).io.w.req.bits.setIdx := jbtacAddr.getBankIdx(updateHistXORAddr)
+    when (b.U === writeBank) {
+      jbtac(b).io.w.req.valid := writeValid
+      jbtac(b).io.w.req.bits.setIdx := writeRow
       jbtac(b).io.w.req.bits.data := writeEntry
     }.otherwise {
       jbtac(b).io.w.req.valid := false.B
@@ -101,9 +109,9 @@ class JBTAC extends XSModule {
   }
 
   XSDebug(io.in.pc.fire(), "[JBTAC]read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
-    io.in.pc.bits, histXORAddr, jbtacAddr.getBank(histXORAddr), jbtacAddr.getBankIdx(histXORAddr), io.in.hist)
-  XSDebug(nextFire, "[JBTAC]read_resp: bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
-    jbtacAddr.getBank(histXORAddrLatch), jbtacAddr.getBankIdx(histXORAddrLatch), readEntries(bank).target, readEntries(bank).offset, readEntries(bank).valid)
-  XSDebug(io.redirectValid, "[JBTAC]update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d\n",
-    io.update.fetchPC, jbtac(b).io.w.req.valid, io.update.hist, jbtacAddr.getBank(updateHistXORAddr), jbtacAddr.getBankIdx(updateHistXORAddr), io.update.target, io.update.fetchIdx)
+    io.in.pc.bits, histXORAddr, readBank, readRow, io.in.hist)
+  XSDebug(nextFire, "[JBTAC]read_resp: pc=0x%x, bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
+    io.in.pcLatch, readBankLatch, readRowLatch, readEntries(readBankLatch).target, readEntries(readBankLatch).offset, readEntries(readBankLatch).valid)
+  XSDebug(io.redirectValid, "[JBTAC]update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d, type=0x%d\n",
+    io.update.fetchPC, writeValid, io.update.hist, writeBank, writeRow, io.update.target, io.update.fetchIdx, io.update._type)
 }
