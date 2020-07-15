@@ -102,8 +102,8 @@ class JBTAC extends XSModule {
 
   XSDebug(io.in.pc.fire(), "[JBTAC]read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
     io.in.pc.bits, histXORAddr, jbtacAddr.getBank(histXORAddr), jbtacAddr.getBankIdx(histXORAddr), io.in.hist)
-  XSDebug(nextFire, "[JBTAC]read_resp: bank=%d, row=%d, target=0x%x, offset=%d\n",
-    jbtacAddr.getBank(histXORAddrLatch), jbtacAddr.getBankIdx(histXORAddrLatch), readEntries(bank).target, readEntries(bank).offset)
-  XSDebug(io.redirectValid, "[JBTAC]update_req: fetchPC=0x%x, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d\n",
-    io.update.fetchPC, io.update.hist, jbtacAddr.getBank(updateHistXORAddr), jbtacAddr.getBankIdx(updateHistXORAddr), io.update.target, io.update.fetchIdx)
+  XSDebug(nextFire, "[JBTAC]read_resp: bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
+    jbtacAddr.getBank(histXORAddrLatch), jbtacAddr.getBankIdx(histXORAddrLatch), readEntries(bank).target, readEntries(bank).offset, readEntries(bank).valid)
+  XSDebug(io.redirectValid, "[JBTAC]update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d\n",
+    io.update.fetchPC, jbtac(b).io.w.req.valid, io.update.hist, jbtacAddr.getBank(updateHistXORAddr), jbtacAddr.getBankIdx(updateHistXORAddr), io.update.target, io.update.fetchIdx)
 }
