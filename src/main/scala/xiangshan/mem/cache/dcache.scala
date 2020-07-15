@@ -69,7 +69,7 @@ class DCacheIO extends XSBundle with HasMEMConst {
 class Dcache extends XSModule with NeedImpl{
   val io = IO(new DCacheIO)
   
-  // Arbitor for 2 dcache ports in built in decache
+  // Arbiter for 2 dcache ports in built in decache
   // store/refill only use port0, port1 is always assigned to load request
 
   // priority:

@@ -96,14 +96,17 @@ class LsuIO extends XSBundle with HasMEMConst {
   val redirect = Flipped(ValidIO(new Redirect))
   val dcache = Flipped(new DCacheIO)
   val dtlb = Flipped(new DtlbIO)
-  // lsroq
-  // sbuffer
 }
 
 // 2l2s out of order lsu for XiangShan
 class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
+
+  val lsroq = Module(new LsRoq)
+  val sbuffer = Module(new Sbuffer)
+  lsroq.io := DontCare // FIXME
+  sbuffer.io := DontCare // FIXME
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -135,7 +138,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
   val l2_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
   val l4_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val l5_in  = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
+  val l5_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
   val l5_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
   l2_out := DontCare
   l4_out := DontCare
@@ -243,6 +246,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 // If cache hit, return writeback result to CDB
 //-------------------------------------------------------
 
+  val loadWriteBack = (0 until LoadPipelineWidth).map(i => { l5_in(i).valid })
+  val loadOut = (0 until LoadPipelineWidth).map(_ => Wire(Decoupled(new ExuOutput)))
   (0 until LoadPipelineWidth).map(i => {
     // data merge
     val rdata = VecInit((0 until 8).map(j => {
@@ -278,12 +283,12 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     // if hit, writeback result to CDB
     // val ldout = Vec(2, Decoupled(new ExuOutput))
     // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
-    io.out(i).bits.uop := l5_in(i).bits.uop
-    io.out(i).bits.data := rdataPartialLoad
-    io.out(i).bits.redirectValid := false.B
-    io.out(i).bits.redirect := DontCare
-    io.out(i).bits.debug.isMMIO := l5_in(i).bits.mmio
-    io.out(i).valid := l5_in(i).valid
+    loadOut(i).bits.uop := l5_in(i).bits.uop
+    loadOut(i).bits.data := rdataPartialLoad
+    loadOut(i).bits.redirectValid := false.B
+    loadOut(i).bits.redirect := DontCare
+    loadOut(i).bits.debug.isMMIO := l5_in(i).bits.mmio
+    loadOut(i).valid := loadWriteBack(i)
 
     // writeback to LSROQ
     // Current dcache use MSHR
@@ -294,9 +299,9 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 //-------------------------------------------------------
 
   val s2_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val s3_in  = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
+  val s3_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
   val s3_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val s4_in  = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
+  val s4_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
   val s4_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
   s2_out := DontCare
   s3_in := DontCare
@@ -367,17 +372,28 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   (0 until StorePipelineWidth).map(i => {
     PipelineConnect(s3_out(i), s4_in(i), s4_out(i).fire(), s4_in(i).bits.uop.brTag.needFlush(io.redirect))
   })
-
+  
 //-------------------------------------------------------
 // ST Pipeline Stage 4
 // Store writeback, send store request to store buffer
 //-------------------------------------------------------
 
-// writeback to LSROQ
+(0 until StorePipelineWidth).map(i => {
+  // writeback to LSROQ
+  s4_out(i).ready := true.B // lsroq is always ready for store writeback
+  lsroq.io.storeIn(i).bits := s4_in(i).bits
+})
 
-// TODO
+//-------------------------------------------------------
+// Writeback to CDB
+//-------------------------------------------------------
 
-// LSROQ writeback
+(0 until 2).map(i => {
+  val cdbArb = Module(new Arbiter(new ExuOutput, 2))
+  io.out(i) <> cdbArb.io.out
+  loadOut(i) <> cdbArb.io.in(0)
+  lsroq.io.out(i) <> cdbArb.io.in(1)
+})
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 1
