@@ -7,7 +7,7 @@ import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.frontend.Frontend
+import xiangshan.frontend._
 import utils._
 
 trait HasXSParameter {

@@ -3,9 +3,8 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
-import xiangshan.backend.ALUOpType
 import utils._
+import xiangshan.backend.ALUOpType
 
 
 class JBTACUpdateBundle extends XSBundle {

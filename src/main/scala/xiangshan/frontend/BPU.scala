@@ -2,11 +2,10 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import xiangshan.utils._
-import xiangshan.backend.ALUOpType
-import xiangshan.backend.BRUOpType
 import utils._
+import xiangshan._
+import xiangshan.backend.ALUOpType
+import xiangshan.backend.JumpOpType
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
@@ -283,10 +282,10 @@ class BPUStage3 extends XSModule {
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction.
   val brIdx = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & io.predecode.bits.mask
   val brTakenIdx = LowestBit(brIdx & inLatch.tage.takens.asUInt, FetchWidth)
-  val jalIdx = LowestBit(inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === BRUOpType.jal }).asUInt) & io.predecode.bits.mask, FetchWidth)
-  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === BRUOpType.call }).asUInt), FetchWidth)
-  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === BRUOpType.jalr }).asUInt), FetchWidth)
-  val retIdx = LowestBit(io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === BRUOpType.ret }).asUInt), FetchWidth)
+  val jalIdx = LowestBit(inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jal }).asUInt) & io.predecode.bits.mask, FetchWidth)
+  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.call }).asUInt), FetchWidth)
+  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt), FetchWidth)
+  val retIdx = LowestBit(io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt), FetchWidth)
 
   val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth)
   val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & LowerMask(jmpIdx, FetchWidth) & io.predecode.bits.mask

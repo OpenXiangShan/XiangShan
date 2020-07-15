@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import device.RAMHelper
 import xiangshan._
-import xiangshan.utils._
+import utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec

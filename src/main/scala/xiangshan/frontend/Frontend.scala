@@ -1,10 +1,10 @@
 package xiangshan.frontend
-
+import utils.XSInfo
 import chisel3._
 import chisel3.util._
 import utils.PipelineConnect
 import xiangshan._
-import utils.XSInfo
+
 
 class Frontend extends XSModule {
   val io = IO(new Bundle() {
