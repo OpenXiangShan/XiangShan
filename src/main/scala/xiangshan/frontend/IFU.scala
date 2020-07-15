@@ -156,15 +156,17 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
     XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 
-    when(if4_valid && io.icacheResp.fire() && if4_tage_taken)
+    when(io.icacheResp.fire() && if4_tage_taken &&if4_valid)
     {
       if1_npc := if4_tage_target
     }
     //redirect: tage result differ btb
     if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
 
-    when(!if4_tage_taken && if4_btb_taken){
-      if1_npc := snpc(if4_pc)
+    if(EnableBPD){
+      when(!if4_tage_taken && if4_btb_taken && if4_valid){
+        if1_npc := if4_pc + (PopCount(io.fetchPacket.bits.mask) >> 2.U)
+      }
     }
 
     //redirect: miss predict
@@ -175,7 +177,8 @@ class IFU extends XSModule with HasIFUConst
     
   
     //flush pipline
-    needflush := if4_btb_missPre || io.redirectInfo.flush()
+    if(EnableBPD){needflush := (if4_valid && if4_btb_missPre) || io.redirectInfo.flush() }
+    else {needflush := io.redirectInfo.flush()}
     when(needflush){
       if3_valid := false.B
       if4_valid := false.B
@@ -184,12 +187,13 @@ class IFU extends XSModule with HasIFUConst
     io.icacheReq.bits.flush := needflush
 
     //Output -> iBuffer
+    //io.fetchPacket <> DontCare
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
-    io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()   //if4_miss_pred should not disable out valid
+    io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     if(EnableBPU){
       io.fetchPacket.bits.mask := Mux(if4_tage_taken,(Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt)),
-        Mux(if4_btb_taken, Reverse(Cat(if4_btb_insMask.map(i => Fill(2, i.asUInt))).asUInt),
+        Mux(if4_btb_taken, Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_btb_insMask.map(i => Fill(2, i.asUInt))).asUInt),
         Fill(FetchWidth*2, 1.U(1.W)))
       )
     }
@@ -203,7 +207,8 @@ class IFU extends XSModule with HasIFUConst
     for(i <- 0 until FetchWidth){
       //io.fetchPacket.bits.pnpc(i) := if1_npc
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth))) {
-        io.fetchPacket.bits.pnpc(i) := if4_btb_target
+        if(EnableBPD){io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) }     //tage not taken use snpc
+        else{io.fetchPacket.bits.pnpc(i) := if4_btb_target}//use fetch PC
       }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
@@ -224,8 +229,6 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
     bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) //TODO: consider RVC && consider cross cacheline fetch
     bpu.io.redirectInfo := io.redirectInfo
-    
-    
     io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }

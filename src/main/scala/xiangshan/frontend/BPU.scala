@@ -323,8 +323,9 @@ class BPUStage3 extends XSModule {
   io.out.bits.rasTopCtr := rasTop.ctr
 
   // flush BPU and redirect when target differs from the target predicted in Stage1
-  io.out.bits.redirect := inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
-    inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target
+  io.out.bits.redirect := (if(EnableBPD) (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
+    inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target)
+    else false.B)
   io.flushBPU := io.out.bits.redirect && io.out.valid
 
   // speculative update RAS
