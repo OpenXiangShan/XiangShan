@@ -3,7 +3,7 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils.{XSDebug, XSInfo, XSWarn}
+import utils.{XSDebug, XSInfo, XSWarn}
 
 case class DP1Parameters
 (

@@ -90,6 +90,7 @@ class CtrlFlow extends XSBundle {
   val intrVec = Vec(12, Bool())
   val isRVC = Bool()
   val isBr = Bool()
+  val crossPageIPFFix = Bool()
 }
 
 // Decode DecodeWidth insts at Decode Stage

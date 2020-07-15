@@ -3,8 +3,8 @@ package xiangshan.backend.brq
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
-import chisel3.util.experimental.BoringUtils
+import utils._
+
 
 class BrqPtr extends XSBundle {
 

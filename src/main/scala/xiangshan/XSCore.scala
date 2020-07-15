@@ -7,8 +7,8 @@ import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.frontend.{Frontend, HasTageParameter}
-import xiangshan.utils._
+import xiangshan.frontend.Frontend
+import utils._
 
 trait HasXSParameter {
   val XLEN = 64
@@ -116,7 +116,7 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class XSCore(implicit val p: XSConfig) extends XSModule {
+class XSCore(implicit p: XSConfig) extends XSModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC

@@ -83,12 +83,20 @@ class XSSimTop extends Module {
   io.difftest := difftest
 
   val logEnable = (GTimer() >= io.logCtrl.log_begin) && (GTimer() < io.logCtrl.log_end)
-  BoringUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+  ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+
+  // Check and dispaly all source and sink connections
+  ExcitingUtils.checkAndDisplay()
 }
 
 object TestMain extends App {
+  if (args.contains("--disable-log"))
+    XSLog.generateLog = false
+  else
+    XSLog.generateLog = true
+
   (new chisel3.stage.ChiselStage).execute(
-    args,
+    args.filterNot(_ == "--disable-log"),
     Seq(ChiselGeneratorAnnotation(() => new XSSimTop))
   )
 }

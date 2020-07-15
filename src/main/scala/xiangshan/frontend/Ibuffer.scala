@@ -1,11 +1,9 @@
-package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
 
 import xiangshan._
-import xiangshan.utils._
-
+import utils._
 class Ibuffer extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
@@ -18,6 +16,7 @@ class Ibuffer extends XSModule {
     io.out(i).bits.exceptionVec := DontCare
     io.out(i).bits.intrVec := DontCare
     io.out(i).bits.isBr := DontCare
+    io.out(i).bits.crossPageIPFFix := DontCare
   }
 
   //mask initial
