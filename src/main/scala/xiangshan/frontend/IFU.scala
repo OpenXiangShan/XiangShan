@@ -163,8 +163,10 @@ class IFU extends XSModule with HasIFUConst
     //redirect: tage result differ btb
     if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
 
-    when(!if4_tage_taken && if4_btb_taken && if4_valid){
-      if1_npc := snpc(if4_pc)
+    if(EnableBPD){
+      when(!if4_tage_taken && if4_btb_taken && if4_valid){
+        if1_npc := snpc(if4_pc)
+      }
     }
 
     //redirect: miss predict
@@ -175,7 +177,8 @@ class IFU extends XSModule with HasIFUConst
     
   
     //flush pipline
-    needflush := (if4_valid && if4_btb_missPre) || io.redirectInfo.flush()
+    if(EnableBPD){needflush := (if4_valid && if4_btb_missPre) || io.redirectInfo.flush() }
+    else {needflush := io.redirectInfo.flush()}
     when(needflush){
       if3_valid := false.B
       if4_valid := false.B
@@ -204,8 +207,8 @@ class IFU extends XSModule with HasIFUConst
     for(i <- 0 until FetchWidth){
       //io.fetchPacket.bits.pnpc(i) := if1_npc
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth))) {
-        //io.fetchPacket.bits.pnpc(i) := if4_btb_target     has bug: redirect won't flush invalid instruction
-        io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) //use fetch PC
+        if(EnableBPD){io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) }     //tage not taken use snpc
+        else{io.fetchPacket.bits.pnpc(i) := if4_btb_target}//use fetch PC
       }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
