@@ -22,12 +22,13 @@ cpu:
 cputest:
 	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2>&1 | tee > cpu.log
 	cat cpu.log | grep different
+	cat cpu.log | grep IPC
 
 # bputest:
 # 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
 # 	cat bpu.log | grep different
 bputest:
-	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) ALL=forcall2 run 2>&1 | tee > bpu.log
+	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
 	cat bpu.log | grep Mbp
 
 amtest:
