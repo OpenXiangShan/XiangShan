@@ -28,10 +28,11 @@ class BTBPred extends XSBundle {
   val writeWay = UInt(log2Up(BtbWays).W)
   val notTakens = Vec(FetchWidth, Bool())
   val dEntries = Vec(FetchWidth, btbDataEntry())
+  val dEntriesValid = Vec(FetchWidth, Bool())
 }
 
 case class btbDataEntry() extends XSBundle {
-  val valid = Bool()
+  // val valid = Bool()
   val target = UInt(VAddrBits.W)
   val pred = UInt(2.W) // 2-bit saturated counter as a quick predictor
   val _type = UInt(2.W)
@@ -69,6 +70,17 @@ class BTB extends XSModule {
   val btbData = List.fill(BtbWays)(List.fill(BtbBanks)(
     Module(new SRAMTemplate(btbDataEntry(), set = BtbSets / BtbBanks, way = FetchWidth, shouldReset = true, holdRead = true))
   ))
+  //val btbDataValid = RegInit(Vec(BtbWays, Vec(BtbBanks, VecInit(Seq.fill(BtbSets / BtbBanks)(VecInit(Seq.fill(FetchWidth)(false.B)))))))
+  // val btbDataValid = Vec(BtbWays, Vec(BtbBanks, Vec(BtbSets / BtbBanks, RegInit(VecInit(Seq.fill(FetchWidth)(false.B))))))
+  val btbDataValid = RegInit(VecInit(Seq.fill(BtbWays)(
+    VecInit(Seq.fill(BtbBanks)(
+      VecInit(Seq.fill(BtbSets / BtbBanks)(
+        VecInit(Seq.fill(FetchWidth)(
+          false.B
+        ))
+      ))
+    ))
+  )))
 
   // BTB read requests
   // read addr comes from pc[6:2]
@@ -113,9 +125,10 @@ class BTB extends XSModule {
 
   // #(FetchWidth) results
   val dataEntries = Wire(Vec(FetchWidth, btbDataEntry()))
+  val dataEntriesValid = Wire(Vec(FetchWidth, Bool()))
 
   wayHits := 0.U.asTypeOf(Vec(BtbWays, Bool()))
-  dataEntries.map(_.valid := false.B)
+  dataEntriesValid.map(_ := false.B)
   dataEntries.map(_.pred := DontCare)
   dataEntries.map(_.target := DontCare)
   dataEntries.map(_._type := DontCare)
@@ -126,7 +139,8 @@ class BTB extends XSModule {
     when (metaRead(w).valid && metaRead(w).tag === btbAddr.getTag(pcLatch)) {
       wayHits(w) := !io.flush && RegNext(readFire(w)(readBankIdx), init = false.B)
       for (i <- 0 until FetchWidth) {
-        dataEntries(i).valid := dataRead(w)(i).valid
+        //dataEntries(i).valid := dataRead(w)(i).valid
+        dataEntriesValid(i) := btbDataValid(w)(btbAddr.getBank(pcLatch))(btbAddr.getBankIdx(pcLatch))(i)
         dataEntries(i)._type := dataRead(w)(i)._type
         dataEntries(i).pred := dataRead(w)(i).pred
         dataEntries(i).target := dataRead(w)(i).target
@@ -142,8 +156,8 @@ class BTB extends XSModule {
   // not taken branches from a valid entry
   val notTakenBranches = Wire(Vec(FetchWidth, Bool()))
   for (i <- 0 until FetchWidth) {
-    predTakens(i) := dataEntries(i).valid && (dataEntries(i)._type === BTBtype.J || dataEntries(i)._type === BTBtype.B && dataEntries(i).pred(1).asBool)
-    notTakenBranches(i) := dataEntries(i).valid && dataEntries(i)._type === BTBtype.B && !dataEntries(i).pred(1).asBool
+    predTakens(i) := dataEntriesValid(i) && (dataEntries(i)._type === BTBtype.J || dataEntries(i)._type === BTBtype.B && dataEntries(i).pred(1).asBool)
+    notTakenBranches(i) := dataEntriesValid(i) && dataEntries(i)._type === BTBtype.B && !dataEntries(i).pred(1).asBool
   }
 
   val isTaken       = predTakens.reduce(_||_)
@@ -175,7 +189,7 @@ class BTB extends XSModule {
   btbMetaWrite.valid := true.B
   btbMetaWrite.tag := btbAddr.getTag(u.fetchPC)
   val btbDataWrite = Wire(btbDataEntry())
-  btbDataWrite.valid := true.B
+  //btbDataWrite.valid := true.B
   btbDataWrite.target := u.target
   btbDataWrite.pred := newCtr
   btbDataWrite._type := u._type
@@ -201,6 +215,9 @@ class BTB extends XSModule {
         btbData(w)(b).io.w.req.bits.setIdx := updateBankIdx
         btbData(w)(b).io.w.req.bits.waymask.map(_ := updateWaymask)
         btbData(w)(b).io.w.req.bits.data := btbDataWrite
+        (0 until FetchWidth).map(i =>
+          btbDataValid(w)(b)(updateBankIdx)(i) := Mux(i.U === u.fetchIdx, btbWriteValid, btbDataValid(w)(b)(updateBankIdx)(i) && !(btbWriteValid && !u.hit))
+        )
         XSDebug(btbWriteValid, "write btb: fetchpc=%x fetchIdx=%d setIdx=%d meta.tag=%x updateWaymask=%d target=%x _type=%b predCtr=%b\n",
           u.fetchPC, u.fetchIdx, updateBankIdx, btbMetaWrite.tag, updateWaymask, btbDataWrite.target, btbDataWrite._type, btbDataWrite.pred)
         XSDebug(btbWriteValid, "write btb: update:hit=%d updateBank=%d updateBankIdx=%d writeWay=%d\n", u.hit, updateBank, updateBankIdx, u.writeWay)
@@ -244,8 +261,8 @@ class BTB extends XSModule {
   for (w <- 0 until BtbWays) {
     XSDebug(true.B, "dataRead: ")
     for (i <- 0 until FetchWidth) {
-      XSDebug(true.B, "%d:%d %x %b %b  ", i.U,
-        dataRead(w)(i).valid, dataRead(w)(i).target, dataRead(w)(i).pred, dataRead(w)(i)._type)
+      XSDebug(true.B, "%d:%d %x %b %b  ", i.U, 
+        btbDataValid(w)(btbAddr.getBank(pcLatch))(btbAddr.getBankIdx(pcLatch))(i), dataRead(w)(i).target, dataRead(w)(i).pred, dataRead(w)(i)._type)
     }
     XSDebug(true.B, "\n")
   }
@@ -258,4 +275,5 @@ class BTB extends XSModule {
   io.out.writeWay := writeWay
   io.out.notTakens := notTakenBranches
   io.out.dEntries := dataEntries
+  io.out.dEntriesValid := dataEntriesValid
 }
