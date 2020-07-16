@@ -20,7 +20,6 @@ class Decoder extends XSModule with HasInstrType {
   io.out := DontCare // FIXME: remove me!!!
   io.out.cf := io.in
 
-  val hasIntr = Wire(Bool())
   val instr: UInt = io.in.instr
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val instrType :: fuType :: fuOpType :: Nil = decodeList
@@ -141,17 +140,11 @@ class Decoder extends XSModule with HasInstrType {
 //    when(io.out.fire()){printf("[IDU] issue: pc %x npc %x instr %x\n", io.out.bits.cf.pc, io.out.bits.cf.pnpc, io.out.bits.cf.instr)}
 //  }
 
-  //FIXME: move it to ROB
-  val intrVec = WireInit(0.U(12.W))
-  BoringUtils.addSink(intrVec, "intrVecIDU")
-  io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
-  hasIntr := intrVec.orR
-
   val vmEnable = WireInit(false.B)
   BoringUtils.addSink(vmEnable, "DTLBENABLE")
 
   io.out.cf.exceptionVec.map(_ := false.B)
-  io.out.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr)
+  io.out.cf.exceptionVec(illegalInstr) := instrType === InstrN
   io.out.cf.exceptionVec(instrPageFault) := io.in.exceptionVec(instrPageFault)
   io.out.cf.exceptionVec(instrAccessFault) := io.in.pc(VAddrBits - 1, PAddrBits).orR && !vmEnable
 

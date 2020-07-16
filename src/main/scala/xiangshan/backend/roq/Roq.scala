@@ -26,7 +26,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // val brMask = Reg(Vec(RoqSize, UInt(BrqSize.W)))
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
-  val redirect = Reg(Vec(RoqSize, new Redirect))
+//  val redirect = Reg(Vec(RoqSize, new Redirect))
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
@@ -192,9 +192,12 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
   }
 
-  // roq redirect only used for exception
-  io.redirect := DontCare //TODO
-  io.redirect.valid := false.B //TODO
+  // TODO: roq redirect only used for exception
+  val intrVec = WireInit(0.U(12.W))
+  ExcitingUtils.addSink(intrVec, "intrVecIDU")
+//  io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
+  io.redirect := DontCare
+  io.redirect.valid := intrVec.orR
 
   // debug info
   XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerRoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerRoqIdxWidth), ringBufferTail)
