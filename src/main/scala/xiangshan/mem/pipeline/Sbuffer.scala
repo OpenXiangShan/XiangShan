@@ -15,12 +15,17 @@ class SbufferUserBundle extends XSBundle with HasMEMConst {
   val lsroqId = UInt(log2Up(LSRoqSize).W)
 }
 
-class SBufferCacheLine extends XSBundle {
+trait HasSBufferConst extends HasXSParameter {
+  val tagWidth = PAddrBits - log2Up(CacheLineSize / 8)
+  val lruCounterWidth = 32
+}
+
+class SBufferCacheLine extends XSBundle with HasSBufferConst {
   val valid = Bool()
-  val tag = UInt((PAddrBits - log2Up(CacheLineSize / 8)).W)
+  val tag = UInt(tagWidth.W)
   val data = UInt(CacheLineSize.W)
   val mask = UInt((CacheLineSize / 8).W)
-  val lruCnt = UInt(32.W)
+  val lruCnt = UInt(lruCounterWidth.W)
 }
 
 // Store buffer for XiangShan Out of Order LSU
