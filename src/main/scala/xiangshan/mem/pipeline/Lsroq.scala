@@ -78,7 +78,9 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
     XSInfo("dispatched %d insts to moq\n", PopCount(firedDispatch))
   }
 
-  // misprediction recovery
+  // misprediction recovery / exception redirect
+  // invalidate lsroq term using robIdx
+  // TODO: check exception redirect implementation
   (0 until MoqSize).map(i => {
     when(uop(i).brTag.needFlush(io.brqRedirect) && allocated(i)){
       allocated(i) := false.B
@@ -152,7 +154,6 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
   // commit store to cdb
   // TODO: how to select 2 from 64?
   // just randomly pick 2 stores, write them back to cdb
-
   val storeWbSelVec = VecInit((0 until MoqSize).map(i => {
     allocated(i) && valid(i) && !writebacked(i) && store(i)
   }))
@@ -174,6 +175,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
   })
 
   // cache miss request
+  // TODO
   // io.miss := DontCare
   // val missRefillSelVec = VecInit(
   //   (0 until MoqSize).map(i => allocated(i) && valid(i) && miss(i))
@@ -192,7 +194,6 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
   val demoqCnt = WireInit(0.U(2.W)) // seem not enough
 
   // load forward query
-
   // TODO
   // def needForward(taddr: UInt, tmask: UInt, tmoqIdx: UInt, saddr: UInt, smask: UInt, smoqIdx: UInt) = {
   //   taddr(PAddrBits-1, 3) === saddr(PAddrBits-1, 3) && 
@@ -203,19 +204,39 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
   //   store(i)
   // }
 
-  // (0 until LoadPipelineWidth).map(i => {
-  //   // val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-  //   io.forward(i).paddr
-  //   io.forward(i).mask
-  //   io.forward(i).moqIdx
-  //   io.forward(i).pc
+  // left.age < right.age
+  def moqIdxOlderThan (left: UInt, right: UInt): Bool = {
+    require(left.getWidth == MoqIdxWidth)
+    require(right.getWidth == MoqIdxWidth)
+    Mux(left(InnerMoqIdxWidth) === right(InnerMoqIdxWidth),
+      left(InnerMoqIdxWidth-1, 0) > right(InnerMoqIdxWidth-1, 0),
+      left(InnerMoqIdxWidth-1, 0) < right(InnerMoqIdxWidth-1, 0)
+    )
+  }
 
-  //   io.forward(i).forwardData = forwardData
-  //   io.forward(i).forwardMask = forwardMask
-  // })
+  (0 until LoadPipelineWidth).map(i => {
+    io.forward(i).forwardMask := 0.U(8.W).asBools
+    io.forward(i).forwardData := DontCare
+    // Just for functional simulation
+    (1 until MoqSize).map(j => {
+      val ptr = io.forward(i).moqIdx - j.U
+      when(
+        moqIdxOlderThan(ptr, io.forward(i).moqIdx) &&
+        valid(ptr) && allocated(ptr) && store(ptr) &&
+        io.forward(i).paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
+      ){
+        (0 until 8).map(k => {
+          when(data(ptr).mask(k) && io.forward(i).mask(k)){
+            io.forward(i).forwardMask(k) := true.B
+            io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
+          }
+        })
+      }
+    })
+  })
 
   // store backward query and rollback
-
+  // TODO
   // val rollback = 
   (0 until StorePipelineWidth).map(i => {
     when(io.storeIn(i).valid){

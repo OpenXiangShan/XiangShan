@@ -62,7 +62,7 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
 class LoadForwardQueryIO extends XSBundle with HasMEMConst {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  val moqIdx = Output(UInt(log2Up(LSRoqSize).W))
+  val moqIdx = Output(UInt(MoqIdxWidth.W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
 
   val forwardMask = Input(Vec(8, Bool()))
