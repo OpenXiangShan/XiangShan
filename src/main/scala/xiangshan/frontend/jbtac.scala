@@ -77,7 +77,9 @@ class JBTAC extends XSModule {
   val readBankLatch = jbtacAddr.getBank(histXORAddrLatch)
   val readRowLatch = jbtacAddr.getBankIdx(histXORAddrLatch)
 
-  val outHit = readEntries(bank).valid && readEntries(bank).tag === Cat(jbtacAddr.getTag(io.in.pcLatch), jbtacAddr.getIdx(io.in.pcLatch)) && !io.flush && readFire(bank)
+  val outHit = readEntries(readBankLatch).valid && 
+    readEntries(readBankLatch).tag === Cat(jbtacAddr.getTag(io.in.pcLatch), jbtacAddr.getIdx(io.in.pcLatch)) &&
+    !io.flush && readFire(readBankLatch)
 
   io.out.hit := outHit
   io.out.hitIdx := readEntries(readBankLatch).offset(log2Up(PredictWidth)-1, 1)
