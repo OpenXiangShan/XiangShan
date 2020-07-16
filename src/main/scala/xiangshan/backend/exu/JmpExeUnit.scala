@@ -35,7 +35,6 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.redirect.brTag := io.in.bits.uop.brTag
   csrExuOut.redirect.isException := false.B
   csrExuOut.redirect.roqIdx := io.in.bits.uop.roqIdx
-  csrExuOut.redirect.freelistAllocPtr := io.in.bits.uop.freelistAllocPtr
   csrExuOut.redirect.target := csr.io.redirect.target
   csrExuOut.debug := DontCare
 

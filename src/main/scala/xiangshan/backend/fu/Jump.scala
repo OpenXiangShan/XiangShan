@@ -24,7 +24,6 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
-  io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
 
   // Output
   val res = pcDelaySlot

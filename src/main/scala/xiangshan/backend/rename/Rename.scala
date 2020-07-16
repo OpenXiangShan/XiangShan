@@ -35,7 +35,7 @@ class Rename extends XSModule {
         p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
         p"lsrc3:${in.bits.ctrl.lsrc3} -> psrc3:${out.bits.psrc3} " +
         p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
-        p"old_pdest:${out.bits.old_pdest} flptr:${out.bits.freelistAllocPtr} " +
+        p"old_pdest:${out.bits.old_pdest}" +
         p"out v:${out.valid} r:${out.ready}\n"
     )
   }
@@ -91,10 +91,21 @@ class Rename extends XSModule {
     val this_can_alloc = Mux(needIntDest, intCanAlloc, fpCanAlloc)
     io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc && !isWalk
 
+    // do checkpoints when a branch inst come
+    for(fl <- Seq(fpFreeList, intFreeList)){
+      fl.cpReqs(i).valid := inValid
+      fl.cpReqs(i).bits := io.in(i).bits.brTag
+    }
+
     lastReady = io.in(i).ready
 
-    uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U, fpFreeList.pdests(i)))
-    uops(i).freelistAllocPtr := intFreeList.allocPtrs(i)
+    uops(i).pdest := Mux(needIntDest,
+      intFreeList.pdests(i),
+      Mux(
+        uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen,
+        0.U, fpFreeList.pdests(i)
+      )
+    )
 
     io.out(i).valid := io.in(i).fire()
     io.out(i).bits := uops(i)
