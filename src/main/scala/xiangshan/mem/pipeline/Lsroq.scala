@@ -29,6 +29,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
     val out = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val scommit = Input(UInt(3.W))

@@ -94,8 +94,8 @@ class LsuIO extends XSBundle with HasMEMConst {
   val stin = Vec(2, Flipped(Decoupled(new StuReq)))
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
-  val dcache = Flipped(new DCacheIO)
-  val dtlb = Flipped(new DtlbIO)
+  val dcache = Flipped(new DcacheToLsuIO)
+  val dtlb = Flipped(new DtlbToLsuIO)
 }
 
 // 2l2s out of order lsu for XiangShan
@@ -344,19 +344,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 // Write paddr to LSROQ
 //-------------------------------------------------------
 
-  // get paddr from dtlb
-  (0 until StorePipelineWidth).map(i => {
-    s3_in(i).bits := DontCare
-    // TODO
-    // s3_in(i).bits.paddr := io.dtlb.store(i).resp.bits.rdata
-    // s3_in(i).bits.data := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.func := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.pc := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.moqIdx := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).valid := io.dtlb.store(i).resp.valid
-  })
+  // get paddr from dtlb, check if rollback is needed
 
-  // check if rollback is needed
   def needRollback(addr1: UInt, wmask1: UInt, id1: UInt, addr2: UInt, wmask2: UInt, id2: UInt): Bool = {
     false.B //TODO
   }
@@ -378,29 +367,32 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 // Store writeback, send store request to store buffer
 //-------------------------------------------------------
 
-(0 until StorePipelineWidth).map(i => {
-  // writeback to LSROQ
-  s4_out(i).ready := true.B // lsroq is always ready for store writeback
-  lsroq.io.storeIn(i).bits := s4_in(i).bits
-})
+  (0 until StorePipelineWidth).map(i => {
+    // writeback to LSROQ
+    s4_out(i).ready := true.B // lsroq is always ready for store writeback
+    lsroq.io.storeIn(i).bits := s4_in(i).bits
 
+    // LSROQ to store buffer
+    lsroq.io.sbuffer(i) <> sbuffer.io.in(i)
+  })
+  
 //-------------------------------------------------------
 // Writeback to CDB
 //-------------------------------------------------------
 
-(0 until 2).map(i => {
-  val cdbArb = Module(new Arbiter(new ExuOutput, 2))
-  io.out(i) <> cdbArb.io.out
-  loadOut(i) <> cdbArb.io.in(0)
-  lsroq.io.out(i) <> cdbArb.io.in(1)
-})
+  (0 until 2).map(i => {
+    val cdbArb = Module(new Arbiter(new ExuOutput, 2))
+    io.out(i) <> cdbArb.io.out
+    loadOut(i) <> cdbArb.io.in(0)
+    lsroq.io.out(i) <> cdbArb.io.in(1)
+  })
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 1
 // Read paddr from store buffer, query DTAG in DCache
 //-------------------------------------------------------
 
-// LSROQ to store buffer
+  sbuffer.io.dcache <> io.dcache.store
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 2

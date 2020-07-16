@@ -19,9 +19,13 @@ class DtlbResp extends XSBundle with HasMEMConst {
   val miss = Bool()
 }
 
-class DtlbIO extends XSBundle with HasMEMConst {
+class DtlbToLsuIO extends XSBundle with HasMEMConst {
   val req = Vec(LoadPipelineWidth + StorePipelineWidth, Flipped(Valid(new DtlbReq)))
   val resp = Vec(LoadPipelineWidth + StorePipelineWidth, Valid(new DtlbResp))
+}
+
+class DtlbIO extends XSBundle with HasMEMConst {
+  val lsu = new DtlbToLsuIO
   // val l2 = TODO
 }
 
@@ -29,7 +33,7 @@ class Dtlb extends XSModule with HasMEMConst with NeedImpl{
   val io = IO(new DtlbIO)
   // Dtlb has 4 ports: 2 for load, 2 fore store 
   (0 until LoadPipelineWidth + StorePipelineWidth).map(i => {
-    io.resp(i).valid := io.req(i).valid
-    io.resp(i).bits.miss := DontCare
+    io.lsu.resp(i).valid := io.lsu.req(i).valid
+    io.lsu.resp(i).bits.miss := DontCare
   })
 }

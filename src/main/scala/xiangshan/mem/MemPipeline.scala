@@ -21,21 +21,25 @@ trait HasMEMConst{
 
 class MemPipeline(implicit val p: XSConfig) extends XSModule with NeedImpl{
   val io = IO(new Bundle{
-
+    val ldin = Vec(2, Flipped(Decoupled(new LduReq)))
+    val stin = Vec(2, Flipped(Decoupled(new StuReq)))
+    val out = Vec(2, Decoupled(new ExuOutput))
+    val redirect = Flipped(ValidIO(new Redirect))
   })
 
   val lsu = Module(new Lsu)
   val dcache = Module(new Dcache)
-  val mshq = Module(new MSHQ)
+  // val mshq = Module(new MSHQ)
   val dtlb = Module(new Dtlb)
-  val lsroq = Module(new LsRoq)
-  val sbuffer = Module(new Sbuffer)
 
-  lsu.io := DontCare
+  lsu.io.ldin <> io.ldin
+  lsu.io.stin <> io.stin
+  lsu.io.out <> io.out
+  lsu.io.redirect <> io.redirect
+  lsu.io.dcache <> dcache.io.lsu
+  lsu.io.dtlb <> dtlb.io.lsu
   dcache.io := DontCare
-  mshq.io := DontCare
   dtlb.io := DontCare
-  lsroq.io := DontCare
-  sbuffer.io := DontCare
+  // mshq.io := DontCare
 
 }

@@ -60,14 +60,19 @@ class DCacheStoreIO extends XSBundle
   val resp = DecoupledIO(new DCacheResp)
 }
 
-class DCacheIO extends XSBundle with HasMEMConst {
+class DcacheToLsuIO extends XSBundle with HasMEMConst {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
   val redirect = Flipped(ValidIO(new Redirect))
 }
 
+class DcacheIO extends XSBundle with HasMEMConst {
+  val lsu = new DcacheToLsuIO
+  // val l2 = TODO
+}
+
 class Dcache extends XSModule with NeedImpl{
-  val io = IO(new DCacheIO)
+  val io = IO(new DcacheIO)
   
   // Arbiter for 2 dcache ports in built in decache
   // store/refill only use port0, port1 is always assigned to load request
