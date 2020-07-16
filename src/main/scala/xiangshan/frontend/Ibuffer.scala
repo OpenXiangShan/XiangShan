@@ -5,6 +5,7 @@ import chisel3.util._
 
 import xiangshan._
 import utils._
+
 class Ibuffer extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
@@ -79,7 +80,8 @@ class Ibuffer extends XSModule {
   when(deqValid) {
     var deq_idx = 0.U(log2Up(DecodeWidth*2+1).W)
     for(i <- 0 until DecodeWidth) {
-      when(io.out(i).ready && ibuf_valid(head_ptr + deq_idx)) {
+      io.out(i).valid := ibuf_valid(head_ptr + deq_idx) // FIXME: need fix me when support RVC
+      when(ibuf_valid(head_ptr + deq_idx)) {
         when(ibuf(head_ptr + deq_idx)(1,0) =/= "b11".U) {
           // is RVC
           io.out(i).bits.instr := Cat(0.U(16.W), ibuf(head_ptr + deq_idx))
@@ -94,8 +96,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + deq_idx)
           io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + deq_idx)
           io.out(i).bits.isRVC := true.B
-          io.out(i).valid := true.B
-          ibuf_valid(head_ptr + deq_idx) := false.B
+          ibuf_valid(head_ptr + deq_idx) := !io.out(i).fire
         }.elsewhen(ibuf_valid(head_ptr + deq_idx + 1.U)) {
           // isn't RVC
           io.out(i).bits.instr := Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx))
@@ -110,9 +111,8 @@ class Ibuffer extends XSModule {
           io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + deq_idx)
           io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + deq_idx)
           io.out(i).bits.isRVC := false.B
-          io.out(i).valid := true.B
-          ibuf_valid(head_ptr + deq_idx) := false.B
-          ibuf_valid(head_ptr + deq_idx+1.U) := false.B
+          ibuf_valid(head_ptr + deq_idx) := !io.out(i).fire
+          ibuf_valid(head_ptr + deq_idx+1.U) := !io.out(i).fire
         }.otherwise {
           // half inst keep in buffer
           io.out(i).bits.instr := 0.U(32.W)
@@ -142,7 +142,6 @@ class Ibuffer extends XSModule {
         io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + (i<<1).U)
         io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + (i<<1).U)
         io.out(i).bits.isRVC := false.B
-        io.out(i).valid := false.B
       }
 
       // When can't deque, deq_idx+0

@@ -165,10 +165,17 @@ class BTB extends XSModule {
 
   // Update logic
   // 1 calculate new 2-bit saturated counter value
+  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
+    val oldSatTaken = old === ((1 << len)-1).U
+    val oldSatNotTaken = old === 0.U
+    Mux(oldSatTaken && taken, ((1 << len)-1-1).U,
+      Mux(oldSatNotTaken && !taken, 0.U,
+        Mux(taken, old + 1.U, old - 1.U)))
+  }
+
   val u = io.update
-  val newCtr = Mux(!u.hit, "b10".U, Mux(u.taken, Mux(u.oldCtr === "b11".U, "b11".U, u.oldCtr + 1.U),
-                                                           Mux(u.oldCtr === "b00".U, "b00".U, u.oldCtr - 1.U)))
-                                                      
+  val newCtr = Mux(!u.hit, "b10".U, satUpdate(u.oldCtr, 2, u.taken))
+
   val updateOnSaturated = u.taken && u.oldCtr === "b11".U || !u.taken && u.oldCtr === "b00".U
 
   // 2 write btb
