@@ -55,8 +55,8 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
   val mmio = Bool()
   val rollback = Bool()
 
-  val forwardMask = UInt(8.W)
-  val forwardData = UInt(XLEN.W)
+  val forwardMask = Vec(8, Bool())
+  val forwardData = Vec(8, UInt(8.W))
 }
 
 class LoadForwardQueryIO extends XSBundle with HasMEMConst {
@@ -126,12 +126,6 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     ))
   }
 
-  // store buffer
-  // TODO
-
-  // lsroq
-  // TODO
-
 //-------------------------------------------------------
 // Load Pipeline
 //-------------------------------------------------------
@@ -198,44 +192,33 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
-  // val dataBackVec = Wire(Vec(XLEN/8, (UInt((XLEN/8).W))))
-  // val dataBack = dataBackVec.asUInt
-  val forwardVec = Wire(Vec(8, UInt(8.W)))
-  val forwardWmask = WireInit(0.U(8.W))
-  forwardVec := DontCare
 
-  // generate dependency mask
-  def getDependencyMask(addr1: UInt, wmask1: UInt, id1: UInt, addr2: UInt, wmask2: UInt, id2: UInt): UInt = {
-    0.U // TODO
-  }
+  (0 until LoadPipelineWidth).map(i => {
 
-  // TODO: update forwardVec/forwardWmask accoring to lsroq
-  // forwardVec := VecInit(List.tabulate(storeQueueSize)(i => {
-  //   i.U < storeHeadPtr && io.dmem.req.bits.addr(PAddrBits-1, log2Up(XLEN/8)) === storeQueue(i).paddr(PAddrBits-1, log2Up(XLEN/8)) && storeQueue(i).valid
-  // }))
-  // forwardWmask := List.tabulate(storeQueueSize)(i => storeQueue(i).wmask & Fill(XLEN/8, forwardVec(i))).foldRight(0.U)((sum, i) => sum | i)
-  // for(j <- (0 to (XLEN/8 - 1))){
-  //   dataBackVec(j) := MuxCase( 
-  //     // default = dmem.resp.bits.rdata(8*(j+1)-1, 8*j), 
-  //     default = 0.U,
-  //     mapping = List.tabulate(storeQueueSize)(i => {
-  //       (forwardVec(i) && storeQueue(i).wmask(j), storeQueue(i).data(8*(j+1)-1, 8*j))
-  //     }).reverse
-  //   )
-  // }
-
-  // TODO: update forwardVec/forwardWmask accoring to store buffer
-  // forwardVec :=
-  // forwardWmask :=
-
-  // generate forward mask / data
-  // (0 until LoadPipelineWidth).map(i => {
-  //   when(s4_out(i).valid){
-  //     s4_out(i).forwardMask := forwardWmask
-  //     s4_out(i).forwardData := forwardVec.asUInt
-  //   }
-  // })
-
+    lsroq.io.forward(i).paddr := l4_out(i).bits.paddr
+    lsroq.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
+    lsroq.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
+    lsroq.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    
+    sbuffer.io.forward(i).paddr := l4_out(i).bits.paddr
+    sbuffer.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
+    sbuffer.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
+    sbuffer.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    
+    val forwardVec = WireInit(lsroq.io.forward(i).forwardData)
+    val forwardMask = WireInit(lsroq.io.forward(i).forwardMask)
+    (0 until XLEN/8).map(j => {
+      when(sbuffer.io.forward(i).forwardMask(j)){
+        forwardMask(j) := true.B
+        forwardVec(j) := sbuffer.io.forward(i).forwardData(j)
+      }
+    // generate XLEN/8 Muxs
+    })
+    
+    l4_out(i).bits.forwardMask := forwardMask
+    l4_out(i).bits.forwardData := forwardVec
+  })
+  
   (0 until LoadPipelineWidth).map(i => {
     PipelineConnect(l4_out(i), l5_in(i), l5_out(i).fire(), l5_in(i).bits.uop.brTag.needFlush(io.redirect))
   })
@@ -252,7 +235,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     // data merge
     val rdata = VecInit((0 until 8).map(j => {
       Mux(l5_in(i).bits.forwardMask(j), 
-        l5_in(i).bits.forwardData(8*(j+1)-1, 8*j), 
+        l5_in(i).bits.forwardData(j), 
         l5_in(i).bits.data(8*(j+1)-1, 8*j)
       )
     })).asUInt

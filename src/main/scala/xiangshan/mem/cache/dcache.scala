@@ -22,6 +22,7 @@ object CacheOp {
 class DcacheUserBundle extends XSBundle with HasMEMConst {
   val uop = Output(new MicroOp) //FIXME: opt data width
   val mmio = Output(Bool())
+  val mask  = UInt((XLEN/8).W)
   // val tlbmiss = Output(Bool())
 }
 

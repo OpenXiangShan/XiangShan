@@ -20,7 +20,7 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
     val dcache = Flipped(new DCacheStoreIO)
-    val loadForwardQuery = Flipped(new LoadForwardQueryIO)
+    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 
   // Get retired store from lsroq
@@ -45,17 +45,19 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
   }
 
   // loadForwardQuery
-  io.loadForwardQuery.forwardMask := VecInit(List.fill(XLEN / 8)(false.B))
-  io.loadForwardQuery.forwardData := DontCare
-  // (0 until SbufferSize).map(i => {
-  //   when(io.loadForwardQuery.paddr match sbuffer(i).paddr){
-  //     (0 until XLEN / 8).map(j => {
-  //       when(io.loadForwardQuery.mask match sbuffer(i)(j).mask){
-  //         io.loadForwardQuery.forwardMask(j) := true.B
-  //         io.loadForwardQuery.forwardData(j) := sbuffer(i)(j).data
-  //       }
-  //     })
-  //   }
-  // })
+  (0 until LoadPipelineWidth).map(i => {
+    io.forward(i).forwardMask := VecInit(List.fill(XLEN / 8)(false.B))
+    io.forward(i).forwardData := DontCare
+    // (0 until SbufferSize).map(i => {
+    //   when(io.loadForwardQuery.paddr match sbuffer(i).paddr){
+    //     (0 until XLEN / 8).map(j => {
+    //       when(io.loadForwardQuery.mask match sbuffer(i)(j).mask){
+    //         io.loadForwardQuery.forwardMask(j) := true.B
+    //         io.loadForwardQuery.forwardData(j) := sbuffer(i)(j).data
+    //       }
+    //     })
+    //   }
+    // })
+  })
 }
   
