@@ -15,22 +15,56 @@ class SbufferUserBundle extends XSBundle with HasMEMConst {
   val lsroqId = UInt(log2Up(LSRoqSize).W)
 }
 
+class SBufferCacheLine extends XSBundle {
+  val valid = Bool()
+  val tag = UInt((PAddrBits - log2Up(CacheLineSize / 8)).W)
+  val data = UInt(CacheLineSize.W)
+  val mask = UInt((CacheLineSize / 8).W)
+  val lruCnt = UInt(32.W)
+}
+
 // Store buffer for XiangShan Out of Order LSU
 class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
   val io = IO(new Bundle() {
+    // DCacheStoreReq:
+    // * receive pa and data from lsroq
+    // * mask for cache line
+    // * miss?
+    // * user: uop + ismmio + mask for double word
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
+
+    // DCacheStoreIO
+    // * req: output DCacheStoreReq
+    // * resp: input DCacheResp
     val dcache = Flipped(new DCacheStoreIO)
+    // LoadForward
+    // input:
+    //   * paddr and mask(8-bit)
+    //   * moqIdx: index in lsroq
+    //   * pc
+    // output:
+    //   * mask and data vec (8 for 8 bytes)
+    //     - mask: bool
+    //     - data: represent 1 byte
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 
+  val cache = RegInit(VecInit(Seq.fill(SbufferSize)(0.U.asTypeOf(new SBufferCacheLine))))
+
   // Get retired store from lsroq
   (0 until StorePipelineWidth).map(i => {
-    io.in(i).ready := DontCare
+    io.in(i).ready := DontCare // when there is empty line for this query
     when(io.in(i).fire()){
       // Add to sbuffer
       // io.in(i).paddr
       // io.in(i).data
       // io.in(i).mask // 8 bit -> 1 bit mask
+
+      // 1. search if paddr falls in current lines
+      //    * update current 'data' and 'mask' field, then set lruCnt to 0
+      // 2. otherwise
+      //                 if there is empty line: modify valid + tag + data + mask + lruCnt
+      //                 else: write back certain line first
     }
   })
 
