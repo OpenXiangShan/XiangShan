@@ -97,8 +97,11 @@ class FreeList extends XSModule with HasFreeListConsts {
     XSDebug(p"req:$allocReq canAlloc:$canAlloc pdest:$pdest headNext:$headPtrNext\n")
   }
 
-  headPtr := Mux(io.redirect.valid,
-    checkPoints(io.redirect.bits.brTag.value), // mispredict or exception happen
+  headPtr := Mux(io.redirect.valid, // mispredict or exception happen
+    Mux(io.redirect.bits.isException,
+      tailPtr,
+      checkPoints(io.redirect.bits.brTag.value)
+    ),
     headPtrNext
   )
 
