@@ -51,7 +51,7 @@ class BTB extends XSModule {
     val in = new Bundle {
       val pc = Flipped(Decoupled(UInt(VAddrBits.W)))
       val pcLatch = Input(UInt(VAddrBits.W))
-      val mask = Input(UInt((PredictWidth).W))
+      val mask = Input(UInt(PredictWidth.W))
     }
     val redirectValid = Input(Bool())
     val flush = Input(Bool())
