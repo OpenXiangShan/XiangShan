@@ -50,7 +50,7 @@ class BranchPrediction extends XSBundle {
   val instrValid = Vec(FetchWidth*2, Bool())
   // target of the first redirect instr in a fetch package
   val target = UInt(VAddrBits.W)
-
+  val lateJump = Bool()
   // save these info in brq!
   // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
   val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
