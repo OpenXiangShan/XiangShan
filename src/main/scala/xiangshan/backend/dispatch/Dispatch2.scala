@@ -205,12 +205,12 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
     else {
       val startIndex = lsExuIndexReg(i - exuParameters.IntExuCnt - exuParameters.FpExuCnt)
       io.enqIQData(i).bits.src1 := Mux(uop_reg(i).ctrl.src1Type === SrcType.pc,
-        uop_reg(i).cf.pc, io.readIntRf(startIndex).data)
+        uop_reg(i).cf.pc, io.readIntRf(8).data)
       io.enqIQData(i).bits.src2 := Mux(uop_reg(i).ctrl.src2Type === SrcType.imm,
         uop_reg(i).ctrl.imm,
         Mux(uop_reg(i).ctrl.src2Type === SrcType.fp,
-          io.readFpRf(startIndex + 1.U).data,
-          io.readIntRf(startIndex + 1.U).data))
+          io.readFpRf(12).data,
+          io.readIntRf(9).data))
       srcIndex(0) := startIndex
       srcIndex(1) := startIndex + 1.U
       srcIndex(2) := 0.U

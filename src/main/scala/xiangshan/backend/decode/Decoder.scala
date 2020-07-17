@@ -54,7 +54,7 @@ class Decoder extends XSModule with HasInstrType {
   val rfWen = isrfWen(instrType)
   val fpWen = isfpWen(instrType)
   io.out.ctrl.lsrc1 := Mux(src1Type === SrcType.pc, 0.U, rs)
-  io.out.ctrl.lsrc2 := Mux(src2Type === SrcType.reg, rt, 0.U)
+  io.out.ctrl.lsrc2 := Mux(src2Type === SrcType.imm, 0.U, rt)
   io.out.ctrl.rfWen := rfWen
   io.out.ctrl.fpWen := fpWen
   io.out.ctrl.ldest := Mux(fpWen || rfWen, rd, 0.U)
