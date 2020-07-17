@@ -36,7 +36,7 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
     // * mask for cache line
     // * miss?
     // * user: uop + ismmio + mask for double word
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new LsPipelineBundle)))
 
     // DCacheStoreIO
     // * req: output DCacheStoreReq
