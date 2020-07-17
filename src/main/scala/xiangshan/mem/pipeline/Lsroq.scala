@@ -34,7 +34,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val scommit = Input(UInt(3.W))
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    // val rollback = TODO
+    val rollback = Output(Valid(new Redirect))
     // val miss = new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth)
   })
 
@@ -109,6 +109,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
       // }.otherwise{
         assert(!io.loadIn(i).bits.miss)
         valid(io.loadIn(i).bits.uop.moqIdx) := true.B
+        writebacked(io.loadIn(i).bits.uop.moqIdx) := true.B
         data(io.loadIn(i).bits.uop.moqIdx).paddr := io.loadIn(i).bits.paddr
         data(io.loadIn(i).bits.uop.moqIdx).mask := io.loadIn(i).bits.mask
         data(io.loadIn(i).bits.uop.moqIdx).data := io.loadIn(i).bits.data
@@ -234,14 +235,62 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
       }
     })
   })
+  
+  val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
 
   // store backward query and rollback
-  // TODO
-  // val rollback = 
+  val needCheck = Seq.fill(8)(WireInit(true.B))
   (0 until StorePipelineWidth).map(i => {
+    rollback(i) := DontCare
+    rollback(i).valid := false.B
     when(io.storeIn(i).valid){
-
+      val needCheck = Seq.fill(MoqSize+1)(Seq.fill(8)(WireInit(true.B)))
+      (1 until MoqSize).map(j => {
+        val ptr = io.forward(i).moqIdx + j.U
+        val reachHead = ptr === ringBufferHeadExtended
+        val addrMatch = writebacked(ptr) && allocated(ptr) &&
+        io.storeIn(i).bits.paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
+        (0 until 8).map(k => {
+          when(needCheck(j)(k) && addrMatch && data(ptr).mask(k) && io.storeIn(i).bits.mask(k)){
+            rollback(i).valid := true.B
+            rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
+            rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+          }
+          needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && store(ptr)) && !reachHead
+        })
+        
+        // when l/s writeback to roq together, check if rollback is needed
+        when(io.storeIn(i).valid && io.storeIn(i).bits.uop.moqIdx === ptr){
+          (0 until LoadPipelineWidth).map(j => {
+            when(
+              io.loadIn(j).valid &&
+              io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.loadIn(j).bits.paddr(PAddrBits-1, 3) &&
+              (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
+            ){
+              rollback(i).valid := true.B
+              rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+              rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
+            }
+          })
+        }
+      })
     }
   })
+
+  val rollRoqIdx = (0 until StorePipelineWidth).map(i => {
+    rollback(i).bits.roqIdx
+  })
+
+  // FIXME: this is ugly
+  val rollbackSel = Mux(
+    rollback(0).valid && rollback(1).valid, 
+    Mux(rollRoqIdx(0)(InnerRoqIdxWidth) === rollRoqIdx(0)(InnerRoqIdxWidth),
+      rollRoqIdx(0)(InnerRoqIdxWidth-1, 0) > rollRoqIdx(0)(InnerRoqIdxWidth-1, 0),
+      rollRoqIdx(0)(InnerRoqIdxWidth-1, 0) < rollRoqIdx(0)(InnerRoqIdxWidth-1, 0)
+    ),
+    rollback(1).valid
+  )
+
+  io.rollback := rollback(rollbackSel)
 
 }

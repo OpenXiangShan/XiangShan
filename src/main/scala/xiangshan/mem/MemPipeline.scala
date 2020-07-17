@@ -25,6 +25,7 @@ class MemPipeline(implicit val p: XSConfig) extends XSModule with NeedImpl{
     val stin = Vec(2, Flipped(Decoupled(new StuReq)))
     val out = Vec(2, Decoupled(new ExuOutput))
     val redirect = Flipped(ValidIO(new Redirect))
+    val rollback = ValidIO(new Redirect)
   })
 
   val lsu = Module(new Lsu)
@@ -41,5 +42,7 @@ class MemPipeline(implicit val p: XSConfig) extends XSModule with NeedImpl{
   dcache.io := DontCare
   dtlb.io := DontCare
   // mshq.io := DontCare
+
+  io.rollback <> lsu.io.rollback
 
 }

@@ -94,6 +94,7 @@ class LsuIO extends XSBundle with HasMEMConst {
   val stin = Vec(2, Flipped(Decoupled(new StuReq)))
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
+  val rollback = Output(Valid(new Redirect))
   val dcache = Flipped(new DcacheToLsuIO)
   val dtlb = Flipped(new DtlbToLsuIO)
 }
@@ -107,6 +108,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   val sbuffer = Module(new Sbuffer)
   lsroq.io := DontCare // FIXME
   sbuffer.io := DontCare // FIXME
+
+  io.rollback <> lsroq.io.rollback
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
