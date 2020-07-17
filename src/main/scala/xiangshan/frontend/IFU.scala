@@ -163,11 +163,13 @@ class IFU extends XSModule with HasIFUConst
     //redirect: tage result differ btb
     if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
 
+    /*
     if(EnableBPD){
       when(!if4_tage_taken && if4_btb_taken && if4_valid){
         if1_npc := if4_pc + (PopCount(io.fetchPacket.bits.mask) >> 2.U)
       }
     }
+    */
 
     //redirect: miss predict
     when(io.redirectInfo.flush()){
