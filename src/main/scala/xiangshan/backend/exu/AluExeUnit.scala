@@ -54,13 +54,27 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   val target = Mux(isBranch, pc + offset, adderRes)(VAddrBits-1,0)
   val isRVC = uop.cf.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
 
+
   io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   io.out.bits.redirectValid := io.out.valid && isBru//isBranch
+  io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
+  io.out.bits.redirect.brTarget := target
   io.out.bits.redirect.brTag := uop.brTag
+  io.out.bits.redirect._type := "b00".U  
+  io.out.bits.redirect.taken := isBranch && taken
+  io.out.bits.redirect.hist := uop.cf.hist
+  io.out.bits.redirect.tageMeta := uop.cf.tageMeta
+  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
+  // io.out.bits.redirect.btbVictimWay := uop.cf.btbVictimWay
+  io.out.bits.redirect.btbPredCtr := uop.cf.btbPredCtr
+  io.out.bits.redirect.btbHitWay := uop.cf.btbHitWay
+  io.out.bits.redirect.rasSp := uop.cf.rasSp
+  io.out.bits.redirect.rasTopCtr := uop.cf.rasTopCtr
   io.out.bits.redirect.isException := DontCare // false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
+
 
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop

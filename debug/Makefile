@@ -2,26 +2,33 @@ ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
+B ?= 0
+E ?= 0
+V ?= ALL
+#V ?= OFF
+EMU_ARGS = B=$(B) E=$(E) V=$(V)
+
 # ------------------------------------------------------------------
 # bulid CPU and run dummy test
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy run
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 
 
 # ------------------------------------------------------------------
 # run different test sets
 # ------------------------------------------------------------------
 
 cputest:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) run 2>&1 | tee > cpu.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2>&1 | tee > cpu.log
 	cat cpu.log | grep different
+	cat cpu.log | grep IPC
 
 # bputest:
 # 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
 # 	cat bpu.log | grep different
 bputest:
-	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) ALL=forcall2 run 2>&1 | tee > bpu.log
+	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
 	cat bpu.log | grep Mbp
 
 amtest:
@@ -83,7 +90,8 @@ disassemble-xv6:
 
 
 P = 4
-SUITE = xiangshan.backend.exu.AluTest
+#SUITE = xiangshan.backend.exu.AluTest
+SUITE = IFUtest
 
 unit-test:
 	cd .. && mill chiselModule.test.testOnly -o -s $(SUITE) -P$(P)

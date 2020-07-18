@@ -71,6 +71,14 @@ class Decoder extends XSModule with HasInstrType {
   ))
   io.out.ctrl.imm := imm
 
+ when (fuType === FuType.jmp) {
+   def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
+   when (isLink(rd) && fuOpType === JumpOpType.jal) { io.out.ctrl.fuOpType := JumpOpType.call }
+   when (fuOpType === JumpOpType.jalr) {
+     when (isLink(rs)) { io.out.ctrl.fuOpType := JumpOpType.ret }
+     when (isLink(rt)) { io.out.ctrl.fuOpType := JumpOpType.call }
+   }
+ }
   // fix LUI
   io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type

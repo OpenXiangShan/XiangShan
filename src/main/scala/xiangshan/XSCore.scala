@@ -7,7 +7,7 @@ import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
-import xiangshan.frontend.Frontend
+import xiangshan.frontend._
 import utils._
 
 trait HasXSParameter {
@@ -26,6 +26,17 @@ trait HasXSParameter {
   val DataBytes = DataBits / 8
   val HasFPU = true
   val FetchWidth = 8
+  val PredictWidth = FetchWidth * 2
+  val EnableBPU = true
+  val EnableBPD = false // enable backing predictor(like Tage) in BPUStage3
+  val HistoryLength = 64
+  val BtbSize = 256
+  // val BtbWays = 4
+  val BtbBanks = PredictWidth
+  // val BtbSets = BtbSize / BtbWays
+  val JbtacSize = 1024
+  val JbtacBanks = 8
+  val RasSize = 16
   val IBufSize = 64
   val DecodeWidth = 6
   val RenameWidth = 6
@@ -81,6 +92,7 @@ trait NeedImpl { this: Module =>
 
 abstract class XSBundle extends Bundle
   with HasXSParameter
+  with HasTageParameter
 
 case class XSConfig
 (
