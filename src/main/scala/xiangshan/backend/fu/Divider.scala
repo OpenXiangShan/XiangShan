@@ -22,6 +22,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
 
   val (a, b) = (io.in.bits.src1, io.in.bits.src2)
   val divBy0 = b === 0.U(len.W)
+  val divBy0Reg = RegEnable(divBy0, newReq)
 
   val shiftReg = Reg(UInt((1 + len * 2).W))
   val hi = shiftReg(len * 2, len)
@@ -50,7 +51,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
     // When divide by 0, the quotient should be all 1's.
     // Therefore we can not shift in 0s here.
     // We do not skip any shift to avoid this.
-    cnt.value := Mux(divBy0, 0.U, Mux(canSkipShift >= (len-1).U, (len-1).U, canSkipShift))
+    cnt.value := Mux(divBy0Reg, 0.U, Mux(canSkipShift >= (len-1).U, (len-1).U, canSkipShift))
     state := s_shift
   } .elsewhen (state === s_shift) {
     shiftReg := aValx2Reg << cnt.value

@@ -31,6 +31,31 @@ class UARTGetc extends BlackBox with HasBlackBoxInline {
      """.stripMargin)
 }
 
+class UARTPutc extends BlackBox with HasBlackBoxInline {
+  val io = IO(new Bundle {
+    val clk = Input(Clock())
+    val putc = Input(Bool())
+    val ch = Input(UInt(8.W))
+  })
+
+  setInline("UARTPutc.v",
+    """
+       |module UARTPutc (
+       |  input clk,
+       |  input putc,
+       |  input [7:0] ch
+       |);
+       |
+       |  always@(posedge clk) begin
+       |    if (putc) begin
+       |      $fwrite(32'h80000001, "%c", ch);
+       |    end
+       |  end
+       |
+       |endmodule
+     """.stripMargin)
+}
+
 class AXI4UART extends AXI4SlaveModule(new AXI4Lite) {
   val rxfifo = RegInit(0.U(32.W))
   val txfifo = Reg(UInt(32.W))
@@ -41,12 +66,17 @@ class AXI4UART extends AXI4SlaveModule(new AXI4Lite) {
   getcHelper.io.clk := clock
   getcHelper.io.getc := (raddr(3,0) === 0.U && ren)
 
-  def putc(c: UInt): UInt = { printf("%c", c(7,0)); c }
+  val putcHelper = Module(new UARTPutc)
+  putcHelper.io.clk := clock
+  putcHelper.io.putc := waddr(3, 0)===4.U && in.w.fire()
+  putcHelper.io.ch := in.w.bits.data(7, 0)
+
+//  def putc(c: UInt): UInt = { printf("%c", c(7,0)); c }
   def getc = getcHelper.io.ch
 
   val mapping = Map(
     RegMap(0x0, getc, RegMap.Unwritable),
-    RegMap(0x4, txfifo, putc),
+    RegMap(0x4, txfifo),
     RegMap(0x8, stat),
     RegMap(0xc, ctrl)
   )
