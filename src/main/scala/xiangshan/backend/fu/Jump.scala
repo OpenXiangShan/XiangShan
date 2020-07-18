@@ -6,6 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
+import xiangshan.backend.decode.isa._
 
 class Jump extends FunctionUnit(jmpCfg){
   val io = IO(new ExuIO)
@@ -20,11 +21,21 @@ class Jump extends FunctionUnit(jmpCfg){
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   io.out.bits.redirectValid := valid
+  io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := target
+  io.out.bits.redirect.brTarget := target // DontCare
   io.out.bits.redirect.brTag := uop.brTag
+  io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  io.out.bits.redirect.taken := true.B
+  io.out.bits.redirect.hist := uop.cf.hist
+  io.out.bits.redirect.tageMeta := uop.cf.tageMeta
+  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
+  io.out.bits.redirect.btbPredCtr := uop.cf.btbPredCtr
+  io.out.bits.redirect.btbHitWay := uop.cf.btbHitWay
+  io.out.bits.redirect.rasSp := uop.cf.rasSp
+  io.out.bits.redirect.rasTopCtr := uop.cf.rasTopCtr
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
-  io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
 
   // Output
   val res = pcDelaySlot

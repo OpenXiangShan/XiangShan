@@ -45,8 +45,8 @@ package object backend {
     def isWordOp(func: UInt) = func(5)
 
     // TODO: move jal/jalr/call/ret from ALU to BRU&CSR
-    def jal  = "b011000".U
-    def jalr = "b011010".U
+    // def jal  = "b011000".U
+    // def jalr = "b011010".U
     // def cjalr= "b111010".U // pc + 2 instead of 4
     def beq  = "b010000".U
     def bne  = "b010001".U
@@ -55,9 +55,9 @@ package object backend {
     def bltu = "b010110".U
     def bgeu = "b010111".U
 
-    // for RAS
-    def call = "b011100".U
-    def ret  = "b011110".U
+    // // for RAS
+    // def call = "b011100".U
+    // def ret  = "b011110".U
 
     // def pcPlus2(func: UInt) = func(5)//[important]
     def isBranch(func: UInt) = func(4,3)===2.U
@@ -97,6 +97,7 @@ package object backend {
     def lbu  = "b000100".U
     def lhu  = "b000101".U
     def lwu  = "b000110".U
+    def flw  = "b010110".U
     def sb   = "b001000".U
     def sh   = "b001001".U
     def sw   = "b001010".U
