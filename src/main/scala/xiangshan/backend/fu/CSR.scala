@@ -591,7 +591,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
-  BoringUtils.addSource(intrVec, "intrVecIDU")
+  // BoringUtils.addSource(intrVec, "intrVecIDU")
   // val intrNO = PriorityEncoder(intrVec)
 
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(io.cfIn.intrVec(i), i.U, sum))
