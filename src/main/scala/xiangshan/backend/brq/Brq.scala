@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import chisel3.util.experimental.BoringUtils
 
 
 class BrqPtr extends XSBundle {
@@ -155,11 +156,11 @@ class Brq extends XSModule {
   for((enq, brTag) <- io.enqReqs.zip(io.brTags)){
     enq.ready := !full
     brTag := tailPtrNext
-    // TODO: check rvc and use predict npc
     when(enq.fire()){
-      brQueue(tailPtrNext.value).npc := enq.bits.cf.pc + 4.U
+      brQueue(tailPtrNext.value).npc := enq.bits.cf.pnpc
       brQueue(tailPtrNext.value).ptrFlag := tailPtrNext.flag
     }
+
     tailPtrNext = tailPtrNext + enq.fire()
     full = isFull(tailPtrNext, headPtrNext)
   }
@@ -176,6 +177,15 @@ class Brq extends XSModule {
       stateQueue(wbIdx) := s_wb
       brQueue(wbIdx).exuOut := exuWb.bits
       brQueue(wbIdx).misPred := brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
+      // brQueue(wbIdx).exuOut.redirect.hist := exuWb.bits.uop.cf.hist
+      // brQueue(wbIdx).exuOut.redirect.btbVictimWay := exuWb.bits.uop.cf.btbVictimWay
+      // brQueue(wbIdx).exuOut.redirect.btbPredCtr := exuWb.bits.uop.cf.btbPredCtr
+      // brQueue(wbIdx).exuOut.redirect.btbHitWay := exuWb.bits.uop.cf.btbHitWay
+      // brQueue(wbIdx).exuOut.redirect.tageMeta := exuWb.bits.uop.cf.tageMeta
+      // brQueue(wbIdx).exuOut.redirect.rasSp := exuWb.bits.uop.cf.rasSp
+      // brQueue(wbIdx).exuOut.redirect.rasTopCtr := exuWb.bits.uop.cf.rasTopCtr
+      // brQueue(wbIdx).exuOut.redirect.fetchIdx := exuWb.bits.uop.cf.fetchOffset << 2.U
+      brQueue(wbIdx).exuOut.redirect := exuWb.bits.redirect
     }
   }
 
@@ -213,4 +223,17 @@ class Brq extends XSModule {
 
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
   XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)} flptr:${io.redirect.bits.freelistAllocPtr}\n")
+  if(EnableBPU){
+    BoringUtils.addSource(io.out.fire(), "MbpInstr")
+    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred, "MbpRight")
+    BoringUtils.addSource(io.out.fire() && commitEntry.misPred, "MbpWrong")
+    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B, "MbpBRight")
+    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B, "MbpBWrong")
+    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J, "MbpJRight")
+    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J, "MbpJWrong")
+    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I, "MbpIRight")
+    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I, "MbpIWrong")
+    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R, "MbpRRight")
+    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R, "MbpRWrong")
+  }
 }
