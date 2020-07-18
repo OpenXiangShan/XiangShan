@@ -15,6 +15,8 @@
 
 #define DIFFTEST_WIDTH 6
 
+static char mybuf[BUFSIZ];
+
 class Emulator {
   const char *image;
   const char *mainargs;
@@ -75,6 +77,8 @@ class Emulator {
   {
     // init emu
     auto args = parse_args(argc, argv);
+
+    setbuf(stderr, mybuf);
 
     // srand
     srand(seed);
