@@ -222,7 +222,8 @@ class Brq extends XSModule {
   }
 
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
-  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)} flptr:${io.redirect.bits.freelistAllocPtr}\n")
+
+  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
   if(EnableBPU){
     BoringUtils.addSource(io.out.fire(), "MbpInstr")
     BoringUtils.addSource(io.out.fire() && !commitEntry.misPred, "MbpRight")

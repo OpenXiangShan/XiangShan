@@ -9,6 +9,7 @@ import bus.simplebus._
 import xiangshan.AddressSpace
 import xiangshan.backend._
 import xiangshan.backend.brq.BrqPtr
+import fpu.boxF32ToF64
 
 
 class StoreQueueEntry extends XSBundle{
@@ -110,7 +111,8 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
       LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+      LSUOpType.flw  -> boxF32ToF64(rdataSel(31,0))
   ))
 
   // pop store queue if insts have been commited and dmem req fired successfully
