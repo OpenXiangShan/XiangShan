@@ -222,4 +222,5 @@ class Emulator {
   }
   uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
+  uint32_t get_seed() const { return seed; }
 };
