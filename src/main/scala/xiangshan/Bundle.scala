@@ -121,7 +121,6 @@ class MicroOp extends CfCtrl {
 
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-  val freelistAllocPtr = new FreeListPtr
   val roqIdx = UInt(RoqIdxWidth.W)
 }
 
@@ -144,7 +143,6 @@ class Redirect extends XSBundle {
   val rasTopCtr = UInt(8.W)
   val isException = Bool()
   val roqIdx = UInt(RoqIdxWidth.W)
-  val freelistAllocPtr = new FreeListPtr
 }
 
 class RedirectInfo extends XSBundle {

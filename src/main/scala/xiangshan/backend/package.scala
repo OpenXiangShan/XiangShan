@@ -97,6 +97,7 @@ package object backend {
     def lbu  = "b000100".U
     def lhu  = "b000101".U
     def lwu  = "b000110".U
+    def flw  = "b010110".U
     def sb   = "b001000".U
     def sh   = "b001001".U
     def sw   = "b001010".U
