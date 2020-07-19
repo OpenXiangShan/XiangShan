@@ -3,6 +3,8 @@ package xiangshan.backend.exu
 import chisel3._
 import xiangshan.{ExuOutput, FuType, XSConfig}
 import xiangshan.backend.fu.{CSR, Jump}
+import xiangshan.backend.decode.isa._
+import utils._
 
 class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
 
@@ -38,9 +40,21 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.redirect.brTag := io.in.bits.uop.brTag
   csrExuOut.redirect.isException := false.B
   csrExuOut.redirect.roqIdx := io.in.bits.uop.roqIdx
-  csrExuOut.redirect.freelistAllocPtr := io.in.bits.uop.freelistAllocPtr
   csrExuOut.redirect.target := csr.io.redirect.target
   csrExuOut.debug := DontCare
+
+  val uop = io.in.bits.uop
+  csrExuOut.redirect.pc := uop.cf.pc
+  csrExuOut.redirect.brTarget := DontCare // DontCare
+  csrExuOut.redirect._type := LookupTree(uop.ctrl.fuOpType, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  csrExuOut.redirect.taken := false.B
+  csrExuOut.redirect.hist := uop.cf.hist
+  csrExuOut.redirect.tageMeta := uop.cf.tageMeta
+  csrExuOut.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
+  csrExuOut.redirect.btbPredCtr := uop.cf.btbPredCtr
+  csrExuOut.redirect.btbHitWay := uop.cf.btbHitWay
+  csrExuOut.redirect.rasSp := uop.cf.rasSp
+  csrExuOut.redirect.rasTopCtr := uop.cf.rasTopCtr
 
   jmp.io.in.bits := io.in.bits
   jmp.io.in.valid := io.in.valid && io.in.bits.uop.ctrl.fuType===FuType.jmp

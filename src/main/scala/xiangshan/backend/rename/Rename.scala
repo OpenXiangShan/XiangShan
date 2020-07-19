@@ -35,7 +35,7 @@ class Rename extends XSModule {
         p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
         p"lsrc3:${in.bits.ctrl.lsrc3} -> psrc3:${out.bits.psrc3} " +
         p"ldest:${in.bits.ctrl.ldest} -> pdest:${out.bits.pdest} " +
-        p"old_pdest:${out.bits.old_pdest} flptr:${out.bits.freelistAllocPtr} " +
+        p"old_pdest:${out.bits.old_pdest} " +
         p"out v:${out.valid} r:${out.ready}\n"
     )
   }
@@ -49,7 +49,7 @@ class Rename extends XSModule {
   val intRat = Module(new RenameTable(float = false)).io
   val fpBusyTable, intBusyTable = Module(new BusyTable).io
 
-  fpFreeList.redirect := DontCare
+  fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
 
   val flush = io.redirect.valid && io.redirect.bits.isException
@@ -88,13 +88,32 @@ class Rename extends XSModule {
     intFreeList.allocReqs(i) := needIntDest && lastReady && io.out(i).ready
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
-    val this_can_alloc = Mux(needIntDest, intCanAlloc, fpCanAlloc)
+    val this_can_alloc = Mux(
+      needIntDest,
+      intCanAlloc,
+      Mux(
+        needFpDest,
+        fpCanAlloc,
+        true.B
+      )
+    )
     io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc && !isWalk
+
+    // do checkpoints when a branch inst come
+    for(fl <- Seq(fpFreeList, intFreeList)){
+      fl.cpReqs(i).valid := inValid
+      fl.cpReqs(i).bits := io.in(i).bits.brTag
+    }
 
     lastReady = io.in(i).ready
 
-    uops(i).pdest := Mux(needIntDest, intFreeList.pdests(i), Mux(uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen, 0.U, fpFreeList.pdests(i)))
-    uops(i).freelistAllocPtr := intFreeList.allocPtrs(i)
+    uops(i).pdest := Mux(needIntDest,
+      intFreeList.pdests(i),
+      Mux(
+        uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen,
+        0.U, fpFreeList.pdests(i)
+      )
+    )
 
     io.out(i).valid := io.in(i).fire()
     io.out(i).bits := uops(i)
@@ -165,7 +184,7 @@ class Rename extends XSModule {
     val (intPhySrcVec, intOldPdest) = readRat(lsrcList.take(2), ldest, fp = false)
     val (fpPhySrcVec, fpOldPdest) = readRat(lsrcList, ldest, fp = true)
     uops(i).psrc1 := Mux(uops(i).ctrl.src1Type === SrcType.reg, intPhySrcVec(0), fpPhySrcVec(0))
-    uops(i).psrc2 := Mux(uops(i).ctrl.src1Type === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
+    uops(i).psrc2 := Mux(uops(i).ctrl.src2Type === SrcType.reg, intPhySrcVec(1), fpPhySrcVec(1))
     uops(i).psrc3 := fpPhySrcVec(2)
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
   }

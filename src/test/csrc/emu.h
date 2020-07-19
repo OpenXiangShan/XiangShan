@@ -15,6 +15,8 @@
 
 #define DIFFTEST_WIDTH 6
 
+static char mybuf[BUFSIZ];
+
 class Emulator {
   const char *image;
   const char *mainargs;
@@ -75,6 +77,8 @@ class Emulator {
   {
     // init emu
     auto args = parse_args(argc, argv);
+
+    setbuf(stderr, mybuf);
 
     // srand
     srand(seed);
@@ -169,7 +173,7 @@ class Emulator {
 
       //printf("xsstatus pc=%lx commit=%d\n", dut_ptr->io_difftest_thisPC, dut_ptr->io_difftest_commit);//FIXIT: delete me when dummy test is passed
 
-      if (!hascommit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
+      if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
         hascommit = 1;
         extern void init_difftest(uint64_t *reg);
         uint64_t reg[DIFFTEST_NR_REG];
@@ -222,4 +226,5 @@ class Emulator {
   }
   uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
+  uint32_t get_seed() const { return seed; }
 };
