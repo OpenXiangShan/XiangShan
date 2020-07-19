@@ -105,7 +105,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   val io = IO(new LsuIO)
 
   val lsroq = Module(new LsRoq)
-  val sbuffer = Module(new Sbuffer)
+  val sbuffer = Module(new FakeSbuffer)
   lsroq.io := DontCare // FIXME
   sbuffer.io := DontCare // FIXME
 
