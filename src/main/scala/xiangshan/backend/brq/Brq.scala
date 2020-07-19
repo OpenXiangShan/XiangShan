@@ -224,29 +224,25 @@ class Brq extends XSModule {
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
 
   XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
-  // val mbpInstr = io.out.fire()
-  // val mbpRight = io.out.fire() && !commitEntry.misPred
-  // val mbpWrong = io.out.fire() && commitEntry.misPred
-  // val mbpBRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.B
-  // val mbpBWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.B
-  // val mbpJRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.J
-  // val mbpJWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.J
-  // val mbpIRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.I
-  // val mbpIWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.I
-  // val mbpRRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.R
-  // val mbpRWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect.btbType===BTBtype.R
 
-  val mbpInstr = WireInit(false.B)
-  val mbpRight = WireInit(false.B)
-  val mbpWrong = WireInit(false.B)
-  val mbpBRight = WireInit(false.B)
-  val mbpBWrong = WireInit(false.B)
-  val mbpJRight = WireInit(false.B)
-  val mbpJWrong = WireInit(false.B)
-  val mbpIRight = WireInit(false.B)
-  val mbpIWrong = WireInit(false.B)
-  val mbpRRight = WireInit(false.B)
-  val mbpRWrong = WireInit(false.B)
+  val fire = io.out.fire()
+  val predRight = fire && !commitEntry.misPred
+  val predWrong = fire && commitEntry.misPred
+  val isBType = commitEntry.exuOut.redirect.btbType===BTBtype.B
+  val isJType = commitEntry.exuOut.redirect.btbType===BTBtype.J
+  val isIType = commitEntry.exuOut.redirect.btbType===BTBtype.I
+  val isRType = commitEntry.exuOut.redirect.btbType===BTBtype.R
+  val mbpInstr = fire
+  val mbpRight = predRight
+  val mbpWrong = predWrong
+  val mbpBRight = predRight && isBType
+  val mbpBWrong = predWrong && isBType
+  val mbpJRight = predRight && isJType
+  val mbpJWrong = predWrong && isJType
+  val mbpIRight = predRight && isIType
+  val mbpIWrong = predWrong && isIType
+  val mbpRRight = predRight && isRType
+  val mbpRWrong = predWrong && isRType
 
   if(EnableBPU){
     BoringUtils.addSource(mbpInstr, "MbpInstr")
