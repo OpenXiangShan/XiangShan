@@ -353,13 +353,14 @@ class BPUStage3 extends XSModule {
     Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
     inLatch.btb.targets(jmpIdx))))
   for (i <- 0 until FetchWidth) {
-    io.out.bits.instrValid(i) := (~(ntToT || tgtDiffers) || i.U <= jmpIdx) && io.predecode.mask(i)
+    io.out.bits.instrValid(i) := (~(ntToT || tgtDiffers) || i.U <= jmpIdx) && io.predecode.bits.mask(i)
   }
   io.flushBPU := io.out.bits.redirect && io.out.valid
 
   // speculative update RAS
   val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
-  rasWrite.retAddr := inLatch.pc + (callIdx << 2.U) + 4.U
+  val retAddr = inLatch.pc + (callIdx << 2.U) + 4.U
+  rasWrite.retAddr := retAddr
   val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
   rasWrite.ctr := Mux(allocNewEntry, 1.U, rasTop.ctr + 1.U)
   val rasWritePosition = Mux(allocNewEntry, sp.value + 1.U, sp.value)

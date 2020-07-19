@@ -11,7 +11,7 @@ IMAGE ?= temp
 
 # remote machine with high frequency to speedup verilog generation
 REMOTE ?= localhost
-REMOTE_PREFIX ?= /nfs/25
+REMOTE_PREFIX ?= /nfs/24
 REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 
 .DEFAULT_GOAL = verilog
