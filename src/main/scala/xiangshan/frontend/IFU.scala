@@ -54,7 +54,7 @@ class IFU extends XSModule with HasIFUConst
     val if1_pc = RegInit(resetVector.U(VAddrBits.W))
     //next
     val if2_ready = WireInit(false.B)
-    val if2_snpc = snpc(if1_pc) //TODO: this is ugly
+    val if2_snpc = snpc(if1_pc) //TODO: calculate snpc according to mask of current fetch packet
     val needflush = WireInit(false.B)
 
     //pipe fire
