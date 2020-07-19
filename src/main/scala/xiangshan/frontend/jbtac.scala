@@ -111,10 +111,10 @@ class JBTAC extends XSModule {
     }
   }
 
-  XSDebug(io.in.pc.fire(), "[JBTAC]read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
+  XSDebug(io.in.pc.fire(), "read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
     io.in.pc.bits, histXORAddr, readBank, readRow, io.in.hist)
-  XSDebug(nextFire, "[JBTAC]read_resp: pc=0x%x, bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
+  XSDebug(nextFire, "read_resp: pc=0x%x, bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
     io.in.pcLatch, readBankLatch, readRowLatch, readEntries(readBankLatch).target, readEntries(readBankLatch).offset, outHit)
-  XSDebug(io.redirectValid, "[JBTAC]update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d, type=0x%d\n",
+  XSDebug(io.redirectValid, "update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d, type=0x%d\n",
     io.update.fetchPC, writeValid, io.update.hist, writeBank, writeRow, io.update.target, io.update.fetchIdx, io.update._type)
 }
