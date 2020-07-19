@@ -15,6 +15,7 @@ import xiangshan.backend.fu.FunctionUnit
 import xiangshan.backend.issue.IssueQueue
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
+import xiangshan.mem._
 
 
 /** Backend Pipeline:
@@ -23,9 +24,10 @@ import xiangshan.backend.roq.Roq
 class Backend(implicit val p: XSConfig) extends XSModule
   with NeedImpl {
   val io = IO(new Bundle {
-    val dmem = new SimpleBusUC(addrBits = VAddrBits)
+    // val dmem = new SimpleBusUC(addrBits = VAddrBits)
     val memMMU = Flipped(new MemMMUIO)
     val frontend = Flipped(new FrontendToBackendIO)
+    val mem = Flipped(new MemToBackendIO)
   })
 
 
@@ -119,7 +121,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.bypassUops <> bypassQueues.map(_.io.selectedUop)
   })
 
-  lsuExeUnits.foreach(_.io.dmem <> io.dmem)
+  lsuExeUnits.foreach(_.io.dmem <> DontCare) // TODO
   lsuExeUnits.foreach(_.io.mcommit <> roq.io.mcommit)
 
   io.frontend.redirectInfo <> redirectInfo

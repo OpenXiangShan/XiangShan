@@ -122,7 +122,7 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class XSCore(implicit p: XSConfig) extends XSModule {
+class XSCore(implicit p: XSConfig) extends XSModule with HasMEMConst {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC
@@ -132,26 +132,27 @@ class XSCore(implicit p: XSConfig) extends XSModule {
 
   io.imem <> DontCare
 
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(3))
+  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2, userBits = DcacheUserBundleWidth))
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
-  val mem = Module(new MemPipeline)
-
-  mem.io := DontCare // FIXME
+  val mem = Module(new Memend)
 
   front.io.backend <> backend.io.frontend
+  mem.io.backend   <> backend.io.mem
 
   backend.io.memMMU.imem <> DontCare
 
   val dtlb = TLB(
-    in = backend.io.dmem,
+    in = mem.io.dmem,
     mem = dmemXbar.io.in(1),
     flush = false.B,
     csrMMU = backend.io.memMMU.dmem
-  )(TLBConfig(name = "dtlb", totalEntry = 64))
+  )(TLBConfig(name = "dtlb", totalEntry = 64, userBits = DcacheUserBundleWidth))
   dmemXbar.io.in(0) <> dtlb.io.out
-  dmemXbar.io.in(2) <> io.frontend
+  // dmemXbar.io.in(1) <> io.frontend
+
+  io.frontend <> DontCare
 
   io.dmem <> Cache(
     in = dmemXbar.io.out,
@@ -159,29 +160,6 @@ class XSCore(implicit p: XSConfig) extends XSModule {
     flush = "b00".U,
     empty = dtlb.io.cacheEmpty,
     enable = HasDcache
-  )(CacheConfig(name = "dcache"))
+  )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
 
-  XSDebug("(req valid, ready | resp valid, ready) \n")
-  XSDebug("c-mem(%x %x %x| %x %x) c-coh(%x %x %x| %x %x) cache (%x %x %x| %x %x) tlb (%x %x %x| %x %x)\n",
-    io.dmem.mem.req.valid,
-    io.dmem.mem.req.ready,
-    io.dmem.mem.req.bits.addr,
-    io.dmem.mem.resp.valid,
-    io.dmem.mem.resp.ready,
-    io.dmem.coh.req.valid,
-    io.dmem.coh.req.ready,
-    io.dmem.coh.req.bits.addr,
-    io.dmem.coh.resp.valid,
-    io.dmem.coh.resp.ready,
-    dmemXbar.io.out.req.valid,
-    dmemXbar.io.out.req.ready,
-    dmemXbar.io.out.req.bits.addr,
-    dmemXbar.io.out.resp.valid,
-    dmemXbar.io.out.resp.ready,
-    backend.io.dmem.req.valid,
-    backend.io.dmem.req.ready,
-    backend.io.dmem.req.bits.addr,
-    backend.io.dmem.resp.valid,
-    backend.io.dmem.resp.ready
-  )
 }
