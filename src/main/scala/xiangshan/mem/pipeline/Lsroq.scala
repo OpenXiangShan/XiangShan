@@ -192,19 +192,51 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
 
   // remove retired insts from lsroq, add retired store to sbuffer
   val scommitCnt = RegInit(0.U(log2Up(MoqSize).W))
-  val demoqCnt = WireInit(0.U(2.W)) // seem not enough
+  val demoqCnt = WireInit(0.U(3.W)) // seems not enough
+
+  // check insts at the tail of lsroq
+  // no more than 2 commited store insts can be sent to sbuffer 
+  var demoqStoreCnt = WireInit(0.U(2.W))
+  var demoqSucceedCnt = WireInit(0.U(3.W))
+  var demoqFreeEntryCnt = WireInit(0.U(3.W))
+  var demoqLegal = WireInit(true.B)
+  
+  // Lsroq -> sbuffer width: 2
+  (0 until 2).map(i => {
+    io.sbuffer(i) := DontCare //ignore higher bits of DCacheStoreReq data/mask
+    io.sbuffer(i).valid := false.B
+  })
+  (0 until 4).map(i => {
+    val ptrExt = ringBufferTailExtended + i.U
+    val ptr = ptrExt(InnerRoqIdxWidth-1, 0)
+    val isValidRetire = demoqSucceedCnt < scommitCnt && allocated(ptr) && valid(ptr) && writebacked(ptr) && !miss(ptr)
+    val isCanceled = !allocated(ptr)
+    demoqLegal = WireInit(demoqLegal && ptrExt =/= ringBufferHeadExtended)
+    when((isValidRetire || isCanceled) && demoqLegal){
+      when(store(ptr)){
+        io.sbuffer(demoqStoreCnt).valid := true.B
+        io.sbuffer(demoqStoreCnt).bits.paddr := data(ptr).paddr
+        io.sbuffer(demoqStoreCnt).bits.data := data(ptr).data
+        io.sbuffer(demoqStoreCnt).bits.mask := data(ptr).mask
+        io.sbuffer(demoqStoreCnt).bits.miss := false.B
+        io.sbuffer(demoqStoreCnt).bits.user.uop := uop(ptr)
+        io.sbuffer(demoqStoreCnt).bits.user.mmio := data(ptr).mmio
+        io.sbuffer(demoqStoreCnt).bits.user.mask := data(ptr).mask
+        io.sbuffer(demoqStoreCnt).bits.user.id := DontCare // always store
+        io.sbuffer(demoqStoreCnt).bits.user.paddr := DontCare
+        demoqStoreCnt = WireInit(demoqStoreCnt + Mux(demoqStoreCnt >= 2.U, 0.U, io.sbuffer(demoqStoreCnt(0)).ready.asUInt))
+      }
+      demoqFreeEntryCnt = WireInit(demoqFreeEntryCnt + 1.U)
+      demoqSucceedCnt = WireInit(demoqFreeEntryCnt + isValidRetire.asUInt)
+      val sbufferFull = store(ptr) && !io.sbuffer(demoqStoreCnt(0)).ready
+      demoqLegal = WireInit(demoqLegal && demoqStoreCnt < 2.U && !sbufferFull)
+    }
+  })
+
+  demoqCnt := demoqSucceedCnt
+  ringBufferTailExtended := ringBufferTailExtended + demoqFreeEntryCnt
 
   // load forward query
-  // TODO
-  // def needForward(taddr: UInt, tmask: UInt, tmoqIdx: UInt, saddr: UInt, smask: UInt, smoqIdx: UInt) = {
-  //   taddr(PAddrBits-1, 3) === saddr(PAddrBits-1, 3) && 
-  //   (tmask & smask).orR && 
-  //   tmoqIdx smoqIdx && 
-  //   allocated(i) &&
-  //   valid(i) &&
-  //   store(i)
-  // }
-
   // left.age < right.age
   def moqIdxOlderThan (left: UInt, right: UInt): Bool = {
     require(left.getWidth == MoqIdxWidth)
