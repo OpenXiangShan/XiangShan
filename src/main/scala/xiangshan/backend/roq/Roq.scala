@@ -17,7 +17,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
-    val scommit = Output(UInt(3.W))
+    val mcommit = Output(UInt(3.W))
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -172,9 +172,15 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
-  // commit store to lsu
-  val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
-  io.scommit := PopCount(validScommit.asUInt)
+  // commit load & store to lsu
+  // val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
+  val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => 
+    state === s_idle && io.commits(i).valid && 
+    microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu
+  )))
+  io.mcommit := PopCount(validMcommit.asUInt)
+
+  // TODO MMIO
 
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){

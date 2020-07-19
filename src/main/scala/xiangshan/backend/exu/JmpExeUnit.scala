@@ -12,7 +12,7 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
 
   jmp.io.out.ready := io.out.ready
   jmp.io.dmem <> DontCare
-  jmp.io.scommit := DontCare
+  jmp.io.mcommit := DontCare
   jmp.io.redirect := io.redirect
 
   val csr = Module(new CSR)

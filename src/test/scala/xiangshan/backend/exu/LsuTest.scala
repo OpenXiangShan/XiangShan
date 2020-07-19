@@ -26,7 +26,7 @@ class LsuDut(dispBegin: Int, dispEnd: Int) extends Exu(Exu.lsuExeUnitCfg) {
 
   lsu.io.in <> io.in
   lsu.io.redirect <> io.redirect
-  lsu.io.scommit <> io.scommit
+  lsu.io.mcommit <> io.mcommit
   io.out <> lsu.io.out
 
   val dmemXbar = Module(new SimpleBusCrossbarNto1(2))
@@ -108,7 +108,7 @@ class LsuTest
         genLsuLd(c.io.in.bits, BASE_ADDR, 8*i)
       })
 
-      c.io.pokePartial(chiselTypeOf(c.io).Lit(_.scommit -> 1.U))
+      c.io.pokePartial(chiselTypeOf(c.io).Lit(_.mcommit -> 1.U))
 
       fork{
         // enq stores

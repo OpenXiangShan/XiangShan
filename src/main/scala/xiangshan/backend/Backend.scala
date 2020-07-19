@@ -39,7 +39,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
   exeUnits.foreach(_.io.dmem := DontCare)
-  exeUnits.foreach(_.io.scommit := DontCare)
+  exeUnits.foreach(_.io.mcommit := DontCare)
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
@@ -120,7 +120,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   })
 
   lsuExeUnits.foreach(_.io.dmem <> io.dmem)
-  lsuExeUnits.foreach(_.io.scommit <> roq.io.scommit)
+  lsuExeUnits.foreach(_.io.mcommit <> roq.io.mcommit)
 
   io.frontend.redirectInfo <> redirectInfo
   io.frontend.commits <> roq.io.commits

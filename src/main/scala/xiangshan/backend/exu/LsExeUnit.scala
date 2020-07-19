@@ -154,7 +154,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   }
 
   // update stqTail, stqCommited
-  stqCommited := stqCommited + io.scommit - storeFinish
+  stqCommited := stqCommited + io.mcommit - storeFinish
   stqHead := stqHead + stqEnqueue - stqDequeue
 
   // Store addr forward match
