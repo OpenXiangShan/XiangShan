@@ -292,28 +292,25 @@ class BPUStage3 extends XSModule {
 
   // get the first taken branch/jal/call/jalr/ret in a fetch line
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction
-  val brs = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & io.predecode.bits.mask
-  val brTakenIdx = PriorityMux(brs & inLatch.tage.takens.asUInt, (0 until FetchWidth).map(_.U))
-  val jalIdx = PriorityMux(inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jal }).asUInt) & io.predecode.bits.mask, (0 until FetchWidth).map(_.U))
-  val callIdx = PriorityMux(inLatch.btb.hits & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.call }).asUInt), (0 until FetchWidth).map(_.U))
-  val jalrIdx = PriorityMux(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt), (0 until FetchWidth).map(_.U))
-  val retIdx = PriorityMux(io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt), (0 until FetchWidth).map(_.U))
 
-  val jmpIdx = Wire(UInt(log2Up(FetchWidth).W))
-  var idx = 0.U
-  io.s3Taken := false.B
-  for (i <- FetchWidth-1 to 0) {
-    val isBrTaken = brs(i) && inLatch.tage.takens(i)
-    val isJal = inLatch.btb.hits(i) && io.predecode.bits.fuOpTypes(i) === JumpOpType.jal && io.predecode.bits.mask(i)
-    val isCall = inLatch.btb.hits(i) && io.predecode.bits.fuOpTypes(i) === JumpOpType.call && io.predecode.bits.mask(i)
-    val isJalr = inLatch.jbtac.hitIdx(i) && io.predecode.bits.fuOpTypes(i) === JumpOpType.jalr && io.predecode.bits.mask(i)
-    val isRet = io.predecode.bits.fuOpTypes(i) === JumpOpType.ret && io.predecode.bits.mask(i) && EnableRAS.B
-    when (isBrTaken || isJal || isCall || isJalr || isRet) {
-      idx = i.U
-      io.s3Taken := true.B
-    }
-  }
-  jmpIdx := idx
+
+  val brs = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & io.predecode.bits.mask
+  val brTakens = brs & inLatch.tage.takens.asUInt
+  val jals = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jal }).asUInt) & io.predecode.bits.mask
+  val calls = inLatch.btb.hits & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.call }).asUInt)
+  val jalrs = inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt)
+  val rets = io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt)
+
+  val brTakenIdx = PriorityMux(brTakens, (0 until FetchWidth).map(_.U))
+  val jalIdx = PriorityMux(jals, (0 until FetchWidth).map(_.U))
+  val callIdx = PriorityMux(calls, (0 until FetchWidth).map(_.U))
+  val jalrIdx = PriorityMux(jalrs, (0 until FetchWidth).map(_.U))
+  val retIdx = PriorityMux(rets, (0 until FetchWidth).map(_.U))
+
+  val jmps = (if (EnableRAS) {brTakens | jals | calls | jalrs | rets} else {brTakens | jals | calls | jalrs})
+  val jmpIdx = MuxCase(0.U, (0 until FetchWidth).map(i => (jmps(i), i.U)))
+  io.s3Taken := MuxCase(false.B, (0 until FetchWidth).map(i => (jmps(i), true.B)))
+
   val brNotTakens = VecInit((0 until FetchWidth).map(i => brs(i) && ~inLatch.tage.takens(i) && i.U <= jmpIdx && io.predecode.bits.mask(i)))
 
 
@@ -353,7 +350,7 @@ class BPUStage3 extends XSModule {
     Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
     inLatch.btb.targets(jmpIdx))))
   for (i <- 0 until FetchWidth) {
-    io.out.bits.instrValid(i) := (~(ntToT || tgtDiffers) || i.U <= jmpIdx) && io.predecode.bits.mask(i)
+    io.out.bits.instrValid(i) := ((io.s3Taken && i.U <= jmpIdx) || ~io.s3Taken) && io.predecode.bits.mask(i)
   }
   io.flushBPU := io.out.bits.redirect && io.out.valid
 
@@ -396,8 +393,9 @@ class BPUStage3 extends XSModule {
     io.out.valid, inLatch.pc, io.out.bits.redirect, io.predecode.bits.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
   XSDebug(true.B, "flushS3=%d\n", flushS3)
   XSDebug(true.B, "validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
-  XSDebug(true.B, "brs=%b brTakenIdx=%d brNTakens=%b jalIdx=%d jalrIdx=%d callIdx=%d retIdx=%d\n",
-    brs, brTakenIdx, brNotTakens.asUInt, jalIdx, jalrIdx, callIdx, retIdx)
+  XSDebug(true.B, "jmpIdx=%d, brs=%b brTakenIdx=%d brNTakens=%b jalIdx=%d jalrIdx=%d callIdx=%d retIdx=%d\n",
+    jmpIdx, brs, brTakenIdx, brNotTakens.asUInt, jalIdx, jalrIdx, callIdx, retIdx)
+  XSDebug(true.B, "tgtDiffers:%d, dirDiffers:%d, s3taken=%d\n", tgtDiffers, dirDiffers, io.s3Taken)
 
   // BPU's TEMP Perf Cnt
   BoringUtils.addSource(io.out.valid, "MbpS3Cnt")

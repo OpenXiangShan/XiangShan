@@ -214,7 +214,7 @@ class BTB extends XSModule {
   }
   XSDebug(nextFire, "bankIdxInOrder:")
   for (i <- 0 until BtbBanks){ XSDebug(false, nextFire, "%d ", bankIdxInOrder(i))}
-  XSDebug(nextFire, "\n")
+  XSDebug(false, nextFire, "\n")
   XSDebug(io.redirectValid, "update_req: pc=0x%x, hit=%d, misPred=%d, oldCtr=%d, taken=%d, target=0x%x, _type=%d\n",
     u.pc, u.hit, u.misPred, u.oldCtr, u.taken, u.target, u._type)
   XSDebug(io.redirectValid, "update: noNeedToUpdate=%d, writeValid=%d, bank=%d, row=%d, newCtr=%d\n",
