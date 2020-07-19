@@ -14,6 +14,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
+    val exception = Output(new MicroOp)
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
@@ -48,7 +49,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // Dispatch
   val csrEnRoq = io.dp1Req.map(i => i.bits.ctrl.fuType === FuType.csr)
   val hasCsr = RegInit(false.B)
-  XSError(!(hasCsr && state === s_idle), "CSR block should only happen in s_idle")
+//  XSError(hasCsr && state =/= s_idle, "CSR block should only happen in s_idle: state %b\n", state)
   when(ringBufferEmpty){ hasCsr:= false.B }
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
   XSDebug("(ready, valid): ")
@@ -109,7 +110,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     switch(state){
       is(s_idle){
         val canCommit = if(i!=0) io.commits(i-1).valid else true.B
-        io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
+        io.commits(i).valid := (if (i == 0) ((valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U)) || io.redirect.valid) && canCommit
+          else valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit)
         io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
         when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
         XSInfo(io.commits(i).valid,
@@ -192,12 +194,25 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
   }
 
+  // when exception occurs, cancels all
+  when (io.redirect.valid) {
+    ringBufferHeadExtended := ringBufferTailExtended
+  }
+
   // TODO: roq redirect only used for exception
   val intrVec = WireInit(0.U(12.W))
   ExcitingUtils.addSink(intrVec, "intrVecIDU")
+  val trapTarget = WireInit(0.U(VAddrBits.W))
+  ExcitingUtils.addSink(trapTarget, "trapTarget")
+  val intrEnable = intrVec.orR
 //  io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
   io.redirect := DontCare
-  io.redirect.valid := intrVec.orR
+  io.redirect.valid := intrEnable && (state === s_idle) && !hasCsr && !ringBufferEmpty
+  io.redirect.bits.isException := true.B
+  io.redirect.bits.target := trapTarget
+  io.exception := microOp(ringBufferTail)
+
+  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x\n", io.exception.cf.pc, trapTarget)
 
   // debug info
   XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerRoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerRoqIdxWidth), ringBufferTail)
@@ -245,6 +260,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
+  val difftestIntrNO = WireInit(0.U(XLEN.W))
+  ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
+  XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %d\n", difftestIntrNO)
   if(!p.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
     BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
@@ -255,7 +273,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(wpc), "difftestWpc")
     BoringUtils.addSource(RegNext(wdata), "difftestWdata")
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
-    BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
+    BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
     //TODO: skip insts that commited in the same cycle ahead of exception
 
     class Monitor extends BlackBox {

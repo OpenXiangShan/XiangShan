@@ -163,10 +163,13 @@ class CSRIO extends FunctionUnitIO {
   val redirect = Output(new Redirect)
   val redirectValid = Output(Bool())
   val fpu_csr = Flipped(new FpuCsrIO)
+  val cfOut = Output(new CtrlFlow)
+  // from rob
+  val exception = Flipped(ValidIO(new MicroOp))
   // for exception check
   val instrValid = Input(Bool())
   // for differential testing
-  val intrNO = Output(UInt(XLEN.W))
+//  val intrNO = Output(UInt(XLEN.W))
   val imemMMU = Flipped(new MMUIO)
   val dmemMMU = Flipped(new MMUIO)
   val wenFix = Output(Bool())
@@ -174,6 +177,8 @@ class CSRIO extends FunctionUnitIO {
 
 class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRConst{
   val io = IO(new CSRIO)
+
+  io.cfOut := io.cfIn
 
   val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
@@ -510,12 +515,9 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val isSret = addr === privSret   && func === CSROpType.jmp
   val isUret = addr === privUret   && func === CSROpType.jmp
 
-  Debug(false){
-    when(wen){
-      printf("[CSR] csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.cfIn.pc, addr, rdata, wdata, func)
-      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-    }
-  }
+  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.cfIn.pc, addr, rdata, wdata, func)
+  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+
 
   // MMU Permission Check
 
@@ -550,19 +552,19 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   io.imemMMU.status_mxr := DontCare
   io.dmemMMU.status_mxr := mstatusStruct.mxr.asBool
 
-  val hasInstrPageFault = io.cfIn.exceptionVec(instrPageFault) && valid
+  val hasInstrPageFault = io.exception.bits.cf.exceptionVec(instrPageFault) && io.exception.valid
   val hasLoadPageFault = io.dmemMMU.loadPF
   val hasStorePageFault = io.dmemMMU.storePF
-  val hasStoreAddrMisaligned = io.cfIn.exceptionVec(storeAddrMisaligned)
-  val hasLoadAddrMisaligned = io.cfIn.exceptionVec(loadAddrMisaligned)
+  val hasStoreAddrMisaligned = io.exception.bits.cf.exceptionVec(storeAddrMisaligned)
+  val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned)
 
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
       Mux(
-        io.cfIn.crossPageIPFFix,
-        SignExt(io.cfIn.pc + 2.U, XLEN),
-        SignExt(io.cfIn.pc, XLEN)
+        io.exception.bits.cf.crossPageIPFFix,
+        SignExt(io.exception.bits.cf.pc + 2.U, XLEN),
+        SignExt(io.exception.bits.cf.pc, XLEN)
       ),
       SignExt(io.dmemMMU.addr, XLEN)
     )
@@ -594,9 +596,11 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   ExcitingUtils.addSource(intrVec, "intrVecIDU")
   // val intrNO = PriorityEncoder(intrVec)
 
-  val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(io.cfIn.intrVec(i), i.U, sum))
+  val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   // val intrNO = PriorityEncoder(io.cfIn.intrVec)
-  val raiseIntr = io.cfIn.intrVec.asUInt.orR
+//  val raiseIntr = io.cfIn.intrVec.asUInt.orR
+  val raiseIntr = intrVec.asUInt.orR && io.exception.valid
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
   val mtip = WireInit(false.B)
   val meip = WireInit(false.B)
@@ -618,28 +622,35 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
   val iduExceptionVec = io.cfIn.exceptionVec
-  val raiseExceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
-  val raiseException = raiseExceptionVec.orR
+  val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
+  io.cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
+//  val raiseException = raiseExceptionVec.orR
+//  val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  io.wenFix := DontCare
+//  val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
+
+  val raiseExceptionVec = io.exception.bits.cf.exceptionVec.asUInt()
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
-  io.wenFix := raiseException
-
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
-  io.intrNO := Mux(raiseIntr, causeNO, 0.U)
+  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+  ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
 
-  val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
+  val raiseExceptionIntr = io.exception.valid
+//  val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   val retTarget = Wire(UInt(VAddrBits.W))
   val trapTarget = Wire(UInt(VAddrBits.W))
+  ExcitingUtils.addSource(trapTarget, "trapTarget")
   io.redirect := DontCare
-  io.redirectValid := (valid && func === CSROpType.jmp) || raiseExceptionIntr || resetSatp
+  io.redirectValid := (valid && func === CSROpType.jmp) || resetSatp
   //TODO: use pred pc instead pc+4
   io.redirect.target := Mux(
     resetSatp,
     io.cfIn.pc+4.U,
-    Mux(
-      raiseExceptionIntr,
-      trapTarget,
+//    Mux(
+//      raiseExceptionIntr,
+//      trapTarget,
       retTarget
-    )
+//    )
   )
 
   XSDebug(
@@ -649,33 +660,17 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
     io.cfIn.pc
   )
 
-//  Debug(){
-//    when(raiseExceptionIntr){
-//      printf("[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-//      printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-//    }
-//    when(io.redirect.valid){
-//      printf("[CSR] redirect to %x\n", io.redirect.target)
-//    }
-//  }
+  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.exception.bits.cf.pc, intrNO, io.exception.bits.cf.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+  XSDebug(raiseExceptionIntr, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.exception.bits.cf.pc, mstatus, mideleg, medeleg, priviledgeMode)
 
-  // Debug(false){
-  // when(raiseExceptionIntr){
-  //   printf("[CSR] raiseExceptionIntr!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-  //   printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-  // }
+  XSDebug(io.redirectValid, "redirect to %x\n", io.redirect.target)
 
-  // when(valid && isMret){
-  //   printf("[CSR] Mret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-  //   printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-  // }
+  XSDebug(valid && isMret, "Mret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+  XSDebug(valid && isMret, "[MST] pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
 
-  // when(valid && isSret){
-  //   printf("[CSR] Sret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
-  //   printf("[MST] time %d pc %x mstatus %x mideleg %x medeleg %x mode %x\n", GTimer(), io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
-  // }
-  //printf("[CSR] Red(%d, %x) raiseExcepIntr:%d valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, valid, io.instrValid)
-  // }
+  XSDebug(valid && isSret, "Sret to %x!\n[CSR] int/exc: pc %x int (%d):%x exc: (%d):%x\n",retTarget, io.cfIn.pc, intrNO, io.cfIn.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
+  XSDebug(valid && isSret, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+  XSDebug("Redirect(%d, %x) raiseExcepIntr:%d valid:%d instrValid:%x \n", io.redirectValid, io.redirect.target, raiseExceptionIntr, valid, io.instrValid)
 
   // Branch control
 
@@ -687,7 +682,6 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   ret := isMret || isSret || isUret
   trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   retTarget := DontCare
-  // TODO redirect target
   // val illegalEret = TODO
 
   when (valid && isMret) {
@@ -733,7 +727,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
 
     when (delegS) {
       scause := causeNO
-      sepc := SignExt(io.cfIn.pc, XLEN)
+      sepc := SignExt(io.exception.bits.cf.pc, XLEN)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -743,7 +737,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
       // trapTarget := stvec(VAddrBits-1. 0)
     }.otherwise {
       mcause := causeNO
-      mepc := SignExt(io.cfIn.pc, XLEN)
+      mepc := SignExt(io.exception.bits.cf.pc, XLEN)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
@@ -764,16 +758,13 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   io.in.ready := true.B
   io.out.valid := valid
 
-//  Debug(false) {
-//    printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
-//  }
-//
-//  Debug(false) {
-//    when(raiseExceptionIntr && delegS ) {
-//      printf("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n", io.redirect.valid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
-//      printf("[CSR3] sepc is writen!!! pc:%x time:%d\n", io.cfIn.pc, GTimer())
-//    }
-//  }
+
+  XSDebug("[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n",
+    io.redirectValid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+  XSDebug(raiseExceptionIntr && delegS, "[CSR2] Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n",
+    io.redirectValid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+  XSDebug(raiseExceptionIntr && delegS, "[CSR3] sepc is writen!!! pc:%x\n", io.cfIn.pc)
+
 
   // perfcnt
 
@@ -842,13 +833,20 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
 //    }
 
     // for differential testing
-    BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
-    BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
-    BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus")
-    BoringUtils.addSource(RegNext(mepc), "difftestMepc")
-    BoringUtils.addSource(RegNext(sepc), "difftestSepc")
-    BoringUtils.addSource(RegNext(mcause), "difftestMcause")
-    BoringUtils.addSource(RegNext(scause), "difftestScause")
+//    BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
+//    BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
+//    BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus")
+//    BoringUtils.addSource(RegNext(mepc), "difftestMepc")
+//    BoringUtils.addSource(RegNext(sepc), "difftestSepc")
+//    BoringUtils.addSource(RegNext(mcause), "difftestMcause")
+//    BoringUtils.addSource(RegNext(scause), "difftestScause")
+    BoringUtils.addSource(priviledgeMode, "difftestMode")
+    BoringUtils.addSource(mstatus, "difftestMstatus")
+    BoringUtils.addSource(mstatus & sstatusRmask, "difftestSstatus")
+    BoringUtils.addSource(mepc, "difftestMepc")
+    BoringUtils.addSource(sepc, "difftestSepc")
+    BoringUtils.addSource(mcause, "difftestMcause")
+    BoringUtils.addSource(scause, "difftestScause")
   } else {
 //    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
