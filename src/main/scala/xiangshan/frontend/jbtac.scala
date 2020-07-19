@@ -86,7 +86,7 @@ class JBTAC extends XSModule {
 
   io.out.hit := outHit
   io.out.hitIdx := readEntries(readBankLatch).offset
-  io.out.target := readEntries(readBankLatch).
+  io.out.target := readEntries(readBankLatch).target
   io.out.isRVILateJump := io.out.hit && io.out.hitIdx === OHToUInt(HighestBit(readMaskLatch, PredictWidth)) && !readEntries(readBankLatch).isRVC
 
   // update jbtac

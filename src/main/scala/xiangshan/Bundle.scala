@@ -68,7 +68,7 @@ class BranchPrediction extends XSBundle {
 
 // Save predecode info in icache
 class Predecode extends XSBundle {
-  val mask = UInt(FetchWidth*2.W)
+  val mask = UInt((FetchWidth*2).W)
   val isRVC = Vec(FetchWidth*2, Bool())
   val fuTypes = Vec(FetchWidth*2, FuType())
   val fuOpTypes = Vec(FetchWidth*2, FuOpType())

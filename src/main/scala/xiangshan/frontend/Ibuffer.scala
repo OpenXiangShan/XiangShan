@@ -33,7 +33,7 @@ class Ibuffer extends XSModule {
   val ibuf_hist = Reg(Vec(IBufSize*2, UInt(HistoryLength.W)))
   // val ibuf_btbVictimWay = Reg(Vec(IBufSize*2, UInt(log2Up(BtbWays).W)))
   val ibuf_btbPredCtr = Reg(Vec(IBufSize*2, UInt(2.W)))
-  val ibuf_btbHitWay = Reg(Vec(IBufSize*2, Bool()))
+  val ibuf_btbHit = Reg(Vec(IBufSize*2, Bool()))
   val ibuf_tageMeta = Reg(Vec(IBufSize*2, (new TageMeta)))
   val ibuf_rasSp = Reg(Vec(IBufSize*2, UInt(log2Up(RasSize).W)))
   val ibuf_rasTopCtr = Reg(Vec(IBufSize*2, UInt(8.W)))
@@ -58,13 +58,13 @@ class Ibuffer extends XSModule {
       when(io.in.bits.mask(i)) {
         ibuf(tail_ptr + enq_idx) := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
         ibuf_pc(tail_ptr + enq_idx) := io.in.bits.pc + (enq_idx<<1).asUInt
-        ibuf_pnpc(tail_ptr + enq_idx) := io.in.bits.pnpc(i>>1)
+        ibuf_pnpc(tail_ptr + enq_idx) := io.in.bits.pnpc(i)
         ibuf_fetchOffset(tail_ptr + enq_idx) := (enq_idx << 1).asUInt
-        ibuf_hist(tail_ptr + enq_idx) := io.in.bits.hist(i>>1)
+        ibuf_hist(tail_ptr + enq_idx) := io.in.bits.hist(i)
         // ibuf_btbVictimWay(tail_ptr + enq_idx) := io.in.bits.btbVictimWay
-        ibuf_btbPredCtr(tail_ptr + enq_idx) := io.in.bits.predCtr(i>>1)
-        ibuf_btbHitWay(tail_ptr + enq_idx) := io.in.bits.btbHitWay
-        ibuf_tageMeta(tail_ptr + enq_idx) := io.in.bits.tageMeta(i>>1)
+        ibuf_btbPredCtr(tail_ptr + enq_idx) := io.in.bits.predCtr(i)
+        ibuf_btbHit(tail_ptr + enq_idx) := io.in.bits.btbHit(i)
+        ibuf_tageMeta(tail_ptr + enq_idx) := io.in.bits.tageMeta(i)
         ibuf_rasSp(tail_ptr + enq_idx) := io.in.bits.rasSp
         ibuf_rasTopCtr(tail_ptr + enq_idx) := io.in.bits.rasTopCtr
         ibuf_valid(tail_ptr + enq_idx) := true.B
@@ -91,7 +91,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.hist := ibuf_hist(head_ptr + deq_idx)
           // io.out(i).bits.btbVictimWay := ibuf_btbVictimWay(head_ptr + deq_idx)
           io.out(i).bits.btbPredCtr := ibuf_btbPredCtr(head_ptr + deq_idx)
-          io.out(i).bits.btbHitWay := ibuf_btbHitWay(head_ptr + deq_idx)
+          io.out(i).bits.btbHit := ibuf_btbHit(head_ptr + deq_idx)
           io.out(i).bits.tageMeta := ibuf_tageMeta(head_ptr + deq_idx)
           io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + deq_idx)
           io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + deq_idx)
@@ -106,7 +106,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.hist := ibuf_hist(head_ptr + deq_idx)
           // io.out(i).bits.btbVictimWay := ibuf_btbVictimWay(head_ptr + deq_idx)
           io.out(i).bits.btbPredCtr := ibuf_btbPredCtr(head_ptr + deq_idx)
-          io.out(i).bits.btbHitWay := ibuf_btbHitWay(head_ptr + deq_idx)
+          io.out(i).bits.btbHit := ibuf_btbHit(head_ptr + deq_idx)
           io.out(i).bits.tageMeta := ibuf_tageMeta(head_ptr + deq_idx)
           io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + deq_idx)
           io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + deq_idx)
@@ -122,7 +122,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.hist := 0.U(HistoryLength.W)
           // io.out(i).bits.btbVictimWay := 0.U(log2Up(BtbWays).W)
           io.out(i).bits.btbPredCtr := 0.U(2.W)
-          io.out(i).bits.btbHitWay := false.B
+          io.out(i).bits.btbHit := false.B
           io.out(i).bits.tageMeta := 0.U.asTypeOf(new TageMeta)
           io.out(i).bits.rasSp := 0.U(log2Up(RasSize))
           io.out(i).bits.rasTopCtr := 0.U(8.W)
@@ -137,7 +137,7 @@ class Ibuffer extends XSModule {
         io.out(i).bits.hist := ibuf_hist(head_ptr + (i<<1).U)
         // io.out(i).bits.btbVictimWay := ibuf_btbVictimWay(head_ptr + (i<<1).U)
         io.out(i).bits.btbPredCtr := ibuf_btbPredCtr(head_ptr + (i<<1).U)
-        io.out(i).bits.btbHitWay := ibuf_btbHitWay(head_ptr + (i<<1).U)
+        io.out(i).bits.btbHit := ibuf_btbHit(head_ptr + (i<<1).U)
         io.out(i).bits.tageMeta := ibuf_tageMeta(head_ptr + (i<<1).U)
         io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + (i<<1).U)
         io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + (i<<1).U)
@@ -166,7 +166,7 @@ class Ibuffer extends XSModule {
       io.out(i).bits.hist := 0.U(HistoryLength.W)
       // io.out(i).bits.btbVictimWay := 0.U(log2Up(BtbWays).W)
       io.out(i).bits.btbPredCtr := 0.U(2.W)
-      io.out(i).bits.btbHitWay := false.B
+      io.out(i).bits.btbHit := false.B
       io.out(i).bits.tageMeta := 0.U.asTypeOf(new TageMeta)
       io.out(i).bits.rasSp := 0.U(log2Up(RasSize))
       io.out(i).bits.rasTopCtr := 0.U(8.W)

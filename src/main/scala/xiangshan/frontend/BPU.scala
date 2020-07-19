@@ -82,7 +82,8 @@ class BPUStage1 extends XSModule {
   // latch pc for 1 cycle latency when reading SRAM
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.fire())
   // TODO: pass real mask in
-  val maskLatch = RegEnable(btb.io.in.mask, io.in.pc.fire())
+  // val maskLatch = RegEnable(btb.io.in.mask, io.in.pc.fire())
+  val maskLatch = Fill(PredictWidth, 1.U(1.W))
 
   val r = io.redirectInfo.redirect
   val updateFetchpc = r.pc - (r.fetchIdx << 1.U)
@@ -136,6 +137,7 @@ class BPUStage1 extends XSModule {
   jbtac.io.update._type := r._type
   jbtac.io.update.target := r.target
   jbtac.io.update.hist := r.hist
+  jbtac.io.update.isRVC := r.isRVC
 
   val jbtacHit = jbtac.io.out.hit
   val jbtacTarget = jbtac.io.out.target
@@ -182,7 +184,7 @@ class BPUStage1 extends XSModule {
   // io.s1OutPred.bits.btbVictimWay := btbWriteWay
   io.s1OutPred.bits.predCtr := btbCtrs
   io.s1OutPred.bits.btbHit := btbValids
-  io.s1OutPred.bits.tageMeta := DontCare
+  io.s1OutPred.bits.tageMeta := DontCare // TODO: enableBPD
   io.s1OutPred.bits.rasSp := DontCare
   io.s1OutPred.bits.rasTopCtr := DontCare
 
@@ -291,7 +293,7 @@ class BPUStage3 extends XSModule {
   // brTakenIdx/jalIdx/callIdx/jalrIdx/retIdx/jmpIdx is one-hot encoded.
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction.
   val brIdx = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & io.predecode.bits.mask
-  val brTakenIdx = if(HasBPD) {
+  val brTakenIdx = if(EnableBPD) {
     LowestBit(brIdx & Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt), PredictWidth)
   } else {
     LowestBit(brIdx & Reverse(Cat(inLatch.btbPred.bits.predCtr.map {c => c(1)}).asUInt), PredictWidth)
@@ -304,7 +306,7 @@ class BPUStage3 extends XSModule {
 
   val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, PredictWidth)
   val brNotTakenIdx = brIdx & LowerMask(jmpIdx, PredictWidth) & (
-    if(HasBPD) ~Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt)
+    if(EnableBPD) ~Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt)
     else ~Reverse(Cat(inLatch.btbPred.bits.predCtr.map {c => c(1)}).asUInt))
 
   val lateJump = jmpIdx === HighestBit(io.predecode.bits.mask, PredictWidth) && !io.predecode.bits.isRVC(OHToUInt(jmpIdx))
@@ -319,6 +321,7 @@ class BPUStage3 extends XSModule {
                             LowerMask(jmpIdx, PredictWidth))).asTypeOf(Vec(PredictWidth, Bool()))
 
   // io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
+  io.out.bits.lateJump := lateJump
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHit := inLatch.btbPred.bits.btbHit
   io.out.bits.tageMeta := inLatch.btbPred.bits.tageMeta

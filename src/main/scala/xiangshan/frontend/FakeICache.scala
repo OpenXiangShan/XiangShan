@@ -34,11 +34,14 @@ class TempPreDecoder extends XSModule  {
   for (i <- 0 until FetchWidth) {
     tempPreDecoders(i).io.in <> DontCare
     tempPreDecoders(i).io.in.instr <> io.in(i)
-    io.out.fuTypes(i) := tempPreDecoders(i).io.out.ctrl.fuType
-    io.out.fuOpTypes(i) := tempPreDecoders(i).io.out.ctrl.fuOpType
+    io.out.fuTypes(2*i) := tempPreDecoders(i).io.out.ctrl.fuType
+    io.out.fuTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuType
+    io.out.fuOpTypes(2*i) := tempPreDecoders(i).io.out.ctrl.fuOpType
+    io.out.fuOpTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuOpType
   }
 
   io.out.mask := DontCare
+  io.out.isRVC := DontCare
 
 }
 

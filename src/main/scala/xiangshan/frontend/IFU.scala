@@ -56,6 +56,13 @@ class IFU extends XSModule with HasIFUConst
     val if2_ready = WireInit(false.B)
     val if2_snpc = snpc(if1_pc) //TODO: calculate snpc according to mask of current fetch packet
     val needflush = WireInit(false.B)
+    // when an RVI instruction is predicted as taken and it crosses over two fetch packets,
+    // IFU should not take this branch but fetch the latter half of the instruction sequentially,
+    // and take the jump target in the next fetch cycle
+    val if2_lateJumpLatch = WireInit(false.B)
+    val if2_lateJumpTarget = RegInit(0.U(VAddrBits.W))
+    val if4_lateJumpLatch = WireInit(false.B)
+    val if4_lateJumpTarget = RegInit(0.U(VAddrBits.W))
 
     //pipe fire
     val if1_fire = if1_valid && if2_ready 
@@ -66,7 +73,7 @@ class IFU extends XSModule with HasIFUConst
       XSDebug("RESET....\n")
       if1_npc := resetVector.U(VAddrBits.W)
     } .otherwise{
-      if1_npc := if2_snpc
+      if1_npc := Mux(if4_lateJumpLatch, if4_lateJumpTarget, Mux(if2_lateJumpLatch, if2_lateJumpTarget, if2_snpc))
     }
 
     when(if1_pcUpdate)
@@ -90,8 +97,15 @@ class IFU extends XSModule with HasIFUConst
     val if2_valid = RegEnable(next=if1_valid,init=false.B,enable=if1_fire)
     val if2_pc = if1_pc
     val if2_btb_taken = bpu.io.btbOut.valid && bpu.io.btbOut.bits.redirect
-    val if2_btb_insMask = bpu.io.btbOut.bits.instrValid
-    val if2_btb_target = bpu.io.btbOut.bits.target
+    val if2_btb_lateJump = WireInit(false.B)
+    val if2_btb_insMask = Mux(if2_btb_taken, bpu.io.btbOut.bits.instrValid.asUInt, Fill(FetchWidth*2, 1.U(1.W))) // TODO: FIX THIS
+    val if2_btb_target = Mux(if2_btb_lateJump, if2_snpc, bpu.io.btbOut.bits.target)
+
+    if2_lateJumpLatch := BoolStopWatch(if2_btb_lateJump, if1_fire, startHighPriority = true)
+    // since late jump target should be taken after the latter half of late jump instr is fetched, we need to latch this target
+    when (if2_btb_lateJump) {
+      if2_lateJumpTarget := bpu.io.btbOut.bits.target
+    }
 
     //next
     val if3_ready = WireInit(false.B)
@@ -108,6 +122,8 @@ class IFU extends XSModule with HasIFUConst
       if1_npc := if2_btb_target
     }
 
+    bpu.io.in.pc.valid := if1_fire && !if2_btb_lateJump
+
     XSDebug("[IF2]if2_valid:%d  ||  if2_pc:0x%x   || if3_ready:%d                                        ",if2_valid,if2_pc,if3_ready)
     XSDebug(false,if2_fire,"------IF2->fire!!!")
     XSDebug(false,true.B,"\n")
@@ -119,10 +135,10 @@ class IFU extends XSModule with HasIFUConst
     //local
     val if3_valid = RegEnable(next=if2_valid,init=false.B,enable=if2_fire)
     val if3_pc = RegEnable(if2_pc,if2_fire)
-    val if3_npc = RegEnable(if1_npc,if2_fire)
-    val if3_btb_target = RegEnable(if2_btb_target,if2_fire)
-    val if3_btb_taken = RegEnable(if2_btb_taken,if2_fire)
-    val if3_btb_insMask = RegEnable(if2_btb_insMask, if2_fire)
+    val if3_npc = RegEnable(if1_npc, if2_fire)
+    val if3_btb_target = RegEnable(Mux(if2_lateJumpLatch, if2_lateJumpTarget, Mux(if2_btb_lateJump, bpu.io.btbOut.bits.target, if2_btb_target)), if2_fire)
+    val if3_btb_taken = RegEnable(Mux(if2_lateJumpLatch, true.B, if2_btb_taken), if2_fire)
+    val if3_btb_insMask = RegEnable(Mux(if2_lateJumpLatch, 1.U((FetchWidth*2).W), if2_btb_insMask), if2_fire)
 
     //next
     val if4_ready = WireInit(false.B)
@@ -147,10 +163,20 @@ class IFU extends XSModule with HasIFUConst
     val if4_btb_target = RegEnable(if3_btb_target,if3_fire)
     val if4_btb_taken = RegEnable(if3_btb_taken,if3_fire)
     val if4_btb_insMask = RegEnable(if3_btb_insMask, if3_fire)
-    val if4_tage_target = bpu.io.tageOut.bits.target
     val if4_tage_taken = bpu.io.tageOut.valid && bpu.io.tageOut.bits.redirect
+    val if4_tage_lateJump = if4_tage_taken && bpu.io.tageOut.bits.lateJump && !io.redirectInfo.flush()
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
-    val if4_btb_missPre = WireInit(false.B)
+    val if4_snpc = if4_pc + (PopCount(if4_tage_insMask) << 1.U)
+    val if4_tage_target = Mux(if4_tage_lateJump, if4_snpc, bpu.io.tageOut.bits.target)
+
+    if2_btb_lateJump := if2_btb_taken && bpu.io.btbOut.bits.lateJump && !io.redirectInfo.flush() && !if4_tage_taken
+
+    if4_lateJumpLatch := BoolStopWatch(if4_tage_lateJump, if1_fire, startHighPriority = true)
+    when (if4_tage_lateJump) {
+      if4_lateJumpTarget := bpu.io.tageOut.bits.target
+    }
+
+    bpu.io.in.pc.valid := if1_fire && !if2_btb_lateJump && !if4_tage_lateJump
 
     XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x   if4_npc:0x%x\n",if4_valid,if4_pc,if4_npc)
     XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
@@ -160,8 +186,6 @@ class IFU extends XSModule with HasIFUConst
     {
       if1_npc := if4_tage_target
     }
-    //redirect: tage result differ btb
-    if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
 
     //redirect: miss predict
     when(io.redirectInfo.flush()){
@@ -171,8 +195,9 @@ class IFU extends XSModule with HasIFUConst
     
   
     //flush pipline
-    if(EnableBPD){needflush := (if4_valid && if4_btb_missPre) || io.redirectInfo.flush() }
-    else {needflush := io.redirectInfo.flush()}
+    // if(EnableBPD){needflush := (if4_valid && if4_tage_taken) || io.redirectInfo.flush() }
+    // else {needflush := io.redirectInfo.flush()}
+    needflush := (if4_valid && if4_tage_taken) || io.redirectInfo.flush()
     when(needflush){
       if3_valid := false.B
       if4_valid := false.B
@@ -185,35 +210,40 @@ class IFU extends XSModule with HasIFUConst
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
     io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
+    /*
     if(EnableBPU){
-      io.fetchPacket.bits.mask := Mux(if4_tage_taken,(Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_tage_insMask.map(i => Fill(2, i.asUInt))).asUInt)),
-        Mux(if4_btb_taken, Fill(FetchWidth*2, 1.U(1.W)) & Reverse(Cat(if4_btb_insMask.map(i => Fill(2, i.asUInt))).asUInt),
-        Fill(FetchWidth*2, 1.U(1.W)))
+      io.fetchPacket.bits.mask := Mux(if4_tage_taken, Fill(FetchWidth*2, 1.U(1.W)) & if4_tage_insMask.asUInt,
+                                  Mux(if4_btb_taken,  Fill(FetchWidth*2, 1.U(1.W)) & if4_btb_insMask.asUInt,
+                                                      Fill(FetchWidth*2, 1.U(1.W)))
       )
     }
     else{
       io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) //TODO : consider cross cacheline fetch
-    }    
+    }
+    */
+    io.fetchPacket.bits.mask := Mux(if4_lateJumpLatch,  1.U((FetchWidth*2).W),
+                                Mux(if4_tage_taken,     Fill(FetchWidth*2, 1.U(1.W)) & if4_tage_insMask.asUInt,
+                                                        Fill(FetchWidth*2, 1.U(1.W)) & if4_btb_insMask.asUInt))
     io.fetchPacket.bits.pc := if4_pc
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
-    for(i <- 0 until FetchWidth){
-      //io.fetchPacket.bits.pnpc(i) := if1_npc
-      when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth))) {
-        if(EnableBPD){io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) }     //tage not taken use snpc
-        else{io.fetchPacket.bits.pnpc(i) := if4_btb_target}//use fetch PC
-      }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
-        io.fetchPacket.bits.pnpc(i) := if1_npc
+    for(i <- 0 until (FetchWidth*2)){
+      when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth*2))) {
+        io.fetchPacket.bits.pnpc(i) := if4_btb_target
+      }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth*2))) {
+        io.fetchPacket.bits.pnpc(i) := Mux(if4_tage_lateJump, bpu.io.tageOut.bits.target, if4_tage_target)
       }.otherwise {
-        io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) //use fetch PC
+        io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << Mux(io.icacheResp.bits.predecode.isRVC(i), 1.U, 2.U))
       }
-      XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,io.fetchPacket.bits.pnpc(i).asUInt)
-    }    
+      XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",
+        Mux((i.U)(0), io.fetchPacket.bits.instrs(i>>1)(31,16), io.fetchPacket.bits.instrs(i>>1)(15,0)),
+        io.fetchPacket.bits.pnpc(i))
+    }
     io.fetchPacket.bits.hist := bpu.io.tageOut.bits.hist
     // io.fetchPacket.bits.btbVictimWay := bpu.io.tageOut.bits.btbVictimWay
     io.fetchPacket.bits.predCtr := bpu.io.tageOut.bits.predCtr
-    io.fetchPacket.bits.btbHitWay := bpu.io.tageOut.bits.btbHitWay
+    io.fetchPacket.bits.btbHit := bpu.io.tageOut.bits.btbHit
     io.fetchPacket.bits.tageMeta := bpu.io.tageOut.bits.tageMeta
     io.fetchPacket.bits.rasSp := bpu.io.tageOut.bits.rasSp
     io.fetchPacket.bits.rasTopCtr := bpu.io.tageOut.bits.rasTopCtr
@@ -221,7 +251,9 @@ class IFU extends XSModule with HasIFUConst
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
-    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W)) //TODO: consider RVC && consider cross cacheline fetch
+    //TODO: consider RVC && consider cross cacheline fetch
+    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W))
+    bpu.io.predecode.bits.isRVC := 0.U.asTypeOf(Vec(FetchWidth*2, Bool()))
     bpu.io.redirectInfo := io.redirectInfo
     io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
