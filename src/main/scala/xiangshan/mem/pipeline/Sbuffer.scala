@@ -61,3 +61,23 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
   })
 }
   
+// Fake Store buffer for XiangShan Out of Order LSU
+// NutShell DCache Interface
+class FakeSbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
+  val io = IO(new Bundle() {
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
+    val dcache = Flipped(new DCacheStoreIO)
+    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+  })
+
+  io.in(1) := DontCare
+  io.in(1).ready := false.B
+
+  // store req will go to DCache directly, forward is not needed here
+  (0 until 2).map(i => {
+    io.forward(i) := DontCare
+    io.forward(i).forwardMask := 0.U.asBools
+  })
+
+  io.dcache.req <> io.in(0)
+}
