@@ -48,7 +48,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // Dispatch
   val csrEnRoq = io.dp1Req.map(i => i.bits.ctrl.fuType === FuType.csr)
   val hasCsr = RegInit(false.B)
-  XSError(!(hasCsr && state === s_idle), "CSR block should only happen in s_idle")
+  XSError(!(hasCsr && state =/= s_idle), "CSR block should only happen in s_idle\n")
   when(ringBufferEmpty){ hasCsr:= false.B }
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
   XSDebug("(ready, valid): ")
@@ -275,5 +275,10 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     debugMonitor.io.trapPC := trapPC
     debugMonitor.io.cycleCnt := GTimer()
     debugMonitor.io.instrCnt := instrCnt
+
+    // BPU temp Perf Cnt
+    if(EnableBPU){
+      BoringUtils.addSource(hitTrap, "XSTRAP_BPU")
+    }
   }
 }

@@ -22,7 +22,7 @@
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
-#define eprintf(...) fprintf(stderr, ## __VA_ARGS__)
+#define eprintf(...) fprintf(stdout, ## __VA_ARGS__)
 
 #define demand(cond,str,...) \
   do { if(!(cond)) { \

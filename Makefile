@@ -98,7 +98,7 @@ $(REF_SO):
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
-SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
+SEED = -s $(shell shuf -i 1-10000 -n 1)
 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
@@ -110,7 +110,7 @@ emu: $(EMU)
 ifeq ($(REMOTE),localhost)
 	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(SEED) -b $(B) -e $(E)"
+	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) $(SEED) -b $(B) -e $(E)"
 endif
 
 cache:
