@@ -110,8 +110,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     switch(state){
       is(s_idle){
         val canCommit = if(i!=0) io.commits(i-1).valid else true.B
-        io.commits(i).valid := (if (i == 0) ((valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U)) || io.redirect.valid) && canCommit
-          else valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit)
+        io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
         io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
         when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
         XSInfo(io.commits(i).valid,
@@ -196,7 +195,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   // when exception occurs, cancels all
   when (io.redirect.valid) {
-    ringBufferHeadExtended := ringBufferTailExtended
+    ringBufferHeadExtended := 0.U
+    ringBufferTailExtended := 0.U
+    for (i <- 0 until RoqSize) {
+      valid(i) := false.B
+    }
   }
 
   // TODO: roq redirect only used for exception
@@ -262,11 +265,14 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   val difftestIntrNO = WireInit(0.U(XLEN.W))
   ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
-  XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %d\n", difftestIntrNO)
+  XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
+  val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
+  val retirePCFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.pc, microOp(firstValidCommit).cf.pc)
+  val retireInstFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.instr, microOp(firstValidCommit).cf.instr)
   if(!p.FPGAPlatform){
-    BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
-    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
-    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
+    BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
+    BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
+    BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
     BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
     BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
     BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
