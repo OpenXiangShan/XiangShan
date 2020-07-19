@@ -19,11 +19,14 @@ object CacheOp {
   def width  = load.getWidth
 }
 
-class DcacheUserBundle extends XSBundle with HasMEMConst {
+class DcacheUserBundle extends XSBundle {
   val uop = Output(new MicroOp) //FIXME: opt data width
   val mmio = Output(Bool())
-  val mask  = UInt((XLEN/8).W)
+  val mask  = Output(UInt((XLEN/8).W))
   // val tlbmiss = Output(Bool())
+  // for pipeline test
+  val id  = Output(UInt(1.W)) // 0: load  1: store
+  val paddr = Output(UInt(PAddrBits.W))
 }
 
 class DCacheLoadReq extends XSBundle
@@ -70,6 +73,9 @@ class DcacheToLsuIO extends XSBundle with HasMEMConst {
 class DcacheIO extends XSBundle with HasMEMConst {
   val lsu = new DcacheToLsuIO
   // val l2 = TODO
+
+  // NutShell cache for pipeline test
+  val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
 }
 
 class Dcache extends XSModule with NeedImpl{
@@ -82,4 +88,49 @@ class Dcache extends XSModule with NeedImpl{
   // load
   // store
   // refill
+
+  // NutShell cache
+  assert(!io.lsu.load(1).req.valid)
+  val dmem = io.dmem
+  val ldReq = io.lsu.load(0).req
+  val stReq = io.lsu.store.req
+  val ldResp = io.lsu.load(0).resp
+  val stResp = io.lsu.store.resp
+  val haveLoadReq = io.lsu.load(0).req.valid
+  val ldUser = Wire(new DcacheUserBundle)
+  val stUser = Wire(new DcacheUserBundle)
+
+  ldUser.uop := ldReq.bits.user.uop
+  ldUser.mmio := ldReq.bits.user.mmio
+  ldUser.mask := DontCare
+  ldUser.id := 0.U
+  ldUser.paddr := ldReq.bits.paddr
+  stUser.uop := stReq.bits.user.uop
+  stUser.mmio := stReq.bits.user.mmio
+  stUser.mask := stReq.bits.mask
+  stUser.id := 1.U
+  stUser.paddr := stReq.bits.paddr
+
+  dmem.req.bits.apply(
+    addr = Mux(haveLoadReq, ldReq.bits.paddr, stReq.bits.paddr), // VM is ignored
+    size = Mux(haveLoadReq, ldReq.bits.user.uop.ctrl.fuOpType(1,0), stReq.bits.user.uop.ctrl.fuOpType(1,0)), 
+    wdata = stReq.bits.data(63, 0), // just for test
+    wmask = stReq.bits.mask, 
+    cmd = Mux(haveLoadReq, SimpleBusCmd.write, SimpleBusCmd.read)
+  )
+  dmem.req.valid := Mux(haveLoadReq, ldReq.valid, stReq.valid)
+  dmem.resp.ready := true.B
+
+  ldReq.ready := dmem.req.ready && haveLoadReq
+  stReq.ready := dmem.req.ready && !haveLoadReq
+
+  ldResp.valid := dmem.resp.fire() && dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 0.U
+  ldResp.bits.paddr := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).paddr
+  ldResp.bits.data := dmem.resp.bits.rdata
+  ldResp.bits.user := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle)
+
+  stResp.valid := dmem.resp.fire() && dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 1.U
+  stResp.bits.paddr := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).paddr
+  stResp.bits.data := dmem.resp.bits.rdata
+  stResp.bits.user := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle)
 }

@@ -16,22 +16,27 @@ trait HasMEMConst{
   val LSRoqSize = 64
   val StoreBufferSize = 16
   val RefillSize = 512
-  val DcacheUserBundleWidth = 64
+  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
 }
 
-class MemPipeline(implicit val p: XSConfig) extends XSModule with NeedImpl{
+class MemPipeline(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
   val io = IO(new Bundle{
     val ldin = Vec(2, Flipped(Decoupled(new LduReq)))
     val stin = Vec(2, Flipped(Decoupled(new StuReq)))
     val out = Vec(2, Decoupled(new ExuOutput))
     val redirect = Flipped(ValidIO(new Redirect))
     val rollback = ValidIO(new Redirect)
+    val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
   })
 
   val lsu = Module(new Lsu)
   val dcache = Module(new Dcache)
   // val mshq = Module(new MSHQ)
   val dtlb = Module(new Dtlb)
+  
+  dcache.io := DontCare
+  dtlb.io := DontCare
+  // mshq.io := DontCare
 
   lsu.io.ldin <> io.ldin
   lsu.io.stin <> io.stin
@@ -39,10 +44,10 @@ class MemPipeline(implicit val p: XSConfig) extends XSModule with NeedImpl{
   lsu.io.redirect <> io.redirect
   lsu.io.dcache <> dcache.io.lsu
   lsu.io.dtlb <> dtlb.io.lsu
-  dcache.io := DontCare
-  dtlb.io := DontCare
-  // mshq.io := DontCare
 
   io.rollback <> lsu.io.rollback
+
+  // for ls pipeline test
+  dcache.io.dmem <> io.dmem
 
 }

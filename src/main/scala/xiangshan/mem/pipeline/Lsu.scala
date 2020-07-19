@@ -151,6 +151,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     l2_out(i).bits := DontCare
     l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src2
     l2_out(i).bits.uop := io.ldin(i).bits.uop
+    l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType)
     l2_out(i).valid := io.ldin(i).valid
   })
 
@@ -314,8 +315,9 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     s2_out(i).bits := DontCare
     s2_out(i).bits.vaddr := saddr(i)
     s2_out(i).bits.paddr := io.dtlb.resp(LoadPipelineWidth + i).bits.paddr
-    s2_out(i).bits.data := io.stin(i).bits.data
+    s2_out(i).bits.data := genWdata(io.stin(i).bits.data, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
     s2_out(i).bits.uop := io.stin(i).bits.uop
+    s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType)
     s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
   })
 
