@@ -7,7 +7,7 @@ import chisel3.experimental.BundleLiterals._
 import chiseltest._
 import xiangshan._
 import xiangshan.frontend.IFU
-import xiangshan.utils._
+import utils._
 import xiangshan.CtrlFlow
 
 class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {

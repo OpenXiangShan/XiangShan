@@ -168,7 +168,7 @@ class BTB extends XSModule {
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
     val oldSatTaken = old === ((1 << len)-1).U
     val oldSatNotTaken = old === 0.U
-    Mux(oldSatTaken && taken, ((1 << len)-1-1).U,
+    Mux(oldSatTaken && taken, ((1 << len)-1).U,
       Mux(oldSatNotTaken && !taken, 0.U,
         Mux(taken, old + 1.U, old - 1.U)))
   }
@@ -195,7 +195,7 @@ class BTB extends XSModule {
   val notBrOrJ = u._type =/= BTBtype.B && u._type =/= BTBtype.J
 
   // Do not update BTB on indirect or return, or correctly predicted J or saturated counters
-  val noNeedToUpdate = (!u.misPred && (isBr && updateOnSaturated || isJ)) || (u.misPred && notBrOrJ)
+  val noNeedToUpdate = (!u.misPred && (isBr && updateOnSaturated || isJ)) || (notBrOrJ)
 
   // do not update on saturated ctrs
   val btbWriteValid = io.redirectValid && !noNeedToUpdate

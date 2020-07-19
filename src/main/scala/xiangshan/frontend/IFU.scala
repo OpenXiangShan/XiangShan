@@ -161,13 +161,8 @@ class IFU extends XSModule with HasIFUConst
       if1_npc := if4_tage_target
     }
     //redirect: tage result differ btb
-    if4_btb_missPre := (if4_tage_taken ^ if4_btb_taken) || (if4_tage_taken && if4_btb_taken && (if4_tage_target =/=  if4_btb_target))
+    if4_btb_missPre := if4_tage_taken
 
-    if(EnableBPD){
-      when(!if4_tage_taken && if4_btb_taken && if4_valid){
-        if1_npc := if4_pc + (PopCount(io.fetchPacket.bits.mask) >> 2.U)
-      }
-    }
 
     //redirect: miss predict
     when(io.redirectInfo.flush()){
@@ -199,7 +194,7 @@ class IFU extends XSModule with HasIFUConst
     }
     else{
       io.fetchPacket.bits.mask := Fill(FetchWidth*2, 1.U(1.W)) //TODO : consider cross cacheline fetch
-    }    
+    }
     io.fetchPacket.bits.pc := if4_pc
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
@@ -207,9 +202,10 @@ class IFU extends XSModule with HasIFUConst
     for(i <- 0 until FetchWidth){
       //io.fetchPacket.bits.pnpc(i) := if1_npc
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth))) {
-        if(EnableBPD){io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) }     //tage not taken use snpc
-        else{io.fetchPacket.bits.pnpc(i) := if4_btb_target}//use fetch PC
+        // When tage agrees with btb, use btb targets
+        io.fetchPacket.bits.pnpc(i) := if4_btb_target
       }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth))) {
+        // When tage disagrees with btb, use tage targets
         io.fetchPacket.bits.pnpc(i) := if1_npc
       }.otherwise {
         io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << 2.U) //use fetch PC

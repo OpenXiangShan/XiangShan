@@ -71,8 +71,8 @@ class BPUStage1 extends XSModule {
   val hist = Mux(updateGhr, newGhr, ghr)
 
   // Tage predictor
-  val tage = Module(new FakeTAGE)
-  // val tage = if(EnableBPD) Module(new Tage) else Module(new FakeTAGE)
+  // val tage = Module(new FakeTAGE)
+  val tage = if(EnableBPD) Module(new Tage) else Module(new FakeTAGE)
   tage.io.req.valid := io.in.pc.fire()
   tage.io.req.bits.pc := io.in.pc.bits
   tage.io.req.bits.hist := hist
@@ -287,15 +287,11 @@ class BPUStage3 extends XSModule {
   val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt), FetchWidth)
   val retIdx = LowestBit(io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt), FetchWidth)
 
-  val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth)
+  val jmpIdx = if (EnableRAS) LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, FetchWidth) 
+               else LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx, FetchWidth)
   val brNotTakenIdx = brIdx & ~inLatch.tage.takens.asUInt & LowerMask(jmpIdx, FetchWidth) & io.predecode.bits.mask
 
-  io.out.bits.redirect := jmpIdx.orR.asBool
-  io.out.bits.target := Mux(jmpIdx === retIdx, rasTopAddr,
-    Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
-    Mux(jmpIdx === 0.U, inLatch.pc + 32.U, // TODO: RVC
-    PriorityMux(jmpIdx, inLatch.btb.targets))))
-  io.out.bits.instrValid := Mux(jmpIdx.orR, LowerMask(jmpIdx, FetchWidth), Fill(FetchWidth, 1.U(1.W))).asTypeOf(Vec(FetchWidth, Bool()))
+
   // io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
@@ -323,19 +319,29 @@ class BPUStage3 extends XSModule {
   io.out.bits.rasTopCtr := rasTop.ctr
 
   // flush BPU and redirect when target differs from the target predicted in Stage1
-  io.out.bits.redirect := (if(EnableBPD) (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
-    inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target)
-    else false.B)
+  val tToNt = inLatch.btbPred.bits.redirect && ~jmpIdx.orR.asBool
+  val ntToT = ~inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool
+  val dirDiffers = tToNt || ntToT
+  val tgtDiffers = inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target
+  io.out.bits.redirect := (if (EnableBPD) {dirDiffers || tgtDiffers} else false.B)
+  io.out.bits.target := Mux(jmpIdx === 0.U, inLatch.pc + (PopCount(io.predecode.bits.mask) << 2.U), // TODO: RVC
+    Mux(jmpIdx === retIdx, rasTopAddr,
+    Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
+    PriorityMux(jmpIdx, inLatch.btb.targets))))
+  io.out.bits.instrValid := Mux(ntToT || tgtDiffers, LowerMask(jmpIdx, FetchWidth), io.predecode.bits.mask).asTypeOf(Vec(FetchWidth, Bool()))
+
   io.flushBPU := io.out.bits.redirect && io.out.valid
 
   // speculative update RAS
   val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
-  rasWrite.retAddr := inLatch.pc + (OHToUInt(callIdx) << 2.U) + 4.U
+  val retAddr = inLatch.pc + (OHToUInt(callIdx) << 2.U) + 4.U
+  rasWrite.retAddr := retAddr
   val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
   rasWrite.ctr := Mux(allocNewEntry, 1.U, rasTop.ctr + 1.U)
+  val rasWritePosition = Mux(allocNewEntry, sp.value + 1.U, sp.value)
   when (io.out.valid) {
     when (jmpIdx === callIdx) {
-      ras(Mux(allocNewEntry, sp.value + 1.U, sp.value)) := rasWrite
+      ras(rasWritePosition) := rasWrite
       when (allocNewEntry) { sp.value := sp.value + 1.U }
     }.elsewhen (jmpIdx === retIdx) {
       when (rasTop.ctr === 1.U) {
@@ -357,6 +363,9 @@ class BPUStage3 extends XSModule {
   io.s1RollBackHist := Mux(io.s3Taken, PriorityMux(jmpIdx, io.out.bits.hist), io.out.bits.hist(0) << PopCount(brIdx & ~inLatch.tage.takens.asUInt))
   // whether Stage3 has a taken jump
   io.s3Taken := jmpIdx.orR.asBool
+
+  XSDebug(io.in.fire() && callIdx.orR, "[RAS]:pc=0x%x, rasWritePosition=%d, rasWriteAddr=0x%x",
+            io.in.bits.pc, rasWritePosition, retAddr)
 
   // debug info
   XSDebug(io.in.fire(), "[BPUS3]in:(%d %d) pc=%x\n", io.in.valid, io.in.ready, io.in.bits.pc)
