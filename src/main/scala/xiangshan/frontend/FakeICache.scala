@@ -38,7 +38,7 @@ class TempPreDecoder extends XSModule  {
     io.out.fuOpTypes(i) := tempPreDecoders(i).io.out.ctrl.fuOpType
   }
 
-  io.out.mask := DontCare
+  io.out.mask := Fill(FetchWidth, 1.U(1.W))  //TODO: consider RVC && consider cross cacheline fetch
 
 }
 
