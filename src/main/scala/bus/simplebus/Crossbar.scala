@@ -1,3 +1,19 @@
+/**************************************************************************************
+* Copyright (c) 2020 Institute of Computing Technology, CAS
+* Copyright (c) 2020 University of Chinese Academy of Sciences
+* 
+* NutShell is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2. 
+* You may obtain a copy of Mulan PSL v2 at:
+*             http://license.coscl.org.cn/MulanPSL2 
+* 
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER 
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR 
+* FIT FOR A PARTICULAR PURPOSE.  
+*
+* See the Mulan PSL v2 for more details.  
+***************************************************************************************/
+
 package bus.simplebus
 
 import chisel3._
@@ -11,7 +27,7 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
     val out = Vec(addressSpace.length, new SimpleBusUC)
   })
 
-  val s_idle :: s_resp :: Nil = Enum(2)
+  val s_idle :: s_resp :: s_error :: Nil = Enum(3)
   val state = RegInit(s_idle)
 
   // select the output channel according to the address
@@ -22,8 +38,10 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
   val outSel = io.out(outSelIdx)
   val outSelIdxResp = RegEnable(outSelIdx, outSel.req.fire() && (state === s_idle))
   val outSelResp = io.out(outSelIdxResp)
+  val reqInvalidAddr = io.in.req.valid && !outSelVec.asUInt.orR
 
-  assert(!io.in.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
+  when(!(!io.in.req.valid || outSelVec.asUInt.orR) || !(!(io.in.req.valid && outSelVec.asUInt.andR))){printf("[ERROR] bad addr %x, time %d\n", addr, GTimer())}
+  // assert(!io.in.req.valid || outSelVec.asUInt.orR, "address decode error, bad addr = 0x%x\n", addr)
   assert(!(io.in.req.valid && outSelVec.asUInt.andR), "address decode error, bad addr = 0x%x\n", addr)
 
   // bind out.req channel
@@ -34,14 +52,19 @@ class SimpleBusCrossbar1toN(addressSpace: List[(Long, Long)]) extends Module {
   }}
 
   switch (state) {
-    is (s_idle) { when (outSel.req.fire()) { state := s_resp } }
+    is (s_idle) { 
+      when (outSel.req.fire()) { state := s_resp } 
+      when (reqInvalidAddr) { state := s_error } 
+    }
     is (s_resp) { when (outSelResp.resp.fire()) { state := s_idle } }
+    is (s_error) { when(io.in.resp.fire()){ state := s_idle } }
   }
 
-  io.in.resp.valid := outSelResp.resp.fire()
+  io.in.resp.valid := outSelResp.resp.fire() || state === s_error
   io.in.resp.bits <> outSelResp.resp.bits
+  // io.in.resp.bits.exc.get := state === s_error
   outSelResp.resp.ready := io.in.resp.ready
-  io.in.req.ready := outSel.req.ready
+  io.in.req.ready := outSel.req.ready || reqInvalidAddr
 
   Debug() {
     when (state === s_idle && io.in.req.valid) {
