@@ -20,6 +20,8 @@ class IFUIO extends XSBundle
     val redirectInfo = Input(new RedirectInfo)
     val icacheReq = DecoupledIO(new FakeIcacheReq)
     val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
+    val btbTaken = Output(Bool())
+    val loopPC = Flipped(ValidIO(UInt(VAddrBits.W)))
 }
 
 class FakeBPU extends XSModule{
@@ -75,7 +77,7 @@ class IFU extends XSModule with HasIFUConst
     }
 
     bpu.io.in.pc.valid := if1_fire
-    bpu.io.in.pc.bits := if1_npc
+    bpu.io.in.pc.bits := Mux(io.loopPC.valid, io.loopPC.bits, if1_npc)
     bpu.io.redirectInfo := io.redirectInfo
 
     XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
@@ -107,6 +109,8 @@ class IFU extends XSModule with HasIFUConst
     {
       if1_npc := if2_btb_target
     }
+
+    io.btbTaken := if2_btb_taken
 
     XSDebug("[IF2]if2_valid:%d  ||  if2_pc:0x%x   || if3_ready:%d                                        ",if2_valid,if2_pc,if3_ready)
     XSDebug(false,if2_fire,"------IF2->fire!!!")
