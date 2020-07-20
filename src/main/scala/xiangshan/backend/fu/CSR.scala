@@ -1,6 +1,7 @@
 package xiangshan.backend.fu
 
 import chisel3._
+import chisel3.ExcitingUtils.ConnectionType
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import fpu.Fflags
@@ -381,12 +382,11 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
 
   // perfcnt
-  // TODO: deal with perfCnt
-  val hasPerfCnt = false
+  val hasPerfCnt = !p.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
-  val perfCntsLoMapping = (0 until nrPerfCnts).map { case i => MaskedRegMap(0xb00 + i, perfCnts(i)) }
-  val perfCntsHiMapping = (0 until nrPerfCnts).map { case i => MaskedRegMap(0xb80 + i, perfCnts(i)(63, 32)) }
+  val perfCntsLoMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb00 + i, perfCnts(i)))
+  val perfCntsHiMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb80 + i, perfCnts(i)(63, 32)))
 
   // CSR reg map
   val mapping = Map(
@@ -778,68 +778,59 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   // perfcnt
 
   val perfCntList = Map(
-    "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
-    "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),
-    "MimemStall"  -> (0xb03, "perfCntCondMimemStall" ),
-    "MaluInstr"   -> (0xb04, "perfCntCondMaluInstr"  ),
-    "MbruInstr"   -> (0xb05, "perfCntCondMbruInstr"  ),
-    "MlsuInstr"   -> (0xb06, "perfCntCondMlsuInstr"  ),
-    "MmduInstr"   -> (0xb07, "perfCntCondMmduInstr"  ),
-    "McsrInstr"   -> (0xb08, "perfCntCondMcsrInstr"  ),
-    "MloadInstr"  -> (0xb09, "perfCntCondMloadInstr" ),
-    "MloadStall"  -> (0xb0a, "perfCntCondMloadStall" ),
-    "MstoreStall" -> (0xb0b, "perfCntCondMstoreStall"),
-    "MmmioInstr"  -> (0xb0c, "perfCntCondMmmioInstr" ),
-    "MicacheHit"  -> (0xb0d, "perfCntCondMicacheHit" ),
-    "MdcacheHit"  -> (0xb0e, "perfCntCondMdcacheHit" ),
-    "MmulInstr"   -> (0xb0f, "perfCntCondMmulInstr"  ),
-    "MifuFlush"   -> (0xb10, "perfCntCondMifuFlush"  ),
-    "MrawStall"   -> (0xb11, "perfCntCondMrawStall"  ),
-    "MexuBusy"    -> (0xb12, "perfCntCondMexuBusy"   ),
-    "MbpBRight"   -> (0xb13, "MbpBRight"             ),
-    "MbpBWrong"   -> (0xb14, "MbpBWrong"             ),
-    "MbpJRight"   -> (0xb15, "MbpJRight"             ),
-    "MbpJWrong"   -> (0xb16, "MbpJWrong"             ),
-    "MbpIRight"   -> (0xb17, "MbpIRight"             ),
-    "MbpIWrong"   -> (0xb18, "MbpIWrong"             ),
-    "MbpRRight"   -> (0xb19, "MbpRRight"             ),
-    "MbpRWrong"   -> (0xb1a, "MbpRWrong"             ),
-    "Custom1"     -> (0xb1b, "Custom1"             ),
-    "Custom2"     -> (0xb1c, "Custom2"             ),
-    "Custom3"     -> (0xb1d, "Custom3"             ),
-    "Custom4"     -> (0xb1e, "Custom4"             ),
-    "Custom5"     -> (0xb1f, "Custom5"             ),
-    "Custom6"     -> (0xb20, "Custom6"             ),
-    "Custom7"     -> (0xb21, "Custom7"             ),
-    "Custom8"     -> (0xb22, "Custom8"             ),
-    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
+//    "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
+//    "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),
+    "MbpInstr"    -> (0xb03, "perfCntCondMbpInstr"   ),
+    "MbpRight"    -> (0xb04, "perfCntCondMbpRight"   ),
+    "MbpWrong"    -> (0xb05, "perfCntCondMbpWrong"   ),
+    "MbpBRight"   -> (0xb06, "perfCntCondMbpBRight"   ),
+    "MbpBWrong"   -> (0xb07, "perfCntCondMbpBWrong"   ),
+    "MbpJRight"   -> (0xb08, "perfCntCondMbpJRight"   ),
+    "MbpJWrong"   -> (0xb09, "perfCntCondMbpJWrong"   ),
+    "MbpIRight"   -> (0xb0a, "perfCntCondMbpIRight"   ),
+    "MbpIWrong"   -> (0xb0b, "perfCntCondMbpIWrong"   ),
+    "MbpRRight"   -> (0xb0c, "perfCntCondMbpRRight"   ),
+    "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"   )
+//    "Custom1"     -> (0xb1b, "Custom1"             ),
+//    "Custom2"     -> (0xb1c, "Custom2"             ),
+//    "Custom3"     -> (0xb1d, "Custom3"             ),
+//    "Custom4"     -> (0xb1e, "Custom4"             ),
+//    "Custom5"     -> (0xb1f, "Custom5"             ),
+//    "Custom6"     -> (0xb20, "Custom6"             ),
+//    "Custom7"     -> (0xb21, "Custom7"             ),
+//    "Custom8"     -> (0xb22, "Custom8"             ),
+//    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
   )
   val perfCntCond = List.fill(0x80)(WireInit(false.B))
-  (perfCnts zip perfCntCond).map { case (c, e) => { when (e) { c := c + 1.U } } }
+  (perfCnts zip perfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
 
-  BoringUtils.addSource(WireInit(true.B), "perfCntCondMcycle")
-  perfCntList.map { case (name, (addr, boringId)) => {
-    BoringUtils.addSink(perfCntCond(addr & 0x7f), boringId)
-    if (!hasPerfCnt) {
-      // do not enable perfcnts except for Mcycle and Minstret
-      if (addr != perfCntList("Mcycle")._1 && addr != perfCntList("Minstret")._1) {
-        perfCntCond(addr & 0x7f) := false.B
+//  ExcitingUtils.addSource(WireInit(true.B), "perfCntCondMcycle", ConnectionType.Perf)
+  perfCntList.foreach {
+    case (_, (address, boringId)) =>
+      if(hasPerfCnt){
+        ExcitingUtils.addSink(perfCntCond(address & 0x7f), boringId, ConnectionType.Perf)
       }
-    }
-  }}
+//      if (!hasPerfCnt) {
+//        // do not enable perfcnts except for Mcycle and Minstret
+//        if (address != perfCntList("Mcycle")._1 && address != perfCntList("Minstret")._1) {
+//          perfCntCond(address & 0x7f) := false.B
+//        }
+//      }
+  }
 
-  val nooptrap = WireInit(false.B)
-  BoringUtils.addSink(nooptrap, "nooptrap")
+  val xstrap = WireInit(false.B)
+  BoringUtils.addSink(xstrap, "XSTRAP")
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
   if (!p.FPGAPlatform) {
 
     // display all perfcnt when nooptrap is executed
-//    when (nooptrap) {
-//      printf("======== PerfCnt =========\n")
-//      perfCntList.toSeq.sortBy(_._2._1).map { case (name, (addr, boringId)) =>
-//        printf("%d <- " + name + "\n", readWithScala(addr)) }
-//    }
+    when (xstrap) {
+      printf("======== PerfCnt =========\n")
+      perfCntList.toSeq.sortBy(_._2._1).foreach { case (str, (address, boringId)) =>
+        printf("%d <- " + str + "\n", readWithScala(address))
+      }
+    }
 
     // for differential testing
     BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")

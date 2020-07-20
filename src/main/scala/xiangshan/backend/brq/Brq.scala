@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
+import chisel3.ExcitingUtils._
 
 
 class BrqPtr extends XSBundle {
@@ -245,16 +245,16 @@ class Brq extends XSModule {
   val mbpRWrong = predWrong && isRType
 
   if(EnableBPU){
-    BoringUtils.addSource(mbpInstr, "MbpInstr")
-    BoringUtils.addSource(mbpRight, "MbpRight")
-    BoringUtils.addSource(mbpWrong, "MbpWrong")
-    BoringUtils.addSource(mbpBRight, "MbpBRight")
-    BoringUtils.addSource(mbpBWrong, "MbpBWrong")
-    BoringUtils.addSource(mbpJRight, "MbpJRight")
-    BoringUtils.addSource(mbpJWrong, "MbpJWrong")
-    BoringUtils.addSource(mbpIRight, "MbpIRight")
-    BoringUtils.addSource(mbpIWrong, "MbpIWrong")
-    BoringUtils.addSource(mbpRRight, "MbpRRight")
-    BoringUtils.addSource(mbpRWrong, "MbpRWrong")
+    ExcitingUtils.addSource(mbpInstr, "perfCntCondMbpInstr", Perf)
+    ExcitingUtils.addSource(mbpRight, "perfCntCondMbpRight", Perf)
+    ExcitingUtils.addSource(mbpWrong, "perfCntCondMbpWrong", Perf)
+    ExcitingUtils.addSource(mbpBRight, "perfCntCondMbpBRight", Perf)
+    ExcitingUtils.addSource(mbpBWrong, "perfCntCondMbpBWrong", Perf)
+    ExcitingUtils.addSource(mbpJRight, "perfCntCondMbpJRight", Perf)
+    ExcitingUtils.addSource(mbpJWrong, "perfCntCondMbpJWrong", Perf)
+    ExcitingUtils.addSource(mbpIRight, "perfCntCondMbpIRight", Perf)
+    ExcitingUtils.addSource(mbpIWrong, "perfCntCondMbpIWrong", Perf)
+    ExcitingUtils.addSource(mbpRRight, "perfCntCondMbpRRight", Perf)
+    ExcitingUtils.addSource(mbpRWrong, "perfCntCondMbpRWrong", Perf)
   }
 }
