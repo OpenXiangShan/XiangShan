@@ -81,6 +81,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   for(i <- 0 until numWbPorts){
     when(io.exeWbResults(i).fire()){
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
+      microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       exuData(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.data
       exuDebug(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.debug
       XSInfo(io.exeWbResults(i).valid, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x\n", 
@@ -109,7 +110,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     io.commits(i) := DontCare
     switch(state){
       is(s_idle){
-        val canCommit = if(i!=0) io.commits(i-1).valid else true.B
+        val canCommit = (if(i!=0) io.commits(i-1).valid else true.B) && !Cat(microOp(ringBufferTail+i.U).cf.exceptionVec).orR()
         io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
         io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
         when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
@@ -207,10 +208,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   ExcitingUtils.addSink(intrVec, "intrVecIDU")
   val trapTarget = WireInit(0.U(VAddrBits.W))
   ExcitingUtils.addSink(trapTarget, "trapTarget")
-  val intrEnable = intrVec.orR
+  val intrEnable = intrVec.orR || Cat(microOp(ringBufferTail).cf.exceptionVec).orR()
 //  io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
   io.redirect := DontCare
-  io.redirect.valid := intrEnable && (state === s_idle) && !hasCsr && !ringBufferEmpty
+  val isEcall = microOp(ringBufferTail).cf.exceptionVec(ecallM) || microOp(ringBufferTail).cf.exceptionVec(ecallS) || microOp(ringBufferTail).cf.exceptionVec(ecallU)
+  io.redirect.valid := intrEnable && (state === s_idle) && !ringBufferEmpty && (!hasCsr || isEcall)
   io.redirect.bits.isException := true.B
   io.redirect.bits.target := trapTarget
   io.exception := microOp(ringBufferTail)
