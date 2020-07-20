@@ -60,9 +60,9 @@ class Ibuffer extends XSModule {
     for(i <- 0 until FetchWidth*2) {
       when(io.in.bits.mask(i)) {
         ibuf(enq_idx).inst := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
-        ibuf(enq_idx).pc := io.in.bits.pc + (enq_idx<<1).asUInt
+        ibuf(enq_idx).pc := io.in.bits.pc + ((enq_idx - tail_ptr)<<1).asUInt
         ibuf(enq_idx).pnpc := io.in.bits.pnpc(i>>1)
-        ibuf(enq_idx).fetchOffset := (enq_idx - tail_ptr << 1).asUInt
+        ibuf(enq_idx).fetchOffset := ((enq_idx - tail_ptr) << 1).asUInt
         ibuf(enq_idx).hist := io.in.bits.hist(i>>1)
         // ibuf(enq_idx).btbVictimWay := io.in.bits.btbVictimWay
         ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i>>1)
@@ -194,13 +194,13 @@ class Ibuffer extends XSModule {
   //Debug Info
   XSDebug(enqValid, "Enque:\n")
   for(i <- 0 until FetchWidth) {
-    XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
+    XSDebug(enqValid, p"${Hexadecimal(io.in.bits.instrs(i))}\n")
   }
 
   XSInfo(io.flush, "Flush signal received, clear buffer\n")
   XSDebug(deqValid, "Deque:\n")
   for(i <- 0 until DecodeWidth) {
-    XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
+    XSDebug(deqValid, p"${Hexadecimal(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
   }
   XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
 //  XSInfo(full, "Queue is full\n")
