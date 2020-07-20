@@ -23,11 +23,18 @@ class Dispatch1 extends XSModule{
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    // enq Moq
+    val toMoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // get MoqIdx
+    val moqIdxs = Input(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
     // to dispatch queue
     val toIntDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val toFpDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val toLsDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
+
+  // TODO: moqIdx
+
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {

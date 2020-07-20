@@ -16,6 +16,10 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    // enq Moq
+    val toMoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // get MoqIdx
+    val moqIdxs = Input(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
     // read regfile
     val readIntRf = Vec(NRReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRReadPorts, Flipped(new RfReadPort))
@@ -40,6 +44,8 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule {
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.toRoq <> io.toRoq
   dispatch1.io.roqIdxs <> io.roqIdxs
+  dispatch1.io.toMoq <> io.toMoq
+  dispatch1.io.moqIdxs <> io.moqIdxs
   dispatch1.io.toIntDq <> intDq.io.enq
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq

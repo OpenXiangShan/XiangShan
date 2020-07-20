@@ -123,6 +123,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
 
   lsuExeUnits.foreach(_.io.dmem <> DontCare) // TODO
   lsuExeUnits.foreach(_.io.mcommit <> roq.io.mcommit)
+  io.mem.mcommit := roq.io.mcommit
+  io.mem.ldin := DontCare // TODO
+  io.mem.stin := DontCare // TODO
 
   io.frontend.redirectInfo <> redirectInfo
   io.frontend.commits <> roq.io.commits
@@ -152,6 +155,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs
+  io.mem.dp1Req <> dispatch.io.toMoq
+  dispatch.io.moqIdxs <> io.mem.moqIdxs
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf
