@@ -7,22 +7,22 @@ import utils._
 import xiangshan.backend.decode.isa.predecode.PreDecode
 
 object BrType {
-  def notBr   = "b000".U
-  def jal     = "b001".U
-  def jalr    = "b010".U
-  def call    = "b011".U
-  def branch  = "b100".U
-  //def ret    = "b101".U
-  def apply() = UInt(3.W)
+  def notBr   = "b00".U
+  def jal     = "b01".U
+  def jalr    = "b10".U
+  def branch  = "b11".U
+  def apply() = UInt(2.W)
 }
 
 class PDecodeInfo extends XSBundle{  // 8 bit
-  val isRVC = Bool()
-  val brTpye = UInt(3.W)
-  val reserve = UInt(4.W)  // TODO:reserve for exception
+  val isRVC   = Bool()
+  val brTpye  = UInt(2.W)
+  val isCall  = Bool()
+  val isRet   = Bool()
+  val reserve = UInt(3.W)  // TODO:reserve for exception
 }
 
-class CacheLine extends XSBundle {
+class CacheLine extends XSBundle {  //TODO:simplebusUC
   val cacheLine = Output(UInt((FetchWidth * 32).W))
 }
 
@@ -37,7 +37,6 @@ class PDecode extends XSModule {
     val preDecodeInfo = ValidIO(Vec(FetchWidth * 2, new PDecodeInfo))
   })
 
-
   val cacheInstr = (0 until FetchWidth * 2).map(i => io.in.bits.cacheLine(i*16+15,i*16))
 
   val preDecodeTemp = Reg(Vec(FetchWidth * 2, new PDecodeInfo))
@@ -46,16 +45,22 @@ class PDecode extends XSModule {
 
   def isRVC(instr: UInt) = instr(1,0) =/= "b11".U
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
-  def brType(instr: UInt) = {
+  def brInfo(instr: UInt) = {
+    val isCall = WireInit(false.B)
+    val isRet = WireInit(false.B)  //TODO:add retInfo
+    val rd = instr(11,7)
     val res::Nil = ListLookup(instr, List(BrType.notBr), PreDecode.brTable)
-    Mux((res === BrType.jal || res === BrType.jalr) && isLink(instr(11,7)) && !isRVC(instr) ,BrType.call, res)
-    //judge in bpu: ret - (res === BrType.jalr && isLink(20,16) && !isRVC(instr))
+    when((res === BrType.jal || res === BrType.jalr) && isLink(rd) && !isRVC(instr)) { isCall := true.B }
+    List(res, isCall, isRet)
   }
 
   for(i <- 0 until FetchWidth * 2) {
-    preDecodeTemp(i).isRVC := isRVC(cacheInstr(i))
-    preDecodeTemp(i).brTpye := brType(cacheInstr(i))
-    preDecodeTemp(i).reserve := "b0000".U
+    val brType::isCall::isRet::Nil = brInfo(cacheInstr(i))
+    preDecodeTemp(i).isRVC  := isRVC(cacheInstr(i))
+    preDecodeTemp(i).brTpye := brType
+    preDecodeTemp(i).isCall := isCall
+    preDecodeTemp(i).isRet  := isRet
+    preDecodeTemp(i).reserve := "b000".U
   }
 
 
@@ -73,6 +78,11 @@ class PDecode extends XSModule {
 //  }
 
   for(i <- 0 until 2 * FetchWidth) {
-    XSDebug(io.preDecodeInfo.valid,p"instr ${Binary(cacheInstr(i))} RVC = ${Binary(io.preDecodeInfo.bits(i).isRVC)}, BrType = ${Binary(io.preDecodeInfo.bits(i).brTpye)}, reverse = ${Binary(io.preDecodeInfo.bits(i).reserve)}\n")
+    XSDebug(io.preDecodeInfo.valid,
+      p"instr ${Binary(cacheInstr(i))} " +
+      p"RVC = ${Binary(io.preDecodeInfo.bits(i).isRVC)}, " +
+      p"BrType = ${Binary(io.preDecodeInfo.bits(i).brTpye)}, " +
+      p"isCall = ${Binary(io.preDecodeInfo.bits(i).isCall)}, " +
+      p"isRet = ${Binary(io.preDecodeInfo.bits(i).isRet)} \n")
   }
 }
