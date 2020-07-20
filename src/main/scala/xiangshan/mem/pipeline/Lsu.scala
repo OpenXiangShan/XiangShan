@@ -92,7 +92,7 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
 class LsuIO extends XSBundle with HasMEMConst {
   val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
-  val out = Vec(2, Decoupled(new ExuOutput))
+  val out = Vec(4, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = Output(Valid(new Redirect))
   val mcommit = Input(UInt(3.W))
@@ -380,11 +380,16 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 //-------------------------------------------------------
 
   (0 until 2).map(i => {
-    val cdbArb = Module(new Arbiter(new ExuOutput, 2))
-    io.out(i) <> cdbArb.io.out
-    loadOut(i) <> cdbArb.io.in(0)
-    lsroq.io.out(i) <> cdbArb.io.in(1)
+    io.out(i) <> loadOut(i)
+    io.out(LoadPipelineWidth + i) <> lsroq.io.out(i)
   })
+
+  // (0 until 2).map(i => {
+  //   val cdbArb = Module(new Arbiter(new ExuOutput, 2))
+  //   io.out(i) <> cdbArb.io.out
+  //   loadOut(i) <> cdbArb.io.in(0)
+  //   lsroq.io.out(i) <> cdbArb.io.in(1)
+  // })
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 1
