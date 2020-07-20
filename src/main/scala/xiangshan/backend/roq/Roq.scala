@@ -217,7 +217,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   io.redirect.bits.target := trapTarget
   io.exception := microOp(ringBufferTail)
 
-  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x\n", io.exception.cf.pc, trapTarget)
+  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x exceptionVec %b\n", io.exception.cf.pc, trapTarget, Cat(microOp(ringBufferTail).cf.exceptionVec))
 
   // debug info
   XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerRoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerRoqIdxWidth), ringBufferTail)
