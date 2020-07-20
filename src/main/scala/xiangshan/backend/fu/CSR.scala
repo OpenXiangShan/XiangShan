@@ -641,7 +641,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val trapTarget = Wire(UInt(VAddrBits.W))
   ExcitingUtils.addSource(trapTarget, "trapTarget")
   io.redirect := DontCare
-  io.redirectValid := (valid && func === CSROpType.jmp) || resetSatp
+  io.redirectValid := (valid && func === CSROpType.jmp && !isEcall) || resetSatp
   //TODO: use pred pc instead pc+4
   io.redirect.target := Mux(
     resetSatp,
