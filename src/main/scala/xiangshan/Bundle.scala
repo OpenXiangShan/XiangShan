@@ -129,7 +129,7 @@ class Redirect extends XSBundle {
   val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
   val brTag = new BrqPtr
-  val _type = UInt(2.W)
+  val btbType = UInt(2.W)
   val isRVC = Bool()
   //val isCall = Bool()
   val taken = Bool()

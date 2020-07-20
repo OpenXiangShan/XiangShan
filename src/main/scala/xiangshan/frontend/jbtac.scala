@@ -12,7 +12,7 @@ class JBTACUpdateBundle extends XSBundle {
   val fetchIdx = UInt(log2Up(PredictWidth).W)
   val hist = UInt(HistoryLength.W)
   val target = UInt(VAddrBits.W)
-  val _type = UInt(2.W)
+  val btbType = UInt(2.W)
   val misPred = Bool()
   val isRVC = Bool()
 }
@@ -82,7 +82,7 @@ class JBTAC extends XSModule {
 
   val outHit = readEntries(readBankLatch).valid && 
     readEntries(readBankLatch).tag === Cat(jbtacAddr.getTag(io.in.pcLatch), jbtacAddr.getIdx(io.in.pcLatch)) &&
-    !io.flush && readFire(readBankLatch) && readMaskLatch(readEntries(readBankLatch).offset).asBool
+    !io.flush && RegNext(readFire(readBankLatch)) && readMaskLatch(readEntries(readBankLatch).offset).asBool
 
   io.out.hit := outHit
   io.out.hitIdx := readEntries(readBankLatch).offset
@@ -103,7 +103,7 @@ class JBTAC extends XSModule {
 
   val writeBank = jbtacAddr.getBank(updateHistXORAddr)
   val writeRow = jbtacAddr.getBankIdx(updateHistXORAddr)
-  val writeValid = io.redirectValid && io.update.misPred && io.update._type === BTBtype.I
+  val writeValid = io.redirectValid && io.update.misPred && io.update.btbType === BTBtype.I
   for (b <- 0 until JbtacBanks) {
     when (b.U === writeBank) {
       jbtac(b).io.w.req.valid := writeValid
@@ -135,5 +135,5 @@ class JBTAC extends XSModule {
   XSDebug(fireLatch, "read_resp: pc=0x%x, bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
     io.in.pcLatch, readBankLatch, readRowLatch, readEntries(readBankLatch).target, readEntries(readBankLatch).offset, outHit)
   XSDebug(io.redirectValid, "update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d, type=0x%d\n",
-    io.update.fetchPC, writeValid, io.update.hist, writeBank, writeRow, io.update.target, io.update.fetchIdx, io.update._type)
+    io.update.fetchPC, writeValid, io.update.hist, writeBank, writeRow, io.update.target, io.update.fetchIdx, io.update.btbType)
 }

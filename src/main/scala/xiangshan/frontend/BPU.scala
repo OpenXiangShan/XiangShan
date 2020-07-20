@@ -105,7 +105,7 @@ class BPUStage1 extends XSModule {
   btb.io.update.oldCtr := r.btbPredCtr
   btb.io.update.taken := r.taken
   btb.io.update.target := r.brTarget
-  btb.io.update._type := r._type
+  btb.io.update.btbType := r.btbType
   // TODO: add RVC logic
   btb.io.update.isRVC := r.isRVC
 
@@ -118,7 +118,7 @@ class BPUStage1 extends XSModule {
   val btbCtrs = VecInit(btb.io.out.dEntries.map(_.pred))
   val btbValids = btb.io.out.hits
   val btbTargets = VecInit(btb.io.out.dEntries.map(_.target))
-  val btbTypes = VecInit(btb.io.out.dEntries.map(_._type))
+  val btbTypes = VecInit(btb.io.out.dEntries.map(_.btbType))
   val btbIsRVCs = VecInit(btb.io.out.dEntries.map(_.isRVC))
 
 
@@ -134,7 +134,7 @@ class BPUStage1 extends XSModule {
   jbtac.io.update.fetchPC := updateFetchpc
   jbtac.io.update.fetchIdx := r.fetchIdx
   jbtac.io.update.misPred := io.redirectInfo.misPred
-  jbtac.io.update._type := r._type
+  jbtac.io.update.btbType := r.btbType
   jbtac.io.update.target := r.target
   jbtac.io.update.hist := r.hist
   jbtac.io.update.isRVC := r.isRVC
@@ -165,7 +165,7 @@ class BPUStage1 extends XSModule {
   // if stage3 redirects, restore history from stage3;
   // if stage1 redirects, speculatively update history;
   // if none of above happens, check if stage1 has not-taken branches and shift zeroes accordingly
-  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r._type === BTBtype.B && !r.taken),
+  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r.btbType === BTBtype.B && !r.taken),
             Mux(io.flush,                   Mux(io.s3Taken, (io.s3RollBackHist << 1.U) | 1.U, io.s3RollBackHist),
             Mux(io.s1OutPred.bits.redirect, (PriorityMux(brJumpIdx | indirectIdx, io.s1OutPred.bits.hist) << 1.U | 1.U),
                                             io.s1OutPred.bits.hist(0) << PopCount(btbNotTakens.asUInt & maskLatch))))
@@ -204,8 +204,8 @@ class BPUStage1 extends XSModule {
   XSDebug("outPred:(%d) pc=0x%x, redirect=%d instrValid=%b tgt=%x\n",
     io.s1OutPred.valid, pcLatch, io.s1OutPred.bits.redirect, io.s1OutPred.bits.instrValid.asUInt, io.s1OutPred.bits.target)
   XSDebug(io.flush && io.redirectInfo.flush(),
-    "flush from backend: pc=%x tgt=%x brTgt=%x _type=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
-    r.pc, r.target, r.brTarget, r._type, r.taken, r.hist, r.fetchIdx, r.isException)
+    "flush from backend: pc=%x tgt=%x brTgt=%x btbType=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
+    r.pc, r.target, r.brTarget, r.btbType, r.taken, r.hist, r.fetchIdx, r.isException)
   XSDebug(io.flush && !io.redirectInfo.flush(),
     "flush from Stage3:  s3Taken=%d s3RollBackHist=%b\n", io.s3Taken, io.s3RollBackHist)
 
@@ -325,7 +325,7 @@ class BPUStage3 extends XSModule {
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHit := inLatch.btbPred.bits.btbHit
   io.out.bits.tageMeta := inLatch.btbPred.bits.tageMeta
-  //io.out.bits._type := Mux(jmpIdx === retIdx, BTBtype.R,
+  //io.out.bits.btbType := Mux(jmpIdx === retIdx, BTBtype.R,
   //  Mux(jmpIdx === jalrIdx, BTBtype.I,
   //  Mux(jmpIdx === brTakenIdx, BTBtype.B, BTBtype.J)))
   val firstHist = inLatch.btbPred.bits.hist(0)
