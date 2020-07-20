@@ -117,17 +117,25 @@ class JBTAC extends XSModule {
   }
 
   // read-after-write bypass
+  val rawBypassHit = Wire(Vec(JbtacBanks, Bool()))
   for (b <- 0 until JbtacBanks) {
     when (readBank === writeBank && readRow === writeRow && b.U === readBank) {
       when (io.in.pc.fire() && writeValid) {
+        rawBypassHit(b) := true.B
         jbtac(b).io.r.req.valid := false.B
-        readEntries(b) := RegNext(writeEntry)
+        // readEntries(b) := RegNext(writeEntry)
         readFire(b) := true.B
         
         XSDebug("raw bypass hits: bank=%d, row=%d, tag=%x, tgt=%x, offet=%d, isRVC=%d\n",
           b.U, readRow, writeEntry.tag, writeEntry.target, writeEntry.offset, writeEntry.isRVC)
+      }.otherwise {
+        rawBypassHit(b) := false.B
       }
+    }.otherwise {
+      rawBypassHit(b) := false.B
     }
+
+    when (RegNext(rawBypassHit(b))) { readEntries(b) := RegNext(writeEntry) }
   }
 
   XSDebug(io.in.pc.fire(), "read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",

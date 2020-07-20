@@ -215,19 +215,30 @@ class BTB extends XSModule {
   io.out.isRVILateJump := io.out.taken && takenIdx === OHToUInt(HighestBit(maskLatch, PredictWidth)) && !dataRead(bankIdxInOrder(takenIdx)).isRVC
 
   // read-after-write bypass
+  val rawBypassHit = Wire(Vec(BtbBanks, Bool()))
   for (b <- 0 until BtbBanks) {
     when (b.U === updateBankIdx && realRow(b) === updateRow) { // read and write to the same address
       when (realMask(b) && io.in.pc.valid && btbWriteValid) {  // both read and write valid
+        rawBypassHit(b) := true.B
         btbMeta(b).io.r.req.valid := false.B
         btbData(b).io.r.req.valid := false.B
-        metaRead(b) := RegNext(btbMetaWrite)
-        dataRead(b) := RegNext(btbDataWrite)
+        // metaRead(b) := RegNext(btbMetaWrite)
+        // dataRead(b) := RegNext(btbDataWrite)
         readFire(b) := true.B
         XSDebug("raw bypass hits: bank=%d, row=%d, meta: %d %x, data: tgt=%x pred=%b btbType=%b isRVC=%d\n",
           b.U, updateRow,
           btbMetaWrite.valid, btbMetaWrite.tag,
           btbDataWrite.target, btbDataWrite.pred, btbDataWrite.btbType, btbDataWrite.isRVC)
+      }.otherwise {
+        rawBypassHit(b) := false.B
       }
+    }.otherwise {
+      rawBypassHit(b) := false.B
+    }
+
+    when (RegNext(rawBypassHit(b))) {
+      metaRead(b) := RegNext(btbMetaWrite)
+      dataRead(b) := RegNext(btbDataWrite)
     }
   }
 
