@@ -79,7 +79,7 @@ int main(int argc, const char** argv) {
 
   int display_trapinfo(uint64_t max_cycles);
   int ret = display_trapinfo(emu.get_max_cycles());
-  eprintf(ANSI_COLOR_BLUE "Guest cycle spent: %" PRIu64 "\n" ANSI_COLOR_RESET, emu.get_cycles());
+  eprintf(ANSI_COLOR_BLUE "Seed=%d Guest cycle spent: %" PRIu64 "\n" ANSI_COLOR_RESET, emu.get_seed(), emu.get_cycles());
   eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
 
   return ret;

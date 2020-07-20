@@ -85,7 +85,7 @@ class Decoder extends XSModule with HasInstrType {
 
   //FIXME: move it to ROB
   val intrVec = WireInit(0.U(12.W))
-  BoringUtils.addSink(intrVec, "intrVecIDU")
+  // BoringUtils.addSink(intrVec, "intrVecIDU")
   io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
   hasIntr := intrVec.orR
 
