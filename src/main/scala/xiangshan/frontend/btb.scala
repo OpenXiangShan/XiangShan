@@ -18,7 +18,7 @@ class BTBUpdateBundle extends XSBundle {
   val oldCtr = UInt(2.W)
   val taken = Bool()
   val target = UInt(VAddrBits.W)
-  val _type = UInt(2.W)
+  val btbType = UInt(2.W)
   val isRVC = Bool()
 }
 
@@ -37,7 +37,7 @@ class BTBPred extends XSBundle {
 case class btbDataEntry() extends XSBundle {
   val target = UInt(VAddrBits.W)
   val pred = UInt(2.W) // 2-bit saturated counter as a quick predictor
-  val _type = UInt(2.W)
+  val btbType = UInt(2.W)
   val isRVC = Bool()
 }
 
@@ -135,8 +135,8 @@ class BTB extends XSModule {
   // not taken branches from a valid entry
   val notTakenBranches = Wire(Vec(BtbBanks, Bool()))
   for (b <- 0 until BtbBanks) {
-    predTakens(b) := bankHits(b) && (dataRead(b)._type === BTBtype.J || dataRead(b)._type === BTBtype.B && dataRead(b).pred(1).asBool)
-    notTakenBranches(b) := bankHits(b) && dataRead(b)._type === BTBtype.B && !dataRead(b).pred(1).asBool
+    predTakens(b) := bankHits(b) && (dataRead(b).btbType === BTBtype.J || dataRead(b).btbType === BTBtype.B && dataRead(b).pred(1).asBool)
+    notTakenBranches(b) := bankHits(b) && dataRead(b).btbType === BTBtype.B && !dataRead(b).pred(1).asBool
   }
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
@@ -146,7 +146,7 @@ class BTB extends XSModule {
   // Priority mux which corresponds with inst orders
   // BTB only produce one single prediction
   val takenTarget = MuxCase(0.U, bankIdxInOrder.map(b => (predTakens(b), dataRead(b).target)))
-  val takenType   = MuxCase(0.U, bankIdxInOrder.map(b => (predTakens(b), dataRead(b)._type)))
+  val takenType   = MuxCase(0.U, bankIdxInOrder.map(b => (predTakens(b), dataRead(b).btbType)))
   // Record which inst is predicted taken
   val takenIdx = MuxCase(0.U, (0 until BtbBanks).map(b => (predTakens(bankIdxInOrder(b)), b.U)))
 
@@ -174,12 +174,12 @@ class BTB extends XSModule {
   val btbDataWrite = Wire(btbDataEntry())
   btbDataWrite.target := u.target
   btbDataWrite.pred := newCtr
-  btbDataWrite._type := u._type
+  btbDataWrite.btbType := u.btbType
   btbDataWrite.isRVC := u.isRVC
 
-  val isBr = u._type === BTBtype.B
-  val isJ = u._type === BTBtype.J
-  val notBrOrJ = u._type =/= BTBtype.B && u._type =/= BTBtype.J
+  val isBr = u.btbType === BTBtype.B
+  val isJ = u.btbType === BTBtype.J
+  val notBrOrJ = u.btbType =/= BTBtype.B && u.btbType =/= BTBtype.J
 
   // Do not update BTB on indirect or return, or correctly predicted J or saturated counters
   val noNeedToUpdate = (!u.misPred && (isBr && updateOnSaturated || isJ)) || (notBrOrJ)
@@ -210,13 +210,13 @@ class BTB extends XSModule {
     io.in.pcLatch, btbAddr.getIdx(io.in.pcLatch))
   for (i <- 0 until BtbBanks){
     XSDebug(nextFire, "read_resp[b=%d][r=%d]: valid=%d, tag=0x%x, target=0x%x, type=%d, ctr=%d\n",
-    i.U, realRowLatch(i), metaRead(i).valid, metaRead(i).tag, dataRead(i).target, dataRead(i)._type, dataRead(i).pred)
+    i.U, realRowLatch(i), metaRead(i).valid, metaRead(i).tag, dataRead(i).target, dataRead(i).btbType, dataRead(i).pred)
   }
   XSDebug(nextFire, "bankIdxInOrder:")
-  for (i <- 0 until BtbBanks){ XSDebug(false, nextFire, "%d ", bankIdxInOrder(i))}
-  XSDebug(false, nextFire, "\n")
-  XSDebug(io.redirectValid, "update_req: pc=0x%x, hit=%d, misPred=%d, oldCtr=%d, taken=%d, target=0x%x, _type=%d\n",
-    u.pc, u.hit, u.misPred, u.oldCtr, u.taken, u.target, u._type)
+  for (i <- 0 until BtbBanks){ XSDebug(nextFire, "%d ", bankIdxInOrder(i))}
+  XSDebug(nextFire, "\n")
+  XSDebug(io.redirectValid, "update_req: pc=0x%x, hit=%d, misPred=%d, oldCtr=%d, taken=%d, target=0x%x, btbType=%d\n",
+    u.pc, u.hit, u.misPred, u.oldCtr, u.taken, u.target, u.btbType)
   XSDebug(io.redirectValid, "update: noNeedToUpdate=%d, writeValid=%d, bank=%d, row=%d, newCtr=%d\n",
     noNeedToUpdate, btbWriteValid, updateBankIdx, updateRow, newCtr)
 }

@@ -62,7 +62,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
   io.out.bits.redirect.brTarget := target
   io.out.bits.redirect.brTag := uop.brTag
-  io.out.bits.redirect._type := "b00".U  
+  io.out.bits.redirect.btbType := "b00".U  
   io.out.bits.redirect.taken := isBranch && taken
   io.out.bits.redirect.hist := uop.cf.hist
   io.out.bits.redirect.tageMeta := uop.cf.tageMeta
@@ -74,7 +74,6 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.rasTopCtr := uop.cf.rasTopCtr
   io.out.bits.redirect.isException := DontCare // false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
-  io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
 
 
   io.out.valid := valid
@@ -95,6 +94,6 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   )
   XSDebug(io.in.valid, "src1:%x src2:%x offset:%x func:%b pc:%x\n",
     src1, src2, offset, func, pc)
-  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d flptr:%x\n",
-     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken, io.out.bits.uop.freelistAllocPtr.value)
+  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d\n",
+     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken)
 }

@@ -37,14 +37,13 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.redirect.brTag := io.in.bits.uop.brTag
   csrExuOut.redirect.isException := false.B
   csrExuOut.redirect.roqIdx := io.in.bits.uop.roqIdx
-  csrExuOut.redirect.freelistAllocPtr := io.in.bits.uop.freelistAllocPtr
   csrExuOut.redirect.target := csr.io.redirect.target
   csrExuOut.debug := DontCare
 
   val uop = io.in.bits.uop
   csrExuOut.redirect.pc := uop.cf.pc
   csrExuOut.redirect.brTarget := DontCare // DontCare
-  csrExuOut.redirect._type := LookupTree(uop.ctrl.fuOpType, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  csrExuOut.redirect.btbType := LookupTree(uop.ctrl.fuOpType, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   csrExuOut.redirect.taken := false.B
   csrExuOut.redirect.hist := uop.cf.hist
   csrExuOut.redirect.tageMeta := uop.cf.tageMeta

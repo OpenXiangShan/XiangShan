@@ -262,8 +262,8 @@ class Tage extends TageModule {
 
   val updateMeta = io.redirectInfo.redirect.tageMeta
   //val updateMisPred = UIntToOH(io.redirectInfo.redirect.fetchIdx) &
-  //  Fill(FetchWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect._type === BTBtype.B).asUInt)
-  val updateMisPred = io.redirectInfo.misPred && io.redirectInfo.redirect._type === BTBtype.B
+  //  Fill(FetchWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B).asUInt)
+  val updateMisPred = io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
   val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
@@ -317,8 +317,8 @@ class Tage extends TageModule {
     io.meta(w).allocate.bits := allocEntry
 
     val isUpdateTaken = io.redirectInfo.valid && io.redirectInfo.redirect.fetchIdx === w.U &&
-      io.redirectInfo.redirect.taken && io.redirectInfo.redirect._type === BTBtype.B
-    when (io.redirectInfo.redirect._type === BTBtype.B && io.redirectInfo.valid &&  io.redirectInfo.redirect.fetchIdx === w.U) {
+      io.redirectInfo.redirect.taken && io.redirectInfo.redirect.btbType === BTBtype.B
+    when (io.redirectInfo.redirect.btbType === BTBtype.B && io.redirectInfo.valid &&  io.redirectInfo.redirect.fetchIdx === w.U) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 

@@ -103,7 +103,7 @@ class BPUStage1 extends XSModule {
   btb.io.update.oldCtr := r.btbPredCtr
   btb.io.update.taken := r.taken
   btb.io.update.target := r.brTarget
-  btb.io.update._type := r._type
+  btb.io.update.btbType := r.btbType
   // TODO: add RVC logic
   btb.io.update.isRVC := DontCare
 
@@ -116,7 +116,7 @@ class BPUStage1 extends XSModule {
   val btbCtrs = VecInit(btb.io.out.dEntries.map(_.pred))
   val btbValids = btb.io.out.hits
   val btbTargets = VecInit(btb.io.out.dEntries.map(_.target))
-  val btbTypes = VecInit(btb.io.out.dEntries.map(_._type))
+  val btbTypes = VecInit(btb.io.out.dEntries.map(_.btbType))
 
 
   val jbtac = Module(new JBTAC)
@@ -129,7 +129,7 @@ class BPUStage1 extends XSModule {
   jbtac.io.update.fetchPC := updateFetchpc
   jbtac.io.update.fetchIdx := r.fetchIdx << 1
   jbtac.io.update.misPred := io.redirectInfo.misPred
-  jbtac.io.update._type := r._type
+  jbtac.io.update.btbType := r.btbType
   jbtac.io.update.target := r.target
   jbtac.io.update.hist := r.hist
 
@@ -155,8 +155,8 @@ class BPUStage1 extends XSModule {
   updateGhr := io.s1OutPred.bits.redirect || io.flush
   val brJumpIdx = Mux(!(btbHit && btbTaken), 0.U, UIntToOH(btbTakenIdx))
   val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
-  //val newTaken = Mux(io.redirectInfo.flush(), !(r._type === BTBtype.B && !r.taken), )
-  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r._type === BTBtype.B && !r.taken),
+  //val newTaken = Mux(io.redirectInfo.flush(), !(r.btbType === BTBtype.B && !r.taken), )
+  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r.btbType === BTBtype.B && !r.taken),
             Mux(io.flush,                   Mux(io.s3Taken, (io.s3RollBackHist << 1.U) | 1.U, io.s3RollBackHist),
             Mux(io.s1OutPred.bits.redirect, ((PriorityMux(brJumpIdx | indirectIdx, io.s1OutPred.bits.hist) << 1.U) | 1.U),
                                             io.s1OutPred.bits.hist(0) << PopCount(btbNotTakens))))
@@ -317,7 +317,7 @@ class BPUStage3 extends XSModule {
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
   io.out.bits.tageMeta := inLatch.btbPred.bits.tageMeta
-  //io.out.bits._type := Mux(jmpIdx === retIdx, BTBtype.R,
+  //io.out.bits.btbType := Mux(jmpIdx === retIdx, BTBtype.R,
   //  Mux(jmpIdx === jalrIdx, BTBtype.I,
   //  Mux(jmpIdx === brTakenIdx, BTBtype.B, BTBtype.J)))
   val firstHist = inLatch.btbPred.bits.hist(0)

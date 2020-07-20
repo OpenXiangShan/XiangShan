@@ -1,27 +1,12 @@
 package xiangshan.backend.decode.isa
 
-import Chisel.BitPat
+import chisel3.util._
 import xiangshan.{FuType, HasXSParameter}
 import xiangshan.backend.decode._
-import xiangshan.backend.decode.SrcType.{fp, imm, reg}
-import RVF_FPUInstr.{N, Y}
-import RVCInstr._
+import xiangshan.backend.LSUOpType
 
+object RVDInstr extends HasXSParameter with HasInstrType {
 
-object RVD_LSUInstr extends HasInstrType{
-  def FLD = BitPat("b?????????????????011?????0000111")
-  def FSD = BitPat("b?????????????????011?????0100111")
-  val table = Array(
-//    FLD -> List(InstrI, FuType.lsu, LSUOpType.ld),
-//    C_FLD -> List(InstrI, FuType.lsu, LSUOpType.ld),
-//    C_FLDSP -> List(InstrI, FuType.lsu, LSUOpType.ld),
-//    FSD -> List(InstrS, FuType.lsu, LSUOpType.sd),
-//    C_FSD -> List(InstrS, FuType.lsu, LSUOpType.sd),
-//    C_FSDSP -> List(InstrS, FuType.lsu, LSUOpType.sd)
-  )
-}
-
-object RVD_FPUInstr extends HasXSParameter {
   def FADD_D             = BitPat("b0000001??????????????????1010011")
   def FSUB_D             = BitPat("b0000101??????????????????1010011")
   def FMUL_D             = BitPat("b0001001??????????????????1010011")
@@ -54,8 +39,14 @@ object RVD_FPUInstr extends HasXSParameter {
   def FMSUB_D            = BitPat("b?????01??????????????????1000111")
   def FNMSUB_D           = BitPat("b?????01??????????????????1001011")
   def FNMADD_D           = BitPat("b?????01??????????????????1001111")
-  //  (isFp, src1Type, src2Type, src3Type, rfWen, fpWen, fuOpType, inputFunc, outputFunc)
+
   val table = Array(
+    FLD -> List(InstrFI, FuType.ldu, LSUOpType.ld),
+    FSD -> List(InstrFS, FuType.stu, LSUOpType.sd)
+  )
+
+  //  (isFp, src1Type, src2Type, src3Type, rfWen, fpWen, fuOpType, inputFunc, outputFunc)
+//  val table = Array(
 
 //    FLD -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
 //    C_FLD -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
@@ -99,10 +90,5 @@ object RVD_FPUInstr extends HasXSParameter {
 //    FCVT_D_WU -> List(Y, reg, imm, imm, N, Y, wu2f, in_raw, out_raw),
 //    FCVT_D_L  -> List(Y, reg, imm, imm, N, Y, l2f, in_raw, out_raw),
 //    FCVT_D_LU -> List(Y, reg, imm, imm, N, Y, lu2f, in_raw, out_raw)
-  )
-}
-
-object RVDInstr {
-  val table = RVD_LSUInstr.table
-  val extraTable = RVD_FPUInstr.table
+//  )
 }

@@ -222,18 +222,39 @@ class Brq extends XSModule {
   }
 
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
-  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)} flptr:${io.redirect.bits.freelistAllocPtr}\n")
+
+  XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
+
+  val fire = io.out.fire()
+  val predRight = fire && !commitEntry.misPred
+  val predWrong = fire && commitEntry.misPred
+  val isBType = commitEntry.exuOut.redirect.btbType===BTBtype.B
+  val isJType = commitEntry.exuOut.redirect.btbType===BTBtype.J
+  val isIType = commitEntry.exuOut.redirect.btbType===BTBtype.I
+  val isRType = commitEntry.exuOut.redirect.btbType===BTBtype.R
+  val mbpInstr = fire
+  val mbpRight = predRight
+  val mbpWrong = predWrong
+  val mbpBRight = predRight && isBType
+  val mbpBWrong = predWrong && isBType
+  val mbpJRight = predRight && isJType
+  val mbpJWrong = predWrong && isJType
+  val mbpIRight = predRight && isIType
+  val mbpIWrong = predWrong && isIType
+  val mbpRRight = predRight && isRType
+  val mbpRWrong = predWrong && isRType
+
   if(EnableBPU){
-    BoringUtils.addSource(io.out.fire(), "MbpInstr")
-    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred, "MbpRight")
-    BoringUtils.addSource(io.out.fire() && commitEntry.misPred, "MbpWrong")
-    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B, "MbpBRight")
-    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B, "MbpBWrong")
-    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J, "MbpJRight")
-    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J, "MbpJWrong")
-    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I, "MbpIRight")
-    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I, "MbpIWrong")
-    BoringUtils.addSource(io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R, "MbpRRight")
-    BoringUtils.addSource(io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R, "MbpRWrong")
+    BoringUtils.addSource(mbpInstr, "MbpInstr")
+    BoringUtils.addSource(mbpRight, "MbpRight")
+    BoringUtils.addSource(mbpWrong, "MbpWrong")
+    BoringUtils.addSource(mbpBRight, "MbpBRight")
+    BoringUtils.addSource(mbpBWrong, "MbpBWrong")
+    BoringUtils.addSource(mbpJRight, "MbpJRight")
+    BoringUtils.addSource(mbpJWrong, "MbpJWrong")
+    BoringUtils.addSource(mbpIRight, "MbpIRight")
+    BoringUtils.addSource(mbpIWrong, "MbpIWrong")
+    BoringUtils.addSource(mbpRRight, "MbpRRight")
+    BoringUtils.addSource(mbpRWrong, "MbpRWrong")
   }
 }

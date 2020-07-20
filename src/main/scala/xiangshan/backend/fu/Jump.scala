@@ -25,7 +25,7 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.target := target
   io.out.bits.redirect.brTarget := target // DontCare
   io.out.bits.redirect.brTag := uop.brTag
-  io.out.bits.redirect._type := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  io.out.bits.redirect.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   io.out.bits.redirect.taken := true.B
   io.out.bits.redirect.hist := uop.cf.hist
   io.out.bits.redirect.tageMeta := uop.cf.tageMeta
@@ -36,7 +36,6 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.rasTopCtr := uop.cf.rasTopCtr
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
-  io.out.bits.redirect.freelistAllocPtr := uop.freelistAllocPtr
 
   // Output
   val res = pcDelaySlot
