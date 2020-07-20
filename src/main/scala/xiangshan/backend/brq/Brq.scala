@@ -244,17 +244,17 @@ class Brq extends XSModule {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
-  if(EnableBPU){
-    BoringUtils.addSource(mbpInstr, "MbpInstr")
-    BoringUtils.addSource(mbpRight, "MbpRight")
-    BoringUtils.addSource(mbpWrong, "MbpWrong")
-    BoringUtils.addSource(mbpBRight, "MbpBRight")
-    BoringUtils.addSource(mbpBWrong, "MbpBWrong")
-    BoringUtils.addSource(mbpJRight, "MbpJRight")
-    BoringUtils.addSource(mbpJWrong, "MbpJWrong")
-    BoringUtils.addSource(mbpIRight, "MbpIRight")
-    BoringUtils.addSource(mbpIWrong, "MbpIWrong")
-    BoringUtils.addSource(mbpRRight, "MbpRRight")
-    BoringUtils.addSource(mbpRWrong, "MbpRWrong")
-  }
+  // if(EnableBPU){
+  //   BoringUtils.addSource(mbpInstr, "MbpInstr")
+  //   BoringUtils.addSource(mbpRight, "MbpRight")
+  //   BoringUtils.addSource(mbpWrong, "MbpWrong")
+  //   BoringUtils.addSource(mbpBRight, "MbpBRight")
+  //   BoringUtils.addSource(mbpBWrong, "MbpBWrong")
+  //   BoringUtils.addSource(mbpJRight, "MbpJRight")
+  //   BoringUtils.addSource(mbpJWrong, "MbpJWrong")
+  //   BoringUtils.addSource(mbpIRight, "MbpIRight")
+  //   BoringUtils.addSource(mbpIWrong, "MbpIWrong")
+  //   BoringUtils.addSource(mbpRRight, "MbpRRight")
+  //   BoringUtils.addSource(mbpRWrong, "MbpRWrong")
+  // }
 }

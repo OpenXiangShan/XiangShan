@@ -205,8 +205,8 @@ class BPUStage1 extends XSModule {
   XSDebug(true.B, "outPred:(%d) pc=0x%x, redirect=%d instrValid=%b tgt=%x\n",
     io.s1OutPred.valid, pcLatch, io.s1OutPred.bits.redirect, io.s1OutPred.bits.instrValid.asUInt, io.s1OutPred.bits.target)
   XSDebug(io.flush && io.redirectInfo.flush(),
-    "flush from backend: pc=%x tgt=%x brTgt=%x _type=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
-    r.pc, r.target, r.brTarget, r._type, r.taken, r.hist, r.fetchIdx, r.isException)
+    "flush from backend: pc=%x tgt=%x brTgt=%x btbType=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
+    r.pc, r.target, r.brTarget, r.btbType, r.taken, r.hist, r.fetchIdx, r.isException)
   XSDebug(io.flush && !io.redirectInfo.flush(),
     "flush from Stage3:  s3Taken=%d s3RollBackHist=%b\n", io.s3Taken, io.s3RollBackHist)
 
@@ -384,7 +384,7 @@ class BPUStage3 extends XSModule {
   // roll back global history in S1 if S3 redirects
   io.s1RollBackHist := Mux(io.s3Taken, io.out.bits.hist(jmpIdx), io.out.bits.hist(0) << PopCount(brs & ~inLatch.tage.takens.asUInt))
 
-  XSDebug(io.in.fire() && callIdx.orR, "[RAS]:pc=0x%x, rasWritePosition=%d, rasWriteAddr=0x%x",
+  XSDebug(io.in.fire() && callIdx.orR, "[RAS]:pc=0x%x, rasWritePosition=%d, rasWriteAddr=0x%x\n",
             io.in.bits.pc, rasWritePosition, retAddr)
 
   // debug info
@@ -398,11 +398,11 @@ class BPUStage3 extends XSModule {
   XSDebug(true.B, "tgtDiffers:%d, dirDiffers:%d, s3taken=%d\n", tgtDiffers, dirDiffers, io.s3Taken)
 
   // BPU's TEMP Perf Cnt
-  BoringUtils.addSource(io.out.valid, "MbpS3Cnt")
-  BoringUtils.addSource(io.out.valid && io.out.bits.redirect, "MbpS3TageRed")
-  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect ^ io.s3Taken), "MbpS3TageRedDir")
-  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect 
-              && io.s3Taken && (io.out.bits.target =/= inLatch.btbPred.bits.target)), "MbpS3TageRedTar")
+  // BoringUtils.addSource(io.out.valid, "MbpS3Cnt")
+  // BoringUtils.addSource(io.out.valid && io.out.bits.redirect, "MbpS3TageRed")
+  // BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect ^ io.s3Taken), "MbpS3TageRedDir")
+  // BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect 
+  //             && io.s3Taken && (io.out.bits.target =/= inLatch.btbPred.bits.target)), "MbpS3TageRedTar")
 }
 
 class BPU extends XSModule {
@@ -443,41 +443,41 @@ class BPU extends XSModule {
   s3.io.redirectInfo <> io.redirectInfo
 
   // TODO: temp and ugly code, when perf counters is added( may after adding CSR), please mv the below counter
-  val bpuPerfCntList = List(
-    ("MbpInstr","         "),
-    ("MbpRight","         "),
-    ("MbpWrong","         "),
-    ("MbpBRight","        "),
-    ("MbpBWrong","        "),
-    ("MbpJRight","        "),
-    ("MbpJWrong","        "),
-    ("MbpIRight","        "),
-    ("MbpIWrong","        "),
-    ("MbpRRight","        "),
-    ("MbpRWrong","        "),
-    ("MbpS3Cnt","         "),
-    ("MbpS3TageRed","     "),
-    ("MbpS3TageRedDir","  "),
-    ("MbpS3TageRedTar","  ")
-  )
+  // val bpuPerfCntList = List(
+  //   ("MbpInstr","         "),
+  //   ("MbpRight","         "),
+  //   ("MbpWrong","         "),
+  //   ("MbpBRight","        "),
+  //   ("MbpBWrong","        "),
+  //   ("MbpJRight","        "),
+  //   ("MbpJWrong","        "),
+  //   ("MbpIRight","        "),
+  //   ("MbpIWrong","        "),
+  //   ("MbpRRight","        "),
+  //   ("MbpRWrong","        "),
+  //   ("MbpS3Cnt","         "),
+  //   ("MbpS3TageRed","     "),
+  //   ("MbpS3TageRedDir","  "),
+  //   ("MbpS3TageRedTar","  ")
+  // )
 
-  val bpuPerfCnts = List.fill(bpuPerfCntList.length)(RegInit(0.U(XLEN.W)))
-  val bpuPerfCntConds = List.fill(bpuPerfCntList.length)(WireInit(false.B))
-  (bpuPerfCnts zip bpuPerfCntConds) map { case (cnt, cond) => { when (cond) { cnt := cnt + 1.U }}}
+  // val bpuPerfCnts = List.fill(bpuPerfCntList.length)(RegInit(0.U(XLEN.W)))
+  // val bpuPerfCntConds = List.fill(bpuPerfCntList.length)(WireInit(false.B))
+  // (bpuPerfCnts zip bpuPerfCntConds) map { case (cnt, cond) => { when (cond) { cnt := cnt + 1.U }}}
 
-  for(i <- bpuPerfCntList.indices) {
-    BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i)._1)
-  }
-
-  val xsTrap = WireInit(false.B)
-  BoringUtils.addSink(xsTrap, "XSTRAP_BPU")
-
-  // if (!p.FPGAPlatform) {
-    when (xsTrap) {
-      printf("=================BPU's PerfCnt================\n")
-      for(i <- bpuPerfCntList.indices) {
-        printf(bpuPerfCntList(i)._1 + bpuPerfCntList(i)._2 + " <- " + "%d\n", bpuPerfCnts(i))
-      }
-    }
+  // for(i <- bpuPerfCntList.indices) {
+  //   BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i)._1)
   // }
+
+  // val xsTrap = WireInit(false.B)
+  // BoringUtils.addSink(xsTrap, "XSTRAP_BPU")
+
+  // // if (!p.FPGAPlatform) {
+  //   when (xsTrap) {
+  //     printf("=================BPU's PerfCnt================\n")
+  //     for(i <- bpuPerfCntList.indices) {
+  //       printf(bpuPerfCntList(i)._1 + bpuPerfCntList(i)._2 + " <- " + "%d\n", bpuPerfCnts(i))
+  //     }
+  //   }
+  // // }
 }

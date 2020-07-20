@@ -161,7 +161,7 @@ class IFU extends XSModule with HasIFUConst
       if1_npc := if4_tage_target
     }
     //redirect: tage result differ btb
-    if4_btb_missPre := if4_tage_taken
+    if4_btb_missPre := if4_tage_taken && if4_valid
 
 
     //redirect: miss predict

@@ -374,6 +374,6 @@ class Tage extends TageModule {
 
   io.out.hits := outHits.asUInt
 
-  XSDebug(io.req.valid, "[TAGE]req: pc=0x%x, hist=%b", io.req.bits.pc, io.req.bits.hist)
+  XSDebug(io.req.valid, "req: pc=0x%x, hist=%b\n", io.req.bits.pc, io.req.bits.hist)
 
 }
