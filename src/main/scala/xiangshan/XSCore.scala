@@ -133,7 +133,7 @@ class XSCore(implicit p: XSConfig) extends XSModule with HasMEMConst {
   io.imem <> DontCare
 
   val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2, userBits = DcacheUserBundleWidth))
-
+  
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)

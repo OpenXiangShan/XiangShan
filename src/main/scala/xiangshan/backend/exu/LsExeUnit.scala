@@ -48,7 +48,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
     Mux(retiringStore, stqData(stqTail).src3, src3In),
     Mux(retiringStore, stqData(stqTail).func, funcIn)
   )
-  assert(!(retiringStore && !stqValid(stqTail)))
+  // assert(!(retiringStore && !stqValid(stqTail)))
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -149,7 +149,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   ){
     retiringStore := true.B
   }
-  when(state === s_partialLoad && retiringStore){
+  when(dmem.resp.fire() && retiringStore){
     retiringStore := false.B
   }
 
