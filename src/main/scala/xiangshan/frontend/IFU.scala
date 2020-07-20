@@ -27,7 +27,7 @@ class FakeBPU extends XSModule{
     val redirectInfo = Input(new RedirectInfo)
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
     val btbOut = ValidIO(new BranchPrediction)
-    val tageOut = ValidIO(new BranchPrediction)
+    val tageOut = Decoupled(new BranchPrediction)
     val predecode = Flipped(ValidIO(new Predecode))
   })
 
@@ -139,6 +139,7 @@ class IFU extends XSModule with HasIFUConst
     val if3_btb_target = RegEnable(Mux(if2_lateJumpLatch, if2_lateJumpTarget, Mux(if2_btb_lateJump, bpu.io.btbOut.bits.target, if2_btb_target)), if2_fire)
     val if3_btb_taken = RegEnable(Mux(if2_lateJumpLatch, true.B, if2_btb_taken), if2_fire)
     val if3_btb_insMask = RegEnable(Mux(if2_lateJumpLatch, 1.U((FetchWidth*2).W), if2_btb_insMask), if2_fire)
+    val if3_btb_lateJump = RegEnable(if2_btb_lateJump, if2_fire)
 
     //next
     val if4_ready = WireInit(false.B)
@@ -163,6 +164,7 @@ class IFU extends XSModule with HasIFUConst
     val if4_btb_target = RegEnable(if3_btb_target,if3_fire)
     val if4_btb_taken = RegEnable(if3_btb_taken,if3_fire)
     val if4_btb_insMask = RegEnable(if3_btb_insMask, if3_fire)
+    val if4_btb_lateJump = RegEnable(if3_btb_lateJump, if3_fire)
     val if4_tage_taken = bpu.io.tageOut.valid && bpu.io.tageOut.bits.redirect
     val if4_tage_lateJump = if4_tage_taken && bpu.io.tageOut.bits.lateJump && !io.redirectInfo.flush()
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
@@ -231,10 +233,20 @@ class IFU extends XSModule with HasIFUConst
     for(i <- 0 until (FetchWidth*2)){
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth*2))) {
         io.fetchPacket.bits.pnpc(i) := if4_btb_target
+        if (i != 0) {
+          when (!io.icacheResp.bits.predecode.isRVC(i) && !if4_btb_lateJump) {
+            io.fetchPacket.bits.pnpc(i-1) := if4_btb_target
+          }
+        }
       }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth*2))) {
         io.fetchPacket.bits.pnpc(i) := Mux(if4_tage_lateJump, bpu.io.tageOut.bits.target, if4_tage_target)
+        if (i != 0) {
+          when (!io.icacheResp.bits.predecode.isRVC(i) && !if4_tage_lateJump) {
+            io.fetchPacket.bits.pnpc(i-1) := if4_tage_target
+          }
+        }
       }.otherwise {
-        io.fetchPacket.bits.pnpc(i) := if4_pc + ((i + 1).U << Mux(io.icacheResp.bits.predecode.isRVC(i), 1.U, 2.U))
+        io.fetchPacket.bits.pnpc(i) := if4_pc + (i.U << 1.U) + Mux(io.icacheResp.bits.predecode.isRVC(i), 2.U, 4.U)
       }
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",
         Mux((i.U)(0), io.fetchPacket.bits.instrs(i>>1)(31,16), io.fetchPacket.bits.instrs(i>>1)(15,0)),
@@ -247,6 +259,7 @@ class IFU extends XSModule with HasIFUConst
     io.fetchPacket.bits.tageMeta := bpu.io.tageOut.bits.tageMeta
     io.fetchPacket.bits.rasSp := bpu.io.tageOut.bits.rasSp
     io.fetchPacket.bits.rasTopCtr := bpu.io.tageOut.bits.rasTopCtr
+    bpu.io.tageOut.ready := io.fetchPacket.ready
 
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid

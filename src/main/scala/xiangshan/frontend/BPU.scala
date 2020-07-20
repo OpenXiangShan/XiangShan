@@ -252,7 +252,7 @@ class BPUStage3 extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
     val in = Flipped(Decoupled(new Stage2To3IO))
-    val out = ValidIO(new BranchPrediction)
+    val out = Decoupled(new BranchPrediction)
     // from icache
     val predecode = Flipped(ValidIO(new Predecode))
     // from backend
@@ -267,16 +267,28 @@ class BPUStage3 extends XSModule {
   val flushS3 = BoolStopWatch(io.flush, io.in.fire(), startHighPriority = true)
   val inLatch = RegInit(0.U.asTypeOf(io.in.bits))
   val validLatch = RegInit(false.B)
+  val predecodeLatch = RegInit(0.U.asTypeOf(io.predecode.bits))
+  val predecodeValidLatch = RegInit(false.B)
   when (io.in.fire()) { inLatch := io.in.bits }
   when (io.flush) {
     validLatch := false.B
   }.elsewhen (io.in.fire()) {
     validLatch := true.B
-  }.elsewhen (io.out.valid) {
+  }.elsewhen (io.out.fire()) {
     validLatch := false.B
   }
-  io.out.valid := validLatch && io.predecode.valid && !flushS3 && !io.flush
-  io.in.ready := !validLatch || io.out.valid
+
+  when (io.predecode.valid) { predecodeLatch := io.predecode.bits }
+  when (io.flush || io.out.fire()) {
+    predecodeValidLatch := false.B
+  }.elsewhen (io.predecode.valid) {
+    predecodeValidLatch := true.B
+  }
+
+  val predecodeValid = io.predecode.valid || predecodeValidLatch
+  val predecode = Mux(io.predecode.valid, io.predecode.bits, predecodeLatch)
+  io.out.valid := validLatch && predecodeValid && !flushS3 && !io.flush
+  io.in.ready := !validLatch || io.out.fire()
 
   // RAS
   // TODO: split retAddr and ctr
@@ -292,32 +304,32 @@ class BPUStage3 extends XSModule {
   // get the first taken branch/jal/call/jalr/ret in a fetch line
   // brTakenIdx/jalIdx/callIdx/jalrIdx/retIdx/jmpIdx is one-hot encoded.
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction.
-  val brIdx = inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & io.predecode.bits.mask
+  val brIdx = inLatch.btb.hits & Reverse(Cat(predecode.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & predecode.mask
   val brTakenIdx = if(EnableBPD) {
     LowestBit(brIdx & Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt), PredictWidth)
   } else {
     LowestBit(brIdx & Reverse(Cat(inLatch.btbPred.bits.predCtr.map {c => c(1)}).asUInt), PredictWidth)
   }
   // TODO: btb doesn't need to hit, jalIdx/callIdx can be calculated based on instructions read in Cache
-  val jalIdx = LowestBit(inLatch.btb.hits & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jal }).asUInt) & io.predecode.bits.mask, PredictWidth)
-  val callIdx = LowestBit(inLatch.btb.hits & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.call }).asUInt), PredictWidth)
-  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt), PredictWidth)
-  val retIdx = LowestBit(io.predecode.bits.mask & Reverse(Cat(io.predecode.bits.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt), PredictWidth)
+  val jalIdx = LowestBit(inLatch.btb.hits & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.jal }).asUInt) & predecode.mask, PredictWidth)
+  val callIdx = LowestBit(inLatch.btb.hits & predecode.mask & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.call }).asUInt), PredictWidth)
+  val jalrIdx = LowestBit(inLatch.jbtac.hitIdx & predecode.mask & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt), PredictWidth)
+  val retIdx = LowestBit(predecode.mask & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt), PredictWidth)
 
   val jmpIdx = LowestBit(brTakenIdx | jalIdx | callIdx | jalrIdx | retIdx, PredictWidth)
   val brNotTakenIdx = brIdx & LowerMask(jmpIdx, PredictWidth) & (
     if(EnableBPD) ~Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt)
     else ~Reverse(Cat(inLatch.btbPred.bits.predCtr.map {c => c(1)}).asUInt))
 
-  val lateJump = jmpIdx === HighestBit(io.predecode.bits.mask, PredictWidth) && !io.predecode.bits.isRVC(OHToUInt(jmpIdx))
+  val lateJump = jmpIdx === HighestBit(predecode.mask, PredictWidth) && !predecode.isRVC(OHToUInt(jmpIdx))
 
-  io.out.bits.target := Mux(jmpIdx === 0.U, inLatch.pc + (PopCount(io.predecode.bits.mask) << 1.U),
+  io.out.bits.target := Mux(jmpIdx === 0.U, inLatch.pc + (PopCount(predecode.mask) << 1.U),
                         Mux(jmpIdx === retIdx, rasTopAddr,
                         Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
                         PriorityMux(jmpIdx, inLatch.btb.targets)))) // TODO: jal and call's target can be calculated here
 
-  io.out.bits.instrValid := Mux(!jmpIdx.orR || lateJump, io.predecode.bits.mask,
-                            Mux(!io.predecode.bits.isRVC(OHToUInt(jmpIdx)), LowerMask(jmpIdx << 1.U, PredictWidth),
+  io.out.bits.instrValid := Mux(!jmpIdx.orR || lateJump, predecode.mask,
+                            Mux(!predecode.isRVC(OHToUInt(jmpIdx)), LowerMask(jmpIdx << 1.U, PredictWidth),
                             LowerMask(jmpIdx, PredictWidth))).asTypeOf(Vec(PredictWidth, Bool()))
 
   // io.out.bits.btbVictimWay := inLatch.btbPred.bits.btbVictimWay
@@ -353,14 +365,14 @@ class BPUStage3 extends XSModule {
   //   else false.B)
   io.out.bits.redirect := inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool ||
     inLatch.btbPred.bits.redirect && jmpIdx.orR.asBool && io.out.bits.target =/= inLatch.btbPred.bits.target
-  io.flushBPU := io.out.bits.redirect && io.out.valid
+  io.flushBPU := io.out.bits.redirect && io.out.fire()
 
   // speculative update RAS
   val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
-  rasWrite.retAddr := inLatch.pc + (OHToUInt(callIdx) << 1.U) + Mux(PriorityMux(callIdx, io.predecode.bits.isRVC), 2.U, 4.U)
+  rasWrite.retAddr := inLatch.pc + (OHToUInt(callIdx) << 1.U) + Mux(PriorityMux(callIdx, predecode.isRVC), 2.U, 4.U)
   val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
   rasWrite.ctr := Mux(allocNewEntry, 1.U, rasTop.ctr + 1.U)
-  when (io.out.valid && jmpIdx =/= 0.U) {
+  when (io.out.fire() && jmpIdx =/= 0.U) {
     when (jmpIdx === callIdx) {
       ras(Mux(allocNewEntry, sp.value + 1.U, sp.value)) := rasWrite
       when (allocNewEntry) { sp.value := sp.value + 1.U }
@@ -387,18 +399,18 @@ class BPUStage3 extends XSModule {
 
   // debug info
   XSDebug(io.in.fire(), "in:(%d %d) pc=%x\n", io.in.valid, io.in.ready, io.in.bits.pc)
-  XSDebug(io.out.valid, "out:%d pc=%x redirect=%d predcdMask=%b instrValid=%b tgt=%x\n",
-    io.out.valid, inLatch.pc, io.out.bits.redirect, io.predecode.bits.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
+  XSDebug(io.out.fire(), "out:(%d %d) pc=%x redirect=%d predcdMask=%b instrValid=%b tgt=%x\n",
+    io.out.valid, io.out.ready, inLatch.pc, io.out.bits.redirect, predecode.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
   XSDebug("flushS3=%d\n", flushS3)
-  XSDebug("validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
+  XSDebug("validLatch=%d predecodeValid=%d\n", validLatch, predecodeValid)
   XSDebug("brIdx=%b brTakenIdx=%b brNTakenIdx=%b jalIdx=%b jalrIdx=%b callIdx=%b retIdx=%b\n",
     brIdx, brTakenIdx, brNotTakenIdx, jalIdx, jalrIdx, callIdx, retIdx)
 
   // BPU's TEMP Perf Cnt
-  BoringUtils.addSource(io.out.valid, "MbpS3Cnt")
-  BoringUtils.addSource(io.out.valid && io.out.bits.redirect, "MbpS3TageRed")
-  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool), "MbpS3TageRedDir")
-  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect 
+  BoringUtils.addSource(io.out.fire(), "MbpS3Cnt")
+  BoringUtils.addSource(io.out.fire() && io.out.bits.redirect, "MbpS3TageRed")
+  BoringUtils.addSource(io.out.fire() && (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool), "MbpS3TageRedDir")
+  BoringUtils.addSource(io.out.fire() && (inLatch.btbPred.bits.redirect 
               && jmpIdx.orR.asBool && (io.out.bits.target =/= inLatch.btbPred.bits.target)), "MbpS3TageRedTar")
 }
 
@@ -411,7 +423,7 @@ class BPU extends XSModule {
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
 
     val btbOut = ValidIO(new BranchPrediction)
-    val tageOut = ValidIO(new BranchPrediction)
+    val tageOut = Decoupled(new BranchPrediction)
 
     // predecode info from icache
     // TODO: simplify this after implement predecode unit
