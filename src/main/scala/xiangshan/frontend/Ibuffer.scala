@@ -13,6 +13,19 @@ class Ibuffer extends XSModule {
     val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   })
 
+  class IBufEntry extends XSBundle {
+    val inst = UInt(16.W)
+    val pc = UInt(VAddrBits.W)
+    val pnpc = UInt(VAddrBits.W)
+    val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
+    val hist = UInt(HistoryLength.W)
+    val btbPredCtr = UInt(2.W)
+    val btbHitWay = Bool()
+    val tageMeta = new TageMeta
+    val rasSp = UInt(log2Up(RasSize).W)
+    val rasTopCtr = UInt(8.W)
+  }
+
   // ignore
   for(i <- 0 until DecodeWidth) {
     io.out(i).bits.exceptionVec := DontCare
@@ -26,17 +39,7 @@ class Ibuffer extends XSModule {
   //  (0 until 16).map(i => mask(i.U) := (io.in.bits.pc(4,1) <= i.U))
 
   // ibuf define
-  val ibuf = Reg(Vec(IBufSize*2, UInt(16.W)))
-  val ibuf_pc = Reg(Vec(IBufSize*2, UInt(VAddrBits.W)))
-  val ibuf_pnpc = Reg(Vec(IBufSize*2, UInt(VAddrBits.W)))
-  val ibuf_fetchOffset = Reg(Vec(IBufSize*2, UInt(log2Up(FetchWidth*4).W)))
-  val ibuf_hist = Reg(Vec(IBufSize*2, UInt(HistoryLength.W)))
-  // val ibuf_btbVictimWay = Reg(Vec(IBufSize*2, UInt(log2Up(BtbWays).W)))
-  val ibuf_btbPredCtr = Reg(Vec(IBufSize*2, UInt(2.W)))
-  val ibuf_btbHitWay = Reg(Vec(IBufSize*2, Bool()))
-  val ibuf_tageMeta = Reg(Vec(IBufSize*2, (new TageMeta)))
-  val ibuf_rasSp = Reg(Vec(IBufSize*2, UInt(log2Up(RasSize).W)))
-  val ibuf_rasTopCtr = Reg(Vec(IBufSize*2, UInt(8.W)))
+  val ibuf = Mem(IBufSize*2, new IBufEntry)
   val ibuf_valid = RegInit(VecInit(Seq.fill(IBufSize*2)(false.B)))
   val head_ptr = RegInit(0.U(log2Up(IBufSize*2).W))
   val tail_ptr = RegInit(0.U(log2Up(IBufSize*2).W))
@@ -53,66 +56,66 @@ class Ibuffer extends XSModule {
 
   // enque
   when(enqValid) {
-    var enq_idx = 0.U(log2Up(FetchWidth*2+1).W)
+    var enq_idx = WireInit(tail_ptr)
     for(i <- 0 until FetchWidth*2) {
       when(io.in.bits.mask(i)) {
-        ibuf(tail_ptr + enq_idx) := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
-        ibuf_pc(tail_ptr + enq_idx) := io.in.bits.pc + (enq_idx<<1).asUInt
-        ibuf_pnpc(tail_ptr + enq_idx) := io.in.bits.pnpc(i>>1)
-        ibuf_fetchOffset(tail_ptr + enq_idx) := (enq_idx << 1).asUInt
-        ibuf_hist(tail_ptr + enq_idx) := io.in.bits.hist(i>>1)
-        // ibuf_btbVictimWay(tail_ptr + enq_idx) := io.in.bits.btbVictimWay
-        ibuf_btbPredCtr(tail_ptr + enq_idx) := io.in.bits.predCtr(i>>1)
-        ibuf_btbHitWay(tail_ptr + enq_idx) := io.in.bits.btbHitWay
-        ibuf_tageMeta(tail_ptr + enq_idx) := io.in.bits.tageMeta(i>>1)
-        ibuf_rasSp(tail_ptr + enq_idx) := io.in.bits.rasSp
-        ibuf_rasTopCtr(tail_ptr + enq_idx) := io.in.bits.rasTopCtr
-        ibuf_valid(tail_ptr + enq_idx) := true.B
+        ibuf(enq_idx).inst := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
+        ibuf(enq_idx).pc := io.in.bits.pc + (enq_idx<<1).asUInt
+        ibuf(enq_idx).pnpc := io.in.bits.pnpc(i>>1)
+        ibuf(enq_idx).fetchOffset := (enq_idx - tail_ptr << 1).asUInt
+        ibuf(enq_idx).hist := io.in.bits.hist(i>>1)
+        // ibuf(enq_idx).btbVictimWay := io.in.bits.btbVictimWay
+        ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i>>1)
+        ibuf(enq_idx).btbHitWay := io.in.bits.btbHitWay
+        ibuf(enq_idx).tageMeta := io.in.bits.tageMeta(i>>1)
+        ibuf(enq_idx).rasSp := io.in.bits.rasSp
+        ibuf(enq_idx).rasTopCtr := io.in.bits.rasTopCtr
+        ibuf_valid(enq_idx) := true.B
       }
       enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
-    tail_ptr := tail_ptr + enq_idx
+    tail_ptr := enq_idx
     last_enq := true.B
   }
 
   // deque
   when(deqValid) {
-    var deq_idx = 0.U(log2Up(DecodeWidth*2+1).W)
+    var deq_idx = WireInit(head_ptr)
     for(i <- 0 until DecodeWidth) {
-      io.out(i).valid := ibuf_valid(head_ptr + deq_idx) // FIXME: need fix me when support RVC
-      when(ibuf_valid(head_ptr + deq_idx)) {
-        when(ibuf(head_ptr + deq_idx)(1,0) =/= "b11".U) {
+      io.out(i).valid := ibuf_valid(deq_idx) // FIXME: need fix me when support RVC
+      when(ibuf_valid(deq_idx)) {
+        when(ibuf(deq_idx).inst(1,0) =/= "b11".U) {
           // is RVC
-          io.out(i).bits.instr := Cat(0.U(16.W), ibuf(head_ptr + deq_idx))
-          io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          io.out(i).bits.pnpc := ibuf_pnpc(head_ptr + deq_idx)
-          io.out(i).bits.fetchOffset := ibuf_fetchOffset(head_ptr + deq_idx)
-          io.out(i).bits.hist := ibuf_hist(head_ptr + deq_idx)
-          // io.out(i).bits.btbVictimWay := ibuf_btbVictimWay(head_ptr + deq_idx)
-          io.out(i).bits.btbPredCtr := ibuf_btbPredCtr(head_ptr + deq_idx)
-          io.out(i).bits.btbHitWay := ibuf_btbHitWay(head_ptr + deq_idx)
-          io.out(i).bits.tageMeta := ibuf_tageMeta(head_ptr + deq_idx)
-          io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + deq_idx)
-          io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + deq_idx)
+          io.out(i).bits.instr := Cat(0.U(16.W), ibuf(deq_idx).inst)
+          io.out(i).bits.pc := ibuf(deq_idx).pc
+          io.out(i).bits.pnpc := ibuf(deq_idx).pnpc
+          io.out(i).bits.fetchOffset := ibuf(deq_idx).fetchOffset
+          io.out(i).bits.hist := ibuf(deq_idx).hist
+          // io.out(i).bits.btbVictimWay := ibuf(deq_idx).btbVictimWay
+          io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
+          io.out(i).bits.btbHitWay := ibuf(deq_idx).btbHitWay
+          io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
+          io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
+          io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
           io.out(i).bits.isRVC := true.B
-          ibuf_valid(head_ptr + deq_idx) := !io.out(i).fire
-        }.elsewhen(ibuf_valid(head_ptr + deq_idx + 1.U)) {
+          ibuf_valid(deq_idx) := !io.out(i).fire
+        }.elsewhen(ibuf_valid(deq_idx + 1.U)) {
           // isn't RVC
-          io.out(i).bits.instr := Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx))
-          io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          io.out(i).bits.pnpc := ibuf_pnpc(head_ptr + deq_idx)
-          io.out(i).bits.fetchOffset := ibuf_fetchOffset(head_ptr + deq_idx)
-          io.out(i).bits.hist := ibuf_hist(head_ptr + deq_idx)
-          // io.out(i).bits.btbVictimWay := ibuf_btbVictimWay(head_ptr + deq_idx)
-          io.out(i).bits.btbPredCtr := ibuf_btbPredCtr(head_ptr + deq_idx)
-          io.out(i).bits.btbHitWay := ibuf_btbHitWay(head_ptr + deq_idx)
-          io.out(i).bits.tageMeta := ibuf_tageMeta(head_ptr + deq_idx)
-          io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + deq_idx)
-          io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + deq_idx)
+          io.out(i).bits.instr := Cat(ibuf(deq_idx+1.U).inst, ibuf(deq_idx).inst)
+          io.out(i).bits.pc := ibuf(deq_idx).pc
+          io.out(i).bits.pnpc := ibuf(deq_idx).pnpc
+          io.out(i).bits.fetchOffset := ibuf(deq_idx).fetchOffset
+          io.out(i).bits.hist := ibuf(deq_idx).hist
+          // io.out(i).bits.btbVictimWay := ibuf(deq_idx).btbVictimWay
+          io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
+          io.out(i).bits.btbHitWay := ibuf(deq_idx).btbHitWay
+          io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
+          io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
+          io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
           io.out(i).bits.isRVC := false.B
-          ibuf_valid(head_ptr + deq_idx) := !io.out(i).fire
-          ibuf_valid(head_ptr + deq_idx+1.U) := !io.out(i).fire
+          ibuf_valid(deq_idx) := !io.out(i).fire
+          ibuf_valid(deq_idx+1.U) := !io.out(i).fire
         }.otherwise {
           // half inst keep in buffer
           io.out(i).bits.instr := 0.U(32.W)
@@ -130,17 +133,17 @@ class Ibuffer extends XSModule {
           io.out(i).valid := false.B
         }
       }.otherwise {
-        io.out(i).bits.instr := Cat(ibuf(head_ptr + (i<<1).U + 1.U), ibuf(head_ptr + (i<<1).U))
-        io.out(i).bits.pc := ibuf_pc(head_ptr + (i<<1).U)
-        io.out(i).bits.pnpc := ibuf_pnpc(head_ptr + (i<<1).U)
-        io.out(i).bits.fetchOffset := ibuf_fetchOffset(head_ptr + (i<<1).U)
-        io.out(i).bits.hist := ibuf_hist(head_ptr + (i<<1).U)
-        // io.out(i).bits.btbVictimWay := ibuf_btbVictimWay(head_ptr + (i<<1).U)
-        io.out(i).bits.btbPredCtr := ibuf_btbPredCtr(head_ptr + (i<<1).U)
-        io.out(i).bits.btbHitWay := ibuf_btbHitWay(head_ptr + (i<<1).U)
-        io.out(i).bits.tageMeta := ibuf_tageMeta(head_ptr + (i<<1).U)
-        io.out(i).bits.rasSp := ibuf_rasSp(head_ptr + (i<<1).U)
-        io.out(i).bits.rasTopCtr := ibuf_rasTopCtr(head_ptr + (i<<1).U)
+        io.out(i).bits.instr := Cat(ibuf(head_ptr + (i<<1).U + 1.U).inst, ibuf(head_ptr + (i<<1).U).inst)
+        io.out(i).bits.pc := ibuf(head_ptr + (i<<1).U).pc
+        io.out(i).bits.pnpc := ibuf(head_ptr + (i<<1).U).pnpc
+        io.out(i).bits.fetchOffset := ibuf(head_ptr + (i<<1).U).fetchOffset
+        io.out(i).bits.hist := ibuf(head_ptr + (i<<1).U).hist
+        // io.out(i).bits.btbVictimWay := ibuf(head_ptr + (i<<1).U).btbVictimWay
+        io.out(i).bits.btbPredCtr := ibuf(head_ptr + (i<<1).U).btbPredCtr
+        io.out(i).bits.btbHitWay := ibuf(head_ptr + (i<<1).U).btbHitWay
+        io.out(i).bits.tageMeta := ibuf(head_ptr + (i<<1).U).tageMeta
+        io.out(i).bits.rasSp := ibuf(head_ptr + (i<<1).U).rasSp
+        io.out(i).bits.rasTopCtr := ibuf(head_ptr + (i<<1).U).rasTopCtr
         io.out(i).bits.isRVC := false.B
       }
 
@@ -149,12 +152,12 @@ class Ibuffer extends XSModule {
       // when not RVC deque, deq_idx+2
       // when only have half inst, keep it in buffer
       deq_idx = deq_idx + PriorityMux(Seq(
-        !(io.out(i).ready && ibuf_valid(head_ptr + deq_idx)) -> 0.U,
-        (ibuf(head_ptr + deq_idx)(1,0) =/= "b11".U) -> 1.U,
-        ibuf_valid(head_ptr + deq_idx + 1.U) -> 2.U
+        !(io.out(i).ready && ibuf_valid(deq_idx)) -> 0.U,
+        (ibuf(deq_idx).inst(1,0) =/= "b11".U) -> 1.U,
+        ibuf_valid(deq_idx + 1.U) -> 2.U
       ))
     }
-    head_ptr := head_ptr + deq_idx
+    head_ptr := deq_idx
 
     last_enq := false.B
   }.otherwise {
