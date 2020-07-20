@@ -6,8 +6,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
   def tagBits = VAddrBits - idxBits - 1
@@ -391,18 +389,10 @@ class BPUStage3 extends XSModule {
   XSDebug(io.in.fire(), "in:(%d %d) pc=%x\n", io.in.valid, io.in.ready, io.in.bits.pc)
   XSDebug(io.out.valid, "out:%d pc=%x redirect=%d predcdMask=%b instrValid=%b tgt=%x\n",
     io.out.valid, inLatch.pc, io.out.bits.redirect, io.predecode.bits.mask, io.out.bits.instrValid.asUInt, io.out.bits.target)
-  XSDebug(true.B, "flushS3=%d\n", flushS3)
-  XSDebug(true.B, "validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
-  XSDebug(true.B, "jmpIdx=%d, brs=%b brTakenIdx=%d brNTakens=%b jalIdx=%d jalrIdx=%d callIdx=%d retIdx=%d\n",
-    jmpIdx, brs, brTakenIdx, brNotTakens.asUInt, jalIdx, jalrIdx, callIdx, retIdx)
-  XSDebug(true.B, "tgtDiffers:%d, dirDiffers:%d, s3taken=%d\n", tgtDiffers, dirDiffers, io.s3Taken)
-
-  // BPU's TEMP Perf Cnt
-  // BoringUtils.addSource(io.out.valid, "MbpS3Cnt")
-  // BoringUtils.addSource(io.out.valid && io.out.bits.redirect, "MbpS3TageRed")
-  // BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect ^ io.s3Taken), "MbpS3TageRedDir")
-  // BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect 
-  //             && io.s3Taken && (io.out.bits.target =/= inLatch.btbPred.bits.target)), "MbpS3TageRedTar")
+  XSDebug(true.B, "[BPUS3]flushS3=%d\n", flushS3)
+  XSDebug(true.B, "[BPUS3]validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
+  XSDebug(true.B, "[BPUS3]brs=%b brTakens=%b brNTakens=%b jals=%b jalrs=%b calls=%b rets=%b\n",
+    brs, brTakens, brNotTakens.asUInt, jals, jalrs, calls, rets)
 }
 
 class BPU extends XSModule {
@@ -441,43 +431,4 @@ class BPU extends XSModule {
   s3.io.predecode <> io.predecode
   io.tageOut <> s3.io.out
   s3.io.redirectInfo <> io.redirectInfo
-
-  // TODO: temp and ugly code, when perf counters is added( may after adding CSR), please mv the below counter
-  // val bpuPerfCntList = List(
-  //   ("MbpInstr","         "),
-  //   ("MbpRight","         "),
-  //   ("MbpWrong","         "),
-  //   ("MbpBRight","        "),
-  //   ("MbpBWrong","        "),
-  //   ("MbpJRight","        "),
-  //   ("MbpJWrong","        "),
-  //   ("MbpIRight","        "),
-  //   ("MbpIWrong","        "),
-  //   ("MbpRRight","        "),
-  //   ("MbpRWrong","        "),
-  //   ("MbpS3Cnt","         "),
-  //   ("MbpS3TageRed","     "),
-  //   ("MbpS3TageRedDir","  "),
-  //   ("MbpS3TageRedTar","  ")
-  // )
-
-  // val bpuPerfCnts = List.fill(bpuPerfCntList.length)(RegInit(0.U(XLEN.W)))
-  // val bpuPerfCntConds = List.fill(bpuPerfCntList.length)(WireInit(false.B))
-  // (bpuPerfCnts zip bpuPerfCntConds) map { case (cnt, cond) => { when (cond) { cnt := cnt + 1.U }}}
-
-  // for(i <- bpuPerfCntList.indices) {
-  //   BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i)._1)
-  // }
-
-  // val xsTrap = WireInit(false.B)
-  // BoringUtils.addSink(xsTrap, "XSTRAP_BPU")
-
-  // // if (!p.FPGAPlatform) {
-  //   when (xsTrap) {
-  //     printf("=================BPU's PerfCnt================\n")
-  //     for(i <- bpuPerfCntList.indices) {
-  //       printf(bpuPerfCntList(i)._1 + bpuPerfCntList(i)._2 + " <- " + "%d\n", bpuPerfCnts(i))
-  //     }
-  //   }
-  // // }
 }

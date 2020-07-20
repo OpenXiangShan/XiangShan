@@ -13,5 +13,6 @@ with open("../build/XSSimTop.v", "r") as f:
         else:
             cnt = cnt + 1
         line = f.readline()
+    mymap[last] = cnt
     for k,v in mymap.items():
         print(k, v)
