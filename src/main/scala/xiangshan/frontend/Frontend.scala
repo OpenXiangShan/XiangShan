@@ -13,7 +13,7 @@ class Frontend extends XSModule {
 
   val ifu = Module(new IFU)
   val fakeicache = Module(new FakeCache)
-  val ibuffer=  Module(new Ibuffer)
+  val lbuffer =  Module(new LoopBuffer)
 
   val needFlush = io.backend.redirectInfo.flush()
 
@@ -21,12 +21,14 @@ class Frontend extends XSModule {
   fakeicache.io.in <> ifu.io.icacheReq
   ifu.io.icacheResp <> fakeicache.io.out
 
-  ibuffer.io.in <> ifu.io.fetchPacket
-  ibuffer.io.flush := needFlush
+  lbuffer.io.redirect := false.B
 
-  io.backend.cfVec <> ibuffer.io.out
+  lbuffer.io.in <> ifu.io.fetchPacket
+  lbuffer.io.flush := needFlush
 
-  for(out <- ibuffer.io.out){
+  io.backend.cfVec <> lbuffer.io.out
+
+  for(out <- lbuffer.io.out){
     XSInfo(out.fire(),
       p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
     )
