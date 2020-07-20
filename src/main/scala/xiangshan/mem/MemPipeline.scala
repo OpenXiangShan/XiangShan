@@ -20,8 +20,8 @@ trait HasMEMConst{
 }
 
 class MemToBackendIO extends XSBundle {
-  val ldin = Vec(2, Flipped(Decoupled(new LduReq)))
-  val stin = Vec(2, Flipped(Decoupled(new StuReq)))
+  val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
+  val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = ValidIO(new Redirect)

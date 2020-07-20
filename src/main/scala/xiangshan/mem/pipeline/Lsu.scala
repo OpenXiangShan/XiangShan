@@ -69,29 +69,29 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
   val forwardData = Input(Vec(8, UInt(8.W)))
 }
 
-class LduReq extends XSBundle with HasMEMConst {
-  val src1 = UInt(VAddrBits.W)
-  val src2 = UInt(VAddrBits.W)
-  // val func = UInt(6.W)
-  val data = UInt(XLEN.W)
-  val uop = new MicroOp
-  // val moqIdx = UInt(log2Up(LSRoqSize).W)
-  // val pc = UInt(VAddrBits.W) //for debug
-}
+// class LduReq extends XSBundle with HasMEMConst {
+//   val src1 = UInt(VAddrBits.W)
+//   val src2 = UInt(VAddrBits.W)
+//   // val func = UInt(6.W)
+//   val data = UInt(XLEN.W)
+//   val uop = new MicroOp
+//   // val moqIdx = UInt(log2Up(LSRoqSize).W)
+//   // val pc = UInt(VAddrBits.W) //for debug
+// }
 
-class StuReq extends XSBundle with HasMEMConst {
-  val src1 = UInt(VAddrBits.W)
-  val src2 = UInt(VAddrBits.W)
-  // val func = UInt(6.W)
-  val data = UInt(XLEN.W)
-  val uop = new MicroOp
-  // val moqIdx = UInt(log2Up(LSRoqSize).W)
-  // val pc = UInt(VAddrBits.W) //for debug
-}
+// class StuReq extends XSBundle with HasMEMConst {
+//   val src1 = UInt(VAddrBits.W)
+//   val src2 = UInt(VAddrBits.W)
+//   // val func = UInt(6.W)
+//   val data = UInt(XLEN.W)
+//   val uop = new MicroOp
+//   // val moqIdx = UInt(log2Up(LSRoqSize).W)
+//   // val pc = UInt(VAddrBits.W) //for debug
+// }
 
 class LsuIO extends XSBundle with HasMEMConst {
-  val ldin = Vec(2, Flipped(Decoupled(new LduReq)))
-  val stin = Vec(2, Flipped(Decoupled(new StuReq)))
+  val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
+  val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = Output(Valid(new Redirect))
@@ -156,7 +156,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   (0 until LoadPipelineWidth).map(i => {
     l2_out(i).bits := DontCare
-    l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src2
+    l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src3
     l2_out(i).bits.uop := io.ldin(i).bits.uop
     l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType)
     l2_out(i).valid := io.ldin(i).valid
@@ -313,7 +313,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   
   // send req to dtlb
   val saddr = VecInit((0 until StorePipelineWidth).map(i => {
-    io.stin(i).bits.src1 + io.stin(i).bits.src2
+    io.stin(i).bits.src1 + io.stin(i).bits.src3
   }))
 
   (0 until StorePipelineWidth).map(i => {
@@ -325,7 +325,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     s2_out(i).bits := DontCare
     s2_out(i).bits.vaddr := saddr(i)
     s2_out(i).bits.paddr := io.dtlb.resp(LoadPipelineWidth + i).bits.paddr
-    s2_out(i).bits.data := genWdata(io.stin(i).bits.data, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
+    s2_out(i).bits.data := genWdata(io.stin(i).bits.src2, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
     s2_out(i).bits.uop := io.stin(i).bits.uop
     s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType)
     s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
