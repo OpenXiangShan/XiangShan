@@ -22,6 +22,7 @@ class FakeIcacheReq extends XSBundle {
 class FakeIcacheResp extends XSBundle {
   val icacheOut = Vec(FetchWidth, UInt(32.W))
   val predecode = new Predecode
+  val mask = Vec(FetchWidth,Bool())
 }
 
 class TempPreDecoder extends XSModule  {
