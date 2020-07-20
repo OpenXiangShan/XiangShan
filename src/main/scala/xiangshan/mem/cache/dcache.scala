@@ -78,7 +78,7 @@ class DcacheIO extends XSBundle with HasMEMConst {
   val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
 }
 
-class Dcache extends XSModule with NeedImpl{
+class Dcache extends XSModule {
   val io = IO(new DcacheIO)
   
   // Arbiter for 2 dcache ports in built in decache
@@ -91,6 +91,10 @@ class Dcache extends XSModule with NeedImpl{
 
   // NutShell cache
   assert(!io.lsu.load(1).req.valid)
+  io.lsu.load(1).resp := DontCare
+  io.lsu.load(1).resp.valid := false.B
+  io.lsu.load(1).req.ready := false.B
+
   val dmem = io.dmem
   val ldReq = io.lsu.load(0).req
   val stReq = io.lsu.store.req

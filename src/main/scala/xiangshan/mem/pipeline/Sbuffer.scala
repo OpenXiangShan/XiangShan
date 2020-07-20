@@ -23,6 +23,8 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 
+  assert(!(io.in(1).ready && !io.in(0).ready))
+
   // Get retired store from lsroq
   (0 until StorePipelineWidth).map(i => {
     io.in(i).ready := DontCare
@@ -72,6 +74,8 @@ class FakeSbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   io.in(1) := DontCare
   io.in(1).ready := false.B
+  assert(!(io.in(1).ready && !io.in(0).ready))
+  // To make lsroq logic simpler, we assume io.in(0).ready == io.in(1).ready ?
 
   // store req will go to DCache directly, forward is not needed here
   (0 until 2).map(i => {
@@ -80,4 +84,5 @@ class FakeSbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
 
   io.dcache.req <> io.in(0)
+  io.dcache.resp.ready := true.B
 }

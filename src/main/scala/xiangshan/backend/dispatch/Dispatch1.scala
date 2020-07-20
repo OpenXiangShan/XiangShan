@@ -34,6 +34,8 @@ class Dispatch1 extends XSModule{
   })
 
   // TODO: moqIdx
+  io.toMoq := DontCare
+  io.moqIdxs := DontCare
 
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(RenameWidth, Bool()))

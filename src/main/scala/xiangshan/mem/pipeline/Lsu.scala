@@ -95,12 +95,15 @@ class LsuIO extends XSBundle with HasMEMConst {
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = Output(Valid(new Redirect))
+  val mcommit = Input(UInt(3.W))
+  val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+  val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
   val dcache = Flipped(new DcacheToLsuIO)
   val dtlb = Flipped(new DtlbToLsuIO)
 }
 
 // 2l2s out of order lsu for XiangShan
-class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
+class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
 
@@ -109,7 +112,11 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
   lsroq.io := DontCare // FIXME
   sbuffer.io := DontCare // FIXME
 
+  lsroq.io.mcommit <> io.mcommit
+  lsroq.io.dp1Req <> io.dp1Req
+  lsroq.io.moqIdxs <> io.moqIdxs
   io.rollback <> lsroq.io.rollback
+  io.dcache.redirect := io.redirect
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -153,6 +160,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     l2_out(i).bits.uop := io.ldin(i).bits.uop
     l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType)
     l2_out(i).valid := io.ldin(i).valid
+    io.ldin(i).ready := l2_out(i).ready
   })
 
   // send req to dtlb
@@ -167,6 +175,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     io.dcache.load(i).req.bits.vaddr := l2_out(i).bits.vaddr
     io.dcache.load(i).req.bits.paddr := io.dtlb.resp(i).bits.paddr
     io.dcache.load(i).req.bits.miss := io.dtlb.resp(i).bits.miss
+    io.dcache.load(i).req.bits.user := DontCare
     io.dcache.load(i).req.bits.user.uop := l2_out(i).bits.uop
   })
 
@@ -186,6 +195,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
   // result from dcache
   (0 until LoadPipelineWidth).map(i => {
+    io.dcache.load(i).resp.ready := true.B
     l4_out(i).bits := DontCare
     l4_out(i).bits.paddr := io.dcache.load(i).resp.bits.paddr
     l4_out(i).bits.data := io.dcache.load(i).resp.bits.data
@@ -319,6 +329,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     s2_out(i).bits.uop := io.stin(i).bits.uop
     s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType)
     s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
+    io.stin(i).ready := s2_out(i).ready
   })
 
   //TODO: tlb miss to store issue queue

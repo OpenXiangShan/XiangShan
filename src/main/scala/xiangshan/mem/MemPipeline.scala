@@ -25,9 +25,12 @@ class MemToBackendIO extends XSBundle {
   val out = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = ValidIO(new Redirect)
+  val mcommit = Input(UInt(3.W))
+  val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+  val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
 }
 
-class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
+class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
     val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
@@ -47,6 +50,9 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst with Ne
   lsu.io.out <> io.backend.out
   lsu.io.redirect <> io.backend.redirect
   lsu.io.rollback <> io.backend.rollback
+  lsu.io.mcommit <> io.backend.mcommit
+  lsu.io.dp1Req <> io.backend.dp1Req
+  lsu.io.moqIdxs <> io.backend.moqIdxs
   lsu.io.dcache <> dcache.io.lsu
   lsu.io.dtlb <> dtlb.io.lsu
 

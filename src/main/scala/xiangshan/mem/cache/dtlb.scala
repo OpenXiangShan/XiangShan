@@ -29,9 +29,11 @@ class DtlbIO extends XSBundle with HasMEMConst {
   // val l2 = TODO
 }
 
-class Dtlb extends XSModule with HasMEMConst with NeedImpl{
+class Dtlb extends XSModule with HasMEMConst {
   val io = IO(new DtlbIO)
   // Dtlb has 4 ports: 2 for load, 2 fore store 
+
+  // fake dtlb
   (0 until LoadPipelineWidth + StorePipelineWidth).map(i => {
     io.lsu.resp(i).valid := io.lsu.req(i).valid
     io.lsu.resp(i).bits.paddr := io.lsu.req(i).bits.vaddr

@@ -22,7 +22,7 @@ class LsRoqEntry extends XSBundle {
 }
 
 // Load/Store Roq (Moq) for XiangShan Out of Order LSU
-class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
+class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
@@ -31,7 +31,6 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
     val out = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
-    val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val mcommit = Input(UInt(3.W))
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val rollback = Output(Valid(new Redirect))
@@ -168,6 +167,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
     io.out(i).bits.uop := uop(storeWbSel(i))
     io.out(i).bits.data := data(storeWbSel(i)).data
     io.out(i).bits.redirectValid := false.B
+    io.out(i).bits.redirect := DontCare
     io.out(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
     when(storeWbSelVec(storeWbSel(i))){
       writebacked(storeWbSel(i)) := true.B
@@ -206,35 +206,44 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst with Nee
     io.sbuffer(i) := DontCare //ignore higher bits of DCacheStoreReq data/mask
     io.sbuffer(i).valid := false.B
   })
-  (0 until 4).map(i => {
+
+  demoqLegal = WireInit(ringBufferTailExtended =/= ringBufferHeadExtended)
+  // TODO: add width to 4? 6?
+  // FIXME
+  (0 until 2).map(i => {
     val ptrExt = ringBufferTailExtended + i.U
     val ptr = ptrExt(InnerRoqIdxWidth-1, 0)
     val isValidRetire = demoqSucceedCnt < scommitCnt && allocated(ptr) && valid(ptr) && writebacked(ptr) && !miss(ptr)
     val isCanceled = !allocated(ptr)
-    demoqLegal = WireInit(demoqLegal && ptrExt =/= ringBufferHeadExtended)
-    when((isValidRetire || isCanceled) && demoqLegal){
-      when(store(ptr)){
-        io.sbuffer(demoqStoreCnt).valid := true.B
-        io.sbuffer(demoqStoreCnt).bits.paddr := data(ptr).paddr
-        io.sbuffer(demoqStoreCnt).bits.data := data(ptr).data
-        io.sbuffer(demoqStoreCnt).bits.mask := data(ptr).mask
-        io.sbuffer(demoqStoreCnt).bits.miss := false.B
-        io.sbuffer(demoqStoreCnt).bits.user.uop := uop(ptr)
-        io.sbuffer(demoqStoreCnt).bits.user.mmio := data(ptr).mmio
-        io.sbuffer(demoqStoreCnt).bits.user.mask := data(ptr).mask
-        io.sbuffer(demoqStoreCnt).bits.user.id := DontCare // always store
-        io.sbuffer(demoqStoreCnt).bits.user.paddr := DontCare
-        demoqStoreCnt = WireInit(demoqStoreCnt + Mux(demoqStoreCnt >= 2.U, 0.U, io.sbuffer(demoqStoreCnt(0)).ready.asUInt))
-      }
-      demoqFreeEntryCnt = WireInit(demoqFreeEntryCnt + 1.U)
-      demoqSucceedCnt = WireInit(demoqFreeEntryCnt + isValidRetire.asUInt)
-      val sbufferFull = store(ptr) && !io.sbuffer(demoqStoreCnt(0)).ready
-      demoqLegal = WireInit(demoqLegal && demoqStoreCnt < 2.U && !sbufferFull)
+
+    io.sbuffer(i).valid := store(ptr) && isValidRetire && demoqLegal
+    io.sbuffer(i).bits.paddr := data(ptr).paddr
+    io.sbuffer(i).bits.data := data(ptr).data
+    io.sbuffer(i).bits.mask := data(ptr).mask
+    io.sbuffer(i).bits.miss := false.B
+    io.sbuffer(i).bits.user.uop := uop(ptr)
+    io.sbuffer(i).bits.user.mmio := data(ptr).mmio
+    io.sbuffer(i).bits.user.mask := data(ptr).mask
+    io.sbuffer(i).bits.user.id := DontCare // always store
+    io.sbuffer(i).bits.user.paddr := DontCare
+
+    when(store(ptr)){
+      demoqStoreCnt = WireInit(demoqStoreCnt + Mux(demoqStoreCnt >= 2.U, 0.U, io.sbuffer(demoqStoreCnt(0)).ready.asUInt))
     }
+
+    when((isValidRetire || isCanceled) && demoqLegal){
+      demoqFreeEntryCnt = WireInit(demoqFreeEntryCnt + 1.U)
+      demoqSucceedCnt = WireInit(demoqSucceedCnt + isValidRetire.asUInt)
+      val sbufferFull = store(ptr) && !io.sbuffer(0).ready
+      demoqLegal = WireInit(demoqLegal && !sbufferFull)
+      allocated(i) := false.B // FIXME: for debug only
+    }
+    //  && !sbufferFull
   })
 
   demoqCnt := demoqSucceedCnt
   ringBufferTailExtended := ringBufferTailExtended + demoqFreeEntryCnt
+  scommitCnt := scommitCnt + io.mcommit - demoqCnt
 
   // load forward query
   // left.age < right.age
