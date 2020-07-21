@@ -150,7 +150,9 @@ class BPUStage1 extends XSModule {
   (0 until FetchWidth).foreach(i => io.s1OutPred.bits.hist(i) := firstHist << histShift(i))
 
   // update ghr
-  updateGhr := io.s1OutPred.bits.redirect || io.flush
+  updateGhr := io.s1OutPred.bits.redirect || 
+               RegNext(io.in.pc.fire) && ~io.s1OutPred.bits.redirect && btbNotTakens.reduce(_||_) ||
+               io.flush
   val brJumpIdx = Mux(!(btbHit && btbTaken), 0.U, UIntToOH(btbTakenIdx))
   val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
   //val newTaken = Mux(io.redirectInfo.flush(), !(r.btbType === BTBtype.B && !r.taken), )
