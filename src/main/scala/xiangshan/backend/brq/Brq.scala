@@ -142,7 +142,7 @@ class Brq extends XSModule {
   )
 
   headPtr := headPtrNext
-  io.redirect.valid := commitValid && commitEntry.misPred
+  io.redirect.valid := commitValid && commitEntry.misPred && !io.roqRedirect.valid
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
