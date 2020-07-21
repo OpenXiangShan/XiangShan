@@ -229,8 +229,9 @@ class IFU extends XSModule with HasIFUConst
 
     //branchInfo Vector
     val branchVec = Mux(if4_tage_taken,Fill(FetchWidth, 1.U(1.W)) & if4_tage_insMask.asUInt,Mux(if4_btb_taken,Fill(FetchWidth, 1.U(1.W)) & if4_btb_insMask.asUInt,0.U))
+    XSDebug(io.fetchPacket.fire(),"[IF4-branch-Vec] %b\n",branchVec.asUInt)
     for(i <- 0 until FetchWidth){
-      io.fetchPacket.bits.branchInfo(i) := HighestBit(branchVec,FetchWidth)
+      io.fetchPacket.bits.branchInfo(i) := Reverse(UIntToOH(PriorityEncoder(Reverse(branchVec))))(i).asBool
     }
 
     //to BPU
