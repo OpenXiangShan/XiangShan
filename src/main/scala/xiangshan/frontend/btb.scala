@@ -74,8 +74,6 @@ class BTB extends XSModule {
 
   // BTB read requests
   val baseBank = btbAddr.getBank(io.in.pc.bits)
-  // val baseTag = btbAddr.getTag(io.in.pc.bits)
-  // val isAligned = baseBank === 0.U
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
     val res = Wire(UInt(len.W))
@@ -105,8 +103,6 @@ class BTB extends XSModule {
   }
 
 
-  // // latch pc for 1 cycle latency when reading SRAM
-  // val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
   // Entries read from SRAM
   val metaRead = Wire(Vec(BtbBanks, btbMetaEntry()))
   val dataRead = Wire(Vec(BtbBanks, btbDataEntry()))
@@ -140,15 +136,6 @@ class BTB extends XSModule {
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
   val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch + b.U) % BtbBanks.U))
-  
-
-  // Let predTakens(0) be in correspond with the first instruction in fetchPC
-  // val predUInt = predTakens.asUInt
-  // val realPreds = Mux(isAlignedLatch, predUInt, Cat(predUInt(BtbBanks-baseBankLatch-1, 0), predUInt(BtbBanks-1, BtbBanks-baseBankLatch))
-  // val realPredsVec = VecInit((0 until BtbBanks).map(realPreds(_).asBool))
-  // val ntbUInt = notTakenBranches.asUInt
-  // val realNtb = Mux(isAlignedLatch, ntbUInt, Cat(ntbUInt(BtbBanks-baseBankLatch-1, 0), ntbUInt(BtbBanks-1, BtbBanks-baseBankLatch))
-  // val realNtbVec = VecInit((0 until BtbBanks).map(realNtb(_).asBool))
 
   val isTaken       = predTakens.reduce(_||_)
   // Priority mux which corresponds with inst orders

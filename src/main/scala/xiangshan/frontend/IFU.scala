@@ -65,7 +65,7 @@ class IFU extends XSModule with HasIFUConst
     val if4_lateJumpTarget = RegInit(0.U(VAddrBits.W))
 
     //pipe fire
-    val if1_fire = if1_valid && if2_ready 
+    val if1_fire = if1_valid && if2_ready || needflush
     val if1_pcUpdate = if1_fire || needflush
 
     bpu.io.in.pc.valid := if1_fire
@@ -237,7 +237,7 @@ class IFU extends XSModule with HasIFUConst
 
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] starPC:0x%x   GroupPC:0x%xn\n",if4_pc.asUInt,groupPC(if4_pc).asUInt)
     XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instrmask %b\n",io.fetchPacket.bits.mask.asUInt)
-    for(i <- 0 until (FetchWidth*2)){
+    for(i <- 0 until (FetchWidth*2)) {
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth*2))) {
         io.fetchPacket.bits.pnpc(i) := if4_btb_target
         if (i != 0) {
