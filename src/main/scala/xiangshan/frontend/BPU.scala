@@ -6,8 +6,6 @@ import utils._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
   def tagBits = VAddrBits - idxBits - 1
@@ -103,7 +101,7 @@ class BPUStage1 extends XSModule {
   btb.io.update.oldCtr := r.btbPredCtr
   btb.io.update.taken := r.taken
   btb.io.update.target := r.brTarget
-  btb.io.update._type := r._type
+  btb.io.update.btbType := r.btbType
   // TODO: add RVC logic
   btb.io.update.isRVC := DontCare
 
@@ -116,7 +114,7 @@ class BPUStage1 extends XSModule {
   val btbCtrs = VecInit(btb.io.out.dEntries.map(_.pred))
   val btbValids = btb.io.out.hits
   val btbTargets = VecInit(btb.io.out.dEntries.map(_.target))
-  val btbTypes = VecInit(btb.io.out.dEntries.map(_._type))
+  val btbTypes = VecInit(btb.io.out.dEntries.map(_.btbType))
 
 
   val jbtac = Module(new JBTAC)
@@ -129,7 +127,7 @@ class BPUStage1 extends XSModule {
   jbtac.io.update.fetchPC := updateFetchpc
   jbtac.io.update.fetchIdx := r.fetchIdx << 1
   jbtac.io.update.misPred := io.redirectInfo.misPred
-  jbtac.io.update._type := r._type
+  jbtac.io.update.btbType := r.btbType
   jbtac.io.update.target := r.target
   jbtac.io.update.hist := r.hist
 
@@ -155,8 +153,8 @@ class BPUStage1 extends XSModule {
   updateGhr := io.s1OutPred.bits.redirect || io.flush
   val brJumpIdx = Mux(!(btbHit && btbTaken), 0.U, UIntToOH(btbTakenIdx))
   val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
-  //val newTaken = Mux(io.redirectInfo.flush(), !(r._type === BTBtype.B && !r.taken), )
-  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r._type === BTBtype.B && !r.taken),
+  //val newTaken = Mux(io.redirectInfo.flush(), !(r.btbType === BTBtype.B && !r.taken), )
+  newGhr := Mux(io.redirectInfo.flush(),    (r.hist << 1.U) | !(r.btbType === BTBtype.B && !r.taken),
             Mux(io.flush,                   Mux(io.s3Taken, (io.s3RollBackHist << 1.U) | 1.U, io.s3RollBackHist),
             Mux(io.s1OutPred.bits.redirect, (PriorityMux(brJumpIdx | indirectIdx, io.s1OutPred.bits.hist) << 1.U | 1.U),
                                             io.s1OutPred.bits.hist(0) << PopCount(btbNotTakens))))
@@ -192,8 +190,8 @@ class BPUStage1 extends XSModule {
   XSDebug(true.B, "[BPUS1]outPred:(%d) pc=0x%x, redirect=%d instrValid=%b tgt=%x\n",
     io.s1OutPred.valid, pcLatch, io.s1OutPred.bits.redirect, io.s1OutPred.bits.instrValid.asUInt, io.s1OutPred.bits.target)
   XSDebug(io.flush && io.redirectInfo.flush(),
-    "[BPUS1]flush from backend: pc=%x tgt=%x brTgt=%x _type=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
-    r.pc, r.target, r.brTarget, r._type, r.taken, r.hist, r.fetchIdx, r.isException)
+    "[BPUS1]flush from backend: pc=%x tgt=%x brTgt=%x btbType=%b taken=%d oldHist=%b fetchIdx=%d isExcpt=%d\n",
+    r.pc, r.target, r.brTarget, r.btbType, r.taken, r.hist, r.fetchIdx, r.isException)
   XSDebug(io.flush && !io.redirectInfo.flush(),
     "[BPUS1]flush from Stage3:  s3Taken=%d s3RollBackHist=%b\n", io.s3Taken, io.s3RollBackHist)
 
@@ -300,7 +298,7 @@ class BPUStage3 extends XSModule {
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
   io.out.bits.btbHitWay := inLatch.btbPred.bits.btbHitWay
   io.out.bits.tageMeta := inLatch.btbPred.bits.tageMeta
-  //io.out.bits._type := Mux(jmpIdx === retIdx, BTBtype.R,
+  //io.out.bits.btbType := Mux(jmpIdx === retIdx, BTBtype.R,
   //  Mux(jmpIdx === jalrIdx, BTBtype.I,
   //  Mux(jmpIdx === brTakenIdx, BTBtype.B, BTBtype.J)))
   val firstHist = inLatch.btbPred.bits.hist(0)
@@ -366,13 +364,6 @@ class BPUStage3 extends XSModule {
   XSDebug(true.B, "[BPUS3]validLatch=%d predecode.valid=%d\n", validLatch, io.predecode.valid)
   XSDebug(true.B, "[BPUS3]brIdx=%b brTakenIdx=%b brNTakenIdx=%b jalIdx=%b jalrIdx=%b callIdx=%b retIdx=%b\n",
     brIdx, brTakenIdx, brNotTakenIdx, jalIdx, jalrIdx, callIdx, retIdx)
-
-  // BPU's TEMP Perf Cnt
-  BoringUtils.addSource(io.out.valid, "MbpS3Cnt")
-  BoringUtils.addSource(io.out.valid && io.out.bits.redirect, "MbpS3TageRed")
-  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect ^ jmpIdx.orR.asBool), "MbpS3TageRedDir")
-  BoringUtils.addSource(io.out.valid && (inLatch.btbPred.bits.redirect 
-              && jmpIdx.orR.asBool && (io.out.bits.target =/= inLatch.btbPred.bits.target)), "MbpS3TageRedTar")
 }
 
 class BPU extends XSModule {
@@ -411,43 +402,4 @@ class BPU extends XSModule {
   s3.io.predecode <> io.predecode
   io.tageOut <> s3.io.out
   s3.io.redirectInfo <> io.redirectInfo
-
-  // TODO: temp and ugly code, when perf counters is added( may after adding CSR), please mv the below counter
-  val bpuPerfCntList = List(
-    ("MbpInstr","         "),
-    ("MbpRight","         "),
-    ("MbpWrong","         "),
-    ("MbpBRight","        "),
-    ("MbpBWrong","        "),
-    ("MbpJRight","        "),
-    ("MbpJWrong","        "),
-    ("MbpIRight","        "),
-    ("MbpIWrong","        "),
-    ("MbpRRight","        "),
-    ("MbpRWrong","        "),
-    ("MbpS3Cnt","         "),
-    ("MbpS3TageRed","     "),
-    ("MbpS3TageRedDir","  "),
-    ("MbpS3TageRedTar","  ")
-  )
-
-  val bpuPerfCnts = List.fill(bpuPerfCntList.length)(RegInit(0.U(XLEN.W)))
-  val bpuPerfCntConds = List.fill(bpuPerfCntList.length)(WireInit(false.B))
-  (bpuPerfCnts zip bpuPerfCntConds) map { case (cnt, cond) => { when (cond) { cnt := cnt + 1.U }}}
-
-  for(i <- bpuPerfCntList.indices) {
-    BoringUtils.addSink(bpuPerfCntConds(i), bpuPerfCntList(i)._1)
-  }
-
-  val xsTrap = WireInit(false.B)
-  BoringUtils.addSink(xsTrap, "XSTRAP_BPU")
-
-  // if (!p.FPGAPlatform) {
-    when (xsTrap) {
-      printf("=================BPU's PerfCnt================\n")
-      for(i <- bpuPerfCntList.indices) {
-        printf(bpuPerfCntList(i)._1 + bpuPerfCntList(i)._2 + " <- " + "%d\n", bpuPerfCnts(i))
-      }
-    }
-  // }
 }
