@@ -50,7 +50,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 ifeq ($(REMOTE),localhost)
 	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
 endif
 
 
@@ -110,7 +110,7 @@ emu: $(EMU)
 ifeq ($(REMOTE),localhost)
 	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) $(SEED) -b $(B) -e $(E)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) $(SEED) -b $(B) -e $(E)"
 endif
 
 cache:
