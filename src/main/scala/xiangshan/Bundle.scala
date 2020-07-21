@@ -196,5 +196,5 @@ class FrontendToBackendIO extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
   val redirectInfo = Input(new RedirectInfo)
-  val commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit))) // update branch pred
+  val inOrderBrInfo = Input(new RedirectInfo)
 }

@@ -65,6 +65,8 @@ class BrqIO extends XSBundle{
   val redirect = Output(Valid(new Redirect))
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
+  // in order dequeue to train bpd
+  val inOrderBrInfo = Output(new RedirectInfo)
 }
 
 class Brq extends XSModule {
@@ -128,6 +130,9 @@ class Brq extends XSModule {
 
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
+  io.inOrderBrInfo.valid := deqValid
+  io.inOrderBrInfo.misPred := commitEntry.misPred
+  io.inOrderBrInfo.redirect := commitEntry.exuOut.redirect
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")

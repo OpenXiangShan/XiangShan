@@ -126,7 +126,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   jmpExeUnit.io.exception.bits := roq.io.exception
 
   io.frontend.redirectInfo <> redirectInfo
-  io.frontend.commits <> roq.io.commits
+  io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
