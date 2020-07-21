@@ -23,6 +23,36 @@ class StoreQueueEntry extends XSBundle{
   val brTag = new BrqPtr //FIXIT
 }
 
+
+
+class MemWrapperIO extends ExuIO {
+  val ldReq = Vec(2, DecoupledIO(new ExuInput))
+  val stReq = Vec(2, DecoupledIO(new ExuInput))
+  val wbReq = Vec(4, Flipped(DecoupledIO(new ExuOutput)))
+}
+
+class MemWrapper extends Exu(Exu.lsuExeUnitCfg, new MemWrapperIO)
+{
+
+  val inLoad = io.in.valid && LSUOpType.isLoad(io.in.bits.uop.ctrl.fuOpType)
+  val inStore = io.in.valid && LSUOpType.isStore(io.in.bits.uop.ctrl.fuOpType)
+
+  io.ldReq(0).valid := inLoad
+  io.ldReq(0).bits := io.in.bits
+  io.ldReq(1) <> DontCare
+
+  io.stReq(0).valid := inStore
+  io.stReq(0).bits := io.in.bits
+  io.stReq(1) <> DontCare
+
+  io.in.ready := Mux(inLoad, io.ldReq(0).ready, Mux(inStore, io.stReq(0).ready, true.B))
+
+  val arb = Module(new Arbiter(new ExuOutput, 4))
+  arb.io.in <> io.wbReq
+  io.out <> arb.io.out
+
+}
+
 // Multi-cycle LSU ported from NOOP
 class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
 

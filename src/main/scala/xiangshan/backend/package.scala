@@ -117,6 +117,7 @@ package object backend {
 
     def isStore(func: UInt): Bool = func(3)
     def isAtom(func: UInt): Bool = func(5)
+    def isLoad(func: UInt): Bool = !isStore(func) && !isAtom(func)
 
     def atomW = "010".U
     def atomD = "011".U

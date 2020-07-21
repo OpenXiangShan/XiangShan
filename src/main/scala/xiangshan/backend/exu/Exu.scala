@@ -49,10 +49,10 @@ case class ExuConfig
   }
 }
 
-abstract class Exu(val config: ExuConfig) extends XSModule {
-  val io = IO(new ExuIO)
+abstract class Exu[T <: ExuIO](val config: ExuConfig, gen: T = new ExuIO) extends XSModule {
+  val io = IO(gen)
   io.dmem <> DontCare
-  io.out.bits.debug.isMMIO := false.B
+  io.out.bits.debug := DontCare
 }
 
 object Exu {
