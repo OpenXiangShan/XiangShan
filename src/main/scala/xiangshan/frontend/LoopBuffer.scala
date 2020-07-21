@@ -73,6 +73,7 @@ class LoopBuffer extends XSModule {
   // Loop Buffer define
   val lbuf = Reg(Vec(IBufSize, new LBufEntry))
   val lbuf_valid = RegInit(VecInit(Seq.fill(IBufSize)(false.B)))
+  val out_isTaken = Reg(Vec(DecodeWidth, Bool()))
   val head_ptr = RegInit(0.U(log2Up(IBufSize).W))
   val tail_ptr = RegInit(0.U(log2Up(IBufSize).W))
 
@@ -81,9 +82,9 @@ class LoopBuffer extends XSModule {
   val loop_ptr = RegInit(0.U(log2Up(IBufSize).W))
 
   // val hasSBB = (0 until DecodeWidth).map(i => lbuf_valid(head_ptr + i.U) && isSBB(lbuf(head_ptr + i.U).inst)).reduce(_||_)
-  val hasSBB = ParallelOR((0 until DecodeWidth).map(i => lbuf_valid(head_ptr + i.U) && isSBB(lbuf(head_ptr + i.U).inst))).asBool()
-  val hasTSBB = ParallelOR((0 until DecodeWidth).map(i => io.out(i).valid && io.out(i).bits.pc === tsbbPC)).asBool()
-  val sbbIdx = OHToUInt(HighestBit(VecInit((0 until DecodeWidth).map(i => isSBB(lbuf(head_ptr + i.U).inst))).asUInt, DecodeWidth))
+  val hasSBB = ParallelOR((0 until DecodeWidth).map(i => io.out(i).fire && isSBB(io.out(i).bits.instr))).asBool()
+  val hasTSBB = ParallelOR((0 until DecodeWidth).map(i => io.out(i).fire && io.out(i).bits.pc === tsbbPC)).asBool()
+  val sbbIdx = OHToUInt(HighestBit(VecInit((0 until DecodeWidth).map(i => isSBB(io.out(i).bits.instr))).asUInt, DecodeWidth))
   val tsbbIdx = OHToUInt((0 until DecodeWidth).map(i => lbuf(head_ptr + i.U).pc === tsbbPC))
   val sbbTaken = lbuf(head_ptr + sbbIdx).isTaken
   val tsbbTaken = io.redirect
@@ -142,6 +143,7 @@ class LoopBuffer extends XSModule {
         io.out(i).bits.rasTopCtr := lbuf(head_ptr + deq_idx).rasTopCtr
         io.out(i).bits.isRVC := false.B
         lbuf_valid(head_ptr + deq_idx) := (lbuf_valid(head_ptr + deq_idx) && LBstate === s_fill) || (hasSBB && sbbTaken && i.U > sbbIdx)
+        out_isTaken(i) := lbuf(head_ptr + deq_idx).isTaken
       }.otherwise {
         io.out(i).bits <> DontCare
       }
