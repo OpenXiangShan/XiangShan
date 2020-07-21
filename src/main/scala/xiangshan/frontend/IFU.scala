@@ -69,7 +69,7 @@ class IFU extends XSModule with HasIFUConst
     val needflush = WireInit(false.B)
 
     //pipe fire
-    val if1_fire = if1_valid && if2_ready 
+    val if1_fire = if1_valid && if2_ready || needflush
     val if1_pcUpdate = if1_fire || needflush || if2_redirect
 
     when(RegNext(reset.asBool) && !reset.asBool){
