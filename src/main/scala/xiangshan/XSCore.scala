@@ -128,8 +128,8 @@ class XSCore(implicit p: XSConfig) extends XSModule {
 
   val dmemXbar = Module(new SimpleBusCrossbarNto1(3))
 
-  val backend = Module(new Backend)
   val front = Module(new Frontend)
+  val backend = Module(new Backend)
 
   front.io.backend <> backend.io.frontend
 

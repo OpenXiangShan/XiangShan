@@ -276,9 +276,8 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     debugMonitor.io.cycleCnt := GTimer()
     debugMonitor.io.instrCnt := instrCnt
 
-    // BPU temp Perf Cnt
     if(EnableBPU){
-      BoringUtils.addSource(hitTrap, "XSTRAP_BPU")
+      BoringUtils.addSource(hitTrap, "XSTRAP")
     }
   }
 }
