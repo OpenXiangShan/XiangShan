@@ -95,6 +95,21 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     }
   }
 
+  // roq redirect only used for exception
+  val intrVec = WireInit(0.U(12.W))
+  ExcitingUtils.addSink(intrVec, "intrVecIDU")
+  val trapTarget = WireInit(0.U(VAddrBits.W))
+  ExcitingUtils.addSink(trapTarget, "trapTarget")
+  val intrEnable = intrVec.orR && (state === s_idle) && !ringBufferEmpty && !hasCsr
+  val exceptionEnable = Cat(microOp(ringBufferTail).cf.exceptionVec).orR() && (state === s_idle) && !ringBufferEmpty
+  val isEcall = microOp(ringBufferTail).cf.exceptionVec(ecallM) || microOp(ringBufferTail).cf.exceptionVec(ecallS) || microOp(ringBufferTail).cf.exceptionVec(ecallU)
+  io.redirect := DontCare
+  io.redirect.valid := intrEnable || exceptionEnable
+  io.redirect.bits.isException := true.B
+  io.redirect.bits.target := trapTarget
+  io.exception := microOp(ringBufferTail)
+  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x exceptionVec %b\n", io.exception.cf.pc, trapTarget, Cat(microOp(ringBufferTail).cf.exceptionVec))
+
   // Commit uop to Rename
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
   shouldWalkVec(0) := ringBufferWalkExtended =/= ringBufferWalkTarget
@@ -110,8 +125,9 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     io.commits(i) := DontCare
     switch(state){
       is(s_idle){
-        val canCommit = (if(i!=0) io.commits(i-1).valid else true.B) && !Cat(microOp(ringBufferTail+i.U).cf.exceptionVec).orR()
-        io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
+        val hasException = Cat(microOp(ringBufferTail+i.U).cf.exceptionVec).orR() || intrEnable
+        val canCommit = if(i!=0) io.commits(i-1).valid else true.B
+        io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit && !hasException
         io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
         when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
         XSInfo(io.commits(i).valid,
@@ -203,21 +219,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     }
   }
 
-  // TODO: roq redirect only used for exception
-  val intrVec = WireInit(0.U(12.W))
-  ExcitingUtils.addSink(intrVec, "intrVecIDU")
-  val trapTarget = WireInit(0.U(VAddrBits.W))
-  ExcitingUtils.addSink(trapTarget, "trapTarget")
-  val intrEnable = intrVec.orR || Cat(microOp(ringBufferTail).cf.exceptionVec).orR()
-//  io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
-  io.redirect := DontCare
-  val isEcall = microOp(ringBufferTail).cf.exceptionVec(ecallM) || microOp(ringBufferTail).cf.exceptionVec(ecallS) || microOp(ringBufferTail).cf.exceptionVec(ecallU)
-  io.redirect.valid := intrEnable && (state === s_idle) && !ringBufferEmpty && (!hasCsr || isEcall)
-  io.redirect.bits.isException := true.B
-  io.redirect.bits.target := trapTarget
-  io.exception := microOp(ringBufferTail)
-
-  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x exceptionVec %b\n", io.exception.cf.pc, trapTarget, Cat(microOp(ringBufferTail).cf.exceptionVec))
 
   // debug info
   XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerRoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerRoqIdxWidth), ringBufferTail)
