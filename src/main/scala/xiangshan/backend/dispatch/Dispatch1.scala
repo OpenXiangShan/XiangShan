@@ -32,11 +32,6 @@ class Dispatch1 extends XSModule{
     val toFpDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
     val toLsDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
-
-  // TODO: moqIdx
-  io.toMoq := DontCare
-  io.moqIdxs := DontCare
-
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
@@ -73,8 +68,23 @@ class Dispatch1 extends XSModule{
       roqIndexRegValid(i) := false.B
     }
     XSDebug(io.toRoq(i).fire() && !io.recv(i),
-      "pc 0x%x receives nboq %x but not accepted by queue (and it waits)\n",
+      "pc 0x%x receives nroq %x but not accepted by queue (and it waits)\n",
       io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
+  }
+
+  val mroqIndexReg = Reg(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+  val mroqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  for (i <- 0 until RenameWidth) {
+    when (io.toMoq(i).fire() && !io.recv(i)) {
+      mroqIndexReg(i) := io.moqIdxs(i)
+      mroqIndexRegValid(i) := true.B
+    }
+    .elsewhen (io.recv(i)) {
+      mroqIndexRegValid(i) := false.B
+    }
+    XSDebug(io.toMoq(i).fire() && !io.recv(i),
+      "pc 0x%x receives mroq %x but not accepted by queue (and it waits)\n",
+      io.fromRename(i).bits.cf.pc, io.moqIdxs(i))
   }
 
   // append nroq to uop
@@ -82,12 +92,15 @@ class Dispatch1 extends XSModule{
   for (i <- 0 until RenameWidth) {
     uop_nroq(i) := io.fromRename(i).bits
     uop_nroq(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
+    uop_nroq(i).moqIdx := Mux(mroqIndexRegValid(i), mroqIndexReg(i), io.moqIdxs(i))
   }
 
   // uop can enqueue when rename.valid and roq.valid
   val can_enqueue = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
-    can_enqueue(i) := io.fromRename(i).valid && (io.toRoq(i).ready || roqIndexRegValid(i)) && !cancelled(i)
+    val roq_ready = io.toRoq(i).ready || roqIndexRegValid(i)
+    val mroq_ready = io.toMoq(i).ready || mroqIndexRegValid(i)
+    can_enqueue(i) := io.fromRename(i).valid && roq_ready && mroq_ready && !cancelled(i)
     io.toIntDq(i).valid := can_enqueue(i) && FuType.isIntExu(io.fromRename(i).bits.ctrl.fuType)
     io.toIntDq(i).bits := uop_nroq(i)
     io.toFpDq(i).valid := can_enqueue(i) && FuType.isFpExu(io.fromRename(i).bits.ctrl.fuType)
@@ -97,18 +110,20 @@ class Dispatch1 extends XSModule{
   }
 
   // ack roq and input (rename) when both roq and dispatch queue are ready
-  val recv_vector =(0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
-  val all_recv = recv_vector.reduce((x, y) => x && y).asBool()
+  val all_recv = Cat((0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))).andR()
   for (i <- 0 until RenameWidth) {
-    io.toRoq(i).bits <> io.fromRename(i).bits
+    io.toRoq(i).bits := io.fromRename(i).bits
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)// && !cancelled(i)
+    io.toMoq(i).bits := io.fromRename(i).bits
+    io.toMoq(i).valid := io.fromRename(i).valid && !mroqIndexRegValid(i)
     XSDebug(io.toRoq(i).fire(), "pc 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
+    XSDebug(io.toMoq(i).fire(), "pc 0x%x receives mroq %d\n", io.fromRename(i).bits.cf.pc, io.moqIdxs(i))
     if (i > 0) {
       XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid,
         "roq handshake not continuous %d", i.U)
     }
     io.fromRename(i).ready := all_recv
-    XSDebug("v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
-      io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
+    XSDebug(io.fromRename(i).valid, "r:%d pc 0x%x of type %b is in %d-th slot\n",
+      io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
 }
