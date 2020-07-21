@@ -119,7 +119,7 @@ class Dcache extends XSModule {
     addr = Mux(haveLoadReq, ldReq.bits.paddr, stReq.bits.paddr), // VM is ignored
     size = Mux(haveLoadReq, ldReq.bits.user.uop.ctrl.fuOpType(1,0), stReq.bits.user.uop.ctrl.fuOpType(1,0)), 
     wdata = stReq.bits.data(63, 0), // just for test
-    wmask = stReq.bits.mask, 
+    wmask = stReq.bits.mask(7,0),  // just for test
     cmd = Mux(haveLoadReq, SimpleBusCmd.write, SimpleBusCmd.read)
   )
   dmem.req.valid := Mux(haveLoadReq, ldReq.valid, stReq.valid)
@@ -137,4 +137,9 @@ class Dcache extends XSModule {
   stResp.bits.paddr := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).paddr
   stResp.bits.data := dmem.resp.bits.rdata
   stResp.bits.user := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle)
+
+  XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd =/= SimpleBusCmd.write, "[DMEM LOAD  REQ] addr 0x%x wdata 0x%x size %d\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size)
+  XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd === SimpleBusCmd.write, "[DMEM STORE REQ] addr 0x%x wdata 0x%x size %d mask %b\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size, dmem.req.bits.wmask(7,0))
+  XSInfo(io.dmem.resp.fire() && io.dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 0.U, "[DMEM LOAD  RESP] data %x\n", io.dmem.resp.bits.rdata)
+  XSInfo(io.dmem.resp.fire() && io.dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 1.U, "[DMEM STORE RESP] data %x\n", io.dmem.resp.bits.rdata)
 }

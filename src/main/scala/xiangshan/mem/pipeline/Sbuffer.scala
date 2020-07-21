@@ -85,4 +85,7 @@ class FakeSbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   io.dcache.req <> io.in(0)
   io.dcache.resp.ready := true.B
+  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x size %d\n", io.in(0).bits.paddr, io.in(0).bits.data, io.in(0).bits.user.uop.ctrl.fuOpType(1,0))
+  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x size %d\n", io.in(1).bits.paddr, io.in(1).bits.data, io.in(1).bits.user.uop.ctrl.fuOpType(1,0))
+  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x size %d\n", io.dcache.req.bits.paddr, io.dcache.req.bits.data, io.dcache.req.bits.user.uop.ctrl.fuOpType(1,0))
 }
