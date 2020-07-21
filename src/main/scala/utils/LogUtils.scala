@@ -28,6 +28,9 @@ object XSLog {
     if(generateLog){
       when (cond && logEnable) {
         printf((if (prefix) commonInfo else p"") + pable)
+        if (debugLevel >= XSLogLevel.ERROR) {
+          assert(false.B)
+        }
       }
     }
   }

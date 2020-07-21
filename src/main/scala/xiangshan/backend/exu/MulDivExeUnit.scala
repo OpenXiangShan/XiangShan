@@ -18,6 +18,7 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
   val div = Module(new DivExeUnit)
 
   for(x <- Seq(mul.io, div.io)){
+    x.exception <> DontCare
     x.scommit <> DontCare
     x.dmem <> DontCare
     x.in.bits := io.in.bits
