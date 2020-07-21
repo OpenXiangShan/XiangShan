@@ -593,13 +593,10 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val intrVecEnable = Wire(Vec(12, Bool()))
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
-  ExcitingUtils.addSource(intrVec, "intrVecIDU")
-  // val intrNO = PriorityEncoder(intrVec)
-
+  val intrBitSet = intrVec.orR()
+  ExcitingUtils.addSource(intrBitSet, "intrBitSetIDU")
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  // val intrNO = PriorityEncoder(io.cfIn.intrVec)
-//  val raiseIntr = io.cfIn.intrVec.asUInt.orR
-  val raiseIntr = intrVec.asUInt.orR && io.exception.valid
+  val raiseIntr = intrBitSet && io.exception.valid
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
   val mtip = WireInit(false.B)
@@ -610,8 +607,6 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   mipWire.e.m := meip
 
   // exceptions
-
-  // TODO: merge iduExceptionVec, csrExceptionVec as raiseExceptionVec
   val csrExceptionVec = Wire(Vec(16, Bool()))
   csrExceptionVec.map(_ := false.B)
   csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
@@ -624,10 +619,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val iduExceptionVec = io.cfIn.exceptionVec
   val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   io.cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
-//  val raiseException = raiseExceptionVec.orR
-//  val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   io.wenFix := DontCare
-//  val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
 
   val raiseExceptionVec = io.exception.bits.cf.exceptionVec.asUInt()
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
@@ -636,29 +628,15 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
 
   val raiseExceptionIntr = io.exception.valid
-//  val raiseExceptionIntr = (raiseException || raiseIntr) && io.instrValid
   val retTarget = Wire(UInt(VAddrBits.W))
   val trapTarget = Wire(UInt(VAddrBits.W))
   ExcitingUtils.addSource(trapTarget, "trapTarget")
   io.redirect := DontCare
   io.redirectValid := (valid && func === CSROpType.jmp && !isEcall) || resetSatp
   //TODO: use pred pc instead pc+4
-  io.redirect.target := Mux(
-    resetSatp,
-    io.cfIn.pc+4.U,
-//    Mux(
-//      raiseExceptionIntr,
-//      trapTarget,
-      retTarget
-//    )
-  )
+  io.redirect.target := Mux(resetSatp, io.cfIn.pc+4.U, retTarget)
 
-  XSDebug(
-    io.redirectValid,
-    "redirect to %x, pc=%x\n",
-    io.redirect.target,
-    io.cfIn.pc
-  )
+  XSDebug(io.redirectValid, "redirect to %x, pc=%x\n", io.redirect.target, io.cfIn.pc)
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.exception.bits.cf.pc, intrNO, io.exception.bits.cf.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
   XSDebug(raiseExceptionIntr, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.exception.bits.cf.pc, mstatus, mideleg, medeleg, priviledgeMode)

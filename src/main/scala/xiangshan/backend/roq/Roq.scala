@@ -96,11 +96,11 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
 
   // roq redirect only used for exception
-  val intrVec = WireInit(0.U(12.W))
-  ExcitingUtils.addSink(intrVec, "intrVecIDU")
+  val intrBitSet = WireInit(false.B)
+  ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
   val trapTarget = WireInit(0.U(VAddrBits.W))
   ExcitingUtils.addSink(trapTarget, "trapTarget")
-  val intrEnable = intrVec.orR && (state === s_idle) && !ringBufferEmpty && !hasCsr
+  val intrEnable = intrBitSet && (state === s_idle) && !ringBufferEmpty && !hasCsr
   val exceptionEnable = Cat(microOp(ringBufferTail).cf.exceptionVec).orR() && (state === s_idle) && !ringBufferEmpty
   val isEcall = microOp(ringBufferTail).cf.exceptionVec(ecallM) || microOp(ringBufferTail).cf.exceptionVec(ecallS) || microOp(ringBufferTail).cf.exceptionVec(ecallU)
   io.redirect := DontCare
