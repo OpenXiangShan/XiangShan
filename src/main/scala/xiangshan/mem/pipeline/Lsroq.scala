@@ -271,6 +271,9 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
           when(data(ptr).mask(k) && io.forward(i).mask(k)){
             io.forward(i).forwardMask(k) := true.B
             io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
+            XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n", 
+              io.forward(i).forwardData(k), ptr, uop(ptr).cf.pc
+            )
           }
         })
       }
@@ -333,5 +336,29 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   )
 
   io.rollback := rollback(rollbackSel)
+  assert(!io.rollback.valid)
+
+  // debug info
+  XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerMoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerMoqIdxWidth), ringBufferTail)
+
+  def PrintFlag(flag: Bool, name: String): Unit = {
+    when(flag){
+      XSDebug(false, true.B, name)
+    }.otherwise{
+      XSDebug(false, true.B, " ")
+    }
+  }
+
+  for(i <- 0 until MoqSize){
+    if(i % 4 == 0) XSDebug("")
+    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    PrintFlag(allocated(i), "a")
+    PrintFlag(valid(i), "v")
+    PrintFlag(writebacked(i), "w")
+    PrintFlag(store(i), "s")
+    PrintFlag(miss(i), "m")
+    XSDebug(false, true.B, " ")
+    if(i % 4 == 3) XSDebug(false, true.B, "\n")
+  }
 
 }
