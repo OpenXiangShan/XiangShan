@@ -19,6 +19,7 @@ class FetchPacket extends XSBundle {
   val tageMeta = Vec(FetchWidth, (new TageMeta))
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
+  val branchInfo = Vec(FetchWidth,Bool())
 }
 
 
