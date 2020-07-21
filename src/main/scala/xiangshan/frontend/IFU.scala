@@ -68,19 +68,6 @@ class IFU extends XSModule with HasIFUConst
     val if1_fire = if1_valid && if2_ready 
     val if1_pcUpdate = if1_fire || needflush
 
-    when(RegNext(reset.asBool) && !reset.asBool){
-    //when((GTimer() === 501.U)){ //TODO:this is ugly
-      XSDebug("RESET....\n")
-      if1_npc := resetVector.U(VAddrBits.W)
-    } .otherwise{
-      if1_npc := Mux(if4_lateJumpLatch, if4_lateJumpTarget, Mux(if2_lateJumpLatch, if2_lateJumpTarget, if2_snpc))
-    }
-
-    when(if1_pcUpdate)
-    { 
-      if1_pc := if1_npc
-    }
-
     bpu.io.in.pc.valid := if1_fire
     bpu.io.in.pc.bits := if1_npc
     bpu.io.redirectInfo := io.redirectInfo
@@ -117,7 +104,23 @@ class IFU extends XSModule with HasIFUConst
     io.icacheReq.valid := if2_valid
     io.icacheReq.bits.addr := if2_pc
 
-    when(if2_valid && if2_btb_taken)
+    when(RegNext(reset.asBool) && !reset.asBool){
+    //when((GTimer() === 501.U)){ //TODO:this is ugly
+      XSDebug("RESET....\n")
+      if1_npc := resetVector.U(VAddrBits.W)
+    }.elsewhen (if2_fire) {
+      if1_npc := Mux(if4_lateJumpLatch, if4_lateJumpTarget, Mux(if2_lateJumpLatch, if2_lateJumpTarget, if2_snpc))
+    }.otherwise {
+      if1_npc := if1_pc
+    }
+
+    when(if1_pcUpdate)
+    { 
+      if1_pc := if1_npc
+    }
+
+    // when if2 fire and if2 redirects, update npc
+    when(if2_fire && if2_btb_taken)
     {
       if1_npc := if2_btb_target
     }
@@ -150,6 +153,8 @@ class IFU extends XSModule with HasIFUConst
 
 
     XSDebug("[IF3]if3_valid:%d  ||  if3_pc:0x%x   if3_npc:0x%x || if4_ready:%d                    ",if3_valid,if3_pc,if3_npc,if4_ready)
+    XSDebug("[IF3]if3_btb_taken:%d if3_btb_insMask:%b if3_btb_lateJump:%d if3_btb_target:0x%x\n",
+      if3_btb_taken, if3_btb_insMask, if3_btb_lateJump, if3_btb_target)
     XSDebug(false,if3_fire,"------IF3->fire!!!")
     XSDebug(false,true.B,"\n")
 
@@ -181,7 +186,8 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.in.pc.valid := if1_fire && !if2_btb_lateJump && !if4_tage_lateJump
 
     XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x   if4_npc:0x%x\n",if4_valid,if4_pc,if4_npc)
-    XSDebug("[IF4-TAGE-out]if4_tage_taken:%d || if4_btb_insMask:%b || if4_tage_target:0x%x \n",if4_tage_taken,if4_tage_insMask.asUInt,if4_tage_target)
+    XSDebug("[IF4]          if4_btb_taken:%d  if4_btb_lateJump:%d  if2_btb_insMask:%b  if4_btb_target:0x%x\n",if4_btb_taken, if4_btb_lateJump, if4_btb_insMask.asUInt, if4_btb_target)
+    XSDebug("[IF4-TAGE-out]if4_tage_taken:%d if4_tage_lateJump:%d if4_tage_insMask:%b if4_tage_target:0x%x\n",if4_tage_taken,if4_tage_lateJump,if4_tage_insMask.asUInt,if4_tage_target)
     XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 
     when(io.icacheResp.fire() && if4_tage_taken &&if4_valid)
@@ -199,8 +205,9 @@ class IFU extends XSModule with HasIFUConst
     //flush pipline
     // if(EnableBPD){needflush := (if4_valid && if4_tage_taken) || io.redirectInfo.flush() }
     // else {needflush := io.redirectInfo.flush()}
-    needflush := (if4_valid && if4_tage_taken) || io.redirectInfo.flush()
+    needflush := (if4_valid && if4_tage_taken && io.icacheResp.fire()) || io.redirectInfo.flush()
     when(needflush){
+      if2_valid := false.B
       if3_valid := false.B
       if4_valid := false.B
     }

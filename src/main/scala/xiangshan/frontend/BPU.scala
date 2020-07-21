@@ -60,6 +60,19 @@ class BPUStage1 extends XSModule {
 
   // flush Stage1 when io.flush
   val flushS1 = BoolStopWatch(io.flush, io.in.pc.fire(), startHighPriority = true)
+  val s1OutPredLatch = RegEnable(io.s1OutPred.bits, RegNext(io.in.pc.fire()))
+  val outLatch = RegEnable(io.out.bits, RegNext(io.in.pc.fire()))
+
+  val s1Valid = RegInit(false.B)
+  when (io.flush) {
+    s1Valid := false.B
+  }.elsewhen (io.in.pc.fire()) {
+    s1Valid := true.B
+  }.elsewhen (io.out.fire()) {
+    s1Valid := false.B
+  }
+  io.out.valid := s1Valid
+
 
   // global history register
   val ghr = RegInit(0.U(HistoryLength.W))
@@ -76,7 +89,6 @@ class BPUStage1 extends XSModule {
   tage.io.req.bits.pc := io.in.pc.bits
   tage.io.req.bits.hist := hist
   tage.io.redirectInfo <> io.redirectInfo
-  io.out.bits.tage <> tage.io.out
   // io.s1OutPred.bits.tageMeta := tage.io.meta
 
   // latch pc for 1 cycle latency when reading SRAM
@@ -172,31 +184,42 @@ class BPUStage1 extends XSModule {
 
   // redirect based on BTB and JBTAC
   val takenIdx = LowestBit(brJumpIdx | indirectIdx, PredictWidth)
-  io.out.valid := RegNext(io.in.pc.fire()) && !io.flush
+  
+  // io.out.valid := RegNext(io.in.pc.fire()) && !io.flush
 
-  io.s1OutPred.valid := io.out.valid
-  io.s1OutPred.bits.redirect := btbTaken || jbtacHit
-  io.s1OutPred.bits.instrValid := Mux(!io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump, maskLatch,
-                                  Mux(!btbIsRVCs(OHToUInt(takenIdx)), LowerMask(takenIdx << 1.U, PredictWidth),
-                                  LowerMask(takenIdx, PredictWidth))).asTypeOf(Vec(PredictWidth, Bool()))
-  io.s1OutPred.bits.target := Mux(takenIdx === 0.U, pcLatch + (PopCount(maskLatch) << 1.U), Mux(takenIdx === brJumpIdx, btbTakenTarget, jbtacTarget))
-  io.s1OutPred.bits.lateJump := btb.io.out.isRVILateJump || jbtac.io.out.isRVILateJump
-  // io.s1OutPred.bits.btbVictimWay := btbWriteWay
-  io.s1OutPred.bits.predCtr := btbCtrs
-  io.s1OutPred.bits.btbHit := btbValids
-  io.s1OutPred.bits.tageMeta := DontCare // TODO: enableBPD
-  io.s1OutPred.bits.rasSp := DontCare
-  io.s1OutPred.bits.rasTopCtr := DontCare
+  // io.s1OutPred.valid := io.out.valid
+  io.s1OutPred.valid := io.out.fire()
+  when (RegNext(io.in.pc.fire())) {
+    io.s1OutPred.bits.redirect := btbTaken || jbtacHit
+    io.s1OutPred.bits.instrValid := Mux(!io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump, maskLatch,
+                                    Mux(!btbIsRVCs(OHToUInt(takenIdx)), LowerMask(takenIdx << 1.U, PredictWidth),
+                                    LowerMask(takenIdx, PredictWidth))).asTypeOf(Vec(PredictWidth, Bool()))
+    io.s1OutPred.bits.target := Mux(takenIdx === 0.U, pcLatch + (PopCount(maskLatch) << 1.U), Mux(takenIdx === brJumpIdx, btbTakenTarget, jbtacTarget))
+    io.s1OutPred.bits.lateJump := btb.io.out.isRVILateJump || jbtac.io.out.isRVILateJump
+    (0 until PredictWidth).map(i => io.s1OutPred.bits.hist(i) := firstHist << histShift(i))
+    // io.s1OutPred.bits.btbVictimWay := btbWriteWay
+    io.s1OutPred.bits.predCtr := btbCtrs
+    io.s1OutPred.bits.btbHit := btbValids
+    io.s1OutPred.bits.tageMeta := DontCare // TODO: enableBPD
+    io.s1OutPred.bits.rasSp := DontCare
+    io.s1OutPred.bits.rasTopCtr := DontCare
+  }.otherwise {
+    io.s1OutPred.bits := s1OutPredLatch
+  }
 
-  io.out.bits.pc := pcLatch
-  io.out.bits.btb.hits := btbValids.asUInt
-  (0 until PredictWidth).map(i => io.out.bits.btb.targets(i) := btbTargets(i))
-  io.out.bits.jbtac.hitIdx := Mux(jbtacHit, UIntToOH(jbtacHitIdx), 0.U)
-  io.out.bits.jbtac.target := jbtacTarget
-  // TODO: we don't need this repeatedly!
-  io.out.bits.hist := io.s1OutPred.bits.hist
-  io.out.bits.btbPred := io.s1OutPred
-
+  when (RegNext(io.in.pc.fire())) {
+    io.out.bits.pc := pcLatch
+    io.out.bits.btb.hits := btbValids.asUInt
+    (0 until PredictWidth).map(i => io.out.bits.btb.targets(i) := btbTargets(i))
+    io.out.bits.jbtac.hitIdx := Mux(jbtacHit, UIntToOH(jbtacHitIdx), 0.U)
+    io.out.bits.jbtac.target := jbtacTarget
+    io.out.bits.tage <> tage.io.out
+    // TODO: we don't need this repeatedly!
+    io.out.bits.hist := io.s1OutPred.bits.hist
+    io.out.bits.btbPred := io.s1OutPred
+  }.otherwise {
+    io.out.bits := outLatch
+  }
 
 
   // debug info
