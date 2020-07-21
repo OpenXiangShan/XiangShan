@@ -63,6 +63,8 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
+  // commit cnt of branch instr
+  val bcommit = Input(UInt(BrTagWidth.W))
 }
 
 class Brq extends XSModule {
@@ -87,6 +89,7 @@ class Brq extends XSModule {
     val isIdle = Bool()
   }
 
+  val brCommitCnt = RegInit(0.U(BrTagWidth.W))
   val brQueue = Reg(Vec(BrqSize, new BrqEntry))
   val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
 
@@ -117,10 +120,14 @@ class Brq extends XSModule {
   }
 
   val commitIsHead = commitIdx===headIdx
-  val deqValid = !stateQueue(headIdx).isIdle && commitIsHead
+  val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
 
+  brCommitCnt := brCommitCnt + io.bcommit - deqValid
+
+  XSDebug(p"brCommitCnt:$brCommitCnt\n")
+  assert(brCommitCnt+io.bcommit >= deqValid)
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
@@ -194,6 +201,7 @@ class Brq extends XSModule {
     stateQueue.foreach(_ := s_idle)
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
+    brCommitCnt := 0.U
   }.elsewhen(io.redirect.valid){
     // misprediction
     stateQueue.zipWithIndex.foreach({case(s, i) =>

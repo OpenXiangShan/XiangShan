@@ -130,6 +130,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
+  brq.io.bcommit := roq.io.bcommit
   brq.io.enqReqs <> decode.io.toBrq
   for ((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.config.hasRedirect))) {
     x.bits := y.io.out.bits
