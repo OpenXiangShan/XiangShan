@@ -221,12 +221,17 @@ class IFU extends XSModule with HasIFUConst
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",io.fetchPacket.bits.instrs(i).asUInt,io.fetchPacket.bits.pnpc(i).asUInt)
     }    
     io.fetchPacket.bits.hist := bpu.io.tageOut.bits.hist
-    // io.fetchPacket.bits.btbVictimWay := bpu.io.tageOut.bits.btbVictimWay
     io.fetchPacket.bits.predCtr := bpu.io.tageOut.bits.predCtr
     io.fetchPacket.bits.btbHitWay := bpu.io.tageOut.bits.btbHitWay
     io.fetchPacket.bits.tageMeta := bpu.io.tageOut.bits.tageMeta
     io.fetchPacket.bits.rasSp := bpu.io.tageOut.bits.rasSp
     io.fetchPacket.bits.rasTopCtr := bpu.io.tageOut.bits.rasTopCtr
+
+    //branchInfo Vector
+    val branchVec = Mux(if4_tage_taken,Fill(FetchWidth, 1.U(1.W)) & if4_tage_insMask.asUInt,Mux(if4_btb_taken,Fill(FetchWidth, 1.U(1.W)) & if4_btb_insMask.asUInt,0.U))
+    for(i <- 0 until FetchWidth){
+      io.fetchPacket.bits.branchInfo(i) := HighestBit(branchVec,FetchWidth)
+    }
 
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid
