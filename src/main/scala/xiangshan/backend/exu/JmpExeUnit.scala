@@ -11,6 +11,7 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
   val jmp = Module(new Jump)
 
   jmp.io.out.ready := io.out.ready
+  jmp.io.exception <> DontCare
   jmp.io.dmem <> DontCare
   jmp.io.scommit := DontCare
   jmp.io.redirect := io.redirect
@@ -18,6 +19,7 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
   val csr = Module(new CSR)
   csr.io.cfIn := io.in.bits.uop.cf
   csr.io.fpu_csr := DontCare
+  csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
   csr.io.imemMMU := DontCare
   csr.io.dmemMMU := DontCare
@@ -32,6 +34,7 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
 
   val csrExuOut = Wire(new ExuOutput)
   csrExuOut.uop := io.in.bits.uop
+  csrExuOut.uop.cf := csr.io.cfOut
   csrExuOut.data := csrOut
   csrExuOut.redirectValid := csr.io.redirectValid
   csrExuOut.redirect.brTag := io.in.bits.uop.brTag

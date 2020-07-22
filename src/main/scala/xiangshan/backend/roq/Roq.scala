@@ -14,19 +14,19 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
+    val exception = Output(new MicroOp)
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val scommit = Output(UInt(3.W))
+    val bcommit = Output(UInt(BrTagWidth.W))
   })
 
   val numWbPorts = io.exeWbResults.length
 
   val microOp = Mem(RoqSize, new MicroOp)
-  // val brMask = Reg(Vec(RoqSize, UInt(BrqSize.W)))
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
-  val redirect = Reg(Vec(RoqSize, new Redirect))
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
@@ -48,7 +48,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   // Dispatch
   val csrEnRoq = io.dp1Req.map(i => i.bits.ctrl.fuType === FuType.csr)
   val hasCsr = RegInit(false.B)
-  XSError(!(hasCsr && state =/= s_idle), "CSR block should only happen in s_idle\n")
   when(ringBufferEmpty){ hasCsr:= false.B }
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
   XSDebug("(ready, valid): ")
@@ -80,6 +79,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   for(i <- 0 until numWbPorts){
     when(io.exeWbResults(i).fire()){
       writebacked(io.exeWbResults(i).bits.uop.roqIdx) := true.B
+      microOp(io.exeWbResults(i).bits.uop.roqIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       exuData(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.data
       exuDebug(io.exeWbResults(i).bits.uop.roqIdx) := io.exeWbResults(i).bits.debug
       XSInfo(io.exeWbResults(i).valid, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x\n", 
@@ -92,6 +92,21 @@ class Roq(implicit val p: XSConfig) extends XSModule {
       )
     }
   }
+
+  // roq redirect only used for exception
+  val intrBitSet = WireInit(false.B)
+  ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
+  val trapTarget = WireInit(0.U(VAddrBits.W))
+  ExcitingUtils.addSink(trapTarget, "trapTarget")
+  val intrEnable = intrBitSet && (state === s_idle) && !ringBufferEmpty && !hasCsr
+  val exceptionEnable = Cat(microOp(ringBufferTail).cf.exceptionVec).orR() && (state === s_idle) && !ringBufferEmpty
+  val isEcall = microOp(ringBufferTail).cf.exceptionVec(ecallM) || microOp(ringBufferTail).cf.exceptionVec(ecallS) || microOp(ringBufferTail).cf.exceptionVec(ecallU)
+  io.redirect := DontCare
+  io.redirect.valid := intrEnable || exceptionEnable
+  io.redirect.bits.isException := true.B
+  io.redirect.bits.target := trapTarget
+  io.exception := microOp(ringBufferTail)
+  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x exceptionVec %b\n", io.exception.cf.pc, trapTarget, Cat(microOp(ringBufferTail).cf.exceptionVec))
 
   // Commit uop to Rename
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
@@ -108,20 +123,22 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     io.commits(i) := DontCare
     switch(state){
       is(s_idle){
+        val ringBufferIndex = ringBufferTail + i.U
+        val hasException = Cat(microOp(ringBufferIndex).cf.exceptionVec).orR() || intrEnable
         val canCommit = if(i!=0) io.commits(i-1).valid else true.B
-        io.commits(i).valid := valid(ringBufferTail+i.U) && writebacked(ringBufferTail+i.U) && canCommit
-        io.commits(i).bits.uop := microOp(ringBufferTail+i.U)
-        when(io.commits(i).valid){valid(ringBufferTail+i.U) := false.B}
+        io.commits(i).valid := valid(ringBufferIndex) && writebacked(ringBufferIndex) && canCommit && !hasException
+        io.commits(i).bits.uop := microOp(ringBufferIndex)
+        when(io.commits(i).valid){valid(ringBufferIndex) := false.B}
         XSInfo(io.commits(i).valid,
           "retired pc %x wen %d ldst %d data %x\n",
-          microOp(ringBufferTail+i.U).cf.pc,
-          microOp(ringBufferTail+i.U).ctrl.rfWen,
-          microOp(ringBufferTail+i.U).ctrl.ldest,
-          exuData(ringBufferTail+i.U)
+          microOp(ringBufferIndex).cf.pc,
+          microOp(ringBufferIndex).ctrl.rfWen,
+          microOp(ringBufferIndex).ctrl.ldest,
+          exuData(ringBufferIndex)
         )
-        XSInfo(io.commits(i).valid && exuDebug(ringBufferTail+i.U).isMMIO,
+        XSInfo(io.commits(i).valid && exuDebug(ringBufferIndex).isMMIO,
           "difftest skiped pc0x%x\n",
-          microOp(ringBufferTail+i.U).cf.pc
+          microOp(ringBufferIndex).cf.pc
         )
       }
 
@@ -169,12 +186,20 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     ringBufferTailExtended := ringBufferTailExtended + PopCount(validCommit)
   }
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
-
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
   // commit store to lsu
   val validScommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
   io.scommit := PopCount(validScommit.asUInt)
+
+  val validBcommit = WireInit(VecInit(
+    (0 until CommitWidth).map(
+      i => state === s_idle &&
+        io.commits(i).valid &&
+        microOp(ringBufferTail+i.U).cf.isBr
+    )
+  ))
+  io.bcommit := PopCount(validBcommit)
 
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){
@@ -192,9 +217,14 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
   }
 
-  // roq redirect only used for exception
-  io.redirect := DontCare //TODO
-  io.redirect.valid := false.B //TODO
+  // when exception occurs, cancels all
+  when (io.redirect.valid) {
+    ringBufferHeadExtended := 0.U
+    ringBufferTailExtended := 0.U
+    for (i <- 0 until RoqSize) {
+      valid(i) := false.B
+    }
+  }
 
   // debug info
   XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerRoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerRoqIdxWidth), ringBufferTail)
@@ -242,18 +272,23 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
   val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
+  val difftestIntrNO = WireInit(0.U(XLEN.W))
+  ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
+  XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
+  val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
+  val retirePCFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.pc, microOp(firstValidCommit).cf.pc)
+  val retireInstFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.instr, microOp(firstValidCommit).cf.instr)
   if(!p.FPGAPlatform){
-    BoringUtils.addSource(RegNext(retireCounter), "difftestCommit")
-    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.pc), "difftestThisPC")//first valid PC
-    BoringUtils.addSource(RegNext(microOp(firstValidCommit).cf.instr), "difftestThisINST")//first valid inst
+    BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
+    BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
+    BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
     BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
     BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
     BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
     BoringUtils.addSource(RegNext(wpc), "difftestWpc")
     BoringUtils.addSource(RegNext(wdata), "difftestWdata")
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
-    BoringUtils.addSource(RegNext(0.U), "difftestIntrNO")
-    //TODO: skip insts that commited in the same cycle ahead of exception
+    BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
 
     class Monitor extends BlackBox {
       val io = IO(new Bundle {

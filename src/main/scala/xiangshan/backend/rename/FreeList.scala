@@ -99,7 +99,7 @@ class FreeList extends XSModule with HasFreeListConsts {
 
   headPtr := Mux(io.redirect.valid, // mispredict or exception happen
     Mux(io.redirect.bits.isException,
-      tailPtr,
+      FreeListPtr(!tailPtr.flag, tailPtr.value),
       checkPoints(io.redirect.bits.brTag.value)
     ),
     headPtrNext
