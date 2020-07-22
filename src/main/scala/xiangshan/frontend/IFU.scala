@@ -186,7 +186,7 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.in.pc.valid := if1_fire && !if2_btb_lateJump && !if4_tage_lateJump
 
     XSDebug("[IF4]if4_valid:%d  ||  if4_pc:0x%x   if4_npc:0x%x\n",if4_valid,if4_pc,if4_npc)
-    XSDebug("[IF4]          if4_btb_taken:%d  if4_btb_lateJump:%d  if2_btb_insMask:%b  if4_btb_target:0x%x\n",if4_btb_taken, if4_btb_lateJump, if4_btb_insMask.asUInt, if4_btb_target)
+    XSDebug("[IF4]          if4_btb_taken:%d  if4_btb_lateJump:%d  if4_btb_insMask:%b  if4_btb_target:0x%x\n",if4_btb_taken, if4_btb_lateJump, if4_btb_insMask.asUInt, if4_btb_target)
     XSDebug("[IF4-TAGE-out]if4_tage_taken:%d if4_tage_lateJump:%d if4_tage_insMask:%b if4_tage_target:0x%x\n",if4_tage_taken,if4_tage_lateJump,if4_tage_insMask.asUInt,if4_tage_target)
     XSDebug("[IF4-ICACHE-RESP]icacheResp.valid:%d   icacheResp.ready:%d\n",io.icacheResp.valid,io.icacheResp.ready)
 

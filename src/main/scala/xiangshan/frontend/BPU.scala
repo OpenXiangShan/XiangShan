@@ -152,6 +152,7 @@ class BPUStage1 extends XSModule {
   val jbtacHit = jbtac.io.out.hit
   val jbtacTarget = jbtac.io.out.target
   val jbtacHitIdx = jbtac.io.out.hitIdx
+  val jbtacIsRVC = jbtac.io.out.isRVC
 
   // calculate global history of each instr
   val firstHist = RegNext(hist)
@@ -194,18 +195,22 @@ class BPUStage1 extends XSModule {
   
   // redirect based on BTB and JBTAC
   val takenIdx = LowestBit(brJumpIdx | indirectIdx, PredictWidth)
-  
+
   // io.out.valid := RegNext(io.in.pc.fire()) && !io.flush
 
   // io.s1OutPred.valid := io.out.valid
   io.s1OutPred.valid := io.out.fire()
   when (RegNext(io.in.pc.fire())) {
     io.s1OutPred.bits.redirect := btbTaken || jbtacHit
-    // io.s1OutPred.bits.instrValid := Mux(!io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump, maskLatch,
-    //                                 Mux(!btbIsRVCs(OHToUInt(takenIdx)), LowerMask(takenIdx << 1.U, PredictWidth),
-    //                                 LowerMask(takenIdx, PredictWidth))).asTypeOf(Vec(PredictWidth, Bool()))
-    io.s1OutPred.bits.instrValid := (maskLatch & Fill(PredictWidth, ~io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump) |
+    // io.s1OutPred.bits.instrValid := (maskLatch & Fill(PredictWidth, ~io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump) |
+    //   PriorityMux(brJumpIdx | indirectIdx, (0 until PredictWidth).map(getInstrValid(_)))).asTypeOf(Vec(PredictWidth, Bool()))
+    io.s1OutPred.bits.instrValid := (maskLatch & Fill(PredictWidth, ~io.s1OutPred.bits.redirect) |
       PriorityMux(brJumpIdx | indirectIdx, (0 until PredictWidth).map(getInstrValid(_)))).asTypeOf(Vec(PredictWidth, Bool()))
+    for (i <- 0 until (PredictWidth - 1)) {
+      when (!io.s1OutPred.bits.lateJump && (!btbIsRVCs(i) && btbValids(i) && i.U === OHToUInt(brJumpIdx) || !jbtacIsRVC && i.U === OHToUInt(indirectIdx) && jbtacHit)) {
+        io.s1OutPred.bits.instrValid(i+1) := maskLatch(i+1)
+      }
+    }
     io.s1OutPred.bits.target := Mux(takenIdx === 0.U, pcLatch + (PopCount(maskLatch) << 1.U), Mux(takenIdx === brJumpIdx, btbTakenTarget, jbtacTarget))
     io.s1OutPred.bits.lateJump := btb.io.out.isRVILateJump || jbtac.io.out.isRVILateJump
     (0 until PredictWidth).map(i => io.s1OutPred.bits.hist(i) := firstHist << histShift(i))

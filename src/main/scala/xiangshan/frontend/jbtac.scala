@@ -22,6 +22,7 @@ class JBTACPred extends XSBundle {
   val target = UInt(VAddrBits.W)
   val hitIdx = UInt(log2Up(PredictWidth).W)
   val isRVILateJump = Bool()
+  val isRVC = Bool()
 }
 
 class JBTAC extends XSModule {
@@ -88,6 +89,7 @@ class JBTAC extends XSModule {
   io.out.hitIdx := readEntries(readBankLatch).offset
   io.out.target := readEntries(readBankLatch).target
   io.out.isRVILateJump := io.out.hit && io.out.hitIdx === OHToUInt(HighestBit(readMaskLatch, PredictWidth)) && !readEntries(readBankLatch).isRVC
+  io.out.isRVC := readEntries(readBankLatch).isRVC
 
   // update jbtac
   val writeEntry = Wire(jbtacEntry())
@@ -140,8 +142,8 @@ class JBTAC extends XSModule {
 
   XSDebug(io.in.pc.fire(), "read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
     io.in.pc.bits, histXORAddr, readBank, readRow, io.in.hist)
-  XSDebug("out: hit=%d tgt=%x hitIdx=%d iRVILateJump=%d\n",
-    io.out.hit, io.out.target, io.out.hitIdx, io.out.isRVILateJump)
+  XSDebug("out: hit=%d tgt=%x hitIdx=%d iRVILateJump=%d isRVC=%d\n",
+    io.out.hit, io.out.target, io.out.hitIdx, io.out.isRVILateJump, io.out.isRVC)
   XSDebug(fireLatch, "read_resp: pc=0x%x, bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
     io.in.pcLatch, readBankLatch, readRowLatch, readEntries(readBankLatch).target, readEntries(readBankLatch).offset, outHit)
   XSDebug(io.redirectValid, "update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d, type=0x%d\n",
