@@ -59,7 +59,6 @@ class LoopBuffer extends XSModule {
     inst === BitPat("b????????????????????_?????_1101111") || 
     inst === BitPat("b????????????????????_?????_1100111") || 
     inst === BitPat("b???????_?????_?????_???_?????_1100011")
-    //    false.B
   }
 
   //Count Register
@@ -154,7 +153,7 @@ class LoopBuffer extends XSModule {
         io.out(i).bits <> DontCare
       }
 
-      XSDebug("deq_idx=%d\n", deq_idx)
+      // XSDebug("deq_idx=%d\n", deq_idx)
       deq_idx = deq_idx + (lbuf_valid(head_ptr + deq_idx) && io.out(i).fire)
     }
 
@@ -251,7 +250,8 @@ class LoopBuffer extends XSModule {
           XSDebug("State change: ACTIVE\n")
           loop_end := head_ptr + tsbbIdx
           XSDebug("loop_end=%d\n", head_ptr + tsbbIdx)
-          loop_ptr := loop_str
+          // This is so ugly
+          loop_ptr := loop_str + PopCount((0 until DecodeWidth).map(io.out(_).fire())) - tsbbIdx - 1.U
         }.otherwise {
           // triggering sbb不跳转
           // To IDLE
