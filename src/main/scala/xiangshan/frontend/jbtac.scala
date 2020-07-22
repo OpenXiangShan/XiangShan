@@ -140,6 +140,8 @@ class JBTAC extends XSModule {
 
   XSDebug(io.in.pc.fire(), "read: pc=0x%x, histXORAddr=0x%x, bank=%d, row=%d, hist=%b\n",
     io.in.pc.bits, histXORAddr, readBank, readRow, io.in.hist)
+  XSDebug("out: hit=%d tgt=%x hitIdx=%d iRVILateJump=%d\n",
+    io.out.hit, io.out.target, io.out.hitIdx, io.out.isRVILateJump)
   XSDebug(fireLatch, "read_resp: pc=0x%x, bank=%d, row=%d, target=0x%x, offset=%d, hit=%d\n",
     io.in.pcLatch, readBankLatch, readRowLatch, readEntries(readBankLatch).target, readEntries(readBankLatch).offset, outHit)
   XSDebug(io.redirectValid, "update_req: fetchPC=0x%x, writeValid=%d, hist=%b, bank=%d, row=%d, target=0x%x, offset=%d, type=0x%d\n",

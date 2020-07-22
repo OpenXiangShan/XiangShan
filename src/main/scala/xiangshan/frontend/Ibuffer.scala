@@ -66,15 +66,17 @@ class Ibuffer extends XSModule {
         ibuf(enq_idx).hist := io.in.bits.hist(i>>1)
         // ibuf(enq_idx).btbVictimWay := io.in.bits.btbVictimWay
         ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i>>1)
-        ibuf(enq_idx).btbHit := io.in.bits.btbHit
+        ibuf(enq_idx).btbHit := io.in.bits.btbHit(i>>1)
         ibuf(enq_idx).tageMeta := io.in.bits.tageMeta(i>>1)
         ibuf(enq_idx).rasSp := io.in.bits.rasSp
         ibuf(enq_idx).rasTopCtr := io.in.bits.rasTopCtr
         ibuf_valid(enq_idx) := true.B
+        XSDebug("Enq: i:%d idx:%d mask:%b instr:%x pc:%x fetchOffset=%d\n",
+          i.U, enq_idx, io.in.bits.mask(i), Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0)), io.in.bits.pc + ((enq_idx - tail_ptr)<<1).asUInt, ((enq_idx - tail_ptr) << 1).asUInt)
       }
 
-      XSDebug(!(i.U)(0), "Enq: i:%d Idx:%d mask:%b instr:%x pc:%x pnpc:%x\n",
-        (i/2).U, enq_idx, io.in.bits.mask(i), io.in.bits.instrs(i/2), io.in.bits.pc + (2*i).U, io.in.bits.pnpc(i/2))
+      // XSDebug(!(i.U)(0), "Enq: i:%d Idx:%d mask:%b instr:%x pc:%x pnpc:%x\n",
+      //   (i/2).U, enq_idx, io.in.bits.mask(i), io.in.bits.instrs(i/2), io.in.bits.pc + ((enq_idx - tail_ptr)<<1).asUInt, io.in.bits.pnpc(i/2))
       enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
@@ -149,6 +151,7 @@ class Ibuffer extends XSModule {
         io.out(i).bits.rasTopCtr := ibuf(head_ptr + (i<<1).U).rasTopCtr
         io.out(i).bits.isRVC := false.B
       }
+      XSDebug(deqValid, p"Deq: i:${i.U} valid:${ibuf_valid(deq_idx)} idx=${Decimal(deq_idx)} ${Decimal(deq_idx + 1.U)} instr:${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid}  r=${io.out(i).ready}\n")
 
       // When can't deque, deq_idx+0
       // when RVC deque, deq_idx+1
@@ -159,8 +162,6 @@ class Ibuffer extends XSModule {
         (ibuf(deq_idx).inst(1,0) =/= "b11".U) -> 1.U,
         ibuf_valid(deq_idx + 1.U) -> 2.U
       ))
-
-      XSDebug(deqValid, p"Deq: i:${i.U} valid:${ibuf_valid(head_ptr + deq_idx)} idx=${Decimal(head_ptr + deq_idx)} instr:${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)}  ${Decimal(head_ptr + deq_idx + 1.U)} v=${io.out(i).valid}  r=${io.out(i).ready}\n")
     }
     head_ptr := deq_idx
 
@@ -207,6 +208,6 @@ class Ibuffer extends XSModule {
   // for(i <- 0 until DecodeWidth) {
   //   XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
   // }
-  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  XSDebug(p"head_ptr=$head_ptr  tail_ptr=$tail_ptr\n")
 //  XSInfo(full, "Queue is full\n")
 }

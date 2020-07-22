@@ -236,6 +236,8 @@ class BTB extends XSModule {
     XSDebug(fireLatch, "read_resp[b=%d][r=%d]: valid=%d, tag=0x%x, target=0x%x, type=%d, ctr=%d\n",
     i.U, realRowLatch(i), metaRead(i).valid, metaRead(i).tag, dataRead(i).target, dataRead(i).btbType, dataRead(i).pred)
   }
+  XSDebug("out: taken=%d takenIdx=%d tgt=%x notTakens=%b hits=%b isRVILateJump=%d\n",
+    io.out.taken, io.out.takenIdx, io.out.target, io.out.notTakens.asUInt, io.out.hits.asUInt, io.out.isRVILateJump)
   XSDebug(fireLatch, "bankIdxInOrder:")
   for (i <- 0 until BtbBanks){ XSDebug(fireLatch, "%d ", bankIdxInOrder(i))}
   XSDebug(fireLatch, "\n")

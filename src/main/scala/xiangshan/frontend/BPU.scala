@@ -168,9 +168,9 @@ class BPUStage1 extends XSModule {
 
   // update ghr
   updateGhr := io.s1OutPred.bits.redirect || 
-               RegNext(io.in.pc.fire) && ~io.s1OutPred.bits.redirect && (btbNotTakens.asUInt & maskLatch).reduce(_||_) ||
+               RegNext(io.in.pc.fire) && ~io.s1OutPred.bits.redirect && (btbNotTakens.asUInt & maskLatch).orR || // TODO: use parallel or
                io.flush
-  val brJumpIdx = Mux(!(btbHit && btbTaken), 0.U, UIntToOH(btbTakenIdx))
+  val brJumpIdx = Mux(!btbTaken, 0.U, UIntToOH(btbTakenIdx))
   val indirectIdx = Mux(!jbtacHit, 0.U, UIntToOH(jbtacHitIdx))
   // if backend redirects, restore history from backend;
   // if stage3 redirects, restore history from stage3;
@@ -204,7 +204,7 @@ class BPUStage1 extends XSModule {
     // io.s1OutPred.bits.instrValid := Mux(!io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump, maskLatch,
     //                                 Mux(!btbIsRVCs(OHToUInt(takenIdx)), LowerMask(takenIdx << 1.U, PredictWidth),
     //                                 LowerMask(takenIdx, PredictWidth))).asTypeOf(Vec(PredictWidth, Bool()))
-    io.s1OutPred.bits.redirect := (maskLatch & Fill(PredictWidth, ~io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump) |
+    io.s1OutPred.bits.instrValid := (maskLatch & Fill(PredictWidth, ~io.s1OutPred.bits.redirect || io.s1OutPred.bits.lateJump) |
       PriorityMux(brJumpIdx | indirectIdx, (0 until PredictWidth).map(getInstrValid(_)))).asTypeOf(Vec(PredictWidth, Bool()))
     io.s1OutPred.bits.target := Mux(takenIdx === 0.U, pcLatch + (PopCount(maskLatch) << 1.U), Mux(takenIdx === brJumpIdx, btbTakenTarget, jbtacTarget))
     io.s1OutPred.bits.lateJump := btb.io.out.isRVILateJump || jbtac.io.out.isRVILateJump
@@ -370,7 +370,8 @@ class BPUStage3 extends XSModule {
   }
 
   // TODO: what if if4 and if2 late jump to the same target?
-  val lateJump = io.s3Taken && PriorityMux(Reverse(predecode.mask),((PredictWidth - 1) to 0).map(_.U)) === jmpIdx && !predecode.isRVC(jmpIdx)
+  // val lateJump = io.s3Taken && PriorityMux(Reverse(predecode.mask), ((PredictWidth - 1) to 0).map(_.U)) === jmpIdx && !predecode.isRVC(jmpIdx)
+  val lateJump = io.s3Taken && PriorityMux(Reverse(predecode.mask), (0 until PredictWidth).map {i => (PredictWidth - 1 - i).U}) === jmpIdx && !predecode.isRVC(jmpIdx)
   io.out.bits.lateJump := lateJump
 
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
@@ -412,6 +413,7 @@ class BPUStage3 extends XSModule {
   // for (i <- 0 until FetchWidth) {
   //   io.out.bits.instrValid(i) := ((io.s3Taken && i.U <= jmpIdx) || ~io.s3Taken) && io.predecode.bits.mask(i)
   // }
+  io.out.bits.instrValid := predecode.mask.asTypeOf(Vec(PredictWidth, Bool()))
   for (i <- PredictWidth - 1 to 0) {
     io.out.bits.instrValid(i) := (io.s3Taken && i.U <= jmpIdx || !io.s3Taken) && predecode.mask(i)
     if (i != (PredictWidth - 1)) {
