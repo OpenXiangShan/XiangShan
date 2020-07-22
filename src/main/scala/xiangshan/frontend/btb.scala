@@ -9,12 +9,9 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 class BTBUpdateBundle extends XSBundle {
-  // val fetchPC = UInt(VAddrBits.W)
   val pc = UInt(VAddrBits.W)
-  // val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   val hit = Bool()
   val misPred = Bool()
-  // val writeWay = UInt(log2Up(BtbWays).W)
   val oldCtr = UInt(2.W)
   val taken = Bool()
   val target = UInt(VAddrBits.W)
@@ -23,15 +20,16 @@ class BTBUpdateBundle extends XSBundle {
 }
 
 class BTBPred extends XSBundle {
-  val hit = Bool()
   val taken = Bool()
-  val takenIdx = UInt(log2Up(FetchWidth).W)
+  val takenIdx = UInt(log2Up(PredictWidth).W)
   val target = UInt(VAddrBits.W)
 
-  // val writeWay = UInt(log2Up(BtbWays).W)
-  val notTakens = Vec(FetchWidth, Bool())
-  val dEntries = Vec(FetchWidth, btbDataEntry())
-  val hits = Vec(FetchWidth, Bool())
+  val notTakens = Vec(PredictWidth, Bool())
+  val dEntries = Vec(PredictWidth, btbDataEntry())
+  val hits = Vec(PredictWidth, Bool())
+
+  // whether an RVI instruction crosses over two fetch packet
+  val isRVILateJump = Bool()
 }
 
 case class btbDataEntry() extends XSBundle {
@@ -53,7 +51,7 @@ class BTB extends XSModule {
     val in = new Bundle {
       val pc = Flipped(Decoupled(UInt(VAddrBits.W)))
       val pcLatch = Input(UInt(VAddrBits.W))
-      val mask = Input(UInt((PredictWidth).W))
+      val mask = Input(UInt(PredictWidth.W))
     }
     val redirectValid = Input(Bool())
     val flush = Input(Bool())
@@ -64,10 +62,7 @@ class BTB extends XSModule {
 
   io.in.pc.ready := true.B
   val fireLatch = RegNext(io.in.pc.fire())
-  val nextFire = Wire(Bool())
-  nextFire := fireLatch
-
-
+  val maskLatch = RegEnable(io.in.mask, io.in.pc.fire())
 
   val btbAddr = new TableAddr(log2Up(BtbSize), BtbBanks)
 
@@ -182,7 +177,7 @@ class BTB extends XSModule {
   val notBrOrJ = u.btbType =/= BTBtype.B && u.btbType =/= BTBtype.J
 
   // Do not update BTB on indirect or return, or correctly predicted J or saturated counters
-  val noNeedToUpdate = (!u.misPred && (isBr && updateOnSaturated || isJ)) || (notBrOrJ)
+  val noNeedToUpdate = (!u.misPred && (isBr && updateOnSaturated || isJ)) || notBrOrJ
 
   // do not update on saturated ctrs
   val btbWriteValid = io.redirectValid && !noNeedToUpdate
@@ -196,25 +191,56 @@ class BTB extends XSModule {
     btbData(b).io.w.req.bits.data := btbDataWrite
   }
 
-  io.out.hit := bankHits.reduce(_||_)
+  // io.out.hit := bankHits.reduce(_||_)
   io.out.taken := isTaken
-  io.out.takenIdx := takenIdx(log2Up(PredictWidth)-1, 1)
+  io.out.takenIdx := takenIdx
   io.out.target := takenTarget
   // io.out.writeWay := writeWay
-  io.out.notTakens := VecInit((0 until BtbBanks by 2).map(b => notTakenBranches(bankIdxInOrder(b))))
-  io.out.dEntries := VecInit((0 until BtbBanks by 2).map(b => dataRead(bankIdxInOrder(b))))
-  io.out.hits := VecInit((0 until BtbBanks by 2).map(b => bankHits(bankIdxInOrder(b))))
+  io.out.notTakens := VecInit((0 until BtbBanks).map(b => notTakenBranches(bankIdxInOrder(b))))
+  io.out.dEntries := VecInit((0 until BtbBanks).map(b => dataRead(bankIdxInOrder(b))))
+  io.out.hits := VecInit((0 until BtbBanks).map(b => bankHits(bankIdxInOrder(b))))
+  io.out.isRVILateJump := io.out.taken && takenIdx === OHToUInt(HighestBit(maskLatch, PredictWidth)) && !dataRead(bankIdxInOrder(takenIdx)).isRVC
+
+  // read-after-write bypass
+  val rawBypassHit = Wire(Vec(BtbBanks, Bool()))
+  for (b <- 0 until BtbBanks) {
+    when (b.U === updateBankIdx && realRow(b) === updateRow) { // read and write to the same address
+      when (realMask(b) && io.in.pc.valid && btbWriteValid) {  // both read and write valid
+        rawBypassHit(b) := true.B
+        btbMeta(b).io.r.req.valid := false.B
+        btbData(b).io.r.req.valid := false.B
+        // metaRead(b) := RegNext(btbMetaWrite)
+        // dataRead(b) := RegNext(btbDataWrite)
+        readFire(b) := true.B
+        XSDebug("raw bypass hits: bank=%d, row=%d, meta: %d %x, data: tgt=%x pred=%b btbType=%b isRVC=%d\n",
+          b.U, updateRow,
+          btbMetaWrite.valid, btbMetaWrite.tag,
+          btbDataWrite.target, btbDataWrite.pred, btbDataWrite.btbType, btbDataWrite.isRVC)
+      }.otherwise {
+        rawBypassHit(b) := false.B
+      }
+    }.otherwise {
+      rawBypassHit(b) := false.B
+    }
+
+    when (RegNext(rawBypassHit(b))) {
+      metaRead(b) := RegNext(btbMetaWrite)
+      dataRead(b) := RegNext(btbDataWrite)
+    }
+  }
 
   XSDebug(io.in.pc.fire(), "read: pc=0x%x, baseBank=%d, realMask=%b\n", io.in.pc.bits, baseBank, realMask)
-  XSDebug(nextFire, "read_resp: pc=0x%x, readIdx=%d-------------------------------\n",
+  XSDebug(fireLatch, "read_resp: pc=0x%x, readIdx=%d-------------------------------\n",
     io.in.pcLatch, btbAddr.getIdx(io.in.pcLatch))
   for (i <- 0 until BtbBanks){
-    XSDebug(nextFire, "read_resp[b=%d][r=%d]: valid=%d, tag=0x%x, target=0x%x, type=%d, ctr=%d\n",
+    XSDebug(fireLatch, "read_resp[b=%d][r=%d]: valid=%d, tag=0x%x, target=0x%x, type=%d, ctr=%d\n",
     i.U, realRowLatch(i), metaRead(i).valid, metaRead(i).tag, dataRead(i).target, dataRead(i).btbType, dataRead(i).pred)
   }
-  XSDebug(nextFire, "bankIdxInOrder:")
-  for (i <- 0 until BtbBanks){ XSDebug(nextFire, "%d ", bankIdxInOrder(i))}
-  XSDebug(nextFire, "\n")
+  XSDebug("out: taken=%d takenIdx=%d tgt=%x notTakens=%b hits=%b isRVILateJump=%d\n",
+    io.out.taken, io.out.takenIdx, io.out.target, io.out.notTakens.asUInt, io.out.hits.asUInt, io.out.isRVILateJump)
+  XSDebug(fireLatch, "bankIdxInOrder:")
+  for (i <- 0 until BtbBanks){ XSDebug(fireLatch, "%d ", bankIdxInOrder(i))}
+  XSDebug(fireLatch, "\n")
   XSDebug(io.redirectValid, "update_req: pc=0x%x, hit=%d, misPred=%d, oldCtr=%d, taken=%d, target=0x%x, btbType=%d\n",
     u.pc, u.hit, u.misPred, u.oldCtr, u.taken, u.target, u.btbType)
   XSDebug(io.redirectValid, "update: noNeedToUpdate=%d, writeValid=%d, bank=%d, row=%d, newCtr=%d\n",
