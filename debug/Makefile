@@ -13,7 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run
 
 # ------------------------------------------------------------------
 # run different test sets

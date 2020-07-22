@@ -62,9 +62,7 @@ class BPUStage1 extends XSModule {
   val outLatch = RegEnable(io.out.bits, RegNext(io.in.pc.fire()))
 
   val s1Valid = RegInit(false.B)
-  when (io.flush) {
-    s1Valid := false.B
-  }.elsewhen (io.in.pc.fire()) {
+  when (io.flush || io.in.pc.fire()) {
     s1Valid := true.B
   }.elsewhen (io.out.fire()) {
     s1Valid := false.B
@@ -415,18 +413,17 @@ class BPUStage3 extends XSModule {
                         Mux(jmpIdx === retIdx, rasTopAddr,
                         Mux(jmpIdx === jalrIdx, inLatch.jbtac.target,
                         inLatch.btb.targets(jmpIdx))))
-  // for (i <- 0 until FetchWidth) {
-  //   io.out.bits.instrValid(i) := ((io.s3Taken && i.U <= jmpIdx) || ~io.s3Taken) && io.predecode.bits.mask(i)
-  // }
+
   io.out.bits.instrValid := predecode.mask.asTypeOf(Vec(PredictWidth, Bool()))
   for (i <- PredictWidth - 1 to 0) {
     io.out.bits.instrValid(i) := (io.s3Taken && i.U <= jmpIdx || !io.s3Taken) && predecode.mask(i)
     if (i != (PredictWidth - 1)) {
-      when (!lateJump && !predecode.isRVC(i)) {
+      when (!lateJump && !predecode.isRVC(i) && io.s3Taken && i.U <= jmpIdx) {
         io.out.bits.instrValid(i+1) := predecode.mask(i+1)
       }
     }
   }
+
   io.flushBPU := io.out.bits.redirect && io.out.fire()
 
   // speculative update RAS

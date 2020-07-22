@@ -207,7 +207,6 @@ class IFU extends XSModule with HasIFUConst
     // else {needflush := io.redirectInfo.flush()}
     needflush := (if4_valid && if4_tage_taken && io.icacheResp.fire()) || io.redirectInfo.flush()
     when(needflush){
-      if2_valid := false.B
       if3_valid := false.B
       if4_valid := false.B
     }
