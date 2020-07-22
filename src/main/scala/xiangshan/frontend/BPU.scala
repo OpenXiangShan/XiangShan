@@ -207,7 +207,7 @@ class BPUStage1 extends XSModule {
     io.s1OutPred.bits.instrValid := (maskLatch & Fill(PredictWidth, ~io.s1OutPred.bits.redirect) |
       PriorityMux(brJumpIdx | indirectIdx, (0 until PredictWidth).map(getInstrValid(_)))).asTypeOf(Vec(PredictWidth, Bool()))
     for (i <- 0 until (PredictWidth - 1)) {
-      when (!io.s1OutPred.bits.lateJump && (!btbIsRVCs(i) && btbValids(i) && i.U === OHToUInt(brJumpIdx) || !jbtacIsRVC && i.U === OHToUInt(indirectIdx) && jbtacHit)) {
+      when (!io.s1OutPred.bits.lateJump && (1.U << i) === takenIdx && (!btbIsRVCs(i) && btbValids(i) || !jbtacIsRVC && (1.U << i) === indirectIdx)) {
         io.s1OutPred.bits.instrValid(i+1) := maskLatch(i+1)
       }
     }

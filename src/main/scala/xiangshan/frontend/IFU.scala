@@ -272,7 +272,7 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
     //TODO: consider RVC && consider cross cacheline fetch
-    bpu.io.predecode.bits.mask := Fill(FetchWidth, 1.U(1.W))
+    bpu.io.predecode.bits.mask := Fill(FetchWidth*2, 1.U(1.W))
     bpu.io.predecode.bits.isRVC := 0.U.asTypeOf(Vec(FetchWidth*2, Bool()))
     bpu.io.redirectInfo := io.redirectInfo
     io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)

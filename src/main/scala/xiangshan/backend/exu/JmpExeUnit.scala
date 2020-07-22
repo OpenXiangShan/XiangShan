@@ -48,7 +48,7 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.redirect.taken := false.B
   csrExuOut.redirect.hist := uop.cf.hist
   csrExuOut.redirect.tageMeta := uop.cf.tageMeta
-  csrExuOut.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
+  csrExuOut.redirect.fetchIdx := uop.cf.fetchOffset >> 1.U  //TODO: consider RVC
   csrExuOut.redirect.btbPredCtr := uop.cf.btbPredCtr
   csrExuOut.redirect.btbHit := uop.cf.btbHit
   csrExuOut.redirect.rasSp := uop.cf.rasSp

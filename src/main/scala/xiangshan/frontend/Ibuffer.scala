@@ -61,13 +61,13 @@ class Ibuffer extends XSModule {
       when(io.in.bits.mask(i)) {
         ibuf(enq_idx).inst := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
         ibuf(enq_idx).pc := io.in.bits.pc + ((enq_idx - tail_ptr)<<1).asUInt
-        ibuf(enq_idx).pnpc := io.in.bits.pnpc(i>>1)
+        ibuf(enq_idx).pnpc := io.in.bits.pnpc(i)
         ibuf(enq_idx).fetchOffset := ((enq_idx - tail_ptr) << 1).asUInt
-        ibuf(enq_idx).hist := io.in.bits.hist(i>>1)
+        ibuf(enq_idx).hist := io.in.bits.hist(i)
         // ibuf(enq_idx).btbVictimWay := io.in.bits.btbVictimWay
-        ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i>>1)
-        ibuf(enq_idx).btbHit := io.in.bits.btbHit(i>>1)
-        ibuf(enq_idx).tageMeta := io.in.bits.tageMeta(i>>1)
+        ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i)
+        ibuf(enq_idx).btbHit := io.in.bits.btbHit(i)
+        ibuf(enq_idx).tageMeta := io.in.bits.tageMeta(i)
         ibuf(enq_idx).rasSp := io.in.bits.rasSp
         ibuf(enq_idx).rasTopCtr := io.in.bits.rasTopCtr
         ibuf_valid(enq_idx) := true.B
