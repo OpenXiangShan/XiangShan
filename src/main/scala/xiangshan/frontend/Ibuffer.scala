@@ -20,7 +20,7 @@ class Ibuffer extends XSModule {
     val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
     val hist = UInt(HistoryLength.W)
     val btbPredCtr = UInt(2.W)
-    val btbHitWay = Bool()
+    val btbHit = Bool()
     val tageMeta = new TageMeta
     val rasSp = UInt(log2Up(RasSize).W)
     val rasTopCtr = UInt(8.W)
@@ -66,12 +66,17 @@ class Ibuffer extends XSModule {
         ibuf(enq_idx).hist := io.in.bits.hist(i>>1)
         // ibuf(enq_idx).btbVictimWay := io.in.bits.btbVictimWay
         ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i>>1)
-        ibuf(enq_idx).btbHitWay := io.in.bits.btbHitWay
+        ibuf(enq_idx).btbHit := io.in.bits.btbHit(i>>1)
         ibuf(enq_idx).tageMeta := io.in.bits.tageMeta(i>>1)
         ibuf(enq_idx).rasSp := io.in.bits.rasSp
         ibuf(enq_idx).rasTopCtr := io.in.bits.rasTopCtr
         ibuf_valid(enq_idx) := true.B
+        XSDebug("Enq: i:%d idx:%d mask:%b instr:%x pc:%x fetchOffset=%d\n",
+          i.U, enq_idx, io.in.bits.mask(i), Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0)), io.in.bits.pc + ((enq_idx - tail_ptr)<<1).asUInt, ((enq_idx - tail_ptr) << 1).asUInt)
       }
+
+      // XSDebug(!(i.U)(0), "Enq: i:%d Idx:%d mask:%b instr:%x pc:%x pnpc:%x\n",
+      //   (i/2).U, enq_idx, io.in.bits.mask(i), io.in.bits.instrs(i/2), io.in.bits.pc + ((enq_idx - tail_ptr)<<1).asUInt, io.in.bits.pnpc(i/2))
       enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
@@ -94,7 +99,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.hist := ibuf(deq_idx).hist
           // io.out(i).bits.btbVictimWay := ibuf(deq_idx).btbVictimWay
           io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
-          io.out(i).bits.btbHitWay := ibuf(deq_idx).btbHitWay
+          io.out(i).bits.btbHit := ibuf(deq_idx).btbHit
           io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
           io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
           io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
@@ -109,7 +114,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.hist := ibuf(deq_idx).hist
           // io.out(i).bits.btbVictimWay := ibuf(deq_idx).btbVictimWay
           io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
-          io.out(i).bits.btbHitWay := ibuf(deq_idx).btbHitWay
+          io.out(i).bits.btbHit := ibuf(deq_idx).btbHit
           io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
           io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
           io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
@@ -125,7 +130,7 @@ class Ibuffer extends XSModule {
           io.out(i).bits.hist := 0.U(HistoryLength.W)
           // io.out(i).bits.btbVictimWay := 0.U(log2Up(BtbWays).W)
           io.out(i).bits.btbPredCtr := 0.U(2.W)
-          io.out(i).bits.btbHitWay := false.B
+          io.out(i).bits.btbHit := false.B
           io.out(i).bits.tageMeta := 0.U.asTypeOf(new TageMeta)
           io.out(i).bits.rasSp := 0.U(log2Up(RasSize))
           io.out(i).bits.rasTopCtr := 0.U(8.W)
@@ -140,12 +145,13 @@ class Ibuffer extends XSModule {
         io.out(i).bits.hist := ibuf(head_ptr + (i<<1).U).hist
         // io.out(i).bits.btbVictimWay := ibuf(head_ptr + (i<<1).U).btbVictimWay
         io.out(i).bits.btbPredCtr := ibuf(head_ptr + (i<<1).U).btbPredCtr
-        io.out(i).bits.btbHitWay := ibuf(head_ptr + (i<<1).U).btbHitWay
+        io.out(i).bits.btbHit := ibuf(head_ptr + (i<<1).U).btbHit
         io.out(i).bits.tageMeta := ibuf(head_ptr + (i<<1).U).tageMeta
         io.out(i).bits.rasSp := ibuf(head_ptr + (i<<1).U).rasSp
         io.out(i).bits.rasTopCtr := ibuf(head_ptr + (i<<1).U).rasTopCtr
         io.out(i).bits.isRVC := false.B
       }
+      XSDebug(deqValid, p"Deq: i:${i.U} valid:${ibuf_valid(deq_idx)} idx=${Decimal(deq_idx)} ${Decimal(deq_idx + 1.U)} instr:${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid}  r=${io.out(i).ready}\n")
 
       // When can't deque, deq_idx+0
       // when RVC deque, deq_idx+1
@@ -169,7 +175,7 @@ class Ibuffer extends XSModule {
       io.out(i).bits.hist := 0.U(HistoryLength.W)
       // io.out(i).bits.btbVictimWay := 0.U(log2Up(BtbWays).W)
       io.out(i).bits.btbPredCtr := 0.U(2.W)
-      io.out(i).bits.btbHitWay := false.B
+      io.out(i).bits.btbHit := false.B
       io.out(i).bits.tageMeta := 0.U.asTypeOf(new TageMeta)
       io.out(i).bits.rasSp := 0.U(log2Up(RasSize))
       io.out(i).bits.rasTopCtr := 0.U(8.W)
@@ -192,16 +198,16 @@ class Ibuffer extends XSModule {
   }
 
   //Debug Info
-  XSDebug(enqValid, "Enque:\n")
-  for(i <- 0 until FetchWidth) {
-    XSDebug(enqValid, p"${Hexadecimal(io.in.bits.instrs(i))}\n")
-  }
+  // XSDebug(enqValid, "Enque:\n")
+  // for(i <- 0 until FetchWidth) {
+  //   XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
+  // }
 
   XSInfo(io.flush, "Flush signal received, clear buffer\n")
-  XSDebug(deqValid, "Deque:\n")
-  for(i <- 0 until DecodeWidth) {
-    XSDebug(deqValid, p"${Hexadecimal(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
-  }
-  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  // XSDebug(deqValid, "Deque:\n")
+  // for(i <- 0 until DecodeWidth) {
+  //   XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
+  // }
+  XSDebug(p"head_ptr=$head_ptr  tail_ptr=$tail_ptr\n")
 //  XSInfo(full, "Queue is full\n")
 }
