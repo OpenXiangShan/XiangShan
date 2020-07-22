@@ -90,7 +90,7 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
 int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode) {
 
-  assert(!isRVC && intrNO == 0);
+  assert(!isRVC);
   #define DEBUG_RETIRE_TRACE_SIZE 16
   #define DEBUG_WB_TRACE_SIZE 16
 
@@ -125,28 +125,29 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
 
   if (intrNO) {
     ref_difftest_raise_intr(intrNO);
-    ref_difftest_exec(1);//TODO
+    // ref_difftest_exec(1);//TODO
   }
-
-  assert(commit > 0 && commit <= 6);
-  for(int i = 0; i < commit; i++){
-    pc_wb_queue[wb_pointer] = wpc[i];
-    wen_wb_queue[wb_pointer] = selectBit(wen, i);
-    wdst_wb_queue[wb_pointer] = wdst[i];
-    wdata_wb_queue[wb_pointer] = wdata[i];
-    wb_pointer = (wb_pointer+1) % DEBUG_WB_TRACE_SIZE;
-    if(selectBit(skip, i)){
-      // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-      // printf("SKIP %d\n", i);
-      // to skip the checking of an instruction, just copy the reg state to reference design
-      ref_difftest_getregs(&ref_r);
-      ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
-      if(selectBit(wen, i)){
-        ref_r[wdst[i]] = wdata[i];
+  else {
+    assert(commit > 0 && commit <= 6);
+    for(int i = 0; i < commit; i++){
+      pc_wb_queue[wb_pointer] = wpc[i];
+      wen_wb_queue[wb_pointer] = selectBit(wen, i);
+      wdst_wb_queue[wb_pointer] = wdst[i];
+      wdata_wb_queue[wb_pointer] = wdata[i];
+      wb_pointer = (wb_pointer+1) % DEBUG_WB_TRACE_SIZE;
+      if(selectBit(skip, i)){
+        // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
+        // printf("SKIP %d\n", i);
+        // to skip the checking of an instruction, just copy the reg state to reference design
+        ref_difftest_getregs(&ref_r);
+        ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
+        if(selectBit(wen, i)){
+          ref_r[wdst[i]] = wdata[i];
+        }
+        ref_difftest_setregs(ref_r);
+      }else{
+        ref_difftest_exec(1);
       }
-      ref_difftest_setregs(ref_r);
-    }else{
-      ref_difftest_exec(1);
     }
   }
   ref_difftest_getregs(&ref_r);

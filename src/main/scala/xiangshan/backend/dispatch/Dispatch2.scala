@@ -112,7 +112,6 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       enq.bits.src3State := io.fpPregRdy(startIndex + 2.U)
     }
     else {
-      // TODO: load store with fp
       val startIndex = 8.U// regfileRPGen.io.lsIQRfSrc(0)
       enq.valid := !instIdxes(i)(2) && io.fromLsDq(instIdxes(i)(1, 0)).valid
       enq.bits := io.fromLsDq(instIdxes(i)(1, 0)).bits
@@ -165,7 +164,6 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       io.fromLsDq(i).bits.cf.pc, i.U)
   }
 
-  // TODO: store needs data from FpRegfile
   val intExuIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRReadPorts).W)))
   val fpExuIndexReg = Reg(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(NRReadPorts).W)))
   val lsExuIndexReg = Reg(Vec(exuParameters.LduCnt + exuParameters.StuCnt, UInt(log2Ceil(NRReadPorts).W)))
