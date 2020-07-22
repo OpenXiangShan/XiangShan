@@ -116,7 +116,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   ))
 
   // pop store queue if insts have been commited and dmem req fired successfully
-  val storeFinish = retiringStore && state === s_partialLoad
+  val storeFinish = retiringStore && dmem.resp.fire()//state === s_partialLoad
   val stqDequeue = storeFinish || !stqValid(stqTail) && stqHead > 0.U
   when(stqDequeue){
     stqValid(stqTail) := false.B
@@ -129,7 +129,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   // if store, add it to store queue
   val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore && !io.redirect.valid
   when(stqEnqueue){
-    stqPtr(stqHead) := emptySlot
+    stqPtr(stqHead - stqDequeue) := emptySlot
     stqData(emptySlot).src1 := src1In
     stqData(emptySlot).src2 := src2In
     stqData(emptySlot).addr := src1In + src2In
