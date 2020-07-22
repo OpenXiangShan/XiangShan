@@ -52,6 +52,7 @@ object Instructions extends HasInstrType with HasXSParameter {
     RVIInstr.table ++
       XSTrap.table ++
       RVZicsrInstr.table ++
+      RVZifenceiInstr.table ++
       Privileged.table ++
       RVFInstr.table ++
       RVDInstr.table ++
@@ -60,7 +61,7 @@ object Instructions extends HasInstrType with HasXSParameter {
 //    (if (HasFPU) RVFInstr.table ++ RVDInstr.table else Nil) ++
 //    Privileged.table ++
 //    RVAInstr.table ++
-//    RVZicsrInstr.table ++ RVZifenceiInstr.table
+//    RVZicsrInstr.table
 }
 
 object CInstructions extends HasInstrType with HasXSParameter {

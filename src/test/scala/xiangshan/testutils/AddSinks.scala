@@ -18,14 +18,23 @@ object AddSinks {
       "perfCntCondMl2cacheReq",
       "mtip",
       "perfCntCondMdcacheReq",
-      "meip"
+      "meip",
+      "perfCntCondMbpInstr",
+      "perfCntCondMbpRight",
+      "perfCntCondMbpWrong",
+      "perfCntCondMbpBRight",
+      "perfCntCondMbpBWrong",
+      "perfCntCondMbpJRight",
+      "perfCntCondMbpJWrong",
+      "perfCntCondMbpIRight",
+      "perfCntCondMbpIWrong",
+      "perfCntCondMbpRRight",
+      "perfCntCondMbpRWrong"
     )
     for (s <- sinks){ BoringUtils.addSink(tmp, s) }
 
-    val disp_begin = WireInit(dispBegin.S(64.W).asUInt())
-    val disp_end = WireInit(dispEnd.S(64.W).asUInt())
-    BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
-    BoringUtils.addSource(disp_end, "DISPLAY_LOG_END")
+    val disp_enable = WireInit(dispBegin.S(64.W).asUInt() < dispEnd.S(64.W).asUInt())
+    BoringUtils.addSource(disp_enable, "DISPLAY_LOG_ENABLE")
 
   }
 }

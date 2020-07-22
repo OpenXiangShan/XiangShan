@@ -181,7 +181,8 @@ class ExuIO extends XSBundle {
   val in = Flipped(DecoupledIO(new ExuInput))
   val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
-
+  // for csr
+  val exception = Flipped(ValidIO(new MicroOp))
   // for Lsu
   val dmem = new SimpleBusUC
   val scommit = Input(UInt(3.W))
@@ -197,5 +198,5 @@ class FrontendToBackendIO extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
   val redirectInfo = Input(new RedirectInfo)
-  val commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit))) // update branch pred
+  val inOrderBrInfo = Input(new RedirectInfo)
 }

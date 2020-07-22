@@ -50,7 +50,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 ifeq ($(REMOTE),localhost)
 	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
 endif
 
 
@@ -98,7 +98,7 @@ $(REF_SO):
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
-SEED = -s $(shell shuf -i 1-10000 -n 1)
+SEED ?= $(shell shuf -i 1-10000 -n 1)
 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
@@ -108,9 +108,9 @@ E ?= -1
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E)
+	@$(EMU) -i $(IMAGE) -s $(SEED) -b $(B) -e $(E)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) $(SEED) -b $(B) -e $(E)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) -s $(SEED) -b $(B) -e $(E)"
 endif
 
 cache:
