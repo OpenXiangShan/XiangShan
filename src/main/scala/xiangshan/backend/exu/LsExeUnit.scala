@@ -127,7 +127,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   }
 
   // if store, add it to store queue
-  val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore && !io.redirect.valid
+  val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore && !io.redirect.valid && state === s_idle
   when(stqEnqueue){
     stqPtr(stqHead - stqDequeue) := emptySlot
     stqData(emptySlot).src1 := src1In
@@ -144,8 +144,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   // have to say it seems better to rebuild FSM instead of using such ugly wrapper
   val needRetireStore = stqCommited > 0.U && stqValid(stqTail)
   when(
-    needRetireStore && !retiringStore && state === s_idle  && !io.in.valid ||
-    needRetireStore && !retiringStore && io.in.valid && isStoreIn
+    needRetireStore && !retiringStore && state === s_idle && (!io.in.valid || isStoreIn)
   ){
     retiringStore := true.B
   }
