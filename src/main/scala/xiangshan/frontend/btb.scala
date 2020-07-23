@@ -135,9 +135,9 @@ class BTB extends XSModule {
   }
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch + b.U) % BtbBanks.U))
+  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch + b.U) (3,0)))
 
-  val isTaken       = predTakens.reduce(_||_)
+  val isTaken       = ParallelOR(predTakens)
   // Priority mux which corresponds with inst orders
   // BTB only produce one single prediction
   val takenTarget = MuxCase(0.U, bankIdxInOrder.map(b => (predTakens(b), dataRead(b).target)))
