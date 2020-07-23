@@ -6,6 +6,8 @@ static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
 static long img_size = 0;
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
+void* get_ram_start() { return &ram[0]; }
+long get_ram_size() { return RAMSIZE; }
 
 void addpageSv39() {
 //three layers

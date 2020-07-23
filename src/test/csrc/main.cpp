@@ -1,7 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
-#include <memory>
 #include <getopt.h>
 #include <string.h>
 #include <sys/time.h>

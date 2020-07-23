@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <fstream>
 #include <vector>
+#include <memory>
+#include <time.h>
 #include "difftest.h"
 
 //#include "VSimTop__Dpi.h"
@@ -14,6 +16,7 @@
 #endif
 
 #define DIFFTEST_WIDTH 6
+#define SNAPSHOT_INTERVAL 10 // unit: second
 
 static char mybuf[BUFSIZ];
 
@@ -132,7 +135,8 @@ class Emulator {
     extern void poll_event(void);
     extern uint32_t uptime(void);
     extern void set_abort(void);
-    uint32_t lasttime = 0;
+    uint32_t lasttime_poll = 0;
+    uint32_t lasttime_snapshot = 0;
     uint64_t lastcommit = n;
     int hascommit = 0;
     const int stuck_limit = 500;
@@ -200,9 +204,21 @@ class Emulator {
       }
 
       uint32_t t = uptime();
-      if (t - lasttime > 100) {
+      if (t - lasttime_poll > 100) {
         poll_event();
-        lasttime = t;
+        lasttime_poll = t;
+      }
+      if (t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
+        // save snapshot every 10s
+        time_t now = time(NULL);
+        snapshot_save(snapshot_filename(my_strftime(now)));
+
+        // remove the last second snapshot
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "rm %s 2> /dev/null", snapshot_filename(my_strftime(now - 20)));
+        system(cmd);
+
+        lasttime_snapshot = t;
       }
     }
   }
@@ -227,4 +243,9 @@ class Emulator {
   uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
   uint32_t get_seed() const { return seed; }
+
+  char* my_strftime(time_t time);
+  char* snapshot_filename(const char *name);
+  void snapshot_save(const char *filename);
+  void snapshot_load(const char *filename);
 };
