@@ -187,11 +187,17 @@ class LoopBuffer extends XSModule {
         io.out(i).bits.rasSp := lbuf(loop_ptr + deq_idx).rasSp
         io.out(i).bits.rasTopCtr := lbuf(loop_ptr + deq_idx).rasTopCtr
         io.out(i).bits.isRVC := false.B
+        // out_isTaken(i) := lbuf(loop_ptr + deq_idx).isTaken
       }.otherwise {
         io.out(i).bits <> DontCare
       }
 
-      deq_idx = Mux(deq_idx === DecodeWidth.U + 1.U || loop_ptr + deq_idx === loop_end, DecodeWidth.U + 1.U, deq_idx + io.out(i).fire)
+      // deq_idx = Mux(deq_idx === DecodeWidth.U + 1.U || loop_ptr + deq_idx === loop_end, DecodeWidth.U + 1.U, deq_idx + io.out(i).fire)
+      deq_idx = PriorityMux(Seq(
+        (!io.out(i).fire || deq_idx === DecodeWidth.U + 1.U) -> deq_idx,
+        (loop_ptr + deq_idx === loop_end) -> (DecodeWidth.U + 1.U),
+        (loop_ptr + deq_idx =/= loop_end) -> (deq_idx + 1.U)
+      ))
     }
 
     val next_loop_ptr = Mux(deq_idx === DecodeWidth.U + 1.U, loop_str, loop_ptr + deq_idx)
@@ -274,7 +280,7 @@ class LoopBuffer extends XSModule {
       // 非triggering sbb造成的cof
       // 遇到过一个周期内跳转为ACTIVE后又跳转为IDLE，无法重现
       // when(ParallelOR((0 until DecodeWidth).map(i => io.out(i).valid && !isSBB(io.out(i).bits.instr) && isJal(io.out(i).bits.instr) && out_isTaken(i))).asBool()) {
-      when(ParallelOR((0 until DecodeWidth).map(i => !sbb_vec(i) && out_isTaken(i))).asBool) {
+      when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC)).asBool) {
         // To IDLE
         LBstate := s_idle
         cleanFILL(loop_str, head_ptr + PopCount((0 until DecodeWidth).map(io.out(_).fire())))
