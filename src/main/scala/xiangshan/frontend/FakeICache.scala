@@ -22,7 +22,6 @@ class FakeIcacheReq extends XSBundle {
 class FakeIcacheResp extends XSBundle {
   val icacheOut = Vec(FetchWidth, UInt(32.W))
   val predecode = new Predecode
-  val mask = Vec(FetchWidth,Bool())
 }
 
 class TempPreDecoder extends XSModule  {
@@ -41,8 +40,8 @@ class TempPreDecoder extends XSModule  {
     io.out.fuOpTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuOpType
   }
 
-  io.out.mask := DontCare
-  io.out.isRVC := DontCare
+  io.out.mask :=  Fill(FetchWidth*2, 1.U)      //TODO: consider cross cacheline fetch
+  io.out.isRVC := Fill(FetchWidth*2, false.B).asTypeOf(Vec(FetchWidth*2,Bool()))
 
 }
 
@@ -134,7 +133,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
 
   //s3_ready := io.out.ready
-  s3_ready := io.out.fire() || !s3_valid
+  s3_ready := (io.out.fire() || !s3_valid) && io.out.ready
 
   val needflush = io.in.bits.flush
   XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
