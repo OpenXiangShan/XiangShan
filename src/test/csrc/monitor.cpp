@@ -43,7 +43,7 @@ int display_trapinfo(uint64_t max_cycles) {
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", g_trapCode);
   }
 
-  double ipc = (double)g_instrCnt / g_cycleCnt;
+  double ipc = (double)g_instrCnt / (g_cycleCnt-500);
   eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %" PRIu64 "\n" ANSI_COLOR_RESET, g_instrCnt);
   eprintf(ANSI_COLOR_MAGENTA "instrCnt = %" PRIu64 ", cycleCnt = %" PRIu64 ", IPC = %lf\n" ANSI_COLOR_RESET,
       g_instrCnt, g_cycleCnt, ipc);
