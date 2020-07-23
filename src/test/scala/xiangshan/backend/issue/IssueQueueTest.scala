@@ -5,14 +5,10 @@ import chiseltest._
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
+import utils.XSLog
 import xiangshan._
 import xiangshan.backend.exu.Exu
 import xiangshan.testutils._
-import xiangshan.testutils.TestCaseGenerator._
-
-import scala.util.Random
 
 class IssueQueueTest extends FlatSpec
   with ChiselScalatestTester
@@ -20,6 +16,7 @@ class IssueQueueTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver
 {
+  XSLog.generateLog = false
   it should "do enq issue with no delay correctly" in {
     test(new IssueQueue(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
       AddSinks()
@@ -38,7 +35,7 @@ class IssueQueueTest extends FlatSpec
       c.io.deq.initSink().setSinkClock(c.clock)
 
       def TEST_SIZE = 2
-      val roqSeq = (0 until TEST_SIZE)
+      val roqSeq = 0 until TEST_SIZE
       val enqPort = c.io.enqCtrl
       fork {
         c.io.enqCtrl.enqueuePartialSeq(roqSeq.map(roq => genEnqRdyReq(enqPort, roq)))

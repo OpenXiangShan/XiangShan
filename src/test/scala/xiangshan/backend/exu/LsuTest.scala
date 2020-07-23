@@ -11,6 +11,7 @@ import bus.simplebus.{SimpleBusCrossbarNto1, SimpleBusUC}
 import device.AXI4RAM
 import noop.{Cache, CacheConfig, MemMMUIO, TLB, TLBConfig}
 import system.CoherenceManager
+import utils.XSLog
 import xiangshan._
 import xiangshan.backend.fu.FunctionUnit.lsuCfg
 import xiangshan.testutils._
@@ -28,6 +29,7 @@ class LsuDut(dispBegin: Int, dispEnd: Int) extends Exu(Exu.lsuExeUnitCfg) {
   lsu.io.redirect <> io.redirect
   lsu.io.scommit <> io.scommit
   io.out <> lsu.io.out
+  lsu.io.exception := DontCare
 
   val dmemXbar = Module(new SimpleBusCrossbarNto1(2))
 
@@ -79,6 +81,8 @@ class LsuTest
     with ParallelTestExecution
     with HasPartialDecoupledDriver {
 
+
+  XSLog.generateLog = false
 
   def BASE_ADDR = 0x80000000L
 
