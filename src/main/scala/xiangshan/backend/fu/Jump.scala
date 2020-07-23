@@ -30,7 +30,7 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.taken := true.B
   io.out.bits.redirect.hist := uop.cf.hist
   io.out.bits.redirect.tageMeta := uop.cf.tageMeta
-  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
+  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 1.U  //TODO: consider RVC
   io.out.bits.redirect.btbPredCtr := uop.cf.btbPredCtr
   io.out.bits.redirect.btbHit := uop.cf.btbHit
   io.out.bits.redirect.rasSp := uop.cf.rasSp

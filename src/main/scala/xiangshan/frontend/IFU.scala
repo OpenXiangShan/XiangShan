@@ -1,4 +1,4 @@
- package xiangshan.frontend
+package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -272,6 +272,4 @@ class IFU extends XSModule with HasIFUConst
     io.fetchPacket.bits.rasTopCtr := bpu.io.tageOut.bits.rasTopCtr
     bpu.io.tageOut.ready := if4_start_ready
 
-
 }
-

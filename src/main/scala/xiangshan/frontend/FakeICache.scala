@@ -132,8 +132,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
 
-  //s3_ready := io.out.ready
-  s3_ready := (io.out.fire() || !s3_valid) && io.out.ready
+  s3_ready := (!s3_valid && io.out.ready) || io.out.fire()
 
   val needflush = io.in.bits.flush
   XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)

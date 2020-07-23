@@ -17,7 +17,7 @@ trait HasTageParameter {
                       ( 128,   64,    9))
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
-  val BankWidth = 8 // FetchWidth
+  val BankWidth = 16 // FetchWidth
 
   val TotalBits = TableInfo.map {
     case (s, h, t) => {
@@ -107,7 +107,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val tageEntrySz = 1 + tagLen + 3
 
-  val (hashed_idx, tag) = compute_tag_and_hash(io.req.bits.pc >> (2 + log2Ceil(FetchWidth)), io.req.bits.hist)
+  val (hashed_idx, tag) = compute_tag_and_hash(io.req.bits.pc, io.req.bits.hist)
 
   val hi_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
   val lo_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
@@ -220,6 +220,10 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
     }
   }
+  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%b, idx=%d, tag=%x\n", io.req.bits.pc, io.req.bits.hist, hashed_idx, tag)
+  for (i <- 0 until BankWidth) {
+    XSDebug(RegNext(io.req.valid), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, RegNext(hashed_idx), req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
+  }
 
 }
 
@@ -227,14 +231,14 @@ class FakeTAGE extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val out = new Bundle {
-      val hits = Output(UInt(FetchWidth.W))
-      val takens = Output(Vec(FetchWidth, Bool()))
+      val hits = Output(UInt(BankWidth.W))
+      val takens = Output(Vec(BankWidth, Bool()))
     }
-    val meta = Output(Vec(FetchWidth, (new TageMeta)))
+    val meta = Output(Vec(BankWidth, (new TageMeta)))
     val redirectInfo = Input(new RedirectInfo)
   })
   
-  io.out.hits := 0.U(FetchWidth.W)
+  io.out.hits := 0.U(BankWidth.W)
   io.out.takens := DontCare
   io.meta := DontCare
 }
@@ -244,10 +248,10 @@ class Tage extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
     val out = new Bundle {
-      val hits = Output(UInt(FetchWidth.W))
-      val takens = Output(Vec(FetchWidth, Bool()))
+      val hits = Output(UInt(BankWidth.W))
+      val takens = Output(Vec(BankWidth, Bool()))
     }
-    val meta = Output(Vec(FetchWidth, (new TageMeta)))
+    val meta = Output(Vec(BankWidth, (new TageMeta)))
     val redirectInfo = Input(new RedirectInfo)
   })
 
@@ -262,7 +266,7 @@ class Tage extends TageModule {
 
   val updateMeta = io.redirectInfo.redirect.tageMeta
   //val updateMisPred = UIntToOH(io.redirectInfo.redirect.fetchIdx) &
-  //  Fill(FetchWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B).asUInt)
+  //  Fill(BankWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B).asUInt)
   val updateMisPred = io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
@@ -277,7 +281,7 @@ class Tage extends TageModule {
   updateU := DontCare
 
   // access tag tables and output meta info
-  val outHits = Wire(Vec(FetchWidth, Bool()))
+  val outHits = Wire(Vec(BankWidth, Bool()))
   for (w <- 0 until BankWidth) {
     var altPred = false.B
     val finalAltPred = WireInit(false.B)
@@ -368,12 +372,15 @@ class Tage extends TageModule {
       tables(i).io.update.u(w) := updateU(i)(w)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.pc := io.redirectInfo.redirect.pc - (io.redirectInfo.redirect.fetchIdx << 2.U)
+    tables(i).io.update.pc := io.redirectInfo.redirect.pc - (io.redirectInfo.redirect.fetchIdx << 1.U)
     tables(i).io.update.hist := io.redirectInfo.redirect.hist
   }
 
   io.out.hits := outHits.asUInt
 
-  XSDebug(io.req.valid, "req: pc=0x%x, hist=%b\n", io.req.bits.pc, io.req.bits.hist)
 
+  val m = updateMeta
+  XSDebug(io.req.valid, "req: pc=0x%x, hist=%b\n", io.req.bits.pc, io.req.bits.hist)
+  XSDebug(io.redirectInfo.valid, "redirect: provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n", m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
+  XSDebug(RegNext(io.req.valid), "resp: pc=%x, outHits=%b, takens=%b\n", RegNext(io.req.bits.pc), io.out.hits, io.out.takens.asUInt)
 }
