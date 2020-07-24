@@ -25,7 +25,7 @@ class MemPipeline(implicit val p: XSConfig) extends XSModule with NeedImpl{
   })
 
   val lsu = Module(new Lsu)
-  val dcache = Module(new Dcache)
+  val dcache = Module(new DCache)
   val mshq = Module(new MSHQ)
   val dtlb = Module(new Dtlb)
   val lsroq = Module(new LsRoq)

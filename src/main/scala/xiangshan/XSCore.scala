@@ -9,7 +9,10 @@ import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend.Frontend
 import xiangshan.mem._
+import xiangshan.mem.cache.ICacheParameters
+import xiangshan.mem.cache.DCacheParameters
 import xiangshan.utils._
+import bus.tilelink.TLParameters
 
 trait HasXSParameter {
   val XLEN = 64
@@ -59,6 +62,24 @@ trait HasXSParameter {
     FmiscDivSqrtCnt = 0,
     LduCnt = 0,
     StuCnt = 1
+  )
+
+  val l1BusDataWidth = 64
+  val l1BusParams = TLParameters(
+    addressBits = PAddrBits,
+    dataBits = l1BusDataWidth,
+    sourceBits = 3,
+    sinkBits = 3
+  )
+
+  val icacheParameters = ICacheParameters(
+  )
+
+  // the width of LSU to DCache IO
+  val memWidth = 2
+  val LRSCCycles = 16
+  val dcacheParameters = DCacheParameters(
+    busParams = l1BusParams
   )
 }
 
