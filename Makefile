@@ -70,6 +70,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
   --assert \
+  --stats-vars \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
   -I$(abspath $(BUILD_DIR)) \
