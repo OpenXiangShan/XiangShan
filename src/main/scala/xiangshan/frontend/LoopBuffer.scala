@@ -298,7 +298,7 @@ class LoopBuffer extends XSModule {
 
       // 非triggering sbb造成的cof
       // when(ParallelOR((0 until DecodeWidth).map(i => io.out(i).valid && io.out(i).bits.pc =/= tsbbPC && isJal(io.out(i).bits.instr) && io.btbTaken)).asBool()) {
-      when(ParallelOR((0 until DecodeWidth).map(i => !sbb_vec(i) && out_isTaken(i))).asBool) {
+      when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC)).asBool) {
         // To IDLE
         XSDebug("cof by other inst, State change: IDLE\n")
         flush()
