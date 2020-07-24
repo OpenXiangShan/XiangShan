@@ -69,7 +69,7 @@ class IFU extends XSModule with HasIFUConst
     val if1_pcUpdate = if1_fire || needflush
 
     bpu.io.in.pc.valid := if1_fire
-    bpu.io.in.pc.bits := Mux(io.loopPC.valid, io.loopPC.bits, if1_npc)
+    bpu.io.in.pc.bits := if1_npc
     bpu.io.redirectInfo := io.redirectInfo
 
     XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)

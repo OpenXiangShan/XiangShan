@@ -8,10 +8,8 @@ import xiangshan._
 class LoopBuffer extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
-    val btbTaken = Input(Bool())
     val in = Flipped(DecoupledIO(new FetchPacket))
     val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-    val loopPC = ValidIO(UInt(VAddrBits.W))
   })
 
   class LBufEntry extends XSBundle {
@@ -21,7 +19,7 @@ class LoopBuffer extends XSModule {
     val pnpc = UInt(VAddrBits.W)
     val hist = UInt(HistoryLength.W)
     val btbPredCtr = UInt(2.W)
-    val btbHitWay = Bool()
+    val btbHit = Bool()
     val tageMeta = new TageMeta
     val rasSp = UInt(log2Up(RasSize).W)
     val rasTopCtr = UInt(8.W)
@@ -95,11 +93,9 @@ class LoopBuffer extends XSModule {
   val tsbb_vec = (0 until DecodeWidth).map(i => io.out(i).fire && io.out(i).bits.pc === tsbbPC)
   val has_tsbb = ParallelOR(tsbb_vec).asBool()
   val tsbbIdx = OHToUInt(HighestBit(VecInit(tsbb_vec).asUInt, DecodeWidth).asUInt)
-  val tsbbTaken = Mux(LBstate === s_fill, out_isTaken(tsbbIdx), io.btbTaken)
+  val tsbbTaken = Mux(LBstate === s_fill, out_isTaken(tsbbIdx), true.B)
 
   val has_branch = ParallelOR((0 until DecodeWidth).map(i => io.out(i).fire && i.U > sbbIdx && !sbb_vec(i) && out_isTaken(i))).asBool
-  // val tsbbTaken = io.btbTaken
-  //  val tsbbTaken = lbuf(head_ptr + tsbbIdx).isTaken
 
   def flush() = {
     XSDebug("Loop Buffer Flushed.\n")
@@ -138,8 +134,6 @@ class LoopBuffer extends XSModule {
   /*---------------*/
   var deq_idx = WireInit(0.U(log2Up(DecodeWidth+2).W))
 
-  io.loopPC.valid := LBstate === s_active
-
   when(LBstate =/= s_active) {
     for(i <- 0 until DecodeWidth) {
     //   io.out(i).valid := !isEmpty(head_ptr + deq_idx, tail_ptr) && lbuf_valid(head_ptr + deq_idx)
@@ -152,7 +146,7 @@ class LoopBuffer extends XSModule {
         io.out(i).bits.pnpc := lbuf(head_ptr + deq_idx).pnpc
         io.out(i).bits.hist := lbuf(head_ptr + deq_idx).hist
         io.out(i).bits.btbPredCtr := lbuf(head_ptr + deq_idx).btbPredCtr
-        io.out(i).bits.btbHitWay := lbuf(head_ptr + deq_idx).btbHitWay
+        io.out(i).bits.btbHit := lbuf(head_ptr + deq_idx).btbHit
         io.out(i).bits.tageMeta := lbuf(head_ptr + deq_idx).tageMeta
         io.out(i).bits.rasSp := lbuf(head_ptr + deq_idx).rasSp
         io.out(i).bits.rasTopCtr := lbuf(head_ptr + deq_idx).rasTopCtr
@@ -168,8 +162,6 @@ class LoopBuffer extends XSModule {
     }
 
     head_ptr := head_ptr + deq_idx
-
-    io.loopPC.bits := DontCare
   }.otherwise {
     deq_idx = 0.U
     for(i <- 0 until DecodeWidth) {
@@ -182,7 +174,7 @@ class LoopBuffer extends XSModule {
         io.out(i).bits.pnpc := lbuf(loop_ptr + deq_idx).pnpc
         io.out(i).bits.hist := lbuf(loop_ptr + deq_idx).hist
         io.out(i).bits.btbPredCtr := lbuf(loop_ptr + deq_idx).btbPredCtr
-        io.out(i).bits.btbHitWay := lbuf(loop_ptr + deq_idx).btbHitWay
+        io.out(i).bits.btbHit := lbuf(loop_ptr + deq_idx).btbHit
         io.out(i).bits.tageMeta := lbuf(loop_ptr + deq_idx).tageMeta
         io.out(i).bits.rasSp := lbuf(loop_ptr + deq_idx).rasSp
         io.out(i).bits.rasTopCtr := lbuf(loop_ptr + deq_idx).rasTopCtr
@@ -204,7 +196,6 @@ class LoopBuffer extends XSModule {
     loop_ptr := next_loop_ptr
     //    XSDebug("deq_idx = %d\n", deq_idx)
     //    XSDebug("loop_ptr = %d\n", Mux(deq_idx === DecodeWidth.U, loop_str, loop_ptr + deq_idx))
-    io.loopPC.bits := lbuf(next_loop_ptr).pc
   }
 
   val offsetCounterWire = WireInit(offsetCounter + (PopCount((0 until DecodeWidth).map(io.out(_).fire())) << 1).asUInt)
@@ -226,7 +217,7 @@ class LoopBuffer extends XSModule {
       lbuf(tail_ptr + enq_idx).fetchOffset := (enq_idx<<2).asUInt
       lbuf(tail_ptr + enq_idx).hist := io.in.bits.hist(i)
       lbuf(tail_ptr + enq_idx).btbPredCtr := io.in.bits.predCtr(i)
-      lbuf(tail_ptr + enq_idx).btbHitWay := io.in.bits.btbHitWay
+      lbuf(tail_ptr + enq_idx).btbHit := io.in.bits.btbHit(i)
       lbuf(tail_ptr + enq_idx).tageMeta := io.in.bits.tageMeta(i)
       lbuf(tail_ptr + enq_idx).rasSp := io.in.bits.rasSp
       lbuf(tail_ptr + enq_idx).rasTopCtr := io.in.bits.rasTopCtr
@@ -297,7 +288,6 @@ class LoopBuffer extends XSModule {
       }
 
       // 非triggering sbb造成的cof
-      // when(ParallelOR((0 until DecodeWidth).map(i => io.out(i).valid && io.out(i).bits.pc =/= tsbbPC && isJal(io.out(i).bits.instr) && io.btbTaken)).asBool()) {
       when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC)).asBool) {
         // To IDLE
         XSDebug("cof by other inst, State change: IDLE\n")

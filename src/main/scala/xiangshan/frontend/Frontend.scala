@@ -21,10 +21,6 @@ class Frontend extends XSModule {
   fakeicache.io.in <> ifu.io.icacheReq
   ifu.io.icacheResp <> fakeicache.io.out
 
-  ifu.io.loopPC <> lbuffer.io.loopPC
-  // lbuffer.io.btbTaken := ifu.io.btbTaken
-  lbuffer.io.btbTaken := true.B
-
   lbuffer.io.in <> ifu.io.fetchPacket
   lbuffer.io.flush := needFlush
 
