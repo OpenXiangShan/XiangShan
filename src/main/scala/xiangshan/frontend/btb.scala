@@ -113,6 +113,19 @@ class BTB extends XSModule {
     dataRead(b) := btbData(b).io.r.resp.data(0)
   }
 
+  //----------------------------
+  val btbPred = List.fill(BtbBanks)(List.fill(BtbSize / BtbBanks)(RegInit(2.U(2.W))))
+  val RegRead = Wire(Vec(PredictWidth,UInt(2.W)))
+  RegRead := DontCare
+  for (b <- 0 until BtbBanks) {
+    for(i <- 0 until BtbBanks){
+      when(realRowLatch(b.U) === i.U){
+        RegRead(b.U) :=  btbPred(b)(i)
+      }
+    }
+  }
+
+  //----------------------------
   val baseBankLatch = btbAddr.getBank(io.in.pcLatch)
   // val isAlignedLatch = baseBankLatch === 0.U
   val baseTag = btbAddr.getTag(io.in.pcLatch)
@@ -130,8 +143,8 @@ class BTB extends XSModule {
   // not taken branches from a valid entry
   val notTakenBranches = Wire(Vec(BtbBanks, Bool()))
   for (b <- 0 until BtbBanks) {
-    predTakens(b) := bankHits(b) && (dataRead(b).btbType === BTBtype.J || dataRead(b).btbType === BTBtype.B && dataRead(b).pred(1).asBool)
-    notTakenBranches(b) := bankHits(b) && dataRead(b).btbType === BTBtype.B && !dataRead(b).pred(1).asBool
+    predTakens(b) := bankHits(b) && (dataRead(b).btbType === BTBtype.J || dataRead(b).btbType === BTBtype.B && RegRead(b.U)(1).asBool)//dataRead(b).pred(1).asBool)
+    notTakenBranches(b) := bankHits(b) && dataRead(b).btbType === BTBtype.B && !RegRead(b.U)(1).asBool//!dataRead(b).pred(1).asBool
   }
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
@@ -147,6 +160,8 @@ class BTB extends XSModule {
 
   // Update logic
   // 1 calculate new 2-bit saturated counter value
+  val updateReadReg = Wire(UInt(2.W))
+  updateReadReg := DontCare
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
     val oldSatTaken = old === ((1 << len)-1).U
     val oldSatNotTaken = old === 0.U
@@ -156,13 +171,23 @@ class BTB extends XSModule {
   }
 
   val u = io.update
-  val newCtr = Mux(!u.hit, "b10".U, satUpdate(u.oldCtr, 2, u.taken))
+  val newCtr = Mux(!u.hit, "b10".U, satUpdate(updateReadReg, 2, u.taken))
 
-  val updateOnSaturated = u.taken && u.oldCtr === "b11".U || !u.taken && u.oldCtr === "b00".U
+  val updateOnSaturated = u.taken && updateReadReg === "b11".U || !u.taken && updateReadReg === "b00".U
 
   // 2 write btb
   val updateBankIdx = btbAddr.getBank(u.pc)
   val updateRow = btbAddr.getBankIdx(u.pc)
+  //----------------------------
+  for (b <- 0 until BtbBanks) {
+    for(i <- 0 until BtbBanks){
+      when( updateRow === i.U && b.U === updateBankIdx ){
+         updateReadReg := btbPred(b)(i)
+      }
+    }
+  }
+
+  //----------------------------
   val btbMetaWrite = Wire(btbMetaEntry())
   btbMetaWrite.valid := true.B
   btbMetaWrite.tag := btbAddr.getTag(u.pc)
@@ -171,6 +196,7 @@ class BTB extends XSModule {
   btbDataWrite.pred := newCtr
   btbDataWrite.btbType := u.btbType
   btbDataWrite.isRVC := u.isRVC
+
 
   val isBr = u.btbType === BTBtype.B
   val isJ = u.btbType === BTBtype.J
@@ -181,7 +207,16 @@ class BTB extends XSModule {
 
   // do not update on saturated ctrs
   val btbWriteValid = io.redirectValid && !noNeedToUpdate
+  //----------------------------
+  for (b <- 0 until BtbBanks) {
+    for(i <- 0 until BtbBanks){
+      when( updateRow === i.U && b.U === updateBankIdx && btbWriteValid){
+          btbPred(b)(i) := newCtr
+      }
+    }
+  }
 
+  //----------------------------
   for (b <- 0 until BtbBanks) {
     btbMeta(b).io.w.req.valid := btbWriteValid && b.U === updateBankIdx
     btbMeta(b).io.w.req.bits.setIdx := updateRow
@@ -190,6 +225,7 @@ class BTB extends XSModule {
     btbData(b).io.w.req.bits.setIdx := updateRow
     btbData(b).io.w.req.bits.data := btbDataWrite
   }
+
 
   // io.out.hit := bankHits.reduce(_||_)
   io.out.taken := isTaken
@@ -226,6 +262,7 @@ class BTB extends XSModule {
     when (RegNext(rawBypassHit(b))) {
       metaRead(b) := RegNext(btbMetaWrite)
       dataRead(b) := RegNext(btbDataWrite)
+      dataRead(b).pred := RegNext(newCtr)
     }
   }
 
