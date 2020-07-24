@@ -59,7 +59,7 @@ EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
 EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
 EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
-EMU_CXXFLAGS  = -O3 -std=c++11 -static -g -Wall -I$(EMU_CSRC_DIR)
+EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 
@@ -70,6 +70,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
   --assert \
+  --stats-vars \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
   -I$(abspath $(BUILD_DIR)) \
@@ -96,7 +97,7 @@ $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
-	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
+	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" time $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
