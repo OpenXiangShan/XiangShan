@@ -44,6 +44,34 @@ trait MemoryOpConstants {
 }
 
 object MemoryOpConstants extends MemoryOpConstants {
+  def getMemoryOpName(cmd: UInt): String = {
+    val opNames = Map(
+      M_XRD -> "M_XRD",
+      M_XWR -> "M_XWR",
+      M_PFR -> "M_PFR",
+      M_PFW -> "M_PFW",
+      M_XA_SWAP -> "M_XA_SWAP",
+      M_FLUSH_ALL -> "M_FLUSH_ALL",
+      M_XLR -> "M_XLR",
+      M_XSC -> "M_XSC",
+      M_XA_ADD -> "M_XA_ADD",
+      M_XA_XOR -> "M_XA_XOR",
+      M_XA_OR -> "M_XA_OR",
+      M_XA_AND -> "M_XA_AND",
+      M_XA_MIN -> "M_XA_MIN",
+      M_XA_MAX -> "M_XA_MAX",
+      M_XA_MINU -> "M_XA_MINU",
+      M_XA_MAXU -> "M_XA_MAXU",
+      M_FLUSH -> "M_FLUSH",
+      M_PWR -> "M_PWR",
+      M_PRODUCE -> "M_PRODUCE",
+      M_CLEAN -> "M_CLEAN",
+      M_SFENCE -> "M_SFENCE",
+      M_WOK -> "M_WOK"
+    )
+    val opLitNames = opNames map {case (k, v) => (k.litValue.longValue, v)}
+    return opLitNames(cmd.litValue.longValue)
+  }
 }
 
 class MemBundle extends XSBundle

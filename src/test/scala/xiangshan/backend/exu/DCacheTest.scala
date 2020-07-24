@@ -34,12 +34,21 @@ case class Req(
   data: Long,
   mask: Long,
   meta: Long
-)
+) {
+  override def toString() : String = {
+    val cmd_name = MemoryOpConstants.getMemoryOpName(cmd)
+    return f"cmd: $cmd_name%s addr: $addr%x data: $data%x mask: $mask%x meta: $meta%d"
+  }
+}
 
 case class Resp(
   data: Long,
   meta: Long
-)
+) {
+  override def toString() : String = {
+    return f"data: $data%x meta: $meta%d"
+  }
+}
 
 class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
   behavior of "DCache"
@@ -89,7 +98,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         r.bits.mask.poke(req.mask.U)
         r.bits.meta.poke(req.meta.U)
         r.valid.poke(true.B)
-        println(s"clock: $global_clock channel: $channel req: $Req")
+        println(s"clock: $global_clock channel: $channel req: $req")
       }
 
       // send a bundle of reqs in the same cycle
@@ -123,7 +132,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         for (i <- 0 to 1) {
           val resp = c.io.in.resp(i)
           if (resp.valid.peek().litToBoolean) {
-            println(s"clock: $global_clock channel: $i resp: $Resp")
+            println(s"clock: $global_clock channel: $i resp: $resp")
             val original_req = all_requests(resp.bits.meta.peek().litValue.longValue)
             // needs to be replayed
             if (resp.bits.nack.peek().litToBoolean) {
@@ -148,7 +157,9 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
 
       // first, initialize every memory cell with random numbers
       for (i <- 0 to num_integers - 1) {
-        val randomNumber = r.nextLong
+        // only deal with unsigned numberss
+        // we can not cast negative numbers to UInts
+        val randomNumber = r.nextLong.abs
         val req = Req(CMD_WRITE, BASE_ADDR + i * INTEGER_SIZE, randomNumber, FULL_MASK, i)
         issue_queue.enqueue(Array[Req](req))
         all_requests += (i.toLong -> req)
