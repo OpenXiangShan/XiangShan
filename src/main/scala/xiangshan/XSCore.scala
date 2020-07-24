@@ -29,6 +29,7 @@ trait HasXSParameter {
   val PredictWidth = FetchWidth * 2
   val EnableBPU = true
   val EnableBPD = false // enable backing predictor(like Tage) in BPUStage3
+  val EnableRAS = false
   val HistoryLength = 64
   val BtbSize = 256
   // val BtbWays = 4
@@ -48,7 +49,7 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val NRReadPorts = 14
   val NRWritePorts = 8
-  val RoqSize = 32
+  val RoqSize = 128
   val InnerRoqIdxWidth = log2Up(RoqSize)
   val RoqIdxWidth = InnerRoqIdxWidth + 1
   val IntDqDeqWidth = 4
@@ -128,8 +129,8 @@ class XSCore(implicit p: XSConfig) extends XSModule {
 
   val dmemXbar = Module(new SimpleBusCrossbarNto1(3))
 
-  val backend = Module(new Backend)
   val front = Module(new Frontend)
+  val backend = Module(new Backend)
 
   front.io.backend <> backend.io.frontend
 

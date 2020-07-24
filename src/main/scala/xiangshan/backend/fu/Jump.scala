@@ -26,12 +26,13 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.brTarget := target // DontCare
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  io.out.bits.redirect.isRVC := isRVC
   io.out.bits.redirect.taken := true.B
   io.out.bits.redirect.hist := uop.cf.hist
   io.out.bits.redirect.tageMeta := uop.cf.tageMeta
-  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 2.U  //TODO: consider RVC
+  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 1.U  //TODO: consider RVC
   io.out.bits.redirect.btbPredCtr := uop.cf.btbPredCtr
-  io.out.bits.redirect.btbHitWay := uop.cf.btbHitWay
+  io.out.bits.redirect.btbHit := uop.cf.btbHit
   io.out.bits.redirect.rasSp := uop.cf.rasSp
   io.out.bits.redirect.rasTopCtr := uop.cf.rasTopCtr
   io.out.bits.redirect.isException := false.B

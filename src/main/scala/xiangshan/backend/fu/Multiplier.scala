@@ -48,7 +48,7 @@ trait HasPipelineReg { this: ArrayMultiplier =>
   }
 
   for(i <- 1 to latency){
-    when(flushVec(i) || rdyVec(i) && !validVec(i-1)){
+    when(flushVec(i-1) || rdyVec(i) && !validVec(i-1)){
       validVec(i) := false.B
     }.elsewhen(rdyVec(i-1) && validVec(i-1) && !flushVec(i-1)){
       validVec(i) := validVec(i-1)

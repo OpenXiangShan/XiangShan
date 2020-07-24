@@ -48,7 +48,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
     Mux(retiringStore, stqData(stqTail).src3, src3In),
     Mux(retiringStore, stqData(stqTail).func, funcIn)
   )
-  assert(!(retiringStore && !stqValid(stqTail)))
+  // assert(!(retiringStore && !stqValid(stqTail)))
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -116,7 +116,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   ))
 
   // pop store queue if insts have been commited and dmem req fired successfully
-  val storeFinish = retiringStore && state === s_partialLoad
+  val storeFinish = retiringStore && dmem.resp.fire()//state === s_partialLoad
   val stqDequeue = storeFinish || !stqValid(stqTail) && stqHead > 0.U
   when(stqDequeue){
     stqValid(stqTail) := false.B
@@ -127,9 +127,9 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   }
 
   // if store, add it to store queue
-  val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore && !io.redirect.valid
+  val stqEnqueue = validIn && isStoreIn && !stqFull && !retiringStore && !io.redirect.valid && state === s_idle
   when(stqEnqueue){
-    stqPtr(stqHead) := emptySlot
+    stqPtr(stqHead - stqDequeue) := emptySlot
     stqData(emptySlot).src1 := src1In
     stqData(emptySlot).src2 := src2In
     stqData(emptySlot).addr := src1In + src2In
@@ -144,12 +144,11 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   // have to say it seems better to rebuild FSM instead of using such ugly wrapper
   val needRetireStore = stqCommited > 0.U && stqValid(stqTail)
   when(
-    needRetireStore && !retiringStore && state === s_idle  && !io.in.valid ||
-    needRetireStore && !retiringStore && io.in.valid && isStoreIn
+    needRetireStore && !retiringStore && state === s_idle && (!io.in.valid || isStoreIn)
   ){
     retiringStore := true.B
   }
-  when(state === s_partialLoad && retiringStore){
+  when(dmem.resp.fire() && retiringStore){
     retiringStore := false.B
   }
 
@@ -184,7 +183,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   val expRedirect = io.redirect.valid && io.redirect.bits.isException
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
   for(i <- 0 until 8){
-    when((i.U >= stqCommited) && (expRedirect || brRedirect && stqData(stqPtr(i)).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(stqPtr(i)))){
+    when((i.U >= stqCommited && i.U < stqHead) && (expRedirect || brRedirect && stqData(stqPtr(i)).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(stqPtr(i)))){
       stqValid(stqPtr(i)) := false.B
     }
     XSDebug("sptrtable: id %d ptr %d valid  %d\n", i.U, stqPtr(i), stqValid(stqPtr(i)))

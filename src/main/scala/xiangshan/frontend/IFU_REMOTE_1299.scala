@@ -69,7 +69,7 @@ class IFU extends XSModule with HasIFUConst
     val if1_pcUpdate = if1_fire || needflush
 
     bpu.io.in.pc.valid := if1_fire
-    bpu.io.in.pc.bits := Mux(io.loopPC.valid, io.loopPC.bits, if1_npc)
+    bpu.io.in.pc.bits := if1_npc
     bpu.io.redirectInfo := io.redirectInfo
 
     XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
@@ -260,19 +260,13 @@ class IFU extends XSModule with HasIFUConst
         io.fetchPacket.bits.pnpc(i))
     }
     io.fetchPacket.bits.hist := bpu.io.tageOut.bits.hist
+    // io.fetchPacket.bits.btbVictimWay := bpu.io.tageOut.bits.btbVictimWay
     io.fetchPacket.bits.predCtr := bpu.io.tageOut.bits.predCtr
     io.fetchPacket.bits.btbHit := bpu.io.tageOut.bits.btbHit
     io.fetchPacket.bits.tageMeta := bpu.io.tageOut.bits.tageMeta
     io.fetchPacket.bits.rasSp := bpu.io.tageOut.bits.rasSp
     io.fetchPacket.bits.rasTopCtr := bpu.io.tageOut.bits.rasTopCtr
     bpu.io.tageOut.ready := io.fetchPacket.ready
-
-    //branchInfo Vector
-    val branchVec = Mux(if4_tage_taken,Fill(FetchWidth, 1.U(1.W)) & if4_tage_insMask.asUInt,Mux(if4_btb_taken,Fill(FetchWidth, 1.U(1.W)) & if4_btb_insMask.asUInt,0.U))
-    XSDebug(io.fetchPacket.fire(),"[IF4-branch-Vec] %b\n",branchVec.asUInt)
-    for(i <- 0 until FetchWidth){
-      io.fetchPacket.bits.branchInfo(i) := (if4_btb_taken || if4_tage_taken) && Reverse(UIntToOH(PriorityEncoder(Reverse(branchVec))))(i).asBool
-    }
 
     //to BPU
     bpu.io.predecode.valid := io.icacheResp.fire() && if4_valid

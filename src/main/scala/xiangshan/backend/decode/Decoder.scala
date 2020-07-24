@@ -19,7 +19,6 @@ class Decoder extends XSModule with HasInstrType {
   io.out := DontCare // FIXME: remove me!!!
   io.out.cf := io.in
 
-  val hasIntr = Wire(Bool())
   val instr: UInt = io.in.instr
   val decodeList = ListLookup(instr, Instructions.DecodeDefault, Instructions.DecodeTable)
   val instrType :: fuType :: fuOpType :: Nil = decodeList
@@ -27,7 +26,11 @@ class Decoder extends XSModule with HasInstrType {
   // todo: remove this when fetch stage can decide if an instr is br/jmp
   io.out.cf.isBr := (instrType === InstrB ||
                     (fuOpType === JumpOpType.jal && instrType === InstrJ && fuType === FuType.jmp) ||
-                    (fuOpType === JumpOpType.jalr && instrType === InstrI && fuType === FuType.jmp))
+                    (fuOpType === JumpOpType.jalr && instrType === InstrI && fuType === FuType.jmp) ||
+                    (fuOpType === CSROpType.jmp && instrType === InstrI && fuType === FuType.csr))
+//  val isRVC = instr(1, 0) =/= "b11".U
+//  val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
+//    ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable)
 
   io.out.ctrl.fuOpType := fuOpType
   io.out.ctrl.fuType := fuType
@@ -83,17 +86,11 @@ class Decoder extends XSModule with HasInstrType {
   io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type
 
-  //FIXME: move it to ROB
-  val intrVec = WireInit(0.U(12.W))
-  // BoringUtils.addSink(intrVec, "intrVecIDU")
-  io.out.cf.intrVec.zip(intrVec.asBools).map{ case(x, y) => x := y }
-  hasIntr := intrVec.orR
-
   val vmEnable = WireInit(false.B)
   BoringUtils.addSink(vmEnable, "DTLBENABLE")
 
   io.out.cf.exceptionVec.map(_ := false.B)
-  io.out.cf.exceptionVec(illegalInstr) := (instrType === InstrN && !hasIntr)
+  io.out.cf.exceptionVec(illegalInstr) := instrType === InstrN
   io.out.cf.exceptionVec(instrPageFault) := io.in.exceptionVec(instrPageFault)
   io.out.cf.exceptionVec(instrAccessFault) := io.in.pc(VAddrBits - 1, PAddrBits).orR && !vmEnable
 
