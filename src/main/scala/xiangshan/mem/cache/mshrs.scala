@@ -21,7 +21,7 @@ class DCacheReqInternal extends DCacheReq
   val way_en    = UInt(nWays.W)
 
   // Used in the MSHRs
-  val sdq_id    = UInt(log2Ceil(cfg.nSDQ).W)
+  val sdq_id    = UInt(log2Up(cfg.nSDQ).W)
 }
 
 
@@ -118,7 +118,7 @@ class MSHR extends DCacheModule
 
   // 这个是对grant的ack
   val grantack = Reg(Valid(new TLBundleE(cfg.busParams)))
-  val refill_ctr  = Reg(UInt(log2Ceil(cacheDataBeats).W))
+  val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
   // grant分为只给权限，不给数据的grant，和又给权限，又给数据的grant
 
   io.idx.valid := state =/= s_invalid
@@ -128,13 +128,29 @@ class MSHR extends DCacheModule
   io.tag.bits := req_tag
   io.way.bits := req.way_en
 
+  // 给输出信号赋值
   // 所有信号默认全部拉低
-  io.meta_write.valid    := false.B
   io.req_pri_rdy         := false.B
+
   io.mem_acquire.valid   := false.B
+  io.mem_acquire.bits    := DontCare
+
+  io.mem_grant.ready     := false.B
+
+  io.mem_finish.valid    := false.B
+  io.mem_finish.bits     := DontCare
+
   io.refill.valid        := false.B
-  io.replay.valid        := false.B
+  io.refill.bits         := DontCare
+
+  io.meta_write.valid    := false.B
+  io.meta_write.bits     := DontCare
+
   io.wb_req.valid        := false.B
+  io.wb_req.bits         := DontCare
+
+  io.replay.valid        := false.B
+  io.replay.bits         := DontCare
 
   def handle_pri_req(old_state: UInt): UInt = {
     // 收到primary请求后，把原来的一些状态变量给重新初始化
@@ -248,7 +264,7 @@ class MSHR extends DCacheModule
       params = cfg.busParams,
       fromSource      = io.id,
       toAddress       = Cat(req_tag, req_idx) << blockOffBits,
-      lgSize          = (log2Ceil(cfg.blockBytes)).U,
+      lgSize          = (log2Up(cfg.blockBytes)).U,
       growPermissions = grow_param)._2
     when (io.mem_acquire.fire()) {
       // 请求发出，等待response
@@ -328,7 +344,7 @@ class MSHR extends DCacheModule
       assert(is_hit, "We still don't have permissions for this store")
       new_coh := coh_on_hit
     }
-    when (rpq.empty) {
+    when (rpq.io.count === 0.U) {
       state := s_meta_write_req
     }
   }
@@ -538,7 +554,7 @@ class MSHRFile extends DCacheModule
   val pri_val = req.valid && sdq_rdy && cacheable && !idx_match(req_idx)
   val mshrs = (0 until cfg.nMSHRs) map { i =>
     val mshr = Module(new MSHR)
-    mshr.io.id := i.U(log2Ceil(cfg.nMSHRs).W)
+    mshr.io.id := i.U(log2Up(cfg.nMSHRs).W)
 
     for (w <- 0 until memWidth) {
       idx_matches(w)(i) := mshr.io.idx.valid && mshr.io.idx.bits === io.req(w).bits.addr(untagBits-1,blockOffBits)

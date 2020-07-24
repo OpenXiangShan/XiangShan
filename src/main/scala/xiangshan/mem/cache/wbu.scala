@@ -19,7 +19,7 @@ class WritebackReq extends DCacheBundle {
 }
 
 class WritebackUnit extends DCacheModule {
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val req = Flipped(Decoupled(new WritebackReq()))
     // 这个是啥？
     val resp = Output(Bool())
@@ -28,8 +28,8 @@ class WritebackUnit extends DCacheModule {
     val data_req = Decoupled(new L1DataReadReq)
     val data_resp = Input(UInt(encRowBits.W))
     val release = Decoupled(new TLBundleC(cfg.busParams))
-    val mem_grant = Decoupled(new TLBundleD(cfg.busParams))
-  }
+    val mem_grant = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
+  })
 
   // 同时处理的request只能有一个
   val req = Reg(new WritebackReq())
@@ -145,4 +145,6 @@ class WritebackUnit extends DCacheModule {
       state := s_invalid
     }
   }
+  io.mem_grant.ready := true.B
+  io.mem_grant.bits := DontCare
 }

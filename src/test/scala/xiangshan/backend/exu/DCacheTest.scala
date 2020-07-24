@@ -70,6 +70,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
 
       // 之前的请求是否在等待req ready？
       var req_waiting:Boolean = false
+      var global_clock:Long = 0
 
 
       def init_test = {
@@ -88,6 +89,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         r.bits.mask.poke(req.mask.U)
         r.bits.meta.poke(req.meta.U)
         r.valid.poke(true.B)
+        println(s"clock: $global_clock channel: $channel req: $Req")
       }
 
       // send a bundle of reqs in the same cycle
@@ -121,6 +123,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         for (i <- 0 to 1) {
           val resp = c.io.in.resp(i)
           if (resp.valid.peek().litToBoolean) {
+            println(s"clock: $global_clock channel: $i resp: $Resp")
             val original_req = all_requests(resp.bits.meta.peek().litValue.longValue)
             // needs to be replayed
             if (resp.bits.nack.peek().litToBoolean) {
@@ -139,6 +142,8 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
 
       // ----------------------------------------
       // store test
+      println(s"store test")
+
       init_test
 
       // first, initialize every memory cell with random numbers
@@ -154,11 +159,14 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         send_req
         handle_resp
         c.clock.step()
+        global_clock += 1
       }
 
       // read out every integer
       // ----------------------------------------
       // read test
+      println(s"load test")//Hello,James
+
       init_test
 
       // first, initialize every memory cell with random numbers
@@ -172,6 +180,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         send_req
         handle_resp
         c.clock.step()
+        global_clock += 1
       }
     }
   }

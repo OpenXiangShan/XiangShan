@@ -55,14 +55,14 @@ class AMOALU(operandBits: Int) extends Module
   val minXLen = 32
   val widths = (0 to log2Ceil(operandBits / minXLen)).map(minXLen << _)
 
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val mask = Input(UInt((operandBits/8).W))
     val cmd = Input(Bits(M_SZ.W))
     val lhs = Input(Bits(operandBits.W))
     val rhs = Input(Bits(operandBits.W))
     val out = Output(Bits(operandBits.W))
     val out_unmasked = Output(Bits(operandBits.W))
-  }
+  })
 
   val max = io.cmd === M_XA_MAX || io.cmd === M_XA_MAXU
   val min = io.cmd === M_XA_MIN || io.cmd === M_XA_MINU

@@ -17,6 +17,8 @@ class NaiveTLToAXI4(params: TLParameters) extends Module
     val out = new AXI4 
   })
 
+  io := DontCare
+
   val debug = true
 
   val in = io.in
@@ -71,7 +73,7 @@ class NaiveTLToAXI4(params: TLParameters) extends Module
   def log_plain(fmt: String, args: Bits*) = log_raw("", fmt, "", args:_*)
 
   when (in.a.fire()) {
-    log("in.a opcode %x, dsid %x, param %x, size %x, source %x, address %x, mask %x, data %x",
+    log("in.a opcode %x, param %x, size %x, source %x, address %x, mask %x, data %x",
       in.a.bits.opcode,
       in.a.bits.param,
       in.a.bits.size,

@@ -115,11 +115,11 @@ class L1DataWriteReq extends L1DataReadReq {
 
 class L1MetadataArray[T <: L1Metadata](onReset: () => T) extends DCacheModule {
   val rstVal = onReset()
-  val io = new Bundle {
+  val io = IO(new Bundle {
     val read = Flipped(Decoupled(new L1MetaReadReq))
     val write = Flipped(Decoupled(new L1MetaWriteReq))
     val resp = Output(Vec(nWays, rstVal.cloneType))
-  }
+  })
   val rst_cnt = RegInit(0.U(log2Up(nSets+1).W))
   val rst = rst_cnt < nSets.U
   val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
@@ -260,8 +260,11 @@ class DCache extends DCacheModule
 {
   val io = IO(new DCacheBundle{
     val lsu   = Flipped(new LSUDMemIO)
-    val bus = Flipped(new TLCached(cfg.busParams))
+    val bus = new TLCached(cfg.busParams)
   })
+
+  io.lsu := DontCare
+  io.bus := DontCare
 
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until memWidth).map(f))
 
@@ -275,6 +278,10 @@ class DCache extends DCacheModule
   val wb = Module(new WritebackUnit)
   // val prober = Module(new ProbeUnit)
   val mshrs = Module(new MSHRFile)
+
+  wb.io := DontCare
+  mshrs.io := DontCare
+
   // mshrs接受一个clear all信号，用来把mshr清空
   // 这个是哈？
   // mshr为啥要知道rob index呢？
@@ -288,6 +295,8 @@ class DCache extends DCacheModule
   // 4 goes to pipeline, 5 goes to prefetcher
 
   metaReadArb.io.in := DontCare
+  metaWriteArb.io.in := DontCare
+
   for (w <- 0 until memWidth) {
     meta(w).io.write.valid := metaWriteArb.io.out.fire()
     meta(w).io.write.bits  := metaWriteArb.io.out.bits
@@ -305,6 +314,7 @@ class DCache extends DCacheModule
   val dataReadArb = Module(new Arbiter(new DCacheDataReadReq, 3))
   // 0 goes to MSHR replays, 1 goes to wb, 2 goes to pipeline
   dataReadArb.io.in := DontCare
+  dataWriteArb.io.in := DontCare
 
   for (w <- 0 until memWidth) {
     data.io.read(w).valid := dataReadArb.io.out.bits.valid(w) && dataReadArb.io.out.valid
@@ -458,7 +468,7 @@ class DCache extends DCacheModule
   // 这边要允许branch被kill
   // 这边允许请求被branch kill是怎么处理的呢？
   // 这个又是啥？
-  val s2_store_failed = Wire(Bool())
+  // val s2_store_failed = Wire(Bool())
   // 这边的exception是啥？
   // 这边不应该出任何exception吧？
   val s1_valid = widthMap(w => RegNext(s0_valid(w), init=false.B))
@@ -544,6 +554,7 @@ class DCache extends DCacheModule
 
   // Mux between cache responses and uncache responses
   val cache_resp = Wire(Vec(memWidth, Valid(new DCacheResp)))
+  cache_resp := DontCare
   for (w <- 0 until memWidth) {
     cache_resp(w).valid         := s2_valid(w) && s2_send_resp(w)
     cache_resp(w).bits.data     := s2_data_word(w)
@@ -554,7 +565,7 @@ class DCache extends DCacheModule
   // 返回结果
   for (w <- 0 until memWidth) {
     io.lsu.resp(w).valid := resp(w).valid
-    io.lsu.resp(w).bits.data := resp(w).bits
+    io.lsu.resp(w).bits.data := 0.U
   }
 
   // Store/amo hits
@@ -595,7 +606,7 @@ class DCache extends DCacheModule
 
   dataWriteArb.io.in(0).valid       := s3_valid
   dataWriteArb.io.in(0).bits.addr   := s3_req.addr
-  dataWriteArb.io.in(0).bits.wmask  := UIntToOH(s3_req.addr(rowOffBits-1,offsetlsb))
+  dataWriteArb.io.in(0).bits.wmask  := 0.U
   dataWriteArb.io.in(0).bits.data   := Fill(rowWords, s3_req.data)
   dataWriteArb.io.in(0).bits.way_en := s3_way
 }
