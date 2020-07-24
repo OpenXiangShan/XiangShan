@@ -213,12 +213,12 @@ class LoopBuffer extends XSModule {
     for(i <- 0 until FetchWidth) {
       lbuf(tail_ptr + enq_idx).inst := io.in.bits.instrs(i)
       lbuf(tail_ptr + enq_idx).pc := io.in.bits.pc + (enq_idx << 2).asUInt
-      lbuf(tail_ptr + enq_idx).pnpc := io.in.bits.pnpc(i)
+      lbuf(tail_ptr + enq_idx).pnpc := io.in.bits.pnpc(i<<1)
       lbuf(tail_ptr + enq_idx).fetchOffset := (enq_idx<<2).asUInt
-      lbuf(tail_ptr + enq_idx).hist := io.in.bits.hist(i)
-      lbuf(tail_ptr + enq_idx).btbPredCtr := io.in.bits.predCtr(i)
-      lbuf(tail_ptr + enq_idx).btbHit := io.in.bits.btbHit(i)
-      lbuf(tail_ptr + enq_idx).tageMeta := io.in.bits.tageMeta(i)
+      lbuf(tail_ptr + enq_idx).hist := io.in.bits.hist(i<<1)
+      lbuf(tail_ptr + enq_idx).btbPredCtr := io.in.bits.predCtr(i<<1)
+      lbuf(tail_ptr + enq_idx).btbHit := io.in.bits.btbHit(i<<1)
+      lbuf(tail_ptr + enq_idx).tageMeta := io.in.bits.tageMeta(i<<1)
       lbuf(tail_ptr + enq_idx).rasSp := io.in.bits.rasSp
       lbuf(tail_ptr + enq_idx).rasTopCtr := io.in.bits.rasTopCtr
 
@@ -320,7 +320,7 @@ class LoopBuffer extends XSModule {
 // when((0 until DecodeWidth).map(i => io.out(i).ready).reduce(_||_)){
     XSDebug("Deque:\n")
     for(i <- 0 until DecodeWidth){
-        XSDebug(p"${Hexadecimal(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready} t=${out_isTaken(i)}\n")
+        XSDebug(p"${Hexadecimal(io.out(i).bits.instr)}  pnpc=${Hexadecimal(io.out(i).bits.pnpc)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready} t=${out_isTaken(i)}\n")
     }
 // }
 

@@ -230,7 +230,7 @@ class Brq extends XSModule {
     XSDebug(
       debug_normal_mode,
       p"enq v:${io.enqReqs(i).valid} rdy:${io.enqReqs(i).ready} pc:${Hexadecimal(io.enqReqs(i).bits.cf.pc)}" +
-        p" brTag:${io.brTags(i)}\n"
+        p"pnpc:${Hexadecimal(io.enqReqs(i).bits.cf.pnpc)} brTag:${io.brTags(i)}\n"
     )
   }
 

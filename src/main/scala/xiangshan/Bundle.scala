@@ -12,7 +12,7 @@ class FetchPacket extends XSBundle {
   val mask = UInt((FetchWidth*2).W)
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
   val pnpc = Vec(FetchWidth*2, UInt(VAddrBits.W))
-  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
+  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W)) // TODO: LoopBuffer can't handle RVC
   // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val predCtr = Vec(FetchWidth*2, UInt(2.W))
   val btbHit = Vec(FetchWidth*2, Bool())
