@@ -41,6 +41,7 @@ public:
     fwrite(buf, size, 1, fp);
     fclose(fp);
     size = 0;
+    printf("save snapshot to %s...\n", m_filename.c_str());
   }
 };
 
@@ -93,5 +94,6 @@ void Emulator::snapshot_load(const char *filename) {
 void Emulator::snapshot_finalize() {
   snapshot_slot[0].save();
   snapshot_slot[1].save();
+  printf("Please remove unused snapshots manually\n");
 }
 
