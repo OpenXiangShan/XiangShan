@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
-import xiangshan.mem.{DCacheResp, LSUDMemIO}
+import xiangshan.mem.{DCacheReq, DCacheResp, LSUDMemIO}
 import bus.tilelink._
 import _root_.utils.{Code, RandomReplacement, Transpose}
 
@@ -263,39 +263,35 @@ class DCache extends DCacheModule
     val bus = new TLCached(cfg.busParams)
   })
 
-  io.lsu := DontCare
-  io.bus := DontCare
-
   def widthMap[T <: Data](f: Int => T) = VecInit((0 until memWidth).map(f))
 
-  // 首先就是流水线上有若干种不同的处理状态，分别是replay，probe，wb之类的
-  // 但是里面有些状态我是不太能理解的。
-  // 我感觉只有lsu和replay需要上流水线其他的都不需要吧？
-  // 另外，lsu和replay上流水线，直接一样处理就好了？也不需要区分吧？
-  // 可能还是需要区分的，因为replay时只有一个？
-  // val t_replay :: t_probe :: t_wb :: t_mshr_meta_read :: t_lsu :: t_prefetch :: Nil = Enum(6)
-
+  // ------------
+  // MSHR, Prober, WBU
   val wb = Module(new WritebackUnit)
   // val prober = Module(new ProbeUnit)
   val mshrs = Module(new MSHRFile)
 
-  wb.io := DontCare
-  mshrs.io := DontCare
 
-  // mshrs接受一个clear all信号，用来把mshr清空
-  // 这个是哈？
-  // mshr为啥要知道rob index呢？
-  // tags
+  // ------------
+  // Meta array
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
   val meta = Seq.fill(memWidth) { Module(new L1MetadataArray(onReset _)) }
-  val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, 2))
+
   // 0 goes to MSHR refills, 1 goes to prober
-  val metaReadArb = Module(new Arbiter(new DCacheMetaReadReq, 6))
+  val MetaWritePortCount = 2
+  val MSHRMetaWritePort = 0
+  val ProberMetaWritePort = 1
+
+  val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, MetaWritePortCount))
+
   // 0 goes to MSHR replays, 1 goes to prober, 2 goes to wb, 3 goes to MSHR meta read,
   // 4 goes to pipeline, 5 goes to prefetcher
+  val MetaReadPortCount = 3
+  val ReplayMetaReadPort = 0
+  val ProberMetaReadPort = 1
+  val PipelineMetaReadPort = 2
 
-  metaReadArb.io.in := DontCare
-  metaWriteArb.io.in := DontCare
+  val metaReadArb = Module(new Arbiter(new DCacheMetaReadReq, MetaReadPortCount))
 
   for (w <- 0 until memWidth) {
     meta(w).io.write.valid := metaWriteArb.io.out.fire()
@@ -307,14 +303,25 @@ class DCache extends DCacheModule
   metaReadArb.io.out.ready  := meta.map(_.io.read.ready).reduce(_||_)
   metaWriteArb.io.out.ready := meta.map(_.io.write.ready).reduce(_||_)
 
-  // data
+
+  // ------------
+  // Data array
   val data = Module(if (numDCacheBanks == 1) new DuplicatedDataArray else new BankedDataArray)
-  val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, 2))
+
   // 0 goes to pipeline, 1 goes to MSHR refills
-  val dataReadArb = Module(new Arbiter(new DCacheDataReadReq, 3))
+  val DataWritePortCount = 2
+  val PipelineDataWritePort = 0
+  val RefillDataWritePort = 1
+
+  val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
+
   // 0 goes to MSHR replays, 1 goes to wb, 2 goes to pipeline
-  dataReadArb.io.in := DontCare
-  dataWriteArb.io.in := DontCare
+  val DataReadPortCount = 3
+  val ReplayDataReadPort = 0
+  val WritebackDataReadPort = 1
+  val PipelineDataReadPort = 2
+
+  val dataReadArb = Module(new Arbiter(new DCacheDataReadReq, DataReadPortCount))
 
   for (w <- 0 until memWidth) {
     data.io.read(w).valid := dataReadArb.io.out.bits.valid(w) && dataReadArb.io.out.valid
@@ -326,201 +333,142 @@ class DCache extends DCacheModule
   data.io.write.bits  := dataWriteArb.io.out.bits
   dataWriteArb.io.out.ready := true.B
 
+
+  // assign default value to signals
+  /*
+  io.lsu.req.ready := false.B
+  io.lsu.resp(0).vai
+  io.bus := DontCare
+
+  wb.io := DontCare
+  mshrs.io := DontCare
+  metaReadArb.io.in := DontCare
+  metaWriteArb.io.in := DontCare
+
+  dataReadArb.io.in := DontCare
+  dataWriteArb.io.in := DontCare
+  */
+
+
   // ------------
   // New requests
+  val t_replay :: t_lsu :: Nil = Enum(2)
 
-  io.lsu.req.ready := metaReadArb.io.in(4).ready && dataReadArb.io.in(2).ready
-  metaReadArb.io.in(4).valid := io.lsu.req.valid
-  dataReadArb.io.in(2).valid := io.lsu.req.valid
+  // LSU requests
+  io.lsu.req.ready := metaReadArb.io.in(PipelineMetaReadPort).ready && dataReadArb.io.in(PipelineDataReadPort).ready
+  metaReadArb.io.in(PipelineMetaReadPort).valid := io.lsu.req.valid
+  dataReadArb.io.in(PipelineDataReadPort).valid := io.lsu.req.valid
   for (w <- 0 until memWidth) {
     // Tag read for new requests
-    metaReadArb.io.in(4).bits.req(w).idx    := io.lsu.req.bits(w).bits.addr >> blockOffBits
-    metaReadArb.io.in(4).bits.req(w).way_en := DontCare
-    metaReadArb.io.in(4).bits.req(w).tag    := DontCare
+    metaReadArb.io.in(PipelineMetaReadPort).bits.req(w).idx    := io.lsu.req.bits(w).bits.addr >> blockOffBits
+    metaReadArb.io.in(PipelineMetaReadPort).bits.req(w).way_en := DontCare
+    metaReadArb.io.in(PipelineMetaReadPort).bits.req(w).tag    := DontCare
     // Data read for new requests
-    dataReadArb.io.in(2).bits.valid(w)      := io.lsu.req.bits(w).valid
-    dataReadArb.io.in(2).bits.req(w).addr   := io.lsu.req.bits(w).bits.addr
-    // way en到底是啥？
-    dataReadArb.io.in(2).bits.req(w).way_en := ~0.U(nWays.W)
+    dataReadArb.io.in(PipelineDataReadPort).bits.valid(w)      := io.lsu.req.bits(w).valid
+    dataReadArb.io.in(PipelineDataReadPort).bits.req(w).addr   := io.lsu.req.bits(w).bits.addr
+    dataReadArb.io.in(PipelineDataReadPort).bits.req(w).way_en := ~0.U(nWays.W)
   }
 
-  // 最最一开始的部分是抢metadata以及data的部分，应该是主要的同步点
   // ------------
   // MSHR Replays
-  /*
   val replay_req = Wire(Vec(memWidth, new DCacheReq))
-  replay_req               := DontCare
-  replay_req(0).uop        := mshrs.io.replay.bits.uop
-  replay_req(0).addr       := mshrs.io.replay.bits.addr
-  replay_req(0).data       := mshrs.io.replay.bits.data
-  replay_req(0).is_hella   := mshrs.io.replay.bits.is_hella
-  // mshr也是等meta以及data就绪了就开始replay？
-  mshrs.io.replay.ready    := metaReadArb.io.in(0).ready && dataReadArb.io.in(0).ready
+  replay_req           := DontCare
+  replay_req(0).cmd    := mshrs.io.replay.bits.cmd
+  replay_req(0).addr   := mshrs.io.replay.bits.addr
+  replay_req(0).data   := mshrs.io.replay.bits.data
+  replay_req(0).mask   := mshrs.io.replay.bits.mask
+  replay_req(0).meta   := mshrs.io.replay.bits.meta
+
+  mshrs.io.replay.ready    := metaReadArb.io.in(ReplayMetaReadPort).ready && dataReadArb.io.in(ReplayDataReadPort).ready
   // Tag read for MSHR replays
   // We don't actually need to read the metadata, for replays we already know our way
-  metaReadArb.io.in(0).valid              := mshrs.io.replay.valid
-  metaReadArb.io.in(0).bits.req(0).idx    := mshrs.io.replay.bits.addr >> blockOffBits
-  metaReadArb.io.in(0).bits.req(0).way_en := DontCare
-  metaReadArb.io.in(0).bits.req(0).tag    := DontCare
+  metaReadArb.io.in(ReplayMetaReadPort).valid              := mshrs.io.replay.valid
+  metaReadArb.io.in(ReplayMetaReadPort).bits.req(0).idx    := mshrs.io.replay.bits.addr >> blockOffBits
+  metaReadArb.io.in(ReplayMetaReadPort).bits.req(0).way_en := DontCare
+  metaReadArb.io.in(ReplayMetaReadPort).bits.req(0).tag    := DontCare
+  metaReadArb.io.in(ReplayMetaReadPort).bits.req(1)        := DontCare
+
   // Data read for MSHR replays
-  dataReadArb.io.in(0).valid              := mshrs.io.replay.valid
-  dataReadArb.io.in(0).bits.req(0).addr   := mshrs.io.replay.bits.addr
-  dataReadArb.io.in(0).bits.req(0).way_en := mshrs.io.replay.bits.way_en
-  dataReadArb.io.in(0).bits.valid         := widthMap(w => (w == 0).B)
-  */
-
-  // -----------
-  // MSHR Meta read
-  /*
-  val mshr_read_req = Wire(Vec(memWidth, new DCacheReq))
-  mshr_read_req             := DontCare
-  mshr_read_req(0).uop      := NullMicroOp
-  mshr_read_req(0).addr     := Cat(mshrs.io.meta_read.bits.tag, mshrs.io.meta_read.bits.idx) << blockOffBits
-  mshr_read_req(0).data     := DontCare
-  mshr_read_req(0).is_hella := false.B
-  metaReadArb.io.in(3).valid       := mshrs.io.meta_read.valid
-  metaReadArb.io.in(3).bits.req(0) := mshrs.io.meta_read.bits
-  mshrs.io.meta_read.ready         := metaReadArb.io.in(3).ready
-  */
-
-
+  dataReadArb.io.in(ReplayDataReadPort).valid              := mshrs.io.replay.valid
+  dataReadArb.io.in(ReplayDataReadPort).bits.valid         := widthMap(w => (w == 0).B)
+  dataReadArb.io.in(ReplayDataReadPort).bits.req(0).addr   := mshrs.io.replay.bits.addr
+  dataReadArb.io.in(ReplayDataReadPort).bits.req(0).way_en := mshrs.io.replay.bits.way_en
+  dataReadArb.io.in(ReplayDataReadPort).bits.req(1)        := DontCare
 
   // -----------
   // Write-backs
-  /*
-  val wb_fire = wb.io.meta_read.fire() && wb.io.data_req.fire()
-  val wb_req = Wire(Vec(memWidth, new DCacheReq))
-  wb_req             := DontCare
-  wb_req(0).uop      := NullMicroOp
-  wb_req(0).addr     := Cat(wb.io.meta_read.bits.tag, wb.io.data_req.bits.addr)
-  wb_req(0).data     := DontCare
-  wb_req(0).is_hella := false.B
-  // Couple the two decoupled interfaces of the WBUnit's meta_read and data_read
-  // Tag read for write-back
-  metaReadArb.io.in(2).valid        := wb.io.meta_read.valid
-  metaReadArb.io.in(2).bits.req(0)  := wb.io.meta_read.bits
-  wb.io.meta_read.ready := metaReadArb.io.in(2).ready && dataReadArb.io.in(1).ready
   // Data read for write-back
-  dataReadArb.io.in(1).valid        := wb.io.data_req.valid
-  dataReadArb.io.in(1).bits.req(0)  := wb.io.data_req.bits
-  dataReadArb.io.in(1).bits.valid   := widthMap(w => (w == 0).B)
-  wb.io.data_req.ready  := metaReadArb.io.in(2).ready && dataReadArb.io.in(1).ready
-  assert(!(wb.io.meta_read.fire() ^ wb.io.data_req.fire()))
-  */
+  dataReadArb.io.in(WritebackDataReadPort).valid        := wb.io.data_req.valid
+  dataReadArb.io.in(WritebackDataReadPort).bits.valid   := widthMap(w => (w == 0).B)
+  dataReadArb.io.in(WritebackDataReadPort).bits.req(0)  := wb.io.data_req.bits
+  dataReadArb.io.in(WritebackDataReadPort).bits.req(1)  := DontCare
+  wb.io.data_req.ready  := dataReadArb.io.in(WritebackDataReadPort).ready
+
 
   // -------
-  // Prober
-  /*
-  val prober_fire  = prober.io.meta_read.fire()
-  val prober_req   = Wire(Vec(memWidth, new DCacheReq))
-  prober_req             := DontCare
-  prober_req(0).uop      := NullMicroOp
-  prober_req(0).addr     := Cat(prober.io.meta_read.bits.tag, prober.io.meta_read.bits.idx) << blockOffBits
-  prober_req(0).data     := DontCare
-  prober_req(0).is_hella := false.B
-  // Tag read for prober
-  metaReadArb.io.in(1).valid       := prober.io.meta_read.valid
-  metaReadArb.io.in(1).bits.req(0) := prober.io.meta_read.bits
-  prober.io.meta_read.ready := metaReadArb.io.in(1).ready
-  // Prober does not need to read data array
-  */
+  // Pipeline
 
-  // -------
-  // Prefetcher
-  /*
-  val prefetch_fire = mshrs.io.prefetch.fire()
-  val prefetch_req  = Wire(Vec(memWidth, new DCacheReq))
-  prefetch_req    := DontCare
-  prefetch_req(0) := mshrs.io.prefetch.bits
-  // Tag read for prefetch
-  metaReadArb.io.in(5).valid              := mshrs.io.prefetch.valid
-  metaReadArb.io.in(5).bits.req(0).idx    := mshrs.io.prefetch.bits.addr >> blockOffBits
-  metaReadArb.io.in(5).bits.req(0).way_en := DontCare
-  metaReadArb.io.in(5).bits.req(0).tag    := DontCare
-  mshrs.io.prefetch.ready := metaReadArb.io.in(5).ready
-  // Prefetch does not need to read data array
-  */
-
-  // 这边主流水线是多个模块在竞争，谁先抢到了，谁就上线
-  // MSHR以及其他的都只用port 0
-  // MSHR read req和replay req怎么用到了同一个口？
-  // 可能他们是都需要占用一段路，然后重合了？
-  // 我总感觉这的一系列mux，其实就是暗示了优先级啊？
-  // 问题：它们的fire是怎么排序的呢？
+  // stage 0
   val s0_valid = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.valid)),
-    VecInit(Seq(false.B, false.B)))
-  val s0_req   = VecInit(io.lsu.req.bits.map(_.bits))
-  // 根据不同的请求有不同的处理吗？
-  val s0_type  = 0.U
+    Mux(mshrs.io.replay.fire(), VecInit(1.U(memWidth.W).asBools),
+      VecInit(0.U(memWidth.W).asBools)))
+  val s0_req = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.bits)),
+    replay_req)
+  val s0_type = Mux(io.lsu.req.fire(), t_lsu, t_replay)
 
   // Does this request need to send a response or nack
-  // 啥意思
-  // MSHR read和lsu的请求是需要发response以及nack的？
-  // 问题：LSU write也要吗？
-  // write暂时先不发送response
+  // for successfully executed load/stores, we send a resp 
+  // for all other failures(bank conflict, blocked by mshr, in write back)
+  // we send a nack
+  // all pipeline requests requires response or nack
+  // only mshr replayed loads needs to send resp
   val s0_send_resp_or_nack = Mux(io.lsu.req.fire(), s0_valid,
-    VecInit(Seq(false.B, false.B)))
+    VecInit(Mux(mshrs.io.replay.fire() && isRead(mshrs.io.replay.bits.cmd), 1.U(memWidth.W), 0.U(memWidth.W)).asBools))
 
 
+  // stage 1
   val s1_req = RegNext(s0_req)
-  // 我们暂时不支持branch kill
-  // br mask是啥？
-  // 这边要允许branch被kill
-  // 这边允许请求被branch kill是怎么处理的呢？
-  // 这个又是啥？
   // val s2_store_failed = Wire(Bool())
-  // 这边的exception是啥？
-  // 这边不应该出任何exception吧？
   val s1_valid = widthMap(w => RegNext(s0_valid(w), init=false.B))
   val s1_addr = s1_req.map(_.addr)
-  // 不是，这个的意思是，prober io req not ready，意思是现在有正在处理的probe的请求，假如要写的meta idx正好冲突，那就s1 nack
-  // 问题：s1_nack是在哪里用上的啊？
-  // 所以s1这边是直接send response或者nack
+  val s1_nack = VecInit(0.U(memWidth.W).asBools)
   val s1_send_resp_or_nack = RegNext(s0_send_resp_or_nack)
-  val s1_type         = RegNext(s0_type)
-
-  // 这些是其他几条线要用到的私有数据
-  // 也就是这三个用的是自己的way en
+  val s1_type = RegNext(s0_type)
+  // For replays, the metadata isn't written yet
+  val s1_replay_way_en = RegNext(mshrs.io.replay.bits.way_en)
 
   // tag check
-  // 这边分为way map和width map
-  // way map是只搞好每个way
-  // width map，是针对每个memWidth，都处理一遍
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  // 这是个啥鬼东西啊？
-  // 这个其实就是一个两层循环
-  // 假如拿imperative的模式来写，其实就是先定义一个tag eq way的变量
-  // 然后对于它的每个bit，搞一个小循环来生成
-  // 这个生成的是每个way是否eq的bitvector
   val s1_tag_eq_way = widthMap(i => wayMap((w: Int) => meta(i).io.resp(w).tag === (s1_addr(i) >> untagBits)).asUInt)
-  // 这边是检查的时候，不仅要考虑到自己读出来是不是valid，还要考虑到replay，wb，mshr meta read等自带way en的家伙
-  // 我们这里暂时不需要这个，我们暂时只需要能先检查tag，再检查coherence是不是hit就可以了。
-  val s1_tag_match_way = widthMap(i => wayMap((w: Int) => s1_tag_eq_way(i)(w) && meta(i).io.resp(w).coh.isValid()).asUInt)
+  val s1_tag_match_way = widthMap(i =>
+      Mux(s1_type === t_replay, s1_replay_way_en,
+        wayMap((w: Int) => s1_tag_eq_way(i)(w) && meta(i).io.resp(w).coh.isValid()).asUInt))
 
+
+  // stage 2
   val s2_req   = RegNext(s1_req)
   val s2_type  = RegNext(s1_type)
   val s2_valid = widthMap(w =>
                   RegNext(s1_valid(w), init = false.B))
 
-  // 哪些way match了
   val s2_tag_match_way = RegNext(s1_tag_match_way)
-  // 具体是哪个way match了？
   val s2_tag_match     = s2_tag_match_way.map(_.orR)
-  // 这边是得到hit way的coh
   val s2_hit_state     = widthMap(i => Mux1H(s2_tag_match_way(i), wayMap((w: Int) => RegNext(meta(i).io.resp(w).coh))))
-  // 检查是否有权限可以访问
   val s2_has_permission = widthMap(w => s2_hit_state(w).onAccess(s2_req(w).cmd)._1)
-  // 老的state，和处理完后的新state
-  // 我有点不太明白的是，假如lsu同时下来的是两写怎么处理啊？还是现在boom下来的只能一读一写？
-  // 写肯定只能有一个，而且肯定是在固定的口的
   val s2_new_hit_state  = widthMap(w => s2_hit_state(w).onAccess(s2_req(w).cmd)._3)
 
-  // replay和write back肯定hit
-  // mshr还要有能力能block hit
-  // 这边还要求hit之前的状态等于hit之后的状态是啥意思呢？
-  // 不应该有权限就行了嘛？
-  // 这边不仅要有权限，由于这边不能进行meta write，所以假如不需要改meta，那是最好不过的了。
-  val s2_hit = widthMap(w => (s2_tag_match(w) && s2_has_permission(w) && s2_hit_state(w) === s2_new_hit_state(w)))
+  // we not only need permissions
+  // we also require that state does not change on hit
+  // thus we require new_hit_state === old_hit_state
+  //
+  // If state changes on hit,
+  // we should treat it as not hit, and let mshr deal with it,
+  // since we can not write meta data on the main pipeline.
+  // It's possible that we had permission but state changes on hit:
+  // eg: write to exclusive but clean block
+  val s2_hit = widthMap(w => (s2_tag_match(w) && s2_has_permission(w) && s2_hit_state(w) === s2_new_hit_state(w) && !mshrs.io.block_hit(w)) || (s2_type === t_replay))
+  val s2_nack = Wire(Vec(memWidth, Bool()))
+  assert(!(s2_type === t_replay && !s2_hit(0)), "Replays should always hit")
 
   val s2_data = Wire(Vec(memWidth, Vec(nWays, UInt(encRowBits.W))))
   for (i <- 0 until memWidth) {
@@ -530,23 +478,98 @@ class DCache extends DCacheModule
   }
 
   val s2_data_muxed = widthMap(w => Mux1H(s2_tag_match_way(w), s2_data(w)))
-  // s2_word_idx应该就是word在row里面的index
+  // the index of word in a row, in case rowBits != wordBits
   val s2_word_idx   = widthMap(w => if (rowWords == 1) 0.U else s2_req(w).addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes)))
 
   // replacement policy
-  // replace似乎是在s1的时候出结果？
   val replacer = cacheParams.replacement
   val s1_replaced_way_en = UIntToOH(replacer.way)
   val s2_replaced_way_en = UIntToOH(RegNext(replacer.way))
   val s2_repl_meta = widthMap(i => Mux1H(s2_replaced_way_en, wayMap((w: Int) => RegNext(meta(i).io.resp(w))).toSeq))
 
-  val s2_send_resp = widthMap(w => RegNext(s1_send_resp_or_nack(w)) && s2_hit(w))
+  val s2_nack_hit    = RegNext(s1_nack)
+  // Can't allocate MSHR for same set currently being written back
+  // the same set is busy
+  val s2_nack_set_busy  = widthMap(w => s2_valid(w) && mshrs.io.block_hit(w))
+  // MSHRs not ready for request
+  // two possibilities:
+  // 1. all MSHR in use
+  // 2. two misses in one cycle and MSHR can only handle one
+  val s2_nack_no_mshr   = widthMap(w => s2_valid(w) && !s2_hit(w) && !mshrs.io.req(w).ready)
+  // Bank conflict on data arrays
+  val s2_nack_data   = widthMap(w => data.io.nacks(w))
+
+  s2_nack           := widthMap(w => (s2_nack_hit(w) || s2_nack_set_busy(w) || s2_nack_no_mshr(w) || s2_nack_data(w)) && s2_type =/= t_replay)
+  val s2_send_resp = widthMap(w => (RegNext(s1_send_resp_or_nack(w)) && !s2_nack(w) &&
+                      (s2_hit(w))))
+  val s2_send_nack = widthMap(w => (RegNext(s1_send_resp_or_nack(w)) && s2_nack(w)))
+  for (w <- 0 until memWidth)
+    assert(!(s2_send_resp(w) && s2_send_nack(w)))
 
   // hits always send a response
   // If MSHR is not available, LSU has to replay this request later
   // If MSHR is available and this is only a store(not a amo), we don't need to wait for resp later
-  // AMO还是要send response的。
-  // 对于store，假如MSHR not available，就要把它给堵住。
+
+  // Miss handling
+  for (w <- 0 until memWidth) {
+    mshrs.io.req(w).valid := s2_valid(w)          &&
+                            !s2_hit(w)            &&
+                            !s2_nack_hit(w)       &&
+                            !s2_nack_set_busy(w)  &&
+                            !s2_nack_data(w)      &&
+                             s2_type === t_lsu
+    assert(!(mshrs.io.req(w).valid && s2_type === t_replay), "Replays should not need to go back into MSHRs")
+    mshrs.io.req(w).bits.cmd         := s2_req(w).cmd
+    mshrs.io.req(w).bits.addr        := s2_req(w).addr
+    mshrs.io.req(w).bits.mask        := s2_req(w).mask
+    mshrs.io.req(w).bits.data        := s2_req(w).data
+    mshrs.io.req(w).bits.meta        := s2_req(w).meta
+
+    mshrs.io.req(w).bits.tag_match   := s2_tag_match(w)
+    mshrs.io.req(w).bits.old_meta    := Mux(s2_tag_match(w), L1Metadata(s2_repl_meta(w).tag, s2_hit_state(w)), s2_repl_meta(w))
+    mshrs.io.req(w).bits.way_en      := Mux(s2_tag_match(w), s2_tag_match_way(w), s2_replaced_way_en)
+    mshrs.io.req(w).bits.sdq_id      := DontCare
+  }
+
+  when (mshrs.io.req.map(_.fire()).reduce(_||_)) { replacer.miss }
+  io.bus.a <> mshrs.io.mem_acquire
+
+  // probes and releases
+  // we do not support probe for now
+  io.bus.b.ready        := false.B
+  metaReadArb.io.in(ProberMetaReadPort).valid := false.B
+  metaReadArb.io.in(ProberMetaReadPort).bits := DontCare
+  metaWriteArb.io.in(ProberMetaWritePort).valid := false.B
+  metaWriteArb.io.in(ProberMetaWritePort).bits := DontCare
+
+  // refills
+  when (io.bus.d.bits.source === cfg.nMSHRs.U) {
+    // This should be ReleaseAck
+    io.bus.d.ready := true.B
+    mshrs.io.mem_grant.valid := false.B
+    mshrs.io.mem_grant.bits  := DontCare
+  } .otherwise {
+    // This should be GrantData
+    mshrs.io.mem_grant <> io.bus.d
+  }
+
+  io.bus.e <> mshrs.io.mem_finish
+
+  dataWriteArb.io.in(RefillDataWritePort) <> mshrs.io.refill
+  metaWriteArb.io.in(MSHRMetaWritePort) <> mshrs.io.meta_write
+
+  // writebacks
+  val wbArb = Module(new Arbiter(new WritebackReq, 2))
+  // 0 goes to prober, 1 goes to MSHR evictions
+  wbArb.io.in(0).valid := false.B
+  wbArb.io.in(0).bits  := DontCare
+  wbArb.io.in(1)       <> mshrs.io.wb_req
+  wb.io.req            <> wbArb.io.out
+  wb.io.data_resp      := data.io.resp(0)
+  mshrs.io.wb_resp     := wb.io.resp
+  wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMSHRs.U
+
+  TLArbiter.lowest(io.bus.c, wb.io.release)
 
   // load data gen
   val s2_data_word_prebypass = widthMap(w => s2_data_muxed(w) >> Cat(s2_word_idx(w), 0.U(log2Ceil(wordBits).W)))
@@ -554,23 +577,24 @@ class DCache extends DCacheModule
 
   // Mux between cache responses and uncache responses
   val cache_resp = Wire(Vec(memWidth, Valid(new DCacheResp)))
-  cache_resp := DontCare
   for (w <- 0 until memWidth) {
-    cache_resp(w).valid         := s2_valid(w) && s2_send_resp(w)
+    cache_resp(w).valid         := s2_valid(w) && (s2_send_resp(w) || s2_send_nack(w))
     cache_resp(w).bits.data     := s2_data_word(w)
+    cache_resp(w).bits.meta     := 0.U
+    cache_resp(w).bits.nack     := s2_send_nack(w)
   }
 
   val resp = WireInit(cache_resp)
 
   // 返回结果
   for (w <- 0 until memWidth) {
-    io.lsu.resp(w).valid := resp(w).valid
-    io.lsu.resp(w).bits.data := 0.U
+    io.lsu.resp(w) <> resp(w)
   }
 
   // Store/amo hits
   val s3_req   = RegNext(s2_req(0))
-  val s3_valid = RegNext(s2_valid(0) && s2_hit(0) && isWrite(s2_req(0).cmd))
+  val s3_valid = RegNext(s2_valid(0) && s2_hit(0) && isWrite(s2_req(0).cmd) &&
+                         !(s2_send_nack(0) && s2_nack(0)), init = false.B)
   for (w <- 1 until memWidth) {
     assert(!(s2_valid(w) && s2_hit(w) && isWrite(s2_req(w).cmd)),
       "Store must go through 0th pipe in L1D")
@@ -578,9 +602,9 @@ class DCache extends DCacheModule
 
   // For bypassing
   val s4_req   = RegNext(s3_req)
-  val s4_valid = RegNext(s3_valid)
+  val s4_valid = RegNext(s3_valid, init = false.B)
   val s5_req   = RegNext(s4_req)
-  val s5_valid = RegNext(s4_valid)
+  val s5_valid = RegNext(s4_valid, init = false.B)
 
   val s3_bypass = widthMap(w => s3_valid && ((s2_req(w).addr >> wordOffBits) === (s3_req.addr >> wordOffBits)))
   val s4_bypass = widthMap(w => s4_valid && ((s2_req(w).addr >> wordOffBits) === (s4_req.addr >> wordOffBits)))
@@ -594,9 +618,8 @@ class DCache extends DCacheModule
                                          s2_data_word_prebypass(w))))
   }
   val amoalu   = Module(new AMOALU(DataBits))
-  amoalu.io.mask := new StoreGen(0.U, s2_req(0).addr, 0.U, DataBits/8).mask
   amoalu.io.cmd  := s2_req(0).cmd
-  // 这边看着就是把lhs和rhs中间拿op算一下
+  amoalu.io.mask := s2_req(0).mask
   amoalu.io.lhs  := s2_data_word(0)
   amoalu.io.rhs  := s2_req(0).data
 
@@ -604,11 +627,12 @@ class DCache extends DCacheModule
   s3_req.data := amoalu.io.out
   val s3_way   = RegNext(s2_tag_match_way(0))
 
-  dataWriteArb.io.in(0).valid       := s3_valid
-  dataWriteArb.io.in(0).bits.addr   := s3_req.addr
-  dataWriteArb.io.in(0).bits.wmask  := 0.U
-  dataWriteArb.io.in(0).bits.data   := Fill(rowWords, s3_req.data)
-  dataWriteArb.io.in(0).bits.way_en := s3_way
+  dataWriteArb.io.in(PipelineDataWritePort).valid       := s3_valid
+  dataWriteArb.io.in(PipelineDataWritePort).bits.addr   := s3_req.addr
+  val wmask = if (rowWords == 1) 1.U else UIntToOH(s3_req.addr(rowOffBits-1,offsetlsb))
+  dataWriteArb.io.in(PipelineDataWritePort).bits.wmask  := wmask
+  dataWriteArb.io.in(PipelineDataWritePort).bits.data   := Fill(rowWords, s3_req.data)
+  dataWriteArb.io.in(PipelineDataWritePort).bits.way_en := s3_way
 }
 
 class DcacheUserBundle extends Bundle
