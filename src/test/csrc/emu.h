@@ -32,10 +32,10 @@ class Emulator {
   uint32_t seed;
   uint64_t max_cycles, cycles;
   uint64_t log_begin, log_end;
+  const char *snapshot_path;
 
   std::vector<const char *> parse_args(int argc, const char *argv[]);
 
-  static const struct option long_options[];
   static void print_help(const char *file);
 
   void read_emu_regs(uint64_t *r) {
@@ -76,7 +76,8 @@ class Emulator {
     image(nullptr),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0),
-    log_begin(0), log_end(-1)
+    log_begin(0), log_end(-1),
+    snapshot_path(NULL)
   {
     // init emu
     auto args = parse_args(argc, argv);
@@ -87,10 +88,6 @@ class Emulator {
     srand(seed);
     srand48(seed);
     Verilated::randReset(2);
-
-    // set log time range and log level
-    dut_ptr->io_logCtrl_log_begin = log_begin;
-    dut_ptr->io_logCtrl_log_end = log_end;
 
     // init ram
     extern void init_ram(const char *img);
@@ -235,6 +232,14 @@ class Emulator {
     eprintf(ANSI_COLOR_MAGENTA "This is random test for cache.\n" ANSI_COLOR_RESET);
     cache_test(max_cycles);
 #else
+    if (snapshot_path != NULL) {
+      snapshot_load(snapshot_path);
+    }
+
+    // set log time range and log level
+    dut_ptr->io_logCtrl_log_begin = log_begin;
+    dut_ptr->io_logCtrl_log_end = log_end;
+
     execute_cycles(max_cycles);
 #endif
   }

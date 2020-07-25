@@ -15,16 +15,6 @@
 std::function<double()> get_sc_time_stamp = []() -> double { return 0; };
 double sc_time_stamp() { return get_sc_time_stamp(); }
 
-const struct option Emulator::long_options[] = {
-  { "seed",           1, NULL, 's' },
-  { "max-cycles",     1, NULL, 'C' },
-  { "image",          1, NULL, 'i' },
-  { "log-begin",      1, NULL, 'b' },
-  { "log-end",        1, NULL, 'e' },
-  { "help",           0, NULL, 'h' },
-  { 0,                0, NULL,  0  }
-};
-
 void Emulator::print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
   printf("\n");
@@ -39,9 +29,31 @@ void Emulator::print_help(const char *file) {
 
 std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
   std::vector<const char *> args = { argv[0] };
+  int long_index = 0;
+  const struct option long_options[] = {
+    { "load-snapshot",  1, NULL,  0  },
+    { "seed",           1, NULL, 's' },
+    { "max-cycles",     1, NULL, 'C' },
+    { "image",          1, NULL, 'i' },
+    { "log-begin",      1, NULL, 'b' },
+    { "log-end",        1, NULL, 'e' },
+    { "help",           0, NULL, 'h' },
+    { 0,                0, NULL,  0  }
+  };
+
   int o;
-  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:b:e:", long_options, NULL)) != -1) {
+  while ( (o = getopt_long(argc, const_cast<char *const*>(argv),
+          "-s:C:hi:m:b:e:", long_options, &long_index)) != -1) {
     switch (o) {
+      case 0:
+        if (long_index == 0) {
+          snapshot_path = optarg;
+          break;
+        }
+        // fall through
+      default:
+        print_help(argv[0]);
+        exit(0);
       case 's': 
         if(std::string(optarg) != "NO_SEED") {
           seed = atoll(optarg);
@@ -55,9 +67,6 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
                 break;
       case 'b': log_begin = atoll(optarg);  break;
       case 'e': log_end = atoll(optarg); break;
-      default:
-                print_help(argv[0]);
-                exit(0);
     }
   }
 

@@ -107,10 +107,11 @@ SEED ?= $(shell shuf -i 1-10000 -n 1)
 # use 'emu -h' to see more details
 B ?= 0
 E ?= -1
+#SNAPSHOT = --load-snapshot=$(NOOP_HOME)/build/2020-07-25@22:19:17.snapshot
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) -s $(SEED) -b $(B) -e $(E)
+	@$(EMU) -i $(IMAGE) -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT)
 else
 	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(realpath $(IMAGE)) -s $(SEED) -b $(B) -e $(E)"
 endif
