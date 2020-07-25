@@ -7,7 +7,10 @@ class VerilatedSaveMem : public VerilatedSave {
   long size;
 
 public:
-  VerilatedSaveMem() { buf = new uint8_t[buf_size]; }
+  VerilatedSaveMem() {
+    buf = new uint8_t[buf_size];
+    size = 0;
+  }
   ~VerilatedSaveMem() { delete buf; }
 
   void init(const char *filename) {
