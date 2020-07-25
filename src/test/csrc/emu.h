@@ -104,6 +104,10 @@ class Emulator {
     reset_ncycles(10);
   }
 
+  ~Emulator() {
+    snapshot_finalize();
+  }
+
   void reset_ncycles(size_t cycles) {
     for(int i = 0; i < cycles; i++) {
       dut_ptr->reset = 1;
@@ -212,12 +216,6 @@ class Emulator {
         // save snapshot every 10s
         time_t now = time(NULL);
         snapshot_save(snapshot_filename(my_strftime(now)));
-
-        // remove the last second snapshot
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "rm %s 2> /dev/null", snapshot_filename(my_strftime(now - 20)));
-        system(cmd);
-
         lasttime_snapshot = t;
       }
     }
@@ -248,4 +246,5 @@ class Emulator {
   char* snapshot_filename(const char *name);
   void snapshot_save(const char *filename);
   void snapshot_load(const char *filename);
+  void snapshot_finalize();
 };

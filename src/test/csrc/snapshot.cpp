@@ -7,15 +7,13 @@ class VerilatedSaveMem : public VerilatedSave {
   long size;
 
 public:
-  VerilatedSaveMem(const char *filename) {
-    buf = new uint8_t[buf_size];
+  VerilatedSaveMem() { buf = new uint8_t[buf_size]; }
+  ~VerilatedSaveMem() { delete buf; }
+
+  void init(const char *filename) {
     size = 0;
     m_filename = filename;
     header();
-  }
-
-  ~VerilatedSaveMem() {
-    delete buf;
   }
 
   void mywrite(const void* __restrict datap, size_t size) VL_MT_UNSAFE_ONE {
@@ -46,6 +44,8 @@ public:
   }
 };
 
+static VerilatedSaveMem snapshot_slot[2];
+
 void* get_ram_start();
 long get_ram_size();
 
@@ -64,7 +64,11 @@ char* Emulator::snapshot_filename(const char *name) {
 }
 
 void Emulator::snapshot_save(const char *filename) {
-  VerilatedSaveMem stream(filename);
+  static int last_slot = 0;
+  VerilatedSaveMem &stream = snapshot_slot[last_slot];
+  last_slot = !last_slot;
+
+  stream.init(filename);
   stream << *dut_ptr;
   stream.flush();
 
@@ -72,7 +76,7 @@ void Emulator::snapshot_save(const char *filename) {
   stream.mywrite(&size, sizeof(size));
   stream.mywrite(get_ram_start(), size);
 
-  stream.save();
+  // actually write to file in snapshot_finalize()
 }
 
 void Emulator::snapshot_load(const char *filename) {
@@ -85,3 +89,9 @@ void Emulator::snapshot_load(const char *filename) {
   assert(size == get_ram_size());
   stream.read(get_ram_start(), size);
 }
+
+void Emulator::snapshot_finalize() {
+  snapshot_slot[0].save();
+  snapshot_slot[1].save();
+}
+
