@@ -26,4 +26,11 @@ enum {
   DIFFTEST_NR_REG
 };
 
+extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n);
+extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n);
+extern void (*ref_difftest_getregs)(void *c);
+extern void (*ref_difftest_setregs)(const void *c);
+
+void init_difftest();
+
 #endif

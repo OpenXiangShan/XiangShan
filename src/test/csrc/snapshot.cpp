@@ -1,5 +1,6 @@
 #include "emu.h"
 #include <verilated_save.h>
+#include "difftest.h"
 
 class VerilatedSaveMem : public VerilatedSave {
   const static long buf_size = 1024 * 1024 * 1024;
@@ -52,6 +53,10 @@ static VerilatedSaveMem snapshot_slot[2];
 
 void* get_ram_start();
 long get_ram_size();
+uint64_t get_nemu_this_pc();
+void set_nemu_this_pc(uint64_t pc);
+extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n);
+extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n);
 
 char* Emulator::my_strftime(time_t time) {
   static char buf[64];
@@ -80,6 +85,18 @@ void Emulator::snapshot_save(const char *filename) {
   stream.mywrite(&size, sizeof(size));
   stream.mywrite(get_ram_start(), size);
 
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  ref_difftest_getregs(&ref_r);
+  stream.mywrite(ref_r, sizeof(ref_r));
+
+  uint64_t nemu_this_pc = get_nemu_this_pc();
+  stream.mywrite(&nemu_this_pc, sizeof(nemu_this_pc));
+
+  char *buf = new char[size];
+  ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
+  stream.mywrite(buf, size);
+  delete buf;
+
   // actually write to file in snapshot_finalize()
 }
 
@@ -92,6 +109,19 @@ void Emulator::snapshot_load(const char *filename) {
   stream.read(&size, sizeof(size));
   assert(size == get_ram_size());
   stream.read(get_ram_start(), size);
+
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  stream.read(ref_r, sizeof(ref_r));
+  ref_difftest_setregs(&ref_r);
+
+  uint64_t nemu_this_pc;
+  stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
+  set_nemu_this_pc(nemu_this_pc);
+
+  char *buf = new char[size];
+  stream.read(buf, size);
+  ref_difftest_memcpy_from_dut(0x80000000, buf, size);
+  delete buf;
 }
 
 void Emulator::snapshot_finalize() {
@@ -99,4 +129,3 @@ void Emulator::snapshot_finalize() {
   snapshot_slot[1].save();
   printf("Please remove unused snapshots manually\n");
 }
-
