@@ -33,6 +33,7 @@ class Emulator {
   uint64_t max_cycles, cycles;
   uint64_t log_begin, log_end;
   const char *snapshot_path;
+  int hascommit;
 
   std::vector<const char *> parse_args(int argc, const char *argv[]);
 
@@ -77,7 +78,7 @@ class Emulator {
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0),
     log_begin(0), log_end(-1),
-    snapshot_path(NULL)
+    snapshot_path(NULL), hascommit(0)
   {
     // init emu
     auto args = parse_args(argc, argv);
@@ -139,7 +140,6 @@ class Emulator {
     uint32_t lasttime_poll = 0;
     uint32_t lasttime_snapshot = 0;
     uint64_t lastcommit = n;
-    int hascommit = 0;
     const int stuck_limit = 500;
     
     static uint32_t wdst[DIFFTEST_WIDTH];
@@ -180,10 +180,13 @@ class Emulator {
 
       if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
         hascommit = 1;
-        extern void init_difftest(uint64_t *reg);
         uint64_t reg[DIFFTEST_NR_REG];
         read_emu_regs(reg);
-        init_difftest(reg);
+        init_difftest();
+        void* get_img_start();
+        long get_img_size();
+        ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
+        ref_difftest_setregs(reg);
       }
 
       // difftest
@@ -233,7 +236,9 @@ class Emulator {
     cache_test(max_cycles);
 #else
     if (snapshot_path != NULL) {
+      init_difftest();
       snapshot_load(snapshot_path);
+      hascommit = 1;
     }
 
     // set log time range and log level
