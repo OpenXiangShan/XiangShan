@@ -19,6 +19,7 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
 
   for(x <- Seq(mul.io, div.io)){
     x.mcommit <> DontCare
+    x.exception <> DontCare
     x.dmem <> DontCare
     x.in.bits := io.in.bits
     x.redirect := io.redirect

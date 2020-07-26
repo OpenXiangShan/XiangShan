@@ -90,8 +90,7 @@ disassemble-xv6:
 
 
 P = 4
-#SUITE = xiangshan.backend.exu.AluTest
-SUITE = IFUtest
+SUITE = xiangshan.backend.exu.AluTest
 
 unit-test:
 	cd .. && mill chiselModule.test.testOnly -o -s $(SUITE) -P$(P)

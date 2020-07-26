@@ -123,7 +123,8 @@ class Dispatch1 extends XSModule{
         "roq handshake not continuous %d", i.U)
     }
     io.fromRename(i).ready := all_recv
-    XSDebug(io.fromRename(i).valid, "r:%d pc 0x%x of type %b is in %d-th slot\n",
-      io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
+
+    XSDebug(io.fromRename(i).valid, "v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
+      io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
 }

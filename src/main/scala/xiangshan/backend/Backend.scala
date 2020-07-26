@@ -40,6 +40,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   //  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
   val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
+  exeUnits.foreach(_.io.exception := DontCare)
   exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
 
@@ -126,12 +127,15 @@ class Backend(implicit val p: XSConfig) extends XSModule
   io.mem.mcommit := roq.io.mcommit
   io.mem.ldin := DontCare // TODO
   io.mem.stin := DontCare // TODO
+  jmpExeUnit.io.exception.valid := roq.io.redirect.valid
+  jmpExeUnit.io.exception.bits := roq.io.exception
 
   io.frontend.redirectInfo <> redirectInfo
-  io.frontend.commits <> roq.io.commits
+  io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
+  brq.io.bcommit := roq.io.bcommit
   brq.io.enqReqs <> decode.io.toBrq
   for ((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.config.hasRedirect))) {
     x.bits := y.io.out.bits

@@ -34,11 +34,14 @@ class TempPreDecoder extends XSModule  {
   for (i <- 0 until FetchWidth) {
     tempPreDecoders(i).io.in <> DontCare
     tempPreDecoders(i).io.in.instr <> io.in(i)
-    io.out.fuTypes(i) := tempPreDecoders(i).io.out.ctrl.fuType
-    io.out.fuOpTypes(i) := tempPreDecoders(i).io.out.ctrl.fuOpType
+    io.out.fuTypes(2*i) := tempPreDecoders(i).io.out.ctrl.fuType
+    io.out.fuTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuType
+    io.out.fuOpTypes(2*i) := tempPreDecoders(i).io.out.ctrl.fuOpType
+    io.out.fuOpTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuOpType
   }
 
   io.out.mask := DontCare
+  io.out.isRVC := DontCare
 
 }
 
@@ -129,7 +132,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
 
-  s3_ready := io.out.ready
+  s3_ready := (!s3_valid && io.out.ready) || io.out.fire()
 
   val needflush = io.in.bits.flush
   XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)

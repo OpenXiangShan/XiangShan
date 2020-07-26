@@ -14,11 +14,12 @@
 #define micro2str(x)  _str(x)
 
 void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
+void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
-void (*ref_difftest_exec)(uint64_t n) = NULL;
-void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
-void (*ref_isa_reg_display)(void) = NULL;
+static void (*ref_difftest_exec)(uint64_t n) = NULL;
+static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
+static void (*ref_isa_reg_display)(void) = NULL;
 
 static bool is_skip_ref;
 static bool is_skip_dut;
@@ -39,7 +40,7 @@ void difftest_skip_dut() {
   is_skip_dut = true;
 }
 
-void init_difftest(uint64_t *reg) {
+void init_difftest() {
   void *handle;
   handle = dlopen(REF_SO, RTLD_LAZY | RTLD_DEEPBIND);
   printf("Using %s for difftest\n", micro2str(REF_SO));
@@ -47,6 +48,9 @@ void init_difftest(uint64_t *reg) {
 
   ref_difftest_memcpy_from_dut = (void (*)(paddr_t, void *, size_t))dlsym(handle, "difftest_memcpy_from_dut");
   assert(ref_difftest_memcpy_from_dut);
+
+  ref_difftest_memcpy_from_ref = (void (*)(void *, paddr_t, size_t))dlsym(handle, "difftest_memcpy_from_ref");
+  assert(ref_difftest_memcpy_from_ref);
 
   ref_difftest_getregs = (void (*)(void *))dlsym(handle, "difftest_getregs");
   assert(ref_difftest_getregs);
@@ -67,10 +71,6 @@ void init_difftest(uint64_t *reg) {
   assert(ref_difftest_init);
 
   ref_difftest_init();
-  void* get_img_start();
-  long get_img_size();
-  ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
-  ref_difftest_setregs(reg);
 }
 
 static const char *reg_name[DIFFTEST_NR_REG] = {
@@ -87,10 +87,15 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
   "sstatus", "scause", "sepc"
 };
 
+static uint64_t nemu_this_pc = 0x80000000;
+
+uint64_t get_nemu_this_pc() { return nemu_this_pc; }
+void set_nemu_this_pc(uint64_t pc) { nemu_this_pc = pc; }
+
 int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode) {
 
-  assert(!isRVC && intrNO == 0);
+  assert(!isRVC);
   #define DEBUG_RETIRE_TRACE_SIZE 16
   #define DEBUG_WB_TRACE_SIZE 16
 
@@ -98,7 +103,6 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
   uint64_t this_pc = reg_scala[DIFFTEST_THIS_PC];
   // ref_difftest_getregs() will get the next pc,
   // therefore we must keep track this one
-  static uint64_t nemu_this_pc = 0x80000000;
   static uint64_t pc_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static uint32_t inst_retire_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
   static uint32_t retire_cnt_queue[DEBUG_RETIRE_TRACE_SIZE] = {0};
@@ -125,28 +129,29 @@ int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
 
   if (intrNO) {
     ref_difftest_raise_intr(intrNO);
-    ref_difftest_exec(1);//TODO
+    // ref_difftest_exec(1);//TODO
   }
-
-  assert(commit > 0 && commit <= 6);
-  for(int i = 0; i < commit; i++){
-    pc_wb_queue[wb_pointer] = wpc[i];
-    wen_wb_queue[wb_pointer] = selectBit(wen, i);
-    wdst_wb_queue[wb_pointer] = wdst[i];
-    wdata_wb_queue[wb_pointer] = wdata[i];
-    wb_pointer = (wb_pointer+1) % DEBUG_WB_TRACE_SIZE;
-    if(selectBit(skip, i)){
-      // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
-      // printf("SKIP %d\n", i);
-      // to skip the checking of an instruction, just copy the reg state to reference design
-      ref_difftest_getregs(&ref_r);
-      ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
-      if(selectBit(wen, i)){
-        ref_r[wdst[i]] = wdata[i];
+  else {
+    assert(commit > 0 && commit <= 6);
+    for(int i = 0; i < commit; i++){
+      pc_wb_queue[wb_pointer] = wpc[i];
+      wen_wb_queue[wb_pointer] = selectBit(wen, i);
+      wdst_wb_queue[wb_pointer] = wdst[i];
+      wdata_wb_queue[wb_pointer] = wdata[i];
+      wb_pointer = (wb_pointer+1) % DEBUG_WB_TRACE_SIZE;
+      if(selectBit(skip, i)){
+        // MMIO accessing should not be a branch or jump, just +2/+4 to get the next pc
+        // printf("SKIP %d\n", i);
+        // to skip the checking of an instruction, just copy the reg state to reference design
+        ref_difftest_getregs(&ref_r);
+        ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
+        if(selectBit(wen, i)){
+          ref_r[wdst[i]] = wdata[i];
+        }
+        ref_difftest_setregs(ref_r);
+      }else{
+        ref_difftest_exec(1);
       }
-      ref_difftest_setregs(ref_r);
-    }else{
-      ref_difftest_exec(1);
     }
   }
   ref_difftest_getregs(&ref_r);

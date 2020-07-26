@@ -1,14 +1,8 @@
-package chiseltest.tests
-
-import org.scalatest._
+package xiangshan.frontend
 
 import chisel3._
-import chisel3.experimental.BundleLiterals._
 import chiseltest._
-import xiangshan._
-import xiangshan.frontend.IFU
-import utils._
-import xiangshan.CtrlFlow
+import org.scalatest.{FlatSpec, Matchers}
 
 class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
   behavior of "IFU Test"
@@ -62,3 +56,4 @@ class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
     }
   }
 }
+

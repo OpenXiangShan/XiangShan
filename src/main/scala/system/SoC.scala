@@ -63,7 +63,7 @@ class XSSoc(implicit val p: XSConfig) extends Module with HasSoCParameter {
   xsCore.io.imem.coh.req.bits := DontCare
 
   val addrSpace = List(
-    (0x40000000L, 0x08000000L), // external devices
+    (0x40000000L, 0x40000000L), // external devices
     (0x38000000L, 0x00010000L)  // CLINT
   )
   val mmioXbar = Module(new SimpleBusCrossbar1toN(addrSpace))

@@ -1,11 +1,13 @@
 #include "common.h"
 
-#define RAMSIZE (256 * 1024 * 1024)
+#define RAMSIZE (128 * 1024 * 1024)
 
 static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
 static long img_size = 0;
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
+void* get_ram_start() { return &ram[0]; }
+long get_ram_size() { return RAMSIZE; }
 
 void addpageSv39() {
 //three layers
@@ -93,6 +95,10 @@ void init_ram(const char *img) {
 
 extern "C" void ram_helper(
     uint64_t rIdx, uint64_t *rdata, uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
+  assert(rIdx < RAMSIZE / sizeof(uint64_t));
   *rdata = ram[rIdx];
-  if (wen) { ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask); }
+  if (wen) {
+    assert(wIdx < RAMSIZE / sizeof(uint64_t));
+    ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask);
+  }
 }
