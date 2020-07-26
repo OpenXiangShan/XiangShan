@@ -11,7 +11,7 @@ IMAGE ?= temp
 
 # remote machine with high frequency to speedup verilog generation
 REMOTE ?= localhost
-REMOTE_PREFIX ?= /nfs/24
+REMOTE_PREFIX ?= 
 REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 
 .DEFAULT_GOAL = verilog
@@ -112,11 +112,7 @@ SNAPSHOT ?=
 ifeq ($(SNAPSHOT),)
 SNAPSHOT_OPTION = 
 else
-ifeq ($(REMOTE),localhost)
-SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
-else
 SNAPSHOT_OPTION = --load-snapshot=$(REMOTE_PREFIX)/$(SNAPSHOT)
-endif
 endif
 
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION)
