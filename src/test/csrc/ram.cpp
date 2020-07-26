@@ -1,6 +1,6 @@
 #include "common.h"
 
-#define RAMSIZE (256 * 1024 * 1024)
+#define RAMSIZE (128 * 1024 * 1024)
 
 static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
 static long img_size = 0;
