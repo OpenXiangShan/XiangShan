@@ -38,7 +38,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   //  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
   //  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
   //  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new MemWrapper))
+  val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
   exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
@@ -121,11 +121,11 @@ class Backend(implicit val p: XSConfig) extends XSModule
     iq.io.bypassUops <> bypassQueues.map(_.io.selectedUop)
   })
 
+  lsuExeUnits.foreach(_.io.dmem <> DontCare) // TODO
+  lsuExeUnits.foreach(_.io.mcommit <> roq.io.mcommit)
   io.mem.mcommit := roq.io.mcommit
-
-  io.mem.ldin <> lsuExeUnits(0).io.ldReq
-  io.mem.stin <> lsuExeUnits(0).io.stReq
-  lsuExeUnits(0).io.wbReq <> io.mem.out
+  io.mem.ldin := DontCare // TODO
+  io.mem.stin := DontCare // TODO
 
   io.frontend.redirectInfo <> redirectInfo
   io.frontend.commits <> roq.io.commits
