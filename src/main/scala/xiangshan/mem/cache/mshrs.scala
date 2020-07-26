@@ -10,6 +10,7 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan.mem.DCacheReq
+import xiangshan.utils.XSDebug
 import bus.tilelink._
 
 class DCacheReqInternal extends DCacheReq
@@ -379,5 +380,50 @@ class MSHRFile extends DCacheModule
   when (io.replay.valid || sdq_enq) {
     sdq_val := sdq_val & ~(UIntToOH(replay_arb.io.out.bits.sdq_id) & Fill(cfg.nSDQ, free_sdq)) |
       PriorityEncoderOH(~sdq_val(cfg.nSDQ-1,0)) & Fill(cfg.nSDQ, sdq_enq)
+  }
+
+  // print all input/output requests for debug purpose
+
+  // print req
+  XSDebug(req.fire(), "cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
+    req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask, req.bits.meta,
+    req.bits.tag_match, req.bits.old_meta.coh.state, req.bits.old_meta.tag, req.bits.way_en)
+
+  // block hit
+  (0 until memWidth) map { w =>
+    XSDebug(io.req(w).valid && io.block_hit(w), "channel %d req block hit\n", w.U)
+  }
+
+  // print refill
+  XSDebug(io.refill.fire(), "addr %x data: %x wmask: %x way_en: %x\n",
+    io.refill.bits.addr, io.refill.bits.data,
+    io.refill.bits.wmask, io.refill.bits.way_en)
+
+  // print meta_write
+  XSDebug(io.meta_write.fire(), "idx %x way_en: %x old_tag: %x new_coh: %d new_tag: %x\n",
+    io.meta_write.bits.idx, io.meta_write.bits.way_en,
+    io.meta_write.bits.data.coh.state, io.meta_write.bits.data.tag,
+    io.meta_write.bits.tag)
+
+  // print replay
+  XSDebug(io.replay.fire(), "cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
+    io.replay.bits.cmd, io.replay.bits.addr, io.replay.bits.data, io.replay.bits.mask, io.replay.bits.meta,
+    io.replay.bits.tag_match, io.replay.bits.old_meta.coh.state, io.replay.bits.old_meta.tag, io.replay.bits.way_en)
+
+  // print wb_req
+  XSDebug(io.wb_req.fire(), "idx %x tag: %x source: %d param: %x way_en: %x voluntary: %b\n",
+    io.wb_req.bits.idx, io.wb_req.bits.tag,
+    io.wb_req.bits.source, io.wb_req.bits.param,
+    io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
+
+  // print tilelink messages
+  when (XSDebug.trigger && io.mem_acquire.fire()) {
+    io.mem_acquire.bits.dump
+  }
+  when (XSDebug.trigger && io.mem_grant.fire()) {
+    io.mem_grant.bits.dump
+  }
+  when (XSDebug.trigger && io.mem_finish.fire()) {
+    io.mem_finish.bits.dump
   }
 }

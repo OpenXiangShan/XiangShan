@@ -5,7 +5,7 @@ package xiangshan.mem.cache
 import chisel3._
 import chisel3.util._
 
-import xiangshan.HasXSParameter
+import xiangshan.{HasXSParameter, XSModule, XSBundle}
 import xiangshan.mem.MemoryOpConstants
 
 // this file contains common building blocks that can be shared by ICache and DCache
@@ -45,8 +45,8 @@ trait HasL1CacheParameters extends HasXSParameter
   def refillCycles = cacheDataBeats
 }
 
-abstract class L1CacheModule extends Module
+abstract class L1CacheModule extends XSModule
   with HasL1CacheParameters
 
-abstract class L1CacheBundle extends Bundle
+abstract class L1CacheBundle extends XSBundle
   with HasL1CacheParameters

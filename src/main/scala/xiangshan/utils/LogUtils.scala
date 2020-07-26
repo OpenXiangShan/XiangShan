@@ -55,6 +55,12 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
     apply(prefix, cond, Printable.pack(fmt, data:_*))
   def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit name: String): Any =
     XSLog(logLevel)(prefix, cond, pable)
+
+  // trigger log or not
+  // used when user what to fine-control their printf output
+  def trigger: Bool = {
+    logLevel.id.U >= XSLog.xsLogLevel && XSLog.displayLog
+  }
 }
 
 object XSDebug extends LogHelper(XSLogLevel.DEBUG)

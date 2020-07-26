@@ -4,10 +4,12 @@ import org.scalatest._
 import scala.collection.mutable.{Map, Queue}
 
 import chisel3._
+import chisel3.util.experimental.BoringUtils
 import chisel3.experimental.BundleLiterals._
 import chiseltest._
 
 import xiangshan.XSModule
+import xiangshan.utils.XSLogLevel
 import xiangshan.mem.{LSUDMemIO, MemoryOpConstants}
 import xiangshan.mem.cache.DCache
 import bus.tilelink.NaiveTLToAXI4
@@ -19,12 +21,23 @@ class DCacheDut extends XSModule {
   })
 
   val dcache = Module(new DCache)
-  val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
+  val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = false))
   val tlToAXI = Module(new NaiveTLToAXI4(l1BusParams))
 
   dcache.io.lsu <> io.in
   dcache.io.bus <> tlToAXI.io.in
   tlToAXI.io.out <> mem.in
+
+
+  // log control
+  val log_begin, log_end, log_level = Wire(UInt(64.W))
+  log_begin := 0.U
+  log_end := 0xfffffff.U
+  log_level := XSLogLevel.DEBUG.id.U
+
+  BoringUtils.addSource(log_begin, "DISPLAY_LOG_START")
+  BoringUtils.addSource(log_end, "DISPLAY_LOG_END")
+  BoringUtils.addSource(log_level, "DISPLAY_LOG_LEVEL")
 }
 
 

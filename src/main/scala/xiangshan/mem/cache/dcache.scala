@@ -5,6 +5,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
 import xiangshan.mem.{DCacheReq, DCacheResp, LSUDMemIO}
+import xiangshan.utils.XSDebug
 import bus.tilelink._
 import _root_.utils.{Code, RandomReplacement, Transpose}
 
@@ -72,10 +73,10 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
 }
 
-abstract class DCacheModule extends Module
+abstract class DCacheModule extends L1CacheModule
   with HasDCacheParameters
 
-abstract class DCacheBundle extends Bundle
+abstract class DCacheBundle extends L1CacheBundle
   with HasDCacheParameters
 
 // basic building blocks for L1 DCache
@@ -407,6 +408,24 @@ class DCache extends DCacheModule
 
   // -------
   // Pipeline
+  def dump_pipeline_reqs(pipeline_stage_name: String, valid: Vec[Bool],
+    reqs: Vec[DCacheReq], s0_type: UInt) = {
+      (0 until memWidth) map { w =>
+          XSDebug(s"$pipeline_stage_name")
+          XSDebug("channel %d: valid: %b ", w.U, valid(w))
+          when (valid(w)) {
+            when (s0_type === t_replay) {
+              XSDebug("type: reply ")
+              } .elsewhen (s0_type === t_lsu) {
+              XSDebug("type: reply ")
+              } .otherwise {
+                XSDebug("type: unknown ")
+              }
+              XSDebug("cmd: %x addr: %x data: %x mask: %x meta: %x\n",
+                reqs(w).cmd, reqs(w).addr, reqs(w).data, reqs(w).mask, reqs(w).meta)
+          }
+      }
+  }
 
   // stage 0
   val s0_valid = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.valid)),
@@ -415,6 +434,9 @@ class DCache extends DCacheModule
   val s0_req = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.bits)),
     replay_req)
   val s0_type = Mux(io.lsu.req.fire(), t_lsu, t_replay)
+
+  dump_pipeline_reqs("DCache s0", s0_valid, s0_req, s0_type)
+
 
   // Does this request need to send a response or nack
   // for successfully executed load/stores, we send a resp 
@@ -437,6 +459,8 @@ class DCache extends DCacheModule
   // For replays, the metadata isn't written yet
   val s1_replay_way_en = RegNext(mshrs.io.replay.bits.way_en)
 
+  dump_pipeline_reqs("DCache s1", s1_valid, s1_req, s1_type)
+
   // tag check
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = widthMap(i => wayMap((w: Int) => meta(i).io.resp(w).tag === (s1_addr(i) >> untagBits)).asUInt)
@@ -450,6 +474,8 @@ class DCache extends DCacheModule
   val s2_type  = RegNext(s1_type)
   val s2_valid = widthMap(w =>
                   RegNext(s1_valid(w), init = false.B))
+
+  dump_pipeline_reqs("DCache s2", s2_valid, s2_req, s2_type)
 
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = s2_tag_match_way.map(_.orR)
