@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, update-ci ]
   pull_request:
     branches: [ master ]
 
@@ -36,7 +36,20 @@ jobs:
           echo $AM_HOME
           echo $NEMU_HOME
           echo $NOOP_HOME
-          make -C $AM_HOME/tests/cputest/ ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run
+          CPU_TEST_DIR=$AM_HOME/tests/cputest
+          echo $CPU_TEST_DIR
+          ret=0
+          for test in $(ls $CPU_TEST_DIR/tests)
+          do
+              t=${test%.c}
+              echo $t
+              make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2>/dev/null | grep "HIT GOOD TRAP"
+              if (( $? == 1 )) then
+                  echo $t fail
+                  ret=1
+              fi
+          done
+          exit $ret
 
   riscv-tests:
     runs-on: self-hosted
