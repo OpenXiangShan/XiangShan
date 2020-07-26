@@ -52,6 +52,23 @@ jobs:
           done
           exit $ret
 
+  microbench:
+    runs-on: self-hosted
+    name: Run microbench
+    needs: [build-emu]
+    steps:
+      - name: Set env
+        run: |
+          echo ::set-env name=AM_HOME::/home/ci-runner/xsenv/nexus-am
+          echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
+          echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
+      - name: Run microbench
+        run: |
+          echo $AM_HOME
+          echo $NEMU_HOME
+          echo $NOOP_HOME
+          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run
+
   riscv-tests:
     runs-on: self-hosted
     name: Run riscv-tests
