@@ -28,25 +28,22 @@ class PDecodeInfo extends XSBundle{  // 8 bit
 }
 
 class CacheLine extends XSBundle {
-  val cacheLine = Output(UInt(CacheLineSize.W))
+  val cacheLine = Output(UInt(256.W))
 }
 
 //how to load predecode information?
 //use PC(6,1) to locate predecode information
 class PDecode extends XSModule {
   val io = IO(new Bundle() {
-    // CacheLine from L1-PLUS Cache
-    val in = Flipped(ValidIO(new CacheLine))
-    // CacheLine to L1 Cache
-    val out = ValidIO(new CacheLine)
-    // preDecodeInfo to L1 Cache
-    val preDecodeInfo = ValidIO(Vec(CacheLineHalfWord, new PDecodeInfo))
+    val in = Input(Vec(FetchWidth,UInt(32.W)))
+    val out = Output(Vec(FetchWidth, new PDecodeInfo))
   })
 
-  val catCacheLine = Cat(0.U(16.W),io.in.bits.cacheLine)    //TODO:add span two Cache-Line
-  val cacheInstr = (0 until CacheLineHalfWord).map(i => catCacheLine(i*16+31,i*16))
+  //val catCacheLine = Cat(0.U(16.W),io.in.bits.cacheLine)    //TODO:add span two Cache-Line
+  val cacheInstr = io.in
+  val preDecodeInfo = io.out
 
-  val preDecodeTemp = Reg(Vec(CacheLineHalfWord, new PDecodeInfo))
+  val preDecodeTemp = Reg(Vec(FetchWidth, new PDecodeInfo))
   val cacheLineTemp = Reg((new CacheLine).cacheLine)
   val validLatch = RegInit(false.B)
 
@@ -61,35 +58,35 @@ class PDecode extends XSModule {
     List(res, isCall, isRet)
   }
 
-  for(i <- 0 until CacheLineHalfWord) {
+  for(i <- 0 until FetchWidth) {
     val brType::isCall::isRet::Nil = brInfo(cacheInstr(i))
-    preDecodeTemp(i).isRVC  := isRVC(cacheInstr(i))
-    preDecodeTemp(i).brTpye := brType
-    preDecodeTemp(i).isCall := isCall
-    preDecodeTemp(i).isRet  := isRet
-    preDecodeTemp(i).excType := ExcType.notExc
+    preDecodeInfo(i).isRVC  := isRVC(cacheInstr(i))
+    preDecodeInfo(i).brTpye := brType
+    preDecodeInfo(i).isCall := isCall
+    preDecodeInfo(i).isRet  := isRet
+    preDecodeInfo(i).excType := ExcType.notExc
   }
 
 
-  validLatch := io.in.valid
-  io.preDecodeInfo.bits := preDecodeTemp
-  io.preDecodeInfo.valid := validLatch
-
-  cacheLineTemp := io.in.bits.cacheLine
-  io.out.valid := validLatch
-  io.out.bits.cacheLine := cacheLineTemp
+//  validLatch := io.in.valid
+//  io.preDecodeInfo.bits := preDecodeTemp
+//  io.preDecodeInfo.valid := validLatch
+//
+//  cacheLineTemp := io.in.bits.cacheLine
+//  io.out.valid := validLatch
+//  io.out.bits.cacheLine := cacheLineTemp
 
 //  XSDebug("cacheinstr:\n")
 //  for(i <- 0 until FetchWidth) {
 //    XSDebug(io.out.valid, p"${Binary(cacheInstr(i))}\n")
 //  }
 
-  for(i <- 0 until CacheLineHalfWord) {
-    XSDebug(io.preDecodeInfo.valid,
+  for(i <- 0 until FetchWidth) {
+    XSDebug(//io.preDecodeInfo.valid,
       p"instr ${Binary(cacheInstr(i))} " +
-      p"RVC = ${Binary(io.preDecodeInfo.bits(i).isRVC)}, " +
-      p"BrType = ${Binary(io.preDecodeInfo.bits(i).brTpye)}, " +
-      p"isCall = ${Binary(io.preDecodeInfo.bits(i).isCall)}, " +
-      p"isRet = ${Binary(io.preDecodeInfo.bits(i).isRet)} \n")
+      p"RVC = ${Binary(preDecodeInfo(i).isRVC)}, " +
+      p"BrType = ${Binary(preDecodeInfo(i).brTpye)}, " +
+      p"isCall = ${Binary(preDecodeInfo(i).isCall)}, " +
+      p"isRet = ${Binary(preDecodeInfo(i).isRet)} \n")
   }
 }

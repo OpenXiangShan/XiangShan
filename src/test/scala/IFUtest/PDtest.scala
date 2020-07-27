@@ -28,15 +28,36 @@ class PDtest extends FlatSpec with ChiselScalatestTester with Matchers {
     "0000000_00010_00001_000_00001_0000011").U //Notbr
   behavior of "PD Test"
 
+//  val cacheInst = Wire(Vec(8, UInt(32.W)))
+//
+//  for(i <- 0 until 8) {
+//    cacheInst(i) := cacheLine(i*32+31,i*32)
+//  }
+
+
   it should "test PDecode" in {
     test(new PDecode) { c =>
       println(s"\n--------------------cycle 1------------------\n")
-      c.io.in.valid.poke(true.B)
-      c.io.in.bits.cacheLine.poke(cacheLine)
+      //c.io.in.valid.poke(true.B)
+      c.io.in(0).poke("b0000000_00010_00001_000_00001_0000011".U)
+      c.io.in(1).poke("b0000000_00010_00001_000_00000_1100011".U)
+      c.io.in(2).poke("b0000000_00010_00001_001_00000_1100011".U)
+      c.io.in(3).poke("b0000000_00010_00001_100_00000_1100011".U)
+      c.io.in(4).poke("b0000000_00010_00001_101_00000_1100011".U)
+      c.io.in(5).poke("b0000000_00000_00000_000_10000_1101111".U)
+      c.io.in(6).poke("b0000000_00010_00011_000_10000_1100111".U)
+      c.io.in(7).poke("b0000000_00000_00000_000_00001_1101111".U)
       c.clock.step()
       println(s"\n--------------------cycle 2------------------\n")
-      c.io.in.valid.poke(true.B)
-      c.io.in.bits.cacheLine.poke(cacheLine)
+      //c.io.in.valid.poke(true.B)
+      c.io.in(0).poke("b0000000_00010_00001_000_00001_0000011".U)
+      c.io.in(1).poke("b0000000_00010_00001_000_00000_1100011".U)
+      c.io.in(2).poke("b0000000_00010_00001_001_00000_1100011".U)
+      c.io.in(3).poke("b0000000_00010_00001_100_00000_1100011".U)
+      c.io.in(4).poke("b0000000_00010_00001_101_00000_1100011".U)
+      c.io.in(5).poke("b0000000_00000_00000_000_10000_1101111".U)
+      c.io.in(6).poke("b0000000_00010_00011_000_10000_1100111".U)
+      c.io.in(7).poke("b0000000_00000_00000_000_00001_1101111".U)
       c.clock.step()
       println(s"\n--------------------cycle 3------------------\n")
     }
