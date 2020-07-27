@@ -202,7 +202,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := Mux(partialLoad, rdataPartialLoad, rdata)
   // io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) && io.out.valid
-  io.out.bits.debug.isMMIO := AddressSpace.isMMIO(addr) //for debug
+  io.out.bits.debug.isMMIO := AddressSpace.isMMIO(Cat(0.U((PAddrBits - VAddrBits).W), addr)) //for debug | add Cat for PAddrBits larger than VAddrBits
   io.out.bits.redirect := DontCare
   io.out.bits.redirectValid := false.B
 

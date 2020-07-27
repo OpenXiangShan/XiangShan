@@ -181,7 +181,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.bits.hit := io.in.valid && hitVec.orR
   io.out.bits.waymask := waymask
   io.out.bits.datas := io.dataReadResp
-  io.out.bits.mmio := xiangshan.AddressSpace.isMMIO(req.addr)
+  io.out.bits.mmio := xiangshan.AddressSpace.isMMIO(ZeroExt(req.addr, 40)) // FIXME: isMMIO should have PAddrBits Length ??
 
   val isForwardData = io.in.valid && (io.dataWriteBus.req match { case r =>
     r.valid && r.bits.setIdx === getDataIdx(req.addr)

@@ -32,7 +32,7 @@ class DcacheUserBundle extends XSBundle {
 class DCacheLoadReq extends XSBundle
 {
   val paddr  = UInt(PAddrBits.W)
-  val vaddr  = UInt(PAddrBits.W)
+  val vaddr  = UInt(VAddrBits.W)
   val miss = Bool()
   val user = new DcacheUserBundle
 }
