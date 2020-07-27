@@ -50,8 +50,22 @@ trait HasXSParameter {
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = 128
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val NRReadPorts = 14
-  val NRWritePorts = 8
+  val exuParameters = ExuParameters(
+    JmpCnt = 1,
+    AluCnt = 4,
+    MulCnt = 1,
+    MduCnt = 1,
+    FmacCnt = 0,
+    FmiscCnt = 0,
+    FmiscDivSqrtCnt = 0,
+    LduCnt = 2,
+    StuCnt = 2
+  )
+  val NRIntReadPorts = 8
+  val NRIntWritePorts = 8
+  val NRMemReadPorts = exuParameters.LduCnt + 2*exuParameters.StuCnt
+  val NRFpReadPorts = 14
+  val NRFpWritePorts = 8
   val MoqSize = 16 // 64
   val RoqSize = 32
   val InnerRoqIdxWidth = log2Up(RoqSize)
@@ -65,17 +79,6 @@ trait HasXSParameter {
     IntDqSize = 16,
     FpDqSize = 16,
     LsDqSize = 16
-  )
-  val exuParameters = ExuParameters(
-    JmpCnt = 1,
-    AluCnt = 4,
-    MulCnt = 1,
-    MduCnt = 1,
-    FmacCnt = 0,
-    FmiscCnt = 0,
-    FmiscDivSqrtCnt = 0,
-    LduCnt = 0,
-    StuCnt = 1
   )
 }
 

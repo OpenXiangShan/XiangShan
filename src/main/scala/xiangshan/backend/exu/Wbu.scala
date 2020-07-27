@@ -43,7 +43,8 @@ class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
   val io = IO(new Bundle() {
     val in  = Vec(exuParameters.ExuCnt, Flipped(DecoupledIO(new ExuOutput)))
     val toRoq = Vec(exuParameters.ExuCnt, ValidIO(new ExuOutput))
-    val toIntRf, toFpRf = Vec(NRWritePorts, ValidIO(new ExuOutput))
+    val toIntRf = Vec(NRIntWritePorts, ValidIO(new ExuOutput))
+    val toFpRf = Vec(NRFpWritePorts, ValidIO(new ExuOutput))
   })
 
   def exuOutToRfReq
@@ -86,11 +87,12 @@ class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
     } else if(wbFp){
       io.in(i).ready := Mux(fReq.valid, fReq.ready, true.B)
     } else {
-      assert(cond = false, s"Error: Found a input wb nothing! idx=$i")
+      // store
+      io.in(i).ready := true.B
     }
   }
 
-  if(wbIntIdx.length < NRWritePorts){
+  if(wbIntIdx.length < NRIntWritePorts){
     io.toIntRf.take(wbIntIdx.length).zip(wbIntReq.map(_._1)).foreach(x => {
       x._1.bits := x._2.bits
       x._1.valid := x._2.valid
@@ -98,12 +100,12 @@ class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
     })
     io.toIntRf.drop(wbIntIdx.length).foreach(_ <> DontCare)
   } else {
-    val intArb = Module(new WriteBackArbMtoN(wbIntIdx.length, NRWritePorts))
+    val intArb = Module(new WriteBackArbMtoN(wbIntIdx.length, NRIntWritePorts))
     intArb.io.in <> wbIntReq.map(_._1)
     io.toIntRf <> intArb.io.out
   }
 
-  if(wbFpIdx.length < NRWritePorts){
+  if(wbFpIdx.length < NRFpWritePorts){
     io.toFpRf.take(wbFpIdx.length).zip(wbFpReq.map(_._1)).foreach(x => {
       x._1.bits := x._2.bits
       x._1.valid := x._2.valid
@@ -111,7 +113,7 @@ class Wbu(wbIntIdx: Array[Int], wbFpIdx: Array[Int]) extends XSModule{
     })
     io.toFpRf.drop(wbFpIdx.length).foreach(_ <> DontCare)
   } else {
-    val fpArb = Module(new WriteBackArbMtoN(wbFpIdx.length, NRWritePorts))
+    val fpArb = Module(new WriteBackArbMtoN(wbFpIdx.length, NRFpWritePorts))
     fpArb.io.in <> wbFpReq.map(_._1)
     io.toFpRf <> fpArb.io.out
   }

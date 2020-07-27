@@ -9,12 +9,12 @@ class Rename extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
-    val wbIntResults = Vec(NRWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val wbFpResults = Vec(NRWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val intRfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val fpRfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val intPregRdy = Vec(NRReadPorts, Output(Bool()))
-    val fpPregRdy = Vec(NRReadPorts, Output(Bool()))
+    val wbIntResults = Vec(NRIntWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val wbFpResults = Vec(NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val intRfReadAddr = Vec(NRIntReadPorts + NRMemReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val intPregRdy = Vec(NRIntReadPorts + NRMemReadPorts, Output(Bool()))
+    val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
@@ -47,7 +47,8 @@ class Rename extends XSModule {
   val fpFreeList, intFreeList = Module(new FreeList).io
   val fpRat = Module(new RenameTable(float = true)).io
   val intRat = Module(new RenameTable(float = false)).io
-  val fpBusyTable, intBusyTable = Module(new BusyTable).io
+  val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts + CommitWidth)).io
+  val intBusyTable = Module(new BusyTable(NRIntReadPorts+NRMemReadPorts, NRIntWritePorts + CommitWidth)).io
 
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
@@ -134,8 +135,10 @@ class Rename extends XSModule {
       rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
       rat.specWritePorts(i).wdata := Mux(specWen, freeList.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
 
-      busyTable.wbPregs(NRWritePorts + i).valid := walkWen
-      busyTable.wbPregs(NRWritePorts + i).bits := io.roqCommits(i).bits.uop.pdest
+      val numRfWritePorts = if(fp) NRFpWritePorts else NRIntWritePorts
+
+      busyTable.wbPregs(numRfWritePorts + i).valid := walkWen
+      busyTable.wbPregs(numRfWritePorts + i).bits := io.roqCommits(i).bits.uop.pdest
 
       XSInfo(walkWen,
         {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
@@ -194,7 +197,9 @@ class Rename extends XSModule {
   def updateBusyTable(fp: Boolean) = {
     val wbResults = if(fp) io.wbFpResults else io.wbIntResults
     val busyTable = if(fp) fpBusyTable else intBusyTable
-    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs.take(NRWritePorts))){
+    for(
+      (wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs.take(if(fp) NRFpWritePorts else NRIntWritePorts))
+    ){
       setPhyRegRdy.valid := wb.valid && needDestReg(fp, wb.bits.uop)
       setPhyRegRdy.bits := wb.bits.uop.pdest
     }

@@ -20,9 +20,10 @@ trait HasMEMConst{
 }
 
 class MemToBackendIO extends XSBundle {
-  val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
-  val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
-  val out = Vec(4, Decoupled(new ExuOutput))
+  val ldin = Vec(exuParameters.LduCnt, Flipped(Decoupled(new ExuInput)))
+  val stin = Vec(exuParameters.StuCnt, Flipped(Decoupled(new ExuInput)))
+  val ldout = Vec(exuParameters.LduCnt, Decoupled(new ExuOutput))
+  val stout = Vec(exuParameters.StuCnt, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = ValidIO(new Redirect)
   val mcommit = Input(UInt(3.W))
@@ -36,27 +37,30 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
   })
 
-  val lsu = Module(new Lsu)
-  val dcache = Module(new Dcache)
-  // val mshq = Module(new MSHQ)
-  val dtlb = Module(new Dtlb)
-  
-  dcache.io := DontCare
-  dtlb.io := DontCare
-  // mshq.io := DontCare
 
-  lsu.io.ldin <> io.backend.ldin
-  lsu.io.stin <> io.backend.stin
-  lsu.io.out <> io.backend.out
-  lsu.io.redirect <> io.backend.redirect
-  lsu.io.rollback <> io.backend.rollback
-  lsu.io.mcommit <> io.backend.mcommit
-  lsu.io.dp1Req <> io.backend.dp1Req
-  lsu.io.moqIdxs <> io.backend.moqIdxs
-  lsu.io.dcache <> dcache.io.lsu
-  lsu.io.dtlb <> dtlb.io.lsu
+  io <> DontCare
 
-  // for ls pipeline test
-  dcache.io.dmem <> io.dmem
+//  val lsu = Module(new Lsu)
+//  val dcache = Module(new Dcache)
+//  // val mshq = Module(new MSHQ)
+//  val dtlb = Module(new Dtlb)
+//
+//  dcache.io := DontCare
+//  dtlb.io := DontCare
+//  // mshq.io := DontCare
+//
+//  lsu.io.ldin <> io.backend.ldin
+//  lsu.io.stin <> io.backend.stin
+//  lsu.io.out <> io.backend.out
+//  lsu.io.redirect <> io.backend.redirect
+//  lsu.io.rollback <> io.backend.rollback
+//  lsu.io.mcommit <> io.backend.mcommit
+//  lsu.io.dp1Req <> io.backend.dp1Req
+//  lsu.io.moqIdxs <> io.backend.moqIdxs
+//  lsu.io.dcache <> dcache.io.lsu
+//  lsu.io.dtlb <> dtlb.io.lsu
+//
+//  // for ls pipeline test
+//  dcache.io.dmem <> io.dmem
 
 }

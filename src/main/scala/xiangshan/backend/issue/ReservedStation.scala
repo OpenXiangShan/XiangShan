@@ -7,15 +7,13 @@ import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.rename.FreeListPtr
 import utils._
 import xiangshan.backend.fu.FunctionUnit._
+import xiangshan.backend.regfile.RfReadPort
 
 
-trait IQConst extends HasXSParameter{
+trait HasIQConst extends HasXSParameter{
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
 }
-
-sealed abstract class IQBundle extends XSBundle with IQConst
-sealed abstract class IQModule extends XSModule with IQConst
 
 object OneCycleFire {
   def apply(fire: Bool) = {
@@ -26,10 +24,50 @@ object OneCycleFire {
   }
 }
 
+
 class IssueQueue
 (
-  exuCfg: ExuConfig, val wakeupCnt: Int, val bypassCnt: Int = 0, val enableBypass: Boolean = false, val fifo: Boolean = false
-) extends IQModule {
+  val exuCfg: ExuConfig,
+  val wakeupCnt: Int,
+  val bypassCnt: Int = 0
+) extends XSModule with HasIQConst with NeedImpl {
+  val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
+    val enq = Flipped(DecoupledIO(new MicroOp))
+    val intRfReadAddr = Output(Vec(exuCfg.intSrcCnt, UInt(PhyRegIdxWidth.W)))
+    val intSrcRdy = Input(Vec(exuCfg.intSrcCnt, Bool()))
+    val fpRfReadAddr = Output(Vec(exuCfg.fpSrcCnt, UInt(PhyRegIdxWidth.W)))
+    val fpSrcRdy = Input(Vec(exuCfg.fpSrcCnt, Bool()))
+    val deq = DecoupledIO(new ExuInput)
+    val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
+    val bypassUops = Vec(bypassCnt, Flipped(ValidIO(new MicroOp)))
+    val numExist = Output(UInt(iqIdxWidth.W))
+  })
+}
+
+class RegfileReader(cfgs: Seq[ExuConfig], bypassCnt: Int) extends Module with NeedImpl {
+
+  val numIntRfRead = cfgs.map(_.intSrcCnt).sum
+  val numFpRfRead = cfgs.map(_.fpSrcCnt).sum
+
+  val io = IO(new Bundle() {
+    // from issue queue
+    val in = Vec(cfgs.length, Flipped(DecoupledIO(new ExuInput)))
+    val bypasses = Vec(bypassCnt, Flipped(DecoupledIO(new ExuOutput)))
+    val readIntRf = Vec(numIntRfRead, Flipped(new RfReadPort))
+    val readFpRf = Vec(numFpRfRead, Flipped(new RfReadPort))
+    val out = Vec(cfgs.length, DecoupledIO(new ExuInput))
+  })
+}
+
+class ReservedStation
+(
+  val exuCfg: ExuConfig,
+  val wakeupCnt: Int,
+  val bypassCnt: Int = 0,
+  val enableBypass: Boolean = false,
+  val fifo: Boolean = false
+) extends XSModule with HasIQConst {
 
   val src2Use = true
   val src3Use = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
