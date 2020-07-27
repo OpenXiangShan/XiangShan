@@ -343,17 +343,17 @@ class BPUStage3 extends XSModule {
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction
 
 
-  val brs = inLatch.btb.hits & Reverse(Cat(predecode.fuOpTypes.map { t => ALUOpType.isBranch(t) }).asUInt) & predecode.mask
+  val brs = inLatch.btb.hits & Reverse(Cat(predecode.pd.map { p => p.brType === BrType.branch }).asUInt) & predecode.mask
   // val brTakens = brs & inLatch.tage.takens.asUInt
   val brTakens = if (EnableBPD) {
     brs & Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt)
   } else {
     brs & Reverse(Cat(inLatch.btbPred.bits.predCtr.map {c => c(1)}).asUInt)
   }
-  val jals = inLatch.btb.hits & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.jal }).asUInt) & predecode.mask
-  val calls = inLatch.btb.hits & predecode.mask & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.call }).asUInt)
-  val jalrs = inLatch.jbtac.hitIdx & predecode.mask & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.jalr }).asUInt)
-  val rets = predecode.mask & Reverse(Cat(predecode.fuOpTypes.map { t => t === JumpOpType.ret }).asUInt)
+  val jals = inLatch.btb.hits & Reverse(Cat(predecode.pd.map { p => p.brType === BrType.jal }).asUInt) & predecode.mask
+  val calls = inLatch.btb.hits & predecode.mask & Reverse(Cat(predecode.pd.map { p => p.isCall }).asUInt)
+  val jalrs = inLatch.jbtac.hitIdx & predecode.mask & Reverse(Cat(predecode.pd.map { p => p.brType === BrType.jalr }).asUInt)
+  val rets = predecode.mask & Reverse(Cat(predecode.pd.map { p => p.isRet }).asUInt)
 
   val brTakenIdx = PriorityMux(brTakens, (0 until PredictWidth).map(_.U))
   val jalIdx = PriorityMux(jals, (0 until PredictWidth).map(_.U))
@@ -365,7 +365,6 @@ class BPUStage3 extends XSModule {
   val jmpIdx = MuxCase(0.U, (0 until PredictWidth).map(i => (jmps(i), i.U)))
   io.s3Taken := MuxCase(false.B, (0 until PredictWidth).map(i => (jmps(i), true.B)))
 
-  // val brNotTakens = VecInit((0 until PredictWidth).map(i => brs(i) && ~inLatch.tage.takens(i) && i.U <= jmpIdx && io.predecode.bits.mask(i)))
   val brNotTakens = if (EnableBPD) {
     VecInit((0 until PredictWidth).map(i => brs(i) && i.U <= jmpIdx && ~inLatch.tage.takens(i>>1) && predecode.mask(i)))
   } else {
@@ -374,7 +373,7 @@ class BPUStage3 extends XSModule {
 
   // TODO: what if if4 and if2 late jump to the same target?
   // val lateJump = io.s3Taken && PriorityMux(Reverse(predecode.mask), ((PredictWidth - 1) to 0).map(_.U)) === jmpIdx && !predecode.isRVC(jmpIdx)
-  val lateJump = io.s3Taken && PriorityMux(Reverse(predecode.mask), (0 until PredictWidth).map {i => (PredictWidth - 1 - i).U}) === jmpIdx && !predecode.isRVC(jmpIdx)
+  val lateJump = io.s3Taken && PriorityMux(Reverse(predecode.mask), (0 until PredictWidth).map {i => (PredictWidth - 1 - i).U}) === jmpIdx && !predecode.pd(jmpIdx).isRVC
   io.out.bits.lateJump := lateJump
 
   io.out.bits.predCtr := inLatch.btbPred.bits.predCtr
@@ -418,7 +417,7 @@ class BPUStage3 extends XSModule {
   for (i <- PredictWidth - 1 to 0) {
     io.out.bits.instrValid(i) := (io.s3Taken && i.U <= jmpIdx || !io.s3Taken) && predecode.mask(i)
     if (i != (PredictWidth - 1)) {
-      when (!lateJump && !predecode.isRVC(i) && io.s3Taken && i.U <= jmpIdx) {
+      when (!lateJump && !predecode.pd(i).isRVC && io.s3Taken && i.U <= jmpIdx) {
         io.out.bits.instrValid(i+1) := predecode.mask(i+1)
       }
     }
@@ -428,7 +427,7 @@ class BPUStage3 extends XSModule {
 
   // speculative update RAS
   val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
-  val retAddr = inLatch.pc + (callIdx << 1.U) + Mux(predecode.isRVC(callIdx), 2.U, 4.U)
+  val retAddr = inLatch.pc + (callIdx << 1.U) + Mux(predecode.pd(callIdx).isRVC, 2.U, 4.U)
   rasWrite.retAddr := retAddr
   val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
   rasWrite.ctr := Mux(allocNewEntry, 1.U, rasTop.ctr + 1.U)

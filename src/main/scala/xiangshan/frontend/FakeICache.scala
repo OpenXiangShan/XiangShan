@@ -29,20 +29,24 @@ class TempPreDecoder extends XSModule  {
     val in = Input(Vec(FetchWidth,UInt(32.W)))
     val out = Output(new Predecode)
   })
-  val tempPreDecoders = Seq.fill(FetchWidth)(Module(new Decoder))
+  // val tempPreDecoders = Seq.fill(FetchWidth)(Module(new Decoder))
+  val tempPreDecoder = Module(new PDecode)
 
+  tempPreDecoder.io.in <> io.in
   for (i <- 0 until FetchWidth) {
-    tempPreDecoders(i).io.in <> DontCare
-    tempPreDecoders(i).io.in.instr <> io.in(i)
-    io.out.fuTypes(2*i) := tempPreDecoders(i).io.out.ctrl.fuType
-    io.out.fuTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuType
-    io.out.fuOpTypes(2*i) := tempPreDecoders(i).io.out.ctrl.fuOpType
-    io.out.fuOpTypes(2*i+1) := tempPreDecoders(i).io.out.ctrl.fuOpType
+    io.out.pd(2*i).isRVC     := false.B
+    io.out.pd(2*i+1).isRVC   := false.B
+    io.out.pd(2*i).brType    := tempPreDecoder.io.out(i).brType
+    io.out.pd(2*i+1).brType  := BrType.notBr
+    io.out.pd(2*i).isCall    := tempPreDecoder.io.out(i).isCall
+    io.out.pd(2*i+1).isCall  := false.B
+    io.out.pd(2*i).isRet     := tempPreDecoder.io.out(i).isRet
+    io.out.pd(2*i+1).isRet   := false.B
+    io.out.pd(2*i).excType   := tempPreDecoder.io.out(i).excType
+    io.out.pd(2*i+1).excType := tempPreDecoder.io.out(i).excType
   }
 
   io.out.mask := DontCare
-  io.out.isRVC := DontCare
-
 }
 
 

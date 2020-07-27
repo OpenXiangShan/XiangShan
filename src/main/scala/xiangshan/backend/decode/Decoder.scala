@@ -79,7 +79,7 @@ class Decoder extends XSModule with HasInstrType {
    when (isLink(rd) && fuOpType === JumpOpType.jal) { io.out.ctrl.fuOpType := JumpOpType.call }
    when (fuOpType === JumpOpType.jalr) {
      when (isLink(rs)) { io.out.ctrl.fuOpType := JumpOpType.ret }
-     when (isLink(rt)) { io.out.ctrl.fuOpType := JumpOpType.call }
+     when (isLink(rd)) { io.out.ctrl.fuOpType := JumpOpType.call }
    }
  }
   // fix LUI

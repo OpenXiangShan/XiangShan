@@ -240,19 +240,19 @@ class IFU extends XSModule with HasIFUConst
       when (if4_btb_taken && !if4_tage_taken && i.U === OHToUInt(HighestBit(if4_btb_insMask.asUInt, FetchWidth*2))) {
         io.fetchPacket.bits.pnpc(i) := if4_btb_target
         if (i != 0) {
-          when (!io.icacheResp.bits.predecode.isRVC(i) && !if4_btb_lateJump) {
+          when (!io.icacheResp.bits.predecode.pd(i).isRVC && !if4_btb_lateJump) {
             io.fetchPacket.bits.pnpc(i-1) := if4_btb_target
           }
         }
       }.elsewhen (if4_tage_taken && i.U === OHToUInt(HighestBit(if4_tage_insMask.asUInt, FetchWidth*2))) {
         io.fetchPacket.bits.pnpc(i) := Mux(if4_tage_lateJump, bpu.io.tageOut.bits.target, if4_tage_target)
         if (i != 0) {
-          when (!io.icacheResp.bits.predecode.isRVC(i) && !if4_tage_lateJump) {
+          when (!io.icacheResp.bits.predecode.pd(i).isRVC && !if4_tage_lateJump) {
             io.fetchPacket.bits.pnpc(i-1) := if4_tage_target
           }
         }
       }.otherwise {
-        io.fetchPacket.bits.pnpc(i) := if4_pc + (i.U << 1.U) + Mux(io.icacheResp.bits.predecode.isRVC(i), 2.U, 4.U)
+        io.fetchPacket.bits.pnpc(i) := if4_pc + (i.U << 1.U) + Mux(io.icacheResp.bits.predecode.pd(i).isRVC, 2.U, 4.U)
       }
       XSDebug(io.fetchPacket.fire,"[IFU-Out-FetchPacket] instruction %x    pnpc:0x%x\n",
         Mux((i.U)(0), io.fetchPacket.bits.instrs(i>>1)(31,16), io.fetchPacket.bits.instrs(i>>1)(15,0)),
@@ -272,7 +272,6 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.predecode.bits <> io.icacheResp.bits.predecode
     //TODO: consider RVC && consider cross cacheline fetch
     bpu.io.predecode.bits.mask := Fill(FetchWidth*2, 1.U(1.W))
-    bpu.io.predecode.bits.isRVC := 0.U.asTypeOf(Vec(FetchWidth*2, Bool()))
     bpu.io.redirectInfo := io.redirectInfo
     io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 

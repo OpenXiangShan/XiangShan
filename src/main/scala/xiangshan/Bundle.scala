@@ -5,6 +5,7 @@ import chisel3.util._
 import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
+import xiangshan.frontend.PDecodeInfo
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -69,9 +70,10 @@ class BranchPrediction extends XSBundle {
 // Save predecode info in icache
 class Predecode extends XSBundle {
   val mask = UInt((FetchWidth*2).W)
-  val isRVC = Vec(FetchWidth*2, Bool())
-  val fuTypes = Vec(FetchWidth*2, FuType())
-  val fuOpTypes = Vec(FetchWidth*2, FuOpType())
+  // val isRVC = Vec(FetchWidth*2, Bool())
+  // val fuTypes = Vec(FetchWidth*2, FuType())
+  // val fuOpTypes = Vec(FetchWidth*2, FuOpType())
+  val pd = Vec(FetchWidth*2, (new PDecodeInfo))
 }
 
 // Dequeue DecodeWidth insts from Ibuffer

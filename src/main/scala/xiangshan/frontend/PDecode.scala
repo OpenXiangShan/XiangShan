@@ -21,7 +21,7 @@ object ExcType {  //TODO:add exctype
 
 class PDecodeInfo extends XSBundle{  // 8 bit
   val isRVC   = Bool()
-  val brTpye  = UInt(2.W)
+  val brType  = UInt(2.W)
   val isCall  = Bool()
   val isRet   = Bool()
   val excType = UInt(3.W)
@@ -41,7 +41,7 @@ class PDecode extends XSModule {
 
   //val catCacheLine = Cat(0.U(16.W),io.in.bits.cacheLine)    //TODO:add span two Cache-Line
   val cacheInstr = io.in
-  val preDecodeInfo = io.out
+  // val preDecodeInfo = io.out
 
   val preDecodeTemp = Reg(Vec(FetchWidth, new PDecodeInfo))
   val cacheLineTemp = Reg((new CacheLine).cacheLine)
@@ -60,11 +60,11 @@ class PDecode extends XSModule {
 
   for(i <- 0 until FetchWidth) {
     val brType::isCall::isRet::Nil = brInfo(cacheInstr(i))
-    preDecodeInfo(i).isRVC  := isRVC(cacheInstr(i))
-    preDecodeInfo(i).brTpye := brType
-    preDecodeInfo(i).isCall := isCall
-    preDecodeInfo(i).isRet  := isRet
-    preDecodeInfo(i).excType := ExcType.notExc
+    io.out(i).isRVC  := isRVC(cacheInstr(i))
+    io.out(i).brType := brType
+    io.out(i).isCall := isCall
+    io.out(i).isRet  := isRet
+    io.out(i).excType := ExcType.notExc
   }
 
 
@@ -83,10 +83,10 @@ class PDecode extends XSModule {
 
   for(i <- 0 until FetchWidth) {
     XSDebug(//io.preDecodeInfo.valid,
-      p"instr ${Binary(cacheInstr(i))} " +
-      p"RVC = ${Binary(preDecodeInfo(i).isRVC)}, " +
-      p"BrType = ${Binary(preDecodeInfo(i).brTpye)}, " +
-      p"isCall = ${Binary(preDecodeInfo(i).isCall)}, " +
-      p"isRet = ${Binary(preDecodeInfo(i).isRet)} \n")
+      p"instr ${Hexadecimal(cacheInstr(i))} " +
+      p"RVC = ${Binary(io.out(i).isRVC)}, " +
+      p"BrType = ${Binary(io.out(i).brType)}, " +
+      p"isCall = ${Binary(io.out(i).isCall)}, " +
+      p"isRet = ${Binary(io.out(i).isRet)} \n")
   }
 }
