@@ -2,6 +2,8 @@
 
 #include <SDL2/SDL.h>
 
+//#define SHOW_SCREEN
+
 #define SCREEN_PORT 0x100 // Note that this is not the standard
 #define SCREEN_MMIO 0x4100
 #define SCREEN_H 600
@@ -20,7 +22,9 @@ extern "C" void put_pixel(uint32_t pixel) {
 }
 
 extern "C" void vmem_sync(void) {
+#ifndef SHOW_SCREEN
   return;
+#endif
   SDL_UpdateTexture(texture, NULL, vmem, SCREEN_W * sizeof(uint32_t));
   SDL_RenderClear(renderer);
   SDL_RenderCopy(renderer, texture, NULL, NULL);
@@ -28,7 +32,9 @@ extern "C" void vmem_sync(void) {
 }
 
 void init_sdl() {
+#ifndef SHOW_SCREEN
   return;
+#endif
   SDL_Init(SDL_INIT_VIDEO);
   SDL_CreateWindowAndRenderer(SCREEN_W, SCREEN_H, 0, &window, &renderer);
   SDL_SetWindowTitle(window, "NOOP");

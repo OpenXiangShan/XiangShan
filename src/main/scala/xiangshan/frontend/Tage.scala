@@ -109,9 +109,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val (hashed_idx, tag) = compute_tag_and_hash(io.req.bits.pc >> (2 + log2Ceil(FetchWidth)), io.req.bits.hist)
 
-  val hi_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
-  val lo_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
-  val table = List.fill(BankWidth)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=true, holdRead=true, singlePort=false)))
+  val hi_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  val lo_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  val table = List.fill(BankWidth)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
 
   val hi_us_r = Wire(Vec(BankWidth, Bool()))
   val lo_us_r = Wire(Vec(BankWidth, Bool()))
@@ -133,9 +133,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       lo_us_r(b) := lo_us(b).io.r.resp.data(0)
       table_r(b) := table(b).io.r.resp.data(0)
 
-      io.resp(b).valid := table_r(b).valid && table_r(b).tag === tag // Missing reset logic
-      io.resp(b).bits.ctr := table_r(b).ctr
-      io.resp(b).bits.u := Cat(hi_us_r(b),lo_us_r(b))
+      // io.resp(b).valid := table_r(b).valid && table_r(b).tag === tag // Missing reset logic
+      // io.resp(b).bits.ctr := table_r(b).ctr
+      // io.resp(b).bits.u := Cat(hi_us_r(b),lo_us_r(b))
     }
   )
 
@@ -262,8 +262,8 @@ class Tage extends TageModule {
 
   val updateMeta = io.redirectInfo.redirect.tageMeta
   //val updateMisPred = UIntToOH(io.redirectInfo.redirect.fetchIdx) &
-  //  Fill(FetchWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect._type === BTBtype.B).asUInt)
-  val updateMisPred = io.redirectInfo.misPred && io.redirectInfo.redirect._type === BTBtype.B
+  //  Fill(FetchWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B).asUInt)
+  val updateMisPred = io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
   val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
@@ -317,8 +317,8 @@ class Tage extends TageModule {
     io.meta(w).allocate.bits := allocEntry
 
     val isUpdateTaken = io.redirectInfo.valid && io.redirectInfo.redirect.fetchIdx === w.U &&
-      io.redirectInfo.redirect.taken && io.redirectInfo.redirect._type === BTBtype.B
-    when (io.redirectInfo.redirect._type === BTBtype.B && io.redirectInfo.valid &&  io.redirectInfo.redirect.fetchIdx === w.U) {
+      io.redirectInfo.redirect.taken && io.redirectInfo.redirect.btbType === BTBtype.B
+    when (io.redirectInfo.redirect.btbType === BTBtype.B && io.redirectInfo.valid &&  io.redirectInfo.redirect.fetchIdx === w.U) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 
@@ -373,5 +373,7 @@ class Tage extends TageModule {
   }
 
   io.out.hits := outHits.asUInt
+
+  XSDebug(io.req.valid, "req: pc=0x%x, hist=%b\n", io.req.bits.pc, io.req.bits.hist)
 
 }

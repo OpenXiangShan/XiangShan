@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
+import chisel3.ExcitingUtils._
 
 
 class BrqPtr extends XSBundle {
@@ -63,6 +63,10 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
+  // commit cnt of branch instr
+  val bcommit = Input(UInt(BrTagWidth.W))
+  // in order dequeue to train bpd
+  val inOrderBrInfo = Output(new RedirectInfo)
 }
 
 class Brq extends XSModule {
@@ -87,6 +91,7 @@ class Brq extends XSModule {
     val isIdle = Bool()
   }
 
+  val brCommitCnt = RegInit(0.U(BrTagWidth.W))
   val brQueue = Reg(Vec(BrqSize, new BrqEntry))
   val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
 
@@ -117,10 +122,17 @@ class Brq extends XSModule {
   }
 
   val commitIsHead = commitIdx===headIdx
-  val deqValid = !stateQueue(headIdx).isIdle && commitIsHead
+  val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
 
+  brCommitCnt := brCommitCnt + io.bcommit - deqValid
+
+  XSDebug(p"brCommitCnt:$brCommitCnt\n")
+  assert(brCommitCnt+io.bcommit >= deqValid)
+  io.inOrderBrInfo.valid := deqValid
+  io.inOrderBrInfo.misPred := commitEntry.misPred
+  io.inOrderBrInfo.redirect := commitEntry.exuOut.redirect
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
@@ -142,7 +154,7 @@ class Brq extends XSModule {
   )
 
   headPtr := headPtrNext
-  io.redirect.valid := commitValid && commitEntry.misPred
+  io.redirect.valid := commitValid && commitEntry.misPred && !io.roqRedirect.valid
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
@@ -194,6 +206,7 @@ class Brq extends XSModule {
     stateQueue.foreach(_ := s_idle)
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
+    brCommitCnt := 0.U
   }.elsewhen(io.redirect.valid){
     // misprediction
     stateQueue.zipWithIndex.foreach({case(s, i) =>
@@ -224,28 +237,37 @@ class Brq extends XSModule {
   XSInfo(debug_roq_redirect, "roq redirect, flush brq\n")
 
   XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
-  val mbpInstr = io.out.fire()
-  val mbpRight = io.out.fire() && !commitEntry.misPred
-  val mbpWrong = io.out.fire() && commitEntry.misPred
-  val mbpBRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B
-  val mbpBWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.B
-  val mbpJRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J
-  val mbpJWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.J
-  val mbpIRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I
-  val mbpIWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.I
-  val mbpRRight = io.out.fire() && !commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R
-  val mbpRWrong = io.out.fire() && commitEntry.misPred && commitEntry.exuOut.redirect._type===BTBtype.R
+
+  val fire = io.out.fire()
+  val predRight = fire && !commitEntry.misPred
+  val predWrong = fire && commitEntry.misPred
+  val isBType = commitEntry.exuOut.redirect.btbType===BTBtype.B
+  val isJType = commitEntry.exuOut.redirect.btbType===BTBtype.J
+  val isIType = commitEntry.exuOut.redirect.btbType===BTBtype.I
+  val isRType = commitEntry.exuOut.redirect.btbType===BTBtype.R
+  val mbpInstr = fire
+  val mbpRight = predRight
+  val mbpWrong = predWrong
+  val mbpBRight = predRight && isBType
+  val mbpBWrong = predWrong && isBType
+  val mbpJRight = predRight && isJType
+  val mbpJWrong = predWrong && isJType
+  val mbpIRight = predRight && isIType
+  val mbpIWrong = predWrong && isIType
+  val mbpRRight = predRight && isRType
+  val mbpRWrong = predWrong && isRType
+
   if(EnableBPU){
-    BoringUtils.addSource(mbpInstr, "MbpInstr")
-    BoringUtils.addSource(mbpRight, "MbpRight")
-    BoringUtils.addSource(mbpWrong, "MbpWrong")
-    BoringUtils.addSource(mbpBRight, "MbpBRight")
-    BoringUtils.addSource(mbpBWrong, "MbpBWrong")
-    BoringUtils.addSource(mbpJRight, "MbpJRight")
-    BoringUtils.addSource(mbpJWrong, "MbpJWrong")
-    BoringUtils.addSource(mbpIRight, "MbpIRight")
-    BoringUtils.addSource(mbpIWrong, "MbpIWrong")
-    BoringUtils.addSource(mbpRRight, "MbpRRight")
-    BoringUtils.addSource(mbpRWrong, "MbpRWrong")
+    ExcitingUtils.addSource(mbpInstr, "perfCntCondMbpInstr", Perf)
+    ExcitingUtils.addSource(mbpRight, "perfCntCondMbpRight", Perf)
+    ExcitingUtils.addSource(mbpWrong, "perfCntCondMbpWrong", Perf)
+    ExcitingUtils.addSource(mbpBRight, "perfCntCondMbpBRight", Perf)
+    ExcitingUtils.addSource(mbpBWrong, "perfCntCondMbpBWrong", Perf)
+    ExcitingUtils.addSource(mbpJRight, "perfCntCondMbpJRight", Perf)
+    ExcitingUtils.addSource(mbpJWrong, "perfCntCondMbpJWrong", Perf)
+    ExcitingUtils.addSource(mbpIRight, "perfCntCondMbpIRight", Perf)
+    ExcitingUtils.addSource(mbpIWrong, "perfCntCondMbpIWrong", Perf)
+    ExcitingUtils.addSource(mbpRRight, "perfCntCondMbpRRight", Perf)
+    ExcitingUtils.addSource(mbpRWrong, "perfCntCondMbpRWrong", Perf)
   }
 }

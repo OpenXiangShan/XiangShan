@@ -11,12 +11,12 @@ class FetchPacket extends XSBundle {
   val instrs = Vec(FetchWidth, UInt(32.W))
   val mask = UInt((FetchWidth*2).W)
   val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
-  val pnpc = Vec(FetchWidth, UInt(VAddrBits.W))
-  val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  val pnpc = Vec(FetchWidth*2, UInt(VAddrBits.W))
+  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
   // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  val predCtr = Vec(FetchWidth, UInt(2.W))
-  val btbHitWay = Bool()
-  val tageMeta = Vec(FetchWidth, (new TageMeta))
+  val predCtr = Vec(FetchWidth*2, UInt(2.W))
+  val btbHit = Vec(FetchWidth*2, Bool())
+  val tageMeta = Vec(FetchWidth*2, (new TageMeta))
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
 }
@@ -47,20 +47,20 @@ class BranchPrediction extends XSBundle {
   val redirect = Bool()
 
   // mask off all the instrs after the first redirect instr
-  val instrValid = Vec(FetchWidth, Bool())
+  val instrValid = Vec(FetchWidth*2, Bool())
   // target of the first redirect instr in a fetch package
   val target = UInt(VAddrBits.W)
-
+  val lateJump = Bool()
   // save these info in brq!
   // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
-  val hist = Vec(FetchWidth, UInt(HistoryLength.W))
+  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
   // victim way when updating btb
   // val btbVictimWay = UInt(log2Up(BtbWays).W)
   // 2-bit saturated counter 
-  val predCtr = Vec(FetchWidth, UInt(2.W))
-  val btbHitWay = Bool()
+  val predCtr = Vec(FetchWidth*2, UInt(2.W))
+  val btbHit = Vec(FetchWidth*2, Bool())
   // tage meta info
-  val tageMeta = Vec(FetchWidth, (new TageMeta))
+  val tageMeta = Vec(FetchWidth*2, (new TageMeta))
   // ras checkpoint, only used in Stage3
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
@@ -68,9 +68,10 @@ class BranchPrediction extends XSBundle {
 
 // Save predecode info in icache
 class Predecode extends XSBundle {
-  val mask = UInt(FetchWidth.W)
-  val fuTypes = Vec(FetchWidth, FuType())
-  val fuOpTypes = Vec(FetchWidth, FuOpType())
+  val mask = UInt((FetchWidth*2).W)
+  val isRVC = Vec(FetchWidth*2, Bool())
+  val fuTypes = Vec(FetchWidth*2, FuType())
+  val fuOpTypes = Vec(FetchWidth*2, FuOpType())
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
@@ -82,7 +83,7 @@ class CtrlFlow extends XSBundle {
   val hist = UInt(HistoryLength.W)
   // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val btbPredCtr = UInt(2.W)
-  val btbHitWay = Bool()
+  val btbHit = Bool()
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
@@ -128,15 +129,16 @@ class Redirect extends XSBundle {
   val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
   val brTag = new BrqPtr
-  val _type = UInt(2.W)
+  val btbType = UInt(2.W)
+  val isRVC = Bool()
   //val isCall = Bool()
   val taken = Bool()
   val hist = UInt(HistoryLength.W)
   val tageMeta = new TageMeta
-  val fetchIdx = UInt(log2Up(FetchWidth).W)
+  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val btbPredCtr = UInt(2.W)
-  val btbHitWay = Bool()
+  val btbHit = Bool()
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val isException = Bool()
@@ -179,7 +181,8 @@ class ExuIO extends XSBundle {
   val in = Flipped(DecoupledIO(new ExuInput))
   val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
-
+  // for csr
+  val exception = Flipped(ValidIO(new MicroOp))
   // for Lsu
   val dmem = new SimpleBusUC
   val scommit = Input(UInt(3.W))
@@ -195,5 +198,5 @@ class FrontendToBackendIO extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
   val redirectInfo = Input(new RedirectInfo)
-  val commits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit))) // update branch pred
+  val inOrderBrInfo = Input(new RedirectInfo)
 }
