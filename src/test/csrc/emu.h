@@ -4,6 +4,8 @@
 #include <iomanip>
 #include <fstream>
 #include <vector>
+#include <memory>
+#include <time.h>
 #include "difftest.h"
 
 //#include "VSimTop__Dpi.h"
@@ -14,6 +16,7 @@
 #endif
 
 #define DIFFTEST_WIDTH 6
+#define SNAPSHOT_INTERVAL 10 // unit: second
 
 static char mybuf[BUFSIZ];
 
@@ -29,10 +32,11 @@ class Emulator {
   uint32_t seed;
   uint64_t max_cycles, cycles;
   uint64_t log_begin, log_end;
+  const char *snapshot_path;
+  int hascommit;
 
   std::vector<const char *> parse_args(int argc, const char *argv[]);
 
-  static const struct option long_options[];
   static void print_help(const char *file);
 
   void read_emu_regs(uint64_t *r) {
@@ -73,7 +77,8 @@ class Emulator {
     image(nullptr),
     dut_ptr(new std::remove_reference<decltype(*dut_ptr)>::type),
     seed(0), max_cycles(-1), cycles(0),
-    log_begin(0), log_end(-1)
+    log_begin(0), log_end(-1),
+    snapshot_path(NULL), hascommit(0)
   {
     // init emu
     auto args = parse_args(argc, argv);
@@ -85,10 +90,6 @@ class Emulator {
     srand48(seed);
     Verilated::randReset(2);
 
-    // set log time range and log level
-    dut_ptr->io_logCtrl_log_begin = log_begin;
-    dut_ptr->io_logCtrl_log_end = log_end;
-
     // init ram
     extern void init_ram(const char *img);
     init_ram(image);
@@ -99,6 +100,10 @@ class Emulator {
 
     // init core
     reset_ncycles(10);
+  }
+
+  ~Emulator() {
+    snapshot_finalize();
   }
 
   void reset_ncycles(size_t cycles) {
@@ -132,9 +137,9 @@ class Emulator {
     extern void poll_event(void);
     extern uint32_t uptime(void);
     extern void set_abort(void);
-    uint32_t lasttime = 0;
+    uint32_t lasttime_poll = 0;
+    uint32_t lasttime_snapshot = 0;
     uint64_t lastcommit = n;
-    int hascommit = 0;
     const int stuck_limit = 500;
     
     static uint32_t wdst[DIFFTEST_WIDTH];
@@ -175,10 +180,13 @@ class Emulator {
 
       if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
         hascommit = 1;
-        extern void init_difftest(uint64_t *reg);
         uint64_t reg[DIFFTEST_NR_REG];
         read_emu_regs(reg);
-        init_difftest(reg);
+        init_difftest();
+        void* get_img_start();
+        long get_img_size();
+        ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
+        ref_difftest_setregs(reg);
       }
 
       // difftest
@@ -200,9 +208,15 @@ class Emulator {
       }
 
       uint32_t t = uptime();
-      if (t - lasttime > 100) {
+      if (t - lasttime_poll > 100) {
         poll_event();
-        lasttime = t;
+        lasttime_poll = t;
+      }
+      if (t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
+        // save snapshot every 10s
+        time_t now = time(NULL);
+        snapshot_save(snapshot_filename(my_strftime(now)));
+        lasttime_snapshot = t;
       }
     }
   }
@@ -221,10 +235,26 @@ class Emulator {
     eprintf(ANSI_COLOR_MAGENTA "This is random test for cache.\n" ANSI_COLOR_RESET);
     cache_test(max_cycles);
 #else
+    if (snapshot_path != NULL) {
+      init_difftest();
+      snapshot_load(snapshot_path);
+      hascommit = 1;
+    }
+
+    // set log time range and log level
+    dut_ptr->io_logCtrl_log_begin = log_begin;
+    dut_ptr->io_logCtrl_log_end = log_end;
+
     execute_cycles(max_cycles);
 #endif
   }
   uint64_t get_cycles() const { return cycles; }
   uint64_t get_max_cycles() const { return max_cycles; }
   uint32_t get_seed() const { return seed; }
+
+  char* my_strftime(time_t time);
+  char* snapshot_filename(const char *name);
+  void snapshot_save(const char *filename);
+  void snapshot_load(const char *filename);
+  void snapshot_finalize();
 };
