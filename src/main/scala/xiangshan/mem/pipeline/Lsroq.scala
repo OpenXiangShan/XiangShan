@@ -19,12 +19,12 @@ class LsRoqEntry extends XSBundle {
   val miss = Bool()
   val mmio = Bool()
   val store = Bool()
-  val bwdMask = UInt(8.W)
-  val bwdData = UInt(XLEN.W)
+  val bwdMask = Vec(8, Bool()) // UInt(8.W)
+  val bwdData = Vec(8, UInt(8.W))
 }
 
 // Load/Store Roq (Moq) for XiangShan Out of Order LSU
-class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
+class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
@@ -32,7 +32,8 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
-    val out = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val mcommit = Input(UInt(3.W))
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val rollback = Output(Valid(new Redirect))
@@ -66,7 +67,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       valid(ringBufferHead+offset) := false.B
       writebacked(ringBufferHead+offset) := false.B
       store(ringBufferHead+offset) := false.B
-      data(ringBufferHead+offset).bwdMask := 0.U
+      data(ringBufferHead+offset).bwdMask := 0.U(8.W).asBools
     }
     io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead+offset)
     io.moqIdxs(i) := ringBufferHeadExtended+offset
@@ -167,20 +168,21 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   storeWbSel(1) := OHToUInt(selvec1.asUInt)
 
   (0 until StorePipelineWidth).map(i => {
-    io.out(i).bits.uop := uop(storeWbSel(i))
-    io.out(i).bits.data := data(storeWbSel(i)).data
-    io.out(i).bits.redirectValid := false.B
-    io.out(i).bits.redirect := DontCare
-    io.out(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
+    io.stout(i).bits.uop := uop(storeWbSel(i))
+    io.stout(i).bits.data := data(storeWbSel(i)).data
+    io.stout(i).bits.redirectValid := false.B
+    io.stout(i).bits.redirect := DontCare
+    io.stout(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
     when(storeWbSelVec(storeWbSel(i))){
       writebacked(storeWbSel(i)) := true.B
     }
-    io.out(i).valid := storeWbSelVec(storeWbSel(i))
+    io.stout(i).valid := storeWbSelVec(storeWbSel(i))
   })
 
   // cache miss request
   // TODO
-  // io.miss := DontCare
+  io.miss.valid := false.B
+  io.miss := DontCare
   // val missRefillSelVec = VecInit(
   //   (0 until MoqSize).map(i => allocated(i) && valid(i) && miss(i))
   // )
@@ -196,8 +198,12 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // get load result from refill resp
   // TODO
 
-  // writeback up to 2 missed load / store insts
+  // writeback up to 2 missed load insts to CDB
   // TODO
+  (0 until 2).map(i => {
+    io.ldout(i) <> DontCare
+    io.ldout(i).valid := false.B
+  })
 
   // remove retired insts from lsroq, add retired store to sbuffer
   val scommitCnt = RegInit(0.U(log2Up(MoqSize).W))
@@ -295,7 +301,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     (0 until 8).map(k => {
       when(data(io.forward(i).moqIdx).bwdMask(k)){
         io.forward(i).forwardMask(k) := true.B
-        io.forward(i).forwardData(k) := data(io.forward(i).moqIdx).bwdData(8*(k+1)-1, 8*k)
+        io.forward(i).forwardData(k) := data(io.forward(i).moqIdx).bwdData(k)
         XSDebug("backwarding "+k+"th byte %x\n", io.forward(i).forwardData(k))
       }
     })
@@ -322,8 +328,8 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
               rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
               rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
             }.otherwise{
-              data(j).bwdMask(k) := 1.U
-              data(j).bwdData(8*(k+1)-1, 8*k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
+              data(j).bwdMask(k) := true.B
+              data(j).bwdData(k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
               XSDebug("write backward data: ptr %x byte %x data %x\n", ptr, k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
             } 
           }

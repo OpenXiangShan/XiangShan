@@ -97,6 +97,7 @@ class Dcache extends XSModule {
 
   // NutShell cache
   assert(!io.lsu.load(1).req.valid)
+  io.lsu.refill <> DontCare
   io.lsu.load(1).resp := DontCare
   io.lsu.load(1).resp.valid := false.B
   io.lsu.load(1).req.ready := false.B
