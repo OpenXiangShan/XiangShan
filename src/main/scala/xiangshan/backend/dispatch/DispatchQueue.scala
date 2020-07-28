@@ -15,76 +15,102 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
 
+class DispatchQEntry extends XSBundle {
+  val uop = new MicroOp
+  val state = UInt(2.W)
+}
+
+// dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
 class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
-  val index_width = log2Ceil(size)
+  val indexWidth = log2Ceil(size)
+
+  val s_valid :: s_dispatched :: s_invalid :: Nil = Enum(3)
 
   // queue data array
-  val entries = Reg(Vec(size, new MicroOp))
-  val entriesValid = Reg(Vec(size, Bool()))
-  val head = RegInit(0.U(index_width.W))
-  val tail = RegInit(0.U(index_width.W))
-  val enq_index = Wire(Vec(enqnum, UInt(index_width.W)))
-  val enq_count = Wire(Vec(enqnum, UInt((index_width + 1).W)))
-  val deq_index = Wire(Vec(deqnum, UInt(index_width.W)))
-  val head_direction = RegInit(0.U(1.W))
-  val tail_direction = RegInit(0.U(1.W))
+  val entries = Reg(Vec(size, new DispatchQEntry))
+  val headPtr = RegInit(0.U((indexWidth + 1).W))
+  val dispatchPtr = RegInit(0.U((indexWidth + 1).W))
+  val tailPtr = RegInit(0.U((indexWidth + 1).W))
+  val headIndex = headPtr(indexWidth - 1, 0)
+  val dispatchIndex = dispatchPtr(indexWidth - 1, 0)
+  val tailIndex = tailPtr(indexWidth - 1, 0)
+  val headDirection = headPtr(indexWidth)
+  val dispatchDirection = dispatchPtr(indexWidth)
+  val tailDirection = tailPtr(indexWidth)
+  val commitPtr = (0 until CommitWidth).map(i => headPtr + i.U)
+  val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
+  val deqPtr = (0 until enqnum).map(i => dispatchDirection + i.U)
+  val commitIndex = commitPtr.map(ptr => ptr(indexWidth - 1, 0))
+  val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
+  val deqIndex = deqPtr.map(ptr => ptr(indexWidth - 1, 0))
 
-  val valid_entries = Mux(head_direction === tail_direction, tail - head, size.U + tail - head)
-  val empty_entries = size.U - valid_entries
+  val validEntries = Mux(headDirection === tailDirection, tailIndex - headIndex, size.U + tailIndex - headIndex)
+  val dispatchEntries = Mux(dispatchDirection === tailDirection, tailIndex - dispatchIndex, size.U + tailIndex - dispatchIndex)
+  val emptyEntries = size.U - validEntries
 
   // check whether valid uops are canceled
-  val cancelled = Wire(Vec(size, Bool()))
+  val cancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    cancelled(i) := entries(i).brTag.needFlush(io.redirect)
+    cancel(i) := entries(i).uop.brTag.needFlush(io.redirect)
   }
 
-  // calcelled uops should be set to invalid from enqueue input
+  // cancelled uops should be set to invalid from enqueue input
   // we don't need to compare their brTags here
   for (i <- 0 until enqnum) {
-    enq_count(i) := PopCount(io.enq.slice(0, i + 1).map(_.valid))
-    enq_index(i) := (tail + enq_count(i) - 1.U) % size.U
     when (io.enq(i).fire()) {
-      entries(enq_index(i)) := io.enq(i).bits
-      entriesValid(enq_index(i)) := true.B
+      entries(enqIndex(i)).uop := io.enq(i).bits
+      entries(enqIndex(i)).state := s_valid
     }
   }
 
   for (i <- 0 until deqnum) {
-    deq_index(i) := ((head + i.U) % size.U).asUInt()
     when (io.deq(i).fire()) {
-      entriesValid(deq_index(i)) := false.B
+      entries(deqIndex(i)).state := s_dispatched
     }
   }
 
   // cancel uops currently in the queue
   for (i <- 0 until size) {
-    when (cancelled(i) && entriesValid(i)) {
-      entriesValid(i) := false.B
+    val needCancel = cancel(i) && entries(i).state === s_valid
+    when (needCancel) {
+      entries(i).state := s_invalid
     }
-    XSInfo(cancelled(i) && entriesValid(i),
-      name + ": valid entry(%d)(pc = %x) cancelled with brTag %x\n",
-      i.U, entries(i).cf.pc, io.redirect.bits.brTag.value)
+    XSInfo(needCancel, p"$name: valid entry($i)(pc = ${Hexadecimal(entries(i).uop.cf.pc)})" +
+      p"cancelled with brTag ${Hexadecimal(io.redirect.bits.brTag.value)}\n")
   }
 
   // enqueue
-  val num_enq_try = enq_count(enqnum - 1)
-  val num_enq = Mux(empty_entries > num_enq_try, num_enq_try, empty_entries)
-  (0 until enqnum).map(i => io.enq(i).ready := enq_count(i) <= num_enq)
-  tail := (tail + num_enq) % size.U
-  tail_direction := ((Cat(0.U(1.W), tail) + num_enq) >= size.U).asUInt() ^ tail_direction
+  val numEnqTry = PriorityEncoder(io.enq.map(!_.valid) :+ true.B)
+  val numEnq = Mux(emptyEntries > numEnqTry, numEnqTry, emptyEntries)
+  val enqReadyBits = (1.U << numEnq).asUInt() - 1.U
+  (0 until enqnum).map(i => io.enq(i).ready := enqReadyBits(i).asBool())
+  tailPtr := tailPtr + numEnq
 
   // dequeue
-  val num_deq_try = Mux(valid_entries > deqnum.U, deqnum.U, valid_entries)
-  val num_deq_fire = PriorityEncoder((io.deq.zipWithIndex map { case (deq, i) =>
-    !deq.fire() && entriesValid(deq_index(i))
+  val numDeqTry = Mux(dispatchEntries > deqnum.U, deqnum.U, dispatchEntries)
+  val numDeqFire = PriorityEncoder((io.deq.zipWithIndex map { case (deq, i) =>
+    !deq.fire() && entries(deqIndex(i)).state === s_valid
   }) :+ true.B)
-  val num_deq = Mux(num_deq_try > num_deq_fire, num_deq_fire, num_deq_try)
+  val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   for (i <- 0 until deqnum) {
-    io.deq(i).bits := entries(deq_index(i))
+    io.deq(i).bits := entries(deqIndex(i)).uop
     // needs to cancel uops trying to dequeue
-    io.deq(i).valid := (i.U < num_deq_try) && entriesValid(deq_index(i)) && !cancelled(deq_index(i))
+    io.deq(i).valid := entries(deqIndex(i)).state === s_valid && !cancel(deqIndex(i))
   }
-  head := (head + num_deq) % size.U
-  head_direction := ((Cat(0.U(1.W), head) + num_deq) >= size.U).asUInt() ^ head_direction
+
+  // replay
+  val numReplay = 0.U
+
+  dispatchPtr := dispatchPtr + numDeq - numReplay
+
+  // commit
+  val numCommit = 0.U
+  val commitBits = (1.U << numCommit).asUInt() - 1.U
+  for (i <- 0 until CommitWidth) {
+    when (commitBits(i)) {
+      entries(commitIndex(i)).state := s_invalid
+    }
+  }
+  headPtr := headPtr + numCommit
 }
