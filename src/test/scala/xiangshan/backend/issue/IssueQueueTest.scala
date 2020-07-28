@@ -18,7 +18,7 @@ class IssueQueueTest extends FlatSpec
 {
   XSLog.generateLog = false
   it should "do enq issue with no delay correctly" in {
-    test(new ReservedStation(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
+    test(new ReservationStation(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
       AddSinks()
     }) { c =>
 

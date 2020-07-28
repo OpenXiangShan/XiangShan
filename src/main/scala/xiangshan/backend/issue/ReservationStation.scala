@@ -34,10 +34,8 @@ class IssueQueue
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val enq = Flipped(DecoupledIO(new MicroOp))
-    val intRfReadAddr = Output(Vec(exuCfg.intSrcCnt, UInt(PhyRegIdxWidth.W)))
-    val intSrcRdy = Input(Vec(exuCfg.intSrcCnt, Bool()))
-    val fpRfReadAddr = Output(Vec(exuCfg.fpSrcCnt, UInt(PhyRegIdxWidth.W)))
-    val fpSrcRdy = Input(Vec(exuCfg.fpSrcCnt, Bool()))
+    val readIntRf = Vec(exuCfg.intSrcCnt, Flipped(new RfReadPort))
+    val readFpRf = Vec(exuCfg.fpSrcCnt, Flipped(new RfReadPort))
     val deq = DecoupledIO(new ExuInput)
     val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
     val bypassUops = Vec(bypassCnt, Flipped(ValidIO(new MicroOp)))
@@ -45,22 +43,7 @@ class IssueQueue
   })
 }
 
-class RegfileReader(cfgs: Seq[ExuConfig], bypassCnt: Int) extends Module with NeedImpl {
-
-  val numIntRfRead = cfgs.map(_.intSrcCnt).sum
-  val numFpRfRead = cfgs.map(_.fpSrcCnt).sum
-
-  val io = IO(new Bundle() {
-    // from issue queue
-    val in = Vec(cfgs.length, Flipped(DecoupledIO(new ExuInput)))
-    val bypasses = Vec(bypassCnt, Flipped(DecoupledIO(new ExuOutput)))
-    val readIntRf = Vec(numIntRfRead, Flipped(new RfReadPort))
-    val readFpRf = Vec(numFpRfRead, Flipped(new RfReadPort))
-    val out = Vec(cfgs.length, DecoupledIO(new ExuInput))
-  })
-}
-
-class ReservedStation
+class ReservationStation
 (
   val exuCfg: ExuConfig,
   val wakeupCnt: Int,
