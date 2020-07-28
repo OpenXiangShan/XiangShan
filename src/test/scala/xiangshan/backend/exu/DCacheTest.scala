@@ -27,6 +27,7 @@ class DCacheDut extends XSModule {
   dcache.io.lsu <> io.in
   dcache.io.bus <> tlToAXI.io.in
   tlToAXI.io.out <> mem.in
+  tlToAXI.io.out.dump
 
 
   // log control
@@ -116,6 +117,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
 
       // send a bundle of reqs in the same cycle
       def send_req_bundle(reqs: Array[Req]) = {
+        println(s"send_req_bundle")
         for (i <- 0 to reqs.length - 1) {
           send_req_channel(reqs(i), i)
         }
@@ -123,6 +125,13 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
       }
 
       def send_req: Unit = {
+        println(s"send_req")
+        // no requests waiting for ready
+        // reset valid signal
+        if (!req_waiting) {
+          c.io.in.req.valid.poke(false.B)
+        }
+
         // no more requests to issue
         if (issue_queue.isEmpty)
           return
@@ -136,6 +145,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
 
         // reqs can be fired
         if (c.io.in.req.ready.peek().litToBoolean) {
+          println(s"req fired")
           req_waiting = false
           issue_queue.dequeue()
         }
@@ -170,6 +180,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
 
       // first, initialize every memory cell with random numbers
       for (i <- 0 to num_integers - 1) {
+        println(s"store $i")
         // only deal with unsigned numberss
         // we can not cast negative numbers to UInts
         val randomNumber = r.nextLong.abs
