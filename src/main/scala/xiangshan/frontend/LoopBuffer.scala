@@ -324,19 +324,19 @@ class LoopBuffer extends XSModule {
     }
 // }
 
-XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
 
 // Print loop buffer
-for(i <- 0 until IBufSize/8) {
-    XSDebug("%x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b\n",
-    lbuf(i*8+0).inst, lbuf_valid(i*8+0),
-      lbuf(i*8+1).inst, lbuf_valid(i*8+1),
-      lbuf(i*8+2).inst, lbuf_valid(i*8+2),
-      lbuf(i*8+3).inst, lbuf_valid(i*8+3),
-      lbuf(i*8+4).inst, lbuf_valid(i*8+4),
-      lbuf(i*8+5).inst, lbuf_valid(i*8+5),
-      lbuf(i*8+6).inst, lbuf_valid(i*8+6),
-      lbuf(i*8+7).inst, lbuf_valid(i*8+7)
+  for(i <- 0 until IBufSize/8) {
+      XSDebug("%x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b\n",
+      lbuf(i*8+0).inst, lbuf_valid(i*8+0),
+        lbuf(i*8+1).inst, lbuf_valid(i*8+1),
+        lbuf(i*8+2).inst, lbuf_valid(i*8+2),
+        lbuf(i*8+3).inst, lbuf_valid(i*8+3),
+        lbuf(i*8+4).inst, lbuf_valid(i*8+4),
+        lbuf(i*8+5).inst, lbuf_valid(i*8+5),
+        lbuf(i*8+6).inst, lbuf_valid(i*8+6),
+        lbuf(i*8+7).inst, lbuf_valid(i*8+7)
     )
   }
 }
