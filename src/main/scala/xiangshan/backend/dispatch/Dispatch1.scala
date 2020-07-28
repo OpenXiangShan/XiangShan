@@ -5,15 +5,8 @@ import chisel3.util._
 import xiangshan._
 import utils.{XSDebug, XSInfo, XSWarn}
 
-case class DP1Parameters
-(
-  IntDqSize: Int,
-  FpDqSize: Int,
-  LsDqSize: Int
-)
-
 // read rob and enqueue
-class Dispatch1 extends XSModule{
+class Dispatch1 extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     // from rename
@@ -28,102 +21,109 @@ class Dispatch1 extends XSModule{
     // get MoqIdx
     val moqIdxs = Input(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
     // to dispatch queue
-    val toIntDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
-    val toFpDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
-    val toLsDq = Vec(RenameWidth, DecoupledIO(new MicroOp))
+    val toIntDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
+    val toFpDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
+    val toLsDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
   })
-  // check whether valid uops are canceled
-  val cancelled = Wire(Vec(RenameWidth, Bool()))
-  for (i <- 0 until RenameWidth) {
-    cancelled(i) := io.fromRename(i).bits.brTag.needFlush(io.redirect)
-    XSDebug(io.redirect.valid, p"pc=${Hexadecimal(io.fromRename(i).bits.cf.pc)} brTag:${io.redirect.bits.brTag}\n")
-  }
+  /**
+    * Part 1: choose the target dispatch queue and the corresponding write ports
+    */
+  // valid bits for different dispatch queues
+  val isInt = WireInit(VecInit(io.fromRename.map(uop => FuType.isIntExu(uop.bits.ctrl.fuType))))
+  val isFp  = WireInit(VecInit(io.fromRename.map(uop => FuType.isFpExu (uop.bits.ctrl.fuType))))
+  val isLs  = WireInit(VecInit(io.fromRename.map(uop => FuType.isMemExu(uop.bits.ctrl.fuType))))
 
-  // enqueue handshake
-  val enq_ready = Wire(Vec(RenameWidth, Bool()))
-  val enq_valid = Wire(Vec(RenameWidth, Bool()))
-  for (i <- 0 until RenameWidth) {
-    enq_ready(i) := (io.toIntDq(i).ready && FuType.isIntExu(io.fromRename(i).bits.ctrl.fuType)) ||
-                    (io.toFpDq(i).ready  && FuType.isFpExu(io.fromRename(i).bits.ctrl.fuType )) ||
-                    (io.toLsDq(i).ready  && FuType.isMemExu(io.fromRename(i).bits.ctrl.fuType))
-    enq_valid(i) := io.toIntDq(i).valid || io.toFpDq(i).valid || io.toLsDq(i).valid
-    io.recv(i) := (enq_ready(i) && enq_valid(i)) || cancelled(i)
-    XSInfo(io.recv(i) && !cancelled(i), "pc 0x%x accepted by queue %x %x %x\n",
-      io.fromRename(i).bits.cf.pc, io.toIntDq(i).valid, io.toFpDq(i).valid, io.toLsDq(i).valid)
-    XSInfo(io.recv(i) && cancelled(i), "pc 0x%x with brTag %x cancelled\n",
-      io.fromRename(i).bits.cf.pc, io.redirect.bits.brTag.value)
-  }
+  // generate index mapping
+  val intIndex = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth))
+  val fpIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth))
+  val lsIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth))
+  intIndex.io.validBits := isInt
+  fpIndex.io.validBits := isFp
+  lsIndex.io.validBits := isLs
 
-  // latch indexes from roq in case of DQ not fire
+  /**
+    * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes
+    */
+  val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
   val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
+  val lsroqIndexReg = Reg(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+  val lsroqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
+  val lsroqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toMoq(i).ready || lsroqIndexRegValid(i) || !isLs(i))))
+
   for (i <- 0 until RenameWidth) {
-    // dispatch queue does not accept the MicroOp
-    // however, ROQ has fired
-    when (io.toRoq(i).fire() && !io.recv(i)) {
+    // input for ROQ and LSROQ
+    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
+    io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i)
+    io.toRoq(i).bits := io.fromRename(i).bits
+    io.toMoq(i).bits := io.fromRename(i).bits
+
+    // receive indexes from ROQ and LSROQ
+    when(io.toRoq(i).fire() && !io.recv(i)) {
       roqIndexReg(i) := io.roqIdxs(i)
       roqIndexRegValid(i) := true.B
-    }
-    .elsewhen (io.recv(i)) {
+    }.elsewhen(io.recv(i)) {
       roqIndexRegValid(i) := false.B
     }
-    XSDebug(io.toRoq(i).fire() && !io.recv(i),
-      "pc 0x%x receives nroq %x but not accepted by queue (and it waits)\n",
-      io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
-  }
-
-  val mroqIndexReg = Reg(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
-  val mroqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  for (i <- 0 until RenameWidth) {
-    when (io.toMoq(i).fire() && !io.recv(i)) {
-      mroqIndexReg(i) := io.moqIdxs(i)
-      mroqIndexRegValid(i) := true.B
+    when(io.toMoq(i).fire() && !io.recv(i)) {
+      lsroqIndexReg(i) := io.moqIdxs(i)
+      lsroqIndexRegValid(i) := true.B
+    }.elsewhen(io.recv(i)) {
+      lsroqIndexRegValid(i) := false.B
     }
-    .elsewhen (io.recv(i)) {
-      mroqIndexRegValid(i) := false.B
-    }
-    XSDebug(io.toMoq(i).fire() && !io.recv(i),
-      "pc 0x%x receives mroq %x but not accepted by queue (and it waits)\n",
-      io.fromRename(i).bits.cf.pc, io.moqIdxs(i))
-  }
 
-  // append nroq to uop
-  val uop_nroq = Wire(Vec(RenameWidth, new MicroOp))
-  for (i <- 0 until RenameWidth) {
-    uop_nroq(i) := io.fromRename(i).bits
-    uop_nroq(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
-    uop_nroq(i).moqIdx := Mux(mroqIndexRegValid(i), mroqIndexReg(i), io.moqIdxs(i))
-  }
+    // append ROQ and LSROQ indexed to uop
+    uopWithIndex(i) := io.fromRename(i).bits
+    uopWithIndex(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
+    uopWithIndex(i).moqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.moqIdxs(i))
 
-  // uop can enqueue when rename.valid and roq.valid
-  val can_enqueue = Wire(Vec(RenameWidth, Bool()))
-  for (i <- 0 until RenameWidth) {
-    val roq_ready = io.toRoq(i).ready || roqIndexRegValid(i)
-    val mroq_ready = io.toMoq(i).ready || mroqIndexRegValid(i)
-    can_enqueue(i) := io.fromRename(i).valid && roq_ready && mroq_ready && !cancelled(i)
-    io.toIntDq(i).valid := can_enqueue(i) && FuType.isIntExu(io.fromRename(i).bits.ctrl.fuType)
-    io.toIntDq(i).bits := uop_nroq(i)
-    io.toFpDq(i).valid := can_enqueue(i) && FuType.isFpExu(io.fromRename(i).bits.ctrl.fuType)
-    io.toFpDq(i).bits := uop_nroq(i)
-    io.toLsDq(i).valid := can_enqueue(i) && FuType.isMemExu(io.fromRename(i).bits.ctrl.fuType)
-    io.toLsDq(i).bits := uop_nroq(i)
-  }
-
-  // ack roq and input (rename) when both roq and dispatch queue are ready
-  val all_recv = Cat((0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))).andR()
-  for (i <- 0 until RenameWidth) {
-    io.toRoq(i).bits := io.fromRename(i).bits
-    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)// && !cancelled(i)
-    io.toMoq(i).bits := io.fromRename(i).bits
-    io.toMoq(i).valid := io.fromRename(i).valid && !mroqIndexRegValid(i)
-    XSDebug(io.toRoq(i).fire(), "pc 0x%x receives nroq %d\n", io.fromRename(i).bits.cf.pc, io.roqIdxs(i))
-    XSDebug(io.toMoq(i).fire(), "pc 0x%x receives mroq %d\n", io.fromRename(i).bits.cf.pc, io.moqIdxs(i))
+    XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
+    XSDebug(io.toMoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives mroq ${io.moqIdxs(i)}\n")
     if (i > 0) {
-      XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid,
-        "roq handshake not continuous %d", i.U)
+      XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid, p"roq handshake not continuous $i")
     }
-    io.fromRename(i).ready := all_recv
+  }
 
+  /**
+    * Step 3: send uop (should not be cancelled) with correct indexes to dispatch queues
+    */
+  val cancelled = WireInit(VecInit(io.fromRename.map(_.bits.brTag.needFlush(io.redirect))))
+  for (i <- 0 until dpParams.DqEnqWidth) {
+    io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
+    io.toIntDq(i).valid := intIndex.io.mapping(i).valid && roqIndexAcquired(intIndex.io.mapping(i).bits) &&
+      lsroqIndexAcquired(intIndex.io.mapping(i).bits) && !cancelled(intIndex.io.mapping(i).bits)
+
+    io.toFpDq(i).bits := uopWithIndex(fpIndex.io.mapping(i).bits)
+    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid && roqIndexAcquired(fpIndex.io.mapping(i).bits) &&
+      lsroqIndexAcquired(fpIndex.io.mapping(i).bits) && !cancelled(fpIndex.io.mapping(i).bits)
+
+    io.toLsDq(i).bits := uopWithIndex(lsIndex.io.mapping(i).bits)
+    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid && roqIndexAcquired(lsIndex.io.mapping(i).bits) &&
+      lsroqIndexAcquired(lsIndex.io.mapping(i).bits) && !cancelled(lsIndex.io.mapping(i).bits)
+
+    XSDebug(io.toIntDq(i).valid, p"pc 0x${Hexadecimal(io.toIntDq(i).bits.cf.pc)} int index $i\n")
+    XSDebug(io.toFpDq(i).valid , p"pc 0x${Hexadecimal(io.toFpDq(i).bits.cf.pc )} fp  index $i\n")
+    XSDebug(io.toLsDq(i).valid , p"pc 0x${Hexadecimal(io.toLsDq(i).bits.cf.pc )} ls  index $i\n")
+  }
+
+  /**
+    * Step 4: send response to rename when dispatch queue accepts the uop
+    */
+  val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
+  val allReady = Cat(readyVector).andR()
+  for (i <- 0 until RenameWidth) {
+    val enqFire = (io.toIntDq(intIndex.io.reverseMapping(i).bits).fire() && isInt(i)) ||
+      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).fire() && isFp(i)) ||
+      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).fire() && isLs(i))
+    io.recv(i) := enqFire || cancelled(i)
+    io.fromRename(i).ready := allReady
+
+    XSInfo(io.recv(i) && !cancelled(i),
+      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
+        p"roq ${uopWithIndex(i).roqIdx} lsroq ${uopWithIndex(i).moqIdx} is accepted by dispatch queue\n")
+    XSInfo(io.recv(i) && cancelled(i),
+      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} with brTag ${io.fromRename(i).bits.brTag.value} cancelled\n")
     XSDebug(io.fromRename(i).valid, "v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
       io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }

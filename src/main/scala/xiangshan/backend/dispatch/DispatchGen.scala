@@ -9,17 +9,17 @@ import utils.XSDebug
 class DispatchGen(exuCfg: Array[ExuConfig]) extends XSModule {
   val io = IO(new Bundle() {
     // from dispatch queues
-    val fromIntDq = Flipped(Vec(IntDqDeqWidth, ValidIO(new MicroOp)))
-    val fromFpDq = Flipped(Vec(FpDqDeqWidth, ValidIO(new MicroOp)))
-    val fromLsDq = Flipped(Vec(LsDqDeqWidth, ValidIO(new MicroOp)))
+    val fromIntDq = Flipped(Vec(dpParams.IntDqDeqWidth, ValidIO(new MicroOp)))
+    val fromFpDq = Flipped(Vec(dpParams.FpDqDeqWidth, ValidIO(new MicroOp)))
+    val fromLsDq = Flipped(Vec(dpParams.LsDqDeqWidth, ValidIO(new MicroOp)))
 
     // enq Issue Queue
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
-    val enqIQIndex = Vec(exuParameters.ExuCnt, ValidIO(UInt(log2Ceil(IntDqDeqWidth).W)))
+    val enqIQIndex = Vec(exuParameters.ExuCnt, ValidIO(UInt(log2Ceil(dpParams.IntDqDeqWidth).W)))
   })
 
-  assert(IntDqDeqWidth >= FpDqDeqWidth)
-  assert(IntDqDeqWidth >= LsDqDeqWidth)
+  assert(dpParams.IntDqDeqWidth >= dpParams.FpDqDeqWidth)
+  assert(dpParams.IntDqDeqWidth >= dpParams.LsDqDeqWidth)
 
   def PriorityGen(numExist: Seq[UInt]) = {
     assert(numExist.length > 1)
@@ -67,35 +67,35 @@ class DispatchGen(exuCfg: Array[ExuConfig]) extends XSModule {
   val fpCanAcceptMatrix = io.fromFpDq.map(deq =>
     (exuParameters.IntExuCnt until exuParameters.IntExuCnt + exuParameters.FpExuCnt).map(i => exuCfg(i).canAccept(deq.bits.ctrl.fuType))
   )
-  val lsCanAcceptMatrix = io.fromFpDq.map(deq =>
-    (exuParameters.IntExuCnt + exuParameters.FpExuCnt until exuParameters.ExuCnt).map(i => exuCfg(i).canAccept(deq.bits.ctrl.fuType))
-  )
-  val bruIQIndex = genIQIndex(exuParameters.JmpCnt, IntDqDeqWidth, intCanAcceptMatrix.map(_(0)),
+//  val lsCanAcceptMatrix = io.fromLsDq.map(deq =>
+//    (exuParameters.IntExuCnt + exuParameters.FpExuCnt until exuParameters.ExuCnt).map(i => exuCfg(i).canAccept(deq.bits.ctrl.fuType))
+//  )
+  val bruIQIndex = genIQIndex(exuParameters.JmpCnt, dpParams.IntDqDeqWidth, intCanAcceptMatrix.map(_(0)),
     (0 until exuParameters.JmpCnt).map(i => io.numExist(i)))
-  val aluIQIndex = genIQIndex(exuParameters.AluCnt, IntDqDeqWidth, intCanAcceptMatrix.map(_(exuParameters.JmpCnt)),
+  val aluIQIndex = genIQIndex(exuParameters.AluCnt, dpParams.IntDqDeqWidth, intCanAcceptMatrix.map(_(exuParameters.JmpCnt)),
     (0 until exuParameters.AluCnt).map(i => io.numExist(exuParameters.JmpCnt+i)))
-  val mulIQIndex = genIQIndex(exuParameters.MulCnt, IntDqDeqWidth, intCanAcceptMatrix.map(_(exuParameters.JmpCnt+exuParameters.AluCnt)),
+  val mulIQIndex = genIQIndex(exuParameters.MulCnt, dpParams.IntDqDeqWidth, intCanAcceptMatrix.map(_(exuParameters.JmpCnt+exuParameters.AluCnt)),
     (0 until exuParameters.MulCnt).map(i => io.numExist(exuParameters.JmpCnt+exuParameters.AluCnt+i)))
-  val muldivIQIndex = genIQIndex(exuParameters.MduCnt, IntDqDeqWidth, io.fromIntDq.zipWithIndex.map({case (deq, i) =>
+  val muldivIQIndex = genIQIndex(exuParameters.MduCnt, dpParams.IntDqDeqWidth, io.fromIntDq.zipWithIndex.map({case (deq, i) =>
     deq.bits.ctrl.fuType === FuType.div || (deq.bits.ctrl.fuType === FuType.mul && i.U > mulIQIndex(0)) }),
     (0 until exuParameters.MduCnt).map(i => io.numExist(exuParameters.JmpCnt+exuParameters.AluCnt+exuParameters.MulCnt+i)))
-  val fmacIQIndex = genIQIndex(exuParameters.FmacCnt, FpDqDeqWidth, if (exuParameters.FmacCnt > 0) fpCanAcceptMatrix.map(_(0)) else Seq(),
+  val fmacIQIndex = genIQIndex(exuParameters.FmacCnt, dpParams.FpDqDeqWidth, if (exuParameters.FmacCnt > 0) fpCanAcceptMatrix.map(_(0)) else Seq(),
     (0 until exuParameters.FmacCnt).map(i => io.numExist(exuParameters.IntExuCnt+i)))
-  val fmiscIQIndex = genIQIndex(exuParameters.FmiscCnt, FpDqDeqWidth, if (exuParameters.FmiscCnt > 0) fpCanAcceptMatrix.map(_(exuParameters.FmacCnt)) else Seq(),
+  val fmiscIQIndex = genIQIndex(exuParameters.FmiscCnt, dpParams.FpDqDeqWidth, if (exuParameters.FmiscCnt > 0) fpCanAcceptMatrix.map(_(exuParameters.FmacCnt)) else Seq(),
     (0 until exuParameters.FmiscCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FmacCnt+i)))
-  val lduIQIndex = genIQIndex(exuParameters.LduCnt, LsDqDeqWidth, lsCanAcceptMatrix.map(_(0)),
-    (0 until exuParameters.LduCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FpExuCnt+i)))
+//  val lduIQIndex = genIQIndex(exuParameters.LduCnt, dpParams.LsDqDeqWidth, lsCanAcceptMatrix.map(_(0)),
+//    (0 until exuParameters.LduCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FpExuCnt+i)))
 //  val stuIQIndex = genIQIndex(exuParameters.StuCnt, LsDqDeqWidth, io.fromLsDq.map(_.bits.ctrl.fuType === FuType.stu))
-  val stuIQIndex = genIQIndex(exuParameters.StuCnt, LsDqDeqWidth, io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)),
+  val stuIQIndex = genIQIndex(exuParameters.StuCnt, dpParams.LsDqDeqWidth, io.fromLsDq.map(deq => FuType.isMemExu(deq.bits.ctrl.fuType)),
     (0 until exuParameters.StuCnt).map(i => io.numExist(exuParameters.IntExuCnt+exuParameters.FpExuCnt+exuParameters.LduCnt+i)))
 
   val allIndex = Seq(bruIQIndex, aluIQIndex, mulIQIndex, muldivIQIndex,
     fmacIQIndex, fmiscIQIndex,
-    lduIQIndex, stuIQIndex
+    /*lduIQIndex, */stuIQIndex
   )
   val allCnt = Seq(exuParameters.JmpCnt, exuParameters.AluCnt, exuParameters.MulCnt, exuParameters.MduCnt,
     exuParameters.FmacCnt, exuParameters.FmiscCnt,
-    exuParameters.LduCnt, exuParameters.StuCnt
+    /*exuParameters.LduCnt, */exuParameters.StuCnt
   )
   assert(allIndex.length == allCnt.length)
   var startIndex = 0

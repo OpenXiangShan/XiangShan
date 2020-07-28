@@ -7,6 +7,17 @@ import xiangshan.backend.exu.ExuConfig
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 
+case class DispatchParameters
+(
+  DqEnqWidth: Int,
+  IntDqSize: Int,
+  FpDqSize: Int,
+  LsDqSize: Int,
+  IntDqDeqWidth: Int,
+  FpDqDeqWidth: Int,
+  LsDqDeqWidth: Int
+)
+
 class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
@@ -39,38 +50,38 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
     val enqIQData = Vec(exuParameters.ExuCnt - exuParameters.LsExuCnt, ValidIO(new ExuInput))
   })
   // pipeline between rename and dispatch
-//  val dispatch1 = Module(new Dispatch1)
-//  for (i <- 0 until RenameWidth) {
-//    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
-//  }
-//  val intDq = Module(new DispatchQueue(dp1Paremeters.IntDqSize, RenameWidth, IntDqDeqWidth, "IntDpQ"))
-//  val fpDq = Module(new DispatchQueue(dp1Paremeters.FpDqSize, RenameWidth, FpDqDeqWidth, "FpDpQ"))
-//  val lsDq = Module(new DispatchQueue(dp1Paremeters.LsDqSize, RenameWidth, LsDqDeqWidth, "LsDpQ"))
-//  val dispatch2 = Module(new Dispatch2(exuCfg))
-//
-//  dispatch1.io.redirect <> io.redirect
-//  dispatch1.io.toRoq <> io.toRoq
-//  dispatch1.io.roqIdxs <> io.roqIdxs
-//  dispatch1.io.toMoq <> io.toMoq
-//  dispatch1.io.moqIdxs <> io.moqIdxs
-//  dispatch1.io.toIntDq <> intDq.io.enq
-//  dispatch1.io.toFpDq <> fpDq.io.enq
-//  dispatch1.io.toLsDq <> lsDq.io.enq
-//
-//  // dispatch queue cancels the uops
-//  intDq.io.redirect <> io.redirect
-//  fpDq.io.redirect <> io.redirect
-//  lsDq.io.redirect <> io.redirect
-//
-//  // dispatch2 only receives valid uops from dispatch queue
-//  dispatch2.io.fromIntDq <> intDq.io.deq
-//  dispatch2.io.fromFpDq <> fpDq.io.deq
-//  dispatch2.io.fromLsDq <> lsDq.io.deq
-//  dispatch2.io.readIntRf <> io.readIntRf
-//  dispatch2.io.readFpRf <> io.readFpRf
-//  dispatch2.io.intPregRdy <> io.intPregRdy
-//  dispatch2.io.fpPregRdy <> io.fpPregRdy
-//  dispatch2.io.enqIQCtrl <> io.enqIQCtrl
-//  dispatch2.io.enqIQData <> io.enqIQData
-//  dispatch2.io.numExist <> io.numExist
+  val dispatch1 = Module(new Dispatch1)
+  for (i <- 0 until RenameWidth) {
+    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
+  }
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, "IntDpQ"))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, "FpDpQ"))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, "LsDpQ"))
+  val dispatch2 = Module(new Dispatch2(exuCfg))
+
+  dispatch1.io.redirect <> io.redirect
+  dispatch1.io.toRoq <> io.toRoq
+  dispatch1.io.roqIdxs <> io.roqIdxs
+  dispatch1.io.toMoq <> io.toMoq
+  dispatch1.io.moqIdxs <> io.moqIdxs
+  dispatch1.io.toIntDq <> intDq.io.enq
+  dispatch1.io.toFpDq <> fpDq.io.enq
+  dispatch1.io.toLsDq <> lsDq.io.enq
+
+  // dispatch queue cancels the uops
+  intDq.io.redirect <> io.redirect
+  fpDq.io.redirect <> io.redirect
+  lsDq.io.redirect <> io.redirect
+
+  // dispatch2 only receives valid uops from dispatch queue
+  dispatch2.io.fromIntDq <> intDq.io.deq
+  dispatch2.io.fromFpDq <> fpDq.io.deq
+  dispatch2.io.fromLsDq <> lsDq.io.deq
+  dispatch2.io.readIntRf <> io.readIntRf
+  dispatch2.io.readFpRf <> io.readFpRf
+  dispatch2.io.intPregRdy <> io.intPregRdy
+  dispatch2.io.fpPregRdy <> io.fpPregRdy
+  dispatch2.io.enqIQCtrl <> io.enqIQCtrl
+  dispatch2.io.enqIQData <> io.enqIQData
+  dispatch2.io.numExist <> io.numExist
 }

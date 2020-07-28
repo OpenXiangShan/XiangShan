@@ -101,7 +101,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   // replay
   val numReplay = 0.U
-
+  for (i <- 0 until size) {
+    val needReplay = cancel(i) && entries(i).state === s_dispatched
+    when (needReplay) {
+      entries(i).state := s_valid
+    }
+  }
   dispatchPtr := dispatchPtr + numDeq - numReplay
 
   // commit
