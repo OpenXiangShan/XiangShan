@@ -31,7 +31,7 @@ class Dispatch1 extends XSModule{
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(RenameWidth, Bool()))
   for (i <- 0 until RenameWidth) {
-    cancelled(i) := io.fromRename(i).bits.brTag.needFlush(io.redirect)
+    cancelled(i) := io.redirect.valid
     XSDebug(io.redirect.valid, p"pc=${Hexadecimal(io.fromRename(i).bits.cf.pc)} brTag:${io.redirect.bits.brTag}\n")
   }
 

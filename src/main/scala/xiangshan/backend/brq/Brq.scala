@@ -31,12 +31,6 @@ class BrqPtr extends XSBundle {
     )
   }
 
-  def needBrFlush(redirectTag: BrqPtr): Bool = this < redirectTag
-
-  def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && (redirect.bits.isException || needBrFlush(redirect.bits.brTag))
-  }
-
   override def toPrintable: Printable = p"f:$flag v:$value"
 
 }
@@ -63,10 +57,11 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
+  val outOfOrderBrInfo = ValidIO(new BranchUpdateInfo)
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
   // in order dequeue to train bpd
-  val inOrderBrInfo = Output(new RedirectInfo)
+  val inOrderBrInfo = ValidIO(new BranchUpdateInfo)
 }
 
 class Brq extends XSModule {
@@ -131,8 +126,8 @@ class Brq extends XSModule {
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
   io.inOrderBrInfo.valid := deqValid
-  io.inOrderBrInfo.misPred := commitEntry.misPred
-  io.inOrderBrInfo.redirect := commitEntry.exuOut.redirect
+  io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
+  io.inOrderBrInfo.bits.isMisPred := commitEntry.misPred
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
@@ -158,6 +153,9 @@ class Brq extends XSModule {
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
+  io.outOfOrderBrInfo.valid := commitValid
+  io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
+  io.outOfOrderBrInfo.bits.isMisPred := commitEntry.misPred
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
   )
@@ -169,7 +167,7 @@ class Brq extends XSModule {
     enq.ready := !full
     brTag := tailPtrNext
     when(enq.fire()){
-      brQueue(tailPtrNext.value).npc := enq.bits.cf.pnpc
+      brQueue(tailPtrNext.value).npc := enq.bits.cf.brUpdate.pnpc
       brQueue(tailPtrNext.value).ptrFlag := tailPtrNext.flag
     }
 
@@ -189,15 +187,6 @@ class Brq extends XSModule {
       stateQueue(wbIdx) := s_wb
       brQueue(wbIdx).exuOut := exuWb.bits
       brQueue(wbIdx).misPred := brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
-      // brQueue(wbIdx).exuOut.redirect.hist := exuWb.bits.uop.cf.hist
-      // brQueue(wbIdx).exuOut.redirect.btbVictimWay := exuWb.bits.uop.cf.btbVictimWay
-      // brQueue(wbIdx).exuOut.redirect.btbPredCtr := exuWb.bits.uop.cf.btbPredCtr
-      // brQueue(wbIdx).exuOut.redirect.btbHitWay := exuWb.bits.uop.cf.btbHitWay
-      // brQueue(wbIdx).exuOut.redirect.tageMeta := exuWb.bits.uop.cf.tageMeta
-      // brQueue(wbIdx).exuOut.redirect.rasSp := exuWb.bits.uop.cf.rasSp
-      // brQueue(wbIdx).exuOut.redirect.rasTopCtr := exuWb.bits.uop.cf.rasTopCtr
-      // brQueue(wbIdx).exuOut.redirect.fetchIdx := exuWb.bits.uop.cf.fetchOffset << 2.U
-      brQueue(wbIdx).exuOut.redirect := exuWb.bits.redirect
     }
   }
 
@@ -211,12 +200,12 @@ class Brq extends XSModule {
     // misprediction
     stateQueue.zipWithIndex.foreach({case(s, i) =>
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      when(ptr.needBrFlush(io.redirect.bits.brTag)){
+      when(ptr < io.redirect.bits.brTag){
         s := s_idle
       }
     })
     tailPtr := io.redirect.bits.brTag + true.B
-  }
+  } // replay: do nothing
 
 
 
@@ -241,10 +230,10 @@ class Brq extends XSModule {
   val fire = io.out.fire()
   val predRight = fire && !commitEntry.misPred
   val predWrong = fire && commitEntry.misPred
-  val isBType = commitEntry.exuOut.redirect.btbType===BTBtype.B
-  val isJType = commitEntry.exuOut.redirect.btbType===BTBtype.J
-  val isIType = commitEntry.exuOut.redirect.btbType===BTBtype.I
-  val isRType = commitEntry.exuOut.redirect.btbType===BTBtype.R
+  val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
+  val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
+  val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
+  val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
   val mbpInstr = fire
   val mbpRight = predRight
   val mbpWrong = predWrong

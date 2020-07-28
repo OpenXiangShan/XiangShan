@@ -12,7 +12,7 @@ import xiangshan.backend.brq.BrqPtr
 import fpu.boxF32ToF64
 
 
-class StoreQueueEntry extends XSBundle{
+class StoreQueueEntry extends XSBundle with HasRoqIdx {
   val src1  = UInt(XLEN.W)
   val src2  = UInt(XLEN.W)
   val addr  = UInt(XLEN.W)
@@ -20,7 +20,6 @@ class StoreQueueEntry extends XSBundle{
   val wdata = UInt(XLEN.W)
   val func  = UInt(6.W)
   val pc  = UInt(VAddrBits.W) //for debug
-  val brTag = new BrqPtr //FIXIT
 }
 
 // Multi-cycle LSU ported from NOOP
@@ -136,7 +135,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
     stqData(emptySlot).src3 := genWdata(src3In, funcIn(1, 0))
     stqData(emptySlot).pc := io.in.bits.uop.cf.pc
     stqData(emptySlot).func := funcIn
-    stqData(emptySlot).brTag := io.in.bits.uop.brTag
+    stqData(emptySlot).roqIdx := io.in.bits.uop.roqIdx
     stqValid(emptySlot) := true.B
   }
 
@@ -183,7 +182,7 @@ class LsExeUnit extends Exu(Exu.lsuExeUnitCfg){
   val expRedirect = io.redirect.valid && io.redirect.bits.isException
   val brRedirect = io.redirect.valid && !io.redirect.bits.isException
   for(i <- 0 until 8){
-    when((i.U >= stqCommited && i.U < stqHead) && (expRedirect || brRedirect && stqData(stqPtr(i)).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(stqPtr(i)))){
+    when((i.U >= stqCommited && i.U < stqHead) && (stqData(stqPtr(i)).olderThan(io.redirect) && stqValid(stqPtr(i)))){
       stqValid(stqPtr(i)) := false.B
     }
     XSDebug("sptrtable: id %d ptr %d valid  %d\n", i.U, stqPtr(i), stqValid(stqPtr(i)))

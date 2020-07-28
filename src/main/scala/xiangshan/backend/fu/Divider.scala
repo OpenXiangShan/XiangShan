@@ -67,7 +67,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
     }
   }
 
-  when(state=/=s_idle && ctrlReg.uop.brTag.needFlush(io.redirect)){
+  when(state=/=s_idle && ctrlReg.uop.olderThan(io.redirect)){
     state := s_idle
   }
 
