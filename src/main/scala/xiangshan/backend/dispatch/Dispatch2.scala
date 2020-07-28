@@ -43,7 +43,9 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       p"ls dp queue $i: ${Hexadecimal(io.fromLsDq(i).bits.cf.pc)} type ${Binary(io.fromLsDq(i).bits.ctrl.fuType)}\n")
   }
 
-  // inst indexes for reservation stations
+  /**
+    * Part 1: generate indexes for reservation stations
+    */
   val rsIndexGen = Module(new DispatchGen(exuCfg))
   rsIndexGen.io.fromIntDq := io.fromIntDq
   rsIndexGen.io.fromFpDq := io.fromFpDq
@@ -55,13 +57,14 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
 
   allIndex.zipWithIndex.map({case(index, i) => XSDebug(instValid(i), p"dispatch to iq index $i: $index\n")})
 
-  // regfile read ports
-  io.readIntRf <> DontCare
-  io.readFpRf <> DontCare
+  /**
+    * Part 2: generate regfile read ports
+    *
+    * Some function units have statically-assigned read ports, such as the four ALUs
+    */
   val regfileRPGen = Module(new RegfileReadPortGen())
   (0 until exuParameters.IntExuCnt).map(i => regfileRPGen.io.intIQEnqIndex(i) := rsIndexGen.io.enqIQIndex(i))
   (0 until exuParameters.FpExuCnt).map(i => regfileRPGen.io.fpIQEnqIndex(i) := rsIndexGen.io.enqIQIndex(exuParameters.IntExuCnt + i))
-  (0 until exuParameters.LsExuCnt).map(i => regfileRPGen.io.lsIQEnqIndex(i) := rsIndexGen.io.enqIQIndex(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i))
   for (i <- 0 until 2 * exuParameters.AluCnt) {
     val bits = io.fromIntDq(regfileRPGen.io.readIntRf(i)).bits
     io.readIntRf(i).addr := (if (i % 2 == 0) bits.psrc1 else bits.psrc2)
@@ -71,7 +74,7 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
     val bits = io.fromFpDq(regfileRPGen.io.readFpRf(i)).bits
     io.readFpRf(i).addr := (if (i % 3 == 0) bits.psrc1 else if (i % 3 == 1) bits.psrc2 else bits.psrc3)
   }
-//  assert(exuParameters.LsExuCnt == 1)
+  io.intMemRegAddr(0) := io.fromLsDq(rsIndexGen.io.enqIQIndex(exuParameters.IntExuCnt + exuParameters.FpExuCnt))
 //  io.readIntRf(8).addr := io.fromLsDq(regfileRPGen.io.readIntRf(8)).bits.psrc1
 //  io.readIntRf(9).addr := io.fromLsDq(regfileRPGen.io.readIntRf(9)).bits.psrc2
 //  io.readFpRf(12).addr := io.fromLsDq(regfileRPGen.io.readFpRf(12)).bits.psrc2
@@ -96,7 +99,9 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
     XSDebug(p"fp regfile $i: addr ${io.readFpRf(i).addr}, state ${io.fpPregRdy(i)}\n")
   }
 
-  // insert into reservation station
+  /**
+    * Part 3: insert uop into reservation stations
+    */
   val instIdxes = (0 until exuParameters.ExuCnt).map(i => Cat(!instValid(i), allIndex(i)))
   io.enqIQCtrl.zipWithIndex map { case (enq, i) =>
     if (i < exuParameters.IntExuCnt) {
@@ -133,7 +138,9 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       enq.bits.cf.pc, enq.bits.ctrl.fuType, enq.bits.src1State, enq.bits.src2State, enq.bits.src3State, i.U, instIdxes(i))
   }
 
-  // responds to dispatch queue
+  /**
+    * Part 4: response to dispatch queue
+    */
   for (i <- 0 until dpParams.IntDqDeqWidth) {
     io.fromIntDq(i).ready := (io.enqIQCtrl.zipWithIndex map {case (rs, j) =>
       (rs.ready && instIdxes(j) === i.U && (j < exuParameters.IntExuCnt).asBool())
@@ -167,17 +174,19 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       io.fromLsDq(i).bits.cf.pc, i.U)
   }
 
+  /**
+    * Part 5: the second stage of dispatch 2
+    *
+    * This stage sends regfile read data to reservation stations
+    */
   val intExuIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
   val fpExuIndexReg = Reg(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(NRFpReadPorts).W)))
-  val lsExuIndexReg = Reg(Vec(exuParameters.LduCnt + exuParameters.StuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
   (0 until exuParameters.IntExuCnt).map(i => intExuIndexReg(i) := regfileRPGen.io.intIQRfSrc(i))
   (0 until exuParameters.FpExuCnt).map(i => fpExuIndexReg(i) := regfileRPGen.io.fpIQRfSrc(i))
-  (0 until exuParameters.LsExuCnt).map(i => lsExuIndexReg(i) := Mux(io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt).bits.ctrl.src2Type === SrcType.fp,
-    regfileRPGen.io.lsIQRfSrc(1), regfileRPGen.io.lsIQRfSrc(0)))
   // TODO: remove uop when reservation stations deal with imme
   val uop_reg = Reg(Vec(exuParameters.ExuCnt, new MicroOp))
   val data_valid = Reg(Vec(exuParameters.ExuCnt, Bool()))
-  for (i <- 0 until exuParameters.ExuCnt) {
+  for (i <- 0 until exuParameters.IntExuCnt + exuParameters.FpExuCnt) {
     data_valid(i) := io.enqIQCtrl(i).fire()
     uop_reg(i) := io.enqIQCtrl(i).bits
     io.enqIQData(i).valid := DontCare
@@ -194,7 +203,7 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       srcIndex(1) := startIndex + 1.U
       srcIndex(2) := 0.U
     }
-    else if (i < exuParameters.IntExuCnt + exuParameters.FpExuCnt) {
+    else {
       val startIndex = fpExuIndexReg(i - exuParameters.IntExuCnt)
       io.enqIQData(i).bits.src1 := io.readFpRf(startIndex).data
       io.enqIQData(i).bits.src2 := io.readFpRf(startIndex + 1.U).data
@@ -202,19 +211,6 @@ class Dispatch2(exuCfg: Array[ExuConfig]) extends XSModule{
       srcIndex(0) := startIndex
       srcIndex(1) := startIndex + 1.U
       srcIndex(2) := startIndex + 2.U
-    }
-    else {
-      val startIndex = lsExuIndexReg(i - exuParameters.IntExuCnt - exuParameters.FpExuCnt)
-      io.enqIQData(i).bits.src1 := Mux(uop_reg(i).ctrl.src1Type === SrcType.pc,
-        uop_reg(i).cf.pc, io.readIntRf(8).data)
-      io.enqIQData(i).bits.src2 := Mux(uop_reg(i).ctrl.src2Type === SrcType.imm,
-        uop_reg(i).ctrl.imm,
-        Mux(uop_reg(i).ctrl.src2Type === SrcType.fp,
-          io.readFpRf(12).data,
-          io.readIntRf(9).data))
-      srcIndex(0) := startIndex
-      srcIndex(1) := startIndex + 1.U
-      srcIndex(2) := 0.U
     }
 
     XSDebug(data_valid(i),

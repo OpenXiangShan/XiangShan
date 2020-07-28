@@ -15,7 +15,9 @@ class DispatchGen(exuCfg: Array[ExuConfig]) extends XSModule {
 
     // enq Issue Queue
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
-    val enqIQIndex = Vec(exuParameters.ExuCnt, ValidIO(UInt(log2Ceil(dpParams.IntDqDeqWidth).W)))
+    val enqIntIQIndex = Vec(exuParameters.IntExuCnt, ValidIO(UInt(log2Ceil(dpParams.IntDqDeqWidth).W)))
+    val enqFpIQIndex = Vec(exuParameters.FpExuCnt, ValidIO(UInt(log2Ceil(dpParams.FpDqDeqWidth).W)))
+    val enqLsIQIndex = Vec(exuParameters.LsExuCnt, ValidIO(UInt(log2Ceil(dpParams.LsDqDeqWidth).W)))
   })
 
   assert(dpParams.IntDqDeqWidth >= dpParams.FpDqDeqWidth)

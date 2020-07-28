@@ -86,9 +86,9 @@ class Dispatch1 extends XSModule {
   }
 
   /**
-    * Step 3: send uop (should not be cancelled) with correct indexes to dispatch queues
+    * Part 3: send uop (should not be cancelled) with correct indexes to dispatch queues
     */
-  val cancelled = WireInit(VecInit(io.fromRename.map(_.bits.brTag.needFlush(io.redirect))))
+  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(true.B)))
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
     io.toIntDq(i).valid := intIndex.io.mapping(i).valid && roqIndexAcquired(intIndex.io.mapping(i).bits) &&
@@ -108,7 +108,7 @@ class Dispatch1 extends XSModule {
   }
 
   /**
-    * Step 4: send response to rename when dispatch queue accepts the uop
+    * Part 4: send response to rename when dispatch queue accepts the uop
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   val allReady = Cat(readyVector).andR()
