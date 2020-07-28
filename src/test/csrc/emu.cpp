@@ -8,7 +8,7 @@ void set_nemu_this_pc(uint64_t pc);
 
 Emulator::Emulator(EmuArgs &args):
   dut_ptr(new VXSSimTop),
-  cycles(0), hascommit(0)
+  cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   // srand
   srand(args.seed);
@@ -100,10 +100,8 @@ inline void Emulator::single_cycle() {
 }
 
 uint64_t Emulator::execute(uint64_t n) {
-  extern bool is_finish();
   extern void poll_event(void);
   extern uint32_t uptime(void);
-  extern void set_abort(void);
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   uint64_t lastcommit = n;
@@ -124,11 +122,12 @@ uint64_t Emulator::execute(uint64_t n) {
   tfp->open("vlt_dump.vcd");	// Open the dump file
 #endif
 
-  while (!is_finish() && n > 0) {
+  while (trapCode == STATE_RUNNING && n > 0) {
     single_cycle();
     n --;
 
-    if(is_finish()) break;
+    if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
+    if (trapCode != STATE_RUNNING) break;
 
     if (lastcommit - n > stuck_limit && hascommit) {
       eprintf("No instruction commits for %d cycles, maybe get stuck\n"
@@ -140,7 +139,7 @@ uint64_t Emulator::execute(uint64_t n) {
       // commit a fake inst to trigger error
       uint64_t reg[DIFFTEST_NR_REG];
       difftest_step(1, reg, 0, 0, 0, wpc, wdata, wdst, 0, 0, 0);
-      set_abort();
+      trapCode = STATE_ABORT;
     }
 
     if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
@@ -167,7 +166,7 @@ uint64_t Emulator::execute(uint64_t n) {
 #if VM_TRACE
         tfp->close();
 #endif
-        set_abort();
+        trapCode = STATE_ABORT;
       }
       lastcommit = n;
     }
@@ -185,6 +184,7 @@ uint64_t Emulator::execute(uint64_t n) {
     }
   }
 
+  display_trapinfo();
   return cycles;
 }
 
@@ -196,6 +196,31 @@ inline char* Emulator::snapshot_filename(time_t t) {
   assert(noop_home != NULL);
   snprintf(buf, 1024, "%s/build/%s.snapshot", noop_home, buf_time);
   return buf;
+}
+
+void Emulator::display_trapinfo() {
+  uint64_t pc = dut_ptr->io_trap_pc;
+  uint64_t instrCnt = dut_ptr->io_trap_instrCnt;
+  uint64_t cycleCnt = dut_ptr->io_trap_cycleCnt;
+
+  switch (trapCode) {
+    case STATE_GOODTRAP:
+      eprintf(ANSI_COLOR_GREEN "HIT GOOD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
+      break;
+    case STATE_BADTRAP:
+      eprintf(ANSI_COLOR_RED "HIT BAD TRAP at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
+      break;
+    case STATE_ABORT:
+      eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
+      break;
+    default:
+      eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
+  }
+
+  double ipc = (double)instrCnt / (cycleCnt-500);
+  eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %" PRIu64 "\n" ANSI_COLOR_RESET, instrCnt);
+  eprintf(ANSI_COLOR_MAGENTA "instrCnt = %" PRIu64 ", cycleCnt = %" PRIu64 ", IPC = %lf\n" ANSI_COLOR_RESET,
+      instrCnt, cycleCnt, ipc);
 }
 
 void Emulator::snapshot_save(const char *filename) {

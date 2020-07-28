@@ -37,10 +37,19 @@ class LogCtrlIO extends Bundle {
   val log_level = Input(UInt(64.W)) // a cpp uint
 }
 
+class TrapIO extends XSBundle {
+  val valid = Output(Bool())
+  val code = Output(UInt(3.W))
+  val pc = Output(UInt(VAddrBits.W))
+  val cycleCnt = Output(UInt(XLEN.W))
+  val instrCnt = Output(UInt(XLEN.W))
+}
+
 class XSSimTop extends Module {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
     val logCtrl = new LogCtrlIO
+    val trap = new TrapIO
   })
 
   lazy val config = XSConfig(FPGAPlatform = false)
@@ -81,6 +90,14 @@ class XSSimTop extends Module {
   BoringUtils.addSink(difftest.mcause, "difftestMcause")
   BoringUtils.addSink(difftest.scause, "difftestScause")
   io.difftest := difftest
+
+  val trap = WireInit(0.U.asTypeOf(new TrapIO))
+  ExcitingUtils.addSink(trap.valid, "trapValid")
+  ExcitingUtils.addSink(trap.code, "trapCode")
+  ExcitingUtils.addSink(trap.pc, "trapPC")
+  ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
+  ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
+  io.trap := trap
 
   val logEnable = (GTimer() >= io.logCtrl.log_begin) && (GTimer() < io.logCtrl.log_end)
   ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")

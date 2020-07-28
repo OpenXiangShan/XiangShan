@@ -74,17 +74,15 @@ int main(int argc, const char** argv) {
   };
 
   uint64_t cycles = emu->execute(args.max_cycles);
+  bool is_good_trap = emu->is_good_trap();
   delete emu;
 
   extern uint32_t uptime(void);
   uint32_t ms = uptime();
 
-  int display_trapinfo(uint64_t max_cycles);
-  int ret = display_trapinfo(args.max_cycles);
   eprintf(ANSI_COLOR_BLUE "Seed=%d Guest cycle spent: %" PRIu64
       " (this will be different from cycleCnt if emu loads a snapshot)\n" ANSI_COLOR_RESET, args.seed, cycles);
   eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
 
-
-  return ret;
+  return !is_good_trap;
 }
