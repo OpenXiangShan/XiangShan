@@ -19,11 +19,12 @@ class BrqTest extends FlatSpec
   with Matchers
   with ParallelTestExecution
   with HasPartialDecoupledDriver {
-  it should "" in {
-    XSLog.generateLog = true
+  it should "redirect out-of-order, dequeue in-order" in {
+    XSLog.generateLog = false
+
     test(new Brq {
       AddSinks()
-    }).withAnnotations(Seq()) { c =>
+    }).withAnnotations(Seq(VerilatorBackendAnnotation)) { c =>
 
       def genEnqReq(x: => DecoupledIO[CfCtrl], pc: Long) = {
         chiselTypeOf(x.bits).Lit(

@@ -32,8 +32,8 @@ class Stage1To2IO extends XSBundle {
     val target = Output(UInt(VAddrBits.W))
   }
   val tage = new Bundle {
-    val hits = Output(UInt(FetchWidth.W))
-    val takens = Output(Vec(FetchWidth, Bool()))
+    val hits = Output(UInt(PredictWidth.W))
+    val takens = Output(Vec(PredictWidth, Bool()))
   }
   val hist = Output(Vec(PredictWidth, UInt(HistoryLength.W)))
   val btbPred = ValidIO(new BranchPrediction)
@@ -62,7 +62,9 @@ class BPUStage1 extends XSModule {
   val outLatch = RegEnable(io.out.bits, RegNext(io.in.pc.fire()))
 
   val s1Valid = RegInit(false.B)
-  when (io.flush || io.in.pc.fire()) {
+  when (io.flush) {
+    s1Valid := true.B
+  }.elsewhen (io.in.pc.fire()) {
     s1Valid := true.B
   }.elsewhen (io.out.fire()) {
     s1Valid := false.B
@@ -85,7 +87,7 @@ class BPUStage1 extends XSModule {
   tage.io.req.bits.pc := io.in.pc.bits
   tage.io.req.bits.hist := hist
   tage.io.redirectInfo <> io.redirectInfo
-  // io.s1OutPred.bits.tageMeta := tage.io.meta
+  io.s1OutPred.bits.tageMeta := tage.io.meta
 
   // latch pc for 1 cycle latency when reading SRAM
   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.fire())
@@ -215,7 +217,7 @@ class BPUStage1 extends XSModule {
     // io.s1OutPred.bits.btbVictimWay := btbWriteWay
     io.s1OutPred.bits.predCtr := btbCtrs
     io.s1OutPred.bits.btbHit := btbValids
-    io.s1OutPred.bits.tageMeta := DontCare // TODO: enableBPD
+    io.s1OutPred.bits.tageMeta := tage.io.meta // TODO: enableBPD
     io.s1OutPred.bits.rasSp := DontCare
     io.s1OutPred.bits.rasTopCtr := DontCare
   }.otherwise {
@@ -342,11 +344,17 @@ class BPUStage3 extends XSModule {
   // get the first taken branch/jal/call/jalr/ret in a fetch line
   // brNotTakenIdx indicates all the not-taken branches before the first jump instruction
 
+  val tageHits = inLatch.tage.hits
+  val tageTakens = inLatch.tage.takens
+  val btbTakens = inLatch.btbPred.bits.predCtr
 
   val brs = inLatch.btb.hits & Reverse(Cat(predecode.pd.map { p => p.brType === BrType.branch }).asUInt) & predecode.mask
   // val brTakens = brs & inLatch.tage.takens.asUInt
   val brTakens = if (EnableBPD) {
-    brs & Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt)
+    // If tage hits, use tage takens, otherwise keep btbpreds
+    // brs & Reverse(Cat(inLatch.tage.takens.map {t => Fill(2, t.asUInt)}).asUInt)
+    XSDebug("tageHits=%b, tageTakens=%b\n", tageHits, tageTakens.asUInt)
+    brs & Reverse(Cat((0 until PredictWidth).map(i => Mux(tageHits(i), tageTakens(i), btbTakens(i)(1)))))
   } else {
     brs & Reverse(Cat(inLatch.btbPred.bits.predCtr.map {c => c(1)}).asUInt)
   }
@@ -366,7 +374,7 @@ class BPUStage3 extends XSModule {
   io.s3Taken := MuxCase(false.B, (0 until PredictWidth).map(i => (jmps(i), true.B)))
 
   val brNotTakens = if (EnableBPD) {
-    VecInit((0 until PredictWidth).map(i => brs(i) && i.U <= jmpIdx && ~inLatch.tage.takens(i>>1) && predecode.mask(i)))
+    VecInit((0 until PredictWidth).map(i => brs(i) && i.U <= jmpIdx && Mux(tageHits(i), ~tageTakens(i), ~btbTakens(i)(1)) && predecode.mask(i)))
   } else {
     VecInit((0 until PredictWidth).map(i => brs(i) && i.U <= jmpIdx && ~inLatch.btbPred.bits.predCtr(i)(1) && predecode.mask(i)))
   }

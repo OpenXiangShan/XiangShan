@@ -1,4 +1,4 @@
- package xiangshan.frontend
+package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
@@ -276,4 +276,3 @@ class IFU extends XSModule with HasIFUConst
     io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }
-

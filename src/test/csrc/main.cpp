@@ -1,7 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
-#include <memory>
 #include <getopt.h>
 #include <string.h>
 #include <sys/time.h>
@@ -15,16 +14,6 @@
 // junk, link for verilator
 std::function<double()> get_sc_time_stamp = []() -> double { return 0; };
 double sc_time_stamp() { return get_sc_time_stamp(); }
-
-const struct option Emulator::long_options[] = {
-  { "seed",           1, NULL, 's' },
-  { "max-cycles",     1, NULL, 'C' },
-  { "image",          1, NULL, 'i' },
-  { "log-begin",      1, NULL, 'b' },
-  { "log-end",        1, NULL, 'e' },
-  { "help",           0, NULL, 'h' },
-  { 0,                0, NULL,  0  }
-};
 
 void Emulator::print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
@@ -40,9 +29,31 @@ void Emulator::print_help(const char *file) {
 
 std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
   std::vector<const char *> args = { argv[0] };
+  int long_index = 0;
+  const struct option long_options[] = {
+    { "load-snapshot",  1, NULL,  0  },
+    { "seed",           1, NULL, 's' },
+    { "max-cycles",     1, NULL, 'C' },
+    { "image",          1, NULL, 'i' },
+    { "log-begin",      1, NULL, 'b' },
+    { "log-end",        1, NULL, 'e' },
+    { "help",           0, NULL, 'h' },
+    { 0,                0, NULL,  0  }
+  };
+
   int o;
-  while ( (o = getopt_long(argc, const_cast<char *const*>(argv), "-s:C:hi:m:b:e:", long_options, NULL)) != -1) {
+  while ( (o = getopt_long(argc, const_cast<char *const*>(argv),
+          "-s:C:hi:m:b:e:", long_options, &long_index)) != -1) {
     switch (o) {
+      case 0:
+        if (long_index == 0) {
+          snapshot_path = optarg;
+          break;
+        }
+        // fall through
+      default:
+        print_help(argv[0]);
+        exit(0);
       case 's': 
         if(std::string(optarg) != "NO_SEED") {
           seed = atoll(optarg);
@@ -56,9 +67,6 @@ std::vector<const char *> Emulator::parse_args(int argc, const char *argv[]) {
                 break;
       case 'b': log_begin = atoll(optarg);  break;
       case 'e': log_end = atoll(optarg); break;
-      default:
-                print_help(argv[0]);
-                exit(0);
     }
   }
 
@@ -79,7 +87,8 @@ int main(int argc, const char** argv) {
 
   int display_trapinfo(uint64_t max_cycles);
   int ret = display_trapinfo(emu.get_max_cycles());
-  eprintf(ANSI_COLOR_BLUE "Seed=%d Guest cycle spent: %" PRIu64 "\n" ANSI_COLOR_RESET, emu.get_seed(), emu.get_cycles());
+  eprintf(ANSI_COLOR_BLUE "Seed=%d Guest cycle spent: %" PRIu64
+      " (this will be different from cycleCnt if emu loads a snapshot)\n" ANSI_COLOR_RESET, emu.get_seed(), emu.get_cycles());
   eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
 
   return ret;
