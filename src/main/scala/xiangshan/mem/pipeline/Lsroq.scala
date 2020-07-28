@@ -19,6 +19,8 @@ class LsRoqEntry extends XSBundle {
   val miss = Bool()
   val mmio = Bool()
   val store = Bool()
+  val bwdMask = UInt(8.W)
+  val bwdData = UInt(XLEN.W)
 }
 
 // Load/Store Roq (Moq) for XiangShan Out of Order LSU
@@ -64,6 +66,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       valid(ringBufferHead+offset) := false.B
       writebacked(ringBufferHead+offset) := false.B
       store(ringBufferHead+offset) := false.B
+      data(ringBufferHead+offset).bwdMask := 0.U
     }
     io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead+offset)
     io.moqIdxs(i) := ringBufferHeadExtended+offset
@@ -190,7 +193,10 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   //   // TODO: re-exec missed inst
   // }
 
-  
+  // get load result from refill resp
+  // TODO
+
+  // writeback up to 2 missed load / store insts
   // TODO
 
   // remove retired insts from lsroq, add retired store to sbuffer
@@ -263,6 +269,8 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     io.forward(i).forwardMask := 0.U(8.W).asBools
     io.forward(i).forwardData := DontCare
     // Just for functional simulation
+
+    // forward
     (1 until MoqSize).map(j => {
       val ptr = io.forward(i).moqIdx - j.U
       when(
@@ -271,14 +279,24 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
         io.forward(i).paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
       ){
         (0 until 8).map(k => {
-          when(data(ptr).mask(k) && io.forward(i).mask(k)){
-            io.forward(i).forwardMask(k) := true.B
-            io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
-            XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
+          // when(data(ptr).mask(k) && io.forward(i).mask(k)){
+            when(data(ptr).mask(k)){
+              io.forward(i).forwardMask(k) := true.B
+              io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
+              XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
               io.forward(i).forwardData(k), ptr, uop(ptr).cf.pc
-            )
-          }
-        })
+              )
+            }
+          })
+        }
+      })
+      
+    // backward
+    (0 until 8).map(k => {
+      when(data(io.forward(i).moqIdx).bwdMask(k)){
+        io.forward(i).forwardMask(k) := true.B
+        io.forward(i).forwardData(k) := data(io.forward(i).moqIdx).bwdData(8*(k+1)-1, 8*k)
+        XSDebug("backwarding "+k+"th byte %x\n", io.forward(i).forwardData(k))
       }
     })
   })
@@ -299,14 +317,21 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
         io.storeIn(i).bits.paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
         (0 until 8).map(k => {
           when(needCheck(j)(k) && addrMatch && data(ptr).mask(k) && io.storeIn(i).bits.mask(k)){
-            rollback(i).valid := true.B
-            rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
-            rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+            when(writebacked(ptr)){
+              rollback(i).valid := true.B
+              rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
+              rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+            }.otherwise{
+              data(j).bwdMask(k) := 1.U
+              data(j).bwdData(8*(k+1)-1, 8*k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
+              XSDebug("write backward data: ptr %x byte %x data %x\n", ptr, k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
+            } 
           }
           needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && store(ptr)) && !reachHead
         })
 
         // when l/s writeback to roq together, check if rollback is needed
+        // currently we just rollback (TODO)
         when(io.storeIn(i).valid && io.storeIn(i).bits.uop.moqIdx === ptr){
           (0 until LoadPipelineWidth).map(j => {
             when(
@@ -320,6 +345,7 @@ class LsRoq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
             }
           })
         }
+
       })
     }
   })
