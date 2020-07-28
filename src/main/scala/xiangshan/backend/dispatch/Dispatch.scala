@@ -20,12 +20,19 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
     val toMoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get MoqIdx
     val moqIdxs = Input(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts - exuParameters.StuCnt, Input(Bool()))
+    // load + store reg status (busy/ready)
+    val intMemRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
+    val fpMemRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
+    val intMemRegRdy = Vec(NRMemReadPorts, Input(Bool()))
+    val fpMemRegRdy = Vec(exuParameters.StuCnt, Input(Bool()))
+
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))

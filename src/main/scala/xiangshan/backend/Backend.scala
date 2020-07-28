@@ -12,7 +12,7 @@ import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.FunctionUnit
-import xiangshan.backend.issue.{IssueQueue, RegfileReader, ReservedStation}
+import xiangshan.backend.issue.{IssueQueue, ReservationStation}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
@@ -102,7 +102,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
 
       println(s"exu:${cfg.name} wakeupCnt:${wakeUpDateVec.length} bypassCnt:$bypassCnt")
 
-      val rs = Module(new ReservedStation(
+      val rs = Module(new ReservationStation(
         cfg, wakeUpDateVec.length, bypassCnt, cfg.enableBypass, false
       ))
       rs.io.redirect <> redirect
@@ -160,13 +160,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
       iq
     })
 
-  val rfReader = Module(new RegfileReader(memConfigs, exeWbReqs.length))
-  rfReader.io.in <> issueQueues.map(_.io.deq)
-  rfReader.io.bypasses <> exeWbReqs
-
   io.mem.mcommit := roq.io.mcommit
-  io.mem.ldin <> rfReader.io.out.take(exuParameters.LduCnt)
-  io.mem.stin <> rfReader.io.out.takeRight(exuParameters.StuCnt)
+  io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
+  io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid
   jmpExeUnit.io.exception.bits := roq.io.exception
 
@@ -188,10 +184,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.in <> decBuf.io.out
-  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr) ++ issueQueues.flatMap(_.io.intRfReadAddr)
-  rename.io.intPregRdy <> dispatch.io.intPregRdy ++ issueQueues.flatMap(_.io.intSrcRdy)
-  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr) ++ issueQueues.flatMap(_.io.fpRfReadAddr)
-  rename.io.fpPregRdy <> dispatch.io.fpPregRdy ++ issueQueues.flatMap(_.io.fpSrcRdy)
+  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr) ++ dispatch.io.intMemRegAddr
+  rename.io.intPregRdy <> dispatch.io.intPregRdy ++ dispatch.io.intMemRegRdy
+  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr) ++ dispatch.io.fpMemRegAddr
+  rename.io.fpPregRdy <> dispatch.io.fpPregRdy ++ dispatch.io.fpMemRegRdy
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
 
@@ -202,8 +198,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   dispatch.io.moqIdxs <> io.mem.moqIdxs
 
   intRf.io.readPorts <> dispatch.io.readIntRf
-  fpRf.io.readPorts <> dispatch.io.readFpRf ++ rfReader.io.readFpRf
-  memRf.io.readPorts <> rfReader.io.readIntRf
+  fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
+  memRf.io.readPorts <> issueQueues.flatMap(_.io.readIntRf)
 
   val wbIntIdx = exuConfigs.zipWithIndex.filter(_._1.writeIntRf).map(_._2)
   val wbFpIdx = exuConfigs.zipWithIndex.filter(_._1.writeFpRf).map(_._2)
