@@ -40,7 +40,7 @@ class Ibuffer extends XSModule {
   val head_ptr = RegInit(0.U(log2Up(IBufSize).W))
   val tail_ptr = RegInit(0.U(log2Up(IBufSize).W))
 
-  val enqValid = !io.flush && ibuf_valid(tail_ptr + FetchWidth.U - 1.U)
+  val enqValid = !io.flush && !ibuf_valid(tail_ptr + FetchWidth.U - 1.U)
   val deqValid = !io.flush && ibuf_valid(head_ptr)
 
   io.in.ready := enqValid
@@ -90,6 +90,9 @@ class Ibuffer extends XSModule {
       deq_idx = deq_idx + io.out(i).fire
     }
     head_ptr := deq_idx
+  }.otherwise {
+    io.out.foreach(_.valid := false.B)
+    io.out.foreach(_.bits <> DontCare)
   }
 
   // Flush
