@@ -385,7 +385,7 @@ class MSHRFile extends DCacheModule
   // print all input/output requests for debug purpose
 
   // print req
-  XSDebug(req.fire(), "cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
+  XSDebug(req.fire(), "req cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
     req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask, req.bits.meta,
     req.bits.tag_match, req.bits.old_meta.coh.state, req.bits.old_meta.tag, req.bits.way_en)
 
@@ -395,35 +395,40 @@ class MSHRFile extends DCacheModule
   }
 
   // print refill
-  XSDebug(io.refill.fire(), "addr %x data: %x wmask: %x way_en: %x\n",
+  XSDebug(io.refill.fire(), "refill addr %x data: %x wmask: %x way_en: %x\n",
     io.refill.bits.addr, io.refill.bits.data,
     io.refill.bits.wmask, io.refill.bits.way_en)
 
   // print meta_write
-  XSDebug(io.meta_write.fire(), "idx %x way_en: %x old_tag: %x new_coh: %d new_tag: %x\n",
+  XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_coh: %d new_tag: %x\n",
     io.meta_write.bits.idx, io.meta_write.bits.way_en,
     io.meta_write.bits.data.coh.state, io.meta_write.bits.data.tag,
     io.meta_write.bits.tag)
 
   // print replay
-  XSDebug(io.replay.fire(), "cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
+  XSDebug(io.replay.fire(), "replay cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
     io.replay.bits.cmd, io.replay.bits.addr, io.replay.bits.data, io.replay.bits.mask, io.replay.bits.meta,
     io.replay.bits.tag_match, io.replay.bits.old_meta.coh.state, io.replay.bits.old_meta.tag, io.replay.bits.way_en)
 
   // print wb_req
-  XSDebug(io.wb_req.fire(), "idx %x tag: %x source: %d param: %x way_en: %x voluntary: %b\n",
+  XSDebug(io.wb_req.fire(), "wb_req idx %x tag: %x source: %d param: %x way_en: %x voluntary: %b\n",
     io.wb_req.bits.idx, io.wb_req.bits.tag,
     io.wb_req.bits.source, io.wb_req.bits.param,
     io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
 
   // print tilelink messages
   when (XSDebug.trigger && io.mem_acquire.fire()) {
+    // add prefix message, so that we can know that,
+    // when and where this message is created
+    XSDebug.printPrefix
     io.mem_acquire.bits.dump
   }
   when (XSDebug.trigger && io.mem_grant.fire()) {
+    XSDebug.printPrefix
     io.mem_grant.bits.dump
   }
   when (XSDebug.trigger && io.mem_finish.fire()) {
+    XSDebug.printPrefix
     io.mem_finish.bits.dump
   }
 }

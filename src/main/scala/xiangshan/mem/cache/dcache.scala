@@ -409,17 +409,17 @@ class DCache extends DCacheModule
   // -------
   // Pipeline
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Vec[Bool],
-    reqs: Vec[DCacheReq], s0_type: UInt) = {
+    reqs: Vec[DCacheReq], req_type: UInt) = {
       (0 until memWidth) map { w =>
-          XSDebug(s"$pipeline_stage_name")
-          XSDebug("channel %d: valid: %b ", w.U, valid(w))
+          XSDebug(s"$pipeline_stage_name\n")
+          XSDebug("channel %d: valid: %b \n", w.U, valid(w))
           when (valid(w)) {
-            when (s0_type === t_replay) {
-              XSDebug("type: reply ")
-              } .elsewhen (s0_type === t_lsu) {
-              XSDebug("type: reply ")
+            when (req_type === t_replay) {
+              XSDebug("req_type: replay ")
+              } .elsewhen (req_type === t_lsu) {
+              XSDebug("req_type: lsu ")
               } .otherwise {
-                XSDebug("type: unknown ")
+                XSDebug("req_type: unknown ")
               }
               XSDebug("cmd: %x addr: %x data: %x mask: %x meta: %x\n",
                 reqs(w).cmd, reqs(w).addr, reqs(w).data, reqs(w).mask, reqs(w).meta)
@@ -437,6 +437,10 @@ class DCache extends DCacheModule
 
   dump_pipeline_reqs("DCache s0", s0_valid, s0_req, s0_type)
 
+  /*
+  XSDebug("lsu_req fire: %b valid: %b ready: %b\n", io.lsu.req.fire(), io.lsu.req.valid, io.lsu.req.ready)
+  XSDebug("replay_req fire: %b valid: %b ready: %b\n", mshrs.io.replay.fire(), mshrs.io.replay.valid, mshrs.io.replay.ready)
+  */
 
   // Does this request need to send a response or nack
   // for successfully executed load/stores, we send a resp 

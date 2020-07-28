@@ -65,17 +65,22 @@ trait AXI4HasLast {
 class AXI4LiteBundleA extends Bundle {
   val addr  = Output(UInt(AXI4Parameters.addrBits.W))
   val prot  = Output(UInt(AXI4Parameters.protBits.W))
+  def dump(channelName: String) = printf(s"channel $channelName addr: %x prot: %x\n", addr, prot)
 }
 
 class AXI4LiteBundleW(override val dataBits: Int = AXI4Parameters.dataBits) extends Bundle with AXI4HasData {
   val strb = Output(UInt((dataBits/8).W))
+  def dump(channelName: String) = printf(s"channel $channelName strb: %x data: %x\n", strb, data)
 }
 
 class AXI4LiteBundleB extends Bundle {
   val resp = Output(UInt(AXI4Parameters.respBits.W))
+  def dump(channelName: String) = printf(s"channel $channelName resp: %x\n", resp)
 }
 
-class AXI4LiteBundleR(override val dataBits: Int = AXI4Parameters.dataBits) extends AXI4LiteBundleB with AXI4HasData
+class AXI4LiteBundleR(override val dataBits: Int = AXI4Parameters.dataBits) extends AXI4LiteBundleB with AXI4HasData {
+  override def dump(channelName: String) = printf(s"channel $channelName resp: %x data: %x\n", resp, data)
+}
 
 
 class AXI4Lite extends Bundle {
@@ -84,6 +89,23 @@ class AXI4Lite extends Bundle {
   val b  = Flipped(Decoupled(new AXI4LiteBundleB))
   val ar = Decoupled(new AXI4LiteBundleA)
   val r  = Flipped(Decoupled(new AXI4LiteBundleR))
+  def dump = {
+    when (aw.fire()) {
+      aw.bits.dump("AW")
+    }
+    when (w.fire()) {
+      w.bits.dump("W")
+    }
+    when (b.fire()) {
+      b.bits.dump("B")
+    }
+    when (ar.fire()) {
+      ar.bits.dump("AR")
+    }
+    when (r.fire()) {
+      r.bits.dump("R")
+    }
+  }
 }
 
 
@@ -97,12 +119,20 @@ class AXI4BundleA(override val idBits: Int) extends AXI4LiteBundleA with AXI4Has
   val cache = Output(UInt(AXI4Parameters.cacheBits.W))
   val qos   = Output(UInt(AXI4Parameters.qosBits.W))  // 0=no QoS, bigger = higher priority
   // val region = UInt(width = 4) // optional
+  override def dump(channelName: String) = printf(s"channel $channelName addr: %x len: %x size: %x burst: %x lock: %b cache: %x qos: %x prot: %x id: %d user: %x\n",
+    addr, len, size, burst, lock, cache, qos, prot, id, user)
 }
 
 // id ... removed in AXI4
-class AXI4BundleW(override val dataBits: Int) extends AXI4LiteBundleW(dataBits) with AXI4HasLast
-class AXI4BundleB(override val idBits: Int) extends AXI4LiteBundleB with AXI4HasId with AXI4HasUser
-class AXI4BundleR(override val dataBits: Int, override val idBits: Int) extends AXI4LiteBundleR(dataBits) with AXI4HasLast with AXI4HasId with AXI4HasUser
+class AXI4BundleW(override val dataBits: Int) extends AXI4LiteBundleW(dataBits) with AXI4HasLast {
+  override def dump(channelName: String) = printf(s"channel $channelName strb: %x data: %x last: %b\n", strb, data, last)
+}
+class AXI4BundleB(override val idBits: Int) extends AXI4LiteBundleB with AXI4HasId with AXI4HasUser {
+  override def dump(channelName: String) = printf(s"channel $channelName resp: %x id: %d user: %x\n", resp, id, user)
+}
+class AXI4BundleR(override val dataBits: Int, override val idBits: Int) extends AXI4LiteBundleR(dataBits) with AXI4HasLast with AXI4HasId with AXI4HasUser {
+  override def dump(channelName: String) = printf(s"channel $channelName resp: %x data: %x id: %d user: %x last: %b\n", resp, data, id, user, last)
+}
 
 
 class AXI4(val dataBits: Int = AXI4Parameters.dataBits, val idBits: Int = AXI4Parameters.idBits) extends AXI4Lite {
@@ -111,4 +141,21 @@ class AXI4(val dataBits: Int = AXI4Parameters.dataBits, val idBits: Int = AXI4Pa
   override val b  = Flipped(Decoupled(new AXI4BundleB(idBits)))
   override val ar = Decoupled(new AXI4BundleA(idBits))
   override val r  = Flipped(Decoupled(new AXI4BundleR(dataBits, idBits)))
+  override def dump = {
+    when (aw.fire()) {
+      aw.bits.dump("AW")
+    }
+    when (w.fire()) {
+      w.bits.dump("W")
+    }
+    when (b.fire()) {
+      b.bits.dump("B")
+    }
+    when (ar.fire()) {
+      ar.bits.dump("AR")
+    }
+    when (r.fire()) {
+      r.bits.dump("R")
+    }
+  }
 }

@@ -6,6 +6,7 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan.HasXSParameter
+import xiangshan.utils.XSDebug
 
 case class TLParameters(
   addressBits: Int = 64,
@@ -248,14 +249,12 @@ class TLBundleE(override val params: TLParameters) extends TLChannel
 class TLUnCached(val params: TLParameters) extends Bundle {
   val a = Decoupled(new TLBundleA(params))
   val d = Flipped(Decoupled(new TLBundleD(params)))
-  def dump(cond: Bool) = {
-    when (cond) {
-      when (a.fire()) {
-        a.bits.dump
-      }
-      when (d.fire()) {
-        d.bits.dump
-      }
+  def dump = {
+    when (a.fire()) {
+      a.bits.dump
+    }
+    when (d.fire()) {
+      d.bits.dump
     }
   }
 }
@@ -265,18 +264,16 @@ class TLCached(override val params: TLParameters) extends TLUnCached(params) {
   val b = Flipped(Decoupled(new TLBundleB(params)))
   val c = Decoupled(new TLBundleC(params))
   val e = Decoupled(new TLBundleE(params))
-  override def dump(cond: Bool) = {
-    super.dump(cond)
-    when (cond) {
-      when (b.fire()) {
-        b.bits.dump
-      }
-      when (c.fire()) {
-        c.bits.dump
-      }
-      when (e.fire()) {
-        e.bits.dump
-      }
+  override def dump = {
+    super.dump
+    when (b.fire()) {
+      b.bits.dump
+    }
+    when (c.fire()) {
+      c.bits.dump
+    }
+    when (e.fire()) {
+      e.bits.dump
     }
   }
 }

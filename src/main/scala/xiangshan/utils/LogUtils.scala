@@ -61,6 +61,13 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   def trigger: Bool = {
     logLevel.id.U >= XSLog.xsLogLevel && XSLog.displayLog
   }
+
+  def printPrefix()(implicit name: String): Unit = {
+    val commonInfo = p"[$logLevel][time=${GTimer()}] $name: "
+    when (trigger) {
+      printf(commonInfo)
+    }
+  }
 }
 
 object XSDebug extends LogHelper(XSLogLevel.DEBUG)

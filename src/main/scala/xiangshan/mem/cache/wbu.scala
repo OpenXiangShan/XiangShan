@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
+import xiangshan.utils.XSDebug
 import bus.tilelink._
 
 class WritebackReq extends DCacheBundle {
@@ -97,12 +98,15 @@ class WritebackUnit extends DCacheModule {
       data_req_cnt := data_req_cnt + 1.U
     }
     when (r2_data_req_fired) {
-      wb_buffer(r2_data_req_cnt) := Mux1H(req.way_en, io.data_resp)
+      val data = Mux1H(req.way_en, io.data_resp)
+      wb_buffer(r2_data_req_cnt) := data
       when (r2_data_req_cnt === (refillCycles-1).U) {
         io.resp := true.B
         state := s_active
         data_req_cnt := 0.U
       }
+      // print data resp
+      XSDebug(s"data_resp cnt: %d data: %x\n", r2_data_req_cnt, data)
     }
   } .elsewhen (state === s_active) {
     io.release.valid := data_req_cnt < refillCycles.U
@@ -125,4 +129,23 @@ class WritebackUnit extends DCacheModule {
       state := s_invalid
     }
   }
+
+  // print all input/output requests for debug purpose
+  // print req
+  val io_req = io.req.bits
+  XSDebug(io.req.fire(), "req tag: %x idx: %x source: %d param: %x way_en: %x voluntary: %b\n",
+    io_req.tag, io_req.idx, io_req.source, io_req.param, io_req.way_en, io_req.voluntary)
+
+  // print data req
+  val io_data_req = io.data_req.bits
+  XSDebug(io.data_req.fire(), "data_req addr: %x way_en: %x\n", io_data_req.addr, io_data_req.way_en)
+
+  // print release
+  when (XSDebug.trigger && io.release.fire()) {
+    XSDebug.printPrefix
+    io.release.bits.dump
+  }
+
+  // print mem_grant
+  XSDebug(io.mem_grant, "mem_grant\n")
 }

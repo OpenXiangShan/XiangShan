@@ -4,13 +4,16 @@ package bus.tilelink
 
 import chisel3._
 import chisel3.util._
+
+import xiangshan.XSModule
+import xiangshan.utils.XSDebug
 import bus.axi4.AXI4
 import bus.axi4.AXI4Parameters
 import utils.GTimer
 
 // a simpel TileLink to AXI4 converter
 // only support TileLink put and get
-class NaiveTLToAXI4(params: TLParameters) extends Module
+class NaiveTLToAXI4(params: TLParameters) extends XSModule
 {
   val io = IO(new Bundle{
     val in = Flipped(new TLCached(params))
@@ -57,45 +60,12 @@ class NaiveTLToAXI4(params: TLParameters) extends Module
   val s_idle :: s_gather_write_data :: s_wait_awready :: s_mem_write :: s_wait_bresp :: s_wait_arready :: s_mem_read :: s_read_resp :: s_write_resp :: Nil = Enum(9)
 
   val state = RegInit(s_idle)
-  val timer = GTimer()
-  val log_prefix = "cycle: %d [L2Cache] state %x "
-  def log_raw(prefix: String, fmt: String, tail: String, args: Bits*) = {
-    if (debug) {
-      printf(prefix + fmt + tail, args:_*)
-    }
-  }
 
-  /** Single log */
-  def log(fmt: String, args: Bits*) = log_raw(log_prefix, fmt, "\n", timer +: state +: args:_*)
-  /** Log with line continued */
-  def log_part(fmt: String, args: Bits*) = log_raw(log_prefix, fmt, "", timer +: state +: args:_*)
-  /** Log with nothing added */
-  def log_plain(fmt: String, args: Bits*) = log_raw("", fmt, "", args:_*)
-
-  when (in.a.fire()) {
-    log("in.a opcode %x, param %x, size %x, source %x, address %x, mask %x, data %x",
-      in.a.bits.opcode,
-      in.a.bits.param,
-      in.a.bits.size,
-      in.a.bits.source,
-      in.a.bits.address,
-      in.a.bits.mask,
-      in.a.bits.data)
+  when (XSDebug.trigger) {
+    XSDebug.printPrefix
+    in.dump
+    out.dump
   }
-
-  /*
-  when (out.a.fire()) {
-    log("out.a.opcode %x, dsid %x, param %x, size %x, source %x, address %x, mask %x, data %x",
-      out.a.bits.opcode,
-      out.a.bits.dsid,
-      out.a.bits.param,
-      out.a.bits.size,
-      out.a.bits.source,
-      out.a.bits.address,
-      out.a.bits.mask,
-      out.a.bits.data)
-  }
-  */
 
   val in_opcode = in.a.bits.opcode
   val in_addr = in.a.bits.address
