@@ -64,9 +64,15 @@ class DCacheStoreIO extends XSBundle
   val resp = DecoupledIO(new DCacheResp)
 }
 
+class MissReqIO extends XSBundle
+{
+  val paddr = UInt(PAddrBits.W)
+}
+
 class DcacheToLsuIO extends XSBundle with HasMEMConst {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
+  val refill = new DCacheStoreIO
   val redirect = Flipped(ValidIO(new Redirect))
 }
 
