@@ -272,6 +272,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     loadOut(i).bits.data := rdataPartialLoad
     loadOut(i).bits.redirectValid := false.B
     loadOut(i).bits.redirect := DontCare
+    loadOut(i).bits.brUpdate := DontCare
     loadOut(i).bits.debug.isMMIO := l5_in(i).bits.mmio
     loadOut(i).valid := l5_in(i).valid
     XSDebug(loadOut(i).fire(), "load writeback: pc %x data %x (%x + %x(%b))\n", 

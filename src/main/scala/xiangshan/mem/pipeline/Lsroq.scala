@@ -41,7 +41,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
 
   val uop = Mem(LSRoqSize, new MicroOp)
-  val data = Mem(LSRoqSize, new LsRoqEntry)
+  val data = Reg(Vec(LSRoqSize, new LsRoqEntry))
   val allocated = RegInit(VecInit(List.fill(MoqSize)(false.B)))
   val valid = RegInit(VecInit(List.fill(MoqSize)(false.B)))
   val writebacked = RegInit(VecInit(List.fill(MoqSize)(false.B)))
@@ -172,6 +172,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     io.stout(i).bits.data := data(storeWbSel(i)).data
     io.stout(i).bits.redirectValid := false.B
     io.stout(i).bits.redirect := DontCare
+    io.stout(i).bits.brUpdate := DontCare
     io.stout(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
     when(storeWbSelVec(storeWbSel(i))){
       writebacked(storeWbSel(i)) := true.B
