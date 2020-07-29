@@ -103,7 +103,6 @@ trait NeedImpl { this: Module =>
 
 abstract class XSBundle extends Bundle
   with HasXSParameter
-  with HasTageParameter
 
 case class XSConfig
 (

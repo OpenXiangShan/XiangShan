@@ -73,7 +73,8 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
 class LsuIO extends XSBundle with HasMEMConst {
   val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
-  val out = Vec(4, Decoupled(new ExuOutput))
+  val ldout = Vec(2, Decoupled(new ExuOutput))
+  val stout = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
   val rollback = Output(Valid(new Redirect))
   val mcommit = Input(UInt(3.W))
@@ -88,7 +89,9 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
 
-  val lsroq = Module(new LsRoq)
+  io.dcache.refill <> DontCare
+
+  val lsroq = Module(new Lsroq)
   val sbuffer = Module(new FakeSbuffer)
 
   lsroq.io.mcommit <> io.mcommit
@@ -219,7 +222,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
   
   (0 until LoadPipelineWidth).map(i => {
-    PipelineConnect(l4_out(i), l5_in(i), io.out(i).fire(), l5_in(i).bits.uop.brTag.needFlush(io.redirect))
+    PipelineConnect(l4_out(i), l5_in(i), io.ldout(i).fire(), l5_in(i).bits.uop.brTag.needFlush(io.redirect))
   })
 
 //-------------------------------------------------------
@@ -269,8 +272,9 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     loadOut(i).bits.data := rdataPartialLoad
     loadOut(i).bits.redirectValid := false.B
     loadOut(i).bits.redirect := DontCare
+    loadOut(i).bits.brUpdate := DontCare
     loadOut(i).bits.debug.isMMIO := l5_in(i).bits.mmio
-    loadOut(i).valid := loadWriteBack(i)
+    loadOut(i).valid := l5_in(i).valid
     XSDebug(loadOut(i).fire(), "load writeback: pc %x data %x (%x + %x(%b))\n", 
       loadOut(i).bits.uop.cf.pc, rdataPartialLoad, l5_in(i).bits.data, 
       l5_in(i).bits.forwardData.asUInt, l5_in(i).bits.forwardMask.asUInt
@@ -283,7 +287,10 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     lsroq.io.loadIn(i).valid := loadWriteBack(i)
 
     // pipeline control
-    l5_in(i).ready := io.out(i).ready
+    l5_in(i).ready := io.ldout(i).ready
+
+    lsroq.io.ldout(i).ready := false.B // TODO
+    // TODO: writeback missed load
   })
 
 //-------------------------------------------------------
@@ -357,10 +364,10 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   
   // Writeback to CDB
   (0 until LoadPipelineWidth).map(i => {
-    io.out(i) <> loadOut(i)
+    io.ldout(i) <> loadOut(i)
   })
   (0 until StorePipelineWidth).map(i => {
-    io.out(LoadPipelineWidth + i) <> lsroq.io.out(i)
+    io.stout(i) <> lsroq.io.stout(i)
   })
 
   // (0 until 2).map(i => {

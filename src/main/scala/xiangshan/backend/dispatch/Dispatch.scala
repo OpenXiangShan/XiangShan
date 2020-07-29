@@ -19,6 +19,7 @@ case class DispatchParameters
 
 class Dispatch() extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
+    // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))

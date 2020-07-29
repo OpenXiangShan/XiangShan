@@ -39,15 +39,13 @@ class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
       //-----------------
       // Cycle 5
       //-----------------
-      c.io.redirectInfo.valid.poke(true.B)
-      c.io.redirectInfo.misPred.poke(true.B)
-      c.io.redirectInfo.redirect.target.poke("h80002800".U)
+      c.io.redirect.valid.poke(true.B)
+      c.io.redirect.bits.target.poke("h80002800".U)
       c.clock.step()
       //-----------------
       // Cycle 6
       //-----------------
-      c.io.redirectInfo.valid.poke(false.B)
-      c.io.redirectInfo.misPred.poke(false.B)
+      c.io.redirect.valid.poke(false.B)
       c.clock.step()
       //-----------------
       // Cycle 7
