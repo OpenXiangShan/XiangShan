@@ -9,19 +9,13 @@ import xiangshan.frontend.PreDecodeInfo
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
-  val instrs = Vec(FetchWidth, UInt(32.W))
-  val mask = UInt((FetchWidth*2).W)
-  val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
-  val pnpc = Vec(FetchWidth*2, UInt(VAddrBits.W))
-  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  val predCtr = Vec(FetchWidth*2, UInt(2.W))
-  val btbHit = Vec(FetchWidth*2, Bool())
-  val tageMeta = Vec(FetchWidth*2, (new TageMeta))
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
+  val instrs = Vec(PredictWidth, UInt(32.W))
+  val mask = UInt(PredictWidth.W)
+  val pc = UInt(VAddrBits.W)
+  val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
+  val brInfo = Vec(PredictWidth, (new BranchInfo))
+  val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
-
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -71,7 +65,6 @@ class Predecode extends XSBundle {
   val mask = UInt((FetchWidth*2).W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
-
 
 class BranchUpdateInfo extends XSBundle {
   // from backend
