@@ -42,7 +42,9 @@ class Dispatch2Ls extends XSModule {
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
   val rsValidVec = allIndexGen.map(_.io.reverseMapping.map(_.valid)).reduceLeft(_ ++ _)
-  val rsIndexVec = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
+  val rsIndexVecRaw = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
+  val rsIndexVec = rsIndexVecRaw.zipWithIndex.map { case (index, i) =>
+    (if (i >= exuParameters.LduCnt) index + exuParameters.LduCnt.U else index) }
 
   /**
     * Part 2: assign regfile read ports (actually only reg states from rename)
