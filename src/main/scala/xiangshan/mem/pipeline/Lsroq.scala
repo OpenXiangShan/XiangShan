@@ -151,31 +151,6 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     }
   })
 
-  // commit store to cdb
-  // TODO: how to select 2 from 64?
-  // just randomly pick 2 stores, write them back to cdb
-  val storeWbSelVec = VecInit((0 until MoqSize).map(i => {
-    allocated(i) && valid(i) && !writebacked(i) && store(i)
-  }))
-  val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(MoqSize).W)))
-  val selvec0 = VecInit(PriorityEncoderOH(storeWbSelVec))
-  val selvec1 = VecInit(PriorityEncoderOH(storeWbSelVec.asUInt & ~selvec0.asUInt))
-  storeWbSel(0) := OHToUInt(selvec0.asUInt)
-  storeWbSel(1) := OHToUInt(selvec1.asUInt)
-
-  (0 until StorePipelineWidth).map(i => {
-    io.stout(i).bits.uop := uop(storeWbSel(i))
-    io.stout(i).bits.data := data(storeWbSel(i)).data
-    io.stout(i).bits.redirectValid := false.B
-    io.stout(i).bits.redirect := DontCare
-    io.stout(i).bits.brUpdate := DontCare
-    io.stout(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
-    when(storeWbSelVec(storeWbSel(i))){
-      writebacked(storeWbSel(i)) := true.B
-    }
-    io.stout(i).valid := storeWbSelVec(storeWbSel(i))
-  })
-
   // cache miss request
   val missRefillSelVec = VecInit(
     (0 until MoqSize).map(i => allocated(i) && miss(i))
@@ -190,12 +165,65 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   // get load result from refill resp
   // TODO
+  // (0 until MoqSize).map(i => {
+  //   when(addr_match){
+  //     data(i).data := dataIn
+  //     valid(i) := true.B
+  //     listening(i) := false.B
+  //   }
+  // })
 
   // writeback up to 2 missed load insts to CDB
-  // TODO
-  (0 until 2).map(i => {
-    io.ldout(i) <> DontCare
-    io.ldout(i).valid := false.B
+  // just randomly pick 2 missed load (data refilled), write them back to cdb
+  val loadWbSelVec = VecInit((0 until MoqSize).map(i => {
+    allocated(i) && valid(i) && !writebacked(i) && !store(i)
+  }))
+  val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(MoqSize).W)))
+  val lselvec0 = VecInit(PriorityEncoderOH(loadWbSelVec))
+  val lselvec1 = VecInit(PriorityEncoderOH(loadWbSelVec.asUInt & ~lselvec0.asUInt))
+  loadWbSel(0) := OHToUInt(lselvec0.asUInt)
+  loadWbSel(1) := OHToUInt(lselvec1.asUInt)
+  (0 until StorePipelineWidth).map(i => {
+    io.ldout(i).bits.uop := uop(loadWbSel(i))
+    io.ldout(i).bits.data := data(loadWbSel(i)).data
+    io.ldout(i).bits.redirectValid := false.B
+    io.ldout(i).bits.redirect := DontCare
+    io.ldout(i).bits.brUpdate := DontCare
+    io.ldout(i).bits.debug.isMMIO := data(loadWbSel(i)).mmio
+    when(loadWbSelVec(loadWbSel(i))){
+      writebacked(loadWbSel(i)) := true.B
+    }
+    io.ldout(i).valid := loadWbSelVec(loadWbSel(i))
+    when(io.ldout(i).fire()){
+      writebacked(loadWbSel(i)) := true.B
+    }
+  })
+
+  // writeback up to 2 store insts to CDB
+  // just randomly pick 2 stores, write them back to cdb
+  val storeWbSelVec = VecInit((0 until MoqSize).map(i => {
+    allocated(i) && valid(i) && !writebacked(i) && store(i)
+  }))
+  val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(MoqSize).W)))
+  val sselvec0 = VecInit(PriorityEncoderOH(storeWbSelVec))
+  val sselvec1 = VecInit(PriorityEncoderOH(storeWbSelVec.asUInt & ~sselvec0.asUInt))
+  storeWbSel(0) := OHToUInt(sselvec0.asUInt)
+  storeWbSel(1) := OHToUInt(sselvec1.asUInt)
+
+  (0 until StorePipelineWidth).map(i => {
+    io.stout(i).bits.uop := uop(storeWbSel(i))
+    io.stout(i).bits.data := data(storeWbSel(i)).data
+    io.stout(i).bits.redirectValid := false.B
+    io.stout(i).bits.redirect := DontCare
+    io.stout(i).bits.brUpdate := DontCare
+    io.stout(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
+    when(storeWbSelVec(storeWbSel(i))){
+      writebacked(storeWbSel(i)) := true.B
+    }
+    io.stout(i).valid := storeWbSelVec(storeWbSel(i))
+    when(io.stout(i).fire()){
+      writebacked(storeWbSel(i)) := true.B
+    }
   })
 
   // remove retired insts from lsroq, add retired store to sbuffer
@@ -254,15 +282,15 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   scommitCnt := scommitCnt + io.mcommit - demoqCnt
 
   // load forward query
-  // left.age < right.age
-  def moqIdxOlderThan (left: UInt, right: UInt): Bool = {
-    require(left.getWidth == MoqIdxWidth)
-    require(right.getWidth == MoqIdxWidth)
-    Mux(left(InnerMoqIdxWidth) === right(InnerMoqIdxWidth),
-      left(InnerMoqIdxWidth-1, 0) > right(InnerMoqIdxWidth-1, 0),
-      left(InnerMoqIdxWidth-1, 0) < right(InnerMoqIdxWidth-1, 0)
-    )
-  }
+  // // left.age < right.age
+  // def moqIdxOlderThan (left: UInt, right: UInt): Bool = {
+  //   require(left.getWidth == MoqIdxWidth)
+  //   require(right.getWidth == MoqIdxWidth)
+  //   Mux(left(InnerMoqIdxWidth) === right(InnerMoqIdxWidth),
+  //     left(InnerMoqIdxWidth-1, 0) > right(InnerMoqIdxWidth-1, 0),
+  //     left(InnerMoqIdxWidth-1, 0) < right(InnerMoqIdxWidth-1, 0)
+  //   )
+  // }
 
   (0 until LoadPipelineWidth).map(i => {
     io.forward(i).forwardMask := 0.U(8.W).asBools
