@@ -215,6 +215,14 @@ class Emulator {
       if (t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
         // save snapshot every 10s
         time_t now = time(NULL);
+        if(!hascommit){
+          eprintf(ANSI_COLOR_RED "\nNo instruction has been commited in the first 10 secends\n");
+#if VM_TRACE
+          tfp->close();
+#endif
+          set_abort();
+          return;
+        }
         snapshot_save(snapshot_filename(my_strftime(now)));
         lasttime_snapshot = t;
       }
