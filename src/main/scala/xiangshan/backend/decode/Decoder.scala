@@ -24,7 +24,7 @@ class Decoder extends XSModule with HasInstrType {
   val instrType :: fuType :: fuOpType :: Nil = decodeList
 
   // todo: remove this when fetch stage can decide if an instr is br/jmp
-  io.out.cf.isBr := (instrType === InstrB ||
+  io.out.cf.brUpdate.isBr := (instrType === InstrB ||
                     (fuOpType === JumpOpType.jal && instrType === InstrJ && fuType === FuType.jmp) ||
                     (fuOpType === JumpOpType.jalr && instrType === InstrI && fuType === FuType.jmp) ||
                     (fuOpType === CSROpType.jmp && instrType === InstrI && fuType === FuType.csr))

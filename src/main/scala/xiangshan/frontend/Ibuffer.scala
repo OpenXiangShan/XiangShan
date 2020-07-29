@@ -30,7 +30,7 @@ class Ibuffer extends XSModule {
   for(i <- 0 until DecodeWidth) {
     io.out(i).bits.exceptionVec := DontCare
     io.out(i).bits.intrVec := DontCare
-    io.out(i).bits.isBr := DontCare
+    io.out(i).bits.brUpdate := DontCare
     io.out(i).bits.crossPageIPFFix := DontCare
   }
 
@@ -94,62 +94,62 @@ class Ibuffer extends XSModule {
           // is RVC
           io.out(i).bits.instr := Cat(0.U(16.W), ibuf(deq_idx).inst)
           io.out(i).bits.pc := ibuf(deq_idx).pc
-          io.out(i).bits.pnpc := ibuf(deq_idx).pnpc
-          io.out(i).bits.fetchOffset := ibuf(deq_idx).fetchOffset
-          io.out(i).bits.hist := ibuf(deq_idx).hist
+          io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
+          io.out(i).bits.brUpdate.fetchOffset := ibuf(deq_idx).fetchOffset
+          io.out(i).bits.brUpdate.hist := ibuf(deq_idx).hist
           // io.out(i).bits.btbVictimWay := ibuf(deq_idx).btbVictimWay
-          io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
-          io.out(i).bits.btbHit := ibuf(deq_idx).btbHit
-          io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
-          io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
-          io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
-          io.out(i).bits.isRVC := true.B
+          io.out(i).bits.brUpdate.btbPredCtr := ibuf(deq_idx).btbPredCtr
+          io.out(i).bits.brUpdate.btbHit := ibuf(deq_idx).btbHit
+          io.out(i).bits.brUpdate.tageMeta := ibuf(deq_idx).tageMeta
+          io.out(i).bits.brUpdate.rasSp := ibuf(deq_idx).rasSp
+          io.out(i).bits.brUpdate.rasTopCtr := ibuf(deq_idx).rasTopCtr
+          io.out(i).bits.brUpdate.isRVC := true.B
           ibuf_valid(deq_idx) := !io.out(i).fire
         }.elsewhen(ibuf_valid(deq_idx + 1.U)) {
           // isn't RVC
           io.out(i).bits.instr := Cat(ibuf(deq_idx+1.U).inst, ibuf(deq_idx).inst)
           io.out(i).bits.pc := ibuf(deq_idx).pc
-          io.out(i).bits.pnpc := ibuf(deq_idx).pnpc
-          io.out(i).bits.fetchOffset := ibuf(deq_idx).fetchOffset
-          io.out(i).bits.hist := ibuf(deq_idx).hist
+          io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
+          io.out(i).bits.brUpdate.fetchOffset := ibuf(deq_idx).fetchOffset
+          io.out(i).bits.brUpdate.hist := ibuf(deq_idx).hist
           // io.out(i).bits.btbVictimWay := ibuf(deq_idx).btbVictimWay
-          io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
-          io.out(i).bits.btbHit := ibuf(deq_idx).btbHit
-          io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
-          io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
-          io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
-          io.out(i).bits.isRVC := false.B
+          io.out(i).bits.brUpdate.btbPredCtr := ibuf(deq_idx).btbPredCtr
+          io.out(i).bits.brUpdate.btbHit := ibuf(deq_idx).btbHit
+          io.out(i).bits.brUpdate.tageMeta := ibuf(deq_idx).tageMeta
+          io.out(i).bits.brUpdate.rasSp := ibuf(deq_idx).rasSp
+          io.out(i).bits.brUpdate.rasTopCtr := ibuf(deq_idx).rasTopCtr
+          io.out(i).bits.brUpdate.isRVC := false.B
           ibuf_valid(deq_idx) := !io.out(i).fire
           ibuf_valid(deq_idx+1.U) := !io.out(i).fire
         }.otherwise {
           // half inst keep in buffer
           io.out(i).bits.instr := 0.U(32.W)
           io.out(i).bits.pc := 0.U(VAddrBits.W)
-          io.out(i).bits.pnpc := 0.U(VAddrBits.W)
-          io.out(i).bits.fetchOffset := 0.U(log2Up(FetchWidth*4).W)
-          io.out(i).bits.hist := 0.U(HistoryLength.W)
+          io.out(i).bits.brUpdate.pnpc := 0.U(VAddrBits.W)
+          io.out(i).bits.brUpdate.fetchOffset := 0.U(log2Up(FetchWidth*4).W)
+          io.out(i).bits.brUpdate.hist := 0.U(HistoryLength.W)
           // io.out(i).bits.btbVictimWay := 0.U(log2Up(BtbWays).W)
-          io.out(i).bits.btbPredCtr := 0.U(2.W)
-          io.out(i).bits.btbHit := false.B
-          io.out(i).bits.tageMeta := 0.U.asTypeOf(new TageMeta)
-          io.out(i).bits.rasSp := 0.U(log2Up(RasSize))
-          io.out(i).bits.rasTopCtr := 0.U(8.W)
-          io.out(i).bits.isRVC := false.B
+          io.out(i).bits.brUpdate.btbPredCtr := 0.U(2.W)
+          io.out(i).bits.brUpdate.btbHit := false.B
+          io.out(i).bits.brUpdate.tageMeta := 0.U.asTypeOf(new TageMeta)
+          io.out(i).bits.brUpdate.rasSp := 0.U(log2Up(RasSize))
+          io.out(i).bits.brUpdate.rasTopCtr := 0.U(8.W)
+          io.out(i).bits.brUpdate.isRVC := false.B
           io.out(i).valid := false.B
         }
       }.otherwise {
         io.out(i).bits.instr := Cat(ibuf(head_ptr + (i<<1).U + 1.U).inst, ibuf(head_ptr + (i<<1).U).inst)
         io.out(i).bits.pc := ibuf(head_ptr + (i<<1).U).pc
-        io.out(i).bits.pnpc := ibuf(head_ptr + (i<<1).U).pnpc
-        io.out(i).bits.fetchOffset := ibuf(head_ptr + (i<<1).U).fetchOffset
-        io.out(i).bits.hist := ibuf(head_ptr + (i<<1).U).hist
+        io.out(i).bits.brUpdate.pnpc := ibuf(head_ptr + (i<<1).U).pnpc
+        io.out(i).bits.brUpdate.fetchOffset := ibuf(head_ptr + (i<<1).U).fetchOffset
+        io.out(i).bits.brUpdate.hist := ibuf(head_ptr + (i<<1).U).hist
         // io.out(i).bits.btbVictimWay := ibuf(head_ptr + (i<<1).U).btbVictimWay
-        io.out(i).bits.btbPredCtr := ibuf(head_ptr + (i<<1).U).btbPredCtr
-        io.out(i).bits.btbHit := ibuf(head_ptr + (i<<1).U).btbHit
-        io.out(i).bits.tageMeta := ibuf(head_ptr + (i<<1).U).tageMeta
-        io.out(i).bits.rasSp := ibuf(head_ptr + (i<<1).U).rasSp
-        io.out(i).bits.rasTopCtr := ibuf(head_ptr + (i<<1).U).rasTopCtr
-        io.out(i).bits.isRVC := false.B
+        io.out(i).bits.brUpdate.btbPredCtr := ibuf(head_ptr + (i<<1).U).btbPredCtr
+        io.out(i).bits.brUpdate.btbHit := ibuf(head_ptr + (i<<1).U).btbHit
+        io.out(i).bits.brUpdate.tageMeta := ibuf(head_ptr + (i<<1).U).tageMeta
+        io.out(i).bits.brUpdate.rasSp := ibuf(head_ptr + (i<<1).U).rasSp
+        io.out(i).bits.brUpdate.rasTopCtr := ibuf(head_ptr + (i<<1).U).rasTopCtr
+        io.out(i).bits.brUpdate.isRVC := false.B
       }
       XSDebug(deqValid, p"Deq: i:${i.U} valid:${ibuf_valid(deq_idx)} idx=${Decimal(deq_idx)} ${Decimal(deq_idx + 1.U)} instr:${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid}  r=${io.out(i).ready}\n")
 
@@ -170,16 +170,16 @@ class Ibuffer extends XSModule {
     for(i <- 0 until DecodeWidth) {
       io.out(i).bits.instr := 0.U
       io.out(i).bits.pc := 0.U
-      io.out(i).bits.pnpc := 0.U
-      io.out(i).bits.fetchOffset := 0.U
-      io.out(i).bits.hist := 0.U(HistoryLength.W)
+      io.out(i).bits.brUpdate.pnpc := 0.U
+      io.out(i).bits.brUpdate.fetchOffset := 0.U
+      io.out(i).bits.brUpdate.hist := 0.U(HistoryLength.W)
       // io.out(i).bits.btbVictimWay := 0.U(log2Up(BtbWays).W)
-      io.out(i).bits.btbPredCtr := 0.U(2.W)
-      io.out(i).bits.btbHit := false.B
-      io.out(i).bits.tageMeta := 0.U.asTypeOf(new TageMeta)
-      io.out(i).bits.rasSp := 0.U(log2Up(RasSize))
-      io.out(i).bits.rasTopCtr := 0.U(8.W)
-      io.out(i).bits.isRVC := false.B
+      io.out(i).bits.brUpdate.btbPredCtr := 0.U(2.W)
+      io.out(i).bits.brUpdate.btbHit := false.B
+      io.out(i).bits.brUpdate.tageMeta := 0.U.asTypeOf(new TageMeta)
+      io.out(i).bits.brUpdate.rasSp := 0.U(log2Up(RasSize))
+      io.out(i).bits.brUpdate.rasTopCtr := 0.U(8.W)
+      io.out(i).bits.brUpdate.isRVC := false.B
       io.out(i).valid := false.B
     }
   }

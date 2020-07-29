@@ -43,30 +43,6 @@ class TageMeta extends XSBundle {
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
 }
 
-// Branch prediction result from BPU Stage1 & 3
-class BranchPrediction extends XSBundle {
-  val redirect = Bool()
-
-  // mask off all the instrs after the first redirect instr
-  val instrValid = Vec(FetchWidth*2, Bool())
-  // target of the first redirect instr in a fetch package
-  val target = UInt(VAddrBits.W)
-  val lateJump = Bool()
-  // save these info in brq!
-  // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
-  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
-  // victim way when updating btb
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  // 2-bit saturated counter 
-  val predCtr = Vec(FetchWidth*2, UInt(2.W))
-  val btbHit = Vec(FetchWidth*2, Bool())
-  // tage meta info
-  val tageMeta = Vec(FetchWidth*2, (new TageMeta))
-  // ras checkpoint, only used in Stage3
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
-}
-
 class BranchPrediction extends XSBundle {
   val redirect = Bool()
   val jmpIdx = UInt(log2Up(PredictWidth).W)
@@ -76,9 +52,19 @@ class BranchPrediction extends XSBundle {
 
 class BranchInfo extends XSBundle {
   val histPtr = UInt(log2Up(ExtHistoryLength).W)
-  val tageMeta = Vec(PredictWidth, (new TageMeta))
+  val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
+
+  def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
+    this.histPtr := histPtr
+    this.tageMeta := tageMeta
+    this.rasSp := rasSp
+    this.rasTopCtr
+    this.asUInt
+  }
+  def size = 0.U.asTypeOf(this).getWidth
+  def fromUInt(x: UInt) = x.asTypeOf(this)
 }
 
 class Predecode extends XSBundle {
@@ -86,23 +72,27 @@ class Predecode extends XSBundle {
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
 
+
+class BranchUpdateInfo extends XSBundle {
+  // from backend
+  val pnpc = UInt(VAddrBits.W)
+  val brTarget = UInt(VAddrBits.W)
+  val taken = Bool()
+  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
+  val isMisPred = Bool()
+
+  // frontend -> backend -> frontend
+  val pd = new PreDecodeInfo
+  val brInfo = new BranchInfo
+}
+
 // Dequeue DecodeWidth insts from Ibuffer
 class CtrlFlow extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
-  val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
-  val pnpc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  val btbPredCtr = UInt(2.W)
-  val btbHit = Bool()
-  val tageMeta = new TageMeta
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
   val exceptionVec = Vec(16, Bool())
   val intrVec = Vec(12, Bool())
-  val isRVC = Bool()
-  val isBr = Bool()
+  val brUpdate = new BranchUpdateInfo
   val crossPageIPFFix = Bool()
 }
 
@@ -128,42 +118,31 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
-// CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl {
+trait HasRoqIdx { this: HasXSParameter =>
+  val roqIdx = UInt(RoqIdxWidth.W)
+  def needFlush(redirect: Valid[Redirect]): Bool = {
+    redirect.valid && Mux(
+      this.roqIdx.head(1) === redirect.bits.roqIdx.head(1),
+      this.roqIdx.tail(1) > redirect.bits.roqIdx.tail(1),
+      this.roqIdx.tail(1) < redirect.bits.roqIdx.tail(1)
+    )
+  }
+}
 
+// CfCtrl -> MicroOp at Rename Stage
+class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-  val roqIdx = UInt(RoqIdxWidth.W)
 }
 
-class Redirect extends XSBundle {
-  val pc = UInt(VAddrBits.W) // wrongly predicted pc
-  val target = UInt(VAddrBits.W)
-  val brTarget = UInt(VAddrBits.W)
-  val brTag = new BrqPtr
-  val btbType = UInt(2.W)
-  val isRVC = Bool()
-  //val isCall = Bool()
-  val taken = Bool()
-  val hist = UInt(HistoryLength.W)
-  val tageMeta = new TageMeta
-  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  val btbPredCtr = UInt(2.W)
-  val btbHit = Bool()
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
+class Redirect extends XSBundle with HasRoqIdx {
   val isException = Bool()
-  val roqIdx = UInt(RoqIdxWidth.W)
-}
-
-class RedirectInfo extends XSBundle {
-
-  val valid = Bool() // a valid commit form brq/roq
-  val misPred = Bool() // a branch miss prediction ?
-  val redirect = new Redirect
-
-  def flush():Bool = valid && (redirect.isException || misPred)
+  val isMisPred = Bool()
+  val isReplay = Bool()
+  val pc = UInt(VAddrBits.W)
+  val target = UInt(VAddrBits.W)
+  val brTag = new BrqPtr
+  val histPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
 class Dp1ToDp2IO extends XSBundle {
@@ -186,6 +165,7 @@ class ExuOutput extends XSBundle {
   val data = UInt(XLEN.W)
   val redirectValid = Bool()
   val redirect = new Redirect
+  val brUpdate = new BranchUpdateInfo
   val debug = new DebugBundle
 }
 
@@ -209,6 +189,7 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirectInfo = Input(new RedirectInfo)
-  val inOrderBrInfo = Input(new RedirectInfo)
+  val redirect = Flipped(ValidIO(new Redirect))
+  val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
 }
