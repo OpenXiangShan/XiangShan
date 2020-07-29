@@ -34,6 +34,8 @@ trait HasXSParameter {
   val EnableRAS = false
   val HistoryLength = 64
   val ExtHistoryLength = HistoryLength * 2
+  val UBtbWays = 16
+  val BtbWays = 2
   val BtbSize = 256
   // val BtbWays = 4
   val BtbBanks = PredictWidth

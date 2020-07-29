@@ -58,7 +58,6 @@ class IFU extends XSModule with HasIFUConst
     bpu.io.in.pc.bits := if1_npc
     bpu.io.redirect := io.redirect
     bpu.io.inOrderBrInfo := io.inOrderBrInfo
-    bpu.io.outOfOrderBrInfo := io.outOfOrderBrInfo
 
     XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
     XSDebug(false,if1_fire,"------IF1->fire!!!")

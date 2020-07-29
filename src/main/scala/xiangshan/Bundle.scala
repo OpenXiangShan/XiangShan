@@ -51,6 +51,10 @@ class BranchPrediction extends XSBundle {
 }
 
 class BranchInfo extends XSBundle {
+  val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
+  val ubtbHits = Vec(PredictWidth, Bool())
+  val btbWriteWay = UInt(log2Up(BtbWays).W)
+  val bimCtrs = Vec(PredictWidth, UInt(2.W))
   val histPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
