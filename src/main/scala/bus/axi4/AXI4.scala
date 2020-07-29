@@ -89,7 +89,8 @@ class AXI4Lite extends Bundle {
   val b  = Flipped(Decoupled(new AXI4LiteBundleB))
   val ar = Decoupled(new AXI4LiteBundleA)
   val r  = Flipped(Decoupled(new AXI4LiteBundleR))
-  def dump = {
+  def anyFire = aw.fire() || w.fire() || b.fire() || ar.fire() || r.fire()
+  def dump(): Unit = {
     when (aw.fire()) {
       aw.bits.dump("AW")
     }
@@ -141,7 +142,7 @@ class AXI4(val dataBits: Int = AXI4Parameters.dataBits, val idBits: Int = AXI4Pa
   override val b  = Flipped(Decoupled(new AXI4BundleB(idBits)))
   override val ar = Decoupled(new AXI4BundleA(idBits))
   override val r  = Flipped(Decoupled(new AXI4BundleR(dataBits, idBits)))
-  override def dump = {
+  override def dump(): Unit = {
     when (aw.fire()) {
       aw.bits.dump("AW")
     }

@@ -410,20 +410,23 @@ class DCache extends DCacheModule
   // Pipeline
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Vec[Bool],
     reqs: Vec[DCacheReq], req_type: UInt) = {
-      (0 until memWidth) map { w =>
-          XSDebug(s"$pipeline_stage_name\n")
-          XSDebug("channel %d: valid: %b \n", w.U, valid(w))
+      val anyValid = valid.reduce(_||_)
+      when (anyValid) {
+        (0 until memWidth) map { w =>
           when (valid(w)) {
+            XSDebug(s"$pipeline_stage_name\n")
+            XSDebug("channel %d: valid: %b \n", w.U, valid(w))
             when (req_type === t_replay) {
               XSDebug("req_type: replay ")
-              } .elsewhen (req_type === t_lsu) {
+            } .elsewhen (req_type === t_lsu) {
               XSDebug("req_type: lsu ")
-              } .otherwise {
-                XSDebug("req_type: unknown ")
-              }
-              XSDebug("cmd: %x addr: %x data: %x mask: %x meta: %x\n",
-                reqs(w).cmd, reqs(w).addr, reqs(w).data, reqs(w).mask, reqs(w).meta)
+            } .otherwise {
+              XSDebug("req_type: unknown ")
+            }
+            XSDebug("cmd: %x addr: %x data: %x mask: %x meta: %x\n",
+              reqs(w).cmd, reqs(w).addr, reqs(w).data, reqs(w).mask, reqs(w).meta)
           }
+        }
       }
   }
 

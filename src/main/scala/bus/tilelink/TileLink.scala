@@ -190,7 +190,7 @@ class TLBundleA(override val params: TLParameters) extends TLAddrChannel
   val data    = UInt(params.dataBits.W)
   val corrupt = Bool()
 
-  def dump = printf(s"$channelName opcode: %x param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
+  def dump(): Unit = printf(s"$channelName opcode: %x param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
     opcode, param, size, source, address, mask, data, corrupt)
 }
 
@@ -205,7 +205,7 @@ class TLBundleB(override val params: TLParameters) extends TLAddrChannel
   val mask    = UInt((params.dataBits/8).W)
   val data    = UInt(params.dataBits.W)
   val corrupt = Bool()
-  def dump = printf(s"$channelName opcode: %x param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
+  def dump(): Unit = printf(s"$channelName opcode: %x param: %x size: %x source: %d address: %x mask: %x data: %x corrupt: %b\n",
     opcode, param, size, source, address, mask, data, corrupt)
 }
 
@@ -219,7 +219,7 @@ class TLBundleC(override val params: TLParameters) extends TLAddrChannel
   val address = UInt(params.addressBits.W)
   val data    = UInt(params.dataBits.W)
   val corrupt = Bool()
-  def dump = printf(s"$channelName opcode: %x param: %x size: %x source: %d address: %x data: %x corrupt: %b\n",
+  def dump(): Unit = printf(s"$channelName opcode: %x param: %x size: %x source: %d address: %x data: %x corrupt: %b\n",
     opcode, param, size, source, address, data, corrupt)
 }
 
@@ -234,7 +234,7 @@ class TLBundleD(override val params: TLParameters) extends TLDataChannel
   val denied  = Bool()
   val data    = UInt(params.dataBits.W)
   val corrupt = Bool()
-  def dump = printf(s"$channelName opcode: %x param: %x size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
+  def dump(): Unit = printf(s"$channelName opcode: %x param: %x size: %x source: %d sink: %d denied: %b data: %x corrupt: %b\n",
     opcode, param, size, source, sink, denied, data, corrupt)
 }
 
@@ -242,14 +242,15 @@ class TLBundleE(override val params: TLParameters) extends TLChannel
 {
   val channelName = "'E' channel"
   val sink    = UInt(params.sinkBits.W)
-  def dump = printf(s"$channelName sink: %d\n", sink)
+  def dump(): Unit = printf(s"$channelName sink: %d\n", sink)
 }
 
 // TL-UL and TL-UC
 class TLUnCached(val params: TLParameters) extends Bundle {
   val a = Decoupled(new TLBundleA(params))
   val d = Flipped(Decoupled(new TLBundleD(params)))
-  def dump = {
+  def anyFire = a.fire() || d.fire()
+  def dump(): Unit = {
     when (a.fire()) {
       a.bits.dump
     }
@@ -264,7 +265,8 @@ class TLCached(override val params: TLParameters) extends TLUnCached(params) {
   val b = Flipped(Decoupled(new TLBundleB(params)))
   val c = Decoupled(new TLBundleC(params))
   val e = Decoupled(new TLBundleE(params))
-  override def dump = {
+  override def anyFire = super.anyFire || b.fire() || c.fire() || e.fire()
+  override def dump(): Unit = {
     super.dump
     when (b.fire()) {
       b.bits.dump

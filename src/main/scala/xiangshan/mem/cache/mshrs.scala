@@ -417,18 +417,7 @@ class MSHRFile extends DCacheModule
     io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
 
   // print tilelink messages
-  when (XSDebug.trigger && io.mem_acquire.fire()) {
-    // add prefix message, so that we can know that,
-    // when and where this message is created
-    XSDebug.printPrefix
-    io.mem_acquire.bits.dump
-  }
-  when (XSDebug.trigger && io.mem_grant.fire()) {
-    XSDebug.printPrefix
-    io.mem_grant.bits.dump
-  }
-  when (XSDebug.trigger && io.mem_finish.fire()) {
-    XSDebug.printPrefix
-    io.mem_finish.bits.dump
-  }
+  XSDebug.exec(io.mem_acquire.fire(), io.mem_acquire.bits.dump)
+  XSDebug.exec(io.mem_grant.fire(), io.mem_grant.bits.dump)
+  XSDebug.exec(io.mem_finish.fire(), io.mem_finish.bits.dump)
 }
