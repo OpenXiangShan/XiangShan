@@ -2,7 +2,6 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import utils.XSDebug
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 
@@ -119,23 +118,23 @@ class PreDecode extends XSModule with HasPdconst{
   prevGPC := gpc
   prevValid := !(instsMask(halfWidth-2) && !isRVC(insts(halfWidth-2))) && !isRVC(insts(halfWidth-1)) && seriesPC
 
-  for (i <- 0 until halfWidth) {
-    XSDebug(true.B,
-      p"instr ${Binary(io.out(i).inst)}, " +
-      p"mask ${Binary(io.out(i).mask)}, " +
-      //p"pc ${Binary(io.out(i).pc)}, " +
-      p"isRVC ${Binary(io.out(i).isRVC)}, " +
-      p"brType ${Binary(io.out(i).brType)}, " +
-      p"isRet ${Binary(io.out(i).isRet)}, " +
-      p"isCall ${Binary(io.out(i).isCall)}\n"
-    )
-  }
-
-  for (i <- 0 until halfWidth) {
-    XSDebug(true.B,
-      p"prevhalf ${Binary(prevHalf)}, " +
-      p"prevvalid ${Binary(prevValid)}, " +
-      p"seriesPC ${Binary(seriesPC)}\n"
-    )
-  }
+//  for (i <- 0 until halfWidth) {
+//    XSDebug(true.B,
+//      p"instr ${Binary(io.out(i).inst)}, " +
+//      p"mask ${Binary(io.out(i).mask)}, " +
+//      //p"pc ${Binary(io.out(i).pc)}, " +
+//      p"isRVC ${Binary(io.out(i).isRVC)}, " +
+//      p"brType ${Binary(io.out(i).brType)}, " +
+//      p"isRet ${Binary(io.out(i).isRet)}, " +
+//      p"isCall ${Binary(io.out(i).isCall)}\n"
+//    )
+//  }
+//
+//  for (i <- 0 until halfWidth) {
+//    XSDebug(true.B,
+//      p"prevhalf ${Binary(prevHalf)}, " +
+//      p"prevvalid ${Binary(prevValid)}, " +
+//      p"seriesPC ${Binary(seriesPC)}\n"
+//    )
+//  }
 }

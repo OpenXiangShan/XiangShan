@@ -54,7 +54,4 @@ class PDtest extends FlatSpec with ChiselScalatestTester with Matchers{
       c.clock.step()
     }
   }
-
-
-
 }
