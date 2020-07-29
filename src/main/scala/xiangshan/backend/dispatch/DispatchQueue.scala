@@ -36,7 +36,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   // check whether valid uops are canceled
   val cancelled = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    cancelled(i) := entries(i).olderThan(io.redirect)
+    cancelled(i) := entries(i).needFlush(io.redirect)
   }
 
   // calcelled uops should be set to invalid from enqueue input

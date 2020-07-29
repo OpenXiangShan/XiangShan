@@ -127,7 +127,7 @@ class CfCtrl extends XSBundle {
 
 trait HasRoqIdx { this: HasXSParameter =>
   val roqIdx = UInt(RoqIdxWidth.W)
-  def olderThan(redirect: Valid[Redirect]): Bool = {
+  def needFlush(redirect: Valid[Redirect]): Bool = {
     redirect.valid && Mux(
       this.roqIdx.head(1) === redirect.bits.roqIdx.head(1),
       this.roqIdx.tail(1) > redirect.bits.roqIdx.tail(1),

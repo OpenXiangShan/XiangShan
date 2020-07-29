@@ -41,7 +41,7 @@ trait HasPipelineReg { this: ArrayMultiplier =>
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
   val ctrlVec = io.in.bits.ctrl +: Array.fill(latency)(Reg(new MulDivCtrl))
-  val flushVec = ctrlVec.zip(validVec).map(x => x._2 && x._1.uop.olderThan(io.redirect))
+  val flushVec = ctrlVec.zip(validVec).map(x => x._2 && x._1.uop.needFlush(io.redirect))
 
   for(i <- 0 until latency){
     rdyVec(i) := !validVec(i+1) || rdyVec(i+1)

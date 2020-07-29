@@ -199,17 +199,17 @@ class IssueQueue
   // Redirect
   //-----------------------------------------
   // redirect enq
-  enqRedHit := io.redirect.valid && io.enqCtrl.bits.olderThan(io.redirect)
+  enqRedHit := io.redirect.valid && io.enqCtrl.bits.needFlush(io.redirect)
 
   // redirect issQue
-  val redHitVec = List.tabulate(iqSize)(i => issQue(i).uop.olderThan(io.redirect))
+  val redHitVec = List.tabulate(iqSize)(i => issQue(i).uop.needFlush(io.redirect))
   for (i <- validQue.indices) {
     when (redHitVec(i) && validQue(i)) {
       validQue(i) := false.B
     }
   }
   // reditect deq(issToExu)
-  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.olderThan(io.redirect))
+  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.needFlush(io.redirect))
   val selIsRed = ParallelOR((deqSelOH & VecInit(redIdHitVec).asUInt).asBools).asBool
 
   //-----------------------------------------
@@ -217,7 +217,7 @@ class IssueQueue
   //-----------------------------------------
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
-  val deqFlushHit = issueToExu.uop.olderThan(io.redirect)
+  val deqFlushHit = issueToExu.uop.needFlush(io.redirect)
   val deqCanIn = !issueToExuValid || io.deq.ready || deqFlushHit
   
   val toIssFire = deqCanIn && has1Rdy && !isPop && !selIsRed
@@ -257,7 +257,7 @@ class IssueQueue
   // send out directly without store the data
   val enqAlreadyRdy = if(src3Listen) { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1)&&enqSrcRdy(2) else enqSrcRdy(0)&&enqSrcRdy(2) } else  { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1) else enqSrcRdy(0) }
   val enqALRdyNext = OneCycleFire(enqAlreadyRdy && enqFire)
-  val enqSendFlushHit = issQue(enqSelIqNext).uop.olderThan(io.redirect)
+  val enqSendFlushHit = issQue(enqSelIqNext).uop.needFlush(io.redirect)
   val enqSendEnable = if(fifo) { RegNext(tailAll===0.U) && enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } else { enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } // FIXME: has1Rdy has combination loop
   when (enqSendEnable) {
     io.deq.valid := true.B
