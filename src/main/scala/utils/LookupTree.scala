@@ -40,4 +40,12 @@ object MuxTLookup {
       res = MuxT(k === key, v, res)
     res
   }
+
+  // in case you really need to search for a 4-tuple
+  def apply[S <: UInt, T <: Data, U <: Data, W <: Data, X <: Data](key: S, default: (T, U, W, X), mapping: Seq[(S, (T, U, W, X))]): (T, U, W, X) = {
+    var res = default
+    for ((k, v) <- mapping.reverse)
+      res = MuxT(k === key, v, res)
+    res
+  }
 }

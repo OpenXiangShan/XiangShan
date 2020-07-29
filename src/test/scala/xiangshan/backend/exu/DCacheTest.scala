@@ -12,7 +12,7 @@ import xiangshan.XSModule
 import xiangshan.utils.XSLogLevel
 import xiangshan.mem.{LSUDMemIO, MemoryOpConstants}
 import xiangshan.mem.cache.DCache
-import bus.tilelink.NaiveTLToAXI4
+import bus.tilelink.FakeTLLLC
 import device.AXI4RAM
 
 class DCacheDut extends XSModule {
@@ -22,7 +22,7 @@ class DCacheDut extends XSModule {
 
   val dcache = Module(new DCache)
   val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = false))
-  val tlToAXI = Module(new NaiveTLToAXI4(l1BusParams))
+  val tlToAXI = Module(new FakeTLLLC(l1BusParams))
 
   dcache.io.lsu <> io.in
   dcache.io.bus <> tlToAXI.io.in
