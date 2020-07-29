@@ -49,16 +49,19 @@ class Dispatch() extends XSModule with NeedImpl {
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.ExuCnt - exuParameters.LsExuCnt, Output(new ExuInput))
   })
-  // pipeline between rename and dispatch
+
   val dispatch1 = Module(new Dispatch1)
-  for (i <- 0 until RenameWidth) {
-    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
-  }
   val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, "IntDpQ"))
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, "FpDpQ"))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, "LsDpQ"))
-  val dispatch2 = Module(new Dispatch2())
 
+  // pipeline between rename and dispatch
+  // accepts all at once
+  for (i <- 0 until RenameWidth) {
+    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
+  }
+
+  // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.toRoq <> io.toRoq
   dispatch1.io.roqIdxs <> io.roqIdxs
@@ -68,24 +71,32 @@ class Dispatch() extends XSModule with NeedImpl {
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq
 
-  // dispatch queue cancels the uops
+  // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
+  // it may cancel the uops
   intDq.io.redirect <> io.redirect
   fpDq.io.redirect <> io.redirect
   lsDq.io.redirect <> io.redirect
 
-  // dispatch2 only receives valid uops from dispatch queue
-  dispatch2.io.fromIntDq <> intDq.io.deq
-  dispatch2.io.fromFpDq <> fpDq.io.deq
-  dispatch2.io.fromLsDq <> lsDq.io.deq
-  dispatch2.io.readIntRf <> io.readIntRf
-  dispatch2.io.readFpRf <> io.readFpRf
-  dispatch2.io.intPregRdy <> io.intPregRdy
-  dispatch2.io.fpPregRdy <> io.fpPregRdy
-  dispatch2.io.intMemRegAddr <> io.intMemRegAddr
-  dispatch2.io.fpMemRegAddr <> io.fpMemRegAddr
-  dispatch2.io.intMemRegRdy <> io.intMemRegRdy
-  dispatch2.io.fpMemRegRdy <> io.fpMemRegRdy
-  dispatch2.io.enqIQCtrl <> io.enqIQCtrl
-  dispatch2.io.enqIQData <> io.enqIQData
-  dispatch2.io.numExist <> io.numExist
+  // Int dispatch queue to Int reservation stations
+  val intDispatch = Module(new Dispatch2Int)
+  intDispatch.io.fromDq <> intDq.io.deq
+  intDispatch.io.readRf <> io.readIntRf
+  intDispatch.io.regRdy := io.intPregRdy
+  intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i) })
+  intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i) })
+  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i) })
+
+  // TODO: Fp dispatch queue to Fp reservation stations
+  fpDq.io.deq <> DontCare
+  io.readFpRf <> DontCare
+
+  // Load/store dispatch queue to load/store issue queues
+  val lsDispatch = Module(new Dispatch2Ls)
+  lsDispatch.io.fromDq <> lsDq.io.deq
+  lsDispatch.io.intRegAddr <> io.intMemRegAddr
+  lsDispatch.io.fpRegAddr <> io.fpMemRegAddr
+  lsDispatch.io.intRegRdy <> io.intMemRegRdy
+  lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
+  lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt+i) })
+  lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt+i) })
 }

@@ -57,6 +57,7 @@ class Dispatch2Ls extends XSModule {
       io.intRegAddr(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc1
     }
     else {
+      io.fpRegAddr(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc2
       io.intRegAddr(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc1
       io.intRegAddr(readPort(i) + 1) := io.fromDq(indexVec(i)).bits.psrc2
     }
@@ -70,7 +71,8 @@ class Dispatch2Ls extends XSModule {
     enq.valid := validVec(i)
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.intRegRdy(readPort(i))
-    enq.bits.src2State := io.intRegRdy(readPort(i) + 1)
+    enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src1Type === SrcType.fp, 
+      io.fpRegRdy(i - exuParameters.LduCnt), io.intRegRdy(readPort(i) + 1))
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType}" +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State})" +
@@ -84,8 +86,8 @@ class Dispatch2Ls extends XSModule {
     io.fromDq(i).ready := rsValidVec(i) && io.enqIQCtrl(rsIndexVec(i)).ready
 
     XSInfo(io.fromDq(i).fire(),
-      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Int dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
+      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Ls dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
-      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Int dispatch queue with index %d\n")
+      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index %d\n")
   }
 }
