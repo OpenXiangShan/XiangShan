@@ -44,7 +44,18 @@ class Dispatch2Int extends XSModule {
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
   val rsValidVec = allIndexGen.map(_.io.reverseMapping.map(_.valid)).reduceLeft(_ ++ _)
-  val rsIndexVec = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
+  val rsIndexVecRaw = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
+  val rsIndexVec = rsIndexVecRaw.zipWithIndex.map{ case (index, i) =>
+    (if (i >= exuParameters.JmpCnt + exuParameters.AluCnt) {
+      index + exuParameters.JmpCnt.U + exuParameters.AluCnt.U
+    }
+    else if (i >= exuParameters.JmpCnt) {
+      index + exuParameters.JmpCnt.U
+    }
+    else {
+      index
+    })
+  }
 
   /**
     * Part 2: assign regfile read ports
@@ -73,10 +84,10 @@ class Dispatch2Int extends XSModule {
     enq.valid := validVec(i)
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.regRdy(readPortIndex(i))
-    enq.bits.src1State := io.regRdy(readPortIndex(i) + 1.U)
+    enq.bits.src2State := io.regRdy(readPortIndex(i) + 1.U)
 
-    XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType}" +
-      p"srcState(${enq.bits.src1State} ${enq.bits.src2State} ${enq.bits.src3State})" +
+    XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
+      p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
       p"enters reservation station $i from ${indexVec(i)}\n")
   }
 
@@ -89,7 +100,7 @@ class Dispatch2Int extends XSModule {
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Int dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
-      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Int dispatch queue with index %d\n")
+      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Int dispatch queue with index $i\n")
   }
 
   /**
