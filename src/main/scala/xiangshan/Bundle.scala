@@ -60,7 +60,7 @@ class BranchInfo extends XSBundle {
     this.histPtr := histPtr
     this.tageMeta := tageMeta
     this.rasSp := rasSp
-    this.rasTopCtr
+    this.rasTopCtr := rasTopCtr
     this.asUInt
   }
   def size = 0.U.asTypeOf(this).getWidth
@@ -142,7 +142,6 @@ class Redirect extends XSBundle with HasRoqIdx {
   val pc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
   val brTag = new BrqPtr
-  val histPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
 class Dp1ToDp2IO extends XSBundle {

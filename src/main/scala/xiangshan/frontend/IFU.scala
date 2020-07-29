@@ -24,28 +24,6 @@ class IFUIO extends XSBundle
   val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
-class BaseBPU extends XSModule {
-  val io = IO(new Bundle() {
-    val redirect = Flipped(ValidIO(new Redirect))
-    val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-    val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
-    val btbOut = ValidIO(new BranchPrediction)
-    val tageOut = Decoupled(new BranchPrediction)
-    val predecode = Flipped(ValidIO(new Predecode))
-  })
-}
-
-class FakeBPU extends BaseBPU {
-
-  io.btbOut.valid := false.B
-  io.btbOut.bits <> DontCare
-  io.btbOut.bits.redirect := false.B
-  io.btbOut.bits.target := DontCare
-  io.tageOut.valid := false.B
-  io.tageOut.bits <> DontCare
-}
-
 
 class IFU extends XSModule with HasIFUConst
 {
