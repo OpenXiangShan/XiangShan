@@ -3,7 +3,6 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.ExuConfig
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 
@@ -97,6 +96,6 @@ class Dispatch() extends XSModule with NeedImpl {
   lsDispatch.io.fpRegAddr <> io.fpMemRegAddr
   lsDispatch.io.intRegRdy <> io.intMemRegRdy
   lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
-  lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt+i) })
-  lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt+i) })
+  lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i) })
+  lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i) })
 }
