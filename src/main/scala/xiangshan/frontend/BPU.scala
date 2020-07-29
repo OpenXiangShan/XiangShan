@@ -6,7 +6,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
-
+/*
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
   def tagBits = VAddrBits - idxBits - 1
 
@@ -513,4 +513,33 @@ class BPU extends XSModule {
   s3.io.predecode <> io.predecode
   io.tageOut <> s3.io.out
   s3.io.redirectInfo <> io.redirectInfo
+}
+*/
+class BPUStage1 extends XSModule {
+
+}
+
+class BPUStage2 extends XSModule {
+
+}
+
+class BPUStage3 extends XSModule {
+
+}
+
+class BPU extends XSModule {
+  val io = IO(new Bundle() {
+    // from backend redirect
+    val redirectInfo = Input(new RedirectInfo)
+    // from ifu, frontend redirect
+    val flush = Input(UInt(3.W))
+    // from if1
+    val in = new Bundle { val pc = Flipped(ValidIO(UInt(VAddrBits.W))) }
+    // to if2/if3/if4
+    val out = Vec(3, Decoupled(new BranchPrediction))
+    // from if4
+    val predecode = Flipped(ValidIO(new Predecode))
+    // to if4, some bpu info used for updating
+    val branchInfo = Decoupled(new BranchInfo)
+  })
 }

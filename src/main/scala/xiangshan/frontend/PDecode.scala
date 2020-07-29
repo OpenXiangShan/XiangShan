@@ -19,7 +19,7 @@ object ExcType {  //TODO:add exctype
   def apply() = UInt(3.W)
 }
 
-class PDecodeInfo extends XSBundle{  // 8 bit
+class PreDecodeInfo extends XSBundle{  // 8 bit
   val isRVC   = Bool()
   val brType  = UInt(2.W)
   val isCall  = Bool()
@@ -36,14 +36,14 @@ class CacheLine extends XSBundle {
 class PDecode extends XSModule {
   val io = IO(new Bundle() {
     val in = Input(Vec(FetchWidth,UInt(32.W)))
-    val out = Output(Vec(FetchWidth, new PDecodeInfo))
+    val out = Output(Vec(FetchWidth, new PreDecodeInfo))
   })
 
   //val catCacheLine = Cat(0.U(16.W),io.in.bits.cacheLine)    //TODO:add span two Cache-Line
   val cacheInstr = io.in
   // val preDecodeInfo = io.out
 
-  val preDecodeTemp = Reg(Vec(FetchWidth, new PDecodeInfo))
+  val preDecodeTemp = Reg(Vec(FetchWidth, new PreDecodeInfo))
   val cacheLineTemp = Reg((new CacheLine).cacheLine)
   val validLatch = RegInit(false.B)
 

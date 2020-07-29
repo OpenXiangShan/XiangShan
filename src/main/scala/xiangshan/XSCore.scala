@@ -33,6 +33,7 @@ trait HasXSParameter {
   val EnableBPD = false // enable backing predictor(like Tage) in BPUStage3
   val EnableRAS = false
   val HistoryLength = 64
+  val ExtHistoryLength = HistoryLength * 2
   val BtbSize = 256
   // val BtbWays = 4
   val BtbBanks = PredictWidth
