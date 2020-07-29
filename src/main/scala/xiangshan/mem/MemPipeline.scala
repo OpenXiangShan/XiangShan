@@ -21,7 +21,9 @@ trait HasMEMConst{
 
 class MemToBackendIO extends XSBundle {
   val ldin = Vec(exuParameters.LduCnt, Flipped(Decoupled(new ExuInput)))
+  val loadTlbHit = Vec(exuParameters.LduCnt, Output(Bool()))
   val stin = Vec(exuParameters.StuCnt, Flipped(Decoupled(new ExuInput)))
+  val storeTlbHit = Vec(exuParameters.StuCnt, Output(Bool()))
   val ldout = Vec(exuParameters.LduCnt, Decoupled(new ExuOutput))
   val stout = Vec(exuParameters.StuCnt, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
@@ -42,6 +44,8 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
 
   io.backend.replayMem := DontCare
+  io.backend.loadTlbHit := DontCare
+  io.backend.storeTlbHit := DontCare
   // io <> DontCare
 
  val lsu = Module(new Lsu)

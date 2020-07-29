@@ -40,6 +40,8 @@ class IssueQueue
     val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
     val bypassUops = Vec(bypassCnt, Flipped(ValidIO(new MicroOp)))
     val numExist = Output(UInt(iqIdxWidth.W))
+    // tlb hit, inst can deq
+    val tlbHit = Input(Bool())
     val replay = Flipped(ValidIO(UInt(RoqIdxWidth.W)))
   })
 }
