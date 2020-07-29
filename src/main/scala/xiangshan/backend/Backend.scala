@@ -203,6 +203,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toMoq
   dispatch.io.moqIdxs <> io.mem.moqIdxs
+  dispatch.io.commits <> roq.io.commits
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)

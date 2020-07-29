@@ -2,13 +2,14 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, XSInfo}
-import xiangshan.{MicroOp, Redirect, XSBundle, XSModule}
+import utils.{XSDebug, XSError, XSInfo}
+import xiangshan.{MicroOp, Redirect, RoqCommit, XSBundle, XSModule}
 
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
+  val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
   val redirect = Flipped(ValidIO(new Redirect))
 
   override def cloneType: DispatchQueueIO.this.type =
@@ -21,7 +22,7 @@ class DispatchQEntry extends XSBundle {
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends XSModule {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
   val indexWidth = log2Ceil(size)
 
@@ -29,36 +30,48 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   // queue data array
   val entries = Reg(Vec(size, new DispatchQEntry))
-
+  // head: first valid entry (dispatched entry)
   val headPtr = RegInit(0.U((indexWidth + 1).W))
   val headIndex = headPtr(indexWidth - 1, 0)
   val headDirection = headPtr(indexWidth)
-
+  // dispatch: first entry that has not been dispatched
   val dispatchPtr = RegInit(0.U((indexWidth + 1).W))
   val dispatchIndex = dispatchPtr(indexWidth - 1, 0)
   val dispatchDirection = dispatchPtr(indexWidth)
-
+  // tail: first invalid entry (free entry)
   val tailPtr = RegInit(0.U((indexWidth + 1).W))
   val tailIndex = tailPtr(indexWidth - 1, 0)
   val tailDirection = tailPtr(indexWidth)
 
+  // commit: starting from head ptr
   val commitPtr = (0 until CommitWidth).map(i => headPtr + i.U)
   val commitIndex = commitPtr.map(ptr => ptr(indexWidth - 1, 0))
-
+  // deq: starting from dispatch ptr
   val deqPtr = (0 until enqnum).map(i => dispatchPtr + i.U)
   val deqIndex = deqPtr.map(ptr => ptr(indexWidth - 1, 0))
-
+  // enq: starting from tail ptr
   val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
   val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
+
+  def greaterOrEqualThan(left: UInt, right: UInt) = {
+    Mux(
+      left(indexWidth) === right(indexWidth),
+      left(indexWidth - 1, 0) >= right(indexWidth - 1, 0),
+      left(indexWidth - 1, 0) < right(indexWidth - 1, 0)
+    )
+  }
+  XSError(!greaterOrEqualThan(tailPtr, headPtr), "assert greaterOrEqualThan(tailPtr, headPtr) failed\n")
+  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr), "assert greaterOrEqualThan(tailPtr, dispatchPtr) failed\n")
+  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), "assert greaterOrEqualThan(dispatchPtr, headPtr) failed\n")
 
   val validEntries = Mux(headDirection === tailDirection, tailIndex - headIndex, size.U + tailIndex - headIndex)
   val dispatchEntries = Mux(dispatchDirection === tailDirection, tailIndex - dispatchIndex, size.U + tailIndex - dispatchIndex)
   val emptyEntries = size.U - validEntries
 
   // check whether valid uops are canceled
-  val cancel = Wire(Vec(size, Bool()))
+  val roqNeedFlush = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    cancel(i) := entries(i).uop.needFlush(io.redirect)
+    roqNeedFlush(i) := entries(i).uop.needFlush(io.redirect)
   }
 
   // cancelled uops should be set to invalid from enqueue input
@@ -78,10 +91,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   // cancel uops currently in the queue
   for (i <- 0 until size) {
-    val needCancel = cancel(i) && entries(i).state === s_valid
+    val needCancel = entries(i).state === s_valid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || io.redirect.bits.isException)
     when (needCancel) {
       entries(i).state := s_invalid
     }
+
     XSInfo(needCancel, p"$name: valid entry($i)(pc = ${Hexadecimal(entries(i).uop.cf.pc)})" +
       p"cancelled with brTag ${Hexadecimal(io.redirect.bits.brTag.value)}\n")
   }
@@ -102,21 +116,23 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
   for (i <- 0 until deqnum) {
     io.deq(i).bits := entries(deqIndex(i)).uop
     // needs to cancel uops trying to dequeue
-    io.deq(i).valid := entries(deqIndex(i)).state === s_valid && !cancel(deqIndex(i))
+    io.deq(i).valid := entries(deqIndex(i)).state === s_valid && !io.redirect.valid
   }
 
   // replay
-  val numReplay = 0.U
+  val needReplay = Wire(Vec(size, Bool()))
+  // TODO: this is unaccptable since it need to add 64 bits
+  val numReplay = PopCount(needReplay)
   for (i <- 0 until size) {
-    val needReplay = cancel(i) && entries(i).state === s_dispatched
-    when (needReplay) {
+    needReplay(i) := roqNeedFlush(i) && entries(i).state === s_dispatched && io.redirect.bits.isReplay
+    when (needReplay(i)) {
       entries(i).state := s_valid
     }
   }
   dispatchPtr := dispatchPtr + numDeq - numReplay
 
   // commit
-  val numCommit = 0.U
+  val numCommit = PopCount(io.commits.map(commit => commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
   val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
   for (i <- 0 until CommitWidth) {
     when (commitBits(i)) {

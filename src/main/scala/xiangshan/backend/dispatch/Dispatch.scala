@@ -31,7 +31,7 @@ class Dispatch() extends XSModule with NeedImpl {
     val toMoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get MoqIdx
     val moqIdxs = Input(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
-
+    val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
@@ -51,9 +51,9 @@ class Dispatch() extends XSModule with NeedImpl {
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, "IntDpQ"))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, "FpDpQ"))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, "LsDpQ"))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, DPQType.INT.litValue().toInt))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, DPQType.FP.litValue().toInt))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, DPQType.LS.litValue().toInt))
 
   // pipeline between rename and dispatch
   // accepts all at once
@@ -74,8 +74,11 @@ class Dispatch() extends XSModule with NeedImpl {
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
+  intDq.io.commits <> io.commits
   fpDq.io.redirect <> io.redirect
+  fpDq.io.commits <> io.commits
   lsDq.io.redirect <> io.redirect
+  lsDq.io.commits <> io.commits
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)

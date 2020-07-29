@@ -74,9 +74,9 @@ trait HasXSParameter {
   val MoqIdxWidth = InnerMoqIdxWidth + 1
   val dpParams = DispatchParameters(
     DqEnqWidth = 4,
-    IntDqSize = 16,
-    FpDqSize = 16,
-    LsDqSize = 16,
+    IntDqSize = 64,
+    FpDqSize = 64,
+    LsDqSize = 64,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
