@@ -101,6 +101,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   io.rollback <> lsroq.io.rollback
   io.dcache.redirect := io.redirect
 
+  lsroq.io.miss.ready := DontCare // TODO
+
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
       "b00".U -> 0x1.U, //0001 << addr(2:0)
