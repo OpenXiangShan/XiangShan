@@ -101,10 +101,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   }
 
   // enqueue
-  val numEnqTry = PriorityEncoder(io.enq.map(!_.valid) :+ true.B)
-  val numEnq = Mux(emptyEntries > numEnqTry, numEnqTry, emptyEntries)
-  val enqReadyBits = (1.U << numEnq).asUInt() - 1.U
+  val numEnqTry = Mux(emptyEntries > enqnum.U, enqnum.U, emptyEntries)
+  val enqReadyBits = (1.U << numEnqTry).asUInt() - 1.U
   (0 until enqnum).map(i => io.enq(i).ready := enqReadyBits(i).asBool())
+  val numEnq = PriorityEncoder(io.enq.map(!_.fire()) :+ true.B)
   tailPtr := tailPtr + numEnq
 
   // dequeue

@@ -37,12 +37,14 @@ class Dispatch1 extends XSModule {
   val intIndex = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
   val fpIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
   val lsIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
-  intIndex.io.validBits := isInt
+  for (i <- 0 until RenameWidth) {
+    intIndex.io.validBits(i) := isInt(i) && io.fromRename(i).valid
+    fpIndex.io.validBits(i)  := isFp(i)  && io.fromRename(i).valid
+    lsIndex.io.validBits(i)  := isLs(i)  && io.fromRename(i).valid
+  }
   intIndex.io.priority := DontCare
-  fpIndex.io.validBits := isFp
-  fpIndex.io.priority := DontCare
-  lsIndex.io.validBits := isLs
-  lsIndex.io.priority := DontCare
+  fpIndex.io.priority  := DontCare
+  lsIndex.io.priority  := DontCare
 
   /**
     * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes
@@ -53,7 +55,7 @@ class Dispatch1 extends XSModule {
   val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
   val lsroqIndexReg = Reg(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
   val lsroqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val lsroqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toMoq(i).ready || lsroqIndexRegValid(i) || !isLs(i))))
+  val lsroqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toMoq(i).ready || lsroqIndexRegValid(i))))
 
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSROQ
@@ -92,19 +94,28 @@ class Dispatch1 extends XSModule {
   /**
     * Part 3: send uop (should not be cancelled) with correct indexes to dispatch queues
     */
+  val orderedEnqueue = Wire(Vec(RenameWidth, Bool()))
+  var prevCanEnqueue = true.B
+  for (i <- 0 until RenameWidth) {
+    orderedEnqueue(i) := prevCanEnqueue
+    prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || io.recv(i))
+  }
   val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(true.B)))
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
-    io.toIntDq(i).valid := intIndex.io.mapping(i).valid && roqIndexAcquired(intIndex.io.mapping(i).bits) &&
-      lsroqIndexAcquired(intIndex.io.mapping(i).bits) && !cancelled(intIndex.io.mapping(i).bits)
+    io.toIntDq(i).valid := intIndex.io.mapping(i).valid && !cancelled(intIndex.io.mapping(i).bits) &&
+      roqIndexAcquired(intIndex.io.mapping(i).bits) &&
+      orderedEnqueue(intIndex.io.mapping(i).bits)
 
     io.toFpDq(i).bits := uopWithIndex(fpIndex.io.mapping(i).bits)
-    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid && roqIndexAcquired(fpIndex.io.mapping(i).bits) &&
-      lsroqIndexAcquired(fpIndex.io.mapping(i).bits) && !cancelled(fpIndex.io.mapping(i).bits)
+    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid && !cancelled(fpIndex.io.mapping(i).bits) &&
+      roqIndexAcquired(fpIndex.io.mapping(i).bits) &&
+      orderedEnqueue(fpIndex.io.mapping(i).bits)
 
     io.toLsDq(i).bits := uopWithIndex(lsIndex.io.mapping(i).bits)
-    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid && roqIndexAcquired(lsIndex.io.mapping(i).bits) &&
-      lsroqIndexAcquired(lsIndex.io.mapping(i).bits) && !cancelled(lsIndex.io.mapping(i).bits)
+    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid && !cancelled(lsIndex.io.mapping(i).bits) &&
+      roqIndexAcquired(lsIndex.io.mapping(i).bits) && lsroqIndexAcquired(lsIndex.io.mapping(i).bits) &&
+      orderedEnqueue(lsIndex.io.mapping(i).bits)
 
     XSDebug(io.toIntDq(i).valid, p"pc 0x${Hexadecimal(io.toIntDq(i).bits.cf.pc)} int index $i\n")
     XSDebug(io.toFpDq(i).valid , p"pc 0x${Hexadecimal(io.toFpDq(i).bits.cf.pc )} fp  index $i\n")
@@ -117,10 +128,10 @@ class Dispatch1 extends XSModule {
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   val allReady = Cat(readyVector).andR()
   for (i <- 0 until RenameWidth) {
-    val enqFire = (io.toIntDq(intIndex.io.reverseMapping(i).bits).fire() && isInt(i)) ||
-      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).fire() && isFp(i)) ||
-      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).fire() && isLs(i))
-    io.recv(i) := enqFire || cancelled(i)
+    val enqReady = (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && isInt(i)) ||
+      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && isFp(i)) ||
+      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && isLs(i))
+    io.recv(i) := (io.fromRename(i).valid && enqReady) || cancelled(i)
     io.fromRename(i).ready := allReady
 
     XSInfo(io.recv(i) && !cancelled(i),
