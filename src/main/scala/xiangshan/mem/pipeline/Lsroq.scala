@@ -38,6 +38,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val rollback = Output(Valid(new Redirect))
     val miss = Decoupled(new MissReqIO)
+    val refill = Flipped(Valid(new DCacheStoreReq))
   })
 
   val uop = Mem(LSRoqSize, new MicroOp)
@@ -164,14 +165,18 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   }
 
   // get load result from refill resp
-  // TODO
-  // (0 until MoqSize).map(i => {
-  //   when(addr_match){
-  //     data(i).data := dataIn
-  //     valid(i) := true.B
-  //     listening(i) := false.B
-  //   }
-  // })
+  def refillDataSel(data: UInt, offset: UInt): UInt = {
+    Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(8*(p+1)-1, 8*p))))
+  }
+
+  (0 until MoqSize).map(i => {
+    val addrMatch = data(i).paddr(PAddrBits-1, 6) === io.refill.bits.paddr
+    when(allocated(i) && listening(i)){
+      data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
+      valid(i) := true.B
+      listening(i) := false.B
+    }
+  })
 
   // writeback up to 2 missed load insts to CDB
   // just randomly pick 2 missed load (data refilled), write them back to cdb

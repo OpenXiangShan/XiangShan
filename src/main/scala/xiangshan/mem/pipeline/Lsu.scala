@@ -82,6 +82,8 @@ class LsuIO extends XSBundle with HasMEMConst {
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
   val dcache = Flipped(new DcacheToLsuIO)
   val dtlb = Flipped(new DtlbToLsuIO)
+  val refill = Flipped(Valid(new DCacheStoreReq))
+  val miss = Decoupled(new MissReqIO)
 }
 
 // 2l2s out of order lsu for XiangShan
@@ -89,7 +91,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
 
-  io.dcache.refill <> DontCare
+  io.dcache.refill <> io.refill
 
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new FakeSbuffer)
@@ -101,7 +103,9 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   io.rollback <> lsroq.io.rollback
   io.dcache.redirect := io.redirect
 
-  lsroq.io.miss.ready := DontCare // TODO
+  lsroq.io.refill <> io.refill
+  lsroq.io.refill.valid := false.B // TODO
+  lsroq.io.miss <> io.miss
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
