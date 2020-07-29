@@ -47,7 +47,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch(exeUnits.map(_.config)))
+  val dispatch = Module(new Dispatch())
   val roq = Module(new Roq)
   val intRf = Module(new Regfile(
     numReadPorts = NRIntReadPorts,
@@ -203,6 +203,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toMoq
   dispatch.io.moqIdxs <> io.mem.moqIdxs
+  dispatch.io.commits <> roq.io.commits
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
