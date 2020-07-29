@@ -2,6 +2,7 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import utils.XSDebug
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 
@@ -34,7 +35,7 @@ object ExcType {  //TODO:add exctype
   def apply() = UInt(3.W)
 }
 
-class PDEntry extends XSBundle{  // 8 bit
+class PDInfo extends XSBundle{  // 8 bit
   val isRVC   = Bool()
   val brType  = UInt(2.W)
   val isCall  = Bool()
@@ -42,11 +43,10 @@ class PDEntry extends XSBundle{  // 8 bit
   val excType = UInt(3.W)
 }
 
-class PDPacket extends XSBundle{
+class PDPacket extends PDInfo{
   val pc = UInt(VAddrBits.W)
   val inst = UInt(32.W)
   val mask = Bool()
-  val pdEntry = new PDEntry
 }
 
 class ICacheResp extends XSBundle {
@@ -57,14 +57,13 @@ class ICacheResp extends XSBundle {
 
 class PreDecode extends XSModule with HasPdconst{
   val io = IO(new Bundle() {
-    val iCacheResp = Input(new ICacheResp)
-    val PreDecodeInfo = Output(Vec(halfWidth, new PDEntry))
-    val toIF4 = Output(Vec(halfWidth, new PDPacket))
+    val in = Input(new ICacheResp)
+    val out = Output(Vec(halfWidth, new PDPacket))
   })
 
-  val gpc = groupPC(io.iCacheResp.fetchPc)
-  val data = io.iCacheResp.data
-  val mask = io.iCacheResp.mask
+  val gpc = groupPC(io.in.fetchPc)
+  val data = io.in.data
+  val mask = io.in.mask
 
   val insts = Wire(Vec(halfWidth, UInt(32.W)))
   val instsMask = Wire(Vec(halfWidth, Bool()))
@@ -82,7 +81,7 @@ class PreDecode extends XSModule with HasPdconst{
     val inst = Wire(UInt(32.W))
     val valid = Wire(Bool())
     val pc = gpc + (i << 1).U - Mux(prevValid && (i.U === 0.U), 2.U, 0.U)
-    val brType::isCall::isRet::Nil = brInfo(inst)
+
     if (i==0) {
       inst := Mux(prevValid, Cat(data(15,0), prevHalf), data(31,0))
       valid := true.B
@@ -102,16 +101,15 @@ class PreDecode extends XSModule with HasPdconst{
     instsMask(i) := mask(i) && valid 
     instsPC(i) := pc
 
-    io.PreDecodeInfo(i).isRVC := instsRVC(i)
-    io.PreDecodeInfo(i).brType := brType
-    io.PreDecodeInfo(i).isCall := isCall
-    io.PreDecodeInfo(i).isRet := isRet
-    io.PreDecodeInfo(i).excType := ExcType.notExc
-
-    io.toIF4(i).pdEntry := io.PreDecodeInfo(i)
-    io.toIF4(i).inst := insts(i)
-    io.toIF4(i).mask := instsMask(i)
-    io.toIF4(i).pc := instsPC(i)
+    val brType::isCall::isRet::Nil = brInfo(inst)
+    io.out(i).isRVC := instsRVC(i)
+    io.out(i).brType := brType
+    io.out(i).isCall := isCall
+    io.out(i).isRet := isRet
+    io.out(i).excType := ExcType.notExc
+    io.out(i).inst := insts(i)
+    io.out(i).mask := instsMask(i)
+    io.out(i).pc := instsPC(i)
   }
 
   //update
@@ -121,23 +119,23 @@ class PreDecode extends XSModule with HasPdconst{
   prevGPC := gpc
   prevValid := !(instsMask(halfWidth-2) && !isRVC(insts(halfWidth-2))) && !isRVC(insts(halfWidth-1)) && seriesPC
 
-//  for (i <- 0 until halfWidth) {
-//    XSDebug(true.B,
-//      p"instr ${Binary(io.toIF4(i).inst)}, " +
-//      p"mask ${Binary(io.toIF4(i).mask)}, " +
-//      //p"pc ${Binary(io.toIF4(i).pc)}, " +
-//      p"isRVC ${Binary(io.PreDecodeInfo(i).isRVC)}, " +
-//      p"brType ${Binary(io.PreDecodeInfo(i).brType)}, " +
-//      p"isRet ${Binary(io.PreDecodeInfo(i).isRet)}, " +
-//      p"isCall ${Binary(io.PreDecodeInfo(i).isCall)}\n"
-//    )
-//  }
-//
-//  for (i <- 0 until halfWidth) {
-//    XSDebug(true.B,
-//      p"prevhalf ${Binary(prevHalf)}, " +
-//      p"prevvalid ${Binary(prevValid)}, " +
-//      p"seriesPC ${Binary(seriesPC)}\n"
-//    )
-//  }
+  for (i <- 0 until halfWidth) {
+    XSDebug(true.B,
+      p"instr ${Binary(io.out(i).inst)}, " +
+      p"mask ${Binary(io.out(i).mask)}, " +
+      //p"pc ${Binary(io.out(i).pc)}, " +
+      p"isRVC ${Binary(io.out(i).isRVC)}, " +
+      p"brType ${Binary(io.out(i).brType)}, " +
+      p"isRet ${Binary(io.out(i).isRet)}, " +
+      p"isCall ${Binary(io.out(i).isCall)}\n"
+    )
+  }
+
+  for (i <- 0 until halfWidth) {
+    XSDebug(true.B,
+      p"prevhalf ${Binary(prevHalf)}, " +
+      p"prevvalid ${Binary(prevValid)}, " +
+      p"seriesPC ${Binary(seriesPC)}\n"
+    )
+  }
 }
