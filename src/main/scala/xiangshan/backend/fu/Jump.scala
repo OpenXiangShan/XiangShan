@@ -13,30 +13,27 @@ class Jump extends FunctionUnit(jmpCfg){
 
   val (iovalid, src1, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 
-  val redirectHit = uop.brTag.needFlush(io.redirect)
+  val redirectHit = uop.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
-  val isRVC = uop.cf.isRVC
+  val isRVC = uop.cf.brUpdate.isRVC
   val pcDelaySlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   io.out.bits.redirectValid := valid
   io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := target
-  io.out.bits.redirect.brTarget := target // DontCare
   io.out.bits.redirect.brTag := uop.brTag
-  io.out.bits.redirect.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
-  io.out.bits.redirect.isRVC := isRVC
-  io.out.bits.redirect.taken := true.B
-  io.out.bits.redirect.hist := uop.cf.hist
-  io.out.bits.redirect.tageMeta := uop.cf.tageMeta
-  io.out.bits.redirect.fetchIdx := uop.cf.fetchOffset >> 1.U  //TODO: consider RVC
-  io.out.bits.redirect.btbPredCtr := uop.cf.btbPredCtr
-  io.out.bits.redirect.btbHit := uop.cf.btbHit
-  io.out.bits.redirect.rasSp := uop.cf.rasSp
-  io.out.bits.redirect.rasTopCtr := uop.cf.rasTopCtr
   io.out.bits.redirect.isException := false.B
+  io.out.bits.redirect.isMisPred := DontCare // check this in brq
+  io.out.bits.redirect.isReplay := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
+
+  io.out.bits.brUpdate := uop.cf.brUpdate
+  io.out.bits.brUpdate.brTarget := target // DontCare
+  io.out.bits.brUpdate.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  io.out.bits.brUpdate.taken := true.B
+  io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
 
   // Output
   val res = pcDelaySlot

@@ -29,7 +29,7 @@ class BrqTest extends FlatSpec
       def genEnqReq(x: => DecoupledIO[CfCtrl], pc: Long) = {
         chiselTypeOf(x.bits).Lit(
           _.cf.pc -> pc.U,
-          _.cf.pnpc -> (pc+4).U
+          _.cf.brUpdate.pnpc -> (pc+4).U
         )
       }
 
@@ -63,8 +63,8 @@ class BrqTest extends FlatSpec
         }
       }
       def checkDeq =  {
-        if(c.io.inOrderBrInfo.valid.peek().litToBoolean){
-          deqTags = deqTags :+ c.io.inOrderBrInfo.redirect.brTag.value.peek().litValue().toInt
+        if(c.io.out.valid.peek().litToBoolean){
+          deqTags = deqTags :+ c.io.out.bits.uop.brTag.value.peek().litValue().toInt
           println(s"====deq tags:$deqTags====")
         }
       }
