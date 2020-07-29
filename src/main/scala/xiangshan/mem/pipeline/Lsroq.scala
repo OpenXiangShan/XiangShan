@@ -16,9 +16,9 @@ class LsRoqEntry extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(8.W)
-  val miss = Bool()
+  // val miss = Bool()
   val mmio = Bool()
-  val store = Bool()
+  // val store = Bool()
   val bwdMask = Vec(8, Bool()) // UInt(8.W)
   val bwdData = Vec(8, UInt(8.W))
 }
@@ -67,6 +67,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       valid(ringBufferHead+offset) := false.B
       writebacked(ringBufferHead+offset) := false.B
       store(ringBufferHead+offset) := false.B
+      miss(ringBufferHead+offset) := false.B
       data(ringBufferHead+offset).bwdMask := 0.U(8.W).asBools
     }
     io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead+offset)
@@ -116,9 +117,9 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
         data(io.loadIn(i).bits.uop.moqIdx).paddr := io.loadIn(i).bits.paddr
         data(io.loadIn(i).bits.uop.moqIdx).mask := io.loadIn(i).bits.mask
         data(io.loadIn(i).bits.uop.moqIdx).data := io.loadIn(i).bits.data
-        data(io.loadIn(i).bits.uop.moqIdx).miss := io.loadIn(i).bits.miss
         data(io.loadIn(i).bits.uop.moqIdx).mmio := io.loadIn(i).bits.mmio
-        data(io.loadIn(i).bits.uop.moqIdx).store := false.B
+        miss(io.loadIn(i).bits.uop.moqIdx) := io.loadIn(i).bits.miss
+        store(io.loadIn(i).bits.uop.moqIdx) := false.B
         XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x\n",
           io.loadIn(i).bits.uop.moqIdx,
           io.loadIn(i).bits.uop.cf.pc,
@@ -140,9 +141,9 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       data(io.storeIn(i).bits.uop.moqIdx).paddr := io.storeIn(i).bits.paddr
       data(io.storeIn(i).bits.uop.moqIdx).mask := io.storeIn(i).bits.mask
       data(io.storeIn(i).bits.uop.moqIdx).data := io.storeIn(i).bits.data
-      data(io.storeIn(i).bits.uop.moqIdx).miss := io.storeIn(i).bits.miss
       data(io.storeIn(i).bits.uop.moqIdx).mmio := io.storeIn(i).bits.mmio
-      data(io.storeIn(i).bits.uop.moqIdx).store := true.B
+      miss(io.storeIn(i).bits.uop.moqIdx) := io.storeIn(i).bits.miss
+      store(io.storeIn(i).bits.uop.moqIdx) := true.B
       XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x miss %x mmio %x roll %x\n",
         io.storeIn(i).bits.uop.moqIdx,
         io.storeIn(i).bits.uop.cf.pc,
@@ -277,25 +278,83 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     // Just for functional simulation
 
     // forward
-    (1 until MoqSize).map(j => {
-      val ptr = io.forward(i).moqIdx - j.U
-      when(
-        moqIdxOlderThan(ptr, io.forward(i).moqIdx) &&
-        valid(ptr) && allocated(ptr) && store(ptr) &&
-        io.forward(i).paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
+    val needForward1 = WireInit(VecInit((0 until MoqSize).map(j => {
+      io.forward(i).moqIdx(InnerMoqIdxWidth-1, 0) > j.U &&
+      (
+        ringBufferTail <= j.U || 
+        ringBufferTailExtended(InnerMoqIdxWidth) =/= io.forward(i).moqIdx(InnerMoqIdxWidth)
+        ) 
+      })))
+      val needForward2 = WireInit(VecInit((0 until MoqSize).map(j => {
+        ringBufferTail <= j.U &&
+        ringBufferTailExtended(InnerMoqIdxWidth) =/= io.forward(i).moqIdx(InnerMoqIdxWidth)
+      })))
+      val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
+      val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+      val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
+      val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+      
+      // forward lookup vec2
+      (0 until MoqSize).map(j => {
+        when(
+          needForward2(j) &&
+          valid(j) && allocated(j) && store(j) &&
+          io.forward(i).paddr(PAddrBits-1, 3) === data(j).paddr(PAddrBits-1, 3)
+        ){
+          (0 until 8).map(k => {
+              when(data(j).mask(k)){
+                forwardMask2(k) := true.B
+                forwardData2(k) := data(j).data(8*(k+1)-1, 8*k)
+                XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
+                data(j).data(8*(k+1)-1, 8*k), j.U, uop(j).cf.pc
+                )
+              }
+            })
+          }
+      })
+      // forward lookup vec1
+      (0 until MoqSize).map(j => {
+        when(
+        needForward1(j) &&
+        valid(j) && allocated(j) && store(j) &&
+        io.forward(i).paddr(PAddrBits-1, 3) === data(j).paddr(PAddrBits-1, 3)
       ){
         (0 until 8).map(k => {
-          // when(data(ptr).mask(k) && io.forward(i).mask(k)){
-            when(data(ptr).mask(k)){
-              io.forward(i).forwardMask(k) := true.B
-              io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
+            when(data(j).mask(k)){
+              forwardMask1(k) := true.B
+              forwardData1(k) := data(j).data(8*(k+1)-1, 8*k)
               XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
-              io.forward(i).forwardData(k), ptr, uop(ptr).cf.pc
+              data(j).data(8*(k+1)-1, 8*k), j.U, uop(j).cf.pc
               )
             }
           })
         }
-      })
+    })
+    // merge forward lookup results
+    (0 until 8).map(k => {
+      io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
+      io.forward(i).forwardData(k) := Mux(forwardMask1(k), forwardData1(k), forwardData2(k))
+    })
+
+    // (1 until MoqSize).map(j => {
+    //   val ptr = io.forward(i).moqIdx - j.U
+    //   when(
+    //     moqIdxOlderThan(ptr, io.forward(i).moqIdx) &&
+    //     valid(ptr) && allocated(ptr) && store(ptr) &&
+    //     io.forward(i).paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
+    //   ){
+    //     (0 until 8).map(k => {
+    //       // when(data(ptr).mask(k) && io.forward(i).mask(k)){
+    //         when(data(ptr).mask(k)){
+    //           io.forward(i).forwardMask(k) := true.B
+    //           io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
+    //           XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
+    //           io.forward(i).forwardData(k), ptr, uop(ptr).cf.pc
+    //           )
+    //         }
+    //       })
+    //     }
+    //   })
       
     // backward
     (0 until 8).map(k => {
