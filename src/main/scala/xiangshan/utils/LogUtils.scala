@@ -72,7 +72,6 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   // dump under with certain prefix
   def exec(dump: => Unit)(implicit name: String): Unit = {
     when (trigger) {
-      printf("world")
       printPrefix
       dump
     }
@@ -81,7 +80,6 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   // dump under certain condition and with certain prefix
   def exec(cond: Bool, dump: => Unit)(implicit name: String): Unit = {
     when (trigger && cond) {
-      printf("hello")
       printPrefix
       dump
     }
