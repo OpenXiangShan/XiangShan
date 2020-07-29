@@ -16,25 +16,32 @@ trait HasIFUConst { this: XSModule =>
 
 class IFUIO extends XSBundle
 {
-    val fetchPacket = DecoupledIO(new FetchPacket)
-    val redirectInfo = Input(new RedirectInfo)
-    val icacheReq = DecoupledIO(new FakeIcacheReq)
-    val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
+  val fetchPacket = DecoupledIO(new FetchPacket)
+  val redirect = Flipped(ValidIO(new Redirect))
+  val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  val icacheReq = DecoupledIO(new FakeIcacheReq)
+  val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
 }
 
-class FakeBPU extends XSModule{
+class BaseBPU extends XSModule {
   val io = IO(new Bundle() {
-    val redirectInfo = Input(new RedirectInfo)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
     val in = new Bundle { val pc = Flipped(Valid(UInt(VAddrBits.W))) }
     val btbOut = ValidIO(new BranchPrediction)
     val tageOut = Decoupled(new BranchPrediction)
     val predecode = Flipped(ValidIO(new Predecode))
   })
+}
 
-  io.btbOut.valid := true.B
+class FakeBPU extends BaseBPU {
+
+  io.btbOut.valid := false.B
   io.btbOut.bits <> DontCare
-  io.btbOut.bits.redirect := GTimer() === 1.U
-  io.btbOut.bits.target := "h080001234".U
+  io.btbOut.bits.redirect := false.B
+  io.btbOut.bits.target := DontCare
   io.tageOut.valid := false.B
   io.tageOut.bits <> DontCare
 }
@@ -43,7 +50,8 @@ class FakeBPU extends XSModule{
 class IFU extends XSModule with HasIFUConst
 {
     val io = IO(new IFUIO)
-    val bpu = if(EnableBPU) Module(new BPU) else Module(new FakeBPU)
+//    val bpu = if(EnableBPU) Module(new BPU) else Module(new FakeBPU)
+    val bpu = Module(new FakeBPU)
 
     //-------------------------
     //      IF1  PC update
@@ -70,7 +78,9 @@ class IFU extends XSModule with HasIFUConst
 
     bpu.io.in.pc.valid := if1_fire
     bpu.io.in.pc.bits := if1_npc
-    bpu.io.redirectInfo := io.redirectInfo
+    bpu.io.redirect := io.redirect
+    bpu.io.inOrderBrInfo := io.inOrderBrInfo
+    bpu.io.outOfOrderBrInfo := io.outOfOrderBrInfo
 
     XSDebug("[IF1]if1_valid:%d  ||  if1_npc:0x%x  || if1_pcUpdate:%d if1_pc:0x%x  || if2_ready:%d",if1_valid,if1_npc,if1_pcUpdate,if1_pc,if2_ready)
     XSDebug(false,if1_fire,"------IF1->fire!!!")
@@ -171,12 +181,12 @@ class IFU extends XSModule with HasIFUConst
     val if4_btb_insMask = RegEnable(if3_btb_insMask, if3_fire)
     val if4_btb_lateJump = RegEnable(if3_btb_lateJump, if3_fire)
     val if4_tage_taken = bpu.io.tageOut.valid && bpu.io.tageOut.bits.redirect
-    val if4_tage_lateJump = if4_tage_taken && bpu.io.tageOut.bits.lateJump && !io.redirectInfo.flush()
+    val if4_tage_lateJump = if4_tage_taken && bpu.io.tageOut.bits.lateJump && !io.redirect.valid
     val if4_tage_insMask = bpu.io.tageOut.bits.instrValid
     val if4_snpc = if4_pc + (PopCount(if4_tage_insMask) << 1.U)
     val if4_tage_target = Mux(if4_tage_lateJump, if4_snpc, bpu.io.tageOut.bits.target)
 
-    if2_btb_lateJump := if2_btb_taken && bpu.io.btbOut.bits.lateJump && !io.redirectInfo.flush() && !if4_tage_taken
+    if2_btb_lateJump := if2_btb_taken && bpu.io.btbOut.bits.lateJump && !io.redirect.valid && !if4_tage_taken
 
     if4_lateJumpLatch := BoolStopWatch(if4_tage_lateJump, if1_fire, startHighPriority = true)
     when (if4_tage_lateJump) {
@@ -196,16 +206,16 @@ class IFU extends XSModule with HasIFUConst
     }
 
     //redirect: miss predict
-    when(io.redirectInfo.flush()){
-      if1_npc := io.redirectInfo.redirect.target
+    when(io.redirect.valid){
+      if1_npc := io.redirect.bits.target
     }
-    XSDebug(io.redirectInfo.flush(),"[IFU-REDIRECT] target:0x%x  \n",io.redirectInfo.redirect.target.asUInt)
+    XSDebug(io.redirect.valid, "[IFU-REDIRECT] target:0x%x  \n", io.redirect.bits.target)
     
   
     //flush pipline
     // if(EnableBPD){needflush := (if4_valid && if4_tage_taken) || io.redirectInfo.flush() }
     // else {needflush := io.redirectInfo.flush()}
-    needflush := (if4_valid && if4_tage_taken && io.icacheResp.fire()) || io.redirectInfo.flush()
+    needflush := (if4_valid && if4_tage_taken && io.icacheResp.fire()) || io.redirect.valid
     when(needflush){
       // if2_valid := false.B
       if3_valid := false.B
@@ -217,7 +227,7 @@ class IFU extends XSModule with HasIFUConst
     //Output -> iBuffer
     //io.fetchPacket <> DontCare
     if4_ready := io.fetchPacket.ready && (io.icacheResp.valid || !if4_valid) && (GTimer() > 500.U)
-    io.fetchPacket.valid := if4_valid && !io.redirectInfo.flush()
+    io.fetchPacket.valid := if4_valid && !io.redirect.valid
     io.fetchPacket.bits.instrs := io.icacheResp.bits.icacheOut
     /*
     if(EnableBPU){
@@ -274,7 +284,6 @@ class IFU extends XSModule with HasIFUConst
     //TODO: consider RVC && consider cross cacheline fetch
     bpu.io.predecode.bits.mask := Fill(FetchWidth*2, 1.U(1.W))
     bpu.io.predecode.bits.isRVC := 0.U.asTypeOf(Vec(FetchWidth*2, Bool()))
-    bpu.io.redirectInfo := io.redirectInfo
     io.icacheResp.ready := io.fetchPacket.ready && (GTimer() > 500.U)
 
 }

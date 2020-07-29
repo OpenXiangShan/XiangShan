@@ -69,11 +69,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   // backend redirect, flush pipeline
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
 
-  val redirectInfo = Wire(new RedirectInfo)
-  // exception or misprediction
-  redirectInfo.valid := roq.io.redirect.valid || brq.io.out.valid
-  redirectInfo.misPred := !roq.io.redirect.valid && brq.io.redirect.valid
-  redirectInfo.redirect := redirect.bits
+  io.frontend.redirect <> redirect
 
 
 
@@ -166,7 +162,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid
   jmpExeUnit.io.exception.bits := roq.io.exception
 
-  io.frontend.redirectInfo <> redirectInfo
+  io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
 
   decode.io.in <> io.frontend.cfVec
