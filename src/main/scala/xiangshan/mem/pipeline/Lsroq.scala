@@ -319,11 +319,14 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       (1 until MoqSize).map(j => {
         val ptr = io.forward(i).moqIdx + j.U
         val reachHead = ptr === ringBufferHeadExtended
-        val addrMatch = writebacked(ptr) && allocated(ptr) &&
+        val addrMatch = allocated(ptr) &&
         io.storeIn(i).bits.paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
+        val mask = data(ptr).mask
+        val _store = store(ptr)
+        val _writebacked = writebacked(ptr)
         (0 until 8).map(k => {
-          when(needCheck(j)(k) && addrMatch && data(ptr).mask(k) && io.storeIn(i).bits.mask(k)){
-            when(writebacked(ptr)){
+          when(needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !_store){
+            when(_writebacked){
               rollback(i).valid := true.B
               rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
               rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
@@ -333,7 +336,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
               XSDebug("write backward data: ptr %x byte %x data %x\n", ptr, k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
             } 
           }
-          needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && store(ptr)) && !reachHead
+          needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && _store) && !reachHead
         })
 
         // when l/s writeback to roq together, check if rollback is needed
