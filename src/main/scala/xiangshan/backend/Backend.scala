@@ -67,11 +67,18 @@ class Backend(implicit val p: XSConfig) extends XSModule
   ))
 
   // backend redirect, flush pipeline
-  val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
+  val redirect = Mux(
+    roq.io.redirect.valid,
+    roq.io.redirect,
+    Mux(
+      brq.io.redirect.valid,
+      brq.io.redirect,
+      io.mem.replayAll
+    )
+  )
 
-  io.frontend.redirect <> redirect
-
-
+  io.frontend.redirect := redirect
+  io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
 
   val memConfigs =
     Seq.fill(exuParameters.LduCnt)(Exu.ldExeUnitCfg) ++
@@ -143,6 +150,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
       ))
       println(s"exu:${cfg.name} wakeupCnt:${wakeUpDateVec.length} bypassCnt:${bypassUopVec.length}")
       iq.io.redirect <> redirect
+      iq.io.replay <> io.mem.replayMem
       iq.io.enq <> dispatch.io.enqIQCtrl(i)
       dispatch.io.numExist(i) := iq.io.numExist
       for(
@@ -167,6 +175,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
+  brq.io.memRedirect <> io.mem.replayAll
   brq.io.bcommit := roq.io.bcommit
   brq.io.enqReqs <> decode.io.toBrq
   for ((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.config.hasRedirect))) {

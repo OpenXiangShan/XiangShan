@@ -25,7 +25,10 @@ class MemToBackendIO extends XSBundle {
   val ldout = Vec(exuParameters.LduCnt, Decoupled(new ExuOutput))
   val stout = Vec(exuParameters.StuCnt, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
-  val rollback = ValidIO(new Redirect)
+  // replay all instructions form dispatch
+  val replayAll = ValidIO(new Redirect)
+  // replay mem instructions form Load Queue/Store Queue
+  val replayMem = ValidIO(UInt(RoqIdxWidth.W))
   val mcommit = Input(UInt(3.W))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
@@ -38,6 +41,7 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
 
 
+  io.backend.replayMem := DontCare
   // io <> DontCare
 
  val lsu = Module(new Lsu)
@@ -54,7 +58,7 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   lsu.io.ldout <> io.backend.ldout
   lsu.io.stout <> io.backend.stout
   lsu.io.redirect <> io.backend.redirect
-  lsu.io.rollback <> io.backend.rollback
+  lsu.io.rollback <> io.backend.replayAll
   lsu.io.mcommit <> io.backend.mcommit
   lsu.io.dp1Req <> io.backend.dp1Req
   lsu.io.moqIdxs <> io.backend.moqIdxs
