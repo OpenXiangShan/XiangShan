@@ -64,7 +64,7 @@ class ReservationStation
     // enq Ctrl sigs at dispatch-2
     val enqCtrl = Flipped(DecoupledIO(new MicroOp))
     // enq Data at next cycle (regfile has 1 cycle latency)
-    val enqData = Flipped(ValidIO(new ExuInput))
+    val enqData = Input(new ExuInput)
 
     //  broadcast selected uop to other issue queues which has bypasses
     val selectedUop = if(enableBypass) ValidIO(new MicroOp) else null
@@ -152,7 +152,7 @@ class ReservationStation
   when (enqFireNext) { enqFireNext := false.B }
   when (enqFire) { enqFireNext := true.B }
 
-  val enqDataVec = List(io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3)
+  val enqDataVec = List(io.enqData.src1, io.enqData.src2, io.enqData.src3)
   when (enqFireNext) {
     for(i <- 0 until srcUseNum) {
       srcDataWire(enqSelIqNext)(i) := enqDataVec(i)
@@ -383,7 +383,7 @@ class ReservationStation
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.brTag.value, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
   XSInfo(enqFire, s"EnqCtrl(%d %d) enqSelIq:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSelIq
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
-  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.bits.src1, io.enqData.bits.src2, io.enqData.bits.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx)
+  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.src1, io.enqData.src2, io.enqData.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx)
   XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b In(%d %d) Out(%d %d)\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot, io.enqCtrl.valid, io.enqCtrl.ready, io.deq.valid, io.deq.ready)
   XSInfo(issueToExuValid, "FireStage:Out(%d %d) src1(%d|%x) src2(%d|%x) src3(%d|%x) deqFlush:%d pc:%x roqIdx:%d\n", io.deq.valid, io.deq.ready, issueToExu.uop.psrc1, issueToExu.src1, issueToExu.uop.psrc2, issueToExu.src2, issueToExu.uop.psrc3, issueToExu.src3, deqFlushHit, issueToExu.uop.cf.pc, issueToExu.uop.roqIdx)

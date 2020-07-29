@@ -18,7 +18,7 @@ case class DispatchParameters
   LsDqDeqWidth: Int
 )
 
-class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
+class Dispatch() extends XSModule with NeedImpl {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     // from rename
@@ -47,7 +47,7 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.ExuCnt - exuParameters.LsExuCnt, ValidIO(new ExuInput))
+    val enqIQData = Vec(exuParameters.ExuCnt - exuParameters.LsExuCnt, Output(new ExuInput))
   })
   // pipeline between rename and dispatch
   val dispatch1 = Module(new Dispatch1)
@@ -57,7 +57,7 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
   val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, "IntDpQ"))
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, "FpDpQ"))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, "LsDpQ"))
-  val dispatch2 = Module(new Dispatch2(exuCfg))
+  val dispatch2 = Module(new Dispatch2())
 
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.toRoq <> io.toRoq
@@ -81,6 +81,10 @@ class Dispatch(exuCfg: Array[ExuConfig]) extends XSModule with NeedImpl {
   dispatch2.io.readFpRf <> io.readFpRf
   dispatch2.io.intPregRdy <> io.intPregRdy
   dispatch2.io.fpPregRdy <> io.fpPregRdy
+  dispatch2.io.intMemRegAddr <> io.intMemRegAddr
+  dispatch2.io.fpMemRegAddr <> io.fpMemRegAddr
+  dispatch2.io.intMemRegRdy <> io.intMemRegRdy
+  dispatch2.io.fpMemRegRdy <> io.fpMemRegRdy
   dispatch2.io.enqIQCtrl <> io.enqIQCtrl
   dispatch2.io.enqIQData <> io.enqIQData
   dispatch2.io.numExist <> io.numExist

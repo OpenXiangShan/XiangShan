@@ -5,9 +5,10 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class IndexMapping(inWidth: Int, outWidth: Int) extends XSModule {
+class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean) extends XSModule {
   val io = IO(new Bundle() {
     val validBits = Input(Vec(inWidth, Bool()))
+    val priority = Input(Vec(outWidth, UInt(log2Ceil(outWidth).W)))
     val mapping = Output(Vec(outWidth, ValidIO(UInt(log2Ceil(inWidth).W))))
     val reverseMapping = Output(Vec(inWidth, ValidIO(UInt(log2Ceil(outWidth).W))))
   })
@@ -17,12 +18,19 @@ class IndexMapping(inWidth: Int, outWidth: Int) extends XSModule {
     io.reverseMapping(j).bits := DontCare
   }
 
+  val unsortedMapping = Wire(Vec(outWidth, UInt(log2Ceil(inWidth).W)))
+  val unsortedValid = Wire(Vec(outWidth, Bool()))
   var maskedValidBits = (0 until inWidth).map(i => io.validBits(i))
   for (i <- 0 until outWidth) {
     val onehot = PriorityEncoderOH(maskedValidBits)
-    io.mapping(i).valid := Cat(onehot).orR()
-    io.mapping(i).bits := OHToUInt(onehot)
+    unsortedValid(i) := Cat(onehot).orR()
+    unsortedMapping(i) := OHToUInt(onehot)
     maskedValidBits = (0 until inWidth).map(i => maskedValidBits(i) && !onehot(i))
+
+    val index = if (withPriority) io.priority(i) else i.U
+    io.mapping(i).valid := unsortedValid(index)
+    io.mapping(i).bits := unsortedMapping(index)
+
     for (j <- 0 until inWidth) {
       when (io.mapping(i).valid && io.mapping(i).bits === j.U) {
         io.reverseMapping(i).valid := true.B
@@ -30,7 +38,6 @@ class IndexMapping(inWidth: Int, outWidth: Int) extends XSModule {
       }
     }
   }
-
 }
 
 object PriorityGen {
@@ -53,5 +60,26 @@ object PriorityGen {
       priority(sortedIndex(i)) := i.U
     }
     priority
+  }
+}
+
+object RegfileReadPortGen {
+  def apply(staticMappedValid: Seq[Bool], dynamicMappedValid: Seq[Bool]) = {
+    val choiceCount = dynamicMappedValid.length + 1
+    val readPortSrc = Wire(Vec(staticMappedValid.length, UInt(log2Ceil(choiceCount).W)))
+    var hasAssigned = (0 until choiceCount).map(_ => false.B)
+    for (i <- 0 until staticMappedValid.length) {
+      val valid = staticMappedValid(i) +: dynamicMappedValid
+      val wantReadPort = (0 until choiceCount).map(j => valid(j) && ((j == 0).asBool() || !hasAssigned(j)))
+      readPortSrc(i) := PriorityEncoder(wantReadPort)
+      val onehot = UIntToOH(readPortSrc(i))
+      hasAssigned = (0 until choiceCount).map(i => hasAssigned(i) || onehot(i))
+    }
+    val dynamicExuSrc = Wire(Vec(dynamicMappedValid.length, UInt(log2Ceil(staticMappedValid.length).W)))
+    for (i <- 0 until dynamicMappedValid.length) {
+      val targetMatch = (0 until staticMappedValid.length).map(j => readPortSrc(j) === (i + 1).U)
+      dynamicExuSrc(i) := PriorityEncoder(targetMatch)
+    }
+    (readPortSrc, dynamicExuSrc)
   }
 }

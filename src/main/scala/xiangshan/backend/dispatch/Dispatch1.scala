@@ -34,12 +34,15 @@ class Dispatch1 extends XSModule {
   val isLs  = WireInit(VecInit(io.fromRename.map(uop => FuType.isMemExu(uop.bits.ctrl.fuType))))
 
   // generate index mapping
-  val intIndex = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth))
-  val fpIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth))
-  val lsIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth))
+  val intIndex = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
+  val fpIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
+  val lsIndex  = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
   intIndex.io.validBits := isInt
+  intIndex.io.priority := DontCare
   fpIndex.io.validBits := isFp
+  fpIndex.io.priority := DontCare
   lsIndex.io.validBits := isLs
+  lsIndex.io.priority := DontCare
 
   /**
     * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes

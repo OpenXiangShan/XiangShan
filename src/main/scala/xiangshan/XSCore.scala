@@ -53,8 +53,8 @@ trait HasXSParameter {
   val exuParameters = ExuParameters(
     JmpCnt = 1,
     AluCnt = 4,
-    MulCnt = 1,
-    MduCnt = 1,
+    MulCnt = 0,
+    MduCnt = 2,
     FmacCnt = 0,
     FmiscCnt = 0,
     FmiscDivSqrtCnt = 0,

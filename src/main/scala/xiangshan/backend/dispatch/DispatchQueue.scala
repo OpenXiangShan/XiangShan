@@ -29,21 +29,27 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   // queue data array
   val entries = Reg(Vec(size, new DispatchQEntry))
+
   val headPtr = RegInit(0.U((indexWidth + 1).W))
-  val dispatchPtr = RegInit(0.U((indexWidth + 1).W))
-  val tailPtr = RegInit(0.U((indexWidth + 1).W))
   val headIndex = headPtr(indexWidth - 1, 0)
-  val dispatchIndex = dispatchPtr(indexWidth - 1, 0)
-  val tailIndex = tailPtr(indexWidth - 1, 0)
   val headDirection = headPtr(indexWidth)
+
+  val dispatchPtr = RegInit(0.U((indexWidth + 1).W))
+  val dispatchIndex = dispatchPtr(indexWidth - 1, 0)
   val dispatchDirection = dispatchPtr(indexWidth)
+
+  val tailPtr = RegInit(0.U((indexWidth + 1).W))
+  val tailIndex = tailPtr(indexWidth - 1, 0)
   val tailDirection = tailPtr(indexWidth)
+
   val commitPtr = (0 until CommitWidth).map(i => headPtr + i.U)
-  val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
-  val deqPtr = (0 until enqnum).map(i => dispatchDirection + i.U)
   val commitIndex = commitPtr.map(ptr => ptr(indexWidth - 1, 0))
-  val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
+
+  val deqPtr = (0 until enqnum).map(i => dispatchPtr + i.U)
   val deqIndex = deqPtr.map(ptr => ptr(indexWidth - 1, 0))
+
+  val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
+  val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
 
   val validEntries = Mux(headDirection === tailDirection, tailIndex - headIndex, size.U + tailIndex - headIndex)
   val dispatchEntries = Mux(dispatchDirection === tailDirection, tailIndex - dispatchIndex, size.U + tailIndex - dispatchIndex)
@@ -111,7 +117,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends X
 
   // commit
   val numCommit = 0.U
-  val commitBits = (1.U << numCommit).asUInt() - 1.U
+  val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
   for (i <- 0 until CommitWidth) {
     when (commitBits(i)) {
       entries(commitIndex(i)).state := s_invalid
