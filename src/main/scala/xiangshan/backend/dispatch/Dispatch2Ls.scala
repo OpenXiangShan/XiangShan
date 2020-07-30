@@ -50,13 +50,12 @@ class Dispatch2Ls extends XSModule {
   })
 
   for (i <- validVec.indices) {
-    XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
+    // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
   }
   for (i <- rsValidVec.indices) {
-    // XSDebug(p"jmp reverse $i: valid ${jmpIndexGen.io.reverseMapping(i).valid} index ${jmpIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"alu reverse $i: valid ${aluIndexGen.io.reverseMapping(i).valid} index ${aluIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"mdu reverse $i: valid ${mduIndexGen.io.reverseMapping(i).valid} index ${mduIndexGen.io.reverseMapping(i).bits}\n")
-    XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
+    // XSDebug(p"load reverse $i: valid ${loadIndexGen.io.reverseMapping(i).valid} index ${loadIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"store reverse $i: valid ${storeIndexGen.io.reverseMapping(i).valid} index ${storeIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
   }
 
   /**
