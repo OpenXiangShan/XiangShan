@@ -4,7 +4,7 @@ import chisel3.{util, _}
 import chisel3.util._
 import utils.{XSDebug, XSInfo}
 import xiangshan._
-import xiangshan.backend.exu.ExuConfig
+import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
 
 class IssueQueue
@@ -50,8 +50,8 @@ class IssueQueue
   // real deq
 
   /*
-    example: realDeqIdx = 2        |  realDeqIdx=0
-             moveMask = 11111100   |  moveMask=11111111
+    example: realDeqIdx = 2       |  realDeqIdx=0
+             moveMask = 11111100  |  moveMask=11111111
  */
   assert(!(io.tlbHit && io.replay.valid), "Error: tlbHit and replay are both true!")
 
@@ -85,16 +85,46 @@ class IssueQueue
     )
   ))
   val selectedIdxWire = PriorityEncoder(selectMask)
-  val selectedIdxReg = Reg(UInt(log2Up(qsize).W))
-  selectedIdxReg := selectedIdxWire - moveMask(selectedIdxWire)
+  val selectedIdxReg = RegEnable(
+    enable = io.deq.ready,
+    next = selectedIdxWire - moveMask(selectedIdxWire)
+  )
+//  selectedIdxReg := selectedIdxWire - moveMask(selectedIdxWire)
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
   XSDebug(
     p"selMaskWire:${Binary(selectMask.asUInt())} selected:$selectedIdxWire moveMask:${Binary(moveMask)}\n"
   )
 
-  // read data && (fake) deq
+
+  // read regfile
+  val selectedUop = uopQueue(Mux(io.deq.ready, selectedIdxWire, selectedIdxReg))
+  val base, storeData = Wire(UInt(XLEN.W))
+
+  exuCfg match {
+    case Exu.ldExeUnitCfg =>
+      io.readIntRf(0).addr := selectedUop.psrc1 // base
+      base := io.readIntRf(0).data
+      storeData := DontCare
+    case Exu.stExeUnitCfg =>
+      io.readIntRf(0).addr := selectedUop.psrc1 // base
+      io.readIntRf(1).addr := selectedUop.psrc2 // store data (int)
+      io.readFpRf(0).addr := selectedUop.psrc2  // store data (fp)
+      base := io.readIntRf(0).data
+      storeData := Mux(SrcType.isReg(selectedUop.ctrl.src2Type),
+        io.readIntRf(1).data,
+        io.readFpRf(0).data
+      )
+    case _ =>
+      require(requirement = false, "Error: IssueQueue only support ldu and stu!")
+  }
+
+  // (fake) deq to Load/Store unit
   io.deq.valid := stateQueue(selectedIdxReg)===s_valid
   io.deq.bits.uop := uopQueue(idxQueue(selectedIdxReg))
+  io.deq.bits.src1 := base
+  io.deq.bits.src2 := storeData
+  io.deq.bits.src3 := DontCare
+
   when(io.deq.fire()){
     stateQueue(selectedIdxReg - moveMask(selectedIdxReg)) := s_wait
     assert(stateQueue(selectedIdxReg) === s_valid, "Dequeue a invalid entry to lsu!")
@@ -162,6 +192,9 @@ class IssueQueue
     }
   }
 
+
+  // assign outputs
+  io.numExist := Mux(isFull, (qsize-1).U, tailPtr)
 
   // Debug sigs
   XSInfo(
