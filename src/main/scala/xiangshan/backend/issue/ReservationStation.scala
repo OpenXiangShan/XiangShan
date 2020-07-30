@@ -24,28 +24,6 @@ object OneCycleFire {
   }
 }
 
-
-class IssueQueue
-(
-  val exuCfg: ExuConfig,
-  val wakeupCnt: Int,
-  val bypassCnt: Int = 0
-) extends XSModule with HasIQConst with NeedImpl {
-  val io = IO(new Bundle() {
-    val redirect = Flipped(ValidIO(new Redirect))
-    val enq = Flipped(DecoupledIO(new MicroOp))
-    val readIntRf = Vec(exuCfg.intSrcCnt, Flipped(new RfReadPort))
-    val readFpRf = Vec(exuCfg.fpSrcCnt, Flipped(new RfReadPort))
-    val deq = DecoupledIO(new ExuInput)
-    val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
-    val bypassUops = Vec(bypassCnt, Flipped(ValidIO(new MicroOp)))
-    val numExist = Output(UInt(iqIdxWidth.W))
-    // tlb hit, inst can deq
-    val tlbHit = Input(Bool())
-    val replay = Flipped(ValidIO(UInt(RoqIdxWidth.W)))
-  })
-}
-
 class ReservationStation
 (
   val exuCfg: ExuConfig,

@@ -144,7 +144,11 @@ class Backend(implicit val p: XSConfig) extends XSModule
     takeRight(exuParameters.LduCnt + exuParameters.StuCnt).
     map({case (cfg, i) =>
       val wakeUpDateVec = exuConfigs.zip(exeWbReqs).filter(x => needData(cfg, x._1)).map(_._2)
-      val bypassUopVec = reservedStations.filter(r => r.exuCfg.enableBypass && needData(cfg, r.exuCfg)).map(_.io.selectedUop)
+      val bypassUopVec = reservedStations.
+        filter(r => r.exuCfg.enableBypass && needData(cfg, r.exuCfg)).map(_.io.selectedUop)
+      val bypassDataVec = exuConfigs.zip(exeWbReqs).
+        filter(x => x._1.enableBypass && needData(cfg, x._1)).map(_._2)
+
       val iq = Module(new IssueQueue(
         cfg, wakeUpDateVec.length, bypassUopVec.length
       ))
@@ -158,9 +162,13 @@ class Backend(implicit val p: XSConfig) extends XSModule
         iq.io.wakeUpPorts.zip(wakeUpDateVec)
       ){
         wakeUpPort.bits := exuOut.bits
-        wakeUpPort.valid := exuOut.valid
+        wakeUpPort.valid := exuOut.fire() // data after arbit
       }
       iq.io.bypassUops <> bypassUopVec
+      for(i <- bypassDataVec.indices){
+        iq.io.bypassData(i).valid := bypassDataVec(i).valid
+        iq.io.bypassData(i).bits := bypassDataVec(i).bits
+      }
       iq
     })
 
@@ -209,10 +217,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
   memRf.io.readPorts <> issueQueues.flatMap(_.io.readIntRf)
 
-  val wbIntIdx = exuConfigs.zipWithIndex.filter(_._1.writeIntRf).map(_._2)
-  val wbFpIdx = exuConfigs.zipWithIndex.filter(_._1.writeFpRf).map(_._2)
 
-  val wbu = Module(new Wbu(wbIntIdx, wbFpIdx))
+  val wbu = Module(new Wbu(exuConfigs))
   wbu.io.in <> exeWbReqs
 
   val wbIntResults = wbu.io.toIntRf

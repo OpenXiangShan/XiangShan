@@ -26,9 +26,9 @@ class Dispatch2Int extends XSModule {
   val aluPriority = PriorityGen((0 until exuParameters.AluCnt).map(i => io.numExist(i+exuParameters.JmpCnt)))
   val mduPriority = PriorityGen((0 until exuParameters.MduCnt).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    jmpIndexGen.io.validBits(i) := Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    aluIndexGen.io.validBits(i) := Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    mduIndexGen.io.validBits(i) := Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    aluIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    mduIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
     XSDebug(io.fromDq(i).valid,
       p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")

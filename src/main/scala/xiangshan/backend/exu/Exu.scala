@@ -64,4 +64,7 @@ object Exu {
   val mulDivExeUnitCfg = ExuConfig("MulDivExu", Array(mulCfg, divCfg), enableBypass = false)
   val ldExeUnitCfg = ExuConfig("LoadExu", Array(lduCfg), enableBypass = false)
   val stExeUnitCfg =ExuConfig("StoreExu", Array(stuCfg), enableBypass = false)
+  val fmacExeUnitCfg = ExuConfig("FmacExu", Array(fmacCfg), enableBypass = false)
+  val fmiscExeUnitCfg = ExuConfig("FmiscExu", Array(fmiscCfg), enableBypass = false)
+  val fmiscDivExeUnitCfg = ExuConfig("FmiscDivExu", Array(fmiscCfg, fDivSqrtCfg), enableBypass = false)
 }

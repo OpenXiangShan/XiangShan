@@ -10,42 +10,89 @@ import xiangshan._
 import xiangshan.backend.exu.Exu
 import xiangshan.testutils._
 
+import scala.util.Random
+
 class IssueQueueTest extends FlatSpec
   with ChiselScalatestTester
   with Matchers
   with ParallelTestExecution
   with HasPartialDecoupledDriver
 {
-  XSLog.generateLog = false
-  it should "do enq issue with no delay correctly" in {
-    test(new ReservationStation(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
-      AddSinks()
-    }) { c =>
+  XSLog.generateLog = true
 
-      def genEnqRdyReq(x: => DecoupledIO[MicroOp], roq: Long) = {
+  it should "enq and deq correctly" in {
+    test(new IssueQueue(Exu.ldExeUnitCfg, 1, 1){
+      AddSinks()
+    }){ c =>
+
+      def genEnqRdyReq(x: => DecoupledIO[MicroOp], roqIdx: Long) = {
         chiselTypeOf(x.bits).Lit(
           _.src1State -> SrcState.rdy,
           _.src2State -> SrcState.rdy,
           _.src3State -> SrcState.rdy,
-          _.roqIdx -> roq.U
+          _.roqIdx -> roqIdx.U,
+          _.cf.pc -> roqIdx.U
         )
       }
 
-      c.io.enqCtrl.initSource().setSourceClock(c.clock)
+      c.io.enq.initSource().setSourceClock(c.clock)
       c.io.deq.initSink().setSinkClock(c.clock)
 
-      def TEST_SIZE = 2
-      val roqSeq = 0 until TEST_SIZE
-      val enqPort = c.io.enqCtrl
       fork {
-        c.io.enqCtrl.enqueuePartialSeq(roqSeq.map(roq => genEnqRdyReq(enqPort, roq)))
+        c.io.enq.enqueuePartialSeq((0 until c.qsize).map(i => genEnqRdyReq(c.io.enq, i)))
       }.fork {
-        c.io.deq.expectDequeuePartialSeq(roqSeq.map(
-          roq => chiselTypeOf(c.io.deq.bits).Lit(
-            _.uop.roqIdx -> roq.U
+//        c.clock.step(10)
+        c.io.deq.expectDequeuePartialSeq((0 until c.qsize).map(
+          i => chiselTypeOf(c.io.deq.bits).Lit(
+            _.uop.roqIdx -> i.U,
+            _.uop.cf.pc -> i.U
           )
         ))
       }.join()
     }
   }
+
+
+  it should "enq and deq bubble correctly" in {
+    test(new IssueQueue(Exu.ldExeUnitCfg, 1, 1){
+      AddSinks()
+    }){ c =>
+
+      def genEnqRdyReq(x: => DecoupledIO[MicroOp], pc: Long) = {
+        chiselTypeOf(x.bits).Lit(
+          _.src1State -> SrcState.rdy,
+          _.src2State -> SrcState.rdy,
+          _.src3State -> SrcState.rdy,
+          _.cf.pc -> pc.U
+        )
+      }
+
+      c.io.enq.initSource().setSourceClock(c.clock)
+      c.io.deq.initSink().setSinkClock(c.clock)
+
+      def TEST_SIZE = 100
+
+      fork {
+        c.io.enq.enqueuePartialSeq((0 until TEST_SIZE).map(i => genEnqRdyReq(c.io.enq, i)))
+      }.fork {
+        c.io.deq.expectDequeuePartialSeq((0 until TEST_SIZE).map(
+          i => chiselTypeOf(c.io.deq.bits).Lit(
+            _.uop.cf.pc -> i.U
+          )
+        ))
+      }.fork{
+        c.clock.step(10)
+        var cnt = 0
+        while (cnt != TEST_SIZE){
+          c.io.tlbHit.poke(true.B)
+          c.clock.step(1)
+          cnt += 1
+          c.io.tlbHit.poke(false.B)
+          c.clock.step(1 + Random.nextInt(10))
+        }
+      }.join()
+    }
+  }
+
+
 }
