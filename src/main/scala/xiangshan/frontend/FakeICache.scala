@@ -21,7 +21,7 @@ class FakeIcacheReq extends XSBundle {
 
 class FakeIcacheResp extends XSBundle {
   val icacheOut = Vec(FetchWidth, UInt(32.W))
-  val predecode = new Predecode
+  // val predecode = new Predecode
 }
 
 class TempPreDecoder extends XSModule  {
@@ -155,5 +155,5 @@ class FakeCache extends XSModule with HasICacheConst {
 
   io.out.valid := s3_valid
   io.out.bits.icacheOut := s3_ram_out
-  io.out.bits.predecode := tempPredecode.io.out
+  // io.out.bits.predecode := tempPredecode.io.out
 }

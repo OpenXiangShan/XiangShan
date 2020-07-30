@@ -21,6 +21,12 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
  def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
+class BPUReq extends XSBundle {
+  val pc = UInt(VAddrBits.W)
+  val hist = UInt(HistoryLength.W)
+  val inMask = UInt(PredictWidth.W)
+}
+
 class PredictorResponse extends XSBundle {
   // the valid bits indicates whether a target is hit
   val ubtb = new Bundle {
@@ -184,11 +190,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     // from ifu, frontend redirect
     val flush = Input(UInt(3.W))
     // from if1
-    val in = new Bundle {
-      val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
-      val hist = Input(UInt(ExtHistoryLength.W))
-      val inMask = Input(UInt(PredictWidth.W))
-    }
+    val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
     val out = Vec(3, Decoupled(new BranchPrediction))
     // from if4

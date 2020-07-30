@@ -40,8 +40,10 @@ class TageMeta extends XSBundle {
 class BranchPrediction extends XSBundle {
   val redirect = Bool()
   val jmpIdx = UInt(log2Up(PredictWidth).W)
+  val hasNotTakenBrs = Bool()
   val target = UInt(VAddrBits.W)
   val saveHalfRVI = Bool()
+  val taken = Bool()
 }
 
 class BranchInfo extends XSBundle {
