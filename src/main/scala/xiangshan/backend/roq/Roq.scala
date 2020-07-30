@@ -189,11 +189,15 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
   // commit load & store to lsu
-  // val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
   val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => 
     state === s_idle && io.commits(i).valid && 
-    microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu
-  )))
+    microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && 
+    microOp(ringBufferTail+i.U).ctrl.fuOpType(3)
+  ))) //FIXIT
+  // val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => 
+    // state === s_idle && io.commits(i).valid && 
+    // microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu
+  // )))
   io.mcommit := PopCount(validMcommit.asUInt)
 
   // TODO MMIO
