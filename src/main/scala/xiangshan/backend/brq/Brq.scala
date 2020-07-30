@@ -122,14 +122,20 @@ class Brq extends XSModule {
   }
   val headIdxMaskHi = headIdxMaskHiVec.asUInt()
   val headIdxMaskLo = (~headIdxMaskHi).asUInt()
+
+  val skipMaskHi = headIdxMaskHi & skipMask
+  val skipMaskLo = headIdxMaskLo & skipMask
+
   val commitIdxHi, commitIdxLo, commitIdx = Wire(UInt(BrqSize.W))
 
-  commitIdxHi := PriorityEncoder(~(headIdxMaskHi & skipMask))
-  commitIdxLo := PriorityEncoder(~(headIdxMaskLo & skipMask))
+  commitIdxHi := PriorityEncoder(~skipMaskHi)
+  commitIdxLo := PriorityEncoder(~skipMaskLo)
+
+  val useLo = (skipMaskHi | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
 
   commitIdx := Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).misPred,
     commitIdxHi,
-    Mux(stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).misPred,
+    Mux(useLo && stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).misPred,
       commitIdxLo,
       headIdx
     )
