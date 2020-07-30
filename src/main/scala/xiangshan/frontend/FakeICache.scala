@@ -21,8 +21,9 @@ class FakeIcacheReq extends XSBundle {
 }
 
 class FakeIcacheResp extends XSBundle {
-  // val icacheOut = Vec(FetchWidth, UInt(32.W))
-  val icacheOut = UInt((FetchWidth * 32).W)
+  val pc = UInt(VAddrBits.W)
+  // val data = Vec(FetchWidth, UInt(32.W))
+  val data = UInt((FetchWidth * 32).W)
   val mask = UInt(PredictWidth.W)
 }
 
@@ -158,6 +159,7 @@ class FakeCache extends XSModule with HasICacheConst {
   // tempPredecode.io.in := s3_ram_out
 
   io.out.valid := s3_valid
-  io.out.bits.icacheOut := s3_ram_out.asUInt
+  io.out.bits.pc := s3_pc
+  io.out.bits.data := s3_ram_out.asUInt
   io.out.bits.mask := mask(s3_pc)
 }
