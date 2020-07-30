@@ -72,7 +72,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
       val CMD_WRITE = MemoryOpConstants.M_XWR
       val FULL_MASK = 0xff
 
-      val BASE_ADDR = 0x80000000L
+      val BASE_ADDR = 0x0L
       val MEM_SIZE = 128 * 1024 * 1024
 
       // for now, we only support load/store of 64bit integers
