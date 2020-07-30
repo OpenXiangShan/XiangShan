@@ -8,9 +8,9 @@ import utils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
-  val groupAlign = log2Up(FetchWidth * 4)
+  val groupAlign = log2Up(FetchWidth * 4 * 2)
   def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
-  // def snpc(pc: UInt): UInt = pc + (1 << groupAlign).U
+  // each 1 bit in mask stands for 2 Bytes
   def mask(pc: UInt): UInt = (Fill(PredictWidth * 2, 1.U(1.W)) >> pc(groupAlign - 1, 1))(PredictWidth - 1, 0)
   def snpc(pc: UInt): UInt = pc + (PopCount(mask(pc)) << 1)
 }
