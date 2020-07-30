@@ -141,11 +141,12 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       data(io.storeIn(i).bits.uop.moqIdx).mmio := io.storeIn(i).bits.mmio
       miss(io.storeIn(i).bits.uop.moqIdx) := io.storeIn(i).bits.miss
       store(io.storeIn(i).bits.uop.moqIdx) := true.B
-      XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x miss %x mmio %x roll %x\n",
+      XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x\n",
         io.storeIn(i).bits.uop.moqIdx,
         io.storeIn(i).bits.uop.cf.pc,
         io.storeIn(i).bits.vaddr,
         io.storeIn(i).bits.paddr,
+        io.storeIn(i).bits.data,
         io.storeIn(i).bits.miss,
         io.storeIn(i).bits.mmio,
         io.storeIn(i).bits.rollback
