@@ -43,18 +43,22 @@ class Dispatch2Int extends XSModule {
   val allIndexGen = Seq(jmpIndexGen, aluIndexGen, mduIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsValidVec = allIndexGen.map(_.io.reverseMapping.map(_.valid)).reduceLeft(_ ++ _)
-  val rsIndexVecRaw = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsIndexVec = rsIndexVecRaw.zipWithIndex.map{ case (index, i) =>
-    (if (i >= exuParameters.JmpCnt + exuParameters.AluCnt) {
-      index + exuParameters.JmpCnt.U + exuParameters.AluCnt.U
-    }
-    else if (i >= exuParameters.JmpCnt) {
-      index + exuParameters.JmpCnt.U
-    }
-    else {
-      index
-    })
+  val rsValidVec = (0 until dpParams.IntDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
+  val rsIndexVec = (0 until dpParams.IntDqDeqWidth).map({i =>
+    val indexOffset = Seq(0, exuParameters.JmpCnt, exuParameters.JmpCnt + exuParameters.AluCnt)
+    allIndexGen.zipWithIndex.map{
+      case (index, j) => Mux(index.io.reverseMapping(i).valid, index.io.reverseMapping(i).bits + indexOffset(j).U, 0.U)
+    }.reduce(_ | _)
+  })
+
+  for (i <- validVec.indices) {
+    // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
+  }
+  for (i <- rsValidVec.indices) {
+    // XSDebug(p"jmp reverse $i: valid ${jmpIndexGen.io.reverseMapping(i).valid} index ${jmpIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"alu reverse $i: valid ${aluIndexGen.io.reverseMapping(i).valid} index ${aluIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"mdu reverse $i: valid ${mduIndexGen.io.reverseMapping(i).valid} index ${mduIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
   }
 
   /**

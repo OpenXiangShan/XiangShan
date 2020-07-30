@@ -33,8 +33,8 @@ class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean) extends X
 
     for (j <- 0 until inWidth) {
       when (io.mapping(i).valid && io.mapping(i).bits === j.U) {
-        io.reverseMapping(i).valid := true.B
-        io.reverseMapping(i).bits := i.U
+        io.reverseMapping(j).valid := true.B
+        io.reverseMapping(j).bits := i.U
       }
     }
   }

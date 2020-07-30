@@ -92,7 +92,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel, p"$name: valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)})" +
+    XSInfo(needCancel, p"$name: valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
       p"cancelled with brTag ${Hexadecimal(io.redirect.bits.brTag.value)}\n")
   }
 

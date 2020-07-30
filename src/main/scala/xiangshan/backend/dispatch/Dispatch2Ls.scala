@@ -26,8 +26,8 @@ class Dispatch2Ls extends XSModule {
   val loadPriority = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
   val storePriority = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
   for (i <- 0 until dpParams.LsDqDeqWidth) {
-    loadIndexGen.io.validBits(i) := Exu.ldExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    storeIndexGen.io.validBits(i) := Exu.stExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    loadIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.ldExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    storeIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.stExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
     XSDebug(io.fromDq(i).valid,
       p"ls dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
@@ -41,10 +41,23 @@ class Dispatch2Ls extends XSModule {
   val allIndexGen = Seq(loadIndexGen, storeIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsValidVec = allIndexGen.map(_.io.reverseMapping.map(_.valid)).reduceLeft(_ ++ _)
-  val rsIndexVecRaw = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsIndexVec = rsIndexVecRaw.zipWithIndex.map { case (index, i) =>
-    (if (i >= exuParameters.LduCnt) index + exuParameters.LduCnt.U else index) }
+  val rsValidVec = (0 until dpParams.LsDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
+  val rsIndexVec = (0 until dpParams.LsDqDeqWidth).map({i =>
+    val indexOffset = Seq(0, exuParameters.LduCnt)
+    allIndexGen.zipWithIndex.map{
+      case (index, j) => Mux(index.io.reverseMapping(i).valid, index.io.reverseMapping(i).bits + indexOffset(j).U, 0.U)
+    }.reduce(_ | _)
+  })
+
+  for (i <- validVec.indices) {
+    XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
+  }
+  for (i <- rsValidVec.indices) {
+    // XSDebug(p"jmp reverse $i: valid ${jmpIndexGen.io.reverseMapping(i).valid} index ${jmpIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"alu reverse $i: valid ${aluIndexGen.io.reverseMapping(i).valid} index ${aluIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"mdu reverse $i: valid ${mduIndexGen.io.reverseMapping(i).valid} index ${mduIndexGen.io.reverseMapping(i).bits}\n")
+    XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
+  }
 
   /**
     * Part 2: assign regfile read ports (actually only reg states from rename)
@@ -82,8 +95,8 @@ class Dispatch2Ls extends XSModule {
         io.fpRegRdy(i - exuParameters.LduCnt), io.intRegRdy(readPort(i) + 1))
     }
 
-    XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType}" +
-      p"srcState(${enq.bits.src1State} ${enq.bits.src2State})" +
+    XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
+      p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
       p"enters reservation station $i from ${indexVec(i)}\n")
   }
 
@@ -97,6 +110,6 @@ class Dispatch2Ls extends XSModule {
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Ls dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
-      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index %d\n")
+      p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index $i\n")
   }
 }
