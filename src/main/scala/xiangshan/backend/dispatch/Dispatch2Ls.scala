@@ -70,7 +70,8 @@ class Dispatch2Ls extends XSModule {
     */
   for (i <- 0 until exuParameters.LsExuCnt) {
     val enq = io.enqIQCtrl(i)
-    enq.valid := validVec(i)
+    // TODO: cache only has 1 load and 1 store
+    enq.valid := (if (i % 2 == 1) false.B else validVec(i))
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.intRegRdy(readPort(i))
     if (i < exuParameters.LduCnt) {
@@ -90,7 +91,8 @@ class Dispatch2Ls extends XSModule {
     * Part 4: response to dispatch queue
     */
   for (i <- 0 until dpParams.LsDqDeqWidth) {
-    io.fromDq(i).ready := rsValidVec(i) && io.enqIQCtrl(rsIndexVec(i)).ready
+    // TODO: cache only has 1 load and 1 store
+    io.fromDq(i).ready := rsValidVec(i) && Mux(rsIndexVec(i)(0) === 1.U, false.B, io.enqIQCtrl(rsIndexVec(i)).ready)
 
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Ls dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
