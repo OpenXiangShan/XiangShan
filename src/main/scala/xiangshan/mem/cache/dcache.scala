@@ -127,7 +127,7 @@ class Dcache extends XSModule {
     size = Mux(haveLoadReq, ldReq.bits.user.uop.ctrl.fuOpType(1,0), stReq.bits.user.uop.ctrl.fuOpType(1,0)), 
     wdata = stReq.bits.data(63, 0), // just for test
     wmask = stReq.bits.mask(7,0),  // just for test
-    cmd = Mux(haveLoadReq, SimpleBusCmd.write, SimpleBusCmd.read)
+    cmd = Mux(haveLoadReq, SimpleBusCmd.read, SimpleBusCmd.write)
   )
   dmem.req.valid := Mux(haveLoadReq, ldReq.valid, stReq.valid)
   dmem.resp.ready := true.B
