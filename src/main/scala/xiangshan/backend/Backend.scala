@@ -208,10 +208,8 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
   memRf.io.readPorts <> issueQueues.flatMap(_.io.readIntRf)
 
-  val wbIntIdx = exuConfigs.zipWithIndex.filter(_._1.writeIntRf).map(_._2)
-  val wbFpIdx = exuConfigs.zipWithIndex.filter(_._1.writeFpRf).map(_._2)
 
-  val wbu = Module(new Wbu(wbIntIdx, wbFpIdx))
+  val wbu = Module(new Wbu(exuConfigs))
   wbu.io.in <> exeWbReqs
 
   val wbIntResults = wbu.io.toIntRf
