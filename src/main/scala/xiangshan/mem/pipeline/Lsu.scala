@@ -355,6 +355,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     // writeback to LSROQ
     s3_in(i).ready := true.B
     lsroq.io.storeIn(i).bits := s3_in(i).bits
+    lsroq.io.storeIn(i).bits.mmio := AddressSpace.isMMIO(s3_in(i).bits.paddr)
     lsroq.io.storeIn(i).valid := s3_in(i).fire()
   })
   
