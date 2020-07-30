@@ -2,6 +2,7 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import utils.XSDebug
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 
@@ -57,6 +58,9 @@ class ICacheResp extends XSBundle {
 class PreDecode extends XSModule with HasPdconst{
   val io = IO(new Bundle() {
     val in = Input(new ICacheResp)
+    val prevHalf = Input(UInt(16.W))
+    val prevValid = Input(false.B)
+
     val out = Output(Vec(halfWidth, new PDPacket))
   })
 
@@ -68,25 +72,19 @@ class PreDecode extends XSModule with HasPdconst{
   val instsMask = Wire(Vec(halfWidth, Bool()))
   val instsRVC = Wire(Vec(halfWidth,Bool()))
   val instsPC = Wire(Vec(halfWidth, UInt(VAddrBits.W)))
-
-
-  val prevHalf = Reg(UInt(16.W))
-  val prevValid = RegInit(false.B)
-  val prevGPC = RegInit(0.U(VAddrBits.W))
-  val seriesPC = RegInit(true.B)  //two cacheline's gpc is continuous
   val nextHalf = Wire(UInt(16.W))
 
   for (i <- 0 until halfWidth) {
     val inst = Wire(UInt(32.W))
     val valid = Wire(Bool())
-    val pc = gpc + (i << 1).U - Mux(prevValid && (i.U === 0.U), 2.U, 0.U)
+    val pc = gpc + (i << 1).U - Mux(io.prevValid && (i.U === 0.U), 2.U, 0.U)
 
     if (i==0) {
-      inst := Mux(prevValid, Cat(data(15,0), prevHalf), data(31,0))
+      inst := Mux(io.prevValid, Cat(data(15,0), io.prevHalf), data(31,0))
       valid := true.B
     } else if (i==1) {
       inst := data(47,16)
-      valid := prevValid || !(instsMask(0) && !isRVC(insts(0)))
+      valid := io.prevValid || !(instsMask(0) && !isRVC(insts(0)))
     } else if (i==halfWidth-1) {
       inst := Cat(0.U(16.W), data(i*16+15, i*16))
       valid := !(instsMask(i-1) && !isRVC(insts(i-1)) || !isRVC(inst))
@@ -111,30 +109,16 @@ class PreDecode extends XSModule with HasPdconst{
     io.out(i).pc := instsPC(i)
   }
 
-  //update
-  nextHalf := data(halfWidth*16-1, (halfWidth-1)*16)
-  prevHalf := nextHalf
-  seriesPC := 1.U === (gpc - prevGPC)(VAddrBits-1, groupAlign)
-  prevGPC := gpc
-  prevValid := !(instsMask(halfWidth-2) && !isRVC(insts(halfWidth-2))) && !isRVC(insts(halfWidth-1)) && seriesPC
 
-//  for (i <- 0 until halfWidth) {
-//    XSDebug(true.B,
-//      p"instr ${Binary(io.out(i).inst)}, " +
-//      p"mask ${Binary(io.out(i).mask)}, " +
-//      //p"pc ${Binary(io.out(i).pc)}, " +
-//      p"isRVC ${Binary(io.out(i).isRVC)}, " +
-//      p"brType ${Binary(io.out(i).brType)}, " +
-//      p"isRet ${Binary(io.out(i).isRet)}, " +
-//      p"isCall ${Binary(io.out(i).isCall)}\n"
-//    )
-//  }
-//
-//  for (i <- 0 until halfWidth) {
-//    XSDebug(true.B,
-//      p"prevhalf ${Binary(prevHalf)}, " +
-//      p"prevvalid ${Binary(prevValid)}, " +
-//      p"seriesPC ${Binary(seriesPC)}\n"
-//    )
-//  }
+  for (i <- 0 until halfWidth) {
+    XSDebug(true.B,
+      p"instr ${Binary(io.out(i).inst)}, " +
+      p"mask ${Binary(io.out(i).mask)}, " +
+      //p"pc ${Binary(io.out(i).pc)}, " +
+      p"isRVC ${Binary(io.out(i).isRVC)}, " +
+      p"brType ${Binary(io.out(i).brType)}, " +
+      p"isRet ${Binary(io.out(i).isRet)}, " +
+      p"isCall ${Binary(io.out(i).isCall)}\n"
+    )
+  }
 }
