@@ -61,8 +61,16 @@ class FakeTLLLC(params: TLParameters) extends XSModule
 
   val state = RegInit(s_idle)
 
-  XSDebug.exec(in.anyFire, in.dump)
-  XSDebug.exec(out.anyFire, out.dump)
+  when (in.anyFire) {
+    in.dump
+  }
+
+  when (out.anyFire) {
+    out.dump
+  }
+
+  // XSDebug.exec(in.anyFire, in.dump)
+  // XSDebug.exec(out.anyFire, out.dump)
 
   // AcquireBlock comes from TL channel A
   // ReleaseData comes from TL channel C

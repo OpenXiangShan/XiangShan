@@ -27,7 +27,6 @@ class DCacheDut extends XSModule {
   dcache.io.lsu <> io.in
   dcache.io.bus <> tlToAXI.io.in
   tlToAXI.io.out <> mem.in
-  tlToAXI.io.out.dump
 
 
   // log control
@@ -125,7 +124,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
       }
 
       def send_req: Unit = {
-        println(s"send_req")
+        // println(s"send_req")
         // no requests waiting for ready
         // reset valid signal
         if (!req_waiting) {

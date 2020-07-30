@@ -5,11 +5,14 @@ package bus.tilelink
 import chisel3._
 import chisel3.util._
 import utils.MaskGen
+import utils.OneHot
 
 object TLUtilities {
+  // lgSize is the log2 of transfer size
+  // you can directly put Tilelink channel's size here, since it's already log2.
   def isAligned(params: TLParameters, address: UInt, lgSize: UInt): Bool = {
     if (params.maxLgSize == 0) true.B else {
-      val mask = UIntToOH(lgSize, params.maxLgSize)
+      val mask = OneHot.UIntToOH1(lgSize, params.maxLgSize)
       (address & mask) === 0.U
     }
   }
@@ -152,6 +155,7 @@ object TLUtilities {
   def addr_hi(x: TLAddrChannel): UInt = addr_hi(x.params, address(x))
   def addr_lo(x: TLAddrChannel): UInt = addr_lo(x.params, address(x))
 
+  // if there are n beats, numBeats gives n
   def numBeats(x: TLChannel): UInt = {
     val params = x.params
     x match {
@@ -167,6 +171,9 @@ object TLUtilities {
     }
   }
 
+  // if there are n beats, numBeats1 gives (n - 1)
+  // so if you want to gather beats from 0 to n - 1
+  // you better use this
   def numBeats1(x: TLChannel): UInt = {
     val params = x.params
     x match {
@@ -175,14 +182,15 @@ object TLUtilities {
         if (params.maxLgSize == 0) {
           0.U
         } else {
-          // TODO:这一行有问题吧？我认为应该是TLParameters.maxLgSize + 1?
-          val decode = UIntToOH(size(bundle), params.maxLgSize) >> log2Ceil(params.beatBytes)
+          val decode = OneHot.UIntToOH1(size(bundle), params.maxLgSize) >> log2Ceil(params.beatBytes)
           Mux(hasData(bundle), decode, 0.U)
         }
       }
     }
   }
 
+  // it may seems unnecessarily complex, but it's correct
+  // count ticks from 0 to numBeats1
   def firstlastHelper(bits: TLChannel, fire: Bool): (Bool, Bool, Bool, UInt) = {
     val params = bits.params
     val beats1   = numBeats1(bits)

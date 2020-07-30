@@ -194,7 +194,7 @@ class MSHR extends DCacheModule
       state := s_refill_resp
     }
   }
-  
+
   when (state === s_refill_resp) {
     when (TLUtilities.hasData(io.mem_grant.bits)) {
       io.mem_grant.ready      := io.refill.ready
@@ -417,7 +417,9 @@ class MSHRFile extends DCacheModule
     io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
 
   // print tilelink messages
+  /*
   XSDebug.exec(io.mem_acquire.fire(), io.mem_acquire.bits.dump)
   XSDebug.exec(io.mem_grant.fire(), io.mem_grant.bits.dump)
   XSDebug.exec(io.mem_finish.fire(), io.mem_finish.bits.dump)
+  */
 }

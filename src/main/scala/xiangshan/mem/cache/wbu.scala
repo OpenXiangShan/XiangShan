@@ -141,7 +141,7 @@ class WritebackUnit extends DCacheModule {
   XSDebug(io.data_req.fire(), "data_req addr: %x way_en: %x\n", io_data_req.addr, io_data_req.way_en)
 
   // print release
-  XSDebug.exec(io.release.fire(), io.release.bits.dump)
+  // XSDebug.exec(io.release.fire(), io.release.bits.dump)
 
   // print mem_grant
   XSDebug(io.mem_grant, "mem_grant\n")
