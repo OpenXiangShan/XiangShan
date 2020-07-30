@@ -53,6 +53,36 @@ class IssueQueueTest extends FlatSpec
   }
 
 
+  it should "only deq ready inst" in {
+    test(new IssueQueue(Exu.ldExeUnitCfg, 1, 1){
+      AddSinks()
+    }){ c =>
+
+      def genEnqRdyReq(x: => DecoupledIO[MicroOp], pc: Long, ready: Boolean) = {
+        chiselTypeOf(x.bits).Lit(
+          _.src1State -> (if(ready) SrcState.rdy else SrcState.busy),
+          _.src2State -> SrcState.rdy,
+          _.src3State -> SrcState.rdy,
+          _.cf.pc -> pc.U
+        )
+      }
+
+      c.io.enq.initSource().setSourceClock(c.clock)
+      c.io.deq.initSink().setSinkClock(c.clock)
+
+      fork {
+        c.io.enq.enqueuePartialSeq((0 until c.qsize).map(i => genEnqRdyReq(c.io.enq, i, i%2==0)))
+      }.fork {
+        //        c.clock.step(10)
+        c.io.deq.expectDequeuePartialSeq((0 until c.qsize).filter(i => i%2==0).map(
+          i => chiselTypeOf(c.io.deq.bits).Lit(
+            _.uop.cf.pc -> i.U
+          )
+        ))
+      }.join()
+    }
+  }
+
   it should "enq and deq bubble correctly" in {
     test(new IssueQueue(Exu.ldExeUnitCfg, 1, 1){
       AddSinks()
