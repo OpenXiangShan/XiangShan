@@ -21,17 +21,17 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
  def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
-abstract class BasePredictor {
+abstract class BasePredictor extends XSModule {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
   // and the special input from other predictors, as well as
   // the metas to store in BRQ
-  abstract class resp extends XSBundle {}
-  abstract class fromOthers extends XSBundle {}
-  abstract class meta extends XSBundle {}
+  abstract class Resp extends XSBundle {}
+  abstract class FromOthers extends XSBundle {}
+  abstract class Meta extends XSBundle {}
 
-  class defaultBasePredictorIO extends XSBundle {
+  class DefaultBasePredictorIO extends XSBundle {
     val flush = Input(Bool())
     val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
     val hist = Input(UInt(HistoryLength.W))
@@ -73,7 +73,7 @@ class BPUStageIO extends XSBundle {
 
 
 abstract class BPUStage extends XSModule {
-  class defaultIO extends XSBundle {
+  class DefaultIO extends XSBundle {
     val flush = Input(Bool())
     val in = Flipped(Decoupled(new BPUStageIO))
     val pred = Decoupled(new BranchPrediction)
@@ -90,6 +90,9 @@ abstract class BPUStage extends XSModule {
 
   val predValid = RegInit(false.B)
   val outFire = io.out.fire()
+
+  // Each stage has its own logic to decide
+  // takens, notTakens and target
 
   val takens = Vec(PredictWidth, Bool())
   val notTakens = Vec(PredictWidth, Bool())
@@ -132,7 +135,7 @@ abstract class BPUStage extends XSModule {
 
 class BPUStage1 extends BPUStage {
 
-  val io = new defaultIO
+  val io = new DefaultIO
 
   // 'overrides' default logic
   // when flush, the prediction should also starts
@@ -157,7 +160,7 @@ class BPUStage1 extends BPUStage {
 }
 
 class BPUStage2 extends XSModule {
-  val io = new defaultIO
+  val io = new DefaultIO
 
   // Use latched response from s1
   val btbResp = inLatch.btb
@@ -171,10 +174,10 @@ class BPUStage2 extends XSModule {
 }
 
 class BPUStage3 extends XSModule {
-  class s3IO extends defaultIO {
+  class S3IO extends DefaultIO {
     val predecode = Flipped(ValidIO(new Predecode))
   }
-  val io = new s3IO
+  val io = new S3IO
   io.out.valid := outValid && io.predecode.valid && !io.flush
 
   // TAGE has its own pipelines and the
