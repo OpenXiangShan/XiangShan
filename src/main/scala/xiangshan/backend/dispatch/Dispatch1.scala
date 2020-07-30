@@ -63,6 +63,7 @@ class Dispatch1 extends XSModule {
     io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i)
     io.toRoq(i).bits := io.fromRename(i).bits
     io.toMoq(i).bits := io.fromRename(i).bits
+    io.toMoq(i).bits.roqIdx := io.roqIdxs(i)
 
     // receive indexes from ROQ and LSROQ
     when(io.toRoq(i).fire() && !io.recv(i)) {
