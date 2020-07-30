@@ -203,6 +203,13 @@ class MSHR extends DCacheModule
       io.refill.bits.way_en   := req.way_en
       io.refill.bits.wmask    := ~(0.U(rowWords.W))
       io.refill.bits.data     := io.mem_grant.bits.data
+
+      when (io.refill.fire()) {
+        refill_ctr := refill_ctr + 1.U
+        when (refill_ctr === (cacheDataBeats - 1).U) {
+          assert(refill_done, "refill not done!")
+        }
+      }
     } .otherwise {
       io.mem_grant.ready      := true.B
     }

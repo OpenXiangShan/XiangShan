@@ -52,3 +52,10 @@ object Or {
     helper(1, x)(width-1, 0)
   }
 }
+
+object OneHot {
+  def OH1ToOH(x: UInt): UInt = (x << 1 | 1.U) & ~Cat(0.U(1.W), x)
+  def OH1ToUInt(x: UInt): UInt = OHToUInt(OH1ToOH(x))
+  def UIntToOH1(x: UInt, width: Int): UInt = ~((-1).S(width.W).asUInt << x)(width-1, 0)
+  def UIntToOH1(x: UInt): UInt = UIntToOH1(x, (1 << x.getWidth) - 1)
+}
