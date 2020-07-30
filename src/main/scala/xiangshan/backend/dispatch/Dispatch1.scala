@@ -100,7 +100,7 @@ class Dispatch1 extends XSModule {
     orderedEnqueue(i) := prevCanEnqueue
     prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || io.recv(i))
   }
-  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(true.B)))
+  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid)))
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
     io.toIntDq(i).valid := intIndex.io.mapping(i).valid && !cancelled(intIndex.io.mapping(i).bits) &&
