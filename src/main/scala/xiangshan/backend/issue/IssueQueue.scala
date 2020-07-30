@@ -2,7 +2,7 @@ package xiangshan.backend.issue
 
 import chisel3.{util, _}
 import chisel3.util._
-import utils.{XSDebug, XSInfo}
+import utils.{ParallelMux, ParallelOR, XSDebug, XSInfo}
 import xiangshan._
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
@@ -12,7 +12,7 @@ class IssueQueue
   val exuCfg: ExuConfig,
   val wakeupCnt: Int,
   val bypassCnt: Int = 0
-) extends XSModule with HasIQConst with NeedImpl {
+) extends XSModule with HasIQConst {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val enq = Flipped(DecoupledIO(new MicroOp))
@@ -21,6 +21,7 @@ class IssueQueue
     val deq = DecoupledIO(new ExuInput)
     val wakeUpPorts = Vec(wakeupCnt, Flipped(ValidIO(new ExuOutput)))
     val bypassUops = Vec(bypassCnt, Flipped(ValidIO(new MicroOp)))
+    val bypassData = Vec(bypassCnt, Flipped(ValidIO(new ExuOutput)))
     val numExist = Output(UInt(iqIdxWidth.W))
     // tlb hit, inst can deq
     val tlbHit = Input(Bool())
@@ -42,6 +43,7 @@ class IssueQueue
   val idxQueue = RegInit(VecInit((0 until qsize).map(_.U(idxWidth.W))))
   val stateQueue = RegInit(VecInit(Seq.fill(qsize)(s_invalid)))
 
+  val readyVec = Wire(Vec(qsize, Bool()))
   val uopQueue = Reg(Vec(qsize, new MicroOp))
   val cntQueue = Reg(Vec(qsize, UInt(log2Up(replayDelay).W)))
 
@@ -76,12 +78,70 @@ class IssueQueue
 
 
   // wake up
+  def getSrcSeq(uop: MicroOp): Seq[UInt] = Seq(uop.psrc1, uop.psrc2, uop.psrc3)
+  def getSrcTypeSeq(uop: MicroOp): Seq[UInt] = Seq(
+    uop.ctrl.src1Type, uop.ctrl.src2Type, uop.ctrl.src3Type
+  )
+  def getSrcStateSeq(uop: MicroOp): Seq[UInt] = Seq(
+    uop.src1State, uop.src2State, uop.src3State
+  )
+
+  def writeBackHit(src: UInt, srcType: UInt, wbUop: (Bool, MicroOp)): Bool = {
+    val (v, uop) = wbUop
+    val isSameType =
+      (SrcType.isReg(srcType) && uop.ctrl.rfWen) || (SrcType.isFp(srcType) && uop.ctrl.fpWen)
+
+    v && isSameType && (src===uop.pdest)
+  }
+
+  def doBypass(src: UInt, srcType: UInt): (Bool, UInt) = {
+    val hitVec = io.bypassData.map(p => (p.valid, p.bits.uop)).
+      map(wbUop => writeBackHit(src, srcType, wbUop))
+    val data = ParallelMux(hitVec.zip(io.bypassData.map(_.bits.data)))
+    (ParallelOR(hitVec).asBool(), data)
+  }
+
+  def wakeUp(uop: MicroOp): MicroOp = {
+    def getNewSrcState(i: Int): UInt = {
+      val src = getSrcSeq(uop)(i)
+      val srcType = getSrcTypeSeq(uop)(i)
+      val srcState = getSrcStateSeq(uop)(i)
+      val hitVec = (
+        io.wakeUpPorts.map(w => (w.valid, w.bits.uop)) ++
+        io.bypassUops.map(p => (p.valid, p.bits))
+        ).map(wbUop => writeBackHit(src, srcType, wbUop))
+      val hit = ParallelOR(hitVec).asBool()
+      Mux(hit, SrcState.rdy, srcState)
+    }
+    val new_uop = WireInit(uop)
+    new_uop.src1State := getNewSrcState(0)
+    if(exuCfg==Exu.stExeUnitCfg) new_uop.src2State := getNewSrcState(1)
+    new_uop
+  }
+
+  def uopIsRdy(uop: MicroOp): Bool = {
+    def srcIsRdy(srcType: UInt, srcState: UInt): Bool = {
+      SrcType.isPcImm(srcType) || srcState===SrcState.rdy
+    }
+    exuCfg match {
+      case Exu.ldExeUnitCfg =>
+        srcIsRdy(uop.ctrl.src1Type, uop.src1State)
+      case Exu.stExeUnitCfg =>
+        srcIsRdy(uop.ctrl.src1Type, uop.src1State) && srcIsRdy(uop.ctrl.src2Type, uop.src2State)
+    }
+  }
+
+  for(i <- 0 until qsize){
+    val newUop = wakeUp(uopQueue(i))
+    uopQueue(i) := newUop
+    readyVec(i) := uopIsRdy(newUop)
+  }
 
   // select
   val selectedIdxRegOH = Wire(UInt(qsize.W))
   val selectMask = WireInit(VecInit(
     (0 until qsize).map(i =>
-      stateQueue(i)===s_valid && !(selectedIdxRegOH(i) && io.deq.fire())
+      (stateQueue(i)===s_valid) && readyVec(idxQueue(i)) && !(selectedIdxRegOH(i) && io.deq.fire())
     )
   ))
   val selectedIdxWire = PriorityEncoder(selectMask)
@@ -98,22 +158,14 @@ class IssueQueue
 
   // read regfile
   val selectedUop = uopQueue(Mux(io.deq.ready, selectedIdxWire, selectedIdxReg))
-  val base, storeData = Wire(UInt(XLEN.W))
 
   exuCfg match {
     case Exu.ldExeUnitCfg =>
       io.readIntRf(0).addr := selectedUop.psrc1 // base
-      base := io.readIntRf(0).data
-      storeData := DontCare
     case Exu.stExeUnitCfg =>
       io.readIntRf(0).addr := selectedUop.psrc1 // base
       io.readIntRf(1).addr := selectedUop.psrc2 // store data (int)
       io.readFpRf(0).addr := selectedUop.psrc2  // store data (fp)
-      base := io.readIntRf(0).data
-      storeData := Mux(SrcType.isReg(selectedUop.ctrl.src2Type),
-        io.readIntRf(1).data,
-        io.readFpRf(0).data
-      )
     case _ =>
       require(requirement = false, "Error: IssueQueue only support ldu and stu!")
   }
@@ -121,8 +173,21 @@ class IssueQueue
   // (fake) deq to Load/Store unit
   io.deq.valid := stateQueue(selectedIdxReg)===s_valid
   io.deq.bits.uop := uopQueue(idxQueue(selectedIdxReg))
-  io.deq.bits.src1 := base
-  io.deq.bits.src2 := storeData
+
+  val src1Bypass = doBypass(io.deq.bits.uop.psrc1, io.deq.bits.uop.ctrl.src1Type)
+  io.deq.bits.src1 := Mux(src1Bypass._1, src1Bypass._2, io.readIntRf(0).data)
+  if(exuCfg == Exu.stExeUnitCfg){
+    val src2Bypass = doBypass(io.deq.bits.uop.psrc2, io.deq.bits.uop.ctrl.src2Type)
+    io.deq.bits.src2 := Mux(src2Bypass._1,
+      src2Bypass._2,
+      Mux(SrcType.isReg(io.deq.bits.uop.ctrl.src2Type),
+        io.readIntRf(1).data,
+        io.readFpRf(0).data
+      )
+    )
+  } else {
+    io.deq.bits.src2 := DontCare
+  }
   io.deq.bits.src3 := DontCare
 
   when(io.deq.fire()){
@@ -139,7 +204,9 @@ class IssueQueue
   io.enq.ready := !isFull && !io.replay.valid && !io.redirect.valid
   when(io.enq.fire()){
     stateQueue(tailAfterRealDeq.tail(1)) := s_valid
-    uopQueue(idxQueue(tailPtr.tail(1))) := io.enq.bits
+    val uopQIdx = idxQueue(tailPtr.tail(1))
+    val new_uop = wakeUp(io.enq.bits)
+    uopQueue(uopQIdx) := new_uop
   }
 
   tailPtr := tailAfterRealDeq + io.enq.fire()
