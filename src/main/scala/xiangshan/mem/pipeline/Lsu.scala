@@ -82,6 +82,8 @@ class LsuIO extends XSBundle with HasMEMConst {
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
   val dcache = Flipped(new DcacheToLsuIO)
   val dtlb = Flipped(new DtlbToLsuIO)
+  val refill = Flipped(Valid(new DCacheStoreReq))
+  val miss = Decoupled(new MissReqIO)
 }
 
 // 2l2s out of order lsu for XiangShan
@@ -89,7 +91,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
 
-  io.dcache.refill <> DontCare
+  io.dcache.refill <> io.refill
 
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new FakeSbuffer)
@@ -100,6 +102,10 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   lsroq.io.brqRedirect := io.redirect
   io.rollback <> lsroq.io.rollback
   io.dcache.redirect := io.redirect
+
+  lsroq.io.refill <> io.refill
+  lsroq.io.refill.valid := false.B // TODO
+  lsroq.io.miss <> io.miss
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -232,7 +238,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 //-------------------------------------------------------
 
   val loadWriteBack = (0 until LoadPipelineWidth).map(i => { l5_in(i).fire() })
-  val loadOut = (0 until LoadPipelineWidth).map(_ => Wire(Decoupled(new ExuOutput)))
+  val hitLoadOut = (0 until LoadPipelineWidth).map(_ => Wire(Decoupled(new ExuOutput)))
   (0 until LoadPipelineWidth).map(i => {
     // data merge
     val rdata = VecInit((0 until 8).map(j => {
@@ -268,15 +274,15 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     // if hit, writeback result to CDB
     // val ldout = Vec(2, Decoupled(new ExuOutput))
     // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
-    loadOut(i).bits.uop := l5_in(i).bits.uop
-    loadOut(i).bits.data := rdataPartialLoad
-    loadOut(i).bits.redirectValid := false.B
-    loadOut(i).bits.redirect := DontCare
-    loadOut(i).bits.brUpdate := DontCare
-    loadOut(i).bits.debug.isMMIO := l5_in(i).bits.mmio
-    loadOut(i).valid := l5_in(i).valid
-    XSDebug(loadOut(i).fire(), "load writeback: pc %x data %x (%x + %x(%b))\n", 
-      loadOut(i).bits.uop.cf.pc, rdataPartialLoad, l5_in(i).bits.data, 
+    hitLoadOut(i).bits.uop := l5_in(i).bits.uop
+    hitLoadOut(i).bits.data := rdataPartialLoad
+    hitLoadOut(i).bits.redirectValid := false.B
+    hitLoadOut(i).bits.redirect := DontCare
+    hitLoadOut(i).bits.brUpdate := DontCare
+    hitLoadOut(i).bits.debug.isMMIO := l5_in(i).bits.mmio
+    hitLoadOut(i).valid := l5_in(i).valid
+    XSDebug(hitLoadOut(i).fire(), "load writeback: pc %x data %x (%x + %x(%b))\n", 
+      hitLoadOut(i).bits.uop.cf.pc, rdataPartialLoad, l5_in(i).bits.data, 
       l5_in(i).bits.forwardData.asUInt, l5_in(i).bits.forwardMask.asUInt
     )
     
@@ -363,19 +369,19 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
   
   // Writeback to CDB
-  (0 until LoadPipelineWidth).map(i => {
-    io.ldout(i) <> loadOut(i)
-  })
+  // (0 until LoadPipelineWidth).map(i => {
+  //   io.ldout(i) <> hitLoadOut(i)
+  // })
   (0 until StorePipelineWidth).map(i => {
     io.stout(i) <> lsroq.io.stout(i)
   })
 
-  // (0 until 2).map(i => {
-  //   val cdbArb = Module(new Arbiter(new ExuOutput, 2))
-  //   io.out(i) <> cdbArb.io.out
-  //   loadOut(i) <> cdbArb.io.in(0)
-  //   lsroq.io.out(i) <> cdbArb.io.in(1)
-  // })
+  (0 until 2).map(i => {
+    val cdbArb = Module(new Arbiter(new ExuOutput, 2))
+    io.ldout(i) <> cdbArb.io.out
+    hitLoadOut(i) <> cdbArb.io.in(0)
+    lsroq.io.ldout(i) <> cdbArb.io.in(1) // missLoadOut
+  })
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 1

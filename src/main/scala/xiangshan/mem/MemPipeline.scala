@@ -68,6 +68,8 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   lsu.io.moqIdxs <> io.backend.moqIdxs
   lsu.io.dcache <> dcache.io.lsu
   lsu.io.dtlb <> dtlb.io.lsu
+  lsu.io.refill <> DontCare // TODO
+  lsu.io.miss <> DontCare //TODO
   
   //  // for ls pipeline test
   dcache.io.dmem <> io.dmem

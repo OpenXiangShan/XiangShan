@@ -72,7 +72,7 @@ class MissReqIO extends XSBundle
 class DcacheToLsuIO extends XSBundle with HasMEMConst {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
-  val refill = new DCacheStoreIO
+  val refill = Flipped(Valid(new DCacheStoreReq))
   val redirect = Flipped(ValidIO(new Redirect))
 }
 

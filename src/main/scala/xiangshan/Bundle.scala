@@ -117,6 +117,7 @@ class CtrlSignals extends XSBundle {
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
+  val dpqType = DPQType()
 }
 
 class CfCtrl extends XSBundle {
@@ -158,9 +159,9 @@ class Redirect extends XSBundle with HasRoqIdx {
 }
 
 class Dp1ToDp2IO extends XSBundle {
-  val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))
-  val fpDqToDp2 = Vec(FpDqDeqWidth, DecoupledIO(new MicroOp))
-  val lsDqToDp2 = Vec(LsDqDeqWidth, DecoupledIO(new MicroOp))
+  val intDqToDp2 = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
+  val fpDqToDp2 = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp))
+  val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
 class DebugBundle extends XSBundle{

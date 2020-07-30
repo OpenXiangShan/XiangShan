@@ -76,4 +76,12 @@ package object xiangshan {
 
     def apply() = UInt(2.W)
   }
+
+  object DPQType {
+    def INT = "b00".U // int dispatch
+    def FP = "b01".U // fp dispatch
+    def LS = "b10".U // ls dispatch
+
+    def apply() = UInt(2.W)
+  }
 }
