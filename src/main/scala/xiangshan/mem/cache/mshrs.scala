@@ -95,6 +95,8 @@ class MSHR extends DCacheModule
   io.tag.bits := req_tag
   io.way.bits := req.way_en
 
+  XSDebug("mshr: %d state: %d idx_valid: %b\n", io.id, state, io.idx.valid)
+
   // assign default values to output signals
   io.req_pri_rdy         := false.B
 
@@ -335,6 +337,15 @@ class MSHRFile extends DCacheModule
       idx_matches(w)(i) := mshr.io.idx.valid && mshr.io.idx.bits === io.req(w).bits.addr(untagBits-1,blockOffBits)
       tag_matches(w)(i) := mshr.io.tag.valid && mshr.io.tag.bits === io.req(w).bits.addr >> untagBits
       way_matches(w)(i) := mshr.io.way.valid && mshr.io.way.bits === io.req(w).bits.way_en
+      when (idx_matches(w)(i)) {
+        XSDebug(s"mshr: $i channel: $w idx_match\n")
+      }
+      when (tag_matches(w)(i)) {
+        XSDebug(s"mshr: $i channel: $w tag_match\n")
+      }
+      when (way_matches(w)(i)) {
+        XSDebug(s"mshr: $i channel: $w way_match\n")
+      }
     }
     wb_tag_list(i) := mshr.io.wb_req.bits.tag
 
@@ -398,7 +409,7 @@ class MSHRFile extends DCacheModule
 
   // block hit
   (0 until memWidth) map { w =>
-    XSDebug(io.req(w).valid && io.block_hit(w), "channel %d req block hit\n", w.U)
+    XSDebug(io.block_hit(w), "channel %d req block hit\n", w.U)
   }
 
   // print refill

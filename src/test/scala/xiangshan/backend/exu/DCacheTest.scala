@@ -154,10 +154,15 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         for (i <- 0 to 1) {
           val resp = c.io.in.resp(i)
           if (resp.valid.peek().litToBoolean) {
-            println(s"clock: $global_clock channel: $i resp: $resp")
-            val original_req = all_requests(resp.bits.meta.peek().litValue.longValue)
+
+            val data = resp.bits.data.peek().litValue.longValue
+            val meta = resp.bits.meta.peek().litValue.longValue
+            val nack = resp.bits.nack.peek().litToBoolean
+            println(f"clock: $global_clock%d channel: $i%d nack: $nack%b data: $data%x meta: $meta%x")
+
+            val original_req = all_requests(meta)
             // needs to be replayed
-            if (resp.bits.nack.peek().litToBoolean) {
+            if (nack) {
               issue_queue.enqueue(Array[Req](original_req))
             } else {
               num_retired_reqs += 1

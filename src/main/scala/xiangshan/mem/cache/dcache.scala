@@ -8,6 +8,8 @@ import xiangshan.mem.{DCacheReq, DCacheResp, LSUDMemIO}
 import xiangshan.utils.XSDebug
 import bus.tilelink._
 import _root_.utils.{Code, RandomReplacement, Transpose}
+import xiangshan.mem.MemoryOpConstants
+
 
 // DCache specific parameters
 // L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
@@ -430,6 +432,17 @@ class DCache extends DCacheModule
       }
   }
 
+  def dump_pipeline_valids(pipeline_stage_name: String, signal_name: String, valid: Vec[Bool]) = {
+    val anyValid = valid.reduce(_||_)
+    when (anyValid) {
+      (0 until memWidth) map { w =>
+        when (valid(w)) {
+          XSDebug(s"$pipeline_stage_name channel %d: $signal_name\n", w.U)
+        }
+      }
+    }
+  }
+
   // stage 0
   val s0_valid = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.valid)),
     Mux(mshrs.io.replay.fire(), VecInit(1.U(memWidth.W).asBools),
@@ -437,6 +450,9 @@ class DCache extends DCacheModule
   val s0_req = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.bits)),
     replay_req)
   val s0_type = Mux(io.lsu.req.fire(), t_lsu, t_replay)
+  val s0_meta = Mux(io.lsu.req.fire(), VecInit(io.lsu.req.bits.map(_.bits.meta)),
+    Mux(mshrs.io.replay.fire(), VecInit(mshrs.io.replay.bits.meta, 0.U(MemoryOpConstants.META_SZ.W)),
+      VecInit(0.U(MemoryOpConstants.META_SZ.W), 0.U(MemoryOpConstants.META_SZ.W))))
 
   dump_pipeline_reqs("DCache s0", s0_valid, s0_req, s0_type)
 
@@ -451,9 +467,8 @@ class DCache extends DCacheModule
   // we send a nack
   // all pipeline requests requires response or nack
   // only mshr replayed loads needs to send resp
-  val s0_send_resp_or_nack = Mux(io.lsu.req.fire(), s0_valid,
-    VecInit(Mux(mshrs.io.replay.fire() && isRead(mshrs.io.replay.bits.cmd), 1.U(memWidth.W), 0.U(memWidth.W)).asBools))
-
+  // all requests should send response back
+  val s0_send_resp_or_nack = s0_valid
 
   // stage 1
   val s1_req = RegNext(s0_req)
@@ -463,6 +478,7 @@ class DCache extends DCacheModule
   val s1_nack = VecInit(0.U(memWidth.W).asBools)
   val s1_send_resp_or_nack = RegNext(s0_send_resp_or_nack)
   val s1_type = RegNext(s0_type)
+  val s1_meta = RegNext(s0_meta)
   // For replays, the metadata isn't written yet
   val s1_replay_way_en = RegNext(mshrs.io.replay.bits.way_en)
 
@@ -479,6 +495,7 @@ class DCache extends DCacheModule
   // stage 2
   val s2_req   = RegNext(s1_req)
   val s2_type  = RegNext(s1_type)
+  val s2_meta  = RegNext(s1_meta)
   val s2_valid = widthMap(w =>
                   RegNext(s1_valid(w), init = false.B))
 
@@ -538,6 +555,14 @@ class DCache extends DCacheModule
   val s2_send_nack = widthMap(w => (RegNext(s1_send_resp_or_nack(w)) && s2_nack(w)))
   for (w <- 0 until memWidth)
     assert(!(s2_send_resp(w) && s2_send_nack(w)))
+
+  dump_pipeline_valids("DCache s2", "s2_hit", s2_hit)
+  dump_pipeline_valids("DCache s2", "s2_nack", s2_nack)
+  dump_pipeline_valids("DCache s2", "s2_nack_hit", s2_nack_hit)
+  dump_pipeline_valids("DCache s2", "s2_nack_set_busy", s2_nack_set_busy)
+  dump_pipeline_valids("DCache s2", "s2_nack_no_mshr", s2_nack_no_mshr)
+  dump_pipeline_valids("DCache s2", "s2_send_resp", s2_send_resp)
+  dump_pipeline_valids("DCache s2", "s2_send_nack", s2_send_nack)
 
   // hits always send a response
   // If MSHR is not available, LSU has to replay this request later
@@ -613,7 +638,7 @@ class DCache extends DCacheModule
   for (w <- 0 until memWidth) {
     cache_resp(w).valid         := s2_valid(w) && (s2_send_resp(w) || s2_send_nack(w))
     cache_resp(w).bits.data     := s2_data_word(w)
-    cache_resp(w).bits.meta     := 0.U
+    cache_resp(w).bits.meta     := s2_meta(w)
     cache_resp(w).bits.nack     := s2_send_nack(w)
   }
 
@@ -622,6 +647,12 @@ class DCache extends DCacheModule
   // 返回结果
   for (w <- 0 until memWidth) {
     io.lsu.resp(w) <> resp(w)
+
+    val channel_resp = io.lsu.resp(w).bits
+    when (io.lsu.resp(w).valid) {
+      XSDebug(s"DCache resp channel $w: data: %x meta: %d nack: %b\n",
+        channel_resp.data, channel_resp.meta, channel_resp.nack)
+    }
   }
 
   // Store/amo hits
