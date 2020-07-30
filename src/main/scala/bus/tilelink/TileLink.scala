@@ -106,27 +106,27 @@ object TLPermissions
   val cWidth = 3
 
   // Cap types (Grant = new permissions, Probe = permisions <= target)
-  def toT = 0.U(bdWidth)
-  def toB = 1.U(bdWidth)
-  def toN = 2.U(bdWidth)
+  def toT = 0.U(bdWidth.W)
+  def toB = 1.U(bdWidth.W)
+  def toN = 2.U(bdWidth.W)
   def isCap(x: UInt) = x <= toN
 
   // Grow types (Acquire = permissions >= target)
-  def NtoB = 0.U(aWidth)
-  def NtoT = 1.U(aWidth)
-  def BtoT = 2.U(aWidth)
+  def NtoB = 0.U(aWidth.W)
+  def NtoT = 1.U(aWidth.W)
+  def BtoT = 2.U(aWidth.W)
   def isGrow(x: UInt) = x <= BtoT
 
   // Shrink types (ProbeAck, Release)
-  def TtoB = 0.U(cWidth)
-  def TtoN = 1.U(cWidth)
-  def BtoN = 2.U(cWidth)
+  def TtoB = 0.U(cWidth.W)
+  def TtoN = 1.U(cWidth.W)
+  def BtoN = 2.U(cWidth.W)
   def isShrink(x: UInt) = x <= BtoN
 
   // Report types (ProbeAck, Release)
-  def TtoT = 3.U(cWidth)
-  def BtoB = 4.U(cWidth)
-  def NtoN = 5.U(cWidth)
+  def TtoT = 3.U(cWidth.W)
+  def BtoB = 4.U(cWidth.W)
+  def NtoN = 5.U(cWidth.W)
   def isReport(x: UInt) = x <= NtoN
 
   def PermMsgGrow:Seq[String] = Seq("Grow NtoB", "Grow NtoT", "Grow BtoT")
@@ -140,18 +140,18 @@ object TLAtomics
   val width = 3 
 
   // Arithmetic types
-  def MIN  = 0.U(width)
-  def MAX  = 1.U(width)
-  def MINU = 2.U(width)
-  def MAXU = 3.U(width)
-  def ADD  = 4.U(width)
+  def MIN  = 0.U(width.W)
+  def MAX  = 1.U(width.W)
+  def MINU = 2.U(width.W)
+  def MAXU = 3.U(width.W)
+  def ADD  = 4.U(width.W)
   def isArithmetic(x: UInt) = x <= ADD
 
   // Logical types
-  def XOR  = 0.U(width)
-  def OR   = 1.U(width)
-  def AND  = 2.U(width)
-  def SWAP = 3.U(width)
+  def XOR  = 0.U(width.W)
+  def OR   = 1.U(width.W)
+  def AND  = 2.U(width.W)
+  def SWAP = 3.U(width.W)
   def isLogical(x: UInt) = x <= SWAP
 
   def ArithMsg:Seq[String] = Seq("MIN", "MAX", "MINU", "MAXU", "ADD")
@@ -163,8 +163,8 @@ object TLHints
 {
   val width = 1
 
-  def PREFETCH_READ  = 0.U(width)
-  def PREFETCH_WRITE = 1.U(width)
+  def PREFETCH_READ  = 0.U(width.W)
+  def PREFETCH_WRITE = 1.U(width.W)
   def isHints(x: UInt) = x <= PREFETCH_WRITE
 
   def HintsMsg:Seq[String] = Seq("PrefetchRead", "PrefetchWrite")
