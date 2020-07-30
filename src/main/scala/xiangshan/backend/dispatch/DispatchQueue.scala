@@ -57,7 +57,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
     Mux(
       left(indexWidth) === right(indexWidth),
       left(indexWidth - 1, 0) >= right(indexWidth - 1, 0),
-      left(indexWidth - 1, 0) < right(indexWidth - 1, 0)
+      left(indexWidth - 1, 0) <= right(indexWidth - 1, 0)
     )
   }
   XSError(!greaterOrEqualThan(tailPtr, headPtr), "assert greaterOrEqualThan(tailPtr, headPtr) failed\n")
