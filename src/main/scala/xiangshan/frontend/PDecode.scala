@@ -25,6 +25,9 @@ class PreDecodeInfo extends XSBundle{  // 8 bit
   val isCall  = Bool()
   val isRet   = Bool()
   val excType = UInt(3.W)
+  def isBr = brType === BrType.branch
+  def isJal = brType === BrType.jal
+  def isJalr = brType === BrType.jalr
 }
 
 class CacheLine extends XSBundle {
