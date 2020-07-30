@@ -72,9 +72,6 @@ class BrqIO extends XSBundle{
 class Brq extends XSModule {
   val io = IO(new BrqIO)
 
-  def redirctWindowSize: Int = BrqSize/2
-  require(redirctWindowSize <= BrqSize && redirctWindowSize > 0)
-
   class BrqEntry extends Bundle {
     val ptrFlag = Bool()
     val npc = UInt(VAddrBits.W)
@@ -103,23 +100,50 @@ class Brq extends XSModule {
 
   // dequeue
   val headIdx = headPtr.value
-  var commitIdx = WireInit(headIdx)
 
-  def needCheckNext(idx: UInt): Bool = {
-    (stateQueue(idx).isWb && !brQueue(idx).misPred) || stateQueue(idx).isCommit
+  val skipMask = Cat(stateQueue.zipWithIndex.map({
+    case (s, i) => (s.isWb && !brQueue(i).misPred) || s.isCommit
+  }).reverse)
+
+  /*
+      example: headIdx       = 2
+               headIdxOH     = 00000100
+               headIdxMaskHI = 11111100
+               headIdxMaskLo = 00000011
+               skipMask      = 00111101
+               commitIdxHi   =  6
+               commitIdxLo   =        0
+               commitIdx     =  6
+   */
+  val headIdxOH = UIntToOH(headIdx)
+  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
+  for(i <- headIdxMaskHiVec.indices){
+    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
   }
+  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
+  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
+  val commitIdxHi, commitIdxLo, commitIdx = Wire(UInt(BrqSize.W))
 
-  var checkNext = WireInit(needCheckNext(headIdx))
+  commitIdxHi := PriorityEncoder(~(headIdxMaskHi & skipMask))
+  commitIdxLo := PriorityEncoder(~(headIdxMaskLo & skipMask))
 
-  for(i <- 1 until redirctWindowSize){
-    val idx = commitIdx + i.U
-    val commitThis = checkNext && stateQueue(idx).isWb && brQueue(idx).misPred
-    commitIdx = Mux(commitThis,
-      idx,
-      commitIdx
+  commitIdx := Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).misPred,
+    commitIdxHi,
+    Mux(stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).misPred,
+      commitIdxLo,
+      headIdx
     )
-    checkNext = checkNext && needCheckNext(idx)
-  }
+  )
+
+//  for(i <- 1 until redirctWindowSize){
+//    val idx = commitIdx + i.U
+//    val commitThis = checkNext && stateQueue(idx).isWb && brQueue(idx).misPred
+//    commitIdx = Mux(commitThis,
+//      idx,
+//      commitIdx
+//    )
+//    checkNext = checkNext && needCheckNext(idx)
+//  }
 
   val commitIsHead = commitIdx===headIdx
   val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
@@ -134,6 +158,12 @@ class Brq extends XSModule {
   io.inOrderBrInfo.misPred := commitEntry.misPred
   io.inOrderBrInfo.redirect := commitEntry.exuOut.redirect
 
+  XSDebug(
+    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
+  )
+  XSDebug(
+    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
+  )
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
