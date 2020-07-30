@@ -209,10 +209,13 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     allocated(i) && valid(i) && !writebacked(i) && store(i)
   }))
   val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(MoqSize).W)))
+  val storeWbValid = Wire(Vec(StorePipelineWidth, Bool()))
   val sselvec0 = VecInit(PriorityEncoderOH(storeWbSelVec))
   val sselvec1 = VecInit(PriorityEncoderOH(storeWbSelVec.asUInt & ~sselvec0.asUInt))
   storeWbSel(0) := OHToUInt(sselvec0.asUInt)
   storeWbSel(1) := OHToUInt(sselvec1.asUInt)
+  storeWbValid(0) := sselvec0.asUInt.orR
+  storeWbValid(1) := sselvec1.asUInt.orR
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
@@ -221,7 +224,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     io.stout(i).bits.redirect := DontCare
     io.stout(i).bits.brUpdate := DontCare
     io.stout(i).bits.debug.isMMIO := data(storeWbSel(i)).mmio
-    io.stout(i).valid := storeWbSelVec(storeWbSel(i))
+    io.stout(i).valid := storeWbSelVec(storeWbSel(i)) && storeWbValid(i)
     when(io.stout(i).fire()){
       writebacked(storeWbSel(i)) := true.B
     }
@@ -230,6 +233,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // remove retired insts from lsroq, add retired store to sbuffer
 
   // move tailPtr
+  // FIXME: opt size using OH -> Mask
   val dequeueMask = Wire(Vec(MoqSize*2, Bool()))
   (0 until MoqSize * 2).map(i => {
     val ptr = i.U(InnerMoqIdxWidth-1, 0)
