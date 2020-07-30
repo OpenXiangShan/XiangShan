@@ -56,9 +56,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
       left(indexWidth - 1, 0) <= right(indexWidth - 1, 0)
     )
   }
-  XSError(!greaterOrEqualThan(tailPtr, headPtr), "assert greaterOrEqualThan(tailPtr, headPtr) failed\n")
-  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr), "assert greaterOrEqualThan(tailPtr, dispatchPtr) failed\n")
-  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), "assert greaterOrEqualThan(dispatchPtr, headPtr) failed\n")
+  XSError(!greaterOrEqualThan(tailPtr, headPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, headPtr: $headPtr) failed\n")
+  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
+  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
 
   val validEntries = Mux(headDirection === tailDirection, tailIndex - headIndex, size.U + tailIndex - headIndex)
   val dispatchEntries = Mux(dispatchDirection === tailDirection, tailIndex - dispatchIndex, size.U + tailIndex - dispatchIndex)
@@ -128,7 +128,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   dispatchPtr := dispatchPtr + numDeq - numReplay
 
   // commit
-  val numCommit = PopCount(io.commits.map(commit => commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
+  val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
   val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
   for (i <- 0 until CommitWidth) {
     when (commitBits(i)) {
