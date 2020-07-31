@@ -43,7 +43,7 @@ class BIM extends BasePredictor {
   val pcLatch = RegEnable(io.pc.bits, io.pc.valid)
 
   val bim = List.fill(BimBanks) {
-    Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = true, holdRead = true)))
+    Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = true, holdRead = true))
   }
 
   val baseBank = bimAddr.getBank(io.pc.bits)

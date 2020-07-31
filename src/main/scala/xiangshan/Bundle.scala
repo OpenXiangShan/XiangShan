@@ -31,6 +31,7 @@ object ValidUndirectioned {
 }
 
 class TageMeta extends XSBundle {
+  def TageNTables = 6
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)

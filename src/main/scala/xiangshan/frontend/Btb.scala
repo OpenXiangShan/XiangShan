@@ -17,7 +17,7 @@ trait BTBParams extends HasXSParameters {
 class BtbDataEntry() extends XSBundle with BTBParams {
   val offset = SInt(offsetLen.W)
   val extended = Bool()
-  def apply(offset: SInt, extended: Bool()) {
+  def apply(offset: SInt, extended: Bool) = {
     this.offset := offset
     this.extended := extended
     this
@@ -30,7 +30,7 @@ class BtbMetaEntry() extends XSBundle with BTBParams {
   val tag = UInt((VAddrBits - log2Up(BtbSize) - 1).W)
   val btbType = UInt(2.W)
   val isRVC = Bool()
-  def apply(tag: UInt, btbType: UInt, isRVC: Bool()) {
+  def apply(tag: UInt, btbType: UInt, isRVC: Bool) = {
     this.valid := true.B
     this.tag := tag
     this.btbType := btbType
@@ -61,15 +61,15 @@ class BTB extends BasePredictor with BTBParams{
 
   val data = List.fill(BTBWays) {
     List.fill(BTBBanks) {
-      Module(new SRAMTemplate(new BtbDataEntry(), set = nRows, shouldReset = true, holdRead = true)))
+      Module(new SRAMTemplate(new BtbDataEntry(), set = nRows, shouldReset = true, holdRead = true))
     }
   }
   val meta = List.fill(BTBWays) {
     List.fill(BTBBanks) {
-      Module(new SRAMTemplate(new BtbMetaEntry(), set = nRows, shouldReset = true, holdRead = true)))
+      Module(new SRAMTemplate(new BtbMetaEntry(), set = nRows, shouldReset = true, holdRead = true))
     }
   }
-  val edata = Module(new SRAMTemplate(UInt(VaddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true)))
+  val edata = Module(new SRAMTemplate(UInt(VaddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
 
   // BTB read requests
   val baseBank = btbAddr.getBank(io.pc.bits)

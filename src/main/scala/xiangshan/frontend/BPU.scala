@@ -150,7 +150,7 @@ class BPUStage1 extends BPUStage {
 
   // 'overrides' default logic
   // when flush, the prediction should also starts
-  override predValid = BoolStopWatch(io.flush || inFire, outFire, true)
+  override val predValid = BoolStopWatch(io.flush || inFire, outFire, true)
   io.out.valid := predValid
 
   // ubtb is accessed with inLatch pc in s1, 
