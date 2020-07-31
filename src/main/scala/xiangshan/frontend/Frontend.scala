@@ -22,6 +22,7 @@ class Frontend extends XSModule {
   ifu.io.outOfOrderBrInfo <> io.backend.outOfOrderBrInfo
   fakeicache.io.in <> ifu.io.icacheReq
   ifu.io.icacheResp <> fakeicache.io.out
+  fakeicache.io.flush := ifu.io.icacheFlush
 
   ibuffer.io.in <> ifu.io.fetchPacket
   ibuffer.io.flush := needFlush

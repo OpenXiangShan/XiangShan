@@ -36,7 +36,7 @@ trait HasXSParameter {
   val ExtHistoryLength = HistoryLength * 2
   val UBtbWays = 16
   val BtbWays = 2
-  val BtbSize = 256
+  val BtbSize = 2048
   // val BtbWays = 4
   val BtbBanks = PredictWidth
   // val BtbSets = BtbSize / BtbWays

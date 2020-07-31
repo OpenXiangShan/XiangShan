@@ -21,45 +21,50 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
  def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
-abstract class BasePredictor {
-  val metaLen = 0
-
-  // An implementation MUST extend the IO bundle with a response
-  // and the special input from other predictors, as well as
-  // the metas to store in BRQ
-  abstract class resp extends XSBundle {}
-  abstract class fromOthers extends XSBundle {}
-  abstract class meta extends XSBundle {}
-
-  class defaultBasePredictorIO extends XSBundle {
-    val flush = Input(Bool())
-    val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
-    val hist = Input(UInt(HistoryLength.W))
-    val inMask = Input(UInt(PredictWidth.W))
-    val update = Flipped(ValidIO(new BranchUpdateInfo))
-  }
-}
-
 class PredictorResponse extends XSBundle {
+  class UbtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
-  val ubtb = new Bundle {
     val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
     val takens = Vec(PredictWidth, Bool())
     val notTakens = Vec(PredictWidth, Bool())
     val isRVC = Vec(PredictWidth, Bool())
   }
+  class BtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
-  val btb = new Bundle {
     val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
     val types = Vec(PredictWidth, UInt(2.W))
     val isRVC = Vec(PredictWidth, Bool())
   }
-  val bim = new Bundle {
+  class BimResp extends XSBundle {
     val ctrs = Vec(PredictWidth, ValidUndirectioned(UInt(2.W)))
   }
+  class TageResp extends XSBundle {
   // the valid bits indicates whether a prediction is hit
-  val tage = new Bundle {
     val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
+  }
+
+  val ubtb = new UbtbResp
+  val btb = new BtbResp
+  val bim = new BimResp
+  val tage = new TageResp
+}
+
+abstract class BasePredictor extends XSModule {
+  val metaLen = 0
+
+  // An implementation MUST extend the IO bundle with a response
+  // and the special input from other predictors, as well as
+  // the metas to store in BRQ
+  abstract class Resp extends XSBundle with PredictorResponse {}
+  abstract class FromOthers extends XSBundle {}
+  abstract class Meta extends XSBundle {}
+
+  class DefaultBasePredictorIO extends XSBundle {
+    val flush = Input(Bool())
+    val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
+    val hist = Input(UInt(HistoryLength.W))
+    val inMask = Input(UInt(PredictWidth.W))
+    val update = Flipped(ValidIO(new BranchUpdateInfo))
   }
 }
 
@@ -73,7 +78,7 @@ class BPUStageIO extends XSBundle {
 
 
 abstract class BPUStage extends XSModule {
-  class defaultIO extends XSBundle {
+  class DefaultIO extends XSBundle {
     val flush = Input(Bool())
     val in = Flipped(Decoupled(new BPUStageIO))
     val pred = Decoupled(new BranchPrediction)
@@ -90,6 +95,9 @@ abstract class BPUStage extends XSModule {
 
   val predValid = RegInit(false.B)
   val outFire = io.out.fire()
+
+  // Each stage has its own logic to decide
+  // takens, notTakens and target
 
   val takens = Vec(PredictWidth, Bool())
   val notTakens = Vec(PredictWidth, Bool())
@@ -132,7 +140,7 @@ abstract class BPUStage extends XSModule {
 
 class BPUStage1 extends BPUStage {
 
-  val io = new defaultIO
+  val io = new DefaultIO
 
   // 'overrides' default logic
   // when flush, the prediction should also starts
@@ -157,7 +165,7 @@ class BPUStage1 extends BPUStage {
 }
 
 class BPUStage2 extends XSModule {
-  val io = new defaultIO
+  val io = new DefaultIO
 
   // Use latched response from s1
   val btbResp = inLatch.btb
@@ -171,10 +179,10 @@ class BPUStage2 extends XSModule {
 }
 
 class BPUStage3 extends XSModule {
-  class s3IO extends defaultIO {
+  class S3IO extends DefaultIO {
     val predecode = Flipped(ValidIO(new Predecode))
   }
-  val io = new s3IO
+  val io = new S3IO
   io.out.valid := outValid && io.predecode.valid && !io.flush
 
   // TAGE has its own pipelines and the
@@ -232,6 +240,12 @@ trait BranchPredictorComponents extends HasXSParameter {
   preds.map(_.io := DontCare)
 }
 
+class BPUReq extends XSBundle {
+  val pc = UInt(VAddrBits.W)
+  val hist = UInt(HistoryLength.W)
+  val inMask = UInt(PredictWidth.W)
+}
+
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
@@ -239,11 +253,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     // from ifu, frontend redirect
     val flush = Input(UInt(3.W))
     // from if1
-    val in = Flipped(ValidIO(new Bundle {
-      val pc = UInt(VAddrBits.W)
-      val hist = UInt(ExtHistoryLength.W)
-      val inMask = UInt(PredictWidth.W)
-    }))
+    val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
     val out = Vec(3, Decoupled(new BranchPrediction))
     // from if4
