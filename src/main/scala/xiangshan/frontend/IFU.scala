@@ -212,6 +212,10 @@ class IFU extends XSModule with HasIFUConst
     extHist(newPtr) := io.outOfOrderBrInfo.bits.taken
   }
 
+  when (io.redirect.valid) {
+    if1_npc := io.redirect.bits.target
+  }
+
   io.icacheReq.valid := if1_valid && if2_ready
   io.icacheReq.bits.addr := if1_npc
   io.icacheResp.ready := if3_valid && if4_ready
@@ -246,4 +250,45 @@ class IFU extends XSModule with HasIFUConst
   io.fetchPacket.bits.brInfo := bpu.io.branchInfo.bits
   (0 until PredictWidth).foreach(i => io.fetchPacket.bits.brInfo(i).histPtr := if4_histPtr)
   io.fetchPacket.bits.pd := if4_pd.pd
+
+  // debug info
+  XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
+  XSDebug(io.icacheFlush(0).asBool, "Flush icache stage2...\n")
+  XSDebug(io.icacheFlush(1).asBool, "Flush icache stage3...\n")
+  XSDebug(io.redirect.valid, "Rediret from backend! isExcp=%d isMisPred=%d isReplay=%d pc=%x\n",
+    io.redirect.bits.isException, io.redirect.bits.isMisPred, io.redirect.bits.isReplay, io.redirect.bits.pc)
+  XSDebug(io.redirect.valid, p"Rediret from backend! target=${Hexadecimal(io.redirect.bits.target)} brTag=${io.redirect.bits.brTag}\n")
+
+  XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x ptr=%d mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, ptr, mask(if1_npc))
+  XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_histPtr, if2_snpc)
+  XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, if3_histPtr)
+  XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_histPtr)
+
+  XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", io.icacheReq.valid, io.icacheReq.ready)
+  XSDebug("[IF1][ghr] headPtr=%d shiftPtr=%d newPtr=%d ptr=%d\n", headPtr, shiftPtr, newPtr, ptr)
+  XSDebug("[IF1][ghr] hist=%b\n", hist.asUInt)
+  XSDebug("[IF1][ghr] extHist=%b\n\n", extHist.asUInt)
+
+  XSDebug("[IF2][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n\n", if2_bp.redirect, if2_bp.taken, if2_bp.jmpIdx, if2_bp.hasNotTakenBrs, if2_bp.target, if2_bp.saveHalfRVI)
+
+  XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
+  XSDebug("[IF3][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if3_bp.redirect, if3_bp.taken, if3_bp.jmpIdx, if3_bp.hasNotTakenBrs, if3_bp.target, if3_bp.saveHalfRVI)
+  XSDebug("[IF3][prevHalfInstr] v=%d redirect=%d fetchpc=%x idx=%d tgt=%x taken=%d instr=%x\n\n",
+    prev_half_valid, prev_half_redirect, prev_half_fetchpc, prev_half_idx, prev_half_tgt, prev_half_taken, prev_half_instr)
+
+  XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
+  XSDebug("[IF4][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.redirect, if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
+  XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b\n", io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask)
+  for (i <- 0 until PredictWidth) {
+    XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] %b %x pc=%x pnpc=%x pd: rvc=%d brType=%b call=%d ret=%d\n",
+      io.fetchPacket.bits.mask(i),
+      io.fetchPacket.bits.instrs(i),
+      io.fetchPacket.bits.pc(i),
+      io.fetchPacket.bits.pnpc(i),
+      io.fetchPacket.bits.pd(i).isRVC,
+      io.fetchPacket.bits.pd(i).brType,
+      io.fetchPacket.bits.pd(i).isCall,
+      io.fetchPacket.bits.pd(i).isRet
+    )
+  }
 }

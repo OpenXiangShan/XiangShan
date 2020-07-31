@@ -106,9 +106,9 @@ class PreDecode extends XSModule with HasPdconst{
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,
-      p"instr ${Hexdecimal(io.out.instrs(i))}, " +
+      p"instr ${Hexadecimal(io.out.instrs(i))}, " +
       p"mask ${Binary(instsMask(i))}, " +
-      p"pc ${Hexdecimal(io.out.pc(i))}, " +
+      p"pc ${Hexadecimal(io.out.pc(i))}, " +
       p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
       p"brType ${Binary(io.out.pd(i).brType)}, " +
       p"isRet ${Binary(io.out.pd(i).isRet)}, " +
