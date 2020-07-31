@@ -141,8 +141,34 @@ class L1MetadataArray[T <: L1Metadata](onReset: () => T) extends DCacheModule {
 
   io.read.ready := !wen // so really this could be a 6T RAM
   io.write.ready := !rst
-}
 
+  def dumpRead() = {
+    when (io.read.fire()) {
+      XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
+        io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
+    }
+  }
+
+  def dumpWrite() = {
+    when (io.write.fire()) {
+      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
+        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+    }
+  }
+
+  def dumpResp() = {
+    (0 until nWays) map { i =>
+      XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
+        io.resp(i).tag, io.resp(i).coh.state)
+    }
+  }
+
+  def dump() = {
+    dumpRead
+    dumpWrite
+    dumpResp
+  }
+}
 
 // argument general L1 DCache bundles with memWidth
 class DCacheMetaReadReq extends DCacheBundle {
@@ -163,6 +189,46 @@ abstract class AbstractDataArray extends DCacheModule {
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until memWidth).map(f))
+
+  def dumpRead() = {
+    (0 until memWidth) map { w =>
+      when (io.read(w).valid) {
+        XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
+          io.read(w).bits.way_en, io.read(w).bits.addr)
+      }
+    }
+  }
+
+  def dumpWrite() = {
+    when (io.write.valid) {
+      XSDebug(s"DataArray Write valid way_en: %x addr: %x data: %x wmask: %x\n",
+        io.write.bits.way_en, io.write.bits.addr, io.write.bits.data, io.write.bits.wmask)
+    }
+  }
+
+  def dumpResp() = {
+    (0 until memWidth) map { w =>
+      XSDebug(s"DataArray ReadResp channel: $w\n")
+      (0 until nWays) map { i =>
+        XSDebug(s"way: $i data: %x\n", io.resp(w)(i))
+      }
+    }
+  }
+
+  def dumpNack() = {
+    (0 until memWidth) map { w =>
+      when (io.nacks(w)) {
+        XSDebug(s"DataArray NACK channel: $w\n")
+      }
+    }
+  }
+
+  def dump() = {
+    dumpRead
+    dumpWrite
+    dumpNack
+    dumpResp
+  }
 }
 
 class DuplicatedDataArray extends AbstractDataArray
@@ -279,6 +345,10 @@ class DCache extends DCacheModule
   // Meta array
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)
   val meta = Seq.fill(memWidth) { Module(new L1MetadataArray(onReset _)) }
+  (0 until memWidth) map { w =>
+    XSDebug(s"MetaArray $w\n")
+    meta(w).dump
+  }
 
   // 0 goes to MSHR refills, 1 goes to prober
   val MetaWritePortCount = 2
@@ -310,6 +380,7 @@ class DCache extends DCacheModule
   // ------------
   // Data array
   val data = Module(if (numDCacheBanks == 1) new DuplicatedDataArray else new BankedDataArray)
+  data.dump()
 
   // 0 goes to pipeline, 1 goes to MSHR refills
   val DataWritePortCount = 2
