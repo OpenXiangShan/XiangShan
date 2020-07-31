@@ -345,7 +345,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
 
   (0 until StorePipelineWidth).map(i =>{
-    PipelineConnect(s2_out(i), s3_in(i), true.B, s3_in(i).bits.uop.needFlush(io.redirect))	 
+    PipelineConnect(s2_out(i), s3_in(i), true.B, s3_in(i).valid && s3_in(i).bits.uop.needFlush(io.redirect))
   })
 
   // Send TLB feedback to store issue queue

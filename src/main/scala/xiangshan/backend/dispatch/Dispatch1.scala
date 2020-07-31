@@ -49,6 +49,8 @@ class Dispatch1 extends XSModule {
   /**
     * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes
     */
+  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid)))
+
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
   val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
@@ -62,7 +64,7 @@ class Dispatch1 extends XSModule {
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
 
-    io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i)
+    io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)
     io.toMoq(i).bits := io.fromRename(i).bits
     io.toMoq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
@@ -102,7 +104,6 @@ class Dispatch1 extends XSModule {
     orderedEnqueue(i) := prevCanEnqueue
     prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || io.recv(i))
   }
-  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid)))
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
     io.toIntDq(i).valid := intIndex.io.mapping(i).valid && !cancelled(intIndex.io.mapping(i).bits) &&
