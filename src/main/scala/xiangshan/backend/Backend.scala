@@ -217,6 +217,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
   memRf.io.readPorts <> issueQueues.flatMap(_.io.readIntRf)
 
+  io.mem.redirect <> redirect
 
   val wbu = Module(new Wbu(exuConfigs))
   wbu.io.in <> exeWbReqs

@@ -89,7 +89,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // invalidate lsroq term using robIdx
   // TODO: check exception redirect implementation
   (0 until MoqSize).map(i => {
-    when(uop(i).brTag.needFlush(io.brqRedirect) && allocated(i)){
+    when(uop(i).needFlush(io.brqRedirect) && allocated(i)){
       allocated(i) := false.B
     }
   })
