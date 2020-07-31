@@ -223,10 +223,10 @@ class IssueQueue
 
   XSDebug("State Dump: ")
   stateQueue.reverse.foreach(s =>{
-    XSDebug(false, s===s_invalid, " -")
-    XSDebug(false, s===s_valid, " v")
-    XSDebug(false, s===s_wait, " w")
-    XSDebug(false, s===s_replay, " r")
+    XSDebug(false, s===s_invalid, "-")
+    XSDebug(false, s===s_valid, "v")
+    XSDebug(false, s===s_wait, "w")
+    XSDebug(false, s===s_replay, "r")
   })
   XSDebug(false, true.B, "\n")
 
