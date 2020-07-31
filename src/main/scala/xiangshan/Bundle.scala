@@ -45,7 +45,6 @@ class BranchPrediction extends XSBundle {
   val hasNotTakenBrs = Bool()
   val target = UInt(VAddrBits.W)
   val saveHalfRVI = Bool()
-  val taken = Bool()
 }
 
 class BranchInfo extends XSBundle {
