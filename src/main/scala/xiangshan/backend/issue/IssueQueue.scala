@@ -65,10 +65,10 @@ class IssueQueue
     (Fill(qsize, 1.U(1.W)) << realDeqIdx)(qsize-1, 0)
   } & Fill(qsize, realDeqValid)
 
-  for(i <- 1 until qsize){
+  for(i <- 0 until qsize-1){
     when(moveMask(i)){
-      idxQueue(i-1) := idxQueue(i)
-      stateQueue(i-1) := stateQueue(i)
+      idxQueue(i) := idxQueue(i+1)
+      stateQueue(i) := stateQueue(i+1)
     }
   }
   when(realDeqValid){
@@ -152,12 +152,13 @@ class IssueQueue
 //  selectedIdxReg := selectedIdxWire - moveMask(selectedIdxWire)
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
   XSDebug(
-    p"selMaskWire:${Binary(selectMask.asUInt())} selected:$selectedIdxWire moveMask:${Binary(moveMask)}\n"
+    p"selMaskWire:${Binary(selectMask.asUInt())} selected:$selectedIdxWire" +
+      p" moveMask:${Binary(moveMask)} selectedIdxReg:$selectedIdxReg\n"
   )
 
 
   // read regfile
-  val selectedUop = uopQueue(Mux(io.deq.ready, selectedIdxWire, selectedIdxReg))
+  val selectedUop = uopQueue(idxQueue(Mux(io.deq.ready, selectedIdxWire, selectedIdxReg)))
 
   exuCfg match {
     case Exu.ldExeUnitCfg =>
@@ -168,7 +169,7 @@ class IssueQueue
       io.readIntRf(1).addr := selectedUop.psrc2 // store data (int)
       io.readFpRf(0).addr := selectedUop.psrc2  // store data (fp)
       XSDebug(
-        p"src1 read addr: ${io.readIntRf(0).addr} src2 read addr: ${io.readIntRf(0).addr}\n"
+        p"src1 read addr: ${io.readIntRf(0).addr} src2 read addr: ${io.readIntRf(1).addr}\n"
       )
     case _ =>
       require(requirement = false, "Error: IssueQueue only support ldu and stu!")
@@ -208,7 +209,7 @@ class IssueQueue
   io.enq.ready := !isFull && !io.replay.valid && !io.redirect.valid
   when(io.enq.fire()){
     stateQueue(tailAfterRealDeq.tail(1)) := s_valid
-    val uopQIdx = idxQueue(tailPtr.tail(1))
+    val uopQIdx = idxQueue(tailAfterRealDeq.tail(1))
     val new_uop = wakeUp(io.enq.bits)
     uopQueue(uopQIdx) := new_uop
   }
