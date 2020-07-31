@@ -76,7 +76,8 @@ class Predecode extends XSBundle {
 
 class BranchUpdateInfo extends XSBundle {
   // from backend
-  val pnpc = UInt(VAddrBits.W)
+  val pc = UInt(VAddrBits.W)
+  val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
   val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)

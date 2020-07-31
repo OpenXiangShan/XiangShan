@@ -21,13 +21,41 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
  def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
+class PredictorResponse extends XSBundle {
+  class UbtbResp extends XSBundle {
+  // the valid bits indicates whether a target is hit
+    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
+    val takens = Vec(PredictWidth, Bool())
+    val notTakens = Vec(PredictWidth, Bool())
+    val isRVC = Vec(PredictWidth, Bool())
+  }
+  class BtbResp extends XSBundle {
+  // the valid bits indicates whether a target is hit
+    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
+    val types = Vec(PredictWidth, UInt(2.W))
+    val isRVC = Vec(PredictWidth, Bool())
+  }
+  class BimResp extends XSBundle {
+    val ctrs = Vec(PredictWidth, ValidUndirectioned(UInt(2.W)))
+  }
+  class TageResp extends XSBundle {
+  // the valid bits indicates whether a prediction is hit
+    val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
+  }
+
+  val ubtb = new UbtbResp
+  val btb = new BtbResp
+  val bim = new BimResp
+  val tage = new TageResp
+}
+
 abstract class BasePredictor extends XSModule {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
   // and the special input from other predictors, as well as
   // the metas to store in BRQ
-  abstract class Resp extends XSBundle {}
+  abstract class Resp extends XSBundle with PredictorResponse {}
   abstract class FromOthers extends XSBundle {}
   abstract class Meta extends XSBundle {}
 
@@ -37,35 +65,6 @@ abstract class BasePredictor extends XSModule {
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
     val update = Flipped(ValidIO(new BranchUpdateInfo))
-  }
-}
-
-class BPUReq extends XSBundle {
-  val pc = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
-  val inMask = UInt(PredictWidth.W)
-}
-
-class PredictorResponse extends XSBundle {
-  // the valid bits indicates whether a target is hit
-  val ubtb = new Bundle {
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
-    val takens = Vec(PredictWidth, Bool())
-    val notTakens = Vec(PredictWidth, Bool())
-    val isRVC = Vec(PredictWidth, Bool())
-  }
-  // the valid bits indicates whether a target is hit
-  val btb = new Bundle {
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
-    val types = Vec(PredictWidth, UInt(2.W))
-    val isRVC = Vec(PredictWidth, Bool())
-  }
-  val bim = new Bundle {
-    val ctrs = Vec(PredictWidth, ValidUndirectioned(UInt(2.W)))
-  }
-  // the valid bits indicates whether a prediction is hit
-  val tage = new Bundle {
-    val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
   }
 }
 
@@ -239,6 +238,12 @@ trait BranchPredictorComponents extends HasXSParameter {
   val tage = new Module(Tage)
   val preds = Seq(ubtb, btb, bim, tage)
   preds.map(_.io := DontCare)
+}
+
+class BPUReq extends XSBundle {
+  val pc = UInt(VAddrBits.W)
+  val hist = UInt(HistoryLength.W)
+  val inMask = UInt(PredictWidth.W)
 }
 
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
