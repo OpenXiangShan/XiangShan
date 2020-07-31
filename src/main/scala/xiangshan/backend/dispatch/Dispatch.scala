@@ -17,7 +17,7 @@ case class DispatchParameters
   LsDqDeqWidth: Int
 )
 
-class Dispatch() extends XSModule with NeedImpl {
+class Dispatch() extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
@@ -85,13 +85,24 @@ class Dispatch() extends XSModule with NeedImpl {
   intDispatch.io.fromDq <> intDq.io.deq
   intDispatch.io.readRf <> io.readIntRf
   intDispatch.io.regRdy := io.intPregRdy
-  intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i) })
-  intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i) })
-  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i) })
+  intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i)})
+  intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i)})
+  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
 
   // TODO: Fp dispatch queue to Fp reservation stations
-  fpDq.io.deq <> DontCare
-  io.readFpRf <> DontCare
+  if (exuParameters.FpExuCnt > 0) {
+    val fpDispatch = Module(new Dispatch2Fp)
+    fpDispatch.io.fromDq <> fpDq.io.deq
+    fpDispatch.io.readRf <> io.readFpRf
+    fpDispatch.io.regRdy <> io.fpPregRdy
+    fpDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i + exuParameters.IntExuCnt)})
+    fpDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i + exuParameters.IntExuCnt)})
+    fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
+  }
+  else {
+    fpDq.io.deq <> DontCare
+    io.readFpRf <> DontCare
+  }
 
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
@@ -100,6 +111,6 @@ class Dispatch() extends XSModule with NeedImpl {
   lsDispatch.io.fpRegAddr <> io.fpMemRegAddr
   lsDispatch.io.intRegRdy <> io.intMemRegRdy
   lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
-  lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i) })
-  lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i) })
+  lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+  lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 }

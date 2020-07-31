@@ -3,7 +3,7 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{XSDebug, XSInfo, XSWarn}
+import utils.{XSDebug, XSError, XSInfo}
 
 // read rob and enqueue
 class Dispatch1 extends XSModule {
@@ -60,9 +60,11 @@ class Dispatch1 extends XSModule {
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSROQ
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
-    io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i)
     io.toRoq(i).bits := io.fromRename(i).bits
+
+    io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i)
     io.toMoq(i).bits := io.fromRename(i).bits
+    io.toMoq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
     // receive indexes from ROQ and LSROQ
     when(io.toRoq(i).fire() && !io.recv(i)) {
@@ -87,7 +89,7 @@ class Dispatch1 extends XSModule {
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
     XSDebug(io.toMoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives mroq ${io.moqIdxs(i)}\n")
     if (i > 0) {
-      XSWarn(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid, p"roq handshake not continuous $i")
+      XSError(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid, p"roq handshake not continuous $i")
     }
   }
 
@@ -100,7 +102,7 @@ class Dispatch1 extends XSModule {
     orderedEnqueue(i) := prevCanEnqueue
     prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || io.recv(i))
   }
-  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(true.B)))
+  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid)))
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
     io.toIntDq(i).valid := intIndex.io.mapping(i).valid && !cancelled(intIndex.io.mapping(i).bits) &&

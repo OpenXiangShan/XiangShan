@@ -35,9 +35,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
-  //  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
-  //  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
-  //  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
+  // val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
+  // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
+  // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
   exeUnits.foreach(_.io.exception := DontCare)
   exeUnits.foreach(_.io.dmem := DontCare)
@@ -217,6 +217,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
   memRf.io.readPorts <> issueQueues.flatMap(_.io.readIntRf)
 
+  io.mem.redirect <> redirect
 
   val wbu = Module(new Wbu(exuConfigs))
   wbu.io.in <> exeWbReqs

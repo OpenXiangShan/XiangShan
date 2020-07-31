@@ -162,10 +162,14 @@ class IssueQueue
   exuCfg match {
     case Exu.ldExeUnitCfg =>
       io.readIntRf(0).addr := selectedUop.psrc1 // base
+      XSDebug(p"src1 read addr: ${io.readIntRf(0).addr}\n")
     case Exu.stExeUnitCfg =>
       io.readIntRf(0).addr := selectedUop.psrc1 // base
       io.readIntRf(1).addr := selectedUop.psrc2 // store data (int)
       io.readFpRf(0).addr := selectedUop.psrc2  // store data (fp)
+      XSDebug(
+        p"src1 read addr: ${io.readIntRf(0).addr} src2 read addr: ${io.readIntRf(0).addr}\n"
+      )
     case _ =>
       require(requirement = false, "Error: IssueQueue only support ldu and stu!")
   }
@@ -231,6 +235,13 @@ class IssueQueue
   })
   XSDebug(false, true.B, "\n")
 
+  XSDebug("State Dump: ")
+  readyVec.reverse.foreach(r =>{
+    XSDebug(false, r, p"r")
+    XSDebug(false, !r, p"-")
+  })
+  XSDebug(false, true.B, "\n")
+
   assert(!(io.replay.valid && realDeqValid), "Error: realDeqValid should be false when replay valid!")
   for(i <- 0 until qsize){
     val uopQIdx = idxQueue(i)
@@ -266,13 +277,15 @@ class IssueQueue
   // Debug sigs
   XSInfo(
     io.enq.fire(),
-    p"enq fire: pc:${Hexadecimal(io.enq.bits.cf.pc)} roqIdx:${io.enq.bits.roqIdx}\n"
+    p"enq fire: pc:${Hexadecimal(io.enq.bits.cf.pc)} roqIdx:${io.enq.bits.roqIdx} " +
+      p"src1: ${io.enq.bits.psrc1} src2:${io.enq.bits.psrc2} pdst:${io.enq.bits.pdest}\n"
   )
   XSInfo(
     io.deq.fire(),
-    p"deq fire: pc:${Hexadecimal(io.deq.bits.uop.cf.pc)} roqIdx:${io.deq.bits.uop.roqIdx}\n"
+    p"deq fire: pc:${Hexadecimal(io.deq.bits.uop.cf.pc)} roqIdx:${io.deq.bits.uop.roqIdx} " +
+      p"src1: ${io.deq.bits.uop.psrc1} data: ${Hexadecimal(io.deq.bits.src1)} " +
+      p"src2: ${io.deq.bits.uop.psrc2} data: ${Hexadecimal(io.deq.bits.src2)} " +
+      p"imm : ${Hexadecimal(io.deq.bits.uop.ctrl.imm)}\npdest: ${io.deq.bits.uop.pdest}\n"
   )
   XSDebug(p"tailPtr:$tailPtr tailAfterDeq:$tailAfterRealDeq tlbHit:${io.tlbHit}\n")
-
-  XSDebug(false, true.B, "\n")
 }

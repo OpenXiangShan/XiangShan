@@ -16,6 +16,7 @@ class Dispatch2Int extends XSModule {
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   })
+
   /**
     * Part 1: generate indexes for reservation stations
     */
@@ -26,9 +27,9 @@ class Dispatch2Int extends XSModule {
   val aluPriority = PriorityGen((0 until exuParameters.AluCnt).map(i => io.numExist(i+exuParameters.JmpCnt)))
   val mduPriority = PriorityGen((0 until exuParameters.MduCnt).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    jmpIndexGen.io.validBits(i) := Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    aluIndexGen.io.validBits(i) := Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    mduIndexGen.io.validBits(i) := Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    aluIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    mduIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
     XSDebug(io.fromDq(i).valid,
       p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
@@ -43,18 +44,22 @@ class Dispatch2Int extends XSModule {
   val allIndexGen = Seq(jmpIndexGen, aluIndexGen, mduIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsValidVec = allIndexGen.map(_.io.reverseMapping.map(_.valid)).reduceLeft(_ ++ _)
-  val rsIndexVecRaw = allIndexGen.map(_.io.reverseMapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsIndexVec = rsIndexVecRaw.zipWithIndex.map{ case (index, i) =>
-    (if (i >= exuParameters.JmpCnt + exuParameters.AluCnt) {
-      index + exuParameters.JmpCnt.U + exuParameters.AluCnt.U
-    }
-    else if (i >= exuParameters.JmpCnt) {
-      index + exuParameters.JmpCnt.U
-    }
-    else {
-      index
-    })
+  val rsValidVec = (0 until dpParams.IntDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
+  val rsIndexVec = (0 until dpParams.IntDqDeqWidth).map({i =>
+    val indexOffset = Seq(0, exuParameters.JmpCnt, exuParameters.JmpCnt + exuParameters.AluCnt)
+    allIndexGen.zipWithIndex.map{
+      case (index, j) => Mux(index.io.reverseMapping(i).valid, index.io.reverseMapping(i).bits + indexOffset(j).U, 0.U)
+    }.reduce(_ | _)
+  })
+
+  for (i <- validVec.indices) {
+    // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
+  }
+  for (i <- rsValidVec.indices) {
+    // XSDebug(p"jmp reverse $i: valid ${jmpIndexGen.io.reverseMapping(i).valid} index ${jmpIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"alu reverse $i: valid ${aluIndexGen.io.reverseMapping(i).valid} index ${aluIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"mdu reverse $i: valid ${mduIndexGen.io.reverseMapping(i).valid} index ${mduIndexGen.io.reverseMapping(i).bits}\n")
+    // XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
   }
 
   /**
@@ -69,8 +74,8 @@ class Dispatch2Int extends XSModule {
   val intDynamicMapped = intDynamicIndex.map(i => indexVec(i))
   for (i <- intStaticIndex.indices) {
     val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
-    io.readRf(2*i).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
-    io.readRf(2*i + 1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
+    io.readRf(2*i  ).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
+    io.readRf(2*i+1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
   }
   val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
   intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := (2*i).U})
@@ -122,7 +127,7 @@ class Dispatch2Int extends XSModule {
 
     XSDebug(dataValidRegDebug(i),
       p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-        p"(${readPortIndexReg(i)}, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
         p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
   }
 }

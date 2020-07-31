@@ -147,7 +147,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   (0 until LoadPipelineWidth).map(i => {
     // l2_out is used to generate dcache req
     l2_out(i).bits := DontCare
-    l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src3
+    l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.uop.ctrl.imm
     l2_out(i).bits.paddr := io.dtlb.resp(i).bits.paddr
     l2_out(i).bits.uop := io.ldin(i).bits.uop
     l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType)
@@ -319,7 +319,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   
   // send req to dtlb
   val saddr = VecInit((0 until StorePipelineWidth).map(i => {
-    io.stin(i).bits.src1 + io.stin(i).bits.src3
+    io.stin(i).bits.src1 + io.stin(i).bits.uop.ctrl.imm
   }))
 
   (0 until StorePipelineWidth).map(i => {
@@ -355,6 +355,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     // writeback to LSROQ
     s3_in(i).ready := true.B
     lsroq.io.storeIn(i).bits := s3_in(i).bits
+    lsroq.io.storeIn(i).bits.mmio := AddressSpace.isMMIO(s3_in(i).bits.paddr)
     lsroq.io.storeIn(i).valid := s3_in(i).fire()
   })
   
