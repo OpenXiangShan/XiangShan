@@ -55,7 +55,7 @@ abstract class BasePredictor extends XSModule {
   // An implementation MUST extend the IO bundle with a response
   // and the special input from other predictors, as well as
   // the metas to store in BRQ
-  abstract class Resp extends XSBundle with PredictorResponse {}
+  abstract class Resp extends PredictorResponse {}
   abstract class FromOthers extends XSBundle {}
   abstract class Meta extends XSBundle {}
 
@@ -64,7 +64,7 @@ abstract class BasePredictor extends XSModule {
     val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
-    val update = Flipped(ValidIO(new BranchUpdateInfo))
+    val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
   }
 }
 
@@ -83,15 +83,12 @@ abstract class BPUStage extends XSModule {
     val in = Flipped(Decoupled(new BPUStageIO))
     val pred = Decoupled(new BranchPrediction)
     val out = Decoupled(new BPUStageIO)
-
-    val inFire = OutPut(Bool())
   }
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
   io.in.ready = !outValid || io.out.fire() && io.pred.fire()
   val inFire = io.in.fire()
   val inLatch = RegEnable(io.in.bits, inFire)
-  io.inFire := inFire
 
   val predValid = RegInit(false.B)
   val outFire = io.out.fire()
@@ -249,7 +246,7 @@ class BPUReq extends XSBundle {
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
-    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(UInt(3.W))
     // from if1
@@ -303,7 +300,7 @@ class BPU extends BaseBPU {
 
 
   //**********************Stage 1****************************//
-  val s1_fire = s1.io.inFire
+  val s1_fire = s1.io.in.fire()
   val s1_resp_in = new PredictorResponse
   val s1_brInfo_in = VecInit(0.U.asTypeOf(Vec(PredictWidth, new BranchInfo)))
 
@@ -312,8 +309,8 @@ class BPU extends BaseBPU {
 
   val s1_inLatch = RegEnable(io.in, s1_fire)
   ubtb.io.flush := io.flush(0) // TODO: fix this
-  ubtb.io.in.pc.valid := s1_inLatch.valid
-  ubtb.io.in.pc.bits := s1_inLatch.bits.pc
+  ubtb.io.pc.valid := s1_inLatch.valid
+  ubtb.io.pc.bits := s1_inLatch.bits.pc
   ubtb.io.inMask := s1_inLatch.bits.inMask
 
   // Wrap ubtb response into resp_in and brInfo_in
@@ -324,8 +321,8 @@ class BPU extends BaseBPU {
   }
 
   btb.io.flush := io.flush(0) // TODO: fix this
-  btb.io.in.pc.valid := io.in.valid
-  btb.io.in.pc.bits := io.in.bits.pc
+  btb.io.pc.valid := io.in.valid
+  btb.io.pc.bits := io.in.bits.pc
   btb.io.inMask := io.in.bits.inMask
 
   // Wrap btb response into resp_in and brInfo_in
@@ -335,8 +332,8 @@ class BPU extends BaseBPU {
   }
 
   bim.io.flush := io.flush(0) // TODO: fix this
-  bim.io.in.pc.valid := io.in.valid
-  bim.io.in.pc.bits := io.in.bits.pc
+  bim.io.pc.valid := io.in.valid
+  bim.io.pc.bits := io.in.bits.pc
   bim.io.inMask := io.in.bits.inMask
 
   // Wrap bim response into resp_in and brInfo_in
@@ -354,18 +351,18 @@ class BPU extends BaseBPU {
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
 
-  tage.io.flush := io.flush(0) // TODO: fix this
-  tage.io.in.pc.valid := s1.io.out.fire()
-  tage.io.in.pc.bits := s1.io.out.bits.pc // PC from s1
-  tage.io.in.hist := io.in.hist // The inst is from s1
-  tage.io.in.inMask := s1.io.out.bits.mask
-  tage.io.in.s3Fire := s3.io.inFire // Tell tage to march 1 stage
-  tage.io.fromOthers <> s1.io.out.resp.bim // Use bim results from s1
+  tage.io.flush := io.flush(1) // TODO: fix this
+  tage.io.pc.valid := s1.io.out.fire()
+  tage.io.pc.bits := s1.io.out.bits.pc // PC from s1
+  tage.io.hist := io.in.hist // The inst is from s1
+  tage.io.inMask := s1.io.out.bits.mask
+  tage.io.s3Fire := s3.io.in.fire() // Tell tage to march 1 stage
+  tage.io.bim <> s1.io.out.resp.bim // Use bim results from s1
 
 
   // Wrap tage response and meta into s3.io.in.bits
   // This is ugly
-  s3.io.in.bits.resp.tage <> tage.io.out
+  s3.io.in.bits.resp.tage <> tage.io.resp
   for (i <- 0 until PredictWidth) {
     s3.io.in.bits.brInfo(i).tageMeta := tage.io.meta(i)
   }
