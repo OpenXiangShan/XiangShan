@@ -45,18 +45,8 @@ class Ibuffer extends XSModule {
     for(i <- 0 until PredictWidth) {
       ibuf_valid(enq_idx) := io.in.bits.mask(i)
 
-      if(i == 0) {
-        ibuf(enq_idx).pc := io.in.bits.pc
-      }
-      else {
-        ibuf(enq_idx).pc := PriorityMux(Seq(
-          !io.in.bits.mask(i) -> ibuf(enq_idx-1).pc,
-          io.in.bits.pd.isRVC -> ibuf(enq_idx-1).pc + 2.U,
-          !io.in.bits.pd.isRVC -> ibuf(enq_idx-1).pc + 4.U
-        ))
-      }
-
       ibuf(enq_idx).inst := io.in.bits.instrs(i)
+      ibuf(enq_idx).pc := io.in.bits.pc(i)
       ibuf(enq_idx).pnpc := io.in.bits.pnpc(i)
       ibuf(enq_idx).brInfo := io.in.bits.brInfo(i)
       ibuf(enq_idx).pd := io.in.bits.pd(i)
