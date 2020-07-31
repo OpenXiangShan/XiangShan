@@ -52,8 +52,8 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   val ringBufferHeadExtended = RegInit(0.U(MoqIdxWidth.W))
   val ringBufferTailExtended = RegInit(0.U(MoqIdxWidth.W))
-  val ringBufferHead = ringBufferHeadExtended(InnerRoqIdxWidth-1,0)
-  val ringBufferTail = ringBufferTailExtended(InnerRoqIdxWidth-1,0)
+  val ringBufferHead = ringBufferHeadExtended(InnerMoqIdxWidth-1,0)
+  val ringBufferTail = ringBufferTailExtended(InnerMoqIdxWidth-1,0)
   val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerMoqIdxWidth)===ringBufferTailExtended(InnerMoqIdxWidth)
   val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerMoqIdxWidth)=/=ringBufferTailExtended(InnerMoqIdxWidth)
   val ringBufferAllowin = !ringBufferFull
