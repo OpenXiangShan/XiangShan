@@ -52,7 +52,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   val isJump = ALUOpType.isJump(func)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = Mux(isBranch, pc + offset, adderRes)(VAddrBits-1,0)
-  val isRVC = uop.cf.brUpdate.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
+  val isRVC = uop.cf.brUpdate.pd.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
 
 
   io.in.ready := io.out.ready
@@ -65,14 +65,16 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.isMisPred := DontCare // check this in brq
   io.out.bits.redirect.isReplay := false.B
-  io.out.bits.redirect.roqIdx := uop.roqIdx
+  // io.out.bits.redirect.roqIdx := uop.roqIdx
 
   io.out.bits.brUpdate := uop.cf.brUpdate
   // override brUpdate
+  io.out.bits.brUpdate.pc := uop.cf.pc
+  io.out.bits.brUpdate.target := Mux(!taken && isBranch, pcLatchSlot, target)
   io.out.bits.brUpdate.brTarget := target
-  io.out.bits.brUpdate.btbType := "b00".U
+  // io.out.bits.brUpdate.btbType := "b00".U
   io.out.bits.brUpdate.taken := isBranch && taken
-  io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
+  // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
 
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop

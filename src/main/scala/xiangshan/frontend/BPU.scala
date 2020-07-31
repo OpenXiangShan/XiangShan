@@ -24,14 +24,14 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
 class PredictorResponse extends XSBundle {
   class UbtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
+    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VAddrBits.W)))
     val takens = Vec(PredictWidth, Bool())
     val notTakens = Vec(PredictWidth, Bool())
     val isRVC = Vec(PredictWidth, Bool())
   }
   class BtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
+    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VAddrBits.W)))
     val types = Vec(PredictWidth, UInt(2.W))
     val isRVC = Vec(PredictWidth, Bool())
   }
@@ -81,7 +81,7 @@ class BPUStageIO extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val mask = UInt(PredictWidth.W)
   val resp = new PredictorResponse
-  val target = UInt(VaddrBits.W)
+  val target = UInt(VAddrBits.W)
   val brInfo = Vec(PredictWidth, new BranchInfo)
 }
 
@@ -95,7 +95,7 @@ abstract class BPUStage extends XSModule {
   }
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
-  io.in.ready = !outValid || io.out.fire() && io.pred.fire()
+  io.in.ready := !outValid || io.out.fire() && io.pred.fire()
   val inFire = io.in.fire()
   val inLatch = RegEnable(io.in.bits, inFire)
 

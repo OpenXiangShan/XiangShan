@@ -68,7 +68,8 @@ class Ibuffer extends XSModule {
       io.out(i).bits.pc := ibuf(deq_idx).pc
       // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
       io.out(i).bits.brUpdate := DontCare
-      io.out(i).bits.brUpdate.pc := io.out(i).bits.pc
+      io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc
+      io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
       io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
       io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
 
