@@ -307,8 +307,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val s3_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
 
   (0 until StorePipelineWidth).map(i => {
-    when (s2_out(i).valid) { printf("S2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)}; 
-    when (s3_in(i).valid ) { printf("S3_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s3_in(i).bits.uop.cf.pc , s3_in(i).bits.vaddr , s3_in(i).bits.paddr , s3_in(i).bits.uop.ctrl.fuOpType , s3_in(i).bits.data )}; 
+    when (s2_out(i).valid) { XSDebug("S2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)}; 
+    when (s3_in(i).valid ) { XSDebug("S3_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s3_in(i).bits.uop.cf.pc , s3_in(i).bits.vaddr , s3_in(i).bits.paddr , s3_in(i).bits.uop.ctrl.fuOpType , s3_in(i).bits.data )}; 
     // when (s4_in(i).valid ) { printf("S4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s4_in(i).bits.uop.cf.pc , s4_in(i).bits.vaddr , s4_in(i).bits.paddr , s4_in(i).bits.uop.ctrl.fuOpType , s4_in(i).bits.data )}; 
   })
   

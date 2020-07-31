@@ -73,7 +73,11 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       listening(ringBufferHead+offset) := false.B
       data(ringBufferHead+offset).bwdMask := 0.U(8.W).asBools
     }
-    io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead+offset)
+    if(i == 0){
+      io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead+offset)
+    }else{
+      io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead+offset) && io.dp1Req(i-1).ready
+    }
     io.moqIdxs(i) := ringBufferHeadExtended+offset
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
