@@ -11,7 +11,8 @@ import xiangshan.frontend.PreDecodeInfo
 class FetchPacket extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
-  val pc = UInt(VAddrBits.W)
+  // val pc = UInt(VAddrBits.W)
+  val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
   val brInfo = Vec(PredictWidth, (new BranchInfo))
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
@@ -44,6 +45,7 @@ class BranchPrediction extends XSBundle {
   val hasNotTakenBrs = Bool()
   val target = UInt(VAddrBits.W)
   val saveHalfRVI = Bool()
+  val taken = Bool()
 }
 
 class BranchInfo extends XSBundle {
