@@ -20,8 +20,8 @@ class MicroBTB extends BasePredictor
     {
         val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
         val takens = Vec(PredictWidth, Bool())
+        val notTakens = Vec(PredictWidth, Bool())
         val isRVC = Vec(PredictWidth, Bool())
-        val isBr = Vec(PredictWidth, Bool())
     }
 
     class MicroBTBPredictMeta extends meta
@@ -75,38 +75,44 @@ class MicroBTB extends BasePredictor
     
     class ReadRespEntry extends XSBundle
     {
-        val is_Br = Bool()
         val is_RVC = Bool()
-        val target = UInt(VAddrBits.W))
+        val target = UInt(VAddrBits.W)
         val valid = Bool()
         val taken = Bool()
+        val notTaken = Bool()
     }
     val read_resp = Wire(Vec(PredictWidth,new ReadRespEntry))
 
-    val read_hit_ohs = VecInit((0 until PredictWidth) map {b => 
+    val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(PredictWidth-1,0) ))
+
+    val read_hit_ohs = read_bank_inOrder.map{ b =>
         VecInit((0 until nWays) map {w => 
-            uBTBMeta(b)(w).tag === read_req_tag && uBTBMeta(b)(w).valid
+            uBTBMeta(b)(w).tag === read_req_tag
         })
-    })
+    }
+
 
     val read_hit_vec = read_hit_ohs.map{oh => ParallelOR(oh)}
     val read_hit_ways = read_hit_ohs.map{oh => PriorityEncoder(oh)}
     val read_hit =  ParallelOR(read_hit_vec)
     val read_hit_way = PriorityEncoder(ParallelOR(read_hit_vec.map(_.asUInt)))
     
-    for(i <- 0 until PredictWidth){
+    read_bank_inOrder.foreach{ i =>
         val  meta_resp = uBTBMeta(i)(read_hit_ways(i))
         val  btb_resp = uBTB(i)(read_hit_ways(i))
-        read_resp(i).valid := meta_resp.valid && read_hit_vec(i) && read_mask(i)
+        var  index = 0
+        read_resp(i).valid := meta_resp.valid && read_hit_vec(i) && read_mask(index)
         read_resp(i).taken := read_resp(i).valid && meta_resp.pred(1)
-        read_resp(i).target := ((io.in.pc).asSInt + (w<<1).S + btb_resp.offset
+        read_resp(i).notTaken := read_resp(i).valid && !meta_resp.pred(1)
+        read_resp(i).target := (io.in.pc).asSInt + (index<<1).S + btb_resp.offset
+        index += 1
 
         out_meta.hits(i) := read_hit_vec(i)
     }
 
     //TODO: way alloc algorithm
     val alloc_way = { 
-        val r_metas = Cat(VecInit(meta.map(e => VecInit(e.map(_.tag)))).asUInt, s1_idx(tagSz-1,0))
+        val r_metas = Cat(VecInit(meta.map(e => VecInit(e.map(_.tag)))).asUInt, (s1_idx)(tagSz-1,0))
         val l = log2Ceil(nWays)
         val nChunks = (r_metas.getWidth + l - 1) / l
         val chunks = (0 until nChunks) map { i =>
@@ -123,10 +129,10 @@ class MicroBTB extends BasePredictor
         when(read_resp(i).valid)
         {
             io.out.targets(i) := read_resp(i).target
-            io.out.taken(i) := read_resp(i).taken
+            io.out.takens(i) := read_resp(i).taken
             io.out.isRVC(i) := read_resp(i).is_RVC
-            io.out.isBr(i) ；= read_resp(i).is_Br
-        } .otherwise 
+            io.out.notTakens(i) := read_resp(i).notTaken
+\        } .otherwise 
         {
             io.out := (0.U).asTypeOf(new MicroBTBResp)
         }
