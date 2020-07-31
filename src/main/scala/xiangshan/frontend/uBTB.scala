@@ -84,10 +84,10 @@ class MicroBTB extends BasePredictor
     val read_resp = Wire(Vec(PredictWidth,new ReadRespEntry))
 
     val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(PredictWidth-1,0) ))
-
+    val isInNextRow = VecInit((0 until PredictWidth).map(_.U < read_req_basebank))
     val read_hit_ohs = read_bank_inOrder.map{ b =>
         VecInit((0 until nWays) map {w => 
-            uBTBMeta(b)(w).tag === read_req_tag
+            Mux(isInNextRow(b),read_req_tag + 1.U,read_req_tag) === uBTBMeta(b)(w).tag
         })
     }
 
@@ -132,7 +132,7 @@ class MicroBTB extends BasePredictor
             io.out.takens(i) := read_resp(i).taken
             io.out.isRVC(i) := read_resp(i).is_RVC
             io.out.notTakens(i) := read_resp(i).notTaken
-\        } .otherwise 
+        } .otherwise 
         {
             io.out := (0.U).asTypeOf(new MicroBTBResp)
         }
@@ -150,6 +150,7 @@ class MicroBTB extends BasePredictor
     val update_taken = io.update.bits.taken
 
     val update_bank = getBank(update_br_pc)
+    val update_base_bank = getBank(update_fetch_pc)
     val update_tag = getTag(update_br_pc)
     val update_taget_offset =  io.update.bits.target.asSInt - update_br_pc.asSInt
     val update_is_BR_or_JAL = (io.update.bits.pd.brType === BrType.branch) || (io.update.bits.pd.brType === BrType.jal) 
@@ -177,6 +178,18 @@ class MicroBTB extends BasePredictor
     }
 
     //bypass:read-after-write 
+    val rawBypassHit = Wire(Vec(PredictWidth, Bool()))
+    for( b <- 0 until PredictWidth) {
+        when(update_bank === b.U && read_hit_vec(b) && uBTB_Meta_write_valid 
+            && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
+        {
+            io.out.targets(b) := io.update.bits.target
+            io.out.takens(b) := io.update.bits.taken
+            io.out.isRVC(b) := io.update.bits.pd.isRVC
+            io.out.notTakens(b) := (io.update.bits.pd.brType === BrType.branch) && (!io.out.takens(b) := io.update.bits.taken)
+        }
+    }
+
 
 
 }
