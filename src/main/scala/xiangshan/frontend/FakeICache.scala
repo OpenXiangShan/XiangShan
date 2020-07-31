@@ -17,7 +17,7 @@ trait HasICacheConst { this: XSModule =>
 
 class FakeIcacheReq extends XSBundle {
   val addr = UInt(VAddrBits.W)
-  val flush = Bool()
+  // val flush = Bool()
 }
 
 class FakeIcacheResp extends XSBundle {
@@ -57,6 +57,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new FakeIcacheReq))
     val out = DecoupledIO(new FakeIcacheResp)
+    val flush = Input(UInt(2.W))
   })
 
   val memByte = 128 * 1024 * 1024
@@ -143,17 +144,18 @@ class FakeCache extends XSModule with HasICacheConst {
 
   s3_ready := (!s3_valid && io.out.ready) || io.out.fire()
 
-  val needflush = io.in.bits.flush
   XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
   XSDebug(false,true.B,"\n")
 
   XSDebug("[Stage3_data] instr1:0x%x   instr2:0x%x\n",s3_ram_out(0).asUInt,s3_ram_out(1).asUInt)
-  XSDebug("[needFlush]] flush:%d\n",needflush)
+  XSDebug("[Flush icache] flush:%b\n", io.flush)
 
-  when(needflush){
-      s2_valid := false.B
-      s3_valid := false.B
-  }
+  // when(needflush){
+  //     s2_valid := false.B
+  //     s3_valid := false.B
+  // }
+  when (io.flush(0)) { s2_valid := false.B }
+  when (io.flush(1)) { s3_valid := false.B }
 
   // val tempPredecode = Module(new TempPreDecoder)
   // tempPredecode.io.in := s3_ram_out

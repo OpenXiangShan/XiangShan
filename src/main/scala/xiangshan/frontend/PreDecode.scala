@@ -7,9 +7,7 @@ import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 
 trait HasPdconst{ this: XSModule =>
-  // val groupAlign = log2Up(FetchWidth * 4)
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
-  // def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
     val rd = instr(11,7)
@@ -42,12 +40,6 @@ class PreDecodeInfo extends XSBundle {  // 8 bit
   val excType = UInt(3.W)
 }
 
-// class PDPacket extends PreDecodeInfo{
-//   val pc = UInt(VAddrBits.W)
-//   val inst = UInt(32.W)
-//   val mask = Bool()
-// }
-
 class PreDecodeResp extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
@@ -55,31 +47,13 @@ class PreDecodeResp extends XSBundle {
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
-// class ICacheResp extends XSBundle {
-//   val fetchPc = UInt(VAddrBits.W)
-//   val data = UInt((FetchWidth * 32).W)
-//   val mask = UInt((FetchWidth * 2).W)
-// }
-
-class FakeIcacheResp extends XSBundle {
-  val pc = UInt(VAddrBits.W)
-  // val data = Vec(FetchWidth, UInt(32.W))
-  val data = UInt((FetchWidth * 32).W)
-  val mask = UInt(PredictWidth.W)
-}
-
 class PreDecode extends XSModule with HasPdconst{
   val io = IO(new Bundle() {
     val in = Input(new FakeIcacheResp)
-    // val prevHalf = Input(UInt(16.W))
-    // val prevValid = Input(false.B)
-    val prev = ValidIO(UInt(16.W))
-
-    // val out = Output(Vec(PredictWidth, new PDPacket))
+    val prev = Flipped(ValidIO(UInt(16.W)))
     val out = Output(new PreDecodeResp)
   })
 
-  // val gpc = groupPC(io.in.pc)
   val data = io.in.data
   val mask = io.in.mask
 

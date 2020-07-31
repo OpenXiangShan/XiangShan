@@ -23,6 +23,7 @@ class IFUIO extends XSBundle
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val icacheReq = DecoupledIO(new FakeIcacheReq)
   val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
+  val icacheFlush = Output(UInt(2.W))
 }
 
 
@@ -30,9 +31,15 @@ class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)
   val bpu = if (EnableBPD) Module(new BPU) else Module(new FakeBPU)
+  val pd = Module(new PreDecode)
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
   val if1_flush, if2_flush, if3_flush, if4_flush = WireInit(false.B)
+
+  if4_flush := io.redirect.valid
+  if3_flush := if4_flush || if4_redirect
+  if2_flush := if3_flush || if3_redirect
+  if1_flush := if2_flush || if2_redirect
 
   //********************** IF1 ****************************//
   val if1_valid = !reset.asBool
@@ -57,7 +64,9 @@ class IFU extends XSModule with HasIFUConst
   val if2_fire = if2_valid && if3_ready
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
+  val if2_histPtr = RegEnable(ptr, if1_fire)
   if2_ready := if2_fire || !if2_valid
+  when (if2_flush) { if2_valid := if1_fire }
 
   when (RegNext(reset.asBool) && !reset.asBool) {
     if1_npc := resetVector.U(VAddrBits.W)
@@ -68,46 +77,108 @@ class IFU extends XSModule with HasIFUConst
   }
 
   val if2_bp = bpu.io.out(0).bits
-  val if2_prev_half_valid = RegInit(false.B)
-  val if2_prev_half_redirect = RegInit(false.B)
-  val if2_prev_half_fetchpc = Reg(UInt(VAddrBits.W))
-  val if2_prev_half_idx = Reg(UInt(log2Up(PredictWidth).W))
-  val if2_prev_half_tgt = Reg(UInt(VAddrBits.W))
-  val if2_prev_half_taken = RegInit(false.B)
-  when (if2_flush) {
-    if2_prev_half_valid := false.B
-    if2_prev_half_redirect := false.B
-  }.elsewhen (if2_fire && if2_bp.saveHalfRVI) {
-    if2_prev_half_valid := true.B
-    if2_prev_half_redirect := if2_bp.redirect && bpu.io.out(0).valid
-    if2_prev_half_fetchpc := if2_pc
-    if2_prev_half_idx := Mux(if2_bp.redirect && bpu.io.out(0).valid, if2_bp.jmpIdx, PopCount(mask(if2_pc)) - 1.U)
-    if2_prev_half_tgt := if2_bp.target
-    if2_prev_half_taken := if2_bp.taken
-  }.elsewhen (if2_fire) {
-    if2_prev_half_valid := false.B
-    if2_prev_half_redirect := false.B
-  }
-
-  if2_redirect := if2_fire && (if2_prev_half_valid && if2_prev_half_redirect || bpu.io.out(0).valid && if2_bp.redirect && !if2_bp.saveHalfRVI)
+  if2_redirect := if2_fire && bpu.io.out(0).valid && if2_bp.redirect && !if2_bp.saveHalfRVI
   when (if2_redirect) { 
-    if1_npc := Mux(if2_prev_half_valid && if2_prev_half_redirect, if2_prev_half_tgt, if2_bp.target)
+    if1_npc := if2_bp.target
   }
 
   //********************** IF3 ****************************//
   val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
   val if4_ready = WireInit(false.B)
   val if3_fire = if3_valid && if4_ready && io.icacheResp.valid
+  val if3_pc = RegEnable(if2_pc, if2_fire)
+  val if3_histPtr = RegEnable(if2_histPtr, if2_fire)
+  if3_ready := if3_fire || !if3_valid
+  when (if3_flush) { if3_valid := false.B }
 
+  val if3_bp = bpu.io.out(1).bits
+  val prev_half_valid = RegInit(false.B)
+  val prev_half_redirect = RegInit(false.B)
+  val prev_half_fetchpc = Reg(UInt(VAddrBits.W))
+  val prev_half_idx = Reg(UInt(log2Up(PredictWidth).W))
+  val prev_half_tgt = Reg(UInt(VAddrBits.W))
+  val prev_half_taken = RegInit(false.B)
+  val prev_half_instr = Reg(UInt(16.W))
+  when (if3_flush) {
+    prev_half_valid := false.B
+    prev_half_redirect := false.B
+  }.elsewhen (if3_fire && if3_bp.saveHalfRVI) {
+    prev_half_valid := true.B
+    prev_half_redirect := if3_bp.redirect && bpu.io.out(1).valid
+    prev_half_fetchpc := if3_pc
+    val idx = Mux(if3_bp.redirect && bpu.io.out(1).valid, if3_bp.jmpIdx, PopCount(mask(if3_pc)) - 1.U)
+    prev_half_idx := idx
+    prev_half_tgt := if3_bp.target
+    prev_half_taken := if3_bp.taken
+    prev_half_instr := pd.io.out.instrs(idx)(15, 0)
+  }.elsewhen (if3_fire) {
+    prev_half_valid := false.B
+    prev_half_redirect := false.B
+  }
+
+  // if3_redirect := if3_fire && (prev_half_valid && prev_half_taken || bpu.io.out(1).valid && if3_bp.redirect && !if3_bp.saveHalfRVI)
+  // when (if3_redirect) {
+  //   if1_npc := Mux(prev_half_valid && prev_half_redirect, prev_half_tgt, if3_bp.target)
+  // }
+
+  when (bpu.io.out(1).valid && if3_fire) {
+    when (prev_half_valid && prev_half_taken) {
+      if3_redirect := true.B
+      if1_npc := prev_half_tgt
+    }.elsewhen (if3_bp.redirect && !if3_bp.saveHalfRVI) {
+      if3_redirect := true.B
+      if1_npc := if3_bp.target
+    }.elsewhen (if3_bp.saveHalfRVI) {
+      if3_redirect := true.B
+      if1_npc := snpc(if3_pc)
+    }.otherwise {
+      if3_redirect := false.B
+    }
+  }.otherwise {
+    if3_redirect := false.B
+  }
 
   //********************** IF4 ****************************//
+  val if4_pd = RegEnable(pd.io.out, if3_fire)
+  // val if4_icacheResp = RegEnable(io.icacheResp.bits, if3_fire)
+  val if4_valid = RegEnable(next = if3_valid, init = false.B, enable = if3_fire)
+  val if4_fire = if4_valid && io.fetchPacket.ready
+  val if4_pc = RegEnable(if3_pc, if3_fire)
+  val if4_histPtr = RegEnable(if3_histPtr, if3_fire)
+  if4_ready := if4_fire || !if4_valid
+  when (if4_flush) { if4_valid := false.B }
+
+  val if4_bp = bpu.io.out(2).bits
+
+  when (bpu.io.out(2).valid && if4_fire && if4_pd.redirect) {
+    when (!if4_bp.saveHalfRVI) {
+      if4_redirect := true.B
+      if1_npc := if4_bp.target
+    }.otherwise {
+      if4_redirect := true.B
+      if1_npc := snpc(if4_pc)
+
+      prev_half_valid := true.B
+      prev_half_redirect := true.B
+      prev_half_fetchpc := if4_pc
+      val idx = PopCount(mask(if4_pc)) - 1.U
+      prev_half_idx := idx
+      prev_half_tgt := if4_bp.target
+      prev_half_taken := if4_bp.taken
+      prev_half_instr := if4_pd.io.out.instrs(idx)(15, 0)
+    }
+  }.otherwise {
+    if4_redirect := false.B
+  }
 
 
 
-  io.icacheReq.valid := if1_valid
+
+
+  io.icacheReq.valid := if1_valid && if2_ready
   io.icacheReq.bits.addr := if1_npc
-  // io.icacheReq.bits.flush := 
-  io.icacheResp.ready := if3_valid
+  io.icacheResp.ready := if3_valid && if4_ready
+  io.icacheFlush := Cat(if3_flush, if2_flush)
 
   bpu.io.inOrderBrInfo <> io.inOrderBrInfo
   bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
@@ -116,6 +187,26 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.in.bits.hist := hist.asUInt
   bpu.io.in.bits.inMask := mask(if1_npc)
   bpu.io.out(0).ready := if2_fire
-  // bpu.io.out(1).ready
-  // bpu.io.out(2).ready
+  bpu.io.out(1).ready := if3_fire
+  bpu.io.out(2).ready := if4_fire
+  bpu.io.predecode.valid := if4_valid
+  bpu.io.predecode.bits.mask := if4_pd.mask
+  bpu.io.predecode.bits.pd := if4_pd.pd
+  bpu.io.branchInfo.ready := if4_fire
+
+  pd.io.in := io.icacheResp.bits
+  pd.io.prev.valid := prev_half_valid
+  pd.io.prev.bits := prev_half_instr
+
+  io.fetchPacket.valid := if4_valid && !io.redirect.valid
+  io.fetchPacket.bits.instrs := if4_pd.instrs
+  io.fetchPacket.bits.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
+  io.fetchPacket.bits.pc := if4_pd.pc
+  (0 until PredictWidth).foreach(i => io.fetchPacket.bits.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
+  when (if4_bp.taken) {
+    io.fetchPacket.bits.pnpc(if4_bp.jmpIdx) := if4_bp.target
+  }
+  io.fetchPacket.bits.brInfo := bpu.io.branchInfo.bits
+  (0 until PredictWidth).foreach(i => io.fetchPacket.bits.brInfo(i).histPtr := if4_histPtr)
+  io.fetchPacket.bits.pd := if4_pd.pd
 }
