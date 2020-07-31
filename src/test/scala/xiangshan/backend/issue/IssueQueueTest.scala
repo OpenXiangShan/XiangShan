@@ -114,10 +114,11 @@ class IssueQueueTest extends FlatSpec
         c.clock.step(10)
         var cnt = 0
         while (cnt != TEST_SIZE){
-          c.io.tlbHit.poke(true.B)
+          c.io.tlbFeedback.valid.poke(true.B)
+          c.io.tlbFeedback.bits.hit.poke(true.B)
           c.clock.step(1)
           cnt += 1
-          c.io.tlbHit.poke(false.B)
+          c.io.tlbFeedback.valid.poke(false.B)
           c.clock.step(1 + Random.nextInt(10))
         }
       }.join()

@@ -24,8 +24,7 @@ class IssueQueue
     val bypassData = Vec(bypassCnt, Flipped(ValidIO(new ExuOutput)))
     val numExist = Output(UInt(iqIdxWidth.W))
     // tlb hit, inst can deq
-    val tlbHit = Input(Bool())
-    val replay = Flipped(ValidIO(UInt(RoqIdxWidth.W)))
+    val tlbFeedback = Flipped(ValidIO(new TlbFeedback))
   })
 
   def qsize: Int = IssQueSize
@@ -33,6 +32,9 @@ class IssueQueue
   def replayDelay = 16
 
   require(isPow2(qsize))
+
+  val tlbHit = io.tlbFeedback.valid && io.tlbFeedback.bits.hit
+  val tlbMiss = io.tlbFeedback.valid && !io.tlbFeedback.bits.hit
 
   /*
       invalid --[enq]--> valid --[deq]--> wait --[tlbHit]--> invalid
@@ -55,12 +57,11 @@ class IssueQueue
     example: realDeqIdx = 2       |  realDeqIdx=0
              moveMask = 11111100  |  moveMask=11111111
  */
-  assert(!(io.tlbHit && io.replay.valid), "Error: tlbHit and replay are both true!")
 
   val firstWait = PriorityEncoder(stateQueue.map(_ === s_wait))
   val firstBubble = PriorityEncoder(stateQueue.map(_ === s_invalid))
-  val realDeqIdx = Mux(io.tlbHit, firstWait, firstBubble)
-  val realDeqValid = io.tlbHit || ((firstBubble < tailPtr.tail(1)) && !io.replay.valid)
+  val realDeqIdx = Mux(tlbHit, firstWait, firstBubble)
+  val realDeqValid = tlbHit || ((firstBubble < tailPtr.tail(1)) && !tlbMiss)
   val moveMask = {
     (Fill(qsize, 1.U(1.W)) << realDeqIdx)(qsize-1, 0)
   } & Fill(qsize, realDeqValid)
@@ -200,13 +201,13 @@ class IssueQueue
     assert(stateQueue(selectedIdxReg) === s_valid, "Dequeue a invalid entry to lsu!")
   }
 
-  assert(!(tailPtr===0.U && io.tlbHit), "Error: queue is empty but tlbHit is true!")
+  assert(!(tailPtr===0.U && tlbHit), "Error: queue is empty but tlbHit is true!")
 
   val tailAfterRealDeq = tailPtr - moveMask(tailPtr.tail(1))
   val isFull = tailAfterRealDeq.head(1).asBool() // tailPtr===qsize.U
 
   // enq
-  io.enq.ready := !isFull && !io.replay.valid && !io.redirect.valid
+  io.enq.ready := !isFull && !tlbMiss && !io.redirect.valid
   when(io.enq.fire()){
     stateQueue(tailAfterRealDeq.tail(1)) := s_valid
     val uopQIdx = idxQueue(tailAfterRealDeq.tail(1))
@@ -243,14 +244,14 @@ class IssueQueue
   })
   XSDebug(false, true.B, "\n")
 
-  assert(!(io.replay.valid && realDeqValid), "Error: realDeqValid should be false when replay valid!")
+  assert(!(tlbMiss && realDeqValid), "Error: realDeqValid should be false when replay valid!")
   for(i <- 0 until qsize){
     val uopQIdx = idxQueue(i)
     val cnt = cntQueue(uopQIdx)
     val nextIdx = i.U - moveMask(i)
     when(
-      (io.replay.valid && stateQueue(i)===s_wait) &&
-        uopQueue(uopQIdx).isAfter(io.replay.bits)
+      (tlbMiss && stateQueue(i)===s_wait) &&
+        uopQueue(uopQIdx).isAfter(io.tlbFeedback.bits.roqIdx)
     ){
       // 'i' is enough because 'realDeqValid' must be false here
       stateQueue(i) := s_replay
@@ -288,5 +289,5 @@ class IssueQueue
       p"src2: ${io.deq.bits.uop.psrc2} data: ${Hexadecimal(io.deq.bits.src2)} " +
       p"imm : ${Hexadecimal(io.deq.bits.uop.ctrl.imm)}\npdest: ${io.deq.bits.uop.pdest}\n"
   )
-  XSDebug(p"tailPtr:$tailPtr tailAfterDeq:$tailAfterRealDeq tlbHit:${io.tlbHit}\n")
+  XSDebug(p"tailPtr:$tailPtr tailAfterDeq:$tailAfterRealDeq tlbHit:${tlbHit}\n")
 }
