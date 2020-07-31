@@ -66,6 +66,8 @@ class PreDecode extends XSModule with HasPdconst{
   val instsPC = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
   val nextHalf = Wire(UInt(16.W))
 
+  val lastHalfInstrIdx = PopCount(mask) - 1.U
+
   for (i <- 0 until PredictWidth) {
     val inst = Wire(UInt(32.W))
     val valid = Wire(Bool())
@@ -82,7 +84,7 @@ class PreDecode extends XSModule with HasPdconst{
       valid := !(instsMask(i-1) && !isRVC(insts(i-1)) || !isRVC(inst))
     } else {
       inst := data(i*16+31, i*16)
-      valid := !(instsMask(i-1) && !isRVC(insts(i-1)))
+      valid := !(instsMask(i-1) && !isRVC(insts(i-1))) && Mux(i.U === lastHalfInstrIdx, isRVC(inst), true.B)
     }
 
     insts(i) := inst
@@ -104,9 +106,9 @@ class PreDecode extends XSModule with HasPdconst{
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,
-      p"instr ${Hexdecimal(io.out.instrs(i))}, " +
+      p"instr ${Hexadecimal(io.out.instrs(i))}, " +
       p"mask ${Binary(instsMask(i))}, " +
-      p"pc ${Hexdecimal(io.out.pc(i))}, " +
+      p"pc ${Hexadecimal(io.out.pc(i))}, " +
       p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
       p"brType ${Binary(io.out.pd(i).brType)}, " +
       p"isRet ${Binary(io.out.pd(i).isRet)}, " +
