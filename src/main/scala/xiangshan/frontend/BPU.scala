@@ -40,6 +40,12 @@ abstract class BasePredictor extends XSModule {
   }
 }
 
+class BPUReq extends XSBundle {
+  val pc = UInt(VAddrBits.W)
+  val hist = UInt(HistoryLength.W)
+  val inMask = UInt(PredictWidth.W)
+}
+
 class PredictorResponse extends XSBundle {
   // the valid bits indicates whether a target is hit
   val ubtb = new Bundle {
@@ -242,11 +248,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     // from ifu, frontend redirect
     val flush = Input(UInt(3.W))
     // from if1
-    val in = Flipped(ValidIO(new Bundle {
-      val pc = UInt(VAddrBits.W)
-      val hist = UInt(ExtHistoryLength.W)
-      val inMask = UInt(PredictWidth.W)
-    }))
+    val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
     val out = Vec(3, Decoupled(new BranchPrediction))
     // from if4
