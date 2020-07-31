@@ -20,11 +20,11 @@ class BrqTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver {
   it should "redirect out-of-order, dequeue in-order" in {
-    XSLog.generateLog = false
+    XSLog.generateLog = true
 
     test(new Brq {
       AddSinks()
-    }).withAnnotations(Seq(VerilatorBackendAnnotation)) { c =>
+    }).withAnnotations(Seq()) { c =>
 
       def genEnqReq(x: => DecoupledIO[CfCtrl], pc: Long) = {
         chiselTypeOf(x.bits).Lit(
@@ -51,7 +51,7 @@ class BrqTest extends FlatSpec
       }
 
       var enqTags = List.tabulate(10)(i => i)
-      val misPred = Random.nextInt(10)
+      val misPred = 6
       println(s"enqTags:$enqTags misPredTag:$misPred")
       enqTags = enqTags.take(misPred + 1)
       var commitTags, deqTags = List[Int]()
@@ -91,6 +91,8 @@ class BrqTest extends FlatSpec
         }
       }
       c.io.bcommit.poke((misPred+1).U)
+      c.clock.step(1)
+      c.io.bcommit.poke(0.U)
       while (deqTags.size != misPred+1) {
         checkCommit
         checkDeq
