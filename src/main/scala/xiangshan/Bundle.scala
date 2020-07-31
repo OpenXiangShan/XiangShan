@@ -198,6 +198,10 @@ class RoqCommit extends XSBundle {
   val isWalk = Bool()
 }
 
+class TlbFeedback extends XSBundle with HasRoqIdx{
+  val hit = Bool()
+}
+
 class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
