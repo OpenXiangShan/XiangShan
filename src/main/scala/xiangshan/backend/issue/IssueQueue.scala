@@ -177,7 +177,7 @@ class IssueQueue
   }
 
   // (fake) deq to Load/Store unit
-  io.deq.valid := stateQueue(selectedIdxReg)===s_valid
+  io.deq.valid := (stateQueue(selectedIdxReg)===s_valid) && readyVec(idxQueue(selectedIdxReg))
   io.deq.bits.uop := uopQueue(idxQueue(selectedIdxReg))
 
   val src1Bypass = doBypass(io.deq.bits.uop.psrc1, io.deq.bits.uop.ctrl.src1Type)
@@ -210,7 +210,7 @@ class IssueQueue
   io.enq.ready := !isFull && !tlbMiss && !io.redirect.valid
   when(io.enq.fire()){
     stateQueue(tailAfterRealDeq.tail(1)) := s_valid
-    val uopQIdx = idxQueue(tailAfterRealDeq.tail(1))
+    val uopQIdx = idxQueue(tailPtr.tail(1))
     val new_uop = wakeUp(io.enq.bits)
     uopQueue(uopQIdx) := new_uop
   }
