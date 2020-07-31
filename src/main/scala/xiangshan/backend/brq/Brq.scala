@@ -123,33 +123,19 @@ class Brq extends XSModule {
   val headIdxMaskHi = headIdxMaskHiVec.asUInt()
   val headIdxMaskLo = (~headIdxMaskHi).asUInt()
 
-  val skipMaskHi = headIdxMaskHi & skipMask
-  val skipMaskLo = headIdxMaskLo & skipMask
+  val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
+  val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
 
-  val commitIdxHi, commitIdxLo, commitIdx = Wire(UInt(BrqSize.W))
+  val skipHi = (skipMask | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
+  val useLo = skipHi && findLo
 
-  commitIdxHi := PriorityEncoder(~skipMaskHi)
-  commitIdxLo := PriorityEncoder(~skipMaskLo)
-
-  val useLo = (skipMaskHi | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
-
-  commitIdx := Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).misPred,
+  val commitIdx = Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).misPred,
     commitIdxHi,
     Mux(useLo && stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).misPred,
       commitIdxLo,
       headIdx
     )
   )
-
-//  for(i <- 1 until redirctWindowSize){
-//    val idx = commitIdx + i.U
-//    val commitThis = checkNext && stateQueue(idx).isWb && brQueue(idx).misPred
-//    commitIdx = Mux(commitThis,
-//      idx,
-//      commitIdx
-//    )
-//    checkNext = checkNext && needCheckNext(idx)
-//  }
 
   val commitIsHead = commitIdx===headIdx
   val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
@@ -164,16 +150,16 @@ class Brq extends XSModule {
   io.inOrderBrInfo.misPred := commitEntry.misPred
   io.inOrderBrInfo.redirect := commitEntry.exuOut.redirect
 
-  XSDebug(
-    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
-  )
-  XSDebug(
-    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
-  )
+//  XSDebug(
+//    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
+//  )
+//  XSDebug(
+//    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
+//  )
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
-  stateQueue.map(s =>{
+  stateQueue.reverse.map(s =>{
     XSDebug(false, s.isIdle, "-")
     XSDebug(false, s.isWb, "w")
     XSDebug(false, s.isCommit, "c")
