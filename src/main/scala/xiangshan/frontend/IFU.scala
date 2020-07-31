@@ -49,14 +49,17 @@ class IFU extends XSModule with HasIFUConst
 
   val extHist = RegInit(Vec(ExtHistoryLength, 0.U(1.W)))
   val headPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
-  val updateHist = io.outOfOrderBrInfo.valid
+  val shiftPtr = WireInit(false.B)
   val newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
-  val ptr = Mux(updateHist, newPtr, headPtr)
-  when (updateHist) { headPtr := newPtr }
+  val ptr = Mux(shiftPtr, newPtr, headPtr)
+  when (shiftPtr) { headPtr := newPtr }
   val hist = Wire(Vec(HistoryLength, UInt(1.W)))
   for (i <- 0 until HistoryLength) {
     hist(i) := extHist(ptr + i.U)
   }
+
+  newPtr := headPtr
+  shiftPtr := false.B
 
   //********************** IF2 ****************************//
   val if2_valid = RegEnable(next = if1_valid, init = false.B, enable = if1_fire)
@@ -80,6 +83,13 @@ class IFU extends XSModule with HasIFUConst
   if2_redirect := if2_fire && bpu.io.out(0).valid && if2_bp.redirect && !if2_bp.saveHalfRVI
   when (if2_redirect) { 
     if1_npc := if2_bp.target
+  }
+
+  when (if2_fire && (if2_bp.taken || if2_bp.hasNotTakenBrs)) {
+    shiftPtr := true.B
+    newPtr := headPtr - 1.U
+    hist(0) := if2_bp.taken.asUInt
+    extHist(newPtr) := if2_bp.taken.asUInt
   }
 
   //********************** IF3 ****************************//
@@ -125,18 +135,31 @@ class IFU extends XSModule with HasIFUConst
     when (prev_half_valid && prev_half_taken) {
       if3_redirect := true.B
       if1_npc := prev_half_tgt
+      shiftPtr := true.B
+      newPtr := if3_histPtr - 1.U
+      hist(0) := 1.U
+      extHist(newPtr) := 1.U
     }.elsewhen (if3_bp.redirect && !if3_bp.saveHalfRVI) {
       if3_redirect := true.B
       if1_npc := if3_bp.target
+      shiftPtr := true.B
+      newPtr := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
+      hist(0) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
+      extHist(newPtr) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(newPtr))
     }.elsewhen (if3_bp.saveHalfRVI) {
       if3_redirect := true.B
       if1_npc := snpc(if3_pc)
+      shiftPtr := true.B
+      newPtr := Mux(if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
+      hist(0) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
+      extHist(newPtr) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(newPtr))
     }.otherwise {
       if3_redirect := false.B
     }
   }.otherwise {
     if3_redirect := false.B
   }
+
 
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
@@ -154,6 +177,12 @@ class IFU extends XSModule with HasIFUConst
     when (!if4_bp.saveHalfRVI) {
       if4_redirect := true.B
       if1_npc := if4_bp.target
+
+      shiftPtr := true.B
+      newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
+      hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
+      extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(newPtr))
+
     }.otherwise {
       if4_redirect := true.B
       if1_npc := snpc(if4_pc)
@@ -166,14 +195,22 @@ class IFU extends XSModule with HasIFUConst
       prev_half_tgt := if4_bp.target
       prev_half_taken := if4_bp.taken
       prev_half_instr := if4_pd.io.out.instrs(idx)(15, 0)
+
+      shiftPtr := true.B
+      newPtr := Mux(if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
+      hist(0) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
+      extHist(newPtr) := Mux(if4_np.hasNotTakenBrs, 0.U, extHist(newPtr))
     }
   }.otherwise {
     if4_redirect := false.B
   }
 
-
-
-
+  when (io.outOfOrderBrInfo.valid) {
+    shiftPtr := true.B
+    newPtr := io.outOfOrderBrInfo.bits.brInfo.histPtr - 1.U
+    hist(0) := io.outOfOrderBrInfo.bits.taken
+    extHist(newPtr) := io.outOfOrderBrInfo.bits.taken
+  }
 
   io.icacheReq.valid := if1_valid && if2_ready
   io.icacheReq.bits.addr := if1_npc
