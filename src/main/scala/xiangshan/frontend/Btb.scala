@@ -17,7 +17,7 @@ trait BTBParams extends HasXSParameters {
 class BtbDataEntry() extends XSBundle with BTBParams {
   val offset = SInt(offsetLen.W)
   val extended = Bool()
-  def apply(offset: SInt, extended: Bool()) {
+  def apply(offset: SInt, extended: Bool) = {
     this.offset := offset
     this.extended := extended
     this
@@ -30,7 +30,7 @@ class BtbMetaEntry() extends XSBundle with BTBParams {
   val tag = UInt((VAddrBits - log2Up(BtbSize) - 1).W)
   val btbType = UInt(2.W)
   val isRVC = Bool()
-  def apply(tag: UInt, btbType: UInt, isRVC: Bool()) {
+  def apply(tag: UInt, btbType: UInt, isRVC: Bool) = {
     this.valid := true.B
     this.tag := tag
     this.btbType := btbType
@@ -48,6 +48,8 @@ class BTB extends BasePredictor with BTBParams{
   class BTBMeta extends Meta {
     val writeWay =  Vec(PredictWidth, UInt(log2Up(BtbWays).W))
   }
+  class BTBFromOthers extends FromOthers {}
+  
   class BTBIO extends DefaultBasePredictorIO {
     val resp = Output(new BTBResp)
     val meta = Output(new BTBMeta)
@@ -55,52 +57,44 @@ class BTB extends BasePredictor with BTBParams{
   val io = new BTBIO
   val btbAddr = new TableAddr(log2Up(BtbSize), BTBBanks)
 
-  val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
+  val pcLatch = RegEnable(io.pc.bits, io.pc.valid)
 
   val data = List.fill(BTBWays) {
     List.fill(BTBBanks) {
-      Module(new SRAMTemplate(new BtbDataEntry(), set = nRows, shouldReset = true, holdRead = true)))
+      Module(new SRAMTemplate(new BtbDataEntry(), set = nRows, shouldReset = true, holdRead = true))
     }
   }
   val meta = List.fill(BTBWays) {
     List.fill(BTBBanks) {
-      Module(new SRAMTemplate(new BtbMetaEntry(), set = nRows, shouldReset = true, holdRead = true)))
+      Module(new SRAMTemplate(new BtbMetaEntry(), set = nRows, shouldReset = true, holdRead = true))
     }
   }
-  val edata = Module(new SRAMTemplate(UInt(VaddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true)))
+  val edata = Module(new SRAMTemplate(UInt(VaddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
 
   // BTB read requests
-  val baseBank = btbAddr.getBank(io.in.pc.bits)
-  // circular shifting
-  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
-    val res = Wire(UInt(len.W))
-    val higher = source << shamt
-    val lower = source >> (len.U - shamt)
-    res := higher | lower
-    res
-  }
-  val realMask = circularShiftLeft(io.in.mask, BtbBanks, baseBank)
+  val baseBank = btbAddr.getBank(io.pc.bits)
+
+  val realMask = circularShiftLeft(io.inMask, BtbBanks, baseBank)
 
   // those banks whose indexes are less than baseBank are in the next row
-  val isInNextRow = VecInit((0 until BtbBanks).map(_.U < baseBank))
+  val isInNextRow = VecInit((0 until BtbBanks).map((_.U +& baseBank)(log2Up(BtbBanks))))
 
-  val baseRow = btbAddr.getBankIdx(io.in.pc.bits)
-  // this row is the last row of a bank
-  val nextRowStartsUp = baseRow.andR
-  val realRow = VecInit((0 until BtbBanks).map(b => Mux(isInNextRow(b.U), Mux(nextRowStartsUp, 0.U, baseRow+1.U), baseRow)))
+  val baseRow = btbAddr.getBankIdx(io.pc.bits)
 
-  val realRowLatch = VecInit(realRow.map(RegEnable(_, enable=io.pc.in.valid)))
+  val realRow = VecInit((0 until BtbBanks).map(b => Mux(isInNextRow(b.U), (baseRow+1.U)(log2Up(nRows)-1, 0), baseRow)))
+
+  val realRowLatch = VecInit(realRow.map(RegEnable(_, enable=io.pc.valid)))
 
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
-      meta(w)(b).reset := reset.asBool
-      meta(w)(b).io.r.req.valid := realMask(b) && io.in.pc.valid
+      meta(w)(b).reset                := reset.asBool
+      meta(w)(b).io.r.req.valid       := realMask(b) && io.pc.valid
       meta(w)(b).io.r.req.bits.setIdx := realRow(b)
-      data(w)(b).reset := reset.asBool
-      data(w)(b).io.r.req.valid := realMask(b) && io.in.pc.valid
+      data(w)(b).reset                := reset.asBool
+      data(w)(b).io.r.req.valid       := realMask(b) && io.pc.valid
       data(w)(b).io.r.req.bits.setIdx := realRow(b)
-      edata.reset := reset.asBool
-      edata.io.r.req.valid := io.in.pc.valid
+      edata.reset                := reset.asBool
+      edata.io.r.req.valid       := io.pc.valid
       edata.io.r.req.bits.setIdx := realRow(0) // Use the baseRow
     }
   }
@@ -112,7 +106,7 @@ class BTB extends BasePredictor with BTBParams{
 
   val baseBankLatch = btbAddr.getBank(pcLatch)
   val baseTag = btbAddr.getTag(pcLatch)
-  val tagIncremented = VecInit((0 until BtbBanks).map(b => RegEnable(isInNextRow(b.U) && nextRowStartsUp, io.in.pc.valid)))
+  val tagIncremented = VecInit((0 until BtbBanks).map(b => RegEnable(isInNextRow(b.U) && nextRowStartsUp, io.pc.valid)))
 
   val totalHits = VecInit((0 until BtbBanks).map( b => 
     VecInit((0 until BtbWays).map( w =>
@@ -127,7 +121,7 @@ class BTB extends BasePredictor with BTBParams{
   ))
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch + b.U) % BtbBanks.U))
+  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch + b.U)(log2Up(BimBanks)-1,0)))
 
 
   for (b <- 0 until BtbBanks) {
@@ -158,14 +152,14 @@ class BTB extends BasePredictor with BTBParams{
     u.pc.asSInt)
   val new_extended = (new_offset > max_offset || new_offset < min_offset)
 
-  val u = io.inOrderBrInfo.bits
+  val u = io.update.bits
   val updateWay = u.brInfo.btbWriteWay
   val updateBankIdx = btbAddr.getBank(u.pc)
   val updateRow = btbAddr.getBankIdx(u.pc)
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), pdInfoToBTBtype(u.pd), u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val updateValid = io.inOrderBrInfo.valid
+  val updateValid = io.update.valid
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {

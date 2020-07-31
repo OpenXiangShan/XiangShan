@@ -8,17 +8,17 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
- def tagBits = VAddrBits - idxBits - 1
+  def tagBits = VAddrBits - idxBits - 1
 
- val tag = UInt(tagBits.W)
- val idx = UInt(idxBits.W)
- val offset = UInt(1.W)
+  val tag = UInt(tagBits.W)
+  val idx = UInt(idxBits.W)
+  val offset = UInt(1.W)
 
- def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
- def getTag(x: UInt) = fromUInt(x).tag
- def getIdx(x: UInt) = fromUInt(x).idx
- def getBank(x: UInt) = getIdx(x)(log2Up(banks) - 1, 0)
- def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
+  def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
+  def getTag(x: UInt) = fromUInt(x).tag
+  def getIdx(x: UInt) = fromUInt(x).idx
+  def getBank(x: UInt) = getIdx(x)(log2Up(banks) - 1, 0)
+  def getBankIdx(x: UInt) = getIdx(x)(idxBits - 1, log2Up(banks))
 }
 
 class PredictorResponse extends XSBundle {
@@ -65,6 +65,15 @@ abstract class BasePredictor extends XSModule {
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
     val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+  }
+
+  // circular shifting
+  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << shamt
+    val lower = source >> (len.U - shamt)
+    res := higher | lower
+    res
   }
 }
 
@@ -141,7 +150,7 @@ class BPUStage1 extends BPUStage {
 
   // 'overrides' default logic
   // when flush, the prediction should also starts
-  override predValid = BoolStopWatch(io.flush || inFire, outFire, true)
+  override val predValid = BoolStopWatch(io.flush || inFire, outFire, true)
   io.out.valid := predValid
 
   // ubtb is accessed with inLatch pc in s1, 
@@ -341,9 +350,9 @@ class BPU extends BaseBPU {
   bim.io.inMask := io.in.bits.inMask
 
   // Wrap bim response into resp_in and brInfo_in
-  s1_resp_in.bim <> bim.io.out
+  s1_resp_in.bim <> bim.io.resp
   for (i <- 0 until PredictWidth) {
-    s1_brInfo_in(i).bimCtr := bim.io.out(i)
+    s1_brInfo_in(i).bimCtr := bim.io.meta(i)
   }
 
 

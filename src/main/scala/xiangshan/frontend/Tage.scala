@@ -319,7 +319,7 @@ class Tage extends BasePredictor with TageModule {
     io.resp.takens(w).bits := s3_bim.ctrs(w)(1)
 
     for (i <- 0 until TageNTables) {
-      val io.resp.takens(w).valid = resps(i)(w).valid
+      io.resp.takens(w).valid = resps(i)(w).valid
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
         io.resp.takens(w).bits := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
