@@ -167,7 +167,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
             } else {
               num_retired_reqs += 1
               if (original_req.cmd.litValue == CMD_READ.litValue) {
-                resp.bits.data.expect(mem(original_req.addr.toInt).U)
+                resp.bits.data.expect(mem(original_req.addr.toInt / INTEGER_SIZE).U)
               }
             }
           }
