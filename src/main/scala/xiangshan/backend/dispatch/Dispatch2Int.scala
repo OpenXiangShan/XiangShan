@@ -16,6 +16,7 @@ class Dispatch2Int extends XSModule {
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   })
+
   /**
     * Part 1: generate indexes for reservation stations
     */
@@ -73,8 +74,8 @@ class Dispatch2Int extends XSModule {
   val intDynamicMapped = intDynamicIndex.map(i => indexVec(i))
   for (i <- intStaticIndex.indices) {
     val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
-    io.readRf(2*i).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
-    io.readRf(2*i + 1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
+    io.readRf(2*i  ).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
+    io.readRf(2*i+1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
   }
   val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
   intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := (2*i).U})
@@ -126,7 +127,7 @@ class Dispatch2Int extends XSModule {
 
     XSDebug(dataValidRegDebug(i),
       p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-        p"(${readPortIndexReg(i)}, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
         p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
   }
 }

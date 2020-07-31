@@ -72,8 +72,8 @@ class Dispatch2Ls extends XSModule {
     }
     else {
       io.fpRegAddr(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc2
-      io.intRegAddr(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc1
-      io.intRegAddr(readPort(i) + 1) := io.fromDq(indexVec(i)).bits.psrc2
+      io.intRegAddr(readPort(i)  ) := io.fromDq(indexVec(i)).bits.psrc1
+      io.intRegAddr(readPort(i)+1) := io.fromDq(indexVec(i)).bits.psrc2
     }
   }
 
@@ -87,7 +87,7 @@ class Dispatch2Ls extends XSModule {
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.intRegRdy(readPort(i))
     if (i < exuParameters.LduCnt) {
-      enq.bits.src2State := io.intRegRdy(readPort(i) + 1)
+      enq.bits.src2State := DontCare
     }
     else {
       enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src1Type === SrcType.fp,
