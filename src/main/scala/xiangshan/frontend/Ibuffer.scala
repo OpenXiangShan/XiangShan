@@ -17,8 +17,8 @@ class Ibuffer extends XSModule {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
     val pnpc = UInt(VAddrBits.W)
-    val brInfo = Vec(PredictWidth, (new BranchInfo))
-    val pd = Vec(PredictWidth, (new PreDecodeInfo))
+    val brInfo = new BranchInfo
+    val pd = new PreDecodeInfo
   }
 
   // Ignore
@@ -66,7 +66,11 @@ class Ibuffer extends XSModule {
 
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
-      io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
+      // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
+      io.out(i).bits.brUpdate := DontCare
+      io.out(i).bits.brUpdate.pc := io.out(i).bits.pc
+      io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
+      io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
 
       deq_idx = deq_idx + io.out(i).fire
     }

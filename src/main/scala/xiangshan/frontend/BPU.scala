@@ -246,10 +246,14 @@ class BPUReq extends XSBundle {
   val inMask = UInt(PredictWidth.W)
 }
 
+class BranchUpdateInfoWithHist extends BranchUpdateInfo {
+  val hist = UInt(HistoryLength.W)
+}
+
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
-    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(UInt(3.W))
     // from if1
