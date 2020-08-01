@@ -19,6 +19,7 @@ object LSUOpType {
   def lbu  = "b000100".U
   def lhu  = "b000101".U
   def lwu  = "b000110".U
+  def ldu  = "b000111".U
   def sb   = "b001000".U
   def sh   = "b001001".U
   def sw   = "b001010".U
@@ -270,9 +271,11 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
         LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
         LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
     ))
 
     // ecc check
