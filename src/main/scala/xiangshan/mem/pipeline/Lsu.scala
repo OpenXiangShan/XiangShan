@@ -138,6 +138,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     when (l2_out(i).valid) { XSDebug("L2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType, l2_out(i).bits.data)}; 
     when (l4_out(i).valid) { XSDebug("L4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", l4_out(i).bits.uop.cf.pc, l4_out(i).bits.vaddr, l4_out(i).bits.paddr, l4_out(i).bits.uop.ctrl.fuOpType, l4_out(i).bits.data)}; 
     when (l5_in(i).valid)  { XSDebug("L5_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", l5_in(i).bits.uop.cf.pc,  l5_in(i).bits.vaddr , l5_in(i).bits.paddr , l5_in(i).bits.uop.ctrl.fuOpType , l5_in(i).bits.data )}; 
+    XSDebug(l2_out(i).fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType)
   })
 
 //-------------------------------------------------------
@@ -316,6 +317,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     when (s2_out(i).valid) { XSDebug("S2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)}; 
     when (s3_in(i).valid ) { XSDebug("S3_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s3_in(i).bits.uop.cf.pc , s3_in(i).bits.vaddr , s3_in(i).bits.paddr , s3_in(i).bits.uop.ctrl.fuOpType , s3_in(i).bits.data )}; 
     // when (s4_in(i).valid ) { printf("S4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s4_in(i).bits.uop.cf.pc , s4_in(i).bits.vaddr , s4_in(i).bits.paddr , s4_in(i).bits.uop.ctrl.fuOpType , s4_in(i).bits.data )}; 
+    XSDebug(s2_out(i).fire(), "store req: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)
   })
   
   //-------------------------------------------------------
