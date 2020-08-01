@@ -77,6 +77,14 @@ abstract class BasePredictor extends XSModule {
     res := higher | lower
     res
   }
+
+  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << (len.U - shamt)
+    val lower = source >> shamt
+    res := higher | lower
+    res
+  }
 }
 
 class BPUStageIO extends XSBundle {

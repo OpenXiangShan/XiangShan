@@ -49,10 +49,10 @@ class BIM extends BasePredictor with BimParams{
 
   val baseBank = bimAddr.getBank(io.pc.bits)
 
-  val realMask = circularShiftLeft(io.inMask, BimBanks, baseBank)
+  val realMask = circularShiftRight(io.inMask, BimBanks, baseBank)
   
   // those banks whose indexes are less than baseBank are in the next row
-  val isInNextRow = VecInit((0 until BtbBanks).map(b => ((BimBanks - baseBank) +& b.U)(log2Up(BimBanks))))
+  val isInNextRow = VecInit((0 until BtbBanks).map(_.U < baseBank))
 
   val baseRow = bimAddr.getBankIdx(io.pc.bits)
 
@@ -71,7 +71,7 @@ class BIM extends BasePredictor with BimParams{
   val baseBankLatch = bimAddr.getBank(pcLatch)
   
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-  val bankIdxInOrder = VecInit((0 until BimBanks).map(b => ((BimBanks - baseBankLatch) +& b.U)(log2Up(BimBanks)-1, 0)))
+  val bankIdxInOrder = VecInit((0 until BimBanks).map(b => (baseBankLatch +& b.U)(log2Up(BimBanks)-1, 0)))
 
   for (b <- 0 until BimBanks) {
     val ctr = bimRead(bankIdxInOrder(b))

@@ -62,7 +62,7 @@ class Ibuffer extends XSModule {
     var deq_idx = head_ptr
     for(i <- 0 until DecodeWidth) {
       io.out(i).valid := ibuf_valid(deq_idx)
-      lbuf_valid(deq_idx) := !io.out(i).fire
+      ibuf_valid(deq_idx) := !io.out(i).fire
 
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
@@ -91,9 +91,9 @@ class Ibuffer extends XSModule {
 
   when(io.in.fire) {
     XSDebug("Enque:\n")
-    XSDebug(p"PC=${Hexadecimal(io.in.bits.pc)} MASK=${Binary(io.in.bits.mask)}\n")
+    XSDebug(p"MASK=${Binary(io.in.bits.mask)}\n")
     for(i <- 0 until PredictWidth){
-        XSDebug(p"${Hexadecimal(io.in.bits.instrs(i))}\n")
+        XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
     }
   }
 
