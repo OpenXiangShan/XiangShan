@@ -114,42 +114,48 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val unhashed_idxes = VecInit((0 until TageBanks).map((io.req.bits.pc >> 1.U) + _.U))
   val bankIdxes = VecInit(unhashed_idxes.map(_(log2Up(TageBanks)-1, 0)))
 
-  val idxes_and_tags = (0 until TageBanks).map(compute_tag_and_hash(unhashed_idxes(_), io.req.bits.hist))
+  val idxes_and_tags = (0 until TageBanks).map(b => compute_tag_and_hash(unhashed_idxes(b.U), io.req.bits.hist))
 
 
   val hi_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
   val lo_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
   val table = List.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
 
-  val bankIdxesLatch = RegEnable(bankIdxes, io.req.valid)
-  val iAndTLatch = RegEnable(idxes_and_tags, io.req.valid)
+  val bankIdxesLatch = RegEnable(bankIdxes, enable=io.req.valid)
+  val idxLatch = RegEnable(VecInit(idxes_and_tags.map(_._1)), enable=io.req.valid)
+  val tagLatch = RegEnable(VecInit(idxes_and_tags.map(_._2)), enable=io.req.valid)
 
   val hi_us_r = Wire(Vec(TageBanks, Bool()))
   val lo_us_r = Wire(Vec(TageBanks, Bool()))
   val table_r = Wire(Vec(TageBanks, new TageEntry))
 
+  val baseBank = unhashed_idxes(0)(log2Up(TageBanks)-1, 0)
+
+  val bankIdxInOrder = VecInit((0 until TageBanks).map(b => ((TageBanks - baseBank) +& b.U)(log2Up(TageBanks)-1, 0)))
+  val bankIdxInOrderLatch= RegEnable(bankIdxInOrder, enable=io.req.valid)
+
+  val realMask = circularShiftLeft(io.inMask, TageBanks, baseBank)
+
   (0 until TageBanks).map(
     b => {
-      val bank = bankIdxes(b)
-      hi_us(bank).reset := reset.asBool
-      lo_us(bank).reset := reset.asBool
-      table(bank).reset := reset.asBool
-      hi_us(bank).io.r.req.valid := io.req.valid
-      lo_us(bank).io.r.req.valid := io.req.valid
-      table(bank).io.r.req.valid := io.req.valid
-      lo_us(bank).io.r.req.bits.setIdx := idxes_and_tags(b)
-      hi_us(bank).io.r.req.bits.setIdx := idxes_and_tags(b)
-      table(bank).io.r.req.bits.setIdx := idxes_and_tags(b)
+      hi_us(b).reset := reset.asBool
+      lo_us(b).reset := reset.asBool
+      table(b).reset := reset.asBool
+      hi_us(b).io.r.req.valid := io.req.valid
+      lo_us(b).io.r.req.valid := io.req.valid
+      table(b).io.r.req.valid := io.req.valid
+      lo_us(b).io.r.req.bits.setIdx := idxes_and_tags(bankIdxInOrder(b))._1
+      hi_us(b).io.r.req.bits.setIdx := idxes_and_tags(bankIdxInOrder(b))._1
+      table(b).io.r.req.bits.setIdx := idxes_and_tags(bankIdxInOrder(b))._1
 
-      val bankLatch = bankIdxesLatch(b)
-      hi_us_r(bankLatch) := hi_us(b).io.r.resp.data(0)
-      lo_us_r(bankLatch) := lo_us(b).io.r.resp.data(0)
-      table_r(bankLatch) := table(b).io.r.resp.data(0)
-
+      // Reorder done
+      hi_us_r(bankIdxInOrderLatch(b)) := hi_us(b).io.r.resp.data(0)
+      lo_us_r(bankIdxInOrderLatch(b)) := lo_us(b).io.r.resp.data(0)
+      table_r(bankIdxInOrderLatch(b)) := table(b).io.r.resp.data(0)
     }
   )
 
-  val req_rhits = VecInit((0 until TageBanks).map(b => table_r(b).valid && table_r(b).tag === iAndTLatch(b)._2))
+  val req_rhits = VecInit((0 until TageBanks).map(b => table_r(b).valid && table_r(b).tag === tagLatch(b)))
 
   (0 until TageBanks).map(b => {
     io.resp(b).valid := req_rhits(b)
@@ -233,25 +239,31 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%b, base_idx=%d, base_tag=%x\n",
     io.req.bits.pc, io.req.bits.hist, idxes_and_tags(0)._1, idxes_and_tags(0)._2)
   for (i <- 0 until TageBanks) {
-    XSDebug(RegNext(io.req.valid), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, iAndTLatch(i)._1, req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
+    XSDebug(RegNext(io.req.valid), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch(i), req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
   }
 
 }
 
 class FakeTAGE extends TageModule {
-  val io = IO(new Bundle() {
-    val req = Input(Valid(new TageReq))
-    val out = new Bundle {
-      val hits = Output(UInt(TageBanks.W))
-      val takens = Output(Vec(TageBanks, Bool()))
-    }
-    val meta = Output(Vec(TageBanks, (new TageMeta)))
-    val redirectInfo = Input(new RedirectInfo)
-  })
+  class TAGEResp extends Resp {
+    val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
+  }
+  class TAGEMeta extends Meta with TageMeta{
+  }
+  class FromBIM extends FromOthers {
+    val ctrs = Vec(PredictWidth, UInt(2.W))
+  }
+  class TageIO extends DefaultBasePredictorIO {
+    val resp = Output(new TAGEResp)
+    val meta = Output(Vec(PredictWidth, new TAGEMeta))
+    val bim = Input(new FromBIM)
+    val s3Fire = Input(Bool())
+  }
 
-  io.out.hits := 0.U(TageBanks.W)
-  io.out.takens := DontCare
-  io.meta := DontCare
+  override val io = new TageIO
+
+  io.resp <> DontCare
+  io.meta <> DontCare
 }
 
 
@@ -271,7 +283,7 @@ class Tage extends BasePredictor with TageModule {
     val s3Fire = Input(Bool())
   }
 
-  val io = new TageIO
+  override val io = new TageIO
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {
