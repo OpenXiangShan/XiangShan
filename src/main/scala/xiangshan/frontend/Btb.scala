@@ -74,10 +74,10 @@ class BTB extends BasePredictor with BTBParams{
   // BTB read requests
   val baseBank = btbAddr.getBank(io.pc.bits)
 
-  val realMask = circularShiftLeft(io.inMask, BtbBanks, baseBank)
+  val realMask = circularShiftRight(io.inMask, BtbBanks, baseBank)
 
   // those banks whose indexes are less than baseBank are in the next row
-  val isInNextRow = VecInit((0 until BtbBanks).map(b => ((BtbBanks - baseBank) +& b.U)(log2Up(BtbBanks))))
+  val isInNextRow = VecInit((0 until BtbBanks).map(_.U < baseBank))
 
   val baseRow = btbAddr.getBankIdx(io.pc.bits)
 
@@ -124,7 +124,7 @@ class BTB extends BasePredictor with BTBParams{
   ))
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => ((BtbBanks - baseBankLatch) +& b.U)(log2Up(BtbBanks)-1,0)))
+  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch +& b.U)(log2Up(BtbBanks)-1,0)))
 
 
   for (b <- 0 until BtbBanks) {
