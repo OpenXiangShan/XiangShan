@@ -329,10 +329,10 @@ class BPU extends BaseBPU {
   ubtb.io.inMask := s1_inLatch.bits.inMask
 
   // Wrap ubtb response into resp_in and brInfo_in
-  s1_resp_in.ubtb <> ubtb.io.resp
+  s1_resp_in.ubtb <> ubtb.io.out
   for (i <- 0 until PredictWidth) {
-    s1_brInfo_in(i).ubtbWriteWay := ubtb.io.meta.writeWay(i)
-    s1_brInfo_in(i).ubtbHits := ubtb.io.out.targets(i).valid
+    s1_brInfo_in(i).ubtbWriteWay := ubtb.io.uBTBBranchInfo.writeWay(i)
+    s1_brInfo_in(i).ubtbHits := ubtb.io.uBTBBranchInfo.hits(i)
   }
 
   btb.io.flush := io.flush(0) // TODO: fix this
