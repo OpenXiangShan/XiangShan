@@ -243,9 +243,13 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   (0 until MoqSize * 2).map(i => {
     val ptr = i.U(InnerMoqIdxWidth-1, 0)
     if(i == 0){
-      dequeueMask(i) := ringBufferTail === i.U && ringBufferHead =/= i.U && !allocated(ptr)
+      dequeueMask(i) := ringBufferTail === i.U && !ringBufferEmpty && !allocated(ptr) // beginning of dequeuemask
     }else{
-      dequeueMask(i) := (dequeueMask(i-1) || ringBufferTail === i.U) && !allocated(ptr) && ringBufferHead =/= i.U(InnerMoqIdxWidth-1, 0)
+      dequeueMask(i) := (
+        dequeueMask(i-1) && !allocated(ptr) && ringBufferHead =/= i.U(InnerMoqIdxWidth-1, 0) ||
+        ringBufferTail === i.U && !ringBufferEmpty && !allocated(ptr) // beginning of dequeuemask
+        // TODO: opt timing
+      )
     }
   })
   ringBufferTailExtended := ringBufferTailExtended + PopCount(dequeueMask.asUInt)
