@@ -63,6 +63,7 @@ class Dispatch1 extends XSModule {
     // input for ROQ and LSROQ
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
+    io.toRoq(i).bits.ctrl.dpqType := Cat(isLs(i), isFp(i))
 
     io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)
     io.toMoq(i).bits := io.fromRename(i).bits
@@ -86,7 +87,6 @@ class Dispatch1 extends XSModule {
     uopWithIndex(i) := io.fromRename(i).bits
     uopWithIndex(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
     uopWithIndex(i).moqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.moqIdxs(i))
-    uopWithIndex(i).ctrl.dpqType := Cat(isLs(i), isFp(i))
 
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
     XSDebug(io.toMoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives mroq ${io.moqIdxs(i)}\n")
