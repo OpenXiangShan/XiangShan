@@ -7,6 +7,7 @@ import utils._
 
 class DecodeBuffer extends XSModule {
   val io = IO(new Bundle() {
+    val isWalking = Input(Bool())
     val redirect = Flipped(ValidIO(new Redirect))
     val in  = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
     val out = Vec(RenameWidth, DecoupledIO(new CfCtrl))
@@ -44,10 +45,10 @@ class DecodeBuffer extends XSModule {
         Mux(r.ctrl.noSpecExec,
           !ParallelOR(validVec.take(i)).asBool(),
           !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec)).asBool()
-        )
+        ) && !io.isWalking
     } else {
       require( i == 0)
-      io.out(i).valid := validVec(i) && !io.redirect.valid
+      io.out(i).valid := validVec(i) && !io.redirect.valid && !io.isWalking
     }
   }
 

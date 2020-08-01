@@ -21,15 +21,9 @@ class Rename extends XSModule {
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
 
-  val isWalk = ParallelOR(io.roqCommits.map(x => x.valid && x.bits.isWalk)).asBool()
-
-  val debug_exception = io.redirect.valid && io.redirect.bits.isException
-  val debug_walk = isWalk
-  val debug_norm = !(debug_exception || debug_walk)
-
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
     XSInfo(
-      debug_norm && in.valid && in.ready,
+      in.valid && in.ready,
       p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
         p"lsrc1:${in.bits.ctrl.lsrc1} -> psrc1:${out.bits.psrc1} " +
         p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
@@ -79,7 +73,7 @@ class Rename extends XSModule {
     uops(i).ctrl := io.in(i).bits.ctrl
     uops(i).brTag := io.in(i).bits.brTag
 
-    val inValid = io.in(i).valid && !isWalk
+    val inValid = io.in(i).valid
 
     // alloc a new phy reg
     val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
@@ -97,7 +91,7 @@ class Rename extends XSModule {
         true.B
       )
     )
-    io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc && !isWalk
+    io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc
 
     // do checkpoints when a branch inst come
     for(fl <- Seq(fpFreeList, intFreeList)){
