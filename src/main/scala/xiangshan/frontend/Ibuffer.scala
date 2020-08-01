@@ -76,6 +76,9 @@ class Ibuffer extends XSModule {
       deq_idx = deq_idx + io.out(i).fire
     }
     head_ptr := deq_idx
+  }.otherwise {
+    io.out.foreach(_.valid := false.B)
+    io.out.foreach(_.bits <> DontCare)
   }
 
   // Flush
