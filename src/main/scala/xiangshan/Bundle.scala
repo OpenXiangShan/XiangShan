@@ -31,6 +31,7 @@ object ValidUndirectioned {
 }
 
 class TageMeta extends XSBundle {
+  def TageNTables = 6
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
@@ -51,7 +52,7 @@ class BranchInfo extends XSBundle {
   val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
   val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
-  val bimCtr =UInt(2.W)
+  val bimCtr = UInt(2.W)
   val histPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
@@ -76,6 +77,7 @@ class Predecode extends XSBundle {
 class BranchUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
+  val pnpc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
   val taken = Bool()
