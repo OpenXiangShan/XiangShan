@@ -64,7 +64,7 @@ class PreDecode extends XSModule with HasPdconst{
   val instsMask = Wire(Vec(PredictWidth, Bool()))
   val instsRVC = Wire(Vec(PredictWidth,Bool()))
   val instsPC = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
-  val nextHalf = Wire(UInt(16.W))
+  // val nextHalf = Wire(UInt(16.W))
 
   val lastHalfInstrIdx = PopCount(mask) - 1.U
 

@@ -65,7 +65,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.isMisPred := DontCare // check this in brq
   io.out.bits.redirect.isReplay := false.B
-  // io.out.bits.redirect.roqIdx := uop.roqIdx
+  io.out.bits.redirect.roqIdx := uop.roqIdx
 
   io.out.bits.brUpdate := uop.cf.brUpdate
   // override brUpdate
