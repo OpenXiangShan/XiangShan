@@ -42,7 +42,7 @@ class MicroBTB extends BasePredictor
 
     val io = IO(new MicroBTBIO)
     io.uBTBBranchInfo <> out_ubtb_br_info
-    io.out.targets.map(_.valid : false.B)
+    io.out.targets.map(_.valid := false.B)
 
     def getTag(pc: UInt) = pc >> (log2Ceil(PredictWidth) + 1).U
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
@@ -206,7 +206,4 @@ class MicroBTB extends BasePredictor
              XSDebug("uBTB bypass hit!\n")
         }
     }
-
-
-
 }
