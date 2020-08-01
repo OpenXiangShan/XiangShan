@@ -147,7 +147,7 @@ class IssueQueue
   ))
   val selectedIdxWire = PriorityEncoder(selectMask)
   val selectedIdxReg = RegEnable(
-    enable = io.deq.ready,
+    enable = true.B,//io.deq.ready,
     next = selectedIdxWire - moveMask(selectedIdxWire)
   )
 //  selectedIdxReg := selectedIdxWire - moveMask(selectedIdxWire)

@@ -142,7 +142,7 @@ class Rename extends XSModule {
 
       XSInfo(walkWen,
         {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
-          p" ldst:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
+          p" ldest:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
       )
 
       rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits(i).bits.isWalk
