@@ -28,7 +28,7 @@ class BIM extends BasePredictor with BimParams{
     val meta = new BIMMeta
   }
 
-  override val io = new BIMIO
+  override val io = IO(new BIMIO)
   // Update logic
   // 1 calculate new 2-bit saturated counter value
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {

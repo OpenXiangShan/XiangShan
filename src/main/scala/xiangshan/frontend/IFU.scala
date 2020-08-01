@@ -47,7 +47,7 @@ class IFU extends XSModule with HasIFUConst
   val if2_ready = WireInit(false.B)
   val if1_fire = if1_valid && (if2_ready || if1_flush) && io.icacheReq.ready
 
-  val extHist = RegInit(Vec(ExtHistoryLength, 0.U(1.W)))
+  val extHist = VecInit(Fill(ExtHistoryLength, RegInit(0.U(1.W))))
   val headPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
   val shiftPtr = WireInit(false.B)
   val newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -267,7 +267,7 @@ class IFU extends XSModule with HasIFUConst
   XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, if3_histPtr)
   XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_histPtr)
 
-  XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", io.icacheReq.valid, io.icacheReq.ready)
+  XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", io.icacheReq.valid, io.icacheReq.ready, io.icacheReq.bits.addr)
   XSDebug("[IF1][ghr] headPtr=%d shiftPtr=%d newPtr=%d ptr=%d\n", headPtr, shiftPtr, newPtr, ptr)
   XSDebug("[IF1][ghr] hist=%b\n", hist.asUInt)
   XSDebug("[IF1][ghr] extHist=%b\n\n", extHist.asUInt)

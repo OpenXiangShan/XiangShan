@@ -103,7 +103,7 @@ abstract class BPUStage extends XSModule {
     val pred = Decoupled(new BranchPrediction)
     val out = Decoupled(new BPUStageIO)
   }
-  val io = new DefaultIO
+  val io = IO(new DefaultIO)
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
@@ -265,7 +265,7 @@ class BranchUpdateInfoWithHist extends BranchUpdateInfo {
   val hist = UInt(HistoryLength.W)
 }
 
-abstract class BaseBPU extends XSModule with BranchPredictorComponents{
+abstract class BaseBPU extends XSModule {
   val io = IO(new Bundle() {
     // from backend
     val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
@@ -280,14 +280,24 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     // to if4, some bpu info used for updating
     val branchInfo = Decoupled(Vec(PredictWidth, new BranchInfo))
   })
+}
+
+
+class FakeBPU extends BaseBPU {
+  io.out.foreach(i => {
+    // Provide not takens
+    i.valid := true.B
+    i.bits <> DontCare
+    i.bits.redirect := false.B
+  })
+  io.branchInfo <> DontCare
+}
+
+class BPU extends BaseBPU {
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
   val s3 = Module(new BPUStage3)
-
-  // TODO: whether to update ubtb when btb successfully 
-  // corrects the wrong prediction from ubtb
-  preds.map(_.io.update <> io.inOrderBrInfo)
 
   s1.io.flush := io.flush(0)
   s2.io.flush := io.flush(1)
@@ -300,27 +310,13 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   io.out(0) <> s1.io.pred
   io.out(1) <> s2.io.pred
   io.out(2) <> s3.io.pred
-  
-  s3.io.predecode <> io.predecode
 
-  io.branchInfo.valid := s3.io.out.valid
-  io.branchInfo.bits := s3.io.out.bits.brInfo
-  s3.io.out.ready := io.branchInfo.ready
-  
-}
-
-
-class FakeBPU extends BaseBPU {
-  io.out.foreach(i => {
-    // Provide not takens
-    i.valid := true.B
-    i.bits := false.B
-  })
-  io.branchInfo <> DontCare
-}
-
-class BPU extends BaseBPU {
-
+  val ubtb = Module(new MicroBTB)
+  val btb = Module(new BTB)
+  val bim = Module(new BIM)
+  val tage = Module(new Tage)
+  val preds = Seq(ubtb, btb, bim, tage)
+  preds.map(_.io.update <> io.inOrderBrInfo)
 
   //**********************Stage 1****************************//
   val s1_fire = s1.io.in.fire()
@@ -373,7 +369,7 @@ class BPU extends BaseBPU {
   s1.io.in.bits.resp := s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
-
+  //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
   tage.io.pc.valid := s1.io.out.fire()
   tage.io.pc.bits := s1.io.out.bits.pc // PC from s1
@@ -382,12 +378,19 @@ class BPU extends BaseBPU {
   tage.io.s3Fire := s3.io.in.fire() // Tell tage to march 1 stage
   tage.io.bim <> s1.io.out.bits.resp.bim // Use bim results from s1
 
-
+  //**********************Stage 3****************************//
   // Wrap tage response and meta into s3.io.in.bits
   // This is ugly
+  
   s3.io.in.bits.resp.tage <> tage.io.resp
   for (i <- 0 until PredictWidth) {
     s3.io.in.bits.brInfo(i).tageMeta := tage.io.meta(i)
   }
 
+  s3.io.predecode <> io.predecode
+
+  s3.io.out.ready := io.branchInfo.ready
+  
+  io.branchInfo.valid := s3.io.out.valid
+  io.branchInfo.bits := s3.io.out.bits.brInfo
 }

@@ -54,7 +54,7 @@ class BTB extends BasePredictor with BTBParams{
     val resp = Output(new BTBResp)
     val meta = Output(new BTBMeta)
   }
-  override val io = new BTBIO
+  override val io = IO(new BTBIO)
   val btbAddr = new TableAddr(log2Up(BtbSize), BtbBanks)
 
   val pcLatch = RegEnable(io.pc.bits, io.pc.valid)

@@ -274,7 +274,7 @@ class FakeTAGE extends BasePredictor with HasTageParameter {
     val s3Fire = Input(Bool())
   }
 
-  override val io = new TageIO
+  override val io = IO(new TageIO)
 
   io.resp <> DontCare
   io.meta <> DontCare
@@ -297,7 +297,7 @@ class Tage extends BasePredictor with HasTageParameter {
     val s3Fire = Input(Bool())
   }
 
-  override val io = new TageIO
+  override val io = IO(new TageIO)
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {
