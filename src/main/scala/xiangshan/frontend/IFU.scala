@@ -47,7 +47,8 @@ class IFU extends XSModule with HasIFUConst
   val if2_ready = WireInit(false.B)
   val if1_fire = if1_valid && (if2_ready || if1_flush) && io.icacheReq.ready
 
-  val extHist = VecInit(Fill(ExtHistoryLength, RegInit(0.U(1.W))))
+  // val extHist = VecInit(Fill(ExtHistoryLength, RegInit(0.U(1.W))))
+  val extHist = RegInit(VecInit(Seq.fill(ExtHistoryLength)(0.U(1.W))))
   val headPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
   val shiftPtr = WireInit(false.B)
   val newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -145,14 +146,14 @@ class IFU extends XSModule with HasIFUConst
       shiftPtr := true.B
       newPtr := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
       hist(0) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
-      extHist(newPtr) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(newPtr))
+      extHist(newPtr) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
     }.elsewhen (if3_bp.saveHalfRVI) {
       if3_redirect := true.B
       if1_npc := snpc(if3_pc)
       shiftPtr := true.B
       newPtr := Mux(if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
       hist(0) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
-      extHist(newPtr) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(newPtr))
+      extHist(newPtr) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
     }.otherwise {
       if3_redirect := false.B
     }
@@ -181,7 +182,7 @@ class IFU extends XSModule with HasIFUConst
       shiftPtr := true.B
       newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
       hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
-      extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(newPtr))
+      extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
 
     }.otherwise {
       if4_redirect := true.B
@@ -199,7 +200,7 @@ class IFU extends XSModule with HasIFUConst
       shiftPtr := true.B
       newPtr := Mux(if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
       hist(0) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
-      extHist(newPtr) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(newPtr))
+      extHist(newPtr) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
     }
   }.otherwise {
     if4_redirect := false.B
