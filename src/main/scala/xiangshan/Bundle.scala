@@ -20,7 +20,7 @@ class FetchPacket extends XSBundle {
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
-  val bits = gen.asInstanceOf[T]
+  val bits = gen.cloneType.asInstanceOf[T]
   override def cloneType = new ValidUndirectioned(gen).asInstanceOf[this.type]
 }
 

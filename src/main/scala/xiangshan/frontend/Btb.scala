@@ -14,34 +14,35 @@ trait BTBParams extends HasXSParameter {
   val extendedNRows = nRows
 }
 
-class BtbDataEntry() extends XSBundle with BTBParams {
+case class BtbDataEntry() extends XSBundle with BTBParams {
   val offset = SInt(offsetLen.W)
   val extended = Bool()
-  def this(offset: SInt, extended: Bool) = {
-    this()
-    this.offset := offset
-    this.extended := extended
-  }
+  // def apply(offset: SInt, extended: Bool) = {
+  //   this.offset := offset
+  //   this.extended := extended
+  //   this
+  // }
 }
 
-class BtbMetaEntry() extends XSBundle with BTBParams {
+case class BtbMetaEntry() extends XSBundle with BTBParams {
   val valid = Bool()
   // TODO: don't need full length of tag
   val tag = UInt((VAddrBits - log2Up(BtbSize) - 1).W)
   val btbType = UInt(2.W)
   val isRVC = Bool()
-  def this(tag: UInt, btbType: UInt, isRVC: Bool) = {
-    this()
-    this.valid := true.B
-    this.tag := tag
-    this.btbType := btbType
-    this.isRVC := isRVC
-  }
+  // def apply(tag: UInt, btbType: UInt, isRVC: Bool) = {
+  //   this.valid := true.B
+  //   this.tag := tag
+  //   this.btbType := btbType
+  //   this.isRVC := isRVC
+  //   this
+  // }
 }
 
 class BTB extends BasePredictor with BTBParams{
   class BTBResp extends Resp {
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VAddrBits.W)))
+    val targets = Vec(PredictWidth, UInt(VAddrBits.W))
+    val hits = Vec(PredictWidth, Bool())
     val types = Vec(PredictWidth, UInt(2.W))
     val isRVC = Vec(PredictWidth, Bool())
   }
@@ -61,12 +62,12 @@ class BTB extends BasePredictor with BTBParams{
 
   val data = List.fill(BtbWays) {
     List.fill(BtbBanks) {
-      Module(new SRAMTemplate(new BtbDataEntry(), set = nRows, shouldReset = true, holdRead = true))
+      Module(new SRAMTemplate(BtbDataEntry(), set = nRows, shouldReset = true, holdRead = true))
     }
   }
   val meta = List.fill(BtbWays) {
     List.fill(BtbBanks) {
-      Module(new SRAMTemplate(new BtbMetaEntry(), set = nRows, shouldReset = true, holdRead = true))
+      Module(new SRAMTemplate(BtbMetaEntry(), set = nRows, shouldReset = true, holdRead = true))
     }
   }
   val edata = Module(new SRAMTemplate(UInt(VAddrBits.W), set = extendedNRows, shouldReset = true, holdRead = true))
@@ -130,23 +131,24 @@ class BTB extends BasePredictor with BTBParams{
   for (b <- 0 until BtbBanks) {
     val meta_entry = metaRead(bankHitWays(bankIdxInOrder(b)))(bankIdxInOrder(b))
     val data_entry = dataRead(bankHitWays(bankIdxInOrder(b)))(bankIdxInOrder(b))
-    io.resp.targets(b).valid := bankHits(bankIdxInOrder(b))
     // Use real pc to calculate the target
-    io.resp.targets(b).bits := Mux(data_entry.extended, edataRead, (pcLatch.asSInt + (bankIdxInOrder(b.U) << 1).asSInt + data_entry.offset).asUInt)
+    io.resp.targets(b) := Mux(data_entry.extended, edataRead, (pcLatch.asSInt + (bankIdxInOrder(b.U) << 1).asSInt + data_entry.offset).asUInt)
+    io.resp.hits(b)  := bankHits(bankIdxInOrder(b))
     io.resp.types(b) := meta_entry.btbType
     io.resp.isRVC(b) := meta_entry.isRVC
     io.meta.writeWay(b) := writeWay(bankIdxInOrder(b))
   }
 
   def pdInfoToBTBtype(pd: PreDecodeInfo) = {
-    val t = Wire(0.U(2.W))
+    val t = WireInit(0.U(2.W))
     when (pd.isJalr) { t := BTBtype.I}
     when (pd.isRet)  { t := BTBtype.R}
     when (pd.isJal)  { t := BTBtype.J}
     when (pd.isBr)   { t := BTBtype.B}
     t
   }
-
+  val u = io.update.bits
+  
   val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
   val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
   val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
@@ -154,12 +156,18 @@ class BTB extends BasePredictor with BTBParams{
     u.pc.asSInt)
   val new_extended = (new_offset > max_offset || new_offset < min_offset)
 
-  val u = io.update.bits
+
   val updateWay = u.brInfo.btbWriteWay
   val updateBankIdx = btbAddr.getBank(u.pc)
   val updateRow = btbAddr.getBankIdx(u.pc)
-  val metaWrite = new BtbMetaEntry(btbAddr.getTag(u.pc), pdInfoToBTBtype(u.pd), u.pd.isRVC)
-  val dataWrite = new BtbDataEntry(new_offset, new_extended)
+  val metaWrite = Wire(BtbMetaEntry())
+  metaWrite.valid   := true.B
+  metaWrite.tag     := btbAddr.getTag(u.pc)
+  metaWrite.btbType := pdInfoToBTBtype(u.pd)
+  metaWrite.isRVC   := u.pd.isRVC
+  val dataWrite = Wire(BtbDataEntry())
+  dataWrite.offset   := new_offset
+  dataWrite.extended := new_extended
 
   val updateValid = io.update.valid
   // Update btb
@@ -195,7 +203,7 @@ class BTB extends BasePredictor with BTBParams{
   for (i <- 0 until BtbBanks) {
     val idx = bankIdxInOrder(i)
     XSDebug(validLatch && bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
-      i.U, idx, io.resp.targets(i).bits, io.resp.isRVC(i), io.resp.types(i))
+      i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
   }
   XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
     u.pc, new_target, new_offset, new_extended, updateWay, updateBankIdx, updateRow)

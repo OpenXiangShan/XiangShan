@@ -283,7 +283,8 @@ class FakeTAGE extends BasePredictor with HasTageParameter {
 
 class Tage extends BasePredictor with HasTageParameter {
   class TAGEResp extends Resp {
-    val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
+    val takens = Vec(PredictWidth, Bool())
+    val hits = Vec(PredictWidth, Bool())
   }
   class TAGEMeta extends Meta{
   }
@@ -341,25 +342,25 @@ class Tage extends BasePredictor with HasTageParameter {
     val finalAltPred = WireInit(s3_bim.ctrs(w)(1))
     var provided = false.B
     var provider = 0.U
-    io.resp.takens(w).valid := false.B
-    io.resp.takens(w).bits := s3_bim.ctrs(w)(1)
+    io.resp.hits(w) := false.B
+    io.resp.takens(w) := s3_bim.ctrs(w)(1)
 
     for (i <- 0 until TageNTables) {
       val hit = resps(i)(w).valid
-      io.resp.takens(w).valid := hit
+      io.resp.hits(w) := hit
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
-        io.resp.takens(w).bits := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
+        io.resp.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
         finalAltPred := altPred
       }
       provided = provided || hit          // Once hit then provide
       provider = Mux(hit, i.U, provider)  // Use the last hit as provider
       altPred = Mux(hit, ctr(2), altPred) // Save current pred as potential altpred
     }
-    io.resp.takens(w).valid := provided
+    io.resp.hits(w) := provided
     io.meta(w).provider.valid := provided
     io.meta(w).provider.bits := provider
-    io.meta(w).altDiffers := finalAltPred =/= io.resp.takens(w).bits
+    io.meta(w).altDiffers := finalAltPred =/= io.resp.takens(w)
     io.meta(w).providerU := resps(provider)(w).bits.u
     io.meta(w).providerCtr := resps(provider)(w).bits.ctr
 
@@ -437,7 +438,6 @@ class Tage extends BasePredictor with HasTageParameter {
   XSDebug(io.pc.valid, "req: pc=0x%x, hist=%b\n", io.pc.bits, io.hist)
   XSDebug(io.update.valid, "redirect: provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n",
     m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
-  // This is not reversed
   XSDebug(true.B, "s3Fire:%d, resp: pc=%x, hits=%b, takens=%b\n",
-    debug_pc_s3, Cat(io.resp.takens.map(_.valid)).asUInt, Cat(io.resp.takens.map(_.bits)).asUInt)
+    io.s3Fire, debug_pc_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
 }
