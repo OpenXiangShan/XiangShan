@@ -14,7 +14,7 @@ trait BimParams extends HasXSParameter {
   val nRows = BimSize / BimBanks
 }
 
-class BIM extends BasePredictor {
+class BIM extends BasePredictor with BimParams{
   class BIMResp extends Resp {
     val ctrs = Vec(PredictWidth, ValidUndirectioned(UInt(2.W)))
   }
@@ -28,6 +28,7 @@ class BIM extends BasePredictor {
     val meta = new BIMMeta
   }
 
+  override val io = new BIMIO
   // Update logic
   // 1 calculate new 2-bit saturated counter value
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
@@ -51,7 +52,7 @@ class BIM extends BasePredictor {
   val realMask = circularShiftLeft(io.inMask, BimBanks, baseBank)
   
   // those banks whose indexes are less than baseBank are in the next row
-  val isInNextRow = VecInit((0 until BtbBanks).map((_.U +& baseBank)(log2Up(BimBanks))))
+  val isInNextRow = VecInit((0 until BtbBanks).map(b => ((BimBanks - baseBank) +& b.U)(log2Up(BimBanks))))
 
   val baseRow = bimAddr.getBankIdx(io.pc.bits)
 
@@ -70,7 +71,7 @@ class BIM extends BasePredictor {
   val baseBankLatch = bimAddr.getBank(pcLatch)
   
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-  val bankIdxInOrder = VecInit((0 until BimBanks).map(b => (baseBankLatch + b.U)(log2Up(BimBanks)-1, 0)))
+  val bankIdxInOrder = VecInit((0 until BimBanks).map(b => ((BimBanks - baseBankLatch) +& b.U)(log2Up(BimBanks)-1, 0)))
 
   for (b <- 0 until BimBanks) {
     val ctr = bimRead(bankIdxInOrder(b))
@@ -91,8 +92,8 @@ class BIM extends BasePredictor {
   val needToUpdate = io.update.valid && !oldSaturated && u.pd.isBr
 
   for (b <- 0 until BimBanks) {
-    bim(b).io.w.req.valid := needToUpdate && b.U == updateBank
+    bim(b).io.w.req.valid := needToUpdate && b.U === updateBank
     bim(b).io.w.req.bits.setIdx := updateRow
-    bim(b).io.w.req.bits.data = satUpdate(oldCtr, 2, newTaken)
+    bim(b).io.w.req.bits.data := satUpdate(oldCtr, 2, newTaken)
   }
 }
