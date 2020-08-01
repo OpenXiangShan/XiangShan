@@ -99,25 +99,31 @@ class Dispatch1 extends XSModule {
     * Part 3: send uop (should not be cancelled) with correct indexes to dispatch queues
     */
   val orderedEnqueue = Wire(Vec(RenameWidth, Bool()))
+  val canEnqueue = Wire(Vec(RenameWidth, Bool()))
+  val enqReady = Wire(Vec(RenameWidth, Bool()))
   var prevCanEnqueue = true.B
   for (i <- 0 until RenameWidth) {
     orderedEnqueue(i) := prevCanEnqueue
-    prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || io.recv(i))
+    canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || lsroqIndexAcquired(i))
+    enqReady(i) := (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
+      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && fpIndex.io.reverseMapping(i).valid) ||
+      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && lsIndex.io.reverseMapping(i).valid)
+    prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || (canEnqueue(i) && enqReady(i)))
   }
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
-    io.toIntDq(i).valid := intIndex.io.mapping(i).valid && !cancelled(intIndex.io.mapping(i).bits) &&
-      roqIndexAcquired(intIndex.io.mapping(i).bits) &&
+    io.toIntDq(i).valid := intIndex.io.mapping(i).valid &&
+      canEnqueue(intIndex.io.mapping(i).bits) &&
       orderedEnqueue(intIndex.io.mapping(i).bits)
 
     io.toFpDq(i).bits := uopWithIndex(fpIndex.io.mapping(i).bits)
-    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid && !cancelled(fpIndex.io.mapping(i).bits) &&
-      roqIndexAcquired(fpIndex.io.mapping(i).bits) &&
+    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid &&
+      canEnqueue(intIndex.io.mapping(i).bits) &&
       orderedEnqueue(fpIndex.io.mapping(i).bits)
 
     io.toLsDq(i).bits := uopWithIndex(lsIndex.io.mapping(i).bits)
-    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid && !cancelled(lsIndex.io.mapping(i).bits) &&
-      roqIndexAcquired(lsIndex.io.mapping(i).bits) && lsroqIndexAcquired(lsIndex.io.mapping(i).bits) &&
+    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid &&
+      canEnqueue(intIndex.io.mapping(i).bits) &&
       orderedEnqueue(lsIndex.io.mapping(i).bits)
 
     XSDebug(io.toIntDq(i).valid, p"pc 0x${Hexadecimal(io.toIntDq(i).bits.cf.pc)} int index $i\n")
@@ -129,17 +135,17 @@ class Dispatch1 extends XSModule {
     * Part 4: send response to rename when dispatch queue accepts the uop
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
-  val allReady = Cat(readyVector).andR()
   for (i <- 0 until RenameWidth) {
-    val enqFire = (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
-      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && fpIndex.io.reverseMapping(i).valid) ||
-      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && lsIndex.io.reverseMapping(i).valid)
-    io.recv(i) := enqFire || cancelled(i)
-    io.fromRename(i).ready := allReady
+    val enqValid = io.toIntDq(intIndex.io.reverseMapping(i).bits).valid ||
+      io.toFpDq(fpIndex.io.reverseMapping(i).bits).valid ||
+      io.toLsDq(lsIndex.io.reverseMapping(i).bits).valid
+    io.recv(i) := (enqValid && enqReady(i)) || cancelled(i)
+    io.fromRename(i).ready := Cat(readyVector).andR()
 
     XSInfo(io.recv(i) && !cancelled(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-        p"roq ${uopWithIndex(i).roqIdx} lsroq ${uopWithIndex(i).moqIdx} is accepted by dispatch queue\n")
+        p"roq ${uopWithIndex(i).roqIdx} lsroq ${uopWithIndex(i).moqIdx} is accepted by dispatch queue " +
+        p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
     XSInfo(io.recv(i) && cancelled(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} with brTag ${io.fromRename(i).bits.brTag.value} cancelled\n")
     XSDebug(io.fromRename(i).valid, "v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
