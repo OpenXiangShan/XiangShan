@@ -100,15 +100,14 @@ class Dispatch1 extends XSModule {
     */
   val orderedEnqueue = Wire(Vec(RenameWidth, Bool()))
   val canEnqueue = Wire(Vec(RenameWidth, Bool()))
-  val enqReady = Wire(Vec(RenameWidth, Bool()))
   var prevCanEnqueue = true.B
   for (i <- 0 until RenameWidth) {
     orderedEnqueue(i) := prevCanEnqueue
     canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || lsroqIndexAcquired(i))
-    enqReady(i) := (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
+    val enqReady = (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
       (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && fpIndex.io.reverseMapping(i).valid) ||
       (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && lsIndex.io.reverseMapping(i).valid)
-    prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || (canEnqueue(i) && enqReady(i)))
+    prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || (canEnqueue(i) && enqReady))
   }
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
@@ -136,10 +135,10 @@ class Dispatch1 extends XSModule {
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   for (i <- 0 until RenameWidth) {
-    val enqValid = io.toIntDq(intIndex.io.reverseMapping(i).bits).valid ||
-      io.toFpDq(fpIndex.io.reverseMapping(i).bits).valid ||
-      io.toLsDq(lsIndex.io.reverseMapping(i).bits).valid
-    io.recv(i) := (enqValid && enqReady(i)) || cancelled(i)
+    val enqFire = (io.toIntDq(intIndex.io.reverseMapping(i).bits).fire() && intIndex.io.reverseMapping(i).valid) ||
+      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).fire() && fpIndex.io.reverseMapping(i).valid) ||
+      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).fire() && lsIndex.io.reverseMapping(i).valid)
+    io.recv(i) := enqFire || cancelled(i)
     io.fromRename(i).ready := Cat(readyVector).andR()
 
     XSInfo(io.recv(i) && !cancelled(i),
@@ -151,4 +150,7 @@ class Dispatch1 extends XSModule {
     XSDebug(io.fromRename(i).valid, "v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
       io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
+  val renameFireCnt = PopCount(io.recv)
+  val enqFireCnt = PopCount(io.toIntDq.map(_.fire)) + PopCount(io.toFpDq.map(_.fire)) + PopCount(io.toLsDq.map(_.fire))
+  XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 }
