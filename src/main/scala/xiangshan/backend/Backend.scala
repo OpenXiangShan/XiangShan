@@ -15,7 +15,7 @@ import xiangshan.backend.fu.FunctionUnit
 import xiangshan.backend.issue.IssueQueue
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
-
+import utils.ParallelOR
 
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
@@ -137,6 +137,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
   decode.io.brTags <> brq.io.brTags
+  decBuf.io.isWalking := ParallelOR(roq.io.commits.map(c => c.valid && c.bits.isWalk)).asBool() // TODO: opt this
   decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
 
