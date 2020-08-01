@@ -67,7 +67,10 @@ class Rename extends XSModule {
     uop.roqIdx := DontCare
   })
 
-  var lastReady = WireInit(true.B)
+  var lastReady = WireInit(io.out(0).ready)
+  // debug assert
+  val outRdy = Cat(io.out.map(_.ready))
+  assert(outRdy===0.U || outRdy.andR())
   for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
@@ -78,8 +81,8 @@ class Rename extends XSModule {
     // alloc a new phy reg
     val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
     val needIntDest = inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocReqs(i) := needFpDest && lastReady && io.out(i).ready
-    intFreeList.allocReqs(i) := needIntDest && lastReady && io.out(i).ready
+    fpFreeList.allocReqs(i) := needFpDest && lastReady
+    intFreeList.allocReqs(i) := needIntDest && lastReady
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
     val this_can_alloc = Mux(
@@ -91,7 +94,7 @@ class Rename extends XSModule {
         true.B
       )
     )
-    io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc
+    io.in(i).ready := lastReady && this_can_alloc
 
     // do checkpoints when a branch inst come
     for(fl <- Seq(fpFreeList, intFreeList)){
