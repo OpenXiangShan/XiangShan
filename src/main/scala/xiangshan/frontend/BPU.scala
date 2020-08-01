@@ -67,7 +67,7 @@ abstract class BasePredictor extends XSModule {
     val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
   }
 
-  val io = new DefaultBasePredictorIO
+  val io = IO(new DefaultBasePredictorIO)
 
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
@@ -87,7 +87,7 @@ abstract class BasePredictor extends XSModule {
   }
 }
 
-class BPUStageIO extends XSBundle {
+class BetweenBPUStage extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val mask = UInt(PredictWidth.W)
   val resp = new PredictorResponse
@@ -95,15 +95,22 @@ class BPUStageIO extends XSBundle {
   val brInfo = Vec(PredictWidth, new BranchInfo)
 }
 
+class BPUStageIO extends XSBundle {
+  val flush = Input(Bool())
+  val in = Flipped(Decoupled(new BetweenBPUStage))
+  val predecode = Flipped(ValidIO(new Predecode))
+  val pred = Decoupled(new BranchPrediction)
+  val out = Decoupled(new BetweenBPUStage)
+}
 
 abstract class BPUStage extends XSModule {
-  class DefaultIO extends XSBundle {
+  val io = IO(new Bundle() {
     val flush = Input(Bool())
-    val in = Flipped(Decoupled(new BPUStageIO))
+    val in = Flipped(Decoupled(new BetweenBPUStage))
+    val predecode = Flipped(ValidIO(new Predecode))
     val pred = Decoupled(new BranchPrediction)
-    val out = Decoupled(new BPUStageIO)
-  }
-  val io = IO(new DefaultIO)
+    val out = Decoupled(new BetweenBPUStage)
+  })
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
@@ -117,14 +124,14 @@ abstract class BPUStage extends XSModule {
   // Each stage has its own logic to decide
   // takens, notTakens and target
 
-  val takens = Vec(PredictWidth, Bool())
-  val notTakens = Vec(PredictWidth, Bool())
+  val takens = Wire(Vec(PredictWidth, Bool()))
+  val notTakens = Wire(Vec(PredictWidth, Bool()))
   val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
   val jmpIdx = PriorityEncoder(takens)
   // get the last valid inst
   val lastValidPos = PriorityMux((PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
-  val target = UInt(VAddrBits.W)
+  val target = Wire(UInt(VAddrBits.W))
 
   io.pred.bits <> DontCare
   io.pred.bits.taken := taken
@@ -176,12 +183,11 @@ class BPUStage1 extends BPUStage {
 
   // resp and brInfo are from the components,
   // so it does not need to be latched
-  io.out.bits.resp <> io.in.bits.resp
+  io.out.bits.resp := io.in.bits.resp
   io.out.bits.brInfo := io.in.bits.brInfo
 }
 
 class BPUStage2 extends BPUStage {
-
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
@@ -194,10 +200,7 @@ class BPUStage2 extends BPUStage {
 }
 
 class BPUStage3 extends BPUStage {
-  class S3IO extends DefaultIO {
-    val predecode = Flipped(ValidIO(new Predecode))
-  }
-  override val io = new S3IO
+
   io.out.valid := predValid && io.predecode.valid && !io.flush
 
   // TAGE has its own pipelines and the
@@ -240,20 +243,20 @@ class BPUStage3 extends BPUStage {
 
   // Wrap tage resp and tage meta in
   // This is ugly
-  io.out.bits.resp.tage <> io.in.bits.resp.tage
+  io.out.bits.resp.tage := io.in.bits.resp.tage
   for (i <- 0 until PredictWidth) {
     io.out.bits.brInfo(i).tageMeta := io.in.bits.brInfo(i).tageMeta
   }
 }
 
-trait BranchPredictorComponents extends HasXSParameter {
-  val ubtb = Module(new MicroBTB)
-  val btb = Module(new BTB)
-  val bim = Module(new BIM)
-  val tage = Module(new Tage)
-  val preds = Seq(ubtb, btb, bim, tage)
-  preds.map(_.io := DontCare)
-}
+// trait BranchPredictorComponents extends HasXSParameter {
+//   val ubtb = Module(new MicroBTB)
+//   val btb = Module(new BTB)
+//   val bim = Module(new BIM)
+//   val tage = Module(new Tage)
+//   val preds = Seq(ubtb, btb, bim, tage)
+//   preds.map(_.io := DontCare)
+// }
 
 class BPUReq extends XSBundle {
   val pc = UInt(VAddrBits.W)
@@ -265,7 +268,27 @@ class BranchUpdateInfoWithHist extends BranchUpdateInfo {
   val hist = UInt(HistoryLength.W)
 }
 
-abstract class BaseBPU extends XSModule {
+// class BaseBPU extends XSModule {
+//   val io = IO(new Bundle() {
+//     // from backend
+//     val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+//     // from ifu, frontend redirect
+//     val flush = Input(UInt(3.W))
+//     // from if1
+//     val in = Flipped(ValidIO(new BPUReq))
+//     // to if2/if3/if4
+//     val out = Vec(3, Decoupled(new BranchPrediction))
+//     // from if4
+//     val predecode = Flipped(ValidIO(new Predecode))
+//     // to if4, some bpu info used for updating
+//     val branchInfo = Decoupled(Vec(PredictWidth, new BranchInfo))
+//   })
+// }
+
+
+
+
+class BaseBPU extends XSModule {
   val io = IO(new Bundle() {
     // from backend
     val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
@@ -280,20 +303,6 @@ abstract class BaseBPU extends XSModule {
     // to if4, some bpu info used for updating
     val branchInfo = Decoupled(Vec(PredictWidth, new BranchInfo))
   })
-}
-
-
-class FakeBPU extends BaseBPU {
-  io.out.foreach(i => {
-    // Provide not takens
-    i.valid := true.B
-    i.bits <> DontCare
-    i.bits.redirect := false.B
-  })
-  io.branchInfo <> DontCare
-}
-
-class BPU extends BaseBPU {
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
@@ -390,7 +399,20 @@ class BPU extends BaseBPU {
   s3.io.predecode <> io.predecode
 
   s3.io.out.ready := io.branchInfo.ready
-  
+
   io.branchInfo.valid := s3.io.out.valid
   io.branchInfo.bits := s3.io.out.bits.brInfo
+}
+
+class BPU extends BaseBPU {}
+
+
+class FakeBPU extends BaseBPU {
+  io.out.foreach(i => {
+    // Provide not takens
+    i.valid := true.B
+    i.bits <> DontCare
+    i.bits.redirect := false.B
+  })
+  io.branchInfo <> DontCare
 }
