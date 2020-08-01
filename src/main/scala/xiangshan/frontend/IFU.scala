@@ -30,7 +30,7 @@ class IFUIO extends XSBundle
 class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)
-  val bpu = if (EnableBPD) Module(new BPU) else Module(new FakeBPU)
+  val bpu = if (EnableBPU) Module(new BPU) else Module(new FakeBPU)
   val pd = Module(new PreDecode)
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
@@ -169,7 +169,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
   val if4_histPtr = RegEnable(if3_histPtr, if3_fire)
-  if4_ready := if4_fire || !if4_valid
+  if4_ready := (if4_fire || !if4_valid) && GTimer() > 500.U
   when (if4_flush) { if4_valid := false.B }
 
   val if4_bp = bpu.io.out(2).bits
@@ -219,7 +219,7 @@ class IFU extends XSModule with HasIFUConst
 
   io.icacheReq.valid := if1_valid && if2_ready
   io.icacheReq.bits.addr := if1_npc
-  io.icacheResp.ready := if3_valid && if4_ready
+  io.icacheResp.ready := if3_valid && if4_ready && GTimer() > 500.U
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
   val inOrderBrHist = Wire(Vec(HistoryLength, UInt(1.W)))
