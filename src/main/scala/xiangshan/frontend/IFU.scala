@@ -173,7 +173,7 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_bp = bpu.io.out(2).bits
 
-  when (bpu.io.out(2).valid && if4_fire && if4_pd.redirect) {
+  when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
     when (!if4_bp.saveHalfRVI) {
       if4_redirect := true.B
       if1_npc := if4_bp.target
@@ -194,12 +194,12 @@ class IFU extends XSModule with HasIFUConst
       prev_half_idx := idx
       prev_half_tgt := if4_bp.target
       prev_half_taken := if4_bp.taken
-      prev_half_instr := if4_pd.io.out.instrs(idx)(15, 0)
+      prev_half_instr := if4_pd.instrs(idx)(15, 0)
 
       shiftPtr := true.B
       newPtr := Mux(if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
       hist(0) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
-      extHist(newPtr) := Mux(if4_np.hasNotTakenBrs, 0.U, extHist(newPtr))
+      extHist(newPtr) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(newPtr))
     }
   }.otherwise {
     if4_redirect := false.B
