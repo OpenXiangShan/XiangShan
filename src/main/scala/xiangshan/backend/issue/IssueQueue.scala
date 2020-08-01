@@ -146,11 +146,7 @@ class IssueQueue
     )
   ))
   val selectedIdxWire = PriorityEncoder(selectMask)
-  val selectedIdxReg = RegEnable(
-    enable = true.B,//io.deq.ready,
-    next = selectedIdxWire - moveMask(selectedIdxWire)
-  )
-//  selectedIdxReg := selectedIdxWire - moveMask(selectedIdxWire)
+  val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
   XSDebug(
     p"selMaskWire:${Binary(selectMask.asUInt())} selected:$selectedIdxWire" +
@@ -159,7 +155,7 @@ class IssueQueue
 
 
   // read regfile
-  val selectedUop = uopQueue(idxQueue(Mux(io.deq.ready, selectedIdxWire, selectedIdxReg)))
+  val selectedUop = uopQueue(idxQueue(selectedIdxWire))
 
   exuCfg match {
     case Exu.ldExeUnitCfg =>
