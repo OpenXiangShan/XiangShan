@@ -187,7 +187,7 @@ class BPUStage1 extends BPUStage {
   target    := Mux(taken, ubtbResp.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
   io.pred.bits.redirect := taken
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !ubtbResp.is_RVC(lastValidPos)
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !ubtbResp.is_RVC(lastValidPos) && ubtbResp.hits(lastValidPos)
 
   // resp and brInfo are from the components,
   // so it does not need to be latched
@@ -205,7 +205,7 @@ class BPUStage2 extends BPUStage {
   target    := Mux(taken, btbResp.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
   io.pred.bits.redirect := target =/= inLatch.target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !btbResp.isRVC(lastValidPos)
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !btbResp.isRVC(lastValidPos) && btbResp.hits(lastValidPos)
 }
 
 class BPUStage3 extends BPUStage {
