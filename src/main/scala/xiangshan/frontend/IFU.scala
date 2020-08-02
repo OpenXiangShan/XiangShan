@@ -65,11 +65,11 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF2 ****************************//
   val if2_valid = RegEnable(next = if1_valid, init = false.B, enable = if1_fire)
   val if3_ready = WireInit(false.B)
-  val if2_fire = if2_valid && if3_ready
+  val if2_fire = if2_valid && if3_ready && !if2_flush
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
   val if2_histPtr = RegEnable(ptr, if1_fire)
-  if2_ready := if2_fire || !if2_valid
+  if2_ready := if2_fire || !if2_valid || if2_flush
   when (if2_flush) { if2_valid := if1_fire }
 
   when (RegNext(reset.asBool) && !reset.asBool) {
@@ -96,10 +96,10 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF3 ****************************//
   val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
   val if4_ready = WireInit(false.B)
-  val if3_fire = if3_valid && if4_ready && io.icacheResp.valid
+  val if3_fire = if3_valid && if4_ready && io.icacheResp.valid && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_histPtr = RegEnable(if2_histPtr, if2_fire)
-  if3_ready := if3_fire || !if3_valid
+  if3_ready := if3_fire || !if3_valid || if3_flush
   when (if3_flush) { if3_valid := false.B }
 
   val if3_bp = bpu.io.out(1).bits
@@ -169,7 +169,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
   val if4_histPtr = RegEnable(if3_histPtr, if3_fire)
-  if4_ready := (if4_fire || !if4_valid) && GTimer() > 500.U
+  if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush) { if4_valid := false.B }
 
   val if4_bp = bpu.io.out(2).bits
@@ -260,9 +260,9 @@ class IFU extends XSModule with HasIFUConst
   XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
   XSDebug(io.icacheFlush(0).asBool, "Flush icache stage2...\n")
   XSDebug(io.icacheFlush(1).asBool, "Flush icache stage3...\n")
-  XSDebug(io.redirect.valid, "Rediret from backend! isExcp=%d isMisPred=%d isReplay=%d pc=%x\n",
+  XSDebug(io.redirect.valid, "Redirect from backend! isExcp=%d isMisPred=%d isReplay=%d pc=%x\n",
     io.redirect.bits.isException, io.redirect.bits.isMisPred, io.redirect.bits.isReplay, io.redirect.bits.pc)
-  XSDebug(io.redirect.valid, p"Rediret from backend! target=${Hexadecimal(io.redirect.bits.target)} brTag=${io.redirect.bits.brTag}\n")
+  XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits.target)} brTag=${io.redirect.bits.brTag}\n")
 
   XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x ptr=%d mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, ptr, mask(if1_npc))
   XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_histPtr, if2_snpc)
