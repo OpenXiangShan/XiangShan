@@ -153,7 +153,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.uop.ctrl.imm
     l2_out(i).bits.paddr := io.dtlb.resp(i).bits.paddr
     l2_out(i).bits.uop := io.ldin(i).bits.uop
-    l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType)
+    l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType(1,0))
     l2_out(i).valid := io.ldin(i).valid
     l2_out(i).ready := io.dcache.load(i).req.ready
     io.ldin(i).ready := l2_out(i).ready
@@ -344,7 +344,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     s2_out(i).bits.paddr := io.dtlb.resp(LoadPipelineWidth + i).bits.paddr
     s2_out(i).bits.data := genWdata(io.stin(i).bits.src2, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
     s2_out(i).bits.uop := io.stin(i).bits.uop
-    s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType)
+    s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
     s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
     io.stin(i).ready := s2_out(i).ready
   })
