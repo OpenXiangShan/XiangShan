@@ -52,6 +52,7 @@ case class ExuConfig
 abstract class Exu(val config: ExuConfig) extends XSModule {
   val io = IO(new ExuIO)
   io.dmem <> DontCare
+  io.out.bits.brUpdate <> DontCare
   io.out.bits.debug.isMMIO := false.B
 }
 
@@ -61,5 +62,9 @@ object Exu {
   val mulExeUnitCfg = ExuConfig("MulExu", Array(mulCfg), enableBypass = false)
   val divExeUnitCfg = ExuConfig("DivExu",Array(divCfg), enableBypass = false)
   val mulDivExeUnitCfg = ExuConfig("MulDivExu", Array(mulCfg, divCfg), enableBypass = false)
-  val lsuExeUnitCfg = ExuConfig("LsExu", Array(lsuCfg), enableBypass = false)
+  val ldExeUnitCfg = ExuConfig("LoadExu", Array(lduCfg), enableBypass = false)
+  val stExeUnitCfg =ExuConfig("StoreExu", Array(stuCfg), enableBypass = false)
+  val fmacExeUnitCfg = ExuConfig("FmacExu", Array(fmacCfg), enableBypass = false)
+  val fmiscExeUnitCfg = ExuConfig("FmiscExu", Array(fmiscCfg), enableBypass = false)
+  val fmiscDivExeUnitCfg = ExuConfig("FmiscDivExu", Array(fmiscCfg, fDivSqrtCfg), enableBypass = false)
 }

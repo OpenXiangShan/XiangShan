@@ -5,16 +5,16 @@ import chisel3.util._
 import xiangshan._
 import utils.{ParallelOR, XSDebug}
 
-class BusyTable extends XSModule {
+class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // set preg state to ready (write back regfile + roq walk)
-    val wbPregs = Vec(NRWritePorts + CommitWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    val wbPregs = Vec(numWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
-    val rfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val pregRdy = Vec(NRReadPorts, Output(Bool()))
+    val rfReadAddr = Vec(numReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val pregRdy = Vec(numReadPorts, Output(Bool()))
   })
 
   val table = RegInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))

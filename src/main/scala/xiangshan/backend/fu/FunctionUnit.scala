@@ -55,8 +55,11 @@ object FunctionUnit {
   val divCfg =
     FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false)
 
-  val lsuCfg =
-    FuConfig(FuType.ldu, 2, 1, writeIntRf = true, writeFpRf = true, hasRedirect = false)
+  val lduCfg =
+    FuConfig(FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false)
+
+  val stuCfg =
+    FuConfig(FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false)
 
   val fmacCfg =
     FuConfig(FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false)

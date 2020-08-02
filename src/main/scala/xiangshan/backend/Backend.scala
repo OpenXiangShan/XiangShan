@@ -12,7 +12,7 @@ import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.FunctionUnit
-import xiangshan.backend.issue.IssueQueue
+import xiangshan.backend.issue.{IssueQueue, ReservationStation}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
@@ -35,11 +35,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
-  //  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
-  //  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
-  //  val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val lsuExeUnits = Array.tabulate(exuParameters.StuCnt)(_ => Module(new LsExeUnit))
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ lsuExeUnits)
+  // val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
+  // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
+  // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
+  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
   exeUnits.foreach(_.io.exception := DontCare)
   exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
@@ -48,93 +47,143 @@ class Backend(implicit val p: XSConfig) extends XSModule
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch(exeUnits.map(_.config)))
+  val dispatch = Module(new Dispatch())
   val roq = Module(new Roq)
   val intRf = Module(new Regfile(
-    numReadPorts = NRReadPorts,
-    numWirtePorts = NRWritePorts,
+    numReadPorts = NRIntReadPorts,
+    numWirtePorts = NRIntWritePorts,
     hasZero = true
   ))
   val fpRf = Module(new Regfile(
-    numReadPorts = NRReadPorts,
-    numWirtePorts = NRWritePorts,
+    numReadPorts = NRFpReadPorts,
+    numWirtePorts = NRFpWritePorts,
     hasZero = false
+  ))
+  val memRf = Module(new Regfile(
+    numReadPorts = 2*exuParameters.StuCnt + exuParameters.LduCnt,
+    numWirtePorts = NRIntWritePorts,
+    hasZero = true,
+    isMemRf = true
   ))
 
   // backend redirect, flush pipeline
-  val redirect = Mux(roq.io.redirect.valid, roq.io.redirect, brq.io.redirect)
+  val redirect = Mux(
+    roq.io.redirect.valid,
+    roq.io.redirect,
+    Mux(
+      brq.io.redirect.valid,
+      brq.io.redirect,
+      io.mem.replayAll
+    )
+  )
 
-  val redirectInfo = Wire(new RedirectInfo)
-  // exception or misprediction
-  redirectInfo.valid := roq.io.redirect.valid || brq.io.out.valid
-  redirectInfo.misPred := !roq.io.redirect.valid && brq.io.redirect.valid
-  redirectInfo.redirect := redirect.bits
+  io.frontend.redirect := redirect
+  io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
 
-  var iqInfo = new StringBuilder
-  val issueQueues = exeUnits.zipWithIndex.map({ case (eu, i) =>
-    def needBypass(cfg: ExuConfig): Boolean = cfg.enableBypass
+  val memConfigs =
+    Seq.fill(exuParameters.LduCnt)(Exu.ldExeUnitCfg) ++
+    Seq.fill(exuParameters.StuCnt)(Exu.stExeUnitCfg)
 
-    val bypassCnt = exeUnits.map(_.config).count(needBypass)
-    def needWakeup(cfg: ExuConfig): Boolean =
-      (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
+  val exuConfigs = exeUnits.map(_.config) ++ memConfigs
 
-    val wakeupCnt = exeUnits.map(_.config).count(needWakeup)
-    assert(!(needBypass(eu.config) && !needWakeup(eu.config))) // needBypass but dont needWakeup is not allowed
-    val iq = Module(new IssueQueue(
-      eu.config,
-      wakeupCnt,
-      bypassCnt,
-      eu.config.enableBypass,
-      fifo = eu.config.supportedFuncUnits.contains(FunctionUnit.lsuCfg)
-    ))
-    iq.io.redirect <> redirect
-    iq.io.numExist <> dispatch.io.numExist(i)
-    iq.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
-    iq.io.enqData <> dispatch.io.enqIQData(i)
-    for(
-      (wakeUpPort, exuOut) <-
-      iq.io.wakeUpPorts.zip(exeUnits.filter(e => needWakeup(e.config)).map(_.io.out))
-    ){
-      wakeUpPort.bits := exuOut.bits
-      wakeUpPort.valid := exuOut.valid
+  val exeWbReqs = exeUnits.map(_.io.out) ++ io.mem.ldout ++ io.mem.stout
+
+  def needWakeup(cfg: ExuConfig): Boolean =
+    (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
+
+  def needData(a: ExuConfig, b: ExuConfig): Boolean =
+    (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
+
+  val reservedStations = exeUnits.
+    zipWithIndex.
+    map({ case (exu, i) =>
+
+      val cfg = exu.config
+
+      val wakeUpDateVec = exuConfigs.zip(exeWbReqs).filter(x => needData(cfg, x._1)).map(_._2)
+      val bypassCnt = exuConfigs.count(c => c.enableBypass && needData(cfg, c))
+
+      println(s"exu:${cfg.name} wakeupCnt:${wakeUpDateVec.length} bypassCnt:$bypassCnt")
+
+      val rs = Module(new ReservationStation(
+        cfg, wakeUpDateVec.length, bypassCnt, cfg.enableBypass, false
+      ))
+      rs.io.redirect <> redirect
+      rs.io.numExist <> dispatch.io.numExist(i)
+      rs.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
+      rs.io.enqData <> dispatch.io.enqIQData(i)
+      for(
+        (wakeUpPort, exuOut) <-
+        rs.io.wakeUpPorts.zip(wakeUpDateVec)
+      ){
+        wakeUpPort.bits := exuOut.bits
+        wakeUpPort.valid := exuOut.valid
+      }
+
+      exu.io.in <> rs.io.deq
+      exu.io.redirect <> redirect
+      rs
+    })
+
+  for( rs <- reservedStations){
+    rs.io.bypassUops <> reservedStations.
+      filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
+      map(_.io.selectedUop)
+
+    val bypassDataVec = exuConfigs.zip(exeWbReqs).
+      filter(x => x._1.enableBypass && needData(rs.exuCfg, x._1)).map(_._2)
+
+    for(i <- bypassDataVec.indices){
+      rs.io.bypassData(i).valid := bypassDataVec(i).valid
+      rs.io.bypassData(i).bits := bypassDataVec(i).bits
     }
-    iqInfo ++= {
-      s"[$i] ${eu.name} Queue wakeupCnt:$wakeupCnt bypassCnt:$bypassCnt" +
-        s" Supported Function:[" +
-        s"${
-          eu.config.supportedFuncUnits.map(
-            fu => FuType.functionNameMap(fu.fuType.litValue())).mkString(", "
-          )
-        }]\n"
-    }
-    eu.io.in <> iq.io.deq
-    eu.io.redirect <> redirect
-    iq
-  })
+  }
 
-  val bypassQueues = issueQueues.filter(_.enableBypass)
-  val bypassUnits = exeUnits.filter(_.config.enableBypass)
-  issueQueues.foreach(iq => {
-    for (i <- iq.io.bypassUops.indices) {
-      iq.io.bypassData(i).bits := bypassUnits(i).io.out.bits
-      iq.io.bypassData(i).valid := bypassUnits(i).io.out.valid
-    }
-    iq.io.bypassUops <> bypassQueues.map(_.io.selectedUop)
-  })
+  val issueQueues = exuConfigs.
+    zipWithIndex.
+    takeRight(exuParameters.LduCnt + exuParameters.StuCnt).
+    map({case (cfg, i) =>
+      val wakeUpDateVec = exuConfigs.zip(exeWbReqs).filter(x => needData(cfg, x._1)).map(_._2)
+      val bypassUopVec = reservedStations.
+        filter(r => r.exuCfg.enableBypass && needData(cfg, r.exuCfg)).map(_.io.selectedUop)
+      val bypassDataVec = exuConfigs.zip(exeWbReqs).
+        filter(x => x._1.enableBypass && needData(cfg, x._1)).map(_._2)
 
-  lsuExeUnits.foreach(_.io.dmem <> DontCare) // TODO
-  lsuExeUnits.foreach(_.io.mcommit <> roq.io.mcommit)
+      val iq = Module(new IssueQueue(
+        cfg, wakeUpDateVec.length, bypassUopVec.length
+      ))
+      println(s"exu:${cfg.name} wakeupCnt:${wakeUpDateVec.length} bypassCnt:${bypassUopVec.length}")
+      iq.io.redirect <> redirect
+      iq.io.tlbFeedback := io.mem.tlbFeedback(i - exuParameters.ExuCnt + exuParameters.LduCnt + exuParameters.StuCnt)
+      iq.io.enq <> dispatch.io.enqIQCtrl(i)
+      dispatch.io.numExist(i) := iq.io.numExist
+      for(
+        (wakeUpPort, exuOut) <-
+        iq.io.wakeUpPorts.zip(wakeUpDateVec)
+      ){
+        wakeUpPort.bits := exuOut.bits
+        wakeUpPort.valid := exuOut.fire() // data after arbit
+      }
+      iq.io.bypassUops <> bypassUopVec
+      for(i <- bypassDataVec.indices){
+        iq.io.bypassData(i).valid := bypassDataVec(i).valid
+        iq.io.bypassData(i).bits := bypassDataVec(i).bits
+      }
+      iq
+    })
+
   io.mem.mcommit := roq.io.mcommit
-  io.mem.ldin := DontCare // TODO
-  io.mem.stin := DontCare // TODO
+  io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
+  io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid
   jmpExeUnit.io.exception.bits := roq.io.exception
 
-  io.frontend.redirectInfo <> redirectInfo
+  io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
+  brq.io.memRedirect <> io.mem.replayAll
   brq.io.bcommit := roq.io.bcommit
   brq.io.enqReqs <> decode.io.toBrq
   for ((x, y) <- brq.io.exuRedirect.zip(exeUnits.filter(_.config.hasRedirect))) {
@@ -148,11 +197,10 @@ class Backend(implicit val p: XSConfig) extends XSModule
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.in <> decBuf.io.out
-  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr)
-  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr)
-  rename.io.intPregRdy <> dispatch.io.intPregRdy
-  rename.io.fpPregRdy <> dispatch.io.fpPregRdy
-
+  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr) ++ dispatch.io.intMemRegAddr
+  rename.io.intPregRdy <> dispatch.io.intPregRdy ++ dispatch.io.intMemRegRdy
+  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr) ++ dispatch.io.fpMemRegAddr
+  rename.io.fpPregRdy <> dispatch.io.fpPregRdy ++ dispatch.io.fpMemRegRdy
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
 
@@ -161,16 +209,15 @@ class Backend(implicit val p: XSConfig) extends XSModule
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toMoq
   dispatch.io.moqIdxs <> io.mem.moqIdxs
+  dispatch.io.commits <> roq.io.commits
 
   intRf.io.readPorts <> dispatch.io.readIntRf
-  fpRf.io.readPorts <> dispatch.io.readFpRf
+  fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
+  memRf.io.readPorts <> issueQueues.flatMap(_.io.readIntRf)
 
-  val exeWbReqs = exeUnits.map(_.io.out)
+  io.mem.redirect <> redirect
 
-  val wbIntIdx = exeUnits.zipWithIndex.filter(_._1.config.writeIntRf).map(_._2)
-  val wbFpIdx = exeUnits.zipWithIndex.filter(_._1.config.writeFpRf).map(_._2)
-
-  val wbu = Module(new Wbu(wbIntIdx, wbFpIdx))
+  val wbu = Module(new Wbu(exuConfigs))
   wbu.io.in <> exeWbReqs
 
   val wbIntResults = wbu.io.toIntRf
@@ -183,8 +230,9 @@ class Backend(implicit val p: XSConfig) extends XSModule
     rfWrite.data := x.bits.data
     rfWrite
   }
-
-  intRf.io.writePorts <> wbIntResults.map(exuOutToRfWrite)
+  val intRfWrite = wbIntResults.map(exuOutToRfWrite)
+  intRf.io.writePorts <> intRfWrite
+  memRf.io.writePorts <> intRfWrite
   fpRf.io.writePorts <> wbFpResults.map(exuOutToRfWrite)
 
   rename.io.wbIntResults <> wbIntResults
@@ -221,7 +269,5 @@ class Backend(implicit val p: XSConfig) extends XSModule
   if (!p.FPGAPlatform) {
     BoringUtils.addSource(debugArchReg, "difftestRegs")
   }
-
-  print(iqInfo)
 
 }

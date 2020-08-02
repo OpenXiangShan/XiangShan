@@ -35,11 +35,11 @@ object ValidUndirectioned {
 }
 
 class TageMeta extends XSBundle {
-  val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+//  val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
-  val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+//  val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
 }
 
 // Branch prediction result from BPU Stage1 & 3
@@ -74,23 +74,32 @@ class Predecode extends XSBundle {
   val fuOpTypes = Vec(FetchWidth*2, FuOpType())
 }
 
-// Dequeue DecodeWidth insts from Ibuffer
-class CtrlFlow extends XSBundle {
-  val instr = UInt(32.W)
-  val pc = UInt(VAddrBits.W)
-  val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
+
+class BranchUpdateInfo extends XSBundle {
+  val fetchOffset = UInt(log2Up(FetchWidth * 4).W)
   val pnpc = UInt(VAddrBits.W)
+  val brTarget = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
   val btbPredCtr = UInt(2.W)
   val btbHit = Bool()
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
-  val exceptionVec = Vec(16, Bool())
-  val intrVec = Vec(12, Bool())
+  val taken = Bool()
+  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
+  val btbType = UInt(2.W)
   val isRVC = Bool()
   val isBr = Bool()
+  val isMisPred = Bool()
+}
+
+// Dequeue DecodeWidth insts from Ibuffer
+class CtrlFlow extends XSBundle {
+  val instr = UInt(32.W)
+  val pc = UInt(VAddrBits.W)
+  val exceptionVec = Vec(16, Bool())
+  val intrVec = Vec(12, Bool())
+  val brUpdate = new BranchUpdateInfo
   val crossPageIPFFix = Bool()
 }
 
@@ -108,6 +117,7 @@ class CtrlSignals extends XSBundle {
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
+  val dpqType = DPQType()
 }
 
 class CfCtrl extends XSBundle {
@@ -116,49 +126,42 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
-// CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl {
+trait HasRoqIdx { this: HasXSParameter =>
+  val roqIdx = UInt(RoqIdxWidth.W)
 
+  def isAfter(thatIdx: UInt): Bool = {
+    Mux(
+      this.roqIdx.head(1) === thatIdx.head(1),
+      this.roqIdx.tail(1) > thatIdx.tail(1),
+      this.roqIdx.tail(1) < thatIdx.tail(1)
+    )
+  }
+
+  def needFlush(redirect: Valid[Redirect]): Bool = {
+    redirect.valid && this.isAfter(redirect.bits.roqIdx)
+  }
+}
+
+// CfCtrl -> MicroOp at Rename Stage
+class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-  val roqIdx = UInt(RoqIdxWidth.W)
   val moqIdx = UInt(MoqIdxWidth.W)
 }
 
-class Redirect extends XSBundle {
-  val pc = UInt(VAddrBits.W) // wrongly predicted pc
-  val target = UInt(VAddrBits.W)
-  val brTarget = UInt(VAddrBits.W)
-  val brTag = new BrqPtr
-  val btbType = UInt(2.W)
-  val isRVC = Bool()
-  //val isCall = Bool()
-  val taken = Bool()
-  val hist = UInt(HistoryLength.W)
-  val tageMeta = new TageMeta
-  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  val btbPredCtr = UInt(2.W)
-  val btbHit = Bool()
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
+class Redirect extends XSBundle with HasRoqIdx {
   val isException = Bool()
-  val roqIdx = UInt(RoqIdxWidth.W)
-}
-
-class RedirectInfo extends XSBundle {
-
-  val valid = Bool() // a valid commit form brq/roq
-  val misPred = Bool() // a branch miss prediction ?
-  val redirect = new Redirect
-
-  def flush():Bool = valid && (redirect.isException || misPred)
+  val isMisPred = Bool()
+  val isReplay = Bool()
+  val pc = UInt(VAddrBits.W)
+  val target = UInt(VAddrBits.W)
+  val brTag = new BrqPtr
 }
 
 class Dp1ToDp2IO extends XSBundle {
-  val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))
-  val fpDqToDp2 = Vec(FpDqDeqWidth, DecoupledIO(new MicroOp))
-  val lsDqToDp2 = Vec(LsDqDeqWidth, DecoupledIO(new MicroOp))
+  val intDqToDp2 = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
+  val fpDqToDp2 = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp))
+  val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
 class DebugBundle extends XSBundle{
@@ -175,6 +178,7 @@ class ExuOutput extends XSBundle {
   val data = UInt(XLEN.W)
   val redirectValid = Bool()
   val redirect = new Redirect
+  val brUpdate = new BranchUpdateInfo
   val debug = new DebugBundle
 }
 
@@ -194,10 +198,15 @@ class RoqCommit extends XSBundle {
   val isWalk = Bool()
 }
 
+class TlbFeedback extends XSBundle with HasRoqIdx{
+  val hit = Bool()
+}
+
 class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirectInfo = Input(new RedirectInfo)
-  val inOrderBrInfo = Input(new RedirectInfo)
+  val redirect = Flipped(ValidIO(new Redirect))
+  val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
 }

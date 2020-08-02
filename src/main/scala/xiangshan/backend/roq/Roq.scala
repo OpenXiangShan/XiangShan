@@ -18,7 +18,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
-    val mcommit = Output(UInt(3.W))
+    val mcommit = Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W)))
     val bcommit = Output(UInt(BrTagWidth.W))
   })
 
@@ -188,13 +188,16 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounter = Mux(state === s_idle, PopCount(validCommit), 0.U)
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
-  // commit load & store to lsu
-  // val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => state === s_idle && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu && microOp(ringBufferTail+i.U).ctrl.fuOpType(3)))) //FIXIT
-  val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => 
-    state === s_idle && io.commits(i).valid && 
-    microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu
-  )))
-  io.mcommit := PopCount(validMcommit.asUInt)
+  // commit store to lsu
+  // val validMcommit = WireInit(VecInit((0 until CommitWidth).map(i => 
+  //   state === s_idle && io.commits(i).valid && 
+  //   microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu 
+  // )))
+  val notWalk = state === s_idle
+  (0 until CommitWidth).map(i => {
+    io.mcommit(i).valid := notWalk && io.commits(i).valid && microOp(ringBufferTail+i.U).ctrl.fuType === FuType.stu
+    io.mcommit(i).bits := io.commits(i).bits.uop.moqIdx
+  })
 
   // TODO MMIO
 
@@ -202,7 +205,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     (0 until CommitWidth).map(
       i => state === s_idle &&
         io.commits(i).valid &&
-        microOp(ringBufferTail+i.U).cf.isBr
+        microOp(ringBufferTail+i.U).cf.brUpdate.isBr
     )
   ))
   io.bcommit := PopCount(validBcommit)

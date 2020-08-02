@@ -31,31 +31,21 @@ class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
     src2 = io.in.bits.src2,
     func = io.in.bits.uop.ctrl.fuOpType
   )
-
+  val uop = io.in.bits.uop
   val csrExuOut = Wire(new ExuOutput)
-  csrExuOut.uop := io.in.bits.uop
+  csrExuOut.uop := uop
   csrExuOut.uop.cf := csr.io.cfOut
   csrExuOut.data := csrOut
   csrExuOut.redirectValid := csr.io.redirectValid
-  csrExuOut.redirect.brTag := io.in.bits.uop.brTag
+  csrExuOut.redirect.brTag := uop.brTag
   csrExuOut.redirect.isException := false.B
-  csrExuOut.redirect.roqIdx := io.in.bits.uop.roqIdx
+  csrExuOut.redirect.isMisPred := false.B
+  csrExuOut.redirect.isReplay := false.B
+  csrExuOut.redirect.roqIdx := uop.roqIdx
   csrExuOut.redirect.target := csr.io.redirect.target
-  csrExuOut.debug := DontCare
-
-  val uop = io.in.bits.uop
   csrExuOut.redirect.pc := uop.cf.pc
-  csrExuOut.redirect.brTarget := DontCare // DontCare
-  csrExuOut.redirect.btbType := LookupTree(uop.ctrl.fuOpType, RV32I_BRUInstr.bruFuncTobtbTypeTable)
-  csrExuOut.redirect.isRVC := uop.cf.isRVC
-  csrExuOut.redirect.taken := false.B
-  csrExuOut.redirect.hist := uop.cf.hist
-  csrExuOut.redirect.tageMeta := uop.cf.tageMeta
-  csrExuOut.redirect.fetchIdx := uop.cf.fetchOffset >> 1.U  //TODO: consider RVC
-  csrExuOut.redirect.btbPredCtr := uop.cf.btbPredCtr
-  csrExuOut.redirect.btbHit := uop.cf.btbHit
-  csrExuOut.redirect.rasSp := uop.cf.rasSp
-  csrExuOut.redirect.rasTopCtr := uop.cf.rasTopCtr
+  csrExuOut.debug := DontCare
+  csrExuOut.brUpdate := DontCare
 
   jmp.io.in.bits := io.in.bits
   jmp.io.in.valid := io.in.valid && io.in.bits.uop.ctrl.fuType===FuType.jmp

@@ -12,7 +12,7 @@ import bus.simplebus._
 
 class SbufferUserBundle extends XSBundle with HasMEMConst {
   val pc = UInt(VAddrBits.W) //for debug
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
+  val lsroqId = UInt(log2Up(MoqSize).W)
 }
 
 // Store buffer for XiangShan Out of Order LSU

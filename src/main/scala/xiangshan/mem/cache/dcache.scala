@@ -64,9 +64,15 @@ class DCacheStoreIO extends XSBundle
   val resp = DecoupledIO(new DCacheResp)
 }
 
+class MissReqIO extends XSBundle
+{
+  val paddr = UInt(PAddrBits.W)
+}
+
 class DcacheToLsuIO extends XSBundle with HasMEMConst {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
+  val refill = Flipped(Valid(new DCacheStoreReq))
   val redirect = Flipped(ValidIO(new Redirect))
 }
 
@@ -91,6 +97,7 @@ class Dcache extends XSModule {
 
   // NutShell cache
   assert(!io.lsu.load(1).req.valid)
+  io.lsu.refill <> DontCare
   io.lsu.load(1).resp := DontCare
   io.lsu.load(1).resp.valid := false.B
   io.lsu.load(1).req.ready := false.B
@@ -120,9 +127,10 @@ class Dcache extends XSModule {
     size = Mux(haveLoadReq, ldReq.bits.user.uop.ctrl.fuOpType(1,0), stReq.bits.user.uop.ctrl.fuOpType(1,0)), 
     wdata = stReq.bits.data(63, 0), // just for test
     wmask = stReq.bits.mask(7,0),  // just for test
-    cmd = Mux(haveLoadReq, SimpleBusCmd.write, SimpleBusCmd.read)
+    cmd = Mux(haveLoadReq, SimpleBusCmd.read, SimpleBusCmd.write)
   )
   dmem.req.valid := Mux(haveLoadReq, ldReq.valid, stReq.valid)
+  dmem.req.bits.user.get := Mux(haveLoadReq, ldUser.asUInt, stUser.asUInt)
   dmem.resp.ready := true.B
 
   ldReq.ready := dmem.req.ready && haveLoadReq

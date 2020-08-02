@@ -11,8 +11,8 @@ import xiangshan.mem.pipeline._
 import bus.simplebus._
 
 class MSHQIO extends XSBundle with HasMEMConst {
-  val refill = new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth)
-  val miss = Flipped(new SimpleBusUC(addrBits = VAddrBits, userBits = (new DcacheUserBundle).getWidth))
+  val miss = Flipped(Valid(new MissReqIO))
+  val refill = Flipped(new DCacheStoreIO)
 //   val l2cache = TODO
 }
 

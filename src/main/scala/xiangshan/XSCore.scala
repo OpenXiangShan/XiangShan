@@ -5,7 +5,7 @@ import chisel3.util._
 import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import xiangshan.backend._
-import xiangshan.backend.dispatch.DP1Parameters
+import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
@@ -50,35 +50,39 @@ trait HasXSParameter {
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = 128
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val NRReadPorts = 14
-  val NRWritePorts = 8
+  val exuParameters = ExuParameters(
+    JmpCnt = 1,
+    AluCnt = 4,
+    MulCnt = 0,
+    MduCnt = 2,
+    FmacCnt = 0,
+    FmiscCnt = 0,
+    FmiscDivSqrtCnt = 0,
+    LduCnt = 2,
+    StuCnt = 2
+  )
+  val NRIntReadPorts = 8
+  val NRIntWritePorts = 8
+  val NRMemReadPorts = exuParameters.LduCnt + 2*exuParameters.StuCnt
+  val NRFpReadPorts = 14
+  val NRFpWritePorts = 8
   val MoqSize = 16 // 64
   val RoqSize = 32
   val InnerRoqIdxWidth = log2Up(RoqSize)
   val RoqIdxWidth = InnerRoqIdxWidth + 1
   val InnerMoqIdxWidth = log2Up(MoqSize)
   val MoqIdxWidth = InnerMoqIdxWidth + 1
-  val IntDqDeqWidth = 4
-  val FpDqDeqWidth = 4
-  val LsDqDeqWidth = 4
+  val dpParams = DispatchParameters(
+    DqEnqWidth = 4,
+    IntDqSize = 64,
+    FpDqSize = 64,
+    LsDqSize = 64,
+    IntDqDeqWidth = 4,
+    FpDqDeqWidth = 4,
+    LsDqDeqWidth = 4
+  )
   val DTLBSize = 32
   val ITLBSize = 32
-  val dp1Paremeters = DP1Parameters(
-    IntDqSize = 16,
-    FpDqSize = 16,
-    LsDqSize = 16
-  )
-  val exuParameters = ExuParameters(
-    JmpCnt = 1,
-    AluCnt = 4,
-    MulCnt = 1,
-    MduCnt = 1,
-    FmacCnt = 0,
-    FmiscCnt = 0,
-    FmiscDivSqrtCnt = 0,
-    LduCnt = 0,
-    StuCnt = 1
-  )
 }
 
 trait HasXSLog { this: Module =>
@@ -101,7 +105,6 @@ trait NeedImpl { this: Module =>
 
 abstract class XSBundle extends Bundle
   with HasXSParameter
-  with HasTageParameter
 
 case class XSConfig
 (

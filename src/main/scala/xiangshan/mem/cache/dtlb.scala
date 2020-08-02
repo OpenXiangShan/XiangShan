@@ -209,7 +209,7 @@ class FakeDtlb extends TlbModule {
   (0 until LoadPipelineWidth + StorePipelineWidth).map(i => {
     io.lsu.resp(i).valid := io.lsu.req(i).valid
     io.lsu.resp(i).bits.paddr := io.lsu.req(i).bits.vaddr
-    io.lsu.resp(i).bits.miss := DontCare
+    io.lsu.resp(i).bits.miss := false.B
   })
 }
 
