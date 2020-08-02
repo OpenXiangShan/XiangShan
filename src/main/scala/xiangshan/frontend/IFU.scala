@@ -226,7 +226,8 @@ class IFU extends XSModule with HasIFUConst
   (0 until HistoryLength).foreach(i => inOrderBrHist(i) := extHist(i.U + io.inOrderBrInfo.bits.brInfo.histPtr))
   bpu.io.inOrderBrInfo.valid := io.inOrderBrInfo.valid
   bpu.io.inOrderBrInfo.bits := Cat(inOrderBrHist.asUInt, io.inOrderBrInfo.bits.asUInt).asTypeOf(new BranchUpdateInfoWithHist)
-  bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
+  // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
+  bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
   bpu.io.in.valid := if1_fire
   bpu.io.in.bits.pc := if1_npc
   bpu.io.in.bits.hist := hist.asUInt

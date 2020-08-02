@@ -133,9 +133,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val lo_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
   val table = List.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
 
-  val hi_us_r = Wire(Vec(TageBanks, Bool()))
-  val lo_us_r = Wire(Vec(TageBanks, Bool()))
-  val table_r = Wire(Vec(TageBanks, new TageEntry))
+  val hi_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+  val lo_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+  val table_r = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageEntry)))
 
   val baseBank = io.req.bits.pc(log2Up(TageBanks), 1)
 
@@ -145,7 +145,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   // if baseBank == 9, then we want to pass idxes_and_tags(0) to bank 9,
   //                         0  1        8  9  10      15
   // so the correct order is 7, 8, ..., 15, 0,  1, ..., 6
-  val iAndTIdxInOrder = VecInit((0 until TageBanks).map(b => ((TageBanks.U - baseBank) + b.U)(log2Up(TageBanks)-1, 0)))
+  val iAndTIdxInOrder = VecInit((0 until TageBanks).map(b => ((TageBanks.U +& b.U) - baseBank)(log2Up(TageBanks)-1, 0)))
   val iAndTIdxInOrderLatch = RegEnable(iAndTIdxInOrder, enable=io.req.valid)
 
   val realMask = circularShiftRight(io.req.bits.mask, TageBanks, baseBank)

@@ -153,8 +153,8 @@ class BPUStage extends XSModule {
   .elsewhen (outFire) { predValid := false.B }
   .otherwise          { predValid := predValid }
 
-  io.out.valid := predValid && !io.flush
-  io.pred.valid := predValid && !io.flush
+  io.out.valid  := predValid || !io.flush
+  io.pred.valid := predValid || !io.flush
 }
 
 class BPUStage1 extends BPUStage {
@@ -271,7 +271,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     // from backend
     val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
-    val flush = Input(UInt(3.W))
+    val flush = Input(Vec(3, Bool()))
     // from if1
     val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
