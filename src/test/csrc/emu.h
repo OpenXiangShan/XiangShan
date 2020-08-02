@@ -1,10 +1,7 @@
 #include "common.h"
 #include "snapshot.h"
 #include "VXSSimTop.h"
-
-#if VM_TRACE
 #include <verilated_vcd_c.h>	// Trace file format header
-#endif
 
 #define DIFFTEST_WIDTH 6
 #define SNAPSHOT_INTERVAL 10 // unit: second
@@ -15,6 +12,7 @@ struct EmuArgs {
   uint64_t log_begin, log_end;
   const char *image;
   const char *snapshot_path;
+  bool enable_waveform;
 
   EmuArgs() {
     seed = 0;
@@ -23,14 +21,14 @@ struct EmuArgs {
     log_end = -1;
     snapshot_path = NULL;
     image = NULL;
+    enable_waveform = false;
   }
 };
 
 class Emulator {
   VXSSimTop *dut_ptr;
-#if VM_TRACE
   VerilatedVcdC* tfp;
-#endif
+  bool enable_waveform;
   VerilatedSaveMem snapshot_slot[2];
 
   enum {
@@ -50,9 +48,11 @@ class Emulator {
   inline void reset_ncycles(size_t cycles);
   inline void single_cycle();
   void display_trapinfo();
+  inline char* timestamp_filename(time_t t, char *buf);
   inline char* snapshot_filename(time_t t);
   void snapshot_save(const char *filename);
   void snapshot_load(const char *filename);
+  inline char* waveform_filename(time_t t);
 
 public:
   Emulator(EmuArgs &args);
