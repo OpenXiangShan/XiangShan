@@ -154,7 +154,7 @@ class FakeCache extends XSModule with HasICacheConst {
   //     s2_valid := false.B
   //     s3_valid := false.B
   // }
-  when (io.flush(0)) { s2_valid := false.B }
+  when (io.flush(0)) { s2_valid := s1_fire }
   when (io.flush(1)) { s3_valid := false.B }
 
   // val tempPredecode = Module(new TempPreDecoder)
