@@ -10,7 +10,7 @@ import scala.math.min
 
 trait MicroBTBPatameter{
     val nWays = 16
-    val offsetSize = 13
+    val offsetSize = 20
 }
 
 class MicroBTB extends BasePredictor
@@ -195,14 +195,14 @@ class MicroBTB extends BasePredictor
    
    //bypass:read-after-write 
    for( b <- 0 until PredictWidth) {
-        when(update_bank === b.U && read_hit_vec(b) && uBTB_Meta_write_valid && read_valid
+        when(update_bank === b.U && uBTB_Meta_write_valid && read_valid
             && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
         {
             io.out.targets(b) := io.update.bits.target
             io.out.takens(b) := io.update.bits.taken
             io.out.is_RVC(b) := io.update.bits.pd.isRVC
             io.out.notTakens(b) := (io.update.bits.pd.brType === BrType.branch) && (!io.out.takens(b))
-             XSDebug("uBTB bypass hit!\n")
+            XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+ (b.U << 1.U),b.U, io.out.targets(b))
         }
     }
 }
