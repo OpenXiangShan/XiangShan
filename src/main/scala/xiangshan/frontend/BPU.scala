@@ -155,6 +155,17 @@ class BPUStage extends XSModule {
 
   io.out.valid  := predValid || !io.flush
   io.pred.valid := predValid || !io.flush
+
+  XSDebug(io.in.fire(), "in:(%d %d) pc=%x, mask=%b, target=%x\n",
+    io.in.valid, io.in.ready, io.in.bits.pc, io.in.bits.mask, io.in.bits.target)
+  XSDebug(io.out.fire(), "out:(%d %d) pc=%x, mask=%b, target=%x\n",
+    io.out.valid, io.out.ready, io.out.bits.pc, io.out.bits.mask, io.out.bits.target)
+  XSDebug("flush=%d\n", io.flush)
+  XSDebug("taken=%d, takens=%b, notTakens=%b, jmpIdx=%d, hasNTBr=%d, lastValidPos=%d, target=%x\n",
+    taken, takens.asUInt, notTakens.asUInt, jmpIdx, hasNTBr, lastValidPos, target)
+  val p = io.pred.bits
+  XSDebug(io.pred.fire(), "outPred: redirect=%d, taken=%d, jmpIdx=%d, hasNTBrs=%d, target=%x, saveHalfRVI=%d\n",
+    p.redirect, p.taken, p.jmpIdx, p.hasNotTakenBrs, p.target, p.saveHalfRVI)
 }
 
 class BPUStage1 extends BPUStage {
@@ -224,12 +235,13 @@ class BPUStage3 extends BPUStage {
   
   val brTakens = 
     if (EnableBPD) {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => btbHits(i) && tageValidTakens(i))))
+      brs & Reverse(Cat((0 until PredictWidth).map(i => tageValidTakens(i))))
     } else {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => btbHits(i) && bimTakens(i))))
+      brs & Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))
     }
 
-  takens := VecInit((0 until PredictWidth).map(i => brTakens(i) || jals(i) || jalrs(i)))
+  // predict taken only if btb has a target
+  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jals(i) || jalrs(i)) && btbHits(i)))
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
@@ -244,6 +256,13 @@ class BPUStage3 extends BPUStage {
   io.out.bits.resp.tage <> io.in.bits.resp.tage
   for (i <- 0 until PredictWidth) {
     io.out.bits.brInfo(i).tageMeta := io.in.bits.brInfo(i).tageMeta
+  }
+
+  XSDebug(io.predecode.valid, "predecode: mask:%b\n", io.predecode.bits.mask)
+  for (i <- 0 until PredictWidth) {
+    val p = io.predecode.bits.pd(i)
+      XSDebug(io.predecode.valid, "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
+        i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
   }
 }
 
@@ -307,6 +326,16 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   io.branchInfo.valid := s3.io.out.valid
   io.branchInfo.bits := s3.io.out.bits.brInfo
   s3.io.out.ready := io.branchInfo.ready
+
+  XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
+  for (i <- 0 until PredictWidth) {
+    val b = io.branchInfo.bits(i)
+    XSDebug(io.branchInfo.fire(), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, bimCtr:%d\n",
+      i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.bimCtr)
+    val t = b.tageMeta
+    XSDebug(io.branchInfo.fire(), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
+      t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
+  }
 }
 
 
