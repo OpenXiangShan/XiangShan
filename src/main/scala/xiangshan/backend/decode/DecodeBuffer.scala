@@ -7,6 +7,7 @@ import utils._
 
 class DecodeBuffer extends XSModule {
   val io = IO(new Bundle() {
+    val isWalking = Input(Bool())
     val redirect = Flipped(ValidIO(new Redirect))
     val in  = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
     val out = Vec(RenameWidth, DecoupledIO(new CfCtrl))
@@ -23,7 +24,6 @@ class DecodeBuffer extends XSModule {
     })
   ).asBool()
 
-  val rightRdyVec = io.out.map(_.ready && leftCanIn)
   for( i <- 0 until RenameWidth){
     when(io.out(i).fire()){
       validVec(i) := false.B
@@ -36,7 +36,7 @@ class DecodeBuffer extends XSModule {
     }
 
     val r = RegEnable(io.in(i).bits, io.in(i).fire())
-    io.in(i).ready := rightRdyVec(i)
+    io.in(i).ready := leftCanIn
     io.out(i).bits <> r
     if(i > 0 ){
       io.out(i).valid := validVec(i) &&
@@ -44,10 +44,10 @@ class DecodeBuffer extends XSModule {
         Mux(r.ctrl.noSpecExec,
           !ParallelOR(validVec.take(i)).asBool(),
           !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec)).asBool()
-        )
+        ) && !io.isWalking
     } else {
       require( i == 0)
-      io.out(i).valid := validVec(i) && !io.redirect.valid
+      io.out(i).valid := validVec(i) && !io.redirect.valid && !io.isWalking
     }
   }
 
