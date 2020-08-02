@@ -109,13 +109,17 @@ B ?= 0
 E ?= -1
 SNAPSHOT ?=
 
+# enable this runtime option if you want to generate a vcd file
+# use 'emu -h' to see more details
+#WAVEFORM = --dump-wave
+
 ifeq ($(SNAPSHOT),)
 SNAPSHOT_OPTION = 
 else
 SNAPSHOT_OPTION = --load-snapshot=$(REMOTE_PREFIX)/$(SNAPSHOT)
 endif
 
-EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) --dump-wave
+EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
