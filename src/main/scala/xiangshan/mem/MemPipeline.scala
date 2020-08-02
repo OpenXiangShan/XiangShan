@@ -28,7 +28,7 @@ class MemToBackendIO extends XSBundle {
   val replayAll = ValidIO(new Redirect)
   // replay mem instructions form Load Queue/Store Queue
   val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
-  val mcommit = Input(UInt(3.W))
+  val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W))))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
 }

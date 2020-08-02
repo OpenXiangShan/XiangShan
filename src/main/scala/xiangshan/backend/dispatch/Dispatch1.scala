@@ -64,6 +64,7 @@ class Dispatch1 extends XSModule {
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
     io.toRoq(i).bits.ctrl.dpqType := Cat(isLs(i), isFp(i))
+    io.toRoq(i).bits.moqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.moqIdxs(i))
 
     io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)
     io.toMoq(i).bits := io.fromRename(i).bits

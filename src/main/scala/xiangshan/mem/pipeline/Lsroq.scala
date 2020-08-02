@@ -34,7 +34,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
-    val mcommit = Input(UInt(3.W))
+    val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W))))
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val rollback = Output(Valid(new Redirect))
     val miss = Decoupled(new MissReqIO)
@@ -46,6 +46,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val allocated = RegInit(VecInit(List.fill(MoqSize)(false.B))) // lsroq entry has been allocated
   val valid = RegInit(VecInit(List.fill(MoqSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(MoqSize)(false.B))) // inst has been writebacked to CDB
+  val commited = Reg(Vec(MoqSize, Bool())) // inst has been writebacked to CDB
   val store = Reg(Vec(MoqSize, Bool())) // inst is a store inst
   val miss = Reg(Vec(MoqSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   val listening = Reg(Vec(MoqSize, Bool())) // waiting foe refill result
@@ -68,6 +69,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       allocated(ringBufferHead+offset) := true.B
       valid(ringBufferHead+offset) := false.B
       writebacked(ringBufferHead+offset) := false.B
+      commited(ringBufferHead+offset) := false.B
       store(ringBufferHead+offset) := false.B
       miss(ringBufferHead+offset) := false.B
       listening(ringBufferHead+offset) := false.B
@@ -93,7 +95,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // invalidate lsroq term using robIdx
   // TODO: check exception redirect implementation
   (0 until MoqSize).map(i => {
-    when(uop(i).needFlush(io.brqRedirect) && allocated(i)){
+    when(uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)){
       allocated(i) := false.B
     }
   })
@@ -213,7 +215,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     io.ldout(i).bits.debug.isMMIO := data(loadWbSel(i)).mmio
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i))
     when(io.ldout(i).fire()){
-      writebacked(loadWbSel(i)) := true.B
+      // writebacked(loadWbSel(i)) := true.B
       allocated(loadWbSel(i)) := false.B
     }
   })
@@ -267,8 +269,16 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
   val scommitPending = RegInit(0.U(log2Up(MoqSize).W))
-  val scommitCnt = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
-  scommitPending := scommitPending + io.mcommit - scommitCnt
+  val scommitIn = PopCount(VecInit((0 until CommitWidth).map(i => io.mcommit(i).valid)).asUInt)
+  val scommitOut = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
+  scommitPending := scommitPending + scommitIn - scommitOut
+
+  // when store commited, mark it as commited (will not be influenced by redirect)
+  (0 until CommitWidth).map(i => {
+    when(io.mcommit(i).valid){
+      commited(io.mcommit(i).bits) := true.B
+    }
+  })
 
   val scommitLimit = Mux(scommitPending > 2.U, 2.U, scommitPending(1, 0))
   val validStoreMask = Wire(Vec(MoqSize*2, Bool()))
@@ -290,7 +300,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       }
     )
     val ptr = i.U(InnerMoqIdxWidth-1, 0)
-    validStoreMask(i) := store(ptr) && writebacked(ptr) && allocated(ptr) && isValid
+    validStoreMask(i) := store(ptr) && writebacked(ptr) && allocated(ptr) && isValid && commited(ptr)
     // if(i == 0){
     //   storeSelCount(0) := TODO
     // }else{
@@ -507,6 +517,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")
+    PrintFlag(allocated(i) && commited(i), "c")
     PrintFlag(allocated(i) && store(i), "s")
     PrintFlag(allocated(i) && miss(i), "m")
     PrintFlag(allocated(i) && listening(i), "l")
