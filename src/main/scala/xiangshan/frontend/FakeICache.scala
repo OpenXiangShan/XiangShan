@@ -114,7 +114,7 @@ class FakeCache extends XSModule with HasICacheConst {
     ).foreach(_ := 0.U)
   }
 
-  XSDebug("[ICache-Stage1] s1_valid:%d || s2_ready:%d || s1_pc:%d",s1_valid,s2_ready,gpc)
+  XSDebug("[ICache-Stage1] s1_valid:%d || s2_ready:%d || s1_pc:%x",s1_valid,s2_ready,gpc)
   XSDebug(false,s1_fire,"------> s1 fire!!!")
   XSDebug(false,true.B,"\n")
 
@@ -154,7 +154,7 @@ class FakeCache extends XSModule with HasICacheConst {
   //     s2_valid := false.B
   //     s3_valid := false.B
   // }
-  when (io.flush(0)) { s2_valid := false.B }
+  when (io.flush(0)) { s2_valid := s1_fire }
   when (io.flush(1)) { s3_valid := false.B }
 
   // val tempPredecode = Module(new TempPreDecoder)
