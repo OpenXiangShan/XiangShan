@@ -50,7 +50,7 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
   val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  // val moqIdx = UInt(log2Up(LSRoqSize).W)
+  // val moqIdx = UInt(log2Up(MoqSize).W)
   val uop = new MicroOp
 
   val miss = Bool()

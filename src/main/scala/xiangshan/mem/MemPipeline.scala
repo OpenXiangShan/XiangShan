@@ -13,7 +13,6 @@ import bus.simplebus._
 trait HasMEMConst{
   val LoadPipelineWidth = 2
   val StorePipelineWidth = 2
-  val LSRoqSize = 64
   val StoreBufferSize = 16
   val RefillSize = 512
   val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
