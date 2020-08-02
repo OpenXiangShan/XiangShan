@@ -6,7 +6,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import bus.axi4._
 import chisel3.stage.ChiselGeneratorAnnotation
-import device.AXI4RAM
+import device._
 import xiangshan._
 import utils._
 
@@ -50,6 +50,7 @@ class XSSimTop extends Module {
     val difftest = new DiffTestIO
     val logCtrl = new LogCtrlIO
     val trap = new TrapIO
+    val uart = new UARTIO
   })
 
   lazy val config = XSConfig(FPGAPlatform = false)
@@ -66,6 +67,7 @@ class XSSimTop extends Module {
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio
+  io.uart <> mmio.io.uart
 
   // soc.io.meip := Counter(true.B, 9973)._2  // use prime here to not overlapped by mtip
   soc.io.meip := false.B  // use prime here to not overlapped by mtip

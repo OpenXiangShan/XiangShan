@@ -96,6 +96,15 @@ inline void Emulator::single_cycle() {
   tfp->dump(cycles);
 #endif
 
+  if (dut_ptr->io_uart_out_valid) {
+    printf("%c", dut_ptr->io_uart_out_ch);
+    fflush(stdout);
+  }
+  if (dut_ptr->io_uart_in_valid) {
+    extern uint8_t uart_getc();
+    dut_ptr->io_uart_in_ch = uart_getc();
+  }
+
   cycles ++;
 }
 
