@@ -16,7 +16,7 @@ trait BimParams extends HasXSParameter {
 
 class BIM extends BasePredictor with BimParams{
   class BIMResp extends Resp {
-    val ctrs = Vec(PredictWidth, ValidUndirectioned(UInt(2.W)))
+    val ctrs = Vec(PredictWidth, UInt(2.W))
   }
   class BIMMeta extends Meta {
     val ctrs = Vec(PredictWidth, UInt(2.W))
@@ -24,8 +24,8 @@ class BIM extends BasePredictor with BimParams{
   class BIMFromOthers extends FromOthers {}
 
   class BIMIO extends DefaultBasePredictorIO {
-    val resp = new BIMResp
-    val meta = new BIMMeta
+    val resp = Output(new BIMResp)
+    val meta = Output(new BIMMeta)
   }
 
   override val io = IO(new BIMIO)
@@ -75,9 +75,8 @@ class BIM extends BasePredictor with BimParams{
 
   for (b <- 0 until BimBanks) {
     val ctr = bimRead(bankIdxInOrder(b))
-    io.resp.ctrs(b).valid := RegNext(io.pc.valid) // Does not need the valid bit
-    io.resp.ctrs(b).bits  := ctr
-    io.meta.ctrs(b)       := ctr
+    io.resp.ctrs(b)  := ctr
+    io.meta.ctrs(b)  := ctr
   }
 
   val u = io.update.bits
