@@ -41,6 +41,7 @@ class PreDecodeInfo extends XSBundle {  // 8 bit
   def isBr = brType === BrType.branch
   def isJal = brType === BrType.jal
   def isJalr = brType === BrType.jalr
+  def notCFI = brType === BrType.notBr
 }
 
 class PreDecodeResp extends XSBundle {
