@@ -4,6 +4,7 @@ import org.scalatest._
 import chiseltest._
 import chisel3._
 import chisel3.experimental.BundleLiterals._
+import top.Parameters
 import utils.XSLog
 import xiangshan.testutils._
 import xiangshan.testutils.TestCaseGenerator._
@@ -20,8 +21,7 @@ class MduTest extends FlatSpec
   with HasPartialDecoupledDriver
 {
 
-  // set to true when you need log
-  XSLog.generateLog = false
+  Parameters.set(Parameters.debugParameters)
 
   "MUL" should "random enq and deq correctly" in {
     test(new MulExeUnit{

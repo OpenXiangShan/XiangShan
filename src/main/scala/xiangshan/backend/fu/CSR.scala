@@ -176,7 +176,7 @@ class CSRIO extends FunctionUnitIO {
   val wenFix = Output(Bool())
 }
 
-class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRConst{
+class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val io = IO(new CSRIO)
 
   io.cfOut := io.cfIn
@@ -387,7 +387,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   val priviledgeMode = RegInit(UInt(2.W), ModeM)
 
   // perfcnt
-  val hasPerfCnt = !p.FPGAPlatform
+  val hasPerfCnt = !env.FPGAPlatform
   val nrPerfCnts = if (hasPerfCnt) 0x80 else 0x3
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfCntsLoMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb00 + i, perfCnts(i)))
@@ -791,7 +791,7 @@ class CSR(implicit val p: XSConfig) extends FunctionUnit(csrCfg) with HasCSRCons
   BoringUtils.addSink(xstrap, "XSTRAP")
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
-  if (!p.FPGAPlatform) {
+  if (!env.FPGAPlatform) {
 
     // display all perfcnt when nooptrap is executed
     when (xstrap) {

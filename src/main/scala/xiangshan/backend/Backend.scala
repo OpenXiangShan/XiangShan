@@ -20,7 +20,7 @@ import utils.ParallelOR
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
   */
-class Backend(implicit val p: XSConfig) extends XSModule
+class Backend extends XSModule
   with NeedImpl {
   val io = IO(new Bundle {
     val dmem = new SimpleBusUC(addrBits = VAddrBits)
@@ -212,7 +212,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
   BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
   val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
-  if (!p.FPGAPlatform) {
+  if (!env.FPGAPlatform) {
     BoringUtils.addSource(debugArchReg, "difftestRegs")
   }
 

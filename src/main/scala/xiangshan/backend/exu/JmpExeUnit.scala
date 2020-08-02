@@ -1,12 +1,12 @@
 package xiangshan.backend.exu
 
 import chisel3._
-import xiangshan.{ExuOutput, FuType, XSConfig}
+import xiangshan.{ExuOutput, FuType}
 import xiangshan.backend.fu.{CSR, Jump}
 import xiangshan.backend.decode.isa._
 import utils._
 
-class JmpExeUnit(implicit val p: XSConfig) extends Exu(Exu.jmpExeUnitCfg) {
+class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
 
   val jmp = Module(new Jump)
 

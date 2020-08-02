@@ -53,8 +53,7 @@ class XSSimTop extends Module {
     val uart = new UARTIO
   })
 
-  lazy val config = XSConfig(FPGAPlatform = false)
-  val soc = Module(new XSSoc()(config))
+  val soc = Module(new XSSoc())
   val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
   // Be careful with the commit checking of emu.
   // A large delay will make emu incorrectly report getting stuck.
@@ -111,11 +110,12 @@ class XSSimTop extends Module {
 }
 
 object TestMain extends App {
-  if (args.contains("--disable-log"))
-    XSLog.generateLog = false
-  else
-    XSLog.generateLog = true
-
+  // set parameters
+  Parameters.set(
+    if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
+    else Parameters.debugParameters // open log
+  )
+  // generate verilog
   (new chisel3.stage.ChiselStage).execute(
     args.filterNot(_ == "--disable-log"),
     Seq(ChiselGeneratorAnnotation(() => new XSSimTop))
