@@ -26,11 +26,27 @@ enum {
   DIFFTEST_NR_REG
 };
 
+struct DiffState {
+  int commit;
+  uint64_t *reg_scala;
+  uint32_t this_inst;
+  int skip;
+  int isRVC;
+  uint64_t *wpc;
+  uint64_t *wdata;
+  uint32_t *wdst;
+  int wen;
+  uint64_t intrNO;
+  int priviledgeMode;
+};
+
 extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n);
 extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n);
 extern void (*ref_difftest_getregs)(void *c);
 extern void (*ref_difftest_setregs)(const void *c);
 
 void init_difftest();
+int difftest_step(DiffState *s);
+void difftest_display(uint8_t mode);
 
 #endif

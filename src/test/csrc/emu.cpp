@@ -23,11 +23,12 @@ Emulator::Emulator(EmuArgs &args):
   extern void init_device(void);
   init_device();
 
+  init_difftest();
+
   // init core
   reset_ncycles(10);
 
   if (args.snapshot_path != NULL) {
-    init_difftest();
     snapshot_load(args.snapshot_path);
     hascommit = 1;
   }
@@ -116,12 +117,15 @@ uint64_t Emulator::execute(uint64_t n) {
   uint64_t lastcommit = n;
   const int stuck_limit = 500;
 
-  static uint32_t wdst[DIFFTEST_WIDTH];
-  static uint64_t wdata[DIFFTEST_WIDTH];
-  static uint64_t wpc[DIFFTEST_WIDTH];
-
-  extern int difftest_step(int commit, uint64_t *reg_scala, uint32_t this_inst,
-      int skip, int isRVC, uint64_t *wpc, uint64_t *wdata, uint32_t *wdst, int wen, uint64_t intrNO, int priviledgeMode);
+  uint32_t wdst[DIFFTEST_WIDTH];
+  uint64_t wdata[DIFFTEST_WIDTH];
+  uint64_t wpc[DIFFTEST_WIDTH];
+  uint64_t reg[DIFFTEST_NR_REG];
+  DiffState diff;
+  diff.reg_scala = reg;
+  diff.wpc = wpc;
+  diff.wdata = wdata;
+  diff.wdst = wdst;
 
 #if VM_TRACE
   Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -145,17 +149,13 @@ uint64_t Emulator::execute(uint64_t n) {
 #if VM_TRACE
       tfp->close();
 #endif
-      // commit a fake inst to trigger error
-      uint64_t reg[DIFFTEST_NR_REG];
-      difftest_step(1, reg, 0, 0, 0, wpc, wdata, wdst, 0, 0, 0);
+      difftest_display(dut_ptr->io_difftest_priviledgeMode);
       trapCode = STATE_ABORT;
     }
 
     if (!hascommit && dut_ptr->io_difftest_commit && dut_ptr->io_difftest_thisPC == 0x80000000u) {
       hascommit = 1;
-      uint64_t reg[DIFFTEST_NR_REG];
       read_emu_regs(reg);
-      init_difftest();
       void* get_img_start();
       long get_img_size();
       ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
@@ -164,14 +164,18 @@ uint64_t Emulator::execute(uint64_t n) {
 
     // difftest
     if (dut_ptr->io_difftest_commit && hascommit) {
-      uint64_t reg[DIFFTEST_NR_REG];
       read_emu_regs(reg);
       read_wb_info(wpc, wdata, wdst);
 
-      if (difftest_step(dut_ptr->io_difftest_commit, reg, dut_ptr->io_difftest_thisINST,
-            dut_ptr->io_difftest_skip, dut_ptr->io_difftest_isRVC,
-            wpc, wdata, wdst, dut_ptr->io_difftest_wen,
-            dut_ptr->io_difftest_intrNO, dut_ptr->io_difftest_priviledgeMode)) {
+      diff.commit = dut_ptr->io_difftest_commit;
+      diff.this_inst = dut_ptr->io_difftest_thisINST;
+      diff.skip = dut_ptr->io_difftest_skip;
+      diff.isRVC = dut_ptr->io_difftest_isRVC;
+      diff.wen = dut_ptr->io_difftest_wen;
+      diff.intrNO = dut_ptr->io_difftest_intrNO;
+      diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
+
+      if (difftest_step(&diff)) {
 #if VM_TRACE
         tfp->close();
 #endif
