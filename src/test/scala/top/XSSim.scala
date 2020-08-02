@@ -101,8 +101,10 @@ class XSSimTop extends Module {
   ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
   io.trap := trap
 
-  val logEnable = (GTimer() >= io.logCtrl.log_begin) && (GTimer() < io.logCtrl.log_end)
+  val timer = GTimer()
+  val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
   ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+  ExcitingUtils.addSource(timer, "logTimestamp")
 
   // Check and dispaly all source and sink connections
   ExcitingUtils.checkAndDisplay()
