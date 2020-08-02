@@ -257,7 +257,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
   val scommitPending = RegInit(0.U(log2Up(MoqSize).W))
-  val scommitCnt = WireInit(0.U(2.W))
+  val scommitCnt = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
   scommitPending := scommitPending + io.mcommit - scommitCnt
 
   val scommitLimit = Mux(scommitPending > 2.U, 2.U, scommitPending(1, 0))
@@ -481,7 +481,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   assert(!io.rollback.valid)
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerMoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerMoqIdxWidth), ringBufferTail)
+  XSDebug("head %d:%d tail %d:%d scommit %d\n", ringBufferHeadExtended(InnerMoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerMoqIdxWidth), ringBufferTail, scommitPending)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag){
