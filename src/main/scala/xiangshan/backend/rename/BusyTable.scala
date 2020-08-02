@@ -20,7 +20,7 @@ class BusyTable extends XSModule {
   val table = RegInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
-    rdy := !table(raddr) || ParallelOR(io.wbPregs.map(wb => wb.valid && (wb.bits===raddr))).asBool()
+    rdy := !table(raddr) || ParallelOR(io.wbPregs.map(wb => wb.valid && (wb.bits===raddr)))
   }
 
   for((alloc, i) <- io.allocPregs.zipWithIndex){

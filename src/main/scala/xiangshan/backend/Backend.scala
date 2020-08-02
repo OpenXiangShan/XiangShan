@@ -137,7 +137,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
   decode.io.brTags <> brq.io.brTags
-  decBuf.io.isWalking := ParallelOR(roq.io.commits.map(c => c.valid && c.bits.isWalk)).asBool() // TODO: opt this
+  decBuf.io.isWalking := ParallelOR(roq.io.commits.map(c => c.valid && c.bits.isWalk)) // TODO: opt this
   decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
 
