@@ -170,19 +170,20 @@ class MicroBTB extends BasePredictor
     val update_taget_offset =  io.update.bits.target.asSInt - update_br_pc.asSInt
     val update_is_BR_or_JAL = (io.update.bits.pd.brType === BrType.branch) || (io.update.bits.pd.brType === BrType.jal) 
 
-    val uBTB_write_valid = io.update.valid && io.update.bits.isMisPred && update_is_BR_or_JAL
-    val uBTB_Meta_write_valid = io.update.valid && update_is_BR_or_JAL
+    val entry_write_valid = io.update.valid && io.update.bits.isMisPred && update_is_BR_or_JAL
+    val meta_write_valid = io.update.valid && update_is_BR_or_JAL
     //write btb target when miss prediction
-    when(uBTB_write_valid)
+    when(entry_write_valid)
     {
         uBTB(update_bank)(update_write_way).offset := update_taget_offset
     }
     //write the uBTBMeta
-    when(uBTB_Meta_write_valid)
+    when(meta_write_valid)
     {
         //commit update
         uBTBMeta(update_bank)(update_write_way).is_Br := io.update.bits.pd.brType === BrType.branch
         uBTBMeta(update_bank)(update_write_way).is_RVC := io.update.bits.pd.isRVC
+        (0 until PredictWidth).foreach{b =>  uBTBMeta(b)(update_write_way).valid := false.B}
         uBTBMeta(update_bank)(update_write_way).valid := true.B
         uBTBMeta(update_bank)(update_write_way).tag := update_tag
         uBTBMeta(update_bank)(update_write_way).pred := 
@@ -191,11 +192,11 @@ class MicroBTB extends BasePredictor
             satUpdate( uBTBMeta(update_bank)(update_write_way).pred,2,update_taken)
         )
     }
-    XSDebug(uBTB_Meta_write_valid,"uBTB update: update fetch pc:0x%x  | real pc:0x%x  | update hits%b  | update_write_way:%d\n",update_fetch_pc,update_br_pc,update_hits,update_write_way)
+    XSDebug(meta_write_valid,"uBTB update: update fetch pc:0x%x  | real pc:0x%x  | update hits%b  | update_write_way:%d\n",update_fetch_pc,update_br_pc,update_hits,update_write_way)
    
    //bypass:read-after-write 
    for( b <- 0 until PredictWidth) {
-        when(update_bank === b.U && uBTB_Meta_write_valid && read_valid
+        when(update_bank === b.U && meta_write_valid && read_valid
             && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
         {
             io.out.targets(b) := io.update.bits.target
