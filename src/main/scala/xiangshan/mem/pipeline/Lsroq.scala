@@ -127,8 +127,8 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       writebacked(io.loadIn(i).bits.uop.moqIdx) := !io.loadIn(i).bits.miss
       allocated(io.loadIn(i).bits.uop.moqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
       data(io.loadIn(i).bits.uop.moqIdx).paddr := io.loadIn(i).bits.paddr
-      data(io.loadIn(i).bits.uop.moqIdx).mask := io.loadIn(i).bits.mask
-      data(io.loadIn(i).bits.uop.moqIdx).data := io.loadIn(i).bits.data
+      data(io.loadIn(i).bits.uop.moqIdx).mask := io.loadIn(i).bits.forwardMask.asUInt // load's "data" field is used to save bypassMask/Data for missed load
+      data(io.loadIn(i).bits.uop.moqIdx).data := io.loadIn(i).bits.forwardData.asUInt // load's "data" field is used to save bypassMask/Data for missed load
       data(io.loadIn(i).bits.uop.moqIdx).mmio := io.loadIn(i).bits.mmio
       miss(io.loadIn(i).bits.uop.moqIdx) := io.loadIn(i).bits.miss
       store(io.loadIn(i).bits.uop.moqIdx) := false.B
@@ -172,13 +172,23 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   // get load result from refill resp
   def refillDataSel(data: UInt, offset: UInt): UInt = {
-    Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(8*(p+1)-1, 8*p))))
+    Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(64*(p+1)-1, 64*p))))
+  }
+
+  def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
+    val res = Wire(Vec(8, UInt(8.W)))
+    (0 until 8).map(i => {
+      res(i) := Mux(fwdMask(i), fwd(8*(i+1)-1, 8*i), refill(8*(i+1)-1, 8*i))
+    })
+    res.asUInt
   }
 
   (0 until MoqSize).map(i => {
     val addrMatch = data(i).paddr(PAddrBits-1, 6) === io.refill.bits.paddr
     when(allocated(i) && listening(i)){
-      data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
+      // TODO: merge data
+      val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
+      data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
       valid(i) := true.B
       listening(i) := false.B
     }
