@@ -8,7 +8,7 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 // A "just-enough" Roq
-class Roq(implicit val p: XSConfig) extends XSModule {
+class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
@@ -275,7 +275,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
   val retirePCFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.pc, microOp(firstValidCommit).cf.pc)
   val retireInstFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.instr, microOp(firstValidCommit).cf.instr)
-  if(!p.FPGAPlatform){
+  if(!env.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
     BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst

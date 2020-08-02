@@ -279,7 +279,7 @@ class Brq extends XSModule {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
-  if(EnableBPU){
+  if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondMbpInstr", Perf)
     ExcitingUtils.addSource(mbpRight, "perfCntCondMbpRight", Perf)
     ExcitingUtils.addSource(mbpWrong, "perfCntCondMbpWrong", Perf)

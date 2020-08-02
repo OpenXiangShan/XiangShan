@@ -7,6 +7,7 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
+import top.Parameters
 import utils.XSLog
 import xiangshan._
 import xiangshan.testutils._
@@ -20,7 +21,7 @@ class BrqTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver {
   it should "redirect out-of-order, dequeue in-order" in {
-    XSLog.generateLog = true
+    Parameters.set(Parameters.debugParameters)
 
     test(new Brq {
       AddSinks()
