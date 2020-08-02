@@ -17,6 +17,8 @@ trait HasMEMConst{
   val StoreBufferSize = 16
   val RefillSize = 512
   val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
+  val TLBWidth = LoadPipelineWidth + StorePipelineWidth
+  val TLBEntrySize = 32
 }
 
 class MemToBackendIO extends XSBundle {
@@ -39,7 +41,7 @@ class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val lsu = Module(new Lsu)
   val dcache = Module(new Dcache)
   // val mshq = Module(new MSHQ)
-  val dtlb = Module(new Dtlb)
+  val dtlb = Module(new FakeDtlb)
   
   dcache.io := DontCare
   dtlb.io := DontCare

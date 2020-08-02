@@ -61,6 +61,8 @@ trait HasXSParameter {
   val IntDqDeqWidth = 4
   val FpDqDeqWidth = 4
   val LsDqDeqWidth = 4
+  val DTLBSize = 32
+  val ITLBSize = 32
   val dp1Paremeters = DP1Parameters(
     IntDqSize = 16,
     FpDqSize = 16,

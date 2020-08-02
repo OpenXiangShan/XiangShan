@@ -151,6 +151,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   (0 until LoadPipelineWidth).map(i => {
     io.dtlb.req(i).valid := l2_out(i).valid
     io.dtlb.req(i).bits.vaddr := l2_out(i).bits.vaddr
+    io.dtlb.req(i).bits.cmd := SimpleBusCmd.read
   })
   
   // send result to dcache
@@ -312,6 +313,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   (0 until StorePipelineWidth).map(i => {
     io.dtlb.req(LoadPipelineWidth + i).bits.vaddr := saddr(i)
     io.dtlb.req(LoadPipelineWidth + i).valid := io.stin(i).valid
+    io.dtlb.req(LoadPipelineWidth + i).bits.cmd := SimpleBusCmd.write
   })
 
   (0 until StorePipelineWidth).map(i => {
