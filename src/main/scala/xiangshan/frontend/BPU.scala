@@ -153,8 +153,8 @@ class BPUStage extends XSModule {
   .elsewhen (outFire) { predValid := false.B }
   .otherwise          { predValid := predValid }
 
-  io.out.valid  := predValid || !io.flush
-  io.pred.valid := predValid || !io.flush
+  io.out.valid  := predValid && !io.flush
+  io.pred.valid := predValid && !io.flush
 
   XSDebug(io.in.fire(), "in:(%d %d) pc=%x, mask=%b, target=%x\n",
     io.in.valid, io.in.ready, io.in.bits.pc, io.in.bits.mask, io.in.bits.target)
@@ -200,7 +200,7 @@ class BPUStage2 extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
-  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && bimResp.ctrs(i)(1)))
+  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BrType.branch && bimResp.ctrs(i)(1) || btbResp.types(i) === BrType.jal)))
   notTakens := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && btbResp.types(i) === BrType.branch && !bimResp.ctrs(i)(1)))
   target    := Mux(taken, btbResp.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
