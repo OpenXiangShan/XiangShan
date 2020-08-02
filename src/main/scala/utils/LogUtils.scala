@@ -22,11 +22,13 @@ object XSLog {
            (prefix: Boolean, cond: Bool, pable: Printable)
            (implicit name: String): Any =
   {
-    val commonInfo = p"[$debugLevel][time=${GTimer()}] $name: "
     val logEnable = WireInit(false.B)
+    val logTimestamp = WireInit(0.U(64.W))
     ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+    ExcitingUtils.addSink(logTimestamp, "logTimestamp")
     if(generateLog){
       when (cond && logEnable) {
+        val commonInfo = p"[$debugLevel][time=$logTimestamp] $name: "
         printf((if (prefix) commonInfo else p"") + pable)
         if (debugLevel >= XSLogLevel.ERROR) {
           assert(false.B)
