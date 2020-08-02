@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{ParallelOR, XSInfo}
+import utils.XSInfo
 
 class Rename extends XSModule {
   val io = IO(new Bundle() {

@@ -45,7 +45,7 @@ case class ExuConfig
   val hasRedirect = supportedFuncUnits.map(_.hasRedirect).reduce(_||_)
 
   def canAccept(fuType: UInt): Bool = {
-    ParallelOR(supportedFuncUnits.map(_.fuType === fuType)).asBool()
+    ParallelOR(supportedFuncUnits.map(_.fuType === fuType))
   }
 }
 

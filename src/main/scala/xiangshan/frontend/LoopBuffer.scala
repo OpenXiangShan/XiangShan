@@ -85,17 +85,17 @@ class LoopBuffer extends XSModule {
 
   // val has_sbb = (0 until DecodeWidth).map(i => lbuf_valid(head_ptr + i.U) && isSBB(lbuf(head_ptr + i.U).inst)).reduce(_||_)
   val sbb_vec = (0 until DecodeWidth).map(i => io.out(i).fire && isSBB(io.out(i).bits.instr))
-  val has_sbb = ParallelOR(sbb_vec).asBool()
+  val has_sbb = ParallelOR(sbb_vec)
   val sbb_and_taken = (0 until DecodeWidth).map(i => sbb_vec(i) && out_isTaken(i))
   val sbbIdx = OHToUInt(HighestBit(VecInit(sbb_and_taken).asUInt, DecodeWidth).asUInt) // The first SBB that is predicted to jump
-  val sbbTaken = ParallelOR(sbb_and_taken).asBool()
+  val sbbTaken = ParallelOR(sbb_and_taken)
 
   val tsbb_vec = (0 until DecodeWidth).map(i => io.out(i).fire && io.out(i).bits.pc === tsbbPC)
-  val has_tsbb = ParallelOR(tsbb_vec).asBool()
+  val has_tsbb = ParallelOR(tsbb_vec)
   val tsbbIdx = OHToUInt(HighestBit(VecInit(tsbb_vec).asUInt, DecodeWidth).asUInt)
   val tsbbTaken = Mux(LBstate === s_fill, out_isTaken(tsbbIdx), true.B)
 
-  val has_branch = ParallelOR((0 until DecodeWidth).map(i => io.out(i).fire && i.U > sbbIdx && !sbb_vec(i) && out_isTaken(i))).asBool
+  val has_branch = ParallelOR((0 until DecodeWidth).map(i => io.out(i).fire && i.U > sbbIdx && !sbb_vec(i) && out_isTaken(i)))
 
   def flush() = {
     XSDebug("Loop Buffer Flushed.\n")
@@ -271,7 +271,7 @@ class LoopBuffer extends XSModule {
       // 非triggering sbb造成的cof
       // 遇到过一个周期内跳转为ACTIVE后又跳转为IDLE，无法重现
       // when(ParallelOR((0 until DecodeWidth).map(i => io.out(i).valid && !isSBB(io.out(i).bits.instr) && isJal(io.out(i).bits.instr) && out_isTaken(i))).asBool()) {
-      when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC)).asBool) {
+      when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC))) {
         // To IDLE
         LBstate := s_idle
         cleanFILL(loop_str, head_ptr + PopCount((0 until DecodeWidth).map(io.out(_).fire())))
@@ -288,7 +288,7 @@ class LoopBuffer extends XSModule {
       }
 
       // 非triggering sbb造成的cof
-      when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC)).asBool) {
+      when(ParallelOR((0 until DecodeWidth).map(i => out_isTaken(i) && io.out(i).bits.pc =/= tsbbPC))) {
         // To IDLE
         XSDebug("cof by other inst, State change: IDLE\n")
         flush()
