@@ -62,6 +62,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
 
   val validEntries = Mux(headDirection === tailDirection, tailIndex - headIndex, size.U + tailIndex - headIndex)
   val dispatchEntries = Mux(dispatchDirection === tailDirection, tailIndex - dispatchIndex, size.U + tailIndex - dispatchIndex)
+  XSError(validEntries < dispatchEntries, "validEntries should be less than dispatchEntries\n")
+  val commitEntries = validEntries - dispatchEntries
   val emptyEntries = size.U - validEntries
 
   // check whether valid uops are canceled
@@ -92,7 +94,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel, p"$name: valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
+    XSInfo(needCancel, p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
       p"cancelled with brTag ${Hexadecimal(io.redirect.bits.brTag.value)}\n")
   }
 
@@ -117,7 +119,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
 
   // replay
   val needReplay = Wire(Vec(size, Bool()))
-  // TODO: this is unaccptable since it need to add 64 bits
+  // TODO: this is unaccptable since it needs to add 64 bits
+  // TODO: there must be some bugs
   val numReplay = PopCount(needReplay)
   for (i <- 0 until size) {
     needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && io.redirect.bits.isReplay
@@ -135,5 +138,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
       stateEntries(commitIndex(i)) := s_invalid
     }
   }
-  headPtr := headPtr + numCommit
+  val invalidNum = PriorityEncoder(commitIndex.map(i => stateEntries(i) =/= s_invalid))
+  val numBubbles = Mux(commitEntries > invalidNum, invalidNum, commitEntries)
+  headPtr := headPtr + numCommit + numBubbles
+
+  XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr\n")
+  XSDebug(p"state: ")
+  stateEntries.reverse.foreach { s =>
+    XSDebug(false, s === s_invalid, "-")
+    XSDebug(false, s === s_valid, "v")
+    XSDebug(false, s === s_dispatched, "d")
+  }
+  XSDebug(false, true.B, "\n")
 }
