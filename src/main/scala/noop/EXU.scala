@@ -135,20 +135,17 @@ class EXU(implicit val p: NOOPConfig) extends NOOPModule {
   BoringUtils.addSource(csr.io.out.fire(), "perfCntCondMcsrInstr")
 
   if (!p.FPGAPlatform) {
-    val mon = Module(new Monitor)
+    val nooptrap = io.in.bits.ctrl.isNoopTrap && io.in.valid
     val cycleCnt = WireInit(0.U(XLEN.W))
     val instrCnt = WireInit(0.U(XLEN.W))
-    val nooptrap = io.in.bits.ctrl.isNoopTrap && io.in.valid
-    mon.io.clk := clock
-    mon.io.reset := reset.asBool
-    mon.io.isNoopTrap := nooptrap
-    mon.io.trapCode := io.in.bits.data.src1
-    mon.io.trapPC := io.in.bits.cf.pc
-    mon.io.cycleCnt := cycleCnt
-    mon.io.instrCnt := instrCnt
 
     BoringUtils.addSink(cycleCnt, "simCycleCnt")
     BoringUtils.addSink(instrCnt, "simInstrCnt")
-    BoringUtils.addSource(nooptrap, "nooptrap")
+
+    BoringUtils.addSource(nooptrap, "trapValid")
+    BoringUtils.addSource(io.in.bits.data.src1, "trapCode")
+    BoringUtils.addSource(io.in.bits.cf.pc, "trapPC")
+    BoringUtils.addSource(cycleCnt, "trapCycleCnt")
+    BoringUtils.addSource(instrCnt, "trapInstrCnt")
   }
 }
