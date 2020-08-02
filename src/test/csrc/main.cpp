@@ -16,6 +16,8 @@ static inline void print_help(const char *file) {
   printf("  -i, --image=FILE      run with this image file\n");
   printf("  -b, --log-begin=NUM   display log from NUM th cycle\n");
   printf("  -e, --log-end=NUM     stop display log at NUM th cycle\n");
+  printf("      --load-snapshot=PATH   load snapshot from PATH\n");
+  printf("      --dump-wave       dump waveform when log is enabled\n");
   printf("  -h, --help            print program help info\n");
   printf("\n");
 }
@@ -25,6 +27,7 @@ static inline EmuArgs parse_args(int argc, const char *argv[]) {
   int long_index = 0;
   const struct option long_options[] = {
     { "load-snapshot",  1, NULL,  0  },
+    { "dump-wave",      0, NULL,  0  },
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
     { "image",          1, NULL, 'i' },
@@ -39,9 +42,9 @@ static inline EmuArgs parse_args(int argc, const char *argv[]) {
           "-s:C:hi:m:b:e:", long_options, &long_index)) != -1) {
     switch (o) {
       case 0:
-        if (long_index == 0) {
-          args.snapshot_path = optarg;
-          break;
+        switch (long_index) {
+          case 0: args.snapshot_path = optarg; continue;
+          case 1: args.enable_waveform = true; continue;
         }
         // fall through
       default:

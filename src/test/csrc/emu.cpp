@@ -25,10 +25,20 @@ Emulator::Emulator(EmuArgs &args):
 
   init_difftest();
 
+  enable_waveform = args.enable_waveform;
+  if (enable_waveform) {
+    Verilated::traceEverOn(true);	// Verilator must compute traced signals
+    tfp = new VerilatedVcdC;
+    dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
+    time_t now = time(NULL);
+    tfp->open(waveform_filename(now));	// Open the dump file
+  }
+
   // init core
   reset_ncycles(10);
 
   if (args.snapshot_path != NULL) {
+    printf("loading from snapshot `%s`...\n", args.snapshot_path);
     snapshot_load(args.snapshot_path);
     hascommit = 1;
   }
@@ -93,9 +103,13 @@ inline void Emulator::single_cycle() {
   dut_ptr->clock = 1;
   dut_ptr->eval();
 
-#if VM_TRACE
-  tfp->dump(cycles);
-#endif
+  if (enable_waveform) {
+    uint64_t cycle = dut_ptr->io_trap_cycleCnt;
+    uint64_t begin = dut_ptr->io_logCtrl_log_begin;
+    uint64_t end   = dut_ptr->io_logCtrl_log_end;
+    bool in_range = (begin <= cycle) && (cycle <= end);
+    if (in_range) { tfp->dump(cycle); }
+  }
 
   if (dut_ptr->io_uart_out_valid) {
     printf("%c", dut_ptr->io_uart_out_ch);
@@ -127,14 +141,6 @@ uint64_t Emulator::execute(uint64_t n) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
-#if VM_TRACE
-  Verilated::traceEverOn(true);	// Verilator must compute traced signals
-  VL_PRINTF("Enabling waves...\n");
-  tfp = new VerilatedVcdC;
-  dut_ptr->trace(tfp, 99);	// Trace 99 levels of hierarchy
-  tfp->open("vlt_dump.vcd");	// Open the dump file
-#endif
-
   while (trapCode == STATE_RUNNING && n > 0) {
     single_cycle();
     n --;
@@ -146,9 +152,6 @@ uint64_t Emulator::execute(uint64_t n) {
       eprintf("No instruction commits for %d cycles, maybe get stuck\n"
           "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
           stuck_limit, stuck_limit);
-#if VM_TRACE
-      tfp->close();
-#endif
       difftest_display(dut_ptr->io_difftest_priviledgeMode);
       trapCode = STATE_ABORT;
     }
@@ -176,9 +179,6 @@ uint64_t Emulator::execute(uint64_t n) {
       diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 
       if (difftest_step(&diff)) {
-#if VM_TRACE
-        tfp->close();
-#endif
         trapCode = STATE_ABORT;
       }
       lastcommit = n;
@@ -197,17 +197,31 @@ uint64_t Emulator::execute(uint64_t n) {
     }
   }
 
+  if (enable_waveform) tfp->close();
   display_trapinfo();
   return cycles;
 }
 
-inline char* Emulator::snapshot_filename(time_t t) {
-  static char buf[1024];
+inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   char buf_time[64];
   strftime(buf_time, sizeof(buf_time), "%F@%T", localtime(&t));
   char *noop_home = getenv("NOOP_HOME");
   assert(noop_home != NULL);
-  snprintf(buf, 1024, "%s/build/%s.snapshot", noop_home, buf_time);
+  int len = snprintf(buf, 1024, "%s/build/%s", noop_home, buf_time);
+  return buf + len;
+}
+
+inline char* Emulator::snapshot_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".snapshot");
+  return buf;
+}
+
+inline char* Emulator::waveform_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".vcd");
   return buf;
 }
 
