@@ -129,7 +129,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val s3_ready = WireInit(false.B)
   val s2_fire  = s2_valid && s3_ready
 
-  s2_ready := s2_fire || !s2_valid
+  s2_ready := s2_fire || !s2_valid || io.flush(0)
   XSDebug("[ICache-Stage2] s2_valid:%d || s3_ready:%d ",s2_valid,s3_ready)
   XSDebug(false,s2_fire,"------> s2 fire!!!")
   XSDebug(false,true.B,"\n")
@@ -142,7 +142,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
   val s3_pc = RegEnable(next=s2_pc, enable = s2_fire)
 
-  s3_ready := (!s3_valid && io.out.ready) || io.out.fire()
+  s3_ready := (!s3_valid && io.out.ready) || io.out.fire() || io.flush(1)
 
   XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
   XSDebug(false,true.B,"\n")
