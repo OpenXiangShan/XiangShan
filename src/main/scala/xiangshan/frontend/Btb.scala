@@ -140,7 +140,7 @@ class BTB extends BasePredictor with BTBParams{
     val meta_entry = metaRead(bankHitWays(bankIdxInOrder(b)))(bankIdxInOrder(b))
     val data_entry = dataRead(bankHitWays(bankIdxInOrder(b)))(bankIdxInOrder(b))
     // Use real pc to calculate the target
-    io.resp.targets(b) := Mux(data_entry.extended, edataRead, (pcLatch.asSInt + (bankIdxInOrder(b.U) << 1).asSInt + data_entry.offset).asUInt)
+    io.resp.targets(b) := Mux(data_entry.extended, edataRead, (pcLatch.asSInt + (Cat(0.U, bankIdxInOrder(b.U) << 1.U)).asSInt + data_entry.offset).asUInt)
     io.resp.hits(b)  := bankHits(bankIdxInOrder(b))
     io.resp.types(b) := meta_entry.btbType
     io.resp.isRVC(b) := meta_entry.isRVC
