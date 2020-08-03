@@ -89,7 +89,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
 
   // cancel uops currently in the queue
   for (i <- 0 until size) {
-    val needCancel = stateEntries(i) === s_valid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || io.redirect.bits.isException)
+    val needCancel = stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || io.redirect.bits.isException)
     when (needCancel) {
       stateEntries(i) := s_invalid
     }
@@ -132,14 +132,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
 
   // commit
   val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
-  val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
+  val invalidNum = PriorityEncoder(commitIndex.map(i => stateEntries(i) =/= s_invalid))
+  val numBubbles = Mux(commitEntries > invalidNum, invalidNum, commitEntries)
+  val commitBits = (1.U((CommitWidth+1).W) << (numCommit + numBubbles)).asUInt() - 1.U
   for (i <- 0 until CommitWidth) {
     when (commitBits(i)) {
       stateEntries(commitIndex(i)) := s_invalid
     }
   }
-  val invalidNum = PriorityEncoder(commitIndex.map(i => stateEntries(i) =/= s_invalid))
-  val numBubbles = Mux(commitEntries > invalidNum, invalidNum, commitEntries)
   headPtr := headPtr + numCommit + numBubbles
 
   XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr\n")
