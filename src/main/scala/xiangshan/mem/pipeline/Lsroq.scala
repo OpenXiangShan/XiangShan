@@ -9,6 +9,7 @@ import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
 import xiangshan.mem.cache._
 import bus.simplebus._
+import utils._
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
@@ -268,50 +269,45 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
+  // scommitPending, scommitIn, scommitOut are for debug only
   val scommitPending = RegInit(0.U(log2Up(MoqSize).W))
   val scommitIn = PopCount(VecInit((0 until CommitWidth).map(i => io.mcommit(i).valid)).asUInt)
   val scommitOut = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
   scommitPending := scommitPending + scommitIn - scommitOut
 
-  // when store commited, mark it as commited (will not be influenced by redirect)
+  val commitedStoreQueue = Module(new MIMOQueue(
+    UInt(InnerMoqIdxWidth.W),
+    entries = MoqSize,
+    inCnt = 6,
+    outCnt = 2,
+    mem = false,
+    perf = true
+  ))
+
+  // When store commited, mark it as commited (will not be influenced by redirect),
+  // then add store's moq ptr into commitedStoreQueue
   (0 until CommitWidth).map(i => {
     when(io.mcommit(i).valid){
       commited(io.mcommit(i).bits) := true.B
     }
+    commitedStoreQueue.io.enq(i).valid := io.mcommit(i).valid
+    commitedStoreQueue.io.enq(i).bits := io.mcommit(i).bits(InnerMoqIdxWidth-1, 0)
+    // We assume commitedStoreQueue.io.enq(i).ready === true.B, 
+    // for commitedStoreQueue.size = 64
   })
 
-  val scommitLimit = Mux(scommitPending > 2.U, 2.U, scommitPending(1, 0))
-  val validStoreMask = Wire(Vec(MoqSize*2, Bool()))
-  // val storeSelCount = Wire(Vec(MoqSize*2, UInt(2.W)))
+  // get no more than 2 commited store from storeCommitedQueue
   val scommitSel = Wire(Vec(2, UInt(log2Up(MoqSize).W)))
-  scommitSel := DontCare
-  val overlap = ringBufferHeadExtended(InnerMoqIdxWidth) =/= ringBufferTailExtended(InnerMoqIdxWidth)
-  (0 until MoqSize * 2).map(i => {
-    val isValid = Mux(overlap,
-      if(i >= MoqSize){ //TODO
-        i.U(InnerMoqIdxWidth-1, 0) < ringBufferHead
-      }else{
-        i.U(InnerMoqIdxWidth-1, 0) >= ringBufferTail
-      },
-      if(i >= MoqSize){
-        false.B
-      }else{
-        i.U(InnerMoqIdxWidth-1, 0) >= ringBufferTail && i.U(InnerMoqIdxWidth-1, 0) < ringBufferHead
-      }
-    )
-    val ptr = i.U(InnerMoqIdxWidth-1, 0)
-    validStoreMask(i) := store(ptr) && writebacked(ptr) && allocated(ptr) && isValid && commited(ptr)
-    // if(i == 0){
-    //   storeSelCount(0) := TODO
-    // }else{
-    //   TODO
-    // }
+  val scommitSelValid = Wire(Vec(2, Bool()))
+  (0 until 2).map(i => {
+    commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire()
+    scommitSel(i) := commitedStoreQueue.io.deq(i).bits
   })
 
   // send selected store inst to sbuffer
   (0 until 2).map(i => {
     val ptr = scommitSel(i)
-    io.sbuffer(i).valid := store(ptr) && allocated(ptr) && writebacked(ptr)
+    io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid
     io.sbuffer(i).bits.paddr := data(ptr).paddr
     io.sbuffer(i).bits.data := data(ptr).data
     io.sbuffer(i).bits.mask := data(ptr).mask
@@ -329,12 +325,6 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       allocated(scommitSel(i)) := false.B
     }
   })
-
-
-  // TODO: temp store to sbuffer logic
-  scommitSel(0) := PriorityEncoder(validStoreMask.asUInt)(InnerMoqIdxWidth-1, 0)
-  io.sbuffer(1) := DontCare //ignore higher bits of DCacheStoreReq data/mask
-  io.sbuffer(1).valid := false.B
 
   // load forward query
   (0 until LoadPipelineWidth).map(i => {
