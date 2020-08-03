@@ -184,7 +184,8 @@ class IFU extends XSModule with HasIFUConst
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
     when (!if4_bp.saveHalfRVI) {
       if4_redirect := true.B
-      if1_npc := if4_bp.target
+      // if1_npc := if4_bp.target
+      if1_npc := Mux(if4_bp.taken, if4_bp.target, snpc(if4_pc))
 
       shiftPtr := true.B
       newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
