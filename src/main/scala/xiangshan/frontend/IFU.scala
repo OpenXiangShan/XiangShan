@@ -165,12 +165,15 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
   // val if4_icacheResp = RegEnable(io.icacheResp.bits, if3_fire)
-  val if4_valid = RegEnable(next = if3_valid, init = false.B, enable = if3_fire)
+  val if4_valid = RegInit(false.B)
+  // val if4_valid = RegEnable(next = if3_valid, init = false.B, enable = if3_fire)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
   val if4_histPtr = RegEnable(if3_histPtr, if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
-  when (if4_flush) { if4_valid := false.B }
+  when (if4_flush)     { if4_valid := false.B }
+  .elsewhen (if3_fire) { if4_valid := if3_valid }
+  .elsewhen(if4_fire)  { if4_valid := false.B }
 
   val if4_bp = bpu.io.out(2).bits
 

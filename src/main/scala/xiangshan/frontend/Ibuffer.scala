@@ -62,8 +62,9 @@ class Ibuffer extends XSModule {
     var deq_idx = head_ptr
     for(i <- 0 until DecodeWidth) {
       io.out(i).valid := ibuf_valid(deq_idx)
-      ibuf_valid(deq_idx) := !io.out(i).fire
-
+      // Only when the entry is valid can it be set invalid
+      when (ibuf_valid(deq_idx)) { ibuf_valid(deq_idx) := !io.out(i).fire }
+      
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
       // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
