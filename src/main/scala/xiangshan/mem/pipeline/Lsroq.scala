@@ -42,7 +42,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     val refill = Flipped(Valid(new DCacheStoreReq))
   })
 
-  val uop = Mem(MoqSize, new MicroOp)
+  val uop = Reg(Vec(MoqSize, new MicroOp))
   val data = Reg(Vec(MoqSize, new LsRoqEntry))
   val allocated = RegInit(VecInit(List.fill(MoqSize)(false.B))) // lsroq entry has been allocated
   val valid = RegInit(VecInit(List.fill(MoqSize)(false.B))) // data is valid
