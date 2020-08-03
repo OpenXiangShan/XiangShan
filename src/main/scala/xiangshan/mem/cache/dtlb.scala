@@ -149,15 +149,6 @@ class DtlbToLsuIO extends TlbBundle {
   val resp = Vec(TLBWidth, Valid(new DtlbResp))
 }
 
-class PTWReq extends TlbBundle {
-  val vpn = UInt(vpnLen.W)
-}
-
-class PTWResp extends TlbBundle {
-  val pte = UInt(XLEN.W)
-  val level = UInt(log2Up(Level).W)
-}
-
 class TlbPtwIO extends TlbBundle {
   val req = DecoupledIO(new PTWReq)
   val resp = Flipped(DecoupledIO(new PTWResp))
@@ -171,14 +162,8 @@ class TlbIssQueIO extends TlbBundle{
 class SfenceBundle extends TlbBundle{
   val rs1 = Bool()
   val rs2 = Bool()
-  val addr = UInt(vpnLen.W)
+  val addr = UInt(VAddrBits.W)
   // val asid = UInt(asidLen.W)
-}
-
-class SfenceIO extends ValidIO(new SfenceBundle)
-
-class TlbCsrBundle extends TlbBundle {
-  
 }
 
 class TlbCsrIO extends TlbBundle {
@@ -197,7 +182,7 @@ class DtlbIO extends TlbBundle {
   val lsu = new DtlbToLsuIO
   val ptw = new TlbPtwIO
   val issQue = new TlbIssQueIO
-  val sfence = new SfenceIO
+  val sfence = Flipped(ValidIO(new SfenceBundle))
   val csr = Flipped(new TlbCsrIO)
 }
 

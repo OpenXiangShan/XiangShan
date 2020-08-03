@@ -81,8 +81,6 @@ trait HasXSParameter {
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
   )
-  val DTLBSize = 32
-  val ITLBSize = 32
 }
 
 trait HasXSLog { this: Module =>
