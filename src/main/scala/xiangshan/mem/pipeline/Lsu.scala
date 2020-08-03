@@ -66,6 +66,7 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
   val mask = Output(UInt(8.W))
   val moqIdx = Output(UInt(MoqIdxWidth.W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
+  val valid = Output(Bool()) //for debug
 
   val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
@@ -215,11 +216,13 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     lsroq.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
     lsroq.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
     lsroq.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    lsroq.io.forward(i).valid := l4_out(i).valid
     
     sbuffer.io.forward(i).paddr := l4_out(i).bits.paddr
     sbuffer.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
     sbuffer.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
     sbuffer.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    sbuffer.io.forward(i).valid := l4_out(i).valid
     
     val forwardVec = WireInit(lsroq.io.forward(i).forwardData)
     val forwardMask = WireInit(lsroq.io.forward(i).forwardMask)
@@ -300,6 +303,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     // Current dcache use MSHR
 
     lsroq.io.loadIn(i).bits := l5_in(i).bits
+    lsroq.io.loadIn(i).bits.data := rdataPartialLoad // for debug
     lsroq.io.loadIn(i).valid := loadWriteBack(i)
 
     // pipeline control

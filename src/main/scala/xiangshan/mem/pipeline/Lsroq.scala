@@ -149,7 +149,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       miss(io.storeIn(i).bits.uop.moqIdx) := io.storeIn(i).bits.miss
       store(io.storeIn(i).bits.uop.moqIdx) := true.B
       XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x\n",
-        io.storeIn(i).bits.uop.moqIdx,
+        io.storeIn(i).bits.uop.moqIdx(InnerMoqIdxWidth-1,0),
         io.storeIn(i).bits.uop.cf.pc,
         io.storeIn(i).bits.vaddr,
         io.storeIn(i).bits.paddr,
@@ -416,13 +416,16 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
         io.forward(i).forwardMask(k) := true.B
         io.forward(i).forwardData(k) := data(io.forward(i).moqIdx).bwdData(k)
         XSDebug("backwarding "+k+"th byte %x, idx %d pc %x\n", 
-          io.forward(i).forwardData(k), io.forward(i).moqIdx, uop(io.forward(i).moqIdx).cf.pc
+          io.forward(i).forwardData(k), io.forward(i).moqIdx(InnerMoqIdxWidth-1,0), uop(io.forward(i).moqIdx).cf.pc
         )
       }
     })
   })
 
+  // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
+
+  // def olderThan() TODO
 
   // store backward query and rollback
   val needCheck = Seq.fill(8)(WireInit(true.B))
@@ -430,9 +433,9 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     rollback(i) := DontCare
     rollback(i).valid := false.B
     when(io.storeIn(i).valid){
-      val needCheck = Seq.fill(MoqSize+1)(Seq.fill(8)(WireInit(true.B)))
-      (1 until MoqSize).map(j => {
-        val ptr = io.forward(i).moqIdx + j.U
+      val needCheck = Seq.fill(MoqSize+1)(Seq.fill(8)(WireInit(true.B))) // TODO: refactor
+      (0 until MoqSize).map(j => {
+        val ptr = io.storeIn(i).bits.uop.moqIdx + j.U
         val reachHead = ptr === ringBufferHeadExtended
         val addrMatch = allocated(ptr) &&
         io.storeIn(i).bits.paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
@@ -446,31 +449,49 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
               rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
               rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
             }.otherwise{
-              data(ptr(InnerMoqIdxWidth-1,0)).bwdMask(k) := true.B
-              data(ptr(InnerMoqIdxWidth-1,0)).bwdData(k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
-              XSDebug("write backward data: ptr %x byte %x data %x\n", ptr(InnerMoqIdxWidth-1,0), k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
+              // data(ptr(InnerMoqIdxWidth-1,0)).bwdMask(k) := true.B
+              // data(ptr(InnerMoqIdxWidth-1,0)).bwdData(k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
+              // XSDebug("write backward data: ptr %d byte %x data %x\n", ptr(InnerMoqIdxWidth-1,0), k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
             } 
           }
           needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && _store) && !reachHead
-        })
+        })  
+      })
 
-        // when l/s writeback to roq together, check if rollback is needed
-        // currently we just rollback (TODO)
-        when(io.storeIn(i).valid && io.storeIn(i).bits.uop.moqIdx === ptr){
-          (0 until LoadPipelineWidth).map(j => {
-            when(
-              io.loadIn(j).valid &&
-              io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.loadIn(j).bits.paddr(PAddrBits-1, 3) &&
-              (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
+      // when l/s writeback to roq together, check if rollback is needed
+      // currently we just rollback (TODO)
+      when(io.storeIn(i).valid){
+        (0 until LoadPipelineWidth).map(j => {
+          when(
+            io.loadIn(j).valid &&
+            io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.loadIn(j).bits.paddr(PAddrBits-1, 3) &&
+            (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
+            // TODO: older than
             ){
               rollback(i).valid := true.B
               rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
               rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
-            }
-          })
-        }
-
-      })
+              XSDebug("need rollback pc %x roqidx %d\n", io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx)
+          }
+        })
+      }
+  
+      // check if rollback is needed for load in l4
+      when(io.storeIn(i).valid){
+        (0 until LoadPipelineWidth).map(j => {
+          when(
+            io.forward(j).valid && // L4 valid
+            io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.forward(j).paddr(PAddrBits-1, 3) &&
+            (io.storeIn(i).bits.mask & io.forward(j).mask).orR
+            // TODO: older than
+          ){
+            XSDebug("need rollback pc %x roqidx %d\n", io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx)
+            rollback(i).valid := true.B
+            rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+            rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
+          }
+        })
+      }
     }
   })
 
@@ -489,7 +510,10 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   )
 
   io.rollback := rollback(rollbackSel)
-  assert(!io.rollback.valid)
+  // assert(!io.rollback.valid)
+  when(io.rollback.valid){
+    XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx)
+  }
 
   // debug info
   XSDebug("head %d:%d tail %d:%d scommit %d\n", ringBufferHeadExtended(InnerMoqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerMoqIdxWidth), ringBufferTail, scommitPending)
