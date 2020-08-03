@@ -85,8 +85,15 @@ class BTB extends BasePredictor with BTBParams{
 
   val realMask = circularShiftRight(io.inMask, BtbBanks, baseBank)
 
+  val realMaskLatch = RegEnable(realMask, io.pc.valid)
+
   // those banks whose indexes are less than baseBank are in the next row
   val isInNextRow = VecInit((0 until BtbBanks).map(_.U < baseBank))
+  XSDebug("isInNextRow: ")
+  (0 until BtbBanks).foreach(i => {
+    XSDebug(false, true.B, "%d ", isInNextRow(i))
+    if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
+  })
 
   val baseRow = btbAddr.getBankIdx(io.pc.bits)
 
@@ -122,7 +129,8 @@ class BTB extends BasePredictor with BTBParams{
 
   val totalHits = VecInit((0 until BtbBanks).map( b => 
     VecInit((0 until BtbWays).map( w =>
-      metaRead(w)(b).tag === Mux(tagIncremented(b), baseTag + 1.U, baseTag) && metaRead(w)(b).valid
+      // This should correspond to the real mask from last valid cycle!
+      metaRead(w)(b).tag === Mux(tagIncremented(b), baseTag + 1.U, baseTag) && metaRead(w)(b).valid && realMaskLatch(b)
     ))
   ))
   val bankHits = VecInit(totalHits.map(_.reduce(_||_)))
@@ -197,8 +205,8 @@ class BTB extends BasePredictor with BTBParams{
   if (debug_verbose) {
     for (i <- 0 until BtbBanks){
       for (j <- 0 until BtbWays) {
-        XSDebug(validLatch && metaRead(j)(i).valid, "read_resp[w=%d][b=%d][r=%d] is valid, tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-        j.U, i.U, realRowLatch(i), metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
+        XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
+        j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
       }
     }
   }
