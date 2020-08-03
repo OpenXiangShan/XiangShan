@@ -129,7 +129,12 @@ class BPUStage extends XSModule {
   val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
   // get the last valid inst
-  val lastValidPos = MuxCase(0.U, (PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
+  // val lastValidPos = MuxCase(0.U, (PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
+  val lastValidPos = PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U))
+  // val lastValidPos = WireInit(0.U(log2Up(PredictWidth).W))
+  // for (i <- 0 until PredictWidth) {
+  //   when (inLatch.mask(i)) { lastValidPos := i.U }
+  // }
   val target = WireInit(0.U(VAddrBits.W))
 
   io.pred.bits <> DontCare
@@ -248,6 +253,8 @@ class BPUStage3 extends BPUStage {
   notTakens := VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))
   target := Mux(taken, inLatch.resp.btb.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
   
+  // lastValidPos := MuxCase(0.U, (PredictWidth-1 to 0).map(i => (pdMask(i), i.U)))
+
   io.pred.bits.redirect := target =/= inLatch.target
   io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !pds(lastValidPos).isRVC
 
