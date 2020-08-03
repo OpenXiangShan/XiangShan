@@ -377,8 +377,8 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
             when(data(j).mask(k)){
               forwardMask1(k) := true.B
               forwardData1(k) := data(j).data(8*(k+1)-1, 8*k)
-              XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
-              data(j).data(8*(k+1)-1, 8*k), j.U, uop(j).cf.pc
+              XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x, idx %d pc %x\n",
+                data(j).data(8*(k+1)-1, 8*k), j.U, uop(j).cf.pc, io.forward(i).moqIdx, uop(io.forward(i).moqIdx(InnerMoqIdxWidth-1,0)).cf.pc
               )
             }
           })
@@ -415,7 +415,9 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
       when(data(io.forward(i).moqIdx).bwdMask(k)){
         io.forward(i).forwardMask(k) := true.B
         io.forward(i).forwardData(k) := data(io.forward(i).moqIdx).bwdData(k)
-        XSDebug("backwarding "+k+"th byte %x\n", io.forward(i).forwardData(k))
+        XSDebug("backwarding "+k+"th byte %x, idx %d pc %x\n", 
+          io.forward(i).forwardData(k), io.forward(i).moqIdx, uop(io.forward(i).moqIdx).cf.pc
+        )
       }
     })
   })
@@ -444,9 +446,9 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
               rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
               rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
             }.otherwise{
-              data(j).bwdMask(k) := true.B
-              data(j).bwdData(k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
-              XSDebug("write backward data: ptr %x byte %x data %x\n", ptr, k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
+              data(ptr(InnerMoqIdxWidth-1,0)).bwdMask(k) := true.B
+              data(ptr(InnerMoqIdxWidth-1,0)).bwdData(k) := io.storeIn(i).bits.data(8*(k+1)-1, 8*k)
+              XSDebug("write backward data: ptr %x byte %x data %x\n", ptr(InnerMoqIdxWidth-1,0), k.U, io.storeIn(i).bits.data(8*(k+1)-1, 8*k))
             } 
           }
           needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && _store) && !reachHead
