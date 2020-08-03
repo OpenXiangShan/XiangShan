@@ -320,8 +320,12 @@ class Tage extends BasePredictor with HasTageParameter {
   val debug_pc_s2 = RegEnable(io.pc.bits, enable=io.pc.valid)
   val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s3Fire)
 
-  val updateMeta = io.update.bits.brInfo.tageMeta
-  val updateMisPred = io.update.bits.isMisPred && io.update.bits.pd.isBr
+  val u = io.update.bits.ui
+  val updateValid = io.update.valid
+  val updateHist = io.update.bits.hist
+
+  val updateMeta = u.brInfo.tageMeta
+  val updateMisPred = u.isMisPred && u.pd.isBr
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
   val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
@@ -334,7 +338,7 @@ class Tage extends BasePredictor with HasTageParameter {
   updateOldCtr := DontCare
   updateU := DontCare
 
-  val updateBank = io.update.bits.pc >> 1.U
+  val updateBank = u.pc >> 1.U
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
@@ -376,9 +380,10 @@ class Tage extends BasePredictor with HasTageParameter {
     io.meta(w).allocate.valid := allocatableSlots =/= 0.U
     io.meta(w).allocate.bits := allocEntry
 
-    val isUpdateTaken = io.update.valid && updateBank === w.U &&
-      io.update.bits.taken && io.update.bits.pd.isBr
-    when (io.update.bits.pd.isBr && io.update.valid && updateBank === w.U) {
+
+    val isUpdateTaken = updateValid && updateBank === w.U &&
+      u.taken && u.pd.isBr
+    when (u.pd.isBr && updateValid && updateBank === w.U) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 
@@ -396,12 +401,12 @@ class Tage extends BasePredictor with HasTageParameter {
     }
   }
 
-  when (io.update.valid && updateMisPred) {
+  when (updateValid && updateMisPred) {
     val idx = updateBank
     val allocate = updateMeta.allocate
     when (allocate.valid) {
       updateMask(allocate.bits)(idx) := true.B
-      updateTaken(allocate.bits)(idx) := io.update.bits.taken
+      updateTaken(allocate.bits)(idx) := u.taken
       updateAlloc(allocate.bits)(idx) := true.B
       updateUMask(allocate.bits)(idx) := true.B
       updateU(allocate.bits)(idx) := 0.U
@@ -428,8 +433,8 @@ class Tage extends BasePredictor with HasTageParameter {
       tables(i).io.update.u(w) := updateU(i)(w)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.pc := io.update.bits.pc
-    tables(i).io.update.hist := io.update.bits.hist
+    tables(i).io.update.pc := u.pc
+    tables(i).io.update.hist := updateHist
   }
 
 

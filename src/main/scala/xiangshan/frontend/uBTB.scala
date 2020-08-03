@@ -156,21 +156,22 @@ class MicroBTB extends BasePredictor
 
     //uBTB update 
     //backend should send fetch pc to update
-    val update_fetch_pc  = io.update.bits.pc
-    val update_idx = io.update.bits.fetchIdx
+    val u = io.update.bits.ui
+    val update_fetch_pc  = u.pc
+    val update_idx = u.fetchIdx
     val update_br_offset = update_idx << 1.U
     val update_br_pc = update_fetch_pc + update_br_offset
-    val update_write_way = io.update.bits.brInfo.ubtbWriteWay
-    val update_hits = io.update.bits.brInfo.ubtbHits
-    val update_taken = io.update.bits.taken
+    val update_write_way = u.brInfo.ubtbWriteWay
+    val update_hits = u.brInfo.ubtbHits
+    val update_taken = u.taken
 
     val update_bank = getBank(update_br_pc)
     val update_base_bank = getBank(update_fetch_pc)
     val update_tag = getTag(update_br_pc)
-    val update_taget_offset =  io.update.bits.target.asSInt - update_br_pc.asSInt
-    val update_is_BR_or_JAL = (io.update.bits.pd.brType === BrType.branch) || (io.update.bits.pd.brType === BrType.jal) 
+    val update_taget_offset =  u.target.asSInt - update_br_pc.asSInt
+    val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
 
-    val entry_write_valid = io.update.valid && io.update.bits.isMisPred && update_is_BR_or_JAL
+    val entry_write_valid = io.update.valid && u.isMisPred && update_is_BR_or_JAL
     val meta_write_valid = io.update.valid && update_is_BR_or_JAL
     //write btb target when miss prediction
     when(entry_write_valid)
@@ -181,8 +182,8 @@ class MicroBTB extends BasePredictor
     when(meta_write_valid)
     {
         //commit update
-        uBTBMeta(update_bank)(update_write_way).is_Br := io.update.bits.pd.brType === BrType.branch
-        uBTBMeta(update_bank)(update_write_way).is_RVC := io.update.bits.pd.isRVC
+        uBTBMeta(update_bank)(update_write_way).is_Br := u.pd.brType === BrType.branch
+        uBTBMeta(update_bank)(update_write_way).is_RVC := u.pd.isRVC
         (0 until PredictWidth).foreach{b =>  uBTBMeta(b)(update_write_way).valid := false.B}
         uBTBMeta(update_bank)(update_write_way).valid := true.B
         uBTBMeta(update_bank)(update_write_way).tag := update_tag
@@ -199,10 +200,10 @@ class MicroBTB extends BasePredictor
         when(update_bank === b.U && meta_write_valid && read_valid
             && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
         {
-            io.out.targets(b) := io.update.bits.target
-            io.out.takens(b) := io.update.bits.taken
-            io.out.is_RVC(b) := io.update.bits.pd.isRVC
-            io.out.notTakens(b) := (io.update.bits.pd.brType === BrType.branch) && (!io.out.takens(b))
+            io.out.targets(b) := u.target
+            io.out.takens(b) := u.taken
+            io.out.is_RVC(b) := u.pd.isRVC
+            io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
             XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+ (b.U << 1.U),b.U, io.out.targets(b))
         }
     }

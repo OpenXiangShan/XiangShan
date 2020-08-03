@@ -281,8 +281,18 @@ class BPUReq extends XSBundle {
   val inMask = UInt(PredictWidth.W)
 }
 
-class BranchUpdateInfoWithHist extends BranchUpdateInfo {
+class BranchUpdateInfoWithHist extends XSBundle {
+  val ui = new BranchUpdateInfo
   val hist = UInt(HistoryLength.W)
+}
+
+object BranchUpdateInfoWithHist {
+  def apply (brInfo: BranchUpdateInfo, hist: UInt) = {
+    val b = Wire(new BranchUpdateInfoWithHist)
+    b.ui <> brInfo
+    b.hist := hist
+    b
+  }
 }
 
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
