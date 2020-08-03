@@ -252,11 +252,9 @@ class BPUStage3 extends BPUStage {
   //     taken prediction, the branch is counted as a not taken branch
   notTakens := VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))
   target := Mux(taken, inLatch.resp.btb.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
-  
-  // lastValidPos := MuxCase(0.U, (PredictWidth-1 to 0).map(i => (pdMask(i), i.U)))
 
   io.pred.bits.redirect := target =/= inLatch.target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !pds(lastValidPos).isRVC
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !pds(lastValidPos).isRVC && pdMask(lastValidPos)
 
   // Wrap tage resp and tage meta in
   // This is ugly
