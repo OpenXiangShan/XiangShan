@@ -140,7 +140,7 @@ class BTB extends BasePredictor with BTBParams{
     val meta_entry = metaRead(bankHitWays(bankIdxInOrder(b)))(bankIdxInOrder(b))
     val data_entry = dataRead(bankHitWays(bankIdxInOrder(b)))(bankIdxInOrder(b))
     // Use real pc to calculate the target
-    io.resp.targets(b) := Mux(data_entry.extended, edataRead, (pcLatch.asSInt + (Cat(0.U, bankIdxInOrder(b.U) << 1.U)).asSInt + data_entry.offset).asUInt)
+    io.resp.targets(b) := Mux(data_entry.extended, edataRead, (pcLatch.asSInt + (b << 1).S + data_entry.offset).asUInt)
     io.resp.hits(b)  := bankHits(bankIdxInOrder(b))
     io.resp.types(b) := meta_entry.btbType
     io.resp.isRVC(b) := meta_entry.isRVC
@@ -204,7 +204,7 @@ class BTB extends BasePredictor with BTBParams{
   }
   for (i <- 0 until BtbBanks) {
     val idx = bankIdxInOrder(i)
-    XSDebug(validLatch && bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
+    XSDebug(validLatch && bankHits(bankIdxInOrder(i)), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
       i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
   }
   XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
