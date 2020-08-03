@@ -284,6 +284,8 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     perf = true
   ))
 
+  commitedStoreQueue.io.flush := false.B
+
   // When store commited, mark it as commited (will not be influenced by redirect),
   // then add store's moq ptr into commitedStoreQueue
   (0 until CommitWidth).map(i => {
@@ -297,16 +299,13 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   })
 
   // get no more than 2 commited store from storeCommitedQueue
-  val scommitSel = Wire(Vec(2, UInt(log2Up(MoqSize).W)))
-  val scommitSelValid = Wire(Vec(2, Bool()))
   (0 until 2).map(i => {
     commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire()
-    scommitSel(i) := commitedStoreQueue.io.deq(i).bits
   })
 
   // send selected store inst to sbuffer
   (0 until 2).map(i => {
-    val ptr = scommitSel(i)
+    val ptr = commitedStoreQueue.io.deq(i).bits
     io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid
     io.sbuffer(i).bits.paddr := data(ptr).paddr
     io.sbuffer(i).bits.data := data(ptr).data
@@ -322,7 +321,7 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   // update lsroq meta if store inst is send to sbuffer
   (0 until 2).map(i => {
     when(io.sbuffer(i).fire()){
-      allocated(scommitSel(i)) := false.B
+      allocated(commitedStoreQueue.io.deq(i).bits) := false.B
     }
   })
 
