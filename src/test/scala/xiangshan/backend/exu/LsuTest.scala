@@ -11,6 +11,7 @@ import bus.simplebus.{SimpleBusCrossbarNto1, SimpleBusUC}
 import device.AXI4RAM
 import noop.{Cache, CacheConfig, MemMMUIO, TLB, TLBConfig}
 import system.CoherenceManager
+import top.Parameters
 import utils.XSLog
 import xiangshan._
 import xiangshan.backend.fu.FunctionUnit.lsuCfg
@@ -82,7 +83,7 @@ class LsuTest
     with HasPartialDecoupledDriver {
 
 
-  XSLog.generateLog = false
+  Parameters.set(Parameters.debugParameters)
 
   def BASE_ADDR = 0x80000000L
 

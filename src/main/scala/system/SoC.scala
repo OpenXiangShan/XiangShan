@@ -1,29 +1,40 @@
 package system
 
-import noop.{Cache,CacheConfig}
+import noop.{Cache, CacheConfig}
 import bus.axi4.{AXI4, AXI4Lite}
 import bus.simplebus._
 import device.AXI4Timer
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-import xiangshan.{XSConfig, XSCore}
+import top.Parameters
+import xiangshan.XSCore
+
+
+case class SoCParameters
+(
+  EnableILA: Boolean = false,
+  HasL2Cache: Boolean = false,
+  HasPrefetch: Boolean = false
+)
 
 trait HasSoCParameter {
-  val EnableILA = false
-  val HasL2cache = false
-  val HasPrefetch = false
+  val soc = Parameters.get.socParameters
+  val env = Parameters.get.envParameters
+  val EnableILA = soc.EnableILA
+  val HasL2cache = soc.HasL2Cache
+  val HasPrefetch = soc.HasPrefetch
 }
 
 class ILABundle extends Bundle {}
 
-class XSSoc(implicit val p: XSConfig) extends Module with HasSoCParameter {
+class XSSoc extends Module with HasSoCParameter {
   val io = IO(new Bundle{
     val mem = new AXI4
-    val mmio = if (p.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC }
+    val mmio = if (env.FPGAPlatform) { new AXI4Lite } else { new SimpleBusUC }
     val frontend = Flipped(new AXI4)
     val meip = Input(Bool())
-    val ila = if (p.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
+    val ila = if (env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
   })
 
   val xsCore = Module(new XSCore)
@@ -70,9 +81,9 @@ class XSSoc(implicit val p: XSConfig) extends Module with HasSoCParameter {
   mmioXbar.io.in <> xsCore.io.mmio
 
   val extDev = mmioXbar.io.out(0)
-  val clint = Module(new AXI4Timer(sim = !p.FPGAPlatform))
+  val clint = Module(new AXI4Timer(sim = !env.FPGAPlatform))
   clint.io.in <> mmioXbar.io.out(1).toAXI4Lite()
-  if (p.FPGAPlatform) io.mmio <> extDev.toAXI4Lite()
+  if (env.FPGAPlatform) io.mmio <> extDev.toAXI4Lite()
   else io.mmio <> extDev
 
   val mtipSync = clint.io.extra.get.mtip

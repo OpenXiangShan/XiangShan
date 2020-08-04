@@ -30,23 +30,20 @@ static int uart_dequeue(void) {
 }
 
 uint32_t uptime(void);
-extern "C" void uart_getc(uint8_t *ch) {
+uint8_t uart_getc() {
   static uint32_t lasttime = 0;
   uint32_t now = uptime();
 
-  *ch = -1;
+  uint8_t ch = -1;
   if (now - lasttime > 60 * 1000) {
     // 1 minute
     eprintf(ANSI_COLOR_RED "now = %ds\n" ANSI_COLOR_RESET, now / 1000);
     lasttime = now;
   }
   if (now > 4 * 3600 * 1000) { // 4 hours
-    *ch = uart_dequeue();
+    ch = uart_dequeue();
   }
-}
-
-void uart_putc(char c) {
-  eprintf("%c", c);
+  return ch;
 }
 
 static void preset_input() {
