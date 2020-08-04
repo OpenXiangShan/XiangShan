@@ -24,10 +24,10 @@ class Decoder extends XSModule with HasInstrType {
   val instrType :: fuType :: fuOpType :: Nil = decodeList
 
   // todo: remove this when fetch stage can decide if an instr is br/jmp
-  io.out.cf.isBr := (instrType === InstrB ||
-                    (fuOpType === JumpOpType.jal && instrType === InstrJ && fuType === FuType.jmp) ||
-                    (fuOpType === JumpOpType.jalr && instrType === InstrI && fuType === FuType.jmp) ||
-                    (fuOpType === CSROpType.jmp && instrType === InstrI && fuType === FuType.csr))
+  // io.out.cf.brUpdate.isBr := (instrType === InstrB ||
+  //                   (fuOpType === JumpOpType.jal && instrType === InstrJ && fuType === FuType.jmp) ||
+  //                   (fuOpType === JumpOpType.jalr && instrType === InstrI && fuType === FuType.jmp) ||
+  //                   (fuOpType === CSROpType.jmp && instrType === InstrI && fuType === FuType.csr))
 //  val isRVC = instr(1, 0) =/= "b11".U
 //  val rvcImmType :: rvcSrc1Type :: rvcSrc2Type :: rvcDestType :: Nil =
 //    ListLookup(instr, CInstructions.DecodeDefault, CInstructions.CExtraDecodeTable)
@@ -79,7 +79,7 @@ class Decoder extends XSModule with HasInstrType {
    when (isLink(rd) && fuOpType === JumpOpType.jal) { io.out.ctrl.fuOpType := JumpOpType.call }
    when (fuOpType === JumpOpType.jalr) {
      when (isLink(rs)) { io.out.ctrl.fuOpType := JumpOpType.ret }
-     when (isLink(rt)) { io.out.ctrl.fuOpType := JumpOpType.call }
+     when (isLink(rd)) { io.out.ctrl.fuOpType := JumpOpType.call }
    }
  }
   // fix LUI

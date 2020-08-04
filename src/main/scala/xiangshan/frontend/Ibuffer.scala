@@ -17,20 +17,14 @@ class Ibuffer extends XSModule {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
     val pnpc = UInt(VAddrBits.W)
-    val fetchOffset = UInt((log2Up(FetchWidth * 4)).W)
-    val hist = UInt(HistoryLength.W)
-    val btbPredCtr = UInt(2.W)
-    val btbHit = Bool()
-    val tageMeta = new TageMeta
-    val rasSp = UInt(log2Up(RasSize).W)
-    val rasTopCtr = UInt(8.W)
+    val brInfo = new BranchInfo
+    val pd = new PreDecodeInfo
   }
 
   // Ignore
   for(out <- io.out) {
     out.bits.exceptionVec := DontCare
     out.bits.intrVec := DontCare
-    out.bits.isBr := DontCare
     out.bits.crossPageIPFFix := DontCare
   }
 
@@ -40,7 +34,7 @@ class Ibuffer extends XSModule {
   val head_ptr = RegInit(0.U(log2Up(IBufSize).W))
   val tail_ptr = RegInit(0.U(log2Up(IBufSize).W))
 
-  val enqValid = !io.flush && !ibuf_valid(tail_ptr + FetchWidth.U - 1.U)
+  val enqValid = !io.flush && !ibuf_valid(tail_ptr + PredictWidth.U - 1.U)
   val deqValid = !io.flush && ibuf_valid(head_ptr)
 
   io.in.ready := enqValid
@@ -48,21 +42,17 @@ class Ibuffer extends XSModule {
   // Enque
   when(io.in.fire) {
     var enq_idx = tail_ptr
-    for(i <- 0 until FetchWidth) {
-      ibuf_valid(enq_idx) := io.in.bits.mask(i<<1)
+
+    for(i <- 0 until PredictWidth) {
+      ibuf_valid(enq_idx) := io.in.bits.mask(i)
 
       ibuf(enq_idx).inst := io.in.bits.instrs(i)
-      ibuf(enq_idx).pc := io.in.bits.pc + ((enq_idx - tail_ptr)<<2).asUInt
-      ibuf(enq_idx).pnpc := io.in.bits.pnpc(i<<1)
-      ibuf(enq_idx).fetchOffset := ((enq_idx - tail_ptr)<<2).asUInt
-      ibuf(enq_idx).hist := io.in.bits.hist(i<<1)
-      ibuf(enq_idx).btbPredCtr := io.in.bits.predCtr(i<<1)
-      ibuf(enq_idx).btbHit := io.in.bits.btbHit(i<<1)
-      ibuf(enq_idx).tageMeta := io.in.bits.tageMeta(i<<1)
-      ibuf(enq_idx).rasSp := io.in.bits.rasSp
-      ibuf(enq_idx).rasTopCtr := io.in.bits.rasTopCtr
+      ibuf(enq_idx).pc := io.in.bits.pc(i)
+      ibuf(enq_idx).pnpc := io.in.bits.pnpc(i)
+      ibuf(enq_idx).brInfo := io.in.bits.brInfo(i)
+      ibuf(enq_idx).pd := io.in.bits.pd(i)
 
-      enq_idx = enq_idx + io.in.bits.mask(i<<1)
+      enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
     tail_ptr := enq_idx
@@ -73,19 +63,17 @@ class Ibuffer extends XSModule {
     var deq_idx = head_ptr
     for(i <- 0 until DecodeWidth) {
       io.out(i).valid := ibuf_valid(deq_idx)
-      ibuf_valid(deq_idx) := !io.out(i).fire
-
+      // Only when the entry is valid can it be set invalid
+      when (ibuf_valid(deq_idx)) { ibuf_valid(deq_idx) := !io.out(i).fire }
+      
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
-      io.out(i).bits.fetchOffset := ibuf(deq_idx).fetchOffset
-      io.out(i).bits.pnpc := ibuf(deq_idx).pnpc
-      io.out(i).bits.hist := ibuf(deq_idx).hist
-      io.out(i).bits.btbPredCtr := ibuf(deq_idx).btbPredCtr
-      io.out(i).bits.btbHit := ibuf(deq_idx).btbHit
-      io.out(i).bits.tageMeta := ibuf(deq_idx).tageMeta
-      io.out(i).bits.rasSp := ibuf(deq_idx).rasSp
-      io.out(i).bits.rasTopCtr := ibuf(deq_idx).rasTopCtr
-      io.out(i).bits.isRVC := false.B // FIXME: This is not ibuffer's work now
+      // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
+      io.out(i).bits.brUpdate := DontCare
+      io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc
+      io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
+      io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
+      io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
 
       deq_idx = deq_idx + io.out(i).fire
     }
@@ -108,9 +96,9 @@ class Ibuffer extends XSModule {
 
   when(io.in.fire) {
     XSDebug("Enque:\n")
-    XSDebug(p"PC=${Hexadecimal(io.in.bits.pc)} MASK=${Binary(io.in.bits.mask)}\n")
-    for(i <- 0 until FetchWidth){
-        XSDebug(p"${Hexadecimal(io.in.bits.instrs(i))}  v=${io.in.valid}  r=${io.in.ready}\n")
+    XSDebug(p"MASK=${Binary(io.in.bits.mask)}\n")
+    for(i <- 0 until PredictWidth){
+        XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
     }
   }
 

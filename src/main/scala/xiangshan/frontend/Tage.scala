@@ -7,7 +7,7 @@ import utils._
 
 import scala.math.min
 
-trait HasTageParameter {
+trait HasTageParameter extends HasXSParameter{
   //                   Sets  Hist   Tag
   val TableInfo = Seq(( 128,    2,    7),
                       ( 128,    4,    7),
@@ -17,11 +17,11 @@ trait HasTageParameter {
                       ( 128,   64,    9))
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
-  val BankWidth = 16 // FetchWidth
+  val TageBanks = PredictWidth // FetchWidth
 
   val TotalBits = TableInfo.map {
     case (s, h, t) => {
-      s * (1+t+3) * BankWidth
+      s * (1+t+3) * PredictWidth
     }
   }.reduce(_+_)
 }
@@ -29,9 +29,13 @@ trait HasTageParameter {
 abstract class TageBundle extends XSBundle with HasTageParameter
 abstract class TageModule extends XSModule with HasTageParameter
 
+
+
+
 class TageReq extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
+  val mask = UInt(PredictWidth.W)
 }
 
 class TageResp extends TageBundle {
@@ -43,19 +47,19 @@ class TageUpdate extends TageBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   // update tag and ctr
-  val mask = Vec(BankWidth, Bool())
-  val taken = Vec(BankWidth, Bool())
-  val alloc = Vec(BankWidth, Bool())
-  val oldCtr = Vec(BankWidth, UInt(3.W))
+  val mask = Vec(TageBanks, Bool())
+  val taken = Vec(TageBanks, Bool())
+  val alloc = Vec(TageBanks, Bool())
+  val oldCtr = Vec(TageBanks, UInt(3.W))
   // update u
-  val uMask = Vec(BankWidth, Bool())
-  val u = Vec(BankWidth, UInt(2.W))
+  val uMask = Vec(TageBanks, Bool())
+  val u = Vec(TageBanks, UInt(2.W))
 }
 
 class FakeTageTable() extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
-    val resp = Output(Vec(BankWidth, Valid(new TageResp)))
+    val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
   })
   io.resp := DontCare
@@ -65,12 +69,12 @@ class FakeTageTable() extends TageModule {
 class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int) extends TageModule {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
-    val resp = Output(Vec(BankWidth, Valid(new TageResp)))
+    val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
   })
 
   // bypass entries for tage update
-  val wrBypassEntries = 8
+  val wrBypassEntries = PredictWidth
 
   def compute_folded_hist(hist: UInt, l: Int) = {
     val nChunks = (histLen + l - 1) / l
@@ -94,6 +98,14 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
                 Mux(ctr === 7.U, 7.U, ctr + 1.U))
   }
 
+  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << (len.U - shamt)
+    val lower = source >> shamt
+    res := higher | lower
+    res
+  }
+
   val doing_reset = RegInit(true.B)
   val reset_idx = RegInit(0.U(log2Ceil(nRows).W))
   reset_idx := reset_idx + doing_reset
@@ -107,17 +119,38 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val tageEntrySz = 1 + tagLen + 3
 
-  val (hashed_idx, tag) = compute_tag_and_hash(io.req.bits.pc, io.req.bits.hist)
+  // use real address to index
+  val unhashed_idxes = VecInit((0 until TageBanks).map(b => ((io.req.bits.pc >> 1.U) + b.U) >> log2Up(TageBanks).U))
 
-  val hi_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
-  val lo_us = List.fill(BankWidth)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
-  val table = List.fill(BankWidth)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  val idxes_and_tags = (0 until TageBanks).map(b => compute_tag_and_hash(unhashed_idxes(b.U), io.req.bits.hist))
+  val idxes = VecInit(idxes_and_tags.map(_._1))
+  val tags = VecInit(idxes_and_tags.map(_._2))
 
-  val hi_us_r = Wire(Vec(BankWidth, Bool()))
-  val lo_us_r = Wire(Vec(BankWidth, Bool()))
-  val table_r = Wire(Vec(BankWidth, new TageEntry))
+  val idxLatch = RegEnable(idxes, enable=io.req.valid)
+  val tagLatch = RegEnable(tags, enable=io.req.valid)
 
-  (0 until BankWidth).map(
+  val hi_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  val lo_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  val table = List.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+
+  val hi_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+  val lo_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
+  val table_r = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageEntry)))
+
+  val baseBank = io.req.bits.pc(log2Up(TageBanks), 1)
+
+
+  // This is different from that in BTB and BIM
+  // We want to pass the correct index and tag into the TAGE table
+  // if baseBank == 9, then we want to pass idxes_and_tags(0) to bank 9,
+  //                         0  1        8  9  10      15
+  // so the correct order is 7, 8, ..., 15, 0,  1, ..., 6
+  val iAndTIdxInOrder = VecInit((0 until TageBanks).map(b => ((TageBanks.U +& b.U) - baseBank)(log2Up(TageBanks)-1, 0)))
+  val iAndTIdxInOrderLatch = RegEnable(iAndTIdxInOrder, enable=io.req.valid)
+
+  val realMask = circularShiftRight(io.req.bits.mask, TageBanks, baseBank)
+
+  (0 until TageBanks).map(
     b => {
       hi_us(b).reset := reset.asBool
       lo_us(b).reset := reset.asBool
@@ -125,23 +158,20 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       hi_us(b).io.r.req.valid := io.req.valid
       lo_us(b).io.r.req.valid := io.req.valid
       table(b).io.r.req.valid := io.req.valid
-      hi_us(b).io.r.req.bits.setIdx := hashed_idx
-      lo_us(b).io.r.req.bits.setIdx := hashed_idx
-      table(b).io.r.req.bits.setIdx := hashed_idx
-      
-      hi_us_r(b) := hi_us(b).io.r.resp.data(0)
-      lo_us_r(b) := lo_us(b).io.r.resp.data(0)
-      table_r(b) := table(b).io.r.resp.data(0)
+      lo_us(b).io.r.req.bits.setIdx := idxes(iAndTIdxInOrder(b.U))
+      hi_us(b).io.r.req.bits.setIdx := idxes(iAndTIdxInOrder(b.U))
+      table(b).io.r.req.bits.setIdx := idxes(iAndTIdxInOrder(b.U))
 
-      // io.resp(b).valid := table_r(b).valid && table_r(b).tag === tag // Missing reset logic
-      // io.resp(b).bits.ctr := table_r(b).ctr
-      // io.resp(b).bits.u := Cat(hi_us_r(b),lo_us_r(b))
+      // Reorder done
+      hi_us_r(iAndTIdxInOrderLatch(b)) := hi_us(b).io.r.resp.data(0)
+      lo_us_r(iAndTIdxInOrderLatch(b)) := lo_us(b).io.r.resp.data(0)
+      table_r(iAndTIdxInOrderLatch(b)) := table(b).io.r.resp.data(0)
     }
   )
 
-  val req_rhits = VecInit(table_r.map(e => e.valid && e.tag === tag && !doing_reset))
+  val req_rhits = VecInit((0 until TageBanks).map(b => table_r(b).valid && table_r(b).tag === tagLatch(b)))
 
-  (0 until BankWidth).map(b => {
+  (0 until TageBanks).map(b => {
     io.resp(b).valid := req_rhits(b)
     io.resp(b).bits.ctr := table_r(b).ctr
     io.resp(b).bits.u := Cat(hi_us_r(b),lo_us_r(b))
@@ -156,26 +186,26 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val doing_clear_u_lo = doing_clear_u && clear_u_ctr(log2Ceil(uBitPeriod) + log2Ceil(nRows)) === 0.U
   val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
 
-  val (update_idx, update_tag) = compute_tag_and_hash(io.update.pc, io.update.hist)
+  val (update_idx, update_tag) = compute_tag_and_hash(io.update.pc >> (1.U + log2Up(TageBanks).U), io.update.hist)
 
-  val update_wdata = Wire(Vec(BankWidth, new TageEntry))
+  val update_wdata = Wire(Vec(TageBanks, new TageEntry))
 
-  
-  (0 until BankWidth).map(b => {
+
+  (0 until TageBanks).map(b => {
     table(b).io.w.req.valid := io.update.mask(b) || doing_reset
     table(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, update_idx)
     table(b).io.w.req.bits.data := Mux(doing_reset, 0.U.asTypeOf(new TageEntry), update_wdata(b))
   })
 
-  val update_hi_wdata = Wire(Vec(BankWidth, Bool()))
-  (0 until BankWidth).map(b => {
+  val update_hi_wdata = Wire(Vec(TageBanks, Bool()))
+  (0 until TageBanks).map(b => {
     hi_us(b).io.w.req.valid := io.update.uMask(b) || doing_reset || doing_clear_u_hi
     hi_us(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, Mux(doing_clear_u_hi, clear_u_idx, update_idx))
     hi_us(b).io.w.req.bits.data := Mux(doing_reset || doing_clear_u_hi, 0.U, update_hi_wdata(b))
   })
 
-  val update_lo_wdata = Wire(Vec(BankWidth, Bool()))
-  (0 until BankWidth).map(b => {
+  val update_lo_wdata = Wire(Vec(TageBanks, Bool()))
+  (0 until TageBanks).map(b => {
     lo_us(b).io.w.req.valid := io.update.uMask(b) || doing_reset || doing_clear_u_lo
     lo_us(b).io.w.req.bits.setIdx := Mux(doing_reset, reset_idx, Mux(doing_clear_u_lo, clear_u_idx, update_idx))
     lo_us(b).io.w.req.bits.data := Mux(doing_reset || doing_clear_u_lo, 0.U, update_lo_wdata(b))
@@ -183,7 +213,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
   val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
-  val wrbypass         = Reg(Vec(wrBypassEntries, Vec(BankWidth, UInt(3.W))))
+  val wrbypass         = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(3.W))))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
 
   val wrbypass_hits    = VecInit((0 until wrBypassEntries) map { i =>
@@ -194,7 +224,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val wrbypass_hit     = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  for (w <- 0 until BankWidth) {
+  for (w <- 0 until TageBanks) {
     update_wdata(w).ctr   := Mux(io.update.alloc(w),
       Mux(io.update.taken(w), 4.U,
                               3.U
@@ -220,91 +250,107 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
     }
   }
-  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%b, idx=%d, tag=%x\n", io.req.bits.pc, io.req.bits.hist, hashed_idx, tag)
-  for (i <- 0 until BankWidth) {
-    XSDebug(RegNext(io.req.valid), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, RegNext(hashed_idx), req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
+  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%b, base_idx=%d, base_tag=%x\n",
+    io.req.bits.pc, io.req.bits.hist, idxes(0.U), tags(0.U))
+  for (i <- 0 until TageBanks) {
+    XSDebug(RegNext(io.req.valid), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch(i), req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
   }
 
 }
 
-class FakeTAGE extends TageModule {
-  val io = IO(new Bundle() {
-    val req = Input(Valid(new TageReq))
-    val out = new Bundle {
-      val hits = Output(UInt(BankWidth.W))
-      val takens = Output(Vec(BankWidth, Bool()))
-    }
-    val meta = Output(Vec(BankWidth, (new TageMeta)))
-    val redirectInfo = Input(new RedirectInfo)
-  })
-  
-  io.out.hits := 0.U(BankWidth.W)
-  io.out.takens := DontCare
-  io.meta := DontCare
+abstract class BaseTage extends BasePredictor with HasTageParameter {
+  class TAGEResp extends Resp {
+    val takens = Vec(PredictWidth, Bool())
+    val hits = Vec(PredictWidth, Bool())
+  }
+  class TAGEMeta extends Meta{
+  }
+  class FromBIM extends FromOthers {
+    val ctrs = Vec(PredictWidth, UInt(2.W))
+  }
+  class TageIO extends DefaultBasePredictorIO {
+    val resp = Output(new TAGEResp)
+    val meta = Output(Vec(PredictWidth, new TageMeta))
+    val bim = Input(new FromBIM)
+    val s3Fire = Input(Bool())
+  }
+
+  override val io = IO(new TageIO)
+}
+
+class FakeTage extends BaseTage {
+  io.resp <> DontCare
+  io.meta <> DontCare
 }
 
 
-class Tage extends TageModule {
-  val io = IO(new Bundle() {
-    val req = Input(Valid(new TageReq))
-    val out = new Bundle {
-      val hits = Output(UInt(BankWidth.W))
-      val takens = Output(Vec(BankWidth, Bool()))
-    }
-    val meta = Output(Vec(BankWidth, (new TageMeta)))
-    val redirectInfo = Input(new RedirectInfo)
-  })
+class Tage extends BaseTage {
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {
       val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
-      t.io.req <> io.req
+      t.io.req.valid := io.pc.valid
+      t.io.req.bits.pc := io.pc.bits
+      t.io.req.bits.hist := io.hist
+      t.io.req.bits.mask := io.inMask
       t
     }
   }
-  val resps = VecInit(tables.map(_.io.resp))
 
-  val updateMeta = io.redirectInfo.redirect.tageMeta
-  //val updateMisPred = UIntToOH(io.redirectInfo.redirect.fetchIdx) &
-  //  Fill(BankWidth, (io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B).asUInt)
-  val updateMisPred = io.redirectInfo.misPred && io.redirectInfo.redirect.btbType === BTBtype.B
+  // Keep the table responses to process in s3
+  val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
 
-  val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
-  val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(BankWidth, Bool()))))
-  val updateTaken = Wire(Vec(TageNTables, Vec(BankWidth, Bool())))
-  val updateAlloc = Wire(Vec(TageNTables, Vec(BankWidth, Bool())))
-  val updateOldCtr = Wire(Vec(TageNTables, Vec(BankWidth, UInt(3.W))))
-  val updateU = Wire(Vec(TageNTables, Vec(BankWidth, UInt(2.W))))
+  val s2_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
+  val s3_bim = RegEnable(s2_bim, enable=io.s3Fire)
+
+  val debug_pc_s2 = RegEnable(io.pc.bits, enable=io.pc.valid)
+  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s3Fire)
+
+  val u = io.update.bits.ui
+  val updateValid = io.update.valid
+  val updateHist = io.update.bits.hist
+
+  val updateMeta = u.brInfo.tageMeta
+  val updateMisPred = u.isMisPred && u.pd.isBr
+
+  val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
+  val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
+  val updateTaken = Wire(Vec(TageNTables, Vec(TageBanks, Bool())))
+  val updateAlloc = Wire(Vec(TageNTables, Vec(TageBanks, Bool())))
+  val updateOldCtr = Wire(Vec(TageNTables, Vec(TageBanks, UInt(3.W))))
+  val updateU = Wire(Vec(TageNTables, Vec(TageBanks, UInt(2.W))))
   updateTaken := DontCare
   updateAlloc := DontCare
   updateOldCtr := DontCare
   updateU := DontCare
 
+  val updateBank = u.pc >> 1.U
+
   // access tag tables and output meta info
-  val outHits = Wire(Vec(BankWidth, Bool()))
-  for (w <- 0 until BankWidth) {
-    var altPred = false.B
-    val finalAltPred = WireInit(false.B)
+  for (w <- 0 until TageBanks) {
+    var altPred = s3_bim.ctrs(w)(1)
+    val finalAltPred = WireInit(s3_bim.ctrs(w)(1))
     var provided = false.B
     var provider = 0.U
-    outHits(w) := false.B
-    io.out.takens(w) := false.B
+    io.resp.hits(w) := false.B
+    io.resp.takens(w) := s3_bim.ctrs(w)(1)
 
     for (i <- 0 until TageNTables) {
       val hit = resps(i)(w).valid
+      io.resp.hits(w) := hit
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
-        io.out.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
+        io.resp.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
         finalAltPred := altPred
       }
       provided = provided || hit          // Once hit then provide
       provider = Mux(hit, i.U, provider)  // Use the last hit as provider
       altPred = Mux(hit, ctr(2), altPred) // Save current pred as potential altpred
     }
-    outHits(w) := provided
+    io.resp.hits(w) := provided
     io.meta(w).provider.valid := provided
     io.meta(w).provider.bits := provider
-    io.meta(w).altDiffers := finalAltPred =/= io.out.takens(w)
+    io.meta(w).altDiffers := finalAltPred =/= io.resp.takens(w)
     io.meta(w).providerU := resps(provider)(w).bits.u
     io.meta(w).providerCtr := resps(provider)(w).bits.ctr
 
@@ -320,9 +366,10 @@ class Tage extends TageModule {
     io.meta(w).allocate.valid := allocatableSlots =/= 0.U
     io.meta(w).allocate.bits := allocEntry
 
-    val isUpdateTaken = io.redirectInfo.valid && io.redirectInfo.redirect.fetchIdx === w.U &&
-      io.redirectInfo.redirect.taken && io.redirectInfo.redirect.btbType === BTBtype.B
-    when (io.redirectInfo.redirect.btbType === BTBtype.B && io.redirectInfo.valid &&  io.redirectInfo.redirect.fetchIdx === w.U) {
+
+    val isUpdateTaken = updateValid && updateBank === w.U &&
+      u.taken && u.pd.isBr
+    when (u.pd.isBr && updateValid && updateBank === w.U) {
       when (updateMeta.provider.valid) {
         val provider = updateMeta.provider.bits
 
@@ -331,7 +378,7 @@ class Tage extends TageModule {
 
         updateU(provider)(w) := Mux(!updateMeta.altDiffers, updateMeta.providerU,
           Mux(updateMisPred, Mux(updateMeta.providerU === 0.U, 0.U, updateMeta.providerU - 1.U),
-                             Mux(updateMeta.providerU === 3.U, 3.U, updateMeta.providerU + 1.U))
+                              Mux(updateMeta.providerU === 3.U, 3.U, updateMeta.providerU + 1.U))
         )
         updateTaken(provider)(w) := isUpdateTaken
         updateOldCtr(provider)(w) := updateMeta.providerCtr
@@ -340,12 +387,12 @@ class Tage extends TageModule {
     }
   }
 
-  when (io.redirectInfo.valid && updateMisPred) {
-    val idx = io.redirectInfo.redirect.fetchIdx
+  when (updateValid && updateMisPred) {
+    val idx = updateBank
     val allocate = updateMeta.allocate
     when (allocate.valid) {
       updateMask(allocate.bits)(idx) := true.B
-      updateTaken(allocate.bits)(idx) := io.redirectInfo.redirect.taken
+      updateTaken(allocate.bits)(idx) := u.taken
       updateAlloc(allocate.bits)(idx) := true.B
       updateUMask(allocate.bits)(idx) := true.B
       updateU(allocate.bits)(idx) := 0.U
@@ -362,25 +409,26 @@ class Tage extends TageModule {
   }
 
   for (i <- 0 until TageNTables) {
-    for (w <- 0 until BankWidth) {
+    for (w <- 0 until TageBanks) {
       tables(i).io.update.mask(w) := updateMask(i)(w)
       tables(i).io.update.taken(w) := updateTaken(i)(w)
       tables(i).io.update.alloc(w) := updateAlloc(i)(w)
       tables(i).io.update.oldCtr(w) := updateOldCtr(i)(w)
-      
+
       tables(i).io.update.uMask(w) := updateUMask(i)(w)
       tables(i).io.update.u(w) := updateU(i)(w)
     }
     // use fetch pc instead of instruction pc
-    tables(i).io.update.pc := io.redirectInfo.redirect.pc - (io.redirectInfo.redirect.fetchIdx << 1.U)
-    tables(i).io.update.hist := io.redirectInfo.redirect.hist
+    tables(i).io.update.pc := u.pc
+    tables(i).io.update.hist := updateHist
   }
 
-  io.out.hits := outHits.asUInt
 
 
   val m = updateMeta
-  XSDebug(io.req.valid, "req: pc=0x%x, hist=%b\n", io.req.bits.pc, io.req.bits.hist)
-  XSDebug(io.redirectInfo.valid, "redirect: provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n", m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
-  XSDebug(RegNext(io.req.valid), "resp: pc=%x, outHits=%b, takens=%b\n", RegNext(io.req.bits.pc), io.out.hits, io.out.takens.asUInt)
+  XSDebug(io.pc.valid, "req: pc=0x%x, hist=%b\n", io.pc.bits, io.hist)
+  XSDebug(io.update.valid, "redirect: provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n",
+    m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
+  XSDebug(true.B, "s3Fire:%d, resp: pc=%x, hits=%b, takens=%b\n",
+    io.s3Fire, debug_pc_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
 }

@@ -30,10 +30,13 @@ case class XSCoreParameters
   EnableRAS: Boolean = false,
   EnableLB: Boolean = false,
   HistoryLength: Int = 64,
-  BtbSize: Int = 256,
+  BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
   RasSize: Int = 16,
+  CacheLineSize: Int = 512,
+  UBtbWays: Int = 16,
+  BtbWays: Int = 2,
   IBufSize: Int = 64,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -93,9 +96,7 @@ trait HasXSParameter {
   val EnableLB = core.EnableLB
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
-  // val BtbWays = 4
   val BtbBanks = PredictWidth
-  // val BtbSets = BtbSize / BtbWays
   val JbtacSize = core.JbtacSize
   val JbtacBanks = core.JbtacBanks
   val RasSize = core.RasSize
@@ -118,6 +119,11 @@ trait HasXSParameter {
   val LsDqDeqWidth = core.LsDqDeqWidth
   val dp1Paremeters = core.dp1Paremeters
   val exuParameters = core.exuParameters
+  val CacheLineSize = core.CacheLineSize
+  val CacheLineHalfWord = CacheLineSize / 16
+  val ExtHistoryLength = HistoryLength * 2
+  val UBtbWays = core.UBtbWays
+  val BtbWays = core.BtbWays
 }
 
 trait HasXSLog { this: Module =>
@@ -140,7 +146,6 @@ trait NeedImpl { this: Module =>
 
 abstract class XSBundle extends Bundle
   with HasXSParameter
-  with HasTageParameter
 
 case class EnviromentParameters
 (

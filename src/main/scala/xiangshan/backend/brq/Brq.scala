@@ -63,10 +63,11 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
+  val outOfOrderBrInfo = ValidIO(new BranchUpdateInfo)
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
   // in order dequeue to train bpd
-  val inOrderBrInfo = Output(new RedirectInfo)
+  val inOrderBrInfo = ValidIO(new BranchUpdateInfo)
 }
 
 class Brq extends XSModule {
@@ -75,7 +76,6 @@ class Brq extends XSModule {
   class BrqEntry extends Bundle {
     val ptrFlag = Bool()
     val npc = UInt(VAddrBits.W)
-    val misPred = Bool()
     val exuOut = new ExuOutput
   }
 
@@ -102,7 +102,7 @@ class Brq extends XSModule {
   val headIdx = headPtr.value
 
   val skipMask = Cat(stateQueue.zipWithIndex.map({
-    case (s, i) => (s.isWb && !brQueue(i).misPred) || s.isCommit
+    case (s, i) => (s.isWb && !brQueue(i).exuOut.brUpdate.isMisPred) || s.isCommit
   }).reverse)
 
   /*
@@ -129,9 +129,10 @@ class Brq extends XSModule {
   val skipHi = (skipMask | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
   val useLo = skipHi && findLo
 
-  val commitIdx = Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).misPred,
+
+  val commitIdx = Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).exuOut.brUpdate.isMisPred,
     commitIdxHi,
-    Mux(useLo && stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).misPred,
+    Mux(useLo && stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).exuOut.brUpdate.isMisPred,
       commitIdxLo,
       headIdx
     )
@@ -141,14 +142,14 @@ class Brq extends XSModule {
   val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
+  val commitIsMisPred = commitEntry.exuOut.redirect.isMisPred
 
   brCommitCnt := brCommitCnt + io.bcommit - deqValid
 
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
   io.inOrderBrInfo.valid := deqValid
-  io.inOrderBrInfo.misPred := commitEntry.misPred
-  io.inOrderBrInfo.redirect := commitEntry.exuOut.redirect
+  io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
 
 //  XSDebug(
 //    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
@@ -176,10 +177,12 @@ class Brq extends XSModule {
   )
 
   headPtr := headPtrNext
-  io.redirect.valid := commitValid && commitEntry.misPred && !io.roqRedirect.valid
+  io.redirect.valid := commitValid && commitIsMisPred && !io.roqRedirect.valid
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
+  io.outOfOrderBrInfo.valid := commitValid
+  io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
   )
@@ -191,7 +194,7 @@ class Brq extends XSModule {
     enq.ready := !full
     brTag := tailPtrNext
     when(enq.fire()){
-      brQueue(tailPtrNext.value).npc := enq.bits.cf.pnpc
+      brQueue(tailPtrNext.value).npc := enq.bits.cf.brUpdate.pnpc
       brQueue(tailPtrNext.value).ptrFlag := tailPtrNext.flag
     }
 
@@ -209,17 +212,11 @@ class Brq extends XSModule {
           p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
       )
       stateQueue(wbIdx) := s_wb
-      brQueue(wbIdx).exuOut := exuWb.bits
-      brQueue(wbIdx).misPred := brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
-      // brQueue(wbIdx).exuOut.redirect.hist := exuWb.bits.uop.cf.hist
-      // brQueue(wbIdx).exuOut.redirect.btbVictimWay := exuWb.bits.uop.cf.btbVictimWay
-      // brQueue(wbIdx).exuOut.redirect.btbPredCtr := exuWb.bits.uop.cf.btbPredCtr
-      // brQueue(wbIdx).exuOut.redirect.btbHitWay := exuWb.bits.uop.cf.btbHitWay
-      // brQueue(wbIdx).exuOut.redirect.tageMeta := exuWb.bits.uop.cf.tageMeta
-      // brQueue(wbIdx).exuOut.redirect.rasSp := exuWb.bits.uop.cf.rasSp
-      // brQueue(wbIdx).exuOut.redirect.rasTopCtr := exuWb.bits.uop.cf.rasTopCtr
-      // brQueue(wbIdx).exuOut.redirect.fetchIdx := exuWb.bits.uop.cf.fetchOffset << 2.U
-      brQueue(wbIdx).exuOut.redirect := exuWb.bits.redirect
+      val exuOut = WireInit(exuWb.bits)
+      val isMisPred = brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
+      exuOut.redirect.isMisPred := isMisPred
+      exuOut.brUpdate.isMisPred := isMisPred
+      brQueue(wbIdx).exuOut := exuOut
     }
   }
 
@@ -233,12 +230,12 @@ class Brq extends XSModule {
     // misprediction
     stateQueue.zipWithIndex.foreach({case(s, i) =>
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      when(ptr.needBrFlush(io.redirect.bits.brTag)){
+      when(ptr < io.redirect.bits.brTag){
         s := s_idle
       }
     })
     tailPtr := io.redirect.bits.brTag + true.B
-  }
+  } // replay: do nothing
 
 
 
@@ -252,7 +249,7 @@ class Brq extends XSModule {
     XSDebug(
       debug_normal_mode,
       p"enq v:${io.enqReqs(i).valid} rdy:${io.enqReqs(i).ready} pc:${Hexadecimal(io.enqReqs(i).bits.cf.pc)}" +
-        p"pnpc:${Hexadecimal(io.enqReqs(i).bits.cf.pnpc)} brTag:${io.brTags(i)}\n"
+        p" brTag:${io.brTags(i)}\n"
     )
   }
 
@@ -261,12 +258,16 @@ class Brq extends XSModule {
   XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
 
   val fire = io.out.fire()
-  val predRight = fire && !commitEntry.misPred
-  val predWrong = fire && commitEntry.misPred
-  val isBType = commitEntry.exuOut.redirect.btbType===BTBtype.B
-  val isJType = commitEntry.exuOut.redirect.btbType===BTBtype.J
-  val isIType = commitEntry.exuOut.redirect.btbType===BTBtype.I
-  val isRType = commitEntry.exuOut.redirect.btbType===BTBtype.R
+  val predRight = fire && !commitIsMisPred
+  val predWrong = fire && commitIsMisPred
+  // val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
+  val isBType = commitEntry.exuOut.brUpdate.pd.isBr
+  // val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
+  val isJType = commitEntry.exuOut.brUpdate.pd.isJal
+  // val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
+  val isIType = commitEntry.exuOut.brUpdate.pd.isJalr
+  // val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
+  val isRType = commitEntry.exuOut.brUpdate.pd.isRet
   val mbpInstr = fire
   val mbpRight = predRight
   val mbpWrong = predWrong
