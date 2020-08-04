@@ -11,7 +11,7 @@ class RAS extends BasePredictor
 {
     class RASResp extends Resp
     {
-        val target =UInt(VAddrBits.W)
+        val target =ValiIO(UInt(VAddrBits.W))
     }
 
     class RASBranchInfo extends Meta
@@ -22,7 +22,7 @@ class RAS extends BasePredictor
 
     class RASIO extends DefaultBasePredictorIO 
     {
-        val retIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
+        val is_ret = Input(Bool())
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
         val redirect =  Flipped(ValidIO(new Redirect)))
@@ -47,16 +47,8 @@ class RAS extends BasePredictor
 
     // update RAS
     // speculative update RAS
-
     when (!is_full && io.callIdx.valid) {
         //push
-        when (ras_top_entry.ctr === 1.U) {
-            sp := Mux(sp.value === 0.U, 0.U, sp - 1.U)
-        }.otherwise {
-            ras_top_entry.ctr := ras_top_entry.ctr - 1.U
-        }
-    }.elsewhen ((!is_empty && io.retIdx.valid) {
-        //pop
         io.out.bits.target := ras_top_addr
         val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
         val allocNewEntry = rasWrite.retAddr =/= rasTopAddr
@@ -64,6 +56,13 @@ class RAS extends BasePredictor
         rasWrite.retAddr := io.pc.bits + (io.callIdx.bits << 2.U) + 4.U
         ras(sp) := in.target
         when(allocNewEntry){sp := sp + 1.U }
+    }.elsewhen ((!is_empty && io.retIdx.valid) {
+        //pop
+        when (ras_top_entry.ctr === 1.U) {
+            sp := Mux(sp.value === 0.U, 0.U, sp - 1.U)
+        }.otherwise {
+            ras_top_entry.ctr := ras_top_entry.ctr - 1.U
+        }
     }
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
