@@ -17,30 +17,42 @@ class BusyTable extends XSModule {
     val pregRdy = Vec(NRReadPorts, Output(Bool()))
   })
 
-  val table = RegInit(VecInit(Seq.fill(NRPhyRegs)(false.B)))
+  val table = RegInit(0.U(NRPhyRegs.W))
+
+  val wbMask = ParallelOR(io.wbPregs.take(NRWritePorts).map(w => Mux(w.valid, UIntToOH(w.bits), 0.U)))
+  val allocMask = ParallelOR(io.allocPregs.map(a => Mux(a.valid, UIntToOH(a.bits), 0.U)))
+
+  val tableNext = table & (~wbMask).asUInt() | allocMask
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
-    rdy := !table(raddr) || ParallelOR(io.wbPregs.map(wb => wb.valid && (wb.bits===raddr)))
+    rdy := !tableNext(raddr)
   }
 
-  for((alloc, i) <- io.allocPregs.zipWithIndex){
-    when(alloc.valid){
-      table(alloc.bits) := true.B
-    }
-    XSDebug(alloc.valid, "Allocate %d\n", alloc.bits)
-  }
+  table := tableNext
 
-  for((wb, i) <- io.wbPregs.zipWithIndex){
-    when(wb.valid){
-      table(wb.bits) := false.B
-    }
-    XSDebug(wb.valid, "writeback %d\n", wb.bits)
-  }
+//  for((alloc, i) <- io.allocPregs.zipWithIndex){
+//    when(alloc.valid){
+//      table(alloc.bits) := true.B
+//    }
+//    XSDebug(alloc.valid, "Allocate %d\n", alloc.bits)
+//  }
+
+
+//  for((wb, i) <- io.wbPregs.zipWithIndex){
+//    when(wb.valid){
+//      table(wb.bits) := false.B
+//    }
+//    XSDebug(wb.valid, "writeback %d\n", wb.bits)
+//  }
 
   when(io.flush){
-    table.foreach(_ := false.B)
+    table := 0.U(NRPhyRegs.W)
   }
 
+  XSDebug(p"table    : ${Binary(table)}\n")
+  XSDebug(p"tableNext: ${Binary(tableNext)}\n")
+  XSDebug(p"allocMask: ${Binary(allocMask)}\n")
+  XSDebug(p"wbMask : ${Binary(wbMask)}\n")
   for (i <- 0 until NRPhyRegs) {
     XSDebug(table(i), "%d is busy\n", i.U)
   }
