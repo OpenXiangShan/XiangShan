@@ -26,7 +26,8 @@ object XSLog {
     val logEnable = WireInit(false.B)
     ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
     if(generateLog){
-      when (cond && logEnable) {
+      val isError = if (debugLevel == XSLogLevel.ERROR) true.B else false.B
+      when (cond && (logEnable || isError)) {
         printf((if (prefix) commonInfo else p"") + pable)
         if (debugLevel >= XSLogLevel.ERROR) {
           assert(false.B)
