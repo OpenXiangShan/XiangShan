@@ -50,10 +50,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
   val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
   // walkDispatch: in case of redirect, walk backward
-  val walkDispatchPtr =  (0 until RenameWidth).map(i => dispatchPtr - i.U)
+  val walkDispatchPtr =  (0 until RenameWidth).map(i => dispatchPtr - (i + 1).U)
   val walkDispatchIndex = walkDispatchPtr.map(ptr => ptr(indexWidth - 1, 0))
   // walkTail: in case of redirect, walk backward
-  val walkTailPtr = (0 until RenameWidth).map(i => tailPtr - i.U)
+  val walkTailPtr = (0 until RenameWidth).map(i => tailPtr - (i + 1).U)
   val walkTailIndex = walkTailPtr.map(ptr => ptr(indexWidth - 1, 0))
 
   // debug: dump dispatch queue states
@@ -76,7 +76,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
     XSDebug(false, s === s_dispatched, "d")
   }
   XSDebug(false, true.B, "\n")
-  XSDebug(p"       ")
+  XSDebug(p"ptr:   ")
   (0 until size).reverse.foreach { i =>
     val isPtr = i.U === headIndex || i.U === tailIndex || i.U === dispatchIndex
     XSDebug(false, isPtr, "^")
@@ -107,7 +107,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
     }
   }
 
-  // commit: from s_dispatch to s_invalid
+  // commit: from s_dispatched to s_invalid
   val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
   val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
   for (i <- 0 until CommitWidth) {
@@ -118,10 +118,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   }
 
   // redirect: cancel uops currently in the queue
+  val exceptionValid = io.redirect.valid && io.redirect.bits.isException
   val roqNeedFlush = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
     roqNeedFlush(i) := uopEntries(i).needFlush(io.redirect)
-    val needCancel = stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || io.redirect.bits.isException)
+    val needCancel = stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || exceptionValid)
     when (needCancel) {
       stateEntries(i) := s_invalid
     }
@@ -130,7 +131,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
       p"cancelled with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
-  // replay: from s_dispatch to s_valid
+  // replay: from s_dispatched to s_valid
   val needReplay = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
     needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && io.redirect.bits.isReplay
@@ -152,21 +153,28 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   val numWalkTailTry = PriorityEncoder(walkTailIndex.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
   val numWalkTail = Mux(numWalkTailTry > validEntries, validEntries, numWalkTailTry)
   XSError(numEnq =/= 0.U && numWalkTail =/= 0.U, "should not enqueue when walk\n")
-  tailPtr := tailPtr + Mux(numEnq =/= 0.U, numEnq, -numWalkTail)
+  tailPtr := Mux(exceptionValid, 0.U, tailPtr + Mux(numEnq =/= 0.U, numEnq, -numWalkTail))
 
   // dequeue
   val numDeqTry = Mux(dispatchEntries > deqnum.U, deqnum.U, dispatchEntries)
-  val numDeqFire = PriorityEncoder(io.deq.zip(deqIndex).map{case (deq, index) => !deq.fire() && stateEntries(index) === s_valid} :+ true.B)
+  val numDeqFire = PriorityEncoder(io.deq.zipWithIndex.map{case (deq, i) =>
+    // For dequeue, the first entry should never be s_invalid
+    // Otherwise, there should be a redirect and tail walks back
+    // in this case, we set numDeq to 0
+    !deq.fire() && (if (i == 0) true.B else stateEntries(deqIndex(i)) =/= s_dispatched)
+  } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // TODO: this is unaccptable since it needs to add 64 bits
   val numReplay = PopCount(needReplay)
   val numWalkDispatchTry = PriorityEncoder(walkDispatchPtr.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
   val numWalkDispatch = Mux(numWalkDispatchTry > commitEntries, commitEntries, numWalkDispatchTry)
-  XSError(numDeq =/= 0.U && numWalkDispatch =/= 0.U, "should not dequeue when walk\n")
-  XSError(numReplay =/= 0.U && numWalkDispatch =/= 0.U, "should not replay when walk\n")
-  dispatchPtr := dispatchPtr + Mux(numDeq =/= 0.U, numDeq, Mux(numWalkDispatch =/= 0.U, -numWalkDispatch, -numReplay))
+  val walkCntDispatch = numWalkDispatch + numReplay
+  // note that numDeq === 0.U entries after dispatch are all flushed
+  // so, numDeq and walkCntDispatch cannot be nonzero at the same time
+  XSError(numDeq =/= 0.U && walkCntDispatch =/= 0.U, "should not dequeue when walk\n")
+  dispatchPtr := Mux(exceptionValid, 0.U, dispatchPtr + Mux(numDeq =/= 0.U, numDeq, -walkCntDispatch))
 
-  headPtr := headPtr + numCommit
+  headPtr := Mux(exceptionValid, 0.U, headPtr + numCommit)
 
   /**
     * Part 3: set output and input
