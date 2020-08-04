@@ -8,6 +8,8 @@ import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
+import scala.math.min
+
 trait BTBParams extends HasXSParameter {
   val nRows = BtbSize / (PredictWidth * BtbWays)
   val offsetLen = 13
@@ -126,18 +128,33 @@ class BTB extends BasePredictor with BTBParams{
   val baseTag = btbAddr.getTag(pcLatch)
 
   val tagIncremented = VecInit((0 until BtbBanks).map(b => RegEnable(isInNextRow(b.U) && nextRowStartsUp, io.pc.valid)))
+  val realTags = VecInit((0 until BtbBanks).map(b => Mux(tagIncremented(b), baseTag + 1.U, baseTag)))
 
   val totalHits = VecInit((0 until BtbBanks).map( b => 
     VecInit((0 until BtbWays).map( w =>
       // This should correspond to the real mask from last valid cycle!
-      metaRead(w)(b).tag === Mux(tagIncremented(b), baseTag + 1.U, baseTag) && metaRead(w)(b).valid && realMaskLatch(b)
+      metaRead(w)(b).tag === realTags(b) && metaRead(w)(b).valid && realMaskLatch(b)
     ))
   ))
   val bankHits = VecInit(totalHits.map(_.reduce(_||_)))
   val bankHitWays = VecInit(totalHits.map(PriorityEncoder(_)))
 
+
+  def allocWay(meta_tags: UInt, req_tag: UInt) = {
+    if (BtbWays > 1) {
+      val tags = Cat(meta_tags, req_tag)
+      val l = log2Up(BtbWays)
+      val nChunks = (tags.getWidth + l - 1) / l
+      val chunks = (0 until nChunks).map( i => 
+        tags(min((i+1)*l, tags.getWidth)-1, i*l)
+      )
+      chunks.reduce(_^_)
+    } else {
+      0.U
+    }
+  }
   val writeWay = VecInit((0 until BtbBanks).map(
-    b => Mux(bankHits(b), bankHitWays(b), LFSR64()(0))
+    b => Mux(bankHits(b), bankHitWays(b), allocWay(VecInit(metaRead.map(w => w(b).tag)).asUInt, realTags(b)))
   ))
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
