@@ -138,6 +138,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
     when (needReplay(i)) {
       stateEntries(i) := s_valid
     }
+
+    XSInfo(needReplay(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
+      p"replayed with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
   /**
