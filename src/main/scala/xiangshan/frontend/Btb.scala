@@ -179,7 +179,7 @@ class BTB extends BasePredictor with BTBParams{
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), pdInfoToBTBtype(u.pd), u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val updateValid = io.update.valid
+  val updateValid = io.update.valid && u.isMisPred
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
@@ -215,6 +215,6 @@ class BTB extends BasePredictor with BTBParams{
     XSDebug(validLatch && bankHits(bankIdxInOrder(i)), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
       i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
   }
-  XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-    u.pc, new_target, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+  XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
+    u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
 }
