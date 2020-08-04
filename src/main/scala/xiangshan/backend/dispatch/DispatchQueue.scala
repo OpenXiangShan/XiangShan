@@ -149,8 +149,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   // enqueue
   val numEnqTry = Mux(emptyEntries > enqnum.U, enqnum.U, emptyEntries)
   val numEnq = PriorityEncoder(io.enq.map(!_.fire()) :+ true.B)
-  val numWalkTail = PriorityEncoder(walkTailIndex.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
-  XSError(numWalkTail > validEntries, "numWalkTail should not be greater than validEntries\n")
+  val numWalkTailTry = PriorityEncoder(walkTailIndex.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
+  val numWalkTail = Mux(numWalkTailTry > validEntries, validEntries, numWalkTailTry)
   XSError(numEnq =/= 0.U && numWalkTail =/= 0.U, "should not enqueue when walk\n")
   tailPtr := tailPtr + Mux(numEnq =/= 0.U, numEnq, -numWalkTail)
 
@@ -160,8 +160,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // TODO: this is unaccptable since it needs to add 64 bits
   val numReplay = PopCount(needReplay)
-  val numWalkDispatch = PriorityEncoder(walkDispatchPtr.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
-  XSError(numWalkDispatch > commitEntries, "numWalkDispatch should not be greater than commitEntries\n")
+  val numWalkDispatchTry = PriorityEncoder(walkDispatchPtr.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
+  val numWalkDispatch = Mux(numWalkDispatchTry > commitEntries, commitEntries, numWalkDispatchTry)
   XSError(numDeq =/= 0.U && numWalkDispatch =/= 0.U, "should not dequeue when walk\n")
   XSError(numReplay =/= 0.U && numWalkDispatch =/= 0.U, "should not replay when walk\n")
   dispatchPtr := dispatchPtr + Mux(numDeq =/= 0.U, numDeq, Mux(numWalkDispatch =/= 0.U, -numWalkDispatch, -numReplay))
