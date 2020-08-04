@@ -25,7 +25,7 @@ class LsRoqEntry extends XSBundle {
 }
 
 // Load/Store Roq (Moq) for XiangShan Out of Order LSU
-class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
+class Lsroq extends XSModule {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))

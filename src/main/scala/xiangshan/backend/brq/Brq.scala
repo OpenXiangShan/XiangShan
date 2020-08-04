@@ -75,9 +75,6 @@ class BrqIO extends XSBundle{
 class Brq extends XSModule {
   val io = IO(new BrqIO)
 
-  def redirctWindowSize: Int = BrqSize/2
-  require(redirctWindowSize <= BrqSize && redirctWindowSize > 0)
-
   class BrqEntry extends Bundle {
     val ptrFlag = Bool()
     val npc = UInt(VAddrBits.W)
@@ -105,23 +102,43 @@ class Brq extends XSModule {
 
   // dequeue
   val headIdx = headPtr.value
-  var commitIdx = WireInit(headIdx)
-  val misPredVec = VecInit(brQueue.map(_.exuOut.redirect.isMisPred))
-  def needCheckNext(idx: UInt): Bool = {
-    (stateQueue(idx).isWb && !misPredVec(idx)) || stateQueue(idx).isCommit
+
+  val skipMask = Cat(stateQueue.zipWithIndex.map({
+    case (s, i) => (s.isWb && !brQueue(i).exuOut.brUpdate.isMisPred) || s.isCommit
+  }).reverse)
+
+  /*
+      example: headIdx       = 2
+               headIdxOH     = 00000100
+               headIdxMaskHI = 11111100
+               headIdxMaskLo = 00000011
+               skipMask      = 00111101
+               commitIdxHi   =  6
+               commitIdxLo   =        0
+               commitIdx     =  6
+   */
+  val headIdxOH = UIntToOH(headIdx)
+  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
+  for(i <- headIdxMaskHiVec.indices){
+    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
   }
+  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
+  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
 
-  var checkNext = WireInit(needCheckNext(headIdx))
+  val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
+  val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
 
-  for(i <- 1 until redirctWindowSize){
-    val idx = commitIdx + i.U
-    val commitThis = checkNext && stateQueue(idx).isWb && misPredVec(idx)
-    commitIdx = Mux(commitThis,
-      idx,
-      commitIdx
+  val skipHi = (skipMask | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
+  val useLo = skipHi && findLo
+
+
+  val commitIdx = Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).exuOut.brUpdate.isMisPred,
+    commitIdxHi,
+    Mux(useLo && stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).exuOut.brUpdate.isMisPred,
+      commitIdxLo,
+      headIdx
     )
-    checkNext = checkNext && needCheckNext(idx)
-  }
+  )
 
   val commitIsHead = commitIdx===headIdx
   val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
@@ -136,10 +153,16 @@ class Brq extends XSModule {
   io.inOrderBrInfo.valid := deqValid
   io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
 
+//  XSDebug(
+//    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
+//  )
+//  XSDebug(
+//    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
+//  )
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
-  stateQueue.map(s =>{
+  stateQueue.reverse.map(s =>{
     XSDebug(false, s.isIdle, "-")
     XSDebug(false, s.isWb, "w")
     XSDebug(false, s.isCommit, "c")
@@ -246,10 +269,14 @@ class Brq extends XSModule {
   val fire = io.out.fire()
   val predRight = fire && !commitIsMisPred
   val predWrong = fire && commitIsMisPred
-  val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
-  val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
-  val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
-  val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
+  // val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
+  val isBType = commitEntry.exuOut.brUpdate.pd.isBr
+  // val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
+  val isJType = commitEntry.exuOut.brUpdate.pd.isJal
+  // val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
+  val isIType = commitEntry.exuOut.brUpdate.pd.isJalr
+  // val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
+  val isRType = commitEntry.exuOut.brUpdate.pd.isRet
   val mbpInstr = fire
   val mbpRight = predRight
   val mbpWrong = predWrong
@@ -262,7 +289,7 @@ class Brq extends XSModule {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
-  if(EnableBPU){
+  if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondMbpInstr", Perf)
     ExcitingUtils.addSource(mbpRight, "perfCntCondMbpRight", Perf)
     ExcitingUtils.addSource(mbpWrong, "perfCntCondMbpWrong", Perf)

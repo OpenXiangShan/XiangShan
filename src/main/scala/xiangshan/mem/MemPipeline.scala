@@ -10,13 +10,6 @@ import xiangshan.mem.cache._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 
-trait HasMEMConst{
-  val LoadPipelineWidth = 2
-  val StorePipelineWidth = 2
-  val StoreBufferSize = 16
-  val RefillSize = 512
-  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
-}
 
 class MemToBackendIO extends XSBundle {
   val ldin = Vec(exuParameters.LduCnt, Flipped(Decoupled(new ExuInput)))
@@ -33,10 +26,10 @@ class MemToBackendIO extends XSBundle {
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
 }
 
-class Memend(implicit val p: XSConfig) extends XSModule with HasMEMConst {
+class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
+    val dmem = new SimpleBusUC(userBits = (new DcacheUserBundle).getWidth)
   })
 
   // io <> DontCare
