@@ -4,68 +4,58 @@ import chisel3._
 import chisel3.util._
 import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
+import top.Parameters
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DP1Parameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import utils._
 
-trait HasXSParameter {
-  val XLEN = 64
-  val HasMExtension = true
-  val HasCExtension = true
-  val HasDiv = true
-  val HasIcache = true
-  val HasDcache = true
-  val EnableStoreQueue = false
-  val AddrBits = 64 // AddrBits is used in some cases
-  val VAddrBits = 39 // VAddrBits is Virtual Memory addr bits
-  val PAddrBits = 32 // PAddrBits is Phyical Memory addr bits
-  val AddrBytes = AddrBits / 8 // unused
-  val DataBits = XLEN
-  val DataBytes = DataBits / 8
-  val CacheLineSize = 512
-  val CacheLineHalfWord = CacheLineSize / 16
-  val HasFPU = true
-  val FetchWidth = 8
-  val PredictWidth = FetchWidth * 2
-  val EnableBPU = true
-  val EnableBPD = false // enable backing predictor(like Tage) in BPUStage3
-  val EnableRAS = false
-  val HistoryLength = 64
-  val ExtHistoryLength = HistoryLength * 2
-  val UBtbWays = 16
-  val BtbWays = 2
-  val BtbSize = 2048
-  // val BtbWays = 4
-  val BtbBanks = PredictWidth
-  // val BtbSets = BtbSize / BtbWays
-  val JbtacSize = 1024
-  val JbtacBanks = 8
-  val RasSize = 16
-  val IBufSize = 64
-  val DecodeWidth = 6
-  val RenameWidth = 6
-  val CommitWidth = 6
-  val BrqSize = 16
-  val IssQueSize = 8
-  val BrTagWidth = log2Up(BrqSize)
-  val NRPhyRegs = 128
-  val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val NRReadPorts = 14
-  val NRWritePorts = 8
-  val RoqSize = 128
-  val InnerRoqIdxWidth = log2Up(RoqSize)
-  val RoqIdxWidth = InnerRoqIdxWidth + 1
-  val IntDqDeqWidth = 4
-  val FpDqDeqWidth = 4
-  val LsDqDeqWidth = 4
-  val dp1Paremeters = DP1Parameters(
+case class XSCoreParameters
+(
+  XLEN: Int = 64,
+  HasMExtension: Boolean = true,
+  HasCExtension: Boolean = true,
+  HasDiv: Boolean = true,
+  HasICache: Boolean = true,
+  HasDCache: Boolean = true,
+  EnableStoreQueue: Boolean = true,
+  AddrBits: Int = 64,
+  VAddrBits: Int = 39,
+  PAddrBits: Int = 32,
+  HasFPU: Boolean = true,
+  FectchWidth: Int = 8,
+  EnableBPU: Boolean = true,
+  EnableBPD: Boolean = false,
+  EnableRAS: Boolean = false,
+  EnableLB: Boolean = false,
+  HistoryLength: Int = 64,
+  BtbSize: Int = 2048,
+  JbtacSize: Int = 1024,
+  JbtacBanks: Int = 8,
+  RasSize: Int = 16,
+  CacheLineSize: Int = 512,
+  UBtbWays: Int = 16,
+  BtbWays: Int = 2,
+  IBufSize: Int = 64,
+  DecodeWidth: Int = 6,
+  RenameWidth: Int = 6,
+  CommitWidth: Int = 6,
+  BrqSize: Int = 16,
+  IssQueSize: Int = 8,
+  NRPhyRegs: Int = 128,
+  NRReadPorts: Int = 14,
+  NRWritePorts: Int = 8,
+  RoqSize: Int = 32,
+  IntDqDeqWidth: Int = 4,
+  FpDqDeqWidth: Int = 4,
+  LsDqDeqWidth: Int = 4,
+  dp1Paremeters: DP1Parameters = DP1Parameters(
     IntDqSize = 16,
     FpDqSize = 16,
     LsDqSize = 16
-  )
-  val exuParameters = ExuParameters(
+  ),
+  exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
     AluCnt = 4,
     MulCnt = 1,
@@ -76,6 +66,64 @@ trait HasXSParameter {
     LduCnt = 0,
     StuCnt = 1
   )
+)
+
+
+trait HasXSParameter {
+
+  val core = Parameters.get.coreParameters
+  val env = Parameters.get.envParameters
+
+  val XLEN = core.XLEN
+  val HasMExtension = core.HasMExtension
+  val HasCExtension = core.HasCExtension
+  val HasDiv = core.HasDiv
+  val HasIcache = core.HasICache
+  val HasDcache = core.HasDCache
+  val EnableStoreQueue = core.EnableStoreQueue
+  val AddrBits = core.AddrBits // AddrBits is used in some cases
+  val VAddrBits = core.VAddrBits // VAddrBits is Virtual Memory addr bits
+  val PAddrBits = core.PAddrBits // PAddrBits is Phyical Memory addr bits
+  val AddrBytes = AddrBits / 8 // unused
+  val DataBits = XLEN
+  val DataBytes = DataBits / 8
+  val HasFPU = core.HasFPU
+  val FetchWidth = core.FectchWidth
+  val PredictWidth = FetchWidth * 2
+  val EnableBPU = core.EnableBPU
+  val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3
+  val EnableRAS = core.EnableRAS
+  val EnableLB = core.EnableLB
+  val HistoryLength = core.HistoryLength
+  val BtbSize = core.BtbSize
+  val BtbBanks = PredictWidth
+  val JbtacSize = core.JbtacSize
+  val JbtacBanks = core.JbtacBanks
+  val RasSize = core.RasSize
+  val IBufSize = core.IBufSize
+  val DecodeWidth = core.DecodeWidth
+  val RenameWidth = core.RenameWidth
+  val CommitWidth = core.CommitWidth
+  val BrqSize = core.BrqSize
+  val IssQueSize = core.IssQueSize
+  val BrTagWidth = log2Up(BrqSize)
+  val NRPhyRegs = core.NRPhyRegs
+  val PhyRegIdxWidth = log2Up(NRPhyRegs)
+  val NRReadPorts = core.NRReadPorts
+  val NRWritePorts = core.NRWritePorts
+  val RoqSize = core.RoqSize
+  val InnerRoqIdxWidth = log2Up(RoqSize)
+  val RoqIdxWidth = InnerRoqIdxWidth + 1
+  val IntDqDeqWidth = core.IntDqDeqWidth
+  val FpDqDeqWidth = core.FpDqDeqWidth
+  val LsDqDeqWidth = core.LsDqDeqWidth
+  val dp1Paremeters = core.dp1Paremeters
+  val exuParameters = core.exuParameters
+  val CacheLineSize = core.CacheLineSize
+  val CacheLineHalfWord = CacheLineSize / 16
+  val ExtHistoryLength = HistoryLength * 2
+  val UBtbWays = core.UBtbWays
+  val BtbWays = core.BtbWays
 }
 
 trait HasXSLog { this: Module =>
@@ -99,10 +147,10 @@ trait NeedImpl { this: Module =>
 abstract class XSBundle extends Bundle
   with HasXSParameter
 
-case class XSConfig
+case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = true
+  EnableDebug: Boolean = false
 )
 
 object AddressSpace extends HasXSParameter {
@@ -121,7 +169,7 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class XSCore(implicit p: XSConfig) extends XSModule {
+class XSCore extends XSModule {
   val io = IO(new Bundle {
     val imem = new SimpleBusC
     val dmem = new SimpleBusC

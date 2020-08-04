@@ -9,6 +9,7 @@ import device._
 class SimMMIO extends Module {
   val io = IO(new Bundle {
     val rw = Flipped(new SimpleBusUC)
+    val uart = new UARTIO
   })
 
   val devAddrSpace = List(
@@ -32,4 +33,5 @@ class SimMMIO extends Module {
   flash.io.in <> xbar.io.out(3).toAXI4Lite()
   sd.io.in <> xbar.io.out(4).toAXI4Lite()
   vga.io.vga := DontCare
+  io.uart <> uart.io.extra.get
 }

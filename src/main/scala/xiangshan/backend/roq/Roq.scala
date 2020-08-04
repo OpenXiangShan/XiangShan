@@ -8,7 +8,7 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 // A "just-enough" Roq
-class Roq(implicit val p: XSConfig) extends XSModule {
+class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
@@ -268,9 +268,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
   val instrCnt = RegInit(0.U(64.W))
   instrCnt := instrCnt + retireCounter
-  val hitTrap = trapVec.reduce(_||_)
-  val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-  val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
   val difftestIntrNO = WireInit(0.U(XLEN.W))
   ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
@@ -278,7 +275,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
   val retirePCFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.pc, microOp(firstValidCommit).cf.pc)
   val retireInstFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.instr, microOp(firstValidCommit).cf.instr)
-  if(!p.FPGAPlatform){
+  if(!env.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
     BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
@@ -290,26 +287,15 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
 
-    class Monitor extends BlackBox {
-      val io = IO(new Bundle {
-        val clk = Input(Clock())
-        val reset = Input(Reset())
-        val isNoopTrap = Input(Bool())
-        val trapCode = Input(UInt(32.W))
-        val trapPC = Input(UInt(64.W))
-        val cycleCnt = Input(UInt(64.W))
-        val instrCnt = Input(UInt(64.W))
-      })
-    }
+    val hitTrap = trapVec.reduce(_||_)
+    val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+    val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
-    val debugMonitor =  Module(new Monitor)
-    debugMonitor.io.clk := this.clock
-    debugMonitor.io.reset := this.reset
-    debugMonitor.io.isNoopTrap := hitTrap
-    debugMonitor.io.trapCode := trapCode
-    debugMonitor.io.trapPC := trapPC
-    debugMonitor.io.cycleCnt := GTimer()
-    debugMonitor.io.instrCnt := instrCnt
+    ExcitingUtils.addSource(hitTrap, "trapValid")
+    ExcitingUtils.addSource(trapCode, "trapCode")
+    ExcitingUtils.addSource(trapPC, "trapPC")
+    ExcitingUtils.addSource(GTimer(), "trapCycleCnt")
+    ExcitingUtils.addSource(instrCnt, "trapInstrCnt")
 
     if(EnableBPU){
       BoringUtils.addSource(hitTrap, "XSTRAP")
