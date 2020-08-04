@@ -150,8 +150,8 @@ class DtlbToLsuIO extends TlbBundle {
 }
 
 class TlbPtwIO extends TlbBundle {
-  val req = DecoupledIO(new PTWReq)
-  val resp = Flipped(DecoupledIO(new PTWResp))
+  val req = DecoupledIO(new PtwReq)
+  val resp = Flipped(DecoupledIO(new PtwResp))
 }
 
 class TlbIssQueIO extends TlbBundle{
@@ -159,7 +159,7 @@ class TlbIssQueIO extends TlbBundle{
   val missCanIss = Output(Bool())
 }
 
-class SfenceBundle extends TlbBundle{
+class SfenceBundle extends TlbBundle{ // TODO: turn to IO, now rare BUnd
   val rs1 = Bool()
   val rs2 = Bool()
   val addr = UInt(VAddrBits.W)
@@ -254,12 +254,12 @@ class DTLB extends TlbModule {
   }
 
   // ptw
-  val state_rdy :: state_wait :: Nil = Enum(2)
-  val state = RegInit(state_rdy)
+  val state_idle :: state_wait :: Nil = Enum(2)
+  val state = RegInit(state_idle)
 
   val vpnPtw = RegEnable(io.ptw.req.bits.vpn, io.ptw.req.fire())
   switch (state) {
-    is (state_rdy) {
+    is (state_idle) {
       for(i <- TLBWidth-1 to 0 by -1) {
         when (!hit(i) && io.ptw.req.fire()) {
           state := state_wait
@@ -273,7 +273,7 @@ class DTLB extends TlbModule {
     is (state_wait) {
       io.ptw.resp.ready := true.B
       when (io.ptw.resp.fire()) {
-        state := state_rdy
+        state := state_idle
       }
     }
   }

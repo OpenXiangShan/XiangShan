@@ -18,6 +18,10 @@ trait HasMEMConst{
   val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
   val TLBWidth = LoadPipelineWidth + StorePipelineWidth
   val TLBEntrySize = 32
+  val L2TLBEntrySize = 256 // or 512
+  val PTWL1EntrySize = 16
+  val PTWL2EntrySize = 256
+  val PTWL3EntrySize = 1024
 }
 
 class MemToBackendIO extends XSBundle {
