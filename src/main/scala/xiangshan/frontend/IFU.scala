@@ -71,6 +71,8 @@ class IFU extends XSModule with HasIFUConst
   val if2_histPtr = RegEnable(ptr, if1_fire)
   if2_ready := if2_fire || !if2_valid || if2_flush
   when (if2_flush) { if2_valid := if1_fire }
+  .elsewhen (if1_fire) { if2_valid := if1_valid }
+  .elsewhen (if2_fire) { if2_valid := false.B }
 
   when (RegNext(reset.asBool) && !reset.asBool) {
     if1_npc := resetVector.U(VAddrBits.W)
@@ -101,6 +103,8 @@ class IFU extends XSModule with HasIFUConst
   val if3_histPtr = RegEnable(if2_histPtr, if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
   when (if3_flush) { if3_valid := false.B }
+  .elsewhen (if2_fire) { if3_valid := if2_valid }
+  .elsewhen (if3_fire) { if3_valid := false.B }
 
   val if3_bp = bpu.io.out(1).bits
   val prev_half_valid = RegInit(false.B)
@@ -180,7 +184,8 @@ class IFU extends XSModule with HasIFUConst
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
     when (!if4_bp.saveHalfRVI) {
       if4_redirect := true.B
-      if1_npc := if4_bp.target
+      // if1_npc := if4_bp.target
+      if1_npc := Mux(if4_bp.taken, if4_bp.target, snpc(if4_pc))
 
       shiftPtr := true.B
       newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
