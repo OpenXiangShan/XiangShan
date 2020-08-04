@@ -460,38 +460,34 @@ class Lsroq(implicit val p: XSConfig) extends XSModule with HasMEMConst {
 
       // when l/s writeback to roq together, check if rollback is needed
       // currently we just rollback (TODO)
-      when(io.storeIn(i).valid){
-        (0 until LoadPipelineWidth).map(j => {
-          when(
-            io.loadIn(j).valid &&
-            io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.loadIn(j).bits.paddr(PAddrBits-1, 3) &&
-            (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
-            // TODO: older than
-            ){
-              rollback(i).valid := true.B
-              rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
-              rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
-              XSDebug("need rollback pc %x roqidx %d\n", io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx)
-          }
-        })
-      }
-  
-      // check if rollback is needed for load in l4
-      when(io.storeIn(i).valid){
-        (0 until LoadPipelineWidth).map(j => {
-          when(
-            io.forward(j).valid && // L4 valid
-            io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.forward(j).paddr(PAddrBits-1, 3) &&
-            (io.storeIn(i).bits.mask & io.forward(j).mask).orR
-            // TODO: older than
+      (0 until LoadPipelineWidth).map(j => {
+        when(
+          io.loadIn(j).valid &&
+          io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.loadIn(j).bits.paddr(PAddrBits-1, 3) &&
+          (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
+          // TODO: older than
           ){
-            XSDebug("need rollback pc %x roqidx %d\n", io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx)
             rollback(i).valid := true.B
             rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
             rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
-          }
-        })
-      }
+            XSDebug("need rollback pc %x roqidx %d\n", io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx)
+        }
+      })
+  
+      // check if rollback is needed for load in l4
+      (0 until LoadPipelineWidth).map(j => {
+        when(
+          io.forward(j).valid && // L4 valid
+          io.storeIn(i).bits.paddr(PAddrBits-1, 3) === io.forward(j).paddr(PAddrBits-1, 3) &&
+          (io.storeIn(i).bits.mask & io.forward(j).mask).orR
+          // TODO: older than
+        ){
+          XSDebug("need rollback pc %x roqidx %d\n", io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx)
+          rollback(i).valid := true.B
+          rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+          rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
+        }
+      })
     }
   })
 

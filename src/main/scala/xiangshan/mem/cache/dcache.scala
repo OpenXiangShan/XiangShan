@@ -113,7 +113,7 @@ class Dcache extends XSModule {
 
   ldUser.uop := ldReq.bits.user.uop
   ldUser.mmio := ldReq.bits.user.mmio
-  ldUser.mask := DontCare
+  ldUser.mask := ldReq.bits.user.mask
   ldUser.id := 0.U
   ldUser.paddr := ldReq.bits.paddr
   stUser.uop := stReq.bits.user.uop
