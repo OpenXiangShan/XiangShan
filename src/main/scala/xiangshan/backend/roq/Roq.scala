@@ -196,7 +196,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     (0 until CommitWidth).map(
       i => state === s_idle &&
         io.commits(i).valid &&
-        microOp(ringBufferTail+i.U).cf.brUpdate.isBr
+        !microOp(ringBufferTail+i.U).cf.brUpdate.pd.notCFI
     )
   ))
   io.bcommit := PopCount(validBcommit)

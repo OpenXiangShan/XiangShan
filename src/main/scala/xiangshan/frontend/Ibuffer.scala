@@ -34,7 +34,7 @@ class Ibuffer extends XSModule {
   val head_ptr = RegInit(0.U(log2Up(IBufSize).W))
   val tail_ptr = RegInit(0.U(log2Up(IBufSize).W))
 
-  val enqValid = !io.flush && !ibuf_valid(tail_ptr + FetchWidth.U - 1.U)
+  val enqValid = !io.flush && !ibuf_valid(tail_ptr + PredictWidth.U - 1.U)
   val deqValid = !io.flush && ibuf_valid(head_ptr)
 
   io.in.ready := enqValid
@@ -62,19 +62,24 @@ class Ibuffer extends XSModule {
     var deq_idx = head_ptr
     for(i <- 0 until DecodeWidth) {
       io.out(i).valid := ibuf_valid(deq_idx)
-      lbuf_valid(deq_idx) := !io.out(i).fire
-
+      // Only when the entry is valid can it be set invalid
+      when (ibuf_valid(deq_idx)) { ibuf_valid(deq_idx) := !io.out(i).fire }
+      
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
       // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
       io.out(i).bits.brUpdate := DontCare
-      io.out(i).bits.brUpdate.pc := io.out(i).bits.pc
+      io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc
+      io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
       io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
       io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
 
       deq_idx = deq_idx + io.out(i).fire
     }
     head_ptr := deq_idx
+  }.otherwise {
+    io.out.foreach(_.valid := false.B)
+    io.out.foreach(_.bits <> DontCare)
   }
 
   // Flush
@@ -90,9 +95,9 @@ class Ibuffer extends XSModule {
 
   when(io.in.fire) {
     XSDebug("Enque:\n")
-    XSDebug(p"PC=${Hexadecimal(io.in.bits.pc)} MASK=${Binary(io.in.bits.mask)}\n")
+    XSDebug(p"MASK=${Binary(io.in.bits.mask)}\n")
     for(i <- 0 until PredictWidth){
-        XSDebug(p"${Hexadecimal(io.in.bits.instrs(i))}\n")
+        XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
     }
   }
 

@@ -237,10 +237,14 @@ class Brq extends XSModule {
   val fire = io.out.fire()
   val predRight = fire && !commitIsMisPred
   val predWrong = fire && commitIsMisPred
-  val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
-  val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
-  val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
-  val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
+  // val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
+  val isBType = commitEntry.exuOut.brUpdate.pd.isBr
+  // val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
+  val isJType = commitEntry.exuOut.brUpdate.pd.isJal
+  // val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
+  val isIType = commitEntry.exuOut.brUpdate.pd.isJalr
+  // val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
+  val isRType = commitEntry.exuOut.brUpdate.pd.isRet
   val mbpInstr = fire
   val mbpRight = predRight
   val mbpWrong = predWrong

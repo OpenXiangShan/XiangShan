@@ -20,7 +20,7 @@ class FetchPacket extends XSBundle {
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
-  val bits = gen.asInstanceOf[T]
+  val bits = gen.cloneType.asInstanceOf[T]
   override def cloneType = new ValidUndirectioned(gen).asInstanceOf[this.type]
 }
 
@@ -77,6 +77,7 @@ class Predecode extends XSBundle {
 class BranchUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
+  val pnpc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
   val taken = Bool()

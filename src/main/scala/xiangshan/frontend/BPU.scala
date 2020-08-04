@@ -24,23 +24,26 @@ class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
 class PredictorResponse extends XSBundle {
   class UbtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
+    val targets = Vec(PredictWidth, UInt(VAddrBits.W))
+    val hits = Vec(PredictWidth, Bool())
     val takens = Vec(PredictWidth, Bool())
     val notTakens = Vec(PredictWidth, Bool())
-    val isRVC = Vec(PredictWidth, Bool())
+    val is_RVC = Vec(PredictWidth, Bool())
   }
   class BtbResp extends XSBundle {
   // the valid bits indicates whether a target is hit
-    val targets = Vec(PredictWidth, ValidUndirectioned(UInt(VaddrBits.W)))
+    val targets = Vec(PredictWidth, UInt(VAddrBits.W))
+    val hits = Vec(PredictWidth, Bool())
     val types = Vec(PredictWidth, UInt(2.W))
     val isRVC = Vec(PredictWidth, Bool())
   }
   class BimResp extends XSBundle {
-    val ctrs = Vec(PredictWidth, ValidUndirectioned(UInt(2.W)))
+    val ctrs = Vec(PredictWidth, UInt(2.W))
   }
   class TageResp extends XSBundle {
   // the valid bits indicates whether a prediction is hit
-    val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
+    val takens = Vec(PredictWidth, Bool())
+    val hits = Vec(PredictWidth, Bool())
   }
 
   val ubtb = new UbtbResp
@@ -55,7 +58,7 @@ abstract class BasePredictor extends XSModule {
   // An implementation MUST extend the IO bundle with a response
   // and the special input from other predictors, as well as
   // the metas to store in BRQ
-  abstract class Resp extends PredictorResponse {}
+  abstract class Resp extends XSBundle {}
   abstract class FromOthers extends XSBundle {}
   abstract class Meta extends XSBundle {}
 
@@ -67,11 +70,21 @@ abstract class BasePredictor extends XSModule {
     val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
   }
 
+  val io = new DefaultBasePredictorIO
+
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
     val res = Wire(UInt(len.W))
     val higher = source << shamt
     val lower = source >> (len.U - shamt)
+    res := higher | lower
+    res
+  }
+
+  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << (len.U - shamt)
+    val lower = source >> shamt
     res := higher | lower
     res
   }
@@ -81,38 +94,48 @@ class BPUStageIO extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val mask = UInt(PredictWidth.W)
   val resp = new PredictorResponse
-  val target = UInt(VaddrBits.W)
+  val target = UInt(VAddrBits.W)
   val brInfo = Vec(PredictWidth, new BranchInfo)
 }
 
 
-abstract class BPUStage extends XSModule {
+class BPUStage extends XSModule {
   class DefaultIO extends XSBundle {
     val flush = Input(Bool())
     val in = Flipped(Decoupled(new BPUStageIO))
     val pred = Decoupled(new BranchPrediction)
     val out = Decoupled(new BPUStageIO)
+    val predecode = Flipped(ValidIO(new Predecode))
   }
+  val io = IO(new DefaultIO)
+
+  val predValid = RegInit(false.B)
+
+  io.in.ready := !predValid || io.out.fire() && io.pred.fire()
+
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
-  io.in.ready = !outValid || io.out.fire() && io.pred.fire()
   val inFire = io.in.fire()
   val inLatch = RegEnable(io.in.bits, inFire)
 
-  val predValid = RegInit(false.B)
   val outFire = io.out.fire()
 
   // Each stage has its own logic to decide
   // takens, notTakens and target
 
-  val takens = Vec(PredictWidth, Bool())
-  val notTakens = Vec(PredictWidth, Bool())
+  val takens = VecInit((0 until PredictWidth).map(_ => false.B))
+  val notTakens = VecInit((0 until PredictWidth).map(_ => false.B))
+  val jmpIdx = PriorityEncoder(takens)
   val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
-  val jmpIdx = PriorityEncoder(takens)
   // get the last valid inst
-  val lastValidPos = PriorityMux((PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
-  val target = UInt(VaddrBits.W)
+  // val lastValidPos = MuxCase(0.U, (PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
+  val lastValidPos = PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U))
+  // val lastValidPos = WireInit(0.U(log2Up(PredictWidth).W))
+  // for (i <- 0 until PredictWidth) {
+  //   when (inLatch.mask(i)) { lastValidPos := i.U }
+  // }
+  val target = WireInit(0.U(VAddrBits.W))
 
   io.pred.bits <> DontCare
   io.pred.bits.taken := taken
@@ -121,8 +144,8 @@ abstract class BPUStage extends XSModule {
   io.pred.bits.target := target
 
   io.out.bits <> DontCare
-  io.out.bits.pc := inLatch.pc.bits
-  io.out.bits.mask := inLatch.inMask
+  io.out.bits.pc := inLatch.pc
+  io.out.bits.mask := inLatch.mask
   io.out.bits.target := target
   io.out.bits.resp <> inLatch.resp
   io.out.bits.brInfo := inLatch.brInfo
@@ -130,39 +153,46 @@ abstract class BPUStage extends XSModule {
   // Default logic
   //  pred.ready not taken into consideration
   //  could be broken
-  when (io.flush) {
-    predValid := false.B
-  }.elsewhen (inFire) {
-    predValid := true.B
-  }.elsewhen (outFire) {
-    predValid := false.B
-  }.otherwise {
-    predValid := outValid
-  }
+  when (io.flush)     { predValid := false.B }
+  .elsewhen (inFire)  { predValid := true.B }
+  .elsewhen (outFire) { predValid := false.B }
+  .otherwise          { predValid := predValid }
 
-  io.out.valid := predValid && !io.flush
+  io.out.valid  := predValid && !io.flush
   io.pred.valid := predValid && !io.flush
+
+  XSDebug(io.in.fire(), "in:(%d %d) pc=%x, mask=%b, target=%x\n",
+    io.in.valid, io.in.ready, io.in.bits.pc, io.in.bits.mask, io.in.bits.target)
+  XSDebug(io.out.fire(), "out:(%d %d) pc=%x, mask=%b, target=%x\n",
+    io.out.valid, io.out.ready, io.out.bits.pc, io.out.bits.mask, io.out.bits.target)
+  XSDebug("flush=%d\n", io.flush)
+  XSDebug("taken=%d, takens=%b, notTakens=%b, jmpIdx=%d, hasNTBr=%d, lastValidPos=%d, target=%x\n",
+    taken, takens.asUInt, notTakens.asUInt, jmpIdx, hasNTBr, lastValidPos, target)
+  val p = io.pred.bits
+  XSDebug(io.pred.fire(), "outPred: redirect=%d, taken=%d, jmpIdx=%d, hasNTBrs=%d, target=%x, saveHalfRVI=%d\n",
+    p.redirect, p.taken, p.jmpIdx, p.hasNotTakenBrs, p.target, p.saveHalfRVI)
 }
 
 class BPUStage1 extends BPUStage {
 
-  val io = new DefaultIO
-
   // 'overrides' default logic
   // when flush, the prediction should also starts
-  override val predValid = BoolStopWatch(io.flush || inFire, outFire, true)
+  when (io.flush || inFire) { predValid := true.B }
+  .elsewhen(outFire)        { predValid := false.B }
+  .otherwise                { predValid := predValid }
+  io.in.ready := !predValid || io.out.fire() && io.pred.fire() || io.flush
   io.out.valid := predValid
 
   // ubtb is accessed with inLatch pc in s1, 
   // so we use io.in instead of inLatch
-  val ubtbResp = io.in.bits.ubtb
+  val ubtbResp = io.in.bits.resp.ubtb
   // the read operation is already masked, so we do not need to mask here
-  takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.targets(i).valid && ubtbResp.takens(i)))
-  notTakens := VecInit((0 until PredictWidth).map(i => ubtbResp.targets(i).valid && ubtbResp.notTakens(i)))
+  takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.takens(i)))
+  notTakens := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.notTakens(i)))
   target    := Mux(taken, ubtbResp.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
   io.pred.bits.redirect := taken
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !ubtbResp.isRVC(lastValidPos)
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !ubtbResp.is_RVC(lastValidPos) && ubtbResp.hits(lastValidPos)
 
   // resp and brInfo are from the components,
   // so it does not need to be latched
@@ -170,38 +200,34 @@ class BPUStage1 extends BPUStage {
   io.out.bits.brInfo := io.in.bits.brInfo
 }
 
-class BPUStage2 extends XSModule {
-  val io = new DefaultIO
+class BPUStage2 extends BPUStage {
 
   // Use latched response from s1
-  val btbResp = inLatch.btb
-  val bimResp = inLatch.bim
-  takens := VecInit((0 until PredictWidth).map(i => btbResp.targets(i).valid && bimResp.ctrs(i)(1)))
-  notTakens := VecInit((0 until PredictWidth).map(i => btbResp.targets(i).valid && btbResp.types(i) === BrType.branch && !bimResp.ctrs(i)(1)))
-  target := Mux(taken, btbResp.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
+  val btbResp = inLatch.resp.btb
+  val bimResp = inLatch.resp.bim
+  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BrType.branch && bimResp.ctrs(i)(1) || btbResp.types(i) === BrType.jal)))
+  notTakens := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && btbResp.types(i) === BrType.branch && !bimResp.ctrs(i)(1)))
+  target    := Mux(taken, btbResp.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
   io.pred.bits.redirect := target =/= inLatch.target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !btbResp.isRVC(lastValidPos)
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !btbResp.isRVC(lastValidPos) && btbResp.hits(lastValidPos)
 }
 
-class BPUStage3 extends XSModule {
-  class S3IO extends DefaultIO {
-    val predecode = Flipped(ValidIO(new Predecode))
-  }
-  val io = new S3IO
-  io.out.valid := outValid && io.predecode.valid && !io.flush
+class BPUStage3 extends BPUStage {
+
+  io.out.valid := predValid && io.predecode.valid && !io.flush
 
   // TAGE has its own pipelines and the
   // response comes directly from s3,
   // so we do not use those from inLatch
-  val tageResp = io.in.bits.tage
-  val tageValidTakens = VecInit(tageResp.takens.map(t => t.valid && t.bits))
+  val tageResp = io.in.bits.resp.tage
+  val tageValidTakens = VecInit((0 until PredictWidth).map( i => tageResp.takens(i) && tageResp.hits(i)))
 
   val pdMask = io.predecode.bits.mask
   val pds    = io.predecode.bits.pd
 
-  val btbHits   = VecInit(inLatch.btb.targets.map(_.valid)).asUInt
-  val bimTakens = VecInit(inLatch.bim.ctrs.map(_.bits(1)))
+  val btbHits   = inLatch.resp.btb.hits.asUInt
+  val bimTakens = VecInit(inLatch.resp.bim.ctrs.map(_(1)))
 
   val brs   = pdMask & Reverse(Cat(pds.map(_.isBr)))
   val jals  = pdMask & Reverse(Cat(pds.map(_.isJal)))
@@ -214,34 +240,42 @@ class BPUStage3 extends XSModule {
   
   val brTakens = 
     if (EnableBPD) {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => btbHits(i) && tageValidTakens(i))))
+      brs & Reverse(Cat((0 until PredictWidth).map(i => tageValidTakens(i))))
     } else {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => btbHits(i) && bimTakens(i))))
+      brs & Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))
     }
 
-  takens := VecInit((0 until PredictWidth).map(i => brTakens(i) || jals(i) || jalrs(i)))
+  // predict taken only if btb has a target
+  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jals(i) || jalrs(i)) && btbHits(i)))
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
   notTakens := VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))
-  target := Mux(taken, inLatch.btb.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
-  
+  target := Mux(taken, inLatch.resp.btb.targets(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
+
   io.pred.bits.redirect := target =/= inLatch.target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !pds(lastValidPos).isRVC
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !pds(lastValidPos).isRVC && pdMask(lastValidPos)
 
   // Wrap tage resp and tage meta in
   // This is ugly
-  io.out.bits.resp.tage <> io.in.bits.tage
+  io.out.bits.resp.tage <> io.in.bits.resp.tage
   for (i <- 0 until PredictWidth) {
     io.out.bits.brInfo(i).tageMeta := io.in.bits.brInfo(i).tageMeta
+  }
+
+  XSDebug(io.predecode.valid, "predecode: mask:%b\n", io.predecode.bits.mask)
+  for (i <- 0 until PredictWidth) {
+    val p = io.predecode.bits.pd(i)
+      XSDebug(io.predecode.valid, "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
+        i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
   }
 }
 
 trait BranchPredictorComponents extends HasXSParameter {
-  val ubtb = new Module(MicroBTB)
-  val btb = new Module(BTB)
-  val bim = new Module(BIM)
-  val tage = new Module(Tage)
+  val ubtb = Module(new MicroBTB)
+  val btb = Module(new BTB)
+  val bim = Module(new BIM)
+  val tage = Module(new Tage)
   val preds = Seq(ubtb, btb, bim, tage)
   preds.map(_.io := DontCare)
 }
@@ -252,8 +286,18 @@ class BPUReq extends XSBundle {
   val inMask = UInt(PredictWidth.W)
 }
 
-class BranchUpdateInfoWithHist extends BranchUpdateInfo {
+class BranchUpdateInfoWithHist extends XSBundle {
+  val ui = new BranchUpdateInfo
   val hist = UInt(HistoryLength.W)
+}
+
+object BranchUpdateInfoWithHist {
+  def apply (brInfo: BranchUpdateInfo, hist: UInt) = {
+    val b = Wire(new BranchUpdateInfoWithHist)
+    b.ui <> brInfo
+    b.hist := hist
+    b
+  }
 }
 
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
@@ -261,7 +305,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     // from backend
     val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
-    val flush = Input(UInt(3.W))
+    val flush = Input(Vec(3, Bool()))
     // from if1
     val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
@@ -272,13 +316,11 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     val branchInfo = Decoupled(Vec(PredictWidth, new BranchInfo))
   })
 
+  preds.map(_.io.update <> io.inOrderBrInfo)
+
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
   val s3 = Module(new BPUStage3)
-
-  // TODO: whether to update ubtb when btb successfully 
-  // corrects the wrong prediction from ubtb
-  preds.map(_.io.update <> io.inOrderBrInfo)
 
   s1.io.flush := io.flush(0)
   s2.io.flush := io.flush(1)
@@ -291,31 +333,43 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   io.out(0) <> s1.io.pred
   io.out(1) <> s2.io.pred
   io.out(2) <> s3.io.pred
-  
+
+  s1.io.predecode <> DontCare
+  s2.io.predecode <> DontCare
   s3.io.predecode <> io.predecode
 
   io.branchInfo.valid := s3.io.out.valid
-  io.branchInfo.bits := s3.io.out.bits.branchInfo.metas
+  io.branchInfo.bits := s3.io.out.bits.brInfo
   s3.io.out.ready := io.branchInfo.ready
-  
+
+  XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
+  for (i <- 0 until PredictWidth) {
+    val b = io.branchInfo.bits(i)
+    XSDebug(io.branchInfo.fire(), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, bimCtr:%d\n",
+      i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.bimCtr)
+    val t = b.tageMeta
+    XSDebug(io.branchInfo.fire(), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
+      t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
+  }
 }
 
 
 class FakeBPU extends BaseBPU {
   io.out.foreach(i => {
-    i <> DontCare
-    i.redirect := false.B
+    // Provide not takens
+    i.valid := true.B
+    i.bits <> DontCare
+    i.bits.redirect := false.B
   })
   io.branchInfo <> DontCare
 }
 
 class BPU extends BaseBPU {
 
-
   //**********************Stage 1****************************//
   val s1_fire = s1.io.in.fire()
-  val s1_resp_in = new PredictorResponse
-  val s1_brInfo_in = VecInit(0.U.asTypeOf(Vec(PredictWidth, new BranchInfo)))
+  val s1_resp_in = Wire(new PredictorResponse)
+  val s1_brInfo_in = Wire(Vec(PredictWidth, new BranchInfo))
 
   s1_resp_in := DontCare
   s1_brInfo_in := DontCare
@@ -329,8 +383,8 @@ class BPU extends BaseBPU {
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
   for (i <- 0 until PredictWidth) {
-    s1_brInfo_in(i).ubtbWriteWay := ubtb.io.meta.writeWay(i)
-    s1_brInfo_in(i).ubtbHits := ubtb.io.out.targets(i).valid
+    s1_brInfo_in(i).ubtbWriteWay := ubtb.io.uBTBBranchInfo.writeWay(i)
+    s1_brInfo_in(i).ubtbHits := ubtb.io.uBTBBranchInfo.hits(i)
   }
 
   btb.io.flush := io.flush(0) // TODO: fix this
@@ -339,7 +393,7 @@ class BPU extends BaseBPU {
   btb.io.inMask := io.in.bits.inMask
 
   // Wrap btb response into resp_in and brInfo_in
-  s1_resp_in.btb <> btb.io.out
+  s1_resp_in.btb <> btb.io.resp
   for (i <- 0 until PredictWidth) {
     s1_brInfo_in(i).btbWriteWay := btb.io.meta.writeWay(i)
   }
@@ -352,29 +406,30 @@ class BPU extends BaseBPU {
   // Wrap bim response into resp_in and brInfo_in
   s1_resp_in.bim <> bim.io.resp
   for (i <- 0 until PredictWidth) {
-    s1_brInfo_in(i).bimCtr := bim.io.meta(i)
+    s1_brInfo_in(i).bimCtr := bim.io.meta.ctrs(i)
   }
 
 
   s1.io.in.valid := io.in.valid
-  s1.io.in.bits.pc := io.in.pc.bits
-  s1.io.in.bits.mask := io.in.mask
+  s1.io.in.bits.pc := io.in.bits.pc
+  s1.io.in.bits.mask := io.in.bits.inMask
   s1.io.in.bits.target := DontCare
   s1.io.in.bits.resp := s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
-
+  //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
   tage.io.pc.valid := s1.io.out.fire()
   tage.io.pc.bits := s1.io.out.bits.pc // PC from s1
-  tage.io.hist := io.in.hist // The inst is from s1
+  tage.io.hist := io.in.bits.hist // The inst is from s1
   tage.io.inMask := s1.io.out.bits.mask
   tage.io.s3Fire := s3.io.in.fire() // Tell tage to march 1 stage
-  tage.io.bim <> s1.io.out.resp.bim // Use bim results from s1
+  tage.io.bim <> s1.io.out.bits.resp.bim // Use bim results from s1
 
-
+  //**********************Stage 3****************************//
   // Wrap tage response and meta into s3.io.in.bits
   // This is ugly
+  
   s3.io.in.bits.resp.tage <> tage.io.resp
   for (i <- 0 until PredictWidth) {
     s3.io.in.bits.brInfo(i).tageMeta := tage.io.meta(i)

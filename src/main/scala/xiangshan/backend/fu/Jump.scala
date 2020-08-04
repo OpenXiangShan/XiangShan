@@ -16,7 +16,7 @@ class Jump extends FunctionUnit(jmpCfg){
   val redirectHit = uop.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
-  val isRVC = uop.cf.brUpdate.isRVC
+  val isRVC = uop.cf.brUpdate.pd.isRVC
   val pcDelaySlot = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
@@ -30,10 +30,12 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.roqIdx := uop.roqIdx
 
   io.out.bits.brUpdate := uop.cf.brUpdate
+  io.out.bits.brUpdate.pc := uop.cf.pc
+  io.out.bits.brUpdate.target := target
   io.out.bits.brUpdate.brTarget := target // DontCare
-  io.out.bits.brUpdate.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
+  // io.out.bits.brUpdate.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   io.out.bits.brUpdate.taken := true.B
-  io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
+  // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
 
   // Output
   val res = pcDelaySlot
