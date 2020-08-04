@@ -11,7 +11,7 @@ class BusyTable extends XSModule {
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // set preg state to ready (write back regfile + roq walk)
-    val wbPregs = Vec(NRWritePorts + CommitWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    val wbPregs = Vec(NRWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
     val rfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val pregRdy = Vec(NRReadPorts, Output(Bool()))
@@ -22,13 +22,14 @@ class BusyTable extends XSModule {
   val wbMask = ParallelOR(io.wbPregs.take(NRWritePorts).map(w => Mux(w.valid, UIntToOH(w.bits), 0.U)))
   val allocMask = ParallelOR(io.allocPregs.map(a => Mux(a.valid, UIntToOH(a.bits), 0.U)))
 
-  val tableNext = table & (~wbMask).asUInt() | allocMask
+  val tableAfterWb = table & (~wbMask).asUInt
+  val tableAfterAlloc = tableAfterWb | allocMask
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
-    rdy := !tableNext(raddr)
+    rdy := !tableAfterWb(raddr)
   }
 
-  table := tableNext
+  table := tableAfterAlloc
 
 //  for((alloc, i) <- io.allocPregs.zipWithIndex){
 //    when(alloc.valid){
@@ -50,7 +51,7 @@ class BusyTable extends XSModule {
   }
 
   XSDebug(p"table    : ${Binary(table)}\n")
-  XSDebug(p"tableNext: ${Binary(tableNext)}\n")
+  XSDebug(p"tableNext: ${Binary(tableAfterAlloc)}\n")
   XSDebug(p"allocMask: ${Binary(allocMask)}\n")
   XSDebug(p"wbMask : ${Binary(wbMask)}\n")
   for (i <- 0 until NRPhyRegs) {
