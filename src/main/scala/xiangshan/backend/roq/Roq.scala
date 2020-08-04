@@ -1,5 +1,6 @@
 package xiangshan.backend.roq
 
+import chisel3.ExcitingUtils.ConnectionType
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -291,14 +292,14 @@ class Roq extends XSModule {
     val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
     val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
-    ExcitingUtils.addSource(hitTrap, "trapValid")
-    ExcitingUtils.addSource(trapCode, "trapCode")
-    ExcitingUtils.addSource(trapPC, "trapPC")
-    ExcitingUtils.addSource(GTimer(), "trapCycleCnt")
-    ExcitingUtils.addSource(instrCnt, "trapInstrCnt")
+    ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
+    ExcitingUtils.addSource(RegNext(trapCode), "trapCode")
+    ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
+    ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
+    ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
 
     if(EnableBPU){
-      BoringUtils.addSource(hitTrap, "XSTRAP")
+      ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
     }
   }
 }
