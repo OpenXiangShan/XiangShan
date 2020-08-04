@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 object ParallelOperation {
-  def apply(xs: Seq[UInt], func: (UInt, UInt) => UInt): UInt = {
+  def apply[T <: Data](xs: Seq[T], func: (T, T) => T): T = {
     xs match {
       case Seq(a) => a
       case Seq(a, b) => func(a, b)
@@ -15,21 +15,21 @@ object ParallelOperation {
 }
 
 object ParallelOR {
-  def apply(xs: Seq[UInt]): UInt = {
-    ParallelOperation(xs, (a, b) => a | b)
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b: T) => (a.asUInt() | b.asUInt()).asTypeOf(xs.head))
   }
 }
 
 object ParallelAND {
-  def apply(xs: Seq[UInt]): UInt = {
-    ParallelOperation(xs, (a, b) => a & b)
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b:T) => (a.asUInt() & b.asUInt()).asTypeOf(xs.head))
   }
 }
 
 object ParallelMux {
   def apply[T<:Data](in: Seq[(Bool, T)]): T = {
-    val xs = in map { case (cond, x) => Fill(x.getWidth, cond) & x.asUInt() }
-    ParallelOR(xs).asInstanceOf[T]
+    val xs = in map { case (cond, x) => (Fill(x.getWidth, cond) & x.asUInt()).asTypeOf(in.head._2) }
+    ParallelOR(xs)
   }
 }
 

@@ -42,6 +42,7 @@ class Ibuffer extends XSModule {
   // Enque
   when(io.in.fire) {
     var enq_idx = tail_ptr
+
     for(i <- 0 until PredictWidth) {
       ibuf_valid(enq_idx) := io.in.bits.mask(i)
 

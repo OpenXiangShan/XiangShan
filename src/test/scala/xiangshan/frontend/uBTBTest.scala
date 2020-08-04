@@ -1,17 +1,9 @@
 package xiangshan.frontend
 
-import org.scalatest._
-import chiseltest._
 import chisel3._
-import chisel3.experimental.BundleLiterals._
-import chisel3.util.experimental.BoringUtils
-import chisel3.util._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
-import utils.XSLog
-import xiangshan._
+import chiseltest._
+import org.scalatest._
 import xiangshan.testutils._
-import xiangshan.testutils.TestCaseGenerator._
 
 
 class uBTBTest extends FlatSpec 
@@ -20,7 +12,6 @@ with Matchers
 with ParallelTestExecution
 with HasPartialDecoupledDriver {
   it should "test uBTBTest" in {
-    XSLog.generateLog = true
     test(new MicroBTB) { c =>
         def genUpdateReq(pc: Long,target: Long,taken: Boolean,fetchIdx: Int,isMiss: Boolean,write_way: Int,hit: Boolean) = {
           c.io.update.valid.poke(true.B)

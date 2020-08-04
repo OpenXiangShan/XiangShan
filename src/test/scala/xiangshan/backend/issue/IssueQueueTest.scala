@@ -5,6 +5,7 @@ import chiseltest._
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
+import top.Parameters
 import utils.XSLog
 import xiangshan._
 import xiangshan.backend.exu.Exu
@@ -16,7 +17,7 @@ class IssueQueueTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver
 {
-  XSLog.generateLog = false
+  Parameters.set(Parameters.debugParameters)
   it should "do enq issue with no delay correctly" in {
     test(new IssueQueue(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
       AddSinks()
