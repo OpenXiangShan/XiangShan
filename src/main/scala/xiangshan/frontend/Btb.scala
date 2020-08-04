@@ -140,21 +140,30 @@ class BTB extends BasePredictor with BTBParams{
   val bankHitWays = VecInit(totalHits.map(PriorityEncoder(_)))
 
 
-  def allocWay(meta_tags: UInt, req_tag: UInt) = {
+  def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
     if (BtbWays > 1) {
+      val w = Wire(UInt(log2Up(BtbWays).W))
+      val valid = WireInit(valids.andR)
       val tags = Cat(meta_tags, req_tag)
       val l = log2Up(BtbWays)
       val nChunks = (tags.getWidth + l - 1) / l
       val chunks = (0 until nChunks).map( i => 
         tags(min((i+1)*l, tags.getWidth)-1, i*l)
       )
-      chunks.reduce(_^_)
+      w := Mux(valid, chunks.reduce(_^_), PriorityEncoder(~valids))
+      w
     } else {
-      0.U
+      val w = WireInit(0.U)
+      w
     }
   }
+  val allocWays = VecInit((0 until BtbBanks).map(b => 
+    allocWay(VecInit(metaRead.map(w => w(b).valid)).asUInt,
+             VecInit(metaRead.map(w => w(b).tag)).asUInt,
+             realTags(b))))
+
   val writeWay = VecInit((0 until BtbBanks).map(
-    b => Mux(bankHits(b), bankHitWays(b), allocWay(VecInit(metaRead.map(w => w(b).tag)).asUInt, realTags(b)))
+    b => Mux(bankHits(b), bankHitWays(b), allocWays(b))
   ))
 
   // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
@@ -234,4 +243,13 @@ class BTB extends BasePredictor with BTBParams{
   }
   XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
     u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+  for (i <- 0 until BtbBanks) {
+    // Conflict when not hit and allocating a valid entry
+    val conflict = metaRead(allocWays(i))(i).valid && !bankHits(i)
+    XSDebug(conflict, "bank(%d) is trying to allocate a valid way(%d)\n", i.U, allocWays(i))
+    // There is another circumstance when a branch is on its way to update while another
+    // branch chose the same way to udpate, then after the first branch is wrote in, 
+    // the second branch will overwrite the first branch
+
+  }
 }

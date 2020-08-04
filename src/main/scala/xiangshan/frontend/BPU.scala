@@ -256,7 +256,7 @@ class BPUStage3 extends BPUStage {
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
   notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))} 
-                else           { VecInit((0 until PredictWidth).map(i => brs(i) && bimTakens(i)))})
+                else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))})
   targetSrc := inLatch.resp.btb.targets
 
   lastIsRVC := pds(lastValidPos).isRVC
