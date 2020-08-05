@@ -182,7 +182,7 @@ class Brq extends XSModule {
   io.redirect.valid := commitValid &&
     commitIsMisPred &&
     !io.roqRedirect.valid &&
-    !(io.memRedirect.valid && io.redirect.bits.needFlush(io.memRedirect))
+    !io.redirect.bits.needFlush(io.memRedirect)
 
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
@@ -238,13 +238,15 @@ class Brq extends XSModule {
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
       when(
         (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
-          (io.memRedirect.valid && ptr.needBrFlush(io.memRedirect.bits.brTag))
+          (s.isWb && brQueue(i).exuOut.uop.needFlush(io.memRedirect))
       ){
         s := s_idle
       }
     })
-    tailPtr := io.redirect.bits.brTag + true.B
-  } // replay: do nothing
+    when(io.redirect.valid){ // Only Br Mispred reset tailPtr, replay does not
+      tailPtr := io.redirect.bits.brTag + true.B
+    }
+  }
 
 
 
