@@ -58,9 +58,9 @@ class IssueQueue
              moveMask = 11111100  |  moveMask=11111111
  */
 
-  val firstBubble = PriorityEncoder(stateQueue.map(_ === s_invalid))
+  val (firstBubble, findBubble) = PriorityEncoderWithFlag(stateQueue.map(_ === s_invalid))
   val realDeqIdx = firstBubble
-  val realDeqValid = firstBubble < tailPtr
+  val realDeqValid = (firstBubble < tailPtr) && findBubble
   val moveMask = {
     (Fill(qsize, 1.U(1.W)) << realDeqIdx)(qsize-1, 0)
   } & Fill(qsize, realDeqValid)
