@@ -176,6 +176,10 @@ class BPUStage extends XSModule {
   val p = io.pred.bits
   XSDebug(io.pred.fire(), "outPred: redirect=%d, taken=%d, jmpIdx=%d, hasNTBrs=%d, target=%x, saveHalfRVI=%d\n",
     p.redirect, p.taken, p.jmpIdx, p.hasNotTakenBrs, p.target, p.saveHalfRVI)
+  XSDebug(io.pred.fire() && p.taken, "outPredTaken: fetchPC:%x, jmpPC:%x\n",
+    inLatch.pc, inLatch.pc + (jmpIdx << 1.U))
+  XSDebug(io.pred.fire() && p.redirect, "outPred: previous target:%x redirected to %x \n",
+    inLatch.target, p.target)
 }
 
 class BPUStage1 extends BPUStage {
@@ -269,11 +273,11 @@ class BPUStage3 extends BPUStage {
     io.out.bits.brInfo(i).tageMeta := io.in.bits.brInfo(i).tageMeta
   }
 
-  XSDebug(io.predecode.valid, "predecode: mask:%b\n", io.predecode.bits.mask)
+  XSDebug(io.predecode.valid, "predecode: pc:%x, mask:%b\n", inLatch.pc, io.predecode.bits.mask)
   for (i <- 0 until PredictWidth) {
     val p = io.predecode.bits.pd(i)
-      XSDebug(io.predecode.valid, "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
-        i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
+    XSDebug(io.predecode.valid && io.predecode.bits.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
+      i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
   }
 }
 
@@ -422,7 +426,7 @@ class BPU extends BaseBPU {
   s1.io.in.valid := io.in.valid
   s1.io.in.bits.pc := io.in.bits.pc
   s1.io.in.bits.mask := io.in.bits.inMask
-  s1.io.in.bits.target := npc(s1_inLatch.bits.pc, PopCount(s1_inLatch.bits.inMask)) // Deault target npc
+  s1.io.in.bits.target := npc(io.in.bits.pc, PopCount(io.in.bits.inMask)) // Deault target npc
   s1.io.in.bits.resp := s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
