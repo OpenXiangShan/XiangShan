@@ -60,7 +60,7 @@ class IssueQueue
 
   val firstBubble = PriorityEncoder(stateQueue.map(_ === s_invalid))
   val realDeqIdx = firstBubble
-  val realDeqValid = firstBubble < tailPtr.tail(1)
+  val realDeqValid = firstBubble < tailPtr
   val moveMask = {
     (Fill(qsize, 1.U(1.W)) << realDeqIdx)(qsize-1, 0)
   } & Fill(qsize, realDeqValid)
@@ -202,7 +202,7 @@ class IssueQueue
   val isFull = tailAfterRealDeq.head(1).asBool() // tailPtr===qsize.U
 
   // enq
-  io.enq.ready := !isFull && !tlbMiss && !io.redirect.valid
+  io.enq.ready := !isFull && !io.redirect.valid
   when(io.enq.fire()){
     stateQueue(tailAfterRealDeq.tail(1)) := s_valid
     val uopQIdx = idxQueue(tailPtr.tail(1))
