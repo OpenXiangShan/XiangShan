@@ -296,7 +296,13 @@ class BPUStage3 extends BPUStage {
   targetSrc := inLatch.resp.btb.targets
   when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
   lastIsRVC := pds(lastValidPos).isRVC
-  lastHit   := pdMask(lastValidPos)
+  when (lastValidPos > 0.U) {
+    lastHit := pdMask(lastValidPos) |
+      !pdMask(lastValidPos - 1.U) & !pdMask(lastValidPos) |
+      pdMask(lastValidPos - 1.U) & !pdMask(lastValidPos) & pds(lastValidPos - 1.U).isRVC
+  }.otherwise {
+    lastHit := pdMask(0) | !pdMask(0) & !pds(0).isRVC
+  }
 
   // Wrap tage resp and tage meta in
   // This is ugly
