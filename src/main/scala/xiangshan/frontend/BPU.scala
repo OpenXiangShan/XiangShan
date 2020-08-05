@@ -106,6 +106,9 @@ class BPUStage extends XSModule {
     val pred = Decoupled(new BranchPrediction)
     val out = Decoupled(new BPUStageIO)
     val predecode = Flipped(ValidIO(new Predecode))
+    val redirect = Flipped(ValidIO(new Redirect))
+    val recover =  Flipped(ValidIO(new BranchUpdateInfo))
+
   }
   val io = IO(new DefaultIO)
 
@@ -220,8 +223,8 @@ class BPUStage2 extends BPUStage {
 
 class BPUStage3 extends BPUStage {
 
-  io.out.valid := predValid && io.predecode.valid && !io.flush
 
+  io.out.valid := predValid && io.predecode.valid && !io.flush
   // TAGE has its own pipelines and the
   // response comes directly from s3,
   // so we do not use those from inLatch
@@ -237,11 +240,29 @@ class BPUStage3 extends BPUStage {
   val brs   = pdMask & Reverse(Cat(pds.map(_.isBr)))
   val jals  = pdMask & Reverse(Cat(pds.map(_.isJal)))
   val jalrs = pdMask & Reverse(Cat(pds.map(_.isJalr)))
-  // val calls = pdMask & Reverse(Cat(pds.map(_.isCall)))
-  // val rets  = pdMask & Reverse(Cat(pds.map(_.isRet)))
+  val calls = pdMask & Reverse(Cat(pds.map(_.isCall)))
+  val rets  = pdMask & Reverse(Cat(pds.map(_.isRet)))
+  val RVCs = pdMask & Reverse(Cat(pds.map(_.isRet)))
 
-  // val callIdx = PriorityEncoder(calls)
-  // val retIdx  = PriorityEncoder(rets)
+   val callIdx = PriorityEncoder(calls)
+   val retIdx  = PriorityEncoder(rets)
+
+  //RAS
+  val ras = Module(new RAS)
+  ras.io <> DontCare
+  ras.io.pc.bits := inLatch.pc 
+  ras.io.pc.valid := inFire
+  ras.io.is_ret := rets.orR && io.predecode.valid
+  ras.io.callIdx.valid := calls.orR && io.predecode.valid
+  ras.io.callIdx.bits := callIdx
+  ras.io.isRVC := (calls & RVCs).orR   //TODO
+  ras.io.redirect := io.redirect
+  ras.io.recover := io.recover
+
+  for(i <- 0 until PredictWidth){
+    io.out.bits.brInfo(i).rasSp :=  ras.io.branchInfo.rasSp
+    io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
+  }
   
   val brTakens = 
     if (EnableBPD) {
@@ -251,14 +272,14 @@ class BPUStage3 extends BPUStage {
     }
 
   // predict taken only if btb has a target
-  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
+  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)|| rets(i)))
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
   notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))} 
                 else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))})
   targetSrc := inLatch.resp.btb.targets
-
+  when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
   lastIsRVC := pds(lastValidPos).isRVC
   lastHit   := pdMask(lastValidPos)
 
@@ -311,6 +332,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
     val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val redirect = Flipped(ValidIO(new Redirect))
+    val recover =  Flipped(ValidIO(new BranchUpdateInfo))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
     // from if1
@@ -350,6 +373,13 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   io.branchInfo.valid := s3.io.out.valid
   io.branchInfo.bits := s3.io.out.bits.brInfo
   s3.io.out.ready := io.branchInfo.ready
+
+  s1.io.recover <> DontCare
+  s1.io.redirect <> DontCare
+  s2.io.redirect <> DontCare
+  s2.io.recover <> DontCare
+  s3.io.redirect <> io.redirect
+  s3.io.recover <> io.recover
 
   XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
   for (i <- 0 until PredictWidth) {
