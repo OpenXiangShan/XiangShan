@@ -257,7 +257,7 @@ class BPUStage3 extends BPUStage {
   val jalrs = pdMask & Reverse(Cat(pds.map(_.isJalr)))
   val calls = pdMask & Reverse(Cat(pds.map(_.isCall)))
   val rets  = pdMask & Reverse(Cat(pds.map(_.isRet)))
-  val RVCs = pdMask & Reverse(Cat(pds.map(_.isRet)))
+  val RVCs = pdMask & Reverse(Cat(pds.map(_.isRVC)))
 
    val callIdx = PriorityEncoder(calls)
    val retIdx  = PriorityEncoder(rets)
@@ -266,9 +266,9 @@ class BPUStage3 extends BPUStage {
   val ras = Module(new RAS)
   ras.io <> DontCare
   ras.io.pc.bits := inLatch.pc 
-  ras.io.pc.valid := predValid
-  ras.io.is_ret := rets.orR && io.predecode.valid
-  ras.io.callIdx.valid := calls.orR && io.predecode.valid
+  ras.io.pc.valid := io.out.fire()//predValid
+  ras.io.is_ret := (retIdx === jmpIdx) && io.predecode.valid
+  ras.io.callIdx.valid :=(callIdx === jmpIdx) && io.predecode.valid
   ras.io.callIdx.bits := callIdx
   ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
   ras.io.redirect := io.redirect
