@@ -49,7 +49,7 @@ class Dispatch1 extends XSModule {
   /**
     * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes
     */
-  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid)))
+  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid && !io.redirect.bits.isReplay)))
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
   val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
