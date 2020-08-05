@@ -168,7 +168,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // TODO: this is unaccptable since it needs to add 64 bits
-  val numReplay = PopCount(needReplay)
+  val headMask = (1.U((size+1).W) << headIndex) - 1.U
+  val dispatchMask = (1.U((size + 1).W) << dispatchIndex) - 1.U
+  val mask = headMask ^ dispatchMask
+  val replayMask = Mux(headDirection === dispatchDirection, mask, ~mask)
+  val numReplay = PopCount((0 until size).map(i => needReplay(i) & replayMask(i)))
   val numWalkDispatchTry = PriorityEncoder(walkDispatchPtr.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
   val numWalkDispatch = Mux(numWalkDispatchTry > commitEntries, commitEntries, numWalkDispatchTry)
   val walkCntDispatch = numWalkDispatch + numReplay
