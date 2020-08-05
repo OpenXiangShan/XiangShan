@@ -2,9 +2,8 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import xiangshan.backend.ALUOpType
 import utils._
+import xiangshan._
 
 import scala.math.min
 
@@ -44,7 +43,7 @@ class MicroBTB extends BasePredictor
     override val io = IO(new MicroBTBIO)
     io.uBTBBranchInfo <> out_ubtb_br_info
 
-    def getTag(pc: UInt) = pc >> (log2Ceil(PredictWidth) + 1).U
+    def getTag(pc: UInt) = (pc >> (log2Ceil(PredictWidth) + 1)).asUInt()
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
     def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
         val oldSatTaken = old === ((1 << len)-1).U
@@ -103,7 +102,7 @@ class MicroBTB extends BasePredictor
     val read_hit_vec = VecInit(read_hit_ohs.map{oh => ParallelOR(oh).asBool})
     val read_hit_ways = VecInit(read_hit_ohs.map{oh => PriorityEncoder(oh)})
     val read_hit =  ParallelOR(read_hit_vec).asBool
-    val read_hit_way = PriorityEncoder(ParallelOR(read_hit_vec.map(_.asUInt)))
+    val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
     
 
     val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => uBTBMeta(read_bank_inOrder(b))(read_hit_ways(b))))//uBTBMeta(i)(read_hit_ways(index))
@@ -159,7 +158,7 @@ class MicroBTB extends BasePredictor
     val u = io.update.bits.ui
     val update_fetch_pc  = u.pc
     val update_idx = u.fetchIdx
-    val update_br_offset = update_idx << 1.U
+    val update_br_offset = (update_idx << 1).asUInt()
     val update_br_pc = update_fetch_pc + update_br_offset
     val update_write_way = u.brInfo.ubtbWriteWay
     val update_hits = u.brInfo.ubtbHits
@@ -204,7 +203,7 @@ class MicroBTB extends BasePredictor
             io.out.takens(b) := u.taken
             io.out.is_RVC(b) := u.pd.isRVC
             io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
-            XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+ (b.U << 1.U),b.U, io.out.targets(b))
+            XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+(b<<1).asUInt(),b.U, io.out.targets(b))
         }
     }
 }
