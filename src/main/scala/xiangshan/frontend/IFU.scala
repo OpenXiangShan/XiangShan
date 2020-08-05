@@ -179,7 +179,13 @@ class IFU extends XSModule with HasIFUConst
   .elsewhen (if3_fire) { if4_valid := if3_valid }
   .elsewhen(if4_fire)  { if4_valid := false.B }
 
-  val if4_bp = bpu.io.out(2).bits
+  val if4_bp = Wire(new BranchPrediction)
+  if4_bp := bpu.io.out(2).bits
+  // TODO: c_jal
+  val if4_cfi_jal = if4_pd.instrs(if4_bp.jmpIdx)
+  val if4_cfi_jal_tgt = if4_pd.pc(if4_bp.jmpIdx) + SignExt(Cat(if4_cfi_jal(31), if4_cfi_jal(19, 12), if4_cfi_jal(20), if4_cfi_jal(30, 21), 0.U(1.W)), XLEN)
+  if4_bp.target := Mux(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, if4_cfi_jal_tgt, bpu.io.out(2).bits.target)
+  if4_bp.redirect := bpu.io.out(2).bits.redirect || if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken && if4_cfi_jal_tgt =/= bpu.io.out(2).bits.target
 
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
     when (!if4_bp.saveHalfRVI) {
@@ -291,6 +297,7 @@ class IFU extends XSModule with HasIFUConst
 
   XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
   XSDebug("[IF4][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.redirect, if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
+  XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_cfi_jal, if4_cfi_jal_tgt)
   XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b\n", io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask)
   for (i <- 0 until PredictWidth) {
     XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] %b %x pc=%x pnpc=%x pd: rvc=%d brType=%b call=%d ret=%d\n",
