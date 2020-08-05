@@ -82,7 +82,7 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   if (hasV) { val v = Bool() }
 }
 
-class TLBEntry extends TlbBundle {
+class TlbEntry extends TlbBundle {
   val vpn = UInt(vpnLen.W) // tag is vpn
   val ppn = UInt(ppnLen.W)
   val level = UInt(log2Up(Level).W) // 0 for 4KB, 1 for 2MB, 2 for 1GB
@@ -102,12 +102,12 @@ class TLBEntry extends TlbBundle {
   //   this.asid === asid
   // }
 
-  def hit(vpn: UInt, asid: UInt) = {
+  def hit(vpn: UInt/*, asid: UInt*/) = {
     vpnHit(vpn)// && asidHit(asid)
   }
 
-  def genTLBEntry(pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
-    val e = new TLBEntry
+  def genTlbEntry(pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
+    val e = new TlbEntry
     e.ppn := pte.asTypeOf(pteBundle).ppn
     e.level := level
     e.vpn := vpn
@@ -170,7 +170,7 @@ class TlbCsrIO extends TlbBundle {
   val satp = Output(new Bundle {
     val mode = UInt(4.W) // TODO: may change number to parameter
     val asid = UInt(16.W)
-    val ppn  = UInt(44.W)
+    val ppn  = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
   })
   val priv = Output(new Bundle {
     val mxr = Bool()
@@ -210,11 +210,11 @@ class DTLB extends TlbModule {
   val reqAddr = io.lsu.req.map(_.bits.vaddr.asTypeOf(vaBundle2))
   val cmd = io.lsu.req.map(_.bits.cmd)
 
-  val v = RegInit(VecInit(Seq.fill(TLBEntrySize)(false.B)).asUInt)
-  val entry = Reg(Vec(TLBEntrySize, new TLBEntry))
+  val v = RegInit(VecInit(Seq.fill(TlbEntrySize)(false.B)).asUInt)
+  val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   // val g = entry.map(_.perm.g) // g is not used, for asid is not used
 
-  val hitVec = (0 until TLBWidth) map { i => (v & VecInit(entry.map(e => e.hit(reqAddr(i).vpn, satp.asid))).asUInt).asBools }
+  val hitVec = (0 until TLBWidth) map { i => (v & VecInit(entry.map(e => e.hit(reqAddr(i).vpn/*, satp.asid*/))).asUInt).asBools }
   val hit = (0 until TLBWidth) map { i => ParallelOR(hitVec(i)).asBool }
   val hitppn = (0 until TLBWidth) map { i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val multiHit = {
@@ -257,7 +257,6 @@ class DTLB extends TlbModule {
   val state_idle :: state_wait :: Nil = Enum(2)
   val state = RegInit(state_idle)
 
-  val vpnPtw = RegEnable(io.ptw.req.bits.vpn, io.ptw.req.fire())
   switch (state) {
     is (state_idle) {
       for(i <- TLBWidth-1 to 0 by -1) {
@@ -281,10 +280,10 @@ class DTLB extends TlbModule {
   // refill
   val ptwResp = io.ptw.resp
   val refill = ptwResp.fire()
-  val refillIdx = LFSR64()(log2Up(TLBEntrySize)-1,0)
+  val refillIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   when (refill) {
     v := v | (1.U << refillIdx)
-    entry(refillIdx) := new TLBEntry().genTLBEntry(ptwResp.bits.pte, ptwResp.bits.level, vpnPtw)
+    entry(refillIdx) := ptwResp.bits
   }
 
   // issQue

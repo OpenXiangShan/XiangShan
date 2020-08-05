@@ -33,11 +33,16 @@ class PteBundle extends PtwBundle{
   }
 }
 
-class PtwEntry extends PtwBundle {
-  val tagLen = 0 // FIXME
+class PtwEntry(tagLen: Int) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val ppn = UInt(ppnLen.W)
   val perm = new PermBundle
+
+  // TODO: add superpage
+  def hit(addr: UInt) = {
+    require(addr.getWidth >= PAddrBits)
+    tag === addr(PAddrBits-1, PAddrBits-tagLen)
+  }
 }
 
 class PtwReq extends PtwBundle {
@@ -46,8 +51,7 @@ class PtwReq extends PtwBundle {
 }
 
 class PtwResp extends PtwBundle {
-  val pte = UInt(XLEN.W)
-  val level = UInt(log2Up(Level).W)
+  val tlb   = new TlbEntry
 }
 
 class PtwIO extends PtwBundle {
@@ -107,25 +111,25 @@ class PTW extends PtwModule {
 
   // may seperate valid bits to speed up sfence's flush
   // Reg/Mem/SyncReadMem is not sure now
-  val tlbl2 = SyncReadMem(L2TLBEntrySize, new TLBEntry)
-  val tlbv  = RegInit(VecInit(Seq.fill(L2TLBEntrySize)(false.B)).asUInt)
-  val ptwl1 = Reg(Vec(PTWL1EntrySize, new PtwEntry))
-  val l1v   = RegInit(VecInit(Seq.fill(PTWL1EntrySize)(false.B)).asUInt)
-  val ptwl2 = SyncReadMem(PTWL2EntrySize, new PtwEntry) // NOTE: the Mem could be only one port(r&w)
-  val l2v   = RegInit(VecInit(Seq.fill(PTWL2EntrySize)(false.B)).asUInt)
+  val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
+  val tlbv  = RegInit(VecInit(Seq.fill(TlbL2EntrySize)(false.B)).asUInt)
+  val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PAddrBits - log2Up(XLEN/8))))
+  val l1v   = RegInit(VecInit(Seq.fill(PtwL1EntrySize)(false.B)).asUInt)
+  val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize))) // NOTE: the Mem could be only single port(r&w)
+  val l2v   = RegInit(VecInit(Seq.fill(PtwL2EntrySize)(false.B)).asUInt)
 
   // tlbl2
   val (tlbHit, tlbHitData) = {
     // tlbl2 is by addr
     // TODO: optimize tlbl2'l2 tag len
-    val ramData = tlbl2.read(req.vpn(log2Up(L2TLBEntrySize)-1, 0), validOneCycle)
-    (ramData.vpn === req.vpn, ramData) // TODO: optimize tag
+    val ramData = tlbl2.read(req.vpn(log2Up(TlbL2EntrySize)-1, 0), validOneCycle)
+    (ramData.hit(req.vpn), ramData) // TODO: optimize tag
     // TODO: add exception and refill
   }
 
   def MakeAddr(ppn: UInt, off: UInt) = {
     require(off.getWidth == 9)
-    Cat(ppn, off, 0.U(3.W))(PAddrBits-1, 0)
+    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
   }
 
   def getVpnn(vpn: UInt, idx: Int) = {
@@ -136,19 +140,19 @@ class PTW extends PtwModule {
   val l1addr = MakeAddr(csr.satp.ppn, getVpnn(req.vpn, 2))
   val (l1Hit, l1HitData) = { // TODO: add excp
     // 16 terms may casue long latency, so divide it into 2 stage, like l2tlb
-    val hitVecT = 0.U // ptwl1.map(_.hit(l1Hit))
-    val hitVec  = RegEnable(hitVecT, validOneCycle).asBools
+    val hitVecT = ptwl1.map(_.hit(l1addr))
+    val hitVec  = hitVecT.map(RegEnable(_, validOneCycle))
     val hitData = ParallelMux(hitVec zip ptwl1)
     val hit     = ParallelOR(hitVec).asBool
     (hit, hitData)
   }
 
   // ptwl2
-  val l1Res = Mux(l1Hit, l1HitData.ppn, 0.U/* TODO */)
+  val l1Res = Mux(l1Hit, l1HitData.ppn, mem.resp.bits.data.asTypeOf(pteBundle).ppn)
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitData) = { // TODO: add excp
-    val ramData = ptwl2.read(l2addr(log2Up(PTWL2EntrySize)-1+3, 0+3), mem.resp.fire())
-    (0.U.asBool/*ramData. === l2addr.vpn*/, ramData) // TODO: optimize tag
+    val ramData = ptwl2.read(l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8)), mem.resp.fire())
+    (ramData.hit(l2addr), ramData) // TODO: optimize tag
   }
 
   // ptwl3
@@ -156,7 +160,7 @@ class PTW extends PtwModule {
    * ptwl3 may be functional conflict with l2-tlb
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
-  val l2Res = Mux(l2Hit, l2HitData.ppn, 0.U/*TODO: mem*/)
+  val l2Res = Mux(l2Hit, l2HitData.ppn, mem.resp.bits.data.asTypeOf(pteBundle).ppn)
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
   // fsm
@@ -226,14 +230,18 @@ class PTW extends PtwModule {
   // )
   // if use Dcache, how to disable VIPT -> it is hard for tlb to mem with dcache
   io.mem.req.bits := DontCare
-  io.mem.req.bits.paddr := 0.U // TODO: add paddr
-  io.mem.req.valid := false.B // TODO: add req.valid
+  io.mem.req.bits.paddr := Mux(state === state_tlb, l1addr,
+                           Mux(state === state_l2,  l2addr,
+                           Mux(state === state_l3,  l3addr, 0.U))) // TODO: add paddr
+  io.mem.req.valid := (state === state_tlb && !tlbHit && l1Hit) ||
+                      (state === state_l2 && !l2Hit) ||
+                      (state === state_l3) // TODO: add req.valid
 
   // resp
+  val level = 0.U // FIXME
   for(i <- 0 until PtwWidth) {
-    io.resp(i).valid := valid && arbChosen===i.U && false.B // TODO: add resp valid logic
-    io.resp(i).bits.pte := 0.U // TODO: add resp logic
-    io.resp(i).bits.level := 0.U // TODO: add resp logic
+    io.resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
+    io.resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, new TlbEntry().genTlbEntry(mem.resp.bits.data, level, req.vpn))
   }
 
   // sfence
