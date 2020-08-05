@@ -130,7 +130,7 @@ class MicroBTB extends BasePredictor
         chunks.reduce(_^_)
     }
     out_ubtb_br_info.writeWay.map(_:= Mux(read_hit,read_hit_way,alloc_way))
-    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%d, read_hit_way:%d  alloc_way:%d\n",read_hit_vec.asUInt,read_hit_way,alloc_way)
+    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, read_hit_way:%d  alloc_way:%d \n",read_hit_vec.asUInt,read_hit_way,alloc_way)
     for(i <- 0 until PredictWidth) {
         XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   notTaken:%d   target:0x%x\n",
                                  i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).notTaken,read_resp(i).target )
@@ -149,10 +149,10 @@ class MicroBTB extends BasePredictor
     //uBTB update 
     //backend should send fetch pc to update
     val u = io.update.bits.ui
-    val update_fetch_pc  = u.pc
-    val update_idx = u.fetchIdx
-    val update_br_offset = (update_idx << 1).asUInt()
-    val update_br_pc = update_fetch_pc + update_br_offset
+    val update_br_pc  = u.pc
+    val update_br_idx = u.fetchIdx
+    val update_br_offset = (update_br_idx << 1).asUInt()
+    val update_fetch_pc = update_br_pc - update_br_offset
     val update_write_way = u.brInfo.ubtbWriteWay
     val update_hits = u.brInfo.ubtbHits
     val update_taken = u.taken
@@ -185,18 +185,19 @@ class MicroBTB extends BasePredictor
             satUpdate( uBTBMeta(update_bank)(update_write_way).pred,2,update_taken)
         )
     }
-    XSDebug(meta_write_valid,"uBTB update: update fetch pc:0x%x  | real pc:0x%x  | update hits%b  | update_write_way:%d\n",update_fetch_pc,update_br_pc,update_hits,update_write_way)
+    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x\n "
+                ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag)
    
    //bypass:read-after-write 
-   for( b <- 0 until PredictWidth) {
-        when(update_bank === b.U && meta_write_valid && read_valid
-            && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
-        {
-            io.out.targets(b) := u.target
-            io.out.takens(b) := u.taken
-            io.out.is_RVC(b) := u.pd.isRVC
-            io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
-            XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+(b<<1).asUInt(),b.U, io.out.targets(b))
-        }
-    }
+//    for( b <- 0 until PredictWidth) {
+//         when(update_bank === b.U && meta_write_valid && read_valid
+//             && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
+//         {
+//             io.out.targets(b) := u.target
+//             io.out.takens(b) := u.taken
+//             io.out.is_RVC(b) := u.pd.isRVC
+//             io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
+//             XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+(b<<1).asUInt(),b.U, io.out.targets(b))
+//         }
+//     }
 }
