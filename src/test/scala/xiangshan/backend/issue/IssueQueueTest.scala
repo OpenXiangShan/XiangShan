@@ -5,6 +5,7 @@ import chiseltest._
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
+import top.Parameters
 import utils.XSLog
 import xiangshan._
 import xiangshan.backend.exu.Exu
@@ -18,7 +19,6 @@ class IssueQueueTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver
 {
-  XSLog.generateLog = true
 
   it should "enq and deq correctly" in {
     test(new IssueQueue(Exu.ldExeUnitCfg, 1, 1){

@@ -24,7 +24,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   val s_invalid :: s_valid :: s_dispatched :: Nil = Enum(3)
 
   // queue data array
-  val uopEntries = Reg(Vec(size, new MicroOp))
+  val uopEntries = Mem(size, new MicroOp)//Reg(Vec(size, new MicroOp))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
   // head: first valid entry (dispatched entry)
   val headPtr = RegInit(0.U((indexWidth + 1).W))
@@ -121,13 +121,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   val exceptionValid = io.redirect.valid && io.redirect.bits.isException
   val roqNeedFlush = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    roqNeedFlush(i) := uopEntries(i).needFlush(io.redirect)
+    roqNeedFlush(i) := uopEntries(i.U).needFlush(io.redirect)
     val needCancel = stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || exceptionValid)
     when (needCancel) {
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel, p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
+    XSInfo(needCancel, p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
       p"cancelled with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
@@ -139,7 +139,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
       stateEntries(i) := s_valid
     }
 
-    XSInfo(needReplay(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
+    XSInfo(needReplay(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
       p"replayed with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
@@ -168,7 +168,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // TODO: this is unaccptable since it needs to add 64 bits
-  val numReplay = PopCount(needReplay)
+  val headMask = (1.U((size+1).W) << headIndex) - 1.U
+  val dispatchMask = (1.U((size + 1).W) << dispatchIndex) - 1.U
+  val mask = headMask ^ dispatchMask
+  val replayMask = Mux(headDirection === dispatchDirection, mask, ~mask)
+  val numReplay = PopCount((0 until size).map(i => needReplay(i) & replayMask(i)))
   val numWalkDispatchTry = PriorityEncoder(walkDispatchPtr.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
   val numWalkDispatch = Mux(numWalkDispatchTry > commitEntries, commitEntries, numWalkDispatchTry)
   val walkCntDispatch = numWalkDispatch + numReplay

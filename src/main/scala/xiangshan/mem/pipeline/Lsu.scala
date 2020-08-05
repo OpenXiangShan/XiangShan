@@ -44,7 +44,7 @@ object LSUOpType {
   def atomD = "011".U
 }
 
-class LsPipelineBundle extends XSBundle with HasMEMConst {
+class LsPipelineBundle extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val func = UInt(6.W)
@@ -61,7 +61,7 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
   val forwardData = Vec(8, UInt(8.W))
 }
 
-class LoadForwardQueryIO extends XSBundle with HasMEMConst {
+class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val moqIdx = Output(UInt(MoqIdxWidth.W))
@@ -72,7 +72,7 @@ class LoadForwardQueryIO extends XSBundle with HasMEMConst {
   val forwardData = Input(Vec(8, UInt(8.W)))
 }
 
-class LsuIO extends XSBundle with HasMEMConst {
+class LsuIO extends XSBundle {
   val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val ldout = Vec(2, Decoupled(new ExuOutput))
@@ -90,7 +90,7 @@ class LsuIO extends XSBundle with HasMEMConst {
 }
 
 // 2l2s out of order lsu for XiangShan
-class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
+class Lsu extends XSModule {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
 

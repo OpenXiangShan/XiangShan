@@ -5,26 +5,22 @@ import chisel3.util._
 import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
+import xiangshan.frontend.PreDecodeInfo
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
-  val instrs = Vec(FetchWidth, UInt(32.W))
-  val mask = UInt((FetchWidth*2).W)
-  val pc = UInt(VAddrBits.W) // the pc of first inst in the fetch group
-  val pnpc = Vec(FetchWidth*2, UInt(VAddrBits.W))
-  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  val predCtr = Vec(FetchWidth*2, UInt(2.W))
-  val btbHit = Vec(FetchWidth*2, Bool())
-  val tageMeta = Vec(FetchWidth*2, (new TageMeta))
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
+  val instrs = Vec(PredictWidth, UInt(32.W))
+  val mask = UInt(PredictWidth.W)
+  // val pc = UInt(VAddrBits.W)
+  val pc = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
+  val brInfo = Vec(PredictWidth, new BranchInfo)
+  val pd = Vec(PredictWidth, new PreDecodeInfo)
 }
-
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
-  val bits = gen.asInstanceOf[T]
+  val bits = gen.cloneType.asInstanceOf[T]
   override def cloneType = new ValidUndirectioned(gen).asInstanceOf[this.type]
 }
 
@@ -35,62 +31,62 @@ object ValidUndirectioned {
 }
 
 class TageMeta extends XSBundle {
-//  val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  def TageNTables = 6
+  val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
-//  val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
 }
 
-// Branch prediction result from BPU Stage1 & 3
 class BranchPrediction extends XSBundle {
   val redirect = Bool()
-
-  // mask off all the instrs after the first redirect instr
-  val instrValid = Vec(FetchWidth*2, Bool())
-  // target of the first redirect instr in a fetch package
+  val taken = Bool()
+  val jmpIdx = UInt(log2Up(PredictWidth).W)
+  val hasNotTakenBrs = Bool()
   val target = UInt(VAddrBits.W)
-  val lateJump = Bool()
-  // save these info in brq!
-  // global history of each valid(or uncancelled) instruction, excluding branch's own prediction result
-  val hist = Vec(FetchWidth*2, UInt(HistoryLength.W))
-  // victim way when updating btb
-  // val btbVictimWay = UInt(log2Up(BtbWays).W)
-  // 2-bit saturated counter 
-  val predCtr = Vec(FetchWidth*2, UInt(2.W))
-  val btbHit = Vec(FetchWidth*2, Bool())
-  // tage meta info
-  val tageMeta = Vec(FetchWidth*2, (new TageMeta))
-  // ras checkpoint, only used in Stage3
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasTopCtr = UInt(8.W)
+  val saveHalfRVI = Bool()
 }
 
-// Save predecode info in icache
-class Predecode extends XSBundle {
-  val mask = UInt((FetchWidth*2).W)
-  val isRVC = Vec(FetchWidth*2, Bool())
-  val fuTypes = Vec(FetchWidth*2, FuType())
-  val fuOpTypes = Vec(FetchWidth*2, FuOpType())
-}
-
-
-class BranchUpdateInfo extends XSBundle {
-  val fetchOffset = UInt(log2Up(FetchWidth * 4).W)
-  val pnpc = UInt(VAddrBits.W)
-  val brTarget = UInt(VAddrBits.W)
-  val hist = UInt(HistoryLength.W)
-  val btbPredCtr = UInt(2.W)
-  val btbHit = Bool()
+class BranchInfo extends XSBundle {
+  val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
+  val ubtbHits = Bool()
+  val btbWriteWay = UInt(log2Up(BtbWays).W)
+  val bimCtr = UInt(2.W)
+  val histPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
+
+  def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
+    this.histPtr := histPtr
+    this.tageMeta := tageMeta
+    this.rasSp := rasSp
+    this.rasTopCtr := rasTopCtr
+    this.asUInt
+  }
+  def size = 0.U.asTypeOf(this).getWidth
+  def fromUInt(x: UInt) = x.asTypeOf(this)
+}
+
+class Predecode extends XSBundle {
+  val mask = UInt((FetchWidth*2).W)
+  val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
+}
+
+class BranchUpdateInfo extends XSBundle {
+  // from backend
+  val pc = UInt(VAddrBits.W)
+  val pnpc = UInt(VAddrBits.W)
+  val target = UInt(VAddrBits.W)
+  val brTarget = UInt(VAddrBits.W)
   val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)
-  val btbType = UInt(2.W)
-  val isRVC = Bool()
-  val isBr = Bool()
   val isMisPred = Bool()
+
+  // frontend -> backend -> frontend
+  val pd = new PreDecodeInfo
+  val brInfo = new BranchInfo
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
@@ -135,6 +131,10 @@ trait HasRoqIdx { this: HasXSParameter =>
       this.roqIdx.tail(1) > thatIdx.tail(1),
       this.roqIdx.tail(1) < thatIdx.tail(1)
     )
+  }
+
+  def isAfter[ T<: HasRoqIdx ](that: T): Bool = {
+    isAfter(that.roqIdx)
   }
 
   def needFlush(redirect: Valid[Redirect]): Bool = {

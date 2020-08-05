@@ -10,7 +10,7 @@ import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 
-class MSHQIO extends XSBundle with HasMEMConst {
+class MSHQIO extends XSBundle {
   val miss = Flipped(Valid(new MissReqIO))
   val refill = Flipped(new DCacheStoreIO)
 //   val l2cache = TODO

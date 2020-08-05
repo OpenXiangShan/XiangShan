@@ -16,12 +16,12 @@ import xiangshan.backend.issue.{IssueQueue, ReservationStation}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
-
+import utils.ParallelOR
 
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
   */
-class Backend(implicit val p: XSConfig) extends XSModule
+class Backend extends XSModule
   with NeedImpl {
   val io = IO(new Bundle {
     // val dmem = new SimpleBusUC(addrBits = VAddrBits)
@@ -191,6 +191,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
   decode.io.brTags <> brq.io.brTags
+  decBuf.io.isWalking := ParallelOR(roq.io.commits.map(c => c.valid && c.bits.isWalk)) // TODO: opt this
   decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
 
@@ -266,7 +267,7 @@ class Backend(implicit val p: XSConfig) extends XSModule
   BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
   BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
   val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
-  if (!p.FPGAPlatform) {
+  if (!env.FPGAPlatform) {
     BoringUtils.addSource(debugArchReg, "difftestRegs")
   }
 

@@ -13,7 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run
 
 # ------------------------------------------------------------------
 # run different test sets
@@ -37,7 +37,8 @@ amtest:
 	cat test.log | grep ISU > isu.log
 
 microbench:
-	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) $(EMU_ARGS) mainargs=test run 2 > microbench.log
+	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) $(EMU_ARGS) mainargs=test run 
+	#2 > microbench.log
 	cat microbench.log | grep IPC
 
 microbench_train:
@@ -45,7 +46,8 @@ microbench_train:
 	cat microbench.log | grep IPC
 
 coremark:
-	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run 2 > coremark.log
+	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run 
+	#2 > coremark.log
 	cat coremark.log | grep IPC
 
 dhrystone:
