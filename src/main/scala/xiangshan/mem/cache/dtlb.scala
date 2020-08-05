@@ -176,14 +176,22 @@ class TlbCsrIO extends TlbBundle {
     val mxr = Bool()
     val sum = Bool()
   })
+  val sfence = Valid(new Bundle {
+    val rs1 = Bool()
+    val rs2 = Bool()
+    val addr = UInt(VAddrBits.W)
+  })
+}
+
+class TlbEndIO extends TlbBundle {
+  val ptw = new TlbPtwIO
+  val issQue = new TlbIssQueIO
+  val csr = Flipped(new TlbCsrIO)
 }
 
 class DtlbIO extends TlbBundle {
   val lsu = new DtlbToLsuIO
-  val ptw = new TlbPtwIO
-  val issQue = new TlbIssQueIO
-  val sfence = Flipped(ValidIO(new SfenceBundle))
-  val csr = Flipped(new TlbCsrIO)
+  val end = new TlbEndIO
 }
 
 class FakeDtlb extends TlbModule {
@@ -201,15 +209,19 @@ class FakeDtlb extends TlbModule {
 class DTLB extends TlbModule {
   val io = IO(new DtlbIO)
 
-  val req = io.lsu.req
-  val resp = io.lsu.resp
-  val valid = req.map(_.valid)
-  val sfence = io.sfence
-  val satp = io.csr.satp
+  val req    = io.lsu.req
+  val resp   = io.lsu.resp
+  
+  val sfence = io.end.csr.sfence
+  val satp   = io.end.csr.satp
+  val priv   = io.end.csr.priv
+  val issQue = io.end.issQue
+  val ptw    = io.end.ptw
 
-  val reqAddr = io.lsu.req.map(_.bits.vaddr.asTypeOf(vaBundle2))
-  val cmd = io.lsu.req.map(_.bits.cmd)
-
+  val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle2))
+  val cmd     = req.map(_.bits.cmd)
+  val valid   = req.map(_.valid)
+  
   val v = RegInit(VecInit(Seq.fill(TlbEntrySize)(false.B)).asUInt)
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   // val g = entry.map(_.perm.g) // g is not used, for asid is not used
@@ -227,13 +239,13 @@ class DTLB extends TlbModule {
 
   // resp
   for(i <- 0 until TLBWidth) {
-    // io.lsu.req(i).ready := io.resp(i).ready // true.B // ValidIO
-    io.lsu.resp(i).valid := valid(i) && hit(i)
-    io.lsu.resp(i).bits.paddr := Cat(hitppn(i), reqAddr(i).off)
-    io.lsu.resp(i).bits.miss := ~hit(i)
-    io.lsu.resp(i).bits.excp.pf.ld := excp_tmp
-    io.lsu.resp(i).bits.excp.pf.st := excp_tmp
-    io.lsu.resp(i).bits.excp.pf.instr := excp_tmp
+    // req(i).ready := resp(i).ready // true.B // ValidIO
+    resp(i).valid := valid(i) && hit(i)
+    resp(i).bits.paddr := Cat(hitppn(i), reqAddr(i).off)
+    resp(i).bits.miss := ~hit(i)
+    resp(i).bits.excp.pf.ld := excp_tmp
+    resp(i).bits.excp.pf.st := excp_tmp
+    resp(i).bits.excp.pf.instr := excp_tmp
   }
 
   // sfence (flush)
@@ -260,33 +272,32 @@ class DTLB extends TlbModule {
   switch (state) {
     is (state_idle) {
       for(i <- TLBWidth-1 to 0 by -1) {
-        when (!hit(i) && io.ptw.req.fire()) {
+        when (!hit(i) && ptw.req.fire()) {
           state := state_wait
-          io.ptw.req.valid := true.B
-          io.ptw.req.bits.vpn := reqAddr(i).vpn
+          ptw.req.valid := true.B
+          ptw.req.bits.vpn := reqAddr(i).vpn
         }
-        assert(!io.ptw.resp.valid)
+        assert(!ptw.resp.valid)
       }
     }
 
     is (state_wait) {
-      io.ptw.resp.ready := true.B
-      when (io.ptw.resp.fire()) {
+      ptw.resp.ready := true.B
+      when (ptw.resp.fire()) {
         state := state_idle
       }
     }
   }
 
   // refill
-  val ptwResp = io.ptw.resp
-  val refill = ptwResp.fire()
+  val refill = ptw.resp.fire()
   val refillIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   when (refill) {
     v := v | (1.U << refillIdx)
-    entry(refillIdx) := ptwResp.bits
+    entry(refillIdx) := ptw.resp.bits
   }
 
   // issQue
-  io.issQue.miss := (~VecInit(hit).asUInt).asBools
-  io.issQue.missCanIss := io.ptw.resp.fire() // one cycle fire
+  issQue.miss := (~VecInit(hit).asUInt).asBools
+  issQue.missCanIss := ptw.resp.fire() // one cycle fire
 }

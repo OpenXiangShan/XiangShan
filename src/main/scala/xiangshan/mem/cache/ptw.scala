@@ -69,18 +69,10 @@ class PtwResp extends PtwBundle {
 }
 
 class PtwIO extends PtwBundle {
-  val req = Vec(PtwWidth, Flipped(Decoupled(new PtwReq)))
-  val resp = Vec(PtwWidth, Decoupled(new PtwResp))
-  val sfence = Flipped(ValidIO(new SfenceBundle))
+  val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val csr = Flipped(new TlbCsrIO)
   val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
 }
-
-// class SeperateValidSyncReadMem extends Module {
-//   val io =
-
-//   val ram = SyncReadMem()
-// }
 
 object ValidHold {
   def apply(infire: Bool, outfire: Bool, flush: Bool = false.B ) = {
@@ -107,17 +99,22 @@ class PTW extends PtwModule {
 
   // io <> DontCare
 
-  val arb = Module(new Arbiter(io.req(0).bits.cloneType, PtwWidth))
-  arb.io.in <> io.req
+  val req_t = io.tlb.map(_.req)
+  val arb = Module(new Arbiter(req_t(0).bits.cloneType, PtwWidth))
+  arb.io.in <> req_t
   val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire())
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
-  val valid = ValidHold(arb.io.out.fire(), io.resp(arbChosen).fire())
+  val resp  = io.tlb.map(_.resp)
+  
+  val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire())
   val validOneCycle = OneCycleValid(arb.io.out.fire())
-  arb.io.out.ready := !valid || io.resp(arbChosen).fire()
+  arb.io.out.ready := !valid || resp(arbChosen).fire()
 
-  val mem = io.mem
-  val csr = io.csr
-  val sfence = io.sfence
+  val mem    = io.mem
+  val satp   = io.csr.satp
+  val sfence = io.csr.sfence
+  val priv   = io.csr.priv
+
   val memRdata = mem.resp.bits.rdata
 
   // two level: l2-tlb-cache && pde/pte-cache
@@ -154,7 +151,7 @@ class PTW extends PtwModule {
   }
 
   // ptwl1
-  val l1addr = MakeAddr(csr.satp.ppn, getVpnn(req.vpn, 2))
+  val l1addr = MakeAddr(satp.ppn, getVpnn(req.vpn, 2))
   val (l1Hit, l1HitData) = { // TODO: add excp
     // 16 terms may casue long latency, so divide it into 2 stage, like l2tlb
     val hitVecT = ptwl1.map(_.hit(l1addr))
@@ -256,10 +253,10 @@ class PTW extends PtwModule {
   // resp
   val level = 0.U // FIXME
   for(i <- 0 until PtwWidth) {
-    io.resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || 
-                        (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
-    io.resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, 
-                               new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
+    resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || 
+      (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
+    resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, 
+      new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
   }
 
   // sfence

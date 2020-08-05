@@ -30,6 +30,7 @@ class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
     val dmem = new SimpleBusUC(userBits = (new DcacheUserBundle).getWidth)
+    val tlb = new TlbEndIO
   })
 
   // io <> DontCare
@@ -37,10 +38,11 @@ class Memend extends XSModule {
   val lsu = Module(new Lsu)
   val dcache = Module(new Dcache)
   // val mshq = Module(new MSHQ)
-  val dtlb = Module(new FakeDtlb)
+  // val dtlb = Module(new FakeDtlb)
+  val dtlb = Module(new DTLB)
   
   dcache.io := DontCare
-  dtlb.io := DontCare
+  dtlb.io.end <> io.tlb
   // mshq.io := DontCare
 
   lsu.io.ldin <> io.backend.ldin

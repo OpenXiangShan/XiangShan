@@ -220,9 +220,18 @@ class XSCore extends XSModule {
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
+  val ptw = Module(new PTW)
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
+  ptw.io.csr <> DontCare // TODO
+  ptw.io.mem <> DontCare // TODO
+  ptw.io.tlb(0) <> mem.io.tlb.ptw
+  ptw.io.tlb(1) <> DontCare
+  ptw.io.csr <> DontCare
+  mem.io.tlb.csr <> DontCare // TODO
+  mem.io.tlb.issQue <> DontCare // TODO
+  
 
   backend.io.memMMU.imem <> DontCare
 
