@@ -207,7 +207,7 @@ class PTW extends PtwModule {
   //   miss := DontCare
   //   user := DontCare
   // )
-  // if use Dcache, how to disable VIPT
+  // if use Dcache, how to disable VIPT -> it is hard for tlb to mem with dcache
   io.mem.req.bits := DontCare
   io.mem.req.bits.paddr := 0.U // TODO: add paddr
   io.mem.req.valid := false.B // TODO: add req.valid
@@ -217,5 +217,16 @@ class PTW extends PtwModule {
     io.resp(i).valid := valid && arbChosen===i.U && false.B // TODO: add resp valid logic
     io.resp(i).bits.pte := 0.U // TODO: add resp logic
     io.resp(i).bits.level := 0.U // TODO: add resp logic
+  }
+
+  // sfence
+  val sfence = io.sfence
+  // for ram is syncReadMem, so could not flush conditionally
+  // l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
+  when (sfence.valid) {
+    tlbv := 0.U
+    l1v := 0.U
+    l2v := 0.U
+    l3v := 0.U
   }
 }
