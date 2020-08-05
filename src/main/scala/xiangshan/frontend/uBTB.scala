@@ -77,7 +77,7 @@ class MicroBTB extends BasePredictor
     val read_valid = io.pc.valid
     val read_req_tag = getTag(io.pc.bits)
     val read_req_basebank = getBank(io.pc.bits)
-    val read_mask = circularShiftRight(io.inMask, PredictWidth, read_req_basebank)
+    val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
     XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
     

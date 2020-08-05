@@ -85,7 +85,7 @@ class BTB extends BasePredictor with BTBParams{
   // BTB read requests
   val baseBank = btbAddr.getBank(io.pc.bits)
 
-  val realMask = circularShiftRight(io.inMask, BtbBanks, baseBank)
+  val realMask = circularShiftLeft(io.inMask, BtbBanks, baseBank)
 
   val realMaskLatch = RegEnable(realMask, io.pc.valid)
 
