@@ -247,9 +247,10 @@ class IssueQueue
     val nextIdx = i.U - moveMask(i)
     //TODO: support replay
     val roqIdxMatch = uop.roqIdx === io.tlbFeedback.bits.roqIdx
+    val notEmpty = stateQueue(i)=/=s_invalid
     val replayThis = (stateQueue(i)===s_wait) && tlbMiss && roqIdxMatch
-    val tlbHitThis = tlbHit && roqIdxMatch
-    val flushThis = uop.needFlush(io.redirect)
+    val tlbHitThis = notEmpty && tlbHit && roqIdxMatch
+    val flushThis = notEmpty && uop.needFlush(io.redirect)
 
     when(replayThis){
       stateQueue(nextIdx) := s_replay
