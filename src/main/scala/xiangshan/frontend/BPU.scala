@@ -266,7 +266,7 @@ class BPUStage3 extends BPUStage {
   val ras = Module(new RAS)
   ras.io <> DontCare
   ras.io.pc.bits := inLatch.pc 
-  ras.io.pc.valid := inFire
+  ras.io.pc.valid := predValid
   ras.io.is_ret := rets.orR && io.predecode.valid
   ras.io.callIdx.valid := calls.orR && io.predecode.valid
   ras.io.callIdx.bits := callIdx

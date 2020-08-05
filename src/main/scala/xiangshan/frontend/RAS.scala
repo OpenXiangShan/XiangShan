@@ -50,18 +50,18 @@ class RAS extends BasePredictor
     io.branchInfo.rasTopCtr := ras(sp).ctr
 
     io.out.valid := !is_empty && io.is_ret
-    XDebug("  index       addr           ctr \n")
+    XSDebug("  index       addr           ctr \n")
     for(i <- 0 until RasSize){
         XSDebug("  (%d)   0x%x      %d",i.U,ras(i).retAddr,ras(i).ctr)
-        when(i.U === sp){XSDebug(false,"   <----sp")}
-        XSDebug(false,"\n")
+        when(i.U === sp){XSDebug(false,true.B,"   <----sp")}
+        XSDebug(false,true.B,"\n")
     }
     // update RAS
     // speculative update RAS
     io.out.bits.target := 0.U
     when (!is_full && io.callIdx.valid && io.pc.valid) {
         //push
-        //XDebug("d")
+        //XSDebug("d")
         val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + 4.U   //TODO: consider RVC
         val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
         val allocNewEntry = new_addr =/= ras_top_addr
@@ -91,6 +91,7 @@ class RAS extends BasePredictor
     when (io.redirect.valid && io.redirect.bits.isMisPred) {
         sp := recoverSp
         ras(recoverSp).ctr := recoverCtr
+        XSDebug("RAS recover: recover.rasSq：%d   |  recover.rasTopCtr:%d \n",recoverSp,recoverCtr)
     }
 
 }
