@@ -98,6 +98,8 @@ class PTW extends PtwModule {
   arb.io.out.ready := !valid || io.resp(arbChosen).fire()
 
   val mem = io.mem
+  val csr = io.csr
+  val sfence = io.sfence
 
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
@@ -107,38 +109,55 @@ class PTW extends PtwModule {
   // Reg/Mem/SyncReadMem is not sure now
   val tlbl2 = SyncReadMem(L2TLBEntrySize, new TLBEntry)
   val tlbv  = RegInit(VecInit(Seq.fill(L2TLBEntrySize)(false.B)).asUInt)
-  // val ptwl1 = SyncReadMem(PTWL1EntrySize, new PtwEntry) // TODO: 16, could use Reg
-  val ptwl1 = Reg(VecInit(Seq.fill(PTWL1EntrySize)(false.B)))
+  val ptwl1 = Reg(Vec(PTWL1EntrySize, new PtwEntry))
   val l1v   = RegInit(VecInit(Seq.fill(PTWL1EntrySize)(false.B)).asUInt)
-  val ptwl2 = SyncReadMem(PTWL2EntrySize, new PtwEntry)
+  val ptwl2 = SyncReadMem(PTWL2EntrySize, new PtwEntry) // NOTE: the Mem could be only one port(r&w)
   val l2v   = RegInit(VecInit(Seq.fill(PTWL2EntrySize)(false.B)).asUInt)
-  val ptwl3 = SyncReadMem(PTWL3EntrySize, new PtwEntry)
-  val l3v   = RegInit(VecInit(Seq.fill(PTWL3EntrySize)(false.B)).asUInt)
 
   // tlbl2
   val (tlbHit, tlbHitData) = {
     // tlbl2 is by addr
     // TODO: optimize tlbl2'l2 tag len
     val ramData = tlbl2.read(req.vpn(log2Up(L2TLBEntrySize)-1, 0), validOneCycle)
-    (ramData.vpn === req.vpn, ramData)
+    (ramData.vpn === req.vpn, ramData) // TODO: optimize tag
     // TODO: add exception and refill
   }
 
+  def MakeAddr(ppn: UInt, off: UInt) = {
+    require(off.getWidth == 9)
+    Cat(ppn, off, 0.U(3.W))(PAddrBits-1, 0)
+  }
+
+  def getVpnn(vpn: UInt, idx: Int) = {
+    vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
+  }
+
   // ptwl1
-  val (l1Hit, l1HitData) = {
-    // TODO: add l1 check hit
-    (false.B, false.B)
+  val l1addr = MakeAddr(csr.satp.ppn, getVpnn(req.vpn, 2))
+  val (l1Hit, l1HitData) = { // TODO: add excp
+    // 16 terms may casue long latency, so divide it into 2 stage, like l2tlb
+    val hitVecT = 0.U // ptwl1.map(_.hit(l1Hit))
+    val hitVec  = RegEnable(hitVecT, validOneCycle).asBools
+    val hitData = ParallelMux(hitVec zip ptwl1)
+    val hit     = ParallelOR(hitVec).asBool
+    (hit, hitData)
   }
 
-  val (l2Hit, l2HitData) = {
-    // TODO: add l2 checkt hit
-    (false.B, false.B)
+  // ptwl2
+  val l1Res = Mux(l1Hit, l1HitData.ppn, 0.U/* TODO */)
+  val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
+  val (l2Hit, l2HitData) = { // TODO: add excp
+    val ramData = ptwl2.read(l2addr(log2Up(PTWL2EntrySize)-1+3, 0+3), mem.resp.fire())
+    (0.U.asBool/*ramData. === l2addr.vpn*/, ramData) // TODO: optimize tag
   }
 
-  val (l3Hit, l3HitData) = {
-    // TODO: add l3 check hit
-    (false.B, false.B)
-  }
+  // ptwl3
+  /* ptwl3 has not cache
+   * ptwl3 may be functional conflict with l2-tlb
+   * if l2-tlb does not hit, ptwl3 would not hit (mostly)
+   */
+  val l2Res = Mux(l2Hit, l2HitData.ppn, 0.U/*TODO: mem*/)
+  val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
   // fsm
   val state_idle :: state_tlb/*check tlbcache/l1*/ :: state_wait1/*mem*/ :: state_l2/*check l2*/:: state_wait2/*mem*/ :: state_l3/*check l3*/ :: state_wait3/*check_l3*/ :: Nil = Enum(7)
@@ -160,7 +179,7 @@ class PTW extends PtwModule {
         state := state_idle // tlbHit, return
       }.elsewhen (l1Hit) {
         state := state_l2 // l1Hit, read l2 cache, get data next cycle
-      }.otherwise {
+      }.elsewhen (mem.req.fire()) {
         state := state_wait1 // send mem.req and wait for resp
       }
     }
@@ -174,7 +193,7 @@ class PTW extends PtwModule {
     is (state_l2) {
       when (l2Hit) {
         state := state_l3 // l2 hit, read l3-cache, get data next cycle
-      }.otherwise {
+      }.elsewhen (mem.req.fire()) {
         state := state_wait3 // send mem.req and wait for resp
       }
     }
@@ -186,9 +205,7 @@ class PTW extends PtwModule {
     }
 
     is (state_l3) {
-      when (l3Hit) {
-        state := state_idle // finish fsm
-      }.otherwise {
+      when (mem.req.fire()) {
         state := state_wait3
       }
     }
@@ -220,13 +237,25 @@ class PTW extends PtwModule {
   }
 
   // sfence
-  val sfence = io.sfence
   // for ram is syncReadMem, so could not flush conditionally
   // l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
   when (sfence.valid) {
     tlbv := 0.U
     l1v := 0.U
     l2v := 0.U
-    l3v := 0.U
+  }
+
+  // refill
+  when (mem.resp.fire()) {
+    when (state === state_wait1) {
+      // refill ptwl1
+    }
+    when (state === state_wait2) {
+      // refill ptwl2
+      // assert(ren && wen)
+    }
+    when (state === state_wait3) {
+      // refill l2-tlb
+    }
   }
 }

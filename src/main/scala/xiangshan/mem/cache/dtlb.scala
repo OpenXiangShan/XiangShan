@@ -92,7 +92,7 @@ class TLBEntry extends TlbBundle {
 
   def vpnHit(vpn: UInt) = {
     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
-    val maskLevel = VecInit((0 until Level).map{i => 
+    val maskLevel = VecInit((0 until Level).map{i =>
       VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt})
     val mask = maskLevel(level)
     (mask&this.vpn) === (mask&vpn)
@@ -188,7 +188,7 @@ class DtlbIO extends TlbBundle {
 
 class FakeDtlb extends TlbModule {
   val io = IO(new DtlbIO)
-  // Dtlb has 4 ports: 2 for load, 2 fore store 
+  // Dtlb has 4 ports: 2 for load, 2 for store
   io <> DontCare
   // fake dtlb
   (0 until LoadPipelineWidth + StorePipelineWidth).map(i => {
@@ -206,7 +206,7 @@ class DTLB extends TlbModule {
   val valid = req.map(_.valid)
   val sfence = io.sfence
   val satp = io.csr.satp
-  
+
   val reqAddr = io.lsu.req.map(_.bits.vaddr.asTypeOf(vaBundle2))
   val cmd = io.lsu.req.map(_.bits.cmd)
 
@@ -269,7 +269,7 @@ class DTLB extends TlbModule {
         assert(!io.ptw.resp.valid)
       }
     }
-    
+
     is (state_wait) {
       io.ptw.resp.ready := true.B
       when (io.ptw.resp.fire()) {
@@ -280,7 +280,7 @@ class DTLB extends TlbModule {
 
   // refill
   val ptwResp = io.ptw.resp
-  val refill = ptwResp.fire() 
+  val refill = ptwResp.fire()
   val refillIdx = LFSR64()(log2Up(TLBEntrySize)-1,0)
   when (refill) {
     v := v | (1.U << refillIdx)
