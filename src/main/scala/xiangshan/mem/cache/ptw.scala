@@ -43,6 +43,20 @@ class PtwEntry(tagLen: Int) extends PtwBundle {
     require(addr.getWidth >= PAddrBits)
     tag === addr(PAddrBits-1, PAddrBits-tagLen)
   }
+
+  def refill(addr: UInt, pte: UInt) {
+    tag := addr(PAddrBits-1, PAddrBits-tagLen)
+    ppn := pte.asTypeOf(pteBundle).ppn
+    perm := pte.asTypeOf(pteBundle).perm
+  }
+
+  def genPtwEntry(addr: UInt, pte: UInt) = {
+    val e = new PtwEntry(tagLen)
+    e.tag := addr(PAddrBits-1, PAddrBits-tagLen)
+    e.ppn := pte.asTypeOf(pteBundle).ppn
+    e.perm := pte.asTypeOf(pteBundle).perm
+    e
+  }
 }
 
 class PtwReq extends PtwBundle {
@@ -111,11 +125,13 @@ class PTW extends PtwModule {
 
   // may seperate valid bits to speed up sfence's flush
   // Reg/Mem/SyncReadMem is not sure now
+  val tagLen1 = PAddrBits - log2Up(XLEN/8)
+  val tagLen2 = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
   val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
   val tlbv  = RegInit(VecInit(Seq.fill(TlbL2EntrySize)(false.B)).asUInt)
-  val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PAddrBits - log2Up(XLEN/8))))
+  val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = tagLen1)))
   val l1v   = RegInit(VecInit(Seq.fill(PtwL1EntrySize)(false.B)).asUInt)
-  val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize))) // NOTE: the Mem could be only single port(r&w)
+  val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
   val l2v   = RegInit(VecInit(Seq.fill(PtwL2EntrySize)(false.B)).asUInt)
 
   // tlbl2
@@ -240,8 +256,10 @@ class PTW extends PtwModule {
   // resp
   val level = 0.U // FIXME
   for(i <- 0 until PtwWidth) {
-    io.resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
-    io.resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, new TlbEntry().genTlbEntry(mem.resp.bits.data, level, req.vpn))
+    io.resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || 
+                        (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
+    io.resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, 
+                               new TlbEntry().genTlbEntry(mem.resp.bits.data, level, req.vpn))
   }
 
   // sfence
@@ -256,14 +274,17 @@ class PTW extends PtwModule {
   // refill
   when (mem.resp.fire()) {
     when (state === state_wait1) {
-      // refill ptwl1
+      val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
+      ptwl1(refillIdx).refill(l1addr, mem.resp.bits.data)
     }
     when (state === state_wait2) {
-      // refill ptwl2
-      // assert(ren && wen)
+      val l2addrStore = RegEnable(l2addr, mem.req.fire() && state === state_l2)
+      val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
+      ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, mem.resp.bits.data))
     }
     when (state === state_wait3) {
-      // refill l2-tlb
+      val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
+      tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(mem.resp.bits.data, level, req.vpn))
     }
   }
 }

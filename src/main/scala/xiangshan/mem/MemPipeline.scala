@@ -21,7 +21,6 @@ trait HasMEMConst{
   val TlbL2EntrySize = 256 // or 512
   val PtwL1EntrySize = 16
   val PtwL2EntrySize = 256
-  val PtwL3EntrySize = 1024
 }
 
 class MemToBackendIO extends XSBundle {
