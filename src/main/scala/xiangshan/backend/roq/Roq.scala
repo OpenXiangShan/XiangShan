@@ -12,6 +12,7 @@ import xiangshan.backend.decode.XSTrap
 class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
+    val memRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
@@ -27,6 +28,7 @@ class Roq extends XSModule {
 
   val microOp = Mem(RoqSize, new MicroOp)
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
@@ -57,6 +59,7 @@ class Roq extends XSModule {
     when(io.dp1Req(i).fire()){
       microOp(ringBufferHead+offset) := io.dp1Req(i).bits
       valid(ringBufferHead+offset) := true.B
+      flag(ringBufferHead+offset) := (ringBufferHeadExtended + offset).head(1).asBool()
       writebacked(ringBufferHead+offset) := false.B
       when(csrEnRoq(i)){ hasCsr := true.B }
     }
@@ -225,6 +228,16 @@ class Roq extends XSModule {
     (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
     state := s_extrawalk
     XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
+  }
+
+  // when rollback, reset writebacked entry to valid
+  when(io.brqRedirect.valid && io.brqRedirect.bits.isReplay){ // TODO: opt timing
+    for (i <- 0 until RoqSize) {
+      val recRoqIdx = Cat(flag(i).asUInt, i.U)
+      when(valid(i) && io.memRedirect.bits.isAfter(recRoqIdx)){
+        writebacked(i) := false.B
+      }
+    }
   }
 
   // when exception occurs, cancels all

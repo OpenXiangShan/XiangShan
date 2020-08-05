@@ -205,6 +205,7 @@ class Backend extends XSModule
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
 
+  roq.io.memRedirect <> io.mem.replayAll
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs

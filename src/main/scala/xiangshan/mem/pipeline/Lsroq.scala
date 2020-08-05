@@ -92,15 +92,6 @@ class Lsroq extends XSModule {
     XSInfo("dispatched %d insts to moq\n", PopCount(firedDispatch))
   }
 
-  // misprediction recovery / exception redirect
-  // invalidate lsroq term using robIdx
-  // TODO: check exception redirect implementation
-  (0 until MoqSize).map(i => {
-    when(uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)) {
-      allocated(i) := false.B
-    }
-  })
-
   // writeback load
   (0 until LoadPipelineWidth).map(i => {
     assert(!io.loadIn(i).bits.miss)
@@ -505,6 +496,23 @@ class Lsroq extends XSModule {
   }
 
   io.rollback := ParallelOperation(rollback, rollbackSel)
+
+  // misprediction recovery / exception redirect
+  // invalidate lsroq term using robIdx
+  // TODO: check exception redirect implementation
+  (0 until MoqSize).map(i => {
+    when(uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)) {
+      when(io.brqRedirect.bits.isReplay){
+        valid(i) := false.B
+        store(i) := false.B
+        writebacked(i) := false.B
+        listening(i) := false.B
+        miss(i) := false.B
+      }.otherwise{
+        allocated(i) := false.B
+      }
+    }
+  })
 
   // assert(!io.rollback.valid)
   when(io.rollback.valid) {
