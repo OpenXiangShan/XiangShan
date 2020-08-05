@@ -76,7 +76,7 @@ class MicroBTB extends BasePredictor
     val read_valid = io.pc.valid
     val read_req_tag = getTag(io.pc.bits)
     val read_req_basebank = getBank(io.pc.bits)
-    val read_mask = io.inMask
+    val read_mask = circularShiftRight(io.inMask, PredictWidth, read_req_basebank)
 
     XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
     
@@ -139,18 +139,11 @@ class MicroBTB extends BasePredictor
     //only when hit and instruction valid and entry valid can output data
     for(i <- 0 until PredictWidth)
     {
-        when(read_resp(i).valid)
-        {
-            io.out.targets(i) := read_resp(i).target
-            io.out.hits(i) := true.B
-            io.out.takens(i) := read_resp(i).taken
-            io.out.is_RVC(i) := read_resp(i).is_RVC
-            io.out.notTakens(i) := read_resp(i).notTaken
-        } .otherwise 
-        {
-            io.out := (0.U).asTypeOf(new MicroBTBResp)
-        }
-
+        io.out.targets(i) := read_resp(i).target
+        io.out.hits(i) := read_resp(i).valid
+        io.out.takens(i) := read_resp(i).taken
+        io.out.is_RVC(i) := read_resp(i).is_RVC
+        io.out.notTakens(i) := read_resp(i).notTaken
     }
 
     //uBTB update 
