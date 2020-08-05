@@ -24,6 +24,8 @@ class DecodeBuffer extends XSModule {
     })
   )
 
+  val flush = io.redirect.valid && !io.redirect.bits.isReplay
+
   for( i <- 0 until RenameWidth){
     when(io.out(i).fire()){
       validVec(i) := false.B
@@ -31,7 +33,7 @@ class DecodeBuffer extends XSModule {
     when(io.in(i).fire()){
       validVec(i) := true.B
     }
-    when(io.redirect.valid){
+    when(flush){
       validVec(i) := false.B
     }
 
@@ -40,14 +42,14 @@ class DecodeBuffer extends XSModule {
     io.out(i).bits <> r
     if(i > 0 ){
       io.out(i).valid := validVec(i) &&
-        !io.redirect.valid &&
+        !flush &&
         Mux(r.ctrl.noSpecExec,
           !ParallelOR(validVec.take(i)),
           !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec))
         ) && !io.isWalking
     } else {
       require( i == 0)
-      io.out(i).valid := validVec(i) && !io.redirect.valid && !io.isWalking
+      io.out(i).valid := validVec(i) && !flush && !io.isWalking
     }
   }
 
