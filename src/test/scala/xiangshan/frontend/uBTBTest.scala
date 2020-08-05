@@ -1,17 +1,9 @@
 package xiangshan.frontend
 
-import org.scalatest._
-import chiseltest._
 import chisel3._
-import chisel3.experimental.BundleLiterals._
-import chisel3.util.experimental.BoringUtils
-import chisel3.util._
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
-import utils.XSLog
-import xiangshan._
+import chiseltest._
+import org.scalatest._
 import xiangshan.testutils._
-import xiangshan.testutils.TestCaseGenerator._
 
 
 class uBTBTest extends FlatSpec 
@@ -20,7 +12,6 @@ with Matchers
 with ParallelTestExecution
 with HasPartialDecoupledDriver {
   it should "test uBTBTest" in {
-    XSLog.generateLog = true
     test(new MicroBTB) { c =>
         def genUpdateReq(pc: Long,target: Long,taken: Boolean,fetchIdx: Int,isMiss: Boolean,write_way: Int,hit: Boolean) = {
           c.io.update.valid.poke(true.B)
@@ -56,9 +47,9 @@ with HasPartialDecoupledDriver {
           c.io.pc.valid.poke(false.B)
         }
         genReadReq(fetchpc = 0x60002010)
-        UpdateOnly(pc=0x60002010, target=0x60001000, taken = true , fetchIdx=6, isMiss = true , write_way=0, hit=false)
+        UpdateOnly(pc=0x6000202a, target=0x60001000, taken = true , fetchIdx=6, isMiss = true , write_way=2, hit=false)
         genReadReq(fetchpc = 0x60002010)
-        Bypass(pc=0x60002080, target=0x600020b0, taken = true , fetchIdx=5, isMiss = true , write_way=5, hit=false)
+        //Bypass(pc=0x60002034, target=0x600020b0, taken = true , fetchIdx=5, isMiss = true , write_way=5, hit=false)
     
     }
   }

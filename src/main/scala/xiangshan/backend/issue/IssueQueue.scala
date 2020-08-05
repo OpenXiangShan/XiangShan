@@ -152,7 +152,7 @@ class IssueQueue
   val deqSel = if (fifo) 0.U else PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot, idx by IdQue's idx
   val deqSelIq = idQue(deqSel)
   val deqSelOH = PriorityEncoderOH(idValidQue & srcIdRdy)
-  val has1Rdy = if (fifo) idValidQue(deqSel) && srcIdRdy(deqSel) else ParallelOR((validQue.asUInt & srcRdy.asUInt).asBools).asBool()
+  val has1Rdy = if (fifo) idValidQue(deqSel) && srcIdRdy(deqSel) else ParallelOR((validQue.asUInt & srcRdy.asUInt).asBools)
 
   //-----------------------------------------
   // idQue Move
@@ -182,7 +182,7 @@ class IssueQueue
   val nonValid = ~(idValidQue | ~tailDot2)
   val popSel = PriorityEncoder(nonValid) // Note: idxed by IDque's index
   val popDot = PriorityDot(nonValid)
-  val isPop = ParallelOR(nonValid.asBools).asBool()
+  val isPop = ParallelOR(nonValid.asBools)
   val moveDot = Mux(isPop, tailDot ^ popDot, tailDot ^ selDot)
 
   assert(!(popOne&&moveDot(0)))
@@ -193,7 +193,7 @@ class IssueQueue
     val ptr_tmp = Mux(full, VecInit(Seq.fill(iqIdxWidth)(true.B)).asUInt, tail)
     idQue(ptr_tmp) := idQue(Mux(isPop, popSel, deqSel))
   }
-  assert(ParallelAND(List.tabulate(iqSize)(i => ParallelOR(List.tabulate(iqSize)(j => i.U === idQue(j))))).asBool)
+  assert(ParallelAND(List.tabulate(iqSize)(i => ParallelOR(List.tabulate(iqSize)(j => i.U === idQue(j))))))
 
   //-----------------------------------------
   // Redirect
@@ -209,8 +209,8 @@ class IssueQueue
     }
   }
   // reditect deq(issToExu)
-  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.needFlush(io.redirect))
-  val selIsRed = ParallelOR((deqSelOH & VecInit(redIdHitVec).asUInt).asBools).asBool
+  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.brTag.needFlush(io.redirect))
+  val selIsRed = ParallelOR((deqSelOH & VecInit(redIdHitVec).asUInt).asBools)
 
   //-----------------------------------------
   // Dequeue (or to Issue Stage)
@@ -283,7 +283,7 @@ class IssueQueue
     for(i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for(j <- 0 until srcListenNum) {
         val hitVec = cdbValid.indices.map(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
-        val hit = ParallelOR(hitVec).asBool
+        val hit = ParallelOR(hitVec)
         val data = ParallelMux(hitVec zip cdbData)
         when (validQue(i) && !srcRdyVec(i)(j) && hit) { 
           srcDataWire(i)(j) := data
@@ -306,7 +306,7 @@ class IssueQueue
       for (j <- 0 until srcListenNum) {
         val hitVec = bpValid.indices.map(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
         val hitVecNext = hitVec.map(RegNext(_))
-        val hit = ParallelOR(hitVec).asBool
+        val hit = ParallelOR(hitVec)
         when (validQue(i) && !srcRdyVec(i)(j) && hit) {
           srcRdyVec(i)(j) := true.B
         }
@@ -331,7 +331,7 @@ class IssueQueue
     for (i <- 0 until srcListenNum) {
       val hitVec = bpValid.indices.map(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
       val hitVecNext = hitVec.map(RegNext(_))
-      val hit = ParallelOR(hitVec).asBool
+      val hit = ParallelOR(hitVec)
       when (enqFire && hit && !enqSrcRdy(i)) {
         srcRdyVec(enqSelIq)(i) := true.B
       }

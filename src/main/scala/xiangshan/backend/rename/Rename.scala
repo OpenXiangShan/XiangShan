@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{ParallelOR, XSInfo}
+import utils.XSInfo
 
 class Rename extends XSModule {
   val io = IO(new Bundle() {
@@ -21,15 +21,9 @@ class Rename extends XSModule {
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
   })
 
-  val isWalk = ParallelOR(io.roqCommits.map(x => x.valid && x.bits.isWalk)).asBool()
-
-  val debug_exception = io.redirect.valid && io.redirect.bits.isException
-  val debug_walk = isWalk
-  val debug_norm = !(debug_exception || debug_walk)
-
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
     XSInfo(
-      debug_norm && in.valid && in.ready,
+      in.valid && in.ready,
       p"pc:${Hexadecimal(in.bits.cf.pc)} in v:${in.valid} in rdy:${in.ready} " +
         p"lsrc1:${in.bits.ctrl.lsrc1} -> psrc1:${out.bits.psrc1} " +
         p"lsrc2:${in.bits.ctrl.lsrc2} -> psrc2:${out.bits.psrc2} " +
@@ -73,19 +67,22 @@ class Rename extends XSModule {
     uop.roqIdx := DontCare
   })
 
-  var lastReady = WireInit(true.B)
+  var lastReady = WireInit(io.out(0).ready)
+  // debug assert
+  val outRdy = Cat(io.out.map(_.ready))
+  assert(outRdy===0.U || outRdy.andR())
   for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
     uops(i).brTag := io.in(i).bits.brTag
 
-    val inValid = io.in(i).valid && !isWalk
+    val inValid = io.in(i).valid
 
     // alloc a new phy reg
     val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
     val needIntDest = inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocReqs(i) := needFpDest && lastReady && io.out(i).ready
-    intFreeList.allocReqs(i) := needIntDest && lastReady && io.out(i).ready
+    fpFreeList.allocReqs(i) := needFpDest && lastReady
+    intFreeList.allocReqs(i) := needIntDest && lastReady
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
     val this_can_alloc = Mux(
@@ -97,7 +94,7 @@ class Rename extends XSModule {
         true.B
       )
     )
-    io.in(i).ready := lastReady && io.out(i).ready && this_can_alloc && !isWalk
+    io.in(i).ready := lastReady && this_can_alloc
 
     // do checkpoints when a branch inst come
     for(fl <- Seq(fpFreeList, intFreeList)){
@@ -132,9 +129,6 @@ class Rename extends XSModule {
       rat.specWritePorts(i).wen := specWen || walkWen
       rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
       rat.specWritePorts(i).wdata := Mux(specWen, freeList.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
-
-      busyTable.wbPregs(NRWritePorts + i).valid := walkWen
-      busyTable.wbPregs(NRWritePorts + i).bits := io.roqCommits(i).bits.uop.pdest
 
       XSInfo(walkWen,
         {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
@@ -193,7 +187,7 @@ class Rename extends XSModule {
   def updateBusyTable(fp: Boolean) = {
     val wbResults = if(fp) io.wbFpResults else io.wbIntResults
     val busyTable = if(fp) fpBusyTable else intBusyTable
-    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs.take(NRWritePorts))){
+    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs)){
       setPhyRegRdy.valid := wb.valid && needDestReg(fp, wb.bits.uop)
       setPhyRegRdy.bits := wb.bits.uop.pdest
     }
