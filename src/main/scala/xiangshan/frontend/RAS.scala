@@ -91,7 +91,7 @@ class RAS extends BasePredictor
     when (io.redirect.valid && io.redirect.bits.isMisPred) {
         sp := recoverSp
         ras(recoverSp).ctr := recoverCtr
-        XSDebug("RAS recover: recover.rasSq：%d   |  recover.rasTopCtr:%d \n",recoverSp,recoverCtr)
+        XSDebug("RAS update: SP:%d , Ctr:%d \n",recoverSp,recoverCtr)
     }
 
 }
