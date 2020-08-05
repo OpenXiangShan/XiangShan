@@ -36,40 +36,53 @@ class RAS extends BasePredictor
     }
     override val io = IO(new RASIO)
 
-    val ras = RegInit(0.U)asTypeOf(Vec(RasSize,rasEntry))
+    val ras = Reg(Vec(RasSize, rasEntry()))  //RegInit(0.U)asTypeOf(Vec(RasSize,rasEntry)) cause comb loop
     val sp = RegInit(0.U(log2Up(RasSize).W))
-    val ras_top_entry = ras(sp)
-    val ras_top_addr = ras_top_entry.retAddr
 
     val is_empty = sp === 0.U
     val is_full = sp === (RasSize - 1).U
+
+    val ras_top_entry = ras(sp-1.U)
+    val ras_top_addr = ras_top_entry.retAddr
+    val ras_top_ctr = ras_top_entry.ctr
     // save ras checkpoint info
     io.branchInfo.rasSp := sp
-    io.branchInfo.rasTopCtr := ras_top_entry.ctr
+    io.branchInfo.rasTopCtr := ras(sp).ctr
 
     io.out.valid := !is_empty && io.is_ret
-
+    XDebug("  index       addr           ctr \n")
+    for(i <- 0 until RasSize){
+        XSDebug("  (%d)   0x%x      %d",i.U,ras(i).retAddr,ras(i).ctr)
+        when(i.U === sp){XSDebug(false,"   <----sp")}
+        XSDebug(false,"\n")
+    }
     // update RAS
     // speculative update RAS
     io.out.bits.target := 0.U
-    when (!is_full && io.callIdx.valid) {
+    when (!is_full && io.callIdx.valid && io.pc.valid) {
         //push
         //XDebug("d")
-        val new_addr:= io.pc.bits + (io.callIdx.bits << 2.U) + 4.U
+        val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + 4.U   //TODO: consider RVC
         val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
         val allocNewEntry = new_addr =/= ras_top_addr
-        rasWrite.ctr := Mux(allocNewEntry, 1.U, ras_top_entry.ctr + 1.U)
-        rasWrite.retAddr := Mux(allocNewEntry, new_addr, ras_top_addr)
-        ras(sp) := rasWrite
-        when(allocNewEntry){sp := sp + 1.U }
+        rasWrite.ctr := 1.U
+        rasWrite.retAddr := new_addr
+        when(allocNewEntry){
+            sp := sp + 1.U 
+            ras(sp) := rasWrite
+        }.otherwise{ 
+            ras_top_ctr := ras_top_ctr + 1.U
+        }
+        XSDebug("push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",rasWrite.retAddr,rasWrite.ctr,allocNewEntry,sp.asUInt)
     }.elsewhen (!is_empty && io.is_ret) {
         //pop
         io.out.bits.target := ras_top_addr
-        when (ras_top_entry.ctr === 1.U) {
+        when (ras_top_ctr === 1.U) {
             sp := Mux(sp === 0.U, 0.U, sp - 1.U)
         }.otherwise {
-            ras_top_entry.ctr := ras_top_entry.ctr - 1.U
+           ras_top_ctr := ras_top_ctr - 1.U
         }
+        XSDebug("pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
     }
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
