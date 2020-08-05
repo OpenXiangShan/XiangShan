@@ -62,7 +62,7 @@ class RAS extends BasePredictor
     when (!is_full && io.callIdx.valid && io.pc.valid) {
         //push
         //XSDebug("d")
-        val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + 4.U   //TODO: consider RVC
+        val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U)
         val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
         val allocNewEntry = new_addr =/= ras_top_addr
         rasWrite.ctr := 1.U

@@ -270,7 +270,7 @@ class BPUStage3 extends BPUStage {
   ras.io.is_ret := rets.orR && io.predecode.valid
   ras.io.callIdx.valid := calls.orR && io.predecode.valid
   ras.io.callIdx.bits := callIdx
-  ras.io.isRVC := (calls & RVCs).orR   //TODO
+  ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
   ras.io.redirect := io.redirect
   ras.io.recover := io.recover
 
