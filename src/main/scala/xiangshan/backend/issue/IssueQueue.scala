@@ -2,7 +2,7 @@ package xiangshan.backend.issue
 
 import chisel3.{util, _}
 import chisel3.util._
-import utils.{ParallelMux, ParallelOR, XSDebug, XSInfo}
+import utils.{ParallelMux, ParallelOR, PriorityEncoderWithFlag, XSDebug, XSInfo}
 import xiangshan._
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
@@ -58,10 +58,9 @@ class IssueQueue
              moveMask = 11111100  |  moveMask=11111111
  */
 
-  val firstWait = PriorityEncoder(stateQueue.map(_ === s_wait))
   val firstBubble = PriorityEncoder(stateQueue.map(_ === s_invalid))
-  val realDeqIdx = Mux(tlbHit, firstWait, firstBubble)
-  val realDeqValid = tlbHit || ((firstBubble < tailPtr.tail(1)) && !tlbMiss)
+  val realDeqIdx = firstBubble
+  val realDeqValid = firstBubble < tailPtr.tail(1)
   val moveMask = {
     (Fill(qsize, 1.U(1.W)) << realDeqIdx)(qsize-1, 0)
   } & Fill(qsize, realDeqValid)
@@ -197,7 +196,7 @@ class IssueQueue
     assert(stateQueue(selectedIdxReg) === s_valid, "Dequeue a invalid entry to lsu!")
   }
 
-  assert(!(tailPtr===0.U && tlbHit), "Error: queue is empty but tlbHit is true!")
+//  assert(!(tailPtr===0.U && tlbHit), "Error: queue is empty but tlbHit is true!")
 
   val tailAfterRealDeq = tailPtr - moveMask(tailPtr.tail(1))
   val isFull = tailAfterRealDeq.head(1).asBool() // tailPtr===qsize.U
@@ -215,7 +214,7 @@ class IssueQueue
 
   XSDebug(
     realDeqValid,
-    p"firstWait:$firstWait firstBubble:$firstBubble realDeqIdx:$realDeqIdx\n"
+    p"realDeqIdx:$realDeqIdx\n"
   )
 
   XSDebug("State Dump: ")
@@ -240,30 +239,30 @@ class IssueQueue
   })
   XSDebug(false, true.B, "\n")
 
-  assert(!(tlbMiss && realDeqValid), "Error: realDeqValid should be false when replay valid!")
+//  assert(!(tlbMiss && realDeqValid), "Error: realDeqValid should be false when replay valid!")
   for(i <- 0 until qsize){
     val uopQIdx = idxQueue(i)
+    val uop = uopQueue(uopQIdx)
     val cnt = cntQueue(uopQIdx)
     val nextIdx = i.U - moveMask(i)
-    when(
-      (tlbMiss && stateQueue(i)===s_wait) &&
-        uopQueue(uopQIdx).isAfter(io.tlbFeedback.bits.roqIdx)
-    ){
-      // 'i' is enough because 'realDeqValid' must be false here
-      stateQueue(i) := s_replay
+    //TODO: support replay
+    val roqIdxMatch = uop.roqIdx === io.tlbFeedback.bits.roqIdx
+    val replayThis = (stateQueue(i)===s_wait) && tlbMiss && roqIdxMatch
+    val tlbHitThis = tlbHit && roqIdxMatch
+    val flushThis = uop.needFlush(io.redirect)
+
+    when(replayThis){
+      stateQueue(nextIdx) := s_replay
       cnt := (replayDelay-1).U
     }
     when(stateQueue(i)===s_replay){
-      when(cnt === 0.U) {
+      when(cnt === 0.U){
         stateQueue(nextIdx) := s_valid
-        if(i == 0) {
-          assert(!moveMask(0), "Error: Attemp to delete a 's_replay' entry!")
-        }
       }.otherwise({
         cnt := cnt - 1.U
       })
     }
-    when(uopQueue(uopQIdx).needFlush(io.redirect)){
+    when(flushThis || tlbHitThis){
       stateQueue(nextIdx) := s_invalid
     }
   }
@@ -286,5 +285,5 @@ class IssueQueue
       p"src2: ${io.deq.bits.uop.psrc2} data: ${Hexadecimal(io.deq.bits.src2)} " +
       p"imm : ${Hexadecimal(io.deq.bits.uop.ctrl.imm)}\npdest: ${io.deq.bits.uop.pdest}\n"
   )
-  XSDebug(p"tailPtr:$tailPtr tailAfterDeq:$tailAfterRealDeq tlbHit:${tlbHit}\n")
+  XSDebug(p"tailPtr:$tailPtr tailAfterDeq:$tailAfterRealDeq tlbHit:$tlbHit\n")
 }
