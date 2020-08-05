@@ -130,7 +130,7 @@ class MicroBTB extends BasePredictor
         chunks.reduce(_^_)
     }
     out_ubtb_br_info.writeWay.map(_:= Mux(read_hit,read_hit_way,alloc_way))
-    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%d, read_hit_way:%d  alloc_way:%d \n",read_hit_vec.asUInt,read_hit_way,alloc_way)
+    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, read_hit_way:%d  alloc_way:%d \n",read_hit_vec.asUInt,read_hit_way,alloc_way)
     for(i <- 0 until PredictWidth) {
         XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   notTaken:%d   target:0x%x\n",
                                  i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).notTaken,read_resp(i).target )
@@ -185,8 +185,8 @@ class MicroBTB extends BasePredictor
             satUpdate( uBTBMeta(update_bank)(update_write_way).pred,2,update_taken)
         )
     }
-    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits%b  | update_write_way:%d  | update_bank: %d| update_br_index:%d\n "
-                ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx)
+    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x\n "
+                ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag)
    
    //bypass:read-after-write 
 //    for( b <- 0 until PredictWidth) {
