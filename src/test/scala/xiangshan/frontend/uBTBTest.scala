@@ -47,9 +47,9 @@ with HasPartialDecoupledDriver {
           c.io.pc.valid.poke(false.B)
         }
         genReadReq(fetchpc = 0x60002010)
-        UpdateOnly(pc=0x60002010, target=0x60001000, taken = true , fetchIdx=6, isMiss = true , write_way=0, hit=false)
+        UpdateOnly(pc=0x60002014, target=0x60001000, taken = true , fetchIdx=6, isMiss = true , write_way=0, hit=false)
         genReadReq(fetchpc = 0x60002010)
-        Bypass(pc=0x60002080, target=0x600020b0, taken = true , fetchIdx=5, isMiss = true , write_way=5, hit=false)
+        //Bypass(pc=0x60002034, target=0x600020b0, taken = true , fetchIdx=5, isMiss = true , write_way=5, hit=false)
     
     }
   }
