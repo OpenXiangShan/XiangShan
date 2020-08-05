@@ -133,6 +133,10 @@ trait HasRoqIdx { this: HasXSParameter =>
     )
   }
 
+  def isAfter[ T<: HasRoqIdx ](that: T): Bool = {
+    isAfter(that.roqIdx)
+  }
+
   def needFlush(redirect: Valid[Redirect]): Bool = {
     redirect.valid && this.isAfter(redirect.bits.roqIdx)
   }
