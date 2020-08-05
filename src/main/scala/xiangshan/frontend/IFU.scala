@@ -325,7 +325,7 @@ class IFU extends XSModule with HasIFUConst
 
   pd.io.in := io.icacheResp.bits
   pd.io.prev.valid := if3_hasPrevHalfInstr
-  pd.io.prev.bits := prevHalfInstr.target
+  pd.io.prev.bits := prevHalfInstr.instr
 
   io.fetchPacket.valid := if4_valid && !io.redirect.valid
   io.fetchPacket.bits.instrs := if4_pd.instrs
