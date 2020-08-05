@@ -18,3 +18,26 @@ object PriorityEncoderDefault {
     PriorityMuxDefault(in.zipWithIndex.map(x => x._1 -> x._2.U), default)
   }
 }
+
+object PriorityMuxWithFlag {
+  def apply[T <: Data](in: Seq[(Bool, T)]): (T, Bool) = {
+    in.size match {
+      case 1 =>
+        (in.head._2, in.head._1)
+      case _ =>
+        val (d_tail, f_tail) = PriorityMuxWithFlag(in.tail)
+        val d_head = in.head._2
+        val f_head = in.head._1
+        (Mux(f_head, d_head, d_tail), f_head || f_tail)
+    }
+  }
+}
+
+object PriorityEncoderWithFlag {
+  def apply(in: Seq[Bool]): (UInt, Bool) = {
+    PriorityMuxWithFlag(in.zipWithIndex.map(x => x._1 -> x._2.U))
+  }
+  def apply(in: Bits): (UInt, Bool) = {
+    PriorityEncoderWithFlag(in.asBools())
+  }
+}

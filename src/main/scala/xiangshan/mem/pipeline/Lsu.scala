@@ -44,7 +44,7 @@ object LSUOpType {
   def atomD = "011".U
 }
 
-class LsPipelineBundle extends XSBundle with HasMEMConst {
+class LsPipelineBundle extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val func = UInt(6.W)
@@ -61,17 +61,18 @@ class LsPipelineBundle extends XSBundle with HasMEMConst {
   val forwardData = Vec(8, UInt(8.W))
 }
 
-class LoadForwardQueryIO extends XSBundle with HasMEMConst {
+class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val moqIdx = Output(UInt(MoqIdxWidth.W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
+  val valid = Output(Bool()) //for debug
 
   val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
 }
 
-class LsuIO extends XSBundle with HasMEMConst {
+class LsuIO extends XSBundle {
   val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
   val ldout = Vec(2, Decoupled(new ExuOutput))
@@ -89,7 +90,7 @@ class LsuIO extends XSBundle with HasMEMConst {
 }
 
 // 2l2s out of order lsu for XiangShan
-class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
+class Lsu extends XSModule {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
 
@@ -136,9 +137,9 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val l5_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
 
   (0 until LoadPipelineWidth).map(i => {
-    when (l2_out(i).valid) { XSDebug("L2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType, l2_out(i).bits.data)}; 
-    when (l4_out(i).valid) { XSDebug("L4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", l4_out(i).bits.uop.cf.pc, l4_out(i).bits.vaddr, l4_out(i).bits.paddr, l4_out(i).bits.uop.ctrl.fuOpType, l4_out(i).bits.data)}; 
-    when (l5_in(i).valid)  { XSDebug("L5_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", l5_in(i).bits.uop.cf.pc,  l5_in(i).bits.vaddr , l5_in(i).bits.paddr , l5_in(i).bits.uop.ctrl.fuOpType , l5_in(i).bits.data )}; 
+    when (l2_out(i).valid) { XSDebug("L2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType, l2_out(i).bits.data, l2_out(i).bits.mask)}; 
+    when (l4_out(i).valid) { XSDebug("L4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", l4_out(i).bits.uop.cf.pc, l4_out(i).bits.vaddr, l4_out(i).bits.paddr, l4_out(i).bits.uop.ctrl.fuOpType, l4_out(i).bits.data, l4_out(i).bits.mask)}; 
+    when (l5_in(i).valid)  { XSDebug("L5_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", l5_in(i).bits.uop.cf.pc,  l5_in(i).bits.vaddr , l5_in(i).bits.paddr , l5_in(i).bits.uop.ctrl.fuOpType , l5_in(i).bits.data,  l5_in(i).bits.mask )}; 
     XSDebug(l2_out(i).fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType)
   })
 
@@ -175,6 +176,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     io.dcache.load(i).req.bits.user := DontCare
     io.dcache.load(i).req.bits.user.uop := l2_out(i).bits.uop
     io.dcache.load(i).req.bits.user.mmio := AddressSpace.isMMIO(io.dcache.load(i).req.bits.paddr)
+    io.dcache.load(i).req.bits.user.mask := l2_out(i).bits.mask
   })
   
   // Send TLB feedback to load issue queue
@@ -204,6 +206,7 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     l4_out(i).bits.data := io.dcache.load(i).resp.bits.data
     l4_out(i).bits.uop := io.dcache.load(i).resp.bits.user.uop
     l4_out(i).bits.mmio := io.dcache.load(i).resp.bits.user.mmio
+    l4_out(i).bits.mask := io.dcache.load(i).resp.bits.user.mask
     l4_out(i).valid := io.dcache.load(i).resp.valid
   })
 
@@ -216,11 +219,13 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     lsroq.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
     lsroq.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
     lsroq.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    lsroq.io.forward(i).valid := l4_out(i).valid
     
     sbuffer.io.forward(i).paddr := l4_out(i).bits.paddr
     sbuffer.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
     sbuffer.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
     sbuffer.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    sbuffer.io.forward(i).valid := l4_out(i).valid
     
     val forwardVec = WireInit(lsroq.io.forward(i).forwardData)
     val forwardMask = WireInit(lsroq.io.forward(i).forwardMask)
@@ -301,13 +306,14 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
     // Current dcache use MSHR
 
     lsroq.io.loadIn(i).bits := l5_in(i).bits
+    lsroq.io.loadIn(i).bits.data := rdataPartialLoad // for debug
     lsroq.io.loadIn(i).valid := loadWriteBack(i)
 
     // pipeline control
     l5_in(i).ready := io.ldout(i).ready
 
     lsroq.io.ldout(i).ready := false.B // TODO
-    // TODO: writeback missed load
+    // TODO: writeback missed loads
   })
 
 //-------------------------------------------------------
@@ -318,8 +324,8 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst {
   val s3_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
 
   (0 until StorePipelineWidth).map(i => {
-    when (s2_out(i).valid) { XSDebug("S2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)}; 
-    when (s3_in(i).valid ) { XSDebug("S3_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s3_in(i).bits.uop.cf.pc , s3_in(i).bits.vaddr , s3_in(i).bits.paddr , s3_in(i).bits.uop.ctrl.fuOpType , s3_in(i).bits.data )}; 
+    when (s2_out(i).valid) { XSDebug("S2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data, s2_out(i).bits.mask)}; 
+    when (s3_in(i).valid ) { XSDebug("S3_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", s3_in(i).bits.uop.cf.pc , s3_in(i).bits.vaddr , s3_in(i).bits.paddr , s3_in(i).bits.uop.ctrl.fuOpType , s3_in(i).bits.data,  s3_in(i).bits.mask )}; 
     // when (s4_in(i).valid ) { printf("S4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s4_in(i).bits.uop.cf.pc , s4_in(i).bits.vaddr , s4_in(i).bits.paddr , s4_in(i).bits.uop.ctrl.fuOpType , s4_in(i).bits.data )}; 
     XSDebug(s2_out(i).fire(), "store req: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)
   })

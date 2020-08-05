@@ -10,7 +10,7 @@ import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 
-trait HasTLBConst extends HasXSParameter with HasMEMConst {
+trait HasTlbConst extends HasXSParameter {
   val Level = 3
 
   val offLen  = 12
@@ -68,8 +68,8 @@ trait HasTLBConst extends HasXSParameter with HasMEMConst {
   }
 }
 
-abstract class TlbBundle extends Bundle with HasTLBConst
-abstract class TlbModule extends Module with HasTLBConst
+abstract class TlbBundle extends Bundle with HasTlbConst
+abstract class TlbModule extends Module with HasTlbConst
 
 class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   val d = Bool()

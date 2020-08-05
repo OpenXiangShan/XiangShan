@@ -16,7 +16,6 @@ class ReservationStationTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver
 {
-  XSLog.generateLog = false
   it should "do enq issue with no delay correctly" in {
     test(new ReservationStation(Exu.aluExeUnitCfg, wakeupCnt = 1, bypassCnt = 1, fifo = false) {
       AddSinks()

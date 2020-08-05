@@ -9,6 +9,7 @@ import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
+import top.Parameters
 
 object CacheOp {
   def load   = "b00".U
@@ -69,17 +70,18 @@ class MissReqIO extends XSBundle
   val paddr = UInt(PAddrBits.W)
 }
 
-class DcacheToLsuIO extends XSBundle with HasMEMConst {
+class DcacheToLsuIO extends XSBundle {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
   val refill = Flipped(Valid(new DCacheStoreReq))
   val redirect = Flipped(ValidIO(new Redirect))
 }
 
-class DcacheIO extends XSBundle with HasMEMConst {
+class DcacheIO extends XSBundle {
   val lsu = new DcacheToLsuIO
   // val l2 = TODO
 
+  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
   // NutShell cache for pipeline test
   val dmem = new SimpleBusUC(userBits = DcacheUserBundleWidth)
 }
@@ -113,7 +115,7 @@ class Dcache extends XSModule {
 
   ldUser.uop := ldReq.bits.user.uop
   ldUser.mmio := ldReq.bits.user.mmio
-  ldUser.mask := DontCare
+  ldUser.mask := ldReq.bits.user.mask
   ldUser.id := 0.U
   ldUser.paddr := ldReq.bits.paddr
   stUser.uop := stReq.bits.user.uop

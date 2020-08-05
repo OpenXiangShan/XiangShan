@@ -10,7 +10,7 @@ import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 
-trait HasPtwConst extends HasTLBConst{
+trait HasPtwConst extends HasTlbConst{
   val PtwWidth = 2
 }
 

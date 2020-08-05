@@ -1,5 +1,6 @@
 package xiangshan.backend.roq
 
+import chisel3.ExcitingUtils.ConnectionType
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -8,9 +9,10 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 // A "just-enough" Roq
-class Roq(implicit val p: XSConfig) extends XSModule {
+class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
+    val memRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
@@ -26,6 +28,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
 
   val microOp = Mem(RoqSize, new MicroOp)
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
@@ -56,6 +59,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     when(io.dp1Req(i).fire()){
       microOp(ringBufferHead+offset) := io.dp1Req(i).bits
       valid(ringBufferHead+offset) := true.B
+      flag(ringBufferHead+offset) := (ringBufferHeadExtended + offset).head(1).asBool()
       writebacked(ringBufferHead+offset) := false.B
       when(csrEnRoq(i)){ hasCsr := true.B }
     }
@@ -205,7 +209,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     (0 until CommitWidth).map(
       i => state === s_idle &&
         io.commits(i).valid &&
-        microOp(ringBufferTail+i.U).cf.brUpdate.isBr
+        !microOp(ringBufferTail+i.U).cf.brUpdate.pd.notCFI
     )
   ))
   io.bcommit := PopCount(validBcommit)
@@ -224,6 +228,16 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     (0 until RenameWidth).map(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
     state := s_extrawalk
     XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
+  }
+
+  // when rollback, reset writebacked entry to valid
+  when(io.brqRedirect.valid && io.brqRedirect.bits.isReplay){ // TODO: opt timing
+    for (i <- 0 until RoqSize) {
+      val recRoqIdx = Cat(flag(i).asUInt, i.U)
+      when(valid(i) && io.memRedirect.bits.isAfter(recRoqIdx)){
+        writebacked(i) := false.B
+      }
+    }
   }
 
   // when exception occurs, cancels all
@@ -277,9 +291,6 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   }
   val instrCnt = RegInit(0.U(64.W))
   instrCnt := instrCnt + retireCounter
-  val hitTrap = trapVec.reduce(_||_)
-  val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-  val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
   val difftestIntrNO = WireInit(0.U(XLEN.W))
   ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
@@ -287,7 +298,7 @@ class Roq(implicit val p: XSConfig) extends XSModule {
   val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
   val retirePCFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.pc, microOp(firstValidCommit).cf.pc)
   val retireInstFix = Mux(io.redirect.valid, microOp(ringBufferTail).cf.instr, microOp(firstValidCommit).cf.instr)
-  if(!p.FPGAPlatform){
+  if(!env.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
     BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
@@ -299,29 +310,18 @@ class Roq(implicit val p: XSConfig) extends XSModule {
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
 
-    class Monitor extends BlackBox {
-      val io = IO(new Bundle {
-        val clk = Input(Clock())
-        val reset = Input(Reset())
-        val isNoopTrap = Input(Bool())
-        val trapCode = Input(UInt(32.W))
-        val trapPC = Input(UInt(64.W))
-        val cycleCnt = Input(UInt(64.W))
-        val instrCnt = Input(UInt(64.W))
-      })
-    }
+    val hitTrap = trapVec.reduce(_||_)
+    val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+    val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
 
-    val debugMonitor =  Module(new Monitor)
-    debugMonitor.io.clk := this.clock
-    debugMonitor.io.reset := this.reset
-    debugMonitor.io.isNoopTrap := hitTrap
-    debugMonitor.io.trapCode := trapCode
-    debugMonitor.io.trapPC := trapPC
-    debugMonitor.io.cycleCnt := GTimer()
-    debugMonitor.io.instrCnt := instrCnt
+    ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
+    ExcitingUtils.addSource(RegNext(trapCode), "trapCode")
+    ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
+    ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
+    ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
 
     if(EnableBPU){
-      BoringUtils.addSource(hitTrap, "XSTRAP")
+      ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
     }
   }
 }

@@ -118,12 +118,12 @@ class Dispatch1 extends XSModule {
 
     io.toFpDq(i).bits := uopWithIndex(fpIndex.io.mapping(i).bits)
     io.toFpDq(i).valid := fpIndex.io.mapping(i).valid &&
-      canEnqueue(intIndex.io.mapping(i).bits) &&
+      canEnqueue(fpIndex.io.mapping(i).bits) &&
       orderedEnqueue(fpIndex.io.mapping(i).bits)
 
     io.toLsDq(i).bits := uopWithIndex(lsIndex.io.mapping(i).bits)
     io.toLsDq(i).valid := lsIndex.io.mapping(i).valid &&
-      canEnqueue(intIndex.io.mapping(i).bits) &&
+      canEnqueue(lsIndex.io.mapping(i).bits) &&
       orderedEnqueue(lsIndex.io.mapping(i).bits)
 
     XSDebug(io.toIntDq(i).valid, p"pc 0x${Hexadecimal(io.toIntDq(i).bits.cf.pc)} int index $i\n")

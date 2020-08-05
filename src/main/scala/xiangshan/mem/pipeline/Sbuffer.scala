@@ -10,13 +10,13 @@ import xiangshan.mem._
 import xiangshan.mem.cache._
 import bus.simplebus._
 
-class SbufferUserBundle extends XSBundle with HasMEMConst {
+class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
   val lsroqId = UInt(log2Up(MoqSize).W)
 }
 
 // Store buffer for XiangShan Out of Order LSU
-class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
+class Sbuffer extends XSModule with NeedImpl{
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
     val dcache = Flipped(new DCacheStoreIO)
@@ -65,7 +65,7 @@ class Sbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst with N
   
 // Fake Store buffer for XiangShan Out of Order LSU
 // NutShell DCache Interface
-class FakeSbuffer(implicit val p: XSConfig) extends XSModule with HasMEMConst {
+class FakeSbuffer extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
     val dcache = Flipped(new DCacheStoreIO)
