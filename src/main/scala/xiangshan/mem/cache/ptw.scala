@@ -73,7 +73,7 @@ class PtwIO extends PtwBundle {
   val resp = Vec(PtwWidth, Decoupled(new PtwResp))
   val sfence = Flipped(ValidIO(new SfenceBundle))
   val csr = Flipped(new TlbCsrIO)
-  val mem = new DCacheLoadIO // Use Dcache temp
+  val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
 }
 
 // class SeperateValidSyncReadMem extends Module {
@@ -118,6 +118,7 @@ class PTW extends PtwModule {
   val mem = io.mem
   val csr = io.csr
   val sfence = io.sfence
+  val memRdata = mem.resp.bits.rdata
 
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
@@ -164,7 +165,7 @@ class PTW extends PtwModule {
   }
 
   // ptwl2
-  val l1Res = Mux(l1Hit, l1HitData.ppn, mem.resp.bits.data.asTypeOf(pteBundle).ppn)
+  val l1Res = Mux(l1Hit, l1HitData.ppn, memRdata.asTypeOf(pteBundle).ppn)
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitData) = { // TODO: add excp
     val ramData = ptwl2.read(l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8)), mem.resp.fire())
@@ -176,7 +177,7 @@ class PTW extends PtwModule {
    * ptwl3 may be functional conflict with l2-tlb
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
-  val l2Res = Mux(l2Hit, l2HitData.ppn, mem.resp.bits.data.asTypeOf(pteBundle).ppn)
+  val l2Res = Mux(l2Hit, l2HitData.ppn, memRdata.asTypeOf(pteBundle).ppn)
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
   // fsm
@@ -238,20 +239,19 @@ class PTW extends PtwModule {
   }
 
   // mem:
-  // io.mem.req.apply(
-  //   paddr := 0.U // TODO: add paddr
-  //   vaddr := DontCare
-  //   miss := DontCare
-  //   user := DontCare
-  // )
-  // if use Dcache, how to disable VIPT -> it is hard for tlb to mem with dcache
-  io.mem.req.bits := DontCare
-  io.mem.req.bits.paddr := Mux(state === state_tlb, l1addr,
-                           Mux(state === state_l2,  l2addr,
-                           Mux(state === state_l3,  l3addr, 0.U))) // TODO: add paddr
   io.mem.req.valid := (state === state_tlb && !tlbHit && l1Hit) ||
                       (state === state_l2 && !l2Hit) ||
                       (state === state_l3) // TODO: add req.valid
+  io.mem.req.bits.apply(
+    addr = Mux(state === state_tlb, l1addr,
+            Mux(state === state_l2,  l2addr,
+            Mux(state === state_l3,  l3addr, 0.U))),
+    cmd  = SimpleBusCmd.read,
+    size = "b11".U,
+    wdata= 0.U,
+    wmask= 0.U,
+    user = 0.U
+  )
 
   // resp
   val level = 0.U // FIXME
@@ -259,7 +259,7 @@ class PTW extends PtwModule {
     io.resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || 
                         (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
     io.resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, 
-                               new TlbEntry().genTlbEntry(mem.resp.bits.data, level, req.vpn))
+                               new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
   }
 
   // sfence
@@ -275,16 +275,16 @@ class PTW extends PtwModule {
   when (mem.resp.fire()) {
     when (state === state_wait1) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
-      ptwl1(refillIdx).refill(l1addr, mem.resp.bits.data)
+      ptwl1(refillIdx).refill(l1addr, memRdata)
     }
     when (state === state_wait2) {
       val l2addrStore = RegEnable(l2addr, mem.req.fire() && state === state_l2)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
-      ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, mem.resp.bits.data))
+      ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
     }
     when (state === state_wait3) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
-      tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(mem.resp.bits.data, level, req.vpn))
+      tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
     }
   }
 }
