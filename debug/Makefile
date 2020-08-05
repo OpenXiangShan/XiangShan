@@ -20,7 +20,7 @@ cpu:
 # ------------------------------------------------------------------
 
 cputest:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2 > cpu.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2>&1 | tee > cpu.log
 	cat cpu.log | grep different
 	cat cpu.log | grep IPC
 
