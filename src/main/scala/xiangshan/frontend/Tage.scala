@@ -258,30 +258,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
 }
 
-class FakeTAGE extends BasePredictor with HasTageParameter {
-  class TAGEResp extends Resp {
-    val takens = Vec(PredictWidth, ValidUndirectioned(Bool()))
-  }
-  class TAGEMeta extends Meta {
-  }
-  class FromBIM extends FromOthers {
-    val ctrs = Vec(PredictWidth, UInt(2.W))
-  }
-  class TageIO extends DefaultBasePredictorIO {
-    val resp = Output(new TAGEResp)
-    val meta = Output(Vec(PredictWidth, new TageMeta))
-    val bim = Input(new FromBIM)
-    val s3Fire = Input(Bool())
-  }
-
-  override val io = IO(new TageIO)
-
-  io.resp <> DontCare
-  io.meta <> DontCare
-}
-
-
-class Tage extends BasePredictor with HasTageParameter {
+abstract class BaseTage extends BasePredictor with HasTageParameter {
   class TAGEResp extends Resp {
     val takens = Vec(PredictWidth, Bool())
     val hits = Vec(PredictWidth, Bool())
@@ -299,6 +276,15 @@ class Tage extends BasePredictor with HasTageParameter {
   }
 
   override val io = IO(new TageIO)
+}
+
+class FakeTage extends BaseTage {
+  io.resp <> DontCare
+  io.meta <> DontCare
+}
+
+
+class Tage extends BaseTage {
 
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {

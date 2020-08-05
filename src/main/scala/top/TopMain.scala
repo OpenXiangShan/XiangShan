@@ -5,11 +5,10 @@ import device.{AXI4Flash, AXI4Timer, AXI4VGA}
 import gpu._
 import chisel3._
 import chisel3.stage.ChiselGeneratorAnnotation
-import xiangshan.XSConfig
 
 class Top extends Module {
   val io = IO(new Bundle{})
-  val xsSoc = Module(new XSSoc()(XSConfig()))
+  val xsSoc = Module(new XSSoc())
   val timer = Module(new AXI4Timer)
   val vga = Module(new AXI4VGA)
   val flash = Module(new AXI4Flash)
