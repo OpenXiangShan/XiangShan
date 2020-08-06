@@ -66,7 +66,7 @@ class BTB extends BasePredictor with BTBParams{
     val meta = Output(new BTBMeta)
   }
   override val io = IO(new BTBIO)
-  val btbAddr = new TableAddr(log2Up(BtbSize), BtbBanks)
+  val btbAddr = new TableAddr(log2Up(BtbSize/BtbWays), BtbBanks)
 
   val pcLatch = RegEnable(io.pc.bits, io.pc.valid)
 
@@ -232,8 +232,8 @@ class BTB extends BasePredictor with BTBParams{
   if (debug_verbose) {
     for (i <- 0 until BtbBanks){
       for (j <- 0 until BtbWays) {
-        XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-        j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
+        XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
+        j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, realMaskLatch(i), metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
       }
     }
   }
