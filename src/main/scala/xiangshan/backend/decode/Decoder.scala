@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import xiangshan._
-import utils.{LookupTree, SignExt, ZeroExt}
+import utils._
 import xiangshan.backend._
 import xiangshan.backend.decode.isa.RVCInstr
 import xiangshan.{CfCtrl, CtrlFlow}
@@ -99,7 +99,7 @@ class Decoder extends XSModule with HasInstrType {
     InstrU  -> SignExt(Cat(instr(31, 12), 0.U(12.W)), XLEN),//fixed
     InstrJ  -> SignExt(Cat(instr(31), instr(19, 12), instr(20), instr(30, 21), 0.U(1.W)), XLEN)
   ))
-  val immrvc = LookupTree(instrType, List(
+  val immrvc = LookupTree(rvcImmType, List(
     RVCInstr.ImmNone  -> 0.U(XLEN.W),
     RVCInstr.ImmLWSP  -> ZeroExt(Cat(instr(3,2), instr(12), instr(6,4), 0.U(2.W)), XLEN),
     RVCInstr.ImmLDSP  -> ZeroExt(Cat(instr(4,2), instr(12), instr(6,5), 0.U(3.W)), XLEN),
@@ -121,10 +121,10 @@ class Decoder extends XSModule with HasInstrType {
 
  when (fuType === FuType.jmp) {
    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
-   when (isLink(rd) && fuOpType === JumpOpType.jal) { io.out.ctrl.fuOpType := JumpOpType.call }
+   when (isLink(rfDest) && fuOpType === JumpOpType.jal) { io.out.ctrl.fuOpType := JumpOpType.call }
    when (fuOpType === JumpOpType.jalr) {
-     when (isLink(rs)) { io.out.ctrl.fuOpType := JumpOpType.ret }
-     when (isLink(rd)) { io.out.ctrl.fuOpType := JumpOpType.call }
+     when (isLink(rfSrc1)) { io.out.ctrl.fuOpType := JumpOpType.ret }
+     when (isLink(rfDest)) { io.out.ctrl.fuOpType := JumpOpType.call }
    }
  }
   // fix LUI
@@ -144,4 +144,12 @@ class Decoder extends XSModule with HasInstrType {
     io.out.ctrl.lsrc1 := 10.U // a0
   }
   io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr
+
+  XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",
+    io.in.instr, io.in.pc, io.in.exceptionVec.asUInt, io.in.intrVec.asUInt, io.in.crossPageIPFFix)
+  XSDebug("out: src1Type=%b src2Type=%b src3Type=%b lsrc1=%d lsrc2=%d lsrc3=%d ldest=%d fuType=%b fuOpType=%b\n",
+    io.out.ctrl.src1Type, io.out.ctrl.src2Type, io.out.ctrl.src3Type, io.out.ctrl.lsrc1, io.out.ctrl.lsrc2, io.out.ctrl.lsrc3, io.out.ctrl.ldest, io.out.ctrl.fuType, io.out.ctrl.fuOpType)
+  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d isRVF=%d imm=%x\n",
+    io.out.ctrl.rfWen, io.out.ctrl.fpWen, io.out.ctrl.isXSTrap, io.out.ctrl.noSpecExec, io.out.ctrl.isBlocked, io.out.ctrl.isRVF, io.out.ctrl.imm)
+
 }
