@@ -117,9 +117,17 @@ class TlbEntry extends TlbBundle {
   }
 }
 
+object TlbCmd {
+  def read  = "b00".U
+  def write = "b01".U
+  def exec  = "b10".U
+
+  def apply() = UInt(2.W)
+}
+
 class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
-  val cmd = SimpleBusCmd() // TODO: turn to Bool
+  val cmd = TlbCmd()
 }
 
 class TlbResp extends TlbBundle {
@@ -156,34 +164,9 @@ class TlbPtwIO extends TlbBundle {
   val resp = Flipped(DecoupledIO(new PtwResp))
 }
 
-class SfenceBundle extends TlbBundle{ // TODO: turn to IO, now rare BUnd
-  val rs1 = Bool()
-  val rs2 = Bool()
-  val addr = UInt(VAddrBits.W)
-  // val asid = UInt(asidLen.W)
-}
-
-class TlbCsrIO extends TlbBundle {
-  val satp = Output(new Bundle {
-    val mode = UInt(4.W) // TODO: may change number to parameter
-    val asid = UInt(16.W)
-    val ppn  = UInt(44.W) // just use PAddrBits - 3 - vpnnLen
-  })
-  val priv = Output(new Bundle {
-    val mxr = Bool()
-    val sum = Bool()
-  })
-  val sfence = Valid(new Bundle {
-    val rs1 = Bool()
-    val rs2 = Bool()
-    val addr = UInt(VAddrBits.W)
-  })
-}
-
 class TlbIO(Width: Int) extends TlbBundle {
   val requestor = Flipped(new TlbRequestIO(Width))
   val ptw = new TlbPtwIO
-  val csr = Flipped(new TlbCsrIO)
 
   override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
 }
@@ -200,16 +183,19 @@ class FakeTlb(Width: Int = 1) extends TlbModule {
   })
 }
 
-class TLB(Width: Int = 1) extends TlbModule {
+class TLB(Width: Int = 1, isDtlb: Boolean = true) extends TlbModule {
   val io = IO(new TlbIO(Width))
 
   val req    = io.requestor.req
   val resp   = io.requestor.resp
-  val sfence = io.csr.sfence
-  val satp   = io.csr.satp
-  val priv   = io.csr.priv
-  // val issQue = io.issQue
   val ptw    = io.ptw
+
+  val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
+  val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
+  val satp   = csr.satp
+  val priv   = csr.priv
+  BoringUtils.addSink(sfence, "SfenceBundle")
+  BoringUtils.addSink(csr, "TLBCSRIO")
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle2))
   val cmd     = req.map(_.bits.cmd)
@@ -223,13 +209,12 @@ class TLB(Width: Int = 1) extends TlbModule {
   val hit = (0 until Width) map {i => ParallelOR(hitVec(i)).asBool }
   val miss = (0 until Width) map {i => !hit(i) && valid(i) }
   val hitppn = (0 until Width) map { i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
+  val hitPerm = (0 until Width) map { i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
   val multiHit = {
     val hitSum = (0 until Width) map {i => PopCount(hitVec(i)) }
     ParallelOR((0 until Width) map { i => !(hitSum(i) === 0.U || hitSum(i) === 1.U) })
   }
   assert(!multiHit) // add multiHit here, later it should be removed (maybe), turn to miss and flush
-
-  val excp_tmp = false.B // TODO: add exception check
 
   // resp
   for(i <- 0 until Width) {
@@ -237,9 +222,9 @@ class TLB(Width: Int = 1) extends TlbModule {
     resp(i).valid := valid(i) && hit(i)
     resp(i).bits.paddr := Cat(hitppn(i), reqAddr(i).off)
     resp(i).bits.miss := ~hit(i)
-    resp(i).bits.excp.pf.ld := excp_tmp
-    resp(i).bits.excp.pf.st := excp_tmp
-    resp(i).bits.excp.pf.instr := excp_tmp
+    resp(i).bits.excp.pf.ld := false.B
+    resp(i).bits.excp.pf.st := false.B
+    resp(i).bits.excp.pf.instr := false.B
   }
 
   // sfence (flush)
@@ -292,8 +277,4 @@ class TLB(Width: Int = 1) extends TlbModule {
     v := v | (1.U << refillIdx)
     entry(refillIdx) := ptw.resp.bits
   }
-
-  // // issQue
-  // issQue.miss := (~VecInit(hit).asUInt).asBools
-  // issQue.missCanIss := ptw.resp.fire() // one cycle fire
 }

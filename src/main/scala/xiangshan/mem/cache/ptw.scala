@@ -70,7 +70,6 @@ class PtwResp extends TlbEntry
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
-  val csr = Flipped(new TlbCsrIO)
   val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
 }
 
@@ -97,11 +96,8 @@ object OneCycleValid {
 class PTW extends PtwModule {
   val io = IO(new PtwIO)
 
-  // io <> DontCare
-
-  val req_t = io.tlb.map(_.req)
-  val arb = Module(new Arbiter(req_t(0).bits.cloneType, PtwWidth))
-  arb.io.in <> req_t
+  val arb = Module(new Arbiter(io.tlb(0).req.bits.cloneType, PtwWidth))
+  arb.io.in <> io.tlb.map(_.req)
   val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire())
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
   val resp  = VecInit(io.tlb.map(_.resp))
@@ -111,9 +107,12 @@ class PTW extends PtwModule {
   arb.io.out.ready := !valid || resp(arbChosen).fire()
 
   val mem    = io.mem
-  val satp   = io.csr.satp
-  val sfence = io.csr.sfence
-  val priv   = io.csr.priv
+  val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
+  val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
+  val satp   = csr.satp
+  val priv   = csr.priv
+  BoringUtils.addSink(sfence, "SfenceBundle")
+  BoringUtils.addSink(csr, "TLBCSRIO")
 
   val memRdata = mem.resp.bits.rdata
 

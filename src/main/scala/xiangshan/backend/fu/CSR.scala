@@ -171,8 +171,6 @@ class CSRIO extends FunctionUnitIO {
   val instrValid = Input(Bool())
   // for differential testing
 //  val intrNO = Output(UInt(XLEN.W))
-  val imemMMU = Flipped(new MMUIO)
-  val dmemMMU = Flipped(new MMUIO)
   val wenFix = Output(Bool())
 }
 
@@ -322,7 +320,15 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
-  BoringUtils.addSource(satp, "CSRSATP")
+
+  val tlbBundle = Wire(new TlbCsrBundle)
+  val sfence    = Wire(new SfenceBundle)
+  tlbBundle.satp.mode := satp(63, 60)
+  tlbBundle.satp.asid := satp(59, 44)
+  tlbBundle.satp.ppn  := satp(43,  0)
+  sfence := 0.U.asTypeOf(new SfenceBundle)
+  BoringUtils.addSource(tlbBundle, "TLBCSRIO")
+  BoringUtils.addSource(sfence, "SfenceBundle") // FIXME: move to MOU
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -545,16 +551,14 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   // assert(!hasStorePageFault)
 
   //TODO: Havn't test if io.dmemMMU.priviledgeMode is correct yet
-  io.imemMMU.priviledgeMode := priviledgeMode
-  io.dmemMMU.priviledgeMode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
-  io.imemMMU.status_sum := mstatusStruct.sum.asBool
-  io.dmemMMU.status_sum := mstatusStruct.sum.asBool
-  io.imemMMU.status_mxr := DontCare
-  io.dmemMMU.status_mxr := mstatusStruct.mxr.asBool
+  tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
+  tlbBundle.priv.sum   := mstatusStruct.sum.asBool
+  tlbBundle.priv.imode := priviledgeMode
+  tlbBundle.priv.dmode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
 
   val hasInstrPageFault = io.exception.bits.cf.exceptionVec(instrPageFault) && io.exception.valid
-  val hasLoadPageFault = io.dmemMMU.loadPF
-  val hasStorePageFault = io.dmemMMU.storePF
+  val hasLoadPageFault = false.B // FIXME: add ld-pf/st-pf
+  val hasStorePageFault = false.B
   val hasStoreAddrMisaligned = io.exception.bits.cf.exceptionVec(storeAddrMisaligned)
   val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned)
 
@@ -566,7 +570,8 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
         SignExt(io.exception.bits.cf.pc + 2.U, XLEN),
         SignExt(io.exception.bits.cf.pc, XLEN)
       ),
-      SignExt(io.dmemMMU.addr, XLEN)
+      // SignExt(io.dmemMMU.addr, XLEN)
+      "hffffffff".U // FIXME: add ld/st pf
     )
     when(priviledgeMode === ModeM){
       mtval := tval
