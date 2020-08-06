@@ -32,6 +32,6 @@ class Dtlb extends XSModule {
   (0 until LoadPipelineWidth + StorePipelineWidth).map(i => {
     io.lsu(i).resp.valid := io.lsu(i).req.valid
     io.lsu(i).resp.bits.paddr := io.lsu(i).req.bits.vaddr
-    io.lsu(i).resp.bits.miss := false.B
+    io.lsu(i).resp.bits.miss := LFSR64()(3, 0) === 0.U
   })
 }
