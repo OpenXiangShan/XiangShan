@@ -207,18 +207,21 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val cmd     = req.map(_.bits.cmd)
   val valid   = req.map(_.valid)
 
+  def widthMapSeq[T <: Seq[Data]](f: Int => T) = (0 until Width).map(f)
+  def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
+
   val v = RegInit(0.U(TlbEntrySize.W))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   // val g = entry.map(_.perm.g) // g is not used, for asid is not used
-  val hitVec = (0 until Width) map { i => 
+  val hitVec = widthMapSeq{ i => 
     (v.asBools zip VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))).map{ case (a,b) => a&b } }
-  val hit = (0 until Width) map {i => ParallelOR(hitVec(i)).asBool & valid(i) }
-  val miss = (0 until Width) map {i => !hit(i) && valid(i) }
-  val hitppn = (0 until Width) map { i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
-  val hitPerm = (0 until Width) map { i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
+  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool & valid(i) }
+  val miss = widthMap{i => !hit(i) && valid(i) }
+  val hitppn = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
+  val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
   val multiHit = {
-    val hitSum = (0 until Width) map {i => PopCount(hitVec(i)) }
-    ParallelOR((0 until Width) map { i => !(hitSum(i) === 0.U || hitSum(i) === 1.U) })
+    val hitSum = widthMap{ i => PopCount(hitVec(i)) }
+    ParallelOR(widthMap{ i => !(hitSum(i) === 0.U || hitSum(i) === 1.U) })
   }
   assert(!multiHit) // add multiHit here, later it should be removed (maybe), turn to miss and flush
 
