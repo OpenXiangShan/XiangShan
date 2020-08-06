@@ -11,7 +11,7 @@ import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
 import utils._
-import xiangshan.mem.cache.DcacheUserBundle
+import xiangshan.cache.DcacheUserBundle
 
 case class XSCoreParameters
 (
