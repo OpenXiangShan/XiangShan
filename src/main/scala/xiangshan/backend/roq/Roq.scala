@@ -20,7 +20,7 @@ class Roq extends XSModule {
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
-    val mcommit = Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W)))
+    val mcommit = Vec(CommitWidth, Valid(UInt(LsroqIdxWidth.W)))
     val bcommit = Output(UInt(BrTagWidth.W))
   })
 
@@ -238,7 +238,7 @@ class Roq extends XSModule {
   // TODO MMIO
   (0 until CommitWidth).map(i => {
     io.mcommit(i).valid := storeCommitVec(i)
-    io.mcommit(i).bits := io.commits(i).bits.uop.moqIdx
+    io.mcommit(i).bits := io.commits(i).bits.uop.lsroqIdx
   })
 
   io.bcommit := PopCount(cfiCommitVec)

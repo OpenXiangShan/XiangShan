@@ -8,7 +8,7 @@ import xiangshan.cache._
 
 class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
-  val lsroqId = UInt(log2Up(MoqSize).W)
+  val lsroqId = UInt(log2Up(LsroqSize).W)
 }
 
 // Store buffer for XiangShan Out of Order LSU

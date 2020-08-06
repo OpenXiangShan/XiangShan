@@ -50,7 +50,7 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  MoqSize: Int = 16,
+  LsroqSize: Int = 16,
   RoqSize: Int = 32,
   IntDqDeqWidth: Int = 4,
   FpDqDeqWidth: Int = 4,
@@ -129,12 +129,12 @@ trait HasXSParameter {
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = core.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val MoqSize = core.MoqSize // 64
+  val LsroqSize = core.LsroqSize // 64
   val RoqSize = core.RoqSize
   val InnerRoqIdxWidth = log2Up(RoqSize)
   val RoqIdxWidth = InnerRoqIdxWidth + 1
-  val InnerMoqIdxWidth = log2Up(MoqSize)
-  val MoqIdxWidth = InnerMoqIdxWidth + 1
+  val InnerLsroqIdxWidth = log2Up(LsroqSize)
+  val LsroqIdxWidth = InnerLsroqIdxWidth + 1
   val IntDqDeqWidth = core.IntDqDeqWidth
   val FpDqDeqWidth = core.FpDqDeqWidth
   val LsDqDeqWidth = core.LsDqDeqWidth

@@ -68,7 +68,6 @@ class LsPipelineBundle extends XSBundle {
   val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  // val moqIdx = UInt(log2Up(MoqSize).W)
   val uop = new MicroOp
 
   val miss = Bool()
@@ -82,7 +81,7 @@ class LsPipelineBundle extends XSBundle {
 class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  val moqIdx = Output(UInt(MoqIdxWidth.W))
+  val lsroqIdx = Output(UInt(LsroqIdxWidth.W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool()) //for debug
 
@@ -100,9 +99,9 @@ class MemToBackendIO extends XSBundle {
   val replayAll = ValidIO(new Redirect)
   // replay mem instructions form Load Queue/Store Queue
   val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
-  val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W))))
+  val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(LsroqIdxWidth.W))))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-  val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+  val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
 }
 
 class Memend extends XSModule {
@@ -151,7 +150,7 @@ class Memend extends XSModule {
   lsroq.io.stout <> io.backend.stout
   lsroq.io.mcommit <> io.backend.mcommit
   lsroq.io.dp1Req <> io.backend.dp1Req
-  lsroq.io.moqIdxs <> io.backend.moqIdxs
+  lsroq.io.lsroqIdxs <> io.backend.lsroqIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
   dcache.io.lsu.redirect := io.backend.redirect

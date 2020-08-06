@@ -106,13 +106,13 @@ class LoadUnit extends XSModule {
 
   io.lsroq.forward.paddr := l4_out.bits.paddr
   io.lsroq.forward.mask := io.dcache.resp.bits.user.mask
-  io.lsroq.forward.moqIdx := l4_out.bits.uop.moqIdx
+  io.lsroq.forward.lsroqIdx := l4_out.bits.uop.lsroqIdx
   io.lsroq.forward.pc := l4_out.bits.uop.cf.pc
   io.lsroq.forward.valid := l4_out.valid
 
   io.sbuffer.paddr := l4_out.bits.paddr
   io.sbuffer.mask := io.dcache.resp.bits.user.mask
-  io.sbuffer.moqIdx := l4_out.bits.uop.moqIdx
+  io.sbuffer.lsroqIdx := l4_out.bits.uop.lsroqIdx
   io.sbuffer.pc := l4_out.bits.uop.cf.pc
   io.sbuffer.valid := l4_out.valid
 

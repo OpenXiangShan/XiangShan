@@ -16,10 +16,10 @@ class Dispatch1 extends XSModule {
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
-    // enq Moq
-    val toMoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get MoqIdx
-    val moqIdxs = Input(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+    // enq Lsroq
+    val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // get LsroqIdx
+    val lsroqIdx = Input(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
     // to dispatch queue
     val toIntDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
     val toFpDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
@@ -55,20 +55,20 @@ class Dispatch1 extends XSModule {
   val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
-  val lsroqIndexReg = Reg(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+  val lsroqIndexReg = Reg(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
   val lsroqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val lsroqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toMoq(i).ready || lsroqIndexRegValid(i))))
+  val lsroqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toLsroq(i).ready || lsroqIndexRegValid(i))))
 
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSROQ
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
     io.toRoq(i).bits.ctrl.dpqType := Cat(isLs(i), isFp(i))
-    io.toRoq(i).bits.moqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.moqIdxs(i))
+    io.toRoq(i).bits.lsroqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.lsroqIdx(i))
 
-    io.toMoq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)
-    io.toMoq(i).bits := io.fromRename(i).bits
-    io.toMoq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
+    io.toLsroq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)
+    io.toLsroq(i).bits := io.fromRename(i).bits
+    io.toLsroq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
     // receive indexes from ROQ and LSROQ
     when(io.toRoq(i).fire() && !io.recv(i)) {
@@ -77,8 +77,8 @@ class Dispatch1 extends XSModule {
     }.elsewhen(io.recv(i)) {
       roqIndexRegValid(i) := false.B
     }
-    when(io.toMoq(i).fire() && !io.recv(i)) {
-      lsroqIndexReg(i) := io.moqIdxs(i)
+    when(io.toLsroq(i).fire() && !io.recv(i)) {
+      lsroqIndexReg(i) := io.lsroqIdx(i)
       lsroqIndexRegValid(i) := true.B
     }.elsewhen(io.recv(i)) {
       lsroqIndexRegValid(i) := false.B
@@ -87,10 +87,10 @@ class Dispatch1 extends XSModule {
     // append ROQ and LSROQ indexed to uop
     uopWithIndex(i) := io.fromRename(i).bits
     uopWithIndex(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
-    uopWithIndex(i).moqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.moqIdxs(i))
+    uopWithIndex(i).lsroqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.lsroqIdx(i))
 
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
-    XSDebug(io.toMoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives mroq ${io.moqIdxs(i)}\n")
+    XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives mroq ${io.lsroqIdx(i)}\n")
     if (i > 0) {
       XSError(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid, p"roq handshake not continuous $i")
     }
@@ -144,7 +144,7 @@ class Dispatch1 extends XSModule {
 
     XSInfo(io.recv(i) && !cancelled(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-        p"roq ${uopWithIndex(i).roqIdx} lsroq ${uopWithIndex(i).moqIdx} is accepted by dispatch queue " +
+        p"roq ${uopWithIndex(i).roqIdx} lsroq ${uopWithIndex(i).lsroqIdx} is accepted by dispatch queue " +
         p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
     XSInfo(io.recv(i) && cancelled(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} with brTag ${io.fromRename(i).bits.brTag.value} cancelled\n")
