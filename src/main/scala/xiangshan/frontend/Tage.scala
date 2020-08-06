@@ -148,16 +148,17 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val iAndTIdxInOrder = VecInit((0 until TageBanks).map(b => ((TageBanks.U +& b.U) - baseBank)(log2Up(TageBanks)-1, 0)))
   val iAndTIdxInOrderLatch = RegEnable(iAndTIdxInOrder, enable=io.req.valid)
 
-  val realMask = circularShiftRight(io.req.bits.mask, TageBanks, baseBank)
+  val realMask = circularShiftLeft(io.req.bits.mask, TageBanks, baseBank)
+  val realMaskLatch = RegEnable(realMask, enable=io.req.valid)
 
   (0 until TageBanks).map(
     b => {
       hi_us(b).reset := reset.asBool
       lo_us(b).reset := reset.asBool
       table(b).reset := reset.asBool
-      hi_us(b).io.r.req.valid := io.req.valid
-      lo_us(b).io.r.req.valid := io.req.valid
-      table(b).io.r.req.valid := io.req.valid
+      hi_us(b).io.r.req.valid := io.req.valid && realMask(b)
+      lo_us(b).io.r.req.valid := io.req.valid && realMask(b)
+      table(b).io.r.req.valid := io.req.valid && realMask(b)
       lo_us(b).io.r.req.bits.setIdx := idxes(iAndTIdxInOrder(b.U))
       hi_us(b).io.r.req.bits.setIdx := idxes(iAndTIdxInOrder(b.U))
       table(b).io.r.req.bits.setIdx := idxes(iAndTIdxInOrder(b.U))
@@ -172,7 +173,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val req_rhits = VecInit((0 until TageBanks).map(b => table_r(b).valid && table_r(b).tag === tagLatch(b)))
 
   (0 until TageBanks).map(b => {
-    io.resp(b).valid := req_rhits(b)
+    io.resp(b).valid := req_rhits(b) && realMask(b)
     io.resp(b).bits.ctr := table_r(b).ctr
     io.resp(b).bits.u := Cat(hi_us_r(b),lo_us_r(b))
   })

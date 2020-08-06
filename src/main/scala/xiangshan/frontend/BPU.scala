@@ -195,7 +195,6 @@ class BPUStage1 extends BPUStage {
   .elsewhen(outFire)        { predValid := false.B }
   .otherwise                { predValid := predValid }
   io.in.ready := !predValid || io.out.fire() && io.pred.fire() || io.flush
-  // io.out.valid := predValid
 
   // ubtb is accessed with inLatch pc in s1, 
   // so we use io.in instead of inLatch
@@ -265,7 +264,7 @@ class BPUStage3 extends BPUStage {
       brs & Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))
     }
 
-  // predict taken only if btb has a target
+  // predict taken only if btb has a target, jal targets will be provided by IFU
   takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
