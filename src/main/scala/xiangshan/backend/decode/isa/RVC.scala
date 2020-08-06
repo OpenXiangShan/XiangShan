@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.decode.HasInstrType
 import xiangshan.FuType
+import xiangshan.backend._
 
 trait HasRVCConst {
 
@@ -117,8 +118,49 @@ object RVCInstr extends HasInstrType with HasRVCConst {
 
 //   def is_C_ADDI4SPN(op: UInt) = op(12,5) =/= 0.U
 
-  // fixme: add rvc inst
-  val table = Array()
+  val table = Array(
+    C_ILLEGAL    -> List(InstrN, FuType.csr, CSROpType.jmp),
+    C_ADDI4SPN   -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_FLD        -> List(InstrFI, FuType.ldu, LSUOpType.ld),
+    C_LW         -> List(InstrI, FuType.ldu, LSUOpType.lw),
+    C_LD         -> List(InstrI, FuType.ldu, LSUOpType.ld),
+    C_FSD        -> List(InstrFS, FuType.stu, LSUOpType.sd),
+    C_SW         -> List(InstrS, FuType.stu, LSUOpType.sw),
+    C_SD         -> List(InstrS, FuType.stu, LSUOpType.sd),
+    C_NOP        -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_ADDI       -> List(InstrI, FuType.alu, ALUOpType.add),
+    // C_JAL        -> List(InstrI, FuType.alu, ALUOpType.add),//RV32C only
+    C_ADDIW      -> List(InstrI, FuType.alu, ALUOpType.addw),
+    C_LI         -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_ADDI16SP   -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_LUI        -> List(InstrU, FuType.alu, ALUOpType.add),
+    C_SRLI       -> List(InstrI, FuType.alu, ALUOpType.srl),
+    C_SRAI       -> List(InstrI, FuType.alu, ALUOpType.sra),
+    C_ANDI       -> List(InstrI, FuType.alu, ALUOpType.and),
+    C_SUB        -> List(InstrR, FuType.alu, ALUOpType.sub),
+    C_XOR        -> List(InstrR, FuType.alu, ALUOpType.xor),
+    C_OR         -> List(InstrR, FuType.alu, ALUOpType.or),
+    C_AND        -> List(InstrR, FuType.alu, ALUOpType.and),
+    C_SUBW       -> List(InstrR, FuType.alu, ALUOpType.subw),
+    C_ADDW       -> List(InstrR, FuType.alu, ALUOpType.addw),
+    C_J          -> List(InstrJ, FuType.jmp, JumpOpType.jal),
+    C_BEQZ       -> List(InstrB, FuType.alu, ALUOpType.beq),
+    C_BNEZ       -> List(InstrB, FuType.alu, ALUOpType.bne),
+    C_SLLI       -> List(InstrI, FuType.alu, ALUOpType.sll),
+    // C_FLDSP      -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_LWSP       -> List(InstrI, FuType.ldu, LSUOpType.lw),
+    // C_FLWSP      -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_LDSP       -> List(InstrI, FuType.ldu, LSUOpType.ld),
+    C_JR         -> List(InstrI, FuType.jmp, JumpOpType.jalr),
+    C_MV         -> List(InstrR, FuType.alu, ALUOpType.add),
+    C_EBREAK     -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_JALR       -> List(InstrI, FuType.jmp, JumpOpType.jalr),
+    C_ADD        -> List(InstrR, FuType.alu, ALUOpType.add),
+    // C_FSDSP      -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_SWSP       -> List(InstrS, FuType.stu, LSUOpType.sw),
+    // C_FSWSP      -> List(InstrI, FuType.alu, ALUOpType.add),
+    C_SDSP       -> List(InstrS, FuType.stu, LSUOpType.sd)
+  )
 
    val cExtraTable = Array(
     C_ADDI4SPN   -> List(ImmADD4SPN, REGx2, DtCare, REGrs2p),

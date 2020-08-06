@@ -178,18 +178,27 @@ class Lsu extends XSModule {
     io.dcache.load(i).req.bits.user.mmio := AddressSpace.isMMIO(io.dcache.load(i).req.bits.paddr)
     io.dcache.load(i).req.bits.user.mask := l2_out(i).bits.mask
   })
-  
-  // Send TLB feedback to load issue queue
-  (0 until LoadPipelineWidth).map(i => {
-    io.tlbFeedback(i).valid := l2_out(i).fire()
-    io.tlbFeedback(i).bits.hit := !io.dtlb.resp(i).bits.miss
-    io.tlbFeedback(i).bits.roqIdx := l2_out(i).bits.uop.roqIdx
-  })
+
+
+
+  val l2_tlbFeedback = (0 until LoadPipelineWidth).map(_ => Wire(new TlbFeedback))
+  for((fb, i) <- l2_tlbFeedback.zipWithIndex){
+    fb.hit := !io.dtlb.resp(i).bits.miss
+    fb.roqIdx := l2_out(i).bits.uop.roqIdx
+  }
 
 //-------------------------------------------------------
 // LD Pipeline Stage 3
 // Compare tag, use addr to query DCache Data
 //-------------------------------------------------------
+
+  val l3_tlbFeedback = l2_tlbFeedback.map(RegNext(_))
+  val l3_valid = l2_out.map(x => RegNext(x.fire(), false.B))
+  for(i <- 0 until LoadPipelineWidth){
+    io.tlbFeedback(i).valid := l3_valid(i)
+    io.tlbFeedback(i).bits := l3_tlbFeedback(i)
+  }
+
 
 // Done in Dcache
 
@@ -352,6 +361,7 @@ class Lsu extends XSModule {
     s2_out(i).bits.paddr := io.dtlb.resp(LoadPipelineWidth + i).bits.paddr
     s2_out(i).bits.data := genWdata(io.stin(i).bits.src2, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
     s2_out(i).bits.uop := io.stin(i).bits.uop
+    s2_out(i).bits.miss := io.dtlb.resp(LoadPipelineWidth + i).bits.miss
     s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
     s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
     io.stin(i).ready := s2_out(i).ready
@@ -361,17 +371,19 @@ class Lsu extends XSModule {
     PipelineConnect(s2_out(i), s3_in(i), true.B, s3_in(i).valid && s3_in(i).bits.uop.needFlush(io.redirect))
   })
 
-  // Send TLB feedback to store issue queue
-  (0 until StorePipelineWidth).map(i => {
-    io.tlbFeedback(LoadPipelineWidth + i).valid := s2_out(i).fire()
-    io.tlbFeedback(LoadPipelineWidth + i).bits.hit := !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
-    io.tlbFeedback(LoadPipelineWidth + i).bits.roqIdx := s2_out(i).bits.uop.roqIdx
-  })
+
 
 //-------------------------------------------------------
 // ST Pipeline Stage 3
 // Write paddr to LSROQ
 //-------------------------------------------------------
+
+  // Send TLB feedback to store issue queue
+  (0 until StorePipelineWidth).foreach(i => {
+    io.tlbFeedback(LoadPipelineWidth + i).valid := s3_in(i).fire()
+    io.tlbFeedback(LoadPipelineWidth + i).bits.hit := !s3_in(i).bits.miss
+    io.tlbFeedback(LoadPipelineWidth + i).bits.roqIdx := s3_in(i).bits.uop.roqIdx
+  })
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsroq
@@ -382,7 +394,7 @@ class Lsu extends XSModule {
     lsroq.io.storeIn(i).bits.mmio := AddressSpace.isMMIO(s3_in(i).bits.paddr)
     lsroq.io.storeIn(i).valid := s3_in(i).fire()
   })
-  
+
 //-------------------------------------------------------
 // ST Pipeline Stage 4
 // Store writeback, send store request to store buffer

@@ -2,9 +2,8 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import xiangshan.backend.ALUOpType
 import utils._
+import xiangshan._
 
 import scala.math.min
 
@@ -44,7 +43,7 @@ class MicroBTB extends BasePredictor
     override val io = IO(new MicroBTBIO)
     io.uBTBBranchInfo <> out_ubtb_br_info
 
-    def getTag(pc: UInt) = pc >> (log2Ceil(PredictWidth) + 1).U
+    def getTag(pc: UInt) = (pc >> (log2Ceil(PredictWidth) + 1)).asUInt()
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
     def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
         val oldSatTaken = old === ((1 << len)-1).U
@@ -77,7 +76,7 @@ class MicroBTB extends BasePredictor
     val read_valid = io.pc.valid
     val read_req_tag = getTag(io.pc.bits)
     val read_req_basebank = getBank(io.pc.bits)
-    val read_mask = io.inMask
+    val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
     XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
     
@@ -103,7 +102,7 @@ class MicroBTB extends BasePredictor
     val read_hit_vec = VecInit(read_hit_ohs.map{oh => ParallelOR(oh).asBool})
     val read_hit_ways = VecInit(read_hit_ohs.map{oh => PriorityEncoder(oh)})
     val read_hit =  ParallelOR(read_hit_vec).asBool
-    val read_hit_way = PriorityEncoder(ParallelOR(read_hit_vec.map(_.asUInt)))
+    val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
     
 
     val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => uBTBMeta(read_bank_inOrder(b))(read_hit_ways(b))))//uBTBMeta(i)(read_hit_ways(index))
@@ -131,7 +130,7 @@ class MicroBTB extends BasePredictor
         chunks.reduce(_^_)
     }
     out_ubtb_br_info.writeWay.map(_:= Mux(read_hit,read_hit_way,alloc_way))
-    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%d, read_hit_way:%d  alloc_way:%d\n",read_hit_vec.asUInt,read_hit_way,alloc_way)
+    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, read_hit_way:%d  alloc_way:%d \n",read_hit_vec.asUInt,read_hit_way,alloc_way)
     for(i <- 0 until PredictWidth) {
         XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   notTaken:%d   target:0x%x\n",
                                  i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).notTaken,read_resp(i).target )
@@ -140,27 +139,20 @@ class MicroBTB extends BasePredictor
     //only when hit and instruction valid and entry valid can output data
     for(i <- 0 until PredictWidth)
     {
-        when(read_resp(i).valid)
-        {
-            io.out.targets(i) := read_resp(i).target
-            io.out.hits(i) := true.B
-            io.out.takens(i) := read_resp(i).taken
-            io.out.is_RVC(i) := read_resp(i).is_RVC
-            io.out.notTakens(i) := read_resp(i).notTaken
-        } .otherwise 
-        {
-            io.out := (0.U).asTypeOf(new MicroBTBResp)
-        }
-
+        io.out.targets(i) := read_resp(i).target
+        io.out.hits(i) := read_resp(i).valid
+        io.out.takens(i) := read_resp(i).taken
+        io.out.is_RVC(i) := read_resp(i).is_RVC
+        io.out.notTakens(i) := read_resp(i).notTaken
     }
 
     //uBTB update 
     //backend should send fetch pc to update
     val u = io.update.bits.ui
-    val update_fetch_pc  = u.pc
-    val update_idx = u.fetchIdx
-    val update_br_offset = update_idx << 1.U
-    val update_br_pc = update_fetch_pc + update_br_offset
+    val update_br_pc  = u.pc
+    val update_br_idx = u.fetchIdx
+    val update_br_offset = (update_br_idx << 1).asUInt()
+    val update_fetch_pc = update_br_pc - update_br_offset
     val update_write_way = u.brInfo.ubtbWriteWay
     val update_hits = u.brInfo.ubtbHits
     val update_taken = u.taken
@@ -193,18 +185,19 @@ class MicroBTB extends BasePredictor
             satUpdate( uBTBMeta(update_bank)(update_write_way).pred,2,update_taken)
         )
     }
-    XSDebug(meta_write_valid,"uBTB update: update fetch pc:0x%x  | real pc:0x%x  | update hits%b  | update_write_way:%d\n",update_fetch_pc,update_br_pc,update_hits,update_write_way)
+    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x\n "
+                ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag)
    
    //bypass:read-after-write 
-   for( b <- 0 until PredictWidth) {
-        when(update_bank === b.U && meta_write_valid && read_valid
-            && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
-        {
-            io.out.targets(b) := u.target
-            io.out.takens(b) := u.taken
-            io.out.is_RVC(b) := u.pd.isRVC
-            io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
-            XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+ (b.U << 1.U),b.U, io.out.targets(b))
-        }
-    }
+//    for( b <- 0 until PredictWidth) {
+//         when(update_bank === b.U && meta_write_valid && read_valid
+//             && Mux(b.U < update_base_bank,update_tag===read_req_tag+1.U ,update_tag===read_req_tag))  //read and write is the same fetch-packet
+//         {
+//             io.out.targets(b) := u.target
+//             io.out.takens(b) := u.taken
+//             io.out.is_RVC(b) := u.pd.isRVC
+//             io.out.notTakens(b) := (u.pd.brType === BrType.branch) && (!io.out.takens(b))
+//             XSDebug("uBTB bypass hit! :   hitpc:0x%x |  hitbanck:%d  |  out_target:0x%x\n",io.pc.bits+(b<<1).asUInt(),b.U, io.out.targets(b))
+//         }
+//     }
 }
