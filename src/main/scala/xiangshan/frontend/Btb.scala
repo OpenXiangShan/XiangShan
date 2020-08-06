@@ -202,10 +202,11 @@ class BTB extends BasePredictor with BTBParams{
   val updateWay = u.brInfo.btbWriteWay
   val updateBankIdx = btbAddr.getBank(u.pc)
   val updateRow = btbAddr.getBankIdx(u.pc)
-  val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), pdInfoToBTBtype(u.pd), u.pd.isRVC)
+  val updateType = pdInfoToBTBtype(u.pd)
+  val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val updateValid = io.update.valid && u.isMisPred
+  val updateValid = io.update.valid && (u.isMisPred && !(u.pd.isJal) || u.pd.isJal)
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
