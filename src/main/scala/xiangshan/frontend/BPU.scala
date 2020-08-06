@@ -267,8 +267,8 @@ class BPUStage3 extends BPUStage {
   ras.io <> DontCare
   ras.io.pc.bits := inLatch.pc 
   ras.io.pc.valid := io.out.fire()//predValid
-  ras.io.is_ret := (retIdx === jmpIdx) && io.predecode.valid
-  ras.io.callIdx.valid :=(callIdx === jmpIdx) && io.predecode.valid
+  ras.io.is_ret := rets.orR  && (retIdx === jmpIdx) && io.predecode.valid
+  ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
   ras.io.callIdx.bits := callIdx
   ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
   ras.io.redirect := io.redirect
