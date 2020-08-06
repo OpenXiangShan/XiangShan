@@ -431,6 +431,7 @@ class BPU extends BaseBPU {
   s1_resp_in.btb <> btb.io.resp
   for (i <- 0 until PredictWidth) {
     s1_brInfo_in(i).btbWriteWay := btb.io.meta.writeWay(i)
+    s1_brInfo_in(i).btbHitJal   := btb.io.meta.hitJal(i)
   }
 
   bim.io.flush := io.flush(0) // TODO: fix this
