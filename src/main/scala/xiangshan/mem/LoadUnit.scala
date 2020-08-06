@@ -74,22 +74,22 @@ class LoadUnit extends XSModule {
   l2_tlbFeedback.hit := !io.dtlb.resp.bits.miss
   l2_tlbFeedback.roqIdx := l2_out.bits.uop.roqIdx
 
-//-------------------------------------------------------
-// LD Pipeline Stage 3
-// Compare tag, use addr to query DCache Data
-//-------------------------------------------------------
+  //-------------------------------------------------------
+  // LD Pipeline Stage 3
+  // Compare tag, use addr to query DCache Data
+  //-------------------------------------------------------
 
   val l3_tlbFeedback = RegNext(l2_tlbFeedback)
   val l3_valid = RegNext(l2_out.fire(), false.B)
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
 
-// Done in Dcache
+  // Done in Dcache
 
-//-------------------------------------------------------
-// LD Pipeline Stage 4
-// Dcache return result, do tag ecc check and forward check
-//-------------------------------------------------------
+  //-------------------------------------------------------
+  // LD Pipeline Stage 4
+  // Dcache return result, do tag ecc check and forward check
+  //-------------------------------------------------------
 
   // result from dcache
   io.dcache.resp.ready := true.B

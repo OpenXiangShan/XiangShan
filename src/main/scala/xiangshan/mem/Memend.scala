@@ -4,8 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
 import xiangshan.cache._
 import bus.simplebus._
 
@@ -166,5 +164,4 @@ class Memend extends XSModule {
   // for ls pipeline test
   dcache.io.dmem <> io.dmem
   dcache.io.lsu.refill <> DontCare
-  
 }
