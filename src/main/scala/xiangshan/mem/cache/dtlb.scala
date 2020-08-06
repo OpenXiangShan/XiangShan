@@ -200,6 +200,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val priv   = csr.priv
   val ifecth = if (isDtlb) false.B else true.B
   val mode   = if (isDtlb) priv.dmode else priv.imode
+  val vmEnable = satp.mode === 8.U && (mode < ModeM)
   BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
@@ -215,8 +216,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   // val g = entry.map(_.perm.g) // g is not used, for asid is not used
   val hitVec = widthMapSeq{ i => 
     (v.asBools zip VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))).map{ case (a,b) => a&b } }
-  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool & valid(i) }
-  val miss = widthMap{i => !hit(i) && valid(i) }
+  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool & valid(i) & vmEnable }
+  val miss = widthMap{i => !hit(i) && valid(i) & vmEnable }
   val hitppn = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
   val multiHit = {
@@ -228,8 +229,9 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   // resp
   for(i <- 0 until Width) {
     // req(i).ready := resp(i).ready // true.B // ValidIO
-    resp(i).valid := valid(i)
-    resp(i).bits.paddr := Cat(hitppn(i), reqAddr(i).off)
+    resp(i).valid := valid(i) // TODO: check it's func in outer module
+    println((i, req(i).bits.vaddr.getWidth, PAddrBits))
+    resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
 
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
@@ -260,19 +262,22 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val state_idle :: state_wait :: Nil = Enum(2)
   val state = RegInit(state_idle)
 
-  ptw <> DontCare
+  ptw <> DontCare // TODO: need check it
   ptw.req.valid := ParallelOR(miss).asBool
   ptw.resp.ready := state === state_wait
+  for(i <- Width-1 to 0 by -1) {
+    when (miss(i)) {
+      ptw.req.bits.vpn := reqAddr(i).vpn
+      ptw.req.bits.cmd := cmd(i)
+    }
+  }
+
   switch (state) {
     is (state_idle) {
-      for(i <- Width-1 to 0 by -1) {
-        when (miss(i)) {
-          state := state_wait
-          ptw.req.bits.vpn := reqAddr(i).vpn
-          ptw.req.bits.cmd := cmd(i)
-        }
-        assert(!ptw.resp.valid)
+      when (ParallelOR(miss).asBool) {
+        state := state_wait
       }
+      assert(!ptw.resp.valid)
     }
 
     is (state_wait) {

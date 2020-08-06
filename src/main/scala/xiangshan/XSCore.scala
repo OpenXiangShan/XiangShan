@@ -24,7 +24,7 @@ case class XSCoreParameters
   EnableStoreQueue: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
-  PAddrBits: Int = 32,
+  PAddrBits: Int = 40,
   HasFPU: Boolean = true,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
