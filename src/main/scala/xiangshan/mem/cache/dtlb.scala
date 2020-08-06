@@ -90,7 +90,7 @@ class TlbEntry extends TlbBundle {
   // val v = Bool() // v&g is special, may need sperate storage?
   val perm = new PermBundle(hasV = false)
 
-  def vpnHit(vpn: UInt) = {
+  def vpnHit(vpn: UInt):Bool = {
     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
     val maskLevel = VecInit((0 until Level).map{i =>
       VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt})
@@ -102,12 +102,12 @@ class TlbEntry extends TlbBundle {
   //   this.asid === asid
   // }
 
-  def hit(vpn: UInt/*, asid: UInt*/) = {
+  def hit(vpn: UInt/*, asid: UInt*/):Bool = {
     vpnHit(vpn)// && asidHit(asid)
   }
 
   def genTlbEntry(pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
-    val e = new TlbEntry
+    val e = Wire(new TlbEntry)
     e.ppn := pte.asTypeOf(pteBundle).ppn
     e.level := level
     e.vpn := vpn
@@ -154,10 +154,10 @@ class TlbPtwIO extends TlbBundle {
   val resp = Flipped(DecoupledIO(new PtwResp))
 }
 
-class TlbIssQueIO extends TlbBundle{
-  val miss = Output(Vec(TLBWidth, Bool()))
-  val missCanIss = Output(Bool())
-}
+// class TlbIssQueIO extends TlbBundle{
+//   val miss = Output(Vec(TLBWidth, Bool()))
+//   val missCanIss = Output(Bool())
+// }
 
 class SfenceBundle extends TlbBundle{ // TODO: turn to IO, now rare BUnd
   val rs1 = Bool()
@@ -183,15 +183,11 @@ class TlbCsrIO extends TlbBundle {
   })
 }
 
-class TlbEndIO extends TlbBundle {
-  val ptw = new TlbPtwIO
-  val issQue = new TlbIssQueIO
-  val csr = Flipped(new TlbCsrIO)
-}
-
 class DtlbIO extends TlbBundle {
   val lsu = new DtlbToLsuIO
-  val end = new TlbEndIO
+  val ptw = new TlbPtwIO
+  // val issQue = new TlbIssQueIO
+  val csr = Flipped(new TlbCsrIO)
 }
 
 class FakeDtlb extends TlbModule {
@@ -211,22 +207,30 @@ class DTLB extends TlbModule {
 
   val req    = io.lsu.req
   val resp   = io.lsu.resp
-  
-  val sfence = io.end.csr.sfence
-  val satp   = io.end.csr.satp
-  val priv   = io.end.csr.priv
-  val issQue = io.end.issQue
-  val ptw    = io.end.ptw
+  val sfence = io.csr.sfence
+  val satp   = io.csr.satp
+  val priv   = io.csr.priv
+  // val issQue = io.issQue
+  val ptw    = io.ptw
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle2))
   val cmd     = req.map(_.bits.cmd)
   val valid   = req.map(_.valid)
   
-  val v = RegInit(VecInit(Seq.fill(TlbEntrySize)(false.B)).asUInt)
+  val v = RegInit(0.U(TlbEntrySize.W))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   // val g = entry.map(_.perm.g) // g is not used, for asid is not used
-
-  val hitVec = (0 until TLBWidth) map { i => (v & VecInit(entry.map(e => e.hit(reqAddr(i).vpn/*, satp.asid*/))).asUInt).asBools }
+  println(TlbEntrySize)
+  println(v.getWidth)
+  println()
+  val hitVec = (0 until TLBWidth) map { i => 
+    (v.asBools zip VecInit(entry.map(e =>
+      e.hit(
+        reqAddr(i).vpn/*, satp.asid*/
+          )
+        )
+      )
+    ).map{ case (a,b) => a&b } }
   val hit = (0 until TLBWidth) map { i => ParallelOR(hitVec(i)).asBool }
   val hitppn = (0 until TLBWidth) map { i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val multiHit = {
@@ -297,7 +301,7 @@ class DTLB extends TlbModule {
     entry(refillIdx) := ptw.resp.bits
   }
 
-  // issQue
-  issQue.miss := (~VecInit(hit).asUInt).asBools
-  issQue.missCanIss := ptw.resp.fire() // one cycle fire
+  // // issQue
+  // issQue.miss := (~VecInit(hit).asUInt).asBools
+  // issQue.missCanIss := ptw.resp.fire() // one cycle fire
 }

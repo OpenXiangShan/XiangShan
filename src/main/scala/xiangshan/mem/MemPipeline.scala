@@ -24,13 +24,15 @@ class MemToBackendIO extends XSBundle {
   val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W))))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+  val csr = Flipped(new TlbCsrIO)
+  // val issQue = new TlbIssQueIO
 }
 
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
     val dmem = new SimpleBusUC(userBits = (new DcacheUserBundle).getWidth)
-    val tlb = new TlbEndIO
+    val pmem = new SimpleBusUC(addrBits = PAddrBits)
   })
 
   // io <> DontCare
@@ -40,9 +42,15 @@ class Memend extends XSModule {
   // val mshq = Module(new MSHQ)
   // val dtlb = Module(new FakeDtlb)
   val dtlb = Module(new DTLB)
-  
+  val ptw = Module(new PTW)
+
   dcache.io := DontCare
-  dtlb.io.end <> io.tlb
+  dtlb.io.csr <> io.backend.csr
+  // dtlb.io.issQue <> io.backend.issQue
+  ptw.io.tlb(0) <> dtlb.io.ptw
+  ptw.io.tlb(1) <> DontCare //mem.io.itlb
+  ptw.io.csr <> io.backend.csr // TODO: from backend.csr
+  ptw.io.mem <> io.pmem // TODO: ptw mem access
   // mshq.io := DontCare
 
   lsu.io.ldin <> io.backend.ldin

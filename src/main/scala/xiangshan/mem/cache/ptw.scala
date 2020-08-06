@@ -51,12 +51,14 @@ class PtwEntry(tagLen: Int) extends PtwBundle {
   }
 
   def genPtwEntry(addr: UInt, pte: UInt) = {
-    val e = new PtwEntry(tagLen)
+    val e = Wire(new PtwEntry(tagLen))
     e.tag := addr(PAddrBits-1, PAddrBits-tagLen)
     e.ppn := pte.asTypeOf(pteBundle).ppn
     e.perm := pte.asTypeOf(pteBundle).perm
     e
   }
+
+  override def cloneType: this.type = (new PtwEntry(tagLen)).asInstanceOf[this.type]
 }
 
 class PtwReq extends PtwBundle {
@@ -64,9 +66,7 @@ class PtwReq extends PtwBundle {
   val cmd = SimpleBusCmd()
 }
 
-class PtwResp extends PtwBundle {
-  val tlb   = new TlbEntry
-}
+class PtwResp extends TlbEntry
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
@@ -104,7 +104,7 @@ class PTW extends PtwModule {
   arb.io.in <> req_t
   val arbChosen = RegEnable(arb.io.chosen, arb.io.out.fire())
   val req = RegEnable(arb.io.out.bits, arb.io.out.fire())
-  val resp  = io.tlb.map(_.resp)
+  val resp  = VecInit(io.tlb.map(_.resp))
   
   val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire())
   val validOneCycle = OneCycleValid(arb.io.out.fire())
@@ -255,7 +255,7 @@ class PTW extends PtwModule {
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || 
       (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
-    resp(i).bits.tlb := Mux(state === state_tlb, tlbHitData, 
+    resp(i).bits := Mux(state === state_tlb, tlbHitData, 
       new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
   }
 
