@@ -87,7 +87,7 @@ class RAS extends BasePredictor
            ras_top_ctr := ras_top_ctr - 1.U
         }
         XSDebug("pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-    }.elsewhen
+    }
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
     val recoverSp = io.recover.bits.brInfo.rasSp
