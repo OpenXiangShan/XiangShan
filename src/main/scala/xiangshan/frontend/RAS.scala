@@ -58,8 +58,10 @@ class RAS extends BasePredictor
     }
     // update RAS
     // speculative update RAS
+    val push_only = !is_full && io.callIdx.valid && !io.is_ret && io.pc.valid
+    val pop_only = !is_empty && io.is_ret && !io.callIdx.valid && io.pc.valid
     io.out.bits.target := 0.U
-    when (!is_full && io.callIdx.valid && io.pc.valid) {
+    when (push_only) {
         //push
         //XSDebug("d")
         val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U)
@@ -74,7 +76,9 @@ class RAS extends BasePredictor
             ras_top_ctr := ras_top_ctr + 1.U
         }
         XSDebug("push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",rasWrite.retAddr,rasWrite.ctr,allocNewEntry,sp.asUInt)
-    }.elsewhen (!is_empty && io.is_ret) {
+    }
+    
+    when (pop_only) {
         //pop
         io.out.bits.target := ras_top_addr
         when (ras_top_ctr === 1.U) {
@@ -83,7 +87,7 @@ class RAS extends BasePredictor
            ras_top_ctr := ras_top_ctr - 1.U
         }
         XSDebug("pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-    }
+    }.elsewhen
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
     val recoverSp = io.recover.bits.brInfo.rasSp
