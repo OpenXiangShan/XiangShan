@@ -52,6 +52,7 @@ class BranchInfo extends XSBundle {
   val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
   val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
+  val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
   val histPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
