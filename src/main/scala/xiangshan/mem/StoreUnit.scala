@@ -19,16 +19,32 @@ class StoreUnit extends XSModule {
   // Store Pipeline
   //-------------------------------------------------------
   val s2_out = Wire(Decoupled(new LsPipelineBundle))
-  val s3_in  = Wire((Decoupled(new LsPipelineBundle)))
+  val s3_in  = Wire(Decoupled(new LsPipelineBundle))
 
-  XSDebug(s2_out.valid, "S2: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    s2_out.bits.uop.cf.pc, s2_out.bits.vaddr, s2_out.bits.paddr, s2_out.bits.uop.ctrl.fuOpType, s2_out.bits.data, s2_out.bits.mask)
-  XSDebug(s3_in.valid, "S3: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    s3_in.bits.uop.cf.pc, s3_in.bits.vaddr, s3_in.bits.paddr, s3_in.bits.uop.ctrl.fuOpType, s3_in.bits.data, s3_in.bits.mask)
-  // XSDebug(s4_in.valid, "S4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n",
-  //   s4_in.bits.uop.cf.pc , s4_in.bits.vaddr , s4_in.bits.paddr , s4_in.bits.uop.ctrl.fuOpType , s4_in.bits.data )
+
+  private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
+    val uop = pipeline.uop
+    XSDebug(cond,
+      name + p" pc ${Hexadecimal(uop.cf.pc)} " +
+        p"addr ${Hexadecimal(pipeline.vaddr)} -> ${Hexadecimal(pipeline.paddr)} " +
+        p"op ${Binary(uop.ctrl.fuOpType)} " +
+        p"data ${pipeline.data} " +
+        p"mask ${pipeline.mask}\n"
+    )
+  }
+
+  printPipeLine(s2_out.bits, s2_out.valid, "S2")
+  // TODO: is this nesscary ?
   XSDebug(s2_out.fire(), "store req: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n",
-    s2_out.bits.uop.cf.pc, s2_out.bits.vaddr, s2_out.bits.paddr, s2_out.bits.uop.ctrl.fuOpType, s2_out.bits.data)
+    s2_out.bits.uop.cf.pc,
+    s2_out.bits.vaddr,
+    s2_out.bits.paddr,
+    s2_out.bits.uop.ctrl.fuOpType,
+    s2_out.bits.data
+  )
+  printPipeLine(s3_in.bits, s3_in.valid, "S3")
+
+
   
   //-------------------------------------------------------
   // ST Pipeline Stage 2
@@ -59,9 +75,14 @@ class StoreUnit extends XSModule {
   //-------------------------------------------------------
 
   // Send TLB feedback to store issue queue
-  io.tlbFeedback.valid := s3_in.fire()
-  io.tlbFeedback.bits.hit := !s3_in.bits.miss
-  io.tlbFeedback.bits.roqIdx := s3_in.bits.uop.roqIdx
+  io.tlbFeedback.valid := RegNext(io.stin.valid && s2_out.ready)
+  io.tlbFeedback.bits.hit := RegNext(!s2_out.bits.miss)
+  io.tlbFeedback.bits.roqIdx := RegNext(s2_out.bits.uop.roqIdx)
+  XSDebug(io.tlbFeedback.valid, 
+    "S3 Store: tlbHit: %d roqIdx: %d\n",
+    io.tlbFeedback.bits.hit,
+    io.tlbFeedback.bits.roqIdx
+  )
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsroq
