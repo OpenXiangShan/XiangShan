@@ -95,7 +95,10 @@ void init_ram(const char *img) {
 
 extern "C" void ram_helper(
     uint64_t rIdx, uint64_t *rdata, uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
-  assert(rIdx < RAMSIZE / sizeof(uint64_t));
+  if (rIdx >= RAMSIZE / sizeof(uint64_t)) {
+    printf("ERROR: ram idx = 0x%x out of bound!\n", rIdx);
+    assert(rIdx < RAMSIZE / sizeof(uint64_t));
+  }
   *rdata = ram[rIdx];
   if (wen) {
     assert(wIdx < RAMSIZE / sizeof(uint64_t));
