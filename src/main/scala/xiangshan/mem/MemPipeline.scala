@@ -39,7 +39,7 @@ class Memend extends XSModule {
   val dcache = Module(new Dcache)
   // val mshq = Module(new MSHQ)
   // val dtlb = Module(new FakeDtlb)
-  val dtlb = Module(new TLB(DTLBWidth))
+  val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val ptw = Module(new PTW)
 
   dcache.io := DontCare

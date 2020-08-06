@@ -9,6 +9,7 @@ import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
+import xiangshan.backend.fu.HasCSRConst
 
 trait HasTlbConst extends HasXSParameter {
   val Level = 3
@@ -123,6 +124,9 @@ object TlbCmd {
   def exec  = "b10".U
 
   def apply() = UInt(2.W)
+  def isRead(a: UInt) = a===read
+  def isWrite(a: UInt) = a===write
+  def isExec(a: UInt) = a===exec
 }
 
 class TlbReq extends TlbBundle {
@@ -183,7 +187,7 @@ class FakeTlb(Width: Int = 1) extends TlbModule {
   })
 }
 
-class TLB(Width: Int = 1, isDtlb: Boolean = true) extends TlbModule {
+class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
   val req    = io.requestor.req
@@ -194,19 +198,21 @@ class TLB(Width: Int = 1, isDtlb: Boolean = true) extends TlbModule {
   val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
   val satp   = csr.satp
   val priv   = csr.priv
+  val ifecth = if (isDtlb) false.B else true.B
+  val mode   = if (isDtlb) priv.dmode else priv.imode
   BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle2))
   val cmd     = req.map(_.bits.cmd)
   val valid   = req.map(_.valid)
-  
+
   val v = RegInit(0.U(TlbEntrySize.W))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   // val g = entry.map(_.perm.g) // g is not used, for asid is not used
   val hitVec = (0 until Width) map { i => 
     (v.asBools zip VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))).map{ case (a,b) => a&b } }
-  val hit = (0 until Width) map {i => ParallelOR(hitVec(i)).asBool }
+  val hit = (0 until Width) map {i => ParallelOR(hitVec(i)).asBool & valid(i) }
   val miss = (0 until Width) map {i => !hit(i) && valid(i) }
   val hitppn = (0 until Width) map { i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val hitPerm = (0 until Width) map { i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
@@ -219,12 +225,15 @@ class TLB(Width: Int = 1, isDtlb: Boolean = true) extends TlbModule {
   // resp
   for(i <- 0 until Width) {
     // req(i).ready := resp(i).ready // true.B // ValidIO
-    resp(i).valid := valid(i) && hit(i)
+    resp(i).valid := valid(i)
     resp(i).bits.paddr := Cat(hitppn(i), reqAddr(i).off)
-    resp(i).bits.miss := ~hit(i)
-    resp(i).bits.excp.pf.ld := false.B
-    resp(i).bits.excp.pf.st := false.B
-    resp(i).bits.excp.pf.instr := false.B
+    resp(i).bits.miss := miss(i)
+
+    val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
+    val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
+    resp(i).bits.excp.pf.ld    := hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/)
+    resp(i).bits.excp.pf.st    := hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
+    resp(i).bits.excp.pf.instr := hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
   }
 
   // sfence (flush)
