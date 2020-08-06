@@ -321,6 +321,7 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.predecode.valid := if4_valid
   bpu.io.predecode.bits.mask := if4_pd.mask
   bpu.io.predecode.bits.pd := if4_pd.pd
+  bpu.io.predecode.bits.isFetchpcEqualFirstpc := if4_pc === if4_pd.pc(0)
   bpu.io.branchInfo.ready := if4_fire
 
   pd.io.in := io.icacheResp.bits

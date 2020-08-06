@@ -275,7 +275,11 @@ class BPUStage3 extends BPUStage {
   targetSrc := inLatch.resp.btb.targets
 
   lastIsRVC := pds(lastValidPos).isRVC
-  when (lastValidPos > 0.U) {
+  when (lastValidPos === 1.U) {
+    lastHit := pdMask(1) |
+      !pdMask(0) & !pdMask(1) |
+      pdMask(0) & !pdMask(1) & (pds(0).isRVC | !io.predecode.bits.isFetchpcEqualFirstpc)
+  }.elsewhen (lastValidPos > 0.U) {
     lastHit := pdMask(lastValidPos) |
       !pdMask(lastValidPos - 1.U) & !pdMask(lastValidPos) |
       pdMask(lastValidPos - 1.U) & !pdMask(lastValidPos) & pds(lastValidPos - 1.U).isRVC

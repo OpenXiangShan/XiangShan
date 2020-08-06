@@ -80,7 +80,7 @@ class PreDecode extends XSModule with HasPdconst{
       valid := Mux(lastHalfInstrIdx === 0.U, Mux(!io.prev.valid, isRVC(inst), true.B), true.B)
     } else if (i==1) {
       inst := data(47,16)
-      valid := io.prev.valid || (!(instsMask(0) && !isRVC(insts(0))) && Mux(lastHalfInstrIdx === 1.U, isRVC(inst), true.B))
+      valid := (io.prev.valid || !(instsMask(0) && !isRVC(insts(0)))) && Mux(lastHalfInstrIdx === 1.U, isRVC(inst), true.B)
     } else if (i==PredictWidth-1) {
       inst := Cat(0.U(16.W), data(i*16+15, i*16))
       valid := !(instsMask(i-1) && !isRVC(insts(i-1)) || !isRVC(inst))
