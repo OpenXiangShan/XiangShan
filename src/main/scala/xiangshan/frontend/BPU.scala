@@ -305,7 +305,7 @@ trait BranchPredictorComponents extends HasXSParameter {
   val tage = (if(EnableBPD) { Module(new Tage) } 
               else          { Module(new FakeTage) })
   val preds = Seq(ubtb, btb, bim, tage)
-  // preds.map(_.io := DontCare)
+  preds.map(_.io := DontCare)
 }
 
 class BPUReq extends XSBundle {
@@ -381,6 +381,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
     XSDebug(io.branchInfo.fire(), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
       t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
   }
+  val debug_verbose = false
 }
 
 
@@ -402,23 +403,15 @@ class BPU extends BaseBPU {
   val s1_brInfo_in = Wire(Vec(PredictWidth, new BranchInfo))
 
   s1_resp_in.tage := DontCare
-  s1_brInfo_in.map(i => {
-    i.histPtr   := DontCare
-    i.tageMeta  := DontCare
-    i.rasSp     := DontCare
-    i.rasTopCtr := DontCare
-  })
+  s1_brInfo_in    := DontCare
 
   val s1_inLatch = RegEnable(io.in, s1_fire)
   ubtb.io.flush := io.flush(0) // TODO: fix this
   ubtb.io.pc.valid := s1_inLatch.valid
   ubtb.io.pc.bits := s1_inLatch.bits.pc
   ubtb.io.inMask := s1_inLatch.bits.inMask
-  ubtb.io.hist := DontCare
 
-  val uo = ubtb.io.out
-  XSDebug("debug: ubtb hits:%b, takens:%b, notTakens:%b\n", 
-    uo.hits.asUInt, uo.takens.asUInt, uo.notTakens.asUInt)
+
 
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
@@ -431,10 +424,8 @@ class BPU extends BaseBPU {
   btb.io.pc.valid := io.in.valid
   btb.io.pc.bits := io.in.bits.pc
   btb.io.inMask := io.in.bits.inMask
-  btb.io.hist := DontCare
 
-  val bo = btb.io.resp
-  XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
+
 
   // Wrap btb response into resp_in and brInfo_in
   s1_resp_in.btb <> btb.io.resp
@@ -446,10 +437,6 @@ class BPU extends BaseBPU {
   bim.io.pc.valid := io.in.valid
   bim.io.pc.bits := io.in.bits.pc
   bim.io.inMask := io.in.bits.inMask
-  bim.io.hist := DontCare
-
-  val bio = bim.io.resp
-  XSDebug("debug: bim takens:%b\n", VecInit(bio.ctrs.map(_(1))).asUInt)
 
 
   // Wrap bim response into resp_in and brInfo_in
@@ -482,6 +469,15 @@ class BPU extends BaseBPU {
   s3.io.in.bits.resp.tage <> tage.io.resp
   for (i <- 0 until PredictWidth) {
     s3.io.in.bits.brInfo(i).tageMeta := tage.io.meta(i)
+  }
+
+  if (debug_verbose) {
+    val uo = ubtb.io.out
+    XSDebug("debug: ubtb hits:%b, takens:%b, notTakens:%b\n", uo.hits.asUInt, uo.takens.asUInt, uo.notTakens.asUInt)
+    val bio = bim.io.resp
+    XSDebug("debug: bim takens:%b\n", VecInit(bio.ctrs.map(_(1))).asUInt)
+    val bo = btb.io.resp
+    XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
   }
 
 }
