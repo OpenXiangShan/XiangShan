@@ -107,67 +107,16 @@ class L1MetaWriteReq extends L1MetaReadReq {
 }
 
 class L1DataReadReq extends DCacheBundle {
+  // you can choose which beat to read to save power
+  val rmask  = Bits(refillCycles.W))
   val way_en = Bits(nWays.W)
   val addr   = Bits(untagBits.W)
 }
 
+// Now, we can write a cache-block in a single cycle
 class L1DataWriteReq extends L1DataReadReq {
-  val wmask  = Bits(rowWords.W)
-  val data   = Bits(encRowBits.W)
-}
-
-class L1MetadataArray[T <: L1Metadata](onReset: () => T) extends DCacheModule {
-  val rstVal = onReset()
-  val io = IO(new Bundle {
-    val read = Flipped(Decoupled(new L1MetaReadReq))
-    val write = Flipped(Decoupled(new L1MetaWriteReq))
-    val resp = Output(Vec(nWays, rstVal.cloneType))
-  })
-  val rst_cnt = RegInit(0.U(log2Up(nSets+1).W))
-  val rst = rst_cnt < nSets.U
-  val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
-  val wdata = Mux(rst, rstVal, io.write.bits.data).asUInt
-  val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
-  val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
-  when (rst) { rst_cnt := rst_cnt + 1.U }
-
-  val metabits = rstVal.getWidth
-  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(metabits.W)))
-  val wen = rst || io.write.valid
-  when (wen) {
-    tag_array.write(waddr, VecInit(Array.fill(nWays)(wdata)), wmask)
-  }
-  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(_.asTypeOf(rstVal))
-
-  io.read.ready := !wen // so really this could be a 6T RAM
-  io.write.ready := !rst
-
-  def dumpRead() = {
-    when (io.read.fire()) {
-      XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
-        io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
-    }
-  }
-
-  def dumpWrite() = {
-    when (io.write.fire()) {
-      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
-        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
-    }
-  }
-
-  def dumpResp() = {
-    (0 until nWays) map { i =>
-      XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
-        io.resp(i).tag, io.resp(i).coh.state)
-    }
-  }
-
-  def dump() = {
-    dumpRead
-    dumpWrite
-    dumpResp
-  }
+  val wmask  = Vec(refillCycles, Bits(rowWords.W))
+  val data   = Vec(refillCycles, Bits(encRowBits.W))
 }
 
 // argument general L1 DCache bundles with memWidth
@@ -184,7 +133,7 @@ abstract class AbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
     val read  = Input(Vec(memWidth, Valid(new L1DataReadReq)))
     val write = Input(Valid(new L1DataWriteReq))
-    val resp  = Output(Vec(memWidth, Vec(nWays, Bits(encRowBits.W))))
+    val resp  = Output(Vec(memWidth, Vec(nWays, Vec(refillCycles, Bits(encRowBits.W)))))
     val nacks = Output(Vec(memWidth, Bool()))
   })
 
@@ -234,17 +183,19 @@ abstract class AbstractDataArray extends DCacheModule {
 class DuplicatedDataArray extends AbstractDataArray
 {
 
-  val waddr = io.write.bits.addr >> rowOffBits
+  val waddr = io.write.bits.addr >> blockOffBits
   for (j <- 0 until memWidth) {
-
-    val raddr = io.read(j).bits.addr >> rowOffBits
+    val raddr = io.read(j).bits.addr >> blockOffBits
     for (w <- 0 until nWays) {
-      val array = SyncReadMem(nSets * refillCycles, Vec(rowWords, Bits(encDataBits.W)))
-      when (io.write.bits.way_en(w) && io.write.valid) {
-        val data = VecInit((0 until rowWords) map (i => io.write.bits.data(encDataBits*(i+1)-1,encDataBits*i)))
-        array.write(waddr, data, io.write.bits.wmask.asBools)
+      for (r <- 0 until refillCycles) {
+        val array = SyncReadMem(nSets, Vec(rowWords, Bits(encDataBits.W)))
+        when (io.write.bits.way_en(w) && io.write.valid) {
+          val data = VecInit((0 until rowWords) map (i => io.write.bits.data(encDataBits*(i+1)-1,encDataBits*i)))
+          array.write(waddr, data, io.write.bits.wmask(r).asBools)
+        }
+        io.resp(j)(w)(r) := RegNext(array.read(raddr, io.read(j).bits.way_en(w)
+          && io.read(j).bits.rmask(r) && io.read(j).valid).asUInt)
       }
-      io.resp(j)(w) := RegNext(array.read(raddr, io.read(j).bits.way_en(w) && io.read(j).valid).asUInt)
     }
     io.nacks(j) := false.B
   }
@@ -321,6 +272,85 @@ class BankedDataArray extends AbstractDataArray {
   }
 
   io.nacks := s2_nacks
+}
+
+class L1MetadataArray[T <: L1Metadata](onReset: () => T) extends DCacheModule {
+  val rstVal = onReset()
+  val io = IO(new Bundle {
+    val read = Flipped(Decoupled(new L1MetaReadReq))
+    val write = Flipped(Decoupled(new L1MetaWriteReq))
+    val resp = Output(Vec(nWays, rstVal.cloneType))
+  })
+  val rst_cnt = RegInit(0.U(log2Up(nSets+1).W))
+  val rst = rst_cnt < nSets.U
+  val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
+  val wdata = Mux(rst, rstVal, io.write.bits.data).asUInt
+  val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
+  val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
+  when (rst) { rst_cnt := rst_cnt + 1.U }
+
+  val metabits = rstVal.getWidth
+  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(metabits.W)))
+  val wen = rst || io.write.valid
+  when (wen) {
+    tag_array.write(waddr, VecInit(Array.fill(nWays)(wdata)), wmask)
+  }
+  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(_.asTypeOf(rstVal))
+
+  io.read.ready := !wen // so really this could be a 6T RAM
+  io.write.ready := !rst
+
+  def dumpRead() = {
+    when (io.read.fire()) {
+      XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
+        io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
+    }
+  }
+
+  def dumpWrite() = {
+    when (io.write.fire()) {
+      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
+        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+    }
+  }
+
+  def dumpResp() = {
+    (0 until nWays) map { i =>
+      XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
+        io.resp(i).tag, io.resp(i).coh.state)
+    }
+  }
+
+  def dump() = {
+    dumpRead
+    dumpWrite
+    dumpResp
+  }
+}
+
+class DuplicatedMetaArray extends DCacheModule {
+  val io = IO(new DCacheBundle {
+    val read  = Input(Vec(memWidth, Valid(new L1MetaReadReq)))
+    val write = Input(Valid(new L1MetaWriteReq))
+    val resp  = Output(Vec(memWidth, Vec(nWays, Vec(refillCycles, Bits(encRowBits.W)))))
+    val nacks = Output(Vec(memWidth, Bool()))
+  })
+
+  def onReset = L1Metadata(0.U, ClientMetadata.onReset)
+  val meta = Seq.fill(memWidth) { Module(new L1MetadataArray(onReset _)) }
+
+  for (w <- 0 until memWidth) {
+    meta(w).io.write <> io.write
+    meta(w).io.read  <> io.read(w)
+    meta(w).io.resp  <> io.resp(w)
+  }
+
+  def dump() = {
+    (0 until memWidth) map { w =>
+      XSDebug(s"MetaArray $w\n")
+      meta(w).dump
+    }
+  }
 }
 
 

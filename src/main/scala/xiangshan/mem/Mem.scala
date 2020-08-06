@@ -95,6 +95,6 @@ class DCacheResp extends MemBundle
 
 class LSUDMemIO extends MemBundle
 {
-  val req = new DecoupledIO(Vec(memWidth, Valid(new DCacheReq)))
-  val resp = Flipped(Vec(memWidth, new ValidIO(new DCacheResp)))
+  val req = new DecoupledIO(new DCacheReq)
+  val resp = Flipped(new ValidIO(new DCacheResp))
 }
