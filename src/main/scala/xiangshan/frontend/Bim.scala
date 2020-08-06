@@ -44,8 +44,13 @@ class BIM extends BasePredictor with BimParams{
   val pcLatch = RegEnable(io.pc.bits, io.pc.valid)
 
   val bim = List.fill(BimBanks) {
-    Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = true, holdRead = true))
+    Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = false, holdRead = true))
   }
+
+  val doing_reset = RegInit(true.B)
+  val resetRow = RegInit(0.U(log2Ceil(nRows).W))
+  resetRow := resetRow + doing_reset
+  when (resetRow === (nRows-1).U) { doing_reset := false.B }
 
   val baseBank = bimAddr.getBank(io.pc.bits)
 
@@ -91,8 +96,8 @@ class BIM extends BasePredictor with BimParams{
   val needToUpdate = io.update.valid && !oldSaturated && u.pd.isBr
 
   for (b <- 0 until BimBanks) {
-    bim(b).io.w.req.valid := needToUpdate && b.U === updateBank
-    bim(b).io.w.req.bits.setIdx := updateRow
-    bim(b).io.w.req.bits.data := satUpdate(oldCtr, 2, newTaken)
+    bim(b).io.w.req.valid := needToUpdate && b.U === updateBank || doing_reset
+    bim(b).io.w.req.bits.setIdx := Mux(doing_reset, resetRow, updateRow)
+    bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), satUpdate(oldCtr, 2, newTaken))
   }
 }

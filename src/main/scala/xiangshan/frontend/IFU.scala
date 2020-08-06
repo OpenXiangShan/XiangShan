@@ -83,7 +83,7 @@ class IFU extends XSModule with HasIFUConst
   }
 
   val if2_bp = bpu.io.out(0).bits
-  if2_redirect := if2_fire && bpu.io.out(0).valid && if2_bp.redirect && !if2_bp.saveHalfRVI
+  if2_redirect := if2_fire && bpu.io.out(0).valid && if2_bp.redirect// && !if2_bp.saveHalfRVI
   when (if2_redirect) { 
     if1_npc := if2_bp.target
   }
@@ -107,70 +107,100 @@ class IFU extends XSModule with HasIFUConst
   .elsewhen (if3_fire) { if3_valid := false.B }
 
   val if3_bp = bpu.io.out(1).bits
-  val prev_half_valid = RegInit(false.B)
-  val prev_half_redirect = RegInit(false.B)
-  val prev_half_fetchpc = Reg(UInt(VAddrBits.W))
-  val prev_half_idx = Reg(UInt(log2Up(PredictWidth).W))
-  val prev_half_tgt = Reg(UInt(VAddrBits.W))
-  val prev_half_taken = RegInit(false.B)
-  val prev_half_instr = Reg(UInt(16.W))
-  when (if3_flush) {
-    prev_half_valid := false.B
-    prev_half_redirect := false.B
-  }.elsewhen (if3_fire && if3_bp.saveHalfRVI) {
-    prev_half_valid := true.B
-    prev_half_redirect := if3_bp.redirect && bpu.io.out(1).valid
-    prev_half_fetchpc := if3_pc
-    val idx = Mux(if3_bp.redirect && bpu.io.out(1).valid, if3_bp.jmpIdx, PopCount(mask(if3_pc)) - 1.U)
-    prev_half_idx := idx
-    prev_half_tgt := if3_bp.target
-    prev_half_taken := if3_bp.taken
-    prev_half_instr := pd.io.out.instrs(idx)(15, 0)
-  }.elsewhen (if3_fire) {
-    prev_half_valid := false.B
-    prev_half_redirect := false.B
+
+  class PrevHalfInstr extends Bundle {
+    val valid = Bool()
+    val taken = Bool()
+    val fetchpc = UInt(VAddrBits.W) // only for debug
+    val idx = UInt(VAddrBits.W) // only for debug
+    val pc = UInt(VAddrBits.W)
+    val target = UInt(VAddrBits.W)
+    val instr = UInt(16.W)
   }
 
-  // if3_redirect := if3_fire && (prev_half_valid && prev_half_taken || bpu.io.out(1).valid && if3_bp.redirect && !if3_bp.saveHalfRVI)
-  // when (if3_redirect) {
-  //   if1_npc := Mux(prev_half_valid && prev_half_redirect, prev_half_tgt, if3_bp.target)
+  val if3_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
+  val if4_prevHalfInstr = Wire(new PrevHalfInstr)
+  when (if4_prevHalfInstr.valid) {
+    if3_prevHalfInstr := if4_prevHalfInstr
+  }
+  val prevHalfInstr = Mux(if4_prevHalfInstr.valid, if4_prevHalfInstr, if3_prevHalfInstr)
+
+  val if3_hasPrevHalfInstr = prevHalfInstr.valid && (prevHalfInstr.pc + 2.U) === if3_pc
+  if3_redirect := if3_fire && bpu.io.out(1).valid && (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.redirect/* && !if3_bp.saveHalfRVI*/ )
+  when (if3_redirect) {
+    if1_npc := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken, prevHalfInstr.target, if3_bp.target)
+  }
+
+  when (if3_fire && if3_redirect) {
+    shiftPtr := true.B
+    newPtr := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
+    hist(0) := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken || if3_bp.hasNotTakenBrs,
+      (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken).asUInt,
+      extHist(if3_histPtr))
+    extHist(newPtr) := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken || if3_bp.hasNotTakenBrs,
+      (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken).asUInt,
+      extHist(if3_histPtr))
+  }
+
+
+
+  // val prev_half_valid = RegInit(false.B)
+  // val prev_half_redirect = RegInit(false.B)
+  // val prev_half_fetchpc = Reg(UInt(VAddrBits.W))
+  // val prev_half_idx = Reg(UInt(log2Up(PredictWidth).W))
+  // val prev_half_tgt = Reg(UInt(VAddrBits.W))
+  // val prev_half_taken = RegInit(false.B)
+  // val prev_half_instr = Reg(UInt(16.W))
+  // when (if3_flush) {
+  //   prev_half_valid := false.B
+  //   prev_half_redirect := false.B
+  // }.elsewhen (if3_fire && if3_bp.saveHalfRVI) {
+  //   prev_half_valid := true.B
+  //   prev_half_redirect := if3_bp.redirect && bpu.io.out(1).valid
+  //   prev_half_fetchpc := if3_pc
+  //   val idx = Mux(if3_bp.redirect && bpu.io.out(1).valid, if3_bp.jmpIdx, PopCount(mask(if3_pc)) - 1.U)
+  //   prev_half_idx := idx
+  //   prev_half_tgt := if3_bp.target
+  //   prev_half_taken := if3_bp.taken
+  //   prev_half_instr := pd.io.out.instrs(idx)(15, 0)
+  // }.elsewhen (if3_fire) {
+  //   prev_half_valid := false.B
+  //   prev_half_redirect := false.B
   // }
 
-  when (bpu.io.out(1).valid && if3_fire) {
-    when (prev_half_valid && prev_half_taken) {
-      if3_redirect := true.B
-      if1_npc := prev_half_tgt
-      shiftPtr := true.B
-      newPtr := if3_histPtr - 1.U
-      hist(0) := 1.U
-      extHist(newPtr) := 1.U
-    }.elsewhen (if3_bp.redirect && !if3_bp.saveHalfRVI) {
-      if3_redirect := true.B
-      if1_npc := if3_bp.target
-      shiftPtr := true.B
-      newPtr := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
-      hist(0) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
-      extHist(newPtr) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
-    }.elsewhen (if3_bp.saveHalfRVI) {
-      if3_redirect := true.B
-      if1_npc := snpc(if3_pc)
-      shiftPtr := true.B
-      newPtr := Mux(if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
-      hist(0) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
-      extHist(newPtr) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
-    }.otherwise {
-      if3_redirect := false.B
-    }
-  }.otherwise {
-    if3_redirect := false.B
-  }
+  // when (bpu.io.out(1).valid && if3_fire) {
+  //   when (prev_half_valid && prev_half_taken) {
+  //     if3_redirect := true.B
+  //     if1_npc := prev_half_tgt
+  //     shiftPtr := true.B
+  //     newPtr := if3_histPtr - 1.U
+  //     hist(0) := 1.U
+  //     extHist(newPtr) := 1.U
+  //   }.elsewhen (if3_bp.redirect && !if3_bp.saveHalfRVI) {
+  //     if3_redirect := true.B
+  //     if1_npc := if3_bp.target
+  //     shiftPtr := true.B
+  //     newPtr := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
+  //     hist(0) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
+  //     extHist(newPtr) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
+  //   }.elsewhen (if3_bp.saveHalfRVI) {
+  //     if3_redirect := true.B
+  //     if1_npc := snpc(if3_pc)
+  //     shiftPtr := true.B
+  //     newPtr := Mux(if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
+  //     hist(0) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
+  //     extHist(newPtr) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
+  //   }.otherwise {
+  //     if3_redirect := false.B
+  //   }
+  // }.otherwise {
+  //   if3_redirect := false.B
+  // }
 
 
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
-  // val if4_icacheResp = RegEnable(io.icacheResp.bits, if3_fire)
   val if4_valid = RegInit(false.B)
-  // val if4_valid = RegEnable(next = if3_valid, init = false.B, enable = if3_fire)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
   val if4_histPtr = RegEnable(if3_histPtr, if3_fire)
@@ -179,40 +209,85 @@ class IFU extends XSModule with HasIFUConst
   .elsewhen (if3_fire) { if4_valid := if3_valid }
   .elsewhen(if4_fire)  { if4_valid := false.B }
 
-  val if4_bp = bpu.io.out(2).bits
+  val if4_bp = Wire(new BranchPrediction)
+  if4_bp := bpu.io.out(2).bits
+  // TODO: c_jal
+  val if4_cfi_jal = if4_pd.instrs(if4_bp.jmpIdx)
+  val if4_cfi_jal_tgt = if4_pd.pc(if4_bp.jmpIdx) + SignExt(Cat(if4_cfi_jal(31), if4_cfi_jal(19, 12), if4_cfi_jal(20), if4_cfi_jal(30, 21), 0.U(1.W)), XLEN)
+  if4_bp.target := Mux(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, if4_cfi_jal_tgt, bpu.io.out(2).bits.target)
+  if4_bp.redirect := bpu.io.out(2).bits.redirect || if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken && if4_cfi_jal_tgt =/= bpu.io.out(2).bits.target
+
+  if4_prevHalfInstr := 0.U.asTypeOf(new PrevHalfInstr)
+  when (bpu.io.out(2).valid && if4_fire && if4_bp.saveHalfRVI) {
+    if4_prevHalfInstr.valid := true.B
+    if4_prevHalfInstr.taken := if4_bp.taken
+    if4_prevHalfInstr.fetchpc := if4_pc
+    if4_prevHalfInstr.idx := PopCount(mask(if4_pc)) - 1.U
+    if4_prevHalfInstr.pc := if4_pd.pc(if4_prevHalfInstr.idx)
+    if4_prevHalfInstr.target := if4_bp.target
+    if4_prevHalfInstr.instr := if4_pd.instrs(if4_prevHalfInstr.idx)(15, 0)
+  }
 
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
-    when (!if4_bp.saveHalfRVI) {
-      if4_redirect := true.B
-      // if1_npc := if4_bp.target
-      if1_npc := Mux(if4_bp.taken, if4_bp.target, snpc(if4_pc))
-
-      shiftPtr := true.B
-      newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
-      hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
-      extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
-
+    if4_redirect := true.B
+    shiftPtr := true.B
+    newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
+    hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
+    extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
+    when (if4_bp.saveHalfRVI) {
+      if1_npc := snpc(if4_pc)
     }.otherwise {
+      if1_npc := if4_bp.target
+    }
+  }.elsewhen (bpu.io.out(2).valid && if4_fire/* && !if4_bp.redirect*/) {
+    when (if4_bp.saveHalfRVI && if4_bp.taken) {
       if4_redirect := true.B
       if1_npc := snpc(if4_pc)
-
-      prev_half_valid := true.B
-      prev_half_redirect := true.B
-      prev_half_fetchpc := if4_pc
-      val idx = PopCount(mask(if4_pc)) - 1.U
-      prev_half_idx := idx
-      prev_half_tgt := if4_bp.target
-      prev_half_taken := if4_bp.taken
-      prev_half_instr := if4_pd.instrs(idx)(15, 0)
-
       shiftPtr := true.B
-      newPtr := Mux(if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
-      hist(0) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
-      extHist(newPtr) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
+      newPtr := if4_histPtr - 1.U
+      hist(0) := 1.U
+      extHist(newPtr) := 1.U
+    }.otherwise {
+      if4_redirect := false.B
     }
   }.otherwise {
     if4_redirect := false.B
   }
+ 
+
+
+  // when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
+  //   when (!if4_bp.saveHalfRVI) {
+  //     if4_redirect := true.B
+  //     // if1_npc := if4_bp.target
+  //     if1_npc := Mux(if4_bp.taken, if4_bp.target, snpc(if4_pc))
+
+  //     shiftPtr := true.B
+  //     newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
+  //     hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
+  //     extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
+
+  //   }.otherwise {
+  //     if4_redirect := true.B
+  //     if1_npc := snpc(if4_pc)
+
+  //     prev_half_valid := true.B
+  //     prev_half_redirect := true.B
+  //     prev_half_fetchpc := if4_pc
+  //     val idx = PopCount(mask(if4_pc)) - 1.U
+  //     prev_half_idx := idx
+  //     prev_half_tgt := if4_bp.target
+  //     prev_half_taken := if4_bp.taken
+  //     prev_half_instr := if4_pd.instrs(idx)(15, 0)
+
+  //     shiftPtr := true.B
+  //     newPtr := Mux(if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
+  //     hist(0) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
+  //     extHist(newPtr) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
+  //   }
+  // }.otherwise {
+  //   if4_redirect := false.B
+  // }
 
   when (io.outOfOrderBrInfo.valid) {
     shiftPtr := true.B
@@ -249,8 +324,8 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.branchInfo.ready := if4_fire
 
   pd.io.in := io.icacheResp.bits
-  pd.io.prev.valid := prev_half_valid
-  pd.io.prev.bits := prev_half_instr
+  pd.io.prev.valid := if3_hasPrevHalfInstr
+  pd.io.prev.bits := prevHalfInstr.target
 
   io.fetchPacket.valid := if4_valid && !io.redirect.valid
   io.fetchPacket.bits.instrs := if4_pd.instrs
@@ -286,11 +361,19 @@ class IFU extends XSModule with HasIFUConst
 
   XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
   XSDebug("[IF3][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if3_bp.redirect, if3_bp.taken, if3_bp.jmpIdx, if3_bp.hasNotTakenBrs, if3_bp.target, if3_bp.saveHalfRVI)
-  XSDebug("[IF3][prevHalfInstr] v=%d redirect=%d fetchpc=%x idx=%d tgt=%x taken=%d instr=%x\n\n",
-    prev_half_valid, prev_half_redirect, prev_half_fetchpc, prev_half_idx, prev_half_tgt, prev_half_taken, prev_half_instr)
+  // XSDebug("[IF3][prevHalfInstr] v=%d redirect=%d fetchpc=%x idx=%d tgt=%x taken=%d instr=%x\n\n",
+  //   prev_half_valid, prev_half_redirect, prev_half_fetchpc, prev_half_idx, prev_half_tgt, prev_half_taken, prev_half_instr)
+  XSDebug("[IF3][    prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x\n",
+    prevHalfInstr.valid, prevHalfInstr.taken, prevHalfInstr.fetchpc, prevHalfInstr.idx, prevHalfInstr.pc, prevHalfInstr.target, prevHalfInstr.instr)
+  XSDebug("[IF3][if3_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x\n\n",
+    if3_prevHalfInstr.valid, if3_prevHalfInstr.taken, if3_prevHalfInstr.fetchpc, if3_prevHalfInstr.idx, if3_prevHalfInstr.pc, if3_prevHalfInstr.target, if3_prevHalfInstr.instr)
+
 
   XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
   XSDebug("[IF4][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.redirect, if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
+  XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_cfi_jal, if4_cfi_jal_tgt)
+  XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x\n",
+    if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr)
   XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b\n", io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask)
   for (i <- 0 until PredictWidth) {
     XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] %b %x pc=%x pnpc=%x pd: rvc=%d brType=%b call=%d ret=%d\n",
