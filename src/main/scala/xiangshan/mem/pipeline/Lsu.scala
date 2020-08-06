@@ -84,7 +84,7 @@ class LsuIO extends XSBundle {
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
   val dcache = Flipped(new DcacheToLsuIO)
-  val dtlb = Flipped(new DtlbToLsuIO)
+  val dtlb = new TlbRequestIO(DTLBWidth)
   val refill = Flipped(Valid(new DCacheStoreReq))
   val miss = Decoupled(new MissReqIO)
 }

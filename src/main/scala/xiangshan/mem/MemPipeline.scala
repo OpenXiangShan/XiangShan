@@ -41,12 +41,11 @@ class Memend extends XSModule {
   val dcache = Module(new Dcache)
   // val mshq = Module(new MSHQ)
   // val dtlb = Module(new FakeDtlb)
-  val dtlb = Module(new DTLB)
+  val dtlb = Module(new TLB(DTLBWidth))
   val ptw = Module(new PTW)
 
   dcache.io := DontCare
   dtlb.io.csr <> io.backend.csr
-  // dtlb.io.issQue <> io.backend.issQue
   ptw.io.tlb(0) <> dtlb.io.ptw
   ptw.io.tlb(1) <> DontCare //mem.io.itlb
   ptw.io.csr <> io.backend.csr // TODO: from backend.csr
@@ -64,7 +63,7 @@ class Memend extends XSModule {
   lsu.io.dp1Req <> io.backend.dp1Req
   lsu.io.moqIdxs <> io.backend.moqIdxs
   lsu.io.dcache <> dcache.io.lsu
-  lsu.io.dtlb <> dtlb.io.lsu
+  lsu.io.dtlb <> dtlb.io.requestor
   lsu.io.refill <> DontCare // TODO
   lsu.io.miss <> DontCare //TODO
   

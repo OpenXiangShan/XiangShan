@@ -153,7 +153,7 @@ trait HasXSParameter {
   val StorePipelineWidth = core.StorePipelineWidth
   val StoreBufferSize = core.StoreBufferSize
   val RefillSize = core.RefillSize
-  val TLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
+  val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
   val TlbEntrySize = core.TlbEntrySize
   val TlbL2EntrySize = core.TlbL2EntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
@@ -223,6 +223,7 @@ class XSCore extends XSModule {
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
+  mem.io.pmem <> DontCare // NOTE: Ptw mem -> TileLink
   // front.io.mem <> mem.io.frontend // ptw of itlb
 
   backend.io.memMMU.imem <> DontCare

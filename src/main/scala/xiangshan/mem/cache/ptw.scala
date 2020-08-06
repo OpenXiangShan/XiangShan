@@ -249,6 +249,8 @@ class PTW extends PtwModule {
     wmask= 0.U,
     user = 0.U
   )
+  io.mem.resp.ready := true.B
+  assert(!io.mem.resp.valid || (state===state_wait1 || state===state_wait2 || state===state_wait3))
 
   // resp
   val level = 0.U // FIXME
