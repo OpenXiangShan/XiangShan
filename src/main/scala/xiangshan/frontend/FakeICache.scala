@@ -81,31 +81,31 @@ class FakeCache extends XSModule with HasICacheConst {
   def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt()
   def inRange(idx: UInt): Bool = idx < (memByte / 8).U
 
-  val ramOut = Wire(Vec(FetchWidth,UInt(32.W)))
+  // val ramOut = Wire(Vec(FetchWidth,UInt(32.W)))
   for(i <- ramHelpers.indices) {
     val rIdx = index(gpc) + i.U
     ramHelpers(i).rIdx := rIdx
-    when(gpc(2) === "b0".U){
-      //little ending
-      ramOut(0) := ramHelpers(0).rdata.tail(32)
-      ramOut(1) := ramHelpers(0).rdata.head(32)
-      ramOut(2) := ramHelpers(1).rdata.tail(32)
-      ramOut(3) := ramHelpers(1).rdata.head(32)
-      ramOut(4) := ramHelpers(2).rdata.tail(32)
-      ramOut(5) := ramHelpers(2).rdata.head(32)
-      ramOut(6) := ramHelpers(3).rdata.tail(32)
-      ramOut(7) := ramHelpers(3).rdata.head(32)
-    } .otherwise {
-      ramOut(0) := ramHelpers(0).rdata.head(32)
-      ramOut(1) := ramHelpers(1).rdata.tail(32)
-      ramOut(2) := ramHelpers(1).rdata.head(32)
-      ramOut(3) := ramHelpers(2).rdata.tail(32)
-      ramOut(4) := ramHelpers(2).rdata.head(32)
-      ramOut(5) := ramHelpers(3).rdata.tail(32)
-      ramOut(6) := ramHelpers(3).rdata.head(32)
-      ramOut(7) := ramHelpers(4).rdata.tail(32)
+    // when(gpc(2) === "b0".U){
+    //   //little ending
+    //   ramOut(0) := ramHelpers(0).rdata.tail(32)
+    //   ramOut(1) := ramHelpers(0).rdata.head(32)
+    //   ramOut(2) := ramHelpers(1).rdata.tail(32)
+    //   ramOut(3) := ramHelpers(1).rdata.head(32)
+    //   ramOut(4) := ramHelpers(2).rdata.tail(32)
+    //   ramOut(5) := ramHelpers(2).rdata.head(32)
+    //   ramOut(6) := ramHelpers(3).rdata.tail(32)
+    //   ramOut(7) := ramHelpers(3).rdata.head(32)
+    // } .otherwise {
+    //   ramOut(0) := ramHelpers(0).rdata.head(32)
+    //   ramOut(1) := ramHelpers(1).rdata.tail(32)
+    //   ramOut(2) := ramHelpers(1).rdata.head(32)
+    //   ramOut(3) := ramHelpers(2).rdata.tail(32)
+    //   ramOut(4) := ramHelpers(2).rdata.head(32)
+    //   ramOut(5) := ramHelpers(3).rdata.tail(32)
+    //   ramOut(6) := ramHelpers(3).rdata.head(32)
+    //   ramOut(7) := ramHelpers(4).rdata.tail(32)
 
-    }
+    // }
     Seq(
       ramHelpers(i).wmask,
       ramHelpers(i).wdata,
@@ -114,17 +114,21 @@ class FakeCache extends XSModule with HasICacheConst {
     ).foreach(_ := 0.U)
   }
 
+  val ramOut = Wire(UInt((XLEN * 5).W))
+  ramOut := Cat(ramHelpers(4).rdata, ramHelpers(3).rdata, ramHelpers(2).rdata, ramHelpers(1).rdata, ramHelpers(0).rdata) >> (gpc(2,1) << 4)
+
+
   XSDebug("[ICache-Stage1] s1_valid:%d || s2_ready:%d || s1_pc:%x",s1_valid,s2_ready,gpc)
   XSDebug(false,s1_fire,"------> s1 fire!!!")
   XSDebug(false,true.B,"\n")
 
-  XSDebug("[Stage1_data] instr1:0x%x   instr2:0x%x\n",ramOut(0).asUInt,ramOut(1).asUInt)
+  // XSDebug("[Stage1_data] instr1:0x%x   instr2:0x%x\n",ramOut(0).asUInt,ramOut(1).asUInt)
 
   //----------------
   //  ICache Stage2
   //----------------
   val s2_valid = RegEnable(next=s1_valid,init=false.B,enable=s1_fire)
-  val s2_ram_out = RegEnable(next=ramOut,enable=s1_fire)
+  val s2_ram_out = RegEnable(next=ramOut(XLEN * 4 - 1, 0),enable=s1_fire)
   val s2_pc = RegEnable(next = gpc, enable = s1_fire)
   val s3_ready = WireInit(false.B)
   val s2_fire  = s2_valid && s3_ready
@@ -134,7 +138,7 @@ class FakeCache extends XSModule with HasICacheConst {
   XSDebug(false,s2_fire,"------> s2 fire!!!")
   XSDebug(false,true.B,"\n")
 
-  XSDebug("[Stage2_data] instr1:0x%x   instr2:0x%x\n",s2_ram_out(0).asUInt,s2_ram_out(1).asUInt)
+  // XSDebug("[Stage2_data] instr1:0x%x   instr2:0x%x\n",s2_ram_out(0).asUInt,s2_ram_out(1).asUInt)
   //----------------
   //  ICache Stage3
   //----------------
@@ -147,7 +151,7 @@ class FakeCache extends XSModule with HasICacheConst {
   XSDebug("[ICache-Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
   XSDebug(false,true.B,"\n")
 
-  XSDebug("[Stage3_data] instr1:0x%x   instr2:0x%x\n",s3_ram_out(0).asUInt,s3_ram_out(1).asUInt)
+  // XSDebug("[Stage3_data] instr1:0x%x   instr2:0x%x\n",s3_ram_out(0).asUInt,s3_ram_out(1).asUInt)
   XSDebug("[Flush icache] flush:%b\n", io.flush)
 
   // when(needflush){
@@ -162,6 +166,6 @@ class FakeCache extends XSModule with HasICacheConst {
 
   io.out.valid := s3_valid
   io.out.bits.pc := s3_pc
-  io.out.bits.data := s3_ram_out.asUInt
+  io.out.bits.data := s3_ram_out
   io.out.bits.mask := mask(s3_pc)
 }
