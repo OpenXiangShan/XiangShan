@@ -58,6 +58,7 @@ class BTB extends BasePredictor with BTBParams{
   }
   class BTBMeta extends Meta {
     val writeWay =  Vec(PredictWidth, UInt(log2Up(BtbWays).W))
+    val hitJal = Vec(PredictWidth, Bool())
   }
   class BTBFromOthers extends FromOthers {}
   
@@ -66,7 +67,7 @@ class BTB extends BasePredictor with BTBParams{
     val meta = Output(new BTBMeta)
   }
   override val io = IO(new BTBIO)
-  val btbAddr = new TableAddr(log2Up(BtbSize), BtbBanks)
+  val btbAddr = new TableAddr(log2Up(BtbSize/BtbWays), BtbBanks)
 
   val pcLatch = RegEnable(io.pc.bits, io.pc.valid)
 
@@ -179,6 +180,7 @@ class BTB extends BasePredictor with BTBParams{
     io.resp.types(b) := meta_entry.btbType
     io.resp.isRVC(b) := meta_entry.isRVC
     io.meta.writeWay(b) := writeWay(bankIdxInOrder(b))
+    io.meta.hitJal(b)   := bankHits(bankIdxInOrder(b)) && meta_entry.btbType === BTBtype.J
   }
 
   def pdInfoToBTBtype(pd: PreDecodeInfo) = {
@@ -194,8 +196,7 @@ class BTB extends BasePredictor with BTBParams{
   val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
   val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
   val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
-  val new_offset = (new_target.asSInt -
-    u.pc.asSInt)
+  val new_offset = (new_target.asSInt - u.pc.asSInt)
   val new_extended = (new_offset > max_offset || new_offset < min_offset)
 
 
@@ -206,7 +207,7 @@ class BTB extends BasePredictor with BTBParams{
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val updateValid = io.update.valid && (u.isMisPred && !(u.pd.isJal) || u.pd.isJal)
+  val updateValid = io.update.valid && (u.isMisPred || !u.brInfo.btbHitJal)
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
@@ -232,8 +233,8 @@ class BTB extends BasePredictor with BTBParams{
   if (debug_verbose) {
     for (i <- 0 until BtbBanks){
       for (j <- 0 until BtbWays) {
-        XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-        j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
+        XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
+        j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, realMaskLatch(i), metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
       }
     }
   }

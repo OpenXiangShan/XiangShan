@@ -296,7 +296,11 @@ class BPUStage3 extends BPUStage {
   targetSrc := inLatch.resp.btb.targets
   when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
   lastIsRVC := pds(lastValidPos).isRVC
-  when (lastValidPos > 0.U) {
+  when (lastValidPos === 1.U) {
+    lastHit := pdMask(1) |
+      !pdMask(0) & !pdMask(1) |
+      pdMask(0) & !pdMask(1) & (pds(0).isRVC | !io.predecode.bits.isFetchpcEqualFirstpc)
+  }.elsewhen (lastValidPos > 0.U) {
     lastHit := pdMask(lastValidPos) |
       !pdMask(lastValidPos - 1.U) & !pdMask(lastValidPos) |
       pdMask(lastValidPos - 1.U) & !pdMask(lastValidPos) & pds(lastValidPos - 1.U).isRVC
@@ -461,6 +465,7 @@ class BPU extends BaseBPU {
   s1_resp_in.btb <> btb.io.resp
   for (i <- 0 until PredictWidth) {
     s1_brInfo_in(i).btbWriteWay := btb.io.meta.writeWay(i)
+    s1_brInfo_in(i).btbHitJal   := btb.io.meta.hitJal(i)
   }
 
   bim.io.flush := io.flush(0) // TODO: fix this
