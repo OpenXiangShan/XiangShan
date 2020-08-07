@@ -127,8 +127,8 @@ class Decoder extends XSModule with HasInstrType {
      when (isLink(rfDest)) { io.out.ctrl.fuOpType := JumpOpType.call }
    }
  }
-  // fix LUI
-  io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U, SrcType.reg, src1Type)
+
+  io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U || instr(15, 13) === "b011".U && instr(1, 0) === "b01".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type
 
   val vmEnable = WireInit(false.B)

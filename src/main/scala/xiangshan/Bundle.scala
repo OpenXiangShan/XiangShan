@@ -71,6 +71,7 @@ class BranchInfo extends XSBundle {
 }
 
 class Predecode extends XSBundle {
+  val isFetchpcEqualFirstpc = Bool()
   val mask = UInt((FetchWidth*2).W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
