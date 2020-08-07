@@ -251,12 +251,11 @@ class Roq extends XSModule {
   }
 
   // when rollback, reset writebacked entry to valid
-  when(io.memRedirect.valid/* && io.memRedirect.bits.isReplay*/){ // TODO: opt timing
+  when(io.memRedirect.valid) { // TODO: opt timing
     for (i <- 0 until RoqSize) {
-      val recRoqIdx = Wire(new MicroOp)
-      recRoqIdx := DontCare
-      recRoqIdx.roqIdx := Cat(flag(i).asUInt, i.U)
-      when(valid(i) && recRoqIdx.isAfter(io.memRedirect.bits)){
+      val recRoqIdx = Wire(new XSBundle with HasRoqIdx)
+      recRoqIdx.roqIdx := Cat(flag(i).asUInt, i.U((RoqIdxWidth - 1).W))
+      when (valid(i) && recRoqIdx.isAfter(io.memRedirect.bits)) {
         writebacked(i) := false.B
       }
     }
