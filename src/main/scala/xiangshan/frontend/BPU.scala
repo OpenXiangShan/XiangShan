@@ -240,7 +240,7 @@ class BPUStage3 extends BPUStage {
   // response comes directly from s3,
   // so we do not use those from inLatch
   val tageResp = io.in.bits.resp.tage
-  val tageValidTakens = VecInit((0 until PredictWidth).map( i => tageResp.takens(i) && tageResp.hits(i)))
+  val tageTakens = tageResp.takens
 
   val pdMask = io.predecode.bits.mask
   val pds    = io.predecode.bits.pd
@@ -259,7 +259,7 @@ class BPUStage3 extends BPUStage {
   
   val brTakens = 
     if (EnableBPD) {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => tageValidTakens(i))))
+      brs & Reverse(Cat((0 until PredictWidth).map(i => tageTakens(i))))
     } else {
       brs & Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))
     }
@@ -269,7 +269,7 @@ class BPUStage3 extends BPUStage {
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
-  notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))} 
+  notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageTakens(i)))} 
                 else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))})
   targetSrc := inLatch.resp.btb.targets
 
@@ -453,11 +453,13 @@ class BPU extends BaseBPU {
   s1.io.in.bits.resp <> s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
+  val s1_hist = RegEnable(io.in.bits.hist, enable=io.in.valid)
+
   //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
   tage.io.pc.valid := s1.io.out.fire()
   tage.io.pc.bits := s1.io.out.bits.pc // PC from s1
-  tage.io.hist := io.in.bits.hist // The inst is from s1
+  tage.io.hist := s1_hist // The inst is from s1
   tage.io.inMask := s1.io.out.bits.mask
   tage.io.s3Fire := s3.io.in.fire() // Tell tage to march 1 stage
   tage.io.bim <> s1.io.out.bits.resp.bim // Use bim results from s1

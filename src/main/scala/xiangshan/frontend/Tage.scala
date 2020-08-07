@@ -97,11 +97,11 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     Mux(!taken, Mux(ctr === 0.U, 0.U, ctr - 1.U),
                 Mux(ctr === 7.U, 7.U, ctr + 1.U))
   }
-
-  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
+  // circular shifting
+  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
     val res = Wire(UInt(len.W))
-    val higher = source << (len.U - shamt)
-    val lower = source >> shamt
+    val higher = source << shamt
+    val lower = source >> (len.U - shamt)
     res := higher | lower
     res
   }
