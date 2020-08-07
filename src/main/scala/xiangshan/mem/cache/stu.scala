@@ -10,13 +10,32 @@ import bus.tilelink._
 import _root_.utils.{Code, RandomReplacement, Transpose}
 import xiangshan.mem.MemoryOpConstants
 
+class StoreReq extends DCacheBundle {
+  val cmd  = UInt(M_SZ.W)
+  val addr  = UInt(PAddrBits.W)
+  val wmask  = Vec(refillCycles, Bits(rowWords.W))
+  val data   = Vec(refillCycles, Bits(encRowBits.W))
+  val meta  = UInt(META_SZ.W)
+}
+
+class StoreResp extends DCacheBundle
+{
+  val meta  = UInt(META_SZ.W)
+}
+
+class StoreIO extends DCacheBundle
+{
+  val req = new DecoupledIO(new StoreReq)
+  val resp = Flipped(new ValidIO(new StoreResp))
+}
 
 class StorePipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
-    val lsu   = Flipped(new LSUDMemIO)
-    val data_write  = Output(Valid(new L1DataWriteReq))
+    val lsu   = Flipped(new StoreIO)
+    val data_read  = Output(Valid(new L1DataReadReq))
     val data_resp  = Output(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val data_write  = Output(Valid(new L1DataWriteReq))
     val meta_read = Decoupled(new L1MetaReadReq)
     val meta_resp = Output(Vec(nWays, rstVal.cloneType))
   })

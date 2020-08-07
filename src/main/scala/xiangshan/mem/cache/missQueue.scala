@@ -13,26 +13,37 @@ import xiangshan.mem.DCacheReq
 import xiangshan.utils.XSDebug
 import bus.tilelink._
 
-class DCacheReqInternal extends DCacheReq
-  with HasDCacheParameters
+class MissQueueReq extends DCacheBundle
 {
-  // miss info
-  val tag_match = Bool()
-  val old_meta  = new L1Metadata
-  val way_en    = UInt(nWays.W)
+  val cmd  = UInt(M_SZ.W)
+  val addr  = UInt(PAddrBits.W)
+  val client_id  = UInt()
+}
 
-  val sdq_id    = UInt(log2Up(cfg.nSDQ).W)
+class MissQueueResp extends DCacheBundle
+{
+  val client_id  = UInt()
+  val entry_id  = UInt()
+}
+
+class MissQueueFinish extends DCacheBundle
+{
+  val client_id = UInt()
+  val entry_id   = UInt()
 }
 
 
-class MSHR extends DCacheModule
+// One miss entry deals with one missed block
+class MissEntry extends DCacheModule
 {
   val io = IO(new Bundle {
+    // MSHR ID
     val id = Input(UInt())
 
-    val req_pri_val = Input(Bool())
-    val req_pri_rdy = Output(Bool())
-    val req         = Input(new DCacheReqInternal)
+    // client requests
+    val req = Flipped(new DecoupledIO(new MissQueueReq))
+    val resp = new ValidIO(new MissQueueResp)
+    val finish = Flipped(new DecoupledIO(new MissQueueFinish))
 
     val idx = Output(Valid(UInt()))
     val way = Output(Valid(UInt()))
@@ -42,48 +53,46 @@ class MSHR extends DCacheModule
     val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
     val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
 
-    val refill      = Decoupled(new L1DataWriteReq)
-
+    val meta_read = Decoupled(new L1MetaReadReq)
+    val meta_resp = Output(Vec(nWays, rstVal.cloneType))
     val meta_write  = Decoupled(new L1MetaWriteReq)
+    val refill      = Decoupled(new L1DataWriteReq)
 
     val wb_req      = Decoupled(new WritebackReq)
     val wb_resp     = Input(Bool())
-
-    // Replays go through the cache pipeline again
-    val replay      = Decoupled(new DCacheReqInternal)
   })
 
-  // TODO: Optimize this. We don't want to mess with cache during speculation
-  // s_refill_req      : Make a request for a new cache line
-  // s_refill_resp     : Store the refill response into our buffer
-  // s_drain_rpq_loads : Drain out loads from the rpq
-  //                   : If miss was misspeculated, go to s_invalid
-  // s_wb_req          : Write back the evicted cache line
-  // s_wb_resp         : Finish writing back the evicted cache line
-  // s_meta_write_req  : Write the metadata for new cache lne
-  // s_meta_write_resp :
+  // MSHR:
+  // 1. get req
+  // 2. read meta data and make replacement decisions
+  // 3. do writeback/refill when necessary
+  // 4. send response back to client
+  // 5. wait for client's finish
+  // 6. update meta data
+  // 7. done
+  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_wb_req :: s_wb_resp :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_send_resp :: s_client_finish :: s_meta_write_req :: Nil = Enum(11)
 
-  val s_invalid :: s_refill_req :: s_refill_resp :: s_wb_req :: s_wb_resp :: s_drain_rpq :: s_meta_write_req :: s_mem_finish :: Nil = Enum(8)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new DCacheReqInternal)
+  val req     = Reg(new MissQueueReq)
   val req_idx = req.addr(untagBits-1, blockOffBits)
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
 
+  // meta read results
+  val req_tag_match = Reg(Bool())
+  val req_old_meta = Reg(new L1Metadata)
+  val req_way_en = Reg(UInt(nWays.W))
+
+  // what permission to release for the old block?
+  val (_, shrink_param, coh_on_clear) = req_old_meta.coh.onCacheControl(M_FLUSH)
+
+  // what permission to acquire for the new block?
   val new_coh = RegInit(ClientMetadata.onReset)
-  val (_, shrink_param, coh_on_clear) = req.old_meta.coh.onCacheControl(M_FLUSH)
   val grow_param = new_coh.onAccess(req.cmd)._2
   val coh_on_grant = new_coh.onGrant(req.cmd, io.mem_grant.bits.param)
 
   val (_, _, refill_done, refill_address_inc) = TLUtilities.addr_inc(io.mem_grant)
-
-  val rpq = Module(new Queue(new DCacheReqInternal, cfg.nRPQ))
-
-  rpq.io.enq.valid := io.req_pri_val && io.req_pri_rdy
-  rpq.io.enq.bits  := io.req
-  rpq.io.deq.ready := false.B
-
 
   val grantack = Reg(Valid(new TLBundleE(cfg.busParams)))
   val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
@@ -91,14 +100,14 @@ class MSHR extends DCacheModule
   io.idx.valid := state =/= s_invalid
   io.tag.valid := state =/= s_invalid
   io.way.valid := state =/= s_invalid
-  io.idx.bits := req_idx
-  io.tag.bits := req_tag
-  io.way.bits := req.way_en
-
-  XSDebug("mshr: %d state: %d idx_valid: %b\n", io.id, state, io.idx.valid)
+  io.idx.bits  := req_idx
+  io.tag.bits  := req_tag
+  io.way.bits  := req.way_en
 
   // assign default values to output signals
-  io.req_pri_rdy         := false.B
+  io.req.ready           := false.B
+  io.resp.valid          := false.B
+  io.finish.ready        := false.B
 
   io.mem_acquire.valid   := false.B
   io.mem_acquire.bits    := DontCare
@@ -108,32 +117,86 @@ class MSHR extends DCacheModule
   io.mem_finish.valid    := false.B
   io.mem_finish.bits     := DontCare
 
-  io.refill.valid        := false.B
-  io.refill.bits         := DontCare
+  io.meta_read.valid     := false.B
+  io.meta_read.bits      := DontCare
 
   io.meta_write.valid    := false.B
   io.meta_write.bits     := DontCare
 
+  io.refill.valid        := false.B
+  io.refill.bits         := DontCare
+
   io.wb_req.valid        := false.B
   io.wb_req.bits         := DontCare
 
-  io.replay.valid        := false.B
-  io.replay.bits         := DontCare
+  XSDebug("entry: %d state: %d\n", io.id, state)
+  // --------------------------------------------
+  // s_invalid: receive requests
+  when (state === s_invalid) {
+    io.req.ready := true.B
 
-  def handle_pri_req(old_state: UInt): UInt = {
-    val new_state = WireInit(old_state)
-    grantack.valid := false.B
-    refill_ctr := 0.U
-    assert(rpq.io.enq.ready)
-    req := io.req
-    val old_coh   = io.req.old_meta.coh
+    when (io.req.fire()) {
+      grantack.valid := false.B
+      refill_ctr := 0.U
+      req := io.req.bits
+      state := s_meta_read_req
+    }
+  }
+
+  // --------------------------------------------
+  // s_meta_read_req: read meta data
+  when (state === s_meta_read_req) {
+    io.meta_read.valid := true.B
+    val meta_read = io.meta_read.bits
+    meta_read.idx    := req_idx
+    meta_read.way_en := ~0.U(nWays.W)
+    meta_read.tag    := DontCare
+
+    when (io.meta_read.fire()) {
+      state := s_meta_read_resp
+    }
+  }
+
+  // s_meta_read_resp: handle meta read response
+  // check hit, miss
+  when (state === s_meta_read_resp) {
+    // tag check
+    def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
+    val tag_eq_way = wayMap((w: Int) => io.meta_resp(w).tag === (req_tag)).asUInt
+    val tag_match_way = wayMap((w: Int) => tag_eq_way(w) && io.meta_resp(w).coh.isValid()).asUInt
+    val tag_match     = tag_match_way.orR
+    val hit_meta     = Mux1H(tag_match_way, wayMap((w: Int) => io.meta_resp(w)))
+    val hit_state     = hit_meta.coh
+    val has_permission = hit_state.onAccess(req.cmd)._1
+    val new_hit_state  = hit_state.onAccess(req.cmd)._3
+    val hit = tag_match && has_permission && hit_state === new_hit_state
+
+    // replacement policy
+    val replacer = cacheParams.replacement
+    val replaced_way_en = UIntToOH(replacer.way)
+    val repl_meta = Mux1H(replaced_way_en, wayMap((w: Int) => io.meta_resp(w)))
+
+    req_tag_match   := tag_match
+    req_old_meta    := Mux(tag_match, hit_meta, repl_meta)
+    req_way_en      := Mux(tag_match, tag_match_way, replaced_way_en)
+
+    replacer.miss
+
+    state := s_decide_next_state
+  }
+
+
+  // decision making
+  def decide_next_state(): UInt = {
+    val new_state = WireInit(s_invalid)
+    val old_coh   = req_old_meta.coh
     val needs_wb = old_coh.onCacheControl(M_FLUSH)._1 // does the line we are evicting need to be written back
-    when (io.req.tag_match) {
+    when (req_tag_match) {
       val (is_hit, _, coh_on_hit) = old_coh.onAccess(io.req.cmd)
       when (is_hit) { // set dirty bit
-        assert(isWrite(io.req.cmd))
+        assert(isWrite(req.cmd))
         new_coh     := coh_on_hit
-        new_state   := s_drain_rpq
+        new_state   := s_send_resp
       } .otherwise { // upgrade permissions
         new_coh     := old_coh
         new_state   := s_refill_req
@@ -149,32 +212,26 @@ class MSHR extends DCacheModule
     new_state
   }
 
-  // --------------------------------------------
-  // s_invalid: receive requests
-  when (state === s_invalid) {
-    io.req_pri_rdy := true.B
+  when (state === s_decide_next_state) {
+    state := decide_next_state()
+  }
 
-    when (io.req_pri_val && io.req_pri_rdy) {
-      state := handle_pri_req(state)
-    }
-  } 
-  
   // --------------------------------------------
   // write back
   when (state === s_wb_req) {
     io.wb_req.valid          := true.B
 
-    io.wb_req.bits.tag       := req.old_meta.tag
+    io.wb_req.bits.tag       := req_old_meta.tag
     io.wb_req.bits.idx       := req_idx
     io.wb_req.bits.param     := shrink_param
-    io.wb_req.bits.way_en    := req.way_en
+    io.wb_req.bits.way_en    := req_way_en
     io.wb_req.bits.source    := io.id
     io.wb_req.bits.voluntary := true.B
     when (io.wb_req.fire()) {
       state := s_wb_resp
     }
   }
-  
+
   when (state === s_wb_resp) {
     when (io.wb_resp) {
       state := s_refill_req
@@ -219,18 +276,44 @@ class MSHR extends DCacheModule
     when (refill_done) {
       grantack.valid := TLUtilities.isRequest(io.mem_grant.bits)
       grantack.bits := TLMasterUtilities.GrantAck(io.mem_grant.bits)
-      state := s_mem_finish
       new_coh := coh_on_grant
+
+      state := s_mem_finish
     }
   }
-  
+
   when (state === s_mem_finish) {
     io.mem_finish.valid := grantack.valid
     io.mem_finish.bits  := grantack.bits
 
     when (io.mem_finish.fire()) {
       grantack.valid := false.B
-      state := s_drain_rpq
+      state := s_send_resp
+    }
+  }
+
+  // --------------------------------------------
+  // inform clients to replay requests
+  when (state === s_send_resp) {
+    io.resp.valid := true.B
+    io.resp.bits.client_id := req.client_id
+    io.resp.bits.entry_id := io.id
+
+    when (io.resp.fire()) {
+      when (isWrite(req.cmd)) {
+        // Set dirty
+        val (is_hit, _, coh_on_hit) = new_coh.onAccess(req.cmd)
+        assert(is_hit, "We still don't have permissions for this store")
+        new_coh := coh_on_hit
+      }
+      state := s_client_finish
+    }
+  }
+
+  when (state === s_client_finish) {
+    io.finish.ready := true.B
+    when (io.finish.fire()) {
+      state := s_meta_write_req
     }
   }
 
@@ -247,158 +330,88 @@ class MSHR extends DCacheModule
       state := s_invalid
     }
   }
-
-  // --------------------------------------------
-  // replay
-  when (state === s_drain_rpq) {
-    io.replay <> rpq.io.deq
-    io.replay.bits.way_en    := req.way_en
-    io.replay.bits.addr := Cat(req_tag, req_idx, rpq.io.deq.bits.addr(blockOffBits-1,0))
-    when (io.replay.fire() && isWrite(rpq.io.deq.bits.cmd)) {
-      // Set dirty bit
-      val (is_hit, _, coh_on_hit) = new_coh.onAccess(rpq.io.deq.bits.cmd)
-      assert(is_hit, "We still don't have permissions for this store")
-      new_coh := coh_on_hit
-    }
-    when (rpq.io.count === 0.U) {
-      state := s_meta_write_req
-    }
-  }
 }
 
 
-class MSHRFile extends DCacheModule
+class MissQueue extends DCacheModule
 {
   val io = IO(new Bundle {
-    val req  = Flipped(Vec(memWidth, Decoupled(new DCacheReqInternal))) // Req from s2 of DCache pipe
-    val block_hit = Output(Vec(memWidth, Bool()))
+    val req = Flipped(new DecoupledIO(new MissQueueReq))
+    val resp = new ValidIO(new MissQueueResp)
+    val finish = Flipped(new DecoupledIO(new MissQueueFinish))
 
-    val mem_acquire  = Decoupled(new TLBundleA(cfg.busParams))
-    val mem_grant    = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
-    val mem_finish   = Decoupled(new TLBundleE(cfg.busParams))
+    val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
+    val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
+    val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
 
-    val refill     = Decoupled(new L1DataWriteReq)
-    val meta_write = Decoupled(new L1MetaWriteReq)
-    val replay     = Decoupled(new DCacheReqInternal)
-    val wb_req     = Decoupled(new WritebackReq)
-    val wb_resp   = Input(Bool())
+    val meta_read = Decoupled(new L1MetaReadReq)
+    val meta_resp = Output(Vec(nWays, rstVal.cloneType))
+    val meta_write  = Decoupled(new L1MetaWriteReq)
+    val refill      = Decoupled(new L1DataWriteReq)
+
+    val wb_req      = Decoupled(new WritebackReq)
+    val wb_resp     = Input(Bool())
   })
 
-  val req_idx = OHToUInt(io.req.map(_.valid))
-  val req     = io.req(req_idx)
+  val resp_arb       = Module(new Arbiter(new MissQueueResp,    cfg.nMissEntries))
+  val finish_arb     = Module(new Arbiter(new MissQueueFinish,  cfg.nMissEntries))
+  val meta_read_arb  = Module(new Arbiter(new L1MetaReadReq,    cfg.nMissEntries))
+  val meta_write_arb = Module(new Arbiter(new L1MetaWriteReq,   cfg.nMissEntries))
+  val refill_arb     = Module(new Arbiter(new L1DataWriteReq,   cfg.nMissEntries))
+  val wb_req_arb     = Module(new Arbiter(new WritebackReq,     cfg.nMissEntries))
 
-  for (w <- 0 until memWidth)
-    io.req(w).ready := false.B
+  val entry_alloc_idx = Wire(UInt())
+  val req_ready = WireInit(false.B)
 
-  val cacheable = true.B
+  val entries = (0 until cfg.nMissEntries) map { i =>
+    val entry = Module(new MissQueue)
 
-  // --------------------
-  // The MSHR SDQ
-  val sdq_val      = RegInit(0.U(cfg.nSDQ.W))
-  val sdq_alloc_id = PriorityEncoder(~sdq_val(cfg.nSDQ-1,0))
-  val sdq_rdy      = !sdq_val.andR
+    entry.io.id := i.U(log2Up(cfg.nMissEntries).W)
 
-  val sdq_enq      = req.fire() && cacheable && isWrite(req.bits.cmd)
-  val sdq          = Mem(cfg.nSDQ, UInt(wordBits.W))
-
-  when (sdq_enq) {
-    sdq(sdq_alloc_id) := req.bits.data
-  }
-
-  // --------------------
-  // The LineBuffer Data
-  def widthMap[T <: Data](f: Int => T) = VecInit((0 until memWidth).map(f))
-
-  val idx_matches = Wire(Vec(memWidth, Vec(cfg.nMSHRs, Bool())))
-  val tag_matches = Wire(Vec(memWidth, Vec(cfg.nMSHRs, Bool())))
-  val way_matches = Wire(Vec(memWidth, Vec(cfg.nMSHRs, Bool())))
-
-  val tag_match   = widthMap(w => Mux1H(idx_matches(w), tag_matches(w)))
-  val idx_match   = widthMap(w => idx_matches(w).reduce(_||_))
-  val way_match   = widthMap(w => Mux1H(idx_matches(w), way_matches(w)))
-
-  val wb_tag_list = Wire(Vec(cfg.nMSHRs, UInt(tagBits.W)))
-
-  val meta_write_arb = Module(new Arbiter(new L1MetaWriteReq,    cfg.nMSHRs))
-  val wb_req_arb     = Module(new Arbiter(new WritebackReq,      cfg.nMSHRs))
-  val replay_arb     = Module(new Arbiter(new DCacheReqInternal, cfg.nMSHRs))
-  val refill_arb     = Module(new Arbiter(new L1DataWriteReq,    cfg.nMSHRs))
-
-  io.mem_grant.ready := false.B
-
-  val mshr_alloc_idx = Wire(UInt())
-  val pri_rdy = WireInit(false.B)
-  val pri_val = req.valid && sdq_rdy && cacheable && !idx_match(req_idx)
-  val mshrs = (0 until cfg.nMSHRs) map { i =>
-    val mshr = Module(new MSHR)
-    mshr.io.id := i.U(log2Up(cfg.nMSHRs).W)
-
-    for (w <- 0 until memWidth) {
-      idx_matches(w)(i) := mshr.io.idx.valid && mshr.io.idx.bits === io.req(w).bits.addr(untagBits-1,blockOffBits)
-      tag_matches(w)(i) := mshr.io.tag.valid && mshr.io.tag.bits === io.req(w).bits.addr >> untagBits
-      way_matches(w)(i) := mshr.io.way.valid && mshr.io.way.bits === io.req(w).bits.way_en
-      when (idx_matches(w)(i)) {
-        XSDebug(s"mshr: $i channel: $w idx_match\n")
-      }
-      when (tag_matches(w)(i)) {
-        XSDebug(s"mshr: $i channel: $w tag_match\n")
-      }
-      when (way_matches(w)(i)) {
-        XSDebug(s"mshr: $i channel: $w way_match\n")
-      }
-    }
-    wb_tag_list(i) := mshr.io.wb_req.bits.tag
-
-    mshr.io.req_pri_val  := (i.U === mshr_alloc_idx) && pri_val
-    when (i.U === mshr_alloc_idx) {
-      pri_rdy := mshr.io.req_pri_rdy
+    // entry req
+    entry.io.req.valid := (i.U === entry_alloc_idx) && io.req.valid
+    entry.io.req.bits  := req.bits
+    when (i.U === entry_alloc_idx) {
+      req_ready := entry.io.req_pri_rdy
     }
 
-    mshr.io.req          := req.bits
-    mshr.io.req.sdq_id   := sdq_alloc_id
+    // entry resp
+    resp_arb.io.in(i)     <>  entry.io.resp
 
-    mshr.io.wb_resp      := io.wb_resp
+    // entry finish
+    entry.io.finish.valid   :=  (i.U === io.finish.bits.entry_id) && io.finish.valid
+    entry.io.finish.bits    :=  io.finish.bits
 
-    meta_write_arb.io.in(i) <> mshr.io.meta_write
-    wb_req_arb.io.in(i)     <> mshr.io.wb_req
-    replay_arb.io.in(i)     <> mshr.io.replay
-    refill_arb.io.in(i)     <> mshr.io.refill
+    meta_read_arb.io.in(i)  <>  entry.io.meta_read
+    entry.io.meta_resp      :=  io.meta_resp
 
-    mshr.io.mem_grant.valid := false.B
-    mshr.io.mem_grant.bits  := DontCare
+    meta_write_arb.io.in(i) <>  entry.io.meta_write
+    refill_arb.io.in(i)     <>  entry.io.refill
+
+    wb_req_arb.io.in(i)     <>  entry.io.wb_req
+    entry.io.wb_resp        :=  io.wb_resp
+
+    entry.io.mem_grant.valid := false.B
+    entry.io.mem_grant.bits  := DontCare
     when (io.mem_grant.bits.source === i.U) {
-      mshr.io.mem_grant <> io.mem_grant
+      entry.io.mem_grant <> io.mem_grant
     }
 
-    mshr
+    entry
   }
 
-  mshr_alloc_idx    := RegNext(PriorityEncoder(mshrs.map(m=>m.io.req_pri_rdy)))
+  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.client.req.ready)))
 
+  io.req.ready  := req_ready
+  io.resp       <> resp_arb.io.out
+  io.meta_read  <> meta_read_arb.io.out
   io.meta_write <> meta_write_arb.io.out
+  io.refill     <> refill_arb.io.out
   io.wb_req     <> wb_req_arb.io.out
 
-  TLArbiter.lowestFromSeq(io.mem_acquire, mshrs.map(_.io.mem_acquire))
-  TLArbiter.lowestFromSeq(io.mem_finish,  mshrs.map(_.io.mem_finish))
+  TLArbiter.lowestFromSeq(io.mem_acquire, entries.map(_.io.mem_acquire))
+  TLArbiter.lowestFromSeq(io.mem_finish,  entries.map(_.io.mem_finish))
 
-  val mmio_rdy = true.B
-
-  for (w <- 0 until memWidth) {
-    io.req(w).ready      := (w.U === req_idx) &&
-      Mux(!cacheable, mmio_rdy, sdq_rdy && pri_rdy)
-    io.block_hit(w)      := idx_match(w)
-  }
-  io.refill         <> refill_arb.io.out
-
-  val free_sdq = io.replay.fire() && isWrite(io.replay.bits.cmd)
-
-  io.replay <> replay_arb.io.out
-  io.replay.bits.data := sdq(replay_arb.io.out.bits.sdq_id)
-
-  when (io.replay.valid || sdq_enq) {
-    sdq_val := sdq_val & ~(UIntToOH(replay_arb.io.out.bits.sdq_id) & Fill(cfg.nSDQ, free_sdq)) |
-      PriorityEncoderOH(~sdq_val(cfg.nSDQ-1,0)) & Fill(cfg.nSDQ, sdq_enq)
-  }
 
   // print all input/output requests for debug purpose
 
