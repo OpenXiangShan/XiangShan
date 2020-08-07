@@ -8,7 +8,7 @@ import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
 
-// A "just-enough" Roq
+
 class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
@@ -20,7 +20,6 @@ class Roq extends XSModule {
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
-    // val mcommit = Vec(CommitWidth, Valid(UInt(LsroqIdxWidth.W)))
     val bcommit = Output(UInt(BrTagWidth.W))
   })
 
@@ -252,10 +251,12 @@ class Roq extends XSModule {
   }
 
   // when rollback, reset writebacked entry to valid
-  when(io.brqRedirect.valid && io.brqRedirect.bits.isReplay){ // TODO: opt timing
+  when(io.memRedirect.valid/* && io.memRedirect.bits.isReplay*/){ // TODO: opt timing
     for (i <- 0 until RoqSize) {
-      val recRoqIdx = Cat(flag(i).asUInt, i.U)
-      when(valid(i) && io.memRedirect.bits.isAfter(recRoqIdx)){
+      val recRoqIdx = Wire(new MicroOp)
+      recRoqIdx := DontCare
+      recRoqIdx.roqIdx := Cat(flag(i).asUInt, i.U)
+      when(valid(i) && recRoqIdx.isAfter(io.memRedirect.bits)){
         writebacked(i) := false.B
       }
     }

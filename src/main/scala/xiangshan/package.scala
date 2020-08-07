@@ -80,9 +80,9 @@ package object xiangshan {
   }
 
   object CommitType {
-    def INT = "b00".U    // int
-    def FP = "b01".U     // fp
-    def LOAD = "b10".U   // load
+    def INT   = "b00".U  // int
+    def FP    = "b01".U  // fp
+    def LOAD  = "b10".U  // load
     def STORE = "b11".U  // store
 
     def apply() = UInt(2.W)

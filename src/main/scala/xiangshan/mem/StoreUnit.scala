@@ -23,13 +23,12 @@ class StoreUnit extends XSModule {
 
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
-    val uop = pipeline.uop
     XSDebug(cond,
-      p"$name" + p" pc ${Hexadecimal(uop.cf.pc)} " +
+      p"$name" + p" pc ${Hexadecimal(pipeline.uop.cf.pc)} " +
         p"addr ${Hexadecimal(pipeline.vaddr)} -> ${Hexadecimal(pipeline.paddr)} " +
-        p"op ${Binary(uop.ctrl.fuOpType)} " +
-        p"data ${pipeline.data} " +
-        p"mask ${pipeline.mask}\n"
+        p"op ${Binary(pipeline.uop.ctrl.fuOpType)} " +
+        p"data ${Hexadecimal(pipeline.data)} " +
+        p"mask ${Hexadecimal(pipeline.mask)}\n"
     )
   }
 
