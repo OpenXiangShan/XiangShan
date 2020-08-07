@@ -25,7 +25,7 @@ class StoreUnit extends XSModule {
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     val uop = pipeline.uop
     XSDebug(cond,
-      name + p" pc ${Hexadecimal(uop.cf.pc)} " +
+      p"$name" + p" pc ${Hexadecimal(uop.cf.pc)} " +
         p"addr ${Hexadecimal(pipeline.vaddr)} -> ${Hexadecimal(pipeline.paddr)} " +
         p"op ${Binary(uop.ctrl.fuOpType)} " +
         p"data ${pipeline.data} " +
@@ -64,11 +64,10 @@ class StoreUnit extends XSModule {
   s2_out.bits.uop := io.stin.bits.uop
   s2_out.bits.miss := io.dtlb.resp.bits.miss
   s2_out.bits.mask := genWmask(s2_out.bits.vaddr, io.stin.bits.uop.ctrl.fuOpType(1,0))
-  s2_out.valid := io.stin.valid && !io.dtlb.resp.bits.miss
+  s2_out.valid := io.stin.valid && !io.dtlb.resp.bits.miss && !s2_out.bits.uop.needFlush(io.redirect)
   io.stin.ready := s2_out.ready
 
-  PipelineConnect(s2_out, s3_in, true.B, s3_in.valid && s3_in.bits.uop.needFlush(io.redirect))
-
+  PipelineConnect(s2_out, s3_in, true.B, false.B)
   //-------------------------------------------------------
   // ST Pipeline Stage 3
   // Write paddr to LSROQ

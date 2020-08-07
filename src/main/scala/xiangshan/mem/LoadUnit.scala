@@ -52,7 +52,7 @@ class LoadUnit extends XSModule {
   l2_out.bits.paddr := io.dtlb.resp.bits.paddr
   l2_out.bits.uop := io.ldin.bits.uop
   l2_out.bits.mask := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
-  l2_out.valid := io.ldin.valid
+  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
   l2_out.ready := io.dcache.req.ready
   io.ldin.ready := l2_out.ready
 
@@ -99,7 +99,7 @@ class LoadUnit extends XSModule {
   l4_out.bits.uop := io.dcache.resp.bits.user.uop
   l4_out.bits.mmio := io.dcache.resp.bits.user.mmio
   l4_out.bits.mask := io.dcache.resp.bits.user.mask
-  l4_out.valid := io.dcache.resp.valid
+  l4_out.valid := io.dcache.resp.valid && l4_out.bits.uop.needFlush(io.redirect)
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
@@ -108,7 +108,7 @@ class LoadUnit extends XSModule {
   io.lsroq.forward.mask := io.dcache.resp.bits.user.mask
   io.lsroq.forward.lsroqIdx := l4_out.bits.uop.lsroqIdx
   io.lsroq.forward.pc := l4_out.bits.uop.cf.pc
-  io.lsroq.forward.valid := l4_out.valid
+  io.lsroq.forward.valid := io.dcache.resp.valid //TODO: opt timing
 
   io.sbuffer.paddr := l4_out.bits.paddr
   io.sbuffer.mask := io.dcache.resp.bits.user.mask
@@ -128,7 +128,7 @@ class LoadUnit extends XSModule {
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
   
-  PipelineConnect(l4_out, l5_in, io.ldout.fire(), l5_in.valid && l5_in.bits.uop.needFlush(io.redirect))
+  PipelineConnect(l4_out, l5_in, io.ldout.fire(), false.B)
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
@@ -192,7 +192,7 @@ class LoadUnit extends XSModule {
 
   io.lsroq.loadIn.bits := l5_in.bits
   io.lsroq.loadIn.bits.data := rdataPartialLoad // for debug
-    io.lsroq.loadIn.valid := loadWriteBack
+  io.lsroq.loadIn.valid := loadWriteBack
 
   // pipeline control
   l5_in.ready := io.ldout.ready
