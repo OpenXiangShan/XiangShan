@@ -22,14 +22,22 @@ class PteBundle extends PtwBundle{
   val ppn  = UInt(ppnLen.W)
   val rsw  = UInt(2.W)
   val perm = new Bundle {
-    val d    = UInt(1.W)
-    val a    = UInt(1.W)
-    val g    = UInt(1.W)
-    val u    = UInt(1.W)
-    val x    = UInt(1.W)
-    val w    = UInt(1.W)
-    val r    = UInt(1.W)
-    val v    = UInt(1.W)
+    val d    = Bool()
+    val a    = Bool()
+    val g    = Bool()
+    val u    = Bool()
+    val x    = Bool()
+    val w    = Bool()
+    val r    = Bool()
+    val v    = Bool()
+  }
+
+  def isPf() = {
+    !perm.v || (!perm.r && perm.w)
+  }
+
+  def isLeaf() = {
+    !isPf() && (perm.r || perm.x)
   }
 }
 
@@ -63,10 +71,14 @@ class PtwEntry(tagLen: Int) extends PtwBundle {
 
 class PtwReq extends PtwBundle {
   val vpn = UInt(vpnLen.W)
-  val cmd = SimpleBusCmd()
+  val idx = UInt(RoqIdxWidth.W) // itlb could ignore it
 }
 
-class PtwResp extends TlbEntry
+class PtwResp extends PtwBundle {
+  val entry = new TlbEntry
+  val idx = UInt(RoqIdxWidth.W)
+  val pf  = Bool() // simple pf no matter cmd
+}
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
@@ -176,72 +188,69 @@ class PTW extends PtwModule {
   val l2Res = Mux(l2Hit, l2HitData.ppn, memRdata.asTypeOf(pteBundle).ppn)
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
-  // fsm
-  val state_idle :: state_tlb/*check tlbcache/l1*/ :: state_wait1/*mem*/ :: state_l2/*check l2*/:: state_wait2/*mem*/ :: state_l3/*check l3*/ :: state_wait3/*check_l3*/ :: Nil = Enum(7)
-  // FIXME: the ptw cache is stored seperately, so the check hit is seperated, fsm is seperated, ugly
-  // NOTE: very simple fsm, may optimize later
-  // TODO: combine these state and use 'level' to choose
-  val state = RegInit(state_idle)
+  // mem Resp
+  val memPte = mem.resp.bits.rdata.asTypeOf(new PteBundle)
 
-  // TODO: add sfence/flush. add superpage support
+  // fsm
+  val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
+  val state = RegInit(state_idle)
+  val level = Reg(UInt(2.W)) // 0/1/2
+  val latch = Reg(resp(0).bits.cloneType)
+  assert(!(level===3.U))
+  assert(!(tlbHit && (mem.req.valid || state===state_wait_resp))) // when tlb hit, should not req/resp.valid
+
   switch (state) {
     is (state_idle) {
       when (valid) {
-        state := state_tlb // read tlb-cache, get data next cycle
+        state := state_req
+        level := 0.U
       }
     }
 
-    is (state_tlb) {
+    is (state_req) {
       when (tlbHit) {
-        state := state_idle // tlbHit, return
-      }.elsewhen (l1Hit) {
-        state := state_l2 // l1Hit, read l2 cache, get data next cycle
+        state := state_idle
+      }.elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
+        level := level + 1.U
       }.elsewhen (mem.req.fire()) {
-        state := state_wait1 // send mem.req and wait for resp
+        state := state_wait_resp
+        assert(!(level === 3.U)) // NOTE: pte is not found after 3 layers(software system is wrong)
       }
     }
 
-    is (state_wait1) {
+    is (state_wait_resp) {
       when (mem.resp.fire()) {
-        state := state_l2 // mem resp, read l2-cache, get data next cycle
+        when (memPte.isLeaf() || memPte.isPf()) {
+          when (resp(arbChosen).ready) {
+            state := state_idle
+          }.otherwise {
+            state := state_wait_ready
+            latch.entry := new TlbEntry().genTlbEntry(memRdata, level, req.vpn)
+            latch.pf := memPte.isPf()
+          }
+        }.otherwise {
+          state := state_req
+          level := level + 1.U
+        }
       }
     }
 
-    is (state_l2) {
-      when (l2Hit) {
-        state := state_l3 // l2 hit, read l3-cache, get data next cycle
-      }.elsewhen (mem.req.fire()) {
-        state := state_wait3 // send mem.req and wait for resp
-      }
-    }
-
-    is (state_wait2) {
-      when (mem.resp.fire()) {
-        state := state_l3 // mem resp, read l3-cache, get data next cycle
-      }
-    }
-
-    is (state_l3) {
-      when (mem.req.fire()) {
-        state := state_wait3
-      }
-    }
-
-    is (state_wait3) {
-      when (mem.resp.fire()) {
+    is (state_wait_ready) {
+      when (resp(arbChosen).ready) {
         state := state_idle
       }
     }
   }
 
   // mem:
-  io.mem.req.valid := (state === state_tlb && !tlbHit && l1Hit) ||
-                      (state === state_l2 && !l2Hit) ||
-                      (state === state_l3) // TODO: add req.valid
+  io.mem.req.valid := state === state_req && 
+                      (level===0.U && !tlbHit && !l1Hit) ||
+                      (level===1.U) ||
+                      (level===2.U)
   io.mem.req.bits.apply(
-    addr = Mux(state === state_tlb, l1addr,
-            Mux(state === state_l2,  l2addr,
-            Mux(state === state_l3,  l3addr, 0.U))),
+    addr = Mux(level===0.U, l1addr/*when l1Hit, dontcare, when l1miss, l1addr*/,
+           Mux(level===1.U, Mux(l2Hit, l3addr, l2addr)/*when l2Hit, l3addr, when l2miss, l2addr*/,
+           l3addr)),
     cmd  = SimpleBusCmd.read,
     size = "b11".U,
     wdata= 0.U,
@@ -249,15 +258,16 @@ class PTW extends PtwModule {
     user = 0.U
   )
   io.mem.resp.ready := true.B
-  assert(!io.mem.resp.valid || (state===state_wait1 || state===state_wait2 || state===state_wait3))
+  assert(!io.mem.resp.valid || state===state_wait_resp)
 
   // resp
-  val level = 0.U // FIXME
+  val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && mem.resp.fire()) || state===state_wait_ready
   for(i <- 0 until PtwWidth) {
-    resp(i).valid := valid && arbChosen===i.U && ((state === state_tlb && tlbHit) || 
-      (state === state_wait3 && mem.resp.fire()))// TODO: add resp valid logic
-    resp(i).bits := Mux(state === state_tlb, tlbHitData, 
-      new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
+    resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
+    resp(i).bits.entry := Mux(state===state_wait_ready, latch.entry,
+      Mux(tlbHit, tlbHitData, new TlbEntry().genTlbEntry(memRdata, level, req.vpn)))
+    resp(i).bits.idx := req.idx
+    resp(i).bits.pf  := Mux(state===state_wait_ready, latch.pf, memPte.isPf())
   }
 
   // sfence
@@ -270,17 +280,18 @@ class PTW extends PtwModule {
   }
 
   // refill
-  when (mem.resp.fire()) {
-    when (state === state_wait1) {
+  assert(!mem.resp.fire() || state===state_wait_resp)
+  when (mem.resp.fire() && !memPte.isPf()) {
+    when (state===state_wait_resp && level===0.U) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
     }
-    when (state === state_wait2) {
-      val l2addrStore = RegEnable(l2addr, mem.req.fire() && state === state_l2)
+    when (state===state_wait_resp && level===1.U) {
+      val l2addrStore = RegEnable(l2addr, mem.req.fire() && state===state_req && level===1.U)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
     }
-    when (state === state_wait3) {
+    when (state===state_wait_resp && memPte.isLeaf()) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
     }

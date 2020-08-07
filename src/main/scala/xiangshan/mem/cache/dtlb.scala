@@ -57,14 +57,14 @@ trait HasTlbConst extends HasXSParameter {
     val ppn  = UInt(ppnLen.W)
     val rsw  = UInt(2.W)
     val perm = new Bundle {
-      val d    = UInt(1.W)
-      val a    = UInt(1.W)
-      val g    = UInt(1.W)
-      val u    = UInt(1.W)
-      val x    = UInt(1.W)
-      val w    = UInt(1.W)
-      val r    = UInt(1.W)
-      val v    = UInt(1.W)
+      val d    = Bool()
+      val a    = Bool()
+      val g    = Bool()
+      val u    = Bool()
+      val x    = Bool()
+      val w    = Bool()
+      val r    = Bool()
+      val v    = Bool()
     }
   }
 }
@@ -131,6 +131,7 @@ object TlbCmd {
 
 class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
+  val idx = UInt(RoqIdxWidth.W)
   val cmd = TlbCmd()
 }
 
@@ -213,11 +214,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   val v = RegInit(0.U(TlbEntrySize.W))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
-  // val g = entry.map(_.perm.g) // g is not used, for asid is not used
+
+  val ptwIdx = Reg(UInt(RoqIdxWidth.W))
+  val ptwPf  = Reg(Bool())
+  val ptwPfHit = widthMap{i => ptwPf && req(i).valid && req(i).bits.idx === ptwIdx }
+  
   val hitVec = widthMapSeq{ i => 
     (v.asBools zip VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))).map{ case (a,b) => a&b } }
-  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool & valid(i) & vmEnable }
-  val miss = widthMap{i => !hit(i) && valid(i) & vmEnable }
+  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool & valid(i) & vmEnable && !ptwPfHit(i)}
+  val miss = widthMap{i => !hit(i) && valid(i) & vmEnable && !ptwPfHit(i) }
   val hitppn = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
   val multiHit = {
@@ -226,19 +231,19 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
   assert(!multiHit) // add multiHit here, later it should be removed (maybe), turn to miss and flush
 
-  // resp
+  // resp  // TODO: A/D has not being concerned
   for(i <- 0 until Width) {
+    when (ptwPfHit(i)) { ptwPf := false.B }
     // req(i).ready := resp(i).ready // true.B // ValidIO
     resp(i).valid := valid(i) // TODO: check it's func in outer module
-    println((i, req(i).bits.vaddr.getWidth, PAddrBits))
     resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
 
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    resp(i).bits.excp.pf.ld    := hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/)
-    resp(i).bits.excp.pf.st    := hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
-    resp(i).bits.excp.pf.instr := hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    resp(i).bits.excp.pf.ld    := (ptwPfHit(i) && TlbCmd.isRead(cmd(i))) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/)
+    resp(i).bits.excp.pf.st    := (ptwPfHit(i) && TlbCmd.isWrite(cmd(i))) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
+    resp(i).bits.excp.pf.instr := (ptwPfHit(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
   }
 
   // sfence (flush)
@@ -263,12 +268,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val state = RegInit(state_idle)
 
   ptw <> DontCare // TODO: need check it
+  when (!ptwPf && ptw.resp.valid) {
+    ptwPf := ptw.resp.bits.pf
+    ptwIdx := ptw.resp.bits.idx
+  }
   ptw.req.valid := ParallelOR(miss).asBool
-  ptw.resp.ready := state === state_wait
+  ptw.resp.ready := state===state_wait && !ptwPf
   for(i <- Width-1 to 0 by -1) {
     when (miss(i)) {
       ptw.req.bits.vpn := reqAddr(i).vpn
-      ptw.req.bits.cmd := cmd(i)
     }
   }
 
@@ -288,10 +296,10 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
 
   // refill
-  val refill = ptw.resp.fire()
+  val refill = ptw.resp.fire() && !ptw.resp.bits.pf
   val refillIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   when (refill) {
     v := v | (1.U << refillIdx)
-    entry(refillIdx) := ptw.resp.bits
+    entry(refillIdx) := ptw.resp.bits.entry
   }
 }
