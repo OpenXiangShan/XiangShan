@@ -30,8 +30,8 @@ class Lsroq extends XSModule {
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
-    val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(LsroqIdxWidth.W))))
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
     val miss = Decoupled(new MissReqIO)
     val refill = Flipped(Valid(new DCacheStoreReq))
@@ -54,6 +54,10 @@ class Lsroq extends XSModule {
   val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerLsroqIdxWidth) === ringBufferTailExtended(InnerLsroqIdxWidth)
   val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerLsroqIdxWidth) =/= ringBufferTailExtended(InnerLsroqIdxWidth)
   val ringBufferAllowin = !ringBufferFull
+
+  val storeCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.STORE)
+  val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
+  val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth-1,0))
 
   // Enqueue at dispatch
   val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
@@ -114,7 +118,7 @@ class Lsroq extends XSModule {
       }
       valid(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss
       writebacked(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss
-      allocated(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
+      // allocated(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
       data(io.loadIn(i).bits.uop.lsroqIdx).paddr := io.loadIn(i).bits.paddr
       data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.forwardMask.asUInt // load's "data" field is used to save bypassMask/Data for missed load
       data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.forwardData.asUInt // load's "data" field is used to save bypassMask/Data for missed load
@@ -202,8 +206,8 @@ class Lsroq extends XSModule {
     io.ldout(i).bits.debug.isMMIO := data(loadWbSel(i)).mmio
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i))
     when(io.ldout(i).fire()) {
-      // writebacked(loadWbSel(i)) := true.B
-      allocated(loadWbSel(i)) := false.B
+      writebacked(loadWbSel(i)) := true.B
+      // allocated(loadWbSel(i)) := false.B
     }
   })
 
@@ -257,7 +261,7 @@ class Lsroq extends XSModule {
   // select up to 2 writebacked store insts
   // scommitPending, scommitIn, scommitOut are for debug only
   val scommitPending = RegInit(0.U(log2Up(LsroqSize).W))
-  val scommitIn = PopCount(VecInit((0 until CommitWidth).map(i => io.mcommit(i).valid)).asUInt)
+  val scommitIn = PopCount(VecInit(storeCommit).asUInt)
   val scommitOut = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
   scommitPending := scommitPending + scommitIn - scommitOut
 
@@ -275,13 +279,22 @@ class Lsroq extends XSModule {
   // When store commited, mark it as commited (will not be influenced by redirect),
   // then add store's lsroq ptr into commitedStoreQueue
   (0 until CommitWidth).map(i => {
-    when(io.mcommit(i).valid) {
-      commited(io.mcommit(i).bits) := true.B
+    when(storeCommit(i)) {
+      commited(mcommitIdx(i)) := true.B
+      XSDebug("store commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
     }
-    commitedStoreQueue.io.enq(i).valid := io.mcommit(i).valid
-    commitedStoreQueue.io.enq(i).bits := io.mcommit(i).bits(InnerLsroqIdxWidth - 1, 0)
+    commitedStoreQueue.io.enq(i).valid := storeCommit(i)
+    commitedStoreQueue.io.enq(i).bits := mcommitIdx(i)
     // We assume commitedStoreQueue.io.enq(i).ready === true.B,
     // for commitedStoreQueue.size = 64
+  })
+
+  // When load commited, mark it as !allocated, this entry will be recycled later
+  (0 until CommitWidth).map(i => {
+    when(loadCommit(i)) {
+      allocated(mcommitIdx(i)) := false.B
+      XSDebug("load commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
+    }
   })
 
   // get no more than 2 commited store from storeCommitedQueue
@@ -427,9 +440,10 @@ class Lsroq extends XSModule {
         val mask = data(ptr).mask
         val s = store(ptr)
         val w = writebacked(ptr)
+        val v = valid(ptr)
         val violationVec = (0 until 8) map (k => {
           needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && s) && !reachHead
-          needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !s && w
+          needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !s && v // TODO: update refilled data
         })
         Cat(violationVec).orR()
       })).asUInt().orR()

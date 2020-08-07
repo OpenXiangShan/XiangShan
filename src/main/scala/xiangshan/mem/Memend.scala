@@ -99,7 +99,7 @@ class MemToBackendIO extends XSBundle {
   val replayAll = ValidIO(new Redirect)
   // replay mem instructions form Load Queue/Store Queue
   val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
-  val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(LsroqIdxWidth.W))))
+  val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
 }
@@ -148,7 +148,7 @@ class Memend extends XSModule {
   sbuffer.io.dcache <> dcache.io.lsu.store
 
   lsroq.io.stout <> io.backend.stout
-  lsroq.io.mcommit <> io.backend.mcommit
+  lsroq.io.commits <> io.backend.commits
   lsroq.io.dp1Req <> io.backend.dp1Req
   lsroq.io.lsroqIdxs <> io.backend.lsroqIdxs
   lsroq.io.brqRedirect := io.backend.redirect
