@@ -167,7 +167,8 @@ class MicroBTB extends BasePredictor
     val update_bank = getBank(update_br_pc)
     val update_base_bank = getBank(update_fetch_pc)
     val update_tag = getTag(update_br_pc)
-    val update_taget_offset =  u.target.asSInt - update_br_pc.asSInt
+    val update_target = Mux(u.pd.isBr, u.brTarget, u.target)
+    val update_taget_offset =  update_target.asSInt - update_br_pc.asSInt
     val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
 
     val entry_write_valid = io.update.valid //&& update_is_BR_or_JAL
