@@ -77,11 +77,13 @@ package object xiangshan {
     def apply() = UInt(2.W)
   }
 
-  object DPQType {
-    def INT = "b00".U // int dispatch
-    def FP = "b01".U // fp dispatch
-    def LS = "b10".U // ls dispatch
+  object CommitType {
+    def INT = "b00".U    // int
+    def FP = "b01".U     // fp
+    def LOAD = "b10".U   // load
+    def STORE = "b11".U  // store
 
     def apply() = UInt(2.W)
+    def isLoadStore(commitType: UInt) = commitType(1)
   }
 }

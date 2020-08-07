@@ -113,7 +113,7 @@ class CtrlSignals extends XSBundle {
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
-  val dpqType = DPQType()
+  val commitType = CommitType()
 }
 
 class CfCtrl extends XSBundle {

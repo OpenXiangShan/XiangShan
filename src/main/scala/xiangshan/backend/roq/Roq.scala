@@ -161,7 +161,7 @@ class Roq extends XSModule {
         io.commits(i).bits.uop := commitUop
 
         storeCommitVec(i) := io.commits(i).valid &&
-          commitUop.ctrl.fuType===FuType.stu
+          commitUop.ctrl.commitType === CommitType.STORE
 
         cfiCommitVec(i) := io.commits(i).valid &&
           !commitUop.cf.brUpdate.pd.notCFI

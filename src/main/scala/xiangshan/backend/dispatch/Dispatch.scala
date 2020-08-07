@@ -17,7 +17,7 @@ case class DispatchParameters
   LsDqDeqWidth: Int
 )
 
-class Dispatch() extends XSModule {
+class Dispatch extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
@@ -51,9 +51,9 @@ class Dispatch() extends XSModule {
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, DPQType.INT.litValue().toInt))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, DPQType.FP.litValue().toInt))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, DPQType.LS.litValue().toInt))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth))
 
   // pipeline between rename and dispatch
   // accepts all at once
@@ -75,10 +75,19 @@ class Dispatch() extends XSModule {
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
   intDq.io.commits <> io.commits
+  intDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
+    dqCommit.valid := commit.valid && dqCommit.bits.uop.ctrl.commitType === CommitType.INT
+  }
   fpDq.io.redirect <> io.redirect
   fpDq.io.commits <> io.commits
+  fpDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
+    dqCommit.valid := commit.valid && dqCommit.bits.uop.ctrl.commitType === CommitType.FP
+  }
   lsDq.io.redirect <> io.redirect
   lsDq.io.commits <> io.commits
+  lsDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
+    dqCommit.valid := commit.valid && CommitType.isLoadStore(dqCommit.bits.uop.ctrl.commitType)
+  }
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)
