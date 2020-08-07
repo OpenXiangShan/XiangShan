@@ -32,6 +32,7 @@ class Dispatch1 extends XSModule {
   val isInt = WireInit(VecInit(io.fromRename.map(uop => FuType.isIntExu(uop.bits.ctrl.fuType))))
   val isFp  = WireInit(VecInit(io.fromRename.map(uop => FuType.isFpExu (uop.bits.ctrl.fuType))))
   val isLs  = WireInit(VecInit(io.fromRename.map(uop => FuType.isMemExu(uop.bits.ctrl.fuType))))
+  val isLoad  = WireInit(VecInit(io.fromRename.map(uop => FuType.isLoadExu(uop.bits.ctrl.fuType))))
 
   // generate index mapping
   val intIndex = Module(new IndexMapping(RenameWidth, dpParams.DqEnqWidth, false))
@@ -63,7 +64,7 @@ class Dispatch1 extends XSModule {
     // input for ROQ and LSROQ
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
-    io.toRoq(i).bits.ctrl.commitType := Cat(isLs(i), isFp(i))
+    io.toRoq(i).bits.ctrl.commitType := Cat(isLs(i), Mux(isLs(i), !isLoad(i), isFp(i))) // TODO: add it to decode
     io.toRoq(i).bits.lsroqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.lsroqIdx(i))
 
     io.toLsroq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)

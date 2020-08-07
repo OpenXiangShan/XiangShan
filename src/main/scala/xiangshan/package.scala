@@ -47,6 +47,8 @@ package object xiangshan {
     def isIntExu(fuType: UInt) =  !fuType(3)
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
+    def isLoadExu(fuType: UInt) = fuType === ldu
+    def isStoreExu(fuType: UInt) = fuType === stu
 
     val functionNameMap = Map(
       jmp.litValue() -> "jmp",
