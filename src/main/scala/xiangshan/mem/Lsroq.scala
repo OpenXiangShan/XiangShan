@@ -15,8 +15,8 @@ class LsRoqEntry extends XSBundle {
   // val miss = Bool()
   val mmio = Bool()
   // val store = Bool()
-  val bwdMask = Vec(8, Bool()) // UInt(8.W)
-  val bwdData = Vec(8, UInt(8.W))
+  // val bwdMask = Vec(8, Bool()) // UInt(8.W)
+  // val bwdData = Vec(8, UInt(8.W))
 }
 
 // Load/Store Roq (Lsroq) for XiangShan Out of Order LSU
@@ -73,7 +73,7 @@ class Lsroq extends XSModule {
       store(ringBufferHead + offset) := false.B
       miss(ringBufferHead + offset) := false.B
       listening(ringBufferHead + offset) := false.B
-      data(ringBufferHead + offset).bwdMask := 0.U(8.W).asBools
+      // data(ringBufferHead + offset).bwdMask := 0.U(8.W).asBools
     }
     if (i == 0) {
       io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead + offset)
@@ -120,9 +120,11 @@ class Lsroq extends XSModule {
       writebacked(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss
       // allocated(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
       data(io.loadIn(i).bits.uop.lsroqIdx).paddr := io.loadIn(i).bits.paddr
-      data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.forwardMask.asUInt // load's "data" field is used to save bypassMask/Data for missed load
-      data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.forwardData.asUInt // load's "data" field is used to save bypassMask/Data for missed load
+      data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.mask
+      data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.data // for debug
       data(io.loadIn(i).bits.uop.lsroqIdx).mmio := io.loadIn(i).bits.mmio
+      // data(io.loadIn(i).bits.uop.lsroqIdx).bwdMask := io.loadIn(i).bits.forwardMask
+      // data(io.loadIn(i).bits.uop.lsroqIdx).bwdData := io.loadIn(i).bits.forwardData
       miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss
       store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
     }
@@ -180,8 +182,9 @@ class Lsroq extends XSModule {
     val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.paddr
     when(allocated(i) && listening(i)) {
       // TODO: merge data
-      val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
-      data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
+      // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
+      // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
+      data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0)) // TODO: forward refill data
       valid(i) := true.B
       listening(i) := false.B
     }
@@ -410,15 +413,15 @@ class Lsroq extends XSModule {
     //   })
 
     // backward
-    (0 until 8).map(k => {
-      when(data(io.forward(i).lsroqIdx).bwdMask(k)) {
-        io.forward(i).forwardMask(k) := true.B
-        io.forward(i).forwardData(k) := data(io.forward(i).lsroqIdx).bwdData(k)
-        XSDebug("backwarding " + k + "th byte %x, idx %d pc %x\n",
-          io.forward(i).forwardData(k), io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0), uop(io.forward(i).lsroqIdx).cf.pc
-        )
-      }
-    })
+    // (0 until 8).map(k => {
+    //   when(data(io.forward(i).lsroqIdx).bwdMask(k)) {
+    //     io.forward(i).forwardMask(k) := true.B
+    //     io.forward(i).forwardData(k) := data(io.forward(i).lsroqIdx).bwdData(k)
+    //     XSDebug("backwarding " + k + "th byte %x, idx %d pc %x\n",
+    //       io.forward(i).forwardData(k), io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0), uop(io.forward(i).lsroqIdx).cf.pc
+    //     )
+    //   }
+    // })
   })
 
   // rollback check
@@ -434,7 +437,7 @@ class Lsroq extends XSModule {
 
       val lsroqViolation = VecInit((0 until LsroqSize).map(j => {
         val ptr = io.storeIn(i).bits.uop.lsroqIdx + j.U
-        val reachHead = ptr === ringBufferHeadExtended
+        val reachHead = (ptr+1.U) === ringBufferHeadExtended
         val addrMatch = allocated(ptr) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(ptr).paddr(PAddrBits - 1, 3)
         val mask = data(ptr).mask
@@ -442,7 +445,7 @@ class Lsroq extends XSModule {
         val w = writebacked(ptr)
         val v = valid(ptr)
         val violationVec = (0 until 8) map (k => {
-          needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && s) && !reachHead
+          needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && s && mask(k)) && !reachHead
           needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !s && v // TODO: update refilled data
         })
         Cat(violationVec).orR()
