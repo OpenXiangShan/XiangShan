@@ -15,6 +15,8 @@ class Rename extends XSModule {
     val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val intPregRdy = Vec(NRIntReadPorts + NRMemReadPorts, Output(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
+    // set preg to busy when replay
+    val replayPregReq = Vec(ReplayWidth, Input(new ReplayPregReq))
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
@@ -200,6 +202,12 @@ class Rename extends XSModule {
 
   intBusyTable.rfReadAddr <> io.intRfReadAddr
   intBusyTable.pregRdy <> io.intPregRdy
+  for(i <- io.replayPregReq.indices){
+    intBusyTable.replayPregs(i).valid := io.replayPregReq(i).isInt
+    fpBusyTable.replayPregs(i).valid := io.replayPregReq(i).isFp
+    intBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
+    fpBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
+  }
   fpBusyTable.rfReadAddr <> io.fpRfReadAddr
   fpBusyTable.pregRdy <> io.fpPregRdy
 }

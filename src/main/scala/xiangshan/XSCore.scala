@@ -55,6 +55,7 @@ case class XSCoreParameters
   IntDqDeqWidth: Int = 4,
   FpDqDeqWidth: Int = 4,
   LsDqDeqWidth: Int = 4,
+  ReplayWidth: Int = 8,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
     IntDqSize = 64,
@@ -138,6 +139,7 @@ trait HasXSParameter {
   val IntDqDeqWidth = core.IntDqDeqWidth
   val FpDqDeqWidth = core.FpDqDeqWidth
   val LsDqDeqWidth = core.LsDqDeqWidth
+  val ReplayWidth = core.ReplayWidth
   val dpParams = core.dpParams
   val exuParameters = core.exuParameters
   val NRIntReadPorts = core.NRIntReadPorts

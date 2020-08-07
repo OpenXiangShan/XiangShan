@@ -164,6 +164,13 @@ class Dp1ToDp2IO extends XSBundle {
   val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
 }
 
+class ReplayPregReq extends XSBundle {
+  // NOTE: set isInt and isFp both to 'false' when invalid
+  val isInt = Bool()
+  val isFp = Bool()
+  val preg = UInt(PhyRegIdxWidth.W)
+}
+
 class DebugBundle extends XSBundle{
   val isMMIO = Bool()
 }
