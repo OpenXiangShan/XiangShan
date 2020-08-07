@@ -142,6 +142,7 @@ class BTB extends BasePredictor with BTBParams{
 
 
   def allocWay(valids: UInt, meta_tags: UInt, req_tag: UInt) = {
+    val randomAlloc = true
     if (BtbWays > 1) {
       val w = Wire(UInt(log2Up(BtbWays).W))
       val valid = WireInit(valids.andR)
@@ -151,7 +152,7 @@ class BTB extends BasePredictor with BTBParams{
       val chunks = (0 until nChunks).map( i => 
         tags(min((i+1)*l, tags.getWidth)-1, i*l)
       )
-      w := Mux(valid, chunks.reduce(_^_), PriorityEncoder(~valids))
+      w := Mux(valid, chunks.reduce(_^_), (if (randomAlloc) {LFSR64()(log2Up(BtbWays)-1,0)} else {PriorityEncoder(~valids)}))
       w
     } else {
       val w = WireInit(0.U)
@@ -207,7 +208,8 @@ class BTB extends BasePredictor with BTBParams{
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val updateValid = io.update.valid && (u.isMisPred || !u.brInfo.btbHitJal)
+  val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && updateType === BTBtype.J
+  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered)
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {

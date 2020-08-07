@@ -222,7 +222,7 @@ class BPUStage2 extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
-  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) === BTBtype.J)))
+  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) =/= BTBtype.B)))
   notTakens := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && btbResp.types(i) === BTBtype.B && !bimResp.ctrs(i)(1)))
   targetSrc := btbResp.targets
 
