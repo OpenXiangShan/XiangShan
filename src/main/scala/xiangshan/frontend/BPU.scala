@@ -335,7 +335,8 @@ object BranchUpdateInfoWithHist {
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
-    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val inOrderBrInfo    = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
     // from if1
@@ -350,7 +351,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
-  preds.map(_.io.update <> io.inOrderBrInfo)
+  preds.map(_.io.update <> io.outOfOrderBrInfo)
+  tage.io.update <> io.inOrderBrInfo
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
