@@ -192,7 +192,7 @@ class BPUStage1 extends BPUStage {
   // 'overrides' default logic
   // when flush, the prediction should also starts
   when (inFire)        { predValid := true.B }
-  .elsewhen (io.flush) { predvalid := false.B }
+  .elsewhen (io.flush) { predValid := false.B }
   .elsewhen (outFire)  { predValid := false.B }
   .otherwise           { predValid := predValid }
   // io.out.valid := predValid
