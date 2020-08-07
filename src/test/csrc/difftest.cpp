@@ -118,7 +118,7 @@ void difftest_display(uint8_t mode) {
 }
 
 int difftest_step(DiffState *s) {
-  assert(!s->isRVC);
+  // assert(!s->isRVC);
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   uint64_t this_pc = s->reg_scala[DIFFTEST_THIS_PC];
@@ -156,7 +156,7 @@ int difftest_step(DiffState *s) {
         // printf("SKIP %d\n", i);
         // to skip the checking of an instruction, just copy the reg state to reference design
         ref_difftest_getregs(&ref_r);
-        ref_r[DIFFTEST_THIS_PC] += 4; //TODO: RVC
+        ref_r[DIFFTEST_THIS_PC] += selectBit(s->isRVC, i) ? 2 : 4;
         if(selectBit(s->wen, i)){
           ref_r[s->wdst[i]] = s->wdata[i];
         }
