@@ -111,7 +111,7 @@ abstract class BPUStage extends XSModule {
 
   val predValid = RegInit(false.B)
 
-  io.in.ready := !predValid || io.out.fire() && io.pred.fire()
+  io.in.ready := !predValid || io.out.fire() && io.pred.fire() || io.flush
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
@@ -191,10 +191,10 @@ class BPUStage1 extends BPUStage {
 
   // 'overrides' default logic
   // when flush, the prediction should also starts
-  when (io.flush || inFire) { predValid := true.B }
-  .elsewhen(outFire)        { predValid := false.B }
-  .otherwise                { predValid := predValid }
-  io.in.ready := !predValid || io.out.fire() && io.pred.fire() || io.flush
+  when (inFire)        { predValid := true.B }
+  .elsewhen (io.flush) { predvalid := false.B }
+  .elsewhen (outFire)  { predValid := false.B }
+  .otherwise           { predValid := predValid }
   // io.out.valid := predValid
 
   // ubtb is accessed with inLatch pc in s1, 
