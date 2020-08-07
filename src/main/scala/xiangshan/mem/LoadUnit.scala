@@ -99,7 +99,7 @@ class LoadUnit extends XSModule {
   l4_out.bits.uop := io.dcache.resp.bits.user.uop
   l4_out.bits.mmio := io.dcache.resp.bits.user.mmio
   l4_out.bits.mask := io.dcache.resp.bits.user.mask
-  l4_out.valid := io.dcache.resp.valid && l4_out.bits.uop.needFlush(io.redirect)
+  l4_out.valid := io.dcache.resp.valid && !l4_out.bits.uop.needFlush(io.redirect)
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
