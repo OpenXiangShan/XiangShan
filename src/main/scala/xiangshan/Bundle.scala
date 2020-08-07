@@ -113,7 +113,7 @@ class CtrlSignals extends XSBundle {
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
-  val dpqType = DPQType()
+  val commitType = CommitType()
 }
 
 class CfCtrl extends XSBundle {
@@ -146,7 +146,7 @@ trait HasRoqIdx { this: HasXSParameter =>
 class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-  val moqIdx = UInt(MoqIdxWidth.W)
+  val lsroqIdx = UInt(LsroqIdxWidth.W)
 }
 
 class Redirect extends XSBundle with HasRoqIdx {

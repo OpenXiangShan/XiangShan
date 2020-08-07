@@ -17,7 +17,7 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends XSModule {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
   val indexWidth = log2Ceil(size)
 
@@ -108,7 +108,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends X
   }
 
   // commit: from s_dispatched to s_invalid
-  val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
+  val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid))
   val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
   for (i <- 0 until CommitWidth) {
     when (commitBits(i)) {

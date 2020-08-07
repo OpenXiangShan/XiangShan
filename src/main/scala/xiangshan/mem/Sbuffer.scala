@@ -1,18 +1,14 @@
-package xiangshan.mem.pipeline
+package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
-import xiangshan.mem._
-import xiangshan.mem.cache._
-import bus.simplebus._
+import xiangshan._
+import xiangshan.cache._
 
 class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
-  val lsroqId = UInt(log2Up(MoqSize).W)
+  val lsroqId = UInt(log2Up(LsroqSize).W)
 }
 
 // Store buffer for XiangShan Out of Order LSU

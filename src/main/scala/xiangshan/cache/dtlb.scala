@@ -1,4 +1,4 @@
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
@@ -157,11 +157,11 @@ class TlbResp extends TlbBundle {
   }
 }
 
-class TlbRequestIO(Width: Int) extends TlbBundle {
-  val req = Vec(Width, Valid(new TlbReq))
-  val resp = Vec(Width, Flipped(Valid(new TlbResp)))
+class TlbRequestIO() extends TlbBundle {
+  val req = Valid(new TlbReq)
+  val resp = Flipped(Valid(new TlbResp))
 
-  override def cloneType: this.type = (new TlbRequestIO(Width)).asInstanceOf[this.type]
+  // override def cloneType: this.type = (new TlbRequestIO(Width)).asInstanceOf[this.type]
 }
 
 class TlbPtwIO extends TlbBundle {
@@ -170,7 +170,7 @@ class TlbPtwIO extends TlbBundle {
 }
 
 class TlbIO(Width: Int) extends TlbBundle {
-  val requestor = Flipped(new TlbRequestIO(Width))
+  val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO
 
   override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
@@ -182,17 +182,17 @@ class FakeTlb(Width: Int = 1) extends TlbModule {
   io <> DontCare
   // fake Tlb
   (0 until LoadPipelineWidth + StorePipelineWidth).map(i => {
-    io.requestor.resp(i).valid := io.requestor.req(i).valid
-    io.requestor.resp(i).bits.paddr := io.requestor.req(i).bits.vaddr
-    io.requestor.resp(i).bits.miss := false.B
+    io.requestor(i).resp.valid := io.requestor(i).req.valid
+    io.requestor(i).resp.bits.paddr := io.requestor(i).req.bits.vaddr
+    io.requestor(i).resp.bits.miss := false.B
   })
 }
 
 class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val io = IO(new TlbIO(Width))
 
-  val req    = io.requestor.req
-  val resp   = io.requestor.resp
+  val req    = io.requestor.map(_.req)
+  val resp   = io.requestor.map(_.resp)
   val ptw    = io.ptw
 
   val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))

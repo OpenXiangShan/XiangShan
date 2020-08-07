@@ -172,7 +172,7 @@ class Backend extends XSModule
       iq
     })
 
-  io.mem.mcommit := roq.io.mcommit
+  io.mem.commits <> roq.io.commits
   io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid
@@ -209,8 +209,8 @@ class Backend extends XSModule
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs
-  io.mem.dp1Req <> dispatch.io.toMoq
-  dispatch.io.moqIdxs <> io.mem.moqIdxs
+  io.mem.dp1Req <> dispatch.io.toLsroq
+  dispatch.io.lsroqIdxs <> io.mem.lsroqIdxs
   dispatch.io.commits <> roq.io.commits
 
   intRf.io.readPorts <> dispatch.io.readIntRf

@@ -1,14 +1,9 @@
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
-import xiangshan.mem._
-import xiangshan.mem.pipeline._
-import bus.simplebus._
 
 class MSHQIO extends XSBundle {
   val miss = Flipped(Valid(new MissReqIO))
