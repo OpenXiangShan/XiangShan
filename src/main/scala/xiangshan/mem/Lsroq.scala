@@ -45,7 +45,8 @@ class Lsroq extends XSModule {
   val commited = Reg(Vec(LsroqSize, Bool())) // inst has been writebacked to CDB
   val store = Reg(Vec(LsroqSize, Bool())) // inst is a store inst
   val miss = Reg(Vec(LsroqSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
-  val listening = Reg(Vec(LsroqSize, Bool())) // waiting foe refill result
+  val listening = Reg(Vec(LsroqSize, Bool())) // waiting for refill result
+  val pending = Reg(Vec(LsroqSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
   val ringBufferHeadExtended = RegInit(0.U(LsroqIdxWidth.W))
   val ringBufferTailExtended = RegInit(0.U(LsroqIdxWidth.W))
@@ -73,6 +74,7 @@ class Lsroq extends XSModule {
       store(ringBufferHead + offset) := false.B
       miss(ringBufferHead + offset) := false.B
       listening(ringBufferHead + offset) := false.B
+      pending(ringBufferHead + offset) := false.B
       // data(ringBufferHead + offset).bwdMask := 0.U(8.W).asBools
     }
     if (i == 0) {
@@ -509,9 +511,29 @@ class Lsroq extends XSModule {
 
   io.rollback := ParallelOperation(rollback, rollbackSel)
 
+  // Memory mapped IO / other uncached operations
+  // when(pending(ringBufferTail) && io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && !io.commits(0.bits.isWalk)){
+  //   set mem access req
+  //   mask / paddr / data can be get from lsroq.data
+  //   mask := data(ringBufferTail).mask
+  //   paddr := data(ringBufferTail).paddr
+  //   data := data(ringBufferTail).data
+  //   store := store(ringBufferTail)
+  // }
+
+  // when(mmio req.fire()){
+  //   pending(ringBufferTail) := false.B
+  // }
+
+  // when(mmio resp.fire()){
+  //   valid(ringBufferTail) := true.B
+  // }
+
+  // TODO: when MMIO inst is write back to lsroq, set valid.writeback as false.B
+  // TODO: load MMIO should not be writebacked to CDB in L5
+
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx
-  // TODO: check exception redirect implementation
   (0 until LsroqSize).map(i => {
     when(uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)) {
       when(io.brqRedirect.bits.isReplay){
@@ -520,6 +542,7 @@ class Lsroq extends XSModule {
         writebacked(i) := false.B
         listening(i) := false.B
         miss(i) := false.B
+        pending(i) := false.B
       }.otherwise{
         allocated(i) := false.B
       }
@@ -552,6 +575,7 @@ class Lsroq extends XSModule {
     PrintFlag(allocated(i) && store(i), "s")
     PrintFlag(allocated(i) && miss(i), "m")
     PrintFlag(allocated(i) && listening(i), "l")
+    PrintFlag(allocated(i) && pending(i), "p")
     XSDebug(false, true.B, " ")
     if (i % 4 == 3) XSDebug(false, true.B, "\n")
   }
