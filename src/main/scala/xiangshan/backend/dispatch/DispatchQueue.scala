@@ -173,7 +173,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchReplayStep = Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg)
   when (exceptionValid) {
     dispatchReplayCntReg := 0.U
-  }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex)) {
+  }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex - 1.U)) {
     dispatchReplayCntReg := dispatchReplayCntReg - distanceBetween(dispatchPtr, tailCancelPtr)
   }.elsewhen (replayValid) {
     dispatchReplayCntReg := dispatchReplayCnt
@@ -218,7 +218,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   dispatchPtr := Mux(exceptionValid,
     0.U,
-    Mux(mispredictionValid && inReplayWalk && needCancel(dispatchIndex),
+    Mux(mispredictionValid && (!inReplayWalk || needCancel(dispatchIndex - 1.U)),
       dispatchCancelPtr,
       dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
   )
