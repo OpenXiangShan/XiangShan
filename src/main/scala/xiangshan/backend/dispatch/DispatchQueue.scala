@@ -161,7 +161,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   assert(replayPosition.getWidth == indexWidth)
   // If the highest bit is one, the direction flips.
   // Otherwise, the direction keeps the same.
-  val tailCancelPtr = Cat(Mux(needCancel(size - 1), ~tailDirection, tailDirection), cancelPosition)
+  val tailCancelPtrDirection = Mux(needCancel(size - 1), ~tailDirection, tailDirection)
+  val tailCancelPtrIndex = Mux(needCancel(size - 1), ~cancelPosition + 1.U, cancelPosition)
+  val tailCancelPtr = Cat(tailCancelPtrDirection, tailCancelPtrIndex)
   // In case of branch mis-prediction, the last dispatched instruction must be the mis-prediction instruction.
   // Thus, we only need to reset dispatchPtr to tailPtr.
   val dispatchCancelPtr = tailCancelPtr
