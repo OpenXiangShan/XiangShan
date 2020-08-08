@@ -167,8 +167,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   val dispatchReplayCnt = Mux(needReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
-  val inReplayWalk = dispatchReplayCnt =/= 0.U
   val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
+  val inReplayWalk = dispatchReplayCntReg =/= 0.U
   val dispatchReplayStep = Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg)
   when (io.redirect.valid && io.redirect.bits.isReplay) {
     dispatchReplayCntReg := dispatchReplayCnt
@@ -214,9 +214,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   dispatchPtr := Mux(exceptionValid,
     0.U,
     // TODO: misprediction when replay? need to compare ROB index
-    Mux(mispredictionValid,
-    dispatchCancelPtr,
-    dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
+    Mux(mispredictionValid && needCancel(dispatchIndex),
+      dispatchCancelPtr,
+      dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
   )
 
   headPtr := Mux(exceptionValid, 0.U, headPtr + numCommit)
