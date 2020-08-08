@@ -170,7 +170,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
   val inReplayWalk = dispatchReplayCntReg =/= 0.U
   val dispatchReplayStep = Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg)
-  when (io.redirect.valid && io.redirect.bits.isReplay) {
+  when (exceptionValid) {
+    dispatchReplayCntReg := 0.U
+  }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex)) {
+    dispatchReplayCntReg := dispatchReplayCntReg - distanceBetween(dispatchIndex, tailCancelPtr)
+  }.elsewhen (replayValid) {
     dispatchReplayCntReg := dispatchReplayCnt
   }.otherwise {
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
@@ -213,7 +217,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   dispatchPtr := Mux(exceptionValid,
     0.U,
-    // TODO: misprediction when replay? need to compare ROB index
     Mux(mispredictionValid && needCancel(dispatchIndex),
       dispatchCancelPtr,
       dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
