@@ -168,7 +168,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   val dispatchReplayCnt = Mux(needReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
   val inReplayWalk = dispatchReplayCnt =/= 0.U
-  val dispatchReplayCntReg = Reg(UInt(indexWidth.W))
+  val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
   val dispatchReplayStep = Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg)
   when (io.redirect.valid && io.redirect.bits.isReplay) {
     dispatchReplayCntReg := dispatchReplayCnt
@@ -216,7 +216,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     // TODO: misprediction when replay? need to compare ROB index
     Mux(mispredictionValid,
     dispatchCancelPtr,
-    dispatchPtr - dispatchReplayCntReg)
+    dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
   )
 
   headPtr := Mux(exceptionValid, 0.U, headPtr + numCommit)
