@@ -148,6 +148,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // 00111000 => 3
   // 11000111 => 1
   // 10000000 => 0
+  // 00000000 => 7
   def getFirstMaskPosition(mask: Vec[Bool]) = {
     Mux(mask(size - 1),
       PriorityEncoder(mask.reverse.map(m => !m)),
@@ -155,8 +156,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     )
   }
 
-  val cancelPosition = getFirstMaskPosition(needCancel)
-  val replayPosition = getFirstMaskPosition(needReplay)
+  // when nothing is cancelled or replayed, the pointers remain unchanged
+  val cancelPosition = Mux(Cat(needCancel).orR, getFirstMaskPosition(needCancel), tailIndex)
+  val replayPosition = Mux(Cat(needReplay).orR, getFirstMaskPosition(needReplay), dispatchIndex)
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
   // If the highest bit is one, the direction flips.
