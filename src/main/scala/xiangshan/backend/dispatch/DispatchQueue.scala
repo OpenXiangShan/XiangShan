@@ -3,22 +3,23 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import utils.{XSDebug, XSError, XSInfo}
-import xiangshan.{MicroOp, Redirect, RoqCommit, XSBundle, XSModule}
+import xiangshan.{MicroOp, Redirect, ReplayPregReq, RoqCommit, XSBundle, XSModule}
 
 
-class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
+class DispatchQueueIO(enqnum: Int, deqnum: Int, replayWidth: Int) extends XSBundle {
   val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
   val redirect = Flipped(ValidIO(new Redirect))
+  val replayPregReq = Output(Vec(replayWidth, new ReplayPregReq))
 
   override def cloneType: DispatchQueueIO.this.type =
-    new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
+    new DispatchQueueIO(enqnum, deqnum, replayWidth).asInstanceOf[this.type]
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule {
-  val io = IO(new DispatchQueueIO(enqnum, deqnum))
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) extends XSModule {
+  val io = IO(new DispatchQueueIO(enqnum, deqnum, replayWidth))
   val indexWidth = log2Ceil(size)
 
   val s_invalid :: s_valid :: s_dispatched :: Nil = Enum(3)
@@ -127,8 +128,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule {
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel, p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
-      p"cancelled with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+    XSInfo(needCancel, p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)})" +
+      p"roqIndex 0x${Hexadecimal(uopEntries(i.U).roqIdx)} " +
+      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
   // replay: from s_dispatched to s_valid
@@ -168,8 +170,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule {
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // TODO: this is unaccptable since it needs to add 64 bits
-  val headMask = (1.U((size+1).W) << headIndex) - 1.U
-  val dispatchMask = (1.U((size + 1).W) << dispatchIndex) - 1.U
+  val headMask = (1.U((size+1).W) << headIndex).asUInt() - 1.U
+  val dispatchMask = (1.U((size + 1).W) << dispatchIndex).asUInt() - 1.U
   val mask = headMask ^ dispatchMask
   val replayMask = Mux(headDirection === dispatchDirection, mask, ~mask)
   val numReplay = PopCount((0 until size).map(i => needReplay(i) & replayMask(i)))

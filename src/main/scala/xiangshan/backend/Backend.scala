@@ -202,8 +202,7 @@ class Backend extends XSModule
   rename.io.intPregRdy <> dispatch.io.intPregRdy ++ dispatch.io.intMemRegRdy
   rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr) ++ dispatch.io.fpMemRegAddr
   rename.io.fpPregRdy <> dispatch.io.fpPregRdy ++ dispatch.io.fpMemRegRdy
-  // TODO: connect this
-  rename.io.replayPregReq <> DontCare
+  rename.io.replayPregReq <> dispatch.io.replayPregReq
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
 

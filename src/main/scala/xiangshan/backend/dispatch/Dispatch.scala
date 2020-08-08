@@ -14,7 +14,10 @@ case class DispatchParameters
   LsDqSize: Int,
   IntDqDeqWidth: Int,
   FpDqDeqWidth: Int,
-  LsDqDeqWidth: Int
+  LsDqDeqWidth: Int,
+  IntDqReplayWidth: Int,
+  FpDqReplayWidth: Int,
+  LsDqReplayWidth: Int
 )
 
 class Dispatch extends XSModule {
@@ -43,7 +46,8 @@ class Dispatch extends XSModule {
     val fpMemRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val intMemRegRdy = Vec(NRMemReadPorts, Input(Bool()))
     val fpMemRegRdy = Vec(exuParameters.StuCnt, Input(Bool()))
-
+    // replay: set preg status to not ready
+    val replayPregReq = Output(Vec(ReplayWidth, new ReplayPregReq))
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
@@ -51,9 +55,9 @@ class Dispatch extends XSModule {
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, dpParams.IntDqReplayWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, dpParams.FpDqReplayWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, dpParams.LsDqReplayWidth))
 
   // pipeline between rename and dispatch
   // accepts all at once
@@ -78,15 +82,26 @@ class Dispatch extends XSModule {
   intDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
     dqCommit.valid := commit.valid && dqCommit.bits.uop.ctrl.commitType === CommitType.INT
   }
+  intDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
+    io.replayPregReq(i) <> replay
+  }
+
   fpDq.io.redirect <> io.redirect
   fpDq.io.commits <> io.commits
   fpDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
     dqCommit.valid := commit.valid && dqCommit.bits.uop.ctrl.commitType === CommitType.FP
   }
+  fpDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
+    io.replayPregReq(i + dpParams.IntDqReplayWidth) <> replay
+  }
+
   lsDq.io.redirect <> io.redirect
   lsDq.io.commits <> io.commits
   lsDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
     dqCommit.valid := commit.valid && CommitType.isLoadStore(dqCommit.bits.uop.ctrl.commitType)
+  }
+  lsDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
+    io.replayPregReq(i + dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth) <> replay
   }
 
   // Int dispatch queue to Int reservation stations
