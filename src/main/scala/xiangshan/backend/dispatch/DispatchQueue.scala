@@ -184,9 +184,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
 
   val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - i.U)(indexWidth - 1, 0))
   for (i <- 0 until replayWidth) {
-    val replayValid = stateEntries(replayIndex(i)) === s_valid
-    io.replayPregReq(i).isInt := replayValid && uopEntries(replayIndex(i)).ctrl.src1Type === SrcType.reg
-    io.replayPregReq(i).isFp  := replayValid && uopEntries(replayIndex(i)).ctrl.src1Type === SrcType.fp
+    val shouldResetDest = inReplayWalk && stateEntries(replayIndex(i)) === s_valid
+    io.replayPregReq(i).isInt := shouldResetDest && uopEntries(replayIndex(i)).ctrl.rfWen
+    io.replayPregReq(i).isFp  := shouldResetDest && uopEntries(replayIndex(i)).ctrl.fpWen
     io.replayPregReq(i).preg  := uopEntries(replayIndex(i)).pdest
   }
 
@@ -221,7 +221,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     0.U,
     Mux(mispredictionValid && (!inReplayWalk || needCancel(dispatchIndex - 1.U)),
       dispatchCancelPtr,
-      dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
+      Mux(inReplayWalk, dispatchPtr - dispatchReplayStep, dispatchPtr + numDeq))
   )
 
   headPtr := Mux(exceptionValid, 0.U, headPtr + numCommit)
@@ -249,7 +249,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     )
   }
 
-  XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr\n")
+  XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr, replayCnt: $dispatchReplayCntReg\n")
   XSDebug(p"state: ")
   stateEntries.reverse.foreach { s =>
     XSDebug(false, s === s_invalid, "-")
