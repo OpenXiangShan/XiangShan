@@ -115,15 +115,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)})" +
+    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
       p"roqIndex 0x${Hexadecimal(uopEntries(i.U).roqIdx)} " +
       p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
   // replay: from s_dispatched to s_valid
+  val replayValid = io.redirect.valid && io.redirect.bits.isReplay
   val needReplay = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && io.redirect.bits.isReplay
+    needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && replayValid
     when (needReplay(i)) {
       stateEntries(i) := s_valid
     }
@@ -173,7 +174,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   when (exceptionValid) {
     dispatchReplayCntReg := 0.U
   }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex)) {
-    dispatchReplayCntReg := dispatchReplayCntReg - distanceBetween(dispatchIndex, tailCancelPtr)
+    dispatchReplayCntReg := dispatchReplayCntReg - distanceBetween(dispatchPtr, tailCancelPtr)
   }.elsewhen (replayValid) {
     dispatchReplayCntReg := dispatchReplayCnt
   }.otherwise {
@@ -217,7 +218,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   dispatchPtr := Mux(exceptionValid,
     0.U,
-    Mux(mispredictionValid && needCancel(dispatchIndex),
+    Mux(mispredictionValid && inReplayWalk && needCancel(dispatchIndex),
       dispatchCancelPtr,
       dispatchPtr + Mux(inReplayWalk, -dispatchReplayStep, numDeq))
   )
@@ -246,10 +247,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
       left(indexWidth - 1, 0) <= right(indexWidth - 1, 0)
     )
   }
-  XSError(!greaterOrEqualThan(tailPtr, headPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, headPtr: $headPtr) failed\n")
-  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr) && !inReplayWalk, p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
-  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
-  XSError(validEntries < dispatchEntries && !inReplayWalk, "validEntries should be less than dispatchEntries\n")
 
   XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr\n")
   XSDebug(p"state: ")
@@ -267,4 +264,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
   XSDebug(false, true.B, "\n")
 
+  XSError(!greaterOrEqualThan(tailPtr, headPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, headPtr: $headPtr) failed\n")
+  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr) && !inReplayWalk, p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
+  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
+  XSError(validEntries < dispatchEntries && !inReplayWalk, "validEntries should be less than dispatchEntries\n")
 }
