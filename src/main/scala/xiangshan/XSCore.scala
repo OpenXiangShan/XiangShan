@@ -52,9 +52,6 @@ case class XSCoreParameters
   NRFpWritePorts: Int = 8,
   LsroqSize: Int = 16,
   RoqSize: Int = 32,
-  IntDqDeqWidth: Int = 4,
-  FpDqDeqWidth: Int = 4,
-  LsDqDeqWidth: Int = 4,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
     IntDqSize = 64,
@@ -62,7 +59,10 @@ case class XSCoreParameters
     LsDqSize = 64,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
-    LsDqDeqWidth = 4
+    LsDqDeqWidth = 4,
+    IntDqReplayWidth = 4,
+    FpDqReplayWidth = 1,
+    LsDqReplayWidth = 3
   ),
   exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
@@ -139,10 +139,8 @@ trait HasXSParameter {
   val RoqIdxWidth = InnerRoqIdxWidth + 1
   val InnerLsroqIdxWidth = log2Up(LsroqSize)
   val LsroqIdxWidth = InnerLsroqIdxWidth + 1
-  val IntDqDeqWidth = core.IntDqDeqWidth
-  val FpDqDeqWidth = core.FpDqDeqWidth
-  val LsDqDeqWidth = core.LsDqDeqWidth
   val dpParams = core.dpParams
+  val ReplayWidth = dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth + dpParams.LsDqReplayWidth
   val exuParameters = core.exuParameters
   val NRIntReadPorts = core.NRIntReadPorts
   val NRIntWritePorts = core.NRIntWritePorts

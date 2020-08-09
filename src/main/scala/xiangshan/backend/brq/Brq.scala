@@ -189,6 +189,11 @@ class Brq extends XSModule {
   io.out.bits := commitEntry.exuOut
   io.outOfOrderBrInfo.valid := commitValid
   io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
+
+  when (io.redirect.valid) {
+    commitEntry.npc := io.redirect.bits.target
+  }
+
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
   )

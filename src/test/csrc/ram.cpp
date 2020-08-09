@@ -97,7 +97,10 @@ extern "C" void ram_helper(
     uint64_t rIdx, uint64_t *rdata, uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
   if (rIdx >= RAMSIZE / sizeof(uint64_t)) {
     printf("ERROR: ram idx = 0x%x out of bound!\n", rIdx);
-    assert(rIdx < RAMSIZE / sizeof(uint64_t));
+    // TODO: don't allow out of bound when crossbar is ready
+    //assert(rIdx < RAMSIZE / sizeof(uint64_t));
+    *rdata = 0xabcd12345678dcbaUL;
+    return;
   }
   *rdata = ram[rIdx];
   if (wen) {
