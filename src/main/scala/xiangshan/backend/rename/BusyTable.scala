@@ -61,7 +61,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
   XSDebug(p"table    : ${Binary(table)}\n")
   XSDebug(p"tableNext: ${Binary(tableAfterAlloc)}\n")
   XSDebug(p"allocMask: ${Binary(allocMask)}\n")
-  XSDebug(p"wbMask : ${Binary(wbMask)}\n")
+  XSDebug(p"wbMask   : ${Binary(wbMask)}\n")
   for (i <- 0 until NRPhyRegs) {
     XSDebug(table(i), "%d is busy\n", i.U)
   }
