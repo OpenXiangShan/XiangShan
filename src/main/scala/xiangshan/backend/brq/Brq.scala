@@ -223,6 +223,7 @@ class Brq extends XSModule {
       exuOut.redirect.isMisPred := isMisPred
       exuOut.brUpdate.isMisPred := isMisPred
       brQueue(wbIdx).exuOut := exuOut
+      brQueue(wbIdx).npc := exuWb.bits.redirect.target
     }
   }
 
