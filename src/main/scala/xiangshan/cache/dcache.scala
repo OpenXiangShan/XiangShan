@@ -1,4 +1,4 @@
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._

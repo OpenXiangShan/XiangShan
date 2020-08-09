@@ -1,10 +1,4 @@
-//******************************************************************************
-// Ported from Rocket-Chip
-// See LICENSE.Berkeley and LICENSE.SiFive in Rocket-Chip for license details.
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._

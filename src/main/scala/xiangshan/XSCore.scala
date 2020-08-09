@@ -10,7 +10,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.mem.cache.{ICacheParameters, DCacheParameters}
+import xiangshan.cache.{ICacheParameters, DCacheParameters}
 import bus.tilelink.TLParameters
 import utils._
 
@@ -51,11 +51,8 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  MoqSize: Int = 16,
+  LsroqSize: Int = 16,
   RoqSize: Int = 32,
-  IntDqDeqWidth: Int = 4,
-  FpDqDeqWidth: Int = 4,
-  LsDqDeqWidth: Int = 4,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
     IntDqSize = 64,
@@ -63,7 +60,10 @@ case class XSCoreParameters
     LsDqSize = 64,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
-    LsDqDeqWidth = 4
+    LsDqDeqWidth = 4,
+    IntDqReplayWidth = 4,
+    FpDqReplayWidth = 1,
+    LsDqReplayWidth = 3
   ),
   exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
@@ -129,17 +129,14 @@ trait HasXSParameter {
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = core.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val MoqSize = core.MoqSize // 64
+  val LsroqSize = core.LsroqSize // 64
   val RoqSize = core.RoqSize
   val InnerRoqIdxWidth = log2Up(RoqSize)
   val RoqIdxWidth = InnerRoqIdxWidth + 1
-
-  val InnerMoqIdxWidth = log2Up(MoqSize)
-  val MoqIdxWidth = InnerMoqIdxWidth + 1
-  val IntDqDeqWidth = core.IntDqDeqWidth
-  val FpDqDeqWidth = core.FpDqDeqWidth
-  val LsDqDeqWidth = core.LsDqDeqWidth
+  val InnerLsroqIdxWidth = log2Up(LsroqSize)
+  val LsroqIdxWidth = InnerLsroqIdxWidth + 1
   val dpParams = core.dpParams
+  val ReplayWidth = dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth + dpParams.LsDqReplayWidth
   val exuParameters = core.exuParameters
   val NRIntReadPorts = core.NRIntReadPorts
   val NRIntWritePorts = core.NRIntWritePorts

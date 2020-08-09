@@ -1,18 +1,14 @@
-package xiangshan.mem.pipeline
+package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
-import xiangshan.mem._
-import xiangshan.mem.cache._
-import bus.simplebus._
+import xiangshan._
+import xiangshan.cache._
 
 class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
-  val lsroqId = UInt(log2Up(MoqSize).W)
+  val lsroqId = UInt(log2Up(LsroqSize).W)
 }
 
 // Store buffer for XiangShan Out of Order LSU
@@ -38,7 +34,7 @@ class Sbuffer extends XSModule with NeedImpl{
 
   // Write back to dcache
   io.dcache.req.valid := DontCare //needWriteToCache
-  io.dcache.req.bits.paddr := DontCare
+  io.dcache.req.bits.addr := DontCare
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := DontCare
 
@@ -85,7 +81,7 @@ class FakeSbuffer extends XSModule {
 
   io.dcache.req <> io.in(0)
   io.dcache.resp.ready := true.B
-  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x size %d\n", io.in(0).bits.paddr, io.in(0).bits.data, io.in(0).bits.user.uop.ctrl.fuOpType(1,0))
-  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x size %d\n", io.in(1).bits.paddr, io.in(1).bits.data, io.in(1).bits.user.uop.ctrl.fuOpType(1,0))
-  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x size %d\n", io.dcache.req.bits.paddr, io.dcache.req.bits.data, io.dcache.req.bits.user.uop.ctrl.fuOpType(1,0))
+  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x size %d\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.user.uop.ctrl.fuOpType(1,0))
+  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x size %d\n", io.in(1).bits.addr, io.in(1).bits.data, io.in(1).bits.user.uop.ctrl.fuOpType(1,0))
+  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x size %d\n", io.dcache.req.bits.addr, io.dcache.req.bits.data, io.dcache.req.bits.user.uop.ctrl.fuOpType(1,0))
 }

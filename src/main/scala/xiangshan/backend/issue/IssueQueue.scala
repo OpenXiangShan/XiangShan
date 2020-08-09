@@ -36,6 +36,11 @@ class IssueQueue
   val tlbHit = io.tlbFeedback.valid && io.tlbFeedback.bits.hit
   val tlbMiss = io.tlbFeedback.valid && !io.tlbFeedback.bits.hit
 
+  XSDebug(io.tlbFeedback.valid,
+    "tlb feedback: hit: %d roqIdx: %d\n",
+    io.tlbFeedback.bits.hit,
+    io.tlbFeedback.bits.roqIdx
+  )
   /*
       invalid --[enq]--> valid --[deq]--> wait --[tlbHit]--> invalid
                                           wait --[replay]--> replay --[cnt]--> valid
@@ -222,7 +227,7 @@ class IssueQueue
     XSDebug(false, s===s_invalid, "-")
     XSDebug(false, s===s_valid, "v")
     XSDebug(false, s===s_wait, "w")
-    XSDebug(false, s===s_replay, "r")
+    XSDebug(false, s===s_replay, "p")
   })
   XSDebug(false, true.B, "\n")
 
@@ -233,10 +238,11 @@ class IssueQueue
   XSDebug(false, true.B, "\n")
 
   XSDebug("State Dump: ")
-  readyVec.reverse.foreach(r =>{
+  for(i <- readyVec.indices.reverse){
+    val r = readyVec(idxQueue(i))
     XSDebug(false, r, p"r")
     XSDebug(false, !r, p"-")
-  })
+  }
   XSDebug(false, true.B, "\n")
 
 //  assert(!(tlbMiss && realDeqValid), "Error: realDeqValid should be false when replay valid!")

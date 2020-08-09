@@ -1,4 +1,4 @@
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
@@ -8,17 +8,20 @@ import bus.tilelink._
 import xiangshan.{MicroOp, Redirect}
 
 // Meta data for dcache requests
+// anything that should go with reqs and resps goes here
 class DCacheMeta extends DCacheBundle {
-  val uop   = Output(new MicroOp) //FIXME: opt data width
-  val mmio  = Output(Bool())
-  // val tlbmiss = Output(Bool())
+  val id      = UInt(reqIdWidth.W)
+  val vaddr   = UInt(PAddrBits.W) // maybe we should use VAddrBits?
+  val paddr   = UInt(PAddrBits.W)
+  val uop     = new MicroOp //FIXME: opt data width
+  val mmio    = Bool()
+  val tlb_miss = Bool()
   // dcache request id
-  // master uses id to link resps to reqs
+  // master uses id to correlate resps to reqs
   // different master can allocate and free ids independently
   // as long as they do not share resp  
-  val id    = Output(UInt(reqIdWidth.W))
-  // whether it's a replayed request?
-  val replay = Bool()
+  val mask    = UInt((DataBits/8).W)
+  val replay  = Bool() // whether it's a replayed request?
 }
 
 // ordinary load and special memory operations(lr/sc, atomics)
@@ -43,12 +46,12 @@ class DCacheStoreReq extends DCacheBundle
 
 class DCacheResp extends DCacheBundle
 {
-  val data   = UInt(DataBits.W)
-  val meta   = new DCacheMeta
+  val data         = UInt(DataBits.W)
+  val meta         = new DCacheMeta
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache req nacked, replay it later
-  val nack   = Bool()
+  val nack         = Bool()
 }
 
 class DCacheLoadIO extends DCacheBundle

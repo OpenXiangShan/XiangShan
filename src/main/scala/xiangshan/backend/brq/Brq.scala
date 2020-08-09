@@ -91,7 +91,7 @@ class Brq extends XSModule {
   }
 
   val brCommitCnt = RegInit(0.U(BrTagWidth.W))
-  val brQueue = Reg(Vec(BrqSize, new BrqEntry))
+  val brQueue = Mem(BrqSize, new BrqEntry) //Reg(Vec(BrqSize, new BrqEntry))
   val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
 
   val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
@@ -104,7 +104,7 @@ class Brq extends XSModule {
   val headIdx = headPtr.value
 
   val skipMask = Cat(stateQueue.zipWithIndex.map({
-    case (s, i) => (s.isWb && !brQueue(i).exuOut.brUpdate.isMisPred) || s.isCommit
+    case (s, i) => (s.isWb && !brQueue(i.U).exuOut.brUpdate.isMisPred) || s.isCommit
   }).reverse)
 
   /*
@@ -189,6 +189,11 @@ class Brq extends XSModule {
   io.out.bits := commitEntry.exuOut
   io.outOfOrderBrInfo.valid := commitValid
   io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
+
+  when (io.redirect.valid) {
+    commitEntry.npc := io.redirect.bits.target
+  }
+
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
   )

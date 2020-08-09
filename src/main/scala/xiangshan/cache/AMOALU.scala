@@ -1,12 +1,7 @@
-// See LICENSE.SiFive for license details.
-// See LICENSE.Berkeley for license details.
-
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-
-import xiangshan.mem.MemoryOpConstants
 
 class StoreGen(typ: UInt, addr: UInt, dat: UInt, maxSize: Int) {
   val size = typ(log2Up(log2Up(maxSize)+1)-1,0)

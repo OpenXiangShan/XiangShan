@@ -1,15 +1,9 @@
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
-import xiangshan.mem._
 
-import bus.tilelink.TLParameters
-import bus.tilelink.TLPermissions
-import bus.tilelink.ClientMetadata
+import bus.tilelink.{TLParameters, TLPermissions, ClientMetadata}
 import utils.{Code, RandomReplacement}
 
 // DCache specific parameters

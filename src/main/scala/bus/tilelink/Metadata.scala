@@ -5,7 +5,7 @@ package bus.tilelink
 
 import chisel3._
 import chisel3.util._
-import xiangshan.mem.MemoryOpConstants
+import xiangshan.cache.MemoryOpConstants
 import utils.MuxTLookup
 
 object ClientStates {

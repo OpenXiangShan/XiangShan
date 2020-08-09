@@ -1,12 +1,11 @@
 // See LICENSE.SiFive for license details.
 
-package xiangshan.mem.cache
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
 
 import xiangshan.{HasXSParameter, XSModule, XSBundle}
-import xiangshan.mem.MemoryOpConstants
 
 // this file contains common building blocks that can be shared by ICache and DCache
 // this is the common parameter base for L1 ICache and L1 DCache

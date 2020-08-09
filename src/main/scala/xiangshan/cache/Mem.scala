@@ -1,6 +1,6 @@
 // See LICENSE.Berkeley for license details.
 
-package xiangshan.mem
+package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
