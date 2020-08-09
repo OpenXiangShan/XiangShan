@@ -60,7 +60,7 @@ class StorePipe extends DCacheModule
 
   // stage 2
   val s2_req   = RegNext(s1_req)
-  val s2_valid = RegNext(s1_valid(w), init = false.B)
+  val s2_valid = RegNext(s1_valid, init = false.B)
 
   dump_pipeline_reqs("StorePipe s2", s2_valid, s2_req)
 
@@ -101,20 +101,20 @@ class StorePipe extends DCacheModule
 
   // now, we do not deal with ECC
   for (i <- 0 until refillCycles) {
-    write_data(i)   := io.lsu.req.data(rowBits * (i + 1), rowBits * i)
-    wmask(i)        := io.lsu.req.mask(rowBytes * (i + 1), rowBytes * i)
+    wdata(i)        := io.lsu.req.bits.data(rowBits * (i + 1), rowBits * i)
+    wmask(i)        := io.lsu.req.bits.mask(rowBytes * (i + 1), rowBytes * i)
     wdata_merged(i) := Cat(s2_data(i)(encRowBits - 1, rowBits),
-      mergePutData(s2_data(i)(rowBits - 1, 0), write_data(i), wmask(i)))
+      mergePutData(s2_data(i)(rowBits - 1, 0), wdata(i), wmask(i)))
   }
 
   // write dcache if hit
-  io.data_write.valid   := s2_valid && s2_hit
-  io.data_write.rmask   := DontCare
-  io.data_write.way_en  := s2_tag_match_way
-  io.data_write.addr    := s2_req.addr
-  io.data_write.wmask   := wmask
-  io.data_write.wdata   := wdata_merged
-  assert(!(io.data_write.valid && !io.data_write.ready))
+  val data_write = io.data_write.bits
+  io.data_write.valid := s2_valid && s2_hit
+  data_write.rmask    := DontCare
+  data_write.way_en   := s2_tag_match_way
+  data_write.addr     := s2_req.addr
+  data_write.wmask    := wmask
+  data_write.data     := wdata_merged
 
   dump_pipeline_valids("StorePipe s2", "s2_hit", s2_hit)
   dump_pipeline_valids("StorePipe s2", "s2_nack", s2_nack)
@@ -122,11 +122,11 @@ class StorePipe extends DCacheModule
   dump_pipeline_valids("StorePipe s2", "s2_nack_set_busy", s2_nack_set_busy)
 
   val resp = Wire(Valid(new DCacheResp))
-  resp.valid         := s2_valid
-  resp.bits.data     := s2_data_word
-  resp.bits.meta     := s2_req.meta
-  resp.bits.miss     := !s2_hit
-  resp.bits.nack     := s2_nack
+  resp.valid     := s2_valid
+  resp.bits.data := DontCare
+  resp.bits.meta := s2_req.meta
+  resp.bits.miss := !s2_hit
+  resp.bits.nack := s2_nack
 
   io.lsu.resp <> resp
 
@@ -138,10 +138,14 @@ class StorePipe extends DCacheModule
   // -------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
-    req: DCacheLoadReq) = {
+    req: DCacheStoreReq) = {
       when (valid) {
-        XSDebug(s"$pipeline_stage_name cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
-          req.cmd, req.addr, req.data, req.mask, req.meta.id, req.meta.replay)
+        XSDebug(s"$pipeline_stage_name cmd: %x addr: %x id: %d replay: %b\n",
+          req.cmd, req.addr, req.meta.id, req.meta.replay)
+        (0 until refillCycles) map { r =>
+          XSDebug(s"cycle: $r data: %x wmask: %x\n",
+            req.data(r), req.mask(r))
+        }
       }
   }
 

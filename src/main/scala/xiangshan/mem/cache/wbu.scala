@@ -53,7 +53,7 @@ class WritebackUnit extends DCacheModule {
   io.release.bits    := DontCare
 
   val r_address = Cat(req.tag, req.idx) << blockOffBits
-  val id = cfg.nMSHRs
+  val id = cfg.nMissEntries
   val probeResponse = TLMasterUtilities.ProbeAck(
                           params = cfg.busParams,
                           fromSource = id.U,

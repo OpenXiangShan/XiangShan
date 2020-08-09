@@ -45,7 +45,6 @@ class MissEntry extends DCacheModule
     val finish = Flipped(DecoupledIO(new MissFinish))
 
     val idx = Output(Valid(UInt()))
-    val way = Output(Valid(UInt()))
     val tag = Output(Valid(UInt()))
 
     val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
@@ -53,7 +52,7 @@ class MissEntry extends DCacheModule
     val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
 
     val meta_read = Decoupled(new L1MetaReadReq)
-    val meta_resp = Output(Vec(nWays, rstVal.cloneType))
+    val meta_resp = Output(Vec(nWays, new L1Metadata))
     val meta_write  = Decoupled(new L1MetaWriteReq)
     val refill      = Decoupled(new L1DataWriteReq)
 
@@ -69,7 +68,7 @@ class MissEntry extends DCacheModule
   // 5. wait for client's finish
   // 6. update meta data
   // 7. done
-  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_wb_req :: s_wb_resp :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_send_resp :: s_client_finish :: s_meta_write_req :: Nil = Enum(11)
+  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_wb_req :: s_wb_resp :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_send_resp :: s_client_finish :: s_meta_write_req :: Nil = Enum(12)
 
   val state = RegInit(s_invalid)
 
@@ -98,10 +97,8 @@ class MissEntry extends DCacheModule
 
   io.idx.valid := state =/= s_invalid
   io.tag.valid := state =/= s_invalid
-  io.way.valid := state =/= s_invalid
   io.idx.bits  := req_idx
   io.tag.bits  := req_tag
-  io.way.bits  := req.way_en
 
   // assign default values to output signals
   io.req.ready           := false.B
@@ -191,7 +188,7 @@ class MissEntry extends DCacheModule
     val old_coh   = req_old_meta.coh
     val needs_wb = old_coh.onCacheControl(M_FLUSH)._1 // does the line we are evicting need to be written back
     when (req_tag_match) {
-      val (is_hit, _, coh_on_hit) = old_coh.onAccess(io.req.cmd)
+      val (is_hit, _, coh_on_hit) = old_coh.onAccess(req.cmd)
       when (is_hit) { // set dirty bit
         assert(isWrite(req.cmd))
         new_coh     := coh_on_hit
@@ -258,7 +255,7 @@ class MissEntry extends DCacheModule
       io.mem_grant.ready      := io.refill.ready
       io.refill.valid         := io.mem_grant.valid
       io.refill.bits.addr     := req_block_addr | (refill_ctr << rowOffBits)
-      io.refill.bits.way_en   := req.way_en
+      io.refill.bits.way_en   := req_way_en
       io.refill.bits.wmask    := ~(0.U(rowWords.W))
       io.refill.bits.data     := io.mem_grant.bits.data
 
@@ -323,7 +320,7 @@ class MissEntry extends DCacheModule
     io.meta_write.bits.idx      := req_idx
     io.meta_write.bits.data.coh := new_coh
     io.meta_write.bits.data.tag := req_tag
-    io.meta_write.bits.way_en   := req.way_en
+    io.meta_write.bits.way_en   := req_way_en
 
     when (io.meta_write.fire()) {
       state := s_invalid
@@ -363,15 +360,15 @@ class MissQueue extends DCacheModule
   val req_ready = WireInit(false.B)
 
   val entries = (0 until cfg.nMissEntries) map { i =>
-    val entry = Module(new MissQueue)
+    val entry = Module(new MissEntry)
 
     entry.io.id := i.U(log2Up(cfg.nMissEntries).W)
 
     // entry req
     entry.io.req.valid := (i.U === entry_alloc_idx) && io.req.valid
-    entry.io.req.bits  := req.bits
+    entry.io.req.bits  := io.req.bits
     when (i.U === entry_alloc_idx) {
-      req_ready := entry.io.req_pri_rdy
+      req_ready := entry.io.req.ready
     }
 
     // entry resp
@@ -399,7 +396,7 @@ class MissQueue extends DCacheModule
     entry
   }
 
-  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.client.req.ready)))
+  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.req.ready)))
 
   io.req.ready  := req_ready
   io.resp       <> resp_arb.io.out
@@ -415,30 +412,17 @@ class MissQueue extends DCacheModule
   // print all input/output requests for debug purpose
 
   // print req
-  XSDebug(req.fire(), "req cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
-    req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask, req.bits.meta,
-    req.bits.tag_match, req.bits.old_meta.coh.state, req.bits.old_meta.tag, req.bits.way_en)
-
-  // block hit
-  (0 until memWidth) map { w =>
-    XSDebug(io.block_hit(w), "channel %d req block hit\n", w.U)
-  }
+  val req = io.req
+  XSDebug(req.fire(), "req cmd: %x addr: %x client_id: %d\n",
+    req.bits.cmd, req.bits.addr, req.bits.client_id)
 
   // print refill
-  XSDebug(io.refill.fire(), "refill addr %x data: %x wmask: %x way_en: %x\n",
-    io.refill.bits.addr, io.refill.bits.data,
-    io.refill.bits.wmask, io.refill.bits.way_en)
+  XSDebug(io.refill.fire(), "refill addr %x\n", io.refill.bits.addr)
 
   // print meta_write
   XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_coh: %d new_tag: %x\n",
-    io.meta_write.bits.idx, io.meta_write.bits.way_en,
-    io.meta_write.bits.data.coh.state, io.meta_write.bits.data.tag,
-    io.meta_write.bits.tag)
-
-  // print replay
-  XSDebug(io.replay.fire(), "replay cmd: %x addr: %x data: %x mask: %x meta: %x tag_match: %b old_coh: %d old_tag: %x way_en: %x\n",
-    io.replay.bits.cmd, io.replay.bits.addr, io.replay.bits.data, io.replay.bits.mask, io.replay.bits.meta,
-    io.replay.bits.tag_match, io.replay.bits.old_meta.coh.state, io.replay.bits.old_meta.tag, io.replay.bits.way_en)
+    io.meta_write.bits.idx, io.meta_write.bits.way_en, io.meta_write.bits.tag,
+    io.meta_write.bits.data.coh.state, io.meta_write.bits.data.tag)
 
   // print wb_req
   XSDebug(io.wb_req.fire(), "wb_req idx %x tag: %x source: %d param: %x way_en: %x voluntary: %b\n",

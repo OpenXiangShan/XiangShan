@@ -29,7 +29,6 @@ class LoadMissEntry extends DCacheModule
     val miss_finish = Flipped(DecoupledIO(new MissFinish))
 
     val idx = Output(Valid(UInt()))
-    val way = Output(Valid(UInt()))
     val tag = Output(Valid(UInt()))
   })
 
@@ -58,16 +57,13 @@ class LoadMissEntry extends DCacheModule
 
   io.miss_req.valid      := false.B
   io.miss_req.bits       := DontCare
-  io.miss_resp.ready     := false.B
   io.miss_finish.valid   := false.B
   io.miss_finish.bits    := DontCare
 
   io.idx.valid := state =/= s_invalid
   io.tag.valid := state =/= s_invalid
-  io.way.valid := state =/= s_invalid
   io.idx.bits := req_idx
   io.tag.bits := req_tag
-  io.way.bits := req.way_en
 
 
   XSDebug("entry: %d state: %d\n", io.id, state)
@@ -96,7 +92,6 @@ class LoadMissEntry extends DCacheModule
   }
 
   when (state === s_miss_resp) {
-    io.miss_resp.ready := true.B
     when (io.miss_resp.fire()) {
       reg_miss_resp := io.miss_resp.bits
       state         := s_drain_rpq
@@ -119,7 +114,7 @@ class LoadMissEntry extends DCacheModule
 
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
-    when (replay_resp_ctr === loadPipelineLatency) {
+    when (replay_resp_ctr === loadPipelineLatency.U) {
       state := s_miss_finish
     }
   }
@@ -146,42 +141,60 @@ class LoadMissQueue extends DCacheModule
     val miss_finish = Flipped(DecoupledIO(new MissFinish))
   })
 
-  val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nLoadMissEntriess))
-  val miss_finish    = Module(new Arbiter(new MissFinish, cfg.nLoadMissEntriess))
-  val replay_arb     = Module(new Arbiter(new DCacheLoadReq,  cfg.nLoadMissEntriess))
+  val miss_req_arb    = Module(new Arbiter(new MissReq,       cfg.nLoadMissEntries))
+  val miss_finish_arb = Module(new Arbiter(new MissFinish,    cfg.nLoadMissEntries))
+  val replay_arb      = Module(new Arbiter(new DCacheLoadReq, cfg.nLoadMissEntries))
 
-  val req             =  io.lsu.req
+  val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
+  val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
+
+  val tag_match   = Mux1H(idx_matches, tag_matches)
+  val idx_match   = idx_matches.reduce(_||_)
+
+  val req             = io.lsu.req
   val entry_alloc_idx = Wire(UInt())
   val pri_rdy         = WireInit(false.B)
-  val pri_val         = req.valid && !idx_match(req_idx)
+  val pri_val         = req.valid && !idx_match
   var sec_rdy         = false.B
 
   val entries = (0 until cfg.nLoadMissEntries) map { i =>
-    val entry = Module(new LoadMissEntries)
+    val entry = Module(new LoadMissEntry)
 
     entry.io.id := i.U(log2Up(cfg.nLoadMissEntries).W)
+
+    idx_matches(i) := entry.io.idx.valid && entry.io.idx.bits === req.bits.addr(untagBits-1,blockOffBits)
+    tag_matches(i) := entry.io.tag.valid && entry.io.tag.bits === req.bits.addr >> untagBits
+    when (XSDebug.trigger) {
+      when (idx_matches(i)) {
+        XSDebug(s"entry: $i idx_match\n")
+      }
+      when (tag_matches(i)) {
+        XSDebug(s"entry: $i tag_match\n")
+      }
+    }
+
+
     // entry req
-    entry.io.pri_val := (i.U === entry_alloc_idx) && pri_val
+    entry.io.req_pri_val := (i.U === entry_alloc_idx) && pri_val
     when (i.U === entry_alloc_idx) {
       pri_rdy := entry.io.req_pri_rdy
     }
-    entry.io.sec_val := io.req.valid && tag_match && idx_matches(i)
+    entry.io.req_sec_val := req.valid && tag_match && idx_matches(i)
     sec_rdy   = sec_rdy || (entry.io.req_sec_rdy && entry.io.req_sec_val)
-    entry.io.req.bits   := req.bits
+    entry.io.req   := req.bits
 
     replay_arb.io.in(i)      <> entry.io.replay
     miss_req_arb.io.in(i)    <> entry.io.miss_req
     when ((i.U === io.miss_resp.bits.client_id) && io.miss_resp.valid) {
       entry.io.miss_resp.valid := true.B
       entry.io.miss_resp.bits := io.miss_resp.bits
-      io.miss_resp.ready := entry.io.miss_resp.ready
     }
     miss_finish_arb.io.in(i) <> entry.io.miss_finish
 
     entry
   }
 
-  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.client.req.ready)))
+  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.req_pri_rdy)))
 
   req.ready   := Mux(idx_match, tag_match && sec_rdy, pri_rdy)
   io.replay.req  <> replay_arb.io.out

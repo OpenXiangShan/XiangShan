@@ -34,7 +34,7 @@ class StoreMissEntry extends DCacheModule
   val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new StoreReq)
+  val req     = Reg(new DCacheStoreReq)
   val req_idx = req.addr(untagBits-1, blockOffBits)
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
@@ -48,7 +48,6 @@ class StoreMissEntry extends DCacheModule
 
   io.miss_req.valid      := false.B
   io.miss_req.bits       := DontCare
-  io.miss_resp.ready     := false.B
   io.miss_finish.valid   := false.B
   io.miss_finish.bits    := DontCare
 
@@ -57,7 +56,7 @@ class StoreMissEntry extends DCacheModule
   io.way.valid := state =/= s_invalid
   io.idx.bits := req_idx
   io.tag.bits := req_tag
-  io.way.bits := req.way_en
+  io.way.bits := DontCare
 
 
   XSDebug("entry: %d state: %d\n", io.id, state)
@@ -85,7 +84,6 @@ class StoreMissEntry extends DCacheModule
   }
 
   when (state === s_miss_resp) {
-    io.miss_resp.ready := true.B
     when (io.miss_resp.fire()) {
       reg_miss_resp := io.miss_resp.bits
       state         := s_drain_rpq
@@ -106,7 +104,7 @@ class StoreMissEntry extends DCacheModule
 
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
-    when (replay_resp_ctr === storePipelineLatency) {
+    when (replay_resp_ctr === storePipelineLatency.U) {
       state := s_miss_finish
     }
   }
@@ -133,40 +131,39 @@ class StoreMissQueue extends DCacheModule
     val miss_finish = Flipped(DecoupledIO(new MissFinish))
   })
 
-  val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntriess))
-  val miss_finish    = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntriess))
-  val replay_arb = Module(new Arbiter(new StoreReq,              cfg.nStoreMissEntriess))
+  val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntries))
+  val miss_finish_arb    = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntries))
+  val replay_arb     = Module(new Arbiter(new DCacheStoreReq,   cfg.nStoreMissEntries))
 
   val req             =  io.lsu.req
   val entry_alloc_idx = Wire(UInt())
   val pri_rdy         = WireInit(false.B)
-  val pri_val         = req.valid && !idx_match(req_idx)
+  val pri_val         = req.valid
 
   val entries = (0 until cfg.nStoreMissEntries) map { i =>
-    val entry = Module(new StoreMissEntries)
+    val entry = Module(new StoreMissEntry)
 
     entry.io.id := i.U(log2Up(cfg.nStoreMissEntries).W)
 
     // entry req
-    entry.io.pri_val := (i.U === entry_alloc_idx) && pri_val
+    entry.io.req_pri_val := (i.U === entry_alloc_idx) && pri_val
     when (i.U === entry_alloc_idx) {
       pri_rdy := entry.io.req_pri_rdy
     }
-    entry.io.req.bits   := req.bits
+    entry.io.req   := req.bits
 
     replay_arb.io.in(i)      <> entry.io.replay
     miss_req_arb.io.in(i)    <> entry.io.miss_req
     when ((i.U === io.miss_resp.bits.client_id) && io.miss_resp.valid) {
       entry.io.miss_resp.valid := true.B
       entry.io.miss_resp.bits := io.miss_resp.bits
-      io.miss_resp.ready := entry.io.miss_resp.ready
     }
     miss_finish_arb.io.in(i) <> entry.io.miss_finish
 
     entry
   }
 
-  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.client.req.ready)))
+  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.req_pri_rdy)))
 
   req.ready      := pri_rdy
   io.replay.req  <> replay_arb.io.out
