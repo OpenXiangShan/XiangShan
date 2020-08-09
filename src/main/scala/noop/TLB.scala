@@ -241,7 +241,7 @@ class TLB(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val in = Flipped(new SimpleBusUC(userBits = userBits, addrBits = VAddrBits))
     val out = new SimpleBusUC(userBits = userBits)
 
-    val mem = new SimpleBusUC()
+    val mem = new SimpleBusUC(userBits = userBits)
     val flush = Input(Bool()) 
     val csrMMU = new MMUIO
     val cacheEmpty = Input(Bool())
@@ -364,7 +364,7 @@ class TLBExec(implicit val tlbConfig: TLBConfig) extends TlbModule{
     val mdWrite = new TLBMDWriteBundle(IndexBits = IndexBits, Ways = Ways, tlbLen = tlbLen)
     val mdReady = Input(Bool())
 
-    val mem = new SimpleBusUC()
+    val mem = new SimpleBusUC(userBits = userBits)
     val flush = Input(Bool()) 
     val satp = Input(UInt(XLEN.W))
     val pf = new MMUIO

@@ -3,9 +3,10 @@ package xiangshan.mem.pipeline
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
+import xiangshan.AddressSpace
 import xiangshan.mem._
 import xiangshan.mem.cache._
 import bus.simplebus._
@@ -18,6 +19,7 @@ object LSUOpType {
   def lbu  = "b000100".U
   def lhu  = "b000101".U
   def lwu  = "b000110".U
+  def ldu  = "b000111".U
   def sb   = "b001000".U
   def sh   = "b001001".U
   def sw   = "b001010".U
@@ -42,65 +44,63 @@ object LSUOpType {
   def atomD = "011".U
 }
 
-class LsPipelineBundle extends XSBundle with HasMEMConst {
+class LsPipelineBundle extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val func = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
-  val pc = UInt(VAddrBits.W) //for debug
+  // val moqIdx = UInt(log2Up(MoqSize).W)
+  val uop = new MicroOp
 
   val miss = Bool()
+  val mmio = Bool()
   val rollback = Bool()
 
-  val forwardMask = UInt(8.W)
-  val forwardData = UInt(XLEN.W)
+  val forwardMask = Vec(8, Bool())
+  val forwardData = Vec(8, UInt(8.W))
 }
 
-class LoadForwardQueryIO extends XSBundle with HasMEMConst {
+class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  val lsroqId = Output(UInt(log2Up(LSRoqSize).W))
+  val moqIdx = Output(UInt(MoqIdxWidth.W))
   val pc = Output(UInt(VAddrBits.W)) //for debug
+  val valid = Output(Bool()) //for debug
 
-  val forwardMask = Input(UInt(8.W))
+  val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
 }
 
-class LduReq extends XSBundle with HasMEMConst {
-  val src1 = UInt(VAddrBits.W)
-  val src2 = UInt(VAddrBits.W)
-  val func = UInt(6.W)
-  val data = UInt(XLEN.W)
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
-  val pc = UInt(VAddrBits.W) //for debug
-}
-
-class StuReq extends XSBundle with HasMEMConst {
-  val src1 = UInt(VAddrBits.W)
-  val src2 = UInt(VAddrBits.W)
-  val func = UInt(6.W)
-  val data = UInt(XLEN.W)
-  val lsroqId = UInt(log2Up(LSRoqSize).W)
-  val pc = UInt(VAddrBits.W) //for debug
-}
-
-class LsuIO extends XSBundle with HasMEMConst {
-  val ldin = Vec(2, Flipped(Decoupled(new LduReq)))
-  val stin = Vec(2, Flipped(Decoupled(new StuReq)))
-  val out = Vec(2, Decoupled(new ExuOutput))
+class LsuIO extends XSBundle {
+  val ldin = Vec(2, Flipped(Decoupled(new ExuInput)))
+  val stin = Vec(2, Flipped(Decoupled(new ExuInput)))
+  val ldout = Vec(2, Decoupled(new ExuOutput))
+  val stout = Vec(2, Decoupled(new ExuOutput))
   val redirect = Flipped(ValidIO(new Redirect))
-  val dcache = Flipped(new LSUDMemIO)
-  val dtlb = Flipped(new DtlbIO)
-  // lsroq
-  // sbuffer
+  val rollback = Output(Valid(new Redirect))
+  val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
+  val mcommit = Flipped(Vec(CommitWidth, Valid(UInt(MoqIdxWidth.W))))
+  val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+  val moqIdxs = Output(Vec(RenameWidth, UInt(MoqIdxWidth.W)))
+  val dcache = new LSUDCacheIO
+  val dtlb = Flipped(new DtlbToLsuIO)
 }
 
 // 2l2s out of order lsu for XiangShan
-class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedImpl{
+class Lsu extends XSModule {
   override def toString: String = "Ldu"
   val io = IO(new LsuIO)
+
+  val lsroq = Module(new Lsroq)
+  val sbuffer = Module(new FakeSbuffer)
+
+  lsroq.io.mcommit <> io.mcommit
+  lsroq.io.dp1Req <> io.dp1Req
+  lsroq.io.moqIdxs <> io.moqIdxs
+  lsroq.io.brqRedirect := io.redirect
+  io.rollback <> lsroq.io.rollback
+  io.dcache.redirect := io.redirect
 
   def genWmask(addr: UInt, sizeEncode: UInt): UInt = {
     LookupTree(sizeEncode, List(
@@ -120,24 +120,20 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
     ))
   }
 
-  // store buffer
-  // TODO
-
-  // lsroq
-  // TODO
-
 //-------------------------------------------------------
 // Load Pipeline
 //-------------------------------------------------------
 
   val l2_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
   val l4_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val l5_in  = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val l5_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  l2_out := DontCare
-  l4_out := DontCare
-  l5_in := DontCare
-  l5_out := DontCare
+  val l5_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
+
+  (0 until LoadPipelineWidth).map(i => {
+    when (l2_out(i).valid) { XSDebug("L2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType, l2_out(i).bits.data, l2_out(i).bits.mask)}; 
+    when (l4_out(i).valid) { XSDebug("L4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", l4_out(i).bits.uop.cf.pc, l4_out(i).bits.vaddr, l4_out(i).bits.paddr, l4_out(i).bits.uop.ctrl.fuOpType, l4_out(i).bits.data, l4_out(i).bits.mask)}; 
+    when (l5_in(i).valid)  { XSDebug("L5_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", l5_in(i).bits.uop.cf.pc,  l5_in(i).bits.vaddr , l5_in(i).bits.paddr , l5_in(i).bits.uop.ctrl.fuOpType , l5_in(i).bits.data,  l5_in(i).bits.mask )}; 
+    XSDebug(l2_out(i).fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n", l2_out(i).bits.uop.cf.pc, l2_out(i).bits.vaddr, l2_out(i).bits.paddr, l2_out(i).bits.uop.ctrl.fuOpType)
+  })
 
 //-------------------------------------------------------
 // LD Pipeline Stage 2
@@ -145,27 +141,55 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 //-------------------------------------------------------
 
   (0 until LoadPipelineWidth).map(i => {
+    // l2_out is used to generate dcache req
     l2_out(i).bits := DontCare
-    l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.src2
-    // l2_out(i).bits.data := io.ldin(i).bits.data
-    l2_out(i).bits.func := io.ldin(i).bits.func
-    l2_out(i).bits.pc := io.ldin(i).bits.pc
-    l2_out(i).bits.lsroqId := io.ldin(i).bits.lsroqId
+    l2_out(i).bits.vaddr := io.ldin(i).bits.src1 + io.ldin(i).bits.uop.ctrl.imm
+    l2_out(i).bits.paddr := io.dtlb.resp(i).bits.paddr
+    l2_out(i).bits.uop := io.ldin(i).bits.uop
+    l2_out(i).bits.mask := genWmask(l2_out(i).bits.vaddr, io.ldin(i).bits.uop.ctrl.fuOpType(1,0))
     l2_out(i).valid := io.ldin(i).valid
+    l2_out(i).ready := io.dcache.load(i).req.ready
+    io.ldin(i).ready := l2_out(i).ready
   })
 
-  // send req to d$tag and dtlb
-  // (0 until LoadPipelineWidth).map(i => {
-  //   io.dmem.req(i).bits.vaddr := l2_out(i).bits.vaddr
-  //   io.dmem.req(i).bits.func := l2_out(i).bits.func
-  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.lsroqId)
-  //   io.dmem.req(i).valid := l2_out(i).valid
-  // } // TODO
+  // send req to dtlb
+  (0 until LoadPipelineWidth).map(i => {
+    io.dtlb.req(i).valid := l2_out(i).valid
+    io.dtlb.req(i).bits.vaddr := l2_out(i).bits.vaddr
+  })
+  
+  // send result to dcache
+  (0 until LoadPipelineWidth).map(i => {
+    io.dcache.load(i).req.valid := io.dtlb.resp(i).valid && !io.dtlb.resp(i).bits.miss
+    io.dcache.load(i).req.bits.vaddr := l2_out(i).bits.vaddr
+    io.dcache.load(i).req.bits.paddr := io.dtlb.resp(i).bits.paddr
+    io.dcache.load(i).req.bits.miss := io.dtlb.resp(i).bits.miss
+    io.dcache.load(i).req.bits.user := DontCare
+    io.dcache.load(i).req.bits.user.uop := l2_out(i).bits.uop
+    io.dcache.load(i).req.bits.user.mmio := AddressSpace.isMMIO(io.dcache.load(i).req.bits.paddr)
+    io.dcache.load(i).req.bits.user.mask := l2_out(i).bits.mask
+  })
+
+
+
+  val l2_tlbFeedback = (0 until LoadPipelineWidth).map(_ => Wire(new TlbFeedback))
+  for((fb, i) <- l2_tlbFeedback.zipWithIndex){
+    fb.hit := !io.dtlb.resp(i).bits.miss
+    fb.roqIdx := l2_out(i).bits.uop.roqIdx
+  }
 
 //-------------------------------------------------------
 // LD Pipeline Stage 3
 // Compare tag, use addr to query DCache Data
 //-------------------------------------------------------
+
+  val l3_tlbFeedback = l2_tlbFeedback.map(RegNext(_))
+  val l3_valid = l2_out.map(x => RegNext(x.fire(), false.B))
+  for(i <- 0 until LoadPipelineWidth){
+    io.tlbFeedback(i).valid := l3_valid(i)
+    io.tlbFeedback(i).bits := l3_tlbFeedback(i)
+  }
+
 
 // Done in Dcache
 
@@ -176,58 +200,49 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
   // result from dcache
   (0 until LoadPipelineWidth).map(i => {
+    io.dcache.load(i).resp.ready := true.B
     l4_out(i).bits := DontCare
-    // l4_out(i).bits.paddr := io.dmem.resp(i).bits.addr
-    // l4_out(i).bits.data := io.dmem.resp(i).bits.data
-    // l4_out(i).bits.func := io.dmem.resp(i).bits.user ...
-    // l4_out(i).bits.pc := io.dmem.resp(i).bits.user ...
-    // l4_out(i).lsroqId := io.dmem.resp(i).bits.user ...
-    // l4_out(i).valid := io.dmem(i).resp.valid
+    l4_out(i).bits.paddr := io.dcache.load(i).resp.bits.paddr
+    l4_out(i).bits.data := io.dcache.load(i).resp.bits.data
+    l4_out(i).bits.uop := io.dcache.load(i).resp.bits.user.uop
+    l4_out(i).bits.mmio := io.dcache.load(i).resp.bits.user.mmio
+    l4_out(i).bits.mask := io.dcache.load(i).resp.bits.user.mask
+    l4_out(i).valid := io.dcache.load(i).resp.valid
   })
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
-  // val dataBackVec = Wire(Vec(XLEN/8, (UInt((XLEN/8).W))))
-  // val dataBack = dataBackVec.asUInt
-  val forwardVec = Wire(Vec(8, UInt(8.W)))
-  val forwardWmask = WireInit(0.U(8.W))
-  forwardVec := DontCare
 
-  // generate dependency mask
-  def getDependencyMask(addr1: UInt, wmask1: UInt, id1: UInt, addr2: UInt, wmask2: UInt, id2: UInt): UInt = {
-    0.U // TODO
-  }
-
-  // TODO: update forwardVec/forwardWmask accoring to store buffer
-  // forwardVec := VecInit(List.tabulate(storeQueueSize)(i => {
-  //   i.U < storeHeadPtr && io.dmem.req.bits.addr(PAddrBits-1, log2Up(XLEN/8)) === storeQueue(i).paddr(PAddrBits-1, log2Up(XLEN/8)) && storeQueue(i).valid
-  // }))
-  // forwardWmask := List.tabulate(storeQueueSize)(i => storeQueue(i).wmask & Fill(XLEN/8, forwardVec(i))).foldRight(0.U)((sum, i) => sum | i)
-  // for(j <- (0 to (XLEN/8 - 1))){
-  //   dataBackVec(j) := MuxCase( 
-  //     // default = dmem.resp.bits.rdata(8*(j+1)-1, 8*j), 
-  //     default = 0.U,
-  //     mapping = List.tabulate(storeQueueSize)(i => {
-  //       (forwardVec(i) && storeQueue(i).wmask(j), storeQueue(i).data(8*(j+1)-1, 8*j))
-  //     }).reverse
-  //   )
-  // }
-
-  // TODO: update forwardVec/forwardWmask accoring to store buffer
-  // forwardVec :=
-  // forwardWmask :=
-
-  // generate forward mask / data
-  // (0 until LoadPipelineWidth).map(i => {
-  //   when(s4_out(i).valid){
-  //     s4_out(i).forwardMask := forwardWmask
-  //     s4_out(i).forwardData := forwardVec.asUInt
-  //   }
-  // })
-
-  // TODO: add brIdx
   (0 until LoadPipelineWidth).map(i => {
-    PipelineConnect(l4_out(i), l5_in(i), l5_out(i).fire(), io.redirect.valid)
+
+    lsroq.io.forward(i).paddr := l4_out(i).bits.paddr
+    lsroq.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
+    lsroq.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
+    lsroq.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    lsroq.io.forward(i).valid := l4_out(i).valid
+    
+    sbuffer.io.forward(i).paddr := l4_out(i).bits.paddr
+    sbuffer.io.forward(i).mask := io.dcache.load(i).resp.bits.user.mask
+    sbuffer.io.forward(i).moqIdx := l4_out(i).bits.uop.moqIdx
+    sbuffer.io.forward(i).pc := l4_out(i).bits.uop.cf.pc
+    sbuffer.io.forward(i).valid := l4_out(i).valid
+    
+    val forwardVec = WireInit(lsroq.io.forward(i).forwardData)
+    val forwardMask = WireInit(lsroq.io.forward(i).forwardMask)
+    (0 until XLEN/8).map(j => {
+      when(sbuffer.io.forward(i).forwardMask(j)){
+        forwardMask(j) := true.B
+        forwardVec(j) := sbuffer.io.forward(i).forwardData(j)
+      }
+    // generate XLEN/8 Muxs
+    })
+    
+    l4_out(i).bits.forwardMask := forwardMask
+    l4_out(i).bits.forwardData := forwardVec
+  })
+  
+  (0 until LoadPipelineWidth).map(i => {
+    PipelineConnect(l4_out(i), l5_in(i), io.ldout(i).fire(), l5_in(i).valid && l5_in(i).bits.uop.needFlush(io.redirect))
   })
 
 //-------------------------------------------------------
@@ -236,17 +251,17 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 // If cache hit, return writeback result to CDB
 //-------------------------------------------------------
 
+  val loadWriteBack = (0 until LoadPipelineWidth).map(i => { l5_in(i).fire() })
+  val hitLoadOut = (0 until LoadPipelineWidth).map(_ => Wire(Decoupled(new ExuOutput)))
   (0 until LoadPipelineWidth).map(i => {
     // data merge
-    val rdata = Wire(UInt(XLEN.W))
-    rdata := DontCare // TODO
-    // val rdata = VecInit((0 until 8).map(j => {
-    //   Mux(l5_in(i).bits.forwardMask(j), 
-    //     l5_in(i).bits.forwardData(8*(j+1)-1, 8*j), 
-    //     l5_in(i).bits.data(8*(j+1)-1, 8*j)
-    //   )
-    // })).asUInt
-    val func = l5_in(i).bits.func
+    val rdata = VecInit((0 until 8).map(j => {
+      Mux(l5_in(i).bits.forwardMask(j), 
+        l5_in(i).bits.forwardData(j), 
+        l5_in(i).bits.data(8*(j+1)-1, 8*j)
+      )
+    })).asUInt
+    val func = l5_in(i).bits.uop.ctrl.fuOpType
     val raddr = l5_in(i).bits.paddr
     val rdataSel = LookupTree(raddr(2, 0), List(
       "b000".U -> rdata(63, 0),
@@ -262,9 +277,11 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
         LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
         LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
     ))
 
     // ecc check
@@ -272,8 +289,31 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 
     // if hit, writeback result to CDB
     // val ldout = Vec(2, Decoupled(new ExuOutput))
-
+    // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
+    hitLoadOut(i).bits.uop := l5_in(i).bits.uop
+    hitLoadOut(i).bits.data := rdataPartialLoad
+    hitLoadOut(i).bits.redirectValid := false.B
+    hitLoadOut(i).bits.redirect := DontCare
+    hitLoadOut(i).bits.brUpdate := DontCare
+    hitLoadOut(i).bits.debug.isMMIO := l5_in(i).bits.mmio
+    hitLoadOut(i).valid := l5_in(i).valid
+    XSDebug(hitLoadOut(i).fire(), "load writeback: pc %x data %x (%x + %x(%b))\n", 
+      hitLoadOut(i).bits.uop.cf.pc, rdataPartialLoad, l5_in(i).bits.data, 
+      l5_in(i).bits.forwardData.asUInt, l5_in(i).bits.forwardMask.asUInt
+    )
+    
     // writeback to LSROQ
+    // Current dcache use MSHR
+
+    lsroq.io.loadIn(i).bits := l5_in(i).bits
+    lsroq.io.loadIn(i).bits.data := rdataPartialLoad // for debug
+    lsroq.io.loadIn(i).valid := loadWriteBack(i)
+
+    // pipeline control
+    l5_in(i).ready := io.ldout(i).ready
+
+    lsroq.io.ldout(i).ready := false.B // TODO
+    // TODO: writeback missed loads
   })
 
 //-------------------------------------------------------
@@ -281,72 +321,68 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 //-------------------------------------------------------
 
   val s2_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val s3_in  = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val s3_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val s4_in  = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  val s4_out = Wire(Vec(2, Decoupled(new LsPipelineBundle)))
-  s2_out := DontCare
-  s3_in := DontCare
-  s3_out := DontCare
-  s4_in := DontCare
-  s4_out := DontCare
+  val s3_in  = Wire(Vec(2, Flipped(Decoupled(new LsPipelineBundle))))
 
-//-------------------------------------------------------
-// ST Pipeline Stage 2
-// Generate addr, use addr to query DTLB
-//-------------------------------------------------------
+  (0 until StorePipelineWidth).map(i => {
+    when (s2_out(i).valid) { XSDebug("S2_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data, s2_out(i).bits.mask)}; 
+    when (s3_in(i).valid ) { XSDebug("S3_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n", s3_in(i).bits.uop.cf.pc , s3_in(i).bits.vaddr , s3_in(i).bits.paddr , s3_in(i).bits.uop.ctrl.fuOpType , s3_in(i).bits.data,  s3_in(i).bits.mask )}; 
+    // when (s4_in(i).valid ) { printf("S4_"+i+": pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s4_in(i).bits.uop.cf.pc , s4_in(i).bits.vaddr , s4_in(i).bits.paddr , s4_in(i).bits.uop.ctrl.fuOpType , s4_in(i).bits.data )}; 
+    XSDebug(s2_out(i).fire(), "store req: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n", s2_out(i).bits.uop.cf.pc, s2_out(i).bits.vaddr, s2_out(i).bits.paddr, s2_out(i).bits.uop.ctrl.fuOpType, s2_out(i).bits.data)
+  })
+  
+  //-------------------------------------------------------
+  // ST Pipeline Stage 2
+  // Generate addr, use addr to query DTLB
+  //-------------------------------------------------------
+  
+  // send req to dtlb
+  val saddr = VecInit((0 until StorePipelineWidth).map(i => {
+    io.stin(i).bits.src1 + io.stin(i).bits.uop.ctrl.imm
+  }))
+
+  (0 until StorePipelineWidth).map(i => {
+    io.dtlb.req(LoadPipelineWidth + i).bits.vaddr := saddr(i)
+    io.dtlb.req(LoadPipelineWidth + i).valid := io.stin(i).valid
+  })
 
   (0 until StorePipelineWidth).map(i => {
     s2_out(i).bits := DontCare
-    s2_out(i).bits.vaddr := io.stin(i).bits.src1 + io.stin(i).bits.src2
-    s2_out(i).bits.data := io.stin(i).bits.data
-    s2_out(i).bits.func := io.stin(i).bits.func
-    s2_out(i).bits.pc := io.stin(i).bits.pc
-    s2_out(i).bits.lsroqId := io.stin(i).bits.lsroqId
-    s2_out(i).valid := io.stin(i).valid
+    s2_out(i).bits.vaddr := saddr(i)
+    s2_out(i).bits.paddr := io.dtlb.resp(LoadPipelineWidth + i).bits.paddr
+    s2_out(i).bits.data := genWdata(io.stin(i).bits.src2, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
+    s2_out(i).bits.uop := io.stin(i).bits.uop
+    s2_out(i).bits.miss := io.dtlb.resp(LoadPipelineWidth + i).bits.miss
+    s2_out(i).bits.mask := genWmask(s2_out(i).bits.vaddr, io.stin(i).bits.uop.ctrl.fuOpType(1,0))
+    s2_out(i).valid := io.stin(i).valid && !io.dtlb.resp(LoadPipelineWidth + i).bits.miss
+    io.stin(i).ready := s2_out(i).ready
   })
 
-  // send req to dtlb
-  // (0 until LoadPipelineWidth).map(i => {
-  //   io.dmem.req(i).bits.vaddr := l2_out(i).bits.vaddr
-  //   io.dmem.req(i).bits.func := l2_out(i).bits.func
-  //   io.dmem.req(i).bits.user := Cat(l2_out(i).bits.pc, l2_out(i).bits.lsroqId)
-  //   io.dmem.req(i).valid := l2_out(i).valid
-  // } // TODO
+  (0 until StorePipelineWidth).map(i =>{
+    PipelineConnect(s2_out(i), s3_in(i), true.B, s3_in(i).valid && s3_in(i).bits.uop.needFlush(io.redirect))
+  })
+
+
 
 //-------------------------------------------------------
 // ST Pipeline Stage 3
 // Write paddr to LSROQ
 //-------------------------------------------------------
 
-  // get paddr from dtlb
-  (0 until StorePipelineWidth).map(i => {
-    s3_in(i).bits := DontCare
-    // TODO
-    // s3_in(i).bits.paddr := io.dtlb.store(i).resp.bits.rdata
-    // s3_in(i).bits.data := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.func := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.pc := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).bits.lsroqId := io.dtlb.store(i).resp.bits.user.get
-    // s3_in(i).valid := io.dtlb.store(i).resp.valid
+  // Send TLB feedback to store issue queue
+  (0 until StorePipelineWidth).foreach(i => {
+    io.tlbFeedback(LoadPipelineWidth + i).valid := s3_in(i).fire()
+    io.tlbFeedback(LoadPipelineWidth + i).bits.hit := !s3_in(i).bits.miss
+    io.tlbFeedback(LoadPipelineWidth + i).bits.roqIdx := s3_in(i).bits.uop.roqIdx
   })
 
-  // check if rollback is needed
-  def needRollback(addr1: UInt, wmask1: UInt, id1: UInt, addr2: UInt, wmask2: UInt, id2: UInt): Bool = {
-    false.B //TODO
-  }
-
+  // get paddr from dtlb, check if rollback is needed
+  // writeback store inst to lsroq
   (0 until StorePipelineWidth).map(i => {
-    val rollback = WireInit(false.B)
-    // check if needRollback
-    // s3_out(i).bits := DontCare
-    // TODO
-    s3_out(i).bits.rollback := rollback
-  })
-
-  // TODO: add brIdx
-  (0 until StorePipelineWidth).map(i => {
-    PipelineConnect(s3_out(i), s4_in(i), s4_out(i).fire(), io.redirect.valid)
+    // writeback to LSROQ
+    s3_in(i).ready := true.B
+    lsroq.io.storeIn(i).bits := s3_in(i).bits
+    lsroq.io.storeIn(i).bits.mmio := AddressSpace.isMMIO(s3_in(i).bits.paddr)
+    lsroq.io.storeIn(i).valid := s3_in(i).fire()
   })
 
 //-------------------------------------------------------
@@ -354,18 +390,32 @@ class Lsu(implicit val p: XSConfig) extends XSModule with HasMEMConst with NeedI
 // Store writeback, send store request to store buffer
 //-------------------------------------------------------
 
-// writeback to LSROQ
+  // LSROQ to store buffer
+  (0 until StorePipelineWidth).map(i => {
+    lsroq.io.sbuffer(i) <> sbuffer.io.in(i)
+  })
+  
+  // Writeback to CDB
+  // (0 until LoadPipelineWidth).map(i => {
+  //   io.ldout(i) <> hitLoadOut(i)
+  // })
+  (0 until StorePipelineWidth).map(i => {
+    io.stout(i) <> lsroq.io.stout(i)
+  })
 
-// TODO
-
-// LSROQ writeback
+  (0 until 2).map(i => {
+    val cdbArb = Module(new Arbiter(new ExuOutput, 2))
+    io.ldout(i) <> cdbArb.io.out
+    hitLoadOut(i) <> cdbArb.io.in(0)
+    lsroq.io.ldout(i) <> cdbArb.io.in(1) // missLoadOut
+  })
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 1
 // Read paddr from store buffer, query DTAG in DCache
 //-------------------------------------------------------
 
-// LSROQ to store buffer
+  sbuffer.io.dcache <> io.dcache.store
 
 //-------------------------------------------------------
 // ST Pipeline Async Stage 2

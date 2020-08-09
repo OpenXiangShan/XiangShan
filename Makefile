@@ -11,7 +11,8 @@ IMAGE ?= temp
 
 # remote machine with high frequency to speedup verilog generation
 REMOTE ?= localhost
-REMOTE_PREFIX ?= /nfs/24/$(abspath .)/
+REMOTE_PREFIX ?= 
+REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 
 .DEFAULT_GOAL = verilog
 
@@ -43,12 +44,13 @@ verilog: $(TOP_V)
 
 SIM_TOP = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 ifeq ($(REMOTE),localhost)
-	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)
+	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
 endif
 
 
@@ -57,17 +59,19 @@ EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
 EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
 EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
-EMU_CXXFLAGS  = -O3 -std=c++11 -static -g -Wall -I$(EMU_CSRC_DIR)
+EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 
-# dump vcd: --debug --trace
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
   --assert \
+  --savable \
+  --stats-vars \
+  --trace \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
   -I$(abspath $(BUILD_DIR)) \
@@ -94,22 +98,34 @@ $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
-	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
+	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" time $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
 
-SEED = -s $(shell seq 1 10000 | shuf | head -n 1)
+SEED ?= $(shell shuf -i 1-10000 -n 1)
 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
 B ?= 0
 E ?= -1
-V ?= ALL
+SNAPSHOT ?=
+
+# enable this runtime option if you want to generate a vcd file
+# use 'emu -h' to see more details
+#WAVEFORM = --dump-wave
+
+ifeq ($(SNAPSHOT),)
+SNAPSHOT_OPTION = 
+else
+SNAPSHOT_OPTION = --load-snapshot=$(REMOTE_PREFIX)/$(SNAPSHOT)
+endif
+
+EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)
+	@$(EMU) -i $(IMAGE) $(EMU_FLAGS)
 else
-	ssh $(REMOTE) "cd $(REMOTE_PREFIX) && $(EMU) -i $(IMAGE) $(SEED) -b $(B) -e $(E) -v $(V)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && export NOOP_HOME=$(REMOTE_PREFIX)/$(NOOP_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(EMU_FLAGS)"
 endif
 
 cache:

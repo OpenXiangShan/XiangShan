@@ -3,7 +3,8 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils.XSDebug
+import utils.XSDebug
+import xiangshan.backend.brq.BrqPtr
 
 trait HasFreeListConsts extends HasXSParameter {
   def FL_SIZE: Int = NRPhyRegs-32
@@ -48,8 +49,10 @@ class FreeList extends XSModule with HasFreeListConsts {
     // alloc new phy regs
     val allocReqs = Input(Vec(RenameWidth, Bool()))
     val pdests = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-    val allocPtrs = Output(Vec(RenameWidth, new FreeListPtr))
     val canAlloc = Output(Vec(RenameWidth, Bool()))
+
+    // do checkpoints
+    val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
 
     // dealloc phy regs
     val deallocReqs = Input(Vec(CommitWidth, Bool()))
@@ -60,6 +63,8 @@ class FreeList extends XSModule with HasFreeListConsts {
   val freeList = RegInit(VecInit(Seq.tabulate(FL_SIZE)(i => (i+32).U(PhyRegIdxWidth.W))))
   val headPtr = RegInit(FreeListPtr(false.B, 0.U))
   val tailPtr = RegInit(FreeListPtr(true.B, 0.U))
+
+  val checkPoints = Reg(Vec(BrqSize, new FreeListPtr()))
 
   def isEmpty(ptr1: FreeListPtr, ptr2: FreeListPtr): Bool = ptr1===ptr2
 
@@ -78,24 +83,34 @@ class FreeList extends XSModule with HasFreeListConsts {
   var empty = WireInit(isEmpty(headPtr, tailPtr))
   var headPtrNext = WireInit(headPtr)
   for(
-    (((allocReq, canAlloc),pdest),allocPtr) <- io.allocReqs.zip(io.canAlloc).zip(io.pdests).zip(io.allocPtrs)
+    (((allocReq, canAlloc),pdest),cpReq) <-
+    io.allocReqs.zip(io.canAlloc).zip(io.pdests).zip(io.cpReqs)
   ){
     canAlloc := !empty
     pdest := freeList(headPtrNext.value)
     headPtrNext = headPtrNext + (allocReq && canAlloc)
-    allocPtr := headPtrNext
+    when(cpReq.valid){
+      checkPoints(cpReq.bits.value) := headPtrNext
+      XSDebug(p"do checkPt at BrqIdx=${cpReq.bits.value} headPtr:$headPtrNext\n")
+    }
     empty = isEmpty(headPtrNext, tailPtr)
     XSDebug(p"req:$allocReq canAlloc:$canAlloc pdest:$pdest headNext:$headPtrNext\n")
   }
 
-  headPtr := Mux(io.redirect.valid,
-    io.redirect.bits.freelistAllocPtr, // mispredict or exception happen
+  headPtr := Mux(io.redirect.valid, // mispredict or exception happen
+    Mux(io.redirect.bits.isException,
+      FreeListPtr(!tailPtr.flag, tailPtr.value),
+      Mux(io.redirect.bits.isMisPred,
+        checkPoints(io.redirect.bits.brTag.value),
+        headPtrNext // replay
+      )
+    ),
     headPtrNext
   )
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 
-  XSDebug(io.redirect.valid, p"redirect: ptr=${io.redirect.bits.freelistAllocPtr}\n")
+  XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
 
 
 

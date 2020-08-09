@@ -9,8 +9,7 @@ package xiangshan.mem.cache
 import chisel3._
 import chisel3.util._
 
-import xiangshan.mem.StoreReq
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 import bus.tilelink._
 
 class StoreMissEntry extends DCacheModule
@@ -20,26 +19,26 @@ class StoreMissEntry extends DCacheModule
 
     val req_pri_val = Input(Bool())
     val req_pri_rdy = Output(Bool())
-    val req         = Flipped(new StoreReq)
-    val replay      = DecoupledIO(new StoreReq)
+    val req         = Flipped(new DCacheStoreReq)
+    val replay      = DecoupledIO(new DCacheStoreReq)
 
-    val miss_req = new DecoupledIO(new MissEntriesReq)
-    val miss_resp = new ValidIO(new MissEntriesResp)
-    val miss_finish = Flipped(new DecoupledIO(new MissEntriesFinish))
+    val miss_req    = DecoupledIO(new MissReq)
+    val miss_resp   = ValidIO(new MissResp)
+    val miss_finish = Flipped(DecoupledIO(new MissFinish))
 
     val idx = Output(Valid(UInt()))
     val way = Output(Valid(UInt()))
     val tag = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_miss_finish :: Nil = Enum(5)
+  val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
   val req     = Reg(new StoreReq)
   val req_idx = req.addr(untagBits-1, blockOffBits)
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
-  val reg_miss_resp = Reg(new MissEntriesResp)
+  val reg_miss_resp = Reg(new MissResp)
 
   // assign default values to output signals
   io.req_pri_rdy         := false.B
@@ -95,10 +94,19 @@ class StoreMissEntry extends DCacheModule
 
   // --------------------------------------------
   // replay
+  val storePipelineLatency = 5
+  val replay_resp_ctr  = Reg(UInt(log2Up(storePipelineLatency).W))
   when (state === s_drain_rpq) {
     io.replay.valid := true.B
     io.replay.bits  := req
     when (io.replay.fire()) {
+      state := s_replay_resp
+    }
+  }
+
+  when (state === s_replay_resp) {
+    replay_resp_ctr := replay_resp_ctr + 1.U
+    when (replay_resp_ctr === storePipelineLatency) {
       state := s_miss_finish
     }
   }
@@ -114,39 +122,30 @@ class StoreMissEntry extends DCacheModule
 }
 
 
-class StoreMissEntriesFile extends DCacheModule
+class StoreMissQueue extends DCacheModule
 {
   val io = IO(new Bundle {
-    val req         = Flipped(DecoupledIO(new StoreReq))
-    val replay      = DecoupledIO(new StoreReq)
+    val lsu         = Flipped(new DCacheStoreIO)
+    val replay      = new DCacheStoreIO
 
-    val miss_req = new DecoupledIO(new MissEntriesReq)
-    val miss_resp = new ValidIO(new MissEntriesResp)
-    val miss_finish = Flipped(new DecoupledIO(new MissEntriesFinish))
+    val miss_req    = DecoupledIO(new MissReq)
+    val miss_resp   = ValidIO(new MissResp)
+    val miss_finish = Flipped(DecoupledIO(new MissFinish))
   })
 
-  val miss_req_arb   = Module(new Arbiter(new MissEntriesReq,    cfg.nStoreMissEntriess))
-  val miss_finish    = Module(new Arbiter(new MissEntriesFinish, cfg.nStoreMissEntriess))
+  val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntriess))
+  val miss_finish    = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntriess))
   val replay_arb = Module(new Arbiter(new StoreReq,              cfg.nStoreMissEntriess))
 
+  val req             =  io.lsu.req
   val entry_alloc_idx = Wire(UInt())
-  val pri_rdy = WireInit(false.B)
-  val pri_val = req.valid && !idx_match(req_idx)
+  val pri_rdy         = WireInit(false.B)
+  val pri_val         = req.valid && !idx_match(req_idx)
 
   val entries = (0 until cfg.nStoreMissEntries) map { i =>
     val entry = Module(new StoreMissEntries)
 
     entry.io.id := i.U(log2Up(cfg.nStoreMissEntries).W)
-
-    val req_pri_val = Input(Bool())
-    val req_pri_rdy = Output(Bool())
-
-    val req         = Flipped(new StoreReq)
-    val replay      = DecoupledIO(StoreReq)
-
-    val miss_req = new DecoupledIO(new MissEntriesReq)
-    val miss_resp = new ValidIO(new MissEntriesResp)
-    val miss_finish = Flipped(new DecoupledIO(new MissEntriesFinish))
 
     // entry req
     entry.io.pri_val := (i.U === entry_alloc_idx) && pri_val
@@ -169,8 +168,9 @@ class StoreMissEntriesFile extends DCacheModule
 
   entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.client.req.ready)))
 
-  io.req.ready  := pri_rdy
-  io.replay     <> replay_arb.io.out
-  io.miss_resp  <> miss_req_arb.io.out
+  req.ready      := pri_rdy
+  io.replay.req  <> replay_arb.io.out
+  io.lsu.resp    <> io.replay.resp
+  io.miss_resp   <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
 }

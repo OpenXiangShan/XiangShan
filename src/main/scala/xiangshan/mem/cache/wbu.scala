@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 import bus.tilelink._
 
 class WritebackReq extends DCacheBundle {

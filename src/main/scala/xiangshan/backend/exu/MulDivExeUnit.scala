@@ -3,7 +3,7 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import xiangshan.backend.MDUOpType
 import xiangshan.backend.fu.FunctionUnit._
 
@@ -18,7 +18,8 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
   val div = Module(new DivExeUnit)
 
   for(x <- Seq(mul.io, div.io)){
-    x.scommit <> DontCare
+    x.mcommit <> DontCare
+    x.exception <> DontCare
     x.dmem <> DontCare
     x.in.bits := io.in.bits
     x.redirect := io.redirect

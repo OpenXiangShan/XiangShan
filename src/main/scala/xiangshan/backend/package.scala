@@ -5,38 +5,22 @@ import chisel3.util._
 
 package object backend {
 
-  // jal csr move(x2f) mou
-  object BRUOpType {
-    // [2bit:Type]: 00:csr 01:move(x2f) mou(fence.i,etc) jump
-    // 0. csr
-    def jmp  = "b00_000".U
-    def wrt  = "b00_001".U
-    def set  = "b00_010".U
-    def clr  = "b00_011".U
-    def wrti = "b00_101".U
-    def seti = "b00_110".U
-    def clri = "b00_111".U
+  object CSROpType {
+    def jmp  = "b000".U
+    def wrt  = "b001".U
+    def set  = "b010".U
+    def clr  = "b011".U
+    def wrti = "b101".U
+    def seti = "b110".U
+    def clri = "b111".U
+  }
 
-    // 1. move(x2f)
-    // FIXME: temp decode, should be fixed when use it
-    def fmv_w_x = "b01_000".U
-    def fmv_d_x = "b01_001".U
-
-    // 2. mou
-    def fence  = "b01_000".U
-    def fencei = "b01_001".U
-    def sfence_vma = "b01_010".U
-
-    // 3. jump
+  // jump
+  object JumpOpType {
     def jal  = "b11_000".U
     def jalr = "b11_010".U
     def call = "b11_011".U
     def ret  = "b11_100".U
-
-    def isCSR(func: UInt) = func(4,3)===0.U
-    def isFMV(func: UInt) = func(4,3)===1.U
-    def isMOU(func: UInt) = func(4,3)===2.U // TODO: change its name
-    def isJUMP(func: UInt) = func(4,3)===3.U
   }
 
 
@@ -61,8 +45,8 @@ package object backend {
     def isWordOp(func: UInt) = func(5)
 
     // TODO: move jal/jalr/call/ret from ALU to BRU&CSR
-    def jal  = "b011000".U
-    def jalr = "b011010".U
+    // def jal  = "b011000".U
+    // def jalr = "b011010".U
     // def cjalr= "b111010".U // pc + 2 instead of 4
     def beq  = "b010000".U
     def bne  = "b010001".U
@@ -71,9 +55,9 @@ package object backend {
     def bltu = "b010110".U
     def bgeu = "b010111".U
 
-    // for RAS
-    def call = "b011100".U
-    def ret  = "b011110".U
+    // // for RAS
+    // def call = "b011100".U
+    // def ret  = "b011110".U
 
     // def pcPlus2(func: UInt) = func(5)//[important]
     def isBranch(func: UInt) = func(4,3)===2.U
@@ -113,6 +97,7 @@ package object backend {
     def lbu  = "b000100".U
     def lhu  = "b000101".U
     def lwu  = "b000110".U
+    def flw  = "b010110".U
     def sb   = "b001000".U
     def sh   = "b001001".U
     def sw   = "b001010".U

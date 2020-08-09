@@ -4,11 +4,8 @@ import org.scalatest._
 import chiseltest._
 import chisel3._
 import chisel3.experimental.BundleLiterals._
-import chisel3.util.experimental.BoringUtils
-import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
-import noop.MDUOpType
-import xiangshan._
+import top.Parameters
+import utils.XSLog
 import xiangshan.testutils._
 import xiangshan.testutils.TestCaseGenerator._
 
@@ -23,12 +20,12 @@ class MduTest extends FlatSpec
   with ParallelTestExecution
   with HasPartialDecoupledDriver
 {
+
+  Parameters.set(Parameters.debugParameters)
+
   "MUL" should "random enq and deq correctly" in {
     test(new MulExeUnit{
-      val disp_begin = WireInit(0.S(64.W).asUInt())
-      val disp_end = WireInit((-1).S(64.W).asUInt())
-      BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
-      BoringUtils.addSource(disp_end, "DISPLAY_LOG_END")
+      AddSinks()
     }){ c =>
 
       c.io.in.initSource().setSourceClock(c.clock)
@@ -51,12 +48,45 @@ class MduTest extends FlatSpec
   }
 
 
+  "MUL" should "only flush instrs newer than the redirect instr" in {
+    test(new MulExeUnit{
+      AddSinks()
+    }){ c =>
+
+      c.io.in.initSource().setSourceClock(c.clock)
+      c.io.out.initSink().setSinkClock(c.clock)
+
+      fork{
+        // 29
+        c.io.in.enqueuePartial(chiselTypeOf(c.io.in.bits).Lit(
+          _.uop.cf.pc -> 666.U,
+          _.uop.brTag.flag -> true.B,
+          _.uop.brTag.value -> 12.U
+        ))
+        // 30
+        c.io.redirect.pokePartial(chiselTypeOf(c.io.redirect).Lit(
+          _.valid -> true.B,
+          _.bits.isException -> false.B,
+          _.bits.brTag.flag -> true.B,
+          _.bits.brTag.value -> 11.U
+        ))
+        c.io.in.enqueuePartial(chiselTypeOf(c.io.in.bits).Lit(
+          _.uop.cf.pc -> 777.U,
+          _.uop.brTag.flag -> true.B,
+          _.uop.brTag.value -> 10.U
+        ))
+        c.io.redirect.pokePartial(chiselTypeOf(c.io.redirect).Lit(_.valid -> false.B))
+      }.fork{
+        c.io.out.expectDequeuePartial(chiselTypeOf(c.io.out.bits).Lit(_.uop.cf.pc -> 777.U))
+      }.join()
+    }
+  }
+
+
+
   "MUL" should "dont flush same br tag" in {
     test(new MulExeUnit{
-      val disp_begin = WireInit(0.S(64.W).asUInt())
-      val disp_end = WireInit((-1).S(64.W).asUInt())
-      BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
-      BoringUtils.addSource(disp_end, "DISPLAY_LOG_END")
+      AddSinks()
     }){ c =>
 
       c.io.in.initSource().setSourceClock(c.clock)
@@ -94,10 +124,7 @@ class MduTest extends FlatSpec
 
   "MDU" should "random enq and deq correctly" in {
     test(new MulDivExeUnit{
-      val disp_begin = WireInit(0.S(64.W).asUInt())
-      val disp_end = WireInit((-1).S(64.W).asUInt())
-      BoringUtils.addSource(disp_begin, "DISPLAY_LOG_START")
-      BoringUtils.addSource(disp_end, "DISPLAY_LOG_END")
+      AddSinks()
     }){ c =>
 
       c.io.in.initSource().setSourceClock(c.clock)

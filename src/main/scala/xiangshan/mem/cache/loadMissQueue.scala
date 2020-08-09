@@ -9,8 +9,7 @@ package xiangshan.mem.cache
 import chisel3._
 import chisel3.util._
 
-import xiangshan.mem.DCacheReq
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 import bus.tilelink._
 
 class LoadMissEntry extends DCacheModule
@@ -22,28 +21,28 @@ class LoadMissEntry extends DCacheModule
     val req_pri_rdy = Output(Bool())
     val req_sec_val = Input(Bool())
     val req_sec_rdy = Output(Bool())
-    val req         = Flipped(new DCacheReq)
-    val replay      = DecoupledIO(DCacheReq)
+    val req         = Flipped(new DCacheLoadReq)
+    val replay      = DecoupledIO(new DCacheLoadReq)
 
-    val miss_req = new DecoupledIO(new MissEntriesReq)
-    val miss_resp = new ValidIO(new MissEntriesResp)
-    val miss_finish = Flipped(new DecoupledIO(new MissEntriesFinish))
+    val miss_req    = DecoupledIO(new MissReq)
+    val miss_resp   = ValidIO(new MissResp)
+    val miss_finish = Flipped(DecoupledIO(new MissFinish))
 
     val idx = Output(Valid(UInt()))
     val way = Output(Valid(UInt()))
     val tag = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_miss_finish :: Nil = Enum(5)
+  val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new DCacheReq)
+  val req     = Reg(new DCacheLoadReq)
   val req_idx = req.addr(untagBits-1, blockOffBits)
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
-  val reg_miss_resp = Reg(new MissEntriesResp)
+  val reg_miss_resp = Reg(new MissResp)
 
-  val rpq = Module(new Queue(new DCacheReq, cfg.nRPQ))
+  val rpq = Module(new Queue(new DCacheLoadReq, cfg.nRPQ))
 
   rpq.io.enq.valid := (io.req_pri_val && io.req_pri_rdy) || (io.req_sec_val && io.req_sec_rdy)
   rpq.io.enq.bits  := io.req
@@ -106,10 +105,21 @@ class LoadMissEntry extends DCacheModule
 
   // --------------------------------------------
   // replay
+  val loadPipelineLatency = 2
+  val replay_resp_ctr  = Reg(UInt(log2Up(loadPipelineLatency).W))
+
   when (state === s_drain_rpq) {
     rpq.io.deq.ready := true.B
     io.replay <> rpq.io.deq
     when (rpq.io.count === 0.U) {
+      replay_resp_ctr := 0.U
+      state := s_replay_resp
+    }
+  }
+
+  when (state === s_replay_resp) {
+    replay_resp_ctr := replay_resp_ctr + 1.U
+    when (replay_resp_ctr === loadPipelineLatency) {
       state := s_miss_finish
     }
   }
@@ -125,43 +135,31 @@ class LoadMissEntry extends DCacheModule
 }
 
 
-class LoadMissEntriesFile extends DCacheModule
+class LoadMissQueue extends DCacheModule
 {
   val io = IO(new Bundle {
-    val req         = Flipped(DecoupledIO(new DCacheReq))
-    val replay      = DecoupledIO(new DCacheReq)
+    val lsu         = Flipped(new DCacheLoadIO)
+    val replay      = new DCacheLoadIO
 
-    val miss_req = new DecoupledIO(new MissEntriesReq)
-    val miss_resp = new ValidIO(new MissEntriesResp)
-    val miss_finish = Flipped(new DecoupledIO(new MissEntriesFinish))
+    val miss_req    = DecoupledIO(new MissReq)
+    val miss_resp   = ValidIO(new MissResp)
+    val miss_finish = Flipped(DecoupledIO(new MissFinish))
   })
 
-  val miss_req_arb   = Module(new Arbiter(new MissEntriesReq,    cfg.nLoadMissEntriess))
-  val miss_finish    = Module(new Arbiter(new MissEntriesFinish, cfg.nLoadMissEntriess))
-  val replay_arb = Module(new Arbiter(new DCacheReq,             cfg.nLoadMissEntriess))
+  val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nLoadMissEntriess))
+  val miss_finish    = Module(new Arbiter(new MissFinish, cfg.nLoadMissEntriess))
+  val replay_arb     = Module(new Arbiter(new DCacheLoadReq,  cfg.nLoadMissEntriess))
 
+  val req             =  io.lsu.req
   val entry_alloc_idx = Wire(UInt())
-  val pri_rdy = WireInit(false.B)
-  val pri_val = req.valid && !idx_match(req_idx)
-  var sec_rdy   = false.B
+  val pri_rdy         = WireInit(false.B)
+  val pri_val         = req.valid && !idx_match(req_idx)
+  var sec_rdy         = false.B
 
   val entries = (0 until cfg.nLoadMissEntries) map { i =>
     val entry = Module(new LoadMissEntries)
 
     entry.io.id := i.U(log2Up(cfg.nLoadMissEntries).W)
-
-    val req_pri_val = Input(Bool())
-    val req_pri_rdy = Output(Bool())
-    val req_sec_val = Input(Bool())
-    val req_sec_rdy = Output(Bool())
-
-    val req         = Flipped(new DCacheReq)
-    val replay      = DecoupledIO(DCacheReq)
-
-    val miss_req = new DecoupledIO(new MissEntriesReq)
-    val miss_resp = new ValidIO(new MissEntriesResp)
-    val miss_finish = Flipped(new DecoupledIO(new MissEntriesFinish))
-
     // entry req
     entry.io.pri_val := (i.U === entry_alloc_idx) && pri_val
     when (i.U === entry_alloc_idx) {
@@ -185,8 +183,9 @@ class LoadMissEntriesFile extends DCacheModule
 
   entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.client.req.ready)))
 
-  io.req.ready  := Mux(idx_match, tag_match && sec_rdy, pri_rdy)
-  io.replay     <> replay_arb.io.out
-  io.miss_resp  <> miss_req_arb.io.out
+  req.ready   := Mux(idx_match, tag_match && sec_rdy, pri_rdy)
+  io.replay.req  <> replay_arb.io.out
+  io.lsu.resp    <> io.replay.resp
+  io.miss_resp   <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
 }

@@ -6,7 +6,7 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan.HasXSParameter
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 
 case class TLParameters(
   addressBits: Int = 64,

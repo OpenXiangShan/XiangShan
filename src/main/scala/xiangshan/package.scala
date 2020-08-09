@@ -67,4 +67,21 @@ package object xiangshan {
   object FuOpType extends HasXSParameter {
     def apply() = UInt(exuParameters.FuOpWidth.W)
   }
+
+  object BTBtype {
+    def B = "b00".U  // branch
+    def J = "b01".U  // jump
+    def I = "b10".U  // indirect
+    def R = "b11".U  // return
+
+    def apply() = UInt(2.W)
+  }
+
+  object DPQType {
+    def INT = "b00".U // int dispatch
+    def FP = "b01".U // fp dispatch
+    def LS = "b10".U // ls dispatch
+
+    def apply() = UInt(2.W)
+  }
 }

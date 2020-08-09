@@ -2,96 +2,199 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import xiangshan.utils.{XSDebug, XSInfo}
-import xiangshan.{MicroOp, Redirect, XSBundle, XSModule}
+import utils.{XSDebug, XSError, XSInfo}
+import xiangshan.{MicroOp, Redirect, RoqCommit, XSBundle, XSModule}
 
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
+  val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
   val redirect = Flipped(ValidIO(new Redirect))
 
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum).asInstanceOf[this.type]
 }
 
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, name: String) extends XSModule {
+// dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dpqType: Int) extends XSModule {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
-  val index_width = log2Ceil(size)
+  val indexWidth = log2Ceil(size)
+
+  val s_invalid :: s_valid :: s_dispatched :: Nil = Enum(3)
 
   // queue data array
-  val entries = Reg(Vec(size, new MicroOp))
-  val entriesValid = Reg(Vec(size, Bool()))
-  val head = RegInit(0.U(index_width.W))
-  val tail = RegInit(0.U(index_width.W))
-  val enq_index = Wire(Vec(enqnum, UInt(index_width.W)))
-  val enq_count = Wire(Vec(enqnum, UInt((index_width + 1).W)))
-  val deq_index = Wire(Vec(deqnum, UInt(index_width.W)))
-  val head_direction = RegInit(0.U(1.W))
-  val tail_direction = RegInit(0.U(1.W))
+  val uopEntries = Mem(size, new MicroOp)//Reg(Vec(size, new MicroOp))
+  val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
+  // head: first valid entry (dispatched entry)
+  val headPtr = RegInit(0.U((indexWidth + 1).W))
+  val headIndex = headPtr(indexWidth - 1, 0)
+  val headDirection = headPtr(indexWidth)
+  // dispatch: first entry that has not been dispatched
+  val dispatchPtr = RegInit(0.U((indexWidth + 1).W))
+  val dispatchIndex = dispatchPtr(indexWidth - 1, 0)
+  val dispatchDirection = dispatchPtr(indexWidth)
+  // tail: first invalid entry (free entry)
+  val tailPtr = RegInit(0.U((indexWidth + 1).W))
+  val tailIndex = tailPtr(indexWidth - 1, 0)
+  val tailDirection = tailPtr(indexWidth)
 
-  val valid_entries = Mux(head_direction === tail_direction, tail - head, size.U + tail - head)
-  val empty_entries = size.U - valid_entries
+  // TODO: make ptr a vector to reduce latency?
+  // commit: starting from head ptr
+  val commitPtr = (0 until CommitWidth).map(i => headPtr + i.U)
+  val commitIndex = commitPtr.map(ptr => ptr(indexWidth - 1, 0))
+  // deq: starting from dispatch ptr
+  val deqPtr = (0 until enqnum).map(i => dispatchPtr + i.U)
+  val deqIndex = deqPtr.map(ptr => ptr(indexWidth - 1, 0))
+  // enq: starting from tail ptr
+  val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
+  val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
+  // walkDispatch: in case of redirect, walk backward
+  val walkDispatchPtr =  (0 until RenameWidth).map(i => dispatchPtr - (i + 1).U)
+  val walkDispatchIndex = walkDispatchPtr.map(ptr => ptr(indexWidth - 1, 0))
+  // walkTail: in case of redirect, walk backward
+  val walkTailPtr = (0 until RenameWidth).map(i => tailPtr - (i + 1).U)
+  val walkTailIndex = walkTailPtr.map(ptr => ptr(indexWidth - 1, 0))
 
-  // check whether valid uops are canceled
-  val cancelled = Wire(Vec(size, Bool()))
-  for (i <- 0 until size) {
-    cancelled(i) := entries(i).brTag.needFlush(io.redirect)
+  // debug: dump dispatch queue states
+  def greaterOrEqualThan(left: UInt, right: UInt) = {
+    Mux(
+      left(indexWidth) === right(indexWidth),
+      left(indexWidth - 1, 0) >= right(indexWidth - 1, 0),
+      left(indexWidth - 1, 0) <= right(indexWidth - 1, 0)
+    )
   }
+  XSError(!greaterOrEqualThan(tailPtr, headPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, headPtr: $headPtr) failed\n")
+  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
+  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
 
-  // calcelled uops should be set to invalid from enqueue input
-  // we don't need to compare their brTags here
+  XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr\n")
+  XSDebug(p"state: ")
+  stateEntries.reverse.foreach { s =>
+    XSDebug(false, s === s_invalid, "-")
+    XSDebug(false, s === s_valid, "v")
+    XSDebug(false, s === s_dispatched, "d")
+  }
+  XSDebug(false, true.B, "\n")
+  XSDebug(p"ptr:   ")
+  (0 until size).reverse.foreach { i =>
+    val isPtr = i.U === headIndex || i.U === tailIndex || i.U === dispatchIndex
+    XSDebug(false, isPtr, "^")
+    XSDebug(false, !isPtr, " ")
+  }
+  XSDebug(false, true.B, "\n")
+
+  val validEntries = Mux(headDirection === tailDirection, tailIndex - headIndex, size.U + tailIndex - headIndex)
+  val dispatchEntries = Mux(dispatchDirection === tailDirection, tailIndex - dispatchIndex, size.U + tailIndex - dispatchIndex)
+  XSError(validEntries < dispatchEntries, "validEntries should be less than dispatchEntries\n")
+  val commitEntries = validEntries - dispatchEntries
+  val emptyEntries = size.U - validEntries
+
+  /**
+    * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
+    */
   for (i <- 0 until enqnum) {
-    enq_count(i) := PopCount(io.enq.slice(0, i + 1).map(_.valid))
-    enq_index(i) := (tail + enq_count(i) - 1.U) % size.U
     when (io.enq(i).fire()) {
-      entries(enq_index(i)) := io.enq(i).bits
-      entriesValid(enq_index(i)) := true.B
+      uopEntries(enqIndex(i)) := io.enq(i).bits
+      stateEntries(enqIndex(i)) := s_valid
     }
   }
 
   for (i <- 0 until deqnum) {
-    deq_index(i) := ((head + i.U) % size.U).asUInt()
     when (io.deq(i).fire()) {
-      entriesValid(deq_index(i)) := false.B
+      stateEntries(deqIndex(i)) := s_dispatched
+      XSError(stateEntries(deqIndex(i)) =/= s_valid, "state of the dispatch entry is not s_valid\n")
     }
   }
 
-  // cancel uops currently in the queue
+  // commit: from s_dispatched to s_invalid
+  val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid && commit.bits.uop.ctrl.dpqType === dpqType.U))
+  val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
+  for (i <- 0 until CommitWidth) {
+    when (commitBits(i)) {
+      stateEntries(commitIndex(i)) := s_invalid
+      XSError(stateEntries(commitIndex(i)) =/= s_dispatched, "state of the commit entry is not s_dispatched\n")
+    }
+  }
+
+  // redirect: cancel uops currently in the queue
+  val exceptionValid = io.redirect.valid && io.redirect.bits.isException
+  val roqNeedFlush = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    when (cancelled(i) && entriesValid(i)) {
-      entriesValid(i) := false.B
+    roqNeedFlush(i) := uopEntries(i.U).needFlush(io.redirect)
+    val needCancel = stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && io.redirect.bits.isMisPred) || exceptionValid)
+    when (needCancel) {
+      stateEntries(i) := s_invalid
     }
-    XSInfo(cancelled(i) && entriesValid(i),
-      name + ": valid entry(%d)(pc = %x) cancelled with brTag %x\n",
-      i.U, entries(i).cf.pc, io.redirect.bits.brTag.value)
+
+    XSInfo(needCancel, p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
+      p"cancelled with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
   }
 
+  // replay: from s_dispatched to s_valid
+  val needReplay = Wire(Vec(size, Bool()))
+  for (i <- 0 until size) {
+    needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && io.redirect.bits.isReplay
+    when (needReplay(i)) {
+      stateEntries(i) := s_valid
+    }
+
+    XSInfo(needReplay(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
+      p"replayed with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+  }
+
+  /**
+    * Part 2: update indices
+    *
+    * tail: (1) enqueue; (2) walk in case of redirect
+    * dispatch: (1) dequeue; (2) replay; (3) walk in case of redirect
+    * head: commit
+    */
   // enqueue
-  val num_enq_try = enq_count(enqnum - 1)
-  val num_enq = Mux(empty_entries > num_enq_try, num_enq_try, empty_entries)
-  (0 until enqnum).map(i => io.enq(i).ready := enq_count(i) <= num_enq)
-  tail := (tail + num_enq) % size.U
-  tail_direction := ((Cat(0.U(1.W), tail) + num_enq) >= size.U).asUInt() ^ tail_direction
+  val numEnqTry = Mux(emptyEntries > enqnum.U, enqnum.U, emptyEntries)
+  val numEnq = PriorityEncoder(io.enq.map(!_.fire()) :+ true.B)
+  val numWalkTailTry = PriorityEncoder(walkTailIndex.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
+  val numWalkTail = Mux(numWalkTailTry > validEntries, validEntries, numWalkTailTry)
+  XSError(numEnq =/= 0.U && numWalkTail =/= 0.U, "should not enqueue when walk\n")
+  tailPtr := Mux(exceptionValid, 0.U, tailPtr + Mux(numEnq =/= 0.U, numEnq, -numWalkTail))
 
   // dequeue
-  val num_deq_try = Mux(valid_entries > deqnum.U, deqnum.U, valid_entries)
-  val num_deq_fire = PriorityEncoder((io.deq.zipWithIndex map { case (deq, i) =>
-    !deq.fire() && entriesValid(deq_index(i))
-  }) :+ true.B)
-  val num_deq = Mux(num_deq_try > num_deq_fire, num_deq_fire, num_deq_try)
-  for (i <- 0 until deqnum) {
-    io.deq(i).bits := entries(deq_index(i))
-    // needs to cancel uops trying to dequeue
-    io.deq(i).valid := (i.U < num_deq_try) && entriesValid(deq_index(i)) && !cancelled(deq_index(i))
-  }
-  head := (head + num_deq) % size.U
-  head_direction := ((Cat(0.U(1.W), head) + num_deq) >= size.U).asUInt() ^ head_direction
+  val numDeqTry = Mux(dispatchEntries > deqnum.U, deqnum.U, dispatchEntries)
+  val numDeqFire = PriorityEncoder(io.deq.zipWithIndex.map{case (deq, i) =>
+    // For dequeue, the first entry should never be s_invalid
+    // Otherwise, there should be a redirect and tail walks back
+    // in this case, we set numDeq to 0
+    !deq.fire() && (if (i == 0) true.B else stateEntries(deqIndex(i)) =/= s_dispatched)
+  } :+ true.B)
+  val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
+  // TODO: this is unaccptable since it needs to add 64 bits
+  val headMask = (1.U((size+1).W) << headIndex) - 1.U
+  val dispatchMask = (1.U((size + 1).W) << dispatchIndex) - 1.U
+  val mask = headMask ^ dispatchMask
+  val replayMask = Mux(headDirection === dispatchDirection, mask, ~mask)
+  val numReplay = PopCount((0 until size).map(i => needReplay(i) & replayMask(i)))
+  val numWalkDispatchTry = PriorityEncoder(walkDispatchPtr.map(i => stateEntries(i) =/= s_invalid) :+ true.B)
+  val numWalkDispatch = Mux(numWalkDispatchTry > commitEntries, commitEntries, numWalkDispatchTry)
+  val walkCntDispatch = numWalkDispatch + numReplay
+  // note that numDeq === 0.U entries after dispatch are all flushed
+  // so, numDeq and walkCntDispatch cannot be nonzero at the same time
+  XSError(numDeq =/= 0.U && walkCntDispatch =/= 0.U, "should not dequeue when walk\n")
+  dispatchPtr := Mux(exceptionValid, 0.U, dispatchPtr + Mux(numDeq =/= 0.U, numDeq, -walkCntDispatch))
 
-  XSDebug(num_deq > 0.U, name + ": num_deq = %d, head = (%d -> %d)\n",
-      num_deq, head, (head + num_deq) % size.U)
-  XSDebug(num_enq > 0.U, name + ": num_enq = %d, tail = (%d -> %d)\n",
-      num_enq, tail, (tail + num_enq) % size.U)
-  XSDebug(valid_entries > 0.U, name + ": valid_entries = %d, head = (%d, %d), tail = (%d, %d), \n",
-      valid_entries, head_direction, head, tail_direction, tail)
+  headPtr := Mux(exceptionValid, 0.U, headPtr + numCommit)
+
+  /**
+    * Part 3: set output and input
+    */
+  val enqReadyBits = (1.U << numEnqTry).asUInt() - 1.U
+  for (i <- 0 until enqnum) {
+    io.enq(i).ready := enqReadyBits(i).asBool()
+  }
+
+  for (i <- 0 until deqnum) {
+    io.deq(i).bits := uopEntries(deqIndex(i))
+    // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
+    io.deq(i).valid := stateEntries(deqIndex(i)) === s_valid && !io.redirect.valid
+  }
+
 }

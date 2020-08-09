@@ -3,10 +3,11 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 
 class DecodeBuffer extends XSModule {
   val io = IO(new Bundle() {
+    val isWalking = Input(Bool())
     val redirect = Flipped(ValidIO(new Redirect))
     val in  = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
     val out = Vec(RenameWidth, DecoupledIO(new CfCtrl))
@@ -21,9 +22,9 @@ class DecodeBuffer extends XSModule {
       case (v, fire) =>
         !v || fire
     })
-  ).asBool()
+  )
 
-  val rightRdyVec = io.out.map(_.ready && leftCanIn)
+  val flush = io.redirect.valid && !io.redirect.bits.isReplay
 
   for( i <- 0 until RenameWidth){
     when(io.out(i).fire()){
@@ -32,21 +33,31 @@ class DecodeBuffer extends XSModule {
     when(io.in(i).fire()){
       validVec(i) := true.B
     }
-    when(io.redirect.valid){
+    when(flush){
       validVec(i) := false.B
     }
 
-    io.in(i).ready := rightRdyVec(i)
-    io.out(i).bits <> RegEnable(io.in(i).bits, io.in(i).fire())
-    io.out(i).valid := validVec(i) && !io.redirect.valid
+    val r = RegEnable(io.in(i).bits, io.in(i).fire())
+    io.in(i).ready := leftCanIn
+    io.out(i).bits <> r
+    if(i > 0 ){
+      io.out(i).valid := validVec(i) &&
+        !flush &&
+        Mux(r.ctrl.noSpecExec,
+          !ParallelOR(validVec.take(i)),
+          !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec))
+        ) && !io.isWalking
+    } else {
+      require( i == 0)
+      io.out(i).valid := validVec(i) && !flush && !io.isWalking
+    }
   }
 
-  for(in<- io.in){
+  for(in <- io.in){
     XSInfo(p"in v:${in.valid} r:${in.ready} pc=${Hexadecimal(in.bits.cf.pc)}\n")
   }
   for(out <- io.out){
     XSInfo(p"out v:${out.valid} r:${out.ready} pc=${Hexadecimal(out.bits.cf.pc)}\n")
   }
 
-  XSDebug(p"validVec: ${Binary(validVec.asUInt())}\n")
 }

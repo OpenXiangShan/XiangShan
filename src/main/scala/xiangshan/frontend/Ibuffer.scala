@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan._
-import xiangshan.utils._
+import utils._
 
 class Ibuffer extends XSModule {
   val io = IO(new Bundle() {
@@ -13,130 +13,113 @@ class Ibuffer extends XSModule {
     val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   })
 
-  // ignore
-  for(i <- 0 until DecodeWidth) {
-    io.out(i).bits.exceptionVec := DontCare
-    io.out(i).bits.intrVec := DontCare
-    io.out(i).bits.isBr := DontCare
+  class IBufEntry extends XSBundle {
+    val inst = UInt(32.W)
+    val pc = UInt(VAddrBits.W)
+    val pnpc = UInt(VAddrBits.W)
+    val brInfo = new BranchInfo
+    val pd = new PreDecodeInfo
   }
 
-  //mask initial
-  //  val mask = Wire(Vec(FetchWidth*2, false.B))
-  //  (0 until 16).map(i => mask(i.U) := (io.in.bits.pc(4,1) <= i.U))
+  // Ignore
+  for(out <- io.out) {
+    out.bits.exceptionVec := DontCare
+    out.bits.intrVec := DontCare
+    out.bits.crossPageIPFFix := DontCare
+  }
 
-  // ibuf define
-  val ibuf = Reg(Vec(IBufSize*2, UInt(16.W)))
-  val ibuf_pc = Reg(Vec(IBufSize*2, UInt(VAddrBits.W)))
-  val ibuf_valid = RegInit(VecInit(Seq.fill(IBufSize*2)(false.B)))
-  val head_ptr = RegInit(0.U(log2Up(IBufSize*2).W))
-  val tail_ptr = RegInit(0.U(log2Up(IBufSize*2).W))
+  // Ibuffer define
+  val ibuf = Mem(IBufSize, new IBufEntry)
+  val ibuf_valid = RegInit(VecInit(Seq.fill(IBufSize)(false.B)))
+  val head_ptr = RegInit(0.U(log2Up(IBufSize).W))
+  val tail_ptr = RegInit(0.U(log2Up(IBufSize).W))
 
-  // true: Last operation is enqueue
-  // false: Last operation is deq_ueue
-  val last_enq = RegInit(false.B)
-  val full = head_ptr === tail_ptr && last_enq
-  val empty = head_ptr === tail_ptr && !last_enq
-  val enqValid = !io.flush && io.in.valid && !full && !ibuf_valid(tail_ptr + (FetchWidth*2).U)
-  val deqValid = !io.flush && !empty //&& io.out.map(_.ready).reduce(_||_)
+  val enqValid = !io.flush && !ibuf_valid(tail_ptr + PredictWidth.U - 1.U)
+  val deqValid = !io.flush && ibuf_valid(head_ptr)
 
   io.in.ready := enqValid
 
-  // enque
-  when(enqValid) {
-    var enq_idx = 0.U(log2Up(FetchWidth*2+1).W)
-    for(i <- 0 until FetchWidth*2) {
-      when(io.in.bits.mask(i)) {
-        ibuf(tail_ptr + enq_idx) := Mux(i.U(0), io.in.bits.instrs(i>>1)(31,16), io.in.bits.instrs(i>>1)(15,0))
-        ibuf_pc(tail_ptr + enq_idx) := io.in.bits.pc + (enq_idx<<1).asUInt
-        ibuf_valid(tail_ptr + enq_idx) := true.B
-      }
+  // Enque
+  when(io.in.fire) {
+    var enq_idx = tail_ptr
+
+    for(i <- 0 until PredictWidth) {
+      ibuf_valid(enq_idx) := io.in.bits.mask(i)
+
+      ibuf(enq_idx).inst := io.in.bits.instrs(i)
+      ibuf(enq_idx).pc := io.in.bits.pc(i)
+      ibuf(enq_idx).pnpc := io.in.bits.pnpc(i)
+      ibuf(enq_idx).brInfo := io.in.bits.brInfo(i)
+      ibuf(enq_idx).pd := io.in.bits.pd(i)
+
       enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
-    tail_ptr := tail_ptr + enq_idx
-    last_enq := true.B
+    tail_ptr := enq_idx
   }
 
-  // deque
+  // Deque
   when(deqValid) {
-    var deq_idx = 0.U(log2Up(DecodeWidth*2+1).W)
+    var deq_idx = head_ptr
     for(i <- 0 until DecodeWidth) {
-      when(io.out(i).ready && ibuf_valid(head_ptr + deq_idx)) {
-        when(ibuf(head_ptr + deq_idx)(1,0) =/= "b11".U) {
-          // is RVC
-          io.out(i).bits.instr := Cat(0.U(16.W), ibuf(head_ptr + deq_idx))
-          io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          io.out(i).bits.isRVC := true.B
-          io.out(i).valid := true.B
-          ibuf_valid(head_ptr + deq_idx) := false.B
-        }.elsewhen(ibuf_valid(head_ptr + deq_idx + 1.U)) {
-          // isn't RVC
-          io.out(i).bits.instr := Cat(ibuf(head_ptr + deq_idx+1.U), ibuf(head_ptr + deq_idx))
-          io.out(i).bits.pc := ibuf_pc(head_ptr + deq_idx)
-          io.out(i).bits.isRVC := false.B
-          io.out(i).valid := true.B
-          ibuf_valid(head_ptr + deq_idx) := false.B
-          ibuf_valid(head_ptr + deq_idx+1.U) := false.B
-        }.otherwise {
-          // half inst keep in buffer
-          io.out(i).bits.instr := 0.U(32.W)
-          io.out(i).bits.pc := 0.U(VAddrBits.W)
-          io.out(i).bits.isRVC := false.B
-          io.out(i).valid := false.B
-        }
-      }.otherwise {
-        io.out(i).bits.instr := Cat(ibuf(head_ptr + (i<<1).U + 1.U), ibuf(head_ptr + (i<<1).U))
-        io.out(i).bits.pc := ibuf_pc(head_ptr + (i<<1).U)
-        io.out(i).bits.isRVC := false.B
-        io.out(i).valid := false.B
-      }
+      io.out(i).valid := ibuf_valid(deq_idx)
+      // Only when the entry is valid can it be set invalid
+      when (ibuf_valid(deq_idx)) { ibuf_valid(deq_idx) := !io.out(i).fire }
+      
+      io.out(i).bits.instr := ibuf(deq_idx).inst
+      io.out(i).bits.pc := ibuf(deq_idx).pc
+      // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
+      io.out(i).bits.brUpdate := DontCare
+      io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc
+      io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
+      io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
+      io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
 
-      // When can't deque, deq_idx+0
-      // when RVC deque, deq_idx+1
-      // when not RVC deque, deq_idx+2
-      // when only have half inst, keep it in buffer
-      deq_idx = deq_idx + PriorityMux(Seq(
-        !(io.out(i).ready && ibuf_valid(head_ptr + deq_idx)) -> 0.U,
-        (ibuf(head_ptr + deq_idx)(1,0) =/= "b11".U) -> 1.U,
-        ibuf_valid(head_ptr + deq_idx + 1.U) -> 2.U
-      ))
+      deq_idx = deq_idx + io.out(i).fire
     }
-    head_ptr := head_ptr + deq_idx
-
-    last_enq := false.B
+    head_ptr := deq_idx
   }.otherwise {
-    for(i <- 0 until DecodeWidth) {
-      io.out(i).bits.instr := 0.U
-      io.out(i).bits.pc := 0.U
-      io.out(i).bits.isRVC := false.B
-      io.out(i).valid := false.B
-    }
+    io.out.foreach(_.valid := false.B)
+    io.out.foreach(_.bits <> DontCare)
   }
 
-  // flush
+  // Flush
   when(io.flush) {
-    for(i <- 0 until IBufSize*2) {
-      ibuf_valid(i) := false.B
-    }
+    ibuf_valid.foreach(_ := false.B)
     head_ptr := 0.U
     tail_ptr := 0.U
+    io.out.foreach(_.valid := false.B)
+  }
 
-    for(i <- 0 until DecodeWidth) {
-      io.out(i).valid := false.B
+  // Debug info
+  XSDebug(io.flush, "IBuffer Flushed\n")
+
+  when(io.in.fire) {
+    XSDebug("Enque:\n")
+    XSDebug(p"MASK=${Binary(io.in.bits.mask)}\n")
+    for(i <- 0 until PredictWidth){
+        XSDebug(p"PC=${Hexadecimal(io.in.bits.pc(i))} ${Hexadecimal(io.in.bits.instrs(i))}\n")
     }
   }
 
-  //Debug Info
-  XSDebug(enqValid, "Enque:\n")
-  for(i <- 0 until FetchWidth) {
-    XSDebug(enqValid, p"${Binary(io.in.bits.instrs(i))}\n")
+  when(deqValid) {
+    XSDebug("Deque:\n")
+    for(i <- 0 until DecodeWidth){
+        XSDebug(p"${Hexadecimal(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
+    }
   }
 
-  XSInfo(io.flush, "Flush signal received, clear buffer\n")
-  XSDebug(deqValid, "Deque:\n")
-  for(i <- 0 until DecodeWidth) {
-    XSDebug(deqValid, p"${Binary(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
+  XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  for(i <- 0 until IBufSize/8) {
+    XSDebug("%x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b\n",
+      ibuf(i*8+0).inst, ibuf_valid(i*8+0),
+        ibuf(i*8+1).inst, ibuf_valid(i*8+1),
+        ibuf(i*8+2).inst, ibuf_valid(i*8+2),
+        ibuf(i*8+3).inst, ibuf_valid(i*8+3),
+        ibuf(i*8+4).inst, ibuf_valid(i*8+4),
+        ibuf(i*8+5).inst, ibuf_valid(i*8+5),
+        ibuf(i*8+6).inst, ibuf_valid(i*8+6),
+        ibuf(i*8+7).inst, ibuf_valid(i*8+7)
+    )
   }
-  XSDebug(enqValid, p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
-//  XSInfo(full, "Queue is full\n")
 }

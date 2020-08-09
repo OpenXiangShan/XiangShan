@@ -3,7 +3,7 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
+import utils._
 import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
@@ -41,14 +41,14 @@ trait HasPipelineReg { this: ArrayMultiplier =>
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
   val ctrlVec = io.in.bits.ctrl +: Array.fill(latency)(Reg(new MulDivCtrl))
-  val flushVec = ctrlVec.zip(validVec).map(x => x._2 && x._1.uop.brTag.needFlush(io.redirect))
+  val flushVec = ctrlVec.zip(validVec).map(x => x._2 && x._1.uop.needFlush(io.redirect))
 
   for(i <- 0 until latency){
     rdyVec(i) := !validVec(i+1) || rdyVec(i+1)
   }
 
   for(i <- 1 to latency){
-    when(flushVec(i) || rdyVec(i) && !validVec(i-1)){
+    when(flushVec(i-1) || rdyVec(i) && !validVec(i-1)){
       validVec(i) := false.B
     }.elsewhen(rdyVec(i-1) && validVec(i-1) && !flushVec(i-1)){
       validVec(i) := validVec(i-1)

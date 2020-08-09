@@ -7,6 +7,8 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
+import top.Parameters
+import utils.XSLog
 import xiangshan._
 import xiangshan.testutils._
 import xiangshan.testutils.TestCaseGenerator._
@@ -18,15 +20,17 @@ class BrqTest extends FlatSpec
   with Matchers
   with ParallelTestExecution
   with HasPartialDecoupledDriver {
-  it should "" in {
+  it should "redirect out-of-order, dequeue in-order" in {
+    Parameters.set(Parameters.debugParameters)
 
     test(new Brq {
       AddSinks()
-    }).withAnnotations(Seq(VerilatorBackendAnnotation)) { c =>
+    }).withAnnotations(Seq()) { c =>
 
       def genEnqReq(x: => DecoupledIO[CfCtrl], pc: Long) = {
         chiselTypeOf(x.bits).Lit(
-          _.cf.pc -> pc.U
+          _.cf.pc -> pc.U,
+          _.cf.brUpdate.pnpc -> (pc+4).U
         )
       }
 
@@ -48,14 +52,20 @@ class BrqTest extends FlatSpec
       }
 
       var enqTags = List.tabulate(10)(i => i)
-      val misPred = Random.nextInt(10)
+      val misPred = 6
       println(s"enqTags:$enqTags misPredTag:$misPred")
       enqTags = enqTags.take(misPred + 1)
-      var deqTags = List[Int]()
+      var commitTags, deqTags = List[Int]()
 
-      def checkDeq = {
+      def checkCommit = {
         if (c.io.out.valid.peek().litToBoolean) {
-          deqTags = deqTags :+ c.io.redirect.bits.brTag.value.peek().litValue().toInt
+          commitTags = commitTags :+ c.io.redirect.bits.brTag.value.peek().litValue().toInt
+          println(s"====commited tags:$commitTags====")
+        }
+      }
+      def checkDeq =  {
+        if(c.io.out.valid.peek().litToBoolean){
+          deqTags = deqTags :+ c.io.out.bits.uop.brTag.value.peek().litValue().toInt
           println(s"====deq tags:$deqTags====")
         }
       }
@@ -73,35 +83,45 @@ class BrqTest extends FlatSpec
         wbPort.bits.pokePartial(
           genExuWb(wbPort, tag, tagFlag = false, if (tag == misPred) 0xffff else tag * 0x1000 + 4)
         )
-        checkDeq
+        checkCommit
         c.clock.step(1)
         wbPort.valid.poke(false.B)
         for (i <- 0 until Random.nextInt(3)) {
-          checkDeq
+          checkCommit
           c.clock.step(1)
         }
       }
+      c.io.bcommit.poke((misPred+1).U)
+      c.clock.step(1)
+      c.io.bcommit.poke(0.U)
       while (deqTags.size != misPred+1) {
+        checkCommit
         checkDeq
         c.clock.step(1)
       }
 
       c.clock.step(10)
 
-      val left = deqTags.takeWhile(x => x!=misPred)
-      val right = deqTags.dropWhile(x => x!=misPred).drop(1)
+      val left = commitTags.takeWhile(x => x!=misPred)
+      val right = commitTags.dropWhile(x => x!=misPred).drop(1)
 
-      println(s"deq before mispred: $left")
-      println(s"deq after mispred: $right")
+      println(s"commited before mispred: $left")
+      println(s"commited after mispred: $right")
 
-      def isValidDeqSeq(in: Seq[Int]): Boolean = {
+      def isValidCommitSeq(in: Seq[Int]): Boolean = {
         for(i <- 1 until in.size){
           if(in(i) == in(i-1)) return false
         }
         true
       }
+      assert(isValidCommitSeq(left) && isValidCommitSeq(right))
 
-      assert(isValidDeqSeq(left) && isValidDeqSeq(right))
+      println(s"deq tags: $deqTags")
+
+      def isValidDeqSeq(in: Seq[Int]): Boolean = {
+         in.zipWithIndex.map(x => x._1==x._2).reduce(_&&_)
+      }
+      assert(isValidDeqSeq(deqTags))
     }
   }
 }

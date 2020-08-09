@@ -6,47 +6,30 @@ import chisel3.util._
 import bus.axi4._
 import utils._
 
-class UARTGetc extends BlackBox with HasBlackBoxInline {
-  val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val getc = Input(Bool())
+class UARTIO extends Bundle {
+  val out = new Bundle {
+    val valid = Output(Bool())
     val ch = Output(UInt(8.W))
-  })
-
-  setInline("UARTGetc.v",
-    s"""
-      |import "DPI-C" function void uart_getc(output byte ch);
-      |
-      |module UARTGetc (
-      |  input clk,
-      |  input getc,
-      |  output reg [7:0] ch
-      |);
-      |
-      |  always@(posedge clk) begin
-      |    if (getc) uart_getc(ch);
-      |  end
-      |
-      |endmodule
-     """.stripMargin)
+  }
+  val in = new Bundle {
+    val valid = Output(Bool())
+    val ch = Input(UInt(8.W))
+  }
 }
 
-class AXI4UART extends AXI4SlaveModule(new AXI4Lite) {
+class AXI4UART extends AXI4SlaveModule(new AXI4Lite, new UARTIO) {
   val rxfifo = RegInit(0.U(32.W))
   val txfifo = Reg(UInt(32.W))
   val stat = RegInit(1.U(32.W))
   val ctrl = RegInit(0.U(32.W))
 
-  val getcHelper = Module(new UARTGetc)
-  getcHelper.io.clk := clock
-  getcHelper.io.getc := (raddr(3,0) === 0.U && ren)
-
-  def putc(c: UInt): UInt = { printf("%c", c(7,0)); c }
-  def getc = getcHelper.io.ch
+  io.extra.get.out.valid := (waddr(3,0) === 4.U && in.w.fire())
+  io.extra.get.out.ch := in.w.bits.data(7,0)
+  io.extra.get.in.valid := (raddr(3,0) === 0.U && ren)
 
   val mapping = Map(
-    RegMap(0x0, getc, RegMap.Unwritable),
-    RegMap(0x4, txfifo, putc),
+    RegMap(0x0, io.extra.get.in.ch, RegMap.Unwritable),
+    RegMap(0x4, txfifo),
     RegMap(0x8, stat),
     RegMap(0xc, ctrl)
   )

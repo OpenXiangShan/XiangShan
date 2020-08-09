@@ -181,7 +181,7 @@ sealed class CacheStage2(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.out.bits.hit := io.in.valid && hitVec.orR
   io.out.bits.waymask := waymask
   io.out.bits.datas := io.dataReadResp
-  io.out.bits.mmio := AddressSpace.isMMIO(req.addr)
+  io.out.bits.mmio := xiangshan.AddressSpace.isMMIO(req.addr)
 
   val isForwardData = io.in.valid && (io.dataWriteBus.req match { case r =>
     r.valid && r.bits.setIdx === getDataIdx(req.addr)
@@ -542,6 +542,7 @@ object Cache {
       empty := cache.io.empty
       cache.io.out
     } else {
+      assert(false, "XiangShan should not reach here!")
       val addrspace = List(AddressSpace.dram) ++ AddressSpace.mmio
       val xbar = Module(new SimpleBusCrossbar1toN(addrspace))
       val busC = WireInit(0.U.asTypeOf(new SimpleBusC))

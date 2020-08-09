@@ -3,7 +3,6 @@ package xiangshan.mem.cache
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
@@ -11,7 +10,7 @@ import xiangshan.mem._
 import bus.tilelink.TLParameters
 import bus.tilelink.TLPermissions
 import bus.tilelink.ClientMetadata
-import _root_.utils.{Code, RandomReplacement}
+import utils.{Code, RandomReplacement}
 
 // DCache specific parameters
 // L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
@@ -74,6 +73,7 @@ abstract class ICacheModule extends Module
 abstract class ICacheBundle extends Bundle
   with HasICacheParameters
 
+/*
 class ICacheMetaReadReq extends ICacheBundle {
   val req = Vec(memWidth, new L1MetaReadReq)
 }
@@ -82,3 +82,4 @@ class ICacheDataReadReq extends ICacheBundle {
   val req = Vec(memWidth, new L1DataReadReq)
   val valid = Vec(memWidth, Bool())
 }
+*/

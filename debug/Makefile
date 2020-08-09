@@ -3,8 +3,9 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= -1
+E ?= 0
 V ?= ALL
+#V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
 
 # ------------------------------------------------------------------
@@ -19,39 +20,42 @@ cpu:
 # ------------------------------------------------------------------
 
 cputest:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) run 2>&1 | tee > cpu.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2>&1 | tee > cpu.log
 	cat cpu.log | grep different
+	cat cpu.log | grep IPC
 
 # bputest:
 # 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log
 # 	cat bpu.log | grep different
 bputest:
-	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) ALL=forcall2 run 2>&1 | tee > bpu.log
+	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2 > bpu.log
 	cat bpu.log | grep Mbp
 
 amtest:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(SINGLETEST) run 2>&1 | tee > test.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(SINGLETEST) run 2 > test.log
 	cat test.log | grep different
 	cat test.log | grep ISU > isu.log
 
 microbench:
-	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=test run 2>&1 | tee > microbench.log
+	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) $(EMU_ARGS) mainargs=test run 
+	#2 > microbench.log
 	cat microbench.log | grep IPC
 
 microbench_train:
-	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) mainargs=train run 2>&1 | tee > microbench.log
+	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) $(EMU_ARGS) mainargs=train run 2 > microbench.log
 	cat microbench.log | grep IPC
 
 coremark:
-	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) mainargs=test run 2>&1 | tee > coremark.log
+	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run 
+	#2 > coremark.log
 	cat coremark.log | grep IPC
 
 dhrystone:
-	$(MAKE) -C $(AM_HOME)/apps/dhrystone $(ARCH) mainargs=test run 2>&1 | tee > dhrystone.log
+	$(MAKE) -C $(AM_HOME)/apps/dhrystone $(ARCH) $(EMU_ARGS) mainargs=test run 2 > dhrystone.log
 	cat dhrystone.log | grep IPC
 
 xj:
-	$(MAKE) -C $(NANOS_HOME) $(ARCH) run
+	$(MAKE) -C $(NANOS_HOME) $(ARCH) $(EMU_ARGS) run
 
 xjnemu:
 	$(MAKE) -C $(NANOS_HOME) ARCH=riscv64-nemu run
@@ -72,7 +76,7 @@ xv6-debug:
 	$(MAKE) -C $(XV6_HOME) noop 2>&1 | tee > xv6.log
 
 linux:
-	$(MAKE) -C $(BBL_LINUX_HOME) noop
+	$(MAKE) -C $(BBL_LINUX_HOME) $(EMU_ARGS) noop
 # ------------------------------------------------------------------
 # get disassembled test src
 # ------------------------------------------------------------------
@@ -95,3 +99,10 @@ unit-test:
 
 unit-test-all:
 	cd .. && mill chiselModule.test.test -P$(P)
+
+# ------------------------------------------------------------------
+# chore
+# ------------------------------------------------------------------
+
+clean:
+	$(MAKE) -C .. clean

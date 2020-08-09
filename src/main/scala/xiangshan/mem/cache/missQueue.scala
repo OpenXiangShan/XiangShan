@@ -9,27 +9,26 @@ package xiangshan.mem.cache
 import chisel3._
 import chisel3.util._
 
-import xiangshan.mem.DCacheReq
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 import bus.tilelink._
 
-class MissQueueReq extends DCacheBundle
+class MissReq extends DCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr  = UInt(PAddrBits.W)
-  val client_id  = UInt()
+  val client_id  = UInt(missQueueClientIdWidth.W)
 }
 
-class MissQueueResp extends DCacheBundle
+class MissResp extends DCacheBundle
 {
-  val client_id  = UInt()
-  val entry_id  = UInt()
+  val client_id  = UInt(missQueueClientIdWidth.W)
+  val entry_id  = UInt(missQueueEntryIdWidth.W)
 }
 
-class MissQueueFinish extends DCacheBundle
+class MissFinish extends DCacheBundle
 {
-  val client_id = UInt()
-  val entry_id   = UInt()
+  val client_id  = UInt(missQueueClientIdWidth.W)
+  val entry_id  = UInt(missQueueEntryIdWidth.W)
 }
 
 
@@ -41,9 +40,9 @@ class MissEntry extends DCacheModule
     val id = Input(UInt())
 
     // client requests
-    val req = Flipped(new DecoupledIO(new MissQueueReq))
-    val resp = new ValidIO(new MissQueueResp)
-    val finish = Flipped(new DecoupledIO(new MissQueueFinish))
+    val req    = Flipped(DecoupledIO(new MissReq))
+    val resp   = ValidIO(new MissResp)
+    val finish = Flipped(DecoupledIO(new MissFinish))
 
     val idx = Output(Valid(UInt()))
     val way = Output(Valid(UInt()))
@@ -74,7 +73,7 @@ class MissEntry extends DCacheModule
 
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new MissQueueReq)
+  val req     = Reg(new MissReq)
   val req_idx = req.addr(untagBits-1, blockOffBits)
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
@@ -336,16 +335,16 @@ class MissEntry extends DCacheModule
 class MissQueue extends DCacheModule
 {
   val io = IO(new Bundle {
-    val req = Flipped(new DecoupledIO(new MissQueueReq))
-    val resp = new ValidIO(new MissQueueResp)
-    val finish = Flipped(new DecoupledIO(new MissQueueFinish))
+    val req    = Flipped(DecoupledIO(new MissReq))
+    val resp   = DecoupledIO(new MissResp)
+    val finish = Flipped(DecoupledIO(new MissFinish))
 
     val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
     val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
     val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
 
     val meta_read = Decoupled(new L1MetaReadReq)
-    val meta_resp = Output(Vec(nWays, rstVal.cloneType))
+    val meta_resp = Output(Vec(nWays, new L1Metadata))
     val meta_write  = Decoupled(new L1MetaWriteReq)
     val refill      = Decoupled(new L1DataWriteReq)
 
@@ -353,8 +352,8 @@ class MissQueue extends DCacheModule
     val wb_resp     = Input(Bool())
   })
 
-  val resp_arb       = Module(new Arbiter(new MissQueueResp,    cfg.nMissEntries))
-  val finish_arb     = Module(new Arbiter(new MissQueueFinish,  cfg.nMissEntries))
+  val resp_arb       = Module(new Arbiter(new MissResp,    cfg.nMissEntries))
+  val finish_arb     = Module(new Arbiter(new MissFinish,  cfg.nMissEntries))
   val meta_read_arb  = Module(new Arbiter(new L1MetaReadReq,    cfg.nMissEntries))
   val meta_write_arb = Module(new Arbiter(new L1MetaWriteReq,   cfg.nMissEntries))
   val refill_arb     = Module(new Arbiter(new L1DataWriteReq,   cfg.nMissEntries))

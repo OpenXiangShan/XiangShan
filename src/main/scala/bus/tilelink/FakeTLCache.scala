@@ -6,11 +6,9 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan.XSModule
-import xiangshan.utils.XSDebug
 import bus.axi4.AXI4
 import bus.axi4.AXI4Parameters
-import utils.GTimer
-import utils.MuxTLookup
+import utils.{GTimer, MuxTLookup, XSDebug}
 
 // It's a fake tilelink LLC
 // It's only deals with AcquireBlock and ReleaseData from upper layer

@@ -6,10 +6,8 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan.XSModule
-import xiangshan.utils.XSDebug
-import bus.axi4.AXI4
-import bus.axi4.AXI4Parameters
-import utils.GTimer
+import bus.axi4.{AXI4, AXI4Parameters}
+import utils.{GTimer, XSDebug}
 
 // a simpel TileLink to AXI4 converter
 // only support TileLink put and get

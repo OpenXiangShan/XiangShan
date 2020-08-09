@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.brq.BrqPtr
-import xiangshan.utils._
+import utils._
 
 class DecodeStage extends XSModule {
   val io = IO(new Bundle() {
@@ -34,24 +34,20 @@ class DecodeStage extends XSModule {
   for (i <- 0 until DecodeWidth) {
     decoders(i).io.in <> io.in(i).bits
     decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
-    // send CfCtrl without brTags and brMasks to brq
-    io.toBrq(i).valid := io.in(i).valid && io.out(i).ready && decoders(i).io.out.cf.isBr
-    XSDebug(io.toBrq(i).valid && io.toBrq(i).ready, p"Branch instr detected. Sending it to BRQ.\n")
-    XSDebug(io.toBrq(i).valid && !io.toBrq(i).ready, p"Branch instr detected. BRQ full...waiting\n")
-    XSDebug(io.in(i).valid && !io.out(i).ready, p"DecBuf full...waiting\n")
     decoderToBrq(i).brTag := DontCare
     io.toBrq(i).bits := decoderToBrq(i)
-    // if brq returns ready, then assert valid and send CfCtrl with bfTag and brMask to DecBuffer
-    io.out(i).valid := io.toBrq(i).ready && io.in(i).valid
-    XSDebug(io.out(i).valid && decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending branch instr to DecBuf\n")
-    XSDebug(io.out(i).valid && !decoders(i).io.out.cf.isBr && io.out(i).ready, p"Sending non-branch instr to DecBuf\n")
+
     decoderToDecBuffer(i) := decoders(i).io.out
     decoderToDecBuffer(i).brTag := io.brTags(i)
     io.out(i).bits := decoderToDecBuffer(i)
 
-    // If an instruction i is received by DecBuffer,
-    // then assert in(i).ready, waiting for new instructions
-    // Only when all out(i).ready signals are true can we decode next instruction group (?)
-    io.in(i).ready := io.out(i).ready
+    val thisReady = io.out(i).ready && io.toBrq(i).ready
+    val thisBrqValid = io.in(i).valid && !decoders(i).io.out.cf.brUpdate.pd.notCFI && io.out(i).ready
+    val thisOutValid =  io.in(i).valid && io.toBrq(i).ready
+    io.in(i).ready    := { if (i == 0) thisReady    else io.in(i-1).ready && thisReady }
+    io.out(i).valid   := { if (i == 0) thisOutValid else io.in(i-1).ready && thisOutValid }
+    io.toBrq(i).valid := { if (i == 0) thisBrqValid else io.in(i-1).ready && thisBrqValid }
+
+    XSDebug(io.in(i).valid || io.out(i).valid || io.toBrq(i).valid, "i:%d In(%d %d) Out(%d %d) ToBrq(%d %d) pc:%x instr:%x\n", i.U, io.in(i).valid, io.in(i).ready, io.out(i).valid, io.out(i).ready, io.toBrq(i).valid, io.toBrq(i).ready, io.in(i).bits.pc, io.in(i).bits.instr)
   }
 }

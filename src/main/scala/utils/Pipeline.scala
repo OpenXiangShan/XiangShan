@@ -11,7 +11,7 @@ object PipelineConnect {
     when (isFlush) { valid := false.B }
 
     left.ready := right.ready
-    right.bits <> RegEnable(left.bits, left.valid && right.ready)
+    right.bits := RegEnable(left.bits, left.valid && right.ready)
     right.valid := valid //&& !isFlush
   }
 }

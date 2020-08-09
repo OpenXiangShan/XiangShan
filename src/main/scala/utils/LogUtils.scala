@@ -1,9 +1,10 @@
-package xiangshan.utils
+package utils
 
 import chisel3._
 import chisel3.util.experimental.BoringUtils
+import top.Parameters
 import xiangshan.HasXSParameter
-import xiangshan.utils.XSLogLevel.XSLogLevel
+import utils.XSLogLevel.XSLogLevel
 
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
@@ -17,29 +18,33 @@ object XSLogLevel extends Enumeration {
 }
 
 object XSLog {
-
-  def displayLog: Bool = {
-    val disp_begin, disp_end = WireInit(0.U(64.W))
-    BoringUtils.addSink(disp_begin, "DISPLAY_LOG_START")
-    BoringUtils.addSink(disp_end, "DISPLAY_LOG_END")
-    assert(disp_begin <= disp_end)
-    (GTimer() >= disp_begin) && (GTimer() <= disp_end)
-  }
-
-  def xsLogLevel: UInt = {
-    val log_level = WireInit(0.U(64.W))
-    BoringUtils.addSink(log_level, "DISPLAY_LOG_LEVEL")
-    assert(log_level < XSLogLevel.maxId.U)
-    log_level
-  }
-
   def apply(debugLevel: XSLogLevel)
            (prefix: Boolean, cond: Bool, pable: Printable)
-           (implicit name: String): Any = {
-    val commonInfo = p"[$debugLevel][time=${GTimer()}] $name: "
-    when (debugLevel.id.U >= xsLogLevel && cond && displayLog) {
-      printf((if (prefix) commonInfo else p"") + pable)
+           (implicit name: String): Any =
+  {
+    val logEnable = WireInit(false.B)
+    val logTimestamp = WireInit(0.U(64.W))
+    ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+    ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+    if(Parameters.get.envParameters.EnableDebug){
+      when (cond && logEnable) {
+        val commonInfo = p"[$debugLevel][time=$logTimestamp] $name: "
+        printf((if (prefix) commonInfo else p"") + pable)
+        if (debugLevel >= XSLogLevel.ERROR) {
+          assert(false.B)
+        }
+      }
     }
+  }
+
+  def displayLog: Bool = {
+    val logEnable = WireInit(false.B)
+    ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+    val ret = WireInit(false.B)
+    if(Parameters.get.envParameters.EnableDebug) {
+      ret := logEnable
+    }
+    ret
   }
 }
 
@@ -59,7 +64,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   // trigger log or not
   // used when user what to fine-control their printf output
   def trigger: Bool = {
-    logLevel.id.U >= XSLog.xsLogLevel && XSLog.displayLog
+    XSLog.displayLog
   }
 
   def printPrefix()(implicit name: String): Unit = {

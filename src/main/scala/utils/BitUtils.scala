@@ -59,3 +59,21 @@ object OneHot {
   def UIntToOH1(x: UInt, width: Int): UInt = ~((-1).S(width.W).asUInt << x)(width-1, 0)
   def UIntToOH1(x: UInt): UInt = UIntToOH1(x, (1 << x.getWidth) - 1)
 }
+
+object LowerMask {
+  def apply(a: UInt, len: Int) = {
+    (0 until len).map(i => a >> i.U).reduce(_|_)
+  }
+}
+
+object LowestBit {
+  def apply(a: UInt, len: Int) = {
+    Mux(a(0), 1.U(len.W), Reverse(((0 until len).map(i => Reverse(a(len - 1, 0)) >> i.U).reduce(_|_) + 1.U) >> 1.U))
+  }
+}
+
+object HighestBit {
+  def apply(a: UInt, len: Int) = {
+    Reverse(LowestBit(Reverse(a), len))
+  }
+}

@@ -7,7 +7,6 @@ import chisel3.util._
 import xiangshan.XSBundle
 
 trait MemoryOpConstants {
-  val META_SZ   = 64
   val NUM_XA_OPS = 9
   val M_SZ      = 5
   def M_X       = BitPat("b?????")
@@ -72,29 +71,4 @@ object MemoryOpConstants extends MemoryOpConstants {
     val opLitNames = opNames map {case (k, v) => (k.litValue.longValue, v)}
     return opLitNames(cmd.litValue.longValue)
   }
-}
-
-class MemBundle extends XSBundle
-  with MemoryOpConstants
-
-class DCacheReq extends MemBundle
-{
-  val cmd  = UInt(M_SZ.W)
-  val addr  = UInt(PAddrBits.W)
-  val data  = UInt(DataBits.W)
-  val mask  = UInt((DataBits/8).W)
-  val meta  = UInt(META_SZ.W)
-}
-
-class DCacheResp extends MemBundle
-{
-  val data = UInt(DataBits.W)
-  val meta  = UInt(META_SZ.W)
-  val nack  = Bool()
-}
-
-class LSUDMemIO extends MemBundle
-{
-  val req = new DecoupledIO(new DCacheReq)
-  val resp = Flipped(new ValidIO(new DCacheResp))
 }

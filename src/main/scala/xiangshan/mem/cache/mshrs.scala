@@ -10,7 +10,7 @@ import chisel3._
 import chisel3.util._
 
 import xiangshan.mem.DCacheReq
-import xiangshan.utils.XSDebug
+import utils.XSDebug
 import bus.tilelink._
 
 class DCacheReqInternal extends DCacheReq
