@@ -186,7 +186,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
   }
 
-  val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - i.U)(indexWidth - 1, 0))
+  val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - (i + 1).U)(indexWidth - 1, 0))
   for (i <- 0 until replayWidth) {
     val shouldResetDest = inReplayWalk && stateEntries(replayIndex(i)) === s_valid
     io.replayPregReq(i).isInt := shouldResetDest && uopEntries(replayIndex(i)).ctrl.rfWen && uopEntries(replayIndex(i)).ctrl.ldest =/= 0.U
@@ -194,8 +194,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     io.replayPregReq(i).preg  := uopEntries(replayIndex(i)).pdest
 
     XSDebug(shouldResetDest, p"replay dispatchPtr+$i: " +
-      p"type (${uopEntries(replayIndex(i)).ctrl.rfWen}, ${uopEntries(replayIndex(i)).ctrl.fpWen} " +
-      p"preg ${uopEntries(replayIndex(i)).pdest}\n")
+      p"type (${uopEntries(replayIndex(i)).ctrl.rfWen}, ${uopEntries(replayIndex(i)).ctrl.fpWen}) " +
+      p"pdest ${uopEntries(replayIndex(i)).pdest} ldest ${uopEntries(replayIndex(i)).ctrl.ldest}\n")
   }
 
   /**
