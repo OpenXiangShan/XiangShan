@@ -224,16 +224,8 @@ class XSCore extends XSModule {
   mem.io.pmem <> DontCare // NOTE: Ptw mem -> TileLink
   // front.io.mem <> mem.io.frontend // ptw of itlb
 
-  backend.io.memMMU.imem <> DontCare
-
-  val dtlb = TLB(
-    in = mem.io.dmem,
-    mem = dmemXbar.io.in(1),
-    flush = false.B,
-    csrMMU = backend.io.memMMU.dmem
-  )(TLBConfig(name = "dtlb", totalEntry = 64, userBits = DcacheUserBundleWidth))
-  dmemXbar.io.in(0) <> dtlb.io.out
-  // dmemXbar.io.in(1) <> io.frontend
+  dmemXbar.io.in(0) <> mem.io.dmem
+  dmemXbar.io.in(1) <> mem.io.pmem
 
   io.frontend <> DontCare
 
@@ -241,7 +233,7 @@ class XSCore extends XSModule {
     in = dmemXbar.io.out,
     mmio = Seq(io.mmio),
     flush = "b00".U,
-    empty = dtlb.io.cacheEmpty,
+    empty = Wire(Bool()),
     enable = HasDcache
   )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
 

@@ -232,7 +232,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
 
   val ptwIdx = Reg(UInt(RoqIdxWidth.W))
-  val ptwPf  = Reg(Bool())
+  val ptwPf  = Reg(Bool()) // TODO: add redirect. also for ptw, add redirect
   val ptwPfHit = widthMap{i => ptwPf && req(i).valid && req(i).bits.idx === ptwIdx }
   
   val hitVec = widthMapSeq{ i => 

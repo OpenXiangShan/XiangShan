@@ -98,7 +98,7 @@ class PtwResp extends PtwBundle {
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
-  val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
+  val mem = new SimpleBusUC(userBits = (new DcacheUserBundle).getWidth, addrBits = PAddrBits) // Use Dcache temp
 }
 
 object ValidHold {
