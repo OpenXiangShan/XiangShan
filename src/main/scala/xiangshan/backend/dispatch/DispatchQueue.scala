@@ -171,7 +171,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // In case of branch mis-prediction:
   // If mis-prediction happens after dispatchPtr, the pointer keeps the same as before.
   // If dispatchPtr needs to be cancelled, reset dispatchPtr to tailPtr.
-  val dispatchCancelPtr = Mux(needCancel(dispatchIndex) || stateEntries(dispatchIndex) === s_invalid, tailCancelPtr, dispatchPtr)
+  val dispatchCancelPtr = Mux(needCancel(dispatchIndex) || dispatchEntries === 0.U, tailCancelPtr, dispatchPtr)
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   val dispatchReplayCnt = Mux(needReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
