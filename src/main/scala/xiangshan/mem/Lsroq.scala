@@ -33,7 +33,7 @@ class Lsroq extends XSModule {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
-    val miss = Decoupled(new DCacheLoadIO)
+    val miss = new DCacheLoadIO
     val refill = Flipped(Valid(new DCacheStoreReq))
   })
 
@@ -160,9 +160,9 @@ class Lsroq extends XSModule {
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
   val missRefillSel = OHToUInt(missRefillSelVec.asUInt)
-  io.miss.valid := missRefillSelVec.asUInt.orR
-  io.miss.bits.addr := data(missRefillSel).paddr
-  when(io.miss.fire()) {
+  io.miss.req.valid := missRefillSelVec.asUInt.orR
+  io.miss.req.bits.addr := data(missRefillSel).paddr
+  when(io.miss.req.fire()) {
     miss(missRefillSel) := false.B
     listening(missRefillSel) := true.B
   }

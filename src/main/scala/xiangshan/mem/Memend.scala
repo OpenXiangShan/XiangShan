@@ -144,7 +144,7 @@ class Memend extends XSModule {
     storeUnits(i).io.lsroq <> lsroq.io.storeIn(i)
   }
 
-  dcache.io.lsu.refill <> DontCare // TODO
+  // dcache.io.lsu.refill <> DontCare // TODO
   sbuffer.io.dcache <> dcache.io.lsu.store
 
   lsroq.io.stout <> io.backend.stout
@@ -160,7 +160,4 @@ class Memend extends XSModule {
   lsroq.io.miss <> DontCare //TODO
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
-  // for ls pipeline test
-  dcache.io.dmem <> io.dmem
-  dcache.io.lsu.refill <> DontCare
 }
