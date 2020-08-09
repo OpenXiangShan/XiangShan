@@ -184,7 +184,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     val distance = distanceBetween(dispatchPtr, tailCancelPtr)
     dispatchReplayCntReg := Mux(dispatchReplayCntReg > distance, dispatchReplayCntReg - distance, 0.U)
   }.elsewhen (replayValid) {
-    dispatchReplayCntReg := dispatchReplayCnt
+    dispatchReplayCntReg := dispatchReplayCnt - dispatchReplayStep
   }.otherwise {
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
   }
