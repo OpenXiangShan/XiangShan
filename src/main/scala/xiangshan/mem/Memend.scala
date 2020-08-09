@@ -108,7 +108,7 @@ class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
     val dmem = new SimpleBusUC(userBits = (new DcacheUserBundle).getWidth)
-    val pmem = new SimpleBusUC(userBits = (new DcacheUserBundle).getWidth, addrBits = PAddrBits) // FIXME: check all simplebus's addrbits
+    val pmem = new SimpleBusUC(addrBits = PAddrBits) // FIXME: check all simplebus's addrbits
   })
 
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
