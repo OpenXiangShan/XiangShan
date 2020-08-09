@@ -69,8 +69,8 @@ trait HasTlbConst extends HasXSParameter {
   }
 }
 
-abstract class TlbBundle extends Bundle with HasTlbConst
-abstract class TlbModule extends Module with HasTlbConst
+abstract class TlbBundle extends XSBundle with HasTlbConst
+abstract class TlbModule extends XSModule with HasTlbConst
 
 class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   val d = Bool()
@@ -81,6 +81,11 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   val w = Bool()
   val r = Bool()
   if (hasV) { val v = Bool() }
+
+  override def toPrintable: Printable = {
+    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// + 
+    //(if(hasV) (p"v:${v}") else p"")
+  }
 }
 
 class TlbEntry extends TlbBundle {
@@ -116,6 +121,10 @@ class TlbEntry extends TlbBundle {
     // e.asid := asid
     e
   }
+
+  override def toPrintable: Printable = {
+    p"vpn:0x${Hexadecimal(vpn)} ppn:0x${Hexadecimal(ppn)} level:${level} perm:${perm}"
+  }
 }
 
 object TlbCmd {
@@ -133,6 +142,10 @@ class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val idx = UInt(RoqIdxWidth.W)
   val cmd = TlbCmd()
+
+  override def toPrintable: Printable = {
+    p"vaddr:0x${Hexadecimal(vaddr)} idx:${idx} cmd:${cmd}"
+  }
 }
 
 class TlbResp extends TlbBundle {
@@ -154,6 +167,9 @@ class TlbResp extends TlbBundle {
     //   val st = Bool()
     //   val instr = Bool()
     // }
+  }
+  override def toPrintable: Printable = {
+    p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr}"
   }
 }
 
@@ -302,4 +318,16 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     v := v | (1.U << refillIdx)
     entry(refillIdx) := ptw.resp.bits.entry
   }
+
+  for(i <- 0 until Width) {
+    XSDebug(req(i).valid, p"req(${i.U}): ${req(i).bits}\n")
+    XSDebug(resp(i).valid, p"resp(${i.U}: ${resp(i).bits}\n")
+  }
+
+  XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
+  XSDebug(ParallelOR(valid), p"CSR: ${csr}\n")
+  XSDebug(ParallelOR(valid), p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)}\n")
+  XSDebug(ParallelOR(valid) || state=/=state_idle || ptwPf, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
+  XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
+  XSDebug(ptw.resp.fire(), p"PTW resp:${ptw.resp.bits}\n")
 }

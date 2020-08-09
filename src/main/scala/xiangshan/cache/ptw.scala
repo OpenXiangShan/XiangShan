@@ -39,6 +39,10 @@ class PteBundle extends PtwBundle{
   def isLeaf() = {
     !isPf() && (perm.r || perm.x)
   }
+
+  override def toPrintable: Printable = {
+    p"ppn:0x${Hexadecimal(ppn)} perm:b${Binary(perm.asUInt)}"
+  }
 }
 
 class PtwEntry(tagLen: Int) extends PtwBundle {
@@ -67,17 +71,29 @@ class PtwEntry(tagLen: Int) extends PtwBundle {
   }
 
   override def cloneType: this.type = (new PtwEntry(tagLen)).asInstanceOf[this.type]
+
+  override def toPrintable: Printable = {
+    p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
+  }
 }
 
 class PtwReq extends PtwBundle {
   val vpn = UInt(vpnLen.W)
   val idx = UInt(RoqIdxWidth.W) // itlb could ignore it
+
+  override def toPrintable: Printable = {
+    p"vpn:0x${Hexadecimal(vpn)} idx:${idx}"
+  }
 }
 
 class PtwResp extends PtwBundle {
   val entry = new TlbEntry
   val idx = UInt(RoqIdxWidth.W)
   val pf  = Bool() // simple pf no matter cmd
+
+  override def toPrintable: Printable = {
+    p"entry:${entry} idx:${idx} pf:${pf}"
+  }
 }
 
 class PtwIO extends PtwBundle {
@@ -296,4 +312,28 @@ class PTW extends PtwModule {
       tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
     }
   }
+
+  def PrintFlag(en: Bool, flag: Bool, nameEnable: String, nameDisable: String): Unit = {
+    when(flag) {
+      XSDebug(false, en, nameEnable)
+    }.otherwise {
+      XSDebug(false, en, nameDisable)
+    }
+  }
+
+  XSDebug(validOneCycle, "New Ptw Req from ")
+  PrintFlag(validOneCycle, arbChosen===0.U, "DTLB:\n", "ITLB:\n")
+  XSDebug(validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)} (roq)idx:${req.idx}\n")
+  XSDebug(resp(arbChosen).fire(), "Ptw Resp to ")
+  PrintFlag(resp(arbChosen).fire(), arbChosen===0.U, "DTLB:\n", "ITLB\n")
+  XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready}) entry:${resp(arbChosen).bits.entry} (roq)idx:${resp(arbChosen).bits.idx} pf:${resp(arbChosen).bits.pf}\n")
+
+  XSDebug(sfence.valid, p"Sfence: sfence instr here ${sfence.bits}\n")
+  XSDebug(valid, p"CSR: ${csr}\n")
+
+  XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}")
+  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)}\n")
+
+  XSDebug(mem.req.fire(), p"mem req fire addr:0x${Hexadecimal(io.mem.req.bits.addr)}\n")
+  XSDebug(mem.resp.fire(), p"mem resp fire rdata:0x${Hexadecimal(io.mem.resp.bits.rdata)} Pte:${memPte}\n")
 }

@@ -223,6 +223,11 @@ class TlbCsrBundle extends XSBundle {
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
+
+  override def toPrintable: Printable = {
+    p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)}" + 
+    p"Priv mxr:${priv.mxr} sum:${priv.sum} imode:${priv.imode} dmode:${priv.dmode}"
+  }
 }
 
 class SfenceBundle extends XSBundle {
@@ -231,5 +236,9 @@ class SfenceBundle extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
+  }
+
+  override def toPrintable: Printable = {
+    p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}"
   }
 }
