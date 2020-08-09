@@ -13,6 +13,8 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int, replayWidth: Int) extends XSBund
   val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
   val redirect = Flipped(ValidIO(new Redirect))
   val replayPregReq = Output(Vec(replayWidth, new ReplayPregReq))
+  val inReplayWalk = Output(Bool())
+  val otherWalkDone = Input(Bool())
 
   override def cloneType: DispatchQueueIO.this.type =
     new DispatchQueueIO(enqnum, deqnum, replayWidth).asInstanceOf[this.type]
@@ -186,6 +188,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
   }
 
+  io.inReplayWalk := inReplayWalk
   val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - (i + 1).U)(indexWidth - 1, 0))
   for (i <- 0 until replayWidth) {
     val shouldResetDest = inReplayWalk && stateEntries(replayIndex(i)) === s_valid
@@ -193,7 +196,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     io.replayPregReq(i).isFp  := shouldResetDest && uopEntries(replayIndex(i)).ctrl.fpWen
     io.replayPregReq(i).preg  := uopEntries(replayIndex(i)).pdest
 
-    XSDebug(shouldResetDest, p"replay dispatchPtr+$i: " +
+    XSDebug(shouldResetDest, p"replay dispatchPtr-${i+1}: " +
       p"type (${uopEntries(replayIndex(i)).ctrl.rfWen}, ${uopEntries(replayIndex(i)).ctrl.fpWen}) " +
       p"pdest ${uopEntries(replayIndex(i)).pdest} ldest ${uopEntries(replayIndex(i)).ctrl.ldest}\n")
   }
@@ -237,15 +240,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   /**
     * Part 4: set output and input
     */
+  val allWalkDone = !inReplayWalk && io.otherWalkDone
   val enqReadyBits = (1.U << numEnqTry).asUInt() - 1.U
   for (i <- 0 until enqnum) {
-    io.enq(i).ready := enqReadyBits(i).asBool() && !inReplayWalk
+    io.enq(i).ready := enqReadyBits(i).asBool() && allWalkDone
   }
 
   for (i <- 0 until deqnum) {
     io.deq(i).bits := uopEntries(deqIndex(i))
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
-    io.deq(i).valid := stateEntries(deqIndex(i)) === s_valid && !io.redirect.valid && !inReplayWalk
+    io.deq(i).valid := stateEntries(deqIndex(i)) === s_valid && !io.redirect.valid && allWalkDone
   }
 
   // debug: dump dispatch queue states

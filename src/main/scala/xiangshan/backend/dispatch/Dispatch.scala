@@ -85,6 +85,7 @@ class Dispatch extends XSModule {
   intDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
     io.replayPregReq(i) <> replay
   }
+  intDq.io.otherWalkDone := !fpDq.io.inReplayWalk && !lsDq.io.inReplayWalk
 
   fpDq.io.redirect <> io.redirect
   fpDq.io.commits <> io.commits
@@ -94,6 +95,7 @@ class Dispatch extends XSModule {
   fpDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
     io.replayPregReq(i + dpParams.IntDqReplayWidth) <> replay
   }
+  fpDq.io.otherWalkDone := !intDq.io.inReplayWalk && !lsDq.io.inReplayWalk
 
   lsDq.io.redirect <> io.redirect
   lsDq.io.commits <> io.commits
@@ -103,6 +105,7 @@ class Dispatch extends XSModule {
   lsDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
     io.replayPregReq(i + dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth) <> replay
   }
+  lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)
