@@ -2,7 +2,7 @@ package xiangshan.backend.issue
 
 import chisel3.{util, _}
 import chisel3.util._
-import utils.{ParallelMux, ParallelOR, PriorityEncoderWithFlag, XSDebug, XSInfo}
+import utils.{ParallelMux, ParallelOR, PriorityEncoderWithFlag, PriorityMuxWithFlag, XSDebug, XSInfo}
 import xiangshan._
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
@@ -149,7 +149,9 @@ class IssueQueue
       (stateQueue(i)===s_valid) && readyVec(idxQueue(i)) && !(selectedIdxRegOH(i) && io.deq.fire())
     )
   ))
-  val (selectedIdxWire, sel) = PriorityEncoderWithFlag(selectMask)
+  val (selectedIdxWire, sel) = PriorityMuxWithFlag(
+    selectMask.zipWithIndex.map(x => (x._1, x._2.U)).reverse
+  )
   val selReg = RegNext(sel)
   val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
