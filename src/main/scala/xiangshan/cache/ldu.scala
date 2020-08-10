@@ -23,6 +23,8 @@ class LoadPipe extends DCacheModule
   val meta_read = io.meta_read.bits
   val data_read = io.data_read.bits
 
+  def beat_idx(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
+
   // Tag read for new requests
   meta_read.idx    := io.lsu.req.bits.addr >> blockOffBits
   meta_read.way_en := ~0.U(nWays.W)
@@ -30,6 +32,8 @@ class LoadPipe extends DCacheModule
   // Data read for new requests
   data_read.addr   := io.lsu.req.bits.addr
   data_read.way_en := ~0.U(nWays.W)
+  // only needs to read the specific beat
+  data_read.rmask  := UIntToOH(beat_idx(io.lsu.req.bits.addr))
 
   // Pipeline
   // stage 0
@@ -81,7 +85,7 @@ class LoadPipe extends DCacheModule
   val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
   val data_resp = io.data_resp
   for (w <- 0 until nWays) {
-    s2_data(w) := data_resp(w)
+    s2_data(w) := data_resp(w)(beat_idx(s2_req.addr))
   }
 
   val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)

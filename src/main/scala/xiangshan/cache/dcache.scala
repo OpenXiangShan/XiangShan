@@ -134,8 +134,8 @@ class L1DataWriteReq extends L1DataReadReq {
 
 abstract class AbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
-    val read  = Input(Vec(LoadPipelineWidth, Valid(new L1DataReadReq)))
-    val write = Input(Valid(new L1DataWriteReq))
+    val read  = Input(Vec(LoadPipelineWidth, DecoupledIO(new L1DataReadReq)))
+    val write = Input(DecoupledIO(new L1DataWriteReq))
     val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, Vec(refillCycles, Bits(encRowBits.W)))))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
@@ -192,17 +192,23 @@ abstract class AbstractDataArray extends DCacheModule {
 
 class DuplicatedDataArray extends AbstractDataArray
 {
-
+  // write is always ready
+  io.write.ready := true.B
   val waddr = io.write.bits.addr >> blockOffBits
   for (j <- 0 until LoadPipelineWidth) {
     val raddr = io.read(j).bits.addr >> blockOffBits
+    // raddr === waddr is undefined behavior!
+    // block read in this case
+    io.read(j).ready := !io.write.valid || raddr =/= waddr
     for (w <- 0 until nWays) {
       for (r <- 0 until refillCycles) {
         val array = SyncReadMem(nSets, Vec(rowWords, Bits(encDataBits.W)))
+        // data write
         when (io.write.bits.way_en(w) && io.write.valid) {
           val data = VecInit((0 until rowWords) map (i => io.write.bits.data(r)(encDataBits*(i+1)-1,encDataBits*i)))
           array.write(waddr, data, io.write.bits.wmask(r).asBools)
         }
+        // data read
         io.resp(j)(w)(r) := RegNext(array.read(raddr, io.read(j).bits.way_en(w)
           && io.read(j).bits.rmask(r) && io.read(j).valid).asUInt)
       }
@@ -234,7 +240,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   }
   io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(_.asTypeOf(rstVal))
 
-  io.read.ready := !wen // so really this could be a 6T RAM
+  io.read.ready := !wen
   io.write.ready := !rst
 
   def dumpRead() = {

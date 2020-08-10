@@ -62,7 +62,7 @@ class MissEntry extends DCacheModule
   // 5. wait for client's finish
   // 6. update meta data
   // 7. done
-  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_wb_req :: s_wb_resp :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_send_resp :: s_client_finish :: s_meta_write_req :: Nil = Enum(12)
+  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_wb_req :: s_wb_resp :: s_refill_req :: s_refill_resp :: s_data_write_req :: s_mem_finish :: s_send_resp :: s_client_finish :: s_meta_write_req :: Nil = Enum(13)
 
   val state = RegInit(s_invalid)
 
@@ -202,6 +202,7 @@ class MissEntry extends DCacheModule
     new_state
   }
 
+  // this state is unnecessary, we can make decisions in s_meta_read_resp
   when (state === s_decide_next_state) {
     state := decide_next_state()
   }
@@ -244,23 +245,18 @@ class MissEntry extends DCacheModule
     }
   }
 
+  val refill_data = Reg(Vec(refillCycles, UInt(rowBits.W)))
   when (state === s_refill_resp) {
-    when (TLUtilities.hasData(io.mem_grant.bits)) {
-      io.mem_grant.ready      := io.refill.ready
-      io.refill.valid         := io.mem_grant.valid
-      io.refill.bits.addr     := req_block_addr | (refill_ctr << rowOffBits)
-      io.refill.bits.way_en   := req_way_en
-      io.refill.bits.wmask    := ~(0.U(rowWords.W))
-      io.refill.bits.data     := io.mem_grant.bits.data
+    io.mem_grant.ready := true.B
 
+    when (TLUtilities.hasData(io.mem_grant.bits)) {
       when (io.refill.fire()) {
         refill_ctr := refill_ctr + 1.U
+        refill_data(refill_ctr) := io.mem_grant.bits.data
         when (refill_ctr === (cacheDataBeats - 1).U) {
           assert(refill_done, "refill not done!")
         }
       }
-    } .otherwise {
-      io.mem_grant.ready      := true.B
     }
 
     when (refill_done) {
@@ -278,6 +274,25 @@ class MissEntry extends DCacheModule
 
     when (io.mem_finish.fire()) {
       grantack.valid := false.B
+
+      // no data
+      when (refill_ctr === 0.U) {
+        state := s_send_resp
+      } .otherwise {
+        state := s_data_write_req
+      }
+    }
+  }
+
+  when (state === s_data_write_req) {
+    io.refill.valid        := true.B
+    io.refill.bits.addr    := req_block_addr
+    io.refill.bits.way_en  := req_way_en
+    io.refill.bits.wmask   := VecInit((0 until refillCycles) map (i => ~0.U(rowWords.W)))
+    io.refill.bits.rmask   := DontCare
+    io.refill.bits.data    := refill_data
+
+    when (io.refill.fire()) {
       state := s_send_resp
     }
   }

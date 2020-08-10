@@ -11,7 +11,7 @@ class StorePipe extends DCacheModule
     val lsu        = Flipped(new DCacheStoreIO)
     val data_read  = Decoupled(new L1DataReadReq)
     val data_resp  = Output(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
-    val data_write = Output(Valid(new L1DataWriteReq))
+    val data_write = Output(Decoupled(new L1DataWriteReq))
     val meta_read  = Decoupled(new L1MetaReadReq)
     val meta_resp  = Output(Vec(nWays, new L1Metadata))
   })
@@ -32,6 +32,7 @@ class StorePipe extends DCacheModule
   // Data read for new requests
   data_read.addr   := io.lsu.req.bits.addr
   data_read.way_en := ~0.U(nWays.W)
+  data_read.rmask  := ~0.U(refillCycles.W)
 
   // Pipeline
   // stage 0
@@ -89,7 +90,7 @@ class StorePipe extends DCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
-  val wdata = Wire(Vec(refillCycles, UInt(encRowBits.W)))
+  val wdata = Wire(Vec(refillCycles, UInt(rowBits.W)))
   val wmask = Wire(Vec(refillCycles, UInt(rowBytes.W)))
   val wdata_merged = Wire(Vec(refillCycles, UInt(encRowBits.W)))
 
@@ -112,8 +113,10 @@ class StorePipe extends DCacheModule
   data_write.rmask    := DontCare
   data_write.way_en   := s2_tag_match_way
   data_write.addr     := s2_req.addr
-  data_write.wmask    := wmask
+  data_write.wmask    := VecInit((0 until refillCycles) map (i => ~0.U(rowWords.W)))
   data_write.data     := wdata_merged
+
+  assert(!(io.data_write.valid && !io.data_write.ready))
 
   dump_pipeline_valids("StorePipe s2", "s2_hit", s2_hit)
   dump_pipeline_valids("StorePipe s2", "s2_nack", s2_nack)
