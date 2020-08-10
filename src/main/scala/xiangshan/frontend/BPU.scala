@@ -212,6 +212,7 @@ class BPUStage1 extends BPUStage {
   // so it does not need to be latched
   io.out.bits.resp <> io.in.bits.resp
   io.out.bits.brInfo := io.in.bits.brInfo
+  io.out.bits.brInfo.map(_.debug_ubtb_cycle := GTimer())
 
   XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
     ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ubtbResp.notTakens.asUInt, ubtbResp.is_RVC.asUInt)
@@ -228,6 +229,8 @@ class BPUStage2 extends BPUStage {
 
   lastIsRVC := btbResp.isRVC(lastValidPos)
   lastHit   := btbResp.hits(lastValidPos)
+
+  io.out.bits.brInfo.map(_.debug_btb_cycle := GTimer())
 
   XSDebug(io.pred.fire(), "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
     btbResp.hits.asUInt, VecInit(bimResp.ctrs.map(_(1))).asUInt)
@@ -286,6 +289,8 @@ class BPUStage3 extends BPUStage {
   }.otherwise {
     lastHit := pdMask(0) | !pdMask(0) & !pds(0).isRVC
   }
+
+  io.out.bits.brInfo.map(_.debug_tage_cycle := GTimer())
 
   // Wrap tage resp and tage meta in
   // This is ugly

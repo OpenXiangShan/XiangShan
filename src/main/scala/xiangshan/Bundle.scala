@@ -59,6 +59,10 @@ class BranchInfo extends XSBundle {
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
 
+  val debug_ubtb_cycle = UInt(64.W)
+  val debug_btb_cycle = UInt(64.W)
+  val debug_tage_cycle = UInt(64.W)
+
   def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
     this.histPtr := histPtr
     this.tageMeta := tageMeta

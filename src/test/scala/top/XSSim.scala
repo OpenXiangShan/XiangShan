@@ -9,6 +9,8 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import device._
 import xiangshan._
 import utils._
+import firrtl.stage.RunFirrtlTransformAnnotation
+import xstransforms.ShowPrintTransform
 
 class DiffTestIO extends XSBundle {
   val r = Output(Vec(64, UInt(XLEN.W)))
@@ -118,6 +120,9 @@ object TestMain extends App {
   // generate verilog
   (new chisel3.stage.ChiselStage).execute(
     args.filterNot(_ == "--disable-log"),
-    Seq(ChiselGeneratorAnnotation(() => new XSSimTop))
+    Seq(
+      ChiselGeneratorAnnotation(() => new XSSimTop),
+      RunFirrtlTransformAnnotation(new ShowPrintTransform)
+    )
   )
 }

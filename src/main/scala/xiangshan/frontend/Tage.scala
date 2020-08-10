@@ -16,7 +16,7 @@ trait HasTageParameter extends HasXSParameter{
                       ( 128,   32,    9),
                       ( 128,   64,    9))
   val TageNTables = TableInfo.size
-  val UBitPeriod = 4096
+  val UBitPeriod = 8192
   val TageBanks = PredictWidth // FetchWidth
 
   val TotalBits = TableInfo.map {
@@ -173,7 +173,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val req_rhits = VecInit((0 until TageBanks).map(b => table_r(b).valid && table_r(b).tag === tagLatch(b)))
 
   (0 until TageBanks).map(b => {
-    io.resp(b).valid := req_rhits(b) && realMask(b)
+    io.resp(b).valid := req_rhits(b) && realMaskLatch(b)
     io.resp(b).bits.ctr := table_r(b).ctr
     io.resp(b).bits.u := Cat(hi_us_r(b),lo_us_r(b))
   })
@@ -290,7 +290,7 @@ class Tage extends BaseTage {
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {
       val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
-      t.io.req.valid := io.pc.valid
+      t.io.req.valid := io.pc.valid && !io.flush
       t.io.req.bits.pc := io.pc.bits
       t.io.req.bits.hist := io.hist
       t.io.req.bits.mask := io.inMask
@@ -300,6 +300,7 @@ class Tage extends BaseTage {
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
+  val flushLatch = RegNext(io.flush)
 
   val s2_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
   val s3_bim = RegEnable(s2_bim, enable=io.s3Fire)
@@ -325,7 +326,7 @@ class Tage extends BaseTage {
   updateOldCtr := DontCare
   updateU := DontCare
 
-  val updateBank = u.pc >> 1.U
+  val updateBank = u.pc(log2Ceil(TageBanks), 1)
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
@@ -337,7 +338,7 @@ class Tage extends BaseTage {
     io.resp.takens(w) := s3_bim.ctrs(w)(1)
 
     for (i <- 0 until TageNTables) {
-      val hit = resps(i)(w).valid
+      val hit = resps(i)(w).valid && !flushLatch
       io.resp.hits(w) := hit
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
@@ -428,8 +429,8 @@ class Tage extends BaseTage {
 
   val m = updateMeta
   XSDebug(io.pc.valid, "req: pc=0x%x, hist=%b\n", io.pc.bits, io.hist)
-  XSDebug(io.update.valid, "redirect: provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n",
-    m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
+  XSDebug(io.update.valid, "redirect: cycle=%d, provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n",
+    u.brInfo.debug_tage_cycle, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
   XSDebug(true.B, "s3Fire:%d, resp: pc=%x, hits=%b, takens=%b\n",
     io.s3Fire, debug_pc_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
 }

@@ -245,8 +245,8 @@ class BTB extends BasePredictor with BTBParams{
     XSDebug(validLatch && bankHits(bankIdxInOrder(i)), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
       i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
   }
-  XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-    u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+  XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
+    u.brInfo.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
   for (i <- 0 until BtbBanks) {
     // Conflict when not hit and allocating a valid entry
     val conflict = metaRead(allocWays(i))(i).valid && !bankHits(i)
