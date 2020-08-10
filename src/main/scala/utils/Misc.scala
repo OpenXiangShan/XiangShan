@@ -2,6 +2,7 @@ package utils
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.random.LFSR
 
 // This gets used everywhere, so make the smallest circuit possible ...
 // Given an address and size, create a mask of beatBytes size
@@ -49,7 +50,7 @@ object Random
   }
   def oneHot(mod: Int): UInt = oneHot(mod, randomizer)
 
-  private def randomizer = LFSR16()
+  private def randomizer = LFSR(16)
   private def partition(value: UInt, slices: Int) =
     Seq.tabulate(slices)(i => value < (((i + 1) << value.getWidth) / slices).U)
 }
@@ -60,7 +61,7 @@ object Random
  */
 object Transpose
 {
-  def apply[T <: chisel3.core.Data](in: Vec[Vec[T]]) = {
+  def apply[T <: chisel3.Data](in: Vec[Vec[T]]) = {
     val n = in(0).size
     VecInit((0 until n).map(i => VecInit(in.map(row => row(i)))))
   }
