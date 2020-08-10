@@ -106,7 +106,6 @@ abstract class BPUStage extends XSModule {
     val pred = Decoupled(new BranchPrediction)
     val out = Decoupled(new BPUStageIO)
     val predecode = Flipped(ValidIO(new Predecode))
-    val redirect = Flipped(ValidIO(new Redirect))
     val recover =  Flipped(ValidIO(new BranchUpdateInfo))
 
   }
@@ -271,7 +270,6 @@ class BPUStage3 extends BPUStage {
   ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
   ras.io.callIdx.bits := callIdx
   ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
-  ras.io.redirect := io.redirect
   ras.io.recover := io.recover
 
   for(i <- 0 until PredictWidth){
@@ -356,8 +354,6 @@ object BranchUpdateInfoWithHist {
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
-    val redirect = Flipped(ValidIO(new Redirect))
-    val recover =  Flipped(ValidIO(new BranchUpdateInfo))
     val inOrderBrInfo    = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
@@ -402,11 +398,9 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   s3.io.out.ready := io.branchInfo.ready
 
   s1.io.recover <> DontCare
-  s1.io.redirect <> DontCare
-  s2.io.redirect <> DontCare
   s2.io.recover <> DontCare
-  s3.io.redirect <> io.redirect
-  s3.io.recover <> io.recover
+  s3.io.recover.valid <> io.inOrderBrInfo.valid
+  s3.io.recover.bits <> io.inOrderBrInfo.bits.ui
 
   XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
   for (i <- 0 until PredictWidth) {
