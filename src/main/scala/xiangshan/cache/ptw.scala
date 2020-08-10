@@ -236,7 +236,7 @@ class PTW extends PtwModule {
         state := state_idle
       }.elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
         level := level + 1.U // TODO: consider superpage
-      }.elsewhen (mem.req.fire()) {
+      }.elsewhen (mem.req.ready) {
         state := state_wait_resp
         assert(!(level === 3.U)) // NOTE: pte is not found after 3 layers(software system is wrong)
       }
@@ -269,7 +269,7 @@ class PTW extends PtwModule {
   // mem:
   io.mem.req.valid := state === state_req && 
                       ((level===0.U && !tlbHit && !l1Hit) ||
-                      (level===1.U) ||
+                      (level===1.U && !l2Hit) ||
                       (level===2.U))
   io.mem.req.bits.apply(
     addr = Mux(level===0.U, l1addr/*when l1Hit, dontcare, when l1miss, l1addr*/,
@@ -282,7 +282,7 @@ class PTW extends PtwModule {
     user = 0.U
   )
   io.mem.resp.ready := true.B
-  assert(!io.mem.resp.valid || state===state_wait_resp)
+  assert(!io.mem.resp.valid || state===state_wait_resp, "mem.resp.valid:%d state:%d", io.mem.resp.valid, state)
 
   // resp
   val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && mem.resp.fire()) || state===state_wait_ready
@@ -343,7 +343,7 @@ class PTW extends PtwModule {
   XSDebug(valid, p"CSR: ${csr}\n")
 
   XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
-  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)}\n")
+  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)} memReq(v:${io.mem.req.valid} r:${io.mem.req.ready})\n")
 
   XSDebug(mem.req.fire(), p"mem req fire addr:0x${Hexadecimal(io.mem.req.bits.addr)}\n")
   XSDebug(mem.resp.fire(), p"mem resp fire rdata:0x${Hexadecimal(io.mem.resp.bits.rdata)} Pte:${memPte}\n")
