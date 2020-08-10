@@ -234,11 +234,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val ptwIdx = Reg(UInt(RoqIdxWidth.W))
   val ptwPf  = RegInit(false.B) // TODO: add redirect. also for ptw, add redirect
   val ptwPfHit = widthMap{i => ptwPf && req(i).valid && req(i).bits.idx === ptwIdx }
-  
+
   val hitVec = widthMapSeq{ i => 
     (v.asBools zip VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))).map{ case (a,b) => a&b } }
-  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool & valid(i) & vmEnable && !ptwPfHit(i)}
-  val miss = widthMap{i => !hit(i) && valid(i) & vmEnable && !ptwPfHit(i) }
+  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool && valid(i) && vmEnable && !ptwPfHit(i)}
+  val miss = widthMap{i => !hit(i) && valid(i) && vmEnable && !ptwPfHit(i)}
   val hitppn = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
   val multiHit = {

@@ -189,14 +189,15 @@ class PTW extends PtwModule {
   val (l1Hit, l1HitData) = { // TODO: add excp
     // 16 terms may casue long latency, so divide it into 2 stage, like l2tlb
     val hitVecT = ptwl1.zipWithIndex.map{case (a,b) => a.hit(l1addr) && l1v(b) }
-    val hitVec  = hitVecT.map(RegEnable(_, init = 0.U, validOneCycle))
+    val hitVec  = hitVecT.map(RegEnable(_, validOneCycle)) // TODO: could have useless init value
     val hitData = ParallelMux(hitVec zip ptwl1)
     val hit     = ParallelOR(hitVec).asBool
     (hit, hitData)
   }
 
   // ptwl2
-  val l1Res = Mux(l1Hit, l1HitData.ppn, memRdata.asTypeOf(pteBundle).ppn)
+  val l1MemBack = mem.resp.fire() && state===state_wait_resp && level===0.U
+  val l1Res = Mux(l1Hit, l1HitData.ppn, RegEnable(memRdata.asTypeOf(pteBundle).ppn, l1MemBack))
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitData) = { // TODO: add excp
     val readRam = (l1Hit && level===0.U && state===state_req) || (mem.resp.fire() && state===state_wait_resp && level===0.U)
@@ -211,7 +212,8 @@ class PTW extends PtwModule {
    * ptwl3 may be functional conflict with l2-tlb
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
-  val l2Res = Mux(l2Hit, l2HitData.ppn, memRdata.asTypeOf(pteBundle).ppn)
+  val l2MemBack = mem.resp.fire() && state===state_wait_resp && level===1.U
+  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memRdata.asTypeOf(pteBundle).ppn, l1MemBack))
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
   // mem Resp
