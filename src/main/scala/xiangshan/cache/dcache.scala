@@ -52,7 +52,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def offsetmsb = idxLSB-1
   def offsetlsb = wordOffBits
   def rowWords = rowBits/wordBits
-  def rowBytes = rowBits/8
   def doNarrowRead = DataBits * nWays % rowBits == 0
   def eccBytes = cacheParams.dataECCBytes
   val eccBits = cacheParams.dataECCBytes * 8
