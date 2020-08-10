@@ -170,9 +170,11 @@ class MicroBTB extends BasePredictor
     val update_target = Mux(u.pd.isBr, u.brTarget, u.target)
     val update_taget_offset =  update_target.asSInt - update_br_pc.asSInt
     val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
-
-    val entry_write_valid = io.update.valid //&& update_is_BR_or_JAL
-    val meta_write_valid = io.update.valid //&& update_is_BR_or_JAL
+  
+  
+    val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && (u.pd.brType === BrType.jal)
+    val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
+    val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
     //write btb target when miss prediction
     when(entry_write_valid)
     {
