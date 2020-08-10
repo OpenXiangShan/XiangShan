@@ -114,7 +114,7 @@ abstract class BPUStage extends XSModule {
 
   val predValid = RegInit(false.B)
 
-  io.in.ready := !predValid || io.out.fire() && io.pred.fire()
+  io.in.ready := !predValid || io.out.fire() && io.pred.fire() || io.flush
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
@@ -194,10 +194,10 @@ class BPUStage1 extends BPUStage {
 
   // 'overrides' default logic
   // when flush, the prediction should also starts
-  when (io.flush || inFire) { predValid := true.B }
-  .elsewhen(outFire)        { predValid := false.B }
-  .otherwise                { predValid := predValid }
-  io.in.ready := !predValid || io.out.fire() && io.pred.fire() || io.flush
+  when (inFire)        { predValid := true.B }
+  .elsewhen (io.flush) { predValid := false.B }
+  .elsewhen (outFire)  { predValid := false.B }
+  .otherwise           { predValid := predValid }
   // io.out.valid := predValid
 
   // ubtb is accessed with inLatch pc in s1, 
@@ -225,7 +225,7 @@ class BPUStage2 extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
-  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) === BTBtype.J)))
+  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) =/= BTBtype.B)))
   notTakens := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && btbResp.types(i) === BTBtype.B && !bimResp.ctrs(i)(1)))
   targetSrc := btbResp.targets
 
@@ -356,9 +356,10 @@ object BranchUpdateInfoWithHist {
 abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   val io = IO(new Bundle() {
     // from backend
-    val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     val redirect = Flipped(ValidIO(new Redirect))
     val recover =  Flipped(ValidIO(new BranchUpdateInfo))
+    val inOrderBrInfo    = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
     // from if1
@@ -373,7 +374,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
-  preds.map(_.io.update <> io.inOrderBrInfo)
+  preds.map(_.io.update <> io.outOfOrderBrInfo)
+  tage.io.update <> io.inOrderBrInfo
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
