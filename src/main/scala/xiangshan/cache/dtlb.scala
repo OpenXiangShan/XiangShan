@@ -288,7 +288,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     ptwPf := ptw.resp.bits.pf
     ptwIdx := ptw.resp.bits.idx
   }
-  ptw.req.valid := ParallelOR(miss).asBool
+  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle
   ptw.resp.ready := state===state_wait && !ptwPf
   for(i <- Width-1 to 0 by -1) {
     when (miss(i)) {
