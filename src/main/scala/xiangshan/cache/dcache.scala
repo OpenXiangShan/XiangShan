@@ -52,6 +52,7 @@ class DCacheLoadIO extends XSBundle
 {
   val req = Flipped(DecoupledIO(new DCacheLoadReq))
   val resp = DecoupledIO(new DCacheResp)
+  val kill = Input(Bool())
 }
 
 class DCacheStoreIO extends XSBundle
@@ -69,7 +70,6 @@ class DcacheToLsuIO extends XSBundle {
   val load = Vec(LoadPipelineWidth, new DCacheLoadIO)
   val store = new DCacheStoreIO
   val refill = Flipped(Valid(new DCacheStoreReq))
-  val redirect = Flipped(ValidIO(new Redirect))
 }
 
 class DcacheIO extends XSBundle {
@@ -133,7 +133,15 @@ class Dcache extends XSModule {
   ldReq.ready := dmem.req.ready && haveLoadReq
   stReq.ready := dmem.req.ready && !haveLoadReq
 
-  ldResp.valid := dmem.resp.fire() && dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 0.U
+  val kill_out = RegInit(false.B)
+  when (io.lsu.load(0).kill) {
+    kill_out := true.B
+  }
+  when (dmem.resp.fire()) {
+    kill_out := false.B
+  }
+
+  ldResp.valid := dmem.resp.fire() && dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 0.U && !kill_out
   ldResp.bits.paddr := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).paddr
   ldResp.bits.data := dmem.resp.bits.rdata
   ldResp.bits.user := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle)
@@ -143,6 +151,7 @@ class Dcache extends XSModule {
   stResp.bits.data := dmem.resp.bits.rdata
   stResp.bits.user := dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle)
 
+  XSDebug(io.lsu.load(0).kill, "[DMEM KILL]\n")
   XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd =/= SimpleBusCmd.write, "[DMEM LOAD  REQ] addr 0x%x wdata 0x%x size %d\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size)
   XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd === SimpleBusCmd.write, "[DMEM STORE REQ] addr 0x%x wdata 0x%x size %d mask %b\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size, dmem.req.bits.wmask(7,0))
   XSInfo(io.dmem.resp.fire() && io.dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 0.U, "[DMEM LOAD  RESP] data %x\n", io.dmem.resp.bits.rdata)
