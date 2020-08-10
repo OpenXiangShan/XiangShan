@@ -16,7 +16,7 @@ trait HasTageParameter extends HasXSParameter{
                       ( 128,   32,    9),
                       ( 128,   64,    9))
   val TageNTables = TableInfo.size
-  val UBitPeriod = 2048
+  val UBitPeriod = 4096
   val TageBanks = PredictWidth // FetchWidth
 
   val TotalBits = TableInfo.map {
