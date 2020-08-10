@@ -202,7 +202,7 @@ class Lsroq extends XSModule {
 
   // (0 until LsroqSize).map(i => {
   //   val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.meta.paddr
-  //   when(allocated(i) && listening(i)) {
+  //   when(allocated(i) && listening(i) && addrMatch && io.miss.resp.fire()) {
   //     // TODO: merge data
   //     // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
   //     // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
@@ -223,7 +223,7 @@ class Lsroq extends XSModule {
   }
 
   (0 until LsroqSize).map(i => {
-    val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.miss.resp.bits.meta.paddr
+    val addrMatch = data(i).paddr(PAddrBits - 1, 3) === io.miss.resp.bits.meta.paddr(PAddrBits - 1, 3)
     when(allocated(i) && listening(i) && addrMatch && io.miss.resp.fire()) {
       val refillData = io.miss.resp.bits.data
       data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
