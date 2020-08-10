@@ -89,8 +89,11 @@ class LoadUnit extends XSModule {
 
   val l3_tlbFeedback = RegNext(l2_tlbFeedback)
   val l3_valid = RegNext(l2_out.fire(), false.B)
+  val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
+  val kill = l3_uop.needFlush(io.redirect)
+//  io.dcache.kill := kill && l3_valid
 
   // Done in Dcache
 

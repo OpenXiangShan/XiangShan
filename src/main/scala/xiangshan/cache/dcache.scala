@@ -52,7 +52,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def offsetmsb = idxLSB-1
   def offsetlsb = wordOffBits
   def rowWords = rowBits/wordBits
-  def rowBytes = rowBits/8
   def doNarrowRead = DataBits * nWays % rowBits == 0
   def eccBytes = cacheParams.dataECCBytes
   val eccBits = cacheParams.dataECCBytes * 8
@@ -193,9 +192,9 @@ abstract class AbstractDataArray extends DCacheModule {
 class DuplicatedDataArray extends AbstractDataArray
 {
 
-  val waddr = io.write.bits.addr >> blockOffBits
+  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   for (j <- 0 until LoadPipelineWidth) {
-    val raddr = io.read(j).bits.addr >> blockOffBits
+    val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
     for (w <- 0 until nWays) {
       for (r <- 0 until refillCycles) {
         val array = SyncReadMem(nSets, Vec(rowWords, Bits(encDataBits.W)))
