@@ -29,6 +29,7 @@ case class XSCoreParameters
   EnableBPD: Boolean = false,
   EnableRAS: Boolean = false,
   EnableLB: Boolean = false,
+  EnableLoop: Boolean = true,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -94,6 +95,7 @@ trait HasXSParameter {
   val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3
   val EnableRAS = core.EnableRAS
   val EnableLB = core.EnableLB
+  val EnableLoop = core.EnableLoop
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
   val BtbBanks = PredictWidth
