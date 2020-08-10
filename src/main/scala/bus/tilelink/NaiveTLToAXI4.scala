@@ -292,4 +292,10 @@ class NaiveTLToAXI4(params: TLParameters) extends XSModule
 object NaiveTLToAXI4
 {
   def apply(params: TLParameters) = { new NaiveTLToAXI4(params) }
+
+  def apply(in: TLCached): AXI4 = {
+    val m = Module(new NaiveTLToAXI4(in.params))
+    m.io.in <> in
+    m.io.out
+  }
 }
