@@ -199,4 +199,20 @@ class LoopPredictor extends LTBModule {
 
   (0 until PredictWidth).foreach(i => io.if4_out(i) := ltbResps(bankIdxInOrder(i)))
 
+  XSDebug("[IF3] fire=%d pc=%x baseBank=%x baseRow=%x baseTag=%x\n", io.if3_fire, io.if3_pc, baseBank, baseRow, baseTag)
+  XSDebug("[IF3] isInNextRow=%b tagInc=%b\n", isInNextRow.asUInt, tagIncremented.asUInt)
+  XSDebug(io.if3_fire, "[IF3] req: \n")
+  for (i <- 0 until PredictWidth) {
+    XSDebug(io.if3_fire, "[IF3] pc=%x idx=%x tag=%x\n", ltbs(i).io.req.bits.pc, ltbs(i).io.req.bits.idx, ltbs(i).io.req.bits.tag)
+  }
+  XSDebug("[IF4] baseBankLatch=%x bankIdxInOrder=", baseBankLatch)
+  for (i <- 0 until PredictWidth) {
+    XSDebug(false, "%x ", bankIdxInOrder(i))
+  }
+  XSDebug(false, "\n")
+  for (i <- 0 until PredictWidth) {
+    XSDebug(io.if4_fire && (i.U === 0 || i.U === 8.U), "[IF4][resps]")
+    XSDebug(false, io.if4_fire, " %d:%d %d", i.U, io.if4_out(i).exit, io.if4_out(i).meta.specCnt)
+    XSDebug(false, io.if4_fire && (i.U === 7.U || i.U === 15.U), "\n")
+  }
 }
