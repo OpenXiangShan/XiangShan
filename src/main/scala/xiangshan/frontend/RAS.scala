@@ -24,7 +24,6 @@ class RAS extends BasePredictor
         val is_ret = Input(Bool())
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
-        val redirect = Flipped(ValidIO(new Redirect))
         val recover =  Flipped(ValidIO(new BranchUpdateInfo))
         val out = ValidIO(new RASResp)
         val branchInfo = Output(new RASBranchInfo)
@@ -58,15 +57,16 @@ class RAS extends BasePredictor
     }
     // update RAS
     // speculative update RAS
-    val push_only = !is_full && io.callIdx.valid && !io.is_ret && io.pc.valid
-    val pop_only = !is_empty && io.is_ret && !io.callIdx.valid && io.pc.valid
+    val push = !is_full && io.callIdx.valid && !io.is_ret && io.pc.valid
+    val pop = !is_empty && io.is_ret && !io.callIdx.valid && io.pc.valid
+    val recover_valid = io.recover.valid && io.recover.bits.isMisPred
     io.out.bits.target := 0.U
-    when (push_only) {
+    val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U)
+    val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
+    val allocNewEntry = new_addr =/= ras_top_addr
+    when (push && !recover_valid) {
         //push
         //XSDebug("d")
-        val new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U)
-        val rasWrite = WireInit(0.U.asTypeOf(rasEntry()))
-        val allocNewEntry = new_addr =/= ras_top_addr
         rasWrite.ctr := 1.U
         rasWrite.retAddr := new_addr
         when(allocNewEntry){
@@ -78,7 +78,7 @@ class RAS extends BasePredictor
         XSDebug("push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",rasWrite.retAddr,rasWrite.ctr,allocNewEntry,sp.asUInt)
     }
     
-    when (pop_only) {
+    when (pop && !recover_valid) {
         //pop
         io.out.bits.target := ras_top_addr
         when (ras_top_ctr === 1.U) {
@@ -92,10 +92,35 @@ class RAS extends BasePredictor
     // use checkpoint to recover RAS
     val recoverSp = io.recover.bits.brInfo.rasSp
     val recoverCtr = io.recover.bits.brInfo.rasTopCtr
-    when (io.redirect.valid && io.redirect.bits.isMisPred) {
+    val recover_top = ras(recoverSp - 1.U)
+    when (recover_valid) {
         sp := recoverSp
         ras(recoverSp).ctr := recoverCtr
         XSDebug("RAS update: SP:%d , Ctr:%d \n",recoverSp,recoverCtr)
+    }
+
+    val recover_and_push = recover_valid && push
+    val recover_and_pop = recover_valid && pop
+    val recover_alloc_new = new_addr =/= recover_top.retAddr
+    when(recover_and_push)
+    {
+        when(recover_alloc_new){
+            sp := recoverSp + 1.U
+            ras(recoverSp).retAddr := new_addr
+            ras(recoverSp).ctr := 1.U
+        } .otherwise{
+            sp := recoverSp
+            recover_top.ctr := recoverCtr + 1.U
+        }
+    } .elsewhen(recover_and_pop)
+    {
+        io.out.bits.target := recover_top.retAddr
+        when ( recover_top.ctr === 1.U) {
+            sp := recoverSp - 1.U
+        }.otherwise {
+            sp := recoverSp
+           recover_top.ctr := recoverCtr - 1.U
+        }
     }
 
 }
