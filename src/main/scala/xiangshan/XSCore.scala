@@ -213,7 +213,7 @@ class XSCore extends XSModule {
 
   val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
 
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2))
+  
   
   val front = Module(new Frontend)
   val backend = Module(new Backend)
@@ -231,8 +231,11 @@ class XSCore extends XSModule {
     empty = Wire(Bool()),
     enable = HasDcache
   )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
-  dmemXbar.io.in(0) <> dcache.mem // FIXME: the coh must be wrong, but not in use currently
+  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2))
+  dmemXbar.io.in(0) <> dcache.mem 
   dmemXbar.io.in(1) <> mem.io.pmem
   io.dmem.mem <> dmemXbar.io.out
-  io.dmem.coh <> dcache.coh
+  io.dmem.coh <> dcache.coh // FIXME: the coh must be wrong, but not in use currently
+  // io.dmem <> dcache
+  // mem.io.pmem <> DontCare
 }
