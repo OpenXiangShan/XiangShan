@@ -293,6 +293,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   for(i <- Width-1 to 0 by -1) {
     when (miss(i)) {
       ptw.req.bits.vpn := reqAddr(i).vpn
+      ptw.req.bits.idx := req(i).bits.idx
     }
   }
 
@@ -321,13 +322,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   for(i <- 0 until Width) {
     XSDebug(req(i).valid, p"req(${i.U}): ${req(i).bits}\n")
-    XSDebug(resp(i).valid, p"resp(${i.U}: ${resp(i).bits}\n")
+    XSDebug(resp(i).valid, p"resp(${i.U}): ${resp(i).bits}\n")
   }
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid), p"CSR: ${csr}\n")
   XSDebug(ParallelOR(valid), p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)}\n")
-  XSDebug(ParallelOR(valid) || state=/=state_idle || ptwPf, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
+  XSDebug(ParallelOR(valid)/* || state=/=state_idle || ptwPf*/, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.fire(), p"PTW resp:${ptw.resp.bits}\n")
 }

@@ -153,18 +153,25 @@ class PTW extends PtwModule {
   val tagLen1 = PAddrBits - log2Up(XLEN/8)
   val tagLen2 = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
   val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
-  val tlbv  = RegInit(VecInit(Seq.fill(TlbL2EntrySize)(false.B)).asUInt)
+  val tlbv  = RegInit(0.U(TlbL2EntrySize.W))
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = tagLen1)))
-  val l1v   = RegInit(VecInit(Seq.fill(PtwL1EntrySize)(false.B)).asUInt)
+  val l1v   = RegInit(0.U(PtwL1EntrySize.W))
   val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
-  val l2v   = RegInit(VecInit(Seq.fill(PtwL2EntrySize)(false.B)).asUInt)
+  val l2v   = RegInit(0.U(PtwL2EntrySize.W))
+
+  // fsm
+  val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
+  val state = RegInit(state_idle)
+  val level = RegInit(0.U(2.W)) // 0/1/2
+  val latch = Reg(resp(0).bits.cloneType)
 
   // tlbl2
   val (tlbHit, tlbHitData) = {
     // tlbl2 is by addr
     // TODO: optimize tlbl2'l2 tag len
     val ramData = tlbl2.read(req.vpn(log2Up(TlbL2EntrySize)-1, 0), validOneCycle)
-    (ramData.hit(req.vpn), ramData) // TODO: optimize tag
+    val vidx = RegEnable(tlbv(req.vpn(log2Up(TlbL2EntrySize)-1, 0)), validOneCycle)
+    (ramData.hit(req.vpn) && vidx, ramData) // TODO: optimize tag
     // TODO: add exception and refill
   }
 
@@ -181,8 +188,8 @@ class PTW extends PtwModule {
   val l1addr = MakeAddr(satp.ppn, getVpnn(req.vpn, 2))
   val (l1Hit, l1HitData) = { // TODO: add excp
     // 16 terms may casue long latency, so divide it into 2 stage, like l2tlb
-    val hitVecT = ptwl1.map(_.hit(l1addr))
-    val hitVec  = hitVecT.map(RegEnable(_, validOneCycle))
+    val hitVecT = ptwl1.zipWithIndex.map{case (a,b) => a.hit(l1addr) && l1v(b) }
+    val hitVec  = hitVecT.map(RegEnable(_, init = 0.U, validOneCycle))
     val hitData = ParallelMux(hitVec zip ptwl1)
     val hit     = ParallelOR(hitVec).asBool
     (hit, hitData)
@@ -192,7 +199,10 @@ class PTW extends PtwModule {
   val l1Res = Mux(l1Hit, l1HitData.ppn, memRdata.asTypeOf(pteBundle).ppn)
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitData) = { // TODO: add excp
-    val ramData = ptwl2.read(l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8)), mem.resp.fire())
+    val readRam = (l1Hit && level===0.U && state===state_req) || (mem.resp.fire() && state===state_wait_resp && level===0.U)
+    val ridx = l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8))
+    val ramData = ptwl2.read(ridx, readRam)
+    val vidx = RegEnable(l2v(ridx), readRam)
     (ramData.hit(l2addr), ramData) // TODO: optimize tag
   }
 
@@ -208,10 +218,6 @@ class PTW extends PtwModule {
   val memPte = mem.resp.bits.rdata.asTypeOf(new PteBundle)
 
   // fsm
-  val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
-  val state = RegInit(state_idle)
-  val level = Reg(UInt(2.W)) // 0/1/2
-  val latch = Reg(resp(0).bits.cloneType)
   assert(!(level===3.U))
   assert(!(tlbHit && (mem.req.valid || state===state_wait_resp))) // when tlb hit, should not req/resp.valid
 
@@ -227,7 +233,7 @@ class PTW extends PtwModule {
       when (tlbHit) {
         state := state_idle
       }.elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
-        level := level + 1.U
+        level := level + 1.U // TODO: consider superpage
       }.elsewhen (mem.req.fire()) {
         state := state_wait_resp
         assert(!(level === 3.U)) // NOTE: pte is not found after 3 layers(software system is wrong)
@@ -260,9 +266,9 @@ class PTW extends PtwModule {
 
   // mem:
   io.mem.req.valid := state === state_req && 
-                      (level===0.U && !tlbHit && !l1Hit) ||
+                      ((level===0.U && !tlbHit && !l1Hit) ||
                       (level===1.U) ||
-                      (level===2.U)
+                      (level===2.U))
   io.mem.req.bits.apply(
     addr = Mux(level===0.U, l1addr/*when l1Hit, dontcare, when l1miss, l1addr*/,
            Mux(level===1.U, Mux(l2Hit, l3addr, l2addr)/*when l2Hit, l3addr, when l2miss, l2addr*/,
@@ -301,15 +307,18 @@ class PTW extends PtwModule {
     when (state===state_wait_resp && level===0.U) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
+      l1v := l1v | UIntToOH(refillIdx)
     }
     when (state===state_wait_resp && level===1.U) {
       val l2addrStore = RegEnable(l2addr, mem.req.fire() && state===state_req && level===1.U)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
+      l2v := l2v | UIntToOH(refillIdx)
     }
     when (state===state_wait_resp && memPte.isLeaf()) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
+      tlbv := tlbv | UIntToOH(refillIdx)
     }
   }
 
@@ -321,17 +330,17 @@ class PTW extends PtwModule {
     }
   }
 
-  XSDebug(validOneCycle, "New Ptw Req from ")
-  PrintFlag(validOneCycle, arbChosen===0.U, "DTLB:\n", "ITLB:\n")
+  XSDebug(validOneCycle, "**New Ptw Req from ")
+  PrintFlag(validOneCycle, arbChosen===0.U, "DTLB**:\n", "ITLB**:\n")
   XSDebug(validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)} (roq)idx:${req.idx}\n")
-  XSDebug(resp(arbChosen).fire(), "Ptw Resp to ")
-  PrintFlag(resp(arbChosen).fire(), arbChosen===0.U, "DTLB:\n", "ITLB\n")
+  XSDebug(resp(arbChosen).fire(), "**Ptw Resp to ")
+  PrintFlag(resp(arbChosen).fire(), arbChosen===0.U, "DTLB**:\n", "ITLB**\n")
   XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready}) entry:${resp(arbChosen).bits.entry} (roq)idx:${resp(arbChosen).bits.idx} pf:${resp(arbChosen).bits.pf}\n")
 
   XSDebug(sfence.valid, p"Sfence: sfence instr here ${sfence.bits}\n")
   XSDebug(valid, p"CSR: ${csr}\n")
 
-  XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}")
+  XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
   XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)}\n")
 
   XSDebug(mem.req.fire(), p"mem req fire addr:0x${Hexadecimal(io.mem.req.bits.addr)}\n")
