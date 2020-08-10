@@ -126,7 +126,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val replayValid = io.redirect.valid && io.redirect.bits.isReplay
   val needReplay = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && replayValid
+    needReplay(i) := roqNeedFlush(i) && stateEntries(i) =/= s_invalid && replayValid
     when (needReplay(i)) {
       stateEntries(i) := s_valid
     }
