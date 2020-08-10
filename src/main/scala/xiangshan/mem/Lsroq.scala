@@ -429,22 +429,15 @@ class Lsroq extends XSModule {
   // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
 
-  def getFirstOne(mask: Vec[Bool], start: UInt) = {
-    val length = mask.length
-    val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
-    val highBits = (0 until length).map(i => mask(i) & lowMask(i))
-    Mux(Cat(highBits).orR(), PriorityEncoder(highBits), PriorityEncoder(mask))
-  }
 
   // store backward query and rollback
   //  val needCheck = Seq.fill(8)(WireInit(true.B))
   (0 until StorePipelineWidth).foreach(i => {
     rollback(i) := DontCare
-
     when(io.storeIn(i).valid) {
       val needCheck = Seq.fill(LsroqSize + 1)(Seq.fill(8)(WireInit(true.B))) // TODO: refactor
 
-      val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
+      val lsroqViolation = VecInit((0 until LsroqSize).map(j => {
         val ptr = io.storeIn(i).bits.uop.lsroqIdx + j.U
         val reachHead = (ptr+1.U) === ringBufferHeadExtended
         val addrMatch = allocated(ptr) &&
@@ -458,8 +451,7 @@ class Lsroq extends XSModule {
           needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !s && v // TODO: update refilled data
         })
         Cat(violationVec).orR()
-      }))
-      val lsroqViolation = lsroqViolationVec.asUInt().orR()
+      })).asUInt().orR()
 
       // when l/s writeback to roq together, check if rollback is needed
       val wbViolation = VecInit((0 until LoadPipelineWidth).map(j => {
@@ -478,15 +470,7 @@ class Lsroq extends XSModule {
       })).asUInt().orR()
 
       rollback(i).valid := lsroqViolation || wbViolation || l4Violation
-      when (lsroqViolation) {
-        val index = getFirstOne(lsroqViolationVec, ringBufferTail)
-        rollback(i).bits.roqIdx := uop(index).roqIdx - 1.U
-      }.otherwise {
-        rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
-      }
-      rollback(i).bits.isReplay := true.B
-      rollback(i).bits.isMisPred := false.B
-      rollback(i).bits.isException := false.B
+
 
       XSDebug(
         lsroqViolation,
@@ -506,6 +490,11 @@ class Lsroq extends XSModule {
     }.otherwise({
       rollback(i).valid := false.B
     })
+    rollback(i).bits.isReplay := true.B
+    rollback(i).bits.isMisPred := false.B
+    rollback(i).bits.isException := false.B
+    rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
+    rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
   })
 
   def rollbackSel(a: Valid[Redirect], b: Valid[Redirect]): ValidIO[Redirect] = {
