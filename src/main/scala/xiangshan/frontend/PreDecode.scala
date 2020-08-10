@@ -14,7 +14,7 @@ trait HasPdconst{ this: XSModule =>
     val rd = Mux(isRVC(instr), 1.U, instr(11,7))
     val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
     val isCall = (brType === BrType.jal || brType === BrType.jalr) && isLink(rd)
-    val isRet = brType === BrType.jalr && isLink(rs) && (!isLink(rd) && !isRVC(instr) || isRVC(instr)&&instr(12)===1) // c.jr is not ret?
+    val isRet = brType === BrType.jalr && isLink(rs) && (!isLink(rd) && !isRVC(instr) || isRVC(instr)&&instr(12)===1.U) // c.jr is not ret?
     List(brType, isCall, isRet)
   }
 }
