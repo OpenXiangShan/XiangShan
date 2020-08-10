@@ -18,7 +18,7 @@ class LoadUnit extends XSModule {
     val ldout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dcache = Flipped(new DCacheLoadIO)
+    val dcache = new DCacheLoadIO
     val dtlb = Flipped(new DtlbToLsuIO)
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
@@ -64,7 +64,8 @@ class LoadUnit extends XSModule {
   io.dcache.req.valid     := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
 
   io.dcache.req.bits.cmd  := MemoryOpConstants.M_XRD
-  io.dcache.req.bits.addr := io.dtlb.resp.bits.paddr
+  // TODO: vaddr
+  io.dcache.req.bits.addr := io.dtlb.resp.bits.paddr 
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := l2_out.bits.mask
 

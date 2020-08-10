@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
@@ -161,7 +162,23 @@ class Lsroq extends XSModule {
   )
   val missRefillSel = OHToUInt(missRefillSelVec.asUInt)
   io.miss.req.valid := missRefillSelVec.asUInt.orR
+  io.miss.req.bits.cmd := MemoryOpConstants.M_XRD
   io.miss.req.bits.addr := data(missRefillSel).paddr
+  io.miss.req.bits.data := DontCare
+  io.miss.req.bits.mask := data(missRefillSel).mask
+  io.miss.req.bits.meta := data(missRefillSel).paddr
+
+  io.miss.req.bits.meta.id       := DontCare
+  io.miss.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
+  io.miss.req.bits.meta.paddr    := data(missRefillSel).paddr
+  io.miss.req.bits.meta.uop      := uop(missRefillSel)
+  io.miss.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
+  io.miss.req.bits.meta.tlb_miss := false.B
+  io.miss.req.bits.meta.mask     := data(missRefillSel).mask
+  io.miss.req.bits.meta.replay   := false.B
+
+  assert(!(data(missRefillSel).mmio && io.miss.req.valid))
+
   when(io.miss.req.fire()) {
     miss(missRefillSel) := false.B
     listening(missRefillSel) := true.B

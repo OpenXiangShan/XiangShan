@@ -15,7 +15,7 @@ class SbufferUserBundle extends XSBundle {
 class Sbuffer extends XSModule with NeedImpl{
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
-    val dcache = Flipped(new DCacheStoreIO)
+    val dcache = new DCacheStoreIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 
@@ -64,7 +64,7 @@ class Sbuffer extends XSModule with NeedImpl{
 class FakeSbuffer extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheStoreReq)))
-    val dcache = Flipped(new DCacheStoreIO)
+    val dcache = new DCacheStoreIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 
