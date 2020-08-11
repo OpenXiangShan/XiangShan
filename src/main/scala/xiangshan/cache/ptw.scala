@@ -334,7 +334,7 @@ class PTW extends PtwModule {
 
   XSDebug(validOneCycle, "**New Ptw Req from ")
   PrintFlag(validOneCycle, arbChosen===0.U, "DTLB**:", "ITLB**:")
-  XSDebug(validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)} (roq)idx:${req.idx}\n")
+  XSDebug(false, validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)} (roq)idx:${req.idx}\n")
   XSDebug(resp(arbChosen).fire(), "**Ptw Resp to ")
   PrintFlag(resp(arbChosen).fire(), arbChosen===0.U, "DTLB**:\n", "ITLB**\n")
   XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready}) entry:${resp(arbChosen).bits.entry} (roq)idx:${resp(arbChosen).bits.idx} pf:${resp(arbChosen).bits.pf}\n")

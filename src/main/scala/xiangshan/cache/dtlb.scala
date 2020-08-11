@@ -98,7 +98,7 @@ class TlbEntry extends TlbBundle {
 
   def vpnHit(vpn: UInt):Bool = {
     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
-    val maskLevel = VecInit((0 until Level).map{i =>
+    val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
       VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt})
     val mask = maskLevel(level)
     (mask&this.vpn) === (mask&vpn)
