@@ -10,8 +10,8 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{ICacheParameters, DCacheParameters}
-import bus.tilelink.TLParameters
+import xiangshan.cache.{DCacheParameters, ICacheParameters}
+import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 import utils._
 
 case class XSCoreParameters
@@ -208,51 +208,46 @@ object AddressSpace extends HasXSParameter {
 }
 
 
+class TLReqProducer extends XSModule {
+  val io = IO(new TLCached(l1BusParams))
+
+  io <> DontCare
+
+  val addr = RegInit("h80000000".U)
+  addr := addr + 4.U
+  val (legal, bundle) = TLMasterUtilities.Get(io.params, 0.U, addr, 3.U)
+  io.a.bits := bundle
+  io.a.valid := true.B
+  assert(legal)
+  io.d.ready := true.B
+  when(io.a.fire()){
+    io.a.bits.dump()
+  }
+  when(io.d.fire()){
+    io.d.bits.dump()
+  }
+}
+
 class XSCore extends XSModule {
   val io = IO(new Bundle {
-    val imem = new SimpleBusC
-    val dmem = new SimpleBusC
-    val mmio = new SimpleBusUC
-    val frontend = Flipped(new SimpleBusUC())
+    val mem = new TLCached(l1BusParams)
+    val mmio = new TLCached(l1BusParams)
   })
 
-  io.imem     <> DontCare
-  io.dmem     <> DontCare
-  io.mmio     <> DontCare
-  io.frontend <> DontCare
+  // val fakecache = Module(new TLReqProducer)
+  // io.mem <> fakecache.io
 
-  /*
-  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
+  io.mmio <> DontCare
 
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2, userBits = DcacheUserBundleWidth))
-  
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
+  mem.io.mem   <> io.mem
+  mem.io.mmio  <> io.mmio
 
   backend.io.memMMU.imem <> DontCare
-
-  val dtlb = TLB(
-    in = mem.io.dmem,
-    mem = dmemXbar.io.in(1),
-    flush = false.B,
-    csrMMU = backend.io.memMMU.dmem
-  )(TLBConfig(name = "dtlb", totalEntry = 64, userBits = DcacheUserBundleWidth))
-  dmemXbar.io.in(0) <> dtlb.io.out
-  // dmemXbar.io.in(1) <> io.frontend
-
-  io.frontend <> DontCare
-
-  io.dmem <> Cache(
-    in = dmemXbar.io.out,
-    mmio = Seq(io.mmio),
-    flush = "b00".U,
-    empty = dtlb.io.cacheEmpty,
-    enable = HasDcache
-  )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
-  */
 
 }

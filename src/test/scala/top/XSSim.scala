@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import bus.axi4._
+import bus.tilelink.NaiveTLToAXI4
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
 import xiangshan._
@@ -58,11 +59,11 @@ class XSSimTop extends Module {
   // Be careful with the commit checking of emu.
   // A large delay will make emu incorrectly report getting stuck.
   val memdelay = Module(new AXI4Delayer(0))
-  val mmio = Module(new SimMMIO)
+  val mmio = Module(new SimMMIO(soc.io.mmio.params))
 
   soc.io.frontend := DontCare
 
-  memdelay.io.in <> soc.io.mem
+  memdelay.io.in <> NaiveTLToAXI4(soc.io.mem)
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio
@@ -105,6 +106,7 @@ class XSSimTop extends Module {
   ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
   ExcitingUtils.addSource(timer, "logTimestamp")
 
+  ExcitingUtils.fixConnections()
   // Check and dispaly all source and sink connections
   ExcitingUtils.checkAndDisplay()
 }

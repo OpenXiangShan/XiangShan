@@ -63,6 +63,18 @@ object ExcitingUtils {
     BoringUtils.addSink(component, name, disableDedup, forceExists)
   }
 
+  def fixConnections(): Unit ={
+    val dontCare = WireInit(0.U)
+    for((name, conn) <- map){
+      if(conn.sinkModule.isEmpty){
+        addSink(dontCare, name, conn.connType)
+      }
+      if(conn.sourceModule.isEmpty){
+        addSource(dontCare, name, conn.connType)
+      }
+    }
+  }
+
 
   def checkAndDisplay(): Unit = {
     var leagle = true

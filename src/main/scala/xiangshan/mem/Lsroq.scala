@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
+import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
@@ -17,6 +18,8 @@ class LsRoqEntry extends XSBundle {
   // val store = Bool()
   // val bwdMask = Vec(8, Bool()) // UInt(8.W)
   // val bwdData = Vec(8, UInt(8.W))
+  val fwdMask = Vec(8, Bool())
+  val fwdData = Vec(8, UInt(8.W))
 }
 
 // Load/Store Roq (Lsroq) for XiangShan Out of Order LSU
@@ -33,8 +36,8 @@ class Lsroq extends XSModule {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
-    val miss = Decoupled(new DCacheLoadIO)
-    val refill = Flipped(Valid(new DCacheStoreReq))
+    val miss = new DCacheLoadIO
+    // val refill = Flipped(Valid(new DCacheStoreReq))
   })
 
   val uop = Reg(Vec(LsroqSize, new MicroOp))
@@ -125,8 +128,8 @@ class Lsroq extends XSModule {
       data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.mask
       data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.data // for debug
       data(io.loadIn(i).bits.uop.lsroqIdx).mmio := io.loadIn(i).bits.mmio
-      // data(io.loadIn(i).bits.uop.lsroqIdx).bwdMask := io.loadIn(i).bits.forwardMask
-      // data(io.loadIn(i).bits.uop.lsroqIdx).bwdData := io.loadIn(i).bits.forwardData
+      data(io.loadIn(i).bits.uop.lsroqIdx).fwdMask := io.loadIn(i).bits.forwardMask
+      data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
       miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss
       store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
     }
@@ -160,18 +163,57 @@ class Lsroq extends XSModule {
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
   val missRefillSel = OHToUInt(missRefillSelVec.asUInt)
-  io.miss.valid := missRefillSelVec.asUInt.orR
-  io.miss.bits.addr := data(missRefillSel).paddr
-  when(io.miss.fire()) {
+  io.miss.req.valid := missRefillSelVec.asUInt.orR
+  io.miss.req.bits.cmd := MemoryOpConstants.M_XRD
+  io.miss.req.bits.addr := data(missRefillSel).paddr
+  io.miss.req.bits.data := DontCare
+  io.miss.req.bits.mask := data(missRefillSel).mask
+  io.miss.req.bits.meta := data(missRefillSel).paddr
+
+  io.miss.req.bits.meta.id       := DontCare
+  io.miss.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
+  io.miss.req.bits.meta.paddr    := data(missRefillSel).paddr
+  io.miss.req.bits.meta.uop      := uop(missRefillSel)
+  io.miss.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
+  io.miss.req.bits.meta.tlb_miss := false.B
+  io.miss.req.bits.meta.mask     := data(missRefillSel).mask
+  io.miss.req.bits.meta.replay   := false.B
+
+  assert(!(data(missRefillSel).mmio && io.miss.req.valid))
+
+  when(io.miss.req.fire()) {
     miss(missRefillSel) := false.B
     listening(missRefillSel) := true.B
   }
 
   // get load result from refill resp
-  def refillDataSel(data: UInt, offset: UInt): UInt = {
-    Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(64 * (p + 1) - 1, 64 * p))))
-  }
+  // Refill a line in 1 cycle
+  // def refillDataSel(data: UInt, offset: UInt): UInt = {
+  //   Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(64 * (p + 1) - 1, 64 * p))))
+  // }
 
+  // def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
+  //   val res = Wire(Vec(8, UInt(8.W)))
+  //   (0 until 8).foreach(i => {
+  //     res(i) := Mux(fwdMask(i), fwd(8 * (i + 1) - 1, 8 * i), refill(8 * (i + 1) - 1, 8 * i))
+  //   })
+  //   res.asUInt
+  // }
+
+  // (0 until LsroqSize).map(i => {
+  //   val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.meta.paddr
+  //   when(allocated(i) && listening(i) && addrMatch && io.miss.resp.fire()) {
+  //     // TODO: merge data
+  //     // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
+  //     // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
+  //     data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0)) // TODO: forward refill data
+  //     valid(i) := true.B
+  //     listening(i) := false.B
+  //   }
+  // })
+
+  // Refill 64 bit in a cycle
+  // Refill data comes back from io.miss.resp
   def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
     val res = Wire(Vec(8, UInt(8.W)))
     (0 until 8).foreach(i => {
@@ -181,12 +223,10 @@ class Lsroq extends XSModule {
   }
 
   (0 until LsroqSize).map(i => {
-    val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.meta.paddr
-    when(allocated(i) && listening(i)) {
-      // TODO: merge data
-      // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
-      // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
-      data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0)) // TODO: forward refill data
+    val addrMatch = data(i).paddr(PAddrBits - 1, 3) === io.miss.resp.bits.meta.paddr(PAddrBits - 1, 3)
+    when(allocated(i) && listening(i) && addrMatch && io.miss.resp.fire()) {
+      val refillData = io.miss.resp.bits.data
+      data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
       valid(i) := true.B
       listening(i) := false.B
     }
