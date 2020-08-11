@@ -10,8 +10,6 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new ExuOutput)
-    val redirect = Flipped(ValidIO(new Redirect)) // for assertion
-    val tlbFeedback = ValidIO(new TlbFeedback)
     val dcache = new DCacheLoadIO
     val dtlb = Flipped(new DtlbToLsuIO)
   })

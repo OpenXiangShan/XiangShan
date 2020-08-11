@@ -119,6 +119,7 @@ class Memend extends XSModule {
 
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
+  val miscUnit = Module(new MiscUnit)
   val dcache = Module(new DCache)
   // val mshq = Module(new MSHQ)
   val dtlb = Module(new Dtlb)
@@ -130,6 +131,7 @@ class Memend extends XSModule {
   dcache.io.bus <> io.mem
   // dcache.io.bus <> io.mmio // TODO: FIXIT
 
+  // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.ldin <> io.backend.ldin(i)
     loadUnits(i).io.ldout <> io.backend.ldout(i)
@@ -138,12 +140,13 @@ class Memend extends XSModule {
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
     loadUnits(i).io.dtlb <> dtlb.io.lsu(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
-
+    
     lsroq.io.loadIn(i) <> loadUnits(i).io.lsroq.loadIn
     lsroq.io.ldout(i) <> loadUnits(i).io.lsroq.ldout
     lsroq.io.forward(i) <> loadUnits(i).io.lsroq.forward
   }
-
+  
+  // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
     storeUnits(i).io.stin <> io.backend.stin(i)
     storeUnits(i).io.redirect <> io.backend.redirect
@@ -152,7 +155,16 @@ class Memend extends XSModule {
     storeUnits(i).io.lsroq <> lsroq.io.storeIn(i)
   }
 
-  // dcache.io.lsu.refill <> DontCare // TODO
+  // MiscUnit
+  // MiscUnit will override other control signials,
+  // as misc insts (LR/SC/AMO) will block the pipeline  
+  // TODO
+  miscUnit.io <> DontCare
+  miscUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits) 
+  // miscUnit.io.dtlb 
+  // miscUnit.io.dcache 
+  // miscUnit.io.out  
+  
   sbuffer.io.dcache <> dcache.io.lsu.store
 
   lsroq.io.stout <> io.backend.stout
@@ -162,13 +174,8 @@ class Memend extends XSModule {
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
   
-  //  lsroq.io.refill <> DontCare
-  //  lsroq.io.refill.valid := false.B // TODO
   lsroq.io.dcache <> dcache.io.lsu.lsroq // TODO: Add AMO
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
 
-  // TODO: MiscUnit
-  // MiscUnit will override other control signials,
-  // as misc insts (LR/SC/AMO) will block the pipeline  
 }
