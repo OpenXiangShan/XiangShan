@@ -76,7 +76,7 @@ class MicroBTB extends BasePredictor
     val read_valid = io.pc.valid
     val read_req_tag = getTag(io.pc.bits)
     val read_req_basebank = getBank(io.pc.bits)
-    val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
+    // val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
     XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
     
@@ -108,7 +108,7 @@ class MicroBTB extends BasePredictor
 
     for(i <- 0 until PredictWidth){
         // do not need to decide whether to produce results\
-        read_resp(i).valid := uBTBMeta_resp(i).valid && read_hit_vec(i) && read_mask(i)
+        read_resp(i).valid := uBTBMeta_resp(i).valid && read_hit_vec(i) && io.inMask(i)
         read_resp(i).taken := read_resp(i).valid && uBTBMeta_resp(i).pred(1)
         read_resp(i).notTaken := read_resp(i).valid && !uBTBMeta_resp(i).pred(1)
         read_resp(i).target := ((io.pc.bits).asSInt + (i<<1).S + btb_resp(i).offset).asUInt
@@ -188,14 +188,19 @@ class MicroBTB extends BasePredictor
         uBTBMeta(update_write_way)(update_bank).valid := true.B
         uBTBMeta(update_write_way)(update_bank).tag := update_tag
         uBTBMeta(update_write_way)(update_bank).pred := 
-        Mux(!update_hits(update_bank),
+        Mux(!update_hits/*(update_bank)*/,
             Mux(update_taken,3.U,0.U),
             satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)
         )
     }
-    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n "
+    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n"
                 ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_taget_offset(offsetSize-1,0))
-   
+    XSDebug(meta_write_valid, "uBTB update: update_taken:%d | old_pred:%b | new_pred:%b\n",
+        update_taken, uBTBMeta(update_write_way)(update_bank).pred,
+        Mux(!update_hits,
+            Mux(update_taken,3.U,0.U),
+            satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)))
+
    //bypass:read-after-write 
 //    for( b <- 0 until PredictWidth) {
 //         when(update_bank === b.U && meta_write_valid && read_valid

@@ -9,7 +9,7 @@ trait LTBParams extends HasXSParameter {
   //  +-----------+---------+--------------+-----------+
   //  |    tag    |   idx   |    4 bits    | 0 (1 bit) |
   //  +-----------+---------+--------------+-----------+
-  val tagLen = 10
+  val tagLen = 24
   val nRows = 16
   val idxLen = log2Up(nRows)
   val cntBits = 10

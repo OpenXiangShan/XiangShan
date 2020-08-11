@@ -420,6 +420,7 @@ class BPU extends BaseBPU {
   val s1_brInfo_in = Wire(Vec(PredictWidth, new BranchInfo))
 
   s1_resp_in.tage := DontCare
+  s1_resp_in.loop := DontCare
   s1_brInfo_in    := DontCare
 
   val s1_inLatch = RegEnable(io.in, s1_fire)
