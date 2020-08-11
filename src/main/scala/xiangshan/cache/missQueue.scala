@@ -35,22 +35,22 @@ class MissEntry extends DCacheModule
 
     // client requests
     val req    = Flipped(DecoupledIO(new MissReq))
-    val resp   = ValidIO(new MissResp)
+    val resp   = DecoupledIO(new MissResp)
     val finish = Flipped(DecoupledIO(new MissFinish))
 
     val block_idx   = Output(Valid(UInt()))
     val block_addr  = Output(Valid(UInt()))
 
-    val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
-    val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
-    val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
+    val mem_acquire = DecoupledIO(new TLBundleA(cfg.busParams))
+    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(cfg.busParams)))
+    val mem_finish  = DecoupledIO(new TLBundleE(cfg.busParams))
 
-    val meta_read = Decoupled(new L1MetaReadReq)
-    val meta_resp = Output(Vec(nWays, new L1Metadata))
-    val meta_write  = Decoupled(new L1MetaWriteReq)
-    val refill      = Decoupled(new L1DataWriteReq)
+    val meta_read   = DecoupledIO(new L1MetaReadReq)
+    val meta_resp   = Input(Vec(nWays, new L1Metadata))
+    val meta_write  = DecoupledIO(new L1MetaWriteReq)
+    val refill      = DecoupledIO(new L1DataWriteReq)
 
-    val wb_req      = Decoupled(new WritebackReq)
+    val wb_req      = DecoupledIO(new WritebackReq)
     val wb_resp     = Input(Bool())
   })
 
@@ -97,6 +97,7 @@ class MissEntry extends DCacheModule
   // assign default values to output signals
   io.req.ready           := false.B
   io.resp.valid          := false.B
+  io.resp.bits           := DontCare
   io.finish.ready        := false.B
 
   io.mem_acquire.valid   := false.B
@@ -342,27 +343,26 @@ class MissQueue extends DCacheModule
 {
   val io = IO(new Bundle {
     val req    = Flipped(DecoupledIO(new MissReq))
-    val resp   = DecoupledIO(new MissResp)
+    val resp   = ValidIO(new MissResp)
     val finish = Flipped(DecoupledIO(new MissFinish))
 
     val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
     val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
     val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
 
-    val meta_read = Decoupled(new L1MetaReadReq)
-    val meta_resp = Output(Vec(nWays, new L1Metadata))
+    val meta_read   = Decoupled(new L1MetaReadReq)
+    val meta_resp   = Input(Vec(nWays, new L1Metadata))
     val meta_write  = Decoupled(new L1MetaWriteReq)
     val refill      = Decoupled(new L1DataWriteReq)
 
     val wb_req      = Decoupled(new WritebackReq)
     val wb_resp     = Input(Bool())
 
-    val inflight_req_idxes  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
-    val inflight_req_block_addrs  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val inflight_req_idxes       = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val inflight_req_block_addrs = Output(Vec(cfg.nMissEntries, Valid(UInt())))
   })
 
-  val resp_arb       = Module(new Arbiter(new MissResp,    cfg.nMissEntries))
-  val finish_arb     = Module(new Arbiter(new MissFinish,  cfg.nMissEntries))
+  val resp_arb       = Module(new Arbiter(new MissResp,         cfg.nMissEntries))
   val meta_read_arb  = Module(new Arbiter(new L1MetaReadReq,    cfg.nMissEntries))
   val meta_write_arb = Module(new Arbiter(new L1MetaWriteReq,   cfg.nMissEntries))
   val refill_arb     = Module(new Arbiter(new L1DataWriteReq,   cfg.nMissEntries))
@@ -384,7 +384,7 @@ class MissQueue extends DCacheModule
     }
 
     // entry resp
-    resp_arb.io.in(i)     <>  entry.io.resp
+    resp_arb.io.in(i)       <>  entry.io.resp
 
     // entry finish
     entry.io.finish.valid   :=  (i.U === io.finish.bits.entry_id) && io.finish.valid
@@ -405,16 +405,19 @@ class MissQueue extends DCacheModule
       entry.io.mem_grant <> io.mem_grant
     }
 
-    io.inflight_req_idxes(i) <> entry.io.block_idx
+    io.inflight_req_idxes(i)       <> entry.io.block_idx
     io.inflight_req_block_addrs(i) <> entry.io.block_addr
 
     entry
   }
 
-  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.req.ready)))
+  entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req.ready))
 
   io.req.ready  := req_ready
-  io.resp       <> resp_arb.io.out
+  io.resp.valid := resp_arb.io.out.valid
+  io.resp.bits  := resp_arb.io.out.bits
+  resp_arb.io.out.ready := true.B
+
   io.meta_read  <> meta_read_arb.io.out
   io.meta_write <> meta_write_arb.io.out
   io.refill     <> refill_arb.io.out

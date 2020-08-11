@@ -139,8 +139,8 @@ class L1DataWriteReq extends L1DataReadReq {
 
 abstract class AbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
-    val read  = Input(Vec(LoadPipelineWidth, DecoupledIO(new L1DataReadReq)))
-    val write = Input(DecoupledIO(new L1DataWriteReq))
+    val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
+    val write = Flipped(DecoupledIO(new L1DataWriteReq))
     val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, Vec(refillCycles, Bits(encRowBits.W)))))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
@@ -278,9 +278,9 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
 
 class DuplicatedMetaArray extends DCacheModule {
   val io = IO(new DCacheBundle {
-    val read  = Input(Vec(LoadPipelineWidth, Valid(new L1MetaReadReq)))
-    val write = Input(Valid(new L1MetaWriteReq))
-    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, Vec(refillCycles, Bits(encRowBits.W)))))
+    val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1MetaReadReq)))
+    val write = Flipped(DecoupledIO(new L1MetaWriteReq))
+    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, new L1Metadata)))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
 

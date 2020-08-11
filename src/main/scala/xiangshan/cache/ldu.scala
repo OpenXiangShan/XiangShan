@@ -9,10 +9,10 @@ class LoadPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
     val lsu       = Flipped(new DCacheLoadIO)
-    val data_read = Decoupled(new L1DataReadReq)
-    val data_resp = Output(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
-    val meta_read = Decoupled(new L1MetaReadReq)
-    val meta_resp = Output(Vec(nWays, new L1Metadata))
+    val data_read = DecoupledIO(new L1DataReadReq)
+    val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val meta_read = DecoupledIO(new L1MetaReadReq)
+    val meta_resp = Input(Vec(nWays, new L1Metadata))
   })
 
   // LSU requests
@@ -107,14 +107,16 @@ class LoadPipe extends DCacheModule
   // load data gen
   val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
 
-  val resp = Wire(Valid(new DCacheResp))
-  resp.valid         := s2_valid
-  resp.bits.data     := s2_data_word
-  resp.bits.meta     := s2_req.meta
-  resp.bits.miss     := !s2_hit
-  resp.bits.nack     := s2_nack
+  val resp = Wire(ValidIO(new DCacheResp))
+  resp.valid     := s2_valid
+  resp.bits.data := s2_data_word
+  resp.bits.meta := s2_req.meta
+  resp.bits.miss := !s2_hit
+  resp.bits.nack := s2_nack
 
-  io.lsu.resp <> resp
+  io.lsu.resp.valid := resp.valid
+  io.lsu.resp.bits := resp.bits
+  assert(!(resp.valid && !io.lsu.resp.ready))
 
   when (resp.valid) {
     XSDebug(s"LoadPipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",

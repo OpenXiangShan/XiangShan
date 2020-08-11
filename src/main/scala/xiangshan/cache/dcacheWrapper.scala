@@ -233,14 +233,14 @@ class DCache extends DCacheModule {
   val storeMissReq = storeMissQueue.io.miss_req
 
   missReqArb.io.in(0).valid          := loadMissReq.valid
-  missReqArb.io.in(0).ready          := loadMissReq.ready
+  loadMissReq.ready                  := missReqArb.io.in(0).ready
   missReqArb.io.in(0).bits.cmd       := loadMissReq.bits.cmd
   missReqArb.io.in(0).bits.addr      := loadMissReq.bits.addr
   missReqArb.io.in(0).bits.client_id := Cat(loadMissQueueClientId,
     loadMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
   missReqArb.io.in(1).valid          := storeMissReq.valid
-  missReqArb.io.in(1).ready          := storeMissReq.ready
+  storeMissReq.ready                 := missReqArb.io.in(1).ready
   missReqArb.io.in(1).bits.cmd       := storeMissReq.bits.cmd
   missReqArb.io.in(1).bits.addr      := storeMissReq.bits.addr
   missReqArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
@@ -271,13 +271,13 @@ class DCache extends DCacheModule {
 
   val missFinishArb = Module(new Arbiter(new MissFinish, 2))
   missFinishArb.io.in(0).valid          := loadMissFinish.valid
-  missFinishArb.io.in(0).ready          := loadMissFinish.ready
+  loadMissFinish.ready                  := missFinishArb.io.in(0).ready
   missFinishArb.io.in(0).bits.entry_id  := loadMissFinish.bits.entry_id
   missFinishArb.io.in(0).bits.client_id := Cat(loadMissQueueClientId,
     loadMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
 
   missFinishArb.io.in(1).valid          := storeMissFinish.valid
-  missFinishArb.io.in(1).ready          := storeMissFinish.ready
+  storeMissFinish.ready                 := missFinishArb.io.in(1).ready
   missFinishArb.io.in(1).bits.entry_id  := storeMissFinish.bits.entry_id
   missFinishArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
     storeMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
@@ -316,31 +316,24 @@ class DCache extends DCacheModule {
   wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMissEntries.U
 
   // synchronization stuff
-  val store_idxes = stu.io.inflight_req_idxes
-  val store_block_addrs = stu.io.inflight_req_block_addrs
-
-  val miss_idxes = missQueue.io.inflight_req_idxes
-  val miss_block_addrs = missQueue.io.inflight_req_block_addrs
-
-
   def block_load(addr: UInt) = {
-    val store_addr_matches = VecInit(store_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val store_addr_match = store_addr_matches.reduce(_||_)
 
-    val miss_idx_matches = VecInit(miss_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
     store_addr_match || miss_idx_match
   }
 
   def block_store(addr: UInt) = {
-    val miss_idx_matches = VecInit(miss_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
     miss_idx_match
   }
 
   def block_miss(addr: UInt) = {
-    val store_idx_matches = VecInit(store_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val store_idx_matches = VecInit(stu.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val store_idx_match = store_idx_matches.reduce(_||_)
     store_idx_match
   }

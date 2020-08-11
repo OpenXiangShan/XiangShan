@@ -9,13 +9,13 @@ class StorePipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
     val lsu        = Flipped(new DCacheStoreIO)
-    val data_read  = Decoupled(new L1DataReadReq)
-    val data_resp  = Output(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
-    val data_write = Output(Decoupled(new L1DataWriteReq))
-    val meta_read  = Decoupled(new L1MetaReadReq)
-    val meta_resp  = Output(Vec(nWays, new L1Metadata))
-    val inflight_req_idxes  = Output(Vec(3, Valid(UInt())))
-    val inflight_req_block_addrs  = Output(Vec(3, Valid(UInt())))
+    val data_read  = DecoupledIO(new L1DataReadReq)
+    val data_resp  = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val data_write = DecoupledIO(new L1DataWriteReq)
+    val meta_read  = DecoupledIO(new L1MetaReadReq)
+    val meta_resp  = Input(Vec(nWays, new L1Metadata))
+    val inflight_req_idxes       = Output(Vec(3, Valid(UInt())))
+    val inflight_req_block_addrs = Output(Vec(3, Valid(UInt())))
   })
 
 
@@ -68,7 +68,7 @@ class StorePipe extends DCacheModule
 
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = s2_tag_match_way.orR
-  val s2_hit_way       = OHToUInt(s2_tag_match_way)
+  val s2_hit_way       = OHToUInt(s2_tag_match_way, nWays)
   val s2_hit_state     = Mux1H(s2_tag_match_way, wayMap((w: Int) => RegNext(meta_resp(w).coh)))
   val s2_has_permission = s2_hit_state.onAccess(s2_req.cmd)._1
   val s2_new_hit_state  = s2_hit_state.onAccess(s2_req.cmd)._3
@@ -132,7 +132,9 @@ class StorePipe extends DCacheModule
   resp.bits.miss := !s2_hit
   resp.bits.nack := s2_nack
 
-  io.lsu.resp <> resp
+  io.lsu.resp.valid := resp.valid
+  io.lsu.resp.bits  := resp.bits
+  assert(!(resp.valid && !io.lsu.resp.ready))
 
   when (resp.valid) {
     XSDebug(s"StorePipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",

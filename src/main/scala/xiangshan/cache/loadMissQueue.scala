@@ -15,12 +15,12 @@ class LoadMissEntry extends DCacheModule
     val req_pri_rdy = Output(Bool())
     val req_sec_val = Input(Bool())
     val req_sec_rdy = Output(Bool())
-    val req         = Flipped(new DCacheLoadReq)
+    val req         = Input(new DCacheLoadReq)
     val replay      = DecoupledIO(new DCacheLoadReq)
 
     val miss_req    = DecoupledIO(new MissReq)
-    val miss_resp   = ValidIO(new MissResp)
-    val miss_finish = Flipped(DecoupledIO(new MissFinish))
+    val miss_resp   = Flipped(ValidIO(new MissResp))
+    val miss_finish = DecoupledIO(new MissFinish)
 
     val idx = Output(Valid(UInt()))
     val tag = Output(Valid(UInt()))
@@ -41,11 +41,15 @@ class LoadMissEntry extends DCacheModule
   rpq.io.enq.bits  := io.req
   rpq.io.deq.ready := false.B
 
-  // assign default values to output signals
-  io.req_pri_rdy         := false.B
-  val sec_rdy = state === s_miss_req || state === s_miss_resp
-  io.req_sec_rdy         := sec_rdy && rpq.io.enq.ready
+  when (rpq.io.enq.fire()) {
+    assert(io.req.cmd === M_XRD)
+  }
 
+  io.req_pri_rdy := state === s_invalid
+  val sec_rdy = state === s_miss_req || state === s_miss_resp
+  io.req_sec_rdy := sec_rdy && rpq.io.enq.ready
+
+  // assign default values to output signals
   io.replay.valid        := false.B
   io.replay.bits         := DontCare
 
@@ -59,15 +63,13 @@ class LoadMissEntry extends DCacheModule
   io.idx.bits := req_idx
   io.tag.bits := req_tag
 
-
   XSDebug("entry: %d state: %d\n", io.id, state)
+
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
-    io.req_pri_rdy := true.B
     assert(rpq.io.enq.ready)
     when (io.req_pri_val && io.req_pri_rdy) {
-      assert(req.cmd === M_XRD)
       req   := io.req
       state := s_miss_req
     }
@@ -106,6 +108,11 @@ class LoadMissEntry extends DCacheModule
     }
   }
 
+  //
+  // we must wait for response here,
+  // if we do'not wait for response here,
+  // this entry may be freed before it's response comes back
+  //
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
     when (replay_resp_ctr === loadPipelineLatency.U) {
@@ -131,8 +138,8 @@ class LoadMissQueue extends DCacheModule
     val replay      = new DCacheLoadIO
 
     val miss_req    = DecoupledIO(new MissReq)
-    val miss_resp   = ValidIO(new MissResp)
-    val miss_finish = Flipped(DecoupledIO(new MissFinish))
+    val miss_resp   = Flipped(ValidIO(new MissResp))
+    val miss_finish = DecoupledIO(new MissFinish)
   })
 
   val miss_req_arb    = Module(new Arbiter(new MissReq,       cfg.nLoadMissEntries))
@@ -167,7 +174,6 @@ class LoadMissQueue extends DCacheModule
       }
     }
 
-
     // entry req
     entry.io.req_pri_val := (i.U === entry_alloc_idx) && pri_val
     when (i.U === entry_alloc_idx) {
@@ -179,20 +185,20 @@ class LoadMissQueue extends DCacheModule
 
     replay_arb.io.in(i)      <> entry.io.replay
     miss_req_arb.io.in(i)    <> entry.io.miss_req
-    when ((i.U === io.miss_resp.bits.client_id) && io.miss_resp.valid) {
-      entry.io.miss_resp.valid := true.B
-      entry.io.miss_resp.bits := io.miss_resp.bits
-    }
+
+    entry.io.miss_resp.valid := (i.U === io.miss_resp.bits.client_id) && io.miss_resp.valid
+    entry.io.miss_resp.bits  := io.miss_resp.bits
+
     miss_finish_arb.io.in(i) <> entry.io.miss_finish
 
     entry
   }
 
-  entry_alloc_idx    := RegNext(PriorityEncoder(entries.map(m=>m.io.req_pri_rdy)))
+  entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req_pri_rdy))
 
   req.ready   := Mux(idx_match, tag_match && sec_rdy, pri_rdy)
   io.replay.req  <> replay_arb.io.out
   io.lsu.resp    <> io.replay.resp
-  io.miss_resp   <> miss_req_arb.io.out
+  io.miss_req    <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
 }

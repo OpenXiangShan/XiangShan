@@ -19,11 +19,11 @@ class WritebackReq extends DCacheBundle {
 
 class WritebackUnit extends DCacheModule {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(new WritebackReq()))
+    val req = Flipped(DecoupledIO(new WritebackReq()))
     val resp = Output(Bool())
-    val data_req = Decoupled(new L1DataReadReq)
-    val data_resp = Input(Vec(nWays, Bits(encRowBits.W)))
-    val release = Decoupled(new TLBundleC(cfg.busParams))
+    val data_req = DecoupledIO(new L1DataReadReq)
+    val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val release = DecoupledIO(new TLBundleC(cfg.busParams))
     val mem_grant = Input(Bool())
   })
 
