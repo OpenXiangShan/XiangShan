@@ -172,7 +172,6 @@ class Lsroq extends XSModule {
   missCacheIO.req.bits.addr := data(missRefillSel).paddr
   missCacheIO.req.bits.data := DontCare
   missCacheIO.req.bits.mask := data(missRefillSel).mask
-  missCacheIO.req.bits.meta := data(missRefillSel).paddr
 
   missCacheIO.req.bits.meta.id       := DCacheMiscType.miss
   missCacheIO.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
@@ -359,12 +358,11 @@ class Lsroq extends XSModule {
     io.sbuffer(i).bits.addr := data(ptr).paddr
     io.sbuffer(i).bits.data := data(ptr).data
     io.sbuffer(i).bits.mask := data(ptr).mask
+    io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := uop(ptr)
     io.sbuffer(i).bits.meta.mmio     := data(ptr).mmio
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
-    io.sbuffer(i).bits.meta.id       := DontCare // always store
-    io.sbuffer(i).bits.meta.paddr    := DontCare
   })
 
   // update lsroq meta if store inst is send to sbuffer
@@ -584,7 +582,7 @@ class Lsroq extends XSModule {
 
   when(mmioCacheIO.resp.fire()){
     valid(ringBufferTail) := true.B
-    data(ringBufferTail) := mmioCacheIO.resp.bits.data(XLEN-1, 0)
+    data(ringBufferTail).data := mmioCacheIO.resp.bits.data(XLEN-1, 0)
     // TODO: write back exception info
   }
 
@@ -594,6 +592,13 @@ class Lsroq extends XSModule {
   // misc arbitor
   io.dcache.req.valid := missCacheIO.req.valid || mmioCacheIO.req.valid
   io.dcache.req.bits := Mux(missCacheIO.req.valid, missCacheIO.req.bits, mmioCacheIO.req.bits)
+  
+  missCacheIO.resp.ready := true.B
+  mmioCacheIO.resp.ready := true.B
+  io.dcache.resp.ready := true.B
+
+  missCacheIO.req.ready := io.dcache.req.ready && missCacheIO.req.valid
+  mmioCacheIO.req.ready := io.dcache.req.ready && !missCacheIO.req.valid
 
   missCacheIO.resp.bits := io.dcache.resp.bits 
   mmioCacheIO.resp.bits := io.dcache.resp.bits

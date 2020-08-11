@@ -249,5 +249,6 @@ class XSCore extends XSModule {
   mem.io.mmio  <> io.mmio
 
   backend.io.memMMU.imem <> DontCare
+  backend.io.memMMU.dmem <> DontCare
 
 }

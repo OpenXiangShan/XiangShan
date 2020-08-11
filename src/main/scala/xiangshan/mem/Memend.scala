@@ -127,6 +127,7 @@ class Memend extends XSModule {
   val sbuffer = Module(new FakeSbuffer)
 
   dtlb.io := DontCare
+  io.mmio <> DontCare // TODO: FIXIT
 
   dcache.io.bus <> io.mem
   // dcache.io.bus <> io.mmio // TODO: FIXIT

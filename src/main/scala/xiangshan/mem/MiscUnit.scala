@@ -77,17 +77,18 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   io.dcache.req.bits.meta.paddr    := paddr
   io.dcache.req.bits.meta.tlb_miss := false.B
   io.dcache.req.bits.meta.replay   := false.B
+
+  io.dcache.resp.ready := true.B
   
   // wait for cache result
 
-  val hitLoadOut = Wire(Decoupled(new ExuOutput))
   io.out.bits.uop := uop
   io.out.bits.data := io.dcache.resp.bits.data
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect := DontCare
   io.out.bits.brUpdate := DontCare
   io.out.bits.debug.isMMIO := AddressSpace.isMMIO(paddr)
-  XSDebug(hitLoadOut.fire(), "misc writeback: pc %x data %x\n", hitLoadOut.bits.uop.cf.pc, io.dcache.resp.bits.data)
+  XSDebug(io.out.fire(), "misc writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
   
   io.in.ready := state === s_tlb && io.dtlb.resp.fire() && !io.dtlb.resp.bits.miss
   io.out.valid := io.dcache.resp.fire()
