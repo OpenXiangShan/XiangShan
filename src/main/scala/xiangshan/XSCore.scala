@@ -10,8 +10,8 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{ICacheParameters, DCacheParameters}
-import bus.tilelink.TLParameters
+import xiangshan.cache.{DCacheParameters, ICacheParameters}
+import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 import utils._
 
 case class XSCoreParameters
@@ -208,18 +208,36 @@ object AddressSpace extends HasXSParameter {
 }
 
 
+class TLReqProducer extends XSModule {
+  val io = IO(new TLCached(l1BusParams))
+
+  io <> DontCare
+
+  val addr = RegInit("h80000000".U)
+  addr := addr + 4.U
+  val (legal, bundle) = TLMasterUtilities.Get(io.params, 0.U, addr, 3.U)
+  io.a.bits := bundle
+  io.a.valid := true.B
+  assert(legal)
+  io.d.ready := true.B
+  when(io.a.fire()){
+    io.a.bits.dump()
+  }
+  when(io.d.fire()){
+    io.d.bits.dump()
+  }
+}
+
 class XSCore extends XSModule {
   val io = IO(new Bundle {
-    val imem = new SimpleBusC
-    val dmem = new SimpleBusC
-    val mmio = new SimpleBusUC
-    val frontend = Flipped(new SimpleBusUC())
+    val mem = new TLCached(l1BusParams)
+    val mmio = new TLCached(l1BusParams)
   })
 
-  io.imem     <> DontCare
-  io.dmem     <> DontCare
-  io.mmio     <> DontCare
-  io.frontend <> DontCare
+  val fakecache = Module(new TLReqProducer)
+
+  io.mem <> fakecache.io
+  io.mmio <> DontCare
 
   /*
   val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
