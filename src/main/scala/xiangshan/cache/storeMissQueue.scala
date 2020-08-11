@@ -29,9 +29,9 @@ class StoreMissEntry extends DCacheModule
   val state = RegInit(s_invalid)
 
   val req     = Reg(new DCacheStoreReq)
-  val req_idx = req.addr(untagBits-1, blockOffBits)
-  val req_tag = req.addr >> untagBits
-  val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
+  val req_idx = get_idx(req.addr)
+  val req_tag = get_tag(req.addr)
+  val req_block_addr = get_block_addr(req.addr)
   val reg_miss_resp = Reg(new MissResp)
 
   // assign default values to output signals

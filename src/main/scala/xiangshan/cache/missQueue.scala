@@ -38,8 +38,8 @@ class MissEntry extends DCacheModule
     val resp   = ValidIO(new MissResp)
     val finish = Flipped(DecoupledIO(new MissFinish))
 
-    val idx = Output(Valid(UInt()))
-    val tag = Output(Valid(UInt()))
+    val block_idx   = Output(Valid(UInt()))
+    val block_addr  = Output(Valid(UInt()))
 
     val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
     val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
@@ -67,9 +67,9 @@ class MissEntry extends DCacheModule
   val state = RegInit(s_invalid)
 
   val req     = Reg(new MissReq)
-  val req_idx = req.addr(untagBits-1, blockOffBits)
-  val req_tag = req.addr >> untagBits
-  val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
+  val req_idx = get_idx(req.addr)
+  val req_tag = get_tag(req.addr)
+  val req_block_addr = get_block_addr(req.addr)
 
   // meta read results
   val req_tag_match = Reg(Bool())
@@ -89,10 +89,10 @@ class MissEntry extends DCacheModule
   val grantack = Reg(Valid(new TLBundleE(cfg.busParams)))
   val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
 
-  io.idx.valid := state =/= s_invalid
-  io.tag.valid := state =/= s_invalid
-  io.idx.bits  := req_idx
-  io.tag.bits  := req_tag
+  io.block_idx.valid  := state =/= s_invalid
+  io.block_addr.valid := state =/= s_invalid
+  io.block_idx.bits   := req_idx
+  io.block_addr.bits  := req_block_addr
 
   // assign default values to output signals
   io.req.ready           := false.B
@@ -356,6 +356,9 @@ class MissQueue extends DCacheModule
 
     val wb_req      = Decoupled(new WritebackReq)
     val wb_resp     = Input(Bool())
+
+    val inflight_req_block_idxes  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val inflight_req_block_addrs  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
   })
 
   val resp_arb       = Module(new Arbiter(new MissResp,    cfg.nMissEntries))
@@ -401,6 +404,9 @@ class MissQueue extends DCacheModule
     when (io.mem_grant.bits.source === i.U) {
       entry.io.mem_grant <> io.mem_grant
     }
+
+    io.inflight_req_block_idxes(i) <> entry.io.block_idx
+    io.inflight_req_block_addrs(i) <> entry.io.block_addr
 
     entry
   }

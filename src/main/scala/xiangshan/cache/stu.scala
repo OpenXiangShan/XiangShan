@@ -14,6 +14,8 @@ class StorePipe extends DCacheModule
     val data_write = Output(Decoupled(new L1DataWriteReq))
     val meta_read  = Decoupled(new L1MetaReadReq)
     val meta_resp  = Output(Vec(nWays, new L1Metadata))
+    val inflight_req_idxes  = Output(Vec(3, Valid(UInt())))
+    val inflight_req_block_addrs  = Output(Vec(3, Valid(UInt())))
   })
 
 
@@ -26,7 +28,7 @@ class StorePipe extends DCacheModule
   val data_read = io.data_read.bits
 
   // Tag read for new requests
-  meta_read.idx    := io.lsu.req.bits.addr >> blockOffBits
+  meta_read.idx    := get_idx(io.lsu.req.bits.addr)
   meta_read.way_en := ~0.U(nWays.W)
   meta_read.tag    := DontCare
   // Data read for new requests
@@ -54,7 +56,7 @@ class StorePipe extends DCacheModule
   val meta_resp = io.meta_resp
   // tag check
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (s1_addr >> untagBits)).asUInt
+  val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
 
 
@@ -136,6 +138,22 @@ class StorePipe extends DCacheModule
     XSDebug(s"StorePipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
       resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
   }
+
+  io.inflight_req_idxes(0).valid := s0_valid
+  io.inflight_req_idxes(1).valid := s1_valid
+  io.inflight_req_idxes(2).valid := s2_valid
+
+  io.inflight_req_idxes(0).bits  := get_idx(s0_req.addr)
+  io.inflight_req_idxes(1).bits  := get_idx(s1_req.addr)
+  io.inflight_req_idxes(2).bits  := get_idx(s2_req.addr)
+
+  io.inflight_req_block_addrs(0).valid := s0_valid
+  io.inflight_req_block_addrs(1).valid := s1_valid
+  io.inflight_req_block_addrs(2).valid := s2_valid
+
+  io.inflight_req_block_addrs(0).bits  := get_block_addr(s0_req.addr)
+  io.inflight_req_block_addrs(1).bits  := get_block_addr(s1_req.addr)
+  io.inflight_req_block_addrs(2).bits  := get_block_addr(s2_req.addr)
 
   // -------
   // Debug logging functions

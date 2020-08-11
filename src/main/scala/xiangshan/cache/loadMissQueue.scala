@@ -30,9 +30,9 @@ class LoadMissEntry extends DCacheModule
   val state = RegInit(s_invalid)
 
   val req     = Reg(new DCacheLoadReq)
-  val req_idx = req.addr(untagBits-1, blockOffBits)
-  val req_tag = req.addr >> untagBits
-  val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
+  val req_idx = get_idx(req.addr)
+  val req_tag = get_tag(req.addr)
+  val req_block_addr = get_block_addr(req.addr)
   val reg_miss_resp = Reg(new MissResp)
 
   val rpq = Module(new Queue(new DCacheLoadReq, cfg.nRPQ))
@@ -156,8 +156,8 @@ class LoadMissQueue extends DCacheModule
 
     entry.io.id := i.U(log2Up(cfg.nLoadMissEntries).W)
 
-    idx_matches(i) := entry.io.idx.valid && entry.io.idx.bits === req.bits.addr(untagBits-1,blockOffBits)
-    tag_matches(i) := entry.io.tag.valid && entry.io.tag.bits === req.bits.addr >> untagBits
+    idx_matches(i) := entry.io.idx.valid && entry.io.idx.bits === get_idx(req.bits.addr)
+    tag_matches(i) := entry.io.tag.valid && entry.io.tag.bits === get_tag(req.bits.addr)
     when (XSDebug.trigger) {
       when (idx_matches(i)) {
         XSDebug(s"entry: $i idx_match\n")
