@@ -185,7 +185,8 @@ class DCache extends DCacheModule {
   loadArb.io.in(1) <> lsu_0.req
   assert(!(lsu_0.req.fire() && lsu_0.req.bits.meta.replay), "LSU should not replay requests")
   assert(!(loadReplay.req.fire() && !loadReplay.req.bits.meta.replay), "LoadMissQueue should replay requests")
-  ldu_0.req <> loadArb.io.out
+  val ldu_0_block = block_load(loadArb.io.out.bits.addr)
+  block_decoupled(loadArb.io.out, ldu_0.req, ldu_0_block)
 
   ldu_0.resp.ready := false.B
 
@@ -203,7 +204,9 @@ class DCache extends DCacheModule {
   }
 
   for (w <- 1 until LoadPipelineWidth) {
-    ldu(w).io.lsu <> io.lsu.load(w)
+    val load_w_block = block_load(io.lsu.load(w).req.bits.addr)
+    block_decoupled(io.lsu.load(w).req, ldu(w).io.lsu.req, load_w_block)
+    ldu(w).io.lsu.resp <> io.lsu.load(w).resp
   }
 
   // load miss queue
@@ -212,9 +215,10 @@ class DCache extends DCacheModule {
   //----------------------------------------
   // store pipe and store miss queue
   storeMissQueue.io.lsu    <> io.lsu.store
-  storeMissQueue.io.replay <> stu.io.lsu
 
-
+  val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
+  block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block)
+  storeMissQueue.io.replay.resp <> stu.io.lsu.resp
 
   //----------------------------------------
   // miss queue
@@ -242,7 +246,8 @@ class DCache extends DCacheModule {
   missReqArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
     storeMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
-  missReq                         <> missReqArb.io.out
+  val miss_block = block_miss(missReqArb.io.out.bits.addr)
+  block_decoupled(missReqArb.io.out, missReq, miss_block)
 
   // Response
   val missResp        = missQueue.io.resp
@@ -309,4 +314,40 @@ class DCache extends DCacheModule {
   missQueue.io.wb_resp := wb.io.resp
   io.bus.c             <> wb.io.release
   wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMissEntries.U
+
+  // synchronization stuff
+  val store_idxes = stu.io.inflight_req_idxes
+  val store_block_addrs = stu.io.inflight_req_block_addrs
+
+  val miss_idxes = missQueue.io.inflight_req_idxes
+  val miss_block_addrs = missQueue.io.inflight_req_block_addrs
+
+
+  def block_load(addr: UInt) = {
+    val store_addr_matches = VecInit(store_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val store_addr_match = store_addr_matches.reduce(_||_)
+
+    val miss_idx_matches = VecInit(miss_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+
+    store_addr_match || miss_idx_match
+  }
+
+  def block_store(addr: UInt) = {
+    val miss_idx_matches = VecInit(miss_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+    miss_idx_match
+  }
+
+  def block_miss(addr: UInt) = {
+    val store_idx_matches = VecInit(store_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val store_idx_match = store_idx_matches.reduce(_||_)
+    store_idx_match
+  }
+
+  def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
+    sink.valid   := source.valid && !block_signal
+    source.ready := sink.ready   && !block_signal
+    sink.bits    := source.bits
+  }
 }

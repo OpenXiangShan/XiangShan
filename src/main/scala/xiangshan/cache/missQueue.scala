@@ -357,7 +357,7 @@ class MissQueue extends DCacheModule
     val wb_req      = Decoupled(new WritebackReq)
     val wb_resp     = Input(Bool())
 
-    val inflight_req_block_idxes  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val inflight_req_idxes  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
     val inflight_req_block_addrs  = Output(Vec(cfg.nMissEntries, Valid(UInt())))
   })
 
@@ -405,7 +405,7 @@ class MissQueue extends DCacheModule
       entry.io.mem_grant <> io.mem_grant
     }
 
-    io.inflight_req_block_idxes(i) <> entry.io.block_idx
+    io.inflight_req_idxes(i) <> entry.io.block_idx
     io.inflight_req_block_addrs(i) <> entry.io.block_addr
 
     entry
