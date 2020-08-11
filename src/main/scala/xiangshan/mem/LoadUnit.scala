@@ -193,7 +193,7 @@ class LoadUnit extends XSModule {
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare
   hitLoadOut.bits.debug.isMMIO := l5_in.bits.mmio
-  hitLoadOut.valid := l5_in.valid
+  hitLoadOut.valid := l5_in.valid && !l5_in.bits.mmio // MMIO will be done in lsroq
   XSDebug(hitLoadOut.fire(), "load writeback: pc %x data %x (%x + %x(%b))\n",
     hitLoadOut.bits.uop.cf.pc, rdataPartialLoad, l5_in.bits.data,
     l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt

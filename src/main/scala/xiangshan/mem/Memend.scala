@@ -20,7 +20,7 @@ object LSUOpType {
   def sh   = "b001001".U
   def sw   = "b001010".U
   def sd   = "b001011".U
-
+  
   def lr      = "b100010".U
   def sc      = "b100011".U
   def amoswap = "b100001".U
@@ -32,12 +32,18 @@ object LSUOpType {
   def amomax  = "b110100".U
   def amominu = "b111000".U
   def amomaxu = "b111100".U
-
+  
   def isStore(func: UInt): Bool = func(3)
   def isAtom(func: UInt): Bool = func(5)
-
+  
   def atomW = "010".U
   def atomD = "011".U
+}
+
+object DCacheMiscType {
+  def miss      = "b00".U
+  def mmio      = "b01".U
+  def misc      = "b10".U
 }
 
 object genWmask {
@@ -158,7 +164,11 @@ class Memend extends XSModule {
   
   //  lsroq.io.refill <> DontCare
   //  lsroq.io.refill.valid := false.B // TODO
-  lsroq.io.miss <> dcache.io.lsu.lsroq // TODO: Add AMO, MMIO support
+  lsroq.io.dcache <> dcache.io.lsu.lsroq // TODO: Add AMO
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
+
+  // TODO: MiscUnit
+  // MiscUnit will override other control signials,
+  // as misc insts (LR/SC/AMO) will block the pipeline  
 }

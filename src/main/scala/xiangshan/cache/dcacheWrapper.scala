@@ -11,7 +11,7 @@ import xiangshan.{MicroOp, Redirect}
 // anything that should go with reqs and resps goes here
 class DCacheMeta extends DCacheBundle {
   val id      = UInt(reqIdWidth.W)
-  val vaddr   = UInt(PAddrBits.W) // maybe we should use VAddrBits?
+  val vaddr   = UInt(VAddrBits.W) // maybe we should use VAddrBits?
   val paddr   = UInt(PAddrBits.W)
   val uop     = new MicroOp //FIXME: opt data width
   val mmio    = Bool()
