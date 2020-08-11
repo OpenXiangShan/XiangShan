@@ -233,7 +233,11 @@ class PTW extends PtwModule {
 
     is (state_req) {
       when (tlbHit) {
-        state := state_idle
+        when (resp(arbChosen).ready) {
+          state := state_idle
+        }.otherwise {
+          state := state_wait_ready
+        }
       }.elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
         level := level + 1.U // TODO: consider superpage
       }.elsewhen (mem.req.ready) {
@@ -288,8 +292,8 @@ class PTW extends PtwModule {
   val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && mem.resp.fire()) || state===state_wait_ready
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
-    resp(i).bits.entry := Mux(state===state_wait_ready, latch.entry,
-      Mux(tlbHit, tlbHitData, new TlbEntry().genTlbEntry(memRdata, level, req.vpn)))
+    resp(i).bits.entry := Mux(tlbHit, tlbHitData,
+      Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memRdata, level, req.vpn)))
     resp(i).bits.idx := req.idx
     resp(i).bits.pf  := Mux(state===state_wait_ready, latch.pf, memPte.isPf())
   }

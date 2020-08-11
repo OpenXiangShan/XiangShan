@@ -320,6 +320,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   when (refill) {
     v := v | (1.U << refillIdx)
     entry(refillIdx) := ptw.resp.bits.entry
+    XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
   }
 
   for(i <- 0 until Width) {
@@ -330,7 +331,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid), p"CSR: ${csr}\n")
   XSDebug(ParallelOR(valid), p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)}\n")
-  XSDebug(ParallelOR(valid)/* || state=/=state_idle || ptwPf*/, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid/* || state=/=state_idle || ptwPf*/, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
-  XSDebug(ptw.resp.fire(), p"PTW resp:${ptw.resp.bits}\n")
+  XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} v:${ptw.resp.valid}r:{ptw.resp.ready} \n")
 }
