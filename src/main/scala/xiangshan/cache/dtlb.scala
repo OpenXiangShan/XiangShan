@@ -255,6 +255,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
 
+    when(resp(i).valid && !resp(i).bits.miss) { assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x", req(i).bits.vaddr, resp(i).bits.paddr) }
+
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     resp(i).bits.excp.pf.ld    := (ptwPfHit(i) && TlbCmd.isRead(cmd(i))) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/)
