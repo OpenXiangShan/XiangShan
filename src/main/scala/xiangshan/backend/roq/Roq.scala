@@ -237,7 +237,7 @@ class Roq extends XSModule {
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){
     state := s_walk
-    walkPtrExt := enqPtrExt - 1.U + dispatchCnt
+    walkPtrExt := Mux(state === s_walk && !walkFinished, walkPtrExt - CommitWidth.U, enqPtrExt - 1.U + dispatchCnt)
     walkTgtExt := io.brqRedirect.bits.roqIdx
     enqPtrExt := io.brqRedirect.bits.roqIdx + 1.U
   }
