@@ -36,7 +36,7 @@ class Lsroq extends XSModule {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
-    val misc = new DCacheLoadIO
+    val dcache = new DCacheLoadIO
     // val refill = Flipped(Valid(new DCacheStoreReq))
   })
   
@@ -592,14 +592,14 @@ class Lsroq extends XSModule {
   // TODO: load MMIO should not be writebacked to CDB in L5
 
   // misc arbitor
-  io.misc.req.valid := missCacheIO.req.valid || mmioCacheIO.req.valid
-  io.misc.req.bits := Mux(missCacheIO.req.valid, missCacheIO.req.bits, mmioCacheIO.req.bits)
+  io.dcache.req.valid := missCacheIO.req.valid || mmioCacheIO.req.valid
+  io.dcache.req.bits := Mux(missCacheIO.req.valid, missCacheIO.req.bits, mmioCacheIO.req.bits)
 
-  missCacheIO.resp.bits := io.misc.resp.bits 
-  mmioCacheIO.resp.bits := io.misc.resp.bits
+  missCacheIO.resp.bits := io.dcache.resp.bits 
+  mmioCacheIO.resp.bits := io.dcache.resp.bits
   
-  missCacheIO.resp.valid := io.misc.resp.valid && io.misc.resp.bits.meta.id(1, 0) === DCacheMiscType.miss
-  mmioCacheIO.resp.valid := io.misc.resp.valid && io.misc.resp.bits.meta.id(1, 0) === DCacheMiscType.mmio
+  missCacheIO.resp.valid := io.dcache.resp.valid && io.dcache.resp.bits.meta.id(1, 0) === DCacheMiscType.miss
+  mmioCacheIO.resp.valid := io.dcache.resp.valid && io.dcache.resp.bits.meta.id(1, 0) === DCacheMiscType.mmio
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx

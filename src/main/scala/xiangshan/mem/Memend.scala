@@ -164,7 +164,7 @@ class Memend extends XSModule {
   
   //  lsroq.io.refill <> DontCare
   //  lsroq.io.refill.valid := false.B // TODO
-  lsroq.io.misc <> dcache.io.lsu.lsroq // TODO: Add AMO, MMIO support
+  lsroq.io.dcache <> dcache.io.lsu.lsroq // TODO: Add AMO
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
 
