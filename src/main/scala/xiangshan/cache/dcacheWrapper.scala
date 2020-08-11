@@ -335,7 +335,11 @@ class DCache extends DCacheModule {
   def block_miss(addr: UInt) = {
     val store_idx_matches = VecInit(stu.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val store_idx_match = store_idx_matches.reduce(_||_)
-    store_idx_match
+
+    val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+
+    store_idx_match || miss_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
