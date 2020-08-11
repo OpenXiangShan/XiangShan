@@ -58,6 +58,7 @@ class BranchInfo extends XSBundle {
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
+  val fetchIdx = UInt(log2Up(PredictWidth).W)
 
   val debug_ubtb_cycle = UInt(64.W)
   val debug_btb_cycle = UInt(64.W)

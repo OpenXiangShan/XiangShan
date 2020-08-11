@@ -121,8 +121,8 @@ object TestMain extends App {
   (new chisel3.stage.ChiselStage).execute(
     args.filterNot(_ == "--disable-log"),
     Seq(
-      ChiselGeneratorAnnotation(() => new XSSimTop),
-      RunFirrtlTransformAnnotation(new ShowPrintTransform)
+      ChiselGeneratorAnnotation(() => new XSSimTop)
+      // RunFirrtlTransformAnnotation(new ShowPrintTransform)
     )
   )
 }

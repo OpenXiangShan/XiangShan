@@ -415,6 +415,7 @@ class BPU extends BaseBPU {
 
   s1_resp_in.tage := DontCare
   s1_brInfo_in    := DontCare
+  (0 until PredictWidth).foreach(i => s1_brInfo_in(i).fetchIdx := i.U)
 
   val s1_inLatch = RegEnable(io.in, s1_fire)
   ubtb.io.flush := io.flush(0) // TODO: fix this
