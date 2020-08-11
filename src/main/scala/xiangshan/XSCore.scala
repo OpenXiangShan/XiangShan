@@ -234,16 +234,11 @@ class XSCore extends XSModule {
     val mmio = new TLCached(l1BusParams)
   })
 
-  val fakecache = Module(new TLReqProducer)
+  // val fakecache = Module(new TLReqProducer)
+  // io.mem <> fakecache.io
 
-  io.mem <> fakecache.io
   io.mmio <> DontCare
 
-  /*
-  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
-
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2, userBits = DcacheUserBundleWidth))
-  
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
@@ -252,25 +247,5 @@ class XSCore extends XSModule {
   mem.io.backend   <> backend.io.mem
 
   backend.io.memMMU.imem <> DontCare
-
-  val dtlb = TLB(
-    in = mem.io.dmem,
-    mem = dmemXbar.io.in(1),
-    flush = false.B,
-    csrMMU = backend.io.memMMU.dmem
-  )(TLBConfig(name = "dtlb", totalEntry = 64, userBits = DcacheUserBundleWidth))
-  dmemXbar.io.in(0) <> dtlb.io.out
-  // dmemXbar.io.in(1) <> io.frontend
-
-  io.frontend <> DontCare
-
-  io.dmem <> Cache(
-    in = dmemXbar.io.out,
-    mmio = Seq(io.mmio),
-    flush = "b00".U,
-    empty = dtlb.io.cacheEmpty,
-    enable = HasDcache
-  )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
-  */
 
 }
