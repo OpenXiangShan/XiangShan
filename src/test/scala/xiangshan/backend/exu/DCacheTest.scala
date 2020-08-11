@@ -4,16 +4,14 @@ import org.scalatest._
 import scala.collection.mutable.{Map, Queue}
 
 import chisel3._
-import chisel3.util.experimental.BoringUtils
 import chisel3.experimental.BundleLiterals._
 import chiseltest._
 
 import xiangshan.XSModule
-import xiangshan.utils.XSLogLevel
-import xiangshan.mem.{LSUDCacheIO, MemoryOpConstants}
-import xiangshan.mem.cache.DCache
+import xiangshan.cache.{LSUDCacheIO, MemoryOpConstants, DCache}
 import bus.tilelink.FakeTLLLC
 import device.AXI4RAM
+import utils.GTimer
 
 class DCacheDut extends XSModule {
   val io = IO(new Bundle() {
@@ -30,14 +28,11 @@ class DCacheDut extends XSModule {
 
 
   // log control
-  val log_begin, log_end, log_level = Wire(UInt(64.W))
-  log_begin := 0.U
-  log_end := 0xfffffff.U
-  log_level := XSLogLevel.DEBUG.id.U
-
-  BoringUtils.addSource(log_begin, "DISPLAY_LOG_START")
-  BoringUtils.addSource(log_end, "DISPLAY_LOG_END")
-  BoringUtils.addSource(log_level, "DISPLAY_LOG_LEVEL")
+  val logEnable = WireInit(true.B)
+  val logTimestamp = WireInit(0.U(64.W))
+  logTimestamp := GTimer()
+  ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+  ExcitingUtils.addSource(logTimestamp, "logTimestamp")
 }
 
 
