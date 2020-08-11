@@ -157,7 +157,6 @@ class Memend extends XSModule {
   lsroq.io.lsroqIdxs <> io.backend.lsroqIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
-  dcache.io.lsu.redirect := io.backend.redirect
 
   lsroq.io.refill <> DontCare
   lsroq.io.refill.valid := false.B // TODO
