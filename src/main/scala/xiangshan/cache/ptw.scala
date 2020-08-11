@@ -295,7 +295,8 @@ class PTW extends PtwModule {
     resp(i).bits.entry := Mux(tlbHit, tlbHitData,
       Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memRdata, level, req.vpn)))
     resp(i).bits.idx := req.idx
-    resp(i).bits.pf  := Mux(state===state_wait_ready, latch.pf, memPte.isPf())
+    resp(i).bits.pf  := Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf())) 
+    // TODO: the pf must not be correct, check it
   }
 
   // sfence

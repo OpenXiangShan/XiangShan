@@ -255,8 +255,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
 
-    when(resp(i).valid && !resp(i).bits.miss) { assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x", req(i).bits.vaddr, resp(i).bits.paddr) }
-
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     resp(i).bits.excp.pf.ld    := (ptwPfHit(i) && TlbCmd.isRead(cmd(i))) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/)
@@ -333,5 +331,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   XSDebug(ParallelOR(valid), p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)}\n")
   XSDebug(ParallelOR(valid) || ptw.resp.valid/* || state=/=state_idle || ptwPf*/, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
-  XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} v:${ptw.resp.valid}r:{ptw.resp.ready} \n")
+  XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} v:${ptw.resp.valid}r:${ptw.resp.ready} \n")
+
+  for (i <- 0 until Width) {
+    XSDebug(resp(i).valid && !resp(i).bits.miss && !(req(i).bits.vaddr===resp(i).bits.paddr), p"vaddr:0x${Hexadecimal(req(i).bits.vaddr)} paddr:0x${Hexadecimal(resp(i).bits.paddr)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)}}\n")
+    when (resp(i).valid && !resp(i).bits.miss && !(req(i).bits.vaddr===resp(i).bits.paddr)) {
+      for (j <- 0 until TlbEntrySize) {
+        XSDebug(true.B, p"TLBEntry(${j.U}): v:${v(j)} ${entry(j)}\n")
+      }
+    }
+    when(resp(i).valid && !resp(i).bits.miss) { assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt) } // FIXME: remove me when tlb may be ok
+  }
 }
