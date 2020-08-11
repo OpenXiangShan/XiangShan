@@ -60,7 +60,7 @@ class WritebackUnit extends DCacheModule {
 
   when (state === s_data_read_req) {
     // Data read for new requests
-    io.data_req.valid := data_req_cnt < refillCycles.U
+    io.data_req.valid       := true.B
     io.data_req.bits.addr   := req.idx << blockOffBits
     io.data_req.bits.way_en := req.way_en
     io.data_req.bits.rmask  := ~0.U(refillCycles.W)
@@ -77,7 +77,7 @@ class WritebackUnit extends DCacheModule {
   when (state === s_data_read_resp_2) {
     val way_idx = OHToUInt(req.way_en)
     for (i <- 0 until refillCycles) {
-      wb_buffer(i)    := io.data_resp(way_idx)(i)
+      wb_buffer(i) := io.data_resp(way_idx)(i)
     }
 
     state := s_active
@@ -104,16 +104,18 @@ class WritebackUnit extends DCacheModule {
 
   when (state === s_active) {
     io.release.valid := data_req_cnt < refillCycles.U
-    io.release.bits := Mux(req.voluntary, voluntaryRelease, probeResponse)
+    io.release.bits  := Mux(req.voluntary, voluntaryRelease, probeResponse)
 
     when (io.mem_grant) {
       acked := true.B
     }
+
     when (io.release.fire()) {
       data_req_cnt := data_req_cnt + 1.U
-    }
-    when ((data_req_cnt === (refillCycles-1).U) && io.release.fire()) {
-      state := Mux(req.voluntary, s_grant, s_invalid)
+
+      when (data_req_cnt === (refillCycles-1).U) {
+        state := Mux(req.voluntary, s_grant, s_invalid)
+      }
     }
   }
   
