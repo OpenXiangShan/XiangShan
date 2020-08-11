@@ -190,7 +190,7 @@ class MicroBTB extends BasePredictor
         uBTBMeta(update_write_way)(update_bank).valid := true.B
         uBTBMeta(update_write_way)(update_bank).tag := update_tag
         uBTBMeta(update_write_way)(update_bank).pred := 
-        Mux(!update_hits(update_bank),
+        Mux(!update_hits,
             Mux(update_taken,3.U,0.U),
             satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)
         )
