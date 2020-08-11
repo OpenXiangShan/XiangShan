@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.cache._
-import bus.simplebus._
+import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 
 object LSUOpType {
   def lb   = "b000000".U
@@ -107,7 +107,8 @@ class MemToBackendIO extends XSBundle {
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val dmem = new SimpleBusUC(userBits = (new DCacheMeta).getWidth)
+    val mem = new TLCached(l1BusParams)
+    val mmio = new TLCached(l1BusParams)
   })
 
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
@@ -118,9 +119,10 @@ class Memend extends XSModule {
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new FakeSbuffer)
 
-  dcache.io := DontCare
   dtlb.io := DontCare
-  // mshq.io := DontCare
+
+  dcache.io.bus <> io.mem
+  // dcache.io.bus <> io.mmio // TODO: FIXIT
 
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.ldin <> io.backend.ldin(i)
@@ -153,10 +155,10 @@ class Memend extends XSModule {
   lsroq.io.lsroqIdxs <> io.backend.lsroqIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
-
-//  lsroq.io.refill <> DontCare
-//  lsroq.io.refill.valid := false.B // TODO
-  lsroq.io.miss <> DontCare //TODO
+  
+  //  lsroq.io.refill <> DontCare
+  //  lsroq.io.refill.valid := false.B // TODO
+  lsroq.io.miss <> dcache.io.lsu.lsroq // TODO: Add AMO, MMIO support
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
 }
