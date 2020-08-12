@@ -9,14 +9,14 @@ import chisel3.experimental.BundleLiterals._
 import chiseltest._
 
 import xiangshan.XSModule
-import xiangshan.cache.{LSUDCacheIO, MemoryOpConstants, DCache}
+import xiangshan.cache.{DCacheToLsuIO, MemoryOpConstants, DCache}
 import bus.tilelink.FakeTLLLC
 import device.AXI4RAM
 import utils.GTimer
 
 class DCacheDut extends XSModule {
   val io = IO(new Bundle() {
-    val in = Flipped(new LSUDCacheIO)
+    val in = Flipped(new DCacheToLsuIO)
   })
 
   val dcache = Module(new DCache)
@@ -38,7 +38,7 @@ class DCacheDut extends XSModule {
 
 
 case class Req(
-  cmd: Int,
+  cmd: UInt,
   addr: Long,
   data: Long,
   mask: Long,
@@ -52,56 +52,37 @@ case class Req(
 }
 
 case class InstructionQueueEntry(
-  req_id: Int,
   issued: Boolean,
-  retired: Boolean
+  retired: Boolean,
+  req_id: Int
 ) {
   override def toString() : String = {
-    return f"req_id: $req_id%d issued: $issued%b retired: $retired%b"
+    return f"issued: $issued%b retired: $retired%b req_id: $req_id%d"
   }
 }
 
 case class IssueQueueEntry(
+  valid: Boolean,
   req_id: Int,
-  revision_id: Int,
-  valid: Boolean
+  revision_id: Int
 ) {
   override def toString() : String = {
-    return f"req_id: $req_id%d valid: $valid%b"
+    return f"valid: $valid%b req_id: $req_id%d revision_id: $revision_id%d"
   }
 }
 
-// ordinary load and special memory operations(lr/sc, atomics)
-class DCacheLoadReq extends DCacheBundle
-{
-  val cmd    = UInt(M_SZ.W)
-  val addr   = UInt(PAddrBits.W)
-  val data   = UInt(DataBits.W)
-  val mask   = UInt((DataBits/8).W)
-  val meta   = new DCacheMeta
+case class LsroqEntry(
+  valid: Boolean, // this entry is valid
+  arrived: Boolean, // req has passed load/store pipe and reached this entry
+  miss: Boolean, // there is a dcache miss(only load req use this)
+  finished: Boolean, // this req can be retired
+  req_id: Int,
+  revision_id: Int
+) {
+  override def toString() : String = {
+    return f"valid: $valid%b arrived: $arrived%b miss: $miss%b finished: $finished%b req_id: $req_id%d revision_id: $revision_id%d"
+  }
 }
-  
-  
-// ordinary store
-class DCacheStoreReq extends DCacheBundle
-{
-  val cmd    = UInt(M_SZ.W)
-  val addr   = UInt(PAddrBits.W)
-  val data   = UInt((cfg.blockBytes * 8).W)
-  val mask   = UInt(cfg.blockBytes.W)
-  val meta   = new DCacheMeta
-}
-  
-class DCacheResp extends DCacheBundle
-{
-  val data         = UInt(DataBits.W)
-  val meta         = new DCacheMeta
-  // cache req missed, send it to miss queue
-  val miss   = Bool()
-  // cache req nacked, replay it later
-  val nack         = Bool()
-}
-  
 
 case class Resp(
   data: Long,
@@ -115,6 +96,7 @@ case class Resp(
 class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
   behavior of "DCache"
 
+  /*
   it should "do load store correctly" in {
     test(new DCacheDut) { c =>
       // ----------------------------------------
@@ -123,6 +105,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
       // for now, we only support load/store of 64bit integers
       val INTEGER_SIZE = 8
       val ISSUE_QUEUE_SIZE = 16
+      val LSROQ_SIZE = 512
       val NumLoadPipe = 2
       val NumStorePipe = 2
 
@@ -212,10 +195,11 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
       }
 
       def instruction_queue_dispatch(): Unit = {
-        val instruction_to_dispatch = issue_queue_available_entries()
+        val instruction_to_dispatch = min(issue_queue_available_entries(), lsroq_available_entries())
         for (i <- 0 until instruction_to_dispatch) {
           val idx = instruction_queue_dispatch_head
           issue_queue_enqueue(instruction_queue(idx).req_id, flush_revision_id)
+          lsroq_enqueue(instruction_queue(idx).req_id, flush_revision_id)
           instruction_queue(idx).issued = true
           instruction_queue_dispatch_head += 1
         }
@@ -343,8 +327,99 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
           println(s"clock: $global_clock channel: $channel req: $req")
       }
 
+      def issue_dcache_store_req(channel: Int) = {
+        println(s"issue_dcache_store_req")
+        // send a new request during this clock
+        // select a load req to issue
+        val store_req_idx = issue_queue_select_store_req()
+        // no more store requests to issue
+        if (store_req_idx == -1) {
+          return
+        }
+
+        val entry = issue_queue(store_req_idx)
+        // clear this req from issue queue
+        issue_queue(store_req_idx).valid = false
+        lsroq_store_arrive(entry.req_id, entry.revision_id)
+      }
+
       // ----------------------------------------
       // lsroq
+      val lsroq = new Array[LsroqEntry](LSROQ_SIZE)  
+      val lsroq_head = 0
+      val lsroq_tail = 0
+
+      def lsroq_inc(val a: Int) = (a + 1) % LSROQ_SIZE
+      def lsroq_dec(val a: Int) = (a - 1) % LSROQ_SIZE
+      def lsroq_inc(val a: Int, val b: Int) = (a + b) % LSROQ_SIZE
+      def lsroq_dec(val a: Int, val b: Int) = (a - b) % LSROQ_SIZE
+      def lsroq_empty() = lsroq_head == lsroq_tail
+      def lsroq_full()  = lsroq_inc(lsroq_tail) === lsroq_head
+
+      def lsroq_used_entries() = (lsroq_tail - lsroq_head) % LSROQ_SIZE
+      def lsroq_available_entries() = LSROQ_SIZE - 1 - lsroq_used_entries
+
+      def init_lsroq(): Unit = {
+        lsroq.clear()
+      }
+
+      def lsroq_enqueue(req_id: Int, revision_id: Int): Unit = {
+        // find an available slot to insert this entry
+        val no_available_slot = true
+        for (0 until LSROQ_SIZE) {
+          if (!lsroq(i).valid) {
+            issue_queue(i).valid = true
+            issue_queue(i).arrived = false
+            issue_queue(i).miss = false
+            issue_queue(i).finished = false
+            issue_queue(i).req_id = req_id
+            issue_queue(i).revision_id = revision_id
+            no_available_slot = false
+          }
+        }
+        assert(!no_available_slot)
+      }
+
+      // a store has finished
+      // finish does not really mean it finishes,
+      // it just means it has arrived at lsroq
+      def lsroq_store_arrive(val req_id: Int, val revision_id: Int): Unit = {
+        // do not deal with outdated request
+        if (is_req_flushed(revision_id))
+          return
+
+        // find our entry
+        val not_found = true
+        var idx = lsroq_head
+        while (idx != lsroq_tail) {
+          val entry = lsroq(idx)
+          assert(entry.valid)
+          if (entry.req_id == req_id && entry.revision_id == revision_id) {
+            lsroq(idx).arrived = true
+            // store requests can be sent to store buffer when they reach the lsroq head
+            lsroq(idx).finished = true
+            not_found = false
+            break
+          }
+          idx = lsroq_inc(idx)
+        }
+        assert(!not_found)
+
+        // check for load, store order violations
+        while (idx != lsroq_tail) {
+          val entry = lsroq(idx)
+          assert(entry.valid)
+          if (entry.arrived) {
+            val my_req = all_requests(req_id)
+            val other_req = all_requests(entry.req_id)
+            if (other_req.valid entry.req_id == req_id && entry.revision_id == revision_id) {
+              lsroq(idx).finished = true
+              not_found = false
+            }
+          }
+          idx = lsroq_inc(idx)
+        }
+      }
 
       // ----------------------------------------
       // store buffer
@@ -378,6 +453,7 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
         init_reqs()
         init_instruction_queue()
         init_issue_queue()
+        init_lsroq()
       }
 
       def evaluate(cycles: Int) = {
@@ -440,4 +516,5 @@ class DCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
       // random read/write test
     }
   }
+  */
 }
