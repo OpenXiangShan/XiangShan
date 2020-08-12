@@ -84,8 +84,15 @@ class LoadUnit extends XSModule {
   val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
-  val kill = l3_uop.needFlush(io.redirect)
-  io.dcache.kill := kill && l3_valid
+  val killValid = Reg(Bool())
+  val needKill = l3_uop.needFlush(io.redirect)
+  when (needKill || l4_out.valid) {
+    killValid := false.B
+  }
+  when (l2_out.fire()) {
+    killValid := true.B
+  }
+  io.dcache.kill := needKill && killValid
 
   // Done in Dcache
 
