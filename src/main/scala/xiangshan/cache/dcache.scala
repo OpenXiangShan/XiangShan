@@ -156,4 +156,5 @@ class Dcache extends XSModule {
   XSInfo(io.dmem.req.fire() && io.dmem.req.bits.cmd === SimpleBusCmd.write, "[DMEM STORE REQ] addr 0x%x wdata 0x%x size %d mask %b\n", dmem.req.bits.addr, dmem.req.bits.wdata, dmem.req.bits.size, dmem.req.bits.wmask(7,0))
   XSInfo(io.dmem.resp.fire() && io.dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 0.U, "[DMEM LOAD  RESP] data %x\n", io.dmem.resp.bits.rdata)
   XSInfo(io.dmem.resp.fire() && io.dmem.resp.bits.user.get.asTypeOf(new DcacheUserBundle).id === 1.U, "[DMEM STORE RESP] data %x\n", io.dmem.resp.bits.rdata)
+  XSInfo(io.dmem.resp.fire() && kill_out, p"[DMEM KILL DONE(ld)] pc:0x${Hexadecimal(ldResp.bits.user.uop.cf.pc)} roqIdx:${ldResp.bits.user.uop.roqIdx}\n") 
 }
