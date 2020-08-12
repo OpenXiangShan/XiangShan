@@ -86,6 +86,7 @@ class BranchUpdateInfo extends XSBundle {
   val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   val isMisPred = Bool()
+  val brTag = new BrqPtr
 
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
