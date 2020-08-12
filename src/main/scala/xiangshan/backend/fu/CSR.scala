@@ -601,8 +601,8 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
 
   val mtip = WireInit(false.B)
   val meip = WireInit(false.B)
-  BoringUtils.addSink(mtip, "mtip")
-  BoringUtils.addSink(meip, "meip")
+  ExcitingUtils.addSink(mtip, "mtip")
+  ExcitingUtils.addSink(meip, "meip")
   mipWire.t.m := mtip
   mipWire.e.m := meip
 
