@@ -82,7 +82,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def clientIdLSB = clientMissQueueEntryIdWidth
   def entryIdMSB = clientMissQueueEntryIdWidth - 1
   def entryIdLSB = 0
-  def reqIdWidth = 32
+  def reqIdWidth = 64
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   // To make things easier, now we assume:
