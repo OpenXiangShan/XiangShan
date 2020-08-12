@@ -293,8 +293,8 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
     u.pc, u.fetchIdx, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
-  XSDebug(io.update.mask.reduce(_||_), "update Table: writing in tag:%b, ctr%d\n",
-    update_wdata(b).tag, update_wdata(b).ctr)
+  XSDebug(io.update.mask.reduce(_||_), "update Table: writing tag:%b, ctr%d in idx:%d\n",
+    update_wdata(b).tag, update_wdata(b).ctr, update_idx)
   XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
     u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
 
@@ -356,6 +356,9 @@ class Tage extends BaseTage {
   val debug_pc_s2 = RegEnable(io.pc.bits, enable=io.pc.valid)
   val debug_pc_s3 = RegEnable(debug_pc_s2, enable=io.s3Fire)
 
+  val debug_hist_s2 = RegEnable(io.hist, enable=io.pc.valid)
+  val debug_hist_s3 = RegEnable(debug_hist_s2, enable=io.s3Fire)
+
   val u = io.update.bits.ui
   val updateValid = io.update.valid
   val updateHist = io.update.bits.hist
@@ -374,7 +377,7 @@ class Tage extends BaseTage {
   updateOldCtr := DontCare
   updateU := DontCare
 
-  val updateBank = u.brInfo.fetchIdx
+  val updateBank = u.pc(log2Ceil(TageBanks), 1)
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
@@ -479,8 +482,9 @@ class Tage extends BaseTage {
   val m = updateMeta
   val bri = u.brInfo
   XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
-  XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-    u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
-  XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hits=%b, takens=%b\n",
-    io.s3Fire, debug_pc_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
+  XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
+  XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
+    debug_pc_s3, debug_hist_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
+  XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+    u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
 }
