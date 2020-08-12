@@ -161,6 +161,8 @@ trait HasXSParameter {
 
   val LRSCCycles = 16
   val dcacheParameters = DCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
     busParams = l1BusParams
   )
 }
