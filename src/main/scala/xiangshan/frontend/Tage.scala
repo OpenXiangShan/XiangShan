@@ -223,7 +223,8 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
   val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
-  val wrbypass         = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(3.W))))
+  val wrbypass_us      = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(2.W))))
+  val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(3.W))))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
 
   val wrbypass_hits    = VecInit((0 until wrBypassEntries) map { i =>
@@ -231,17 +232,32 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     wrbypass_tags(i) === update_tag &&
     wrbypass_idxs(i) === update_idx
   })
-  val wrbypass_hit     = wrbypass_hits.reduce(_||_)
-  val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
+  val wrbypass_rhits   = VecInit((0 until wrBypassEntries) map { i =>
+    io.req.valid &&
+    wrbypass_tags(i) === tag &&
+    wrbypass_idxs(i) === idx
+  })
+  val wrbypass_hit      = wrbypass_hits.reduce(_||_)
+  val wrbypass_rhit     = wrbypass_rhits.reduce(_||_)
+  val wrbypass_hit_idx  = PriorityEncoder(wrbypass_hits)
+  val wrbypass_rhit_idx = PriorityEncoder(wrbypass_rhits)
+
+  val wrbypass_rhit_latch = RegNext(wrbypass_rhit)
+  val hit_ctrs = RegEnable(wrbypass_ctrs(wrbypass_rhit_idx), wrbypass_hit)
+  // when (wrbypass_rhit_latch) {
+
+  // }
+
 
   for (w <- 0 until TageBanks) {
     update_wdata(w).ctr   := Mux(io.update.alloc(w),
       Mux(io.update.taken(w), 4.U,
                               3.U
       ),
-      Mux(wrbypass_hit,       inc_ctr(wrbypass(wrbypass_hit_idx)(w), io.update.taken(w)),
-                              inc_ctr(io.update.oldCtr(w), io.update.taken(w))
-      )
+      // Mux(wrbypass_hit,       inc_ctr(wrbypass_ctrs(wrbypass_hit_idx)(w), io.update.taken(w)),
+      //                         inc_ctr(io.update.oldCtr(w), io.update.taken(w))
+      // )
+      inc_ctr(io.update.oldCtr(w), io.update.taken(w))
     )
     update_wdata(w).valid := true.B
     update_wdata(w).tag   := update_tag
@@ -252,19 +268,38 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   when (io.update.mask.reduce(_||_)) {
     when (wrbypass_hits.reduce(_||_)) {
-      wrbypass(wrbypass_hit_idx) := VecInit(update_wdata.map(_.ctr))
+      wrbypass_ctrs(wrbypass_hit_idx) := VecInit(update_wdata.map(_.ctr))
     } .otherwise {
-      wrbypass     (wrbypass_enq_idx) := VecInit(update_wdata.map(_.ctr))
+      wrbypass_ctrs(wrbypass_enq_idx) := VecInit(update_wdata.map(_.ctr))
       wrbypass_tags(wrbypass_enq_idx) := update_tag
       wrbypass_idxs(wrbypass_enq_idx) := update_idx
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
     }
   }
-  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%b, base_idx=%d, base_tag=%x\n",
+  // when (io.update.uMask.reduce(_||_)) {
+  //   when (wrbypass_hits.reduce(_||_)) {
+  //     wrbypass_us(wrbypass_hit_idx) := VecInit(io.update.u.map(_))
+  //   }
+  // }
+  val u = io.update
+  val b = PriorityEncoder(u.mask)
+  val ub = PriorityEncoder(u.uMask)
+  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x\n",
     io.req.bits.pc, io.req.bits.hist, idx, tag)
   for (i <- 0 until TageBanks) {
-    XSDebug(RegNext(io.req.valid), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch, req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
+    XSDebug(RegNext(io.req.valid) && req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch, req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
   }
+  XSDebug(RegNext(io.req.valid) && !req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
+
+  XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
+    u.pc, u.fetchIdx, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
+  XSDebug(io.update.mask.reduce(_||_), "update Table: writing in tag:%b, ctr%d\n",
+    update_wdata(b).tag, update_wdata(b).ctr)
+  XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
+    u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
+
+  // XSDebug(wrbypass_hits.reduce(_||_), "wrbypass hits, wridx:%d, tag:%x, ctr:%d, idx:%d\n",
+  //   wrbypass_hit_idx, )
   // for (b <- 0 until TageBanks) {
   //   for (i <- 0 until nRows) {
   //     val r = ReadAndHold(array, io.r.req.bits.setIdx, realRen)
@@ -339,7 +374,7 @@ class Tage extends BaseTage {
   updateOldCtr := DontCare
   updateU := DontCare
 
-  val updateBank = u.pc(log2Ceil(TageBanks), 1)
+  val updateBank = u.brInfo.fetchIdx
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
@@ -436,15 +471,16 @@ class Tage extends BaseTage {
     // use fetch pc instead of instruction pc
     tables(i).io.update.pc := u.pc
     tables(i).io.update.hist := updateHist
-    tables(i).io.update.fetchIdx := u.fetchIdx
+    tables(i).io.update.fetchIdx := u.brInfo.fetchIdx
   }
 
 
 
   val m = updateMeta
-  XSDebug(io.pc.valid, "req: pc=0x%x, hist=%b\n", io.pc.bits, io.hist)
-  XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, provider(%d):%d, altDiffers:%d, providerU:%d, providerCtr:%d, allocate(%d):%d\n",
-    u.pc, u.pc - (u.fetchIdx << 1.U), u.brInfo.debug_tage_cycle, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
+  val bri = u.brInfo
+  XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
+  XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+    u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
   XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hits=%b, takens=%b\n",
     io.s3Fire, debug_pc_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
 }
