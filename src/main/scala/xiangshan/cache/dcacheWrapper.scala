@@ -70,7 +70,7 @@ class DCacheToLsuIO extends DCacheBundle {
   val load     = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsroq    = Flipped(new DCacheLoadIO)  // lsroq load/store
   val store    = Flipped(new DCacheStoreIO) // for sbuffer
-  val redirect = ValidIO(new Redirect)
+  // val redirect = ValidIO(new Redirect)
 }
 
 class DCacheIO extends DCacheBundle {
