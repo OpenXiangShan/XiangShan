@@ -103,8 +103,8 @@ class StorePipe extends DCacheModule
 
   // now, we do not deal with ECC
   for (i <- 0 until refillCycles) {
-    wdata(i)        := io.lsu.req.bits.data(rowBits * (i + 1), rowBits * i)
-    wmask(i)        := io.lsu.req.bits.mask(rowBytes * (i + 1), rowBytes * i)
+    wdata(i)        := io.lsu.req.bits.data(rowBits * (i + 1) - 1, rowBits * i)
+    wmask(i)        := io.lsu.req.bits.mask(rowBytes * (i + 1) - 1, rowBytes * i)
     wdata_merged(i) := Cat(s2_data(i)(encRowBits - 1, rowBits),
       mergePutData(s2_data(i)(rowBits - 1, 0), wdata(i), wmask(i)))
   }
