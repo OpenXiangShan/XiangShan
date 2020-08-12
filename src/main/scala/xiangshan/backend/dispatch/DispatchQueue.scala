@@ -178,7 +178,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
   val needExtraReplayWalk = Cat((0 until deqnum).map(i => stateEntries(deqIndex(i)) === s_dispatched)).orR
   val needExtraReplayWalkReg = RegNext(needExtraReplayWalk && replayValid, false.B)
-  val inReplayWalk = dispatchReplayCntReg =/= 0.U
+  val inReplayWalk = dispatchReplayCntReg =/= 0.U || needExtraReplayWalkReg
   val dispatchReplayStep = Mux(needExtraReplayWalkReg, 0.U, Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg))
   when (exceptionValid) {
     dispatchReplayCntReg := 0.U
@@ -195,7 +195,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - (i + 1).U)(indexWidth - 1, 0))
   for (i <- 0 until replayWidth) {
     val index =  Mux(needExtraReplayWalkReg, (if (i < deqnum) deqIndex(i) else 0.U), replayIndex(i))
-    val shouldResetDest = inReplayWalk && (stateEntries(index) === Mux(needExtraReplayWalkReg, s_dispatched, s_valid))
+    val shouldResetDest = inReplayWalk && stateEntries(index) === s_valid
     io.replayPregReq(i).isInt := shouldResetDest && uopEntries(index).ctrl.rfWen && uopEntries(index).ctrl.ldest =/= 0.U
     io.replayPregReq(i).isFp  := shouldResetDest && uopEntries(index).ctrl.fpWen
     io.replayPregReq(i).preg  := uopEntries(index).pdest
