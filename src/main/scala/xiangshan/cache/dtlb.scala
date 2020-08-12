@@ -234,27 +234,29 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   val v = RegInit(0.U(TlbEntrySize.W))
+  val pf = RegInit(0.U(TlbEntrySize.W)) // TODO: when ptw resp a pf(now only page not found), store here
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
 
-  val ptwIdx = Reg(UInt(RoqIdxWidth.W))
-  val ptwPf  = RegInit(false.B) // TODO: add redirect. also for ptw, add redirect
-  val ptwPfHit = widthMap{i => ptwPf && req(i).valid && req(i).bits.idx === ptwIdx }
+  
 
-  val hitVec = widthMapSeq{ i => 
-    (v.asBools zip VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))).map{ case (a,b) => a&b } }
-  val hit = widthMap{i => ParallelOR(hitVec(i)).asBool && valid(i) && vmEnable && !ptwPfHit(i)}
-  val miss = widthMap{i => !hit(i) && valid(i) && vmEnable && !ptwPfHit(i)}
-  val hitppn = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
+  val entryHitVec = widthMapSeq{i => VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/))) }
+  val hitVec  = widthMapSeq{ i => (v.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
+  val pfHitVec   = widthMapSeq{ i => (pf.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
+  val pfArray = widthMap{ i => ParallelOR(pfHitVec(i)).asBool && valid(i) && vmEnable }
+  val hit     = widthMap{ i => ParallelOR(hitVec(i)).asBool && valid(i) && vmEnable && ~pfArray(i) }
+  val miss    = widthMap{ i => !hit(i) && valid(i) && vmEnable && ~pfArray(i) }
+  val hitppn  = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
   val multiHit = {
     val hitSum = widthMap{ i => PopCount(hitVec(i)) }
-    ParallelOR(widthMap{ i => !(hitSum(i) === 0.U || hitSum(i) === 1.U) })
+    val pfHitSum = widthMap{ i => PopCount(pfHitVec(i)) }
+    ParallelOR(widthMap{ i => !(hitSum(i)===0.U || hitSum(i)===1.U) || !(pfHitSum(i)===0.U || pfHitSum(i)===1.U)})
   }
+  for(i <- 0 until Width) { assert((hit(i)&pfArray(i))===false.B, "hit(%d):%d pfArray(%d):%d v:0x%x pf:0x%x", i.U, hit(i), i.U, pfArray(i), v, pf) }
   assert(!multiHit) // add multiHit here, later it should be removed (maybe), turn to miss and flush
 
   // resp  // TODO: A/D has not being concerned
   for(i <- 0 until Width) {
-    when (ptwPfHit(i)) { ptwPf := false.B }
     // req(i).ready := resp(i).ready // true.B // ValidIO
     resp(i).valid := valid(i) // TODO: check it's func in outer module
     resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
@@ -262,39 +264,20 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    resp(i).bits.excp.pf.ld    := (ptwPfHit(i) && TlbCmd.isRead(cmd(i))) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/)
-    resp(i).bits.excp.pf.st    := (ptwPfHit(i) && TlbCmd.isWrite(cmd(i))) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
-    resp(i).bits.excp.pf.instr := (ptwPfHit(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    resp(i).bits.excp.pf.ld    := (pfArray(i) && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
+    resp(i).bits.excp.pf.st    := (pfArray(i) && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
+    resp(i).bits.excp.pf.instr := (pfArray(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
   }
 
-  // sfence (flush)
-  when (sfence.valid) {
-    when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
-      when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
-        v := 0.U // all should be flush
-      }.otherwise { // all pte but only spec asid
-        v := v & ~VecInit(entry.map(e => /*e.asid === sfence.bits.asid && */!e.perm.g)).asUInt
-      }
-    }.otherwise { // virtual rs1=/=0.U
-      when (sfence.bits.rs2) { // asid
-        v := v & ~VecInit(entry.map(_.vpn === sfence.bits.addr.asTypeOf(vaBundle2).vpn)).asUInt
-      }.otherwise { // particular va and asid
-        v := v & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle2).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
-      }
-    }
-  }
+  
 
   // ptw
   val state_idle :: state_wait :: Nil = Enum(2)
   val state = RegInit(state_idle)
 
   ptw <> DontCare // TODO: need check it
-  when (!ptwPf && ptw.resp.valid) {
-    ptwPf := ptw.resp.bits.pf
-    ptwIdx := ptw.resp.bits.idx
-  }
   ptw.req.valid := ParallelOR(miss).asBool && state===state_idle
-  ptw.resp.ready := state===state_wait && !ptwPf
+  ptw.resp.ready := state===state_wait
   for(i <- Width-1 to 0 by -1) {
     when (miss(i)) {
       ptw.req.bits.vpn := reqAddr(i).vpn
@@ -317,24 +300,56 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
   }
 
+  // reset pf when pf hit
+  val pfHitReset = WireInit(0.U(TlbEntrySize.W))
+  when (ParallelOR(pfArray).asBool /* or ParallelOR(valid)*/) {
+    val pfHitAndValid = widthMap{i => Mux(valid(i), VecInit(pfHitVec(i)).asUInt, 0.U) }
+    pfHitReset := ParallelOR(pfHitAndValid)
+  }
+
   // refill
   val refill = ptw.resp.fire() && !ptw.resp.bits.pf
   val refillIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
+  val pfRefill = WireInit(0.U(TlbEntrySize.W))
   when (refill) {
-    v := v | (1.U << refillIdx)
+    v := v | UIntToOH(refillIdx)
+    pfRefill := Mux(ptw.resp.bits.pf, UIntToOH(refillIdx), 0.U)
     entry(refillIdx) := ptw.resp.bits.entry
     XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
   }
 
+  // pf update
+  when (refill || ParallelOR(pfArray).asBool /* or ParallelOR(valid)*/) {
+    pf := (pf & ~pfHitReset) | pfRefill
+  }
+
+  // sfence (flush)
+  when (sfence.valid) {
+    when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
+      when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
+        v := 0.U // all should be flush
+      }.otherwise { // all pte but only spec asid
+        v := v & ~VecInit(entry.map(e => /*e.asid === sfence.bits.asid && */!e.perm.g)).asUInt
+      }
+    }.otherwise { // virtual rs1=/=0.U
+      when (sfence.bits.rs2) { // asid
+        v := v & ~VecInit(entry.map(_.vpn === sfence.bits.addr.asTypeOf(vaBundle2).vpn)).asUInt
+      }.otherwise { // particular va and asid
+        v := v & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle2).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+      }
+    }
+  }
+
+  // Log
   for(i <- 0 until Width) {
     XSDebug(req(i).valid, p"req(${i.U}): ${req(i).bits}\n")
     XSDebug(resp(i).valid, p"resp(${i.U}): ${resp(i).bits}\n")
   }
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
-  XSDebug(ParallelOR(valid), p"CSR: ${csr}\n")
-  XSDebug(ParallelOR(valid), p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)}\n")
-  XSDebug(ParallelOR(valid) || ptw.resp.valid/* || state=/=state_idle || ptwPf*/, p"state:${state} ptwPf:${ptwPf} ptwIdx:${ptwIdx}\n")
+  XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid/* || state=/=state_idle*/, p"state:${state}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} v:${ptw.resp.valid}r:${ptw.resp.ready} \n")
 
@@ -347,4 +362,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
     when(resp(i).valid && !resp(i).bits.miss) { assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt) } // FIXME: remove me when tlb may be ok
   }
+  
+  assert((v&pf)===0.U, "v and pf can't be true at same time: v:0x%x pf:0x%x", v, pf)
 }
