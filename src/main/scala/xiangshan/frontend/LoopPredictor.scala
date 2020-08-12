@@ -84,29 +84,43 @@ class LTBColumn extends LTBModule {
   val if3_tag = io.req.bits.tag
   val if3_pc = io.req.bits.pc // only for debug
   val if3_entry = WireInit(ltb(if3_idx))
-  when (io.update.valid && io.update.bits.misPred) {
-    when (updateIdx === if3_idx) {
-      if3_entry.specCnt := 0.U
-    }.otherwise {
-      if3_entry.specCnt := ltb(if3_idx).nSpecCnt
-    }
-  }
+  // when (io.update.valid && io.update.bits.misPred) {
+  //   when (updateIdx === if3_idx) {
+  //     if3_entry.specCnt := 1.U
+  //   }.otherwise {
+  //     if3_entry.specCnt := ltb(if3_idx).nSpecCnt
+  //   }
+  // }
 
-  val if4_entry = RegEnable(if3_entry, io.req.valid)
-  val if4_idx = RegEnable(if3_idx, io.req.valid)
-  val if4_tag = RegEnable(if3_tag, io.req.valid)
-  val if4_specCnt = Mux(io.update.valid && io.update.bits.misPred, Mux(updateIdx === if4_idx, 0.U, ltb(if4_idx).nSpecCnt), if4_entry.specCnt)
-  io.resp.meta := if4_specCnt
-  io.resp.exit := if4_tag === if4_entry.tag && if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned
+  // val if4_entry = RegEnable(if3_entry, io.req.valid)
+  // val if4_idx = RegEnable(if3_idx, io.req.valid)
+  // val if4_tag = RegEnable(if3_tag, io.req.valid)
+  // val if4_specCnt = Mux(io.update.valid && io.update.bits.misPred, Mux(updateIdx === if4_idx, 0.U, ltb(if4_idx).nSpecCnt), if4_entry.specCnt)
+  // io.resp.meta := if4_specCnt
+  // io.resp.exit := if4_tag === if4_entry.tag && if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned
+
+  io.resp.meta := RegEnable(if3_entry.specCnt, io.req.valid)
+  io.resp.exit := RegNext(if3_tag === if3_entry.tag && if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf && io.req.valid)
 
   // speculatively update specCnt
-  when (RegNext(io.req.valid) && if4_entry.tag === if4_tag) {
-    when (if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned) {
-      ltb(if4_idx).age := 7.U
-      ltb(if4_idx).specCnt := 0.U
+
+  // when (RegNext(io.req.valid) && if4_entry.tag === if4_tag) {
+  //   when (if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned) {
+  //     ltb(if4_idx).age := 7.U
+  //     ltb(if4_idx).specCnt := 0.U
+  //   }.otherwise {
+  //     ltb(if4_idx).age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
+  //     ltb(if4_idx).specCnt := if4_specCnt + 1.U
+  //   }
+  // }
+
+  when (io.req.valid && if3_entry.tag === if3_tag) {
+    when (if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf) {
+      ltb(if3_idx).age := 7.U
+      ltb(if3_idx).specCnt := 0.U
     }.otherwise {
-      ltb(if4_idx).age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
-      ltb(if4_idx).specCnt := if4_specCnt + 1.U
+      ltb(if3_idx).age := Mux(if3_entry.age === 7.U, 7.U, if3_entry.age + 1.U)
+      ltb(if3_idx).specCnt := if3_entry.specCnt + 1.U
     }
   }
 
@@ -125,8 +139,8 @@ class LTBColumn extends LTBModule {
       wEntry.conf := 0.U
       wEntry.age := 7.U
       wEntry.tripCnt := Fill(cntBits, 1.U(1.W))
-      wEntry.specCnt := 0.U
-      wEntry.nSpecCnt := 0.U
+      wEntry.specCnt := 1.U
+      wEntry.nSpecCnt := 1.U
       ltb(updateIdx) := wEntry
     }.elsewhen (tagMatch) {
       // During resolution, a taken branch found in the LTB has its nSpecCnt incremented by one.
@@ -156,14 +170,26 @@ class LTBColumn extends LTBModule {
     }
   }
 
+  // bypass for if3_entry.specCnt
+  when (io.update.valid && !doingReset && io.req.valid && updateIdx === if3_idx) {
+    when (!tagMatch && io.update.bits.misPred || tagMatch) {
+      if3_entry.specCnt := wEntry.specCnt
+    }
+  }
+  when (io.repair && !doingReset && io.req.valid) {
+    if3_entry.specCnt := if3_entry.nSpecCnt
+  }
+
   //debug info
   XSDebug(doingReset, "Reseting...\n")
   XSDebug("[IF3][req] v=%d pc=%x idx=%x tag=%x\n", io.req.valid, io.req.bits.pc, io.req.bits.idx, io.req.bits.tag)
   XSDebug("[IF3][if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d\n", if3_entry.tag, if3_entry.conf, if3_entry.age, if3_entry.tripCnt, if3_entry.specCnt, if3_entry.nSpecCnt)
-  XSDebug("[IF4] idx=%x tag=%x specCnt=%d\n", if4_idx, if4_tag, if4_specCnt)
-  XSDebug(RegNext(io.req.valid) && if4_entry.tag === if4_tag, "[IF4][speculative update] new specCnt=%d\n",
-    Mux(if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned, 0.U, if4_specCnt + 1.U))
-  XSDebug("[update] v=%d misPred=%d pc=%x meta=%d taken=%d\n", io.update.valid, io.update.bits.misPred, io.update.bits.pc, io.update.bits.meta, io.update.bits.taken)
+  // XSDebug("[IF4] idx=%x tag=%x specCnt=%d\n", if4_idx, if4_tag, if4_specCnt)
+  // XSDebug(RegNext(io.req.valid) && if4_entry.tag === if4_tag, "[IF4][speculative update] new specCnt=%d\n",
+  //   Mux(if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned, 0.U, if4_specCnt + 1.U))
+  XSDebug(io.req.valid && if3_entry.tag === if3_tag, "[IF3][speculative update] new specCnt=%d\n",
+    Mux(if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf, 0.U, if3_entry.specCnt + 1.U))
+  XSDebug("[update] v=%d misPred=%d pc=%x idx=%x tag=%x meta=%d taken=%d tagMatch=%d cntMatch=%d\n", io.update.valid, io.update.bits.misPred, io.update.bits.pc, updateIdx, updateTag, io.update.bits.meta, io.update.bits.taken, tagMatch, cntMatch)
   XSDebug("[entry ] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d\n", entry.tag, entry.conf, entry.age, entry.tripCnt, entry.specCnt, entry.nSpecCnt)
   XSDebug("[wEntry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d\n", wEntry.tag, wEntry.conf, wEntry.age, wEntry.tripCnt, wEntry.specCnt, wEntry.nSpecCnt)
   XSDebug(io.update.valid && io.update.bits.misPred || io.repair, "MisPred or repairing, all of the nSpecCnts copy their values into the specCnts\n")
@@ -203,7 +229,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.req.bits.tag := realTags(i)
     // ltbs(i).io.if4_fire := io.if4_fire
     // ltbs(i).io.update := io.update
-    ltbs(i).io.update.valid := i.U === ltbAddr.getBank(io.update.bits.ui.pc) && io.update.valid
+    ltbs(i).io.update.valid := i.U === ltbAddr.getBank(io.update.bits.ui.pc) && io.update.valid && io.update.bits.ui.pd.isBr
     ltbs(i).io.update.bits.misPred := io.update.bits.ui.isMisPred
     ltbs(i).io.update.bits.pc := io.update.bits.ui.pc
     ltbs(i).io.update.bits.meta := io.update.bits.ui.brInfo.specCnt
