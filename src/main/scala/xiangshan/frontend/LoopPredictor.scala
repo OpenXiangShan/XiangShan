@@ -102,28 +102,6 @@ class LTBColumn extends LTBModule {
   io.resp.meta := RegEnable(if3_entry.specCnt, io.req.valid)
   io.resp.exit := RegNext(if3_tag === if3_entry.tag && if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf && io.req.valid)
 
-  // speculatively update specCnt
-
-  // when (RegNext(io.req.valid) && if4_entry.tag === if4_tag) {
-  //   when (if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned) {
-  //     ltb(if4_idx).age := 7.U
-  //     ltb(if4_idx).specCnt := 0.U
-  //   }.otherwise {
-  //     ltb(if4_idx).age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
-  //     ltb(if4_idx).specCnt := if4_specCnt + 1.U
-  //   }
-  // }
-
-  when (io.req.valid && if3_entry.tag === if3_tag) {
-    when (if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf) {
-      ltb(if3_idx).age := 7.U
-      ltb(if3_idx).specCnt := 0.U
-    }.otherwise {
-      ltb(if3_idx).age := Mux(if3_entry.age === 7.U, 7.U, if3_entry.age + 1.U)
-      ltb(if3_idx).specCnt := if3_entry.specCnt + 1.U
-    }
-  }
-
   // when resolving a branch
   val updateSpecCnt = io.update.bits.meta
   val entry = ltb(updateIdx)
@@ -155,6 +133,17 @@ class LTBColumn extends LTBModule {
         wEntry.nSpecCnt := 0.U
       }
       ltb(updateIdx) := wEntry
+    }
+  }
+
+  // speculatively update specCnt
+  when (io.req.valid && if3_entry.tag === if3_tag) {
+    when (if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf) {
+      ltb(if3_idx).age := 7.U
+      ltb(if3_idx).specCnt := 0.U
+    }.otherwise {
+      ltb(if3_idx).age := Mux(if3_entry.age === 7.U, 7.U, if3_entry.age + 1.U)
+      ltb(if3_idx).specCnt := if3_entry.specCnt + 1.U
     }
   }
 
