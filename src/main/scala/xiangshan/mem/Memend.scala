@@ -156,16 +156,6 @@ class Memend extends XSModule {
     storeUnits(i).io.lsroq <> lsroq.io.storeIn(i)
   }
 
-  // MiscUnit
-  // MiscUnit will override other control signials,
-  // as misc insts (LR/SC/AMO) will block the pipeline  
-  // TODO
-  miscUnit.io <> DontCare
-  miscUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits) 
-  // miscUnit.io.dtlb 
-  // miscUnit.io.dcache 
-  // miscUnit.io.out  
-  
   sbuffer.io.dcache <> dcache.io.lsu.store
 
   lsroq.io.stout <> io.backend.stout
@@ -179,5 +169,25 @@ class Memend extends XSModule {
   lsroq.io.uncache <> uncache.io.lsroq
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
-
+  
+  // MiscUnit
+  // MiscUnit will override other control signials,
+  // as misc insts (LR/SC/AMO) will block the pipeline  
+  miscUnit.io <> DontCare
+  miscUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits) 
+  miscUnit.io.in.valid := io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou || 
+    io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
+  when(miscUnit.io.dtlb.req.valid){
+    dtlb.io.lsu(0) <> miscUnit.io.dtlb 
+  }
+  when(miscUnit.io.dcache.req.valid){
+    dcache.io.lsu.lsroq.req <> miscUnit.io.dcache.req 
+  }
+  when(dcache.io.lsu.lsroq.resp.valid && dcache.io.lsu.lsroq.resp.bits.meta.id(1, 0) === DCacheMiscType.misc){
+    dcache.io.lsu.lsroq.resp <> miscUnit.io.dcache.resp
+  }
+  when(miscUnit.io.out.valid){
+    io.backend.ldout(0) <> miscUnit.io.out
+  }
+  miscUnit.io.out.ready := true.B
 }
