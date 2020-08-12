@@ -154,7 +154,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val bankIdxInOrder = VecInit((0 until TageBanks).map(b => (baseBankLatch +& b.U)(log2Up(TageBanks)-1, 0)))
 
   val realMask = circularShiftLeft(io.req.bits.mask, TageBanks, baseBank)
-  val realMaskLatch = RegEnable(realMask, enable=io.req.valid)
+  val maskLatch = RegEnable(io.req.bits.mask, enable=io.req.valid)
 
   (0 until TageBanks).map(
     b => {
@@ -181,7 +181,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val req_rhits = VecInit((0 until TageBanks).map(b => table_r(bankIdxInOrder(b)).valid && table_r(bankIdxInOrder(b)).tag === tagLatch))
 
   (0 until TageBanks).map(b => {
-    io.resp(b).valid := req_rhits(b) && realMaskLatch(b)
+    io.resp(b).valid := req_rhits(b) && maskLatch(b)
     io.resp(b).bits.ctr := table_r(bankIdxInOrder(b)).ctr
     io.resp(b).bits.u := Cat(hi_us_r(bankIdxInOrder(b)),lo_us_r(bankIdxInOrder(b)))
   })
@@ -284,11 +284,13 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val u = io.update
   val b = PriorityEncoder(u.mask)
   val ub = PriorityEncoder(u.uMask)
-  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x\n",
-    io.req.bits.pc, io.req.bits.hist, idx, tag)
+  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x, baseBank=%d, mask=%b, realMask=%b\n",
+    io.req.bits.pc, io.req.bits.hist, idx, tag, baseBank, io.req.bits.mask, realMask)
   for (i <- 0 until TageBanks) {
-    XSDebug(RegNext(io.req.valid) && req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch, req_rhits(i), table_r(i).ctr, Cat(hi_us_r(i),lo_us_r(i)).asUInt)
+    XSDebug(RegNext(io.req.valid) && req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch, req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
   }
+
+  XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", req_rhits.asUInt, maskLatch)
   XSDebug(RegNext(io.req.valid) && !req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
 
   XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
@@ -348,7 +350,7 @@ class Tage extends BaseTage {
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
-  val flushLatch = RegNext(io.flush)
+  // val flushLatch = RegNext(io.flush)
 
   val s2_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
   val s3_bim = RegEnable(s2_bim, enable=io.s3Fire)
@@ -385,12 +387,10 @@ class Tage extends BaseTage {
     val finalAltPred = WireInit(s3_bim.ctrs(w)(1))
     var provided = false.B
     var provider = 0.U
-    io.resp.hits(w) := false.B
     io.resp.takens(w) := s3_bim.ctrs(w)(1)
 
     for (i <- 0 until TageNTables) {
-      val hit = resps(i)(w).valid && !flushLatch
-      io.resp.hits(w) := hit
+      val hit = resps(i)(w).valid
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
         io.resp.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
@@ -485,6 +485,9 @@ class Tage extends BaseTage {
   XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
   XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
     debug_pc_s3, debug_hist_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
+  for (i <- 0 until TageNTables) {
+    XSDebug(RegNext(io.s3Fire), "Table(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(resps(i).map(_.valid)).asUInt, Cat(resps(i).map(_.bits.ctr)), Cat(resps(i).map(_.bits.u)))
+  }
   XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
     u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
 }
