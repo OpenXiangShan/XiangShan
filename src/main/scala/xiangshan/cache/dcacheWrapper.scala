@@ -5,7 +5,7 @@ import chisel3.util._
 
 import utils.XSDebug
 import bus.tilelink._
-import xiangshan.{MicroOp, Redirect}
+import xiangshan.{MicroOp}
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -70,7 +70,6 @@ class DCacheToLsuIO extends DCacheBundle {
   val load     = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsroq    = Flipped(new DCacheLoadIO)  // lsroq load/store
   val store    = Flipped(new DCacheStoreIO) // for sbuffer
-  val redirect = ValidIO(new Redirect)
 }
 
 class DCacheIO extends DCacheBundle {
@@ -80,9 +79,6 @@ class DCacheIO extends DCacheBundle {
 
 class DCache extends DCacheModule {
   val io = IO(new DCacheIO)
-
-  io.lsu.redirect.valid := false.B
-  io.lsu.redirect.bits := DontCare
 
   //----------------------------------------
   // core data structures
