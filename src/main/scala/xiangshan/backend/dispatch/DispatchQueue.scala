@@ -176,8 +176,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   val dispatchReplayCnt = Mux(needReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
   val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
+  val needExtraReplayWalk = Cat((0 until deqnum).map(i => stateEntries(deqIndex(i)) === s_dispatched)).orR
+  val needExtraReplayWalkReg = RegNext(needExtraReplayWalk && replayValid, false.B)
   val inReplayWalk = dispatchReplayCntReg =/= 0.U
-  val dispatchReplayStep = Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg)
+  val dispatchReplayStep = Mux(needExtraReplayWalkReg, 0.U, Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg))
   when (exceptionValid) {
     dispatchReplayCntReg := 0.U
   }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex - 1.U)) {
@@ -185,21 +187,22 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     dispatchReplayCntReg := Mux(dispatchReplayCntReg > distance, dispatchReplayCntReg - distance, 0.U)
   }.elsewhen (replayValid) {
     dispatchReplayCntReg := dispatchReplayCnt - dispatchReplayStep
-  }.otherwise {
+  }.elsewhen (!needExtraReplayWalkReg) {
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
   }
 
   io.inReplayWalk := inReplayWalk
   val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - (i + 1).U)(indexWidth - 1, 0))
   for (i <- 0 until replayWidth) {
-    val shouldResetDest = inReplayWalk && stateEntries(replayIndex(i)) === s_valid
-    io.replayPregReq(i).isInt := shouldResetDest && uopEntries(replayIndex(i)).ctrl.rfWen && uopEntries(replayIndex(i)).ctrl.ldest =/= 0.U
-    io.replayPregReq(i).isFp  := shouldResetDest && uopEntries(replayIndex(i)).ctrl.fpWen
-    io.replayPregReq(i).preg  := uopEntries(replayIndex(i)).pdest
+    val index =  Mux(needExtraReplayWalkReg, (if (i < deqnum) deqIndex(i) else 0.U), replayIndex(i))
+    val shouldResetDest = inReplayWalk && (needExtraReplayWalkReg || stateEntries(index) === s_valid)
+    io.replayPregReq(i).isInt := shouldResetDest && uopEntries(index).ctrl.rfWen && uopEntries(index).ctrl.ldest =/= 0.U
+    io.replayPregReq(i).isFp  := shouldResetDest && uopEntries(index).ctrl.fpWen
+    io.replayPregReq(i).preg  := uopEntries(index).pdest
 
-    XSDebug(shouldResetDest, p"replay dispatchPtr-${i+1}: " +
-      p"type (${uopEntries(replayIndex(i)).ctrl.rfWen}, ${uopEntries(replayIndex(i)).ctrl.fpWen}) " +
-      p"pdest ${uopEntries(replayIndex(i)).pdest} ldest ${uopEntries(replayIndex(i)).ctrl.ldest}\n")
+    XSDebug(shouldResetDest, p"replay $i: " +
+      p"type (${uopEntries(index).ctrl.rfWen}, ${uopEntries(index).ctrl.fpWen}) " +
+      p"pdest ${uopEntries(index).pdest} ldest ${uopEntries(index).ctrl.ldest}\n")
   }
 
   /**
@@ -262,7 +265,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     )
   }
 
-  XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr, replayCnt: $dispatchReplayCntReg\n")
+  XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr, " +
+    p"replayCnt: $dispatchReplayCntReg, needExtraReplayWalkReg: $needExtraReplayWalkReg\n")
   XSDebug(p"state: ")
   stateEntries.reverse.foreach { s =>
     XSDebug(false, s === s_invalid, "-")

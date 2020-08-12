@@ -61,8 +61,8 @@ case class XSCoreParameters
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4,
     IntDqReplayWidth = 4,
-    FpDqReplayWidth = 1,
-    LsDqReplayWidth = 3
+    FpDqReplayWidth = 4,
+    LsDqReplayWidth = 4
   ),
   exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
