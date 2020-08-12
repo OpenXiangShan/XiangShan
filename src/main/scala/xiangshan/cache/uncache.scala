@@ -22,6 +22,7 @@ class Uncache extends DCacheModule {
   )
 
   io.bus <> DontCare
+  io.lsroq <> DontCare
 
   io.bus.a.valid := io.lsroq.req.valid
   io.bus.a.bits := Mux(
