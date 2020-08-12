@@ -100,6 +100,8 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
     val out = Decoupled(new Stage1IO)
     val metaReadBus = CacheMetaArrayReadBus()
     val dataReadBus = CacheDataArrayReadBus()
+
+    val s2s3Empty = Input(Bool()) // FIXME: remove me when do not use nut's cache
   })
 
   if (ro) when (io.in.fire()) { assert(!io.in.bits.isWrite()) }
@@ -117,8 +119,8 @@ sealed class CacheStage1(implicit val cacheConfig: CacheConfig) extends CacheMod
   io.dataReadBus.apply(valid = readBusValid, setIdx = getDataIdx(io.in.bits.addr))
 
   io.out.bits.req := io.in.bits
-  io.out.valid := io.in.valid && io.metaReadBus.req.ready && io.dataReadBus.req.ready
-  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready
+  io.out.valid := io.in.valid && io.metaReadBus.req.ready && io.dataReadBus.req.ready && io.s2s3Empty // FIXME: remove me when do not use nut's cache 
+  io.in.ready := (!io.in.valid || io.out.fire()) && io.metaReadBus.req.ready && io.dataReadBus.req.ready && io.s2s3Empty // FIXME: remove me when do not use nut's cache
 
   Debug() {
     if (debug) {
@@ -484,6 +486,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
   io.out.mem <> s3.io.mem
   io.mmio <> s3.io.mmio
   io.empty := !s2.io.in.valid && !s3.io.in.valid
+  s1.io.s2s3Empty := io.empty // FIXME: remove me when do not use nut's cache
 
   io.in.resp.valid := Mux(s3.io.out.valid && s3.io.out.bits.isPrefetch(), false.B, s3.io.out.valid || s3.io.dataReadRespToL1)
 
@@ -527,7 +530,7 @@ class Cache(implicit val cacheConfig: CacheConfig) extends CacheModule {
       when (s1.io.in.valid) { printf("%d ", GTimer()) ; printf(p"[${cacheName}.S1]: ${s1.io.in.bits}\n") }
       when (s2.io.in.valid) { printf("%d ", GTimer()) ; printf(p"[${cacheName}.S2]: ${s2.io.in.bits.req}\n") }
       when (s3.io.in.valid) { printf("%d ", GTimer()) ; printf(p"[${cacheName}.S3]: ${s3.io.in.bits.req}\n") }
-      //s3.io.mem.dump(cacheName + ".mem")
+      // s3.io.mem.dump(cacheName + ".mem")
     }}
   }
 }

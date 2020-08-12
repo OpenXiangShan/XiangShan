@@ -61,6 +61,9 @@ class LoadUnit extends XSModule {
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
   io.dtlb.req.bits.idx := l2_out.bits.uop.roqIdx
   io.dtlb.req.bits.cmd := TlbCmd.read
+  io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
+  io.dtlb.req.bits.debug.roqIdx := l2_out.bits.uop.roqIdx
+  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx
   
   // send result to dcache
   io.dcache.req.valid := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss // TODO: check it 
@@ -95,6 +98,10 @@ class LoadUnit extends XSModule {
     killValid := true.B
   }
   io.dcache.kill := needKill && killValid
+
+  // NOTE: the below is for kill's debug, remove it after fixing the bug
+  XSDebug(io.dcache.kill, p"Kill: needKill:${needKill} killValid:${killValid} l4outValid:${l4_out.valid} l3valid:${l3_valid} pc:0x${Hexadecimal(l3_uop.cf.pc)} roqidx:${l3_uop.roqIdx} lsRoqIdx:${l3_uop.lsroqIdx}\n")
+  XSDebug(io.dcache.kill, p"Kill: Redirect: valid:${io.redirect.valid} isExcp:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag}")
 
   // Done in Dcache
 
