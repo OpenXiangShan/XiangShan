@@ -121,16 +121,16 @@ class Memend extends XSModule {
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
   val miscUnit = Module(new MiscUnit)
   val dcache = Module(new DCache)
+  val uncache = Module(new Uncache)
   // val mshq = Module(new MSHQ)
   val dtlb = Module(new Dtlb)
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new FakeSbuffer)
 
   dtlb.io := DontCare
-  io.mmio <> DontCare // TODO: FIXIT
-
+  
   dcache.io.bus <> io.mem
-  // dcache.io.bus <> io.mmio // TODO: FIXIT
+  uncache.io.bus <> io.mmio
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -176,6 +176,7 @@ class Memend extends XSModule {
   io.backend.replayAll <> lsroq.io.rollback
   
   lsroq.io.dcache <> dcache.io.lsu.lsroq // TODO: Add AMO
+  lsroq.io.uncache <> uncache.io.lsroq
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
 
