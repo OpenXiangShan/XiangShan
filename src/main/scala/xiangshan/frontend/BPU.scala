@@ -275,6 +275,7 @@ class BPUStage3 extends BPUStage {
   for(i <- 0 until PredictWidth){
     io.out.bits.brInfo(i).rasSp :=  ras.io.branchInfo.rasSp
     io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
+    io.out.bits.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
   }
   
   val brTakens = 
