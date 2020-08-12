@@ -37,6 +37,7 @@ class Lsroq extends XSModule {
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLoadIO
+    val uncache = new DCacheLoadIO
     // val refill = Flipped(Valid(new DCacheStoreReq))
   })
   
@@ -63,8 +64,6 @@ class Lsroq extends XSModule {
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth-1,0))
   
-  val missCacheIO = Wire(new DCacheLoadIO)
-  val mmioCacheIO = Wire(new DCacheLoadIO)
   // TODO: misc arbitor
 
   // Enqueue at dispatch
@@ -167,24 +166,26 @@ class Lsroq extends XSModule {
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
   val missRefillSel = OHToUInt(missRefillSelVec.asUInt)
-  missCacheIO.req.valid := missRefillSelVec.asUInt.orR
-  missCacheIO.req.bits.cmd := MemoryOpConstants.M_XRD
-  missCacheIO.req.bits.addr := data(missRefillSel).paddr
-  missCacheIO.req.bits.data := DontCare
-  missCacheIO.req.bits.mask := data(missRefillSel).mask
+  io.dcache.req.valid := missRefillSelVec.asUInt.orR
+  io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
+  io.dcache.req.bits.addr := data(missRefillSel).paddr
+  io.dcache.req.bits.data := DontCare
+  io.dcache.req.bits.mask := data(missRefillSel).mask
 
-  missCacheIO.req.bits.meta.id       := DCacheMiscType.miss
-  missCacheIO.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
-  missCacheIO.req.bits.meta.paddr    := data(missRefillSel).paddr
-  missCacheIO.req.bits.meta.uop      := uop(missRefillSel)
-  missCacheIO.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
-  missCacheIO.req.bits.meta.tlb_miss := false.B
-  missCacheIO.req.bits.meta.mask     := data(missRefillSel).mask
-  missCacheIO.req.bits.meta.replay   := false.B
+  io.dcache.req.bits.meta.id       := DCacheMiscType.miss
+  io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
+  io.dcache.req.bits.meta.paddr    := data(missRefillSel).paddr
+  io.dcache.req.bits.meta.uop      := uop(missRefillSel)
+  io.dcache.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
+  io.dcache.req.bits.meta.tlb_miss := false.B
+  io.dcache.req.bits.meta.mask     := data(missRefillSel).mask
+  io.dcache.req.bits.meta.replay   := false.B
 
-  assert(!(data(missRefillSel).mmio && missCacheIO.req.valid))
+  io.dcache.resp.ready := true.B
 
-  when(missCacheIO.req.fire()) {
+  assert(!(data(missRefillSel).mmio && io.dcache.req.valid))
+
+  when(io.dcache.req.fire()) {
     miss(missRefillSel) := false.B
     listening(missRefillSel) := true.B
   }
@@ -205,7 +206,7 @@ class Lsroq extends XSModule {
 
   // (0 until LsroqSize).map(i => {
   //   val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.meta.paddr
-  //   when(allocated(i) && listening(i) && addrMatch && missCacheIO.resp.fire()) {
+  //   when(allocated(i) && listening(i) && addrMatch && io.dcache.resp.fire()) {
   //     // TODO: merge data
   //     // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
   //     // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
@@ -216,7 +217,7 @@ class Lsroq extends XSModule {
   // })
 
   // Refill 64 bit in a cycle
-  // Refill data comes back from missCacheIO.resp
+  // Refill data comes back from io.dcache.resp
   def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
     val res = Wire(Vec(8, UInt(8.W)))
     (0 until 8).foreach(i => {
@@ -226,9 +227,9 @@ class Lsroq extends XSModule {
   }
 
   (0 until LsroqSize).map(i => {
-    val addrMatch = data(i).paddr(PAddrBits - 1, 3) === missCacheIO.resp.bits.meta.paddr(PAddrBits - 1, 3)
-    when(allocated(i) && listening(i) && addrMatch && missCacheIO.resp.fire()) {
-      val refillData = missCacheIO.resp.bits.data
+    val addrMatch = data(i).paddr(PAddrBits - 1, 3) === io.dcache.resp.bits.meta.paddr(PAddrBits - 1, 3)
+    when(allocated(i) && listening(i) && addrMatch && io.dcache.resp.fire()) {
+      val refillData = io.dcache.resp.bits.data
       data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
       valid(i) := true.B
       listening(i) := false.B
@@ -558,53 +559,35 @@ class Lsroq extends XSModule {
 
   // setup misc mem access req
   // mask / paddr / data can be get from lsroq.data
-  mmioCacheIO.req.valid := pending(ringBufferTail) && 
+  io.uncache.req.valid := pending(ringBufferTail) && 
     io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
     !io.commits(0).bits.isWalk
 
-  mmioCacheIO.req.bits.cmd  := Mux(store(ringBufferTail), MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)
-  mmioCacheIO.req.bits.addr := data(ringBufferTail).paddr 
-  mmioCacheIO.req.bits.data := data(ringBufferTail).data
-  mmioCacheIO.req.bits.mask := data(ringBufferTail).mask
+  io.uncache.req.bits.cmd  := Mux(store(ringBufferTail), MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)
+  io.uncache.req.bits.addr := data(ringBufferTail).paddr 
+  io.uncache.req.bits.data := data(ringBufferTail).data
+  io.uncache.req.bits.mask := data(ringBufferTail).mask
 
-  mmioCacheIO.req.bits.meta.id       := DCacheMiscType.mmio
-  mmioCacheIO.req.bits.meta.vaddr    := DontCare
-  mmioCacheIO.req.bits.meta.paddr    := data(ringBufferTail).paddr
-  mmioCacheIO.req.bits.meta.uop      := uop(ringBufferTail)
-  mmioCacheIO.req.bits.meta.mmio     := true.B // data(ringBufferTail).mmio
-  mmioCacheIO.req.bits.meta.tlb_miss := false.B
-  mmioCacheIO.req.bits.meta.mask     := data(ringBufferTail).mask
-  mmioCacheIO.req.bits.meta.replay   := false.B
+  io.uncache.req.bits.meta.id       := DCacheMiscType.mmio
+  io.uncache.req.bits.meta.vaddr    := DontCare
+  io.uncache.req.bits.meta.paddr    := data(ringBufferTail).paddr
+  io.uncache.req.bits.meta.uop      := uop(ringBufferTail)
+  io.uncache.req.bits.meta.mmio     := true.B // data(ringBufferTail).mmio
+  io.uncache.req.bits.meta.tlb_miss := false.B
+  io.uncache.req.bits.meta.mask     := data(ringBufferTail).mask
+  io.uncache.req.bits.meta.replay   := false.B
 
-  when(mmioCacheIO.req.fire()){
+  io.uncache.resp.ready := true.B
+
+  when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B
   }
 
-  when(mmioCacheIO.resp.fire()){
+  when(io.uncache.resp.fire()){
     valid(ringBufferTail) := true.B
-    data(ringBufferTail).data := mmioCacheIO.resp.bits.data(XLEN-1, 0)
+    data(ringBufferTail).data := io.uncache.resp.bits.data(XLEN-1, 0)
     // TODO: write back exception info
   }
-
-  // TODO: when MMIO inst is write back to lsroq, set valid.writeback as false.B
-  // TODO: load MMIO should not be writebacked to CDB in L5
-
-  // misc arbitor
-  io.dcache.req.valid := missCacheIO.req.valid || mmioCacheIO.req.valid
-  io.dcache.req.bits := Mux(missCacheIO.req.valid, missCacheIO.req.bits, mmioCacheIO.req.bits)
-  
-  missCacheIO.resp.ready := true.B
-  mmioCacheIO.resp.ready := true.B
-  io.dcache.resp.ready := true.B
-
-  missCacheIO.req.ready := io.dcache.req.ready && missCacheIO.req.valid
-  mmioCacheIO.req.ready := io.dcache.req.ready && !missCacheIO.req.valid
-
-  missCacheIO.resp.bits := io.dcache.resp.bits 
-  mmioCacheIO.resp.bits := io.dcache.resp.bits
-  
-  missCacheIO.resp.valid := io.dcache.resp.valid && io.dcache.resp.bits.meta.id(1, 0) === DCacheMiscType.miss
-  mmioCacheIO.resp.valid := io.dcache.resp.valid && io.dcache.resp.bits.meta.id(1, 0) === DCacheMiscType.mmio
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx
