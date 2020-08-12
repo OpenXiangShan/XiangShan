@@ -81,6 +81,9 @@ class DCacheIO extends DCacheBundle {
 class DCache extends DCacheModule {
   val io = IO(new DCacheIO)
 
+  io.lsu.redirect.valid := false.B
+  io.lsu.redirect.bits := DontCare
+
   //----------------------------------------
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
