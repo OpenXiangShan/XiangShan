@@ -177,11 +177,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // otherwise: firstMaskPosition
   val maskedNeedReplay = Cat(needReplay.reverse) & dispatchedMask
   val someReplay = Cat(maskedNeedReplay).orR
+  val allReplay = Cat(maskedNeedReplay).andR
   XSDebug(replayValid, p"needReplay: ${Binary(Cat(needReplay))}\n")
   XSDebug(replayValid, p"dispatchedMask: ${Binary(dispatchedMask)}\n")
   XSDebug(replayValid, p"maskedNeedReplay: ${Binary(maskedNeedReplay)}\n")
   val cancelPosition = Mux(!Cat(needCancel).orR || Cat(needCancel).andR, tailIndex, getFirstMaskPosition(needCancel))
-  val replayPosition = Mux(!someReplay || Cat(maskedNeedReplay).andR, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
+  val replayPosition = Mux(!someReplay || allReplay, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
   XSDebug(replayValid, p"getFirstMaskPosition: ${getFirstMaskPosition(maskedNeedReplay.asBools)}\n")
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
@@ -196,8 +197,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchCancelPtr = Mux(needCancel(dispatchIndex) || dispatchEntries === 0.U, tailCancelPtr, dispatchPtr)
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
-  val dispatchReplayCnt = Mux(maskedNeedReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
+  // for 11111111, replayPosition is unuseful. We naively set Cnt to size.U
+  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition))
   val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
+  // actually, if deqIndex points to head uops and they are replayed, there's no need for extraWalk
+  // however, to simplify logic, we simply let it do extra walk now
   val needExtraReplayWalk = Cat((0 until deqnum).map(i => needReplay(deqIndex(i)))).orR
   val needExtraReplayWalkReg = RegNext(needExtraReplayWalk && replayValid, false.B)
   val inReplayWalk = dispatchReplayCntReg =/= 0.U || needExtraReplayWalkReg
