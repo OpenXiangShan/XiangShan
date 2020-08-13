@@ -225,7 +225,10 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
   val wrbypass_us      = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(2.W))))
   val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(3.W))))
+  val wrbypass_ctr_valids = Reg(Vec(wrBypassEntries, Vec(TageBanks, Bool())))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
+
+  when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
 
   val wrbypass_hits    = VecInit((0 until wrBypassEntries) map { i =>
     !doing_reset &&
@@ -248,16 +251,18 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   // }
 
+  val updateBank = PriorityEncoder(io.update.mask)
 
   for (w <- 0 until TageBanks) {
     update_wdata(w).ctr   := Mux(io.update.alloc(w),
       Mux(io.update.taken(w), 4.U,
                               3.U
       ),
-      // Mux(wrbypass_hit,       inc_ctr(wrbypass_ctrs(wrbypass_hit_idx)(w), io.update.taken(w)),
-      //                         inc_ctr(io.update.oldCtr(w), io.update.taken(w))
-      // )
-      inc_ctr(io.update.oldCtr(w), io.update.taken(w))
+      Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(w),
+            inc_ctr(wrbypass_ctrs(wrbypass_hit_idx)(w), io.update.taken(w)),
+            inc_ctr(io.update.oldCtr(w), io.update.taken(w))
+      )
+      // inc_ctr(io.update.oldCtr(w), io.update.taken(w))
     )
     update_wdata(w).valid := true.B
     update_wdata(w).tag   := update_tag
@@ -268,9 +273,12 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   when (io.update.mask.reduce(_||_)) {
     when (wrbypass_hits.reduce(_||_)) {
-      wrbypass_ctrs(wrbypass_hit_idx) := VecInit(update_wdata.map(_.ctr))
+      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := update_wdata(updateBank).ctr
+      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
     } .otherwise {
-      wrbypass_ctrs(wrbypass_enq_idx) := VecInit(update_wdata.map(_.ctr))
+      // wrbypass_ctrs(wrbypass_enq_idx) := VecInit(update_wdata.map(_.ctr))
+      wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := update_wdata(updateBank).ctr
+      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
       wrbypass_tags(wrbypass_enq_idx) := update_tag
       wrbypass_idxs(wrbypass_enq_idx) := update_idx
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
@@ -299,6 +307,13 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     update_wdata(b).tag, update_wdata(b).ctr, update_idx)
   XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
     u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
+
+  // ------------------------------Debug-------------------------------------
+  val valids = Reg(Vec(TageBanks, Vec(nRows, Bool())))
+  when (reset.asBool) { valids.foreach(b => b.foreach(r => r := false.B)) }
+  (0 until TageBanks).map( b => { when (io.update.mask(b)) { valids(b)(update_idx) := true.B }})
+  XSDebug("Table usage:------------------------\n")
+  (0 until TageBanks).map( b => { XSDebug("Bank(%d): %d out of %d rows are valid\n", b.U, PopCount(valids(b)), nRows.U)})
 
   // XSDebug(wrbypass_hits.reduce(_||_), "wrbypass hits, wridx:%d, tag:%x, ctr:%d, idx:%d\n",
   //   wrbypass_hit_idx, )
