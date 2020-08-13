@@ -132,7 +132,7 @@ class LTBColumn extends LTBModule {
 
   // speculatively update specCnt
   when (io.req.valid && if3_entry.tag === if3_tag) {
-    when (if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf) {
+    when ((if3_entry.specCnt + 1.U) === if3_entry.tripCnt/* && if3_entry.isConf*/) {
       ltb(if3_idx).age := 7.U
       ltb(if3_idx).specCnt := 0.U
     }.otherwise {
