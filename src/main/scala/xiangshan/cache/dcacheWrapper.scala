@@ -58,6 +58,8 @@ class DCacheLoadIO extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheLoadReq)
   val resp = Flipped(DecoupledIO(new DCacheResp))
+  // kill previous cycle's req
+  val s1_kill = Output(Bool())
 }
 
 class DCacheStoreIO extends DCacheBundle
@@ -202,10 +204,15 @@ class DCache extends DCacheModule {
     ldu_0.resp.ready := lsu_0.resp.ready
   }
 
+  // the s1 kill signal
+  // only lsu uses this, replay never kills
+  ldu_0.s1_kill := lsu_0.s1_kill
+
   for (w <- 1 until LoadPipelineWidth) {
     val load_w_block = block_load(io.lsu.load(w).req.bits.addr)
     block_decoupled(io.lsu.load(w).req, ldu(w).io.lsu.req, load_w_block)
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
+    ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
   }
 
   // load miss queue
