@@ -456,9 +456,16 @@ class MissQueue extends DCacheModule
     io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
 
   // print tilelink messages
-  /*
-  XSDebug.exec(io.mem_acquire.fire(), io.mem_acquire.bits.dump)
-  XSDebug.exec(io.mem_grant.fire(), io.mem_grant.bits.dump)
-  XSDebug.exec(io.mem_finish.fire(), io.mem_finish.bits.dump)
-  */
+  when (io.mem_acquire.fire()) {
+    XSDebug("mem_acquire ")
+    io.mem_acquire.bits.dump
+  }
+  when (io.mem_grant.fire()) {
+    XSDebug("mem_grant ")
+    io.mem_grant.bits.dump
+  }
+  when (io.mem_finish.fire()) {
+    XSDebug("mem_finish ")
+    io.mem_finish.bits.dump
+  }
 }
