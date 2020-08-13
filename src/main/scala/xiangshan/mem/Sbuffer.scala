@@ -80,8 +80,15 @@ class FakeSbuffer extends XSModule {
   })
 
   io.dcache.req <> io.in(0)
+  // update req data / mask according to pc
+  val wdataVec = WireInit(VecInit(Seq.fill(8)(0.U(64.W))))
+  val wmaskVec = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+  wdataVec(io.in(0).bits.addr(5,3)) := io.in(0).bits.data
+  wmaskVec(io.in(0).bits.addr(5,3)) := io.in(0).bits.mask
+  io.dcache.req.bits.data := wdataVec.asUInt
+  io.dcache.req.bits.mask := wmaskVec.asUInt
   io.dcache.resp.ready := true.B
-  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x\n", io.in(0).bits.addr, io.in(0).bits.data)
-  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x\n", io.in(1).bits.addr, io.in(1).bits.data)
-  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x\n", io.dcache.req.bits.addr, io.dcache.req.bits.data)
+  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.mask)
+  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(1).bits.addr, io.in(1).bits.data, io.in(0).bits.mask)
+  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x mask %b\n", io.dcache.req.bits.addr, io.dcache.req.bits.data, io.dcache.req.bits.mask)
 }
