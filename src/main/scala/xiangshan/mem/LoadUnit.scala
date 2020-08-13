@@ -89,7 +89,7 @@ class LoadUnit extends XSModule {
   val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
-  val killValid = Reg(Bool())
+  val killValid = RegInit(false.B)
   val needKill = l3_uop.needFlush(io.redirect)
   when (needKill || l4_out.valid) {
     killValid := false.B
@@ -100,9 +100,9 @@ class LoadUnit extends XSModule {
   io.dcache.kill := needKill && killValid
 
   // NOTE: the below is for kill's debug, remove it after fixing the bug
-  XSDebug(killValid, p"Kill: needKill:${needKill} killValid:${killValid} l4outValid:${l4_out.valid} l3valid:${l3_valid} pc:0x${Hexadecimal(l3_uop.cf.pc)} roqidx:${l3_uop.roqIdx} lsRoqIdx:${l3_uop.lsroqIdx}\n")
-  XSDebug(io.dcache.kill, p"Kill: Redirect: valid:${io.redirect.valid} isExcp:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag}")
-
+  XSDebug(l2_out.fire(), p"L2 OutFire: pc:0x${Hexadecimal(l2_out.bits.uop.cf.pc)} roqIdx:${l2_out.bits.uop.roqIdx} lsRoqIdx:${l2_out.bits.uop.lsroqIdx}\n")
+  XSDebug(io.dcache.kill, p"Kill: needKill:${needKill} killValid:${killValid} l4outValid:${l4_out.valid} l3valid:${l3_valid} pc:0x${Hexadecimal(l3_uop.cf.pc)} roqidx:${l3_uop.roqIdx} lsRoqIdx:${l3_uop.lsroqIdx}\n")
+  XSDebug(io.dcache.kill, p"Kill: Redirect: valid:${io.redirect.valid} isExcp:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag}\n")
   // Done in Dcache
 
   //-------------------------------------------------------
