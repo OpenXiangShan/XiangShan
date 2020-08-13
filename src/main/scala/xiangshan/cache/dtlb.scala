@@ -312,7 +312,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val refillIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   val pfRefill = WireInit(0.U(TlbEntrySize.W))
   when (refill) {
-    v := v | UIntToOH(refillIdx)
+    v := Mux(ptw.resp.bits.pf, v, v | UIntToOH(refillIdx))
     pfRefill := Mux(ptw.resp.bits.pf, UIntToOH(refillIdx), 0.U)
     entry(refillIdx) := ptw.resp.bits.entry
     XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
