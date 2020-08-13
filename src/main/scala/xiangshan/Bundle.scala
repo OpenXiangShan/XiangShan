@@ -63,6 +63,7 @@ class BranchInfo extends XSBundle {
   val debug_ubtb_cycle = UInt(64.W)
   val debug_btb_cycle = UInt(64.W)
   val debug_tage_cycle = UInt(64.W)
+  val specCnt = UInt(10.W)
 
   def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
     this.histPtr := histPtr
@@ -90,6 +91,7 @@ class BranchUpdateInfo extends XSBundle {
   val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   val isMisPred = Bool()
+  val brTag = new BrqPtr
 
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
