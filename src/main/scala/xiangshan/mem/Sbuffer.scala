@@ -1,10 +1,12 @@
 package xiangshan.mem
+
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.cache._
 import utils.ParallelAND
+import utils.TrueLRU
 
 
 class SbufferUserBundle extends XSBundle {
@@ -57,6 +59,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   val updateInfo = WireInit(VecInit(Seq.fill(StorePipelineWidth)(0.U.asTypeOf(new UpdateInfo))))
   updateInfo := DontCare
+
+  val lru = new TrueLRU(StoreBufferSize)
 
   def getTag(pa: UInt): UInt =
     pa(PAddrBits - 1, PAddrBits - tagWidth)
@@ -141,7 +145,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
           }
         })
 
-        XSDebug("Update line#%d with tag %x, mask: %x, data: %x\n", bufIdx.U, cache(bufIdx).tag,
+        XSInfo("Update line#%d with tag %x, mask: %x, data: %x\n", bufIdx.U, cache(bufIdx).tag,
           io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
       }
     }
@@ -151,7 +155,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
     val freeVec = WireInit(VecInit((0 until StoreBufferSize).map(i => cache(i).valid || busy(i.U, storeIdx))))
     val hasFree = !ParallelAND(freeVec)
     val nextFree = PriorityEncoder(freeVec.map(i => !i))
-    //    XSDebug("hasFree: %d, nextFreeIdx: %d\n", hasFree, nextFree)
+    //    XSInfo("hasFree: %d, nextFreeIdx: %d\n", hasFree, nextFree)
 
     when (!updateInfo(storeIdx).isForward && !updateInfo(storeIdx).isUpdated && hasFree) {
       updateInfo(storeIdx).isInserted := true.B
@@ -168,7 +172,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
           when (io.in(storeIdx).bits.mask.asBools()(i % 8)) {
             updateInfo(storeIdx).newMask(i) := true.B
             updateInfo(storeIdx).newData(i) := io.in(storeIdx).bits.data(8 * (i % 8 + 1) - 1, 8 * (i % 8))
-            XSDebug("[%d] write data %x\n", i.U, io.in(storeIdx).bits.data(8 * (i % 8 + 1) - 1, 8 * (i % 8)))
+            XSInfo("[%d] write data %x\n", i.U, io.in(storeIdx).bits.data(8 * (i % 8 + 1) - 1, 8 * (i % 8)))
           } .otherwise {
             updateInfo(storeIdx).newMask(i) := false.B
             updateInfo(storeIdx).newData(i) := 0.U
@@ -176,7 +180,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         }
       })
 
-      XSDebug("Insert into line#%d with tag %x, mask: %x, data: %x, pa: %x\n", nextFree, getTag(io.in(storeIdx).bits.addr),
+      XSInfo("Insert into line#%d with tag %x, mask: %x, data: %x, pa: %x\n", nextFree, getTag(io.in(storeIdx).bits.addr),
         io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data, io.in(storeIdx).bits.addr)
     }
 
@@ -185,7 +189,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
       updateInfo(storeIdx).isIgnored := true.B
     }
 
-    XSDebug(updateInfo(storeIdx).isUpdated && updateInfo(storeIdx).isInserted, "Error: one line is both updated and inserted!\n")
+    XSInfo(updateInfo(storeIdx).isUpdated && updateInfo(storeIdx).isInserted, "Error: one line is both updated and inserted!\n")
 
     io.in(storeIdx).ready := updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted || updateInfo(storeIdx).isForward
 
@@ -196,7 +200,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
       // ----------------------------------------
       when(updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isForward) {
         // clear lruCnt
-        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
+//        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
+        lru.access(updateInfo(storeIdx).idx)
         // update mask and data
         cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
         cache(updateInfo(storeIdx).idx).mask := updateInfo(storeIdx).newMask
@@ -206,7 +211,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // ----------------------------------------
       } .elsewhen(updateInfo(storeIdx).isInserted) {
         // clear lruCnt
-        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
+//        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
+        lru.access(updateInfo(storeIdx).idx)
         // set valid
         cache(updateInfo(storeIdx).idx).valid := true.B
         // set tag
@@ -221,13 +227,13 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   // Update lruCnt
   //--------------------------------------------------------------------------------------------------------------------
-  (0 until StoreBufferSize).foreach(i => {
-    for (j <- 0 until StorePipelineWidth) {
-      when(cache(i).valid && !(updateInfo(j).idx === i.U && !updateInfo(j).isIgnored)) {
-        cache(i).lruCnt := cache(i).lruCnt + 1.U
-      }
-    }
-  })
+//  (0 until StoreBufferSize).foreach(i => {
+//    for (j <- 0 until StorePipelineWidth) {
+//      when(cache(i).valid && !(updateInfo(j).idx === i.U && !updateInfo(j).isIgnored)) {
+//        cache(i).lruCnt := cache(i).lruCnt + 1.U
+//      }
+//    }
+//  })
 
 
   // Write back to d-cache
@@ -236,14 +242,16 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   val validCnt: UInt = Wire(UInt(4.W))
   validCnt := PopCount((0 until StoreBufferSize).map(i => cache(i).valid))
-  XSDebug("[ %d ] lines valid this cycle\n", validCnt)
+  XSInfo("[ %d ] lines valid this cycle\n", validCnt)
 
-  def older(a: UInt, b: UInt): UInt = {
-    Mux(cache(a).lruCnt >= cache(b).lruCnt, a, b)
-  }
+//  def older(a: UInt, b: UInt): UInt = {
+//    Mux(cache(a).lruCnt >= cache(b).lruCnt, a, b)
+//  }
   // TODO: refine LRU implementation
   val oldestLineIdx: UInt = Wire(UInt(sBufferIndexWidth.W))
-  oldestLineIdx := ParallelOperation((0 until StoreBufferSize).map(_.U), (a, b) => older(a.asUInt(), b.asUInt()))
+//  oldestLineIdx := ParallelOperation((0 until StoreBufferSize).map(_.U), (a, b) => older(a.asUInt(), b.asUInt()))
+  oldestLineIdx := lru.way
+  XSInfo("Least recently used #[ %d ] line\n", validCnt)
 
   io.dcache.req.valid := false.B //needWriteToCache
   io.dcache.req.bits.addr := DontCare
@@ -284,6 +292,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   when(io.dcache.resp.fire()) {
     waitingCacheLine.valid := false.B
+    lru.miss
+    XSInfo("recv resp from dcache. wb tag %x\n", waitingCacheLine.tag)
   }
 
 
