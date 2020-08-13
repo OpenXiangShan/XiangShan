@@ -101,7 +101,7 @@ class LoadUnit extends XSModule {
   when (l2_out.fire()) {
     killValid := true.B
   }
-  // io.dcache.kill := needKill && killValid
+  io.dcache.s1_kill := needKill && killValid
   // FIXIT
 
   // Done in Dcache
