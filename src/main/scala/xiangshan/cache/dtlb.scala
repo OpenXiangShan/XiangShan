@@ -294,7 +294,10 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // refill
   val refill = ptw.resp.fire() && !ptw.resp.bits.pf
-  val refillIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
+  val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
+  val priorIdx = PriorityEncoder(~v)
+  val antiPriorIdx = PriorityEncoder(Reverse(~v)) // or just (TlbEntrySize-1).U
+  val refillIdx = Mux(ParallelAND(v.asBools), Mux(ptw.resp.bits.pf, antiPriorIdx, priorIdx), randIdx)
   val pfRefill = WireInit(0.U(TlbEntrySize.W))
   when (refill) {
     v := Mux(ptw.resp.bits.pf, v, v | UIntToOH(refillIdx))
