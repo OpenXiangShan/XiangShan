@@ -64,6 +64,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchEntries = distanceBetween(tailPtr, dispatchPtr)
   val commitEntries = validEntries - dispatchEntries
   val emptyEntries = size.U - validEntries
+  val isFull = tailDirection =/= headDirection && tailIndex === headIndex
+  val isFullDispatch = dispatchDirection =/= headDirection && dispatchIndex === headIndex
+
+  def rangeMask(start: UInt, end: UInt): UInt = {
+    val startMask = (1.U((size + 1).W) << start(indexWidth - 1, 0)).asUInt - 1.U
+    val endMask = (1.U((size + 1).W) << end(indexWidth - 1, 0)).asUInt - 1.U
+    val xorMask = startMask(size - 1, 0) ^ endMask(size - 1, 0)
+    Mux(start(indexWidth) === end(indexWidth), xorMask, ~xorMask)
+  }
+  val dispatchedMask = rangeMask(headPtr, dispatchPtr)
 
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -126,7 +136,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val replayValid = io.redirect.valid && io.redirect.bits.isReplay
   val needReplay = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needReplay(i) := roqNeedFlush(i) && stateEntries(i) =/= s_invalid && replayValid
+    needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && replayValid
     when (needReplay(i)) {
       stateEntries(i) := s_valid
     }
@@ -148,10 +158,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // note that it returns the position starting from either the leftmost or the rightmost
   // 00000001 => 0
   // 00111000 => 3
-  // 11000111 => 1
-  // 10000000 => 0
+  // 11000111 => 2
+  // 10000000 => 1
   // 00000000 => 7
-  def getFirstMaskPosition(mask: Vec[Bool]) = {
+  // 11111111 => 7
+  def getFirstMaskPosition(mask: Seq[Bool]) = {
     Mux(mask(size - 1),
       PriorityEncoder(mask.reverse.map(m => !m)),
       PriorityEncoder(mask)
@@ -159,8 +170,19 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
 
   // when nothing is cancelled or replayed, the pointers remain unchanged
-  val cancelPosition = Mux(Cat(needCancel).orR, getFirstMaskPosition(needCancel), tailIndex)
-  val replayPosition = Mux(Cat(needReplay).orR, getFirstMaskPosition(needReplay), dispatchIndex)
+  // if any uop is cancelled or replayed, the pointer should go to the first zero before all ones
+  // position: continuous ones count from leftmost or rightmost (direction bit is considered)
+  // if all bits are one, we need to keep the index unchanged
+  // 00000000, 11111111: unchanged
+  // otherwise: firstMaskPosition
+  val maskedNeedReplay = Cat(needReplay.reverse) & dispatchedMask
+  val someReplay = Cat(maskedNeedReplay).orR
+  XSDebug(replayValid, p"needReplay: ${Binary(Cat(needReplay))}\n")
+  XSDebug(replayValid, p"dispatchedMask: ${Binary(dispatchedMask)}\n")
+  XSDebug(replayValid, p"maskedNeedReplay: ${Binary(maskedNeedReplay)}\n")
+  val cancelPosition = Mux(!Cat(needCancel).orR || Cat(needCancel).andR, tailIndex, getFirstMaskPosition(needCancel))
+  val replayPosition = Mux(!someReplay || Cat(maskedNeedReplay).andR, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
+  XSDebug(replayValid, p"getFirstMaskPosition: ${getFirstMaskPosition(maskedNeedReplay.asBools)}\n")
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
   // If the highest bit is one, the direction flips.
@@ -174,9 +196,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchCancelPtr = Mux(needCancel(dispatchIndex) || dispatchEntries === 0.U, tailCancelPtr, dispatchPtr)
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
-  val dispatchReplayCnt = Mux(needReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
+  val dispatchReplayCnt = Mux(maskedNeedReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
   val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
-  val needExtraReplayWalk = Cat((0 until deqnum).map(i => stateEntries(deqIndex(i)) === s_dispatched)).orR
+  val needExtraReplayWalk = Cat((0 until deqnum).map(i => needReplay(deqIndex(i)))).orR
   val needExtraReplayWalkReg = RegNext(needExtraReplayWalk && replayValid, false.B)
   val inReplayWalk = dispatchReplayCntReg =/= 0.U || needExtraReplayWalkReg
   val dispatchReplayStep = Mux(needExtraReplayWalkReg, 0.U, Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg))
@@ -185,7 +207,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex - 1.U)) {
     val distance = distanceBetween(dispatchPtr, tailCancelPtr)
     dispatchReplayCntReg := Mux(dispatchReplayCntReg > distance, dispatchReplayCntReg - distance, 0.U)
-  }.elsewhen (replayValid) {
+  }.elsewhen (replayValid && someReplay) {
     dispatchReplayCntReg := dispatchReplayCnt - dispatchReplayStep
   }.elsewhen (!needExtraReplayWalkReg) {
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
