@@ -175,14 +175,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // if all bits are one, we need to keep the index unchanged
   // 00000000, 11111111: unchanged
   // otherwise: firstMaskPosition
-  // how to check 00000000: tail is 0 (should be the same as needCancel(tailIndex - 1.U))
-  // how to check 11111111: full && head is 1 (should be the same as needCancel(headIndex))
-  // however, 11111111 should never occur unless exception
   val maskedNeedReplay = Cat(needReplay.reverse) & dispatchedMask
-  val cancelPosition = Mux(needCancel(tailIndex - 1.U), getFirstMaskPosition(needCancel), tailIndex)
-  val replayPosition = Mux(maskedNeedReplay(dispatchIndex - 1.U), getFirstMaskPosition(maskedNeedReplay.asBools), dispatchIndex)
-  XSError(!exceptionValid && (isFull && needCancel(headIndex)), "ALL CANCELLED: this should never occur\n")
-  XSError(!exceptionValid && (isFullDispatch && maskedNeedReplay(headIndex)), "ALL REPLAYED: this should never occur\n")
+  XSDebug(replayValid, p"needReplay: ${Binary(Cat(needReplay))}\n")
+  XSDebug(replayValid, p"dispatchedMask: ${Binary(dispatchedMask)}\n")
+  XSDebug(replayValid, p"maskedNeedReplay: ${Binary(maskedNeedReplay)}\n")
+  val cancelPosition = Mux(!Cat(needCancel).orR || Cat(needCancel).andR, tailIndex, getFirstMaskPosition(needCancel))
+  val replayPosition = Mux(!Cat(maskedNeedReplay).orR || Cat(maskedNeedReplay).andR, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
+  XSDebug(replayValid, p"getFirstMaskPosition: ${getFirstMaskPosition(maskedNeedReplay.asBools)}\n")
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
   // If the highest bit is one, the direction flips.
