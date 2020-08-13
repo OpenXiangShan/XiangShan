@@ -23,6 +23,7 @@ case class DCacheParameters(
     nMissEntries: Int = 1,
     nLoadMissEntries: Int = 1,
     nStoreMissEntries: Int = 1,
+    nMMIOEntries: Int = 1,
     nSDQ: Int = 17,
     nRPQ: Int = 16,
     nMMIOs: Int = 1,
