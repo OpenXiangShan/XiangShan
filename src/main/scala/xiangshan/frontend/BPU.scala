@@ -488,3 +488,16 @@ class BPU extends BaseBPU {
   }
 
 }
+
+object BPU{
+  def apply(enableBPU: Boolean = true) = {
+      if(enableBPU) {
+        val BPU = Module(new BPU)
+        BPU
+      }
+      else {
+        val FakeBPU = Module(new FakeBPU)
+        FakeBPU
+      }
+  }
+}
