@@ -3,7 +3,7 @@ package system
 import noop.{Cache, CacheConfig}
 import bus.axi4.{AXI4, AXI4Lite, AXI4ToAXI4Lite}
 import bus.simplebus._
-import bus.tilelink.{NaiveTL1toN, NaiveTLToAXI4, TLCached}
+import bus.tilelink.{NaiveTL1toN, MMIOTLToAXI4, TLCached}
 import device.AXI4Timer
 import chisel3._
 import chisel3.util._
@@ -52,7 +52,7 @@ class XSSoc extends Module with HasSoCParameter {
 
   val extDev = mmioXbar.io.out(0)
   val clint = Module(new AXI4Timer(sim = !env.FPGAPlatform))
-  clint.io.in <> AXI4ToAXI4Lite(NaiveTLToAXI4(mmioXbar.io.out(1)))
+  clint.io.in <> AXI4ToAXI4Lite(MMIOTLToAXI4(mmioXbar.io.out(1)))
 
   io.mmio <> extDev
 

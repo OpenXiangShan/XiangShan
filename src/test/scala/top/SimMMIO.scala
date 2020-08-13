@@ -4,7 +4,7 @@ import bus.axi4.AXI4ToAXI4Lite
 import chisel3._
 import chisel3.util._
 import bus.simplebus._
-import bus.tilelink.{NaiveTL1toN, NaiveTLToAXI4, TLCached, TLParameters}
+import bus.tilelink.{NaiveTL1toN, MMIOTLToAXI4, TLCached, TLParameters}
 import device._
 
 class SimMMIO(para: TLParameters) extends Module {
@@ -24,7 +24,7 @@ class SimMMIO(para: TLParameters) extends Module {
   val xbar = Module(new NaiveTL1toN(devAddrSpace, io.rw.params))
   xbar.io.in <> io.rw
 
-  val axiOut = xbar.io.out.map(tl => AXI4ToAXI4Lite(NaiveTLToAXI4(tl)))
+  val axiOut = xbar.io.out.map(tl => AXI4ToAXI4Lite(MMIOTLToAXI4(tl)))
 
   val uart = Module(new AXI4UART)
   val vga = Module(new AXI4VGA(sim = true))
