@@ -45,7 +45,9 @@ class Dispatch2Fp extends XSModule {
   val rsIndexVec = (0 until dpParams.FpDqDeqWidth).map({i =>
     val indexOffset = Seq(0, exuParameters.FmacCnt)
     allIndexGen.zipWithIndex.map{
-      case (index, j) => Mux(index.io.reverseMapping(i).valid, index.io.reverseMapping(i).bits + indexOffset(j).U, 0.U)
+      case (index, j) => Mux(index.io.reverseMapping(i).valid,
+        ZeroExt(index.io.reverseMapping(i).bits, log2Ceil(exuParameters.FpExuCnt)) + indexOffset(j).U,
+        0.U)
     }.reduce(_ | _)
   })
 
