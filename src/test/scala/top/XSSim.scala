@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import bus.axi4._
-import bus.tilelink.NaiveTLToAXI4
+import bus.tilelink.FakeTLLLC
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
 import xiangshan._
@@ -46,7 +46,7 @@ class TrapIO extends XSBundle {
   val instrCnt = Output(UInt(XLEN.W))
 }
 
-class XSSimTop extends Module {
+class XSSimTop extends XSModule {
   val io = IO(new Bundle{
     val difftest = new DiffTestIO
     val logCtrl = new LogCtrlIO
@@ -60,10 +60,12 @@ class XSSimTop extends Module {
   // A large delay will make emu incorrectly report getting stuck.
   val memdelay = Module(new AXI4Delayer(0))
   val mmio = Module(new SimMMIO(soc.io.mmio.params))
+  val tlToAXI = Module(new FakeTLLLC(l1BusParams))
 
   soc.io.frontend := DontCare
 
-  memdelay.io.in <> NaiveTLToAXI4(soc.io.mem)
+  tlToAXI.io.in <> soc.io.mem
+  memdelay.io.in <> tlToAXI.io.out
   mem.io.in <> memdelay.io.out
 
   mmio.io.rw <> soc.io.mmio

@@ -79,6 +79,7 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
+  io.dcache.s1_kill := false.B
   
   // wait for cache result
 

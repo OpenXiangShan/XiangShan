@@ -23,6 +23,7 @@ case class DCacheParameters(
     nMissEntries: Int = 1,
     nLoadMissEntries: Int = 1,
     nStoreMissEntries: Int = 1,
+    nMMIOEntries: Int = 1,
     nSDQ: Int = 17,
     nRPQ: Int = 16,
     nMMIOs: Int = 1,
@@ -82,7 +83,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def clientIdLSB = clientMissQueueEntryIdWidth
   def entryIdMSB = clientMissQueueEntryIdWidth - 1
   def entryIdLSB = 0
-  def reqIdWidth = 32
+  def reqIdWidth = 64
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   // To make things easier, now we assume:
@@ -281,7 +282,6 @@ class DuplicatedMetaArray extends DCacheModule {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
     val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, new L1Metadata)))
-    val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
 
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)

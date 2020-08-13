@@ -62,8 +62,8 @@ case class XSCoreParameters
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4,
     IntDqReplayWidth = 4,
-    FpDqReplayWidth = 1,
-    LsDqReplayWidth = 3
+    FpDqReplayWidth = 4,
+    LsDqReplayWidth = 4
   ),
   exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
@@ -161,6 +161,8 @@ trait HasXSParameter {
 
   val LRSCCycles = 16
   val dcacheParameters = DCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
     busParams = l1BusParams
   )
 }
