@@ -260,23 +260,6 @@ class BPUStage3 extends BPUStage {
 
    val callIdx = PriorityEncoder(calls)
    val retIdx  = PriorityEncoder(rets)
-
-  //RAS
-  val ras = Module(new RAS)
-  ras.io <> DontCare
-  ras.io.pc.bits := inLatch.pc 
-  ras.io.pc.valid := io.out.fire()//predValid
-  ras.io.is_ret := rets.orR  && (retIdx === jmpIdx) && io.predecode.valid
-  ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
-  ras.io.callIdx.bits := callIdx
-  ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
-  ras.io.recover := io.recover
-
-  for(i <- 0 until PredictWidth){
-    io.out.bits.brInfo(i).rasSp :=  ras.io.branchInfo.rasSp
-    io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
-    io.out.bits.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
-  }
   
   val brTakens = 
     if (EnableBPD) {
@@ -286,14 +269,35 @@ class BPUStage3 extends BPUStage {
     }
 
   // predict taken only if btb has a target
-  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)|| rets(i)))
+  takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
   notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageValidTakens(i)))} 
                 else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))})
   targetSrc := inLatch.resp.btb.targets
-  when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
+
+  //RAS
+  if(EnableRAS){
+    val ras = Module(new RAS)
+    ras.io <> DontCare
+    ras.io.pc.bits := inLatch.pc 
+    ras.io.pc.valid := io.out.fire()//predValid
+    ras.io.is_ret := rets.orR  && (retIdx === jmpIdx) && io.predecode.valid
+    ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
+    ras.io.callIdx.bits := callIdx
+    ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
+    ras.io.recover := io.recover
+
+    for(i <- 0 until PredictWidth){
+      io.out.bits.brInfo(i).rasSp :=  ras.io.branchInfo.rasSp
+      io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
+      io.out.bits.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
+    }
+    takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)|| rets(i)))
+    when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
+  }
+
   lastIsRVC := pds(lastValidPos).isRVC
   when (lastValidPos === 1.U) {
     lastHit := pdMask(1) |
