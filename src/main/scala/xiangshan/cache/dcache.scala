@@ -281,7 +281,6 @@ class DuplicatedMetaArray extends DCacheModule {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1MetaReadReq)))
     val write = Flipped(DecoupledIO(new L1MetaWriteReq))
     val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, new L1Metadata)))
-    val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
 
   def onReset = L1Metadata(0.U, ClientMetadata.onReset)

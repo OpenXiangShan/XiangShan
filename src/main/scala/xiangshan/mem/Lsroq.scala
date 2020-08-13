@@ -182,12 +182,21 @@ class Lsroq extends XSModule {
   io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
+  io.dcache.s1_kill := false.B
 
   assert(!(data(missRefillSel).mmio && io.dcache.req.valid))
 
   when(io.dcache.req.fire()) {
     miss(missRefillSel) := false.B
     listening(missRefillSel) := true.B
+  }
+
+  when(io.dcache.req.fire()){
+    XSDebug("miss req: pc %x addr %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr) 
+  }
+
+  when(io.dcache.resp.fire()){
+    XSDebug("miss resp: addr %x data %x\n", io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
   }
 
   // get load result from refill resp
@@ -233,6 +242,7 @@ class Lsroq extends XSModule {
       data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
       valid(i) := true.B
       listening(i) := false.B
+      XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt) 
     }
   })
 
@@ -578,6 +588,7 @@ class Lsroq extends XSModule {
   io.uncache.req.bits.meta.replay   := false.B
 
   io.uncache.resp.ready := true.B
+  io.uncache.s1_kill := false.B
 
   when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B
@@ -587,6 +598,14 @@ class Lsroq extends XSModule {
     valid(ringBufferTail) := true.B
     data(ringBufferTail).data := io.uncache.resp.bits.data(XLEN-1, 0)
     // TODO: write back exception info
+  }
+
+  when(io.uncache.req.fire()){
+    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr, io.uncache.req.bits.data, io.uncache.req.bits.cmd, io.uncache.req.bits.mask) 
+  }
+
+  when(io.uncache.resp.fire()){
+    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
   }
 
   // misprediction recovery / exception redirect

@@ -199,6 +199,8 @@ class LoadMissQueue extends DCacheModule
   req.ready   := Mux(idx_match, tag_match && sec_rdy, pri_rdy)
   io.replay.req  <> replay_arb.io.out
   io.lsu.resp    <> io.replay.resp
+  // replay never kills its previous request
+  io.replay.s1_kill := false.B
   io.miss_req    <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
 }

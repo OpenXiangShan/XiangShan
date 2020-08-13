@@ -5,7 +5,7 @@ import chisel3.util._
 
 import utils.XSDebug
 import bus.tilelink._
-import xiangshan.{MicroOp, Redirect}
+import xiangshan.{MicroOp}
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -58,6 +58,8 @@ class DCacheLoadIO extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheLoadReq)
   val resp = Flipped(DecoupledIO(new DCacheResp))
+  // kill previous cycle's req
+  val s1_kill = Output(Bool())
 }
 
 class DCacheStoreIO extends DCacheBundle
@@ -70,7 +72,6 @@ class DCacheToLsuIO extends DCacheBundle {
   val load     = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsroq    = Flipped(new DCacheLoadIO)  // lsroq load/store
   val store    = Flipped(new DCacheStoreIO) // for sbuffer
-  // val redirect = ValidIO(new Redirect)
 }
 
 class DCacheIO extends DCacheBundle {
@@ -203,10 +204,15 @@ class DCache extends DCacheModule {
     ldu_0.resp.ready := lsu_0.resp.ready
   }
 
+  // the s1 kill signal
+  // only lsu uses this, replay never kills
+  ldu_0.s1_kill := lsu_0.s1_kill
+
   for (w <- 1 until LoadPipelineWidth) {
     val load_w_block = block_load(io.lsu.load(w).req.bits.addr)
     block_decoupled(io.lsu.load(w).req, ldu(w).io.lsu.req, load_w_block)
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
+    ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
   }
 
   // load miss queue

@@ -149,7 +149,8 @@ class IssueQueue
       (stateQueue(i)===s_valid) && readyVec(idxQueue(i)) && !(selectedIdxRegOH(i) && io.deq.fire())
     )
   ))
-  val selectedIdxWire = PriorityEncoder(selectMask)
+  val (selectedIdxWire, sel) = PriorityEncoderWithFlag(selectMask)
+  val selReg = RegNext(sel)
   val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
   XSDebug(
@@ -177,7 +178,7 @@ class IssueQueue
   }
 
   // (fake) deq to Load/Store unit
-  io.deq.valid := (stateQueue(selectedIdxReg)===s_valid) && readyVec(idxQueue(selectedIdxReg))
+  io.deq.valid := (stateQueue(selectedIdxReg)===s_valid) && readyVec(idxQueue(selectedIdxReg)) && selReg
   io.deq.bits.uop := uopQueue(idxQueue(selectedIdxReg))
 
   val src1Bypass = doBypass(io.deq.bits.uop.psrc1, io.deq.bits.uop.ctrl.src1Type)

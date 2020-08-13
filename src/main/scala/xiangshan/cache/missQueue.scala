@@ -368,6 +368,10 @@ class MissQueue extends DCacheModule
   val refill_arb     = Module(new Arbiter(new L1DataWriteReq,   cfg.nMissEntries))
   val wb_req_arb     = Module(new Arbiter(new WritebackReq,     cfg.nMissEntries))
 
+  // assign default values to output signals
+  io.finish.ready := false.B
+  io.mem_grant.ready := false.B
+
   val entry_alloc_idx = Wire(UInt())
   val req_ready = WireInit(false.B)
 
@@ -389,6 +393,9 @@ class MissQueue extends DCacheModule
     // entry finish
     entry.io.finish.valid   :=  (i.U === io.finish.bits.entry_id) && io.finish.valid
     entry.io.finish.bits    :=  io.finish.bits
+    when (entry.io.finish.valid) {
+      io.finish.ready := entry.io.finish.ready
+    }
 
     meta_read_arb.io.in(i)  <>  entry.io.meta_read
     entry.io.meta_resp      :=  io.meta_resp
