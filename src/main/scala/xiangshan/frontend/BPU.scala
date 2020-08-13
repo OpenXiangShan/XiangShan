@@ -281,8 +281,10 @@ class BPUStage3 extends BPUStage {
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
-  notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageTakens(i)))} 
-                else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))})
+  notTakens := ((if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageTakens(i)))}
+                else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))}).asUInt |
+               (if (EnableLoop) { VecInit((0 until PredictWidth).map(i => brs(i) && loopResp(i)))}
+                else { WireInit(0.U.asTypeOf(UInt(PredictWidth.W))) }).asUInt).asTypeOf(Vec(PredictWidth, Bool()))
   targetSrc := inLatch.resp.btb.targets
 
   lastIsRVC := pds(lastValidPos).isRVC
