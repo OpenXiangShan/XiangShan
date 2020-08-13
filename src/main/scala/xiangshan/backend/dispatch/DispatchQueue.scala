@@ -176,11 +176,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // 00000000, 11111111: unchanged
   // otherwise: firstMaskPosition
   val maskedNeedReplay = Cat(needReplay.reverse) & dispatchedMask
+  val someReplay = Cat(maskedNeedReplay).orR
   XSDebug(replayValid, p"needReplay: ${Binary(Cat(needReplay))}\n")
   XSDebug(replayValid, p"dispatchedMask: ${Binary(dispatchedMask)}\n")
   XSDebug(replayValid, p"maskedNeedReplay: ${Binary(maskedNeedReplay)}\n")
   val cancelPosition = Mux(!Cat(needCancel).orR || Cat(needCancel).andR, tailIndex, getFirstMaskPosition(needCancel))
-  val replayPosition = Mux(!Cat(maskedNeedReplay).orR || Cat(maskedNeedReplay).andR, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
+  val replayPosition = Mux(!someReplay || Cat(maskedNeedReplay).andR, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
   XSDebug(replayValid, p"getFirstMaskPosition: ${getFirstMaskPosition(maskedNeedReplay.asBools)}\n")
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
@@ -206,7 +207,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex - 1.U)) {
     val distance = distanceBetween(dispatchPtr, tailCancelPtr)
     dispatchReplayCntReg := Mux(dispatchReplayCntReg > distance, dispatchReplayCntReg - distance, 0.U)
-  }.elsewhen (replayValid) {
+  }.elsewhen (replayValid && someReplay) {
     dispatchReplayCntReg := dispatchReplayCnt - dispatchReplayStep
   }.elsewhen (!needExtraReplayWalkReg) {
     dispatchReplayCntReg := dispatchReplayCntReg - dispatchReplayStep
