@@ -1,6 +1,6 @@
 package xiangshan.backend.roq
 
-import chisel3.ExcitingUtils.ConnectionType
+import chisel3.ExcitingUtils._
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -339,6 +339,7 @@ class Roq extends XSModule {
     ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
     ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
     ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
+    ExcitingUtils.addSource(state === s_walk || state === s_extrawalk, "perfCntCondRoqWalk", Perf)
 
     if(EnableBPU){
       ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
