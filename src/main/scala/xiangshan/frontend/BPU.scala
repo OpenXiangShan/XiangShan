@@ -7,6 +7,10 @@ import xiangshan._
 import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
+trait HasBPUParameter extends HasXSParameter {
+  val BPUDebug = false
+}
+
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
   def tagBits = VAddrBits - idxBits - 1
 
@@ -52,7 +56,7 @@ class PredictorResponse extends XSBundle {
   val tage = new TageResp
 }
 
-abstract class BasePredictor extends XSModule {
+abstract class BasePredictor extends XSModule with HasBPUParameter{
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
@@ -99,7 +103,7 @@ class BPUStageIO extends XSBundle {
 }
 
 
-abstract class BPUStage extends XSModule {
+abstract class BPUStage extends XSModule with HasBPUParameter{
   class DefaultIO extends XSBundle {
     val flush = Input(Bool())
     val in = Flipped(Decoupled(new BPUStageIO))
@@ -166,25 +170,27 @@ abstract class BPUStage extends XSModule {
   io.out.valid  := predValid && !io.flush
   io.pred.valid := predValid && !io.flush
 
-  XSDebug(io.in.fire(), "in:(%d %d) pc=%x, mask=%b, target=%x\n",
-    io.in.valid, io.in.ready, io.in.bits.pc, io.in.bits.mask, io.in.bits.target)
-  XSDebug(io.out.fire(), "out:(%d %d) pc=%x, mask=%b, target=%x\n",
-    io.out.valid, io.out.ready, io.out.bits.pc, io.out.bits.mask, io.out.bits.target)
-  XSDebug("flush=%d\n", io.flush)
-  XSDebug("taken=%d, takens=%b, notTakens=%b, jmpIdx=%d, hasNTBr=%d, lastValidPos=%d, target=%x\n",
-    taken, takens.asUInt, notTakens.asUInt, jmpIdx, hasNTBr, lastValidPos, target)
-  val p = io.pred.bits
-  XSDebug(io.pred.fire(), "outPred: redirect=%d, taken=%d, jmpIdx=%d, hasNTBrs=%d, target=%x, saveHalfRVI=%d\n",
-    p.redirect, p.taken, p.jmpIdx, p.hasNotTakenBrs, p.target, p.saveHalfRVI)
-  XSDebug(io.pred.fire() && p.taken, "outPredTaken: fetchPC:%x, jmpPC:%x\n",
-    inLatch.pc, inLatch.pc + (jmpIdx << 1.U))
-  XSDebug(io.pred.fire() && p.redirect, "outPred: previous target:%x redirected to %x \n",
-    inLatch.target, p.target)
-  XSDebug(io.pred.fire(), "outPred targetSrc: ")
-  for (i <- 0 until PredictWidth) {
-    XSDebug(false, io.pred.fire(), "(%d):%x ", i.U, targetSrc(i))
+  if (BPUDebug) {
+    XSDebug(io.in.fire(), "in:(%d %d) pc=%x, mask=%b, target=%x\n",
+      io.in.valid, io.in.ready, io.in.bits.pc, io.in.bits.mask, io.in.bits.target)
+    XSDebug(io.out.fire(), "out:(%d %d) pc=%x, mask=%b, target=%x\n",
+      io.out.valid, io.out.ready, io.out.bits.pc, io.out.bits.mask, io.out.bits.target)
+    XSDebug("flush=%d\n", io.flush)
+    XSDebug("taken=%d, takens=%b, notTakens=%b, jmpIdx=%d, hasNTBr=%d, lastValidPos=%d, target=%x\n",
+      taken, takens.asUInt, notTakens.asUInt, jmpIdx, hasNTBr, lastValidPos, target)
+    val p = io.pred.bits
+    XSDebug(io.pred.fire(), "outPred: redirect=%d, taken=%d, jmpIdx=%d, hasNTBrs=%d, target=%x, saveHalfRVI=%d\n",
+      p.redirect, p.taken, p.jmpIdx, p.hasNotTakenBrs, p.target, p.saveHalfRVI)
+    XSDebug(io.pred.fire() && p.taken, "outPredTaken: fetchPC:%x, jmpPC:%x\n",
+      inLatch.pc, inLatch.pc + (jmpIdx << 1.U))
+    XSDebug(io.pred.fire() && p.redirect, "outPred: previous target:%x redirected to %x \n",
+      inLatch.target, p.target)
+    XSDebug(io.pred.fire(), "outPred targetSrc: ")
+    for (i <- 0 until PredictWidth) {
+      XSDebug(false, io.pred.fire(), "(%d):%x ", i.U, targetSrc(i))
+    }
+    XSDebug(false, io.pred.fire(), "\n")
   }
-  XSDebug(false, io.pred.fire(), "\n")
 }
 
 class BPUStage1 extends BPUStage {
@@ -212,10 +218,12 @@ class BPUStage1 extends BPUStage {
   // so it does not need to be latched
   io.out.bits.resp <> io.in.bits.resp
   io.out.bits.brInfo := io.in.bits.brInfo
-  io.out.bits.brInfo.map(_.debug_ubtb_cycle := GTimer())
 
-  XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
-    ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ubtbResp.notTakens.asUInt, ubtbResp.is_RVC.asUInt)
+  if (BPUDebug) {
+    io.out.bits.brInfo.map(_.debug_ubtb_cycle := GTimer())
+    XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
+      ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ubtbResp.notTakens.asUInt, ubtbResp.is_RVC.asUInt)
+  }
 }
 
 class BPUStage2 extends BPUStage {
@@ -230,10 +238,12 @@ class BPUStage2 extends BPUStage {
   lastIsRVC := btbResp.isRVC(lastValidPos)
   lastHit   := btbResp.hits(lastValidPos)
 
-  io.out.bits.brInfo.map(_.debug_btb_cycle := GTimer())
 
-  XSDebug(io.pred.fire(), "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
-    btbResp.hits.asUInt, VecInit(bimResp.ctrs.map(_(1))).asUInt)
+  if (BPUDebug) {
+    io.out.bits.brInfo.map(_.debug_btb_cycle := GTimer())
+    XSDebug(io.pred.fire(), "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
+      btbResp.hits.asUInt, VecInit(bimResp.ctrs.map(_(1))).asUInt)
+  }
 }
 
 class BPUStage3 extends BPUStage {
@@ -290,7 +300,6 @@ class BPUStage3 extends BPUStage {
     lastHit := pdMask(0) | !pdMask(0) & !pds(0).isRVC
   }
 
-  io.out.bits.brInfo.map(_.debug_tage_cycle := GTimer())
 
   // Wrap tage resp and tage meta in
   // This is ugly
@@ -299,11 +308,14 @@ class BPUStage3 extends BPUStage {
     io.out.bits.brInfo(i).tageMeta := io.in.bits.brInfo(i).tageMeta
   }
 
-  XSDebug(io.predecode.valid, "predecode: pc:%x, mask:%b\n", inLatch.pc, io.predecode.bits.mask)
-  for (i <- 0 until PredictWidth) {
-    val p = io.predecode.bits.pd(i)
-    XSDebug(io.predecode.valid && io.predecode.bits.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
-      i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
+  if (BPUDebug) {
+    io.out.bits.brInfo.map(_.debug_tage_cycle := GTimer())
+    XSDebug(io.predecode.valid, "predecode: pc:%x, mask:%b\n", inLatch.pc, io.predecode.bits.mask)
+    for (i <- 0 until PredictWidth) {
+      val p = io.predecode.bits.pd(i)
+      XSDebug(io.predecode.valid && io.predecode.bits.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
+        i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
+    }
   }
 }
 
@@ -337,7 +349,7 @@ object BranchUpdateInfoWithHist {
   }
 }
 
-abstract class BaseBPU extends XSModule with BranchPredictorComponents{
+abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasBPUParameter{
   val io = IO(new Bundle() {
     // from backend
     val inOrderBrInfo    = Flipped(ValidIO(new BranchUpdateInfoWithHist))
@@ -383,14 +395,16 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents{
   io.branchInfo.bits := s3.io.out.bits.brInfo
   s3.io.out.ready := io.branchInfo.ready
 
-  XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
-  for (i <- 0 until PredictWidth) {
-    val b = io.branchInfo.bits(i)
-    XSDebug(io.branchInfo.fire(), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, btbHitJal:%d, bimCtr:%d, fetchIdx:%d\n",
-      i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.btbHitJal, b.bimCtr, b.fetchIdx)
-    val t = b.tageMeta
-    XSDebug(io.branchInfo.fire(), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
-      t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
+  if (BPUDebug) {
+    XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
+    for (i <- 0 until PredictWidth) {
+      val b = io.branchInfo.bits(i)
+      XSDebug(io.branchInfo.fire(), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, btbHitJal:%d, bimCtr:%d, fetchIdx:%d\n",
+        i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.btbHitJal, b.bimCtr, b.fetchIdx)
+      val t = b.tageMeta
+      XSDebug(io.branchInfo.fire(), "  tageMeta: pvder(%d):%d, altDiffers:%d, pvderU:%d, pvderCtr:%d, allocate(%d):%d\n",
+        t.provider.valid, t.provider.bits, t.altDiffers, t.providerU, t.providerCtr, t.allocate.valid, t.allocate.bits)
+    }
   }
   val debug_verbose = false
 }
@@ -486,13 +500,15 @@ class BPU extends BaseBPU {
     s3.io.in.bits.brInfo(i).tageMeta := tage.io.meta(i)
   }
 
-  if (debug_verbose) {
-    val uo = ubtb.io.out
-    XSDebug("debug: ubtb hits:%b, takens:%b, notTakens:%b\n", uo.hits.asUInt, uo.takens.asUInt, uo.notTakens.asUInt)
-    val bio = bim.io.resp
-    XSDebug("debug: bim takens:%b\n", VecInit(bio.ctrs.map(_(1))).asUInt)
-    val bo = btb.io.resp
-    XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
+  if (BPUDebug) {
+    if (debug_verbose) {
+      val uo = ubtb.io.out
+      XSDebug("debug: ubtb hits:%b, takens:%b, notTakens:%b\n", uo.hits.asUInt, uo.takens.asUInt, uo.notTakens.asUInt)
+      val bio = bim.io.resp
+      XSDebug("debug: bim takens:%b\n", VecInit(bio.ctrs.map(_(1))).asUInt)
+      val bo = btb.io.resp
+      XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
+    }
   }
 
 }

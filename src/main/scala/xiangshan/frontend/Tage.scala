@@ -7,7 +7,7 @@ import utils._
 
 import scala.math.min
 
-trait HasTageParameter extends HasXSParameter{
+trait HasTageParameter extends HasXSParameter with HasBPUParameter{
   //                   Sets  Hist   Tag
   val TableInfo = Seq(( 128,    2,    7),
                       ( 128,    4,    7),
@@ -289,31 +289,34 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   //     wrbypass_us(wrbypass_hit_idx) := VecInit(io.update.u.map(_))
   //   }
   // }
-  val u = io.update
-  val b = PriorityEncoder(u.mask)
-  val ub = PriorityEncoder(u.uMask)
-  XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x, baseBank=%d, mask=%b, realMask=%b\n",
-    io.req.bits.pc, io.req.bits.hist, idx, tag, baseBank, io.req.bits.mask, realMask)
-  for (i <- 0 until TageBanks) {
-    XSDebug(RegNext(io.req.valid) && req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch, req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
+
+  if (BPUDebug) {
+    val u = io.update
+    val b = PriorityEncoder(u.mask)
+    val ub = PriorityEncoder(u.uMask)
+    XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x, baseBank=%d, mask=%b, realMask=%b\n",
+      io.req.bits.pc, io.req.bits.hist, idx, tag, baseBank, io.req.bits.mask, realMask)
+    for (i <- 0 until TageBanks) {
+      XSDebug(RegNext(io.req.valid) && req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n", i.U, idxLatch, req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
+    }
+
+    XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", req_rhits.asUInt, maskLatch)
+    XSDebug(RegNext(io.req.valid) && !req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
+
+    XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
+      u.pc, u.fetchIdx, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
+    XSDebug(io.update.mask.reduce(_||_), "update Table: writing tag:%b, ctr%d in idx:%d\n",
+      update_wdata(b).tag, update_wdata(b).ctr, update_idx)
+    XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
+      u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
+
+    // ------------------------------Debug-------------------------------------
+    val valids = Reg(Vec(TageBanks, Vec(nRows, Bool())))
+    when (reset.asBool) { valids.foreach(b => b.foreach(r => r := false.B)) }
+    (0 until TageBanks).map( b => { when (io.update.mask(b)) { valids(b)(update_idx) := true.B }})
+    XSDebug("Table usage:------------------------\n")
+    (0 until TageBanks).map( b => { XSDebug("Bank(%d): %d out of %d rows are valid\n", b.U, PopCount(valids(b)), nRows.U)})
   }
-
-  XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", req_rhits.asUInt, maskLatch)
-  XSDebug(RegNext(io.req.valid) && !req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
-
-  XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
-    u.pc, u.fetchIdx, u.hist, b, u.taken(b), u.alloc(b), u.oldCtr(b))
-  XSDebug(io.update.mask.reduce(_||_), "update Table: writing tag:%b, ctr%d in idx:%d\n",
-    update_wdata(b).tag, update_wdata(b).ctr, update_idx)
-  XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
-    u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
-
-  // ------------------------------Debug-------------------------------------
-  val valids = Reg(Vec(TageBanks, Vec(nRows, Bool())))
-  when (reset.asBool) { valids.foreach(b => b.foreach(r => r := false.B)) }
-  (0 until TageBanks).map( b => { when (io.update.mask(b)) { valids(b)(update_idx) := true.B }})
-  XSDebug("Table usage:------------------------\n")
-  (0 until TageBanks).map( b => { XSDebug("Bank(%d): %d out of %d rows are valid\n", b.U, PopCount(valids(b)), nRows.U)})
 
   // XSDebug(wrbypass_hits.reduce(_||_), "wrbypass hits, wridx:%d, tag:%x, ctr:%d, idx:%d\n",
   //   wrbypass_hit_idx, )
@@ -493,16 +496,17 @@ class Tage extends BaseTage {
   }
 
 
-
-  val m = updateMeta
-  val bri = u.brInfo
-  XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
-  XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
-  XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
-    debug_pc_s3, debug_hist_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
-  for (i <- 0 until TageNTables) {
-    XSDebug(RegNext(io.s3Fire), "Table(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(resps(i).map(_.valid)).asUInt, Cat(resps(i).map(_.bits.ctr)), Cat(resps(i).map(_.bits.u)))
+  if (BPUDebug) {
+    val m = updateMeta
+    val bri = u.brInfo
+    XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
+    XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
+    XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
+      debug_pc_s3, debug_hist_s3, io.resp.hits.asUInt, io.resp.takens.asUInt)
+    for (i <- 0 until TageNTables) {
+      XSDebug(RegNext(io.s3Fire), "Table(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(resps(i).map(_.valid)).asUInt, Cat(resps(i).map(_.bits.ctr)), Cat(resps(i).map(_.bits.u)))
+    }
+    XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+      u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
   }
-  XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-    u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
 }

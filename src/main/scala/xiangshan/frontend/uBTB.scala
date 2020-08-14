@@ -137,11 +137,7 @@ class MicroBTB extends BasePredictor
         
     }
     (0 until PredictWidth).map(i => out_ubtb_br_info.writeWay(i) := Mux(read_hit_vec(i).asBool,read_hit_ways(i),alloc_ways(i)))
-    XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
-    for(i <- 0 until PredictWidth) {
-        XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   notTaken:%d   target:0x%x  alloc_way:%d\n",
-                                 i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).notTaken,read_resp(i).target,out_ubtb_br_info.writeWay(i))
-    }
+
     //response
     //only when hit and instruction valid and entry valid can output data
     for(i <- 0 until PredictWidth)
@@ -195,8 +191,17 @@ class MicroBTB extends BasePredictor
             satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)
         )
     }
-    XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n "
-                ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_taget_offset(offsetSize-1,0))
+
+    if (BPUDebug) {
+        XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
+        for(i <- 0 until PredictWidth) {
+            XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   notTaken:%d   target:0x%x  alloc_way:%d\n",
+                                    i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).notTaken,read_resp(i).target,out_ubtb_br_info.writeWay(i))
+        }
+
+        XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n "
+                    ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_taget_offset(offsetSize-1,0))
+    }
    
    //bypass:read-after-write 
 //    for( b <- 0 until PredictWidth) {
