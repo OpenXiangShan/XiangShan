@@ -311,18 +311,18 @@ class PTW extends PtwModule {
   // refill
   assert(!mem.resp.fire() || state===state_wait_resp)
   when (mem.resp.fire() && !memPte.isPf()) {
-    when (state===state_wait_resp && level===0.U) {
+    when (state===state_wait_resp && level===0.U && !memPte.isPf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
       l1v := l1v | UIntToOH(refillIdx)
     }
-    when (state===state_wait_resp && level===1.U) {
+    when (state===state_wait_resp && level===1.U && !memPte.isPf) {
       val l2addrStore = RegEnable(l2addr, mem.req.fire() && state===state_req && level===1.U)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
       l2v := l2v | UIntToOH(refillIdx)
     }
-    when (state===state_wait_resp && memPte.isLeaf()) {
+    when (state===state_wait_resp && memPte.isLeaf() && !memPte.isPf) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
       tlbv := tlbv | UIntToOH(refillIdx)
