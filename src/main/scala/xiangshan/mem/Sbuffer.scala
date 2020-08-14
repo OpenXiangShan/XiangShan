@@ -340,26 +340,74 @@ class FakeSbuffer extends XSModule {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 
-  io.in(1) := DontCare
+  assert(!(io.in(1).valid && !io.in(0).valid))
+
+  // assign default values to signals
   io.in(1).ready := false.B
-  assert(!(io.in(1).ready && !io.in(0).ready))
-  // To make lsroq logic simpler, we assume io.in(0).ready == io.in(1).ready ?
 
-  // store req will go to DCache directly, forward is not needed here
-  (0 until 2).map(i => {
-    io.forward(i) := DontCare
-    io.forward(i).forwardMask := 0.U(8.W).asBools
-  })
+  io.dcache.req.valid := false.B
+  io.dcache.req.bits := DontCare
+  io.dcache.resp.ready := false.B
 
-  io.dcache.req <> io.in(0)
-  // update req data / mask according to pc
+  val s_invalid :: s_req :: s_resp :: Nil = Enum(3)
+
+  val state = RegInit(s_invalid)
+
+  val req = Reg(new DCacheStoreReq)
+
+  XSDebug("state: %d\n", state)
+
+  io.in(0).ready := state === s_invalid
+
+  def word_addr(addr: UInt) = (addr >> 3) << 3
+  def block_addr(addr: UInt) = (addr >> 6) << 6
+
+  // --------------------------------------------
+  // s_invalid: receive requests
+  when (state === s_invalid) {
+    when (io.in(0).fire()) {
+      req   := io.in(0).bits
+      state := s_req
+    }
+  }
+
   val wdataVec = WireInit(VecInit(Seq.fill(8)(0.U(64.W))))
   val wmaskVec = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
-  wdataVec(io.in(0).bits.addr(5,3)) := io.in(0).bits.data
-  wmaskVec(io.in(0).bits.addr(5,3)) := io.in(0).bits.mask
-  io.dcache.req.bits.data := wdataVec.asUInt
-  io.dcache.req.bits.mask := wmaskVec.asUInt
-  io.dcache.resp.ready := true.B
+  wdataVec(req.addr(5,3)) := req.data
+  wmaskVec(req.addr(5,3)) := req.mask
+
+  when (state === s_req) {
+    val dcache_req = io.dcache.req
+    dcache_req.valid := true.B
+    dcache_req.bits.cmd  := MemoryOpConstants.M_XWR
+    dcache_req.bits.addr := block_addr(req.addr)
+    dcache_req.bits.data := wdataVec.asUInt
+    dcache_req.bits.mask := wmaskVec.asUInt
+    dcache_req.bits.meta := DontCare
+
+    when (dcache_req.fire()) {
+      state := s_resp
+    }
+  }
+
+  when (state === s_resp) {
+    io.dcache.resp.ready := true.B
+    when (io.dcache.resp.fire()) {
+      state := s_invalid
+    }
+  }
+
+  // do forwarding here
+  for (i <- 0 until LoadPipelineWidth) {
+    val addr_match = word_addr(io.forward(i).paddr) === word_addr(req.addr)
+    val mask_match = (io.forward(i).mask & req.mask) =/= 0.U
+    val need_forward = state =/= s_invalid && addr_match && mask_match
+
+    io.forward(i).forwardMask := Mux(need_forward, VecInit(UIntToOH(req.addr(5, 3), 8).asBools),
+      VecInit(0.U(8.W).asBools))
+    io.forward(i).forwardData := wdataVec
+  }
+
   XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.mask)
   XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(1).bits.addr, io.in(1).bits.data, io.in(0).bits.mask)
   XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x mask %b\n", io.dcache.req.bits.addr, io.dcache.req.bits.data, io.dcache.req.bits.mask)

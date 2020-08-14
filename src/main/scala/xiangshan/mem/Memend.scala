@@ -125,7 +125,7 @@ class Memend extends XSModule {
   // val mshq = Module(new MSHQ)
   val dtlb = Module(new Dtlb)
   val lsroq = Module(new Lsroq)
-  val sbuffer = Module(new Sbuffer)
+  val sbuffer = Module(new FakeSbuffer)
 
   dtlb.io := DontCare
   
