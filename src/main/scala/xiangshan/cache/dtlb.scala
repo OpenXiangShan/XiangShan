@@ -361,13 +361,13 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   assert(!multiHit) // add multiHit here, later it should be removed (maybe), turn to miss and flush
 
   for (i <- 0 until Width) {
-    XSDebug(resp(i).valid && !resp(i).bits.miss && !(req(i).bits.vaddr===resp(i).bits.paddr), p"vaddr:0x${Hexadecimal(req(i).bits.vaddr)} paddr:0x${Hexadecimal(resp(i).bits.paddr)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)}}\n")
-    when (resp(i).valid && !resp(i).bits.miss && !(req(i).bits.vaddr===resp(i).bits.paddr)) {
+    XSDebug(resp(i).valid && hit(i) && !(req(i).bits.vaddr===resp(i).bits.paddr), p"vaddr:0x${Hexadecimal(req(i).bits.vaddr)} paddr:0x${Hexadecimal(resp(i).bits.paddr)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)}}\n")
+    when (resp(i).valid && hit(i) && !(req(i).bits.vaddr===resp(i).bits.paddr)) {
       for (j <- 0 until TlbEntrySize) {
         XSDebug(true.B, p"TLBEntry(${j.U}): v:${v(j)} ${entry(j)}\n")
       }
     } // FIXME: remove me when tlb may be ok
-    when(resp(i).valid && !resp(i).bits.miss) {
+    when(resp(i).valid && hit(i)) {
       assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt)
     } // FIXME: remove me when tlb may be ok
   }
