@@ -88,6 +88,7 @@ class MissEntry extends DCacheModule
 
   val grantack = Reg(Valid(new TLBundleE(cfg.busParams)))
   val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
+  val should_refill_data  = Reg(Bool())
 
   io.block_idx.valid  := state =/= s_invalid
   io.block_addr.valid := state =/= s_invalid
@@ -129,6 +130,7 @@ class MissEntry extends DCacheModule
     when (io.req.fire()) {
       grantack.valid := false.B
       refill_ctr := 0.U
+      should_refill_data := false.B
       req := io.req.bits
       state := s_meta_read_req
     }
@@ -251,7 +253,8 @@ class MissEntry extends DCacheModule
     io.mem_grant.ready := true.B
 
     when (TLUtilities.hasData(io.mem_grant.bits)) {
-      when (io.refill.fire()) {
+      when (io.mem_grant.fire()) {
+        should_refill_data := true.B
         refill_ctr := refill_ctr + 1.U
         refill_data(refill_ctr) := io.mem_grant.bits.data
         when (refill_ctr === (cacheDataBeats - 1).U) {
@@ -277,8 +280,8 @@ class MissEntry extends DCacheModule
       grantack.valid := false.B
 
       // no data
-      when (refill_ctr === 0.U) {
-        state := s_send_resp
+      when (!should_refill_data) {
+        state := s_meta_write_req
       } .otherwise {
         state := s_data_write_req
       }
