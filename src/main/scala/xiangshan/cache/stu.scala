@@ -160,7 +160,7 @@ class StorePipe extends DCacheModule
   // -------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
-    req: DCacheStoreReq) = {
+    req: DCacheLineReq ) = {
       when (valid) {
         XSDebug(s"$pipeline_stage_name cmd: %x addr: %x id: %d replay: %b\n",
           req.cmd, req.addr, req.meta.id, req.meta.replay)

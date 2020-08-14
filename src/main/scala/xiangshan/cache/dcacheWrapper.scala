@@ -25,7 +25,7 @@ class DCacheMeta extends DCacheBundle {
 }
 
 // ordinary load and special memory operations(lr/sc, atomics)
-class DCacheLoadReq extends DCacheBundle
+class DCacheWordReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -35,7 +35,7 @@ class DCacheLoadReq extends DCacheBundle
 }
 
 // ordinary store
-class DCacheStoreReq extends DCacheBundle
+class DCacheLineReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -56,7 +56,7 @@ class DCacheResp extends DCacheBundle
 
 class DCacheLoadIO extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheLoadReq)
+  val req  = DecoupledIO(new DCacheWordReq )
   val resp = Flipped(DecoupledIO(new DCacheResp))
   // kill previous cycle's req
   val s1_kill = Output(Bool())
@@ -64,7 +64,7 @@ class DCacheLoadIO extends DCacheBundle
 
 class DCacheStoreIO extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheStoreReq)
+  val req  = DecoupledIO(new DCacheLineReq )
   val resp = Flipped(DecoupledIO(new DCacheResp))
 }
 
@@ -178,7 +178,7 @@ class DCache extends DCacheModule {
   //----------------------------------------
   // load pipe and load miss queue
   // load miss queue replays on ldu 0
-  val loadArb = Module(new Arbiter(new DCacheLoadReq, 2))
+  val loadArb = Module(new Arbiter(new DCacheWordReq , 2))
   val loadReplay = loadMissQueue.io.replay
   val lsu_0 = io.lsu.load(0)
   val ldu_0 = ldu(0).io.lsu

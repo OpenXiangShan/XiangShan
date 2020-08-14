@@ -13,8 +13,8 @@ class StoreMissEntry extends DCacheModule
 
     val req_pri_val = Input(Bool())
     val req_pri_rdy = Output(Bool())
-    val req         = Input(new DCacheStoreReq)
-    val replay      = DecoupledIO(new DCacheStoreReq)
+    val req         = Input(new DCacheLineReq )
+    val replay      = DecoupledIO(new DCacheLineReq )
 
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
@@ -27,7 +27,7 @@ class StoreMissEntry extends DCacheModule
   val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new DCacheStoreReq)
+  val req     = Reg(new DCacheLineReq )
   val req_idx = get_idx(req.addr)
   val req_tag = get_tag(req.addr)
   val req_block_addr = get_block_addr(req.addr)
@@ -132,7 +132,7 @@ class StoreMissQueue extends DCacheModule
 
   val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntries))
   val miss_finish_arb    = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntries))
-  val replay_arb     = Module(new Arbiter(new DCacheStoreReq,   cfg.nStoreMissEntries))
+  val replay_arb     = Module(new Arbiter(new DCacheLineReq ,   cfg.nStoreMissEntries))
 
   val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
   val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))

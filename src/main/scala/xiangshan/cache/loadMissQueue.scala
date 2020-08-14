@@ -15,8 +15,8 @@ class LoadMissEntry extends DCacheModule
     val req_pri_rdy = Output(Bool())
     val req_sec_val = Input(Bool())
     val req_sec_rdy = Output(Bool())
-    val req         = Input(new DCacheLoadReq)
-    val replay      = DecoupledIO(new DCacheLoadReq)
+    val req         = Input(new DCacheWordReq )
+    val replay      = DecoupledIO(new DCacheWordReq )
 
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
@@ -29,13 +29,13 @@ class LoadMissEntry extends DCacheModule
   val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new DCacheLoadReq)
+  val req     = Reg(new DCacheWordReq )
   val req_idx = get_idx(req.addr)
   val req_tag = get_tag(req.addr)
   val req_block_addr = get_block_addr(req.addr)
   val reg_miss_resp = Reg(new MissResp)
 
-  val rpq = Module(new Queue(new DCacheLoadReq, cfg.nRPQ))
+  val rpq = Module(new Queue(new DCacheWordReq , cfg.nRPQ))
 
   rpq.io.enq.valid := (io.req_pri_val && io.req_pri_rdy) || (io.req_sec_val && io.req_sec_rdy)
   rpq.io.enq.bits  := io.req
@@ -145,7 +145,7 @@ class LoadMissQueue extends DCacheModule
 
   val miss_req_arb    = Module(new Arbiter(new MissReq,       cfg.nLoadMissEntries))
   val miss_finish_arb = Module(new Arbiter(new MissFinish,    cfg.nLoadMissEntries))
-  val replay_arb      = Module(new Arbiter(new DCacheLoadReq, cfg.nLoadMissEntries))
+  val replay_arb      = Module(new Arbiter(new DCacheWordReq , cfg.nLoadMissEntries))
 
   val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
   val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
