@@ -192,7 +192,7 @@ class MicroBTB extends BasePredictor
         )
     }
 
-    if (BPUDebug) {
+    if (BPUDebug && debug) {
         XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
         for(i <- 0 until PredictWidth) {
             XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   notTaken:%d   target:0x%x  alloc_way:%d\n",

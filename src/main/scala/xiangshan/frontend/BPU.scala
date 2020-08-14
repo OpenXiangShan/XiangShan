@@ -76,6 +76,8 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
 
   val io = new DefaultBasePredictorIO
 
+  val debug = false
+
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
     val res = Wire(UInt(len.W))
