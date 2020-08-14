@@ -15,7 +15,7 @@ class MMIOEntry extends DCacheModule
     val id = Input(UInt())
 
     // client requests
-    val req = Flipped(DecoupledIO(new DCacheLoadReq))
+    val req = Flipped(DecoupledIO(new DCacheWordReq ))
     val resp = DecoupledIO(new DCacheResp)
 
     val mem_acquire = DecoupledIO(new TLBundleA(cfg.busParams))
@@ -26,7 +26,7 @@ class MMIOEntry extends DCacheModule
 
   val state = RegInit(s_invalid)
 
-  val req       = Reg(new DCacheLoadReq)
+  val req       = Reg(new DCacheWordReq )
   val resp_data = Reg(UInt(DataBits.W))
 
 

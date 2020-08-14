@@ -30,7 +30,7 @@ class Lsroq extends XSModule {
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
+    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheLineReq ))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
@@ -38,7 +38,7 @@ class Lsroq extends XSModule {
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLoadIO
     val uncache = new DCacheLoadIO
-    // val refill = Flipped(Valid(new DCacheStoreReq))
+    // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
   val uop = Reg(Vec(LsroqSize, new MicroOp))

@@ -126,7 +126,7 @@ class LoadPipe extends DCacheModule
   // -------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
-    req: DCacheLoadReq) = {
+    req: DCacheWordReq ) = {
       when (valid) {
         XSDebug(s"$pipeline_stage_name cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
           req.cmd, req.addr, req.data, req.mask, req.meta.id, req.meta.replay)
