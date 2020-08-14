@@ -17,11 +17,11 @@ REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 .DEFAULT_GOAL = verilog
 
 help:
-	mill chiselModule.test.runMain top.$(TOP) --help
+	mill XiangShan.test.runMain top.$(TOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill chiselModule.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
+	mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
 	$(MEM_GEN) $(@D)/$(@F).conf >> $@
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
@@ -48,9 +48,9 @@ SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 ifeq ($(REMOTE),localhost)
-	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
 else
-	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)"
 endif
 
 
