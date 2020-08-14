@@ -11,10 +11,10 @@ trait HasPdconst{ this: XSModule =>
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
     val brType::Nil = ListLookup(instr, List(BrType.notBr), PreDecodeInst.brTable)
-    val rd = Mux(isRVC(instr), 1.U, instr(11,7))
+    val rd = Mux(isRVC(instr), instr(12), instr(11,7))
     val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
     val isCall = (brType === BrType.jal || brType === BrType.jalr) && isLink(rd)
-    val isRet = brType === BrType.jalr && isLink(rs) && (!isLink(rd) && !isRVC(instr) || isRVC(instr)&&instr(12)===1.U) // c.jr is not ret?
+    val isRet = brType === BrType.jalr && isLink(rs) && !isCall
     List(brType, isCall, isRet)
   }
 }
