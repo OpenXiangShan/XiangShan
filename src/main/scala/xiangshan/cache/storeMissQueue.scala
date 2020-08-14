@@ -141,11 +141,14 @@ class StoreMissQueue extends DCacheModule
   val idx_match   = idx_matches.reduce(_||_)
 
 
-  val req             =  io.lsu.req
+  val req             = io.lsu.req
   val entry_alloc_idx = Wire(UInt())
   val pri_rdy         = WireInit(false.B)
   val pri_val         = req.valid && !idx_match
-  assert(!(req.valid && idx_match))
+  // sbuffer should not send down the same block twice
+  // what's more, it should allow write into sbuffer
+  // if the same block is being handled dcache
+  assert(!(req.valid && tag_match))
 
   val entries = (0 until cfg.nStoreMissEntries) map { i =>
     val entry = Module(new StoreMissEntry)
@@ -175,7 +178,8 @@ class StoreMissQueue extends DCacheModule
 
   entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req_pri_rdy))
 
-  req.ready      := pri_rdy
+  // whenever index matches, do not let it in
+  req.ready      := pri_rdy && !idx_match
   io.replay.req  <> replay_arb.io.out
   io.lsu.resp    <> io.replay.resp
   io.miss_req    <> miss_req_arb.io.out
