@@ -296,11 +296,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val refill = ptw.resp.fire() && !ptw.resp.bits.pf
   val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   val priorIdx = PriorityEncoder(~v)
-  val antiPriorIdx = PriorityEncoder(Reverse(~v)) // or just (TlbEntrySize-1).U
+  val antiPriorIdx = PriorityEncoder(Reverse(~(v|pf))) // or just (TlbEntrySize-1).U
   val refillIdx = Mux(ParallelAND(v.asBools), Mux(ptw.resp.bits.pf, antiPriorIdx, priorIdx), randIdx)
   val pfRefill = WireInit(0.U(TlbEntrySize.W))
   when (refill) {
-    v := Mux(ptw.resp.bits.pf, v, v | UIntToOH(refillIdx))
+    v := Mux(ptw.resp.bits.pf, v & ~UIntToOH(refillIdx), v | UIntToOH(refillIdx))
     pfRefill := Mux(ptw.resp.bits.pf, UIntToOH(refillIdx), 0.U)
     entry(refillIdx) := ptw.resp.bits.entry
     XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
@@ -316,14 +316,18 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         v := 0.U // all should be flush
+        pf := 0.U
       }.otherwise { // all pte but only spec asid
         v := v & ~VecInit(entry.map(e => /*e.asid === sfence.bits.asid && */!e.perm.g)).asUInt
+        pf := pf & ~VecInit(entry.map(e => /*e.asid === sfence.bits.asid && */!e.perm.g)).asUInt
       }
     }.otherwise { // virtual rs1=/=0.U
       when (sfence.bits.rs2) { // asid
         v := v & ~VecInit(entry.map(_.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn)).asUInt
+        pf := pf & ~VecInit(entry.map(_.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn)).asUInt
       }.otherwise { // particular va and asid
         v := v & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+        pf := pf & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
       }
     }
   }
