@@ -10,11 +10,11 @@ trait HasPdconst{ this: XSModule =>
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
   def isLink(reg:UInt) = reg === 1.U || reg === 5.U
   def brInfo(instr: UInt) = {
-    val rd = instr(11,7)
-    val rs = instr(19,15)
     val brType::Nil = ListLookup(instr, List(BrType.notBr), PreDecodeInst.brTable)
-    val isCall = (brType === BrType.jal || brType === BrType.jalr) && isLink(rd) && !isRVC(instr)
-    val isRet = brType === BrType.jalr && isLink(rs) && !isLink(rd) && !isRVC(instr)
+    val rd = Mux(isRVC(instr), 1.U, instr(11,7))
+    val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
+    val isCall = (brType === BrType.jal || brType === BrType.jalr) && isLink(rd)
+    val isRet = brType === BrType.jalr && isLink(rs) && (!isLink(rd) && !isRVC(instr) || isRVC(instr)&&instr(12)===1.U) // c.jr is not ret?
     List(brType, isCall, isRet)
   }
 }
@@ -76,10 +76,11 @@ class PreDecode extends XSModule with HasPdconst{
 
     if (i==0) {
       inst := Mux(io.prev.valid, Cat(data(15,0), io.prev.bits), data(31,0))
-      valid := true.B
+      // valid := Mux(lastHalfInstrIdx === 0.U, isRVC(inst), true.B)
+      valid := Mux(lastHalfInstrIdx === 0.U, Mux(!io.prev.valid, isRVC(inst), true.B), true.B)
     } else if (i==1) {
       inst := data(47,16)
-      valid := io.prev.valid || !(instsMask(0) && !isRVC(insts(0)))
+      valid := (io.prev.valid || !(instsMask(0) && !isRVC(insts(0)))) && Mux(lastHalfInstrIdx === 1.U, isRVC(inst), true.B)
     } else if (i==PredictWidth-1) {
       inst := Cat(0.U(16.W), data(i*16+15, i*16))
       valid := !(instsMask(i-1) && !isRVC(insts(i-1)) || !isRVC(inst))

@@ -211,9 +211,11 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2).bits
-  // TODO: c_jal
+
   val if4_cfi_jal = if4_pd.instrs(if4_bp.jmpIdx)
-  val if4_cfi_jal_tgt = if4_pd.pc(if4_bp.jmpIdx) + SignExt(Cat(if4_cfi_jal(31), if4_cfi_jal(19, 12), if4_cfi_jal(20), if4_cfi_jal(30, 21), 0.U(1.W)), XLEN)
+  val if4_cfi_jal_tgt = if4_pd.pc(if4_bp.jmpIdx) + Mux(if4_pd.pd(if4_bp.jmpIdx).isRVC,
+    SignExt(Cat(if4_cfi_jal(12), if4_cfi_jal(8), if4_cfi_jal(10, 9), if4_cfi_jal(6), if4_cfi_jal(7), if4_cfi_jal(2), if4_cfi_jal(11), if4_cfi_jal(5, 3), 0.U(1.W)), XLEN),
+    SignExt(Cat(if4_cfi_jal(31), if4_cfi_jal(19, 12), if4_cfi_jal(20), if4_cfi_jal(30, 21), 0.U(1.W)), XLEN))
   if4_bp.target := Mux(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, if4_cfi_jal_tgt, bpu.io.out(2).bits.target)
   if4_bp.redirect := bpu.io.out(2).bits.redirect || if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken && if4_cfi_jal_tgt =/= bpu.io.out(2).bits.target
 
@@ -309,6 +311,9 @@ class IFU extends XSModule with HasIFUConst
   (0 until HistoryLength).foreach(i => inOrderBrHist(i) := extHist(i.U + io.inOrderBrInfo.bits.brInfo.histPtr))
   bpu.io.inOrderBrInfo.valid := io.inOrderBrInfo.valid
   bpu.io.inOrderBrInfo.bits := BranchUpdateInfoWithHist(io.inOrderBrInfo.bits, inOrderBrHist.asUInt)
+  bpu.io.outOfOrderBrInfo.valid := io.outOfOrderBrInfo.valid
+  bpu.io.outOfOrderBrInfo.bits := BranchUpdateInfoWithHist(io.outOfOrderBrInfo.bits, inOrderBrHist.asUInt) // Dont care about hist
+
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
   bpu.io.in.valid := if1_fire
@@ -321,11 +326,12 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.predecode.valid := if4_valid
   bpu.io.predecode.bits.mask := if4_pd.mask
   bpu.io.predecode.bits.pd := if4_pd.pd
+  bpu.io.predecode.bits.isFetchpcEqualFirstpc := if4_pc === if4_pd.pc(0)
   bpu.io.branchInfo.ready := if4_fire
 
   pd.io.in := io.icacheResp.bits
   pd.io.prev.valid := if3_hasPrevHalfInstr
-  pd.io.prev.bits := prevHalfInstr.target
+  pd.io.prev.bits := prevHalfInstr.instr
 
   io.fetchPacket.valid := if4_valid && !io.redirect.valid
   io.fetchPacket.bits.instrs := if4_pd.instrs
