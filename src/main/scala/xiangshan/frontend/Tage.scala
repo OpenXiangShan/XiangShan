@@ -16,7 +16,7 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
                       ( 128,   32,    9),
                       ( 128,   64,    9))
   val TageNTables = TableInfo.size
-  val UBitPeriod = 8192
+  val UBitPeriod = 2048
   val TageBanks = PredictWidth // FetchWidth
 
   val TotalBits = TableInfo.map {
@@ -27,7 +27,7 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
 }
 
 abstract class TageBundle extends XSBundle with HasTageParameter
-abstract class TageModule extends XSModule with HasTageParameter
+abstract class TageModule extends XSModule with HasTageParameter { val debug = false }
 
 
 
@@ -73,9 +73,9 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
   })
-
+  override val debug = true
   // bypass entries for tage update
-  val wrBypassEntries = PredictWidth
+  val wrBypassEntries = 8
 
   def compute_folded_hist(hist: UInt, l: Int) = {
     val nChunks = (histLen + l - 1) / l
@@ -143,14 +143,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val baseBank = io.req.bits.pc(log2Up(TageBanks), 1)
   val baseBankLatch = RegEnable(baseBank, enable=io.req.valid)
 
-
-  // This is different from that in BTB and BIM
-  // We want to pass the correct index and tag into the TAGE table
-  // if baseBank == 9, then we want to pass idxes_and_tags(0) to bank 9,
-  //                         0  1        8  9  10      15
-  // so the correct order is 7, 8, ..., 15, 0,  1, ..., 6
-  // val iAndTIdxInOrder = VecInit((0 until TageBanks).map(b => ((TageBanks.U +& b.U) - baseBank)(log2Up(TageBanks)-1, 0)))
-  // val iAndTIdxInOrderLatch = RegEnable(iAndTIdxInOrder, enable=io.req.valid)
   val bankIdxInOrder = VecInit((0 until TageBanks).map(b => (baseBankLatch +& b.U)(log2Up(TageBanks)-1, 0)))
 
   val realMask = circularShiftLeft(io.req.bits.mask, TageBanks, baseBank)
@@ -168,10 +160,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       hi_us(b).io.r.req.bits.setIdx := idx
       table(b).io.r.req.bits.setIdx := idx
 
-      // Reorder done
-      // hi_us_r(b) := hi_us(bankIdxInOrder(b)).io.r.resp.data(0)
-      // lo_us_r(b) := lo_us(bankIdxInOrder(b)).io.r.resp.data(0)
-      // table_r(b) := table(bankIdxInOrder(b)).io.r.resp.data(0)
       hi_us_r(b) := hi_us(b).io.r.resp.data(0)
       lo_us_r(b) := lo_us(b).io.r.resp.data(0)
       table_r(b) := table(b).io.r.resp.data(0)
@@ -223,7 +211,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
   val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
-  val wrbypass_us      = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(2.W))))
   val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(3.W))))
   val wrbypass_ctr_valids = Reg(Vec(wrBypassEntries, Vec(TageBanks, Bool())))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
@@ -235,21 +222,30 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     wrbypass_tags(i) === update_tag &&
     wrbypass_idxs(i) === update_idx
   })
+
   val wrbypass_rhits   = VecInit((0 until wrBypassEntries) map { i =>
     io.req.valid &&
     wrbypass_tags(i) === tag &&
     wrbypass_idxs(i) === idx
   })
+
   val wrbypass_hit      = wrbypass_hits.reduce(_||_)
   val wrbypass_rhit     = wrbypass_rhits.reduce(_||_)
   val wrbypass_hit_idx  = PriorityEncoder(wrbypass_hits)
   val wrbypass_rhit_idx = PriorityEncoder(wrbypass_rhits)
 
-  val wrbypass_rhit_latch = RegNext(wrbypass_rhit)
-  val hit_ctrs = RegEnable(wrbypass_ctrs(wrbypass_rhit_idx), wrbypass_hit)
-  // when (wrbypass_rhit_latch) {
+  val wrbypass_rctr_hits = VecInit((0 until TageBanks).map( b => wrbypass_ctr_valids(wrbypass_rhit_idx)(b)))
 
-  // }
+  val rhit_ctrs = RegEnable(wrbypass_ctrs(wrbypass_rhit_idx), wrbypass_rhit)
+
+  when (RegNext(wrbypass_rhit)) {
+    for (b <- 0 until TageBanks) {
+      when (RegNext(wrbypass_rctr_hits(b.U + baseBank))) {
+        io.resp(b).bits.ctr := rhit_ctrs(bankIdxInOrder(b))
+      }
+    }
+  }
+
 
   val updateBank = PriorityEncoder(io.update.mask)
 
@@ -262,7 +258,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
             inc_ctr(wrbypass_ctrs(wrbypass_hit_idx)(w), io.update.taken(w)),
             inc_ctr(io.update.oldCtr(w), io.update.taken(w))
       )
-      // inc_ctr(io.update.oldCtr(w), io.update.taken(w))
     )
     update_wdata(w).valid := true.B
     update_wdata(w).tag   := update_tag
@@ -276,7 +271,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := update_wdata(updateBank).ctr
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
     } .otherwise {
-      // wrbypass_ctrs(wrbypass_enq_idx) := VecInit(update_wdata.map(_.ctr))
       wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := update_wdata(updateBank).ctr
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
       wrbypass_tags(wrbypass_enq_idx) := update_tag
@@ -284,13 +278,8 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Ceil(wrBypassEntries)-1,0)
     }
   }
-  // when (io.update.uMask.reduce(_||_)) {
-  //   when (wrbypass_hits.reduce(_||_)) {
-  //     wrbypass_us(wrbypass_hit_idx) := VecInit(io.update.u.map(_))
-  //   }
-  // }
 
-  if (BPUDebug) {
+  if (BPUDebug && debug) {
     val u = io.update
     val b = PriorityEncoder(u.mask)
     val ub = PriorityEncoder(u.uMask)
@@ -310,6 +299,19 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     XSDebug(io.update.mask.reduce(_||_), "update u: pc:%x, fetchIdx:%d, hist:%x, bank:%d, writing in u:%b\n",
       u.pc, u.fetchIdx, u.hist, ub, io.update.u(ub))
 
+    val updateBank = PriorityEncoder(io.update.mask)
+    XSDebug(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank),
+      "wrbypass hits, wridx:%d, tag:%x, idx:%d, hitctr:%d, bank:%d\n",
+      wrbypass_hit_idx, update_tag, update_idx, wrbypass_ctrs(wrbypass_hit_idx)(updateBank), updateBank)
+
+    when (wrbypass_rhit && wrbypass_ctr_valids(wrbypass_rhit_idx).reduce(_||_)) {
+      for (b <- 0 until TageBanks) {
+        XSDebug(wrbypass_ctr_valids(wrbypass_rhit_idx)(b),
+          "wrbypass rhits, wridx:%d, tag:%x, idx:%d, hitctr:%d, bank:%d\n",
+          wrbypass_rhit_idx, tag, idx, wrbypass_ctrs(wrbypass_rhit_idx)(b), b.U)
+      }
+    }
+
     // ------------------------------Debug-------------------------------------
     val valids = Reg(Vec(TageBanks, Vec(nRows, Bool())))
     when (reset.asBool) { valids.foreach(b => b.foreach(r => r := false.B)) }
@@ -318,13 +320,6 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     (0 until TageBanks).map( b => { XSDebug("Bank(%d): %d out of %d rows are valid\n", b.U, PopCount(valids(b)), nRows.U)})
   }
 
-  // XSDebug(wrbypass_hits.reduce(_||_), "wrbypass hits, wridx:%d, tag:%x, ctr:%d, idx:%d\n",
-  //   wrbypass_hit_idx, )
-  // for (b <- 0 until TageBanks) {
-  //   for (i <- 0 until nRows) {
-  //     val r = ReadAndHold(array, io.r.req.bits.setIdx, realRen)
-  //   }
-  // }
 }
 
 abstract class BaseTage extends BasePredictor with HasTageParameter {
@@ -365,6 +360,8 @@ class Tage extends BaseTage {
       t
     }
   }
+
+  override val debug = true
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
@@ -496,7 +493,7 @@ class Tage extends BaseTage {
   }
 
 
-  if (BPUDebug) {
+  if (BPUDebug && debug) {
     val m = updateMeta
     val bri = u.brInfo
     XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)

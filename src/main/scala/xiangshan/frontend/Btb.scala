@@ -227,7 +227,7 @@ class BTB extends BasePredictor with BTBParams{
   edata.io.w.req.bits.data := u.target
 
 
-  if (BPUDebug) {
+  if (BPUDebug && debug) {
     val debug_verbose = true
 
     val validLatch = RegNext(io.pc.valid)
