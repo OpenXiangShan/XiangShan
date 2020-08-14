@@ -294,6 +294,20 @@ class MissEntry extends DCacheModule
     io.refill.bits.data    := refill_data
 
     when (io.refill.fire()) {
+      state := s_meta_write_req
+    }
+  }
+
+  // --------------------------------------------
+  // meta write
+  when (state === s_meta_write_req) {
+    io.meta_write.valid         := true.B
+    io.meta_write.bits.idx      := req_idx
+    io.meta_write.bits.data.coh := new_coh
+    io.meta_write.bits.data.tag := req_tag
+    io.meta_write.bits.way_en   := req_way_en
+
+    when (io.meta_write.fire()) {
       state := s_send_resp
     }
   }
@@ -319,20 +333,6 @@ class MissEntry extends DCacheModule
   when (state === s_client_finish) {
     io.finish.ready := true.B
     when (io.finish.fire()) {
-      state := s_meta_write_req
-    }
-  }
-
-  // --------------------------------------------
-  // meta write
-  when (state === s_meta_write_req) {
-    io.meta_write.valid         := true.B
-    io.meta_write.bits.idx      := req_idx
-    io.meta_write.bits.data.coh := new_coh
-    io.meta_write.bits.data.tag := req_tag
-    io.meta_write.bits.way_en   := req_way_en
-
-    when (io.meta_write.fire()) {
       state := s_invalid
     }
   }
