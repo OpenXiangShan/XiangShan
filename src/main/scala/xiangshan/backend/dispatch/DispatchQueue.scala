@@ -169,26 +169,30 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     )
   }
 
-  // when nothing is cancelled or replayed, the pointers remain unchanged
-  // if any uop is cancelled or replayed, the pointer should go to the first zero before all ones
-  // position: continuous ones count from leftmost or rightmost (direction bit is considered)
-  // if all bits are one, we need to keep the index unchanged
-  // 00000000, 11111111: unchanged
-  // otherwise: firstMaskPosition
   val maskedNeedReplay = Cat(needReplay.reverse) & dispatchedMask
+  val allCancel = Cat(needCancel).andR
   val someReplay = Cat(maskedNeedReplay).orR
+  val allReplay = Cat(maskedNeedReplay).andR
   XSDebug(replayValid, p"needReplay: ${Binary(Cat(needReplay))}\n")
   XSDebug(replayValid, p"dispatchedMask: ${Binary(dispatchedMask)}\n")
   XSDebug(replayValid, p"maskedNeedReplay: ${Binary(maskedNeedReplay)}\n")
-  val cancelPosition = Mux(!Cat(needCancel).orR || Cat(needCancel).andR, tailIndex, getFirstMaskPosition(needCancel))
-  val replayPosition = Mux(!someReplay || Cat(maskedNeedReplay).andR, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
+  // when nothing or everything is cancelled or replayed, the pointers remain unchanged
+  // if any uop is cancelled or replayed, the pointer should go to the first zero before all ones
+  // position: target index
+  //   (1) if leftmost bits are ones, count continuous ones from leftmost (target position is the last one)
+  //   (2) if leftmost bit is zero, count rightmost zero btis (target position is the first one)
+  // if all bits are one, we need to keep the index unchanged
+  // 00000000, 11111111: unchanged
+  // otherwise: firstMaskPosition
+  val cancelPosition = Mux(!Cat(needCancel).orR || allCancel, tailIndex, getFirstMaskPosition(needCancel))
+  val replayPosition = Mux(!someReplay || allReplay, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
   XSDebug(replayValid, p"getFirstMaskPosition: ${getFirstMaskPosition(maskedNeedReplay.asBools)}\n")
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
   // If the highest bit is one, the direction flips.
   // Otherwise, the direction keeps the same.
   val tailCancelPtrDirection = Mux(needCancel(size - 1), ~tailDirection, tailDirection)
-  val tailCancelPtrIndex = Mux(needCancel(size - 1), ~cancelPosition + 1.U, cancelPosition)
+  val tailCancelPtrIndex = Mux(needCancel(size - 1) && !allCancel, ~cancelPosition + 1.U, cancelPosition)
   val tailCancelPtr = Cat(tailCancelPtrDirection, tailCancelPtrIndex)
   // In case of branch mis-prediction:
   // If mis-prediction happens after dispatchPtr, the pointer keeps the same as before.
@@ -196,8 +200,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchCancelPtr = Mux(needCancel(dispatchIndex) || dispatchEntries === 0.U, tailCancelPtr, dispatchPtr)
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
-  val dispatchReplayCnt = Mux(maskedNeedReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition)
-  val dispatchReplayCntReg = RegInit(0.U(indexWidth.W))
+  // for 11111111, replayPosition is unuseful. We naively set Cnt to size.U
+  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition))
+  val dispatchReplayCntReg = RegInit(0.U((indexWidth + 1).W))
+  // actually, if deqIndex points to head uops and they are replayed, there's no need for extraWalk
+  // however, to simplify logic, we simply let it do extra walk now
   val needExtraReplayWalk = Cat((0 until deqnum).map(i => needReplay(deqIndex(i)))).orR
   val needExtraReplayWalkReg = RegNext(needExtraReplayWalk && replayValid, false.B)
   val inReplayWalk = dispatchReplayCntReg =/= 0.U || needExtraReplayWalkReg
