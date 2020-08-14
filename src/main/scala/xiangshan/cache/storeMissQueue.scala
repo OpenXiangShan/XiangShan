@@ -148,7 +148,7 @@ class StoreMissQueue extends DCacheModule
   // sbuffer should not send down the same block twice
   // what's more, it should allow write into sbuffer
   // if the same block is being handled dcache
-  assert(!(req.valid && tag_match))
+  // assert(!(req.valid && tag_match))
 
   val entries = (0 until cfg.nStoreMissEntries) map { i =>
     val entry = Module(new StoreMissEntry)
