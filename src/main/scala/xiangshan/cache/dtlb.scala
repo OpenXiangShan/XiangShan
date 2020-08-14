@@ -233,10 +233,14 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).bits.miss := miss(i)
 
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
+    val update = hit(i) && (!hitPerm(i).a || !hitPerm(i).d && TlbCmd.isWrite(cmd(i))) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    resp(i).bits.excp.pf.ld    := (pfArray(i) && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
-    resp(i).bits.excp.pf.st    := (pfArray(i) && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
-    resp(i).bits.excp.pf.instr := (pfArray(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    val ldPf = (pfArray(i) && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
+    val stPf = (pfArray(i) && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
+    val instrPf = (pfArray(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    resp(i).bits.excp.pf.ld    := ldPf || update
+    resp(i).bits.excp.pf.st    := stPf || update
+    resp(i).bits.excp.pf.instr := instrPf || update
   }
 
   // ptw
@@ -297,8 +301,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   val priorIdx = PriorityEncoder(~v)
   val antiPriorIdx = (TlbEntrySize-1).U - PriorityEncoder(Reverse(~(v|pf))) // or just (TlbEntrySize-1).U
-  // val refillIdx = Mux(ptw.resp.bits.pf, Mux(ParallelAND((v|pf).asBools), randIdx, antiPriorIdx),
-  //                                       Mux(ParallelAND((v|pf).asBools), randIdx, priorIdx))
   val refillIdx = Mux(ParallelAND((v|pf).asBools), randIdx, Mux(ptw.resp.bits.pf, antiPriorIdx, priorIdx))
   val pfRefill = WireInit(0.U(TlbEntrySize.W))
   when (refill) {
