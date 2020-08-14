@@ -291,7 +291,7 @@ class IFU extends XSModule with HasIFUConst
   //   if4_redirect := false.B
   // }
 
-  when (io.outOfOrderBrInfo.valid) {
+  when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
     shiftPtr := true.B
     newPtr := io.outOfOrderBrInfo.bits.brInfo.histPtr - 1.U
     hist(0) := io.outOfOrderBrInfo.bits.taken
