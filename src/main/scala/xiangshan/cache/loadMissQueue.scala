@@ -102,6 +102,7 @@ class LoadMissEntry extends DCacheModule
   when (state === s_drain_rpq) {
     rpq.io.deq.ready := true.B
     io.replay <> rpq.io.deq
+    io.replay.bits.meta.replay = true.B
     when (rpq.io.count === 0.U) {
       replay_resp_ctr := 0.U
       state := s_replay_resp
