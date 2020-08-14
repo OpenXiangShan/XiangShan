@@ -233,7 +233,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     resp(i).bits.miss := miss(i)
 
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
-    val update = hit(i) && (!hitPerm(i).a || !hitPerm(i).d && TlbCmd.isWrite(cmd(i))) // update A/D through exception
+    val update = false.B && hit(i) && (!hitPerm(i).a || !hitPerm(i).d && TlbCmd.isWrite(cmd(i))) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
     val ldPf = (pfArray(i) && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
     val stPf = (pfArray(i) && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
