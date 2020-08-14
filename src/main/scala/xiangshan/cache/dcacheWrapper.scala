@@ -260,15 +260,17 @@ class DCache extends DCacheModule {
   val loadMissResp    = loadMissQueue.io.miss_resp
   val storeMissResp   = storeMissQueue.io.miss_resp
 
-  val clientId = missResp.bits.client_id(entryIdMSB, entryIdLSB)
+  val clientId = missResp.bits.client_id(clientIdMSB, clientIdLSB)
 
   val isLoadMissResp = clientId === loadMissQueueClientId
   loadMissResp.valid := missResp.valid && isLoadMissResp
-  loadMissResp.bits  := missResp.bits
+  loadMissResp.bits.entry_id := missResp.bits.entry_id
+  loadMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   val isStoreMissResp = clientId === storeMissQueueClientId
   storeMissResp.valid := missResp.valid && isStoreMissResp
-  storeMissResp.bits  := missResp.bits
+  storeMissResp.bits.entry_id := missResp.bits.entry_id
+  storeMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   // Finish
   val missFinish        = missQueue.io.finish
