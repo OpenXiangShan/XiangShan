@@ -441,6 +441,14 @@ class MissQueue extends DCacheModule
   XSDebug(req.fire(), "req cmd: %x addr: %x client_id: %d\n",
     req.bits.cmd, req.bits.addr, req.bits.client_id)
 
+  val resp = io.resp
+  XSDebug(resp.fire(), "resp client_id: %d entry_id: %d\n",
+    resp.bits.client_id, resp.bits.entry_id)
+
+  val finish = io.finish
+  XSDebug(finish.fire(), "finish client_id: %d entry_id: %d\n",
+    finish.bits.client_id, finish.bits.entry_id)
+
   // print refill
   XSDebug(io.refill.fire(), "refill addr %x\n", io.refill.bits.addr)
 

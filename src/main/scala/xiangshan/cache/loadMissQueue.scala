@@ -203,4 +203,34 @@ class LoadMissQueue extends DCacheModule
   io.replay.s1_kill := false.B
   io.miss_req    <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
+
+  // debug output
+  when (req.fire()) {
+    XSDebug(s"req cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask, req.bits.meta.id, req.bits.meta.replay)
+  }
+
+  val replay = io.replay.req
+  when (replay.fire()) {
+    XSDebug(s"replay cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      replay.bits.cmd, replay.bits.addr, replay.bits.data, replay.bits.mask, replay.bits.meta.id, replay.bits.meta.replay)
+  }
+
+  val resp = io.lsu.resp
+  when (resp.fire()) {
+    XSDebug(s"resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
+      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
+  }
+
+  val miss_req = io.miss_req
+  XSDebug(miss_req.fire(), "miss_req cmd: %x addr: %x client_id: %d\n",
+    miss_req.bits.cmd, miss_req.bits.addr, miss_req.bits.client_id)
+
+  val miss_resp = io.miss_resp
+  XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d\n",
+    miss_resp.bits.client_id, miss_resp.bits.entry_id)
+
+  val miss_finish = io.miss_finish
+  XSDebug(miss_finish.fire(), "miss_finish client_id: %d entry_id: %d\n",
+    miss_finish.bits.client_id, miss_finish.bits.entry_id)
 }
