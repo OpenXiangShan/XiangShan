@@ -135,19 +135,21 @@ class Lsroq extends XSModule {
       data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
       miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss
       store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
+      pending(io.storeIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
     }
   })
 
   // writeback store
   (0 until StorePipelineWidth).map(i => {
     when(io.storeIn(i).fire()) {
-      valid(io.storeIn(i).bits.uop.lsroqIdx) := true.B
+      valid(io.storeIn(i).bits.uop.lsroqIdx) := !io.storeIn(i).bits.mmio
       data(io.storeIn(i).bits.uop.lsroqIdx).paddr := io.storeIn(i).bits.paddr
       data(io.storeIn(i).bits.uop.lsroqIdx).mask := io.storeIn(i).bits.mask
       data(io.storeIn(i).bits.uop.lsroqIdx).data := io.storeIn(i).bits.data
       data(io.storeIn(i).bits.uop.lsroqIdx).mmio := io.storeIn(i).bits.mmio
       miss(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.miss
       store(io.storeIn(i).bits.uop.lsroqIdx) := true.B
+      pending(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.mmio
       XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x\n",
         io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0),
         io.storeIn(i).bits.uop.cf.pc,
@@ -357,14 +359,11 @@ class Lsroq extends XSModule {
   })
 
   // get no more than 2 commited store from storeCommitedQueue
-  (0 until 2).map(i => {
-    commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire()
-  })
-
   // send selected store inst to sbuffer
   (0 until 2).map(i => {
     val ptr = commitedStoreQueue.io.deq(i).bits
-    io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid
+    val mmio = data(ptr).mmio
+    io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid && !mmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := data(ptr).paddr
     io.sbuffer(i).bits.data := data(ptr).data
@@ -372,13 +371,13 @@ class Lsroq extends XSModule {
     io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := uop(ptr)
-    io.sbuffer(i).bits.meta.mmio     := data(ptr).mmio
+    io.sbuffer(i).bits.meta.mmio     := mmio
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
-  })
 
-  // update lsroq meta if store inst is send to sbuffer
-  (0 until 2).map(i => {
-    when(io.sbuffer(i).fire()) {
+    commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire() || mmio
+
+    // update lsroq meta if store inst is send to sbuffer
+    when(commitedStoreQueue.io.deq(i).valid && (mmio || io.sbuffer(i).ready)) {
       allocated(commitedStoreQueue.io.deq(i).bits) := false.B
     }
   })
