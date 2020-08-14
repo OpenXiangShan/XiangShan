@@ -66,7 +66,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
     pa(PAddrBits - 1, PAddrBits - tagWidth)
 
   def getByteOffset(pa: UInt): UInt =
-    pa(offsetWidth - 1, log2Up(8))
+    Cat(pa(offsetWidth - 1, log2Up(8)), Fill(3, 0.U))
 
   // check if cacheIdx is modified by former request in this cycle
   def busy(cacheIdx: UInt, max: Int): Bool = {
@@ -101,8 +101,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
         updateInfo(storeIdx).newTag := updateInfo(formerIdx).newTag
         // update mask and data
         (0 until cacheMaskWidth).foreach(i => {
-          when (i.U < (getByteOffset(io.in(storeIdx).bits.addr) << 3).asUInt() ||
-            i.U > ((getByteOffset(io.in(storeIdx).bits.addr) << 3) | 7.U)) {
+          when (i.U < getByteOffset(io.in(storeIdx).bits.addr).asUInt() ||
+            i.U > (getByteOffset(io.in(storeIdx).bits.addr) | 7.U)) {
             updateInfo(storeIdx).newMask(i) := updateInfo(formerIdx).newMask(i)
             updateInfo(storeIdx).newData(i) := updateInfo(formerIdx).newData(i)
           } otherwise {
@@ -130,8 +130,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
         // update mask and data
         (0 until cacheMaskWidth).foreach(i => {
-          when (i.U < (getByteOffset(io.in(storeIdx).bits.addr) << 3).asUInt() ||
-            i.U > ((getByteOffset(io.in(storeIdx).bits.addr) << 3) | 7.U)) {
+          when (i.U < getByteOffset(io.in(storeIdx).bits.addr).asUInt() ||
+            i.U > (getByteOffset(io.in(storeIdx).bits.addr) | 7.U)) {
             updateInfo(storeIdx).newMask(i) := cache(bufIdx).mask(i)
             updateInfo(storeIdx).newData(i) := cache(bufIdx).data(i)
           } otherwise {
@@ -145,8 +145,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
           }
         })
 
-        XSInfo("Update line#%d with tag %x, mask: %x, data: %x\n", bufIdx.U, cache(bufIdx).tag,
-          io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
+
       }
     }
 
@@ -164,15 +163,15 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
       // set mask and data
       (0 until cacheMaskWidth).foreach(i => {
-        when (i.U < (getByteOffset(io.in(storeIdx).bits.addr) << 3).asUInt() ||
-          i.U > ((getByteOffset(io.in(storeIdx).bits.addr) << 3) | 7.U)) {
+        when (i.U < getByteOffset(io.in(storeIdx).bits.addr).asUInt() ||
+          i.U > (getByteOffset(io.in(storeIdx).bits.addr) | 7.U)) {
           updateInfo(storeIdx).newMask(i) := false.B
           updateInfo(storeIdx).newData(i) := 0.U
         } otherwise {
           when (io.in(storeIdx).bits.mask.asBools()(i % 8)) {
             updateInfo(storeIdx).newMask(i) := true.B
             updateInfo(storeIdx).newData(i) := io.in(storeIdx).bits.data(8 * (i % 8 + 1) - 1, 8 * (i % 8))
-            XSInfo("[%d] write data %x\n", i.U, io.in(storeIdx).bits.data(8 * (i % 8 + 1) - 1, 8 * (i % 8)))
+//            XSInfo("[%d] write data %x\n", i.U, io.in(storeIdx).bits.data(8 * (i % 8 + 1) - 1, 8 * (i % 8)))
           } .otherwise {
             updateInfo(storeIdx).newMask(i) := false.B
             updateInfo(storeIdx).newData(i) := 0.U
@@ -180,8 +179,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         }
       })
 
-      XSInfo("Insert into line#%d with tag %x, mask: %x, data: %x, pa: %x\n", nextFree, getTag(io.in(storeIdx).bits.addr),
-        io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data, io.in(storeIdx).bits.addr)
+
     }
 
     // 3. not enough space for this query
@@ -203,8 +201,17 @@ class Sbuffer extends XSModule with HasSBufferConst {
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
         // update mask and data
-        cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
-        cache(updateInfo(storeIdx).idx).mask := updateInfo(storeIdx).newMask
+//        cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
+        cache(updateInfo(storeIdx).idx).data.zipWithIndex.foreach { case (int, i) =>
+          int := updateInfo(storeIdx).newData(i)
+        }
+//        cache(updateInfo(storeIdx).idx).mask := updateInfo(storeIdx).newMask
+        cache(updateInfo(storeIdx).idx).mask.zipWithIndex.foreach { case (int, i) =>
+          int := updateInfo(storeIdx).newMask(i)
+        }
+
+        XSInfo("Update line#%d with tag %x, mask: %x, data: %x\n", updateInfo(storeIdx).idx, cache(updateInfo(storeIdx).idx).tag,
+          io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
 
 
         // Insert
@@ -218,8 +225,17 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // set tag
         cache(updateInfo(storeIdx).idx).tag := updateInfo(storeIdx).newTag
         // update mask and data
-        cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
-        cache(updateInfo(storeIdx).idx).mask := updateInfo(storeIdx).newMask
+//        cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
+//        cache(updateInfo(storeIdx).idx).mask := updateInfo(storeIdx).newMask
+        cache(updateInfo(storeIdx).idx).data.zipWithIndex.foreach { case (int, i) =>
+          int := updateInfo(storeIdx).newData(i)
+        }
+        cache(updateInfo(storeIdx).idx).mask.zipWithIndex.foreach { case (int, i) =>
+          int := updateInfo(storeIdx).newMask(i)
+        }
+
+        XSInfo("Insert into line#%d with tag %x, mask: %x, data: %x, pa: %x\n", updateInfo(storeIdx).idx, getTag(io.in(storeIdx).bits.addr),
+          io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data, io.in(storeIdx).bits.addr)
       } // ignore UNCHANGED & EVICTED state
     }
   }
@@ -320,6 +336,9 @@ class Sbuffer extends XSModule with HasSBufferConst {
             io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
             io.forward(loadIdx).forwardMask(i) := cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
           })
+
+          XSDebug("[Forwarding] tag: %x data: %x mask: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).forwardData.asUInt(),
+            io.forward(loadIdx).forwardMask.asUInt())
         }
       })
     }
@@ -329,6 +348,11 @@ class Sbuffer extends XSModule with HasSBufferConst {
   XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x\n", io.in(0).bits.addr, io.in(0).bits.data)
   XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x\n", io.in(1).bits.addr, io.in(1).bits.data)
   XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x\n", io.dcache.req.bits.addr, io.dcache.req.bits.data)
+
+  // output cache line
+  cache.zipWithIndex.foreach { case (line, i) => {
+    XSDebug(line.valid, "[#%d line] Tag: %x, data: %x, mask: %x\n", i.U, line.tag, line.data.asUInt(), line.mask.asUInt())
+  }}
 }
   
 // Fake Store buffer for XiangShan Out of Order LSU
