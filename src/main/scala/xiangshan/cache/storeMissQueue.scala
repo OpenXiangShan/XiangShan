@@ -84,7 +84,7 @@ class StoreMissEntry extends DCacheModule
 
   // --------------------------------------------
   // replay
-  val storePipelineLatency = 5
+  val storePipelineLatency = 2
   val replay_resp_ctr  = Reg(UInt(log2Up(storePipelineLatency).W))
   when (state === s_drain_rpq) {
     io.replay.valid            := true.B
@@ -103,7 +103,7 @@ class StoreMissEntry extends DCacheModule
   //
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
-    when (replay_resp_ctr === storePipelineLatency.U) {
+    when (replay_resp_ctr === (storePipelineLatency - 1).U) {
       state := s_miss_finish
     }
   }

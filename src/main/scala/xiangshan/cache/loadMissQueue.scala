@@ -113,10 +113,15 @@ class LoadMissEntry extends DCacheModule
   // we must wait for response here,
   // if we do'not wait for response here,
   // this entry may be freed before it's response comes back
-  //
+
+  // load pipe line latency is 2 cycles
+  // we send req in s0 and get response in s2
+  // s_drain_rpq is s0
+  // when we reach s_replay_resp, load req goes to s1
+  // we should wait here for another cycle until load req goes to s2
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
-    when (replay_resp_ctr === loadPipelineLatency.U) {
+    when (replay_resp_ctr === (loadPipelineLatency - 1).U) {
       state := s_miss_finish
     }
   }
