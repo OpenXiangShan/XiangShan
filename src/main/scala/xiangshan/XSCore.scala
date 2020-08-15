@@ -27,7 +27,7 @@ case class XSCoreParameters
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
-  EnableRAS: Boolean = false,
+  EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
