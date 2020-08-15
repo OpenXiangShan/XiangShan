@@ -8,7 +8,7 @@ import chipsalliance.rocketchip.config._
 import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.{RegField, RegWriteFn}
-import utils.{HoldUnless, MaskExpand, RegMap}
+import utils.{GTimer, HoldUnless, MaskExpand, RegMap}
 
 class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) extends LazyModule {
 
@@ -44,7 +44,8 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
       0xbff8 -> RegField.bytes(mtime)
     )
 
-    printf(p"[Timer] mtime=$mtime cnt=$cnt freq=$freq\n")
+    val gtime = GTimer()
+    printf(p"[$gtime][Timer] mtime=$mtime cnt=$cnt freq=$freq\n")
 
     mtip := RegNext(mtime >= mtimecmp)
   }
