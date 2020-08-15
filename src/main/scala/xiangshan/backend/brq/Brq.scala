@@ -103,9 +103,7 @@ class Brq extends XSModule {
   // dequeue
   val headIdx = headPtr.value
 
-  val skipMask = Cat(stateQueue.zipWithIndex.map({
-    case (s, i) => (s.isWb && !brQueue(i.U).exuOut.brUpdate.isMisPred) || s.isCommit
-  }).reverse)
+  val skipMask = Cat(stateQueue.map(_.isCommit).reverse)
 
   /*
       example: headIdx       = 2
@@ -132,16 +130,15 @@ class Brq extends XSModule {
   val useLo = skipHi && findLo
 
 
-  val commitIdx = Mux(stateQueue(commitIdxHi).isWb && brQueue(commitIdxHi).exuOut.brUpdate.isMisPred,
+  val commitIdx = Mux(stateQueue(commitIdxHi).isWb,
     commitIdxHi,
-    Mux(useLo && stateQueue(commitIdxLo).isWb && brQueue(commitIdxLo).exuOut.brUpdate.isMisPred,
+    Mux(useLo && stateQueue(commitIdxLo).isWb,
       commitIdxLo,
       headIdx
     )
   )
 
-  val commitIsHead = commitIdx===headIdx
-  val deqValid = !stateQueue(headIdx).isIdle && commitIsHead && brCommitCnt=/=0.U
+  val deqValid = stateQueue(headIdx).isCommit && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
   val commitIsMisPred = commitEntry.exuOut.redirect.isMisPred
@@ -150,7 +147,7 @@ class Brq extends XSModule {
 
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
-  io.inOrderBrInfo.valid := deqValid
+  io.inOrderBrInfo.valid := commitValid
   io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
   XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
 
@@ -171,13 +168,14 @@ class Brq extends XSModule {
   XSDebug(false, true.B, "\n")
 
   val headPtrNext = WireInit(headPtr + deqValid)
-  stateQueue(commitIdx):= Mux(deqValid,
-    s_idle,
-    Mux(commitValid,
-      s_commited,
-      stateQueue(commitIdx)
-    )
-  )
+
+  when(commitValid){
+    stateQueue(commitIdx) := s_commited
+  }
+  when(deqValid){
+    stateQueue(headIdx) := s_idle
+  }
+  assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
   headPtr := headPtrNext
   io.redirect.valid := commitValid &&
