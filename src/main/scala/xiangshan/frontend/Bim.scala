@@ -101,7 +101,7 @@ class BIM extends BasePredictor with BimParams{
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtr = Mux(wrbypass_hit, wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
+  val oldCtr = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank), wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
   val newTaken = u.taken
   val newCtr = satUpdate(oldCtr, 2, newTaken)
   val oldSaturated = newCtr === oldCtr
