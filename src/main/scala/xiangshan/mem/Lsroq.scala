@@ -101,7 +101,6 @@ class Lsroq extends XSModule {
 
   // writeback load
   (0 until LoadPipelineWidth).map(i => {
-    assert(!io.loadIn(i).bits.miss)
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
