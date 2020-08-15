@@ -2,6 +2,7 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
+import chisel3.ExcitingUtils._
 import xiangshan._
 import utils.{XSDebug, XSError, XSInfo}
 
@@ -46,6 +47,11 @@ class Dispatch1 extends XSModule {
   intIndex.io.priority := DontCare
   fpIndex.io.priority  := DontCare
   lsIndex.io.priority  := DontCare
+
+  if (!env.FPGAPlatform) {
+    val dispatchNotEmpty = Cat(io.fromRename.map(_.valid)).orR
+    ExcitingUtils.addSource(!dispatchNotEmpty, "perfCntCondDp1Empty", Perf)
+  }
 
   /**
     * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes

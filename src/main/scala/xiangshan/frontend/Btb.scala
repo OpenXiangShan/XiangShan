@@ -226,34 +226,37 @@ class BTB extends BasePredictor with BTBParams{
   edata.io.w.req.bits.setIdx := updateRow
   edata.io.w.req.bits.data := u.target
 
-  val debug_verbose = true
 
-  val validLatch = RegNext(io.pc.valid)
-  XSDebug(io.pc.valid, "read: pc=0x%x, baseBank=%d, realMask=%b\n", io.pc.bits, baseBank, realMask)
-  XSDebug(validLatch, "read_resp: pc=0x%x, readIdx=%d-------------------------------\n",
-    pcLatch, btbAddr.getIdx(pcLatch))
-  if (debug_verbose) {
-    for (i <- 0 until BtbBanks){
-      for (j <- 0 until BtbWays) {
-        XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-        j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, realMaskLatch(i), metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
+  if (BPUDebug && debug) {
+    val debug_verbose = true
+
+    val validLatch = RegNext(io.pc.valid)
+    XSDebug(io.pc.valid, "read: pc=0x%x, baseBank=%d, realMask=%b\n", io.pc.bits, baseBank, realMask)
+    XSDebug(validLatch, "read_resp: pc=0x%x, readIdx=%d-------------------------------\n",
+      pcLatch, btbAddr.getIdx(pcLatch))
+    if (debug_verbose) {
+      for (i <- 0 until BtbBanks){
+        for (j <- 0 until BtbWays) {
+          XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
+          j.U, i.U, realRowLatch(i), metaRead(j)(i).valid, realMaskLatch(i), metaRead(j)(i).tag, dataRead(j)(i).offset, metaRead(j)(i).btbType, dataRead(j)(i).extended, metaRead(j)(i).isRVC)
+        }
       }
     }
+    for (i <- 0 until BtbBanks) {
+      val idx = bankIdxInOrder(i)
+      XSDebug(validLatch && bankHits(bankIdxInOrder(i)), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
+        i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
+    }
+    XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
+      u.brInfo.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+    for (i <- 0 until BtbBanks) {
+      // Conflict when not hit and allocating a valid entry
+      val conflict = metaRead(allocWays(i))(i).valid && !bankHits(i)
+      XSDebug(conflict, "bank(%d) is trying to allocate a valid way(%d)\n", i.U, allocWays(i))
+      // There is another circumstance when a branch is on its way to update while another
+      // branch chose the same way to udpate, then after the first branch is wrote in, 
+      // the second branch will overwrite the first branch
   }
-  for (i <- 0 until BtbBanks) {
-    val idx = bankIdxInOrder(i)
-    XSDebug(validLatch && bankHits(bankIdxInOrder(i)), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
-      i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
-  }
-  XSDebug(updateValid, "update_req: pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-    u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
-  for (i <- 0 until BtbBanks) {
-    // Conflict when not hit and allocating a valid entry
-    val conflict = metaRead(allocWays(i))(i).valid && !bankHits(i)
-    XSDebug(conflict, "bank(%d) is trying to allocate a valid way(%d)\n", i.U, allocWays(i))
-    // There is another circumstance when a branch is on its way to update while another
-    // branch chose the same way to udpate, then after the first branch is wrote in, 
-    // the second branch will overwrite the first branch
 
   }
 }

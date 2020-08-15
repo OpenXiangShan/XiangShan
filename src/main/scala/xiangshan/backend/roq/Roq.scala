@@ -1,6 +1,6 @@
 package xiangshan.backend.roq
 
-import chisel3.ExcitingUtils.ConnectionType
+import chisel3.ExcitingUtils._
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -342,6 +342,13 @@ class Roq extends XSModule {
     ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
     ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
     ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
+    ExcitingUtils.addSource(state === s_walk || state === s_extrawalk, "perfCntCondRoqWalk", Perf)
+    val deqNotWritebacked = valid(deqPtr) && !writebacked(deqPtr)
+    val deqUopCommitType = deqUop.ctrl.commitType
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.INT,   "perfCntCondRoqWaitInt",   Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.FP,    "perfCntCondRoqWaitFp",    Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.LOAD,  "perfCntCondRoqWaitLoad",  Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.STORE, "perfCntCondRoqWaitStore", Perf)
 
     if(EnableBPU){
       ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)
