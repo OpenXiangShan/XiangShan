@@ -50,7 +50,7 @@ class UpdateInfo extends XSBundle with HasSBufferConst {
 // Store buffer for XiangShan Out of Order LSU
 class Sbuffer extends XSModule with HasSBufferConst {
   val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheLineReq )))
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq )))
     val dcache = new DCacheStoreIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
@@ -359,7 +359,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
 // NutShell DCache Interface
 class FakeSbuffer extends XSModule {
   val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheLineReq )))
+    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
     val dcache = new DCacheStoreIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
@@ -377,7 +377,7 @@ class FakeSbuffer extends XSModule {
 
   val state = RegInit(s_invalid)
 
-  val req = Reg(new DCacheLineReq)
+  val req = Reg(new DCacheWordReq)
 
   XSDebug("state: %d\n", state)
 
