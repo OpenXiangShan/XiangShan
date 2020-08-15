@@ -377,7 +377,7 @@ class FakeSbuffer extends XSModule {
 
   val state = RegInit(s_invalid)
 
-  val req = Reg(new DCacheStoreReq)
+  val req = Reg(new DCacheLineReq)
 
   XSDebug("state: %d\n", state)
 
