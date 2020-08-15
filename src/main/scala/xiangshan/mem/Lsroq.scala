@@ -545,8 +545,10 @@ class Lsroq extends XSModule {
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx
-  (0 until LsroqSize).map(i => {
-    when(uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)) {
+  val needCancel = Wire(Vec(LsroqSize, Bool()))
+  for (i <- 0 until LsroqSize) {
+    needCancel(i) := uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)
+    when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
         valid(i) := false.B
         store(i) := false.B
@@ -558,7 +560,10 @@ class Lsroq extends XSModule {
         allocated(i) := false.B
       }
     }
-  })
+  }
+  when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {
+    ringBufferHeadExtended := ringBufferHeadExtended - PopCount(needCancel)
+  }
 
   // assert(!io.rollback.valid)
   when(io.rollback.valid) {

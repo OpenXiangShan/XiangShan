@@ -12,6 +12,7 @@ trait BimParams extends HasXSParameter {
   val BimBanks = PredictWidth
   val BimSize = 4096
   val nRows = BimSize / BimBanks
+  val bypassEntries = 16
 }
 
 class BIM extends BasePredictor with BimParams{
@@ -89,15 +90,42 @@ class BIM extends BasePredictor with BimParams{
   val updateBank = bimAddr.getBank(u.pc)
   val updateRow = bimAddr.getBankIdx(u.pc)
 
-  val oldCtr = u.brInfo.bimCtr
+
+  val wrbypass_ctrs       = Reg(Vec(bypassEntries, Vec(BimBanks, UInt(2.W))))
+  val wrbypass_ctr_valids = Reg(Vec(bypassEntries, Vec(BimBanks, Bool())))
+  val wrbypass_rows     = Reg(Vec(bypassEntries, UInt(log2Up(nRows).W)))
+  val wrbypass_enq_idx  = RegInit(0.U(log2Up(bypassEntries).W))
+
+  val wrbypass_hits = VecInit((0 until bypassEntries).map( i => 
+    !doing_reset && wrbypass_rows(i) === updateRow))
+  val wrbypass_hit = wrbypass_hits.reduce(_||_)
+  val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
+
+  val oldCtr = Mux(wrbypass_hit, wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
   val newTaken = u.taken
-  val oldSaturated = u.taken && oldCtr === 3.U || !u.taken && oldCtr === 0.U
+  val newCtr = satUpdate(oldCtr, 2, newTaken)
+  val oldSaturated = newCtr === oldCtr
   
   val needToUpdate = io.update.valid && !oldSaturated && u.pd.isBr
+
+  when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
+  
+  when (needToUpdate) {
+    when (wrbypass_hit) {
+      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
+      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
+    } .otherwise {
+      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
+      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
+      wrbypass_rows(wrbypass_enq_idx) := updateRow
+      wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
+    }
+  }
 
   for (b <- 0 until BimBanks) {
     bim(b).io.w.req.valid := needToUpdate && b.U === updateBank || doing_reset
     bim(b).io.w.req.bits.setIdx := Mux(doing_reset, resetRow, updateRow)
-    bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), satUpdate(oldCtr, 2, newTaken))
+    bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtr)
   }
+  
 }

@@ -45,7 +45,9 @@ class Dispatch2Ls extends XSModule {
   val rsIndexVec = (0 until dpParams.LsDqDeqWidth).map({i =>
     val indexOffset = Seq(0, exuParameters.LduCnt)
     allIndexGen.zipWithIndex.map{
-      case (index, j) => Mux(index.io.reverseMapping(i).valid, index.io.reverseMapping(i).bits + indexOffset(j).U, 0.U)
+      case (index, j) => Mux(index.io.reverseMapping(i).valid,
+        ZeroExt(index.io.reverseMapping(i).bits, log2Ceil(exuParameters.LsExuCnt)) + indexOffset(j).U,
+        0.U)
     }.reduce(_ | _)
   })
 

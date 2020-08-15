@@ -759,7 +759,14 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     "MbpIRight"   -> (0xb0a, "perfCntCondMbpIRight"   ),
     "MbpIWrong"   -> (0xb0b, "perfCntCondMbpIWrong"   ),
     "MbpRRight"   -> (0xb0c, "perfCntCondMbpRRight"   ),
-    "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"   )
+    "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"   ),
+    "DpqReplay"   -> (0xb0e, "perfCntCondDpqReplay"   ),
+    "RoqWalk"     -> (0xb0f, "perfCntCondRoqWalk"     ),
+    "RoqWaitInt"  -> (0xb10, "perfCntCondRoqWaitInt"  ),
+    "RoqWaitFp"   -> (0xb11, "perfCntCondRoqWaitFp"   ),
+    "RoqWaitLoad" -> (0xb12, "perfCntCondRoqWaitLoad" ),
+    "RoqWaitStore"-> (0xb13, "perfCntCondRoqWaitStore"),
+    "Dp1Empty"    -> (0xb14, "perfCntCondDp1Empty"    )
 //    "Custom1"     -> (0xb1b, "Custom1"             ),
 //    "Custom2"     -> (0xb1c, "Custom2"             ),
 //    "Custom3"     -> (0xb1d, "Custom3"             ),

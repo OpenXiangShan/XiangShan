@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
+import chisel3.ExcitingUtils._
 
 case class DispatchParameters
 (
@@ -106,6 +107,11 @@ class Dispatch extends XSModule {
     io.replayPregReq(i + dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth) <> replay
   }
   lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
+
+  if (!env.FPGAPlatform) {
+    val inWalk = intDq.io.inReplayWalk || fpDq.io.inReplayWalk || lsDq.io.inReplayWalk
+    ExcitingUtils.addSource(inWalk, "perfCntCondDpqReplay", Perf)
+  }
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)

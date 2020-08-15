@@ -3,7 +3,7 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= 0
+E ?= -1
 V ?= ALL
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
@@ -13,7 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=shift $(EMU_ARGS) run 2>&1 | tee > ras_shift.log
 
 # ------------------------------------------------------------------
 # run different test sets
