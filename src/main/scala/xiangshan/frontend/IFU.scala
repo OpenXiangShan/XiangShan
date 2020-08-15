@@ -30,7 +30,7 @@ class IFUIO extends XSBundle
 class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)
-  val bpu = if (EnableBPU) Module(new BPU) else Module(new FakeBPU)
+  val bpu = BPU(EnableBPU)
   val pd = Module(new PreDecode)
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
@@ -291,7 +291,7 @@ class IFU extends XSModule with HasIFUConst
   //   if4_redirect := false.B
   // }
 
-  when (io.outOfOrderBrInfo.valid) {
+  when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
     shiftPtr := true.B
     newPtr := io.outOfOrderBrInfo.bits.brInfo.histPtr - 1.U
     hist(0) := io.outOfOrderBrInfo.bits.taken

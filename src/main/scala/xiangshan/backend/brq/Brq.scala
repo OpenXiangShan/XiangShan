@@ -152,6 +152,7 @@ class Brq extends XSModule {
   assert(brCommitCnt+io.bcommit >= deqValid)
   io.inOrderBrInfo.valid := deqValid
   io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
+  XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
 
 //  XSDebug(
 //    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
