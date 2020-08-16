@@ -36,7 +36,7 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
   extends LazyModuleImp(outer)
 {
   val io = IO(new Bundle {
-    val extra = Option(outer._extra.cloneType)
+    val extra = if(outer._extra == null) None else Some(outer._extra.cloneType)
   })
 
   val (in, edge) = outer.node.in.head
