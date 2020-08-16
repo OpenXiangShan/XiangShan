@@ -187,7 +187,10 @@ class MissEntry extends DCacheModule
     when (req_tag_match) {
       val (is_hit, _, coh_on_hit) = old_coh.onAccess(req.cmd)
       when (is_hit) { // set dirty bit
-        assert(isWrite(req.cmd))
+        // we do not need to assert write any more
+        // read may go here as well
+        // eg: when several load miss on the same block
+        // assert(isWrite(req.cmd))
         new_coh     := coh_on_hit
         new_state   := s_send_resp
       } .otherwise { // upgrade permissions
