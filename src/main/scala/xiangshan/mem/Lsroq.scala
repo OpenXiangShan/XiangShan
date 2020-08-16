@@ -598,7 +598,7 @@ class Lsroq extends XSModule {
 
   // setup misc mem access req
   // mask / paddr / data can be get from lsroq.data
-  io.uncache.req.valid := pending(ringBufferTail) && 
+  io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
     io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
     !io.commits(0).bits.isWalk
 
