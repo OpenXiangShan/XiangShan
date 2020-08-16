@@ -166,7 +166,7 @@ class Lsroq extends XSModule {
   val missRefillSelVec = VecInit(
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
-  val missRefillSel = OHToUInt(missRefillSelVec.asUInt)
+  val missRefillSel = PriorityEncoder(missRefillSelVec.asUInt)
   io.dcache.req.valid := missRefillSelVec.asUInt.orR
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
   io.dcache.req.bits.addr := data(missRefillSel).paddr
