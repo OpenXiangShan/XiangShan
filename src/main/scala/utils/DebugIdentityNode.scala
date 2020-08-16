@@ -29,3 +29,10 @@ class DebugIdentityNode()(implicit p: Parameters) extends LazyModule {
     }
   }
 }
+
+object DebugIdentityNode {
+  def apply()(implicit p: Parameters): TLIdentityNode = {
+    val identityNode = LazyModule(new DebugIdentityNode())
+    identityNode.node
+  }
+}
