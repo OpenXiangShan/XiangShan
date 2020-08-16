@@ -75,6 +75,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   // io.out.bits.brUpdate.btbType := "b00".U
   io.out.bits.brUpdate.taken := isBranch && taken
   // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
+  io.out.bits.brUpdate.brTag := uop.brTag
 
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop

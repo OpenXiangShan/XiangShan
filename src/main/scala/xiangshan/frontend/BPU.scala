@@ -49,11 +49,15 @@ class PredictorResponse extends XSBundle {
     val takens = Vec(PredictWidth, Bool())
     val hits = Vec(PredictWidth, Bool())
   }
+  class LoopResp extends XSBundle {
+    val exit = Vec(PredictWidth, Bool())
+  }
 
   val ubtb = new UbtbResp
   val btb = new BtbResp
   val bim = new BimResp
   val tage = new TageResp
+  val loop = new LoopResp
 }
 
 abstract class BasePredictor extends XSModule with HasBPUParameter{
@@ -260,6 +264,8 @@ class BPUStage3 extends BPUStage {
   val tageResp = io.in.bits.resp.tage
   val tageTakens = tageResp.takens
 
+  val loopResp = io.in.bits.resp.loop.exit
+
   val pdMask = io.predecode.bits.mask
   val pds    = io.predecode.bits.pd
 
@@ -276,20 +282,24 @@ class BPUStage3 extends BPUStage {
    val callIdx = PriorityEncoder(calls)
    val retIdx  = PriorityEncoder(rets)
   
-  val brTakens = 
-    if (EnableBPD) {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => tageTakens(i))))
-    } else {
-      brs & Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))
-    }
+  val brTakens = brs &
+    (if (EnableBPD) Reverse(Cat((0 until PredictWidth).map(i => tageTakens(i)))) else Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))) &
+    (if (EnableLoop) ~loopResp.asUInt else Fill(PredictWidth, 1.U(1.W)))
+    // if (EnableBPD) {
+    //   brs & Reverse(Cat((0 until PredictWidth).map(i => tageValidTakens(i))))
+    // } else {
+    //   brs & Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))
+    // }
 
   // predict taken only if btb has a target, jal targets will be provided by IFU
   takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
-  notTakens := (if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageTakens(i)))} 
-                else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))})
+  notTakens := ((if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageTakens(i)))}
+                else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))}).asUInt |
+               (if (EnableLoop) { VecInit((0 until PredictWidth).map(i => brs(i) && loopResp(i)))}
+                else { WireInit(0.U.asTypeOf(UInt(PredictWidth.W))) }).asUInt).asTypeOf(Vec(PredictWidth, Bool()))
   targetSrc := inLatch.resp.btb.targets
 
   //RAS
@@ -330,8 +340,10 @@ class BPUStage3 extends BPUStage {
   // Wrap tage resp and tage meta in
   // This is ugly
   io.out.bits.resp.tage <> io.in.bits.resp.tage
+  io.out.bits.resp.loop <> io.in.bits.resp.loop
   for (i <- 0 until PredictWidth) {
     io.out.bits.brInfo(i).tageMeta := io.in.bits.brInfo(i).tageMeta
+    io.out.bits.brInfo(i).specCnt := io.in.bits.brInfo(i).specCnt
   }
 
   if (BPUDebug) {
@@ -351,7 +363,8 @@ trait BranchPredictorComponents extends HasXSParameter {
   val bim = Module(new BIM)
   val tage = (if(EnableBPD) { Module(new Tage) } 
               else          { Module(new FakeTage) })
-  val preds = Seq(ubtb, btb, bim, tage)
+  val loop = Module(new LoopPredictor)
+  val preds = Seq(ubtb, btb, bim, tage, loop)
   preds.map(_.io := DontCare)
 }
 
@@ -459,6 +472,7 @@ class BPU extends BaseBPU {
   val s1_brInfo_in = Wire(Vec(PredictWidth, new BranchInfo))
 
   s1_resp_in.tage := DontCare
+  s1_resp_in.loop := DontCare
   s1_brInfo_in    := DontCare
   (0 until PredictWidth).foreach(i => s1_brInfo_in(i).fetchIdx := i.U)
 
@@ -525,10 +539,17 @@ class BPU extends BaseBPU {
   //**********************Stage 3****************************//
   // Wrap tage response and meta into s3.io.in.bits
   // This is ugly
+
+  loop.io.flush := io.flush(2)
+  loop.io.pc.valid := s2.io.out.fire()
+  loop.io.pc.bits := s2.io.out.bits.pc
+  loop.io.inMask := s2.io.out.bits.mask
   
   s3.io.in.bits.resp.tage <> tage.io.resp
+  s3.io.in.bits.resp.loop <> loop.io.resp
   for (i <- 0 until PredictWidth) {
     s3.io.in.bits.brInfo(i).tageMeta := tage.io.meta(i)
+    s3.io.in.bits.brInfo(i).specCnt := loop.io.meta.specCnts(i)
   }
 
   if (BPUDebug) {

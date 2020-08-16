@@ -61,6 +61,7 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val rasTopCtr = UInt(8.W)
   val rasToqAddr = UInt(VAddrBits.W)
   val fetchIdx = UInt(log2Up(PredictWidth).W)
+  val specCnt = UInt(10.W)
 
   val debug_ubtb_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
   val debug_btb_cycle  = if (BPUDebug) UInt(64.W) else UInt(0.W)
@@ -92,6 +93,7 @@ class BranchUpdateInfo extends XSBundle {
   val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   val isMisPred = Bool()
+  val brTag = new BrqPtr
 
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
