@@ -47,6 +47,8 @@ package object xiangshan {
     def isIntExu(fuType: UInt) =  !fuType(3)
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
+    def isLoadExu(fuType: UInt) = fuType === ldu
+    def isStoreExu(fuType: UInt) = fuType === stu
 
     val functionNameMap = Map(
       jmp.litValue() -> "jmp",
@@ -75,5 +77,15 @@ package object xiangshan {
     def R = "b11".U  // return
 
     def apply() = UInt(2.W)
+  }
+
+  object CommitType {
+    def INT   = "b00".U  // int
+    def FP    = "b01".U  // fp
+    def LOAD  = "b10".U  // load
+    def STORE = "b11".U  // store
+
+    def apply() = UInt(2.W)
+    def isLoadStore(commitType: UInt) = commitType(1)
   }
 }

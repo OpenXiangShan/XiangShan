@@ -340,6 +340,10 @@ hs_err_pid*
 
 # vscode environment
 .vscode
+.metals
+.bloop
+.coursier
+mill.rdiB
 
 stale_outputs_checked
 

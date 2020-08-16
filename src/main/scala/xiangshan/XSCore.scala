@@ -6,10 +6,12 @@ import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
-import xiangshan.backend.dispatch.DP1Parameters
+import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
+import xiangshan.mem._
 import utils._
+import xiangshan.cache.DcacheUserBundle
 
 case class XSCoreParameters
 (
@@ -30,7 +32,7 @@ case class XSCoreParameters
   EnableRAS: Boolean = false,
   EnableLB: Boolean = false,
   HistoryLength: Int = 64,
-  BtbSize: Int = 2048,
+  BtbSize: Int = 256,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
   RasSize: Int = 16,
@@ -44,28 +46,39 @@ case class XSCoreParameters
   BrqSize: Int = 16,
   IssQueSize: Int = 8,
   NRPhyRegs: Int = 128,
-  NRReadPorts: Int = 14,
-  NRWritePorts: Int = 8,
+  NRIntReadPorts: Int = 8,
+  NRIntWritePorts: Int = 8,
+  NRFpReadPorts: Int = 14,
+  NRFpWritePorts: Int = 8,
+  LsroqSize: Int = 16,
   RoqSize: Int = 32,
-  IntDqDeqWidth: Int = 4,
-  FpDqDeqWidth: Int = 4,
-  LsDqDeqWidth: Int = 4,
-  dp1Paremeters: DP1Parameters = DP1Parameters(
-    IntDqSize = 16,
-    FpDqSize = 16,
-    LsDqSize = 16
+  dpParams: DispatchParameters = DispatchParameters(
+    DqEnqWidth = 4,
+    IntDqSize = 64,
+    FpDqSize = 64,
+    LsDqSize = 64,
+    IntDqDeqWidth = 4,
+    FpDqDeqWidth = 4,
+    LsDqDeqWidth = 4,
+    IntDqReplayWidth = 4,
+    FpDqReplayWidth = 4,
+    LsDqReplayWidth = 4
   ),
   exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
     AluCnt = 4,
-    MulCnt = 1,
-    MduCnt = 1,
+    MulCnt = 0,
+    MduCnt = 2,
     FmacCnt = 0,
     FmiscCnt = 0,
     FmiscDivSqrtCnt = 0,
-    LduCnt = 0,
-    StuCnt = 1
-  )
+    LduCnt = 2,
+    StuCnt = 2
+  ),
+  LoadPipelineWidth: Int = 2,
+  StorePipelineWidth: Int = 2,
+  StoreBufferSize: Int = 16,
+  RefillSize: Int = 512
 )
 
 
@@ -96,10 +109,17 @@ trait HasXSParameter {
   val EnableLB = core.EnableLB
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
+  // val BtbWays = 4
   val BtbBanks = PredictWidth
+  // val BtbSets = BtbSize / BtbWays
   val JbtacSize = core.JbtacSize
   val JbtacBanks = core.JbtacBanks
   val RasSize = core.RasSize
+  val CacheLineSize = core.CacheLineSize
+  val CacheLineHalfWord = CacheLineSize / 16
+  val ExtHistoryLength = HistoryLength * 2
+  val UBtbWays = core.UBtbWays
+  val BtbWays = core.BtbWays
   val IBufSize = core.IBufSize
   val DecodeWidth = core.DecodeWidth
   val RenameWidth = core.RenameWidth
@@ -109,21 +129,24 @@ trait HasXSParameter {
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = core.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val NRReadPorts = core.NRReadPorts
-  val NRWritePorts = core.NRWritePorts
+  val LsroqSize = core.LsroqSize // 64
   val RoqSize = core.RoqSize
   val InnerRoqIdxWidth = log2Up(RoqSize)
   val RoqIdxWidth = InnerRoqIdxWidth + 1
-  val IntDqDeqWidth = core.IntDqDeqWidth
-  val FpDqDeqWidth = core.FpDqDeqWidth
-  val LsDqDeqWidth = core.LsDqDeqWidth
-  val dp1Paremeters = core.dp1Paremeters
+  val InnerLsroqIdxWidth = log2Up(LsroqSize)
+  val LsroqIdxWidth = InnerLsroqIdxWidth + 1
+  val dpParams = core.dpParams
+  val ReplayWidth = dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth + dpParams.LsDqReplayWidth
   val exuParameters = core.exuParameters
-  val CacheLineSize = core.CacheLineSize
-  val CacheLineHalfWord = CacheLineSize / 16
-  val ExtHistoryLength = HistoryLength * 2
-  val UBtbWays = core.UBtbWays
-  val BtbWays = core.BtbWays
+  val NRIntReadPorts = core.NRIntReadPorts
+  val NRIntWritePorts = core.NRIntWritePorts
+  val NRMemReadPorts = exuParameters.LduCnt + 2*exuParameters.StuCnt
+  val NRFpReadPorts = core.NRFpReadPorts
+  val NRFpWritePorts = core.NRFpWritePorts
+  val LoadPipelineWidth = core.LoadPipelineWidth
+  val StorePipelineWidth = core.StorePipelineWidth
+  val StoreBufferSize = core.StoreBufferSize
+  val RefillSize = core.RefillSize
 }
 
 trait HasXSLog { this: Module =>
@@ -179,23 +202,29 @@ class XSCore extends XSModule {
 
   io.imem <> DontCare
 
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(3))
+  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
 
+  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2, userBits = DcacheUserBundleWidth))
+  
   val front = Module(new Frontend)
   val backend = Module(new Backend)
+  val mem = Module(new Memend)
 
   front.io.backend <> backend.io.frontend
+  mem.io.backend   <> backend.io.mem
 
   backend.io.memMMU.imem <> DontCare
 
   val dtlb = TLB(
-    in = backend.io.dmem,
+    in = mem.io.dmem,
     mem = dmemXbar.io.in(1),
     flush = false.B,
     csrMMU = backend.io.memMMU.dmem
-  )(TLBConfig(name = "dtlb", totalEntry = 64))
+  )(TLBConfig(name = "dtlb", totalEntry = 64, userBits = DcacheUserBundleWidth))
   dmemXbar.io.in(0) <> dtlb.io.out
-  dmemXbar.io.in(2) <> io.frontend
+  // dmemXbar.io.in(1) <> io.frontend
+
+  io.frontend <> DontCare
 
   io.dmem <> Cache(
     in = dmemXbar.io.out,
@@ -203,29 +232,6 @@ class XSCore extends XSModule {
     flush = "b00".U,
     empty = dtlb.io.cacheEmpty,
     enable = HasDcache
-  )(CacheConfig(name = "dcache"))
+  )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
 
-  XSDebug("(req valid, ready | resp valid, ready) \n")
-  XSDebug("c-mem(%x %x %x| %x %x) c-coh(%x %x %x| %x %x) cache (%x %x %x| %x %x) tlb (%x %x %x| %x %x)\n",
-    io.dmem.mem.req.valid,
-    io.dmem.mem.req.ready,
-    io.dmem.mem.req.bits.addr,
-    io.dmem.mem.resp.valid,
-    io.dmem.mem.resp.ready,
-    io.dmem.coh.req.valid,
-    io.dmem.coh.req.ready,
-    io.dmem.coh.req.bits.addr,
-    io.dmem.coh.resp.valid,
-    io.dmem.coh.resp.ready,
-    dmemXbar.io.out.req.valid,
-    dmemXbar.io.out.req.ready,
-    dmemXbar.io.out.req.bits.addr,
-    dmemXbar.io.out.resp.valid,
-    dmemXbar.io.out.resp.ready,
-    backend.io.dmem.req.valid,
-    backend.io.dmem.req.ready,
-    backend.io.dmem.req.bits.addr,
-    backend.io.dmem.resp.valid,
-    backend.io.dmem.resp.ready
-  )
 }

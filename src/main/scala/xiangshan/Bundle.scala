@@ -122,6 +122,7 @@ class CtrlSignals extends XSBundle {
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
+  val commitType = CommitType()
 }
 
 class CfCtrl extends XSBundle {
@@ -132,12 +133,21 @@ class CfCtrl extends XSBundle {
 
 trait HasRoqIdx { this: HasXSParameter =>
   val roqIdx = UInt(RoqIdxWidth.W)
-  def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && Mux(
-      this.roqIdx.head(1) === redirect.bits.roqIdx.head(1),
-      this.roqIdx.tail(1) > redirect.bits.roqIdx.tail(1),
-      this.roqIdx.tail(1) < redirect.bits.roqIdx.tail(1)
+
+  def isAfter(thatIdx: UInt): Bool = {
+    Mux(
+      this.roqIdx.head(1) === thatIdx.head(1),
+      this.roqIdx.tail(1) > thatIdx.tail(1),
+      this.roqIdx.tail(1) < thatIdx.tail(1)
     )
+  }
+
+  def isAfter[ T<: HasRoqIdx ](that: T): Bool = {
+    isAfter(that.roqIdx)
+  }
+
+  def needFlush(redirect: Valid[Redirect]): Bool = {
+    redirect.valid && this.isAfter(redirect.bits.roqIdx)
   }
 }
 
@@ -145,6 +155,7 @@ trait HasRoqIdx { this: HasXSParameter =>
 class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
+  val lsroqIdx = UInt(LsroqIdxWidth.W)
 }
 
 class Redirect extends XSBundle with HasRoqIdx {
@@ -157,9 +168,16 @@ class Redirect extends XSBundle with HasRoqIdx {
 }
 
 class Dp1ToDp2IO extends XSBundle {
-  val intDqToDp2 = Vec(IntDqDeqWidth, DecoupledIO(new MicroOp))
-  val fpDqToDp2 = Vec(FpDqDeqWidth, DecoupledIO(new MicroOp))
-  val lsDqToDp2 = Vec(LsDqDeqWidth, DecoupledIO(new MicroOp))
+  val intDqToDp2 = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
+  val fpDqToDp2 = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp))
+  val lsDqToDp2 = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp))
+}
+
+class ReplayPregReq extends XSBundle {
+  // NOTE: set isInt and isFp both to 'false' when invalid
+  val isInt = Bool()
+  val isFp = Bool()
+  val preg = UInt(PhyRegIdxWidth.W)
 }
 
 class DebugBundle extends XSBundle{
@@ -188,12 +206,16 @@ class ExuIO extends XSBundle {
   val exception = Flipped(ValidIO(new MicroOp))
   // for Lsu
   val dmem = new SimpleBusUC
-  val scommit = Input(UInt(3.W))
+  val mcommit = Input(UInt(3.W))
 }
 
 class RoqCommit extends XSBundle {
   val uop = new MicroOp
   val isWalk = Bool()
+}
+
+class TlbFeedback extends XSBundle with HasRoqIdx{
+  val hit = Bool()
 }
 
 class FrontendToBackendIO extends XSBundle {
