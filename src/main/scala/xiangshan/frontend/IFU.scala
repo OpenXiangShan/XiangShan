@@ -30,7 +30,7 @@ class IFUIO extends XSBundle
 class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)
-  val bpu = if (EnableBPU) Module(new BPU) else Module(new FakeBPU)
+  val bpu = BPU(EnableBPU)
   val pd = Module(new PreDecode)
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
