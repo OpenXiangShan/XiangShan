@@ -480,8 +480,9 @@ class Lsroq extends XSModule {
         Cat(violationVec).orR()
       }))
       val lsroqViolation = lsroqViolationVec.asUInt().orR()
-      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, ringBufferTail)
+      val lsroqViolationIndex = io.storeIn(i).bits.uop.lsroqIdx + PriorityEncoder(lsroqViolationVec)
       val lsroqViolationUop = uop(lsroqViolationIndex)
+      XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $lsroqViolationIndex")
 
       // when l/s writeback to roq together, check if rollback is needed
       val wbViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
@@ -490,8 +491,9 @@ class Lsroq extends XSModule {
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.loadIn(j).bits.paddr(PAddrBits - 1, 3) &&
           (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
       }))
-      val wbViolation = lsroqViolationVec.asUInt().orR()
+      val wbViolation = wbViolationVec.asUInt().orR()
       val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
+      XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop")
 
       // check if rollback is needed for load in l4
       val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
@@ -519,18 +521,18 @@ class Lsroq extends XSModule {
 
       XSDebug(
         lsroqViolation,
-        "need rollback (ld wb before store) pc %x roqidx %d\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx
+        "need rollback (ld wb before store) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, lsroqViolationUop.roqIdx
       )
       XSDebug(
         wbViolation,
-        "need rollback (ld/st wb together) pc %x roqidx %d\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx
+        "need rollback (ld/st wb together) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, wbViolationUop.roqIdx
       )
       XSDebug(
         l4Violation,
-        "need rollback (l4 load) pc %x roqidx %d\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx
+        "need rollback (l4 load) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, l4ViolationUop.roqIdx
       )
     }.otherwise {
       rollback(i).valid := false.B
