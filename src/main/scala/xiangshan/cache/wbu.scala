@@ -28,7 +28,7 @@ class WritebackUnit extends DCacheModule {
   })
 
   val req = Reg(new WritebackReq())
-  val s_invalid :: s_data_read_req :: s_data_read_resp_1 :: s_data_read_resp_2 :: s_active :: s_grant :: s_resp :: Nil = Enum(7)
+  val s_invalid :: s_data_read_req :: s_data_read_resp :: s_active :: s_grant :: s_resp :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
   val data_req_cnt = RegInit(0.U(log2Up(refillCycles+1).W))
@@ -60,6 +60,9 @@ class WritebackUnit extends DCacheModule {
     }
   }
 
+  val dataArrayLatency = 2
+  val data_array_ctr  = Reg(UInt(log2Up(dataArrayLatency).W))
+
   when (state === s_data_read_req) {
     // Data read for new requests
     io.data_req.valid       := true.B
@@ -68,21 +71,21 @@ class WritebackUnit extends DCacheModule {
     io.data_req.bits.rmask  := ~0.U(refillCycles.W)
 
     when (io.data_req.fire()) {
-      state := s_data_read_resp_1
+      state := s_data_read_resp
+      data_array_ctr := 0.U
     }
   }
 
-  when (state === s_data_read_resp_1) {
-    state := s_data_read_resp_2
-  }
+  when (state === s_data_read_resp) {
+    data_array_ctr := data_array_ctr + 1.U
+    when (data_array_ctr === (dataArrayLatency - 1).U) {
+      val way_idx = OHToUInt(req.way_en)
+      for (i <- 0 until refillCycles) {
+        wb_buffer(i) := io.data_resp(way_idx)(i)
+      }
 
-  when (state === s_data_read_resp_2) {
-    val way_idx = OHToUInt(req.way_en)
-    for (i <- 0 until refillCycles) {
-      wb_buffer(i) := io.data_resp(way_idx)(i)
+      state := s_active
     }
-
-    state := s_active
   }
 
   // release
