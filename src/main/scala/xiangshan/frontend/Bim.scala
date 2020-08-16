@@ -12,7 +12,7 @@ trait BimParams extends HasXSParameter {
   val BimBanks = PredictWidth
   val BimSize = 4096
   val nRows = BimSize / BimBanks
-  val bypassEntries = 16
+  val bypassEntries = 4
 }
 
 class BIM extends BasePredictor with BimParams{
@@ -104,9 +104,9 @@ class BIM extends BasePredictor with BimParams{
   val oldCtr = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank), wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
   val newTaken = u.taken
   val newCtr = satUpdate(oldCtr, 2, newTaken)
-  val oldSaturated = newCtr === oldCtr
+  // val oldSaturated = newCtr === oldCtr
   
-  val needToUpdate = io.update.valid && !oldSaturated && u.pd.isBr
+  val needToUpdate = io.update.valid && u.pd.isBr
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   
@@ -116,6 +116,7 @@ class BIM extends BasePredictor with BimParams{
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
     } .otherwise {
       wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
+      (0 until BimBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
       wrbypass_rows(wrbypass_enq_idx) := updateRow
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
