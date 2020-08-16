@@ -120,10 +120,11 @@ class StorePipe extends DCacheModule
 
   assert(!(io.data_write.valid && !io.data_write.ready))
 
-  dump_pipeline_valids("StorePipe s2", "s2_hit", s2_hit)
-  dump_pipeline_valids("StorePipe s2", "s2_nack", s2_nack)
-  dump_pipeline_valids("StorePipe s2", "s2_nack_hit", s2_nack_hit)
-  dump_pipeline_valids("StorePipe s2", "s2_nack_set_busy", s2_nack_set_busy)
+  // only dump these signals when they are actually valid
+  dump_pipeline_valids("StorePipe s2", "s2_hit", s2_valid && s2_hit)
+  dump_pipeline_valids("StorePipe s2", "s2_nack", s2_valid && s2_nack)
+  dump_pipeline_valids("StorePipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
+  dump_pipeline_valids("StorePipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
   val resp = Wire(Valid(new DCacheResp))
   resp.valid     := s2_valid
