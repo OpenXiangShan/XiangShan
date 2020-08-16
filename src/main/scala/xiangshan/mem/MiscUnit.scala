@@ -92,7 +92,7 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   XSDebug(io.out.fire(), "misc writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
   
   io.in.ready := state === s_tlb && io.dtlb.resp.fire() && !io.dtlb.resp.bits.miss
-  io.out.valid := io.dcache.resp.fire()
+  io.out.valid := io.dcache.resp.fire() && io.dcache.resp.bits.meta.id === DCacheMiscType.misc
 
   // TODO: distinguish L/S/A inst, A inst should not be sent into lsroq
 }
