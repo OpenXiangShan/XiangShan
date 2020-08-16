@@ -23,6 +23,10 @@ class LoadUnit extends XSModule {
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
   })
+  
+  when(io.ldin.valid){
+    XSDebug("load enpipe %x iw %x fw %x\n", io.ldin.bits.uop.cf.pc, io.ldin.bits.uop.ctrl.rfWen, io.ldin.bits.uop.ctrl.fpWen)
+  }
 
   //-------------------------------------------------------
   // Load Pipeline
@@ -137,18 +141,18 @@ class LoadUnit extends XSModule {
   io.sbuffer.pc := l4_out.bits.uop.cf.pc
   io.sbuffer.valid := l4_out.valid
 
-  val forwardVec = WireInit(io.lsroq.forward.forwardData)
-  val forwardMask = WireInit(io.lsroq.forward.forwardMask)
+  val forwardVec = WireInit(io.sbuffer.forwardData)
+  val forwardMask = WireInit(io.sbuffer.forwardMask)
   // generate XLEN/8 Muxs
   (0 until XLEN/8).map(j => {
-    when(io.sbuffer.forwardMask(j)) {
+    when(io.lsroq.forward.forwardMask(j)) {
       forwardMask(j) := true.B
-      forwardVec(j) := io.sbuffer.forwardData(j)
+      forwardVec(j) := io.lsroq.forward.forwardData(j)
     }
   })
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
-  
+
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
 
   //-------------------------------------------------------
@@ -225,4 +229,8 @@ class LoadUnit extends XSModule {
   io.ldout <> cdbArb.io.out
   hitLoadOut <> cdbArb.io.in(0)
   io.lsroq.ldout <> cdbArb.io.in(1) // missLoadOut
+
+  when(l5_in.valid){
+    XSDebug("load depipe %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
+  }
 }
