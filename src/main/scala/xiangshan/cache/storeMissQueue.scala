@@ -13,8 +13,8 @@ class StoreMissEntry extends DCacheModule
 
     val req_pri_val = Input(Bool())
     val req_pri_rdy = Output(Bool())
-    val req         = Input(new DCacheStoreReq)
-    val replay      = DecoupledIO(new DCacheStoreReq)
+    val req         = Input(new DCacheLineReq )
+    val replay      = DecoupledIO(new DCacheLineReq )
 
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
@@ -27,7 +27,7 @@ class StoreMissEntry extends DCacheModule
   val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new DCacheStoreReq)
+  val req     = Reg(new DCacheLineReq )
   val req_idx = get_idx(req.addr)
   val req_tag = get_tag(req.addr)
   val req_block_addr = get_block_addr(req.addr)
@@ -84,12 +84,14 @@ class StoreMissEntry extends DCacheModule
 
   // --------------------------------------------
   // replay
-  val storePipelineLatency = 5
+  val storePipelineLatency = 2
   val replay_resp_ctr  = Reg(UInt(log2Up(storePipelineLatency).W))
   when (state === s_drain_rpq) {
-    io.replay.valid := true.B
-    io.replay.bits  := req
+    io.replay.valid            := true.B
+    io.replay.bits             := req
+    io.replay.bits.meta.replay := true.B
     when (io.replay.fire()) {
+      replay_resp_ctr := 0.U
       state := s_replay_resp
     }
   }
@@ -101,7 +103,7 @@ class StoreMissEntry extends DCacheModule
   //
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
-    when (replay_resp_ctr === storePipelineLatency.U) {
+    when (replay_resp_ctr === (storePipelineLatency - 1).U) {
       state := s_miss_finish
     }
   }
@@ -130,7 +132,7 @@ class StoreMissQueue extends DCacheModule
 
   val miss_req_arb   = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntries))
   val miss_finish_arb    = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntries))
-  val replay_arb     = Module(new Arbiter(new DCacheStoreReq,   cfg.nStoreMissEntries))
+  val replay_arb     = Module(new Arbiter(new DCacheLineReq ,   cfg.nStoreMissEntries))
 
   val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
   val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
@@ -139,11 +141,14 @@ class StoreMissQueue extends DCacheModule
   val idx_match   = idx_matches.reduce(_||_)
 
 
-  val req             =  io.lsu.req
+  val req             = io.lsu.req
   val entry_alloc_idx = Wire(UInt())
   val pri_rdy         = WireInit(false.B)
   val pri_val         = req.valid && !idx_match
-  assert(!(req.valid && idx_match))
+  // sbuffer should not send down the same block twice
+  // what's more, it should allow write into sbuffer
+  // if the same block is being handled dcache
+  // assert(!(req.valid && tag_match))
 
   val entries = (0 until cfg.nStoreMissEntries) map { i =>
     val entry = Module(new StoreMissEntry)
@@ -173,9 +178,40 @@ class StoreMissQueue extends DCacheModule
 
   entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req_pri_rdy))
 
-  req.ready      := pri_rdy
+  // whenever index matches, do not let it in
+  req.ready      := pri_rdy && !idx_match
   io.replay.req  <> replay_arb.io.out
   io.lsu.resp    <> io.replay.resp
   io.miss_req    <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
+
+  // debug output
+  when (req.fire()) {
+    XSDebug(s"req cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask, req.bits.meta.id, req.bits.meta.replay)
+  }
+
+  val replay = io.replay.req
+  when (replay.fire()) {
+    XSDebug(s"replay cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      replay.bits.cmd, replay.bits.addr, replay.bits.data, replay.bits.mask, replay.bits.meta.id, replay.bits.meta.replay)
+  }
+
+  val resp = io.lsu.resp
+  when (resp.fire()) {
+    XSDebug(s"resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
+      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
+  }
+
+  val miss_req = io.miss_req
+  XSDebug(miss_req.fire(), "miss_req cmd: %x addr: %x client_id: %d\n",
+    miss_req.bits.cmd, miss_req.bits.addr, miss_req.bits.client_id)
+
+  val miss_resp = io.miss_resp
+  XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d\n",
+    miss_resp.bits.client_id, miss_resp.bits.entry_id)
+
+  val miss_finish = io.miss_finish
+  XSDebug(miss_finish.fire(), "miss_finish client_id: %d entry_id: %d\n",
+    miss_finish.bits.client_id, miss_finish.bits.entry_id)
 }

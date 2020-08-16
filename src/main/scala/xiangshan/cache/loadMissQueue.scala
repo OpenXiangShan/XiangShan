@@ -15,8 +15,8 @@ class LoadMissEntry extends DCacheModule
     val req_pri_rdy = Output(Bool())
     val req_sec_val = Input(Bool())
     val req_sec_rdy = Output(Bool())
-    val req         = Input(new DCacheLoadReq)
-    val replay      = DecoupledIO(new DCacheLoadReq)
+    val req         = Input(new DCacheWordReq )
+    val replay      = DecoupledIO(new DCacheWordReq )
 
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
@@ -29,13 +29,13 @@ class LoadMissEntry extends DCacheModule
   val s_invalid :: s_miss_req :: s_miss_resp :: s_drain_rpq :: s_replay_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
-  val req     = Reg(new DCacheLoadReq)
+  val req     = Reg(new DCacheWordReq )
   val req_idx = get_idx(req.addr)
   val req_tag = get_tag(req.addr)
   val req_block_addr = get_block_addr(req.addr)
   val reg_miss_resp = Reg(new MissResp)
 
-  val rpq = Module(new Queue(new DCacheLoadReq, cfg.nRPQ))
+  val rpq = Module(new Queue(new DCacheWordReq , cfg.nRPQ))
 
   rpq.io.enq.valid := (io.req_pri_val && io.req_pri_rdy) || (io.req_sec_val && io.req_sec_rdy)
   rpq.io.enq.bits  := io.req
@@ -102,6 +102,7 @@ class LoadMissEntry extends DCacheModule
   when (state === s_drain_rpq) {
     rpq.io.deq.ready := true.B
     io.replay <> rpq.io.deq
+    io.replay.bits.meta.replay := true.B
     when (rpq.io.count === 0.U) {
       replay_resp_ctr := 0.U
       state := s_replay_resp
@@ -112,10 +113,15 @@ class LoadMissEntry extends DCacheModule
   // we must wait for response here,
   // if we do'not wait for response here,
   // this entry may be freed before it's response comes back
-  //
+
+  // load pipe line latency is 2 cycles
+  // we send req in s0 and get response in s2
+  // s_drain_rpq is s0
+  // when we reach s_replay_resp, load req goes to s1
+  // we should wait here for another cycle until load req goes to s2
   when (state === s_replay_resp) {
     replay_resp_ctr := replay_resp_ctr + 1.U
-    when (replay_resp_ctr === loadPipelineLatency.U) {
+    when (replay_resp_ctr === (loadPipelineLatency - 1).U) {
       state := s_miss_finish
     }
   }
@@ -144,7 +150,7 @@ class LoadMissQueue extends DCacheModule
 
   val miss_req_arb    = Module(new Arbiter(new MissReq,       cfg.nLoadMissEntries))
   val miss_finish_arb = Module(new Arbiter(new MissFinish,    cfg.nLoadMissEntries))
-  val replay_arb      = Module(new Arbiter(new DCacheLoadReq, cfg.nLoadMissEntries))
+  val replay_arb      = Module(new Arbiter(new DCacheWordReq , cfg.nLoadMissEntries))
 
   val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
   val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
@@ -203,4 +209,34 @@ class LoadMissQueue extends DCacheModule
   io.replay.s1_kill := false.B
   io.miss_req    <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
+
+  // debug output
+  when (req.fire()) {
+    XSDebug(s"req cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask, req.bits.meta.id, req.bits.meta.replay)
+  }
+
+  val replay = io.replay.req
+  when (replay.fire()) {
+    XSDebug(s"replay cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      replay.bits.cmd, replay.bits.addr, replay.bits.data, replay.bits.mask, replay.bits.meta.id, replay.bits.meta.replay)
+  }
+
+  val resp = io.lsu.resp
+  when (resp.fire()) {
+    XSDebug(s"resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
+      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
+  }
+
+  val miss_req = io.miss_req
+  XSDebug(miss_req.fire(), "miss_req cmd: %x addr: %x client_id: %d\n",
+    miss_req.bits.cmd, miss_req.bits.addr, miss_req.bits.client_id)
+
+  val miss_resp = io.miss_resp
+  XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d\n",
+    miss_resp.bits.client_id, miss_resp.bits.entry_id)
+
+  val miss_finish = io.miss_finish
+  XSDebug(miss_finish.fire(), "miss_finish client_id: %d entry_id: %d\n",
+    miss_finish.bits.client_id, miss_finish.bits.entry_id)
 }

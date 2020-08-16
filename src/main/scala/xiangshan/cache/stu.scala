@@ -120,10 +120,11 @@ class StorePipe extends DCacheModule
 
   assert(!(io.data_write.valid && !io.data_write.ready))
 
-  dump_pipeline_valids("StorePipe s2", "s2_hit", s2_hit)
-  dump_pipeline_valids("StorePipe s2", "s2_nack", s2_nack)
-  dump_pipeline_valids("StorePipe s2", "s2_nack_hit", s2_nack_hit)
-  dump_pipeline_valids("StorePipe s2", "s2_nack_set_busy", s2_nack_set_busy)
+  // only dump these signals when they are actually valid
+  dump_pipeline_valids("StorePipe s2", "s2_hit", s2_valid && s2_hit)
+  dump_pipeline_valids("StorePipe s2", "s2_nack", s2_valid && s2_nack)
+  dump_pipeline_valids("StorePipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
+  dump_pipeline_valids("StorePipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
   val resp = Wire(Valid(new DCacheResp))
   resp.valid     := s2_valid
@@ -160,7 +161,7 @@ class StorePipe extends DCacheModule
   // -------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
-    req: DCacheStoreReq) = {
+    req: DCacheLineReq ) = {
       when (valid) {
         XSDebug(s"$pipeline_stage_name cmd: %x addr: %x id: %d replay: %b\n",
           req.cmd, req.addr, req.meta.id, req.meta.replay)

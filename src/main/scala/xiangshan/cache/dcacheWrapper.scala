@@ -25,7 +25,7 @@ class DCacheMeta extends DCacheBundle {
 }
 
 // ordinary load and special memory operations(lr/sc, atomics)
-class DCacheLoadReq extends DCacheBundle
+class DCacheWordReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -35,7 +35,7 @@ class DCacheLoadReq extends DCacheBundle
 }
 
 // ordinary store
-class DCacheStoreReq extends DCacheBundle
+class DCacheLineReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
@@ -56,7 +56,7 @@ class DCacheResp extends DCacheBundle
 
 class DCacheLoadIO extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheLoadReq)
+  val req  = DecoupledIO(new DCacheWordReq )
   val resp = Flipped(DecoupledIO(new DCacheResp))
   // kill previous cycle's req
   val s1_kill = Output(Bool())
@@ -64,7 +64,7 @@ class DCacheLoadIO extends DCacheBundle
 
 class DCacheStoreIO extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheStoreReq)
+  val req  = DecoupledIO(new DCacheLineReq )
   val resp = Flipped(DecoupledIO(new DCacheResp))
 }
 
@@ -178,7 +178,7 @@ class DCache extends DCacheModule {
   //----------------------------------------
   // load pipe and load miss queue
   // load miss queue replays on ldu 0
-  val loadArb = Module(new Arbiter(new DCacheLoadReq, 2))
+  val loadArb = Module(new Arbiter(new DCacheWordReq , 2))
   val loadReplay = loadMissQueue.io.replay
   val lsu_0 = io.lsu.load(0)
   val ldu_0 = ldu(0).io.lsu
@@ -187,7 +187,8 @@ class DCache extends DCacheModule {
   assert(!(lsu_0.req.fire() && lsu_0.req.bits.meta.replay), "LSU should not replay requests")
   assert(!(loadReplay.req.fire() && !loadReplay.req.bits.meta.replay), "LoadMissQueue should replay requests")
   val ldu_0_block = block_load(loadArb.io.out.bits.addr)
-  block_decoupled(loadArb.io.out, ldu_0.req, ldu_0_block)
+  // do not block replayed reqs
+  block_decoupled(loadArb.io.out, ldu_0.req, ldu_0_block && !loadArb.io.out.bits.meta.replay)
 
   ldu_0.resp.ready := false.B
 
@@ -213,6 +214,7 @@ class DCache extends DCacheModule {
     block_decoupled(io.lsu.load(w).req, ldu(w).io.lsu.req, load_w_block)
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
     ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
+    assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.replay), "LSU should not replay requests")
   }
 
   // load miss queue
@@ -221,9 +223,11 @@ class DCache extends DCacheModule {
   //----------------------------------------
   // store pipe and store miss queue
   storeMissQueue.io.lsu    <> io.lsu.store
+  assert(!(storeMissQueue.io.replay.req.fire() && !storeMissQueue.io.replay.req.bits.meta.replay),
+    "StoreMissQueue should replay requests")
 
   val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
-  block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block)
+  block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block && !storeMissQueue.io.replay.req.bits.meta.replay)
   storeMissQueue.io.replay.resp <> stu.io.lsu.resp
 
   //----------------------------------------
@@ -260,15 +264,17 @@ class DCache extends DCacheModule {
   val loadMissResp    = loadMissQueue.io.miss_resp
   val storeMissResp   = storeMissQueue.io.miss_resp
 
-  val clientId = missResp.bits.client_id(entryIdMSB, entryIdLSB)
+  val clientId = missResp.bits.client_id(clientIdMSB, clientIdLSB)
 
   val isLoadMissResp = clientId === loadMissQueueClientId
   loadMissResp.valid := missResp.valid && isLoadMissResp
-  loadMissResp.bits  := missResp.bits
+  loadMissResp.bits.entry_id := missResp.bits.entry_id
+  loadMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   val isStoreMissResp = clientId === storeMissQueueClientId
   storeMissResp.valid := missResp.valid && isStoreMissResp
-  storeMissResp.bits  := missResp.bits
+  storeMissResp.bits.entry_id := missResp.bits.entry_id
+  storeMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   // Finish
   val missFinish        = missQueue.io.finish

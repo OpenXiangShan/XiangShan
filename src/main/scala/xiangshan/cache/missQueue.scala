@@ -88,6 +88,7 @@ class MissEntry extends DCacheModule
 
   val grantack = Reg(Valid(new TLBundleE(cfg.busParams)))
   val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
+  val should_refill_data  = Reg(Bool())
 
   io.block_idx.valid  := state =/= s_invalid
   io.block_addr.valid := state =/= s_invalid
@@ -129,6 +130,7 @@ class MissEntry extends DCacheModule
     when (io.req.fire()) {
       grantack.valid := false.B
       refill_ctr := 0.U
+      should_refill_data := false.B
       req := io.req.bits
       state := s_meta_read_req
     }
@@ -185,7 +187,10 @@ class MissEntry extends DCacheModule
     when (req_tag_match) {
       val (is_hit, _, coh_on_hit) = old_coh.onAccess(req.cmd)
       when (is_hit) { // set dirty bit
-        assert(isWrite(req.cmd))
+        // we do not need to assert write any more
+        // read may go here as well
+        // eg: when several load miss on the same block
+        // assert(isWrite(req.cmd))
         new_coh     := coh_on_hit
         new_state   := s_send_resp
       } .otherwise { // upgrade permissions
@@ -251,7 +256,8 @@ class MissEntry extends DCacheModule
     io.mem_grant.ready := true.B
 
     when (TLUtilities.hasData(io.mem_grant.bits)) {
-      when (io.refill.fire()) {
+      when (io.mem_grant.fire()) {
+        should_refill_data := true.B
         refill_ctr := refill_ctr + 1.U
         refill_data(refill_ctr) := io.mem_grant.bits.data
         when (refill_ctr === (cacheDataBeats - 1).U) {
@@ -277,8 +283,8 @@ class MissEntry extends DCacheModule
       grantack.valid := false.B
 
       // no data
-      when (refill_ctr === 0.U) {
-        state := s_send_resp
+      when (!should_refill_data) {
+        state := s_meta_write_req
       } .otherwise {
         state := s_data_write_req
       }
@@ -294,6 +300,20 @@ class MissEntry extends DCacheModule
     io.refill.bits.data    := refill_data
 
     when (io.refill.fire()) {
+      state := s_meta_write_req
+    }
+  }
+
+  // --------------------------------------------
+  // meta write
+  when (state === s_meta_write_req) {
+    io.meta_write.valid         := true.B
+    io.meta_write.bits.idx      := req_idx
+    io.meta_write.bits.data.coh := new_coh
+    io.meta_write.bits.data.tag := req_tag
+    io.meta_write.bits.way_en   := req_way_en
+
+    when (io.meta_write.fire()) {
       state := s_send_resp
     }
   }
@@ -319,20 +339,6 @@ class MissEntry extends DCacheModule
   when (state === s_client_finish) {
     io.finish.ready := true.B
     when (io.finish.fire()) {
-      state := s_meta_write_req
-    }
-  }
-
-  // --------------------------------------------
-  // meta write
-  when (state === s_meta_write_req) {
-    io.meta_write.valid         := true.B
-    io.meta_write.bits.idx      := req_idx
-    io.meta_write.bits.data.coh := new_coh
-    io.meta_write.bits.data.tag := req_tag
-    io.meta_write.bits.way_en   := req_way_en
-
-    when (io.meta_write.fire()) {
       state := s_invalid
     }
   }
@@ -440,6 +446,14 @@ class MissQueue extends DCacheModule
   val req = io.req
   XSDebug(req.fire(), "req cmd: %x addr: %x client_id: %d\n",
     req.bits.cmd, req.bits.addr, req.bits.client_id)
+
+  val resp = io.resp
+  XSDebug(resp.fire(), "resp client_id: %d entry_id: %d\n",
+    resp.bits.client_id, resp.bits.entry_id)
+
+  val finish = io.finish
+  XSDebug(finish.fire(), "finish client_id: %d entry_id: %d\n",
+    finish.bits.client_id, finish.bits.entry_id)
 
   // print refill
   XSDebug(io.refill.fire(), "refill addr %x\n", io.refill.bits.addr)

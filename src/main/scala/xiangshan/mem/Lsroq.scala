@@ -30,7 +30,7 @@ class Lsroq extends XSModule {
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheStoreReq))
+    val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
@@ -38,7 +38,7 @@ class Lsroq extends XSModule {
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLoadIO
     val uncache = new DCacheLoadIO
-    // val refill = Flipped(Valid(new DCacheStoreReq))
+    // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
   val uop = Reg(Vec(LsroqSize, new MicroOp))
@@ -101,10 +101,9 @@ class Lsroq extends XSModule {
 
   // writeback load
   (0 until LoadPipelineWidth).map(i => {
-    assert(!io.loadIn(i).bits.miss)
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
           io.loadIn(i).bits.uop.lsroqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -135,19 +134,21 @@ class Lsroq extends XSModule {
       data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
       miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss
       store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
+      pending(io.storeIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
     }
   })
 
   // writeback store
   (0 until StorePipelineWidth).map(i => {
     when(io.storeIn(i).fire()) {
-      valid(io.storeIn(i).bits.uop.lsroqIdx) := true.B
+      valid(io.storeIn(i).bits.uop.lsroqIdx) := !io.storeIn(i).bits.mmio
       data(io.storeIn(i).bits.uop.lsroqIdx).paddr := io.storeIn(i).bits.paddr
       data(io.storeIn(i).bits.uop.lsroqIdx).mask := io.storeIn(i).bits.mask
       data(io.storeIn(i).bits.uop.lsroqIdx).data := io.storeIn(i).bits.data
       data(io.storeIn(i).bits.uop.lsroqIdx).mmio := io.storeIn(i).bits.mmio
       miss(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.miss
       store(io.storeIn(i).bits.uop.lsroqIdx) := true.B
+      pending(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.mmio
       XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x\n",
         io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0),
         io.storeIn(i).bits.uop.cf.pc,
@@ -257,8 +258,32 @@ class Lsroq extends XSModule {
   loadWbSel(0) := OHToUInt(lselvec0)
   loadWbSel(1) := OHToUInt(lselvec1)
   (0 until StorePipelineWidth).map(i => {
+    // data select
+    val rdata = data(loadWbSel(i)).data
+    val func = uop(loadWbSel(i)).ctrl.fuOpType
+    val raddr = data(loadWbSel(i)).paddr
+    val rdataSel = LookupTree(raddr(2, 0), List(
+      "b000".U -> rdata(63, 0),
+      "b001".U -> rdata(63, 8),
+      "b010".U -> rdata(63, 16),
+      "b011".U -> rdata(63, 24),
+      "b100".U -> rdata(63, 32),
+      "b101".U -> rdata(63, 40),
+      "b110".U -> rdata(63, 48),
+      "b111".U -> rdata(63, 56)
+    ))
+    val rdataPartialLoad = LookupTree(func, List(
+        LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
+        LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
+        LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
+        LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+    ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
-    io.ldout(i).bits.data := data(loadWbSel(i)).data
+    io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
@@ -266,7 +291,13 @@ class Lsroq extends XSModule {
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i))
     when(io.ldout(i).fire()) {
       writebacked(loadWbSel(i)) := true.B
-      // allocated(loadWbSel(i)) := false.B
+      XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x paddr %x data %x mmio %x\n",
+        io.ldout(i).bits.uop.lsroqIdx,
+        io.ldout(i).bits.uop.cf.pc,
+        data(loadWbSel(i)).paddr,
+        data(loadWbSel(i)).data,
+        data(loadWbSel(i)).mmio
+      )
     }
   })
 
@@ -319,11 +350,6 @@ class Lsroq extends XSModule {
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
   // scommitPending, scommitIn, scommitOut are for debug only
-  val scommitPending = RegInit(0.U(log2Up(LsroqSize).W))
-  val scommitIn = PopCount(VecInit(storeCommit).asUInt)
-  val scommitOut = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
-  scommitPending := scommitPending + scommitIn - scommitOut
-
   val commitedStoreQueue = Module(new MIMOQueue(
     UInt(InnerLsroqIdxWidth.W),
     entries = LsroqSize,
@@ -332,6 +358,12 @@ class Lsroq extends XSModule {
     mem = false,
     perf = true
   ))
+
+  // scommit counter for debugging
+  val scommitPending = RegInit(0.U(log2Up(LsroqSize).W))
+  val scommitIn = PopCount(VecInit(storeCommit).asUInt)
+  val scommitOut = PopCount(VecInit((0 until 2).map(i => commitedStoreQueue.io.deq(i).fire())).asUInt)
+  scommitPending := scommitPending + scommitIn - scommitOut
 
   commitedStoreQueue.io.flush := false.B
 
@@ -357,14 +389,11 @@ class Lsroq extends XSModule {
   })
 
   // get no more than 2 commited store from storeCommitedQueue
-  (0 until 2).map(i => {
-    commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire()
-  })
-
   // send selected store inst to sbuffer
   (0 until 2).map(i => {
     val ptr = commitedStoreQueue.io.deq(i).bits
-    io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid
+    val mmio = data(ptr).mmio
+    io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid && !mmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := data(ptr).paddr
     io.sbuffer(i).bits.data := data(ptr).data
@@ -372,13 +401,13 @@ class Lsroq extends XSModule {
     io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := uop(ptr)
-    io.sbuffer(i).bits.meta.mmio     := data(ptr).mmio
+    io.sbuffer(i).bits.meta.mmio     := mmio
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
-  })
 
-  // update lsroq meta if store inst is send to sbuffer
-  (0 until 2).map(i => {
-    when(io.sbuffer(i).fire()) {
+    commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire() || mmio
+
+    // update lsroq meta if store inst is send to sbuffer
+    when(commitedStoreQueue.io.deq(i).valid && (mmio || io.sbuffer(i).ready)) {
       allocated(commitedStoreQueue.io.deq(i).bits) := false.B
     }
   })
@@ -610,8 +639,10 @@ class Lsroq extends XSModule {
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx
-  (0 until LsroqSize).map(i => {
-    when(uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)) {
+  val needCancel = Wire(Vec(LsroqSize, Bool()))
+  for (i <- 0 until LsroqSize) {
+    needCancel(i) := uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)
+    when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
         valid(i) := false.B
         store(i) := false.B
@@ -623,7 +654,10 @@ class Lsroq extends XSModule {
         allocated(i) := false.B
       }
     }
-  })
+  }
+  when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {
+    ringBufferHeadExtended := ringBufferHeadExtended - PopCount(needCancel)
+  }
 
   // assert(!io.rollback.valid)
   when(io.rollback.valid) {

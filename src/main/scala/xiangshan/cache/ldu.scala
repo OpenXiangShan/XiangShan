@@ -99,10 +99,11 @@ class LoadPipe extends DCacheModule
 
   s2_nack           := s2_nack_hit || s2_nack_set_busy || s2_nack_data
 
-  dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_hit)
-  dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_nack)
-  dump_pipeline_valids("LoadPipe s2", "s2_nack_hit", s2_nack_hit)
-  dump_pipeline_valids("LoadPipe s2", "s2_nack_set_busy", s2_nack_set_busy)
+  // only dump these signals when they are actually valid
+  dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
+  dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
+  dump_pipeline_valids("LoadPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
+  dump_pipeline_valids("LoadPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
   // load data gen
   val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
@@ -126,7 +127,7 @@ class LoadPipe extends DCacheModule
   // -------
   // Debug logging functions
   def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
-    req: DCacheLoadReq) = {
+    req: DCacheWordReq ) = {
       when (valid) {
         XSDebug(s"$pipeline_stage_name cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
           req.cmd, req.addr, req.data, req.mask, req.meta.id, req.meta.replay)

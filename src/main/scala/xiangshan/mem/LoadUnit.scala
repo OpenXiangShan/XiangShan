@@ -23,6 +23,10 @@ class LoadUnit extends XSModule {
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
   })
+  
+  when(io.ldin.valid){
+    XSDebug("load enpipe %x iw %x fw %x\n", io.ldin.bits.uop.cf.pc, io.ldin.bits.uop.ctrl.rfWen, io.ldin.bits.uop.ctrl.fpWen)
+  }
 
   //-------------------------------------------------------
   // Load Pipeline
@@ -119,6 +123,7 @@ class LoadUnit extends XSModule {
   l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
   l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
   l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
+  l4_out.bits.miss  := io.dcache.resp.bits.miss
   l4_out.valid      := io.dcache.resp.valid && !l4_out.bits.uop.needFlush(io.redirect)
 
   // Store addr forward match
@@ -136,19 +141,19 @@ class LoadUnit extends XSModule {
   io.sbuffer.pc := l4_out.bits.uop.cf.pc
   io.sbuffer.valid := l4_out.valid
 
-  val forwardVec = WireInit(io.lsroq.forward.forwardData)
-  val forwardMask = WireInit(io.lsroq.forward.forwardMask)
+  val forwardVec = WireInit(io.sbuffer.forwardData)
+  val forwardMask = WireInit(io.sbuffer.forwardMask)
   // generate XLEN/8 Muxs
   (0 until XLEN/8).map(j => {
-    when(io.sbuffer.forwardMask(j)) {
+    when(io.lsroq.forward.forwardMask(j)) {
       forwardMask(j) := true.B
-      forwardVec(j) := io.sbuffer.forwardData(j)
+      forwardVec(j) := io.lsroq.forward.forwardData(j)
     }
   })
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
-  
-  PipelineConnect(l4_out, l5_in, io.ldout.fire(), false.B)
+
+  PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
@@ -201,7 +206,7 @@ class LoadUnit extends XSModule {
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare
   hitLoadOut.bits.debug.isMMIO := l5_in.bits.mmio
-  hitLoadOut.valid := l5_in.valid && !l5_in.bits.mmio // MMIO will be done in lsroq
+  hitLoadOut.valid := l5_in.valid && !l5_in.bits.mmio && !l5_in.bits.miss // MMIO will be done in lsroq
   XSDebug(hitLoadOut.fire(), "load writeback: pc %x data %x (%x + %x(%b))\n",
     hitLoadOut.bits.uop.cf.pc, rdataPartialLoad, l5_in.bits.data,
     l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt
@@ -224,4 +229,8 @@ class LoadUnit extends XSModule {
   io.ldout <> cdbArb.io.out
   hitLoadOut <> cdbArb.io.in(0)
   io.lsroq.ldout <> cdbArb.io.in(1) // missLoadOut
+
+  when(l5_in.valid){
+    XSDebug("load depipe %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
+  }
 }

@@ -6,6 +6,7 @@ import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.HasBPUParameter
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -48,15 +49,22 @@ class BranchPrediction extends XSBundle {
   val saveHalfRVI = Bool()
 }
 
-class BranchInfo extends XSBundle {
+class BranchInfo extends XSBundle with HasBPUParameter {
   val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
   val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
+  val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
   val histPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
+  val rasToqAddr = UInt(VAddrBits.W)
+  val fetchIdx = UInt(log2Up(PredictWidth).W)
+
+  val debug_ubtb_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
+  val debug_btb_cycle  = if (BPUDebug) UInt(64.W) else UInt(0.W)
+  val debug_tage_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
 
   def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
     this.histPtr := histPtr
@@ -70,6 +78,7 @@ class BranchInfo extends XSBundle {
 }
 
 class Predecode extends XSBundle {
+  val isFetchpcEqualFirstpc = Bool()
   val mask = UInt((FetchWidth*2).W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
