@@ -326,11 +326,6 @@ class Lsroq extends XSModule {
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
   // scommitPending, scommitIn, scommitOut are for debug only
-  val scommitPending = RegInit(0.U(log2Up(LsroqSize).W))
-  val scommitIn = PopCount(VecInit(storeCommit).asUInt)
-  val scommitOut = PopCount(VecInit((0 until 2).map(i => io.sbuffer(i).fire())).asUInt)
-  scommitPending := scommitPending + scommitIn - scommitOut
-
   val commitedStoreQueue = Module(new MIMOQueue(
     UInt(InnerLsroqIdxWidth.W),
     entries = LsroqSize,
@@ -339,6 +334,12 @@ class Lsroq extends XSModule {
     mem = false,
     perf = true
   ))
+
+  // scommit counter for debugging
+  val scommitPending = RegInit(0.U(log2Up(LsroqSize).W))
+  val scommitIn = PopCount(VecInit(storeCommit).asUInt)
+  val scommitOut = PopCount(VecInit((0 until 2).map(i => commitedStoreQueue.io.deq(i).fire())).asUInt)
+  scommitPending := scommitPending + scommitIn - scommitOut
 
   commitedStoreQueue.io.flush := false.B
 
