@@ -495,8 +495,8 @@ class Lsroq extends XSModule {
 
       // check if rollback is needed for load in l4
       val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
-        // TODO: consider load store order
-        io.forward(j).valid && // L4 valid
+        io.forward(j).valid && // L4 valid\
+          io.forward(j).uop.isAfter(io.storeIn(i).bits.uop) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
           (io.storeIn(i).bits.mask & io.forward(j).mask).orR
       }))
