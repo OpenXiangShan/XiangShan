@@ -2,16 +2,17 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
+import utils.{Code, RandomReplacement, XSDebug}
 
-import utils.{XSDebug, Code, RandomReplacement}
-import bus.tilelink.{TLParameters, ClientMetadata}
 import scala.math.max
 
 
 // DCache specific parameters
 // L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
 // It's a virtually indexed, physically tagged cache.
-case class DCacheParameters(
+case class DCacheParameters
+(
     nSets: Int = 64,
     nWays: Int = 8,
     rowBits: Int = 64,
@@ -27,8 +28,8 @@ case class DCacheParameters(
     nSDQ: Int = 17,
     nRPQ: Int = 16,
     nMMIOs: Int = 1,
-    blockBytes: Int = 64,
-    busParams: TLParameters) extends L1CacheParameters {
+    blockBytes: Int = 64
+) extends L1CacheParameters {
 
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
@@ -54,9 +55,9 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def offsetlsb = wordOffBits
 
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
-  def get_tag(addr: UInt) = addr >> untagBits
+  def get_tag(addr: UInt) = (addr >> untagBits).asUInt()
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
-  def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
+  def get_block_addr(addr: UInt) = ((addr >> blockOffBits) << blockOffBits).asUInt()
 
   def rowWords = rowBits/wordBits
   def doNarrowRead = DataBits * nWays % rowBits == 0
@@ -200,9 +201,9 @@ class DuplicatedDataArray extends AbstractDataArray
 {
   // write is always ready
   io.write.ready := true.B
-  val waddr = io.write.bits.addr >> blockOffBits
+  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   for (j <- 0 until LoadPipelineWidth) {
-    val raddr = io.read(j).bits.addr >> blockOffBits
+    val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
     // raddr === waddr is undefined behavior!
     // block read in this case
     io.read(j).ready := !io.write.valid || raddr =/= waddr

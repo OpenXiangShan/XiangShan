@@ -1,11 +1,11 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import utils.XSDebug
-import bus.tilelink._
-import xiangshan.{MicroOp}
+import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters}
+import xiangshan.MicroOp
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -76,11 +76,29 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
-  val bus = new TLCached(cfg.busParams)
 }
 
-class DCache extends DCacheModule {
+
+class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+
+  val clientParameters = TLMasterPortParameters.v1(
+    Seq(TLMasterParameters.v1(
+      name = "dcache",
+      sourceId = IdRange(0, cfg.nMissEntries+1)
+    ))
+  )
+
+  val clientNode = TLClientNode(Seq(clientParameters))
+
+  lazy val module = new DCacheImp(this)
+}
+
+
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
+
   val io = IO(new DCacheIO)
+
+  val (bus, edge) = outer.clientNode.out.head
 
   //----------------------------------------
   // core data structures
@@ -94,8 +112,8 @@ class DCache extends DCacheModule {
   val stu = Module(new StorePipe)
   val loadMissQueue = Module(new LoadMissQueue)
   val storeMissQueue = Module(new StoreMissQueue)
-  val missQueue = Module(new MissQueue)
-  val wb = Module(new WritebackUnit)
+  val missQueue = Module(new MissQueue(edge))
+  val wb = Module(new WritebackUnit(edge))
 
 
   //----------------------------------------
@@ -297,35 +315,35 @@ class DCache extends DCacheModule {
   missFinish                            <> missFinishArb.io.out
 
   // tilelink stuff
-  io.bus.a <> missQueue.io.mem_acquire
-  io.bus.e <> missQueue.io.mem_finish
+  bus.a <> missQueue.io.mem_acquire
+  bus.e <> missQueue.io.mem_finish
 
-  when (io.bus.d.bits.source === cfg.nMissEntries.U) {
+  when (bus.d.bits.source === cfg.nMissEntries.U) {
     // This should be ReleaseAck
-    io.bus.d.ready := true.B
+    bus.d.ready := true.B
     missQueue.io.mem_grant.valid := false.B
     missQueue.io.mem_grant.bits  := DontCare
   } .otherwise {
     // This should be GrantData
-    missQueue.io.mem_grant <> io.bus.d
+    missQueue.io.mem_grant <> bus.d
   }
 
 
   //----------------------------------------
   // prober
-  io.bus.b.ready        := false.B
+  bus.b.ready        := false.B
 
   //----------------------------------------
   // wb
   // 0 goes to prober, 1 goes to missQueue evictions
-  val wbArb = Module(new Arbiter(new WritebackReq, 2))
+  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle.sourceBits), 2))
   wbArb.io.in(0).valid := false.B
   wbArb.io.in(0).bits  := DontCare
   wbArb.io.in(1)       <> missQueue.io.wb_req
   wb.io.req            <> wbArb.io.out
   missQueue.io.wb_resp := wb.io.resp
-  io.bus.c             <> wb.io.release
-  wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMissEntries.U
+  bus.c             <> wb.io.release
+  wb.io.mem_grant      := bus.d.fire() && bus.d.bits.source === cfg.nMissEntries.U
 
   // synchronization stuff
   def block_load(addr: UInt) = {

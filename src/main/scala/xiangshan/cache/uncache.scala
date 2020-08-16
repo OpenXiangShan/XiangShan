@@ -2,13 +2,14 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-
 import utils.XSDebug
-import bus.tilelink._
-import xiangshan.{MicroOp, Redirect, NeedImpl}
+import chipsalliance.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import xiangshan.{HasXSLog, MicroOp, NeedImpl, Redirect}
 
 // One miss entry deals with one mmio request
-class MMIOEntry extends DCacheModule
+class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 {
   val io = IO(new Bundle {
     // MSHR ID
@@ -18,8 +19,8 @@ class MMIOEntry extends DCacheModule
     val req = Flipped(DecoupledIO(new DCacheWordReq ))
     val resp = DecoupledIO(new DCacheResp)
 
-    val mem_acquire = DecoupledIO(new TLBundleA(cfg.busParams))
-    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(cfg.busParams)))
+    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
   })
 
   val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
@@ -56,19 +57,19 @@ class MMIOEntry extends DCacheModule
   // --------------------------------------------
   // refill
   // access 64bit data, addr are 64bit aligned
-  val load = TLMasterUtilities.Get(
-    params = cfg.busParams,
+  val load = edge.Get(
     fromSource      = io.id,
     toAddress       = req.addr,
-    lgSize          = (log2Up(DataBits)).U)._2
+    lgSize          = log2Up(DataBits).U
+  )._2
 
-  val store = TLMasterUtilities.Put(
-    params = cfg.busParams,
+  val store = edge.Put(
     fromSource      = io.id,
     toAddress = req.addr,
     lgSize  = (log2Up(DataBits)).U,
     data  = req.data,
-    mask = req.mask)._2
+    mask = req.mask
+  )._2
 
   when (state === s_refill_req) {
     io.mem_acquire.valid := true.B
@@ -79,7 +80,7 @@ class MMIOEntry extends DCacheModule
     }
   }
 
-  val (_, _, refill_done, _) = TLUtilities.addr_inc(io.mem_grant)
+  val (_, _, refill_done, _) = edge.addr_inc(io.mem_grant)
 
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
@@ -108,34 +109,54 @@ class MMIOEntry extends DCacheModule
 
 class UncacheIO extends DCacheBundle {
   val lsroq = Flipped(new DCacheLoadIO)
-  val bus = new TLCached(l1BusParams)
 }
 
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
-class Uncache extends DCacheModule {
+
+class Uncache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+
+  val clientParameters = TLMasterPortParameters.v1(
+    clients = Seq(TLMasterParameters.v1(
+      "uncache",
+      sourceId = IdRange(0, cfg.nMMIOEntries)
+    ))
+  )
+  val clientNode = TLClientNode(Seq(clientParameters))
+
+  lazy val module = new UncacheImp(this)
+
+}
+
+class UncacheImp(outer: Uncache)
+  extends LazyModuleImp(outer)
+    with HasDCacheParameters
+    with HasXSLog
+{
   val io = IO(new UncacheIO)
+
+  val (bus, edge) = outer.clientNode.out.head
 
   val resp_arb = Module(new Arbiter(new DCacheResp, cfg.nMMIOEntries))
 
   val req  = io.lsroq.req
   val resp = io.lsroq.resp
-  val mem_acquire = io.bus.a
-  val mem_grant   = io.bus.d
+  val mem_acquire = bus.a
+  val mem_grant   = bus.d
 
   val entry_alloc_idx = Wire(UInt())
   val req_ready = WireInit(false.B)
 
   // assign default values to output signals
-  io.bus.b.ready := false.B
-  io.bus.c.valid := false.B
-  io.bus.c.bits  := DontCare
-  io.bus.d.ready := false.B
-  io.bus.e.valid := false.B
-  io.bus.e.bits  := DontCare
+  bus.b.ready := false.B
+  bus.c.valid := false.B
+  bus.c.bits  := DontCare
+  bus.d.ready := false.B
+  bus.e.valid := false.B
+  bus.e.bits  := DontCare
 
   val entries = (0 until cfg.nMMIOEntries) map { i =>
-    val entry = Module(new MMIOEntry)
+    val entry = Module(new MMIOEntry(edge))
 
     entry.io.id := i.U(log2Up(cfg.nMMIOEntries).W)
 
@@ -161,7 +182,7 @@ class Uncache extends DCacheModule {
 
   req.ready  := req_ready
   resp          <> resp_arb.io.out
-  TLArbiter.lowestFromSeq(mem_acquire, entries.map(_.io.mem_acquire))
+  TLArbiter.lowestFromSeq(edge, mem_acquire, entries.map(_.io.mem_acquire))
 
 
   // print all input/output requests for debug purpose
@@ -172,12 +193,13 @@ class Uncache extends DCacheModule {
   XSDebug(resp.fire(), "data: %x\n", req.bits.data)
 
   // print tilelink messages
+  // TODO: add dump info
   when (mem_acquire.fire()) {
-    XSDebug("mem_acquire ")
-    mem_acquire.bits.dump
+    XSDebug("mem_acquire \n")
+//    mem_acquire.bits.dump
   }
   when (mem_grant.fire()) {
-    XSDebug("mem_grant ")
-    mem_grant.bits.dump
+    XSDebug("mem_grant \n")
+//    mem_grant.bits.dump
   }
 }

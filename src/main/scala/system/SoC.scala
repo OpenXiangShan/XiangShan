@@ -38,7 +38,7 @@ class DummyCore()(implicit p: Parameters) extends LazyModule {
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
-  private val xsCore = LazyModule(new DummyCore())
+  private val xsCore = LazyModule(new XSCore())
 
   // only mem and extDev visible externally
   val mem = xsCore.mem

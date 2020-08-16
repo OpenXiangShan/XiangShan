@@ -116,7 +116,7 @@ class Memend extends XSModule {
     val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
     val miscToDcache = new DCacheLoadIO
     val sbufferToDcache = new DCacheStoreIO
-    val uncache = new UncacheIO
+    val uncache = new DCacheLoadIO
   })
 
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
@@ -139,11 +139,10 @@ class Memend extends XSModule {
   val lsroqToDcache = Wire(new DCacheLoadIO)
   val miscUnitToDcache = Wire(new DCacheLoadIO)
   // misc + miss --> arbiter --> miscToDcache
-  val miscToDcache = Wire(new DCacheLoadIO)
+  val miscToDcache = io.miscToDcache
 
   // connect dcache ports
   io.loadUnitToDcacheVec <> loadUnitToDcacheVec
-  io.miscToDcache <> miscToDcache
   io.sbufferToDcache <> sbufferToDcache
   io.uncache <> lsroqToUncache
 
@@ -198,9 +197,9 @@ class Memend extends XSModule {
   miscUnit.io.dcache <> miscUnitToDcache
 
   assert(!(lsroqToDcache.req.valid && miscUnitToDcache.req.valid))
-  val memReqArb = new Arbiter(miscToDcache.req, 2)
-  memReqArb.io.in(0) := lsroqToDcache.req
-  memReqArb.io.in(1) := miscUnitToDcache.req
+  val memReqArb = Module(new Arbiter(miscToDcache.req.bits.cloneType, 2))
+  memReqArb.io.in(0) <> lsroqToDcache.req
+  memReqArb.io.in(1) <> miscUnitToDcache.req
 
   miscToDcache.req <> memReqArb.io.out
 

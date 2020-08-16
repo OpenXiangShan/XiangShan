@@ -2,7 +2,6 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
@@ -11,7 +10,9 @@ import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, Uncache}
-import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
+import chipsalliance.rocketchip.config
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLClientNode, TLIdentityNode}
 import utils._
 
 case class XSCoreParameters
@@ -149,12 +150,6 @@ trait HasXSParameter {
   val RefillSize = core.RefillSize
 
   val l1BusDataWidth = 64
-  val l1BusParams = TLParameters(
-    addressBits = PAddrBits,
-    dataBits = l1BusDataWidth,
-    sourceBits = 3,
-    sinkBits = 3
-  )
 
   val icacheParameters = ICacheParameters(
   )
@@ -162,12 +157,11 @@ trait HasXSParameter {
   val LRSCCycles = 16
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
-    dataECC = Some("secded"),
-    busParams = l1BusParams
+    dataECC = Some("secded")
   )
 }
 
-trait HasXSLog { this: Module =>
+trait HasXSLog { this: RawModule =>
   implicit val moduleName: String = this.name
 }
 
@@ -210,40 +204,27 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class TLReqProducer extends XSModule {
-  val io = IO(new TLCached(l1BusParams))
 
-  io <> DontCare
+class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
-  val addr = RegInit("h80000000".U)
-  addr := addr + 4.U
-  val (legal, bundle) = TLMasterUtilities.Get(io.params, 0.U, addr, 3.U)
-  io.a.bits := bundle
-  io.a.valid := true.B
-  assert(legal)
-  io.d.ready := true.B
-  when(io.a.fire()){
-    io.a.bits.dump()
-  }
-  when(io.d.fire()){
-    io.d.bits.dump()
-  }
+  val dcache = LazyModule(new DCache())
+  val uncache = LazyModule(new Uncache())
+
+  // TODO: crossbar Icache/Dcache/PTW here
+  val mem = dcache.clientNode
+  val mmio = uncache.clientNode
+
+  lazy val module = new XSCoreImp(this)
 }
 
-class XSCore extends XSModule {
-  val io = IO(new Bundle {
-    val mem = new TLCached(l1BusParams)
-    val mmio = new TLCached(l1BusParams)
-  })
-
-  // val fakecache = Module(new TLReqProducer)
-  // io.mem <> fakecache.io
+class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
-  val dcache = Module(new DCache)
-  val uncache = Module(new Uncache)
+
+  val dcache = outer.dcache.module
+  val uncache = outer.uncache.module
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
@@ -252,10 +233,6 @@ class XSCore extends XSModule {
   dcache.io.lsu.store <> mem.io.sbufferToDcache
   uncache.io.lsroq <> mem.io.uncache
 
-  io.mmio <> uncache.io.bus
-  io.mem <> dcache.io.bus
-
   backend.io.memMMU.imem <> DontCare
   backend.io.memMMU.dmem <> DontCare
-
 }

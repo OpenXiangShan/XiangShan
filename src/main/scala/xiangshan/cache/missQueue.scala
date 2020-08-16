@@ -2,9 +2,8 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-
+import freechips.rocketchip.tilelink._
 import utils.XSDebug
-import bus.tilelink._
 
 class MissReq extends DCacheBundle
 {
@@ -27,7 +26,7 @@ class MissFinish extends DCacheBundle
 
 
 // One miss entry deals with one missed block
-class MissEntry extends DCacheModule
+class MissEntry(edge: TLEdgeOut) extends DCacheModule
 {
   val io = IO(new Bundle {
     // MSHR ID
@@ -41,16 +40,16 @@ class MissEntry extends DCacheModule
     val block_idx   = Output(Valid(UInt()))
     val block_addr  = Output(Valid(UInt()))
 
-    val mem_acquire = DecoupledIO(new TLBundleA(cfg.busParams))
-    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(cfg.busParams)))
-    val mem_finish  = DecoupledIO(new TLBundleE(cfg.busParams))
+    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
 
     val meta_read   = DecoupledIO(new L1MetaReadReq)
     val meta_resp   = Input(Vec(nWays, new L1Metadata))
     val meta_write  = DecoupledIO(new L1MetaWriteReq)
     val refill      = DecoupledIO(new L1DataWriteReq)
 
-    val wb_req      = DecoupledIO(new WritebackReq)
+    val wb_req      = DecoupledIO(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp     = Input(Bool())
   })
 
@@ -84,9 +83,9 @@ class MissEntry extends DCacheModule
   val grow_param = new_coh.onAccess(req.cmd)._2
   val coh_on_grant = new_coh.onGrant(req.cmd, io.mem_grant.bits.param)
 
-  val (_, _, refill_done, refill_address_inc) = TLUtilities.addr_inc(io.mem_grant)
+  val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
-  val grantack = Reg(Valid(new TLBundleE(cfg.busParams)))
+  val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
   val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
   val should_refill_data  = Reg(Bool())
 
@@ -240,10 +239,10 @@ class MissEntry extends DCacheModule
   when (state === s_refill_req) {
     io.mem_acquire.valid := true.B
     // TODO: Use AcquirePerm if just doing permissions acquire
-    io.mem_acquire.bits  := TLMasterUtilities.AcquireBlock(
-      params = cfg.busParams,
+    // TODO: review this
+    io.mem_acquire.bits  := edge.AcquireBlock(
       fromSource      = io.id,
-      toAddress       = Cat(req_tag, req_idx) << blockOffBits,
+      toAddress       = (Cat(req_tag, req_idx) << blockOffBits).asUInt(),
       lgSize          = (log2Up(cfg.blockBytes)).U,
       growPermissions = grow_param)._2
     when (io.mem_acquire.fire()) {
@@ -255,7 +254,7 @@ class MissEntry extends DCacheModule
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
 
-    when (TLUtilities.hasData(io.mem_grant.bits)) {
+    when (edge.hasData(io.mem_grant.bits)) {
       when (io.mem_grant.fire()) {
         should_refill_data := true.B
         refill_ctr := refill_ctr + 1.U
@@ -267,8 +266,8 @@ class MissEntry extends DCacheModule
     }
 
     when (refill_done) {
-      grantack.valid := TLUtilities.isRequest(io.mem_grant.bits)
-      grantack.bits := TLMasterUtilities.GrantAck(io.mem_grant.bits)
+      grantack.valid := edge.isRequest(io.mem_grant.bits)
+      grantack.bits := edge.GrantAck(io.mem_grant.bits)
       new_coh := coh_on_grant
 
       state := s_mem_finish
@@ -345,23 +344,23 @@ class MissEntry extends DCacheModule
 }
 
 
-class MissQueue extends DCacheModule
+class MissQueue(edge: TLEdgeOut) extends DCacheModule
 {
   val io = IO(new Bundle {
     val req    = Flipped(DecoupledIO(new MissReq))
     val resp   = ValidIO(new MissResp)
     val finish = Flipped(DecoupledIO(new MissFinish))
 
-    val mem_acquire = Decoupled(new TLBundleA(cfg.busParams))
-    val mem_grant   = Flipped(Decoupled(new TLBundleD(cfg.busParams)))
-    val mem_finish  = Decoupled(new TLBundleE(cfg.busParams))
+    val mem_acquire = Decoupled(new TLBundleA(edge.bundle))
+    val mem_grant   = Flipped(Decoupled(new TLBundleD(edge.bundle)))
+    val mem_finish  = Decoupled(new TLBundleE(edge.bundle))
 
     val meta_read   = Decoupled(new L1MetaReadReq)
     val meta_resp   = Input(Vec(nWays, new L1Metadata))
     val meta_write  = Decoupled(new L1MetaWriteReq)
     val refill      = Decoupled(new L1DataWriteReq)
 
-    val wb_req      = Decoupled(new WritebackReq)
+    val wb_req      = Decoupled(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp     = Input(Bool())
 
     val inflight_req_idxes       = Output(Vec(cfg.nMissEntries, Valid(UInt())))
@@ -372,7 +371,7 @@ class MissQueue extends DCacheModule
   val meta_read_arb  = Module(new Arbiter(new L1MetaReadReq,    cfg.nMissEntries))
   val meta_write_arb = Module(new Arbiter(new L1MetaWriteReq,   cfg.nMissEntries))
   val refill_arb     = Module(new Arbiter(new L1DataWriteReq,   cfg.nMissEntries))
-  val wb_req_arb     = Module(new Arbiter(new WritebackReq,     cfg.nMissEntries))
+  val wb_req_arb     = Module(new Arbiter(new WritebackReq(edge.bundle.sourceBits),     cfg.nMissEntries))
 
   // assign default values to output signals
   io.finish.ready := false.B
@@ -382,7 +381,7 @@ class MissQueue extends DCacheModule
   val req_ready = WireInit(false.B)
 
   val entries = (0 until cfg.nMissEntries) map { i =>
-    val entry = Module(new MissEntry)
+    val entry = Module(new MissEntry(edge))
 
     entry.io.id := i.U(log2Up(cfg.nMissEntries).W)
 
@@ -436,8 +435,8 @@ class MissQueue extends DCacheModule
   io.refill     <> refill_arb.io.out
   io.wb_req     <> wb_req_arb.io.out
 
-  TLArbiter.lowestFromSeq(io.mem_acquire, entries.map(_.io.mem_acquire))
-  TLArbiter.lowestFromSeq(io.mem_finish,  entries.map(_.io.mem_finish))
+  TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
+  TLArbiter.lowestFromSeq(edge, io.mem_finish,  entries.map(_.io.mem_finish))
 
 
   // print all input/output requests for debug purpose
@@ -470,16 +469,17 @@ class MissQueue extends DCacheModule
     io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
 
   // print tilelink messages
+  // TODO: impl TLBundle.dump
   when (io.mem_acquire.fire()) {
     XSDebug("mem_acquire ")
-    io.mem_acquire.bits.dump
+//    io.mem_acquire.bits.dump
   }
   when (io.mem_grant.fire()) {
     XSDebug("mem_grant ")
-    io.mem_grant.bits.dump
+//    io.mem_grant.bits.dump
   }
   when (io.mem_finish.fire()) {
     XSDebug("mem_finish ")
-    io.mem_finish.bits.dump
+//    io.mem_finish.bits.dump
   }
 }

@@ -9,7 +9,7 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import device._
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBuffer, TLFuzzer, TLToAXI4}
+import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
 import xiangshan._
 import utils._
 import firrtl.stage.RunFirrtlTransformAnnotation
