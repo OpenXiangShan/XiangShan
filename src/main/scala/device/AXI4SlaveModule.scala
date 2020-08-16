@@ -64,6 +64,38 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
     printf(p"[$timer][r] id: ${in.r.bits.id}\n")
   }
 
+
+  val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)
+
+  val state = RegInit(s_idle)
+
+  switch(state){
+    is(s_idle){
+      when(in.ar.fire()){
+        state := s_rdata
+      }
+      when(in.aw.fire()){
+        state := s_wdata
+      }
+    }
+    is(s_rdata){
+      when(in.r.fire() && in.r.bits.last){
+        state := s_idle
+      }
+    }
+    is(s_wdata){
+      when(in.w.fire() && in.w.bits.last){
+        state := s_wresp
+      }
+    }
+    is(s_wresp){
+      when(in.b.fire()){
+        state := s_idle
+      }
+    }
+  }
+
+
   val fullMask = MaskExpand(in.w.bits.strb)
 
   def genWdata(originData: UInt) = (originData & (~fullMask).asUInt()) | (in.w.bits.data & fullMask)
@@ -101,10 +133,10 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
   }
 
   val r_busy = BoolStopWatch(in.ar.fire(), in.r.fire() && rLast, startHighPriority = true)
-  in.ar.ready := in.r.ready || !r_busy
+  in.ar.ready := state === s_idle
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
   ren := RegNext(in.ar.fire()) || (in.r.fire() && !rLast)
-  in.r.valid := BoolStopWatch(ren && (in.ar.fire() || r_busy), in.r.fire(), startHighPriority = true)
+  in.r.valid := state === s_rdata
 
 
   val waddr = Wire(UInt())
@@ -120,11 +152,11 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
     (c.value, in.w.bits.last)
   }
 
-  val w_busy = BoolStopWatch(in.aw.fire(), in.b.fire(), startHighPriority = true)
-  in.aw.ready := !w_busy
-  in.w.ready := in.aw.valid || (w_busy)
+  in.aw.ready := state === s_idle
+  in.w.ready := state === s_wdata
+
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
-  in.b.valid := BoolStopWatch(in.w.fire() && wLast, in.b.fire(), startHighPriority = true)
+  in.b.valid := state===s_wresp
 
   in.b.bits.id := RegEnable(in.aw.bits.id, in.aw.fire())
   in.b.bits.user := RegEnable(in.aw.bits.user, in.aw.fire())

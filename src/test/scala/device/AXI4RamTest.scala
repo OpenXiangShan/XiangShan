@@ -16,7 +16,7 @@ class AXI4RamFuzzTest()(implicit p: Parameters) extends LazyModule {
   val fuzz = LazyModule(new TLFuzzer(
     nOperations = 10,
     overrideAddress = Some(addressSet),
-    inFlight = 1
+    inFlight = 10
   ))
   val ident = LazyModule(new DebugIdentityNode())
   val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
