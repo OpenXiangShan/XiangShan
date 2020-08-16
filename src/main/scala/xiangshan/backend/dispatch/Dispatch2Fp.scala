@@ -29,8 +29,8 @@ class Dispatch2Fp extends XSModule {
     fmacIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.fmacExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     fmiscIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.fmiscExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
-    XSDebug(io.fromDq(i).valid,
-      p"fp dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
+    // XSDebug(io.fromDq(i).valid,
+    //   p"fp dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
   }
   for (i <- 0 until exuParameters.FmacCnt) {
     fmacIndexGen.io.priority(i) := fmacPriority(i)

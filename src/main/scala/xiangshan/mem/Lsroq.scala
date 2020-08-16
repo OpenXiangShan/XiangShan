@@ -71,24 +71,26 @@ class Lsroq extends XSModule {
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount(validDispatch(i - 1, 0))
+    val lsroqIdx = ringBufferHeadExtended + offset
+    val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
-      uop(ringBufferHead + offset) := io.dp1Req(i).bits
-      allocated(ringBufferHead + offset) := true.B
-      valid(ringBufferHead + offset) := false.B
-      writebacked(ringBufferHead + offset) := false.B
-      commited(ringBufferHead + offset) := false.B
-      store(ringBufferHead + offset) := false.B
-      miss(ringBufferHead + offset) := false.B
-      listening(ringBufferHead + offset) := false.B
-      pending(ringBufferHead + offset) := false.B
-      // data(ringBufferHead + offset).bwdMask := 0.U(8.W).asBools
+      uop(index) := io.dp1Req(i).bits
+      allocated(index) := true.B
+      valid(index) := false.B
+      writebacked(index) := false.B
+      commited(index) := false.B
+      store(index) := false.B
+      miss(index) := false.B
+      listening(index) := false.B
+      pending(index) := false.B
+      // data(index).bwdMask := 0.U(8.W).asBools
     }
     if (i == 0) {
-      io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead + offset)
+      io.dp1Req(i).ready := ringBufferAllowin && !allocated(index)
     } else {
-      io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead + offset) && io.dp1Req(i - 1).ready
+      io.dp1Req(i).ready := ringBufferAllowin && !allocated(index) && io.dp1Req(i - 1).ready
     }
-    io.lsroqIdxs(i) := ringBufferHeadExtended + offset
+    io.lsroqIdxs(i) := lsroqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
   XSDebug(false, true.B, "\n")
@@ -512,15 +514,42 @@ class Lsroq extends XSModule {
   // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
 
+  def getFirstOne(mask: Vec[Bool], start: UInt) = {
+    val length = mask.length
+    val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
+    val highBits = (0 until length).map(i => mask(i) & lowMask(i))
+    Mux(Cat(highBits).orR(), PriorityEncoder(highBits), PriorityEncoder(mask))
+  }
+
+  def getOldestInTwo(valid: Seq[Bool], uop: Seq[MicroOp]) = {
+    assert(valid.length == uop.length)
+    assert(valid.length == 2)
+    Mux(valid(0) && valid(1),
+      Mux(uop(0).isAfter(uop(1)), uop(1), uop(0)),
+      Mux(valid(0) && !valid(1), uop(0), uop(1)))
+  }
+
+  def getAfterMask(valid: Seq[Bool], uop: Seq[MicroOp]) = {
+    assert(valid.length == uop.length)
+    val length = valid.length
+    (0 until length).map(i => {
+      (0 until length).map(j => {
+        Mux(valid(i) && valid(j),
+          uop(i).isAfter(uop(j)),
+          Mux(!valid(i), true.B, false.B))
+      })
+    })
+  }
 
   // store backward query and rollback
   //  val needCheck = Seq.fill(8)(WireInit(true.B))
   (0 until StorePipelineWidth).foreach(i => {
     rollback(i) := DontCare
+
     when(io.storeIn(i).valid) {
       val needCheck = Seq.fill(LsroqSize + 1)(Seq.fill(8)(WireInit(true.B))) // TODO: refactor
 
-      val lsroqViolation = VecInit((0 until LsroqSize).map(j => {
+      val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
         val ptr = io.storeIn(i).bits.uop.lsroqIdx + j.U
         val reachHead = (ptr+1.U) === ringBufferHeadExtended
         val addrMatch = allocated(ptr) &&
@@ -534,50 +563,65 @@ class Lsroq extends XSModule {
           needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !s && v // TODO: update refilled data
         })
         Cat(violationVec).orR()
-      })).asUInt().orR()
+      }))
+      val lsroqViolation = lsroqViolationVec.asUInt().orR()
+      val lsroqViolationIndex = io.storeIn(i).bits.uop.lsroqIdx + PriorityEncoder(lsroqViolationVec)
+      val lsroqViolationUop = uop(lsroqViolationIndex)
+      XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $lsroqViolationIndex")
 
       // when l/s writeback to roq together, check if rollback is needed
-      val wbViolation = VecInit((0 until LoadPipelineWidth).map(j => {
+      val wbViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
         io.loadIn(j).valid &&
           io.loadIn(j).bits.uop.isAfter(io.storeIn(i).bits.uop) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.loadIn(j).bits.paddr(PAddrBits - 1, 3) &&
           (io.storeIn(i).bits.mask & io.loadIn(j).bits.mask).orR
-      })).asUInt().orR()
+      }))
+      val wbViolation = wbViolationVec.asUInt().orR()
+      val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
+      XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop")
 
       // check if rollback is needed for load in l4
-      val l4Violation = VecInit((0 until LoadPipelineWidth).map(j => {
-        // TODO: consider load store order
-        io.forward(j).valid && // L4 valid
+      val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
+        io.forward(j).valid && // L4 valid\
+          io.forward(j).uop.isAfter(io.storeIn(i).bits.uop) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
           (io.storeIn(i).bits.mask & io.forward(j).mask).orR
-      })).asUInt().orR()
+      }))
+      val l4Violation = l4ViolationVec.asUInt().orR()
+      val l4ViolationUop = getOldestInTwo(l4ViolationVec, io.forward.map(_.uop))
 
-      rollback(i).valid := lsroqViolation || wbViolation || l4Violation
+      val rollbackValidVec = Seq(lsroqViolation, wbViolation, l4Violation)
+      val rollbackUopVec = Seq(lsroqViolationUop, wbViolationUop, l4ViolationUop)
+      rollback(i).valid := Cat(rollbackValidVec).orR
+      val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
+      val oneAfterZero = mask(1)(0)
+      val rollbackUop = Mux(oneAfterZero && mask(2)(0),
+        rollbackUopVec(0),
+        Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
+      rollback(i).bits.roqIdx := rollbackUop.roqIdx - 1.U
 
+      rollback(i).bits.isReplay := true.B
+      rollback(i).bits.isMisPred := false.B
+      rollback(i).bits.isException := false.B
 
       XSDebug(
         lsroqViolation,
-        "need rollback (ld wb before store) pc %x roqidx %d\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx
+        "need rollback (ld wb before store) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, lsroqViolationUop.roqIdx
       )
       XSDebug(
         wbViolation,
-        "need rollback (ld/st wb together) pc %x roqidx %d\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx
+        "need rollback (ld/st wb together) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, wbViolationUop.roqIdx
       )
       XSDebug(
         l4Violation,
-        "need rollback (l4 load) pc %x roqidx %d\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx
+        "need rollback (l4 load) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, l4ViolationUop.roqIdx
       )
-    }.otherwise({
+    }.otherwise {
       rollback(i).valid := false.B
-    })
-    rollback(i).bits.isReplay := true.B
-    rollback(i).bits.isMisPred := false.B
-    rollback(i).bits.isException := false.B
-    rollback(i).bits.target := io.storeIn(i).bits.uop.cf.pc
-    rollback(i).bits.roqIdx := io.storeIn(i).bits.uop.roqIdx
+    }
   })
 
   def rollbackSel(a: Valid[Redirect], b: Valid[Redirect]): ValidIO[Redirect] = {
