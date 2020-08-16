@@ -145,6 +145,8 @@ class FakeTLLLC(params: TLParameters) extends XSModule
       Cat(req_release_data,  BtoN)   -> (Y, N, toN, s_send_release_resp)))
   }
 
+  XSDebug("state: %d\n", state)
+  
   // state transitions:
   // s_idle: idle state
   // capture requests
@@ -246,6 +248,10 @@ class FakeTLLLC(params: TLParameters) extends XSModule
     for (i <- 0 until split) {
       data_buf((gather_cnt << splitBits) + i.U) := in.c.bits.data(outerBeatSize * (i + 1) - 1, outerBeatSize * i)
     }
+  }
+
+  when (state === s_gather_release_data) {
+    in.c.ready := Y
     when (gather_done) {
       state := s_send_release_resp
     }

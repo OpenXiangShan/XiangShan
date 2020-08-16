@@ -48,6 +48,8 @@ class WritebackUnit extends DCacheModule {
   io.release.valid   := false.B
   io.release.bits    := DontCare
 
+  XSDebug("state: %d\n", state)
+
   when (state === s_invalid) {
     io.req.ready := true.B
     when (io.req.fire()) {
