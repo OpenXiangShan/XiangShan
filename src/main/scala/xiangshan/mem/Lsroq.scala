@@ -258,8 +258,32 @@ class Lsroq extends XSModule {
   loadWbSel(0) := OHToUInt(lselvec0)
   loadWbSel(1) := OHToUInt(lselvec1)
   (0 until StorePipelineWidth).map(i => {
+    // data select
+    val rdata = data(loadWbSel(i)).data
+    val func = uop(loadWbSel(i)).ctrl.fuOpType
+    val raddr = data(loadWbSel(i)).paddr
+    val rdataSel = LookupTree(raddr(2, 0), List(
+      "b000".U -> rdata(63, 0),
+      "b001".U -> rdata(63, 8),
+      "b010".U -> rdata(63, 16),
+      "b011".U -> rdata(63, 24),
+      "b100".U -> rdata(63, 32),
+      "b101".U -> rdata(63, 40),
+      "b110".U -> rdata(63, 48),
+      "b111".U -> rdata(63, 56)
+    ))
+    val rdataPartialLoad = LookupTree(func, List(
+        LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
+        LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
+        LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
+        LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+    ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
-    io.ldout(i).bits.data := data(loadWbSel(i)).data
+    io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
