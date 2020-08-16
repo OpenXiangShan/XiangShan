@@ -112,7 +112,12 @@ class AXI4VGA
   extends LazyModule with HasVGAParameter {
 
 
-  private val fb = LazyModule(new AXI4RAM(fbAddress, sim, false))
+  private val fb = LazyModule(new AXI4RAM(
+    fbAddress,
+    memByte= FBPixels * 4,
+    sim,
+    executable = false
+  ))
   private val ctrl = LazyModule(new VGACtrl(ctrlAddress))
 
   val node = AXI4IdentityNode()

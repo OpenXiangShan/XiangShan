@@ -21,6 +21,7 @@ class RAMHelper(memByte: BigInt) extends BlackBox with HasXSParameter {
 class AXI4RAM
 (
   address: AddressSet,
+  memByte: Long,
   useBlackBox: Boolean = false,
   executable: Boolean = true,
   beatBytes: Int = 8,
@@ -31,9 +32,8 @@ class AXI4RAM
 
   override lazy val module = new AXI4SlaveModuleImp(this){
 
-    val offsetMask = address.mask.toInt
-    val memByte = offsetMask + 1
     val offsetBits = log2Up(memByte)
+    val offsetMask = (1 << offsetBits) - 1
 
 
     def index(addr: UInt) = ((addr & offsetMask.U) >> log2Ceil(beatBytes)).asUInt()
