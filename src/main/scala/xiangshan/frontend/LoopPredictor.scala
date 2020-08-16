@@ -91,7 +91,8 @@ class LTBColumn extends LTBModule {
   val if3_entry = WireInit(ltb(if3_idx))
 
   io.resp.meta := RegEnable(if3_entry.specCnt + 1.U, io.req.valid)
-  io.resp.exit := RegNext(if3_tag === if3_entry.tag && (if3_entry.specCnt + 1.U) === if3_entry.tripCnt/* && if3_entry.isConf*/ && io.req.valid)
+  // io.resp.exit := RegNext(if3_tag === if3_entry.tag && (if3_entry.specCnt + 1.U) === if3_entry.tripCnt/* && if3_entry.isConf*/ && io.req.valid)
+  io.resp.exit := RegEnable(if3_tag === if3_entry.tag && (if3_entry.specCnt + 1.U) === if3_entry.tripCnt && io.req.valid, io.req.valid)
 
   // when resolving a branch
   val entry = ltb(updateIdx)
@@ -114,15 +115,15 @@ class LTBColumn extends LTBModule {
     }.elsewhen (tagMatch) {
       // During resolution, a taken branch found in the LTB has its nSpecCnt incremented by one.
       when (io.update.bits.taken) {
-        wEntry.nSpecCnt := Mux(entry.brTag.needBrFlush(updateBrTag), entry.nSpecCnt, entry.nSpecCnt + 1.U)
-        wEntry.specCnt := Mux(io.update.bits.misPred && !entry.brTag.needBrFlush(updateBrTag), entry.nSpecCnt + 1.U, entry.specCnt)
+        wEntry.nSpecCnt := entry.nSpecCnt + 1.U
+        wEntry.specCnt := Mux(io.update.bits.misPred/* && !entry.brTag.needBrFlush(updateBrTag)*/, entry.nSpecCnt + 1.U, entry.specCnt)
       // A not-taken loop-branch found in the LTB during branch resolution updates its trip count and conf.
       }.otherwise {
         // wEntry.conf := Mux(entry.nSpecCnt === entry.tripCnt, Mux(entry.isLearned, 7.U, entry.conf + 1.U), 0.U)
         wEntry.conf := Mux(io.update.bits.misPred, 0.U, Mux(entry.isLearned, 7.U, entry.conf + 1.U))
         // wEntry.tripCnt := entry.nSpecCnt + 1.U
         wEntry.tripCnt := io.update.bits.meta
-        wEntry.specCnt := Mux(io.update.bits.misPred, 0.U, entry.specCnt - entry.nSpecCnt - 1.U)
+        wEntry.specCnt := Mux(io.update.bits.misPred, 0.U, entry.specCnt/* - entry.nSpecCnt - 1.U*/)
         wEntry.nSpecCnt := 0.U
         wEntry.brTag := updateBrTag
       }
@@ -209,9 +210,21 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val isInNextRow = VecInit((0 until PredictWidth).map(_.U < baseBank))
   val tagIncremented = VecInit((0 until PredictWidth).map(i => isInNextRow(i.U) && nextRowStartsUp))
   val realTags = VecInit((0 until PredictWidth).map(i => Mux(tagIncremented(i), baseTag + 1.U, baseTag)(tagLen - 1, 0)))
+  val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBank +& i.U)(log2Up(PredictWidth) - 1, 0)))
+  val realMask = circularShiftLeft(io.inMask, PredictWidth, baseBank)
+
   for (i <- 0 until PredictWidth) {
-    ltbs(i).io.req.valid := io.pc.valid && !io.flush
-    ltbs(i).io.req.bits.pc := io.pc.bits + (i.U << 1) // only for debug
+    ltbs(i).io.req.bits.pc := io.pc.bits
+    for (j <- 0 until PredictWidth) {
+      when (Mux(isInNextRow(i), baseBank + j.U === (PredictWidth + i).U, baseBank + j.U === i.U)) {
+        ltbs(i).io.req.bits.pc := io.pc.bits + (j.U << 1)
+      }
+    }
+  }
+
+  for (i <- 0 until PredictWidth) {
+    ltbs(i).io.req.valid := io.pc.valid && !io.flush && realMask(i)
+    // ltbs(i).io.req.bits.pc := io.pc.bits + (bankIdxInOrder(i) << 1) // only for debug
     ltbs(i).io.req.bits.idx := Mux(isInNextRow(i), baseRow + 1.U, baseRow)
     ltbs(i).io.req.bits.tag := realTags(i)
     // ltbs(i).io.if4_fire := io.if4_fire
@@ -226,21 +239,22 @@ class LoopPredictor extends BasePredictor with LTBParams {
   }
 
   val baseBankLatch = RegEnable(baseBank, io.pc.valid)
-  val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBankLatch +& i.U)(log2Up(PredictWidth) - 1, 0)))
+  // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBankLatch +& i.U)(log2Up(PredictWidth) - 1, 0)))]
+  val bankIdxInOrderLatch = RegEnable(bankIdxInOrder, io.pc.valid)
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
-  (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(bankIdxInOrder(i)).exit)
-  (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(bankIdxInOrder(i)).meta)
+  (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(bankIdxInOrderLatch(i)).exit)
+  (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(bankIdxInOrderLatch(i)).meta)
 
   // debug info
   XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x baseBank=%x baseRow=%x baseTag=%x\n", io.pc.valid, io.flush, io.pc.bits, baseBank, baseRow, baseTag)
   XSDebug("[IF3][req] isInNextRow=%b tagInc=%b\n", isInNextRow.asUInt, tagIncremented.asUInt)
   for (i <- 0 until PredictWidth) {
-    XSDebug(io.pc.valid, "[IF3][req] pc=%x idx=%x tag=%x\n", ltbs(i).io.req.bits.pc, ltbs(i).io.req.bits.idx, ltbs(i).io.req.bits.tag)
+    XSDebug("[IF3][req] bank %d: v=%d mask=%d pc=%x idx=%x tag=%x\n", i.U, ltbs(i).io.req.valid, realMask(i), ltbs(i).io.req.bits.pc, ltbs(i).io.req.bits.idx, ltbs(i).io.req.bits.tag)
   }
-  XSDebug("[IF4] baseBankLatch=%x bankIdxInOrder=", baseBankLatch)
+  XSDebug("[IF4] baseBankLatch=%x bankIdxInOrderLatch=", baseBankLatch)
   for (i <- 0 until PredictWidth) {
-    XSDebug(false, true.B, "%x ", bankIdxInOrder(i))
+    XSDebug(false, true.B, "%x ", bankIdxInOrderLatch(i))
   }
   XSDebug(false, true.B, "\n")
   for (i <- 0 until PredictWidth) {

@@ -61,11 +61,11 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val rasTopCtr = UInt(8.W)
   val rasToqAddr = UInt(VAddrBits.W)
   val fetchIdx = UInt(log2Up(PredictWidth).W)
+  val specCnt = UInt(10.W)
 
   val debug_ubtb_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
   val debug_btb_cycle  = if (BPUDebug) UInt(64.W) else UInt(0.W)
   val debug_tage_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
-  val specCnt = UInt(10.W)
 
   def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
     this.histPtr := histPtr
