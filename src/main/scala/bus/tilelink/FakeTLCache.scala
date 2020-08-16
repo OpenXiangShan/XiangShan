@@ -60,12 +60,12 @@ class FakeTLLLC(params: TLParameters) extends XSModule
   val state = RegInit(s_idle)
 
   when (in.anyFire) {
-    XSDebug("tilelink in ")
+    XSDebug("in ")
     in.dump
   }
 
   when (out.anyFire) {
-    XSDebug("tilelink out ")
+    XSDebug("out ")
     out.dump
   }
 
