@@ -10,7 +10,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCacheParameters, ICacheParameters}
+import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, Uncache}
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 import utils._
 
@@ -239,16 +239,21 @@ class XSCore extends XSModule {
   // val fakecache = Module(new TLReqProducer)
   // io.mem <> fakecache.io
 
-  io.mmio <> DontCare
-
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
+  val dcache = Module(new DCache)
+  val uncache = Module(new Uncache)
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
-  mem.io.mem   <> io.mem
-  mem.io.mmio  <> io.mmio
+  dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec
+  dcache.io.lsu.lsroq <> mem.io.miscToDcache
+  dcache.io.lsu.store <> mem.io.sbufferToDcache
+  uncache.io.lsroq <> mem.io.uncache
+
+  io.mmio <> uncache.io.bus
+  io.mem <> dcache.io.bus
 
   backend.io.memMMU.imem <> DontCare
   backend.io.memMMU.dmem <> DontCare
