@@ -28,7 +28,7 @@ class WritebackUnit extends DCacheModule {
   })
 
   val req = Reg(new WritebackReq())
-  val s_invalid :: s_data_read_req :: s_data_read_resp_1 :: s_data_read_resp_2 :: s_active :: s_grant :: Nil = Enum(6)
+  val s_invalid :: s_data_read_req :: s_data_read_resp_1 :: s_data_read_resp_2 :: s_active :: s_grant :: s_resp :: Nil = Enum(7)
   val state = RegInit(s_invalid)
 
   val data_req_cnt = RegInit(0.U(log2Up(refillCycles+1).W))
@@ -116,7 +116,7 @@ class WritebackUnit extends DCacheModule {
       data_req_cnt := data_req_cnt + 1.U
 
       when (data_req_cnt === (refillCycles-1).U) {
-        state := Mux(req.voluntary, s_grant, s_invalid)
+        state := Mux(req.voluntary, s_grant, s_resp)
       }
     }
   }
@@ -126,8 +126,13 @@ class WritebackUnit extends DCacheModule {
       acked := true.B
     }
     when (acked) {
-      state := s_invalid
+      state := s_resp
     }
+  }
+
+  when (state === s_resp) {
+    io.resp := true.B
+    state := s_invalid
   }
 
   // print all input/output requests for debug purpose
