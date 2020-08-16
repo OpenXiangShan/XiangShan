@@ -149,7 +149,7 @@ class LoadUnit extends XSModule {
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
   
-  PipelineConnect(l4_out, l5_in, io.ldout.fire(), false.B)
+  PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
@@ -202,7 +202,7 @@ class LoadUnit extends XSModule {
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare
   hitLoadOut.bits.debug.isMMIO := l5_in.bits.mmio
-  hitLoadOut.valid := l5_in.valid && !l5_in.bits.mmio // MMIO will be done in lsroq
+  hitLoadOut.valid := l5_in.valid && !l5_in.bits.mmio && !l5_in.bits.miss // MMIO will be done in lsroq
   XSDebug(hitLoadOut.fire(), "load writeback: pc %x data %x (%x + %x(%b))\n",
     hitLoadOut.bits.uop.cf.pc, rdataPartialLoad, l5_in.bits.data,
     l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt

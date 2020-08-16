@@ -103,7 +103,7 @@ class Lsroq extends XSModule {
   (0 until LoadPipelineWidth).map(i => {
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
           io.loadIn(i).bits.uop.lsroqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -267,7 +267,13 @@ class Lsroq extends XSModule {
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i))
     when(io.ldout(i).fire()) {
       writebacked(loadWbSel(i)) := true.B
-      // allocated(loadWbSel(i)) := false.B
+      XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x paddr %x data %x mmio %x\n",
+        io.ldout(i).bits.uop.lsroqIdx,
+        io.ldout(i).bits.uop.cf.pc,
+        data(loadWbSel(i)).paddr,
+        data(loadWbSel(i)).data,
+        data(loadWbSel(i)).mmio
+      )
     }
   })
 
