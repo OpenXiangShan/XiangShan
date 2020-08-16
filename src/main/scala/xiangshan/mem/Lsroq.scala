@@ -132,7 +132,7 @@ class Lsroq extends XSModule {
       data(io.loadIn(i).bits.uop.lsroqIdx).mmio := io.loadIn(i).bits.mmio
       data(io.loadIn(i).bits.uop.lsroqIdx).fwdMask := io.loadIn(i).bits.forwardMask
       data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
-      miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss
+      miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
       pending(io.storeIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
     }
