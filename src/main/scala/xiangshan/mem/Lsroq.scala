@@ -65,24 +65,26 @@ class Lsroq extends XSModule {
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount(validDispatch(i - 1, 0))
+    val lsroqIdx = ringBufferHeadExtended + offset
+    val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
-      uop(ringBufferHead + offset) := io.dp1Req(i).bits
-      allocated(ringBufferHead + offset) := true.B
-      valid(ringBufferHead + offset) := false.B
-      writebacked(ringBufferHead + offset) := false.B
-      commited(ringBufferHead + offset) := false.B
-      store(ringBufferHead + offset) := false.B
-      miss(ringBufferHead + offset) := false.B
-      listening(ringBufferHead + offset) := false.B
-      pending(ringBufferHead + offset) := false.B
-      // data(ringBufferHead + offset).bwdMask := 0.U(8.W).asBools
+      uop(index) := io.dp1Req(i).bits
+      allocated(index) := true.B
+      valid(index) := false.B
+      writebacked(index) := false.B
+      commited(index) := false.B
+      store(index) := false.B
+      miss(index) := false.B
+      listening(index) := false.B
+      pending(index) := false.B
+      // data(index).bwdMask := 0.U(8.W).asBools
     }
     if (i == 0) {
-      io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead + offset)
+      io.dp1Req(i).ready := ringBufferAllowin && !allocated(index)
     } else {
-      io.dp1Req(i).ready := ringBufferAllowin && !allocated(ringBufferHead + offset) && io.dp1Req(i - 1).ready
+      io.dp1Req(i).ready := ringBufferAllowin && !allocated(index) && io.dp1Req(i - 1).ready
     }
-    io.lsroqIdxs(i) := ringBufferHeadExtended + offset
+    io.lsroqIdxs(i) := lsroqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
   XSDebug(false, true.B, "\n")
