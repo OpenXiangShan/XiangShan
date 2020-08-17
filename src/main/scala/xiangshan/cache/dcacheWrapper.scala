@@ -84,7 +84,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "dcache",
-      sourceId = IdRange(0, cfg.nMissEntries+1)
+      sourceId = IdRange(0, cfg.nMissEntries+1),
+      supportsProbe = TransferSizes(cfg.blockBytes)
     ))
   )
 
@@ -147,14 +148,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
-  metaArray.io.resp(0) <> missQueue.io.meta_resp
+  missQueue.io.meta_resp <> metaArray.io.resp(0)
   // metaArray.io.resp(0) <> prober.io.meta_resp
-  metaArray.io.resp(0) <> stu.io.meta_resp
-  metaArray.io.resp(0) <> ldu(0).io.meta_resp
+  stu.io.meta_resp <> metaArray.io.resp(0)
+  ldu(0).io.meta_resp <> metaArray.io.resp(0)
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
-    metaArray.io.resp(w) <> ldu(w).io.meta_resp
+    ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }
 
   //----------------------------------------

@@ -291,7 +291,8 @@ class DuplicatedMetaArray extends DCacheModule {
   for (w <- 0 until LoadPipelineWidth) {
     meta(w).io.write <> io.write
     meta(w).io.read  <> io.read(w)
-    meta(w).io.resp  <> io.resp(w)
+    io.resp(w) <> meta(w).io.resp
+//    meta(w).io.resp  <> io.resp(w)
   }
 
   def dump() = {

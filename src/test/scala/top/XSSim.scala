@@ -9,7 +9,7 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import device._
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBuffer, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
+import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
 import xiangshan._
 import utils._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -53,9 +53,11 @@ class TrapIO extends XSBundle {
 
 class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
 
+  val memAddressSet = AddressSet(0x0L, 0xffffffffffL)
+
   val soc = LazyModule(new XSSoc())
   val axiRam = LazyModule(new AXI4RAM(
-    AddressSet(0x0L, 0xffffffffffL),
+    memAddressSet,
     memByte = 128 * 1024 * 1024,
     useBlackBox = true
   ))
@@ -64,6 +66,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
   axiRam.node :=
     AXI4UserYanker() :=
     TLToAXI4() :=
+    TLCacheCork(sinkIds = 1) :=
     soc.mem
 
   axiMMIO.axiBus :=
