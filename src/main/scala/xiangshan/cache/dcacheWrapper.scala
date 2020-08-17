@@ -140,10 +140,10 @@ class DCache extends DCacheModule {
   }
 
   //----------------------------------------
-  // meta array
+  // data array
   val DataWritePortCount = 2
-  val MissQueueDataWritePort = 0
-  val StorePipeDataWritePort = 1
+  val StorePipeDataWritePort = 0
+  val MissQueueDataWritePort = 1
 
   val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
 
