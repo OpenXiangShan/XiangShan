@@ -131,7 +131,7 @@ class MiscPipe extends DCacheModule
   io.data_write.valid := false.B
   io.data_write.bits  := DontCare
 
-  io.inflight_req_idxes(0).valid := s0_valid
+  io.inflight_req_idxes(0).valid := io.lsu.req.valid
   io.inflight_req_idxes(1).valid := s1_valid
   io.inflight_req_idxes(2).valid := s2_valid
 
@@ -139,7 +139,7 @@ class MiscPipe extends DCacheModule
   io.inflight_req_idxes(1).bits  := get_idx(s1_req.addr)
   io.inflight_req_idxes(2).bits  := get_idx(s2_req.addr)
 
-  io.inflight_req_block_addrs(0).valid := s0_valid
+  io.inflight_req_block_addrs(0).valid := io.lsu.req.valid
   io.inflight_req_block_addrs(1).valid := s1_valid
   io.inflight_req_block_addrs(2).valid := s2_valid
 
