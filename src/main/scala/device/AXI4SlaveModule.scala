@@ -56,19 +56,19 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
     )
   }
   when(in.w.fire()){
-    XSDebug(p"[w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last}\n")
+    XSDebug(p"[w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last} data:${Hexadecimal(in.w.bits.data)}\n")
   }
   when(in.b.fire()){
     XSDebug(p"[b] id: ${in.b.bits.id}\n")
   }
   when(in.r.fire()){
-    XSDebug(p"[r] id: ${in.r.bits.id}\n")
+    XSDebug(p"[r] id: ${in.r.bits.id} data: ${Hexadecimal(in.r.bits.data)}\n")
   }
 
 
-  val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)
+  private val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)
 
-  val state = RegInit(s_idle)
+  private val state = RegInit(s_idle)
 
   switch(state){
     is(s_idle){
