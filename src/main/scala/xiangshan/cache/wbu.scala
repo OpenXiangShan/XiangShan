@@ -27,7 +27,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   })
 
   val req = Reg(new WritebackReq(edge.bundle.sourceBits))
-  val s_invalid :: s_data_read_req :: s_data_read_resp_1 :: s_data_read_resp_2 :: s_active :: s_grant :: Nil = Enum(6)
+  val s_invalid :: s_data_read_req :: s_data_read_resp :: s_active :: s_grant :: s_resp :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
   val data_req_cnt = RegInit(0.U(log2Up(refillCycles+1).W))
@@ -47,6 +47,8 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   io.release.valid   := false.B
   io.release.bits    := DontCare
 
+  XSDebug("state: %d\n", state)
+
   when (state === s_invalid) {
     io.req.ready := true.B
     when (io.req.fire()) {
@@ -57,6 +59,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     }
   }
 
+  val dataArrayLatency = 2
+  val data_array_ctr  = Reg(UInt(log2Up(dataArrayLatency).W))
+
   when (state === s_data_read_req) {
     // Data read for new requests
     io.data_req.valid       := true.B
@@ -65,21 +70,21 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     io.data_req.bits.rmask  := ~0.U(refillCycles.W)
 
     when (io.data_req.fire()) {
-      state := s_data_read_resp_1
+      state := s_data_read_resp
+      data_array_ctr := 0.U
     }
   }
 
-  when (state === s_data_read_resp_1) {
-    state := s_data_read_resp_2
-  }
+  when (state === s_data_read_resp) {
+    data_array_ctr := data_array_ctr + 1.U
+    when (data_array_ctr === (dataArrayLatency - 1).U) {
+      val way_idx = OHToUInt(req.way_en)
+      for (i <- 0 until refillCycles) {
+        wb_buffer(i) := io.data_resp(way_idx)(i)
+      }
 
-  when (state === s_data_read_resp_2) {
-    val way_idx = OHToUInt(req.way_en)
-    for (i <- 0 until refillCycles) {
-      wb_buffer(i) := io.data_resp(way_idx)(i)
+      state := s_active
     }
-
-    state := s_active
   }
 
   // release
@@ -114,7 +119,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
       data_req_cnt := data_req_cnt + 1.U
 
       when (data_req_cnt === (refillCycles-1).U) {
-        state := Mux(req.voluntary, s_grant, s_invalid)
+        state := Mux(req.voluntary, s_grant, s_resp)
       }
     }
   }
@@ -124,8 +129,13 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
       acked := true.B
     }
     when (acked) {
-      state := s_invalid
+      state := s_resp
     }
+  }
+
+  when (state === s_resp) {
+    io.resp := true.B
+    state := s_invalid
   }
 
   // print all input/output requests for debug purpose

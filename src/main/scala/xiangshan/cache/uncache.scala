@@ -60,13 +60,13 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
   val load = edge.Get(
     fromSource      = io.id,
     toAddress       = req.addr,
-    lgSize          = log2Up(DataBits).U
+    lgSize          = log2Up(DataBytes).U
   )._2
 
   val store = edge.Put(
     fromSource      = io.id,
     toAddress = req.addr,
-    lgSize  = (log2Up(DataBits)).U,
+    lgSize  = (log2Up(DataBytes)).U,
     data  = req.data,
     mask = req.mask
   )._2

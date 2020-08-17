@@ -29,8 +29,8 @@ class Dispatch2Ls extends XSModule {
     loadIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.ldExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     storeIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.stExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
-    XSDebug(io.fromDq(i).valid,
-      p"ls dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
+    // XSDebug(io.fromDq(i).valid,
+    //   p"ls dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
   }
   for (i <- 0 until exuParameters.LduCnt) {
     loadIndexGen.io.priority(i) := loadPriority(i)

@@ -88,6 +88,7 @@ class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
   val lsroqIdx = Output(UInt(LsroqIdxWidth.W))
+  val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool()) //for debug
 
@@ -202,6 +203,7 @@ class Memend extends XSModule {
   memReqArb.io.in(1) <> miscUnitToDcache.req
 
   miscToDcache.req <> memReqArb.io.out
+  miscToDcache.s1_kill := lsroqToDcache.s1_kill
 
   lsroqToDcache.resp <> miscToDcache.resp
   miscUnitToDcache.resp <> miscToDcache.resp

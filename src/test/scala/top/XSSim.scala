@@ -7,7 +7,7 @@ import chisel3.util.experimental.BoringUtils
 import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
-import freechips.rocketchip.amba.axi4.AXI4UserYanker
+import freechips.rocketchip.amba.axi4.{AXI4Fragmenter, AXI4UserYanker}
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
 import xiangshan._
@@ -66,6 +66,8 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
   axiRam.node :=
     AXI4UserYanker() :=
     TLToAXI4() :=
+    TLBuffer(BufferParams.default) :=
+    TLFragmenter(8, 64 * 8, holdFirstDeny = true) :=
     TLCacheCork(sinkIds = 1) :=
     soc.mem
 
@@ -73,6 +75,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     AXI4UserYanker() :=
     TLToAXI4() :=
     TLBuffer(BufferParams(2, flow = false, pipe = true)) := // use a tlbuffer to avoid CombLoop
+    TLFragmenter(8, 8) :=
     soc.extDev
 
   lazy val module = new LazyModuleImp(this) {

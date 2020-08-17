@@ -60,12 +60,12 @@ class FakeTLLLC(params: TLParameters) extends XSModule
   val state = RegInit(s_idle)
 
   when (in.anyFire) {
-    XSDebug("tilelink in ")
+    XSDebug("in ")
     in.dump
   }
 
   when (out.anyFire) {
-    XSDebug("tilelink out ")
+    XSDebug("out ")
     out.dump
   }
 
@@ -145,6 +145,8 @@ class FakeTLLLC(params: TLParameters) extends XSModule
       Cat(req_release_data,  BtoN)   -> (Y, N, toN, s_send_release_resp)))
   }
 
+  XSDebug("state: %d\n", state)
+  
   // state transitions:
   // s_idle: idle state
   // capture requests
@@ -202,23 +204,29 @@ class FakeTLLLC(params: TLParameters) extends XSModule
     }
   }
 
-  // send acquire response
-  val resp_fire = in.d.fire() && needs_memory_access
-  val (resp_cnt, resp_done) = Counter(resp_fire, innerDataBeats)
+  // only trigger counter when state === s_send_acquire_resp
+  // s_send_release_resp also use channel D
+  // do not let it mess up with our own counter
+  val resp_fire = in.d.fire() && state === s_send_acquire_resp
+  val resp_data_fire = resp_fire && needs_memory_access
+  val resp_not_data_fire = resp_fire && !needs_memory_access
+  val (resp_cnt, resp_done) = Counter(resp_data_fire, innerDataBeats)
 
   val resp_data = Wire(Vec(split, UInt(outerBeatSize.W)))
   for (i <- 0 until split) {
     resp_data(i) := data_buf((resp_cnt << splitBits) + i.U)
   }
 
+  // send acquire response
   when (state === s_send_acquire_resp) {
     in.d.valid := Y
+
     val grantData = TLSlaveUtilities.Grant(params, 0.U, acquire_req.source, acquire_req.size, new_param, resp_data.asUInt, N, N)
     val grant = TLSlaveUtilities.Grant(params, 0.U, acquire_req.source, acquire_req.size, new_param, N)
     in.d.bits := Mux(needs_memory_access, grantData, grant)
 
-    val grantDataDone = in.d.fire() && needs_memory_access && resp_done
-    val grantDone = in.d.fire() && !needs_memory_access
+    val grantDataDone = resp_data_fire && resp_done
+    val grantDone = resp_not_data_fire
 
     when (grantDataDone || grantDone) {
       state := s_wait_e
@@ -246,6 +254,10 @@ class FakeTLLLC(params: TLParameters) extends XSModule
     for (i <- 0 until split) {
       data_buf((gather_cnt << splitBits) + i.U) := in.c.bits.data(outerBeatSize * (i + 1) - 1, outerBeatSize * i)
     }
+  }
+
+  when (state === s_gather_release_data) {
+    in.c.ready := Y
     when (gather_done) {
       state := s_send_release_resp
     }

@@ -53,14 +53,14 @@ class AXI4RamTLBurstTest()(implicit p: Parameters) extends LazyModule {
 
   val addressSet = AddressSet(0x38000000L, 0x0000ffffL)
 
-  val tlburst = LazyModule(new TLBurstMaster(startAddr = addressSet.base.toLong, nOp = 3))
+  val tlburst = LazyModule(new TLBurstMaster(startAddr = addressSet.base.toLong, nOp = 1, burstLen = 32))
   val ident = LazyModule(new DebugIdentityNode())
   val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
 
   axiRam.node :=
     AXI4UserYanker() :=
     TLToAXI4() :=
-    TLFragmenter(8, 8) :=
+    TLFragmenter(8, 32 * 8, holdFirstDeny = true) :=
     ident.node :=
     tlburst.node
 
