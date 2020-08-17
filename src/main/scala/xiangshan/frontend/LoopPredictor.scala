@@ -36,6 +36,7 @@ class LoopEntry extends LTBBundle {
   val nSpecCnt = UInt(cntBits.W)
   // brTag of the latest not-taken/loop-exit branch
   val brTag = new BrqPtr
+  val unusable = Bool()
 
   def isLearned = conf === 7.U
   def isConf = conf =/= 0.U
@@ -92,7 +93,7 @@ class LTBColumn extends LTBModule {
 
   io.resp.meta := RegEnable(if3_entry.specCnt + 1.U, io.req.valid)
   // io.resp.exit := RegNext(if3_tag === if3_entry.tag && (if3_entry.specCnt + 1.U) === if3_entry.tripCnt/* && if3_entry.isConf*/ && io.req.valid)
-  io.resp.exit := RegEnable(if3_tag === if3_entry.tag && (if3_entry.specCnt + 1.U) === if3_entry.tripCnt && io.req.valid, io.req.valid)
+  io.resp.exit := RegEnable(if3_tag === if3_entry.tag && (if3_entry.specCnt + 1.U) === if3_entry.tripCnt && io.req.valid && !if3_entry.unusable, io.req.valid)
 
   // when resolving a branch
   val entry = ltb(updateIdx)
@@ -111,6 +112,7 @@ class LTBColumn extends LTBModule {
       wEntry.specCnt := 1.U
       wEntry.nSpecCnt := 1.U
       wEntry.brTag := updateBrTag
+      wEntry.unusable := false.B
       ltb(updateIdx) := wEntry
     }.elsewhen (tagMatch) {
       // During resolution, a taken branch found in the LTB has its nSpecCnt incremented by one.
@@ -126,6 +128,7 @@ class LTBColumn extends LTBModule {
         wEntry.specCnt := Mux(io.update.bits.misPred, 0.U, entry.specCnt/* - entry.nSpecCnt - 1.U*/)
         wEntry.nSpecCnt := 0.U
         wEntry.brTag := updateBrTag
+        wEntry.unusable := io.update.bits.misPred && (io.update.bits.meta > entry.tripCnt)
       }
       ltb(updateIdx) := wEntry
     }
