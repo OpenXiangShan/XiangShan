@@ -6,6 +6,7 @@ import utils._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, TransferSizes}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.amba.axi4.{AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters}
+import xiangshan.HasXSLog
 
 abstract class AXI4SlaveModule[T <: Data]
 (
@@ -33,7 +34,7 @@ abstract class AXI4SlaveModule[T <: Data]
 }
 
 class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
-  extends LazyModuleImp(outer)
+  extends LazyModuleImp(outer) with HasXSLog
 {
   val io = IO(new Bundle {
     val extra = if(outer._extra == null) None else Some(outer._extra.cloneType)
@@ -41,27 +42,27 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
 
   val (in, edge) = outer.node.in.head
 
-  val timer = GTimer()
+//  val timer = GTimer()
   when(in.ar.fire()){
-    printf(p"[$timer][ar] addr: ${Hexadecimal(in.ar.bits.addr)} " +
+    XSDebug(p"[ar] addr: ${Hexadecimal(in.ar.bits.addr)} " +
       p"arlen:${in.ar.bits.len} arsize:${in.ar.bits.size} " +
       p"id: ${in.ar.bits.id}\n"
     )
   }
   when(in.aw.fire()){
-    printf(p"[$timer][aw] addr: ${Hexadecimal(in.aw.bits.addr)} " +
+    XSDebug(p"[aw] addr: ${Hexadecimal(in.aw.bits.addr)} " +
       p"awlen:${in.aw.bits.len} awsize:${in.aw.bits.size} " +
       p"id: ${in.aw.bits.id}\n"
     )
   }
   when(in.w.fire()){
-    printf(p"[$timer][w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last}\n")
+    XSDebug(p"[w] wmask: ${Binary(in.w.bits.strb)} last:${in.w.bits.last}\n")
   }
   when(in.b.fire()){
-    printf(p"[$timer][b] id: ${in.b.bits.id}\n")
+    XSDebug(p"[b] id: ${in.b.bits.id}\n")
   }
   when(in.r.fire()){
-    printf(p"[$timer][r] id: ${in.r.bits.id}\n")
+    XSDebug(p"[r] id: ${in.r.bits.id}\n")
   }
 
 

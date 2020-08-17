@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
-import utils.XSDebug
+import utils.{HasTLDump, XSDebug}
 
 class MissReq extends DCacheBundle
 {
@@ -344,7 +344,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 }
 
 
-class MissQueue(edge: TLEdgeOut) extends DCacheModule
+class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 {
   val io = IO(new Bundle {
     val req    = Flipped(DecoupledIO(new MissReq))
@@ -469,17 +469,16 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule
     io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
 
   // print tilelink messages
-  // TODO: impl TLBundle.dump
   when (io.mem_acquire.fire()) {
     XSDebug("mem_acquire ")
-//    io.mem_acquire.bits.dump
+    io.mem_acquire.bits.dump
   }
   when (io.mem_grant.fire()) {
     XSDebug("mem_grant ")
-//    io.mem_grant.bits.dump
+    io.mem_grant.bits.dump
   }
   when (io.mem_finish.fire()) {
     XSDebug("mem_finish ")
-//    io.mem_finish.bits.dump
+    io.mem_finish.bits.dump
   }
 }

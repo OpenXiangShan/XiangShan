@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.XSDebug
+import utils.{HasTLDump, XSDebug}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
@@ -138,6 +138,7 @@ class UncacheImp(outer: Uncache)
   extends LazyModuleImp(outer)
     with HasDCacheParameters
     with HasXSLog
+    with HasTLDump
 {
   val io = IO(new UncacheIO)
 
@@ -199,13 +200,12 @@ class UncacheImp(outer: Uncache)
   XSDebug(resp.fire(), "data: %x\n", req.bits.data)
 
   // print tilelink messages
-  // TODO: add dump info
   when (mem_acquire.fire()) {
     XSDebug("mem_acquire \n")
-//    mem_acquire.bits.dump
+    mem_acquire.bits.dump
   }
   when (mem_grant.fire()) {
     XSDebug("mem_grant \n")
-//    mem_grant.bits.dump
+    mem_grant.bits.dump
   }
 }

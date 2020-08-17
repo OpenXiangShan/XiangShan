@@ -44,8 +44,8 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
       0xbff8 -> RegField.bytes(mtime)
     )
 
-    val gtime = GTimer()
-    printf(p"[$gtime][Timer] mtime=$mtime cnt=$cnt freq=$freq\n")
+//    val gtime = GTimer()
+//    printf(p"[$gtime][Timer] mtime=$mtime cnt=$cnt freq=$freq\n")
 
     mtip := RegNext(mtime >= mtimecmp)
   }
