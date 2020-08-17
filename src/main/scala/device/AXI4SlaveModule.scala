@@ -65,6 +65,12 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
     XSDebug(p"[r] id: ${in.r.bits.id} data: ${Hexadecimal(in.r.bits.data)}\n")
   }
 
+  when(in.aw.fire()){
+    assert(in.aw.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt ince!")
+  }
+  when(in.ar.fire()){
+    assert(in.ar.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt ince!")
+  }
 
   private val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)
 
@@ -102,21 +108,12 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
   def genWdata(originData: UInt) = (originData & (~fullMask).asUInt()) | (in.w.bits.data & fullMask)
 
   val raddr = Wire(UInt())
-  val ren = Wire(Bool())
   val (readBeatCnt, rLast) = {
     val c = Counter(256)
-    val beatCnt = Counter(256)
     val len = HoldUnless(in.ar.bits.len, in.ar.fire())
-    val burst = HoldUnless(in.ar.bits.burst, in.ar.fire())
-    val wrapAddr = in.ar.bits.addr & (~(in.ar.bits.len << in.ar.bits.size)).asUInt()
-    raddr := HoldUnless(wrapAddr, in.ar.fire())
+    raddr := HoldUnless(in.ar.bits.addr, in.ar.fire())
     in.r.bits.last := (c.value === len)
-    when(ren) {
-      beatCnt.inc()
-      when(burst === AXI4Parameters.BURST_WRAP && beatCnt.value === len) {
-        beatCnt.value := 0.U
-      }
-    }
+
     when(in.r.fire()) {
       c.inc()
       when(in.r.bits.last) {
@@ -124,19 +121,19 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
       }
     }
     when(in.ar.fire()) {
-      beatCnt.value := (in.ar.bits.addr >> in.ar.bits.size).asUInt() & in.ar.bits.len
-      when(in.ar.bits.len =/= 0.U && in.ar.bits.burst === AXI4Parameters.BURST_WRAP) {
-        assert(in.ar.bits.len === 1.U || in.ar.bits.len === 3.U ||
-          in.ar.bits.len === 7.U || in.ar.bits.len === 15.U)
-      }
+      assert(
+        in.ar.bits.len === 0.U ||
+          in.ar.bits.len === 1.U ||
+          in.ar.bits.len === 3.U ||
+          in.ar.bits.len === 7.U ||
+          in.ar.bits.len === 15.U
+      )
     }
-    (beatCnt.value, in.r.bits.last)
+    (c.value, in.r.bits.last)
   }
 
-  val r_busy = BoolStopWatch(in.ar.fire(), in.r.fire() && rLast, startHighPriority = true)
   in.ar.ready := state === s_idle
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
-  ren := RegNext(in.ar.fire()) || (in.r.fire() && !rLast)
   in.r.valid := state === s_rdata
 
 

@@ -133,6 +133,6 @@ class AXI4DummySD
     RegMap.generate(mapping, getOffset(raddr), rdata,
       getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(strb))
 
-    in.r.bits.data := RegEnable(RegNext(Fill(2, rdata(31, 0))), ren)
+    in.r.bits.data := Fill(2, rdata(31, 0))
   }
 }

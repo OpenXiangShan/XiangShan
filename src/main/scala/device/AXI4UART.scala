@@ -33,7 +33,7 @@ class AXI4UART
 
     io.extra.get.out.valid := (waddr(3,0) === 4.U && in.w.fire())
     io.extra.get.out.ch := in.w.bits.data(7,0)
-    io.extra.get.in.valid := (raddr(3,0) === 0.U && ren)
+    io.extra.get.in.valid := (raddr(3,0) === 0.U && in.r.fire())
 
     val mapping = Map(
       RegMap(0x0, io.extra.get.in.ch, RegMap.Unwritable),

@@ -63,6 +63,6 @@ class AXI4RAM
 
       Cat(mem.read(rIdx).reverse)
     }
-    in.r.bits.data := RegEnable(rdata, ren)
+    in.r.bits.data := rdata
   }
 }
