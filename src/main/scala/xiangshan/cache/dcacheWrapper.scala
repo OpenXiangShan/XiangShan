@@ -69,13 +69,15 @@ class DCacheStoreIO extends DCacheBundle
 }
 
 class DCacheToLsuIO extends DCacheBundle {
-  val load     = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
-  val lsroq    = Flipped(new DCacheLoadIO)  // lsroq load/store
-  val store    = Flipped(new DCacheStoreIO) // for sbuffer
+  val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
+  val lsroq = Flipped(new DCacheLoadIO)  // lsroq load/store
+  val store = Flipped(new DCacheStoreIO) // for sbuffer
+  val misc  = Flipped(new DCacheLoadIO)  // misc reqs
 }
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  val ptw = Flipped(new DCacheLoadIO)
   val bus = new TLCached(cfg.busParams)
 }
 
@@ -92,8 +94,10 @@ class DCache extends DCacheModule {
   // core modules
   val ldu = Seq.fill(LoadPipelineWidth) { Module(new LoadPipe) }
   val stu = Module(new StorePipe)
+  val misc = Module(new MiscPipe)
   val loadMissQueue = Module(new LoadMissQueue)
   val storeMissQueue = Module(new StoreMissQueue)
+  val miscMissQueue = Module(new MiscMissQueue)
   val missQueue = Module(new MissQueue)
   val wb = Module(new WritebackUnit)
 
@@ -113,11 +117,13 @@ class DCache extends DCacheModule {
 
   // To simplify port arbitration
   // MissQueue, Prober and StorePipe all use port 0
-  val MetaReadPortCount = 4
+  // if contention got severe, considering load balancing on two ports?
+  val MetaReadPortCount = 5
   val MissQueueMetaReadPort = 0
   val ProberMetaReadPort = 1
   val StorePipeMetaReadPort = 2
   val LoadPipeMetaReadPort = 3
+  val MiscPipeMetaReadPort = 4
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
@@ -126,6 +132,7 @@ class DCache extends DCacheModule {
   metaReadArb.io.in(ProberMetaReadPort).bits  := DontCare
   metaReadArb.io.in(StorePipeMetaReadPort)    <> stu.io.meta_read
   metaReadArb.io.in(LoadPipeMetaReadPort)     <> ldu(0).io.meta_read
+  metaReadArb.io.in(MiscPipeMetaReadPort)     <> misc.io.meta_read
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
@@ -133,6 +140,7 @@ class DCache extends DCacheModule {
   // metaArray.io.resp(0) <> prober.io.meta_resp
   metaArray.io.resp(0) <> stu.io.meta_resp
   metaArray.io.resp(0) <> ldu(0).io.meta_resp
+  metaArray.io.resp(0) <> misc.io.meta_resp
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
@@ -141,33 +149,38 @@ class DCache extends DCacheModule {
 
   //----------------------------------------
   // data array
-  val DataWritePortCount = 2
+  val DataWritePortCount = 3
   val StorePipeDataWritePort = 0
   val MissQueueDataWritePort = 1
+  val MiscPipeDataWritePort = 2
 
   val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
 
-  dataWriteArb.io.in(MissQueueDataWritePort) <> missQueue.io.refill
   dataWriteArb.io.in(StorePipeDataWritePort) <> stu.io.data_write
+  dataWriteArb.io.in(MissQueueDataWritePort) <> missQueue.io.refill
+  dataWriteArb.io.in(MiscPipeDataWritePort)  <> misc.io.data_write
 
   dataArray.io.write <> dataWriteArb.io.out
 
   // To simplify port arbitration
   // WritebackUnit and StorePipe use port 0
-  val DataReadPortCount = 3
+  val DataReadPortCount = 4
   val WritebackDataReadPort = 0
   val StorePipeDataReadPort = 1
   val LoadPipeDataReadPort = 2
+  val MiscPipeDataReadPort = 3
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
   dataReadArb.io.in(WritebackDataReadPort) <> wb.io.data_req
   dataReadArb.io.in(StorePipeDataReadPort) <> stu.io.data_read
+  dataReadArb.io.in(MiscPipeDataReadPort)  <> misc.io.data_read
   dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(0).io.data_read
 
   dataArray.io.read(0) <> dataReadArb.io.out
   dataArray.io.resp(0) <> wb.io.data_resp
   dataArray.io.resp(0) <> stu.io.data_resp
+  dataArray.io.resp(0) <> misc.io.data_resp
   dataArray.io.resp(0) <> ldu(0).io.data_resp
 
   for (w <- 1 until LoadPipelineWidth) {
@@ -231,30 +244,100 @@ class DCache extends DCacheModule {
   storeMissQueue.io.replay.resp <> stu.io.lsu.resp
 
   //----------------------------------------
-  // miss queue
-  val loadMissQueueClientId = 0.U(clientIdWidth.W)
-  val storeMissQueueClientId = 1.U(clientIdWidth.W)
+  // misc pipe
+  miscMissQueue.io.replay <> misc.io.lsu
+  val miscClientIdWidth = 1
+  val lsuMiscClientId = 0.U(miscClientIdWidth.W)
+  val ptwMiscClientId = 1.U(miscClientIdWidth.W)
+  val miscClientIdMSB = reqIdWidth - 1
+  val miscClientIdLSB = reqIdWidth - miscClientIdWidth
 
   // Request
-  val missReqArb = Module(new Arbiter(new MissReq, 2))
+  val miscReqArb = Module(new Arbiter(new DCacheWordReq, 2))
+
+  val miscReq    = miscMissQueue.io.lsu.req
+  val lsuMiscReq = io.lsu.misc.req
+  val ptwMiscReq = io.ptw.req
+
+  miscReqArb.io.in(0).valid        := lsuMiscReq.valid
+  lsuMiscReq.ready                 := miscReqArb.io.in(0).ready
+  miscReqArb.io.in(0).bits         := lsuMiscReq.bits
+  miscReqArb.io.in(0).bits.meta.id := Cat(lsuMiscClientId,
+    lsuMiscReq.bits.meta.id(miscClientIdLSB - 1, 0))
+
+  miscReqArb.io.in(1).valid        := ptwMiscReq.valid
+  ptwMiscReq.ready                 := miscReqArb.io.in(1).ready
+  miscReqArb.io.in(1).bits         := ptwMiscReq.bits
+  miscReqArb.io.in(1).bits.meta.id := Cat(ptwMiscClientId,
+    ptwMiscReq.bits.meta.id(miscClientIdLSB - 1, 0))
+
+  val misc_block = block_misc(miscReqArb.io.out.bits.addr)
+  block_decoupled(miscReqArb.io.out, miscReq, misc_block)
+
+  // Response
+  val miscResp    = miscMissQueue.io.lsu.resp
+  val lsuMiscResp = io.lsu.misc.resp
+  val ptwMiscResp = io.ptw.resp
+
+  miscResp.ready  := false.B
+
+  val miscClientId = miscResp.bits.meta.id(miscClientIdMSB, miscClientIdLSB)
+
+  val isLsuMiscResp  = miscClientId === lsuMiscClientId
+  lsuMiscResp.valid := miscResp.valid && isLsuMiscResp
+  lsuMiscResp.bits  := miscResp.bits
+  lsuMiscResp.bits.meta.id := miscResp.bits.meta.id(miscClientIdLSB - 1, 0)
+  when (lsuMiscResp.valid) {
+    miscResp.ready := lsuMiscResp.ready
+  }
+
+  val isPTWMiscResp  = miscClientId === ptwMiscClientId
+  ptwMiscResp.valid := miscResp.valid && isPTWMiscResp
+  ptwMiscResp.bits  := miscResp.bits
+  ptwMiscResp.bits.meta.id := miscResp.bits.meta.id(miscClientIdLSB - 1, 0)
+  when (ptwMiscResp.valid) {
+    miscResp.ready := ptwMiscResp.ready
+  }
+
+  // some other stuff
+  miscMissQueue.io.lsu.s1_kill := false.B
+
+  assert(!(miscReq.fire() && miscReq.bits.meta.replay),
+    "Misc should not replay requests")
+  assert(!io.lsu.misc.s1_kill, "Lsroq should never use s1 kill on misc")
+  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc")
+
+  //----------------------------------------
+  // miss queue
+  val loadMissQueueClientId  = 0.U(clientIdWidth.W)
+  val storeMissQueueClientId = 1.U(clientIdWidth.W)
+  val miscMissQueueClientId  = 2.U(clientIdWidth.W)
+
+  // Request
+  val missReqArb = Module(new Arbiter(new MissReq, 3))
 
   val missReq      = missQueue.io.req
   val loadMissReq  = loadMissQueue.io.miss_req
   val storeMissReq = storeMissQueue.io.miss_req
+  val miscMissReq  = miscMissQueue.io.miss_req
 
   missReqArb.io.in(0).valid          := loadMissReq.valid
   loadMissReq.ready                  := missReqArb.io.in(0).ready
-  missReqArb.io.in(0).bits.cmd       := loadMissReq.bits.cmd
-  missReqArb.io.in(0).bits.addr      := loadMissReq.bits.addr
+  missReqArb.io.in(0).bits           := loadMissReq.bits
   missReqArb.io.in(0).bits.client_id := Cat(loadMissQueueClientId,
     loadMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
   missReqArb.io.in(1).valid          := storeMissReq.valid
   storeMissReq.ready                 := missReqArb.io.in(1).ready
-  missReqArb.io.in(1).bits.cmd       := storeMissReq.bits.cmd
-  missReqArb.io.in(1).bits.addr      := storeMissReq.bits.addr
+  missReqArb.io.in(1).bits           := storeMissReq.bits
   missReqArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
     storeMissReq.bits.client_id(entryIdMSB, entryIdLSB))
+
+  missReqArb.io.in(2).valid          := miscMissReq.valid
+  miscMissReq.ready                  := missReqArb.io.in(2).ready
+  missReqArb.io.in(2).bits           := miscMissReq.bits
+  missReqArb.io.in(2).bits.client_id := Cat(miscMissQueueClientId,
+    miscMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
   val miss_block = block_miss(missReqArb.io.out.bits.addr)
   block_decoupled(missReqArb.io.out, missReq, miss_block)
@@ -263,6 +346,7 @@ class DCache extends DCacheModule {
   val missResp        = missQueue.io.resp
   val loadMissResp    = loadMissQueue.io.miss_resp
   val storeMissResp   = storeMissQueue.io.miss_resp
+  val miscMissResp    = miscMissQueue.io.miss_resp
 
   val clientId = missResp.bits.client_id(clientIdMSB, clientIdLSB)
 
@@ -276,12 +360,18 @@ class DCache extends DCacheModule {
   storeMissResp.bits.entry_id := missResp.bits.entry_id
   storeMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
+  val isMiscMissResp = clientId === miscMissQueueClientId
+  miscMissResp.valid := missResp.valid && isMiscMissResp
+  miscMissResp.bits.entry_id := missResp.bits.entry_id
+  miscMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
+
   // Finish
   val missFinish        = missQueue.io.finish
   val loadMissFinish    = loadMissQueue.io.miss_finish
   val storeMissFinish   = storeMissQueue.io.miss_finish
+  val miscMissFinish    = miscMissQueue.io.miss_finish
 
-  val missFinishArb = Module(new Arbiter(new MissFinish, 2))
+  val missFinishArb = Module(new Arbiter(new MissFinish, 3))
   missFinishArb.io.in(0).valid          := loadMissFinish.valid
   loadMissFinish.ready                  := missFinishArb.io.in(0).ready
   missFinishArb.io.in(0).bits.entry_id  := loadMissFinish.bits.entry_id
@@ -293,6 +383,12 @@ class DCache extends DCacheModule {
   missFinishArb.io.in(1).bits.entry_id  := storeMissFinish.bits.entry_id
   missFinishArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
     storeMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
+
+  missFinishArb.io.in(2).valid          := miscMissFinish.valid
+  miscMissFinish.ready                  := missFinishArb.io.in(2).ready
+  missFinishArb.io.in(2).bits.entry_id  := miscMissFinish.bits.entry_id
+  missFinishArb.io.in(2).bits.client_id := Cat(miscMissQueueClientId,
+    miscMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
 
   missFinish                            <> missFinishArb.io.out
 
@@ -332,26 +428,44 @@ class DCache extends DCacheModule {
     val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val store_addr_match = store_addr_matches.reduce(_||_)
 
+    val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val misc_addr_match = misc_addr_matches.reduce(_||_)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_addr_match || miss_idx_match
+    store_addr_match || misc_addr_match || miss_idx_match
   }
 
   def block_store(addr: UInt) = {
+    val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val misc_addr_match = misc_addr_matches.reduce(_||_)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    miss_idx_match
+    misc_addr_match || miss_idx_match
+  }
+
+  def block_misc(addr: UInt) = {
+    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val store_addr_match = store_addr_matches.reduce(_||_)
+
+    val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+    store_addr_match || miss_idx_match
   }
 
   def block_miss(addr: UInt) = {
     val store_idx_matches = VecInit(stu.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val store_idx_match = store_idx_matches.reduce(_||_)
 
+    val misc_idx_matches = VecInit(misc.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val misc_idx_match = misc_idx_matches.reduce(_||_)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_idx_match || miss_idx_match
+    store_idx_match || misc_idx_match || miss_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
