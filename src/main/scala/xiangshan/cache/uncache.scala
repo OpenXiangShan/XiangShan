@@ -23,6 +23,10 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
   })
 
+  // address from 'memend' haven't aligned to `DataBytes`,
+  // mask the low 'lgDataBytes' to align the address
+  val lgDataBytes = log2Up(DataBytes)
+
   val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
 
   val state = RegInit(s_invalid)
@@ -50,6 +54,8 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 
     when (io.req.fire()) {
       req   := io.req.bits
+      // align the address
+      req.addr := Cat(io.req.bits.addr.head(PAddrBits-lgDataBytes), 0.U(lgDataBytes.W))
       state := s_refill_req
     }
   }
