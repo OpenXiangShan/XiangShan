@@ -175,7 +175,7 @@ class ICache extends ICacheModule
   outPacket := dataHitWay >> (s3_req.pc(5,1) << 4)  //TODO: this is ugly
 
   //icache miss
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(9)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(cacheDataBeats)
 
