@@ -5,6 +5,7 @@ import chisel3.util._
 import device.RAMHelper
 import xiangshan._
 import utils._
+import xiangshan.cache._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -21,8 +22,8 @@ class IFUIO extends XSBundle
   val redirect = Flipped(ValidIO(new Redirect))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-  val icacheReq = DecoupledIO(new FakeIcacheReq)
-  val icacheResp = Flipped(DecoupledIO(new FakeIcacheResp))
+  val icacheReq = DecoupledIO(new ICacheReq)
+  val icacheResp = Flipped(DecoupledIO(new ICacheResp))
   val icacheFlush = Output(UInt(2.W))
 }
 
