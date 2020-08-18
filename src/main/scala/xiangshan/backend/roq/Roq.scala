@@ -298,6 +298,7 @@ class Roq extends XSModule {
   val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
   val wpc = Wire(Vec(CommitWidth, UInt(VAddrBits.W)))
   val trapVec = Wire(Vec(CommitWidth, Bool()))
+  val isRVC = Wire(Vec(CommitWidth, Bool()))
   for(i <- 0 until CommitWidth){
     // io.commits(i).valid
     val idx = deqPtr+i.U
@@ -308,6 +309,7 @@ class Roq extends XSModule {
     wdst(i) := uop.ctrl.ldest
     wpc(i) := uop.cf.pc
     trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
+    isRVC(i) := uop.cf.brUpdate.pd.isRVC
   }
   val instrCnt = RegInit(0.U(64.W))
   instrCnt := instrCnt + retireCounter
@@ -323,7 +325,8 @@ class Roq extends XSModule {
     BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
     BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
     BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
-    BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
+    // BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
+    BoringUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC")
     BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
     BoringUtils.addSource(RegNext(wpc), "difftestWpc")
     BoringUtils.addSource(RegNext(wdata), "difftestWdata")
@@ -340,6 +343,12 @@ class Roq extends XSModule {
     ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
     ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
     ExcitingUtils.addSource(state === s_walk || state === s_extrawalk, "perfCntCondRoqWalk", Perf)
+    val deqNotWritebacked = valid(deqPtr) && !writebacked(deqPtr)
+    val deqUopCommitType = deqUop.ctrl.commitType
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.INT,   "perfCntCondRoqWaitInt",   Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.FP,    "perfCntCondRoqWaitFp",    Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.LOAD,  "perfCntCondRoqWaitLoad",  Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.STORE, "perfCntCondRoqWaitStore", Perf)
 
     if(EnableBPU){
       ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)

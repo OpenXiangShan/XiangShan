@@ -92,6 +92,7 @@ class StoreUnit extends XSModule {
   // writeback to LSROQ
   s3_in.ready := true.B
   io.lsroq.bits := s3_in.bits
+  io.lsroq.bits.miss := false.B
   io.lsroq.bits.mmio := AddressSpace.isMMIO(s3_in.bits.paddr)
   io.lsroq.valid := s3_in.fire()
 

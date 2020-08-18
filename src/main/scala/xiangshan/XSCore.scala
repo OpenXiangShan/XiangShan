@@ -10,8 +10,9 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
+import xiangshan.cache.{DCacheParameters, ICacheParameters}
+import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 import utils._
-import xiangshan.cache.DcacheUserBundle
 
 case class XSCoreParameters
 (
@@ -28,7 +29,7 @@ case class XSCoreParameters
   HasFPU: Boolean = true,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
-  EnableBPD: Boolean = false,
+  EnableBPD: Boolean = true,
   EnableRAS: Boolean = false,
   EnableLB: Boolean = false,
   HistoryLength: Int = 64,
@@ -84,7 +85,6 @@ case class XSCoreParameters
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256
 )
-
 
 trait HasXSParameter {
 
@@ -156,6 +156,24 @@ trait HasXSParameter {
   val TlbL2EntrySize = core.TlbL2EntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
+
+  val l1BusDataWidth = 64
+  val l1BusParams = TLParameters(
+    addressBits = PAddrBits,
+    dataBits = l1BusDataWidth,
+    sourceBits = 3,
+    sinkBits = 3
+  )
+
+  val icacheParameters = ICacheParameters(
+  )
+
+  val LRSCCycles = 16
+  val dcacheParameters = DCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
+    busParams = l1BusParams
+  )
 }
 
 trait HasXSLog { this: Module =>
@@ -201,41 +219,43 @@ object AddressSpace extends HasXSParameter {
 }
 
 
+class TLReqProducer extends XSModule {
+  val io = IO(new TLCached(l1BusParams))
+
+  io <> DontCare
+
+  val addr = RegInit("h80000000".U)
+  addr := addr + 4.U
+  val (legal, bundle) = TLMasterUtilities.Get(io.params, 0.U, addr, 3.U)
+  io.a.bits := bundle
+  io.a.valid := true.B
+  assert(legal)
+  io.d.ready := true.B
+  when(io.a.fire()){
+    io.a.bits.dump()
+  }
+  when(io.d.fire()){
+    io.d.bits.dump()
+  }
+}
+
 class XSCore extends XSModule {
   val io = IO(new Bundle {
-    val imem = new SimpleBusC
-    val dmem = new SimpleBusC
-    val mmio = new SimpleBusUC
-    val frontend = Flipped(new SimpleBusUC())
+    val mem = new TLCached(l1BusParams)
+    val mmio = new TLCached(l1BusParams)
   })
 
-  io.imem <> DontCare
+  // val fakecache = Module(new TLReqProducer)
+  // io.mem <> fakecache.io
 
-  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
+  io.mmio <> DontCare
 
-  
-  
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
-  // front.io.mem <> mem.io.frontend // ptw of itlb
-  io.frontend <> DontCare
-
-  val dcache = Cache(
-    in = mem.io.dmem,
-    mmio = Seq(io.mmio),
-    flush = "b00".U,
-    empty = Wire(Bool()),
-    enable = HasDcache
-  )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2))
-  dmemXbar.io.in(0) <> dcache.mem 
-  dmemXbar.io.in(1) <> mem.io.pmem
-  io.dmem.mem <> dmemXbar.io.out
-  io.dmem.coh <> dcache.coh // FIXME: the coh must be wrong, but not in use currently
-  // io.dmem <> dcache
-  // mem.io.pmem <> DontCare
+  mem.io.mem   <> io.mem
+  mem.io.mmio  <> io.mmio
 }

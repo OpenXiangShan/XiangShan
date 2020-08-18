@@ -31,8 +31,8 @@ class Dispatch2Int extends XSModule {
     aluIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     mduIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
-    XSDebug(io.fromDq(i).valid,
-      p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
+    // XSDebug(io.fromDq(i).valid,
+    //   p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
   }
   jmpIndexGen.io.priority := DontCare
   for (i <- 0 until exuParameters.AluCnt) {

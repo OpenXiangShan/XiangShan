@@ -1,7 +1,6 @@
 package utils
 
 import chisel3._
-import chisel3.util.experimental.BoringUtils
 import top.Parameters
 import xiangshan.HasXSParameter
 import utils.XSLogLevel.XSLogLevel
@@ -36,6 +35,16 @@ object XSLog {
       }
     }
   }
+
+  def displayLog: Bool = {
+    val logEnable = WireInit(false.B)
+    ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+    val ret = WireInit(false.B)
+    if(Parameters.get.envParameters.EnableDebug) {
+      ret := logEnable
+    }
+    ret
+  }
 }
 
 sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter {
@@ -50,6 +59,35 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
     apply(prefix, cond, Printable.pack(fmt, data:_*))
   def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit name: String): Any =
     XSLog(logLevel)(prefix, cond, pable)
+
+  // trigger log or not
+  // used when user what to fine-control their printf output
+  def trigger: Bool = {
+    XSLog.displayLog
+  }
+
+  def printPrefix()(implicit name: String): Unit = {
+    val commonInfo = p"[$logLevel][time=${GTimer()}] $name: "
+    when (trigger) {
+      printf(commonInfo)
+    }
+  }
+
+  // dump under with certain prefix
+  def exec(dump: () => Unit)(implicit name: String): Unit = {
+    when (trigger) {
+      printPrefix
+      dump
+    }
+  }
+
+  // dump under certain condition and with certain prefix
+  def exec(cond: Bool, dump: () => Unit)(implicit name: String): Unit = {
+    when (trigger && cond) {
+      printPrefix
+      dump
+    }
+  }
 }
 
 object XSDebug extends LogHelper(XSLogLevel.DEBUG)

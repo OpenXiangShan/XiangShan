@@ -108,7 +108,7 @@ class Dispatch extends XSModule {
   }
   lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
 
-  if(!env.FPGAPlatform) {
+  if (!env.FPGAPlatform) {
     val inWalk = intDq.io.inReplayWalk || fpDq.io.inReplayWalk || lsDq.io.inReplayWalk
     ExcitingUtils.addSource(inWalk, "perfCntCondDpqReplay", Perf)
   }

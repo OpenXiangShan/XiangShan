@@ -136,16 +136,6 @@ class TlbResp extends TlbBundle {
       val st = Bool()
       val instr = Bool()
     }
-    // val ma = new Bundle { // may handle in other module
-    //   val ld = Bool()
-    //   val st = Bool()
-    //   val instr = Bool()
-    // }
-    // val af = new Bundle {
-    //   val ld = Bool()
-    //   val st = Bool()
-    //   val instr = Bool()
-    // }
   }
   override def toPrintable: Printable = {
     p"paddr:0x${Hexadecimal(paddr)} miss:${miss} excp.pf: ld:${excp.pf.ld} st:${excp.pf.st} instr:${excp.pf.instr}"

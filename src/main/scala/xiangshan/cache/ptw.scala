@@ -10,12 +10,12 @@ import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 
-trait HasPtwConst extends HasTlbConst{
+trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
 }
 
 abstract class PtwBundle extends XSBundle with HasPtwConst
-abstract class PtwModule extends XSModule with HasPtwConst
+abstract class PtwModule extends XSModule with HasPtwConst 
 
 class PteBundle extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
@@ -98,7 +98,8 @@ class PtwResp extends PtwBundle {
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
-  val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
+  //val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
+  val mem = new DCacheLoadIO
 }
 
 object ValidHold {
@@ -142,7 +143,8 @@ class PTW extends PtwModule {
   BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
-  val memRdata = mem.resp.bits.rdata
+  val memRdata = mem.resp.bits.data
+  val memPte = memRdata.asTypeOf(new PteBundle)
 
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
@@ -197,7 +199,7 @@ class PTW extends PtwModule {
 
   // ptwl2
   val l1MemBack = mem.resp.fire() && state===state_wait_resp && level===0.U
-  val l1Res = Mux(l1Hit, l1HitData.ppn, RegEnable(memRdata.asTypeOf(pteBundle).ppn, l1MemBack))
+  val l1Res = Mux(l1Hit, l1HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitData) = { // TODO: add excp
     val readRam = (l1Hit && level===0.U && state===state_req) || (mem.resp.fire() && state===state_wait_resp && level===0.U)
@@ -213,11 +215,8 @@ class PTW extends PtwModule {
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
   val l2MemBack = mem.resp.fire() && state===state_wait_resp && level===1.U
-  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memRdata.asTypeOf(pteBundle).ppn, l1MemBack))
+  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
-
-  // mem Resp
-  val memPte = mem.resp.bits.rdata.asTypeOf(new PteBundle)
 
   // fsm
   assert(!(level===3.U))
@@ -271,22 +270,19 @@ class PTW extends PtwModule {
   }
 
   // mem:
-  io.mem.req.valid := state === state_req && 
+  mem.req.valid := state === state_req && 
                       ((level===0.U && !tlbHit && !l1Hit) ||
                       (level===1.U && !l2Hit) ||
                       (level===2.U))
-  io.mem.req.bits.apply(
-    addr = Mux(level===0.U, l1addr/*when l1Hit, dontcare, when l1miss, l1addr*/,
+  mem.req.bits.cmd := M_XRD
+  mem.req.bits.addr := Mux(level===0.U, l1addr/*when l1Hit, DontCare, when l1miss, l1addr*/,
            Mux(level===1.U, Mux(l2Hit, l3addr, l2addr)/*when l2Hit, l3addr, when l2miss, l2addr*/,
-           l3addr)),
-    cmd  = SimpleBusCmd.read,
-    size = "b11".U,
-    wdata= 0.U,
-    wmask= 0.U,
-    user = 0.U
-  )
-  io.mem.resp.ready := true.B
-  assert(!io.mem.resp.valid || state===state_wait_resp, "mem.resp.valid:%d state:%d", io.mem.resp.valid, state)
+           l3addr))
+  mem.req.bits.data := DontCare
+  mem.req.bits.mask := VecInit(Fill(mem.req.bits.mask.getWidth, true.B)).asUInt
+  mem.req.bits.meta := DontCare // TODO: check it
+  mem.resp.ready := true.B // TODO: mem.resp.ready := state===state_wait_resp
+  assert(!mem.resp.valid || state===state_wait_resp, "mem.resp.valid:%d state:%d", mem.resp.valid, state)
 
   // resp
   val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && mem.resp.fire()) || state===state_wait_ready
@@ -348,8 +344,8 @@ class PTW extends PtwModule {
   XSDebug(valid, p"CSR: ${csr}\n")
 
   XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
-  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)} memReq(v:${io.mem.req.valid} r:${io.mem.req.ready})\n")
+  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)} memReq(v:${mem.req.valid} r:${mem.req.ready})\n")
 
-  XSDebug(mem.req.fire(), p"mem req fire addr:0x${Hexadecimal(io.mem.req.bits.addr)}\n")
-  XSDebug(mem.resp.fire(), p"mem resp fire rdata:0x${Hexadecimal(io.mem.resp.bits.rdata)} Pte:${memPte}\n")
+  XSDebug(mem.req.fire(), p"mem req fire addr:0x${Hexadecimal(mem.req.bits.addr)}\n")
+  XSDebug(mem.resp.fire(), p"mem resp fire rdata:0x${Hexadecimal(mem.resp.bits.data)} Pte:${memPte}\n")
 }
