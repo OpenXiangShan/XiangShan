@@ -21,8 +21,6 @@ trait HasSBufferConst extends HasXSParameter {
   val tagWidth: Int = PAddrBits - log2Up(CacheLineSize / 8)
   val offsetWidth: Int = log2Up(CacheLineSize / 8)
 
-  val lruCounterWidth: Int = 8
-
   val cacheMaskWidth: Int = CacheLineSize / 8
   val instMaskWidth: Int = XLEN / 8
 }
@@ -32,7 +30,6 @@ class SBufferCacheLine extends XSBundle with HasSBufferConst {
   val tag = UInt(tagWidth.W)
   val data = Vec(cacheMaskWidth, UInt(8.W))// UInt(CacheLineSize.W)
   val mask = Vec(cacheMaskWidth, Bool())
-  val lruCnt = UInt(lruCounterWidth.W)
 }
 
 class UpdateInfo extends XSBundle with HasSBufferConst {
@@ -73,7 +70,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
     if (max == 0)
       false.B
     else
-      ParallelOR((0 until max).map(i => (updateInfo(i).idx === cacheIdx && io.in(i).valid))).asBool()
+      ParallelOR((0 until max).map(i => updateInfo(i).idx === cacheIdx && io.in(i).valid)).asBool()
   }
 
 
@@ -93,8 +90,10 @@ class Sbuffer extends XSModule with HasSBufferConst {
     // 0. compare with former requests
     for (formerIdx <- 0 until storeIdx) {
       // i: former request
-      when (getTag(io.in(storeIdx).bits.addr) === updateInfo(formerIdx).newTag && !updateInfo(formerIdx).isIgnored) {
+      when (getTag(io.in(storeIdx).bits.addr) === updateInfo(formerIdx).newTag &&
+        (updateInfo(formerIdx).isUpdated || updateInfo(formerIdx).isInserted) && io.in(storeIdx).valid) {
         updateInfo(storeIdx).isForward := true.B
+        updateInfo(formerIdx).isIgnored := true.B
         updateInfo(storeIdx).idx := updateInfo(formerIdx).idx
 
 
@@ -122,7 +121,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
     // 1. search for existing lines
     for (bufIdx <- 0 until StoreBufferSize) {
-      when (!updateInfo(storeIdx).isForward && (getTag(io.in(storeIdx).bits.addr) === cache(bufIdx).tag) && cache(bufIdx).valid) {
+      when (!updateInfo(storeIdx).isForward && (getTag(io.in(storeIdx).bits.addr) === cache(bufIdx).tag) && cache(bufIdx).valid && io.in(storeIdx).valid) {
         // mark this line as UPDATE
         updateInfo(storeIdx).isUpdated := true.B
         updateInfo(storeIdx).idx := bufIdx.U
@@ -156,7 +155,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
     val nextFree = PriorityEncoder(freeVec.map(i => !i))
     //    XSInfo("hasFree: %d, nextFreeIdx: %d\n", hasFree, nextFree)
 
-    when (!updateInfo(storeIdx).isForward && !updateInfo(storeIdx).isUpdated && hasFree) {
+    when (!updateInfo(storeIdx).isForward && !updateInfo(storeIdx).isUpdated && hasFree && io.in(storeIdx).valid) {
       updateInfo(storeIdx).isInserted := true.B
       updateInfo(storeIdx).idx := nextFree
       updateInfo(storeIdx).newTag := getTag(io.in(storeIdx).bits.addr)
@@ -194,9 +193,13 @@ class Sbuffer extends XSModule with HasSBufferConst {
     when(io.in(storeIdx).fire()){
 
 
-      // Update or Forward
-      // ----------------------------------------
-      when(updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isForward) {
+      when(updateInfo(storeIdx).isIgnored) {
+        XSInfo("Ignore line#%d\n", storeIdx.U)
+
+
+        // Update or Forward
+        // ----------------------------------------
+      } .elsewhen(updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isForward) {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
@@ -241,17 +244,6 @@ class Sbuffer extends XSModule with HasSBufferConst {
   }
 
 
-  // Update lruCnt
-  //--------------------------------------------------------------------------------------------------------------------
-//  (0 until StoreBufferSize).foreach(i => {
-//    for (j <- 0 until StorePipelineWidth) {
-//      when(cache(i).valid && !(updateInfo(j).idx === i.U && !updateInfo(j).isIgnored)) {
-//        cache(i).lruCnt := cache(i).lruCnt + 1.U
-//      }
-//    }
-//  })
-
-
   // Write back to d-cache
   //--------------------------------------------------------------------------------------------------------------------
   val waitingCacheLine: SBufferCacheLine = RegInit(0.U.asTypeOf(new SBufferCacheLine))
@@ -260,12 +252,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   validCnt := PopCount((0 until StoreBufferSize).map(i => cache(i).valid))
   XSInfo("[ %d ] lines valid this cycle\n", validCnt)
 
-//  def older(a: UInt, b: UInt): UInt = {
-//    Mux(cache(a).lruCnt >= cache(b).lruCnt, a, b)
-//  }
-  // TODO: refine LRU implementation
   val oldestLineIdx: UInt = Wire(UInt(sBufferIndexWidth.W))
-//  oldestLineIdx := ParallelOperation((0 until StoreBufferSize).map(_.U), (a, b) => older(a.asUInt(), b.asUInt()))
   oldestLineIdx := lru.way
   XSInfo("Least recently used #[ %d ] line\n", validCnt)
 
