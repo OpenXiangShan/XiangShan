@@ -132,6 +132,8 @@ class Memend extends XSModule {
   
   dcache.io.bus <> io.mem
   uncache.io.bus <> io.mmio
+  dcache.io.lsu.misc <> DontCare
+  dcache.io.ptw      <> DontCare
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
