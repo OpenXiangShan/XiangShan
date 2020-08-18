@@ -50,6 +50,12 @@ class LoadUnit extends XSModule {
   // Generate addr, use addr to query DCache Tag and DTLB
   //-------------------------------------------------------
 
+  val l2_dtlb_hit  = Wire(new Bool())
+  val l2_dtlb_miss = Wire(new Bool())
+  val l2_dcache = Wire(new Bool())
+  val l2_mmio = Wire(new Bool())
+  val isMMIOReq = Wire(new Bool())
+
   // l2_out is used to generate dcache req
   l2_out.bits := DontCare
   l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
@@ -57,15 +63,23 @@ class LoadUnit extends XSModule {
   l2_out.bits.uop := io.ldin.bits.uop
   l2_out.bits.mask := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
   l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
-  l2_out.ready := io.dcache.req.ready
+  // when we are sure it's a MMIO req, we do not need to wait for cache ready
+  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
   io.ldin.ready := l2_out.ready
 
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
+
+  l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
+  l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss
+  isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
+  l2_dcache := l2_dtlb_hit && !isMMIOReq
+  l2_mmio   := l2_dtlb_hit && isMMIOReq
   
   // send result to dcache
-  io.dcache.req.valid     := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
+  // never send tlb missed or MMIO reqs to dcache
+  io.dcache.req.valid     := l2_dcache
 
   io.dcache.req.bits.cmd  := MemoryOpConstants.M_XRD
   // TODO: vaddr
@@ -77,7 +91,7 @@ class LoadUnit extends XSModule {
   io.dcache.req.bits.meta.vaddr    := l2_out.bits.vaddr
   io.dcache.req.bits.meta.paddr    := io.dtlb.resp.bits.paddr
   io.dcache.req.bits.meta.uop      := l2_out.bits.uop
-  io.dcache.req.bits.meta.mmio     := AddressSpace.isMMIO(io.dcache.req.bits.meta.paddr)
+  io.dcache.req.bits.meta.mmio     := isMMIOReq
   io.dcache.req.bits.meta.tlb_miss := io.dtlb.resp.bits.miss
   io.dcache.req.bits.meta.mask     := l2_out.bits.mask
   io.dcache.req.bits.meta.replay   := false.B
@@ -92,20 +106,20 @@ class LoadUnit extends XSModule {
   // Compare tag, use addr to query DCache Data
   //-------------------------------------------------------
 
-  val l3_tlbFeedback = RegNext(l2_tlbFeedback)
   val l3_valid = RegNext(l2_out.fire(), false.B)
+  val l3_dtlb_miss = RegEnable(next = l2_dtlb_miss, enable = l2_out.fire(), init = false.B)
+  val l3_dcache = RegEnable(next = l2_dcache, enable = l2_out.fire(), init = false.B)
+  val l3_mmio = RegEnable(next = l2_mmio, enable = l2_out.fire(), init = false.B)
+  val l3_tlbFeedback = RegEnable(next = l2_tlbFeedback, enable = l2_out.fire())
   val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
+  val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
+
+  // dltb miss reqs ends here
+  val l3_passdown = l3_valid && !l3_dtlb_miss
+
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
-  val killValid = Reg(Bool())
-  val needKill = l3_uop.needFlush(io.redirect)
-  when (needKill || l4_out.valid) {
-    killValid := false.B
-  }
-  when (l2_out.fire()) {
-    killValid := true.B
-  }
-  io.dcache.s1_kill := needKill && killValid
+  io.dcache.s1_kill := l3_valid && l3_dcache && l3_uop.needFlush(io.redirect)
   // FIXIT
 
   // Done in Dcache
@@ -115,16 +129,25 @@ class LoadUnit extends XSModule {
   // Dcache return result, do tag ecc check and forward check
   //-------------------------------------------------------
 
-  // result from dcache
-  io.dcache.resp.ready := true.B
-  l4_out.bits := DontCare
-  l4_out.bits.data  := io.dcache.resp.bits.data
-  l4_out.bits.paddr := io.dcache.resp.bits.meta.paddr
-  l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
-  l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
-  l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
-  l4_out.bits.miss  := io.dcache.resp.bits.miss
-  l4_out.valid      := io.dcache.resp.valid && !l4_out.bits.uop.needFlush(io.redirect)
+  val l4_valid = RegNext(l3_passdown, false.B)
+  val l4_dcache = RegNext(l3_dcache, false.B)
+  val l4_mmio = RegNext(l3_mmio, false.B)
+  val l4_bundle = RegNext(l3_bundle)
+
+  assert(!(io.dcache.resp.ready && !io.dcache.resp.valid), "DCache response got lost")
+  io.dcache.resp.ready := l4_valid && l4_dcache
+  when (io.dcache.resp.fire()) {
+    l4_out.bits := DontCare
+    l4_out.bits.data  := io.dcache.resp.bits.data
+    l4_out.bits.paddr := io.dcache.resp.bits.meta.paddr
+    l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
+    l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
+    l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
+    l4_out.bits.miss  := io.dcache.resp.bits.miss
+    } .otherwise {
+    l4_out.bits := l4_bundle
+  }
+  l4_out.valid := l4_valid && !l4_out.bits.uop.needFlush(io.redirect)
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
