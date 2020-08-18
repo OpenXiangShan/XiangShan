@@ -90,6 +90,9 @@ class StorePipe extends DCacheModule
 
   s2_nack           := s2_nack_hit || s2_nack_set_busy
 
+  val s2_info = p"tag match: $s2_tag_match hasPerm: $s2_has_permission" +
+    p" hit state: $s2_hit_state new state: $s2_new_hit_state s2_nack: $s2_nack\n"
+
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
   val wdata = Wire(Vec(refillCycles, UInt(rowBits.W)))
@@ -160,21 +163,18 @@ class StorePipe extends DCacheModule
 
   // -------
   // Debug logging functions
-  def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool,
-    req: DCacheLineReq ) = {
+  def dump_pipeline_reqs(pipeline_stage_name: String, valid: Bool, req: DCacheLineReq ) = {
       when (valid) {
-        XSDebug(s"$pipeline_stage_name cmd: %x addr: %x id: %d replay: %b\n",
-          req.cmd, req.addr, req.meta.id, req.meta.replay)
-        (0 until refillCycles) map { r =>
-          XSDebug(s"cycle: $r data: %x wmask: %x\n",
-            req.data(r), req.mask(r))
-        }
+        XSDebug(
+          s"$pipeline_stage_name cmd: %x addr: %x id: %d replay: %b\n",
+          req.cmd, req.addr, req.meta.id, req.meta.replay
+        )
       }
   }
 
   def dump_pipeline_valids(pipeline_stage_name: String, signal_name: String, valid: Bool) = {
     when (valid) {
-      XSDebug(s"$pipeline_stage_name $signal_name\n")
+      XSDebug(p"$pipeline_stage_name $signal_name " + s2_info)
     }
   }
 }

@@ -191,7 +191,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
         // eg: when several load miss on the same block
         // assert(isWrite(req.cmd))
         new_coh     := coh_on_hit
-        new_state   := s_send_resp
+        new_state   := s_meta_write_req
       } .otherwise { // upgrade permissions
         new_coh     := old_coh
         new_state   := s_refill_req
