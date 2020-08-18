@@ -99,6 +99,7 @@ class ICacheReq extends ICacheBundle
 class ICacheResp extends ICacheBundle
 {
   //TODO
+  val pc = UInt(VAddrBits.W)
   val data = UInt((FetchWidth * 32).W)
   val mask = UInt(PredictWidth.W)
 }
@@ -120,7 +121,9 @@ class ICache extends ICacheModule
   val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
   val dataArray = List.fill(cacheDataBeats){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
 
-  //-----------Stage 1-------------
+  //----------------------------
+  //    Stage 1
+  //----------------------------
   val s1_valid = io.req.fire()
   val s1_req = io.req.bits
   val s1_idx = get_idx(s1_req.addr)
@@ -133,7 +136,9 @@ class ICache extends ICacheModule
     dataArray(i).io.r.req.valid := s1_valid
     dataArray(i).io.r.req.bits := s1_idx
   }
-  //-----------Stage 2--------------
+  //----------------------------
+  //    Stage 2
+  //----------------------------
   val s2_valid = RegEnable(next = s1_valid, init = false.B, enable = s1_fire)
   val s2_req = RegEnable(next = s1_req,init = 0.U, enable = s1_fire)
   val s2_tag = get_tag(s2_req.addr)
@@ -158,7 +163,9 @@ class ICache extends ICacheModule
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
 
-  //------------Stage 3-------------
+  //----------------------------
+  //    Stage 2
+  //----------------------------
   val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
   val s3_req = RegEnable(next=s2_req,init=false.B,enable=s2_fire)
   val s3_data = RegEnable(next=datas,init=0.U,enable=s2_fire)
@@ -237,6 +244,7 @@ class ICache extends ICacheModule
   io.resp.valid := (s3_valid && s3_hit) || (state === s_wait_resp)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req.mask
+  io.resp.bits.pc := s3_req.addr
 
   when (io.flush(0)) { s2_valid := s1_fire }
   when (io.flush(1)) { s3_valid := false.B }
