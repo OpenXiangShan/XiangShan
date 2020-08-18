@@ -23,6 +23,7 @@ case class DCacheParameters(
     nMissEntries: Int = 1,
     nLoadMissEntries: Int = 1,
     nStoreMissEntries: Int = 1,
+    nMiscMissEntries: Int = 1,
     nMMIOEntries: Int = 1,
     nSDQ: Int = 17,
     nRPQ: Int = 16,
@@ -75,8 +76,13 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
   def loadMissQueueEntryIdWidth = log2Up(cfg.nLoadMissEntries)
   def storeMissQueueEntryIdWidth = log2Up(cfg.nStoreMissEntries)
-  def clientMissQueueEntryIdWidth = max(loadMissQueueEntryIdWidth, storeMissQueueEntryIdWidth)
-  def nClientMissQueues = 2
+  def miscMissQueueEntryIdWidth = log2Up(cfg.nMiscMissEntries)
+  def clientMissQueueEntryIdWidth = max(
+    max(loadMissQueueEntryIdWidth,
+      storeMissQueueEntryIdWidth),
+      miscMissQueueEntryIdWidth)
+
+  def nClientMissQueues = 3
   def clientIdWidth = log2Up(nClientMissQueues)
   def missQueueClientIdWidth = clientIdWidth + clientMissQueueEntryIdWidth
   def clientIdMSB = missQueueClientIdWidth - 1

@@ -60,13 +60,13 @@ class MMIOEntry extends DCacheModule
     params = cfg.busParams,
     fromSource      = io.id,
     toAddress       = req.addr,
-    lgSize          = (log2Up(DataBits)).U)._2
+    lgSize          = (log2Up(DataBytes)).U)._2
 
   val store = TLMasterUtilities.Put(
     params = cfg.busParams,
     fromSource      = io.id,
     toAddress = req.addr,
-    lgSize  = (log2Up(DataBits)).U,
+    lgSize  = (log2Up(DataBytes)).U,
     data  = req.data,
     mask = req.mask)._2
 
