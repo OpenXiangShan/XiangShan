@@ -158,9 +158,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.meta_resp <> metaArray.io.resp(0)
   // metaArray.io.resp(0) <> prober.io.meta_resp
-  metaArray.io.resp(0) <> stu.io.meta_resp
-  metaArray.io.resp(0) <> ldu(0).io.meta_resp
-  metaArray.io.resp(0) <> misc.io.meta_resp
+  stu.io.meta_resp <> metaArray.io.resp(0)
+  ldu(0).io.meta_resp <> metaArray.io.resp(0)
+  misc.io.meta_resp <> metaArray.io.resp(0)
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
