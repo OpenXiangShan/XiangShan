@@ -230,6 +230,11 @@ class DCache extends DCacheModule {
     assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.replay), "LSU should not replay requests")
   }
 
+  for (w <- 0 until LoadPipelineWidth) {
+    assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.mmio), "MMIO requests should not go to cache")
+    assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.tlb_miss), "TLB missed requests should not go to cache")
+  }
+
   // load miss queue
   loadMissQueue.io.lsu <> io.lsu.lsroq
 
@@ -238,6 +243,12 @@ class DCache extends DCacheModule {
   storeMissQueue.io.lsu    <> io.lsu.store
   assert(!(storeMissQueue.io.replay.req.fire() && !storeMissQueue.io.replay.req.bits.meta.replay),
     "StoreMissQueue should replay requests")
+  assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.replay),
+    "Sbuffer should not should replay requests")
+  assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.mmio),
+    "MMIO requests should not go to cache")
+  assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.tlb_miss),
+    "TLB missed requests should not go to cache")
 
   val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
   block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block && !storeMissQueue.io.replay.req.bits.meta.replay)
@@ -303,9 +314,14 @@ class DCache extends DCacheModule {
   miscMissQueue.io.lsu.s1_kill := false.B
 
   assert(!(miscReq.fire() && miscReq.bits.meta.replay),
-    "Misc should not replay requests")
+    "Misc does not support request replay")
+  assert(!(miscReq.fire() && miscReq.bits.meta.mmio),
+    "MMIO requests should not go to cache")
+  assert(!(miscReq.fire() && miscReq.bits.meta.tlb_miss),
+    "TLB missed requests should not go to cache")
   assert(!io.lsu.misc.s1_kill, "Lsroq should never use s1 kill on misc")
   assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc")
+
 
   //----------------------------------------
   // miss queue
