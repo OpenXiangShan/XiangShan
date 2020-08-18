@@ -136,7 +136,7 @@ class Lsroq extends XSModule {
       data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
       miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
       store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
-      pending(io.storeIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
+      pending(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
     }
   })
 
@@ -517,8 +517,9 @@ class Lsroq extends XSModule {
   def getFirstOne(mask: Vec[Bool], start: UInt) = {
     val length = mask.length
     val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
-    val highBits = (0 until length).map(i => mask(i) & lowMask(i))
-    Mux(Cat(highBits).orR(), PriorityEncoder(highBits), PriorityEncoder(mask))
+    val highBits = (0 until length).map(i => mask(i) & ~lowMask(i))
+    val highBitsUint = Cat(highBits.reverse)
+    PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
   }
 
   def getOldestInTwo(valid: Seq[Bool], uop: Seq[MicroOp]) = {
@@ -541,33 +542,33 @@ class Lsroq extends XSModule {
     })
   }
 
+  def rangeMask(start: UInt, end: UInt): UInt = {
+    val startMask = (1.U((LsroqSize + 1).W) << start(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
+    val endMask = (1.U((LsroqSize + 1).W) << end(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
+    val xorMask = startMask(LsroqSize - 1, 0) ^ endMask(LsroqSize - 1, 0)
+    Mux(start(InnerLsroqIdxWidth) === end(InnerLsroqIdxWidth), xorMask, ~xorMask)
+  }
+
   // store backward query and rollback
   //  val needCheck = Seq.fill(8)(WireInit(true.B))
   (0 until StorePipelineWidth).foreach(i => {
     rollback(i) := DontCare
 
     when(io.storeIn(i).valid) {
-      val needCheck = Seq.fill(LsroqSize + 1)(Seq.fill(8)(WireInit(true.B))) // TODO: refactor
-
+      val startIndex = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0)
+      val toEnqPtrMask = rangeMask(io.storeIn(i).bits.uop.lsroqIdx, ringBufferHeadExtended)
       val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
-        val ptr = io.storeIn(i).bits.uop.lsroqIdx + j.U
-        val reachHead = (ptr+1.U) === ringBufferHeadExtended
-        val addrMatch = allocated(ptr) &&
-          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(ptr).paddr(PAddrBits - 1, 3)
-        val mask = data(ptr).mask
-        val s = store(ptr)
-        val w = writebacked(ptr)
-        val v = valid(ptr)
-        val violationVec = (0 until 8) map (k => {
-          needCheck(j+1)(k) := needCheck(j)(k) && !(addrMatch && s && mask(k)) && !reachHead
-          needCheck(j)(k) && addrMatch && mask(k) && io.storeIn(i).bits.mask(k) && !s && v // TODO: update refilled data
-        })
-        Cat(violationVec).orR()
+        val addrMatch = allocated(j) &&
+          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && !store(j) && valid(j)
+        // TODO: update refilled data
+        val violationVec = (0 until 8).map(k => data(j).mask(k) && io.storeIn(i).bits.mask(k))
+        Cat(violationVec).orR() && entryNeedCheck
       }))
       val lsroqViolation = lsroqViolationVec.asUInt().orR()
-      val lsroqViolationIndex = io.storeIn(i).bits.uop.lsroqIdx + PriorityEncoder(lsroqViolationVec)
+      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, startIndex)
       val lsroqViolationUop = uop(lsroqViolationIndex)
-      XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $lsroqViolationIndex")
+      XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $startIndex, $lsroqViolationIndex\n")
 
       // when l/s writeback to roq together, check if rollback is needed
       val wbViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
@@ -578,7 +579,7 @@ class Lsroq extends XSModule {
       }))
       val wbViolation = wbViolationVec.asUInt().orR()
       val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
-      XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop")
+      XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
       // check if rollback is needed for load in l4
       val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {

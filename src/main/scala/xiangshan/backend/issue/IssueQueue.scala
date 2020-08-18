@@ -277,8 +277,7 @@ class IssueQueue
 
 
   // assign outputs
-  // TODO currently set to zero
-  io.numExist := 0.U//Mux(isFull, (qsize-1).U, tailPtr)
+  io.numExist := Mux(isFull, (qsize-1).U, tailPtr)
 
   // Debug sigs
   XSInfo(

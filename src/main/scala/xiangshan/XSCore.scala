@@ -226,6 +226,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
+  // TODO: connect this
+  dcache.io.lsu.misc <> DontCare
+
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
   dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec

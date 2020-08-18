@@ -145,7 +145,7 @@ class StorePipe extends DCacheModule
       resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
   }
 
-  io.inflight_req_idxes(0).valid := s0_valid
+  io.inflight_req_idxes(0).valid := io.lsu.req.valid
   io.inflight_req_idxes(1).valid := s1_valid
   io.inflight_req_idxes(2).valid := s2_valid
 
@@ -153,7 +153,7 @@ class StorePipe extends DCacheModule
   io.inflight_req_idxes(1).bits  := get_idx(s1_req.addr)
   io.inflight_req_idxes(2).bits  := get_idx(s2_req.addr)
 
-  io.inflight_req_block_addrs(0).valid := s0_valid
+  io.inflight_req_block_addrs(0).valid := io.lsu.req.valid
   io.inflight_req_block_addrs(1).valid := s1_valid
   io.inflight_req_block_addrs(2).valid := s2_valid
 
