@@ -43,7 +43,7 @@ class IFU extends XSModule with HasIFUConst
   if1_flush := if2_flush || if2_redirect
 
   //********************** IF1 ****************************//
-  val if1_valid = !reset.asBool
+  val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
   val if1_fire = if1_valid && (if2_ready || if1_flush) && io.icacheReq.ready
@@ -305,6 +305,7 @@ class IFU extends XSModule with HasIFUConst
 
   io.icacheReq.valid := if1_valid && if2_ready
   io.icacheReq.bits.addr := if1_npc
+  io.icacheReq.bits.mask := mask(if1_npc)
   io.icacheResp.ready := if3_ready
   io.icacheFlush := Cat(if3_flush, if2_flush)
 

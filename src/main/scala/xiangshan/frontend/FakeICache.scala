@@ -34,7 +34,7 @@ class FakeCache extends XSModule with HasICacheConst {
   val memByte = 128 * 1024 * 1024
 
   val ramHelpers = Module(new RAMHelper(memByte)).io
-  ramHelpers.foreach(_.clk := clock)
+  ramHelpers.clk := clock
 
   //fake instruction fetch pipeline
   //----------------
@@ -48,13 +48,13 @@ class FakeCache extends XSModule with HasICacheConst {
   def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt()
   def inRange(idx: UInt): Bool = idx < (memByte / 8).U
 
-  val s_idle :: s_mem_read :: Nil = Enum(3)
+  val s_idle :: s_mem_read :: Nil = Enum(2)
   val state = RegInit(s_idle)
   val beatCounter = RegInit(0.U(3.W))
   
   io.out.bits.finish := false.B
   switch(state){
-    is(s_idle) when(io.in.fire){state := s_mem_read}
+    is(s_idle) {when(io.in.fire){state := s_mem_read}}
     is(s_mem_read){
       beatCounter := beatCounter + 1.U
       when(beatCounter === 7.U){
@@ -75,5 +75,5 @@ class FakeCache extends XSModule with HasICacheConst {
   ).foreach(_ := 0.U)
 
   io.out.valid := (state === s_mem_read)
-  io.out.bits.data := ramHelpers.io.rdata
+  io.out.bits.data := ramHelpers.rdata
 }
