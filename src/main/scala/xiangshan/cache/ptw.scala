@@ -283,6 +283,7 @@ class PTW extends PtwModule {
   mem.req.bits.meta := DontCare // TODO: check it
   mem.resp.ready := true.B // TODO: mem.resp.ready := state===state_wait_resp
   assert(!mem.resp.valid || state===state_wait_resp, "mem.resp.valid:%d state:%d", mem.resp.valid, state)
+  mem.s1_kill := false.B // NOTE: shoud not use it. for ptw will change to TL later
 
   // resp
   val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && mem.resp.fire()) || state===state_wait_ready
