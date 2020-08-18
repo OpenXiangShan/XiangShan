@@ -36,15 +36,6 @@ class LoadUnit extends XSModule {
   val l4_out = Wire(Decoupled(new LsPipelineBundle))
   val l5_in  = Wire(Flipped(Decoupled(new LsPipelineBundle)))
 
-  XSDebug(l2_out.valid, "L2: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType, l2_out.bits.data, l2_out.bits.mask)
-  XSDebug(l4_out.valid, "L4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr, l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask)
-  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr , l5_in.bits.paddr , l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask )
-  XSDebug(l2_out.fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n",
-    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType)
-
   //-------------------------------------------------------
   // LD Pipeline Stage 2
   // Generate addr, use addr to query DCache Tag and DTLB
@@ -76,7 +67,7 @@ class LoadUnit extends XSModule {
   isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
   l2_dcache := l2_dtlb_hit && !isMMIOReq
   l2_mmio   := l2_dtlb_hit && isMMIOReq
-  
+
   // send result to dcache
   // never send tlb missed or MMIO reqs to dcache
   io.dcache.req.valid     := l2_dcache
@@ -101,6 +92,15 @@ class LoadUnit extends XSModule {
   l2_tlbFeedback.hit := !io.dtlb.resp.bits.miss
   l2_tlbFeedback.roqIdx := l2_out.bits.uop.roqIdx
 
+  // dump l2
+  XSDebug(l2_out.valid, "L2: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
+    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr,
+    l2_out.bits.uop.ctrl.fuOpType, l2_out.bits.data, l2_out.bits.mask,
+    l2_dtlb_miss, l2_dcache, l2_mmio)
+
+  XSDebug(l2_out.fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n",
+    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType)
+
   //-------------------------------------------------------
   // LD Pipeline Stage 3
   // Compare tag, use addr to query DCache Data
@@ -113,14 +113,23 @@ class LoadUnit extends XSModule {
   val l3_tlbFeedback = RegEnable(next = l2_tlbFeedback, enable = l2_out.fire())
   val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
   val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
-
   // dltb miss reqs ends here
   val l3_passdown = l3_valid && !l3_dtlb_miss
 
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
   io.dcache.s1_kill := l3_valid && l3_dcache && l3_uop.needFlush(io.redirect)
-  // FIXIT
+
+  // dump l3
+  XSDebug(l3_valid, "l3: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
+    l3_bundle.uop.cf.pc, l3_bundle.vaddr, l3_bundle.paddr,
+    l3_bundle.uop.ctrl.fuOpType, l3_bundle.data, l3_bundle.mask,
+    l3_dtlb_miss, l3_dcache, l3_mmio)
+
+  XSDebug(io.tlbFeedback.valid, "tlbFeedback: hit %b roqIdx %d\n",
+    io.tlbFeedback.bits.hit, io.tlbFeedback.bits.roqIdx)
+
+  XSDebug(io.dcache.s1_kill, "l3: dcache s1_kill\n")
 
   // Done in Dcache
 
@@ -179,6 +188,14 @@ class LoadUnit extends XSModule {
   l4_out.bits.forwardData := forwardVec
 
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
+
+  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dcache %b mmio %b\n",
+    l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
+    l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
+    l4_dcache, l4_mmio)
+
+  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
+    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr , l5_in.bits.paddr , l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask )
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
