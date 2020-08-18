@@ -100,6 +100,7 @@ class DCache extends DCacheModule {
   val miscMissQueue = Module(new MiscMissQueue)
   val missQueue = Module(new MissQueue)
   val wb = Module(new WritebackUnit)
+  val prober = Module(new ProbeUnit)
 
 
   //----------------------------------------
@@ -110,8 +111,7 @@ class DCache extends DCacheModule {
   val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, MetaWritePortCount))
 
   metaWriteArb.io.in(MissQueueMetaWritePort)    <> missQueue.io.meta_write
-  metaWriteArb.io.in(ProberMetaWritePort).valid := false.B
-  metaWriteArb.io.in(ProberMetaWritePort).bits  := DontCare
+  metaWriteArb.io.in(ProberMetaWritePort)       <> prober.io.meta_write
 
   metaArray.io.write <> metaWriteArb.io.out
 
@@ -128,8 +128,7 @@ class DCache extends DCacheModule {
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
   metaReadArb.io.in(MissQueueMetaReadPort)    <> missQueue.io.meta_read
-  metaReadArb.io.in(ProberMetaReadPort).valid := false.B
-  metaReadArb.io.in(ProberMetaReadPort).bits  := DontCare
+  metaReadArb.io.in(ProberMetaReadPort)       <> prober.io.meta_read
   metaReadArb.io.in(StorePipeMetaReadPort)    <> stu.io.meta_read
   metaReadArb.io.in(LoadPipeMetaReadPort)     <> ldu(0).io.meta_read
   metaReadArb.io.in(MiscPipeMetaReadPort)     <> misc.io.meta_read
@@ -137,7 +136,7 @@ class DCache extends DCacheModule {
   metaArray.io.read(0) <> metaReadArb.io.out
 
   metaArray.io.resp(0) <> missQueue.io.meta_resp
-  // metaArray.io.resp(0) <> prober.io.meta_resp
+  metaArray.io.resp(0) <> prober.io.meta_resp
   metaArray.io.resp(0) <> stu.io.meta_resp
   metaArray.io.resp(0) <> ldu(0).io.meta_resp
   metaArray.io.resp(0) <> misc.io.meta_resp
@@ -426,19 +425,20 @@ class DCache extends DCacheModule {
 
   //----------------------------------------
   // prober
-  io.bus.b.ready        := false.B
+  io.bus.b <> prober.io.req
 
   //----------------------------------------
   // wb
   // 0 goes to prober, 1 goes to missQueue evictions
   val wbArb = Module(new Arbiter(new WritebackReq, 2))
-  wbArb.io.in(0).valid := false.B
-  wbArb.io.in(0).bits  := DontCare
+  wbArb.io.in(0)       <> prober.io.wb_req
   wbArb.io.in(1)       <> missQueue.io.wb_req
   wb.io.req            <> wbArb.io.out
   missQueue.io.wb_resp := wb.io.resp
-  io.bus.c             <> wb.io.release
+  prober.io.wb_resp    := wb.io.resp
   wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMissEntries.U
+
+  TLArbiter.lowestFromSeq(io.bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
   def block_load(addr: UInt) = {
