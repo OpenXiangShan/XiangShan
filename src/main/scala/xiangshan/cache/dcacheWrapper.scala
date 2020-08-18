@@ -237,6 +237,7 @@ class DCache extends DCacheModule {
 
   // load miss queue
   loadMissQueue.io.lsu <> io.lsu.lsroq
+  assert(!io.lsu.lsroq.s1_kill, "Lsroq should never use s1 kill on loadMissQueue")
 
   //----------------------------------------
   // store pipe and store miss queue
