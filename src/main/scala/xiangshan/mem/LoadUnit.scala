@@ -114,7 +114,7 @@ class LoadUnit extends XSModule {
   val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
   val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
   // dltb miss reqs ends here
-  val l3_passdown = l3_valid && !l3_dtlb_miss
+  val l3_passdown = l3_valid && !l3_dtlb_miss && !l3_uop.needFlush(io.redirect)
 
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
