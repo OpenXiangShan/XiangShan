@@ -88,11 +88,11 @@ class IFU extends XSModule with HasIFUConst
     if1_npc := if2_bp.target
   }
 
-  when (if2_fire && (if2_bp.taken || if2_bp.hasNotTakenBrs)) {
+  when (if2_fire && (if2_bp.takenOnBr || if2_bp.hasNotTakenBrs)) {
     shiftPtr := true.B
     newPtr := headPtr - 1.U
-    hist(0) := if2_bp.taken.asUInt
-    extHist(newPtr) := if2_bp.taken.asUInt
+    hist(0) := if2_bp.takenOnBr.asUInt
+    extHist(newPtr) := if2_bp.takenOnBr.asUInt
   }
 
   //********************** IF3 ****************************//
@@ -116,6 +116,7 @@ class IFU extends XSModule with HasIFUConst
     val pc = UInt(VAddrBits.W)
     val target = UInt(VAddrBits.W)
     val instr = UInt(16.W)
+    val takenOnBr = Bool()
   }
 
   val if3_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
@@ -133,12 +134,12 @@ class IFU extends XSModule with HasIFUConst
 
   when (if3_fire && if3_redirect) {
     shiftPtr := true.B
-    newPtr := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
-    hist(0) := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken || if3_bp.hasNotTakenBrs,
-      (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken).asUInt,
+    newPtr := Mux(if3_hasPrevHalfInstr && prevHalfInstr.takenOnBr || if3_bp.takenOnBr || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
+    hist(0) := Mux(if3_hasPrevHalfInstr && prevHalfInstr.takenOnBr || if3_bp.takenOnBr || if3_bp.hasNotTakenBrs,
+      (if3_hasPrevHalfInstr && prevHalfInstr.takenOnBr || if3_bp.takenOnBr).asUInt,
       extHist(if3_histPtr))
-    extHist(newPtr) := Mux(if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken || if3_bp.hasNotTakenBrs,
-      (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.taken).asUInt,
+    extHist(newPtr) := Mux(if3_hasPrevHalfInstr && prevHalfInstr.takenOnBr || if3_bp.takenOnBr || if3_bp.hasNotTakenBrs,
+      (if3_hasPrevHalfInstr && prevHalfInstr.takenOnBr || if3_bp.takenOnBr).asUInt,
       extHist(if3_histPtr))
   }
 
@@ -223,6 +224,7 @@ class IFU extends XSModule with HasIFUConst
   when (bpu.io.out(2).valid && if4_fire && if4_bp.saveHalfRVI) {
     if4_prevHalfInstr.valid := true.B
     if4_prevHalfInstr.taken := if4_bp.taken
+    if4_prevHalfInstr.takenOnBr := if4_bp.takenOnBr
     if4_prevHalfInstr.fetchpc := if4_pc
     if4_prevHalfInstr.idx := PopCount(mask(if4_pc)) - 1.U
     if4_prevHalfInstr.pc := if4_pd.pc(if4_prevHalfInstr.idx)
@@ -233,22 +235,29 @@ class IFU extends XSModule with HasIFUConst
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
     if4_redirect := true.B
     shiftPtr := true.B
-    newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
-    hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
-    extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
+    newPtr := Mux(if4_bp.takenOnBr || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
+    hist(0) := Mux(if4_bp.takenOnBr || if4_bp.hasNotTakenBrs, if4_bp.takenOnBr.asUInt, extHist(if4_histPtr))
+    extHist(newPtr) := Mux(if4_bp.takenOnBr || if4_bp.hasNotTakenBrs, if4_bp.takenOnBr.asUInt, extHist(if4_histPtr))
     when (if4_bp.saveHalfRVI) {
       if1_npc := snpc(if4_pc)
     }.otherwise {
       if1_npc := if4_bp.target
     }
   }.elsewhen (bpu.io.out(2).valid && if4_fire/* && !if4_bp.redirect*/) {
-    when (if4_bp.saveHalfRVI && if4_bp.taken) {
+    when (if4_bp.saveHalfRVI && if4_bp.takenOnBr) {
       if4_redirect := true.B
       if1_npc := snpc(if4_pc)
       shiftPtr := true.B
       newPtr := if4_histPtr - 1.U
       hist(0) := 1.U
       extHist(newPtr) := 1.U
+    }.elsewhen (if4_bp.saveHalfRVI && if4_bp.taken) {
+      if4_redirect := true.B
+      if1_npc := snpc(if4_pc)
+      shiftPtr := true.B
+      newPtr := if4_histPtr
+      hist(0) := extHist(if4_histPtr)
+      extHist(newPtr) := extHist(if4_histPtr)
     }.otherwise {
       if4_redirect := false.B
     }
@@ -292,10 +301,19 @@ class IFU extends XSModule with HasIFUConst
   // }
 
   when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
+    val b = io.outOfOrderBrInfo.bits
+    val oldPtr = b.brInfo.histPtr
     shiftPtr := true.B
-    newPtr := io.outOfOrderBrInfo.bits.brInfo.histPtr - 1.U
-    hist(0) := io.outOfOrderBrInfo.bits.taken
-    extHist(newPtr) := io.outOfOrderBrInfo.bits.taken
+    when (!b.pd.isBr && !b.brInfo.sawNotTakenBranch) {
+      // If mispredicted cfi is not a branch,
+      // and there wasn't any not taken branch before it,
+      // we should only recover the pointer to an unshifted state
+      newPtr := oldPtr
+    }.otherwise {
+      newPtr := oldPtr - 1.U
+      hist(0) := b.taken
+      extHist(newPtr) := b.taken
+    }
   }
 
   when (io.redirect.valid) {

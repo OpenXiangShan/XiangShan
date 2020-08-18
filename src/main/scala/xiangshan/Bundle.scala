@@ -47,6 +47,7 @@ class BranchPrediction extends XSBundle {
   val hasNotTakenBrs = Bool()
   val target = UInt(VAddrBits.W)
   val saveHalfRVI = Bool()
+  val takenOnBr = Bool()
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
@@ -62,6 +63,7 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val rasToqAddr = UInt(VAddrBits.W)
   val fetchIdx = UInt(log2Up(PredictWidth).W)
   val specCnt = UInt(10.W)
+  val sawNotTakenBranch = Bool()
 
   val debug_ubtb_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
   val debug_btb_cycle  = if (BPUDebug) UInt(64.W) else UInt(0.W)

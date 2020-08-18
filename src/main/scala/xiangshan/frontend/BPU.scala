@@ -8,7 +8,7 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = false
+  val BPUDebug = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -31,7 +31,7 @@ class PredictorResponse extends XSBundle {
     val targets = Vec(PredictWidth, UInt(VAddrBits.W))
     val hits = Vec(PredictWidth, Bool())
     val takens = Vec(PredictWidth, Bool())
-    val notTakens = Vec(PredictWidth, Bool())
+    val brMask = Vec(PredictWidth, Bool())
     val is_RVC = Vec(PredictWidth, Bool())
   }
   class BtbResp extends XSBundle {
@@ -137,6 +137,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
 
   val takens = Wire(Vec(PredictWidth, Bool()))
   val notTakens = Wire(Vec(PredictWidth, Bool()))
+  val brMask = Wire(Vec(PredictWidth, Bool()))
   val jmpIdx = PriorityEncoder(takens)
   val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
@@ -159,6 +160,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.pred.bits.hasNotTakenBrs := hasNTBr
   io.pred.bits.target := target
   io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !lastIsRVC && lastHit
+  io.pred.bits.takenOnBr := taken && brMask(jmpIdx)
 
   io.out.bits <> DontCare
   io.out.bits.pc := inLatch.pc
@@ -166,6 +168,8 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.out.bits.target := target
   io.out.bits.resp <> inLatch.resp
   io.out.bits.brInfo := inLatch.brInfo
+  (0 until PredictWidth).map(i => 
+    io.out.bits.brInfo(i).sawNotTakenBranch := (if (i == 0) false.B else (brMask.asUInt & notTakens.asUInt)(i-1,0).orR))
 
   // Default logic
   //  pred.ready not taken into consideration
@@ -216,8 +220,9 @@ class BPUStage1 extends BPUStage {
   val ubtbResp = io.in.bits.resp.ubtb
   // the read operation is already masked, so we do not need to mask here
   takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.takens(i)))
-  notTakens := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.notTakens(i)))
+  notTakens := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && !ubtbResp.takens(i) && ubtbResp.brMask(i)))
   targetSrc := ubtbResp.targets
+  brMask := ubtbResp.brMask
 
   lastIsRVC := ubtbResp.is_RVC(lastValidPos)
   lastHit   := ubtbResp.hits(lastValidPos)
@@ -230,7 +235,7 @@ class BPUStage1 extends BPUStage {
   if (BPUDebug) {
     io.out.bits.brInfo.map(_.debug_ubtb_cycle := GTimer())
     XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
-      ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ubtbResp.notTakens.asUInt, ubtbResp.is_RVC.asUInt)
+      ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ~ubtbResp.takens.asUInt & brMask.asUInt, ubtbResp.is_RVC.asUInt)
   }
 }
 
@@ -242,6 +247,7 @@ class BPUStage2 extends BPUStage {
   takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) =/= BTBtype.B)))
   notTakens := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && btbResp.types(i) === BTBtype.B && !bimResp.ctrs(i)(1)))
   targetSrc := btbResp.targets
+  brMask := VecInit(btbResp.types.map(_ === BTBtype.B))
 
   lastIsRVC := btbResp.isRVC(lastValidPos)
   lastHit   := btbResp.hits(lastValidPos)
@@ -301,6 +307,7 @@ class BPUStage3 extends BPUStage {
                (if (EnableLoop) { VecInit((0 until PredictWidth).map(i => brs(i) && loopResp(i)))}
                 else { WireInit(0.U.asTypeOf(UInt(PredictWidth.W))) }).asUInt).asTypeOf(Vec(PredictWidth, Bool()))
   targetSrc := inLatch.resp.btb.targets
+  brMask := WireInit(brs.asTypeOf(Vec(PredictWidth, Bool())))
 
   //RAS
   if(EnableRAS){
@@ -555,7 +562,7 @@ class BPU extends BaseBPU {
   if (BPUDebug) {
     if (debug_verbose) {
       val uo = ubtb.io.out
-      XSDebug("debug: ubtb hits:%b, takens:%b, notTakens:%b\n", uo.hits.asUInt, uo.takens.asUInt, uo.notTakens.asUInt)
+      XSDebug("debug: ubtb hits:%b, takens:%b, notTakens:%b\n", uo.hits.asUInt, uo.takens.asUInt, ~uo.takens.asUInt & uo.brMask.asUInt)
       val bio = bim.io.resp
       XSDebug("debug: bim takens:%b\n", VecInit(bio.ctrs.map(_(1))).asUInt)
       val bo = btb.io.resp
