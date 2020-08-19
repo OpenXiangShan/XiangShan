@@ -255,7 +255,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   //--------------------------------------------------------------------------------------------------------------------
   val waitingCacheLine: SBufferCacheLine = RegInit(0.U.asTypeOf(new SBufferCacheLine))
 
-  val validCnt: UInt = Wire(UInt(4.W))
+  val validCnt: UInt = Wire(UInt((sBufferIndexWidth + 1).W))
   validCnt := PopCount((0 until StoreBufferSize).map(i => cache(i).valid))
   XSInfo("[ %d ] lines valid this cycle\n", validCnt)
 
@@ -281,7 +281,9 @@ class Sbuffer extends XSModule with HasSBufferConst {
       io.dcache.req.bits.data := cache(oldestLineIdx).data.asUInt()
       io.dcache.req.bits.mask := cache(oldestLineIdx).mask.asUInt()
 
-      XSDebug("[WaitForWB] idx: %d, addr: %x, mask: %x, data: %x\n", oldestLineIdx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
+      XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n", oldestLineIdx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
+    } .otherwise {
+      XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     }
 
     for (i <- 0 until StorePipelineWidth) {
