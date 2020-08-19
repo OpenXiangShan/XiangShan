@@ -47,17 +47,6 @@ class LoadUnit extends XSModule {
   val l2_mmio = Wire(new Bool())
   val isMMIOReq = Wire(new Bool())
 
-  // l2_out is used to generate dcache req
-  l2_out.bits := DontCare
-  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
-  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
-  l2_out.bits.uop := io.ldin.bits.uop
-  l2_out.bits.mask := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
-  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
-  // when we are sure it's a MMIO req, we do not need to wait for cache ready
-  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
-  io.ldin.ready := l2_out.ready
-
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
@@ -67,6 +56,19 @@ class LoadUnit extends XSModule {
   isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
   l2_dcache := l2_dtlb_hit && !isMMIOReq
   l2_mmio   := l2_dtlb_hit && isMMIOReq
+
+  // l2_out is used to generate dcache req
+  l2_out.bits := DontCare
+  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
+  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
+  l2_out.bits.mask  := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
+  l2_out.bits.uop   := io.ldin.bits.uop
+  l2_out.bits.miss  := false.B
+  l2_out.bits.mmio  := l2_mmio
+  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
+  // when we are sure it's a MMIO req, we do not need to wait for cache ready
+  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
+  io.ldin.ready := l2_out.ready
 
   // send result to dcache
   // never send tlb missed or MMIO reqs to dcache
@@ -153,7 +155,7 @@ class LoadUnit extends XSModule {
     l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
     l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
     l4_out.bits.miss  := io.dcache.resp.bits.miss
-    } .otherwise {
+  } .otherwise {
     l4_out.bits := l4_bundle
   }
   l4_out.valid := l4_valid && !l4_out.bits.uop.needFlush(io.redirect)
