@@ -10,6 +10,7 @@ import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
 import xiangshan.backend.fu.HasCSRConst
+import chisel3.ExcitingUtils._
 
 trait HasTlbConst extends HasXSParameter {
   val Level = 3
@@ -323,6 +324,17 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         pf := pf & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
       }
     }
+  }
+
+  if (!env.FPGAPlatform) {
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntDtlbReqCnt0", Perf)
+    ExcitingUtils.addSource(valid(1)/* && vmEnable*/, "perfCntDtlbReqCnt1", Perf)
+    ExcitingUtils.addSource(valid(2)/* && vmEnable*/, "perfCntDtlbReqCnt2", Perf)
+    ExcitingUtils.addSource(valid(3)/* && vmEnable*/, "perfCntDtlbReqCnt3", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntDtlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && miss(1), "perfCntDtlbMissCnt1", Perf)
+    ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && miss(2), "perfCntDtlbMissCnt2", Perf)
+    ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && miss(3), "perfCntDtlbMissCnt3", Perf)
   }
 
   // Log

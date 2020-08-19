@@ -9,6 +9,7 @@ import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
 import xiangshan.mem.pipeline._
 import bus.simplebus._
+import chisel3.ExcitingUtils._
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
@@ -167,7 +168,9 @@ class PTW extends PtwModule {
   val level = RegInit(0.U(2.W)) // 0/1/2
   val latch = Reg(resp(0).bits.cloneType)
 
-  // tlbl2
+  /*
+   * tlbl2
+   */
   val (tlbHit, tlbHitData) = {
     // tlbl2 is by addr
     // TODO: optimize tlbl2'l2 tag len
@@ -186,7 +189,9 @@ class PTW extends PtwModule {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
   }
 
-  // ptwl1
+  /*
+   * ptwl1
+   */
   val l1addr = MakeAddr(satp.ppn, getVpnn(req.vpn, 2))
   val (l1Hit, l1HitData) = { // TODO: add excp
     // 16 terms may casue long latency, so divide it into 2 stage, like l2tlb
@@ -197,7 +202,9 @@ class PTW extends PtwModule {
     (hit, hitData)
   }
 
-  // ptwl2
+  /*
+   * ptwl2
+   */
   val l1MemBack = mem.resp.fire() && state===state_wait_resp && level===0.U
   val l1Res = Mux(l1Hit, l1HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
@@ -209,8 +216,8 @@ class PTW extends PtwModule {
     (ramData.hit(l2addr), ramData) // TODO: optimize tag
   }
 
-  // ptwl3
-  /* ptwl3 has not cache
+  /* ptwl3
+   * ptwl3 has not cache
    * ptwl3 may be functional conflict with l2-tlb
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
@@ -218,7 +225,9 @@ class PTW extends PtwModule {
   val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
-  // fsm
+  /*
+   * fsm
+   */
   assert(!(level===3.U))
   assert(!(tlbHit && (mem.req.valid || state===state_wait_resp))) // when tlb hit, should not req/resp.valid
 
@@ -269,7 +278,9 @@ class PTW extends PtwModule {
     }
   }
 
-  // mem:
+  /*
+   * mem
+   */
   mem.req.valid := state === state_req && 
                       ((level===0.U && !tlbHit && !l1Hit) ||
                       (level===1.U && !l2Hit) ||
@@ -285,7 +296,9 @@ class PTW extends PtwModule {
   assert(!mem.resp.valid || state===state_wait_resp, "mem.resp.valid:%d state:%d", mem.resp.valid, state)
   mem.s1_kill := false.B // NOTE: shoud not use it. for ptw will change to TL later
 
-  // resp
+  /*
+   * resp
+   */
   val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && mem.resp.fire()) || state===state_wait_ready
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
@@ -296,16 +309,19 @@ class PTW extends PtwModule {
     // TODO: the pf must not be correct, check it
   }
 
-  // sfence
-  // for ram is syncReadMem, so could not flush conditionally
-  // l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
+  /* sfence
+   * for ram is syncReadMem, so could not flush conditionally
+   * l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
+   */
   when (sfence.valid) {
     tlbv := 0.U
     l1v := 0.U
     l2v := 0.U
   }
 
-  // refill
+  /*
+   * refill
+   */
   assert(!mem.resp.fire() || state===state_wait_resp)
   when (mem.resp.fire() && !memPte.isPf()) {
     when (state===state_wait_resp && level===0.U && !memPte.isPf) {
@@ -324,6 +340,12 @@ class PTW extends PtwModule {
       tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
       tlbv := tlbv | UIntToOH(refillIdx)
     }
+  }
+
+  if (!env.FPGAPlatform) {
+    ExcitingUtils.addSource(validOneCycle, "perfCntPtwReqCnt", Perf)
+    ExcitingUtils.addSource(valid, "perfCntPtwCycleCnt", Perf)
+    ExcitingUtils.addSource(valid && tlbHit && state===state_req && level===0.U, "perfCntPtwL2TlbHit", Perf)
   }
 
   def PrintFlag(en: Bool, flag: Bool, nameEnable: String, nameDisable: String): Unit = {
