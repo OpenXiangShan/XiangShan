@@ -67,6 +67,7 @@ class LoadUnit extends XSModule {
   isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
   l2_dcache := l2_dtlb_hit && !isMMIOReq
   l2_mmio   := l2_dtlb_hit && isMMIOReq
+  l2_out.bits.mmio := l2_mmio
 
   // send result to dcache
   // never send tlb missed or MMIO reqs to dcache
@@ -109,10 +110,9 @@ class LoadUnit extends XSModule {
   val l3_valid = RegNext(l2_out.fire(), false.B)
   val l3_dtlb_miss = RegEnable(next = l2_dtlb_miss, enable = l2_out.fire(), init = false.B)
   val l3_dcache = RegEnable(next = l2_dcache, enable = l2_out.fire(), init = false.B)
-  val l3_mmio = RegEnable(next = l2_mmio, enable = l2_out.fire(), init = false.B)
   val l3_tlbFeedback = RegEnable(next = l2_tlbFeedback, enable = l2_out.fire())
-  val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
   val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
+  val l3_uop = l3_bundle.uop
   // dltb miss reqs ends here
   val l3_passdown = l3_valid && !l3_dtlb_miss && !l3_uop.needFlush(io.redirect)
 
@@ -124,7 +124,7 @@ class LoadUnit extends XSModule {
   XSDebug(l3_valid, "l3: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
     l3_bundle.uop.cf.pc, l3_bundle.vaddr, l3_bundle.paddr,
     l3_bundle.uop.ctrl.fuOpType, l3_bundle.data, l3_bundle.mask,
-    l3_dtlb_miss, l3_dcache, l3_mmio)
+    l3_dtlb_miss, l3_dcache, l3_bundle.mmio)
 
   XSDebug(io.tlbFeedback.valid, "tlbFeedback: hit %b roqIdx %d\n",
     io.tlbFeedback.bits.hit, io.tlbFeedback.bits.roqIdx)
@@ -140,7 +140,6 @@ class LoadUnit extends XSModule {
 
   val l4_valid = RegNext(l3_passdown, false.B)
   val l4_dcache = RegNext(l3_dcache, false.B)
-  val l4_mmio = RegNext(l3_mmio, false.B)
   val l4_bundle = RegNext(l3_bundle)
 
   assert(!(io.dcache.resp.ready && !io.dcache.resp.valid), "DCache response got lost")
@@ -192,7 +191,7 @@ class LoadUnit extends XSModule {
   XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dcache %b mmio %b\n",
     l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
     l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
-    l4_dcache, l4_mmio)
+    l4_dcache, l4_bundle.mmio)
 
   XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
     l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr , l5_in.bits.paddr , l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask )
