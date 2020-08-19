@@ -207,7 +207,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     val pad0 = Output(UInt(9.W))
     val tsr = Output(UInt(1.W))
     val tw = Output(UInt(1.W))
-    val tvm = Output(UInt(1.W))
+    val tvm = Output(UInt(1.W)) // TODO: add excp check
     val mxr = Output(UInt(1.W))
     val sum = Output(UInt(1.W))
     val mprv = Output(UInt(1.W))
@@ -266,7 +266,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   // | pad0 |
   // | tsr  |
   // | tw   |
-  // | tvm  |
+  // | tvm  | // TODO: add excp check 3.1.6.4
   // | mxr  |
   // | sum  |
   // | mprv |

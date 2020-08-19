@@ -23,7 +23,7 @@ class MiscUnit extends XSModule with MemoryOpConstants{
 
   switch (state) {
     is (s_tlb) {
-      when(io.in.valid && io.dtlb.resp.valid){
+      when(io.in.valid && io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
         state := s_cache_req
       }
     }
@@ -49,6 +49,7 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   io.dtlb.req.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlb.req.bits.debug.roqIdx := io.in.bits.uop.roqIdx
   io.dtlb.req.bits.debug.lsroqIdx := io.in.bits.uop.lsroqIdx
+  // TODO: add excp logic of dtlb.resp.bits.excp.pf
 
   // record paddr
   val paddr = RegEnable(io.dtlb.resp.bits.paddr, io.in.fire())

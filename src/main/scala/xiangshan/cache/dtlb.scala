@@ -217,8 +217,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // resp  // TODO: A/D has not being concerned
   for(i <- 0 until Width) {
-    // req(i).ready := resp(i).ready // true.B // ValidIO
-    resp(i).valid := valid(i) // TODO: check it's func in outer module
+    resp(i).valid := valid(i)
     resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
 
