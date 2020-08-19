@@ -90,11 +90,15 @@ class Sbuffer extends XSModule with HasSBufferConst {
     // 0. compare with former requests
     for (formerIdx <- 0 until storeIdx) {
       // i: former request
-      when (getTag(io.in(storeIdx).bits.addr) === updateInfo(formerIdx).newTag &&
-        (updateInfo(formerIdx).isUpdated || updateInfo(formerIdx).isInserted) && io.in(storeIdx).valid) {
+      when ((getTag(io.in(storeIdx).bits.addr) === updateInfo(formerIdx).newTag) &&
+        (updateInfo(formerIdx).isUpdated || updateInfo(formerIdx).isInserted) && io.in(storeIdx).valid && io.in(formerIdx).valid) {
         updateInfo(storeIdx).isForward := true.B
         updateInfo(formerIdx).isIgnored := true.B
         updateInfo(storeIdx).idx := updateInfo(formerIdx).idx
+        XSDebug("req#%d writes same line with req#%d\n", storeIdx.U, formerIdx.U)
+
+        updateInfo(storeIdx).isInserted := updateInfo(formerIdx).isInserted
+        updateInfo(storeIdx).isUpdated := updateInfo(formerIdx).isUpdated
 
 
         updateInfo(storeIdx).newTag := updateInfo(formerIdx).newTag
@@ -188,18 +192,21 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
     XSInfo(updateInfo(storeIdx).isUpdated && updateInfo(storeIdx).isInserted, "Error: one line is both updated and inserted!\n")
 
-    io.in(storeIdx).ready := updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted || updateInfo(storeIdx).isForward
+    if (storeIdx > 0)
+      io.in(storeIdx).ready := io.in(storeIdx - 1).ready && (updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted)
+    else
+      io.in(storeIdx).ready := updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted
 
     when(io.in(storeIdx).fire()){
 
 
       when(updateInfo(storeIdx).isIgnored) {
-        XSInfo("Ignore line#%d\n", storeIdx.U)
+        XSInfo("Ignore req#%d with paddr %x, mask %x, data %x\n", storeIdx.U, io.in(storeIdx).bits.addr, io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
 
 
-        // Update or Forward
+        // Update
         // ----------------------------------------
-      } .elsewhen(updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isForward) {
+      } .elsewhen(updateInfo(storeIdx).isUpdated) {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
@@ -213,7 +220,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
           int := updateInfo(storeIdx).newMask(i)
         }
 
-        XSInfo("Update line#%d with tag %x, mask: %x, data: %x\n", updateInfo(storeIdx).idx, cache(updateInfo(storeIdx).idx).tag,
+        XSInfo("Update line#%d with tag %x, mask %x, data %x\n", updateInfo(storeIdx).idx, cache(updateInfo(storeIdx).idx).tag,
           io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
 
 
@@ -273,6 +280,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
     when (!busy(oldestLineIdx, StorePipelineWidth)) {
       io.dcache.req.bits.data := cache(oldestLineIdx).data.asUInt()
       io.dcache.req.bits.mask := cache(oldestLineIdx).mask.asUInt()
+
+      XSDebug("[WaitForWB] idx: %d, addr: %x, mask: %x, data: %x\n", oldestLineIdx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     }
 
     for (i <- 0 until StorePipelineWidth) {
@@ -296,7 +305,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   when(io.dcache.resp.fire()) {
     waitingCacheLine.valid := false.B
     lru.miss
-    XSInfo("recv resp from dcache. wb tag %x\n", waitingCacheLine.tag)
+    XSInfo("recv resp from dcache. wb tag %x mask %x data %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
   }
 
 
@@ -306,26 +315,43 @@ class Sbuffer extends XSModule with HasSBufferConst {
     io.forward(loadIdx).forwardMask := VecInit(List.fill(instMaskWidth)(false.B))
     io.forward(loadIdx).forwardData := DontCare
 
-    when(getTag(io.forward(loadIdx).paddr) === waitingCacheLine.tag) {
-      (0 until XLEN / 8).map(i => {
-        io.forward(loadIdx).forwardData(i) := waitingCacheLine.data(i.U + getByteOffset(io.forward(loadIdx).paddr))
-        io.forward(loadIdx).forwardMask(i) := waitingCacheLine.mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
+    when(getTag(io.forward(loadIdx).paddr) === waitingCacheLine.tag && waitingCacheLine.valid) {
+      (0 until XLEN / 8).foreach(i => {
+        when (waitingCacheLine.mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
+          io.forward(loadIdx).forwardData(i) := waitingCacheLine.data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+          io.forward(loadIdx).forwardMask(i) := true.B
+        } .otherwise {
+          io.forward(loadIdx).forwardData(i) := 0.U
+          io.forward(loadIdx).forwardMask(i) := false.B
+        }
+
       })
     } .otherwise {
       (0 until StoreBufferSize).foreach(sBufIdx => {
-        when(getTag(io.forward(loadIdx).paddr) === cache(sBufIdx).tag) {
+        when(getTag(io.forward(loadIdx).paddr) === cache(sBufIdx).tag && cache(sBufIdx).valid) {
           // send data with mask in this line
           // this mask is not 'mask for cache line' and we need to check low bits of paddr
           // to get certain part of one line
           // P.S. data in io.in will be manipulated by lsroq
 
-          (0 until XLEN / 8).map(i => {
-            io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
-            io.forward(loadIdx).forwardMask(i) := cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
+          (0 until XLEN / 8).foreach(i => {
+
+            when (cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
+              io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+              io.forward(loadIdx).forwardMask(i) := true.B
+            } .otherwise {
+              io.forward(loadIdx).forwardData(i) := 0.U
+              io.forward(loadIdx).forwardMask(i) := false.B
+            }
+//            io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+//            io.forward(loadIdx).forwardMask(i) := cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
           })
 
-          XSDebug("[Forwarding] tag: %x data: %x mask: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).forwardData.asUInt(),
-            io.forward(loadIdx).forwardMask.asUInt())
+          when (io.forward(loadIdx).valid) {
+            XSDebug("[ForwardReq] paddr: %x mask: %x pc: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).mask, io.forward(loadIdx).pc)
+            XSDebug("[Forwarding] forward-data: %x forward-mask: %x\n", io.forward(loadIdx).forwardData.asUInt(),
+              io.forward(loadIdx).forwardMask.asUInt())
+          }
         }
       })
     }
