@@ -5,7 +5,8 @@ import device.{AXI4Timer, TLTimer}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLFuzzer, TLIdentityNode, TLXbar}
+import freechips.rocketchip.tilelink.{TLBuffer, TLFuzzer, TLIdentityNode, TLXbar}
+import utils.DebugIdentityNode
 import xiangshan.{HasXSParameter, XSCore}
 
 
@@ -50,9 +51,16 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     sim = !env.FPGAPlatform
   ))
 
-  mmioXbar := xsCore.mmio
-  clint.node := mmioXbar
-  extDev := mmioXbar
+  mmioXbar :=
+    TLBuffer() :=
+    DebugIdentityNode() :=
+    xsCore.mmio
+
+  clint.node :=
+    mmioXbar
+
+  extDev :=
+    mmioXbar
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{

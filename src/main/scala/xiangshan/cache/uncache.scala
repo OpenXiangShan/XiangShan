@@ -200,12 +200,12 @@ class UncacheImp(outer: Uncache)
   XSDebug(resp.fire(), "data: %x\n", req.bits.data)
 
   // print tilelink messages
-  when (mem_acquire.fire()) {
-    XSDebug("mem_acquire \n")
+  when(mem_acquire.valid){
+    XSDebug("mem_acquire valid, ready=%d ", mem_acquire.ready)
     mem_acquire.bits.dump
   }
   when (mem_grant.fire()) {
-    XSDebug("mem_grant \n")
+    XSDebug("mem_grant fire ")
     mem_grant.bits.dump
   }
 }

@@ -75,7 +75,6 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
   axiMMIO.axiBus :=
     AXI4UserYanker() :=
     TLToAXI4() :=
-    TLBuffer(BufferParams(2, flow = false, pipe = true)) := // use a tlbuffer to avoid CombLoop
     TLFragmenter(8, 8) :=
     soc.extDev
 
