@@ -189,13 +189,22 @@ class LoadUnit extends XSModule {
 
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
 
-  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dcache %b mmio %b\n",
+  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b\n",
     l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
     l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
-    l4_dcache, l4_mmio)
+    l4_out.bits.forwardData.asUInt, l4_out.bits.forwardMask.asUInt, l4_dcache, l4_mmio)
 
-  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr , l5_in.bits.paddr , l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask )
+  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x\n",
+    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr, l5_in.bits.paddr,
+    l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask,
+    l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt)
+
+  XSDebug(l4_valid, "l4: sbuffer forwardData: 0x%x forwardMask: %x\n",
+    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt)
+
+  XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
+    io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
+
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
