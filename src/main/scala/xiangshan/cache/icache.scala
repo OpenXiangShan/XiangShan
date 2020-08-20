@@ -232,12 +232,13 @@ class ICache extends ICacheModule
   val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))   //TODO: this is ugly
   val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
   for(b <- 0 until cacheDataBeats){
-    dataArray(b).io.w.req.valid := (state === s_memReadResp) && io.mem_grant.fire() && (b.U === readBeatCnt.value)
+    val writeOneBeat = (state === s_memReadResp) && io.mem_grant.fire() && (b.U === readBeatCnt.value)
+    dataArray(b).io.w.req.valid := writeOneBeat
     dataArray(b).io.w.req.bits.apply(   setIdx=get_idx(s3_req_pc), 
                                         data=io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle), 
                                         waymask=s3_wayMask)
 
-    when((state === s_memReadResp) && io.mem_grant.fire()){refillDataReg(b) := io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle)}
+    when(writeOneBeat) {refillDataReg(b) := io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle)}
   }
 
 
