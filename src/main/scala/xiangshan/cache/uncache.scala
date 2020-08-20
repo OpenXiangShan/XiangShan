@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, XSDebug}
+import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
@@ -23,9 +23,6 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
   })
 
-  // address from 'memend' haven't aligned to `DataBytes`,
-  // mask the low 'lgDataBytes' to align the address
-  val lgDataBytes = log2Up(DataBytes)
 
   val s_invalid :: s_refill_req :: s_refill_resp :: s_send_resp :: Nil = Enum(4)
 
@@ -54,25 +51,33 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 
     when (io.req.fire()) {
       req   := io.req.bits
-      // align the address
-      req.addr := Cat(io.req.bits.addr.head(PAddrBits-lgDataBytes), 0.U(lgDataBytes.W))
+      req.addr := io.req.bits.addr
       state := s_refill_req
     }
   }
 
   // --------------------------------------------
   // refill
-  // access 64bit data, addr are 64bit aligned
+  // TODO: determine 'lgSize' in memend
+  val size = PopCount(req.mask)
+  val (lgSize, legal) = PriorityMuxWithFlag(Seq(
+    1.U -> 0.U,
+    2.U -> 1.U,
+    4.U -> 2.U,
+    8.U -> 3.U
+  ).map(m => (size===m._1) -> m._2))
+  assert(!(io.mem_acquire.valid && !legal))
+
   val load = edge.Get(
     fromSource      = io.id,
     toAddress       = req.addr,
-    lgSize          = log2Up(DataBytes).U
+    lgSize          = lgSize
   )._2
 
   val store = edge.Put(
     fromSource      = io.id,
     toAddress = req.addr,
-    lgSize  = (log2Up(DataBytes)).U,
+    lgSize  = lgSize,
     data  = req.data,
     mask = req.mask
   )._2
