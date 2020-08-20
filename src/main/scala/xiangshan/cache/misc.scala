@@ -106,6 +106,45 @@ class MiscPipe extends DCacheModule
 
   s2_nack           := s2_nack_hit || s2_nack_set_busy || s2_nack_data
 
+  // lr/sc
+  val debug_sc_fail_addr = RegInit(0.U)
+  val debug_sc_fail_cnt  = RegInit(0.U(8.W))
+
+  val lrsc_count = RegInit(0.U(log2Ceil(lrscCycles).W))
+  val lrsc_valid = lrsc_count > lrscBackoff.U
+  val lrsc_addr  = Reg(UInt())
+  val s2_lr = s2_req.cmd === M_XLR && !s2_nack
+  val s2_sc = s2_req.cmd === M_XSC && !s2_nack
+  val s2_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s2_req.addr)
+  val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
+  val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
+  when (s2_valid) {
+    when (s2_hit && !s2_nack && s2_lr) {
+      lrsc_count := (lrscCycles - 1).U
+      lrsc_addr := get_block_addr(s2_req.addr)
+    } .otherwise {
+      lrsc_count := 0.U
+    }
+  } .elsewhen (lrsc_count > 0.U) {
+    lrsc_count := lrsc_count - 1.U
+  }
+
+  when (s2_valid) {
+    when (s2_req.addr === debug_sc_fail_addr) {
+      when (s2_sc_fail) {
+        debug_sc_fail_cnt := debug_sc_fail_cnt + 1.U
+      } .elsewhen (s2_sc) {
+        debug_sc_fail_cnt := 0.U
+      }
+    } .otherwise {
+      when (s2_sc_fail) {
+        debug_sc_fail_addr := s2_req.addr
+        debug_sc_fail_cnt  := 1.U
+      }
+    }
+  }
+  assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
+
   // only dump these signals when they are actually valid
   dump_pipeline_valids("MiscPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("MiscPipe s2", "s2_nack", s2_valid && s2_nack)
@@ -117,7 +156,7 @@ class MiscPipe extends DCacheModule
 
   val resp = Wire(ValidIO(new DCacheResp))
   resp.valid     := s2_valid
-  resp.bits.data := s2_data_word
+  resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word)
   resp.bits.meta := s2_req.meta
   resp.bits.miss := !s2_hit
   resp.bits.nack := s2_nack
@@ -142,7 +181,7 @@ class MiscPipe extends DCacheModule
   amoalu.io.rhs  := s2_req.data
 
   val s3_req   = RegNext(s2_req)
-  val s3_valid = RegNext(s2_valid && s2_hit && isWrite(s2_req.cmd) && !s2_nack)
+  val s3_valid = RegNext(s2_valid && s2_hit && isWrite(s2_req.cmd) && !s2_nack && !s2_sc_fail)
   val s3_tag_match_way = RegNext(s2_tag_match_way)
 
   s3_req.data := amoalu.io.out
