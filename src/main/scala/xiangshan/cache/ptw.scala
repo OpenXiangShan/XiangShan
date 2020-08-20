@@ -1,5 +1,6 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -8,13 +9,16 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 import xiangshan.mem._
 import chisel3.ExcitingUtils._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
 }
 
 abstract class PtwBundle extends XSBundle with HasPtwConst
-abstract class PtwModule extends XSModule with HasPtwConst 
+abstract class PtwModule(outer: PTW) extends LazyModuleImp(outer)
+  with HasXSParameter with HasXSLog with HasPtwConst
 
 class PteBundle extends PtwBundle{
   val reserved  = UInt(pteResLen.W)
@@ -97,8 +101,6 @@ class PtwResp extends PtwBundle {
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
-  //val mem = new SimpleBusUC(addrBits = PAddrBits) // Use Dcache temp
-  val mem = new DCacheLoadIO
 }
 
 object ValidHold {
@@ -121,7 +123,27 @@ object OneCycleValid {
   }
 }
 
-class PTW extends PtwModule {
+class PTW()(implicit p: Parameters) extends LazyModule {
+
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
+    clients = Seq(TLMasterParameters.v1(
+      "ptw"
+    ))
+  )))
+
+  lazy val module = new PTWImp(this)
+}
+
+class PTWImp(outer: PTW) extends PtwModule(outer){
+
+  val (mem, edge) = outer.node.out.head
+  val bundleA =  edge.Get(0.U, 1234.U, 6.U)._2
+  mem.a.bits := bundleA
+
+
+
+
+
   val io = IO(new PtwIO)
 
   val arb = Module(new Arbiter(new PtwReq, PtwWidth))
