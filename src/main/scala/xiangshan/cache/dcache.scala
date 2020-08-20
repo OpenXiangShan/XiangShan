@@ -57,6 +57,7 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
   def get_tag(addr: UInt) = addr >> untagBits
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
+  def get_block(addr: UInt) = addr >> blockOffBits
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
 
   def rowWords = rowBits/wordBits

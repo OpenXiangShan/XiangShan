@@ -39,12 +39,15 @@ class MiscPipe extends DCacheModule
   data_read.rmask  := UIntToOH(get_beat(io.lsu.req.bits.addr))
 
   // Pipeline
+  // ---------------------------------------
   // stage 0
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
 
   dump_pipeline_reqs("MiscPipe s0", s0_valid, s0_req)
 
+
+  // ---------------------------------------
   // stage 1
   val s1_req = RegNext(s0_req)
   val s1_valid = RegNext(s0_valid, init = false.B)
@@ -60,6 +63,7 @@ class MiscPipe extends DCacheModule
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
 
 
+  // ---------------------------------------
   // stage 2
   val s2_req   = RegNext(s1_req)
   val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
@@ -127,10 +131,40 @@ class MiscPipe extends DCacheModule
       resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
   }
 
-  // assign default value to output signals
-  io.data_write.valid := false.B
-  io.data_write.bits  := DontCare
 
+  // ---------------------------------------
+  // s3: do data write
+  // Store/amo hits
+  val amoalu   = Module(new AMOALU(DataBits))
+  amoalu.io.mask := s2_req.mask
+  amoalu.io.cmd  := s2_req.cmd
+  amoalu.io.lhs  := s2_data_word
+  amoalu.io.rhs  := s2_req.data
+
+  val s3_req   = RegNext(s2_req)
+  val s3_valid = RegNext(s2_valid && s2_hit && isWrite(s2_req.cmd) && !s2_nack)
+  val s3_tag_match_way = RegNext(s2_tag_match_way)
+
+  s3_req.data := amoalu.io.out
+
+  // write dcache if hit
+  // only needs to read the specific beat
+  val wmask = WireInit(VecInit((0 until refillCycles) map (i => 0.U(rowWords.W))))
+  val wdata = WireInit(VecInit((0 until refillCycles) map (i => Cat(0.U((encRowBits - rowBits).W), s3_req.data))))
+  wmask(get_beat(s3_req.addr)) := ~0.U(rowWords.W)
+
+  val data_write = io.data_write.bits
+  io.data_write.valid := s3_valid
+  data_write.rmask    := DontCare
+  data_write.way_en   := s3_tag_match_way
+  data_write.addr     := s3_req.addr
+  data_write.wmask    := wmask
+  data_write.data     := wdata
+
+  assert(!(io.data_write.valid && !io.data_write.ready))
+
+  // -------
+  // wire out signals for synchronization
   io.inflight_req_idxes(0).valid := io.lsu.req.valid
   io.inflight_req_idxes(1).valid := s1_valid
   io.inflight_req_idxes(2).valid := s2_valid

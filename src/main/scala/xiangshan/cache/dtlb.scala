@@ -33,5 +33,9 @@ class Dtlb extends XSModule {
     io.lsu(i).resp.valid := io.lsu(i).req.valid
     io.lsu(i).resp.bits.paddr := io.lsu(i).req.bits.vaddr
     io.lsu(i).resp.bits.miss := LFSR64()(5, 0) === 0.U
+    when(io.lsu(i).req.valid){
+      XSDebug("vaddr %x paddr %x miss %b\n",
+        io.lsu(i).req.bits.vaddr, io.lsu(i).resp.bits.paddr, io.lsu(i).resp.bits.miss)
+    }
   })
 }

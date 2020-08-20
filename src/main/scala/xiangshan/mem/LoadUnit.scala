@@ -36,36 +36,43 @@ class LoadUnit extends XSModule {
   val l4_out = Wire(Decoupled(new LsPipelineBundle))
   val l5_in  = Wire(Flipped(Decoupled(new LsPipelineBundle)))
 
-  XSDebug(l2_out.valid, "L2: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType, l2_out.bits.data, l2_out.bits.mask)
-  XSDebug(l4_out.valid, "L4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr, l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask)
-  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr , l5_in.bits.paddr , l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask )
-  XSDebug(l2_out.fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n",
-    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType)
-
   //-------------------------------------------------------
   // LD Pipeline Stage 2
   // Generate addr, use addr to query DCache Tag and DTLB
   //-------------------------------------------------------
 
-  // l2_out is used to generate dcache req
-  l2_out.bits := DontCare
-  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
-  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
-  l2_out.bits.uop := io.ldin.bits.uop
-  l2_out.bits.mask := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
-  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
-  l2_out.ready := io.dcache.req.ready
-  io.ldin.ready := l2_out.ready
+  val l2_dtlb_hit  = Wire(new Bool())
+  val l2_dtlb_miss = Wire(new Bool())
+  val l2_dcache = Wire(new Bool())
+  val l2_mmio = Wire(new Bool())
+  val isMMIOReq = Wire(new Bool())
 
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
-  
+
+  l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
+  l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss
+  isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
+  l2_dcache := l2_dtlb_hit && !isMMIOReq
+  l2_mmio   := l2_dtlb_hit && isMMIOReq
+
+  // l2_out is used to generate dcache req
+  l2_out.bits := DontCare
+  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
+  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
+  l2_out.bits.mask  := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
+  l2_out.bits.uop   := io.ldin.bits.uop
+  l2_out.bits.miss  := false.B
+  l2_out.bits.mmio  := l2_mmio
+  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
+  // when we are sure it's a MMIO req, we do not need to wait for cache ready
+  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
+  io.ldin.ready := l2_out.ready
+
   // send result to dcache
-  io.dcache.req.valid     := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
+  // never send tlb missed or MMIO reqs to dcache
+  io.dcache.req.valid     := l2_dcache
 
   io.dcache.req.bits.cmd  := MemoryOpConstants.M_XRD
   // TODO: vaddr
@@ -77,7 +84,7 @@ class LoadUnit extends XSModule {
   io.dcache.req.bits.meta.vaddr    := l2_out.bits.vaddr
   io.dcache.req.bits.meta.paddr    := io.dtlb.resp.bits.paddr
   io.dcache.req.bits.meta.uop      := l2_out.bits.uop
-  io.dcache.req.bits.meta.mmio     := AddressSpace.isMMIO(io.dcache.req.bits.meta.paddr)
+  io.dcache.req.bits.meta.mmio     := isMMIOReq
   io.dcache.req.bits.meta.tlb_miss := io.dtlb.resp.bits.miss
   io.dcache.req.bits.meta.mask     := l2_out.bits.mask
   io.dcache.req.bits.meta.replay   := false.B
@@ -87,26 +94,44 @@ class LoadUnit extends XSModule {
   l2_tlbFeedback.hit := !io.dtlb.resp.bits.miss
   l2_tlbFeedback.roqIdx := l2_out.bits.uop.roqIdx
 
+  // dump l2
+  XSDebug(l2_out.valid, "L2: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
+    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr,
+    l2_out.bits.uop.ctrl.fuOpType, l2_out.bits.data, l2_out.bits.mask,
+    l2_dtlb_miss, l2_dcache, l2_mmio)
+
+  XSDebug(l2_out.fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n",
+    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType)
+
   //-------------------------------------------------------
   // LD Pipeline Stage 3
   // Compare tag, use addr to query DCache Data
   //-------------------------------------------------------
 
-  val l3_tlbFeedback = RegNext(l2_tlbFeedback)
   val l3_valid = RegNext(l2_out.fire(), false.B)
+  val l3_dtlb_miss = RegEnable(next = l2_dtlb_miss, enable = l2_out.fire(), init = false.B)
+  val l3_dcache = RegEnable(next = l2_dcache, enable = l2_out.fire(), init = false.B)
+  val l3_mmio = RegEnable(next = l2_mmio, enable = l2_out.fire(), init = false.B)
+  val l3_tlbFeedback = RegEnable(next = l2_tlbFeedback, enable = l2_out.fire())
   val l3_uop = RegEnable(l2_out.bits.uop, l2_out.fire())
+  val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
+  // dltb miss reqs ends here
+  val l3_passdown = l3_valid && !l3_dtlb_miss && !l3_uop.needFlush(io.redirect)
+
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
-  val killValid = Reg(Bool())
-  val needKill = l3_uop.needFlush(io.redirect)
-  when (needKill || l4_out.valid) {
-    killValid := false.B
-  }
-  when (l2_out.fire()) {
-    killValid := true.B
-  }
-  io.dcache.s1_kill := needKill && killValid
-  // FIXIT
+  io.dcache.s1_kill := l3_valid && l3_dcache && l3_uop.needFlush(io.redirect)
+
+  // dump l3
+  XSDebug(l3_valid, "l3: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
+    l3_bundle.uop.cf.pc, l3_bundle.vaddr, l3_bundle.paddr,
+    l3_bundle.uop.ctrl.fuOpType, l3_bundle.data, l3_bundle.mask,
+    l3_dtlb_miss, l3_dcache, l3_mmio)
+
+  XSDebug(io.tlbFeedback.valid, "tlbFeedback: hit %b roqIdx %d\n",
+    io.tlbFeedback.bits.hit, io.tlbFeedback.bits.roqIdx)
+
+  XSDebug(io.dcache.s1_kill, "l3: dcache s1_kill\n")
 
   // Done in Dcache
 
@@ -115,16 +140,25 @@ class LoadUnit extends XSModule {
   // Dcache return result, do tag ecc check and forward check
   //-------------------------------------------------------
 
-  // result from dcache
-  io.dcache.resp.ready := true.B
-  l4_out.bits := DontCare
-  l4_out.bits.data  := io.dcache.resp.bits.data
-  l4_out.bits.paddr := io.dcache.resp.bits.meta.paddr
-  l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
-  l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
-  l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
-  l4_out.bits.miss  := io.dcache.resp.bits.miss
-  l4_out.valid      := io.dcache.resp.valid && !l4_out.bits.uop.needFlush(io.redirect)
+  val l4_valid = RegNext(l3_passdown, false.B)
+  val l4_dcache = RegNext(l3_dcache, false.B)
+  val l4_mmio = RegNext(l3_mmio, false.B)
+  val l4_bundle = RegNext(l3_bundle)
+
+  assert(!(io.dcache.resp.ready && !io.dcache.resp.valid), "DCache response got lost")
+  io.dcache.resp.ready := l4_valid && l4_dcache
+  when (io.dcache.resp.fire()) {
+    l4_out.bits := DontCare
+    l4_out.bits.data  := io.dcache.resp.bits.data
+    l4_out.bits.paddr := io.dcache.resp.bits.meta.paddr
+    l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
+    l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
+    l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
+    l4_out.bits.miss  := io.dcache.resp.bits.miss
+  } .otherwise {
+    l4_out.bits := l4_bundle
+  }
+  l4_out.valid := l4_valid && !l4_out.bits.uop.needFlush(io.redirect)
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
@@ -156,6 +190,23 @@ class LoadUnit extends XSModule {
   l4_out.bits.forwardData := forwardVec
 
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
+
+  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b\n",
+    l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
+    l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
+    l4_out.bits.forwardData.asUInt, l4_out.bits.forwardMask.asUInt, l4_dcache, l4_mmio)
+
+  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x\n",
+    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr, l5_in.bits.paddr,
+    l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask,
+    l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt)
+
+  XSDebug(l4_valid, "l4: sbuffer forwardData: 0x%x forwardMask: %x\n",
+    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt)
+
+  XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
+    io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
+
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
