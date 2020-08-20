@@ -2,38 +2,37 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
-
 import utils.XSDebug
-import bus.tilelink._
+import freechips.rocketchip.tilelink.{TLBundleC, TLEdgeOut, TLPermissions}
 
-class WritebackReq extends DCacheBundle {
+class WritebackReq(sourceBits: Int) extends DCacheBundle {
   val tag = Bits(tagBits.W)
   val idx = Bits(idxBits.W)
-  // TODO: make it configurable
-  val source = UInt(cfg.busParams.sourceBits.W)
+  val source = UInt(sourceBits.W)
   val param = UInt(TLPermissions.cWidth.W) 
   val way_en = Bits(nWays.W)
   val voluntary = Bool()
+
+  override def cloneType: WritebackReq.this.type = new WritebackReq(sourceBits).asInstanceOf[this.type]
 }
 
-class WritebackUnit extends DCacheModule {
+class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   val io = IO(new Bundle {
-    val req = Flipped(DecoupledIO(new WritebackReq()))
+    val req = Flipped(DecoupledIO(new WritebackReq(edge.bundle.sourceBits)))
     val resp = Output(Bool())
     val data_req = DecoupledIO(new L1DataReadReq)
     val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
-    val release = DecoupledIO(new TLBundleC(cfg.busParams))
+    val release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Input(Bool())
   })
 
-  val req = Reg(new WritebackReq())
+  val req = Reg(new WritebackReq(edge.bundle.sourceBits))
   val s_invalid :: s_data_read_req :: s_data_read_resp :: s_active :: s_grant :: s_resp :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
   val data_req_cnt = RegInit(0.U(log2Up(refillCycles+1).W))
 
-  val (_, last_beat, all_beats_done, beat_count) = TLUtilities.count(io.release)
+  val (_, last_beat, all_beats_done, beat_count) = edge.count(io.release)
 
   val wb_buffer = Reg(Vec(refillCycles, UInt(rowBits.W)))
   val acked = RegInit(false.B)
@@ -89,23 +88,24 @@ class WritebackUnit extends DCacheModule {
   }
 
   // release
-  val r_address = Cat(req.tag, req.idx) << blockOffBits
+  val r_address = (Cat(req.tag, req.idx) << blockOffBits).asUInt()
   val id = cfg.nMissEntries
-  val probeResponse = TLMasterUtilities.ProbeAck(
-                          params = cfg.busParams,
-                          fromSource = id.U,
-                          toAddress = r_address,
-                          lgSize = log2Ceil(cfg.blockBytes).U,
-                          reportPermissions = req.param,
-                          data = wb_buffer(data_req_cnt))
 
-  val voluntaryRelease = TLMasterUtilities.Release(
-                          params = cfg.busParams,
-                          fromSource = id.U,
-                          toAddress = r_address,
-                          lgSize = log2Ceil(cfg.blockBytes).U,
-                          shrinkPermissions = req.param,
-                          data = wb_buffer(data_req_cnt))._2
+  val probeResponse = edge.ProbeAck(
+    fromSource = id.U,
+    toAddress = r_address,
+    lgSize = log2Ceil(cfg.blockBytes).U,
+    reportPermissions = req.param,
+    data = wb_buffer(data_req_cnt)
+  )
+
+  val voluntaryRelease = edge.Release(
+    fromSource = id.U,
+    toAddress = r_address,
+    lgSize = log2Ceil(cfg.blockBytes).U,
+    shrinkPermissions = req.param,
+    data = wb_buffer(data_req_cnt)
+  )._2
 
   when (state === s_active) {
     io.release.valid := data_req_cnt < refillCycles.U
