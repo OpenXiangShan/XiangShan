@@ -241,7 +241,8 @@ class ICache extends ICacheModule
   }
 
  
-  s3_ready := !s3_valid || io.resp.fire() || io.flush(1)
+  //s3_ready := !s3_valid || io.resp.fire() || io.flush(1)
+  s3_ready := io.resp.ready && (state === s_idle) && !miss
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
