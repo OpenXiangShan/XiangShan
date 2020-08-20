@@ -278,7 +278,7 @@ class LoadUnit extends XSModule {
   hitLoadOut <> cdbArb.io.in(0)
   io.lsroq.ldout <> cdbArb.io.in(1) // missLoadOut
 
-  when(l5_in.valid){
-    XSDebug("load depipe %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
+  when(io.ldout.fire()){
+    XSDebug("ldout %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
   }
 }
