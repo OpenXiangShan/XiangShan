@@ -187,7 +187,7 @@ class LoadUnit extends XSModule {
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
 
-  PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
+  PipelineConnect(l4_out, l5_in, io.ldout.fire() || (l5_in.bits.miss || l5_in.bits.mmio) && l5_in.valid, false.B)
 
   XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b\n",
     l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
