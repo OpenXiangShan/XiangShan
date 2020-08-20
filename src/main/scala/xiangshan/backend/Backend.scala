@@ -24,8 +24,6 @@ import utils.ParallelOR
 class Backend extends XSModule
   with NeedImpl {
   val io = IO(new Bundle {
-    // val dmem = new SimpleBusUC(addrBits = VAddrBits)
-    val memMMU = Flipped(new MemMMUIO)
     val frontend = Flipped(new FrontendToBackendIO)
     val mem = Flipped(new MemToBackendIO)
   })

@@ -9,7 +9,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLClientNode, TLIdentityNode}
@@ -26,7 +26,7 @@ case class XSCoreParameters
   EnableStoreQueue: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
-  PAddrBits: Int = 32,
+  PAddrBits: Int = 40,
   HasFPU: Boolean = true,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
@@ -80,7 +80,11 @@ case class XSCoreParameters
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
-  RefillSize: Int = 512
+  RefillSize: Int = 512,
+  TlbEntrySize: Int = 32,
+  TlbL2EntrySize: Int = 256, // or 512
+  PtwL1EntrySize: Int = 16,
+  PtwL2EntrySize: Int = 256
 )
 
 trait HasXSParameter {
@@ -148,6 +152,11 @@ trait HasXSParameter {
   val StorePipelineWidth = core.StorePipelineWidth
   val StoreBufferSize = core.StoreBufferSize
   val RefillSize = core.RefillSize
+  val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
+  val TlbEntrySize = core.TlbEntrySize
+  val TlbL2EntrySize = core.TlbL2EntrySize
+  val PtwL1EntrySize = core.PtwL1EntrySize
+  val PtwL2EntrySize = core.PtwL2EntrySize
 
   val l1BusDataWidth = 64
 
@@ -225,17 +234,21 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
+  val ptw = Module(new PTW)
 
   // TODO: connect this
   dcache.io.lsu.misc <> DontCare
 
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
+
+  ptw.io.tlb(0) <> mem.io.ptw
+  ptw.io.tlb(1) <> DontCare
+  ptw.io.mem <> DontCare
+
   dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec
   dcache.io.lsu.lsroq <> mem.io.miscToDcache
   dcache.io.lsu.store <> mem.io.sbufferToDcache
   uncache.io.lsroq <> mem.io.uncache
 
-  backend.io.memMMU.imem <> DontCare
-  backend.io.memMMU.dmem <> DontCare
 }

@@ -5,7 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)

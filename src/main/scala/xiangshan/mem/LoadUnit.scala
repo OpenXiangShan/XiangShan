@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -19,7 +19,7 @@ class LoadUnit extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcache = new DCacheLoadIO
-    val dtlb = Flipped(new DtlbToLsuIO)
+    val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
   })
@@ -61,6 +61,11 @@ class LoadUnit extends XSModule {
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
+  io.dtlb.req.bits.idx := l2_out.bits.uop.roqIdx
+  io.dtlb.req.bits.cmd := TlbCmd.read
+  io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
+  io.dtlb.req.bits.debug.roqIdx := l2_out.bits.uop.roqIdx
+  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx
 
   l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
   l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss

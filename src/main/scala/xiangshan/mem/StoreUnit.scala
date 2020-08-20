@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.DtlbToLsuIO
+import xiangshan.cache.{TlbRequestIO, TlbCmd}
 
 class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dtlb = Flipped(new DtlbToLsuIO)
+    val dtlb = new TlbRequestIO()
     val lsroq = ValidIO(new LsPipelineBundle)
   })
 
@@ -55,6 +55,11 @@ class StoreUnit extends XSModule {
 
   io.dtlb.req.bits.vaddr := saddr
   io.dtlb.req.valid := io.stin.valid
+  io.dtlb.req.bits.idx := io.stin.bits.uop.roqIdx
+  io.dtlb.req.bits.cmd := TlbCmd.write
+  io.dtlb.req.bits.debug.pc := io.stin.bits.uop.cf.pc
+  io.dtlb.req.bits.debug.roqIdx := io.stin.bits.uop.roqIdx
+  io.dtlb.req.bits.debug.lsroqIdx := io.stin.bits.uop.lsroqIdx
 
   s2_out.bits := DontCare
   s2_out.bits.vaddr := saddr
