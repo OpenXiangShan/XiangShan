@@ -273,9 +273,6 @@ class LoadUnit extends XSModule {
   // pipeline control
   l5_in.ready := io.ldout.ready
 
-  io.lsroq.ldout.ready := false.B // TODO
-  // TODO: writeback missed loads
-
   val cdbArb = Module(new Arbiter(new ExuOutput, 2))
   io.ldout <> cdbArb.io.out
   hitLoadOut <> cdbArb.io.in(0)
