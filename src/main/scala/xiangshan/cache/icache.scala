@@ -152,7 +152,7 @@ class ICache extends ICacheModule
   val s2_fire = s2_valid && s3_ready
 
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
-  val datas = dataArray.map(b => RegNext(b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle))))
+  val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
 
   val hitVec = VecInit(metas.map(w => s2_valid && (w.tag === s2_tag) && w.valid))
   val victimWayMask = (1.U << LFSR64()(log2Up(nWays)-1,0))
@@ -168,15 +168,15 @@ class ICache extends ICacheModule
   s2_hit := ParallelOR(hitVec)
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
-  XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s1_req_pc,s1_req_mask)
-  XSDebug("[Stage 2] tag: %d  hit:%d\n",s2_tag,s2_hit)
+  XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
+  XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
   XSDebug("[Stage 2] victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b\n",victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
   //----------------------------
   //    Stage 3
   //----------------------------
   val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
-  val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s1_fire)
-  val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s1_fire)
+  val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
+  val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
   val s3_data = datas
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
@@ -186,7 +186,6 @@ class ICache extends ICacheModule
   val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
   val dataHitWayUInt = (Cat(dataHitWay(7),dataHitWay(6),dataHitWay(5),dataHitWay(4),dataHitWay(3),dataHitWay(2),dataHitWay(1),dataHitWay(0))).asUInt //TODO: this is ugly
   val allInBlock = s3_req_mask.andR
-  val fetchPacketStart = get_beat(s3_req_pc)
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
   outPacket := dataHitWayUInt >> (s3_req_pc(5,1) << 4)  //TODO: this is ugly
 
@@ -241,20 +240,22 @@ class ICache extends ICacheModule
     when(writeOneBeat) {refillDataReg(b) := io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle)}
   }
 
-
+ 
   s3_ready := !s3_valid || io.resp.fire() || io.flush(1)
 
   //TODO: coherence
-  XSDebug("[Stage 3] valid  pc: 0x%x  mask: %b \n",s3_valid,s1_req_pc,s1_req_mask)
+  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
   XSDebug("[Stage 3] state: %d\n",state)
+  XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
   XSDebug("[mem_acqurire] valid:%d  ready:%d  addr:%x \n",io.mem_acquire.valid,io.mem_acquire.ready,io.mem_acquire.bits.addr)
   XSDebug("[mem_grant] valid:%d  ready:%d  data:%x   finish:%d   readBeatcnt:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,io.mem_grant.bits.finish,readBeatCnt.value)
-  XSDebug("[Stage 3] hit:%d  miss：%d  waymask:%d \n",s3_hit,s3_miss,waymask.asUInt)
+  XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x \n",s3_hit,s3_miss,s3_wayMask.asUInt)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
   for(i <- 0 until cacheDataBeats){
       XSDebug("[Stage 3] %x\n",dataHitWay(i))
   }
   XSDebug("[Stage 3] outPacket :%x\n",outPacket)
+  XSDebug("[Stage 3] refillDataOut :%x\n",refillDataOut)
   //-----------out put------------
   val dataArrayReadyVec = dataArray.map(b => b.io.r.req.ready)
   io.req.ready := metaArray.io.r.req.ready && ParallelOR(dataArrayReadyVec) && s2_ready
@@ -265,7 +266,10 @@ class ICache extends ICacheModule
   io.resp.bits.pc := s3_req_pc
 
   when (io.flush(0)) { s2_valid := s1_fire }
-  when (io.flush(1)) { s3_valid := false.B }
+  when (io.flush(1)) { 
+    s3_valid := false.B 
+    state := s_idle        //Maybe not enough
+  }
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 
