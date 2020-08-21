@@ -143,13 +143,16 @@ class ICache extends ICacheModule
   //----------------------------
   //    Stage 2
   //----------------------------
-  val s2_valid = RegEnable(next = s1_valid, init = false.B, enable = s1_fire)
+  val s2_valid = RegInit(false.B)
   val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
   val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
   val s2_tag = get_tag(s2_req_pc)
   val s2_hit = WireInit(false.B)
   val s3_ready = WireInit(false.B)
   val s2_fire = s2_valid && s3_ready && !io.flush(0)
+  when(io.flush(0)) {s2_valid := s1_fire}
+  .elsewhen(s1_fire) { s2_valid := s1_valid}
+  .elsewhen(s2_fire) { s2_valid := false.B}
 
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
@@ -174,13 +177,16 @@ class ICache extends ICacheModule
   //----------------------------
   //    Stage 3
   //----------------------------
-  val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
+  val s3_valid = RegInit(false.B)
   val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
   val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
   val s3_data = datas
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
+  when(io.flush(1)) { s3_valid := false.B }
+  .elsewhen(s2_fire) { s3_valid := s2_valid }
+  .elsewhen(io.resp.fire()) { s3_valid := false.B }
 
   //icache hit
   val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
@@ -270,9 +276,6 @@ class ICache extends ICacheModule
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
-
-  when (io.flush(0)) { s2_valid := s1_fire }
-  when (io.flush(1)) { s3_valid := false.B }
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 
