@@ -47,17 +47,6 @@ class LoadUnit extends XSModule {
   val l2_mmio = Wire(new Bool())
   val isMMIOReq = Wire(new Bool())
 
-  // l2_out is used to generate dcache req
-  l2_out.bits := DontCare
-  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
-  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
-  l2_out.bits.uop := io.ldin.bits.uop
-  l2_out.bits.mask := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
-  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
-  // when we are sure it's a MMIO req, we do not need to wait for cache ready
-  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
-  io.ldin.ready := l2_out.ready
-
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
@@ -72,7 +61,19 @@ class LoadUnit extends XSModule {
   isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
   l2_dcache := l2_dtlb_hit && !isMMIOReq
   l2_mmio   := l2_dtlb_hit && isMMIOReq
-  l2_out.bits.mmio := l2_mmio
+
+  // l2_out is used to generate dcache req
+  l2_out.bits := DontCare
+  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
+  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
+  l2_out.bits.mask  := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
+  l2_out.bits.uop   := io.ldin.bits.uop
+  l2_out.bits.miss  := false.B
+  l2_out.bits.mmio  := l2_mmio
+  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
+  // when we are sure it's a MMIO req, we do not need to wait for cache ready
+  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
+  io.ldin.ready := l2_out.ready
 
   // send result to dcache
   // never send tlb missed or MMIO reqs to dcache
@@ -157,7 +158,7 @@ class LoadUnit extends XSModule {
     l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
     l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
     l4_out.bits.miss  := io.dcache.resp.bits.miss
-    } .otherwise {
+  } .otherwise {
     l4_out.bits := l4_bundle
   }
   l4_out.valid := l4_valid && !l4_out.bits.uop.needFlush(io.redirect)
@@ -191,15 +192,24 @@ class LoadUnit extends XSModule {
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
 
-  PipelineConnect(l4_out, l5_in, io.ldout.fire() || l5_in.bits.miss && l5_in.valid, false.B)
+  PipelineConnect(l4_out, l5_in, io.ldout.fire() || (l5_in.bits.miss || l5_in.bits.mmio) && l5_in.valid, false.B)
 
-  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dcache %b mmio %b\n",
+  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b\n",
     l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
     l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
-    l4_dcache, l4_bundle.mmio)
+    l4_out.bits.forwardData.asUInt, l4_out.bits.forwardMask.asUInt, l4_dcache, l4_out.bits.mmio)
 
-  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x\n",
-    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr , l5_in.bits.paddr , l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask )
+  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x\n",
+    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr, l5_in.bits.paddr,
+    l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask,
+    l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt)
+
+  XSDebug(l4_valid, "l4: sbuffer forwardData: 0x%x forwardMask: %x\n",
+    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt)
+
+  XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
+    io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
+
 
   //-------------------------------------------------------
   // LD Pipeline Stage 5
@@ -268,15 +278,12 @@ class LoadUnit extends XSModule {
   // pipeline control
   l5_in.ready := io.ldout.ready
 
-  io.lsroq.ldout.ready := false.B // TODO
-  // TODO: writeback missed loads
-
   val cdbArb = Module(new Arbiter(new ExuOutput, 2))
   io.ldout <> cdbArb.io.out
   hitLoadOut <> cdbArb.io.in(0)
   io.lsroq.ldout <> cdbArb.io.in(1) // missLoadOut
 
-  when(l5_in.valid){
-    XSDebug("load depipe %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
+  when(io.ldout.fire()){
+    XSDebug("ldout %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
   }
 }

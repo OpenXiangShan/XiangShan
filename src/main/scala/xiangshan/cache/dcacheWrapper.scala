@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters}
+import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
 import xiangshan.MicroOp
 
 // Meta data for dcache requests
@@ -120,6 +120,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val miscMissQueue = Module(new MiscMissQueue)
   val missQueue = Module(new MissQueue(edge))
   val wb = Module(new WritebackUnit(edge))
+  val prober = Module(new ProbeUnit(edge))
 
 
   //----------------------------------------
@@ -130,8 +131,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, MetaWritePortCount))
 
   metaWriteArb.io.in(MissQueueMetaWritePort)    <> missQueue.io.meta_write
-  metaWriteArb.io.in(ProberMetaWritePort).valid := false.B
-  metaWriteArb.io.in(ProberMetaWritePort).bits  := DontCare
+  metaWriteArb.io.in(ProberMetaWritePort)       <> prober.io.meta_write
 
   metaArray.io.write <> metaWriteArb.io.out
 
@@ -148,19 +148,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
   metaReadArb.io.in(MissQueueMetaReadPort)    <> missQueue.io.meta_read
-  metaReadArb.io.in(ProberMetaReadPort).valid := false.B
-  metaReadArb.io.in(ProberMetaReadPort).bits  := DontCare
+  metaReadArb.io.in(ProberMetaReadPort)       <> prober.io.meta_read
   metaReadArb.io.in(StorePipeMetaReadPort)    <> stu.io.meta_read
   metaReadArb.io.in(LoadPipeMetaReadPort)     <> ldu(0).io.meta_read
   metaReadArb.io.in(MiscPipeMetaReadPort)     <> misc.io.meta_read
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
-  missQueue.io.meta_resp <> metaArray.io.resp(0)
-  // metaArray.io.resp(0) <> prober.io.meta_resp
-  stu.io.meta_resp <> metaArray.io.resp(0)
-  ldu(0).io.meta_resp <> metaArray.io.resp(0)
-  misc.io.meta_resp <> metaArray.io.resp(0)
+  missQueue.io.meta_resp <>  metaArray.io.resp(0)
+  prober.io.meta_resp    <>  metaArray.io.resp(0)
+  stu.io.meta_resp       <>  metaArray.io.resp(0)
+  ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
+  misc.io.meta_resp      <>  metaArray.io.resp(0)
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
@@ -446,19 +445,21 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // prober
-  bus.b.ready        := false.B
+  // bus.b <> prober.io.req
+  prober.io.req := DontCare
 
   //----------------------------------------
   // wb
   // 0 goes to prober, 1 goes to missQueue evictions
   val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle.sourceBits), 2))
-  wbArb.io.in(0).valid := false.B
-  wbArb.io.in(0).bits  := DontCare
+  wbArb.io.in(0)       <> prober.io.wb_req
   wbArb.io.in(1)       <> missQueue.io.wb_req
   wb.io.req            <> wbArb.io.out
   missQueue.io.wb_resp := wb.io.resp
-  bus.c             <> wb.io.release
+  prober.io.wb_resp    := wb.io.resp
   wb.io.mem_grant      := bus.d.fire() && bus.d.bits.source === cfg.nMissEntries.U
+
+  TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
   def block_load(addr: UInt) = {
