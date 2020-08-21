@@ -2,66 +2,68 @@ package xstransforms
 
 import firrtl._
 import firrtl.ir._
+import top.{DisableAllPrintAnnotation, DisablePrintfAnnotation}
 
-class ShowPrintTransform extends Transform {
+import scala.collection.mutable
 
-  override def inputForm: CircuitForm = ChirrtlForm
-
-  override def outputForm: CircuitForm = ChirrtlForm
+class ShowPrintTransform extends Transform with DependencyAPIMigration {
 
   override protected def execute(state: CircuitState): CircuitState = {
     val c = state.circuit
-    val modules = scala.collection.mutable.ArrayBuffer[String]()
 
-    def containsPrint(s: Statement): Boolean = s match {
-      case p: Print => true
-      case b: Block =>
-        for (st <- b.stmts) if (containsPrint(st)) return true
-        false
-      case cond: Conditionally =>
-        if (containsPrint(cond.conseq)) return true
-        if (containsPrint(cond.alt)) return true
-        false
-      case _ => false
+    val blackList = state.annotations.collect {
+      case DisablePrintfAnnotation(m) => m
     }
+    val disableAll = state.annotations.collectFirst {
+      case DisableAllPrintAnnotation() => true
+    }.nonEmpty
 
-    for (m <- c.modules) {
-      m match {
-        case chiselModule: Module =>
-          if (containsPrint(chiselModule.body)) {
-            var en = true
-            var flag = true
-            while (flag) {
-              val str = scala.io.StdIn.readLine(s"Enable printf in [${m.name}]? Press Y(y)/N(n):")
-              if (str.isEmpty || str.toLowerCase.contains("y")) {
-                flag = false
-              } else if (str.toLowerCase().contains("n")) {
-                flag = false
-                en = false
-              }
-            }
-            modules += m.name
-          }
-        case _ => // do nothing
-      }
-    }
+    val top = c.main
+    val queue = new mutable.Queue[String]()
+    val ancestors = new mutable.HashMap[String, mutable.LinkedHashSet[String]]()
 
-    def disableModulePrintf(m: Module): DefModule = {
-      def disableStmtPrintf(s: Statement): Statement = s match {
-        case print: Print =>
-          EmptyStmt
+    queue += top
+    ancestors(top) = mutable.LinkedHashSet.empty
+
+    def findSubModules(m: DefModule): Unit = {
+      def viewStmt(s: Statement): Statement = s match {
+        case DefInstance(_, name, module) =>
+          ancestors(module) = ancestors(m.name) + m.name
+          queue += module
+          s
         case other =>
-          other.mapStmt(disableStmtPrintf)
+          other.mapStmt(viewStmt)
       }
-      m.mapStmt(disableStmtPrintf)
+      m.foreachStmt(viewStmt)
     }
 
-    def processModule(m: DefModule): DefModule = m match {
-      case chiselModule: Module =>
-        if (modules.contains(chiselModule.name)) chiselModule
-        else disableModulePrintf(chiselModule)
-      case otherModule =>
-        otherModule
+    while (queue.nonEmpty) {
+      val curr = queue.dequeue()
+      c.modules.find(m => m.name==curr).map(findSubModules)
+    }
+
+    def processModule(m: DefModule): DefModule = {
+      def disableModulePrint = {
+        def disableStmtPrint(s: Statement): Statement = s match {
+          case _: Print =>
+            EmptyStmt
+          case other =>
+            other.mapStmt(disableStmtPrint)
+        }
+        m.mapStmt(disableStmtPrint)
+      }
+      if(
+        disableAll ||
+        blackList.nonEmpty &&
+          (
+            blackList.contains(m.name) ||
+              blackList.map(b => ancestors(m.name).contains(b)).reduce(_||_)
+          )
+      ){
+        disableModulePrint
+      } else {
+        m
+      }
     }
 
     state.copy(c.mapModule(processModule))
