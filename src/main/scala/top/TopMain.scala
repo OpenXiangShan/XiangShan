@@ -27,7 +27,7 @@ class Top extends Module {
 }
 
 object TopMain extends App {
-  (new chisel3.stage.ChiselStage).execute(
+  XiangShanStage.execute(
     args,
     Seq(ChiselGeneratorAnnotation(() => new Top))
   )

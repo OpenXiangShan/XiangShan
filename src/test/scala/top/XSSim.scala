@@ -118,11 +118,10 @@ object TestMain extends App {
     else Parameters.debugParameters // open log
   )
   // generate verilog
-  (new chisel3.stage.ChiselStage).execute(
-    args.filterNot(_ == "--disable-log"),
+  XiangShanStage.execute(
+    args,
     Seq(
       ChiselGeneratorAnnotation(() => new XSSimTop)
-      // RunFirrtlTransformAnnotation(new ShowPrintTransform)
     )
   )
 }
