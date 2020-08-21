@@ -194,6 +194,10 @@ class ICache extends ICacheModule
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(cacheDataBeats)
 
+  val needFlush = RegInit(false.B)
+  when(io.flush(1) && (state =/= s_idle)){ needFlush := true.B }
+  when((state=== s_wait_resp) && needFlush){ needFlush := false.B }
+
   switch(state){
     is(s_idle){
       when(s3_miss && io.flush === 0.U){
@@ -211,7 +215,7 @@ class ICache extends ICacheModule
     }
 
     is(s_wait_resp){
-      when(io.resp.fire()||io.flush(0)||io.flush(1)){state := s_idle}
+      when(io.resp.fire() || needFlush){state := s_idle}
     }
 
   }
@@ -242,7 +246,7 @@ class ICache extends ICacheModule
 
  
   //s3_ready := !s3_valid || io.resp.fire() || io.flush(1)
-  s3_ready := io.resp.ready && (state === s_idle) && !miss
+  s3_ready := ((io.resp.fire() || !s3_valid) && !needFlush) || (needFlush && state === s_wait_resp)
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
@@ -267,10 +271,7 @@ class ICache extends ICacheModule
   io.resp.bits.pc := s3_req_pc
 
   when (io.flush(0)) { s2_valid := s1_fire }
-  when (io.flush(1)) { 
-    s3_valid := false.B 
-    state := s_idle        //Maybe not enough
-  }
+  when (io.flush(1)) { s3_valid := false.B }
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 
