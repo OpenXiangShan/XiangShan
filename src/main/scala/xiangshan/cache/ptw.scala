@@ -307,7 +307,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
     toAddress  = memAddr,
-    lgSize     = log2Up(XLEN).U
+    lgSize     = log2Up(XLEN/8).U
   )._2
   mem.a.bits  := pteRead
   mem.a.valid := state === state_req && 
@@ -333,7 +333,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * for ram is syncReadMem, so could not flush conditionally
    * l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
    */
-  when (sfence.valid) {
+  when (sfence.valid) { // TODO: flush optionally
     tlbv := 0.U
     l1v := 0.U
     l2v := 0.U
