@@ -201,11 +201,11 @@ class Lsroq extends XSModule {
   }
 
   when(io.dcache.req.fire()){
-    XSDebug("miss req: pc %x addr %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr) 
+    XSDebug("miss req: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x vaddr:0x%x\n", io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx, io.dcache.req.bits.meta.uop.lsroqIdx, io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr) 
   }
 
   when(io.dcache.resp.fire()){
-    XSDebug("miss resp: addr %x data %x\n", io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
+    XSDebug("miss resp: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x data %x\n", io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx, io.dcache.resp.bits.meta.uop.lsroqIdx, io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
   }
 
   // get load result from refill resp
