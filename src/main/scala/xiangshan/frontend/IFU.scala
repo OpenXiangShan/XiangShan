@@ -306,7 +306,8 @@ class IFU extends XSModule with HasIFUConst
   io.icacheReq.valid := if1_valid && if2_ready
   io.icacheReq.bits.addr := if1_npc
   io.icacheReq.bits.mask := mask(if1_npc)
-  io.icacheResp.ready := if3_ready
+  //io.icacheResp.ready := if3_ready
+  io.icacheResp.ready := if3_valid
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
   val inOrderBrHist = Wire(Vec(HistoryLength, UInt(1.W)))

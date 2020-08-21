@@ -130,7 +130,7 @@ class ICache extends ICacheModule
   val s1_req_mask = io.req.bits.mask
   val s1_idx = get_idx(s1_req_pc)
   val s2_ready = WireInit(false.B)
-  val s1_fire = s1_valid && s2_ready
+  val s1_fire = s1_valid && (s2_ready || io.flush(0))
 
   metaArray.io.r.req.valid := s1_valid
   metaArray.io.r.req.bits.apply(setIdx=s1_idx)
@@ -149,7 +149,7 @@ class ICache extends ICacheModule
   val s2_tag = get_tag(s2_req_pc)
   val s2_hit = WireInit(false.B)
   val s3_ready = WireInit(false.B)
-  val s2_fire = s2_valid && s3_ready
+  val s2_fire = s2_valid && s3_ready && !io.flush(0)
 
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
@@ -251,6 +251,7 @@ class ICache extends ICacheModule
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
   XSDebug("[Stage 3] state: %d\n",state)
+  XSDebug("[Stage 3] needflush:%d",needFlush)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
   XSDebug("[mem_acqurire] valid:%d  ready:%d  addr:%x \n",io.mem_acquire.valid,io.mem_acquire.ready,io.mem_acquire.bits.addr)
   XSDebug("[mem_grant] valid:%d  ready:%d  data:%x   finish:%d   readBeatcnt:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,io.mem_grant.bits.finish,readBeatCnt.value)
@@ -265,7 +266,7 @@ class ICache extends ICacheModule
   val dataArrayReadyVec = dataArray.map(b => b.io.r.req.ready)
   io.req.ready := metaArray.io.r.req.ready && ParallelOR(dataArrayReadyVec) && s2_ready
   
-  io.resp.valid := (s3_valid && s3_hit) || (state === s_wait_resp)
+  io.resp.valid := s3_valid && (s3_hit || state === s_wait_resp)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
