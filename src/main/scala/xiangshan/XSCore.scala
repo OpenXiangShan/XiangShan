@@ -12,7 +12,7 @@ import xiangshan.mem._
 import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
 import utils._
 
 case class XSCoreParameters
@@ -224,8 +224,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   val mem = TLXbar()
   val mmio = uncache.clientNode
 
-  mem := dcache.clientNode
-  mem := ptw.node
+  mem := TLCacheCork(sinkIds = 1) := dcache.clientNode
+  mem := TLCacheCork(sinkIds = 1) := ptw.node
 
   lazy val module = new XSCoreImp(this)
 }
