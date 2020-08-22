@@ -201,7 +201,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val v = RegInit(0.U(TlbEntrySize.W))
   val pf = RegInit(0.U(TlbEntrySize.W)) // TODO: when ptw resp a pf(now only page not found), store here
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
-  val g = Cat(entry.map(_.perm.g)) // TODO: need check if reverse is needed
+  val g = VecInit(entry.map(_.perm.g)).asUInt // TODO: need check if reverse is needed
 
   val entryHitVec = widthMapSeq{i => VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/))) }
   val hitVec  = widthMapSeq{ i => (v.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
