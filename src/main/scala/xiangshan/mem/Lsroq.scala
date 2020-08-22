@@ -75,6 +75,7 @@ class Lsroq extends XSModule {
     val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
       uop(index) := io.dp1Req(i).bits
+      uop(index).lsroqIdx := lsroqIdx // NOTE: add by zhangzifei, need check by others
       allocated(index) := true.B
       valid(index) := false.B
       writebacked(index) := false.B
