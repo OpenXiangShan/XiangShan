@@ -187,6 +187,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
   val state = RegInit(state_idle)
   val level = RegInit(0.U(2.W)) // 0/1/2
+  val levelNext = level + 1.U
   val latch = Reg(new PtwResp)
 
   // mem alias
@@ -248,9 +249,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   /*
    * fsm
    */
-  assert(!(level===3.U))
   assert(!(tlbHit && (mem.a.valid || state===state_wait_resp))) // when tlb hit, should not req/resp.valid
 
+  val notFound = WireInit(false.B)
   switch (state) {
     is (state_idle) {
       when (valid) {
@@ -266,11 +267,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         }.otherwise {
           state := state_wait_ready
         }
-      }.elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
-        level := level + 1.U // TODO: consider superpage
-      }.elsewhen (memReqReady) {
+      } .elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
+        level := levelNext // TODO: consider superpage
+      } .elsewhen (memReqReady) {
         state := state_wait_resp
-        assert(!(level === 3.U)) // NOTE: pte is not found after 3 layers(software system is wrong)
       }
     }
 
@@ -285,8 +285,17 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
             latch.pf := memPte.isPf()
           }
         }.otherwise {
-          state := state_req
-          level := level + 1.U
+          level := levelNext
+          when (level=/=2.U) {
+            state := state_req
+          } .otherwise {
+            notFound := true.B
+            when (resp(arbChosen).ready) {
+              state := state_idle
+            } .otherwise {
+              state := state_wait_ready
+            }
+          }
         }
       }
     }
@@ -318,12 +327,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   /*
    * resp
    */
-  val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf()) && memRespFire) || state===state_wait_ready
+  val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf() || (!memPte.isLeaf() && level===2.U)) && memRespFire) || state===state_wait_ready
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
     resp(i).bits.entry := Mux(tlbHit, tlbHitData,
-      Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memRdata, level, req.vpn)))
-    resp(i).bits.pf  := Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf())) 
+      Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memRdata, Mux(level===3.U, 2.U, level), req.vpn)))
+    resp(i).bits.pf  := Mux(level===3.U || notFound, true.B, Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf())))
     // TODO: the pf must not be correct, check it
   }
 

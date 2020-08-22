@@ -96,7 +96,7 @@ class TlbEntry extends TlbBundle {
   // }
 
   def hit(vpn: UInt/*, asid: UInt*/):Bool = {
-    vpnHit(vpn)// && asidHit(asid)
+    vpnHit(vpn) // && asidHit(asid)
   }
 
   def genTlbEntry(pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
