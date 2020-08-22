@@ -50,10 +50,9 @@ class LoadUnit extends XSModule {
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
-  io.dtlb.req.bits.idx := l2_out.bits.uop.roqIdx
   io.dtlb.req.bits.cmd := TlbCmd.read
+  io.dtlb.req.bits.roqIdx := l2_out.bits.uop.roqIdx
   io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.roqIdx := l2_out.bits.uop.roqIdx
   io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx
 
   l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss

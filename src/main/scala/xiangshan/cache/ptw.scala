@@ -82,20 +82,18 @@ class PtwEntry(tagLen: Int) extends PtwBundle {
 
 class PtwReq extends PtwBundle {
   val vpn = UInt(vpnLen.W)
-  val idx = UInt(RoqIdxWidth.W) // itlb could ignore it
 
   override def toPrintable: Printable = {
-    p"vpn:0x${Hexadecimal(vpn)} idx:${idx}"
+    p"vpn:0x${Hexadecimal(vpn)}"
   }
 }
 
 class PtwResp extends PtwBundle {
   val entry = new TlbEntry
-  val idx = UInt(RoqIdxWidth.W)
   val pf  = Bool() // simple pf no matter cmd
 
   override def toPrintable: Printable = {
-    p"entry:${entry} idx:${idx} pf:${pf}"
+    p"entry:${entry} pf:${pf}"
   }
 }
 
@@ -324,7 +322,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
     resp(i).bits.entry := Mux(tlbHit, tlbHitData,
       Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memRdata, level, req.vpn)))
-    resp(i).bits.idx := req.idx
     resp(i).bits.pf  := Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf())) 
     // TODO: the pf must not be correct, check it
   }
@@ -380,10 +377,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
   XSDebug(validOneCycle, "**New Ptw Req from ")
   PrintFlag(validOneCycle, arbChosen===0.U, "DTLB**:", "ITLB**:")
-  XSDebug(false, validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)} (roq)idx:${req.idx}\n")
+  XSDebug(false, validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)}\n")
   XSDebug(resp(arbChosen).fire(), "**Ptw Resp to ")
   PrintFlag(resp(arbChosen).fire(), arbChosen===0.U, "DTLB**:\n", "ITLB**\n")
-  XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready}) entry:${resp(arbChosen).bits.entry} (roq)idx:${resp(arbChosen).bits.idx} pf:${resp(arbChosen).bits.pf}\n")
+  XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready}) entry:${resp(arbChosen).bits.entry} pf:${resp(arbChosen).bits.pf}\n")
 
   XSDebug(sfence.valid, p"Sfence: sfence instr here ${sfence.bits}\n")
   XSDebug(valid, p"CSR: ${csr}\n")

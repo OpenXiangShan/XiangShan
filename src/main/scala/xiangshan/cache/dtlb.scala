@@ -114,16 +114,15 @@ object TlbCmd {
 
 class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
-  val idx = UInt(RoqIdxWidth.W)
   val cmd = TlbCmd()
+  val roqIdx = UInt(RoqIdxWidth.W)
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
-    val roqIdx = UInt(RoqIdxWidth.W)
     val lsroqIdx = UInt(LsroqIdxWidth.W)
   }
 
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} idx:${idx} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${debug.roqIdx} lsroqIdx:${debug.lsroqIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx} lsroqIdx:${debug.lsroqIdx}"
   }
 }
 
@@ -175,7 +174,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val priv   = csr.priv
   val ifecth = if (isDtlb) false.B else true.B
   val mode   = if (isDtlb) priv.dmode else priv.imode
-  val vmEnable = false.B // satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
+  val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
@@ -246,9 +245,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
   for (i <- 0 until Width) {
     ptwReqSeq(i).valid := valid(i) && miss(i)
-    ptwReqSeq(i).roqIdx := req(i).bits.idx
+    ptwReqSeq(i).roqIdx := req(i).bits.roqIdx
     ptwReqSeq(i).bits.vpn := reqAddr(i).vpn
-    ptwReqSeq(i).bits.idx := req(i).bits.idx
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
 

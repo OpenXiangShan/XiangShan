@@ -55,10 +55,9 @@ class StoreUnit extends XSModule {
 
   io.dtlb.req.bits.vaddr := saddr
   io.dtlb.req.valid := io.stin.valid
-  io.dtlb.req.bits.idx := io.stin.bits.uop.roqIdx
   io.dtlb.req.bits.cmd := TlbCmd.write
+  io.dtlb.req.bits.roqIdx := io.stin.bits.uop.roqIdx
   io.dtlb.req.bits.debug.pc := io.stin.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.roqIdx := io.stin.bits.uop.roqIdx
   io.dtlb.req.bits.debug.lsroqIdx := io.stin.bits.uop.lsroqIdx
 
   s2_out.bits := DontCare

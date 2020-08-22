@@ -44,10 +44,9 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   // keep firing until tlb hit
   io.dtlb.req.valid      := io.in.valid && state === s_tlb
   io.dtlb.req.bits.vaddr := io.in.bits.src1
-  io.dtlb.req.bits.idx   := io.in.bits.uop.roqIdx
+  io.dtlb.req.bits.roqIdx   := io.in.bits.uop.roqIdx
   io.dtlb.req.bits.cmd   := Mux(io.in.bits.uop.ctrl.fuOpType === LSUOpType.lr, TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.debug.pc := io.in.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.roqIdx := io.in.bits.uop.roqIdx
   io.dtlb.req.bits.debug.lsroqIdx := io.in.bits.uop.lsroqIdx
   // TODO: add excp logic of dtlb.resp.bits.excp.pf
 
