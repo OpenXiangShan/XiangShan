@@ -188,6 +188,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val v = RegInit(0.U(TlbEntrySize.W))
   val pf = RegInit(0.U(TlbEntrySize.W)) // TODO: when ptw resp a pf(now only page not found), store here
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
+  val g = Cat(entry.map(_.perm.g)) // TODO: need check if reverse is needed
 
   val entryHitVec = widthMapSeq{i => VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/))) }
   val hitVec  = widthMapSeq{ i => (v.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
@@ -294,19 +295,23 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   when (sfence.valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
-        v := 0.U // all should be flush
+        // all addr and all asid
+        v := 0.U
         pf := 0.U
-      }.otherwise { // all pte but only spec asid
-        v := v & ~VecInit(entry.map(e => /*e.asid === sfence.bits.asid && */!e.perm.g)).asUInt
-        pf := pf & ~VecInit(entry.map(e => /*e.asid === sfence.bits.asid && */!e.perm.g)).asUInt
+      }.otherwise {
+        // all addr but specific asid
+        v := v & g // TODO: need check if reverse is needed
+        pf := pf & g
       }
-    }.otherwise { // virtual rs1=/=0.U
-      when (sfence.bits.rs2) { // asid
-        v := v & ~VecInit(entry.map(_.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn)).asUInt
-        pf := pf & ~VecInit(entry.map(_.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn)).asUInt
-      }.otherwise { // particular va and asid
-        v := v & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
-        pf := pf & ~VecInit(entry.map(e => e.vpn === sfence.bits.addr.asTypeOf(vaBundle).vpn && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+    }.otherwise {
+      when (sfence.bits.rs2) {
+        // specific addr but all asid
+        v := v & ~VecInit(entry.map(_.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn))).asUInt
+        pf := pf & ~VecInit(entry.map(_.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn))).asUInt
+      }.otherwise {
+        // specific addr and specific asid
+        v := v & ~VecInit(entry.map(e => e.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+        pf := pf & ~VecInit(entry.map(e => e.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
       }
     }
   }

@@ -167,11 +167,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val tagLen1 = PAddrBits - log2Up(XLEN/8)
   val tagLen2 = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
   val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
-  val tlbv  = RegInit(0.U(TlbL2EntrySize.W))
+  val tlbv  = RegInit(0.U(TlbL2EntrySize.W)) // valid
+  val tlbg  = RegInit(0.U(TlbL2EntrySize.W)) // global
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = tagLen1)))
-  val l1v   = RegInit(0.U(PtwL1EntrySize.W))
+  val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
+  val l1g   = Cat(ptwl1.map(_.perm.g))
   val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
-  val l2v   = RegInit(0.U(PtwL2EntrySize.W))
+  val l2v   = RegInit(0.U(PtwL2EntrySize.W)) // valid
+  val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
 
   // fsm
   val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
@@ -326,36 +329,59 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     // TODO: the pf must not be correct, check it
   }
 
-  /* sfence
-   * for ram is syncReadMem, so could not flush conditionally
-   * l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
-   */
-  when (sfence.valid) { // TODO: flush optionally
-    tlbv := 0.U
-    l1v := 0.U
-    l2v := 0.U
-  }
-
   /*
    * refill
    */
   assert(!memRespFire || state===state_wait_resp)
   when (memRespFire && !memPte.isPf()) {
-    when (state===state_wait_resp && level===0.U && !memPte.isPf) {
+    when (level===0.U && !memPte.isLeaf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
       l1v := l1v | UIntToOH(refillIdx)
     }
-    when (state===state_wait_resp && level===1.U && !memPte.isPf) {
+    when (level===1.U && !memPte.isLeaf) {
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
       ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
       l2v := l2v | UIntToOH(refillIdx)
+      l2g := l2g | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
     }
-    when (state===state_wait_resp && memPte.isLeaf() && !memPte.isPf) {
+    when (memPte.isLeaf()) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
       tlbv := tlbv | UIntToOH(refillIdx)
+      tlbg := tlbg | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
+    }
+  }
+
+  /* sfence
+   * for ram is syncReadMem, so could not flush conditionally
+   * l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
+   */
+  when (sfence.valid) { // TODO: flush optionally
+    when (sfence.bits.rs1/*va*/) {
+      when (sfence.bits.rs2) {
+        // all va && all asid
+        tlbv := 0.U
+        tlbg := 0.U
+        l1v  := 0.U
+        l2v  := 0.U
+        l2g  := 0.U
+      } .otherwise {
+        // all va && specific asid except global
+        tlbv := tlbv & tlbg
+        l1v  := l1v  & l1g
+        l2v  := l2v  & l2g
+      }
+    } .otherwise {
+      when (sfence.bits.rs2) {
+        // specific leaf of addr && all asid
+        tlbv := tlbv & ~UIntToOH(sfence.bits.addr(log2Up(TlbL2EntrySize)-1+offLen, 0+offLen))
+        tlbg := tlbg & ~UIntToOH(sfence.bits.addr(log2Up(TlbL2EntrySize)-1+offLen, 0+offLen))
+      } .otherwise {
+        // specific leaf of addr && specific asid
+        tlbv := tlbv & (~UIntToOH(sfence.bits.addr(log2Up(TlbL2EntrySize)-1+offLen, 0+offLen)) | tlbg)
+      }
     }
   }
 
