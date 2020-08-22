@@ -14,6 +14,15 @@ import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMaster
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwWidth = 2
+
+  def MakeAddr(ppn: UInt, off: UInt) = {
+    require(off.getWidth == 9)
+    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
+  }
+
+  def getVpnn(vpn: UInt, idx: Int) = {
+    vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
+  }
 }
 
 abstract class PtwBundle extends XSBundle with HasPtwConst
@@ -156,8 +165,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
-
-
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
   // pde/pte-cache is cache of page-table, speeding up ptw
@@ -200,15 +207,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val vidx = RegEnable(tlbv(req.vpn(log2Up(TlbL2EntrySize)-1, 0)), validOneCycle)
     (ramData.hit(req.vpn) && vidx, ramData) // TODO: optimize tag
     // TODO: add exception and refill
-  }
-
-  def MakeAddr(ppn: UInt, off: UInt) = {
-    require(off.getWidth == 9)
-    Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
-  }
-
-  def getVpnn(vpn: UInt, idx: Int) = {
-    vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
   }
 
   /*

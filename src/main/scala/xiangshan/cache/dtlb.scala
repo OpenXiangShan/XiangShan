@@ -62,6 +62,19 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   }
 }
 
+class comBundle extends TlbBundle with HasRoqIdx{
+  val valid = Bool()
+  val bits = new PtwReq
+  def isPrior(that: comBundle): Bool = {
+    (this.valid && !that.valid) || (this.valid && that.valid && (that isAfter this))
+  }
+}
+object Compare {
+  def apply[T<:Data](xs: Seq[comBundle]): comBundle = {
+    ParallelOperation(xs, (a: comBundle, b: comBundle) => Mux(a isPrior b, a, b))
+  }
+}
+
 class TlbEntry extends TlbBundle {
   val vpn = UInt(vpnLen.W) // tag is vpn
   val ppn = UInt(ppnLen.W)
@@ -228,19 +241,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   ptw <> DontCare // TODO: need check it
   ptw.req.valid := ParallelOR(miss).asBool && state===state_idle
   ptw.resp.ready := state===state_wait
-  class comBundle extends TlbBundle with HasRoqIdx{
-    val valid = Bool()
-    val bits = new PtwReq
-
-    def isPrior(that: comBundle): Bool = {
-      (this.valid && !that.valid) || (this.valid && that.valid && (that isAfter this))
-    }
-  }
-  object Compare {
-    def apply[T<:Data](xs: Seq[comBundle]): comBundle = {
-      ParallelOperation(xs, (a: comBundle, b: comBundle) => Mux(a isPrior b, a, b))
-    }
-  }
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
   val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
