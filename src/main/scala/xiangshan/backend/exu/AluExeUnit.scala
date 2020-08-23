@@ -17,7 +17,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   val redirectHit = uop.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
-  val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !ALUOpType.isJump(func)
+  val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw)
   val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
   val sltu = !adderRes(XLEN)
@@ -46,19 +46,15 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
     ALUOpType.getBranchType(ALUOpType.bltu) -> sltu
   )
 
-  val isBru = ALUOpType.isBru(func)
-  // val isBranch =  io.in.bits.uop.cf.isBr// ALUOpType.isBranch(func)
-  val isBranch =  ALUOpType.isBranch(func)
-  val isJump = ALUOpType.isJump(func)
+  val isBranch = uop.cf.brUpdate.pd.isBr// ALUOpType.isBranch(func)
+  val isRVC = uop.cf.brUpdate.pd.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = Mux(isBranch, pc + offset, adderRes)(VAddrBits-1,0)
-  val isRVC = uop.cf.brUpdate.pd.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
-
-
-  io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
 
-  io.out.bits.redirectValid := io.out.valid && isBru//isBranch
+  io.in.ready := io.out.ready
+
+  io.out.bits.redirectValid := io.out.valid && isBranch
   io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
   io.out.bits.redirect.brTag := uop.brTag
@@ -78,7 +74,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
 
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := Mux(isJump, pcLatchSlot, aluRes)
+  io.out.bits.data := aluRes
   
   XSDebug(io.in.valid,
     "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:f:%d v:%d\n",
@@ -94,6 +90,6 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   )
   XSDebug(io.in.valid, "src1:%x src2:%x offset:%x func:%b pc:%x\n",
     src1, src2, offset, func, pc)
-  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d\n",
-     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken)
+  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBranch:%d target:%x taken:%d\n",
+     io.out.bits.data, aluRes, isRVC, isBranch, target, taken)
 }
