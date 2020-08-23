@@ -54,6 +54,12 @@ package object backend {
     def isBranch(func: UInt) = func(4)
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
+
+    // alu take sfence.vma and fence.i
+    def sfence = "b110000".U
+    def fencei = "b110001".U
+
+    def waitSbffer(func: UInt) = func===sfence
   }
 
   object MDUOpType {
@@ -111,8 +117,6 @@ package object backend {
     def atomD = "011".U
   }
 
-
-
   object BTBtype {
     def B = "b00".U  // branch
     def J = "b01".U  // jump
@@ -121,5 +125,4 @@ package object backend {
 
     def apply() = UInt(2.W)
   }
-
 }

@@ -143,7 +143,8 @@ class Decoder extends XSModule with HasInstrType {
   when(io.out.ctrl.isXSTrap){
     io.out.ctrl.lsrc1 := 10.U // a0
   }
-  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou
+  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou || (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence)
+  //io.out.ctrl.isBlocked := (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence) // TOOD: check it
 
 
   XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",
