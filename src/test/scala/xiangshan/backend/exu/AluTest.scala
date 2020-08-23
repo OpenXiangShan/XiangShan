@@ -19,7 +19,7 @@ class AluTest extends FlatSpec
   with HasPartialDecoupledDriver
 {
   it should "do simple test corrcetly" in {
-    test(new AluExeUnit){c =>
+    test(new AluExeUnit(false)){c =>
 
       c.io.in.initSource().setSourceClock(c.clock)
       c.io.out.initSink().setSinkClock(c.clock)
@@ -32,7 +32,7 @@ class AluTest extends FlatSpec
   }
 
   it should "do random add correctly" in {
-    test(new AluExeUnit){c =>
+    test(new AluExeUnit(false)){c =>
 
       c.io.in.initSource().setSourceClock(c.clock)
       c.io.out.initSink().setSinkClock(c.clock)

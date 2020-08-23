@@ -59,7 +59,7 @@ package object backend {
     def sfence = "b110000".U
     def fencei = "b110001".U
 
-    def waitSbffer(func: UInt) = func===sfence
+    def waitSbuffer(func: UInt) = func===sfence
   }
 
   object MDUOpType {

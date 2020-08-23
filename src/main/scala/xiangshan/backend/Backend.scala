@@ -29,7 +29,7 @@ class Backend extends XSModule
   })
 
 
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
+  val aluExeUnits = Module(new AluExeUnit(hasSfence = true)) +: Array.tabulate(exuParameters.AluCnt-1)(_ => Module(new AluExeUnit(hasSfence = false)))
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
