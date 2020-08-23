@@ -496,7 +496,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
   val wen = valid && func =/= CSROpType.jmp && Mux(addr===Satp.U, satpLegalMode, true.B)
-  // TODO: problem: is wen under mode check?
+  // TODO: problem: is wen under mode check? 
   // if satp.mode is illegal, will not write
   // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
@@ -627,7 +627,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
   // csrExceptionVec(instrPageFault) := hasInstrPageFault
-  csrExceptionVec(illegalInstr) := isIllegalAddr && wen // Trigger an illegal instr exception when unimplemented csr is being read/written
+  csrExceptionVec(illegalInstr) := isIllegalAddr && wen // Trigger an illegal instr exception when unimplemented csr is being read/written // TODO: if csrrw under wrong priv mode will cause illegal instr now ?
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
   val iduExceptionVec = io.cfIn.exceptionVec
