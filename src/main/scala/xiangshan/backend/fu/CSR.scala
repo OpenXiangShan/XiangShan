@@ -313,7 +313,9 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
   val sipMask  = "h222".U & mideleg
+  // val satp = RegInit(0.U(XLEN.W))
   val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
+  val satpMask = "hf0000fffffffffff".U // disable asid
   // val satp = RegInit(UInt(XLEN.W), 0.U)
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   val scause = RegInit(UInt(XLEN.W), 0.U)
@@ -324,7 +326,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val tlbBundle = Wire(new TlbCsrBundle)
   val sfence    = Wire(new SfenceBundle)
   tlbBundle.satp.mode := satp(63, 60)
-  tlbBundle.satp.asid := satp(59, 44)
+  tlbBundle.satp.asid := satp(59, 44) // NOTE: disable asid, always 0.U
   tlbBundle.satp.ppn  := satp(43,  0)
   sfence := 0.U.asTypeOf(new SfenceBundle)
   BoringUtils.addSource(tlbBundle, "TLBCSRIO")
@@ -436,7 +438,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable, sipMask),
 
     // Supervisor Protection and Translation
-    MaskedRegMap(Satp, satp),
+    MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
 
     // Machine Information Registers
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
