@@ -221,6 +221,12 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     assert(this.getWidth == XLEN)
   }
 
+  class SatpStruct extends Bundle {
+    val mode = UInt(4.W)
+    val asid = UInt(16.W)
+    val ppn  = UInt(44.W)
+  }
+
   class Interrupt extends Bundle {
     val e = new Priv
     val t = new Priv
@@ -325,9 +331,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
 
   val tlbBundle = Wire(new TlbCsrBundle)
   val sfence    = Wire(new SfenceBundle)
-  tlbBundle.satp.mode := satp(63, 60)
-  tlbBundle.satp.asid := satp(59, 44) // NOTE: disable asid, always 0.U
-  tlbBundle.satp.ppn  := satp(43,  0)
+  tlbBundle.satp := satp.asTypeOf(new SatpStruct)
   sfence := 0.U.asTypeOf(new SfenceBundle)
   BoringUtils.addSource(tlbBundle, "TLBCSRIO")
   BoringUtils.addSource(sfence, "SfenceBundle") // FIXME: move to MOU
@@ -489,12 +493,15 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
 
-  val wen = valid && func =/= CSROpType.jmp
+  // satp wen check
+  val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
+  val wen = valid && func =/= CSROpType.jmp && Mux(addr===Satp.U, satpLegalMode, true.B)
+  // TODO: problem: is wen under mode check?
+  // if satp.mode is illegal, will not write
   // Debug(){when(wen){printf("[CSR] addr %x wdata %x func %x rdata %x\n", addr, wdata, func, rdata)}}
   MaskedRegMap.generate(mapping, addr, rdata, wen, wdata)
-  val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
-  val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.out.bits := rdata
+  val isIllegalAddr = MaskedRegMap.isIllegalAddr(mapping, addr)
 
   // Fix Mip/Sip write
   val fixMapping = Map(
@@ -638,6 +645,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val retTarget = Wire(UInt(VAddrBits.W))
   val trapTarget = Wire(UInt(VAddrBits.W))
   ExcitingUtils.addSource(trapTarget, "trapTarget")
+  val resetSatp = addr === Satp.U && satpLegalMode && wen // write to satp will cause the pipeline be flushed
   io.redirect := DontCare
   io.redirectValid := (valid && func === CSROpType.jmp && !isEcall) || resetSatp
   //TODO: use pred pc instead pc+4
