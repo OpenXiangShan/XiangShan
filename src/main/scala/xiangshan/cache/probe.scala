@@ -4,16 +4,17 @@ import chisel3._
 import chisel3.util._
 
 import utils.XSDebug
-import bus.tilelink._
+import freechips.rocketchip.tilelink._
+import utils.{HasTLDump, XSDebug}
 
-class ProbeUnit extends DCacheModule {
+class ProbeUnit(edge: TLEdgeOut) extends DCacheModule {
   val io = IO(new Bundle {
-    val req = Flipped(Decoupled(new TLBundleB(cfg.busParams)))
-    val rep = Decoupled(new TLBundleC(cfg.busParams))
+    val req = Flipped(Decoupled(new TLBundleB(edge.bundle)))
+    val rep = Decoupled(new TLBundleC(edge.bundle))
     val meta_read = Decoupled(new L1MetaReadReq)
     val meta_resp   = Input(Vec(nWays, new L1Metadata))
     val meta_write = Decoupled(new L1MetaWriteReq)
-    val wb_req = Decoupled(new WritebackReq())
+    val wb_req = Decoupled(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp = Input(Bool())
   })
 
@@ -21,7 +22,7 @@ class ProbeUnit extends DCacheModule {
 
   val state = RegInit(s_invalid)
 
-  val req = Reg(new TLBundleB(cfg.busParams))
+  val req = Reg(new TLBundleB(edge.bundle))
   val req_idx = get_idx(req.address)
   val req_tag = get_tag(req.address)
   val req_block_addr = get_block_addr(req.address)
@@ -87,7 +88,7 @@ class ProbeUnit extends DCacheModule {
   // no need to write back, just release
   when (state === s_release) {
     io.rep.valid := true.B
-    io.rep.bits  := TLMasterUtilities.ProbeAck(req, report_param)
+    io.rep.bits  := edge.ProbeAck(req, report_param)
 
     when (io.rep.fire()) {
       state := Mux(tag_matches, s_meta_write_req, s_invalid)

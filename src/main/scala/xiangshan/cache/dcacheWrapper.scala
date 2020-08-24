@@ -1,11 +1,11 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import utils.XSDebug
-import bus.tilelink._
-import xiangshan.{MicroOp}
+import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
+import xiangshan.MicroOp
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -77,12 +77,32 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  // TODO: remove ptw port, it directly connect to L2
   val ptw = Flipped(new DCacheLoadIO)
-  val bus = new TLCached(cfg.busParams)
 }
 
-class DCache extends DCacheModule {
+
+class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+
+  val clientParameters = TLMasterPortParameters.v1(
+    Seq(TLMasterParameters.v1(
+      name = "dcache",
+      sourceId = IdRange(0, cfg.nMissEntries+1),
+      supportsProbe = TransferSizes(cfg.blockBytes)
+    ))
+  )
+
+  val clientNode = TLClientNode(Seq(clientParameters))
+
+  lazy val module = new DCacheImp(this)
+}
+
+
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
+
   val io = IO(new DCacheIO)
+
+  val (bus, edge) = outer.clientNode.out.head
 
   //----------------------------------------
   // core data structures
@@ -98,9 +118,9 @@ class DCache extends DCacheModule {
   val loadMissQueue = Module(new LoadMissQueue)
   val storeMissQueue = Module(new StoreMissQueue)
   val miscMissQueue = Module(new MiscMissQueue)
-  val missQueue = Module(new MissQueue)
-  val wb = Module(new WritebackUnit)
-  val prober = Module(new ProbeUnit)
+  val missQueue = Module(new MissQueue(edge))
+  val wb = Module(new WritebackUnit(edge))
+  val prober = Module(new ProbeUnit(edge))
 
 
   //----------------------------------------
@@ -135,15 +155,15 @@ class DCache extends DCacheModule {
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
-  metaArray.io.resp(0) <> missQueue.io.meta_resp
-  metaArray.io.resp(0) <> prober.io.meta_resp
-  metaArray.io.resp(0) <> stu.io.meta_resp
-  metaArray.io.resp(0) <> ldu(0).io.meta_resp
-  metaArray.io.resp(0) <> misc.io.meta_resp
+  missQueue.io.meta_resp <>  metaArray.io.resp(0)
+  prober.io.meta_resp    <>  metaArray.io.resp(0)
+  stu.io.meta_resp       <>  metaArray.io.resp(0)
+  ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
+  misc.io.meta_resp      <>  metaArray.io.resp(0)
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
-    metaArray.io.resp(w) <> ldu(w).io.meta_resp
+    ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }
 
   //----------------------------------------
@@ -409,36 +429,37 @@ class DCache extends DCacheModule {
   missFinish                            <> missFinishArb.io.out
 
   // tilelink stuff
-  io.bus.a <> missQueue.io.mem_acquire
-  io.bus.e <> missQueue.io.mem_finish
+  bus.a <> missQueue.io.mem_acquire
+  bus.e <> missQueue.io.mem_finish
 
-  when (io.bus.d.bits.source === cfg.nMissEntries.U) {
+  when (bus.d.bits.source === cfg.nMissEntries.U) {
     // This should be ReleaseAck
-    io.bus.d.ready := true.B
+    bus.d.ready := true.B
     missQueue.io.mem_grant.valid := false.B
     missQueue.io.mem_grant.bits  := DontCare
   } .otherwise {
     // This should be GrantData
-    missQueue.io.mem_grant <> io.bus.d
+    missQueue.io.mem_grant <> bus.d
   }
 
 
   //----------------------------------------
   // prober
-  io.bus.b <> prober.io.req
+  // bus.b <> prober.io.req
+  prober.io.req := DontCare
 
   //----------------------------------------
   // wb
   // 0 goes to prober, 1 goes to missQueue evictions
-  val wbArb = Module(new Arbiter(new WritebackReq, 2))
+  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle.sourceBits), 2))
   wbArb.io.in(0)       <> prober.io.wb_req
   wbArb.io.in(1)       <> missQueue.io.wb_req
   wb.io.req            <> wbArb.io.out
   missQueue.io.wb_resp := wb.io.resp
   prober.io.wb_resp    := wb.io.resp
-  wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMissEntries.U
+  wb.io.mem_grant      := bus.d.fire() && bus.d.bits.source === cfg.nMissEntries.U
 
-  TLArbiter.lowestFromSeq(io.bus.c, Seq(prober.io.rep, wb.io.release))
+  TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
   def block_load(addr: UInt) = {

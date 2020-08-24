@@ -6,6 +6,7 @@ Currently it only supports riscv32.
 ## Compile chisel code
 
 * Install `mill`. Refer to [the Manual section in this guide][mill].
+* Run `make init` to init git submodules
 * Run `make` to generate verilog code. The output file is `build/TopMain.v`.
 
 [mill]: http://lihaoyi.com/mill#manual
