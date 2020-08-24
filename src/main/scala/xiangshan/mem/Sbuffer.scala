@@ -261,7 +261,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   val oldestLineIdx: UInt = Wire(UInt(sBufferIndexWidth.W))
   oldestLineIdx := lru.way
-  XSInfo("Least recently used #[ %d ] line\n", validCnt)
+  XSInfo("Least recently used #[ %d ] line\n", oldestLineIdx)
 
   io.dcache.req.valid := false.B //needWriteToCache
   io.dcache.req.bits.addr := DontCare
