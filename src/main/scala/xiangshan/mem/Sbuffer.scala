@@ -267,8 +267,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   io.dcache.req.bits.addr := DontCare
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := DontCare
-
-  io.dcache.req.bits.cmd := DontCare // NOT USED
+  io.dcache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.dcache.req.bits.meta := DontCare // NOT USED
   io.dcache.resp.ready := waitingCacheLine.valid
 
