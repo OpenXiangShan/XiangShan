@@ -105,22 +105,28 @@ class Lsroq extends XSModule {
   (0 until LoadPipelineWidth).map(i => {
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x\n",
           io.loadIn(i).bits.uop.lsroqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
           io.loadIn(i).bits.paddr,
           io.loadIn(i).bits.data,
+          io.loadIn(i).bits.mask,
+          io.loadIn(i).bits.forwardData.asUInt,
+          io.loadIn(i).bits.forwardMask.asUInt,
           io.loadIn(i).bits.mmio,
           io.loadIn(i).bits.rollback
         )
       }.otherwise {
-        XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x\n",
+        XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x\n",
           io.loadIn(i).bits.uop.lsroqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
           io.loadIn(i).bits.paddr,
           io.loadIn(i).bits.data,
+          io.loadIn(i).bits.mask,
+          io.loadIn(i).bits.forwardData.asUInt,
+          io.loadIn(i).bits.forwardMask.asUInt,
           io.loadIn(i).bits.mmio,
           io.loadIn(i).bits.rollback
         )

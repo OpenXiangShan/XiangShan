@@ -1,11 +1,11 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-
-import utils.XSDebug
-import bus.tilelink._
-import xiangshan.{MicroOp}
+import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
+import xiangshan.MicroOp
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -77,12 +77,32 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  // TODO: remove ptw port, it directly connect to L2
   val ptw = Flipped(new DCacheLoadIO)
-  val bus = new TLCached(cfg.busParams)
 }
 
-class DCache extends DCacheModule {
+
+class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+
+  val clientParameters = TLMasterPortParameters.v1(
+    Seq(TLMasterParameters.v1(
+      name = "dcache",
+      sourceId = IdRange(0, cfg.nMissEntries+1),
+      supportsProbe = TransferSizes(cfg.blockBytes)
+    ))
+  )
+
+  val clientNode = TLClientNode(Seq(clientParameters))
+
+  lazy val module = new DCacheImp(this)
+}
+
+
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
+
   val io = IO(new DCacheIO)
+
+  val (bus, edge) = outer.clientNode.out.head
 
   //----------------------------------------
   // core data structures
@@ -98,8 +118,9 @@ class DCache extends DCacheModule {
   val loadMissQueue = Module(new LoadMissQueue)
   val storeMissQueue = Module(new StoreMissQueue)
   val miscMissQueue = Module(new MiscMissQueue)
-  val missQueue = Module(new MissQueue)
-  val wb = Module(new WritebackUnit)
+  val missQueue = Module(new MissQueue(edge))
+  val wb = Module(new WritebackUnit(edge))
+  val prober = Module(new ProbeUnit(edge))
 
 
   //----------------------------------------
@@ -110,8 +131,7 @@ class DCache extends DCacheModule {
   val metaWriteArb = Module(new Arbiter(new L1MetaWriteReq, MetaWritePortCount))
 
   metaWriteArb.io.in(MissQueueMetaWritePort)    <> missQueue.io.meta_write
-  metaWriteArb.io.in(ProberMetaWritePort).valid := false.B
-  metaWriteArb.io.in(ProberMetaWritePort).bits  := DontCare
+  metaWriteArb.io.in(ProberMetaWritePort)       <> prober.io.meta_write
 
   metaArray.io.write <> metaWriteArb.io.out
 
@@ -128,23 +148,22 @@ class DCache extends DCacheModule {
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
   metaReadArb.io.in(MissQueueMetaReadPort)    <> missQueue.io.meta_read
-  metaReadArb.io.in(ProberMetaReadPort).valid := false.B
-  metaReadArb.io.in(ProberMetaReadPort).bits  := DontCare
+  metaReadArb.io.in(ProberMetaReadPort)       <> prober.io.meta_read
   metaReadArb.io.in(StorePipeMetaReadPort)    <> stu.io.meta_read
   metaReadArb.io.in(LoadPipeMetaReadPort)     <> ldu(0).io.meta_read
   metaReadArb.io.in(MiscPipeMetaReadPort)     <> misc.io.meta_read
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
-  metaArray.io.resp(0) <> missQueue.io.meta_resp
-  // metaArray.io.resp(0) <> prober.io.meta_resp
-  metaArray.io.resp(0) <> stu.io.meta_resp
-  metaArray.io.resp(0) <> ldu(0).io.meta_resp
-  metaArray.io.resp(0) <> misc.io.meta_resp
+  missQueue.io.meta_resp <>  metaArray.io.resp(0)
+  prober.io.meta_resp    <>  metaArray.io.resp(0)
+  stu.io.meta_resp       <>  metaArray.io.resp(0)
+  ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
+  misc.io.meta_resp      <>  metaArray.io.resp(0)
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
-    metaArray.io.resp(w) <> ldu(w).io.meta_resp
+    ldu(w).io.meta_resp <> metaArray.io.resp(w)
   }
 
   //----------------------------------------
@@ -230,14 +249,26 @@ class DCache extends DCacheModule {
     assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.replay), "LSU should not replay requests")
   }
 
+  for (w <- 0 until LoadPipelineWidth) {
+    assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.mmio), "MMIO requests should not go to cache")
+    assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.tlb_miss), "TLB missed requests should not go to cache")
+  }
+
   // load miss queue
   loadMissQueue.io.lsu <> io.lsu.lsroq
+  assert(!io.lsu.lsroq.s1_kill, "Lsroq should never use s1 kill on loadMissQueue")
 
   //----------------------------------------
   // store pipe and store miss queue
   storeMissQueue.io.lsu    <> io.lsu.store
   assert(!(storeMissQueue.io.replay.req.fire() && !storeMissQueue.io.replay.req.bits.meta.replay),
     "StoreMissQueue should replay requests")
+  assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.replay),
+    "Sbuffer should not should replay requests")
+  assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.mmio),
+    "MMIO requests should not go to cache")
+  assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.tlb_miss),
+    "TLB missed requests should not go to cache")
 
   val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
   block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block && !storeMissQueue.io.replay.req.bits.meta.replay)
@@ -303,9 +334,14 @@ class DCache extends DCacheModule {
   miscMissQueue.io.lsu.s1_kill := false.B
 
   assert(!(miscReq.fire() && miscReq.bits.meta.replay),
-    "Misc should not replay requests")
+    "Misc does not support request replay")
+  assert(!(miscReq.fire() && miscReq.bits.meta.mmio),
+    "MMIO requests should not go to cache")
+  assert(!(miscReq.fire() && miscReq.bits.meta.tlb_miss),
+    "TLB missed requests should not go to cache")
   assert(!io.lsu.misc.s1_kill, "Lsroq should never use s1 kill on misc")
   assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc")
+
 
   //----------------------------------------
   // miss queue
@@ -393,35 +429,37 @@ class DCache extends DCacheModule {
   missFinish                            <> missFinishArb.io.out
 
   // tilelink stuff
-  io.bus.a <> missQueue.io.mem_acquire
-  io.bus.e <> missQueue.io.mem_finish
+  bus.a <> missQueue.io.mem_acquire
+  bus.e <> missQueue.io.mem_finish
 
-  when (io.bus.d.bits.source === cfg.nMissEntries.U) {
+  when (bus.d.bits.source === cfg.nMissEntries.U) {
     // This should be ReleaseAck
-    io.bus.d.ready := true.B
+    bus.d.ready := true.B
     missQueue.io.mem_grant.valid := false.B
     missQueue.io.mem_grant.bits  := DontCare
   } .otherwise {
     // This should be GrantData
-    missQueue.io.mem_grant <> io.bus.d
+    missQueue.io.mem_grant <> bus.d
   }
 
 
   //----------------------------------------
   // prober
-  io.bus.b.ready        := false.B
+  // bus.b <> prober.io.req
+  prober.io.req := DontCare
 
   //----------------------------------------
   // wb
   // 0 goes to prober, 1 goes to missQueue evictions
-  val wbArb = Module(new Arbiter(new WritebackReq, 2))
-  wbArb.io.in(0).valid := false.B
-  wbArb.io.in(0).bits  := DontCare
+  val wbArb = Module(new Arbiter(new WritebackReq(edge.bundle.sourceBits), 2))
+  wbArb.io.in(0)       <> prober.io.wb_req
   wbArb.io.in(1)       <> missQueue.io.wb_req
   wb.io.req            <> wbArb.io.out
   missQueue.io.wb_resp := wb.io.resp
-  io.bus.c             <> wb.io.release
-  wb.io.mem_grant      := io.bus.d.fire() && io.bus.d.bits.source === cfg.nMissEntries.U
+  prober.io.wb_resp    := wb.io.resp
+  wb.io.mem_grant      := bus.d.fire() && bus.d.bits.source === cfg.nMissEntries.U
+
+  TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
   def block_load(addr: UInt) = {

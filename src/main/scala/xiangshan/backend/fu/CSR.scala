@@ -322,7 +322,8 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
-  ExcitingUtils.addSource(satp, "CSRSATP")
+  // FIXME
+//  ExcitingUtils.addSource(satp, "CSRSATP")
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))

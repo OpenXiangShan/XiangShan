@@ -114,26 +114,38 @@ class MemToBackendIO extends XSBundle {
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val mem = new TLCached(l1BusParams)
-    val mmio = new TLCached(l1BusParams)
+    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
+    val miscToDcache = new DCacheLoadIO
+    val sbufferToDcache = new DCacheStoreIO
+    val uncache = new DCacheLoadIO
   })
 
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
   val miscUnit = Module(new MiscUnit)
-  val dcache = Module(new DCache)
-  val uncache = Module(new Uncache)
   // val mshq = Module(new MSHQ)
-  val dtlb = Module(new Dtlb)
+  val dtlb = Module(new Dtlb) //TODO: move dtlb out
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new Sbuffer)
 
   dtlb.io := DontCare
-  
-  dcache.io.bus <> io.mem
-  uncache.io.bus <> io.mmio
-  dcache.io.lsu.misc <> DontCare
-  dcache.io.ptw      <> DontCare
+
+  val loadUnitToDcacheVec = Wire(Vec(exuParameters.LduCnt, new DCacheLoadIO))
+
+  val sbufferToDcache = Wire(new DCacheStoreIO)
+
+  val lsroqToUncache = Wire(new DCacheLoadIO)
+
+  // lsroq and miscUnit share one dcache port
+  val lsroqToDcache = Wire(new DCacheLoadIO)
+  val miscUnitToDcache = Wire(new DCacheLoadIO)
+  // misc + miss --> arbiter --> miscToDcache
+  val miscToDcache = io.miscToDcache
+
+  // connect dcache ports
+  io.loadUnitToDcacheVec <> loadUnitToDcacheVec
+  io.sbufferToDcache <> sbufferToDcache
+  io.uncache <> lsroqToUncache
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -141,15 +153,15 @@ class Memend extends XSModule {
     loadUnits(i).io.ldout <> io.backend.ldout(i)
     loadUnits(i).io.redirect <> io.backend.redirect
     loadUnits(i).io.tlbFeedback <> io.backend.tlbFeedback(i)
-    loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
+    loadUnits(i).io.dcache <> loadUnitToDcacheVec(i)
     loadUnits(i).io.dtlb <> dtlb.io.lsu(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
-    
+
     lsroq.io.loadIn(i) <> loadUnits(i).io.lsroq.loadIn
     lsroq.io.ldout(i) <> loadUnits(i).io.lsroq.ldout
     lsroq.io.forward(i) <> loadUnits(i).io.lsroq.forward
   }
-  
+
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
     storeUnits(i).io.stin <> io.backend.stin(i)
@@ -159,7 +171,7 @@ class Memend extends XSModule {
     storeUnits(i).io.lsroq <> lsroq.io.storeIn(i)
   }
 
-  sbuffer.io.dcache <> dcache.io.lsu.store
+  sbuffer.io.dcache <> sbufferToDcache
 
   lsroq.io.stout <> io.backend.stout
   lsroq.io.commits <> io.backend.commits
@@ -167,28 +179,40 @@ class Memend extends XSModule {
   lsroq.io.lsroqIdxs <> io.backend.lsroqIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
-  
-  lsroq.io.dcache <> dcache.io.lsu.lsroq // TODO: Add AMO
-  lsroq.io.uncache <> uncache.io.lsroq
+
+  lsroq.io.dcache <> lsroqToDcache // TODO: Add AMO
+  lsroq.io.uncache <> lsroqToUncache
   // LSROQ to store buffer
   lsroq.io.sbuffer <> sbuffer.io.in
-  
+
   // MiscUnit
   // MiscUnit will override other control signials,
-  // as misc insts (LR/SC/AMO) will block the pipeline  
+  // as misc insts (LR/SC/AMO) will block the pipeline
   miscUnit.io <> DontCare
-  miscUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits) 
-  miscUnit.io.in.valid := io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou || 
+  miscUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
+  miscUnit.io.in.valid := io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou ||
     io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
   when(miscUnit.io.dtlb.req.valid){
-    dtlb.io.lsu(0) <> miscUnit.io.dtlb 
+    dtlb.io.lsu(0) <> miscUnit.io.dtlb
   }
-  when(miscUnit.io.dcache.req.valid){
-    dcache.io.lsu.lsroq.req <> miscUnit.io.dcache.req 
-  }
-  when(dcache.io.lsu.lsroq.resp.valid && dcache.io.lsu.lsroq.resp.bits.meta.id(1, 0) === DCacheMiscType.misc){
-    dcache.io.lsu.lsroq.resp <> miscUnit.io.dcache.resp
-  }
+  miscUnit.io.dcache <> miscUnitToDcache
+
+  assert(!(lsroqToDcache.req.valid && miscUnitToDcache.req.valid))
+  val memReqArb = Module(new Arbiter(miscToDcache.req.bits.cloneType, 2))
+  memReqArb.io.in(0) <> lsroqToDcache.req
+  memReqArb.io.in(1) <> miscUnitToDcache.req
+
+  miscToDcache.req <> memReqArb.io.out
+  miscToDcache.s1_kill := lsroqToDcache.s1_kill
+
+  lsroqToDcache.resp <> miscToDcache.resp
+  miscUnitToDcache.resp <> miscToDcache.resp
+  // override resp's valid bit
+  lsroqToDcache.resp.valid := miscToDcache.resp.valid &&
+    miscToDcache.resp.bits.meta.id(1, 0)===DCacheMiscType.miss
+  miscUnitToDcache.resp.valid := miscToDcache.resp.valid &&
+    miscToDcache.resp.bits.meta.id(1, 0)===DCacheMiscType.misc
+
   when(miscUnit.io.out.valid){
     io.backend.ldout(0) <> miscUnit.io.out
   }
