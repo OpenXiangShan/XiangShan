@@ -71,7 +71,7 @@ class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.brUpdate.taken := isBranch && taken
   // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
 
-  if (hasSfence) {
+  if (hasSfence) { // Sfence && fence.i here. // TODO: add fence.i
     val waitSbuffer = ALUOpType.waitSbuffer(func)
     val sbEmpty = WireInit(true.B) // TODO: use tileLink and init is false.B
     val validNeg = RegInit(true.B)
@@ -89,6 +89,7 @@ class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
     io.out.bits.data := aluRes
     io.in.ready := Mux(waitSbuffer, sbEmpty && io.out.ready, io.out.ready)
   } else {
+    assert(!(ALUOpType.sfence===func && iovalid))
     io.in.ready := io.out.ready
     io.out.valid := valid
     io.out.bits.uop <> io.in.bits.uop
