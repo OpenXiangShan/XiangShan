@@ -140,6 +140,8 @@ class ICache extends ICacheModule
   }
   XSDebug("[Stage 1] v : r : f  (%d  %d  %d)  request pc: 0x%x  mask: %b\n",s1_valid,s2_ready,s1_fire,s1_req_pc,s1_req_mask)
   XSDebug("[Stage 1] index: %d\n",s1_idx)
+  
+  
   //----------------------------
   //    Stage 2
   //----------------------------
@@ -174,6 +176,8 @@ class ICache extends ICacheModule
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
   XSDebug("[Stage 2] victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b\n",victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
+  
+  
   //----------------------------
   //    Stage 3
   //----------------------------
@@ -201,8 +205,8 @@ class ICache extends ICacheModule
   val readBeatCnt = Counter(cacheDataBeats)
 
   val needFlush = RegInit(false.B)
-  when(io.flush(1) && (state =/= s_idle)){ needFlush := true.B }
-  when((state=== s_wait_resp) && needFlush){ needFlush := false.B }
+  when(io.flush(1) && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
+  .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
   switch(state){
     is(s_idle){

@@ -13,7 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=shift $(EMU_ARGS) run 2>&1 | tee > shift.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=min3 $(EMU_ARGS) run 2>&1 | tee > min3.log
 
 # ------------------------------------------------------------------
 # run different test sets
