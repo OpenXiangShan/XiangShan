@@ -81,7 +81,7 @@ class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
     sfence.valid := valid && validNeg && ALUOpType.sfence===func
     sfence.bits.rs1 := uop.ctrl.lsrc1===0.U
     sfence.bits.rs2 := uop.ctrl.lsrc2===0.U
-    sfence.bits.addr := aluRes
+    sfence.bits.addr := src1
     BoringUtils.addSource(sfence, "SfenceBundle")
 
     io.out.valid := Mux(waitSbuffer, valid && sbEmpty, valid)
