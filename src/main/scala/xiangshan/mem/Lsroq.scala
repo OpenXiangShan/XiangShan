@@ -681,7 +681,13 @@ class Lsroq extends XSModule {
   }
 
   when(io.uncache.req.fire()){
-    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr, io.uncache.req.bits.data, io.uncache.req.bits.cmd, io.uncache.req.bits.mask) 
+    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
+      uop(ringBufferTail).cf.pc,
+      io.uncache.req.bits.addr,
+      io.uncache.req.bits.data,
+      io.uncache.req.bits.cmd,
+      io.uncache.req.bits.mask
+    )
   }
 
   when(io.uncache.resp.fire()){
