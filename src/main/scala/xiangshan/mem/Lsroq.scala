@@ -567,7 +567,7 @@ class Lsroq extends XSModule {
       val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && !store(j) && valid(j)
+        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && !store(j) && (valid(j) || listening(j) || miss(j))
         // TODO: update refilled data
         val violationVec = (0 until 8).map(k => data(j).mask(k) && io.storeIn(i).bits.mask(k))
         Cat(violationVec).orR() && entryNeedCheck
