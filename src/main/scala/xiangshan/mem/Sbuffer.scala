@@ -62,6 +62,9 @@ class Sbuffer extends XSModule with HasSBufferConst {
   def getTag(pa: UInt): UInt =
     pa(PAddrBits - 1, PAddrBits - tagWidth)
 
+  def getAddr(tag: UInt): UInt =
+    Cat(tag, 0.U((PAddrBits - tagWidth).W))
+
   def getByteOffset(pa: UInt): UInt =
     Cat(pa(offsetWidth - 1, log2Up(8)), Fill(3, 0.U))
 
@@ -274,7 +277,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   when (validCnt === StoreBufferSize.U && !waitingCacheLine.valid) {
     // assert valid and send data + mask + addr(ends with 000b) to d-cache
-    io.dcache.req.bits.addr := Cat(cache(oldestLineIdx).tag, 0.U(3.W))
+    io.dcache.req.bits.addr := getAddr(cache(oldestLineIdx).tag)
 
     when (!busy(oldestLineIdx, StorePipelineWidth)) {
       io.dcache.req.bits.data := cache(oldestLineIdx).data.asUInt()
