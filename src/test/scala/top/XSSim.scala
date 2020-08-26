@@ -136,11 +136,10 @@ object TestMain extends App {
   )
   implicit val p = config.Parameters.empty
   // generate verilog
-  (new chisel3.stage.ChiselStage).execute(
-    args.filterNot(_ == "--disable-log"),
+  XiangShanStage.execute(
+    args,
     Seq(
       ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
-      // RunFirrtlTransformAnnotation(new ShowPrintTransform)
     )
   )
 }
