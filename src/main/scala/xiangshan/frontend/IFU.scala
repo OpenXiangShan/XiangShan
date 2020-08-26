@@ -319,6 +319,7 @@ class IFU extends XSModule with HasIFUConst
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
+  bpu.io.cacheValid := io.icacheResp.valid
   bpu.io.in.valid := if1_fire
   bpu.io.in.bits.pc := if1_npc
   bpu.io.in.bits.hist := hist.asUInt
