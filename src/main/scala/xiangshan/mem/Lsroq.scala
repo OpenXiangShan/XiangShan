@@ -649,7 +649,9 @@ class Lsroq extends XSModule {
 
   // setup misc mem access req
   // mask / paddr / data can be get from lsroq.data
+  val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
+    (commitType === CommitType.STORE || commitType === CommitType.LOAD) && 
     io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
     !io.commits(0).bits.isWalk
 
