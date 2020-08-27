@@ -13,8 +13,7 @@ class Frontend extends XSModule {
   })
 
   val ifu = Module(new IFU)
-  val icache = Module(new ICache)
-  val fakeicache = Module(new FakeCache)
+  val icache = ICache(enableICache = true)
   val ibuffer =  if(EnableLB) Module(new LoopBuffer) else Module(new Ibuffer)
 
   val needFlush = io.backend.redirect.valid
@@ -26,8 +25,6 @@ class Frontend extends XSModule {
 
   //cache
   icache.io.req <> ifu.io.icacheReq
-  fakeicache.io.in <> icache.io.mem_acquire
-  icache.io.mem_grant <> fakeicache.io.out
   ifu.io.icacheResp <> icache.io.resp
   icache.io.flush := ifu.io.icacheFlush
 

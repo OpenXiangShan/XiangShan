@@ -115,6 +115,11 @@ class ICacheIO extends ICacheBundle
   val flush = Input(UInt(2.W))
 }
 
+/* ------------------------------------------------------------
+ * This abstract module defined ICache base pipeline and IO
+ * ------------------------------------------------------------
+ */
+
 abstract class ICacheBase extends XSModule with HasICacheParameters
 {
     val io = IO(new ICacheIO)
@@ -156,6 +161,10 @@ abstract class ICacheBase extends XSModule with HasICacheParameters
 }
 
 
+/* ------------------------------------------------------------
+ * This module is a SRAM with 4-way associated mapping
+ * ------------------------------------------------------------
+ */
 class ICache extends ICacheBase
 {
 
@@ -302,6 +311,13 @@ class ICache extends ICacheBase
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 }
 
+/* ------------------------------------------------------------
+ * This module is a RAM scope, and is only for simulation debug.
+ * Under this module, icache is assumed no cache miss.
+ * (Warning!) And with no consideration for cache coherence
+ * ------------------------------------------------------------
+ */
+
 class FakeICache extends ICacheBase
 {
     val memByte = 128 * 1024 * 1024
@@ -356,7 +372,6 @@ class FakeICache extends ICacheBase
   val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
 
-
   XSDebug("[Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
   XSDebug(false,true.B,"\n")
   XSDebug("[Flush icache] flush:%b\n", io.flush)
@@ -368,5 +383,24 @@ class FakeICache extends ICacheBase
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := s3_ram_out
   io.resp.bits.mask := s3_req_mask
+}
+
+
+//TODO: consider L2 or L3 cache connection
+object ICache{
+  def apply(enableICache: Boolean = true) = {
+    if(enableICache){
+      val fakecache = Module(new FakeCache)
+      val icache = Module(new ICache)
+
+      fakecache.io.in <> icache.io.mem_acquire
+      icache.io.mem_grant <> fakecache.io.out
+      icache
+    }
+    else {
+      val fakeicache = Module(new FakeICache)
+      fakeicache
+    }
+  }
 }
 
