@@ -266,10 +266,15 @@ class Sbuffer extends XSModule with HasSBufferConst {
   oldestLineIdx := lru.way
   XSInfo("Least recently used #[ %d ] line\n", oldestLineIdx)
 
+  val dcacheData = Wire(UInt(io.dcache.req.bits.data.getWidth.W))
+  val dcacheMask = Wire(UInt(io.dcache.req.bits.mask.getWidth.W))
+  dcacheData := DontCare
+  dcacheMask := DontCare
+
   io.dcache.req.valid := false.B //needWriteToCache
   io.dcache.req.bits.addr := DontCare
-  io.dcache.req.bits.data := DontCare
-  io.dcache.req.bits.mask := DontCare
+  io.dcache.req.bits.data := dcacheData
+  io.dcache.req.bits.mask := dcacheMask
   io.dcache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.dcache.req.bits.meta := DontCare // NOT USED
   io.dcache.resp.ready := waitingCacheLine.valid
@@ -280,8 +285,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
     io.dcache.req.bits.addr := getAddr(cache(oldestLineIdx).tag)
 
     when (!busy(oldestLineIdx, StorePipelineWidth)) {
-      io.dcache.req.bits.data := cache(oldestLineIdx).data.asUInt()
-      io.dcache.req.bits.mask := cache(oldestLineIdx).mask.asUInt()
+      dcacheData := cache(oldestLineIdx).data.asUInt()
+      dcacheMask := cache(oldestLineIdx).mask.asUInt()
 
       XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n", oldestLineIdx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     } .otherwise {
@@ -290,8 +295,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
     for (i <- 0 until StorePipelineWidth) {
       when (updateInfo(i).idx === oldestLineIdx && updateInfo(i).isUpdated && io.in(i).valid) {
-        io.dcache.req.bits.data := updateInfo(i).newData.asUInt()
-        io.dcache.req.bits.mask := updateInfo(i).newMask.asUInt()
+        dcacheData := updateInfo(i).newData.asUInt()
+        dcacheMask := updateInfo(i).newMask.asUInt()
       }
     }
 
@@ -301,6 +306,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
   when(io.dcache.req.fire()){
     // save current req
     waitingCacheLine := cache(oldestLineIdx)
+    waitingCacheLine.data := dcacheData.asTypeOf(Vec(cacheMaskWidth, UInt(8.W)))
+    waitingCacheLine.mask := dcacheMask.asTypeOf(Vec(cacheMaskWidth, Bool()))
     XSError(!cache(oldestLineIdx).valid, "!cache(oldestLineIdx).valid\n")
     // waitingCacheLine.valid := true.B
 

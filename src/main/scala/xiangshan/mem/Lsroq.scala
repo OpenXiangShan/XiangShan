@@ -472,8 +472,8 @@ class Lsroq extends XSModule {
           when(data(j).mask(k)) {
             forwardMask1(k) := true.B
             forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x, idx %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc, io.forward(i).lsroqIdx, uop(io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).cf.pc
+            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
+              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
             )
           }
         })
