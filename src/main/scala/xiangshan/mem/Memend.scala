@@ -128,7 +128,7 @@ class Memend extends XSModule {
 
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsroq = Module(new Lsroq)
-  val sbuffer = Module(new FakeSbuffer)
+  val sbuffer = Module(new Sbuffer)
 
   val loadUnitToDcacheVec = Wire(Vec(exuParameters.LduCnt, new DCacheLoadIO))
 

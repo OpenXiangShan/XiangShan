@@ -473,8 +473,8 @@ class Lsroq extends XSModule {
           when(data(j).mask(k)) {
             forwardMask1(k) := true.B
             forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x, idx %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc, io.forward(i).lsroqIdx, uop(io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).cf.pc
+            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
+              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
             )
           }
         })
@@ -650,7 +650,9 @@ class Lsroq extends XSModule {
 
   // setup misc mem access req
   // mask / paddr / data can be get from lsroq.data
+  val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
+    (commitType === CommitType.STORE || commitType === CommitType.LOAD) && 
     io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
     !io.commits(0).bits.isWalk
 
@@ -682,7 +684,13 @@ class Lsroq extends XSModule {
   }
 
   when(io.uncache.req.fire()){
-    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr, io.uncache.req.bits.data, io.uncache.req.bits.cmd, io.uncache.req.bits.mask) 
+    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
+      uop(ringBufferTail).cf.pc,
+      io.uncache.req.bits.addr,
+      io.uncache.req.bits.data,
+      io.uncache.req.bits.cmd,
+      io.uncache.req.bits.mask
+    )
   }
 
   when(io.uncache.resp.fire()){
