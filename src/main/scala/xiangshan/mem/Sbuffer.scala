@@ -339,35 +339,37 @@ class Sbuffer extends XSModule with HasSBufferConst {
         }
 
       })
-    } .otherwise {
-      (0 until StoreBufferSize).foreach(sBufIdx => {
-        when(getTag(io.forward(loadIdx).paddr) === cache(sBufIdx).tag && cache(sBufIdx).valid) {
-          // send data with mask in this line
-          // this mask is not 'mask for cache line' and we need to check low bits of paddr
-          // to get certain part of one line
-          // P.S. data in io.in will be manipulated by lsroq
-
-          (0 until XLEN / 8).foreach(i => {
-
-            when (cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
-              io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
-              io.forward(loadIdx).forwardMask(i) := true.B
-            } .otherwise {
-              io.forward(loadIdx).forwardData(i) := 0.U
-              io.forward(loadIdx).forwardMask(i) := false.B
-            }
-//            io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
-//            io.forward(loadIdx).forwardMask(i) := cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
-          })
-
-          when (io.forward(loadIdx).valid) {
-            XSDebug("[ForwardReq] paddr: %x mask: %x pc: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).mask, io.forward(loadIdx).pc)
-            XSDebug("[Forwarding] forward-data: %x forward-mask: %x\n", io.forward(loadIdx).forwardData.asUInt(),
-              io.forward(loadIdx).forwardMask.asUInt())
-          }
-        }
-      })
     }
+
+    // data in StoreBuffer should have higer priority than waitingCacheLine
+    for (sBufIdx <- 0 until StoreBufferSize) {
+      when(getTag(io.forward(loadIdx).paddr) === cache(sBufIdx).tag && cache(sBufIdx).valid) {
+        // send data with mask in this line
+        // this mask is not 'mask for cache line' and we need to check low bits of paddr
+        // to get certain part of one line
+        // P.S. data in io.in will be manipulated by lsroq
+
+        (0 until XLEN / 8).foreach(i => {
+
+          when (cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
+            io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+            io.forward(loadIdx).forwardMask(i) := true.B
+          } .otherwise {
+            io.forward(loadIdx).forwardData(i) := 0.U
+            io.forward(loadIdx).forwardMask(i) := false.B
+          }
+            // io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+            // io.forward(loadIdx).forwardMask(i) := cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
+        })
+
+        when (io.forward(loadIdx).valid) {
+          XSDebug("[ForwardReq] paddr: %x mask: %x pc: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).mask, io.forward(loadIdx).pc)
+          XSDebug("[Forwarding] forward-data: %x forward-mask: %x\n", io.forward(loadIdx).forwardData.asUInt(),
+            io.forward(loadIdx).forwardMask.asUInt())
+        }
+      }
+    }
+
   })
 
   // additional logs
