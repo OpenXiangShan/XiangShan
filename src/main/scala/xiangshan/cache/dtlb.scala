@@ -267,28 +267,36 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
 
   // reset pf when pf hit
-  val pfHitReset = WireInit(0.U(TlbEntrySize.W))
-  when (ParallelOR(pfArray).asBool /* or ParallelOR(valid)*/) {
-    val pfHitAndValid = widthMap{i => Mux(valid(i), VecInit(pfHitVec(i)).asUInt, 0.U) }
-    pfHitReset := ParallelOR(pfHitAndValid)
-  }
+  val pfHitReset = ParallelOR(widthMap{i => Mux(valid(i), VecInit(pfHitVec(i)).asUInt, 0.U) })
+  val pfHitRefill = ParallelOR(pfHitReset.asBools)
 
   // refill
   val refill = ptw.resp.fire()
   val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
   val priorIdx = PriorityEncoder(~(v|pf))
-  val refillIdx = Mux(ParallelAND((v|pf).asBools), randIdx, priorIdx)
-  val pfRefill = WireInit(0.U(TlbEntrySize.W))
+  val tlbfull = ParallelAND((v|pf).asBools)
+  val refillIdx = Mux(tlbfull, randIdx, priorIdx)
+  val re2OH = UIntToOH(refillIdx)
   when (refill) {
-    v := Mux(ptw.resp.bits.pf, v & ~UIntToOH(refillIdx), v | UIntToOH(refillIdx))
-    pfRefill := Mux(ptw.resp.bits.pf, UIntToOH(refillIdx), 0.U)
+    v := Mux(ptw.resp.bits.pf, v & ~re2OH, v | re2OH)
     entry(refillIdx) := ptw.resp.bits.entry
     XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
   }
 
   // pf update
-  when (refill || ParallelOR(pfArray).asBool /* or ParallelOR(valid)*/) {
-    pf := (pf & ~pfHitReset) | pfRefill
+  when (refill) {
+    when (pfHitRefill) {
+      pf := Mux(ptw.resp.bits.pf, pf | re2OH, pf & ~re2OH) & ~pfHitReset
+    } .otherwise {
+      pf := Mux(ptw.resp.bits.pf, pf | re2OH, pf & ~re2OH)
+    }
+  } .otherwise {
+    when (pfHitRefill) {
+      pf := pf & ~pfHitReset
+    }
+  }
+  when (PopCount(pf) > 10.U) { // when too much pf, just clear
+    pf := Mux(refill && ptw.resp.bits.pf, re2OH, 0.U)
   }
 
   // sfence (flush)
