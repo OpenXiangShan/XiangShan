@@ -2,6 +2,7 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import xiangshan.FuType._
 import utils._
@@ -9,7 +10,7 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
 
-class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
+class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
 
   val (iovalid, src1, src2, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, 
     io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
@@ -17,7 +18,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   val redirectHit = uop.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
-  val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw) && !ALUOpType.isJump(func)
+  val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw)
   val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
   val xorRes = src1 ^ src2
   val sltu = !adderRes(XLEN)
@@ -46,19 +47,13 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
     ALUOpType.getBranchType(ALUOpType.bltu) -> sltu
   )
 
-  val isBru = ALUOpType.isBru(func)
-  // val isBranch =  io.in.bits.uop.cf.isBr// ALUOpType.isBranch(func)
-  val isBranch =  ALUOpType.isBranch(func)
-  val isJump = ALUOpType.isJump(func)
+  val isBranch = uop.cf.brUpdate.pd.isBr// ALUOpType.isBranch(func)
+  val isRVC = uop.cf.brUpdate.pd.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = Mux(isBranch, pc + offset, adderRes)(VAddrBits-1,0)
-  val isRVC = uop.cf.brUpdate.pd.isRVC//(io.in.bits.cf.instr(1,0) =/= "b11".U)
-
-
-  io.in.ready := io.out.ready
   val pcLatchSlot = Mux(isRVC, pc + 2.U, pc + 4.U)
 
-  io.out.bits.redirectValid := io.out.valid && isBru//isBranch
+  io.out.bits.redirectValid := io.out.valid && isBranch
   io.out.bits.redirect.pc := uop.cf.pc
   io.out.bits.redirect.target := Mux(!taken && isBranch, pcLatchSlot, target)
   io.out.bits.redirect.brTag := uop.brTag
@@ -76,10 +71,32 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.brUpdate.taken := isBranch && taken
   // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
 
-  io.out.valid := valid
-  io.out.bits.uop <> io.in.bits.uop
-  io.out.bits.data := Mux(isJump, pcLatchSlot, aluRes)
+  if (hasSfence) { // Sfence && fence.i here. // TODO: add fence.i
+    val waitSbuffer = ALUOpType.waitSbuffer(func)
+    val sbEmpty = WireInit(true.B) // TODO: use tileLink and init is false.B
+    val validNeg = RegInit(true.B)
+    when (io.out.fire()) { validNeg := true.B }
+    when (io.in.valid && !io.out.valid) { validNeg := false.B }
+    val sfence = Wire(new SfenceBundle)
+    sfence.valid := valid && validNeg && ALUOpType.sfence===func
+    sfence.bits.rs1 := uop.ctrl.lsrc1===0.U
+    sfence.bits.rs2 := uop.ctrl.lsrc2===0.U
+    sfence.bits.addr := src1
+    BoringUtils.addSource(sfence, "SfenceBundle")
+
+    io.out.valid := Mux(waitSbuffer, valid && sbEmpty, valid)
+    io.out.bits.uop <> io.in.bits.uop
+    io.out.bits.data := aluRes
+    io.in.ready := Mux(waitSbuffer, sbEmpty && io.out.ready, io.out.ready)
+  } else {
+    assert(!(ALUOpType.sfence===func && iovalid))
+    io.in.ready := io.out.ready
+    io.out.valid := valid
+    io.out.bits.uop <> io.in.bits.uop
+    io.out.bits.data := aluRes
+  }
   
+
   XSDebug(io.in.valid,
     "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:f:%d v:%d\n",
     io.in.valid,
@@ -94,6 +111,6 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   )
   XSDebug(io.in.valid, "src1:%x src2:%x offset:%x func:%b pc:%x\n",
     src1, src2, offset, func, pc)
-  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBru:%d isBranch:%d isJump:%d target:%x taken:%d\n",
-     io.out.bits.data, aluRes, isRVC, isBru, isBranch, isJump, target, taken)
+  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBranch:%d target:%x taken:%d\n",
+     io.out.bits.data, aluRes, isRVC, isBranch, target, taken)
 }

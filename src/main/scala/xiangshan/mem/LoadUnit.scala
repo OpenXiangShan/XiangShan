@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -19,7 +19,7 @@ class LoadUnit extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcache = new DCacheLoadIO
-    val dtlb = Flipped(new DtlbToLsuIO)
+    val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
   })
@@ -50,6 +50,10 @@ class LoadUnit extends XSModule {
   // send req to dtlb
   io.dtlb.req.valid := l2_out.valid
   io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
+  io.dtlb.req.bits.cmd := TlbCmd.read
+  io.dtlb.req.bits.roqIdx := l2_out.bits.uop.roqIdx
+  io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
+  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx
 
   l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
   l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss
@@ -103,6 +107,8 @@ class LoadUnit extends XSModule {
   XSDebug(l2_out.fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n",
     l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType)
 
+  XSDebug(io.dcache.req.valid, p"dcache req(${io.dcache.req.valid} ${io.dcache.req.ready}): pc:0x${Hexadecimal(io.dcache.req.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.req.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.req.bits.meta.uop.lsroqIdx} addr:0x${Hexadecimal(io.dcache.req.bits.addr)} vaddr:0x${Hexadecimal(io.dcache.req.bits.meta.vaddr)} paddr:0x${Hexadecimal(io.dcache.req.bits.meta.paddr)} mmio:${io.dcache.req.bits.meta.mmio} tlb_miss:${io.dcache.req.bits.meta.tlb_miss} mask:${io.dcache.req.bits.meta.mask}\n")
+
   //-------------------------------------------------------
   // LD Pipeline Stage 3
   // Compare tag, use addr to query DCache Data
@@ -153,6 +159,7 @@ class LoadUnit extends XSModule {
     l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
     l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
     l4_out.bits.miss  := io.dcache.resp.bits.miss
+    XSDebug(io.dcache.resp.fire(), p"DcacheResp(l4): data:0x${Hexadecimal(io.dcache.resp.bits.data)} paddr:0x${Hexadecimal(io.dcache.resp.bits.meta.paddr)} pc:0x${Hexadecimal(io.dcache.resp.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.resp.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.resp.bits.meta.uop.lsroqIdx} miss:${io.dcache.resp.bits.miss}\n")
   } .otherwise {
     l4_out.bits := l4_bundle
   }
@@ -189,13 +196,13 @@ class LoadUnit extends XSModule {
 
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || (l5_in.bits.miss || l5_in.bits.mmio) && l5_in.valid, false.B)
 
-  XSDebug(l4_valid, "l4: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b\n",
-    l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
+  XSDebug(l4_valid, "l4: out.valid:%d pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b miss:%d\n",
+    l4_out.valid, l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
     l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
-    l4_out.bits.forwardData.asUInt, l4_out.bits.forwardMask.asUInt, l4_dcache, l4_out.bits.mmio)
+    l4_out.bits.forwardData.asUInt, l4_out.bits.forwardMask.asUInt, l4_dcache, l4_out.bits.mmio, l4_out.bits.miss)
 
-  XSDebug(l5_in.valid, "L5: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x\n",
-    l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr, l5_in.bits.paddr,
+  XSDebug(l5_in.valid, "L5(%d %d): pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x\n",
+    l5_in.valid, l5_in.ready, l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr, l5_in.bits.paddr,
     l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask,
     l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt)
 
@@ -205,7 +212,7 @@ class LoadUnit extends XSModule {
   XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
     io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
 
-
+  XSDebug(io.redirect.valid, p"Redirect: excp:${io.redirect.bits.isException} misp:${io.redirect.bits.isMisPred} replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.needFlush(io.redirect)} l3:${l3_uop.needFlush(io.redirect)} l4:${l4_out.bits.uop.needFlush(io.redirect)}\n")
   //-------------------------------------------------------
   // LD Pipeline Stage 5
   // Do data ecc check, merge result and write back to LS ROQ

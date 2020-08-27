@@ -39,7 +39,6 @@ class MMIOTLToAXI4(params: TLParameters) extends XSModule
   assert(innerBeatSize == outerBeatSize)
   val axi4_size = log2Up(outerBeatBytes).U
 
-
   val s_idle :: s_wait_awready :: s_mem_write :: s_wait_bresp :: s_wait_arready :: s_mem_read :: s_send_resp :: Nil = Enum(7)
  
   val state = RegInit(s_idle)

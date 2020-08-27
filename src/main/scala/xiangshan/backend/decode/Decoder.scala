@@ -131,19 +131,20 @@ class Decoder extends XSModule with HasInstrType {
   io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U || instr(15, 13) === "b011".U && instr(1, 0) === "b01".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type
 
-  val vmEnable = WireInit(false.B)
-  BoringUtils.addSink(vmEnable, "DTLBENABLE")
+  // val vmEnable = WireInit(false.B)
+  // BoringUtils.addSink(vmEnable, "DTLBENABLE")
 
   io.out.cf.exceptionVec.map(_ := false.B)
   io.out.cf.exceptionVec(illegalInstr) := instrType === InstrN
   io.out.cf.exceptionVec(instrPageFault) := io.in.exceptionVec(instrPageFault)
-  io.out.cf.exceptionVec(instrAccessFault) := io.in.pc(VAddrBits - 1, PAddrBits).orR && !vmEnable
+  // io.out.cf.exceptionVec(instrAccessFault) := io.in.pc(VAddrBits - 1, PAddrBits).orR && !vmEnable // NOTE: PAddrBits is larger than VAddrBits, so comment it
 
   io.out.ctrl.isXSTrap := (instr === XSTrap.TRAP)
   when(io.out.ctrl.isXSTrap){
     io.out.ctrl.lsrc1 := 10.U // a0
   }
-  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou
+  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou || (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence/*noSpecExec make it sent to alu0,for roq is empty*/)
+  //io.out.ctrl.isBlocked := (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence) // TOOD: check it
 
 
   XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",
