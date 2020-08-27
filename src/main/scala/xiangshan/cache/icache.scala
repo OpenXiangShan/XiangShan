@@ -2,6 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import device.RAMHelper
 import xiangshan._
 import xiangshan.frontend._
 import utils._
@@ -156,7 +157,7 @@ abstract class ICacheBase extends XSModule with HasICacheParameters
     .elsewhen(s2_fire) { s3_valid := s2_valid }
     .elsewhen(io.resp.fire()) { s3_valid := false.B }
 
-    s3_ready := (!s3_valid && io.out.ready) || io.out.fire() || io.flush(1)
+    s3_ready := (!s3_valid && io.resp.ready) || io.resp.fire() || io.flush(1)
 
 }
 
@@ -369,7 +370,6 @@ class FakeICache extends ICacheBase
   //----------------
   //  ICache Stage3
   //----------------
-  val s3_valid = RegEnable(next=s2_valid,init=false.B,enable=s2_fire)
   val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
 
   XSDebug("[Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
@@ -383,6 +383,8 @@ class FakeICache extends ICacheBase
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.data := s3_ram_out
   io.resp.bits.mask := s3_req_mask
+  io.mem_acquire <> DontCare
+  io.mem_grant := DontCare
 }
 
 
@@ -399,6 +401,8 @@ object ICache{
     }
     else {
       val fakeicache = Module(new FakeICache)
+      fakeicache.io.mem_grant <> DontCare
+      fakeicache.io.mem_acquire := DontCare
       fakeicache
     }
   }
