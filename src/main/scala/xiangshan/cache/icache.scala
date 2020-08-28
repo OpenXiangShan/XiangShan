@@ -1,14 +1,19 @@
 package xiangshan.cache
 
+import chipsalliance.rocketchip.config
 import chisel3._
 import chisel3.util._
-import device.RAMHelper
+import device._
 import xiangshan._
 import xiangshan.frontend._
 import utils._
 
+import freechips.rocketchip.amba.axi4.{AXI4Fragmenter, AXI4UserYanker}
+import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
+import freechips.rocketchip.diplomacy.{AddressSet,BufferParams,IdRange,LazyModule, LazyModuleImp, TransferSizes}
+import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
+import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
 import bus.tilelink.{TLParameters, TLPermissions, ClientMetadata}
-import utils.{Code, RandomReplacement}
 
 // DCache specific parameters
 // L1 DCache is 64set, 8way-associative, with 64byte block, a total of 32KB
@@ -56,6 +61,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   val encWordBits = encBits * (wordBits / eccBits)
   def encDataBits = cacheParams.dataCode.width(wordBits) // NBDCache only
   def encRowBits = encDataBits*rowWords
+  def cacheID = 0
   
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
   def get_tag(addr: UInt) = addr >> untagBits
@@ -107,58 +113,31 @@ class ICacheResp extends ICacheBundle
   val mask = UInt(PredictWidth.W)
 }
 
-class ICacheIO extends ICacheBundle
+
+class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
-  val mem_acquire = DecoupledIO(new FakeIcacheReq)
-  val mem_grant = Flipped(DecoupledIO(new FakeIcacheResp))
+  val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+  val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+  val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
   val flush = Input(UInt(2.W))
 }
 
-/* ------------------------------------------------------------
- * This abstract module defined ICache base pipeline and IO
- * ------------------------------------------------------------
- */
 
-abstract class ICacheBase extends XSModule with HasICacheParameters
+class ICache()(implicit p: Parameters) extends LazyModule
+  with HasICacheParameters
 {
-    val io = IO(new ICacheIO)
-    //----------------------------
-    //    Stage 1
-    //----------------------------
-    val s1_valid = io.req.fire()
-    val s1_req_pc = io.req.bits.addr
-    val s1_req_mask = io.req.bits.mask
-    val s2_ready = WireInit(false.B)
-    val s1_fire = s1_valid && (s2_ready || io.flush(0))
-
-    //----------------------------
-    //    Stage 2
-    //----------------------------
-    val s2_valid = RegInit(false.B)
-    val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
-    val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
-    val s3_ready = WireInit(false.B)
-    val s2_fire = s2_valid && s3_ready && !io.flush(0)
-    when(io.flush(0)) {s2_valid := s1_fire}
-    .elsewhen(s1_fire) { s2_valid := s1_valid}
-    .elsewhen(s2_fire) { s2_valid := false.B}
-
-    s2_ready := s2_fire || !s2_valid || io.flush(0)
-
-    //----------------------------
-    //    Stage 3
-    //----------------------------
-    val s3_valid = RegInit(false.B)
-    val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
-    val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
-    when(io.flush(1)) { s3_valid := false.B }
-    .elsewhen(s2_fire) { s3_valid := s2_valid }
-    .elsewhen(io.resp.fire()) { s3_valid := false.B }
-
-    s3_ready := (!s3_valid && io.resp.ready) || io.resp.fire() || io.flush(1)
-
+  val clientParameters = TLMasterPortParameters.v1(
+    Seq(TLMasterParameters.v1(
+      name = "icache",
+      sourceId = IdRange(0, 1),
+      supportsProbe = TransferSizes(cacheParams.blockBytes)
+    ))
+  )
+  val clientNode = TLClientNode(Seq(clientParameters))
+  lazy val module = new ICacheImp(this)
+  
 }
 
 
@@ -166,15 +145,33 @@ abstract class ICacheBase extends XSModule with HasICacheParameters
  * This module is a SRAM with 4-way associated mapping
  * ------------------------------------------------------------
  */
-class ICache extends ICacheBase
+class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
+  with HasICacheParameters
+  with HasXSLog
 {
+  val (bus, edge) = outer.clientNode.out.head
+  val io = IO(new ICacheIO(edge))
 
+  //Tilelink connection out
+  bus.a <> io.mem_acquire
+  bus.e <> io.mem_finish
+  io.mem_grant <> bus.d
+
+  val (_, _, refill_done, refill_cnt) = edge.count(bus.d)
+
+  //------------------------------------
+  //Memory
   val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
   val dataArray = List.fill(cacheDataBeats){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
 
   //----------------------------
   //    Stage 1
   //----------------------------
+  val s1_valid = io.req.fire()
+  val s1_req_pc = io.req.bits.addr
+  val s1_req_mask = io.req.bits.mask
+  val s2_ready = WireInit(false.B)
+  val s1_fire = s1_valid && (s2_ready || io.flush(0))
   val s1_idx = get_idx(s1_req_pc)
 
   metaArray.io.r.req.valid := s1_valid
@@ -190,8 +187,16 @@ class ICache extends ICacheBase
   //----------------------------
   //    Stage 2
   //----------------------------
+  val s2_valid = RegInit(false.B)
+  val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
+  val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
+  val s3_ready = WireInit(false.B)
+  val s2_fire = s2_valid && s3_ready && !io.flush(0)
   val s2_tag = get_tag(s2_req_pc)
   val s2_hit = WireInit(false.B)
+  when(io.flush(0)) {s2_valid := s1_fire}
+  .elsewhen(s1_fire) { s2_valid := s1_valid}
+  .elsewhen(s2_fire) { s2_valid := false.B}
 
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
@@ -208,6 +213,7 @@ class ICache extends ICacheBase
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
  
   s2_hit := ParallelOR(hitVec)
+  s2_ready := s2_fire || !s2_valid || io.flush(0)
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
@@ -217,10 +223,16 @@ class ICache extends ICacheBase
   //----------------------------
   //    Stage 3
   //----------------------------
+  val s3_valid = RegInit(false.B)
+  val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
+  val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
   val s3_data = datas
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
+  when(io.flush(1)) { s3_valid := false.B }
+  .elsewhen(s2_fire) { s3_valid := s2_valid }
+  .elsewhen(io.resp.fire()) { s3_valid := false.B } 
 
   //icache hit
   val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
@@ -230,13 +242,15 @@ class ICache extends ICacheBase
   outPacket := dataHitWayUInt >> (s3_req_pc(5,1) << 4)  //TODO: this is ugly
 
   //icache miss
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_mem_finish :: s_wait_resp :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(cacheDataBeats)
 
   val needFlush = RegInit(false.B)
   when(io.flush(1) && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
   .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
+
+  val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
 
   switch(state){
     is(s_idle){
@@ -246,11 +260,44 @@ class ICache extends ICacheBase
       }
     }
 
-    is(s_memReadReq){ when(io.mem_acquire.fire()){ state := s_memReadResp}}
+    is(s_memReadReq){ 
+      io.mem_acquire.valid := true.B
+      io.mem_acquire.bits  := edge.AcquireBlock(
+        fromSource      = cacheID.U,
+        toAddress       = groupPC(s3_req_pc),
+        lgSize          = (log2Up(cacheParams.blockBytes)).U,
+        growPermissions = 0.U)._2   //TODO: icache grow permission
+      when(io.mem_acquire.fire()){ 
+        state := s_memReadResp
+      }
+    }
+
     is(s_memReadResp){
-      when(io.mem_grant.fire()){
-        readBeatCnt.inc()
-        when(io.mem_grant.bits.finish){state := s_wait_resp}
+      io.mem_grant.ready := true.B
+
+      when (edge.hasData(io.mem_grant.bits)) {
+        when(io.mem_grant.fire()){
+          readBeatCnt.inc()
+          refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data
+          when(readBeatCnt.value === (cacheDataBeats - 1).U){
+            assert(refill_done, "refill not done!")
+            state := s_mem_finish
+          }
+        }
+      }
+
+      when(refill_done) {
+        grantack.valid := edge.isRequest(io.mem_grant.bits)
+        grantack.bits := edge.GrantAck(io.mem_grant.bits)
+      }
+    }
+
+    is(s_mem_finish) {
+      io.mem_finish.valid := grantack.valid
+      io.mem_finish.bits  := grantack.bits
+      when (io.mem_finish.fire()) {
+        grantack.valid := false.B
+        state := s_wait_resp
       }
     }
 
@@ -260,16 +307,12 @@ class ICache extends ICacheBase
 
   }
 
-  io.mem_acquire.valid := (state === s_memReadReq) 
-  io.mem_acquire.bits.addr := groupPC(s3_req_pc)
-
-  io.mem_grant.ready := true.B
 
   //refill write
   val metaWrite = Wire(new ICacheMetaBundle)
   metaWrite.tag := get_tag(s3_req_pc)
   metaWrite.valid := true.B
-  metaArray.io.w.req.valid := (state === s_memReadResp) && io.mem_grant.fire() && io.mem_grant.bits.finish
+  metaArray.io.w.req.valid := (state === s_memReadResp) && io.mem_grant.fire() && refill_done
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
   val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))   //TODO: this is ugly
@@ -281,7 +324,6 @@ class ICache extends ICacheBase
                                         data=io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle), 
                                         waymask=s3_wayMask)
 
-    when(writeOneBeat) {refillDataReg(b) := io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle)}
   }
 
   s3_ready := ((io.resp.fire() || !s3_valid) && !needFlush) || (needFlush && state === s_wait_resp)
@@ -309,102 +351,8 @@ class ICache extends ICacheBase
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
 
-  XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
+  //XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 }
-
-/* ------------------------------------------------------------
- * This module is a RAM scope, and is only for simulation debug.
- * Under this module, icache is assumed no cache miss.
- * (Warning!) And with no consideration for cache coherence
- * ------------------------------------------------------------
- */
-
-class FakeICache extends ICacheBase
-{
-    val memByte = 128 * 1024 * 1024
-
-  val ramHelpers = Array.fill(FetchWidth/2 + 1)(Module(new RAMHelper(memByte)).io) 
-  ramHelpers.foreach(_.clk := clock)
-
-  //fake instruction fetch pipeline
-  //----------------
-  //  ICache Stage1
-  //----------------
-  val gpc = (io.req.bits.addr) //use fetch pc
-  io.req.ready := s2_ready
-
-  val offsetBits = log2Up(memByte)
-  val offsetMask = (1 << offsetBits) - 1
-  def index(addr: UInt): UInt = ((addr & offsetMask.U) >> log2Ceil(DataBytes)).asUInt()
-  def inRange(idx: UInt): Bool = idx < (memByte / 8).U
-
-  for(i <- ramHelpers.indices) {
-    val rIdx = index(gpc) + i.U
-    ramHelpers(i).rIdx := rIdx
-
-    Seq(
-      ramHelpers(i).wmask,
-      ramHelpers(i).wdata,
-      ramHelpers(i).wen,
-      ramHelpers(i).wIdx
-    ).foreach(_ := 0.U)
-  }
-
-  val ramOut = Wire(UInt((XLEN * 5).W))
-  ramOut := Cat(ramHelpers(4).rdata, ramHelpers(3).rdata, ramHelpers(2).rdata, ramHelpers(1).rdata, ramHelpers(0).rdata) >> (gpc(2,1) << 4)
-
-  XSDebug("[ICache-Stage1] s1_valid:%d || s2_ready:%d || s1_pc:%x",s1_valid,s2_ready,gpc)
-  XSDebug(false,s1_fire,"------> s1 fire!!!")
-  XSDebug(false,true.B,"\n")
-
-  //----------------
-  //  ICache Stage2
-  //----------------
-  val s2_ram_out = RegEnable(next=ramOut(XLEN * 4 - 1, 0),enable=s1_fire)
-
-  XSDebug("[Stage2] s2_valid:%d || s3_ready:%d ",s2_valid,s3_ready)
-  XSDebug(false,s2_fire,"------> s2 fire!!!")
-  XSDebug(false,true.B,"\n")
-
-  // XSDebug("[Stage2_data] instr1:0x%x   instr2:0x%x\n",s2_ram_out(0).asUInt,s2_ram_out(1).asUInt)
-  //----------------
-  //  ICache Stage3
-  //----------------
-  val s3_ram_out = RegEnable(next=s2_ram_out,enable=s2_fire)
-
-  XSDebug("[Stage3] s3_valid:%d || s3_ready:%d ",s3_valid,s3_ready)
-  XSDebug(false,true.B,"\n")
-  XSDebug("[Flush icache] flush:%b\n", io.flush)
-
-  when (io.flush(0)) { s2_valid := s1_fire }
-  when (io.flush(1)) { s3_valid := false.B }
-
-  io.resp.valid := s3_valid
-  io.resp.bits.pc := s3_req_pc
-  io.resp.bits.data := s3_ram_out
-  io.resp.bits.mask := s3_req_mask
-  io.mem_acquire <> DontCare
-  io.mem_grant := DontCare
-}
-
 
 //TODO: consider L2 or L3 cache connection
-object ICache{
-  def apply(enableICache: Boolean = true) = {
-    if(enableICache){
-      val fakecache = Module(new FakeCache)
-      val icache = Module(new ICache)
-
-      fakecache.io.in <> icache.io.mem_acquire
-      icache.io.mem_grant <> fakecache.io.out
-      icache
-    }
-    else {
-      val fakeicache = Module(new FakeICache)
-      fakeicache.io.mem_grant <> DontCare
-      fakeicache.io.mem_acquire := DontCare
-      fakeicache
-    }
-  }
-}
 
