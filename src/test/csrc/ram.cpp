@@ -27,16 +27,36 @@ void addpageSv39() {
 #define PTEADDR(i) (0x88000000 - (PAGESIZE * PTENUM) + (PAGESIZE * i)) //0x88000000 - 0x100*64
 #define PTEMMIONUM 128
 #define PDEMMIONUM 1
+#define PTEDEVNUM 128
+#define PDEDEVNUM 1
 
   uint64_t pdde[ENTRYNUM];
   uint64_t pde[ENTRYNUM];
   uint64_t pte[PTENUM][ENTRYNUM];
   
-  //special addr for mmio 0x40000000 - 0x4fffffff
+  // special addr for mmio 0x40000000 - 0x4fffffff
   uint64_t pdemmio[ENTRYNUM];
   uint64_t ptemmio[PTEMMIONUM][ENTRYNUM];
-  
-  pdde[1] = (((PDDEADDR-PAGESIZE*1) & 0xfffff000) >> 2) | 0x1;
+
+  // special addr for internal devices 0x30000000-0x3fffffff
+  uint64_t pdedev[ENTRYNUM];
+  uint64_t ptedev[PTEDEVNUM][ENTRYNUM];
+
+  // dev: 0x30000000-0x3fffffff
+  pdde[0] = (((PDDEADDR-PAGESIZE*(PDEMMIONUM+PTEMMIONUM+PDEDEVNUM)) & 0xfffff000) >> 2) | 0x1;
+
+  for (int i = 0; i < PTEDEVNUM; i++) {
+    pdedev[ENTRYNUM-PTEDEVNUM+i] = (((PDDEADDR-PAGESIZE*(PDEMMIONUM+PTEMMIONUM+PDEDEVNUM+PTEDEVNUM-i)) & 0xfffff000) >> 2) | 0x1;
+  }
+
+  for(int outidx = 0; outidx < PTEDEVNUM; outidx++) {
+    for(int inidx = 0; inidx < ENTRYNUM; inidx++) {
+      ptedev[outidx][inidx] = (((0x30000000 + outidx*PTEVOLUME + inidx*PAGESIZE) & 0xfffff000) >> 2) | 0xf;
+    }
+  }
+
+  // mmio: 0x40000000 - 0x4fffffff
+  pdde[1] = (((PDDEADDR-PAGESIZE*PDEMMIONUM) & 0xfffff000) >> 2) | 0x1;
 
   for(int i = 0; i < PTEMMIONUM; i++) {
     pdemmio[i] = (((PDDEADDR-PAGESIZE*(PTEMMIONUM+PDEMMIONUM-i)) & 0xfffff000) >> 2) | 0x1;
@@ -63,6 +83,8 @@ void addpageSv39() {
     }
   }
 
+  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM+PDEDEVNUM+PTEDEVNUM)),ptedev,PAGESIZE*PTEDEVNUM);
+  memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM+PDEDEVNUM)),pdedev,PAGESIZE*PDEDEVNUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM+PTEMMIONUM)),ptemmio, PAGESIZE*PTEMMIONUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM+PDEMMIONUM)), pdemmio, PAGESIZE*PDEMMIONUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDDENUM+PDENUM)), pdde, PAGESIZE*PDDENUM);

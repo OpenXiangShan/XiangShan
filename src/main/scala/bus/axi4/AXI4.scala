@@ -5,9 +5,10 @@ package bus.axi4
 import chisel3._
 import chisel3.util._
 
-import noop.HasNOOPParameter
+// import noop.HasNOOPParameter
+import xiangshan.HasXSParameter
 
-object AXI4Parameters extends HasNOOPParameter {
+object AXI4Parameters extends HasXSParameter {
   // These are all fixed by the AXI4 standard:
   val lenBits   = 8
   val sizeBits  = 3

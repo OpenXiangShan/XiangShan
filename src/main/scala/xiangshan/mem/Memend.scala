@@ -118,17 +118,17 @@ class Memend extends XSModule {
     val miscToDcache = new DCacheLoadIO
     val sbufferToDcache = new DCacheStoreIO
     val uncache = new DCacheLoadIO
+    val ptw = new TlbPtwIO
   })
 
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
   val miscUnit = Module(new MiscUnit)
   // val mshq = Module(new MSHQ)
-  val dtlb = Module(new Dtlb) //TODO: move dtlb out
+
+  val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new Sbuffer)
-
-  dtlb.io := DontCare
 
   val loadUnitToDcacheVec = Wire(Vec(exuParameters.LduCnt, new DCacheLoadIO))
 
@@ -147,6 +147,8 @@ class Memend extends XSModule {
   io.sbufferToDcache <> sbufferToDcache
   io.uncache <> lsroqToUncache
 
+  io.ptw <> dtlb.io.ptw
+
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.ldin <> io.backend.ldin(i)
@@ -154,7 +156,7 @@ class Memend extends XSModule {
     loadUnits(i).io.redirect <> io.backend.redirect
     loadUnits(i).io.tlbFeedback <> io.backend.tlbFeedback(i)
     loadUnits(i).io.dcache <> loadUnitToDcacheVec(i)
-    loadUnits(i).io.dtlb <> dtlb.io.lsu(i)
+    loadUnits(i).io.dtlb <> dtlb.io.requestor(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
 
     lsroq.io.loadIn(i) <> loadUnits(i).io.lsroq.loadIn
@@ -167,7 +169,7 @@ class Memend extends XSModule {
     storeUnits(i).io.stin <> io.backend.stin(i)
     storeUnits(i).io.redirect <> io.backend.redirect
     storeUnits(i).io.tlbFeedback <> io.backend.tlbFeedback(exuParameters.LduCnt + i)
-    storeUnits(i).io.dtlb <> dtlb.io.lsu(exuParameters.LduCnt + i)
+    storeUnits(i).io.dtlb <> dtlb.io.requestor(exuParameters.LduCnt + i) // FIXME
     storeUnits(i).io.lsroq <> lsroq.io.storeIn(i)
   }
 
@@ -193,7 +195,7 @@ class Memend extends XSModule {
   miscUnit.io.in.valid := io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou ||
     io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
   when(miscUnit.io.dtlb.req.valid){
-    dtlb.io.lsu(0) <> miscUnit.io.dtlb
+    dtlb.io.requestor(0) <> miscUnit.io.dtlb // TODO: check it later
   }
   miscUnit.io.dcache <> miscUnitToDcache
 

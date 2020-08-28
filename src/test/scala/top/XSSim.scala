@@ -68,7 +68,6 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     TLToAXI4() :=
     TLBuffer(BufferParams.default) :=
     TLFragmenter(8, 64, holdFirstDeny = true) :=
-    TLCacheCork(sinkIds = 1) :=
     DebugIdentityNode() :=
     soc.mem
 
