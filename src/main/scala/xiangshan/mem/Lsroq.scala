@@ -419,27 +419,26 @@ class Lsroq extends XSModule {
         io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
       (0 until XLEN / 8).foreach(k => {
         when (needCheck && data(j).mask(k)) {
-          when (needForward2(j)) {
-            forwardMask2(k) := true.B
-            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug(p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
-              p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
-          }
-          // forward1 is older than forward2 and should have higher priority
           when (needForward1(j)) {
             forwardMask1(k) := true.B
             forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug(p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
-              p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
           }
+          when (needForward2(j)) {
+            forwardMask2(k) := true.B
+            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+          }
+          XSDebug(needForward1(j) || needForward2(j),
+            p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
+            p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
         }
       })
     }
 
     // merge forward lookup results
+    // forward2 is younger than forward1 and should have higher priority
     (0 until XLEN / 8).map(k => {
       io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
-      io.forward(i).forwardData(k) := Mux(forwardMask1(k), forwardData1(k), forwardData2(k))
+      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
     })
   })
 
