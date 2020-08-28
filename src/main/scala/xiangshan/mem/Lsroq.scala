@@ -13,11 +13,7 @@ class LsRoqEntry extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(8.W)
-  // val miss = Bool()
   val mmio = Bool()
-  // val store = Bool()
-  // val bwdMask = Vec(8, Bool()) // UInt(8.W)
-  // val bwdData = Vec(8, UInt(8.W))
   val fwdMask = Vec(8, Bool())
   val fwdData = Vec(8, UInt(8.W))
 }
@@ -284,18 +280,18 @@ class Lsroq extends XSModule {
   })
 
   // writeback up to 2 store insts to CDB
-  // just randomly pick 2 stores, write them back to cdb
+  // choose the first two valid store requests from deqPtr
   val storeWbSelVec = VecInit((0 until LsroqSize).map(i => {
     allocated(i) && valid(i) && !writebacked(i) && store(i)
-  })).asUInt()
+  }))
   val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LsroqSize).W)))
   val storeWbValid = Wire(Vec(StorePipelineWidth, Bool()))
-  val sselvec0 = PriorityEncoderOH(storeWbSelVec)
-  val sselvec1 = PriorityEncoderOH(storeWbSelVec & (~sselvec0).asUInt)
-  storeWbSel(0) := OHToUInt(sselvec0)
-  storeWbSel(1) := OHToUInt(sselvec1)
-  storeWbValid(0) := sselvec0.orR
-  storeWbValid(1) := sselvec1.orR
+  storeWbSel(0) := getFirstOne(storeWbSelVec, ringBufferTail)
+  val firstSelMask = UIntToOH(storeWbSel(0))
+  val secondWbSelVec = VecInit((0 until LsroqSize).map(i => storeWbSelVec(i) && !firstSelMask(i)))
+  storeWbSel(1) := getFirstOne(secondWbSelVec, ringBufferTail)
+  storeWbValid(0) := Cat(storeWbSelVec).orR
+  storeWbValid(1) := Cat(secondWbSelVec).orR
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
