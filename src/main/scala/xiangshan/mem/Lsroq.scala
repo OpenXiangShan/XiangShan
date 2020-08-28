@@ -75,7 +75,6 @@ class Lsroq extends XSModule {
     val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
       uop(index) := io.dp1Req(i).bits
-      uop(index).lsroqIdx := lsroqIdx // NOTE: add by zhangzifei, need check by others
       allocated(index) := true.B
       valid(index) := false.B
       writebacked(index) := false.B
@@ -208,32 +207,6 @@ class Lsroq extends XSModule {
   when(io.dcache.resp.fire()){
     XSDebug("miss resp: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x data %x\n", io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx, io.dcache.resp.bits.meta.uop.lsroqIdx, io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
   }
-
-  // get load result from refill resp
-  // Refill a line in 1 cycle
-  // def refillDataSel(data: UInt, offset: UInt): UInt = {
-  //   Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(64 * (p + 1) - 1, 64 * p))))
-  // }
-
-  // def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
-  //   val res = Wire(Vec(8, UInt(8.W)))
-  //   (0 until 8).foreach(i => {
-  //     res(i) := Mux(fwdMask(i), fwd(8 * (i + 1) - 1, 8 * i), refill(8 * (i + 1) - 1, 8 * i))
-  //   })
-  //   res.asUInt
-  // }
-
-  // (0 until LsroqSize).map(i => {
-  //   val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.meta.paddr
-  //   when(allocated(i) && listening(i) && addrMatch && io.dcache.resp.fire()) {
-  //     // TODO: merge data
-  //     // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
-  //     // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
-  //     data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0)) // TODO: forward refill data
-  //     valid(i) := true.B
-  //     listening(i) := false.B
-  //   }
-  // })
 
   // Refill 64 bit in a cycle
   // Refill data comes back from io.dcache.resp
@@ -485,37 +458,6 @@ class Lsroq extends XSModule {
       io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
       io.forward(i).forwardData(k) := Mux(forwardMask1(k), forwardData1(k), forwardData2(k))
     })
-
-    // (1 until LsroqSize).map(j => {
-    //   val ptr = io.forward(i).lsroqIdx - j.U
-    //   when(
-    //     lsroqIdxOlderThan(ptr, io.forward(i).lsroqIdx) &&
-    //     valid(ptr) && allocated(ptr) && store(ptr) &&
-    //     io.forward(i).paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
-    //   ){
-    //     (0 until 8).map(k => {
-    //       // when(data(ptr).mask(k) && io.forward(i).mask(k)){
-    //         when(data(ptr).mask(k)){
-    //           io.forward(i).forwardMask(k) := true.B
-    //           io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
-    //           XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
-    //           io.forward(i).forwardData(k), ptr, uop(ptr).cf.pc
-    //           )
-    //         }
-    //       })
-    //     }
-    //   })
-
-    // backward
-    // (0 until 8).map(k => {
-    //   when(data(io.forward(i).lsroqIdx).bwdMask(k)) {
-    //     io.forward(i).forwardMask(k) := true.B
-    //     io.forward(i).forwardData(k) := data(io.forward(i).lsroqIdx).bwdData(k)
-    //     XSDebug("backwarding " + k + "th byte %x, idx %d pc %x\n",
-    //       io.forward(i).forwardData(k), io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0), uop(io.forward(i).lsroqIdx).cf.pc
-    //     )
-    //   }
-    // })
   })
 
   // rollback check
