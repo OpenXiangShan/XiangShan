@@ -9,11 +9,13 @@ import xiangshan.cache._
 
 class Frontend extends XSModule {
   val io = IO(new Bundle() {
+    val icacheReq = DecoupledIO(new ICacheReq)
+    val icacheResp = Flipped(DecoupledIO(new ICacheResp))
+    val icacheFlush = Output(UInt(2.W))
     val backend = new FrontendToBackendIO
   })
 
   val ifu = Module(new IFU)
-  val icache = ICache(enableICache = true)
   val ibuffer =  if(EnableLB) Module(new LoopBuffer) else Module(new Ibuffer)
 
   val needFlush = io.backend.redirect.valid
@@ -22,12 +24,10 @@ class Frontend extends XSModule {
   ifu.io.redirect <> io.backend.redirect
   ifu.io.inOrderBrInfo <> io.backend.inOrderBrInfo
   ifu.io.outOfOrderBrInfo <> io.backend.outOfOrderBrInfo
-
-  //cache
-  icache.io.req <> ifu.io.icacheReq
-  ifu.io.icacheResp <> icache.io.resp
-  icache.io.flush := ifu.io.icacheFlush
-
+  //icache
+  io.icacheReq <> ifu.io.icacheReq
+  io.icacheFlush <> ifu.io.icacheFlush
+  ifu.io.icacheResp <> io.icacheResp
   //ibuffer
   ibuffer.io.in <> ifu.io.fetchPacket
   ibuffer.io.flush := needFlush

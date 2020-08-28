@@ -1,6 +1,6 @@
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config
+import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import device._
@@ -8,10 +8,8 @@ import xiangshan._
 import xiangshan.frontend._
 import utils._
 
-import freechips.rocketchip.amba.axi4.{AXI4Fragmenter, AXI4UserYanker}
 import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
-import freechips.rocketchip.diplomacy.{AddressSet,BufferParams,IdRange,LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
+import freechips.rocketchip.diplomacy.{AddressSet,IdRange,LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
 import bus.tilelink.{TLParameters, TLPermissions, ClientMetadata}
 
@@ -82,8 +80,10 @@ trait HasICacheParameters extends HasL1CacheParameters {
 // sealed abstract class ICacheModule extends XSModule
 //   with HasICacheParameters
 
-sealed abstract class ICacheBundle extends XSBundle
+abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
+abstract class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
+  with HasICacheParameters with HasXSLog
 
 
 sealed class ICacheMetaBundle extends ICacheBundle
@@ -145,9 +145,7 @@ class ICache()(implicit p: Parameters) extends LazyModule
  * This module is a SRAM with 4-way associated mapping
  * ------------------------------------------------------------
  */
-class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
-  with HasICacheParameters
-  with HasXSLog
+class ICacheImp(outer: ICache) extends ICacheModule(outer)
 {
   val (bus, edge) = outer.clientNode.out.head
   val io = IO(new ICacheIO(edge))
@@ -155,7 +153,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
   //Tilelink connection out
   bus.a <> io.mem_acquire
   bus.e <> io.mem_finish
-  io.mem_grant <> bus.d
+  bus.d <> io.mem_grant
 
   val (_, _, refill_done, refill_cnt) = edge.count(bus.d)
 
@@ -251,6 +249,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
   .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
   val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
+  val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))   //TODO: this is ugly
 
   switch(state){
     is(s_idle){
@@ -278,7 +277,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
       when (edge.hasData(io.mem_grant.bits)) {
         when(io.mem_grant.fire()){
           readBeatCnt.inc()
-          refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data
+          refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle)
           when(readBeatCnt.value === (cacheDataBeats - 1).U){
             assert(refill_done, "refill not done!")
             state := s_mem_finish
@@ -315,7 +314,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
   metaArray.io.w.req.valid := (state === s_memReadResp) && io.mem_grant.fire() && refill_done
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
-  val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))   //TODO: this is ugly
   val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
   for(b <- 0 until cacheDataBeats){
     val writeOneBeat = (state === s_memReadResp) && io.mem_grant.fire() && (b.U === readBeatCnt.value)
@@ -333,8 +331,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer)
   XSDebug("[Stage 3] state: %d\n",state)
   XSDebug("[Stage 3] needflush:%d",needFlush)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
-  XSDebug("[mem_acqurire] valid:%d  ready:%d  addr:%x \n",io.mem_acquire.valid,io.mem_acquire.ready,io.mem_acquire.bits.addr)
-  XSDebug("[mem_grant] valid:%d  ready:%d  data:%x   finish:%d   readBeatcnt:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,io.mem_grant.bits.finish,readBeatCnt.value)
+  XSDebug("[mem_acqurire] valid:%d  ready:%d\n",io.mem_acquire.valid,io.mem_acquire.ready)
+  XSDebug("[mem_grant] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,readBeatCnt.value)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x \n",s3_hit,s3_miss,s3_wayMask.asUInt)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
   for(i <- 0 until cacheDataBeats){
