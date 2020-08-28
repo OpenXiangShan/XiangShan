@@ -401,7 +401,7 @@ class Lsroq extends XSModule {
     // (2) if they have different flags, we need to check range(tail, lsroqSize) and range(0, lsroqIdx)
     // Forward1: Mux(same_flag, range(tail, lsroqIdx), range(tail, lsroqSize))
     // Forward2: Mux(same_flag, 0.U,                   range(0, lsroqIdx)    )
-    // i.e. forward1 is the target entries with the same flag bits and forward2
+    // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
     val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
@@ -413,44 +413,31 @@ class Lsroq extends XSModule {
     val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
     val needForward2 = Mux(differentFlag, forwardMask, 0.U(LsroqSize.W))
 
-    // forward lookup vec2
-    (0 until LsroqSize).map(j => {
-      when(
-        needForward2(j) &&
-          valid(j) && allocated(j) && store(j) &&
-          io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      ) {
-        (0 until 8).map(k => {
-          when(data(j).mask(k)) {
+    // entry with larger index should have higher priority since it's data is younger
+    for (j <- 0 until LsroqSize) {
+      val needCheck = valid(j) && allocated(j) && store(j) &&
+        io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+      (0 until XLEN / 8).foreach(k => {
+        when (needCheck && data(j).mask(k)) {
+          when (needForward2(j)) {
             forwardMask2(k) := true.B
             forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
-            )
+            XSDebug(p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
+              p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
           }
-        })
-      }
-    })
-    // forward lookup vec1
-    (0 until LsroqSize).map(j => {
-      when(
-        needForward1(j) &&
-          valid(j) && allocated(j) && store(j) &&
-          io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      ) {
-        (0 until 8).map(k => {
-          when(data(j).mask(k)) {
+          // forward1 is older than forward2 and should have higher priority
+          when (needForward1(j)) {
             forwardMask1(k) := true.B
             forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
-            )
+            XSDebug(p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
+              p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
           }
-        })
-      }
-    })
+        }
+      })
+    }
+
     // merge forward lookup results
-    (0 until 8).map(k => {
+    (0 until XLEN / 8).map(k => {
       io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
       io.forward(i).forwardData(k) := Mux(forwardMask1(k), forwardData1(k), forwardData2(k))
     })
