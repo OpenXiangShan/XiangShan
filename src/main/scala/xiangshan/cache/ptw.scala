@@ -182,14 +182,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
   val l2v   = RegInit(0.U(PtwL2EntrySize.W)) // valid
   val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
-
-  // fsm
-  val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
-  val state = RegInit(state_idle)
-  val level = RegInit(0.U(2.W)) // 0/1/2
-  val levelNext = level + 1.U
-  val latch = Reg(new PtwResp)
-
+  
   // mem alias
   val memRdata = mem.d.bits.data
   val memPte = memRdata.asTypeOf(new PteBundle)
@@ -197,6 +190,14 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val memRespFire = mem.d.fire()
   val memReqReady = mem.a.ready
   val memReqFire = mem.a.fire()
+
+  // fsm
+  val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
+  val state = RegInit(state_idle)
+  val level = RegInit(0.U(2.W)) // 0/1/2
+  val levelNext = level + 1.U
+  val latch = Reg(new PtwResp)
+  val sfenceLatch = RegEnable(false.B, init = false.B, memRespFire) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
   /*
    * tlbl2
@@ -269,7 +270,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         }
       } .elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
         level := levelNext // TODO: consider superpage
-      } .elsewhen (memReqReady) {
+      } .elsewhen (memReqReady && !sfenceLatch) {
         state := state_wait_resp
       }
     }
@@ -321,7 +322,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   mem.a.valid := state === state_req && 
                ((level===0.U && !tlbHit && !l1Hit) ||
                 (level===1.U && !l2Hit) ||
-                (level===2.U))
+                (level===2.U)) && !sfenceLatch
   mem.d.ready := state === state_wait_resp
 
   /*
@@ -366,6 +367,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
    */
   when (sfence.valid) { // TODO: flush optionally
+    valid := false.B
+    state := state_idle
+    when (state===state_wait_resp && !memRespFire) {
+      sfenceLatch := true.B // NOTE: every req need a resp
+    }
+
     when (sfence.bits.rs1/*va*/) {
       when (sfence.bits.rs2) {
         // all va && all asid
