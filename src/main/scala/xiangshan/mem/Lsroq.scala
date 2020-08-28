@@ -391,27 +391,27 @@ class Lsroq extends XSModule {
   })
 
   // load forward query
+  // check over all lsroq entries and forward data from the first matched store
   (0 until LoadPipelineWidth).map(i => {
     io.forward(i).forwardMask := 0.U(8.W).asBools
     io.forward(i).forwardData := DontCare
-    // Just for functional simulation
 
-    // forward
-    val needForward1 = WireInit(VecInit((0 until LsroqSize).map(j => {
-      io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0) > j.U &&
-        (
-          ringBufferTail <= j.U ||
-            ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
-          )
-    })))
-    val needForward2 = WireInit(VecInit((0 until LsroqSize).map(j => {
-      ringBufferTail <= j.U &&
-        ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
-    })))
+    // Compare ringBufferTail (deqPtr) and forward.lsroqIdx, we have two cases:
+    // (1) if they have the same flag, we need to check range(tail, lsroqIdx)
+    // (2) if they have different flags, we need to check range(tail, lsroqSize) and range(0, lsroqIdx)
+    // Forward1: Mux(same_flag, range(tail, lsroqIdx), range(tail, lsroqSize))
+    // Forward2: Mux(same_flag, 0.U,                   range(0, lsroqIdx)    )
+    // i.e. forward1 is the target entries with the same flag bits and forward2
     val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
     val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+
+    val differentFlag = ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
+    val tailMask = ((1.U((LsroqSize + 1).W)) << ringBufferTail).asUInt - 1.U
+    val forwardMask = ((1.U((LsroqSize + 1).W)) << io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
+    val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
+    val needForward2 = Mux(differentFlag, forwardMask, 0.U(LsroqSize.W))
 
     // forward lookup vec2
     (0 until LsroqSize).map(j => {
