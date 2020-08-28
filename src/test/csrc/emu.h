@@ -30,6 +30,7 @@ class Emulator {
   VerilatedVcdC* tfp;
   bool enable_waveform;
   VerilatedSaveMem snapshot_slot[2];
+  EmuArgs args;
 
   enum {
     STATE_GOODTRAP = 0,
@@ -55,9 +56,10 @@ class Emulator {
   inline char* waveform_filename(time_t t);
 
 public:
-  Emulator(EmuArgs &args);
+  Emulator(int argc, const char *argv[]);
   ~Emulator();
   uint64_t execute(uint64_t n);
   uint64_t get_cycles() const { return cycles; }
+  EmuArgs get_args() const { return args; }
   bool is_good_trap() { return trapCode == STATE_GOODTRAP; };
 };

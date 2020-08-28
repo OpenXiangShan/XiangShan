@@ -1,0 +1,4 @@
+[submodule "rocket-chip"]
+	path = rocket-chip
+	url = https://github.com/chipsalliance/rocket-chip.git
+	branch = 2bdb03dbca3f77ad4c378cc1b95ab4961bc1448a

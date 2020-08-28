@@ -2,7 +2,6 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import bus.simplebus._
 import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
@@ -10,8 +9,11 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
+import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
+import chipsalliance.rocketchip.config
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
 import utils._
-import xiangshan.cache.DcacheUserBundle
 
 case class XSCoreParameters
 (
@@ -24,7 +26,7 @@ case class XSCoreParameters
   EnableStoreQueue: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
-  PAddrBits: Int = 32,
+  PAddrBits: Int = 40,
   HasFPU: Boolean = true,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
@@ -78,9 +80,12 @@ case class XSCoreParameters
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
-  RefillSize: Int = 512
+  RefillSize: Int = 512,
+  TlbEntrySize: Int = 32,
+  TlbL2EntrySize: Int = 256, // or 512
+  PtwL1EntrySize: Int = 16,
+  PtwL2EntrySize: Int = 256
 )
-
 
 trait HasXSParameter {
 
@@ -147,9 +152,25 @@ trait HasXSParameter {
   val StorePipelineWidth = core.StorePipelineWidth
   val StoreBufferSize = core.StoreBufferSize
   val RefillSize = core.RefillSize
+  val DTLBWidth = core.LoadPipelineWidth + core.StorePipelineWidth
+  val TlbEntrySize = core.TlbEntrySize
+  val TlbL2EntrySize = core.TlbL2EntrySize
+  val PtwL1EntrySize = core.PtwL1EntrySize
+  val PtwL2EntrySize = core.PtwL2EntrySize
+
+  val l1BusDataWidth = 64
+
+  val icacheParameters = ICacheParameters(
+  )
+
+  val LRSCCycles = 16
+  val dcacheParameters = DCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded")
+  )
 }
 
-trait HasXSLog { this: Module =>
+trait HasXSLog { this: RawModule =>
   implicit val moduleName: String = this.name
 }
 
@@ -192,46 +213,45 @@ object AddressSpace extends HasXSParameter {
 }
 
 
-class XSCore extends XSModule {
-  val io = IO(new Bundle {
-    val imem = new SimpleBusC
-    val dmem = new SimpleBusC
-    val mmio = new SimpleBusUC
-    val frontend = Flipped(new SimpleBusUC())
-  })
 
-  io.imem <> DontCare
+class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
-  val DcacheUserBundleWidth = (new DcacheUserBundle).getWidth
+  val dcache = LazyModule(new DCache())
+  val uncache = LazyModule(new Uncache())
+  val ptw = LazyModule(new PTW())
 
-  val dmemXbar = Module(new SimpleBusCrossbarNto1(n = 2, userBits = DcacheUserBundleWidth))
-  
+  // TODO: crossbar Icache/Dcache/PTW here
+  val mem = TLXbar()
+  val mmio = uncache.clientNode
+
+  mem := TLCacheCork(sinkIds = 1) := dcache.clientNode
+  mem := TLCacheCork(sinkIds = 1) := ptw.node
+
+  lazy val module = new XSCoreImp(this)
+}
+
+class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
+
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
 
+  val dcache = outer.dcache.module
+  val uncache = outer.uncache.module
+  val ptw = outer.ptw.module
+
+  // TODO: connect this
+  dcache.io.lsu.misc <> DontCare
+
   front.io.backend <> backend.io.frontend
   mem.io.backend   <> backend.io.mem
 
-  backend.io.memMMU.imem <> DontCare
+  ptw.io.tlb(0) <> mem.io.ptw
+  ptw.io.tlb(1) <> DontCare
 
-  val dtlb = TLB(
-    in = mem.io.dmem,
-    mem = dmemXbar.io.in(1),
-    flush = false.B,
-    csrMMU = backend.io.memMMU.dmem
-  )(TLBConfig(name = "dtlb", totalEntry = 64, userBits = DcacheUserBundleWidth))
-  dmemXbar.io.in(0) <> dtlb.io.out
-  // dmemXbar.io.in(1) <> io.frontend
-
-  io.frontend <> DontCare
-
-  io.dmem <> Cache(
-    in = dmemXbar.io.out,
-    mmio = Seq(io.mmio),
-    flush = "b00".U,
-    empty = dtlb.io.cacheEmpty,
-    enable = HasDcache
-  )(CacheConfig(name = "dcache", userBits = DcacheUserBundleWidth))
+  dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec
+  dcache.io.lsu.lsroq <> mem.io.miscToDcache
+  dcache.io.lsu.store <> mem.io.sbufferToDcache
+  uncache.io.lsroq <> mem.io.uncache
 
 }

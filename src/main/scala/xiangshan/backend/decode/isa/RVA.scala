@@ -3,6 +3,7 @@ package xiangshan.backend.decode.isa
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
+import xiangshan.mem.LSUOpType
 import xiangshan.backend.decode.HasInstrType
 
 
@@ -25,6 +26,21 @@ object RVAInstr extends HasInstrType {
   def AMOMAXU = BitPat("b11100_??_?????_?????_01?_?????_0101111")
   // funct3 === 010 or 011
 
-  // fixme: add rva inst
-  val table = Array()
+  val table = Array(
+    // LR          -> List(InstrI, FuType.mou, LSUOpType.lr),
+    // SC          -> List(InstrS, FuType.mou, LSUOpType.sc),
+    LR_D        -> List(InstrI, FuType.mou, LSUOpType.lr),
+    LR_W        -> List(InstrI, FuType.mou, LSUOpType.lr),
+    SC_D        -> List(InstrSA, FuType.mou, LSUOpType.sc),
+    SC_W        -> List(InstrSA, FuType.mou, LSUOpType.sc),
+    AMOSWAP     -> List(InstrR, FuType.mou, LSUOpType.amoswap),
+    AMOADD      -> List(InstrR, FuType.mou, LSUOpType.amoadd),
+    AMOXOR      -> List(InstrR, FuType.mou, LSUOpType.amoxor),
+    AMOAND      -> List(InstrR, FuType.mou, LSUOpType.amoand),
+    AMOOR       -> List(InstrR, FuType.mou, LSUOpType.amoor),
+    AMOMIN      -> List(InstrR, FuType.mou, LSUOpType.amomin),
+    AMOMAX      -> List(InstrR, FuType.mou, LSUOpType.amomax),
+    AMOMINU     -> List(InstrR, FuType.mou, LSUOpType.amominu),
+    AMOMAXU     -> List(InstrR, FuType.mou, LSUOpType.amomaxu)
+  )
 }

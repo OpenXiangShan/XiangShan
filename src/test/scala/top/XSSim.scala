@@ -4,9 +4,12 @@ import system._
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-import bus.axi4._
+import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
+import freechips.rocketchip.amba.axi4.{AXI4Fragmenter, AXI4UserYanker}
+import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
 import xiangshan._
 import utils._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -24,7 +27,7 @@ class DiffTestIO extends XSBundle {
   val wpc = Output(Vec(CommitWidth, UInt(VAddrBits.W))) // set difftest width to 6
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
-  
+
   val priviledgeMode = Output(UInt(2.W))
   val mstatus = Output(UInt(64.W))
   val sstatus = Output(UInt(64.W))
@@ -47,68 +50,81 @@ class TrapIO extends XSBundle {
   val instrCnt = Output(UInt(XLEN.W))
 }
 
-class XSSimTop extends Module {
-  val io = IO(new Bundle{
-    val difftest = new DiffTestIO
-    val logCtrl = new LogCtrlIO
-    val trap = new TrapIO
-    val uart = new UARTIO
-  })
 
-  val soc = Module(new XSSoc())
-  val mem = Module(new AXI4RAM(memByte = 128 * 1024 * 1024, useBlackBox = true))
-  // Be careful with the commit checking of emu.
-  // A large delay will make emu incorrectly report getting stuck.
-  val memdelay = Module(new AXI4Delayer(0))
-  val mmio = Module(new SimMMIO)
+class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
 
-  soc.io.frontend := DontCare
+  val memAddressSet = AddressSet(0x0L, 0xffffffffffL)
 
-  memdelay.io.in <> soc.io.mem
-  mem.io.in <> memdelay.io.out
+  val soc = LazyModule(new XSSoc())
+  val axiRam = LazyModule(new AXI4RAM(
+    memAddressSet,
+    memByte = 128 * 1024 * 1024,
+    useBlackBox = true
+  ))
+  val axiMMIO = LazyModule(new SimMMIO())
 
-  mmio.io.rw <> soc.io.mmio
-  io.uart <> mmio.io.uart
+  axiRam.node :=
+    AXI4UserYanker() :=
+    TLToAXI4() :=
+    TLBuffer(BufferParams.default) :=
+    TLFragmenter(8, 64, holdFirstDeny = true) :=
+    DebugIdentityNode() :=
+    soc.mem
 
-  // soc.io.meip := Counter(true.B, 9973)._2  // use prime here to not overlapped by mtip
-  soc.io.meip := false.B  // use prime here to not overlapped by mtip
+  axiMMIO.axiBus :=
+    AXI4UserYanker() :=
+    TLToAXI4() :=
+    TLFragmenter(8, 8) :=
+    soc.extDev
 
-  val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
-  BoringUtils.addSink(difftest.commit, "difftestCommit")
-  BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
-  BoringUtils.addSink(difftest.thisINST, "difftestThisINST")
-  BoringUtils.addSink(difftest.skip, "difftestSkip")
-  BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
-  BoringUtils.addSink(difftest.wen, "difftestWen")
-  BoringUtils.addSink(difftest.wdata, "difftestWdata")
-  BoringUtils.addSink(difftest.wdst, "difftestWdst")
-  BoringUtils.addSink(difftest.wpc, "difftestWpc")
-  BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
-  BoringUtils.addSink(difftest.r, "difftestRegs")
-  BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
-  BoringUtils.addSink(difftest.mstatus, "difftestMstatus")
-  BoringUtils.addSink(difftest.sstatus, "difftestSstatus") 
-  BoringUtils.addSink(difftest.mepc, "difftestMepc")
-  BoringUtils.addSink(difftest.sepc, "difftestSepc")
-  BoringUtils.addSink(difftest.mcause, "difftestMcause")
-  BoringUtils.addSink(difftest.scause, "difftestScause")
-  io.difftest := difftest
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val difftest = new DiffTestIO
+      val logCtrl = new LogCtrlIO
+      val trap = new TrapIO
+      val uart = new UARTIO
+    })
 
-  val trap = WireInit(0.U.asTypeOf(new TrapIO))
-  ExcitingUtils.addSink(trap.valid, "trapValid")
-  ExcitingUtils.addSink(trap.code, "trapCode")
-  ExcitingUtils.addSink(trap.pc, "trapPC")
-  ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
-  ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
-  io.trap := trap
+    io.uart <> axiMMIO.module.io.uart
+    soc.module.io.meip := false.B
 
-  val timer = GTimer()
-  val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-  ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-  ExcitingUtils.addSource(timer, "logTimestamp")
+    val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
+    BoringUtils.addSink(difftest.commit, "difftestCommit")
+    BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
+    BoringUtils.addSink(difftest.thisINST, "difftestThisINST")
+    BoringUtils.addSink(difftest.skip, "difftestSkip")
+    BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
+    BoringUtils.addSink(difftest.wen, "difftestWen")
+    BoringUtils.addSink(difftest.wdata, "difftestWdata")
+    BoringUtils.addSink(difftest.wdst, "difftestWdst")
+    BoringUtils.addSink(difftest.wpc, "difftestWpc")
+    BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
+    BoringUtils.addSink(difftest.r, "difftestRegs")
+    BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
+    BoringUtils.addSink(difftest.mstatus, "difftestMstatus")
+    BoringUtils.addSink(difftest.sstatus, "difftestSstatus")
+    BoringUtils.addSink(difftest.mepc, "difftestMepc")
+    BoringUtils.addSink(difftest.sepc, "difftestSepc")
+    BoringUtils.addSink(difftest.mcause, "difftestMcause")
+    BoringUtils.addSink(difftest.scause, "difftestScause")
+    io.difftest := difftest
 
-  // Check and dispaly all source and sink connections
-  ExcitingUtils.checkAndDisplay()
+    val trap = WireInit(0.U.asTypeOf(new TrapIO))
+    ExcitingUtils.addSink(trap.valid, "trapValid")
+    ExcitingUtils.addSink(trap.code, "trapCode")
+    ExcitingUtils.addSink(trap.pc, "trapPC")
+    ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
+    ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
+    io.trap := trap
+
+    val timer = GTimer()
+    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+    ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+    ExcitingUtils.addSource(timer, "logTimestamp")
+
+    // Check and dispaly all source and sink connections
+    ExcitingUtils.checkAndDisplay()
+  }
 }
 
 object TestMain extends App {
@@ -117,11 +133,12 @@ object TestMain extends App {
     if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
     else Parameters.debugParameters // open log
   )
+  implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
     args,
     Seq(
-      ChiselGeneratorAnnotation(() => new XSSimTop)
+      ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
     )
   )
 }
