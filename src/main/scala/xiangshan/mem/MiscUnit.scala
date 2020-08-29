@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 
 class MiscUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new ExuOutput)
     val dcache = new DCacheLoadIO
-    val dtlb = Flipped(new DtlbToLsuIO)
+    val dtlb = new TlbRequestIO
   })
 
   //-------------------------------------------------------
@@ -23,7 +23,7 @@ class MiscUnit extends XSModule with MemoryOpConstants{
 
   switch (state) {
     is (s_tlb) {
-      when(io.in.valid && io.dtlb.resp.valid){
+      when(io.in.valid && io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
         state := s_cache_req
       }
     }
@@ -42,8 +42,13 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   // TLB   
   // send req to dtlb
   // keep firing until tlb hit
-  io.dtlb.req.valid := io.in.valid && state === s_tlb
+  io.dtlb.req.valid      := io.in.valid && state === s_tlb
   io.dtlb.req.bits.vaddr := io.in.bits.src1
+  io.dtlb.req.bits.roqIdx   := io.in.bits.uop.roqIdx
+  io.dtlb.req.bits.cmd   := Mux(io.in.bits.uop.ctrl.fuOpType === LSUOpType.lr, TlbCmd.read, TlbCmd.write)
+  io.dtlb.req.bits.debug.pc := io.in.bits.uop.cf.pc
+  io.dtlb.req.bits.debug.lsroqIdx := io.in.bits.uop.lsroqIdx
+  // TODO: add excp logic of dtlb.resp.bits.excp.pf
 
   // record paddr
   val paddr = RegEnable(io.dtlb.resp.bits.paddr, io.in.fire())

@@ -62,6 +62,9 @@ class Sbuffer extends XSModule with HasSBufferConst {
   def getTag(pa: UInt): UInt =
     pa(PAddrBits - 1, PAddrBits - tagWidth)
 
+  def getAddr(tag: UInt): UInt =
+    Cat(tag, 0.U((PAddrBits - tagWidth).W))
+
   def getByteOffset(pa: UInt): UInt =
     Cat(pa(offsetWidth - 1, log2Up(8)), Fill(3, 0.U))
 
@@ -90,11 +93,15 @@ class Sbuffer extends XSModule with HasSBufferConst {
     // 0. compare with former requests
     for (formerIdx <- 0 until storeIdx) {
       // i: former request
-      when (getTag(io.in(storeIdx).bits.addr) === updateInfo(formerIdx).newTag &&
-        (updateInfo(formerIdx).isUpdated || updateInfo(formerIdx).isInserted) && io.in(storeIdx).valid) {
+      when ((getTag(io.in(storeIdx).bits.addr) === updateInfo(formerIdx).newTag) &&
+        (updateInfo(formerIdx).isUpdated || updateInfo(formerIdx).isInserted) && io.in(storeIdx).valid && io.in(formerIdx).valid) {
         updateInfo(storeIdx).isForward := true.B
         updateInfo(formerIdx).isIgnored := true.B
         updateInfo(storeIdx).idx := updateInfo(formerIdx).idx
+        XSDebug("req#%d writes same line with req#%d\n", storeIdx.U, formerIdx.U)
+
+        updateInfo(storeIdx).isInserted := updateInfo(formerIdx).isInserted
+        updateInfo(storeIdx).isUpdated := updateInfo(formerIdx).isUpdated
 
 
         updateInfo(storeIdx).newTag := updateInfo(formerIdx).newTag
@@ -188,18 +195,21 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
     XSInfo(updateInfo(storeIdx).isUpdated && updateInfo(storeIdx).isInserted, "Error: one line is both updated and inserted!\n")
 
-    io.in(storeIdx).ready := updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted || updateInfo(storeIdx).isForward
+    if (storeIdx > 0)
+      io.in(storeIdx).ready := io.in(storeIdx - 1).ready && (updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted)
+    else
+      io.in(storeIdx).ready := updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isInserted
 
     when(io.in(storeIdx).fire()){
 
 
       when(updateInfo(storeIdx).isIgnored) {
-        XSInfo("Ignore line#%d\n", storeIdx.U)
+        XSInfo("Ignore req#%d with paddr %x, mask %x, data %x\n", storeIdx.U, io.in(storeIdx).bits.addr, io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
 
 
-        // Update or Forward
+        // Update
         // ----------------------------------------
-      } .elsewhen(updateInfo(storeIdx).isUpdated || updateInfo(storeIdx).isForward) {
+      } .elsewhen(updateInfo(storeIdx).isUpdated) {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
@@ -213,7 +223,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
           int := updateInfo(storeIdx).newMask(i)
         }
 
-        XSInfo("Update line#%d with tag %x, mask: %x, data: %x\n", updateInfo(storeIdx).idx, cache(updateInfo(storeIdx).idx).tag,
+        XSInfo("Update line#%d with tag %x, mask %x, data %x\n", updateInfo(storeIdx).idx, cache(updateInfo(storeIdx).idx).tag,
           io.in(storeIdx).bits.mask, io.in(storeIdx).bits.data)
 
 
@@ -248,37 +258,45 @@ class Sbuffer extends XSModule with HasSBufferConst {
   //--------------------------------------------------------------------------------------------------------------------
   val waitingCacheLine: SBufferCacheLine = RegInit(0.U.asTypeOf(new SBufferCacheLine))
 
-  val validCnt: UInt = Wire(UInt(4.W))
+  val validCnt: UInt = Wire(UInt((sBufferIndexWidth + 1).W))
   validCnt := PopCount((0 until StoreBufferSize).map(i => cache(i).valid))
   XSInfo("[ %d ] lines valid this cycle\n", validCnt)
 
   val oldestLineIdx: UInt = Wire(UInt(sBufferIndexWidth.W))
   oldestLineIdx := lru.way
-  XSInfo("Least recently used #[ %d ] line\n", validCnt)
+  XSInfo("Least recently used #[ %d ] line\n", oldestLineIdx)
+
+  val dcacheData = Wire(UInt(io.dcache.req.bits.data.getWidth.W))
+  val dcacheMask = Wire(UInt(io.dcache.req.bits.mask.getWidth.W))
+  dcacheData := DontCare
+  dcacheMask := DontCare
 
   io.dcache.req.valid := false.B //needWriteToCache
   io.dcache.req.bits.addr := DontCare
-  io.dcache.req.bits.data := DontCare
-  io.dcache.req.bits.mask := DontCare
-
-  io.dcache.req.bits.cmd := DontCare // NOT USED
+  io.dcache.req.bits.data := dcacheData
+  io.dcache.req.bits.mask := dcacheMask
+  io.dcache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.dcache.req.bits.meta := DontCare // NOT USED
   io.dcache.resp.ready := waitingCacheLine.valid
 
 
-  when (validCnt + 2.U >= StoreBufferSize.U && !waitingCacheLine.valid) {
+  when (validCnt === StoreBufferSize.U && !waitingCacheLine.valid) {
     // assert valid and send data + mask + addr(ends with 000b) to d-cache
-    io.dcache.req.bits.addr := Cat(cache(oldestLineIdx).tag, 0.U(3.W))
+    io.dcache.req.bits.addr := getAddr(cache(oldestLineIdx).tag)
 
     when (!busy(oldestLineIdx, StorePipelineWidth)) {
-      io.dcache.req.bits.data := cache(oldestLineIdx).data.asUInt()
-      io.dcache.req.bits.mask := cache(oldestLineIdx).mask.asUInt()
+      dcacheData := cache(oldestLineIdx).data.asUInt()
+      dcacheMask := cache(oldestLineIdx).mask.asUInt()
+
+      XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n", oldestLineIdx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
+    } .otherwise {
+      XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     }
 
     for (i <- 0 until StorePipelineWidth) {
       when (updateInfo(i).idx === oldestLineIdx && updateInfo(i).isUpdated && io.in(i).valid) {
-        io.dcache.req.bits.data := updateInfo(i).newData.asUInt()
-        io.dcache.req.bits.mask := updateInfo(i).newMask.asUInt()
+        dcacheData := updateInfo(i).newData.asUInt()
+        dcacheMask := updateInfo(i).newMask.asUInt()
       }
     }
 
@@ -287,16 +305,20 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   when(io.dcache.req.fire()){
     // save current req
-    waitingCacheLine.valid := true.B
     waitingCacheLine := cache(oldestLineIdx)
+    waitingCacheLine.data := dcacheData.asTypeOf(Vec(cacheMaskWidth, UInt(8.W)))
+    waitingCacheLine.mask := dcacheMask.asTypeOf(Vec(cacheMaskWidth, Bool()))
+    XSError(!cache(oldestLineIdx).valid, "!cache(oldestLineIdx).valid\n")
+    // waitingCacheLine.valid := true.B
 
     cache(oldestLineIdx).valid := false.B
+    XSInfo("send req to dcache %x\n", oldestLineIdx)
   }
 
   when(io.dcache.resp.fire()) {
     waitingCacheLine.valid := false.B
     lru.miss
-    XSInfo("recv resp from dcache. wb tag %x\n", waitingCacheLine.tag)
+    XSInfo("recv resp from dcache. wb tag %x mask %x data %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
   }
 
 
@@ -306,29 +328,37 @@ class Sbuffer extends XSModule with HasSBufferConst {
     io.forward(loadIdx).forwardMask := VecInit(List.fill(instMaskWidth)(false.B))
     io.forward(loadIdx).forwardData := DontCare
 
-    when(getTag(io.forward(loadIdx).paddr) === waitingCacheLine.tag) {
-      (0 until XLEN / 8).map(i => {
-        io.forward(loadIdx).forwardData(i) := waitingCacheLine.data(i.U + getByteOffset(io.forward(loadIdx).paddr))
-        io.forward(loadIdx).forwardMask(i) := waitingCacheLine.mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
-      })
-    } .otherwise {
-      (0 until StoreBufferSize).foreach(sBufIdx => {
-        when(getTag(io.forward(loadIdx).paddr) === cache(sBufIdx).tag) {
-          // send data with mask in this line
-          // this mask is not 'mask for cache line' and we need to check low bits of paddr
-          // to get certain part of one line
-          // P.S. data in io.in will be manipulated by lsroq
-
-          (0 until XLEN / 8).map(i => {
-            io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
-            io.forward(loadIdx).forwardMask(i) := cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr))
-          })
-
-          XSDebug("[Forwarding] tag: %x data: %x mask: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).forwardData.asUInt(),
-            io.forward(loadIdx).forwardMask.asUInt())
+    when(getTag(io.forward(loadIdx).paddr) === waitingCacheLine.tag && waitingCacheLine.valid) {
+      (0 until XLEN / 8).foreach(i => {
+        when (waitingCacheLine.mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
+          io.forward(loadIdx).forwardData(i) := waitingCacheLine.data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+          io.forward(loadIdx).forwardMask(i) := true.B
         }
       })
     }
+
+    // data in StoreBuffer should have higer priority than waitingCacheLine
+    for (sBufIdx <- 0 until StoreBufferSize) {
+      when(getTag(io.forward(loadIdx).paddr) === cache(sBufIdx).tag && cache(sBufIdx).valid) {
+        // send data with mask in this line
+        // this mask is not 'mask for cache line' and we need to check low bits of paddr
+        // to get certain part of one line
+        // P.S. data in io.in will be manipulated by lsroq
+        (0 until XLEN / 8).foreach(i => {
+          when (cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
+            io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))
+            io.forward(loadIdx).forwardMask(i) := true.B
+          }
+        })
+
+        when (io.forward(loadIdx).valid) {
+          XSDebug("[ForwardReq] paddr: %x mask: %x pc: %x\n", io.forward(loadIdx).paddr, io.forward(loadIdx).mask, io.forward(loadIdx).pc)
+          XSDebug("[Forwarding] forward-data: %x forward-mask: %x\n", io.forward(loadIdx).forwardData.asUInt(),
+            io.forward(loadIdx).forwardMask.asUInt())
+        }
+      }
+    }
+
   })
 
   // additional logs
@@ -340,87 +370,4 @@ class Sbuffer extends XSModule with HasSBufferConst {
   cache.zipWithIndex.foreach { case (line, i) => {
     XSDebug(line.valid, "[#%d line] Tag: %x, data: %x, mask: %x\n", i.U, line.tag, line.data.asUInt(), line.mask.asUInt())
   }}
-}
-  
-// Fake Store buffer for XiangShan Out of Order LSU
-// NutShell DCache Interface
-class FakeSbuffer extends XSModule {
-  val io = IO(new Bundle() {
-    val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
-    val dcache = new DCacheStoreIO
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-  })
-
-  assert(!(io.in(1).valid && !io.in(0).valid))
-
-  // assign default values to signals
-  io.in(1).ready := false.B
-
-  io.dcache.req.valid := false.B
-  io.dcache.req.bits := DontCare
-  io.dcache.resp.ready := false.B
-
-  val s_invalid :: s_req :: s_resp :: Nil = Enum(3)
-
-  val state = RegInit(s_invalid)
-
-  val req = Reg(new DCacheWordReq)
-
-  XSDebug("state: %d\n", state)
-
-  io.in(0).ready := state === s_invalid
-
-  def word_addr(addr: UInt) = (addr >> 3) << 3
-  def block_addr(addr: UInt) = (addr >> 6) << 6
-
-  // --------------------------------------------
-  // s_invalid: receive requests
-  when (state === s_invalid) {
-    when (io.in(0).fire()) {
-      req   := io.in(0).bits
-      state := s_req
-    }
-  }
-
-  val wdataVec = WireInit(VecInit(Seq.fill(8)(0.U(64.W))))
-  val wmaskVec = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
-  wdataVec(req.addr(5,3)) := req.data
-  wmaskVec(req.addr(5,3)) := req.mask
-
-  when (state === s_req) {
-    val dcache_req = io.dcache.req
-    dcache_req.valid := true.B
-    dcache_req.bits.cmd  := MemoryOpConstants.M_XWR
-    dcache_req.bits.addr := block_addr(req.addr)
-    dcache_req.bits.data := wdataVec.asUInt
-    dcache_req.bits.mask := wmaskVec.asUInt
-    dcache_req.bits.meta := DontCare
-
-    when (dcache_req.fire()) {
-      state := s_resp
-    }
-  }
-
-  when (state === s_resp) {
-    io.dcache.resp.ready := true.B
-    when (io.dcache.resp.fire()) {
-      state := s_invalid
-    }
-  }
-
-  // do forwarding here
-  for (i <- 0 until LoadPipelineWidth) {
-    val addr_match = word_addr(io.forward(i).paddr) === word_addr(req.addr)
-    val mask = io.forward(i).mask & req.mask(7, 0)
-    val mask_match = mask =/= 0.U
-    val need_forward = state =/= s_invalid && addr_match && mask_match
-
-    io.forward(i).forwardMask := Mux(need_forward, VecInit(mask.asBools),
-      VecInit(0.U(8.W).asBools))
-    io.forward(i).forwardData := VecInit((0 until 8) map {i => req.data((i + 1) * 8 - 1, i * 8)})
-  }
-
-  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.mask)
-  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(1).bits.addr, io.in(1).bits.data, io.in(0).bits.mask)
-  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x mask %b\n", io.dcache.req.bits.addr, io.dcache.req.bits.data, io.dcache.req.bits.mask)
 }

@@ -5,7 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheLoadIO, DtlbToLsuIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
@@ -75,6 +75,7 @@ class Lsroq extends XSModule {
     val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
       uop(index) := io.dp1Req(i).bits
+      uop(index).lsroqIdx := lsroqIdx // NOTE: add by zhangzifei, need check by others
       allocated(index) := true.B
       valid(index) := false.B
       writebacked(index) := false.B
@@ -174,7 +175,7 @@ class Lsroq extends XSModule {
   val missRefillSelVec = VecInit(
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
-  val missRefillSel = PriorityEncoder(missRefillSelVec.asUInt)
+  val missRefillSel = getFirstOne(missRefillSelVec, ringBufferTail)
   io.dcache.req.valid := missRefillSelVec.asUInt.orR
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
   io.dcache.req.bits.addr := data(missRefillSel).paddr
@@ -201,11 +202,11 @@ class Lsroq extends XSModule {
   }
 
   when(io.dcache.req.fire()){
-    XSDebug("miss req: pc %x addr %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr) 
+    XSDebug("miss req: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x vaddr:0x%x\n", io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx, io.dcache.req.bits.meta.uop.lsroqIdx, io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr) 
   }
 
   when(io.dcache.resp.fire()){
-    XSDebug("miss resp: addr %x data %x\n", io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
+    XSDebug("miss resp: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x data %x\n", io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx, io.dcache.resp.bits.meta.uop.lsroqIdx, io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
   }
 
   // get load result from refill resp
@@ -472,8 +473,8 @@ class Lsroq extends XSModule {
           when(data(j).mask(k)) {
             forwardMask1(k) := true.B
             forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x, idx %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc, io.forward(i).lsroqIdx, uop(io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).cf.pc
+            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
+              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
             )
           }
         })
@@ -566,7 +567,7 @@ class Lsroq extends XSModule {
       val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && !store(j) && valid(j)
+        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && !store(j) && (valid(j) || listening(j) || miss(j))
         // TODO: update refilled data
         val violationVec = (0 until 8).map(k => data(j).mask(k) && io.storeIn(i).bits.mask(k))
         Cat(violationVec).orR() && entryNeedCheck
@@ -649,7 +650,9 @@ class Lsroq extends XSModule {
 
   // setup misc mem access req
   // mask / paddr / data can be get from lsroq.data
+  val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
+    (commitType === CommitType.STORE || commitType === CommitType.LOAD) && 
     io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
     !io.commits(0).bits.isWalk
 
@@ -681,7 +684,13 @@ class Lsroq extends XSModule {
   }
 
   when(io.uncache.req.fire()){
-    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n", uop(missRefillSel).cf.pc, io.dcache.req.bits.addr, io.uncache.req.bits.data, io.uncache.req.bits.cmd, io.uncache.req.bits.mask) 
+    XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
+      uop(ringBufferTail).cf.pc,
+      io.uncache.req.bits.addr,
+      io.uncache.req.bits.data,
+      io.uncache.req.bits.cmd,
+      io.uncache.req.bits.mask
+    )
   }
 
   when(io.uncache.resp.fire()){

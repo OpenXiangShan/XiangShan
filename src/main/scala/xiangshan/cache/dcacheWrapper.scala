@@ -340,7 +340,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   assert(!(miscReq.fire() && miscReq.bits.meta.tlb_miss),
     "TLB missed requests should not go to cache")
   assert(!io.lsu.misc.s1_kill, "Lsroq should never use s1 kill on misc")
-  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc")
+  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc") // TODO: ptw wanna use s1_kill
 
 
   //----------------------------------------

@@ -24,14 +24,12 @@ import utils.ParallelOR
 class Backend extends XSModule
   with NeedImpl {
   val io = IO(new Bundle {
-    // val dmem = new SimpleBusUC(addrBits = VAddrBits)
-    val memMMU = Flipped(new MemMMUIO)
     val frontend = Flipped(new FrontendToBackendIO)
     val mem = Flipped(new MemToBackendIO)
   })
 
 
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
+  val aluExeUnits = Module(new AluExeUnit(hasSfence = true)) +: Array.tabulate(exuParameters.AluCnt-1)(_ => Module(new AluExeUnit(hasSfence = false)))
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))

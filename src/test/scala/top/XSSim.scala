@@ -68,7 +68,6 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     TLToAXI4() :=
     TLBuffer(BufferParams.default) :=
     TLFragmenter(8, 64, holdFirstDeny = true) :=
-    TLCacheCork(sinkIds = 1) :=
     DebugIdentityNode() :=
     soc.mem
 
@@ -136,11 +135,10 @@ object TestMain extends App {
   )
   implicit val p = config.Parameters.empty
   // generate verilog
-  (new chisel3.stage.ChiselStage).execute(
-    args.filterNot(_ == "--disable-log"),
+  XiangShanStage.execute(
+    args,
     Seq(
       ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
-      // RunFirrtlTransformAnnotation(new ShowPrintTransform)
     )
   )
 }
