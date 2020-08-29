@@ -52,14 +52,20 @@ class Lsroq extends XSModule {
   val ringBufferTailExtended = RegInit(0.U(LsroqIdxWidth.W))
   val ringBufferHead = ringBufferHeadExtended(InnerLsroqIdxWidth - 1, 0)
   val ringBufferTail = ringBufferTailExtended(InnerLsroqIdxWidth - 1, 0)
-  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerLsroqIdxWidth) === ringBufferTailExtended(InnerLsroqIdxWidth)
-  val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerLsroqIdxWidth) =/= ringBufferTailExtended(InnerLsroqIdxWidth)
+  val ringBufferSameFlag = ringBufferHeadExtended(InnerLsroqIdxWidth) === ringBufferTailExtended(InnerLsroqIdxWidth)
+  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferSameFlag
+  val ringBufferFull = ringBufferHead === ringBufferTail && !ringBufferSameFlag
   val ringBufferAllowin = !ringBufferFull
   
   val storeCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.STORE)
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth-1,0))
-  
+
+  val tailMask = (((1.U((LsroqSize + 1).W)) << ringBufferTail).asUInt - 1.U)(LsroqSize - 1, 0)
+  val headMask = (((1.U((LsroqSize + 1).W)) << ringBufferHead).asUInt - 1.U)(LsroqSize - 1, 0)
+  val enqDeqMask1 = tailMask ^ headMask
+  val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
+
   // TODO: misc arbitor
 
   // Enqueue at dispatch
@@ -309,21 +315,12 @@ class Lsroq extends XSModule {
   // remove retired insts from lsroq, add retired store to sbuffer
 
   // move tailPtr
-  // FIXME: opt size using OH -> Mask
-  val dequeueMask = Wire(Vec(LsroqSize * 2, Bool()))
-  (0 until LsroqSize * 2).foreach(i => {
-    val ptr = i.U(InnerLsroqIdxWidth - 1, 0)
-    if (i == 0) {
-      dequeueMask(i) := ringBufferTail === i.U && !ringBufferEmpty && !allocated(ptr) // beginning of dequeuemask
-    } else {
-      dequeueMask(i) := (
-        dequeueMask(i - 1) && !allocated(ptr) && ringBufferHead =/= i.U(InnerLsroqIdxWidth - 1, 0) ||
-          ringBufferTail === i.U && !ringBufferEmpty && !allocated(ptr) // beginning of dequeuemask
-        // TODO: opt timing
-        )
-    }
-  })
-  ringBufferTailExtended := ringBufferTailExtended + PopCount(dequeueMask.asUInt)
+  // allocatedMask: dequeuePtr can go to the next 1-bit
+  val allocatedMask = VecInit((0 until LsroqSize).map(i => allocated(i) || !enqDeqMask(i)))
+  // find the first one from deqPtr (ringBufferTail)
+  val nextTail1 = getFirstOneWithFlag(allocatedMask, ringBufferTail, ringBufferTailExtended(InnerLsroqIdxWidth))
+  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
+  ringBufferTailExtended := nextTail
 
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
@@ -408,7 +405,6 @@ class Lsroq extends XSModule {
     val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
 
     val differentFlag = ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
-    val tailMask = ((1.U((LsroqSize + 1).W)) << ringBufferTail).asUInt - 1.U
     val forwardMask = ((1.U((LsroqSize + 1).W)) << io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
     val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
     val needForward2 = Mux(differentFlag, forwardMask, 0.U(LsroqSize.W))
@@ -453,6 +449,16 @@ class Lsroq extends XSModule {
     PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
   }
 
+  def getFirstOneWithFlag(mask: Vec[Bool], start: UInt, startFlag: UInt) = {
+    val length = mask.length
+    val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
+    val highBits = (0 until length).map(i => mask(i) & ~lowMask(i))
+    val highBitsUint = Cat(highBits.reverse)
+    val changeDirection = !highBitsUint.orR()
+    val index = PriorityEncoder(Mux(!changeDirection, highBitsUint, mask.asUInt))
+    Cat(startFlag ^ changeDirection, index)
+  }
+
   def getOldestInTwo(valid: Seq[Bool], uop: Seq[MicroOp]) = {
     assert(valid.length == uop.length)
     assert(valid.length == 2)
@@ -487,7 +493,10 @@ class Lsroq extends XSModule {
 
     when(io.storeIn(i).valid) {
       val startIndex = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0)
-      val toEnqPtrMask = rangeMask(io.storeIn(i).bits.uop.lsroqIdx, ringBufferHeadExtended)
+      val lsroqIdxMask = ((1.U((LsroqSize + 1).W) << startIndex).asUInt - 1.U)(LsroqSize - 1, 0)
+      val xorMask = lsroqIdxMask ^ headMask
+      val sameFlag = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth) === ringBufferHeadExtended(InnerLsroqIdxWidth)
+      val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
       val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
