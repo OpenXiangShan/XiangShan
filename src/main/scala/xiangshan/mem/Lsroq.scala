@@ -176,7 +176,7 @@ class Lsroq extends XSModule {
   val missRefillSelVec = VecInit(
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
-  val missRefillSel = getFirstOne(missRefillSelVec, ringBufferTail)
+  val missRefillSel = getFirstOne(missRefillSelVec, tailMask)
   io.dcache.req.valid := missRefillSelVec.asUInt.orR
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
   io.dcache.req.bits.addr := data(missRefillSel).paddr
@@ -292,10 +292,10 @@ class Lsroq extends XSModule {
   }))
   val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LsroqSize).W)))
   val storeWbValid = Wire(Vec(StorePipelineWidth, Bool()))
-  storeWbSel(0) := getFirstOne(storeWbSelVec, ringBufferTail)
+  storeWbSel(0) := getFirstOne(storeWbSelVec, tailMask)
   val firstSelMask = UIntToOH(storeWbSel(0))
   val secondWbSelVec = VecInit((0 until LsroqSize).map(i => storeWbSelVec(i) && !firstSelMask(i)))
-  storeWbSel(1) := getFirstOne(secondWbSelVec, ringBufferTail)
+  storeWbSel(1) := getFirstOne(secondWbSelVec, tailMask)
   storeWbValid(0) := Cat(storeWbSelVec).orR
   storeWbValid(1) := Cat(secondWbSelVec).orR
 
@@ -318,7 +318,7 @@ class Lsroq extends XSModule {
   // allocatedMask: dequeuePtr can go to the next 1-bit
   val allocatedMask = VecInit((0 until LsroqSize).map(i => allocated(i) || !enqDeqMask(i)))
   // find the first one from deqPtr (ringBufferTail)
-  val nextTail1 = getFirstOneWithFlag(allocatedMask, ringBufferTail, ringBufferTailExtended(InnerLsroqIdxWidth))
+  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended(InnerLsroqIdxWidth))
   val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
   ringBufferTailExtended := nextTail
 
@@ -441,18 +441,16 @@ class Lsroq extends XSModule {
   // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
 
-  def getFirstOne(mask: Vec[Bool], start: UInt) = {
+  def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
     val length = mask.length
-    val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
-    val highBits = (0 until length).map(i => mask(i) & ~lowMask(i))
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
     val highBitsUint = Cat(highBits.reverse)
     PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
   }
 
-  def getFirstOneWithFlag(mask: Vec[Bool], start: UInt, startFlag: UInt) = {
+  def getFirstOneWithFlag(mask: Vec[Bool], startMask: UInt, startFlag: UInt) = {
     val length = mask.length
-    val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
-    val highBits = (0 until length).map(i => mask(i) & ~lowMask(i))
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
     val highBitsUint = Cat(highBits.reverse)
     val changeDirection = !highBitsUint.orR()
     val index = PriorityEncoder(Mux(!changeDirection, highBitsUint, mask.asUInt))
@@ -506,7 +504,7 @@ class Lsroq extends XSModule {
         Cat(violationVec).orR() && entryNeedCheck
       }))
       val lsroqViolation = lsroqViolationVec.asUInt().orR()
-      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, startIndex)
+      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, lsroqIdxMask)
       val lsroqViolationUop = uop(lsroqViolationIndex)
       XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $startIndex, $lsroqViolationIndex\n")
 
