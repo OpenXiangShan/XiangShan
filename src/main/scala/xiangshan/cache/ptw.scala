@@ -244,7 +244,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
   val l2MemBack = memRespFire && state===state_wait_resp && level===1.U
-  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
+  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memPte.ppn, l2MemBack))
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
   /*
