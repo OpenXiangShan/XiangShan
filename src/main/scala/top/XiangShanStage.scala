@@ -29,7 +29,7 @@ case class DisableAllPrintAnnotation() extends NoTargetAnnotation
 object DisableAllPrintAnnotation extends HasShellOptions {
   val options = Seq(
     new ShellOption[Unit](
-      longOption = "disable-log",
+      longOption = "disable-all",
       toAnnotationSeq = _ => Seq(DisableAllPrintAnnotation()),
       helpText =
         "All the verilog 'printf' will be removed\n",
