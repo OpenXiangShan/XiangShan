@@ -428,6 +428,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
   XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)} memReq(v:${mem.a.valid} r:${mem.a.ready})\n")
 
-  XSDebug(memRespFire, p"mem req fire addr:0x${Hexadecimal(memAddr)}\n")
+  XSDebug(memReqFire, p"mem req fire addr:0x${Hexadecimal(memAddr)}\n")
   XSDebug(memRespFire, p"mem resp fire rdata:0x${Hexadecimal(mem.d.bits.data)} Pte:${memPte}\n")
 }
