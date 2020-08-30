@@ -235,7 +235,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val ridx = l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8))
     val ramData = ptwl2.read(ridx, readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
-    (ramData.hit(l2addr), ramData) // TODO: optimize tag
+    (ramData.hit(l2addr) && vidx, ramData) // TODO: optimize tag
   }
 
   /* ptwl3
