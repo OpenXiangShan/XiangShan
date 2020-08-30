@@ -261,8 +261,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // store pipe and store miss queue
   storeMissQueue.io.lsu    <> io.lsu.store
+  /*
   assert(!(storeMissQueue.io.replay.req.fire() && !storeMissQueue.io.replay.req.bits.meta.replay),
     "StoreMissQueue should replay requests")
+  */
   assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.replay),
     "Sbuffer should not should replay requests")
   assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.mmio),
