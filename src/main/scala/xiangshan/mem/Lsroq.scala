@@ -13,11 +13,7 @@ class LsRoqEntry extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(8.W)
-  // val miss = Bool()
   val mmio = Bool()
-  // val store = Bool()
-  // val bwdMask = Vec(8, Bool()) // UInt(8.W)
-  // val bwdData = Vec(8, UInt(8.W))
   val fwdMask = Vec(8, Bool())
   val fwdData = Vec(8, UInt(8.W))
 }
@@ -56,14 +52,20 @@ class Lsroq extends XSModule {
   val ringBufferTailExtended = RegInit(0.U(LsroqIdxWidth.W))
   val ringBufferHead = ringBufferHeadExtended(InnerLsroqIdxWidth - 1, 0)
   val ringBufferTail = ringBufferTailExtended(InnerLsroqIdxWidth - 1, 0)
-  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerLsroqIdxWidth) === ringBufferTailExtended(InnerLsroqIdxWidth)
-  val ringBufferFull = ringBufferHead === ringBufferTail && ringBufferHeadExtended(InnerLsroqIdxWidth) =/= ringBufferTailExtended(InnerLsroqIdxWidth)
+  val ringBufferSameFlag = ringBufferHeadExtended(InnerLsroqIdxWidth) === ringBufferTailExtended(InnerLsroqIdxWidth)
+  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferSameFlag
+  val ringBufferFull = ringBufferHead === ringBufferTail && !ringBufferSameFlag
   val ringBufferAllowin = !ringBufferFull
   
   val storeCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.STORE)
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth-1,0))
-  
+
+  val tailMask = (((1.U((LsroqSize + 1).W)) << ringBufferTail).asUInt - 1.U)(LsroqSize - 1, 0)
+  val headMask = (((1.U((LsroqSize + 1).W)) << ringBufferHead).asUInt - 1.U)(LsroqSize - 1, 0)
+  val enqDeqMask1 = tailMask ^ headMask
+  val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
+
   // TODO: misc arbitor
 
   // Enqueue at dispatch
@@ -75,7 +77,6 @@ class Lsroq extends XSModule {
     val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
       uop(index) := io.dp1Req(i).bits
-      uop(index).lsroqIdx := lsroqIdx // NOTE: add by zhangzifei, need check by others
       allocated(index) := true.B
       valid(index) := false.B
       writebacked(index) := false.B
@@ -175,7 +176,7 @@ class Lsroq extends XSModule {
   val missRefillSelVec = VecInit(
     (0 until LsroqSize).map(i => allocated(i) && miss(i))
   )
-  val missRefillSel = getFirstOne(missRefillSelVec, ringBufferTail)
+  val missRefillSel = getFirstOne(missRefillSelVec, tailMask)
   io.dcache.req.valid := missRefillSelVec.asUInt.orR
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
   io.dcache.req.bits.addr := data(missRefillSel).paddr
@@ -208,32 +209,6 @@ class Lsroq extends XSModule {
   when(io.dcache.resp.fire()){
     XSDebug("miss resp: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x data %x\n", io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx, io.dcache.resp.bits.meta.uop.lsroqIdx, io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
   }
-
-  // get load result from refill resp
-  // Refill a line in 1 cycle
-  // def refillDataSel(data: UInt, offset: UInt): UInt = {
-  //   Mux1H((0 until 8).map(p => (data(5, 3) === p.U, data(64 * (p + 1) - 1, 64 * p))))
-  // }
-
-  // def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
-  //   val res = Wire(Vec(8, UInt(8.W)))
-  //   (0 until 8).foreach(i => {
-  //     res(i) := Mux(fwdMask(i), fwd(8 * (i + 1) - 1, 8 * i), refill(8 * (i + 1) - 1, 8 * i))
-  //   })
-  //   res.asUInt
-  // }
-
-  // (0 until LsroqSize).map(i => {
-  //   val addrMatch = data(i).paddr(PAddrBits - 1, 6) === io.refill.bits.meta.paddr
-  //   when(allocated(i) && listening(i) && addrMatch && io.dcache.resp.fire()) {
-  //     // TODO: merge data
-  //     // val refillData = refillDataSel(io.refill.bits.data, data(i).paddr(5, 0))
-  //     // data(i).data := mergeRefillData(refillData, data(i).data, data(i).mask)
-  //     data(i).data := refillDataSel(io.refill.bits.data, data(i).paddr(5, 0)) // TODO: forward refill data
-  //     valid(i) := true.B
-  //     listening(i) := false.B
-  //   }
-  // })
 
   // Refill 64 bit in a cycle
   // Refill data comes back from io.dcache.resp
@@ -311,18 +286,18 @@ class Lsroq extends XSModule {
   })
 
   // writeback up to 2 store insts to CDB
-  // just randomly pick 2 stores, write them back to cdb
+  // choose the first two valid store requests from deqPtr
   val storeWbSelVec = VecInit((0 until LsroqSize).map(i => {
     allocated(i) && valid(i) && !writebacked(i) && store(i)
-  })).asUInt()
+  }))
   val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LsroqSize).W)))
   val storeWbValid = Wire(Vec(StorePipelineWidth, Bool()))
-  val sselvec0 = PriorityEncoderOH(storeWbSelVec)
-  val sselvec1 = PriorityEncoderOH(storeWbSelVec & (~sselvec0).asUInt)
-  storeWbSel(0) := OHToUInt(sselvec0)
-  storeWbSel(1) := OHToUInt(sselvec1)
-  storeWbValid(0) := sselvec0.orR
-  storeWbValid(1) := sselvec1.orR
+  storeWbSel(0) := getFirstOne(storeWbSelVec, tailMask)
+  val firstSelMask = UIntToOH(storeWbSel(0))
+  val secondWbSelVec = VecInit((0 until LsroqSize).map(i => storeWbSelVec(i) && !firstSelMask(i)))
+  storeWbSel(1) := getFirstOne(secondWbSelVec, tailMask)
+  storeWbValid(0) := Cat(storeWbSelVec).orR
+  storeWbValid(1) := Cat(secondWbSelVec).orR
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
@@ -340,21 +315,12 @@ class Lsroq extends XSModule {
   // remove retired insts from lsroq, add retired store to sbuffer
 
   // move tailPtr
-  // FIXME: opt size using OH -> Mask
-  val dequeueMask = Wire(Vec(LsroqSize * 2, Bool()))
-  (0 until LsroqSize * 2).foreach(i => {
-    val ptr = i.U(InnerLsroqIdxWidth - 1, 0)
-    if (i == 0) {
-      dequeueMask(i) := ringBufferTail === i.U && !ringBufferEmpty && !allocated(ptr) // beginning of dequeuemask
-    } else {
-      dequeueMask(i) := (
-        dequeueMask(i - 1) && !allocated(ptr) && ringBufferHead =/= i.U(InnerLsroqIdxWidth - 1, 0) ||
-          ringBufferTail === i.U && !ringBufferEmpty && !allocated(ptr) // beginning of dequeuemask
-        // TODO: opt timing
-        )
-    }
-  })
-  ringBufferTailExtended := ringBufferTailExtended + PopCount(dequeueMask.asUInt)
+  // allocatedMask: dequeuePtr can go to the next 1-bit
+  val allocatedMask = VecInit((0 until LsroqSize).map(i => allocated(i) || !enqDeqMask(i)))
+  // find the first one from deqPtr (ringBufferTail)
+  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended(InnerLsroqIdxWidth))
+  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
+  ringBufferTailExtended := nextTail
 
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
@@ -422,111 +388,73 @@ class Lsroq extends XSModule {
   })
 
   // load forward query
+  // check over all lsroq entries and forward data from the first matched store
   (0 until LoadPipelineWidth).map(i => {
     io.forward(i).forwardMask := 0.U(8.W).asBools
     io.forward(i).forwardData := DontCare
-    // Just for functional simulation
 
-    // forward
-    val needForward1 = WireInit(VecInit((0 until LsroqSize).map(j => {
-      io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0) > j.U &&
-        (
-          ringBufferTail <= j.U ||
-            ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
-          )
-    })))
-    val needForward2 = WireInit(VecInit((0 until LsroqSize).map(j => {
-      ringBufferTail <= j.U &&
-        ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
-    })))
+    // Compare ringBufferTail (deqPtr) and forward.lsroqIdx, we have two cases:
+    // (1) if they have the same flag, we need to check range(tail, lsroqIdx)
+    // (2) if they have different flags, we need to check range(tail, lsroqSize) and range(0, lsroqIdx)
+    // Forward1: Mux(same_flag, range(tail, lsroqIdx), range(tail, lsroqSize))
+    // Forward2: Mux(same_flag, 0.U,                   range(0, lsroqIdx)    )
+    // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
     val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
 
-    // forward lookup vec2
-    (0 until LsroqSize).map(j => {
-      when(
-        needForward2(j) &&
-          valid(j) && allocated(j) && store(j) &&
-          io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      ) {
-        (0 until 8).map(k => {
-          when(data(j).mask(k)) {
-            forwardMask2(k) := true.B
-            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
-            )
-          }
-        })
-      }
-    })
-    // forward lookup vec1
-    (0 until LsroqSize).map(j => {
-      when(
-        needForward1(j) &&
-          valid(j) && allocated(j) && store(j) &&
-          io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      ) {
-        (0 until 8).map(k => {
-          when(data(j).mask(k)) {
+    val differentFlag = ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
+    val forwardMask = ((1.U((LsroqSize + 1).W)) << io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
+    val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
+    val needForward2 = Mux(differentFlag, forwardMask, 0.U(LsroqSize.W))
+
+    // entry with larger index should have higher priority since it's data is younger
+    for (j <- 0 until LsroqSize) {
+      val needCheck = valid(j) && allocated(j) && store(j) &&
+        io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+      (0 until XLEN / 8).foreach(k => {
+        when (needCheck && data(j).mask(k)) {
+          when (needForward1(j)) {
             forwardMask1(k) := true.B
             forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-            XSDebug("forwarding " + k + "th byte %x from ptr %d pc %x\n",
-              data(j).data(8 * (k + 1) - 1, 8 * k), j.U, uop(j).cf.pc
-            )
           }
-        })
-      }
-    })
+          when (needForward2(j)) {
+            forwardMask2(k) := true.B
+            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+          }
+          XSDebug(needForward1(j) || needForward2(j),
+            p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
+            p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
+        }
+      })
+    }
+
     // merge forward lookup results
-    (0 until 8).map(k => {
+    // forward2 is younger than forward1 and should have higher priority
+    (0 until XLEN / 8).map(k => {
       io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
-      io.forward(i).forwardData(k) := Mux(forwardMask1(k), forwardData1(k), forwardData2(k))
+      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
     })
-
-    // (1 until LsroqSize).map(j => {
-    //   val ptr = io.forward(i).lsroqIdx - j.U
-    //   when(
-    //     lsroqIdxOlderThan(ptr, io.forward(i).lsroqIdx) &&
-    //     valid(ptr) && allocated(ptr) && store(ptr) &&
-    //     io.forward(i).paddr(PAddrBits-1, 3) === data(ptr).paddr(PAddrBits-1, 3)
-    //   ){
-    //     (0 until 8).map(k => {
-    //       // when(data(ptr).mask(k) && io.forward(i).mask(k)){
-    //         when(data(ptr).mask(k)){
-    //           io.forward(i).forwardMask(k) := true.B
-    //           io.forward(i).forwardData(k) := data(ptr).data(8*(k+1)-1, 8*k)
-    //           XSDebug("forwarding "+k+"th byte %x from ptr %d pc %x\n",
-    //           io.forward(i).forwardData(k), ptr, uop(ptr).cf.pc
-    //           )
-    //         }
-    //       })
-    //     }
-    //   })
-
-    // backward
-    // (0 until 8).map(k => {
-    //   when(data(io.forward(i).lsroqIdx).bwdMask(k)) {
-    //     io.forward(i).forwardMask(k) := true.B
-    //     io.forward(i).forwardData(k) := data(io.forward(i).lsroqIdx).bwdData(k)
-    //     XSDebug("backwarding " + k + "th byte %x, idx %d pc %x\n",
-    //       io.forward(i).forwardData(k), io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0), uop(io.forward(i).lsroqIdx).cf.pc
-    //     )
-    //   }
-    // })
   })
 
   // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
 
-  def getFirstOne(mask: Vec[Bool], start: UInt) = {
+  def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
     val length = mask.length
-    val lowMask = (1.U((length + 1).W) << start).asUInt() - 1.U
-    val highBits = (0 until length).map(i => mask(i) & ~lowMask(i))
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
     val highBitsUint = Cat(highBits.reverse)
     PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
+  }
+
+  def getFirstOneWithFlag(mask: Vec[Bool], startMask: UInt, startFlag: UInt) = {
+    val length = mask.length
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
+    val highBitsUint = Cat(highBits.reverse)
+    val changeDirection = !highBitsUint.orR()
+    val index = PriorityEncoder(Mux(!changeDirection, highBitsUint, mask.asUInt))
+    Cat(startFlag ^ changeDirection, index)
   }
 
   def getOldestInTwo(valid: Seq[Bool], uop: Seq[MicroOp]) = {
@@ -563,7 +491,10 @@ class Lsroq extends XSModule {
 
     when(io.storeIn(i).valid) {
       val startIndex = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0)
-      val toEnqPtrMask = rangeMask(io.storeIn(i).bits.uop.lsroqIdx, ringBufferHeadExtended)
+      val lsroqIdxMask = ((1.U((LsroqSize + 1).W) << startIndex).asUInt - 1.U)(LsroqSize - 1, 0)
+      val xorMask = lsroqIdxMask ^ headMask
+      val sameFlag = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth) === ringBufferHeadExtended(InnerLsroqIdxWidth)
+      val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
       val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
@@ -573,7 +504,7 @@ class Lsroq extends XSModule {
         Cat(violationVec).orR() && entryNeedCheck
       }))
       val lsroqViolation = lsroqViolationVec.asUInt().orR()
-      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, startIndex)
+      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, lsroqIdxMask)
       val lsroqViolationUop = uop(lsroqViolationIndex)
       XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $startIndex, $lsroqViolationIndex\n")
 
