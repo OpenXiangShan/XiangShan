@@ -149,6 +149,8 @@ class LoadUnit extends XSModule {
   val l4_dcache = RegNext(l3_dcache, false.B)
   val l4_bundle = RegNext(l3_bundle)
 
+  val fullForward = Wire(Bool())
+
   assert(!(io.dcache.resp.ready && !io.dcache.resp.valid), "DCache response got lost")
   io.dcache.resp.ready := l4_valid && l4_dcache
   when (io.dcache.resp.fire()) {
@@ -158,7 +160,9 @@ class LoadUnit extends XSModule {
     l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
     l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
     l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
-    l4_out.bits.miss  := io.dcache.resp.bits.miss
+    // when we can get the data completely from forward
+    // we no longer need to access dcache
+    l4_out.bits.miss  := Mux(fullForward, false.B, io.dcache.resp.bits.miss)
     XSDebug(io.dcache.resp.fire(), p"DcacheResp(l4): data:0x${Hexadecimal(io.dcache.resp.bits.data)} paddr:0x${Hexadecimal(io.dcache.resp.bits.meta.paddr)} pc:0x${Hexadecimal(io.dcache.resp.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.resp.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.resp.bits.meta.uop.lsroqIdx} miss:${io.dcache.resp.bits.miss}\n")
   } .otherwise {
     l4_out.bits := l4_bundle
@@ -193,6 +197,7 @@ class LoadUnit extends XSModule {
   })
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
+  fullForward := (~l4_out.bits.forwardMask.asUInt & l4_out.bits.mask) === 0.U
 
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || (l5_in.bits.miss || l5_in.bits.mmio) && l5_in.valid, false.B)
 
