@@ -129,6 +129,8 @@ class Memend extends XSModule {
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new Sbuffer)
+  // if you wants to stress test dcache store, use FakeSbuffer
+  // val sbuffer = Module(new FakeSbuffer)
 
   val loadUnitToDcacheVec = Wire(Vec(exuParameters.LduCnt, new DCacheLoadIO))
 
