@@ -44,10 +44,6 @@ package object backend {
 
     def isWordOp(func: UInt) = func(5)
 
-    // TODO: move jal/jalr/call/ret from ALU to BRU&CSR
-    // def jal  = "b011000".U
-    // def jalr = "b011010".U
-    // def cjalr= "b111010".U // pc + 2 instead of 4
     def beq  = "b010000".U
     def bne  = "b010001".U
     def blt  = "b010100".U
@@ -55,16 +51,15 @@ package object backend {
     def bltu = "b010110".U
     def bgeu = "b010111".U
 
-    // // for RAS
-    // def call = "b011100".U
-    // def ret  = "b011110".U
-
-    // def pcPlus2(func: UInt) = func(5)//[important]
-    def isBranch(func: UInt) = func(4,3)===2.U
-    def isBru(func: UInt) = func(4)
-    def isJump(func: UInt) = func(4,3)===3.U//isBru(func) && !isBranch(func)
+    def isBranch(func: UInt) = func(4)
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
+
+    // alu take sfence.vma and fence.i
+    def sfence = "b110000".U
+    def fencei = "b110001".U
+
+    def waitSbuffer(func: UInt) = func===sfence
   }
 
   object MDUOpType {
@@ -122,8 +117,6 @@ package object backend {
     def atomD = "011".U
   }
 
-
-
   object BTBtype {
     def B = "b00".U  // branch
     def J = "b01".U  // jump
@@ -132,5 +125,4 @@ package object backend {
 
     def apply() = UInt(2.W)
   }
-
 }

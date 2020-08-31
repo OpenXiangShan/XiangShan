@@ -261,8 +261,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // store pipe and store miss queue
   storeMissQueue.io.lsu    <> io.lsu.store
+  /*
   assert(!(storeMissQueue.io.replay.req.fire() && !storeMissQueue.io.replay.req.bits.meta.replay),
     "StoreMissQueue should replay requests")
+  */
   assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.replay),
     "Sbuffer should not should replay requests")
   assert(!(io.lsu.store.req.fire() && io.lsu.store.req.bits.meta.mmio),
@@ -340,7 +342,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   assert(!(miscReq.fire() && miscReq.bits.meta.tlb_miss),
     "TLB missed requests should not go to cache")
   assert(!io.lsu.misc.s1_kill, "Lsroq should never use s1 kill on misc")
-  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc")
+  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc") // TODO: ptw wanna use s1_kill
 
 
   //----------------------------------------
