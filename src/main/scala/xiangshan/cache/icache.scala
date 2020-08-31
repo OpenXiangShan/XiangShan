@@ -118,9 +118,6 @@ class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
-  val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-  val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-  val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
   val flush = Input(UInt(2.W))
 }
 
@@ -130,10 +127,7 @@ class ICache()(implicit p: Parameters) extends LazyModule
 {
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
-      name = "icache",
-      sourceId = IdRange(0, 1),
-      supportsProbe = TransferSizes(cacheParams.blockBytes)
-    ))
+      name = "icache"))
   )
   val clientNode = TLClientNode(Seq(clientParameters))
   lazy val module = new ICacheImp(this)
@@ -149,11 +143,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 {
   val (bus, edge) = outer.clientNode.out.head
   val io = IO(new ICacheIO(edge))
-
-  //Tilelink connection out
-  bus.a <> io.mem_acquire
-  bus.e <> io.mem_finish
-  bus.d <> io.mem_grant
 
   val (_, _, refill_done, refill_cnt) = edge.count(bus.d)
 
@@ -240,7 +229,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   outPacket := dataHitWayUInt >> (s3_req_pc(5,1) << 4)  //TODO: this is ugly
 
   //icache miss
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_mem_finish :: s_wait_resp :: Nil = Enum(5)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(cacheDataBeats)
 
@@ -248,7 +237,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   when(io.flush(1) && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
   .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
-  val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
   val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))   //TODO: this is ugly
 
   switch(state){
@@ -260,43 +248,21 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
     }
 
     is(s_memReadReq){ 
-      io.mem_acquire.valid := true.B
-      io.mem_acquire.bits  := edge.AcquireBlock(
-        fromSource      = cacheID.U,
-        toAddress       = groupPC(s3_req_pc),
-        lgSize          = (log2Up(cacheParams.blockBytes)).U,
-        growPermissions = 0.U)._2   //TODO: icache grow permission
-      when(io.mem_acquire.fire()){ 
+      when(bus.a.fire()){ 
         state := s_memReadResp
       }
     }
 
     is(s_memReadResp){
-      io.mem_grant.ready := true.B
-
-      when (edge.hasData(io.mem_grant.bits)) {
-        when(io.mem_grant.fire()){
+      when (edge.hasData(bus.d.bits)) {
+        when(bus.d.fire()){
           readBeatCnt.inc()
-          refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle)
+          refillDataReg(readBeatCnt.value) := bus.d.bits.data.asTypeOf(new ICacheDataBundle)
           when(readBeatCnt.value === (cacheDataBeats - 1).U){
             assert(refill_done, "refill not done!")
-            state := s_mem_finish
+            state := s_wait_resp
           }
         }
-      }
-
-      when(refill_done) {
-        grantack.valid := edge.isRequest(io.mem_grant.bits)
-        grantack.bits := edge.GrantAck(io.mem_grant.bits)
-      }
-    }
-
-    is(s_mem_finish) {
-      io.mem_finish.valid := grantack.valid
-      io.mem_finish.bits  := grantack.bits
-      when (io.mem_finish.fire()) {
-        grantack.valid := false.B
-        state := s_wait_resp
       }
     }
 
@@ -311,15 +277,15 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val metaWrite = Wire(new ICacheMetaBundle)
   metaWrite.tag := get_tag(s3_req_pc)
   metaWrite.valid := true.B
-  metaArray.io.w.req.valid := (state === s_memReadResp) && io.mem_grant.fire() && refill_done
+  metaArray.io.w.req.valid := (state === s_memReadResp) && bus.d.fire() && refill_done
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
   val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
   for(b <- 0 until cacheDataBeats){
-    val writeOneBeat = (state === s_memReadResp) && io.mem_grant.fire() && (b.U === readBeatCnt.value)
+    val writeOneBeat = (state === s_memReadResp) && bus.d.fire() && (b.U === readBeatCnt.value)
     dataArray(b).io.w.req.valid := writeOneBeat
     dataArray(b).io.w.req.bits.apply(   setIdx=get_idx(s3_req_pc), 
-                                        data=io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle), 
+                                        data=bus.d.bits.data.asTypeOf(new ICacheDataBundle), 
                                         waymask=s3_wayMask)
 
   }
@@ -328,12 +294,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
-  XSDebug("[Stage 3] state: %d\n",state)
-  XSDebug("[Stage 3] needflush:%d",needFlush)
-  XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
-  XSDebug("[mem_acqurire] valid:%d  ready:%d\n",io.mem_acquire.valid,io.mem_acquire.ready)
-  XSDebug("[mem_grant] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,readBeatCnt.value)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x \n",s3_hit,s3_miss,s3_wayMask.asUInt)
+  XSDebug("[Stage 3] state: %d\n",state)
+  XSDebug("[Stage 3] needflush:%d, refilldone:%d",needFlush,refill_done)
+  XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
+  XSDebug("[Chanel A] valid:%d  ready:%d\n",bus.a.valid,bus.a.ready)
+  XSDebug("[Chanel D] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",bus.d.valid,bus.d.ready,bus.d.bits.data,readBeatCnt.value)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
   for(i <- 0 until cacheDataBeats){
       XSDebug("[Stage 3] %x\n",dataHitWay(i))
@@ -349,7 +315,19 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
 
-  //XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
+  bus.b.ready := true.B
+  bus.c.valid := false.B
+  bus.e.valid := false.B
+  bus.a.valid := (state === s_memReadReq)
+  bus.a.bits  := edge.Get(
+    fromSource      = cacheID.U,
+    toAddress       = groupPC(s3_req_pc),
+    lgSize          = (log2Up(cacheParams.blockBytes)).U)._2 
+
+  bus.d.ready := true.B
+
+
+  XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 }
 
 //TODO: consider L2 or L3 cache connection
