@@ -40,7 +40,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   val cacheParams = icacheParameters
 
   // the width of inner CPU data interface
-  override  def tagBits = VAddrBits - untagBits
+  // override  def tagBits = VAddrBits - untagBits
   def wordBits = DataBits
   def wordBytes = DataBytes
   def wordOffBits = log2Up(wordBytes)
@@ -111,6 +111,7 @@ class ICacheResp extends ICacheBundle
   val pc = UInt(VAddrBits.W)
   val data = UInt((FetchWidth * 32).W)
   val mask = UInt(PredictWidth.W)
+  val ipf = Bool()
 }
 
 
@@ -180,7 +181,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
   val s3_ready = WireInit(false.B)
   val s2_fire = s2_valid && s3_ready && !io.flush(0) && io.tlb.resp.fire()
-  val s2_tag = get_tag(s2_req_pc)
+  // val s2_tag = get_tag(s2_req_pc)
+  val s2_tlb_resp = WireInit(io.tlb.resp.bits)
+  val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
   when(io.flush(0)) {s2_valid := s1_fire}
   .elsewhen(s1_fire) { s2_valid := s1_valid}
@@ -200,7 +203,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
  
-  s2_hit := ParallelOR(hitVec)
+  s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
@@ -214,6 +217,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_valid = RegInit(false.B)
   val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
   val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
+  val s3_tlb_resp = RegEnable(next = s2_tlb_resp, init = 0.U.asTypeOf(new TlbResp), enable = s2_fire)
   val s3_data = datas
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
@@ -315,8 +319,16 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
+  io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
 
   io.tlb.resp.ready := s3_ready
+  io.tlb.req.valid := s2_valid
+  io.tlb.req.bits.vaddr := s2_req_pc
+  io.tlb.req.bits.cmd := TlbCmd.exec
+  io.tlb.req.bits.roqIdx := DontCare
+  io.tlb.req.bits.debug.pc := s2_req_pc
+  io.tlb.req.bits.debug.lsroqIdx := DontCare
+  
   bus.b.ready := true.B
   bus.c.valid := false.B
   bus.e.valid := false.B
