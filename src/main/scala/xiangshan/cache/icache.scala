@@ -208,6 +208,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
+  XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}")
+  XSDebug(p"[Stage 2] tlb resp: v ${io.tlb.resp.valid} r ${io.tlb.resp.ready} ${s2_tlb_resp}")
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
   XSDebug("[Stage 2] victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b\n",victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
   
@@ -301,11 +303,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   s3_ready := ((io.resp.fire() || !s3_valid) && !needFlush) || (needFlush && state === s_wait_resp)
 
   //TODO: coherence
-  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
+  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x \n",s3_hit,s3_miss,s3_wayMask.asUInt)
   XSDebug("[Stage 3] state: %d\n",state)
   XSDebug("[Stage 3] needflush:%d, refilldone:%d",needFlush,refill_done)
-  XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
+  XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
+  XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}")
   XSDebug("[Chanel A] valid:%d  ready:%d\n",bus.a.valid,bus.a.ready)
   XSDebug("[Chanel D] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",bus.d.valid,bus.d.ready,bus.d.bits.data,readBeatCnt.value)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
