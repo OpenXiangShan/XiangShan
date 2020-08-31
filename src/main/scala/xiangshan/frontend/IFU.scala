@@ -117,10 +117,13 @@ class IFU extends XSModule with HasIFUConst
     val pc = UInt(VAddrBits.W)
     val target = UInt(VAddrBits.W)
     val instr = UInt(16.W)
+    val ipf = Bool()
   }
 
   val if3_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
   val if4_prevHalfInstr = Wire(new PrevHalfInstr)
+  // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
+  val crossPageIPF = WireInit(false.B)
   when (if4_prevHalfInstr.valid) {
     if3_prevHalfInstr := if4_prevHalfInstr
   }
@@ -144,63 +147,10 @@ class IFU extends XSModule with HasIFUConst
   }
 
 
-
-  // val prev_half_valid = RegInit(false.B)
-  // val prev_half_redirect = RegInit(false.B)
-  // val prev_half_fetchpc = Reg(UInt(VAddrBits.W))
-  // val prev_half_idx = Reg(UInt(log2Up(PredictWidth).W))
-  // val prev_half_tgt = Reg(UInt(VAddrBits.W))
-  // val prev_half_taken = RegInit(false.B)
-  // val prev_half_instr = Reg(UInt(16.W))
-  // when (if3_flush) {
-  //   prev_half_valid := false.B
-  //   prev_half_redirect := false.B
-  // }.elsewhen (if3_fire && if3_bp.saveHalfRVI) {
-  //   prev_half_valid := true.B
-  //   prev_half_redirect := if3_bp.redirect && bpu.io.out(1).valid
-  //   prev_half_fetchpc := if3_pc
-  //   val idx = Mux(if3_bp.redirect && bpu.io.out(1).valid, if3_bp.jmpIdx, PopCount(mask(if3_pc)) - 1.U)
-  //   prev_half_idx := idx
-  //   prev_half_tgt := if3_bp.target
-  //   prev_half_taken := if3_bp.taken
-  //   prev_half_instr := pd.io.out.instrs(idx)(15, 0)
-  // }.elsewhen (if3_fire) {
-  //   prev_half_valid := false.B
-  //   prev_half_redirect := false.B
-  // }
-
-  // when (bpu.io.out(1).valid && if3_fire) {
-  //   when (prev_half_valid && prev_half_taken) {
-  //     if3_redirect := true.B
-  //     if1_npc := prev_half_tgt
-  //     shiftPtr := true.B
-  //     newPtr := if3_histPtr - 1.U
-  //     hist(0) := 1.U
-  //     extHist(newPtr) := 1.U
-  //   }.elsewhen (if3_bp.redirect && !if3_bp.saveHalfRVI) {
-  //     if3_redirect := true.B
-  //     if1_npc := if3_bp.target
-  //     shiftPtr := true.B
-  //     newPtr := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
-  //     hist(0) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
-  //     extHist(newPtr) := Mux(if3_bp.taken || if3_bp.hasNotTakenBrs, if3_bp.taken.asUInt, extHist(if3_histPtr))
-  //   }.elsewhen (if3_bp.saveHalfRVI) {
-  //     if3_redirect := true.B
-  //     if1_npc := snpc(if3_pc)
-  //     shiftPtr := true.B
-  //     newPtr := Mux(if3_bp.hasNotTakenBrs, if3_histPtr - 1.U, if3_histPtr)
-  //     hist(0) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
-  //     extHist(newPtr) := Mux(if3_bp.hasNotTakenBrs, 0.U, extHist(if3_histPtr))
-  //   }.otherwise {
-  //     if3_redirect := false.B
-  //   }
-  // }.otherwise {
-  //   if3_redirect := false.B
-  // }
-
-
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
+  val if4_ipf = RegEnable(io.icacheResp.bits.ipf || if3_hasPrevHalfInstr && prevHalfInstr.ipf, if3_fire)
+  val if4_crossPageIPF = RegEnable(crossPageIPF, if3_fire)
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
@@ -229,6 +179,7 @@ class IFU extends XSModule with HasIFUConst
     if4_prevHalfInstr.pc := if4_pd.pc(if4_prevHalfInstr.idx)
     if4_prevHalfInstr.target := if4_bp.target
     if4_prevHalfInstr.instr := if4_pd.instrs(if4_prevHalfInstr.idx)(15, 0)
+    if4_prevHalfInstr.ipf := if4_ipf
   }
 
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
@@ -257,40 +208,6 @@ class IFU extends XSModule with HasIFUConst
     if4_redirect := false.B
   }
  
-
-
-  // when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
-  //   when (!if4_bp.saveHalfRVI) {
-  //     if4_redirect := true.B
-  //     // if1_npc := if4_bp.target
-  //     if1_npc := Mux(if4_bp.taken, if4_bp.target, snpc(if4_pc))
-
-  //     shiftPtr := true.B
-  //     newPtr := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
-  //     hist(0) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
-  //     extHist(newPtr) := Mux(if4_bp.taken || if4_bp.hasNotTakenBrs, if4_bp.taken.asUInt, extHist(if4_histPtr))
-
-  //   }.otherwise {
-  //     if4_redirect := true.B
-  //     if1_npc := snpc(if4_pc)
-
-  //     prev_half_valid := true.B
-  //     prev_half_redirect := true.B
-  //     prev_half_fetchpc := if4_pc
-  //     val idx = PopCount(mask(if4_pc)) - 1.U
-  //     prev_half_idx := idx
-  //     prev_half_tgt := if4_bp.target
-  //     prev_half_taken := if4_bp.taken
-  //     prev_half_instr := if4_pd.instrs(idx)(15, 0)
-
-  //     shiftPtr := true.B
-  //     newPtr := Mux(if4_bp.hasNotTakenBrs, if4_histPtr - 1.U, if4_histPtr)
-  //     hist(0) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
-  //     extHist(newPtr) := Mux(if4_bp.hasNotTakenBrs, 0.U, extHist(if4_histPtr))
-  //   }
-  // }.otherwise {
-  //   if4_redirect := false.B
-  // }
 
   when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
     shiftPtr := true.B
@@ -336,6 +253,15 @@ class IFU extends XSModule with HasIFUConst
   pd.io.in := io.icacheResp.bits
   pd.io.prev.valid := if3_hasPrevHalfInstr
   pd.io.prev.bits := prevHalfInstr.instr
+  // if a fetch packet triggers page fault, set the pf instruction to nop
+  when (!if3_hasPrevHalfInstr && io.icacheResp.bits.ipf) {
+    (0 until FetchWidth).foreach(i => pd.io.in.data(i*32+31, i*32) := ZeroExt("b0010011".U, 32)) // nop
+  }.elsewhen (if3_hasPrevHalfInstr && (prevHalfInstr.ipf || io.icacheResp.bits.ipf)) {
+    pd.io.prev.bits := ZeroExt("b0010011".U, 16)
+    (0 until FetchWidth).foreach(i => pd.io.in.data(i*32+31, i*32) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
+
+    when (io.icacheResp.bits.ipf && !prevHalfInstr.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
+  }
 
   io.fetchPacket.valid := if4_valid && !io.redirect.valid
   io.fetchPacket.bits.instrs := if4_pd.instrs
@@ -348,6 +274,8 @@ class IFU extends XSModule with HasIFUConst
   io.fetchPacket.bits.brInfo := bpu.io.branchInfo.bits
   (0 until PredictWidth).foreach(i => io.fetchPacket.bits.brInfo(i).histPtr := if4_histPtr)
   io.fetchPacket.bits.pd := if4_pd.pd
+  io.fetchPacket.bits.ipf := if4_ipf
+  io.fetchPacket.bits.crossPageIPFFix := if4_crossPageIPF
 
   // debug info
   XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")

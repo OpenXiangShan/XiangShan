@@ -67,7 +67,8 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
   
   val groupAlign = log2Up(FetchWidth * 4 * 2)
-  def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  // def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   // To make things easier, now we assume:
@@ -219,6 +220,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
   val s3_tlb_resp = RegEnable(next = s2_tlb_resp, init = 0.U.asTypeOf(new TlbResp), enable = s2_fire)
   val s3_data = datas
+  val s3_tag = RegEnable(s2_tag, s2_fire)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
@@ -280,7 +282,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   //refill write
   val metaWrite = Wire(new ICacheMetaBundle)
-  metaWrite.tag := get_tag(s3_req_pc)
+  // metaWrite.tag := get_tag(s3_req_pc)
+  metaWrite.tag := s3_tag
   metaWrite.valid := true.B
   metaArray.io.w.req.valid := (state === s_memReadResp) && bus.d.fire() && refill_done
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
@@ -335,7 +338,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   bus.a.valid := (state === s_memReadReq)
   bus.a.bits  := edge.Get(
     fromSource      = cacheID.U,
-    toAddress       = groupPC(s3_req_pc),
+    // toAddress       = groupPC(s3_req_pc),
+    toAddress       = groupPC(s3_tlb_resp.paddr)
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2 
 
   bus.d.ready := true.B
