@@ -255,10 +255,14 @@ class IFU extends XSModule with HasIFUConst
   pd.io.prev.bits := prevHalfInstr.instr
   // if a fetch packet triggers page fault, set the pf instruction to nop
   when (!if3_hasPrevHalfInstr && io.icacheResp.bits.ipf) {
-    (0 until FetchWidth).foreach(i => pd.io.in.data(i*32+31, i*32) := ZeroExt("b0010011".U, 32)) // nop
+    val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
+    (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
+    pd.io.in.data := instrs.asUInt
   }.elsewhen (if3_hasPrevHalfInstr && (prevHalfInstr.ipf || io.icacheResp.bits.ipf)) {
     pd.io.prev.bits := ZeroExt("b0010011".U, 16)
-    (0 until FetchWidth).foreach(i => pd.io.in.data(i*32+31, i*32) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
+    val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
+    (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
+    pd.io.in.data := instrs.asUInt
 
     when (io.icacheResp.bits.ipf && !prevHalfInstr.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
   }

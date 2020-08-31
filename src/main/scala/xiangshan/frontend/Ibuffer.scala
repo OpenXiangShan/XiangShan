@@ -7,7 +7,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.fu.HasExceptionNO
 
-class Ibuffer extends XSModule with HasExceptionNO {
+class Ibuffer extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
     val in = Flipped(DecoupledIO(new FetchPacket))
@@ -73,7 +73,9 @@ class Ibuffer extends XSModule with HasExceptionNO {
       
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
-      io.out(i).bits.exceptionVec := Mux(ibuf(deq_idx).ipf, UIntToOH(instrPageFault.U), 0.U)
+      // io.out(i).bits.exceptionVec := Mux(ibuf(deq_idx).ipf, UIntToOH(instrPageFault.U), 0.U)
+      io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
+      io.out(i).bits.exceptionVec(instrPageFault) := ibuf(deq_idx).ipf
       // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
       io.out(i).bits.brUpdate := DontCare
       io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc

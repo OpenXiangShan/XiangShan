@@ -339,7 +339,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   bus.a.bits  := edge.Get(
     fromSource      = cacheID.U,
     // toAddress       = groupPC(s3_req_pc),
-    toAddress       = groupPC(s3_tlb_resp.paddr)
+    toAddress       = groupPC(s3_tlb_resp.paddr),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2 
 
   bus.d.ready := true.B

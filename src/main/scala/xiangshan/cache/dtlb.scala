@@ -329,7 +329,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && isDtlb) {
     ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntDtlbReqCnt0", Perf)
     ExcitingUtils.addSource(valid(1)/* && vmEnable*/, "perfCntDtlbReqCnt1", Perf)
     ExcitingUtils.addSource(valid(2)/* && vmEnable*/, "perfCntDtlbReqCnt2", Perf)
@@ -338,6 +338,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && miss(1), "perfCntDtlbMissCnt1", Perf)
     ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && miss(2), "perfCntDtlbMissCnt2", Perf)
     ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && miss(3), "perfCntDtlbMissCnt3", Perf)
+  }
+
+  if (!env.FPGAPlatform && !isDtlb) {
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntItlbReqCnt0", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntItlbMissCnt0", Perf)
   }
 
   // Log
@@ -397,7 +402,7 @@ object TLB {
     } else { // itlb
       require(width == 1)
       tlb.io.requestor(0).req.valid := in(0).req.valid
-      tlb.io.requestor(0).req.bits := in(0).req.valid
+      tlb.io.requestor(0).req.bits := in(0).req.bits
       in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready
 
       // val pf = LookupTree(tlb.io.requestor(0).req.bits.cmd, List(
