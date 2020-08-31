@@ -118,6 +118,7 @@ class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
+  val tlb = new BlockTlbRequestIO
   val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
   val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
   val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
@@ -189,7 +190,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
   val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
   val s3_ready = WireInit(false.B)
-  val s2_fire = s2_valid && s3_ready && !io.flush(0)
+  val s2_fire = s2_valid && s3_ready && !io.flush(0) && io.tlb.resp.fire()
   val s2_tag = get_tag(s2_req_pc)
   val s2_hit = WireInit(false.B)
   when(io.flush(0)) {s2_valid := s1_fire}
@@ -348,6 +349,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
+
+  io.tlb.resp.ready := s3_ready
 
   //XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 }
