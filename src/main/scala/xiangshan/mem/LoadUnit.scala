@@ -162,7 +162,9 @@ class LoadUnit extends XSModule {
     l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
     // when we can get the data completely from forward
     // we no longer need to access dcache
-    l4_out.bits.miss  := Mux(fullForward, false.B, io.dcache.resp.bits.miss)
+    // treat nack as miss
+    l4_out.bits.miss  := Mux(fullForward, false.B,
+      io.dcache.resp.bits.miss || io.dcache.resp.bits.nack)
     XSDebug(io.dcache.resp.fire(), p"DcacheResp(l4): data:0x${Hexadecimal(io.dcache.resp.bits.data)} paddr:0x${Hexadecimal(io.dcache.resp.bits.meta.paddr)} pc:0x${Hexadecimal(io.dcache.resp.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.resp.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.resp.bits.meta.uop.lsroqIdx} miss:${io.dcache.resp.bits.miss}\n")
   } .otherwise {
     l4_out.bits := l4_bundle
