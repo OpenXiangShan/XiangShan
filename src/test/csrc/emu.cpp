@@ -193,7 +193,7 @@ uint64_t Emulator::execute(uint64_t n) {
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   uint64_t lastcommit = n;
-  const int stuck_limit = 500;
+  const int stuck_limit = 2000;
 
   uint32_t wdst[DIFFTEST_WIDTH];
   uint64_t wdata[DIFFTEST_WIDTH];
