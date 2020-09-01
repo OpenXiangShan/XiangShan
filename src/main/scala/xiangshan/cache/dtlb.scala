@@ -258,7 +258,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   switch (state) {
     is (state_idle) {
-      when (ParallelOR(miss).asBool) {
+      when (ParallelOR(miss).asBool && ptw.req.fire()) {
         state := state_wait
       }
       assert(!ptw.resp.valid)
