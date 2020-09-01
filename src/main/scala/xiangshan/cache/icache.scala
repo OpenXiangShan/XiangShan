@@ -83,7 +83,9 @@ trait HasICacheParameters extends HasL1CacheParameters {
 abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
 abstract class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
-  with HasICacheParameters with HasXSLog
+  with HasICacheParameters 
+  with HasXSLog
+  with ICacheBase
 
 
 sealed class ICacheMetaBundle extends ICacheBundle
@@ -121,6 +123,35 @@ class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
   val flush = Input(UInt(2.W))
 }
 
+trait ICacheBase extends HasICacheParameters
+{
+  //----------------------------
+  //    Stage 1
+  //----------------------------
+  val s1_valid = WireInit(false.B)
+  val s1_req_pc = Wire(UInt(VAddrBits.W))
+  val s1_req_mask = Wire(UInt(PredictWidth.W))
+  val s1_fire = WireInit(false.B)
+
+  //----------------------------
+  //    Stage 2
+  //----------------------------
+  val s2_valid = RegInit(false.B)
+  val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
+  val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
+  val s2_ready = WireInit(false.B)
+  val s2_fire = WireInit(false.B)
+
+  //----------------------------
+  //    Stage 3
+  //----------------------------
+  val s3_valid = RegInit(false.B)
+  val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
+  val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
+  val s3_ready = WireInit(false.B)
+
+}
+
 
 class ICache()(implicit p: Parameters) extends LazyModule
   with HasICacheParameters
@@ -154,13 +185,13 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //----------------------------
   //    Stage 1
   //----------------------------
-  val s1_valid = io.req.fire()
-  val s1_req_pc = io.req.bits.addr
-  val s1_req_mask = io.req.bits.mask
-  val s2_ready = WireInit(false.B)
-  val s1_fire = s1_valid && (s2_ready || io.flush(0))
+  s1_valid := io.req.fire()
+  s1_req_pc := io.req.bits.addr
+  s1_req_mask := io.req.bits.mask
+  s2_ready := WireInit(false.B)
+  s1_fire := s1_valid && (s2_ready || io.flush(0))
+  
   val s1_idx = get_idx(s1_req_pc)
-
   metaArray.io.r.req.valid := s1_valid
   metaArray.io.r.req.bits.apply(setIdx=s1_idx)
   for(b <- 0 until cacheDataBeats){
@@ -174,13 +205,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //----------------------------
   //    Stage 2
   //----------------------------
-  val s2_valid = RegInit(false.B)
-  val s2_req_pc = RegEnable(next = s1_req_pc,init = 0.U, enable = s1_fire)
-  val s2_req_mask = RegEnable(next = s1_req_mask,init = 0.U, enable = s1_fire)
-  val s3_ready = WireInit(false.B)
-  val s2_fire = s2_valid && s3_ready && !io.flush(0)
   val s2_tag = get_tag(s2_req_pc)
   val s2_hit = WireInit(false.B)
+  s2_fire := s2_valid && s3_ready && !io.flush(0)
   when(io.flush(0)) {s2_valid := s1_fire}
   .elsewhen(s1_fire) { s2_valid := s1_valid}
   .elsewhen(s2_fire) { s2_valid := false.B}
@@ -210,9 +237,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //----------------------------
   //    Stage 3
   //----------------------------
-  val s3_valid = RegInit(false.B)
-  val s3_req_pc = RegEnable(next = s2_req_pc,init = 0.U, enable = s2_fire)
-  val s3_req_mask = RegEnable(next = s2_req_mask,init = 0.U, enable = s2_fire)
   val s3_data = datas
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
