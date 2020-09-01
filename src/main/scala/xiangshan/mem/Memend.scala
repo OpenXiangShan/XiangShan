@@ -176,7 +176,20 @@ class Memend extends XSModule {
   }
 
   sbuffer.io.dcache <> sbufferToDcache
-  sbuffer.io.flush_req_valid := false.B
+
+  // flush sbuffer
+  val fenceFlush = Wire(Flipped(new SbufferFlushBundle))
+  BoringUtils.addSink(fenceFlush, "FenceUnitFlushSbufferBundle")
+  val atomicsFlush = Wire(Flipped(new SbufferFlushBundle))
+  BoringUtils.addSink(atomicsFlush, "AtomicsUnitFlushSbufferBundle")
+  // if both of them tries to flush sbuffer at the same time
+  // something must have gone wrong
+  assert(!(fenceFlush.req_valid && atomicsFlush.req_valid))
+  sbuffer.io.flush.req_valid := fenceFlush.req_valid || atomicsFlush.req_valid
+  fenceFlush.req_ready := sbuffer.io.flush.req_ready
+  fenceFlush.resp_valid := sbuffer.io.flush.resp_valid
+  atomicsFlush.req_ready := sbuffer.io.flush.req_ready
+  atomicsFlush.resp_valid := sbuffer.io.flush.resp_valid
 
   lsroq.io.stout <> io.backend.stout
   lsroq.io.commits <> io.backend.commits
