@@ -91,7 +91,6 @@ abstract class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
 sealed class ICacheMetaBundle extends ICacheBundle
 {
   val tag = UInt(tagBits.W)
-  val valid = Bool()
   //val coh = new ClientMetadata
 }
 
@@ -182,6 +181,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
   val dataArray = List.fill(cacheDataBeats){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
 
+  val validArray = RegInit(0.U((nSets * nWays).W))
+
   //----------------------------
   //    Stage 1
   //----------------------------
@@ -206,6 +207,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //    Stage 2
   //----------------------------
   val s2_tag = get_tag(s2_req_pc)
+  val s2_idx = get_idx(s2_req_pc)
   val s2_hit = WireInit(false.B)
   s2_fire := s2_valid && s3_ready && !io.flush(0)
   when(io.flush(0)) {s2_valid := s1_fire}
@@ -213,16 +215,16 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   .elsewhen(s2_fire) { s2_valid := false.B}
 
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
+  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U))}.reverse).asUInt
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
 
-  val hitVec = VecInit(metas.map(w => s2_valid && (w.tag === s2_tag) && w.valid))
+  val hitVec = VecInit((0 until nWays).map{w => metas(w).tag === s2_tag && validMeta(w) === 1.U})
   val victimWayMask = (1.U << LFSR64()(log2Up(nWays)-1,0))
-  val invalidVec = VecInit(metas.map(m => !m.valid))
-  val invalidValue = invalidVec.asUInt
-  val hasInvalidWay = ParallelOR(invalidVec).asBool
-  val refillInvalidWaymask = Mux(invalidValue >= 8.U, "b1000".U,
-    Mux(invalidValue >= 4.U, "b0100".U,
-    Mux(invalidValue >= 2.U, "b0010".U, "b0001".U)))
+  val invalidVec = ~validMeta
+  val hasInvalidWay = invalidVec.orR
+  val refillInvalidWaymask = Mux(invalidVec >= 8.U, "b1000".U,
+    Mux(invalidVec >= 4.U, "b0100".U,
+    Mux(invalidVec >= 2.U, "b0010".U, "b0001".U)))
   
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
  
@@ -231,7 +233,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
-  XSDebug("[Stage 2] victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b\n",victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
+  XSDebug("[Stage 2] validMeta: %b  victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b \n",validMeta,victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
   
   
   //----------------------------
@@ -299,10 +301,17 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   //refill write
   val metaWrite = Wire(new ICacheMetaBundle)
+  val icacheFlush = WireInit(false.B)
+  val refillFinalOneBeat = (state === s_memReadResp) && bus.d.fire() && refill_done
+  val wayNum = OHToUInt(waymask)
+  val validPtr = Cat(get_idx(s3_req_pc),wayNum)
   metaWrite.tag := get_tag(s3_req_pc)
-  metaWrite.valid := true.B
-  metaArray.io.w.req.valid := (state === s_memReadResp) && bus.d.fire() && refill_done
+  metaArray.io.w.req.valid := refillFinalOneBeat
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
+
+  when(refillFinalOneBeat && !icacheFlush){
+    validArray := validArray.bitSet(validPtr, true.B)
+  }
 
   val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
   for(b <- 0 until cacheDataBeats){
