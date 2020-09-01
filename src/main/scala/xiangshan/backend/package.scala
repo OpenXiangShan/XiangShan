@@ -54,34 +54,75 @@ package object backend {
     def isBranch(func: UInt) = func(4)
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
-
-    // alu take sfence.vma and fence.i
-    def sfence = "b110000".U
-    def fencei = "b110001".U
-
-    def waitSbuffer(func: UInt) = func===sfence
   }
 
   object MDUOpType {
-    def mul    = "b0000".U
-    def mulh   = "b0001".U
-    def mulhsu = "b0010".U
-    def mulhu  = "b0011".U
-    def mulw   = "b1000".U
+    // mul
+    // bit encoding: | type (2bit) | isWord(1bit) | padding(2bit)(all zero) | opcode(2bit) |
+    def mul    = "b0000000".U
+    def mulh   = "b0000001".U
+    def mulhsu = "b0000010".U
+    def mulhu  = "b0000011".U
+    def mulw   = "b0010000".U
 
-    def div    = "b0100".U
-    def divu   = "b0101".U
-    def rem    = "b0110".U
-    def remu   = "b0111".U
+    // div
+    // bit encoding: | type (2bit) | isWord(1bit) | isSign(1bit) | padding(2bit)(all zero) | opcode(1bit) |
+    def div    = "b0100000".U
+    def divu   = "b0101000".U
+    def rem    = "b0100001".U
+    def remu   = "b0101001".U
 
-    def divw   = "b1100".U
-    def divuw  = "b1101".U
-    def remw   = "b1110".U
-    def remuw  = "b1111".U
+    def divw   = "b0110000".U
+    def divuw  = "b0111000".U
+    def remw   = "b0110001".U
+    def remuw  = "b0111001".U
 
-    def isDiv(op: UInt) = op(2)
-    def isDivSign(op: UInt) = isDiv(op) && !op(0)
-    def isW(op: UInt) = op(3)
+    // fence
+    // bit encoding: | type (2bit) | padding(3bit)(all zero) | opcode(2bit) |
+    def fence    = "b1000000".U
+    def sfence   = "b1000001".U
+    def fencei   = "b1000010".U
+
+    // atomics
+    // bit encoding: | type (2bit) | isWord(1bit) | opcode(4bit) |
+    def lrw      = "b1110000".U
+    def scw      = "b1110001".U
+    def amoswapw = "b1110010".U
+    def amoaddw  = "b1110011".U
+    def amoandw  = "b1110100".U
+    def amoorw   = "b1110101".U
+    def amoxorw  = "b1110110".U
+    def amomaxw  = "b1110111".U
+    def amominw  = "b1111000".U
+
+    def lrd      = "b1100000".U
+    def scd      = "b1100001".U
+    def amoswapd = "b1100010".U
+    def amoaddd  = "b1100011".U
+    def amoandd  = "b1100100".U
+    def amoord   = "b1100101".U
+    def amoxord  = "b1100110".U
+    def amomaxd  = "b1100110".U
+    def amomind  = "b1101000".U
+
+    // the highest bits are for instruction types
+    def typeMSB = 6
+    def typeLSB = 5
+
+    def MulType     = "b00".U
+    def DivType     = "b01".U
+    def FenceType   = "b10".U
+    def AtomicsType = "b11".U
+
+    def isMul(op: UInt)     = op(typeMSB, typeLSB) === MulType
+    def isDiv(op: UInt)     = op(typeMSB, typeLSB) === DivType
+    def isFence(op: UInt)   = op(typeMSB, typeLSB) === FenceType
+    def isAtomics(op: UInt) = op(typeMSB, typeLSB) === AtomicsType
+
+    def isDivSign(op: UInt) = isDiv(op) && !op(3)
+    def isW(op: UInt) = op(4)
+
+    def waitSbuffer(func: UInt) = func === sfence
   }
 
   object LSUOpType {
