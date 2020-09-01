@@ -78,7 +78,7 @@ object Compare {
 class TlbEntry extends TlbBundle {
   val vpn = UInt(vpnLen.W) // tag is vpn
   val ppn = UInt(ppnLen.W)
-  val level = UInt(log2Up(Level).W) // 0 for 4KB, 1 for 2MB, 2 for 1GB
+  val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
   // val asid = UInt(asidLen.W), asid maybe expensive to support, but useless
   // val v = Bool() // v&g is special, may need sperate storage?
   val perm = new PermBundle(hasV = false)
@@ -86,7 +86,7 @@ class TlbEntry extends TlbBundle {
   def vpnHit(vpn: UInt):Bool = {
     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
     val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
-      VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt})
+      Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
     val mask = maskLevel(level)
     (mask&this.vpn) === (mask&vpn)
   }
