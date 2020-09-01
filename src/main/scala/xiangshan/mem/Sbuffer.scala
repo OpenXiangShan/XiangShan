@@ -82,6 +82,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   }
 
 
+  val lru_accessed = WireInit(VecInit(Seq.fill(StorePipelineWidth)(false.B)))
 
   // Get retired store from lsroq
   //--------------------------------------------------------------------------------------------------------------------
@@ -218,6 +219,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
+        lru_accessed(storeIdx) := true.B
         // update mask and data
 //        cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
         cache(updateInfo(storeIdx).idx).data.zipWithIndex.foreach { case (int, i) =>
@@ -238,6 +240,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
+        lru_accessed(storeIdx) := true.B
         // set valid
         cache(updateInfo(storeIdx).idx).valid := true.B
         // set tag
@@ -298,9 +301,11 @@ class Sbuffer extends XSModule with HasSBufferConst {
     }
   }
 
+  val lru_miss = WireInit(false.B)
   when (eviction_state === e_wb_resp) {
     when (wb_resp) {
       lru.miss
+      lru_miss := true.B
       eviction_state := e_wb_req
     }
   }
@@ -346,11 +351,18 @@ class Sbuffer extends XSModule with HasSBufferConst {
     }
   }
 
+  val lru_flush = WireInit(false.B)
   when (flush_state === f_flushed) {
     lru.flush
+    lru_flush := true.B
     io.flush_resp_valid := true.B
     flush_state := f_invalid
   }
+
+  // check for concurrent modification to lru states
+  val lru_modified = VecInit(lru_accessed ++ Seq(lru_miss, lru_flush))
+  val cnt = PopCount(lru_modified)
+  assert(cnt <= 1.U)
 
 
   // write back unit
@@ -379,6 +391,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   when (state === s_invalid) {
     wb_arb.io.out.ready := true.B
     when (wb_arb.io.out.fire()) {
+      assert(cache(wb_arb.io.out.bits).valid)
       wb_idx := wb_arb.io.out.bits
       state := s_dcache_req
     }
@@ -389,18 +402,21 @@ class Sbuffer extends XSModule with HasSBufferConst {
     io.dcache.req.valid := true.B
     io.dcache.req.bits.addr := getAddr(cache(wb_idx).tag)
 
+    val gotValidData = WireInit(false.B)
+
     // prepare write data and write mask
     when (!busy(wb_idx, StorePipelineWidth)) {
       // get data directly from cache
+      gotValidData := true.B
       dcacheData := cache(wb_idx).data.asUInt()
       dcacheMask := cache(wb_idx).mask.asUInt()
-
       XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n",
         wb_idx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     } .otherwise {
       for (i <- 0 until StorePipelineWidth) {
         // get data from updateInfo
         when (updateInfo(i).idx === wb_idx && updateInfo(i).isUpdated && io.in(i).valid) {
+          gotValidData := true.B
           dcacheData := updateInfo(i).newData.asUInt()
           dcacheMask := updateInfo(i).newMask.asUInt()
         }
@@ -409,6 +425,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
       XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n",
         waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     }
+    assert(gotValidData)
 
 
     when(io.dcache.req.fire()){
