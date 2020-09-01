@@ -13,7 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=shift $(EMU_ARGS) run 2>&1 | tee > ras_shift.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 | tee > dummy.log
 
 # ------------------------------------------------------------------
 # run different test sets
