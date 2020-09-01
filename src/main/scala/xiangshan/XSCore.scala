@@ -12,7 +12,7 @@ import xiangshan.mem._
 import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils._
 
@@ -240,12 +240,12 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   private val xbar = TLXbar()
 
-  xbar := dcache.clientNode
-  xbar := ptw.node
+  xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  xbar := TLBuffer() := ptw.node
 
   l2.node := xbar
 
-  mem := TLCacheCork() := l2.node
+  mem := TLBuffer() := TLCacheCork() := TLBuffer() := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
