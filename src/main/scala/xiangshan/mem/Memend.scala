@@ -176,6 +176,7 @@ class Memend extends XSModule {
   }
 
   sbuffer.io.dcache <> sbufferToDcache
+  sbuffer.io.flush_req_valid := false.B
 
   lsroq.io.stout <> io.backend.stout
   lsroq.io.commits <> io.backend.commits

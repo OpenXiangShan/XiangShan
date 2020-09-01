@@ -106,6 +106,7 @@ class TrueLRU(n_ways: Int) {
   def way = get_replace_way(state_reg)
   def miss = access(way)
   def hit = {}
+  def flush() = { state_reg := 0.U(nBits.W) }
   @deprecated("replace 'replace' with 'way' from abstract class ReplacementPolicy","Rocket Chip 2020.05")
   def replace: UInt = way
 }
