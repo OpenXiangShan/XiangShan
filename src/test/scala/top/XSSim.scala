@@ -134,7 +134,7 @@ object TestMain extends App {
   implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
-    args,
+    args.filterNot(_ == "--disable-log"),
     Seq(
       ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
     )
