@@ -5,9 +5,9 @@ import chisel3.util._
 
 import utils.XSDebug
 
-// wraps around MiscPipe
+// wraps around AtomicsPipe
 // when requests misse, send miss req to missQueue and replays reqs
-class MiscMissQueue extends DCacheModule
+class AtomicsMissQueue extends DCacheModule
 {
   val io = IO(new DCacheBundle {
     val lsu         = Flipped(new DCacheLoadIO)
