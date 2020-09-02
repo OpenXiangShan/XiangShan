@@ -60,7 +60,8 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def encDataBits = cacheParams.dataCode.width(wordBits) // NBDCache only
   def encRowBits = encDataBits*rowWords
   def cacheID = 0
-  
+  def RVCInsLen = cacheDataBits/4 
+
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
   def get_tag(addr: UInt) = addr >> untagBits
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
@@ -247,12 +248,23 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
 
-  //icache hit
+  //icache hit 
+  //val allInBlock = s3_req_mask.andR
   val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
-  val dataHitWayUInt = (Cat(dataHitWay(7),dataHitWay(6),dataHitWay(5),dataHitWay(4),dataHitWay(3),dataHitWay(2),dataHitWay(1),dataHitWay(0))).asUInt //TODO: this is ugly
-  val allInBlock = s3_req_mask.andR
+  val dataHitWay_16bit = Wire(Vec(cacheDataBeats * 4,UInt(RVCInsLen.W)))
+  (0 until cacheDataBeats).foreach{ i =>
+    (0 until 4).foreach{ j =>
+      dataHitWay_16bit(i*4 + j) := dataHitWay(i)(j*16+15, j*16)
+    }
+  }
+  val startPtr = s3_req_pc(5,1)
+  val cutPacket = WireInit(VecInit(Seq.fill(cacheDataBeats * 2){0.U(RVCInsLen.W)}))
+  (0 until cacheDataBeats * 2).foreach{ i =>
+    cutPacket(i) := Mux(s3_req_mask(i).asBool,dataHitWay_16bit(startPtr + i.U),0.U)
+  }
+  //val dataHitWayUInt = (Cat((dataHitWay.map(w => w)).reverse)).asUInt //TODO: this is ugly
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
-  outPacket := dataHitWayUInt >> (s3_req_pc(5,1) << 4)  //TODO: this is ugly
+  outPacket := cutPacket.asUInt  //TODO: this is ugly
 
   //icache miss
   val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
