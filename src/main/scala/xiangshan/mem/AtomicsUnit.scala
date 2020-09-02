@@ -18,7 +18,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: Nil = Enum(6)
+  val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
   val in = Reg(new ExuInput())
   // paddr after translation
@@ -38,13 +38,12 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
-  io.dtlb.resp.ready   := false.B
 
   io.flush_sbuffer.req_valid := false.B
 
 
 
-  when (state === s_idle) {
+  when (state === s_invalid) {
     io.in.ready := true.B
     when (io.in.fire()) {
       in := io.in.bits
@@ -70,7 +69,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
     // TODO: exception handling
     val exception = WireInit(false.B)
-    val cause     = Wire(UInt())
     // there are exceptions, no need to execute it
     when (exception) {
       state := s_finish
@@ -139,7 +137,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.out.bits.debug.isMMIO := AddressSpace.isMMIO(paddr)
     when (io.out.fire()) {
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
-      state := s_idle
+      state := s_invalid
     }
   }
 }

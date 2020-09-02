@@ -2,6 +2,7 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import xiangshan.cache._
@@ -187,10 +188,13 @@ class Memend extends XSModule {
   sbuffer.io.dcache <> io.sbufferToDcache
 
   // flush sbuffer
+  // fence flush temporarily not connected
   val fenceFlush = Wire(Flipped(new SbufferFlushBundle))
   BoringUtils.addSink(fenceFlush, "FenceUnitFlushSbufferBundle")
+  fenceFlush.req_valid := false.B
+
   val atomicsFlush = Wire(Flipped(new SbufferFlushBundle))
-  BoringUtils.addSink(atomicsFlush, "AtomicsUnitFlushSbufferBundle")
+
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush.req_valid && atomicsFlush.req_valid))
@@ -203,17 +207,26 @@ class Memend extends XSModule {
   // AtomicsUnit
   // AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
-  atomicsUnit.io <> DontCare
-  atomicsUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
-  atomicsUnit.io.in.valid := io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou ||
-    io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
-  when(atomicsUnit.io.dtlb.req.valid){
+  val ld0_atomics = io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou
+  val ld1_atomics = io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
+
+  atomicsUnit.io.dtlb.resp.valid := false.B
+  atomicsUnit.io.dtlb.resp.bits  := DontCare
+  atomicsUnit.io.out.ready       := false.B
+
+  // dispatch 0 takes priority
+  atomicsUnit.io.in.valid := ld0_atomics || ld1_atomics
+  atomicsUnit.io.in.bits  := Mux(ld0_atomics, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
+  when (ld0_atomics) { io.backend.ldin(0).ready := atomicsUnit.io.in.ready }
+  when (!ld0_atomics && ld1_atomics) { io.backend.ldin(1).ready := atomicsUnit.io.in.ready }
+
+  when(atomicsUnit.io.dtlb.req.valid) {
     dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
   }
-  atomicsUnit.io.dcache <> io.atomics
+  atomicsUnit.io.dcache        <> io.atomics
+  atomicsUnit.io.flush_sbuffer <> atomicsFlush
 
   when(atomicsUnit.io.out.valid){
     io.backend.ldout(0) <> atomicsUnit.io.out
   }
-  atomicsUnit.io.out.ready := true.B
 }

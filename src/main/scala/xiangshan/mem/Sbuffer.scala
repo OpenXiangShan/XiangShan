@@ -44,6 +44,12 @@ class UpdateInfo extends XSBundle with HasSBufferConst {
   val isIgnored: Bool = Bool()
 }
 
+class SbufferFlushBundle extends Bundle {
+  val req_valid = Output(Bool())
+  val req_ready = Input(Bool())
+  val resp_valid = Input(Bool())
+}
+
 // Store buffer for XiangShan Out of Order LSU
 class Sbuffer extends XSModule with HasSBufferConst {
   val io = IO(new Bundle() {
@@ -52,9 +58,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
 
     // sbuffer flush
-    val flush_req_valid = Input(Bool())
-    val flush_req_ready = Output(Bool())
-    val flush_resp_valid = Output(Bool())
+    val flush = Flipped(new SbufferFlushBundle)
   })
 
   val cache: Vec[SBufferCacheLine] = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SBufferCacheLine))))
@@ -320,12 +324,12 @@ class Sbuffer extends XSModule with HasSBufferConst {
   wb_arb.io.in(FlushPort).valid := false.B
   wb_arb.io.in(FlushPort).bits  := DontCare
 
-  io.flush_req_ready := false.B
-  io.flush_resp_valid := false.B
+  io.flush.req_ready := false.B
+  io.flush.resp_valid := false.B
 
   when (flush_state === f_invalid) {
-    io.flush_req_ready := true.B
-    when (io.flush_req_valid && io.flush_req_ready) {
+    io.flush.req_ready := true.B
+    when (io.flush.req_valid && io.flush.req_ready) {
       flush_state := f_wb_req
     }
   }
@@ -355,7 +359,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   when (flush_state === f_flushed) {
     lru.flush
     lru_flush := true.B
-    io.flush_resp_valid := true.B
+    io.flush.resp_valid := true.B
     flush_state := f_invalid
   }
 
