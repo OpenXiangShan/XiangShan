@@ -12,12 +12,15 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
     (io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType)
 
 
-  val isDiv = MDUOpType.isDiv(func)
+  val isMul     = MDUOpType.isMul(func)
+  val isDiv     = MDUOpType.isDiv(func)
+  val isFence   = MDUOpType.isFence(func)
 
-  val mul = Module(new MulExeUnit)
-  val div = Module(new DivExeUnit)
+  val mul       = Module(new MulExeUnit)
+  val div       = Module(new DivExeUnit)
+  val fence     = Module(new FenceExeUnit)
 
-  for(x <- Seq(mul.io, div.io)){
+  for(x <- Seq(mul.io, div.io, fence.io)){
     x.mcommit <> DontCare
     x.exception <> DontCare
     x.dmem <> DontCare
@@ -25,10 +28,14 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
     x.redirect := io.redirect
   }
 
-  mul.io.in.valid := io.in.valid && !isDiv
-  div.io.in.valid := io.in.valid && isDiv
+  mul.io.in.valid     := io.in.valid && isMul
+  div.io.in.valid     := io.in.valid && isDiv
+  fence.io.in.valid   := io.in.valid && isFence
 
-  io.in.ready := Mux(isDiv, div.io.in.ready, mul.io.in.ready)
+  io.in.ready := false.B
+  when (isMul) { io.in.ready := mul.io.in.ready }
+  when (isDiv) { io.in.ready := div.io.in.ready }
+  when (isFence) { io.in.ready := fence.io.in.ready }
 
   val arb = Module(new Arbiter(new ExuOutput, 2))
 

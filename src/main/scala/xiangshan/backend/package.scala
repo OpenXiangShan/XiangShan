@@ -54,34 +54,49 @@ package object backend {
     def isBranch(func: UInt) = func(4)
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
-
-    // alu take sfence.vma and fence.i
-    def sfence = "b110000".U
-    def fencei = "b110001".U
-
-    def waitSbuffer(func: UInt) = func===sfence
   }
 
   object MDUOpType {
-    def mul    = "b0000".U
-    def mulh   = "b0001".U
-    def mulhsu = "b0010".U
-    def mulhu  = "b0011".U
-    def mulw   = "b1000".U
+    // mul
+    // bit encoding: | type (2bit) | isWord(1bit) | opcode(2bit) |
+    def mul    = "b00000".U
+    def mulh   = "b00001".U
+    def mulhsu = "b00010".U
+    def mulhu  = "b00011".U
+    def mulw   = "b00100".U
 
-    def div    = "b0100".U
-    def divu   = "b0101".U
-    def rem    = "b0110".U
-    def remu   = "b0111".U
+    // div
+    // bit encoding: | type (2bit) | isWord(1bit) | isSign(1bit) | opcode(1bit) |
+    def div    = "b01000".U
+    def divu   = "b01010".U
+    def rem    = "b01001".U
+    def remu   = "b01011".U
 
-    def divw   = "b1100".U
-    def divuw  = "b1101".U
-    def remw   = "b1110".U
-    def remuw  = "b1111".U
+    def divw   = "b01100".U
+    def divuw  = "b01110".U
+    def remw   = "b01101".U
+    def remuw  = "b01111".U
 
-    def isDiv(op: UInt) = op(2)
-    def isDivSign(op: UInt) = isDiv(op) && !op(0)
-    def isW(op: UInt) = op(3)
+    // fence
+    // bit encoding: | type (2bit) | padding(1bit)(zero) | opcode(2bit) |
+    def fence    = "b10000".U
+    def sfence   = "b10001".U
+    def fencei   = "b10010".U
+
+    // the highest bits are for instruction types
+    def typeMSB = 4
+    def typeLSB = 3
+
+    def MulType     = "b00".U
+    def DivType     = "b01".U
+    def FenceType   = "b10".U
+
+    def isMul(op: UInt)     = op(typeMSB, typeLSB) === MulType
+    def isDiv(op: UInt)     = op(typeMSB, typeLSB) === DivType
+    def isFence(op: UInt)   = op(typeMSB, typeLSB) === FenceType
+
+    def isDivSign(op: UInt) = isDiv(op) && !op(1)
+    def isW(op: UInt) = op(2)
   }
 
   object LSUOpType {
