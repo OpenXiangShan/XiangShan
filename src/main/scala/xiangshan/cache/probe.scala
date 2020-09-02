@@ -7,7 +7,7 @@ import utils.XSDebug
 import freechips.rocketchip.tilelink._
 import utils.{HasTLDump, XSDebug}
 
-class ProbeUnit(edge: TLEdgeOut) extends DCacheModule {
+class ProbeUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new TLBundleB(edge.bundle)))
     val rep = Decoupled(new TLBundleC(edge.bundle))
@@ -16,9 +16,12 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule {
     val meta_write = Decoupled(new L1MetaWriteReq)
     val wb_req = Decoupled(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp = Input(Bool())
+    val block = Input(Bool())
+    val inflight_req_idx        = Output(Valid(UInt()))
+    val inflight_req_block_addr = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_release :: s_wb_req :: s_wb_resp :: s_meta_write_req :: Nil = Enum(8)
+  val s_invalid :: s_wait_sync :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_release :: s_wb_req :: s_wb_resp :: s_meta_write_req :: Nil = Enum(9)
 
   val state = RegInit(s_invalid)
 
@@ -45,14 +48,29 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule {
   io.wb_req.valid := false.B
   io.wb_req.bits  := DontCare
 
-  // state === s_invalid
+  io.inflight_req_idx.valid := state =/= s_invalid
+  io.inflight_req_idx.bits  := req_idx
+
+  io.inflight_req_block_addr.valid := state =/= s_invalid
+  io.inflight_req_block_addr.bits  := req_block_addr
+
+  XSDebug("state: %d\n", state)
+
   when (state === s_invalid) {
     io.req.ready := true.B
     when (io.req.fire()) {
       req := io.req.bits
-      state := s_meta_read_req
+      state := s_wait_sync
     }
   } 
+
+  // we could be blocked by miss queue, or anything else
+  // just wait for them
+  when (state === s_wait_sync) {
+    when (!io.block) {
+      state := s_meta_read_req
+    }
+  }
 
   when (state === s_meta_read_req) {
     io.meta_read.valid := true.B
@@ -126,5 +144,21 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule {
     when (io.meta_write.fire()) {
       state := s_invalid
     }
+  }
+
+  // print wb_req
+  XSDebug(io.wb_req.fire(), "wb_req idx %x tag: %x source: %d param: %x way_en: %x voluntary: %b\n",
+    io.wb_req.bits.idx, io.wb_req.bits.tag,
+    io.wb_req.bits.source, io.wb_req.bits.param,
+    io.wb_req.bits.way_en, io.wb_req.bits.voluntary)
+
+  // print tilelink messages
+  when (io.req.fire()) {
+    XSDebug("mem_probe ")
+    io.req.bits.dump
+  }
+  when (io.rep.fire()) {
+    XSDebug("mem_release ")
+    io.rep.bits.dump
   }
 }

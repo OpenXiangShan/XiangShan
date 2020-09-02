@@ -450,8 +450,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // prober
-  // bus.b <> prober.io.req
-  prober.io.req := DontCare
+  prober.io.block := block_probe(prober.io.inflight_req_block_addr.bits)
+  prober.io.req <> bus.b
 
   //----------------------------------------
   // wb
@@ -484,18 +484,22 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val misc_addr_match = misc_addr_matches.reduce(_||_)
 
+    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    misc_addr_match || miss_idx_match
+    misc_addr_match || prober_addr_match || miss_idx_match
   }
 
   def block_misc(addr: UInt) = {
     val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val store_addr_match = store_addr_matches.reduce(_||_)
 
+    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    store_addr_match || miss_idx_match
+    store_addr_match || prober_addr_match || miss_idx_match
   }
 
   def block_miss(addr: UInt) = {
@@ -505,10 +509,24 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val misc_idx_matches = VecInit(misc.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val misc_idx_match = misc_idx_matches.reduce(_||_)
 
+    val prober_idx_match = prober.io.inflight_req_idx.valid && prober.io.inflight_req_idx.bits === get_idx(addr)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_idx_match || misc_idx_match || miss_idx_match
+    store_idx_match || misc_idx_match || prober_idx_match || miss_idx_match
+  }
+
+  def block_probe(addr: UInt) = {
+    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val store_addr_match = store_addr_matches.reduce(_||_)
+
+    val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val misc_addr_match = misc_addr_matches.reduce(_||_)
+
+    val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+    store_addr_match || misc_addr_match || miss_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
