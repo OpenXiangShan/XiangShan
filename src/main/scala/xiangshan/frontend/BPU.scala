@@ -8,7 +8,7 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = false
+  val BPUDebug = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -76,7 +76,7 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
 
   val io = new DefaultBasePredictorIO
 
-  val debug = false
+  val debug = true
 
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
@@ -113,7 +113,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
     val out = Decoupled(new BPUStageIO)
     val predecode = Flipped(ValidIO(new Predecode))
     val recover =  Flipped(ValidIO(new BranchUpdateInfo))
-
+    val cacheValid = Input(Bool())
   }
   val io = IO(new DefaultIO)
 
@@ -232,6 +232,7 @@ class BPUStage1 extends BPUStage {
 
 class BPUStage2 extends BPUStage {
 
+  io.out.valid := predValid && !io.flush && io.cacheValid
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
@@ -382,6 +383,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
+    val cacheValid = Input(Bool())
     // from if1
     val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
@@ -425,6 +427,10 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   s2.io.recover <> DontCare
   s3.io.recover.valid <> io.inOrderBrInfo.valid
   s3.io.recover.bits <> io.inOrderBrInfo.bits.ui
+
+  s1.io.cacheValid := DontCare
+  s2.io.cacheValid := io.cacheValid
+  s3.io.cacheValid := io.cacheValid
   
   if (BPUDebug) {
     XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")

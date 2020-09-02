@@ -789,9 +789,11 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     "DTlbMissCnt1"-> (0xb20, "perfCntDtlbMissCnt1"    ),
     "DTlbMissCnt2"-> (0xb21, "perfCntDtlbMissCnt2"    ),
     "DTlbMissCnt3"-> (0xb22, "perfCntDtlbMissCnt3"    ),
-    "PtwReqCnt"   -> (0xb23, "perfCntPtwReqCnt"       ),
-    "PtwCycleCnt" -> (0xb24, "perfCntPtwCycleCnt"     ),
-    "PtwL2TlbHit" -> (0xb25, "perfCntPtwL2TlbHit"     )
+    "ITlbReqCnt0" -> (0xb23, "perfCntItlbReqCnt0"     ),
+    "ITlbMissCnt0"-> (0xb24, "perfCntItlbMissCnt0"    ),
+    "PtwReqCnt"   -> (0xb25, "perfCntPtwReqCnt"       ),
+    "PtwCycleCnt" -> (0xb26, "perfCntPtwCycleCnt"     ),
+    "PtwL2TlbHit" -> (0xb27, "perfCntPtwL2TlbHit"     )
 //    "Custom1"     -> (0xb1b, "Custom1"             ),
 //    "Custom2"     -> (0xb1c, "Custom2"             ),
 //    "Custom3"     -> (0xb1d, "Custom3"             ),

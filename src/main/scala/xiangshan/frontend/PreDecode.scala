@@ -5,6 +5,7 @@ import chisel3.util._
 import utils.XSDebug
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
+import xiangshan.cache._
 
 trait HasPdconst{ this: XSModule =>
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
@@ -53,7 +54,7 @@ class PreDecodeResp extends XSBundle {
 
 class PreDecode extends XSModule with HasPdconst{
   val io = IO(new Bundle() {
-    val in = Input(new FakeIcacheResp)
+    val in = Input(new ICacheResp)
     val prev = Flipped(ValidIO(UInt(16.W)))
     val out = Output(new PreDecodeResp)
   })

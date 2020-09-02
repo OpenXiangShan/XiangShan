@@ -9,7 +9,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
@@ -218,6 +218,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
+  val icache = LazyModule(new ICache())
   val ptw = LazyModule(new PTW())
 
   // TODO: crossbar Icache/Dcache/PTW here
@@ -225,6 +226,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   val mmio = uncache.clientNode
 
   mem := TLCacheCork(sinkIds = 1) := dcache.clientNode
+  mem := TLCacheCork(sinkIds = 1) := icache.clientNode
   mem := TLCacheCork(sinkIds = 1) := ptw.node
 
   lazy val module = new XSCoreImp(this)
@@ -238,16 +240,21 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
+  val icache = outer.icache.module
   val ptw = outer.ptw.module
 
   // TODO: connect this
   dcache.io.lsu.misc <> DontCare
 
   front.io.backend <> backend.io.frontend
+  front.io.icacheResp <> icache.io.resp
+  front.io.icacheToTlb <> icache.io.tlb
+  icache.io.req <> front.io.icacheReq
+  icache.io.flush <> front.io.icacheFlush
   mem.io.backend   <> backend.io.mem
 
   ptw.io.tlb(0) <> mem.io.ptw
-  ptw.io.tlb(1) <> DontCare
+  ptw.io.tlb(1) <> front.io.ptw
 
   dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec
   dcache.io.lsu.lsroq <> mem.io.miscToDcache
