@@ -271,9 +271,20 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(cacheDataBeats)
 
+  //pipeline flush register
   val needFlush = RegInit(false.B)
   when(io.flush(1) && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
   .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
+
+  //cache flush register
+  val icacheFlush = WireInit(false.B)
+  val cacheflushed = RegInit(false.B)
+  BoringUtils.addSink(icacheFlush, "FenceI")
+  XSDebug("[Fence.i] icacheFlush:%d, cacheflushed:%d",icacheFlush,cacheflushed)
+  when(icacheFlush && (state =/= s_idle) && (state =/= s_wait_resp)){ cacheflushed := true.B}
+  .elsewhen((state=== s_wait_resp) && cacheflushed) {cacheflushed := false.B }
+
+  val waitForRefillDone = needFlush || cacheflushed
 
   val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))   //TODO: this is ugly
 
@@ -305,7 +316,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
     }
 
     is(s_wait_resp){
-      when(io.resp.fire() || needFlush){state := s_idle}
+      when(io.resp.fire() || needFlush ){state := s_idle}
     }
 
   }
@@ -313,7 +324,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   //refill write
   val metaWrite = Wire(new ICacheMetaBundle)
-  val icacheFlush = WireInit(false.B)
   val refillFinalOneBeat = (state === s_memReadResp) && bus.d.fire() && refill_done
   val wayNum = OHToUInt(waymask)
   val validPtr = Cat(get_idx(s3_req_pc),wayNum)
@@ -321,9 +331,11 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   metaArray.io.w.req.valid := refillFinalOneBeat
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
-  when(refillFinalOneBeat && !icacheFlush){
+  when(refillFinalOneBeat && !cacheflushed){
     validArray := validArray.bitSet(validPtr, true.B)
   }
+
+  when(icacheFlush){ validArray := 0.U }
 
   val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
   for(b <- 0 until cacheDataBeats){
@@ -335,7 +347,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   }
 
-  s3_ready := ((io.resp.fire() || !s3_valid) && !needFlush) || (needFlush && state === s_wait_resp)
+  s3_ready := ((io.resp.fire() || !s3_valid) && !waitForRefillDone) || (waitForRefillDone && state === s_wait_resp)
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
@@ -370,7 +382,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2 
 
   bus.d.ready := true.B
-
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 }
