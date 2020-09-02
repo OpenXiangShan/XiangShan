@@ -218,9 +218,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   loadArb.io.in(1) <> lsu_0.req
   assert(!(lsu_0.req.fire() && lsu_0.req.bits.meta.replay), "LSU should not replay requests")
   assert(!(loadReplay.req.fire() && !loadReplay.req.bits.meta.replay), "LoadMissQueue should replay requests")
-  val ldu_0_block = block_load(loadArb.io.out.bits.addr)
-  // do not block replayed reqs
-  block_decoupled(loadArb.io.out, ldu_0.req, ldu_0_block && !loadArb.io.out.bits.meta.replay)
+  val ldu_0_nack = nack_load(loadArb.io.out.bits.addr)
+  // do not nack replayed reqs
+  ldu_0.req <> loadArb.io.out
+  ldu(0).io.nack := ldu_0_nack && !loadArb.io.out.bits.meta.replay
 
   ldu_0.resp.ready := false.B
 
@@ -242,8 +243,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   ldu_0.s1_kill := lsu_0.s1_kill
 
   for (w <- 1 until LoadPipelineWidth) {
-    val load_w_block = block_load(io.lsu.load(w).req.bits.addr)
-    block_decoupled(io.lsu.load(w).req, ldu(w).io.lsu.req, load_w_block)
+    val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
+    ldu(w).io.lsu.req <> io.lsu.load(w).req
+    ldu(w).io.nack := load_w_nack
+
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
     ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
     assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.replay), "LSU should not replay requests")
@@ -464,7 +467,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
-  def block_load(addr: UInt) = {
+  def nack_load(addr: UInt) = {
     val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val store_addr_match = store_addr_matches.reduce(_||_)
 
