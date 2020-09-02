@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
+import chisel3.ExcitingUtils._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
 
 class LsRoqEntry extends XSBundle {
@@ -283,6 +284,7 @@ class Lsroq extends XSModule {
         data(loadWbSel(i)).mmio
       )
     }
+    ExcitingUtils.addSource(io.ldout(i).fire(), "perfCntCacheLoadMiss"+i, Perf)
   })
 
   // writeback up to 2 store insts to CDB
