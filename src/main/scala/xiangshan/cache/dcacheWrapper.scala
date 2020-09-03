@@ -281,6 +281,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // misc pipe
+  misc.io.wb_invalidate_lrsc := wb.io.inflight_addr
   miscMissQueue.io.replay <> misc.io.lsu
   val miscClientIdWidth = 1
   val lsuMiscClientId = 0.U(miscClientIdWidth.W)
@@ -524,9 +525,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val misc_addr_match = misc_addr_matches.reduce(_||_)
 
+    val lrsc_addr_match = misc.io.block_probe_addr.valid && misc.io.block_probe_addr.bits === get_block_addr(addr)
+
     val miss_idx_matches = VecInit(missQueue.io.block_probe_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    store_addr_match || misc_addr_match || miss_idx_match
+
+    store_addr_match || misc_addr_match || lrsc_addr_match || miss_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
