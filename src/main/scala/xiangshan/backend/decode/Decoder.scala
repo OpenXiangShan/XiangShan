@@ -81,7 +81,7 @@ class Decoder extends XSModule with HasInstrType {
 
   // TODO: refactor decode logic
   // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
-  val rfWen = isrfWen(instrType)
+  val rfWen = isrfWen(instrType) && fuType=/=FuType.fence // NOTE: fence instr use instrU but do not wb
   val fpWen = isfpWen(instrType)
   io.out.ctrl.lsrc1 := Mux(src1Type === SrcType.pc, 0.U, rfSrc1)
   io.out.ctrl.lsrc2 := Mux(src2Type === SrcType.imm, 0.U, rfSrc2)
@@ -143,7 +143,7 @@ class Decoder extends XSModule with HasInstrType {
   when(io.out.ctrl.isXSTrap){
     io.out.ctrl.lsrc1 := 10.U // a0
   }
-  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou || (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence/*noSpecExec make it sent to alu0,for roq is empty*/)
+  io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou || io.out.ctrl.fuType===FuType.fence/*noSpecExec make it sent to alu0,for roq is empty*/
   //io.out.ctrl.isBlocked := (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence) // TOOD: check it
 
 

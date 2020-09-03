@@ -55,6 +55,9 @@ object FunctionUnit {
   val divCfg =
     FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false)
 
+  val fenceCfg = 
+    FuConfig(FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false/*NOTE: need redirect but when commit*/)
+
   val lduCfg =
     FuConfig(FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false)
 

@@ -1,94 +1,51 @@
-package xiangshan.backend.fu
+package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend._
+import chisel3.util.experimental.BoringUtils
 
-import xiangshan.backend.fu.FunctionUnit._
+import xiangshan.backend.MDUOpType
 
-class FenceExeUnit extends FunctionUnit(fenceCfg) {
-  val io = IO(new MulDivIO(len))
+class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
+  val (valid, src1, src2, uop, func, lsrc1, lsrc2) = 
+    (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.ctrl.lsrc1, io.in.bits.uop.ctrl.lsrc2)
 
-  val s_idle :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_flush_others_req :: s_finish :: Nil = Enum(5)
-  val state = RegInit(s_idle)
+  val s_req :: s_resp :: Nil = Enum(2)
+  val state = RegInit(s_req)
 
-  val src1 = Reg(UInt())
-  val src2 = Reg(UInt())
-  val ctrl = Reg(new MulDivCtrl())
-
-  // assign default value to output signals
-  io.in.ready  := false.B
-  io.out.valid := false.B
-  io.out.bits  := DontCare
-
-  when (state === s_idle) {
-    io.in.ready := true.B
-    when (io.in.fire()) {
-      src1 := io.in.bits.src1
-      src2 := io.in.bits.src2
-      ctrl := io.in.bits.ctrl
-      state := s_flush_sbuffer_req
-    }
-  }
-
-  // flush sbuffer
-  val sbufferFlush = Wire(new SbufferFlushBundle)
-  BoringUtils.addSource(sbufferFlush, "FenceUnitFlushSbufferBundle")
-  sbufferFlush.req_valid := false.B
-
-  when (state === s_flush_sbuffer_req) {
-    sbufferFlush.req_valid := true.B
-    when (sbufferFlush.req_valid && sbufferFlush.req_ready) {
-      state := s_flush_sbuffer_resp
-    }
-  }
-
-  when (state === s_flush_sbuffer_resp) {
-    when (sbufferFlush.resp_valid) {
-      state := s_flush_others_req
-    }
-  }
-
-  val func = ctrl.fuOpType
-
-  // flush icache/tlb when necessary
-  val sfence = Wire(new SfenceBundle)
+  val sfence  = WireInit(0.U.asTypeOf(new SfenceBundle))
+  val sbuffer = WireInit(false.B)
+  val fencei  = WireInit(false.B)
+  val sbEmpty = WireInit(false.B)
+  BoringUtils.addSource(sbuffer, "FenceUnitSbufferFlush")
   BoringUtils.addSource(sfence, "SfenceBundle")
-  sfence.valid := false.B
-  sfence.bits  := DontCare
+  // BoringUtils.addSource(fencei,  "FenceI") // TODO: uncomment it when merge icache
+  BoringUtils.addSink(sbEmpty, "SBufferEmpty")
+  // NOTE: icache & tlb & sbuffer must receive flush signal at any time
+  sbuffer      := valid && state === s_req && !sbEmpty
+  fencei       := valid && state === s_req && func === MDUOpType.fencei
+  sfence.valid := valid && state === s_req && func === MDUOpType.sfence
+  sfence.bits.rs1  := lsrc1 === 0.U
+  sfence.bits.rs2  := lsrc2 === 0.U
+  sfence.bits.addr := src1
 
-  val fencei = Wire(Bool())
-  BoringUtils.addSource(fencei, "FenceI")
-  fencei := false.B
-
-  when (state === s_flush_others_req) {
-    when (func === MDUOpType.sfence) {
-      sfence.valid := true.B
-      sfence.bits.rs1  := ctrl.lsrc1 === 0.U
-      sfence.bits.rs2  := ctrl.lsrc2 === 0.U
-      sfence.bits.addr := src1
-    } .elsewhen (func === MDUOpType.fencei) {
-      fencei := true.B
-    } .elsewhen (func === MDUOpType.fence) {
-      // fence does nothing
-      // it just blocks everything behind
-    } .otherwise {
-      // you should never reach here
-      asser(true.B)
+  switch (state) {
+    is (s_req) { // send all the flush at s_req
+      when (valid && (!sbEmpty || !io.out.ready)) { state := s_resp }
     }
-
-    state := s_finish
-  }
-
-  when (state === s_finish) {
-    io.out.valid := true.B
-    // fence has no output
-    io.out.bits.data := 0.U
-    io.out.bits.uop := ctrl.uop
-    when (io.out.fire()) {
-      state := s_idle
+    is (s_resp) { // wait for sbEmpty if send flush to sbuffer
+      when (sbEmpty && io.out.ready) { state := s_req }
     }
   }
+
+  assert(!(io.out.valid && io.out.bits.uop.ctrl.rfWen))
+  io.in.ready := state === s_req
+  io.out.valid := (state === s_resp && sbEmpty) || (state === s_req && sbEmpty && valid)
+  io.out.bits.data := DontCare
+  io.out.bits.uop := Mux(state === s_req, uop, RegEnable(uop, io.in.fire()))
+  io.out.bits.redirect <> DontCare
+  io.out.bits.redirectValid := false.B
+  io.out.bits.debug <> DontCare
 }
