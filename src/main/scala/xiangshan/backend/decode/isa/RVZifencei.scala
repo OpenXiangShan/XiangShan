@@ -3,9 +3,9 @@ package xiangshan.backend.decode.isa
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
-import xiangshan.backend.ALUOpType
+import xiangshan.backend.MDUOpType
 import xiangshan.backend.decode._
-import xiangshan.backend.decode.isa.RV64IInstr.InstrI
+import xiangshan.backend.decode.isa.RV64IInstr.InstrU
 
 
 object RVZifenceiInstr extends HasInstrType {
@@ -13,6 +13,6 @@ object RVZifenceiInstr extends HasInstrType {
 
   // fixme: add rvzifencei inst
   val table = Array(
-    FENCEI -> List(InstrI, FuType.alu, ALUOpType.add)
+    FENCEI -> List(InstrU, FuType.fence, MDUOpType.fencei)
   )
 }

@@ -119,7 +119,7 @@ class Roq extends XSModule {
     deqUop.cf.exceptionVec(ecallS) ||
     deqUop.cf.exceptionVec(ecallU)
   io.redirect := DontCare
-  io.redirect.valid := intrEnable || exceptionEnable
+  io.redirect.valid := intrEnable || exceptionEnable // TODO: add fence flush to flush the whol pipe
   io.redirect.bits.isException := true.B
   io.redirect.bits.target := trapTarget
   io.exception := deqUop

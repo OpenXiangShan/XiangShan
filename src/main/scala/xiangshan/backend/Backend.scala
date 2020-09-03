@@ -29,14 +29,15 @@ class Backend extends XSModule
   })
 
 
-  val aluExeUnits = Module(new AluExeUnit(hasSfence = true)) +: Array.tabulate(exuParameters.AluCnt-1)(_ => Module(new AluExeUnit(hasSfence = false)))
+  val aluExeUnits =Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
-  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
+  val mduFenceExeUnit = Array.tabulate(1)(_ => Module(new MulDivFenceExeUnit)) // MulDivExeFenceUnit
+  val mduExeUnits = Array.tabulate(exuParameters.MduCnt-1)(_ => Module(new MulDivExeUnit))
   // val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
   // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
   // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
+  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduFenceExeUnit ++ mduExeUnits)
   exeUnits.foreach(_.io.exception := DontCare)
   exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)

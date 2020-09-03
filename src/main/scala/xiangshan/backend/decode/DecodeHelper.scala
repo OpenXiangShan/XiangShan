@@ -47,7 +47,7 @@ object FuOpType {
 
 object Instructions extends HasInstrType with HasXSParameter {
   def NOP = 0x00000013.U
-  val DecodeDefault = List(InstrN, FuType.alu, ALUOpType.sll)
+  val DecodeDefault = List(InstrN, FuType.alu, ALUOpType.sll) // TODO: need check
   def DecodeTable =
     RVIInstr.table ++
       XSTrap.table ++
