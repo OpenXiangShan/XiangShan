@@ -62,12 +62,14 @@ EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
+EMU_THREADS   = 1
 
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
+  --threads $(EMU_THREADS) \
   --assert \
   --savable \
   --stats-vars \
