@@ -222,6 +222,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // do not nack replayed reqs
   ldu_0.req <> loadArb.io.out
   ldu(0).io.nack := ldu_0_nack && !loadArb.io.out.bits.meta.replay
+  when (ldu_0_nack) {
+    printf("DCache: LoadUnit 0 nacked\n")
+  }
 
   ldu_0.resp.ready := false.B
 
@@ -246,6 +249,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
     ldu(w).io.lsu.req <> io.lsu.load(w).req
     ldu(w).io.nack := load_w_nack
+    when (load_w_nack) {
+      printf(s"DCache: LoadUnit $w nacked\n")
+    }
 
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
     ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
@@ -278,6 +284,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
   block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block && !storeMissQueue.io.replay.req.bits.meta.replay)
   storeMissQueue.io.replay.resp <> stu.io.lsu.resp
+  when (store_block) {
+    printf("DCache: StorePipe blocked\n")
+  }
 
   //----------------------------------------
   // misc pipe
@@ -310,6 +319,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val misc_block = block_misc(miscReqArb.io.out.bits.addr)
   block_decoupled(miscReqArb.io.out, miscReq, misc_block)
+  when (misc_block) {
+    printf("DCache: MiscUnit blocked\n")
+  }
 
   // Response
   val miscResp    = miscMissQueue.io.lsu.resp
@@ -383,6 +395,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val miss_block = block_miss(missReqArb.io.out.bits.addr)
   block_decoupled(missReqArb.io.out, missReq, miss_block)
+  when (miss_block) {
+    printf("DCache: MissQueue blocked\n")
+  }
 
   // Response
   val missResp        = missQueue.io.resp
@@ -453,6 +468,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // prober
   prober.io.block := block_probe(prober.io.inflight_req_block_addr.bits)
   prober.io.req <> bus.b
+  when (prober.io.block) {
+    printf("DCache: prober blocked\n")
+  }
 
   //----------------------------------------
   // wb
