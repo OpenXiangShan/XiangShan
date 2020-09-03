@@ -40,6 +40,9 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     val block_idx   = Output(Valid(UInt()))
     val block_addr  = Output(Valid(UInt()))
 
+    val block_probe_idx   = Output(Valid(UInt()))
+    val block_probe_addr  = Output(Valid(UInt()))
+
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
@@ -93,6 +96,12 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   io.block_addr.valid := state =/= s_invalid
   io.block_idx.bits   := req_idx
   io.block_addr.bits  := req_block_addr
+
+  // to preserve forward progress, we allow probe when we are dealing with acquire/grant
+  io.block_probe_idx.valid  := state =/= s_invalid && state =/= s_refill_req && state =/= s_refill_resp
+  io.block_probe_addr.valid := state =/= s_invalid && state =/= s_refill_req && state =/= s_refill_resp
+  io.block_probe_idx.bits   := req_idx
+  io.block_probe_addr.bits  := req_block_addr
 
   // assign default values to output signals
   io.req.ready           := false.B
@@ -364,6 +373,9 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
     val inflight_req_idxes       = Output(Vec(cfg.nMissEntries, Valid(UInt())))
     val inflight_req_block_addrs = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+
+    val block_probe_idxes    = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val block_probe_addrs    = Output(Vec(cfg.nMissEntries, Valid(UInt())))
   })
 
   val resp_arb       = Module(new Arbiter(new MissResp,         cfg.nMissEntries))
@@ -418,6 +430,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
     io.inflight_req_idxes(i)       <> entry.io.block_idx
     io.inflight_req_block_addrs(i) <> entry.io.block_addr
+    io.block_probe_idxes(i)        <> entry.io.block_probe_idx
+    io.block_probe_addrs(i)        <> entry.io.block_probe_addr
 
     entry
   }
