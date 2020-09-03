@@ -325,12 +325,11 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.resp.bits.entry_id := io.id
 
     when (io.resp.fire()) {
-      when (isWrite(req.cmd)) {
-        // Set dirty
-        val (is_hit, _, coh_on_hit) = new_coh.onAccess(req.cmd)
-        assert(is_hit, "We still don't have permissions for this store")
-        new_coh := coh_on_hit
-      }
+      // additional assertion
+      val (is_hit, _, coh_on_hit) = new_coh.onAccess(req.cmd)
+      assert(is_hit, "We still don't have permissions for this store")
+      assert(new_coh === coh_on_hit, "Incorrect coherence meta data")
+
       state := s_client_finish
     }
   }
