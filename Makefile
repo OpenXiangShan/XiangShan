@@ -69,7 +69,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
-  --threads $(EMU_THREADS) \
+  --threads $(EMU_THREADS) --threads-dpi none\
   --assert \
   --savable \
   --stats-vars \
@@ -125,7 +125,7 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+	@numactl -m 0 -N 0 -- $(EMU) -i $(IMAGE) $(EMU_FLAGS)
 else
 	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && export NOOP_HOME=$(REMOTE_PREFIX)/$(NOOP_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(EMU_FLAGS)"
 endif
