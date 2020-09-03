@@ -43,6 +43,11 @@ class UpdateInfo extends XSBundle with HasSBufferConst {
   val isIgnored: Bool = Bool()
 }
 
+class SbufferFlushBundle extends Bundle {
+  val valid = Output(Bool())
+  val empty = Input(Bool())
+}
+
 // Store buffer for XiangShan Out of Order LSU
 class Sbuffer extends XSModule with HasSBufferConst {
   val io = IO(new Bundle() {

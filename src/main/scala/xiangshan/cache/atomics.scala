@@ -7,7 +7,7 @@ import utils.XSDebug
 
 // this is a traditional cache pipeline:
 // it handles load/store/amo/lr,sc
-class MiscPipe extends DCacheModule
+class AtomicsPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
     val lsu       = Flipped(new DCacheLoadIO)
@@ -44,7 +44,7 @@ class MiscPipe extends DCacheModule
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
 
-  dump_pipeline_reqs("MiscPipe s0", s0_valid, s0_req)
+  dump_pipeline_reqs("AtomicsPipe s0", s0_valid, s0_req)
 
 
   // ---------------------------------------
@@ -54,7 +54,7 @@ class MiscPipe extends DCacheModule
   val s1_addr = s1_req.addr
   val s1_nack = false.B 
 
-  dump_pipeline_reqs("MiscPipe s1", s1_valid, s1_req)
+  dump_pipeline_reqs("AtomicsPipe s1", s1_valid, s1_req)
 
   // tag check
   val meta_resp = io.meta_resp
@@ -68,7 +68,7 @@ class MiscPipe extends DCacheModule
   val s2_req   = RegNext(s1_req)
   val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
 
-  dump_pipeline_reqs("MiscPipe s2", s2_valid, s2_req)
+  dump_pipeline_reqs("AtomicsPipe s2", s2_valid, s2_req)
 
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = s2_tag_match_way.orR
@@ -146,10 +146,10 @@ class MiscPipe extends DCacheModule
   assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
 
   // only dump these signals when they are actually valid
-  dump_pipeline_valids("MiscPipe s2", "s2_hit", s2_valid && s2_hit)
-  dump_pipeline_valids("MiscPipe s2", "s2_nack", s2_valid && s2_nack)
-  dump_pipeline_valids("MiscPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
-  dump_pipeline_valids("MiscPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_hit", s2_valid && s2_hit)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack", s2_valid && s2_nack)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
   // load data gen
   val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
@@ -166,7 +166,7 @@ class MiscPipe extends DCacheModule
   assert(!(resp.valid && !io.lsu.resp.ready))
 
   when (resp.valid) {
-    XSDebug(s"MiscPipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
+    XSDebug(s"AtomicsPipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
       resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
   }
 

@@ -183,7 +183,7 @@ class Lsroq extends XSModule {
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := data(missRefillSel).mask
 
-  io.dcache.req.bits.meta.id       := DCacheMiscType.miss
+  io.dcache.req.bits.meta.id       := DCacheAtomicsType.miss // DontCare // DCacheMiscType.miss  // TODO: // FIXME
   io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
   io.dcache.req.bits.meta.paddr    := data(missRefillSel).paddr
   io.dcache.req.bits.meta.uop      := uop(missRefillSel)
@@ -592,7 +592,7 @@ class Lsroq extends XSModule {
   io.uncache.req.bits.data := data(ringBufferTail).data
   io.uncache.req.bits.mask := data(ringBufferTail).mask
 
-  io.uncache.req.bits.meta.id       := DCacheMiscType.mmio
+  io.uncache.req.bits.meta.id       := DCacheAtomicsType.mmio// DontCare // DCacheMiscType.mmio // TODO: // FIXME
   io.uncache.req.bits.meta.vaddr    := DontCare
   io.uncache.req.bits.meta.paddr    := data(ringBufferTail).paddr
   io.uncache.req.bits.meta.uop      := uop(ringBufferTail)
