@@ -12,6 +12,8 @@ class Frontend extends XSModule {
     val icacheReq = DecoupledIO(new ICacheReq)
     val icacheResp = Flipped(DecoupledIO(new ICacheResp))
     val icacheFlush = Output(UInt(2.W))
+    val icacheToTlb = Flipped(new BlockTlbRequestIO)
+    val ptw = new TlbPtwIO
     val backend = new FrontendToBackendIO
   })
 
@@ -28,6 +30,13 @@ class Frontend extends XSModule {
   io.icacheReq <> ifu.io.icacheReq
   io.icacheFlush <> ifu.io.icacheFlush
   ifu.io.icacheResp <> io.icacheResp
+  //itlb to ptw
+  io.ptw <> TLB(
+    in = Seq(io.icacheToTlb),
+    width = 1,
+    isDtlb = false,
+    shouldBlock = true
+  )
   //ibuffer
   ibuffer.io.in <> ifu.io.fetchPacket
   ibuffer.io.flush := needFlush
