@@ -8,13 +8,6 @@ import xiangshan.cache._
 import utils.ParallelAND
 import utils.TrueLRU
 
-class SbufferFlushBundle extends Bundle {
-  val req_valid = Output(Bool())
-  val req_ready = Input(Bool())
-  val resp_valid = Input(Bool())
-}
-
-
 class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
   val lsroqId = UInt(log2Up(LsroqSize).W)
@@ -56,7 +49,10 @@ class Sbuffer extends XSModule with HasSBufferConst {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq )))
     val dcache = new DCacheStoreIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val flush = Flipped(new SbufferFlushBundle) // sbuffer flush
+    val flush = new Bundle {
+      val valid = Input(Bool())
+      val empty = Output(Bool())
+    } // sbuffer flush
   })
 
   val cache: Vec[SBufferCacheLine] = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SBufferCacheLine))))
@@ -316,56 +312,31 @@ class Sbuffer extends XSModule with HasSBufferConst {
   // Sbuffer flush
   //-------------------------------------------------
   // flush state machine
-  val f_invalid :: f_wb_req :: f_wb_resp :: f_flushed :: Nil = Enum(4)
-  val flush_state = RegInit(f_invalid)
+  val f_idle :: f_req :: f_wait_resp :: Nil = Enum(3)
+  val f_state = RegInit(f_idle)
+  val flush = io.flush
+  val empty = validCnt === 0.U
+  flush.empty := empty
 
-  wb_arb.io.in(FlushPort).valid := false.B
-  wb_arb.io.in(FlushPort).bits  := DontCare
+  wb_arb.io.in(FlushPort).valid := f_state === f_req
+  wb_arb.io.in(FlushPort).bits := PriorityEncoder((0 until StoreBufferSize).map(i => cache(i).valid))
 
-  io.flush.req_ready := false.B
-  io.flush.resp_valid := false.B
-
-  when (flush_state === f_invalid) {
-    io.flush.req_ready := true.B
-    when (io.flush.req_valid && io.flush.req_ready) {
-      flush_state := f_wb_req
+  switch (f_state) {
+    is (f_idle) {
+      when (flush.valid && !empty) { f_state := f_req } 
+    }
+    is (f_req) {
+      assert(!empty, "when flush, should not be empty")
+      when (wb_arb.io.in(FlushPort).fire()) { f_state := f_wait_resp }
+    }
+    is (f_wait_resp) { when (wb_resp) {
+      when (empty) { f_state := f_idle }
+      .otherwise { f_state := f_req } }
     }
   }
 
-  when (flush_state === f_wb_req) {
-    val empty = validCnt === 0.U
-    val flush_idx = PriorityEncoder((0 until StoreBufferSize).map(i => cache(i).valid))
-
-    when (!empty) {
-      wb_arb.io.in(FlushPort).valid := true.B
-      wb_arb.io.in(FlushPort).bits  := flush_idx
-      when (wb_arb.io.in(FlushPort).fire()) {
-        flush_state := f_wb_resp
-      }
-    } .otherwise {
-      flush_state := f_flushed
-    }
-  }
-
-  when (flush_state === f_wb_resp) {
-    when (wb_resp) {
-      flush_state := f_wb_req
-    }
-  }
-
-  val lru_flush = WireInit(false.B)
-  when (flush_state === f_flushed) {
-    lru.flush
-    lru_flush := true.B
-    io.flush.resp_valid := true.B
-    flush_state := f_invalid
-  }
-
-  // check for concurrent modification to lru states
-  val lru_modified = VecInit(lru_accessed ++ Seq(lru_miss, lru_flush))
-  val cnt = PopCount(lru_modified)
-  assert(cnt <= 1.U)
-
+  XSDebug(flush.valid, p"Reveive flush. f_state:${f_state} state:${state}\n")
+  XSDebug(f_state =/= f_idle || flush.valid, p"f_state:${f_state} idx:${wb_arb.io.in(FlushPort).bits} In(${wb_arb.io.in(FlushPort).valid} ${wb_arb.io.in(FlushPort).ready}) wb_resp:${wb_resp}\n")
 
   // write back unit
   // ---------------------------------------------------------------

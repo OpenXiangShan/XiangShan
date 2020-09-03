@@ -78,7 +78,7 @@ object Compare {
 class TlbEntry extends TlbBundle {
   val vpn = UInt(vpnLen.W) // tag is vpn
   val ppn = UInt(ppnLen.W)
-  val level = UInt(log2Up(Level).W) // 0 for 4KB, 1 for 2MB, 2 for 1GB
+  val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
   // val asid = UInt(asidLen.W), asid maybe expensive to support, but useless
   // val v = Bool() // v&g is special, may need sperate storage?
   val perm = new PermBundle(hasV = false)
@@ -86,7 +86,7 @@ class TlbEntry extends TlbBundle {
   def vpnHit(vpn: UInt):Bool = {
     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
     val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
-      VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt})
+      Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
     val mask = maskLevel(level)
     (mask&this.vpn) === (mask&vpn)
   }
@@ -159,6 +159,11 @@ class TlbRequestIO() extends TlbBundle {
   val resp = Flipped(Valid(new TlbResp))
 
   // override def cloneType: this.type = (new TlbRequestIO(Width)).asInstanceOf[this.type]
+}
+
+class BlockTlbRequestIO() extends TlbBundle {
+  val req = DecoupledIO(new TlbReq)
+  val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
 class TlbPtwIO extends TlbBundle {
@@ -253,7 +258,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   switch (state) {
     is (state_idle) {
-      when (ParallelOR(miss).asBool) {
+      when (ParallelOR(miss).asBool && ptw.req.fire()) {
         state := state_wait
       }
       assert(!ptw.resp.valid)
@@ -324,7 +329,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
   }
 
-  if (!env.FPGAPlatform) {
+  if (!env.FPGAPlatform && isDtlb) {
     ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntDtlbReqCnt0", Perf)
     ExcitingUtils.addSource(valid(1)/* && vmEnable*/, "perfCntDtlbReqCnt1", Perf)
     ExcitingUtils.addSource(valid(2)/* && vmEnable*/, "perfCntDtlbReqCnt2", Perf)
@@ -333,6 +338,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && miss(1), "perfCntDtlbMissCnt1", Perf)
     ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && miss(2), "perfCntDtlbMissCnt2", Perf)
     ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && miss(3), "perfCntDtlbMissCnt3", Perf)
+  }
+
+  if (!env.FPGAPlatform && !isDtlb) {
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntItlbReqCnt0", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntItlbMissCnt0", Perf)
   }
 
   // Log
@@ -372,4 +382,39 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
   
   assert((v&pf)===0.U, "v and pf can't be true at same time: v:0x%x pf:0x%x", v, pf)
+}
+
+object TLB {
+  def apply(in: Seq[BlockTlbRequestIO], width: Int, isDtlb: Boolean, shouldBlock: Boolean) = {
+    require(in.length == width)
+    
+    val tlb = Module(new TLB(width, isDtlb))
+    
+    if (!shouldBlock) { // dtlb
+      for (i <- 0 until width) {
+        tlb.io.requestor(i).req.valid := in(i).req.valid
+        tlb.io.requestor(i).req.bits := in(i).req.bits
+        in(i).req.ready := DontCare
+
+        in(i).resp.valid := tlb.io.requestor(i).resp.valid
+        in(i).resp.bits := tlb.io.requestor(i).resp.bits
+      }
+    } else { // itlb
+      require(width == 1)
+      tlb.io.requestor(0).req.valid := in(0).req.valid
+      tlb.io.requestor(0).req.bits := in(0).req.bits
+      in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready
+
+      // val pf = LookupTree(tlb.io.requestor(0).req.bits.cmd, List(
+      //   TlbCmd.read -> tlb.io.requestor(0).resp.bits.excp.pf.ld,
+      //   TlbCmd.write -> tlb.io.requestor(0).resp.bits.excp.pf.st,
+      //   TlbCmd.exec -> tlb.io.requestor(0).resp.bits.excp.pf.instr
+      // ))
+
+      in(0).resp.valid := tlb.io.requestor(0).resp.valid && !tlb.io.requestor(0).resp.bits.miss
+      in(0).resp.bits := tlb.io.requestor(0).resp.bits
+    }
+
+    tlb.io.ptw
+  }
 }

@@ -40,7 +40,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   val cacheParams = icacheParameters
 
   // the width of inner CPU data interface
-  override  def tagBits = VAddrBits - untagBits
+  // override  def tagBits = VAddrBits - untagBits
   def wordBits = DataBits
   def wordBytes = DataBytes
   def wordOffBits = log2Up(wordBytes)
@@ -68,7 +68,8 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
   
   val groupAlign = log2Up(FetchWidth * 4 * 2)
-  def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  // def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   // To make things easier, now we assume:
@@ -113,6 +114,7 @@ class ICacheResp extends ICacheBundle
   val pc = UInt(VAddrBits.W)
   val data = UInt((FetchWidth * 32).W)
   val mask = UInt(PredictWidth.W)
+  val ipf = Bool()
 }
 
 
@@ -120,6 +122,7 @@ class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
+  val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
 }
 
@@ -207,8 +210,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //----------------------------
   //    Stage 2
   //----------------------------
-  val s2_tag = get_tag(s2_req_pc)
   val s2_idx = get_idx(s2_req_pc)
+  val s2_tlb_resp = WireInit(io.tlb.resp.bits)
+  val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
   s2_fire := s2_valid && s3_ready && !io.flush(0)
   when(io.flush(0)) {s2_valid := s1_fire}
@@ -229,10 +233,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
  
-  s2_hit := ParallelOR(hitVec)
+  s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
+  XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}")
+  XSDebug(p"[Stage 2] tlb resp: v ${io.tlb.resp.valid} r ${io.tlb.resp.ready} ${s2_tlb_resp}")
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
   XSDebug("[Stage 2] validMeta: %b  victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b \n",validMeta,victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
   
@@ -240,7 +246,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //----------------------------
   //    Stage 3
   //----------------------------
+  val s3_tlb_resp = RegEnable(next = s2_tlb_resp, init = 0.U.asTypeOf(new TlbResp), enable = s2_fire)
   val s3_data = datas
+  val s3_tag = RegEnable(s2_tag, s2_fire)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
@@ -350,11 +358,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   s3_ready := ((io.resp.fire() || !s3_valid) && !waitForRefillDone) || (waitForRefillDone && state === s_wait_resp)
 
   //TODO: coherence
-  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b \n",s3_valid,s3_req_pc,s3_req_mask)
+  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x \n",s3_hit,s3_miss,s3_wayMask.asUInt)
   XSDebug("[Stage 3] state: %d\n",state)
   XSDebug("[Stage 3] needflush:%d, refilldone:%d",needFlush,refill_done)
-  XSDebug("[Stage 3] tag: %x    idx: %d\n",get_tag(s3_req_pc),get_idx(s3_req_pc))
+  XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
+  XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}")
   XSDebug("[Chanel A] valid:%d  ready:%d\n",bus.a.valid,bus.a.ready)
   XSDebug("[Chanel D] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",bus.d.valid,bus.d.ready,bus.d.bits.data,readBeatCnt.value)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
@@ -371,14 +380,24 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
+  io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
 
+  io.tlb.resp.ready := s3_ready
+  io.tlb.req.valid := s2_valid
+  io.tlb.req.bits.vaddr := s2_req_pc
+  io.tlb.req.bits.cmd := TlbCmd.exec
+  io.tlb.req.bits.roqIdx := DontCare
+  io.tlb.req.bits.debug.pc := s2_req_pc
+  io.tlb.req.bits.debug.lsroqIdx := DontCare
+  
   bus.b.ready := true.B
   bus.c.valid := false.B
   bus.e.valid := false.B
   bus.a.valid := (state === s_memReadReq)
   bus.a.bits  := edge.Get(
     fromSource      = cacheID.U,
-    toAddress       = groupPC(s3_req_pc),
+    // toAddress       = groupPC(s3_req_pc),
+    toAddress       = groupPC(s3_tlb_resp.paddr),
     lgSize          = (log2Up(cacheParams.blockBytes)).U)._2 
 
   bus.d.ready := true.B

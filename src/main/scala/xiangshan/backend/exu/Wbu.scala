@@ -104,10 +104,10 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
     }
   } else {
     val directReq = wbIntReq.filter(w => Seq(Exu.ldExeUnitCfg, Exu.aluExeUnitCfg).contains(w._2))
-    val mulReq = wbIntReq.filter(w => Seq(Exu.mulExeUnitCfg, Exu.mulDivExeUnitCfg).contains(w._2))
+    val mulReq = wbIntReq.filter(w => Seq(Exu.mulExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulDivFenceExeUnitCfg).contains(w._2))
     val otherReq = splitN(
       wbIntReq.filterNot(w => Seq(
-        Exu.ldExeUnitCfg, Exu.aluExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulExeUnitCfg
+        Exu.ldExeUnitCfg, Exu.aluExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulExeUnitCfg, Exu.mulDivFenceExeUnitCfg
       ).contains(w._2)),
       mulReq.size
     )

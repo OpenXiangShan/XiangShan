@@ -9,7 +9,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{ICache,DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
@@ -248,12 +248,13 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   front.io.backend <> backend.io.frontend
   front.io.icacheResp <> icache.io.resp
+  front.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
   mem.io.backend   <> backend.io.mem
 
   ptw.io.tlb(0) <> mem.io.ptw
-  ptw.io.tlb(1) <> DontCare
+  ptw.io.tlb(1) <> front.io.ptw
 
   dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec
   dcache.io.lsu.lsroq <> mem.io.miscToDcache
