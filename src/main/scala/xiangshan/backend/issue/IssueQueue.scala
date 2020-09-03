@@ -99,10 +99,12 @@ class IssueQueue
     v && isSameType && (src===uop.pdest)
   }
 
+  //TODO: opt this, do bypass select in 'select' stage not 'issue' stage
+  val bypassData = RegNext(io.bypassData)
   def doBypass(src: UInt, srcType: UInt): (Bool, UInt) = {
-    val hitVec = io.bypassData.map(p => (p.valid, p.bits.uop)).
+    val hitVec = bypassData.map(p => (p.valid, p.bits.uop)).
       map(wbUop => writeBackHit(src, srcType, wbUop))
-    val data = ParallelMux(hitVec.zip(io.bypassData.map(_.bits.data)))
+    val data = ParallelMux(hitVec.zip(bypassData.map(_.bits.data)))
     (ParallelOR(hitVec).asBool(), data)
   }
 
@@ -136,13 +138,17 @@ class IssueQueue
     }
   }
 
+
+  // 1. wake up
   for(i <- 0 until qsize){
-    val newUop = wakeUp(uopQueue(i))
-    uopQueue(i) := newUop
-    readyVec(i) := uopIsRdy(newUop)
+    uopQueue(i) := wakeUp(uopQueue(i))
   }
 
-  // select
+  // 2. select
+  for(i <- 0 until qsize){
+    readyVec(i) := uopIsRdy(uopQueue(i))
+  }
+
   val selectedIdxRegOH = Wire(UInt(qsize.W))
   val selectMask = WireInit(VecInit(
     (0 until qsize).map(i =>
@@ -178,7 +184,7 @@ class IssueQueue
   }
 
   // (fake) deq to Load/Store unit
-  io.deq.valid := (stateQueue(selectedIdxReg)===s_valid) && readyVec(idxQueue(selectedIdxReg)) && selReg
+  io.deq.valid := (stateQueue(selectedIdxReg)===s_valid) && selReg
   io.deq.bits.uop := uopQueue(idxQueue(selectedIdxReg))
 
   val src1Bypass = doBypass(io.deq.bits.uop.psrc1, io.deq.bits.uop.ctrl.src1Type)
