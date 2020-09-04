@@ -215,7 +215,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s2_tlb_resp = WireInit(io.tlb.resp.bits)
   val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
-  s2_fire := s2_valid && s3_ready && !io.flush(0)
+  s2_fire := s2_valid && s3_ready && !io.flush(0) && io.tlb.resp.fire()
   when(io.flush(0)) {s2_valid := s1_fire}
   .elsewhen(s1_fire) { s2_valid := s1_valid}
   .elsewhen(s2_fire) { s2_valid := false.B}
@@ -257,23 +257,25 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
 
+  def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
+    val sourceVec_16bit = Wire(Vec(cacheDataBeats * 4,UInt(RVCInsLen.W)))
+    (0 until cacheDataBeats).foreach{ i =>
+      (0 until 4).foreach{ j =>
+        sourceVec_16bit(i*4 + j) := sourceVec(i)(j*16+15, j*16)
+      }
+    }
+    val cutPacket = WireInit(VecInit(Seq.fill(cacheDataBeats * 2){0.U(RVCInsLen.W)}))
+    (0 until cacheDataBeats * 2).foreach{ i =>
+      cutPacket(i) := Mux(mask(i).asBool,sourceVec_16bit(startPtr + i.U),0.U)
+    }
+    cutPacket.asUInt
+  }
+
   //icache hit 
   //val allInBlock = s3_req_mask.andR
   val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
-  val dataHitWay_16bit = Wire(Vec(cacheDataBeats * 4,UInt(RVCInsLen.W)))
-  (0 until cacheDataBeats).foreach{ i =>
-    (0 until 4).foreach{ j =>
-      dataHitWay_16bit(i*4 + j) := dataHitWay(i)(j*16+15, j*16)
-    }
-  }
-  val startPtr = s3_req_pc(5,1)
-  val cutPacket = WireInit(VecInit(Seq.fill(cacheDataBeats * 2){0.U(RVCInsLen.W)}))
-  (0 until cacheDataBeats * 2).foreach{ i =>
-    cutPacket(i) := Mux(s3_req_mask(i).asBool,dataHitWay_16bit(startPtr + i.U),0.U)
-  }
-  //val dataHitWayUInt = (Cat((dataHitWay.map(w => w)).reverse)).asUInt //TODO: this is ugly
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
-  outPacket := cutPacket.asUInt  //TODO: this is ugly
+  outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
 
   //icache miss
   val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
@@ -346,7 +348,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   when(icacheFlush){ validArray := 0.U }
 
-  val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
+  //val refillDataOut = refillDataReg.asUInt >> (s3_req_pc(5,1) << 4)
+  val refillDataVec = refillDataReg.asTypeOf(Vec(cacheDataBeats,UInt(cacheDataBits.W)))
+  val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
   for(b <- 0 until cacheDataBeats){
     val writeOneBeat = (state === s_memReadResp) && bus.d.fire() && (b.U === readBeatCnt.value)
     dataArray(b).io.w.req.valid := writeOneBeat

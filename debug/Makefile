@@ -3,7 +3,7 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= 0
+E ?= -1
 V ?= ALL
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
@@ -17,7 +17,7 @@ cache:
 	#2>&1 | tee > loader.log
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 | tee > dummy.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=goldbach $(EMU_ARGS) run 2>&1 | tee > goldbach.log
 
 # ------------------------------------------------------------------
 # run different test sets
