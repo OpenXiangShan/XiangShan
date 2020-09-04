@@ -113,16 +113,40 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
       req.cmd := MemoryOpConstants.M_XRD
       req.addr := addr
       req.data := DontCare
-      req.mask := DontCare
+      req.mask := Fill(req.mask.getWidth, true.B)
       req.meta := DontCare
       req
     }
 
-    val s_idle :: s_write :: s_read :: s_finish :: Nil = Enum(4)
+    val s_idle :: s_write_req :: s_write_resp :: s_read_req :: s_read_resp :: s_finish :: Nil = Enum(6)
     val state = RegInit(s_idle)
 
-    when(io.in.fire()){
-      state := s_write
+    switch(state){
+      is(s_idle){
+        when(io.in.fire()){
+          state := s_write_req
+        }
+      }
+      is(s_write_req){
+        when(storePorts.map(_.req.fire()).reduce(_||_)){
+          state := s_write_resp
+        }
+      }
+      is(s_write_resp){
+        when(storePorts.map(_.resp.fire()).reduce(_||_)){
+          state := s_read_req
+        }
+      }
+      is(s_read_req){
+        when(loadPorts.map(_.req.fire()).reduce(_||_)){
+          state := s_read_resp
+        }
+      }
+      is(s_read_resp){
+        when(loadPorts.map(_.resp.fire()).reduce(_||_)){
+          state := s_finish
+        }
+      }
     }
 
     io.in.ready := state === s_idle
@@ -134,7 +158,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
     storePorts.zipWithIndex.foreach{
       case (port, i) =>
         port.req.bits := storeReq
-        port.req.valid := state===s_write && i.U===in.hartId
+        port.req.valid := state===s_write_req && i.U===in.hartId
         port.resp.ready := true.B
         XSDebug(
           port.req.fire(),
@@ -146,16 +170,12 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
     XSDebug(p"state: $state\n")
 
-    when(storePorts.map(_.resp.fire()).reduce(_||_)){
-      state := s_read // write finish, goto read this from another core
-    }
-
     val loadReq = sendLoadReq(in.waddr)
 
     loadPorts.zipWithIndex.foreach{
       case (port, i) =>
         port.req.bits := loadReq
-        port.req.valid := state===s_read && i.U=/=in.hartId
+        port.req.valid := state===s_read_req && i.U=/=in.hartId
         port.resp.ready := true.B
         XSDebug(
           port.resp.fire(),
@@ -218,7 +238,7 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
 
         for(i <- 0 until 100){
           val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
-          val data = Random.nextLong() & 0x7fffffff
+          val data = Random.nextLong() & 0x7fffffffffffffffL
           c.io.in.enqueue(chiselTypeOf(c.io.in.bits).Lit(
             _.waddr -> addr.U,
             _.wdata -> data.U,
