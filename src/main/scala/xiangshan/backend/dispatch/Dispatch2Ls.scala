@@ -111,4 +111,7 @@ class Dispatch2Ls extends XSModule {
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index $i\n")
   }
+
+  XSPerf("utilization", PopCount(io.fromDq.map(_.valid)))
+  XSPerf("waitInstr", PopCount(io.fromDq.map(r => r.valid && !r.ready)))
 }

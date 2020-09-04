@@ -108,11 +108,6 @@ class Dispatch extends XSModule {
   }
   lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
 
-  if (!env.FPGAPlatform) {
-    val inWalk = intDq.io.inReplayWalk || fpDq.io.inReplayWalk || lsDq.io.inReplayWalk
-    ExcitingUtils.addSource(inWalk, "perfCntCondDpqReplay", Perf)
-  }
-
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)
   intDispatch.io.fromDq <> intDq.io.deq
@@ -146,4 +141,7 @@ class Dispatch extends XSModule {
   lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+
+  val inWalk = intDq.io.inReplayWalk || fpDq.io.inReplayWalk || lsDq.io.inReplayWalk
+  XSPerf("replayWalkCycle", inWalk)
 }

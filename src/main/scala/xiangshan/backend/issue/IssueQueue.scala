@@ -2,7 +2,7 @@ package xiangshan.backend.issue
 
 import chisel3.{util, _}
 import chisel3.util._
-import utils.{ParallelMux, ParallelOR, PriorityEncoderWithFlag, XSDebug, XSInfo}
+import utils.{ParallelMux, ParallelOR, PriorityEncoderWithFlag, XSDebug, XSInfo, XSPerf}
 import xiangshan._
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
@@ -293,4 +293,6 @@ class IssueQueue
       p"imm : ${Hexadecimal(io.deq.bits.uop.ctrl.imm)}\npdest: ${io.deq.bits.uop.pdest}\n"
   )
   XSDebug(p"tailPtr:$tailPtr tailAfterDeq:$tailAfterRealDeq tlbHit:$tlbHit\n")
+
+  XSPerf("utilization", tailPtr)
 }

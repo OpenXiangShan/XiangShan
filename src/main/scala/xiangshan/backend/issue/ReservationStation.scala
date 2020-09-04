@@ -418,4 +418,6 @@ class ReservationStation
       )
     }
   }
+
+  XSPerf("utilization", tailAll)
 }

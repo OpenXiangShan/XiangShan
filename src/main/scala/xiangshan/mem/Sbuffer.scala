@@ -370,6 +370,8 @@ class Sbuffer extends XSModule with HasSBufferConst {
   cache.zipWithIndex.foreach { case (line, i) => {
     XSDebug(line.valid, "[#%d line] Tag: %x, data: %x, mask: %x\n", i.U, line.tag, line.data.asUInt(), line.mask.asUInt())
   }}
+
+  XSPerf("waitResp", waitingCacheLine.valid)
 }
 
 // Fake Store buffer for XiangShan Out of Order LSU

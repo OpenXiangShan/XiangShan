@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.ExcitingUtils._
 import xiangshan._
-import utils.{XSDebug, XSError, XSInfo}
+import utils.{XSDebug, XSError, XSInfo, XSPerf}
 
 // read rob and enqueue
 class Dispatch1 extends XSModule {
@@ -47,11 +47,6 @@ class Dispatch1 extends XSModule {
   intIndex.io.priority := DontCare
   fpIndex.io.priority  := DontCare
   lsIndex.io.priority  := DontCare
-
-  if (!env.FPGAPlatform) {
-    val dispatchNotEmpty = Cat(io.fromRename.map(_.valid)).orR
-    ExcitingUtils.addSource(!dispatchNotEmpty, "perfCntCondDp1Empty", Perf)
-  }
 
   /**
     * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes
@@ -161,4 +156,7 @@ class Dispatch1 extends XSModule {
   val renameFireCnt = PopCount(io.recv)
   val enqFireCnt = PopCount(io.toIntDq.map(_.fire)) + PopCount(io.toFpDq.map(_.fire)) + PopCount(io.toLsDq.map(_.fire))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
+
+  XSPerf("utilization", PopCount(io.fromRename.map(_.valid)))
+  XSPerf("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
 }

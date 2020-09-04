@@ -2,7 +2,7 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, XSError, XSInfo}
+import utils.{XSDebug, XSError, XSInfo, XSPerf}
 import xiangshan.backend.decode.SrcType
 import xiangshan.{MicroOp, Redirect, ReplayPregReq, RoqCommit, XSBundle, XSModule}
 
@@ -315,4 +315,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   XSError(!greaterOrEqualThan(tailPtr, dispatchPtr) && !inReplayWalk, p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
   XSError(!greaterOrEqualThan(dispatchPtr, headPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
   XSError(validEntries < dispatchEntries && !inReplayWalk, "validEntries should be less than dispatchEntries\n")
+
+  XSPerf("utilization", PopCount(stateEntries.map(_ =/= s_invalid)))
+  XSPerf("replayInstr", PopCount(io.replayPregReq.map(replay => replay.isInt || replay.isFp)))
 }

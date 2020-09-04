@@ -683,4 +683,8 @@ class Lsroq extends XSModule {
     if (i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
+  XSPerf("utilization", PopCount(allocated))
+  XSPerf("storeWait", PopCount((0 until LsroqSize).map(i => allocated(i) && store(i) && commited(i))))
+  XSPerf("enqInstr", PopCount(io.dp1Req.map(_.fire())))
+  XSPerf("replayInstr", Mux(io.brqRedirect.valid && io.brqRedirect.bits.isReplay, PopCount(needCancel), 0.U))
 }

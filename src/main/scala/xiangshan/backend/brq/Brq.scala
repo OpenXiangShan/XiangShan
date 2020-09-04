@@ -308,4 +308,18 @@ class Brq extends XSModule {
     ExcitingUtils.addSource(mbpRRight, "perfCntCondMbpRRight", Perf)
     ExcitingUtils.addSource(mbpRWrong, "perfCntCondMbpRWrong", Perf)
   }
+
+  val utilization = Mux(headPtr.flag === tailPtr.flag, tailPtr.value - headPtr.value, BrqSize.U + tailPtr.value - headPtr.value)
+  XSPerf("utilization", utilization)
+  XSPerf("mbpInstr", PopCount(mbpInstr))
+  XSPerf("mbpRight", PopCount(mbpRight))
+  XSPerf("mbpWrong", PopCount(mbpWrong))
+  XSPerf("mbpBRight", PopCount(mbpBRight))
+  XSPerf("mbpBWrong", PopCount(mbpBWrong))
+  XSPerf("mbpJRight", PopCount(mbpJRight))
+  XSPerf("mbpJWrong", PopCount(mbpJWrong))
+  XSPerf("mbpIRight", PopCount(mbpIRight))
+  XSPerf("mbpIWrong", PopCount(mbpIWrong))
+  XSPerf("mbpRRight", PopCount(mbpRRight))
+  XSPerf("mbpRWrong", PopCount(mbpRWrong))
 }
