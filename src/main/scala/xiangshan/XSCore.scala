@@ -45,15 +45,15 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
-  BrqSize: Int = 16,
+  BrqSize: Int = 32,
   IssQueSize: Int = 8,
   NRPhyRegs: Int = 128,
   NRIntReadPorts: Int = 8,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  LsroqSize: Int = 16,
-  RoqSize: Int = 32,
+  LsroqSize: Int = 64,
+  RoqSize: Int = 128,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
     IntDqSize = 64,
@@ -194,7 +194,8 @@ abstract class XSBundle extends Bundle
 case class EnviromentParameters
 (
   FPGAPlatform: Boolean = true,
-  EnableDebug: Boolean = false
+  EnableDebug: Boolean = false,
+  EnablePerfDebug: Boolean = true
 )
 
 object AddressSpace extends HasXSParameter {
