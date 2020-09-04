@@ -108,6 +108,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
   val metaArray = Module(new DuplicatedMetaArray)
+  dataArray.dump()
+  metaArray.dump()
 
 
   //----------------------------------------
