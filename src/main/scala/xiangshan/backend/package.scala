@@ -97,6 +97,8 @@ package object backend {
 
     def isDivSign(op: UInt) = isDiv(op) && !op(1)
     def isW(op: UInt) = op(2)
+    def isH(op: UInt) = (isDiv(op) && op(0)) || (isMul(op) && op(1,0)=/=0.U)
+    def getMulOp(op: UInt) = op(1,0)
   }
 
   object LSUOpType {

@@ -48,4 +48,6 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   io.out.bits.redirect <> DontCare
   io.out.bits.redirectValid := false.B
   io.out.bits.debug <> DontCare
+
+  XSDebug(valid || state=/=s_resp, p"In(${io.in.valid} ${io.in.ready}) Out(${io.out.valid} ${io.out.ready}) sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence} Inpc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} InroqIdx:${io.in.bits.uop.roqIdx} Outpc:0x${Hexadecimal(io.out.bits.uop.cf.pc)} OutroqIdx:${io.out.bits.uop.roqIdx}\n")
 }
