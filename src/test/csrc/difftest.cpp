@@ -158,7 +158,9 @@ int difftest_step(DiffState *s) {
         ref_difftest_getregs(&ref_r);
         ref_r[DIFFTEST_THIS_PC] += selectBit(s->isRVC, i) ? 2 : 4;
         if(selectBit(s->wen, i)){
-          ref_r[s->wdst[i]] = s->wdata[i];
+          if(s->wdst[i] != 0){
+            ref_r[s->wdst[i]] = s->wdata[i];
+          }
         }
         ref_difftest_setregs(ref_r);
       }else{
