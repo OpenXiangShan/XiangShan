@@ -38,6 +38,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.redirect.brTag := uop.brTag
   csrExuOut.redirect.isException := false.B
   csrExuOut.redirect.isMisPred := false.B
+  csrExuOut.redirect.isFlushPipe := false.B
   csrExuOut.redirect.isReplay := false.B
   csrExuOut.redirect.roqIdx := uop.roqIdx
   csrExuOut.redirect.target := csr.io.redirect.target

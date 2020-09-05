@@ -59,6 +59,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.isMisPred := DontCare // check this in brq
+  io.out.bits.redirect.isFlushPipe := false.B
   io.out.bits.redirect.isReplay := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
 
@@ -77,13 +78,14 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.data := aluRes
 
   XSDebug(io.in.valid,
-    "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:f:%d v:%d\n",
+    "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",
     io.in.valid,
     io.in.ready,
     io.out.valid,
     io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     redirectHit,
     io.redirect.bits.brTag.flag,
     io.redirect.bits.brTag.value

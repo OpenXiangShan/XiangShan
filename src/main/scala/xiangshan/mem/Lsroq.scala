@@ -542,6 +542,7 @@ class Lsroq extends XSModule {
       rollback(i).bits.isReplay := true.B
       rollback(i).bits.isMisPred := false.B
       rollback(i).bits.isException := false.B
+      rollback(i).bits.isFlushPipe := false.B
 
       XSDebug(
         lsroqViolation,

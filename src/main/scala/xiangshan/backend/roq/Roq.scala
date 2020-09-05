@@ -114,14 +114,16 @@ class Roq extends XSModule {
   val deqUop = microOp(deqPtr)
   val intrEnable = intrBitSet && (state === s_idle) && !isEmpty && !hasCsr
   val exceptionEnable = Cat(deqUop.cf.exceptionVec).orR() && (state === s_idle) && !isEmpty
-
+  // TODO: need check if writebacked needed
   val isEcall = deqUop.cf.exceptionVec(ecallM) ||
     deqUop.cf.exceptionVec(ecallS) ||
     deqUop.cf.exceptionVec(ecallU)
+  val isFlushPipe = (deqUop.ctrl.flushPipe && writebacked(deqPtr))
   io.redirect := DontCare
-  io.redirect.valid := intrEnable || exceptionEnable // TODO: add fence flush to flush the whol pipe
-  io.redirect.bits.isException := true.B
-  io.redirect.bits.target := trapTarget
+  io.redirect.valid := intrEnable || exceptionEnable || isFlushPipe// TODO: add fence flush to flush the whole pipe
+  io.redirect.bits.isException := intrEnable || exceptionEnable
+  io.redirect.bits.isFlushPipe := isFlushPipe
+  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, trapTarget)
   io.exception := deqUop
   XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x exceptionVec %b\n", io.exception.cf.pc, trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
 
@@ -153,7 +155,7 @@ class Roq extends XSModule {
         val commitIdx = deqPtr + i.U
         val commitUop = microOp(commitIdx)
         val hasException = Cat(commitUop.cf.exceptionVec).orR() || intrEnable
-        val canCommit = if(i!=0) io.commits(i-1).valid else true.B
+        val canCommit = if(i!=0) (io.commits(i-1).valid && io.commits(i-1).bits.uop.ctrl.flushPipe) else true.B
         val v = valid(commitIdx)
         val w = writebacked(commitIdx)
         io.commits(i).valid := v && w && canCommit && !hasException
@@ -235,7 +237,7 @@ class Roq extends XSModule {
   io.bcommit := PopCount(cfiCommitVec)
 
   // when redirect, walk back roq entries
-  when(io.brqRedirect.valid){
+  when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk
     walkPtrExt := Mux(state === s_walk && !walkFinished, walkPtrExt - CommitWidth.U, Mux(state === s_extrawalk, walkPtrExt, enqPtrExt - 1.U + dispatchCnt))
     walkTgtExt := io.brqRedirect.bits.roqIdx

@@ -181,7 +181,7 @@
 //  rdata := dataBackVec.asUInt
 //
 //  val expRedirect = io.redirect.valid && io.redirect.bits.isException
-//  val brRedirect = io.redirect.valid && !io.redirect.bits.isException
+//  val brRedirect = io.redirect.valid && io.redirect.bits.isMisPred
 //  for(i <- 0 until 8){
 //    when((i.U >= stqCommited && i.U < stqHead) && (expRedirect || brRedirect && stqData(stqPtr(i)).brTag.needBrFlush(io.redirect.bits.brTag) && stqValid(stqPtr(i)))){
 //      stqValid(stqPtr(i)) := false.B

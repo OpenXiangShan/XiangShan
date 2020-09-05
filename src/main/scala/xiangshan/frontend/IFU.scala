@@ -285,8 +285,8 @@ class IFU extends XSModule with HasIFUConst
   XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
   XSDebug(io.icacheFlush(0).asBool, "Flush icache stage2...\n")
   XSDebug(io.icacheFlush(1).asBool, "Flush icache stage3...\n")
-  XSDebug(io.redirect.valid, "Redirect from backend! isExcp=%d isMisPred=%d isReplay=%d pc=%x\n",
-    io.redirect.bits.isException, io.redirect.bits.isMisPred, io.redirect.bits.isReplay, io.redirect.bits.pc)
+  XSDebug(io.redirect.valid, "Redirect from backend! isExcp=%d isFpp:%d isMisPred=%d isReplay=%d pc=%x\n",
+    io.redirect.bits.isException, io.redirect.bits.isFlushPipe, io.redirect.bits.isMisPred, io.redirect.bits.isReplay, io.redirect.bits.pc)
   XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits.target)} brTag=${io.redirect.bits.brTag}\n")
 
   XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x ptr=%d mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, ptr, mask(if1_npc))

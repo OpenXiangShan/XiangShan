@@ -51,11 +51,12 @@ class MulExeUnit extends Exu(Exu.mulExeUnitCfg){
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
 
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d) brTag:%x\n",
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid, io.in.ready,
     io.out.valid, io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
   XSDebug(io.in.valid, "src1:%x src2:%x pc:%x\n", src1, src2, io.in.bits.uop.cf.pc)
