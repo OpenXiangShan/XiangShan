@@ -18,13 +18,17 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   // Misc Memory Accsess FSM
   //-------------------------------------------------------
   
-  val s_tlb :: s_cache_req :: s_cache_resp :: Nil = Enum(3)
+  val s_tlb :: s_cache_req :: s_cache_resp :: s_exception :: Nil = Enum(4)
   val state = RegInit(s_tlb)
+  val hasException = WireInit(false.B)
 
   switch (state) {
     is (s_tlb) {
-      when(io.in.valid && io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
+      when(io.in.valid && io.dtlb.resp.valid && !io.dtlb.resp.bits.miss && !hasException){
         state := s_cache_req
+      }
+      when(io.in.valid && io.dtlb.resp.valid && hasException){
+        state := s_exception
       }
     }
     is (s_cache_req) {
@@ -37,6 +41,9 @@ class MiscUnit extends XSModule with MemoryOpConstants{
         state := s_tlb
       }
     }
+    is (s_exception) {
+      state := s_tlb
+    }
   }
 
   // TLB   
@@ -48,13 +55,23 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   io.dtlb.req.bits.cmd   := Mux(io.in.bits.uop.ctrl.fuOpType === LSUOpType.lr, TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.debug.pc := io.in.bits.uop.cf.pc
   io.dtlb.req.bits.debug.lsroqIdx := io.in.bits.uop.lsroqIdx
-  // TODO: add excp logic of dtlb.resp.bits.excp.pf
+
+  // exception check
+  val addrAligned = io.in.bits.src1(1, 0) === 0.U
+  // Zam extension is not supported yet
+  val exceptionVec = WireInit(VecInit(0.U(16.W).asBools))
+  exceptionVec(loadAddrMisaligned) := !addrAligned && io.in.bits.uop.ctrl.fuOpType === LSUOpType.lr
+  exceptionVec(storeAddrMisaligned) := !addrAligned && io.in.bits.uop.ctrl.fuOpType =/= LSUOpType.lr
+  exceptionVec(loadPageFault) := io.dtlb.resp.bits.excp.pf.ld
+  exceptionVec(storePageFault) := io.dtlb.resp.bits.excp.pf.st
+  hasException := exceptionVec.asUInt.orR
 
   // record paddr
   val paddr = RegEnable(io.dtlb.resp.bits.paddr, io.in.fire())
   val func  = RegEnable(io.in.bits.uop.ctrl.fuOpType, io.in.fire())
   val src2  = RegEnable(io.in.bits.src2, io.in.fire())
   val uop  = RegEnable(io.in.bits.uop, io.in.fire())
+  val exceptionVecReg = RegEnable(exceptionVec, io.dtlb.resp.valid)
   
   // DCache
   // send result to dcache
@@ -94,10 +111,11 @@ class MiscUnit extends XSModule with MemoryOpConstants{
   io.out.bits.redirect := DontCare
   io.out.bits.brUpdate := DontCare
   io.out.bits.debug.isMMIO := AddressSpace.isMMIO(paddr)
+  io.out.bits.uop.cf.exceptionVec := exceptionVecReg
   XSDebug(io.out.fire(), "misc writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
   
-  io.in.ready := state === s_tlb && io.dtlb.resp.fire() && !io.dtlb.resp.bits.miss
-  io.out.valid := io.dcache.resp.fire() && io.dcache.resp.bits.meta.id === DCacheMiscType.misc
+  io.in.ready := state === s_tlb && io.dtlb.resp.fire() && (!io.dtlb.resp.bits.miss || hasException)
+  io.out.valid := io.dcache.resp.fire() && io.dcache.resp.bits.meta.id === DCacheMiscType.misc || state === s_exception
 
   // TODO: distinguish L/S/A inst, A inst should not be sent into lsroq
 }
