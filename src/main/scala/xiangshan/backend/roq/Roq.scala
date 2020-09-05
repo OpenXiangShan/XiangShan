@@ -93,7 +93,7 @@ class Roq extends XSModule {
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
       val debugUop = microOp(wbIdx)
-      XSInfo(true.B, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x roqIdx: %x\n",
+      XSInfo(true.B, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x roqIdx: %d\n",
         debugUop.cf.pc,
         debugUop.ctrl.rfWen,
         io.exeWbResults(i).bits.data,
@@ -155,7 +155,7 @@ class Roq extends XSModule {
         val commitIdx = deqPtr + i.U
         val commitUop = microOp(commitIdx)
         val hasException = Cat(commitUop.cf.exceptionVec).orR() || intrEnable
-        val canCommit = if(i!=0) (io.commits(i-1).valid && io.commits(i-1).bits.uop.ctrl.flushPipe) else true.B
+        val canCommit = if(i!=0) (io.commits(i-1).valid && !io.commits(i-1).bits.uop.ctrl.flushPipe) else true.B
         val v = valid(commitIdx)
         val w = writebacked(commitIdx)
         io.commits(i).valid := v && w && canCommit && !hasException
