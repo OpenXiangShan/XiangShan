@@ -118,7 +118,7 @@ class Roq extends XSModule {
   val isEcall = deqUop.cf.exceptionVec(ecallM) ||
     deqUop.cf.exceptionVec(ecallS) ||
     deqUop.cf.exceptionVec(ecallU)
-  val isFlushPipe = (deqUop.ctrl.flushPipe && writebacked(deqPtr))
+  val isFlushPipe = (deqUop.ctrl.flushPipe && writebacked(deqPtr) && valid(deqPtr) && (state === s_idle) && !isEmpty)
   io.redirect := DontCare
   io.redirect.valid := intrEnable || exceptionEnable || isFlushPipe// TODO: add fence flush to flush the whole pipe
   io.redirect.bits.isException := intrEnable || exceptionEnable
@@ -264,7 +264,7 @@ class Roq extends XSModule {
   }
 
   // when exception occurs, cancels all
-  when (io.redirect.valid) {
+  when (io.redirect.valid) { // TODO: need check for flushPipe
     enqPtrExt := 0.U
     deqPtrExt := 0.U
     for (i <- 0 until RoqSize) {
