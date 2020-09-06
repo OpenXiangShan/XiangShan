@@ -21,7 +21,7 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   val sbEmpty = WireInit(false.B)
   BoringUtils.addSource(sbuffer, "FenceUnitSbufferFlush")
   BoringUtils.addSource(sfence, "SfenceBundle")
-  // BoringUtils.addSource(fencei,  "FenceI") // TODO: uncomment it when merge icache
+  BoringUtils.addSource(fencei,  "FenceI")
   BoringUtils.addSink(sbEmpty, "SBufferEmpty")
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := valid && state === s_req && !sbEmpty
