@@ -20,8 +20,8 @@ object Privileged extends HasInstrType {
     ECALL          -> List(InstrI, FuType.csr, CSROpType.jmp),
     MRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
     SRET           -> List(InstrI, FuType.csr, CSROpType.jmp),
-    SFANCE_VMA     -> List(InstrI, FuType.fence, MDUOpType.sfence), // NOTE: Ignore Src2, no need for asid
-    FENCE          -> List(InstrU, FuType.fence, MDUOpType.fence)
+    SFANCE_VMA     -> List(InstrI, FuType.fence, FenceOpType.sfence), // NOTE: Ignore Src2, no need for asid
+    FENCE          -> List(InstrU, FuType.fence, FenceOpType.fence)
 //    FENCE          -> List(InstrS, FuType.alu, ALUOpType.add), // nop    InstrS -> !wen
 //    WFI            -> List(InstrI, FuType.alu, ALUOpType.add) // nop
     // FENCE          -> List(InstrB, FuType.mou, MOUOpType.fencei)

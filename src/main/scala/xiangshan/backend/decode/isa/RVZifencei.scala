@@ -13,6 +13,6 @@ object RVZifenceiInstr extends HasInstrType {
 
   // fixme: add rvzifencei inst
   val table = Array(
-    FENCEI -> List(InstrU, FuType.fence, MDUOpType.fencei)
+    FENCEI -> List(InstrU, FuType.fence, FenceOpType.fencei)
   )
 }
