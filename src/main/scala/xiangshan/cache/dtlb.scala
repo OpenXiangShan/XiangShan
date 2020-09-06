@@ -226,9 +226,9 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   // resp  // TODO: A/D has not being concerned
   for(i <- 0 until Width) {
     val paddr = LookupTreeDefault(hitLevel(i), Cat(hitppn(i), reqAddr(i).off), List(
-      2.U -> Cat(hitppn(i)(ppnLen - 1, 2*vpnnLen), reqAddr(i).vpn(2*vpnnLen - 1, 0), reqAddr(i).off),
+      0.U -> Cat(hitppn(i)(ppnLen - 1, 2*vpnnLen), reqAddr(i).vpn(2*vpnnLen - 1, 0), reqAddr(i).off),
       1.U -> Cat(hitppn(i)(ppnLen - 1, vpnnLen), reqAddr(i).vpn(vpnnLen - 1, 0), reqAddr(i).off),
-      0.U -> Cat(hitppn(i), reqAddr(i).off)
+      2.U -> Cat(hitppn(i), reqAddr(i).off)
     ))
 
     resp(i).valid := valid(i)
