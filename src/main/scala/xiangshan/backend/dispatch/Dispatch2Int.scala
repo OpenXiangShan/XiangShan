@@ -23,15 +23,12 @@ class Dispatch2Int extends XSModule {
   assert(exuParameters.JmpCnt == 1)
   val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.JmpCnt, false))
   val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.AluCnt, true))
-  val mdfuIndexGen= Module(new IndexMapping(dpParams.IntDqDeqWidth, 1, true))
-  val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.MduCnt-1, true))
+  val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.MduCnt, true))
   val aluPriority = PriorityGen((0 until exuParameters.AluCnt).map(i => io.numExist(i+exuParameters.JmpCnt)))
-  // val mdfuPriority= PriorityGen((0 until 1).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
-  // val mduPriority = PriorityGen((0 until (exuParameters.MduCnt-1)).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt+1)))
+  val mduPriority = PriorityGen((0 until exuParameters.MduCnt).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
     jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     aluIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    mdfuIndexGen.io.validBits(i):= io.fromDq(i).valid && Exu.mulDivFenceExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     mduIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     // XSDebug(io.fromDq(i).valid,
     //   p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
@@ -40,18 +37,15 @@ class Dispatch2Int extends XSModule {
   for (i <- 0 until exuParameters.AluCnt) {
     aluIndexGen.io.priority(i) := aluPriority(i)
   }
-  for (i <- 0 until 1) {
-    mdfuIndexGen.io.priority(i) := DontCare //mdfuPriority(i) // NOTE: DontCare for there is just one fence
+  for (i <- 0 until exuParameters.MduCnt) {
+    mduIndexGen.io.priority(i) := mduPriority(i)
   }
-  for (i <- 0 until exuParameters.MduCnt-1) {
-    mduIndexGen.io.priority(i) := DontCare // mduPriority(i) // NOTE: DontCare for there is just one mdu
-  }
-  val allIndexGen = Seq(jmpIndexGen, aluIndexGen, mdfuIndexGen, mduIndexGen)
+  val allIndexGen = Seq(jmpIndexGen, aluIndexGen, mduIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
   val rsValidVec = (0 until dpParams.IntDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
   val rsIndexVec = (0 until dpParams.IntDqDeqWidth).map({i =>
-    val indexOffset = Seq(0, exuParameters.JmpCnt, exuParameters.JmpCnt + exuParameters.AluCnt , exuParameters.JmpCnt + exuParameters.AluCnt + 1)
+    val indexOffset = Seq(0, exuParameters.JmpCnt, exuParameters.JmpCnt + exuParameters.AluCnt)
     allIndexGen.zipWithIndex.map{
       case (index, j) => Mux(index.io.reverseMapping(i).valid,
         ZeroExt(index.io.reverseMapping(i).bits, log2Ceil(exuParameters.IntExuCnt)) + indexOffset(j).U,
