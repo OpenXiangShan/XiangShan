@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
 
-import xiangshan.backend.MDUOpType
+import xiangshan.backend.FenceOpType
 
 class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   val (valid, src1, src2, uop, func, lsrc1, lsrc2) = 
@@ -25,8 +25,8 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   BoringUtils.addSink(sbEmpty, "SBufferEmpty")
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := valid && state === s_req && !sbEmpty
-  fencei       := valid && state === s_req && func === MDUOpType.fencei
-  sfence.valid := valid && state === s_req && func === MDUOpType.sfence
+  fencei       := valid && state === s_req && func === FenceOpType.fencei
+  sfence.valid := valid && state === s_req && func === FenceOpType.sfence
   sfence.bits.rs1  := lsrc1 === 0.U
   sfence.bits.rs2  := lsrc2 === 0.U
   sfence.bits.addr := src1
