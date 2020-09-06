@@ -125,7 +125,7 @@ class Roq extends XSModule {
   io.redirect.bits.isFlushPipe := isFlushPipe
   io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, trapTarget)
   io.exception := deqUop
-  XSDebug(io.redirect.valid, "generate exception: pc 0x%x target 0x%x exceptionVec %b\n", io.exception.cf.pc, trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
+  XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
 
   // Commit uop to Rename (walk)
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))

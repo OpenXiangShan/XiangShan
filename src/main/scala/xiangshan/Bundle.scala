@@ -150,7 +150,7 @@ trait HasRoqIdx { this: HasXSParameter =>
   }
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && this.isAfter(redirect.bits.roqIdx)
+    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || this.isAfter(redirect.bits.roqIdx)) // TODO: need check by JiaWei
   }
 }
 
