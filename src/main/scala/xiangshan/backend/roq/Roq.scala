@@ -48,9 +48,9 @@ class Roq extends XSModule {
   val state = RegInit(s_idle)
 
   // Dispatch
-  val csrEnRoq = io.dp1Req.map(i => i.bits.ctrl.fuType === FuType.csr)
-  val hasCsr = RegInit(false.B)
-  when(isEmpty){ hasCsr:= false.B }
+  val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.noSpecExec)
+  val hasNoSpec = RegInit(false.B)
+  when(isEmpty){ hasNoSpec:= false.B }
   val validDispatch = io.dp1Req.map(_.valid)
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
@@ -63,11 +63,11 @@ class Roq extends XSModule {
       valid(roqIdx) := true.B
       flag(roqIdx) := roqIdxExt.head(1).asBool()
       writebacked(roqIdx) := false.B
-      when(csrEnRoq(i)){ hasCsr := true.B }
+      when(noSpecEnq(i)){ hasNoSpec := true.B }
     }
     io.dp1Req(i).ready := (notFull && !valid(roqIdx) && state === s_idle) &&
-      (!csrEnRoq(i) || isEmpty) &&
-      !hasCsr
+      (!noSpecEnq(i) || isEmpty) &&
+      !hasNoSpec
     io.roqIdxs(i) := roqIdxExt
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
@@ -112,7 +112,7 @@ class Roq extends XSModule {
   ExcitingUtils.addSink(trapTarget, "trapTarget")
 
   val deqUop = microOp(deqPtr)
-  val intrEnable = intrBitSet && (state === s_idle) && !isEmpty && !hasCsr
+  val intrEnable = intrBitSet && (state === s_idle) && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = Cat(deqUop.cf.exceptionVec).orR() && (state === s_idle) && !isEmpty
   // TODO: need check if writebacked needed
   val isEcall = deqUop.cf.exceptionVec(ecallM) ||
