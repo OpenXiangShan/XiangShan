@@ -568,6 +568,10 @@ class BPU extends BaseBPU {
       val bo = btb.io.resp
       XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
     }
+    val buValid = io.inOrderBrInfo.valid
+    val buinfo  = io.inOrderBrInfo.bits.ui
+    val pd = buinfo.pd
+    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred})\n")
   }
 
 }
