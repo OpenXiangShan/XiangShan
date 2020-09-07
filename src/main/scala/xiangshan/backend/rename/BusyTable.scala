@@ -5,31 +5,39 @@ import chisel3.util._
 import xiangshan._
 import utils.{ParallelOR, XSDebug}
 
-class BusyTable extends XSModule {
+class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
   val io = IO(new Bundle() {
     val flush = Input(Bool())
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // set preg state to ready (write back regfile + roq walk)
-    val wbPregs = Vec(NRWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    val wbPregs = Vec(numWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
+    // set preg state to busy when replay
+    val replayPregs = Vec(ReplayWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
-    val rfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val pregRdy = Vec(NRReadPorts, Output(Bool()))
+    val rfReadAddr = Vec(numReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val pregRdy = Vec(numReadPorts, Output(Bool()))
   })
 
   val table = RegInit(0.U(NRPhyRegs.W))
 
-  val wbMask = ParallelOR(io.wbPregs.take(NRWritePorts).map(w => Mux(w.valid, UIntToOH(w.bits), 0.U)))
-  val allocMask = ParallelOR(io.allocPregs.map(a => Mux(a.valid, UIntToOH(a.bits), 0.U)))
+  def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
+    ParallelOR(rVec.map(v => Mux(v.valid, UIntToOH(v.bits), 0.U)))
+  }
+
+  val wbMask = reqVecToMask(io.wbPregs)
+  val allocMask = reqVecToMask(io.allocPregs)
+  val replayMask = reqVecToMask(io.replayPregs)
 
   val tableAfterWb = table & (~wbMask).asUInt
   val tableAfterAlloc = tableAfterWb | allocMask
+  val tableAfterReplay = tableAfterAlloc | replayMask
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
     rdy := !tableAfterWb(raddr)
   }
 
-  table := tableAfterAlloc
+  table := tableAfterReplay
 
 //  for((alloc, i) <- io.allocPregs.zipWithIndex){
 //    when(alloc.valid){
@@ -53,7 +61,7 @@ class BusyTable extends XSModule {
   XSDebug(p"table    : ${Binary(table)}\n")
   XSDebug(p"tableNext: ${Binary(tableAfterAlloc)}\n")
   XSDebug(p"allocMask: ${Binary(allocMask)}\n")
-  XSDebug(p"wbMask : ${Binary(wbMask)}\n")
+  XSDebug(p"wbMask   : ${Binary(wbMask)}\n")
   for (i <- 0 until NRPhyRegs) {
     XSDebug(table(i), "%d is busy\n", i.U)
   }

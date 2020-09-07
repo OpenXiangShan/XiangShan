@@ -13,12 +13,15 @@ jobs:
     name: Make EMU
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
       - name: Set env
         run: |
           echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
           echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
       - name: Build EMU
-        run: make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j20
+        run:
+          make ./build/emu SIM_ARGS=--disable-log EMU_THREADS=16 NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j20
 
   cputest:
     runs-on: self-hosted

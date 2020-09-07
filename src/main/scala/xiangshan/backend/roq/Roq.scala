@@ -1,6 +1,6 @@
 package xiangshan.backend.roq
 
-import chisel3.ExcitingUtils.ConnectionType
+import chisel3.ExcitingUtils._
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -8,10 +8,11 @@ import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
 
-// A "just-enough" Roq
+
 class Roq extends XSModule {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
+    val memRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     val redirect = Output(Valid(new Redirect))
@@ -19,7 +20,6 @@ class Roq extends XSModule {
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
-    val scommit = Output(UInt(3.W))
     val bcommit = Output(UInt(BrTagWidth.W))
   })
 
@@ -27,6 +27,7 @@ class Roq extends XSModule {
 
   val microOp = Mem(RoqSize, new MicroOp)
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
 
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
@@ -60,6 +61,7 @@ class Roq extends XSModule {
     when(io.dp1Req(i).fire()){
       microOp(roqIdx) := io.dp1Req(i).bits
       valid(roqIdx) := true.B
+      flag(roqIdx) := roqIdxExt.head(1).asBool()
       writebacked(roqIdx) := false.B
       when(csrEnRoq(i)){ hasCsr := true.B }
     }
@@ -158,8 +160,7 @@ class Roq extends XSModule {
         io.commits(i).bits.uop := commitUop
 
         storeCommitVec(i) := io.commits(i).valid &&
-          commitUop.ctrl.fuType===FuType.stu &&
-          LSUOpType.isStore(commitUop.ctrl.fuOpType)
+          commitUop.ctrl.commitType === CommitType.STORE
 
         cfiCommitVec(i) := io.commits(i).valid &&
           !commitUop.cf.brUpdate.pd.notCFI
@@ -230,14 +231,13 @@ class Roq extends XSModule {
   val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
 
-  // commit store to lsu, commit branch to brq
-  io.scommit := PopCount(storeCommitVec)
+  // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
 
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){
     state := s_walk
-    walkPtrExt := enqPtrExt - 1.U + dispatchCnt
+    walkPtrExt := Mux(state === s_walk && !walkFinished, walkPtrExt - CommitWidth.U, Mux(state === s_extrawalk, walkPtrExt, enqPtrExt - 1.U + dispatchCnt))
     walkTgtExt := io.brqRedirect.bits.roqIdx
     enqPtrExt := io.brqRedirect.bits.roqIdx + 1.U
   }
@@ -248,6 +248,17 @@ class Roq extends XSModule {
     (0 until RenameWidth).foreach(i => extraSpaceForMPR(i) := io.dp1Req(i).bits)
     state := s_extrawalk
     XSDebug("roq full, switched to s_extrawalk. needExtraSpaceForMPR: %b\n", needExtraSpaceForMPR.asUInt)
+  }
+
+  // when rollback, reset writebacked entry to valid
+  when(io.memRedirect.valid) { // TODO: opt timing
+    for (i <- 0 until RoqSize) {
+      val recRoqIdx = Wire(new XSBundle with HasRoqIdx)
+      recRoqIdx.roqIdx := Cat(flag(i).asUInt, i.U((RoqIdxWidth - 1).W))
+      when (valid(i) && recRoqIdx.isAfter(io.memRedirect.bits)) {
+        writebacked(i) := false.B
+      }
+    }
   }
 
   // when exception occurs, cancels all
@@ -331,6 +342,13 @@ class Roq extends XSModule {
     ExcitingUtils.addSource(RegNext(trapPC), "trapPC")
     ExcitingUtils.addSource(RegNext(GTimer()), "trapCycleCnt")
     ExcitingUtils.addSource(RegNext(instrCnt), "trapInstrCnt")
+    ExcitingUtils.addSource(state === s_walk || state === s_extrawalk, "perfCntCondRoqWalk", Perf)
+    val deqNotWritebacked = valid(deqPtr) && !writebacked(deqPtr)
+    val deqUopCommitType = deqUop.ctrl.commitType
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.INT,   "perfCntCondRoqWaitInt",   Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.FP,    "perfCntCondRoqWaitFp",    Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.LOAD,  "perfCntCondRoqWaitLoad",  Perf)
+    ExcitingUtils.addSource(deqNotWritebacked && deqUopCommitType === CommitType.STORE, "perfCntCondRoqWaitStore", Perf)
 
     if(EnableBPU){
       ExcitingUtils.addSource(hitTrap, "XSTRAP", ConnectionType.Debug)

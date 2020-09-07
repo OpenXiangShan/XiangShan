@@ -13,7 +13,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jmp.io.out.ready := io.out.ready
   jmp.io.exception <> DontCare
   jmp.io.dmem <> DontCare
-  jmp.io.scommit := DontCare
+  jmp.io.mcommit := DontCare
   jmp.io.redirect := io.redirect
 
   val csr = Module(new CSR)
@@ -21,8 +21,6 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.fpu_csr := DontCare
   csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
-  csr.io.imemMMU := DontCare
-  csr.io.dmemMMU := DontCare
   csr.io.out.ready := io.out.ready
   csr.io.in.bits.src3 := DontCare
   val csrOut = csr.access(

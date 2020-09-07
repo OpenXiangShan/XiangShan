@@ -17,11 +17,11 @@ REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 .DEFAULT_GOAL = verilog
 
 help:
-	mill chiselModule.test.runMain top.$(TOP) --help
+	mill XiangShan.test.runMain top.$(TOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill chiselModule.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
+	mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
 	$(MEM_GEN) $(@D)/$(@F).conf >> $@
 	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
 	@git log -n 1 >> .__head__
@@ -48,9 +48,9 @@ SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 ifeq ($(REMOTE),localhost)
-	mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
 else
-	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill chiselModule.test.runMain $(SIMTOP) -X verilog -td $(@D) --output-file $(@F) $(SIM_ARGS)"
+	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)"
 endif
 
 
@@ -62,12 +62,14 @@ EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
+EMU_THREADS   = 1
 
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
+  --threads $(EMU_THREADS) --threads-dpi none\
   --assert \
   --savable \
   --stats-vars \
@@ -123,7 +125,7 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+	@numactl -m 0 -N 0 -- $(EMU) -i $(IMAGE) $(EMU_FLAGS)
 else
 	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && export NOOP_HOME=$(REMOTE_PREFIX)/$(NOOP_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(EMU_FLAGS)"
 endif
@@ -134,4 +136,9 @@ cache:
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: verilog emu clean help $(REF_SO)
+init:
+	git submodule update --init
+	# do not use a recursive init to pull some not used submodules
+	cd ./rocket-chip/ && git submodule update --init api-config-chipsalliance hardfloat
+
+.PHONY: verilog emu clean help init $(REF_SO)

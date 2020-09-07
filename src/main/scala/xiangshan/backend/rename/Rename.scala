@@ -9,12 +9,14 @@ class Rename extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
-    val wbIntResults = Vec(NRWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val wbFpResults = Vec(NRWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val intRfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val fpRfReadAddr = Vec(NRReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val intPregRdy = Vec(NRReadPorts, Output(Bool()))
-    val fpPregRdy = Vec(NRReadPorts, Output(Bool()))
+    val wbIntResults = Vec(NRIntWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val wbFpResults = Vec(NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
+    val intRfReadAddr = Vec(NRIntReadPorts + NRMemReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val intPregRdy = Vec(NRIntReadPorts + NRMemReadPorts, Output(Bool()))
+    val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
+    // set preg to busy when replay
+    val replayPregReq = Vec(ReplayWidth, Input(new ReplayPregReq))
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
@@ -41,7 +43,8 @@ class Rename extends XSModule {
   val fpFreeList, intFreeList = Module(new FreeList).io
   val fpRat = Module(new RenameTable(float = true)).io
   val intRat = Module(new RenameTable(float = false)).io
-  val fpBusyTable, intBusyTable = Module(new BusyTable).io
+  val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts)).io
+  val intBusyTable = Module(new BusyTable(NRIntReadPorts+NRMemReadPorts, NRIntWritePorts)).io
 
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
@@ -65,6 +68,7 @@ class Rename extends XSModule {
     uop.src2State := DontCare
     uop.src3State := DontCare
     uop.roqIdx := DontCare
+    uop.lsroqIdx := DontCare
   })
 
   var lastReady = WireInit(io.out(0).ready)
@@ -132,7 +136,7 @@ class Rename extends XSModule {
 
       XSInfo(walkWen,
         {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
-          p" ldst:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
+          p" ldest:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
       )
 
       rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits(i).bits.isWalk
@@ -198,6 +202,12 @@ class Rename extends XSModule {
 
   intBusyTable.rfReadAddr <> io.intRfReadAddr
   intBusyTable.pregRdy <> io.intPregRdy
+  for(i <- io.replayPregReq.indices){
+    intBusyTable.replayPregs(i).valid := io.replayPregReq(i).isInt
+    fpBusyTable.replayPregs(i).valid := io.replayPregReq(i).isFp
+    intBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
+    fpBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
+  }
   fpBusyTable.rfReadAddr <> io.fpRfReadAddr
   fpBusyTable.pregRdy <> io.fpPregRdy
 }
