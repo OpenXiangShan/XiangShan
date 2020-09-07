@@ -106,7 +106,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dcache.req.bits.addr := paddr 
     io.dcache.req.bits.data := in.src2
     // TODO: atomics do need mask: fix mask
-    io.dcache.req.bits.mask := DontCare
+    io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
     io.dcache.req.bits.meta.id       := DCacheAtomicsType.atomics
     io.dcache.req.bits.meta.paddr    := paddr
     io.dcache.req.bits.meta.tlb_miss := false.B
