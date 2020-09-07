@@ -590,7 +590,10 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val hasStoreAddrMisaligned = io.exception.bits.cf.exceptionVec(storeAddrMisaligned) && io.exception.valid
   val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned) && io.exception.valid
 
-  // TODO: fix mtval
+  // mtval write logic
+  val memExceptionAddr = WireInit(0.U(VAddrBits.W))
+  ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
+  ExcitingUtils.addSink(memExceptionAddr, "EXECPTION_VADDR")
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
@@ -599,8 +602,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
         SignExt(io.exception.bits.cf.pc + 2.U, XLEN),
         SignExt(io.exception.bits.cf.pc, XLEN)
       ),
-      // SignExt(io.dmemMMU.addr, XLEN)
-      "hffffffff".U // FIXME: add ld/st pf
+      SignExt(memExceptionAddr, XLEN)
     )
     when(priviledgeMode === ModeM){
       mtval := tval
@@ -609,11 +611,9 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     }
   }
 
-  val lsuAddr = WireInit(0.U(64.W))
-  BoringUtils.addSink(lsuAddr, "LSUADDR")
   when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
   {
-    mtval := SignExt(lsuAddr, XLEN)
+    mtval := SignExt(memExceptionAddr, XLEN)
   }
 
   // Exception and Intr
