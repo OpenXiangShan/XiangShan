@@ -18,6 +18,8 @@ class AtomicsPipe extends DCacheModule
     val meta_resp  = Input(Vec(nWays, new L1Metadata))
     val inflight_req_idxes       = Output(Vec(3, Valid(UInt())))
     val inflight_req_block_addrs = Output(Vec(3, Valid(UInt())))
+    val block_probe_addr   = Output(Valid(UInt()))
+    val wb_invalidate_lrsc = Input(Valid(UInt()))
   })
 
   // LSU requests
@@ -127,6 +129,20 @@ class AtomicsPipe extends DCacheModule
     }
   } .elsewhen (lrsc_count > 0.U) {
     lrsc_count := lrsc_count - 1.U
+  }
+
+  io.block_probe_addr.valid := lrsc_valid
+  io.block_probe_addr.bits  := lrsc_addr
+
+  // when we release this block,
+  // we invalidate this reservation set
+  when (io.wb_invalidate_lrsc.valid) {
+    when (io.wb_invalidate_lrsc.bits === lrsc_addr) {
+      lrsc_count := 0.U
+    }
+
+    // when we release this block, there should be no matching lrsc inflight
+    assert (!(s2_valid && (s2_lr || s2_sc) && io.wb_invalidate_lrsc.bits === get_block_addr(s2_req.addr)))
   }
 
   when (s2_valid) {

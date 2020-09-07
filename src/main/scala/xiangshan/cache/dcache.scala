@@ -299,13 +299,36 @@ class DuplicatedMetaArray extends DCacheModule {
     meta(w).io.write <> io.write
     meta(w).io.read  <> io.read(w)
     io.resp(w) <> meta(w).io.resp
-//    meta(w).io.resp  <> io.resp(w)
+  }
+
+  def dumpRead() = {
+    (0 until LoadPipelineWidth) map { w =>
+      when (io.read(w).fire()) {
+        XSDebug("MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
+          io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
+      }
+    }
+  }
+
+  def dumpWrite() = {
+    when (io.write.fire()) {
+      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
+        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+    }
+  }
+
+  def dumpResp() = {
+    (0 until LoadPipelineWidth) map { w =>
+      (0 until nWays) map { i =>
+        XSDebug(s"MetaArray Resp: channel: $w way: $i tag: %x coh: %x\n",
+          io.resp(w)(i).tag, io.resp(w)(i).coh.state)
+      }
+    }
   }
 
   def dump() = {
-    (0 until LoadPipelineWidth) map { w =>
-      XSDebug(s"MetaArray $w\n")
-      meta(w).dump
-    }
+    dumpRead
+    dumpWrite
+    dumpResp
   }
 }

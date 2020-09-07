@@ -12,7 +12,8 @@ import xiangshan.mem._
 import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils._
 
 case class XSCoreParameters
@@ -166,7 +167,10 @@ trait HasXSParameter {
   val LRSCCycles = 16
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
-    dataECC = Some("secded")
+    dataECC = Some("secded"),
+    nMissEntries = 16,
+    nLoadMissEntries = 8,
+    nStoreMissEntries = 8
   )
 }
 
@@ -221,13 +225,32 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   val icache = LazyModule(new ICache())
   val ptw = LazyModule(new PTW())
 
-  // TODO: crossbar Icache/Dcache/PTW here
-  val mem = TLXbar()
+  val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
-  mem := TLCacheCork(sinkIds = 1) := dcache.clientNode
-  mem := TLCacheCork(sinkIds = 1) := icache.clientNode
-  mem := TLCacheCork(sinkIds = 1) := ptw.node
+  // TODO: refactor these params
+  private val l2 = LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 2,
+      ways = 4,
+      sets = 512 * 1024 / (64 * 4),
+      blockBytes = 64,
+      beatBytes = 8
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = 8
+    )
+  ))
+
+  private val xbar = TLXbar()
+
+  xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := ptw.node
+
+  l2.node := xbar
+
+  mem := TLBuffer() := TLCacheCork() := TLBuffer() := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
