@@ -380,44 +380,35 @@ class Sbuffer extends XSModule with HasSBufferConst {
     io.dcache.req.valid := true.B
     io.dcache.req.bits.addr := getAddr(cache(wb_idx).tag)
 
-    val gotValidData = WireInit(false.B)
-
     // prepare write data and write mask
-    when (!busy(wb_idx, StorePipelineWidth)) {
-      // get data directly from cache
-      gotValidData := true.B
-      dcacheData := cache(wb_idx).data.asUInt()
-      dcacheMask := cache(wb_idx).mask.asUInt()
-      XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n",
-        wb_idx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
-    } .otherwise {
-      for (i <- 0 until StorePipelineWidth) {
-        // get data from updateInfo
-        when (updateInfo(i).idx === wb_idx && updateInfo(i).isUpdated && io.in(i).valid) {
-          gotValidData := true.B
-          dcacheData := updateInfo(i).newData.asUInt()
-          dcacheMask := updateInfo(i).newMask.asUInt()
-        }
+    // first, we get data from cache
+    dcacheData := cache(wb_idx).data.asUInt()
+    dcacheMask := cache(wb_idx).mask.asUInt()
+
+    // then, we tried to merge any updates
+    for (i <- 0 until StorePipelineWidth) {
+      // get data from updateInfo
+      when (updateInfo(i).idx === wb_idx && updateInfo(i).isUpdated && io.in(i).valid) {
+        dcacheData := updateInfo(i).newData.asUInt()
+        dcacheMask := updateInfo(i).newMask.asUInt()
       }
-
-      XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n",
-        waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     }
-    assert(gotValidData)
 
-
-    when(io.dcache.req.fire()){
+    when(io.dcache.req.fire()) {
       // save current req
       waitingCacheLine := cache(wb_idx)
       waitingCacheLine.data := dcacheData.asTypeOf(Vec(cacheMaskWidth, UInt(8.W)))
       waitingCacheLine.mask := dcacheMask.asTypeOf(Vec(cacheMaskWidth, Bool()))
-      XSError(!cache(wb_idx).valid, "!cache(wb_idx).valid\n")
-      // waitingCacheLine.valid := true.B
+      waitingCacheLine.valid := true.B
 
       cache(wb_idx).valid := false.B
-      XSInfo("send req to dcache %x\n", wb_idx)
 
       state := s_dcache_resp
+
+      assert(cache(wb_idx).valid, "sbuffer cache line not valid\n")
+      XSInfo("send req to dcache %x\n", wb_idx)
+      XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n",
+        wb_idx, io.dcache.req.bits.addr, dcacheMask.asUInt(), dcacheData.asUInt())
     }
   }
 
@@ -429,6 +420,10 @@ class Sbuffer extends XSModule with HasSBufferConst {
       state := s_invalid
       XSInfo("recv resp from dcache. wb tag %x mask %x data %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
     }
+
+    // the inflight req
+    XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n",
+      waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
   }
 
 
