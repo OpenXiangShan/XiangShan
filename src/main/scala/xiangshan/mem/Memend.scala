@@ -214,8 +214,17 @@ class Memend extends XSModule {
   // dispatch 0 takes priority
   atomicsUnit.io.in.valid := ld0_atomics || ld1_atomics
   atomicsUnit.io.in.bits  := Mux(ld0_atomics, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
-  when (ld0_atomics) { io.backend.ldin(0).ready := atomicsUnit.io.in.ready }
+  when (ld0_atomics) {
+    io.backend.ldin(0).ready := atomicsUnit.io.in.ready
+    // explitly set ld1 ready to false, do not let it fire
+    when (ld1_atomics) { io.backend.ldin(1).ready := false.B }
+  }
+
   when (!ld0_atomics && ld1_atomics) { io.backend.ldin(1).ready := atomicsUnit.io.in.ready }
+
+  // for atomics, do not let them enter load unit
+  when (ld0_atomics) { loadUnits(0).io.ldin.valid := false.B }
+  when (ld1_atomics) { loadUnits(1).io.ldin.valid := false.B }
 
   when(atomicsUnit.io.dtlb.req.valid) {
     dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
