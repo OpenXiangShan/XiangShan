@@ -510,7 +510,10 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   ))
 
   // satp wen check
-  val wen = valid && func =/= CSROpType.jmp
+  val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)	  
+
+  // general CSR wen check
+  val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
   val permitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) 
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
