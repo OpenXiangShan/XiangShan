@@ -47,11 +47,12 @@ class DivExeUnit extends Exu(Exu.divExeUnitCfg) {
   io.dmem <> DontCare
   io.out.bits.debug <> DontCare
 
-  XSDebug(io.in.valid || io.redirect.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d) brTag:%x\n",
+  XSDebug(io.in.valid || io.redirect.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid, io.in.ready,
     io.out.valid, io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
   XSDebug(io.in.valid, "src1:%x src2:%x func:%b pc:%x roqIdx:%d\n", src1, src2, func, io.in.bits.uop.cf.pc, io.in.bits.uop.roqIdx)

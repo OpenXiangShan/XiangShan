@@ -57,7 +57,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
 }
 
 object Exu {
-  val jmpExeUnitCfg = ExuConfig("JmpExu", Array(jmpCfg, i2fCfg, csrCfg), enableBypass = false)
+  val jmpExeUnitCfg = ExuConfig("JmpExu", Array(jmpCfg, i2fCfg, csrCfg, fenceCfg), enableBypass = false)
   val aluExeUnitCfg = ExuConfig("AluExu", Array(aluCfg), enableBypass = true)
   val mulExeUnitCfg = ExuConfig("MulExu", Array(mulCfg), enableBypass = false)
   val divExeUnitCfg = ExuConfig("DivExu", Array(divCfg), enableBypass = false)

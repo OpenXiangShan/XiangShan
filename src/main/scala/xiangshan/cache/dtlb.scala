@@ -216,6 +216,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val miss    = widthMap{ i => !hit(i) && valid(i) && vmEnable && ~pfArray(i) }
   val hitppn  = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
   val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
+  val hitLevel= widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.level)) }
   val multiHit = {
     val hitSum = widthMap{ i => PopCount(hitVec(i)) }
     val pfHitSum = widthMap{ i => PopCount(pfHitVec(i)) }
@@ -224,8 +225,14 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // resp  // TODO: A/D has not being concerned
   for(i <- 0 until Width) {
+    val paddr = LookupTreeDefault(hitLevel(i), Cat(hitppn(i), reqAddr(i).off), List(
+      0.U -> Cat(hitppn(i)(ppnLen - 1, 2*vpnnLen), reqAddr(i).vpn(2*vpnnLen - 1, 0), reqAddr(i).off),
+      1.U -> Cat(hitppn(i)(ppnLen - 1, vpnnLen), reqAddr(i).vpn(vpnnLen - 1, 0), reqAddr(i).off),
+      2.U -> Cat(hitppn(i), reqAddr(i).off)
+    ))
+
     resp(i).valid := valid(i)
-    resp(i).bits.paddr := Mux(vmEnable, Cat(hitppn(i), reqAddr(i).off), SignExt(req(i).bits.vaddr, PAddrBits))
+    resp(i).bits.paddr := Mux(vmEnable, paddr, SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
 
     val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?

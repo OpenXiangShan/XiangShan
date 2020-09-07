@@ -144,13 +144,13 @@ class Decoder extends XSModule with HasInstrType {
     io.out.ctrl.lsrc1 := 10.U // a0
   }
   io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou || io.out.ctrl.fuType===FuType.fence/*noSpecExec make it sent to alu0,for roq is empty*/
-  //io.out.ctrl.isBlocked := (io.out.ctrl.fuType===FuType.alu && io.out.ctrl.fuOpType===ALUOpType.sfence) // TOOD: check it
+  io.out.ctrl.flushPipe := io.out.ctrl.fuType===FuType.fence
 
 
   XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",
     io.in.instr, io.in.pc, io.in.exceptionVec.asUInt, io.in.intrVec.asUInt, io.in.crossPageIPFFix)
   XSDebug("out: src1Type=%b src2Type=%b src3Type=%b lsrc1=%d lsrc2=%d lsrc3=%d ldest=%d fuType=%b fuOpType=%b\n",
     io.out.ctrl.src1Type, io.out.ctrl.src2Type, io.out.ctrl.src3Type, io.out.ctrl.lsrc1, io.out.ctrl.lsrc2, io.out.ctrl.lsrc3, io.out.ctrl.ldest, io.out.ctrl.fuType, io.out.ctrl.fuOpType)
-  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d isRVF=%d imm=%x\n",
-    io.out.ctrl.rfWen, io.out.ctrl.fpWen, io.out.ctrl.isXSTrap, io.out.ctrl.noSpecExec, io.out.ctrl.isBlocked, io.out.ctrl.isRVF, io.out.ctrl.imm)
+  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d isRVF=%d imm=%x\n",
+    io.out.ctrl.rfWen, io.out.ctrl.fpWen, io.out.ctrl.isXSTrap, io.out.ctrl.noSpecExec, io.out.ctrl.isBlocked, io.out.ctrl.flushPipe, io.out.ctrl.isRVF, io.out.ctrl.imm)
 }

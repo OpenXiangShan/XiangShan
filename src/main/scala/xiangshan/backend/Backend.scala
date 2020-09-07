@@ -32,12 +32,11 @@ class Backend extends XSModule
   val aluExeUnits =Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
-  val mduFenceExeUnit = Array.tabulate(1)(_ => Module(new MulDivFenceExeUnit)) // MulDivExeFenceUnit
-  val mduExeUnits = Array.tabulate(exuParameters.MduCnt-1)(_ => Module(new MulDivExeUnit))
+  val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
   // val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
   // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
   // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduFenceExeUnit ++ mduExeUnits)
+  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
   exeUnits.foreach(_.io.exception := DontCare)
   exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
@@ -174,7 +173,7 @@ class Backend extends XSModule
   io.mem.commits <> roq.io.commits
   io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
-  jmpExeUnit.io.exception.valid := roq.io.redirect.valid
+  jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.exception.bits := roq.io.exception
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo

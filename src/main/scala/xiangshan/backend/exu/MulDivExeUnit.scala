@@ -45,11 +45,12 @@ class MulDivFenceExeUnit extends Exu(Exu.mulDivFenceExeUnitCfg){
 
   io.out <> arb.io.out
 
-  XSDebug(io.in.valid || io.redirect.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d) brTag:%x\n",
+  XSDebug(io.in.valid || io.redirect.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid, io.in.ready,
     io.out.valid, io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
   XSDebug(io.in.valid, "src1:%x src2:%x pc:%x fuType:%b fuOpType:%b roqIdx:%d (%d%d%d)\n", src1, src2, io.in.bits.uop.cf.pc, io.in.bits.uop.ctrl.fuType, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.roqIdx, isMul, isDiv, isFence)
@@ -90,11 +91,12 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
 
   io.out <> arb.io.out
 
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d) brTag:%x\n",
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid, io.in.ready,
     io.out.valid, io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
   XSDebug(io.in.valid, "src1:%x src2:%x pc:%x\n", src1, src2, io.in.bits.uop.cf.pc)

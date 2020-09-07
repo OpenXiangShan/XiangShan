@@ -212,7 +212,7 @@ class LoadUnit extends XSModule {
   XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
     io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
 
-  XSDebug(io.redirect.valid, p"Redirect: excp:${io.redirect.bits.isException} misp:${io.redirect.bits.isMisPred} replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.needFlush(io.redirect)} l3:${l3_uop.needFlush(io.redirect)} l4:${l4_out.bits.uop.needFlush(io.redirect)}\n")
+  XSDebug(io.redirect.valid, p"Redirect: excp:${io.redirect.bits.isException} flushPipe:${io.redirect.bits.isFlushPipe} misp:${io.redirect.bits.isMisPred} replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.needFlush(io.redirect)} l3:${l3_uop.needFlush(io.redirect)} l4:${l4_out.bits.uop.needFlush(io.redirect)}\n")
   //-------------------------------------------------------
   // LD Pipeline Stage 5
   // Do data ecc check, merge result and write back to LS ROQ

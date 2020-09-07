@@ -23,6 +23,11 @@ package object backend {
     def ret  = "b11_100".U
   }
 
+  object FenceOpType {
+    def fence  = "b10000".U
+    def sfence = "b10001".U
+    def fencei = "b10010".U
+  }
 
   object ALUOpType {
     def add  = "b000000".U

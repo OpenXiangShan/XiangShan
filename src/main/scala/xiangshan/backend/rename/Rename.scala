@@ -49,7 +49,7 @@ class Rename extends XSModule {
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
 
-  val flush = io.redirect.valid && io.redirect.bits.isException
+  val flush = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe) // TODO: need check by JiaWei
   fpRat.flush := flush
   intRat.flush := flush
   fpBusyTable.flush := flush
