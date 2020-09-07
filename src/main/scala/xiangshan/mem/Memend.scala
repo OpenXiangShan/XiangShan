@@ -201,6 +201,7 @@ class Memend extends XSModule {
   assert(!(fenceFlush && atomicsFlush))
   sbuffer.io.flush.valid := fenceFlush || atomicsFlush
 
+  // TODO: make 0/1 configurable
   // AtomicsUnit
   // AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
