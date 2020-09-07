@@ -1,13 +1,14 @@
 package xiangshan.cache
 
-import chisel3.util.experimental.BoringUtils
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import device._
 import xiangshan._
 import xiangshan.frontend._
 import utils._
+import chisel3.ExcitingUtils._
+import chisel3.util.experimental.BoringUtils
+import chipsalliance.rocketchip.config.Parameters
 
 import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
 import freechips.rocketchip.diplomacy.{AddressSet,IdRange,LazyModule, LazyModuleImp, TransferSizes}
@@ -406,5 +407,11 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   bus.d.ready := true.B
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
+
+  //Performance Counter
+  if (!env.FPGAPlatform ) {
+    ExcitingUtils.addSource( s3_valid && (state === s_idle), "perfCntIcacheReqCnt", Perf)
+    ExcitingUtils.addSource( s3_valid && (state === s_idle) && s3_miss, "perfCntIcacheMissCnt", Perf)
+  }
 }
 
