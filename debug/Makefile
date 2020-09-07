@@ -99,10 +99,10 @@ P = 4
 SUITE = xiangshan.backend.exu.AluTest
 
 unit-test:
-	cd .. && mill chiselModule.test.testOnly -o -s $(SUITE) -P$(P)
+	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE) -P$(P)
 
 unit-test-all:
-	cd .. && mill chiselModule.test.test -P$(P)
+	cd .. && mill XiangShan.test.test -P$(P)
 
 # ------------------------------------------------------------------
 # chore

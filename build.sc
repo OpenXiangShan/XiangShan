@@ -25,11 +25,11 @@ trait CommonModule extends ScalaModule {
   override def scalacPluginIvyDeps = Agg(macroParadise)
 }
 
-object `rocket-chip` extends SbtModule with CommonModule {
+val rocketChisel = Agg(
+  ivy"edu.berkeley.cs::chisel3:3.3.1"
+)
 
-  val rocketChisel = Agg(
-    ivy"edu.berkeley.cs::chisel3:3.3.1"
-  )
+object `rocket-chip` extends SbtModule with CommonModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     ivy"${scalaOrganization()}:scala-reflect:${scalaVersion()}",
@@ -53,6 +53,15 @@ object `rocket-chip` extends SbtModule with CommonModule {
 
 }
 
+object `block-inclusivecache-sifive` extends CommonModule {
+  override def ivyDeps = super.ivyDeps() ++ rocketChisel
+
+  override def millSourcePath = super.millSourcePath / 'design / 'craft / 'inclusivecache
+
+  override def moduleDeps = super.moduleDeps ++ Seq(`rocket-chip`)
+}
+
+
 object XiangShan extends CommonModule with SbtModule {
   override def millSourcePath = millOuterCtx.millSourcePath
 
@@ -62,7 +71,7 @@ object XiangShan extends CommonModule with SbtModule {
     ivy"edu.berkeley.cs::chisel3:3.3.2"
   )
 
-  override def moduleDeps = super.moduleDeps ++ Seq(`rocket-chip`)
+  override def moduleDeps = super.moduleDeps ++ Seq(`rocket-chip`, `block-inclusivecache-sifive`)
 
   object test extends Tests {
     override def ivyDeps = super.ivyDeps() ++ Agg(
