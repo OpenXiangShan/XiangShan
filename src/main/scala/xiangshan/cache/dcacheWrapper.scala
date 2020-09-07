@@ -77,8 +77,6 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
-  // TODO: remove ptw port, it directly connect to L2
-  val ptw = Flipped(new DCacheLoadIO)
 }
 
 
@@ -293,66 +291,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // atomics pipe
   atomics.io.wb_invalidate_lrsc := wb.io.inflight_addr
+  atomicsMissQueue.io.lsu <> io.lsu.atomics
   atomicsMissQueue.io.replay <> atomics.io.lsu
-  val atomicsClientIdWidth = 1
-  val lsuAtomicsClientId = 0.U(atomicsClientIdWidth.W)
-  val ptwAtomicsClientId = 1.U(atomicsClientIdWidth.W)
-  val atomicsClientIdMSB = reqIdWidth - 1
-  val atomicsClientIdLSB = reqIdWidth - atomicsClientIdWidth
 
-  // Request
-  val atomicsReqArb = Module(new Arbiter(new DCacheWordReq, 2))
-
-  val atomicsReq    = atomicsMissQueue.io.lsu.req
-  val lsuAtomicsReq = io.lsu.atomics.req
-  val ptwAtomicsReq = io.ptw.req
-
-  atomicsReqArb.io.in(0).valid        := lsuAtomicsReq.valid
-  lsuAtomicsReq.ready                 := atomicsReqArb.io.in(0).ready
-  atomicsReqArb.io.in(0).bits         := lsuAtomicsReq.bits
-  atomicsReqArb.io.in(0).bits.meta.id := Cat(lsuAtomicsClientId,
-    lsuAtomicsReq.bits.meta.id(atomicsClientIdLSB - 1, 0))
-
-  atomicsReqArb.io.in(1).valid        := ptwAtomicsReq.valid
-  ptwAtomicsReq.ready                 := atomicsReqArb.io.in(1).ready
-  atomicsReqArb.io.in(1).bits         := ptwAtomicsReq.bits
-  atomicsReqArb.io.in(1).bits.meta.id := Cat(ptwAtomicsClientId,
-    ptwAtomicsReq.bits.meta.id(atomicsClientIdLSB - 1, 0))
-
-  val atomics_block = block_atomics(atomicsReqArb.io.out.bits.addr)
-  block_decoupled(atomicsReqArb.io.out, atomicsReq, atomics_block)
+  val atomics_block = block_atomics(atomicsMissQueue.io.replay.req.bits.addr)
+  block_decoupled(atomicsMissQueue.io.replay.req, atomics.io.lsu.req, atomics_block)
   when (atomics_block) {
     printf("DCache: AtomicsPipe blocked\n")
   }
 
-  // Response
-  val atomicsResp    = atomicsMissQueue.io.lsu.resp
-  val lsuAtomicsResp = io.lsu.atomics.resp
-  val ptwAtomicsResp = io.ptw.resp
-
-  atomicsResp.ready  := false.B
-
-  val atomicsClientId = atomicsResp.bits.meta.id(atomicsClientIdMSB, atomicsClientIdLSB)
-
-  val isLsuAtomicsResp  = atomicsClientId === lsuAtomicsClientId
-  lsuAtomicsResp.valid := atomicsResp.valid && isLsuAtomicsResp
-  lsuAtomicsResp.bits  := atomicsResp.bits
-  lsuAtomicsResp.bits.meta.id := atomicsResp.bits.meta.id(atomicsClientIdLSB - 1, 0)
-  when (lsuAtomicsResp.valid) {
-    atomicsResp.ready := lsuAtomicsResp.ready
-  }
-
-  val isPTWAtomicsResp  = atomicsClientId === ptwAtomicsClientId
-  ptwAtomicsResp.valid := atomicsResp.valid && isPTWAtomicsResp
-  ptwAtomicsResp.bits  := atomicsResp.bits
-  ptwAtomicsResp.bits.meta.id := atomicsResp.bits.meta.id(atomicsClientIdLSB - 1, 0)
-  when (ptwAtomicsResp.valid) {
-    atomicsResp.ready := ptwAtomicsResp.ready
-  }
-
   // some other stuff
-  atomicsMissQueue.io.lsu.s1_kill := false.B
-
+  val atomicsReq = io.lsu.atomics.req
   assert(!(atomicsReq.fire() && atomicsReq.bits.meta.replay),
     "Atomics does not support request replay")
   assert(!(atomicsReq.fire() && atomicsReq.bits.meta.mmio),
@@ -360,7 +309,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   assert(!(atomicsReq.fire() && atomicsReq.bits.meta.tlb_miss),
     "TLB missed requests should not go to cache")
   assert(!io.lsu.atomics.s1_kill, "Lsroq should never use s1 kill on atomics")
-  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on atomics") // TODO: ptw wanna use s1_kill
 
 
   //----------------------------------------
