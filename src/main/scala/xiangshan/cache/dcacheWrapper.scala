@@ -300,6 +300,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     printf("DCache: AtomicsPipe blocked\n")
   }
 
+  // when atomics are in flight, there should be no load or store in flight
+  // so atomics and store should not show up at the same time
+  val atomics_inflight = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid)).reduce(_||_)
+  val store_inflight = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid)).reduce(_||_)
+  assert(!(atomics_inflight && store_inflight))
+
+
   // some other stuff
   val atomicsReq = io.lsu.atomics.req
   assert(!(atomicsReq.fire() && atomicsReq.bits.meta.replay),
@@ -450,25 +457,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   def block_store(addr: UInt) = {
-    val atomics_addr_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val atomics_addr_match = atomics_addr_matches.reduce(_||_)
-
     val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    atomics_addr_match || prober_addr_match || miss_idx_match
+    prober_addr_match || miss_idx_match
   }
 
   def block_atomics(addr: UInt) = {
-    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val store_addr_match = store_addr_matches.reduce(_||_)
-
     val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    store_addr_match || prober_addr_match || miss_idx_match
+    prober_addr_match || miss_idx_match
   }
 
   def block_miss(addr: UInt) = {
