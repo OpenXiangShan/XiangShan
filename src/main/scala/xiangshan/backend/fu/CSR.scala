@@ -585,10 +585,10 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   tlbBundle.priv.dmode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
 
   val hasInstrPageFault = io.exception.bits.cf.exceptionVec(instrPageFault) && io.exception.valid
-  val hasLoadPageFault = false.B // FIXME: add ld-pf/st-pf
-  val hasStorePageFault = false.B
-  val hasStoreAddrMisaligned = io.exception.bits.cf.exceptionVec(storeAddrMisaligned)
-  val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned)
+  val hasLoadPageFault = io.exception.bits.cf.exceptionVec(loadPageFault) && io.exception.valid
+  val hasStorePageFault = io.exception.bits.cf.exceptionVec(storePageFault) && io.exception.valid
+  val hasStoreAddrMisaligned = io.exception.bits.cf.exceptionVec(storeAddrMisaligned) && io.exception.valid
+  val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned) && io.exception.valid
 
   // TODO: fix mtval
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
