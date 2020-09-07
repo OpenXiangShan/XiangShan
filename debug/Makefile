@@ -13,7 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cache:
-	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 
+	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 2>&1 | tee > loader.log
 	#2>&1 | tee > loader.log
 
 cpu:
