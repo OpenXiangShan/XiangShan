@@ -21,7 +21,7 @@ jobs:
           echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
       - name: Build EMU
         run:
-          make ./build/emu SIM_ARGS=--disable-log NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j20
+          make ./build/emu SIM_ARGS=--disable-log EMU_THREADS=16 NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j20
 
   cputest:
     runs-on: self-hosted
