@@ -261,7 +261,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   var extList = List('a', 's', 'i', 'u')
   if(HasMExtension){ extList = extList :+ 'm'}
   if(HasCExtension){ extList = extList :+ 'c'}
-  if(HasFPU){ extList = extList ++ List('f', 'd')}
+  if(HasFPU){ extList = extList/* ++ List('f', 'd')*/}
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U 
   val misa = RegInit(UInt(XLEN.W), misaInitVal) 
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
