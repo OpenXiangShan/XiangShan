@@ -320,8 +320,14 @@ class Sbuffer extends XSModule with HasSBufferConst {
   val f_idle :: f_req :: f_wait_resp :: Nil = Enum(3)
   val f_state = RegInit(f_idle)
   val flush = io.flush
+  // empty means there are no valid cache line in sbuffer
+  // but there may exist cache line being flushed to dcache and not finished
   val empty = validCnt === 0.U
-  flush.empty := empty
+
+  // sbuffer is flushed empty only when:
+  // 1. there no valid line in sbuffer and
+  // 2. cache line waiting to be flushed are flushed out
+  flush.empty := empty && !waitingCacheLine.valid
 
   wb_arb.io.in(FlushPort).valid := f_state === f_req
   wb_arb.io.in(FlushPort).bits := PriorityEncoder((0 until StoreBufferSize).map(i => cache(i).valid))
