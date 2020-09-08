@@ -22,14 +22,14 @@ object SignExt {
   def apply(a: UInt, len: Int) = {
     val aLen = a.getWidth
     val signBit = a(aLen-1)
-    if (aLen == len) a else Cat(Fill(len - aLen, signBit), a)
+    if (aLen >= len) a(len-1,0) else Cat(Fill(len - aLen, signBit), a)
   }
 }
 
 object ZeroExt {
   def apply(a: UInt, len: Int) = {
     val aLen = a.getWidth
-    if (aLen == len) a else Cat(0.U((len - aLen).W), a)
+    if (aLen >= len) a(len-1,0) else Cat(0.U((len - aLen).W), a)
   }
 }
 
@@ -75,5 +75,16 @@ object LowestBit {
 object HighestBit {
   def apply(a: UInt, len: Int) = {
     Reverse(LowestBit(Reverse(a), len))
+  }
+}
+
+object GenMask {
+  // generate w/r mask
+  def apply(high: Int, low: Int) = {
+    require(high > low)
+    VecInit(List.fill(high+1)(true.B)).asUInt >> low << low
+  }
+  def apply(pos: Int) = {
+    1.U << pos
   }
 }
