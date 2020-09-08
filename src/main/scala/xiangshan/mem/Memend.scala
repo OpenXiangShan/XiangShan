@@ -223,17 +223,24 @@ class Memend extends XSModule {
 
   when (!st0_atomics && st1_atomics) { io.backend.stin(1).ready := atomicsUnit.io.in.ready }
 
-  // for atomics, do not let them enter load unit
+  // for atomics, do not let them enter store unit
   when (st0_atomics) { storeUnits(0).io.stin.valid := false.B }
   when (st1_atomics) { storeUnits(1).io.stin.valid := false.B }
 
   when(atomicsUnit.io.dtlb.req.valid) {
     dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
+    // take load unit 0's tlb port
+    // make sure not to disturb loadUnit
+    assert(!loadUnits(0).io.dtlb.req.valid)
+    loadUnits(0).io.dtlb.resp.valid := false.B
   }
   atomicsUnit.io.dcache        <> io.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbEmpty
 
   when(atomicsUnit.io.out.valid){
     io.backend.ldout(0) <> atomicsUnit.io.out
+    // take load unit 0's write back port
+    assert(!loadUnits(0).io.ldout.valid)
+    loadUnits(0).io.ldout.ready := false.B
   }
 }
