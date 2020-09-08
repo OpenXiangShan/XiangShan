@@ -205,27 +205,27 @@ class Memend extends XSModule {
   // AtomicsUnit
   // AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
-  val ld0_atomics = io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou
-  val ld1_atomics = io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
+  val st0_atomics = io.backend.stin(0).valid && io.backend.stin(0).bits.uop.ctrl.fuType === FuType.mou
+  val st1_atomics = io.backend.stin(1).valid && io.backend.stin(1).bits.uop.ctrl.fuType === FuType.mou
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.out.ready       := false.B
 
   // dispatch 0 takes priority
-  atomicsUnit.io.in.valid := ld0_atomics || ld1_atomics
-  atomicsUnit.io.in.bits  := Mux(ld0_atomics, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
-  when (ld0_atomics) {
-    io.backend.ldin(0).ready := atomicsUnit.io.in.ready
-    // explitly set ld1 ready to false, do not let it fire
-    when (ld1_atomics) { io.backend.ldin(1).ready := false.B }
+  atomicsUnit.io.in.valid := st0_atomics || st1_atomics
+  atomicsUnit.io.in.bits  := Mux(st0_atomics, io.backend.stin(0).bits, io.backend.stin(1).bits)
+  when (st0_atomics) {
+    io.backend.stin(0).ready := atomicsUnit.io.in.ready
+    // explitly set st1 ready to false, do not let it fire
+    when (st1_atomics) { io.backend.stin(1).ready := false.B }
   }
 
-  when (!ld0_atomics && ld1_atomics) { io.backend.ldin(1).ready := atomicsUnit.io.in.ready }
+  when (!st0_atomics && st1_atomics) { io.backend.stin(1).ready := atomicsUnit.io.in.ready }
 
   // for atomics, do not let them enter load unit
-  when (ld0_atomics) { loadUnits(0).io.ldin.valid := false.B }
-  when (ld1_atomics) { loadUnits(1).io.ldin.valid := false.B }
+  when (st0_atomics) { storeUnits(0).io.stin.valid := false.B }
+  when (st1_atomics) { storeUnits(1).io.stin.valid := false.B }
 
   when(atomicsUnit.io.dtlb.req.valid) {
     dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
