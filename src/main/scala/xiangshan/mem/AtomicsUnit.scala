@@ -41,7 +41,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   io.flush_sbuffer.valid := false.B
 
-
+  XSDebug("state: %d\n", state)
 
   when (state === s_invalid) {
     io.in.ready := true.B
