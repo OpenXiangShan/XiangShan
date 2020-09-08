@@ -332,6 +332,9 @@ class Sbuffer extends XSModule with HasSBufferConst {
   wb_arb.io.in(FlushPort).valid := f_state === f_req
   wb_arb.io.in(FlushPort).bits := PriorityEncoder((0 until StoreBufferSize).map(i => cache(i).valid))
 
+  // we only expect flush signal in f_idle state
+  assert(!(flush.valid && f_state =/= f_idle))
+
   switch (f_state) {
     is (f_idle) {
       when (flush.valid && !empty) { f_state := f_req } 
