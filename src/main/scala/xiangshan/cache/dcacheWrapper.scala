@@ -295,7 +295,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   atomicsMissQueue.io.replay <> atomics.io.lsu
 
   val atomics_block = block_atomics(atomicsMissQueue.io.replay.req.bits.addr)
-  block_decoupled(atomicsMissQueue.io.replay.req, atomics.io.lsu.req, atomics_block)
+  block_decoupled(atomicsMissQueue.io.replay.req, atomics.io.lsu.req, atomics_block && !atomicsMissQueue.io.replay.req.bits.meta.replay)
   when (atomics_block) {
     printf("DCache: AtomicsPipe blocked\n")
   }
