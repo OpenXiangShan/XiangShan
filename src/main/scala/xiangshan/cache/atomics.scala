@@ -166,6 +166,14 @@ class AtomicsPipe extends DCacheModule
   dump_pipeline_valids("AtomicsPipe s2", "s2_nack", s2_valid && s2_nack)
   dump_pipeline_valids("AtomicsPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
   dump_pipeline_valids("AtomicsPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
+  when (s2_valid) {
+    XSDebug("lrsc_count: %d lrsc_valid: %b lrsc_addr: %x\n",
+      lrsc_count, lrsc_valid, lrsc_addr)
+    XSDebug("s2_lr: %b s2_sc: %b s2_lrsc_addr_match: %b s2_sc_fail: %b s2_sc_resp: %x\n",
+      s2_lr, s2_sc, s2_lrsc_addr_match, s2_sc_fail, s2_sc_resp)
+    XSDebug("debug_sc_fail_addr: %x debug_sc_fail_cnt: %d\n",
+      debug_sc_fail_addr, debug_sc_fail_cnt)
+  }
 
   // load data gen
   val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
@@ -217,6 +225,9 @@ class AtomicsPipe extends DCacheModule
   data_write.data     := wdata
 
   assert(!(io.data_write.valid && !io.data_write.ready))
+
+  dump_pipeline_reqs("AtomicsPipe s3", s3_valid, s3_req)
+
 
   // -------
   // wire out signals for synchronization

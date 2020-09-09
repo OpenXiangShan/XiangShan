@@ -6,6 +6,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class LsRoqEntry extends XSBundle {
   val vaddr = UInt(VAddrBits.W) // TODO: need opt
@@ -271,8 +272,7 @@ class Lsroq extends XSModule {
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools

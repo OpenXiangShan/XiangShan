@@ -64,6 +64,10 @@ object FunctionUnit {
   val stuCfg =
     FuConfig(FuType.stu, 2, 1, writeIntRf = false, writeFpRf = false, hasRedirect = false)
 
+  // use ldu's write back port, so set writeIntRf to false
+  val mouCfg =
+    FuConfig(FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false)
+
   val fmacCfg =
     FuConfig(FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false)
 

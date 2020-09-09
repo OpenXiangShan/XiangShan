@@ -10,39 +10,6 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 
-object LSUOpType {
-  def lb   = "b000000".U
-  def lh   = "b000001".U
-  def lw   = "b000010".U
-  def ld   = "b000011".U
-  def lbu  = "b000100".U
-  def lhu  = "b000101".U
-  def lwu  = "b000110".U
-  def ldu  = "b000111".U
-  def sb   = "b001000".U
-  def sh   = "b001001".U
-  def sw   = "b001010".U
-  def sd   = "b001011".U
-  
-  def lr      = "b100010".U
-  def sc      = "b100011".U
-  def amoswap = "b100001".U
-  def amoadd  = "b100000".U
-  def amoxor  = "b100100".U
-  def amoand  = "b101100".U
-  def amoor   = "b101000".U
-  def amomin  = "b110000".U
-  def amomax  = "b110100".U
-  def amominu = "b111000".U
-  def amomaxu = "b111100".U
-  
-  def isStore(func: UInt): Bool = func(3)
-  def isAtom(func: UInt): Bool = func(5)
-  
-  def atomW = "010".U
-  def atomD = "011".U
-}
-
 object DCacheAtomicsType {
   def miss      = "b00".U
   def mmio      = "b01".U
@@ -201,29 +168,46 @@ class Memend extends XSModule {
   assert(!(fenceFlush && atomicsFlush))
   sbuffer.io.flush.valid := fenceFlush || atomicsFlush
 
+  // TODO: make 0/1 configurable
   // AtomicsUnit
   // AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
-  val ld0_atomics = io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou
-  val ld1_atomics = io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
+  val st0_atomics = io.backend.stin(0).valid && io.backend.stin(0).bits.uop.ctrl.fuType === FuType.mou
+  val st1_atomics = io.backend.stin(1).valid && io.backend.stin(1).bits.uop.ctrl.fuType === FuType.mou
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.out.ready       := false.B
 
   // dispatch 0 takes priority
-  atomicsUnit.io.in.valid := ld0_atomics || ld1_atomics
-  atomicsUnit.io.in.bits  := Mux(ld0_atomics, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
-  when (ld0_atomics) { io.backend.ldin(0).ready := atomicsUnit.io.in.ready }
-  when (!ld0_atomics && ld1_atomics) { io.backend.ldin(1).ready := atomicsUnit.io.in.ready }
+  atomicsUnit.io.in.valid := st0_atomics || st1_atomics
+  atomicsUnit.io.in.bits  := Mux(st0_atomics, io.backend.stin(0).bits, io.backend.stin(1).bits)
+  when (st0_atomics) {
+    io.backend.stin(0).ready := atomicsUnit.io.in.ready
+    // explitly set st1 ready to false, do not let it fire
+    when (st1_atomics) { io.backend.stin(1).ready := false.B }
+  }
+
+  when (!st0_atomics && st1_atomics) { io.backend.stin(1).ready := atomicsUnit.io.in.ready }
+
+  // for atomics, do not let them enter store unit
+  when (st0_atomics) { storeUnits(0).io.stin.valid := false.B }
+  when (st1_atomics) { storeUnits(1).io.stin.valid := false.B }
 
   when(atomicsUnit.io.dtlb.req.valid) {
     dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
+    // take load unit 0's tlb port
+    // make sure not to disturb loadUnit
+    assert(!loadUnits(0).io.dtlb.req.valid)
+    loadUnits(0).io.dtlb.resp.valid := false.B
   }
   atomicsUnit.io.dcache        <> io.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbEmpty
 
   when(atomicsUnit.io.out.valid){
     io.backend.ldout(0) <> atomicsUnit.io.out
+    // take load unit 0's write back port
+    assert(!loadUnits(0).io.ldout.valid)
+    loadUnits(0).io.ldout.ready := false.B
   }
 }

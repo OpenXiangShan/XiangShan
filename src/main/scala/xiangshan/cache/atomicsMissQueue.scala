@@ -124,4 +124,33 @@ class AtomicsMissQueue extends DCacheModule
       state := s_invalid
     }
   }
+
+  // debug output
+  when (io.lsu.req.fire()) {
+    XSDebug(s"io.lsu.req cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      io.lsu.req.bits.cmd, io.lsu.req.bits.addr, io.lsu.req.bits.data, io.lsu.req.bits.mask, io.lsu.req.bits.meta.id, io.lsu.req.bits.meta.replay)
+  }
+
+  val replay = io.replay.req
+  when (replay.fire()) {
+    XSDebug(s"replay cmd: %x addr: %x data: %x mask: %x id: %d replay: %b\n",
+      replay.bits.cmd, replay.bits.addr, replay.bits.data, replay.bits.mask, replay.bits.meta.id, replay.bits.meta.replay)
+  }
+
+  when (io.lsu.resp.fire()) {
+    XSDebug(s"io.lsu.resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
+      io.lsu.resp.bits.data, io.lsu.resp.bits.meta.id, io.lsu.resp.bits.meta.replay, io.lsu.resp.bits.miss, io.lsu.resp.bits.nack)
+  }
+
+  val miss_req = io.miss_req
+  XSDebug(miss_req.fire(), "miss_req cmd: %x addr: %x client_id: %d\n",
+    miss_req.bits.cmd, miss_req.bits.addr, miss_req.bits.client_id)
+
+  val miss_resp = io.miss_resp
+  XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d\n",
+    miss_resp.bits.client_id, miss_resp.bits.entry_id)
+
+  val miss_finish = io.miss_finish
+  XSDebug(miss_finish.fire(), "miss_finish client_id: %d entry_id: %d\n",
+    miss_finish.bits.client_id, miss_finish.bits.entry_id)
 }
