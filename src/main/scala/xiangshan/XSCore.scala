@@ -164,7 +164,7 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
   )
 
-  val LRSCCycles = 16
+  val LRSCCycles = 100
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
