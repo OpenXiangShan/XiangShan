@@ -11,36 +11,50 @@ import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 
 object LSUOpType {
-  def lb   = "b000000".U
-  def lh   = "b000001".U
-  def lw   = "b000010".U
-  def ld   = "b000011".U
-  def lbu  = "b000100".U
-  def lhu  = "b000101".U
-  def lwu  = "b000110".U
-  def ldu  = "b000111".U
-  def sb   = "b001000".U
-  def sh   = "b001001".U
-  def sw   = "b001010".U
-  def sd   = "b001011".U
-  
-  def lr      = "b100010".U
-  def sc      = "b100011".U
-  def amoswap = "b100001".U
-  def amoadd  = "b100000".U
-  def amoxor  = "b100100".U
-  def amoand  = "b101100".U
-  def amoor   = "b101000".U
-  def amomin  = "b110000".U
-  def amomax  = "b110100".U
-  def amominu = "b111000".U
-  def amomaxu = "b111100".U
-  
-  def isStore(func: UInt): Bool = func(3)
-  def isAtom(func: UInt): Bool = func(5)
-  
-  def atomW = "010".U
-  def atomD = "011".U
+    // normal load/store
+    // bit(1, 0) are size
+    def lb   = "b000000".U
+    def lh   = "b000001".U
+    def lw   = "b000010".U
+    def ld   = "b000011".U
+    def lbu  = "b000100".U
+    def lhu  = "b000101".U
+    def lwu  = "b000110".U
+    def sb   = "b001000".U
+    def sh   = "b001001".U
+    def sw   = "b001010".U
+    def sd   = "b001011".U
+
+    // float/double load store
+    def flw  = "b010110".U
+
+    // atomics
+    // bit(1, 0) are size
+    // since atomics use a different fu type
+    // so we can safely reuse other load/store's encodings
+    def lr_w      = "b000010".U
+    def sc_w      = "b000110".U
+    def amoswap_w = "b001010".U
+    def amoadd_w  = "b001110".U
+    def amoxor_w  = "b010010".U
+    def amoand_w  = "b010110".U
+    def amoor_w   = "b011010".U
+    def amomin_w  = "b011110".U
+    def amomax_w  = "b100010".U
+    def amominu_w = "b100110".U
+    def amomaxu_w = "b101010".U
+
+    def lr_d      = "b000011".U
+    def sc_d      = "b000111".U
+    def amoswap_d = "b001011".U
+    def amoadd_d  = "b001111".U
+    def amoxor_d  = "b010011".U
+    def amoand_d  = "b010111".U
+    def amoor_d   = "b011011".U
+    def amomin_d  = "b011111".U
+    def amomax_d  = "b100011".U
+    def amominu_d = "b100111".U
+    def amomaxu_d = "b101011".U
 }
 
 object DCacheAtomicsType {

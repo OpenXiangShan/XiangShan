@@ -263,8 +263,7 @@ class Lsroq extends XSModule {
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.data := rdataPartialLoad

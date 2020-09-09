@@ -58,7 +58,8 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src1
     io.dtlb.req.bits.roqIdx := in.uop.roqIdx
-    io.dtlb.req.bits.cmd    := Mux(in.uop.ctrl.fuOpType === LSUOpType.lr, TlbCmd.read, TlbCmd.write)
+    val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
+    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx
 
@@ -90,21 +91,33 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_cache_req) {
     io.dcache.req.valid := true.B
     io.dcache.req.bits.cmd := LookupTree(in.uop.ctrl.fuOpType, List(
-      LSUOpType.lr -> M_XLR,
-      LSUOpType.sc -> M_XSC,
-      LSUOpType.amoswap -> M_XA_SWAP,
-      LSUOpType.amoadd -> M_XA_ADD,
-      LSUOpType.amoxor -> M_XA_XOR,
-      LSUOpType.amoand -> M_XA_AND,
-      LSUOpType.amoor -> M_XA_OR,
-      LSUOpType.amomin -> M_XA_MIN,
-      LSUOpType.amomax -> M_XA_MAX,
-      LSUOpType.amominu -> M_XA_MINU,
-      LSUOpType.amomaxu -> M_XA_MAXU
+      LSUOpType.lr_w      -> M_XLR,
+      LSUOpType.sc_w      -> M_XSC,
+      LSUOpType.amoswap_w -> M_XA_SWAP,
+      LSUOpType.amoadd_w  -> M_XA_ADD,
+      LSUOpType.amoxor_w  -> M_XA_XOR,
+      LSUOpType.amoand_w  -> M_XA_AND,
+      LSUOpType.amoor_w   -> M_XA_OR,
+      LSUOpType.amomin_w  -> M_XA_MIN,
+      LSUOpType.amomax_w  -> M_XA_MAX,
+      LSUOpType.amominu_w -> M_XA_MINU,
+      LSUOpType.amomaxu_w -> M_XA_MAXU,
+
+      LSUOpType.lr_d      -> M_XLR,
+      LSUOpType.sc_d      -> M_XSC,
+      LSUOpType.amoswap_d -> M_XA_SWAP,
+      LSUOpType.amoadd_d  -> M_XA_ADD,
+      LSUOpType.amoxor_d  -> M_XA_XOR,
+      LSUOpType.amoand_d  -> M_XA_AND,
+      LSUOpType.amoor_d   -> M_XA_OR,
+      LSUOpType.amomin_d  -> M_XA_MIN,
+      LSUOpType.amomax_d  -> M_XA_MAX,
+      LSUOpType.amominu_d -> M_XA_MINU,
+      LSUOpType.amomaxu_d -> M_XA_MAXU
     ))
 
     io.dcache.req.bits.addr := paddr 
-    io.dcache.req.bits.data := in.src2
+    io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
     io.dcache.req.bits.meta.id       := DCacheAtomicsType.atomics
