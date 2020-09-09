@@ -134,7 +134,44 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
     when(io.dcache.resp.fire()) {
-      resp_data := io.dcache.resp.bits.data
+      val rdata = io.dcache.resp.bits.data
+      val rdataSel = LookupTree(paddr(2, 0), List(
+        "b000".U -> rdata(63, 0),
+        "b001".U -> rdata(63, 8),
+        "b010".U -> rdata(63, 16),
+        "b011".U -> rdata(63, 24),
+        "b100".U -> rdata(63, 32),
+        "b101".U -> rdata(63, 40),
+        "b110".U -> rdata(63, 48),
+        "b111".U -> rdata(63, 56)
+      ))
+
+      resp_data := LookupTree(in.uop.ctrl.fuOpType, List(
+        LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.sc_w      -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amoadd_w  -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amoxor_w  -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amoand_w  -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amoor_w   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amomin_w  -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amomax_w  -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amominu_w -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.amomaxu_w -> SignExt(rdataSel(31, 0), XLEN),
+
+        LSUOpType.lr_d      -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.sc_d      -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amoswap_d -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amoadd_d  -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amoxor_d  -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amoand_d  -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amoor_d   -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amomin_d  -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amomax_d  -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amominu_d -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.amomaxu_d -> SignExt(rdataSel(63, 0), XLEN)
+      ))
+
       state := s_finish
     }
   }
