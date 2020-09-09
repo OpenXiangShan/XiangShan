@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class AtomicsUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {

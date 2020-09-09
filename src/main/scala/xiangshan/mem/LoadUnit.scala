@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)

@@ -3,7 +3,7 @@ package xiangshan.backend.decode.isa
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
-import xiangshan.mem.LSUOpType
+import xiangshan.backend.LSUOpType
 import xiangshan.backend.decode.HasInstrType
 
 

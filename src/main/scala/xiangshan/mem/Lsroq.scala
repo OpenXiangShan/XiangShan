@@ -6,6 +6,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class LsRoqEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
