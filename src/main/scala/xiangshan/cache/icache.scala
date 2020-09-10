@@ -1,13 +1,14 @@
 package xiangshan.cache
 
-import chisel3.util.experimental.BoringUtils
-import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import device._
 import xiangshan._
 import xiangshan.frontend._
 import utils._
+import chisel3.ExcitingUtils._
+import chisel3.util.experimental.BoringUtils
+import chipsalliance.rocketchip.config.Parameters
 
 import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
 import freechips.rocketchip.diplomacy.{AddressSet,IdRange,LazyModule, LazyModuleImp, TransferSizes}
@@ -174,11 +175,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   // generate the one hot code according to a UInt between 0-8
   def PriorityMask(sourceVec: UInt) : UInt = {
-    val OH = Mux(sourceVec >= 8.U, "b1000".U,
+    val oneHot = Mux(sourceVec >= 8.U, "b1000".U,
              Mux(sourceVec >= 4.U, "b0100".U,
              Mux(sourceVec >= 2.U, "b0010".U, "b0001".U)))
-    OH
+    oneHot
   }
+
 
   val (bus, edge) = outer.clientNode.out.head
   val io = IO(new ICacheIO(edge))
@@ -259,10 +261,13 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
+  val s3_mmio = s3_valid &&  AddressSpace.isMMIO(s3_tlb_resp.paddr)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
   val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))
+
+  assert(!(s3_hit && s3_mmio), "MMIO address should not hit in ICache!")
 
   // icache hit 
   // simply cut the hit cacheline
@@ -271,9 +276,10 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
 
   //icache miss
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
+  val s_idle :: s_mmioReq :: s_mmioResp :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(cacheDataBeats)
+  val mmioAddrReg = RegInit(0.U(PAddrBits.W))
 
   //pipeline flush register
   val needFlush = RegInit(false.B)
@@ -291,14 +297,37 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val waitForRefillDone = needFlush || cacheflushed
 
   // state change to wait for a cacheline refill
+  val countFull = readBeatCnt.value === (cacheDataBeats - 1).U
   switch(state){
     is(s_idle){
-      when(s3_miss && io.flush === 0.U){
+      when(s3_mmio && io.flush === 0.U){
+        state := s_mmioReq
+        readBeatCnt.value := 0.U
+        mmioAddrReg := s3_tlb_resp.paddr
+      } .elsewhen(s3_miss && io.flush === 0.U){
         state := s_memReadReq
         readBeatCnt.value := 0.U
       }
     }
 
+    //mmio request
+    is(s_mmioReq){
+      when(bus.a.fire()){
+        state := s_mmioResp
+        mmioAddrReg := mmioAddrReg + 8.U   //consider MMIO response 64 bits valid data
+      }
+    }
+
+    is(s_mmioResp){
+      when (edge.hasData(bus.d.bits) && bus.d.fire()) {
+        readBeatCnt.inc()
+        assert(refill_done, "MMIO response should be one beat only!")
+        refillDataReg(readBeatCnt.value) := bus.d.bits.data.asTypeOf(new ICacheDataBundle)
+        state := Mux(countFull,s_wait_resp,s_mmioReq)
+      }
+    }
+
+    // memory request
     is(s_memReadReq){ 
       when(bus.a.fire()){ 
         state := s_memReadResp
@@ -306,15 +335,13 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
     }
 
     is(s_memReadResp){
-      when (edge.hasData(bus.d.bits)) {
-        when(bus.d.fire()){
+      when (edge.hasData(bus.d.bits) && bus.d.fire()) {
           readBeatCnt.inc()
           refillDataReg(readBeatCnt.value) := bus.d.bits.data.asTypeOf(new ICacheDataBundle)
-          when(readBeatCnt.value === (cacheDataBeats - 1).U){
+          when(countFull){
             assert(refill_done, "refill not done!")
             state := s_wait_resp
           }
-        }
       }
     }
 
@@ -398,13 +425,24 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   bus.b.ready := true.B
   bus.c.valid := false.B
   bus.e.valid := false.B
-  bus.a.valid := (state === s_memReadReq)
-  bus.a.bits  := edge.Get(
+  bus.a.valid := (state === s_memReadReq) || (state === s_mmioReq)
+  val memTileReq  = edge.Get(
     fromSource      = cacheID.U,
     toAddress       = groupPC(s3_tlb_resp.paddr),
-    lgSize          = (log2Up(cacheParams.blockBytes)).U)._2 
+    lgSize          = (log2Up(cacheParams.blockBytes)).U )._2 
+  val mmioTileReq = edge.Get(
+    fromSource      = cacheID.U,
+    toAddress       = mmioAddrReg,
+    lgSize          = (log2Up(cacheDataBits)).U )._2
+  bus.a.bits :=  Mux((state === s_mmioReq),mmioTileReq, memTileReq)
   bus.d.ready := true.B
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
+
+  //Performance Counter
+  if (!env.FPGAPlatform ) {
+    ExcitingUtils.addSource( s3_valid && (state === s_idle), "perfCntIcacheReqCnt", Perf)
+    ExcitingUtils.addSource( s3_valid && (state === s_idle) && s3_miss, "perfCntIcacheMissCnt", Perf)
+  }
 }
 

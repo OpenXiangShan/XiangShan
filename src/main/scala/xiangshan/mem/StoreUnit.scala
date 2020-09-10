@@ -70,6 +70,16 @@ class StoreUnit extends XSModule {
   s2_out.valid := io.stin.valid && !io.dtlb.resp.bits.miss && !s2_out.bits.uop.needFlush(io.redirect)
   io.stin.ready := s2_out.ready
 
+  // exception check
+  val addrAligned = LookupTree(io.stin.bits.uop.ctrl.fuOpType(1,0), List(
+    "b00".U   -> true.B,              //b
+    "b01".U   -> (s2_out.bits.vaddr(0) === 0.U),   //h
+    "b10".U   -> (s2_out.bits.vaddr(1,0) === 0.U), //w
+    "b11".U   -> (s2_out.bits.vaddr(2,0) === 0.U)  //d
+  ))
+  s2_out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+  s2_out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlb.resp.bits.excp.pf.st
+
   PipelineConnect(s2_out, s3_in, true.B, false.B)
   //-------------------------------------------------------
   // ST Pipeline Stage 3

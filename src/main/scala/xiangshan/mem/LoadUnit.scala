@@ -75,6 +75,16 @@ class LoadUnit extends XSModule {
   l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
   io.ldin.ready := l2_out.ready
 
+  // exception check
+  val addrAligned = LookupTree(io.ldin.bits.uop.ctrl.fuOpType(1,0), List(
+    "b00".U   -> true.B,              //b
+    "b01".U   -> (l2_out.bits.vaddr(0) === 0.U),   //h
+    "b10".U   -> (l2_out.bits.vaddr(1,0) === 0.U), //w
+    "b11".U   -> (l2_out.bits.vaddr(2,0) === 0.U)  //d
+  ))
+  l2_out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
+  l2_out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlb.resp.bits.excp.pf.ld
+
   // send result to dcache
   // never send tlb missed or MMIO reqs to dcache
   io.dcache.req.valid     := l2_dcache
