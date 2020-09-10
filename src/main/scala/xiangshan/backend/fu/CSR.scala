@@ -176,6 +176,7 @@ class CSRIO extends FunctionUnitIO {
   val exception = Flipped(ValidIO(new MicroOp))
   // for exception check
   val instrValid = Input(Bool())
+  val flushPipe = Output(Bool())
   // for differential testing
 //  val intrNO = Output(UInt(XLEN.W))
   val wenFix = Output(Bool())
@@ -673,9 +674,9 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   ExcitingUtils.addSource(trapTarget, "trapTarget")
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.redirect := DontCare
-  io.redirectValid := (valid && func === CSROpType.jmp && !isEcall) || resetSatp
-  //TODO: use pred pc instead pc+4
-  io.redirect.target := Mux(resetSatp, io.cfIn.pc+4.U, retTarget)
+  io.redirectValid := valid && func === CSROpType.jmp && !isEcall
+  io.redirect.target := retTarget
+  io.flushPipe := resetSatp
 
   XSDebug(io.redirectValid, "redirect to %x, pc=%x\n", io.redirect.target, io.cfIn.pc)
 

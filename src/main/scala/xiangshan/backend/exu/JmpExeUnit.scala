@@ -42,6 +42,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val csrExuOut = Wire(new ExuOutput)
   csrExuOut.uop := uop
   csrExuOut.uop.cf := csr.io.cfOut
+  csrExuOut.uop.ctrl.flushPipe := csr.io.flushPipe
   csrExuOut.data := csrOut
   csrExuOut.redirectValid := csr.io.redirectValid
   csrExuOut.redirect.brTag := uop.brTag
