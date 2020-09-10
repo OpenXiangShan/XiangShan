@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.XSDebug
+import utils.{XSDebug, ErrGen}
 
 // this is a traditional cache pipeline:
 // it handles load/store/amo/lr,sc
@@ -176,11 +176,20 @@ class AtomicsPipe extends DCacheModule
   }
 
   // load data gen
-  val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
+  val s2_data_words = Wire(Vec(rowWords, UInt(encDataBits.W)))
+  for (w <- 0 until rowWords) {
+    s2_data_words(w) := s2_data_muxed(encDataBits * (w + 1) - 1, encDataBits * w)
+  }
+  val s2_data_word =  s2_data_words(s2_word_idx)
+  val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
+  val s2_data_word_decoded = s2_decoded.corrected
+  assert(!(s2_valid && !s2_hit && !s2_nack && s2_decoded.uncorrectable))
+
+
 
   val resp = Wire(ValidIO(new DCacheResp))
   resp.valid     := s2_valid
-  resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word)
+  resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word_decoded)
   resp.bits.meta := s2_req.meta
   resp.bits.miss := !s2_hit
   resp.bits.nack := s2_nack
@@ -201,19 +210,23 @@ class AtomicsPipe extends DCacheModule
   val amoalu   = Module(new AMOALU(DataBits))
   amoalu.io.mask := s2_req.mask
   amoalu.io.cmd  := s2_req.cmd
-  amoalu.io.lhs  := s2_data_word
+  amoalu.io.lhs  := s2_data_word_decoded
   amoalu.io.rhs  := s2_req.data
 
   val s3_req   = RegNext(s2_req)
   val s3_valid = RegNext(s2_valid && s2_hit && isWrite(s2_req.cmd) && !s2_nack && !s2_sc_fail)
   val s3_tag_match_way = RegNext(s2_tag_match_way)
 
-  s3_req.data := amoalu.io.out
+  val wdata_encoded = cacheParams.dataCode.encode(amoalu.io.out)
+  val wdata_flipped = ErrGen(wdata_encoded, 1)
+  val s3_wdata = Reg(UInt())
+  s3_wdata := wdata_flipped
 
   // write dcache if hit
   // only needs to read the specific beat
   val wmask = WireInit(VecInit((0 until refillCycles) map (i => 0.U(rowWords.W))))
-  val wdata = WireInit(VecInit((0 until refillCycles) map (i => Cat(0.U((encRowBits - rowBits).W), s3_req.data))))
+  val wdata = WireInit(VecInit((0 until refillCycles) map (i => Cat(
+    (0 until rowWords) map { w => s3_wdata }))))
   wmask(get_beat(s3_req.addr)) := ~0.U(rowWords.W)
 
   val data_write = io.data_write.bits

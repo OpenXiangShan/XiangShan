@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
-import utils.{HasTLDump, XSDebug}
+import utils.{HasTLDump, XSDebug, ErrGen}
 
 class MissReq extends DCacheBundle
 {
@@ -272,7 +272,13 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       when (io.mem_grant.fire()) {
         should_refill_data := true.B
         refill_ctr := refill_ctr + 1.U
-        refill_data(refill_ctr) := io.mem_grant.bits.data
+        refill_data(refill_ctr) := Cat((rowWords - 1 to 0) map { w =>
+          val word = io.mem_grant.bits.data(wordBits * (w + 1) - 1, wordBits * w)
+          val word_encoded = cacheParams.dataCode.encode(word)
+          val word_flipped = ErrGen(word_encoded, 1)
+          word_flipped
+        })
+
         when (refill_ctr === (cacheDataBeats - 1).U) {
           assert(refill_done, "refill not done!")
         }

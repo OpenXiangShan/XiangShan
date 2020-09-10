@@ -84,7 +84,14 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     when (data_array_ctr === (dataArrayLatency - 1).U) {
       val way_idx = OHToUInt(req.way_en)
       for (i <- 0 until refillCycles) {
-        wb_buffer(i) := io.data_resp(way_idx)(i)
+        wb_buffer(i) := Cat((rowWords - 1 to 0) map { w =>
+          val data_word = io.data_resp(way_idx)(i)(
+            encDataBits * (w + 1) - 1, encDataBits * w)
+          val decoded = cacheParams.dataCode.decode(data_word)
+          val data_word_decoded = decoded.corrected
+          assert(!decoded.uncorrectable)
+          data_word_decoded
+        })
       }
 
       state := s_active

@@ -20,7 +20,6 @@ case class DCacheParameters
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
-    dataECCBytes: Int = 1,
     nMissEntries: Int = 1,
     nLoadMissEntries: Int = 1,
     nStoreMissEntries: Int = 1,
@@ -63,10 +62,6 @@ trait HasDCacheParameters extends HasL1CacheParameters {
 
   def rowWords = rowBits/wordBits
   def doNarrowRead = DataBits * nWays % rowBits == 0
-  def eccBytes = cacheParams.dataECCBytes
-  val eccBits = cacheParams.dataECCBytes * 8
-  val encBits = cacheParams.dataCode.width(eccBits)
-  val encWordBits = encBits * (wordBits / eccBits)
   def encDataBits = cacheParams.dataCode.width(wordBits) // NBDCache only
   def encRowBits = encDataBits*rowWords
   def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed

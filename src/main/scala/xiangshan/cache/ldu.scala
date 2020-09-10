@@ -119,11 +119,19 @@ class LoadPipe extends DCacheModule
   dump_pipeline_valids("LoadPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
   // load data gen
-  val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
+  val s2_data_words = Wire(Vec(rowWords, UInt(encDataBits.W)))
+  for (w <- 0 until rowWords) {
+    s2_data_words(w) := s2_data_muxed(encDataBits * (w + 1) - 1, encDataBits * w)
+  }
+  val s2_data_word =  s2_data_words(s2_word_idx)
+  val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
+  val s2_data_word_decoded = s2_decoded.corrected
+  assert(!(s2_valid && !s2_hit && !s2_nack && s2_decoded.uncorrectable))
+
 
   val resp = Wire(ValidIO(new DCacheResp))
   resp.valid     := s2_valid
-  resp.bits.data := s2_data_word
+  resp.bits.data := s2_data_word_decoded
   resp.bits.meta := s2_req.meta
   resp.bits.miss := !s2_hit
   resp.bits.nack := s2_nack

@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.XSDebug
+import utils.{XSDebug, ErrGen}
 
 class StorePipe extends DCacheModule
 {
@@ -95,8 +95,15 @@ class StorePipe extends DCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
-  val wdata = Wire(Vec(refillCycles, UInt(rowBits.W)))
-  val wmask = Wire(Vec(refillCycles, UInt(rowBytes.W)))
+  val s2_data_decoded = (0 until refillCycles) map { r =>
+    (0 until rowWords) map { w =>
+      val data = s2_data(r)(encDataBits * (w + 1) - 1, encDataBits * w)
+      val decoded = cacheParams.dataCode.decode(data)
+      assert(!(s2_valid && !s2_hit && !s2_nack && decoded.uncorrectable))
+      decoded.corrected
+    }
+  }
+
   val wdata_merged = Wire(Vec(refillCycles, UInt(encRowBits.W)))
 
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
@@ -106,11 +113,17 @@ class StorePipe extends DCacheModule
 
   // now, we do not deal with ECC
   for (i <- 0 until refillCycles) {
-    wdata(i)        := s2_req.data(rowBits * (i + 1) - 1, rowBits * i)
-    wmask(i)        := s2_req.mask(rowBytes * (i + 1) - 1, rowBytes * i)
-    wdata_merged(i) := Cat(s2_data(i)(encRowBits - 1, rowBits),
-      mergePutData(s2_data(i)(rowBits - 1, 0), wdata(i), wmask(i)))
+    wdata_merged(i) := Cat((rowWords - 1 to 0) map { w =>
+      val old_data = s2_data_decoded(i)(w)
+      val new_data = s2_req.data(rowBits * (i + 1) - 1, rowBits * i)(wordBits * (w + 1) - 1, wordBits * w)
+      val wmask = s2_req.mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w)
+      val wdata = mergePutData(old_data, new_data, wmask)
+      val wdata_encoded = cacheParams.dataCode.encode(wdata)
+      val wdata_flipped = ErrGen(wdata_encoded, 1)
+      wdata_flipped
+    })
   }
+
 
   // write dcache if hit
   val data_write = io.data_write.bits
