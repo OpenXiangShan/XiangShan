@@ -18,13 +18,13 @@ import xstransforms.ShowPrintTransform
 class DiffTestIO extends XSBundle {
   val r = Output(Vec(64, UInt(XLEN.W)))
   val commit = Output(UInt(32.W))
-  val thisPC = Output(UInt(VAddrBits.W))
+  val thisPC = Output(UInt(XLEN.W))
   val thisINST = Output(UInt(32.W))
   val skip = Output(UInt(32.W))
   val wen = Output(UInt(32.W))
   val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
-  val wpc = Output(Vec(CommitWidth, UInt(VAddrBits.W))) // set difftest width to 6
+  val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
 

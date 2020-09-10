@@ -122,7 +122,7 @@ class Dispatch2Int extends XSModule {
 
     io.enqIQData(i) := DontCare
     io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.src1Type === SrcType.pc,
-      uopReg(i).cf.pc, io.readRf(readPortIndexReg(i)).data)
+      SignExt(uopReg(i).cf.pc, XLEN), io.readRf(readPortIndexReg(i)).data)
     io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.src2Type === SrcType.imm,
       uopReg(i).ctrl.imm, io.readRf(readPortIndexReg(i) + 1.U).data)
 
