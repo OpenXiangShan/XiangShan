@@ -314,6 +314,11 @@ class BPUStage3 extends BPUStage {
     when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
   }
 
+
+  when (!io.predecode.bits.isFetchpcEqualFirstpc) {
+    lastValidPos := PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)) + 1.U
+  }
+
   lastIsRVC := pds(lastValidPos).isRVC
   when (lastValidPos === 1.U) {
     lastHit := pdMask(1) |
