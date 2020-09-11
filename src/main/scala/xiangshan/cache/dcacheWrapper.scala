@@ -170,8 +170,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // data array
   val DataWritePortCount = 3
   val StorePipeDataWritePort = 0
-  val MissQueueDataWritePort = 1
-  val AtomicsPipeDataWritePort = 2
+  val AtomicsPipeDataWritePort = 1
+  val MissQueueDataWritePort = 2
 
   val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
 
