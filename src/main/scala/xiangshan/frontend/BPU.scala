@@ -137,14 +137,10 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
   // get the last valid inst
-  // val lastValidPos = MuxCase(0.U, (PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
-  val lastValidPos = PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U))
+  val lastValidPos = WireInit(PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)))
   val lastHit   = Wire(Bool())
   val lastIsRVC = Wire(Bool())
-  // val lastValidPos = WireInit(0.U(log2Up(PredictWidth).W))
-  // for (i <- 0 until PredictWidth) {
-  //   when (inLatch.mask(i)) { lastValidPos := i.U }
-  // }
+  
   val targetSrc = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
   val target = Mux(taken, targetSrc(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
