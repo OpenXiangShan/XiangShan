@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.brq.BrqPtr
 
-trait LTBParams extends HasXSParameter {
+trait LTBParams extends HasXSParameter with HasBPUParameter {
   //  +-----------+---------+--------------+-----------+
   //  |    tag    |   idx   |    4 bits    | 0 (1 bit) |
   //  +-----------+---------+--------------+-----------+
@@ -17,7 +17,7 @@ trait LTBParams extends HasXSParameter {
 }
 
 abstract class LTBBundle extends XSBundle with LTBParams
-abstract class LTBModule extends XSModule with LTBParams
+abstract class LTBModule extends XSModule with LTBParams { val debug = false }
 
 // class LoopMeta extends LTBBundle {
 // }
@@ -167,23 +167,25 @@ class LTBColumn extends LTBModule {
     if3_entry.specCnt := if3_entry.nSpecCnt
   }
 
-  //debug info
-  XSDebug(doingReset, "Reseting...\n")
-  XSDebug("[IF3][req] v=%d pc=%x idx=%x tag=%x\n", io.req.valid, io.req.bits.pc, io.req.bits.idx, io.req.bits.tag)
-  XSDebug("[IF3][if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", if3_entry.tag, if3_entry.conf, if3_entry.age, if3_entry.tripCnt, if3_entry.specCnt, if3_entry.nSpecCnt)
-  XSDebug(false, true.B, p" brTag=${if3_entry.brTag}\n")
-  // XSDebug("[IF4] idx=%x tag=%x specCnt=%d\n", if4_idx, if4_tag, if4_specCnt)
-  // XSDebug(RegNext(io.req.valid) && if4_entry.tag === if4_tag, "[IF4][speculative update] new specCnt=%d\n",
-  //   Mux(if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned, 0.U, if4_specCnt + 1.U))
-  XSDebug(io.req.valid && if3_entry.tag === if3_tag, "[IF3][speculative update] new specCnt=%d\n",
-    Mux(if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf, 0.U, if3_entry.specCnt + 1.U))
-  XSDebug("[update] v=%d misPred=%d pc=%x idx=%x tag=%x meta=%d taken=%d tagMatch=%d cntMatch=%d", io.update.valid, io.update.bits.misPred, io.update.bits.pc, updateIdx, updateTag, io.update.bits.meta, io.update.bits.taken, tagMatch, cntMatch)
-  XSDebug(false, true.B, p" brTag=${updateBrTag}\n")
-  XSDebug("[entry ] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", entry.tag, entry.conf, entry.age, entry.tripCnt, entry.specCnt, entry.nSpecCnt)
-  XSDebug(false, true.B, p" brTag=${entry.brTag}\n")
-  XSDebug("[wEntry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", wEntry.tag, wEntry.conf, wEntry.age, wEntry.tripCnt, wEntry.specCnt, wEntry.nSpecCnt)
-  XSDebug(false, true.B, p" brTag=${wEntry.brTag}\n")
-  XSDebug(io.update.valid && io.update.bits.misPred || io.repair, "MisPred or repairing, all of the nSpecCnts copy their values into the specCnts\n")
+  if (BPUDebug && debug) {
+    //debug info
+    XSDebug(doingReset, "Reseting...\n")
+    XSDebug("[IF3][req] v=%d pc=%x idx=%x tag=%x\n", io.req.valid, io.req.bits.pc, io.req.bits.idx, io.req.bits.tag)
+    XSDebug("[IF3][if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", if3_entry.tag, if3_entry.conf, if3_entry.age, if3_entry.tripCnt, if3_entry.specCnt, if3_entry.nSpecCnt)
+    XSDebug(false, true.B, p" brTag=${if3_entry.brTag}\n")
+    // XSDebug("[IF4] idx=%x tag=%x specCnt=%d\n", if4_idx, if4_tag, if4_specCnt)
+    // XSDebug(RegNext(io.req.valid) && if4_entry.tag === if4_tag, "[IF4][speculative update] new specCnt=%d\n",
+    //   Mux(if4_specCnt === if4_entry.tripCnt && if4_entry.isLearned, 0.U, if4_specCnt + 1.U))
+    XSDebug(io.req.valid && if3_entry.tag === if3_tag, "[IF3][speculative update] new specCnt=%d\n",
+      Mux(if3_entry.specCnt === if3_entry.tripCnt && if3_entry.isConf, 0.U, if3_entry.specCnt + 1.U))
+    XSDebug("[update] v=%d misPred=%d pc=%x idx=%x tag=%x meta=%d taken=%d tagMatch=%d cntMatch=%d", io.update.valid, io.update.bits.misPred, io.update.bits.pc, updateIdx, updateTag, io.update.bits.meta, io.update.bits.taken, tagMatch, cntMatch)
+    XSDebug(false, true.B, p" brTag=${updateBrTag}\n")
+    XSDebug("[entry ] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", entry.tag, entry.conf, entry.age, entry.tripCnt, entry.specCnt, entry.nSpecCnt)
+    XSDebug(false, true.B, p" brTag=${entry.brTag}\n")
+    XSDebug("[wEntry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", wEntry.tag, wEntry.conf, wEntry.age, wEntry.tripCnt, wEntry.specCnt, wEntry.nSpecCnt)
+    XSDebug(false, true.B, p" brTag=${wEntry.brTag}\n")
+    XSDebug(io.update.valid && io.update.bits.misPred || io.repair, "MisPred or repairing, all of the nSpecCnts copy their values into the specCnts\n")
+  }
 
 }
 
@@ -249,20 +251,22 @@ class LoopPredictor extends BasePredictor with LTBParams {
   (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(bankIdxInOrderLatch(i)).exit)
   (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(bankIdxInOrderLatch(i)).meta)
 
-  // debug info
-  XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x baseBank=%x baseRow=%x baseTag=%x\n", io.pc.valid, io.flush, io.pc.bits, baseBank, baseRow, baseTag)
-  XSDebug("[IF3][req] isInNextRow=%b tagInc=%b\n", isInNextRow.asUInt, tagIncremented.asUInt)
-  for (i <- 0 until PredictWidth) {
-    XSDebug("[IF3][req] bank %d: v=%d mask=%d pc=%x idx=%x tag=%x\n", i.U, ltbs(i).io.req.valid, realMask(i), ltbs(i).io.req.bits.pc, ltbs(i).io.req.bits.idx, ltbs(i).io.req.bits.tag)
-  }
-  XSDebug("[IF4] baseBankLatch=%x bankIdxInOrderLatch=", baseBankLatch)
-  for (i <- 0 until PredictWidth) {
-    XSDebug(false, true.B, "%x ", bankIdxInOrderLatch(i))
-  }
-  XSDebug(false, true.B, "\n")
-  for (i <- 0 until PredictWidth) {
-    XSDebug(RegNext(io.pc.valid) && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
-    XSDebug(false, RegNext(io.pc.valid), " %d:%d %d", i.U, io.resp.exit(i), io.meta.specCnts(i))
-    XSDebug(false, RegNext(io.pc.valid) && (i.U === 7.U || i.U === 15.U), "\n")
+  if (BPUDebug && debug) {
+    // debug info
+    XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x baseBank=%x baseRow=%x baseTag=%x\n", io.pc.valid, io.flush, io.pc.bits, baseBank, baseRow, baseTag)
+    XSDebug("[IF3][req] isInNextRow=%b tagInc=%b\n", isInNextRow.asUInt, tagIncremented.asUInt)
+    for (i <- 0 until PredictWidth) {
+      XSDebug("[IF3][req] bank %d: v=%d mask=%d pc=%x idx=%x tag=%x\n", i.U, ltbs(i).io.req.valid, realMask(i), ltbs(i).io.req.bits.pc, ltbs(i).io.req.bits.idx, ltbs(i).io.req.bits.tag)
+    }
+    XSDebug("[IF4] baseBankLatch=%x bankIdxInOrderLatch=", baseBankLatch)
+    for (i <- 0 until PredictWidth) {
+      XSDebug(false, true.B, "%x ", bankIdxInOrderLatch(i))
+    }
+    XSDebug(false, true.B, "\n")
+    for (i <- 0 until PredictWidth) {
+      XSDebug(RegNext(io.pc.valid) && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
+      XSDebug(false, RegNext(io.pc.valid), " %d:%d %d", i.U, io.resp.exit(i), io.meta.specCnts(i))
+      XSDebug(false, RegNext(io.pc.valid) && (i.U === 7.U || i.U === 15.U), "\n")
+    }
   }
 }

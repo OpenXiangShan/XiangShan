@@ -29,11 +29,11 @@ class Frontend extends XSModule {
 
   io.backend.cfVec <> ibuffer.io.out
 
-  for(out <- ibuffer.io.out){
-    XSInfo(out.fire(),
-      p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
-    )
-  }
+  // for(out <- ibuffer.io.out){
+  //   XSInfo(out.fire(),
+  //     p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
+  //   )
+  // }
 
 
 }

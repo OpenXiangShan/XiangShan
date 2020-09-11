@@ -8,7 +8,8 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = true
+  val BPUDebug = false
+  val EnableCFICommitLog = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -568,6 +569,9 @@ class BPU extends BaseBPU {
       val bo = btb.io.resp
       XSDebug("debug: btb hits:%b\n", bo.hits.asUInt)
     }
+  }
+  
+  if (EnableCFICommitLog) {
     val buValid = io.inOrderBrInfo.valid
     val buinfo  = io.inOrderBrInfo.bits.ui
     val pd = buinfo.pd

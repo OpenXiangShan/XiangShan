@@ -78,7 +78,6 @@ class MicroBTB extends BasePredictor
     val read_req_basebank = getBank(io.pc.bits)
     // val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
-    XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
     
     class ReadRespEntry extends XSBundle
     {
@@ -193,6 +192,7 @@ class MicroBTB extends BasePredictor
     }
 
     if (BPUDebug && debug) {
+        XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
         XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
         for(i <- 0 until PredictWidth) {
             XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",

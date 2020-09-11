@@ -92,11 +92,7 @@ class BTB extends BasePredictor with BTBParams{
 
   // those banks whose indexes are less than baseBank are in the next row
   val isInNextRow = VecInit((0 until BtbBanks).map(_.U < baseBank))
-  XSDebug("isInNextRow: ")
-  (0 until BtbBanks).foreach(i => {
-    XSDebug(false, true.B, "%d ", isInNextRow(i))
-    if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
-  })
+
 
   val baseRow = btbAddr.getBankIdx(io.pc.bits)
 
@@ -229,6 +225,12 @@ class BTB extends BasePredictor with BTBParams{
 
   if (BPUDebug && debug) {
     val debug_verbose = true
+    
+    XSDebug("isInNextRow: ")
+    (0 until BtbBanks).foreach(i => {
+      XSDebug(false, true.B, "%d ", isInNextRow(i))
+      if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
+    })
 
     val validLatch = RegNext(io.pc.valid)
     XSDebug(io.pc.valid, "read: pc=0x%x, baseBank=%d, realMask=%b\n", io.pc.bits, baseBank, realMask)

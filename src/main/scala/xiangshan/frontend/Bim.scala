@@ -129,11 +129,13 @@ class BIM extends BasePredictor with BimParams{
     bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtr)
   }
 
-  XSDebug(doing_reset, "Reseting...\n")
-  XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x brTgt=%x\n", io.update.valid, u.pc, u.pnpc, u.target, u.brTarget)
-  XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)
-  XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.brInfo.bimCtr)}\n")
-  XSDebug("needToUpdate=%d updateBank=%x updateRow=%x newCtr=%b oldCtr=%b\n", needToUpdate, updateBank, updateRow, newCtr, oldCtr)
-  XSDebug("[wrbypass] hit=%d hits=%b\n", wrbypass_hit, wrbypass_hits.asUInt)
+  if (BPUDebug && debug) {
+    XSDebug(doing_reset, "Reseting...\n")
+    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x brTgt=%x\n", io.update.valid, u.pc, u.pnpc, u.target, u.brTarget)
+    XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)
+    XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.brInfo.bimCtr)}\n")
+    XSDebug("needToUpdate=%d updateBank=%x updateRow=%x newCtr=%b oldCtr=%b\n", needToUpdate, updateBank, updateRow, newCtr, oldCtr)
+    XSDebug("[wrbypass] hit=%d hits=%b\n", wrbypass_hit, wrbypass_hits.asUInt)
+  }
   
 }
