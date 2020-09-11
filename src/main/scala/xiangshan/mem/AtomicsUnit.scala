@@ -14,6 +14,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val dcache        = new DCacheLoadIO
     val dtlb          = new TlbRequestIO
     val flush_sbuffer = new SbufferFlushBundle
+    val tlbFeedback   = ValidIO(new TlbFeedback)
   })
 
   //-------------------------------------------------------
@@ -51,6 +52,15 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       state := s_tlb
     }
   }
+
+  // Send TLB feedback to store issue queue
+  // we send feedback right after we receives request
+  // also, we always treat amo as tlb hit
+  // since we will continue polling tlb all by ourself
+  io.tlbFeedback.valid       := RegNext(io.in.fire())
+  io.tlbFeedback.bits.hit    := true.B
+  io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
+
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
