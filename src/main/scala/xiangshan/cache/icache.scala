@@ -45,7 +45,9 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def beatWords = beatBytes / wordBytes
   def beatOffBits = log2Up(beatBytes)
   def cacheID = 0
-  def RVCInsLen = cacheDataBits/4 
+  def RVCInsLen = cacheDataBits/4
+  def tileBusWidth = DataBits * 4 // 256 bits bus
+  def tileBeatCnt = cacheParams.blockBytes * 8 / tileBusWidth
 
   def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
   def get_tag(addr: UInt) = addr >> untagBits
@@ -265,7 +267,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
-  val refillDataReg = Reg(Vec(cacheDataBeats,new ICacheDataBundle))
+  val refillDataReg = Reg(Vec(tileBeatCnt,UInt(tileBusWidth.W)))
 
   assert(!(s3_hit && s3_mmio), "MMIO address should not hit in ICache!")
 
@@ -278,8 +280,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //icache miss
   val s_idle :: s_mmioReq :: s_mmioResp :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
-  val readBeatCnt = Counter(cacheDataBeats)
+  val readBeatCnt = Counter(tileBeatCnt)
+
+  //uncache request
+  val mmioBeatCnt = Counter(cacheDataBeats)
   val mmioAddrReg = RegInit(0.U(PAddrBits.W))
+  val mmioReg = Reg(Vec(cacheDataBeats/2, UInt(cacheDataBeats.W))
 
   //pipeline flush register
   val needFlush = RegInit(false.B)
@@ -297,12 +303,13 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val waitForRefillDone = needFlush || cacheflushed
 
   // state change to wait for a cacheline refill
-  val countFull = readBeatCnt.value === (cacheDataBeats - 1).U
+  val countFull = readBeatCnt.value === (tileBeatCnt - 1).U
+  val mmioCntFull = mmioBeatCnt.value === (cacheDataBeats - 1).U
   switch(state){
     is(s_idle){
       when(s3_mmio && io.flush === 0.U){
         state := s_mmioReq
-        readBeatCnt.value := 0.U
+        mmioBeatCnt.value := 0.U
         mmioAddrReg := s3_tlb_resp.paddr
       } .elsewhen(s3_miss && io.flush === 0.U){
         state := s_memReadReq
@@ -320,9 +327,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
     is(s_mmioResp){
       when (edge.hasData(bus.d.bits) && bus.d.fire()) {
-        readBeatCnt.inc()
+        mmioBeatCnt.inc()
         assert(refill_done, "MMIO response should be one beat only!")
-        refillDataReg(readBeatCnt.value) := bus.d.bits.data.asTypeOf(new ICacheDataBundle)
+        mmioReg(mmioBeatCnt.value) := bus.d.bits.data
         state := Mux(countFull,s_wait_resp,s_mmioReq)
       }
     }
@@ -337,7 +344,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
     is(s_memReadResp){
       when (edge.hasData(bus.d.bits) && bus.d.fire()) {
           readBeatCnt.inc()
-          refillDataReg(readBeatCnt.value) := bus.d.bits.data.asTypeOf(new ICacheDataBundle)
+	  refillDataReg(readBeatCnt.value) := bus.d.bits.data.asTypeOf(new ICacheDataBundle)
           when(countFull){
             assert(refill_done, "refill not done!")
             state := s_wait_resp
@@ -361,14 +368,36 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   metaArray.io.w.req.valid := refillFinalOneBeat
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
-  for(b <- 0 until cacheDataBeats){
-    val writeOneBeat = (state === s_memReadResp) && bus.d.fire() && (b.U === readBeatCnt.value)
-    dataArray(b).io.w.req.valid := writeOneBeat
-    dataArray(b).io.w.req.bits.apply(   setIdx=get_idx(s3_req_pc), 
-                                        data=bus.d.bits.data.asTypeOf(new ICacheDataBundle), 
-                                        waymask=s3_wayMask)
+  if(tileBusWidth == 64){
+    for(b <- 0 until cacheDataBeats){
+      val writeOneBeat = (state === s_memReadResp) && bus.d.fire() && (b.U === readBeatCnt.value)
+      dataArray(b).io.w.req.valid := writeOneBeat
+      dataArray(b).io.w.req.bits.apply(   setIdx=get_idx(s3_req_pc), 
+                                          data=bus.d.bits.data.asTypeOf(new ICacheDataBundle), 
+                                          waymask=s3_wayMask)
 
+    }
   }
+  else{
+    val writeFirstHalf = (state === s_memReadResp) && bus.d.fire() && (readBeatCnt.value === 0.U)
+    (0 until cacheDataBeats/2).foreach{ b =>
+	dataArray(b).io.w.req.valid := writeFirstHalf
+	dataArray(b).io.w.req.bits.apply( setIdx=get_idx(s3_req_pc), 
+                                          data=bus.d.bits.data(b * 64 +63, b*64).asTypeOf(new ICacheDataBundle), 
+                                          waymask=s3_wayMask)
+
+    }
+    val writeLastHalf = (state === s_memReadResp) && bus.d.fire() && (readBeatCnt.value === 1.U)
+    (cacheDataBeats/2 until cacheDataBeats).foreach{ b =>
+    	val index = b - cacheDataBeats/2
+	dataArray(b).io.w.req.valid := writeLastHalf
+	dataArray(b).io.w.req.bits.apply( setIdx=get_idx(s3_req_pc), 
+                                          data=bus.d.bits.data(index * 64 +63, index*64).asTypeOf(new ICacheDataBundle), 
+                                          waymask=s3_wayMask)
+
+    }
+
+ }
 
   when(refillFinalOneBeat && !cacheflushed){
     validArray := validArray.bitSet(validPtr, true.B)
