@@ -150,7 +150,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.pred.bits.jmpIdx := jmpIdx
   io.pred.bits.hasNotTakenBrs := hasNTBr
   io.pred.bits.target := target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !lastIsRVC && lastHit
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken && !(jmpIdx === 0.U && !io.predecode.bits.isFetchpcEqualFirstpc)) || !taken ) && !lastIsRVC && lastHit
 
   io.out.bits <> DontCare
   io.out.bits.pc := inLatch.pc
@@ -311,9 +311,9 @@ class BPUStage3 extends BPUStage {
   }
 
 
-  when (!io.predecode.bits.isFetchpcEqualFirstpc) {
-    lastValidPos := PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)) + 1.U
-  }
+  // when (!io.predecode.bits.isFetchpcEqualFirstpc) {
+  //   lastValidPos := PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)) + 1.U
+  // }
 
   lastIsRVC := pds(lastValidPos).isRVC
   when (lastValidPos === 1.U) {
