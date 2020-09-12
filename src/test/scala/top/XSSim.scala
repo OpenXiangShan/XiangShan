@@ -35,6 +35,14 @@ class DiffTestIO extends XSBundle {
   val sepc = Output(UInt(64.W))
   val mcause = Output(UInt(64.W))
   val scause = Output(UInt(64.W))
+
+  val satp = Output(UInt(64.W))
+  val mip = Output(UInt(64.W))
+  val mie = Output(UInt(64.W))
+  val mscratch = Output(UInt(64.W))
+  val sscratch = Output(UInt(64.W))
+  val mideleg = Output(UInt(64.W))
+  val medeleg = Output(UInt(64.W))
 }
 
 class LogCtrlIO extends Bundle {
@@ -105,6 +113,13 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.sepc, "difftestSepc")
     BoringUtils.addSink(difftest.mcause, "difftestMcause")
     BoringUtils.addSink(difftest.scause, "difftestScause")
+    BoringUtils.addSink(difftest.satp, "difftestSatp")
+    BoringUtils.addSink(difftest.mip, "difftestMip")
+    BoringUtils.addSink(difftest.mie, "difftestMie")
+    BoringUtils.addSink(difftest.mscratch, "difftestMscratch")
+    BoringUtils.addSink(difftest.sscratch, "difftestSscratch")
+    BoringUtils.addSink(difftest.mideleg, "difftestMideleg")
+    BoringUtils.addSink(difftest.medeleg, "difftestMedeleg")
     io.difftest := difftest
 
     val trap = WireInit(0.U.asTypeOf(new TrapIO))

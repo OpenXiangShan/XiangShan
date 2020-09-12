@@ -23,8 +23,17 @@ enum {
   DIFFTEST_SSTATUS,
   DIFFTEST_SCAUSE,
   DIFFTEST_SEPC,
+  DIFFTEST_SATP,
+  DIFFTEST_MIP,
+  DIFFTEST_MIE,
+  DIFFTEST_MSCRATCH,
+  DIFFTEST_SSCRATCH,
+  DIFFTEST_MIDELEG,
+  DIFFTEST_MEDELEG,
   DIFFTEST_NR_REG
 };
+// DIFFTEST_MTVAL, DIFFTEST_STVAL will be updated while committing exception
+// Compare / snapshot them is not necessary
 
 struct DiffState {
   int commit;
