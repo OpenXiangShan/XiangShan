@@ -15,6 +15,12 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
                       ( 256,   16,    8),
                       ( 128,   32,    9),
                       ( 128,   64,    9))
+                      // (  64,   64,   11),
+                      // (  64,  101,   12),
+                      // (  64,  160,   12),
+                      // (  64,  254,   13),
+                      // (  32,  403,   14),
+                      // (  32,  640,   15))
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
   val TageBanks = PredictWidth // FetchWidth
@@ -467,7 +473,7 @@ class Tage extends BaseTage {
       updateU(allocate.bits)(idx) := 0.U
     }.otherwise {
       val provider = updateMeta.provider
-      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U)
+      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
       for (i <- 0 until TageNTables) {
         when (decrMask(i)) {
           updateUMask(i)(idx) := true.B

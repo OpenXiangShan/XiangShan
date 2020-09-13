@@ -65,9 +65,9 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val specCnt = UInt(10.W)
   val sawNotTakenBranch = Bool()
 
-  val debug_ubtb_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
-  val debug_btb_cycle  = if (BPUDebug) UInt(64.W) else UInt(0.W)
-  val debug_tage_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
+  val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+  val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+  val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
   def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
     this.histPtr := histPtr

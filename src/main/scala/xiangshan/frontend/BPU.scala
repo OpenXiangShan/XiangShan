@@ -10,6 +10,8 @@ import xiangshan.backend.JumpOpType
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
   val EnableCFICommitLog = true
+  val EnbaleCFIPredLog = true
+  val EnableBPUTimeRecord = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -140,7 +142,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   val notTakens = Wire(Vec(PredictWidth, Bool()))
   val brMask = Wire(Vec(PredictWidth, Bool()))
   val jmpIdx = PriorityEncoder(takens)
-  val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
+  val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i) && brMask(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
   // get the last valid inst
   // val lastValidPos = MuxCase(0.U, (PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
@@ -234,9 +236,11 @@ class BPUStage1 extends BPUStage {
   io.out.bits.brInfo := io.in.bits.brInfo
 
   if (BPUDebug) {
-    io.out.bits.brInfo.map(_.debug_ubtb_cycle := GTimer())
     XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
       ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ~ubtbResp.takens.asUInt & brMask.asUInt, ubtbResp.is_RVC.asUInt)
+  }
+  if (EnableBPUTimeRecord) {
+    io.out.bits.brInfo.map(_.debug_ubtb_cycle := GTimer())
   }
 }
 
@@ -255,9 +259,11 @@ class BPUStage2 extends BPUStage {
 
 
   if (BPUDebug) {
-    io.out.bits.brInfo.map(_.debug_btb_cycle := GTimer())
     XSDebug(io.pred.fire(), "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
       btbResp.hits.asUInt, VecInit(bimResp.ctrs.map(_(1))).asUInt)
+  }
+  if (EnableBPUTimeRecord) {
+    io.out.bits.brInfo.map(_.debug_btb_cycle := GTimer())
   }
 }
 
@@ -355,13 +361,21 @@ class BPUStage3 extends BPUStage {
   }
 
   if (BPUDebug) {
-    io.out.bits.brInfo.map(_.debug_tage_cycle := GTimer())
     XSDebug(io.predecode.valid, "predecode: pc:%x, mask:%b\n", inLatch.pc, io.predecode.bits.mask)
     for (i <- 0 until PredictWidth) {
       val p = io.predecode.bits.pd(i)
       XSDebug(io.predecode.valid && io.predecode.bits.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
         i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
     }
+  }
+
+  if (EnbaleCFIPredLog) {
+    val out = io.out
+    XSDebug(out.fire(), p"cfi_pred: fetchpc(${Hexadecimal(out.bits.pc)}) mask(${out.bits.mask}) brmask(${brMask.asUInt})\n")
+  }
+
+  if (EnableBPUTimeRecord) {
+    io.out.bits.brInfo.map(_.debug_tage_cycle := GTimer())
   }
 }
 
@@ -571,11 +585,14 @@ class BPU extends BaseBPU {
     }
   }
   
+
+
   if (EnableCFICommitLog) {
     val buValid = io.inOrderBrInfo.valid
     val buinfo  = io.inOrderBrInfo.bits.ui
     val pd = buinfo.pd
-    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred})\n")
+    val tage_cycle = buinfo.brInfo.debug_tage_cycle
+    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred}) cycle($tage_cycle)\n")
   }
 
 }

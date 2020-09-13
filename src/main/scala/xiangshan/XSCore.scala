@@ -124,7 +124,7 @@ trait HasXSParameter {
   val RasSize = core.RasSize
   val CacheLineSize = core.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
-  val ExtHistoryLength = HistoryLength * 2
+  val ExtHistoryLength = HistoryLength + 64
   val UBtbWays = core.UBtbWays
   val BtbWays = core.BtbWays
   val IBufSize = core.IBufSize
