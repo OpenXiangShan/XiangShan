@@ -73,7 +73,7 @@ class Dispatch1 extends XSModule {
     io.toRoq(i).bits.ctrl.commitType := Cat(isLs(i), isStore(i) | isFp(i)) // TODO: add it to decode
     io.toRoq(i).bits.lsroqIdx := Mux(lsroqIndexRegValid(i), lsroqIndexReg(i), io.lsroqIdx(i))
 
-    io.toLsroq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && roqIndexAcquired(i) && !cancelled(i)
+    io.toLsroq(i).valid := io.fromRename(i).valid && !lsroqIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !cancelled(i)
     io.toLsroq(i).bits := io.fromRename(i).bits
     io.toLsroq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
@@ -111,7 +111,7 @@ class Dispatch1 extends XSModule {
   var prevCanEnqueue = true.B
   for (i <- 0 until RenameWidth) {
     orderedEnqueue(i) := prevCanEnqueue
-    canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || lsroqIndexAcquired(i))
+    canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsroqIndexAcquired(i))
     val enqReady = (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
       (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && fpIndex.io.reverseMapping(i).valid) ||
       (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && lsIndex.io.reverseMapping(i).valid)

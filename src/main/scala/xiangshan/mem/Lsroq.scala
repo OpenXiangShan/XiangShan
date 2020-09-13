@@ -6,6 +6,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class LsRoqEntry extends XSBundle {
   val vaddr = UInt(VAddrBits.W) // TODO: need opt
@@ -191,7 +192,7 @@ class Lsroq extends XSModule {
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := data(missRefillSel).mask
 
-  io.dcache.req.bits.meta.id       := DCacheMiscType.miss
+  io.dcache.req.bits.meta.id       := DCacheAtomicsType.miss // DontCare // DCacheMiscType.miss  // TODO: // FIXME
   io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
   io.dcache.req.bits.meta.paddr    := data(missRefillSel).paddr
   io.dcache.req.bits.meta.uop      := uop(missRefillSel)
@@ -271,8 +272,7 @@ class Lsroq extends XSModule {
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
@@ -552,6 +552,7 @@ class Lsroq extends XSModule {
       rollback(i).bits.isReplay := true.B
       rollback(i).bits.isMisPred := false.B
       rollback(i).bits.isException := false.B
+      rollback(i).bits.isFlushPipe := false.B
 
       XSDebug(
         lsroqViolation,
@@ -602,7 +603,7 @@ class Lsroq extends XSModule {
   io.uncache.req.bits.data := data(ringBufferTail).data
   io.uncache.req.bits.mask := data(ringBufferTail).mask
 
-  io.uncache.req.bits.meta.id       := DCacheMiscType.mmio
+  io.uncache.req.bits.meta.id       := DCacheAtomicsType.mmio// DontCare // DCacheMiscType.mmio // TODO: // FIXME
   io.uncache.req.bits.meta.vaddr    := DontCare
   io.uncache.req.bits.meta.paddr    := data(ringBufferTail).paddr
   io.uncache.req.bits.meta.uop      := uop(ringBufferTail)

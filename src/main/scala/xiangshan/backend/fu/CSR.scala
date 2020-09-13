@@ -176,6 +176,7 @@ class CSRIO extends FunctionUnitIO {
   val exception = Flipped(ValidIO(new MicroOp))
   // for exception check
   val instrValid = Input(Bool())
+  val flushPipe = Output(Bool())
   // for differential testing
 //  val intrNO = Output(UInt(XLEN.W))
   val wenFix = Output(Bool())
@@ -637,10 +638,13 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
   val mtip = WireInit(false.B)
+  val msip = WireInit(false.B)
   val meip = WireInit(false.B)
   ExcitingUtils.addSink(mtip, "mtip")
+  ExcitingUtils.addSink(msip, "msip")
   ExcitingUtils.addSink(meip, "meip")
   mipWire.t.m := mtip
+  mipWire.s.m := msip
   mipWire.e.m := meip
 
   // exceptions
@@ -673,9 +677,9 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   ExcitingUtils.addSource(trapTarget, "trapTarget")
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.redirect := DontCare
-  io.redirectValid := (valid && func === CSROpType.jmp && !isEcall) || resetSatp
-  //TODO: use pred pc instead pc+4
-  io.redirect.target := Mux(resetSatp, io.cfIn.pc+4.U, retTarget)
+  io.redirectValid := valid && func === CSROpType.jmp && !isEcall
+  io.redirect.target := retTarget
+  io.flushPipe := resetSatp
 
   XSDebug(io.redirectValid, "redirect to %x, pc=%x\n", io.redirect.target, io.cfIn.pc)
 
@@ -799,9 +803,11 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     "DTlbMissCnt1"-> (0xb20, "perfCntDtlbMissCnt1"    ),
     "DTlbMissCnt2"-> (0xb21, "perfCntDtlbMissCnt2"    ),
     "DTlbMissCnt3"-> (0xb22, "perfCntDtlbMissCnt3"    ),
-    "PtwReqCnt"   -> (0xb23, "perfCntPtwReqCnt"       ),
-    "PtwCycleCnt" -> (0xb24, "perfCntPtwCycleCnt"     ),
-    "PtwL2TlbHit" -> (0xb25, "perfCntPtwL2TlbHit"     )
+    "ITlbReqCnt0" -> (0xb23, "perfCntItlbReqCnt0"     ),
+    "ITlbMissCnt0"-> (0xb24, "perfCntItlbMissCnt0"    ),
+    "PtwReqCnt"   -> (0xb25, "perfCntPtwReqCnt"       ),
+    "PtwCycleCnt" -> (0xb26, "perfCntPtwCycleCnt"     ),
+    "PtwL2TlbHit" -> (0xb27, "perfCntPtwL2TlbHit"     )
 //    "Custom1"     -> (0xb1b, "Custom1"             ),
 //    "Custom2"     -> (0xb1c, "Custom2"             ),
 //    "Custom3"     -> (0xb1d, "Custom3"             ),

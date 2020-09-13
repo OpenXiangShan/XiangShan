@@ -8,7 +8,7 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = false
+  val BPUDebug = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -76,7 +76,7 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
 
   val io = new DefaultBasePredictorIO
 
-  val debug = false
+  val debug = true
 
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
@@ -113,7 +113,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
     val out = Decoupled(new BPUStageIO)
     val predecode = Flipped(ValidIO(new Predecode))
     val recover =  Flipped(ValidIO(new BranchUpdateInfo))
-
+    val cacheValid = Input(Bool())
   }
   val io = IO(new DefaultIO)
 
@@ -137,14 +137,10 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   val hasNTBr = (0 until PredictWidth).map(i => i.U <= jmpIdx && notTakens(i)).reduce(_||_)
   val taken = takens.reduce(_||_)
   // get the last valid inst
-  // val lastValidPos = MuxCase(0.U, (PredictWidth-1 to 0).map(i => (inLatch.mask(i), i.U)))
-  val lastValidPos = PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U))
+  val lastValidPos = WireInit(PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)))
   val lastHit   = Wire(Bool())
   val lastIsRVC = Wire(Bool())
-  // val lastValidPos = WireInit(0.U(log2Up(PredictWidth).W))
-  // for (i <- 0 until PredictWidth) {
-  //   when (inLatch.mask(i)) { lastValidPos := i.U }
-  // }
+  
   val targetSrc = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
   val target = Mux(taken, targetSrc(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
@@ -154,7 +150,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.pred.bits.jmpIdx := jmpIdx
   io.pred.bits.hasNotTakenBrs := hasNTBr
   io.pred.bits.target := target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !lastIsRVC && lastHit
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken && !(jmpIdx === 0.U && !io.predecode.bits.isFetchpcEqualFirstpc)) || !taken ) && !lastIsRVC && lastHit
 
   io.out.bits <> DontCare
   io.out.bits.pc := inLatch.pc
@@ -232,6 +228,7 @@ class BPUStage1 extends BPUStage {
 
 class BPUStage2 extends BPUStage {
 
+  io.out.valid := predValid && !io.flush && io.cacheValid
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
@@ -313,6 +310,11 @@ class BPUStage3 extends BPUStage {
     when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
   }
 
+
+  // when (!io.predecode.bits.isFetchpcEqualFirstpc) {
+  //   lastValidPos := PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)) + 1.U
+  // }
+
   lastIsRVC := pds(lastValidPos).isRVC
   when (lastValidPos === 1.U) {
     lastHit := pdMask(1) |
@@ -382,6 +384,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
+    val cacheValid = Input(Bool())
     // from if1
     val in = Flipped(ValidIO(new BPUReq))
     // to if2/if3/if4
@@ -425,6 +428,10 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   s2.io.recover <> DontCare
   s3.io.recover.valid <> io.inOrderBrInfo.valid
   s3.io.recover.bits <> io.inOrderBrInfo.bits.ui
+
+  s1.io.cacheValid := DontCare
+  s2.io.cacheValid := io.cacheValid
+  s3.io.cacheValid := io.cacheValid
   
   if (BPUDebug) {
     XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")

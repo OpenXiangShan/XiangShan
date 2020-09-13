@@ -42,7 +42,9 @@ class DecodeStage extends XSModule {
     io.out(i).bits := decoderToDecBuffer(i)
 
     val thisReady = io.out(i).ready && io.toBrq(i).ready
-    val thisBrqValid = io.in(i).valid && !decoders(i).io.out.cf.brUpdate.pd.notCFI && io.out(i).ready
+    val isMret = decoders(i).io.out.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
+    val isSret = decoders(i).io.out.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
+    val thisBrqValid = io.in(i).valid && (!decoders(i).io.out.cf.brUpdate.pd.notCFI || isMret || isSret) && io.out(i).ready
     val thisOutValid =  io.in(i).valid && io.toBrq(i).ready
     io.in(i).ready    := { if (i == 0) thisReady    else io.in(i-1).ready && thisReady }
     io.out(i).valid   := { if (i == 0) thisOutValid else io.in(i-1).ready && thisOutValid }

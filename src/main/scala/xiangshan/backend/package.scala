@@ -23,6 +23,11 @@ package object backend {
     def ret  = "b11_100".U
   }
 
+  object FenceOpType {
+    def fence  = "b10000".U
+    def sfence = "b10001".U
+    def fencei = "b10010".U
+  }
 
   object ALUOpType {
     def add  = "b000000".U
@@ -54,37 +59,56 @@ package object backend {
     def isBranch(func: UInt) = func(4)
     def getBranchType(func: UInt) = func(2, 1)
     def isBranchInvert(func: UInt) = func(0)
-
-    // alu take sfence.vma and fence.i
-    def sfence = "b110000".U
-    def fencei = "b110001".U
-
-    def waitSbuffer(func: UInt) = func===sfence
   }
 
   object MDUOpType {
-    def mul    = "b0000".U
-    def mulh   = "b0001".U
-    def mulhsu = "b0010".U
-    def mulhu  = "b0011".U
-    def mulw   = "b1000".U
+    // mul
+    // bit encoding: | type (2bit) | isWord(1bit) | opcode(2bit) |
+    def mul    = "b00000".U
+    def mulh   = "b00001".U
+    def mulhsu = "b00010".U
+    def mulhu  = "b00011".U
+    def mulw   = "b00100".U
 
-    def div    = "b0100".U
-    def divu   = "b0101".U
-    def rem    = "b0110".U
-    def remu   = "b0111".U
+    // div
+    // bit encoding: | type (2bit) | isWord(1bit) | isSign(1bit) | opcode(1bit) |
+    def div    = "b01000".U
+    def divu   = "b01010".U
+    def rem    = "b01001".U
+    def remu   = "b01011".U
 
-    def divw   = "b1100".U
-    def divuw  = "b1101".U
-    def remw   = "b1110".U
-    def remuw  = "b1111".U
+    def divw   = "b01100".U
+    def divuw  = "b01110".U
+    def remw   = "b01101".U
+    def remuw  = "b01111".U
 
-    def isDiv(op: UInt) = op(2)
-    def isDivSign(op: UInt) = isDiv(op) && !op(0)
-    def isW(op: UInt) = op(3)
+    // fence
+    // bit encoding: | type (2bit) | padding(1bit)(zero) | opcode(2bit) |
+    def fence    = "b10000".U
+    def sfence   = "b10001".U
+    def fencei   = "b10010".U
+
+    // the highest bits are for instruction types
+    def typeMSB = 4
+    def typeLSB = 3
+
+    def MulType     = "b00".U
+    def DivType     = "b01".U
+    def FenceType   = "b10".U
+
+    def isMul(op: UInt)     = op(typeMSB, typeLSB) === MulType
+    def isDiv(op: UInt)     = op(typeMSB, typeLSB) === DivType
+    def isFence(op: UInt)   = op(typeMSB, typeLSB) === FenceType
+
+    def isDivSign(op: UInt) = isDiv(op) && !op(1)
+    def isW(op: UInt) = op(2)
+    def isH(op: UInt) = (isDiv(op) && op(0)) || (isMul(op) && op(1,0)=/=0.U)
+    def getMulOp(op: UInt) = op(1,0)
   }
 
   object LSUOpType {
+    // normal load/store
+    // bit(1, 0) are size
     def lb   = "b000000".U
     def lh   = "b000001".U
     def lw   = "b000010".U
@@ -92,29 +116,41 @@ package object backend {
     def lbu  = "b000100".U
     def lhu  = "b000101".U
     def lwu  = "b000110".U
-    def flw  = "b010110".U
     def sb   = "b001000".U
     def sh   = "b001001".U
     def sw   = "b001010".U
     def sd   = "b001011".U
 
-    def lr      = "b100010".U
-    def sc      = "b100011".U
-    def amoswap = "b100001".U
-    def amoadd  = "b100000".U
-    def amoxor  = "b100100".U
-    def amoand  = "b101100".U
-    def amoor   = "b101000".U
-    def amomin  = "b110000".U
-    def amomax  = "b110100".U
-    def amominu = "b111000".U
-    def amomaxu = "b111100".U
+    // float/double load store
+    def flw  = "b010110".U
 
-    def isStore(func: UInt): Bool = func(3)
-    def isAtom(func: UInt): Bool = func(5)
+    // atomics
+    // bit(1, 0) are size
+    // since atomics use a different fu type
+    // so we can safely reuse other load/store's encodings
+    def lr_w      = "b000010".U
+    def sc_w      = "b000110".U
+    def amoswap_w = "b001010".U
+    def amoadd_w  = "b001110".U
+    def amoxor_w  = "b010010".U
+    def amoand_w  = "b010110".U
+    def amoor_w   = "b011010".U
+    def amomin_w  = "b011110".U
+    def amomax_w  = "b100010".U
+    def amominu_w = "b100110".U
+    def amomaxu_w = "b101010".U
 
-    def atomW = "010".U
-    def atomD = "011".U
+    def lr_d      = "b000011".U
+    def sc_d      = "b000111".U
+    def amoswap_d = "b001011".U
+    def amoadd_d  = "b001111".U
+    def amoxor_d  = "b010011".U
+    def amoand_d  = "b010111".U
+    def amoor_d   = "b011011".U
+    def amomin_d  = "b011111".U
+    def amomax_d  = "b100011".U
+    def amominu_d = "b100111".U
+    def amomaxu_d = "b101011".U
   }
 
   object BTBtype {

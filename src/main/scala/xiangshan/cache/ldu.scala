@@ -13,12 +13,23 @@ class LoadPipe extends DCacheModule
     val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
     val meta_read = DecoupledIO(new L1MetaReadReq)
     val meta_resp = Input(Vec(nWays, new L1Metadata))
+
+    // req got nacked in stage 0?
+    val nack      = Input(Bool())
   })
 
   // LSU requests
-  io.lsu.req.ready := io.meta_read.ready && io.data_read.ready
-  io.meta_read.valid := io.lsu.req.valid
-  io.data_read.valid := io.lsu.req.valid
+  // replayed req should never be nacked
+  assert(!(io.lsu.req.valid && io.lsu.req.bits.meta.replay && io.nack))
+
+  // it you got nacked, you can directly passdown
+  val not_nacked_ready = io.meta_read.ready && io.data_read.ready
+  val nacked_ready     = true.B
+
+  // ready can wait for valid
+  io.lsu.req.ready := io.lsu.req.valid && ((!io.nack && not_nacked_ready) || (io.nack && nacked_ready))
+  io.meta_read.valid := io.lsu.req.valid && !io.nack
+  io.data_read.valid := io.lsu.req.valid && !io.nack
 
   val meta_read = io.meta_read.bits
   val data_read = io.data_read.bits
@@ -46,7 +57,7 @@ class LoadPipe extends DCacheModule
   val s1_req = RegNext(s0_req)
   val s1_valid = RegNext(s0_valid, init = false.B)
   val s1_addr = s1_req.addr
-  val s1_nack = false.B 
+  val s1_nack = RegNext(io.nack)
 
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 

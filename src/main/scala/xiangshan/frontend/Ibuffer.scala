@@ -5,6 +5,7 @@ import chisel3.util._
 
 import xiangshan._
 import utils._
+import xiangshan.backend.fu.HasExceptionNO
 
 class Ibuffer extends XSModule {
   val io = IO(new Bundle() {
@@ -19,13 +20,15 @@ class Ibuffer extends XSModule {
     val pnpc = UInt(VAddrBits.W)
     val brInfo = new BranchInfo
     val pd = new PreDecodeInfo
+    val ipf = Bool()
+    val crossPageIPFFix = Bool()
   }
 
   // Ignore
   for(out <- io.out) {
-    out.bits.exceptionVec := DontCare
+    // out.bits.exceptionVec := DontCare
     out.bits.intrVec := DontCare
-    out.bits.crossPageIPFFix := DontCare
+    // out.bits.crossPageIPFFix := DontCare
   }
 
   // Ibuffer define
@@ -51,6 +54,8 @@ class Ibuffer extends XSModule {
       ibuf(enq_idx).pnpc := io.in.bits.pnpc(i)
       ibuf(enq_idx).brInfo := io.in.bits.brInfo(i)
       ibuf(enq_idx).pd := io.in.bits.pd(i)
+      ibuf(enq_idx).ipf := io.in.bits.ipf
+      ibuf(enq_idx).crossPageIPFFix := io.in.bits.crossPageIPFFix
 
       enq_idx = enq_idx + io.in.bits.mask(i)
     }
@@ -68,12 +73,16 @@ class Ibuffer extends XSModule {
       
       io.out(i).bits.instr := ibuf(deq_idx).inst
       io.out(i).bits.pc := ibuf(deq_idx).pc
+      // io.out(i).bits.exceptionVec := Mux(ibuf(deq_idx).ipf, UIntToOH(instrPageFault.U), 0.U)
+      io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
+      io.out(i).bits.exceptionVec(instrPageFault) := ibuf(deq_idx).ipf
       // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
       io.out(i).bits.brUpdate := DontCare
       io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc
       io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
       io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
       io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
+      io.out(i).bits.crossPageIPFFix := ibuf(deq_idx).crossPageIPFFix
 
       deq_idx = deq_idx + io.out(i).fire
     }
@@ -105,7 +114,8 @@ class Ibuffer extends XSModule {
   when(deqValid) {
     XSDebug("Deque:\n")
     for(i <- 0 until DecodeWidth){
-        XSDebug(p"${Hexadecimal(io.out(i).bits.instr)}  PC=${Hexadecimal(io.out(i).bits.pc)}  v=${io.out(i).valid}  r=${io.out(i).ready}\n")
+        XSDebug(p"${Hexadecimal(io.out(i).bits.instr)} PC=${Hexadecimal(io.out(i).bits.pc)} v=${io.out(i).valid} r=${io.out(i).ready} " +
+          p"excpVec=${Binary(io.out(i).bits.exceptionVec.asUInt)} crossPageIPF=${io.out(i).bits.crossPageIPFFix}\n")
     }
   }
 
