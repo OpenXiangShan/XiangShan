@@ -40,6 +40,9 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     val block_idx   = Output(Valid(UInt()))
     val block_addr  = Output(Valid(UInt()))
 
+    val block_probe_idx   = Output(Valid(UInt()))
+    val block_probe_addr  = Output(Valid(UInt()))
+
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish  = DecoupledIO(new TLBundleE(edge.bundle))
@@ -94,6 +97,12 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   io.block_idx.bits   := req_idx
   io.block_addr.bits  := req_block_addr
 
+  // to preserve forward progress, we allow probe when we are dealing with acquire/grant
+  io.block_probe_idx.valid  := state =/= s_invalid && state =/= s_refill_req && state =/= s_refill_resp
+  io.block_probe_addr.valid := state =/= s_invalid && state =/= s_refill_req && state =/= s_refill_resp
+  io.block_probe_idx.bits   := req_idx
+  io.block_probe_addr.bits  := req_block_addr
+
   // assign default values to output signals
   io.req.ready           := false.B
   io.resp.valid          := false.B
@@ -121,6 +130,11 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   io.wb_req.bits         := DontCare
 
   XSDebug("entry: %d state: %d\n", io.id, state)
+  XSDebug("entry: %d block_idx_valid: %b block_idx: %d block_addr_valid: %b block_addr: %d\n",
+    io.id, io.block_idx.valid, io.block_idx.bits, io.block_addr.valid, io.block_addr.bits)
+  XSDebug("entry: %d block_probe_idx_valid: %b block_probe_idx: %d block_probe_addr_valid: %b block_probe_addr: %d\n",
+    io.id, io.block_probe_idx.valid, io.block_probe_idx.bits, io.block_probe_addr.valid, io.block_probe_addr.bits)
+
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
@@ -325,12 +339,11 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.resp.bits.entry_id := io.id
 
     when (io.resp.fire()) {
-      when (isWrite(req.cmd)) {
-        // Set dirty
-        val (is_hit, _, coh_on_hit) = new_coh.onAccess(req.cmd)
-        assert(is_hit, "We still don't have permissions for this store")
-        new_coh := coh_on_hit
-      }
+      // additional assertion
+      val (is_hit, _, coh_on_hit) = new_coh.onAccess(req.cmd)
+      assert(is_hit, "We still don't have permissions for this store")
+      assert(new_coh === coh_on_hit, "Incorrect coherence meta data")
+
       state := s_client_finish
     }
   }
@@ -365,6 +378,9 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
     val inflight_req_idxes       = Output(Vec(cfg.nMissEntries, Valid(UInt())))
     val inflight_req_block_addrs = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+
+    val block_probe_idxes    = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val block_probe_addrs    = Output(Vec(cfg.nMissEntries, Valid(UInt())))
   })
 
   val resp_arb       = Module(new Arbiter(new MissResp,         cfg.nMissEntries))
@@ -419,6 +435,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
     io.inflight_req_idxes(i)       <> entry.io.block_idx
     io.inflight_req_block_addrs(i) <> entry.io.block_addr
+    io.block_probe_idxes(i)        <> entry.io.block_probe_idx
+    io.block_probe_addrs(i)        <> entry.io.block_probe_addr
 
     entry
   }

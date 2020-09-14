@@ -2,3 +2,7 @@
 	path = rocket-chip
 	url = https://github.com/chipsalliance/rocket-chip.git
 	branch = 2bdb03dbca3f77ad4c378cc1b95ab4961bc1448a
+[submodule "block-inclusivecache-sifive"]
+	path = block-inclusivecache-sifive
+	url = https://github.com/sifive/block-inclusivecache-sifive.git
+	branch = d4db623ff534f775ffc49f59c4a9ef24d5d759d0

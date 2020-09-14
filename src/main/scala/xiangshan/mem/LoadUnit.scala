@@ -5,6 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -73,6 +74,16 @@ class LoadUnit extends XSModule {
   // when we are sure it's a MMIO req, we do not need to wait for cache ready
   l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
   io.ldin.ready := l2_out.ready
+
+  // exception check
+  val addrAligned = LookupTree(io.ldin.bits.uop.ctrl.fuOpType(1,0), List(
+    "b00".U   -> true.B,              //b
+    "b01".U   -> (l2_out.bits.vaddr(0) === 0.U),   //h
+    "b10".U   -> (l2_out.bits.vaddr(1,0) === 0.U), //w
+    "b11".U   -> (l2_out.bits.vaddr(2,0) === 0.U)  //d
+  ))
+  l2_out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
+  l2_out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlb.resp.bits.excp.pf.ld
 
   // send result to dcache
   // never send tlb missed or MMIO reqs to dcache
@@ -149,6 +160,8 @@ class LoadUnit extends XSModule {
   val l4_dcache = RegNext(l3_dcache, false.B)
   val l4_bundle = RegNext(l3_bundle)
 
+  val fullForward = Wire(Bool())
+
   assert(!(io.dcache.resp.ready && !io.dcache.resp.valid), "DCache response got lost")
   io.dcache.resp.ready := l4_valid && l4_dcache
   when (io.dcache.resp.fire()) {
@@ -158,7 +171,11 @@ class LoadUnit extends XSModule {
     l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
     l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
     l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
-    l4_out.bits.miss  := io.dcache.resp.bits.miss
+    // when we can get the data completely from forward
+    // we no longer need to access dcache
+    // treat nack as miss
+    l4_out.bits.miss  := Mux(fullForward, false.B,
+      io.dcache.resp.bits.miss || io.dcache.resp.bits.nack)
     XSDebug(io.dcache.resp.fire(), p"DcacheResp(l4): data:0x${Hexadecimal(io.dcache.resp.bits.data)} paddr:0x${Hexadecimal(io.dcache.resp.bits.meta.paddr)} pc:0x${Hexadecimal(io.dcache.resp.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.resp.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.resp.bits.meta.uop.lsroqIdx} miss:${io.dcache.resp.bits.miss}\n")
   } .otherwise {
     l4_out.bits := l4_bundle
@@ -193,6 +210,7 @@ class LoadUnit extends XSModule {
   })
   l4_out.bits.forwardMask := forwardMask
   l4_out.bits.forwardData := forwardVec
+  fullForward := (~l4_out.bits.forwardMask.asUInt & l4_out.bits.mask) === 0.U
 
   PipelineConnect(l4_out, l5_in, io.ldout.fire() || (l5_in.bits.miss || l5_in.bits.mmio) && l5_in.valid, false.B)
 
@@ -212,7 +230,7 @@ class LoadUnit extends XSModule {
   XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
     io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
 
-  XSDebug(io.redirect.valid, p"Redirect: excp:${io.redirect.bits.isException} misp:${io.redirect.bits.isMisPred} replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.needFlush(io.redirect)} l3:${l3_uop.needFlush(io.redirect)} l4:${l4_out.bits.uop.needFlush(io.redirect)}\n")
+  XSDebug(io.redirect.valid, p"Redirect: excp:${io.redirect.bits.isException} flushPipe:${io.redirect.bits.isFlushPipe} misp:${io.redirect.bits.isMisPred} replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.needFlush(io.redirect)} l3:${l3_uop.needFlush(io.redirect)} l4:${l4_out.bits.uop.needFlush(io.redirect)}\n")
   //-------------------------------------------------------
   // LD Pipeline Stage 5
   // Do data ecc check, merge result and write back to LS ROQ
@@ -247,8 +265,7 @@ class LoadUnit extends XSModule {
       LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-      LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
   ))
 
   // ecc check

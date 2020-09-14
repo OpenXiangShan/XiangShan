@@ -12,8 +12,12 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # bulid CPU and run dummy test
 # ------------------------------------------------------------------
 
+cache:
+	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 2>&1 | tee > loader.log
+	#2>&1 | tee > loader.log
+
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=shift $(EMU_ARGS) run 2>&1 | tee > ras_shift.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=goldbach $(EMU_ARGS) run 2>&1 | tee > goldbach.log
 
 # ------------------------------------------------------------------
 # run different test sets
@@ -95,10 +99,10 @@ P = 4
 SUITE = xiangshan.backend.exu.AluTest
 
 unit-test:
-	cd .. && mill chiselModule.test.testOnly -o -s $(SUITE) -P$(P)
+	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE) -P$(P)
 
 unit-test-all:
-	cd .. && mill chiselModule.test.test -P$(P)
+	cd .. && mill XiangShan.test.test -P$(P)
 
 # ------------------------------------------------------------------
 # chore

@@ -7,7 +7,7 @@ import utils.XSDebug
 
 // this is a traditional cache pipeline:
 // it handles load/store/amo/lr,sc
-class MiscPipe extends DCacheModule
+class AtomicsPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
     val lsu       = Flipped(new DCacheLoadIO)
@@ -18,6 +18,8 @@ class MiscPipe extends DCacheModule
     val meta_resp  = Input(Vec(nWays, new L1Metadata))
     val inflight_req_idxes       = Output(Vec(3, Valid(UInt())))
     val inflight_req_block_addrs = Output(Vec(3, Valid(UInt())))
+    val block_probe_addr   = Output(Valid(UInt()))
+    val wb_invalidate_lrsc = Input(Valid(UInt()))
   })
 
   // LSU requests
@@ -44,7 +46,7 @@ class MiscPipe extends DCacheModule
   val s0_valid = io.lsu.req.fire()
   val s0_req = io.lsu.req.bits
 
-  dump_pipeline_reqs("MiscPipe s0", s0_valid, s0_req)
+  dump_pipeline_reqs("AtomicsPipe s0", s0_valid, s0_req)
 
 
   // ---------------------------------------
@@ -54,7 +56,7 @@ class MiscPipe extends DCacheModule
   val s1_addr = s1_req.addr
   val s1_nack = false.B 
 
-  dump_pipeline_reqs("MiscPipe s1", s1_valid, s1_req)
+  dump_pipeline_reqs("AtomicsPipe s1", s1_valid, s1_req)
 
   // tag check
   val meta_resp = io.meta_resp
@@ -68,7 +70,7 @@ class MiscPipe extends DCacheModule
   val s2_req   = RegNext(s1_req)
   val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
 
-  dump_pipeline_reqs("MiscPipe s2", s2_valid, s2_req)
+  dump_pipeline_reqs("AtomicsPipe s2", s2_valid, s2_req)
 
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = s2_tag_match_way.orR
@@ -118,7 +120,16 @@ class MiscPipe extends DCacheModule
   val s2_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s2_req.addr)
   val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
   val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
-  when (s2_valid) {
+
+  // we have permission on this block
+  // but we can not finish in this pass
+  // we need to go to miss queue to update meta and set dirty first
+  val s2_set_dirty = s2_tag_match && s2_has_permission && s2_hit_state =/= s2_new_hit_state
+  // this sc should succeed, but we need to set dirty first
+  // do not treat it as a sc failure and reset lr sc counter
+  val sc_set_dirty = s2_set_dirty && !s2_nack && s2_sc && s2_lrsc_addr_match
+
+  when (s2_valid && !sc_set_dirty) {
     when (s2_hit && !s2_nack && s2_lr) {
       lrsc_count := (lrscCycles - 1).U
       lrsc_addr := get_block_addr(s2_req.addr)
@@ -127,6 +138,20 @@ class MiscPipe extends DCacheModule
     }
   } .elsewhen (lrsc_count > 0.U) {
     lrsc_count := lrsc_count - 1.U
+  }
+
+  io.block_probe_addr.valid := lrsc_valid
+  io.block_probe_addr.bits  := lrsc_addr
+
+  // when we release this block,
+  // we invalidate this reservation set
+  when (io.wb_invalidate_lrsc.valid) {
+    when (io.wb_invalidate_lrsc.bits === lrsc_addr) {
+      lrsc_count := 0.U
+    }
+
+    // when we release this block, there should be no matching lrsc inflight
+    assert (!(s2_valid && (s2_lr || s2_sc) && io.wb_invalidate_lrsc.bits === get_block_addr(s2_req.addr)))
   }
 
   when (s2_valid) {
@@ -146,10 +171,18 @@ class MiscPipe extends DCacheModule
   assert(debug_sc_fail_cnt < 100.U, "L1DCache failed too many SCs in a row")
 
   // only dump these signals when they are actually valid
-  dump_pipeline_valids("MiscPipe s2", "s2_hit", s2_valid && s2_hit)
-  dump_pipeline_valids("MiscPipe s2", "s2_nack", s2_valid && s2_nack)
-  dump_pipeline_valids("MiscPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
-  dump_pipeline_valids("MiscPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_hit", s2_valid && s2_hit)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack", s2_valid && s2_nack)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
+  when (s2_valid) {
+    XSDebug("lrsc_count: %d lrsc_valid: %b lrsc_addr: %x\n",
+      lrsc_count, lrsc_valid, lrsc_addr)
+    XSDebug("s2_lr: %b s2_sc: %b s2_lrsc_addr_match: %b s2_sc_fail: %b s2_sc_resp: %x\n",
+      s2_lr, s2_sc, s2_lrsc_addr_match, s2_sc_fail, s2_sc_resp)
+    XSDebug("debug_sc_fail_addr: %x debug_sc_fail_cnt: %d\n",
+      debug_sc_fail_addr, debug_sc_fail_cnt)
+  }
 
   // load data gen
   val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
@@ -166,7 +199,7 @@ class MiscPipe extends DCacheModule
   assert(!(resp.valid && !io.lsu.resp.ready))
 
   when (resp.valid) {
-    XSDebug(s"MiscPipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
+    XSDebug(s"AtomicsPipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
       resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
   }
 
@@ -201,6 +234,9 @@ class MiscPipe extends DCacheModule
   data_write.data     := wdata
 
   assert(!(io.data_write.valid && !io.data_write.ready))
+
+  dump_pipeline_reqs("AtomicsPipe s3", s3_valid, s3_req)
+
 
   // -------
   // wire out signals for synchronization

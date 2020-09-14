@@ -2,48 +2,18 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
+import chisel3.util.experimental.BoringUtils
+
 import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 
-object LSUOpType {
-  def lb   = "b000000".U
-  def lh   = "b000001".U
-  def lw   = "b000010".U
-  def ld   = "b000011".U
-  def lbu  = "b000100".U
-  def lhu  = "b000101".U
-  def lwu  = "b000110".U
-  def ldu  = "b000111".U
-  def sb   = "b001000".U
-  def sh   = "b001001".U
-  def sw   = "b001010".U
-  def sd   = "b001011".U
-  
-  def lr      = "b100010".U
-  def sc      = "b100011".U
-  def amoswap = "b100001".U
-  def amoadd  = "b100000".U
-  def amoxor  = "b100100".U
-  def amoand  = "b101100".U
-  def amoor   = "b101000".U
-  def amomin  = "b110000".U
-  def amomax  = "b110100".U
-  def amominu = "b111000".U
-  def amomaxu = "b111100".U
-  
-  def isStore(func: UInt): Bool = func(3)
-  def isAtom(func: UInt): Bool = func(5)
-  
-  def atomW = "010".U
-  def atomD = "011".U
-}
-
-object DCacheMiscType {
+object DCacheAtomicsType {
   def miss      = "b00".U
   def mmio      = "b01".U
-  def misc      = "b10".U
+  def atomics      = "b10".U
 }
 
 object genWmask {
@@ -115,110 +85,140 @@ class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
     val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
-    val miscToDcache = new DCacheLoadIO
+    val loadMiss = new DCacheLoadIO
+    val atomics  = new DCacheLoadIO
     val sbufferToDcache = new DCacheStoreIO
     val uncache = new DCacheLoadIO
     val ptw = new TlbPtwIO
   })
 
+  // inner modules
   val loadUnits = (0 until exuParameters.LduCnt).map(_ => Module(new LoadUnit))
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
-  val miscUnit = Module(new MiscUnit)
-  // val mshq = Module(new MSHQ)
-
+  val atomicsUnit = Module(new AtomicsUnit)
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsroq = Module(new Lsroq)
   val sbuffer = Module(new Sbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
 
-  val loadUnitToDcacheVec = Wire(Vec(exuParameters.LduCnt, new DCacheLoadIO))
-
-  val sbufferToDcache = Wire(new DCacheStoreIO)
-
-  val lsroqToUncache = Wire(new DCacheLoadIO)
-
-  // lsroq and miscUnit share one dcache port
-  val lsroqToDcache = Wire(new DCacheLoadIO)
-  val miscUnitToDcache = Wire(new DCacheLoadIO)
-  // misc + miss --> arbiter --> miscToDcache
-  val miscToDcache = io.miscToDcache
-
-  // connect dcache ports
-  io.loadUnitToDcacheVec <> loadUnitToDcacheVec
-  io.sbufferToDcache <> sbufferToDcache
-  io.uncache <> lsroqToUncache
-
+  // dtlb
   io.ptw <> dtlb.io.ptw
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
-    loadUnits(i).io.ldin <> io.backend.ldin(i)
-    loadUnits(i).io.ldout <> io.backend.ldout(i)
-    loadUnits(i).io.redirect <> io.backend.redirect
-    loadUnits(i).io.tlbFeedback <> io.backend.tlbFeedback(i)
-    loadUnits(i).io.dcache <> loadUnitToDcacheVec(i)
-    loadUnits(i).io.dtlb <> dtlb.io.requestor(i)
-    loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
+    // get input form dispatch
+    loadUnits(i).io.ldin          <> io.backend.ldin(i)
+    loadUnits(i).io.ldout         <> io.backend.ldout(i)
+    loadUnits(i).io.redirect      <> io.backend.redirect
+    loadUnits(i).io.tlbFeedback   <> io.backend.tlbFeedback(i)
+    // dtlb access
+    loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
+    // dcache access
+    loadUnits(i).io.dcache        <> io.loadUnitToDcacheVec(i)
+    // forward
+    loadUnits(i).io.lsroq.forward <> lsroq.io.forward(i)
+    loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
 
-    lsroq.io.loadIn(i) <> loadUnits(i).io.lsroq.loadIn
-    lsroq.io.ldout(i) <> loadUnits(i).io.lsroq.ldout
-    lsroq.io.forward(i) <> loadUnits(i).io.lsroq.forward
+    // passdown to lsroq
+    lsroq.io.loadIn(i)            <> loadUnits(i).io.lsroq.loadIn
+    lsroq.io.ldout(i)             <> loadUnits(i).io.lsroq.ldout
   }
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
-    storeUnits(i).io.stin <> io.backend.stin(i)
-    storeUnits(i).io.redirect <> io.backend.redirect
+    // get input form dispatch
+    storeUnits(i).io.stin        <> io.backend.stin(i)
+    storeUnits(i).io.redirect    <> io.backend.redirect
     storeUnits(i).io.tlbFeedback <> io.backend.tlbFeedback(exuParameters.LduCnt + i)
-    storeUnits(i).io.dtlb <> dtlb.io.requestor(exuParameters.LduCnt + i) // FIXME
-    storeUnits(i).io.lsroq <> lsroq.io.storeIn(i)
+
+    // dtlb access
+    storeUnits(i).io.dtlb        <> dtlb.io.requestor(exuParameters.LduCnt + i) // FIXME
+
+    // passdown to lsroq
+    storeUnits(i).io.lsroq       <> lsroq.io.storeIn(i)
   }
 
-  sbuffer.io.dcache <> sbufferToDcache
-
-  lsroq.io.stout <> io.backend.stout
-  lsroq.io.commits <> io.backend.commits
-  lsroq.io.dp1Req <> io.backend.dp1Req
-  lsroq.io.lsroqIdxs <> io.backend.lsroqIdxs
+  // Lsroq
+  lsroq.io.stout       <> io.backend.stout
+  lsroq.io.commits     <> io.backend.commits
+  lsroq.io.dp1Req      <> io.backend.dp1Req
+  lsroq.io.lsroqIdxs   <> io.backend.lsroqIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
 
-  lsroq.io.dcache <> lsroqToDcache // TODO: Add AMO
-  lsroq.io.uncache <> lsroqToUncache
+  lsroq.io.dcache      <> io.loadMiss
+  lsroq.io.uncache     <> io.uncache
+
   // LSROQ to store buffer
-  lsroq.io.sbuffer <> sbuffer.io.in
+  lsroq.io.sbuffer     <> sbuffer.io.in
 
-  // MiscUnit
-  // MiscUnit will override other control signials,
-  // as misc insts (LR/SC/AMO) will block the pipeline
-  miscUnit.io <> DontCare
-  miscUnit.io.in.bits := Mux(io.backend.ldin(0).valid, io.backend.ldin(0).bits, io.backend.ldin(1).bits)
-  miscUnit.io.in.valid := io.backend.ldin(0).valid && io.backend.ldin(0).bits.uop.ctrl.fuType === FuType.mou ||
-    io.backend.ldin(1).valid && io.backend.ldin(1).bits.uop.ctrl.fuType === FuType.mou
-  when(miscUnit.io.dtlb.req.valid){
-    dtlb.io.requestor(0) <> miscUnit.io.dtlb // TODO: check it later
+  // Sbuffer
+  sbuffer.io.dcache <> io.sbufferToDcache
+
+  // flush sbuffer
+  val fenceFlush = WireInit(false.B)
+  val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
+  BoringUtils.addSink(fenceFlush, "FenceUnitSbufferFlush")
+  val sbEmpty = WireInit(false.B)
+  sbEmpty := sbuffer.io.flush.empty
+  BoringUtils.addSource(sbEmpty, "SBufferEmpty")
+  // if both of them tries to flush sbuffer at the same time
+  // something must have gone wrong
+  assert(!(fenceFlush && atomicsFlush))
+  sbuffer.io.flush.valid := fenceFlush || atomicsFlush
+
+  // TODO: make 0/1 configurable
+  // AtomicsUnit
+  // AtomicsUnit will override other control signials,
+  // as atomics insts (LR/SC/AMO) will block the pipeline
+  val st0_atomics = io.backend.stin(0).valid && io.backend.stin(0).bits.uop.ctrl.fuType === FuType.mou
+  val st1_atomics = io.backend.stin(1).valid && io.backend.stin(1).bits.uop.ctrl.fuType === FuType.mou
+  // amo should always go through store issue queue 0
+  assert(!st1_atomics)
+
+  atomicsUnit.io.dtlb.resp.valid := false.B
+  atomicsUnit.io.dtlb.resp.bits  := DontCare
+  atomicsUnit.io.out.ready       := false.B
+
+  // dispatch 0 takes priority
+  atomicsUnit.io.in.valid := st0_atomics || st1_atomics
+  atomicsUnit.io.in.bits  := Mux(st0_atomics, io.backend.stin(0).bits, io.backend.stin(1).bits)
+  when (st0_atomics) {
+    io.backend.stin(0).ready := atomicsUnit.io.in.ready
+    // explitly set st1 ready to false, do not let it fire
+    when (st1_atomics) { io.backend.stin(1).ready := false.B }
   }
-  miscUnit.io.dcache <> miscUnitToDcache
 
-  assert(!(lsroqToDcache.req.valid && miscUnitToDcache.req.valid))
-  val memReqArb = Module(new Arbiter(miscToDcache.req.bits.cloneType, 2))
-  memReqArb.io.in(0) <> lsroqToDcache.req
-  memReqArb.io.in(1) <> miscUnitToDcache.req
+  when (!st0_atomics && st1_atomics) { io.backend.stin(1).ready := atomicsUnit.io.in.ready }
 
-  miscToDcache.req <> memReqArb.io.out
-  miscToDcache.s1_kill := lsroqToDcache.s1_kill
+  // for atomics, do not let them enter store unit
+  when (st0_atomics) { storeUnits(0).io.stin.valid := false.B }
+  when (st1_atomics) { storeUnits(1).io.stin.valid := false.B }
 
-  lsroqToDcache.resp <> miscToDcache.resp
-  miscUnitToDcache.resp <> miscToDcache.resp
-  // override resp's valid bit
-  lsroqToDcache.resp.valid := miscToDcache.resp.valid &&
-    miscToDcache.resp.bits.meta.id(1, 0)===DCacheMiscType.miss
-  miscUnitToDcache.resp.valid := miscToDcache.resp.valid &&
-    miscToDcache.resp.bits.meta.id(1, 0)===DCacheMiscType.misc
-
-  when(miscUnit.io.out.valid){
-    io.backend.ldout(0) <> miscUnit.io.out
+  when(atomicsUnit.io.dtlb.req.valid) {
+    dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
+    // take load unit 0's tlb port
+    // make sure not to disturb loadUnit
+    assert(!loadUnits(0).io.dtlb.req.valid)
+    loadUnits(0).io.dtlb.resp.valid := false.B
   }
-  miscUnit.io.out.ready := true.B
+
+  when(atomicsUnit.io.tlbFeedback.valid) {
+    assert(!storeUnits(0).io.tlbFeedback.valid)
+    atomicsUnit.io.tlbFeedback <> io.backend.tlbFeedback(exuParameters.LduCnt + 0)
+  }
+
+  atomicsUnit.io.dcache        <> io.atomics
+  atomicsUnit.io.flush_sbuffer.empty := sbEmpty
+
+  atomicsUnit.io.dcache        <> io.atomics
+  atomicsUnit.io.flush_sbuffer.empty := sbEmpty
+
+  when(atomicsUnit.io.out.valid){
+    io.backend.ldout(0) <> atomicsUnit.io.out
+    // take load unit 0's write back port
+    assert(!loadUnits(0).io.ldout.valid)
+    loadUnits(0).io.ldout.ready := false.B
+  }
 }

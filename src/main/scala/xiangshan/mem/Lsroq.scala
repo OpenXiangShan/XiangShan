@@ -7,13 +7,15 @@ import xiangshan._
 import xiangshan.cache._
 import chisel3.ExcitingUtils._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.backend.LSUOpType
 
 class LsRoqEntry extends XSBundle {
+  val vaddr = UInt(VAddrBits.W) // TODO: need opt
   val paddr = UInt(PAddrBits.W)
   val op = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  val exception = UInt(8.W)
+  val exception = UInt(16.W) // TODO: opt size
   val mmio = Bool()
   val fwdMask = Vec(8, Bool())
   val fwdData = Vec(8, UInt(8.W))
@@ -108,7 +110,7 @@ class Lsroq extends XSModule {
   (0 until LoadPipelineWidth).map(i => {
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
           io.loadIn(i).bits.uop.lsroqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -118,10 +120,11 @@ class Lsroq extends XSModule {
           io.loadIn(i).bits.forwardData.asUInt,
           io.loadIn(i).bits.forwardMask.asUInt,
           io.loadIn(i).bits.mmio,
-          io.loadIn(i).bits.rollback
-        )
-      }.otherwise {
-        XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x\n",
+          io.loadIn(i).bits.rollback,
+          io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+          )
+        }.otherwise {
+          XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
           io.loadIn(i).bits.uop.lsroqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -131,36 +134,41 @@ class Lsroq extends XSModule {
           io.loadIn(i).bits.forwardData.asUInt,
           io.loadIn(i).bits.forwardMask.asUInt,
           io.loadIn(i).bits.mmio,
-          io.loadIn(i).bits.rollback
-        )
+          io.loadIn(i).bits.rollback,
+          io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+          )
+        }
+        valid(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        writebacked(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        // allocated(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
+        data(io.loadIn(i).bits.uop.lsroqIdx).paddr := io.loadIn(i).bits.paddr
+        data(io.loadIn(i).bits.uop.lsroqIdx).vaddr := io.loadIn(i).bits.vaddr
+        data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.mask
+        data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.data // for mmio / misc / debug
+        data(io.loadIn(i).bits.uop.lsroqIdx).mmio := io.loadIn(i).bits.mmio
+        data(io.loadIn(i).bits.uop.lsroqIdx).fwdMask := io.loadIn(i).bits.forwardMask
+        data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
+        data(io.loadIn(i).bits.uop.lsroqIdx).exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+        miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
+        pending(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
       }
-      valid(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-      writebacked(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-      // allocated(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
-      data(io.loadIn(i).bits.uop.lsroqIdx).paddr := io.loadIn(i).bits.paddr
-      data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.mask
-      data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.data // for mmio / misc / debug
-      data(io.loadIn(i).bits.uop.lsroqIdx).mmio := io.loadIn(i).bits.mmio
-      data(io.loadIn(i).bits.uop.lsroqIdx).fwdMask := io.loadIn(i).bits.forwardMask
-      data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
-      miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-      store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
-      pending(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
-    }
-  })
-
-  // writeback store
-  (0 until StorePipelineWidth).map(i => {
-    when(io.storeIn(i).fire()) {
-      valid(io.storeIn(i).bits.uop.lsroqIdx) := !io.storeIn(i).bits.mmio
-      data(io.storeIn(i).bits.uop.lsroqIdx).paddr := io.storeIn(i).bits.paddr
-      data(io.storeIn(i).bits.uop.lsroqIdx).mask := io.storeIn(i).bits.mask
-      data(io.storeIn(i).bits.uop.lsroqIdx).data := io.storeIn(i).bits.data
-      data(io.storeIn(i).bits.uop.lsroqIdx).mmio := io.storeIn(i).bits.mmio
-      miss(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.miss
-      store(io.storeIn(i).bits.uop.lsroqIdx) := true.B
-      pending(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.mmio
-      XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x\n",
+    })
+    
+    // writeback store
+    (0 until StorePipelineWidth).map(i => {
+      when(io.storeIn(i).fire()) {
+        valid(io.storeIn(i).bits.uop.lsroqIdx) := !io.storeIn(i).bits.mmio
+        data(io.storeIn(i).bits.uop.lsroqIdx).paddr := io.storeIn(i).bits.paddr
+        data(io.storeIn(i).bits.uop.lsroqIdx).vaddr := io.storeIn(i).bits.vaddr
+        data(io.storeIn(i).bits.uop.lsroqIdx).mask := io.storeIn(i).bits.mask
+        data(io.storeIn(i).bits.uop.lsroqIdx).data := io.storeIn(i).bits.data
+        data(io.storeIn(i).bits.uop.lsroqIdx).mmio := io.storeIn(i).bits.mmio
+        data(io.storeIn(i).bits.uop.lsroqIdx).exception := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+        miss(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.miss
+        store(io.storeIn(i).bits.uop.lsroqIdx) := true.B
+        pending(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.mmio
+        XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x exc %x\n",
         io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0),
         io.storeIn(i).bits.uop.cf.pc,
         io.storeIn(i).bits.vaddr,
@@ -168,9 +176,10 @@ class Lsroq extends XSModule {
         io.storeIn(i).bits.data,
         io.storeIn(i).bits.miss,
         io.storeIn(i).bits.mmio,
-        io.storeIn(i).bits.rollback
-      )
-    }
+        io.storeIn(i).bits.rollback,
+        io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+        )
+      }
   })
 
   // cache miss request
@@ -184,7 +193,7 @@ class Lsroq extends XSModule {
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := data(missRefillSel).mask
 
-  io.dcache.req.bits.meta.id       := DCacheMiscType.miss
+  io.dcache.req.bits.meta.id       := DCacheAtomicsType.miss // DontCare // DCacheMiscType.miss  // TODO: // FIXME
   io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
   io.dcache.req.bits.meta.paddr    := data(missRefillSel).paddr
   io.dcache.req.bits.meta.uop      := uop(missRefillSel)
@@ -264,10 +273,10 @@ class Lsroq extends XSModule {
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-        LSUOpType.ldu  -> ZeroExt(rdataSel(63, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
+    io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
@@ -303,6 +312,7 @@ class Lsroq extends XSModule {
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
+    io.stout(i).bits.uop.cf.exceptionVec := data(storeWbSel(i)).exception.asBools
     io.stout(i).bits.data := data(storeWbSel(i)).data
     io.stout(i).bits.redirectValid := false.B
     io.stout(i).bits.redirect := DontCare
@@ -544,6 +554,7 @@ class Lsroq extends XSModule {
       rollback(i).bits.isReplay := true.B
       rollback(i).bits.isMisPred := false.B
       rollback(i).bits.isException := false.B
+      rollback(i).bits.isFlushPipe := false.B
 
       XSDebug(
         lsroqViolation,
@@ -594,7 +605,7 @@ class Lsroq extends XSModule {
   io.uncache.req.bits.data := data(ringBufferTail).data
   io.uncache.req.bits.mask := data(ringBufferTail).mask
 
-  io.uncache.req.bits.meta.id       := DCacheMiscType.mmio
+  io.uncache.req.bits.meta.id       := DCacheAtomicsType.mmio// DontCare // DCacheMiscType.mmio // TODO: // FIXME
   io.uncache.req.bits.meta.vaddr    := DontCare
   io.uncache.req.bits.meta.paddr    := data(ringBufferTail).paddr
   io.uncache.req.bits.meta.uop      := uop(ringBufferTail)
@@ -629,6 +640,12 @@ class Lsroq extends XSModule {
   when(io.uncache.resp.fire()){
     XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
   }
+
+  // Read vaddr for mem exception
+  val mexcLsroqIdx = WireInit(0.U(LsroqIdxWidth.W))
+  val memExceptionAddr = WireInit(data(mexcLsroqIdx(InnerLsroqIdxWidth - 1, 0)).vaddr)
+  ExcitingUtils.addSink(mexcLsroqIdx, "EXECPTION_LSROQIDX")
+  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_VADDR")
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx

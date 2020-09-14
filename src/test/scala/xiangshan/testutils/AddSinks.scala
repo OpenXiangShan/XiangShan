@@ -2,6 +2,7 @@ package xiangshan.testutils
 
 import chisel3._
 import chisel3.util.experimental.BoringUtils
+import utils.GTimer
 
 object AddSinks {
   def apply(dispBegin: Int = 0, dispEnd: Int = -1) = {
@@ -34,7 +35,9 @@ object AddSinks {
     for (s <- sinks){ BoringUtils.addSink(tmp, s) }
 
     val disp_enable = WireInit(dispBegin.S(64.W).asUInt() < dispEnd.S(64.W).asUInt())
+    val time = GTimer()
     BoringUtils.addSource(disp_enable, "DISPLAY_LOG_ENABLE")
+    BoringUtils.addSource(time, "logTimestamp")
 
   }
 }

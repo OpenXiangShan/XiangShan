@@ -34,6 +34,7 @@ package object xiangshan {
     def alu          = "b0011".U
     def mul          = "b0100".U
     def div          = "b0101".U
+    def fence        = "b0110".U
 
     def fmac         = "b1000".U
     def fmisc        = "b1001".U
@@ -58,6 +59,7 @@ package object xiangshan {
       alu.litValue() -> "alu",
       mul.litValue() -> "mul",
       div.litValue() -> "div",
+      fence.litValue() -> "fence",
       fmac.litValue() -> "fmac",
       fmisc.litValue() -> "fmisc",
       fDivSqrt.litValue() -> "fdiv/fsqrt",
