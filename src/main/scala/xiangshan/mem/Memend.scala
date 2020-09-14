@@ -174,6 +174,8 @@ class Memend extends XSModule {
   // as atomics insts (LR/SC/AMO) will block the pipeline
   val st0_atomics = io.backend.stin(0).valid && io.backend.stin(0).bits.uop.ctrl.fuType === FuType.mou
   val st1_atomics = io.backend.stin(1).valid && io.backend.stin(1).bits.uop.ctrl.fuType === FuType.mou
+  // amo should always go through store issue queue 0
+  assert(!st1_atomics)
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
@@ -201,6 +203,15 @@ class Memend extends XSModule {
     assert(!loadUnits(0).io.dtlb.req.valid)
     loadUnits(0).io.dtlb.resp.valid := false.B
   }
+
+  when(atomicsUnit.io.tlbFeedback.valid) {
+    assert(!storeUnits(0).io.tlbFeedback.valid)
+    atomicsUnit.io.tlbFeedback <> io.backend.tlbFeedback(exuParameters.LduCnt + 0)
+  }
+
+  atomicsUnit.io.dcache        <> io.atomics
+  atomicsUnit.io.flush_sbuffer.empty := sbEmpty
+
   atomicsUnit.io.dcache        <> io.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbEmpty
 

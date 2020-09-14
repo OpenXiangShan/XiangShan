@@ -3,9 +3,10 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan._
+import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
-import xiangshan.MicroOp
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -96,7 +97,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasXSLog {
 
   val io = IO(new DCacheIO)
 
@@ -170,8 +171,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // data array
   val DataWritePortCount = 3
   val StorePipeDataWritePort = 0
-  val MissQueueDataWritePort = 1
-  val AtomicsPipeDataWritePort = 2
+  val AtomicsPipeDataWritePort = 1
+  val MissQueueDataWritePort = 2
 
   val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
 
@@ -222,9 +223,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // do not nack replayed reqs
   ldu_0.req <> loadArb.io.out
   ldu(0).io.nack := ldu_0_nack && !loadArb.io.out.bits.meta.replay
-  when (ldu_0_nack) {
-    printf("DCache: LoadUnit 0 nacked\n")
-  }
+  XSDebug(ldu_0_nack, "LoadUnit 0 nacked\n")
 
   ldu_0.resp.ready := false.B
 
@@ -249,9 +248,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
     ldu(w).io.lsu.req <> io.lsu.load(w).req
     ldu(w).io.nack := load_w_nack
-    when (load_w_nack) {
-      printf(s"DCache: LoadUnit $w nacked\n")
-    }
+    XSDebug(load_w_nack, s"LoadUnit $w nacked\n")
 
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
     ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
@@ -284,9 +281,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
   block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block && !storeMissQueue.io.replay.req.bits.meta.replay)
   storeMissQueue.io.replay.resp <> stu.io.lsu.resp
-  when (store_block) {
-    printf("DCache: StorePipe blocked\n")
-  }
+  XSDebug(store_block, "StorePipe blocked\n")
 
   //----------------------------------------
   // atomics pipe
@@ -296,9 +291,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val atomics_block = block_atomics(atomicsMissQueue.io.replay.req.bits.addr)
   block_decoupled(atomicsMissQueue.io.replay.req, atomics.io.lsu.req, atomics_block && !atomicsMissQueue.io.replay.req.bits.meta.replay)
-  when (atomics_block) {
-    printf("DCache: AtomicsPipe blocked\n")
-  }
+  XSDebug(atomics_block, "AtomicsPipe blocked\n")
 
   // when atomics are in flight, there should be no load or store in flight
   // so atomics and store should not show up at the same time
@@ -352,9 +345,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val miss_block = block_miss(missReqArb.io.out.bits.addr)
   block_decoupled(missReqArb.io.out, missReq, miss_block)
-  when (miss_block) {
-    printf("DCache: MissQueue blocked\n")
-  }
+  XSDebug(miss_block, "MissQueue blocked\n")
 
   // Response
   val missResp        = missQueue.io.resp
@@ -425,9 +416,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // prober
   prober.io.block := block_probe(prober.io.inflight_req_block_addr.bits)
   prober.io.req <> bus.b
-  when (prober.io.block) {
-    printf("DCache: prober blocked\n")
-  }
+  XSDebug(prober.io.block, "prober blocked\n")
 
   //----------------------------------------
   // wb

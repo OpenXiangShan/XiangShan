@@ -89,6 +89,7 @@ class Roq extends XSModule {
       val wbIdx = wbIdxExt.tail(1)
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
+      microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       exuData(wbIdx) := io.exeWbResults(i).bits.data
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
@@ -169,10 +170,12 @@ class Roq extends XSModule {
 
         when(io.commits(i).valid){v := false.B}
         XSInfo(io.commits(i).valid,
-          "retired pc %x wen %d ldst %d data %x\n",
+          "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x\n",
           commitUop.cf.pc,
           commitUop.ctrl.rfWen,
           commitUop.ctrl.ldest,
+          commitUop.pdest,
+          commitUop.old_pdest,
           exuData(commitIdx)
         )
         XSInfo(io.commits(i).valid && exuDebug(commitIdx).isMMIO,
@@ -298,7 +301,7 @@ class Roq extends XSModule {
   val wen = Wire(Vec(CommitWidth, Bool()))
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
-  val wpc = Wire(Vec(CommitWidth, UInt(VAddrBits.W)))
+  val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val trapVec = Wire(Vec(CommitWidth, Bool()))
   val isRVC = Wire(Vec(CommitWidth, Bool()))
   for(i <- 0 until CommitWidth){
@@ -309,7 +312,7 @@ class Roq extends XSModule {
     wen(i) := io.commits(i).valid && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
     wdata(i) := exuData(idx)
     wdst(i) := uop.ctrl.ldest
-    wpc(i) := uop.cf.pc
+    wpc(i) := SignExt(uop.cf.pc, XLEN)
     trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
     isRVC(i) := uop.cf.brUpdate.pd.isRVC
   }
@@ -320,7 +323,7 @@ class Roq extends XSModule {
   ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
   XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
   val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
-  val retirePCFix = Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc)
+  val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
   val retireInstFix = Mux(io.redirect.valid, microOp(deqPtr).cf.instr, microOp(firstValidCommit).cf.instr)
   if(!env.FPGAPlatform){
     BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
@@ -337,7 +340,7 @@ class Roq extends XSModule {
 
     val hitTrap = trapVec.reduce(_||_)
     val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-    val trapPC = PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1))
+    val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
 
     ExcitingUtils.addSource(RegNext(hitTrap), "trapValid")
     ExcitingUtils.addSource(RegNext(trapCode), "trapCode")

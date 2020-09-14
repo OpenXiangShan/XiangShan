@@ -120,7 +120,16 @@ class AtomicsPipe extends DCacheModule
   val s2_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s2_req.addr)
   val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
   val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
-  when (s2_valid) {
+
+  // we have permission on this block
+  // but we can not finish in this pass
+  // we need to go to miss queue to update meta and set dirty first
+  val s2_set_dirty = s2_tag_match && s2_has_permission && s2_hit_state =/= s2_new_hit_state
+  // this sc should succeed, but we need to set dirty first
+  // do not treat it as a sc failure and reset lr sc counter
+  val sc_set_dirty = s2_set_dirty && !s2_nack && s2_sc && s2_lrsc_addr_match
+
+  when (s2_valid && !sc_set_dirty) {
     when (s2_hit && !s2_nack && s2_lr) {
       lrsc_count := (lrscCycles - 1).U
       lrsc_addr := get_block_addr(s2_req.addr)

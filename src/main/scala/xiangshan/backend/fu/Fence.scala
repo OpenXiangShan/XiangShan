@@ -12,7 +12,7 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   val (valid, src1, src2, uop, func, lsrc1, lsrc2) = 
     (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.ctrl.lsrc1, io.in.bits.uop.ctrl.lsrc2)
 
-  val s_sb :: s_tlb :: s_icache :: Nil = Enum(3)
+  val s_sb :: s_tlb :: s_icache :: s_none :: Nil = Enum(4)
   val state = RegInit(s_sb)
 
   val sfence  = WireInit(0.U.asTypeOf(new SfenceBundle))
@@ -33,6 +33,7 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
 
   when (state === s_sb && valid && func === FenceOpType.fencei && !sbEmpty) { state := s_icache }
   when (state === s_sb && valid && func === FenceOpType.sfence && !sbEmpty) { state := s_tlb }
+  when (state === s_sb && valid && func === FenceOpType.fence  && !sbEmpty) { state := s_none }
   when (state =/= s_sb && sbEmpty) { state := s_sb } 
 
   assert(!(io.out.valid && io.out.bits.uop.ctrl.rfWen))

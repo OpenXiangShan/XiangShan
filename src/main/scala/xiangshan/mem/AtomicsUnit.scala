@@ -14,6 +14,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val dcache        = new DCacheLoadIO
     val dtlb          = new TlbRequestIO
     val flush_sbuffer = new SbufferFlushBundle
+    val tlbFeedback   = ValidIO(new TlbFeedback)
   })
 
   //-------------------------------------------------------
@@ -52,6 +53,15 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     }
   }
 
+  // Send TLB feedback to store issue queue
+  // we send feedback right after we receives request
+  // also, we always treat amo as tlb hit
+  // since we will continue polling tlb all by ourself
+  io.tlbFeedback.valid       := RegNext(io.in.fire())
+  io.tlbFeedback.bits.hit    := true.B
+  io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
+
+
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
     // send req to dtlb
@@ -65,15 +75,24 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx
 
     when(io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
-      paddr := io.dtlb.resp.bits.paddr
-      state := s_flush_sbuffer_req
-    }
-
-    // TODO: exception handling
-    val exception = WireInit(false.B)
-    // there are exceptions, no need to execute it
-    when (exception) {
-      state := s_finish
+      // exception handling
+      val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
+        "b00".U   -> true.B,              //b
+        "b01".U   -> (in.src1(0) === 0.U),   //h
+        "b10".U   -> (in.src1(1,0) === 0.U), //w
+        "b11".U   -> (in.src1(2,0) === 0.U)  //d
+      ))
+      in.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+      in.uop.cf.exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
+      val exception = !addrAligned || io.dtlb.resp.bits.excp.pf.st
+      when (exception) {
+        // check for exceptions
+        // if there are exceptions, no need to execute it
+        state := s_finish
+      } .otherwise {
+        paddr := io.dtlb.resp.bits.paddr
+        state := s_flush_sbuffer_req
+      }
     }
   }
 
