@@ -638,10 +638,13 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
   val mtip = WireInit(false.B)
+  val msip = WireInit(false.B)
   val meip = WireInit(false.B)
   ExcitingUtils.addSink(mtip, "mtip")
+  ExcitingUtils.addSink(msip, "msip")
   ExcitingUtils.addSink(meip, "meip")
   mipWire.t.m := mtip
+  mipWire.s.m := msip
   mipWire.e.m := meip
 
   // exceptions
