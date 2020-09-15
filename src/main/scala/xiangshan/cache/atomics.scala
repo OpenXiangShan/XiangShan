@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.{XSDebug, ErrGen}
+import utils.{XSDebug}
 
 // this is a traditional cache pipeline:
 // it handles load/store/amo/lr,sc
@@ -227,9 +227,8 @@ class AtomicsPipe extends DCacheModule
   val s3_tag_match_way = RegNext(s2_tag_match_way)
 
   val wdata_encoded = cacheParams.dataCode.encode(amoalu.io.out)
-  val wdata_flipped = ErrGen(wdata_encoded, 1)
   val s3_wdata = Reg(UInt())
-  s3_wdata := wdata_flipped
+  s3_wdata := wdata_encoded
 
   // write dcache if hit
   // only needs to read the specific beat

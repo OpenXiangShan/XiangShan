@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.{XSDebug, ErrGen}
+import utils.{XSDebug}
 
 class StorePipe extends DCacheModule
 {
@@ -119,8 +119,7 @@ class StorePipe extends DCacheModule
       val wmask = s2_req.mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w)
       val wdata = mergePutData(old_data, new_data, wmask)
       val wdata_encoded = cacheParams.dataCode.encode(wdata)
-      val wdata_flipped = ErrGen(wdata_encoded, 1)
-      wdata_flipped
+      wdata_encoded
     })
   }
 
