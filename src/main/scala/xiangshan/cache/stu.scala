@@ -99,7 +99,7 @@ class StorePipe extends DCacheModule
     (0 until rowWords) map { w =>
       val data = s2_data(r)(encDataBits * (w + 1) - 1, encDataBits * w)
       val decoded = cacheParams.dataCode.decode(data)
-      assert(!(s2_valid && !s2_hit && !s2_nack && decoded.uncorrectable))
+      assert(!(s2_valid && s2_hit && !s2_nack && decoded.uncorrectable))
       decoded.corrected
     }
   }

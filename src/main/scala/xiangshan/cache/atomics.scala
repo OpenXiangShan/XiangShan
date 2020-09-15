@@ -192,7 +192,7 @@ class AtomicsPipe extends DCacheModule
   val s2_data_word =  s2_data_words(s2_word_idx)
   val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
   val s2_data_word_decoded = s2_decoded.corrected
-  assert(!(s2_valid && !s2_hit && !s2_nack && s2_decoded.uncorrectable))
+  assert(!(s2_valid && s2_hit && !s2_nack && s2_decoded.uncorrectable))
 
 
 
