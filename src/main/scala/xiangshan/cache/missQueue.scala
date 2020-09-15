@@ -264,7 +264,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     }
   }
 
-  val refill_data = Reg(Vec(refillCycles, UInt(rowBits.W)))
+  val refill_data = Reg(Vec(refillCycles, UInt(encRowBits.W)))
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
 
