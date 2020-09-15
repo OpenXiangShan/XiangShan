@@ -144,6 +144,7 @@ inline void Emulator::read_emu_regs(uint64_t *r) {
   r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest_sscratch;
   r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest_mideleg;
   r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest_medeleg;
+  r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
 }
 
 inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {

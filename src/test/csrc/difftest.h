@@ -30,6 +30,7 @@ enum {
   DIFFTEST_SSCRATCH,
   DIFFTEST_MIDELEG,
   DIFFTEST_MEDELEG,
+  DIFFTEST_MODE,
   DIFFTEST_NR_REG
 };
 // DIFFTEST_MTVAL, DIFFTEST_STVAL will be updated while committing exception
