@@ -865,6 +865,13 @@ class CSR extends XSModule
     BoringUtils.addSource(sepc, "difftestSepc")
     BoringUtils.addSource(mcause, "difftestMcause")
     BoringUtils.addSource(scause, "difftestScause")
+    BoringUtils.addSource(satp, "difftestSatp")
+    BoringUtils.addSource(mipReg, "difftestMip")
+    BoringUtils.addSource(mie, "difftestMie")
+    BoringUtils.addSource(mscratch, "difftestMscratch")
+    BoringUtils.addSource(sscratch, "difftestSscratch")
+    BoringUtils.addSource(mideleg, "difftestMideleg")
+    BoringUtils.addSource(medeleg, "difftestMedeleg")
   } else {
 //    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
