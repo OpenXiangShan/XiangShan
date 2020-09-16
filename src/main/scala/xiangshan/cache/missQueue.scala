@@ -89,7 +89,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   val (_, _, refill_done, refill_address_inc) = edge.addr_inc(io.mem_grant)
 
   val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
-  val refill_ctr  = Reg(UInt(log2Up(cacheDataBeats).W))
+  val refill_ctr  = Reg(UInt(log2Up(refillCycles).W))
   val should_refill_data  = Reg(Bool())
 
   io.block_idx.valid  := state =/= s_invalid
@@ -264,7 +264,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     }
   }
 
-  val refill_data = Reg(Vec(refillCycles, UInt(encRowBits.W)))
+  val refill_data = Reg(Vec(blockRows, UInt(encRowBits.W)))
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
 
@@ -272,13 +272,16 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       when (io.mem_grant.fire()) {
         should_refill_data := true.B
         refill_ctr := refill_ctr + 1.U
-        refill_data(refill_ctr) := Cat((rowWords - 1 to 0) map { w =>
-          val word = io.mem_grant.bits.data(wordBits * (w + 1) - 1, wordBits * w)
-          val word_encoded = cacheParams.dataCode.encode(word)
-          word_encoded
-        })
+        for (i <- 0 until beatRows) {
+          val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
+          refill_data((refill_ctr << log2Floor(beatRows)) + i.U) := Cat((0 until rowWords).reverse map { w =>
+            val word = row(wordBits * (w + 1) - 1, wordBits * w)
+            val word_encoded = cacheParams.dataCode.encode(word)
+            word_encoded
+          })
+        }
 
-        when (refill_ctr === (cacheDataBeats - 1).U) {
+        when (refill_ctr === (refillCycles - 1).U) {
           assert(refill_done, "refill not done!")
         }
       }
@@ -313,7 +316,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.refill.valid        := true.B
     io.refill.bits.addr    := req_block_addr
     io.refill.bits.way_en  := req_way_en
-    io.refill.bits.wmask   := VecInit((0 until refillCycles) map (i => ~0.U(rowWords.W)))
+    io.refill.bits.wmask   := VecInit((0 until blockRows) map (i => ~0.U(rowWords.W)))
     io.refill.bits.rmask   := DontCare
     io.refill.bits.data    := refill_data
 

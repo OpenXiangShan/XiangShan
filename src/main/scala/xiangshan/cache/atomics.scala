@@ -12,7 +12,7 @@ class AtomicsPipe extends DCacheModule
   val io = IO(new DCacheBundle{
     val lsu       = Flipped(new DCacheLoadIO)
     val data_read  = DecoupledIO(new L1DataReadReq)
-    val data_resp  = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val data_resp  = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val data_write = DecoupledIO(new L1DataWriteReq)
     val meta_read  = DecoupledIO(new L1MetaReadReq)
     val meta_resp  = Input(Vec(nWays, new L1Metadata))
@@ -38,7 +38,7 @@ class AtomicsPipe extends DCacheModule
   data_read.addr   := io.lsu.req.bits.addr
   data_read.way_en := ~0.U(nWays.W)
   // only needs to read the specific beat
-  data_read.rmask  := UIntToOH(get_beat(io.lsu.req.bits.addr))
+  data_read.rmask  := UIntToOH(get_row(io.lsu.req.bits.addr))
 
   // Pipeline
   // ---------------------------------------
@@ -92,7 +92,7 @@ class AtomicsPipe extends DCacheModule
   val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
   val data_resp = io.data_resp
   for (w <- 0 until nWays) {
-    s2_data(w) := data_resp(w)(get_beat(s2_req.addr))
+    s2_data(w) := data_resp(w)(get_row(s2_req.addr))
   }
 
   val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
@@ -185,9 +185,9 @@ class AtomicsPipe extends DCacheModule
   }
 
   // load data gen
-  val s2_data_words = Wire(Vec(rowWords, UInt(encDataBits.W)))
+  val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
   for (w <- 0 until rowWords) {
-    s2_data_words(w) := s2_data_muxed(encDataBits * (w + 1) - 1, encDataBits * w)
+    s2_data_words(w) := s2_data_muxed(encWordBits * (w + 1) - 1, encWordBits * w)
   }
   val s2_data_word =  s2_data_words(s2_word_idx)
   val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
@@ -216,7 +216,7 @@ class AtomicsPipe extends DCacheModule
   // ---------------------------------------
   // s3: do data write
   // Store/amo hits
-  val amoalu   = Module(new AMOALU(DataBits))
+  val amoalu   = Module(new AMOALU(wordBits))
   amoalu.io.mask := s2_req.mask
   amoalu.io.cmd  := s2_req.cmd
   amoalu.io.lhs  := s2_data_word_decoded
@@ -232,10 +232,10 @@ class AtomicsPipe extends DCacheModule
 
   // write dcache if hit
   // only needs to read the specific beat
-  val wmask = WireInit(VecInit((0 until refillCycles) map (i => 0.U(rowWords.W))))
-  val wdata = WireInit(VecInit((0 until refillCycles) map (i => Cat(
+  val wmask = WireInit(VecInit((0 until blockRows) map (i => 0.U(rowWords.W))))
+  val wdata = WireInit(VecInit((0 until blockRows) map (i => Cat(
     (0 until rowWords) map { w => s3_wdata }))))
-  wmask(get_beat(s3_req.addr)) := ~0.U(rowWords.W)
+  wmask(get_row(s3_req.addr)) := ~0.U(rowWords.W)
 
   val data_write = io.data_write.bits
   io.data_write.valid := s3_valid

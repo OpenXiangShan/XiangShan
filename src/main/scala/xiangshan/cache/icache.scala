@@ -22,12 +22,11 @@ case class ICacheParameters(
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
-    dataECCBytes: Int = 1,
-    nMSHRs: Int = 1,
     nSDQ: Int = 17,
     nRPQ: Int = 16,
     nMMIOs: Int = 1,
-    blockBytes: Int = 64) extends L1CacheParameters {
+    blockBytes: Int = 64
+)extends L1CacheParameters {
 
   def tagCode: Code = Code.fromString(tagECC)
   def dataCode: Code = Code.fromString(dataECC)
@@ -38,27 +37,18 @@ trait HasICacheParameters extends HasL1CacheParameters {
   val cacheParams = icacheParameters
 
   // the width of inner CPU data interface
-  def wordBits = DataBits
-  def wordBytes = DataBytes
-  def wordOffBits = log2Up(wordBytes)
-  def beatBytes = cacheParams.blockBytes / cacheDataBeats
-  def beatWords = beatBytes / wordBytes
-  def beatOffBits = log2Up(beatBytes)
   def cacheID = 0
-  def RVCInsLen = cacheDataBits/4
-  def tileBusWidth = DataBits * 4 // 256 bits bus
-  def tileBeatCnt = cacheParams.blockBytes * 8 / tileBusWidth
-
-  def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
-  def get_tag(addr: UInt) = addr >> untagBits
-  def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
-  
+  // RVC instruction length
+  def RVCInsLen = 16
   val groupAlign = log2Up(FetchWidth * 4 * 2)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
-  require(rowBits == wordBits, s"rowBits($rowBits) != wordBits($wordBits)")
-  require(rowBits == cacheDataBits, s"rowBits($rowBits) != cacheDataBits($cacheDataBits)")
+  require(isPow2(nWays), s"nWays($nWays) must be pow2")
+  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
+  require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
+  // this is a VIPT L1 cache
+  require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
 }
 
 abstract class ICacheBundle extends XSBundle
@@ -77,7 +67,7 @@ sealed class ICacheMetaBundle extends ICacheBundle
 
 sealed class ICacheDataBundle extends ICacheBundle
 {
-  val data = UInt(cacheDataBits.W)
+  val data = UInt(wordBits.W)
 }
 
 class ICacheReq extends ICacheBundle
@@ -162,14 +152,14 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 {
   // cut a cacheline into a fetch packet
   def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
-    val sourceVec_16bit = Wire(Vec(cacheDataBeats * 4,UInt(RVCInsLen.W)))
-    (0 until cacheDataBeats).foreach{ i =>
+    val sourceVec_16bit = Wire(Vec(blockWords * 4,UInt(RVCInsLen.W)))
+    (0 until blockWords).foreach{ i =>
       (0 until 4).foreach{ j =>
         sourceVec_16bit(i*4 + j) := sourceVec(i)(j*16+15, j*16)
       }
     }
-    val cutPacket = WireInit(VecInit(Seq.fill(cacheDataBeats * 2){0.U(RVCInsLen.W)}))
-    (0 until cacheDataBeats * 2).foreach{ i =>
+    val cutPacket = WireInit(VecInit(Seq.fill(blockWords * 2){0.U(RVCInsLen.W)}))
+    (0 until blockWords * 2).foreach{ i =>
       cutPacket(i) := Mux(mask(i).asBool,sourceVec_16bit(startPtr + i.U),0.U)
     }
     cutPacket.asUInt
@@ -192,7 +182,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //    Memory Part
   //----------------------------
   val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
-  val dataArray = List.fill(cacheDataBeats){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
+  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
   // 256-bit valid
   val validArray = RegInit(0.U((nSets * nWays).W)) 
 
@@ -209,7 +199,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s1_idx = get_idx(s1_req_pc)
   metaArray.io.r.req.valid := s1_valid
   metaArray.io.r.req.bits.apply(setIdx=s1_idx)
-  for(b <- 0 until cacheDataBeats){
+  for(b <- 0 until blockWords){
     dataArray(b).io.r.req.valid := s1_valid
     dataArray(b).io.r.req.bits.apply(setIdx=s1_idx)
   }
@@ -267,7 +257,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
-  val refillDataReg = Reg(Vec(tileBeatCnt,UInt(tileBusWidth.W)))
+  val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
   assert(!(s3_hit && s3_mmio), "MMIO address should not hit in ICache!")
 
@@ -280,12 +270,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //icache miss
   val s_idle :: s_mmioReq :: s_mmioResp :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(6)
   val state = RegInit(s_idle)
-  val readBeatCnt = Counter(tileBeatCnt)
+  val readBeatCnt = Counter(refillCycles)
 
   //uncache request
-  val mmioBeatCnt = Counter(cacheDataBeats)
+  val mmioBeatCnt = Counter(blockWords)
   val mmioAddrReg = RegInit(0.U(PAddrBits.W))
-  val mmioReg = Reg(Vec(cacheDataBeats/2, UInt(cacheDataBeats.W)))
+  val mmioReg = Reg(Vec(blockWords/2, UInt(blockWords.W)))
 
   //pipeline flush register
   val needFlush = RegInit(false.B)
@@ -303,8 +293,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val waitForRefillDone = needFlush || cacheflushed
 
   // state change to wait for a cacheline refill
-  val countFull = readBeatCnt.value === (tileBeatCnt - 1).U
-  val mmioCntFull = mmioBeatCnt.value === (cacheDataBeats - 1).U
+  val countFull = readBeatCnt.value === (refillCycles - 1).U
+  val mmioCntFull = mmioBeatCnt.value === (blockWords - 1).U
   switch(state){
     is(s_idle){
       when(s3_mmio && io.flush === 0.U){
@@ -329,7 +319,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
       when (edge.hasData(bus.d.bits) && bus.d.fire()) {
         mmioBeatCnt.inc()
         assert(refill_done, "MMIO response should be one beat only!")
-        mmioReg(mmioBeatCnt.value) := bus.d.bits.data(cacheDataBits-1,0)
+        mmioReg(mmioBeatCnt.value) := bus.d.bits.data(wordBits-1,0)
         state := Mux(mmioCntFull,s_wait_resp,s_mmioReq)
       }
     }
@@ -368,8 +358,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   metaArray.io.w.req.valid := refillFinalOneBeat
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
-  if(tileBusWidth == 64){
-    for(b <- 0 until cacheDataBeats){
+  if(beatBits == 64){
+    for(b <- 0 until blockWords){
       val writeOneBeat = (state === s_memReadResp) && bus.d.fire() && (b.U === readBeatCnt.value)
       dataArray(b).io.w.req.valid := writeOneBeat
       dataArray(b).io.w.req.bits.apply(   setIdx=get_idx(s3_req_pc), 
@@ -380,7 +370,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   }
   else{
     val writeFirstHalf = (state === s_memReadResp) && bus.d.fire() && (readBeatCnt.value === 0.U)
-    (0 until cacheDataBeats/2).foreach{ b =>
+    (0 until blockWords/2).foreach{ b =>
       dataArray(b).io.w.req.valid := writeFirstHalf
       dataArray(b).io.w.req.bits.apply( setIdx=get_idx(s3_req_pc),
                                         data=bus.d.bits.data(b * 64 +63, b*64).asTypeOf(new ICacheDataBundle),
@@ -388,8 +378,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
     }
     val writeLastHalf = (state === s_memReadResp) && bus.d.fire() && (readBeatCnt.value === 1.U)
-    (cacheDataBeats/2 until cacheDataBeats).foreach{ b =>
-    	val index = b - cacheDataBeats/2
+    (blockWords/2 until blockWords).foreach{ b =>
+      val index = b - blockWords/2
       dataArray(b).io.w.req.valid := writeLastHalf
       dataArray(b).io.w.req.bits.apply( setIdx=get_idx(s3_req_pc),
                                           data=bus.d.bits.data(index * 64 +63, index*64).asTypeOf(new ICacheDataBundle), 
@@ -406,7 +396,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //icache flush: only flush valid Array register
   when(icacheFlush){ validArray := 0.U }
 
-  val refillDataVec = refillDataReg.asTypeOf(Vec(cacheDataBeats,UInt(cacheDataBits.W)))
+  val refillDataVec = refillDataReg.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
 
   s3_ready := ((io.resp.fire() || !s3_valid) && !waitForRefillDone) || (waitForRefillDone && state === s_wait_resp)
@@ -421,7 +411,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   XSDebug("[Chanel A] valid:%d  ready:%d\n",bus.a.valid,bus.a.ready)
   XSDebug("[Chanel D] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",bus.d.valid,bus.d.ready,bus.d.bits.data,readBeatCnt.value)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
-  for(i <- 0 until cacheDataBeats){
+  for(i <- 0 until blockWords){
       XSDebug("[Stage 3] %x\n",dataHitWay(i))
   }
   XSDebug("[Stage 3] outPacket :%x\n",outPacket)
@@ -462,7 +452,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val mmioTileReq = edge.Get(
     fromSource      = cacheID.U,
     toAddress       = mmioAddrReg,
-    lgSize          = (log2Up(cacheDataBits)).U )._2
+    lgSize          = (log2Up(wordBits)).U )._2
   bus.a.bits :=  Mux((state === s_mmioReq),mmioTileReq, memTileReq)
   bus.d.ready := true.B
 

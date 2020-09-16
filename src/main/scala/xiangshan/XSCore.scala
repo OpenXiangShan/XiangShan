@@ -159,7 +159,7 @@ trait HasXSParameter {
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
 
-  val l1BusDataWidth = 64
+  val l1BusDataWidth = 256
 
   val icacheParameters = ICacheParameters(
   )
