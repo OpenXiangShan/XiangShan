@@ -9,6 +9,5 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
 class Fmac extends FunctionUnit(fmacCfg){
-  val io = IO(new Bundle() {})
   override def toString: String = "Fmac"
 }

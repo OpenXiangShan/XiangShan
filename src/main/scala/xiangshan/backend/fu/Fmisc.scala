@@ -9,6 +9,5 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
 class Fmisc extends FunctionUnit(fmiscCfg){
-  val io = IO(new Bundle() {})
   override def toString: String = "Fmisc"
 }

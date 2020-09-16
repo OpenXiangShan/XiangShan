@@ -8,5 +8,4 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
 class I2f extends FunctionUnit(i2fCfg){
-  val io = IO(new Bundle() {})
 }
