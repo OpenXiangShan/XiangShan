@@ -29,7 +29,7 @@ class Backend extends XSModule
   })
 
 
-  val aluExeUnits = Module(new AluExeUnit(hasSfence = true)) +: Array.tabulate(exuParameters.AluCnt-1)(_ => Module(new AluExeUnit(hasSfence = false)))
+  val aluExeUnits =Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JmpExeUnit)
   val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
@@ -173,7 +173,7 @@ class Backend extends XSModule
   io.mem.commits <> roq.io.commits
   io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
-  jmpExeUnit.io.exception.valid := roq.io.redirect.valid
+  jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.exception.bits := roq.io.exception
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo

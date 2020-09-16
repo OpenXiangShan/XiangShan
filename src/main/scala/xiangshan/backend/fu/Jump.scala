@@ -25,6 +25,7 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.redirect.target := target
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect.isException := false.B
+  io.out.bits.redirect.isFlushPipe := false.B
   io.out.bits.redirect.isMisPred := DontCare // check this in brq
   io.out.bits.redirect.isReplay := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
@@ -50,13 +51,14 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.debug <> DontCare
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:%x\n",
     io.in.valid,
     io.in.ready,
     io.out.valid,
     io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     redirectHit,
     io.redirect.bits.brTag.value
   )

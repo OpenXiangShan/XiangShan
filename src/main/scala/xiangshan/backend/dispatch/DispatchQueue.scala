@@ -118,11 +118,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // redirect: cancel uops currently in the queue
   val mispredictionValid = io.redirect.valid && io.redirect.bits.isMisPred
   val exceptionValid = io.redirect.valid && io.redirect.bits.isException
+  val flushPipeValid = io.redirect.valid && io.redirect.bits.isFlushPipe
   val roqNeedFlush = Wire(Vec(size, Bool()))
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
     roqNeedFlush(i) := uopEntries(i.U).needFlush(io.redirect)
-    needCancel(i) := stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && mispredictionValid) || exceptionValid)
+    needCancel(i) := stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && mispredictionValid) || exceptionValid || flushPipeValid)
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }

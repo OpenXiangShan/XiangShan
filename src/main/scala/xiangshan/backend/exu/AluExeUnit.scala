@@ -10,7 +10,7 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 
 
-class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
+class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
 
   val (iovalid, src1, src2, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, 
     io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
@@ -59,6 +59,7 @@ class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
   io.out.bits.redirect.brTag := uop.brTag
   io.out.bits.redirect.isException := false.B
   io.out.bits.redirect.isMisPred := DontCare // check this in brq
+  io.out.bits.redirect.isFlushPipe := false.B
   io.out.bits.redirect.isReplay := false.B
   io.out.bits.redirect.roqIdx := uop.roqIdx
 
@@ -72,40 +73,20 @@ class AluExeUnit(hasSfence: Boolean) extends Exu(Exu.aluExeUnitCfg) {
   // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
   io.out.bits.brUpdate.brTag := uop.brTag
 
-  if (hasSfence) { // Sfence && fence.i here. // TODO: add fence.i
-    val waitSbuffer = ALUOpType.waitSbuffer(func)
-    val sbEmpty = WireInit(true.B) // TODO: use tileLink and init is false.B
-    val validNeg = RegInit(true.B)
-    when (io.out.fire()) { validNeg := true.B }
-    when (io.in.valid && !io.out.valid) { validNeg := false.B }
-    val sfence = Wire(new SfenceBundle)
-    sfence.valid := valid && validNeg && ALUOpType.sfence===func
-    sfence.bits.rs1 := uop.ctrl.lsrc1===0.U
-    sfence.bits.rs2 := uop.ctrl.lsrc2===0.U
-    sfence.bits.addr := src1
-    BoringUtils.addSource(sfence, "SfenceBundle")
+  io.in.ready := io.out.ready
+  io.out.valid := valid
+  io.out.bits.uop <> io.in.bits.uop
+  io.out.bits.data := aluRes
 
-    io.out.valid := Mux(waitSbuffer, valid && sbEmpty, valid)
-    io.out.bits.uop <> io.in.bits.uop
-    io.out.bits.data := aluRes
-    io.in.ready := Mux(waitSbuffer, sbEmpty && io.out.ready, io.out.ready)
-  } else {
-    assert(!(ALUOpType.sfence===func && iovalid))
-    io.in.ready := io.out.ready
-    io.out.valid := valid
-    io.out.bits.uop <> io.in.bits.uop
-    io.out.bits.data := aluRes
-  }
-  
-
-  XSDebug(io.in.valid,
-    "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:f:%d v:%d\n",
+  XSDebug(io.in.valid || io.redirect.valid,
+    "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",
     io.in.valid,
     io.in.ready,
     io.out.valid,
     io.out.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
+    io.redirect.bits.isFlushPipe,
     redirectHit,
     io.redirect.bits.brTag.flag,
     io.redirect.bits.brTag.value

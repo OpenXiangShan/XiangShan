@@ -30,7 +30,6 @@ class Dispatch2Int extends XSModule {
     jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     aluIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     mduIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-
     // XSDebug(io.fromDq(i).valid,
     //   p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
   }
@@ -123,7 +122,7 @@ class Dispatch2Int extends XSModule {
 
     io.enqIQData(i) := DontCare
     io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.src1Type === SrcType.pc,
-      uopReg(i).cf.pc, io.readRf(readPortIndexReg(i)).data)
+      SignExt(uopReg(i).cf.pc, XLEN), io.readRf(readPortIndexReg(i)).data)
     io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.src2Type === SrcType.imm,
       uopReg(i).ctrl.imm, io.readRf(readPortIndexReg(i) + 1.U).data)
 

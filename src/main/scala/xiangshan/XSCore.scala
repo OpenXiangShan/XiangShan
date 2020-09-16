@@ -9,10 +9,11 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils._
 
 case class XSCoreParameters
@@ -27,7 +28,7 @@ case class XSCoreParameters
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
-  HasFPU: Boolean = true,
+  HasFPU: Boolean = false,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
@@ -165,10 +166,13 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
   )
 
-  val LRSCCycles = 16
+  val LRSCCycles = 100
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
-    dataECC = Some("secded")
+    dataECC = Some("secded"),
+    nMissEntries = 16,
+    nLoadMissEntries = 8,
+    nStoreMissEntries = 8
   )
 }
 
@@ -220,14 +224,35 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
+  val icache = LazyModule(new ICache())
   val ptw = LazyModule(new PTW())
 
-  // TODO: crossbar Icache/Dcache/PTW here
-  val mem = TLXbar()
+  val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
-  mem := TLCacheCork(sinkIds = 1) := dcache.clientNode
-  mem := TLCacheCork(sinkIds = 1) := ptw.node
+  // TODO: refactor these params
+  private val l2 = LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 2,
+      ways = 4,
+      sets = 512 * 1024 / (64 * 4),
+      blockBytes = 64,
+      beatBytes = 8
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = 8
+    )
+  ))
+
+  private val xbar = TLXbar()
+
+  xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := ptw.node
+
+  l2.node := xbar
+
+  mem := TLBuffer() := TLCacheCork() := TLBuffer() := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
@@ -240,20 +265,25 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
+  val icache = outer.icache.module
   val ptw = outer.ptw.module
 
   // TODO: connect this
-  dcache.io.lsu.misc <> DontCare
 
   front.io.backend <> backend.io.frontend
+  front.io.icacheResp <> icache.io.resp
+  front.io.icacheToTlb <> icache.io.tlb
+  icache.io.req <> front.io.icacheReq
+  icache.io.flush <> front.io.icacheFlush
   mem.io.backend   <> backend.io.mem
 
   ptw.io.tlb(0) <> mem.io.ptw
-  ptw.io.tlb(1) <> DontCare
+  ptw.io.tlb(1) <> front.io.ptw
 
-  dcache.io.lsu.load <> mem.io.loadUnitToDcacheVec
-  dcache.io.lsu.lsroq <> mem.io.miscToDcache
-  dcache.io.lsu.store <> mem.io.sbufferToDcache
-  uncache.io.lsroq <> mem.io.uncache
+  dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
+  dcache.io.lsu.lsroq   <> mem.io.loadMiss
+  dcache.io.lsu.atomics <> mem.io.atomics
+  dcache.io.lsu.store   <> mem.io.sbufferToDcache
+  uncache.io.lsroq      <> mem.io.uncache
 
 }

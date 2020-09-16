@@ -18,6 +18,8 @@ class FetchPacket extends XSBundle {
   val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
   val brInfo = Vec(PredictWidth, new BranchInfo)
   val pd = Vec(PredictWidth, new PreDecodeInfo)
+  val ipf = Bool()
+  val crossPageIPFFix = Bool()
 }
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -124,6 +126,7 @@ class CtrlSignals extends XSBundle {
   val isXSTrap = Bool()
   val noSpecExec = Bool()  // This inst can not be speculated
   val isBlocked  = Bool()  // This inst requires pipeline to be blocked
+  val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
   val commitType = CommitType()
@@ -151,7 +154,7 @@ trait HasRoqIdx { this: HasXSParameter =>
   }
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && this.isAfter(redirect.bits.roqIdx)
+    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || this.isAfter(redirect.bits.roqIdx)) // TODO: need check by JiaWei
   }
 }
 
@@ -166,6 +169,7 @@ class Redirect extends XSBundle with HasRoqIdx {
   val isException = Bool()
   val isMisPred = Bool()
   val isReplay = Bool()
+  val isFlushPipe = Bool()
   val pc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
   val brTag = new BrqPtr

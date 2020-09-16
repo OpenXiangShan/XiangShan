@@ -24,6 +24,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
     val release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Input(Bool())
+    val inflight_addr = Output(Valid(UInt()))
   })
 
   val req = Reg(new WritebackReq(edge.bundle.sourceBits))
@@ -46,6 +47,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
 
   io.release.valid   := false.B
   io.release.bits    := DontCare
+
+  io.inflight_addr.valid := state =/= s_invalid
+  io.inflight_addr.bits  := req.idx << blockOffBits
 
   XSDebug("state: %d\n", state)
 
