@@ -21,19 +21,95 @@ case class FuConfig
   writeIntRf: Boolean,
   writeFpRf: Boolean,
   hasRedirect: Boolean
-)
-
-class FunctionUnitIO extends XSBundle {
-  val in = Flipped(Decoupled(new Bundle {
-    val src1 = Output(UInt(XLEN.W))
-    val src2 = Output(UInt(XLEN.W))
-    val src3 = Output(UInt(XLEN.W))
-    val func = Output(FuOpType())
-  }))
-  val out = Decoupled(Output(UInt(XLEN.W)))
+) {
+  def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }
 
-abstract class FunctionUnit(cfg: FuConfig) extends XSModule
+class FunctionUnitIO[TI <: Data, TO <: Data]
+(
+  cfg: FuConfig,
+  len: Int,
+  extIn: => TI = null,
+  extOut: => TO = null
+) extends XSBundle
+{
+  val in = Flipped(DecoupledIO(new Bundle() {
+    val src = Vec(cfg.srcCnt, UInt(len.W))
+    val uop = new MicroOp
+    val ext = if(extIn == null) None else Some(extIn.cloneType)
+  }))
+  val out = DecoupledIO(new Bundle() {
+    val data = UInt(XLEN.W)
+    val uop = new MicroOp
+    val ext = if(extOut == null) None else Some(extOut.cloneType)
+  })
+  val redirectIn = Flipped(ValidIO(new Redirect))
+}
+
+abstract class FunctionUnit[TI <: Data, TO <: Data]
+(
+  cfg: FuConfig,
+  len: Int = 64,
+  extIn: => TI = null,
+  extOut: => TO = null
+) extends XSModule {
+
+  val io = IO(new FunctionUnitIO[TI, TO](cfg, len, extIn, extOut))
+
+}
+
+abstract class PipelinedFunctionUnit[TI <: Data, TO <: Data]
+(
+  cfg: FuConfig,
+  len: Int,
+  latency: Int,
+  extIn: => TI = null,
+  extOut: => TO = null
+) extends FunctionUnit(cfg, len, extIn, extOut)
+{
+
+  val hasExtIn = extIn != null
+
+  val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
+  val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
+  val uopVec = io.in.bits.uop +: Array.fill(latency)(Reg(new MicroOp))
+
+
+  val flushVec = uopVec.zip(validVec).map(x => x._2 && x._1.needFlush(io.redirectIn))
+
+  for (i <- 0 until latency) {
+    rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)
+  }
+
+  for (i <- 1 to latency) {
+    when(flushVec(i - 1) || rdyVec(i) && !validVec(i - 1)) {
+      validVec(i) := false.B
+    }.elsewhen(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)) {
+      validVec(i) := validVec(i - 1)
+      uopVec(i) := uopVec(i - 1)
+    }
+  }
+
+  io.in.ready := rdyVec(0)
+  io.out.valid := validVec.last && !flushVec.last
+  io.out.bits.uop := uopVec.last
+
+  def PipelineReg[TT <: Data](i: Int)(next: TT) = RegEnable(
+    next,
+    enable = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
+  )
+
+  def S1Reg[TT <: Data](next: TT): TT = PipelineReg[TT](1)(next)
+
+  def S2Reg[TT <: Data](next: TT): TT = PipelineReg[TT](2)(next)
+
+  def S3Reg[TT <: Data](next: TT): TT = PipelineReg[TT](3)(next)
+
+  def S4Reg[TT <: Data](next: TT): TT = PipelineReg[TT](4)(next)
+
+  def S5Reg[TT <: Data](next: TT): TT = PipelineReg[TT](5)(next)
+
+}
 
 object FunctionUnit {
 
