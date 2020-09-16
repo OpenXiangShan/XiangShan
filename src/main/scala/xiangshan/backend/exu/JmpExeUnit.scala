@@ -40,7 +40,10 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
+  csr.io.in.valid  := io.in.valid && isCsr
+  csr.io.in.bits.ext.get := io.in.bits.uop.ctrl.fuOpType
   csr.io.in.bits.connectToExuInput(io.in.bits)
+  csr.io.redirectIn := io.redirect
   val csrOut = csr.io.out.bits.data
   // val uop = io.in.bits.uop
   val csrExuOut = Wire(new ExuOutput)
