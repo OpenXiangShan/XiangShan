@@ -28,16 +28,17 @@ class MulExeUnit extends Exu(Exu.mulExeUnitCfg){
   val isH = MDUOpType.isH(func)
   val op  = MDUOpType.getMulOp(func)
 
-  mul.io.redirect := io.redirect
-  mul.io.in.bits.ctrl.uop := io.in.bits.uop
-  mul.io.in.bits.ctrl.sign := DontCare //Mul don't use this
-  mul.io.in.bits.ctrl.isW := isW
-  mul.io.in.bits.ctrl.isHi := isH
-  mul.io.in.bits.src1 := LookupTree(
+  val mulInputCtrl = mul.io.in.bits.ext.get
+  mul.io.redirectIn := io.redirect
+  mul.io.in.bits.uop := io.in.bits.uop
+  mulInputCtrl.sign := DontCare //Mul don't use this
+  mulInputCtrl.isW := isW
+  mulInputCtrl.isHi := isH
+  mul.io.in.bits.src(0) := LookupTree(
     op,
     mulInputFuncTable.map(p => (p._1(1,0), p._2._1(src1)))
   )
-  mul.io.in.bits.src2 := LookupTree(
+  mul.io.in.bits.src(1) := LookupTree(
     op,
     mulInputFuncTable.map(p => (p._1(1,0), p._2._2(src2)))
   )
