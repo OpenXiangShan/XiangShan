@@ -183,24 +183,16 @@ class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, 64, FuOpType()) {
   val wenFix = Output(Bool())
 }
 
-class CSR extends FunctionUnit[UInt, Null](csrCfg, 64, FuOpType())
+class CSR extends XSModule
     with HasCSRConst
 {
 
-  override val io = new CSRIO
+  val io = IO(new CSRIO)
 
   io.cfOut := io.cfIn
 
   val (valid, src1, src2, func) =
-    (io.in.valid, io.in.bits.src(0), io.in.bits.src(1), io.in.bits.ext.get)
-
-  def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
-    this.valid := valid
-    this.src1 := src1
-    this.src2 := src2
-    this.func := func
-    io.out.bits.data
-  }
+    (io.in.valid, io.in.bits.src(0), io.in.bits.uop.ctrl.imm, io.in.bits.ext.get)
 
   // CSR define
 
@@ -525,7 +517,8 @@ class CSR extends FunctionUnit[UInt, Null](csrCfg, 64, FuOpType())
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
-  io.out.bits := rdata
+  io.out.bits.data := rdata
+  io.out.bits.uop := io.in.bits.uop
 
   // Fix Mip/Sip write
   val fixMapping = Map(

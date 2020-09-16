@@ -37,12 +37,20 @@ class FunctionUnitIO[TI <: Data, TO <: Data]
     val src = Vec(cfg.srcCnt, UInt(len.W))
     val uop = new MicroOp
     val ext = if(extIn == null) None else Some(extIn.cloneType)
+
+    def connectToExuInput(exuIn: ExuInput): Unit = {
+      val exuSrcIn = Seq(exuIn.src1, exuIn.src2, exuIn.src3)
+      src.zip(exuSrcIn).foreach{case (x, y) => x := y}
+      uop := exuIn.uop
+    }
   }))
+
   val out = DecoupledIO(new Bundle() {
     val data = UInt(XLEN.W)
     val uop = new MicroOp
     val ext = if(extOut == null) None else Some(extOut.cloneType)
   })
+
   val redirectIn = Flipped(ValidIO(new Redirect))
 }
 

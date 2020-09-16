@@ -19,9 +19,11 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val isFence = fuType === FuType.fence
 
   jmp.io.in.valid := io.in.valid && isJmp
-  jmp.io.in.bits := io.in.bits
   jmp.io.out.ready := io.out.ready
+
+  jmp.io.in.bits.connectToExuInput(io.in.bits)
   jmp.io.redirectIn := io.redirect
+
   val jumpExuOut = Wire(new ExuOutput)
   val jumpExtraOut = jmp.io.out.bits.ext.get
 
@@ -38,12 +40,8 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
-  val csrOut = csr.access(
-    valid = io.in.valid && fuType === FuType.csr,
-    src1 = io.in.bits.src1,
-    src2 = io.in.bits.src2,
-    func = io.in.bits.uop.ctrl.fuOpType
-  )
+  csr.io.in.bits.connectToExuInput(io.in.bits)
+  val csrOut = csr.io.out.bits.data
   // val uop = io.in.bits.uop
   val csrExuOut = Wire(new ExuOutput)
   csrExuOut.uop := uop
