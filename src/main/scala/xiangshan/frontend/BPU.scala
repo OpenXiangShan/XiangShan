@@ -8,7 +8,7 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = false
+  val BPUDebug = true
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = true
@@ -162,7 +162,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.pred.bits.jmpIdx := jmpIdx
   io.pred.bits.hasNotTakenBrs := hasNTBr
   io.pred.bits.target := target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken) || !taken ) && !lastIsRVC && lastHit
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken && !(jmpIdx === 0.U && !io.predecode.bits.isFetchpcEqualFirstpc)) || !taken ) && !lastIsRVC && lastHit
   io.pred.bits.takenOnBr := taken && brMask(jmpIdx)
 
   io.out.bits <> DontCare
@@ -276,6 +276,8 @@ class BPUStage3 extends BPUStage {
   // so we do not use those from inLatch
   val tageResp = io.in.bits.resp.tage
   val tageTakens = tageResp.takens
+  val tageHits   = tageResp.hits
+  val tageValidTakens = VecInit((tageTakens zip tageHits).map{case (t, h) => t && h})
 
   val loopResp = io.in.bits.resp.loop.exit
 
@@ -295,8 +297,9 @@ class BPUStage3 extends BPUStage {
    val callIdx = PriorityEncoder(calls)
    val retIdx  = PriorityEncoder(rets)
   
+  // Use bim results for those who tage does not have an entry for
   val brTakens = brs &
-    (if (EnableBPD) Reverse(Cat((0 until PredictWidth).map(i => tageTakens(i)))) else Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))) &
+    (if (EnableBPD) Reverse(Cat((0 until PredictWidth).map(i => tageValidTakens(i) || !tageHits(i) && bimTakens(i)))) else Reverse(Cat((0 until PredictWidth).map(i => bimTakens(i))))) &
     (if (EnableLoop) ~loopResp.asUInt else Fill(PredictWidth, 1.U(1.W)))
     // if (EnableBPD) {
     //   brs & Reverse(Cat((0 until PredictWidth).map(i => tageValidTakens(i))))
@@ -309,8 +312,7 @@ class BPUStage3 extends BPUStage {
   // Whether should we count in branches that are not recorded in btb?
   // PS: Currently counted in. Whenever tage does not provide a valid
   //     taken prediction, the branch is counted as a not taken branch
-  notTakens := ((if (EnableBPD) { VecInit((0 until PredictWidth).map(i => brs(i) && !tageTakens(i)))}
-                else           { VecInit((0 until PredictWidth).map(i => brs(i) && !bimTakens(i)))}).asUInt |
+  notTakens := ((VecInit((0 until PredictWidth).map(i => brs(i) && !takens(i)))).asUInt |
                (if (EnableLoop) { VecInit((0 until PredictWidth).map(i => brs(i) && loopResp(i)))}
                 else { WireInit(0.U.asTypeOf(UInt(PredictWidth.W))) }).asUInt).asTypeOf(Vec(PredictWidth, Bool()))
   targetSrc := inLatch.resp.btb.targets
@@ -547,7 +549,7 @@ class BPU extends BaseBPU {
   s1.io.in.bits.resp <> s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
-  val s1_hist = RegEnable(io.in.bits.hist, enable=io.in.valid)
+  val s1_hist = RegEnable(io.in.bits.hist, enable=s1_fire)
 
   //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
@@ -592,7 +594,7 @@ class BPU extends BaseBPU {
     val buinfo  = io.inOrderBrInfo.bits.ui
     val pd = buinfo.pd
     val tage_cycle = buinfo.brInfo.debug_tage_cycle
-    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred}) cycle($tage_cycle)\n")
+    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred}) cycle($tage_cycle) hist(${Hexadecimal(io.inOrderBrInfo.bits.hist)})\n")
   }
 
 }

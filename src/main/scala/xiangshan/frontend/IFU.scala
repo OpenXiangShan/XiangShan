@@ -14,7 +14,7 @@ trait HasIFUConst { this: XSModule =>
   def mask(pc: UInt): UInt = (Fill(PredictWidth * 2, 1.U(1.W)) >> pc(groupAlign - 1, 1))(PredictWidth - 1, 0)
   def snpc(pc: UInt): UInt = pc + (PopCount(mask(pc)) << 1)
   
-  val IFUDebug = false
+  val IFUDebug = true
 }
 
 class IFUIO extends XSBundle
@@ -97,12 +97,16 @@ class IFU extends XSModule with HasIFUConst
     extHist(newPtr) := if2_bp.takenOnBr.asUInt
   }
 
+  // repair histptr when if4 finds a not taken branch which is
+  // not recorded in uBTB or BTB
+  val if4_shiftWithoutRedirect = WireInit(false.B)
+
   //********************** IF3 ****************************//
   val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
   val if4_ready = WireInit(false.B)
   val if3_fire = if3_valid && if4_ready && io.icacheResp.valid && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
-  val if3_histPtr = RegEnable(if2_histPtr, if2_fire)
+  val if3_histPtr = RegEnable(if2_histPtr - if4_shiftWithoutRedirect.asUInt, if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
   when (if3_flush) { if3_valid := false.B }
   .elsewhen (if2_fire) { if3_valid := if2_valid }
@@ -206,7 +210,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
-  val if4_histPtr = RegEnable(if3_histPtr, if3_fire)
+  val if4_histPtr = RegEnable(if3_histPtr - if4_shiftWithoutRedirect.asUInt, if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
   .elsewhen (if3_fire) { if4_valid := if3_valid }
@@ -262,6 +266,13 @@ class IFU extends XSModule with HasIFUConst
       extHist(newPtr) := extHist(if4_histPtr)
     }.otherwise {
       if4_redirect := false.B
+      when (if4_bp.takenOnBr || if4_bp.hasNotTakenBrs) {
+        shiftPtr := true.B
+        if4_shiftWithoutRedirect := true.B
+        newPtr := if4_histPtr - 1.U
+        hist(0) := if4_bp.takenOnBr.asUInt
+        extHist(newPtr) := if4_bp.takenOnBr.asUInt
+      }
     }
   }.otherwise {
     if4_redirect := false.B
@@ -313,8 +324,8 @@ class IFU extends XSModule with HasIFUConst
       newPtr := oldPtr
     }.otherwise {
       newPtr := oldPtr - 1.U
-      hist(0) := b.taken
-      extHist(newPtr) := b.taken
+      hist(0) := Mux(b.pd.isBr, b.taken, 0.U)
+      extHist(newPtr) := Mux(b.pd.isBr, b.taken, 0.U)
     }
   }
 

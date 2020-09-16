@@ -7,6 +7,7 @@ import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
+import xiangshan.frontend.HasTageParameter
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -31,8 +32,7 @@ object ValidUndirectioned {
   }
 }
 
-class TageMeta extends XSBundle {
-  def TageNTables = 6
+class TageMeta extends XSBundle with HasTageParameter {
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
