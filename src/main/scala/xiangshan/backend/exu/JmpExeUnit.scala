@@ -21,17 +21,23 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jmp.io.in.valid := io.in.valid && isJmp
   jmp.io.in.bits := io.in.bits
   jmp.io.out.ready := io.out.ready
-  jmp.io.exception <> DontCare
-  jmp.io.dmem <> DontCare
-  jmp.io.mcommit := DontCare
-  jmp.io.redirect := io.redirect
+  jmp.io.redirectIn := io.redirect
+  val jumpExuOut = Wire(new ExuOutput)
+  val jumpExtraOut = jmp.io.out.bits.ext.get
+
+  jumpExuOut.uop := uop
+  jumpExuOut.data := jmp.io.out.bits.data
+  jumpExuOut.brUpdate := jumpExtraOut.brUpdate
+  jumpExuOut.redirect := jumpExtraOut.redirect
+  jumpExuOut.redirectValid := jumpExtraOut.redirectValid
+  jumpExuOut.debug := DontCare
+
 
   csr.io.cfIn := io.in.bits.uop.cf
   csr.io.fpu_csr := DontCare
   csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
-  csr.io.in.bits.src3 := DontCare
   val csrOut = csr.access(
     valid = io.in.valid && fuType === FuType.csr,
     src1 = io.in.bits.src1,
@@ -44,14 +50,14 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.uop.cf := csr.io.cfOut
   csrExuOut.uop.ctrl.flushPipe := csr.io.flushPipe
   csrExuOut.data := csrOut
-  csrExuOut.redirectValid := csr.io.redirectValid
+  csrExuOut.redirectValid := csr.io.redirectOutValid
   csrExuOut.redirect.brTag := uop.brTag
   csrExuOut.redirect.isException := false.B
   csrExuOut.redirect.isMisPred := false.B
   csrExuOut.redirect.isFlushPipe := false.B
   csrExuOut.redirect.isReplay := false.B
   csrExuOut.redirect.roqIdx := uop.roqIdx
-  csrExuOut.redirect.target := csr.io.redirect.target
+  csrExuOut.redirect.target := csr.io.redirectOut.target
   csrExuOut.redirect.pc := uop.cf.pc
   csrExuOut.debug := DontCare
   csrExuOut.brUpdate := DontCare
@@ -66,7 +72,13 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
 
   // NOTE: just one instr in this module at the same time
   io.in.ready := jmp.io.in.ready && csr.io.in.ready && fence.io.in.ready 
-  io.out.bits := Mux(jmp.io.out.valid, jmp.io.out.bits, Mux(csr.io.out.valid, csrExuOut, fence.io.out.bits))
+  io.out.bits := Mux(jmp.io.out.valid,
+    jumpExuOut,
+    Mux(csr.io.out.valid,
+      csrExuOut,
+      fence.io.out.bits
+    )
+  )
   io.out.valid := jmp.io.out.valid || csr.io.out.valid || fence.io.out.valid
 
   XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready} ${jmp.io.in.ready}${csr.io.in.ready}${fence.io.in.ready}) pc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} roqIdx:${io.in.bits.uop.roqIdx} fuType:b${Binary(io.in.bits.uop.ctrl.fuType)} fuOpType:b${Binary(io.in.bits.uop.ctrl.fuOpType)} isJmp:${isJmp} isCsr${isCsr} isFence:${isFence}\n")

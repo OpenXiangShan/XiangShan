@@ -53,11 +53,11 @@ trait HasCSRConst {
   // Supervisor Protection and Translation
   val Satp          = 0x180
 
-  // Machine Information Registers 
-  val Mvendorid     = 0xF11 
-  val Marchid       = 0xF12 
-  val Mimpid        = 0xF13 
-  val Mhartid       = 0xF14 
+  // Machine Information Registers
+  val Mvendorid     = 0xF11
+  val Marchid       = 0xF12
+  val Mimpid        = 0xF13
+  val Mhartid       = 0xF14
 
   // Machine Trap Setup
   val Mstatus       = 0x300
@@ -84,7 +84,7 @@ trait HasCSRConst {
   val PmpaddrBase   = 0x3B0
 
   // Machine Counter/Timers
-  // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers 
+  // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers
   // 0xB80 - 0x89F are also used as perfcnt csr
 
   // Machine Counter Setup (not implemented)
@@ -166,10 +166,11 @@ class FpuCsrIO extends XSBundle {
   val frm = Input(UInt(3.W))
 }
 
-class CSRIO extends FunctionUnitIO {
+class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, 64, FuOpType()) {
+
   val cfIn = Input(new CtrlFlow)
-  val redirect = Output(new Redirect)
-  val redirectValid = Output(Bool())
+  val redirectOut = Output(new Redirect)
+  val redirectOutValid = Output(Bool())
   val fpu_csr = Flipped(new FpuCsrIO)
   val cfOut = Output(new CtrlFlow)
   // from rob
@@ -182,18 +183,23 @@ class CSRIO extends FunctionUnitIO {
   val wenFix = Output(Bool())
 }
 
-class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
-  val io = IO(new CSRIO)
+class CSR extends FunctionUnit[UInt, Null](csrCfg, 64, FuOpType())
+    with HasCSRConst
+{
+
+  override val io = new CSRIO
 
   io.cfOut := io.cfIn
 
-  val (valid, src1, src2, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.func)
+  val (valid, src1, src2, func) =
+    (io.in.valid, io.in.bits.src(0), io.in.bits.src(1), io.in.bits.ext.get)
+
   def access(valid: Bool, src1: UInt, src2: UInt, func: UInt): UInt = {
     this.valid := valid
     this.src1 := src1
     this.src2 := src2
     this.func := func
-    io.out.bits
+    io.out.bits.data
   }
 
   // CSR define
@@ -257,14 +263,14 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val mipFixMask = GenMask(9) | GenMask(5) | GenMask(1)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
-  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}
-  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}
+  def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt()
+  def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}.asUInt()
   var extList = List('a', 's', 'i', 'u')
   if(HasMExtension){ extList = extList :+ 'm'}
   if(HasCExtension){ extList = extList :+ 'c'}
   if(HasFPU){ extList = extList ++ List('f', 'd')}
-  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U 
-  val misa = RegInit(UInt(XLEN.W), misaInitVal) 
+  val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
+  val misa = RegInit(UInt(XLEN.W), misaInitVal)
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
 
@@ -300,12 +306,12 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     mstatusNew
   }
 
-  val mstatusMask = ~ZeroExt((
+  val mstatusMask = (~ZeroExt((
     GenMask(XLEN-2, 38) | GenMask(31, 23) | GenMask(10, 9) | GenMask(2) |
     GenMask(37) | // MBE
     GenMask(36) | // SBE
     GenMask(6)    // UBE
-  ), 64)
+  ), 64)).asUInt()
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
@@ -338,7 +344,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val sipMask  = "h222".U & mideleg
   val satp = RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
-  val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0 
+  val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0
   // val satp = RegInit(UInt(XLEN.W), 0.U)
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   val scause = RegInit(UInt(XLEN.W), 0.U)
@@ -511,11 +517,11 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   ))
 
   // satp wen check
-  val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)	  
+  val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
   // general CSR wen check
   val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
-  val permitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) 
+  val permitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode)
   // Writeable check is ingored.
   // Currently, write to illegal csr addr will be ignored
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
@@ -676,12 +682,12 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val trapTarget = Wire(UInt(VAddrBits.W))
   ExcitingUtils.addSource(trapTarget, "trapTarget")
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  io.redirect := DontCare
-  io.redirectValid := valid && func === CSROpType.jmp && !isEcall
-  io.redirect.target := retTarget
+  io.redirectOut := DontCare
+  io.redirectOutValid := valid && func === CSROpType.jmp && !isEcall
+  io.redirectOut.target := retTarget
   io.flushPipe := resetSatp
 
-  XSDebug(io.redirectValid, "redirect to %x, pc=%x\n", io.redirect.target, io.cfIn.pc)
+  XSDebug(io.redirectOutValid, "redirect to %x, pc=%x\n", io.redirectOut.target, io.cfIn.pc)
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",io.exception.bits.cf.pc, intrNO, io.exception.bits.cf.intrVec.asUInt, exceptionNO, raiseExceptionVec.asUInt)
   XSDebug(raiseExceptionIntr, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.exception.bits.cf.pc, mstatus, mideleg, medeleg, priviledgeMode)
@@ -765,10 +771,10 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   io.out.valid := valid
 
 
-  XSDebug(io.redirectValid, "Rediret %x raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n",
-    io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+  XSDebug(io.redirectOutValid, "Rediret %x raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n",
+    io.redirectOut.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
   XSDebug(raiseExceptionIntr && delegS, "Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d instrValid:%x \n",
-    io.redirectValid, io.redirect.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
+    io.redirectOutValid, io.redirectOut.target, raiseExceptionIntr, isSret, retTarget, sepc, delegS, deleg, io.cfIn.pc, valid, io.instrValid)
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", io.cfIn.pc)
 
 
