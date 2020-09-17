@@ -144,6 +144,7 @@ class PTW()(implicit p: Parameters) extends LazyModule {
 class PTWImp(outer: PTW) extends PtwModule(outer){
 
   val (mem, edge) = outer.node.out.head
+  require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
 

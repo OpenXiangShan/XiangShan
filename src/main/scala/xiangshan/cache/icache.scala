@@ -175,6 +175,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
 
   val (bus, edge) = outer.clientNode.out.head
+  require(bus.d.bits.data.getWidth == l1BusDataWidth, "ICache: tilelink width does not match")
   val io = IO(new ICacheIO(edge))
   val (_, _, refill_done, refill_cnt) = edge.count(bus.d)
 
