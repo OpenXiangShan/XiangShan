@@ -24,6 +24,7 @@ class DiffTestIO extends XSBundle {
   val wen = Output(UInt(32.W))
   val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
+  val diffTestDebugLrScValid = Output(Vec(CommitWidth, Bool())) // set difftest width to 6
   val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val isRVC = Output(Bool())
   val intrNO = Output(UInt(64.W))
@@ -106,6 +107,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.wen, "difftestWen")
     BoringUtils.addSink(difftest.wdata, "difftestWdata")
     BoringUtils.addSink(difftest.wdst, "difftestWdst")
+    BoringUtils.addSink(difftest.diffTestDebugLrScValid, "diffTestDebugLrScValid")
     BoringUtils.addSink(difftest.wpc, "difftestWpc")
     BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
     BoringUtils.addSink(difftest.r, "difftestRegs")
