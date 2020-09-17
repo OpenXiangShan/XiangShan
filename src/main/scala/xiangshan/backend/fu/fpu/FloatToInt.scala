@@ -1,8 +1,8 @@
-package fpu
+package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import fpu.util.{ORTree, ShiftRightJam}
+import xiangshan.backend.fu.fpu.util.{ORTree, ShiftRightJam}
 
 //def f2w:UInt    = FpuOp("011", "000")
 //def f2wu:UInt   = FpuOp("011", "001")

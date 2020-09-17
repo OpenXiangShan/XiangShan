@@ -1,9 +1,9 @@
-package fpu.fma
+package xiangshan.backend.fu.fpu.fma
 
 import chisel3._
 import chisel3.util._
-import fpu._
-import fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, ShiftRightJam}
+import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, ShiftRightJam}
 
 
 class FMA extends FPUSubModule with HasPipelineReg {

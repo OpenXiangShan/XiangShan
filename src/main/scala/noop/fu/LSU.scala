@@ -4,7 +4,7 @@ import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import utils._
 import bus.simplebus._
-import fpu.boxF32ToF64
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
 object LSUOpType {
   def lb   = "b000000".U

@@ -1,4 +1,4 @@
-package fpu.util
+package xiangshan.backend.fu.fpu.util
 
 import chisel3._
 

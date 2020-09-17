@@ -4,10 +4,10 @@ import chisel3.{util, _}
 import chisel3.util._
 import utils._
 import noop._
-import fpu._
-import fpu.FPUIOFunc._
-import fpu.divsqrt.DivSqrt
-import fpu.fma.FMA
+import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.fpu.FPUIOFunc._
+import xiangshan.backend.fu.fpu.divsqrt.DivSqrt
+import xiangshan.backend.fu.fpu.fma.FMA
 
 class FpInstr extends NOOPBundle {
   val func5 = UInt(5.W)

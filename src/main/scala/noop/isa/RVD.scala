@@ -5,8 +5,8 @@ import noop._
 import noop.SrcType.{fp, imm, reg}
 import RVF_FPUInstr.{Y, N}
 import RVCInstr._
-import fpu.FPUIOFunc._
-import fpu.FPUOpType._
+import xiangshan.backend.fu.fpu.FPUIOFunc._
+import xiangshan.backend.fu.fpu.FPUOpType._
 
 object RVD_LSUInstr extends HasInstrType{
   def FLD = BitPat("b?????????????????011?????0000111")

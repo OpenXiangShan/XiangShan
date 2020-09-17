@@ -1,9 +1,9 @@
-package fpu.divsqrt
+package xiangshan.backend.fu.fpu.divsqrt
 
-import fpu._
+import xiangshan.backend.fu.fpu._
 import chisel3._
 import chisel3.util._
-import fpu.util.{FPUDebug, ORTree, ShiftRightJam}
+import xiangshan.backend.fu.fpu.util.{FPUDebug, ORTree, ShiftRightJam}
 
 
 class DivSqrt extends FPUSubModule {

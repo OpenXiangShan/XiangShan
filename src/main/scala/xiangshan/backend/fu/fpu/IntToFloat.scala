@@ -1,8 +1,8 @@
-package fpu
+package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import fpu.util.ORTree
+import xiangshan.backend.fu.fpu.util.ORTree
 
 class IntToFloat extends FPUSubModule with HasPipelineReg {
   def latency = 2

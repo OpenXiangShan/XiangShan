@@ -1,8 +1,8 @@
-package fpu.fma
+package xiangshan.backend.fu.fpu.fma
 
 import chisel3._
 import chisel3.util._
-import fpu.util._
+import xiangshan.backend.fu.fpu.util._
 import utils.SignExt
 
 class ArrayMultiplier(len: Int, regDepth: Int = 0, realArraryMult: Boolean = false) extends Module {

@@ -4,8 +4,8 @@ import Chisel.BitPat
 import chisel3._
 import noop._
 import noop.SrcType._
-import fpu.FPUOpType._
-import fpu.FPUIOFunc._
+import xiangshan.backend.fu.fpu.FPUOpType._
+import xiangshan.backend.fu.fpu.FPUIOFunc._
 
 object RVF_LSUInstr extends HasInstrType{
   def FLW = BitPat("b?????????????????010?????0000111")

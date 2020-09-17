@@ -1,8 +1,8 @@
-package fpu
+package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import fpu.util.ShiftRightJam
+import xiangshan.backend.fu.fpu.util.ShiftRightJam
 
 class F64toF32 extends FPUSubModule with HasPipelineReg {
   def latency: Int = 2

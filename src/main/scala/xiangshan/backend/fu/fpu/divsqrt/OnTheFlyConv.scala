@@ -1,10 +1,10 @@
-package fpu.divsqrt
+package xiangshan.backend.fu.fpu.divsqrt
 
 import chisel3._
 import chisel3.util._
 import utils._
-import fpu._
-import fpu.util.FPUDebug
+import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.fpu.util.FPUDebug
 
 class OnTheFlyConv(len: Int) extends Module {
   val io = IO(new Bundle() {

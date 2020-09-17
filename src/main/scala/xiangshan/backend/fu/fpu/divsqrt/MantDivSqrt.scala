@@ -1,9 +1,9 @@
-package fpu.divsqrt
+package xiangshan.backend.fu.fpu.divsqrt
 
 import chisel3._
 import chisel3.util._
-import fpu.util._
-import fpu.util.FPUDebug
+import xiangshan.backend.fu.fpu.util._
+import xiangshan.backend.fu.fpu.util.FPUDebug
 
 class MantDivSqrt(len: Int) extends Module{
   val io = IO(new Bundle() {

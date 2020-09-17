@@ -1,9 +1,9 @@
-package fpu
+package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import fpu.RoudingMode._
-import fpu.util.ORTree
+import xiangshan.backend.fu.fpu.RoudingMode._
+import xiangshan.backend.fu.fpu.util.ORTree
 
 class RoundingUnit(mantWidth: Int) extends Module{
   val io = IO(new Bundle() {
