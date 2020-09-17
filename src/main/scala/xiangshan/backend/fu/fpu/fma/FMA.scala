@@ -4,10 +4,10 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, ShiftRightJam}
+import xiangshan.backend.fu.FunctionUnit.fmacCfg
 
 
-class FMA extends FPUSubModule with HasPipelineReg {
-  def latency = 5
+class FMA extends FPUPipelineModule(fmacCfg, 5) {
 
   def UseRealArraryMult = false
 
@@ -21,12 +21,9 @@ class FMA extends FPUSubModule with HasPipelineReg {
     * Stage 1: Decode Operands
     *****************************************************************/
 
-  val rm = io.in.bits.rm
-  val isDouble = io.in.bits.isDouble
-  val op = io.in.bits.op
-  val rs0 = io.in.bits.a
-  val rs1 = io.in.bits.b
-  val rs2 = io.in.bits.c
+  val rs0 = io.in.bits.src(0)
+  val rs1 = io.in.bits.src(1)
+  val rs2 = io.in.bits.src(2)
   val zero = 0.U(Float64.getWidth.W)
   val one = Mux(isDouble,
     Cat(0.U(1.W), Float64.expBiasInt.U(Float64.expWidth.W), 0.U(Float64.mantWidth.W)),
@@ -151,11 +148,11 @@ class FMA extends FPUSubModule with HasPipelineReg {
   val s1_discardAMant = S1Reg(aIsZero || expDiff > (ADD_WIDTH+3).S)
   val s1_invalid = S1Reg(invalid)
 
-  FPUDebug(){
-    when(valids(1) && ready){
-      printf(p"[s1] prodExp+56:${s1_prodExpAdj} aExp:${s1_aExpRaw} diff:${s1_expDiff}\n")
-    }
-  }
+//  FPUDebug(){
+//    when(valids(1) && ready){
+//      printf(p"[s1] prodExp+56:${s1_prodExpAdj} aExp:${s1_aExpRaw} diff:${s1_expDiff}\n")
+//    }
+//  }
 
 
   /******************************************************************
@@ -188,11 +185,11 @@ class FMA extends FPUSubModule with HasPipelineReg {
   val s2_effSub = S2Reg(effSub)
 
 
-  FPUDebug(){
-    when(valids(1) && ready){
-      printf(p"[s2] discardAMant:${s1_discardAMant} discardProd:${s1_discardProdMant} \n")
-    }
-  }
+//  FPUDebug(){
+//    when(valids(1) && ready){
+//      printf(p"[s2] discardAMant:${s1_discardAMant} discardProd:${s1_discardProdMant} \n")
+//    }
+//  }
 
   /******************************************************************
     * Stage 3: A + Prod => adder result
@@ -284,14 +281,14 @@ class FMA extends FPUSubModule with HasPipelineReg {
   val s4_expPostNorm = S4Reg(expPostNorm)
   val s4_invalid = S4Reg(s3_invalid)
 
-  FPUDebug(){
-    when(valids(3) && ready){
-      printf(p"[s4] expPreNorm:${s3_expPreNorm} normShift:${s3_normShift} expPostNorm:${expPostNorm} " +
-        p"denormShift:${denormShift}" +
-        p"" +
-        p" \n")
-    }
-  }
+//  FPUDebug(){
+//    when(valids(3) && ready){
+//      printf(p"[s4] expPreNorm:${s3_expPreNorm} normShift:${s3_normShift} expPostNorm:${expPostNorm} " +
+//        p"denormShift:${denormShift}" +
+//        p"" +
+//        p" \n")
+//    }
+//  }
 
   /******************************************************************
     * Stage 5: Rounding
@@ -342,11 +339,11 @@ class FMA extends FPUSubModule with HasPipelineReg {
   val s5_inexact = S5Reg(inexact)
   val s5_ovSetInf = S5Reg(s4_ovSetInf)
 
-  FPUDebug(){
-    when(valids(4) && ready){
-      printf(p"[s5] expPostNorm:${s4_expPostNorm} expRounded:${expRounded}\n")
-    }
-  }
+//  FPUDebug(){
+//    when(valids(4) && ready){
+//      printf(p"[s5] expPostNorm:${s4_expPostNorm} expRounded:${expRounded}\n")
+//    }
+//  }
 
   /******************************************************************
     * Assign Outputs
@@ -375,22 +372,22 @@ class FMA extends FPUSubModule with HasPipelineReg {
     )
   )
 
-  io.out.bits.result := result
-  io.out.bits.fflags.invalid := s5_invalid
-  io.out.bits.fflags.inexact := s5_inexact
-  io.out.bits.fflags.overflow := s5_overflow
-  io.out.bits.fflags.underflow := s5_underflow
-  io.out.bits.fflags.infinite := false.B
+  io.out.bits.data := result
+  fflags.invalid := s5_invalid
+  fflags.inexact := s5_inexact
+  fflags.overflow := s5_overflow
+  fflags.underflow := s5_underflow
+  fflags.infinite := false.B
 
-  FPUDebug(){
-    //printf(p"v0:${valids(0)} v1:${valids(1)} v2:${valids(2)} v3:${valids(3)} v4:${valids(4)} v5:${valids(5)}\n")
-    when(io.in.fire()){
-      printf(p"[in] a:${Hexadecimal(a)} b:${Hexadecimal(b)} c:${Hexadecimal(c)}\n")
-    }
-    when(io.out.fire()){
-      printf(p"[out] res:${Hexadecimal(io.out.bits.result)}\n")
-    }
-  }
+//  FPUDebug(){
+//    //printf(p"v0:${valids(0)} v1:${valids(1)} v2:${valids(2)} v3:${valids(3)} v4:${valids(4)} v5:${valids(5)}\n")
+//    when(io.in.fire()){
+//      printf(p"[in] a:${Hexadecimal(a)} b:${Hexadecimal(b)} c:${Hexadecimal(c)}\n")
+//    }
+//    when(io.out.fire()){
+//      printf(p"[out] res:${Hexadecimal(io.out.bits.result)}\n")
+//    }
+//  }
 
 
 }

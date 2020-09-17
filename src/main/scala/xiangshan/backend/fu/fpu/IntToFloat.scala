@@ -3,16 +3,13 @@ package xiangshan.backend.fu.fpu
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.fpu.util.ORTree
+import xiangshan.backend.fu.FunctionUnit.i2fCfg
 
-class IntToFloat extends FPUSubModule with HasPipelineReg {
-  def latency = 2
-
+class IntToFloat extends FPUPipelineModule(i2fCfg, 2) {
   /** Stage 1: Count leading zeros and shift
     */
 
-  val op = io.in.bits.op
-  val isDouble = io.in.bits.isDouble
-  val a = io.in.bits.a
+  val a = io.in.bits.src(0)
   val aNeg = (~a).asUInt()
   val aComp = aNeg + 1.U
   val aSign = Mux(op(0), false.B, Mux(op(1), a(63), a(31)))
@@ -32,7 +29,7 @@ class IntToFloat extends FPUSubModule with HasPipelineReg {
     )
   )
   val leadingZeroHasError = S1Reg(aSign && (leadingZerosComp=/=leadingZerosNeg))
-  val rmReg = S1Reg(io.in.bits.rm)
+  val rmReg = S1Reg(rm)
   val opReg = S1Reg(op)
   val isDoubleReg = S1Reg(isDouble)
   val aIsZeroReg = S1Reg(a===0.U)
@@ -70,10 +67,10 @@ class IntToFloat extends FPUSubModule with HasPipelineReg {
   )
   val resD = Cat(aSignReg, expRounded, mantRounded)
 
-  io.out.bits.result := S2Reg(Mux(aIsZeroReg, 0.U, Mux(isDoubleReg, resD, resS)))
-  io.out.bits.fflags.inexact := S2Reg(roudingUnit.io.out.inexact)
-  io.out.bits.fflags.underflow := false.B
-  io.out.bits.fflags.overflow := false.B
-  io.out.bits.fflags.infinite := false.B
-  io.out.bits.fflags.invalid := false.B
+  io.out.bits.data := S2Reg(Mux(aIsZeroReg, 0.U, Mux(isDoubleReg, resD, resS)))
+  fflags.inexact := S2Reg(roudingUnit.io.out.inexact)
+  fflags.underflow := false.B
+  fflags.overflow := false.B
+  fflags.infinite := false.B
+  fflags.invalid := false.B
 }

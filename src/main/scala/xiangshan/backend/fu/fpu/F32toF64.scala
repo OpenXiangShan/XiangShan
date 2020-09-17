@@ -2,11 +2,11 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.fu.FunctionUnit._
 
-class F32toF64 extends FPUSubModule with HasPipelineReg {
-  def latency: Int = 2
+class F32toF64 extends FPUPipelineModule(fmiscCfg, 2) {
 
-  val a = io.in.bits.a
+  val a = io.in.bits.src(0)
   val f32 = Float32(a)
 
   val classify = Module(new Classify(Float32.expWidth, Float32.mantWidth))
@@ -56,10 +56,10 @@ class F32toF64 extends FPUSubModule with HasPipelineReg {
   )
   val result = Mux(s1_isNaN, Float64.defaultNaN, commonResult)
 
-  io.out.bits.result := S2Reg(result)
-  io.out.bits.fflags.invalid := S2Reg(s1_isSNaN)
-  io.out.bits.fflags.overflow := false.B
-  io.out.bits.fflags.underflow := false.B
-  io.out.bits.fflags.infinite := false.B
-  io.out.bits.fflags.inexact := false.B
+  io.out.bits.data := S2Reg(result)
+  fflags.invalid := S2Reg(s1_isSNaN)
+  fflags.overflow := false.B
+  fflags.underflow := false.B
+  fflags.infinite := false.B
+  fflags.inexact := false.B
 }

@@ -2,14 +2,11 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.fu.FunctionUnit._
 
-class FMV(XLEN: Int) extends FPUSubModule with HasPipelineReg {
+class FMV(XLEN: Int) extends FPUPipelineModule(fmiscCfg, 1) {
 
-  def latency = 1
-
-  val isDouble = io.in.bits.isDouble
-  val op = io.in.bits.op
-  val src = Seq(io.in.bits.a, io.in.bits.b).map(x =>
+  val src = io.in.bits.src.map(x =>
     Mux(isDouble || op(2,1)==="b00".U, x, extF32ToF64(x))
   )
   val aSign = Mux(op(2,1)==="b00".U && !isDouble, src(0)(31), src(0)(63))
@@ -39,12 +36,12 @@ class FMV(XLEN: Int) extends FPUSubModule with HasPipelineReg {
   val result = Mux(op === "b010".U,
     classifyResult,
     Mux(isDouble,
-      Cat(resSign, io.in.bits.a(62, 0)),
-      Cat(resSign, io.in.bits.a(30 ,0))
+      Cat(resSign, io.in.bits.src(0)(62, 0)),
+      Cat(resSign, io.in.bits.src(0)(30 ,0))
     )
   )
   val resultReg = S1Reg(result)
 
-  io.out.bits.result := resultReg
-  io.out.bits.fflags := 0.U.asTypeOf(new Fflags)
+  io.out.bits.data := resultReg
+  fflags := 0.U.asTypeOf(new Fflags)
 }

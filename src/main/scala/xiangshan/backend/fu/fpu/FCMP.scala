@@ -2,12 +2,11 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.fu.FunctionUnit._
 
-class FCMP extends FPUSubModule with HasPipelineReg{
-  def latency = 2
+class FCMP extends FPUPipelineModule(fmiscCfg, 2){
 
-  val isDouble = io.in.bits.isDouble
-  val src = Seq(io.in.bits.a, io.in.bits.b).map(x => Mux(isDouble, x, extF32ToF64(x)))
+  val src = io.in.bits.src.map(x => Mux(isDouble, x, extF32ToF64(x)))
   val sign = src.map(_(63))
   val aSign = sign(0)
 
@@ -20,8 +19,8 @@ class FCMP extends FPUSubModule with HasPipelineReg{
   val srcIsSNaN = classify.map(_.isSNaN)
 
   val isDoubleReg = S1Reg(isDouble)
-  val opReg = S1Reg(io.in.bits.op)
-  val srcReg = Seq(io.in.bits.a, io.in.bits.b).map(S1Reg)
+  val opReg = S1Reg(op)
+  val srcReg = io.in.bits.src.map(S1Reg)
   val (aSignReg, bSignReg) = (S1Reg(sign(0)), S1Reg(sign(1)))
 
   val hasNaNReg = S1Reg(srcIsNaN(0) || srcIsNaN(1))
@@ -50,10 +49,10 @@ class FCMP extends FPUSubModule with HasPipelineReg{
   val min = Mux(bothNaNReg, defaultNaN, Mux(sel_a && !aIsNaNReg, srcReg(0), srcReg(1)))
   val max = Mux(bothNaNReg, defaultNaN, Mux(!sel_a && !aIsNaNReg, srcReg(0), srcReg(1)))
 
-  io.out.bits.fflags.inexact := false.B
-  io.out.bits.fflags.underflow := false.B
-  io.out.bits.fflags.overflow := false.B
-  io.out.bits.fflags.infinite := false.B
-  io.out.bits.fflags.invalid := S2Reg(invalid)
-  io.out.bits.result := S2Reg(Mux(opReg===0.U, min, Mux(opReg===1.U, max, fcmpResult)))
+  fflags.inexact := false.B
+  fflags.underflow := false.B
+  fflags.overflow := false.B
+  fflags.infinite := false.B
+  fflags.invalid := S2Reg(invalid)
+  io.out.bits.data := S2Reg(Mux(opReg===0.U, min, Mux(opReg===1.U, max, fcmpResult)))
 }

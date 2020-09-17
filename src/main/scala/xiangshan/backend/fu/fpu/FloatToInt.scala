@@ -3,25 +3,21 @@ package xiangshan.backend.fu.fpu
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.fpu.util.{ORTree, ShiftRightJam}
+import xiangshan.backend.fu.FunctionUnit._
 
 //def f2w:UInt    = FpuOp("011", "000")
 //def f2wu:UInt   = FpuOp("011", "001")
 //def f2l:UInt    = FpuOp("011", "010")
 //def f2lu:UInt   = FpuOp("011", "011")
 
-class FloatToInt extends FPUSubModule with HasPipelineReg {
-
-  def latency = 2
+class FloatToInt extends FPUPipelineModule(fmiscCfg, 2) {
 
   def SEXP_WIDTH = Float64.expWidth + 2
 
   /** Stage 1: Shift Operand
     */
 
-  val op = io.in.bits.op
-  val rm = io.in.bits.rm
-  val isDouble = io.in.bits.isDouble
-  val a = Mux(isDouble, io.in.bits.a, extF32ToF64(io.in.bits.a))
+  val a = Mux(isDouble, io.in.bits.src(0), extF32ToF64(io.in.bits.src(0)))
   val f64 = Float64(a)
 
   val cls = Module(new Classify(Float64.expWidth, Float64.mantWidth))
@@ -97,10 +93,10 @@ class FloatToInt extends FPUSubModule with HasPipelineReg {
   /** Assign Outputs
     */
 
-  io.out.bits.result := s2_result
-  io.out.bits.fflags.invalid := s2_invalid
-  io.out.bits.fflags.overflow := false.B
-  io.out.bits.fflags.underflow := false.B
-  io.out.bits.fflags.infinite := false.B
-  io.out.bits.fflags.inexact := s2_inexact
+  io.out.bits.data := s2_result
+  fflags.invalid := s2_invalid
+  fflags.overflow := false.B
+  fflags.underflow := false.B
+  fflags.infinite := false.B
+  fflags.inexact := s2_inexact
 }

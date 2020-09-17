@@ -2,14 +2,13 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.fu.FunctionUnit.fmiscCfg
 import xiangshan.backend.fu.fpu.util.ShiftRightJam
 
-class F64toF32 extends FPUSubModule with HasPipelineReg {
-  def latency: Int = 2
+class F64toF32 extends FPUPipelineModule(fmiscCfg, 2) {
   def SEXP_WIDTH = Float64.expWidth + 2
 
-  val rm = io.in.bits.rm
-  val a = io.in.bits.a
+  val a = io.in.bits.src(0)
 
   val classify = Module(new Classify(Float64.expWidth, Float64.mantWidth))
   classify.io.in := a
@@ -67,11 +66,11 @@ class F64toF32 extends FPUSubModule with HasPipelineReg {
     )
   )
 
-  io.out.bits.result := S2Reg(result)
-  io.out.bits.fflags.invalid := S2Reg(s1_isSNaN)
-  io.out.bits.fflags.overflow := S2Reg(overflow)
-  io.out.bits.fflags.underflow := S2Reg(underflow)
-  io.out.bits.fflags.infinite := false.B
-  io.out.bits.fflags.inexact := S2Reg(inexact)
+  io.out.bits.data := S2Reg(result)
+  fflags.invalid := S2Reg(s1_isSNaN)
+  fflags.overflow := S2Reg(overflow)
+  fflags.underflow := S2Reg(underflow)
+  fflags.infinite := false.B
+  fflags.inexact := S2Reg(inexact)
 }
 

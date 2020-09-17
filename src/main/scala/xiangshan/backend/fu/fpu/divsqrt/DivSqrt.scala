@@ -4,9 +4,9 @@ import xiangshan.backend.fu.fpu._
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.fpu.util.{FPUDebug, ORTree, ShiftRightJam}
+import xiangshan.backend.fu.FunctionUnit.fDivSqrtCfg
 
-
-class DivSqrt extends FPUSubModule {
+class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
 
   def SEXP_WIDTH: Int = Float64.expWidth + 2
   def D_MANT_WIDTH: Int = Float64.mantWidth + 1
@@ -16,16 +16,15 @@ class DivSqrt extends FPUSubModule {
   val s_idle :: s_norm :: s_start :: s_compute :: s_round:: s_finish :: Nil = Enum(6)
   val state = RegInit(s_idle)
 
-  val rm = io.in.bits.rm
+
   val rmReg = RegEnable(rm, io.in.fire())
-  val isDiv = !io.in.bits.op(0)
+  val isDiv = !op(0)
   val isDivReg = RegEnable(isDiv, io.in.fire())
-  val isDouble = io.in.bits.isDouble
   val isDoubleReg = RegEnable(isDouble, io.in.fire())
 
   val (a, b) = (
-    Mux(isDouble, io.in.bits.a, extF32ToF64(io.in.bits.a)),
-    Mux(isDouble, io.in.bits.b, extF32ToF64(io.in.bits.b))
+    Mux(isDouble, io.in.bits.src(0), extF32ToF64(io.in.bits.src(0))),
+    Mux(isDouble, io.in.bits.src(1), extF32ToF64(io.in.bits.src(1)))
   )
 
 
@@ -282,7 +281,7 @@ class DivSqrt extends FPUSubModule {
 
   io.in.ready := (state === s_idle) && io.out.ready
   io.out.valid := state === s_finish
-  io.out.bits.result := Mux(specialCaseHappenReg,
+  io.out.bits.data := Mux(specialCaseHappenReg,
     specialResult,
     Mux(overflowReg,
       Mux(isDoubleReg,
@@ -293,39 +292,39 @@ class DivSqrt extends FPUSubModule {
     )
   )
 
-  io.out.bits.fflags.invalid := Mux(isDivReg, divInvalidReg, sqrtInvalidReg)
-  io.out.bits.fflags.underflow := !specialCaseHappenReg && underflowReg
-  io.out.bits.fflags.overflow := !specialCaseHappenReg && overflowReg
-  io.out.bits.fflags.infinite := Mux(isDivReg, divInfReg, false.B)
-  io.out.bits.fflags.inexact := !specialCaseHappenReg && (inexactReg || overflowReg || underflowReg)
+  fflags.invalid := Mux(isDivReg, divInvalidReg, sqrtInvalidReg)
+  fflags.underflow := !specialCaseHappenReg && underflowReg
+  fflags.overflow := !specialCaseHappenReg && overflowReg
+  fflags.infinite := Mux(isDivReg, divInfReg, false.B)
+  fflags.inexact := !specialCaseHappenReg && (inexactReg || overflowReg || underflowReg)
 
-  FPUDebug() {
-    //    printf(p"$cnt in:${Hexadecimal(io.in.bits.src0)} \n")
-    when(io.in.fire()) {
-      printf(p"[In.fire] " +
-        p"a:${Hexadecimal(io.in.bits.a)} aexp:${aExp.asSInt()} amant:${Hexadecimal(aMant)} " +
-        p"b:${Hexadecimal(io.in.bits.b)} bexp:${bExp.asSInt()} bmant:${Hexadecimal(bMant)}\n")
-    }
-//    when(state === s_norm) {
-//      printf(p"[norm] lz:$aMantLez\n")
+//  FPUDebug() {
+//    //    printf(p"$cnt in:${Hexadecimal(io.in.bits.src0)} \n")
+//    when(io.in.fire()) {
+//      printf(p"[In.fire] " +
+//        p"a:${Hexadecimal(io.in.bits.a)} aexp:${aExp.asSInt()} amant:${Hexadecimal(aMant)} " +
+//        p"b:${Hexadecimal(io.in.bits.b)} bexp:${bExp.asSInt()} bmant:${Hexadecimal(bMant)}\n")
 //    }
-    when(state === s_compute){
-//      when(sqrt.io.out.fire()){
-//        printf(p"[compute] ")
-//      }
-    }
-    when(state === s_start) {
-      printf(p"[start] sign:$resSignReg mant:${Hexadecimal(aMantReg)} exp:${aExpReg.asSInt()}\n")
-    }
-    when(state === s_round){
-      printf(p"[round] exp before round:${aExpReg} g:$gReg r:$rReg s:$sReg mant:${Hexadecimal(aMantReg)}\n" +
-        p"[round] mantRounded:${Hexadecimal(mantRounded)}\n")
-    }
-    when(io.out.valid) {
-      printf(p"[Out.valid] " +
-        p"invalid:$sqrtInvalidReg  result:${Hexadecimal(commonResult)}\n" +
-        p"output:${Hexadecimal(io.out.bits.result)} " +
-        p"exp:${aExpReg.asSInt()} \n")
-    }
-  }
+////    when(state === s_norm) {
+////      printf(p"[norm] lz:$aMantLez\n")
+////    }
+//    when(state === s_compute){
+////      when(sqrt.io.out.fire()){
+////        printf(p"[compute] ")
+////      }
+//    }
+//    when(state === s_start) {
+//      printf(p"[start] sign:$resSignReg mant:${Hexadecimal(aMantReg)} exp:${aExpReg.asSInt()}\n")
+//    }
+//    when(state === s_round){
+//      printf(p"[round] exp before round:${aExpReg} g:$gReg r:$rReg s:$sReg mant:${Hexadecimal(aMantReg)}\n" +
+//        p"[round] mantRounded:${Hexadecimal(mantRounded)}\n")
+//    }
+//    when(io.out.valid) {
+//      printf(p"[Out.valid] " +
+//        p"invalid:$sqrtInvalidReg  result:${Hexadecimal(commonResult)}\n" +
+//        p"output:${Hexadecimal(io.out.bits.result)} " +
+//        p"exp:${aExpReg.asSInt()} \n")
+//    }
+//  }
 }
