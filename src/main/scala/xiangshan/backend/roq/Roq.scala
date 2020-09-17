@@ -310,7 +310,7 @@ class Roq extends XSModule {
     // io.commits(i).valid
     val idx = deqPtr+i.U
     val uop = io.commits(i).bits.uop
-    val DifftestSkipSC = true
+    val DifftestSkipSC = false
     if(!DifftestSkipSC){
       skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
     }else{
