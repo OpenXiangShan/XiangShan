@@ -30,9 +30,10 @@ class MulDivIO(val len: Int) extends XSBundle {
 abstract class Multiplier
 (
   val len: Int,
-  val latency: Int = 3
-) extends PipelinedFunctionUnit(mulCfg, len, latency, new MulDivCtrl) {
-//  val io = IO(new MulDivIO(len))
+  latency: Int = 3
+) extends FunctionUnit(cfg = mulCfg, extIn = new MulDivCtrl, latency = latency)
+  with HasPipelineReg[MulDivCtrl, Null]
+{
 
   val (src1, src2) = (io.in.bits.src(0), io.in.bits.src(1))
 

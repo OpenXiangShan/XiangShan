@@ -2,10 +2,8 @@ package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util._
-
 import xiangshan._
 import utils._
-
 import FunctionUnit._
 
 /*
@@ -52,6 +50,9 @@ class FunctionUnitIO[TI <: Data, TO <: Data]
   })
 
   val redirectIn = Flipped(ValidIO(new Redirect))
+
+  override def cloneType: FunctionUnitIO.this.type =
+    new FunctionUnitIO(cfg, len, extIn, extOut).asInstanceOf[this.type]
 }
 
 abstract class FunctionUnit[TI <: Data, TO <: Data]
@@ -59,24 +60,16 @@ abstract class FunctionUnit[TI <: Data, TO <: Data]
   cfg: FuConfig,
   len: Int = 64,
   extIn: => TI = null,
-  extOut: => TO = null
+  extOut: => TO = null,
+  val latency: Int = 0
 ) extends XSModule {
 
   val io = IO(new FunctionUnitIO[TI, TO](cfg, len, extIn, extOut))
 
 }
 
-abstract class PipelinedFunctionUnit[TI <: Data, TO <: Data]
-(
-  cfg: FuConfig,
-  len: Int,
-  latency: Int,
-  extIn: => TI = null,
-  extOut: => TO = null
-) extends FunctionUnit(cfg, len, extIn, extOut)
-{
-
-  val hasExtIn = extIn != null
+trait HasPipelineReg[TI <: Data, TO <: Data] {
+  this: FunctionUnit[TI, TO] =>
 
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
@@ -116,7 +109,6 @@ abstract class PipelinedFunctionUnit[TI <: Data, TO <: Data]
   def S4Reg[TT <: Data](next: TT): TT = PipelineReg[TT](4)(next)
 
   def S5Reg[TT <: Data](next: TT): TT = PipelineReg[TT](5)(next)
-
 }
 
 object FunctionUnit {

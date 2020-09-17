@@ -166,7 +166,7 @@ class FpuCsrIO extends XSBundle {
   val frm = Input(UInt(3.W))
 }
 
-class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, 64, FuOpType()) {
+class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, len=64, extIn= FuOpType()) {
 
   val cfIn = Input(new CtrlFlow)
   val redirectOut = Output(new Redirect)
@@ -181,6 +181,10 @@ class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, 64, FuOpType()) {
   // for differential testing
 //  val intrNO = Output(UInt(XLEN.W))
   val wenFix = Output(Bool())
+
+  override def cloneType: CSRIO.this.type =
+    new CSRIO().asInstanceOf[this.type]
+
 }
 
 class CSR extends XSModule
