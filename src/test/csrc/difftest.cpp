@@ -16,6 +16,7 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
+static void (*ref_difftest_sync)(uint64_t *skip) = NULL;
 static void (*ref_difftest_exec)(uint64_t n) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 static void (*ref_isa_reg_display)(void) = NULL;
@@ -56,6 +57,9 @@ void init_difftest() {
 
   ref_difftest_setregs = (void (*)(const void *))dlsym(handle, "difftest_setregs");
   assert(ref_difftest_setregs);
+
+  ref_difftest_sync = (void (*)(uint64_t *))dlsym(handle, "difftest_sync");
+  assert(ref_difftest_sync);
 
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
@@ -141,6 +145,10 @@ int difftest_step(DiffState *s) {
   //   return 0;
   // }
 
+  // sync lr/sc reg status
+  ref_difftest_sync((uint64_t*)&s->sync); // sync lr/sc microarchitectural regs
+
+  // single step difftest
   if (s->intrNO) {
     ref_difftest_raise_intr(s->intrNO);
     // ref_difftest_exec(1);//TODO
