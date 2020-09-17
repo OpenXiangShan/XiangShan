@@ -27,6 +27,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val paddr = Reg(UInt())
   // dcache response data
   val resp_data = Reg(UInt())
+  val is_lrsc_valid = Reg(Bool())
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -153,6 +154,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
     when(io.dcache.resp.fire()) {
+      is_lrsc_valid := io.dcache.resp.bits.meta.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
         "b000".U -> rdata(63, 0),
@@ -198,6 +200,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_finish) {
     io.out.valid := true.B
     io.out.bits.uop := in.uop
+    io.out.bits.uop.diffTestDebugLrScValid := is_lrsc_valid
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare

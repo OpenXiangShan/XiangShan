@@ -192,11 +192,14 @@ class AtomicsPipe extends DCacheModule
   val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
 
   val resp = Wire(ValidIO(new DCacheResp))
-  resp.valid     := s2_valid
-  resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word)
-  resp.bits.meta := s2_req.meta
-  resp.bits.miss := !s2_hit
-  resp.bits.nack := s2_nack
+  resp.valid        := s2_valid
+  resp.bits.data    := Mux(s2_sc, s2_sc_resp, s2_data_word)
+  resp.bits.meta    := s2_req.meta
+  // reuse this field to pass lr sc valid to commit
+  // nemu use this to see whether lr sc counter is still valid
+  resp.bits.meta.id := lrsc_valid
+  resp.bits.miss    := !s2_hit
+  resp.bits.nack    := s2_nack
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
