@@ -72,9 +72,9 @@ case class XSCoreParameters
     AluCnt = 4,
     MulCnt = 0,
     MduCnt = 2,
-    FmacCnt = 0,
-    FmiscCnt = 0,
-    FmiscDivSqrtCnt = 0,
+    FmacCnt = 4,
+    FmiscCnt = 1,
+    FmiscDivSqrtCnt = 1,
     LduCnt = 2,
     StuCnt = 2
   ),
