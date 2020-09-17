@@ -317,8 +317,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
     // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(CacheLineSize/2/8)), 0.U(log2Up(CacheLineSize/2/8).W)),
-    lgSize     = log2Up((CacheLineSize/2)/8).U
+    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
+    lgSize     = log2Up(l1BusDataWidth/8).U
   )._2
   mem.a.bits  := pteRead
   mem.a.valid := state === state_req && 
@@ -328,7 +328,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   mem.d.ready := state === state_wait_resp
 
   val memAddrLatch = RegEnable(memAddr, mem.a.valid)
-  memRdata := (mem.d.bits.data >> (memAddrLatch(4,3) << log2Up(XLEN)))(XLEN - 1, 0)
+  memRdata := (mem.d.bits.data >> (memAddrLatch(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)) << log2Up(XLEN)))(XLEN - 1, 0)
 
   /*
    * resp
