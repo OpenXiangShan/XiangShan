@@ -36,6 +36,11 @@ enum {
 // DIFFTEST_MTVAL, DIFFTEST_STVAL will be updated while committing exception
 // Compare / snapshot them is not necessary
 
+struct SyncState {
+  uint64_t lrscValid;
+  uint64_t lrscAddr;
+};
+
 struct DiffState {
   // Regs and mode for single step difftest
   int commit;
@@ -51,10 +56,7 @@ struct DiffState {
   int priviledgeMode;
 
   // Microarchitucural signal needed to sync status
-  struct SyncState {
-    uint64_t lrscValid;
-    uint64_t lrscAddr;
-  } sync;
+  struct SyncState sync;
   // lrscValid needs to be synced as nemu does not know 
   // how many cycles were used to finish a lr/sc pair, 
   // this will lead to different sc results.

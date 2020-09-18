@@ -122,8 +122,7 @@ class AtomicsPipe extends DCacheModule
   val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
   val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
 
-  BoringUtils.addSource(lrsc_addr, "difftestLrscAddr")
-  BoringUtils.addSource(lrsc_valid, "difftestLrscValid")
+  BoringUtils.addSource(RegEnable(lrsc_addr, s2_valid), "difftestLrscAddr")
 
   // we have permission on this block
   // but we can not finish in this pass

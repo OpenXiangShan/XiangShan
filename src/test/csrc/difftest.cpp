@@ -145,8 +145,6 @@ int difftest_step(DiffState *s) {
   //   return 0;
   // }
 
-  // sync lr/sc reg status
-  ref_difftest_sync((uint64_t*)&s->sync); // sync lr/sc microarchitectural regs
 
   // single step difftest
   if (s->intrNO) {
@@ -174,6 +172,12 @@ int difftest_step(DiffState *s) {
         }
         ref_difftest_setregs(ref_r);
       }else{
+        // sync lr/sc reg status
+        struct SyncState sync;
+        sync.lrscValid = selectBit(s->sync.lrscValid, i);
+        sync.lrscAddr = s->sync.lrscAddr;
+        ref_difftest_sync((uint64_t*)&sync); // sync lr/sc microarchitectural regs
+        // single step exec
         ref_difftest_exec(1);
       }
     }
