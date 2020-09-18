@@ -44,8 +44,8 @@ class DiffTestIO extends XSBundle {
   val mideleg = Output(UInt(64.W))
   val medeleg = Output(UInt(64.W))
 
-  val lrscValid = Output(UInt(32.W))
-  val lrscAddr = Output(UInt(64.W))
+  val scFailed = Output(Bool())
+  // val lrscAddr = Output(UInt(64.W))
 }
 
 class LogCtrlIO extends Bundle {
@@ -123,8 +123,8 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.sscratch, "difftestSscratch")
     BoringUtils.addSink(difftest.mideleg, "difftestMideleg")
     BoringUtils.addSink(difftest.medeleg, "difftestMedeleg")
-    BoringUtils.addSink(difftest.lrscValid, "difftestLrscValid")
-    BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
+    BoringUtils.addSink(difftest.scFailed, "difftestScFailed")
+    // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
     io.difftest := difftest
 
     val trap = WireInit(0.U.asTypeOf(new TrapIO))

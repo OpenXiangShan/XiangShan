@@ -252,8 +252,7 @@ uint64_t Emulator::execute(uint64_t n) {
       diff.intrNO = dut_ptr->io_difftest_intrNO;
       diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 
-      diff.sync.lrscValid = dut_ptr->io_difftest_lrscValid;
-      diff.sync.lrscAddr = dut_ptr->io_difftest_lrscAddr;
+      diff.sync.scFailed = dut_ptr->io_difftest_scFailed;
 
       if (difftest_step(&diff)) {
         trapCode = STATE_ABORT;

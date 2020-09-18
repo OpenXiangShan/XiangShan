@@ -328,6 +328,11 @@ class Roq extends XSModule {
     trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
     isRVC(i) := uop.cf.brUpdate.pd.isRVC
   }
+
+  val scFailed = !diffTestDebugLrScValid(0) && 
+    io.commits(0).bits.uop.ctrl.fuType === FuType.mou &&
+    (io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_d || io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_w)
+
   val instrCnt = RegInit(0.U(64.W))
   instrCnt := instrCnt + retireCounter
 
@@ -348,7 +353,7 @@ class Roq extends XSModule {
     BoringUtils.addSource(RegNext(wpc), "difftestWpc")
     BoringUtils.addSource(RegNext(wdata), "difftestWdata")
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
-    BoringUtils.addSource(RegNext(diffTestDebugLrScValid).asUInt, "difftestLrscValid")
+    BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
     BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
 
     val hitTrap = trapVec.reduce(_||_)
