@@ -83,7 +83,9 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
   "fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11",
   "this_pc",
   "mstatus", "mcause", "mepc",
-  "sstatus", "scause", "sepc"
+  "sstatus", "scause", "sepc",
+  "satp", 
+  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg"   
 };
 
 static uint64_t nemu_this_pc = 0x80000000;
