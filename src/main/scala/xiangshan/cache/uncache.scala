@@ -148,6 +148,7 @@ class UncacheImp(outer: Uncache)
   val io = IO(new UncacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
+  require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
   val resp_arb = Module(new Arbiter(new DCacheResp, cfg.nMMIOEntries))
 

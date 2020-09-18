@@ -226,7 +226,8 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   when (wen) {
     tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wdata))), wmask)
   }
-  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(cacheParams.tagCode.decode(_.asTypeOf(rstVal)))
+  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(rdata =>
+      cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
 
   io.read.ready := !wen
   io.write.ready := !rst

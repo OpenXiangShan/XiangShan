@@ -235,7 +235,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
       ways = 4,
       sets = 512 * 1024 / (64 * 4),
       blockBytes = 64,
-      beatBytes = 32
+      beatBytes = 32 // beatBytes = l1BusDataWidth / 8
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 8
