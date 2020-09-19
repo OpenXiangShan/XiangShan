@@ -99,7 +99,7 @@ class Backend extends XSModule
       val cfg = exu.config
 
       val wakeUpDateVec = exuConfigs.zip(exeWbReqs).filter(x => needData(cfg, x._1)).map(_._2)
-      val bypassCnt = exuConfigs.count(c => c.enableBypass && needData(cfg, c) && cfg.enableBypass)
+      val bypassCnt = exuConfigs.count(c => c.enableBypass && needData(cfg, c))
 
       println(s"exu:${cfg.name} wakeupCnt:${wakeUpDateVec.length} bypassCnt:$bypassCnt")
 
@@ -127,15 +127,13 @@ class Backend extends XSModule
     val bypassDataVec = exuConfigs.zip(exeWbReqs).
       filter(x => x._1.enableBypass && needData(rs.exuCfg, x._1)).map(_._2)
 
-    if(rs.exuCfg.enableBypass) {
-      rs.io.bypassUops <> reservedStations.
-      filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
-      map(_.io.selectedUop)
+    rs.io.bypassUops <> reservedStations.
+    filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
+    map(_.io.selectedUop)
 
-      for(i <- bypassDataVec.indices){
-        rs.io.bypassData(i).valid := bypassDataVec(i).valid
-        rs.io.bypassData(i).bits := bypassDataVec(i).bits
-      }
+    for(i <- bypassDataVec.indices){
+      rs.io.bypassData(i).valid := bypassDataVec(i).valid
+      rs.io.bypassData(i).bits := bypassDataVec(i).bits
     }
   }
 

@@ -71,7 +71,6 @@ class ReservationStation
   require(!(!src3Use && src3Listen))
   require(!(!src2Use && src3Use))
   require(!(!src2Listen && src3Listen))
-  require(enableBypass && bypassCnt>0 || !enableBypass && bypassCnt==0)
 
   // Issue Queue
   // val issQue = IndexableMem(iqSize, new ExuInput, mem = false, init = None)
@@ -298,7 +297,7 @@ class ReservationStation
       }
     }
 
-  if (enableBypass) {
+  if (bypassCnt > 0) {
     val bpPdest = io.bypassUops.map(_.bits.pdest)
     val bpValid = io.bypassUops.map(_.valid)
     val bpData  = io.bypassData.map(_.bits.data)
@@ -352,7 +351,9 @@ class ReservationStation
         XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
     }
+  }
 
+  if (enableBypass) {
     // send out bypass
     val sel = io.selectedUop
     sel.valid := toIssFire && !enqSendEnable
