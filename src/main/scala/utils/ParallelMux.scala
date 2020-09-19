@@ -5,6 +5,7 @@ import chisel3.util._
 
 object ParallelOperation {
   def apply[T <: Data](xs: Seq[T], func: (T, T) => T): T = {
+    require(xs.nonEmpty)
     xs match {
       case Seq(a) => a
       case Seq(a, b) => func(a, b)
