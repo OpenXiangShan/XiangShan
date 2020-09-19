@@ -6,6 +6,7 @@ import utils._
 import xiangshan._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -265,7 +266,8 @@ class LoadUnit extends XSModule {
       LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+      LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
   ))
 
   // ecc check
