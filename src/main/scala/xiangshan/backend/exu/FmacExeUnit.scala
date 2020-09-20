@@ -18,8 +18,10 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg) {
   fma.io.in.bits.ext.get <> DontCare
 
   fma.io.redirectIn := io.redirect
+  fma.io.out.ready := io.out.ready
 
   io.in.ready := fma.io.in.ready
+  io.out.valid := fma.io.out.valid
   io.out.bits.uop := fma.io.out.bits.uop
   io.out.bits.data := fma.io.out.bits.data
   io.out.bits.redirectValid := false.B
