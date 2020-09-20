@@ -36,16 +36,19 @@ class Decoder extends XSModule with HasInstrType {
   io.out.ctrl.fuType := fuType
 
   val SrcTypeTable = List(
-    InstrI  ->   (SrcType.reg, SrcType.imm),
-    InstrFI ->   (SrcType.reg, SrcType.imm),
-    InstrR  ->   (SrcType.reg, SrcType.reg),
-    InstrS  ->   (SrcType.reg, SrcType.reg),
-    InstrFS ->   (SrcType.reg, SrcType.fp ),
-    InstrSA ->   (SrcType.reg, SrcType.reg),
-    InstrB  ->   (SrcType.reg, SrcType.reg),
-    InstrU  ->   (SrcType.pc , SrcType.imm),
-    InstrJ  ->   (SrcType.pc , SrcType.imm),
-    InstrN  ->   (SrcType.pc , SrcType.imm)
+    InstrI    -> (SrcType.reg, SrcType.imm),
+    InstrFI   -> (SrcType.reg, SrcType.imm),
+    InstrR    -> (SrcType.reg, SrcType.reg),
+    InstrFR   -> (SrcType.fp,  SrcType.fp ),
+    InstrS    -> (SrcType.reg, SrcType.reg),
+    InstrFS   -> (SrcType.reg, SrcType.fp ),
+    InstrSA   -> (SrcType.reg, SrcType.reg),
+    InstrB    -> (SrcType.reg, SrcType.reg),
+    InstrU    -> (SrcType.pc , SrcType.imm),
+    InstrJ    -> (SrcType.pc , SrcType.imm),
+    InstrN    -> (SrcType.pc , SrcType.imm),
+    InstrGtoF -> (SrcType.reg, SrcType.imm),
+    InstrFtoG -> (SrcType.fp , SrcType.imm)
   )
   val src1Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
   val src2Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))

@@ -1,9 +1,11 @@
 package xiangshan.backend.decode.isa
 
 import chisel3.util._
-import xiangshan.{FuType, HasXSParameter}
+import xiangshan.HasXSParameter
+import xiangshan.FuType._
 import xiangshan.backend.decode._
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.FPUOpType._
 
 object RVDInstr extends HasXSParameter with HasInstrType {
 
@@ -41,54 +43,43 @@ object RVDInstr extends HasXSParameter with HasInstrType {
   def FNMADD_D           = BitPat("b?????01??????????????????1001111")
 
   val table = Array(
-    FLD -> List(InstrFI, FuType.ldu, LSUOpType.ld),
-    FSD -> List(InstrFS, FuType.stu, LSUOpType.sd)
+    FLD -> List(InstrFI, ldu, LSUOpType.ld),
+    FSD -> List(InstrFS, stu, LSUOpType.sd),
+
+    // FR
+    FADD_D    -> List(InstrFR, fmac,  fadd),
+    FSUB_D    -> List(InstrFR, fmac,  fsub),
+    FMUL_D    -> List(InstrFR, fmac,  fmul),
+    FDIV_D    -> List(InstrFR, fmisc, fdiv),
+    FMIN_D    -> List(InstrFR, fmisc, fmin),
+    FMAX_D    -> List(InstrFR, fmisc, fmax),
+    FSGNJ_D   -> List(InstrFR, fmisc, fsgnj),
+    FSGNJN_D  -> List(InstrFR, fmisc, fsgnjn),
+    FSGNJX_D  -> List(InstrFR, fmisc, fsgnjx),
+    FSQRT_D   -> List(InstrFR, fmisc, fsqrt),
+    FMADD_D   -> List(InstrFR, fmac,  fmadd),
+    FNMADD_D  -> List(InstrFR, fmac,  fnmadd),
+    FMSUB_D   -> List(InstrFR, fmac,  fmsub),
+    FNMSUB_D  -> List(InstrFR, fmac,  fnmsub),
+    FCVT_S_D  -> List(InstrFR, fmisc, d2s),
+    FCVT_D_S  -> List(InstrFR, fmisc, s2d),
+
+    // FtoG
+    FCLASS_D  -> List(InstrFtoG, fmisc, fclass),
+    FMV_X_D   -> List(InstrFtoG, fmisc, fmv_f2i),
+    FCVT_W_D  -> List(InstrFtoG, fmisc, f2w),
+    FCVT_WU_D -> List(InstrFtoG, fmisc, f2wu),
+    FCVT_L_D  -> List(InstrFtoG, fmisc, f2l),
+    FCVT_LU_D -> List(InstrFtoG, fmisc, f2lu),
+    FLE_D     -> List(InstrFtoG, fmisc, fle),
+    FLT_D     -> List(InstrFtoG, fmisc, flt),
+    FEQ_D     -> List(InstrFtoG, fmisc, feq),
+
+    // GtoF
+    FMV_D_X   -> List(InstrGtoF, i2f, fmv_i2f),
+    FCVT_D_W  -> List(InstrGtoF, i2f, w2f),
+    FCVT_D_WU -> List(InstrGtoF, i2f, wu2f),
+    FCVT_D_L  -> List(InstrGtoF, i2f, l2f),
+    FCVT_D_LU -> List(InstrGtoF, i2f, lu2f)
   )
-
-  //  (isFp, src1Type, src2Type, src3Type, rfWen, fpWen, fuOpType, inputFunc, outputFunc)
-//  val table = Array(
-
-//    FLD -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
-//    C_FLD -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
-//    C_FLDSP -> List(Y, reg, imm, imm, N, Y, LSUOpType.ld, in_raw, out_raw),
-//    FSD -> List(Y, reg, fp, imm, N, N, LSUOpType.sd, in_raw, out_raw),
-//    C_FSD -> List(Y, reg, fp, imm, N, N, LSUOpType.sd, in_raw, out_raw),
-//    C_FSDSP -> List(Y, reg, fp, imm, N, N, LSUOpType.sd, in_raw, out_raw),
-//    // fp fp -> fp
-//    FADD_D   -> List(Y, fp, fp, imm, N, Y, fadd, in_raw, out_raw),
-//    FSUB_D   -> List(Y, fp, fp, imm, N, Y, fsub, in_raw, out_raw),
-//    FMUL_D   -> List(Y, fp, fp, imm, N, Y, fmul, in_raw, out_raw),
-//    FDIV_D   -> List(Y, fp, fp, imm, N, Y, fdiv, in_raw, out_raw),
-//    FMIN_D   -> List(Y, fp, fp, imm, N, Y, fmin, in_raw, out_raw),
-//    FMAX_D   -> List(Y, fp, fp, imm, N, Y, fmax, in_raw, out_raw),
-//    FSGNJ_D  -> List(Y, fp, fp, imm, N, Y, fsgnj, in_raw, out_raw),
-//    FSGNJN_D -> List(Y, fp, fp, imm, N, Y, fsgnjn, in_raw, out_raw),
-//    FSGNJX_D -> List(Y, fp, fp, imm, N, Y, fsgnjx, in_raw, out_raw),
-//    // fp -> fp
-//    FSQRT_D  -> List(Y, fp, imm, imm, N, Y, fsqrt, in_raw, out_raw),
-//    FCVT_S_D -> List(Y, fp, imm, imm, N, Y, d2s, in_raw, out_box),
-//    FCVT_D_S -> List(Y, fp, imm, imm, N, Y, s2d, in_unbox, out_raw),
-//    // fp fp fp -> fp
-//    FMADD_D  -> List(Y, fp, fp, fp, N, Y, fmadd, in_raw, out_raw),
-//    FNMADD_D -> List(Y, fp, fp, fp, N, Y, fnmadd, in_raw, out_raw),
-//    FMSUB_D  -> List(Y, fp, fp, fp, N, Y, fmsub, in_raw, out_raw),
-//    FNMSUB_D -> List(Y, fp, fp, fp, N, Y, fnmsub, in_raw, out_raw),
-//    // fp -> gp
-//    FCLASS_D  -> List(Y, fp, imm, imm, Y, N, fclass, in_raw, out_raw),
-//    FMV_X_D   -> List(Y, fp, imm, imm, Y, N, fmv_f2i, in_raw, out_raw),
-//    FCVT_W_D  -> List(Y, fp, imm, imm, Y, N, f2w, in_raw, out_sext),
-//    FCVT_WU_D -> List(Y, fp, imm, imm, Y, N, f2wu, in_raw, out_sext),
-//    FCVT_L_D  -> List(Y, fp, imm, imm, Y, N, f2l, in_raw, out_raw),
-//    FCVT_LU_D -> List(Y, fp, imm, imm, Y, N, f2lu, in_raw, out_raw),
-//    // fp fp -> gp
-//    FLE_D -> List(Y, fp, fp, imm, Y, N, fle, in_raw, out_raw),
-//    FLT_D -> List(Y, fp, fp, imm, Y, N, flt, in_raw, out_raw),
-//    FEQ_D -> List(Y, fp, fp, imm, Y, N, feq, in_raw, out_raw),
-//    // gp -> fp
-//    FMV_D_X   -> List(Y, reg, imm, imm, N, Y, fmv_i2f, in_raw, out_raw),
-//    FCVT_D_W  -> List(Y, reg, imm, imm, N, Y, w2f, in_raw, out_raw),
-//    FCVT_D_WU -> List(Y, reg, imm, imm, N, Y, wu2f, in_raw, out_raw),
-//    FCVT_D_L  -> List(Y, reg, imm, imm, N, Y, l2f, in_raw, out_raw),
-//    FCVT_D_LU -> List(Y, reg, imm, imm, N, Y, lu2f, in_raw, out_raw)
-//  )
 }
