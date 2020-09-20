@@ -91,7 +91,7 @@ class Dispatch2Ls extends XSModule {
       enq.bits.src2State := DontCare
     }
     else {
-      enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src1Type === SrcType.fp,
+      enq.bits.src2State := Mux(io.fromDq(indexVec(i)).bits.ctrl.src2Type === SrcType.fp,
         io.fpRegRdy(i - exuParameters.LduCnt), io.intRegRdy(readPort(i) + 1))
     }
 
