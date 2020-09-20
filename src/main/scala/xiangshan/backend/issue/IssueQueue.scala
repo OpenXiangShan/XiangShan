@@ -246,7 +246,7 @@ class IssueQueue
 
   XSDebug("State Dump: ")
   for(i <- readyVec.indices.reverse){
-    val r = readyVec(idxQueue(i))
+    val r = (stateQueue(i)=/=s_invalid) && readyVec(idxQueue(i))
     XSDebug(false, r, p"r")
     XSDebug(false, !r, p"-")
   }
@@ -289,7 +289,8 @@ class IssueQueue
   XSInfo(
     io.enq.fire(),
     p"enq fire: pc:${Hexadecimal(io.enq.bits.cf.pc)} roqIdx:${io.enq.bits.roqIdx} " +
-      p"src1: ${io.enq.bits.psrc1} src2:${io.enq.bits.psrc2} pdst:${io.enq.bits.pdest}\n"
+      p"src1: ${io.enq.bits.psrc1} state: ${io.enq.bits.src1State} " +
+      p"src2: ${io.enq.bits.psrc2} state: ${io.enq.bits.src2State} pdst:${io.enq.bits.pdest}\n"
   )
   XSInfo(
     io.deq.fire(),
