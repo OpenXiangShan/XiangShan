@@ -124,12 +124,12 @@ class Backend extends XSModule
     })
 
   for( rs <- reservedStations){
-    rs.io.bypassUops <> reservedStations.
-      filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
-      map(_.io.selectedUop)
-
     val bypassDataVec = exuConfigs.zip(exeWbReqs).
       filter(x => x._1.enableBypass && needData(rs.exuCfg, x._1)).map(_._2)
+
+    rs.io.bypassUops <> reservedStations.
+    filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
+    map(_.io.selectedUop)
 
     for(i <- bypassDataVec.indices){
       rs.io.bypassData(i).valid := bypassDataVec(i).valid

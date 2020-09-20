@@ -32,7 +32,6 @@ class ReservationStation
   val enableBypass: Boolean = false,
   val fifo: Boolean = false
 ) extends XSModule with HasIQConst {
-
   val src2Use = true
   val src3Use = (exuCfg.intSrcCnt > 2) || (exuCfg.fpSrcCnt > 2)
   val src2Listen = true
@@ -297,7 +296,8 @@ class ReservationStation
         }
       }
     }
-  
+
+  if (bypassCnt > 0) {
     val bpPdest = io.bypassUops.map(_.bits.pdest)
     val bpValid = io.bypassUops.map(_.valid)
     val bpData  = io.bypassData.map(_.bits.data)
@@ -351,7 +351,8 @@ class ReservationStation
         XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
       }
     }
-  
+  }
+
   if (enableBypass) {
     // send out bypass
     val sel = io.selectedUop
@@ -363,6 +364,7 @@ class ReservationStation
     sel.bits.ctrl.rfWen := issQue(deqSelIq).uop.ctrl.rfWen
     sel.bits.ctrl.fpWen := issQue(deqSelIq).uop.ctrl.fpWen
   }
+
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d isFpp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.isFlushPipe, io.redirect.bits.brTag.value, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
   XSInfo(enqFire, s"EnqCtrl(%d %d) enqSelIq:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSelIq
     , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)

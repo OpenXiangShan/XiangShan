@@ -349,7 +349,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
     }
   }
 
-  XSDebug(flush.valid, p"Reveive flush. f_state:${f_state} state:${state}\n")
+  XSDebug(flush.valid, p"Reveive flush. f_state:${f_state}\n")
   XSDebug(f_state =/= f_idle || flush.valid, p"f_state:${f_state} idx:${wb_arb.io.in(FlushPort).bits} In(${wb_arb.io.in(FlushPort).valid} ${wb_arb.io.in(FlushPort).ready}) wb_resp:${wb_resp}\n")
 
   // write back unit
