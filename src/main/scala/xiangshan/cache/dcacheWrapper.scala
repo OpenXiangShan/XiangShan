@@ -102,6 +102,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val io = IO(new DCacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
+  require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
   //----------------------------------------
   // core data structures

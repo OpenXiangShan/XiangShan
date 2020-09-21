@@ -3,14 +3,14 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 
-import utils.XSDebug
+import utils.{XSDebug}
 
 class StorePipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
     val lsu        = Flipped(new DCacheStoreIO)
     val data_read  = DecoupledIO(new L1DataReadReq)
-    val data_resp  = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val data_resp  = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val data_write = DecoupledIO(new L1DataWriteReq)
     val meta_read  = DecoupledIO(new L1MetaReadReq)
     val meta_resp  = Input(Vec(nWays, new L1Metadata))
@@ -34,7 +34,7 @@ class StorePipe extends DCacheModule
   // Data read for new requests
   data_read.addr   := io.lsu.req.bits.addr
   data_read.way_en := ~0.U(nWays.W)
-  data_read.rmask  := ~0.U(refillCycles.W)
+  data_read.rmask  := ~0.U(blockRows.W)
 
   // Pipeline
   // stage 0
@@ -95,9 +95,16 @@ class StorePipe extends DCacheModule
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
-  val wdata = Wire(Vec(refillCycles, UInt(rowBits.W)))
-  val wmask = Wire(Vec(refillCycles, UInt(rowBytes.W)))
-  val wdata_merged = Wire(Vec(refillCycles, UInt(encRowBits.W)))
+  val s2_data_decoded = (0 until blockRows) map { r =>
+    (0 until rowWords) map { w =>
+      val data = s2_data(r)(encWordBits * (w + 1) - 1, encWordBits * w)
+      val decoded = cacheParams.dataCode.decode(data)
+      assert(!(s2_valid && s2_hit && !s2_nack && decoded.uncorrectable))
+      decoded.corrected
+    }
+  }
+
+  val wdata_merged = Wire(Vec(blockRows, UInt(encRowBits.W)))
 
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
     val full_wmask = FillInterleaved(8, wmask)
@@ -105,12 +112,17 @@ class StorePipe extends DCacheModule
   }
 
   // now, we do not deal with ECC
-  for (i <- 0 until refillCycles) {
-    wdata(i)        := s2_req.data(rowBits * (i + 1) - 1, rowBits * i)
-    wmask(i)        := s2_req.mask(rowBytes * (i + 1) - 1, rowBytes * i)
-    wdata_merged(i) := Cat(s2_data(i)(encRowBits - 1, rowBits),
-      mergePutData(s2_data(i)(rowBits - 1, 0), wdata(i), wmask(i)))
+  for (i <- 0 until blockRows) {
+    wdata_merged(i) := Cat((0 until rowWords).reverse map { w =>
+      val old_data = s2_data_decoded(i)(w)
+      val new_data = s2_req.data(rowBits * (i + 1) - 1, rowBits * i)(wordBits * (w + 1) - 1, wordBits * w)
+      val wmask = s2_req.mask(rowBytes * (i + 1) - 1, rowBytes * i)(wordBytes * (w + 1) - 1, wordBytes * w)
+      val wdata = mergePutData(old_data, new_data, wmask)
+      val wdata_encoded = cacheParams.dataCode.encode(wdata)
+      wdata_encoded
+    })
   }
+
 
   // write dcache if hit
   val data_write = io.data_write.bits
@@ -118,7 +130,7 @@ class StorePipe extends DCacheModule
   data_write.rmask    := DontCare
   data_write.way_en   := s2_tag_match_way
   data_write.addr     := s2_req.addr
-  data_write.wmask    := VecInit((0 until refillCycles) map (i => ~0.U(rowWords.W)))
+  data_write.wmask    := VecInit((0 until blockRows) map (i => ~0.U(rowWords.W)))
   data_write.data     := wdata_merged
 
   assert(!(io.data_write.valid && !io.data_write.ready))
