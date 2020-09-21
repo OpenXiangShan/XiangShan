@@ -276,7 +276,7 @@ class DuplicatedMetaArray extends DCacheModule {
   def dumpRead() = {
     (0 until LoadPipelineWidth) map { w =>
       when (io.read(w).fire()) {
-        XSDebug("MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
+        XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
           io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
       }
     }
