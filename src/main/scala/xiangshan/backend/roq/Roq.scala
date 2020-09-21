@@ -90,6 +90,7 @@ class Roq extends XSModule {
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
+      microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
@@ -301,6 +302,7 @@ class Roq extends XSModule {
   val wen = Wire(Vec(CommitWidth, Bool()))
   val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
+  val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
   val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
   val trapVec = Wire(Vec(CommitWidth, Bool()))
   val isRVC = Wire(Vec(CommitWidth, Bool()))
@@ -308,7 +310,7 @@ class Roq extends XSModule {
     // io.commits(i).valid
     val idx = deqPtr+i.U
     val uop = io.commits(i).bits.uop
-    val DifftestSkipSC = true
+    val DifftestSkipSC = false
     if(!DifftestSkipSC){
       skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
     }else{
@@ -321,10 +323,16 @@ class Roq extends XSModule {
     wen(i) := io.commits(i).valid && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
     wdata(i) := exuData(idx)
     wdst(i) := uop.ctrl.ldest
+    diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
     wpc(i) := SignExt(uop.cf.pc, XLEN)
     trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
     isRVC(i) := uop.cf.brUpdate.pd.isRVC
   }
+
+  val scFailed = !diffTestDebugLrScValid(0) && 
+    io.commits(0).bits.uop.ctrl.fuType === FuType.mou &&
+    (io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_d || io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_w)
+
   val instrCnt = RegInit(0.U(64.W))
   instrCnt := instrCnt + retireCounter
 
@@ -345,6 +353,7 @@ class Roq extends XSModule {
     BoringUtils.addSource(RegNext(wpc), "difftestWpc")
     BoringUtils.addSource(RegNext(wdata), "difftestWdata")
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
+    BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
     BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
 
     val hitTrap = trapVec.reduce(_||_)
