@@ -66,6 +66,7 @@ class BTB extends BasePredictor with BTBParams{
     val resp = Output(new BTBResp)
     val meta = Output(new BTBMeta)
   }
+  override val debug = true
   override val io = IO(new BTBIO)
   val btbAddr = new TableAddr(log2Up(BtbSize/BtbWays), BtbBanks)
 
@@ -205,7 +206,7 @@ class BTB extends BasePredictor with BTBParams{
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
   val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && updateType === BTBtype.J
-  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered)
+  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered || !u.isMisPred && u.pd.isBr)
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {

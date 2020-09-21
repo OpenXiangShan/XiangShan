@@ -79,7 +79,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
   })
-  override val debug = true
+  // override val debug = true
   // bypass entries for tage update
   val wrBypassEntries = 8
 
@@ -368,7 +368,7 @@ class Tage extends BaseTage {
     }
   }
 
-  override val debug = true
+  // override val debug = true
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))

@@ -8,7 +8,7 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = true
+  val BPUDebug = false
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = true
@@ -83,7 +83,7 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
 
   val io = new DefaultBasePredictorIO
 
-  val debug = true
+  val debug = false
 
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
@@ -109,6 +109,7 @@ class BPUStageIO extends XSBundle {
   val resp = new PredictorResponse
   val target = UInt(VAddrBits.W)
   val brInfo = Vec(PredictWidth, new BranchInfo)
+  val saveHalfRVI = Bool()
 }
 
 
@@ -148,6 +149,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   val lastValidPos = WireInit(PriorityMux(Reverse(inLatch.mask), (PredictWidth-1 to 0 by -1).map(i => i.U)))
   val lastHit   = Wire(Bool())
   val lastIsRVC = Wire(Bool())
+  val saveHalfRVI = ((lastValidPos === jmpIdx && taken) || !taken ) && !lastIsRVC && lastHit
   
   val targetSrc = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
   val target = Mux(taken, targetSrc(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
@@ -158,7 +160,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.pred.bits.jmpIdx := jmpIdx
   io.pred.bits.hasNotTakenBrs := hasNTBr
   io.pred.bits.target := target
-  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken && !(jmpIdx === 0.U && !io.predecode.bits.isFetchpcEqualFirstpc)) || !taken ) && !lastIsRVC && lastHit
+  io.pred.bits.saveHalfRVI := saveHalfRVI
   io.pred.bits.takenOnBr := taken && brMask(jmpIdx)
 
   io.out.bits <> DontCare
@@ -167,6 +169,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   io.out.bits.target := target
   io.out.bits.resp <> inLatch.resp
   io.out.bits.brInfo := inLatch.brInfo
+  io.out.bits.saveHalfRVI := saveHalfRVI
   (0 until PredictWidth).map(i => 
     io.out.bits.brInfo(i).sawNotTakenBranch := (if (i == 0) false.B else (brMask.asUInt & notTakens.asUInt)(i-1,0).orR))
 
@@ -354,6 +357,8 @@ class BPUStage3 extends BPUStage {
     lastHit := pdMask(0) | !pdMask(0) & !pds(0).isRVC
   }
 
+
+  io.pred.bits.saveHalfRVI := ((lastValidPos === jmpIdx && taken && !(jmpIdx === 0.U && !io.predecode.bits.isFetchpcEqualFirstpc)) || !taken ) && !lastIsRVC && lastHit
 
   // Wrap tage resp and tage meta in
   // This is ugly

@@ -40,6 +40,7 @@ class MicroBTB extends BasePredictor
         val uBTBBranchInfo = Output(new MicroBTBBranchInfo)
     }
 
+    override val debug = true
     override val io = IO(new MicroBTBIO)
     io.uBTBBranchInfo <> out_ubtb_br_info
 
