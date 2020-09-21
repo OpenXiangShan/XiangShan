@@ -308,7 +308,16 @@ class Roq extends XSModule {
     // io.commits(i).valid
     val idx = deqPtr+i.U
     val uop = io.commits(i).bits.uop
-    skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
+    val DifftestSkipSC = true
+    if(!DifftestSkipSC){
+      skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
+    }else{
+      skip(i) := (
+          exuDebug(idx).isMMIO || 
+          uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
+          uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
+        ) && io.commits(i).valid
+    }
     wen(i) := io.commits(i).valid && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
     wdata(i) := exuData(idx)
     wdst(i) := uop.ctrl.ldest
