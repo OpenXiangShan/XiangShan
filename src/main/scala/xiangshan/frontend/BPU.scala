@@ -122,6 +122,8 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
     val predecode = Flipped(ValidIO(new Predecode))
     val recover =  Flipped(ValidIO(new BranchUpdateInfo))
     val cacheValid = Input(Bool())
+    val debug_hist = Input(UInt(HistoryLength.W))
+    val debug_histPtr = Input(UInt(log2Up(ExtHistoryLength).W))
   }
   val io = IO(new DefaultIO)
 
@@ -380,7 +382,7 @@ class BPUStage3 extends BPUStage {
 
   if (EnbaleCFIPredLog) {
     val out = io.out
-    XSDebug(out.fire(), p"cfi_pred: fetchpc(${Hexadecimal(out.bits.pc)}) mask(${out.bits.mask}) brmask(${brMask.asUInt})\n")
+    XSDebug(out.fire(), p"cfi_pred: fetchpc(${Hexadecimal(out.bits.pc)}) mask(${out.bits.mask}) brmask(${brMask.asUInt}) hist(${Hexadecimal(io.debug_hist)}) histPtr(${io.debug_histPtr})\n")
   }
 
   if (EnableBPUTimeRecord) {
@@ -403,6 +405,7 @@ class BPUReq extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val inMask = UInt(PredictWidth.W)
+  val histPtr = UInt(log2Up(ExtHistoryLength).W) // only for debug
 }
 
 class BranchUpdateInfoWithHist extends XSBundle {
@@ -474,6 +477,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   s1.io.cacheValid := DontCare
   s2.io.cacheValid := io.cacheValid
   s3.io.cacheValid := io.cacheValid
+
   
   if (BPUDebug) {
     XSDebug(io.branchInfo.fire(), "branchInfo sent!\n")
@@ -562,6 +566,20 @@ class BPU extends BaseBPU {
   s1.io.in.bits.brInfo <> s1_brInfo_in
 
   val s1_hist = RegEnable(io.in.bits.hist, enable=s1_fire)
+  val s2_hist = RegEnable(s1_hist, enable=s2.io.in.fire())
+  val s3_hist = RegEnable(s2_hist, enable=s3.io.in.fire())
+
+  s1.io.debug_hist := s1_hist
+  s2.io.debug_hist := s2_hist
+  s3.io.debug_hist := s3_hist
+
+  val s1_histPtr = RegEnable(io.in.bits.histPtr, enable=s1_fire)
+  val s2_histPtr = RegEnable(s1_histPtr, enable=s2.io.in.fire())
+  val s3_histPtr = RegEnable(s2_histPtr, enable=s3.io.in.fire())
+
+  s1.io.debug_histPtr := s1_histPtr
+  s2.io.debug_histPtr := s2_histPtr
+  s3.io.debug_histPtr := s3_histPtr
 
   //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this

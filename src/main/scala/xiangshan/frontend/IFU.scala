@@ -359,6 +359,7 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.in.valid := if1_fire
   bpu.io.in.bits.pc := if1_npc
   bpu.io.in.bits.hist := hist.asUInt
+  bpu.io.in.bits.histPtr := ptr
   bpu.io.in.bits.inMask := mask(if1_npc)
   bpu.io.out(0).ready := if2_fire
   bpu.io.out(1).ready := if3_fire
