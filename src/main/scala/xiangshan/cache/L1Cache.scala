@@ -12,7 +12,6 @@ trait L1CacheParameters {
   def nSets:         Int
   def nWays:         Int
   def rowBits:       Int
-  def nTLBEntries:   Int
   def blockBytes:    Int
 }
 
@@ -21,26 +20,58 @@ trait HasL1CacheParameters extends HasXSParameter
   val cacheParams: L1CacheParameters
 
   def nSets = cacheParams.nSets
-  def blockOffBits = log2Up(cacheParams.blockBytes)
+  def nWays = cacheParams.nWays
+  def blockBytes = cacheParams.blockBytes
+
   def idxBits = log2Up(cacheParams.nSets)
+  def wayBits = log2Up(nWays)
+  def blockOffBits = log2Up(cacheParams.blockBytes)
+
   def untagBits = blockOffBits + idxBits
   // 4K page
   def pgIdxBits = 12
   def pgUntagBits = untagBits min pgIdxBits
-
-  // L1 cache are all physically tagged cache
   def tagBits = PAddrBits - pgUntagBits
-  def nWays = cacheParams.nWays
-  def wayBits = log2Up(nWays)
+
+  // the basic unit at which we store contents
+  // SRAM bank width
   def rowBits = cacheParams.rowBits
   def rowBytes = rowBits/8
   def rowOffBits = log2Up(rowBytes)
-  def nTLBEntries = cacheParams.nTLBEntries
+  // the number of rows in a block
+  def blockRows = blockBytes / rowBytes
 
-  def cacheDataBits = l1BusDataWidth
-  def cacheDataBytes = cacheDataBits / 8
-  def cacheDataBeats = (cacheParams.blockBytes * 8) / cacheDataBits
-  def refillCycles = cacheDataBeats
+  // outer bus width
+  def beatBits = l1BusDataWidth
+  def beatBytes = beatBits / 8
+  def refillCycles = blockBytes / beatBytes
+  def beatOffBits = log2Up(beatBytes)
+
+  // inner bus width(determined by XLEN)
+  def wordBits = DataBits
+  def wordBytes = wordBits / 8
+  def wordOffBits = log2Up(wordBytes)
+  // the number of words in a block
+  def blockWords = blockBytes / wordBytes
+
+  def idxMSB = untagBits-1
+  def idxLSB = blockOffBits
+  def offsetmsb = idxLSB-1
+  def offsetlsb = wordOffBits
+
+  def get_tag(addr: UInt) = (addr >> untagBits).asUInt()
+  def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
+  def get_block(addr: UInt) = addr >> blockOffBits
+  def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
+
+  def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
+  def get_row(addr: UInt) = addr(blockOffBits - 1, rowOffBits)
+  def get_word(addr: UInt) = addr(blockOffBits - 1, wordOffBits)
+
+  def beatRows = beatBits/rowBits
+  def rowWords = rowBits/wordBits
+
+  def full_divide(a: Int, b: Int) = a >= b && isPow2(a / b)
 }
 
 abstract class L1CacheModule extends XSModule
