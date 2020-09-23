@@ -38,7 +38,10 @@ enum {
 
 struct SyncChannel {
   uint64_t scFailed; // sc inst commited, it failed beacuse lr_valid === 0
-  // uint64_t lrscAddr;
+};
+
+struct SyncState {
+  uint64_t lrscValid;
 };
 
 struct DiffState {
