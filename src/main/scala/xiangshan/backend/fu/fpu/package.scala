@@ -7,49 +7,58 @@ object FPUOpType {
   def funcWidth = 6
   def FpuOp(fu: String, op: String): UInt = ("b" + fu + op).U(funcWidth.W)
 
+  def FU_FMAC = "000"
+  def FU_FCMP = "001"
+  def FU_FMV =  "010"
+  def FU_F2I =  "011"
+  def FU_I2F =  "100"
+  def FU_S2D =  "101"
+  def FU_D2S =  "110"
+  def FU_DIVSQRT = "111"
+
   // FMA
-  def fadd:UInt   = FpuOp("000", "000")
-  def fsub:UInt   = FpuOp("000", "001")
-  def fmadd:UInt  = FpuOp("000", "100")
-  def fmsub:UInt  = FpuOp("000", "101")
-  def fnmsub:UInt = FpuOp("000", "110")
-  def fnmadd:UInt = FpuOp("000", "111")
-  def fmul:UInt   = FpuOp("000", "010")
+  def fadd:UInt   = FpuOp(FU_FMAC, "000")
+  def fsub:UInt   = FpuOp(FU_FMAC, "001")
+  def fmadd:UInt  = FpuOp(FU_FMAC, "100")
+  def fmsub:UInt  = FpuOp(FU_FMAC, "101")
+  def fnmsub:UInt = FpuOp(FU_FMAC, "110")
+  def fnmadd:UInt = FpuOp(FU_FMAC, "111")
+  def fmul:UInt   = FpuOp(FU_FMAC, "010")
 
   // FCMP
-  def fmin:UInt   = FpuOp("001", "000")
-  def fmax:UInt   = FpuOp("001", "001")
-  def fle:UInt    = FpuOp("001", "010")
-  def flt:UInt    = FpuOp("001", "011")
-  def feq:UInt    = FpuOp("001", "100")
+  def fmin:UInt   = FpuOp(FU_FCMP, "000")
+  def fmax:UInt   = FpuOp(FU_FCMP, "001")
+  def fle:UInt    = FpuOp(FU_FCMP, "010")
+  def flt:UInt    = FpuOp(FU_FCMP, "011")
+  def feq:UInt    = FpuOp(FU_FCMP, "100")
 
   // FMV
-  def fmv_f2i:UInt= FpuOp("010", "000")
-  def fmv_i2f:UInt= FpuOp("010", "001")
-  def fclass:UInt = FpuOp("010", "010")
-  def fsgnj:UInt  = FpuOp("010", "110")
-  def fsgnjn:UInt = FpuOp("010", "101")
-  def fsgnjx:UInt = FpuOp("010", "100")
+  def fmv_f2i:UInt= FpuOp(FU_FMV, "000")
+  def fmv_i2f:UInt= FpuOp(FU_FMV, "001")
+  def fclass:UInt = FpuOp(FU_FMV, "010")
+  def fsgnj:UInt  = FpuOp(FU_FMV, "110")
+  def fsgnjn:UInt = FpuOp(FU_FMV, "101")
+  def fsgnjx:UInt = FpuOp(FU_FMV, "100")
 
   // FloatToInt
-  def f2w:UInt    = FpuOp("011", "000")
-  def f2wu:UInt   = FpuOp("011", "001")
-  def f2l:UInt    = FpuOp("011", "010")
-  def f2lu:UInt   = FpuOp("011", "011")
+  def f2w:UInt    = FpuOp(FU_F2I, "000")
+  def f2wu:UInt   = FpuOp(FU_F2I, "001")
+  def f2l:UInt    = FpuOp(FU_F2I, "010")
+  def f2lu:UInt   = FpuOp(FU_F2I, "011")
 
   // IntToFloat
-  def w2f:UInt    = FpuOp("100", "000")
-  def wu2f:UInt   = FpuOp("100", "001")
-  def l2f:UInt    = FpuOp("100", "010")
-  def lu2f:UInt   = FpuOp("100", "011")
+  def w2f:UInt    = FpuOp(FU_I2F, "000")
+  def wu2f:UInt   = FpuOp(FU_I2F, "001")
+  def l2f:UInt    = FpuOp(FU_I2F, "010")
+  def lu2f:UInt   = FpuOp(FU_I2F, "011")
 
   // FloatToFloat
-  def s2d:UInt    = FpuOp("101", "000")
-  def d2s:UInt    = FpuOp("110", "000")
+  def s2d:UInt    = FpuOp(FU_S2D, "000")
+  def d2s:UInt    = FpuOp(FU_D2S, "000")
 
   // Div/Sqrt
-  def fdiv:UInt   = FpuOp("111", "000")
-  def fsqrt:UInt  = FpuOp("111", "001")
+  def fdiv:UInt   = FpuOp(FU_DIVSQRT, "000")
+  def fsqrt:UInt  = FpuOp(FU_DIVSQRT, "001")
 }
 
 object FPUIOFunc {

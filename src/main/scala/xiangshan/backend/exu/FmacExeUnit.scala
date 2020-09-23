@@ -15,7 +15,10 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg) {
   fma.io.in.bits.src(0) := io.in.bits.src1
   fma.io.in.bits.src(1) := io.in.bits.src2
   fma.io.in.bits.src(2) := io.in.bits.src3
-  fma.io.in.bits.ext.get <> DontCare
+  val extraInput = fma.io.in.bits.ext.get
+  extraInput.rm := DontCare
+  extraInput.op := io.in.bits.uop.ctrl.fuOpType(2, 0)
+  extraInput.isDouble := !io.in.bits.uop.ctrl.isRVF
 
   fma.io.redirectIn := io.redirect
   fma.io.out.ready := io.out.ready

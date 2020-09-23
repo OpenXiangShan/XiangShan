@@ -17,6 +17,7 @@ class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
   val state = RegInit(s_idle)
 
 
+  val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
   val rmReg = RegEnable(rm, io.in.fire())
   val isDiv = !op(0)
   val isDivReg = RegEnable(isDiv, io.in.fire())
@@ -291,6 +292,7 @@ class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
       commonResult
     )
   )
+  io.out.bits.uop := uopReg
 
   fflags.invalid := Mux(isDivReg, divInvalidReg, sqrtInvalidReg)
   fflags.underflow := !specialCaseHappenReg && underflowReg
