@@ -10,12 +10,6 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 
-object DCacheAtomicsType {
-  def miss      = "b00".U
-  def mmio      = "b01".U
-  def atomics      = "b10".U
-}
-
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
     (LookupTree(sizeEncode, List(
