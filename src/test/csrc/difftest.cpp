@@ -16,9 +16,9 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
-static void (*ref_difftest_get_mastatus)(uint64_t *s) = NULL;
-static void (*ref_difftest_set_mastatus)(uint64_t *s) = NULL;
-static void (*ref_disambiguate_exec)(uint64_t *skidisambiguate_parap) = NULL;
+void (*ref_difftest_get_mastatus)(void *s) = NULL;
+void (*ref_difftest_set_mastatus)(const void *s) = NULL;
+vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para) = NULL;
 static void (*ref_difftest_exec)(uint64_t n) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 static void (*ref_isa_reg_display)(void) = NULL;
@@ -60,13 +60,13 @@ void init_difftest() {
   ref_difftest_setregs = (void (*)(const void *))dlsym(handle, "difftest_setregs");
   assert(ref_difftest_setregs);
 
-  ref_difftest_get_mastatus = (void (*)(uint64_t *))dlsym(handle, "difftest_get_mastatus");
+  ref_difftest_get_mastatus = (void (*)(void *))dlsym(handle, "difftest_get_mastatus");
   assert(ref_difftest_get_mastatus);
 
-  ref_difftest_set_mastatus = (void (*)(uint64_t *))dlsym(handle, "difftest_set_mastatus");
+  ref_difftest_set_mastatus = (void (*)(const void *))dlsym(handle, "difftest_set_mastatus");
   assert(ref_difftest_set_mastatus);
 
-  ref_disambiguate_exec = (void (*)(uint64_t *))dlsym(handle, "disambiguate_exec");
+  ref_disambiguate_exec = (vaddr_t (*)(void *))dlsym(handle, "disambiguate_exec");
   assert(ref_disambiguate_exec);
 
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
