@@ -24,6 +24,22 @@ object DisablePrintfAnnotation extends HasShellOptions{
 
 }
 
+case class EnablePrintfAnnotation(m: String) extends NoTargetAnnotation
+
+object EnablePrintfAnnotation extends HasShellOptions {
+  val options = Seq(
+    new ShellOption[String](
+      longOption = "enable-module-print",
+      toAnnotationSeq = s => Seq(EnablePrintfAnnotation(s)),
+      helpText =
+        "The verilog 'printf' except the <module> and it's submodules will be removed\n",
+      shortOption = Some("em"),
+      helpValueName = Some("<module>")
+    )
+  )
+
+}
+
 case class DisableAllPrintAnnotation() extends NoTargetAnnotation
 
 object DisableAllPrintAnnotation extends HasShellOptions {
@@ -41,6 +57,7 @@ object DisableAllPrintAnnotation extends HasShellOptions {
 trait XiangShanCli { this: Shell =>
   parser.note("XiangShan Options")
   DisablePrintfAnnotation.addOptions(parser)
+  EnablePrintfAnnotation.addOptions(parser)
   DisableAllPrintAnnotation.addOptions(parser)
 }
 
