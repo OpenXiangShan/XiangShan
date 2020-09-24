@@ -17,6 +17,7 @@ object XSLogLevel extends Enumeration {
 }
 
 object XSLog {
+  val MagicStr = "9527"
   def apply(debugLevel: XSLogLevel)
            (prefix: Boolean, cond: Bool, pable: Printable)
            (implicit name: String): Any =
@@ -27,7 +28,7 @@ object XSLog {
     ExcitingUtils.addSink(logTimestamp, "logTimestamp")
     if(Parameters.get.envParameters.EnableDebug){
       when (cond && logEnable) {
-        val commonInfo = p"[$debugLevel][time=$logTimestamp] $name: "
+        val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)
         if (debugLevel >= XSLogLevel.ERROR) {
           assert(false.B)
@@ -67,7 +68,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel) extends HasXSParameter
   }
 
   def printPrefix()(implicit name: String): Unit = {
-    val commonInfo = p"[$logLevel][time=${GTimer()}] $name: "
+    val commonInfo = p"[$logLevel][time=${GTimer()}] ${XSLog.MagicStr}: "
     when (trigger) {
       printf(commonInfo)
     }
