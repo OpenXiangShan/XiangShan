@@ -2,11 +2,16 @@ package xstransforms
 
 import firrtl._
 import firrtl.ir._
-import top.{DisableAllPrintAnnotation, DisablePrintfAnnotation}
+import top._
 
 import scala.collection.mutable
 
 class ShowPrintTransform extends Transform with DependencyAPIMigration {
+
+  // The first transform to run
+  override def prerequisites = firrtl.stage.Forms.ChirrtlForm
+  // Invalidates everything
+  override def invalidates(a: Transform) = true
 
   override protected def execute(state: CircuitState): CircuitState = {
     val c = state.circuit
@@ -14,9 +19,17 @@ class ShowPrintTransform extends Transform with DependencyAPIMigration {
     val blackList = state.annotations.collect {
       case DisablePrintfAnnotation(m) => m
     }
+    val whiteList = state.annotations.collect {
+      case EnablePrintfAnnotation(m) => m
+    }
     val disableAll = state.annotations.collectFirst {
       case DisableAllPrintAnnotation() => true
     }.nonEmpty
+
+    assert(
+      !(whiteList.nonEmpty && (disableAll || blackList.nonEmpty)),
+      "'white list' can't be used with 'disable all' or 'black list'!"
+    )
 
     val top = c.main
     val queue = new mutable.Queue[String]()
@@ -52,14 +65,13 @@ class ShowPrintTransform extends Transform with DependencyAPIMigration {
         }
         m.mapStmt(disableStmtPrint)
       }
-      if(
-        disableAll ||
-        blackList.nonEmpty &&
-          (
-            blackList.contains(m.name) ||
-              blackList.map(b => ancestors(m.name).contains(b)).reduce(_||_)
-          )
-      ){
+      val isInBlackList = blackList.nonEmpty && (
+        blackList.contains(m.name) || blackList.map( b => ancestors(m.name).contains(b)).reduce(_||_)
+      )
+      val isInWhiteList = whiteList.isEmpty || (
+        whiteList.nonEmpty && (whiteList.contains(m.name) || whiteList.map( x => ancestors(m.name).contains(x)).reduce(_||_))
+      ) 
+      if( disableAll || isInBlackList || !isInWhiteList ){
         disableModulePrint
       } else {
         m

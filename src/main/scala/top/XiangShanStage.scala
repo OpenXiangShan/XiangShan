@@ -6,6 +6,7 @@ import firrtl.annotations.NoTargetAnnotation
 import firrtl.options.{HasShellOptions, Shell, ShellOption}
 import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
 import xstransforms.ShowPrintTransform
+import xstransforms.PrintModuleName
 
 case class DisablePrintfAnnotation(m: String) extends NoTargetAnnotation
 
@@ -18,6 +19,22 @@ object DisablePrintfAnnotation extends HasShellOptions{
       helpText =
         "The verilog 'printf' in the <module> and it's submodules will be removed\n",
       shortOption = Some("dm"),
+      helpValueName = Some("<module>")
+    )
+  )
+
+}
+
+case class EnablePrintfAnnotation(m: String) extends NoTargetAnnotation
+
+object EnablePrintfAnnotation extends HasShellOptions {
+  val options = Seq(
+    new ShellOption[String](
+      longOption = "enable-module-print",
+      toAnnotationSeq = s => Seq(EnablePrintfAnnotation(s)),
+      helpText =
+        "The verilog 'printf' except the <module> and it's submodules will be removed\n",
+      shortOption = Some("em"),
       helpValueName = Some("<module>")
     )
   )
@@ -41,6 +58,7 @@ object DisableAllPrintAnnotation extends HasShellOptions {
 trait XiangShanCli { this: Shell =>
   parser.note("XiangShan Options")
   DisablePrintfAnnotation.addOptions(parser)
+  EnablePrintfAnnotation.addOptions(parser)
   DisableAllPrintAnnotation.addOptions(parser)
 }
 
@@ -59,7 +77,10 @@ object XiangShanStage {
   ): AnnotationSeq = {
     (new XiangShanStage).execute(
       args,
-      annotations :+ RunFirrtlTransformAnnotation(new ShowPrintTransform)
+      annotations ++ Seq(
+        RunFirrtlTransformAnnotation(new ShowPrintTransform),
+        RunFirrtlTransformAnnotation(new PrintModuleName)
+      )
     )
   }
 }
