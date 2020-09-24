@@ -89,6 +89,7 @@ Emulator::Emulator(int argc, const char *argv[]):
 
   init_difftest();
 
+#if VM_TRACE == 1
   enable_waveform = args.enable_waveform;
   if (enable_waveform) {
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -97,6 +98,9 @@ Emulator::Emulator(int argc, const char *argv[]):
     time_t now = time(NULL);
     tfp->open(waveform_filename(now));	// Open the dump file
   }
+#else
+  enable_waveform = false;
+#endif
 
   // init core
   reset_ncycles(10);
@@ -177,6 +181,7 @@ inline void Emulator::single_cycle() {
   dut_ptr->clock = 1;
   dut_ptr->eval();
 
+#if VM_TRACE == 1
   if (enable_waveform) {
     uint64_t cycle = dut_ptr->io_trap_cycleCnt;
     uint64_t begin = dut_ptr->io_logCtrl_log_begin;
@@ -184,6 +189,7 @@ inline void Emulator::single_cycle() {
     bool in_range = (begin <= cycle) && (cycle <= end);
     if (in_range) { tfp->dump(cycle); }
   }
+#endif
 
   if (dut_ptr->io_uart_out_valid) {
     printf("%c", dut_ptr->io_uart_out_ch);
@@ -273,7 +279,9 @@ uint64_t Emulator::execute(uint64_t n) {
     }
   }
 
+#if VM_TRACE == 1
   if (enable_waveform) tfp->close();
+#endif
   display_trapinfo();
   return cycles;
 }

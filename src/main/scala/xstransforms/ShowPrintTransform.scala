@@ -12,6 +12,11 @@ class ShowPrintTransform extends Transform with DependencyAPIMigration {
   // Invalidates everything
   override def invalidates(a: Transform) = true
 
+  // The first transform to run
+  override def prerequisites = firrtl.stage.Forms.ChirrtlForm
+  // Invalidates everything
+  override def invalidates(a: Transform) = true
+
   override protected def execute(state: CircuitState): CircuitState = {
     val c = state.circuit
 
