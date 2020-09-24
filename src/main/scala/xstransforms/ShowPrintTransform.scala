@@ -7,10 +7,6 @@ import top._
 import scala.collection.mutable
 
 class ShowPrintTransform extends Transform with DependencyAPIMigration {
-  // The first transform to run
-  override def prerequisites = firrtl.stage.Forms.ChirrtlForm
-  // Invalidates everything
-  override def invalidates(a: Transform) = true
 
   // The first transform to run
   override def prerequisites = firrtl.stage.Forms.ChirrtlForm
