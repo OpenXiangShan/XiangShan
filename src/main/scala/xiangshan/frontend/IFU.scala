@@ -15,7 +15,7 @@ trait HasIFUConst { this: XSModule =>
   def mask(pc: UInt): UInt = (Fill(PredictWidth * 2, 1.U(1.W)) >> pc(groupAlign - 1, 1))(PredictWidth - 1, 0)
   def snpc(pc: UInt): UInt = pc + (PopCount(mask(pc)) << 1)
   
-  val IFUDebug = false
+  val IFUDebug = true
 }
 
 class GlobalHistoryInfo() extends XSBundle {
@@ -118,6 +118,8 @@ class IFU extends XSModule with HasIFUConst
   when (if2_fire && if2_realGHInfo.shifted) {
     shiftPtr := true.B
     newPtr := if2_newPtr
+  }
+  when (if2_realGHInfo.shifted && if2_newPtr >= ptr) {
     hist(if2_newPtr-ptr) := if2_realGHInfo.takenOnBr.asUInt
   }
 
@@ -186,9 +188,10 @@ class IFU extends XSModule with HasIFUConst
   }
 
   // when it does not redirect, we still need to modify hist(wire)
-  when(if3_realGHInfo.shifted) {
+  when(if3_realGHInfo.shifted && if3_newPtr >= ptr) {
     hist(if3_newPtr-ptr) := if3_realGHInfo.takenOnBr
-  }.elsewhen (if3_hasPrevHalfInstr && prevHalfInstr.ghInfo.shifted) {
+  }
+  when (if3_hasPrevHalfInstr && prevHalfInstr.ghInfo.shifted && prevHalfInstr.newPtr >= ptr) {
     hist(prevHalfInstr.newPtr-ptr) := prevHalfInstr.ghInfo.takenOnBr
   }
 
@@ -279,7 +282,7 @@ class IFU extends XSModule with HasIFUConst
   //   }
   }
 
-  when (if4_realGHInfo.shifted) {
+  when (if4_realGHInfo.shifted && if4_newPtr >= ptr) {
     hist(if4_newPtr-ptr) := if4_realGHInfo.takenOnBr
   }
 
@@ -288,7 +291,7 @@ class IFU extends XSModule with HasIFUConst
     when (if3_hasPrevHalfInstr && prevHalfInstr.ghInfo.shifted) {
       shiftPtr := true.B
       newPtr := prevHalfInstr.newPtr
-      hist(prevHalfInstr.newPtr-ptr) := prevHalfInstr.ghInfo.takenOnBr
+      extHist(prevHalfInstr.newPtr) := prevHalfInstr.ghInfo.takenOnBr
     }
   }
 

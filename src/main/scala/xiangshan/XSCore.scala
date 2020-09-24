@@ -36,7 +36,7 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = false,
   HistoryLength: Int = 64,
-  BtbSize: Int = 256,
+  BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
   RasSize: Int = 16,
