@@ -144,6 +144,7 @@ class PTW()(implicit p: Parameters) extends LazyModule {
 class PTWImp(outer: PTW) extends PtwModule(outer){
 
   val (mem, edge) = outer.node.out.head
+  require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
 
@@ -156,7 +157,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
   val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire())
   val validOneCycle = OneCycleValid(arb.io.out.fire())
-  arb.io.out.ready := !valid || resp(arbChosen).fire()
+  arb.io.out.ready := !valid// || resp(arbChosen).fire()
 
   val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
   val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
@@ -184,7 +185,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
   
   // mem alias
-  val memRdata = mem.d.bits.data
+  // val memRdata = mem.d.bits.data
+  val memRdata = Wire(UInt(XLEN.W))
   val memPte = memRdata.asTypeOf(new PteBundle)
   val memValid = mem.d.valid
   val memRespFire = mem.d.fire()
@@ -315,8 +317,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
                  Mux(level===1.U, Mux(l2Hit, l3addr, l2addr)/*when l2Hit, l3addr, when l2miss, l2addr*/, l3addr))
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
-    toAddress  = memAddr,
-    lgSize     = log2Up(XLEN/8).U
+    // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
+    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
+    lgSize     = log2Up(l1BusDataWidth/8).U
   )._2
   mem.a.bits  := pteRead
   mem.a.valid := state === state_req && 
@@ -324,6 +327,9 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
                 (level===1.U && !l2Hit) ||
                 (level===2.U)) && !sfenceLatch
   mem.d.ready := state === state_wait_resp
+
+  val memAddrLatch = RegEnable(memAddr, mem.a.valid)
+  memRdata := (mem.d.bits.data >> (memAddrLatch(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)) << log2Up(XLEN)))(XLEN - 1, 0)
 
   /*
    * resp
