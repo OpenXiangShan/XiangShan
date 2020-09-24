@@ -37,7 +37,7 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
 
     if (sim) {
       val isWFI = WireInit(false.B)
-      BoringUtils.addSink(isWFI, "isWFI")
+      ExcitingUtils.addSink(isWFI, "isWFI")
       when (isWFI) { mtime := mtime + 100000.U }
     }
 

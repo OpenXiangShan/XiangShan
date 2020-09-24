@@ -7,6 +7,7 @@ import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.decode.isa.Privileged.WFI
 
 
 class Roq extends XSModule {
@@ -239,6 +240,9 @@ class Roq extends XSModule {
 
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
+
+  val hasWFI = io.commits.map(c => c.valid && state===s_idle && c.bits.uop.cf.instr===WFI).reduce(_||_)
+  ExcitingUtils.addSource(hasWFI, "isWFI")
 
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
