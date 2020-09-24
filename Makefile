@@ -14,6 +14,8 @@ REMOTE ?= localhost
 REMOTE_PREFIX ?= 
 REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 
+USE_DISPLAY = 0
+
 .DEFAULT_GOAL = verilog
 
 help:
@@ -52,7 +54,9 @@ ifeq ($(REMOTE),localhost)
 else
 	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)"
 endif
-
+ifeq ($(USE_DISPLAY),1)
+	sed -i "s/fwrite(32'h80000002,/display(/g" $(SIM_TOP_V)
+endif
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
 EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
