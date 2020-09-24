@@ -89,6 +89,7 @@ class IFU extends XSModule with HasIFUConst
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
   val if2_GHInfo = RegEnable(if1_GHInfo, if1_fire)
+  val if2_predHistPtr = RegEnable(if1_histPtr, enable=if1_fire)
   if2_ready := if2_fire || !if2_valid || if2_flush
   when (if2_flush) { if2_valid := if1_fire }
   .elsewhen (if1_fire) { if2_valid := if1_valid }
@@ -131,6 +132,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_fire = if3_valid && if4_ready && io.icacheResp.valid && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_GHInfo = RegEnable(if2_realGHInfo, if2_fire)
+  val if3_predHistPtr = RegEnable(if2_predHistPtr, enable=if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
   when (if3_flush) { if3_valid := false.B }
   .elsewhen (if2_fire) { if3_valid := if2_valid }
@@ -204,6 +206,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_pc = RegEnable(if3_pc, if3_fire)
 
   val if4_GHInfo = RegEnable(if3_realGHInfo, if3_fire)
+  val if4_predHistPtr = RegEnable(if3_predHistPtr, enable=if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
   .elsewhen (if3_fire) { if4_valid := if3_valid }
@@ -302,11 +305,11 @@ class IFU extends XSModule with HasIFUConst
 
   // This is a histPtr which is only modified when a prediction
   // is sent, so that it can get the final prediction info
-  val if4_predHistPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
-  if4_histPtr := if4_predHistPtr
+  val finalPredHistPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
+  if4_histPtr := finalPredHistPtr
   if4_newPtr  := if3_histPtr
   when (if4_fire && if4_realGHInfo.shifted) {
-    if4_predHistPtr := if4_newPtr
+    finalPredHistPtr := if4_newPtr
   }
 
   if3_histPtr := Mux(if4_realGHInfo.shifted && if4_valid && !if4_flush, if4_histPtr - 1.U, if4_histPtr)
@@ -329,10 +332,10 @@ class IFU extends XSModule with HasIFUConst
       // and there wasn't any not taken branch before it,
       // we should only recover the pointer to an unshifted state
       newPtr := oldPtr
-      if4_predHistPtr := oldPtr
+      finalPredHistPtr := oldPtr
     }.otherwise {
       newPtr := oldPtr - 1.U
-      if4_predHistPtr := oldPtr - 1.U
+      finalPredHistPtr := oldPtr - 1.U
       hist(0) := Mux(b.pd.isBr, b.taken, 0.U)
       extHist(newPtr) := Mux(b.pd.isBr, b.taken, 0.U)
     }
@@ -350,7 +353,7 @@ class IFU extends XSModule with HasIFUConst
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
   val inOrderBrHist = Wire(Vec(HistoryLength, UInt(1.W)))
-  (0 until HistoryLength).foreach(i => inOrderBrHist(i) := extHist(i.U + io.inOrderBrInfo.bits.brInfo.histPtr))
+  (0 until HistoryLength).foreach(i => inOrderBrHist(i) := extHist(i.U + io.inOrderBrInfo.bits.brInfo.predHistPtr))
   bpu.io.inOrderBrInfo.valid := io.inOrderBrInfo.valid
   bpu.io.inOrderBrInfo.bits := BranchUpdateInfoWithHist(io.inOrderBrInfo.bits, inOrderBrHist.asUInt)
   bpu.io.outOfOrderBrInfo.valid := io.outOfOrderBrInfo.valid
@@ -399,7 +402,8 @@ class IFU extends XSModule with HasIFUConst
     io.fetchPacket.bits.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
   io.fetchPacket.bits.brInfo := bpu.io.branchInfo.bits
-  (0 until PredictWidth).foreach(i => io.fetchPacket.bits.brInfo(i).histPtr := if4_predHistPtr)
+  (0 until PredictWidth).foreach(i => io.fetchPacket.bits.brInfo(i).histPtr := finalPredHistPtr)
+  (0 until PredictWidth).foreach(i => io.fetchPacket.bits.brInfo(i).predHistPtr := if4_predHistPtr)
   io.fetchPacket.bits.pd := if4_pd.pd
   io.fetchPacket.bits.ipf := if4_ipf
   io.fetchPacket.bits.crossPageIPFFix := if4_crossPageIPF
