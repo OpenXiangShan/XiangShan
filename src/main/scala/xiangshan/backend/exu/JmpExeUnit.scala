@@ -13,10 +13,12 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val jmp = Module(new Jump)
   val csr = Module(new CSR)
   val fence = Module(new FenceExeUnit)
+  val i2f = Module(new I2fExeUnit)
 
   val isJmp = fuType === FuType.jmp
   val isCsr = fuType === FuType.csr
   val isFence = fuType === FuType.fence
+  val isI2f = fuType === FuType.i2f
 
   jmp.io.in.valid := io.in.valid && isJmp
   jmp.io.out.ready := io.out.ready
@@ -71,17 +73,35 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   fence.io.dmem <> DontCare
   fence.io.out.ready := io.out.ready
 
+  i2f.io.in.valid := valid && isI2f
+  i2f.io.in.bits := io.in.bits
+  i2f.io.redirect <> io.redirect
+  i2f.io.mcommit <> DontCare
+  i2f.io.exception <> DontCare
+  i2f.io.dmem <> DontCare
+  i2f.io.out.ready := io.out.ready
+
   // NOTE: just one instr in this module at the same time
-  io.in.ready := jmp.io.in.ready && csr.io.in.ready && fence.io.in.ready 
+  io.in.ready := jmp.io.in.ready && csr.io.in.ready && fence.io.in.ready && i2f.io.in.ready
   io.out.bits := Mux(jmp.io.out.valid,
     jumpExuOut,
     Mux(csr.io.out.valid,
       csrExuOut,
-      fence.io.out.bits
+      Mux(fence.io.out.valid,
+        fence.io.out.bits,
+        i2f.io.out.bits
+      )
     )
   )
-  io.out.valid := jmp.io.out.valid || csr.io.out.valid || fence.io.out.valid
+  io.out.valid := jmp.io.out.valid || csr.io.out.valid || fence.io.out.valid || i2f.io.out.valid
 
-  XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready} ${jmp.io.in.ready}${csr.io.in.ready}${fence.io.in.ready}) pc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} roqIdx:${io.in.bits.uop.roqIdx} fuType:b${Binary(io.in.bits.uop.ctrl.fuType)} fuOpType:b${Binary(io.in.bits.uop.ctrl.fuOpType)} isJmp:${isJmp} isCsr${isCsr} isFence:${isFence}\n")
-  XSDebug(io.out.valid, p"Out(${io.out.valid} ${io.out.ready} ${jmp.io.out.valid}${csr.io.out.valid}${fence.io.out.valid}) pc:0x${Hexadecimal(io.out.bits.uop.cf.pc)} roqIdx:${io.out.bits.uop.roqIdx} fuType:b${Binary(io.out.bits.uop.ctrl.fuType)} fuOpType:b${Binary(io.out.bits.uop.ctrl.fuOpType)}\n")
+  XSDebug(io.in.valid,
+    p"In(${io.in.valid} ${io.in.ready} ${jmp.io.in.ready}${csr.io.in.ready}${fence.io.in.ready}${i2f.io.in.ready}) " +
+      p"pc:0x${Hexadecimal(io.in.bits.uop.cf.pc)} roqIdx:${io.in.bits.uop.roqIdx} " +
+      p"fuType:b${Binary(io.in.bits.uop.ctrl.fuType)} fuOpType:b${Binary(io.in.bits.uop.ctrl.fuOpType)} " +
+      p"isJmp:$isJmp isCsr$isCsr isFence:$isFence isI2f:$isI2f\n")
+  XSDebug(io.out.valid,
+    p"Out(${io.out.valid} ${io.out.ready} ${jmp.io.out.valid}${csr.io.out.valid}${fence.io.out.valid}${i2f.io.out.valid}) " +
+      p"pc:0x${Hexadecimal(io.out.bits.uop.cf.pc)} roqIdx:${io.out.bits.uop.roqIdx} " +
+      p"fuType:b${Binary(io.out.bits.uop.ctrl.fuType)} fuOpType:b${Binary(io.out.bits.uop.ctrl.fuOpType)}\n")
 }
