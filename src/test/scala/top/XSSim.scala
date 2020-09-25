@@ -27,6 +27,7 @@ class DiffTestIO extends XSBundle {
   val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val isRVC = Output(UInt(32.W))
   val intrNO = Output(UInt(64.W))
+  val cause = Output(UInt(64.W))
 
   val priviledgeMode = Output(UInt(2.W))
   val mstatus = Output(UInt(64.W))
@@ -45,7 +46,6 @@ class DiffTestIO extends XSBundle {
   val medeleg = Output(UInt(64.W))
 
   val scFailed = Output(Bool())
-  // val lrscAddr = Output(UInt(64.W))
 }
 
 class LogCtrlIO extends Bundle {
@@ -108,6 +108,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.wdst, "difftestWdst")
     BoringUtils.addSink(difftest.wpc, "difftestWpc")
     BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
+    BoringUtils.addSink(difftest.cause, "difftestCause")
     BoringUtils.addSink(difftest.r, "difftestRegs")
     BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
     BoringUtils.addSink(difftest.mstatus, "difftestMstatus")

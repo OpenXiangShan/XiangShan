@@ -670,6 +670,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
   ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
+  ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
 
   val raiseExceptionIntr = io.exception.valid
   val retTarget = Wire(UInt(VAddrBits.W))

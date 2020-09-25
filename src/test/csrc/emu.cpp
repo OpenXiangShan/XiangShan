@@ -250,6 +250,7 @@ uint64_t Emulator::execute(uint64_t n) {
       diff.isRVC = dut_ptr->io_difftest_isRVC;
       diff.wen = dut_ptr->io_difftest_wen;
       diff.intrNO = dut_ptr->io_difftest_intrNO;
+      diff.cause = dut_ptr->io_difftest_cause;
       diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 
       diff.sync.scFailed = dut_ptr->io_difftest_scFailed;

@@ -56,6 +56,7 @@ struct DiffState {
   uint32_t *wdst;
   int wen;
   uint64_t intrNO;
+  uint64_t cause; // for disambiguate_exec
   int priviledgeMode;
 
   // Microarchitucural signal needed to sync status
