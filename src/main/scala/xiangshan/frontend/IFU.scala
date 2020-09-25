@@ -89,7 +89,7 @@ class IFU extends XSModule with HasIFUConst
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
   val if2_GHInfo = RegEnable(if1_GHInfo, if1_fire)
-  val if2_predHistPtr = RegEnable(if1_histPtr, enable=if1_fire)
+  val if2_predHistPtr = RegEnable(ptr, enable=if1_fire)
   if2_ready := if2_fire || !if2_valid || if2_flush
   when (if2_flush) { if2_valid := if1_fire }
   .elsewhen (if1_fire) { if2_valid := if1_valid }
