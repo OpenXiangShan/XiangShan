@@ -159,6 +159,7 @@ class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
   val lsroqIdx = UInt(LsroqIdxWidth.W)
+  val diffTestDebugLrScValid = Bool()
 }
 
 class Redirect extends XSBundle with HasRoqIdx {
