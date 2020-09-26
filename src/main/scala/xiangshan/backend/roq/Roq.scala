@@ -115,15 +115,12 @@ class Roq extends XSModule {
   ExcitingUtils.addSink(trapTarget, "trapTarget")
 
   val deqUop = microOp(deqPtr)
-  val intrEnable = intrBitSet && (state === s_idle) && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
-  val exceptionEnable = Cat(deqUop.cf.exceptionVec).orR() && (state === s_idle) && !isEmpty
-  // TODO: need check if writebacked needed
-  val isEcall = deqUop.cf.exceptionVec(ecallM) ||
-    deqUop.cf.exceptionVec(ecallS) ||
-    deqUop.cf.exceptionVec(ecallU)
-  val isFlushPipe = (deqUop.ctrl.flushPipe && writebacked(deqPtr) && valid(deqPtr) && (state === s_idle) && !isEmpty)
+  val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
+  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
+  val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
+  val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
   io.redirect := DontCare
-  io.redirect.valid := intrEnable || exceptionEnable || isFlushPipe// TODO: add fence flush to flush the whole pipe
+  io.redirect.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)// TODO: add fence flush to flush the whole pipe
   io.redirect.bits.isException := intrEnable || exceptionEnable
   io.redirect.bits.isFlushPipe := isFlushPipe
   io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, trapTarget)
