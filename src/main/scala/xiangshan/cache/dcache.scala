@@ -16,11 +16,9 @@ case class DCacheParameters
     nSets: Int = 64,
     nWays: Int = 8,
     rowBits: Int = 64,
-    numDCacheBanks: Int = 2,
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
-    dataECCBytes: Int = 1,
     nMissEntries: Int = 1,
     nLoadMissEntries: Int = 1,
     nStoreMissEntries: Int = 1,
@@ -42,33 +40,8 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   val cacheParams = dcacheParameters
   val cfg = cacheParams
 
-  val numDCacheBanks = cfg.numDCacheBanks
-  // the width of inner CPU data interface
-  def wordBits = DataBits
-  def wordBytes = DataBytes
-  def wordOffBits = log2Up(wordBytes)
-  def beatBytes = cfg.blockBytes / cacheDataBeats
-  def beatWords = beatBytes / wordBytes
-  def beatOffBits = log2Up(beatBytes)
-  def idxMSB = untagBits-1
-  def idxLSB = blockOffBits
-  def offsetmsb = idxLSB-1
-  def offsetlsb = wordOffBits
-
-  def get_beat(addr: UInt) = addr(blockOffBits - 1, beatOffBits)
-  def get_tag(addr: UInt) = (addr >> untagBits).asUInt()
-  def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)
-  def get_block(addr: UInt) = addr >> blockOffBits
-  def get_block_addr(addr: UInt) = (addr >> blockOffBits) << blockOffBits
-
-  def rowWords = rowBits/wordBits
-  def doNarrowRead = DataBits * nWays % rowBits == 0
-  def eccBytes = cacheParams.dataECCBytes
-  val eccBits = cacheParams.dataECCBytes * 8
-  val encBits = cacheParams.dataCode.width(eccBits)
-  val encWordBits = encBits * (wordBits / eccBits)
-  def encDataBits = cacheParams.dataCode.width(wordBits) // NBDCache only
-  def encRowBits = encDataBits*rowWords
+  def encWordBits = cacheParams.dataCode.width(wordBits)
+  def encRowBits = encWordBits*rowWords
   def lrscCycles = LRSCCycles // ISA requires 16-insn LRSC sequences to succeed
   def lrscBackoff = 3 // disallow LRSC reacquisition briefly
   def blockProbeAfterGrantCycles = 8 // give the processor some time to issue a request after a grant
@@ -94,11 +67,10 @@ trait HasDCacheParameters extends HasL1CacheParameters {
   def reqIdWidth = 64
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
-  // To make things easier, now we assume:
-  // core_data_width(wordBits) == L1_basic_storage_unit_width(rowBits) ==
-  // outer_tilelink_interface_width(cacheDataBits)
-  require(rowBits == wordBits, s"rowBits($rowBits) != wordBits($wordBits)")
-  require(rowBits == cacheDataBits, s"rowBits($rowBits) != cacheDataBits($cacheDataBits)")
+  require(isPow2(nWays), s"nWays($nWays) must be pow2")
+  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
+  require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
+  // this is a VIPT L1 cache
   require(pgIdxBits >= untagBits, s"page aliasing problem: pgIdxBits($pgIdxBits) < untagBits($untagBits)")
 }
 
@@ -134,23 +106,23 @@ class L1MetaWriteReq extends L1MetaReadReq {
 }
 
 class L1DataReadReq extends DCacheBundle {
-  // you can choose which beat to read to save power
-  val rmask  = Bits(refillCycles.W)
+  // you can choose which bank to read to save power
+  val rmask  = Bits(blockRows.W)
   val way_en = Bits(nWays.W)
   val addr   = Bits(untagBits.W)
 }
 
 // Now, we can write a cache-block in a single cycle
 class L1DataWriteReq extends L1DataReadReq {
-  val wmask  = Vec(refillCycles, Bits(rowWords.W))
-  val data   = Vec(refillCycles, Bits(encRowBits.W))
+  val wmask  = Vec(blockRows, Bits(rowWords.W))
+  val data   = Vec(blockRows, Bits(encRowBits.W))
 }
 
 abstract class AbstractDataArray extends DCacheModule {
   val io = IO(new DCacheBundle {
     val read  = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1DataReadReq)))
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
-    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, Vec(refillCycles, Bits(encRowBits.W)))))
+    val resp  = Output(Vec(LoadPipelineWidth, Vec(nWays, Vec(blockRows, Bits(encRowBits.W)))))
     val nacks = Output(Vec(LoadPipelineWidth, Bool()))
   })
 
@@ -170,7 +142,7 @@ abstract class AbstractDataArray extends DCacheModule {
       XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
         io.write.bits.way_en, io.write.bits.addr)
 
-      (0 until refillCycles) map { r =>
+      (0 until blockRows) map { r =>
         XSDebug(s"cycle: $r data: %x wmask: %x\n",
           io.write.bits.data(r), io.write.bits.wmask(r))
       }
@@ -181,7 +153,7 @@ abstract class AbstractDataArray extends DCacheModule {
     (0 until LoadPipelineWidth) map { w =>
       XSDebug(s"DataArray ReadResp channel: $w\n")
       (0 until nWays) map { i =>
-        (0 until refillCycles) map { r =>
+        (0 until blockRows) map { r =>
           XSDebug(s"way: $i cycle: $r data: %x\n", io.resp(w)(i)(r))
         }
       }
@@ -215,11 +187,11 @@ class DuplicatedDataArray extends AbstractDataArray
     // block read in this case
     io.read(j).ready := !io.write.valid || raddr =/= waddr
     for (w <- 0 until nWays) {
-      for (r <- 0 until refillCycles) {
-        val array = SyncReadMem(nSets, Vec(rowWords, Bits(encDataBits.W)))
+      for (r <- 0 until blockRows) {
+        val array = SyncReadMem(nSets, Vec(rowWords, Bits(encWordBits.W)))
         // data write
         when (io.write.bits.way_en(w) && io.write.valid) {
-          val data = VecInit((0 until rowWords) map (i => io.write.bits.data(r)(encDataBits*(i+1)-1,encDataBits*i)))
+          val data = VecInit((0 until rowWords) map (i => io.write.bits.data(r)(encWordBits*(i+1)-1,encWordBits*i)))
           array.write(waddr, data, io.write.bits.wmask(r).asBools)
         }
         // data read
@@ -299,13 +271,36 @@ class DuplicatedMetaArray extends DCacheModule {
     meta(w).io.write <> io.write
     meta(w).io.read  <> io.read(w)
     io.resp(w) <> meta(w).io.resp
-//    meta(w).io.resp  <> io.resp(w)
+  }
+
+  def dumpRead() = {
+    (0 until LoadPipelineWidth) map { w =>
+      when (io.read(w).fire()) {
+        XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
+          io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
+      }
+    }
+  }
+
+  def dumpWrite() = {
+    when (io.write.fire()) {
+      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
+        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+    }
+  }
+
+  def dumpResp() = {
+    (0 until LoadPipelineWidth) map { w =>
+      (0 until nWays) map { i =>
+        XSDebug(s"MetaArray Resp: channel: $w way: $i tag: %x coh: %x\n",
+          io.resp(w)(i).tag, io.resp(w)(i).coh.state)
+      }
+    }
   }
 
   def dump() = {
-    (0 until LoadPipelineWidth) map { w =>
-      XSDebug(s"MetaArray $w\n")
-      meta(w).dump
-    }
+    dumpRead
+    dumpWrite
+    dumpResp
   }
 }

@@ -89,6 +89,7 @@ Emulator::Emulator(int argc, const char *argv[]):
 
   init_difftest();
 
+#if VM_TRACE == 1
   enable_waveform = args.enable_waveform;
   if (enable_waveform) {
     Verilated::traceEverOn(true);	// Verilator must compute traced signals
@@ -97,6 +98,9 @@ Emulator::Emulator(int argc, const char *argv[]):
     time_t now = time(NULL);
     tfp->open(waveform_filename(now));	// Open the dump file
   }
+#else
+  enable_waveform = false;
+#endif
 
   // init core
   reset_ncycles(10);
@@ -135,6 +139,16 @@ inline void Emulator::read_emu_regs(uint64_t *r) {
   r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest_sepc;
   r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest_mcause;
   r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest_scause;
+  // r[DIFFTEST_MTVAL  ] = dut_ptr->io_difftest_mtval;
+  // r[DIFFTEST_STVAL  ] = dut_ptr->io_difftest_stval;
+  r[DIFFTEST_SATP   ] = dut_ptr->io_difftest_satp;
+  r[DIFFTEST_MIP    ] = dut_ptr->io_difftest_mip;
+  r[DIFFTEST_MIE    ] = dut_ptr->io_difftest_mie;
+  r[DIFFTEST_MSCRATCH]= dut_ptr->io_difftest_mscratch;
+  r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest_sscratch;
+  r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest_mideleg;
+  r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest_medeleg;
+  r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
 }
 
 inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst) {
@@ -167,6 +181,7 @@ inline void Emulator::single_cycle() {
   dut_ptr->clock = 1;
   dut_ptr->eval();
 
+#if VM_TRACE == 1
   if (enable_waveform) {
     uint64_t cycle = dut_ptr->io_trap_cycleCnt;
     uint64_t begin = dut_ptr->io_logCtrl_log_begin;
@@ -174,6 +189,7 @@ inline void Emulator::single_cycle() {
     bool in_range = (begin <= cycle) && (cycle <= end);
     if (in_range) { tfp->dump(cycle); }
   }
+#endif
 
   if (dut_ptr->io_uart_out_valid) {
     printf("%c", dut_ptr->io_uart_out_ch);
@@ -193,7 +209,7 @@ uint64_t Emulator::execute(uint64_t n) {
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
   uint64_t lastcommit = n;
-  const int stuck_limit = 500;
+  const int stuck_limit = 2000;
 
   uint32_t wdst[DIFFTEST_WIDTH];
   uint64_t wdata[DIFFTEST_WIDTH];
@@ -242,6 +258,8 @@ uint64_t Emulator::execute(uint64_t n) {
       diff.intrNO = dut_ptr->io_difftest_intrNO;
       diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 
+      diff.sync.scFailed = dut_ptr->io_difftest_scFailed;
+
       if (difftest_step(&diff)) {
         trapCode = STATE_ABORT;
       }
@@ -261,7 +279,9 @@ uint64_t Emulator::execute(uint64_t n) {
     }
   }
 
+#if VM_TRACE == 1
   if (enable_waveform) tfp->close();
+#endif
   display_trapinfo();
   return cycles;
 }

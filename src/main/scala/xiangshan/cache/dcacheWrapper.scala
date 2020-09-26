@@ -3,9 +3,10 @@ package xiangshan.cache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan._
+import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
-import xiangshan.MicroOp
 
 // Meta data for dcache requests
 // anything that should go with reqs and resps goes here
@@ -72,13 +73,11 @@ class DCacheToLsuIO extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsroq = Flipped(new DCacheLoadIO)  // lsroq load/store
   val store = Flipped(new DCacheStoreIO) // for sbuffer
-  val misc  = Flipped(new DCacheLoadIO)  // misc reqs
+  val atomics  = Flipped(new DCacheLoadIO)  // atomics reqs
 }
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
-  // TODO: remove ptw port, it directly connect to L2
-  val ptw = Flipped(new DCacheLoadIO)
 }
 
 
@@ -98,26 +97,29 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 }
 
 
-class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters {
+class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParameters with HasXSLog {
 
   val io = IO(new DCacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
+  require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
   //----------------------------------------
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
   val metaArray = Module(new DuplicatedMetaArray)
+  dataArray.dump()
+  metaArray.dump()
 
 
   //----------------------------------------
   // core modules
   val ldu = Seq.fill(LoadPipelineWidth) { Module(new LoadPipe) }
   val stu = Module(new StorePipe)
-  val misc = Module(new MiscPipe)
+  val atomics = Module(new AtomicsPipe)
   val loadMissQueue = Module(new LoadMissQueue)
   val storeMissQueue = Module(new StoreMissQueue)
-  val miscMissQueue = Module(new MiscMissQueue)
+  val atomicsMissQueue = Module(new AtomicsMissQueue)
   val missQueue = Module(new MissQueue(edge))
   val wb = Module(new WritebackUnit(edge))
   val prober = Module(new ProbeUnit(edge))
@@ -143,7 +145,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val ProberMetaReadPort = 1
   val StorePipeMetaReadPort = 2
   val LoadPipeMetaReadPort = 3
-  val MiscPipeMetaReadPort = 4
+  val AtomicsPipeMetaReadPort = 4
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
@@ -151,7 +153,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   metaReadArb.io.in(ProberMetaReadPort)       <> prober.io.meta_read
   metaReadArb.io.in(StorePipeMetaReadPort)    <> stu.io.meta_read
   metaReadArb.io.in(LoadPipeMetaReadPort)     <> ldu(0).io.meta_read
-  metaReadArb.io.in(MiscPipeMetaReadPort)     <> misc.io.meta_read
+  metaReadArb.io.in(AtomicsPipeMetaReadPort)  <> atomics.io.meta_read
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
@@ -159,7 +161,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   prober.io.meta_resp    <>  metaArray.io.resp(0)
   stu.io.meta_resp       <>  metaArray.io.resp(0)
   ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
-  misc.io.meta_resp      <>  metaArray.io.resp(0)
+  atomics.io.meta_resp      <>  metaArray.io.resp(0)
 
   for (w <- 1 until LoadPipelineWidth) {
     metaArray.io.read(w) <> ldu(w).io.meta_read
@@ -170,14 +172,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // data array
   val DataWritePortCount = 3
   val StorePipeDataWritePort = 0
-  val MissQueueDataWritePort = 1
-  val MiscPipeDataWritePort = 2
+  val AtomicsPipeDataWritePort = 1
+  val MissQueueDataWritePort = 2
 
   val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
 
   dataWriteArb.io.in(StorePipeDataWritePort) <> stu.io.data_write
   dataWriteArb.io.in(MissQueueDataWritePort) <> missQueue.io.refill
-  dataWriteArb.io.in(MiscPipeDataWritePort)  <> misc.io.data_write
+  dataWriteArb.io.in(AtomicsPipeDataWritePort)  <> atomics.io.data_write
 
   dataArray.io.write <> dataWriteArb.io.out
 
@@ -187,19 +189,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val WritebackDataReadPort = 0
   val StorePipeDataReadPort = 1
   val LoadPipeDataReadPort = 2
-  val MiscPipeDataReadPort = 3
+  val AtomicsPipeDataReadPort = 3
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
   dataReadArb.io.in(WritebackDataReadPort) <> wb.io.data_req
   dataReadArb.io.in(StorePipeDataReadPort) <> stu.io.data_read
-  dataReadArb.io.in(MiscPipeDataReadPort)  <> misc.io.data_read
+  dataReadArb.io.in(AtomicsPipeDataReadPort)  <> atomics.io.data_read
   dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(0).io.data_read
 
   dataArray.io.read(0) <> dataReadArb.io.out
   dataArray.io.resp(0) <> wb.io.data_resp
   dataArray.io.resp(0) <> stu.io.data_resp
-  dataArray.io.resp(0) <> misc.io.data_resp
+  dataArray.io.resp(0) <> atomics.io.data_resp
   dataArray.io.resp(0) <> ldu(0).io.data_resp
 
   for (w <- 1 until LoadPipelineWidth) {
@@ -218,9 +220,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   loadArb.io.in(1) <> lsu_0.req
   assert(!(lsu_0.req.fire() && lsu_0.req.bits.meta.replay), "LSU should not replay requests")
   assert(!(loadReplay.req.fire() && !loadReplay.req.bits.meta.replay), "LoadMissQueue should replay requests")
-  val ldu_0_block = block_load(loadArb.io.out.bits.addr)
-  // do not block replayed reqs
-  block_decoupled(loadArb.io.out, ldu_0.req, ldu_0_block && !loadArb.io.out.bits.meta.replay)
+  val ldu_0_nack = nack_load(loadArb.io.out.bits.addr)
+  // do not nack replayed reqs
+  ldu_0.req <> loadArb.io.out
+  ldu(0).io.nack := ldu_0_nack && !loadArb.io.out.bits.meta.replay
+  XSDebug(ldu_0_nack, "LoadUnit 0 nacked\n")
 
   ldu_0.resp.ready := false.B
 
@@ -242,8 +246,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   ldu_0.s1_kill := lsu_0.s1_kill
 
   for (w <- 1 until LoadPipelineWidth) {
-    val load_w_block = block_load(io.lsu.load(w).req.bits.addr)
-    block_decoupled(io.lsu.load(w).req, ldu(w).io.lsu.req, load_w_block)
+    val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
+    ldu(w).io.lsu.req <> io.lsu.load(w).req
+    ldu(w).io.nack := load_w_nack
+    XSDebug(load_w_nack, s"LoadUnit $w nacked\n")
+
     ldu(w).io.lsu.resp <> io.lsu.load(w).resp
     ldu(w).io.lsu.s1_kill <> io.lsu.load(w).s1_kill
     assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.replay), "LSU should not replay requests")
@@ -275,81 +282,41 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val store_block = block_store(storeMissQueue.io.replay.req.bits.addr)
   block_decoupled(storeMissQueue.io.replay.req, stu.io.lsu.req, store_block && !storeMissQueue.io.replay.req.bits.meta.replay)
   storeMissQueue.io.replay.resp <> stu.io.lsu.resp
+  XSDebug(store_block, "StorePipe blocked\n")
 
   //----------------------------------------
-  // misc pipe
-  miscMissQueue.io.replay <> misc.io.lsu
-  val miscClientIdWidth = 1
-  val lsuMiscClientId = 0.U(miscClientIdWidth.W)
-  val ptwMiscClientId = 1.U(miscClientIdWidth.W)
-  val miscClientIdMSB = reqIdWidth - 1
-  val miscClientIdLSB = reqIdWidth - miscClientIdWidth
+  // atomics pipe
+  atomics.io.wb_invalidate_lrsc := wb.io.inflight_addr
+  atomicsMissQueue.io.lsu <> io.lsu.atomics
+  atomicsMissQueue.io.replay <> atomics.io.lsu
 
-  // Request
-  val miscReqArb = Module(new Arbiter(new DCacheWordReq, 2))
+  val atomics_block = block_atomics(atomicsMissQueue.io.replay.req.bits.addr)
+  block_decoupled(atomicsMissQueue.io.replay.req, atomics.io.lsu.req, atomics_block && !atomicsMissQueue.io.replay.req.bits.meta.replay)
+  XSDebug(atomics_block, "AtomicsPipe blocked\n")
 
-  val miscReq    = miscMissQueue.io.lsu.req
-  val lsuMiscReq = io.lsu.misc.req
-  val ptwMiscReq = io.ptw.req
+  // when atomics are in flight, there should be no load or store in flight
+  // so atomics and store should not show up at the same time
+  val atomics_inflight = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid)).reduce(_||_)
+  val store_inflight = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid)).reduce(_||_)
+  assert(!(atomics_inflight && store_inflight))
 
-  miscReqArb.io.in(0).valid        := lsuMiscReq.valid
-  lsuMiscReq.ready                 := miscReqArb.io.in(0).ready
-  miscReqArb.io.in(0).bits         := lsuMiscReq.bits
-  miscReqArb.io.in(0).bits.meta.id := Cat(lsuMiscClientId,
-    lsuMiscReq.bits.meta.id(miscClientIdLSB - 1, 0))
-
-  miscReqArb.io.in(1).valid        := ptwMiscReq.valid
-  ptwMiscReq.ready                 := miscReqArb.io.in(1).ready
-  miscReqArb.io.in(1).bits         := ptwMiscReq.bits
-  miscReqArb.io.in(1).bits.meta.id := Cat(ptwMiscClientId,
-    ptwMiscReq.bits.meta.id(miscClientIdLSB - 1, 0))
-
-  val misc_block = block_misc(miscReqArb.io.out.bits.addr)
-  block_decoupled(miscReqArb.io.out, miscReq, misc_block)
-
-  // Response
-  val miscResp    = miscMissQueue.io.lsu.resp
-  val lsuMiscResp = io.lsu.misc.resp
-  val ptwMiscResp = io.ptw.resp
-
-  miscResp.ready  := false.B
-
-  val miscClientId = miscResp.bits.meta.id(miscClientIdMSB, miscClientIdLSB)
-
-  val isLsuMiscResp  = miscClientId === lsuMiscClientId
-  lsuMiscResp.valid := miscResp.valid && isLsuMiscResp
-  lsuMiscResp.bits  := miscResp.bits
-  lsuMiscResp.bits.meta.id := miscResp.bits.meta.id(miscClientIdLSB - 1, 0)
-  when (lsuMiscResp.valid) {
-    miscResp.ready := lsuMiscResp.ready
-  }
-
-  val isPTWMiscResp  = miscClientId === ptwMiscClientId
-  ptwMiscResp.valid := miscResp.valid && isPTWMiscResp
-  ptwMiscResp.bits  := miscResp.bits
-  ptwMiscResp.bits.meta.id := miscResp.bits.meta.id(miscClientIdLSB - 1, 0)
-  when (ptwMiscResp.valid) {
-    miscResp.ready := ptwMiscResp.ready
-  }
 
   // some other stuff
-  miscMissQueue.io.lsu.s1_kill := false.B
-
-  assert(!(miscReq.fire() && miscReq.bits.meta.replay),
-    "Misc does not support request replay")
-  assert(!(miscReq.fire() && miscReq.bits.meta.mmio),
+  val atomicsReq = io.lsu.atomics.req
+  assert(!(atomicsReq.fire() && atomicsReq.bits.meta.replay),
+    "Atomics does not support request replay")
+  assert(!(atomicsReq.fire() && atomicsReq.bits.meta.mmio),
     "MMIO requests should not go to cache")
-  assert(!(miscReq.fire() && miscReq.bits.meta.tlb_miss),
+  assert(!(atomicsReq.fire() && atomicsReq.bits.meta.tlb_miss),
     "TLB missed requests should not go to cache")
-  assert(!io.lsu.misc.s1_kill, "Lsroq should never use s1 kill on misc")
-  assert(!io.ptw.s1_kill, "Lsroq should never use s1 kill on misc") // TODO: ptw wanna use s1_kill
+  assert(!io.lsu.atomics.s1_kill, "Lsroq should never use s1 kill on atomics")
 
 
   //----------------------------------------
   // miss queue
   val loadMissQueueClientId  = 0.U(clientIdWidth.W)
   val storeMissQueueClientId = 1.U(clientIdWidth.W)
-  val miscMissQueueClientId  = 2.U(clientIdWidth.W)
+  val atomicsMissQueueClientId  = 2.U(clientIdWidth.W)
 
   // Request
   val missReqArb = Module(new Arbiter(new MissReq, 3))
@@ -357,7 +324,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missReq      = missQueue.io.req
   val loadMissReq  = loadMissQueue.io.miss_req
   val storeMissReq = storeMissQueue.io.miss_req
-  val miscMissReq  = miscMissQueue.io.miss_req
+  val atomicsMissReq  = atomicsMissQueue.io.miss_req
 
   missReqArb.io.in(0).valid          := loadMissReq.valid
   loadMissReq.ready                  := missReqArb.io.in(0).ready
@@ -371,20 +338,21 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missReqArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
     storeMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
-  missReqArb.io.in(2).valid          := miscMissReq.valid
-  miscMissReq.ready                  := missReqArb.io.in(2).ready
-  missReqArb.io.in(2).bits           := miscMissReq.bits
-  missReqArb.io.in(2).bits.client_id := Cat(miscMissQueueClientId,
-    miscMissReq.bits.client_id(entryIdMSB, entryIdLSB))
+  missReqArb.io.in(2).valid          := atomicsMissReq.valid
+  atomicsMissReq.ready                  := missReqArb.io.in(2).ready
+  missReqArb.io.in(2).bits           := atomicsMissReq.bits
+  missReqArb.io.in(2).bits.client_id := Cat(atomicsMissQueueClientId,
+    atomicsMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
   val miss_block = block_miss(missReqArb.io.out.bits.addr)
   block_decoupled(missReqArb.io.out, missReq, miss_block)
+  XSDebug(miss_block, "MissQueue blocked\n")
 
   // Response
   val missResp        = missQueue.io.resp
   val loadMissResp    = loadMissQueue.io.miss_resp
   val storeMissResp   = storeMissQueue.io.miss_resp
-  val miscMissResp    = miscMissQueue.io.miss_resp
+  val atomicsMissResp    = atomicsMissQueue.io.miss_resp
 
   val clientId = missResp.bits.client_id(clientIdMSB, clientIdLSB)
 
@@ -398,16 +366,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   storeMissResp.bits.entry_id := missResp.bits.entry_id
   storeMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
-  val isMiscMissResp = clientId === miscMissQueueClientId
-  miscMissResp.valid := missResp.valid && isMiscMissResp
-  miscMissResp.bits.entry_id := missResp.bits.entry_id
-  miscMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
+  val isAtomicsMissResp = clientId === atomicsMissQueueClientId
+  atomicsMissResp.valid := missResp.valid && isAtomicsMissResp
+  atomicsMissResp.bits.entry_id := missResp.bits.entry_id
+  atomicsMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   // Finish
   val missFinish        = missQueue.io.finish
   val loadMissFinish    = loadMissQueue.io.miss_finish
   val storeMissFinish   = storeMissQueue.io.miss_finish
-  val miscMissFinish    = miscMissQueue.io.miss_finish
+  val atomicsMissFinish    = atomicsMissQueue.io.miss_finish
 
   val missFinishArb = Module(new Arbiter(new MissFinish, 3))
   missFinishArb.io.in(0).valid          := loadMissFinish.valid
@@ -422,11 +390,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missFinishArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
     storeMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
 
-  missFinishArb.io.in(2).valid          := miscMissFinish.valid
-  miscMissFinish.ready                  := missFinishArb.io.in(2).ready
-  missFinishArb.io.in(2).bits.entry_id  := miscMissFinish.bits.entry_id
-  missFinishArb.io.in(2).bits.client_id := Cat(miscMissQueueClientId,
-    miscMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
+  missFinishArb.io.in(2).valid          := atomicsMissFinish.valid
+  atomicsMissFinish.ready                  := missFinishArb.io.in(2).ready
+  missFinishArb.io.in(2).bits.entry_id  := atomicsMissFinish.bits.entry_id
+  missFinishArb.io.in(2).bits.client_id := Cat(atomicsMissQueueClientId,
+    atomicsMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
 
   missFinish                            <> missFinishArb.io.out
 
@@ -447,8 +415,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // prober
-  // bus.b <> prober.io.req
-  prober.io.req := DontCare
+  prober.io.block := block_probe(prober.io.inflight_req_block_addr.bits)
+  prober.io.req <> bus.b
+  XSDebug(prober.io.block, "prober blocked\n")
 
   //----------------------------------------
   // wb
@@ -464,48 +433,63 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
-  def block_load(addr: UInt) = {
+  def nack_load(addr: UInt) = {
     val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val store_addr_match = store_addr_matches.reduce(_||_)
 
-    val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val misc_addr_match = misc_addr_matches.reduce(_||_)
+    val atomics_addr_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val atomics_addr_match = atomics_addr_matches.reduce(_||_)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_addr_match || misc_addr_match || miss_idx_match
+    store_addr_match || atomics_addr_match || miss_idx_match
   }
 
   def block_store(addr: UInt) = {
-    val misc_addr_matches = VecInit(misc.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val misc_addr_match = misc_addr_matches.reduce(_||_)
+    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    misc_addr_match || miss_idx_match
+    prober_addr_match || miss_idx_match
   }
 
-  def block_misc(addr: UInt) = {
-    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val store_addr_match = store_addr_matches.reduce(_||_)
+  def block_atomics(addr: UInt) = {
+    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    store_addr_match || miss_idx_match
+    prober_addr_match || miss_idx_match
   }
 
   def block_miss(addr: UInt) = {
     val store_idx_matches = VecInit(stu.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val store_idx_match = store_idx_matches.reduce(_||_)
 
-    val misc_idx_matches = VecInit(misc.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
-    val misc_idx_match = misc_idx_matches.reduce(_||_)
+    val atomics_idx_matches = VecInit(atomics.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val atomics_idx_match = atomics_idx_matches.reduce(_||_)
+
+    val prober_idx_match = prober.io.inflight_req_idx.valid && prober.io.inflight_req_idx.bits === get_idx(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_idx_match || misc_idx_match || miss_idx_match
+    store_idx_match || atomics_idx_match || prober_idx_match || miss_idx_match
+  }
+
+  def block_probe(addr: UInt) = {
+    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val store_addr_match = store_addr_matches.reduce(_||_)
+
+    val atomics_addr_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
+    val atomics_addr_match = atomics_addr_matches.reduce(_||_)
+
+    val lrsc_addr_match = atomics.io.block_probe_addr.valid && atomics.io.block_probe_addr.bits === get_block_addr(addr)
+
+    val miss_idx_matches = VecInit(missQueue.io.block_probe_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
+    val miss_idx_match = miss_idx_matches.reduce(_||_)
+
+    store_addr_match || atomics_addr_match || lrsc_addr_match || miss_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {

@@ -8,7 +8,6 @@ import xiangshan.cache._
 import utils.ParallelAND
 import utils.TrueLRU
 
-
 class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
   val lsroqId = UInt(log2Up(LsroqSize).W)
@@ -44,12 +43,21 @@ class UpdateInfo extends XSBundle with HasSBufferConst {
   val isIgnored: Bool = Bool()
 }
 
+class SbufferFlushBundle extends Bundle {
+  val valid = Output(Bool())
+  val empty = Input(Bool())
+}
+
 // Store buffer for XiangShan Out of Order LSU
 class Sbuffer extends XSModule with HasSBufferConst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq )))
     val dcache = new DCacheStoreIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val flush = new Bundle {
+      val valid = Input(Bool())
+      val empty = Output(Bool())
+    } // sbuffer flush
   })
 
   val cache: Vec[SBufferCacheLine] = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SBufferCacheLine))))
@@ -77,6 +85,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
   }
 
 
+  val lru_accessed = WireInit(VecInit(Seq.fill(StorePipelineWidth)(false.B)))
 
   // Get retired store from lsroq
   //--------------------------------------------------------------------------------------------------------------------
@@ -213,6 +222,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
+        lru_accessed(storeIdx) := true.B
         // update mask and data
 //        cache(updateInfo(storeIdx).idx).data := updateInfo(storeIdx).newData
         cache(updateInfo(storeIdx).idx).data.zipWithIndex.foreach { case (int, i) =>
@@ -233,6 +243,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // clear lruCnt
 //        cache(updateInfo(storeIdx).idx).lruCnt := 0.U
         lru.access(updateInfo(storeIdx).idx)
+        lru_accessed(storeIdx) := true.B
         // set valid
         cache(updateInfo(storeIdx).idx).valid := true.B
         // set tag
@@ -256,8 +267,19 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   // Write back to d-cache
   //--------------------------------------------------------------------------------------------------------------------
+
+  val WriteBackPortCount = 2
+  val FlushPort = 0  // flush has higher priority
+  val EvictionPort = 1
+
+  val wb_arb = Module(new Arbiter(UInt(), WriteBackPortCount))
+  val wb_resp = WireInit(false.B)
+
   val waitingCacheLine: SBufferCacheLine = RegInit(0.U.asTypeOf(new SBufferCacheLine))
 
+
+  // LRU eviction
+  //-------------------------------------------------
   val validCnt: UInt = Wire(UInt((sBufferIndexWidth + 1).W))
   validCnt := PopCount((0 until StoreBufferSize).map(i => cache(i).valid))
   XSInfo("[ %d ] lines valid this cycle\n", validCnt)
@@ -265,6 +287,77 @@ class Sbuffer extends XSModule with HasSBufferConst {
   val oldestLineIdx: UInt = Wire(UInt(sBufferIndexWidth.W))
   oldestLineIdx := lru.way
   XSInfo("Least recently used #[ %d ] line\n", oldestLineIdx)
+
+
+  // eviction state machine
+  val e_wb_req :: e_wb_resp :: Nil = Enum(2)
+  val eviction_state = RegInit(e_wb_req)
+
+  wb_arb.io.in(EvictionPort).valid := false.B
+  wb_arb.io.in(EvictionPort).bits  := DontCare
+
+  when (eviction_state === e_wb_req) {
+    wb_arb.io.in(EvictionPort).valid := validCnt === StoreBufferSize.U && !waitingCacheLine.valid
+    wb_arb.io.in(EvictionPort).bits  := oldestLineIdx
+    when (wb_arb.io.in(EvictionPort).fire()) {
+      eviction_state := e_wb_resp
+    }
+  }
+
+  val lru_miss = WireInit(false.B)
+  when (eviction_state === e_wb_resp) {
+    when (wb_resp) {
+      lru.miss
+      lru_miss := true.B
+      eviction_state := e_wb_req
+    }
+  }
+
+
+  // Sbuffer flush
+  //-------------------------------------------------
+  // flush state machine
+  val f_idle :: f_req :: f_wait_resp :: Nil = Enum(3)
+  val f_state = RegInit(f_idle)
+  val flush = io.flush
+  // empty means there are no valid cache line in sbuffer
+  // but there may exist cache line being flushed to dcache and not finished
+  val empty = validCnt === 0.U
+
+  // sbuffer is flushed empty only when:
+  // 1. there no valid line in sbuffer and
+  // 2. cache line waiting to be flushed are flushed out
+  flush.empty := empty && !waitingCacheLine.valid
+
+  wb_arb.io.in(FlushPort).valid := f_state === f_req
+  wb_arb.io.in(FlushPort).bits := PriorityEncoder((0 until StoreBufferSize).map(i => cache(i).valid))
+
+  // we only expect flush signal in f_idle state
+  assert(!(flush.valid && f_state =/= f_idle))
+
+  switch (f_state) {
+    is (f_idle) {
+      when (flush.valid && !empty) { f_state := f_req } 
+    }
+    is (f_req) {
+      assert(!empty, "when flush, should not be empty")
+      when (wb_arb.io.in(FlushPort).fire()) { f_state := f_wait_resp }
+    }
+    is (f_wait_resp) { when (wb_resp) {
+      when (empty) { f_state := f_idle }
+      .otherwise { f_state := f_req } }
+    }
+  }
+
+  XSDebug(flush.valid, p"Reveive flush. f_state:${f_state} state:${state}\n")
+  XSDebug(f_state =/= f_idle || flush.valid, p"f_state:${f_state} idx:${wb_arb.io.in(FlushPort).bits} In(${wb_arb.io.in(FlushPort).valid} ${wb_arb.io.in(FlushPort).ready}) wb_resp:${wb_resp}\n")
+
+  // write back unit
+  // ---------------------------------------------------------------
+  val s_invalid :: s_dcache_req :: s_dcache_resp :: Nil = Enum(3)
+  val state = RegInit(s_invalid)
+
+  val wb_idx = Reg(UInt())
 
   val dcacheData = Wire(UInt(io.dcache.req.bits.data.getWidth.W))
   val dcacheMask = Wire(UInt(io.dcache.req.bits.mask.getWidth.W))
@@ -277,48 +370,69 @@ class Sbuffer extends XSModule with HasSBufferConst {
   io.dcache.req.bits.mask := dcacheMask
   io.dcache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.dcache.req.bits.meta := DontCare // NOT USED
-  io.dcache.resp.ready := waitingCacheLine.valid
+  io.dcache.resp.ready := false.B
 
+  wb_arb.io.out.ready := false.B
 
-  when (validCnt === StoreBufferSize.U && !waitingCacheLine.valid) {
-    // assert valid and send data + mask + addr(ends with 000b) to d-cache
-    io.dcache.req.bits.addr := getAddr(cache(oldestLineIdx).tag)
-
-    when (!busy(oldestLineIdx, StorePipelineWidth)) {
-      dcacheData := cache(oldestLineIdx).data.asUInt()
-      dcacheMask := cache(oldestLineIdx).mask.asUInt()
-
-      XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n", oldestLineIdx, io.dcache.req.bits.addr, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
-    } .otherwise {
-      XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
+  // wbu state machine
+  when (state === s_invalid) {
+    wb_arb.io.out.ready := true.B
+    when (wb_arb.io.out.fire()) {
+      assert(cache(wb_arb.io.out.bits).valid)
+      wb_idx := wb_arb.io.out.bits
+      state := s_dcache_req
     }
+  }
 
+  when (state === s_dcache_req) {
+    // assert valid and send data + mask + addr(ends with 000b) to d-cache
+    io.dcache.req.valid := true.B
+    io.dcache.req.bits.addr := getAddr(cache(wb_idx).tag)
+
+    // prepare write data and write mask
+    // first, we get data from cache
+    dcacheData := cache(wb_idx).data.asUInt()
+    dcacheMask := cache(wb_idx).mask.asUInt()
+
+    // then, we tried to merge any updates
     for (i <- 0 until StorePipelineWidth) {
-      when (updateInfo(i).idx === oldestLineIdx && updateInfo(i).isUpdated && io.in(i).valid) {
+      // get data from updateInfo
+      when (updateInfo(i).idx === wb_idx && updateInfo(i).isUpdated && io.in(i).valid) {
         dcacheData := updateInfo(i).newData.asUInt()
         dcacheMask := updateInfo(i).newMask.asUInt()
       }
     }
 
-    io.dcache.req.valid := true.B
+    when(io.dcache.req.fire()) {
+      // save current req
+      waitingCacheLine := cache(wb_idx)
+      waitingCacheLine.data := dcacheData.asTypeOf(Vec(cacheMaskWidth, UInt(8.W)))
+      waitingCacheLine.mask := dcacheMask.asTypeOf(Vec(cacheMaskWidth, Bool()))
+      waitingCacheLine.valid := true.B
+
+      cache(wb_idx).valid := false.B
+
+      state := s_dcache_resp
+
+      assert(cache(wb_idx).valid, "sbuffer cache line not valid\n")
+      XSInfo("send req to dcache %x\n", wb_idx)
+      XSDebug("[New D-Cache Req] idx: %d, addr: %x, mask: %x, data: %x\n",
+        wb_idx, io.dcache.req.bits.addr, dcacheMask.asUInt(), dcacheData.asUInt())
+    }
   }
 
-  when(io.dcache.req.fire()){
-    // save current req
-    waitingCacheLine := cache(oldestLineIdx)
-    waitingCacheLine.data := dcacheData.asTypeOf(Vec(cacheMaskWidth, UInt(8.W)))
-    waitingCacheLine.mask := dcacheMask.asTypeOf(Vec(cacheMaskWidth, Bool()))
-    XSError(!cache(oldestLineIdx).valid, "!cache(oldestLineIdx).valid\n")
-    // waitingCacheLine.valid := true.B
+  when (state === s_dcache_resp) {
+    io.dcache.resp.ready := true.B
+    when(io.dcache.resp.fire()) {
+      waitingCacheLine.valid := false.B
+      wb_resp := true.B
+      state := s_invalid
+      XSInfo("recv resp from dcache. wb tag %x mask %x data %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
+    }
 
-    cache(oldestLineIdx).valid := false.B
-    XSInfo("send req to dcache %x\n", oldestLineIdx)
-  }
-
-  when(io.dcache.resp.fire()) {
-    waitingCacheLine.valid := false.B
-    lru.miss
-    XSInfo("recv resp from dcache. wb tag %x mask %x data %x\n", waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
+    // the inflight req
+    XSDebug("[Pending Write Back] tag: %x, mask: %x, data: %x\n",
+      waitingCacheLine.tag, waitingCacheLine.mask.asUInt(), waitingCacheLine.data.asUInt())
   }
 
 

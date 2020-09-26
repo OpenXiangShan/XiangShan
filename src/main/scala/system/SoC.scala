@@ -67,9 +67,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       val meip = Input(Bool())
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
-    val mtipSync = WireInit(0.U(1.W)) //clint.module.mtip
+    val mtipSync = clint.module.io.mtip
+    val msipSync = clint.module.io.msip
     val meipSync = RegNext(RegNext(io.meip))
     ExcitingUtils.addSource(mtipSync, "mtip")
+    ExcitingUtils.addSource(msipSync, "msip")
     ExcitingUtils.addSource(meipSync, "meip")
   }
 

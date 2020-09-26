@@ -10,15 +10,26 @@ class LoadPipe extends DCacheModule
   val io = IO(new DCacheBundle{
     val lsu       = Flipped(new DCacheLoadIO)
     val data_read = DecoupledIO(new L1DataReadReq)
-    val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val data_resp = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val meta_read = DecoupledIO(new L1MetaReadReq)
     val meta_resp = Input(Vec(nWays, new L1Metadata))
+
+    // req got nacked in stage 0?
+    val nack      = Input(Bool())
   })
 
   // LSU requests
-  io.lsu.req.ready := io.meta_read.ready && io.data_read.ready
-  io.meta_read.valid := io.lsu.req.valid
-  io.data_read.valid := io.lsu.req.valid
+  // replayed req should never be nacked
+  assert(!(io.lsu.req.valid && io.lsu.req.bits.meta.replay && io.nack))
+
+  // it you got nacked, you can directly passdown
+  val not_nacked_ready = io.meta_read.ready && io.data_read.ready
+  val nacked_ready     = true.B
+
+  // ready can wait for valid
+  io.lsu.req.ready := io.lsu.req.valid && ((!io.nack && not_nacked_ready) || (io.nack && nacked_ready))
+  io.meta_read.valid := io.lsu.req.valid && !io.nack
+  io.data_read.valid := io.lsu.req.valid && !io.nack
 
   val meta_read = io.meta_read.bits
   val data_read = io.data_read.bits
@@ -30,8 +41,8 @@ class LoadPipe extends DCacheModule
   // Data read for new requests
   data_read.addr   := io.lsu.req.bits.addr
   data_read.way_en := ~0.U(nWays.W)
-  // only needs to read the specific beat
-  data_read.rmask  := UIntToOH(get_beat(io.lsu.req.bits.addr))
+  // only needs to read the specific row
+  data_read.rmask  := UIntToOH(get_row(io.lsu.req.bits.addr))
 
   // Pipeline
   // stage 0
@@ -46,7 +57,7 @@ class LoadPipe extends DCacheModule
   val s1_req = RegNext(s0_req)
   val s1_valid = RegNext(s0_valid, init = false.B)
   val s1_addr = s1_req.addr
-  val s1_nack = false.B 
+  val s1_nack = RegNext(io.nack)
 
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
 
@@ -85,7 +96,7 @@ class LoadPipe extends DCacheModule
   val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
   val data_resp = io.data_resp
   for (w <- 0 until nWays) {
-    s2_data(w) := data_resp(w)(get_beat(s2_req.addr))
+    s2_data(w) := data_resp(w)(get_row(s2_req.addr))
   }
 
   val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
@@ -108,11 +119,19 @@ class LoadPipe extends DCacheModule
   dump_pipeline_valids("LoadPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
   // load data gen
-  val s2_data_word = s2_data_muxed >> Cat(s2_word_idx, 0.U(log2Ceil(wordBits).W))
+  val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
+  for (w <- 0 until rowWords) {
+    s2_data_words(w) := s2_data_muxed(encWordBits * (w + 1) - 1, encWordBits * w)
+  }
+  val s2_data_word =  s2_data_words(s2_word_idx)
+  val s2_decoded = cacheParams.dataCode.decode(s2_data_word)
+  val s2_data_word_decoded = s2_decoded.corrected
+  assert(!(s2_valid && s2_hit && !s2_nack && s2_decoded.uncorrectable))
+
 
   val resp = Wire(ValidIO(new DCacheResp))
   resp.valid     := s2_valid
-  resp.bits.data := s2_data_word
+  resp.bits.data := s2_data_word_decoded
   resp.bits.meta := s2_req.meta
   resp.bits.miss := !s2_hit
   resp.bits.nack := s2_nack

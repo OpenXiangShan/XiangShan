@@ -34,7 +34,7 @@ class BrqPtr extends XSBundle {
   def needBrFlush(redirectTag: BrqPtr): Bool = this < redirectTag
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && (redirect.bits.isException || needBrFlush(redirect.bits.brTag))
+    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || needBrFlush(redirect.bits.brTag)) //TODO: discuss if (isException || isFlushPipe) need here?
   }
 
   override def toPrintable: Printable = p"f:$flag v:$value"
@@ -242,7 +242,7 @@ class Brq extends XSModule {
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
       when(
         (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
-          (s.isWb && brQueue(i).exuOut.uop.needFlush(io.memRedirect))
+          (!s.isIdle && brQueue(i).exuOut.uop.needFlush(io.memRedirect))
       ){
         s := s_idle
       }

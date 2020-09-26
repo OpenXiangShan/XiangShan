@@ -21,9 +21,10 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     val req = Flipped(DecoupledIO(new WritebackReq(edge.bundle.sourceBits)))
     val resp = Output(Bool())
     val data_req = DecoupledIO(new L1DataReadReq)
-    val data_resp = Input(Vec(nWays, Vec(refillCycles, Bits(encRowBits.W))))
+    val data_resp = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val release = DecoupledIO(new TLBundleC(edge.bundle))
     val mem_grant = Input(Bool())
+    val inflight_addr = Output(Valid(UInt()))
   })
 
   val req = Reg(new WritebackReq(edge.bundle.sourceBits))
@@ -34,7 +35,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
 
   val (_, last_beat, all_beats_done, beat_count) = edge.count(io.release)
 
-  val wb_buffer = Reg(Vec(refillCycles, UInt(rowBits.W)))
+  val wb_buffer = Reg(Vec(refillCycles, UInt(beatBits.W)))
   val acked = RegInit(false.B)
 
   // assign default value to signals
@@ -46,6 +47,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
 
   io.release.valid   := false.B
   io.release.bits    := DontCare
+
+  io.inflight_addr.valid := state =/= s_invalid
+  io.inflight_addr.bits  := req.idx << blockOffBits
 
   XSDebug("state: %d\n", state)
 
@@ -67,7 +71,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     io.data_req.valid       := true.B
     io.data_req.bits.addr   := req.idx << blockOffBits
     io.data_req.bits.way_en := req.way_en
-    io.data_req.bits.rmask  := ~0.U(refillCycles.W)
+    io.data_req.bits.rmask  := ~0.U(blockRows.W)
 
     when (io.data_req.fire()) {
       state := s_data_read_resp
@@ -80,7 +84,19 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     when (data_array_ctr === (dataArrayLatency - 1).U) {
       val way_idx = OHToUInt(req.way_en)
       for (i <- 0 until refillCycles) {
-        wb_buffer(i) := io.data_resp(way_idx)(i)
+        wb_buffer(i) := Cat((0 until beatRows).reverse map { j =>
+          val idx = i * beatRows + j
+          val row = io.data_resp(way_idx)(idx)
+          // encode each word in this row
+          val row_decoded = Cat((0 until rowWords).reverse map { w =>
+            val data_word = row(encWordBits * (w + 1) - 1, encWordBits * w)
+            val decoded = cacheParams.dataCode.decode(data_word)
+            val data_word_decoded = decoded.corrected
+            assert(!decoded.uncorrectable)
+            data_word_decoded
+          })
+        row_decoded
+        })
       }
 
       state := s_active

@@ -18,14 +18,14 @@ import xstransforms.ShowPrintTransform
 class DiffTestIO extends XSBundle {
   val r = Output(Vec(64, UInt(XLEN.W)))
   val commit = Output(UInt(32.W))
-  val thisPC = Output(UInt(VAddrBits.W))
+  val thisPC = Output(UInt(XLEN.W))
   val thisINST = Output(UInt(32.W))
   val skip = Output(UInt(32.W))
   val wen = Output(UInt(32.W))
   val wdata = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val wdst = Output(Vec(CommitWidth, UInt(32.W))) // set difftest width to 6
-  val wpc = Output(Vec(CommitWidth, UInt(VAddrBits.W))) // set difftest width to 6
-  val isRVC = Output(Bool())
+  val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
+  val isRVC = Output(UInt(32.W))
   val intrNO = Output(UInt(64.W))
 
   val priviledgeMode = Output(UInt(2.W))
@@ -35,6 +35,17 @@ class DiffTestIO extends XSBundle {
   val sepc = Output(UInt(64.W))
   val mcause = Output(UInt(64.W))
   val scause = Output(UInt(64.W))
+
+  val satp = Output(UInt(64.W))
+  val mip = Output(UInt(64.W))
+  val mie = Output(UInt(64.W))
+  val mscratch = Output(UInt(64.W))
+  val sscratch = Output(UInt(64.W))
+  val mideleg = Output(UInt(64.W))
+  val medeleg = Output(UInt(64.W))
+
+  val scFailed = Output(Bool())
+  // val lrscAddr = Output(UInt(64.W))
 }
 
 class LogCtrlIO extends Bundle {
@@ -67,14 +78,12 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     AXI4UserYanker() :=
     TLToAXI4() :=
     TLBuffer(BufferParams.default) :=
-    TLFragmenter(8, 64, holdFirstDeny = true) :=
     DebugIdentityNode() :=
     soc.mem
 
   axiMMIO.axiBus :=
     AXI4UserYanker() :=
     TLToAXI4() :=
-    TLFragmenter(8, 8) :=
     soc.extDev
 
   lazy val module = new LazyModuleImp(this) {
@@ -107,6 +116,15 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.sepc, "difftestSepc")
     BoringUtils.addSink(difftest.mcause, "difftestMcause")
     BoringUtils.addSink(difftest.scause, "difftestScause")
+    BoringUtils.addSink(difftest.satp, "difftestSatp")
+    BoringUtils.addSink(difftest.mip, "difftestMip")
+    BoringUtils.addSink(difftest.mie, "difftestMie")
+    BoringUtils.addSink(difftest.mscratch, "difftestMscratch")
+    BoringUtils.addSink(difftest.sscratch, "difftestSscratch")
+    BoringUtils.addSink(difftest.mideleg, "difftestMideleg")
+    BoringUtils.addSink(difftest.medeleg, "difftestMedeleg")
+    BoringUtils.addSink(difftest.scFailed, "difftestScFailed")
+    // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
     io.difftest := difftest
 
     val trap = WireInit(0.U.asTypeOf(new TrapIO))
@@ -136,7 +154,7 @@ object TestMain extends App {
   implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
-    args,
+    args.filterNot(_ == "--disable-log"),
     Seq(
       ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
     )

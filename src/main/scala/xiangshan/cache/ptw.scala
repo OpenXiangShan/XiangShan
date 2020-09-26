@@ -144,6 +144,7 @@ class PTW()(implicit p: Parameters) extends LazyModule {
 class PTWImp(outer: PTW) extends PtwModule(outer){
 
   val (mem, edge) = outer.node.out.head
+  require(mem.d.bits.data.getWidth == l1BusDataWidth, "PTW: tilelink width does not match")
 
   val io = IO(new PtwIO)
 
@@ -156,7 +157,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
   val valid = ValidHold(arb.io.out.fire(), resp(arbChosen).fire())
   val validOneCycle = OneCycleValid(arb.io.out.fire())
-  arb.io.out.ready := !valid || resp(arbChosen).fire()
+  arb.io.out.ready := !valid// || resp(arbChosen).fire()
 
   val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
   val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
@@ -182,6 +183,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
   val l2v   = RegInit(0.U(PtwL2EntrySize.W)) // valid
   val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
+  
+  // mem alias
+  // val memRdata = mem.d.bits.data
+  val memRdata = Wire(UInt(XLEN.W))
+  val memPte = memRdata.asTypeOf(new PteBundle)
+  val memValid = mem.d.valid
+  val memRespFire = mem.d.fire()
+  val memReqReady = mem.a.ready
+  val memReqFire = mem.a.fire()
 
   // fsm
   val state_idle :: state_req :: state_wait_resp :: state_wait_ready :: Nil = Enum(4)
@@ -189,14 +199,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val level = RegInit(0.U(2.W)) // 0/1/2
   val levelNext = level + 1.U
   val latch = Reg(new PtwResp)
-
-  // mem alias
-  val memRdata = mem.d.bits.data
-  val memPte = memRdata.asTypeOf(new PteBundle)
-  val memValid = mem.d.valid
-  val memRespFire = mem.d.fire()
-  val memReqReady = mem.a.ready
-  val memReqFire = mem.a.fire()
+  val sfenceLatch = RegEnable(false.B, init = false.B, memRespFire) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
   /*
    * tlbl2
@@ -234,7 +237,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val ridx = l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8))
     val ramData = ptwl2.read(ridx, readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
-    (ramData.hit(l2addr), ramData) // TODO: optimize tag
+    (ramData.hit(l2addr) && vidx, ramData) // TODO: optimize tag
   }
 
   /* ptwl3
@@ -243,7 +246,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * if l2-tlb does not hit, ptwl3 would not hit (mostly)
    */
   val l2MemBack = memRespFire && state===state_wait_resp && level===1.U
-  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
+  val l2Res = Mux(l2Hit, l2HitData.ppn, RegEnable(memPte.ppn, l2MemBack))
   val l3addr = MakeAddr(l2Res, getVpnn(req.vpn, 0))
 
   /*
@@ -269,7 +272,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         }
       } .elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
         level := levelNext // TODO: consider superpage
-      } .elsewhen (memReqReady) {
+      } .elsewhen (memReqReady && !sfenceLatch) {
         state := state_wait_resp
       }
     }
@@ -314,15 +317,19 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
                  Mux(level===1.U, Mux(l2Hit, l3addr, l2addr)/*when l2Hit, l3addr, when l2miss, l2addr*/, l3addr))
   val pteRead =  edge.Get(
     fromSource = 0.U/*id*/,
-    toAddress  = memAddr,
-    lgSize     = log2Up(XLEN/8).U
+    // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
+    toAddress  = Cat(memAddr(PAddrBits - 1, log2Up(l1BusDataWidth/8)), 0.U(log2Up(l1BusDataWidth/8).W)),
+    lgSize     = log2Up(l1BusDataWidth/8).U
   )._2
   mem.a.bits  := pteRead
   mem.a.valid := state === state_req && 
                ((level===0.U && !tlbHit && !l1Hit) ||
                 (level===1.U && !l2Hit) ||
-                (level===2.U))
+                (level===2.U)) && !sfenceLatch
   mem.d.ready := state === state_wait_resp
+
+  val memAddrLatch = RegEnable(memAddr, mem.a.valid)
+  memRdata := (mem.d.bits.data >> (memAddrLatch(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)) << log2Up(XLEN)))(XLEN - 1, 0)
 
   /*
    * resp
@@ -366,6 +373,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * l3 may be conflict with l2tlb??, may be we could combine l2-tlb with l3-ptw
    */
   when (sfence.valid) { // TODO: flush optionally
+    valid := false.B
+    state := state_idle
+    when (state===state_wait_resp && !memRespFire) {
+      sfenceLatch := true.B // NOTE: every req need a resp
+    }
+
     when (sfence.bits.rs1/*va*/) {
       when (sfence.bits.rs2) {
         // all va && all asid
@@ -421,6 +434,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
   XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)} memReq(v:${mem.a.valid} r:${mem.a.ready})\n")
 
-  XSDebug(memRespFire, p"mem req fire addr:0x${Hexadecimal(memAddr)}\n")
+  XSDebug(memReqFire, p"mem req fire addr:0x${Hexadecimal(memAddr)}\n")
   XSDebug(memRespFire, p"mem resp fire rdata:0x${Hexadecimal(mem.d.bits.data)} Pte:${memPte}\n")
 }

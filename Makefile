@@ -62,16 +62,25 @@ EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
+EMU_THREADS   = 1
+ifeq ($(EMU_THREADS), 1)
+	VTHREAD_FLAGS = 
+else 
+	VTHREAD_FLAGS = --threads $(EMU_THREADS) --threads-dpi none
+endif
 
+
+
+# --trace
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
+  $(VTHREAD_FLAGS) \
   --assert \
   --savable \
   --stats-vars \
-  --trace \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
   -I$(abspath $(BUILD_DIR)) \
@@ -123,7 +132,7 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
 ifeq ($(REMOTE),localhost)
-	@$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+	@numactl -m 0 -N 0 -- $(EMU) -i $(IMAGE) $(EMU_FLAGS)
 else
 	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && export NOOP_HOME=$(REMOTE_PREFIX)/$(NOOP_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(EMU_FLAGS)"
 endif
