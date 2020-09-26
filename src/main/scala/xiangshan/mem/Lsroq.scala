@@ -223,11 +223,17 @@ class Lsroq extends XSModule {
   (0 until LsroqSize).map(i => {
     val addrMatch = data(i).paddr(PAddrBits - 1, 3) === io.dcache.resp.bits.meta.paddr(PAddrBits - 1, 3)
     when(allocated(i) && listening(i) && addrMatch && io.dcache.resp.fire()) {
-      val refillData = io.dcache.resp.bits.data
-      data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
-      valid(i) := true.B
-      listening(i) := false.B
-      XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt) 
+      when(!io.dcache.resp.bits.miss){
+        val refillData = io.dcache.resp.bits.data
+        data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
+        valid(i) := true.B
+        listening(i) := false.B
+        XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt) 
+      }.otherwise{
+        miss(i) := true.B
+        listening(i) := false.B
+        XSDebug("miss resp: miss again! pos %d addr %x\n", i.U, data(i).paddr) 
+      }
     }
   })
 
