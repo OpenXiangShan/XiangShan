@@ -6,7 +6,7 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import xiangshan.backend._
-import xiangshan.backend.decode.isa.RVCInstr
+import xiangshan.backend.decode.isa.{RVCInstr, RV32I_ALUInstr, RVFInstr, RVDInstr}
 import xiangshan.{CfCtrl, CtrlFlow}
 
 
@@ -48,7 +48,7 @@ class Decoder extends XSModule with HasInstrType {
     InstrJ    -> (SrcType.pc , SrcType.imm),
     InstrN    -> (SrcType.pc , SrcType.imm),
     InstrGtoF -> (SrcType.reg, SrcType.imm),
-    InstrFtoG -> (SrcType.fp , SrcType.imm)
+    InstrFtoG -> (SrcType.fp , SrcType.fp)
   )
   val src1Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._1)))
   val src2Type = LookupTree(instrType, SrcTypeTable.map(p => (p._1, p._2._2)))
@@ -131,8 +131,48 @@ class Decoder extends XSModule with HasInstrType {
    }
  }
 
-  io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U || instr(15, 13) === "b011".U && instr(1, 0) === "b01".U, SrcType.reg, src1Type)
-  io.out.ctrl.src2Type := src2Type
+
+
+
+  def bitPatLookup(key: UInt, default: UInt, mapping: Seq[(BitPat, UInt)]) = {
+    mapping.foldLeft(default){case (d, (k, v)) => Mux(k === key, v, d)}
+  }
+
+  io.out.ctrl.src1Type := bitPatLookup(instr, src1Type, Seq(
+    RV32I_ALUInstr.LUI -> SrcType.reg // FIX LUI
+  ))
+  io.out.ctrl.src2Type := bitPatLookup(instr, src2Type, Seq(
+    RVFInstr.FDIV_S -> SrcType.imm,
+    RVFInstr.FSQRT_S -> SrcType.imm,
+    RVFInstr.FCLASS_S -> SrcType.imm,
+    RVFInstr.FMV_X_W -> SrcType.imm,
+    RVFInstr.FCVT_W_S -> SrcType.imm,
+    RVFInstr.FCVT_WU_S -> SrcType.imm,
+    RVFInstr.FCVT_L_S -> SrcType.imm,
+    RVFInstr.FCVT_LU_S -> SrcType.imm,
+
+    RVDInstr.FSQRT_D -> SrcType.imm,
+    RVDInstr.FDIV_D -> SrcType.imm,
+    RVDInstr.FCVT_S_D -> SrcType.imm,
+    RVDInstr.FCVT_D_S -> SrcType.imm,
+    RVDInstr.FCLASS_D -> SrcType.imm,
+    RVDInstr.FMV_X_D -> SrcType.imm,
+    RVDInstr.FCVT_W_D -> SrcType.imm,
+    RVDInstr.FCVT_WU_D -> SrcType.imm,
+    RVDInstr.FCVT_L_D -> SrcType.imm,
+    RVDInstr.FCVT_LU_D -> SrcType.imm
+  ))
+  io.out.ctrl.src3Type := bitPatLookup(instr, SrcType.imm, Seq(
+    RVFInstr.FMADD_S -> SrcType.fp,
+    RVFInstr.FNMADD_S -> SrcType.fp,
+    RVFInstr.FMSUB_S -> SrcType.fp,
+    RVFInstr.FNMSUB_S -> SrcType.fp,
+
+    RVDInstr.FMADD_D -> SrcType.fp,
+    RVDInstr.FNMADD_D -> SrcType.fp,
+    RVDInstr.FMSUB_D -> SrcType.fp,
+    RVDInstr.FNMSUB_D -> SrcType.fp,
+  ))
 
   // val vmEnable = WireInit(false.B)
   // BoringUtils.addSink(vmEnable, "DTLBENABLE")

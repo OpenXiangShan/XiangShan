@@ -18,6 +18,7 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
   extraInput.isDouble := isDouble
   extraInput.rm := DontCare
   extraInput.op := op
+  intToFloat.io.out.ready := io.out.ready
   intToFloat.io.in.valid := valid && fu===("b"+FU_I2F).U
   intToFloat.io.in.bits.src(0) := io.in.bits.src1
   intToFloat.io.in.bits.uop := uopIn
@@ -27,6 +28,7 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
     intToFloat.io.out.bits.data,
     io.in.bits.src1
   )
+  io.in.ready := true.B
   io.out.bits.uop := uopIn
   io.out.bits.redirect <> DontCare
   io.out.bits.redirectValid := false.B

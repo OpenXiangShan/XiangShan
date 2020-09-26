@@ -133,7 +133,7 @@ object RVCInstr extends HasInstrType with HasRVCConst {
     C_ADDIW      -> List(InstrI, FuType.alu, ALUOpType.addw),
     C_LI         -> List(InstrI, FuType.alu, ALUOpType.add),
     C_ADDI16SP   -> List(InstrI, FuType.alu, ALUOpType.add),
-    C_LUI        -> List(InstrU, FuType.alu, ALUOpType.add),
+    C_LUI        -> List(InstrI, FuType.alu, ALUOpType.add),
     C_SRLI       -> List(InstrI, FuType.alu, ALUOpType.srl),
     C_SRAI       -> List(InstrI, FuType.alu, ALUOpType.sra),
     C_ANDI       -> List(InstrI, FuType.alu, ALUOpType.and),
