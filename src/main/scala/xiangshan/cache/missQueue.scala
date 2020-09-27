@@ -292,6 +292,8 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   }
 
   val refill_data = Reg(Vec(blockRows, UInt(encRowBits.W)))
+  // not encoded data
+  val refill_data_raw = Reg(Vec(blockRows, UInt(rowBits.W)))
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
 
@@ -306,6 +308,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
             val word_encoded = cacheParams.dataCode.encode(word)
             word_encoded
           })
+          refill_data_raw((refill_ctr << log2Floor(beatRows)) + i.U) := row
         }
 
         when (refill_ctr === (refillCycles - 1).U) {
@@ -377,7 +380,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.resp.bits.entry_id := io.id
     io.resp.bits.way_en := req_way_en
     io.resp.bits.has_data := should_refill_data
-    io.resp.bits.data := refill_data.asUInt
+    io.resp.bits.data := refill_data_raw.asUInt
 
     when (io.resp.fire()) {
       // additional assertion
