@@ -30,11 +30,11 @@ enum {
   DIFFTEST_SSCRATCH,
   DIFFTEST_MIDELEG,
   DIFFTEST_MEDELEG,
+  DIFFTEST_MTVAL,
+  DIFFTEST_STVAL,
   DIFFTEST_MODE,
   DIFFTEST_NR_REG
 };
-// DIFFTEST_MTVAL, DIFFTEST_STVAL will be updated while committing exception
-// Compare / snapshot them is not necessary
 
 struct SyncChannel {
   uint64_t scFailed; // sc inst commited, it failed beacuse lr_valid === 0

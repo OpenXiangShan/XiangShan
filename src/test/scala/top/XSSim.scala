@@ -34,6 +34,8 @@ class DiffTestIO extends XSBundle {
   val sstatus = Output(UInt(64.W))
   val mepc = Output(UInt(64.W))
   val sepc = Output(UInt(64.W))
+  val mtval = Output(UInt(64.W))
+  val stval = Output(UInt(64.W))
   val mcause = Output(UInt(64.W))
   val scause = Output(UInt(64.W))
 
@@ -115,6 +117,8 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.sstatus, "difftestSstatus")
     BoringUtils.addSink(difftest.mepc, "difftestMepc")
     BoringUtils.addSink(difftest.sepc, "difftestSepc")
+    BoringUtils.addSink(difftest.mtval, "difftestMtval")
+    BoringUtils.addSink(difftest.stval, "difftestStval")
     BoringUtils.addSink(difftest.mcause, "difftestMcause")
     BoringUtils.addSink(difftest.scause, "difftestScause")
     BoringUtils.addSink(difftest.satp, "difftestSatp")

@@ -867,6 +867,8 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     BoringUtils.addSource(mstatus & sstatusRmask, "difftestSstatus")
     BoringUtils.addSource(mepc, "difftestMepc")
     BoringUtils.addSource(sepc, "difftestSepc")
+    BoringUtils.addSource(mtval, "difftestMtval")
+    BoringUtils.addSource(stval, "difftestStval")
     BoringUtils.addSource(mcause, "difftestMcause")
     BoringUtils.addSource(scause, "difftestScause")
     BoringUtils.addSource(satp, "difftestSatp")
