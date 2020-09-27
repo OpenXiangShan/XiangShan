@@ -10,8 +10,8 @@ import utils.XSDebug
 class AtomicsMissQueue extends DCacheModule
 {
   val io = IO(new DCacheBundle {
-    val lsu         = Flipped(new DCacheLoadIO)
-    val replay      = new DCacheLoadIO
+    val lsu         = Flipped(new DCacheWordIO)
+    val replay      = new DCacheWordIO
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
     val miss_finish = DecoupledIO(new MissFinish)
@@ -22,7 +22,7 @@ class AtomicsMissQueue extends DCacheModule
   val id = 0.U
 
   val req     = Reg(new DCacheWordReq)
-  val resp    = Reg(new DCacheResp)
+  val resp    = Reg(new DCacheWordResp)
   val req_block_addr = get_block_addr(req.addr)
   val reg_miss_resp = Reg(new MissResp)
 

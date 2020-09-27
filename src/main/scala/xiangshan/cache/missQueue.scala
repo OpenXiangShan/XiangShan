@@ -14,8 +14,11 @@ class MissReq extends DCacheBundle
 
 class MissResp extends DCacheBundle
 {
-  val client_id  = UInt(missQueueClientIdWidth.W)
+  val client_id = UInt(missQueueClientIdWidth.W)
   val entry_id  = UInt(missQueueEntryIdWidth.W)
+  val way_en    = Bits(nWays.W)
+  val has_data  = Bool()
+  val data      = UInt(blockBits.W)
 }
 
 class MissFinish extends DCacheBundle
@@ -91,6 +94,15 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   val grantack = Reg(Valid(new TLBundleE(edge.bundle)))
   val refill_ctr  = Reg(UInt(log2Up(refillCycles).W))
   val should_refill_data  = Reg(Bool())
+  val needs_writeback  = Reg(Bool())
+
+  // for read, to shorten latency
+  // we send back response as soon as possible
+  //
+  // for store and amo
+  // we send back response when we have finished everything
+  // inform clients to replay requests
+  val early_response   = Reg(Bool())
 
   io.block_idx.valid  := state =/= s_invalid
   io.block_addr.valid := state =/= s_invalid
@@ -144,6 +156,8 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       grantack.valid := false.B
       refill_ctr := 0.U
       should_refill_data := false.B
+      needs_writeback := false.B
+      early_response := false.B
       req := io.req.bits
       state := s_meta_read_req
     }
@@ -197,23 +211,33 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     val new_state = WireInit(s_invalid)
     val old_coh   = req_old_meta.coh
     val needs_wb = old_coh.onCacheControl(M_FLUSH)._1 // does the line we are evicting need to be written back
+    early_response := req.cmd === M_XRD
+
     when (req_tag_match) {
       val (is_hit, _, coh_on_hit) = old_coh.onAccess(req.cmd)
       when (is_hit) { // set dirty bit
         // we do not need to assert write any more
         // read may go here as well
         // eg: when several load miss on the same block
-        // assert(isWrite(req.cmd))
-        new_coh     := coh_on_hit
-        new_state   := s_meta_write_req
+        when (req.cmd === M_XRD) {
+          // normal read
+          // read hit, no need to update meta
+          new_state := s_send_resp
+        } .otherwise {
+          assert(isWrite(req.cmd))
+          new_coh     := coh_on_hit
+          new_state   := s_meta_write_req
+        }
       } .otherwise { // upgrade permissions
         new_coh     := old_coh
         new_state   := s_refill_req
       }
     } .otherwise { // refill and writeback if necessary
       new_coh     := ClientMetadata.onReset
+      should_refill_data := true.B
       when (needs_wb) {
         new_state   := s_wb_req
+        needs_writeback := true.B
       } .otherwise {
         new_state   := s_refill_req
       }
@@ -270,7 +294,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
     when (edge.hasData(io.mem_grant.bits)) {
       when (io.mem_grant.fire()) {
-        should_refill_data := true.B
+        assert(should_refill_data)
         refill_ctr := refill_ctr + 1.U
         for (i <- 0 until beatRows) {
           val row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
@@ -307,7 +331,11 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       when (!should_refill_data) {
         state := s_meta_write_req
       } .otherwise {
-        state := s_data_write_req
+        when (early_response) {
+          state := s_send_resp
+        } .otherwise {
+          state := s_data_write_req
+        }
       }
     }
   }
@@ -340,19 +368,26 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   }
 
   // --------------------------------------------
-  // inform clients to replay requests
   when (state === s_send_resp) {
     io.resp.valid := true.B
     io.resp.bits.client_id := req.client_id
     io.resp.bits.entry_id := io.id
+    io.resp.bits.way_en := req_way_en
+    io.resp.bits.has_data := should_refill_data
+    io.resp.bits.data := refill_data.asUInt
 
     when (io.resp.fire()) {
       // additional assertion
       val (is_hit, _, coh_on_hit) = new_coh.onAccess(req.cmd)
-      assert(is_hit, "We still don't have permissions for this store")
+      assert(is_hit, "We still don't have permissions for this block")
       assert(new_coh === coh_on_hit, "Incorrect coherence meta data")
 
-      state := s_client_finish
+      // for read, we will write data later
+      when (early_response && should_refill_data) {
+        state := s_data_write_req
+      } .otherwise {
+        state := s_client_finish
+      }
     }
   }
 

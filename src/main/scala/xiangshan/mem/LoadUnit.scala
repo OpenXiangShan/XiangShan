@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
 
 class LoadToLsroqIO extends XSBundle {
@@ -19,7 +19,7 @@ class LoadUnit extends XSModule {
     val ldout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dcache = new DCacheLoadIO
+    val dcache = new DCacheWordIO
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
