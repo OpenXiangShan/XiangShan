@@ -42,7 +42,10 @@ class AtomicsMissQueue extends DCacheModule
   io.miss_finish.bits  := DontCare
 
 
-  XSDebug("state: %d\n", state)
+  when (state =/= s_invalid) {
+    XSDebug("state: %d\n", state)
+  }
+
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {

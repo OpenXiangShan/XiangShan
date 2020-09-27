@@ -53,7 +53,10 @@ class StoreMissEntry extends DCacheModule
   io.tag.bits := req_tag
 
 
-  XSDebug("entry: %d state: %d\n", io.id, state)
+  when (state =/= s_invalid) {
+    XSDebug("entry: %d state: %d\n", io.id, state)
+  }
+
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {

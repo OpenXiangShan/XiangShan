@@ -141,11 +141,14 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   io.wb_req.valid        := false.B
   io.wb_req.bits         := DontCare
 
-  XSDebug("entry: %d state: %d\n", io.id, state)
-  XSDebug("entry: %d block_idx_valid: %b block_idx: %x block_addr_valid: %b block_addr: %x\n",
-    io.id, io.block_idx.valid, io.block_idx.bits, io.block_addr.valid, io.block_addr.bits)
-  XSDebug("entry: %d block_probe_idx_valid: %b block_probe_idx: %x block_probe_addr_valid: %b block_probe_addr: %x\n",
-    io.id, io.block_probe_idx.valid, io.block_probe_idx.bits, io.block_probe_addr.valid, io.block_probe_addr.bits)
+  when (state =/= s_invalid) {
+    XSDebug("entry: %d state: %d\n", io.id, state)
+    XSDebug("entry: %d block_idx_valid: %b block_idx: %x block_addr_valid: %b block_addr: %x\n",
+      io.id, io.block_idx.valid, io.block_idx.bits, io.block_addr.valid, io.block_addr.bits)
+    XSDebug("entry: %d block_probe_idx_valid: %b block_probe_idx: %x block_probe_addr_valid: %b block_probe_addr: %x\n",
+      io.id, io.block_probe_idx.valid, io.block_probe_idx.bits, io.block_probe_addr.valid, io.block_probe_addr.bits)
+  }
+
 
   // --------------------------------------------
   // s_invalid: receive requests

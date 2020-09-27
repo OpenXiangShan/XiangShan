@@ -54,7 +54,10 @@ class LoadMissEntry extends DCacheModule
   io.tag.bits := req_tag
 
 
-  XSDebug("entry: %d state: %d\n", io.id, state)
+  when (state =/= s_invalid) {
+    XSDebug("entry: %d state: %d\n", io.id, state)
+  }
+
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
@@ -241,8 +244,8 @@ class LoadMissQueue extends DCacheModule
     miss_req.bits.cmd, miss_req.bits.addr, miss_req.bits.client_id)
 
   val miss_resp = io.miss_resp
-  XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d\n",
-    miss_resp.bits.client_id, miss_resp.bits.entry_id)
+  XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d has_data: %b data: %x\n",
+    miss_resp.bits.client_id, miss_resp.bits.entry_id, miss_resp.bits.has_data, miss_resp.bits.data)
 
   val miss_finish = io.miss_finish
   XSDebug(miss_finish.fire(), "miss_finish client_id: %d entry_id: %d\n",
