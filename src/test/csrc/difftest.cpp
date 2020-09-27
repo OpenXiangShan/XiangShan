@@ -97,7 +97,8 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
   "mstatus", "mcause", "mepc",
   "sstatus", "scause", "sepc",
   "satp", 
-  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg"   
+  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg", 
+  "mtval", "stval", "mode"
 };
 
 static uint64_t nemu_this_pc = 0x80000000;
