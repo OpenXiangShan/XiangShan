@@ -7,6 +7,7 @@ import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.Fflags
 
 
 class Roq extends XSModule {
@@ -30,6 +31,7 @@ class Roq extends XSModule {
   val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
 
+  val exuFflags = Mem(RoqSize, new Fflags)
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
 
@@ -92,6 +94,7 @@ class Roq extends XSModule {
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
+      exuFflags(wbIdx) := io.exeWbResults(i).bits.fflags
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
       val debugUop = microOp(wbIdx)
@@ -150,6 +153,9 @@ class Roq extends XSModule {
 
   val storeCommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val cfiCommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  // wiring to csr
+  val fflags = WireInit(0.U.asTypeOf(new Fflags))
+  val dirty_fs = WireInit(false.B)
   for(i <- 0 until CommitWidth){
     io.commits(i) := DontCare
     switch(state){
@@ -169,15 +175,28 @@ class Roq extends XSModule {
         cfiCommitVec(i) := io.commits(i).valid &&
           !commitUop.cf.brUpdate.pd.notCFI
 
+        val commitFflags = exuFflags(commitIdx)
+        when(io.commits(i).valid){
+          when(commitFflags.asUInt.orR()){
+            // update fflags
+            fflags := exuFflags(commitIdx)
+          }
+          when(commitUop.ctrl.fpWen){
+            // set fs to dirty
+            dirty_fs := true.B
+          }
+        }
+
         when(io.commits(i).valid){v := false.B}
         XSInfo(io.commits(i).valid,
-          "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x\n",
+          "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x fflags: %b\n",
           commitUop.cf.pc,
           commitUop.ctrl.rfWen,
           commitUop.ctrl.ldest,
           commitUop.pdest,
           commitUop.old_pdest,
-          exuData(commitIdx)
+          exuData(commitIdx),
+          exuFflags(commitIdx).asUInt
         )
         XSInfo(io.commits(i).valid && exuDebug(commitIdx).isMMIO,
           "difftest skiped pc0x%x\n",
@@ -217,6 +236,9 @@ class Roq extends XSModule {
     }
     io.commits(i).bits.isWalk := state =/= s_idle
   }
+
+  BoringUtils.addSource(fflags, "Fflags")
+  BoringUtils.addSource(dirty_fs, "DirtyFs")
 
   val validCommit = io.commits.map(_.valid)
   when(state===s_walk) {

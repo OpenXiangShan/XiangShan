@@ -279,6 +279,7 @@ class LoadUnit extends XSModule {
   val hitLoadOut = Wire(Decoupled(new ExuOutput))
   hitLoadOut.bits.uop := l5_in.bits.uop
   hitLoadOut.bits.data := rdataPartialLoad
+  hitLoadOut.bits.fflags := DontCare
   hitLoadOut.bits.redirectValid := false.B
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare

@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
 class LsRoqEntry extends XSBundle {
   val vaddr = UInt(VAddrBits.W) // TODO: need opt
@@ -269,6 +270,7 @@ class Lsroq extends XSModule {
         LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
         LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0)),
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
@@ -277,6 +279,7 @@ class Lsroq extends XSModule {
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.data := rdataPartialLoad
+    io.ldout(i).bits.fflags := DontCare
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
@@ -312,6 +315,7 @@ class Lsroq extends XSModule {
     io.stout(i).bits.uop := uop(storeWbSel(i))
     io.stout(i).bits.uop.cf.exceptionVec := data(storeWbSel(i)).exception.asBools
     io.stout(i).bits.data := data(storeWbSel(i)).data
+    io.stout(i).bits.fflags := DontCare
     io.stout(i).bits.redirectValid := false.B
     io.stout(i).bits.redirect := DontCare
     io.stout(i).bits.brUpdate := DontCare

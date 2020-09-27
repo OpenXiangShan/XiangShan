@@ -1,9 +1,11 @@
 package xiangshan.backend.exu
 
 import chisel3._
+import chisel3.util.experimental.BoringUtils
 import xiangshan.{ExuOutput, FuType}
 import xiangshan.backend.fu.{CSR, Jump}
 import xiangshan.backend.decode.isa._
+import xiangshan.backend.fu.fpu.Fflags
 import utils._
 
 class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
@@ -32,13 +34,24 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jumpExuOut.uop := uop
   jumpExuOut.data := jmp.io.out.bits.data
   jumpExuOut.brUpdate := jumpExtraOut.brUpdate
+  jumpExuOut.fflags := DontCare
   jumpExuOut.redirect := jumpExtraOut.redirect
   jumpExuOut.redirectValid := jumpExtraOut.redirectValid
   jumpExuOut.debug := DontCare
 
 
+  val fflags = WireInit(0.U.asTypeOf(new Fflags))
+  val dirty_fs = WireInit(false.B)
+  BoringUtils.addSink(fflags, "Fflags")
+  BoringUtils.addSink(dirty_fs, "DirtyFs")
+  val frm = WireInit(0.U(3.W))
+  frm := csr.io.fpu_csr.frm
+  BoringUtils.addSource(frm, "Frm")
+
   csr.io.cfIn := io.in.bits.uop.cf
-  csr.io.fpu_csr := DontCare
+  csr.io.fpu_csr.fflags := fflags
+  csr.io.fpu_csr.isIllegal := false.B // TODO: check illegal rounding mode
+  csr.io.fpu_csr.dirty_fs := dirty_fs
   csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
@@ -53,6 +66,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.uop.cf := csr.io.cfOut
   csrExuOut.uop.ctrl.flushPipe := csr.io.flushPipe
   csrExuOut.data := csrOut
+  csrExuOut.fflags := DontCare
   csrExuOut.redirectValid := csr.io.redirectOutValid
   csrExuOut.redirect.brTag := uop.brTag
   csrExuOut.redirect.isException := false.B

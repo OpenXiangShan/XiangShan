@@ -3,6 +3,7 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.exu.Exu.fmiscExeUnitCfg
 import xiangshan.backend.fu.fpu.{F32toF64, F64toF32, FCMP, FMV, FPUSubModuleOutput, FloatToInt}
 import xiangshan.backend.fu.fpu.divsqrt.DivSqrt
@@ -29,6 +30,8 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
   val fuOp = io.in.bits.uop.ctrl.fuOpType
   val fu = fuOp.head(3)
   val op = fuOp.tail(3)
+  val frm = WireInit(0.U(3.W))
+  BoringUtils.addSink(frm, "Frm")
 
   io.in.ready := Cat(subModules.map(x => fu===x._2 && x._1.io.in.ready)).orR()
 
@@ -40,7 +43,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
       module.io.in.bits.src(1) := io.in.bits.src2
       val extraInput = module.io.in.bits.ext.get
       extraInput.isDouble := !io.in.bits.uop.ctrl.isRVF
-      extraInput.rm := DontCare
+      extraInput.rm := frm
       extraInput.op := op
       module.io.redirectIn := io.redirect
   }
