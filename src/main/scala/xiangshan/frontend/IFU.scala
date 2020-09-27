@@ -2,6 +2,7 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import device.RAMHelper
 import xiangshan._
 import utils._
@@ -25,8 +26,11 @@ class IFUIO extends XSBundle
   val icacheReq = DecoupledIO(new ICacheReq)
   val icacheResp = Flipped(DecoupledIO(new ICacheResp))
   val icacheFlush = Output(UInt(2.W))
+  val LBFetch = Flipped(new IFUFetchIO)
+  val LBredirect = Flipped(ValidIO(UInt(VAddrBits.W)))
+  val tgtpc = Output(UInt(VAddrBits.W))
+  val inLoop = Input(Bool())
 }
-
 
 class IFU extends XSModule with HasIFUConst
 {
@@ -37,7 +41,9 @@ class IFU extends XSModule with HasIFUConst
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
   val if1_flush, if2_flush, if3_flush, if4_flush = WireInit(false.B)
 
-  if4_flush := io.redirect.valid
+  val icacheResp = WireInit(Mux(io.inLoop, io.LBFetch.LBResp, io.icacheResp.bits))
+
+  if4_flush := io.redirect.valid || io.LBredirect.valid
   if3_flush := if4_flush || if4_redirect
   if2_flush := if3_flush || if3_redirect
   if1_flush := if2_flush || if2_redirect
@@ -46,7 +52,7 @@ class IFU extends XSModule with HasIFUConst
   val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
-  val if1_fire = if1_valid && (if2_ready || if1_flush) && io.icacheReq.ready
+  val if1_fire = if1_valid && (if2_ready || if1_flush) && (io.inLoop || io.icacheReq.ready)
 
   // val extHist = VecInit(Fill(ExtHistoryLength, RegInit(0.U(1.W))))
   val extHist = RegInit(VecInit(Seq.fill(ExtHistoryLength)(0.U(1.W))))
@@ -99,7 +105,7 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF3 ****************************//
   val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
   val if4_ready = WireInit(false.B)
-  val if3_fire = if3_valid && if4_ready && io.icacheResp.valid && !if3_flush
+  val if3_fire = if3_valid && if4_ready && (io.inLoop || io.icacheResp.valid) && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_histPtr = RegEnable(if2_histPtr, if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
@@ -149,7 +155,7 @@ class IFU extends XSModule with HasIFUConst
 
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
-  val if4_ipf = RegEnable(io.icacheResp.bits.ipf || if3_hasPrevHalfInstr && prevHalfInstr.ipf, if3_fire)
+  val if4_ipf = RegEnable(icacheResp.ipf || if3_hasPrevHalfInstr && prevHalfInstr.ipf, if3_fire)
   val if4_crossPageIPF = RegEnable(crossPageIPF, if3_fire)
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
@@ -216,15 +222,40 @@ class IFU extends XSModule with HasIFUConst
     extHist(newPtr) := io.outOfOrderBrInfo.bits.taken
   }
 
+  when (io.LBredirect.valid) {
+    if1_npc := io.LBredirect.bits
+  }
+
   when (io.redirect.valid) {
     if1_npc := io.redirect.bits.target
   }
 
-  io.icacheReq.valid := if1_valid && if2_ready
-  io.icacheReq.bits.addr := if1_npc
-  io.icacheReq.bits.mask := mask(if1_npc)
-  io.icacheResp.ready := if4_ready
+  when(io.inLoop) {
+    io.icacheReq.valid := if4_flush
+    io.icacheResp.ready := false.B
+  }.otherwise {
+    io.icacheReq.valid := if1_valid && if2_ready
+    // io.icacheResp.ready := if3_ready
+    io.icacheResp.ready := if4_ready
   //io.icacheResp.ready := if3_valid
+  }
+  io.icacheReq.bits.addr := if1_npc
+
+  // when(if4_bp.taken) {
+  //   when(if4_bp.saveHalfRVI) {
+  //     io.LBFetch.LBReq := snpc(if4_pc)
+  //   }.otherwise {
+  //     io.LBFetch.LBReq := if4_bp.target
+  //   }
+  // }.otherwise {
+  //   io.LBFetch.LBReq := snpc(if4_pc)
+  //   XSDebug(p"snpc(if4_pc)=${Hexadecimal(snpc(if4_pc))}\n")
+  // }
+  io.LBFetch.LBReq := if3_pc
+  io.tgtpc := if4_bp.target
+  
+  io.icacheReq.bits.mask := mask(if1_npc)
+  
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
   val inOrderBrHist = Wire(Vec(HistoryLength, UInt(1.W)))
@@ -236,7 +267,7 @@ class IFU extends XSModule with HasIFUConst
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
-  bpu.io.cacheValid := io.icacheResp.valid
+  bpu.io.cacheValid := (io.inLoop || io.icacheResp.valid)
   bpu.io.in.valid := if1_fire
   bpu.io.in.bits.pc := if1_npc
   bpu.io.in.bits.hist := hist.asUInt
@@ -250,21 +281,30 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.predecode.bits.isFetchpcEqualFirstpc := if4_pc === if4_pd.pc(0)
   bpu.io.branchInfo.ready := if4_fire
 
-  pd.io.in := io.icacheResp.bits
+  when(io.inLoop) {
+    pd.io.in := io.LBFetch.LBResp
+    pd.io.in.mask := io.LBFetch.LBResp.mask & mask(io.LBFetch.LBResp.pc)
+    XSDebug("Fetch from LB\n")
+    XSDebug(p"pc=${Hexadecimal(io.LBFetch.LBResp.pc)}\n")
+    XSDebug(p"data=${Hexadecimal(io.LBFetch.LBResp.data)}\n")
+    XSDebug(p"mask=${Hexadecimal(io.LBFetch.LBResp.mask)}\n")
+  }.otherwise {
+    pd.io.in := icacheResp
+  }
   pd.io.prev.valid := if3_hasPrevHalfInstr
   pd.io.prev.bits := prevHalfInstr.instr
   // if a fetch packet triggers page fault, set the pf instruction to nop
-  when (!if3_hasPrevHalfInstr && io.icacheResp.bits.ipf) {
+  when (!if3_hasPrevHalfInstr && icacheResp.ipf) {
     val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
     (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
     pd.io.in.data := instrs.asUInt
-  }.elsewhen (if3_hasPrevHalfInstr && (prevHalfInstr.ipf || io.icacheResp.bits.ipf)) {
+  }.elsewhen (if3_hasPrevHalfInstr && (prevHalfInstr.ipf || icacheResp.ipf)) {
     pd.io.prev.bits := ZeroExt("b0010011".U, 16)
     val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
     (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
     pd.io.in.data := instrs.asUInt
 
-    when (io.icacheResp.bits.ipf && !prevHalfInstr.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
+    when (icacheResp.ipf && !prevHalfInstr.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
   }
 
   io.fetchPacket.valid := if4_valid && !io.redirect.valid
@@ -280,6 +320,9 @@ class IFU extends XSModule with HasIFUConst
   io.fetchPacket.bits.pd := if4_pd.pd
   io.fetchPacket.bits.ipf := if4_ipf
   io.fetchPacket.bits.crossPageIPFFix := if4_crossPageIPF
+
+  // predTaken Vec
+  io.fetchPacket.bits.predTaken := if4_bp.taken
 
   // debug info
   XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
