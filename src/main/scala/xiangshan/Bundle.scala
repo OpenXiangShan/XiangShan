@@ -19,6 +19,7 @@ class FetchPacket extends XSBundle {
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val crossPageIPFFix = Bool()
+  val predTaken = Bool()
 }
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
