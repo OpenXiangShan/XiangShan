@@ -357,7 +357,7 @@ class Roq extends XSModule {
     BoringUtils.addSource(RegNext(wdata), "difftestWdata")
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
-  BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
+    BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
     BoringUtils.addSource(RegNext(difftestCause), "difftestCause")
 
     val hitTrap = trapVec.reduce(_||_)

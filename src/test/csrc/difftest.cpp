@@ -187,17 +187,12 @@ int difftest_step(DiffState *s) {
         ref_difftest_setregs(ref_r);
       }else{
         // single step exec
-// #define ENABLE_DISAMBIGUATE
-#ifdef ENABLE_DISAMBIGUATE
         // IPF, LPF, SPF
         if(s->cause == 12 || s->cause == 13 || s->cause == 15){
           ref_disambiguate_exec(&s->cause);
         }else{
           ref_difftest_exec(1);
         }
-#else
-        ref_difftest_exec(1);
-#endif
       }
     }
   }
