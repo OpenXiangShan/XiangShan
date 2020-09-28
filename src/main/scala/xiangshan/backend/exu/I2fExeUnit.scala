@@ -3,6 +3,7 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
+import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.fpu.IntToFloatSingleCycle
 import xiangshan.backend.fu.fpu.FPUOpType._
 
@@ -11,8 +12,8 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
   val uopIn = io.in.bits.uop
   val isDouble = !uopIn.ctrl.isRVF
   val fuOp = uopIn.ctrl.fuOpType
-  val fu = fuOp.head(3)
-  val op = fuOp.tail(3)
+  val fu = fuOp.head(4)
+  val op = fuOp.tail(4)
   val frm = WireInit(0.U(3.W))
   BoringUtils.addSink(frm, "Frm")
 
@@ -29,8 +30,12 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
   intToFloat.io.redirectIn := io.redirect
   io.out.valid := valid
   io.out.bits.data := Mux(intToFloat.io.out.valid,
-    intToFloat.io.out.bits.data,
-    io.in.bits.src1
+    Mux(isDouble, intToFloat.io.out.bits.data, boxF32ToF64(intToFloat.io.out.bits.data)),
+    Mux(isDouble, io.in.bits.src1, boxF32ToF64(io.in.bits.src1))
+  )
+  io.out.bits.fflags := Mux(intToFloat.io.out.valid,
+    intToFloat.io.out.bits.ext.get,
+    0.U.asTypeOf(new Fflags)
   )
   io.in.ready := true.B
   io.out.bits.uop := uopIn

@@ -85,10 +85,15 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
 
   def splitN[T](in: Seq[T], n: Int): Seq[Option[Seq[T]]] = {
     require(n > 0)
-    if(in.size < n) Seq(Some(in)) ++ Seq.fill(n-1)(None)
-    else {
-      val m = in.size/n
-      Some(in.take(m)) +: splitN(in.drop(m), n-1)
+    if(n == 1){
+      return Seq(Some(in))
+    } else {
+      if(in.size < n ){
+        Seq(Some(in)) ++ Seq.fill(n-1)(None)
+      } else {
+        val m = in.size / n
+        Some(in.take(m)) +: splitN(in.drop(m), n-1)
+      }
     }
   }
 
@@ -105,12 +110,14 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
   } else {
     val directReq = wbIntReq.filter(w => Seq(Exu.ldExeUnitCfg, Exu.aluExeUnitCfg).contains(w._2))
     val mulReq = wbIntReq.filter(w => Seq(Exu.mulExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulDivFenceExeUnitCfg).contains(w._2))
+    println("aaa")
     val otherReq = splitN(
       wbIntReq.filterNot(w => Seq(
         Exu.ldExeUnitCfg, Exu.aluExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulExeUnitCfg, Exu.mulDivFenceExeUnitCfg
       ).contains(w._2)),
       mulReq.size
     )
+    println("bbb")
     require(directReq.size + mulReq.size <= NRIntWritePorts)
     // alu && load: direct connect
     io.toIntRf.take(directReq.size).zip(directReq).foreach(x => directConnect(x._1, x._2._1))

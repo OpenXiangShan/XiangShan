@@ -142,7 +142,6 @@ class Decoder extends XSModule with HasInstrType {
     RV32I_ALUInstr.LUI -> SrcType.reg // FIX LUI
   ))
   io.out.ctrl.src2Type := bitPatLookup(instr, src2Type, Seq(
-    RVFInstr.FDIV_S -> SrcType.imm,
     RVFInstr.FSQRT_S -> SrcType.imm,
     RVFInstr.FCLASS_S -> SrcType.imm,
     RVFInstr.FMV_X_W -> SrcType.imm,
@@ -188,6 +187,8 @@ class Decoder extends XSModule with HasInstrType {
   }
   io.out.ctrl.noSpecExec := io.out.ctrl.isXSTrap || io.out.ctrl.fuType===FuType.csr || io.out.ctrl.fuType===FuType.mou || io.out.ctrl.fuType===FuType.fence/*noSpecExec make it sent to alu0,for roq is empty*/
   io.out.ctrl.flushPipe := io.out.ctrl.fuType===FuType.fence
+
+  io.out.ctrl.isRVF := instr(26, 25) === 0.U
 
 
   XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",

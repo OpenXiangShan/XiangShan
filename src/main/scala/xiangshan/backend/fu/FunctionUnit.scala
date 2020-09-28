@@ -146,7 +146,7 @@ object FunctionUnit {
     FuConfig(FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false)
 
   val fmiscCfg =
-    FuConfig(FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false)
+    FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = true, hasRedirect = false)
 
   val fDivSqrtCfg =
     FuConfig(FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false)
