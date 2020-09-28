@@ -5,7 +5,7 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
 
 class LsRoqEntry extends XSBundle {
@@ -20,8 +20,14 @@ class LsRoqEntry extends XSBundle {
   val fwdData = Vec(8, UInt(8.W))
 }
 
+// inflight miss block reqs
+class InflightBlockInfo extends XSBundle {
+  val block_addr = UInt(PAddrBits.W)
+  val valid = Bool()
+}
+
 // Load/Store Roq (Lsroq) for XiangShan Out of Order LSU
-class Lsroq extends XSModule {
+class Lsroq extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
@@ -34,8 +40,8 @@ class Lsroq extends XSModule {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
-    val dcache = new DCacheLoadIO
-    val uncache = new DCacheLoadIO
+    val dcache = new DCacheLineIO
+    val uncache = new DCacheWordIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -148,7 +154,9 @@ class Lsroq extends XSModule {
         data(io.loadIn(i).bits.uop.lsroqIdx).fwdMask := io.loadIn(i).bits.forwardMask
         data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
         data(io.loadIn(i).bits.uop.lsroqIdx).exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
-        miss(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        miss(io.loadIn(i).bits.uop.lsroqIdx) := dcacheMissed
+        listening(io.loadIn(i).bits.uop.lsroqIdx) := dcacheMissed
         store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
         pending(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
       }
@@ -182,34 +190,57 @@ class Lsroq extends XSModule {
   })
 
   // cache miss request
+  val inflightReqs = RegInit(VecInit(Seq.fill(cfg.nLoadMissEntries)(0.U.asTypeOf(new InflightBlockInfo))))
+  val inflightReqFull = inflightReqs.map(req => req.valid).reduce(_&&_)
+  val reqBlockIndex = PriorityEncoder(~VecInit(inflightReqs.map(req => req.valid)).asUInt)
+
   val missRefillSelVec = VecInit(
-    (0 until LsroqSize).map(i => allocated(i) && miss(i))
-  )
+    (0 until LsroqSize).map{ i =>
+      val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(data(i).paddr)).reduce(_||_)
+      allocated(i) && miss(i) && !inflight
+    })
+
   val missRefillSel = getFirstOne(missRefillSelVec, tailMask)
+  val missRefillBlockAddr = get_block_addr(data(missRefillSel).paddr)
   io.dcache.req.valid := missRefillSelVec.asUInt.orR
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
-  io.dcache.req.bits.addr := data(missRefillSel).paddr
+  io.dcache.req.bits.addr := missRefillBlockAddr
   io.dcache.req.bits.data := DontCare
-  io.dcache.req.bits.mask := data(missRefillSel).mask
+  io.dcache.req.bits.mask := DontCare
 
   io.dcache.req.bits.meta.id       := DontCare // TODO: // FIXME
   io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
-  io.dcache.req.bits.meta.paddr    := data(missRefillSel).paddr
+  io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
   io.dcache.req.bits.meta.uop      := uop(missRefillSel)
   io.dcache.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
   io.dcache.req.bits.meta.tlb_miss := false.B
-  io.dcache.req.bits.meta.mask     := data(missRefillSel).mask
+  io.dcache.req.bits.meta.mask     := DontCare
   io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
-  io.dcache.s1_kill := false.B
 
   assert(!(data(missRefillSel).mmio && io.dcache.req.valid))
 
   when(io.dcache.req.fire()) {
     miss(missRefillSel) := false.B
     listening(missRefillSel) := true.B
+
+    // mark this block as inflight
+    inflightReqs(reqBlockIndex).valid := true.B
+    inflightReqs(reqBlockIndex).block_addr := missRefillBlockAddr
+    assert(!inflightReqs(reqBlockIndex).valid)
   }
+
+  when(io.dcache.resp.fire()) {
+    val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)).reduce(_||_)
+    assert(inflight)
+    for (i <- 0 until cfg.nLoadMissEntries) {
+      when (inflightReqs(i).valid && inflightReqs(i).block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)) {
+        inflightReqs(i).valid := false.B
+      }
+    }
+  }
+
 
   when(io.dcache.req.fire()){
     XSDebug("miss req: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x vaddr:0x%x\n", io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx, io.dcache.req.bits.meta.uop.lsroqIdx, io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr) 
@@ -230,9 +261,14 @@ class Lsroq extends XSModule {
   }
 
   (0 until LsroqSize).map(i => {
-    val addrMatch = data(i).paddr(PAddrBits - 1, 3) === io.dcache.resp.bits.meta.paddr(PAddrBits - 1, 3)
-    when(allocated(i) && listening(i) && addrMatch && io.dcache.resp.fire()) {
-      val refillData = io.dcache.resp.bits.data
+    val blockMatch = get_block_addr(data(i).paddr) === io.dcache.resp.bits.meta.paddr
+    when(allocated(i) && listening(i) && blockMatch && io.dcache.resp.fire()) {
+      // split them into words
+      val words = VecInit((0 until blockWords) map { i =>
+        io.dcache.resp.bits.data(DataBits * (i + 1) - 1, DataBits * i)
+      })
+
+      val refillData = words(get_word(data(i).paddr))
       data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
       valid(i) := true.B
       listening(i) := false.B

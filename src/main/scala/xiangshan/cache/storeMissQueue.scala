@@ -11,8 +11,8 @@ class StoreMissEntry extends DCacheModule
   val io = IO(new Bundle {
     val id = Input(UInt())
 
-    val lsu         = Flipped(new DCacheStoreIO)
-    val replay      = new DCacheStoreIO
+    val lsu         = Flipped(new DCacheLineIO)
+    val replay      = new DCacheLineIO
 
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
@@ -26,7 +26,7 @@ class StoreMissEntry extends DCacheModule
   val state = RegInit(s_invalid)
 
   val req     = Reg(new DCacheLineReq )
-  val resp    = Reg(new DCacheResp)
+  val resp    = Reg(new DCacheLineResp)
 
   val req_idx = get_idx(req.addr)
   val req_tag = get_tag(req.addr)
@@ -53,7 +53,10 @@ class StoreMissEntry extends DCacheModule
   io.tag.bits := req_tag
 
 
-  XSDebug("entry: %d state: %d\n", io.id, state)
+  when (state =/= s_invalid) {
+    XSDebug("entry: %d state: %d\n", io.id, state)
+  }
+
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
@@ -142,8 +145,8 @@ class StoreMissEntry extends DCacheModule
 class StoreMissQueue extends DCacheModule
 {
   val io = IO(new Bundle {
-    val lsu         = Flipped(new DCacheStoreIO)
-    val replay      = new DCacheStoreIO
+    val lsu         = Flipped(new DCacheLineIO)
+    val replay      = new DCacheLineIO
 
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
@@ -152,8 +155,8 @@ class StoreMissQueue extends DCacheModule
 
   val miss_req_arb    = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntries))
   val miss_finish_arb = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntries))
-  val replay_arb      = Module(new Arbiter(new DCacheLineReq,   cfg.nStoreMissEntries))
-  val resp_arb        = Module(new Arbiter(new DCacheResp,   cfg.nStoreMissEntries))
+  val replay_arb      = Module(new Arbiter(new DCacheLineReq,  cfg.nStoreMissEntries))
+  val resp_arb        = Module(new Arbiter(new DCacheLineResp, cfg.nStoreMissEntries))
 
   val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
   val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
