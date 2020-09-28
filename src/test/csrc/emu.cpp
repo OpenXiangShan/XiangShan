@@ -146,8 +146,10 @@ inline void Emulator::read_emu_regs(uint64_t *r) {
   r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest_sscratch;
   r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest_mideleg;
   r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest_medeleg;
-  r[DIFFTEST_MTVAL] = dut_ptr->io_difftest_mtval;
-  r[DIFFTEST_STVAL] = dut_ptr->io_difftest_stval;
+  r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest_mtval;
+  r[DIFFTEST_STVAL]   = dut_ptr->io_difftest_stval;
+  r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest_mtvec;
+  r[DIFFTEST_STVEC]   = dut_ptr->io_difftest_stvec;
   r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
 }
 
