@@ -338,7 +338,10 @@ class Roq extends XSModule {
   instrCnt := instrCnt + retireCounter
 
   val difftestIntrNO = WireInit(0.U(XLEN.W))
+  val difftestCause = WireInit(0.U(XLEN.W))
   ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
+  ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
+
   XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
   val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
   val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
@@ -356,6 +359,7 @@ class Roq extends XSModule {
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
     BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
+    BoringUtils.addSource(RegNext(difftestCause), "difftestCause")
 
     val hitTrap = trapVec.reduce(_||_)
     val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
