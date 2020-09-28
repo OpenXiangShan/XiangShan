@@ -45,7 +45,11 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
     case (module, fuSel) =>
       module.io.in.valid := io.in.valid && fu===fuSel
       module.io.in.bits.uop := io.in.bits.uop
-      module.io.in.bits.src(0) := Mux(isRVF || fuOp===s2d, unboxF64ToF32(src1), src1)
+      module.io.in.bits.src(0) := Mux(
+        (isRVF && fuOp=/=d2s && fuOp=/=fmv_f2i) || fuOp===s2d, 
+        unboxF64ToF32(src1), 
+        src1
+      )
       module.io.in.bits.src(1) := Mux(isRVF, unboxF64ToF32(src2), src2)
       val extraInput = module.io.in.bits.ext.get
       extraInput.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
@@ -53,7 +57,6 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
       extraInput.op := op
       module.io.redirectIn := io.redirect
   }
-  fmv.io.in.bits.src(0) := src1 // don't unbox
 
   val wbArb = Module(new Arbiter(chiselTypeOf(subModules(0)._1.io.out.bits), subModules.length))
 
@@ -68,7 +71,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
   val outCtrl = out.bits.uop.ctrl
   io.out.bits.data := Mux(outCtrl.isRVF && outCtrl.fpWen, 
     boxF32ToF64(out.bits.data), 
-    Mux(outCtrl.fuOpType===fmv_f2i || outCtrl.fuOpType===f2w || outCtrl.fuOpType===f2wu,
+    Mux( (outCtrl.isRVF && outCtrl.fuOpType===fmv_f2i) || outCtrl.fuOpType===f2w || outCtrl.fuOpType===f2wu,
       SignExt(out.bits.data(31, 0), XLEN),
       out.bits.data
     )

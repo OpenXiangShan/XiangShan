@@ -153,7 +153,6 @@ class Decoder extends XSModule with HasInstrType {
     RVFInstr.FCVT_LU_S -> SrcType.imm,
 
     RVDInstr.FSQRT_D -> SrcType.imm,
-    RVDInstr.FDIV_D -> SrcType.imm,
     RVDInstr.FCVT_S_D -> SrcType.imm,
     RVDInstr.FCVT_D_S -> SrcType.imm,
     RVDInstr.FCLASS_D -> SrcType.imm,
