@@ -369,7 +369,11 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     io.meta_write.bits.way_en   := req_way_en
 
     when (io.meta_write.fire()) {
-      state := s_send_resp
+      when (early_response) {
+        state := s_client_finish
+      } .otherwise {
+        state := s_send_resp
+      }
     }
   }
 
