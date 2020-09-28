@@ -218,13 +218,16 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
   when (rst) { rst_cnt := rst_cnt + 1.U }
 
-  val metabits = rstVal.getWidth
-  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(metabits.W)))
+  val metaBits = rstVal.getWidth
+  val encMetaBits = cacheParams.tagCode.width(metaBits)
+
+  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(encMetaBits.W)))
   val wen = rst || io.write.valid
   when (wen) {
-    tag_array.write(waddr, VecInit(Array.fill(nWays)(wdata)), wmask)
+    tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wdata))), wmask)
   }
-  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(_.asTypeOf(rstVal))
+  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(rdata =>
+      cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
 
   io.read.ready := !wen
   io.write.ready := !rst
