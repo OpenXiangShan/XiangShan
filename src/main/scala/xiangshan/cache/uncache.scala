@@ -17,7 +17,7 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 
     // client requests
     val req = Flipped(DecoupledIO(new DCacheWordReq ))
-    val resp = DecoupledIO(new DCacheResp)
+    val resp = DecoupledIO(new DCacheWordResp)
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
@@ -119,7 +119,7 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 }
 
 class UncacheIO extends DCacheBundle {
-  val lsroq = Flipped(new DCacheLoadIO)
+  val lsroq = Flipped(new DCacheWordIO)
 }
 
 // convert DCacheIO to TileLink
@@ -150,7 +150,7 @@ class UncacheImp(outer: Uncache)
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
-  val resp_arb = Module(new Arbiter(new DCacheResp, cfg.nMMIOEntries))
+  val resp_arb = Module(new Arbiter(new DCacheWordResp, cfg.nMMIOEntries))
 
   val req  = io.lsroq.req
   val resp = io.lsroq.resp

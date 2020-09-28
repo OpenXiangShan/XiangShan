@@ -22,6 +22,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def nSets = cacheParams.nSets
   def nWays = cacheParams.nWays
   def blockBytes = cacheParams.blockBytes
+  def blockBits = blockBytes * 8
 
   def idxBits = log2Up(cacheParams.nSets)
   def wayBits = log2Up(nWays)
