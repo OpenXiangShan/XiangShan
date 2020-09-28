@@ -110,14 +110,12 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
   } else {
     val directReq = wbIntReq.filter(w => Seq(Exu.ldExeUnitCfg, Exu.aluExeUnitCfg).contains(w._2))
     val mulReq = wbIntReq.filter(w => Seq(Exu.mulExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulDivFenceExeUnitCfg).contains(w._2))
-    println("aaa")
     val otherReq = splitN(
       wbIntReq.filterNot(w => Seq(
         Exu.ldExeUnitCfg, Exu.aluExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulExeUnitCfg, Exu.mulDivFenceExeUnitCfg
       ).contains(w._2)),
       mulReq.size
     )
-    println("bbb")
     require(directReq.size + mulReq.size <= NRIntWritePorts)
     // alu && load: direct connect
     io.toIntRf.take(directReq.size).zip(directReq).foreach(x => directConnect(x._1, x._2._1))

@@ -80,6 +80,7 @@ class Decoder extends XSModule with HasInstrType {
 
   val rfSrc1 = Mux(isRVC, rvc_src1, rs)
   val rfSrc2 = Mux(isRVC, rvc_src2, rt)
+  val rfSrc3 = instr(31, 27)
   val rfDest = Mux(isRVC, rvc_dest, rd)
 
   // TODO: refactor decode logic
@@ -88,6 +89,7 @@ class Decoder extends XSModule with HasInstrType {
   val fpWen = isfpWen(instrType)
   io.out.ctrl.lsrc1 := Mux(src1Type === SrcType.pc, 0.U, rfSrc1)
   io.out.ctrl.lsrc2 := Mux(src2Type === SrcType.imm, 0.U, rfSrc2)
+  io.out.ctrl.lsrc3 := rfSrc3
   io.out.ctrl.rfWen := rfWen
   io.out.ctrl.fpWen := fpWen
   io.out.ctrl.ldest := Mux(fpWen || rfWen, rfDest, 0.U)

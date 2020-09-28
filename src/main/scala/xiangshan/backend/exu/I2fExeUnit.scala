@@ -20,8 +20,9 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
   val valid = io.in.valid && !uopIn.needFlush(io.redirect)
   val intToFloat = Module(new IntToFloatSingleCycle)
   val extraInput = intToFloat.io.in.bits.ext.get
+  val instr_rm = io.in.bits.uop.cf.instr(14, 12)
   extraInput.isDouble := isDouble
-  extraInput.rm := frm
+  extraInput.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   extraInput.op := op
   intToFloat.io.out.ready := io.out.ready
   intToFloat.io.in.valid := valid && fu===("b"+FU_I2F).U

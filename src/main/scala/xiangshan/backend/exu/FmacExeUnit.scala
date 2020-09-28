@@ -20,7 +20,8 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg) {
   val extraInput = fma.io.in.bits.ext.get
   val frm = WireInit(0.U(3.W))
   BoringUtils.addSink(frm, "Frm")
-  extraInput.rm := frm
+  val instr_rm = io.in.bits.uop.cf.instr(14, 12)
+  extraInput.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   extraInput.op := io.in.bits.uop.ctrl.fuOpType(2, 0)
   extraInput.isDouble := isRVD
 

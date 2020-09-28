@@ -40,6 +40,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
 
   io.in.ready := Cat(subModules.map(x => fu===x._2 && x._1.io.in.ready)).orR()
 
+  val instr_rm = io.in.bits.uop.cf.instr(14, 12)
   subModules.foreach{
     case (module, fuSel) =>
       module.io.in.valid := io.in.valid && fu===fuSel
@@ -47,8 +48,8 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
       module.io.in.bits.src(0) := Mux(isRVF || fuOp===s2d, unboxF64ToF32(src1), src1)
       module.io.in.bits.src(1) := Mux(isRVF, unboxF64ToF32(src2), src2)
       val extraInput = module.io.in.bits.ext.get
+      extraInput.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
       extraInput.isDouble := !isRVF
-      extraInput.rm := frm
       extraInput.op := op
       module.io.redirectIn := io.redirect
   }
