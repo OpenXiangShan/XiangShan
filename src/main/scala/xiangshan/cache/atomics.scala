@@ -11,7 +11,7 @@ import utils.{XSDebug}
 class AtomicsPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
-    val lsu       = Flipped(new DCacheLoadIO)
+    val lsu       = Flipped(new DCacheWordIO)
     val data_read  = DecoupledIO(new L1DataReadReq)
     val data_resp  = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val data_write = DecoupledIO(new L1DataWriteReq)
@@ -122,8 +122,7 @@ class AtomicsPipe extends DCacheModule
   val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
   val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
 
-  BoringUtils.addSource(lrsc_addr, "difftestLrscAddr")
-  BoringUtils.addSource(lrsc_valid, "difftestLrscValid")
+  // BoringUtils.addSource(RegEnable(lrsc_addr, s2_valid && s2_lr), "difftestLrscAddr")
 
   // we have permission on this block
   // but we can not finish in this pass
@@ -200,12 +199,15 @@ class AtomicsPipe extends DCacheModule
 
 
 
-  val resp = Wire(ValidIO(new DCacheResp))
-  resp.valid     := s2_valid
-  resp.bits.data := Mux(s2_sc, s2_sc_resp, s2_data_word_decoded)
-  resp.bits.meta := s2_req.meta
-  resp.bits.miss := !s2_hit
-  resp.bits.nack := s2_nack
+  val resp = Wire(ValidIO(new DCacheWordResp))
+  resp.valid        := s2_valid
+  resp.bits.data    := Mux(s2_sc, s2_sc_resp, s2_data_word)
+  resp.bits.meta    := s2_req.meta
+  // reuse this field to pass lr sc valid to commit
+  // nemu use this to see whether lr sc counter is still valid
+  resp.bits.meta.id := lrsc_valid
+  resp.bits.miss    := !s2_hit
+  resp.bits.nack    := s2_nack
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits

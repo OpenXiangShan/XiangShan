@@ -3,7 +3,7 @@ package utils
 import chisel3._
 
 object BoolStopWatch {
-  def apply(start: Bool, stop: Bool, startHighPriority: Boolean = false) = {
+  def apply(start: Bool, stop: Bool, startHighPriority: Boolean = false, bypass: Boolean = false) = {
     val r = RegInit(false.B)
     if (startHighPriority) {
       when (stop) { r := false.B }
@@ -13,7 +13,7 @@ object BoolStopWatch {
       when (start) { r := true.B }
       when (stop) { r := false.B }
     }
-    r
+    (if (bypass) (start || r) else r)
   }
 }
 

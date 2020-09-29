@@ -12,7 +12,7 @@ trait BimParams extends HasXSParameter {
   val BimBanks = PredictWidth
   val BimSize = 4096
   val nRows = BimSize / BimBanks
-  val bypassEntries = 16
+  val bypassEntries = 4
 }
 
 class BIM extends BasePredictor with BimParams{
@@ -101,12 +101,12 @@ class BIM extends BasePredictor with BimParams{
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtr = Mux(wrbypass_hit, wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
+  val oldCtr = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank), wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
   val newTaken = u.taken
   val newCtr = satUpdate(oldCtr, 2, newTaken)
-  val oldSaturated = newCtr === oldCtr
+  // val oldSaturated = newCtr === oldCtr
   
-  val needToUpdate = io.update.valid && !oldSaturated && u.pd.isBr
+  val needToUpdate = io.update.valid && u.pd.isBr
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   
@@ -116,6 +116,7 @@ class BIM extends BasePredictor with BimParams{
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
     } .otherwise {
       wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
+      (0 until BimBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
       wrbypass_rows(wrbypass_enq_idx) := updateRow
       wrbypass_enq_idx := (wrbypass_enq_idx + 1.U)(log2Up(bypassEntries)-1,0)
@@ -126,6 +127,15 @@ class BIM extends BasePredictor with BimParams{
     bim(b).io.w.req.valid := needToUpdate && b.U === updateBank || doing_reset
     bim(b).io.w.req.bits.setIdx := Mux(doing_reset, resetRow, updateRow)
     bim(b).io.w.req.bits.data := Mux(doing_reset, 2.U(2.W), newCtr)
+  }
+
+  if (BPUDebug && debug) {
+    XSDebug(doing_reset, "Reseting...\n")
+    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x brTgt=%x\n", io.update.valid, u.pc, u.pnpc, u.target, u.brTarget)
+    XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)
+    XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.brInfo.bimCtr)}\n")
+    XSDebug("needToUpdate=%d updateBank=%x updateRow=%x newCtr=%b oldCtr=%b\n", needToUpdate, updateBank, updateRow, newCtr, oldCtr)
+    XSDebug("[wrbypass] hit=%d hits=%b\n", wrbypass_hit, wrbypass_hits.asUInt)
   }
   
 }

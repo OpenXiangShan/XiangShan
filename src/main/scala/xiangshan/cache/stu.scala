@@ -8,7 +8,7 @@ import utils.{XSDebug}
 class StorePipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
-    val lsu        = Flipped(new DCacheStoreIO)
+    val lsu        = Flipped(new DCacheLineIO)
     val data_read  = DecoupledIO(new L1DataReadReq)
     val data_resp  = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val data_write = DecoupledIO(new L1DataWriteReq)
@@ -141,7 +141,7 @@ class StorePipe extends DCacheModule
   dump_pipeline_valids("StorePipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
   dump_pipeline_valids("StorePipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
 
-  val resp = Wire(Valid(new DCacheResp))
+  val resp = Wire(Valid(new DCacheLineResp))
   resp.valid     := s2_valid
   resp.bits.data := DontCare
   resp.bits.meta := s2_req.meta

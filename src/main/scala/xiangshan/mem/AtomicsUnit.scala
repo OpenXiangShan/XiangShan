@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
 
 class AtomicsUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
     val out           = Decoupled(new ExuOutput)
-    val dcache        = new DCacheLoadIO
+    val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
@@ -27,6 +27,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val paddr = Reg(UInt())
   // dcache response data
   val resp_data = Reg(UInt())
+  val is_lrsc_valid = Reg(Bool())
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -140,7 +141,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))
-    io.dcache.req.bits.meta.id       := DCacheAtomicsType.atomics
+    io.dcache.req.bits.meta.id       := DontCare
     io.dcache.req.bits.meta.paddr    := paddr
     io.dcache.req.bits.meta.tlb_miss := false.B
     io.dcache.req.bits.meta.replay   := false.B
@@ -153,6 +154,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_cache_resp) {
     io.dcache.resp.ready := true.B
     when(io.dcache.resp.fire()) {
+      is_lrsc_valid := io.dcache.resp.bits.meta.id
       val rdata = io.dcache.resp.bits.data
       val rdataSel = LookupTree(paddr(2, 0), List(
         "b000".U -> rdata(63, 0),
@@ -198,6 +200,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   when (state === s_finish) {
     io.out.valid := true.B
     io.out.bits.uop := in.uop
+    io.out.bits.uop.diffTestDebugLrScValid := is_lrsc_valid
     io.out.bits.data := resp_data
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare

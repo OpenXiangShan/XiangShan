@@ -66,6 +66,7 @@ class BTB extends BasePredictor with BTBParams{
     val resp = Output(new BTBResp)
     val meta = Output(new BTBMeta)
   }
+  override val debug = true
   override val io = IO(new BTBIO)
   val btbAddr = new TableAddr(log2Up(BtbSize/BtbWays), BtbBanks)
 
@@ -92,11 +93,7 @@ class BTB extends BasePredictor with BTBParams{
 
   // those banks whose indexes are less than baseBank are in the next row
   val isInNextRow = VecInit((0 until BtbBanks).map(_.U < baseBank))
-  XSDebug("isInNextRow: ")
-  (0 until BtbBanks).foreach(i => {
-    XSDebug(false, true.B, "%d ", isInNextRow(i))
-    if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
-  })
+
 
   val baseRow = btbAddr.getBankIdx(io.pc.bits)
 
@@ -209,7 +206,7 @@ class BTB extends BasePredictor with BTBParams{
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
   val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && updateType === BTBtype.J
-  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered)
+  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered || !u.isMisPred && u.pd.isBr)
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
@@ -229,6 +226,12 @@ class BTB extends BasePredictor with BTBParams{
 
   if (BPUDebug && debug) {
     val debug_verbose = true
+    
+    XSDebug("isInNextRow: ")
+    (0 until BtbBanks).foreach(i => {
+      XSDebug(false, true.B, "%d ", isInNextRow(i))
+      if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
+    })
 
     val validLatch = RegNext(io.pc.valid)
     XSDebug(io.pc.valid, "read: pc=0x%x, baseBank=%d, realMask=%b\n", io.pc.bits, baseBank, realMask)

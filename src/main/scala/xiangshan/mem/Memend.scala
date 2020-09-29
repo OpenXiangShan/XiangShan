@@ -10,12 +10,6 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 
-object DCacheAtomicsType {
-  def miss      = "b00".U
-  def mmio      = "b01".U
-  def atomics      = "b10".U
-}
-
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
     (LookupTree(sizeEncode, List(
@@ -84,11 +78,11 @@ class MemToBackendIO extends XSBundle {
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
-    val loadMiss = new DCacheLoadIO
-    val atomics  = new DCacheLoadIO
-    val sbufferToDcache = new DCacheStoreIO
-    val uncache = new DCacheLoadIO
+    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheWordIO)
+    val loadMiss = new DCacheLineIO
+    val atomics  = new DCacheWordIO
+    val sbufferToDcache = new DCacheLineIO
+    val uncache = new DCacheWordIO
     val ptw = new TlbPtwIO
   })
 

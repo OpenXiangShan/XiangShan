@@ -7,6 +7,7 @@ import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
+import xiangshan.frontend.HasTageParameter
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -33,8 +34,7 @@ object ValidUndirectioned {
   }
 }
 
-class TageMeta extends XSBundle {
-  def TageNTables = 6
+class TageMeta extends XSBundle with HasTageParameter {
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
@@ -49,6 +49,7 @@ class BranchPrediction extends XSBundle {
   val hasNotTakenBrs = Bool()
   val target = UInt(VAddrBits.W)
   val saveHalfRVI = Bool()
+  val takenOnBr = Bool()
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
@@ -58,15 +59,18 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
   val histPtr = UInt(log2Up(ExtHistoryLength).W)
+  val predHistPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val rasToqAddr = UInt(VAddrBits.W)
   val fetchIdx = UInt(log2Up(PredictWidth).W)
+  val specCnt = UInt(10.W)
+  val sawNotTakenBranch = Bool()
 
-  val debug_ubtb_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
-  val debug_btb_cycle  = if (BPUDebug) UInt(64.W) else UInt(0.W)
-  val debug_tage_cycle = if (BPUDebug) UInt(64.W) else UInt(0.W)
+  val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+  val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
+  val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
   def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
     this.histPtr := histPtr
@@ -94,6 +98,7 @@ class BranchUpdateInfo extends XSBundle {
   val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   val isMisPred = Bool()
+  val brTag = new BrqPtr
 
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
@@ -159,6 +164,7 @@ class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
   val lsroqIdx = UInt(LsroqIdxWidth.W)
+  val diffTestDebugLrScValid = Bool()
 }
 
 class Redirect extends XSBundle with HasRoqIdx {
