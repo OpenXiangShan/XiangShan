@@ -98,7 +98,7 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
   "sstatus", "scause", "sepc",
   "satp", 
   "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg", 
-  "mtval", "stval", "mode"
+  "mtval", "stval", "mtvec", "stvec", "mode"
 };
 
 static uint64_t nemu_this_pc = 0x80000000;
@@ -190,6 +190,7 @@ int difftest_step(DiffState *s) {
         // single step exec
         // IPF, LPF, SPF
         if(s->cause == 12 || s->cause == 13 || s->cause == 15){
+          printf("s->cause %ld\n", s->cause);
           ref_disambiguate_exec(&s->cause);
         }else{
           ref_difftest_exec(1);
