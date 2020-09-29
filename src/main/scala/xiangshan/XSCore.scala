@@ -32,10 +32,11 @@ case class XSCoreParameters
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
-  EnableRAS: Boolean = false,
+  EnableRAS: Boolean = true,
   EnableLB: Boolean = false,
+  EnableLoop: Boolean = false,
   HistoryLength: Int = 64,
-  BtbSize: Int = 256,
+  BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
   JbtacBanks: Int = 8,
   RasSize: Int = 16,
@@ -113,6 +114,7 @@ trait HasXSParameter {
   val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3
   val EnableRAS = core.EnableRAS
   val EnableLB = core.EnableLB
+  val EnableLoop = core.EnableLoop
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
   // val BtbWays = 4
@@ -123,7 +125,7 @@ trait HasXSParameter {
   val RasSize = core.RasSize
   val CacheLineSize = core.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
-  val ExtHistoryLength = HistoryLength * 2
+  val ExtHistoryLength = HistoryLength + 64
   val UBtbWays = core.UBtbWays
   val BtbWays = core.BtbWays
   val IBufSize = core.IBufSize

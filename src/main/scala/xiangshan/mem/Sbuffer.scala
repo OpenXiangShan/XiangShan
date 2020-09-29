@@ -52,7 +52,7 @@ class SbufferFlushBundle extends Bundle {
 class Sbuffer extends XSModule with HasSBufferConst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq )))
-    val dcache = new DCacheStoreIO
+    val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val flush = new Bundle {
       val valid = Input(Bool())
@@ -490,7 +490,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
 class FakeSbuffer extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
-    val dcache = new DCacheStoreIO
+    val dcache = new DCacheLineIO
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
   })
 

@@ -4,14 +4,14 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheLoadIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
 
 class AtomicsUnit extends XSModule with MemoryOpConstants{
   val io = IO(new Bundle() {
     val in            = Flipped(Decoupled(new ExuInput))
     val out           = Decoupled(new ExuOutput)
-    val dcache        = new DCacheLoadIO
+    val dcache        = new DCacheWordIO
     val dtlb          = new TlbRequestIO
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)

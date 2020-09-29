@@ -51,6 +51,7 @@ class Jump extends FunctionUnit(jmpCfg, extOut = new RedirectOut) {
   brUpdate.brTarget := target // DontCare
   brUpdate.taken := true.B
   // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
+  io.out.bits.brUpdate.brTag := uop.brTag
 
   // Output
   val res = pcDelaySlot

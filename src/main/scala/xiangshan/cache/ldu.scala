@@ -8,7 +8,7 @@ import utils.XSDebug
 class LoadPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
-    val lsu       = Flipped(new DCacheLoadIO)
+    val lsu       = Flipped(new DCacheWordIO)
     val data_read = DecoupledIO(new L1DataReadReq)
     val data_resp = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val meta_read = DecoupledIO(new L1MetaReadReq)
@@ -129,7 +129,7 @@ class LoadPipe extends DCacheModule
   assert(!(s2_valid && s2_hit && !s2_nack && s2_decoded.uncorrectable))
 
 
-  val resp = Wire(ValidIO(new DCacheResp))
+  val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid     := s2_valid
   resp.bits.data := s2_data_word_decoded
   resp.bits.meta := s2_req.meta
