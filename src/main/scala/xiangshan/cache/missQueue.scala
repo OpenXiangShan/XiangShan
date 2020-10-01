@@ -238,12 +238,9 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     } .otherwise { // refill and writeback if necessary
       new_coh     := ClientMetadata.onReset
       should_refill_data := true.B
-      when (needs_wb) {
-        new_state   := s_wb_req
-        needs_writeback := true.B
-      } .otherwise {
-        new_state   := s_refill_req
-      }
+      needs_writeback := needs_wb
+      // refill first to decrease load miss penalty
+      new_state   := s_refill_req
     }
     new_state
   }
@@ -271,7 +268,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
   when (state === s_wb_resp) {
     when (io.wb_resp) {
-      state := s_refill_req
+      state := s_data_write_req
     }
   }
 
@@ -334,13 +331,26 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       grantack.valid := false.B
 
       // no data
-      when (!should_refill_data) {
-        state := s_meta_write_req
+      when (early_response) {
+        // load miss respond right after finishing tilelink transactions
+        assert(should_refill_data)
+        state := s_send_resp
       } .otherwise {
-        when (early_response) {
-          state := s_send_resp
+        // if we do not do early respond
+        // we must be a write
+        when (needs_writeback) {
+          // write back data
+          assert(should_refill_data)
+          state := s_wb_req
         } .otherwise {
-          state := s_data_write_req
+          // no need to write back
+          when (should_refill_data) {
+            // fill data into dcache
+            state := s_data_write_req
+          } otherwise {
+            // just got permission, no need to fill data into dcache
+            state := s_meta_write_req
+          }
         }
       }
     }
@@ -392,9 +402,15 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
       assert(is_hit, "We still don't have permissions for this block")
       assert(new_coh === coh_on_hit, "Incorrect coherence meta data")
 
-      // for read, we will write data later
+      // read miss
       when (early_response && should_refill_data) {
-        state := s_data_write_req
+        when (needs_writeback) {
+          // write back data later
+          state := s_wb_req
+        } .otherwise {
+          // for read, we will write data later
+          state := s_data_write_req
+        }
       } .otherwise {
         state := s_client_finish
       }
