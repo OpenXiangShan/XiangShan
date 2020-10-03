@@ -595,9 +595,14 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned) && io.exception.valid
 
   // mtval write logic
-  val memExceptionAddr = WireInit(0.U(VAddrBits.W))
+  val lsroqExceptionAddr = WireInit(0.U(VAddrBits.W))
+  val atomExceptionAddr = WireInit(0.U(VAddrBits.W))
+  val atomOverrideXtval = WireInit(false.B)
   ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSink(memExceptionAddr, "EXECPTION_VADDR")
+  ExcitingUtils.addSink(lsroqExceptionAddr, "EXECPTION_VADDR")
+  ExcitingUtils.addSink(atomExceptionAddr, "ATOM_EXECPTION_VADDR")
+  ExcitingUtils.addSink(atomOverrideXtval, "ATOM_OVERRIDE_XTVAL")
+  val memExceptionAddr = Mux(atomOverrideXtval, atomExceptionAddr, lsroqExceptionAddr)
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
