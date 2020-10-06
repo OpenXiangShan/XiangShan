@@ -1,6 +1,7 @@
 package xiangshan.mem
 
 import chisel3._
+import chisel3.experimental.chiselName
 import chisel3.util._
 import xiangshan._
 import utils._
@@ -24,8 +25,13 @@ class SbufferLine extends SbufferBundle {
   val tag = UInt(TagWidth.W)
   val data = UInt(CacheLineSize.W)
   val mask = UInt(CacheLineBytes.W)
+
+  override def toPrintable: Printable = {
+    p"tag:${Hexadecimal(tag)} data:${Hexadecimal(data)} mask:${Binary(mask)}\n"
+  }
 }
 
+@chiselName
 class NewSbuffer extends XSModule with HasSbufferCst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
@@ -141,11 +147,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
       mem_new(mergeIdx) := mergeWordReq(req.bits, mem_old(mergeIdx))
       lruAccessWays(reqIdx).valid := true.B
       lruAccessWays(reqIdx).bits := mergeIdx
+      XSDebug(p"merge req $reqIdx to line [$mergeIdx]\n")
     }.elsewhen(notFull && req.valid){
       state_new(insertIdx) := s_valid
       mem_new(insertIdx) := wordReqToBufLine(req.bits)
       lruAccessWays(reqIdx).valid := true.B
       lruAccessWays(reqIdx).bits := insertIdx
+      XSDebug(p"insert req $reqIdx to line[$insertIdx]\n")
     }
     state_new.zip(mem_new)
   }
@@ -159,6 +167,19 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   for(i <- 0 until StoreBufferSize){
     buffer.write(i.U, updatedSbufferLine(i))
     stateVec(i) := updatedState(i)
+  }
+
+  for(i <- 0 until StoreBufferSize){
+    XSDebug(p"[$i] state:${stateVec(i)} buf:${bufferRead(i)}\n")
+  }
+
+  for((req, i) <- io.in.zipWithIndex){
+    XSDebug(req.fire(),
+      p"accept req [$i]: " +
+        p"addr:${Hexadecimal(req.bits.addr)} " +
+        p"data:${Hexadecimal(req.bits.data)} " +
+        p"mask:${Binary(req.bits.mask)}\n"
+    )
   }
 
 
@@ -191,6 +212,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
       }
     }
   }
+  XSDebug(p"sbuffer state:${sbuffer_state} maybefull:${may_full} empty:${empty}\n")
 
   val evictionIdxWire = Mux(stateVec(replaceIdx)===s_valid, replaceIdx, firstValidEntry)
   val evictionIdxEnqReq = Wire(DecoupledIO(UInt(SbufferIndexWidth.W)))
@@ -214,6 +236,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   lru.access(lruAccessWays)
   when(sbuffer_state === x_drain_sbuffer && empty){
     lru.flush()
+    XSDebug("drain sbuffer finish, flush lru\n")
   }
 
 
@@ -228,6 +251,10 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   io.dcache.req.bits.meta.id := wbIdx
   when(io.dcache.req.fire()){ stateVec(wbIdx) := s_inflight_resp }
 
+  XSDebug(io.dcache.req.fire(),
+    p"send buf [$wbIdx] to Dcache\n"
+  )
+
   // For now, dcache access is 'blocking access'
   io.dcache.resp.ready := true.B
   evictionIdxQueue.io.deq.ready := io.dcache.resp.fire()
@@ -239,25 +266,32 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   // ---------------------- Load Data Forward ---------------------
 
-  def forwardQuery(forward: LoadForwardQueryIO, bufLine: SbufferLine): LoadForwardQueryIO = {
+  // (buff, do_forward)
+  // pass 'do_forward' here to avoid duplicated tag compare
+  type ForwardBuf = (SbufferLine, Bool)
+
+  def forwardQuery(forward: LoadForwardQueryIO, buff: ForwardBuf): LoadForwardQueryIO = {
+    val bufLine = buff._1
+    val do_forward = buff._2
     val forwardWire = WireInit(forward)
     val forwardMask = forwardWire.forwardMask
     val forwardData = forwardWire.forwardData
     val dataVec = VecInit((0 until CacheLineBytes).map(i =>
       bufLine.data(i*8+7, i*8)
     ))
-
-    (0 until DataBytes).map(i => {
-      val lineOffset = Cat(getByteOffset(forward.paddr), i.U(3.W))
-      when(bufLine.mask(lineOffset) && forward.mask(i)){
-        forwardMask(i) := true.B
-        forwardData(i) := dataVec(lineOffset)
-      }
-    })
+    when(do_forward){
+      (0 until DataBytes).map(i => {
+        val lineOffset = Cat(getByteOffset(forward.paddr), i.U(3.W))
+        when(bufLine.mask(lineOffset) && forward.mask(i)){
+          forwardMask(i) := true.B
+          forwardData(i) := dataVec(lineOffset)
+        }
+      })
+    }
     forwardWire
   }
 
-  for(forward <- io.forward){
+  for((forward, i) <- io.forward.zipWithIndex){
     val tag_matches = witdhMap(i => bufferRead(i).tag===getTag(forward.paddr))
     val valid_tag_matches = witdhMap(i => tag_matches(i) && stateVec(i)===s_valid)
     val inflight_tag_matches = witdhMap(i =>
@@ -273,9 +307,20 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     initialForward.forwardMask := 0.U.asTypeOf(Vec(DataBytes, Bool()))
     initialForward.forwardData := DontCare
 
-    val forwardResult = Seq(inflight_line, valid_line).foldLeft(initialForward)(forwardQuery)
+    val forwardResult = Seq(
+      (inflight_line, inflight_tag_match),
+      (valid_line, valid_tag_match)
+    ).foldLeft(initialForward)(forwardQuery)
+
     forward.forwardMask := forwardResult.forwardMask
     forward.forwardData := forwardResult.forwardData
+
+    XSDebug(inflight_tag_match, p"tag match: forward [$i] <> buf[$inflight_forwad_idx]\n")
+    XSDebug(valid_tag_match,
+      p"tag match: forward [$i] <> buf[$valid_forward_idx] " +
+        p"forward mask:${Binary(forward.forwardMask.asUInt())} " +
+        p"forward data:${Hexadecimal(forward.forwardData.asUInt())}\n"
+    )
   }
 }
 
