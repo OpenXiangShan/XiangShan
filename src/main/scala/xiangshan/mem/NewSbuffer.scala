@@ -94,6 +94,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
         dataVec(wordIdx)(i) := req.data(i*8+7, i*8)
       }
     }
+    bufLine.tag := getTag(req.addr)
     bufLine.mask := mask.asUInt()
     bufLine.data := dataVec.asUInt()
     bufLine
@@ -120,31 +121,33 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   def enqSbuffer(buf: Seq[SbufferEntry], reqWithIdx: ReqWithIdx): Seq[SbufferEntry] = {
     val req = reqWithIdx._1
     val reqIdx = reqWithIdx._2
-    val state = VecInit(buf.map(_._1))
-    val mem = VecInit(buf.map(_._2))
+    val state_old = VecInit(buf.map(_._1))
+    val mem_old = VecInit(buf.map(_._2))
+    val state_new = WireInit(state_old)
+    val mem_new = WireInit(mem_old)
 
     def stateCanMerge(s: UInt): Bool = s===s_valid || s===s_inflight_req
 
     val mergeMask = witdhMap(i =>
-      req.valid && stateCanMerge(state(i)) && getTag(req.bits.addr)===mem(i).tag
+      req.valid && stateCanMerge(state_old(i)) && getTag(req.bits.addr)===mem_old(i).tag
     )
     val canMerge = Cat(mergeMask).orR()
-    val invalidMask = state.map(s => s===s_invalid)
+    val invalidMask = state_old.map(s => s===s_invalid)
     val notFull = Cat(invalidMask).orR()
     req.ready := notFull || canMerge
     val mergeIdx = PriorityEncoder(mergeMask)
     val insertIdx = PriorityEncoder(invalidMask)
     when(canMerge){
-      mem(mergeIdx) := mergeWordReq(req.bits, mem(mergeIdx))
+      mem_new(mergeIdx) := mergeWordReq(req.bits, mem_old(mergeIdx))
       lruAccessWays(reqIdx).valid := true.B
       lruAccessWays(reqIdx).bits := mergeIdx
     }.elsewhen(notFull && req.valid){
-      state(insertIdx) := s_valid
-      mem(insertIdx) := wordReqToBufLine(req.bits)
+      state_new(insertIdx) := s_valid
+      mem_new(insertIdx) := wordReqToBufLine(req.bits)
       lruAccessWays(reqIdx).valid := true.B
       lruAccessWays(reqIdx).bits := insertIdx
     }
-    state.zip(mem)
+    state_new.zip(mem_new)
   }
 
   val bufferRead = VecInit((0 until StoreBufferSize) map (i => buffer.read(i.U)))
@@ -226,6 +229,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.dcache.req.fire()){ stateVec(wbIdx) := s_inflight_resp }
 
   // For now, dcache access is 'blocking access'
+  io.dcache.resp.ready := true.B
   evictionIdxQueue.io.deq.ready := io.dcache.resp.fire()
   when(io.dcache.resp.fire()){
     stateVec(wbIdx) := s_invalid
@@ -275,3 +279,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
 }
 
+object NewSbuffer extends App {
+  override def main(args: Array[String]): Unit = {
+    chisel3.Driver.execute(args, ()=> new NewSbuffer)
+  }
+}
