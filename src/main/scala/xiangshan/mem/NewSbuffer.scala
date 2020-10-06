@@ -11,6 +11,13 @@ import utils.TrueLRU
 
 
 trait HasSbufferCst extends HasXSParameter {
+  // def s_invalid :: s_valid :: s_inflight_req :: s_inflight_resp :: Nil = Enum(4)
+
+  def s_invalid = 0.U(2.W)
+  def s_valid = 1.U(2.W)
+  def s_inflight_req = 2.U(2.W)
+  def s_inflight_resp = 3.U(2.W)
+
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = tag + offset
   val CacheLineBytes: Int = CacheLineSize / 8
@@ -31,6 +38,26 @@ class SbufferLine extends SbufferBundle {
   }
 }
 
+class AbstractEvictor extends XSModule with HasSbufferCst{
+  val io = IO(new Bundle{
+    val states = Input(Vec(StoreBufferSize, UInt(s_invalid.getWidth.W)))
+    val do_eviction = Output(Bool())
+  })
+}
+
+
+class NaiveEvictor(threshold: Int) extends AbstractEvictor{
+
+  require(threshold >= 0 && threshold <= StoreBufferSize)
+
+  val entryCnt = PopCount(io.states.map(s => s=/=s_invalid))
+
+  io.do_eviction := entryCnt >= threshold.U((SbufferIndexWidth+1).W)
+
+  XSDebug("sbuffer entry cnt: %d\n", entryCnt)
+
+}
+
 @chiselName
 class NewSbuffer extends XSModule with HasSbufferCst {
   val io = IO(new Bundle() {
@@ -42,8 +69,6 @@ class NewSbuffer extends XSModule with HasSbufferCst {
       val empty = Output(Bool())
     } // sbuffer flush
   })
-
-  val s_invalid :: s_valid :: s_inflight_req :: s_inflight_resp :: Nil = Enum(4)
 
   val buffer = Mem(StoreBufferSize, new SbufferLine)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
@@ -170,32 +195,41 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
 
   for(i <- 0 until StoreBufferSize){
-    XSDebug(p"[$i] state:${stateVec(i)} buf:${bufferRead(i)}\n")
+    XSDebug(stateVec(i)=/=s_invalid,
+      p"[$i] state:${stateVec(i)} buf:${bufferRead(i)}\n"
+    )
   }
 
   for((req, i) <- io.in.zipWithIndex){
     XSDebug(req.fire(),
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
-        p"data:${Hexadecimal(req.bits.data)} " +
-        p"mask:${Binary(req.bits.mask)}\n"
+        p"mask:${Binary(req.bits.mask)} " + 
+        p"data:${Hexadecimal(req.bits.data)}\n" 
+    )
+    XSDebug(req.valid && !req.ready,
+      p"req [$i] blocked by sbuffer\n"
     )
   }
 
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val may_full = Cat(stateVec.map(s => s=/=s_invalid)).andR()
+  val do_eviction = Wire(Bool())
   val empty = Cat(stateVec.map(s => s===s_invalid)).andR() && !Cat(io.in.map(_.valid)).orR()
   val replaceIdx = lru.way
   val firstValidEntry = PriorityEncoder(stateVec.map(s => s===s_valid))
+
+  val evictor = Module(new NaiveEvictor(StoreBufferSize-4))
+  evictor.io.states := stateVec
+  do_eviction := evictor.io.do_eviction
 
   io.flush.empty := empty
   switch(sbuffer_state){
     is(x_idle){
       when(io.flush.valid){
         sbuffer_state := x_drain_sbuffer
-      }.elsewhen(may_full){
+      }.elsewhen(do_eviction){
         sbuffer_state := x_replace
       }
     }
@@ -207,12 +241,12 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     is(x_replace){
       when(io.flush.valid){
         sbuffer_state := x_drain_sbuffer
-      }.elsewhen(!may_full){
+      }.elsewhen(!do_eviction){
         sbuffer_state := x_idle
       }
     }
   }
-  XSDebug(p"sbuffer state:${sbuffer_state} maybefull:${may_full} empty:${empty}\n")
+  XSDebug(p"sbuffer state:${sbuffer_state} do eviction:${do_eviction} empty:${empty}\n")
 
   val evictionIdxWire = Mux(stateVec(replaceIdx)===s_valid, replaceIdx, firstValidEntry)
   val evictionIdxEnqReq = Wire(DecoupledIO(UInt(SbufferIndexWidth.W)))
@@ -224,7 +258,6 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   evictionIdxEnqReq.bits := evictionIdxWire
   evictionIdxQueue.io.enq <> evictionIdxEnqReq
-  assert(evictionIdxEnqReq.ready)
 
   when(evictionIdxEnqReq.fire()){
     stateVec(evictionIdxWire) := s_inflight_req
@@ -281,7 +314,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     ))
     when(do_forward){
       (0 until DataBytes).map(i => {
-        val lineOffset = Cat(getByteOffset(forward.paddr), i.U(3.W))
+        val lineOffset = Cat(getWordOffset(forward.paddr), i.U(3.W))
         when(bufLine.mask(lineOffset) && forward.mask(i)){
           forwardMask(i) := true.B
           forwardData(i) := dataVec(lineOffset)
@@ -315,11 +348,11 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     forward.forwardMask := forwardResult.forwardMask
     forward.forwardData := forwardResult.forwardData
 
-    XSDebug(inflight_tag_match, p"tag match: forward [$i] <> buf[$inflight_forwad_idx]\n")
+    XSDebug(inflight_tag_match, 
+      p"inflight tag match: forward [$i] <> buf[$inflight_forwad_idx]\n"
+    )
     XSDebug(valid_tag_match,
-      p"tag match: forward [$i] <> buf[$valid_forward_idx] " +
-        p"forward mask:${Binary(forward.forwardMask.asUInt())} " +
-        p"forward data:${Hexadecimal(forward.forwardData.asUInt())}\n"
+      p"valid tag match: forward [$i] <> buf[$valid_forward_idx]\n"
     )
   }
 }
