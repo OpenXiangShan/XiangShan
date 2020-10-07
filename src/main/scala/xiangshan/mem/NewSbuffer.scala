@@ -1,7 +1,6 @@
 package xiangshan.mem
 
 import chisel3._
-import chisel3.experimental.chiselName
 import chisel3.util._
 import xiangshan._
 import utils._
@@ -58,7 +57,6 @@ class NaiveEvictor(threshold: Int) extends AbstractEvictor{
 
 }
 
-@chiselName
 class NewSbuffer extends XSModule with HasSbufferCst {
   val io = IO(new Bundle() {
     val in = Vec(StorePipelineWidth, Flipped(Decoupled(new DCacheWordReq)))
@@ -283,18 +281,18 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   io.dcache.req.bits.meta := DontCare
   io.dcache.req.bits.meta.id := wbIdx
   when(io.dcache.req.fire()){ stateVec(wbIdx) := s_inflight_resp }
+  evictionIdxQueue.io.deq.ready := io.dcache.req.ready
 
   XSDebug(io.dcache.req.fire(),
-    p"send buf [$wbIdx] to Dcache\n"
+    p"send buf [$wbIdx] to Dcache, req fire\n"
   )
 
-  // For now, dcache access is 'blocking access'
-  io.dcache.resp.ready := true.B
-  evictionIdxQueue.io.deq.ready := io.dcache.resp.fire()
+  io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
+  val respId = io.dcache.resp.bits.meta.id
   when(io.dcache.resp.fire()){
-    stateVec(wbIdx) := s_invalid
-    assert(wbIdx === io.dcache.resp.bits.meta.id)
-    assert(stateVec(wbIdx) === s_inflight_resp)
+    stateVec(respId) := s_invalid
+    assert(stateVec(respId) === s_inflight_resp)
+    XSDebug(p"recv cache resp: id=[$respId]\n")
   }
 
   // ---------------------- Load Data Forward ---------------------
