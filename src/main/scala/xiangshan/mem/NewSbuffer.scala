@@ -100,6 +100,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   def getWordOffset(pa: UInt): UInt = pa(OffsetWidth-1, 3)
 
+  def isOneOf(key: UInt, seq: Seq[UInt]): Bool =
+    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR()
 
   def witdhMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
 
@@ -155,7 +157,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     val state_new = WireInit(state_old)
     val mem_new = WireInit(mem_old)
 
-    def stateCanMerge(s: UInt): Bool = s===s_valid || s===s_inflight_req
+    def stateCanMerge(s: UInt): Bool = isOneOf(s, Seq(s_valid, s_inflight_req))
 
     val mergeMask = witdhMap(i =>
       req.valid && stateCanMerge(state_old(i)) && getTag(req.bits.addr)===mem_old(i).tag
@@ -250,9 +252,23 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val evictionIdxEnqReq = Wire(DecoupledIO(UInt(SbufferIndexWidth.W)))
   val evictionIdxQueue = Module(new Queue(UInt(SbufferIndexWidth.W), StoreBufferSize, pipe = true, flow = false))
 
-  evictionIdxEnqReq.valid := (
-    sbuffer_state===x_drain_sbuffer || sbuffer_state===x_replace
-    ) && stateVec(evictionIdxWire)===s_valid
+  def noSameBlockInflight(idx: UInt): Bool = {
+    val tag = updatedSbufferLine(idx).tag
+    !Cat(witdhMap(i => {
+      // stateVec(idx) itself must not be s_inflight*
+      isOneOf(stateVec(i), Seq(s_inflight_req, s_inflight_resp)) &&
+        tag===updatedSbufferLine(i).tag
+    })).orR()
+  }
+
+  /*
+      If there is a inflight dcache req which has same tag with evictionIdx's tag,
+      current eviction should be blocked.
+   */
+  evictionIdxEnqReq.valid :=
+    isOneOf(sbuffer_state, Seq(x_drain_sbuffer, x_replace)) &&
+      stateVec(evictionIdxWire)===s_valid &&
+      noSameBlockInflight(evictionIdxWire)
 
   evictionIdxEnqReq.bits := evictionIdxWire
   evictionIdxQueue.io.enq <> evictionIdxEnqReq
