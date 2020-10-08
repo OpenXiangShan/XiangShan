@@ -9,10 +9,8 @@ MEM_GEN = ./scripts/vlsi_mem_gen
 SIMTOP = top.TestMain
 IMAGE ?= temp
 
-# remote machine with high frequency to speedup verilog generation
+# remote machine with more cores to speedup c++ build
 REMOTE ?= localhost
-REMOTE_PREFIX ?= 
-REMOTE_PRJ_HOME = $(REMOTE_PREFIX)/$(abspath .)/
 
 .DEFAULT_GOAL = verilog
 
@@ -47,11 +45,7 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-ifeq ($(REMOTE),localhost)
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
-else
-	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)"
-endif
 
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
@@ -97,17 +91,11 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 
-ifeq ($(REMOTE),localhost)
-REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
-else
-REF_SO := /home/pcl/NEMU/build/riscv64-nemu-interpreter-so
-endif
-
 $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
-	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" time $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(dir $(EMU_MK)) -f $(abspath $(EMU_MK))
+	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
@@ -125,17 +113,13 @@ SNAPSHOT ?=
 ifeq ($(SNAPSHOT),)
 SNAPSHOT_OPTION = 
 else
-SNAPSHOT_OPTION = --load-snapshot=$(REMOTE_PREFIX)/$(SNAPSHOT)
+SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
 endif
 
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
-ifeq ($(REMOTE),localhost)
-	@numactl -m 0 -N 0 -- $(EMU) -i $(IMAGE) $(EMU_FLAGS)
-else
-	ssh -tt $(REMOTE) "cd $(REMOTE_PRJ_HOME) && export NOOP_HOME=$(REMOTE_PREFIX)/$(NOOP_HOME) && $(EMU) -i $(REMOTE_PREFIX)/$(IMAGE) $(EMU_FLAGS)"
-endif
+	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
