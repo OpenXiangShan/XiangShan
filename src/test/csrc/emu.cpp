@@ -194,8 +194,8 @@ inline void Emulator::single_cycle() {
 #endif
 
   if (dut_ptr->io_uart_out_valid) {
-    fprintf(stderr, "%c", dut_ptr->io_uart_out_ch);
-    fflush(stderr);
+    printf("%c", dut_ptr->io_uart_out_ch);
+    fflush(stdout);
   }
   if (dut_ptr->io_uart_in_valid) {
     extern uint8_t uart_getc();

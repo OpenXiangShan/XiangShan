@@ -12,8 +12,6 @@ IMAGE ?= temp
 # remote machine with more cores to speedup c++ build
 REMOTE ?= localhost
 
-USE_DISPLAY = 0
-
 .DEFAULT_GOAL = verilog
 
 help:
@@ -48,9 +46,6 @@ SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
-ifeq ($(USE_DISPLAY),1)
-	sed -i "s/fwrite(32'h80000002,/display(/g" $(SIM_TOP_V)
-endif
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
 EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
