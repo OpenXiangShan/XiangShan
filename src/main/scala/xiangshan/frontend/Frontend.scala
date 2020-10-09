@@ -57,6 +57,11 @@ class Frontend extends XSModule {
       p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
     )
   }
+  // for(out <- ibuffer.io.out){
+  //   XSInfo(out.fire(),
+  //     p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
+  //   )
+  // }
 
 
 }

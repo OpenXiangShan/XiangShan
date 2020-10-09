@@ -64,20 +64,7 @@ class RAS extends BasePredictor
     io.branchInfo.rasToqAddr := DontCare
 
     io.out.valid := !spec_is_empty && io.is_ret
-    XSDebug("----------------RAS(spec)----------------\n")
-    XSDebug("  index       addr           ctr \n")
-    for(i <- 0 until RasSize){
-        XSDebug("  (%d)   0x%x      %d",i.U,spec_ras(i).retAddr,spec_ras(i).ctr)
-        when(i.U === spec_sp){XSDebug(false,true.B,"   <----sp")}
-        XSDebug(false,true.B,"\n")
-    }
-    XSDebug("----------------RAS(commit)----------------\n")
-    XSDebug("  index       addr           ctr \n")
-    for(i <- 0 until RasSize){
-        XSDebug("  (%d)   0x%x      %d",i.U,commit_ras(i).retAddr,commit_ras(i).ctr)
-        when(i.U === commit_sp){XSDebug(false,true.B,"   <----sp")}
-        XSDebug(false,true.B,"\n")
-    }
+
     // update spec RAS
     // speculative update RAS
     val spec_push = !spec_is_full && io.callIdx.valid && io.pc.valid
@@ -95,7 +82,6 @@ class RAS extends BasePredictor
         }.otherwise{ 
             spec_ras_top_ctr := spec_ras_top_ctr + 1.U
         }
-        XSDebug("(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",spec_ras_write.retAddr,spec_ras_write.ctr,sepc_alloc_new,spec_sp.asUInt)
     }
     
     when (spec_pop) {
@@ -105,7 +91,6 @@ class RAS extends BasePredictor
         }.otherwise {
            spec_ras_top_ctr := spec_ras_top_ctr - 1.U
         }
-        XSDebug("(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
     }
     io.out.bits.target := spec_ras_top_addr
     // TODO: back-up stack for ras
@@ -132,7 +117,6 @@ class RAS extends BasePredictor
         }.otherwise{ 
             commit_ras_top_ctr := commit_ras_top_ctr + 1.U
         }
-        XSDebug("(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",commit_ras_write.retAddr,commit_ras_write.ctr,sepc_alloc_new,commit_sp.asUInt)
     }
     
     when (commit_pop) {
@@ -142,12 +126,10 @@ class RAS extends BasePredictor
         }.otherwise {
            commit_ras_top_ctr := commit_ras_top_ctr - 1.U
         }
-        XSDebug("(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
     }
 
     val copy_valid = io.recover.valid && io.recover.bits.isMisPred
     val copy_next = RegNext(copy_valid)
-    XSDebug("copyValid:%d copyNext:%d \n",copy_valid,copy_next)
     when(copy_next)
     {
         for(i <- 0 until RasSize)
@@ -156,6 +138,30 @@ class RAS extends BasePredictor
             spec_sp := commit_sp
         }
     }
+
+    if (BPUDebug && debug) {
+        XSDebug("----------------RAS(spec)----------------\n")
+        XSDebug("  index       addr           ctr \n")
+        for(i <- 0 until RasSize){
+            XSDebug("  (%d)   0x%x      %d",i.U,spec_ras(i).retAddr,spec_ras(i).ctr)
+            when(i.U === spec_sp){XSDebug(false,true.B,"   <----sp")}
+            XSDebug(false,true.B,"\n")
+        }
+        XSDebug("----------------RAS(commit)----------------\n")
+        XSDebug("  index       addr           ctr \n")
+        for(i <- 0 until RasSize){
+            XSDebug("  (%d)   0x%x      %d",i.U,commit_ras(i).retAddr,commit_ras(i).ctr)
+            when(i.U === commit_sp){XSDebug(false,true.B,"   <----sp")}
+            XSDebug(false,true.B,"\n")
+        }
+
+        XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",spec_ras_write.retAddr,spec_ras_write.ctr,sepc_alloc_new,spec_sp.asUInt)
+        XSDebug(spec_pop, "(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
+        XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",commit_ras_write.retAddr,commit_ras_write.ctr,sepc_alloc_new,commit_sp.asUInt)
+        XSDebug(commit_pop, "(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
+        XSDebug("copyValid:%d copyNext:%d \n",copy_valid,copy_next)
+    }
+
 
     // val recoverSp = io.recover.bits.brInfo.rasSp
     // val recoverCtr = io.recover.bits.brInfo.rasTopCtr

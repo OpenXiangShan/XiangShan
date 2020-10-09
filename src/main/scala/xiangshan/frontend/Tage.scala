@@ -15,6 +15,12 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
                       ( 256,   16,    8),
                       ( 128,   32,    9),
                       ( 128,   64,    9))
+                      // (  64,   64,   11),
+                      // (  64,  101,   12),
+                      // (  64,  160,   12),
+                      // (  64,  254,   13),
+                      // (  32,  403,   14),
+                      // (  32,  640,   15))
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
   val TageBanks = PredictWidth // FetchWidth
@@ -73,7 +79,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val resp = Output(Vec(TageBanks, Valid(new TageResp)))
     val update = Input(new TageUpdate)
   })
-  override val debug = true
+  // override val debug = true
   // bypass entries for tage update
   val wrBypassEntries = 8
 
@@ -272,6 +278,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
     } .otherwise {
       wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := update_wdata(updateBank).ctr
+      (0 until TageBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
       wrbypass_tags(wrbypass_enq_idx) := update_tag
       wrbypass_idxs(wrbypass_enq_idx) := update_idx
@@ -361,7 +368,7 @@ class Tage extends BaseTage {
     }
   }
 
-  override val debug = true
+  // override val debug = true
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
@@ -466,7 +473,7 @@ class Tage extends BaseTage {
       updateU(allocate.bits)(idx) := 0.U
     }.otherwise {
       val provider = updateMeta.provider
-      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U)
+      val decrMask = Mux(provider.valid, ~LowerMask(UIntToOH(provider.bits), TageNTables), 0.U(TageNTables.W))
       for (i <- 0 until TageNTables) {
         when (decrMask(i)) {
           updateUMask(i)(idx) := true.B

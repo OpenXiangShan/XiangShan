@@ -45,7 +45,7 @@ class DCacheLineReq  extends DCacheBundle
   val meta   = new DCacheMeta
 }
 
-class DCacheResp extends DCacheBundle
+class DCacheWordResp extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
   val meta         = new DCacheMeta
@@ -55,25 +55,35 @@ class DCacheResp extends DCacheBundle
   val nack         = Bool()
 }
 
-class DCacheLoadIO extends DCacheBundle
+class DCacheLineResp extends DCacheBundle
+{
+  val data   = UInt((cfg.blockBytes * 8).W)
+  val meta   = new DCacheMeta
+  // cache req missed, send it to miss queue
+  val miss   = Bool()
+  // cache req nacked, replay it later
+  val nack   = Bool()
+}
+
+class DCacheWordIO extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq )
-  val resp = Flipped(DecoupledIO(new DCacheResp))
+  val resp = Flipped(DecoupledIO(new DCacheWordResp))
   // kill previous cycle's req
   val s1_kill = Output(Bool())
 }
 
-class DCacheStoreIO extends DCacheBundle
+class DCacheLineIO extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheLineReq )
-  val resp = Flipped(DecoupledIO(new DCacheResp))
+  val resp = Flipped(DecoupledIO(new DCacheLineResp))
 }
 
 class DCacheToLsuIO extends DCacheBundle {
-  val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
-  val lsroq = Flipped(new DCacheLoadIO)  // lsroq load/store
-  val store = Flipped(new DCacheStoreIO) // for sbuffer
-  val atomics  = Flipped(new DCacheLoadIO)  // atomics reqs
+  val load  = Vec(LoadPipelineWidth, Flipped(new DCacheWordIO)) // for speculative load
+  val lsroq = Flipped(new DCacheLineIO)  // lsroq load/store
+  val store = Flipped(new DCacheLineIO) // for sbuffer
+  val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
 }
 
 class DCacheIO extends DCacheBundle {
@@ -185,24 +195,27 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // To simplify port arbitration
   // WritebackUnit and StorePipe use port 0
-  val DataReadPortCount = 4
+  val DataReadPortCount = 5
   val WritebackDataReadPort = 0
   val StorePipeDataReadPort = 1
   val LoadPipeDataReadPort = 2
   val AtomicsPipeDataReadPort = 3
+  val LoadMissDataReadPort = 4
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
   dataReadArb.io.in(WritebackDataReadPort) <> wb.io.data_req
   dataReadArb.io.in(StorePipeDataReadPort) <> stu.io.data_read
-  dataReadArb.io.in(AtomicsPipeDataReadPort)  <> atomics.io.data_read
   dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(0).io.data_read
+  dataReadArb.io.in(AtomicsPipeDataReadPort) <> atomics.io.data_read
+  dataReadArb.io.in(LoadMissDataReadPort)    <> loadMissQueue.io.data_req
 
   dataArray.io.read(0) <> dataReadArb.io.out
   dataArray.io.resp(0) <> wb.io.data_resp
   dataArray.io.resp(0) <> stu.io.data_resp
   dataArray.io.resp(0) <> atomics.io.data_resp
   dataArray.io.resp(0) <> ldu(0).io.data_resp
+  dataArray.io.resp(0) <> loadMissQueue.io.data_resp
 
   for (w <- 1 until LoadPipelineWidth) {
     dataArray.io.read(w) <> ldu(w).io.data_read
@@ -211,41 +224,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // load pipe and load miss queue
-  // load miss queue replays on ldu 0
-  val loadArb = Module(new Arbiter(new DCacheWordReq , 2))
-  val loadReplay = loadMissQueue.io.replay
-  val lsu_0 = io.lsu.load(0)
-  val ldu_0 = ldu(0).io.lsu
-  loadArb.io.in(0) <> loadReplay.req
-  loadArb.io.in(1) <> lsu_0.req
-  assert(!(lsu_0.req.fire() && lsu_0.req.bits.meta.replay), "LSU should not replay requests")
-  assert(!(loadReplay.req.fire() && !loadReplay.req.bits.meta.replay), "LoadMissQueue should replay requests")
-  val ldu_0_nack = nack_load(loadArb.io.out.bits.addr)
-  // do not nack replayed reqs
-  ldu_0.req <> loadArb.io.out
-  ldu(0).io.nack := ldu_0_nack && !loadArb.io.out.bits.meta.replay
-  XSDebug(ldu_0_nack, "LoadUnit 0 nacked\n")
-
-  ldu_0.resp.ready := false.B
-
-  val isReplay = ldu_0.resp.bits.meta.replay
-  loadReplay.resp.valid := ldu_0.resp.valid && isReplay
-  loadReplay.resp.bits  := ldu_0.resp.bits
-  when (loadReplay.resp.valid) {
-    ldu_0.resp.ready := loadReplay.resp.ready
-  }
-
-  lsu_0.resp.valid := ldu_0.resp.valid && !isReplay
-  lsu_0.resp.bits  := ldu_0.resp.bits
-  when (lsu_0.resp.valid) {
-    ldu_0.resp.ready := lsu_0.resp.ready
-  }
-
   // the s1 kill signal
   // only lsu uses this, replay never kills
-  ldu_0.s1_kill := lsu_0.s1_kill
-
-  for (w <- 1 until LoadPipelineWidth) {
+  for (w <- 0 until LoadPipelineWidth) {
     val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
     ldu(w).io.lsu.req <> io.lsu.load(w).req
     ldu(w).io.nack := load_w_nack
@@ -263,7 +244,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // load miss queue
   loadMissQueue.io.lsu <> io.lsu.lsroq
-  assert(!io.lsu.lsroq.s1_kill, "Lsroq should never use s1 kill on loadMissQueue")
 
   //----------------------------------------
   // store pipe and store miss queue
@@ -358,17 +338,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val isLoadMissResp = clientId === loadMissQueueClientId
   loadMissResp.valid := missResp.valid && isLoadMissResp
-  loadMissResp.bits.entry_id := missResp.bits.entry_id
+  loadMissResp.bits  := missResp.bits
   loadMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   val isStoreMissResp = clientId === storeMissQueueClientId
   storeMissResp.valid := missResp.valid && isStoreMissResp
-  storeMissResp.bits.entry_id := missResp.bits.entry_id
+  storeMissResp.bits  := missResp.bits
   storeMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   val isAtomicsMissResp = clientId === atomicsMissQueueClientId
   atomicsMissResp.valid := missResp.valid && isAtomicsMissResp
-  atomicsMissResp.bits.entry_id := missResp.bits.entry_id
+  atomicsMissResp.bits  := missResp.bits
   atomicsMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   // Finish
