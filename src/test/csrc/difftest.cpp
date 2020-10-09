@@ -16,7 +16,9 @@ void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n) = NULL;
 void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n) = NULL;
 void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
-static void (*ref_difftest_sync)(uint64_t *skip) = NULL;
+void (*ref_difftest_get_mastatus)(void *s) = NULL;
+void (*ref_difftest_set_mastatus)(const void *s) = NULL;
+vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para) = NULL;
 static void (*ref_difftest_exec)(uint64_t n) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 static void (*ref_isa_reg_display)(void) = NULL;
@@ -58,8 +60,14 @@ void init_difftest() {
   ref_difftest_setregs = (void (*)(const void *))dlsym(handle, "difftest_setregs");
   assert(ref_difftest_setregs);
 
-  ref_difftest_sync = (void (*)(uint64_t *))dlsym(handle, "difftest_sync");
-  assert(ref_difftest_sync);
+  ref_difftest_get_mastatus = (void (*)(void *))dlsym(handle, "difftest_get_mastatus");
+  assert(ref_difftest_get_mastatus);
+
+  ref_difftest_set_mastatus = (void (*)(const void *))dlsym(handle, "difftest_set_mastatus");
+  assert(ref_difftest_set_mastatus);
+
+  ref_disambiguate_exec = (vaddr_t (*)(void *))dlsym(handle, "disambiguate_exec");
+  assert(ref_disambiguate_exec);
 
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
@@ -89,7 +97,8 @@ static const char *reg_name[DIFFTEST_NR_REG] = {
   "mstatus", "mcause", "mepc",
   "sstatus", "scause", "sepc",
   "satp", 
-  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg"   
+  "mip", "mie", "mscratch", "sscratch", "mideleg", "medeleg", 
+  "mtval", "stval", "mtvec", "stvec", "mode"
 };
 
 static uint64_t nemu_this_pc = 0x80000000;
@@ -147,12 +156,9 @@ int difftest_step(DiffState *s) {
 
   // sync lr/sc reg status
   if(s->sync.scFailed){
-    struct SyncState {
-      uint64_t lrscValid; // sc inst commited, it failed beacuse lr_valid === 0
-      uint64_t lrscAddr;
-    } sync;
+    struct SyncState sync;
     sync.lrscValid = 0;
-    ref_difftest_sync((uint64_t*)&sync); // sync lr/sc microarchitectural regs
+    ref_difftest_set_mastatus((uint64_t*)&sync); // sync lr/sc microarchitectural regs
   }
 
   // single step difftest
@@ -182,7 +188,13 @@ int difftest_step(DiffState *s) {
         ref_difftest_setregs(ref_r);
       }else{
         // single step exec
-        ref_difftest_exec(1);
+        // IPF, LPF, SPF
+        if(s->cause == 12 || s->cause == 13 || s->cause == 15){
+          printf("s->cause %ld\n", s->cause);
+          ref_disambiguate_exec(&s->cause);
+        }else{
+          ref_difftest_exec(1);
+        }
       }
     }
   }

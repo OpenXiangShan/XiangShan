@@ -242,7 +242,7 @@ class Brq extends XSModule {
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
       when(
         (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
-          (!s.isIdle && brQueue(i).exuOut.uop.needFlush(io.memRedirect))
+          (s.isWb && brQueue(i).exuOut.uop.needFlush(io.memRedirect))
       ){
         s := s_idle
       }

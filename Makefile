@@ -121,6 +121,7 @@ endif
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
+	ls build
 	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
 
 cache:

@@ -139,8 +139,6 @@ inline void Emulator::read_emu_regs(uint64_t *r) {
   r[DIFFTEST_SEPC   ] = dut_ptr->io_difftest_sepc;
   r[DIFFTEST_MCAUSE ] = dut_ptr->io_difftest_mcause;
   r[DIFFTEST_SCAUSE ] = dut_ptr->io_difftest_scause;
-  // r[DIFFTEST_MTVAL  ] = dut_ptr->io_difftest_mtval;
-  // r[DIFFTEST_STVAL  ] = dut_ptr->io_difftest_stval;
   r[DIFFTEST_SATP   ] = dut_ptr->io_difftest_satp;
   r[DIFFTEST_MIP    ] = dut_ptr->io_difftest_mip;
   r[DIFFTEST_MIE    ] = dut_ptr->io_difftest_mie;
@@ -148,6 +146,10 @@ inline void Emulator::read_emu_regs(uint64_t *r) {
   r[DIFFTEST_SSCRATCH]= dut_ptr->io_difftest_sscratch;
   r[DIFFTEST_MIDELEG] = dut_ptr->io_difftest_mideleg;
   r[DIFFTEST_MEDELEG] = dut_ptr->io_difftest_medeleg;
+  r[DIFFTEST_MTVAL]   = dut_ptr->io_difftest_mtval;
+  r[DIFFTEST_STVAL]   = dut_ptr->io_difftest_stval;
+  r[DIFFTEST_MTVEC]   = dut_ptr->io_difftest_mtvec;
+  r[DIFFTEST_STVEC]   = dut_ptr->io_difftest_stvec;
   r[DIFFTEST_MODE]    = dut_ptr->io_difftest_priviledgeMode;
 }
 
@@ -256,6 +258,7 @@ uint64_t Emulator::execute(uint64_t n) {
       diff.isRVC = dut_ptr->io_difftest_isRVC;
       diff.wen = dut_ptr->io_difftest_wen;
       diff.intrNO = dut_ptr->io_difftest_intrNO;
+      diff.cause = dut_ptr->io_difftest_cause;
       diff.priviledgeMode = dut_ptr->io_difftest_priviledgeMode;
 
       diff.sync.scFailed = dut_ptr->io_difftest_scFailed;
@@ -359,6 +362,10 @@ void Emulator::snapshot_save(const char *filename) {
   stream.unbuf_write(buf, size);
   delete buf;
 
+  struct SyncState sync_mastate;
+  ref_difftest_get_mastatus(&sync_mastate);
+  stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
+
   // actually write to file in snapshot_finalize()
 }
 
@@ -384,4 +391,8 @@ void Emulator::snapshot_load(const char *filename) {
   stream.read(buf, size);
   ref_difftest_memcpy_from_dut(0x80000000, buf, size);
   delete buf;
+
+  struct SyncState sync_mastate;
+  stream.read(&sync_mastate, sizeof(struct SyncState));
+  ref_difftest_set_mastatus(&sync_mastate);
 }
