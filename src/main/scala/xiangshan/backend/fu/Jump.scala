@@ -37,6 +37,7 @@ class Jump extends FunctionUnit(jmpCfg){
   // io.out.bits.brUpdate.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   io.out.bits.brUpdate.taken := true.B
   // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
+  io.out.bits.brUpdate.brTag := uop.brTag
 
   // Output
   val res = pcDelaySlot
