@@ -206,8 +206,7 @@ class Memend extends XSModule {
   atomicsUnit.io.dcache        <> io.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbEmpty
 
-  atomicsUnit.io.dcache        <> io.atomics
-  atomicsUnit.io.flush_sbuffer.empty := sbEmpty
+  atomicsUnit.io.redirect <> io.backend.redirect
 
   when(atomicsUnit.io.out.valid){
     io.backend.ldout(0) <> atomicsUnit.io.out
