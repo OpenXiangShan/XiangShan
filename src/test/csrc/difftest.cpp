@@ -190,7 +190,7 @@ int difftest_step(DiffState *s) {
         // single step exec
         // IPF, LPF, SPF
         if(s->cause == 12 || s->cause == 13 || s->cause == 15){
-          printf("s->cause %ld\n", s->cause);
+          // printf("s->cause %ld\n", s->cause);
           ref_disambiguate_exec(&s->cause);
         }else{
           ref_difftest_exec(1);
