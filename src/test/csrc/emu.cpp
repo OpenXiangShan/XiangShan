@@ -274,11 +274,18 @@ uint64_t Emulator::execute(uint64_t n) {
       poll_event();
       lasttime_poll = t;
     }
+    static int snapshot_count = 0;
     if (t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
       // save snapshot every 10s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
       lasttime_snapshot = t;
+      // dump snapshot to file every 10 minutes
+      snapshot_count++;
+      if (snapshot_count == 60) {
+        snapshot_slot[0].save();
+        snapshot_count = 0;
+      }
     }
   }
 
