@@ -347,7 +347,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   /*
    * refill
    */
-  assert(!memRespFire || state===state_wait_resp)
+  assert(!memRespFire || (state===state_wait_resp || sfenceLatch))
   when (memRespFire && !memPte.isPf() && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
