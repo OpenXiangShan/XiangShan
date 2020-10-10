@@ -57,6 +57,9 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
     val wb_req      = DecoupledIO(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp     = Input(Bool())
+
+    // watch prober's write back requests
+    val probe_wb_req = Flipped(ValidIO(new WritebackReq(edge.bundle.sourceBits)))
   })
 
   // MSHR:
@@ -356,6 +359,32 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     }
   }
 
+  // during refill, probe may step in, it may release our blocks
+  // if it releases the block we are trying to acquire, we don't care, since we will get it back eventually
+  // but we need to know whether it releases the block we are trying to evict
+  val prober_writeback_our_block = (state === s_refill_req || state === s_refill_resp) &&
+    io.probe_wb_req.valid && !io.probe_wb_req.bits.voluntary &&
+    io.probe_wb_req.bits.tag === req_old_meta.tag &&
+    io.probe_wb_req.bits.idx === req_idx &&
+    io.probe_wb_req.bits.way_en === req_way_en &&
+    needs_writeback
+
+  def onShrink(param: UInt): ClientMetadata = {
+    import freechips.rocketchip.tilelink.ClientStates._
+    import freechips.rocketchip.tilelink.TLPermissions._
+    val state = MuxLookup(param, Nothing, Seq(
+      TtoB   -> Branch,
+      TtoN   -> Nothing,
+      BtoN   -> Nothing))
+    ClientMetadata(state)
+  }
+
+  when (prober_writeback_our_block) {
+    req_old_meta.coh := onShrink(io.probe_wb_req.bits.param)
+  }
+
+  // --------------------------------------------
+  // data write
   when (state === s_data_write_req) {
     io.refill.valid        := true.B
     io.refill.bits.addr    := req_block_addr
@@ -445,6 +474,8 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     val wb_req      = Decoupled(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp     = Input(Bool())
 
+    val probe_wb_req = Flipped(ValidIO(new WritebackReq(edge.bundle.sourceBits)))
+
     val inflight_req_idxes       = Output(Vec(cfg.nMissEntries, Valid(UInt())))
     val inflight_req_block_addrs = Output(Vec(cfg.nMissEntries, Valid(UInt())))
 
@@ -495,6 +526,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
 
     wb_req_arb.io.in(i)     <>  entry.io.wb_req
     entry.io.wb_resp        :=  io.wb_resp
+    entry.io.probe_wb_req   <>  io.probe_wb_req
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare

@@ -56,10 +56,17 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   when (state === s_invalid) {
     io.req.ready := true.B
     when (io.req.fire()) {
-      state := s_data_read_req
-      data_req_cnt := 0.U
-      req := io.req.bits
-      acked := false.B
+      // for report types: TtoT, BtoB, NtoN, we do nothing
+      import freechips.rocketchip.tilelink.TLPermissions._
+      def do_nothing(x: UInt) = x > BtoN
+      when (do_nothing(io.req.bits.param)) {
+        state := s_resp
+      } .otherwise {
+        state := s_data_read_req
+        data_req_cnt := 0.U
+        req := io.req.bits
+        acked := false.B
+      }
     }
   }
 
