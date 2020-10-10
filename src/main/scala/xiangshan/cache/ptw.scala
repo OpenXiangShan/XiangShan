@@ -189,6 +189,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val memRdata = Wire(UInt(XLEN.W))
   val memPte = memRdata.asTypeOf(new PteBundle)
   val memValid = mem.d.valid
+  val memRespReady = mem.d.ready
   val memRespFire = mem.d.fire()
   val memReqReady = mem.a.ready
   val memReqFire = mem.a.fire()
@@ -199,7 +200,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val level = RegInit(0.U(2.W)) // 0/1/2
   val levelNext = level + 1.U
   val latch = Reg(new PtwResp)
-  val sfenceLatch = RegEnable(false.B, init = false.B, memRespFire) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
+  val sfenceLatch = RegEnable(false.B, init = false.B, memValid) // NOTE: store sfence to disable mem.resp.fire(), but not stall other ptw req
 
   /*
    * tlbl2
@@ -326,7 +327,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
                ((level===0.U && !tlbHit && !l1Hit) ||
                 (level===1.U && !l2Hit) ||
                 (level===2.U)) && !sfenceLatch
-  mem.d.ready := state === state_wait_resp
+  mem.d.ready := state === state_wait_resp || sfenceLatch
 
   val memAddrLatch = RegEnable(memAddr, mem.a.valid)
   memRdata := (mem.d.bits.data >> (memAddrLatch(log2Up(l1BusDataWidth/8) - 1, log2Up(XLEN/8)) << log2Up(XLEN)))(XLEN - 1, 0)
@@ -347,7 +348,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    * refill
    */
   assert(!memRespFire || state===state_wait_resp)
-  when (memRespFire && !memPte.isPf()) {
+  when (memRespFire && !memPte.isPf() && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
@@ -436,4 +437,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
   XSDebug(memReqFire, p"mem req fire addr:0x${Hexadecimal(memAddr)}\n")
   XSDebug(memRespFire, p"mem resp fire rdata:0x${Hexadecimal(mem.d.bits.data)} Pte:${memPte}\n")
+
+  XSDebug(sfenceLatch, p"ptw has a flushed req waiting for resp... state:${state} mem.a(${mem.a.valid} ${mem.a.ready}) d($memValid} ${memRespReady})\n")
 }
