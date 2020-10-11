@@ -326,7 +326,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   mem.a.valid := state === state_req && 
                ((level===0.U && !tlbHit && !l1Hit) ||
                 (level===1.U && !l2Hit) ||
-                (level===2.U)) && !sfenceLatch
+                (level===2.U)) && !sfenceLatch && !sfence.valid
   mem.d.ready := state === state_wait_resp || sfenceLatch
 
   val memAddrLatch = RegEnable(memAddr, mem.a.valid)
