@@ -313,6 +313,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
+    io.ldout(i).bits.uop.lsroqIdx := loadWbSel(i)
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
@@ -347,6 +348,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
+    io.stout(i).bits.uop.lsroqIdx := storeWbSel(i)
     io.stout(i).bits.uop.cf.exceptionVec := data(storeWbSel(i)).exception.asBools
     io.stout(i).bits.data := data(storeWbSel(i)).data
     io.stout(i).bits.redirectValid := false.B
