@@ -93,7 +93,7 @@ class Memend extends XSModule {
   val atomicsUnit = Module(new AtomicsUnit)
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsroq = Module(new Lsroq)
-  val sbuffer = Module(new Sbuffer)
+  val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
 
