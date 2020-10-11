@@ -42,6 +42,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
+    val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -631,7 +632,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
   val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
     (commitType === CommitType.STORE || commitType === CommitType.LOAD) && 
-    io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
+    io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
     !io.commits(0).bits.isWalk
 
   io.uncache.req.bits.cmd  := Mux(store(ringBufferTail), MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)

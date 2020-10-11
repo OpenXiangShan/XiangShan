@@ -22,6 +22,7 @@ class Roq extends XSModule {
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
+    val roqDeqPtr = Output(UInt(RoqIdxWidth.W))
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -47,6 +48,8 @@ class Roq extends XSModule {
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
   val state = RegInit(s_idle)
+
+  io.roqDeqPtr := deqPtrExt
 
   // Dispatch
   val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.noSpecExec)
