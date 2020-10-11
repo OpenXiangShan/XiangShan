@@ -356,14 +356,13 @@ class IFU extends XSModule with HasIFUConst
   }
 
   when(io.inLoop) {
-    io.icacheReq.valid := if4_flush
-    io.icacheResp.ready := false.B
+    io.icacheReq.valid := if2_flush
   }.otherwise {
     io.icacheReq.valid := if1_valid && if2_ready
     // io.icacheResp.ready := if3_ready
-    io.icacheResp.ready := if4_ready
   //io.icacheResp.ready := if3_valid
   }
+  io.icacheResp.ready := if4_ready
   io.icacheReq.bits.addr := if1_npc
 
   // when(if4_bp.taken) {
