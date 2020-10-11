@@ -24,8 +24,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
   val in = Reg(new ExuInput())
-  // vaddr for stored for exception
-  val vaddr = Reg(UInt())
   val atom_override_xtval = RegInit(false.B)
   // paddr after translation
   val paddr = Reg(UInt())
@@ -33,7 +31,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val resp_data = Reg(UInt())
   val is_lrsc_valid = Reg(Bool())
 
-  ExcitingUtils.addSource(vaddr, "ATOM_EXECPTION_VADDR")
+  ExcitingUtils.addSource(in.src1, "ATOM_EXECPTION_VADDR")
   ExcitingUtils.addSource(atom_override_xtval, "ATOM_OVERRIDE_XTVAL")
 
   // assign default value to output signals
@@ -58,7 +56,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     when (io.in.fire()) {
       in := io.in.bits
       state := s_tlb
-      vaddr := in.src1
     }
   }
 
