@@ -1,4 +1,5 @@
 #include "emu.h"
+#include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
 
@@ -376,7 +377,10 @@ void Emulator::snapshot_save(const char *filename) {
   uint64_t csr_buf[4096];
   ref_difftest_get_csr(csr_buf);
   stream.unbuf_write(&csr_buf, sizeof(csr_buf));
-  
+
+  long sdcard_offset = ftell(fp);
+  stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
+
   // actually write to file in snapshot_finalize()
 }
 
@@ -410,4 +414,8 @@ void Emulator::snapshot_load(const char *filename) {
   uint64_t csr_buf[4096];
   stream.read(&csr_buf, sizeof(csr_buf));
   ref_difftest_set_csr(csr_buf);
+
+  long sdcard_offset = 0;
+  stream.read(&sdcard_offset, sizeof(sdcard_offset));
+  fseek(fp, sdcard_offset, SEEK_SET);
 }
