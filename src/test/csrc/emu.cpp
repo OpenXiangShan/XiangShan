@@ -373,6 +373,10 @@ void Emulator::snapshot_save(const char *filename) {
   ref_difftest_get_mastatus(&sync_mastate);
   stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
 
+  uint64_t csr_buf[4096];
+  ref_difftest_get_csr(csr_buf);
+  stream.unbuf_write(&csr_buf, sizeof(csr_buf));
+  
   // actually write to file in snapshot_finalize()
 }
 
@@ -402,4 +406,8 @@ void Emulator::snapshot_load(const char *filename) {
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));
   ref_difftest_set_mastatus(&sync_mastate);
+
+  uint64_t csr_buf[4096];
+  stream.read(&csr_buf, sizeof(csr_buf));
+  ref_difftest_set_csr(csr_buf);
 }
