@@ -410,6 +410,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   prober.io.wb_resp    := wb.io.resp
   wb.io.mem_grant      := bus.d.fire() && bus.d.bits.source === cfg.nMissEntries.U
 
+  missQueue.io.probe_wb_req.valid := prober.io.wb_req.fire()
+  missQueue.io.probe_wb_req.bits  := prober.io.wb_req.bits
+
   TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
   // synchronization stuff
@@ -469,7 +472,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val miss_idx_matches = VecInit(missQueue.io.block_probe_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_addr_match || atomics_addr_match || lrsc_addr_match || miss_idx_match
+    // the missed req
+    val miss_req_idx_match = missReq.fire() && get_idx(missReq.bits.addr) === get_idx(addr)
+
+    store_addr_match || atomics_addr_match || lrsc_addr_match || miss_idx_match || miss_req_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {
