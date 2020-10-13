@@ -362,7 +362,8 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   // during refill, probe may step in, it may release our blocks
   // if it releases the block we are trying to acquire, we don't care, since we will get it back eventually
   // but we need to know whether it releases the block we are trying to evict
-  val prober_writeback_our_block = (state === s_refill_req || state === s_refill_resp) &&
+  val prober_writeback_our_block = (state === s_refill_req || state === s_refill_resp ||
+    state === s_mem_finish || state === s_send_resp || state === s_wb_req) &&
     io.probe_wb_req.valid && !io.probe_wb_req.bits.voluntary &&
     io.probe_wb_req.bits.tag === req_old_meta.tag &&
     io.probe_wb_req.bits.idx === req_idx &&
