@@ -47,6 +47,9 @@ class RenameTable(float: Boolean) extends XSModule {
 
   when(io.flush){
     spec_table := arch_table
+    for(w <- io.archWritePorts) {
+      when(w.wen){ spec_table(w.addr) := w.wdata }
+    }
   }
 
   BoringUtils.addSource(arch_table, if(float) "DEBUG_FP_ARCH_RAT" else "DEBUG_INI_ARCH_RAT")

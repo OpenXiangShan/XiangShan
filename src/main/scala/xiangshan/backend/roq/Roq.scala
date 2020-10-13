@@ -8,6 +8,7 @@ import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
 import xiangshan.backend.fu.fpu.Fflags
+import xiangshan.backend.decode.isa.Privileged.WFI
 
 
 class Roq extends XSModule {
@@ -22,6 +23,7 @@ class Roq extends XSModule {
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
+    val roqDeqPtr = Output(UInt(RoqIdxWidth.W))
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -48,6 +50,8 @@ class Roq extends XSModule {
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
   val state = RegInit(s_idle)
+
+  io.roqDeqPtr := deqPtrExt
 
   // Dispatch
   val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.noSpecExec)
@@ -91,6 +95,7 @@ class Roq extends XSModule {
       val wbIdx = wbIdxExt.tail(1)
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
+      microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
@@ -117,15 +122,12 @@ class Roq extends XSModule {
   ExcitingUtils.addSink(trapTarget, "trapTarget")
 
   val deqUop = microOp(deqPtr)
-  val intrEnable = intrBitSet && (state === s_idle) && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
-  val exceptionEnable = Cat(deqUop.cf.exceptionVec).orR() && (state === s_idle) && !isEmpty
-  // TODO: need check if writebacked needed
-  val isEcall = deqUop.cf.exceptionVec(ecallM) ||
-    deqUop.cf.exceptionVec(ecallS) ||
-    deqUop.cf.exceptionVec(ecallU)
-  val isFlushPipe = (deqUop.ctrl.flushPipe && writebacked(deqPtr) && valid(deqPtr) && (state === s_idle) && !isEmpty)
+  val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
+  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
+  val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
+  val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
   io.redirect := DontCare
-  io.redirect.valid := intrEnable || exceptionEnable || isFlushPipe// TODO: add fence flush to flush the whole pipe
+  io.redirect.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)// TODO: add fence flush to flush the whole pipe
   io.redirect.bits.isException := intrEnable || exceptionEnable
   io.redirect.bits.isFlushPipe := isFlushPipe
   io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, trapTarget)
@@ -262,6 +264,9 @@ class Roq extends XSModule {
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
 
+  val hasWFI = io.commits.map(c => c.valid && state===s_idle && c.bits.uop.cf.instr===WFI).reduce(_||_)
+  ExcitingUtils.addSource(hasWFI, "isWFI")
+
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk
@@ -359,7 +364,10 @@ class Roq extends XSModule {
   instrCnt := instrCnt + retireCounter
 
   val difftestIntrNO = WireInit(0.U(XLEN.W))
+  val difftestCause = WireInit(0.U(XLEN.W))
   ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
+  ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
+
   XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
   val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
   val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
@@ -377,6 +385,7 @@ class Roq extends XSModule {
     BoringUtils.addSource(RegNext(wdst), "difftestWdst")
     BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
     BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
+    BoringUtils.addSource(RegNext(difftestCause), "difftestCause")
 
     val hitTrap = trapVec.reduce(_||_)
     val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))

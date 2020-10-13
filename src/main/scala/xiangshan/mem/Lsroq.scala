@@ -43,6 +43,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
+    val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -314,6 +315,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
+    io.ldout(i).bits.uop.lsroqIdx := loadWbSel(i)
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).bits.redirectValid := false.B
@@ -349,6 +351,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
+    io.stout(i).bits.uop.lsroqIdx := storeWbSel(i)
     io.stout(i).bits.uop.cf.exceptionVec := data(storeWbSel(i)).exception.asBools
     io.stout(i).bits.data := data(storeWbSel(i)).data
     io.stout(i).bits.fflags := DontCare
@@ -635,7 +638,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
   val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
     (commitType === CommitType.STORE || commitType === CommitType.LOAD) && 
-    io.commits(0).bits.uop.lsroqIdx === ringBufferTailExtended && 
+    io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
     !io.commits(0).bits.isWalk
 
   io.uncache.req.bits.cmd  := Mux(store(ringBufferTail), MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)

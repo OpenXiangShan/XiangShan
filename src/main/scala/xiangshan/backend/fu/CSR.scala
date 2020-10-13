@@ -598,9 +598,14 @@ class CSR extends XSModule
   val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned) && io.exception.valid
 
   // mtval write logic
-  val memExceptionAddr = WireInit(0.U(VAddrBits.W))
+  val lsroqExceptionAddr = WireInit(0.U(VAddrBits.W))
+  val atomExceptionAddr = WireInit(0.U(VAddrBits.W))
+  val atomOverrideXtval = WireInit(false.B)
   ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSink(memExceptionAddr, "EXECPTION_VADDR")
+  ExcitingUtils.addSink(lsroqExceptionAddr, "EXECPTION_VADDR")
+  ExcitingUtils.addSink(atomExceptionAddr, "ATOM_EXECPTION_VADDR")
+  ExcitingUtils.addSink(atomOverrideXtval, "ATOM_OVERRIDE_XTVAL")
+  val memExceptionAddr = Mux(atomOverrideXtval, atomExceptionAddr, lsroqExceptionAddr)
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
@@ -673,6 +678,7 @@ class CSR extends XSModule
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
   val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
   ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
+  ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
 
   val raiseExceptionIntr = io.exception.valid
   val retTarget = Wire(UInt(VAddrBits.W))
@@ -869,6 +875,10 @@ class CSR extends XSModule
     BoringUtils.addSource(mstatus & sstatusRmask, "difftestSstatus")
     BoringUtils.addSource(mepc, "difftestMepc")
     BoringUtils.addSource(sepc, "difftestSepc")
+    BoringUtils.addSource(mtval, "difftestMtval")
+    BoringUtils.addSource(stval, "difftestStval")
+    BoringUtils.addSource(mtvec, "difftestMtvec")
+    BoringUtils.addSource(stvec, "difftestStvec")
     BoringUtils.addSource(mcause, "difftestMcause")
     BoringUtils.addSource(scause, "difftestScause")
     BoringUtils.addSource(satp, "difftestSatp")

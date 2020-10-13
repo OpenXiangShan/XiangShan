@@ -15,6 +15,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val dtlb          = new TlbRequestIO
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
+    val redirect      = Flipped(ValidIO(new Redirect))
   })
 
   //-------------------------------------------------------
@@ -23,11 +24,15 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val s_invalid :: s_tlb  :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(7)
   val state = RegInit(s_invalid)
   val in = Reg(new ExuInput())
+  val atom_override_xtval = RegInit(false.B)
   // paddr after translation
   val paddr = Reg(UInt())
   // dcache response data
   val resp_data = Reg(UInt())
   val is_lrsc_valid = Reg(Bool())
+
+  ExcitingUtils.addSource(in.src1, "ATOM_EXECPTION_VADDR")
+  ExcitingUtils.addSource(atom_override_xtval, "ATOM_OVERRIDE_XTVAL")
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -85,11 +90,13 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       ))
       in.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
       in.uop.cf.exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
-      val exception = !addrAligned || io.dtlb.resp.bits.excp.pf.st
+      in.uop.cf.exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
+      val exception = !addrAligned || io.dtlb.resp.bits.excp.pf.st || io.dtlb.resp.bits.excp.pf.ld
       when (exception) {
         // check for exceptions
         // if there are exceptions, no need to execute it
         state := s_finish
+        atom_override_xtval := true.B
       } .otherwise {
         paddr := io.dtlb.resp.bits.paddr
         state := s_flush_sbuffer_req
@@ -210,5 +217,9 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
       state := s_invalid
     }
+  }
+
+  when(io.redirect.valid){
+    atom_override_xtval := false.B
   }
 }
