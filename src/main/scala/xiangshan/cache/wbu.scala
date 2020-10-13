@@ -30,6 +30,7 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   val req = Reg(new WritebackReq(edge.bundle.sourceBits))
   val s_invalid :: s_data_read_req :: s_data_read_resp :: s_active :: s_grant :: s_resp :: Nil = Enum(6)
   val state = RegInit(s_invalid)
+  val should_writeback_data = Reg(Bool())
 
   val data_req_cnt = RegInit(0.U(log2Up(refillCycles+1).W))
 
@@ -58,11 +59,19 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     when (io.req.fire()) {
       // for report types: TtoT, BtoB, NtoN, we do nothing
       import freechips.rocketchip.tilelink.TLPermissions._
+      def is_dirty(x: UInt) = x <= TtoN
       def do_nothing(x: UInt) = x > BtoN
       when (do_nothing(io.req.bits.param)) {
+        should_writeback_data := false.B
         state := s_resp
       } .otherwise {
-        state := s_data_read_req
+        when (is_dirty(io.req.bits.param)) {
+          state := s_data_read_req
+          should_writeback_data := true.B
+        } .otherwise {
+          state := s_active
+          should_writeback_data := false.B
+        }
         data_req_cnt := 0.U
         req := io.req.bits
         acked := false.B
@@ -118,11 +127,25 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     fromSource = id.U,
     toAddress = r_address,
     lgSize = log2Ceil(cfg.blockBytes).U,
+    reportPermissions = req.param
+  )
+
+  val probeResponseData = edge.ProbeAck(
+    fromSource = id.U,
+    toAddress = r_address,
+    lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param,
     data = wb_buffer(data_req_cnt)
   )
 
   val voluntaryRelease = edge.Release(
+    fromSource = id.U,
+    toAddress = r_address,
+    lgSize = log2Ceil(cfg.blockBytes).U,
+    shrinkPermissions = req.param
+  )._2
+
+  val voluntaryReleaseData = edge.Release(
     fromSource = id.U,
     toAddress = r_address,
     lgSize = log2Ceil(cfg.blockBytes).U,
@@ -132,7 +155,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
 
   when (state === s_active) {
     io.release.valid := data_req_cnt < refillCycles.U
-    io.release.bits  := Mux(req.voluntary, voluntaryRelease, probeResponse)
+    io.release.bits  := Mux(req.voluntary,
+      Mux(should_writeback_data, voluntaryReleaseData, voluntaryRelease),
+      Mux(should_writeback_data, probeResponseData, probeResponse))
 
     when (io.mem_grant) {
       acked := true.B
