@@ -43,8 +43,8 @@ class Dispatch extends XSModule {
     val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
     // load + store reg status (busy/ready)
-    val intMemRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    val fpMemRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
+    val memIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
+    val memFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort))
     val intMemRegRdy = Vec(NRMemReadPorts, Input(Bool()))
     val fpMemRegRdy = Vec(exuParameters.StuCnt, Input(Bool()))
     // replay: set preg status to not ready
@@ -140,8 +140,8 @@ class Dispatch extends XSModule {
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
   lsDispatch.io.fromDq <> lsDq.io.deq
-  lsDispatch.io.intRegAddr <> io.intMemRegAddr
-  lsDispatch.io.fpRegAddr <> io.fpMemRegAddr
+  lsDispatch.io.readIntRf <> io.memIntRf
+  lsDispatch.io.readFpRf <> io.memFpRf
   lsDispatch.io.intRegRdy <> io.intMemRegRdy
   lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
