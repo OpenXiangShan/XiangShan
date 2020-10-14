@@ -166,6 +166,7 @@ int difftest_step(DiffState *s) {
   if(s->sync.scFailed){
     struct SyncState sync;
     sync.lrscValid = 0;
+    sync.lrscAddr = 0;
     ref_difftest_set_mastatus((uint64_t*)&sync); // sync lr/sc microarchitectural regs
   }
 
