@@ -36,6 +36,7 @@ class IcacheMissReq extends ICacheBundle
 {
     val addr  = UInt(PAddrBits.W)
     val waymask = UInt(PredictWidth.W)
+    val clientID = Bool()
 }
 
 class IcacheMissResp extends ICacheBundle
@@ -46,6 +47,9 @@ class IcacheMissResp extends ICacheBundle
 class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
+        // MSHR ID
+        val id = Input(UInt())
+
         val req = Flipped(DecoupledIO(new IcacheMissReq))
         val resp = Flipped(DecoupledIO(new IcacheMissResp))
         
@@ -72,6 +76,21 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 
     val (_, _, refill_done, refill_cnt) = edge.count(io.mem_grant)
 
+    //initial
+    io.req.ready := false.B
+    io.resp.valid := false.B
+    io.resp.bits := DontCare
+
+    io.mem_acquire.valid := false.B
+    io.mem_acquire.bits := DontCare
+
+    io.mem_grant.ready := true.B   
+
+    io.meta_wirte.valid := false.B
+    io.meta_wirte.bits := DontCare
+
+    io.refill.valid := false.B
+    io.refill.bits := DontCare
 
     //state change
     val countFull = readBeatCnt.value === (refillCycles - 1).U
@@ -155,9 +174,25 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
    
     }
 
-    io.mem_grant.ready := true.B   
 
 
 }
 
-class IcacheMissQueue() 
+class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule 
+{
+  val io = IO(new Bundle{
+    val req = Flipped(DecoupledIO(new IcacheMissReq))
+    val resp = Flipped(DecoupledIO(new IcacheMissResp))
+    
+    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+
+    val meta_wirte = DecoupledIO(new ICacheMetaWrite)
+    val refill = DecoupledIO(new ICacheRefill)
+
+    val flush = UInt(2.W)
+
+  })
+
+  val resp_arb = 
+}
