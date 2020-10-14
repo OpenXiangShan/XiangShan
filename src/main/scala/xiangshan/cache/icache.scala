@@ -43,6 +43,8 @@ trait HasICacheParameters extends HasL1CacheParameters {
   val groupAlign = log2Up(FetchWidth * 4 * 2)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
+  // ICache MSHR settings
+
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
   require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
