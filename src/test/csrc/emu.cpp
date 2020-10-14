@@ -378,7 +378,11 @@ void Emulator::snapshot_save(const char *filename) {
   ref_difftest_get_csr(csr_buf);
   stream.unbuf_write(&csr_buf, sizeof(csr_buf));
 
-  long sdcard_offset = ftell(fp);
+  long sdcard_offset;
+  if(fp)
+    sdcard_offset = ftell(fp);
+  else
+    sdcard_offset = 0;
   stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
 
   // actually write to file in snapshot_finalize()
@@ -417,5 +421,6 @@ void Emulator::snapshot_load(const char *filename) {
 
   long sdcard_offset = 0;
   stream.read(&sdcard_offset, sizeof(sdcard_offset));
-  fseek(fp, sdcard_offset, SEEK_SET);
+  if(fp)
+    fseek(fp, sdcard_offset, SEEK_SET);
 }
