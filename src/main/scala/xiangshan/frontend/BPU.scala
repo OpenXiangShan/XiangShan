@@ -340,7 +340,8 @@ class BPUStage3 extends BPUStage {
     takens := VecInit((0 until PredictWidth).map(i => {
       ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
           jals(i) ||
-          (ras.io.out.valid && rets(i))
+          (!ras.io.out.bits.specEmpty && rets(i)) ||
+          (ras.io.out.bits.specEmpty && btbHits(i))
       }
     ))
     when(ras.io.is_ret && ras.io.out.valid){
