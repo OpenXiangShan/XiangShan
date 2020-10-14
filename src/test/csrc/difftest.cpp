@@ -18,6 +18,8 @@ void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
 void (*ref_difftest_get_mastatus)(void *s) = NULL;
 void (*ref_difftest_set_mastatus)(const void *s) = NULL;
+void (*ref_difftest_get_csr)(void *c) = NULL;
+void (*ref_difftest_set_csr)(const void *c) = NULL;
 vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para) = NULL;
 static void (*ref_difftest_exec)(uint64_t n) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
@@ -65,6 +67,12 @@ void init_difftest() {
 
   ref_difftest_set_mastatus = (void (*)(const void *))dlsym(handle, "difftest_set_mastatus");
   assert(ref_difftest_set_mastatus);
+
+  ref_difftest_get_csr = (void (*)(void *))dlsym(handle, "difftest_get_csr");
+  assert(ref_difftest_get_csr);
+
+  ref_difftest_set_csr = (void (*)(const void *))dlsym(handle, "difftest_set_csr");
+  assert(ref_difftest_set_csr);
 
   ref_disambiguate_exec = (vaddr_t (*)(void *))dlsym(handle, "disambiguate_exec");
   assert(ref_disambiguate_exec);

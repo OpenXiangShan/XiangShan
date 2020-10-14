@@ -72,10 +72,10 @@ extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n);
 extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n);
 extern void (*ref_difftest_getregs)(void *c);
 extern void (*ref_difftest_setregs)(const void *c);
-extern void (*ref_difftest_getregs)(void *c);
-extern void (*ref_difftest_setregs)(const void *c);
 extern void (*ref_difftest_get_mastatus)(void *s);
 extern void (*ref_difftest_set_mastatus)(const void *s);
+extern void (*ref_difftest_get_csr)(void *c);
+extern void (*ref_difftest_set_csr)(const void *c);
 extern vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para);
 
 void init_difftest();
