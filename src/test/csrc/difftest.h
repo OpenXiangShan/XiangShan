@@ -44,6 +44,7 @@ struct SyncChannel {
 
 struct SyncState {
   uint64_t lrscValid;
+  uint64_t lrscAddr;
 };
 
 struct DiffState {
