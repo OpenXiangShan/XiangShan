@@ -396,7 +396,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // sync with prober
   missQueue.io.probe_wb_req.valid := prober.io.wb_req.fire()
   missQueue.io.probe_wb_req.bits  := prober.io.wb_req.bits
-  missQueue.io.probe_active       := prober.io.inflight_req_idx
+  missQueue.io.probe_active       := prober.io.probe_active
 
   //----------------------------------------
   // prober
