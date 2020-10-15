@@ -73,6 +73,7 @@ class MemToBackendIO extends XSBundle {
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+  val oldestStore = Output(Valid(UInt(RoqIdxWidth.W)))
 }
 
 class Memend extends XSModule {
@@ -138,6 +139,7 @@ class Memend extends XSModule {
   lsroq.io.commits     <> io.backend.commits
   lsroq.io.dp1Req      <> io.backend.dp1Req
   lsroq.io.lsroqIdxs   <> io.backend.lsroqIdxs
+  lsroq.io.oldestStore <> io.backend.oldestStore
   lsroq.io.brqRedirect := io.backend.redirect
   io.backend.replayAll <> lsroq.io.rollback
 

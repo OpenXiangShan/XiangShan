@@ -31,6 +31,7 @@ class Lsroq extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+    val oldestStore = Output(Valid(UInt(RoqIdxWidth.W)))
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -161,7 +162,12 @@ class Lsroq extends XSModule with HasDCacheParameters {
         pending(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
       }
     })
-    
+
+    // find first store req that has not been writebacked
+    val storeNotWritebacked = VecInit((0 until LsroqSize).map(i => store(i) && !writebacked(i)))
+    val firstStore = getFirstOne(storeNotWritebacked, tailMask)
+    io.oldestStore.valid := false.B
+    io.oldestStore.bits := DontCare
     // writeback store
     (0 until StorePipelineWidth).map(i => {
       when(io.storeIn(i).fire()) {
@@ -176,16 +182,20 @@ class Lsroq extends XSModule with HasDCacheParameters {
         store(io.storeIn(i).bits.uop.lsroqIdx) := true.B
         pending(io.storeIn(i).bits.uop.lsroqIdx) := io.storeIn(i).bits.mmio
         XSInfo("store write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x exc %x\n",
-        io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0),
-        io.storeIn(i).bits.uop.cf.pc,
-        io.storeIn(i).bits.vaddr,
-        io.storeIn(i).bits.paddr,
-        io.storeIn(i).bits.data,
-        io.storeIn(i).bits.miss,
-        io.storeIn(i).bits.mmio,
-        io.storeIn(i).bits.rollback,
-        io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+          io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0),
+          io.storeIn(i).bits.uop.cf.pc,
+          io.storeIn(i).bits.vaddr,
+          io.storeIn(i).bits.paddr,
+          io.storeIn(i).bits.data,
+          io.storeIn(i).bits.miss,
+          io.storeIn(i).bits.mmio,
+          io.storeIn(i).bits.rollback,
+          io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
         )
+        when (io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0) === firstStore) {
+          io.oldestStore.valid := true.B
+          io.oldestStore.bits := io.storeIn(i).bits.uop.roqIdx
+        }
       }
   })
 

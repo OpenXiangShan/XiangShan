@@ -35,7 +35,7 @@ class Dispatch extends XSModule {
     val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsroqIdx
     val lsroqIdxs = Input(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
-    val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
+    val dequeueRoqIndex = Input(Valid(UInt(RoqIdxWidth.W)))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
@@ -79,30 +79,21 @@ class Dispatch extends XSModule {
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
-  intDq.io.commits <> io.commits
-  intDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
-    dqCommit.valid := commit.valid && dqCommit.bits.uop.ctrl.commitType === CommitType.INT
-  }
+  intDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
   intDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
     io.replayPregReq(i) <> replay
   }
   intDq.io.otherWalkDone := !fpDq.io.inReplayWalk && !lsDq.io.inReplayWalk
 
   fpDq.io.redirect <> io.redirect
-  fpDq.io.commits <> io.commits
-  fpDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
-    dqCommit.valid := commit.valid && dqCommit.bits.uop.ctrl.commitType === CommitType.FP
-  }
+  fpDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
   fpDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
     io.replayPregReq(i + dpParams.IntDqReplayWidth) <> replay
   }
   fpDq.io.otherWalkDone := !intDq.io.inReplayWalk && !lsDq.io.inReplayWalk
 
   lsDq.io.redirect <> io.redirect
-  lsDq.io.commits <> io.commits
-  lsDq.io.commits.zip(io.commits).map { case (dqCommit, commit) =>
-    dqCommit.valid := commit.valid && CommitType.isLoadStore(dqCommit.bits.uop.ctrl.commitType)
-  }
+  lsDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
   lsDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
     io.replayPregReq(i + dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth) <> replay
   }

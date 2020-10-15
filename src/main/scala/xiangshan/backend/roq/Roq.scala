@@ -22,6 +22,7 @@ class Roq extends XSModule {
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
+    val commitRoqIndex = Output(Valid(UInt(RoqIdxWidth.W)))
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -234,6 +235,9 @@ class Roq extends XSModule {
   }
   val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
+  val commitOffset = PriorityEncoder((validCommit :+ false.B).map(!_))
+  io.commitRoqIndex.valid := io.commits(0).valid && !io.commits(0).bits.isWalk
+  io.commitRoqIndex.bits := deqPtrExt + commitOffset
 
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
