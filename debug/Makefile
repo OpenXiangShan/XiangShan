@@ -2,8 +2,8 @@ ARCH = ARCH=riscv64-noop
 NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
-B ?= 3730400
-E ?= 3808439
+B ?= 0
+E ?= 0
 V ?= ALL
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
@@ -50,7 +50,7 @@ microbench_train:
 	cat microbench.log | grep IPC
 
 coremark:
-	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run 2>&1 | tee > cor_ras.log
+	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run
 	#2 > coremark.log
 	cat coremark.log | grep IPC
 
