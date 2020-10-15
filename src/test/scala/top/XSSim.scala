@@ -27,12 +27,17 @@ class DiffTestIO extends XSBundle {
   val wpc = Output(Vec(CommitWidth, UInt(XLEN.W))) // set difftest width to 6
   val isRVC = Output(UInt(32.W))
   val intrNO = Output(UInt(64.W))
+  val cause = Output(UInt(64.W))
 
   val priviledgeMode = Output(UInt(2.W))
   val mstatus = Output(UInt(64.W))
   val sstatus = Output(UInt(64.W))
   val mepc = Output(UInt(64.W))
   val sepc = Output(UInt(64.W))
+  val mtval = Output(UInt(64.W))
+  val stval = Output(UInt(64.W))
+  val mtvec = Output(UInt(64.W))
+  val stvec = Output(UInt(64.W))
   val mcause = Output(UInt(64.W))
   val scause = Output(UInt(64.W))
 
@@ -45,7 +50,6 @@ class DiffTestIO extends XSBundle {
   val medeleg = Output(UInt(64.W))
 
   val scFailed = Output(Bool())
-  // val lrscAddr = Output(UInt(64.W))
 }
 
 class LogCtrlIO extends Bundle {
@@ -108,12 +112,17 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     BoringUtils.addSink(difftest.wdst, "difftestWdst")
     BoringUtils.addSink(difftest.wpc, "difftestWpc")
     BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
+    BoringUtils.addSink(difftest.cause, "difftestCause")
     BoringUtils.addSink(difftest.r, "difftestRegs")
     BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
     BoringUtils.addSink(difftest.mstatus, "difftestMstatus")
     BoringUtils.addSink(difftest.sstatus, "difftestSstatus")
     BoringUtils.addSink(difftest.mepc, "difftestMepc")
     BoringUtils.addSink(difftest.sepc, "difftestSepc")
+    BoringUtils.addSink(difftest.mtval, "difftestMtval")
+    BoringUtils.addSink(difftest.stval, "difftestStval")
+    BoringUtils.addSink(difftest.mtvec, "difftestMtvec")
+    BoringUtils.addSink(difftest.stvec, "difftestStvec")
     BoringUtils.addSink(difftest.mcause, "difftestMcause")
     BoringUtils.addSink(difftest.scause, "difftestScause")
     BoringUtils.addSink(difftest.satp, "difftestSatp")

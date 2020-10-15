@@ -30,15 +30,20 @@ enum {
   DIFFTEST_SSCRATCH,
   DIFFTEST_MIDELEG,
   DIFFTEST_MEDELEG,
+  DIFFTEST_MTVAL,
+  DIFFTEST_STVAL,
+  DIFFTEST_MTVEC,
+  DIFFTEST_STVEC,
   DIFFTEST_MODE,
   DIFFTEST_NR_REG
 };
-// DIFFTEST_MTVAL, DIFFTEST_STVAL will be updated while committing exception
-// Compare / snapshot them is not necessary
 
 struct SyncChannel {
   uint64_t scFailed; // sc inst commited, it failed beacuse lr_valid === 0
-  // uint64_t lrscAddr;
+};
+
+struct SyncState {
+  uint64_t lrscValid;
 };
 
 struct DiffState {
@@ -53,6 +58,7 @@ struct DiffState {
   uint32_t *wdst;
   int wen;
   uint64_t intrNO;
+  uint64_t cause; // for disambiguate_exec
   int priviledgeMode;
 
   // Microarchitucural signal needed to sync status
@@ -66,6 +72,11 @@ extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n);
 extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n);
 extern void (*ref_difftest_getregs)(void *c);
 extern void (*ref_difftest_setregs)(const void *c);
+extern void (*ref_difftest_getregs)(void *c);
+extern void (*ref_difftest_setregs)(const void *c);
+extern void (*ref_difftest_get_mastatus)(void *s);
+extern void (*ref_difftest_set_mastatus)(const void *s);
+extern vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para);
 
 void init_difftest();
 int difftest_step(DiffState *s);
