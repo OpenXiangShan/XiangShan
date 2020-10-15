@@ -12,7 +12,7 @@ import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.FunctionUnit
-import xiangshan.backend.issue.{IssueQueue, ReservationStation}
+import xiangshan.backend.issue.{IssueQueue, ReservationStationNew}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
@@ -92,50 +92,51 @@ class Backend extends XSModule
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
-  val reservedStations = exeUnits.
-    zipWithIndex.
-    map({ case (exu, i) =>
 
-      val cfg = exu.config
+  val reservedStations  = exeUnits.zipWithIndex.map({ case (exu, i) =>
 
-      val wakeUpDateVec = exuConfigs.zip(exeWbReqs).filter(x => needData(cfg, x._1)).map(_._2)
-      val bypassCnt = exuConfigs.count(c => c.enableBypass && needData(cfg, c))
+    val cfg = exu.config
+    
+    val writeBackedData = exuConfigs.zip(exeWbReqs).filter(x => x._1.hasCertainLatency && needData(x._1, cfg)).map(_._2.bits.data)
+    val wakeupCnt = writeBackedData.length
 
-      println(s"exu:${cfg.name} wakeupCnt:${wakeUpDateVec.length} bypassCnt:$bypassCnt")
+    val extraListenPorts = exuConfigs
+      .zip(exeWbReqs)
+      .filter(x => x._1.hasUncertainlatency && needData(x._1, cfg))
+      .map(_._2)
+    val extraListenPortsCnt = extraListenPorts.length
 
-      val rs = Module(new ReservationStation(
-        cfg, wakeUpDateVec.length, bypassCnt, cfg.enableBypass, false
-      ))
-      rs.io.redirect <> redirect
-      rs.io.numExist <> dispatch.io.numExist(i)
-      rs.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
-      rs.io.enqData <> dispatch.io.enqIQData(i)
-      for(
-        (wakeUpPort, exuOut) <-
-        rs.io.wakeUpPorts.zip(wakeUpDateVec)
-      ){
-        wakeUpPort.bits := exuOut.bits
-        wakeUpPort.valid := exuOut.valid
-      }
 
-      exu.io.in <> rs.io.deq
-      exu.io.redirect <> redirect
-      rs
-    })
+    val rs = Module(new ReservationStationNew(cfg, wakeupCnt, extraListenPortsCnt))
+
+    println(s"exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt}")
+
+    rs.io.redirect <> redirect
+    rs.io.numExist <> dispatch.io.numExist(i)
+    rs.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
+    rs.io.enqData <> dispatch.io.enqIQData(i)
+
+
+    rs.io.writeBackedData <> writeBackedData
+    for((x, y) <- rs.io.extraListenPorts.zip(extraListenPorts)){
+      x.valid := y.fire()
+      x.bits := y.bits
+    }
+
+    exu.io.in <> rs.io.deq
+    exu.io.redirect <> redirect
+    
+    rs
+  })
 
   for( rs <- reservedStations){
-    rs.io.bypassUops <> reservedStations.
-      filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
-      map(_.io.selectedUop)
 
-    val bypassDataVec = exuConfigs.zip(exeWbReqs).
-      filter(x => x._1.enableBypass && needData(rs.exuCfg, x._1)).map(_._2)
+    rs.io.broadcastedUops <> reservedStations.
+        filter(x => x.exuCfg.hasCertainLatency && needData(rs.exuCfg, x.exuCfg)).
+        map(_.io.selectedUop)
 
-    for(i <- bypassDataVec.indices){
-      rs.io.bypassData(i).valid := bypassDataVec(i).valid
-      rs.io.bypassData(i).bits := bypassDataVec(i).bits
-    }
   }
+
 
   val issueQueues = exuConfigs.
     zipWithIndex.
