@@ -284,7 +284,7 @@ class ReservationStation
 
     for(i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for(j <- 0 until srcListenNum) {
-        val hitVec = cdbValid.indices.map(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
+        val hitVec = cdbValid.indices.map(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) && cdbPdest(i) =/= 0.U || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
         val hit = ParallelOR(hitVec).asBool
         val data = ParallelMux(hitVec zip cdbData)
         when (validQue(i) && !srcRdyVec(i)(j) && hit) { 
@@ -306,7 +306,7 @@ class ReservationStation
 
     for (i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for (j <- 0 until srcListenNum) {
-        val hitVec = bpValid.indices.map(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
+        val hitVec = bpValid.indices.map(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) && cdbPdest(i) =/= 0.U || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
         val hitVecNext = hitVec.map(RegNext(_))
         val hit = ParallelOR(hitVec).asBool
         when (validQue(i) && !srcRdyVec(i)(j) && hit) {
