@@ -67,7 +67,7 @@ class DCacheLineResp extends DCacheBundle
 
 class DCacheWordIO extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReq )
+  val req  = DecoupledIO(new DCacheWordReq)
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
   // kill previous cycle's req
   val s1_kill = Output(Bool())
