@@ -53,8 +53,11 @@ case class XSCoreParameters
   NRIntReadPorts: Int = 8,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
-  NRFpWritePorts: Int = 8,
+  NRFpWritePorts: Int = 8, 
+  EnableUnifiedLSQ: Boolean = true,
   LsroqSize: Int = 16,
+  LoadQueueSize: Int = 16,
+  StoreQueueSize: Int = 16,
   RoqSize: Int = 32,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
@@ -137,7 +140,10 @@ trait HasXSParameter {
   val BrTagWidth = log2Up(BrqSize)
   val NRPhyRegs = core.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
+  val EnableUnifiedLSQ = core.EnableUnifiedLSQ
   val LsroqSize = core.LsroqSize // 64
+  val LoadQueueSize = core.LoadQueueSize
+  val StoreQueueSize = core.StoreQueueSize
   val RoqSize = core.RoqSize
   val InnerRoqIdxWidth = log2Up(RoqSize)
   val RoqIdxWidth = InnerRoqIdxWidth + 1

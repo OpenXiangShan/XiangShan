@@ -92,7 +92,7 @@ class Memend extends XSModule {
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
   val atomicsUnit = Module(new AtomicsUnit)
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
-  val lsroq = Module(new Lsroq)
+  val lsroq = if(EnableUnifiedLSQ) Module(new Lsroq) else Module(new LsqWrappper) 
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
