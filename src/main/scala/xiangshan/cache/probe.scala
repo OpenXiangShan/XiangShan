@@ -16,12 +16,11 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump {
     val meta_write = Decoupled(new L1MetaWriteReq)
     val wb_req = Decoupled(new WritebackReq(edge.bundle.sourceBits))
     val wb_resp = Input(Bool())
-    val block = Input(Bool())
     val inflight_req_idx        = Output(Valid(UInt()))
     val inflight_req_block_addr = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_wait_sync :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_release :: s_wb_req :: s_wb_resp :: s_meta_write_req :: Nil = Enum(9)
+  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_release :: s_wb_req :: s_wb_resp :: s_meta_write_req :: Nil = Enum(8)
 
   val state = RegInit(s_invalid)
 
@@ -60,14 +59,6 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump {
     io.req.ready := true.B
     when (io.req.fire()) {
       req := io.req.bits
-      state := s_wait_sync
-    }
-  } 
-
-  // we could be blocked by miss queue, or anything else
-  // just wait for them
-  when (state === s_wait_sync) {
-    when (!io.block) {
       state := s_meta_read_req
     }
   }

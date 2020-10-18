@@ -393,11 +393,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
 
+  // sync with prober
+  missQueue.io.probe_wb_req.valid := prober.io.wb_req.fire()
+  missQueue.io.probe_wb_req.bits  := prober.io.wb_req.bits
+  missQueue.io.probe_active       := prober.io.inflight_req_block_addr
+
   //----------------------------------------
   // prober
-  prober.io.block := block_probe(prober.io.inflight_req_block_addr.bits)
-  prober.io.req <> bus.b
-  XSDebug(prober.io.block, "prober blocked\n")
+  prober.io.req.valid := bus.b.valid
+  bus.b.ready         := prober.io.req.ready && !block_probe(get_block_addr(bus.b.bits.address))
+  prober.io.req.bits  := bus.b.bits
 
   //----------------------------------------
   // wb
@@ -409,9 +414,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.wb_resp := wb.io.resp
   prober.io.wb_resp    := wb.io.resp
   wb.io.mem_grant      := bus.d.fire() && bus.d.bits.source === cfg.nMissEntries.U
-
-  missQueue.io.probe_wb_req.valid := prober.io.wb_req.fire()
-  missQueue.io.probe_wb_req.bits  := prober.io.wb_req.bits
 
   TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 

@@ -40,9 +40,9 @@ uint8_t uart_getc() {
     eprintf(ANSI_COLOR_RED "now = %ds\n" ANSI_COLOR_RESET, now / 1000);
     lasttime = now;
   }
-  if (now > 4 * 3600 * 1000) { // 4 hours
-    ch = uart_dequeue();
-  }
+  // if (now > 4 * 3600 * 1000) { // 4 hours
+  //   ch = uart_dequeue();
+  // }
   return ch;
 }
 
