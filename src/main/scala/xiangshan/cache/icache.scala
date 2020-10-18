@@ -355,7 +355,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val refillFinalOneBeat = (state === s_memReadResp) && bus.d.fire() && refill_done
   val wayNum = OHToUInt(waymask)
   val validPtr = Cat(get_idx(s3_req_pc),wayNum)
-  metaWrite.tag := get_tag(s3_req_pc)
+  //metaWrite.tag := get_tag(s3_req_pc)     
+  metaWrite.tag := s3_tag
   metaArray.io.w.req.valid := refillFinalOneBeat
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
