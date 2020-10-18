@@ -12,11 +12,10 @@ import xiangshan.backend.LSUOpType
 class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+    val sqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
     val brqRedirect = Input(Valid(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))

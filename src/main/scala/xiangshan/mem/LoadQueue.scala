@@ -13,7 +13,7 @@ import xiangshan.mem._
 class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+    val lqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only

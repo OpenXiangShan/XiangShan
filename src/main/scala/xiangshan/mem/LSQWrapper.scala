@@ -28,12 +28,44 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
-    // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
-  loadQueue.io <> DontCare
-  storeQueue.io <> DontCare
 
+  // load queue wiring
+  loadQueue.io.dp1Req <> io.dp1Req
+  loadQueue.io.brqRedirect <> io.brqRedirect
+  loadQueue.io.loadIn <> io.loadIn
+  loadQueue.io.storeIn <> io.storeIn
+  loadQueue.io.ldout <> io.ldout
+  loadQueue.io.forward <> io.forward
+  loadQueue.io.commits <> io.commits
+  loadQueue.io.rollback <> io.rollback
+  loadQueue.io.dcache <> io.dcache
+  loadQueue.io.roqDeqPtr <> io.roqDeqPtr
+
+  // store queue wiring
+  // storeQueue.io <> DontCare
+  storeQueue.io.dp1Req <> io.dp1Req
+  storeQueue.io.brqRedirect <> io.brqRedirect
+  storeQueue.io.storeIn <> io.storeIn
+  storeQueue.io.sbuffer <> io.sbuffer
+  storeQueue.io.stout <> io.stout
+  storeQueue.io.forward <> io.forward
+  storeQueue.io.commits <> io.commits
+  storeQueue.io.rollback <> io.rollback
+  storeQueue.io.roqDeqPtr <> io.roqDeqPtr
+
+  // uncache arbiter
+  val uncacheArb = Module(new Arbiter(new DCacheWordIO, 2))
+  uncacheArb.io.in(0) <> loadQueue.io.uncache
+  uncacheArb.io.in(1) <> storeQueue.io.uncache
+  uncacheArb.io.out <> io.uncache
+
+  (0 until RenameWidth).map(i => {
+    loadQueue.io.lqIdxs(i) <> io.lsroqIdxs(i).lqIdx
+    storeQueue.io.sqIdxs(i) <> io.lsroqIdxs(i).sqIdx
+    io.lsroqIdxs(i).lsIdxType := DontCare 
+  })
 }
