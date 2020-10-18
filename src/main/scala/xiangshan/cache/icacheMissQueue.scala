@@ -18,18 +18,33 @@ abstract class ICacheMissQueueModule extends XSModule
   with HasICacheParameters 
   with HasXSLog
 
-class ICacheRefill extends XSBundle
+abstract class ICacheMissQueueBundle extends XSBundle
+  with HasICacheParameters
+
+class ICacheRefill extends ICacheMissQueueBundle
 {
-    refill_idx = UInt()
-    refill_data = UInt()
-    refill_waymask = UInt()
+    refill_idx = UInt(idxBits.W)
+    refill_data = Vec(blockWords,UInt(wordBits.W))
+    refill_waymask = UInt(nWays.W)
+
+    def applay(data:UInt, setIdx:UInt, waymask:UInt) = {
+      this.refill_idx := setIdx
+      this.refill_data := data
+      this.refill_waymask := waymask
+    }
 }
 
-class ICacheMetaWrite extends XSBundle
+class ICacheMetaWrite extends ICacheMissQueueBundle
 {
-    meta_wirte_idx = UInt()
-    meta_wirte_tag = UInt()
-    meta_write_waymask = UInt()
+    meta_write_idx = UInt(idxBits.W)
+    meta_write_tag = UInt(tagBits.W)
+    meta_write_waymask = UInt(nWays.W)
+
+    def applay(tag:UInt, setIdx:UInt, waymask:UInt) = {
+      this.meta_write_idx := setIdx
+      this.meta_write_tag := tag
+      this.meta_write_waymask := waymask
+    }
 }
 
 class IcacheMissReq extends ICacheBundle
@@ -56,19 +71,20 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
         val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
         val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
-        val meta_wirte = DecoupledIO(new ICacheMetaWrite)
+        val meta_write = DecoupledIO(new ICacheMetaWrite)
         val refill = DecoupledIO(new ICacheRefill)
 
-        val flush = UInt(2.W)
+        val flush = Bool()
     })
 
-    val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_resp :: Nil = Enum(7)
+    val s_idle :: s_memReadReq :: s_memReadResp :: s_write_back :: s_wait_resp :: Nil = Enum(5)
     val state = RegInit(s_idle)
 
     //req register
     val req = Reg(new IcacheMissReq)
     val req_idx = get_idx(req.addr)
     val req_tag = get_tag(req.addr)
+    val req_waymask = req.waymask
 
     //8 for 64 bits bus and 2 for 256 bits
     val readBeatCnt = Counter(refillCycles)
@@ -77,26 +93,25 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
     val (_, _, refill_done, refill_cnt) = edge.count(io.mem_grant)
 
     //initial
-    io.req.ready := false.B
-    io.resp.valid := false.B
     io.resp.bits := DontCare
-
-    io.mem_acquire.valid := false.B
     io.mem_acquire.bits := DontCare
-
     io.mem_grant.ready := true.B   
-
-    io.meta_wirte.valid := false.B
-    io.meta_wirte.bits := DontCare
-
-    io.refill.valid := false.B
+    io.meta_write.bits := DontCare
     io.refill.bits := DontCare
+
+    io.req.ready := state === s_idle
+    io.mem_acquire.valid := state === s_memReadResp
+    io.resp.valid := state === s_wait_resp
+
+    //flush register
+    val needFlush = RegInit(false.B)
+    when(io.flush && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
+    .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
     //state change
     val countFull = readBeatCnt.value === (refillCycles - 1).U
     switch(state){
       is(s_idle){
-        io.req.ready := true.B
         when(io.req.fire() && io.flush === 0.U){
           state := s_memReadReq
           readBeatCnt.value := 0.U
@@ -111,68 +126,38 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
       }
 
       is(s_memReadResp){
-        io.mem_acquire.valid := true.B
-        when (edge.hasData(io.mem_grant.bits) && io.mem_grant.d.fire()) {
+        when (edge.hasData(io.mem_grant.bits) && io.mem_grant.fire()) {
           readBeatCnt.inc()
 	      refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data
           when(countFull){
             assert(refill_done, "refill not done!")
-            state := s_wait_resp
+            state := s_write_back
           }
         }
       }
 
       is(s_write_back){
-          when(io.refill.fire()){ state := s_wait_resp}
+        when(io.refill.fire() && io.meta_write.fire()){
+          state := s_wait_resp
+        }
       }
 
       is(s_wait_resp){
-        io.resp.valid := true.B
         io.resp.bits.data := refillDataReg
         when(io.resp.fire() || needFlush ){ state := s_idle }
       }
 
     }
 
-    //refill write
-    val metaWrite = Wire(new ICacheMetaBundle)
-    val refillFinalOneBeat = (state === s_memReadResp) && io.mem_grant.fire() && refill_done
-    val wayNum = OHToUInt(waymask)
-    val validPtr = Cat(get_idx(s3_req_pc),wayNum)
-    metaWrite.tag := get_tag(s3_req_pc)
-    io.meta_wirte.valid := refillFinalOneBeat
-    io.meta_wirte.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
+    //refill write and meta write
+    //WARNING: Maybe could not finish refill in 1 cycle
+    io.meta_write.valid := state === s_write_back
+    io.meta_write.bits.apply(tag=req_tag, setIdx=req_idx, waymask=req_waymask)
    
-    if(beatBits == 64){
-        for(b <- 0 until blockWords){
-        val writeOneBeat = (state === s_memReadResp) && io.mem_grant.fire() && (b.U === readBeatCnt.value)
-        io.refill.valid := writeOneBeat
-        io.refill.bits.apply(   setIdx=get_idx(s3_req_pc), 
-                                            data=io.mem_grant.bits.data.asTypeOf(new ICacheDataBundle), 
-                                            waymask=s3_wayMask)
-   
-        }
-    }
-    else{
-        val writeFirstHalf = (state === s_memReadResp) && io.mem_grant.fire() && (readBeatCnt.value === 0.U)
-        (0 until blockWords/2).foreach{ b =>
-        io.refill.valid := writeFirstHalf
-        io.refill.bits.apply( setIdx=get_idx(s3_req_pc),
-                                            data=io.mem_grant.bits.data(b * 64 +63, b*64).asTypeOf(new ICacheDataBundle),
-                                            waymask=s3_wayMask)
-   
-        }
-        val writeLastHalf = (state === s_memReadResp) && io.mem_grant.fire() && (readBeatCnt.value === 1.U)
-        (blockWords/2 until blockWords).foreach{ b =>
-        val index = b - blockWords/2
-        io.refill.valid := writeLastHalf
-        io.refill.bits.apply( setIdx=get_idx(s3_req_pc),
-                                            data=io.mem_grant.bits.data(index * 64 +63, index*64).asTypeOf(new ICacheDataBundle), 
-                                            waymask=s3_wayMask)
-   
-        }
-   
-    }
+    io.refill.valid := state === s_write_back
+    io.refill.bits.apply(data=refillDataReg.asTypeOf(Vec(blockWords,UInt(wordBits.W))),
+                        setIdx=req_idx,
+                        waymask=req_waymask)
 
 
 
@@ -187,12 +172,58 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
-    val meta_wirte = DecoupledIO(new ICacheMetaWrite)
+    val meta_write = DecoupledIO(new ICacheMetaWrite)
     val refill = DecoupledIO(new ICacheRefill)
 
     val flush = UInt(2.W)
 
   })
 
-  val resp_arb = 
+  val resp_arb       = Module(new Arbiter(new IcacheMissResp,   nMSHRs))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrite,  nMSHRs))
+  val refill_arb     = Module(new Arbiter(new ICacheRefill,     nMSHRs))
+
+  //initial
+  io.mem_grant.ready := true.B
+  
+  val entry_alloc_idx = Wire(UInt())
+  val req_ready = WireInit(false.B)
+
+  val entries = (0 until cfg.nMissEntries) map { i =>
+    val entry = Module(new MissEntry(edge))
+
+    entry.io.id := i.U(log2Up(cfg.nMissEntries).W)
+
+    // entry req
+    entry.io.req.valid := (i.U === entry_alloc_idx) && io.req.valid
+    entry.io.req.bits  := io.req.bits
+    when (i.U === entry_alloc_idx) {
+      req_ready := entry.io.req.ready
+    }
+
+    // entry resp
+    resp_arb.io.in(i)       <>  entry.io.resp
+    meta_write_arb.io.in(i) <>  entry.io.meta_write
+    refill_arb.io.in(i)     <>  entry.io.refill
+
+    entry.io.mem_grant.valid := false.B
+    entry.io.mem_grant.bits  := DontCare
+    when (io.mem_grant.bits.source === i.U) {
+      entry.io.mem_grant <> io.mem_grant
+    }
+    entry
+  }
+
+  entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req.ready))
+
+  io.req.ready  := req_ready
+  io.resp.valid := resp_arb.io.out.valid
+  io.resp.bits  := resp_arb.io.out.bits
+  resp_arb.io.out.ready := true.B
+
+  io.meta_write <> meta_write_arb.io.out
+  io.refill     <> refill_arb.io.out
+
+  TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
+  TLArbiter.lowestFromSeq(edge, io.mem_finish,  entries.map(_.io.mem_finish))
 }

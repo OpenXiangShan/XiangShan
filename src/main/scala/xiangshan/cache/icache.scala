@@ -270,20 +270,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
   outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
 
-  //icache miss
-  val s_idle :: s_mmioReq :: s_mmioResp :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(6)
-  val state = RegInit(s_idle)
-  val readBeatCnt = Counter(refillCycles)
-
-  //uncache request
-  val mmioBeatCnt = Counter(blockWords)
-  val mmioAddrReg = RegInit(0.U(PAddrBits.W))
-  val mmioReg = Reg(Vec(blockWords/2, UInt(blockWords.W)))
-
-  //pipeline flush register
-  val needFlush = RegInit(false.B)
-  when(io.flush(1) && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
-  .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
   //cache flush register
   val icacheFlush = WireInit(false.B)
@@ -294,62 +280,6 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   .elsewhen((state=== s_wait_resp) && cacheflushed) {cacheflushed := false.B }
 
   val waitForRefillDone = needFlush || cacheflushed
-
-  // state change to wait for a cacheline refill
-  val countFull = readBeatCnt.value === (refillCycles - 1).U
-  val mmioCntFull = mmioBeatCnt.value === (blockWords - 1).U
-  switch(state){
-    is(s_idle){
-      when(s3_mmio && io.flush === 0.U){
-        state := s_mmioReq
-        mmioBeatCnt.value := 0.U
-        mmioAddrReg := s3_tlb_resp.paddr
-      } .elsewhen(s3_miss && io.flush === 0.U){
-        state := s_memReadReq
-        readBeatCnt.value := 0.U
-      }
-    }
-
-    //mmio request
-    is(s_mmioReq){
-      when(bus.a.fire()){
-        state := s_mmioResp
-        mmioAddrReg := mmioAddrReg + 8.U   //consider MMIO response 64 bits valid data
-      }
-    }
-
-    is(s_mmioResp){
-      when (edge.hasData(bus.d.bits) && bus.d.fire()) {
-        mmioBeatCnt.inc()
-        assert(refill_done, "MMIO response should be one beat only!")
-        mmioReg(mmioBeatCnt.value) := bus.d.bits.data(wordBits-1,0)
-        state := Mux(mmioCntFull,s_wait_resp,s_mmioReq)
-      }
-    }
-
-    // memory request
-    is(s_memReadReq){ 
-      when(bus.a.fire()){ 
-        state := s_memReadResp
-      }
-    }
-
-    is(s_memReadResp){
-      when (edge.hasData(bus.d.bits) && bus.d.fire()) {
-        readBeatCnt.inc()
-	      refillDataReg(readBeatCnt.value) := bus.d.bits.data
-        when(countFull){
-          assert(refill_done, "refill not done!")
-          state := s_wait_resp
-        }
-      }
-    }
-
-    is(s_wait_resp){
-      when(io.resp.fire() || needFlush ){state := s_idle}
-    }
-
-  }
 
 
   //refill write
