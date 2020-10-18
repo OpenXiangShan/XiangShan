@@ -16,6 +16,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(LoadPipelineWidth, Valid(new RoqCommit)))
@@ -323,7 +324,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
     // entry with larger index should have higher priority since it's data is younger
     for (j <- 0 until LsroqSize) {
-      val needCheck = valid(j) && allocated(j) && store(j) &&
+      val needCheck = valid(j) && allocated(j) && // all valid terms need to be checked
         io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
       (0 until XLEN / 8).foreach(k => {
         when (needCheck && data(j).mask(k)) {
@@ -410,7 +411,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
       val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && !store(j) && (valid(j) || listening(j) || miss(j))
+        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (valid(j) || listening(j) || miss(j))
         // TODO: update refilled data
         val violationVec = (0 until 8).map(k => data(j).mask(k) && io.storeIn(i).bits.mask(k))
         Cat(violationVec).orR() && entryNeedCheck
@@ -496,11 +497,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   // mask / paddr / data can be get from lsroq.data
   val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
-    (commitType === CommitType.STORE || commitType === CommitType.LOAD) && 
+    commitType === CommitType.LOAD && 
     io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
     !io.commits(0).bits.isWalk
 
-  io.uncache.req.bits.cmd  := Mux(store(ringBufferTail), MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD)
+  io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := data(ringBufferTail).paddr 
   io.uncache.req.bits.data := data(ringBufferTail).data
   io.uncache.req.bits.mask := data(ringBufferTail).mask
@@ -541,11 +542,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
   }
 
+  // FIXME: index by lq/sq id
   // Read vaddr for mem exception
   val mexcLsroqIdx = WireInit(0.U(LsroqIdxWidth.W))
   val memExceptionAddr = WireInit(data(mexcLsroqIdx(InnerLsroqIdxWidth - 1, 0)).vaddr)
   ExcitingUtils.addSink(mexcLsroqIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_VADDR")
+  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_LOAD_VADDR")
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx
@@ -555,7 +557,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
         valid(i) := false.B
-        store(i) := false.B
         writebacked(i) := false.B
         listening(i) := false.B
         miss(i) := false.B
@@ -592,7 +593,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")
     PrintFlag(allocated(i) && commited(i), "c")
-    PrintFlag(allocated(i) && store(i), "s")
     PrintFlag(allocated(i) && miss(i), "m")
     PrintFlag(allocated(i) && listening(i), "l")
     PrintFlag(allocated(i) && pending(i), "p")
