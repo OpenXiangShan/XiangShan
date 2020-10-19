@@ -76,6 +76,9 @@ class MemToBackendIO extends XSBundle {
   val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
 }
 
+// Memory pipeline wrapper
+//
+// Wrap the whole memory access pipeline as a single module "Memend"
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
