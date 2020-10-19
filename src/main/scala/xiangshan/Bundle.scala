@@ -159,11 +159,87 @@ trait HasRoqIdx { this: HasXSParameter =>
   }
 }
 
+// Load / Store Index
+//
+// When using unified lsroq, lsIdx serves as lsroqIdx,
+// while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
+// All lsroqIdx will be replaced by new lsIdx in the future.
+trait HasLSIdx { this: HasXSParameter =>
+  if(EnableUnifiedLSQ){
+    val lsroqIdx = UInt(LsroqIdxWidth.W)
+    def isEqual(thatIdx: UInt): Bool = {
+      this.lsroqIdx === thatIdx
+    }
+
+    def isAfter(thatIdx: UInt): Bool = {
+      Mux(
+        this.lsroqIdx.head(1) === thatIdx.head(1),
+        this.lsroqIdx.tail(1) > thatIdx.tail(1),
+        this.lsroqIdx.tail(1) < thatIdx.tail(1)
+      )
+    }
+    
+    def isAfter[ T<: HasLSIdx ](that: T): Bool = {
+      isAfter(that.lsroqIdx)
+    }
+  } else {
+    val lqIdx = UInt(LoadQueueIdxWidth)
+    val sqIdx = UInt(StoreQueueIdxWidth)
+    val instIsLoad = Bool()
+
+    def isLoad(): Bool = this.instIsLoad
+
+    def isLoadAfter(thatLqIdx: UInt): Bool = {
+      Mux(
+        this.lqIdx.head(1) === thatLqIdx.head(1),
+        this.lqIdx.tail(1) > thatLqIdx.tail(1),
+        this.lqIdx.tail(1) < thatLqIdx.tail(1)
+      )
+    }
+    
+    def isLoadAfter[ T<: HasLSIdx ](that: T): Bool = {
+      isLoadAfter(that.lqIdx)
+    }
+
+    def isStoreAfter(thatSqIdx: UInt): Bool = {
+      Mux(
+        this.sqIdx.head(1) === thatSqIdx.head(1),
+        this.sqIdx.tail(1) > thatSqIdx.tail(1),
+        this.sqIdx.tail(1) < thatSqIdx.tail(1)
+      )
+    }
+    
+    def isStoreAfter[ T<: HasLSIdx ](that: T): Bool = {
+      isStoreAfter(that.sqIdx)
+    }
+
+    // TODO: refactor isAfter
+
+    // def isAfter(lqIdx: UInt, sqIdx: UInt, instIsLoad: Bool): Bool = {
+    //   // there are 4 cases:
+    //   // load  <-> load
+    //   // load  <-> store
+    //   // store <-> load
+    //   // store <-> store
+    //   Mux(
+    //     this.lsroqIdx.head(1) === thatIdx.head(1),
+    //     this.lsroqIdx.tail(1) > thatIdx.tail(1),
+    //     this.lsroqIdx.tail(1) < thatIdx.tail(1)
+    //   )
+    // }
+    
+    // def isAfter[ T<: HasLSIdx ](that: T): Bool = {
+    //   isAfter(that.lsroqIdx)
+    // }
+  }
+}
+
+class LSIdx extends XSBundle with HasLSIdx {}
+
 // CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl with HasRoqIdx {
+class MicroOp extends CfCtrl with HasRoqIdx with HasLSIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
-  val lsroqIdx = UInt(LsroqIdxWidth.W)
   val diffTestDebugLrScValid = Bool()
 }
 
