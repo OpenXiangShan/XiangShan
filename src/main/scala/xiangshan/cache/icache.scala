@@ -353,7 +353,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //refill write
   val metaWrite = Wire(new ICacheMetaBundle)
   val refillFinalOneBeat = (state === s_memReadResp) && bus.d.fire() && refill_done
-  val wayNum = OHToUInt(waymask)
+  val wayNum = OHToUInt(s3_wayMask.asTypeOf(Vec(nWays,Bool())))
   val validPtr = Cat(get_idx(s3_req_pc),wayNum)
   //metaWrite.tag := get_tag(s3_req_pc)     
   metaWrite.tag := s3_tag
