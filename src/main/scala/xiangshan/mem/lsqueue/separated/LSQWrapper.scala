@@ -34,17 +34,14 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
   val storeQueue = Module(new StoreQueue)
 
   // reorg dp1Req
-  // Note: it is only a behavior level model, refactor needed
-  // TODO: FIXME
   val dp1LdReq = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val dp1StReq = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-  var ldPtr = WireInit(0.U)
-  var stPtr = WireInit(0.U)
   (0 until RenameWidth).map(i => {
-    dp1LdReq(i) <> dp1Req(ldPtr)
-    dp1StReq(i) <> dp1Req(stPtr)
-    ldPtr = ldPtr +& dp1Req(i).valid && LSUOpType.isLoad(dp1Req(i).bits.ctrl.fuOpType)
-    stPtr = stPtr +& dp1Req(i).valid && LSUOpType.isStore(dp1Req(i).bits.ctrl.fuOpType)
+    when(LSUOpType.isStore(dp1Req(i).bits.ctrl.fuOpType)){
+      dp1StReq(i) <> dp1Req(i)
+    }.otherwise{
+      dp1LdReq(i) <> dp1Req(i)
+    }
   })
 
   // load queue wiring
