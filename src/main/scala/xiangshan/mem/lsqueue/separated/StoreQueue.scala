@@ -100,7 +100,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
         data(io.storeIn(i).bits.uop.sqIdx).mmio := io.storeIn(i).bits.mmio
         data(io.storeIn(i).bits.uop.sqIdx).exception := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
         miss(io.storeIn(i).bits.uop.sqIdx) := io.storeIn(i).bits.miss
-        store(io.storeIn(i).bits.uop.sqIdx) := true.B
         pending(io.storeIn(i).bits.uop.sqIdx) := io.storeIn(i).bits.mmio
         XSInfo("store write to sq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x exc %x\n",
         io.storeIn(i).bits.uop.sqIdx(InnerStoreQueueIdxWidth - 1, 0),
@@ -118,8 +117,25 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   // writeback up to 2 store insts to CDB
   // choose the first two valid store requests from deqPtr
+
+  def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
+    val length = mask.length
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
+    val highBitsUint = Cat(highBits.reverse)
+    PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
+  }
+
+  def getFirstOneWithFlag(mask: Vec[Bool], startMask: UInt, startFlag: UInt) = {
+    val length = mask.length
+    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
+    val highBitsUint = Cat(highBits.reverse)
+    val changeDirection = !highBitsUint.orR()
+    val index = PriorityEncoder(Mux(!changeDirection, highBitsUint, mask.asUInt))
+    Cat(startFlag ^ changeDirection, index)
+  }
+
   val storeWbSelVec = VecInit((0 until StoreQueueSize).map(i => {
-    allocated(i) && valid(i) && !writebacked(i) && store(i)
+    allocated(i) && valid(i) && !writebacked(i)
   }))
   val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(StoreQueueSize).W)))
   val storeWbValid = Wire(Vec(StorePipelineWidth, Bool()))
@@ -155,7 +171,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
   ringBufferTailExtended := nextTail
 
-  // TODO: FIXME: commitedStoreQueue is not necessary
+  // CommitedStoreQueue is not necessary
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
   // scommitPending, scommitIn, scommitOut are for debug only
@@ -166,29 +182,29 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     outCnt = 2,
     mem = false,
     perf = true
-  ))
-
-  // // scommit counter for debugging
-  // val scommitPending = RegInit(0.U(log2Up(StoreQueueSize).W))
-  // val scommitIn = PopCount(VecInit(storeCommit).asUInt)
-  // val scommitOut = PopCount(VecInit((0 until 2).map(i => commitedStoreQueue.io.deq(i).fire())).asUInt)
-  // scommitPending := scommitPending + scommitIn - scommitOut
-
-  commitedStoreQueue.io.flush := false.B
-
-  // When store commited, mark it as commited (will not be influenced by redirect),
-  // then add store's sq ptr into commitedStoreQueue
-  (0 until CommitWidth).map(i => {
-    when(storeCommit(i)) {
-      commited(mcommitIdx(i)) := true.B
-      XSDebug("store commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
-    }
-    commitedStoreQueue.io.enq(i).valid := storeCommit(i)
-    commitedStoreQueue.io.enq(i).bits := mcommitIdx(i)
-    // We assume commitedStoreQueue.io.enq(i).ready === true.B,
+    ))
+    
+    // // scommit counter for debugging
+    // val scommitPending = RegInit(0.U(log2Up(StoreQueueSize).W))
+    // val scommitIn = PopCount(VecInit(storeCommit).asUInt)
+    // val scommitOut = PopCount(VecInit((0 until 2).map(i => commitedStoreQueue.io.deq(i).fire())).asUInt)
+    // scommitPending := scommitPending + scommitIn - scommitOut
+    
+    commitedStoreQueue.io.flush := false.B
+    
+    // When store commited, mark it as commited (will not be influenced by redirect),
+    // then add store's sq ptr into commitedStoreQueue
+    (0 until CommitWidth).map(i => {
+      when(storeCommit(i)) {
+        commited(mcommitIdx(i)) := true.B
+        XSDebug("store commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
+      }
+      commitedStoreQueue.io.enq(i).valid := storeCommit(i)
+      commitedStoreQueue.io.enq(i).bits := mcommitIdx(i)
+      // We assume commitedStoreQueue.io.enq(i).ready === true.B,
     // for commitedStoreQueue.size = 64
   })
-
+  
   // get no more than 2 commited store from storeCommitedQueue
   // send selected store inst to sbuffer
   (0 until 2).map(i => {
@@ -204,30 +220,30 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     io.sbuffer(i).bits.meta.uop      := uop(ptr)
     io.sbuffer(i).bits.meta.mmio     := mmio
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
-
+    
     commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire() || mmio
-
+    
     // update sq meta if store inst is send to sbuffer
     when(commitedStoreQueue.io.deq(i).valid && (mmio || io.sbuffer(i).ready)) {
       allocated(commitedStoreQueue.io.deq(i).bits) := false.B
     }
   })
-
+  
   // Memory mapped IO / other uncached operations
-
+  
   // setup misc mem access req
   // mask / paddr / data can be get from sq.data
   val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
-    commitType === CommitType.STORE && 
-    io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
-    !io.commits(0).bits.isWalk
-
+  commitType === CommitType.STORE && 
+  io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
+  !io.commits(0).bits.isWalk
+  
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := data(ringBufferTail).paddr 
   io.uncache.req.bits.data := data(ringBufferTail).data
   io.uncache.req.bits.mask := data(ringBufferTail).mask
-
+  
   io.uncache.req.bits.meta.id       := DontCare // TODO: // FIXME
   io.uncache.req.bits.meta.vaddr    := DontCare
   io.uncache.req.bits.meta.paddr    := data(ringBufferTail).paddr
@@ -236,20 +252,20 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   io.uncache.req.bits.meta.tlb_miss := false.B
   io.uncache.req.bits.meta.mask     := data(ringBufferTail).mask
   io.uncache.req.bits.meta.replay   := false.B
-
+  
   io.uncache.resp.ready := true.B
   io.uncache.s1_kill := false.B
-
+  
   when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B
   }
-
+  
   when(io.uncache.resp.fire()){
     valid(ringBufferTail) := true.B
     data(ringBufferTail).data := io.uncache.resp.bits.data(XLEN-1, 0)
     // TODO: write back exception info
   }
-
+  
   when(io.uncache.req.fire()){
     XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
       uop(ringBufferTail).cf.pc,
@@ -265,7 +281,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   }
 
   // Read vaddr for mem exception
-  val mexcLsIdx = WireInit(0.asTypeOf(new LSIdx()))
+  val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
   val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx(InnerStoreQueueIdxWidth - 1, 0)).vaddr)
   ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
   ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_STORE_VADDR")
@@ -278,7 +294,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
         valid(i) := false.B
-        store(i) := false.B
         writebacked(i) := false.B
         listening(i) := false.B
         miss(i) := false.B
@@ -293,7 +308,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   }
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d scommit %d\n", ringBufferHeadExtended(InnerStoreQueueIdxWidth), ringBufferHead, ringBufferTailExtended(InnerStoreQueueIdxWidth), ringBufferTail, scommitPending)
+  XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerStoreQueueIdxWidth), ringBufferHead, ringBufferTailExtended(InnerStoreQueueIdxWidth), ringBufferTail)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
@@ -310,7 +325,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")
     PrintFlag(allocated(i) && commited(i), "c")
-    PrintFlag(allocated(i) && store(i), "s")
     PrintFlag(allocated(i) && miss(i), "m")
     PrintFlag(allocated(i) && listening(i), "l")
     PrintFlag(allocated(i) && pending(i), "p")

@@ -165,72 +165,33 @@ trait HasRoqIdx { this: HasXSParameter =>
 // while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
 // All lsroqIdx will be replaced by new lsIdx in the future.
 trait HasLSIdx { this: HasXSParameter =>
-  if(EnableUnifiedLSQ){
-    val lsroqIdx = UInt(LsroqIdxWidth.W)
-    def isEqual(thatIdx: UInt): Bool = {
-      this.lsroqIdx === thatIdx
-    }
+  
+  // if(EnableUnifiedLSQ) // TODO
 
-    def isAfter(thatIdx: UInt): Bool = {
-      Mux(
-        this.lsroqIdx.head(1) === thatIdx.head(1),
-        this.lsroqIdx.tail(1) > thatIdx.tail(1),
-        this.lsroqIdx.tail(1) < thatIdx.tail(1)
-      )
-    }
-    
-    def isAfter[ T<: HasLSIdx ](that: T): Bool = {
-      isAfter(that.lsroqIdx)
-    }
-  } else {
-    val lqIdx = UInt(LoadQueueIdxWidth)
-    val sqIdx = UInt(StoreQueueIdxWidth)
-    val instIsLoad = Bool()
+  // Unified LSQ
+  val lsroqIdx = UInt(LsroqIdxWidth.W)
+  
+  // Separate LSQ
+  val lqIdx = UInt(LoadQueueIdxWidth.W)
+  val sqIdx = UInt(StoreQueueIdxWidth.W)
+  val instIsLoad = Bool()
 
-    def isLoad(): Bool = this.instIsLoad
+  def isLoad(): Bool = instIsLoad
 
-    def isLoadAfter(thatLqIdx: UInt): Bool = {
-      Mux(
-        this.lqIdx.head(1) === thatLqIdx.head(1),
-        this.lqIdx.tail(1) > thatLqIdx.tail(1),
-        this.lqIdx.tail(1) < thatLqIdx.tail(1)
-      )
-    }
-    
-    def isLoadAfter[ T<: HasLSIdx ](that: T): Bool = {
-      isLoadAfter(that.lqIdx)
-    }
+  def isLoadAfter(thatLqIdx: UInt): Bool = {
+    Mux(
+      lqIdx.head(1) === thatLqIdx.head(1),
+      lqIdx.tail(1) > thatLqIdx.tail(1),
+      lqIdx.tail(1) < thatLqIdx.tail(1)
+    )
+  }
 
-    def isStoreAfter(thatSqIdx: UInt): Bool = {
-      Mux(
-        this.sqIdx.head(1) === thatSqIdx.head(1),
-        this.sqIdx.tail(1) > thatSqIdx.tail(1),
-        this.sqIdx.tail(1) < thatSqIdx.tail(1)
-      )
-    }
-    
-    def isStoreAfter[ T<: HasLSIdx ](that: T): Bool = {
-      isStoreAfter(that.sqIdx)
-    }
-
-    // TODO: refactor isAfter
-
-    // def isAfter(lqIdx: UInt, sqIdx: UInt, instIsLoad: Bool): Bool = {
-    //   // there are 4 cases:
-    //   // load  <-> load
-    //   // load  <-> store
-    //   // store <-> load
-    //   // store <-> store
-    //   Mux(
-    //     this.lsroqIdx.head(1) === thatIdx.head(1),
-    //     this.lsroqIdx.tail(1) > thatIdx.tail(1),
-    //     this.lsroqIdx.tail(1) < thatIdx.tail(1)
-    //   )
-    // }
-    
-    // def isAfter[ T<: HasLSIdx ](that: T): Bool = {
-    //   isAfter(that.lsroqIdx)
-    // }
+  def isStoreAfter(thatSqIdx: UInt): Bool = {
+    Mux(
+      sqIdx.head(1) === thatSqIdx.head(1),
+      sqIdx.tail(1) > thatSqIdx.tail(1),
+      sqIdx.tail(1) < thatSqIdx.tail(1)
+    )
   }
 }
 

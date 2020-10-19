@@ -136,7 +136,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         miss(io.loadIn(i).bits.uop.lqIdx) := dcacheMissed
         listening(io.loadIn(i).bits.uop.lqIdx) := dcacheMissed
-        store(io.loadIn(i).bits.uop.lqIdx) := false.B
         pending(io.loadIn(i).bits.uop.lqIdx) := io.loadIn(i).bits.mmio
       }
     })
@@ -231,7 +230,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   // writeback up to 2 missed load insts to CDB
   // just randomly pick 2 missed load (data refilled), write them back to cdb
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && valid(i) && !writebacked(i) && !store(i)
+    allocated(i) && valid(i) && !writebacked(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
   val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val lselvec0 = PriorityEncoderOH(loadWbSelVec)
@@ -543,7 +542,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   }
 
   // Read vaddr for mem exception
-  val mexcLsIdx = WireInit(0.asTypeOf(new LSIdx()))
+  val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
   val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx(InnerLoadQueueIdxWidth - 1, 0)).vaddr)
   ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
   ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_LOAD_VADDR")
@@ -575,7 +574,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   }
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d scommit %d\n", ringBufferHeadExtended(InnerLoadQueueIdxWidth), ringBufferHead, ringBufferTailExtended(InnerLoadQueueIdxWidth), ringBufferTail, scommitPending)
+  XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended(InnerLoadQueueIdxWidth), ringBufferHead, ringBufferTailExtended(InnerLoadQueueIdxWidth), ringBufferTail)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {

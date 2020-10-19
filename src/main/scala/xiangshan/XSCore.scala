@@ -151,8 +151,8 @@ trait HasXSParameter {
   val StoreQueueSize = core.StoreQueueSize
   val InnerLoadQueueIdxWidth = log2Up(LoadQueueSize)
   val InnerStoreQueueIdxWidth = log2Up(StoreQueueSize)
-  val LoadQueueIdxWidth = InnerLqIdxWidth + 1
-  val StoreQueueIdxWidth = InnerSqIdxWidth + 1
+  val LoadQueueIdxWidth = InnerLoadQueueIdxWidth + 1
+  val StoreQueueIdxWidth = InnerStoreQueueIdxWidth + 1
   val dpParams = core.dpParams
   val ReplayWidth = dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth + dpParams.LsDqReplayWidth
   val exuParameters = core.exuParameters
