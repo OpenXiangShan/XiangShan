@@ -185,9 +185,11 @@ class LoadUnit extends XSModule {
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
 
+  // io.lsroq.forward := DontCare
   io.lsroq.forward.paddr := l4_out.bits.paddr
   io.lsroq.forward.mask := io.dcache.resp.bits.meta.mask
   io.lsroq.forward.lsroqIdx := l4_out.bits.uop.lsroqIdx
+  io.lsroq.forward.lqIdx := l4_out.bits.uop.lqIdx
   io.lsroq.forward.uop := l4_out.bits.uop
   io.lsroq.forward.pc := l4_out.bits.uop.cf.pc
   io.lsroq.forward.valid := io.dcache.resp.valid //TODO: opt timing
@@ -195,6 +197,7 @@ class LoadUnit extends XSModule {
   io.sbuffer.paddr := l4_out.bits.paddr
   io.sbuffer.mask := io.dcache.resp.bits.meta.mask
   io.sbuffer.lsroqIdx := l4_out.bits.uop.lsroqIdx
+  io.sbuffer.lqIdx := l4_out.bits.uop.lqIdx
   io.sbuffer.uop := DontCare
   io.sbuffer.pc := l4_out.bits.uop.cf.pc
   io.sbuffer.valid := l4_out.valid

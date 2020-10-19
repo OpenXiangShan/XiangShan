@@ -32,16 +32,26 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
   
   if(EnableUnifiedLSQ){
     val lsroq = Module(new Lsroq)
-    io := DontCare
-    io <> lsroq.io
+
+    lsroq.io.dp1Req <> io.dp1Req
+    lsroq.io.brqRedirect <> io.brqRedirect
+    lsroq.io.loadIn <> io.loadIn
+    lsroq.io.storeIn <> io.storeIn
+    lsroq.io.sbuffer <> io.sbuffer
+    lsroq.io.ldout <> io.ldout
+    lsroq.io.stout <> io.stout
+    lsroq.io.forward <> io.forward
+    lsroq.io.commits <> io.commits
+    lsroq.io.rollback <> io.rollback
+    lsroq.io.dcache <> io.dcache
+    lsroq.io.uncache <> io.uncache
+    lsroq.io.roqDeqPtr <> io.roqDeqPtr
     (0 until RenameWidth).map(i => {
       io.lsIdxs(i).lsroqIdx := lsroq.io.lsroqIdxs(i)
     })
   } else {
-    
     val loadQueue = Module(new LoadQueue)
     val storeQueue = Module(new StoreQueue)
-    
     
     // load queue wiring
     loadQueue.io.dp1Req <> io.dp1Req
