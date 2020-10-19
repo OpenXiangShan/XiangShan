@@ -13,7 +13,7 @@ import xiangshan.mem._
 class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+    val lqIdxs = Output(Vec(RenameWidth, UInt(LoadQueueIdxWidth.W))) // LSIdx will be assembled in LSQWrapper
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
@@ -27,30 +27,30 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
-  val uop = Reg(Vec(LsroqSize, new MicroOp))
-  val data = Reg(Vec(LsroqSize, new LsRoqEntry))
-  val allocated = RegInit(VecInit(List.fill(LsroqSize)(false.B))) // lsroq entry has been allocated
-  val valid = RegInit(VecInit(List.fill(LsroqSize)(false.B))) // data is valid
-  val writebacked = RegInit(VecInit(List.fill(LsroqSize)(false.B))) // inst has been writebacked to CDB
-  val commited = Reg(Vec(LsroqSize, Bool())) // inst has been writebacked to CDB
-  val miss = Reg(Vec(LsroqSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
-  val listening = Reg(Vec(LsroqSize, Bool())) // waiting for refill result
-  val pending = Reg(Vec(LsroqSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
+  val uop = Reg(Vec(LoadQueueSize, new MicroOp))
+  val data = Reg(Vec(LoadQueueSize, new LsRoqEntry)) // FIXME: use LoadQueueEntry instead
+  val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
+  val valid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
+  val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
+  val commited = Reg(Vec(LoadQueueSize, Bool())) // inst has been writebacked to CDB
+  val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
+  val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
+  val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
   
-  val ringBufferHeadExtended = RegInit(0.U(LsroqIdxWidth.W))
-  val ringBufferTailExtended = RegInit(0.U(LsroqIdxWidth.W))
-  val ringBufferHead = ringBufferHeadExtended(InnerLsroqIdxWidth - 1, 0)
-  val ringBufferTail = ringBufferTailExtended(InnerLsroqIdxWidth - 1, 0)
-  val ringBufferSameFlag = ringBufferHeadExtended(InnerLsroqIdxWidth) === ringBufferTailExtended(InnerLsroqIdxWidth)
+  val ringBufferHeadExtended = RegInit(0.U(LoadQueueIdxWidth.W))
+  val ringBufferTailExtended = RegInit(0.U(LoadQueueIdxWidth.W))
+  val ringBufferHead = ringBufferHeadExtended(InnerLoadQueueIdxWidth - 1, 0)
+  val ringBufferTail = ringBufferTailExtended(InnerLoadQueueIdxWidth - 1, 0)
+  val ringBufferSameFlag = ringBufferHeadExtended(InnerLoadQueueIdxWidth) === ringBufferTailExtended(InnerLoadQueueIdxWidth)
   val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferSameFlag
   val ringBufferFull = ringBufferHead === ringBufferTail && !ringBufferSameFlag
   val ringBufferAllowin = !ringBufferFull
   
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
-  val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth-1,0))
+  val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lqIdx(InnerLoadQueueIdxWidth-1,0))
 
-  val tailMask = (((1.U((LsroqSize + 1).W)) << ringBufferTail).asUInt - 1.U)(LsroqSize - 1, 0)
-  val headMask = (((1.U((LsroqSize + 1).W)) << ringBufferHead).asUInt - 1.U)(LsroqSize - 1, 0)
+  val tailMask = (((1.U((LoadQueueSize + 1).W)) << ringBufferTail).asUInt - 1.U)(LoadQueueSize - 1, 0)
+  val headMask = (((1.U((LoadQueueSize + 1).W)) << ringBufferHead).asUInt - 1.U)(LoadQueueSize - 1, 0)
   val enqDeqMask1 = tailMask ^ headMask
   val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
 
@@ -61,8 +61,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount(validDispatch(i - 1, 0))
-    val lsroqIdx = ringBufferHeadExtended + offset
-    val index = lsroqIdx(InnerLsroqIdxWidth - 1, 0)
+    val lqIdx = ringBufferHeadExtended + offset
+    val index = lqIdx(InnerLoadQueueIdxWidth - 1, 0)
     when(io.dp1Req(i).fire()) {
       uop(index) := io.dp1Req(i).bits
       allocated(index) := true.B
@@ -79,7 +79,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     } else {
       io.dp1Req(i).ready := ringBufferAllowin && !allocated(index) && io.dp1Req(i - 1).ready
     }
-    io.lsroqIdxs(i) := lsroqIdx
+    io.lqIdxs(i) := lqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
   XSDebug(false, true.B, "\n")
@@ -87,15 +87,15 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
   when(firedDispatch.orR) {
     ringBufferHeadExtended := ringBufferHeadExtended + PopCount(firedDispatch)
-    XSInfo("dispatched %d insts to lsroq\n", PopCount(firedDispatch))
+    XSInfo("dispatched %d insts to lq\n", PopCount(firedDispatch))
   }
 
   // writeback load
   (0 until LoadPipelineWidth).map(i => {
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lsroq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
-          io.loadIn(i).bits.uop.lsroqIdx,
+        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
+          io.loadIn(i).bits.uop.lqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
           io.loadIn(i).bits.paddr,
@@ -109,7 +109,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
           )
         }.otherwise {
           XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
-          io.loadIn(i).bits.uop.lsroqIdx,
+          io.loadIn(i).bits.uop.lqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
           io.loadIn(i).bits.paddr,
@@ -122,22 +122,22 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
           io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
           )
         }
-        valid(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        writebacked(io.loadIn(i).bits.uop.lsroqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        // allocated(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.miss // if hit, lsroq entry can be recycled
-        data(io.loadIn(i).bits.uop.lsroqIdx).paddr := io.loadIn(i).bits.paddr
-        data(io.loadIn(i).bits.uop.lsroqIdx).vaddr := io.loadIn(i).bits.vaddr
-        data(io.loadIn(i).bits.uop.lsroqIdx).mask := io.loadIn(i).bits.mask
-        data(io.loadIn(i).bits.uop.lsroqIdx).data := io.loadIn(i).bits.data // for mmio / misc / debug
-        data(io.loadIn(i).bits.uop.lsroqIdx).mmio := io.loadIn(i).bits.mmio
-        data(io.loadIn(i).bits.uop.lsroqIdx).fwdMask := io.loadIn(i).bits.forwardMask
-        data(io.loadIn(i).bits.uop.lsroqIdx).fwdData := io.loadIn(i).bits.forwardData
-        data(io.loadIn(i).bits.uop.lsroqIdx).exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+        valid(io.loadIn(i).bits.uop.lqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        writebacked(io.loadIn(i).bits.uop.lqIdx) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        // allocated(io.loadIn(i).bits.uop.lqIdx) := io.loadIn(i).bits.miss // if hit, lq entry can be recycled
+        data(io.loadIn(i).bits.uop.lqIdx).paddr := io.loadIn(i).bits.paddr
+        data(io.loadIn(i).bits.uop.lqIdx).vaddr := io.loadIn(i).bits.vaddr
+        data(io.loadIn(i).bits.uop.lqIdx).mask := io.loadIn(i).bits.mask
+        data(io.loadIn(i).bits.uop.lqIdx).data := io.loadIn(i).bits.data // for mmio / misc / debug
+        data(io.loadIn(i).bits.uop.lqIdx).mmio := io.loadIn(i).bits.mmio
+        data(io.loadIn(i).bits.uop.lqIdx).fwdMask := io.loadIn(i).bits.forwardMask
+        data(io.loadIn(i).bits.uop.lqIdx).fwdData := io.loadIn(i).bits.forwardData
+        data(io.loadIn(i).bits.uop.lqIdx).exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        miss(io.loadIn(i).bits.uop.lsroqIdx) := dcacheMissed
-        listening(io.loadIn(i).bits.uop.lsroqIdx) := dcacheMissed
-        store(io.loadIn(i).bits.uop.lsroqIdx) := false.B
-        pending(io.loadIn(i).bits.uop.lsroqIdx) := io.loadIn(i).bits.mmio
+        miss(io.loadIn(i).bits.uop.lqIdx) := dcacheMissed
+        listening(io.loadIn(i).bits.uop.lqIdx) := dcacheMissed
+        store(io.loadIn(i).bits.uop.lqIdx) := false.B
+        pending(io.loadIn(i).bits.uop.lqIdx) := io.loadIn(i).bits.mmio
       }
     })
 
@@ -147,7 +147,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val reqBlockIndex = PriorityEncoder(~VecInit(inflightReqs.map(req => req.valid)).asUInt)
 
   val missRefillSelVec = VecInit(
-    (0 until LsroqSize).map{ i =>
+    (0 until LoadQueueSize).map{ i =>
       val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(data(i).paddr)).reduce(_||_)
       allocated(i) && miss(i) && !inflight
     })
@@ -195,11 +195,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
 
   when(io.dcache.req.fire()){
-    XSDebug("miss req: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x vaddr:0x%x\n", io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx, io.dcache.req.bits.meta.uop.lsroqIdx, io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr) 
+    XSDebug("miss req: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x vaddr:0x%x\n", io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx, io.dcache.req.bits.meta.uop.lqIdx, io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr) 
   }
 
   when(io.dcache.resp.fire()){
-    XSDebug("miss resp: pc:0x%x roqIdx:%d lsroqIdx:%d (p)addr:0x%x data %x\n", io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx, io.dcache.resp.bits.meta.uop.lsroqIdx, io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
+    XSDebug("miss resp: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x data %x\n", io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx, io.dcache.resp.bits.meta.uop.lqIdx, io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data) 
   }
 
   // Refill 64 bit in a cycle
@@ -212,7 +212,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     res.asUInt
   }
 
-  (0 until LsroqSize).map(i => {
+  (0 until LoadQueueSize).map(i => {
     val blockMatch = get_block_addr(data(i).paddr) === io.dcache.resp.bits.meta.paddr
     when(allocated(i) && listening(i) && blockMatch && io.dcache.resp.fire()) {
       // split them into words
@@ -230,10 +230,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   // writeback up to 2 missed load insts to CDB
   // just randomly pick 2 missed load (data refilled), write them back to cdb
-  val loadWbSelVec = VecInit((0 until LsroqSize).map(i => {
+  val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
     allocated(i) && valid(i) && !writebacked(i) && !store(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
-  val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LsroqSize).W)))
+  val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val lselvec0 = PriorityEncoderOH(loadWbSelVec)
   val lselvec1 = PriorityEncoderOH(loadWbSelVec & (~lselvec0).asUInt)
   loadWbSel(0) := OHToUInt(lselvec0)
@@ -264,7 +264,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
-    io.ldout(i).bits.uop.lsroqIdx := loadWbSel(i)
+    io.ldout(i).bits.uop.lqIdx := loadWbSel(i)
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
@@ -274,7 +274,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     when(io.ldout(i).fire()) {
       writebacked(loadWbSel(i)) := true.B
       XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x paddr %x data %x mmio %x\n",
-        io.ldout(i).bits.uop.lsroqIdx,
+        io.ldout(i).bits.uop.lqIdx,
         io.ldout(i).bits.uop.cf.pc,
         data(loadWbSel(i)).paddr,
         data(loadWbSel(i)).data,
@@ -285,9 +285,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   // move tailPtr
   // allocatedMask: dequeuePtr can go to the next 1-bit
-  val allocatedMask = VecInit((0 until LsroqSize).map(i => allocated(i) || !enqDeqMask(i)))
+  val allocatedMask = VecInit((0 until LoadQueueSize).map(i => allocated(i) || !enqDeqMask(i)))
   // find the first one from deqPtr (ringBufferTail)
-  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended(InnerLsroqIdxWidth))
+  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended(InnerLoadQueueIdxWidth))
   val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
   ringBufferTailExtended := nextTail
 
@@ -300,30 +300,30 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   })
 
   // load forward query
-  // check over all lsroq entries and forward data from the first matched store
+  // check over all lq entries and forward data from the first matched store
   // TODO: FIXME
   (0 until LoadPipelineWidth).map(i => {
     io.forward(i).forwardMask := 0.U(8.W).asBools
     io.forward(i).forwardData := DontCare
 
-    // Compare ringBufferTail (deqPtr) and forward.lsroqIdx, we have two cases:
-    // (1) if they have the same flag, we need to check range(tail, lsroqIdx)
-    // (2) if they have different flags, we need to check range(tail, lsroqSize) and range(0, lsroqIdx)
-    // Forward1: Mux(same_flag, range(tail, lsroqIdx), range(tail, lsroqSize))
-    // Forward2: Mux(same_flag, 0.U,                   range(0, lsroqIdx)    )
+    // Compare ringBufferTail (deqPtr) and forward.lqIdx, we have two cases:
+    // (1) if they have the same flag, we need to check range(tail, lqIdx)
+    // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, lqIdx)
+    // Forward1: Mux(same_flag, range(tail, lqIdx), range(tail, LoadQueueSize))
+    // Forward2: Mux(same_flag, 0.U,                   range(0, lqIdx)    )
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
     val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
     val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
     val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
 
-    val differentFlag = ringBufferTailExtended(InnerLsroqIdxWidth) =/= io.forward(i).lsroqIdx(InnerLsroqIdxWidth)
-    val forwardMask = ((1.U((LsroqSize + 1).W)) << io.forward(i).lsroqIdx(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
+    val differentFlag = ringBufferTailExtended(InnerLoadQueueIdxWidth) =/= io.forward(i).lqIdx(InnerLoadQueueIdxWidth)
+    val forwardMask = ((1.U((LoadQueueSize + 1).W)) << io.forward(i).lqIdx(InnerLoadQueueIdxWidth - 1, 0)).asUInt - 1.U
     val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
-    val needForward2 = Mux(differentFlag, forwardMask, 0.U(LsroqSize.W))
+    val needForward2 = Mux(differentFlag, forwardMask, 0.U(LoadQueueSize.W))
 
     // entry with larger index should have higher priority since it's data is younger
-    for (j <- 0 until LsroqSize) {
+    for (j <- 0 until LoadQueueSize) {
       val needCheck = valid(j) && allocated(j) && // all valid terms need to be checked
         io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
       (0 until XLEN / 8).foreach(k => {
@@ -391,10 +391,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   }
 
   def rangeMask(start: UInt, end: UInt): UInt = {
-    val startMask = (1.U((LsroqSize + 1).W) << start(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
-    val endMask = (1.U((LsroqSize + 1).W) << end(InnerLsroqIdxWidth - 1, 0)).asUInt - 1.U
-    val xorMask = startMask(LsroqSize - 1, 0) ^ endMask(LsroqSize - 1, 0)
-    Mux(start(InnerLsroqIdxWidth) === end(InnerLsroqIdxWidth), xorMask, ~xorMask)
+    val startMask = (1.U((LoadQueueSize + 1).W) << start(InnerLoadQueueIdxWidth - 1, 0)).asUInt - 1.U
+    val endMask = (1.U((LoadQueueSize + 1).W) << end(InnerLoadQueueIdxWidth - 1, 0)).asUInt - 1.U
+    val xorMask = startMask(LoadQueueSize - 1, 0) ^ endMask(LoadQueueSize - 1, 0)
+    Mux(start(InnerLoadQueueIdxWidth) === end(InnerLoadQueueIdxWidth), xorMask, ~xorMask)
   }
 
   // store backward query and rollback
@@ -403,12 +403,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     rollback(i) := DontCare
 
     when(io.storeIn(i).valid) {
-      val startIndex = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth - 1, 0)
-      val lsroqIdxMask = ((1.U((LsroqSize + 1).W) << startIndex).asUInt - 1.U)(LsroqSize - 1, 0)
-      val xorMask = lsroqIdxMask ^ headMask
-      val sameFlag = io.storeIn(i).bits.uop.lsroqIdx(InnerLsroqIdxWidth) === ringBufferHeadExtended(InnerLsroqIdxWidth)
+      val startIndex = io.storeIn(i).bits.uop.lqIdx(InnerLoadQueueIdxWidth - 1, 0)
+      val lqIdxMask = ((1.U((LoadQueueSize + 1).W) << startIndex).asUInt - 1.U)(LoadQueueSize - 1, 0)
+      val xorMask = lqIdxMask ^ headMask
+      val sameFlag = io.storeIn(i).bits.uop.lqIdx(InnerLoadQueueIdxWidth) === ringBufferHeadExtended(InnerLoadQueueIdxWidth)
       val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
-      val lsroqViolationVec = VecInit((0 until LsroqSize).map(j => {
+      val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
         val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (valid(j) || listening(j) || miss(j))
@@ -416,10 +416,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
         val violationVec = (0 until 8).map(k => data(j).mask(k) && io.storeIn(i).bits.mask(k))
         Cat(violationVec).orR() && entryNeedCheck
       }))
-      val lsroqViolation = lsroqViolationVec.asUInt().orR()
-      val lsroqViolationIndex = getFirstOne(lsroqViolationVec, lsroqIdxMask)
-      val lsroqViolationUop = uop(lsroqViolationIndex)
-      XSDebug(lsroqViolation, p"${Binary(Cat(lsroqViolationVec))}, $startIndex, $lsroqViolationIndex\n")
+      val lqViolation = lqViolationVec.asUInt().orR()
+      val lqViolationIndex = getFirstOne(lqViolationVec, lqIdxMask)
+      val lqViolationUop = uop(lqViolationIndex)
+      XSDebug(lqViolation, p"${Binary(Cat(lqViolationVec))}, $startIndex, $lqViolationIndex\n")
 
       // when l/s writeback to roq together, check if rollback is needed
       val wbViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
@@ -442,8 +442,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
       val l4Violation = l4ViolationVec.asUInt().orR()
       val l4ViolationUop = getOldestInTwo(l4ViolationVec, io.forward.map(_.uop))
 
-      val rollbackValidVec = Seq(lsroqViolation, wbViolation, l4Violation)
-      val rollbackUopVec = Seq(lsroqViolationUop, wbViolationUop, l4ViolationUop)
+      val rollbackValidVec = Seq(lqViolation, wbViolation, l4Violation)
+      val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l4ViolationUop)
       rollback(i).valid := Cat(rollbackValidVec).orR
       val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
       val oneAfterZero = mask(1)(0)
@@ -458,9 +458,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
       rollback(i).bits.isFlushPipe := false.B
 
       XSDebug(
-        lsroqViolation,
+        lqViolation,
         "need rollback (ld wb before store) pc %x roqidx %d target %x\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, lsroqViolationUop.roqIdx
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, lqViolationUop.roqIdx
       )
       XSDebug(
         wbViolation,
@@ -494,7 +494,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   // Memory mapped IO / other uncached operations
 
   // setup misc mem access req
-  // mask / paddr / data can be get from lsroq.data
+  // mask / paddr / data can be get from lq.data
   val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
     commitType === CommitType.LOAD && 
@@ -544,15 +544,15 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   // FIXME: index by lq/sq id
   // Read vaddr for mem exception
-  val mexcLsroqIdx = WireInit(0.U(LsroqIdxWidth.W))
-  val memExceptionAddr = WireInit(data(mexcLsroqIdx(InnerLsroqIdxWidth - 1, 0)).vaddr)
-  ExcitingUtils.addSink(mexcLsroqIdx, "EXECPTION_LSROQIDX")
+  val mexcLsIdx = WireInit(0.asTypeOf(new LSIdx()))
+  val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx(InnerLoadQueueIdxWidth - 1, 0)).vaddr)
+  ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
   ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_LOAD_VADDR")
 
   // misprediction recovery / exception redirect
-  // invalidate lsroq term using robIdx
-  val needCancel = Wire(Vec(LsroqSize, Bool()))
-  for (i <- 0 until LsroqSize) {
+  // invalidate lq term using robIdx
+  val needCancel = Wire(Vec(LoadQueueSize, Bool()))
+  for (i <- 0 until LoadQueueSize) {
     needCancel(i) := uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
@@ -576,7 +576,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   }
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d scommit %d\n", ringBufferHeadExtended(InnerLsroqIdxWidth), ringBufferHead, ringBufferTailExtended(InnerLsroqIdxWidth), ringBufferTail, scommitPending)
+  XSDebug("head %d:%d tail %d:%d scommit %d\n", ringBufferHeadExtended(InnerLoadQueueIdxWidth), ringBufferHead, ringBufferTailExtended(InnerLoadQueueIdxWidth), ringBufferTail, scommitPending)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
@@ -586,7 +586,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     }
   }
 
-  for (i <- 0 until LsroqSize) {
+  for (i <- 0 until LoadQueueSize) {
     if (i % 4 == 0) XSDebug("")
     XSDebug(false, true.B, "%x ", uop(i).cf.pc)
     PrintFlag(allocated(i), "a")
