@@ -542,7 +542,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
   }
 
-  // FIXME: index by lq/sq id
   // Read vaddr for mem exception
   val mexcLsIdx = WireInit(0.asTypeOf(new LSIdx()))
   val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx(InnerLoadQueueIdxWidth - 1, 0)).vaddr)
