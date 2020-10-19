@@ -118,6 +118,7 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
       is(s_idle){
         when(io.req.fire()){
           state := s_memReadReq
+          req := io.req.bits
           readBeatCnt.value := 0.U
         }
       }
@@ -135,14 +136,14 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 	        refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data
           when(countFull){
             assert(refill_done, "refill not done!")
-            state := Mux(needFlush,s_idle,s_write_back)
+            state := Mux(needFlush,s_wait_resp,s_write_back)
           }
         }
       }
 
       is(s_write_back){
         when(io.refill.fire() && io.meta_write.fire()){
-          state := Mux(needFlush,s_idle,s_wait_resp)
+          state := s_wait_resp
         }
       }
 
@@ -163,6 +164,20 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
                         setIdx=req_idx,
                         waymask=req_waymask)
 
+    //mem request
+    io.mem_acquire.bits := edge.Get(
+        fromSource      = io.id,
+        toAddress       = groupPC(req.addr),
+        lgSize          = (log2Up(cacheParams.blockBytes)).U )._2 
+
+
+    XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
+    XSDebug("[ICache MSHR %d] (Info)state:%d  refill_done:%d contFull:%d readBeatCnt:%d  needFlush:%d\n",io.id.asUInt,state,refill_done,countFull,readBeatCnt.value,needFlush)
+    XSDebug("[ICache MSHR %d] (mem_acquire) valid%d ready:%d\n",io.id.asUInt,io.mem_acquire.valid,io.mem_acquire.ready)
+    XSDebug("[ICache MSHR %d] (mem_grant)   valid%d ready:%d data:%x \n",io.id.asUInt,io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data)
+    XSDebug("[ICache MSHR %d] (meta_write)  valid%d ready:%d  tag:%x \n",io.id.asUInt,io.meta_write.valid,io.meta_write.ready,io.meta_write.bits.meta_write_tag)
+    XSDebug("[ICache MSHR %d] (refill)  valid%d ready:%d  data:%x \n",io.id.asUInt,io.refill.valid,io.refill.ready,io.refill.bits.refill_data)
+    XSDebug("[ICache MSHR %d] (resp)  valid%d ready:%d \n",io.id.asUInt,io.resp.valid,io.resp.ready)
 
 
 }
@@ -220,6 +235,7 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   }
 
   entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req.ready))
+  XSDebug("[ICache MissQueue] (ready vector) %b idx:%d \n",PriorityEncoder(entries.map(m=>m.io.req.ready)),entry_alloc_idx)
 
   io.req.ready  := req_ready
   io.resp.valid := resp_arb.io.out.valid

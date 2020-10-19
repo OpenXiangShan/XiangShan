@@ -17,7 +17,7 @@ cache:
 	#2>&1 | tee > loader.log
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 | tee > dummy.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=add $(EMU_ARGS) run 2>&1 | tee > add.log
 
 # ------------------------------------------------------------------
 # run different test sets
