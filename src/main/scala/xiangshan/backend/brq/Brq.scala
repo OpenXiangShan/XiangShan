@@ -7,21 +7,7 @@ import utils._
 import chisel3.ExcitingUtils._
 
 
-class BrqPtr extends XSBundle {
-
-  val flag = Bool()
-  val value = UInt(BrTagWidth.W)
-
-  final def + (inc: Bool): BrqPtr = {
-    Mux(inc && (value === (BrqSize-1).U),
-      BrqPtr(!flag, 0.U),
-      BrqPtr(flag, value + inc)
-    )
-  }
-
-  final def === (that: BrqPtr): Bool = {
-    (this.value===that.value) && (this.flag===that.flag)
-  }
+class BrqPtr extends CircularQueuePtr(BrqPtr.BrqSize) {
 
   // this.age < that.age
   final def < (that: BrqPtr): Bool = {
@@ -41,7 +27,7 @@ class BrqPtr extends XSBundle {
 
 }
 
-object BrqPtr {
+object BrqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): BrqPtr = {
     val ptr = Wire(new BrqPtr)
     ptr.flag := f
@@ -72,7 +58,7 @@ class BrqIO extends XSBundle{
   val inOrderBrInfo = ValidIO(new BranchUpdateInfo)
 }
 
-class Brq extends XSModule {
+class Brq extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new BrqIO)
 
   class BrqEntry extends Bundle {
@@ -96,8 +82,8 @@ class Brq extends XSModule {
 
   val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
 
-  def isEmpty(ptr1: BrqPtr, ptr2: BrqPtr): Bool = ptr1 === ptr2
-  def isFull(ptr1: BrqPtr, ptr2: BrqPtr): Bool = (ptr1.flag=/=ptr2.flag) && (ptr1.value===ptr2.value)
+//  def isEmpty(ptr1: BrqPtr, ptr2: BrqPtr): Bool = ptr1 === ptr2
+//  def isFull(ptr1: BrqPtr, ptr2: BrqPtr): Bool = (ptr1.flag=/=ptr2.flag) && (ptr1.value===ptr2.value)
 
 
   // dequeue
