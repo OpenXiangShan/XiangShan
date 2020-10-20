@@ -400,7 +400,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // prober
-  prober.io.req.valid := bus.b.valid
+  prober.io.req.valid := bus.b.valid && !block_probe(get_block_addr(bus.b.bits.address))
   bus.b.ready         := prober.io.req.ready && !block_probe(get_block_addr(bus.b.bits.address))
   prober.io.req.bits  := bus.b.bits
 
