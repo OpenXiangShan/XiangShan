@@ -77,11 +77,44 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     storeQueue.io.rollback <> io.rollback
     storeQueue.io.roqDeqPtr <> io.roqDeqPtr
     
-    // uncache arbiter
-    val uncacheArb = Module(new Arbiter(new DCacheWordIO, 2))
-    uncacheArb.io.in(0) <> loadQueue.io.uncache
-    uncacheArb.io.in(1) <> storeQueue.io.uncache
-    uncacheArb.io.out <> io.uncache
+    // naive uncache arbiter
+    val s_idle :: s_load :: s_store :: Nil = Enum(3)
+    val uncacheState = RegInit(s_idle)
+
+    switch(uncacheState){
+      is(s_idle){
+        when(io.uncache.req.fire()){
+          uncacheState := Mux(loadQueue.io.uncache.req.valid, s_load, s_store)
+        }
+      }
+      is(s_load){
+        when(io.uncache.resp.fire()){
+          uncacheState := s_idle
+        }
+      }
+      is(s_store){
+        when(io.uncache.resp.fire()){
+          uncacheState := s_idle
+        }
+      }
+    }
+
+    loadQueue.io.uncache := DontCare
+    storeQueue.io.uncache := DontCare
+    when(loadQueue.io.uncache.req.valid){
+      io.uncache.req <> loadQueue.io.uncache.req
+    }.otherwise{
+      io.uncache.req <> storeQueue.io.uncache.req
+    }
+    when(uncacheState === s_load){
+      io.uncache.resp <> loadQueue.io.uncache.resp
+    }.otherwise{
+      io.uncache.resp <> storeQueue.io.uncache.resp
+    }
+    io.uncache.s1_kill := false.B
+
+    assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
+    assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
     
     // fix valid, allocate lq / sq index
     (0 until RenameWidth).map(i => {
