@@ -101,6 +101,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
 
     loadQueue.io.uncache := DontCare
     storeQueue.io.uncache := DontCare
+    loadQueue.io.uncache.resp.valid := false.B
+    storeQueue.io.uncache.resp.valid := false.B
     when(loadQueue.io.uncache.req.valid){
       io.uncache.req <> loadQueue.io.uncache.req
     }.otherwise{
@@ -115,6 +117,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
 
     assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
     assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
+    assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && uncacheState === s_idle))
     
     // fix valid, allocate lq / sq index
     (0 until RenameWidth).map(i => {
