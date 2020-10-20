@@ -136,7 +136,7 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 	        refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data
           when(countFull){
             assert(refill_done, "refill not done!")
-            state := Mux(needFlush,s_wait_resp,s_write_back)
+            state := Mux(needFlush || io.flush,s_wait_resp,s_write_back)
           }
         }
       }
@@ -148,7 +148,7 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
       }
 
       is(s_wait_resp){
-        io.resp.bits.data := refillDataReg.asUInt
+        io.resp.bits.data := re:fillDataReg.asUInt
         when(io.resp.fire() || needFlush ){ state := s_idle }
       }
 
