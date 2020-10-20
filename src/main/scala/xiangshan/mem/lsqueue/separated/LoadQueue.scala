@@ -19,7 +19,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val commits = Flipped(Vec(LoadPipelineWidth, Valid(new RoqCommit)))
+    val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO

@@ -20,7 +20,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
-    val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
     // val refill = Flipped(Valid(new DCacheLineReq ))
@@ -274,10 +273,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
       io.uncache.req.bits.cmd,
       io.uncache.req.bits.mask
     )
-  }
-
-  when(io.uncache.resp.fire()){
-    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
   }
 
   // Read vaddr for mem exception
