@@ -166,33 +166,33 @@ trait HasRoqIdx { this: HasXSParameter =>
 // All lsroqIdx will be replaced by new lsIdx in the future.
 trait HasLSIdx { this: HasXSParameter =>
   
-  // if(EnableUnifiedLSQ) // TODO
-
+  // if(EnableUnifiedLSQ){
   // Unified LSQ
   val lsroqIdx = UInt(LsroqIdxWidth.W)
-  
+  // } else {
   // Separate LSQ
   val lqIdx = UInt(LoadQueueIdxWidth.W)
   val sqIdx = UInt(StoreQueueIdxWidth.W)
   val instIsLoad = Bool()
+  // }
 
-  def isLoad(): Bool = instIsLoad
+  // def isLoad(): Bool = instIsLoad
 
-  def isLoadAfter(thatLqIdx: UInt): Bool = {
-    Mux(
-      lqIdx.head(1) === thatLqIdx.head(1),
-      lqIdx.tail(1) > thatLqIdx.tail(1),
-      lqIdx.tail(1) < thatLqIdx.tail(1)
-    )
-  }
+  // def isLoadAfter(thatLqIdx: UInt): Bool = {
+  //   Mux(
+  //     lqIdx.head(1) === thatLqIdx.head(1),
+  //     lqIdx.tail(1) > thatLqIdx.tail(1),
+  //     lqIdx.tail(1) < thatLqIdx.tail(1)
+  //   )
+  // }
 
-  def isStoreAfter(thatSqIdx: UInt): Bool = {
-    Mux(
-      sqIdx.head(1) === thatSqIdx.head(1),
-      sqIdx.tail(1) > thatSqIdx.tail(1),
-      sqIdx.tail(1) < thatSqIdx.tail(1)
-    )
-  }
+  // def isStoreAfter(thatSqIdx: UInt): Bool = {
+  //   Mux(
+  //     sqIdx.head(1) === thatSqIdx.head(1),
+  //     sqIdx.tail(1) > thatSqIdx.tail(1),
+  //     sqIdx.tail(1) < thatSqIdx.tail(1)
+  //   )
+  // }
 }
 
 class LSIdx extends XSBundle with HasLSIdx {}

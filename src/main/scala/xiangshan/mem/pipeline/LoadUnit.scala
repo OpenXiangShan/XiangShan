@@ -54,7 +54,7 @@ class LoadUnit extends XSModule {
   io.dtlb.req.bits.cmd := TlbCmd.read
   io.dtlb.req.bits.roqIdx := l2_out.bits.uop.roqIdx
   io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx
+  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx // FIXME: need update
 
   l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
   l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss

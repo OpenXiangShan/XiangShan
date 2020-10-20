@@ -211,15 +211,7 @@ class Backend extends XSModule
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
   dispatch.io.commits <> roq.io.commits
-  if(EnableUnifiedLSQ){
-    io.mem.lsIdxs := DontCare
-    (0 until RenameWidth).map(i => {
-      dispatch.io.lsroqIdxs(i) <> io.mem.lsIdxs(i).lsroqIdx
-    })
-  } else {
-    // TODO
-    // dispatch.io.lsroqIdxs <> io.mem.lsroqIdxs
-  }
+  dispatch.io.lsIdxs <> io.mem.lsIdxs
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)

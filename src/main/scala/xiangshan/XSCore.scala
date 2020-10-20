@@ -54,7 +54,7 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8, 
-  EnableUnifiedLSQ: Boolean = true,
+  EnableUnifiedLSQ: Boolean = false,
   LsroqSize: Int = 16,
   LoadQueueSize: Int = 16,
   StoreQueueSize: Int = 16,

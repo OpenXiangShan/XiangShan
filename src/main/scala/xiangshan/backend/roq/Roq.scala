@@ -94,6 +94,9 @@ class Roq extends XSModule {
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
+      microOp(wbIdx).lqIdx := io.exeWbResults(i).bits.uop.lqIdx
+      microOp(wbIdx).sqIdx := io.exeWbResults(i).bits.uop.sqIdx
+      microOp(wbIdx).instIsLoad := io.exeWbResults(i).bits.uop.instIsLoad
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data

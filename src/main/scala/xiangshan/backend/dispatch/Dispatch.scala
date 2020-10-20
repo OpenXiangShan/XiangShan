@@ -33,8 +33,8 @@ class Dispatch extends XSModule {
     val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
     // enq Lsroq
     val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get LsroqIdx
-    val lsroqIdxs = Input(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+    // get LsIdx
+    val lsIdxs = Input(Vec(RenameWidth, new LSIdx))
     val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
@@ -71,7 +71,7 @@ class Dispatch extends XSModule {
   dispatch1.io.toRoq <> io.toRoq
   dispatch1.io.roqIdxs <> io.roqIdxs
   dispatch1.io.toLsroq <> io.toLsroq
-  dispatch1.io.lsroqIdx <> io.lsroqIdxs
+  dispatch1.io.lsIdx <> io.lsIdxs
   dispatch1.io.toIntDq <> intDq.io.enq
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq

@@ -131,7 +131,7 @@ class TlbReq extends TlbBundle {
   val roqIdx = UInt(RoqIdxWidth.W)
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
-    val lsroqIdx = UInt(LsroqIdxWidth.W)
+    val lsroqIdx = UInt(LsroqIdxWidth.W) // FIXME: need update
   }
 
   override def toPrintable: Printable = {
