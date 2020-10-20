@@ -1,8 +1,9 @@
 #include "common.h"
+#include "sdcard.h"
+
+FILE *fp = NULL;
 
 extern "C" {
-
-static FILE *fp = NULL;
 
 void sd_setaddr(uint32_t addr) {
   fseek(fp, addr, SEEK_SET);
