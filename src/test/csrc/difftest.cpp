@@ -18,6 +18,8 @@ void (*ref_difftest_getregs)(void *c) = NULL;
 void (*ref_difftest_setregs)(const void *c) = NULL;
 void (*ref_difftest_get_mastatus)(void *s) = NULL;
 void (*ref_difftest_set_mastatus)(const void *s) = NULL;
+void (*ref_difftest_get_csr)(void *c) = NULL;
+void (*ref_difftest_set_csr)(const void *c) = NULL;
 vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para) = NULL;
 static void (*ref_difftest_exec)(uint64_t n) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
@@ -65,6 +67,12 @@ void init_difftest() {
 
   ref_difftest_set_mastatus = (void (*)(const void *))dlsym(handle, "difftest_set_mastatus");
   assert(ref_difftest_set_mastatus);
+
+  ref_difftest_get_csr = (void (*)(void *))dlsym(handle, "difftest_get_csr");
+  assert(ref_difftest_get_csr);
+
+  ref_difftest_set_csr = (void (*)(const void *))dlsym(handle, "difftest_set_csr");
+  assert(ref_difftest_set_csr);
 
   ref_disambiguate_exec = (vaddr_t (*)(void *))dlsym(handle, "disambiguate_exec");
   assert(ref_disambiguate_exec);
@@ -158,6 +166,7 @@ int difftest_step(DiffState *s) {
   if(s->sync.scFailed){
     struct SyncState sync;
     sync.lrscValid = 0;
+    sync.lrscAddr = 0;
     ref_difftest_set_mastatus((uint64_t*)&sync); // sync lr/sc microarchitectural regs
   }
 
@@ -190,7 +199,7 @@ int difftest_step(DiffState *s) {
         // single step exec
         // IPF, LPF, SPF
         if(s->cause == 12 || s->cause == 13 || s->cause == 15){
-          printf("s->cause %ld\n", s->cause);
+          // printf("s->cause %ld\n", s->cause);
           ref_disambiguate_exec(&s->cause);
         }else{
           ref_difftest_exec(1);

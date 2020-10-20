@@ -157,7 +157,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
   val target = Mux(taken, targetSrc(jmpIdx), npc(inLatch.pc, PopCount(inLatch.mask)))
 
   io.pred.bits <> DontCare
-  io.pred.bits.redirect := target =/= inLatch.target
+  io.pred.bits.redirect := target =/= inLatch.target || inLatch.saveHalfRVI && !saveHalfRVI
   io.pred.bits.taken := taken
   io.pred.bits.jmpIdx := jmpIdx
   io.pred.bits.hasNotTakenBrs := hasNTBr
@@ -564,6 +564,7 @@ class BPU extends BaseBPU {
   s1.io.in.bits.target := npc(io.in.bits.pc, PopCount(io.in.bits.inMask)) // Deault target npc
   s1.io.in.bits.resp <> s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
+  s1.io.in.bits.saveHalfRVI := false.B
 
   val s1_hist = RegEnable(io.in.bits.hist, enable=s1_fire)
   val s2_hist = RegEnable(s1_hist, enable=s2.io.in.fire())
