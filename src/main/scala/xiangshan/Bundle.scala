@@ -159,12 +159,22 @@ trait HasRoqIdx { this: HasXSParameter =>
   }
 }
 
+class PerfDebugInfo extends XSBundle {
+  // val fetchTime = UInt(64.W)
+  val renameTime = UInt(64.W)
+  val inRoqTime = UInt(64.W)
+  val issueTime = UInt(64.W)
+  val writebackTime = UInt(64.W)
+  val commitTime = UInt(64.W)
+}
+
 // CfCtrl -> MicroOp at Rename Stage
 class MicroOp extends CfCtrl with HasRoqIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
   val lsroqIdx = UInt(LsroqIdxWidth.W)
   val diffTestDebugLrScValid = Bool()
+  val debugInfo = PerfDebugInfo()
 }
 
 class Redirect extends XSBundle with HasRoqIdx {

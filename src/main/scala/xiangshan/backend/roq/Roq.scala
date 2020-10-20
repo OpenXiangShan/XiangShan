@@ -56,6 +56,7 @@ class Roq extends XSModule {
   val hasNoSpec = RegInit(false.B)
   when(isEmpty){ hasNoSpec:= false.B }
   val validDispatch = io.dp1Req.map(_.valid)
+  val timer = GTimer()
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
     val offset = PopCount(validDispatch.take(i))
@@ -64,6 +65,7 @@ class Roq extends XSModule {
 
     when(io.dp1Req(i).fire()){
       microOp(roqIdx) := io.dp1Req(i).bits
+      microOp(roqIdx).debugInfo.inRoqTime := timer
       valid(roqIdx) := true.B
       flag(roqIdx) := roqIdxExt.head(1).asBool()
       writebacked(roqIdx) := false.B
@@ -94,6 +96,7 @@ class Roq extends XSModule {
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
+      microOp(wbIdx).debugInfo.writebackTime := timer
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data

@@ -76,6 +76,7 @@ class Rename extends XSModule {
   // debug assert
   val outRdy = Cat(io.out.map(_.ready))
   assert(outRdy===0.U || outRdy.andR())
+  val timer = GTimer()
   for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
@@ -119,6 +120,7 @@ class Rename extends XSModule {
 
     io.out(i).valid := io.in(i).fire()
     io.out(i).bits := uops(i)
+    io.out(i).bits.debugInfo.renameTime = timer
 
     // write rename table
     def writeRat(fp: Boolean) = {
