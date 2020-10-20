@@ -229,7 +229,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
 
-  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U))}.reverse).asUInt
+  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
   val hitVec = VecInit((0 until nWays).map{w => metas(w).tag === s2_tag && validMeta(w) === 1.U})
@@ -259,13 +259,10 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
-  val s3_mmio = s3_valid &&  AddressSpace.isMMIO(s3_tlb_resp.paddr)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
-
-  assert(!(s3_hit && s3_mmio), "MMIO address should not hit in ICache!")
 
   // icache hit 
   // simply cut the hit cacheline
@@ -299,7 +296,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //refill write
   //meta
   val metaWrite = Wire(new ICacheMetaBundle)
-  val wayNum = OHToUInt(waymask)
+  val wayNum = OHToUInt(s3_wayMask.asTypeOf(Vec(nWays,Bool())))
   val validPtr = Cat(get_idx(s3_req_pc),wayNum)
   val metaWriteReq = icacheMissQueue.io.meta_write.bits
   icacheMissQueue.io.meta_write.ready := true.B
