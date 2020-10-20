@@ -148,7 +148,7 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
       }
 
       is(s_wait_resp){
-        io.resp.bits.data := re:fillDataReg.asUInt
+        io.resp.bits.data := refillDataReg.asUInt
         when(io.resp.fire() || needFlush ){ state := s_idle }
       }
 
@@ -238,10 +238,7 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   XSDebug("[ICache MissQueue] (ready vector) %b idx:%d \n",PriorityEncoder(entries.map(m=>m.io.req.ready)),entry_alloc_idx)
 
   io.req.ready  := req_ready
-  io.resp.valid := resp_arb.io.out.valid
-  io.resp.bits  := resp_arb.io.out.bits
-  resp_arb.io.out.ready := true.B
-
+  io.resp <> resp_arb.io.out
   io.meta_write <> meta_write_arb.io.out
   io.refill     <> refill_arb.io.out
 
