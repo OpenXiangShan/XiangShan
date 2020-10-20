@@ -1,4 +1,5 @@
 #include "emu.h"
+#include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
 
@@ -274,11 +275,18 @@ uint64_t Emulator::execute(uint64_t n) {
       poll_event();
       lasttime_poll = t;
     }
+    static int snapshot_count = 0;
     if (t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
       // save snapshot every 10s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
       lasttime_snapshot = t;
+      // dump snapshot to file every 10 minutes
+      snapshot_count++;
+      if (snapshot_count == 60) {
+        snapshot_slot[0].save();
+        snapshot_count = 0;
+      }
     }
   }
 
@@ -366,6 +374,17 @@ void Emulator::snapshot_save(const char *filename) {
   ref_difftest_get_mastatus(&sync_mastate);
   stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
 
+  uint64_t csr_buf[4096];
+  ref_difftest_get_csr(csr_buf);
+  stream.unbuf_write(&csr_buf, sizeof(csr_buf));
+
+  long sdcard_offset;
+  if(fp)
+    sdcard_offset = ftell(fp);
+  else
+    sdcard_offset = 0;
+  stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
+
   // actually write to file in snapshot_finalize()
 }
 
@@ -395,4 +414,13 @@ void Emulator::snapshot_load(const char *filename) {
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));
   ref_difftest_set_mastatus(&sync_mastate);
+
+  uint64_t csr_buf[4096];
+  stream.read(&csr_buf, sizeof(csr_buf));
+  ref_difftest_set_csr(csr_buf);
+
+  long sdcard_offset = 0;
+  stream.read(&sdcard_offset, sizeof(sdcard_offset));
+  if(fp)
+    fseek(fp, sdcard_offset, SEEK_SET);
 }

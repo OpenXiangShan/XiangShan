@@ -94,7 +94,7 @@ class IssueQueue
   def writeBackHit(src: UInt, srcType: UInt, wbUop: (Bool, MicroOp)): Bool = {
     val (v, uop) = wbUop
     val isSameType =
-      (SrcType.isReg(srcType) && uop.ctrl.rfWen) || (SrcType.isFp(srcType) && uop.ctrl.fpWen)
+      (SrcType.isReg(srcType) && uop.ctrl.rfWen && src =/= 0.U) || (SrcType.isFp(srcType) && uop.ctrl.fpWen)
 
     v && isSameType && (src===uop.pdest)
   }

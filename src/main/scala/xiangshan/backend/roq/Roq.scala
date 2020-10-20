@@ -22,6 +22,7 @@ class Roq extends XSModule {
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
+    val roqDeqPtr = Output(UInt(RoqIdxWidth.W))
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -47,6 +48,8 @@ class Roq extends XSModule {
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
   val state = RegInit(s_idle)
+
+  io.roqDeqPtr := deqPtrExt
 
   // Dispatch
   val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.noSpecExec)
@@ -90,6 +93,7 @@ class Roq extends XSModule {
       val wbIdx = wbIdxExt.tail(1)
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
+      microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
@@ -116,7 +120,8 @@ class Roq extends XSModule {
 
   val deqUop = microOp(deqPtr)
   val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
-  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
+  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec &&
+    deqUop.ctrl.commitType =/= CommitType.STORE && deqUop.ctrl.commitType =/= CommitType.LOAD// TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
   io.redirect := DontCare

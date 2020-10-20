@@ -224,7 +224,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
 
-  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U))}.reverse).asUInt
+  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
   val hitVec = VecInit((0 until nWays).map{w => metas(w).tag === s2_tag && validMeta(w) === 1.U})
