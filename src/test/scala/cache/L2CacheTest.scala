@@ -28,12 +28,27 @@ case class L2CacheTestParams
   banks: Int = 1,
   capacityKB: Int = 4,
   blockBytes: Int = 64,
-  beatBytes: Int = 8
+  beatBytes: Int = 32,
+  writeBytes: Int = 8
 ) {
   require(blockBytes >= beatBytes)
 }
 
 case object L2CacheTestKey extends Field[L2CacheTestParams]
+
+case class L3CacheTestParams
+(
+  ways: Int = 4,
+  banks: Int = 1,
+  capacityKB: Int = 4,
+  blockBytes: Int = 64,
+  beatBytes: Int = 32,
+  writeBytes: Int = 8
+) {
+  require(blockBytes >= beatBytes)
+}
+
+case object L3CacheTestKey extends Field[L3CacheTestParams]
 
 
 class L2TestTopIO extends Bundle {
@@ -50,10 +65,8 @@ class L2TestTopIO extends Bundle {
 class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
   val cores = Array.fill(2)(LazyModule(new DCache()))
-
   val l2params = p(L2CacheTestKey)
-
-  val l2 = LazyModule(new InclusiveCache(
+  val l2s = Array.fill(2)(LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
       ways = l2params.ways,
@@ -62,7 +75,21 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
       beatBytes = l2params.beatBytes
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = l2params.beatBytes
+      writeBytes = l2params.writeBytes
+    )
+  )))
+
+  val l3params = p(L3CacheTestKey)
+  val l3 = LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 2,
+      ways = l3params.ways,
+      sets = l3params.capacityKB * 1024 / (l3params.blockBytes * l3params.ways * l3params.banks),
+      blockBytes = l3params.blockBytes,
+      beatBytes = l3params.beatBytes
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = l3params.writeBytes
     )
   ))
 
@@ -74,18 +101,20 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
   val xbar = TLXbar()
 
-  for(core <- cores){
-    xbar := TLBuffer() := DebugIdentityNode() := core.clientNode
+  for(i <- 0 until 2) {
+    val core = cores(i)
+    val l2 = l2s(i)
+    xbar := DebugIdentityNode() := l2.node := DebugIdentityNode() := core.clientNode
   }
 
-  l2.node := TLBuffer() := DebugIdentityNode() := xbar
+  l3.node := TLBuffer() := DebugIdentityNode() := xbar
 
   ram.node :=
     AXI4UserYanker() :=
     TLToAXI4() :=
     TLBuffer() :=
     TLCacheCork() :=
-    l2.node
+    l3.node
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
 
@@ -226,6 +255,8 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
     implicit val p = Parameters((site, up, here) => {
       case L2CacheTestKey =>
         L2CacheTestParams()
+      case L3CacheTestKey =>
+        L3CacheTestParams()
     })
 
     test(LazyModule(new L2TestTopWrapper()).module)
