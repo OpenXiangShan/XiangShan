@@ -5,4 +5,4 @@
 [submodule "block-inclusivecache-sifive"]
 	path = block-inclusivecache-sifive
 	url = https://github.com/RISCVERS/block-inclusivecache-sifive.git
-	branch = b1c680ac6367f6298fbcc7be25a4c643967bef22
+	branch = 5491dcc937ed3c6f7722bef9db448653daab75e8
