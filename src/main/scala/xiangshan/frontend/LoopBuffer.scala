@@ -40,22 +40,11 @@ class LoopBuffer extends XSModule {
 
   // ignore
   for(i <- 0 until DecodeWidth) {
-    io.out(i).bits.exceptionVec := DontCare
+    // io.out(i).bits.exceptionVec := DontCare
     io.out(i).bits.intrVec := DontCare
-    io.out(i).bits.crossPageIPFFix := DontCare
+    // io.out(i).bits.crossPageIPFFix := DontCare
   }
 
-  // Check Short Backward Branch
-  // def isSBB(inst: UInt): Bool = {
-  //   inst === BitPat("b1111_???????_111111111_?????_1101111") || inst === BitPat("b1111???_?????_?????_???_????1_1100011")
-  // }
-
-  // Get sbb target
-  // def sbbOffest(inst: UInt): UInt = {
-  //   val isJal = inst === BitPat("b1111_???????_111111111_?????_1101111")
-  //   val isCon = inst === BitPat("b1111???_?????_?????_???_????1_1100011")
-  //   Mux(isJal, inst(27, 21), Mux(isCon, Cat(inst(27,25), inst(11,8)), 0.U(7.W)))
-  // }
   def sbbOffest(inst: UInt): UInt = {
     val isJal = inst === BitPat("b1111_???????_111111111_?????_1101111")
     val isCon = inst === BitPat("b1111???_?????_?????_???_????1_1100011")
@@ -74,13 +63,6 @@ class LoopBuffer extends XSModule {
   def isSBB(inst: UInt): Bool = {
     sbbOffest(inst) > 0.U
   }
-
-  // FIXME: Can be replace by isBr
-  // def isBranch(inst: UInt): Bool = {
-  //   inst === BitPat("b????????????????????_?????_1101111") || 
-  //   inst === BitPat("b????????????????????_?????_1100111") || 
-  //   inst === BitPat("b???????_?????_?????_???_?????_1100011")
-  // }
 
   // predTaken to OH
   val predTakenVec = Mux(io.in.bits.predTaken, Reverse(PriorityEncoderOH(Reverse(io.in.bits.mask))), 0.U(PredictWidth.W))
@@ -160,11 +142,15 @@ class LoopBuffer extends XSModule {
       io.out(i).bits.instr := outWire.inst
 
       io.out(i).bits.pc := outWire.pc
+      io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
+      io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
+
       io.out(i).bits.brUpdate := DontCare
       io.out(i).bits.brUpdate.pc := outWire.pc
       io.out(i).bits.brUpdate.pnpc := outWire.pnpc
-      io.out(i).bits.brUpdate.brInfo := outWire.brInfo
       io.out(i).bits.brUpdate.pd := outWire.pd
+      io.out(i).bits.brUpdate.brInfo := outWire.brInfo
+      io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
 
       deq_idx = deq_idx + io.out(i).fire
     }
@@ -202,6 +188,8 @@ class LoopBuffer extends XSModule {
         inWire.pnpc := io.in.bits.pnpc(i)
         inWire.brInfo := io.in.bits.brInfo(i)
         inWire.pd := io.in.bits.pd(i)
+        inWire.ipf := io.in.bits.ipf
+        inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
 
         ibufValid(enq_idx) := Mux(LBstate =/= s_active, true.B, !(hasTsbb && !tsbbTaken && i.U > tsbbIdx))
         ibuf(enq_idx) := inWire
