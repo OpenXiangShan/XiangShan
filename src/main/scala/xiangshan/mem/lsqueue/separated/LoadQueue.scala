@@ -298,58 +298,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     }
   })
 
-  // load forward query
-  // check over all lq entries and forward data from the first matched store
-  // TODO: FIXME
-  (0 until LoadPipelineWidth).map(i => {
-    io.forward(i).forwardMask := 0.U(8.W).asBools
-    io.forward(i).forwardData := DontCare
-
-    // Compare ringBufferTail (deqPtr) and forward.lqIdx, we have two cases:
-    // (1) if they have the same flag, we need to check range(tail, lqIdx)
-    // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, lqIdx)
-    // Forward1: Mux(same_flag, range(tail, lqIdx), range(tail, LoadQueueSize))
-    // Forward2: Mux(same_flag, 0.U,                   range(0, lqIdx)    )
-    // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
-    val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
-    val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
-    val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
-    val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
-
-    val differentFlag = ringBufferTailExtended(InnerLoadQueueIdxWidth) =/= io.forward(i).lqIdx(InnerLoadQueueIdxWidth)
-    val forwardMask = ((1.U((LoadQueueSize + 1).W)) << io.forward(i).lqIdx(InnerLoadQueueIdxWidth - 1, 0)).asUInt - 1.U
-    val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
-    val needForward2 = Mux(differentFlag, forwardMask, 0.U(LoadQueueSize.W))
-
-    // entry with larger index should have higher priority since it's data is younger
-    for (j <- 0 until LoadQueueSize) {
-      val needCheck = valid(j) && allocated(j) && // all valid terms need to be checked
-        io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
-      (0 until XLEN / 8).foreach(k => {
-        when (needCheck && data(j).mask(k)) {
-          when (needForward1(j)) {
-            forwardMask1(k) := true.B
-            forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-          }
-          when (needForward2(j)) {
-            forwardMask2(k) := true.B
-            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-          }
-          XSDebug(needForward1(j) || needForward2(j),
-            p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
-            p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
-        }
-      })
-    }
-
-    // merge forward lookup results
-    // forward2 is younger than forward1 and should have higher priority
-    (0 until XLEN / 8).map(k => {
-      io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
-      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
-    })
-  })
-
   // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
 
@@ -395,6 +343,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val xorMask = startMask(LoadQueueSize - 1, 0) ^ endMask(LoadQueueSize - 1, 0)
     Mux(start(InnerLoadQueueIdxWidth) === end(InnerLoadQueueIdxWidth), xorMask, ~xorMask)
   }
+
+  // ignore data forward
+  (0 until LoadPipelineWidth).foreach(i => {
+    io.forward(i).forwardMask := DontCare
+    io.forward(i).forwardData := DontCare
+  })
 
   // store backward query and rollback
   //  val needCheck = Seq.fill(8)(WireInit(true.B))

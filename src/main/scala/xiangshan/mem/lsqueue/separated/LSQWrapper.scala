@@ -59,7 +59,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     loadQueue.io.loadIn <> io.loadIn
     loadQueue.io.storeIn <> io.storeIn
     loadQueue.io.ldout <> io.ldout
-    loadQueue.io.forward <> io.forward
     loadQueue.io.commits <> io.commits
     loadQueue.io.rollback <> io.rollback
     loadQueue.io.dcache <> io.dcache
@@ -72,11 +71,12 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     storeQueue.io.storeIn <> io.storeIn
     storeQueue.io.sbuffer <> io.sbuffer
     storeQueue.io.stout <> io.stout
-    storeQueue.io.forward <> io.forward
     storeQueue.io.commits <> io.commits
-    storeQueue.io.rollback <> io.rollback
     storeQueue.io.roqDeqPtr <> io.roqDeqPtr
     
+    loadQueue.io.forward <> io.forward
+    storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
+
     // naive uncache arbiter
     val s_idle :: s_load :: s_store :: Nil = Enum(3)
     val uncacheState = RegInit(s_idle)

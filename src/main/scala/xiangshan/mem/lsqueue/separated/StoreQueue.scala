@@ -19,7 +19,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
-    val rollback = Output(Valid(new Redirect))
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
     // val refill = Flipped(Valid(new DCacheLineReq ))
@@ -170,6 +169,59 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
   ringBufferTailExtended := nextTail
 
+  // load forward query
+  // check over all lq entries and forward data from the first matched store
+  (0 until LoadPipelineWidth).map(i => {
+    io.forward(i).forwardMask := 0.U(8.W).asBools
+    io.forward(i).forwardData := DontCare
+
+    // Compare ringBufferTail (deqPtr) and forward.sqIdx, we have two cases:
+    // (1) if they have the same flag, we need to check range(tail, sqIdx)
+    // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
+    // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueSize))
+    // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
+    // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
+    val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
+    val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+    val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
+    val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+
+    val differentFlag = ringBufferTailExtended(InnerStoreQueueIdxWidth) =/= io.forward(i).sqIdx(InnerStoreQueueIdxWidth)
+    val forwardMask = ((1.U((StoreQueueSize + 1).W)) << io.forward(i).sqIdx(InnerStoreQueueIdxWidth - 1, 0)).asUInt - 1.U
+    val needForward1 = Mux(differentFlag, ~tailMask, tailMask ^ forwardMask)
+    val needForward2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W))
+
+    XSDebug("" + i + " f1 %b f2 %b sqIdx %d pa %x\n", needForward1, needForward2, io.forward(i).sqIdx, io.forward(i).paddr)
+
+    // entry with larger index should have higher priority since it's data is younger
+    for (j <- 0 until StoreQueueSize) {
+      val needCheck = valid(j) && allocated(j) && // all valid terms need to be checked
+        io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+      (0 until XLEN / 8).foreach(k => {
+        when (needCheck && data(j).mask(k)) {
+          when (needForward1(j)) {
+            forwardMask1(k) := true.B
+            forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+          }
+          when (needForward2(j)) {
+            forwardMask2(k) := true.B
+            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+          }
+          XSDebug(needForward1(j) || needForward2(j),
+            p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
+            p"from ptr $j pc ${Hexadecimal(uop(j).cf.pc)}\n")
+        }
+      })
+    }
+
+    // merge forward lookup results
+    // forward2 is younger than forward1 and should have higher priority
+    (0 until XLEN / 8).map(k => {
+      io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
+      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
+    })
+  })
+
   // CommitedStoreQueue is not necessary
   // send commited store inst to sbuffer
   // select up to 2 writebacked store insts
@@ -277,7 +329,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   // Read vaddr for mem exception
   val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-  val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx(InnerStoreQueueIdxWidth - 1, 0)).vaddr)
+  val memExceptionAddr = WireInit(data(mexcLsIdx.sqIdx(InnerStoreQueueIdxWidth - 1, 0)).vaddr)
   ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
   ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_STORE_VADDR")
 
