@@ -252,7 +252,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val state = RegInit(state_idle)
 
   ptw <> DontCare // TODO: need check it
-  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle
+  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle && !sfence.valid
   ptw.resp.ready := state===state_wait
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
