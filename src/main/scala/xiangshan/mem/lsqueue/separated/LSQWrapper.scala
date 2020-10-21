@@ -128,6 +128,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
       loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
       storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
       io.lsIdxs(i).instIsLoad := !isStore
+      io.dp1Req(i).ready := Mux(isStore, storeQueue.io.dp1Req(i).ready, loadQueue.io.dp1Req(i).ready)
     })
   }
 }
