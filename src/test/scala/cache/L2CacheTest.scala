@@ -7,6 +7,7 @@ import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
+import firrtl.stage.RunFirrtlTransformAnnotation
 import chiseltest.ChiselScalatestTester
 import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
@@ -18,6 +19,7 @@ import utils.{DebugIdentityNode, HoldUnless, XSDebug}
 import xiangshan.HasXSLog
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
+import xstransforms.PrintModuleName
 
 import scala.util.Random
 
@@ -260,7 +262,10 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
     })
 
     test(LazyModule(new L2TestTopWrapper()).module)
-      .withAnnotations(Seq(VerilatorBackendAnnotation)){ c =>
+      .withAnnotations(Seq(
+        VerilatorBackendAnnotation,
+        RunFirrtlTransformAnnotation(new PrintModuleName)
+      )){ c =>
 
         c.io.in.initSource().setSourceClock(c.clock)
         c.io.out.initSink().setSinkClock(c.clock)
