@@ -186,7 +186,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   // for 11111111, replayPosition is unuseful. We naively set Cnt to size.U
-  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), dispatchPtr.value + replayPosition, dispatchPtr.value - replayPosition))
+  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), (dispatchPtr + replayPosition).value, (dispatchPtr - replayPosition).value))
   val dispatchReplayCntReg = RegInit(0.U)
   // actually, if deqIndex points to head uops and they are replayed, there's no need for extraWalk
   // however, to simplify logic, we simply let it do extra walk now
@@ -196,7 +196,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchReplayStep = Mux(needExtraReplayWalkReg, 0.U, Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg))
   when (exceptionValid) {
     dispatchReplayCntReg := 0.U
-  }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchPtr.value - 1.U)) {
+  }.elsewhen (inReplayWalk && mispredictionValid && needCancel((dispatchPtr - 1.U).value)) {
     val distance = distanceBetween(dispatchPtr, tailCancelPtr)
     dispatchReplayCntReg := Mux(dispatchReplayCntReg > distance, dispatchReplayCntReg - distance, 0.U)
   }.elsewhen (replayValid && someReplay) {
@@ -248,7 +248,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   dispatchPtr := Mux(exceptionValid,
     0.U.asTypeOf(new CircularQueuePtr(size)),
-    Mux(mispredictionValid && (!inReplayWalk || needCancel(dispatchPtr.value - 1.U)),
+    Mux(mispredictionValid && (!inReplayWalk || needCancel((dispatchPtr - 1.U).value)),
       dispatchCancelPtr,
       Mux(inReplayWalk, dispatchPtr - dispatchReplayStep, dispatchPtr + numDeq))
   )
