@@ -167,7 +167,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.redirect.valid := commitValid &&
     commitIsMisPred &&
     !io.roqRedirect.valid &&
-    !io.redirect.bits.needFlush(io.memRedirect)
+    !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
@@ -228,7 +228,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
       when(
         (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
-          (s.isWb && brQueue(i).exuOut.uop.needFlush(io.memRedirect))
+          (s.isWb && brQueue(i).exuOut.uop.roqIdx.needFlush(io.memRedirect))
       ){
         s := s_idle
       }

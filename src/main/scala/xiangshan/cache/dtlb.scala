@@ -6,6 +6,7 @@ import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
+import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem._
 import bus.simplebus._
 import xiangshan.backend.fu.HasCSRConst
@@ -62,11 +63,12 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   }
 }
 
-class comBundle extends TlbBundle with HasRoqIdx{
+class comBundle extends TlbBundle with HasCircularQueuePtrHelper{
+  val roqIdx = new RoqPtr
   val valid = Bool()
   val bits = new PtwReq
   def isPrior(that: comBundle): Bool = {
-    (this.valid && !that.valid) || (this.valid && that.valid && (that isAfter this))
+    (this.valid && !that.valid) || (this.valid && that.valid && isAfter(that.roqIdx, this.roqIdx))
   }
 }
 object Compare {
@@ -128,7 +130,7 @@ object TlbCmd {
 class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
-  val roqIdx = UInt(RoqIdxWidth.W)
+  val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
     val lsroqIdx = UInt(LsroqIdxWidth.W)

@@ -106,15 +106,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val roqNeedFlush = Wire(Vec(size, Bool()))
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    roqNeedFlush(i) := uopEntries(i.U).needFlush(io.redirect)
+    roqNeedFlush(i) := uopEntries(i.U).roqIdx.needFlush(io.redirect)
     needCancel(i) := stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && mispredictionValid) || exceptionValid || flushPipeValid)
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
     XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
-      p"roqIndex 0x${Hexadecimal(uopEntries(i.U).roqIdx)} " +
-      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+      p"roqIndex ${uopEntries(i.U).roqIdx} " +
+      p"cancelled with redirect roqIndex ${io.redirect.bits.roqIdx}\n")
   }
 
   // replay: from s_dispatched to s_valid
@@ -127,7 +127,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     }
 
     XSInfo(needReplay(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
-      p"replayed with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+      p"replayed with roqIndex ${io.redirect.bits.roqIdx}\n")
   }
 
   /**

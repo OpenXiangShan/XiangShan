@@ -9,6 +9,9 @@ class CircularQueuePtr(val entries: Int) extends Bundle {
   val flag = Bool()
   val value = UInt(PTR_WIDTH.W)
 
+  override def toPrintable: Printable = {
+    p"$flag:$value"
+  }
 }
 
 trait HasCircularQueuePtrHelper {

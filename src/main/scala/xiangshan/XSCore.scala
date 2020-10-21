@@ -55,7 +55,7 @@ case class XSCoreParameters
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
   LsroqSize: Int = 16,
-  RoqSize: Int = 32,
+  RoqSize: Int = 24,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
     IntDqSize = 12,
