@@ -21,7 +21,7 @@ class LoadUnit_S0 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
     val dtlb = Valid(new TlbReq)
-    val dcache = DecoupledIO(new DCacheWordReq)
+    val dcache = DecoupledIO(new DCacheLoadReq)
   })
 
   val s0_uop = io.in.bits.uop
@@ -38,9 +38,9 @@ class LoadUnit_S0 extends XSModule {
 
   // query DCache
   io.dcache.valid := io.out.valid
-  io.dcache.cmd  := MemoryOpConstants.M_XRD
-  io.dcache.vaddr := s0_vaddr
-  io.dcache.mask := s0_vaddr
+  io.dcache.bits.cmd  := MemoryOpConstants.M_XRD
+  io.dcache.bits.addr := s0_vaddr
+  io.dcache.bits.mask := s0_mask
 
   val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
@@ -70,6 +70,8 @@ class LoadUnit_S1 extends XSModule {
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = Valid(new TlbResp)
     val forward = new LoadForwardQueryIO
+    val s1_kill = Output(Bool())
+    val s1_paddr = Output(UInt(PAddBits.W))
   })
 
   val s1_uop = io.in.bits.uop
@@ -82,6 +84,11 @@ class LoadUnit_S1 extends XSModule {
   io.tlbFeedback.valid := io.out.valid
   io.tlbFeedback.bits.hit := !s1_tlb_miss
   io.tlbFeedback.bits.roqIdx := s1_uop.roqIdx
+
+  // if tlb misses or mmio, kill prvious cycles dcache request
+  // TODO: kill dcache request when flushed
+  io.s1_kill :=  s1_tlb_miss || s1_mmio
+  io.s1_paddr :=  s1_paddr
 
   io.forward.valid := io.out.valid
   io.forward.paddr := s1_paddr
