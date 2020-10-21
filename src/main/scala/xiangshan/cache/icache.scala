@@ -42,7 +42,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def RVCInsLen = 16
 
   // icache Queue
-  def nMSHRs = 4
+  def nMSHRs = 2
   val groupAlign = log2Up(FetchWidth * 4 * 2)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
@@ -275,21 +275,22 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //ICache MissQueue
   val icacheMissQueue = Module(new IcacheMissQueue(edge))
   val blocking = RegInit(false.B)
+  val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
   icacheMissQueue.io.req.valid := s3_miss && (io.flush === 0.U) && !blocking//TODO: specificate flush condition
-  icacheMissQueue.io.req.bits.apply(missAddr=s3_tlb_resp.paddr,missWaymask=s3_wayMask)
+  icacheMissQueue.io.req.bits.apply(missAddr=s3_tlb_resp.paddr,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := io.flush(1)
 
   when(icacheMissQueue.io.req.fire()){blocking := true.B}
-  .elsewhen(icacheMissQueue.io.resp.fire()){blocking := false.B}
+  .elsewhen(icacheMissQueue.io.resp.fire() && isICacheResp){blocking := false.B}
 
   //cache flush register
   val icacheFlush = WireInit(false.B)
   val cacheflushed = RegInit(false.B)
   BoringUtils.addSink(icacheFlush, "FenceI")
   XSDebug("[Fence.i] icacheFlush:%d, cacheflushed:%d\n",icacheFlush,cacheflushed)
-  when(icacheFlush && blocking && !icacheMissQueue.io.resp.valid){ cacheflushed := true.B}
-  .elsewhen(icacheMissQueue.io.resp.valid && cacheflushed) {cacheflushed := false.B }
+  when(icacheFlush && blocking && !isICacheResp){ cacheflushed := true.B}
+  .elsewhen(isICacheResp && cacheflushed) {cacheflushed := false.B }
 
   //TODO: Prefetcher
 
@@ -325,7 +326,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //icache flush: only flush valid Array register
   when(icacheFlush){ validArray := 0.U }
 
-  val refillDataVec = icacheMissQueue.io.resp.bits.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
+  val refillDataVec = icacheMissQueue.io.resp.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
 
   s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.valid)

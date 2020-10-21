@@ -51,23 +51,25 @@ class IcacheMissReq extends ICacheBundle
 {
     val addr  = UInt(PAddrBits.W)
     val waymask = UInt(PredictWidth.W)
-    //val clientID = Bool()
-    def apply(missAddr:UInt, missWaymask:UInt) = {
+    val clientID = UInt(2.W)
+    def apply(missAddr:UInt, missWaymask:UInt, source:UInt) = {
       this.addr := missAddr
       this.waymask := missWaymask
+      this.clientID := source
     }
 }
 
 class IcacheMissResp extends ICacheBundle
 {
     val data = UInt(blockBits.W)
+    val clientID = UInt(2.W)
 }
 
 class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
         // MSHR ID
-        val id = Input(UInt())
+        val id = Input(UInt(log2Up(nMSHRs).W))
 
         val req = Flipped(DecoupledIO(new IcacheMissReq))
         val resp = DecoupledIO(new IcacheMissResp)
@@ -149,6 +151,7 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 
       is(s_wait_resp){
         io.resp.bits.data := refillDataReg.asUInt
+	io.resp.bits.clientID := req.clientID
         when(io.resp.fire() || needFlush ){ state := s_idle }
       }
 
