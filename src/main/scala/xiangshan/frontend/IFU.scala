@@ -39,10 +39,7 @@ class IFUIO extends XSBundle
   val icacheReq = DecoupledIO(new ICacheReq)
   val icacheResp = Flipped(DecoupledIO(new ICacheResp))
   val icacheFlush = Output(UInt(2.W))
-  val LBFetch = Flipped(new IFUFetchIO)
-  val LBredirect = Flipped(ValidIO(UInt(VAddrBits.W)))
-  val tgtpc = Output(UInt(VAddrBits.W))
-  val inLoop = Input(Bool())
+  val loopBufPar = Flipped(new LoopBufferParameters)
 }
 
 class IFU extends XSModule with HasIFUConst
@@ -54,9 +51,9 @@ class IFU extends XSModule with HasIFUConst
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
   val if1_flush, if2_flush, if3_flush, if4_flush = WireInit(false.B)
 
-  val icacheResp = WireInit(Mux(io.inLoop, io.LBFetch.LBResp, io.icacheResp.bits))
+  val icacheResp = WireInit(Mux(io.loopBufPar.inLoop, io.loopBufPar.LBResp, io.icacheResp.bits))
 
-  if4_flush := io.redirect.valid || io.LBredirect.valid
+  if4_flush := io.redirect.valid || io.loopBufPar.LBredirect.valid
   if3_flush := if4_flush || if4_redirect
   if2_flush := if3_flush || if3_redirect
   if1_flush := if2_flush || if2_redirect
@@ -65,7 +62,7 @@ class IFU extends XSModule with HasIFUConst
   val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
-  val if1_fire = if1_valid && (if2_ready || if1_flush) && (io.inLoop || io.icacheReq.ready)
+  val if1_fire = if1_valid && (if2_ready || if1_flush) && (io.loopBufPar.inLoop || io.icacheReq.ready)
 
 
   val if1_histPtr, if2_histPtr, if3_histPtr, if4_histPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -135,7 +132,7 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF3 ****************************//
   val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
   val if4_ready = WireInit(false.B)
-  val if3_fire = if3_valid && if4_ready && (io.inLoop || io.icacheResp.valid) && !if3_flush
+  val if3_fire = if3_valid && if4_ready && (io.loopBufPar.inLoop || io.icacheResp.valid) && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_GHInfo = RegEnable(if2_realGHInfo, if2_fire)
   val if3_predHistPtr = RegEnable(if2_predHistPtr, enable=if2_fire)
@@ -347,15 +344,15 @@ class IFU extends XSModule with HasIFUConst
     }
   }
 
-  when (io.LBredirect.valid) {
-    if1_npc := io.LBredirect.bits
+  when (io.loopBufPar.LBredirect.valid) {
+    if1_npc := io.loopBufPar.LBredirect.bits
   }
 
   when (io.redirect.valid) {
     if1_npc := io.redirect.bits.target
   }
 
-  when(io.inLoop) {
+  when(io.loopBufPar.inLoop) {
     io.icacheReq.valid := if2_flush
   }.otherwise {
     io.icacheReq.valid := if1_valid && if2_ready
@@ -367,16 +364,16 @@ class IFU extends XSModule with HasIFUConst
 
   // when(if4_bp.taken) {
   //   when(if4_bp.saveHalfRVI) {
-  //     io.LBFetch.LBReq := snpc(if4_pc)
+  //     io.loopBufPar.LBReq := snpc(if4_pc)
   //   }.otherwise {
-  //     io.LBFetch.LBReq := if4_bp.target
+  //     io.loopBufPar.LBReq := if4_bp.target
   //   }
   // }.otherwise {
-  //   io.LBFetch.LBReq := snpc(if4_pc)
+  //   io.loopBufPar.LBReq := snpc(if4_pc)
   //   XSDebug(p"snpc(if4_pc)=${Hexadecimal(snpc(if4_pc))}\n")
   // }
-  io.LBFetch.LBReq := if3_pc
-  io.tgtpc := if4_bp.target
+  io.loopBufPar.LBReq := if3_pc
+  io.loopBufPar.tgtpc := if4_bp.target
   
   io.icacheReq.bits.mask := mask(if1_npc)
   
@@ -391,7 +388,7 @@ class IFU extends XSModule with HasIFUConst
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
-  bpu.io.cacheValid := (io.inLoop || io.icacheResp.valid)
+  bpu.io.cacheValid := (io.loopBufPar.inLoop || io.icacheResp.valid)
   bpu.io.in.valid := if1_fire
   bpu.io.in.bits.pc := if1_npc
   bpu.io.in.bits.hist := hist.asUInt
@@ -406,13 +403,13 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.predecode.bits.isFetchpcEqualFirstpc := if4_pc === if4_pd.pc(0)
   bpu.io.branchInfo.ready := if4_fire
 
-  when(io.inLoop) {
-    pd.io.in := io.LBFetch.LBResp
-    pd.io.in.mask := io.LBFetch.LBResp.mask & mask(io.LBFetch.LBResp.pc)
+  when(io.loopBufPar.inLoop) {
+    pd.io.in := io.loopBufPar.LBResp
+    pd.io.in.mask := io.loopBufPar.LBResp.mask & mask(io.loopBufPar.LBResp.pc)
     XSDebug("Fetch from LB\n")
-    XSDebug(p"pc=${Hexadecimal(io.LBFetch.LBResp.pc)}\n")
-    XSDebug(p"data=${Hexadecimal(io.LBFetch.LBResp.data)}\n")
-    XSDebug(p"mask=${Hexadecimal(io.LBFetch.LBResp.mask)}\n")
+    XSDebug(p"pc=${Hexadecimal(io.loopBufPar.LBResp.pc)}\n")
+    XSDebug(p"data=${Hexadecimal(io.loopBufPar.LBResp.data)}\n")
+    XSDebug(p"mask=${Hexadecimal(io.loopBufPar.LBResp.mask)}\n")
   }.otherwise {
     pd.io.in := icacheResp
   }

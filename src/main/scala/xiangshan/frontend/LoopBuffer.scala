@@ -8,7 +8,10 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 
-class IFUFetchIO extends XSBundle {
+class LoopBufferParameters extends XSBundle {
+  val LBredirect = ValidIO(UInt(VAddrBits.W))
+  val tgtpc = Input(UInt(VAddrBits.W))
+  val inLoop = Output(Bool())
   val LBReq = Input(UInt(VAddrBits.W))
   val LBResp  = Output(new ICacheResp)
 }
@@ -17,10 +20,7 @@ class LoopBufferIO extends XSBundle {
   val flush = Input(Bool())
   val in = Flipped(DecoupledIO(new FetchPacket))
   val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-  val LBredirect = ValidIO(UInt(VAddrBits.W))
-  val tgtpc = Input(UInt(VAddrBits.W))
-  val inLoop = Output(Bool())
-  val IFUFetch = new IFUFetchIO
+  val loopBufPar = new LoopBufferParameters
 }
 
 class LoopBuffer extends XSModule {
@@ -116,7 +116,7 @@ class LoopBuffer extends XSModule {
   val s_idle :: s_fill :: s_active :: Nil = Enum(3)
   val LBstate = RegInit(s_idle)
 
-  io.inLoop := LBstate === s_active
+  io.loopBufPar.inLoop := LBstate === s_active
 
   def flushLB() = {
     for(i <- 0 until IBufSize*2) {
@@ -143,8 +143,8 @@ class LoopBuffer extends XSModule {
     flushIB
   }
 
-  io.LBredirect.valid := false.B
-  io.LBredirect.bits := DontCare
+  io.loopBufPar.LBredirect.valid := false.B
+  io.loopBufPar.LBredirect.bits := DontCare
 
   /*---------------*/
   /*    Dequeue    */
@@ -219,10 +219,10 @@ class LoopBuffer extends XSModule {
   offsetCounter := offsetCounterWire
 
   // IFU fetch from LB
-  io.IFUFetch.LBResp.pc := io.IFUFetch.LBReq
-  io.IFUFetch.LBResp.data := Cat((31 to 0 by -1).map(i => lbuf(io.IFUFetch.LBReq(7,1) + i.U).inst))
-  io.IFUFetch.LBResp.mask := Cat((31 to 0 by -1).map(i => lbufValid(io.IFUFetch.LBReq(7,1) + i.U)))
-  io.IFUFetch.LBResp.ipf := false.B
+  io.loopBufPar.LBResp.pc := io.loopBufPar.LBReq
+  io.loopBufPar.LBResp.data := Cat((31 to 0 by -1).map(i => lbuf(io.loopBufPar.LBReq(7,1) + i.U).inst))
+  io.loopBufPar.LBResp.mask := Cat((31 to 0 by -1).map(i => lbufValid(io.loopBufPar.LBReq(7,1) + i.U)))
+  io.loopBufPar.LBResp.ipf := false.B
 
   /*-----------------------*/
   /*    Loop Buffer FSM    */
@@ -269,8 +269,8 @@ class LoopBuffer extends XSModule {
         when(hasTsbb && !tsbbTaken) {
           XSDebug("tsbb not taken, State change: IDLE\n")
           LBstate := s_idle
-          io.LBredirect.valid := true.B
-          io.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
+          io.loopBufPar.LBredirect.valid := true.B
+          io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
           XSDebug(p"redirect pc=${Hexadecimal(tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U))}\n")
           flushLB()
         }
@@ -278,19 +278,19 @@ class LoopBuffer extends XSModule {
         when(brTaken && !tsbbTaken) {
           XSDebug("cof by other inst, State change: IDLE\n")
           LBstate := s_idle
-          io.LBredirect.valid := true.B
-          io.LBredirect.bits := io.tgtpc
-          // io.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.IFUFetch.LBReq)
-          XSDebug(p"redirect pc=${Hexadecimal(io.tgtpc)}\n")
+          io.loopBufPar.LBredirect.valid := true.B
+          io.loopBufPar.LBredirect.bits := io.loopBufPar.tgtpc
+          // io.loopBufPar.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.loopBufPar.LBReq)
+          XSDebug(p"redirect pc=${Hexadecimal(io.loopBufPar.tgtpc)}\n")
           flushLB()
         }
 
         when(hasTsbb && brTaken && !tsbbTaken) {
           XSDebug("tsbb and cof, State change: IDLE\n")
           LBstate := s_idle
-          io.LBredirect.valid := true.B
-          io.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
-          // io.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.IFUFetch.LBReq)
+          io.loopBufPar.LBredirect.valid := true.B
+          io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
+          // io.loopBufPar.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.loopBufPar.LBReq)
           XSDebug(p"redirect pc=${Hexadecimal(tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U))}\n")
           flushLB()
         }
