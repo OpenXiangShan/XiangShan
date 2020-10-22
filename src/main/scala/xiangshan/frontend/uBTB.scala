@@ -46,14 +46,6 @@ class MicroBTB extends BasePredictor
 
     def getTag(pc: UInt) = (pc >> (log2Ceil(PredictWidth) + 1)).asUInt()
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
-    def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
-        val oldSatTaken = old === ((1 << len)-1).U
-        val oldSatNotTaken = old === 0.U
-        Mux(oldSatTaken && taken, ((1 << len)-1).U,
-            Mux(oldSatNotTaken && !taken, 0.U,
-            Mux(taken, old + 1.U, old - 1.U)))
-    } 
-
 
     class MicroBTBMeta extends XSBundle
     {

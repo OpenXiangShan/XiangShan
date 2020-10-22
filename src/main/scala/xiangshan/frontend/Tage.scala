@@ -33,7 +33,7 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
 }
 
 abstract class TageBundle extends XSBundle with HasTageParameter
-abstract class TageModule extends XSModule with HasTageParameter { val debug = false }
+abstract class TageModule extends XSModule with HasTageParameter with PredictorUtils { val debug = false }
 
 
 
@@ -100,18 +100,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     (idx, tag)
   }
 
-  def inc_ctr(ctr: UInt, taken: Bool): UInt = {
-    Mux(!taken, Mux(ctr === 0.U, 0.U, ctr - 1.U),
-                Mux(ctr === 7.U, 7.U, ctr + 1.U))
-  }
-  // circular shifting
-  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
-    val res = Wire(UInt(len.W))
-    val higher = source << shamt
-    val lower = source >> (len.U - shamt)
-    res := higher | lower
-    res
-  }
+  def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, 3, taken)
 
   val doing_reset = RegInit(true.B)
   val reset_idx = RegInit(0.U(log2Ceil(nRows).W))

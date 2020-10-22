@@ -63,7 +63,33 @@ class PredictorResponse extends XSBundle {
   val loop = new LoopResp
 }
 
-abstract class BasePredictor extends XSModule with HasBPUParameter{
+trait PredictorUtils {
+  // circular shifting
+  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << shamt
+    val lower = source >> (len.U - shamt)
+    res := higher | lower
+    res
+  }
+
+  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << (len.U - shamt)
+    val lower = source >> shamt
+    res := higher | lower
+    res
+  }
+
+  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
+    val oldSatTaken = old === ((1 << len)-1).U
+    val oldSatNotTaken = old === 0.U
+    Mux(oldSatTaken && taken, ((1 << len)-1).U,
+      Mux(oldSatNotTaken && !taken, 0.U,
+        Mux(taken, old + 1.U, old - 1.U)))
+  }
+}
+abstract class BasePredictor extends XSModule with HasBPUParameter with PredictorUtils {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
@@ -84,23 +110,6 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
   val io = new DefaultBasePredictorIO
 
   val debug = false
-
-  // circular shifting
-  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
-    val res = Wire(UInt(len.W))
-    val higher = source << shamt
-    val lower = source >> (len.U - shamt)
-    res := higher | lower
-    res
-  }
-
-  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
-    val res = Wire(UInt(len.W))
-    val higher = source << (len.U - shamt)
-    val lower = source >> shamt
-    res := higher | lower
-    res
-  }
 }
 
 class BPUStageIO extends XSBundle {
