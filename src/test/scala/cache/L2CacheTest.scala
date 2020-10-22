@@ -68,13 +68,15 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
   val cores = Array.fill(2)(LazyModule(new DCache()))
   val l2params = p(L2CacheTestKey)
-  val l2s = Array.fill(2)(LazyModule(new InclusiveCache(
+  val l2s = (0 until 2) map (i =>
+    LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
       ways = l2params.ways,
       sets = l2params.capacityKB * 1024 / (l2params.blockBytes * l2params.ways * l2params.banks),
       blockBytes = l2params.blockBytes,
-      beatBytes = l2params.beatBytes
+      beatBytes = l2params.beatBytes,
+      cacheName = s"L2_$i"
     ),
     InclusiveCacheMicroParameters(
       writeBytes = l2params.writeBytes
@@ -84,11 +86,12 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
   val l3params = p(L3CacheTestKey)
   val l3 = LazyModule(new InclusiveCache(
     CacheParameters(
-      level = 2,
+      level = 3,
       ways = l3params.ways,
       sets = l3params.capacityKB * 1024 / (l3params.blockBytes * l3params.ways * l3params.banks),
       blockBytes = l3params.blockBytes,
-      beatBytes = l3params.beatBytes
+      beatBytes = l3params.beatBytes,
+      cacheName = "L3"
     ),
     InclusiveCacheMicroParameters(
       writeBytes = l3params.writeBytes
@@ -106,10 +109,10 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
   for(i <- 0 until 2) {
     val core = cores(i)
     val l2 = l2s(i)
-    xbar := DebugIdentityNode() := l2.node := DebugIdentityNode() := core.clientNode
+    xbar := l2.node := core.clientNode
   }
 
-  l3.node := TLBuffer() := DebugIdentityNode() := xbar
+  l3.node := xbar
 
   ram.node :=
     AXI4UserYanker() :=
@@ -127,7 +130,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
     cores.foreach(_.module.io <> DontCare)
 
     val storePorts = cores.map(_.module.io.lsu.store)
-    val loadPorts  = cores.map(_.module.io.lsu.lsroq)
+    val loadPorts  = cores.map(_.module.io.lsu.atomics)
 
     def sendStoreReq(addr: UInt, data: UInt): DCacheLineReq = {
       val req = Wire(new DCacheLineReq)
@@ -141,9 +144,9 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
 
     def sendLoadReq(addr: UInt): DCacheWordReq = {
       val req = Wire(new DCacheWordReq)
-      req.cmd := MemoryOpConstants.M_XRD
+      req.cmd := MemoryOpConstants.M_XA_ADD
       req.addr := addr
-      req.data := DontCare
+      req.data := 0.U
       req.mask := Fill(req.mask.getWidth, true.B)
       req.meta := DontCare
       req
@@ -261,11 +264,16 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
         L3CacheTestParams()
     })
 
+    /*
     test(LazyModule(new L2TestTopWrapper()).module)
       .withAnnotations(Seq(
         VerilatorBackendAnnotation,
         RunFirrtlTransformAnnotation(new PrintModuleName)
       )){ c =>
+        */
+
+    test(LazyModule(new L2TestTopWrapper()).module)
+      .withAnnotations(Seq(VerilatorBackendAnnotation)){ c =>
 
         c.io.in.initSource().setSourceClock(c.clock)
         c.io.out.initSink().setSinkClock(c.clock)
