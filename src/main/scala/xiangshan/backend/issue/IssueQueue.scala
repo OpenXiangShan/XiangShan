@@ -283,7 +283,7 @@ class IssueQueue
 
 
   // assign outputs
-  io.numExist := Mux(isFull, (qsize-1).U, tailPtr)
+  io.numExist := Mux(isFull, (qsize-1).U, PopCount(stateQueue.map(_ =/= s_invalid)))
 
   // Debug sigs
   XSInfo(
