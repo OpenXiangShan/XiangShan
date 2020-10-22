@@ -156,15 +156,13 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   (0 until TageBanks).map(
     b => {
-      hi_us(b).reset := reset.asBool
-      lo_us(b).reset := reset.asBool
-      table(b).reset := reset.asBool
-      hi_us(b).io.r.req.valid := io.req.valid && realMask(b)
-      lo_us(b).io.r.req.valid := io.req.valid && realMask(b)
-      table(b).io.r.req.valid := io.req.valid && realMask(b)
-      lo_us(b).io.r.req.bits.setIdx := idx
-      hi_us(b).io.r.req.bits.setIdx := idx
-      table(b).io.r.req.bits.setIdx := idx
+      Seq(hi_us, lo_us, table).map(
+        t => {
+          t(b).reset := reset.asBool
+          t(b).io.r.req.valid := io.req.valid && realMask(b)
+          t(b).io.r.req.bits.setIdx := idx
+        }
+      )
 
       hi_us_r(b) := hi_us(b).io.r.resp.data(0)
       lo_us_r(b) := lo_us(b).io.r.resp.data(0)
