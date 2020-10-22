@@ -200,6 +200,10 @@ int difftest_step(DiffState *s) {
         // IPF, LPF, SPF
         if(s->cause == 12 || s->cause == 13 || s->cause == 15){
           // printf("s->cause %ld\n", s->cause);
+          struct DisambiguationState ds;
+          ds.exceptionNo = s->cause;
+          ds.mtval = s->reg_scala[DIFFTEST_MTVAL];
+          ds.stval = s->reg_scala[DIFFTEST_STVAL];
           ref_disambiguate_exec(&s->cause);
         }else{
           ref_difftest_exec(1);
