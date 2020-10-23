@@ -2,7 +2,7 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, XSError, XSInfo}
+import utils._
 import xiangshan.backend.decode.SrcType
 import xiangshan.{MicroOp, Redirect, ReplayPregReq, RoqCommit, XSBundle, XSModule}
 
@@ -21,57 +21,41 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int, replayWidth: Int) extends XSBund
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) extends XSModule {
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new DispatchQueueIO(enqnum, deqnum, replayWidth))
   val indexWidth = log2Ceil(size)
 
   val s_invalid :: s_valid :: s_dispatched :: Nil = Enum(3)
 
   // queue data array
-  val uopEntries = Mem(size, new MicroOp)//Reg(Vec(size, new MicroOp))
+  val uopEntries = Mem(size, new MicroOp)
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
   // head: first valid entry (dispatched entry)
-  val headPtr = RegInit(0.U((indexWidth + 1).W))
-  val headIndex = headPtr(indexWidth - 1, 0)
-  val headDirection = headPtr(indexWidth)
+  val headPtr = RegInit(0.U.asTypeOf(new CircularQueuePtr(size)))
   // dispatch: first entry that has not been dispatched
-  val dispatchPtr = RegInit(0.U((indexWidth + 1).W))
-  val dispatchIndex = dispatchPtr(indexWidth - 1, 0)
-  val dispatchDirection = dispatchPtr(indexWidth)
+  val dispatchPtr = RegInit(0.U.asTypeOf(new CircularQueuePtr(size)))
   // tail: first invalid entry (free entry)
-  val tailPtr = RegInit(0.U((indexWidth + 1).W))
-  val tailIndex = tailPtr(indexWidth - 1, 0)
-  val tailDirection = tailPtr(indexWidth)
+  val tailPtr = RegInit(0.U.asTypeOf(new CircularQueuePtr(size)))
 
   // TODO: make ptr a vector to reduce latency?
   // commit: starting from head ptr
-  val commitPtr = (0 until CommitWidth).map(i => headPtr + i.U)
-  val commitIndex = commitPtr.map(ptr => ptr(indexWidth - 1, 0))
+  val commitIndex = (0 until CommitWidth).map(i => headPtr + i.U).map(_.value)
   // deq: starting from dispatch ptr
-  val deqPtr = (0 until enqnum).map(i => dispatchPtr + i.U)
-  val deqIndex = deqPtr.map(ptr => ptr(indexWidth - 1, 0))
+  val deqIndex = (0 until deqnum).map(i => dispatchPtr + i.U).map(_.value)
   // enq: starting from tail ptr
-  val enqPtr = (0 until enqnum).map(i => tailPtr + i.U)
-  val enqIndex = enqPtr.map(ptr => ptr(indexWidth - 1, 0))
+  val enqIndex = (0 until enqnum).map(i => tailPtr + i.U).map(_.value)
 
-  def distanceBetween(left: UInt, right: UInt) = {
-    Mux(left(indexWidth) === right(indexWidth),
-      left(indexWidth - 1, 0) - right(indexWidth - 1, 0),
-      size.U + left(indexWidth - 1, 0) - right(indexWidth - 1, 0))
-  }
 
   val validEntries = distanceBetween(tailPtr, headPtr)
   val dispatchEntries = distanceBetween(tailPtr, dispatchPtr)
   val commitEntries = validEntries - dispatchEntries
   val emptyEntries = size.U - validEntries
-  val isFull = tailDirection =/= headDirection && tailIndex === headIndex
-  val isFullDispatch = dispatchDirection =/= headDirection && dispatchIndex === headIndex
 
-  def rangeMask(start: UInt, end: UInt): UInt = {
-    val startMask = (1.U((size + 1).W) << start(indexWidth - 1, 0)).asUInt - 1.U
-    val endMask = (1.U((size + 1).W) << end(indexWidth - 1, 0)).asUInt - 1.U
+  def rangeMask(start: CircularQueuePtr, end: CircularQueuePtr): UInt = {
+    val startMask = (1.U((size + 1).W) << start.value).asUInt - 1.U
+    val endMask = (1.U((size + 1).W) << end.value).asUInt - 1.U
     val xorMask = startMask(size - 1, 0) ^ endMask(size - 1, 0)
-    Mux(start(indexWidth) === end(indexWidth), xorMask, ~xorMask)
+    Mux(start.flag === end.flag, xorMask, ~xorMask)
   }
   val dispatchedMask = rangeMask(headPtr, dispatchPtr)
 
@@ -122,15 +106,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val roqNeedFlush = Wire(Vec(size, Bool()))
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    roqNeedFlush(i) := uopEntries(i.U).needFlush(io.redirect)
+    roqNeedFlush(i) := uopEntries(i.U).roqIdx.needFlush(io.redirect)
     needCancel(i) := stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && mispredictionValid) || exceptionValid || flushPipeValid)
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
     XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
-      p"roqIndex 0x${Hexadecimal(uopEntries(i.U).roqIdx)} " +
-      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+      p"roqIndex ${uopEntries(i.U).roqIdx} " +
+      p"cancelled with redirect roqIndex ${io.redirect.bits.roqIdx}\n")
   }
 
   // replay: from s_dispatched to s_valid
@@ -143,7 +127,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     }
 
     XSInfo(needReplay(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
-      p"replayed with roqIndex ${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+      p"replayed with roqIndex ${io.redirect.bits.roqIdx}\n")
   }
 
   /**
@@ -185,25 +169,25 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // if all bits are one, we need to keep the index unchanged
   // 00000000, 11111111: unchanged
   // otherwise: firstMaskPosition
-  val cancelPosition = Mux(!Cat(needCancel).orR || allCancel, tailIndex, getFirstMaskPosition(needCancel))
-  val replayPosition = Mux(!someReplay || allReplay, dispatchIndex, getFirstMaskPosition(maskedNeedReplay.asBools))
+  val cancelPosition = Mux(!Cat(needCancel).orR || allCancel, tailPtr.value, getFirstMaskPosition(needCancel))
+  val replayPosition = Mux(!someReplay || allReplay, dispatchPtr.value, getFirstMaskPosition(maskedNeedReplay.asBools))
   XSDebug(replayValid, p"getFirstMaskPosition: ${getFirstMaskPosition(maskedNeedReplay.asBools)}\n")
   assert(cancelPosition.getWidth == indexWidth)
   assert(replayPosition.getWidth == indexWidth)
   // If the highest bit is one, the direction flips.
   // Otherwise, the direction keeps the same.
-  val tailCancelPtrDirection = Mux(needCancel(size - 1), ~tailDirection, tailDirection)
-  val tailCancelPtrIndex = Mux(needCancel(size - 1) && !allCancel, ~cancelPosition + 1.U, cancelPosition)
-  val tailCancelPtr = Cat(tailCancelPtrDirection, tailCancelPtrIndex)
+  val tailCancelPtr = Wire(new CircularQueuePtr(size))
+  tailCancelPtr.flag := Mux(needCancel(size - 1), ~tailPtr.flag, tailPtr.flag)
+  tailCancelPtr.value := Mux(needCancel(size - 1) && !allCancel, size.U - cancelPosition, cancelPosition)
   // In case of branch mis-prediction:
   // If mis-prediction happens after dispatchPtr, the pointer keeps the same as before.
   // If dispatchPtr needs to be cancelled, reset dispatchPtr to tailPtr.
-  val dispatchCancelPtr = Mux(needCancel(dispatchIndex) || dispatchEntries === 0.U, tailCancelPtr, dispatchPtr)
+  val dispatchCancelPtr = Mux(needCancel(dispatchPtr.value) || dispatchEntries === 0.U, tailCancelPtr, dispatchPtr)
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   // for 11111111, replayPosition is unuseful. We naively set Cnt to size.U
-  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), dispatchIndex + replayPosition, dispatchIndex - replayPosition))
-  val dispatchReplayCntReg = RegInit(0.U((indexWidth + 1).W))
+  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), (dispatchPtr + replayPosition).value, (dispatchPtr - replayPosition).value))
+  val dispatchReplayCntReg = RegInit(0.U)
   // actually, if deqIndex points to head uops and they are replayed, there's no need for extraWalk
   // however, to simplify logic, we simply let it do extra walk now
   val needExtraReplayWalk = Cat((0 until deqnum).map(i => needReplay(deqIndex(i)))).orR
@@ -212,7 +196,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val dispatchReplayStep = Mux(needExtraReplayWalkReg, 0.U, Mux(dispatchReplayCntReg > replayWidth.U, replayWidth.U, dispatchReplayCntReg))
   when (exceptionValid) {
     dispatchReplayCntReg := 0.U
-  }.elsewhen (inReplayWalk && mispredictionValid && needCancel(dispatchIndex - 1.U)) {
+  }.elsewhen (inReplayWalk && mispredictionValid && needCancel((dispatchPtr - 1.U).value)) {
     val distance = distanceBetween(dispatchPtr, tailCancelPtr)
     dispatchReplayCntReg := Mux(dispatchReplayCntReg > distance, dispatchReplayCntReg - distance, 0.U)
   }.elsewhen (replayValid && someReplay) {
@@ -222,7 +206,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
 
   io.inReplayWalk := inReplayWalk
-  val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - (i + 1).U)(indexWidth - 1, 0))
+  val replayIndex = (0 until replayWidth).map(i => (dispatchPtr - (i + 1).U).value)
   for (i <- 0 until replayWidth) {
     val index =  Mux(needExtraReplayWalkReg, (if (i < deqnum) deqIndex(i) else 0.U), replayIndex(i))
     val shouldResetDest = inReplayWalk && stateEntries(index) === s_valid
@@ -247,7 +231,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val numEnq = PriorityEncoder(io.enq.map(!_.fire()) :+ true.B)
   XSError(numEnq =/= 0.U && (mispredictionValid || exceptionValid), "should not enqueue when redirect\n")
   tailPtr := Mux(exceptionValid,
-    0.U,
+    0.U.asTypeOf(new CircularQueuePtr(size)),
     Mux(mispredictionValid,
       tailCancelPtr,
       tailPtr + numEnq)
@@ -263,13 +247,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   dispatchPtr := Mux(exceptionValid,
-    0.U,
-    Mux(mispredictionValid && (!inReplayWalk || needCancel(dispatchIndex - 1.U)),
+    0.U.asTypeOf(new CircularQueuePtr(size)),
+    Mux(mispredictionValid && (!inReplayWalk || needCancel((dispatchPtr - 1.U).value)),
       dispatchCancelPtr,
       Mux(inReplayWalk, dispatchPtr - dispatchReplayStep, dispatchPtr + numDeq))
   )
 
-  headPtr := Mux(exceptionValid, 0.U, headPtr + numCommit)
+  headPtr := Mux(exceptionValid, 0.U.asTypeOf(new CircularQueuePtr(size)), headPtr + numCommit)
 
   /**
     * Part 4: set output and input
@@ -287,14 +271,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
 
   // debug: dump dispatch queue states
-  def greaterOrEqualThan(left: UInt, right: UInt) = {
-    Mux(
-      left(indexWidth) === right(indexWidth),
-      left(indexWidth - 1, 0) >= right(indexWidth - 1, 0),
-      left(indexWidth - 1, 0) <= right(indexWidth - 1, 0)
-    )
-  }
-
   XSDebug(p"head: $headPtr, tail: $tailPtr, dispatch: $dispatchPtr, " +
     p"replayCnt: $dispatchReplayCntReg, needExtraReplayWalkReg: $needExtraReplayWalkReg\n")
   XSDebug(p"state: ")
@@ -306,14 +282,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   XSDebug(false, true.B, "\n")
   XSDebug(p"ptr:   ")
   (0 until size).reverse.foreach { i =>
-    val isPtr = i.U === headIndex || i.U === tailIndex || i.U === dispatchIndex
+    val isPtr = i.U === headPtr.value || i.U === tailPtr.value || i.U === dispatchPtr.value
     XSDebug(false, isPtr, "^")
     XSDebug(false, !isPtr, " ")
   }
   XSDebug(false, true.B, "\n")
 
-  XSError(!greaterOrEqualThan(tailPtr, headPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, headPtr: $headPtr) failed\n")
-  XSError(!greaterOrEqualThan(tailPtr, dispatchPtr) && !inReplayWalk, p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
-  XSError(!greaterOrEqualThan(dispatchPtr, headPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
+  XSError(isAfter(headPtr, tailPtr), p"assert greaterOrEqualThan(tailPtr: $tailPtr, headPtr: $headPtr) failed\n")
+  XSError(isAfter(dispatchPtr, tailPtr) && !inReplayWalk, p"assert greaterOrEqualThan(tailPtr: $tailPtr, dispatchPtr: $dispatchPtr) failed\n")
+  XSError(isAfter(headPtr, dispatchPtr), p"assert greaterOrEqualThan(dispatchPtr: $dispatchPtr, headPtr: $headPtr) failed\n")
   XSError(validEntries < dispatchEntries && !inReplayWalk, "validEntries should be less than dispatchEntries\n")
 }

@@ -8,6 +8,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
+import xiangshan.backend.roq.RoqPtr
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 //
@@ -27,7 +28,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
-    val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
+    val roqDeqPtr = Input(new RoqPtr)
   })
   
   if(EnableUnifiedLSQ){

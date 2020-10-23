@@ -70,7 +70,7 @@ class LoadUnit extends XSModule {
   l2_out.bits.uop   := io.ldin.bits.uop
   l2_out.bits.miss  := false.B
   l2_out.bits.mmio  := l2_mmio
-  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.needFlush(io.redirect)
+  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.roqIdx.needFlush(io.redirect)
   // when we are sure it's a MMIO req, we do not need to wait for cache ready
   l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
   io.ldin.ready := l2_out.ready
@@ -132,11 +132,11 @@ class LoadUnit extends XSModule {
   val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
   val l3_uop = l3_bundle.uop
   // dltb miss reqs ends here
-  val l3_passdown = l3_valid && !l3_dtlb_miss && !l3_uop.needFlush(io.redirect)
+  val l3_passdown = l3_valid && !l3_dtlb_miss && !l3_uop.roqIdx.needFlush(io.redirect)
 
   io.tlbFeedback.valid := l3_valid
   io.tlbFeedback.bits := l3_tlbFeedback
-  io.dcache.s1_kill := l3_valid && l3_dcache && l3_uop.needFlush(io.redirect)
+  io.dcache.s1_kill := l3_valid && l3_dcache && l3_uop.roqIdx.needFlush(io.redirect)
 
   // dump l3
   XSDebug(l3_valid, "l3: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
@@ -145,7 +145,7 @@ class LoadUnit extends XSModule {
     l3_dtlb_miss, l3_dcache, l3_bundle.mmio)
 
   XSDebug(io.tlbFeedback.valid, "tlbFeedback: hit %b roqIdx %d\n",
-    io.tlbFeedback.bits.hit, io.tlbFeedback.bits.roqIdx)
+    io.tlbFeedback.bits.hit, io.tlbFeedback.bits.roqIdx.asUInt)
 
   XSDebug(io.dcache.s1_kill, "l3: dcache s1_kill\n")
 
@@ -180,7 +180,7 @@ class LoadUnit extends XSModule {
   } .otherwise {
     l4_out.bits := l4_bundle
   }
-  l4_out.valid := l4_valid && !l4_out.bits.uop.needFlush(io.redirect)
+  l4_out.valid := l4_valid && !l4_out.bits.uop.roqIdx.needFlush(io.redirect)
 
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
@@ -233,7 +233,12 @@ class LoadUnit extends XSModule {
   XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
     io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
 
-  XSDebug(io.redirect.valid, p"Redirect: excp:${io.redirect.bits.isException} flushPipe:${io.redirect.bits.isFlushPipe} misp:${io.redirect.bits.isMisPred} replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.needFlush(io.redirect)} l3:${l3_uop.needFlush(io.redirect)} l4:${l4_out.bits.uop.needFlush(io.redirect)}\n")
+  XSDebug(io.redirect.valid,
+    p"Redirect: excp:${io.redirect.bits.isException} flushPipe:${io.redirect.bits.isFlushPipe} misp:${io.redirect.bits.isMisPred} " +
+    p"replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} " +
+    p"brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.roqIdx.needFlush(io.redirect)} l3:${l3_uop.roqIdx.needFlush(io.redirect)} " +
+    p"l4:${l4_out.bits.uop.roqIdx.needFlush(io.redirect)}\n"
+  )
   //-------------------------------------------------------
   // LD Pipeline Stage 5
   // Do data ecc check, merge result and write back to LS ROQ

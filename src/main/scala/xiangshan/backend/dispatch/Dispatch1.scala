@@ -5,6 +5,7 @@ import chisel3.util._
 import chisel3.ExcitingUtils._
 import xiangshan._
 import utils.{XSDebug, XSError, XSInfo}
+import xiangshan.backend.roq.RoqPtr
 
 // read rob and enqueue
 class Dispatch1 extends XSModule {
@@ -16,7 +17,7 @@ class Dispatch1 extends XSModule {
     // enq Roq
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
-    val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
     // enq Lsroq
     val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsIdx
@@ -59,7 +60,7 @@ class Dispatch1 extends XSModule {
   val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid && !io.redirect.bits.isReplay)))
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
-  val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+  val roqIndexReg = Reg(Vec(RenameWidth, new RoqPtr))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
   val lsIndexReg = Reg(Vec(RenameWidth, new LSIdx))

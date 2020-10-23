@@ -6,6 +6,7 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
+import xiangshan.backend.roq.RoqPtr
 
 import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
@@ -76,7 +77,7 @@ class MemToBackendIO extends XSBundle {
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
-  val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
+  val roqDeqPtr = Input(new RoqPtr)
 }
 
 // Memory pipeline wrapper

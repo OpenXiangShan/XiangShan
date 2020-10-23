@@ -7,9 +7,10 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.roq.RoqPtr
 
 // Store Queue
-class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
+class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val sqIdxs = Output(Vec(RenameWidth, UInt(StoreQueueIdxWidth.W)))
@@ -20,7 +21,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val uncache = new DCacheWordIO
-    val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
+    val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -337,7 +338,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
   // invalidate sq term using robIdx
   val needCancel = Wire(Vec(StoreQueueSize, Bool()))
   for (i <- 0 until StoreQueueSize) {
-    needCancel(i) := uop(i).needFlush(io.brqRedirect) && allocated(i) && !commited(i)
+    needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
         valid(i) := false.B

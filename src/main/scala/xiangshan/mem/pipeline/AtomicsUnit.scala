@@ -176,7 +176,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
       resp_data := LookupTree(in.uop.ctrl.fuOpType, List(
         LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.sc_w      -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.sc_w      -> rdata,
         LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
         LSUOpType.amoadd_w  -> SignExt(rdataSel(31, 0), XLEN),
         LSUOpType.amoxor_w  -> SignExt(rdataSel(31, 0), XLEN),
@@ -188,7 +188,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         LSUOpType.amomaxu_w -> SignExt(rdataSel(31, 0), XLEN),
 
         LSUOpType.lr_d      -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.sc_d      -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.sc_d      -> rdata,
         LSUOpType.amoswap_d -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.amoadd_d  -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.amoxor_d  -> SignExt(rdataSel(63, 0), XLEN),
