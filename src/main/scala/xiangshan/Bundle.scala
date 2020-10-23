@@ -140,28 +140,8 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
-// trait HasRoqIdx { this: HasXSParameter =>
-  
-
-//   def isAfter(thatIdx: UInt): Bool = {
-//     Mux(
-//       this.roqIdx.head(1) === thatIdx.head(1),
-//       this.roqIdx.tail(1) > thatIdx.tail(1),
-//       this.roqIdx.tail(1) < thatIdx.tail(1)
-//     )
-//   }
-
-//   def isAfter[ T<: HasRoqIdx ](that: T): Bool = {
-//     isAfter(that.roqIdx)
-//   }
-
-//   def needFlush(redirect: Valid[Redirect]): Bool = {
-//     redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || this.isAfter(redirect.bits.roqIdx)) // TODO: need check by JiaWei
-//   }
-// }
-
 // CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl /*with HasRoqIdx*/ {
+class MicroOp extends CfCtrl {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
   val roqIdx = new RoqPtr
@@ -169,7 +149,7 @@ class MicroOp extends CfCtrl /*with HasRoqIdx*/ {
   val diffTestDebugLrScValid = Bool()
 }
 
-class Redirect extends XSBundle /*with HasRoqIdx*/ {
+class Redirect extends XSBundle {
   val roqIdx = new RoqPtr
   val isException = Bool()
   val isMisPred = Bool()
