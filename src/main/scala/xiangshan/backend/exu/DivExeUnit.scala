@@ -55,9 +55,10 @@ class DivExeUnit extends Exu(Exu.divExeUnitCfg) {
     io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
-  XSDebug(io.in.valid, "src1:%x src2:%x func:%b pc:%x roqIdx:%d\n", src1, src2, func, io.in.bits.uop.cf.pc, io.in.bits.uop.roqIdx)
-  XSDebug(io.out.valid, "Out(%d %d) res:%x func:%b pc:%x roqIdx:%d\n",
-    io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.ctrl.fuOpType, io.out.bits.uop.cf.pc, io.out.bits.uop.roqIdx
+  XSDebug(io.in.valid, p"src1: 0x${Hexadecimal(src1)} src2: 0x${Hexadecimal(src2)} func: ${Binary(func)} " +
+    p"pc: ${io.in.bits.uop.cf.pc} roqIdx: ${io.in.bits.uop.roqIdx}\n")
+  XSDebug(io.out.valid, p"Out(${io.out.valid} ${io.out.ready}) res: ${Hexadecimal(io.out.bits.data)} " +
+    p"func: ${Binary(io.out.bits.uop.ctrl.fuOpType)} pc: ${Hexadecimal(io.out.bits.uop.cf.pc)} roqIdx: ${io.out.bits.uop.roqIdx}\n"
   )
 
 }
