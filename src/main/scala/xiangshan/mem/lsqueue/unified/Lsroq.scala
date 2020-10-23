@@ -282,12 +282,12 @@ class Lsroq extends XSModule with HasDCacheParameters {
   val loadWbSelVec = VecInit((0 until LsroqSize).map(i => {
     allocated(i) && valid(i) && !writebacked(i) && !store(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
-  val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LsroqSize).W)))
+  val loadWbSel = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LsroqSize).W)))
   val lselvec0 = PriorityEncoderOH(loadWbSelVec)
   val lselvec1 = PriorityEncoderOH(loadWbSelVec & (~lselvec0).asUInt)
   loadWbSel(0) := OHToUInt(lselvec0)
   loadWbSel(1) := OHToUInt(lselvec1)
-  (0 until StorePipelineWidth).map(i => {
+  (0 until LoadPipelineWidth).map(i => {
     // data select
     val rdata = data(loadWbSel(i)).data
     val func = uop(loadWbSel(i)).ctrl.fuOpType

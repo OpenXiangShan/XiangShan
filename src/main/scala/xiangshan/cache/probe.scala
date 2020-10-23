@@ -19,6 +19,7 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump {
     val block = Input(Bool())
     val inflight_req_idx        = Output(Valid(UInt()))
     val inflight_req_block_addr = Output(Valid(UInt()))
+    val probe_active = Output(Valid(UInt()))
   })
 
   val s_invalid :: s_wait_sync :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_release :: s_wb_req :: s_wb_resp :: s_meta_write_req :: Nil = Enum(9)
@@ -53,6 +54,11 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump {
 
   io.inflight_req_block_addr.valid := state =/= s_invalid
   io.inflight_req_block_addr.bits  := req_block_addr
+
+  // active means nobody is blocking it anymore
+  // it will run free
+  io.probe_active.valid     := state =/= s_invalid && state =/= s_wait_sync
+  io.probe_active.bits      := req_idx
 
   XSDebug("state: %d\n", state)
 

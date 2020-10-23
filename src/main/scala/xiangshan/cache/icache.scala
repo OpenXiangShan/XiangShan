@@ -224,7 +224,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
   val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
 
-  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U))}.reverse).asUInt
+  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
   val hitVec = VecInit((0 until nWays).map{w => metas(w).tag === s2_tag && validMeta(w) === 1.U})
@@ -254,13 +254,10 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
-  val s3_mmio = s3_valid &&  AddressSpace.isMMIO(s3_tlb_resp.paddr)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
-
-  assert(!(s3_hit && s3_mmio), "MMIO address should not hit in ICache!")
 
   // icache hit 
   // simply cut the hit cacheline
@@ -269,14 +266,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
 
   //icache miss
-  val s_idle :: s_mmioReq :: s_mmioResp :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(6)
+  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val readBeatCnt = Counter(refillCycles)
-
-  //uncache request
-  val mmioBeatCnt = Counter(blockWords)
-  val mmioAddrReg = RegInit(0.U(PAddrBits.W))
-  val mmioReg = Reg(Vec(blockWords/2, UInt(blockWords.W)))
 
   //pipeline flush register
   val needFlush = RegInit(false.B)
@@ -295,35 +287,14 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
 
   // state change to wait for a cacheline refill
   val countFull = readBeatCnt.value === (refillCycles - 1).U
-  val mmioCntFull = mmioBeatCnt.value === (blockWords - 1).U
   switch(state){
     is(s_idle){
-      when(s3_mmio && io.flush === 0.U){
-        state := s_mmioReq
-        mmioBeatCnt.value := 0.U
-        mmioAddrReg := s3_tlb_resp.paddr
-      } .elsewhen(s3_miss && io.flush === 0.U){
+      when(s3_miss && io.flush === 0.U){
         state := s_memReadReq
         readBeatCnt.value := 0.U
       }
     }
 
-    //mmio request
-    is(s_mmioReq){
-      when(bus.a.fire()){
-        state := s_mmioResp
-        mmioAddrReg := mmioAddrReg + 8.U   //consider MMIO response 64 bits valid data
-      }
-    }
-
-    is(s_mmioResp){
-      when (edge.hasData(bus.d.bits) && bus.d.fire()) {
-        mmioBeatCnt.inc()
-        assert(refill_done, "MMIO response should be one beat only!")
-        mmioReg(mmioBeatCnt.value) := bus.d.bits.data(wordBits-1,0)
-        state := Mux(mmioCntFull,s_wait_resp,s_mmioReq)
-      }
-    }
 
     // memory request
     is(s_memReadReq){ 
@@ -353,9 +324,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //refill write
   val metaWrite = Wire(new ICacheMetaBundle)
   val refillFinalOneBeat = (state === s_memReadResp) && bus.d.fire() && refill_done
-  val wayNum = OHToUInt(waymask)
+  val wayNum = OHToUInt(s3_wayMask.asTypeOf(Vec(nWays,Bool())))
   val validPtr = Cat(get_idx(s3_req_pc),wayNum)
-  metaWrite.tag := get_tag(s3_req_pc)
+  metaWrite.tag := s3_tag
   metaArray.io.w.req.valid := refillFinalOneBeat
   metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
 
@@ -445,16 +416,12 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   bus.b.ready := true.B
   bus.c.valid := false.B
   bus.e.valid := false.B
-  bus.a.valid := (state === s_memReadReq) || (state === s_mmioReq)
+  bus.a.valid := (state === s_memReadReq)
   val memTileReq  = edge.Get(
     fromSource      = cacheID.U,
     toAddress       = groupPC(s3_tlb_resp.paddr),
     lgSize          = (log2Up(cacheParams.blockBytes)).U )._2 
-  val mmioTileReq = edge.Get(
-    fromSource      = cacheID.U,
-    toAddress       = mmioAddrReg,
-    lgSize          = (log2Up(wordBits)).U )._2
-  bus.a.bits :=  Mux((state === s_mmioReq),mmioTileReq, memTileReq)
+  bus.a.bits :=   memTileReq
   bus.d.ready := true.B
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))

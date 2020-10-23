@@ -62,6 +62,9 @@ class ReservationStation
 
     // to Dispatch
     val numExist = Output(UInt(iqIdxWidth.W))
+
+    // tlb hit, inst can deq, only used in ld/st reservation stations
+    val tlbFeedback = Flipped(ValidIO(new TlbFeedback))
   })
 
   val srcAllNum = 3
@@ -284,7 +287,7 @@ class ReservationStation
 
     for(i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for(j <- 0 until srcListenNum) {
-        val hitVec = cdbValid.indices.map(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
+        val hitVec = cdbValid.indices.map(k => psrc(i)(j) === cdbPdest(k) && cdbValid(k) && (srcType(i)(j)===SrcType.reg && cdbrfWen(k) && cdbPdest(k) =/= 0.U || srcType(i)(j)===SrcType.fp && cdbfpWen(k)))
         val hit = ParallelOR(hitVec).asBool
         val data = ParallelMux(hitVec zip cdbData)
         when (validQue(i) && !srcRdyVec(i)(j) && hit) { 
@@ -306,7 +309,7 @@ class ReservationStation
 
     for (i <- idQue.indices) { // Should be IssQue.indices but Mem() does not support
       for (j <- 0 until srcListenNum) {
-        val hitVec = bpValid.indices.map(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
+        val hitVec = bpValid.indices.map(k => psrc(i)(j) === bpPdest(k) && bpValid(k) && (srcType(i)(j)===SrcType.reg && bprfWen(k) && bpPdest(k) =/= 0.U || srcType(i)(j)===SrcType.fp && bpfpWen(k)))
         val hitVecNext = hitVec.map(RegNext(_))
         val hit = ParallelOR(hitVec).asBool
         when (validQue(i) && !srcRdyVec(i)(j) && hit) {
@@ -333,7 +336,7 @@ class ReservationStation
     val enqPsrc = List(enqCtrl.bits.psrc1, enqCtrl.bits.psrc2, enqCtrl.bits.psrc3)
     val enqSrcType = List(enqCtrl.bits.ctrl.src1Type, enqCtrl.bits.ctrl.src2Type, enqCtrl.bits.ctrl.src3Type)
     for (i <- 0 until srcListenNum) {
-      val hitVec = bpValid.indices.map(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
+      val hitVec = bpValid.indices.map(j => enqPsrc(i)===bpPdest(j) && bpValid(j) && (enqSrcType(i)===SrcType.reg && bprfWen(j) && bpPdest(j) =/= 0.U || enqSrcType(i)===SrcType.fp && bpfpWen(j)))
       val hitVecNext = hitVec.map(RegNext(_))
       val hit = ParallelOR(hitVec).asBool
       when (enqFire && hit && !enqSrcRdy(i)) {

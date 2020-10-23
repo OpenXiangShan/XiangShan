@@ -60,6 +60,8 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
     // watch prober's write back requests
     val probe_wb_req = Flipped(ValidIO(new WritebackReq(edge.bundle.sourceBits)))
+
+    val probe_active = Flipped(ValidIO(UInt()))
   })
 
   // MSHR:
@@ -70,7 +72,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
   // 5. wait for client's finish
   // 6. update meta data
   // 7. done
-  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_wb_req :: s_wb_resp :: s_refill_req :: s_refill_resp :: s_data_write_req :: s_mem_finish :: s_send_resp :: s_client_finish :: s_meta_write_req :: Nil = Enum(13)
+  val s_invalid :: s_meta_read_req :: s_meta_read_resp :: s_decide_next_state :: s_refill_req :: s_refill_resp :: s_mem_finish :: s_wait_probe_exit :: s_send_resp :: s_wb_req :: s_wb_resp :: s_data_write_req :: s_meta_write_req :: s_client_finish :: Nil = Enum(14)
 
   val state = RegInit(s_invalid)
 
@@ -332,7 +334,14 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
 
     when (io.mem_finish.fire()) {
       grantack.valid := false.B
+      state := s_wait_probe_exit
+    }
+  }
 
+  when (state === s_wait_probe_exit) {
+    // we only wait for probe, when prober is manipulating our set
+    val should_wait_for_probe_exit = io.probe_active.valid && io.probe_active.bits === req_idx
+    when (!should_wait_for_probe_exit) {
       // no data
       when (early_response) {
         // load miss respond right after finishing tilelink transactions
@@ -359,10 +368,12 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
     }
   }
 
+
   // during refill, probe may step in, it may release our blocks
   // if it releases the block we are trying to acquire, we don't care, since we will get it back eventually
   // but we need to know whether it releases the block we are trying to evict
-  val prober_writeback_our_block = (state === s_refill_req || state === s_refill_resp) &&
+  val prober_writeback_our_block = (state === s_refill_req || state === s_refill_resp ||
+    state === s_mem_finish || state === s_wait_probe_exit || state === s_send_resp || state === s_wb_req) &&
     io.probe_wb_req.valid && !io.probe_wb_req.bits.voluntary &&
     io.probe_wb_req.bits.tag === req_old_meta.tag &&
     io.probe_wb_req.bits.idx === req_idx &&
@@ -475,6 +486,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     val wb_resp     = Input(Bool())
 
     val probe_wb_req = Flipped(ValidIO(new WritebackReq(edge.bundle.sourceBits)))
+    val probe_active = Flipped(ValidIO(UInt()))
 
     val inflight_req_idxes       = Output(Vec(cfg.nMissEntries, Valid(UInt())))
     val inflight_req_block_addrs = Output(Vec(cfg.nMissEntries, Valid(UInt())))
@@ -527,6 +539,7 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     wb_req_arb.io.in(i)     <>  entry.io.wb_req
     entry.io.wb_resp        :=  io.wb_resp
     entry.io.probe_wb_req   <>  io.probe_wb_req
+    entry.io.probe_active   <>  io.probe_active
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare

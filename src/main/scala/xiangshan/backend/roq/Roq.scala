@@ -123,7 +123,8 @@ class Roq extends XSModule {
 
   val deqUop = microOp(deqPtr)
   val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
-  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec // TODO: wanna check why has hasCsr(hasNoSpec)
+  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec &&
+    deqUop.ctrl.commitType =/= CommitType.STORE && deqUop.ctrl.commitType =/= CommitType.LOAD// TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
   io.redirect := DontCare

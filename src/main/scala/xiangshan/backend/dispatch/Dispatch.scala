@@ -38,13 +38,13 @@ class Dispatch extends XSModule {
     val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
-    val readFpRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
+    val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
-    val fpPregRdy = Vec(NRFpReadPorts - exuParameters.StuCnt, Input(Bool()))
+    val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
     // load + store reg status (busy/ready)
-    val intMemRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    val fpMemRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
+    val memIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
+    val memFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort))
     val intMemRegRdy = Vec(NRMemReadPorts, Input(Bool()))
     val fpMemRegRdy = Vec(exuParameters.StuCnt, Input(Bool()))
     // replay: set preg status to not ready
@@ -52,7 +52,7 @@ class Dispatch extends XSModule {
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.ExuCnt - exuParameters.LsExuCnt, Output(new ExuInput))
+    val enqIQData = Vec(exuParameters.ExuCnt, Output(new ExuInput))
   })
 
   val dispatch1 = Module(new Dispatch1)
@@ -140,8 +140,8 @@ class Dispatch extends XSModule {
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
   lsDispatch.io.fromDq <> lsDq.io.deq
-  lsDispatch.io.intRegAddr <> io.intMemRegAddr
-  lsDispatch.io.fpRegAddr <> io.fpMemRegAddr
+  lsDispatch.io.readIntRf <> io.memIntRf
+  lsDispatch.io.readFpRf <> io.memFpRf
   lsDispatch.io.intRegRdy <> io.intMemRegRdy
   lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
