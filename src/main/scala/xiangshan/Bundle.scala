@@ -5,6 +5,7 @@ import chisel3.util._
 import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
+import xiangshan.backend.roq.RoqPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
@@ -139,26 +140,6 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
-trait HasRoqIdx { this: HasXSParameter =>
-  val roqIdx = UInt(RoqIdxWidth.W)
-
-  def isAfter(thatIdx: UInt): Bool = {
-    Mux(
-      this.roqIdx.head(1) === thatIdx.head(1),
-      this.roqIdx.tail(1) > thatIdx.tail(1),
-      this.roqIdx.tail(1) < thatIdx.tail(1)
-    )
-  }
-
-  def isAfter[ T<: HasRoqIdx ](that: T): Bool = {
-    isAfter(that.roqIdx)
-  }
-
-  def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || this.isAfter(redirect.bits.roqIdx)) // TODO: need check by JiaWei
-  }
-}
-
 class PerfDebugInfo extends XSBundle {
   // val fetchTime = UInt(64.W)
   val renameTime = UInt(64.W)
@@ -169,15 +150,17 @@ class PerfDebugInfo extends XSBundle {
 }
 
 // CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl with HasRoqIdx {
+class MicroOp extends CfCtrl {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
+  val roqIdx = new RoqPtr
   val lsroqIdx = UInt(LsroqIdxWidth.W)
   val diffTestDebugLrScValid = Bool()
   val debugInfo = new PerfDebugInfo
 }
 
-class Redirect extends XSBundle with HasRoqIdx {
+class Redirect extends XSBundle {
+  val roqIdx = new RoqPtr
   val isException = Bool()
   val isMisPred = Bool()
   val isReplay = Bool()
@@ -234,7 +217,8 @@ class RoqCommit extends XSBundle {
   val isWalk = Bool()
 }
 
-class TlbFeedback extends XSBundle with HasRoqIdx{
+class TlbFeedback extends XSBundle {
+  val roqIdx = new RoqPtr
   val hit = Bool()
 }
 

@@ -6,6 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
+import xiangshan.backend.roq.RoqPtr
 
 case class DispatchParameters
 (
@@ -30,7 +31,7 @@ class Dispatch extends XSModule {
     // enq Roq
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
-    val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
     // enq Lsroq
     val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsroqIdx
