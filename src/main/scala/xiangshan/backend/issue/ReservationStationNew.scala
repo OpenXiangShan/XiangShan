@@ -4,7 +4,20 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.{Exu, ExuConfig}
+import java.rmi.registry.Registry
+import java.{util => ju}
 
+class SrcBundle extends XSBundle {
+  val src = UInt(PhyRegIdxWidth.W)
+  val state = SrcState()
+  val srctype = SrcType()
+  
+  def hit(uop: MicorOp) : Bool = {
+    (src === uop.pdest) && (state === SrcState.busy) &&
+    ((srctype === SrcType.reg && uop.ctrl.rfWen) ||
+     (srctype === SrcType.fp  && uop.ctrl.fpWen))
+  }
+}
 
 class ReservationStationNew
 (
@@ -52,64 +65,114 @@ class ReservationStationNew
 
   io <> DontCare
 
-  // TODO: wanna put state machine into ReservationEntry, but difficult to use if we do that, how?
-  val entries = (0 until iqSize).map{val entry = Module(new ReservationEntry); entry.io}
-  val tailPtr = RegInit(0.U((iqIdxWidth+1).W))
-  val idxQueue = RegInit(VecInit((0 until qsize).map(_.U(idxWidth.W))))
-  val emptyQueueTmp = VecInit(entries.map(_.state.empty))
-  val emptyQueue = (0 until iqSize).map(emptyQueueTmp(idxQueue(i))) // TODO: may have long latency
+  // GOAL: 
+  // 1. divide control part and data part
+  // 2. store control signal in sending RS and send out when after paticular cycles
+  // 3. one RS only have one paticular delay
+  // 4. remove the issue stage
+  // 5. support replay will cause one or two more latency for state machine change
+  //    so would not support replay in current edition.
+
+  // here is three logial part:
+  // control part: psrc(5.W)*3 srcState(1.W)*3 fuOpType/Latency(3.W) roqIdx
+  // data part: data(64.W)*3
+  // other part: lsroqIdx and many other signal in uop. may set them to control part(close to dispatch)
+
+  // control part:
+  val validQueue    = RegInit(VecInit(Seq.fill(false.B)))
+  val srcQueue      = RegInit(Vec(iqSize, Seq.fill(srcNum)(new SrcBundle)))
+
+  // data part:
+  val data          = Reg(Vec(iqSize, Seq.fill(3/*srcNum*/)(UInt(XLEN.W))))
+
+  // other part:
+  val uop           = Reg(Vec(iqSize, new MicroOp))
+
+  // rs queue part:
+  val tailPtr       = RegInit(0.U(idxWidth+1).W)
+  val idxQueue      = RegInit(VecInit((0 until iqSize).map(_.U(idxWidth.W))))
+  val readyQueue    = srcState.map(_.andR).zip(validQueue).map(_&_)
 
   // real deq
-  
-  // TODO: can we apply multi-in multi-out style? 
-  val (firstBubble, findBubble) = PriorityEncoderWithFlag(emptyQueue)
-  val realDeqIdx = firstBubble
-  val realDeqValid = (firstBubble < tailPtr) && findBubble
+  // TODO: 
+  val (firstBubble, findBubble) = PriorityEncoderWithFlag(validQueue.map(!_))
+  val (firstReady, findReady) = PriorityEncoderWithFlag(validQueue)
+  val deqIdx = Mux(findBubble, firstBubble, findReady)
+  val deqValid = ((firstBubble < tailPtr) && findBubble) || ((firstReady < tailPtr) && findReady)
   val moveMask = {
-    (Fill(qsize, 1.U(1.W)) << realDeqIdx)(qsize-1, 0)
-  } & Fill(qsize, realDeqValid)
+    (Fill(iqSize, 1.U(1.W)) << deqIdx)(qsize-1, 0)
+  } & Fill(iqSize, deqValid)
 
   for(i <- 0 until qsize-1){
     when(moveMask(i)){
-      idxQueue(i) := idxQueue(i+1)
+      idxQueue(i)   := idxQueue(i+1)
+      srcQueue(i)   := srcQueue(i+1)
+      validQueue(i) := validQueue(i+1)
     }
   }
   when(realDeqValid){
     idxQueue.last := idxQueue(realDeqIdx)
+    validQueue.last := false.B
   }
 
   // wakeup and bypass and flush
+  // data update and control update
+  // bypass update and wakeup update -> wakeup method and bypass method may not be ok
+  // for ld/st, still need send to control part, long latency
+  def wakeup(src: SrcState) : (Bool, UInt) = {
+    val hitVec = extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
+    assert(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U)
+    
+    val hit = hitVec.orR
+    (Mux(hit, ParallelMux(hitVec zip extraListenPorts.map(_.data)))
+  }
+
+  def bypass(src: SrcState) : (Bool, Bool, UInt) = {
+    val hitVec = broadcastedUops.map(port => src.hit(port.bits) && port.valid)
+    assert(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U)
+
+    val hit = hitVec.orR
+    (Mux(hit, RegNext(hit), ParallelMux(RegNext(hitVec) zip writeBackedData))
+  }
+  
   for (i <- 0 until iqSize) {
-    entries(i).bypassUops := io.boradcastedUops
-    entries(i).bypassData := io.writeBackedData
-    entries(i).wakeup     := io.extraListenPorts
-    entries(i).redirect   := io.redirect
+    for (j <- 0 until srcNum) {
+      val (wuHit, wuData) = wakeup(srcQueue(i)(j))
+      val (bpHit, bpHitReg, bpData) = bypass(srcQueue(i)(j))
+      assert(!(bpHit && wuHit))
+      assert(!(bpHitReg && wuHit))
+
+      when (wuHit || bpHit) { srcQueue(i)(j).srcState := SrcState.rdy }
+      when (wuHit) { data(idxQueue(i))(j) := wuData }
+      when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
+      // NOTE: can not use Mem/Sram to store data, for multi-read/multi-write
+    }
   }
 
   // select
-  val rdyQueue = entries.map(_.state.ready)
   val selectedIdxRegOH = Wire(UInt(qsize.W))
   val selectMask = WireInit(VecInit(
     (0 until qsize).map(i =>
-      rdyQueue(i) && !(selectedIdxRegOH(i) && io.deq.fire()) // TODO: read it
+      readyQueue(i) && !(selectedIdxRegOH(i) && io.deq.fire()) // TODO: read it
     )
   ))
-  val (selectedIdxWire, sel) = PriorityEncoderWithFlag(selectMask)
-  val selReg = RegNext(sel)
+  val (selectedIdxWire, selected) = PriorityEncoderWithFlag(selectMask)
+  val selReg = RegNext(selected)
   val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
-  
+
   // fake deq
   // TODO: add fake deq later
   // TODO: add deq: may have one more latency, but for replay later.
   // TODO: may change to another way to deq and select, for there is no Vec, but Seq, change to multi-in multi-out
-  io.deq.valid := rdyQueue(selectedIdxReg) && selReg // TODO: read it and add assert for rdyQueue
-  io.deq.bits.uop := entries(0).io.out.uop
-  for (i <- 0 until iqSize) {
-    when (idxQueue(selectedIdxReg)===i.U) {
-      io.deq.bits.uop := entries(i).out.uop
-    }
-  }
+  io.deq.valid := readyQueue(selectedIdxReg) && selReg // TODO: read it and add assert for rdyQueue
+  io.deq.bits.uop := uop(idxQueue(selectedIdxReg))
+  io.deq.bits.uop.src1 := data(selectedIdxReg)(0)
+  if(srcNum > 1) { io.deq.bits.uop.src2 := data(selectedIdxReg)(1) }
+  if(srcNum > 2) { io.deq.bits.uop.src3 := data(selectedIdxReg)(2) } // TODO: beautify it
+  io.deq.bits.uop.src1State := srcQueue(selectedIdxReg)(0).state
+  if(srcNum > 1) { io.deq.bits.uop.src2State := srcQueue(selectedIdxReg)(1).state }
+  if(srcNum > 2) { io.deq.bits.uop.src3State := srcQueue(selectedIdxReg)(2).state }
 
   // enq
   val tailAfterRealDeq = tailPtr - moveMask(tailPtr.tail(1))
