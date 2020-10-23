@@ -1,10 +1,8 @@
 package xiangshan.backend
 
-import bus.simplebus.SimpleBusUC
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-import noop.MemMMUIO
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.Rename
@@ -16,7 +14,7 @@ import xiangshan.backend.issue.{IssueQueue, ReservationStation}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
-import utils.ParallelOR
+import utils._
 
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
@@ -27,7 +25,7 @@ class Backend extends XSModule
     val frontend = Flipped(new FrontendToBackendIO)
     val mem = Flipped(new MemToBackendIO)
   })
-
+  val timer = GTimer()
 
   val aluExeUnits =Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JmpExeUnit)
@@ -37,9 +35,12 @@ class Backend extends XSModule
   // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
   // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
-  exeUnits.foreach(_.io.exception := DontCare)
-  exeUnits.foreach(_.io.dmem := DontCare)
-  exeUnits.foreach(_.io.mcommit := DontCare)
+  exeUnits.foreach(exe => {
+    exe.io.exception := DontCare
+    exe.io.dmem := DontCare
+    exe.io.mcommit := DontCare
+    exe.io.in.bits.uop.debugInfo.issueTime := timer
+  })
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
@@ -190,7 +191,7 @@ class Backend extends XSModule
     x.valid := y.io.out.fire() && y.io.out.bits.redirectValid
   }
   decode.io.brTags <> brq.io.brTags
-  decBuf.io.isWalking := ParallelOR(roq.io.commits.map(c => c.valid && c.bits.isWalk)) // TODO: opt this
+  decBuf.io.isWalking := Cat(roq.io.commits.map(c => c.valid && c.bits.isWalk)).orR // TODO: opt this
   decBuf.io.redirect <> redirect
   decBuf.io.in <> decode.io.out
 
@@ -204,10 +205,12 @@ class Backend extends XSModule
   rename.io.replayPregReq <> dispatch.io.replayPregReq
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
+  dispatch.io.fromRename.foreach(_.bits.debugInfo.renameTime := timer)
 
   roq.io.memRedirect <> io.mem.replayAll
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
+  roq.io.dp1Req.foreach(_.bits.debugInfo.dispatchTime := timer)
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
   dispatch.io.lsroqIdxs <> io.mem.lsroqIdxs
@@ -242,7 +245,22 @@ class Backend extends XSModule
 
   roq.io.exeWbResults.take(exeWbReqs.length).zip(wbu.io.toRoq).foreach(x => x._1 := x._2)
   roq.io.exeWbResults.last := brq.io.out
+  roq.io.exeWbResults.foreach(_.bits.uop.debugInfo.writebackTime := timer)
 
+  val commitTime = timer
+  val renameToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.renameTime, 0.U)).reduce(_ + _)
+  val dispatchToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.dispatchTime, 0.U)).reduce(_ + _)
+  val issueToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.issueTime, 0.U)).reduce(_ + _)
+  val writebackToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.writebackTime, 0.U)).reduce(_ + _)
+  val loadDispatchToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.LOAD, timer - c.bits.uop.debugInfo.renameTime, 0.U)).reduce(_ + _)
+  val storeDispatchToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE, timer - c.bits.uop.debugInfo.renameTime, 0.U)).reduce(_ + _)
+
+  XSPerf("renameToCommit", renameToCommit)
+  XSPerf("dispatchToCommit", dispatchToCommit)
+  XSPerf("issueToCommit", issueToCommit)
+  XSPerf("writebackToCommit", writebackToCommit)
+  XSPerf("loadDispatchToCommit", loadDispatchToCommit)
+  XSPerf("storeDispatchToCommit", storeDispatchToCommit)
 
   // TODO: Remove sink and source
   val tmp = WireInit(0.U)

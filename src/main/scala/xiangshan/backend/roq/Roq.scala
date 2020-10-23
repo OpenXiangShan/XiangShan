@@ -65,7 +65,6 @@ class Roq extends XSModule {
 
     when(io.dp1Req(i).fire()){
       microOp(roqIdx) := io.dp1Req(i).bits
-      microOp(roqIdx).debugInfo.inRoqTime := timer
       valid(roqIdx) := true.B
       flag(roqIdx) := roqIdxExt.head(1).asBool()
       writebacked(roqIdx) := false.B
@@ -96,7 +95,6 @@ class Roq extends XSModule {
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
-      microOp(wbIdx).debugInfo.writebackTime := timer
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
@@ -185,6 +183,17 @@ class Roq extends XSModule {
           commitUop.old_pdest,
           exuData(commitIdx)
         )
+        when (io.commits(i).valid) {
+          printf(
+            "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x\n",
+            commitUop.cf.pc,
+            commitUop.ctrl.rfWen,
+            commitUop.ctrl.ldest,
+            commitUop.pdest,
+            commitUop.old_pdest,
+            exuData(commitIdx)
+          )
+        }
         XSInfo(io.commits(i).valid && exuDebug(commitIdx).isMMIO,
           "difftest skiped pc0x%x\n",
           commitUop.cf.pc
@@ -306,6 +315,8 @@ class Roq extends XSModule {
 
   XSPerf("utilization", PopCount(valid))
   XSPerf("commitInstr", PopCount(io.commits.map(c => c.valid && !c.bits.isWalk)))
+  XSPerf("commitInstrLoad", PopCount(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.LOAD)))
+  XSPerf("commitInstrStore", PopCount(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE)))
   XSPerf("writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
   XSPerf("enqInstr", PopCount(io.dp1Req.map(_.fire())))
   XSPerf("walkInstr", PopCount(io.commits.map(c => c.valid && c.bits.isWalk)))
