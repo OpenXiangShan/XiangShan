@@ -230,6 +230,7 @@ class MissEntry(edge: TLEdgeOut) extends DCacheModule
         when (req.cmd === M_XRD) {
           // normal read
           // read hit, no need to update meta
+          new_coh   := old_coh
           new_state := s_send_resp
         } .otherwise {
           assert(isWrite(req.cmd))
