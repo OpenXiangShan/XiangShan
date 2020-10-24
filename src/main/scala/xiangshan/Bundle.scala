@@ -6,6 +6,7 @@ import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.mem.LqPtr
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
@@ -152,7 +153,7 @@ trait HasLSIdx { this: HasXSParameter =>
   val lsroqIdx = UInt(LsroqIdxWidth.W)
   // } else {
   // Separate LSQ
-  val lqIdx = UInt(LoadQueueIdxWidth.W)
+  val lqIdx = new LqPtr
   val sqIdx = UInt(StoreQueueIdxWidth.W)
   val instIsLoad = Bool()
   // }
