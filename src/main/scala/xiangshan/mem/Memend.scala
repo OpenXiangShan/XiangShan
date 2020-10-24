@@ -61,7 +61,7 @@ class LoadForwardQueryIO extends XSBundle {
 
   val lsroqIdx = Output(UInt(LsroqIdxWidth.W))
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
-  val sqIdx = Output(UInt(StoreQueueIdxWidth.W))
+  val sqIdx = Output(new SqPtr)
 }
 
 class MemToBackendIO extends XSBundle {

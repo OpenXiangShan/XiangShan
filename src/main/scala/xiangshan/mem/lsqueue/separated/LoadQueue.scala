@@ -11,11 +11,7 @@ import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
 
-class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) {
-  // def needFlush(redirect: Valid[Redirect]): Bool = {
-  //   redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || isAfter(this, redirect.bits.roqIdx))
-  // }
-}
+class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
 
 object LqPtr extends HasXSParameter {
   def apply(f: Bool, v: UInt): LqPtr = {
