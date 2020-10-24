@@ -95,11 +95,10 @@ disassemble-xv6:
 	cp $(XV6_HOME)/build/code.txt ./d-xv6.log
 
 
-P = 4
-SUITE = xiangshan.backend.exu.AluTest
+SUITE = cache.L2CacheTest
 
 unit-test:
-	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE) -P$(P)
+	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE)
 
 unit-test-all:
 	cd .. && mill XiangShan.test.test -P$(P)
