@@ -69,12 +69,15 @@ class Dispatch1 extends XSModule {
 
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSROQ
+    val commitType = Cat(isLs(i), isStore(i) | isFp(i))
+
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
-    io.toRoq(i).bits.ctrl.commitType := Cat(isLs(i), isStore(i) | isFp(i)) // TODO: add it to decode
+    io.toRoq(i).bits.ctrl.commitType := commitType
 
     io.toLsroq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !cancelled(i)
     io.toLsroq(i).bits := io.fromRename(i).bits
+    io.toLsroq(i).bits.ctrl.commitType := commitType
     io.toLsroq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
     // receive indexes from ROQ and LSROQ
@@ -100,8 +103,7 @@ class Dispatch1 extends XSModule {
     } else {
       uopWithIndex(i).lqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).lqIdx
       uopWithIndex(i).sqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).sqIdx
-      uopWithIndex(i).instIsLoad := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).instIsLoad
-      XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx} isLoad ${io.lsIdx(i).instIsLoad}\n")
+      XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx}\n")
     }
 
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
@@ -165,7 +167,7 @@ class Dispatch1 extends XSModule {
     }else{
       XSInfo(io.recv(i) && !cancelled(i),
         p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-          p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx} isLoad ${uopWithIndex(i).instIsLoad}" +
+          p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx}" +
           p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
     }
 

@@ -603,13 +603,12 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
     val lsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
     lsIdx.lqIdx := io.exception.bits.lqIdx
     lsIdx.sqIdx := io.exception.bits.sqIdx
-    lsIdx.instIsLoad := io.exception.bits.instIsLoad
     ExcitingUtils.addSource(lsIdx, "EXECPTION_LSROQIDX")
     val lqExceptionAddr = WireInit(0.U(VAddrBits.W))
     val sqExceptionAddr = WireInit(0.U(VAddrBits.W))
     ExcitingUtils.addSink(lqExceptionAddr, "EXECPTION_LOAD_VADDR")
     ExcitingUtils.addSink(sqExceptionAddr, "EXECPTION_STORE_VADDR")
-    lsroqExceptionAddr := Mux(io.exception.bits.instIsLoad, lqExceptionAddr, sqExceptionAddr)
+    lsroqExceptionAddr := Mux(CommitType.lsInstIsStore(io.exception.bits.ctrl.commitType), sqExceptionAddr, lqExceptionAddr)
   }
 
   val atomExceptionAddr = WireInit(0.U(VAddrBits.W))

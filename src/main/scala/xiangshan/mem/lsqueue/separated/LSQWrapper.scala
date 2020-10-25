@@ -122,14 +122,12 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     
     // fix valid, allocate lq / sq index
     (0 until RenameWidth).map(i => {
-      val isStore = LSUOpType.isStore(io.dp1Req(i).bits.ctrl.fuOpType)
+      val isStore = CommitType.lsInstIsStore(io.dp1Req(i).bits.ctrl.commitType)
       val prevCanIn = if (i == 0) true.B else Cat((0 until i).map(i => io.dp1Req(i).ready)).andR
       loadQueue.io.dp1Req(i).valid := !isStore && io.dp1Req(i).valid && prevCanIn
       storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid && prevCanIn
-      io.lsIdxs(i) := DontCare
       loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
       storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
-      io.lsIdxs(i).instIsLoad := !isStore
       io.dp1Req(i).ready := storeQueue.io.dp1Req(i).ready && loadQueue.io.dp1Req(i).ready
     })
   }

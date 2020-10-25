@@ -71,7 +71,6 @@ class Rename extends XSModule {
     uop.diffTestDebugLrScValid := DontCare
 
     uop.lsroqIdx := DontCare
-    uop.instIsLoad := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
   })

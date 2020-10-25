@@ -86,11 +86,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       // data(index).bwdMask := 0.U(8.W).asBools
     }
     val numTryEnqueue = offset +& io.dp1Req(i).valid
-    // if (i == 0) {
     io.dp1Req(i).ready := numTryEnqueue <= emptyEntries
-    // } else {
-    //   io.dp1Req(i).ready := ringBufferAllowin && !allocated(index)// && io.dp1Req(i - 1).ready
-    // }
     io.sqIdxs(i) := sqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }

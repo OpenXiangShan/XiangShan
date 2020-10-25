@@ -90,7 +90,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     }
     val numTryEnqueue = offset +& io.dp1Req(i).valid
     io.dp1Req(i).ready := numTryEnqueue <= emptyEntries
-
     io.lqIdxs(i) := lqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
