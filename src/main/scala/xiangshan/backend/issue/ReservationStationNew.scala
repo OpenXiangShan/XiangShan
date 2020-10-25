@@ -28,6 +28,19 @@ object SrcBundle {
     b.srctype := srctype
     b
   }
+  
+  def stateCheck(src: SrcBundle): UInt /*SrcState*/ = {
+    Mux( (src.srctype=/=SrcType.reg && src.srctype=/=SrcType.fp) ||               
+      (src.srctype===SrcType.reg && src.src===0.U), SrcState.rdy, src.state)
+  }
+
+  def check(src: UInt, state: UInt, srctype: UInt): SrcBundle = {
+    val b = Wire(new SrcBundle)
+    b.src := src
+    b.state := stateCheck(SrcBundle(src, state, srctype))
+    b.srctype := srctype
+    b
+  }
 }
 
 class BypassQueue(number: Int) extends XSModule {
@@ -230,11 +243,6 @@ class ReservationStationNew
   val tailAfterRealDeq = tailPtr - moveMask(tailPtr.tail(1))
   val isFull = tailAfterRealDeq.head(1).asBool() // tailPtr===qsize.U
   
-  def stateCheck(src: SrcBundle): UInt /*SrcState*/ = {
-    Mux( (src.srctype=/=SrcType.reg && src.srctype=/=SrcType.fp) ||               
-      (src.srctype===SrcType.reg && src.src===0.U), SrcState.rdy, src.state)
-  }
-
   io.enqCtrl.ready := !isFull && !io.redirect.valid // TODO: check this redirect && need more optimization
   when (io.enqCtrl.fire()) { 
     val enqUop = io.enqCtrl.bits
@@ -243,9 +251,7 @@ class ReservationStationNew
     val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
     val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
     for (i <- 0 until srcNum) { // TODO: add enq wakeup / bypass check
-      srcQueue(tailPtr.tail(1))(i).srctype := srcTypeSeq(i)
-      srcQueue(tailPtr.tail(1))(i).src     := srcSeq(i)
-      srcQueue(tailPtr.tail(1))(i).state   := stateCheck(SrcBundle(srcSeq(i), srcStateSeq(i), srcTypeSeq(i)))
+      srcQueue(tailPtr.tail(1))(i) := SrcBundle.check(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))
     }
   }
   when (RegNext(io.enqCtrl.fire())) {
@@ -262,4 +268,8 @@ class ReservationStationNew
 
   // log
   // TODO: add log
+  // XSDebug(p"In(${io.enqCtr.valid} ${io.enqCtr.ready}) Out(${io.deq.valid} ${io.deq.ready})
+  //    tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} 
+  //    isFull:${isFull}\n")
+  // XSDebug(io.enqCtrl.fire, "enqFire: "
 }
