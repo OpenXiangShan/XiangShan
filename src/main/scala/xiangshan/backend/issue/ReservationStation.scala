@@ -201,17 +201,17 @@ class ReservationStation
   // Redirect
   //-----------------------------------------
   // redirect enq
-  enqRedHit := io.redirect.valid && io.enqCtrl.bits.needFlush(io.redirect)
+  enqRedHit := io.redirect.valid && io.enqCtrl.bits.roqIdx.needFlush(io.redirect)
 
   // redirect issQue
-  val redHitVec = List.tabulate(iqSize)(i => issQue(i).uop.needFlush(io.redirect))
+  val redHitVec = List.tabulate(iqSize)(i => issQue(i).uop.roqIdx.needFlush(io.redirect))
   for (i <- validQue.indices) {
     when (redHitVec(i) && validQue(i)) {
       validQue(i) := false.B
     }
   }
   // reditect deq(issToExu)
-  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.needFlush(io.redirect))
+  val redIdHitVec = List.tabulate(iqSize)(i => issQue(idQue(i)).uop.roqIdx.needFlush(io.redirect))
   val selIsRed = ParallelOR((deqSelOH & VecInit(redIdHitVec).asUInt).asBools).asBool
 
   //-----------------------------------------
@@ -219,7 +219,7 @@ class ReservationStation
   //-----------------------------------------
   val issueToExu = Reg(new ExuInput)
   val issueToExuValid = RegInit(false.B)
-  val deqFlushHit = issueToExu.uop.needFlush(io.redirect)
+  val deqFlushHit = issueToExu.uop.roqIdx.needFlush(io.redirect)
   val deqCanIn = !issueToExuValid || io.deq.ready || deqFlushHit
   
   val toIssFire = deqCanIn && has1Rdy && !isPop && !selIsRed
@@ -259,7 +259,7 @@ class ReservationStation
   // send out directly without store the data
   val enqAlreadyRdy = if(src3Listen) { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1)&&enqSrcRdy(2) else enqSrcRdy(0)&&enqSrcRdy(2) } else  { if(src2Listen) enqSrcRdy(0)&&enqSrcRdy(1) else enqSrcRdy(0) }
   val enqALRdyNext = OneCycleFire(enqAlreadyRdy && enqFire)
-  val enqSendFlushHit = issQue(enqSelIqNext).uop.needFlush(io.redirect)
+  val enqSendFlushHit = issQue(enqSelIqNext).uop.roqIdx.needFlush(io.redirect)
   val enqSendEnable = if(fifo) { RegNext(tailAll===0.U) && enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } else { enqALRdyNext && (!issueToExuValid || deqFlushHit) && (enqSelIqNext === deqSelIq) && !isPop && !enqSendFlushHit/* && has1Rdy*//* && io.deq.ready*/ } // FIXME: has1Rdy has combination loop
   when (enqSendEnable) {
     io.deq.valid := true.B
@@ -293,7 +293,9 @@ class ReservationStation
         }
         // XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "WakeUp: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b Data:%x\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt, data)
         for (k <- cdbValid.indices) {
-          XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k), "WakeUpHit: IQIdx:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", i.U, j.U, psrc(i)(j), k.U, cdbData(k), io.wakeUpPorts(k).bits.uop.cf.pc, io.wakeUpPorts(k).bits.uop.roqIdx)
+          XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k),
+            "WakeUpHit: IQIdx:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n",
+            i.U, j.U, psrc(i)(j), k.U, cdbData(k), io.wakeUpPorts(k).bits.uop.cf.pc, io.wakeUpPorts(k).bits.uop.roqIdx.asUInt)
         }
       }
     }
@@ -317,13 +319,15 @@ class ReservationStation
         }
         // XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit, "BypassCtrl: Sel:%d Src:(%d|%d) Rdy:%d Hit:%d HitVec:%b\n", i.U, j.U, psrc(i)(j), srcRdyVec(i)(j), hit, VecInit(hitVec).asUInt)
         for (k <- bpValid.indices) {
-          XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k), "BypassCtrlHit: IQIdx:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n", i.U, j.U, psrc(i)(j), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+          XSDebug(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k),
+            "BypassCtrlHit: IQIdx:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n",
+            i.U, j.U, psrc(i)(j), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx.asUInt)
         }
         // XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit), "BypassData: Sel:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", i.U, j.U, psrc(i)(j), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
         for (k <- bpValid.indices) {
           XSDebug(RegNext(validQue(i) && !srcRdyVec(i)(j) && hit && hitVec(k)),
             "BypassDataHit: IQIdx:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n",
-            i.U, j.U, psrc(i)(j), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+            i.U, j.U, psrc(i)(j), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx.asUInt)
         }
       }
     }
@@ -344,11 +348,15 @@ class ReservationStation
       }
       // XSDebug(enqFire && hit, "EnqBypassCtrl: enqSelIq:%d Src:(%d|%d) Hit:%d HitVec:%b \n", enqSelIq, i.U, enqPsrc(i), hit, VecInit(hitVec).asUInt)
       for (k <- bpValid.indices) {
-        XSDebug(enqFire && hit && !enqSrcRdy(i) && hitVec(k), "EnqBypassCtrlHit: enqSelIq:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+        XSDebug(enqFire && hit && !enqSrcRdy(i) && hitVec(k),
+          "EnqBypassCtrlHit: enqSelIq:%d Src%d:%d Ports:%d Pc:%x RoqIdx:%x\n",
+          enqSelIq, i.U, enqPsrc(i), k.U, io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx.asUInt)
       }
       // XSDebug(RegNext(enqFire && hit), "EnqBypassData: enqSelIqNext:%d Src:(%d|%d) HitVecNext:%b Data:%x (for last cycle's Ctrl)\n", enqSelIqNext, i.U, enqPsrc(i), VecInit(hitVecNext).asUInt, ParallelMux(hitVecNext zip bpData))
       for (k <- bpValid.indices) {
-        XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)), "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n", enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx)
+        XSDebug(RegNext(enqFire && hit && !enqSrcRdy(i) && hitVec(k)),
+          "EnqBypassDataHit: enqSelIq:%d Src%d:%d Ports:%d Data:%x Pc:%x RoqIdx:%x\n",
+          enqSelIq, i.U, enqPsrc(i), k.U, bpData(k), io.bypassUops(k).bits.cf.pc, io.bypassUops(k).bits.roqIdx.asUInt)
       }
     }
   
@@ -364,12 +372,23 @@ class ReservationStation
     sel.bits.ctrl.fpWen := issQue(deqSelIq).uop.ctrl.fpWen
   }
   XSInfo(io.redirect.valid, "Redirect: valid:%d isExp:%d isFpp:%d brTag:%d redHitVec:%b redIdHitVec:%b enqHit:%d selIsRed:%d\n", io.redirect.valid, io.redirect.bits.isException, io.redirect.bits.isFlushPipe, io.redirect.bits.brTag.value, VecInit(redHitVec).asUInt, VecInit(redIdHitVec).asUInt, enqRedHit, selIsRed)
-  XSInfo(enqFire, s"EnqCtrl(%d %d) enqSelIq:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n", io.enqCtrl.valid, io.enqCtrl.ready, enqSelIq
-    , io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State, io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State, io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx)
-  XSInfo(enqFireNext, "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n", io.enqData.src1, io.enqData.src2, io.enqData.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx)
-  XSInfo(deqFire, "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n", io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3, io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx)
+  XSInfo(enqFire,
+    s"EnqCtrl(%d %d) enqSelIq:%d Psrc/Rdy(%d:%d %d:%d %d:%d) Dest:%d oldDest:%d pc:%x roqIdx:%x\n",
+    io.enqCtrl.valid, io.enqCtrl.ready, enqSelIq, io.enqCtrl.bits.psrc1, io.enqCtrl.bits.src1State,
+    io.enqCtrl.bits.psrc2, io.enqCtrl.bits.src2State, io.enqCtrl.bits.psrc3, io.enqCtrl.bits.src3State,
+    io.enqCtrl.bits.pdest, io.enqCtrl.bits.old_pdest, io.enqCtrl.bits.cf.pc, io.enqCtrl.bits.roqIdx.asUInt)
+  XSInfo(enqFireNext,
+    "EnqData: src1:%x src2:%x src3:%x pc:%x roqIdx:%x(for last cycle's Ctrl)\n",
+    io.enqData.src1, io.enqData.src2, io.enqData.src3, issQue(enqSelIqNext).uop.cf.pc, issQue(enqSelIqNext).uop.roqIdx.asUInt)
+  XSInfo(deqFire,
+    "Deq:(%d %d) [%d|%x][%d|%x][%d|%x] pdest:%d pc:%x roqIdx:%x\n",
+    io.deq.valid, io.deq.ready, io.deq.bits.uop.psrc1, io.deq.bits.src1, io.deq.bits.uop.psrc2, io.deq.bits.src2, io.deq.bits.uop.psrc3,
+    io.deq.bits.src3, io.deq.bits.uop.pdest, io.deq.bits.uop.cf.pc, io.deq.bits.uop.roqIdx.asUInt)
   XSDebug("tailAll:%d KID(%d%d%d) tailDot:%b tailDot2:%b selDot:%b popDot:%b moveDot:%b In(%d %d) Out(%d %d)\n", tailAll, tailKeep, tailInc, tailDec, tailDot, tailDot2, selDot, popDot, moveDot, io.enqCtrl.valid, io.enqCtrl.ready, io.deq.valid, io.deq.ready)
-  XSInfo(issueToExuValid, "FireStage:Out(%d %d) src1(%d|%x) src2(%d|%x) src3(%d|%x) deqFlush:%d pc:%x roqIdx:%d\n", io.deq.valid, io.deq.ready, issueToExu.uop.psrc1, issueToExu.src1, issueToExu.uop.psrc2, issueToExu.src2, issueToExu.uop.psrc3, issueToExu.src3, deqFlushHit, issueToExu.uop.cf.pc, issueToExu.uop.roqIdx)
+  XSInfo(issueToExuValid,
+    "FireStage:Out(%d %d) src1(%d|%x) src2(%d|%x) src3(%d|%x) deqFlush:%d pc:%x roqIdx:%d\n",
+    io.deq.valid, io.deq.ready, issueToExu.uop.psrc1, issueToExu.src1, issueToExu.uop.psrc2, issueToExu.src2, issueToExu.uop.psrc3, issueToExu.src3,
+    deqFlushHit, issueToExu.uop.cf.pc, issueToExu.uop.roqIdx.asUInt)
   if(enableBypass) {
     XSDebug("popOne:%d isPop:%d popSel:%d deqSel:%d deqCanIn:%d toIssFire:%d has1Rdy:%d selIsRed:%d nonValid:%b SelUop:(%d, %d)\n", popOne, isPop, popSel, deqSel, deqCanIn, toIssFire, has1Rdy, selIsRed, nonValid, io.selectedUop.valid, io.selectedUop.bits.pdest)
   } else {
@@ -396,7 +415,7 @@ class ReservationStation
         srcData(idQue(i))(2),
         issQue(idQue(i)).uop.brTag.value,
         issQue(idQue(i)).uop.cf.pc,
-        issQue(idQue(i)).uop.roqIdx
+        issQue(idQue(i)).uop.roqIdx.asUInt
       )
     }.otherwise {
       XSDebug("%d |%d|%d| %d|%b|%x| %d|%b|%x| %d|%b|%x| %x |%x|%x\n",
@@ -414,7 +433,7 @@ class ReservationStation
         srcData(idQue(i))(2),
         issQue(idQue(i)).uop.brTag.value,
         issQue(idQue(i)).uop.cf.pc,
-        issQue(idQue(i)).uop.roqIdx
+        issQue(idQue(i)).uop.roqIdx.asUInt
       )
     }
   }
