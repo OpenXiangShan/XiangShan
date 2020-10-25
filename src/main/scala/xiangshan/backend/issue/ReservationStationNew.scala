@@ -18,6 +18,10 @@ class SrcBundle extends XSBundle {
     ((srctype === SrcType.reg && uop.ctrl.rfWen && src=/=0.U) ||
      (srctype === SrcType.fp  && uop.ctrl.fpWen)) // TODO: check if zero map to zero when rename
   }
+
+  override def toPrintable: Printable = {
+    p"src:${src} state:${state} type:${srctype}"
+  }
 }
 
 object SrcBundle {
@@ -193,6 +197,9 @@ class ReservationStationNew
       assert(!(bpHit && wuHit))
       assert(!(bpHitReg && wuHit))
 
+      XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${idxQueue(i)}\n")
+      XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) Ctrl idx:${idxQueue(i)}\n")
+      XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${idxQueue(i)}\n")
       when (wuHit || bpHit) { srcQueue(i)(j).state := SrcState.rdy }
       when (wuHit) { data(idxQueue(i))(j) := wuData }
       when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
@@ -253,12 +260,14 @@ class ReservationStationNew
     for (i <- 0 until srcNum) { // TODO: add enq wakeup / bypass check
       srcQueue(tailPtr.tail(1))(i) := SrcBundle.check(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))
     }
+    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcTypeSeq(0)}state:${srcStateSeq(0)}type:${srcTypeSeq(0)} src2:${srcTypeSeq(1)}state:${srcStateSeq(1)}type:${srcTypeSeq(1)} src3:${srcTypeSeq(2)}state:${srcStateSeq(2)}type:${srcTypeSeq(2)}\n")
   }
   when (RegNext(io.enqCtrl.fire())) {
     val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
     // data(RegNext(idxQueue(tailPtr.tail(1)))).zip.srcDataSeq.map{ case(a,b) => a := b }
-    val enqIdxNext = RegNext(idxQueue(tailPtr.tail(1)))
+    val enqIdxNext = RegNext(idxQueue(tailPtr.tail(1))) // TODO: add enq wakeup / bypass check
     for(i <- data(0).indices) { data(enqIdxNext)(i) := srcDataSeq(i) }
+    XSDebug(p"EnqDataFire: idx:${enqIdxNext} src1:0x${Hexadecimal(srcDataSeq(0))} src2:0x${Hexadecimal(srcDataSeq(1))} src3:0x${Hexadecimal(srcDataSeq(2))}\n")
   }
 
   tailPtr := tailAfterRealDeq + io.enqCtrl.fire()
@@ -268,8 +277,12 @@ class ReservationStationNew
 
   // log
   // TODO: add log
-  // XSDebug(p"In(${io.enqCtr.valid} ${io.enqCtr.ready}) Out(${io.deq.valid} ${io.deq.ready})
-  //    tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} 
-  //    isFull:${isFull}\n")
-  // XSDebug(io.enqCtrl.fire, "enqFire: "
+  XSDebug(p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull}\n")
+  XSDebug(p"SelMask:b${Binary(selectMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} selIdxReg:${selectedIdxReg} selReg:${selReg}\n")
+  XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)} fixedDelay:${fixedDelay.U}\n")
+  XSDebug(io.deq.fire, p"Deq: SelIdxReg:${selectedIdxReg} Idx:${idxQueue(selectedIdxReg)} roqIdx:${io.deq.bits.uop.roqIdx} src1:0x${Hexadecimal(io.deq.bits.src1)} src2:0x${io.deq.bits.src2} src3:0x${io.deq.bits.src3}\n")
+  XSDebug("  : IQ|src1 |src2 | src3| roqIdx|pc\n")
+  for(i <- 0 until iqSize) {
+    XSDebug(p"${i.U}: ${idxQueue(i)} |${srcQueue(i)(0)}|${srcQueue(i)(1)}|${srcQueue(i)(2)}|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
+  }
 }
