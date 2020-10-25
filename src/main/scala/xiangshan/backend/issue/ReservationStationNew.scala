@@ -238,9 +238,9 @@ class ReservationStationNew
   // TODO: may change to another way to deq and select, for there is no Vec, but Seq, change to multi-in multi-out
   io.deq.valid := readyQueue(selectedIdxReg) && selReg // TODO: read it and add assert for rdyQueue
   io.deq.bits.uop := uop(idxQueue(selectedIdxReg))
-  io.deq.bits.src1 := data(selectedIdxReg)(0)
-  if(srcNum > 1) { io.deq.bits.src2 := data(selectedIdxReg)(1) }
-  if(srcNum > 2) { io.deq.bits.src3 := data(selectedIdxReg)(2) } // TODO: beautify it
+  io.deq.bits.src1 := data(idxQueue(selectedIdxReg))(0)
+  if(srcNum > 1) { io.deq.bits.src2 := data(idxQueue(selectedIdxReg))(1) }
+  if(srcNum > 2) { io.deq.bits.src3 := data(idxQueue(selectedIdxReg))(2) } // TODO: beautify it
   // NOTE: srcState will only use in RS/IQ, so ignore it
   // io.deq.bits.uop.src1State := srcQueue(selectedIdxReg)(0).state
   // if(srcNum > 1) { io.deq.bits.uop.src2State := srcQueue(selectedIdxReg)(1).state }
