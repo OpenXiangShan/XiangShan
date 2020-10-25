@@ -32,7 +32,7 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
-    val oldestStore = Output(Valid(UInt(RoqIdxWidth.W)))
+    val oldestStore = Output(Valid(new RoqPtr))
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))

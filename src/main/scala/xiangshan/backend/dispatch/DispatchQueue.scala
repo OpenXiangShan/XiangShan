@@ -5,12 +5,12 @@ import chisel3.util._
 import utils._
 import xiangshan.backend.decode.SrcType
 import xiangshan._
-
+import xiangshan.backend.roq.RoqPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int, replayWidth: Int) extends XSBundle {
   val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
-  val dequeueRoqIndex = Input(Valid(UInt(RoqIdxWidth.W)))
+  val dequeueRoqIndex = Input(Valid(new RoqPtr))
   val redirect = Flipped(ValidIO(new Redirect))
   val replayPregReq = Output(Vec(replayWidth, new ReplayPregReq))
   val inReplayWalk = Output(Bool())
@@ -90,17 +90,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
 
   // commit: from s_dispatched to s_invalid
   val needDequeue = Wire(Vec(size, Bool()))
-  val deqRoqIdx = Wire(new XSBundle with HasRoqIdx)
-  deqRoqIdx.roqIdx := io.dequeueRoqIndex.bits
+  val deqRoqIdx = io.dequeueRoqIndex.bits
   for (i <- 0 until size) {
-    needDequeue(i) := stateEntries(i)  === s_dispatched && io.dequeueRoqIndex.valid && !uopEntries(i).isAfter(deqRoqIdx)
+    needDequeue(i) := stateEntries(i)  === s_dispatched && io.dequeueRoqIndex.valid && !isAfter(uopEntries(i).roqIdx, deqRoqIdx)
     when (needDequeue(i)) {
       stateEntries(i) := s_invalid
     }
 
     XSInfo(needDequeue(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
-      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx)} " +
-      p"left dispatch queue with deqRoqIndex 0x${Hexadecimal(io.dequeueRoqIndex.bits)}\n")
+      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx.asUInt)} " +
+      p"left dispatch queue with deqRoqIndex 0x${Hexadecimal(io.dequeueRoqIndex.bits.asUInt)}\n")
   }
 
   // redirect: cancel uops currently in the queue
@@ -118,8 +117,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     }
 
     XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
-      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx)} " +
-      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx)}\n")
+      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx.asUInt)} " +
+      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx.asUInt)}\n")
   }
 
   // replay: from s_dispatched to s_valid

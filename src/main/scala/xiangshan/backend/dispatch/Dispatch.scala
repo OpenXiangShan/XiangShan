@@ -36,7 +36,7 @@ class Dispatch extends XSModule {
     val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsIdx
     val lsIdxs = Input(Vec(RenameWidth, new LSIdx))
-    val dequeueRoqIndex = Input(Valid(UInt(RoqIdxWidth.W)))
+    val dequeueRoqIndex = Input(Valid(new RoqPtr))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))

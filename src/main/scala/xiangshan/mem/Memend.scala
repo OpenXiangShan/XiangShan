@@ -77,7 +77,7 @@ class MemToBackendIO extends XSBundle {
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
-  val oldestStore = Output(Valid(UInt(RoqIdxWidth.W)))
+  val oldestStore = Output(Valid(new RoqPtr))
   val roqDeqPtr = Input(new RoqPtr)
 }
 
