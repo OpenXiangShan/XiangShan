@@ -211,8 +211,8 @@ class Backend extends XSModule
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
-  dispatch.io.lsroqIdxs <> io.mem.lsroqIdxs
   dispatch.io.commits <> roq.io.commits
+  dispatch.io.lsIdxs <> io.mem.lsIdxs
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
