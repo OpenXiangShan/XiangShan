@@ -56,8 +56,8 @@ case class XSCoreParameters
   NRFpWritePorts: Int = 8, 
   EnableUnifiedLSQ: Boolean = false,
   LsroqSize: Int = 16,
-  LoadQueueSize: Int = 16,
-  StoreQueueSize: Int = 16,
+  LoadQueueSize: Int = 12,
+  StoreQueueSize: Int = 10,
   RoqSize: Int = 32,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
