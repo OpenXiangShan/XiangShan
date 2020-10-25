@@ -281,8 +281,8 @@ class ReservationStationNew
   XSDebug(p"SelMask:b${Binary(selectMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} selIdxReg:${selectedIdxReg} selReg:${selReg}\n")
   XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)} fixedDelay:${fixedDelay.U}\n")
   XSDebug(io.deq.fire, p"Deq: SelIdxReg:${selectedIdxReg} Idx:${idxQueue(selectedIdxReg)} roqIdx:${io.deq.bits.uop.roqIdx} src1:0x${Hexadecimal(io.deq.bits.src1)} src2:0x${io.deq.bits.src2} src3:0x${io.deq.bits.src3}\n")
-  XSDebug("  : IQ|src1 |src2 | src3| roqIdx|pc\n")
+  XSDebug("  : IQ|v|r| src1 |src2 | src3| roqIdx|pc\n")
   for(i <- 0 until iqSize) {
-    XSDebug(p"${i.U}: ${idxQueue(i)} |${srcQueue(i)(0)}|${srcQueue(i)(1)}|${srcQueue(i)(2)}|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
+    XSDebug(p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)}|${srcQueue(i)(1)}|${srcQueue(i)(2)}|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
   }
 }
