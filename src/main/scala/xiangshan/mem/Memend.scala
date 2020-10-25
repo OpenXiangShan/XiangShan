@@ -85,7 +85,7 @@ class MemToBackendIO extends XSBundle {
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheWordIO)
+    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
     val loadMiss = new DCacheLineIO
     val atomics  = new DCacheWordIO
     val sbufferToDcache = new DCacheLineIO

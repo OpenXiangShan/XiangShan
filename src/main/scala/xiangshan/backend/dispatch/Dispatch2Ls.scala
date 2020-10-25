@@ -10,8 +10,8 @@ import xiangshan.backend.exu._
 class Dispatch2Ls extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
-    val readFpRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
+    val readIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
+    val readFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort))
     // val intRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     // val fpRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val intRegRdy = Vec(NRMemReadPorts, Input(Bool()))
@@ -120,7 +120,7 @@ class Dispatch2Ls extends XSModule {
     */
   val uopReg = Reg(Vec(exuParameters.LsExuCnt, new MicroOp))
   val dataValidRegDebug = Reg(Vec(exuParameters.LsExuCnt, Bool()))
-  for (i <- 0 until exuParameters.IntExuCnt) {
+  for (i <- 0 until exuParameters.LsExuCnt) {
     uopReg(i) := io.enqIQCtrl(i).bits
     dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
 

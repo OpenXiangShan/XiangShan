@@ -469,7 +469,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   io.uncache.req.bits.meta.replay   := false.B
 
   io.uncache.resp.ready := true.B
-  io.uncache.s1_kill := false.B
 
   when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B

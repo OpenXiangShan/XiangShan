@@ -318,8 +318,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     "MMIO requests should not go to cache")
   assert(!(atomicsReq.fire() && atomicsReq.bits.meta.tlb_miss),
     "TLB missed requests should not go to cache")
-  assert(!io.lsu.atomics.s1_kill, "Lsroq should never use s1 kill on atomics")
-
 
   //----------------------------------------
   // miss queue

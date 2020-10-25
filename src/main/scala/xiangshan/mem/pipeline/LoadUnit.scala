@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.cache._
+// import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
 
 class LoadToLsroqIO extends XSBundle {
@@ -20,8 +21,8 @@ class LoadUnit_S0 extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val dtlb = Valid(new TlbReq)
-    val dcache = DecoupledIO(new DCacheLoadReq)
+    val dtlbReq = Valid(new TlbReq)
+    val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
 
   val s0_uop = io.in.bits.uop
@@ -29,18 +30,18 @@ class LoadUnit_S0 extends XSModule {
   val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
-  io.dtlb.valid := io.out.valid
-  io.dtlb.bits.vaddr := s0_vaddr
-  io.dtlb.bits.cmd := TlbCmd.read
-  io.dtlb.bits.roqIdx := s0_uop.roqIdx
-  io.dtlb.bits.debug.pc := s0_uop.cf.pc
-  io.dtlb.bits.debug.lsroqIdx := s0_uop.lsroqIdx
+  io.dtlbReq.valid := io.out.valid
+  io.dtlbReq.bits.vaddr := s0_vaddr
+  io.dtlbReq.bits.cmd := TlbCmd.read
+  io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
+  io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbReq.bits.debug.lsroqIdx := s0_uop.lsroqIdx
 
   // query DCache
-  io.dcache.valid := io.out.valid
-  io.dcache.bits.cmd  := MemoryOpConstants.M_XRD
-  io.dcache.bits.addr := s0_vaddr
-  io.dcache.bits.mask := s0_mask
+  io.dcacheReq.valid := io.out.valid
+  io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
+  io.dcacheReq.bits.addr := s0_vaddr
+  io.dcacheReq.bits.mask := s0_mask
 
   val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
@@ -68,18 +69,18 @@ class LoadUnit_S1 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dtlb = Valid(new TlbResp)
+    val dtlbResp = Flipped(Valid(new TlbResp))
     val forward = new LoadForwardQueryIO
     val s1_kill = Output(Bool())
-    val s1_paddr = Output(UInt(PAddBits.W))
+    val s1_paddr = Output(UInt(PAddrBits.W))
   })
 
   val s1_uop = io.in.bits.uop
-  val s1_tlb_miss = io.dtlb.resp.bits.miss
-  val s1_paddr = io.dtlb.resp.bits.paddr
+  val s1_tlb_miss = io.dtlbResp.bits.miss
+  val s1_paddr = io.dtlbResp.bits.paddr
   val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
 
-  io.dtlb.ready := io.out.ready
+  // io.dtlbResp.ready := io.out.ready
 
   io.tlbFeedback.valid := io.out.valid
   io.tlbFeedback.bits.hit := !s1_tlb_miss
@@ -102,7 +103,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
-  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlb.resp.bits.excp.pf.ld
+  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
   io.in.ready := io.out.ready || !io.in.valid
 
@@ -116,7 +117,7 @@ class LoadUnit_S2 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val dcache = Flipped(DecoupledIO(new DCacheWordResp))
+    val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadForwardQueryIO
   })
@@ -124,10 +125,10 @@ class LoadUnit_S2 extends XSModule {
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
-  val s2_cache_miss = io.dcache.resp.miss
+  val s2_cache_miss = io.dcacheResp.bits.miss
 
-  io.dcache.ready := true.B
-  assert(!(io.in.valid && !io.dcache.resp.valid), "DCache response got lost")
+  io.dcacheResp.ready := true.B
+  assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
 
   val forwardMask = WireInit(io.sbuffer.forwardMask)
   val forwardData = WireInit(io.sbuffer.forwardData)
@@ -142,7 +143,7 @@ class LoadUnit_S2 extends XSModule {
 
   // data merge
   val rdata = VecInit((0 until XLEN / 8).map(j => 
-    Mux(forwardMask(j), forwardData(j), io.dcache.resp.data(8*(j+1)-1, 8*j)))).asUInt
+    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j)))).asUInt
   val rdataSel = LookupTree(s2_paddr(2, 0), List(
     "b000".U -> rdata(63, 0),
     "b001".U -> rdata(63, 8),
@@ -181,7 +182,7 @@ class LoadUnit extends XSModule {
     val ldout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dcache = new DCacheWordIO
+    val dcache = new DCacheLoadIO
     val dtlb = new TlbRequestIO()
     val sbuffer = new LoadForwardQueryIO
     val lsroq = new LoadToLsroqIO
@@ -193,22 +194,22 @@ class LoadUnit extends XSModule {
 
   load_s0.io.in <> io.ldin
   load_s0.io.redirect <> io.redirect
-  load_s0.io.dtlb <> io.dtlb.req
-  load_s0.io.dcache <> io.dcache.req
+  load_s0.io.dtlbReq <> io.dtlb.req
+  load_s0.io.dcacheReq <> io.dcache.req
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire(), false.B)
 
-  io.dcache.req.bits.paddr := load_s1.io.out.bits.paddr
+  io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
   load_s1.io.tlbFeedback <> io.tlbFeedback
-  load_s1.io.dtlb <> io.dtlb.resp
+  load_s1.io.dtlbResp <> io.dtlb.resp
   io.sbuffer <> load_s1.io.forward
   io.lsroq.forward <> load_s1.io.forward
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire(), false.B)
 
   load_s2.io.redirect <> io.redirect
-  load_s2.io.dcache <> io.dcache.resp
+  load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.sbuffer.forwardMask := io.sbuffer.forwardMask
   load_s2.io.sbuffer.forwardData := io.sbuffer.forwardData
   load_s2.io.lsroq.forwardMask := io.lsroq.forward.forwardMask
