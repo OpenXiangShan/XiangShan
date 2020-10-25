@@ -68,10 +68,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // TODO: misc arbitor
 
   // Enqueue at dispatch
-  val validDispatch = VecInit((0 until RenameWidth).map(io.dp1Req(_).valid)).asUInt
+  val emptyEntries = StoreQueueSize.U - distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
-    val offset = if (i == 0) 0.U else PopCount(validDispatch(i - 1, 0))
+    val offset = if (i == 0) 0.U else PopCount((0 until i).map(io.dp1Req(_).valid))
     val sqIdx = ringBufferHeadExtended + offset
     val index = sqIdx.value
     when(io.dp1Req(i).fire()) {
@@ -85,11 +85,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       pending(index) := false.B
       // data(index).bwdMask := 0.U(8.W).asBools
     }
-    if (i == 0) {
-      io.dp1Req(i).ready := ringBufferAllowin && !allocated(index)
-    } else {
-      io.dp1Req(i).ready := ringBufferAllowin && !allocated(index) && io.dp1Req(i - 1).ready
-    }
+    val numTryEnqueue = offset +& io.dp1Req(i).valid
+    // if (i == 0) {
+    io.dp1Req(i).ready := numTryEnqueue <= emptyEntries
+    // } else {
+    //   io.dp1Req(i).ready := ringBufferAllowin && !allocated(index)// && io.dp1Req(i - 1).ready
+    // }
     io.sqIdxs(i) := sqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
@@ -391,7 +392,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     PrintFlag(allocated(i) && listening(i), "l")
     PrintFlag(allocated(i) && pending(i), "p")
     XSDebug(false, true.B, " ")
-    if (i % 4 == 3) XSDebug(false, true.B, "\n")
+    if (i % 4 == 3 || i == StoreQueueSize - 1) XSDebug(false, true.B, "\n")
   }
 
 }
