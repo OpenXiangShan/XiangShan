@@ -166,7 +166,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
     when (io.release.fire()) {
       data_req_cnt := data_req_cnt + 1.U
 
-      when (data_req_cnt === (refillCycles-1).U) {
+      val last_beat = Mux(should_writeback_data, data_req_cnt === (refillCycles-1).U, true.B)
+
+      when (last_beat) {
         state := Mux(req.voluntary, s_grant, s_resp)
       }
     }

@@ -6,6 +6,7 @@ import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
+import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem._
 import bus.simplebus._
 import xiangshan.backend.fu.HasCSRConst
@@ -62,11 +63,12 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   }
 }
 
-class comBundle extends TlbBundle with HasRoqIdx{
+class comBundle extends TlbBundle with HasCircularQueuePtrHelper{
+  val roqIdx = new RoqPtr
   val valid = Bool()
   val bits = new PtwReq
   def isPrior(that: comBundle): Bool = {
-    (this.valid && !that.valid) || (this.valid && that.valid && (that isAfter this))
+    (this.valid && !that.valid) || (this.valid && that.valid && isAfter(that.roqIdx, this.roqIdx))
   }
 }
 object Compare {
@@ -128,10 +130,10 @@ object TlbCmd {
 class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
-  val roqIdx = UInt(RoqIdxWidth.W)
+  val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
-    val lsroqIdx = UInt(LsroqIdxWidth.W)
+    val lsroqIdx = UInt(LsroqIdxWidth.W) // FIXME: need update
   }
 
   override def toPrintable: Printable = {
@@ -252,7 +254,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val state = RegInit(state_idle)
 
   ptw <> DontCare // TODO: need check it
-  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle
+  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle && !sfence.valid
   ptw.resp.ready := state===state_wait
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
@@ -314,6 +316,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // sfence (flush)
   when (sfence.valid) {
+    state := state_idle
+    ptw.req.valid := false.B
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid

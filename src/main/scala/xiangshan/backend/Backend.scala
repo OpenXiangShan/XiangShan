@@ -171,6 +171,7 @@ class Backend extends XSModule
     })
 
   io.mem.commits <> roq.io.commits
+  io.mem.roqDeqPtr := roq.io.roqDeqPtr
   io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
@@ -209,10 +210,11 @@ class Backend extends XSModule
   roq.io.dp1Req <> dispatch.io.toRoq
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
-  dispatch.io.lsroqIdxs <> io.mem.lsroqIdxs
+  dispatch.io.lsIdxs <> io.mem.lsIdxs
   dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.mem.oldestStore.valid
   // store writeback must be after commit roqIdx
   dispatch.io.dequeueRoqIndex.bits := Mux(io.mem.oldestStore.valid, io.mem.oldestStore.bits, roq.io.commitRoqIndex.bits)
+
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
