@@ -144,17 +144,22 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     SqPtr(startFlag ^ changeDirection, index)
   }
 
+  def selectFirstTwo(valid: Vec[Bool], startMask: UInt) = {
+    val selVec = Wire(Vec(2, UInt(log2Up(StoreQueueSize).W)))
+    val selValid = Wire(Vec(2, Bool()))
+    selVec(0) := getFirstOne(valid, startMask)
+    val firstSelMask = UIntToOH(selVec(0))
+    val secondSelVec = VecInit((0 until valid.length).map(i => valid(i) && !firstSelMask(i)))
+    selVec(1) := getFirstOne(secondSelVec, startMask)
+    selValid(0) := Cat(valid).orR
+    selValid(1) := Cat(secondSelVec).orR
+    (selValid, selVec)
+  }
+
   val storeWbSelVec = VecInit((0 until StoreQueueSize).map(i => {
     allocated(i) && valid(i) && !writebacked(i)
   }))
-  val storeWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(StoreQueueSize).W)))
-  val storeWbValid = Wire(Vec(StorePipelineWidth, Bool()))
-  storeWbSel(0) := getFirstOne(storeWbSelVec, tailMask)
-  val firstSelMask = UIntToOH(storeWbSel(0))
-  val secondWbSelVec = VecInit((0 until StoreQueueSize).map(i => storeWbSelVec(i) && !firstSelMask(i)))
-  storeWbSel(1) := getFirstOne(secondWbSelVec, tailMask)
-  storeWbValid(0) := Cat(storeWbSelVec).orR
-  storeWbValid(1) := Cat(secondWbSelVec).orR
+  val (storeWbValid, storeWbSel) = selectFirstTwo(storeWbSelVec, tailMask)
 
   (0 until StorePipelineWidth).map(i => {
     io.stout(i).bits.uop := uop(storeWbSel(i))
@@ -234,46 +239,24 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     })
   })
 
-  // CommitedStoreQueue is not necessary
-  // send commited store inst to sbuffer
-  // select up to 2 writebacked store insts
-  // scommitPending, scommitIn, scommitOut are for debug only
-  val commitedStoreQueue = Module(new MIMOQueue(
-    UInt(InnerStoreQueueIdxWidth.W),
-    entries = StoreQueueSize,
-    inCnt = 6,
-    outCnt = 2,
-    mem = false,
-    perf = true
-  ))
-
-  // // scommit counter for debugging
-  // val scommitPending = RegInit(0.U(log2Up(StoreQueueSize).W))
-  // val scommitIn = PopCount(VecInit(storeCommit).asUInt)
-  // val scommitOut = PopCount(VecInit((0 until 2).map(i => commitedStoreQueue.io.deq(i).fire())).asUInt)
-  // scommitPending := scommitPending + scommitIn - scommitOut
-
-  commitedStoreQueue.io.flush := false.B
-
-  // When store commited, mark it as commited (will not be influenced by redirect),
-  // then add store's sq ptr into commitedStoreQueue
   (0 until CommitWidth).map(i => {
     when(storeCommit(i)) {
       commited(mcommitIdx(i)) := true.B
       XSDebug("store commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
     }
-    commitedStoreQueue.io.enq(i).valid := storeCommit(i)
-    commitedStoreQueue.io.enq(i).bits := mcommitIdx(i)
-    // We assume commitedStoreQueue.io.enq(i).ready === true.B,
-    // for commitedStoreQueue.size = 64
   })
+
+  val storeCommitSelVec = VecInit((0 until StoreQueueSize).map(i => {
+    allocated(i) && commited(i)
+  }))
+  val (storeCommitValid, storeCommitSel) = selectFirstTwo(storeCommitSelVec, tailMask)
   
   // get no more than 2 commited store from storeCommitedQueue
   // send selected store inst to sbuffer
   (0 until 2).map(i => {
-    val ptr = commitedStoreQueue.io.deq(i).bits
+    val ptr = storeCommitSel(i)
     val mmio = data(ptr).mmio
-    io.sbuffer(i).valid := commitedStoreQueue.io.deq(i).valid && !mmio
+    io.sbuffer(i).valid := storeCommitValid(i) && !mmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := data(ptr).paddr
     io.sbuffer(i).bits.data := data(ptr).data
@@ -284,11 +267,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.meta.mmio     := mmio
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
     
-    commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire() || mmio
-    
     // update sq meta if store inst is send to sbuffer
-    when(commitedStoreQueue.io.deq(i).valid && (mmio || io.sbuffer(i).ready)) {
-      allocated(commitedStoreQueue.io.deq(i).bits) := false.B
+    when(storeCommitValid(i) && (mmio || io.sbuffer(i).ready)) {
+      allocated(ptr) := false.B
     }
   })
   
@@ -298,10 +279,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // mask / paddr / data can be get from sq.data
   val commitType = io.commits(0).bits.uop.ctrl.commitType 
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
-  commitType === CommitType.STORE && 
-  io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
-  !io.commits(0).bits.isWalk
-  
+    commitType === CommitType.STORE &&
+    io.roqDeqPtr === uop(ringBufferTail).roqIdx &&
+    !io.commits(0).bits.isWalk
+
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := data(ringBufferTail).paddr 
   io.uncache.req.bits.data := data(ringBufferTail).data
