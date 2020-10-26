@@ -22,11 +22,15 @@ class LoadUnit_S0 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
     val dtlbReq = Valid(new TlbReq)
+    val dtlbResp = Flipped(Valid(new TlbResp))
+    val tlbFeedback = ValidIO(new TlbFeedback)
     val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
 
   val s0_uop = io.in.bits.uop
   val s0_vaddr = io.in.bits.src1 + s0_uop.ctrl.imm
+  val s0_paddr = io.dtlbResp.bits.paddr
+  val s0_tlb_miss = io.dtlbResp.bits.miss
   val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
@@ -36,6 +40,12 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.lsroqIdx := s0_uop.lsroqIdx
+  
+  // feedback tlb result to RS
+  // Note: can be moved to s1
+  io.tlbFeedback.valid := io.out.valid
+  io.tlbFeedback.bits.hit := !s0_tlb_miss
+  io.tlbFeedback.bits.roqIdx := s0_uop.roqIdx
 
   // query DCache
   io.dcacheReq.valid := io.out.valid
@@ -64,9 +74,12 @@ class LoadUnit_S0 extends XSModule {
   io.out.valid := io.in.valid && !s0_uop.needFlush(io.redirect)
   io.out.bits := DontCare
   io.out.bits.vaddr := s0_vaddr
+  io.out.bits.paddr := s0_paddr
+  io.out.bits.tlbMiss := io.dtlbResp.bits.miss
   io.out.bits.mask := s0_mask
   io.out.bits.uop := s0_uop
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
+  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
   io.in.ready := io.out.ready
 }
@@ -79,30 +92,19 @@ class LoadUnit_S1 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val tlbFeedback = ValidIO(new TlbFeedback)
-    val dtlbResp = Flipped(Valid(new TlbResp))
     val forward = new LoadForwardQueryIO
-    val s1_kill = Output(Bool())
+    // val s1_kill = Output(Bool())
     val s1_paddr = Output(UInt(PAddrBits.W))
   })
 
   val s1_uop = io.in.bits.uop
-  val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_paddr = io.dtlbResp.bits.paddr
+  val s1_paddr = io.in.bits.paddr
+  val s1_tlb_miss = io.in.bits.tlbMiss
   val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
-
-  // io.dtlbResp.ready := io.out.ready
-
-  io.tlbFeedback.valid := io.out.valid
-  io.tlbFeedback.bits.hit := !s1_tlb_miss
-  io.tlbFeedback.bits.roqIdx := s1_uop.roqIdx
-
-  // if tlb misses or mmio, kill prvious cycles dcache request
-  // TODO: kill dcache request when flushed
-  io.s1_kill :=  s1_tlb_miss || s1_mmio
+  
   io.s1_paddr :=  s1_paddr
 
-  io.forward.valid := io.out.valid
+  io.forward.valid := io.in.valid // && !s1_uop.needFlush(io.redirect) will cause comb. loop
   io.forward.paddr := s1_paddr
   io.forward.mask := io.in.bits.mask
   io.forward.lsroqIdx := s1_uop.lsroqIdx
@@ -115,7 +117,6 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
-  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
   io.in.ready := io.out.ready || !io.in.valid
 
@@ -195,7 +196,9 @@ class LoadUnit_S2 extends XSModule {
 
   // TODO: ECC check
 
-  io.out.valid := io.in.valid && !s2_uop.needFlush(io.redirect)
+  io.out.valid := io.in.valid // && !s2_uop.needFlush(io.redirect) will cause comb. loop
+  // Inst will be canceled in store queue / lsroq, 
+  // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
   io.out.bits.miss := s2_cache_miss && !fullForward
@@ -224,15 +227,15 @@ class LoadUnit extends XSModule {
   load_s0.io.in <> io.ldin
   load_s0.io.redirect <> io.redirect
   load_s0.io.dtlbReq <> io.dtlb.req
+  load_s0.io.dtlbResp <> io.dtlb.resp
   load_s0.io.dcacheReq <> io.dcache.req
+  load_s0.io.tlbFeedback <> io.tlbFeedback
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire(), false.B)
 
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
-  load_s1.io.tlbFeedback <> io.tlbFeedback
-  load_s1.io.dtlbResp <> io.dtlb.resp
-  load_s1.io.s1_kill <> io.dcache.s1_kill
+  io.dcache.s1_kill := DontCare // FIXME
   io.sbuffer <> load_s1.io.forward
   io.lsroq.forward <> load_s1.io.forward
 
