@@ -154,11 +154,11 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // select the last writebacked instruction
-  val validStoreVec = VecInit((0 until StoreQueueSize).map(i => allocated(i) && !valid(i)))
+  val validStoreVec = VecInit((0 until StoreQueueSize).map(i => !(allocated(i) && valid(i))))
   val storeNotValid = SqPtr(false.B, getFirstOne(validStoreVec, tailMask))
-  val storeValidPtr = storeNotValid - 1.U
-  io.oldestStore.valid := false.B//Cat(validStoreVec).orR
-  io.oldestStore.bits := uop(storeValidPtr.value).roqIdx
+  val storeValidIndex = (storeNotValid - 1.U).value
+  io.oldestStore.valid := allocated(ringBufferTailExtended.value) && valid(ringBufferTailExtended.value) && !commited(storeValidIndex)
+  io.oldestStore.bits := uop(storeValidIndex).roqIdx
 
   // writeback up to 2 store insts to CDB
   // choose the first two valid store requests from deqPtr
