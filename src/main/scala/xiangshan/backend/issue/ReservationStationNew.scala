@@ -249,18 +249,22 @@ class ReservationStationNew
   // enq
   val tailAfterRealDeq = tailPtr - moveMask(tailPtr.tail(1))
   val isFull = tailAfterRealDeq.head(1).asBool() // tailPtr===qsize.U
-  
+  tailPtr := tailAfterRealDeq + io.enqCtrl.fire()
+
   io.enqCtrl.ready := !isFull && !io.redirect.valid // TODO: check this redirect && need more optimization
-  when (io.enqCtrl.fire()) { 
+  when (io.enqCtrl.fire()) {
+    validQueue(tailPtr.tail(1)) := true.B
+
     val enqUop = io.enqCtrl.bits
     uop(idxQueue(tailPtr.tail(1))) := enqUop
     val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
     val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
     val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
     for (i <- 0 until srcNum) { // TODO: add enq wakeup / bypass check
+      XSDebug(p"Src(${i.U}): ${SrcBundle.check(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))}\n")
       srcQueue(tailPtr.tail(1))(i) := SrcBundle.check(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))
     }
-    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcTypeSeq(0)}state:${srcStateSeq(0)}type:${srcTypeSeq(0)} src2:${srcTypeSeq(1)}state:${srcStateSeq(1)}type:${srcTypeSeq(1)} src3:${srcTypeSeq(2)}state:${srcStateSeq(2)}type:${srcTypeSeq(2)}\n")
+    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcTypeSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcTypeSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcTypeSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)}\n")
   }
   when (RegNext(io.enqCtrl.fire())) {
     val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
@@ -269,8 +273,6 @@ class ReservationStationNew
     for(i <- data(0).indices) { data(enqIdxNext)(i) := srcDataSeq(i) }
     XSDebug(p"EnqDataFire: idx:${enqIdxNext} src1:0x${Hexadecimal(srcDataSeq(0))} src2:0x${Hexadecimal(srcDataSeq(1))} src3:0x${Hexadecimal(srcDataSeq(2))}\n")
   }
-
-  tailPtr := tailAfterRealDeq + io.enqCtrl.fire()
 
   // other io
   io.numExist := tailPtr
