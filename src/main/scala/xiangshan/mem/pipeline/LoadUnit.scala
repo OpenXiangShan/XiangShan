@@ -205,6 +205,11 @@ class LoadUnit_S2 extends XSModule {
 
   io.in.ready := io.out.ready || !io.in.valid
 
+  XSDebug(io.out.fire(), "dcache hit: pc %x rdata %x <- D$ %x + fwd %x(%b)\n", 
+    s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
+    forwardData.asUInt, forwardMask.asUInt
+  )
+
 }
 
 
