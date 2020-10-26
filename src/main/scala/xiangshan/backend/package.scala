@@ -121,6 +121,9 @@ package object backend {
     def sw   = "b001010".U
     def sd   = "b001011".U
 
+    def isLoad(op: UInt): Bool = !op(3)
+    def isStore(op: UInt): Bool = op(3)
+
     // float/double load store
     def flw  = "b010110".U
 

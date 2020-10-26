@@ -69,6 +69,12 @@ struct DiffState {
   // this will lead to different sc results.
 };
 
+struct DisambiguationState {
+  uint64_t exceptionNo;
+  uint64_t mtval;
+  uint64_t stval;
+};
+
 extern void (*ref_difftest_memcpy_from_dut)(paddr_t dest, void *src, size_t n);
 extern void (*ref_difftest_memcpy_from_ref)(void *dest, paddr_t src, size_t n);
 extern void (*ref_difftest_getregs)(void *c);

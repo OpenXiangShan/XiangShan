@@ -100,6 +100,7 @@ void init_ram(const char *img) {
     assert(0);
   }
 
+  printf("Emu compiled at %s, %s\n", __DATE__, __TIME__);
   printf("The image is %s\n", img);
 
   fseek(fp, 0, SEEK_END);
