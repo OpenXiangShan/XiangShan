@@ -58,15 +58,6 @@ class Backend extends XSModule
     hasZero = false
   ))
 
-  // decode.io := DontCare
-  // brq.io := DontCare
-  // decBuf.io := DontCare
-  // rename.io := DontCare
-  // dispatch.io := DontCare
-  // roq.io := DontCare
-  // intRf.io := DontCare
-  // fpRf.io := DontCare
-
   // backend redirect, flush pipeline
   val redirect = Mux(
     roq.io.redirect.valid,
@@ -123,6 +114,7 @@ class Backend extends XSModule
       case otherCfg =>
         exeUnits(i).io.in <> rs.io.deq
         exeUnits(i).io.redirect <> redirect
+        rs.io.tlbFeedback := DontCare
     }
 
     rs
@@ -146,6 +138,7 @@ class Backend extends XSModule
   io.mem.roqDeqPtr := roq.io.roqDeqPtr
   io.mem.ldin <> reservedStations.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
   io.mem.stin <> reservedStations.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
+  io.mem.tlbFeedback <> reservedStations.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.tlbFeedback) ++ reservedStations.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.tlbFeedback)
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.exception.bits := roq.io.exception
 

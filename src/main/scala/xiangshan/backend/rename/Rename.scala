@@ -44,7 +44,7 @@ class Rename extends XSModule {
   val fpRat = Module(new RenameTable(float = true)).io
   val intRat = Module(new RenameTable(float = false)).io
   val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts)).io
-  val intBusyTable = Module(new BusyTable(NRIntReadPorts+NRMemReadPorts, NRIntWritePorts)).io
+  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts)).io
 
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect

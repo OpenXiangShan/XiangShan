@@ -38,10 +38,10 @@ class Dispatch extends XSModule {
     val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort))
-    val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+    val readFpRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
-    val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
+    val fpPregRdy = Vec(NRFpReadPorts - exuParameters.StuCnt, Input(Bool()))
     // load + store reg status (busy/ready)
     val memIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
     val memFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort))
