@@ -160,6 +160,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   io.dcache.req.bits.mask := DontCare
 
   io.dcache.req.bits.meta.id       := DontCare // TODO: // FIXME
+  io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
+  io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
+  io.dcache.req.bits.meta.uop      := uop(missRefillSel)
+  io.dcache.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
+  io.dcache.req.bits.meta.tlb_miss := false.B
+  io.dcache.req.bits.meta.mask     := DontCare
   io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
@@ -266,7 +272,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i))
     when(io.ldout(i).fire()) {
       writebacked(loadWbSel(i)) := true.B
-      XSInfo(io.loadIn(i).valid, "load miss write to cbd idx %d pc 0x%x paddr %x data %x mmio %x\n",
+      XSInfo("load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
+        io.ldout(i).bits.uop.roqIdx,
         io.ldout(i).bits.uop.lqIdx,
         io.ldout(i).bits.uop.cf.pc,
         data(loadWbSel(i)).paddr,

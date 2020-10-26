@@ -253,7 +253,7 @@ class LoadUnit extends XSModule {
     p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")
   XSDebug(load_s1.io.out.valid, 
     p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, tlb_miss ${io.dtlb.resp.bits.miss}, " + 
-    p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}")
+    p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}\n")
 
   // writeback to LSROQ
   // Current dcache use MSHR
@@ -279,7 +279,7 @@ class LoadUnit extends XSModule {
   // io.lsroq.ldout <> cdbArb.io.in(1) // missLoadOut
   load_s2.io.out.ready := true.B
   io.lsroq.ldout.ready := !hitLoadOut.valid
-  io.ldout.bits := Mux(load_s2.io.out.ready, hitLoadOut.bits, io.lsroq.ldout.bits)
+  io.ldout.bits := Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsroq.ldout.bits)
   io.ldout.valid := hitLoadOut.valid || io.lsroq.ldout.valid
 
   when(io.ldout.fire()){
