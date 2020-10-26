@@ -174,26 +174,26 @@ class ReservationStationNew
   // data update and control update
   // bypass update and wakeup update -> wakeup method and bypass method may not be ok
   // for ld/st, still need send to control part, long latency
-  def wakeup(src: SrcBundle) : (Bool, UInt) = {
+  def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
     val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
     assert(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U)
     
-    val hit = ParallelOR(hitVec)
+    val hit = ParallelOR(hitVec) && valid
     (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
   }
 
-  def bypass(src: SrcBundle) : (Bool, Bool, UInt) = {
+  def bypass(src: SrcBundle, valid: Bool) : (Bool, Bool, UInt) = {
     val hitVec = io.broadcastedUops.map(port => src.hit(port.bits) && port.valid)
     assert(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U)
 
-    val hit = ParallelOR(hitVec)
+    val hit = ParallelOR(hitVec) && valid
     (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
   }
   
   for (i <- 0 until iqSize) {
     for (j <- 0 until srcNum) {
-      val (wuHit, wuData) = wakeup(srcQueue(i)(j))
-      val (bpHit, bpHitReg, bpData) = bypass(srcQueue(i)(j))
+      val (wuHit, wuData) = wakeup(srcQueue(i)(j), validQueue(i))
+      val (bpHit, bpHitReg, bpData) = bypass(srcQueue(i)(j), validQueue(i))
       assert(!(bpHit && wuHit))
       assert(!(bpHitReg && wuHit))
 
@@ -206,6 +206,10 @@ class ReservationStationNew
       // NOTE: can not use Mem/Sram to store data, for multi-read/multi-write
     }
   }
+
+  // redirect
+  val redHitVec = (0 until iqSize).map(i => uop(idxQueue(i)).roqIdx.needFlush(io.redirect))
+  redHitVec.zip(validQueue).map{ case (r,v) => when (r) { v := false.B } }
 
   // select
   val selectedIdxRegOH = Wire(UInt(iqSize.W))
@@ -278,21 +282,20 @@ class ReservationStationNew
 
   // log
   // TODO: add log
-  XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull}\n")
-  XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"SelMask:b${Binary(selectMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} selIdxReg:${selectedIdxReg} selReg:${selReg}\n")
+  XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull} validQue:b${Binary(validQueue.asUInt)} readyQueue:${Binary(readyQueue.asUInt)}\n")
+  XSDebug(io.redirect.valid && (io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue)), p"Redirect: roqIdx:${io.redirect.bits.roqIdx} isException:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} isFlushPipe:${io.redirect.bits.isFlushPipe}\n")
+  XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"SelMask:b${Binary(selectMask.asUInt)} MoveMask:b${Binary(moveMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} selIdxReg:${selectedIdxReg} selReg:${selReg}\n")
   XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)} fixedDelay:${fixedDelay.U}\n")
-  XSDebug(io.deq.fire, p"Deq: SelIdxReg:${selectedIdxReg} Idx:${idxQueue(selectedIdxReg)} roqIdx:${io.deq.bits.uop.roqIdx} src1:0x${Hexadecimal(io.deq.bits.src1)} src2:0x${io.deq.bits.src2} src3:0x${io.deq.bits.src3}\n")
-  XSDebug(ParallelOR(validQueue), "  : IQ|v|r| src1 |src2 | src3| roqIdx|pc\n")
-  XSDebug(bpQueue.io.in.valid, p"BypassEnq: pc:0x${Hexadecimal(bpQueue.io.in.bits.cf.pc)} roqIdx:${bpQueue.io.in.bits.roqIdx} idxQueue:${selectedIdxWire} pdest:${bpQueue.io.in.bits.pdest} rfWen:${bpQueue.io.in.bits.ctrl.rfWen} fpWen:${bpQueue.io.in.bits.ctrl.fpWen}\n")
-  XSDebug(bpQueue.io.out.valid, p"BypassEnq: pc:0x${Hexadecimal(bpQueue.io.out.bits.cf.pc)} roqIdx:${bpQueue.io.out.bits.roqIdx} idxQueue:${selectedIdxWire} pdest:${bpQueue.io.out.bits.pdest} rfWen:${bpQueue.io.out.bits.ctrl.rfWen} fpWen:${bpQueue.io.out.bits.ctrl.fpWen}\n")
+  XSDebug(io.deq.fire, p"Deq: SelIdxReg:${selectedIdxReg} pc:0x${io.deq.bits.uop.cf.pc} Idx:${idxQueue(selectedIdxReg)} roqIdx:${io.deq.bits.uop.roqIdx} src1:0x${Hexadecimal(io.deq.bits.src1)} src2:0x${io.deq.bits.src2} src3:0x${io.deq.bits.src3}\n")
   val broadcastedUops = io.broadcastedUops
   val extraListenPorts = io.extraListenPorts
   for (i <- broadcastedUops.indices) {
-    XSDebug(broadcastedUops(i).valid, p"BpUops(${i.U}): pc:0x${Hexadecimal(broadcastedUops(i).bits.cf.pc)} roqIdx:${broadcastedUops(i).bits.roqIdx} idxQueue:${selectedIdxWire} pdest:${broadcastedUops(i).bits.pdest} rfWen:${broadcastedUops(i).bits.ctrl.rfWen} fpWen:${broadcastedUops(i).bits.ctrl.fpWen} data(last):0x${Hexadecimal(io.writeBackedData(i))}\n")
+    XSDebug(broadcastedUops(i).valid && (io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue)), p"BpUops(${i.U}): pc:0x${Hexadecimal(broadcastedUops(i).bits.cf.pc)} roqIdx:${broadcastedUops(i).bits.roqIdx} idxQueue:${selectedIdxWire} pdest:${broadcastedUops(i).bits.pdest} rfWen:${broadcastedUops(i).bits.ctrl.rfWen} fpWen:${broadcastedUops(i).bits.ctrl.fpWen} data(last):0x${Hexadecimal(io.writeBackedData(i))}\n")
   }
   for (i <- extraListenPorts.indices) {
-    XSDebug(extraListenPorts(i).valid, p"BypassEnq: pc:0x${Hexadecimal(extraListenPorts(i).bits.uop.cf.pc)} roqIdx:${extraListenPorts(i).bits.uop.roqIdx} idxQueue:${selectedIdxWire} pdest:${extraListenPorts(i).bits.uop.pdest} rfWen:${extraListenPorts(i).bits.uop.ctrl.rfWen} fpWen:${extraListenPorts(i).bits.uop.ctrl.fpWen} data:0x${Hexadecimal(extraListenPorts(i).bits.data)}\n")
+    XSDebug(extraListenPorts(i).valid && (io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue)), p"BypassEnq: pc:0x${Hexadecimal(extraListenPorts(i).bits.uop.cf.pc)} roqIdx:${extraListenPorts(i).bits.uop.roqIdx} idxQueue:${selectedIdxWire} pdest:${extraListenPorts(i).bits.uop.pdest} rfWen:${extraListenPorts(i).bits.uop.ctrl.rfWen} fpWen:${extraListenPorts(i).bits.uop.ctrl.fpWen} data:0x${Hexadecimal(extraListenPorts(i).bits.data)}\n")
   }
+  XSDebug(ParallelOR(validQueue), "  : IQ|v|r| src1 |src2 | src3| roqIdx|pc\n")
   for(i <- 0 until iqSize) {
     XSDebug(validQueue(i), p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)}|${srcQueue(i)(1)}|${srcQueue(i)(2)}|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
   }
