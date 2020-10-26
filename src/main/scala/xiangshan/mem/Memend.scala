@@ -35,12 +35,13 @@ object genWdata {
 class LsPipelineBundle extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
-  val func = UInt(6.W)
+  val func = UInt(6.W) //fixme???
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val uop = new MicroOp
 
   val miss = Bool()
+  val tlbMiss = Bool()
   val mmio = Bool()
   val rollback = Bool()
 

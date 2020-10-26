@@ -58,6 +58,15 @@ class Backend extends XSModule
     hasZero = false
   ))
 
+  // decode.io := DontCare
+  // brq.io := DontCare
+  // decBuf.io := DontCare
+  // rename.io := DontCare
+  // dispatch.io := DontCare
+  // roq.io := DontCare
+  // intRf.io := DontCare
+  // fpRf.io := DontCare
+
   // backend redirect, flush pipeline
   val redirect = Mux(
     roq.io.redirect.valid,
@@ -108,7 +117,6 @@ class Backend extends XSModule
       wakeUpPort.valid := exuOut.valid
     }
 
-
     cfg match {
       case Exu.ldExeUnitCfg =>
       case Exu.stExeUnitCfg =>
@@ -120,7 +128,7 @@ class Backend extends XSModule
     rs
   })
 
-  for( rs <- reservedStations){
+  for(rs <- reservedStations){
     rs.io.bypassUops <> reservedStations.
       filter(x => x.enableBypass && needData(rs.exuCfg, x.exuCfg)).
       map(_.io.selectedUop)

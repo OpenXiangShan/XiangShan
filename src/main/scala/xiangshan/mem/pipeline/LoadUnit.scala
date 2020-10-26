@@ -42,6 +42,17 @@ class LoadUnit_S0 extends XSModule {
   io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
   io.dcacheReq.bits.addr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
+  io.dcacheReq.bits.data := DontCare
+
+  // TODO: update cache meta
+  io.dcacheReq.bits.meta.id       := DontCare
+  io.dcacheReq.bits.meta.vaddr    := s0_vaddr
+  io.dcacheReq.bits.meta.paddr    := DontCare
+  io.dcacheReq.bits.meta.uop      := s0_uop
+  io.dcacheReq.bits.meta.mmio     := false.B
+  io.dcacheReq.bits.meta.tlb_miss := false.B
+  io.dcacheReq.bits.meta.mask     := s0_mask
+  io.dcacheReq.bits.meta.replay   := false.B
 
   val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
@@ -103,6 +114,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
+  io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
   io.in.ready := io.out.ready || !io.in.valid
@@ -126,6 +138,23 @@ class LoadUnit_S2 extends XSModule {
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_cache_miss = io.dcacheResp.bits.miss
+
+  // load forward query datapath
+  io.sbuffer.valid := io.in.valid
+  io.sbuffer.paddr := s2_paddr
+  io.sbuffer.uop := s2_uop
+  io.sbuffer.sqIdx := s2_uop.sqIdx
+  io.sbuffer.lsroqIdx := s2_uop.lsroqIdx
+  io.sbuffer.mask := s2_mask
+  io.sbuffer.pc := s2_uop.cf.pc // FIXME: remove it
+  
+  io.lsroq.valid := io.in.valid
+  io.lsroq.paddr := s2_paddr
+  io.lsroq.uop := s2_uop
+  io.lsroq.sqIdx := s2_uop.sqIdx
+  io.lsroq.lsroqIdx := s2_uop.lsroqIdx
+  io.lsroq.mask := s2_mask
+  io.lsroq.pc := s2_uop.cf.pc // FIXME: remove it
 
   io.dcacheResp.ready := true.B
   assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
@@ -203,6 +232,7 @@ class LoadUnit extends XSModule {
   load_s1.io.redirect <> io.redirect
   load_s1.io.tlbFeedback <> io.tlbFeedback
   load_s1.io.dtlbResp <> io.dtlb.resp
+  load_s1.io.s1_kill <> io.dcache.s1_kill
   io.sbuffer <> load_s1.io.forward
   io.lsroq.forward <> load_s1.io.forward
 
@@ -247,6 +277,7 @@ class LoadUnit extends XSModule {
   load_s2.io.out.ready := true.B
   io.lsroq.ldout.ready := !hitLoadOut.valid
   io.ldout.bits := Mux(load_s2.io.out.ready, hitLoadOut.bits, io.lsroq.ldout.bits)
+  io.ldout.valid := hitLoadOut.valid || io.lsroq.ldout.valid
 
   when(io.ldout.fire()){
     XSDebug("ldout %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)

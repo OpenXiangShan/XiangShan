@@ -258,6 +258,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (w <- 0 until LoadPipelineWidth) {
     val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
     ldu(w).io.lsu.req <> io.lsu.load(w).req
+    ldu(w).io.lsu.s1_paddr <> io.lsu.load(w).s1_paddr
     ldu(w).io.nack := load_w_nack
     XSDebug(load_w_nack, s"LoadUnit $w nacked\n")
 

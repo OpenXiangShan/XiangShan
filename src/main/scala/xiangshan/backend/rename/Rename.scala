@@ -11,9 +11,9 @@ class Rename extends XSModule {
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
     val wbIntResults = Vec(NRIntWritePorts, Flipped(ValidIO(new ExuOutput)))
     val wbFpResults = Vec(NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val intRfReadAddr = Vec(NRIntReadPorts + NRMemReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val intRfReadAddr = Vec(NRIntReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val intPregRdy = Vec(NRIntReadPorts + NRMemReadPorts, Output(Bool()))
+    val intPregRdy = Vec(NRIntReadPorts, Output(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
     // set preg to busy when replay
     val replayPregReq = Vec(ReplayWidth, Input(new ReplayPregReq))

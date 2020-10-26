@@ -37,10 +37,10 @@ class Dispatch extends XSModule {
     val lsIdxs = Input(Vec(RenameWidth, new LSIdx))
     val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
     // read regfile
-    val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
+    val readIntRf = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
     // read reg status (busy/ready)
-    val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
+    val intPregRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
     // load + store reg status (busy/ready)
     val memIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
@@ -136,7 +136,7 @@ class Dispatch extends XSModule {
     fpDq.io.deq <> DontCare
     io.readFpRf <> DontCare
   }
-
+  
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
   lsDispatch.io.fromDq <> lsDq.io.deq
@@ -146,4 +146,5 @@ class Dispatch extends XSModule {
   lsDispatch.io.fpRegRdy <> io.fpMemRegRdy
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 }
