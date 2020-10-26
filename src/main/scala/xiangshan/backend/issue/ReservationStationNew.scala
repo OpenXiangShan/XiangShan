@@ -152,7 +152,7 @@ class ReservationStationNew
   // TODO: 
   val (firstBubble, findBubble) = PriorityEncoderWithFlag(validQueue.map(!_))
   val (firstReady, findReady) = PriorityEncoderWithFlag(validQueue)
-  val deqIdx = Mux(findBubble, firstBubble, findReady)
+  val deqIdx = Mux(findBubble && (firstBubble < tailPtr), firstBubble, firstReady)
   val deqValid = ((firstBubble < tailPtr) && findBubble) || ((firstReady < tailPtr) && findReady)
   val moveMask = {
     (Fill(iqSize, 1.U(1.W)) << deqIdx)(iqSize-1, 0)
