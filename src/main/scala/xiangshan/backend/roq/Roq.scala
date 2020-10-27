@@ -10,19 +10,35 @@ import xiangshan.backend.LSUOpType
 import xiangshan.backend.decode.isa.Privileged.WFI
 
 
-class Roq extends XSModule {
+class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
+  def needFlush(redirect: Valid[Redirect]): Bool = {
+    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || isAfter(this, redirect.bits.roqIdx))
+  }
+}
+
+object RoqPtr extends HasXSParameter {
+  def apply(f: Bool, v: UInt): RoqPtr = {
+    val ptr = Wire(new RoqPtr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
+
+
+class Roq extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val memRedirect = Input(Valid(new Redirect))
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val roqIdxs = Output(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    val roqIdxs = Output(Vec(RenameWidth, new RoqPtr))
     val redirect = Output(Valid(new Redirect))
     val exception = Output(new MicroOp)
     // exu + brq
     val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
-    val roqDeqPtr = Output(UInt(RoqIdxWidth.W))
+    val roqDeqPtr = Output(new RoqPtr)
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -35,15 +51,15 @@ class Roq extends XSModule {
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
 
-  val enqPtrExt = RegInit(0.U(RoqIdxWidth.W))
-  val deqPtrExt = RegInit(0.U(RoqIdxWidth.W))
-  val walkPtrExt = Reg(UInt(RoqIdxWidth.W))
-  val walkTgtExt = Reg(UInt(RoqIdxWidth.W))
-  val enqPtr = enqPtrExt(InnerRoqIdxWidth-1,0)
-  val deqPtr = deqPtrExt(InnerRoqIdxWidth-1,0)
-  val walkPtr = walkPtrExt(InnerRoqIdxWidth-1,0)
-  val isEmpty = enqPtr === deqPtr && enqPtrExt.head(1)===deqPtrExt.head(1)
-  val isFull = enqPtr === deqPtr && enqPtrExt.head(1)=/=deqPtrExt.head(1)
+  val enqPtrExt = RegInit(0.U.asTypeOf(new RoqPtr))
+  val deqPtrExt = RegInit(0.U.asTypeOf(new RoqPtr))
+  val walkPtrExt = Reg(new RoqPtr)
+  val walkTgtExt = Reg(new RoqPtr)
+  val enqPtr = enqPtrExt.value
+  val deqPtr = deqPtrExt.value
+  val walkPtr = walkPtrExt.value
+  val isEmpty = enqPtr === deqPtr && enqPtrExt.flag ===deqPtrExt.flag
+  val isFull = enqPtr === deqPtr && enqPtrExt.flag =/= deqPtrExt.flag
   val notFull = !isFull
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
@@ -60,12 +76,12 @@ class Roq extends XSModule {
   for (i <- 0 until RenameWidth) {
     val offset = PopCount(validDispatch.take(i))
     val roqIdxExt = enqPtrExt + offset
-    val roqIdx = roqIdxExt.tail(1)
+    val roqIdx = roqIdxExt.value
 
     when(io.dp1Req(i).fire()){
       microOp(roqIdx) := io.dp1Req(i).bits
       valid(roqIdx) := true.B
-      flag(roqIdx) := roqIdxExt.head(1).asBool()
+      flag(roqIdx) := roqIdxExt.flag
       writebacked(roqIdx) := false.B
       when(noSpecEnq(i)){ hasNoSpec := true.B }
     }
@@ -90,24 +106,22 @@ class Roq extends XSModule {
   for(i <- 0 until numWbPorts){
     when(io.exeWbResults(i).fire()){
       val wbIdxExt = io.exeWbResults(i).bits.uop.roqIdx
-      val wbIdx = wbIdxExt.tail(1)
+      val wbIdx = wbIdxExt.value
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
       microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
+      microOp(wbIdx).lqIdx := io.exeWbResults(i).bits.uop.lqIdx
+      microOp(wbIdx).sqIdx := io.exeWbResults(i).bits.uop.sqIdx
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
       val debugUop = microOp(wbIdx)
-      XSInfo(true.B, "writebacked pc 0x%x wen %d data 0x%x ldst %d pdst %d skip %x roqIdx: %d\n",
-        debugUop.cf.pc,
-        debugUop.ctrl.rfWen,
-        io.exeWbResults(i).bits.data,
-        debugUop.ctrl.ldest,
-        io.exeWbResults(i).bits.uop.pdest,
-        io.exeWbResults(i).bits.debug.isMMIO,
-        wbIdxExt
+      XSInfo(true.B,
+        p"writebacked pc 0x${Hexadecimal(debugUop.cf.pc)} wen ${debugUop.ctrl.rfWen} " +
+        p"data 0x${Hexadecimal(io.exeWbResults(i).bits.data)} ldst ${debugUop.ctrl.ldest} pdst ${debugUop.ctrl.ldest} " +
+        p"skip ${io.exeWbResults(i).bits.debug.isMMIO} roqIdx: ${wbIdxExt}\n"
       )
     }
   }
@@ -135,7 +149,7 @@ class Roq extends XSModule {
   // Commit uop to Rename (walk)
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
   val walkPtrMatchVec  = Wire(Vec(CommitWidth, Bool()))
-  val walkPtrVec = Wire(Vec(CommitWidth, UInt(RoqIdxWidth.W)))
+  val walkPtrVec = Wire(Vec(CommitWidth, new RoqPtr))
   for(i <- shouldWalkVec.indices){
     walkPtrVec(i) := walkPtrExt - i.U
     walkPtrMatchVec(i) := walkPtrVec(i) === walkTgtExt
@@ -189,7 +203,7 @@ class Roq extends XSModule {
       }
 
       is(s_walk){
-        val idx = walkPtrVec(i).tail(1)
+        val idx = walkPtrVec(i).value
         val v = valid(idx)
         val walkUop = microOp(idx)
         io.commits(i).valid := v && shouldWalkVec(i)
@@ -229,7 +243,7 @@ class Roq extends XSModule {
     }
     walkPtrExt := walkPtrExt - CommitWidth.U
     // ringBufferWalkExtended := ringBufferWalkExtended - validCommit
-    XSInfo("rolling back: enqPtr %d deqPtr %d walk %d:%d\n", enqPtr, deqPtr, walkPtrExt.head(1), walkPtr)
+    XSInfo("rolling back: enqPtr %d deqPtr %d walk %d:%d\n", enqPtr, deqPtr, walkPtrExt.flag, walkPtr)
   }
 
   // move tail ptr
@@ -265,9 +279,8 @@ class Roq extends XSModule {
   // when rollback, reset writebacked entry to valid
   when(io.memRedirect.valid) { // TODO: opt timing
     for (i <- 0 until RoqSize) {
-      val recRoqIdx = Wire(new XSBundle with HasRoqIdx)
-      recRoqIdx.roqIdx := Cat(flag(i).asUInt, i.U((RoqIdxWidth - 1).W))
-      when (valid(i) && recRoqIdx.isAfter(io.memRedirect.bits)) {
+      val recRoqIdx = RoqPtr(flag(i), i.U)
+      when (valid(i) && isAfter(recRoqIdx, io.memRedirect.bits.roqIdx)) {
         writebacked(i) := false.B
       }
     }
@@ -275,15 +288,15 @@ class Roq extends XSModule {
 
   // when exception occurs, cancels all
   when (io.redirect.valid) { // TODO: need check for flushPipe
-    enqPtrExt := 0.U
-    deqPtrExt := 0.U
+    enqPtrExt := 0.U.asTypeOf(new RoqPtr)
+    deqPtrExt := 0.U.asTypeOf(new RoqPtr)
     for (i <- 0 until RoqSize) {
       valid(i) := false.B
     }
   }
 
   // debug info
-  XSDebug("enqPtr %d:%d deqPtr %d:%d\n", enqPtrExt.head(1), enqPtr, deqPtrExt.head(1), deqPtr)
+  XSDebug(p"enqPtr ${enqPtrExt} deqPtr ${deqPtrExt}\n")
   XSDebug("")
   for(i <- 0 until RoqSize){
     XSDebug(false, !valid(i), "-")
