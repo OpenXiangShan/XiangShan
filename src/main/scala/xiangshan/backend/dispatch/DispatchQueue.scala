@@ -92,7 +92,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val needDequeue = Wire(Vec(size, Bool()))
   val deqRoqIdx = io.dequeueRoqIndex.bits
   for (i <- 0 until size) {
-    needDequeue(i) := stateEntries(i)  === s_dispatched && io.dequeueRoqIndex.valid && !isAfter(uopEntries(i).roqIdx, deqRoqIdx)
+    needDequeue(i) := stateEntries(i)  === s_dispatched && io.dequeueRoqIndex.valid && !isAfter(uopEntries(i).roqIdx, deqRoqIdx) && dispatchedMask(i)
     when (needDequeue(i)) {
       stateEntries(i) := s_invalid
     }
