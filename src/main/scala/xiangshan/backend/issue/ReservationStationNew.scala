@@ -147,14 +147,29 @@ class ReservationStationNew
   val idxQueue      = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val readyQueue    = VecInit(srcQueue.map(a => ParallelAND(a.map(_.state === SrcState.rdy)).asBool).
   zip(validQueue).map{ case (a,b) => a&b })
+  
+  // select
+  // for no replay, select just equal to deq (attached)
+  // with   replay, select is just two stage with deq.
+  val moveMask = WireInit(0.U(iqSize.W))
+  val selectedIdxRegOH = Wire(UInt(iqSize.W))
+  val selectMask = WireInit(VecInit(
+    (0 until iqSize).map(i =>
+      readyQueue(i) && !(selectedIdxRegOH(i) && io.deq.fire()) // TODO: read it
+    )
+  ))
+  val (selectedIdxWire, selected) = PriorityEncoderWithFlag(selectMask)
+  val selReg = RegNext(selected)
+  val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
+  selectedIdxRegOH := UIntToOH(selectedIdxReg)
 
-  // real deq
+  // real deQ
   // TODO: 
   val (firstBubble, findBubble) = PriorityEncoderWithFlag(validQueue.map(!_))
-  val (firstReady, findReady) = PriorityEncoderWithFlag(validQueue)
-  val deqIdx = Mux(findBubble && (firstBubble < tailPtr), firstBubble, firstReady)
-  val deqValid = ((firstBubble < tailPtr) && findBubble) || ((firstReady < tailPtr) && findReady)
-  val moveMask = {
+  val haveBubble = findBubble && (firstBubble < tailPtr)
+  val deqValid = haveBubble/*fire an bubble*/ || (selReg && io.deq.ready/*fire an rdy*/)
+  val deqIdx = Mux(haveBubble, firstBubble, selectedIdxReg) // TODO: may have one more cycle delay than fire slot
+  moveMask := {
     (Fill(iqSize, 1.U(1.W)) << deqIdx)(iqSize-1, 0)
   } & Fill(iqSize, deqValid)
 
@@ -211,18 +226,6 @@ class ReservationStationNew
   val redHitVec = (0 until iqSize).map(i => uop(idxQueue(i)).roqIdx.needFlush(io.redirect))
   redHitVec.zip(validQueue).map{ case (r,v) => when (r) { v := false.B } }
 
-  // select
-  val selectedIdxRegOH = Wire(UInt(iqSize.W))
-  val selectMask = WireInit(VecInit(
-    (0 until iqSize).map(i =>
-      readyQueue(i) && !(selectedIdxRegOH(i) && io.deq.fire()) // TODO: read it
-    )
-  ))
-  val (selectedIdxWire, selected) = PriorityEncoderWithFlag(selectMask)
-  val selReg = RegNext(selected)
-  val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
-  selectedIdxRegOH := UIntToOH(selectedIdxReg)
-
   // bypass send
   // store selected uops and send out one cycle before result back
   val fixedDelay = 1 // TODO: fix it
@@ -240,7 +243,7 @@ class ReservationStationNew
   // TODO: add fake deq later
   // TODO: add deq: may have one more latency, but for replay later.
   // TODO: may change to another way to deq and select, for there is no Vec, but Seq, change to multi-in multi-out
-  io.deq.valid := readyQueue(selectedIdxReg) && selReg // TODO: read it and add assert for rdyQueue
+  io.deq.valid := selReg && !haveBubble // TODO: read it and add assert for rdyQueue
   io.deq.bits.uop := uop(idxQueue(selectedIdxReg))
   io.deq.bits.src1 := data(idxQueue(selectedIdxReg))(0)
   if(srcNum > 1) { io.deq.bits.src2 := data(idxQueue(selectedIdxReg))(1) }
@@ -284,7 +287,7 @@ class ReservationStationNew
   // TODO: add log
   XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull} validQue:b${Binary(validQueue.asUInt)} readyQueue:${Binary(readyQueue.asUInt)}\n")
   XSDebug(io.redirect.valid && (io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue)), p"Redirect: roqIdx:${io.redirect.bits.roqIdx} isException:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} isFlushPipe:${io.redirect.bits.isFlushPipe}\n")
-  XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"SelMask:b${Binary(selectMask.asUInt)} MoveMask:b${Binary(moveMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} selIdxReg:${selectedIdxReg} selReg:${selReg}\n")
+  XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"SelMask:b${Binary(selectMask.asUInt)} MoveMask:b${Binary(moveMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} selIdxReg:${selectedIdxReg} selReg:${selReg} haveBubble:${haveBubble} deqValid:${deqValid} firstBubble:${firstBubble} findBubble:${findBubble} selRegOH:b${Binary(selectedIdxRegOH)}\n")
   XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)} fixedDelay:${fixedDelay.U}\n")
   XSDebug(io.deq.fire, p"Deq: SelIdxReg:${selectedIdxReg} pc:0x${io.deq.bits.uop.cf.pc} Idx:${idxQueue(selectedIdxReg)} roqIdx:${io.deq.bits.uop.roqIdx} src1:0x${Hexadecimal(io.deq.bits.src1)} src2:0x${io.deq.bits.src2} src3:0x${io.deq.bits.src3}\n")
   val broadcastedUops = io.broadcastedUops
