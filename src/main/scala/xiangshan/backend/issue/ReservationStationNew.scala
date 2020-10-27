@@ -269,8 +269,9 @@ class ReservationStationNew
     val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
     for (i <- 0 until srcNum) { // TODO: add enq wakeup / bypass check
       srcQueue(tailPtr.tail(1))(i) := SrcBundle.check(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))
+      // XSDebug(p"SrcCheck: before:${SrcBundle(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))} after:${SrcBundle.check(srcSeq(i), srcStateSeq(i), srcTypeSeq(i))}\n")
     }
-    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcTypeSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcTypeSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcTypeSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)}\n")
+    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)}\n")
   }
   when (RegNext(io.enqCtrl.fire())) {
     val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
@@ -298,8 +299,8 @@ class ReservationStationNew
   for (i <- extraListenPorts.indices) {
     XSDebug(extraListenPorts(i).valid && (io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue)), p"BypassEnq: pc:0x${Hexadecimal(extraListenPorts(i).bits.uop.cf.pc)} roqIdx:${extraListenPorts(i).bits.uop.roqIdx} idxQueue:${selectedIdxWire} pdest:${extraListenPorts(i).bits.uop.pdest} rfWen:${extraListenPorts(i).bits.uop.ctrl.rfWen} fpWen:${extraListenPorts(i).bits.uop.ctrl.fpWen} data:0x${Hexadecimal(extraListenPorts(i).bits.data)}\n")
   }
-  XSDebug(ParallelOR(validQueue), "  : IQ|v|r| src1 |src2 | src3| roqIdx|pc\n")
+  XSDebug(ParallelOR(validQueue), "  : IQ|v|r| src1 |src2 | src3|pdest(rf|fp)| roqIdx|pc\n")
   for(i <- 0 until iqSize) {
-    XSDebug(validQueue(i), p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)}|${srcQueue(i)(1)}|${srcQueue(i)(2)}|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
+    XSDebug(validQueue(i), p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)}|${srcQueue(i)(1)}|${srcQueue(i)(2)}|${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
   }
 }
