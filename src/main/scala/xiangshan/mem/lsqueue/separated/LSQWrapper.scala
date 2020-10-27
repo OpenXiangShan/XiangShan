@@ -29,6 +29,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
+    val oldestStore = Output(Valid(new RoqPtr))
   })
   
   if(EnableUnifiedLSQ){
@@ -47,6 +48,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     lsroq.io.dcache <> io.dcache
     lsroq.io.uncache <> io.uncache
     lsroq.io.roqDeqPtr <> io.roqDeqPtr
+    lsroq.io.oldestStore <> io.oldestStore
     (0 until RenameWidth).map(i => {
       io.lsIdxs(i).lsroqIdx := lsroq.io.lsroqIdxs(i)
     })
@@ -74,6 +76,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     storeQueue.io.stout <> io.stout
     storeQueue.io.commits <> io.commits
     storeQueue.io.roqDeqPtr <> io.roqDeqPtr
+    storeQueue.io.oldestStore <> io.oldestStore
     
     loadQueue.io.forward <> io.forward
     storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
