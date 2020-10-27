@@ -32,6 +32,8 @@ class LoopBuffer extends XSModule {
     val pnpc = UInt(VAddrBits.W)
     val brInfo = new BranchInfo
     val pd = new PreDecodeInfo
+    val ipf = Bool()
+    val crossPageIPFFix = Bool()
   }
 
   class LBufEntry extends XSBundle {
@@ -166,9 +168,9 @@ class LoopBuffer extends XSModule {
   io.in.ready := enqValid
 
   var enq_idx = WireInit(tailPtr)
+  // ExcitingUtils.addSource(io.in.fire && LBstate =/= s_active, "CntFetchFromICache", Perf)
+  // ExcitingUtils.addSource(io.in.fire && LBstate === s_active, "CntFetchFromLoopBuffer", Perf)
   when(io.in.fire) {
-    // ExcitingUtils.addSource(LBstate =/= s_active, "CntFetchFromICache", Perf)
-    // ExcitingUtils.addSource(LBstate === s_active, "CntFetchFromLoopBuffer", Perf)
     for(i <- 0 until PredictWidth) {
       var inWire = Wire(new IBufEntry)
       inWire := DontCare
@@ -259,6 +261,7 @@ class LoopBuffer extends XSModule {
           LBstate := s_idle
           io.loopBufPar.LBredirect.valid := true.B
           io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
+          // ExcitingUtils.addSource(true.B, "CntLBRedirect1", Perf)
           XSDebug(p"redirect pc=${Hexadecimal(tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U))}\n")
           flushLB()
         }
@@ -269,6 +272,7 @@ class LoopBuffer extends XSModule {
           io.loopBufPar.LBredirect.valid := true.B
           io.loopBufPar.LBredirect.bits := io.loopBufPar.tgtpc
           // io.loopBufPar.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.loopBufPar.LBReq)
+          // ExcitingUtils.addSource(true.B, "CntLBRedirect2", Perf)
           XSDebug(p"redirect pc=${Hexadecimal(io.loopBufPar.tgtpc)}\n")
           flushLB()
         }
@@ -279,6 +283,7 @@ class LoopBuffer extends XSModule {
           io.loopBufPar.LBredirect.valid := true.B
           io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
           // io.loopBufPar.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.loopBufPar.LBReq)
+          // ExcitingUtils.addSource(true.B, "CntLBRedirect3", Perf)
           XSDebug(p"redirect pc=${Hexadecimal(tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U))}\n")
           flushLB()
         }

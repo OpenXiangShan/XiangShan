@@ -7,6 +7,7 @@ import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
+import chisel3.ExcitingUtils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -427,6 +428,12 @@ class IFU extends XSModule with HasIFUConst
     pd.io.in.data := instrs.asUInt
 
     when (icacheResp.ipf && !prevHalfInstr.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
+  }
+
+  //Performance Counter
+  if (!env.FPGAPlatform ) {
+    ExcitingUtils.addSource(io.fetchPacket.fire && !io.loopBufPar.inLoop, "CntFetchFromICache", Perf)
+    ExcitingUtils.addSource(io.fetchPacket.fire && io.loopBufPar.inLoop, "CntFetchFromLoopBuffer", Perf)
   }
 
   io.fetchPacket.valid := if4_valid && !io.redirect.valid
