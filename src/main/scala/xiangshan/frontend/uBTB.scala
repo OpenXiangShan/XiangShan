@@ -88,41 +88,39 @@ class MicroBTB extends BasePredictor
     //     }
     // }
 
-    class UBTBMeta(nWays: Int) extends XSModule {
+    class UBTBMetaBank(nWays: Int) extends XSModule {
         val io = IO(new Bundle {
             val wen = Input(Bool())
             val wWay = Input(UInt(log2Up(nWays).W))
-            val wRow = Input(UInt(log2Up(PredictWidth).W))
             val wdata = Input(new MicroBTBMeta)
-            val entries = Output(Vec(nWays, Vec(PredictWidth, new MicroBTBMeta)))
+            val entries = Output(Vec(nWays, new MicroBTBMeta))
         })
-        val mem = RegInit((0.U).asTypeOf(Vec(nWays, Vec(PredictWidth, new MicroBTBMeta))))
+        val mem = RegInit((0.U).asTypeOf(Vec(nWays, new MicroBTBMeta)))
         io.entries := mem
         when (io.wen) {
-            mem(io.wWay)(io.wRow) := io.wdata
+            mem(io.wWay) := io.wdata
         }
     }
 
-    class UBTBData(nWays: Int) extends XSModule {
+    class UBTBDataBank(nWays: Int) extends XSModule {
         val io = IO(new Bundle {
             val wen = Input(Bool())
             val wWay = Input(UInt(log2Up(nWays).W))
-            val wRow = Input(UInt(log2Up(PredictWidth).W))
             val wdata = Input(new MicroBTBEntry)
-            val entries = Output(Vec(nWays, Vec(PredictWidth, new MicroBTBEntry)))
+            val entries = Output(Vec(nWays, new MicroBTBEntry))
         })
-        val mem = RegInit((0.U).asTypeOf(Vec(nWays, Vec(PredictWidth, new MicroBTBEntry))))
+        val mem = RegInit((0.U).asTypeOf(Vec(nWays, new MicroBTBEntry)))
         io.entries := mem
         when (io.wen) {
-            mem(io.wWay)(io.wRow) := io.wdata
+            mem(io.wWay) := io.wdata
         }
     }
 
-    val meta = Module(new UBTBMeta(nWays)).io
-    val data = Module(new UBTBData(nWays)).io
+    val metas = Seq.fill(PredictWidth)(Module(new UBTBMetaBank(nWays)).io)
+    val datas = Seq.fill(PredictWidth)(Module(new UBTBDataBank(nWays)).io)
 
-    val uBTBMeta = meta.entries
-    val uBTB = data.entries
+    val uBTBMeta = VecInit(metas.map(m => m.entries))
+    val uBTB     = VecInit(datas.map(d => d.entries))
 
     //uBTB read
     //tag is bank align
@@ -228,15 +226,14 @@ class MicroBTB extends BasePredictor
     // {
     //     uBTB(update_write_way)(update_bank).offset := update_taget_offset
     // }
-    data.wen := entry_write_valid
-    data.wWay := update_write_way
-    data.wRow := update_bank
-    data.wdata := update_taget_offset.asTypeOf(new MicroBTBEntry)
+    for (b <- 0 until PredictWidth) {
+        datas(b).wen := entry_write_valid && b.U === update_bank
+        datas(b).wWay := update_write_way
+        datas(b).wdata := update_taget_offset.asTypeOf(new MicroBTBEntry)
+    }
+
 
     //write the uBTBMeta
-    meta.wen := meta_write_valid
-    meta.wWay := update_write_way
-    meta.wRow := update_bank
     val update_write_meta = Wire(new MicroBTBMeta)
     update_write_meta.is_Br  := u.pd.brType === BrType.branch
     update_write_meta.is_RVC := u.pd.isRVC
@@ -246,7 +243,12 @@ class MicroBTB extends BasePredictor
                                     Mux(update_taken,3.U,0.U),
                                     satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)
                                 )
-    meta.wdata := update_write_meta
+
+    for (b <- 0 until PredictWidth) {
+        metas(b).wen := meta_write_valid && b.U === update_bank
+        metas(b).wWay := update_write_way
+        metas(b).wdata := update_write_meta
+    }
     // when(meta_write_valid)
     // {
     //     //commit update
