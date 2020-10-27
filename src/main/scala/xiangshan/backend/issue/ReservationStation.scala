@@ -149,7 +149,6 @@ class ReservationStation
   val tailAdd = tailAll + 1.U
   val tailSub = tailAll - 1.U
   tailAll := Mux(tailKeep, tailAll, Mux(tailInc, tailAdd, tailSub))
-  assert(tailAll < 9.U)
   // Select to Dequeue
   val deqSel = if (fifo) 0.U else PriorityEncoder(idValidQue & srcIdRdy) //may not need idx, just need oneHot, idx by IdQue's idx
   val deqSelIq = idQue(deqSel)
@@ -250,7 +249,6 @@ class ReservationStation
   ) // Note: direct by IQue's idx, different from deqSel
 
   io.numExist := Mux(tailAll === iqSize.U, (iqSize-1).U, tailAll)
-  assert(tailAll < 9.U)
 
   //-----------------------------------------
   // Issue with No Delay
