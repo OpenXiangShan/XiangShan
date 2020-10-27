@@ -94,7 +94,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
   (0 until LoadPipelineWidth).map(i => {
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lq lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
           io.loadIn(i).bits.uop.lqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -108,7 +108,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
           io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
           )
         }.otherwise {
-          XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
+          XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
           io.loadIn(i).bits.uop.lqIdx,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
