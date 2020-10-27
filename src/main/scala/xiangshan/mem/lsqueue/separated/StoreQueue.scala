@@ -21,7 +21,6 @@ object SqPtr extends HasXSParameter {
   }
 }
 
-
 // Store Queue
 class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
@@ -36,6 +35,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
+    val oldestStore = Output(Valid(new RoqPtr))
   })
   
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
@@ -125,9 +125,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     }
   })
 
-  // writeback up to 2 store insts to CDB
-  // choose the first two valid store requests from deqPtr
-
   def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
     val length = mask.length
     val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
@@ -156,9 +153,16 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     (selValid, selVec)
   }
 
-  val storeWbSelVec = VecInit((0 until StoreQueueSize).map(i => {
-    allocated(i) && valid(i) && !writebacked(i)
-  }))
+  // select the last writebacked instruction
+  val validStoreVec = VecInit((0 until StoreQueueSize).map(i => !(allocated(i) && valid(i))))
+  val storeNotValid = SqPtr(false.B, getFirstOne(validStoreVec, tailMask))
+  val storeValidIndex = (storeNotValid - 1.U).value
+  io.oldestStore.valid := allocated(ringBufferTailExtended.value) && valid(ringBufferTailExtended.value) && !commited(storeValidIndex)
+  io.oldestStore.bits := uop(storeValidIndex).roqIdx
+
+  // writeback up to 2 store insts to CDB
+  // choose the first two valid store requests from deqPtr
+  val storeWbSelVec = VecInit((0 until StoreQueueSize).map(i => allocated(i) && valid(i) && !writebacked(i)))
   val (storeWbValid, storeWbSel) = selectFirstTwo(storeWbSelVec, tailMask)
 
   (0 until StorePipelineWidth).map(i => {
@@ -176,15 +180,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     }
   })
 
-  // remove retired insts from sq, add retired store to sbuffer
-
-  // move tailPtr
-  // allocatedMask: dequeuePtr can go to the next 1-bit
-  val allocatedMask = VecInit((0 until StoreQueueSize).map(i => allocated(i) || !enqDeqMask(i)))
-  // find the first one from deqPtr (ringBufferTail)
-  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended.flag)
-  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
-  ringBufferTailExtended := nextTail
 
   // load forward query
   // check over all lq entries and forward data from the first matched store
@@ -246,13 +241,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     }
   })
 
+  // remove retired insts from sq, add retired store to sbuffer
   val storeCommitSelVec = VecInit((0 until StoreQueueSize).map(i => {
     allocated(i) && commited(i)
   }))
   val (storeCommitValid, storeCommitSel) = selectFirstTwo(storeCommitSelVec, tailMask)
-  
-  // get no more than 2 commited store from storeCommitedQueue
   // send selected store inst to sbuffer
+  val dequeueValid = Wire(Vec(2, Bool()))
   (0 until 2).map(i => {
     val ptr = storeCommitSel(i)
     val mmio = data(ptr).mmio
@@ -268,11 +263,14 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
     
     // update sq meta if store inst is send to sbuffer
-    when(storeCommitValid(i) && (mmio || io.sbuffer(i).ready)) {
+    dequeueValid(i) := storeCommitValid(i) && (mmio || io.sbuffer(i).ready)
+    when (dequeueValid(i)) {
       allocated(ptr) := false.B
     }
   })
-  
+  // move tailPtr
+  ringBufferTailExtended := ringBufferTailExtended + PopCount(dequeueValid)
+
   // Memory mapped IO / other uncached operations
   
   // setup misc mem access req
