@@ -81,7 +81,7 @@ class LoadUnit_S0 extends XSModule {
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
-  io.in.ready := io.out.ready
+  io.in.ready := io.out.fire()
 
   XSDebug(io.dcacheReq.fire(), "[DCACHE LOAD REQ] pc %x vaddr %x paddr will be %x\n", 
     s0_uop.cf.pc, s0_vaddr, s0_paddr
