@@ -54,7 +54,7 @@ class LoadUnit extends XSModule {
   io.dtlb.req.bits.cmd := TlbCmd.read
   io.dtlb.req.bits.roqIdx := l2_out.bits.uop.roqIdx
   io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx
+  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx // FIXME: need update
 
   l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
   l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss
@@ -185,9 +185,11 @@ class LoadUnit extends XSModule {
   // Store addr forward match
   // If match, get data / fmask from store queue / store buffer
 
+  // io.lsroq.forward := DontCare
   io.lsroq.forward.paddr := l4_out.bits.paddr
   io.lsroq.forward.mask := io.dcache.resp.bits.meta.mask
   io.lsroq.forward.lsroqIdx := l4_out.bits.uop.lsroqIdx
+  io.lsroq.forward.sqIdx := l4_out.bits.uop.sqIdx
   io.lsroq.forward.uop := l4_out.bits.uop
   io.lsroq.forward.pc := l4_out.bits.uop.cf.pc
   io.lsroq.forward.valid := io.dcache.resp.valid //TODO: opt timing
@@ -195,6 +197,7 @@ class LoadUnit extends XSModule {
   io.sbuffer.paddr := l4_out.bits.paddr
   io.sbuffer.mask := io.dcache.resp.bits.meta.mask
   io.sbuffer.lsroqIdx := l4_out.bits.uop.lsroqIdx
+  io.sbuffer.sqIdx := l4_out.bits.uop.sqIdx
   io.sbuffer.uop := DontCare
   io.sbuffer.pc := l4_out.bits.uop.cf.pc
   io.sbuffer.valid := l4_out.valid

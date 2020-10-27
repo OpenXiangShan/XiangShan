@@ -6,6 +6,7 @@ import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
@@ -140,6 +141,7 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
+
 class PerfDebugInfo extends XSBundle {
   // val fetchTime = UInt(64.W)
   val renameTime = UInt(64.W)
@@ -149,12 +151,29 @@ class PerfDebugInfo extends XSBundle {
   // val commitTime = UInt(64.W)
 }
 
+// Load / Store Index
+//
+// When using unified lsroq, lsIdx serves as lsroqIdx,
+// while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
+// All lsroqIdx will be replaced by new lsIdx in the future.
+trait HasLSIdx { this: HasXSParameter =>
+  
+  // if(EnableUnifiedLSQ){
+  // Unified LSQ
+  val lsroqIdx = UInt(LsroqIdxWidth.W)
+  // } else {
+  // Separate LSQ
+  val lqIdx = new LqPtr
+  val sqIdx = new SqPtr
+}
+
+class LSIdx extends XSBundle with HasLSIdx {}
+
 // CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl {
+class MicroOp extends CfCtrl with HasLSIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
   val roqIdx = new RoqPtr
-  val lsroqIdx = UInt(LsroqIdxWidth.W)
   val diffTestDebugLrScValid = Bool()
   val debugInfo = new PerfDebugInfo
 }

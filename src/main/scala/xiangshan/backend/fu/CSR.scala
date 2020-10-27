@@ -596,10 +596,23 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
 
   // mtval write logic
   val lsroqExceptionAddr = WireInit(0.U(VAddrBits.W))
+  if(EnableUnifiedLSQ){
+    ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
+    ExcitingUtils.addSink(lsroqExceptionAddr, "EXECPTION_VADDR")
+  } else {
+    val lsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
+    lsIdx.lqIdx := io.exception.bits.lqIdx
+    lsIdx.sqIdx := io.exception.bits.sqIdx
+    ExcitingUtils.addSource(lsIdx, "EXECPTION_LSROQIDX")
+    val lqExceptionAddr = WireInit(0.U(VAddrBits.W))
+    val sqExceptionAddr = WireInit(0.U(VAddrBits.W))
+    ExcitingUtils.addSink(lqExceptionAddr, "EXECPTION_LOAD_VADDR")
+    ExcitingUtils.addSink(sqExceptionAddr, "EXECPTION_STORE_VADDR")
+    lsroqExceptionAddr := Mux(CommitType.lsInstIsStore(io.exception.bits.ctrl.commitType), sqExceptionAddr, lqExceptionAddr)
+  }
+
   val atomExceptionAddr = WireInit(0.U(VAddrBits.W))
   val atomOverrideXtval = WireInit(false.B)
-  ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSink(lsroqExceptionAddr, "EXECPTION_VADDR")
   ExcitingUtils.addSink(atomExceptionAddr, "ATOM_EXECPTION_VADDR")
   ExcitingUtils.addSink(atomOverrideXtval, "ATOM_OVERRIDE_XTVAL")
   val memExceptionAddr = Mux(atomOverrideXtval, atomExceptionAddr, lsroqExceptionAddr)
