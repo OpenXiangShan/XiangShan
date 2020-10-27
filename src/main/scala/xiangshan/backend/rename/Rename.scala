@@ -68,8 +68,11 @@ class Rename extends XSModule {
     uop.src2State := DontCare
     uop.src3State := DontCare
     uop.roqIdx := DontCare
-    uop.lsroqIdx := DontCare
     uop.diffTestDebugLrScValid := DontCare
+
+    uop.lsroqIdx := DontCare
+    uop.lqIdx := DontCare
+    uop.sqIdx := DontCare
   })
 
   var lastReady = WireInit(io.out(0).ready)

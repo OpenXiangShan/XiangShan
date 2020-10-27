@@ -52,13 +52,16 @@ class LsPipelineBundle extends XSBundle {
 class LoadForwardQueryIO extends XSBundle {
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt(8.W))
-  val lsroqIdx = Output(UInt(LsroqIdxWidth.W))
   val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool()) //for debug
-
+  
   val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
+
+  val lsroqIdx = Output(UInt(LsroqIdxWidth.W))
+  // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
+  val sqIdx = Output(new SqPtr)
 }
 
 class MemToBackendIO extends XSBundle {
@@ -73,10 +76,13 @@ class MemToBackendIO extends XSBundle {
   val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-  val lsroqIdxs = Output(Vec(RenameWidth, UInt(LsroqIdxWidth.W)))
+  val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
   val roqDeqPtr = Input(new RoqPtr)
 }
 
+// Memory pipeline wrapper
+//
+// Wrap the whole memory access pipeline as a single module "Memend"
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
@@ -93,7 +99,7 @@ class Memend extends XSModule {
   val storeUnits = (0 until exuParameters.StuCnt).map(_ => Module(new StoreUnit))
   val atomicsUnit = Module(new AtomicsUnit)
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
-  val lsroq = Module(new Lsroq)
+  val lsroq = Module(new LsqWrappper) 
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
@@ -139,7 +145,7 @@ class Memend extends XSModule {
   lsroq.io.stout       <> io.backend.stout
   lsroq.io.commits     <> io.backend.commits
   lsroq.io.dp1Req      <> io.backend.dp1Req
-  lsroq.io.lsroqIdxs   <> io.backend.lsroqIdxs
+  lsroq.io.lsIdxs   <> io.backend.lsIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   lsroq.io.roqDeqPtr := io.backend.roqDeqPtr
   io.backend.replayAll <> lsroq.io.rollback
