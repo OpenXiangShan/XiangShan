@@ -4,13 +4,13 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan.backend.decode.SrcType
-import xiangshan.{MicroOp, Redirect, ReplayPregReq, RoqCommit, XSBundle, XSModule}
-
+import xiangshan._
+import xiangshan.backend.roq.RoqPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int, replayWidth: Int) extends XSBundle {
   val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
-  val commits = Input(Vec(CommitWidth, Valid(new RoqCommit)))
+  val dequeueRoqIndex = Input(Valid(new RoqPtr))
   val redirect = Flipped(ValidIO(new Redirect))
   val replayPregReq = Output(Vec(replayWidth, new ReplayPregReq))
   val inReplayWalk = Output(Bool())
@@ -89,14 +89,17 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
 
   // commit: from s_dispatched to s_invalid
-  val numCommit = PopCount(io.commits.map(commit => !commit.bits.isWalk && commit.valid))
-  val commitBits = (1.U((CommitWidth+1).W) << numCommit).asUInt() - 1.U
-  for (i <- 0 until CommitWidth) {
-    when (commitBits(i)) {
-      stateEntries(commitIndex(i)) := s_invalid
-
-      XSError(stateEntries(commitIndex(i)) =/= s_dispatched, "state of the commit entry is not s_dispatched\n")
+  val needDequeue = Wire(Vec(size, Bool()))
+  val deqRoqIdx = io.dequeueRoqIndex.bits
+  for (i <- 0 until size) {
+    needDequeue(i) := stateEntries(i)  === s_dispatched && io.dequeueRoqIndex.valid && !isAfter(uopEntries(i).roqIdx, deqRoqIdx) && dispatchedMask(i)
+    when (needDequeue(i)) {
+      stateEntries(i) := s_invalid
     }
+
+    XSInfo(needDequeue(i), p"dispatched entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
+      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx.asUInt)} " +
+      p"left dispatch queue with deqRoqIndex 0x${Hexadecimal(io.dequeueRoqIndex.bits.asUInt)}\n")
   }
 
   // redirect: cancel uops currently in the queue
@@ -107,14 +110,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
     roqNeedFlush(i) := uopEntries(i.U).roqIdx.needFlush(io.redirect)
-    needCancel(i) := stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && mispredictionValid) || exceptionValid || flushPipeValid)
+    needCancel(i) := stateEntries(i) =/= s_invalid && ((roqNeedFlush(i) && mispredictionValid) || exceptionValid || flushPipeValid) && !needDequeue(i)
+
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i.U).cf.pc)}) " +
-      p"roqIndex ${uopEntries(i.U).roqIdx} " +
-      p"cancelled with redirect roqIndex ${io.redirect.bits.roqIdx}\n")
+    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
+      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx.asUInt)} " +
+      p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx.asUInt)}\n")
   }
 
   // replay: from s_dispatched to s_valid
@@ -253,7 +257,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
       Mux(inReplayWalk, dispatchPtr - dispatchReplayStep, dispatchPtr + numDeq))
   )
 
-  headPtr := Mux(exceptionValid, 0.U.asTypeOf(new CircularQueuePtr(size)), headPtr + numCommit)
+  headPtr := Mux(exceptionValid, 0.U.asTypeOf(new CircularQueuePtr(size)), headPtr + PopCount(needDequeue))
 
   /**
     * Part 4: set output and input

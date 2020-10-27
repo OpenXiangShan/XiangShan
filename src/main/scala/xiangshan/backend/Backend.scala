@@ -213,8 +213,11 @@ class Backend extends XSModule
   roq.io.dp1Req.foreach(_.bits.debugInfo.dispatchTime := timer)
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
-  dispatch.io.commits <> roq.io.commits
   dispatch.io.lsIdxs <> io.mem.lsIdxs
+  dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.mem.oldestStore.valid
+  // store writeback must be after commit roqIdx
+  dispatch.io.dequeueRoqIndex.bits := Mux(io.mem.oldestStore.valid, io.mem.oldestStore.bits, roq.io.commitRoqIndex.bits)
+
 
   intRf.io.readPorts <> dispatch.io.readIntRf
   fpRf.io.readPorts <> dispatch.io.readFpRf ++ issueQueues.flatMap(_.io.readFpRf)
