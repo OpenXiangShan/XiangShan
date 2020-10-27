@@ -236,7 +236,7 @@ class LoadUnit extends XSModule {
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire(), false.B)
+  PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire() || load_s1.io.out.bits.uop.needFlush(io.redirect), false.B)
 
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
