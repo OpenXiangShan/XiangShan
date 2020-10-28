@@ -229,7 +229,7 @@ class ReservationStationNew
     if (i != 0) {
       when (redHitVec(i)) { validQueue(i.U - moveMask(i-1)) := false.B }
     } else {
-      // Nothing to do
+      when (redHitVec(i) && !moveMask(i)) { validQueue(i) := false.B }
     }
   }
 
