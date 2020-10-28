@@ -1,7 +1,7 @@
 [submodule "rocket-chip"]
 	path = rocket-chip
 	url = https://github.com/chipsalliance/rocket-chip.git
-	branch = 2bdb03dbca3f77ad4c378cc1b95ab4961bc1448a
+	branch = d6bd3c61993637c3f10544c59e861fae8af29f39
 [submodule "block-inclusivecache-sifive"]
 	path = block-inclusivecache-sifive
 	url = https://github.com/RISCVERS/block-inclusivecache-sifive.git

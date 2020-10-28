@@ -5,7 +5,7 @@ import scalalib._
 import coursier.maven.MavenRepository
 
 object CustomZincWorkerModule extends ZincWorkerModule {
-  def repositories() = Seq(
+  def repositories() = super.repositories ++ Seq(
     MavenRepository("https://maven.aliyun.com/repository/public"),
     MavenRepository("https://maven.aliyun.com/repository/apache-snapshots")
   )
@@ -26,7 +26,7 @@ trait CommonModule extends ScalaModule {
 }
 
 val rocketChisel = Agg(
-  ivy"edu.berkeley.cs::chisel3:3.3.1"
+  ivy"edu.berkeley.cs::chisel3:3.4.0"
 )
 
 object `rocket-chip` extends SbtModule with CommonModule {
@@ -68,7 +68,7 @@ object XiangShan extends CommonModule with SbtModule {
   override def forkArgs = Seq("-Xmx10G")
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
-    ivy"edu.berkeley.cs::chisel3:3.3.2"
+    ivy"edu.berkeley.cs::chisel3:3.4.0-RC3"
   )
 
   override def moduleDeps = super.moduleDeps ++ Seq(`rocket-chip`, `block-inclusivecache-sifive`)

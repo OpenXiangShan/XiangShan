@@ -40,7 +40,7 @@ class ShowPrintTransform extends Transform with DependencyAPIMigration {
 
     def findSubModules(m: DefModule): Unit = {
       def viewStmt(s: Statement): Statement = s match {
-        case DefInstance(_, name, module) =>
+        case DefInstance(_, name, module, _) =>
           ancestors(module) = ancestors(m.name) + m.name
           queue += module
           s
