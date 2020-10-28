@@ -143,6 +143,7 @@ class LoadUnit_S2 extends XSModule {
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_cache_miss = io.dcacheResp.bits.miss
+  val s2_cache_nack = io.dcacheResp.bits.nack
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid
@@ -205,13 +206,15 @@ class LoadUnit_S2 extends XSModule {
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
-  io.out.bits.miss := s2_cache_miss && !fullForward
+  io.out.bits.miss := (s2_cache_miss || s2_cache_nack) && !fullForward
+  io.out.bits.mmio := io.in.bits.mmio
 
   io.in.ready := io.out.ready || !io.in.valid
 
-  XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n", 
+  XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b) + %x(%b)\n", 
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
-    forwardData.asUInt, forwardMask.asUInt
+    io.lsroq.forwardData.asUInt, io.lsroq.forwardMask.asUInt, 
+    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
   )
 
 }

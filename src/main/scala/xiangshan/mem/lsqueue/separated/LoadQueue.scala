@@ -386,24 +386,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
       val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
       XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
-      // check if rollback is needed for load in l4
-      val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
-        io.forward(j).valid && // L4 valid\
-          io.forward(j).uop.isAfter(io.storeIn(i).bits.uop) &&
-          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
-          (io.storeIn(i).bits.mask & io.forward(j).mask).orR
-      }))
-      val l4Violation = l4ViolationVec.asUInt().orR()
-      val l4ViolationUop = getOldestInTwo(l4ViolationVec, io.forward.map(_.uop))
-
-      val rollbackValidVec = Seq(lqViolation, wbViolation, l4Violation)
-      val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l4ViolationUop)
+      val rollbackValidVec = Seq(lqViolation, wbViolation)
+      val rollbackUopVec = Seq(lqViolationUop, wbViolationUop)
       rollback(i).valid := Cat(rollbackValidVec).orR
       val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
       val oneAfterZero = mask(1)(0)
-      val rollbackUop = Mux(oneAfterZero && mask(2)(0),
-        rollbackUopVec(0),
-        Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
+      val rollbackUop = Mux(oneAfterZero, rollbackUopVec(0), rollbackUopVec(1))
       rollback(i).bits.roqIdx := rollbackUop.roqIdx - 1.U
 
       rollback(i).bits.isReplay := true.B
@@ -421,11 +409,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
         "need rollback (ld/st wb together) pc %x roqidx %d target %x\n",
         io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, wbViolationUop.roqIdx
       )
-      XSDebug(
-        l4Violation,
-        "need rollback (l4 load) pc %x roqidx %d target %x\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, l4ViolationUop.roqIdx
-      )
+
     }.otherwise {
       rollback(i).valid := false.B
     }
@@ -540,7 +524,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   for (i <- 0 until LoadQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, data(i).paddr)
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

@@ -366,7 +366,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
 
   for (i <- 0 until StoreQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, data(i).paddr)
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

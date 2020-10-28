@@ -568,24 +568,12 @@ class Lsroq extends XSModule with HasDCacheParameters {
       val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
       XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
-      // check if rollback is needed for load in l4
-      val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
-        io.forward(j).valid && // L4 valid\
-          io.forward(j).uop.isAfter(io.storeIn(i).bits.uop) &&
-          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
-          (io.storeIn(i).bits.mask & io.forward(j).mask).orR
-      }))
-      val l4Violation = l4ViolationVec.asUInt().orR()
-      val l4ViolationUop = getOldestInTwo(l4ViolationVec, io.forward.map(_.uop))
-
-      val rollbackValidVec = Seq(lsroqViolation, wbViolation, l4Violation)
-      val rollbackUopVec = Seq(lsroqViolationUop, wbViolationUop, l4ViolationUop)
+      val rollbackValidVec = Seq(lsroqViolation, wbViolation)
+      val rollbackUopVec = Seq(lsroqViolationUop, wbViolationUop)
       rollback(i).valid := Cat(rollbackValidVec).orR
       val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
       val oneAfterZero = mask(1)(0)
-      val rollbackUop = Mux(oneAfterZero && mask(2)(0),
-        rollbackUopVec(0),
-        Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
+      val rollbackUop = Mux(oneAfterZero, rollbackUopVec(0), rollbackUopVec(1))
       rollback(i).bits.roqIdx := rollbackUop.roqIdx - 1.U
 
       rollback(i).bits.isReplay := true.B
@@ -602,11 +590,6 @@ class Lsroq extends XSModule with HasDCacheParameters {
         wbViolation,
         "need rollback (ld/st wb together) pc %x roqidx %d target %x\n",
         io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, wbViolationUop.roqIdx
-      )
-      XSDebug(
-        l4Violation,
-        "need rollback (l4 load) pc %x roqidx %d target %x\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx, l4ViolationUop.roqIdx
       )
     }.otherwise {
       rollback(i).valid := false.B
