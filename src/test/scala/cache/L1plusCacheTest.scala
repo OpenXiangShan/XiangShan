@@ -195,22 +195,21 @@ class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
 
   top.Parameters.set(top.Parameters.debugParameters)
 
+  val annos = Seq(
+    VerilatorBackendAnnotation,
+    RunFirrtlTransformAnnotation(new PrintModuleName)
+  )
+
   it should "run" in {
 
     implicit val p = Parameters((site, up, here) => {
       case L1plusCacheTestKey => 0
     })
 
-    /*
-    test(LazyModule(new L1plusTestTopWrapper()).module)
-      .withAnnotations(Seq(
-        VerilatorBackendAnnotation,
-        RunFirrtlTransformAnnotation(new PrintModuleName)
-      )){ c =>
-        */
 
     test(LazyModule(new L1plusTestTopWrapper()).module)
-      .withAnnotations(Seq(VerilatorBackendAnnotation)){ c =>
+      .withAnnotations(annos){ c =>
+
 
         c.io.in.initSource().setSourceClock(c.clock)
         c.io.out.initSink().setSinkClock(c.clock)
