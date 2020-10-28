@@ -223,7 +223,11 @@ class ReservationStationNew
   val redHitVec = (0 until iqSize).map(i => uop(idxQueue(i)).roqIdx.needFlush(io.redirect))
   //redHitVec.zip(validQueue).map{ case (r,v) => when (r) { v := false.B } }
   for (i <- 0 until iqSize) {
-    when (redHitVec(i)) { validQueue(i.U - moveMask(i)) := false.B }
+    if (i != 0) {
+      when (redHitVec(i)) { validQueue(i.U - moveMask(i-1)) := false.B }
+    } else {
+      // Nothing to do
+    }
   }
 
   // bypass send
@@ -236,7 +240,7 @@ class ReservationStationNew
   io.selectedUop.bits  := bpQueue.io.out.bits
 
   // output
-  io.deq.valid := selReg && !haveBubble // TODO: read it and add assert for rdyQueue
+  io.deq.valid := selReg && !haveBubble && !uop(idxQueue(selectedIdxReg)).roqIdx.needFlush(io.redirect)// TODO: read it and add assert for rdyQueue
   io.deq.bits.uop := uop(idxQueue(selectedIdxReg))
   io.deq.bits.src1 := data(idxQueue(selectedIdxReg))(0)
   if(srcNum > 1) { io.deq.bits.src2 := data(idxQueue(selectedIdxReg))(1) }
