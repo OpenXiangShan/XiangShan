@@ -79,10 +79,7 @@ object XiangShan extends CommonModule with SbtModule {
 
   override def forkArgs = Seq("-Xmx10G")
 
-  override def ivyDeps = super.ivyDeps() ++ Agg(
-    ivy"edu.berkeley.cs::chisel3:3.4.0-RC3"
-  )
-
+  override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
     `rocket-chip`, 
 	`block-inclusivecache-sifive`,

@@ -279,7 +279,7 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
 
         c.clock.step(100)
 
-        for(i <- 0 until 10){
+        for(i <- 0 until 100000){
           val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
           val data = Random.nextLong() & 0x7fffffffffffffffL
           c.io.in.enqueue(chiselTypeOf(c.io.in.bits).Lit(
