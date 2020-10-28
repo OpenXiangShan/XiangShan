@@ -217,8 +217,17 @@ class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
 
         c.clock.step(100)
 
-        for(i <- 0 until 1000){
-          val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
+        val mem_size = 128 * 1024 * 1024
+        val block_size = 64
+        val nblocks = mem_size / block_size
+        for(i <- 0 until nblocks){
+          // we do not support l1plus flush for now
+          // so we could only scan the whole memory,
+          // and write every block for only once.
+          // if we rewrite the same block multiple times
+          // L1plus could not give correct data since it hasn't been flushed
+          // val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
+          val addr = i * 64
           val words = (0 until 8) map { _ =>
             (BigInt(Random.nextLong() & 0x7fffffffffffffffL))
           }
