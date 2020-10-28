@@ -24,9 +24,7 @@ cpu:
 # ------------------------------------------------------------------
 
 cputest:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) $(EMU_ARGS) run 2>&1 | tee > cpu.log
-	cat cpu.log | grep different
-	cat cpu.log | grep IPC
+	bash cputest.sh
 
 # bputest:
 # 	$(MAKE) -C $(AM_HOME)/tests/bputest $(ARCH) run 2>&1 | tee > bpu.log

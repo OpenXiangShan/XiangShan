@@ -90,5 +90,6 @@ package object xiangshan {
 
     def apply() = UInt(2.W)
     def isLoadStore(commitType: UInt) = commitType(1)
+    def lsInstIsStore(commitType: UInt) = commitType(0)
   }
 }

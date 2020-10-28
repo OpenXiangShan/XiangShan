@@ -53,9 +53,12 @@ class MulDivFenceExeUnit extends Exu(Exu.mulDivFenceExeUnitCfg){
     io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
-  XSDebug(io.in.valid, "src1:%x src2:%x pc:%x fuType:%b fuOpType:%b roqIdx:%d (%d%d%d)\n", src1, src2, io.in.bits.uop.cf.pc, io.in.bits.uop.ctrl.fuType, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.roqIdx, isMul, isDiv, isFence)
+  XSDebug(io.in.valid, "src1:%x src2:%x pc:%x fuType:%b fuOpType:%b roqIdx:%d (%d%d%d)\n",
+    src1, src2, io.in.bits.uop.cf.pc, io.in.bits.uop.ctrl.fuType, io.in.bits.uop.ctrl.fuOpType,
+    io.in.bits.uop.roqIdx.asUInt, isMul, isDiv, isFence)
   XSDebug(io.out.valid, "Out(%d %d) res:%x pc:%x fuType:%b fuOpType:%b roqIdx:%d chosen:%d\n",
-    io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc, io.in.bits.uop.ctrl.fuType, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.roqIdx, arb.io.chosen
+    io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc, io.in.bits.uop.ctrl.fuType,
+    io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.roqIdx.asUInt, arb.io.chosen
   )
 }
 
