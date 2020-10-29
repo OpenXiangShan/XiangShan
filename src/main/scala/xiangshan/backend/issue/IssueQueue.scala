@@ -39,7 +39,7 @@ class IssueQueue
   XSDebug(io.tlbFeedback.valid,
     "tlb feedback: hit: %d roqIdx: %d\n",
     io.tlbFeedback.bits.hit,
-    io.tlbFeedback.bits.roqIdx
+    io.tlbFeedback.bits.roqIdx.asUInt
   )
   /*
       invalid --[enq]--> valid --[deq]--> wait --[tlbHit]--> invalid
@@ -259,11 +259,11 @@ class IssueQueue
     val cnt = cntQueue(uopQIdx)
     val nextIdx = i.U - moveMask(i)
     //TODO: support replay
-    val roqIdxMatch = uop.roqIdx === io.tlbFeedback.bits.roqIdx
+    val roqIdxMatch = uop.roqIdx.asUInt === io.tlbFeedback.bits.roqIdx.asUInt
     val notEmpty = stateQueue(i)=/=s_invalid
     val replayThis = (stateQueue(i)===s_wait) && tlbMiss && roqIdxMatch
     val tlbHitThis = notEmpty && tlbHit && roqIdxMatch
-    val flushThis = notEmpty && uop.needFlush(io.redirect)
+    val flushThis = notEmpty && uop.roqIdx.needFlush(io.redirect)
 
     when(replayThis){
       stateQueue(nextIdx) := s_replay
@@ -283,7 +283,7 @@ class IssueQueue
 
 
   // assign outputs
-  io.numExist := Mux(isFull, (qsize-1).U, tailPtr)
+  io.numExist := Mux(isFull, (qsize-1).U, PopCount(stateQueue.map(_ =/= s_invalid)))
 
   // Debug sigs
   XSInfo(

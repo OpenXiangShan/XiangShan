@@ -70,6 +70,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+RANDOMIZE_MEM_INIT \
   $(VTHREAD_FLAGS) \
   --assert \
+  --trace \
   --savable \
   --stats-vars \
   --output-split 5000 \
@@ -96,7 +97,7 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j250 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j80 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
 endif
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
@@ -132,7 +133,7 @@ clean:
 
 init:
 	git submodule update --init
-	# do not use a recursive init to pull some not used submodules
+	@# do not use a recursive init to pull some not used submodules
 	cd ./rocket-chip/ && git submodule update --init api-config-chipsalliance hardfloat
 
 .PHONY: verilog emu clean help init $(REF_SO)

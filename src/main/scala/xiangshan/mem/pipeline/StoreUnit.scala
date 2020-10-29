@@ -58,7 +58,7 @@ class StoreUnit extends XSModule {
   io.dtlb.req.bits.cmd := TlbCmd.write
   io.dtlb.req.bits.roqIdx := io.stin.bits.uop.roqIdx
   io.dtlb.req.bits.debug.pc := io.stin.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.lsroqIdx := io.stin.bits.uop.lsroqIdx
+  io.dtlb.req.bits.debug.lsroqIdx := io.stin.bits.uop.lsroqIdx // FIXME: need update
 
   s2_out.bits := DontCare
   s2_out.bits.vaddr := saddr
@@ -67,7 +67,7 @@ class StoreUnit extends XSModule {
   s2_out.bits.uop := io.stin.bits.uop
   s2_out.bits.miss := io.dtlb.resp.bits.miss
   s2_out.bits.mask := genWmask(s2_out.bits.vaddr, io.stin.bits.uop.ctrl.fuOpType(1,0))
-  s2_out.valid := io.stin.valid && !io.dtlb.resp.bits.miss && !s2_out.bits.uop.needFlush(io.redirect)
+  s2_out.valid := io.stin.valid && !io.dtlb.resp.bits.miss && !s2_out.bits.uop.roqIdx.needFlush(io.redirect)
   io.stin.ready := s2_out.ready
 
   // exception check
@@ -93,7 +93,7 @@ class StoreUnit extends XSModule {
   XSDebug(io.tlbFeedback.valid, 
     "S3 Store: tlbHit: %d roqIdx: %d\n",
     io.tlbFeedback.bits.hit,
-    io.tlbFeedback.bits.roqIdx
+    io.tlbFeedback.bits.roqIdx.asUInt
   )
 
   // get paddr from dtlb, check if rollback is needed
