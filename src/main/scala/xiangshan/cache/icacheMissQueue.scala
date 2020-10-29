@@ -7,12 +7,6 @@ import xiangshan._
 import utils._
 import chisel3.ExcitingUtils._
 import chisel3.util.experimental.BoringUtils
-import chipsalliance.rocketchip.config.Parameters
-
-import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
-import freechips.rocketchip.diplomacy.{AddressSet,IdRange,LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
-import bus.tilelink.{TLParameters, TLPermissions, ClientMetadata}
 
 abstract class ICacheMissQueueModule extends XSModule
   with HasICacheParameters 
@@ -50,10 +44,12 @@ class ICacheMetaWrite extends ICacheMissQueueBundle
 class IcacheMissReq extends ICacheBundle
 {
     val addr  = UInt(PAddrBits.W)
+    val setIdx   = UInt(idxBits.W)
     val waymask = UInt(PredictWidth.W)
     val clientID = UInt(2.W)
-    def apply(missAddr:UInt, missWaymask:UInt, source:UInt) = {
+    def apply(missAddr:UInt, missIdx:UInt, missWaymask:UInt, source:UInt) = {
       this.addr := missAddr
+      this.setIdx  := missIdx
       this.waymask := missWaymask
       this.clientID := source
     }
@@ -65,7 +61,7 @@ class IcacheMissResp extends ICacheBundle
     val clientID = UInt(2.W)
 }
 
-class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
+class IcacheMissEntry extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
         // MSHR ID
@@ -74,8 +70,8 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
         val req = Flipped(DecoupledIO(new IcacheMissReq))
         val resp = DecoupledIO(new IcacheMissResp)
         
-        val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-        val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+        val mem_acquire = DecoupledIO(new L1plusCacheReq)
+        val mem_grant   = FFlipped(DecoupledIO(new L1plusCacheResp))
 
         val meta_write = DecoupledIO(new ICacheMetaWrite)
         val refill = DecoupledIO(new ICacheRefill)
@@ -88,15 +84,14 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
 
     //req register
     val req = Reg(new IcacheMissReq)
-    val req_idx = get_idx(req.addr)
-    val req_tag = get_tag(req.addr)
+    val req_idx = get_idx(req.setIdx)         //virtual index
+    val req_tag = get_tag(req.addr)           //physical tag
     val req_waymask = req.waymask
 
     //8 for 64 bits bus and 2 for 256 bits
     val readBeatCnt = Counter(refillCycles)
-    val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
-
-    val (_, _, refill_done, refill_cnt) = edge.count(io.mem_grant)
+    //val respDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
+    val respDataReg = Reg(UInt(blockBits.W))
 
     //initial
     io.resp.bits := DontCare
@@ -115,7 +110,6 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
     .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
     //state change
-    val countFull = readBeatCnt.value === (refillCycles - 1).U
     switch(state){
       is(s_idle){
         when(io.req.fire()){
@@ -133,13 +127,9 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
       }
 
       is(s_memReadResp){
-        when (edge.hasData(io.mem_grant.bits) && io.mem_grant.fire()) {
-          readBeatCnt.inc()
-	        refillDataReg(readBeatCnt.value) := io.mem_grant.bits.data
-          when(countFull){
-            assert(refill_done, "refill not done!")
-            state := Mux(needFlush || io.flush,s_wait_resp,s_write_back)
-          }
+        when (io.mem_grant.bits.id === io.id && io.mem_grant.fire()) {
+	        respDataReg := io.mem_grant.bits.data
+          state := Mux(needFlush || io.flush,s_wait_resp,s_write_back)
         }
       }
 
@@ -150,8 +140,8 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
       }
 
       is(s_wait_resp){
-        io.resp.bits.data := refillDataReg.asUInt
-	io.resp.bits.clientID := req.clientID
+        io.resp.bits.data := respDataReg.asUInt
+	      io.resp.bits.clientID := req.clientID
         when(io.resp.fire() || needFlush ){ state := s_idle }
       }
 
@@ -163,15 +153,14 @@ class IcacheMissEntry(edge: TLEdgeOut) extends ICacheMissQueueModule
     io.meta_write.bits.apply(tag=req_tag, setIdx=req_idx, waymask=req_waymask)
    
     io.refill.valid := (state === s_write_back) && !needFlush
-    io.refill.bits.apply(data=refillDataReg.asUInt,
+    io.refill.bits.apply(data=respDataReg.asUInt,
                         setIdx=req_idx,
                         waymask=req_waymask)
 
     //mem request
-    io.mem_acquire.bits := edge.Get(
-        fromSource      = io.id,
-        toAddress       = groupPC(req.addr),
-        lgSize          = (log2Up(cacheParams.blockBytes)).U )._2 
+    io.mem_acquire.bits.cmd := M_SZ.U 
+    io.mem_acquire.bits.addr := req.
+
 
 
     XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
