@@ -337,6 +337,10 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   io.empty := state === s_send_resp
   flush_block_req := state =/= s_invalid
 
+  when (state =/= s_invalid) {
+    XSDebug(s"L1plusCache flush state machine: %d\n", state)
+  }
+
   // to simplify synchronization, we do not allow reqs with same indexes
   def block_req(addr: UInt) = {
     val pipe_idx_matches = VecInit(pipe.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
@@ -352,6 +356,25 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
     sink.valid   := source.valid && !block_signal
     source.ready := sink.ready   && !block_signal
     sink.bits    := source.bits
+  }
+
+  // debug output
+  when (io.req.valid) {
+    XSDebug(s"L1plusCache req cmd: %x addr: %x id: %d\n",
+      io.req.bits.cmd, io.req.bits.addr, io.req.bits.id)
+  }
+
+  when (io.resp.valid) {
+    XSDebug(s"L1plusCache resp data: %x id: %d\n",
+      io.resp.bits.data, io.resp.bits.id)
+  }
+
+  when (io.flush) {
+    XSDebug(s"L1plusCache flush\n")
+  }
+
+  when (io.empty) {
+    XSDebug(s"L1plusCache empty\n")
   }
 }
 
