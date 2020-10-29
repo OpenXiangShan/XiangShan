@@ -59,15 +59,15 @@ abstract class L1plusCacheBundle extends L1CacheBundle
 // MetaArray and DataArray
 // TODO: dedup with DCache
 class L1plusCacheMetadata extends L1plusCacheBundle {
-  val coh = new ClientMetadata
+  val valid = Bool()
   val tag = UInt(tagBits.W)
 }
 
 object L1plusCacheMetadata {
-  def apply(tag: Bits, coh: ClientMetadata) = {
+  def apply(tag: Bits, valid: Bool) = {
     val meta = Wire(new L1plusCacheMetadata)
     meta.tag := tag
-    meta.coh := coh
+    meta.valid := valid
     meta
   }
 }
@@ -159,34 +159,39 @@ class L1plusCacheDataArray extends L1plusCacheModule {
   }
 }
 
-class L1plusCacheMetadataArray(onReset: () => L1plusCacheMetadata) extends L1plusCacheModule {
-  val rstVal = onReset()
+class L1plusCacheMetadataArray extends L1plusCacheModule {
   val io = IO(new Bundle {
     val read = Flipped(Decoupled(new L1plusCacheMetaReadReq))
     val write = Flipped(Decoupled(new L1plusCacheMetaWriteReq))
     val resp = Output(Vec(nWays, new L1plusCacheMetadata))
   })
-  val rst_cnt = RegInit(0.U(log2Up(nSets+1).W))
-  val rst = rst_cnt < nSets.U
-  val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
-  val wdata = Mux(rst, rstVal, io.write.bits.data).asUInt
-  val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
-  val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
-  when (rst) { rst_cnt := rst_cnt + 1.U }
+  val waddr = io.write.bits.idx
+  val wvalid = io.write.bits.data.valid
+  val wtag = io.write.bits.data.tag.asUInt
+  val wmask = Mux((nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
+  val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
-  val metaBits = rstVal.getWidth
-  val encMetaBits = cacheParams.tagCode.width(metaBits)
+  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(tagBits.W)))
+  val valid_array = RegInit(VecInit(Seq.fill(nSets)(0.U(nWays.W))))
 
-  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(encMetaBits.W)))
-  val wen = rst || io.write.valid
+  val wen = io.write.valid && !reset.toBool
   when (wen) {
-    tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wdata))), wmask)
+    tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wtag))), wmask)
+    when (wvalid) {
+      valid_array(waddr) := valid_array(waddr) | io.write.bits.way_en
+    } .otherwise {
+      valid_array(waddr) := valid_array(waddr) & ~io.write.bits.way_en
+    }
   }
-  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(rdata =>
-      cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
+  val rtags = tag_array.read(io.read.bits.idx, io.read.fire()).map(rdata =>
+      cacheParams.tagCode.decode(rdata).corrected)
+  for (i <- 0 until nWays) {
+    io.resp(i).valid := RegNext(valid_array(io.read.bits.idx)(i))
+    io.resp(i).tag   := rtags(i)
+  }
 
-  io.read.ready := !wen
-  io.write.ready := !rst
+  io.read.ready  := !io.write.valid && !reset.toBool
+  io.write.ready := !reset.toBool
 
   def dumpRead() = {
     when (io.read.fire()) {
@@ -197,15 +202,15 @@ class L1plusCacheMetadataArray(onReset: () => L1plusCacheMetadata) extends L1plu
 
   def dumpWrite() = {
     when (io.write.fire()) {
-      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
-        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+      XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_valid: %x\n",
+        io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.valid)
     }
   }
 
   def dumpResp() = {
     (0 until nWays) map { i =>
-      XSDebug(s"MetaArray Resp: way: $i tag: %x coh: %x\n",
-        io.resp(i).tag, io.resp(i).coh.state)
+      XSDebug(s"MetaArray Resp: way: $i tag: %x valid: %x\n",
+        io.resp(i).tag, io.resp(i).valid)
     }
   }
 
@@ -261,8 +266,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   // core data structures
   val dataArray = Module(new L1plusCacheDataArray)
 
-  def onReset = L1plusCacheMetadata(0.U, ClientMetadata.onReset)
-  val metaArray = Module(new L1plusCacheMetadataArray(onReset _))
+  val metaArray = Module(new L1plusCacheMetadataArray())
   dataArray.dump()
   metaArray.dump()
 
@@ -380,7 +384,7 @@ class L1plusCachePipe extends L1plusCacheModule
   // tag check
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
-  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
+  val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).valid).asUInt
 
   s1_passdown := s1_valid && (!s2_valid || s2_passdown)
 
@@ -395,26 +399,8 @@ class L1plusCachePipe extends L1plusCacheModule
   dump_pipeline_reqs("L1plusCachePipe s2", s2_valid, s2_req)
 
   val s2_tag_match_way = RegEnable(s1_tag_match_way, s1_passdown)
-  val s2_tag_match     = s2_tag_match_way.orR
+  val s2_hit           = s2_tag_match_way.orR
   val s2_hit_way       = OHToUInt(s2_tag_match_way, nWays)
-  val s2_hit_state     = Mux1H(s2_tag_match_way, wayMap((w: Int) => RegEnable(meta_resp(w).coh, s1_passdown)))
-  val s2_has_permission = s2_hit_state.onAccess(s2_req.cmd)._1
-  val s2_new_hit_state  = s2_hit_state.onAccess(s2_req.cmd)._3
-
-  // we not only need permissions
-  // we also require that state does not change on hit
-  // thus we require new_hit_state === old_hit_state
-  //
-  // If state changes on hit,
-  // we should treat it as not hit, and let mshr deal with it,
-  // since we can not write meta data on the main pipeline.
-  // It's possible that we had permission but state changes on hit:
-  // eg: write to exclusive but clean block
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_state === s2_new_hit_state
-
-
-  val s2_info = p"tag match: $s2_tag_match hasPerm: $s2_has_permission" +
-    p" hit state: $s2_hit_state new state: $s2_new_hit_state\n"
 
   val data_resp = io.data_resp
   val s2_data = data_resp(s2_hit_way)
@@ -424,9 +410,6 @@ class L1plusCachePipe extends L1plusCacheModule
       assert(!(s2_valid && s2_hit && decoded.uncorrectable))
       decoded.corrected
     })
-
-  // only dump these signals when they are actually valid
-  dump_pipeline_valids("L1plusCachePipe s2", "s2_hit", s2_valid && s2_hit)
 
   io.resp.valid     := s2_valid && s2_hit
   io.resp.bits.data := s2_data_decoded
@@ -468,12 +451,6 @@ class L1plusCachePipe extends L1plusCacheModule
           req.cmd, req.addr, req.id
         )
       }
-  }
-
-  def dump_pipeline_valids(pipeline_stage_name: String, signal_name: String, valid: Bool) = {
-    when (valid) {
-      XSDebug(p"$pipeline_stage_name $signal_name " + s2_info)
-    }
   }
 }
 
@@ -622,11 +599,11 @@ class L1plusCacheMissEntry(edge: TLEdgeOut) extends L1plusCacheModule
   // --------------------------------------------
   // meta write
   when (state === s_meta_write_req) {
-    io.meta_write.valid         := true.B
-    io.meta_write.bits.idx      := req_idx
-    io.meta_write.bits.data.coh := ClientMetadata(ClientStates.Branch)
-    io.meta_write.bits.data.tag := req_tag
-    io.meta_write.bits.way_en   := req.way_en
+    io.meta_write.valid           := true.B
+    io.meta_write.bits.idx        := req_idx
+    io.meta_write.bits.data.valid := true.B
+    io.meta_write.bits.data.tag   := req_tag
+    io.meta_write.bits.way_en     := req.way_en
 
     when (io.meta_write.fire()) {
       state := s_invalid
@@ -721,9 +698,9 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
   XSDebug(io.refill.fire(), "refill addr %x\n", io.refill.bits.addr)
 
   // print meta_write
-  XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_coh: %d new_tag: %x\n",
+  XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_valid: %d new_tag: %x\n",
     io.meta_write.bits.idx, io.meta_write.bits.way_en, io.meta_write.bits.tag,
-    io.meta_write.bits.data.coh.state, io.meta_write.bits.data.tag)
+    io.meta_write.bits.data.valid, io.meta_write.bits.data.tag)
 
   // print tilelink messages
   when (io.mem_acquire.fire()) {
