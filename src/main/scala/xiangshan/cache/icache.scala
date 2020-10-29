@@ -8,12 +8,6 @@ import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
 import chisel3.util.experimental.BoringUtils
-import chipsalliance.rocketchip.config.Parameters
-
-import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
-import freechips.rocketchip.diplomacy.{AddressSet,IdRange,LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
-import bus.tilelink.{TLParameters, TLPermissions, ClientMetadata}
 
 case class ICacheParameters(
     nSets: Int = 64,
@@ -24,6 +18,7 @@ case class ICacheParameters(
     dataECC: Option[String] = None,
     nSDQ: Int = 17,
     nRPQ: Int = 16,
+    nMissEntries: Int = 1,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
@@ -42,8 +37,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def RVCInsLen = 16
 
   // icache Queue
-  def nMSHRs = 2
-  val groupAlign = log2Up(FetchWidth * 4 * 2)
+  val groupAlign = log2Up(cacheParams.blockBytes)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
   // ICache MSHR settings
@@ -59,9 +53,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
 abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
 
-abstract class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
-  with HasICacheParameters 
-  with HasXSLog
+abstract class ICacheModule extends XSModule
   with ICacheBase
 
 
@@ -90,10 +82,12 @@ class ICacheResp extends ICacheBundle
 }
 
 
-class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
+class ICacheIO extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
+  val mem_acquire = DecoupledIO(new L1plusCacheReq)
+  val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
   val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
 }
@@ -131,29 +125,13 @@ trait ICacheBase extends HasICacheParameters
 
 }
 
-/* ------------------------------------------------------------
- * This module is the Top tilelink module of Icache
- * ------------------------------------------------------------
- */
-class ICache()(implicit p: Parameters) extends LazyModule
-  with HasICacheParameters
-{
-  val clientParameters = TLMasterPortParameters.v1(
-    Seq(TLMasterParameters.v1(
-      name = "icache"))
-  )
-  val clientNode = TLClientNode(Seq(clientParameters))
-  lazy val module = new ICacheImp(this)
-  
-}
-
 
 /* ------------------------------------------------------------
  * This module is a SRAM with 4-way associated mapping
  * The hardware implementation of ICache
  * ------------------------------------------------------------
  */
-class ICacheImp(outer: ICache) extends ICacheModule(outer)
+class ICacheImp extends ICacheModule
 {
   // cut a cacheline into a fetch packet
   def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
@@ -179,10 +157,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   }
 
 
-  val (bus, edge) = outer.clientNode.out.head
-  require(bus.d.bits.data.getWidth == l1BusDataWidth, "ICache: tilelink width does not match")
-  val io = IO(new ICacheIO(edge))
-  val (_, _, refill_done, refill_cnt) = edge.count(bus.d)
+  val io = IO(new ICacheIO)
 
   //----------------------------
   //    Memory Part
@@ -259,6 +234,7 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
+  val s3_idx = get_idx(s3_req_pc)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
@@ -273,11 +249,11 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val waitForRefillDone = cacheflushed
 
   //ICache MissQueue
-  val icacheMissQueue = Module(new IcacheMissQueue(edge))
+  val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
   val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
   icacheMissQueue.io.req.valid := s3_miss && (io.flush === 0.U) && !blocking//TODO: specificate flush condition
-  icacheMissQueue.io.req.bits.apply(missAddr=s3_tlb_resp.paddr,missWaymask=s3_wayMask,source=cacheID.U(2.W))
+  icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := io.flush(1)
 
@@ -368,12 +344,9 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   io.tlb.req.bits.debug.pc := s2_req_pc
   io.tlb.req.bits.debug.lsroqIdx := DontCare
   
-  //tilelink
-  bus.b.ready := true.B
-  bus.c.valid := false.B
-  bus.e.valid := false.B
-  bus.a <> icacheMissQueue.io.mem_acquire
-  icacheMissQueue.io.mem_grant <> bus.d
+  //To L1 plus
+  io.mem_acquire <> icacheMissQueue.io.mem_acquire
+  icacheMissQueue.io.mem_grant <> io.mem_grant
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 

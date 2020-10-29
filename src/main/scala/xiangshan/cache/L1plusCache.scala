@@ -38,11 +38,14 @@ case class L1plusCacheParameters
 
 trait HasL1plusCacheParameters extends HasL1CacheParameters {
   val cacheParams = l1plusCacheParameters
+  val icacheParams = icacheParameters
   val cfg = cacheParams
+  val icfg = icacheParams
 
   def encRowBits = cacheParams.dataCode.width(rowBits)
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
+  def icachemisQueueEntryIdWidth = log2Up(icfg.nMissEntries)
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")

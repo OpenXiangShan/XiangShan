@@ -168,6 +168,7 @@ trait HasXSParameter {
   val l1BusDataWidth = 256
 
   val icacheParameters = ICacheParameters(
+    nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
@@ -235,7 +236,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
-  val icache = LazyModule(new ICache())
+  val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
   val mem = TLIdentityNode()
@@ -258,7 +259,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   private val xbar = TLXbar()
 
   xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
   xbar := TLBuffer() := DebugIdentityNode() := ptw.node
 
   l2.node := xbar
@@ -276,8 +277,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
-  val icache = outer.icache.module
+  val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
+  val icache = Module(new ICache)
 
   // TODO: connect this
 
@@ -286,6 +288,11 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   front.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
+
+  icache.io.mem_acquire <> l1pluscache.io.req
+  l1pluscache.io.resp <> icache.io.mem_grant
+  l1pluscache.io.flush := false.B
+
   mem.io.backend   <> backend.io.mem
 
   ptw.io.tlb(0) <> mem.io.ptw

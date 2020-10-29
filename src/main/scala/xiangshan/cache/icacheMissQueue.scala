@@ -65,7 +65,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 {
     val io = IO(new Bundle{
         // MSHR ID
-        val id = Input(UInt(log2Up(nMSHRs).W))
+        val id = Input(UInt(log2Up(cacheParams.nMissEntries).W))
 
         val req = Flipped(DecoupledIO(new IcacheMissReq))
         val resp = DecoupledIO(new IcacheMissResp)
@@ -133,6 +133,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
         }
       }
 
+      //TODO: Maybe this sate is noe necessary so we don't need respDataReg
       is(s_write_back){
         when(io.refill.fire() && io.meta_write.fire()){
           state := s_wait_resp
@@ -159,7 +160,8 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
     //mem request
     io.mem_acquire.bits.cmd := M_SZ.U 
-    io.mem_acquire.bits.addr := req.
+    io.mem_acquire.bits.addr := req.addr
+    io.mem_acquire.bits.id := io.id
 
 
 
@@ -180,8 +182,8 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
     val req = Flipped(DecoupledIO(new IcacheMissReq))
     val resp = DecoupledIO(new IcacheMissResp)
     
-    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val mem_acquire = DecoupledIO(new L1plusCacheReq)
+    val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
 
     val meta_write = DecoupledIO(new ICacheMetaWrite)
     val refill = DecoupledIO(new ICacheRefill)
@@ -190,9 +192,11 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
 
   })
 
-  val resp_arb       = Module(new Arbiter(new IcacheMissResp,   nMSHRs))
-  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrite,  nMSHRs))
-  val refill_arb     = Module(new Arbiter(new ICacheRefill,     nMSHRs))
+  val resp_arb       = Module(new Arbiter(new IcacheMissResp,   cacheParams.nMissEntries))
+  val meta_write_arb = Module(new Arbiter(new ICacheMetaWrite,  cacheParams.nMissEntries))
+  val refill_arb     = Module(new Arbiter(new ICacheRefill,     cacheParams.nMissEntries))
+  val mem_acquire_arb= Module(new Arbiter(new L1plusCacheReq,   cacheParams.nMissEntries))
+  val mem_grant_arb  = Module(new Arbiter(new L1plusCacheResp,  cacheParams.nMissEntries))
 
   //initial
   io.mem_grant.ready := true.B
@@ -200,10 +204,10 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   val entry_alloc_idx = Wire(UInt())
   val req_ready = WireInit(false.B)
 
-  val entries = (0 until nMSHRs) map { i =>
+  val entries = (0 until cacheParams.nMissEntries) map { i =>
     val entry = Module(new IcacheMissEntry(edge))
 
-    entry.io.id := i.U(log2Up(nMSHRs).W)
+    entry.io.id := i.U(log2Up(cacheParams.nMissEntries).W)
     entry.io.flush := io.flush
 
     // entry req
@@ -217,10 +221,11 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
     resp_arb.io.in(i)       <>  entry.io.resp
     meta_write_arb.io.in(i) <>  entry.io.meta_write
     refill_arb.io.in(i)     <>  entry.io.refill
+    mem_acquire_arb（i）    <>   entry.io.mem_acquire
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare
-    when (io.mem_grant.bits.source === i.U) {
+    when (io.mem_grant.bits.id === i.U) {
       entry.io.mem_grant <> io.mem_grant
     }
     entry
@@ -234,5 +239,4 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   io.meta_write <> meta_write_arb.io.out
   io.refill     <> refill_arb.io.out
 
-  TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
 }
