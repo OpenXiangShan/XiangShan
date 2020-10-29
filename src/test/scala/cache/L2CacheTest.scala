@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
+import chiseltest.internal.LineCoverageAnnotation
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -255,6 +256,12 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
 
   top.Parameters.set(top.Parameters.debugParameters)
 
+  val annos = Seq(
+    VerilatorBackendAnnotation,
+    LineCoverageAnnotation,
+    RunFirrtlTransformAnnotation(new PrintModuleName)
+  )
+
   it should "run" in {
 
     implicit val p = Parameters((site, up, here) => {
@@ -264,16 +271,8 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
         L3CacheTestParams()
     })
 
-    /*
-    test(LazyModule(new L2TestTopWrapper()).module)
-      .withAnnotations(Seq(
-        VerilatorBackendAnnotation,
-        RunFirrtlTransformAnnotation(new PrintModuleName)
-      )){ c =>
-        */
-
-    test(LazyModule(new L2TestTopWrapper()).module)
-      .withAnnotations(Seq(VerilatorBackendAnnotation)){ c =>
+     test(LazyModule(new L2TestTopWrapper()).module)
+      .withAnnotations(annos){ c =>
 
         c.io.in.initSource().setSourceClock(c.clock)
         c.io.out.initSink().setSinkClock(c.clock)
