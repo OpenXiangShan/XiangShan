@@ -133,7 +133,7 @@ clean:
 
 init:
 	git submodule update --init
-	# do not use a recursive init to pull some not used submodules
+	@# do not use a recursive init to pull some not used submodules
 	cd ./rocket-chip/ && git submodule update --init api-config-chipsalliance hardfloat
 
 .PHONY: verilog emu clean help init $(REF_SO)
