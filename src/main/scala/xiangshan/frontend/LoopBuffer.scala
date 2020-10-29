@@ -63,7 +63,7 @@ class LoopBuffer extends XSModule {
   }
 
   def isSBB(inst: UInt): Bool = {
-    sbbOffest(inst) > 0.U
+    sbbOffest(inst) > 0.U // TODO < 56.U
   }
 
   // predTaken to OH
@@ -104,16 +104,16 @@ class LoopBuffer extends XSModule {
 
   def flushLB() = {
     for(i <- 0 until IBufSize*2) {
-      // lbuf(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
+      lbuf(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
       lbufValid(i) := false.B
     }
   }
 
   def flushIB() = {
     for(i <- 0 until IBufSize) {
-      // ibuf(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
-      // ibuf(i).pc := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
-      // lbuf(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
+      ibuf(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
+      ibuf(i).pc := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
+      lbuf(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
       ibufValid(i) := false.B
     }
     headPtr := 0.U
@@ -193,11 +193,12 @@ class LoopBuffer extends XSModule {
         inWire.ipf := io.in.bits.ipf
         inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
 
-        ibufValid(enq_idx) := Mux(LBstate =/= s_active, true.B, !(hasTsbb && !tsbbTaken && i.U > tsbbIdx))
+        // ibufValid(enq_idx) := Mux(LBstate =/= s_active, true.B, !(hasTsbb && !tsbbTaken && i.U > tsbbIdx))
+        ibufValid(enq_idx) := true.B
         ibuf(enq_idx) := inWire
       }
 
-      enq_idx = enq_idx + Mux(LBstate =/= s_active, io.in.bits.mask(i), io.in.bits.mask(i) && !(hasTsbb && !tsbbTaken && i.U > tsbbIdx))
+      enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
     tailPtr := enq_idx
@@ -256,13 +257,15 @@ class LoopBuffer extends XSModule {
       is(s_active) {
         // To IDLE
         // triggering sbb不跳转 退出循环
+        val redirect_pc = io.in.bits.pnpc(PredictWidth.U - PriorityEncoder(Reverse(io.in.bits.mask)) - 1.U)
         when(hasTsbb && !tsbbTaken) {
           XSDebug("tsbb not taken, State change: IDLE\n")
           LBstate := s_idle
           io.loopBufPar.LBredirect.valid := true.B
-          io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
+          // io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
+          io.loopBufPar.LBredirect.bits := redirect_pc
           // ExcitingUtils.addSource(true.B, "CntLBRedirect1", Perf)
-          XSDebug(p"redirect pc=${Hexadecimal(tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U))}\n")
+          XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
           flushLB()
         }
 
@@ -270,10 +273,10 @@ class LoopBuffer extends XSModule {
           XSDebug("cof by other inst, State change: IDLE\n")
           LBstate := s_idle
           io.loopBufPar.LBredirect.valid := true.B
-          io.loopBufPar.LBredirect.bits := io.loopBufPar.tgtpc
+          io.loopBufPar.LBredirect.bits := redirect_pc
           // io.loopBufPar.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.loopBufPar.LBReq)
           // ExcitingUtils.addSource(true.B, "CntLBRedirect2", Perf)
-          XSDebug(p"redirect pc=${Hexadecimal(io.loopBufPar.tgtpc)}\n")
+          XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
           flushLB()
         }
 
@@ -281,10 +284,10 @@ class LoopBuffer extends XSModule {
           XSDebug("tsbb and cof, State change: IDLE\n")
           LBstate := s_idle
           io.loopBufPar.LBredirect.valid := true.B
-          io.loopBufPar.LBredirect.bits := tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U)
+          io.loopBufPar.LBredirect.bits := redirect_pc
           // io.loopBufPar.LBredirect.bits := Mux(brIdx > tsbbIdx, tsbbPC + 4.U, io.loopBufPar.LBReq)
           // ExcitingUtils.addSource(true.B, "CntLBRedirect3", Perf)
-          XSDebug(p"redirect pc=${Hexadecimal(tsbbPC + Mux(io.in.bits.pd(tsbbIdx).isRVC, 2.U, 4.U))}\n")
+          XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
           flushLB()
         }
       }
