@@ -172,7 +172,8 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val wmask = Mux((nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
-  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(tagBits.W)))
+  def encTagBits = cacheParams.tagCode.width(tagBits)
+  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(encTagBits.W)))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
     for (i <- 0 until nSets) {
