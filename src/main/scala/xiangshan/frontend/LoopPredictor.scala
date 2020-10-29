@@ -88,18 +88,29 @@ class LTBColumn extends LTBModule {
       val swdata = Input(new LoopEntry)
       val copyCnt = Input(Vec(nRows, Bool()))
     })
-    val mem = RegInit(0.U.asTypeOf(Vec(nRows, new LoopEntry)))
+    
+    // val mem = RegInit(0.U.asTypeOf(Vec(nRows, new LoopEntry)))
+    val mem = Mem(nRows, new LoopEntry)
     io.rdata  := mem(io.rIdx)
     io.urdata := mem(io.urIdx)
-    when (io.wen) {
-      mem(io.wIdx) := io.wdata
-    }
-    when (io.swen) {
-      mem(io.swIdx) := io.swdata
-    }
+    val wdata = WireInit(io.wdata)
+    val swdata = WireInit(io.swdata)
     for (i <- 0 until nRows) {
-      when (io.copyCnt(i)) {
-        mem(i).specCnt := mem(i).nSpecCnt
+      val copyValid = io.copyCnt(i)
+      when (copyValid && io.swIdx === i.U && io.swen) {
+        swdata.specCnt := mem(i).nSpecCnt
+      }
+      val wd = WireInit(mem(i)) // default for copycnt
+      val wen = WireInit(io.copyCnt(i) || io.wen && io.wIdx === i.U || io.swen && io.swIdx === i.U)
+      when (!copyValid) {
+        when (io.swen) {
+          wd := swdata
+        }.elsewhen (io.wen) {
+          wd := wdata
+        }
+      }
+      when (wen) {
+        mem.write(i.U, wd)
       }
     }
   }
@@ -133,9 +144,9 @@ class LTBColumn extends LTBModule {
   val cntMatch = entry.tripCnt === io.update.bits.meta
   val wEntry = WireInit(entry)
 
-  ltb.wen := io.update.valid && !doingReset
   ltb.wIdx := updateIdx
   ltb.wdata := wEntry
+  ltb.wen := false.B
 
   when (io.update.valid && !doingReset) {
     // When a branch resolves and is found to not be in the LTB,
@@ -150,6 +161,7 @@ class LTBColumn extends LTBModule {
       wEntry.brTag := updateBrTag
       wEntry.unusable := false.B
       // ltb(updateIdx) := wEntry
+      ltb.wen := true.B
     }.elsewhen (tagMatch) {
       // During resolution, a taken branch found in the LTB has its nSpecCnt incremented by one.
       when (io.update.bits.taken) {
@@ -167,6 +179,7 @@ class LTBColumn extends LTBModule {
         wEntry.unusable := io.update.bits.misPred && (io.update.bits.meta > entry.tripCnt)
       }
       // ltb(updateIdx) := wEntry
+      ltb.wen := true.B
     }
   }
 
