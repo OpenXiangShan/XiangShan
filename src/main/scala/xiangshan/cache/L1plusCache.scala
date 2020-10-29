@@ -164,6 +164,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
     val read = Flipped(Decoupled(new L1plusCacheMetaReadReq))
     val write = Flipped(Decoupled(new L1plusCacheMetaWriteReq))
     val resp = Output(Vec(nWays, new L1plusCacheMetadata))
+    val flush = Input(Bool())
   })
   val waddr = io.write.bits.idx
   val wvalid = io.write.bits.data.valid
@@ -172,9 +173,14 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
   val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(tagBits.W)))
-  val valid_array = RegInit(VecInit(Seq.fill(nSets)(0.U(nWays.W))))
+  val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
+  when (reset.toBool || io.flush) {
+    for (i <- 0 until nSets) {
+      valid_array(i) := 0.U
+    }
+  }
 
-  val wen = io.write.valid && !reset.toBool
+  val wen = io.write.valid && !reset.toBool && !io.flush
   when (wen) {
     tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wtag))), wmask)
     when (wvalid) {
@@ -190,8 +196,8 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
     io.resp(i).tag   := rtags(i)
   }
 
-  io.read.ready  := !io.write.valid && !reset.toBool
-  io.write.ready := !reset.toBool
+  io.read.ready  := !io.write.valid && !reset.toBool && !io.flush
+  io.write.ready := !reset.toBool && !io.flush
 
   def dumpRead() = {
     when (io.read.fire()) {
@@ -238,6 +244,8 @@ class L1plusCacheIO extends L1plusCacheBundle
 {
   val req  = DecoupledIO(new L1plusCacheReq)
   val resp = Flipped(DecoupledIO(new L1plusCacheResp))
+  val flush = Output(Bool())
+  val empty = Input(Bool())
 }
 
 class L1plusCache()(implicit p: Parameters) extends LazyModule with HasL1plusCacheParameters {
@@ -276,7 +284,8 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   val missQueue = Module(new L1plusCacheMissQueue(edge))
   val resp_arb = Module(new Arbiter(new L1plusCacheResp, 2))
 
-  val req_block = block_req(io.req.bits.addr)
+  val flush_block_req = Wire(Bool())
+  val req_block = block_req(io.req.bits.addr) || flush_block_req
   block_decoupled(io.req, pipe.io.req, req_block)
   XSDebug(req_block, "Request blocked\n")
 
@@ -301,6 +310,32 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   bus.c.bits  := DontCare
   bus.e.valid := false.B
   bus.e.bits  := DontCare
+
+  // flush state machine
+  val s_invalid :: s_drain_cache :: s_flush_cache :: s_send_resp :: Nil = Enum(4)
+  val state = RegInit(s_invalid)
+
+  switch (state) {
+    is (s_invalid) {
+      when (io.flush) {
+        state := s_invalid
+      }
+    }
+    is (s_drain_cache) {
+      when (pipe.io.empty && missQueue.io.empty) {
+        state := s_flush_cache
+      }
+    }
+    is (s_flush_cache) {
+      state := s_send_resp
+    }
+    is (s_send_resp) {
+      state := s_invalid
+    }
+  }
+  metaArray.io.flush := state === s_flush_cache
+  io.empty := state === s_send_resp
+  flush_block_req := state =/= s_invalid
 
   // to simplify synchronization, we do not allow reqs with same indexes
   def block_req(addr: UInt) = {
@@ -331,6 +366,7 @@ class L1plusCachePipe extends L1plusCacheModule
     val meta_resp  = Input(Vec(nWays, new L1plusCacheMetadata))
     val miss_req   = DecoupledIO(new L1plusCacheMissReq)
     val inflight_req_idxes = Output(Vec(2, Valid(UInt())))
+    val empty = Output(Bool())
   })
 
   val s0_passdown = Wire(Bool())
@@ -441,6 +477,8 @@ class L1plusCachePipe extends L1plusCacheModule
   io.inflight_req_idxes(0).bits := get_idx(s1_req.addr)
   io.inflight_req_idxes(1).valid := s2_valid
   io.inflight_req_idxes(1).bits := get_idx(s2_req.addr)
+
+  io.empty := !s0_valid && !s1_valid && !s2_valid
 
   // -------
   // Debug logging functions
@@ -623,6 +661,7 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
     val meta_write  = DecoupledIO(new L1plusCacheMetaWriteReq)
     val refill      = DecoupledIO(new L1plusCacheDataWriteReq)
     val inflight_req_idxes = Output(Vec(cfg.nMissEntries, Valid(UInt())))
+    val empty       = Output(Bool())
   })
 
   val resp_arb       = Module(new Arbiter(new L1plusCacheResp,           cfg.nMissEntries))
@@ -684,6 +723,8 @@ class L1plusCacheMissQueue(edge: TLEdgeOut) extends L1plusCacheModule with HasTL
   io.refill     <> refill_arb.io.out
 
   TLArbiter.lowestFromSeq(edge, io.mem_acquire, entries.map(_.io.mem_acquire))
+
+  io.empty := VecInit(entries.map(m=>m.io.req.ready)).asUInt.andR
 
   // print all input/output requests for debug purpose
   // print req
