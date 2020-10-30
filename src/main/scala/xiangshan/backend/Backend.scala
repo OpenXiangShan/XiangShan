@@ -96,7 +96,11 @@ class Backend extends XSModule
   val reservedStations  = exeUnits.zipWithIndex.map({ case (exu, i) =>
 
     val cfg = exu.config
-    
+    // NOTE: exu could have certern and uncertaion latency
+    // but could not have multiple certern latency
+    var certainLatency = -1
+    if(cfg.hasCertainLatency) { certainLatency = cfg.latency.latencyVal.get }
+
     val writeBackedData = exuConfigs.zip(exeWbReqs).filter(x => x._1.hasCertainLatency && needData(x._1, cfg)).map(_._2.bits.data)
     val wakeupCnt = writeBackedData.length
 
@@ -107,9 +111,9 @@ class Backend extends XSModule
     val extraListenPortsCnt = extraListenPorts.length
 
 
-    val rs = Module(new ReservationStationNew(cfg, wakeupCnt, extraListenPortsCnt))
+    val rs = Module(new ReservationStationNew(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency))
 
-    println(s"exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt}")
+    println(s"exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency}")
 
     rs.io.redirect <> redirect
     rs.io.numExist <> dispatch.io.numExist(i)

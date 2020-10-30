@@ -52,22 +52,17 @@ class BypassQueue(number: Int) extends XSModule {
     val in  = Flipped(ValidIO(new MicroOp))
     val out = ValidIO(new MicroOp)
   })
-  require(number >= 1)
-  if(number == 1) {  io.in <> io.out }
+  if(number == 0) {  io.in <> io.out }
   else {
-    val queue = Seq.fill(number-1)(RegInit(0.U.asTypeOf(new Bundle{
+    val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()
       val bits = new MicroOp
     })))
     queue(0).valid := io.in.valid
     queue(0).bits  := io.in.bits
-    (0 until (number-2)).map{i => queue(i+1) := queue(i) }
+    (0 until (number-1)).map{i => queue(i+1) := queue(i) }
     io.out.valid := queue(number-1).valid
     io.out.bits := queue(number-1).bits
-    // TODO: change to ptr
-    // val ptr = RegInit(0.U(log2Up(number-1).W))
-    // val ptrNext = ptr + 1.U
-    // ptr := Mux(ptrNext === number.U, 0.U, ptrNext)
   }
 }
 
@@ -76,7 +71,8 @@ class ReservationStationNew
   val exuCfg: ExuConfig,
   wakeupCnt: Int,
   extraListenPortsCnt: Int,
-  srcNum: Int = 3
+  srcNum: Int = 3,
+  fixedDelay: Int
 ) extends XSModule {
 
 
@@ -235,12 +231,24 @@ class ReservationStationNew
 
   // bypass send
   // store selected uops and send out one cycle before result back
-  val fixedDelay = 1 // TODO: fix it
+  def bpSelCheck(uop: MicroOp): Bool = { // TODO: wanna a map from FunctionUnit.scala
+    val fuType = uop.ctrl.fuType
+    (fuType === FuType.alu) ||
+    (fuType === FuType.mul) ||
+    (fuType === FuType.jmp) ||
+    (fuType === FuType.i2f) ||
+    (fuType === FuType.csr) ||
+    (fuType === FuType.fence) ||
+    (fuType === FuType.fmac)
+  }
   val bpQueue = Module(new BypassQueue(fixedDelay))
   bpQueue.io.in.valid := selValid
   bpQueue.io.in.bits := uop(idxQueue(selectedIdxWire))
-  io.selectedUop.valid := bpQueue.io.out.valid
+  io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits)
   io.selectedUop.bits  := bpQueue.io.out.bits
+  if(fixedDelay > 0) {
+    XSDebug(io.selectedUop.valid, "SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
+  }
 
   // output
   io.deq.valid := selReg && !haveBubble && !uop(idxQueue(selectedIdxReg)).roqIdx.needFlush(io.redirect)// TODO: read it and add assert for rdyQueue

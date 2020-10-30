@@ -29,6 +29,8 @@ case class NexusLatency(value: Int) extends HasFuLatency {
   override val latencyVal: Option[Int] = Some(value)
 }
 
+
+
 case class FuConfig
 (
   fuType: UInt,
