@@ -149,6 +149,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         miss(loadWbIndex) := dcacheMissed
         listening(loadWbIndex) := dcacheMissed
         pending(loadWbIndex) := io.loadIn(i).bits.mmio
+        uop(loadWbIndex).debugInfo.issueTime := io.loadIn(i).bits.uop.debugInfo.issueTime
       }
     })
 

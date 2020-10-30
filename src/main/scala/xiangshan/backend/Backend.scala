@@ -39,7 +39,6 @@ class Backend extends XSModule
     exe.io.exception := DontCare
     exe.io.dmem := DontCare
     exe.io.mcommit := DontCare
-    exe.io.in.bits.uop.debugInfo.issueTime := timer
   })
 
   val decode = Module(new DecodeStage)
@@ -120,6 +119,7 @@ class Backend extends XSModule
       }
 
       exu.io.in <> rs.io.deq
+      exu.io.in.bits.uop.debugInfo.issueTime := timer
       exu.io.redirect <> redirect
       rs
     })
@@ -257,15 +257,19 @@ class Backend extends XSModule
   val dispatchToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.dispatchTime, 0.U)).reduce(_ + _)
   val issueToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.issueTime, 0.U)).reduce(_ + _)
   val writebackToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, timer - c.bits.uop.debugInfo.writebackTime, 0.U)).reduce(_ + _)
-  val loadDispatchToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.LOAD, timer - c.bits.uop.debugInfo.renameTime, 0.U)).reduce(_ + _)
-  val storeDispatchToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE, timer - c.bits.uop.debugInfo.renameTime, 0.U)).reduce(_ + _)
+  val loadIssueToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.LOAD, timer - c.bits.uop.debugInfo.issueTime, 0.U)).reduce(_ + _)
+  val loadIssueToWriteback = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.LOAD, c.bits.uop.debugInfo.writebackTime - c.bits.uop.debugInfo.issueTime, 0.U)).reduce(_ + _)
+  val storeIssueToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE, timer - c.bits.uop.debugInfo.issueTime, 0.U)).reduce(_ + _)
+  val storeIssueToWriteback = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE, c.bits.uop.debugInfo.writebackTime - c.bits.uop.debugInfo.issueTime, 0.U)).reduce(_ + _)
 
   XSPerf("renameToCommit", renameToCommit)
   XSPerf("dispatchToCommit", dispatchToCommit)
   XSPerf("issueToCommit", issueToCommit)
   XSPerf("writebackToCommit", writebackToCommit)
-  XSPerf("loadDispatchToCommit", loadDispatchToCommit)
-  XSPerf("storeDispatchToCommit", storeDispatchToCommit)
+  XSPerf("loadIssueToCommit", loadIssueToCommit)
+  XSPerf("loadIssueToWriteback", loadIssueToWriteback)
+  XSPerf("storeIssueToCommit", storeIssueToCommit)
+  XSPerf("storeIssueToWriteback", storeIssueToWriteback)
 
   // TODO: Remove sink and source
   val tmp = WireInit(0.U)

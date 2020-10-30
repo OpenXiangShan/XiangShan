@@ -116,6 +116,8 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
       microOp(wbIdx).sqIdx := io.exeWbResults(i).bits.uop.sqIdx
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
+      microOp(wbIdx).debugInfo.issueTime := io.exeWbResults(i).bits.uop.debugInfo.issueTime
+      microOp(wbIdx).debugInfo.writebackTime := io.exeWbResults(i).bits.uop.debugInfo.writebackTime
       exuData(wbIdx) := io.exeWbResults(i).bits.data
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 

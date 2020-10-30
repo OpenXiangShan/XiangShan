@@ -111,6 +111,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       data(stWbIndex).exception := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
       miss(stWbIndex) := io.storeIn(i).bits.miss
       pending(stWbIndex) := io.storeIn(i).bits.mmio
+      uop(stWbIndex).debugInfo.issueTime := io.storeIn(i).bits.uop.debugInfo.issueTime
       XSInfo("store write to sq idx %d pc 0x%x vaddr %x paddr %x data %x miss %x mmio %x roll %x exc %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
         io.storeIn(i).bits.uop.cf.pc,
