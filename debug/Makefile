@@ -4,7 +4,7 @@ SINGLETEST = ALL=min3
 
 B ?= 0
 E ?= 0
-V ?= ALL
+V ?= OFF
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
 
@@ -18,7 +18,8 @@ cache:
 	#2>&1 | tee > loader.log
 
 cpu:
-	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run 2>&1 | tee > dummy.log
+	$(MAKE) -C $(AM_HOME)/tests/cputest $(ARCH) ALL=dummy $(EMU_ARGS) run
+	#2>&1 | tee > dummy.log
 
 # ------------------------------------------------------------------
 # run different test sets

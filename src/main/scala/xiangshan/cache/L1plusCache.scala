@@ -235,13 +235,13 @@ class L1plusCacheReq extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val id   = UInt(missQueueEntryIdWidth.W)
+  val id   = UInt(icachemisQueueEntryIdWidth.W)
 }
 
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
-  val id   = UInt(missQueueEntryIdWidth.W)
+  val id   = UInt(icachemisQueueEntryIdWidth.W)
 }
 
 class L1plusCacheIO extends L1plusCacheBundle

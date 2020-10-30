@@ -131,7 +131,7 @@ trait ICacheBase extends HasICacheParameters
  * The hardware implementation of ICache
  * ------------------------------------------------------------
  */
-class ICacheImp extends ICacheModule
+class ICache extends ICacheModule
 {
   // cut a cacheline into a fetch packet
   def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
@@ -312,8 +312,8 @@ class ICacheImp extends ICacheModule
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x blocking:%d\n",s3_hit,s3_miss,s3_wayMask.asUInt,blocking)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
   XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}\n")
-  XSDebug("[Chanel A] valid:%d  ready:%d\n",bus.a.valid,bus.a.ready)
-  XSDebug("[Chanel D] valid:%d  ready:%d  data:%x  \n",bus.d.valid,bus.d.ready,bus.d.bits.data)
+  XSDebug("[mem_acquire] valid:%d  ready:%d\n",io.mem_acquire.valid,io.mem_acquire.ready)
+  XSDebug("[mem_grant] valid:%d  ready:%d  data:%x id:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,io.mem_grant.bits.id)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
   for(i <- 0 until blockWords){
       XSDebug("[Stage 3] %x\n",dataHitWay(i))

@@ -71,7 +71,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
         val resp = DecoupledIO(new IcacheMissResp)
         
         val mem_acquire = DecoupledIO(new L1plusCacheReq)
-        val mem_grant   = FFlipped(DecoupledIO(new L1plusCacheResp))
+        val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
 
         val meta_write = DecoupledIO(new ICacheMetaWrite)
         val refill = DecoupledIO(new ICacheRefill)
@@ -84,7 +84,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
     //req register
     val req = Reg(new IcacheMissReq)
-    val req_idx = get_idx(req.setIdx)         //virtual index
+    val req_idx = req.setIdx         //virtual index
     val req_tag = get_tag(req.addr)           //physical tag
     val req_waymask = req.waymask
 
@@ -159,14 +159,14 @@ class IcacheMissEntry extends ICacheMissQueueModule
                         waymask=req_waymask)
 
     //mem request
-    io.mem_acquire.bits.cmd := M_SZ.U 
+    io.mem_acquire.bits.cmd := MemoryOpConstants.M_XRD
     io.mem_acquire.bits.addr := req.addr
     io.mem_acquire.bits.id := io.id
 
 
 
     XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
-    XSDebug("[ICache MSHR %d] (Info)state:%d  refill_done:%d contFull:%d readBeatCnt:%d  needFlush:%d\n",io.id.asUInt,state,refill_done,countFull,readBeatCnt.value,needFlush)
+    XSDebug("[ICache MSHR %d] (Info)state:%d  needFlush:%d\n",io.id.asUInt,state,needFlush)
     XSDebug("[ICache MSHR %d] (mem_acquire) valid%d ready:%d\n",io.id.asUInt,io.mem_acquire.valid,io.mem_acquire.ready)
     XSDebug("[ICache MSHR %d] (mem_grant)   valid%d ready:%d data:%x \n",io.id.asUInt,io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data)
     XSDebug("[ICache MSHR %d] (meta_write)  valid%d ready:%d  tag:%x \n",io.id.asUInt,io.meta_write.valid,io.meta_write.ready,io.meta_write.bits.meta_write_tag)
@@ -176,7 +176,7 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
 }
 
-class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule 
+class IcacheMissQueue extends ICacheMissQueueModule 
 {
   val io = IO(new Bundle{
     val req = Flipped(DecoupledIO(new IcacheMissReq))
@@ -196,7 +196,6 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   val meta_write_arb = Module(new Arbiter(new ICacheMetaWrite,  cacheParams.nMissEntries))
   val refill_arb     = Module(new Arbiter(new ICacheRefill,     cacheParams.nMissEntries))
   val mem_acquire_arb= Module(new Arbiter(new L1plusCacheReq,   cacheParams.nMissEntries))
-  val mem_grant_arb  = Module(new Arbiter(new L1plusCacheResp,  cacheParams.nMissEntries))
 
   //initial
   io.mem_grant.ready := true.B
@@ -205,7 +204,7 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   val req_ready = WireInit(false.B)
 
   val entries = (0 until cacheParams.nMissEntries) map { i =>
-    val entry = Module(new IcacheMissEntry(edge))
+    val entry = Module(new IcacheMissEntry)
 
     entry.io.id := i.U(log2Up(cacheParams.nMissEntries).W)
     entry.io.flush := io.flush
@@ -221,7 +220,7 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
     resp_arb.io.in(i)       <>  entry.io.resp
     meta_write_arb.io.in(i) <>  entry.io.meta_write
     refill_arb.io.in(i)     <>  entry.io.refill
-    mem_acquire_arb（i）    <>   entry.io.mem_acquire
+    mem_acquire_arb.io.in(i)    <>   entry.io.mem_acquire
 
     entry.io.mem_grant.valid := false.B
     entry.io.mem_grant.bits  := DontCare
@@ -232,11 +231,11 @@ class IcacheMissQueue(edge: TLEdgeOut) extends ICacheMissQueueModule
   }
 
   entry_alloc_idx    := PriorityEncoder(entries.map(m=>m.io.req.ready))
-  XSDebug("[ICache MissQueue] (ready vector) %b idx:%d \n",PriorityEncoder(entries.map(m=>m.io.req.ready)),entry_alloc_idx)
 
   io.req.ready  := req_ready
   io.resp <> resp_arb.io.out
   io.meta_write <> meta_write_arb.io.out
   io.refill     <> refill_arb.io.out
+  io.mem_acquire <> mem_acquire_arb.io.out
 
 }
