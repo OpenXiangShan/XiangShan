@@ -248,17 +248,20 @@ class LoadUnit extends XSModule {
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
   io.dcache.s1_kill := DontCare // FIXME
-  io.sbuffer <> load_s1.io.forward
-  io.lsroq.forward <> load_s1.io.forward
+//  io.sbuffer <> load_s1.io.forward
+//  io.lsroq.forward <> load_s1.io.forward
+  load_s1.io.forward <> DontCare // TODO: do we still need this? can we remove s1.io.forward?
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire(), false.B)
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
-  load_s2.io.sbuffer.forwardMask := io.sbuffer.forwardMask
-  load_s2.io.sbuffer.forwardData := io.sbuffer.forwardData
-  load_s2.io.lsroq.forwardMask := io.lsroq.forward.forwardMask
-  load_s2.io.lsroq.forwardData := io.lsroq.forward.forwardData
+  io.sbuffer <> load_s2.io.sbuffer
+  io.lsroq.forward <> load_s2.io.lsroq
+//  load_s2.io.sbuffer.forwardMask := io.sbuffer.forwardMask
+//  load_s2.io.sbuffer.forwardData := io.sbuffer.forwardData
+//  load_s2.io.lsroq.forwardMask := io.lsroq.forward.forwardMask
+//  load_s2.io.lsroq.forwardData := io.lsroq.forward.forwardData
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx)}, " +

@@ -17,7 +17,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with NeedImpl {
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
