@@ -70,7 +70,7 @@ jobs:
           echo $AM_HOME
           echo $NEMU_HOME
           echo $NOOP_HOME
-          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run
+          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null
 
   riscv-tests:
     runs-on: self-hosted
@@ -87,5 +87,5 @@ jobs:
           echo $NEMU_HOME
           echo $NOOP_HOME
           echo $RVTEST_HOME
-          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
+          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run 2> /dev/null
 
