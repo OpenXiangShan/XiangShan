@@ -3,7 +3,7 @@ NANOS_HOME ?= $(AM_HOME)/../nanos-lite
 SINGLETEST = ALL=min3
 
 B ?= 0
-E ?= 0
+E ?= -1
 V ?= OFF
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
@@ -13,8 +13,7 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cache:
-	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 
-	#2>&1 | tee > loader.log
+	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 2>&1 | tee > loader.log
 	#2>&1 | tee > loader.log
 
 cpu:

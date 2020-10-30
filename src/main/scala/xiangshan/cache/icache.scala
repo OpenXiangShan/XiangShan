@@ -90,6 +90,7 @@ class ICacheIO extends ICacheBundle
   val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
   val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
+  val l1plusflush = Output(Bool())
 }
 
 /* ------------------------------------------------------------
@@ -246,8 +247,6 @@ class ICache extends ICacheModule
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
   outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
   
-  val waitForRefillDone = cacheflushed
-
   //ICache MissQueue
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
@@ -347,6 +346,8 @@ class ICache extends ICacheModule
   //To L1 plus
   io.mem_acquire <> icacheMissQueue.io.mem_acquire
   icacheMissQueue.io.mem_grant <> io.mem_grant
+
+  io.l1plusflush := icacheFlush
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 

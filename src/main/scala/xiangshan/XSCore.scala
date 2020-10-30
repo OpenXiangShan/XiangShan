@@ -291,7 +291,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   icache.io.mem_acquire <> l1pluscache.io.req
   l1pluscache.io.resp <> icache.io.mem_grant
-  l1pluscache.io.flush := false.B
+  l1pluscache.io.flush := icache.io.l1plusflush
 
   mem.io.backend   <> backend.io.mem
 
