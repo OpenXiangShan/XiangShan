@@ -5,6 +5,7 @@ import chisel3.util._
 import chisel3.ExcitingUtils._
 import xiangshan._
 import utils.{XSDebug, XSError, XSInfo}
+import xiangshan.backend.roq.RoqPtr
 
 // read rob and enqueue
 class Dispatch1 extends XSModule {
@@ -16,7 +17,7 @@ class Dispatch1 extends XSModule {
     // enq Roq
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
-    val roqIdxs = Input(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+    val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
     // enq Lsroq
     val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsIdx
@@ -59,7 +60,7 @@ class Dispatch1 extends XSModule {
   val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid && !io.redirect.bits.isReplay)))
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
-  val roqIndexReg = Reg(Vec(RenameWidth, UInt(RoqIdxWidth.W)))
+  val roqIndexReg = Reg(Vec(RenameWidth, new RoqPtr))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
   val lsIndexReg = Reg(Vec(RenameWidth, new LSIdx))
@@ -68,12 +69,15 @@ class Dispatch1 extends XSModule {
 
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSROQ
+    val commitType = Cat(isLs(i), isStore(i) | isFp(i))
+
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
-    io.toRoq(i).bits.ctrl.commitType := Cat(isLs(i), isStore(i) | isFp(i)) // TODO: add it to decode
+    io.toRoq(i).bits.ctrl.commitType := commitType
 
     io.toLsroq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !cancelled(i)
     io.toLsroq(i).bits := io.fromRename(i).bits
+    io.toLsroq(i).bits.ctrl.commitType := commitType
     io.toLsroq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
     // receive indexes from ROQ and LSROQ
@@ -99,8 +103,7 @@ class Dispatch1 extends XSModule {
     } else {
       uopWithIndex(i).lqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).lqIdx
       uopWithIndex(i).sqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).sqIdx
-      uopWithIndex(i).instIsLoad := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).instIsLoad
-      XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx} isLoad ${io.lsIdx(i).instIsLoad}\n")
+      XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx}\n")
     }
 
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
@@ -164,7 +167,7 @@ class Dispatch1 extends XSModule {
     }else{
       XSInfo(io.recv(i) && !cancelled(i),
         p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-          p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx} isLoad ${uopWithIndex(i).instIsLoad}" +
+          p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx}" +
           p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
     }
 

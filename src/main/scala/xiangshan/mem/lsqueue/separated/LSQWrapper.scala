@@ -8,6 +8,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
+import xiangshan.backend.roq.RoqPtr
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 //
@@ -27,7 +28,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
-    val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
+    val roqDeqPtr = Input(new RoqPtr)
+    val oldestStore = Output(Valid(new RoqPtr))
   })
   
   if(EnableUnifiedLSQ){
@@ -46,6 +48,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     lsroq.io.dcache <> io.dcache
     lsroq.io.uncache <> io.uncache
     lsroq.io.roqDeqPtr <> io.roqDeqPtr
+    lsroq.io.oldestStore <> io.oldestStore
     (0 until RenameWidth).map(i => {
       io.lsIdxs(i).lsroqIdx := lsroq.io.lsroqIdxs(i)
     })
@@ -73,6 +76,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     storeQueue.io.stout <> io.stout
     storeQueue.io.commits <> io.commits
     storeQueue.io.roqDeqPtr <> io.roqDeqPtr
+    storeQueue.io.oldestStore <> io.oldestStore
     
     loadQueue.io.forward <> io.forward
     storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
@@ -120,14 +124,13 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     
     // fix valid, allocate lq / sq index
     (0 until RenameWidth).map(i => {
-      val isStore = LSUOpType.isStore(io.dp1Req(i).bits.ctrl.fuOpType)
-      loadQueue.io.dp1Req(i).valid := !isStore && io.dp1Req(i).valid
-      storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid
-      io.lsIdxs(i) := DontCare
+      val isStore = CommitType.lsInstIsStore(io.dp1Req(i).bits.ctrl.commitType)
+      val prevCanIn = if (i == 0) true.B else Cat((0 until i).map(i => io.dp1Req(i).ready)).andR
+      loadQueue.io.dp1Req(i).valid := !isStore && io.dp1Req(i).valid && prevCanIn
+      storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid && prevCanIn
       loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
       storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
-      io.lsIdxs(i).instIsLoad := !isStore
-      io.dp1Req(i).ready := Mux(isStore, storeQueue.io.dp1Req(i).ready, loadQueue.io.dp1Req(i).ready)
+      io.dp1Req(i).ready := storeQueue.io.dp1Req(i).ready && loadQueue.io.dp1Req(i).ready
     })
   }
 }

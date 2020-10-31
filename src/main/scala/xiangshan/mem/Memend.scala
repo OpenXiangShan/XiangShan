@@ -6,6 +6,7 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import chisel3.util.experimental.BoringUtils
+import xiangshan.backend.roq.RoqPtr
 
 import xiangshan.cache._
 import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
@@ -61,7 +62,7 @@ class LoadForwardQueryIO extends XSBundle {
 
   val lsroqIdx = Output(UInt(LsroqIdxWidth.W))
   // val lqIdx = Output(UInt(LoadQueueIdxWidth.W))
-  val sqIdx = Output(UInt(StoreQueueIdxWidth.W))
+  val sqIdx = Output(new SqPtr)
 }
 
 class MemToBackendIO extends XSBundle {
@@ -77,7 +78,8 @@ class MemToBackendIO extends XSBundle {
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
-  val roqDeqPtr = Input(UInt(RoqIdxWidth.W))
+  val oldestStore = Output(Valid(new RoqPtr))
+  val roqDeqPtr = Input(new RoqPtr)
 }
 
 // Memory pipeline wrapper
@@ -145,7 +147,8 @@ class Memend extends XSModule {
   lsroq.io.stout       <> io.backend.stout
   lsroq.io.commits     <> io.backend.commits
   lsroq.io.dp1Req      <> io.backend.dp1Req
-  lsroq.io.lsIdxs      <> io.backend.lsIdxs
+  lsroq.io.oldestStore <> io.backend.oldestStore
+  lsroq.io.lsIdxs   <> io.backend.lsIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   lsroq.io.roqDeqPtr := io.backend.roqDeqPtr
   io.backend.replayAll <> lsroq.io.rollback

@@ -13,7 +13,7 @@ class Jump extends FunctionUnit(jmpCfg){
 
   val (iovalid, src1, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
 
-  val redirectHit = uop.needFlush(io.redirect)
+  val redirectHit = uop.roqIdx.needFlush(io.redirect)
   val valid = iovalid && !redirectHit
 
   val isRVC = uop.cf.brUpdate.pd.isRVC

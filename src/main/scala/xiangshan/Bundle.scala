@@ -5,6 +5,8 @@ import chisel3.util._
 import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
+import xiangshan.backend.roq.RoqPtr
+import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
@@ -139,26 +141,6 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
-trait HasRoqIdx { this: HasXSParameter =>
-  val roqIdx = UInt(RoqIdxWidth.W)
-
-  def isAfter(thatIdx: UInt): Bool = {
-    Mux(
-      this.roqIdx.head(1) === thatIdx.head(1),
-      this.roqIdx.tail(1) > thatIdx.tail(1),
-      this.roqIdx.tail(1) < thatIdx.tail(1)
-    )
-  }
-
-  def isAfter[ T<: HasRoqIdx ](that: T): Bool = {
-    isAfter(that.roqIdx)
-  }
-
-  def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || this.isAfter(redirect.bits.roqIdx)) // TODO: need check by JiaWei
-  }
-}
-
 // Load / Store Index
 //
 // When using unified lsroq, lsIdx serves as lsroqIdx,
@@ -171,40 +153,22 @@ trait HasLSIdx { this: HasXSParameter =>
   val lsroqIdx = UInt(LsroqIdxWidth.W)
   // } else {
   // Separate LSQ
-  val lqIdx = UInt(LoadQueueIdxWidth.W)
-  val sqIdx = UInt(StoreQueueIdxWidth.W)
-  val instIsLoad = Bool()
-  // }
-
-  // def isLoad(): Bool = instIsLoad
-
-  // def isLoadAfter(thatLqIdx: UInt): Bool = {
-  //   Mux(
-  //     lqIdx.head(1) === thatLqIdx.head(1),
-  //     lqIdx.tail(1) > thatLqIdx.tail(1),
-  //     lqIdx.tail(1) < thatLqIdx.tail(1)
-  //   )
-  // }
-
-  // def isStoreAfter(thatSqIdx: UInt): Bool = {
-  //   Mux(
-  //     sqIdx.head(1) === thatSqIdx.head(1),
-  //     sqIdx.tail(1) > thatSqIdx.tail(1),
-  //     sqIdx.tail(1) < thatSqIdx.tail(1)
-  //   )
-  // }
+  val lqIdx = new LqPtr
+  val sqIdx = new SqPtr
 }
 
 class LSIdx extends XSBundle with HasLSIdx {}
 
 // CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl with HasRoqIdx with HasLSIdx {
+class MicroOp extends CfCtrl with HasLSIdx {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
+  val roqIdx = new RoqPtr
   val diffTestDebugLrScValid = Bool()
 }
 
-class Redirect extends XSBundle with HasRoqIdx {
+class Redirect extends XSBundle {
+  val roqIdx = new RoqPtr
   val isException = Bool()
   val isMisPred = Bool()
   val isReplay = Bool()
@@ -261,7 +225,8 @@ class RoqCommit extends XSBundle {
   val isWalk = Bool()
 }
 
-class TlbFeedback extends XSBundle with HasRoqIdx{
+class TlbFeedback extends XSBundle {
+  val roqIdx = new RoqPtr
   val hit = Bool()
 }
 

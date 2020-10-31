@@ -48,7 +48,7 @@ class LoadUnit_S0 extends XSModule {
   io.tlbFeedback.bits.roqIdx := s0_uop.roqIdx
 
   // query DCache
-  io.dcacheReq.valid := io.in.valid && !s0_uop.needFlush(io.redirect)
+  io.dcacheReq.valid := io.in.valid && !s0_uop.roqIdx.needFlush(io.redirect)
   io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
   io.dcacheReq.bits.addr := s0_vaddr
   io.dcacheReq.bits.mask := s0_mask
@@ -116,7 +116,7 @@ class LoadUnit_S1 extends XSModule {
   io.forward.uop := s1_uop
   io.forward.pc := s1_uop.cf.pc
 
-  io.out.valid := io.in.valid && !s1_uop.needFlush(io.redirect)
+  io.out.valid := io.in.valid && !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
@@ -243,7 +243,7 @@ class LoadUnit extends XSModule {
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire() || load_s1.io.out.bits.uop.needFlush(io.redirect), false.B)
+  PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire() || load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect), false.B)
 
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
@@ -264,10 +264,10 @@ class LoadUnit extends XSModule {
 //  load_s2.io.lsroq.forwardData := io.lsroq.forward.forwardData
 
   XSDebug(load_s0.io.out.valid,
-    p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx)}, " +
+    p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
     p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")
   XSDebug(load_s1.io.out.valid, 
-    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx)}, tlb_miss ${io.dtlb.resp.bits.miss}, " + 
+    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.dtlb.resp.bits.miss}, " + 
     p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}\n")
 
   // writeback to LSROQ

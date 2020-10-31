@@ -74,11 +74,15 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
+  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
   srand48(args.seed);
   Verilated::randReset(2);
+
+  // init core
+  reset_ncycles(10);
 
   // init ram
   extern void init_ram(const char *img);
@@ -102,9 +106,6 @@ Emulator::Emulator(int argc, const char *argv[]):
 #else
   enable_waveform = false;
 #endif
-
-  // init core
-  reset_ncycles(10);
 
   if (args.snapshot_path != NULL) {
     printf("loading from snapshot `%s`...\n", args.snapshot_path);
