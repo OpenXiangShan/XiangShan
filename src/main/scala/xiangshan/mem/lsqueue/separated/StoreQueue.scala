@@ -273,6 +273,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with NeedImpl {
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
     
     commitedStoreQueue.io.deq(i).ready := io.sbuffer(i).fire() || mmio
+
+    XSDebug(io.sbuffer(i).fire(), "[SBUFFER STORE REQ] pa %x data %x\n", data(ptr).paddr, data(ptr).data)
     
     // update sq meta if store inst is send to sbuffer
     when(commitedStoreQueue.io.deq(i).valid && (mmio || io.sbuffer(i).ready)) {
