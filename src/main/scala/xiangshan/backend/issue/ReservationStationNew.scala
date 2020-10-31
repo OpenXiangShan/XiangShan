@@ -237,7 +237,7 @@ class ReservationStationNew
   if(srcNum > 2) { io.deq.bits.src3 := data(idxQueue(selectedIdxReg))(2) } // TODO: beautify it
 
   // enq
-  val tailAfterRealDeq = tailPtr - moveMask(tailPtr.tail(1))
+  val tailAfterRealDeq = tailPtr - (io.deq.fire() || haveBubble)
   val isFull = tailAfterRealDeq.head(1).asBool() // tailPtr===qsize.U
   tailPtr := tailAfterRealDeq + io.enqCtrl.fire()
 
