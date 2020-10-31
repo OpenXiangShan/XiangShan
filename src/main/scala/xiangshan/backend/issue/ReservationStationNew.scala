@@ -288,10 +288,7 @@ class ReservationStationNew
       when (wuHit || bpHit) { srcQueue(i.U - moveMask(i))(j).state := SrcState.rdy }
       when (wuHit) { data(idxQueue(i))(j) := wuData }
       when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
-      
-      assert(RegNext(!(bpHit && wuHit)))
-      assert(RegNext(!(bpHitReg && wuHit)))
-      assert(RegNext(!(srcQueue(i)(j).state === SrcState.rdy && (bpHit && wuHit))))
+
       XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${idxQueue(i)}\n")
       XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) Ctrl idx:${idxQueue(i)}\n")
       XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${idxQueue(i)}\n")
