@@ -183,6 +183,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
       valid_array(i) := 0.U
     }
   }
+  XSDebug("valid_array:%x   flush:%d\n",valid_array.asUInt,io.flush)
 
   val wen = io.write.valid && !reset.toBool && !io.flush
   when (wen) {
@@ -322,7 +323,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   switch (state) {
     is (s_invalid) {
       when (io.flush) {
-        state := s_invalid
+        state := s_drain_cache
       }
     }
     is (s_drain_cache) {
