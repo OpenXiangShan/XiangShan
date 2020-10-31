@@ -54,8 +54,14 @@ abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
 
 abstract class ICacheModule extends XSModule
+  with HasICacheParameters
   with ICacheBase
 
+abstract class ICacheArray extends XSModule
+  with HasICacheParameters
+
+abstract class ICachArray extends XSModule
+  with HasICacheParameters
 
 sealed class ICacheMetaBundle extends ICacheBundle
 {
@@ -126,6 +132,91 @@ trait ICacheBase extends HasICacheParameters
 
 }
 
+class ICacheMetaWriteBundle extends ICacheBundle
+{
+  val virIdx = UInt(idxBits.W)
+  val phyTag = UInt(tagBits.W)
+  val waymask = UInt(nWays.W)
+
+  def apply(tag:UInt, idx:UInt, waymask:UInt){
+    this.virIdx := idx
+    this.phyTag := tag
+    this.waymask := waymask
+  }
+
+}
+
+class ICacheDataWriteBundle extends ICacheBundle
+{
+  val virIdx = UInt(idxBits.W)
+  val data = UInt(blockBits.W)
+  val waymask = UInt(nWays.W)
+
+  def apply(data:UInt, idx:UInt, waymask:UInt){
+    this.virIdx := idx
+    this.data := data
+    this.waymask := waymask
+  }
+
+}
+
+class ICacheMetaArray extends ICachArray
+{
+  val io=IO{new Bundle{
+    val write = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
+    val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
+    val readResp = Output(Vec(nWays,new ICacheMetaBundle))
+  }}
+
+  val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
+
+  //read 
+  metaArray.io.r.req.valid := io.read.valid
+  io.read.ready := metaArray.io.r.req.ready
+  io.write.ready := DontCare
+  metaArray.io.r.req.bits.apply(setIdx=io.read.bits)
+  io.readResp := metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
+  //write
+  val write = io.write.bits
+  metaArray.io.w.req.valid := io.write.valid
+  metaArray.io.w.req.bits.apply(data=write.phyTag.asTypeOf(new ICacheMetaBundle), setIdx=write.virIdx, waymask=write.waymask)
+
+
+}
+
+class ICacheDataArray extends ICachArray
+{
+  val io=IO{new Bundle{
+    val write = Flipped(DecoupledIO(new ICacheDataWriteBundle))
+    val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
+    val readResp = Output(Vec(blockWords,Vec(nWays,new ICacheDataBundle)))
+  }}
+
+  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
+
+  //read 
+  for(b <- 0 until blockWords){
+    dataArray(b).io.r.req.valid := io.read.valid
+    dataArray(b).io.r.req.bits.apply(setIdx=io.read.bits)
+  }
+  val dataArrayReadyVec = dataArray.map(b => b.io.r.req.ready)
+
+  io.read.ready := ParallelOR(dataArrayReadyVec)
+  io.write.ready := DontCare
+  io.readResp := VecInit(dataArray.map(b => b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle))))
+
+  //write
+  val write = io.write.bits
+  val write_data = write.data.asTypeOf(Vec(blockWords,new ICacheDataBundle))
+  for(b <- 0 until blockWords){
+    dataArray(b).io.w.req.valid := io.write.valid
+    dataArray(b).io.w.req.bits.apply(   setIdx=write.virIdx, 
+                                        data=write_data(b), 
+                                        waymask=write.waymask)
+
+  }
+
+}
 
 /* ------------------------------------------------------------
  * This module is a SRAM with 4-way associated mapping
@@ -163,8 +254,8 @@ class ICache extends ICacheModule
   //----------------------------
   //    Memory Part
   //----------------------------
-  val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
-  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
+  val metaArray = Module(new ICacheMetaArray)
+  val dataArray = Module(new ICacheDataArray)
   // 256-bit valid
   val validArray = RegInit(0.U((nSets * nWays).W)) 
 
@@ -179,12 +270,11 @@ class ICache extends ICacheModule
   
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
-  metaArray.io.r.req.valid := s1_valid
-  metaArray.io.r.req.bits.apply(setIdx=s1_idx)
-  for(b <- 0 until blockWords){
-    dataArray(b).io.r.req.valid := s1_valid
-    dataArray(b).io.r.req.bits.apply(setIdx=s1_idx)
-  }
+  metaArray.io.read.valid := s1_valid
+  metaArray.io.read.bits  :=s1_idx
+  dataArray.io.read.valid := s1_valid
+  dataArray.io.read.bits  :=s1_idx
+
   XSDebug("[Stage 1] v : r : f  (%d  %d  %d)  request pc: 0x%x  mask: %b\n",s1_valid,s2_ready,s1_fire,s1_req_pc,s1_req_mask)
   XSDebug("[Stage 1] index: %d\n",s1_idx)
   
@@ -202,8 +292,8 @@ class ICache extends ICacheModule
   .elsewhen(s2_fire) { s2_valid := false.B}
 
   // SRAM(Meta and Data) read reseponse
-  val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
-  val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
+  val metas = metaArray.io.readResp
+  val datas =RegEnable(next=dataArray.io.readResp, enable=s2_fire)
 
   val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
 
@@ -270,18 +360,15 @@ class ICache extends ICacheModule
   //TODO: Prefetcher
 
   //refill write
-  //meta
-  val metaWrite = Wire(new ICacheMetaBundle)
-  val wayNum = OHToUInt(s3_wayMask.asTypeOf(Vec(nWays,Bool())))
-  val validPtr = Cat(get_idx(s3_req_pc),wayNum)
   val metaWriteReq = icacheMissQueue.io.meta_write.bits
   icacheMissQueue.io.meta_write.ready := true.B
-  //metaWrite.tag := get_tag(s3_req_pc)     
-  metaWrite.tag := s3_tag
-  metaArray.io.w.req.valid := icacheMissQueue.io.meta_write.valid
-  metaArray.io.w.req.bits.apply(data=metaWriteReq.meta_write_tag.asTypeOf(new ICacheMetaBundle), 
-                                setIdx=metaWriteReq.meta_write_idx, waymask=metaWriteReq.meta_write_waymask)
+  metaArray.io.write.valid := icacheMissQueue.io.meta_write.valid 
+  metaArray.io.write.bits.apply(tag=metaWriteReq.meta_write_tag, 
+                                idx=metaWriteReq.meta_write_idx, 
+                                waymask=metaWriteReq.meta_write_waymask)
 
+  val wayNum = OHToUInt(metaWriteReq.meta_write_waymask.asTypeOf(Vec(nWays,Bool())))
+  val validPtr = Cat(metaWriteReq.meta_write_idx,wayNum)
   when(icacheMissQueue.io.meta_write.valid && !cacheflushed){
     validArray := validArray.bitSet(validPtr, true.B)
   }
@@ -289,14 +376,10 @@ class ICache extends ICacheModule
   //data
   icacheMissQueue.io.refill.ready := true.B
   val refillReq = icacheMissQueue.io.refill.bits
-  val refillData = refillReq.refill_data.asTypeOf(Vec(blockWords,new ICacheDataBundle))
-  for(b <- 0 until blockWords){
-      dataArray(b).io.w.req.valid := icacheMissQueue.io.refill.valid
-      dataArray(b).io.w.req.bits.apply(   setIdx=refillReq.refill_idx, 
-                                          data=refillData(b), 
-                                          waymask=refillReq.refill_waymask)
-
-  }
+  dataArray.io.write.valid := icacheMissQueue.io.refill.valid 
+  dataArray.io.write.bits.apply(data=refillReq.refill_data,
+                                idx=refillReq.refill_idx,
+                                waymask=refillReq.refill_waymask)
 
   //icache flush: only flush valid Array register
   when(icacheFlush){ validArray := 0.U }
@@ -324,8 +407,7 @@ class ICache extends ICacheModule
   //    Out Put
   //----------------------------
   //icache request
-  val dataArrayReadyVec = dataArray.map(b => b.io.r.req.ready)
-  io.req.ready := metaArray.io.r.req.ready && ParallelOR(dataArrayReadyVec) && s2_ready
+  io.req.ready := metaArray.io.read.ready && dataArray.io.read.ready && s2_ready
   
   //icache response: to pre-decoder
   io.resp.valid := s3_valid && (s3_hit || icacheMissQueue.io.resp.valid)

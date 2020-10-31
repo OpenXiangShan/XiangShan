@@ -115,7 +115,6 @@ class IcacheMissEntry extends ICacheMissQueueModule
         when(io.req.fire()){
           state := s_memReadReq
           req := io.req.bits
-          readBeatCnt.value := 0.U
         }
       }
 
