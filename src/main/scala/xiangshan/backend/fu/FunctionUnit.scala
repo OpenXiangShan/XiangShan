@@ -70,7 +70,7 @@ object FunctionUnit {
 
   val mulCfg =
     FuConfig(FuType.mul, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false,
-      CertainLatency(3)
+      UncertainLatency()// CertainLatency(3)
     )
 
   val divCfg =

@@ -53,11 +53,13 @@ class BypassQueue(number: Int) extends XSModule {
     val out = ValidIO(new MicroOp)
     val redirect = Flipped(ValidIO(new Redirect))
   })
-  if(number == 0) { 
+  if (number < 0) {
+    io.out.valid := false.B
+    io.out.bits := DontCare
+  } else if(number == 0) {
     io.in <> io.out
     io.out.valid := io.in.valid && !io.out.bits.roqIdx.needFlush(io.redirect) 
-  }
-  else {
+  } else {
     val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()
       val bits = new MicroOp
@@ -304,7 +306,7 @@ class ReservationStationNew
   XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull} validQue:b${Binary(validQueue.asUInt)} readyQueue:${Binary(readyQueue.asUInt)}\n")
   XSDebug(io.redirect.valid && (io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue)), p"Redirect: roqIdx:${io.redirect.bits.roqIdx} isException:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} isFlushPipe:${io.redirect.bits.isFlushPipe} RedHitVec:b${Binary(VecInit(redHitVec).asUInt)}\n")
   XSDebug(io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue), p"SelMask:b${Binary(selectMask.asUInt)} MoveMask:b${Binary(moveMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} redSel:${redSel} selValid:${selValid} selIdxReg:${selectedIdxReg} selReg:${selReg} haveBubble:${haveBubble} deqValid:${deqValid} firstBubble:${firstBubble} findBubble:${findBubble} selRegOH:b${Binary(selectedIdxRegOH)}\n")
-  XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)} fixedDelay:${fixedDelay.U}\n")
+  XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)}}\n")
   XSDebug(io.deq.fire, p"Deq: SelIdxReg:${selectedIdxReg} pc:0x${Hexadecimal(io.deq.bits.uop.cf.pc)} Idx:${idxQueue(selectedIdxReg)} roqIdx:${io.deq.bits.uop.roqIdx} src1:0x${Hexadecimal(io.deq.bits.src1)} src2:0x${Hexadecimal(io.deq.bits.src2)} src3:0x${Hexadecimal(io.deq.bits.src3)}\n")
   val broadcastedUops = io.broadcastedUops
   val extraListenPorts = io.extraListenPorts
