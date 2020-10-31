@@ -51,8 +51,12 @@ class BypassQueue(number: Int) extends XSModule {
   val io = IO(new Bundle {
     val in  = Flipped(ValidIO(new MicroOp))
     val out = ValidIO(new MicroOp)
+    val redirect = Flipped(ValidIO(new Redirect))
   })
-  if(number == 0) {  io.in <> io.out }
+  if(number == 0) { 
+    io.in <> io.out
+    io.out.valid := io.in.valid && !io.out.bits.roqIdx.needFlush(io.redirect) 
+  }
   else {
     val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()
@@ -60,9 +64,15 @@ class BypassQueue(number: Int) extends XSModule {
     })))
     queue(0).valid := io.in.valid
     queue(0).bits  := io.in.bits
-    (0 until (number-1)).map{i => queue(i+1) := queue(i) }
-    io.out.valid := queue(number-1).valid
+    (0 until (number-1)).map{i => 
+      queue(i+1) := queue(i)
+      queue(i+1).valid := queue(i).valid && !queue(i).bits.roqIdx.needFlush(io.redirect)
+    }
+    io.out.valid := queue(number-1).valid && !queue(number-1).bits.roqIdx.needFlush(io.redirect)
     io.out.bits := queue(number-1).bits
+    for (i <- 0 until number) {
+      XSDebug(queue(i).valid, p"BPQue(${i.U}): pc:${Hexadecimal(queue(i).bits.cf.pc)} roqIdx:${queue(i).bits.roqIdx} pdest:${queue(i).bits.pdest} rfWen:${queue(i).bits.ctrl.rfWen} fpWen${queue(i).bits.ctrl.fpWen}\n")
+    }
   }
 }
 
@@ -244,10 +254,11 @@ class ReservationStationNew
   val bpQueue = Module(new BypassQueue(fixedDelay))
   bpQueue.io.in.valid := selValid
   bpQueue.io.in.bits := uop(idxQueue(selectedIdxWire))
+  bpQueue.io.redirect := io.redirect
   io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits)
   io.selectedUop.bits  := bpQueue.io.out.bits
   if(fixedDelay > 0) {
-    XSDebug(io.selectedUop.valid, "SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
+    XSDebug(io.selectedUop.valid, p"SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
   }
 
   // output
