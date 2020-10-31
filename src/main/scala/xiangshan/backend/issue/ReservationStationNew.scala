@@ -187,7 +187,7 @@ class ReservationStationNew
   // wakeup and bypass
   def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
     val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
-    assert(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U)
+    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
     
     val hit = ParallelOR(hitVec) && valid
     (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
@@ -195,7 +195,7 @@ class ReservationStationNew
 
   def bypass(src: SrcBundle, valid: Bool) : (Bool, Bool, UInt) = {
     val hitVec = io.broadcastedUops.map(port => src.hit(port.bits) && port.valid)
-    assert(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U)
+    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
 
     val hit = ParallelOR(hitVec) && valid
     (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
@@ -209,9 +209,9 @@ class ReservationStationNew
       when (wuHit) { data(idxQueue(i))(j) := wuData }
       when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
       
-      assert(!(bpHit && wuHit))
-      assert(!(bpHitReg && wuHit))
-      assert(!(srcQueue(i)(j).state === SrcState.rdy && (bpHit && wuHit)))
+      assert(RegNext(!(bpHit && wuHit)))
+      assert(RegNext(!(bpHitReg && wuHit)))
+      assert(RegNext(!(srcQueue(i)(j).state === SrcState.rdy && (bpHit && wuHit))))
       XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${idxQueue(i)}\n")
       XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) Ctrl idx:${idxQueue(i)}\n")
       XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${idxQueue(i)}\n")

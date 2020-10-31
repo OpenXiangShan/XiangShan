@@ -57,7 +57,7 @@ EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 EMU_THREADS   = 1
 ifeq ($(EMU_THREADS), 1)
-	VTHREAD_FLAGS = 
+	VTHREAD_FLAGS = --threads 1 
 else 
 	VTHREAD_FLAGS = --threads $(EMU_THREADS) --threads-dpi none
 endif
@@ -69,6 +69,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
   $(VTHREAD_FLAGS) \
+  --trace \
   --assert \
   --savable \
   --stats-vars \
