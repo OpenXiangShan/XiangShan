@@ -31,7 +31,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
@@ -119,7 +119,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
           io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
           )
         }.otherwise {
-          XSInfo(io.loadIn(i).valid, "load hit write to cbd idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
+          XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
           io.loadIn(i).bits.uop.lqIdx.asUInt,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -293,11 +293,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
     when(io.ldout(i).fire()) {
       writebacked(loadWbSel(i)) := true.B
-      XSInfo("load miss write to cbd idx %d roqIdx %d ldWbSel(%d) %d pc 0x%x paddr %x data %x mmio %x\n",
-        io.ldout(i).bits.uop.lqIdx.asUInt,
+      XSInfo("load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
         io.ldout(i).bits.uop.roqIdx.asUInt,
-        i.U,
-        loadWbSel(i),
+        io.ldout(i).bits.uop.lqIdx.asUInt,
         io.ldout(i).bits.uop.cf.pc,
         data(loadWbSel(i)).paddr,
         data(loadWbSel(i)).data,
@@ -409,24 +407,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
       XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
-      // check if rollback is needed for load in l4
-      val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
-        io.forward(j).valid && // L4 valid\
-          isAfter(io.forward(j).uop.roqIdx, io.storeIn(i).bits.uop.roqIdx) &&
-          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
-          (io.storeIn(i).bits.mask & io.forward(j).mask).orR
-      }))
-      val l4Violation = l4ViolationVec.asUInt().orR()
-      val l4ViolationUop = getOldestInTwo(l4ViolationVec, io.forward.map(_.uop))
-
-      val rollbackValidVec = Seq(lqViolation, wbViolation, l4Violation)
-      val rollbackUopVec = Seq(lqViolationUop, wbViolationUop, l4ViolationUop)
+      val rollbackValidVec = Seq(lqViolation, wbViolation)
+      val rollbackUopVec = Seq(lqViolationUop, wbViolationUop)
       rollback(i).valid := Cat(rollbackValidVec).orR
       val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
       val oneAfterZero = mask(1)(0)
-      val rollbackUop = Mux(oneAfterZero && mask(2)(0),
-        rollbackUopVec(0),
-        Mux(!oneAfterZero && mask(2)(1), rollbackUopVec(1), rollbackUopVec(2)))
+      val rollbackUop = Mux(oneAfterZero, rollbackUopVec(0), rollbackUopVec(1))
       rollback(i).bits.roqIdx := rollbackUop.roqIdx - 1.U
 
       rollback(i).bits.isReplay := true.B
@@ -443,11 +429,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         wbViolation,
         "need rollback (ld/st wb together) pc %x roqidx %d target %x\n",
         io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, wbViolationUop.roqIdx.asUInt
-      )
-      XSDebug(
-        l4Violation,
-        "need rollback (l4 load) pc %x roqidx %d target %x\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, l4ViolationUop.roqIdx.asUInt
       )
     }.otherwise {
       rollback(i).valid := false.B
@@ -493,7 +474,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   io.uncache.req.bits.meta.replay   := false.B
 
   io.uncache.resp.ready := true.B
-  io.uncache.s1_kill := false.B
 
   when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B
@@ -564,7 +544,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   for (i <- 0 until LoadQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, data(i).paddr)
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

@@ -84,7 +84,8 @@ class ReservationStationNew
   wakeupCnt: Int,
   extraListenPortsCnt: Int,
   srcNum: Int = 3,
-  fixedDelay: Int
+  fixedDelay: Int,
+  feedback: Boolean
 ) extends XSModule {
 
 
@@ -122,6 +123,7 @@ class ReservationStationNew
     val numExist = Output(UInt(iqIdxWidth.W))
 
     // TODO: support replay for future use if exu is ldu/stu
+    val tlbFeedback = Flipped(ValidIO(new TlbFeedback))
   })
 
 //  io <> DontCare
@@ -283,7 +285,7 @@ class ReservationStationNew
   def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
     val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
     assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
-    
+
     val hit = ParallelOR(hitVec) && valid
     (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
   }
