@@ -142,7 +142,13 @@ class ReservationStationNew
   // other part: lsroqIdx and many other signal in uop. may set them to control part(close to dispatch)
 
   // control part:
-  val validQueue    = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
+
+  val s_idle :: s_valid :: s_wait :: s_replay :: Nil = Enum(4)
+
+  val stateQueue    = RegInit(VecInit(Seq.fill(iqSize)(s_idle)))
+  // val validQueue    = RegInit(VecInit(Seq.fill(iqSize)(false.B)))
+  val validQueue    = stateQueue.map(_ === s_valid)
+  val emptyQueue    = stateQueue.map(_ === s_idle)
   val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, new SrcBundle)))
   // val srcQueue      = Seq.fill(iqSize)(Seq.fill(srcNum)(Reg(new SrcBundle)))
 
@@ -181,7 +187,7 @@ class ReservationStationNew
   // TODO:
   val bubIdxRegOH = Wire(UInt(iqSize.W))
   val bubMask = WireInit(VecInit(
-    (0 until iqSize).map(i => !validQueue(i) && !bubIdxRegOH(i))
+    (0 until iqSize).map(i => emptyQueue(i) && !bubIdxRegOH(i))
   ))
   val (firstBubble, findBubble) = PriorityEncoderWithFlag(bubMask)
   haveBubble := findBubble && (firstBubble < tailPtr)
@@ -201,12 +207,12 @@ class ReservationStationNew
     when(moveMask(i)){
       idxQueue(i)   := idxQueue(i+1)
       srcQueue(i).zip(srcQueue(i+1)).map{case (a,b) => a := b}
-      validQueue(i) := validQueue(i+1)
+      stateQueue(i) := stateQueue(i+1)
     }
   }
   when(deqValid){
     idxQueue.last := idxQueue(deqIdx)
-    validQueue.last := false.B
+    stateQueue.last := s_idle
   }
 
   // redirect
@@ -214,9 +220,9 @@ class ReservationStationNew
   //redHitVec.zip(validQueue).map{ case (r,v) => when (r) { v := false.B } }
   for (i <- 0 until iqSize) {
     if (i != 0) {
-      when (redHitVec(i)) { validQueue(i.U - moveMask(i-1)) := false.B }
+      when (redHitVec(i)) { stateQueue(i.U - moveMask(i-1)) := s_idle }
     } else {
-      when (redHitVec(i) && !moveMask(i)) { validQueue(i) := false.B }
+      when (redHitVec(i) && !moveMask(i)) { stateQueue(i) := s_idle }
     }
   }
 
@@ -269,7 +275,7 @@ class ReservationStationNew
 
   when (io.enqCtrl.fire()) {
     uop(enqIdx_data) := enqUop 
-    validQueue(enqIdx_ctrl) := true.B
+    stateQueue(enqIdx_ctrl) := s_valid
     srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s,i) =>
       s := SrcBundle.check(srcSeq(i), Mux(enqBpVec(i)._1, SrcState.rdy, srcStateSeq(i)), srcTypeSeq(i)) }
     
@@ -321,7 +327,7 @@ class ReservationStationNew
   // log
   // TODO: add log
   val print = io.enqCtrl.valid || io.deq.valid || ParallelOR(validQueue) || tailPtr=/=0.U || true.B
-  XSDebug(print, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull} validQue:b${Binary(validQueue.asUInt)} readyQueue:${Binary(readyQueue.asUInt)}\n")
+  XSDebug(print, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${io.deq.valid} ${io.deq.ready}) tailPtr:${tailPtr} tailPtr.tail:${tailPtr.tail(1)} tailADeq:${tailAfterRealDeq} isFull:${isFull} validQue:b${Binary(VecInit(validQueue).asUInt)} readyQueue:${Binary(readyQueue.asUInt)}\n")
   XSDebug(io.redirect.valid && print, p"Redirect: roqIdx:${io.redirect.bits.roqIdx} isException:${io.redirect.bits.isException} isMisPred:${io.redirect.bits.isMisPred} isReplay:${io.redirect.bits.isReplay} isFlushPipe:${io.redirect.bits.isFlushPipe} RedHitVec:b${Binary(VecInit(redHitVec).asUInt)}\n")
   XSDebug(print, p"SelMask:b${Binary(selectMask.asUInt)} MoveMask:b${Binary(moveMask.asUInt)} rdyQue:b${Binary(readyQueue.asUInt)} selIdxWire:${selectedIdxWire} sel:${selected} redSel:${redSel} selValid:${selValid} selIdxReg:${selectedIdxReg} selReg:${selReg} haveBubble:${haveBubble} deqValid:${deqValid} firstBubble:${firstBubble} findBubble:${findBubble} bubReg:${bubReg} bubIdxReg:${bubIdxReg} selRegOH:b${Binary(selectedIdxRegOH)}\n")
   XSDebug(io.selectedUop.valid, p"Select: roqIdx:${io.selectedUop.bits.roqIdx} pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} fuType:b${Binary(io.selectedUop.bits.ctrl.fuType)} FuOpType:b${Binary(io.selectedUop.bits.ctrl.fuOpType)}}\n")
@@ -335,8 +341,8 @@ class ReservationStationNew
   for (i <- extraListenPorts.indices) {
     XSDebug(extraListenPorts(i).valid && print, p"WakeUp(${i.U}): pc:0x${Hexadecimal(extraListenPorts(i).bits.uop.cf.pc)} roqIdx:${extraListenPorts(i).bits.uop.roqIdx} pdest:${extraListenPorts(i).bits.uop.pdest} rfWen:${extraListenPorts(i).bits.uop.ctrl.rfWen} fpWen:${extraListenPorts(i).bits.uop.ctrl.fpWen} data:0x${Hexadecimal(extraListenPorts(i).bits.data)}\n")
   }
-  XSDebug(print, "  : IQ|v|r| src1 |src2 | src3|pdest(rf|fp)| roqIdx|pc\n")
+  XSDebug(print, "  : IQ|s|r| src1 |src2 | src3|pdest(rf|fp)| roqIdx|pc\n")
   for(i <- 0 until iqSize) {
-    XSDebug(print, p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)} 0x${Hexadecimal(data(idxQueue(i))(0))}|${srcQueue(i)(1)} 0x${Hexadecimal(data(idxQueue(i))(1))}|${srcQueue(i)(2)} 0x${Hexadecimal(data(idxQueue(i))(2))}|${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
+    XSDebug(print, p"${i.U}: ${idxQueue(i)}|${stateQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)} 0x${Hexadecimal(data(idxQueue(i))(0))}|${srcQueue(i)(1)} 0x${Hexadecimal(data(idxQueue(i))(1))}|${srcQueue(i)(2)} 0x${Hexadecimal(data(idxQueue(i))(2))}|${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
   }
 }
