@@ -167,9 +167,10 @@ class ReservationStationNew
       // TODO: add redirect here, may cause long latency , change it
     )
   ))
+  val haveBubble = Wire(Bool())
   val (selectedIdxWire, selected) = PriorityEncoderWithFlag(selectMask)
   val redSel = uop(idxQueue(selectedIdxWire)).roqIdx.needFlush(io.redirect)
-  val selValid = !redSel && selected
+  val selValid = !redSel && selected && !haveBubble
   val selReg = RegNext(selValid)
   val selectedIdxReg = RegNext(selectedIdxWire - moveMask(selectedIdxWire))
   selectedIdxRegOH := UIntToOH(selectedIdxReg)
@@ -177,7 +178,7 @@ class ReservationStationNew
   // real deQ
   // TODO: 
   val (firstBubble, findBubble) = PriorityEncoderWithFlag(validQueue.map(!_))
-  val haveBubble = findBubble && (firstBubble < tailPtr)
+  haveBubble := findBubble && (firstBubble < tailPtr)
   val deqValid = haveBubble/*fire an bubble*/ || (selReg && io.deq.ready/*fire an rdy*/)
   val deqIdx = Mux(haveBubble, firstBubble, selectedIdxReg) // TODO: may have one more cycle delay than fire slot
   moveMask := {
