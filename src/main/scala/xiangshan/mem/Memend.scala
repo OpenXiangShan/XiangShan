@@ -79,6 +79,7 @@ class MemToBackendIO extends XSBundle {
   val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
   val oldestStore = Output(Valid(new RoqPtr))
   val roqDeqPtr = Input(new RoqPtr)
+  val exceptionAddr = new ExceptionAddrIO
 }
 
 // Memory pipeline wrapper
@@ -150,6 +151,7 @@ class Memend extends XSModule {
   lsroq.io.lsIdxs   <> io.backend.lsIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   lsroq.io.roqDeqPtr := io.backend.roqDeqPtr
+
   io.backend.replayAll <> lsroq.io.rollback
 
   lsroq.io.dcache      <> io.loadMiss
@@ -225,4 +227,9 @@ class Memend extends XSModule {
     assert(!loadUnits(0).io.ldout.valid)
     loadUnits(0).io.ldout.ready := false.B
   }
+
+  lsroq.io.exceptionAddr.lsIdx := io.backend.exceptionAddr.lsIdx
+  lsroq.io.exceptionAddr.isStore := io.backend.exceptionAddr.isStore
+  io.backend.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsroq.io.exceptionAddr.vaddr)
+
 }

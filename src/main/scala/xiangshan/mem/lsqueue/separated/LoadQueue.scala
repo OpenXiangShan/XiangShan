@@ -38,6 +38,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
+    val exceptionAddr = new ExceptionAddrIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -514,10 +515,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // Read vaddr for mem exception
-  val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-  val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx.value).vaddr)
-  ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_LOAD_VADDR")
+  io.exceptionAddr.vaddr := data(io.exceptionAddr.lsIdx.lqIdx.value).vaddr
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx

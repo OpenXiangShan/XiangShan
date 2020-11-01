@@ -215,6 +215,7 @@ class ExuIO extends XSBundle {
   val out = DecoupledIO(new ExuOutput)
   // for csr
   val exception = Flipped(ValidIO(new MicroOp))
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
   // for Lsu
   val dmem = new SimpleBusUC
   val mcommit = Input(UInt(3.W))

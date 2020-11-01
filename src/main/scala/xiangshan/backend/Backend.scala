@@ -37,9 +37,7 @@ class Backend extends XSModule
   // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
   // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
-  exeUnits.foreach(_.io.exception := DontCare)
-  exeUnits.foreach(_.io.dmem := DontCare)
-  exeUnits.foreach(_.io.mcommit := DontCare)
+  exeUnits.foreach(_.io := DontCare)
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
@@ -176,6 +174,12 @@ class Backend extends XSModule
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.exception.bits := roq.io.exception
+
+  jmpExeUnit.io.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
+  io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
+  io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
+  io.mem.exceptionAddr.isStore := CommitType.lsInstIsStore(roq.io.exception.ctrl.commitType)
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo

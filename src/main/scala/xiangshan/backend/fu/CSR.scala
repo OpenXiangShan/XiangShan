@@ -185,6 +185,7 @@ class CSRIO extends FunctionUnitIO {
 //  val intrNO = Output(UInt(XLEN.W))
   val wenFix = Output(Bool())
   val perf = Vec(NumPerfCounters, new PerfCounterIO)
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
 }
 
 class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
@@ -600,27 +601,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned) && io.exception.valid
 
   // mtval write logic
-  val lsroqExceptionAddr = WireInit(0.U(VAddrBits.W))
-  if(EnableUnifiedLSQ){
-    ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
-    ExcitingUtils.addSink(lsroqExceptionAddr, "EXECPTION_VADDR")
-  } else {
-    val lsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-    lsIdx.lqIdx := io.exception.bits.lqIdx
-    lsIdx.sqIdx := io.exception.bits.sqIdx
-    ExcitingUtils.addSource(lsIdx, "EXECPTION_LSROQIDX")
-    val lqExceptionAddr = WireInit(0.U(VAddrBits.W))
-    val sqExceptionAddr = WireInit(0.U(VAddrBits.W))
-    ExcitingUtils.addSink(lqExceptionAddr, "EXECPTION_LOAD_VADDR")
-    ExcitingUtils.addSink(sqExceptionAddr, "EXECPTION_STORE_VADDR")
-    lsroqExceptionAddr := Mux(CommitType.lsInstIsStore(io.exception.bits.ctrl.commitType), sqExceptionAddr, lqExceptionAddr)
-  }
-
-  val atomExceptionAddr = WireInit(0.U(VAddrBits.W))
-  val atomOverrideXtval = WireInit(false.B)
-  ExcitingUtils.addSink(atomExceptionAddr, "ATOM_EXECPTION_VADDR")
-  ExcitingUtils.addSink(atomOverrideXtval, "ATOM_OVERRIDE_XTVAL")
-  val memExceptionAddr = Mux(atomOverrideXtval, atomExceptionAddr, lsroqExceptionAddr)
+  val memExceptionAddr = SignExt(io.memExceptionVAddr, XLEN)
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
@@ -629,7 +610,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
         SignExt(io.exception.bits.cf.pc + 2.U, XLEN),
         SignExt(io.exception.bits.cf.pc, XLEN)
       ),
-      SignExt(memExceptionAddr, XLEN)
+      memExceptionAddr
     )
     when(priviledgeMode === ModeM){
       mtval := tval
@@ -640,7 +621,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
 
   when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
   {
-    mtval := SignExt(memExceptionAddr, XLEN)
+    mtval := memExceptionAddr
   }
 
   // Exception and Intr
