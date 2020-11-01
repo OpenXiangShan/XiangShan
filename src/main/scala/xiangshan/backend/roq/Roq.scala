@@ -261,9 +261,6 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
 
-  val hasWFI = io.commits.map(c => c.valid && state===s_idle && c.bits.uop.cf.instr===WFI).reduce(_||_)
-  ExcitingUtils.addSource(hasWFI, "isWFI")
-
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk

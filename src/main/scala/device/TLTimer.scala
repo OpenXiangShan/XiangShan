@@ -35,12 +35,6 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
     val tick = (nextCnt === freq)
     when (tick) { mtime := mtime + inc }
 
-    if (sim) {
-      val isWFI = WireInit(false.B)
-      ExcitingUtils.addSink(isWFI, "isWFI")
-      when (isWFI) { mtime := mtime + 100000.U }
-    }
-
     node.regmap( mapping =
       0x0000 -> RegField.bytes(msip),
       0x4000 -> RegField.bytes(mtimecmp),
