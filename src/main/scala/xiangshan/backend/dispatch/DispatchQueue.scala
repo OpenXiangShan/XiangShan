@@ -190,7 +190,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   // In case of replay, we need to walk back and recover preg states in the busy table.
   // We keep track of the number of entries needed to be walked instead of target position to reduce overhead
   // for 11111111, replayPosition is unuseful. We naively set Cnt to size.U
-  val dispatchReplayCnt = Mux(allReplay, size.U, Mux(maskedNeedReplay(size - 1), (dispatchPtr + replayPosition).value, (dispatchPtr - replayPosition).value))
+  val dispatchReplayCnt = Mux(
+    allReplay, size.U,
+    Mux(maskedNeedReplay(size - 1),
+      // replay makes flag flipped
+      dispatchPtr.value + replayPosition,
+      // the new replay does not change the flag
+      Mux(dispatchPtr.value <= replayPosition,
+        // but we are currently in a replay that changes the flag
+        dispatchPtr.value + (size.U - replayPosition),
+        dispatchPtr.value - replayPosition)))
   val dispatchReplayCntReg = RegInit(0.U)
   // actually, if deqIndex points to head uops and they are replayed, there's no need for extraWalk
   // however, to simplify logic, we simply let it do extra walk now
