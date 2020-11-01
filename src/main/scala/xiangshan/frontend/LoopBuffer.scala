@@ -63,7 +63,8 @@ class LoopBuffer extends XSModule {
   }
 
   def isSBB(inst: UInt): Bool = {
-    sbbOffest(inst) > 0.U // TODO < 56.U
+    val sbbOffestWire = WireInit(sbbOffest(inst))
+    sbbOffestWire > 0.U && sbbOffestWire <= 112.U // TODO < 56.U
   }
 
   // predTaken to OH
