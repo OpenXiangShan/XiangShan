@@ -247,13 +247,17 @@ class ReservationStationNew
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
   val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
-  val enqIdxNext = RegNext(idxQueue(tailPtr.tail(1))) 
+
+  val enqPtr = Mux(tailPtr.head(1).asBool, selectedIdxReg, tailPtr.tail(1))
+  val enqIdx_data = idxQueue(enqPtr)
+  val enqIdx_ctrl = tailAfterRealDeq.tail(1)
+  val enqIdxNext = RegNext(enqIdx_data) 
   val enqBpVec = (0 until srcNum).map(i => bypass(SrcBundle(srcSeq(i), srcStateSeq(i), srcTypeSeq(i)), true.B))
 
   when (io.enqCtrl.fire()) {
-    uop(idxQueue(tailPtr.tail(1))) := enqUop 
-    validQueue(tailAfterRealDeq.tail(1)) := true.B
-    srcQueue(tailAfterRealDeq.tail(1)).zipWithIndex.map{ case (s,i) =>
+    uop(enqIdx_data) := enqUop 
+    validQueue(enqIdx_ctrl) := true.B
+    srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s,i) =>
       s := SrcBundle.check(srcSeq(i), Mux(enqBpVec(i)._1, SrcState.rdy, srcStateSeq(i)), srcTypeSeq(i)) }
     
     XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)} enqBpHit:${enqBpVec(0)._1}${enqBpVec(1)._1}${enqBpVec(2)._1}\n")
@@ -316,6 +320,6 @@ class ReservationStationNew
   }
   XSDebug(ParallelOR(validQueue), "  : IQ|v|r| src1 |src2 | src3|pdest(rf|fp)| roqIdx|pc\n")
   for(i <- 0 until iqSize) {
-    XSDebug(validQueue(i), p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)} 0x${Hexadecimal(data(idxQueue(i))(0))}|${srcQueue(i)(1)} 0x${Hexadecimal(data(idxQueue(i))(1))}|${srcQueue(i)(2)} 0x${Hexadecimal(data(idxQueue(i))(2))}|${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
+    XSDebug(ParallelOR(validQueue), p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${srcQueue(i)(0)} 0x${Hexadecimal(data(idxQueue(i))(0))}|${srcQueue(i)(1)} 0x${Hexadecimal(data(idxQueue(i))(1))}|${srcQueue(i)(2)} 0x${Hexadecimal(data(idxQueue(i))(2))}|${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
   }
 }
