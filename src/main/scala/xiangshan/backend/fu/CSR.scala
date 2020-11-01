@@ -166,6 +166,10 @@ class FpuCsrIO extends XSBundle {
   val frm = Input(UInt(3.W))
 }
 
+class PerfCounterIO extends XSBundle {
+  val value = Input(UInt(XLEN.W))
+}
+
 class CSRIO extends FunctionUnitIO {
   val cfIn = Input(new CtrlFlow)
   val redirect = Output(new Redirect)
@@ -180,6 +184,7 @@ class CSRIO extends FunctionUnitIO {
   // for differential testing
 //  val intrNO = Output(UInt(XLEN.W))
   val wenFix = Output(Bool())
+  val perf = Vec(NumPerfCounters, new PerfCounterIO)
 }
 
 class CSR extends FunctionUnit(csrCfg) with HasCSRConst{

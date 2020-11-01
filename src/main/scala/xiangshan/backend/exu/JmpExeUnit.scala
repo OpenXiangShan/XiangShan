@@ -32,6 +32,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
   csr.io.in.bits.src3 := DontCare
+  csr.io.perf <> DontCare
   val csrOut = csr.access(
     valid = io.in.valid && fuType === FuType.csr,
     src1 = io.in.bits.src1,
