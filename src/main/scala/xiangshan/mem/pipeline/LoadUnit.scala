@@ -116,7 +116,7 @@ class LoadUnit_S1 extends XSModule {
   io.forward.uop := s1_uop
   io.forward.pc := s1_uop.cf.pc
 
-  io.out.valid := io.in.valid && !s1_uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
@@ -252,7 +252,7 @@ class LoadUnit extends XSModule {
 //  io.lsroq.forward <> load_s1.io.forward
   load_s1.io.forward <> DontCare // TODO: do we still need this? can we remove s1.io.forward?
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire(), false.B)
+  PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire() || load_s1.io.out.bits.tlbMiss, false.B)
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
