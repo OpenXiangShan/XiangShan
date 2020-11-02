@@ -40,6 +40,8 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     val bcommit = Output(UInt(BrTagWidth.W))
     val commitRoqIndex = Output(Valid(new RoqPtr))
     val roqDeqPtr = Output(new RoqPtr)
+    val intrBitSet = Input(Bool())
+    val trapTarget = Input(UInt(VAddrBits.W))
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -128,14 +130,14 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // roq redirect only used for exception
-  val intrBitSet = WireInit(false.B)
-  ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
-  val trapTarget = WireInit(0.U(VAddrBits.W))
-  ExcitingUtils.addSink(trapTarget, "trapTarget")
+  // val intrBitSet = WireInit(false.B)
+  // ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
+  // val trapTarget = WireInit(0.U(VAddrBits.W))
+  // ExcitingUtils.addSink(trapTarget, "trapTarget")
 
   val deqUop = microOp(deqPtr)
   val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
-  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec &&
+  val intrEnable = io.intrBitSet && !isEmpty && !hasNoSpec &&
     deqUop.ctrl.commitType =/= CommitType.STORE && deqUop.ctrl.commitType =/= CommitType.LOAD// TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
@@ -143,9 +145,9 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   io.redirect.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)// TODO: add fence flush to flush the whole pipe
   io.redirect.bits.isException := intrEnable || exceptionEnable
   io.redirect.bits.isFlushPipe := isFlushPipe
-  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, trapTarget)
+  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.trapTarget)
   io.exception := deqUop
-  XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
+  XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
 
   // Commit uop to Rename (walk)
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
@@ -260,9 +262,6 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
 
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
-
-  val hasWFI = io.commits.map(c => c.valid && state===s_idle && c.bits.uop.cf.instr===WFI).reduce(_||_)
-  ExcitingUtils.addSource(hasWFI, "isWFI")
 
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?

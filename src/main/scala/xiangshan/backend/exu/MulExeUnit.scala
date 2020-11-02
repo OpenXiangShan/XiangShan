@@ -50,6 +50,7 @@ class MulExeUnit extends Exu(Exu.mulExeUnitCfg){
   io.out.bits.data := mul.io.out.bits.data
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
+  io.csrOnly <> DontCare
 
   XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid, io.in.ready,

@@ -18,20 +18,28 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val isCsr = fuType === FuType.csr
   val isFence = fuType === FuType.fence
 
+  jmp.io <> DontCare
   jmp.io.in.valid := io.in.valid && isJmp
   jmp.io.in.bits := io.in.bits
   jmp.io.out.ready := io.out.ready
-  jmp.io.exception <> DontCare
   jmp.io.dmem <> DontCare
   jmp.io.mcommit := DontCare
   jmp.io.redirect := io.redirect
 
   csr.io.cfIn := io.in.bits.uop.cf
   csr.io.fpu_csr := DontCare
-  csr.io.exception <> io.exception
+ 
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
   csr.io.in.bits.src3 := DontCare
+  csr.io.perf <> DontCare
+  csr.io.exception := io.csrOnly.exception
+  csr.io.memExceptionVAddr := io.csrOnly.memExceptionVAddr
+  io.csrOnly.trapTarget := csr.io.trapTarget
+  csr.io.mtip := io.csrOnly.externalInterrupt.mtip
+  csr.io.msip := io.csrOnly.externalInterrupt.msip
+  csr.io.meip := io.csrOnly.externalInterrupt.meip
+  io.csrOnly.interrupt := csr.io.interrupt
   val csrOut = csr.access(
     valid = io.in.valid && fuType === FuType.csr,
     src1 = io.in.bits.src1,
@@ -56,11 +64,11 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.debug := DontCare
   csrExuOut.brUpdate := DontCare
 
+  fence.io <> DontCare
   fence.io.in.valid := valid && isFence
   fence.io.in.bits := io.in.bits
   fence.io.redirect <> DontCare // io.redirect // No need for fence is the first instr
   fence.io.mcommit <> DontCare
-  fence.io.exception <> DontCare
   fence.io.dmem <> DontCare
   fence.io.out.ready := io.out.ready
 
