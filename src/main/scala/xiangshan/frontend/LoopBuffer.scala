@@ -53,13 +53,15 @@ class LoopBuffer extends XSModule {
     val isRVCJal = inst === BitPat("b????????????????_001_1?111??????_01")
     val isRVCCon = inst === BitPat("b????????????????_11?_1??_???_?????_01")
 
-    PriorityMux(Seq(
+    val rst = PriorityMux(Seq(
       isJal    -> inst(27, 21),
       isCon    -> Cat(inst(27,25), inst(11,8)),
       isRVCJal -> Cat(inst(6), inst(7), inst(2), inst(11), inst(5,3)),
       isRVCCon -> Cat(inst(6), inst(5), inst(2), inst(11,10), inst(4,3)),
       true.B   -> 0.U(7.W)
     ))
+
+    (~rst).asUInt + 1.U
   }
 
   def isSBB(inst: UInt): Bool = {
