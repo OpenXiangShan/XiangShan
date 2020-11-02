@@ -224,7 +224,8 @@ class ReservationStationNew
   // redirect
   val redHitVec = (0 until iqSize).map(i => uop(idxQueue(i)).roqIdx.needFlush(io.redirect))
   val fbMatchVec  = (0 until iqSize).map(i => 
-    uop(idxQueue(i)).roqIdx.asUInt === io.tlbFeedback.bits.roqIdx.asUInt && io.tlbFeedback.valid && stateQueue(i) === s_wait)
+    uop(idxQueue(i)).roqIdx.asUInt === io.tlbFeedback.bits.roqIdx.asUInt && io.tlbFeedback.valid && (stateQueue(i) === s_wait || stateQueue(i)===s_valid)) 
+    // TODO: feedback at the same cycle now, may change later
   //redHitVec.zip(validQueue).map{ case (r,v) => when (r) { v := false.B } }
   for (i <- 0 until iqSize) {
     val cnt = cntQueue(idxQueue(i))
