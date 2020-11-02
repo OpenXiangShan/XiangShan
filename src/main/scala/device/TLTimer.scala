@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import chipsalliance.rocketchip.config._
-import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.RegField
 import utils.{HasTLDump, XSDebug}

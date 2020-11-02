@@ -2,7 +2,6 @@ package xiangshan.backend.decode
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import xiangshan.backend._
@@ -130,9 +129,6 @@ class Decoder extends XSModule with HasInstrType {
 
   io.out.ctrl.src1Type := Mux(instr(6,0) === "b0110111".U || instr(15, 13) === "b011".U && instr(1, 0) === "b01".U, SrcType.reg, src1Type)
   io.out.ctrl.src2Type := src2Type
-
-  // val vmEnable = WireInit(false.B)
-  // BoringUtils.addSink(vmEnable, "DTLBENABLE")
 
   io.out.cf.exceptionVec.map(_ := false.B)
   io.out.cf.exceptionVec(illegalInstr) := instrType === InstrN

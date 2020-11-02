@@ -1,7 +1,6 @@
 package device
 
 import chisel3._
-import chisel3.util.experimental.BoringUtils
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
