@@ -44,6 +44,7 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   io.out.bits.redirect <> DontCare
   io.out.bits.redirectValid := false.B
   io.out.bits.debug <> DontCare
+  io.csrOnly <> DontCare
 
   assert(!(valid || state =/= s_sb) || io.out.ready) // NOTE: fence instr must be the first(only one) instr, so io.out.ready must be true
 

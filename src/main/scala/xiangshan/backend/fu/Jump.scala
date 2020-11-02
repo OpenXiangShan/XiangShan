@@ -48,6 +48,7 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.data := res
 
   io.dmem <> DontCare
+  io.csrOnly <> DontCare
   io.out.bits.debug <> DontCare
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it

@@ -209,13 +209,26 @@ class ExuOutput extends XSBundle {
   val debug = new DebugBundle
 }
 
+class ExternalInterruptIO extends XSBundle {
+  val mtip = Input(Bool())
+  val msip = Input(Bool())
+  val meip = Input(Bool())
+}
+
+class CSRSpecialIO extends XSBundle {
+  val exception = Flipped(ValidIO(new MicroOp))
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val externalInterrupt = new ExternalInterruptIO
+  val interrupt = Output(Bool())
+}
+
 class ExuIO extends XSBundle {
   val in = Flipped(DecoupledIO(new ExuInput))
   val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
   // for csr
-  val exception = Flipped(ValidIO(new MicroOp))
-  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val csrOnly = new CSRSpecialIO
   // for Lsu
   val dmem = new SimpleBusUC
   val mcommit = Input(UInt(3.W))

@@ -186,6 +186,11 @@ class CSRIO extends FunctionUnitIO {
   val wenFix = Output(Bool())
   val perf = Vec(NumPerfCounters, new PerfCounterIO)
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val mtip = Input(Bool())
+  val msip = Input(Bool())
+  val meip = Input(Bool())
+  val interrupt = Output(Bool())
 }
 
 class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
@@ -636,20 +641,14 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
   val intrBitSet = intrVec.orR()
-  ExcitingUtils.addSource(intrBitSet, "intrBitSetIDU")
+  io.interrupt := intrBitSet
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val raiseIntr = intrBitSet && io.exception.valid
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
-  val mtip = WireInit(false.B)
-  val msip = WireInit(false.B)
-  val meip = WireInit(false.B)
-  ExcitingUtils.addSink(mtip, "mtip")
-  ExcitingUtils.addSink(msip, "msip")
-  ExcitingUtils.addSink(meip, "meip")
-  mipWire.t.m := mtip
-  mipWire.s.m := msip
-  mipWire.e.m := meip
+  mipWire.t.m := io.mtip
+  mipWire.s.m := io.msip
+  mipWire.e.m := io.meip
 
   // exceptions
   val csrExceptionVec = Wire(Vec(16, Bool()))
@@ -678,8 +677,6 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
 
   val raiseExceptionIntr = io.exception.valid
   val retTarget = Wire(UInt(VAddrBits.W))
-  val trapTarget = Wire(UInt(VAddrBits.W))
-  ExcitingUtils.addSource(trapTarget, "trapTarget")
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.redirect := DontCare
   io.redirectValid := valid && func === CSROpType.jmp && !isEcall
@@ -698,7 +695,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
 
-  trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+  io.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   retTarget := DontCare
   // val illegalEret = TODO
 

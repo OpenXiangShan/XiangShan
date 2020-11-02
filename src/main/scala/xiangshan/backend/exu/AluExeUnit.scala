@@ -77,6 +77,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := aluRes
+  io.csrOnly <> DontCare
 
   XSDebug(io.in.valid || io.redirect.valid,
     "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",

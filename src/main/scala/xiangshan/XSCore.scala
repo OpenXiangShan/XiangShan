@@ -264,6 +264,9 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 }
 
 class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
+  val io = IO(new Bundle {
+    val externalInterrupt = new ExternalInterruptIO
+  })
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
@@ -282,6 +285,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
   mem.io.backend   <> backend.io.mem
+  io.externalInterrupt <> backend.io.externalInterrupt
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw
