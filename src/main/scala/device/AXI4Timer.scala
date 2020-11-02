@@ -31,12 +31,6 @@ class AXI4Timer
     val tick = (nextCnt === freq)
     when (tick) { mtime := mtime + inc }
 
-    if (sim) {
-      val isWFI = WireInit(false.B)
-      BoringUtils.addSink(isWFI, "isWFI")
-      when (isWFI) { mtime := mtime + 100000.U }
-    }
-
     val mapping = Map(
       RegMap(0x4000, mtimecmp),
       RegMap(0x8000, freq),
