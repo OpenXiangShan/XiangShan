@@ -23,7 +23,6 @@ class MulDivFenceExeUnit extends Exu(Exu.mulDivFenceExeUnitCfg){
   for(x <- Seq(mul.io, div.io, fence.io)){
     x.mcommit <> DontCare
     x.csrOnly <> DontCare
-    x.dmem <> DontCare
     x.in.bits := io.in.bits
     x.redirect := io.redirect
   }

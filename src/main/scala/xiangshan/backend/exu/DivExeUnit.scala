@@ -44,7 +44,6 @@ class DivExeUnit extends Exu(Exu.divExeUnitCfg) {
   io.out.bits.data := divider.io.out.bits.data
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
-  io.dmem <> DontCare
   io.csrOnly <> DontCare
   io.out.bits.debug <> DontCare
 

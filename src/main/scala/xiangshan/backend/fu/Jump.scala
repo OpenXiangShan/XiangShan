@@ -47,7 +47,6 @@ class Jump extends FunctionUnit(jmpCfg){
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := res
 
-  io.dmem <> DontCare
   io.csrOnly <> DontCare
   io.out.bits.debug <> DontCare
 

@@ -1,10 +1,8 @@
 package xiangshan.backend
 
-import bus.simplebus.SimpleBusUC
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-import noop.MemMMUIO
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.Rename
@@ -39,7 +37,6 @@ class Backend extends XSModule
   // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
   exeUnits.foreach(_.io.csrOnly := DontCare)
-  exeUnits.foreach(_.io.dmem := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
 
   val decode = Module(new DecodeStage)

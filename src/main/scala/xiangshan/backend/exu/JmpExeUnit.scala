@@ -22,7 +22,6 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jmp.io.in.valid := io.in.valid && isJmp
   jmp.io.in.bits := io.in.bits
   jmp.io.out.ready := io.out.ready
-  jmp.io.dmem <> DontCare
   jmp.io.mcommit := DontCare
   jmp.io.redirect := io.redirect
 
@@ -69,7 +68,6 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   fence.io.in.bits := io.in.bits
   fence.io.redirect <> DontCare // io.redirect // No need for fence is the first instr
   fence.io.mcommit <> DontCare
-  fence.io.dmem <> DontCare
   fence.io.out.ready := io.out.ready
 
   // NOTE: just one instr in this module at the same time

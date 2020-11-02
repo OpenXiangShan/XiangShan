@@ -2,13 +2,13 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
+import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}

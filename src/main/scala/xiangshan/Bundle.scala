@@ -2,7 +2,6 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
@@ -229,8 +228,6 @@ class ExuIO extends XSBundle {
   val out = DecoupledIO(new ExuOutput)
   // for csr
   val csrOnly = new CSRSpecialIO
-  // for Lsu
-  val dmem = new SimpleBusUC
   val mcommit = Input(UInt(3.W))
 }
 

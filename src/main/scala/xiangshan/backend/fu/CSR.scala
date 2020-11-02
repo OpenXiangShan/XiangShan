@@ -5,7 +5,6 @@ import chisel3.ExcitingUtils.ConnectionType
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import fpu.Fflags
-import noop.MMUIO
 import utils._
 import xiangshan._
 import xiangshan.backend._
