@@ -78,7 +78,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
-    io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx
+    io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx // FIXME: need update
 
     when(io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
       // exception handling
@@ -176,7 +176,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
       resp_data := LookupTree(in.uop.ctrl.fuOpType, List(
         LSUOpType.lr_w      -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.sc_w      -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.sc_w      -> rdata,
         LSUOpType.amoswap_w -> SignExt(rdataSel(31, 0), XLEN),
         LSUOpType.amoadd_w  -> SignExt(rdataSel(31, 0), XLEN),
         LSUOpType.amoxor_w  -> SignExt(rdataSel(31, 0), XLEN),
@@ -188,7 +188,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
         LSUOpType.amomaxu_w -> SignExt(rdataSel(31, 0), XLEN),
 
         LSUOpType.lr_d      -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.sc_d      -> SignExt(rdataSel(63, 0), XLEN),
+        LSUOpType.sc_d      -> rdata,
         LSUOpType.amoswap_d -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.amoadd_d  -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.amoxor_d  -> SignExt(rdataSel(63, 0), XLEN),

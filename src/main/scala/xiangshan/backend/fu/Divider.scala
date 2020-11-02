@@ -71,7 +71,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl)
     }
   }
 
-  when(state=/=s_idle && uopReg.needFlush(io.redirectIn)){
+  when(state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)){
     state := s_idle
   }
 

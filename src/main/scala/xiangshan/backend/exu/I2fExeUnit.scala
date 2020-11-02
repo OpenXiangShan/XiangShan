@@ -17,7 +17,7 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
   val frm = WireInit(0.U(3.W))
   BoringUtils.addSink(frm, "Frm")
 
-  val valid = io.in.valid && !uopIn.needFlush(io.redirect)
+  val valid = io.in.valid && !uopIn.roqIdx.needFlush(io.redirect)
   val intToFloat = Module(new IntToFloatSingleCycle)
   val extraInput = intToFloat.io.in.bits.ext.get
   val instr_rm = io.in.bits.uop.cf.instr(14, 12)

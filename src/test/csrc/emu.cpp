@@ -1,4 +1,5 @@
 #include "emu.h"
+#include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
 
@@ -73,11 +74,15 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
+  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
   srand48(args.seed);
   Verilated::randReset(2);
+
+  // init core
+  reset_ncycles(10);
 
   // init ram
   extern void init_ram(const char *img);
@@ -101,9 +106,6 @@ Emulator::Emulator(int argc, const char *argv[]):
 #else
   enable_waveform = false;
 #endif
-
-  // init core
-  reset_ncycles(10);
 
   if (args.snapshot_path != NULL) {
     printf("loading from snapshot `%s`...\n", args.snapshot_path);
@@ -373,6 +375,17 @@ void Emulator::snapshot_save(const char *filename) {
   ref_difftest_get_mastatus(&sync_mastate);
   stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
 
+  uint64_t csr_buf[4096];
+  ref_difftest_get_csr(csr_buf);
+  stream.unbuf_write(&csr_buf, sizeof(csr_buf));
+
+  long sdcard_offset;
+  if(fp)
+    sdcard_offset = ftell(fp);
+  else
+    sdcard_offset = 0;
+  stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
+
   // actually write to file in snapshot_finalize()
 }
 
@@ -402,4 +415,13 @@ void Emulator::snapshot_load(const char *filename) {
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));
   ref_difftest_set_mastatus(&sync_mastate);
+
+  uint64_t csr_buf[4096];
+  stream.read(&csr_buf, sizeof(csr_buf));
+  ref_difftest_set_csr(csr_buf);
+
+  long sdcard_offset = 0;
+  stream.read(&sdcard_offset, sizeof(sdcard_offset));
+  if(fp)
+    fseek(fp, sdcard_offset, SEEK_SET);
 }

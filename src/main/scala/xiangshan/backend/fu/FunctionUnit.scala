@@ -74,7 +74,7 @@ trait HasPipelineReg[TI <: Data, TO <: Data] {
   val uopVec = io.in.bits.uop +: Array.fill(latency)(Reg(new MicroOp))
 
 
-  val flushVec = uopVec.zip(validVec).map(x => x._2 && x._1.needFlush(io.redirectIn))
+  val flushVec = uopVec.zip(validVec).map(x => x._2 && x._1.roqIdx.needFlush(io.redirectIn))
 
   for (i <- 0 until latency) {
     rdyVec(i) := !validVec(i + 1) || rdyVec(i + 1)

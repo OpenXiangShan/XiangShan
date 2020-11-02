@@ -36,7 +36,6 @@ abstract class Multiplier
 {
 
   val (src1, src2) = (io.in.bits.src(0), io.in.bits.src(1))
-
 }
 
 //trait HasPipelineReg { this: ArrayMultiplier =>
