@@ -178,6 +178,7 @@ class CSRIO extends FunctionUnitIO {
   val cfOut = Output(new CtrlFlow)
   // from rob
   val exception = Flipped(ValidIO(new MicroOp))
+  val isInterrupt = Input(Bool())
   // for exception check
   val instrValid = Input(Bool())
   val flushPipe = Output(Bool())
@@ -643,7 +644,7 @@ class CSR extends FunctionUnit(csrCfg) with HasCSRConst{
   val intrBitSet = intrVec.orR()
   io.interrupt := intrBitSet
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  val raiseIntr = intrBitSet && io.exception.valid
+  val raiseIntr = intrBitSet && io.exception.valid && io.isInterrupt
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
   mipWire.t.m := io.mtip
