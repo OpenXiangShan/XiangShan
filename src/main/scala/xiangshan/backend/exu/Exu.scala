@@ -51,7 +51,6 @@ case class ExuConfig
 
 abstract class Exu(val config: ExuConfig) extends XSModule {
   val io = IO(new ExuIO)
-  io.dmem <> DontCare
   io.out.bits.brUpdate <> DontCare
   io.out.bits.fflags <> DontCare
   io.out.bits.debug.isMMIO := false.B

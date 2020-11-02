@@ -35,5 +35,6 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg) {
   io.out.bits.fflags := fma.io.out.bits.ext.get
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
+  io.csrOnly <> DontCare
 
 }

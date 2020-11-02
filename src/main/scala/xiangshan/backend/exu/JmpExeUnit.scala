@@ -17,14 +17,19 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   val fence = Module(new FenceExeUnit)
   val i2f = Module(new I2fExeUnit)
 
+  fence.io.csrOnly <> DontCare
+  i2f.io.csrOnly <> DontCare
+
   val isJmp = fuType === FuType.jmp
   val isCsr = fuType === FuType.csr
   val isFence = fuType === FuType.fence
   val isI2f = fuType === FuType.i2f
 
+  jmp.io <> DontCare
   jmp.io.in.valid := io.in.valid && isJmp
   jmp.io.out.ready := io.out.ready
-
+//<<<<<<< HEAD
+//
   jmp.io.in.bits.connectToExuInput(io.in.bits)
   jmp.io.redirectIn := io.redirect
 
@@ -52,7 +57,6 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.fpu_csr.fflags := fflags
   csr.io.fpu_csr.isIllegal := false.B // TODO: check illegal rounding mode
   csr.io.fpu_csr.dirty_fs := dirty_fs
-  csr.io.exception <> io.exception
   csr.io.instrValid := DontCare
   csr.io.out.ready := io.out.ready
   csr.io.in.valid  := io.in.valid && isCsr
@@ -60,6 +64,18 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.in.bits.connectToExuInput(io.in.bits)
   csr.io.redirectIn := io.redirect
   val csrOut = csr.io.out.bits.data
+
+
+  csr.io.perf <> DontCare
+
+  csr.io.exception := io.csrOnly.exception
+  csr.io.memExceptionVAddr := io.csrOnly.memExceptionVAddr
+  io.csrOnly.trapTarget := csr.io.trapTarget
+  csr.io.mtip := io.csrOnly.externalInterrupt.mtip
+  csr.io.msip := io.csrOnly.externalInterrupt.msip
+  csr.io.meip := io.csrOnly.externalInterrupt.meip
+  io.csrOnly.interrupt := csr.io.interrupt
+
   // val uop = io.in.bits.uop
   val csrExuOut = Wire(new ExuOutput)
   csrExuOut.uop := uop
@@ -79,20 +95,17 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csrExuOut.debug := DontCare
   csrExuOut.brUpdate := DontCare
 
+  fence.io <> DontCare
   fence.io.in.valid := valid && isFence
   fence.io.in.bits := io.in.bits
   fence.io.redirect <> DontCare // io.redirect // No need for fence is the first instr
   fence.io.mcommit <> DontCare
-  fence.io.exception <> DontCare
-  fence.io.dmem <> DontCare
   fence.io.out.ready := io.out.ready
 
   i2f.io.in.valid := valid && isI2f
   i2f.io.in.bits := io.in.bits
   i2f.io.redirect <> io.redirect
   i2f.io.mcommit <> DontCare
-  i2f.io.exception <> DontCare
-  i2f.io.dmem <> DontCare
   i2f.io.out.ready := io.out.ready
 
   // NOTE: just one instr in this module at the same time

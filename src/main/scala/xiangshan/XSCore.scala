@@ -2,13 +2,13 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
+import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -89,7 +89,8 @@ case class XSCoreParameters
   TlbEntrySize: Int = 32,
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 256
+  PtwL2EntrySize: Int = 256,
+  NumPerfCounters: Int = 16
 )
 
 trait HasXSParameter {
@@ -164,6 +165,7 @@ trait HasXSParameter {
   val TlbL2EntrySize = core.TlbL2EntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
+  val NumPerfCounters = core.NumPerfCounters
 
   val l1BusDataWidth = 256
 
@@ -262,6 +264,9 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 }
 
 class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
+  val io = IO(new Bundle {
+    val externalInterrupt = new ExternalInterruptIO
+  })
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
@@ -280,6 +285,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
   mem.io.backend   <> backend.io.mem
+  io.externalInterrupt <> backend.io.externalInterrupt
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw

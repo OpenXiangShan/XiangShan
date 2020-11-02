@@ -36,6 +36,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val oldestStore = Output(Valid(new RoqPtr))
+    val exceptionAddr = new ExceptionAddrIO
   })
   
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
@@ -326,10 +327,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // Read vaddr for mem exception
-  val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-  val memExceptionAddr = WireInit(data(mexcLsIdx.sqIdx.value).vaddr)
-  ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_STORE_VADDR")
+  io.exceptionAddr.vaddr := data(io.exceptionAddr.lsIdx.sqIdx.value).vaddr
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx

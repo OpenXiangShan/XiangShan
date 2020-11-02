@@ -8,7 +8,6 @@ import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem._
-import bus.simplebus._
 import xiangshan.backend.fu.HasCSRConst
 import chisel3.ExcitingUtils._
 

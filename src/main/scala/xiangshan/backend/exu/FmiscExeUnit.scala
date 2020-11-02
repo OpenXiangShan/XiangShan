@@ -78,4 +78,5 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
   )
   io.out.bits.redirectValid := DontCare
   io.out.bits.redirect := DontCare
+  io.csrOnly <> DontCare
 }

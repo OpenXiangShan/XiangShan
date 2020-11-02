@@ -43,4 +43,5 @@ class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
   io.out.bits.redirect <> DontCare
   io.out.bits.redirectValid := false.B
   io.out.bits.debug <> DontCare
+  io.csrOnly <> DontCare
 }

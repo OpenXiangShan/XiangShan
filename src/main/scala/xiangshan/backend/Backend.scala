@@ -1,10 +1,8 @@
 package xiangshan.backend
 
-import bus.simplebus.SimpleBusUC
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-import noop.MemMMUIO
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.Rename
@@ -26,6 +24,7 @@ class Backend extends XSModule
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val mem = Flipped(new MemToBackendIO)
+    val externalInterrupt = new ExternalInterruptIO
   })
 
 
@@ -37,8 +36,7 @@ class Backend extends XSModule
   val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new FmiscExeUnit))
   // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrtExeUnit))
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ fmacExeUnits ++ fmiscExeUnits)
-  exeUnits.foreach(_.io.exception := DontCare)
-  exeUnits.foreach(_.io.dmem := DontCare)
+  exeUnits.foreach(_.io.csrOnly := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
 
   val decode = Module(new DecodeStage)
@@ -174,8 +172,14 @@ class Backend extends XSModule
   io.mem.roqDeqPtr := roq.io.roqDeqPtr
   io.mem.ldin <> issueQueues.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
-  jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
-  jmpExeUnit.io.exception.bits := roq.io.exception
+  jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
+  jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
+
+  jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
+  io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
+  io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
+  io.mem.exceptionAddr.isStore := CommitType.lsInstIsStore(roq.io.exception.ctrl.commitType)
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
@@ -208,6 +212,8 @@ class Backend extends XSModule
   roq.io.memRedirect <> io.mem.replayAll
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
+  roq.io.intrBitSet := jmpExeUnit.io.csrOnly.interrupt
+  roq.io.trapTarget := jmpExeUnit.io.csrOnly.trapTarget
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
   dispatch.io.lsIdxs <> io.mem.lsIdxs

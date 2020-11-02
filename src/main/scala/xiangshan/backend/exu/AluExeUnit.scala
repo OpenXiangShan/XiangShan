@@ -2,7 +2,6 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import xiangshan.FuType._
 import utils._
@@ -77,6 +76,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := aluRes
+  io.csrOnly <> DontCare
 
   XSDebug(io.in.valid || io.redirect.valid,
     "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",

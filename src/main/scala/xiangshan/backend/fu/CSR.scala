@@ -5,7 +5,6 @@ import chisel3.ExcitingUtils.ConnectionType
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import fpu.Fflags
-import noop.MMUIO
 import utils._
 import xiangshan._
 import xiangshan.backend._
@@ -166,8 +165,12 @@ class FpuCsrIO extends XSBundle {
   val frm = Input(UInt(3.W))
 }
 
-class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, len=64, extIn= FuOpType()) {
 
+class PerfCounterIO extends XSBundle {
+  val value = Input(UInt(XLEN.W))
+}
+
+class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, len=64, extIn= FuOpType()) {
   val cfIn = Input(new CtrlFlow)
   val redirectOut = Output(new Redirect)
   val redirectOutValid = Output(Bool())
@@ -185,6 +188,13 @@ class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, len=64, extIn= FuOpType()
   override def cloneType: CSRIO.this.type =
     new CSRIO().asInstanceOf[this.type]
 
+  val perf = Vec(NumPerfCounters, new PerfCounterIO)
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val mtip = Input(Bool())
+  val msip = Input(Bool())
+  val meip = Input(Bool())
+  val interrupt = Output(Bool())
 }
 
 class CSR extends XSModule
@@ -598,27 +608,7 @@ class CSR extends XSModule
   val hasLoadAddrMisaligned = io.exception.bits.cf.exceptionVec(loadAddrMisaligned) && io.exception.valid
 
   // mtval write logic
-  val lsroqExceptionAddr = WireInit(0.U(VAddrBits.W))
-  if(EnableUnifiedLSQ){
-    ExcitingUtils.addSource(io.exception.bits.lsroqIdx, "EXECPTION_LSROQIDX")
-    ExcitingUtils.addSink(lsroqExceptionAddr, "EXECPTION_VADDR")
-  } else {
-    val lsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-    lsIdx.lqIdx := io.exception.bits.lqIdx
-    lsIdx.sqIdx := io.exception.bits.sqIdx
-    ExcitingUtils.addSource(lsIdx, "EXECPTION_LSROQIDX")
-    val lqExceptionAddr = WireInit(0.U(VAddrBits.W))
-    val sqExceptionAddr = WireInit(0.U(VAddrBits.W))
-    ExcitingUtils.addSink(lqExceptionAddr, "EXECPTION_LOAD_VADDR")
-    ExcitingUtils.addSink(sqExceptionAddr, "EXECPTION_STORE_VADDR")
-    lsroqExceptionAddr := Mux(CommitType.lsInstIsStore(io.exception.bits.ctrl.commitType), sqExceptionAddr, lqExceptionAddr)
-  }
-
-  val atomExceptionAddr = WireInit(0.U(VAddrBits.W))
-  val atomOverrideXtval = WireInit(false.B)
-  ExcitingUtils.addSink(atomExceptionAddr, "ATOM_EXECPTION_VADDR")
-  ExcitingUtils.addSink(atomOverrideXtval, "ATOM_OVERRIDE_XTVAL")
-  val memExceptionAddr = Mux(atomOverrideXtval, atomExceptionAddr, lsroqExceptionAddr)
+  val memExceptionAddr = SignExt(io.memExceptionVAddr, XLEN)
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
@@ -627,7 +617,7 @@ class CSR extends XSModule
         SignExt(io.exception.bits.cf.pc + 2.U, XLEN),
         SignExt(io.exception.bits.cf.pc, XLEN)
       ),
-      SignExt(memExceptionAddr, XLEN)
+      memExceptionAddr
     )
     when(priviledgeMode === ModeM){
       mtval := tval
@@ -638,7 +628,7 @@ class CSR extends XSModule
 
   when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
   {
-    mtval := SignExt(memExceptionAddr, XLEN)
+    mtval := memExceptionAddr
   }
 
   // Exception and Intr
@@ -653,20 +643,14 @@ class CSR extends XSModule
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
   val intrBitSet = intrVec.orR()
-  ExcitingUtils.addSource(intrBitSet, "intrBitSetIDU")
+  io.interrupt := intrBitSet
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
   val raiseIntr = intrBitSet && io.exception.valid
   XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", io.exception.bits.cf.pc, intrNO)
 
-  val mtip = WireInit(false.B)
-  val msip = WireInit(false.B)
-  val meip = WireInit(false.B)
-  ExcitingUtils.addSink(mtip, "mtip")
-  ExcitingUtils.addSink(msip, "msip")
-  ExcitingUtils.addSink(meip, "meip")
-  mipWire.t.m := mtip
-  mipWire.s.m := msip
-  mipWire.e.m := meip
+  mipWire.t.m := io.mtip
+  mipWire.s.m := io.msip
+  mipWire.e.m := io.meip
 
   // exceptions
   val csrExceptionVec = Wire(Vec(16, Bool()))
@@ -695,8 +679,6 @@ class CSR extends XSModule
 
   val raiseExceptionIntr = io.exception.valid
   val retTarget = Wire(UInt(VAddrBits.W))
-  val trapTarget = Wire(UInt(VAddrBits.W))
-  ExcitingUtils.addSource(trapTarget, "trapTarget")
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   io.redirectOut := DontCare
   io.redirectOutValid := valid && func === CSROpType.jmp && !isEcall
@@ -715,7 +697,7 @@ class CSR extends XSModule
   val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
 
-  trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+  io.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   retTarget := DontCare
   // val illegalEret = TODO
 
