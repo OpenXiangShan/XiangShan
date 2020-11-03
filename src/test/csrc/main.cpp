@@ -8,6 +8,8 @@ std::function<double()> get_sc_time_stamp = []() -> double { return 0; };
 double sc_time_stamp() { return get_sc_time_stamp(); }
 
 int main(int argc, const char** argv) {
+  printf("Emu compiled at %s, %s\n", __DATE__, __TIME__);
+
   setbuf(stderr, mybuf);
 
   auto emu = new Emulator(argc, argv);
