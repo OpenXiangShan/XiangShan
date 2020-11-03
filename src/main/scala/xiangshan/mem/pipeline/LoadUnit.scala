@@ -96,28 +96,54 @@ class LoadUnit_S1 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val forward = new LoadForwardQueryIO
-    // val s1_kill = Output(Bool())
     val s1_paddr = Output(UInt(PAddrBits.W))
+    val sbuffer = new LoadForwardQueryIO
+    val lsroq = new LoadForwardQueryIO
   })
 
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.in.bits.paddr
   val s1_tlb_miss = io.in.bits.tlbMiss
   val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
+  val s1_mask = io.in.bits.mask
   
+  io.out.bits := io.in.bits // forwardXX field will be updated in s1
   io.s1_paddr :=  s1_paddr
 
-  io.forward.valid := io.in.valid // && !s1_uop.needFlush(io.redirect) will cause comb. loop
-  io.forward.paddr := s1_paddr
-  io.forward.mask := io.in.bits.mask
-  io.forward.lsroqIdx := s1_uop.lsroqIdx
-  io.forward.sqIdx := s1_uop.sqIdx
-  io.forward.uop := s1_uop
-  io.forward.pc := s1_uop.cf.pc
+  // load forward query datapath
+  io.sbuffer.valid := io.in.valid
+  io.sbuffer.paddr := s1_paddr
+  io.sbuffer.uop := s1_uop
+  io.sbuffer.sqIdx := s1_uop.sqIdx
+  io.sbuffer.lsroqIdx := s1_uop.lsroqIdx
+  io.sbuffer.mask := s1_mask
+  io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
+  
+  io.lsroq.valid := io.in.valid
+  io.lsroq.paddr := s1_paddr
+  io.lsroq.uop := s1_uop
+  io.lsroq.sqIdx := s1_uop.sqIdx
+  io.lsroq.lsroqIdx := s1_uop.lsroqIdx
+  io.lsroq.mask := s1_mask
+  io.lsroq.pc := s1_uop.cf.pc // FIXME: remove it
 
-  io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
-  io.out.bits := io.in.bits
+  io.out.bits.forwardMask := io.sbuffer.forwardMask
+  io.out.bits.forwardData := io.sbuffer.forwardData
+  // generate XLEN/8 Muxs
+  for (i <- 0 until XLEN / 8) {
+    when(io.lsroq.forwardMask(i)) {
+      io.out.bits.forwardMask(i) := true.B
+      io.out.bits.forwardData(i) := io.lsroq.forwardData(i)
+    }
+  }
+
+  XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n", 
+    s1_uop.cf.pc,
+    io.lsroq.forwardData.asUInt, io.lsroq.forwardMask.asUInt, 
+    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
+  )
+
+  io.out.valid := io.in.valid && !s1_tlb_miss &&  !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -135,8 +161,6 @@ class LoadUnit_S2 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
-    val sbuffer = new LoadForwardQueryIO
-    val lsroq = new LoadForwardQueryIO
   })
 
   val s2_uop = io.in.bits.uop
@@ -145,35 +169,12 @@ class LoadUnit_S2 extends XSModule {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_nack = io.dcacheResp.bits.nack
 
-  // load forward query datapath
-  io.sbuffer.valid := io.in.valid
-  io.sbuffer.paddr := s2_paddr
-  io.sbuffer.uop := s2_uop
-  io.sbuffer.sqIdx := s2_uop.sqIdx
-  io.sbuffer.lsroqIdx := s2_uop.lsroqIdx
-  io.sbuffer.mask := s2_mask
-  io.sbuffer.pc := s2_uop.cf.pc // FIXME: remove it
-  
-  io.lsroq.valid := io.in.valid
-  io.lsroq.paddr := s2_paddr
-  io.lsroq.uop := s2_uop
-  io.lsroq.sqIdx := s2_uop.sqIdx
-  io.lsroq.lsroqIdx := s2_uop.lsroqIdx
-  io.lsroq.mask := s2_mask
-  io.lsroq.pc := s2_uop.cf.pc // FIXME: remove it
 
   io.dcacheResp.ready := true.B
   assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
 
-  val forwardMask = WireInit(io.sbuffer.forwardMask)
-  val forwardData = WireInit(io.sbuffer.forwardData)
-  // generate XLEN/8 Muxs
-  for (i <- 0 until XLEN / 8) {
-    when(io.lsroq.forwardMask(i)) {
-      forwardMask(i) := true.B
-      forwardData(i) := io.lsroq.forwardData(i)
-    }
-  }
+  val forwardMask = io.in.bits.forwardMask
+  val forwardData = io.in.bits.forwardData
   val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U
 
   // data merge
@@ -211,10 +212,9 @@ class LoadUnit_S2 extends XSModule {
 
   io.in.ready := io.out.ready || !io.in.valid
 
-  XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b) + %x(%b)\n", 
+  XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n", 
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
-    io.lsroq.forwardData.asUInt, io.lsroq.forwardMask.asUInt, 
-    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
+    io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt 
   )
 
 }
@@ -248,20 +248,13 @@ class LoadUnit extends XSModule {
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
   io.dcache.s1_kill := DontCare // FIXME
-//  io.sbuffer <> load_s1.io.forward
-//  io.lsroq.forward <> load_s1.io.forward
-  load_s1.io.forward <> DontCare // TODO: do we still need this? can we remove s1.io.forward?
+  io.sbuffer <> load_s1.io.sbuffer
+  io.lsroq.forward <> load_s1.io.lsroq
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire() || load_s1.io.out.bits.tlbMiss, false.B)
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
-  io.sbuffer <> load_s2.io.sbuffer
-  io.lsroq.forward <> load_s2.io.lsroq
-//  load_s2.io.sbuffer.forwardMask := io.sbuffer.forwardMask
-//  load_s2.io.sbuffer.forwardData := io.sbuffer.forwardData
-//  load_s2.io.lsroq.forwardMask := io.lsroq.forward.forwardMask
-//  load_s2.io.lsroq.forwardData := io.lsroq.forward.forwardData
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
