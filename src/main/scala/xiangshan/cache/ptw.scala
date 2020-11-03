@@ -41,12 +41,19 @@ class PteBundle extends PtwBundle{
     val v    = Bool()
   }
 
-  def isPf() = {
-    !perm.v || (!perm.r && perm.w)
+  def unaligned(level: UInt) = {
+    assert(level=/=3.U)
+    isLeaf() && !(level === 2.U ||
+                  level === 1.U && ppn(vpnnLen-1,   0) === 0.U ||
+                  level === 0.U && ppn(vpnnLen*2-1, 0) === 0.U)
+  }
+
+  def isPf(level: UInt) = {
+    !perm.v || (!perm.r && perm.w) || unaligned(level)
   }
 
   def isLeaf() = {
-    !isPf() && (perm.r || perm.x)
+    perm.r || perm.x || perm.w
   }
 
   override def toPrintable: Printable = {
@@ -280,7 +287,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
           state := state_wait_ready
         }
       } .elsewhen (l1Hit && level===0.U || l2Hit && level===1.U) {
-        level := levelNext // TODO: consider superpage
+        level := levelNext
       } .elsewhen (memReqReady && !sfenceLatch) {
         state := state_wait_resp
       }
@@ -288,13 +295,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
     is (state_wait_resp) {
       when (memRespFire) {
-        when (memPte.isLeaf() || memPte.isPf()) {
+        when (memPte.isLeaf() || memPte.isPf(level)) {
           when (resp(arbChosen).ready) {
             state := state_idle
           }.otherwise {
             state := state_wait_ready
             latch.entry := new TlbEntry().genTlbEntry(memRdata, level, req.vpn)
-            latch.pf := memPte.isPf()
+            latch.pf := memPte.isPf(level)
           }
         }.otherwise {
           level := levelNext
@@ -343,12 +350,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   /*
    * resp
    */
-  val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf() || (!memPte.isLeaf() && level===2.U)) && memRespFire && !sfenceLatch) || state===state_wait_ready
+  val ptwFinish = (state===state_req && tlbHit && level===0.U) || ((memPte.isLeaf() || memPte.isPf(level) || (!memPte.isLeaf() && level===2.U)) && memRespFire && !sfenceLatch) || state===state_wait_ready
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
     resp(i).bits.entry := Mux(tlbHit, tlbHitData,
       Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memRdata, Mux(level===3.U, 2.U, level), req.vpn)))
-    resp(i).bits.pf  := Mux(level===3.U || notFound, true.B, Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf())))
+    resp(i).bits.pf  := Mux(level===3.U || notFound, true.B, Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf(level))))
     // TODO: the pf must not be correct, check it
   }
 
@@ -360,7 +367,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   ptwl2.io.w.req.valid := false.B
   tlbl2.io.w.req.valid := false.B
   assert(!memRespFire || (state===state_wait_resp || sfenceLatch))
-  when (memRespFire && !memPte.isPf() && !sfenceLatch) {
+  when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
