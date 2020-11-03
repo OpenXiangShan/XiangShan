@@ -201,7 +201,7 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
           exuData(commitIdx)
         )
         when (io.commits(i).valid) {
-          printf(
+          XSInfo(
             "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x\n",
             commitUop.cf.pc,
             commitUop.ctrl.rfWen,
