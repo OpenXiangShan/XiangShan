@@ -153,7 +153,7 @@ class RAS extends BasePredictor
 
     val commit_push = WireInit(false.B)
     val commit_pop = WireInit(false.B)
-    val commit_new_addr = WireInit(io.recover.bits.pc + 4.U)  //TODO: consider RVC
+    val commit_new_addr = Mux(io.recover.bits.pd.isRVC,io.recover.bits.pc + 2.U,io.recover.bits.pc + 4.U)
     commit_ras.push_valid := commit_push
     commit_ras.pop_valid  := commit_pop
     commit_ras.new_addr   := commit_new_addr
