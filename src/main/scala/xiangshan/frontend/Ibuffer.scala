@@ -50,12 +50,13 @@ class Ibuffer extends XSModule {
   // Enque
   io.in.ready := enqValid
 
-  var enq_idx = WireInit(tail_ptr)
   when(io.in.fire) {
-    var inWire = Wire(new IBufEntry)
-    inWire := DontCare
+    var enq_idx = WireInit(tail_ptr)
 
     for(i <- 0 until PredictWidth) {
+      var inWire = Wire(new IBufEntry)
+      inWire := DontCare
+
       ibuf_valid(enq_idx) := io.in.bits.mask(i)
 
       inWire.inst := io.in.bits.instrs(i)
@@ -74,9 +75,10 @@ class Ibuffer extends XSModule {
   }
 
   // Deque
-  var deq_idx = head_ptr
 
   when(deqValid) {
+    var deq_idx = head_ptr
+
     for(i <- 0 until DecodeWidth) {
       var outWire = WireInit(ibuf(deq_idx))
 
