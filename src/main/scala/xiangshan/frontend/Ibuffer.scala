@@ -47,23 +47,26 @@ class Ibuffer extends XSModule {
   val enqValid = !io.flush && !ibuf_valid(tail_ptr + PredictWidth.U - 1.U)
   val deqValid = !io.flush && ibuf_valid(head_ptr)
 
+  // Enque
   io.in.ready := enqValid
 
-  // Enque
+  var enq_idx = WireInit(tail_ptr)
   when(io.in.fire) {
-    var enq_idx = tail_ptr
+    var inWire = Wire(new IBufEntry)
+    inWire := DontCare
 
     for(i <- 0 until PredictWidth) {
       ibuf_valid(enq_idx) := io.in.bits.mask(i)
 
-      ibuf(enq_idx).inst := io.in.bits.instrs(i)
-      ibuf(enq_idx).pc := io.in.bits.pc(i)
-      ibuf(enq_idx).pnpc := io.in.bits.pnpc(i)
-      ibuf(enq_idx).brInfo := io.in.bits.brInfo(i)
-      ibuf(enq_idx).pd := io.in.bits.pd(i)
-      ibuf(enq_idx).ipf := io.in.bits.ipf
-      ibuf(enq_idx).crossPageIPFFix := io.in.bits.crossPageIPFFix
+      inWire.inst := io.in.bits.instrs(i)
+      inWire.pc := io.in.bits.pc(i)
+      inWire.pnpc := io.in.bits.pnpc(i)
+      inWire.brInfo := io.in.bits.brInfo(i)
+      inWire.pd := io.in.bits.pd(i)
+      inWire.ipf := io.in.bits.ipf
+      inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
 
+      ibuf(enq_idx) := inWire
       enq_idx = enq_idx + io.in.bits.mask(i)
     }
 
@@ -71,25 +74,28 @@ class Ibuffer extends XSModule {
   }
 
   // Deque
+  var deq_idx = head_ptr
+
   when(deqValid) {
-    var deq_idx = head_ptr
     for(i <- 0 until DecodeWidth) {
+      var outWire = WireInit(ibuf(deq_idx))
+
       io.out(i).valid := ibuf_valid(deq_idx)
       // Only when the entry is valid can it be set invalid
       when (ibuf_valid(deq_idx)) { ibuf_valid(deq_idx) := !io.out(i).fire }
       
-      io.out(i).bits.instr := ibuf(deq_idx).inst
-      io.out(i).bits.pc := ibuf(deq_idx).pc
-      // io.out(i).bits.exceptionVec := Mux(ibuf(deq_idx).ipf, UIntToOH(instrPageFault.U), 0.U)
+      io.out(i).bits.instr := outWire.inst
+      io.out(i).bits.pc := outWire.pc
+      // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
       io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
-      io.out(i).bits.exceptionVec(instrPageFault) := ibuf(deq_idx).ipf
-      // io.out(i).bits.brUpdate := ibuf(deq_idx).brInfo
+      io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
+      // io.out(i).bits.brUpdate := outWire.brInfo
       io.out(i).bits.brUpdate := DontCare
-      io.out(i).bits.brUpdate.pc := ibuf(deq_idx).pc
-      io.out(i).bits.brUpdate.pnpc := ibuf(deq_idx).pnpc
-      io.out(i).bits.brUpdate.pd := ibuf(deq_idx).pd
-      io.out(i).bits.brUpdate.brInfo := ibuf(deq_idx).brInfo
-      io.out(i).bits.crossPageIPFFix := ibuf(deq_idx).crossPageIPFFix
+      io.out(i).bits.brUpdate.pc := outWire.pc
+      io.out(i).bits.brUpdate.pnpc := outWire.pnpc
+      io.out(i).bits.brUpdate.pd := outWire.pd
+      io.out(i).bits.brUpdate.brInfo := outWire.brInfo
+      io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
 
       deq_idx = deq_idx + io.out(i).fire
     }
