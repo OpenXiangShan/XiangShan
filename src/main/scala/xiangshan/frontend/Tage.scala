@@ -24,15 +24,20 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
   val TageNTables = TableInfo.size
   val UBitPeriod = 2048
   val TageBanks = PredictWidth // FetchWidth
-
+  val TageCtrBits = 3
+  val SCHistLens = 0 :: TableInfo.map{ case (_,h,_) => h}.toList
+  val SCNTables = 6
+  val SCCtrBits = 6
+  val SCNRows = 1024
+  val SCTableInfo = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {case ((n, cb), h) => (n, cb, h)}
   val TotalBits = TableInfo.map {
     case (s, h, t) => {
-      s * (1+t+3) * PredictWidth
+      s * (1+t+TageCtrBits) * PredictWidth
     }
   }.reduce(_+_)
 }
 
-abstract class TageBundle extends XSBundle with HasTageParameter
+abstract class TageBundle extends XSBundle with HasTageParameter with PredictorUtils
 abstract class TageModule extends XSModule with HasTageParameter with PredictorUtils { val debug = false }
 
 
@@ -45,7 +50,7 @@ class TageReq extends TageBundle {
 }
 
 class TageResp extends TageBundle {
-  val ctr = UInt(3.W)
+  val ctr = UInt(TageCtrBits.W)
   val u = UInt(2.W)
 }
 
@@ -57,7 +62,7 @@ class TageUpdate extends TageBundle {
   val mask = Vec(TageBanks, Bool())
   val taken = Vec(TageBanks, Bool())
   val alloc = Vec(TageBanks, Bool())
-  val oldCtr = Vec(TageBanks, UInt(3.W))
+  val oldCtr = Vec(TageBanks, UInt(TageCtrBits.W))
   // update u
   val uMask = Vec(TageBanks, Bool())
   val u = Vec(TageBanks, UInt(2.W))
@@ -100,7 +105,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     (idx, tag)
   }
 
-  def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, 3, taken)
+  def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, TageCtrBits, taken)
 
   val doing_reset = RegInit(true.B)
   val reset_idx = RegInit(0.U(log2Ceil(nRows).W))
@@ -110,10 +115,10 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   class TageEntry() extends TageBundle {
     val valid = Bool()
     val tag = UInt(tagLen.W)
-    val ctr = UInt(3.W)
+    val ctr = UInt(TageCtrBits.W)
   }
 
-  val tageEntrySz = 1 + tagLen + 3
+  val tageEntrySz = 1 + tagLen + TageCtrBits
 
   // use real address to index
   // val unhashed_idxes = VecInit((0 until TageBanks).map(b => ((io.req.bits.pc >> 1.U) + b.U) >> log2Up(TageBanks).U))
@@ -204,7 +209,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val wrbypass_tags    = Reg(Vec(wrBypassEntries, UInt(tagLen.W)))
   val wrbypass_idxs    = Reg(Vec(wrBypassEntries, UInt(log2Ceil(nRows).W)))
-  val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(3.W))))
+  val wrbypass_ctrs    = Reg(Vec(wrBypassEntries, Vec(TageBanks, UInt(TageCtrBits.W))))
   val wrbypass_ctr_valids = Reg(Vec(wrBypassEntries, Vec(TageBanks, Bool())))
   val wrbypass_enq_idx = RegInit(0.U(log2Ceil(wrBypassEntries).W))
 
@@ -355,10 +360,27 @@ class Tage extends BaseTage {
     }
   }
 
+  val scTables = SCTableInfo.map {
+    case (nRows, ctrBits, histLen) => {
+      val t = if (EnableSC) Module(new SCTable(nRows, ctrBits, histLen)) else Module(new FakeSCTable)
+      val req = t.io.req
+      req.valid := io.pc.valid && !io.flush
+      req.bits.pc := io.pc.bits
+      req.bits.hist := io.hist
+      req.bits.mask := io.inMask
+      t
+    }
+  }
+
+  val scThreshold = RegInit(0.U.asTypeOf(new SCThreshold()))
+  val useThreshold = WireInit(scThreshold.thres)
+  val updateThreshold = WireInit((useThreshold << 3) + 21.U)
+
   // override val debug = true
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
+  val scResps = VecInit(scTables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
   // val flushLatch = RegNext(io.flush)
 
   val s2_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
@@ -381,15 +403,27 @@ class Tage extends BaseTage {
   val updateUMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
   val updateTaken = Wire(Vec(TageNTables, Vec(TageBanks, Bool())))
   val updateAlloc = Wire(Vec(TageNTables, Vec(TageBanks, Bool())))
-  val updateOldCtr = Wire(Vec(TageNTables, Vec(TageBanks, UInt(3.W))))
+  val updateOldCtr = Wire(Vec(TageNTables, Vec(TageBanks, UInt(TageCtrBits.W))))
   val updateU = Wire(Vec(TageNTables, Vec(TageBanks, UInt(2.W))))
   updateTaken := DontCare
   updateAlloc := DontCare
   updateOldCtr := DontCare
   updateU := DontCare
 
+  val scUpdateMask = Wire(Vec(SCNTables, Vec(TageBanks, Bool())))
+  val scUpdateTagePred = Wire(Vec(SCNTables, Bool()))
+  val scUpdateTaken = Wire(Vec(SCNTables, Bool()))
+  val scUpdateOldCtrs = Wire(Vec(SCNTables, SInt(SCCtrBits.W)))
+  scUpdateMask := DontCare
+  scUpdateTagePred := DontCare
+  scUpdateTaken := DontCare
+  scUpdateOldCtrs := DontCare
+
+  val updateSCMeta = u.brInfo.tageMeta.scMeta
+
   val updateBank = u.pc(log2Ceil(TageBanks), 1)
 
+  val tageTaken = WireInit(false.B)
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
     var altPred = s3_bim.ctrs(w)(1)
@@ -403,6 +437,7 @@ class Tage extends BaseTage {
       val ctr = resps(i)(w).bits.ctr
       when (hit) {
         io.resp.takens(w) := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2)) // Use altpred on weak taken
+        tageTaken := Mux(ctr === 3.U || ctr === 4.U, altPred, ctr(2))
         finalAltPred := altPred
       }
       provided = provided || hit          // Once hit then provide
@@ -428,6 +463,44 @@ class Tage extends BaseTage {
     io.meta(w).allocate.valid := allocatableSlots =/= 0.U
     io.meta(w).allocate.bits := allocEntry
 
+    val scMeta = io.meta(w).scMeta
+    scMeta := DontCare
+    val scTableSums = VecInit(
+      (0 to 1) map { i => {
+          // val providerCtr = resps(provider)(w).bits.ctr.zext()
+          // val pvdrCtrCentered = (((providerCtr - 4.S) << 1) + 1.S) << 3
+          // sum += pvdrCtrCentered
+          if (EnableSC) {
+            (0 until SCNTables) map { j => 
+              scTables(j).getCenteredValue(scResps(j)(w).ctr(i))
+            } reduce (_+_) // TODO: rewrite with adder tree
+          }
+          else 0.S
+        }
+      }
+    )
+
+    if (EnableSC) {
+      scMeta.tageTaken := tageTaken
+      scMeta.scUsed := provided
+      scMeta.scPred := false.B
+      scMeta.sum := 0.S
+      when (provided) {
+        val providerCtr = resps(provider)(w).bits.ctr.zext()
+        val pvdrCtrCentered = (((providerCtr - 4.S) << 1) + 1.S) << 3
+        val taken = tageTaken
+        val totalSum = scTableSums(taken.asUInt) + pvdrCtrCentered
+        val sumBelowThreshold = totalSum.abs.asUInt < useThreshold
+        val scPred = totalSum >= 0.S
+        scMeta.scPred := scPred
+        scMeta.sum    := totalSum
+        scMeta.ctrs   := VecInit(scResps.map(r => r(w).ctr(taken.asUInt)))
+        // Use prediction from Statistical Corrector
+        when (!sumBelowThreshold) {
+          io.resp.takens(w) := scPred
+        }
+      }
+    }
 
     val isUpdateTaken = updateValid && updateBank === w.U &&
       u.taken && u.pd.isBr
@@ -470,6 +543,25 @@ class Tage extends BaseTage {
     }
   }
 
+  if (EnableSC) {
+    when (updateValid && updateSCMeta.scUsed.asBool) {
+      val scPred = updateSCMeta.scPred
+      val tageTaken = updateSCMeta.tageTaken
+      val scSum = updateSCMeta.sum
+      val sumAbs = scSum.abs().asUInt
+      val scOldCtrs = updateSCMeta.ctrs
+      when (scPred =/= tageTaken && sumAbs < useThreshold - 2.U) {
+        scThreshold := scThreshold.update(scPred != u.taken)
+      }
+      when (scPred =/= u.taken || sumAbs < updateThreshold) {
+        scUpdateMask.foreach(t => t(updateBank) := true.B)
+        scUpdateTagePred.foreach(t => t := tageTaken)
+        scUpdateTaken.foreach(t => t := u.taken)
+        (scUpdateOldCtrs zip scOldCtrs).foreach{case (t, c) => t := c}
+      }
+    }
+  }
+
   for (i <- 0 until TageNTables) {
     for (w <- 0 until TageBanks) {
       tables(i).io.update.mask(w) := updateMask(i)(w)
@@ -484,6 +576,18 @@ class Tage extends BaseTage {
     tables(i).io.update.pc := u.pc
     tables(i).io.update.hist := updateHist
     tables(i).io.update.fetchIdx := u.brInfo.fetchIdx
+  }
+
+  for (i <- 0 until SCNTables) {
+    for (w <- 0 until TageBanks) {
+      scTables(i).io.update.mask(w)     := scUpdateMask(i)(w)
+    }
+    scTables(i).io.update.oldCtr   := scUpdateOldCtrs(i)
+    scTables(i).io.update.tagePred := scUpdateTagePred(i)
+    scTables(i).io.update.taken    := scUpdateTaken(i)
+    scTables(i).io.update.pc := u.pc
+    scTables(i).io.update.hist := updateHist
+    scTables(i).io.update.fetchIdx := u.brInfo.fetchIdx
   }
 
 

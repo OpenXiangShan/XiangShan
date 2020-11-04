@@ -81,12 +81,21 @@ trait PredictorUtils {
     res
   }
 
+  // To be verified
   def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
     val oldSatTaken = old === ((1 << len)-1).U
     val oldSatNotTaken = old === 0.U
     Mux(oldSatTaken && taken, ((1 << len)-1).U,
       Mux(oldSatNotTaken && !taken, 0.U,
         Mux(taken, old + 1.U, old - 1.U)))
+  }
+
+  def signedSatUpdate(old: SInt, len: Int, taken: Bool): SInt = {
+    val oldSatTaken = old === ((1 << (len-1))-1).S
+    val oldSatNotTaken = old === (-(1 << (len-1))).S
+    Mux(oldSatTaken && taken, ((1 << (len-1))-1).S,
+      Mux(oldSatNotTaken && !taken, (-(1 << (len-1))).S,
+        Mux(taken, old + 1.S, old - 1.S)))
   }
 }
 abstract class BasePredictor extends XSModule with HasBPUParameter with PredictorUtils {
