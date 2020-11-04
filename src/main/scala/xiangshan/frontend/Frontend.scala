@@ -18,8 +18,7 @@ class Frontend extends XSModule {
   })
 
   val ifu = Module(new IFU)
-  val ibuffer =  if(EnableLB) Module(new LoopBuffer) else Module(new Ibuffer)
-  // val ibuffer = Module(new LoopBuffer)
+  val ibuffer =  Module(new Ibuffer)
 
   val needFlush = io.backend.redirect.valid
 
@@ -41,16 +40,9 @@ class Frontend extends XSModule {
   //ibuffer
   ibuffer.io.in <> ifu.io.fetchPacket
   ibuffer.io.flush := needFlush
-  ifu.io.loopBufPar <> ibuffer.io.loopBufPar
 
   io.backend.cfVec <> ibuffer.io.out
 
-
-  for(out <- ibuffer.io.out){
-    XSInfo(out.fire(),
-      p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"
-    )
-  }
   // for(out <- ibuffer.io.out){
   //   XSInfo(out.fire(),
   //     p"inst:${Hexadecimal(out.bits.instr)} pc:${Hexadecimal(out.bits.pc)}\n"

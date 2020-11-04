@@ -7,8 +7,14 @@ import xiangshan._
 import utils._
 import xiangshan.backend.fu.HasExceptionNO
 
+class IBufferIO extends XSBundle {
+  val flush = Input(Bool())
+  val in = Flipped(DecoupledIO(new FetchPacket))
+  val out = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+}
+
 class Ibuffer extends XSModule {
-  val io = IO(new LoopBufferIO)
+  val io = IO(new IBufferIO)
 
   class IBufEntry extends XSBundle {
     val inst = UInt(32.W)
@@ -21,9 +27,9 @@ class Ibuffer extends XSModule {
   }
 
   // Ignore
-  io.loopBufPar <> DontCare
-  io.loopBufPar.LBredirect.valid := false.B
-  io.loopBufPar.inLoop := false.B
+  // io.loopBufPar <> DontCare
+  // io.loopBufPar.LBredirect.valid := false.B
+  // io.loopBufPar.inLoop := false.B
 
 
   for(out <- io.out) {

@@ -32,7 +32,10 @@ object AddSinks {
       "perfCntCondMbpRRight",
       "perfCntCondMbpRWrong",
       "CntFetchFromICache",
-      "CntFetchFromLoopBuffer"
+      "CntFetchFromLoopBuffer",
+      "CntExitLoop1",
+      "CntExitLoop2",
+      "CntExitLoop3"
     )
     for (s <- sinks){ BoringUtils.addSink(tmp, s) }
 
