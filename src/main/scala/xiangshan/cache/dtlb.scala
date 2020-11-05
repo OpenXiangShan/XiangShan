@@ -175,6 +175,7 @@ class TlbPtwIO extends TlbBundle {
 class TlbIO(Width: Int) extends TlbBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO
+  val sfence = Input(new SfenceBundle)
 
   override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
 }
@@ -187,7 +188,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val resp   = io.requestor.map(_.resp)
   val ptw    = io.ptw
 
-  val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
+  val sfence = io.sfence
   val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
   val satp   = csr.satp
   val priv   = csr.priv
@@ -195,7 +196,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val mode   = if (isDtlb) priv.dmode else priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = satp.mode === 8.U && (mode < ModeM)
-  BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle))
@@ -396,10 +396,19 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 }
 
 object TLB {
-  def apply(in: Seq[BlockTlbRequestIO], width: Int, isDtlb: Boolean, shouldBlock: Boolean) = {
+  def apply
+  (
+    in: Seq[BlockTlbRequestIO],
+    sfence: SfenceBundle,
+    width: Int,
+    isDtlb: Boolean,
+    shouldBlock: Boolean
+  ) = {
     require(in.length == width)
     
     val tlb = Module(new TLB(width, isDtlb))
+
+    tlb.io.sfence <> sfence
     
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

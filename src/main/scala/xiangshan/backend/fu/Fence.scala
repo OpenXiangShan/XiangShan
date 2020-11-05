@@ -4,25 +4,29 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
 
 import xiangshan.backend.FenceOpType
 
+class FenceToSbuffer extends XSBundle {
+  val flushSb = Output(Bool())
+  val sbIsEmpty = Input(Bool())
+}
+
 class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
+
+  val sfence = IO(Output(new SfenceBundle))
+  val fencei = IO(Output(Bool()))
+  val toSbuffer = IO(new FenceToSbuffer)
+
   val (valid, src1, src2, uop, func, lsrc1, lsrc2) = 
     (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.ctrl.lsrc1, io.in.bits.uop.ctrl.lsrc2)
 
   val s_sb :: s_tlb :: s_icache :: s_none :: Nil = Enum(4)
   val state = RegInit(s_sb)
 
-  val sfence  = WireInit(0.U.asTypeOf(new SfenceBundle))
-  val sbuffer = WireInit(false.B)
-  val fencei  = WireInit(false.B)
-  val sbEmpty = WireInit(false.B)
-  BoringUtils.addSource(sbuffer, "FenceUnitSbufferFlush")
-  BoringUtils.addSource(sfence, "SfenceBundle")
-  BoringUtils.addSource(fencei,  "FenceI")
-  BoringUtils.addSink(sbEmpty, "SBufferEmpty")
+  val sbuffer = toSbuffer.flushSb
+  val sbEmpty = toSbuffer.sbIsEmpty
+
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := valid && state === s_sb && !sbEmpty
   fencei       := (state === s_icache && sbEmpty) || (state === s_sb && valid && sbEmpty && func === FenceOpType.fencei)

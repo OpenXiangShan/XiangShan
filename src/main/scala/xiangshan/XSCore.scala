@@ -281,18 +281,18 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   val icache = outer.icache.module
   val ptw = outer.ptw.module
 
-  // TODO: connect this
-
   front.io.backend <> backend.io.frontend
   front.io.icacheResp <> icache.io.resp
   front.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
+  icache.io.fencei := backend.io.fencei
   mem.io.backend   <> backend.io.mem
   io.externalInterrupt <> backend.io.externalInterrupt
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw
+  ptw.io.sfence <> backend.io.sfence
 
   dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
   dcache.io.lsu.lsroq   <> mem.io.loadMiss

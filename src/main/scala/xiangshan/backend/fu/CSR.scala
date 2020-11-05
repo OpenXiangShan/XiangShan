@@ -359,11 +359,8 @@ class CSR extends XSModule
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
 
   val tlbBundle = Wire(new TlbCsrBundle)
-  // val sfence    = Wire(new SfenceBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
-  // sfence := 0.U.asTypeOf(new SfenceBundle)
   BoringUtils.addSource(tlbBundle, "TLBCSRIO")
-  // BoringUtils.addSource(sfence, "SfenceBundle") // FIXME: move to MOU
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))

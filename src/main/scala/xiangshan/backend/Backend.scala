@@ -25,6 +25,8 @@ class Backend extends XSModule
     val frontend = Flipped(new FrontendToBackendIO)
     val mem = Flipped(new MemToBackendIO)
     val externalInterrupt = new ExternalInterruptIO
+    val sfence = Output(new SfenceBundle)
+    val fencei = Output(Bool())
   })
 
 
@@ -176,6 +178,8 @@ class Backend extends XSModule
   jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
 
   jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  jmpExeUnit.fenceToSbuffer <> io.mem.fenceToSbuffer
+  io.mem.sfence <> jmpExeUnit.sfence
   io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
   io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
   io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
@@ -183,6 +187,9 @@ class Backend extends XSModule
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
+  io.frontend.sfence <> jmpExeUnit.sfence
+
+  io.fencei := jmpExeUnit.fencei
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect

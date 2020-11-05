@@ -108,6 +108,7 @@ class PtwResp extends PtwBundle {
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
+  val sfence = Input(new SfenceBundle)
 }
 
 object ValidHold {
@@ -159,11 +160,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val validOneCycle = OneCycleValid(arb.io.out.fire())
   arb.io.out.ready := !valid// || resp(arbChosen).fire()
 
-  val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
+  val sfence = io.sfence
   val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
   val satp   = csr.satp
   val priv   = csr.priv
-  BoringUtils.addSink(sfence, "SfenceBundle")
   BoringUtils.addSink(csr, "TLBCSRIO")
 
   // two level: l2-tlb-cache && pde/pte-cache
