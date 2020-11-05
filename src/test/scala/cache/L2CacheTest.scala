@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
+import chiseltest.internal.LineCoverageAnnotation
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -257,6 +258,7 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
 
   val annos = Seq(
     VerilatorBackendAnnotation,
+    LineCoverageAnnotation,
     RunFirrtlTransformAnnotation(new PrintModuleName)
   )
 

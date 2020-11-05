@@ -300,6 +300,14 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     }
   })
 
+  // move tailPtr
+  // allocatedMask: dequeuePtr can go to the next 1-bit
+  val allocatedMask = VecInit((0 until LoadQueueSize).map(i => allocated(i) || !enqDeqMask(i)))
+  // find the first one from deqPtr (ringBufferTail)
+  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended.flag)
+  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
+  ringBufferTailExtended := nextTail
+
   // When load commited, mark it as !allocated, this entry will be recycled later
   (0 until CommitWidth).map(i => {
     when(loadCommit(i)) {
@@ -307,8 +315,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       XSDebug("load commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
     }
   })
-  // move tailPtr
-  ringBufferTailExtended := ringBufferTailExtended + PopCount(loadCommit)
 
   // rollback check
   val rollback = Wire(Vec(StorePipelineWidth, Valid(new Redirect)))
