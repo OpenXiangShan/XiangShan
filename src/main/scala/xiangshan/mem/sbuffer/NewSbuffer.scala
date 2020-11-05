@@ -71,7 +71,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val buffer = Mem(StoreBufferSize, new SbufferLine)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
   //val lru = new SbufferLRU(StoreBufferSize)
-  val lru = new TrueLRU(StoreBufferSize)
+  val lru = new SbufferLRU(StoreBufferSize)
   // 2 * enq + 1 * deq
   val lruAccessWays = Wire(Vec(io.in.getWidth+1, new Valid(UInt(SbufferIndexWidth.W))))
   for(w <- lruAccessWays){
@@ -218,7 +218,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   val do_eviction = Wire(Bool())
   val empty = Cat(stateVec.map(s => s===s_invalid)).andR() && !Cat(io.in.map(_.valid)).orR()
-  val replaceIdx = lru.way //(stateVec.map(s => s===s_valid))
+  val replaceIdx = lru.way(stateVec.map(s => s===s_valid))
   val firstValidEntry = PriorityEncoder(stateVec.map(s => s===s_valid))
 
   val evictor = Module(new NaiveEvictor(StoreBufferSize-4))
