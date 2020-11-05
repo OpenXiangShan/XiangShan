@@ -15,6 +15,7 @@ trait HasLoopBufferCst extends HasXSParameter {
 class LoopBufferParameters extends XSBundle {
   val LBredirect = ValidIO(UInt(VAddrBits.W))
   val fetchReq = Input(UInt(VAddrBits.W))
+  val noTakenMask = Input(UInt(PredictWidth.W))
   // val preFetchPC = DecoupledIO(UInt(VAddrBits.W))
   // val preFetchResp = Flipped(DecoupledIO(new ICacheResp))
   // val preFetchSend = DecoupledIO(new ICacheResp)
@@ -97,7 +98,7 @@ class NewLoopBuffer extends XSModule with HasLoopBufferCst{
 
   // Enque loop body
   when(io.in.fire && LBstate === s_fill) {
-    io.in.bits.mask.asBools().zipWithIndex.map {case(m, i) =>
+    io.loopBufPar.noTakenMask.asBools().zipWithIndex.map {case(m, i) =>
       when(m) {
         buffer(io.in.bits.pc(i)(7,1)).inst := io.in.bits.instrs(i)(15, 0)
         bufferValid(io.in.bits.pc(i)(7,1)) := true.B

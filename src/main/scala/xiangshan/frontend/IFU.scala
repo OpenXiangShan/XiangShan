@@ -359,7 +359,7 @@ class IFU extends XSModule with HasIFUConst
   }
 
   when(inLoop) {
-    io.icacheReq.valid := if2_flush
+    io.icacheReq.valid := if4_flush
   }.otherwise {
     io.icacheReq.valid := if1_valid && if2_ready
     // io.icacheResp.ready := if3_ready
@@ -410,7 +410,7 @@ class IFU extends XSModule with HasIFUConst
 
   pd.io.in := icacheResp
   when(inLoop) {
-    pd.io.in.mask := loopBuffer.io.out.bits.mask & mask(loopBuffer.io.out.bits.pc)
+    pd.io.in.mask := loopBuffer.io.out.bits.mask & mask(loopBuffer.io.out.bits.pc) // TODO: Maybe this is unnecessary
     // XSDebug("Fetch from LB\n")
     // XSDebug(p"pc=${Hexadecimal(io.loopBufPar.LBResp.pc)}\n")
     // XSDebug(p"data=${Hexadecimal(io.loopBufPar.LBResp.data)}\n")
@@ -445,6 +445,7 @@ class IFU extends XSModule with HasIFUConst
   // io.fetchPacket.valid := if4_valid && !io.redirect.valid
   fetchPacketWire.instrs := if4_pd.instrs
   fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
+  loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
   (0 until PredictWidth).foreach(i => fetchPacketWire.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
   when (if4_bp.taken) {
