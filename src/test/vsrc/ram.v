@@ -1,11 +1,14 @@
-import "DPI-C" function void ram_helper
+import "DPI-C" function void ram_write_helper
 (
-  input  longint    rIdx,
-  output longint    rdata,
   input  longint    wIdx,
   input  longint    wdata,
   input  longint    wmask,
   input  bit    wen
+);
+
+import "DPI-C" function longint ram_read_helper
+(
+  input  longint    rIdx
 );
 
 module RAMHelper(
@@ -18,8 +21,10 @@ module RAMHelper(
   input         wen
 );
 
+  assign rdata = ram_read_helper(rIdx);
+
   always @(posedge clk) begin
-    ram_helper(rIdx, rdata, wIdx, wdata, wmask, wen);
+    ram_write_helper(wIdx, wdata, wmask, wen);
   end
 
 endmodule
