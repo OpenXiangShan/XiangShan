@@ -319,7 +319,7 @@ class L1plusCacheImp(outer: L1plusCache) extends LazyModuleImp(outer) with HasL1
   switch (state) {
     is (s_invalid) {
       when (io.flush) {
-        state := s_invalid
+        state := s_drain_cache
       }
     }
     is (s_drain_cache) {

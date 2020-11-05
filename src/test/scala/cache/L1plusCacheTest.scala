@@ -137,6 +137,14 @@ class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers 
           c.io.l1plus.flush.poke(false.B)
         }
 
+        def flush_l1plus() = {
+          c.io.l1plus.flush.poke(true.B)
+          while (!c.io.l1plus.empty.peek().litToBoolean) {
+            c.clock.step()
+          }
+          c.io.l1plus.flush.poke(false.B)
+        }
+
         def evaluate() = {
           while (!sq.isFinished() || !lq.isFinished()) {
             sq.tick(c.io.dcacheStore)
@@ -178,7 +186,16 @@ class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers 
 
         scan_test()
 
-        // random read/write test
+        // self_modify_test
+        def self_modify_test() = {
+          println(s"self_modify_test")
+          for (i <- 0 until 10) {
+            flush_l1plus()
+            scan_test()
+          }
+        }
+
+        self_modify_test()
       }
   }
 }
