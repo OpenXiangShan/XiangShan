@@ -33,6 +33,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   csr.io.in.bits.src3 := DontCare
   csr.io.perf <> DontCare
   csr.io.exception := io.csrOnly.exception
+  csr.io.isInterrupt := io.redirect.bits.isFlushPipe
   csr.io.memExceptionVAddr := io.csrOnly.memExceptionVAddr
   io.csrOnly.trapTarget := csr.io.trapTarget
   csr.io.mtip := io.csrOnly.externalInterrupt.mtip

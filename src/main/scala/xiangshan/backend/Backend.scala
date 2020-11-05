@@ -174,8 +174,8 @@ class Backend extends XSModule
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
-
   jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  jmpExeUnit.io.csrOnly.externalInterrupt := io.externalInterrupt
   io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
   io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
   io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
