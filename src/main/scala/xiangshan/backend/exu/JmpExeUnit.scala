@@ -1,18 +1,22 @@
 package xiangshan.backend.exu
 
 import chisel3._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.{ExuOutput, FuType, SfenceBundle}
+import xiangshan.{ExuOutput, FuType, SfenceBundle, TlbCsrBundle}
 import xiangshan.backend.fu.{CSR, Jump}
-import xiangshan.backend.decode.isa._
 import xiangshan.backend.fu.fpu.Fflags
 import utils._
 
 class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
 
+  val fflags = IO(Input(new Fflags))
+  val dirty_fs = IO(Input(Bool()))
+  val frm = IO(Output(UInt(3.W)))
+
   val fenceToSbuffer = IO(new FenceToSbuffer)
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))
+
+  val tlbCsrIO = IO(Output(new TlbCsrBundle))
 
   val (valid, src1, src2, uop, fuType, func) = (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuType, io.in.bits.uop.ctrl.fuOpType)
 
@@ -53,13 +57,8 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jumpExuOut.debug := DontCare
 
 
-  val fflags = WireInit(0.U.asTypeOf(new Fflags))
-  val dirty_fs = WireInit(false.B)
-  BoringUtils.addSink(fflags, "Fflags")
-  BoringUtils.addSink(dirty_fs, "DirtyFs")
-  val frm = WireInit(0.U(3.W))
   frm := csr.io.fpu_csr.frm
-  BoringUtils.addSource(frm, "Frm")
+  tlbCsrIO := csr.io.tlbCsrIO
 
   csr.io.cfIn := io.in.bits.uop.cf
   csr.io.fpu_csr.fflags := fflags
@@ -115,6 +114,7 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   i2f.io.redirect <> io.redirect
   i2f.io.mcommit <> DontCare
   i2f.io.out.ready := io.out.ready
+  i2f.frm := frm
 
   // NOTE: just one instr in this module at the same time
   io.in.ready := jmp.io.in.ready && csr.io.in.ready && fence.io.in.ready && i2f.io.in.ready

@@ -7,7 +7,6 @@ import xiangshan._
 import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
-import chisel3.util.experimental.BoringUtils
 import chipsalliance.rocketchip.config.Parameters
 
 import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}

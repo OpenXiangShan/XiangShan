@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
 import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.decode.isa.Privileged.WFI
@@ -43,6 +42,9 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     val roqDeqPtr = Output(new RoqPtr)
     val intrBitSet = Input(Bool())
     val trapTarget = Input(UInt(VAddrBits.W))
+
+    val fflags = Output(new Fflags)
+    val dirty_fs = Output(Bool())
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -257,8 +259,8 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     io.commits(i).bits.isWalk := state =/= s_idle
   }
 
-  BoringUtils.addSource(fflags, "Fflags")
-  BoringUtils.addSource(dirty_fs, "DirtyFs")
+  io.fflags := fflags
+  io.dirty_fs := dirty_fs
 
   val validCommit = io.commits.map(_.valid)
   when(state===s_walk) {

@@ -4,10 +4,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.cache._
-import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
 import xiangshan.backend.exu.FenceToSbuffer
 
 object genWmask {
@@ -81,6 +79,7 @@ class MemToBackendIO extends XSBundle {
   val exceptionAddr = new ExceptionAddrIO
   val fenceToSbuffer = Flipped(new FenceToSbuffer)
   val sfence = Input(new SfenceBundle)
+  val csr = Input(new TlbCsrBundle)
 }
 
 // Memory pipeline wrapper
@@ -110,6 +109,7 @@ class Memend extends XSModule {
   // dtlb
   io.ptw <> dtlb.io.ptw
   dtlb.io.sfence <> io.backend.sfence
+  dtlb.io.csr <> io.backend.csr
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {

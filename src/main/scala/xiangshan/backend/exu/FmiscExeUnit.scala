@@ -3,7 +3,6 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import utils._
 import xiangshan.backend.exu.Exu.fmiscExeUnitCfg
 import xiangshan.backend.fu.fpu.{F32toF64, F64toF32, FCMP, FMV, FPUSubModuleOutput, FloatToInt}
@@ -12,6 +11,8 @@ import xiangshan.backend.fu.fpu.FPUOpType._
 import xiangshan.backend.fu.fpu._
 
 class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
+
+  val frm = IO(Input(UInt(3.W)))
 
   val fcmp = Module(new FCMP)
   val fmv = Module(new FMV(XLEN))
@@ -33,8 +34,6 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg){
   assert(fuOp.getWidth == 7) // when fuOp's WIDTH change, here must change too
   val fu = fuOp.head(4)
   val op = fuOp.tail(4)
-  val frm = WireInit(0.U(3.W))
-  BoringUtils.addSink(frm, "Frm")
   val isRVF = io.in.bits.uop.ctrl.isRVF
   val (src1, src2) = (io.in.bits.src1, io.in.bits.src2)
 

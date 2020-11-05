@@ -195,6 +195,7 @@ class CSRIO extends FunctionUnitIO[UInt, Null](csrCfg, len=64, extIn= FuOpType()
   val msip = Input(Bool())
   val meip = Input(Bool())
   val interrupt = Output(Bool())
+  val tlbCsrIO = Output(new TlbCsrBundle)
 }
 
 class CSR extends XSModule
@@ -360,7 +361,7 @@ class CSR extends XSModule
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
-  BoringUtils.addSource(tlbBundle, "TLBCSRIO")
+  io.tlbCsrIO := tlbBundle
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))

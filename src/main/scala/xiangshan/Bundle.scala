@@ -251,6 +251,7 @@ class FrontendToBackendIO extends XSBundle {
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val sfence = Input(new SfenceBundle)
+  val tlbCsrIO = Input(new TlbCsrBundle)
 }
 
 class TlbCsrBundle extends XSBundle {

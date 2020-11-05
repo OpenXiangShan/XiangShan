@@ -27,6 +27,7 @@ class Backend extends XSModule
     val externalInterrupt = new ExternalInterruptIO
     val sfence = Output(new SfenceBundle)
     val fencei = Output(Bool())
+    val tlbCsrIO = Output(new TlbCsrBundle)
   })
 
 
@@ -40,6 +41,9 @@ class Backend extends XSModule
   val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ fmacExeUnits ++ fmiscExeUnits)
   exeUnits.foreach(_.io.csrOnly := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
+
+  fmacExeUnits.foreach(_.frm := jmpExeUnit.frm)
+  fmiscExeUnits.foreach(_.frm := jmpExeUnit.frm)
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
@@ -176,10 +180,13 @@ class Backend extends XSModule
   io.mem.stin <> issueQueues.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
+  jmpExeUnit.fflags := roq.io.fflags
+  jmpExeUnit.dirty_fs := roq.io.dirty_fs
 
   jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   jmpExeUnit.fenceToSbuffer <> io.mem.fenceToSbuffer
   io.mem.sfence <> jmpExeUnit.sfence
+  io.mem.csr <> jmpExeUnit.tlbCsrIO
   io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
   io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
   io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
@@ -188,8 +195,10 @@ class Backend extends XSModule
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
   io.frontend.sfence <> jmpExeUnit.sfence
+  io.frontend.tlbCsrIO <> jmpExeUnit.tlbCsrIO
 
   io.fencei := jmpExeUnit.fencei
+  io.tlbCsrIO := jmpExeUnit.tlbCsrIO
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect

@@ -2,12 +2,13 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.exu.Exu.fmacExeUnitCfg
 import xiangshan.backend.fu.fpu.fma.FMA
 import xiangshan.backend.fu.fpu._
 
 class FmacExeUnit extends Exu(fmacExeUnitCfg) {
+
+  val frm = IO(Input(UInt(3.W)))
 
   val fma = Module(new FMA)
 
@@ -18,8 +19,6 @@ class FmacExeUnit extends Exu(fmacExeUnitCfg) {
   fma.io.in.bits.src := VecInit(Seq(input.src1, input.src2, input.src3).map(src => Mux(isRVD, src, unboxF64ToF32(src))))
   fma.io.in.bits.uop := io.in.bits.uop
   val extraInput = fma.io.in.bits.ext.get
-  val frm = WireInit(0.U(3.W))
-  BoringUtils.addSink(frm, "Frm")
   val instr_rm = io.in.bits.uop.cf.instr(14, 12)
   extraInput.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   extraInput.op := io.in.bits.uop.ctrl.fuOpType(2, 0)

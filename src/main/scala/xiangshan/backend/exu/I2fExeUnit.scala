@@ -2,20 +2,19 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.fpu.IntToFloatSingleCycle
 import xiangshan.backend.fu.fpu.FPUOpType._
 
 class I2fExeUnit extends Exu(Exu.i2fExeUnitCfg){
 
+  val frm = IO(Input(UInt(3.W)))
+
   val uopIn = io.in.bits.uop
   val isDouble = !uopIn.ctrl.isRVF
   val fuOp = uopIn.ctrl.fuOpType
   val fu = fuOp.head(4)
   val op = fuOp.tail(4)
-  val frm = WireInit(0.U(3.W))
-  BoringUtils.addSink(frm, "Frm")
 
   val valid = io.in.valid && !uopIn.roqIdx.needFlush(io.redirect)
   val intToFloat = Module(new IntToFloatSingleCycle)
