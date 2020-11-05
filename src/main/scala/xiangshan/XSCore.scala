@@ -186,14 +186,18 @@ trait HasXSLog { this: RawModule =>
   implicit val moduleName: String = this.name
 }
 
-abstract class XSModule extends Module
+abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
+{
+  def io: Record
+}
 
 //remove this trait after impl module logic
-trait NeedImpl { this: Module =>
+trait NeedImpl { this: RawModule =>
   override protected def IO[T <: Data](iodef: T): T = {
+    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.experimental.IO(iodef)
     io <> DontCare
     io
