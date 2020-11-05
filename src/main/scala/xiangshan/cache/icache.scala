@@ -39,6 +39,10 @@ trait HasICacheParameters extends HasL1CacheParameters {
   // icache Queue
   val groupAlign = log2Up(cacheParams.blockBytes)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  
+  //ECC encoding
+  def encRowBits = cacheParams.dataCode.width(rowBits)
+  def encTagBits = cacheParams.tagCode.width(tagBits)
 
   // ICache MSHR settings
 
@@ -63,15 +67,15 @@ abstract class ICacheArray extends XSModule
 abstract class ICachArray extends XSModule
   with HasICacheParameters
 
-sealed class ICacheMetaBundle extends ICacheBundle
-{
-  val tag = UInt(tagBits.W)
-}
+// sealed class ICacheMetaBundle extends ICacheBundle
+// {
+//   val tag = UInt(tagBits.W)
+// }
 
-sealed class ICacheDataBundle extends ICacheBundle
-{
-  val data = UInt(wordBits.W)
-}
+// sealed class ICacheDataBundle extends ICacheBundle
+// {
+//   val data = UInt(encRowBits.W)
+// }
 
 class ICacheReq extends ICacheBundle
 {
@@ -165,21 +169,25 @@ class ICacheMetaArray extends ICachArray
   val io=IO{new Bundle{
     val write = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
     val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
-    val readResp = Output(Vec(nWays,new ICacheMetaBundle))
+    val readResp = Output(Vec(nWays,UInt(tagBits.W)))
   }}
 
-  val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
+  val metaArray = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays, shouldReset = true))
 
   //read 
   metaArray.io.r.req.valid := io.read.valid
   io.read.ready := metaArray.io.r.req.ready
   io.write.ready := DontCare
   metaArray.io.r.req.bits.apply(setIdx=io.read.bits)
-  io.readResp := metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
+
+  val rtag = metaArray.io.r.resp.asTypeOf(Vec(nWays,UInt(encTagBits.W)))
+  val tag_encoded = VecInit(rtag.map(wtag => cacheParams.tagCode.decode(wtag).corrected))
+  io.readResp :=tag_encoded.asTypeOf(Vec(nWays,UInt(tagBits.W)))
   //write
   val write = io.write.bits
+  val wdata_encoded = cacheParams.tagCode.encode(write.phyTag.asUInt)
   metaArray.io.w.req.valid := io.write.valid
-  metaArray.io.w.req.bits.apply(data=write.phyTag.asTypeOf(new ICacheMetaBundle), setIdx=write.virIdx, waymask=write.waymask)
+  metaArray.io.w.req.bits.apply(data=wdata_encoded, setIdx=write.virIdx, waymask=write.waymask)
 
 
 }
@@ -189,12 +197,13 @@ class ICacheDataArray extends ICachArray
   val io=IO{new Bundle{
     val write = Flipped(DecoupledIO(new ICacheDataWriteBundle))
     val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
-    val readResp = Output(Vec(blockWords,Vec(nWays,new ICacheDataBundle)))
+    val readResp = Output(Vec(blockWords,Vec(nWays,UInt(encRowBits.W))))
   }}
 
-  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
+  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(UInt(encRowBits.W), set=nSets, way = nWays))}
 
   //read 
+  //do ECC decoding after way choose
   for(b <- 0 until blockWords){
     dataArray(b).io.r.req.valid := io.read.valid
     dataArray(b).io.r.req.bits.apply(setIdx=io.read.bits)
@@ -203,15 +212,17 @@ class ICacheDataArray extends ICachArray
 
   io.read.ready := ParallelOR(dataArrayReadyVec)
   io.write.ready := DontCare
-  io.readResp := VecInit(dataArray.map(b => b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle))))
+  io.readResp := VecInit(dataArray.map(b => b.io.r.resp.asTypeOf(Vec(nWays,UInt(encRowBits.W)))))
 
   //write
   val write = io.write.bits
-  val write_data = write.data.asTypeOf(Vec(blockWords,new ICacheDataBundle))
+  val write_data = write.data.asTypeOf(Vec(blockWords,UInt(rowBits.W)))
+  val write_data_encoded = write_data.map(wdata => cacheParams.tagCode.encode(wdata))
+
   for(b <- 0 until blockWords){
     dataArray(b).io.w.req.valid := io.write.valid
     dataArray(b).io.w.req.bits.apply(   setIdx=write.virIdx, 
-                                        data=write_data(b), 
+                                        data=write_data_encoded(b), 
                                         waymask=write.waymask)
 
   }
@@ -298,7 +309,7 @@ class ICache extends ICacheModule
   val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
-  val hitVec = VecInit((0 until nWays).map{w => metas(w).tag === s2_tag && validMeta(w) === 1.U})
+  val hitVec = VecInit((0 until nWays).map{w => metas(w)=== s2_tag && validMeta(w) === 1.U})
   val victimWayMask = (1.U << LFSR64()(log2Up(nWays)-1,0))
   val invalidVec = ~validMeta
   val hasInvalidWay = invalidVec.orR
@@ -332,10 +343,19 @@ class ICache extends ICacheModule
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
   // icache hit 
+  // data ECC encoding
   // simply cut the hit cacheline
-  val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
+  val dataHitWay = VecInit(s3_data.map(b => Mux1H(s3_wayMask,b).asUInt))
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
-  outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
+  val dataHitWayDecoded = VecInit(   
+    (0 until blockWords).map{r => 
+      val row = dataHitWay.asTypeOf(Vec(blockWords,UInt(encRowBits.W)))(r)
+      val decodedRow = cacheParams.dataCode.decode(row)
+      assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
+      decodedRow.corrected
+    }
+  )
+  outPacket := cutHelper(dataHitWay,s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
   
   //ICache MissQueue
   val icacheMissQueue = Module(new IcacheMissQueue)
