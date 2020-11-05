@@ -1,5 +1,6 @@
 package cache
 
+import scala.collection.mutable.ArrayBuffer
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
@@ -16,8 +17,8 @@ import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
 import org.scalatest.{FlatSpec, Matchers}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.HasXSLog
-import xiangshan.cache.{DCache, L1plusCache, DCacheLineReq, L1plusCacheReq, MemoryOpConstants}
+import xiangshan.{HasXSLog, MicroOp}
+import xiangshan.cache.{DCache, L1plusCache, DCacheLineIO, L1plusCacheIO, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
@@ -26,13 +27,8 @@ import scala.util.Random
 case object L1plusCacheTestKey extends Field[Long]
 
 class L1plusTestTopIO extends Bundle {
-  val in = Flipped(DecoupledIO(new Bundle() {
-    val wdata = Input(UInt(512.W))
-    val waddr = Input(UInt(20.W))
-  }))
-  val out = DecoupledIO(new Bundle() {
-    val rdata = Output(UInt(512.W))
-  })
+  val l1plus = new L1plusCacheIO()
+  val dcacheStore = new DCacheLineIO()
 }
 
 class L1plusTestTop()(implicit p: Parameters) extends LazyModule{
@@ -75,123 +71,37 @@ class L1plusTestTop()(implicit p: Parameters) extends LazyModule{
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
 
-    val io = IO(new L1plusTestTopIO)
-
-    val in = HoldUnless(io.in.bits, io.in.fire())
-
-    dcache.module.io <> DontCare
-
-    val storePort = dcache.module.io.lsu.store
-    val loadPort  = l1plusCache.module.io
-
-    def sendStoreReq(addr: UInt, data: UInt): DCacheLineReq = {
-      val req = Wire(new DCacheLineReq)
-      req.cmd := MemoryOpConstants.M_XWR
-      req.addr := addr
-      req.data := data
-      req.mask := Fill(req.mask.getWidth, true.B)
-      req.meta := DontCare
-      req
-    }
-
-    def sendLoadReq(addr: UInt): L1plusCacheReq = {
-      val req = Wire(new L1plusCacheReq)
-      req.cmd  := MemoryOpConstants.M_XRD
-      req.addr := addr
-      req.id   := 0.U
-      req
-    }
-
-    val s_idle :: s_write_req :: s_write_resp :: s_read_req :: s_read_resp :: s_finish :: Nil = Enum(6)
-    val state = RegInit(s_idle)
-
-    switch(state){
-      is(s_idle){
-        when(io.in.fire()){
-          state := s_write_req
-        }
-      }
-      is(s_write_req){
-        when(storePort.req.fire()) {
-          state := s_write_resp
-        }
-      }
-      is(s_write_resp){
-        when(storePort.resp.fire()) {
-          state := s_read_req
-        }
-      }
-      is(s_read_req){
-        when(loadPort.req.fire()) {
-          state := s_read_resp
-        }
-      }
-      is(s_read_resp){
-        when(loadPort.resp.fire()) {
-          state := s_finish
-        }
-      }
-    }
-
-    io.in.ready := state === s_idle
-
-    val storeReq = Wire(new DCacheLineReq)
-
-    storeReq := sendStoreReq(in.waddr, in.wdata)
-
-    storePort.req.bits := storeReq
-    storePort.req.valid := state===s_write_req
-    storePort.resp.ready := true.B
-    XSDebug(
-      storePort.req.fire(),
-      "write data %x to dcache\n",
-      storePort.req.bits.data,
-    )
-
-    XSDebug(p"state: $state\n")
-
-    val loadReq = sendLoadReq(in.waddr)
-
-    loadPort.req.bits := loadReq
-    loadPort.req.valid := state===s_read_req
-    loadPort.resp.ready := true.B
-    XSDebug(
-      loadPort.resp.fire(),
-      "read data %x form l1plusCache\n",
-      loadPort.resp.bits.data,
-    )
-
-    val rdata = Reg(UInt(512.W))
-
-    when(loadPort.resp.fire()) {
-      state := s_finish
-      rdata := loadPort.resp.bits.data
-    }
-
-    io.out.bits.rdata := rdata
-    io.out.valid := state === s_finish
-
-    when(io.out.fire()){
-      state := s_idle
-    }
-  }
-
-}
-
-class L1plusTestTopWrapper()(implicit p: Parameters) extends LazyModule {
-
-  val testTop = LazyModule(new L1plusTestTop())
-
-  lazy val module = new LazyModuleImp(this){
-    val io = IO(new L1plusTestTopIO)
+    val io = IO(Flipped(new L1plusTestTopIO))
 
     AddSinks()
 
-    io <> testTop.module.io
+    dcache.module.io <> DontCare
+
+    dcache.module.io.lsu.store <> io.dcacheStore
+    l1plusCache.module.io <> io.l1plus
   }
+
 }
 
-class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
+class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
+  behavior of "L1plusCache"
+
+  val mem_size = 128 * 1024 * 1024
+  val block_size = 64
+  // val nblocks = mem_size / block_size
+  val nblocks = 100
+
+  // data structures
+  // our golden version cache
+  val cache_blocks = new Array[BigInt](nblocks)
+  for (i <- 0 until nblocks) {
+    cache_blocks(i) = BigInt(0)
+  }
+
+  // ----------------------------------------
+  // useful request parameter values
+  val CMD_READ = MemoryOpConstants.M_XRD
+  val r = scala.util.Random
 
   top.Parameters.set(top.Parameters.debugParameters)
 
@@ -207,41 +117,303 @@ class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
     })
 
 
-    test(LazyModule(new L1plusTestTopWrapper()).module)
+    test(LazyModule(new L1plusTestTop()).module)
       .withAnnotations(annos){ c =>
-
-
-        c.io.in.initSource().setSourceClock(c.clock)
-        c.io.out.initSink().setSinkClock(c.clock)
 
         c.clock.step(100)
 
-        val mem_size = 128 * 1024 * 1024
-        val block_size = 64
-        val nblocks = mem_size / block_size
-        for(i <- 0 until nblocks){
-          // we do not support l1plus flush for now
-          // so we could only scan the whole memory,
-          // and write every block for only once.
-          // if we rewrite the same block multiple times
-          // L1plus could not give correct data since it hasn't been flushed
-          // val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
-          val addr = i * 64
-          val words = (0 until 8) map { _ =>
-            (BigInt(Random.nextLong() & 0x7fffffffffffffffL))
-          }
+        val sq = new StoreQueue(8)
+        val lq = new LoadQueue(8)
 
-          val data = words.foldLeft(BigInt(0))((sum, i) => sum << 64 | i)
+        def init() = {
+          sq.init()
+          lq.init()
 
-          c.io.in.enqueue(chiselTypeOf(c.io.in.bits).Lit(
-            _.waddr -> addr.U,
-            _.wdata -> data.U
-          ))
-          c.io.out.expectDequeue(chiselTypeOf(c.io.out.bits).Lit(
-            _.rdata -> data.U
-          ))
+          // initialize DUT inputs
+          c.io.dcacheStore.req.valid.poke(false.B)
+          c.io.dcacheStore.resp.ready.poke(false.B)
+          c.io.l1plus.req.valid.poke(false.B)
+          c.io.l1plus.resp.ready.poke(false.B)
+          c.io.l1plus.flush.poke(false.B)
         }
+
+        def evaluate() = {
+          while (!sq.isFinished() || !lq.isFinished()) {
+            sq.tick(c.io.dcacheStore)
+            lq.tick(c.io.l1plus)
+            c.clock.step()
+          }
+        }
+
+        // ----------------------------------------
+        // scan test
+        // write every memory block and then read out every memory cell
+        def scan_test() = {
+          println(s"scan test")
+          init()
+          // first, initialize every memory block with random numbers
+          for (i <- 0 until nblocks) {
+            val addr = i * 64
+            val words = (0 until 8) map { _ =>
+              (BigInt(r.nextLong() & 0x7fffffffffffffffL))
+            }
+            val data = words.foldLeft(BigInt(0))((sum, i) => sum << 64 | i)
+            cache_blocks(i) = data
+            println(f"enq store addr: $addr%x data: $data%x")
+            sq.enq(Req(addr, data))
+          }
+          // execute reqs
+          evaluate()
+
+          // read them out
+          for (i <- 0 until nblocks) {
+            val addr = i * 64
+            val data = cache_blocks(i)
+            println(f"enq load addr: $addr%x data: $data%x")
+            lq.enq(Req(addr, data))
+          }
+          // execute reqs
+          evaluate()
+        }
+
+        scan_test()
+
+        // random read/write test
+      }
+  }
+}
+
+// emulated queue
+class IdPool(val nReqIds: Int) {
+  val freeIds = new Array[Boolean](nReqIds)
+
+  def allocate(): Int = {
+    for (i <- 0 until freeIds.size) {
+      if (freeIds(i)) {
+        freeIds(i) = false
+        return i
+      }
+    }
+    // no free id to allocate
+    return -1
+  }
+
+  def free(id: Int): Unit = {
+    assert(!freeIds(id))
+    freeIds(id) = true
+  }
+
+  def init(): Unit = {
+    for (i <- 0 until freeIds.size) {
+      freeIds(i) = true
+    }
+  }
+}
+
+case class Req(
+  addr: Long,
+  data: BigInt
+) {
+  override def toString() : String = {
+    return f"addr: $addr%x data: $data%x"
+  }
+}
+
+case class QueueEntry(
+  var id: Int, // it's transaction id
+  req: Req
+) {
+  override def toString() : String = {
+    return f"id: $id%d req: $req"
+  }
+}
+
+class Queue(nEntries: Int, name: String) {
+  // Queue
+  // ---------------------------------------
+  val idPool = new IdPool(nEntries)
+  val queue = new ArrayBuffer[QueueEntry]()
+  def enq(req: Req) = {
+    // for unissued reqs, they have id = -1
+    queue += new QueueEntry(-1, req)
+  }
+
+  // select a req to issue
+  // req with id == -1 are not issued
+  def select(): Int = {
+    for (i <- 0 until queue.size) {
+      if (queue(i).id == -1)
+        return i
+    }
+    return -1
+  }
+
+  // retire the req with transaction id tId
+  def retire(tId: Int): Unit = {
+    println(f"$name retire transaction: $tId%d")
+    for (i <- 0 until queue.size) {
+      if (queue(i).id == tId) {
+        // remove this request
+        queue.remove(i)
+        println(f"$name retire req: $i%d transaction: $tId%d")
+        return
+      }
+    }
+    assert(false)
+  }
+
+  def issue(idx: Int, tId: Int) = {
+    println(f"$name issue req: $idx%d transaction: $tId%d")
+    assert(queue(idx).id == -1)
+    queue(idx).id = tId
+  }
+
+  // look up req by transaction id tId
+  def lookUp(tId: Int): Req = {
+    for (i <- 0 until queue.size) {
+      if (queue(i).id == tId) {
+        // remove this request
+        return queue(i).req
+      }
+    }
+    // we must return a value
+    // just to make scala happy
+    return Req(0, 0)
+  }
+
+  var reqWaiting = false
+
+  def init(): Unit = {
+    idPool.init()
+    queue.clear()
+    reqWaiting = false
+  }
+
+  def isFinished() = queue.isEmpty
+}
+
+class StoreQueue(nEntries: Int) extends Queue(nEntries, "StoreQueue") {
+  def sendReq(port: DCacheLineIO): Unit = {
+    val req = port.req
+    // has last cycle's req been fired?
+    if (reqWaiting && req.ready.peek().litToBoolean) {
+      reqWaiting = false
+      // no requests waiting on line
+      // reset valid signal
+      req.valid.poke(false.B)
+    }
+
+    // can we send a new request in this cycle
+    val reqIdx = select()
+    if (reqWaiting || reqIdx == -1) {
+      return
+    }
+
+    val tId = idPool.allocate()
+    if (tId == -1) {
+      return
+    }
+
+    // try sending a new request in this cycle
+    // select a  req to issue
+
+    reqWaiting = true
+
+    issue(reqIdx, tId)
+
+    val CMD_WRITE = MemoryOpConstants.M_XWR
+    val FULL_MASK = BigInt("ffffffffffffffff", 16).U
+
+    val r = queue(reqIdx).req
+    req.valid.poke(true.B)
+    req.bits.cmd.poke(CMD_WRITE)
+    req.bits.addr.poke(r.addr.U)
+    req.bits.data.poke(r.data.U)
+    req.bits.mask.poke(FULL_MASK)
+    req.bits.meta.id.poke(tId.U)
+    req.bits.meta.vaddr.poke(r.addr.U)
+    req.bits.meta.paddr.poke(r.addr.U)
+    // req.bits.meta.uop.poke(0.U.asTypeOf(new MicroOp))
+    req.bits.meta.mmio.poke(false.B)
+    req.bits.meta.tlb_miss.poke(false.B)
+    req.bits.meta.mask.poke(FULL_MASK)
+    req.bits.meta.replay.poke(false.B)
+  }
+
+  def handleResp(port: DCacheLineIO) = {
+    val resp = port.resp
+    // always ready
+    resp.ready.poke(true.B)
+    if (resp.valid.peek().litToBoolean) {
+      val id = resp.bits.meta.id.peek().litValue.longValue.toInt
+      idPool.free(id)
+      retire(id)
     }
   }
 
+  def tick(port: DCacheLineIO) = {
+    // first, try to send reqs
+    sendReq(port)
+    // then, receive responses
+    handleResp(port)
+  }
+}
+
+class LoadQueue(nEntries: Int) extends Queue(nEntries, "LoadQueue") {
+  def sendReq(port: L1plusCacheIO): Unit = {
+    val req = port.req
+    // has last cycle's req been fired?
+    if (reqWaiting && req.ready.peek().litToBoolean) {
+      reqWaiting = false
+      // no requests waiting on line
+      // reset valid signal
+      req.valid.poke(false.B)
+    }
+
+    // can we send a new request in this cycle
+    val reqIdx = select()
+    if (reqWaiting || reqIdx == -1) {
+      return
+    }
+
+    val tId = idPool.allocate()
+    if (tId == -1) {
+      return
+    }
+
+    // try sending a new request in this cycle
+    // select a  req to issue
+
+    reqWaiting = true
+    issue(reqIdx, tId)
+
+    val CMD_READ = MemoryOpConstants.M_XRD
+
+    val r = queue(reqIdx).req
+    req.valid.poke(true.B)
+    req.bits.cmd.poke(CMD_READ)
+    req.bits.addr.poke(r.addr.U)
+    req.bits.id.poke(tId.U)
+  }
+
+  def handleResp(port: L1plusCacheIO) = {
+    val resp = port.resp
+    // always ready
+    resp.ready.poke(true.B)
+    if (resp.valid.peek().litToBoolean) {
+      val id = resp.bits.id.peek().litValue.longValue.toInt
+      val rdata = resp.bits.data.peek().litValue
+      val r = lookUp(id)
+      assert(r.data == rdata)
+      idPool.free(id)
+      retire(id)
+    }
+  }
+
+  def tick(port: L1plusCacheIO) = {
+    // first, try to send reqs
+    sendReq(port)
+    // then, receive responses
+    handleResp(port)
+  }
 }
