@@ -1,7 +1,7 @@
 package xiangshan.backend.fu
 
 import chisel3._
-import chisel3.ExcitingUtils.ConnectionType
+import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
 import fpu.Fflags
@@ -862,24 +862,24 @@ class CSR extends XSModule
 //    BoringUtils.addSource(RegNext(sepc), "difftestSepc")
 //    BoringUtils.addSource(RegNext(mcause), "difftestMcause")
 //    BoringUtils.addSource(RegNext(scause), "difftestScause")
-    BoringUtils.addSource(priviledgeMode, "difftestMode")
-    BoringUtils.addSource(mstatus, "difftestMstatus")
-    BoringUtils.addSource(mstatus & sstatusRmask, "difftestSstatus")
-    BoringUtils.addSource(mepc, "difftestMepc")
-    BoringUtils.addSource(sepc, "difftestSepc")
-    BoringUtils.addSource(mtval, "difftestMtval")
-    BoringUtils.addSource(stval, "difftestStval")
-    BoringUtils.addSource(mtvec, "difftestMtvec")
-    BoringUtils.addSource(stvec, "difftestStvec")
-    BoringUtils.addSource(mcause, "difftestMcause")
-    BoringUtils.addSource(scause, "difftestScause")
-    BoringUtils.addSource(satp, "difftestSatp")
-    BoringUtils.addSource(mipReg, "difftestMip")
-    BoringUtils.addSource(mie, "difftestMie")
-    BoringUtils.addSource(mscratch, "difftestMscratch")
-    BoringUtils.addSource(sscratch, "difftestSscratch")
-    BoringUtils.addSource(mideleg, "difftestMideleg")
-    BoringUtils.addSource(medeleg, "difftestMedeleg")
+    ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
+    ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
+    ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)
+    ExcitingUtils.addSource(mepc, "difftestMepc", Debug)
+    ExcitingUtils.addSource(sepc, "difftestSepc", Debug)
+    ExcitingUtils.addSource(mtval, "difftestMtval", Debug)
+    ExcitingUtils.addSource(stval, "difftestStval", Debug)
+    ExcitingUtils.addSource(mtvec, "difftestMtvec", Debug)
+    ExcitingUtils.addSource(stvec, "difftestStvec", Debug)
+    ExcitingUtils.addSource(mcause, "difftestMcause", Debug)
+    ExcitingUtils.addSource(scause, "difftestScause", Debug)
+    ExcitingUtils.addSource(satp, "difftestSatp", Debug)
+    ExcitingUtils.addSource(mipReg, "difftestMip", Debug)
+    ExcitingUtils.addSource(mie, "difftestMie", Debug)
+    ExcitingUtils.addSource(mscratch, "difftestMscratch", Debug)
+    ExcitingUtils.addSource(sscratch, "difftestSscratch", Debug)
+    ExcitingUtils.addSource(mideleg, "difftestMideleg", Debug)
+    ExcitingUtils.addSource(medeleg, "difftestMedeleg", Debug)
   } else {
 //    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }

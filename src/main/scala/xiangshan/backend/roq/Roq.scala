@@ -390,19 +390,19 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
   val retireInstFix = Mux(io.redirect.valid, microOp(deqPtr).cf.instr, microOp(firstValidCommit).cf.instr)
   if(!env.FPGAPlatform){
-    BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
-    BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
-    BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
-    BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
+    ExcitingUtils.addSource(RegNext(retireCounterFix), "difftestCommit", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
+    ExcitingUtils.addSource(RegNext(retireInstFix), "difftestThisINST", ExcitingUtils.Debug)//first valid inst
+    ExcitingUtils.addSource(RegNext(skip.asUInt), "difftestSkip", ExcitingUtils.Debug)
     // BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
-    BoringUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC")
-    BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
-    BoringUtils.addSource(RegNext(wpc), "difftestWpc")
-    BoringUtils.addSource(RegNext(wdata), "difftestWdata")
-    BoringUtils.addSource(RegNext(wdst), "difftestWdst")
-    BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
-    BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
-    BoringUtils.addSource(RegNext(difftestCause), "difftestCause")
+    ExcitingUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wen.asUInt), "difftestWen", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wpc), "difftestWpc", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wdata), "difftestWdata", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wdst), "difftestWdst", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(scFailed), "difftestScFailed", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(difftestCause), "difftestCause", ExcitingUtils.Debug)
 
     val hitTrap = trapVec.reduce(_||_)
     val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))

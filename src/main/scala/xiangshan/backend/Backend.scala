@@ -260,32 +260,12 @@ class Backend extends XSModule
   roq.io.exeWbResults.last := brq.io.out
 
 
-  // TODO: Remove sink and source
-  val tmp = WireInit(0.U)
-  val sinks = Array[String](
-    "DTLBFINISH",
-    "DTLBPF",
-    "DTLBENABLE",
-    "perfCntCondMdcacheLoss",
-    "perfCntCondMl2cacheLoss",
-    "perfCntCondMdcacheHit",
-    "lsuMMIO",
-    "perfCntCondMl2cacheHit",
-    "perfCntCondMl2cacheReq",
-    "mtip",
-    "perfCntCondMdcacheReq",
-    "meip"
-  )
-  for (s <- sinks) {
-    BoringUtils.addSink(tmp, s)
-  }
-
   val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
   BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
   BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
   val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
   if (!env.FPGAPlatform) {
-    BoringUtils.addSource(debugArchReg, "difftestRegs")
+    ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
   }
 
 }
