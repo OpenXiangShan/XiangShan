@@ -14,7 +14,7 @@ trait HasPdconst{ this: XSModule =>
     val brType::Nil = ListLookup(instr, List(BrType.notBr), PreDecodeInst.brTable)
     val rd = Mux(isRVC(instr), instr(12), instr(11,7))
     val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
-    val isCall = (brType === BrType.jal || brType === BrType.jalr) && isLink(rd)
+    val isCall = (brType === BrType.jal && !isRVC(instr) || brType === BrType.jalr) && isLink(rd) // Only for RV64
     val isRet = brType === BrType.jalr && isLink(rs) && !isCall
     List(brType, isCall, isRet)
   }
