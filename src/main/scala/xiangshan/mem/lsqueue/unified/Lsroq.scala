@@ -590,18 +590,19 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
       val wbViolationUop = getOldestInTwo(wbViolationVec, io.loadIn.map(_.bits.uop))
       XSDebug(wbViolation, p"${Binary(Cat(wbViolationVec))}, $wbViolationUop\n")
 
-      // check if rollback is needed for load in l4
-      val l4ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
+      // check if rollback is needed for load in l1
+      val l1ViolationVec = VecInit((0 until LoadPipelineWidth).map(j => {
         io.forward(j).valid && // L4 valid\
           isAfter(io.forward(j).uop.roqIdx, io.storeIn(i).bits.uop.roqIdx) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
           (io.storeIn(i).bits.mask & io.forward(j).mask).orR
       }))
-      val l4Violation = l4ViolationVec.asUInt().orR()
-      val l4ViolationUop = getOldestInTwo(l4ViolationVec, io.forward.map(_.uop))
+      val l1Violation = l1ViolationVec.asUInt().orR()
+      val l1ViolationUop = getOldestInTwo(l1ViolationVec, io.forward.map(_.uop))
+      XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
 
-      val rollbackValidVec = Seq(lsroqViolation, wbViolation, l4Violation)
-      val rollbackUopVec = Seq(lsroqViolationUop, wbViolationUop, l4ViolationUop)
+      val rollbackValidVec = Seq(lsroqViolation, wbViolation, l1Violation)
+      val rollbackUopVec = Seq(lsroqViolationUop, wbViolationUop, l1ViolationUop)
       rollback(i).valid := Cat(rollbackValidVec).orR
       val mask = getAfterMask(rollbackValidVec, rollbackUopVec)
       val oneAfterZero = mask(1)(0)
@@ -616,6 +617,12 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
       rollback(i).bits.isFlushPipe := false.B
 
       XSDebug(
+        l1Violation,
+        "need rollback (l4 load) pc %x roqidx %d target %x\n",
+        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, l1ViolationUop.roqIdx.asUInt
+      )
+
+      XSDebug(
         lsroqViolation,
         "need rollback (ld wb before store) pc %x roqidx %d target %x\n",
         io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, lsroqViolationUop.roqIdx.asUInt
@@ -624,11 +631,6 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
         wbViolation,
         "need rollback (ld/st wb together) pc %x roqidx %d target %x\n",
         io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, wbViolationUop.roqIdx.asUInt
-      )
-      XSDebug(
-        l4Violation,
-        "need rollback (l4 load) pc %x roqidx %d target %x\n",
-        io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.roqIdx.asUInt, l4ViolationUop.roqIdx.asUInt
       )
     }.otherwise {
       rollback(i).valid := false.B
@@ -674,7 +676,6 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
   io.uncache.req.bits.meta.replay   := false.B
 
   io.uncache.resp.ready := true.B
-  io.uncache.s1_kill := false.B
 
   when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B

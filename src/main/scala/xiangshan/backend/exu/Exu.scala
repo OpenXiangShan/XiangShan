@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.{CertainLatency, FuConfig, HasFuLatency, NexusLatency, UncertainLatency}
 import utils.ParallelOR
 import xiangshan.backend.fu.FunctionUnit._
 
@@ -43,6 +43,27 @@ case class ExuConfig
   val writeIntRf = supportedFuncUnits.map(_.writeIntRf).reduce(_||_)
   val writeFpRf = supportedFuncUnits.map(_.writeFpRf).reduce(_||_)
   val hasRedirect = supportedFuncUnits.map(_.hasRedirect).reduce(_||_)
+
+  val latency: HasFuLatency = {
+    val lats = supportedFuncUnits.map(_.latency)
+    val latencyValue = lats.collectFirst{
+      case x if x.latencyVal.nonEmpty =>
+        x.latencyVal.get
+    }
+    val hasUncertain = lats.exists(x => x.latencyVal.isEmpty)
+    if(latencyValue.nonEmpty){
+      if(hasUncertain) NexusLatency(latencyValue.get) else CertainLatency(latencyValue.get)
+    } else UncertainLatency()
+  }
+  val hasCertainLatency = latency.latencyVal.nonEmpty
+  val hasUncertainlatency = latency match {
+    case _: UncertainLatency =>
+      true
+    case _: NexusLatency =>
+      true
+    case _ =>
+      false
+  }
 
   def canAccept(fuType: UInt): Bool = {
     ParallelOR(supportedFuncUnits.map(_.fuType === fuType))

@@ -131,7 +131,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     }.otherwise{
       io.uncache.resp <> storeQueue.io.uncache.resp
     }
-    io.uncache.s1_kill := false.B
 
     assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
     assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))

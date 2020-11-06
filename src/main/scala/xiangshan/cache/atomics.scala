@@ -68,7 +68,7 @@ class AtomicsPipe extends DCacheModule
   // ---------------------------------------
   // stage 2
   val s2_req   = RegNext(s1_req)
-  val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
+  val s2_valid = RegNext(s1_valid, init = false.B)
 
   dump_pipeline_reqs("AtomicsPipe s2", s2_valid, s2_req)
 

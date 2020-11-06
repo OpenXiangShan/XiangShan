@@ -34,7 +34,6 @@ class AtomicsMissQueue extends DCacheModule
   io.replay.req.valid  := false.B
   io.replay.req.bits   := DontCare
   io.replay.resp.ready := false.B
-  io.replay.s1_kill    := false.B
 
   io.miss_req.valid    := false.B
   io.miss_req.bits     := DontCare

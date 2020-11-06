@@ -40,8 +40,6 @@ class JmpExeUnit extends Exu(Exu.jmpExeUnitCfg) {
   jmp.io <> DontCare
   jmp.io.in.valid := io.in.valid && isJmp
   jmp.io.out.ready := io.out.ready
-//<<<<<<< HEAD
-//
   jmp.io.in.bits.connectToExuInput(io.in.bits)
   jmp.io.redirectIn := io.redirect
 

@@ -5,7 +5,7 @@ import firrtl.AnnotationSeq
 import firrtl.annotations.NoTargetAnnotation
 import firrtl.options.{HasShellOptions, Shell, ShellOption}
 import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
-import xstransforms.ShowPrintTransform
+// import xstransforms.ShowPrintTransform
 import xstransforms.PrintModuleName
 
 case class DisablePrintfAnnotation(m: String) extends NoTargetAnnotation
@@ -78,7 +78,7 @@ object XiangShanStage {
     (new XiangShanStage).execute(
       args,
       annotations ++ Seq(
-        RunFirrtlTransformAnnotation(new ShowPrintTransform),
+        // RunFirrtlTransformAnnotation(new ShowPrintTransform),
         RunFirrtlTransformAnnotation(new PrintModuleName)
       )
     )

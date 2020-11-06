@@ -56,7 +56,11 @@ EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 EMU_THREADS   = 1
-VTHREAD_FLAGS = --threads $(EMU_THREADS) --threads-dpi none
+ifeq ($(EMU_THREADS), 1)
+	VTHREAD_FLAGS = --threads 1 
+else 
+	VTHREAD_FLAGS = --threads $(EMU_THREADS) --threads-dpi none
+endif
 
 # --trace
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
@@ -67,7 +71,6 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   $(VTHREAD_FLAGS) \
   --trace \
   --assert \
-  --trace \
   --savable \
   --stats-vars \
   --output-split 5000 \

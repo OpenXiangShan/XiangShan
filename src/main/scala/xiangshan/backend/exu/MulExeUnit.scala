@@ -61,9 +61,7 @@ class MulExeUnit extends Exu(Exu.mulExeUnitCfg){
     io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
-  XSDebug(io.in.valid, "src1:%x src2:%x pc:%x\n", src1, src2, io.in.bits.uop.cf.pc)
-  XSDebug(io.out.valid, "Out(%d %d) res:%x pc:%x\n",
-    io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc
-  )
+  XSDebug(io.in.valid, p"src1:${Hexadecimal(src1)} src2:${Hexadecimal(src2)} pc:${Hexadecimal(io.in.bits.uop.cf.pc)} roqIdx:${io.in.bits.uop.roqIdx}\n")
+  XSDebug(io.out.valid, p"Out(${io.out.valid} ${io.out.ready}) res:${Hexadecimal(io.out.bits.data)} pc:${io.out.bits.uop.cf.pc} roqIdx:${io.out.bits.uop.roqIdx}\n")
   XSDebug(io.redirect.valid, p"redirect: ${io.redirect.bits.brTag}\n")
 }
