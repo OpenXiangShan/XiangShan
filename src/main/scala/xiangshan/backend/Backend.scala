@@ -148,11 +148,12 @@ class Backend extends XSModule
   jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
   jmpExeUnit.fflags := roq.io.fflags
   jmpExeUnit.dirty_fs := roq.io.dirty_fs
-
+  jmpExeUnit.io.csrOnly.externalInterrupt := io.externalInterrupt
   jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   jmpExeUnit.fenceToSbuffer <> io.mem.fenceToSbuffer
   io.mem.sfence <> jmpExeUnit.sfence
   io.mem.csr <> jmpExeUnit.tlbCsrIO
+
   io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
   io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
   io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx

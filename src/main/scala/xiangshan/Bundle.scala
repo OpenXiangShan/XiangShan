@@ -218,6 +218,7 @@ class ExternalInterruptIO extends XSBundle {
 
 class CSRSpecialIO extends XSBundle {
   val exception = Flipped(ValidIO(new MicroOp))
+  val isInterrupt = Input(Bool())
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   val trapTarget = Output(UInt(VAddrBits.W))
   val externalInterrupt = new ExternalInterruptIO

@@ -148,7 +148,8 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   io.redirect := DontCare
   io.redirect.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)// TODO: add fence flush to flush the whole pipe
   io.redirect.bits.isException := intrEnable || exceptionEnable
-  io.redirect.bits.isFlushPipe := isFlushPipe
+  // reuse isFlushPipe to represent interrupt for CSR
+  io.redirect.bits.isFlushPipe := isFlushPipe || intrEnable
   io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.trapTarget)
   io.exception := deqUop
   XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
