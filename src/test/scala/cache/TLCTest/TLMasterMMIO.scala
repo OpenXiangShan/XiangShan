@@ -10,10 +10,10 @@ import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 
 class TLCFakeBundle extends DCacheBundle
 {
-  val sourceBits = log2Up(cfg.nMissEntries)
+  val sourceBits = 5 //maybe parameterized later
 }
 
-class  TLCFakeABundle extends TLCFakeBundle
+class TLCFakeABundle extends TLCFakeBundle
 {
   val opcode = UInt(3.W)
   val param = UInt(3.W)

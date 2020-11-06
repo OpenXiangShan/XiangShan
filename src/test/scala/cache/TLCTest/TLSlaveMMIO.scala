@@ -40,7 +40,7 @@ class TLCSlaveMMIO()(implicit p: Parameters) extends LazyModule
     beatBytes  = beatBytes,
     minLatency = 1,
     endSinkId = 8,
-  ))) // no bypass needed for this device
+  )))
 
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
