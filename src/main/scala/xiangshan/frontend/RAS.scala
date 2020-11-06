@@ -25,6 +25,7 @@ class RAS extends BasePredictor
         val is_ret = Input(Bool())
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
+        val isLastHalfRVI = Input(Bool())
         val recover =  Flipped(ValidIO(new BranchUpdateInfo))
         val out = ValidIO(new RASResp)
         val branchInfo = Output(new RASBranchInfo)
@@ -69,7 +70,7 @@ class RAS extends BasePredictor
     // speculative update RAS
     val spec_push = !spec_is_full && io.callIdx.valid && io.pc.valid
     val spec_pop = !spec_is_empty && io.is_ret && io.pc.valid
-    val spec_new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U)
+    val spec_new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U))
     val spec_ras_write = WireInit(0.U.asTypeOf(rasEntry()))
     val sepc_alloc_new = spec_new_addr =/= spec_ras_top_addr
     when (spec_push) {
