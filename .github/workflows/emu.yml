@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, update-ci, xs-fpu]
+    branches: [ master, update-ci]
   pull_request:
     branches: [ master ]
 

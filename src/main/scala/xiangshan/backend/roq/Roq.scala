@@ -7,7 +7,6 @@ import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
 import xiangshan.backend.fu.fpu.Fflags
-import xiangshan.backend.decode.isa.Privileged.WFI
 
 
 class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
@@ -396,7 +395,6 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
     ExcitingUtils.addSource(RegNext(retireInstFix), "difftestThisINST", ExcitingUtils.Debug)//first valid inst
     ExcitingUtils.addSource(RegNext(skip.asUInt), "difftestSkip", ExcitingUtils.Debug)
-    // BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
     ExcitingUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(wen.asUInt), "difftestWen", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(wpc), "difftestWpc", ExcitingUtils.Debug)

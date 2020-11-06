@@ -39,3 +39,15 @@ object ParallelLookUp {
     ParallelMux(mapping.map(m => (m._1===key) -> m._2))
   }
 }
+
+object ParallelMax {
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt() > b.asUInt(),a, b).asTypeOf(xs.head))
+  }
+}
+
+object ParallelMin {
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt() < b.asUInt(),a, b).asTypeOf(xs.head))
+  }
+}

@@ -106,7 +106,7 @@ class RAS extends BasePredictor
     //update commit ras
     val commit_push = !commit_is_full && io.recover.valid && io.recover.bits.pd.isCall
     val commit_pop = !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
-    val commit_new_addr = io.recover.bits.pc + 4.U  //TODO: consider RVC
+    val commit_new_addr = Mux(io.recover.bits.pd.isRVC,io.recover.bits.pc + 2.U,io.recover.bits.pc + 4.U) 
     val commit_ras_write = WireInit(0.U.asTypeOf(rasEntry()))
     val commit_alloc_new = commit_new_addr =/= commit_ras_top_addr
     when (commit_push) {

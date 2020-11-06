@@ -177,7 +177,7 @@ object FunctionUnit {
 
   val fmiscCfg =
     FuConfig(FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false,
-      CertainLatency(2)
+      UncertainLatency()
     )
 
   val fDivSqrtCfg =

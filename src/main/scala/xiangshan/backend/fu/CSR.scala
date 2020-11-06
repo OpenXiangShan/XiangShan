@@ -3,7 +3,6 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import fpu.Fflags
 import utils._
 import xiangshan._
@@ -411,11 +410,6 @@ class CSR extends XSModule
 //  val setLrAddr = WireInit(UInt(AddrBits.W), DontCare) //TODO : need check
 //  val lr = RegInit(Bool(), false.B)
 //  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
-//  BoringUtils.addSink(setLr, "set_lr")
-//  BoringUtils.addSink(setLrVal, "set_lr_val")
-//  BoringUtils.addSink(setLrAddr, "set_lr_addr")
-//  BoringUtils.addSource(lr, "lr")
-//  BoringUtils.addSource(lrAddr, "lr_addr")
 //
 //  when(setLr){
 //    lr := setLrVal
@@ -855,14 +849,6 @@ class CSR extends XSModule
       }
     }
 
-    // for differential testing
-//    BoringUtils.addSource(RegNext(priviledgeMode), "difftestMode")
-//    BoringUtils.addSource(RegNext(mstatus), "difftestMstatus")
-//    BoringUtils.addSource(RegNext(mstatus & sstatusRmask), "difftestSstatus")
-//    BoringUtils.addSource(RegNext(mepc), "difftestMepc")
-//    BoringUtils.addSource(RegNext(sepc), "difftestSepc")
-//    BoringUtils.addSource(RegNext(mcause), "difftestMcause")
-//    BoringUtils.addSource(RegNext(scause), "difftestScause")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
     ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
     ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)
@@ -882,6 +868,5 @@ class CSR extends XSModule
     ExcitingUtils.addSource(mideleg, "difftestMideleg", Debug)
     ExcitingUtils.addSource(medeleg, "difftestMedeleg", Debug)
   } else {
-//    BoringUtils.addSource(readWithScala(perfCntList("Minstret")._1), "ilaInstrCnt")
   }
 }
