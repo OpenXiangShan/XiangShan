@@ -2,15 +2,13 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.Rename
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.fu.FunctionUnit
-import xiangshan.backend.issue.{IssueQueue, ReservationStationNew}
+import xiangshan.backend.issue.ReservationStationNew
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
@@ -239,8 +237,8 @@ class Backend extends XSModule
 
 
   val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-  BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
-  BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
+  ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
+  ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
   val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
   if (!env.FPGAPlatform) {
     ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
