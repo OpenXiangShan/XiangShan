@@ -186,6 +186,7 @@ class Memend extends XSModule {
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.out.ready       := false.B
+  atomicsUnit.io.dtlb.req.ready  := dtlb.io.requestor(0).req.ready
 
   // dispatch 0 takes priority
   atomicsUnit.io.in.valid := st0_atomics || st1_atomics

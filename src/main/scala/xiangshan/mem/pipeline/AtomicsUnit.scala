@@ -45,6 +45,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
+  io.dtlb.resp.ready   := false.B
 
   io.flush_sbuffer.valid := false.B
 
@@ -78,8 +79,9 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
     io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx // FIXME: need update
+    io.dtlb.resp.ready := true.B
 
-    when(io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
+    when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b

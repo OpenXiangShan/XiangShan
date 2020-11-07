@@ -70,6 +70,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+RANDOMIZE_MEM_INIT \
   $(VTHREAD_FLAGS) \
   --assert \
+	--trace \
   --savable \
   --stats-vars \
   --output-split 5000 \

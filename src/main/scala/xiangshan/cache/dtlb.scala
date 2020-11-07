@@ -157,10 +157,8 @@ class TlbResp extends TlbBundle {
 }
 
 class TlbRequestIO() extends TlbBundle {
-  val req = Valid(new TlbReq)
-  val resp = Flipped(Valid(new TlbResp))
-
-  // override def cloneType: this.type = (new TlbRequestIO(Width)).asInstanceOf[this.type]
+  val req = DecoupledIO(new TlbReq)
+  val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
 class BlockTlbRequestIO() extends TlbBundle {
@@ -234,6 +232,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       2.U -> Cat(hitppn(i), reqAddr(i).off)
     ))
 
+    req(i).ready := resp(i).ready
     resp(i).valid := valid(i)
     resp(i).bits.paddr := Mux(vmEnable, paddr, SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
@@ -282,7 +281,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
 
   // reset pf when pf hit
-  val pfHitReset = ParallelOR(widthMap{i => Mux(valid(i), VecInit(pfHitVec(i)).asUInt, 0.U) })
+  val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVec(i)).asUInt, 0.U) })
   val pfHitRefill = ParallelOR(pfHitReset.asBools)
 
   // refill
@@ -359,8 +358,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // Log
   for(i <- 0 until Width) {
-    XSDebug(req(i).valid, p"req(${i.U}): ${req(i).bits}\n")
-    XSDebug(resp(i).valid, p"resp(${i.U}): ${resp(i).bits}\n")
+    XSDebug(req(i).valid, p"req(${i.U}): (${req(i).valid} ${req(i).ready}) ${req(i).bits}\n")
+    XSDebug(resp(i).valid, p"resp(${i.U}): (${resp(i).valid} ${resp(i).ready}) ${resp(i).bits}\n")
   }
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
@@ -404,27 +403,24 @@ object TLB {
     
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {
-        tlb.io.requestor(i).req.valid := in(i).req.valid
-        tlb.io.requestor(i).req.bits := in(i).req.bits
-        in(i).req.ready := DontCare
+        tlb.io.requestor(i) <> in(i)
+        // tlb.io.requestor(i).req.valid := in(i).req.valid
+        // tlb.io.requestor(i).req.bits := in(i).req.bits
+        // in(i).req.ready := tlb.io.requestor(i).req.ready
 
-        in(i).resp.valid := tlb.io.requestor(i).resp.valid
-        in(i).resp.bits := tlb.io.requestor(i).resp.bits
+        // in(i).resp.valid := tlb.io.requestor(i).resp.valid
+        // in(i).resp.bits := tlb.io.requestor(i).resp.bits
+        // tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
     } else { // itlb
       require(width == 1)
       tlb.io.requestor(0).req.valid := in(0).req.valid
       tlb.io.requestor(0).req.bits := in(0).req.bits
-      in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready
-
-      // val pf = LookupTree(tlb.io.requestor(0).req.bits.cmd, List(
-      //   TlbCmd.read -> tlb.io.requestor(0).resp.bits.excp.pf.ld,
-      //   TlbCmd.write -> tlb.io.requestor(0).resp.bits.excp.pf.st,
-      //   TlbCmd.exec -> tlb.io.requestor(0).resp.bits.excp.pf.instr
-      // ))
+      in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready && tlb.io.requestor(0).req.ready
 
       in(0).resp.valid := tlb.io.requestor(0).resp.valid && !tlb.io.requestor(0).resp.bits.miss
       in(0).resp.bits := tlb.io.requestor(0).resp.bits
+      tlb.io.requestor(0).resp.ready := in(0).resp.ready
     }
 
     tlb.io.ptw

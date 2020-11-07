@@ -21,8 +21,8 @@ class LoadUnit_S0 extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val dtlbReq = Valid(new TlbReq)
-    val dtlbResp = Flipped(Valid(new TlbResp))
+    val dtlbReq = DecoupledIO(new TlbReq)
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
@@ -40,7 +40,9 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
   io.dtlbReq.bits.debug.lsroqIdx := s0_uop.lsroqIdx
-  
+  io.dtlbResp.ready := io.out.ready
+  // FIXME: tlb change to DecoupledIO, need to fix tlb's usage
+
   // feedback tlb result to RS
   // Note: can be moved to s1
   io.tlbFeedback.valid := io.out.valid
