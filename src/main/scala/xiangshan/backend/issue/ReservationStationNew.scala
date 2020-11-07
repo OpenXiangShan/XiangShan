@@ -86,7 +86,7 @@ class ReservationStationNew
   srcNum: Int = 3,
   fixedDelay: Int,
   feedback: Boolean,
-  replayDelay: Int = 16
+  replayDelay: Int = 10
 ) extends XSModule {
 
 
