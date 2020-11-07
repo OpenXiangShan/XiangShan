@@ -17,7 +17,7 @@ jobs:
           submodules: 'recursive'
       - name: Check Wiring
         run: |
-          grep -rn "BoringUtils" $GITHUB_WORKSPACE/src/main/scala/xiangshan
+          grep -rn "BoringUtils" $($GITHUB_WORKSPACE/src/main/scala/xiangshan)
           if [[ $? == 0 ]];
           then
               exit 1
