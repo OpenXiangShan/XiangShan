@@ -361,14 +361,15 @@ class ICache extends ICacheModule
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
   val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
-  icacheMissQueue.io.req.valid := s3_miss && (io.flush === 0.U) && !blocking//TODO: specificate flush condition
+  icacheMissQueue.io.req.valid := s3_miss && !io.flush(1) && !blocking//TODO: specificate flush condition
   icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
   icacheMissQueue.io.flush := io.flush(1)
 
   when(icacheMissQueue.io.req.fire()){blocking := true.B}
-  .elsewhen(icacheMissQueue.io.resp.fire() && isICacheResp){blocking := false.B}
+  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) || io.flush(1)) ){blocking := false.B}
 
+  XSDebug(blocking && io.flush(1),"check for icache non-blocking")
   //cache flush register
   val icacheFlush = WireInit(false.B)
   val cacheflushed = RegInit(false.B)

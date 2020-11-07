@@ -102,7 +102,6 @@ class IcacheMissEntry extends ICacheMissQueueModule
 
     io.req.ready := state === s_idle
     io.mem_acquire.valid := state === s_memReadReq
-    io.resp.valid := state === s_wait_resp
 
     //flush register
     val needFlush = RegInit(false.B)
@@ -162,7 +161,8 @@ class IcacheMissEntry extends ICacheMissQueueModule
     io.mem_acquire.bits.addr := req.addr
     io.mem_acquire.bits.id := io.id
 
-
+    //resp to icache
+    io.resp.valid := (state === s_wait_resp) && !needFlush
 
     XSDebug("[ICache MSHR %d] (req)valid:%d  ready:%d req.addr:%x waymask:%b  || Register: req:%x  \n",io.id.asUInt,io.req.valid,io.req.ready,io.req.bits.addr,io.req.bits.waymask,req.asUInt)
     XSDebug("[ICache MSHR %d] (Info)state:%d  needFlush:%d\n",io.id.asUInt,state,needFlush)
