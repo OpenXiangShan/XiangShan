@@ -9,7 +9,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
@@ -170,7 +170,12 @@ trait HasXSParameter {
   val icacheParameters = ICacheParameters(
   )
 
-  val LRSCCycles = 100
+  val l1plusCacheParameters = L1plusCacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
+    nMissEntries = 8
+  )
+
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -178,6 +183,8 @@ trait HasXSParameter {
     nLoadMissEntries = 8,
     nStoreMissEntries = 8
   )
+
+  val LRSCCycles = 100
 }
 
 trait HasXSLog { this: RawModule =>
