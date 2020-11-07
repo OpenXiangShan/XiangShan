@@ -158,8 +158,8 @@ class StoreMissQueue extends DCacheModule
   val replay_arb      = Module(new Arbiter(new DCacheLineReq,  cfg.nStoreMissEntries))
   val resp_arb        = Module(new Arbiter(new DCacheLineResp, cfg.nStoreMissEntries))
 
-  val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
-  val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
+  val idx_matches = Wire(Vec(cfg.nStoreMissEntries, Bool()))
+  val tag_matches = Wire(Vec(cfg.nStoreMissEntries, Bool()))
 
   val tag_match   = Mux1H(idx_matches, tag_matches)
   val idx_match   = idx_matches.reduce(_||_)
