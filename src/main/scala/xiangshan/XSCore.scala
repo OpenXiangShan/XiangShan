@@ -50,7 +50,7 @@ case class XSCoreParameters
   BrqSize: Int = 48,
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 160,
-  NRIntReadPorts: Int = 8,
+  NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8, 

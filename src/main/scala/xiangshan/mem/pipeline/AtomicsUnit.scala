@@ -41,7 +41,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   io.dcache.req.valid  := false.B
   io.dcache.req.bits   := DontCare
-  io.dcache.s1_kill    := false.B
   io.dcache.resp.ready := false.B
 
   io.dtlb.req.valid    := false.B

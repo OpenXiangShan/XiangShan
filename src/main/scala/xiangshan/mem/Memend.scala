@@ -36,12 +36,13 @@ object genWdata {
 class LsPipelineBundle extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
-  val func = UInt(6.W)
+  val func = UInt(6.W) //fixme???
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val uop = new MicroOp
 
   val miss = Bool()
+  val tlbMiss = Bool()
   val mmio = Bool()
   val rollback = Bool()
 
@@ -73,7 +74,7 @@ class MemToBackendIO extends XSBundle {
   // replay all instructions form dispatch
   val replayAll = ValidIO(new Redirect)
   // replay mem instructions form Load Queue/Store Queue
-  val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
+  val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(new TlbFeedback))
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
@@ -87,7 +88,7 @@ class MemToBackendIO extends XSBundle {
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheWordIO)
+    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
     val loadMiss = new DCacheLineIO
     val atomics  = new DCacheWordIO
     val sbufferToDcache = new DCacheLineIO
