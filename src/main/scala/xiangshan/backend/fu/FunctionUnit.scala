@@ -176,7 +176,7 @@ object FunctionUnit {
     )
 
   val fmiscCfg =
-    FuConfig(FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false,
+    FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = true, hasRedirect = false,
       UncertainLatency()
     )
 

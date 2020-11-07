@@ -260,7 +260,6 @@ class ReservationStationNew
   def bpSelCheck(uop: MicroOp): Bool = { // TODO: wanna a map from FunctionUnit.scala
     val fuType = uop.ctrl.fuType
     (fuType === FuType.alu) ||
-    (fuType === FuType.mul) ||
     (fuType === FuType.jmp) ||
     (fuType === FuType.i2f) ||
     (fuType === FuType.csr) ||
