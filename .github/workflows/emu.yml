@@ -16,12 +16,7 @@ jobs:
         with:
           submodules: 'recursive'
       - name: Check Wiring
-        run: |
-          grep -rn "BoringUtils" $($GITHUB_WORKSPACE/src/main/scala/xiangshan)
-          if [[ $? == 0 ]];
-          then
-              exit 1
-          fi
+        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: Set env
         run: |
           echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
