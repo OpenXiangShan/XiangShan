@@ -22,8 +22,7 @@ class MulDivFenceExeUnit extends Exu(Exu.mulDivFenceExeUnitCfg){
 
   for(x <- Seq(mul.io, div.io, fence.io)){
     x.mcommit <> DontCare
-    x.exception <> DontCare
-    x.dmem <> DontCare
+    x.csrOnly <> DontCare
     x.in.bits := io.in.bits
     x.redirect := io.redirect
   }
@@ -73,9 +72,7 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
   val div       = Module(new DivExeUnit)
 
   for(x <- Seq(mul.io, div.io)){
-    x.mcommit <> DontCare
-    x.exception <> DontCare
-    x.dmem <> DontCare
+    x <> DontCare
     x.in.bits := io.in.bits
     x.redirect := io.redirect
   }
@@ -93,6 +90,7 @@ class MulDivExeUnit extends Exu(Exu.mulDivExeUnitCfg){
   arb.io.in(1) <> div.io.out
 
   io.out <> arb.io.out
+  io.csrOnly <> DontCare
 
   XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid, io.in.ready,

@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, update-ci ]
+    branches: [ master, update-ci]
   pull_request:
     branches: [ master ]
 
@@ -15,6 +15,8 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
+      - name: Check Wiring
+        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: Set env
         run: |
           echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
@@ -70,7 +72,7 @@ jobs:
           echo $AM_HOME
           echo $NEMU_HOME
           echo $NOOP_HOME
-          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run
+          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null
 
   riscv-tests:
     runs-on: self-hosted
@@ -87,5 +89,5 @@ jobs:
           echo $NEMU_HOME
           echo $NOOP_HOME
           echo $RVTEST_HOME
-          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run
+          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run 2> /dev/null
 

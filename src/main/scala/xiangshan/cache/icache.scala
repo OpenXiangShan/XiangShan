@@ -7,7 +7,6 @@ import xiangshan._
 import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
-import chisel3.util.experimental.BoringUtils
 
 case class ICacheParameters(
     nSets: Int = 64,
@@ -101,6 +100,7 @@ class ICacheIO extends ICacheBundle
   val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
   val l1plusflush = Output(Bool())
+  val fencei = Input(Bool())
 }
 
 /* ------------------------------------------------------------
@@ -371,9 +371,8 @@ class ICache extends ICacheModule
 
   XSDebug(blocking && io.flush(1),"check for icache non-blocking")
   //cache flush register
-  val icacheFlush = WireInit(false.B)
+  val icacheFlush = io.fencei
   val cacheflushed = RegInit(false.B)
-  BoringUtils.addSink(icacheFlush, "FenceI")
   XSDebug("[Fence.i] icacheFlush:%d, cacheflushed:%d\n",icacheFlush,cacheflushed)
   when(icacheFlush && blocking && !isICacheResp){ cacheflushed := true.B}
   .elsewhen(isICacheResp && cacheflushed) {cacheflushed := false.B }
