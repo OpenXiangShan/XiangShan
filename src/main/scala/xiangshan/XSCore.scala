@@ -9,7 +9,7 @@ import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
@@ -170,6 +170,7 @@ trait HasXSParameter {
   val l1BusDataWidth = 256
 
   val icacheParameters = ICacheParameters(
+    nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
@@ -241,7 +242,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
-  val icache = LazyModule(new ICache())
+  val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
   val mem = TLIdentityNode()
@@ -264,7 +265,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   private val xbar = TLXbar()
 
   xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
   xbar := TLBuffer() := DebugIdentityNode() := ptw.node
 
   l2.node := xbar
@@ -285,15 +286,21 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
-  val icache = outer.icache.module
+  val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
+  val icache = Module(new ICache)
 
   front.io.backend <> backend.io.frontend
   front.io.icacheResp <> icache.io.resp
   front.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
+
+  icache.io.mem_acquire <> l1pluscache.io.req
+  l1pluscache.io.resp <> icache.io.mem_grant
+  l1pluscache.io.flush := icache.io.l1plusflush
   icache.io.fencei := backend.io.fencei
+
   mem.io.backend   <> backend.io.mem
   io.externalInterrupt <> backend.io.externalInterrupt
 
