@@ -7,7 +7,6 @@ import xiangshan._
 import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
-import chisel3.util.experimental.BoringUtils
 import chipsalliance.rocketchip.config.Parameters
 
 import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
@@ -91,6 +90,7 @@ class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
   val resp = DecoupledIO(new ICacheResp)
   val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
+  val fencei = Input(Bool())
 }
 
 /* ------------------------------------------------------------
@@ -276,9 +276,8 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
 
   //cache flush register
-  val icacheFlush = WireInit(false.B)
+  val icacheFlush = io.fencei
   val cacheflushed = RegInit(false.B)
-  BoringUtils.addSink(icacheFlush, "FenceI")
   XSDebug("[Fence.i] icacheFlush:%d, cacheflushed:%d\n",icacheFlush,cacheflushed)
   when(icacheFlush && (state =/= s_idle) && (state =/= s_wait_resp)){ cacheflushed := true.B}
   .elsewhen((state=== s_wait_resp) && cacheflushed) {cacheflushed := false.B }

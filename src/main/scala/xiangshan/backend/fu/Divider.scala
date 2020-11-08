@@ -8,8 +8,7 @@ import xiangshan.backend._
 
 import xiangshan.backend.fu.FunctionUnit._
 
-class Divider(len: Int) extends FunctionUnit(divCfg) {
-  val io = IO(new MulDivIO(len))
+class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl) {
 
   def abs(a: UInt, sign: Bool): (Bool, UInt) = {
     val s = a(len - 1) && sign
@@ -20,7 +19,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
   val state = RegInit(s_idle)
   val newReq = (state === s_idle) && io.in.fire()
 
-  val (a, b) = (io.in.bits.src1, io.in.bits.src2)
+  val (a, b) = (io.in.bits.src(0), io.in.bits.src(1))
   val divBy0 = b === 0.U(len.W)
   val divBy0Reg = RegEnable(divBy0, newReq)
 
@@ -28,13 +27,18 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
 
-  val (aSign, aVal) = abs(a, io.in.bits.ctrl.sign)
-  val (bSign, bVal) = abs(b, io.in.bits.ctrl.sign)
+  val ctrl = io.in.bits.ext.get
+  val sign = io.in.bits.ext.get.sign
+  val uop = io.in.bits.uop
+
+  val (aSign, aVal) = abs(a, sign)
+  val (bSign, bVal) = abs(b, sign)
   val aSignReg = RegEnable(aSign, newReq)
   val qSignReg = RegEnable((aSign ^ bSign) && !divBy0, newReq)
   val bReg = RegEnable(bVal, newReq)
   val aValx2Reg = RegEnable(Cat(aVal, "b0".U), newReq)
-  val ctrlReg = RegEnable(io.in.bits.ctrl, newReq)
+  val ctrlReg = RegEnable(ctrl, newReq)
+  val uopReg = RegEnable(uop, newReq)
 
   val cnt = Counter(len)
   when (newReq) {
@@ -67,7 +71,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
     }
   }
 
-  when(state=/=s_idle && ctrlReg.uop.roqIdx.needFlush(io.redirect)){
+  when(state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)){
     state := s_idle
   }
 
@@ -78,7 +82,7 @@ class Divider(len: Int) extends FunctionUnit(divCfg) {
   val xlen = io.out.bits.data.getWidth
   val res = Mux(ctrlReg.isHi, resR, resQ)
   io.out.bits.data := Mux(ctrlReg.isW, SignExt(res(31,0),xlen), res)
-  io.out.bits.uop := ctrlReg.uop
+  io.out.bits.uop := uopReg
 
   io.out.valid := state === s_finish
   io.in.ready := state === s_idle

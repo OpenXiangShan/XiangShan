@@ -48,7 +48,7 @@ microbench_train:
 	cat microbench.log | grep IPC
 
 coremark:
-	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run 
+	$(MAKE) -C $(AM_HOME)/apps/coremark $(ARCH) $(EMU_ARGS) mainargs=test run
 	#2 > coremark.log
 	cat coremark.log | grep IPC
 

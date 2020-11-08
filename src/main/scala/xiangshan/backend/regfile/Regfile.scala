@@ -2,7 +2,6 @@ package xiangshan.backend.regfile
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 
 class RfReadPort extends XSBundle {
@@ -20,8 +19,7 @@ class Regfile
 (
   numReadPorts: Int,
   numWirtePorts: Int,
-  hasZero: Boolean,
-  isMemRf: Boolean = false
+  hasZero: Boolean
 ) extends XSModule {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort)
@@ -29,19 +27,6 @@ class Regfile
   })
 
   val mem = Mem(NRPhyRegs, UInt(XLEN.W))
-
-  val debugRegSync = WireInit(0.U(XLEN.W))
-  val debugCnt = RegInit(0.U((PhyRegIdxWidth+1).W))
-  when(!debugCnt.head(1).asBool()){
-    debugCnt := debugCnt + 1.U
-    if(isMemRf){
-      BoringUtils.addSink(debugRegSync, "DEBUG_REG_SYNC")
-      mem(debugCnt) := debugRegSync
-    } else if (hasZero) {
-      debugRegSync := mem(debugCnt)
-      BoringUtils.addSource(debugRegSync, "DEBUG_REG_SYNC") 
-    }
-  }
   
   for(r <- io.readPorts){
     val addr_reg = RegNext(r.addr)
@@ -54,11 +39,19 @@ class Regfile
     }
   }
 
-  if(!isMemRf){
-    val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-    BoringUtils.addSink(debugArchRat, if(hasZero) "DEBUG_INI_ARCH_RAT" else "DEBUG_FP_ARCH_RAT")
+  val debugArchRat = WireInit(VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+  ExcitingUtils.addSink(
+    debugArchRat,
+    if(hasZero) "DEBUG_INI_ARCH_RAT" else "DEBUG_FP_ARCH_RAT",
+    ExcitingUtils.Debug
+  )
 
-    val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(x => if(hasZero && x._2==0) 0.U else mem(x._1))))
-    BoringUtils.addSource(debugArchReg, if(hasZero) "DEBUG_INT_ARCH_REG" else "DEBUG_FP_ARCH_REG")
-  }
+  val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(
+    x => if(hasZero && x._2==0) 0.U else mem(x._1)
+  )))
+  ExcitingUtils.addSource(
+    debugArchReg,
+    if(hasZero) "DEBUG_INT_ARCH_REG" else "DEBUG_FP_ARCH_REG",
+    ExcitingUtils.Debug
+  )
 }

@@ -85,10 +85,15 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
 
   def splitN[T](in: Seq[T], n: Int): Seq[Option[Seq[T]]] = {
     require(n > 0)
-    if(in.size < n) Seq(Some(in)) ++ Seq.fill(n-1)(None)
-    else {
-      val m = in.size/n
-      Some(in.take(m)) +: splitN(in.drop(m), n-1)
+    if(n == 1){
+      return Seq(Some(in))
+    } else {
+      if(in.size < n ){
+        Seq(Some(in)) ++ Seq.fill(n-1)(None)
+      } else {
+        val m = in.size / n
+        Some(in.take(m)) +: splitN(in.drop(m), n-1)
+      }
     }
   }
 

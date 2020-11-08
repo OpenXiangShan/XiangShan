@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import chipsalliance.rocketchip.config._
-import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper.RegField
 import utils.{HasTLDump, XSDebug}
@@ -34,12 +33,6 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
     cnt := Mux(nextCnt < freq, nextCnt, 0.U)
     val tick = (nextCnt === freq)
     when (tick) { mtime := mtime + inc }
-
-    if (sim) {
-      val isWFI = WireInit(false.B)
-      ExcitingUtils.addSink(isWFI, "isWFI")
-      when (isWFI) { mtime := mtime + 100000.U }
-    }
 
     node.regmap( mapping =
       0x0000 -> RegField.bytes(msip),

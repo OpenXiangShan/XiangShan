@@ -10,6 +10,12 @@ import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
 
+class ExceptionAddrIO extends XSBundle {
+  val lsIdx = Input(new LSIdx)
+  val isStore = Input(Bool())
+  val vaddr = Output(UInt(VAddrBits.W))
+}
+
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 //
 // By using this Wrapper, interface of unified lsroq and ldq / stq are the same 
@@ -30,6 +36,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
     val oldestStore = Output(Valid(new RoqPtr))
+    val exceptionAddr = new ExceptionAddrIO
   })
   
   if(EnableUnifiedLSQ){
@@ -49,6 +56,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     lsroq.io.uncache <> io.uncache
     lsroq.io.roqDeqPtr <> io.roqDeqPtr
     lsroq.io.oldestStore <> io.oldestStore
+    lsroq.io.exceptionAddr <> io.exceptionAddr
     (0 until RenameWidth).map(i => {
       io.lsIdxs(i).lsroqIdx := lsroq.io.lsroqIdxs(i)
     })
@@ -66,7 +74,9 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     loadQueue.io.rollback <> io.rollback
     loadQueue.io.dcache <> io.dcache
     loadQueue.io.roqDeqPtr <> io.roqDeqPtr
-    
+    loadQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
+    loadQueue.io.exceptionAddr.isStore := DontCare
+
     // store queue wiring
     // storeQueue.io <> DontCare
     storeQueue.io.dp1Req <> io.dp1Req
@@ -77,9 +87,13 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     storeQueue.io.commits <> io.commits
     storeQueue.io.roqDeqPtr <> io.roqDeqPtr
     storeQueue.io.oldestStore <> io.oldestStore
-    
+    storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
+    storeQueue.io.exceptionAddr.isStore := DontCare
+
     loadQueue.io.forward <> io.forward
     storeQueue.io.forward <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
+
+    io.exceptionAddr.vaddr := Mux(io.exceptionAddr.isStore, storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
 
     // naive uncache arbiter
     val s_idle :: s_load :: s_store :: Nil = Enum(3)
@@ -117,7 +131,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
     }.otherwise{
       io.uncache.resp <> storeQueue.io.uncache.resp
     }
-    io.uncache.s1_kill := false.B
 
     assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
     assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))

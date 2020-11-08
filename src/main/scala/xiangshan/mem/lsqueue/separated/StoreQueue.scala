@@ -36,6 +36,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
     val oldestStore = Output(Valid(new RoqPtr))
+    val exceptionAddr = new ExceptionAddrIO
   })
   
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
@@ -178,6 +179,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     when(io.stout(i).fire()) {
       writebacked(storeWbSel(i)) := true.B
     }
+    io.stout(i).bits.fflags := DontCare
   })
 
   // remove retired insts from sq, add retired store to sbuffer
@@ -271,6 +273,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.meta.mmio     := mmio
     io.sbuffer(i).bits.meta.mask     := data(ptr).mask
     
+    XSDebug(io.sbuffer(i).fire(), "[SBUFFER STORE REQ] pa %x data %x\n", data(ptr).paddr, data(ptr).data)
+
     // update sq meta if store inst is send to sbuffer
     when(storeCommitValid(i) && (mmio || io.sbuffer(i).ready)) {
       allocated(ptr) := false.B
@@ -302,7 +306,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.uncache.req.bits.meta.replay   := false.B
   
   io.uncache.resp.ready := true.B
-  io.uncache.s1_kill := false.B
   
   when(io.uncache.req.fire()){
     pending(ringBufferTail) := false.B
@@ -325,10 +328,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // Read vaddr for mem exception
-  val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-  val memExceptionAddr = WireInit(data(mexcLsIdx.sqIdx.value).vaddr)
-  ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_STORE_VADDR")
+  io.exceptionAddr.vaddr := data(io.exceptionAddr.lsIdx.sqIdx.value).vaddr
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
@@ -364,7 +364,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   for (i <- 0 until StoreQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x ", uop(i).cf.pc)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, data(i).paddr)
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")
