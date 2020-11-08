@@ -2,10 +2,13 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.FuType
+import xiangshan.backend.fu.{CertainLatency, FuConfig}
 import xiangshan.backend.fu.fpu.util.ORTree
-import xiangshan.backend.fu.FunctionUnit.i2fCfg
 
-class IntToFloat extends FPUPipelineModule(i2fCfg, 2) {
+class IntToFloat extends FPUPipelineModule(
+  FuConfig(FuType.i2f, 1, 0, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2))
+) {
   /** Stage 1: Count leading zeros and shift
     */
 

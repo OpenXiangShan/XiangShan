@@ -2,9 +2,13 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.FuType
+import xiangshan.backend.fu.{CertainLatency, FuConfig}
 import xiangshan.backend.fu.FunctionUnit._
 
-class F32toF64 extends FPUPipelineModule(fmiscCfg, 2) {
+class F32toF64 extends FPUPipelineModule(
+  FuConfig(FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2))
+) {
 
   val a = io.in.bits.src(0)
   val f32 = Float32(a)

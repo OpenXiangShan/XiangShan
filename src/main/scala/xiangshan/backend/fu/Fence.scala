@@ -1,10 +1,9 @@
-package xiangshan.backend.exu
+package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-
 import xiangshan.backend.FenceOpType
 
 class FenceToSbuffer extends XSBundle {
@@ -12,14 +11,22 @@ class FenceToSbuffer extends XSBundle {
   val sbIsEmpty = Input(Bool())
 }
 
-class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
+class Fence extends FunctionUnit(FuConfig(
+  FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false
+)){
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))
   val toSbuffer = IO(new FenceToSbuffer)
 
-  val (valid, src1, src2, uop, func, lsrc1, lsrc2) = 
-    (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.ctrl.lsrc1, io.in.bits.uop.ctrl.lsrc2)
+  val (valid, src1, uop, func, lsrc1, lsrc2) = (
+    io.in.valid,
+    io.in.bits.src(0),
+    io.in.bits.uop,
+    io.in.bits.uop.ctrl.fuOpType,
+    io.in.bits.uop.ctrl.lsrc1,
+    io.in.bits.uop.ctrl.lsrc2
+  )
 
   val s_sb :: s_tlb :: s_icache :: s_none :: Nil = Enum(4)
   val state = RegInit(s_sb)
@@ -45,10 +52,6 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   io.out.valid := (state =/= s_sb && sbEmpty) || (state === s_sb && sbEmpty && valid)
   io.out.bits.data := DontCare
   io.out.bits.uop := Mux(state === s_sb, uop, RegEnable(uop, io.in.fire()))
-  io.out.bits.redirect <> DontCare
-  io.out.bits.redirectValid := false.B
-  io.out.bits.debug <> DontCare
-  io.csrOnly <> DontCare
 
   assert(!(valid || state =/= s_sb) || io.out.ready) // NOTE: fence instr must be the first(only one) instr, so io.out.ready must be true
 

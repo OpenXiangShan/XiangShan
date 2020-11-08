@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.cache._
-import xiangshan.backend.exu.FenceToSbuffer
+import xiangshan.backend.fu.FenceToSbuffer
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
