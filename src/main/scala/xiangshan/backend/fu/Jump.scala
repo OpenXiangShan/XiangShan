@@ -8,16 +8,17 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 import xiangshan.backend.decode.isa._
 
-class RedirectOut extends XSBundle {
-  val redirectValid = Bool()
-  val redirect = new Redirect
-  val brUpdate = new BranchUpdateInfo
+trait HasRedirectOut { this: RawModule =>
+  val redirectOutValid = IO(Output(Bool()))
+  val redirectOut = IO(Output(new Redirect))
+  val brUpdate = IO(Output(new BranchUpdateInfo))
 }
 
-class Jump extends FunctionUnit(jmpCfg, extOut = new RedirectOut) {
+class Jump extends FunctionUnit(
+  FuConfig(FuType.jmp, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = true)
+) with HasRedirectOut {
 
-  val (iovalid, src1, offset, func, pc, uop) = (
-    io.in.valid,
+  val (src1, offset, func, pc, uop) = (
     io.in.bits.src(0),
     io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
@@ -26,16 +27,13 @@ class Jump extends FunctionUnit(jmpCfg, extOut = new RedirectOut) {
   )
 
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
-  val valid = iovalid && !redirectHit
+  val valid = io.in.valid && !redirectHit
 
   val isRVC = uop.cf.brUpdate.pd.isRVC
-  val pcDelaySlot = Mux(isRVC, pc + 2.U, pc + 4.U)
+  val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
-  val redirectOut = io.out.bits.ext.get.redirect
-  val brUpdate = io.out.bits.ext.get.brUpdate
-
-  io.out.bits.ext.get.redirectValid := valid
+  redirectOutValid := valid
   redirectOut.pc := uop.cf.pc
   redirectOut.target := target
   redirectOut.brTag := uop.brTag
@@ -50,13 +48,12 @@ class Jump extends FunctionUnit(jmpCfg, extOut = new RedirectOut) {
   brUpdate.target := target
   brUpdate.brTarget := target // DontCare
   brUpdate.taken := true.B
-  // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
 
   // Output
-  val res = pcDelaySlot
+  val res = snpc
 
   io.in.ready := io.out.ready
-  io.out.valid := valid // TODO: CSR/MOU/FMV may need change it
+  io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := res
 

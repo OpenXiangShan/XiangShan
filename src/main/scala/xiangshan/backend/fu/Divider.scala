@@ -4,11 +4,14 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend._
 
-import xiangshan.backend.fu.FunctionUnit._
+class Divider(len: Int) extends FunctionUnit(
+  FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false, UncertainLatency()),
+  len
+) {
 
-class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl) {
+  val ctrl = IO(Input(new MulDivCtrl))
+  val sign = ctrl.sign
 
   def abs(a: UInt, sign: Bool): (Bool, UInt) = {
     val s = a(len - 1) && sign
@@ -27,8 +30,6 @@ class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl)
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
 
-  val ctrl = io.in.bits.ext.get
-  val sign = io.in.bits.ext.get.sign
   val uop = io.in.bits.uop
 
   val (aSign, aVal) = abs(a, sign)
