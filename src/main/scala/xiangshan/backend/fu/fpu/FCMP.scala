@@ -2,9 +2,13 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.FuType
+import xiangshan.backend.fu.{CertainLatency, FuConfig}
 import xiangshan.backend.fu.FunctionUnit._
 
-class FCMP extends FPUPipelineModule(fmiscCfg, 2){
+class FCMP extends FPUPipelineModule(
+  FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2))
+){
 
   val src = io.in.bits.src.map(x => Mux(isDouble, x, extF32ToF64(x)))
   val sign = src.map(_(63))
