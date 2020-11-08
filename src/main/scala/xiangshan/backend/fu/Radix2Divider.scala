@@ -5,13 +5,15 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-class Divider(len: Int) extends FunctionUnit(
+abstract class AbstractDivider(len: Int) extends FunctionUnit(
   FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false, UncertainLatency()),
   len
-) {
-
+){
   val ctrl = IO(Input(new MulDivCtrl))
   val sign = ctrl.sign
+}
+
+class Radix2Divider(len: Int) extends AbstractDivider(len) {
 
   def abs(a: UInt, sign: Bool): (Bool, UInt) = {
     val s = a(len - 1) && sign
