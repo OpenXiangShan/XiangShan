@@ -110,6 +110,7 @@ Emulator::Emulator(int argc, const char *argv[]):
   if (args.snapshot_path != NULL) {
     printf("loading from snapshot `%s`...\n", args.snapshot_path);
     snapshot_load(args.snapshot_path);
+    printf("model cycleCnt = %" PRIu64 "\n", dut_ptr->io_trap_cycleCnt);
     hascommit = 1;
   }
 

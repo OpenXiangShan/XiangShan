@@ -16,6 +16,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val flush_sbuffer = new SbufferFlushBundle
     val tlbFeedback   = ValidIO(new TlbFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
+    val exceptionAddr = ValidIO(UInt(VAddrBits.W))
   })
 
   //-------------------------------------------------------
@@ -31,8 +32,8 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val resp_data = Reg(UInt())
   val is_lrsc_valid = Reg(Bool())
 
-  ExcitingUtils.addSource(in.src1, "ATOM_EXECPTION_VADDR")
-  ExcitingUtils.addSource(atom_override_xtval, "ATOM_OVERRIDE_XTVAL")
+  io.exceptionAddr.valid := atom_override_xtval
+  io.exceptionAddr.bits  := in.src1
 
   // assign default value to output signals
   io.in.ready          := false.B

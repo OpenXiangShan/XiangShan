@@ -2,14 +2,14 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
@@ -28,7 +28,7 @@ case class XSCoreParameters
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
-  HasFPU: Boolean = false,
+  HasFPU: Boolean = true,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
@@ -76,8 +76,8 @@ case class XSCoreParameters
     AluCnt = 4,
     MulCnt = 0,
     MduCnt = 2,
-    FmacCnt = 0,
-    FmiscCnt = 0,
+    FmacCnt = 4,
+    FmiscCnt = 2,
     FmiscDivSqrtCnt = 0,
     LduCnt = 2,
     StuCnt = 2
@@ -89,7 +89,8 @@ case class XSCoreParameters
   TlbEntrySize: Int = 32,
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 256
+  PtwL2EntrySize: Int = 256,
+  NumPerfCounters: Int = 16
 )
 
 trait HasXSParameter {
@@ -164,10 +165,12 @@ trait HasXSParameter {
   val TlbL2EntrySize = core.TlbL2EntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
+  val NumPerfCounters = core.NumPerfCounters
 
   val l1BusDataWidth = 256
 
   val icacheParameters = ICacheParameters(
+    nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
@@ -191,14 +194,18 @@ trait HasXSLog { this: RawModule =>
   implicit val moduleName: String = this.name
 }
 
-abstract class XSModule extends Module
+abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
+{
+  def io: Record
+}
 
 //remove this trait after impl module logic
-trait NeedImpl { this: Module =>
+trait NeedImpl { this: RawModule =>
   override protected def IO[T <: Data](iodef: T): T = {
+    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.experimental.IO(iodef)
     io <> DontCare
     io
@@ -235,7 +242,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
-  val icache = LazyModule(new ICache())
+  val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
   val mem = TLIdentityNode()
@@ -258,7 +265,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   private val xbar = TLXbar()
 
   xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
+  xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
   xbar := TLBuffer() := DebugIdentityNode() := ptw.node
 
   l2.node := xbar
@@ -269,6 +276,9 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 }
 
 class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
+  val io = IO(new Bundle {
+    val externalInterrupt = new ExternalInterruptIO
+  })
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
@@ -276,20 +286,28 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
-  val icache = outer.icache.module
+  val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-
-  // TODO: connect this
+  val icache = Module(new ICache)
 
   front.io.backend <> backend.io.frontend
   front.io.icacheResp <> icache.io.resp
   front.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
+
+  icache.io.mem_acquire <> l1pluscache.io.req
+  l1pluscache.io.resp <> icache.io.mem_grant
+  l1pluscache.io.flush := icache.io.l1plusflush
+  icache.io.fencei := backend.io.fencei
+
   mem.io.backend   <> backend.io.mem
+  io.externalInterrupt <> backend.io.externalInterrupt
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw
+  ptw.io.sfence <> backend.io.sfence
+  ptw.io.csr <> backend.io.tlbCsrIO
 
   dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
   dcache.io.lsu.lsroq   <> mem.io.loadMiss

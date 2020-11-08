@@ -69,6 +69,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
   $(VTHREAD_FLAGS) \
+  --trace \
   --assert \
 	--trace \
   --savable \

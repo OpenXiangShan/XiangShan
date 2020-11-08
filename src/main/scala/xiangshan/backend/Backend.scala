@@ -1,22 +1,19 @@
 package xiangshan.backend
 
-import bus.simplebus.SimpleBusUC
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
-import noop.MemMMUIO
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.Rename
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.fu.FunctionUnit
-import xiangshan.backend.issue.{IssueQueue, ReservationStationNew}
+import xiangshan.backend.issue.ReservationStationNew
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
 import utils.ParallelOR
+import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
 
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
@@ -26,26 +23,37 @@ class Backend extends XSModule
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val mem = Flipped(new MemToBackendIO)
+    val externalInterrupt = new ExternalInterruptIO
+    val sfence = Output(new SfenceBundle)
+    val fencei = Output(Bool())
+    val tlbCsrIO = Output(new TlbCsrBundle)
   })
 
 
   val aluExeUnits =Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
-  val jmpExeUnit = Module(new JmpExeUnit)
-  val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
+  val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
-  // val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new Fmac))
-  // val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new Fmisc))
-  // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrt))
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits)
-  exeUnits.foreach(_.io.exception := DontCare)
-  exeUnits.foreach(_.io.dmem := DontCare)
+  val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new FmacExeUnit))
+  val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new FmiscExeUnit))
+  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mduExeUnits ++ fmacExeUnits ++ fmiscExeUnits)
+  exeUnits.foreach(_.io.csrOnly := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
+
+  fmacExeUnits.foreach(_.frm := jmpExeUnit.frm)
+  fmiscExeUnits.foreach(_.frm := jmpExeUnit.frm)
+
+  val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
+  val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch)
+  val dispatch = Module(new Dispatch(
+    jmpExeUnit.config, aluExeUnits(0).config, mduExeUnits(0).config,
+    fmacExeUnits(0).config, fmiscExeUnits(0).config,
+    ldExeUnitCfg, stExeUnitCfg
+  ))
   val roq = Module(new Roq)
   val intRf = Module(new Regfile(
     numReadPorts = NRIntReadPorts,
@@ -72,9 +80,11 @@ class Backend extends XSModule
   io.frontend.redirect := redirect
   io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
 
+
+
   val memConfigs =
-    Seq.fill(exuParameters.LduCnt)(Exu.ldExeUnitCfg) ++
-    Seq.fill(exuParameters.StuCnt)(Exu.stExeUnitCfg)
+    Seq.fill(exuParameters.LduCnt)(ldExeUnitCfg) ++
+    Seq.fill(exuParameters.StuCnt)(stExeUnitCfg)
 
   val exuConfigs = exeUnits.map(_.config) ++ memConfigs
 
@@ -85,7 +95,6 @@ class Backend extends XSModule
 
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
-
 
   val reservedStations  = exuConfigs.zipWithIndex.map({ case (cfg, i) =>
 
@@ -103,7 +112,7 @@ class Backend extends XSModule
       .map(_._2)
     val extraListenPortsCnt = extraListenPorts.length
 
-    val feedback = (cfg == Exu.ldExeUnitCfg) || (cfg == Exu.stExeUnitCfg)
+    val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
     
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
   
@@ -121,13 +130,15 @@ class Backend extends XSModule
     }
 
     cfg match {
-      case Exu.ldExeUnitCfg =>
-      case Exu.stExeUnitCfg =>
+      case `ldExeUnitCfg` =>
+      case `stExeUnitCfg` =>
       case otherCfg =>
         exeUnits(i).io.in <> rs.io.deq
         exeUnits(i).io.redirect <> redirect
         rs.io.tlbFeedback := DontCare
     }
+
+    rs.suggestName(s"rs_${cfg.name}")
 
     rs
   })
@@ -140,14 +151,35 @@ class Backend extends XSModule
 
   io.mem.commits <> roq.io.commits
   io.mem.roqDeqPtr := roq.io.roqDeqPtr
-  io.mem.ldin <> reservedStations.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
-  io.mem.stin <> reservedStations.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
-  io.mem.tlbFeedback <> reservedStations.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.tlbFeedback) ++ reservedStations.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.tlbFeedback)
-  jmpExeUnit.io.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
-  jmpExeUnit.io.exception.bits := roq.io.exception
+
+  io.mem.ldin <> reservedStations.filter(_.exuCfg == ldExeUnitCfg).map(_.io.deq)
+  io.mem.stin <> reservedStations.filter(_.exuCfg == stExeUnitCfg).map(_.io.deq)
+  jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
+  jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
+  jmpExeUnit.fflags := roq.io.fflags
+  jmpExeUnit.dirty_fs := roq.io.dirty_fs
+  jmpExeUnit.io.csrOnly.externalInterrupt := io.externalInterrupt
+  jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  jmpExeUnit.fenceToSbuffer <> io.mem.fenceToSbuffer
+  io.mem.sfence <> jmpExeUnit.sfence
+  io.mem.csr <> jmpExeUnit.tlbCsrIO
+
+  io.mem.exceptionAddr.lsIdx.lsroqIdx := roq.io.exception.lsroqIdx
+  io.mem.exceptionAddr.lsIdx.lqIdx := roq.io.exception.lqIdx
+  io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
+  io.mem.exceptionAddr.isStore := CommitType.lsInstIsStore(roq.io.exception.ctrl.commitType)
+
+  io.mem.tlbFeedback <> reservedStations.filter(
+    x => x.exuCfg == ldExeUnitCfg || x.exuCfg == stExeUnitCfg
+  ).map(_.io.tlbFeedback)
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
+  io.frontend.sfence <> jmpExeUnit.sfence
+  io.frontend.tlbCsrIO <> jmpExeUnit.tlbCsrIO
+
+  io.fencei := jmpExeUnit.fencei
+  io.tlbCsrIO := jmpExeUnit.tlbCsrIO
 
   decode.io.in <> io.frontend.cfVec
   brq.io.roqRedirect <> roq.io.redirect
@@ -177,6 +209,8 @@ class Backend extends XSModule
   roq.io.memRedirect <> io.mem.replayAll
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
+  roq.io.intrBitSet := jmpExeUnit.io.csrOnly.interrupt
+  roq.io.trapTarget := jmpExeUnit.io.csrOnly.trapTarget
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   io.mem.dp1Req <> dispatch.io.toLsroq
   dispatch.io.lsIdxs <> io.mem.lsIdxs
@@ -213,32 +247,12 @@ class Backend extends XSModule
   roq.io.exeWbResults.last := brq.io.out
 
 
-  // TODO: Remove sink and source
-  val tmp = WireInit(0.U)
-  val sinks = Array[String](
-    "DTLBFINISH",
-    "DTLBPF",
-    "DTLBENABLE",
-    "perfCntCondMdcacheLoss",
-    "perfCntCondMl2cacheLoss",
-    "perfCntCondMdcacheHit",
-    "lsuMMIO",
-    "perfCntCondMl2cacheHit",
-    "perfCntCondMl2cacheReq",
-    "mtip",
-    "perfCntCondMdcacheReq",
-    "meip"
-  )
-  for (s <- sinks) {
-    BoringUtils.addSink(tmp, s)
-  }
-
   val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-  BoringUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG")
-  BoringUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG")
+  ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
+  ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
   val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
   if (!env.FPGAPlatform) {
-    BoringUtils.addSource(debugArchReg, "difftestRegs")
+    ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
   }
 
 }

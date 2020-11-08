@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.cache._
 // import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -199,7 +200,8 @@ class LoadUnit_S2 extends XSModule {
       LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+      LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
   ))
 
   // TODO: ECC check
@@ -278,6 +280,7 @@ class LoadUnit extends XSModule {
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare
   hitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
+  hitLoadOut.bits.fflags := DontCare
 
   // TODO: arbiter
   // if hit, writeback result to CDB

@@ -9,6 +9,7 @@ import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConsta
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
 
 class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
@@ -38,6 +39,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
+    val exceptionAddr = new ExceptionAddrIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -280,7 +282,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+        LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
@@ -290,6 +293,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := data(loadWbSel(i)).mmio
+    io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
     when(io.ldout(i).fire()) {
       writebacked(loadWbSel(i)) := true.B
@@ -520,10 +524,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // Read vaddr for mem exception
-  val mexcLsIdx = WireInit(0.U.asTypeOf(new LSIdx()))
-  val memExceptionAddr = WireInit(data(mexcLsIdx.lqIdx.value).vaddr)
-  ExcitingUtils.addSink(mexcLsIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_LOAD_VADDR")
+  io.exceptionAddr.vaddr := data(io.exceptionAddr.lsIdx.lqIdx.value).vaddr
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
