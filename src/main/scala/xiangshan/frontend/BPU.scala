@@ -330,6 +330,7 @@ class BPUStage3 extends BPUStage {
     ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
     ras.io.callIdx.bits := callIdx
     ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
+    ras.io.isLastHalfRVI := !io.predecode.bits.isFetchpcEqualFirstpc
     ras.io.recover := io.recover
 
     for(i <- 0 until PredictWidth){
