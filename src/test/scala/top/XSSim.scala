@@ -3,7 +3,6 @@ package top
 import system._
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
@@ -12,8 +11,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, Laz
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
 import xiangshan._
 import utils._
-import firrtl.stage.RunFirrtlTransformAnnotation
-import xstransforms.ShowPrintTransform
+import ExcitingUtils.Debug
 
 class DiffTestIO extends XSBundle {
   val r = Output(Vec(64, UInt(XLEN.W)))
@@ -102,37 +100,37 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     soc.module.io.meip := false.B
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
-    BoringUtils.addSink(difftest.commit, "difftestCommit")
-    BoringUtils.addSink(difftest.thisPC, "difftestThisPC")
-    BoringUtils.addSink(difftest.thisINST, "difftestThisINST")
-    BoringUtils.addSink(difftest.skip, "difftestSkip")
-    BoringUtils.addSink(difftest.isRVC, "difftestIsRVC")
-    BoringUtils.addSink(difftest.wen, "difftestWen")
-    BoringUtils.addSink(difftest.wdata, "difftestWdata")
-    BoringUtils.addSink(difftest.wdst, "difftestWdst")
-    BoringUtils.addSink(difftest.wpc, "difftestWpc")
-    BoringUtils.addSink(difftest.intrNO, "difftestIntrNO")
-    BoringUtils.addSink(difftest.cause, "difftestCause")
-    BoringUtils.addSink(difftest.r, "difftestRegs")
-    BoringUtils.addSink(difftest.priviledgeMode, "difftestMode")
-    BoringUtils.addSink(difftest.mstatus, "difftestMstatus")
-    BoringUtils.addSink(difftest.sstatus, "difftestSstatus")
-    BoringUtils.addSink(difftest.mepc, "difftestMepc")
-    BoringUtils.addSink(difftest.sepc, "difftestSepc")
-    BoringUtils.addSink(difftest.mtval, "difftestMtval")
-    BoringUtils.addSink(difftest.stval, "difftestStval")
-    BoringUtils.addSink(difftest.mtvec, "difftestMtvec")
-    BoringUtils.addSink(difftest.stvec, "difftestStvec")
-    BoringUtils.addSink(difftest.mcause, "difftestMcause")
-    BoringUtils.addSink(difftest.scause, "difftestScause")
-    BoringUtils.addSink(difftest.satp, "difftestSatp")
-    BoringUtils.addSink(difftest.mip, "difftestMip")
-    BoringUtils.addSink(difftest.mie, "difftestMie")
-    BoringUtils.addSink(difftest.mscratch, "difftestMscratch")
-    BoringUtils.addSink(difftest.sscratch, "difftestSscratch")
-    BoringUtils.addSink(difftest.mideleg, "difftestMideleg")
-    BoringUtils.addSink(difftest.medeleg, "difftestMedeleg")
-    BoringUtils.addSink(difftest.scFailed, "difftestScFailed")
+    ExcitingUtils.addSink(difftest.commit, "difftestCommit", Debug)
+    ExcitingUtils.addSink(difftest.thisPC, "difftestThisPC", Debug)
+    ExcitingUtils.addSink(difftest.thisINST, "difftestThisINST", Debug)
+    ExcitingUtils.addSink(difftest.skip, "difftestSkip", Debug)
+    ExcitingUtils.addSink(difftest.isRVC, "difftestIsRVC", Debug)
+    ExcitingUtils.addSink(difftest.wen, "difftestWen", Debug)
+    ExcitingUtils.addSink(difftest.wdata, "difftestWdata", Debug)
+    ExcitingUtils.addSink(difftest.wdst, "difftestWdst", Debug)
+    ExcitingUtils.addSink(difftest.wpc, "difftestWpc", Debug)
+    ExcitingUtils.addSink(difftest.intrNO, "difftestIntrNO", Debug)
+    ExcitingUtils.addSink(difftest.cause, "difftestCause", Debug)
+    ExcitingUtils.addSink(difftest.r, "difftestRegs", Debug)
+    ExcitingUtils.addSink(difftest.priviledgeMode, "difftestMode", Debug)
+    ExcitingUtils.addSink(difftest.mstatus, "difftestMstatus", Debug)
+    ExcitingUtils.addSink(difftest.sstatus, "difftestSstatus", Debug)
+    ExcitingUtils.addSink(difftest.mepc, "difftestMepc", Debug)
+    ExcitingUtils.addSink(difftest.sepc, "difftestSepc", Debug)
+    ExcitingUtils.addSink(difftest.mtval, "difftestMtval", Debug)
+    ExcitingUtils.addSink(difftest.stval, "difftestStval", Debug)
+    ExcitingUtils.addSink(difftest.mtvec, "difftestMtvec", Debug)
+    ExcitingUtils.addSink(difftest.stvec, "difftestStvec", Debug)
+    ExcitingUtils.addSink(difftest.mcause, "difftestMcause", Debug)
+    ExcitingUtils.addSink(difftest.scause, "difftestScause", Debug)
+    ExcitingUtils.addSink(difftest.satp, "difftestSatp", Debug)
+    ExcitingUtils.addSink(difftest.mip, "difftestMip", Debug)
+    ExcitingUtils.addSink(difftest.mie, "difftestMie", Debug)
+    ExcitingUtils.addSink(difftest.mscratch, "difftestMscratch", Debug)
+    ExcitingUtils.addSink(difftest.sscratch, "difftestSscratch", Debug)
+    ExcitingUtils.addSink(difftest.mideleg, "difftestMideleg", Debug)
+    ExcitingUtils.addSink(difftest.medeleg, "difftestMedeleg", Debug)
+    ExcitingUtils.addSink(difftest.scFailed, "difftestScFailed", Debug)
     // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
     io.difftest := difftest
 

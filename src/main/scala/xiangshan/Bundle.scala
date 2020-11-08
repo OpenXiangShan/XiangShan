@@ -2,8 +2,8 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
+import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -204,10 +204,26 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt(XLEN.W)
+  val fflags  = new Fflags
   val redirectValid = Bool()
   val redirect = new Redirect
   val brUpdate = new BranchUpdateInfo
   val debug = new DebugBundle
+}
+
+class ExternalInterruptIO extends XSBundle {
+  val mtip = Input(Bool())
+  val msip = Input(Bool())
+  val meip = Input(Bool())
+}
+
+class CSRSpecialIO extends XSBundle {
+  val exception = Flipped(ValidIO(new MicroOp))
+  val isInterrupt = Input(Bool())
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val externalInterrupt = new ExternalInterruptIO
+  val interrupt = Output(Bool())
 }
 
 class ExuIO extends XSBundle {
@@ -215,9 +231,7 @@ class ExuIO extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
   // for csr
-  val exception = Flipped(ValidIO(new MicroOp))
-  // for Lsu
-  val dmem = new SimpleBusUC
+  val csrOnly = new CSRSpecialIO
   val mcommit = Input(UInt(3.W))
 }
 
@@ -238,6 +252,8 @@ class FrontendToBackendIO extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  val sfence = Input(new SfenceBundle)
+  val tlbCsrIO = Input(new TlbCsrBundle)
 }
 
 class TlbCsrBundle extends XSBundle {

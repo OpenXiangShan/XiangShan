@@ -8,47 +8,54 @@ import xiangshan.backend._
 import xiangshan.backend.fu.FunctionUnit._
 import xiangshan.backend.decode.isa._
 
-class Jump extends FunctionUnit(jmpCfg){
-  val io = IO(new ExuIO)
+trait HasRedirectOut { this: RawModule =>
+  val redirectOutValid = IO(Output(Bool()))
+  val redirectOut = IO(Output(new Redirect))
+  val brUpdate = IO(Output(new BranchUpdateInfo))
+}
 
-  val (iovalid, src1, offset, func, pc, uop) = (io.in.valid, io.in.bits.src1, io.in.bits.uop.ctrl.imm, io.in.bits.uop.ctrl.fuOpType, SignExt(io.in.bits.uop.cf.pc, AddrBits), io.in.bits.uop)
+class Jump extends FunctionUnit(
+  FuConfig(FuType.jmp, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = true)
+) with HasRedirectOut {
 
-  val redirectHit = uop.roqIdx.needFlush(io.redirect)
-  val valid = iovalid && !redirectHit
+  val (src1, offset, func, pc, uop) = (
+    io.in.bits.src(0),
+    io.in.bits.uop.ctrl.imm,
+    io.in.bits.uop.ctrl.fuOpType,
+    SignExt(io.in.bits.uop.cf.pc, AddrBits),
+    io.in.bits.uop
+  )
+
+  val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
+  val valid = io.in.valid && !redirectHit
 
   val isRVC = uop.cf.brUpdate.pd.isRVC
-  val pcDelaySlot = Mux(isRVC, pc + 2.U, pc + 4.U)
+  val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
-  io.out.bits.redirectValid := valid
-  io.out.bits.redirect.pc := uop.cf.pc
-  io.out.bits.redirect.target := target
-  io.out.bits.redirect.brTag := uop.brTag
-  io.out.bits.redirect.isException := false.B
-  io.out.bits.redirect.isFlushPipe := false.B
-  io.out.bits.redirect.isMisPred := DontCare // check this in brq
-  io.out.bits.redirect.isReplay := false.B
-  io.out.bits.redirect.roqIdx := uop.roqIdx
+  redirectOutValid := valid
+  redirectOut.pc := uop.cf.pc
+  redirectOut.target := target
+  redirectOut.brTag := uop.brTag
+  redirectOut.isException := false.B
+  redirectOut.isFlushPipe := false.B
+  redirectOut.isMisPred := DontCare // check this in brq
+  redirectOut.isReplay := false.B
+  redirectOut.roqIdx := uop.roqIdx
 
-  io.out.bits.brUpdate := uop.cf.brUpdate
-  io.out.bits.brUpdate.pc := uop.cf.pc
-  io.out.bits.brUpdate.target := target
-  io.out.bits.brUpdate.brTarget := target // DontCare
-  // io.out.bits.brUpdate.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
-  io.out.bits.brUpdate.taken := true.B
-  // io.out.bits.brUpdate.fetchIdx := uop.cf.brUpdate.fetchOffset >> 1.U  //TODO: consider RVC
-  io.out.bits.brUpdate.brTag := uop.brTag
+  brUpdate := uop.cf.brUpdate
+  brUpdate.pc := uop.cf.pc
+  brUpdate.target := target
+  brUpdate.brTarget := target // DontCare
+  brUpdate.taken := true.B
 
   // Output
-  val res = pcDelaySlot
+  val res = snpc
 
   io.in.ready := io.out.ready
-  io.out.valid := valid // TODO: CSR/MOU/FMV may need change it
+  io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := res
-
-  io.dmem <> DontCare
-  io.out.bits.debug <> DontCare
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
   XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:%x\n",
@@ -56,11 +63,11 @@ class Jump extends FunctionUnit(jmpCfg){
     io.in.ready,
     io.out.valid,
     io.out.ready,
-    io.redirect.valid,
-    io.redirect.bits.isException,
-    io.redirect.bits.isFlushPipe,
+    io.redirectIn.valid,
+    io.redirectIn.bits.isException,
+    io.redirectIn.bits.isFlushPipe,
     redirectHit,
-    io.redirect.bits.brTag.value
+    io.redirectIn.bits.brTag.value
   )
   XSDebug(io.in.valid, "src1:%x offset:%x func:%b type:JUMP pc:%x res:%x\n", src1, offset, func, pc, res)
 }

@@ -2,14 +2,11 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.roq.RoqPtr
-
 import xiangshan.cache._
-import bus.tilelink.{TLArbiter, TLCached, TLMasterUtilities, TLParameters}
+import xiangshan.backend.fu.FenceToSbuffer
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -36,12 +33,13 @@ object genWdata {
 class LsPipelineBundle extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
-  val func = UInt(6.W)
+  val func = UInt(6.W) //fixme???
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val uop = new MicroOp
 
   val miss = Bool()
+  val tlbMiss = Bool()
   val mmio = Bool()
   val rollback = Bool()
 
@@ -73,12 +71,16 @@ class MemToBackendIO extends XSBundle {
   // replay all instructions form dispatch
   val replayAll = ValidIO(new Redirect)
   // replay mem instructions form Load Queue/Store Queue
-  val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.LduCnt, ValidIO(new TlbFeedback))
+  val tlbFeedback = Vec(exuParameters.LduCnt + exuParameters.StuCnt, ValidIO(new TlbFeedback))
   val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
   val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
   val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
   val oldestStore = Output(Valid(new RoqPtr))
   val roqDeqPtr = Input(new RoqPtr)
+  val exceptionAddr = new ExceptionAddrIO
+  val fenceToSbuffer = Flipped(new FenceToSbuffer)
+  val sfence = Input(new SfenceBundle)
+  val csr = Input(new TlbCsrBundle)
 }
 
 // Memory pipeline wrapper
@@ -87,7 +89,7 @@ class MemToBackendIO extends XSBundle {
 class Memend extends XSModule {
   val io = IO(new Bundle{
     val backend = new MemToBackendIO
-    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheWordIO)
+    val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
     val loadMiss = new DCacheLineIO
     val atomics  = new DCacheWordIO
     val sbufferToDcache = new DCacheLineIO
@@ -107,6 +109,8 @@ class Memend extends XSModule {
 
   // dtlb
   io.ptw <> dtlb.io.ptw
+  dtlb.io.sfence <> io.backend.sfence
+  dtlb.io.csr <> io.backend.csr
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -150,6 +154,7 @@ class Memend extends XSModule {
   lsroq.io.lsIdxs   <> io.backend.lsIdxs
   lsroq.io.brqRedirect := io.backend.redirect
   lsroq.io.roqDeqPtr := io.backend.roqDeqPtr
+
   io.backend.replayAll <> lsroq.io.rollback
 
   lsroq.io.dcache      <> io.loadMiss
@@ -164,10 +169,9 @@ class Memend extends XSModule {
   // flush sbuffer
   val fenceFlush = WireInit(false.B)
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
-  BoringUtils.addSink(fenceFlush, "FenceUnitSbufferFlush")
-  val sbEmpty = WireInit(false.B)
-  sbEmpty := sbuffer.io.flush.empty
-  BoringUtils.addSource(sbEmpty, "SBufferEmpty")
+  fenceFlush := io.backend.fenceToSbuffer.flushSb
+  val sbEmpty = sbuffer.io.flush.empty
+  io.backend.fenceToSbuffer.sbIsEmpty := sbEmpty
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush))
@@ -225,4 +229,9 @@ class Memend extends XSModule {
     assert(!loadUnits(0).io.ldout.valid)
     loadUnits(0).io.ldout.ready := false.B
   }
+
+  lsroq.io.exceptionAddr.lsIdx := io.backend.exceptionAddr.lsIdx
+  lsroq.io.exceptionAddr.isStore := io.backend.exceptionAddr.isStore
+  io.backend.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsroq.io.exceptionAddr.vaddr)
+
 }
