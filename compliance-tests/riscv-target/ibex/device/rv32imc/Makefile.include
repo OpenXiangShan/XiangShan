@@ -1,0 +1,36 @@
+IBEX        = $(ROOTDIR)/riscv-target/ibex/device/rv32imc
+LDSCRIPT    = $(IBEX)/link.ld
+TRAPHANDLER = $(IBEX)/handler.S
+DEFINES     = -DPRIV_MISA_S=0 -DPRIV_MISA_U=0 -DTRAPHANDLER="\"$(TRAPHANDLER)\""
+
+TARGET_SIM   ?= Vibex_riscv_compliance
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) \
+        --term-after-cycles=100000 \
+        --raminit=$(<).vmem \
+        > $(*).stdout \
+        2> $@; \
+        grep "^SIGNATURE: " $(*).stdout | sed 's/SIGNATURE: 0x//' \
+        > $(*).signature.output
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_READELF  ?= $(RISCV_PREFIX)readelf
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		$(DEFINES) -T$(LDSCRIPT) $$(<) \
+		-o $$(@); \
+    $$(RISCV_OBJDUMP) -D $$(@) > $$(@).objdump; \
+    $$(RISCV_READELF) -a $$(@) > $$(@).readelf; \
+    $$(RISCV_OBJCOPY) -O binary $$(@) $$(@).bin; \
+    srec_cat $$(@).bin -binary -offset 0x0000 -byte-swap 4 -o $$(@).vmem -vmem    
+    

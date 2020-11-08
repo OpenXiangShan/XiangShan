@@ -1,0 +1,25 @@
+TARGET_SIM   ?= grift-sim
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) --arch=RV32I \
+        --mem-dump-begin=begin_signature --mem-dump-end=end_signature \
+	--halt-pc=grift_stop_addr \
+        $(work_dir_isa)/$< > $(work_dir_isa)/$(*).signature.output 2> $(work_dir_isa)/$@;
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		-T$(ROOTDIR)/riscv-test-env/p/link.ld $$< \
+		-o $(work_dir_isa)/$$@; \
+	$$(RISCV_OBJDUMP) -D $(work_dir_isa)/$$@ > $(work_dir_isa)/$$@.objdump

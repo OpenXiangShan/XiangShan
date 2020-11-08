@@ -1,0 +1,27 @@
+RISCV_PREFIX   ?= riscv64-linux-gnu-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_GNU      ?= $(RISCV_PREFIX)gnu
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_ld       ?= $(RISCV_PREFIX)ld
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+
+RISCV_ISA  ?= rv64i
+
+act_dir := .
+#work_dir := $(act_dir)/work/$(RISCV_ISA)
+work_dir_log := $(act_dir)/work/$(RISCV_ISA)/bin_log
+
+#vpath %.signature_output $(act_dir)
+
+SRC=$(notdir $(wildcard $(work_dir_log)/*.bin))
+OBJ_1=$(patsubst %.bin,%.log,$(addprefix $(work_dir_log)/,$(SRC)))
+
+all:$(OBJ_1)
+
+$(work_dir_log)/%.log:$(work_dir_log)/%.bin
+	make -C /home/tjz/work/XiangShan emu B=0 E=4000 IMAGE="/home/tjz/work/XiangShan/compliance-tests/$^" DATAWIDTH=64 > $@ 2>&1
+
+
+.PHONY:clean
+clean:
+	rm -r $(work_dir_log)/*.log

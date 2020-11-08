@@ -1,0 +1,59 @@
+ifeq ($(OS),Windows_NT)
+    ARCH := Windows64
+else
+    ARCH := Linux64
+endif
+
+#
+# make RISCV_TARGET=OpenHW RISCV_DEVICE=cv32e40p RISCV_ISA=rv32i
+#
+
+CV32E40P      = $(ROOTDIR)/riscv-target/OpenHW/device/cv32e40p
+LDSCRIPT      = $(CV32E40P)/link.ld
+TRAPHANDLER   = $(CV32E40P)/handler.S
+DEFINES       = -DPRIV_MISA_S=0 -DPRIV_MISA_U=0 -DTRAPHANDLER="\"$(TRAPHANDLER)\""
+
+TARGET_SIM   ?= iss.exe --processorvendor openhwgroup.ovpworld.org --processorname riscv
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) \
+        --variant CV32E40P --program $(<) \
+        --extlib iss/cpu0/sigdump=riscv.ovpworld.org/intercept/signatureDump/1.0 \
+        --extlib riscv.ovpworld.org/intercept/customControl/1.0 \
+        --override iss/cpu0/sigdump/SignatureFile=$(*).signature.output \
+        --override iss/cpu0/sigdump/ResultReg=3 \
+        --override iss/cpu0/simulateexceptions=T \
+        --override iss/cpu0/defaultsemihost=F \
+        --logfile $(@) \
+        --finishafter 10000 $(REDIR1); \
+            cat $(*).signature.output | \
+            sed 's/.\{8\}/& /g' | \
+            awk '{print $$4 " " $$3 " " $$2 " " $$1}' | \
+            sed 's/ /\n/g' > $(*).temp; \
+            mv $(*).temp $(*).signature.output;
+
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_NM       ?= $(RISCV_PREFIX)nm
+RISCV_READELF  ?= $(RISCV_PREFIX)readelf
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles $(RVTEST_DEFINES)
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		$(DEFINES) -T$(LDSCRIPT) $$< \
+		-o $$(@); \
+    $$(RISCV_OBJDUMP) -D $$(@) > $(work_dir_isa)/$$(*).objdump; \
+    $$(RISCV_READELF) -a $$(@) > $(work_dir_isa)/$$(*).readelf; \
+    $$(RISCV_NM)         $$(@) > $(work_dir_isa)/$$(*).nm; \
+    $$(RISCV_OBJCOPY) -O verilog $$(@) $(work_dir_isa)/$$(*).hex;

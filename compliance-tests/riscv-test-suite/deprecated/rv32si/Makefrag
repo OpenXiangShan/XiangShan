@@ -1,0 +1,14 @@
+rv32si_sc_tests =    \
+	csr \
+	ma_fetch \
+	scall \
+	sbreak \
+	wfi \
+ 	dirty 
+
+# 	ma_fetch  - needs signature and it says it failed..
+
+rv32si_tests = $(addsuffix .elf, $(rv32si_sc_tests))
+
+target_tests += $(rv32si_tests)
+

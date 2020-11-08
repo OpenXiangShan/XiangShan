@@ -1,0 +1,33 @@
+RI5CY       = $(ROOTDIR)/riscv-target/ri5cy/device/rv32imc
+LDSCRIPT    = $(RI5CY)/link.ld
+TRAPHANDLER = $(RI5CY)/handler.S
+DEFINES     = -DPRIV_MISA_S=0 -DPRIV_MISA_U=0 -DTRAPHANDLER="\"$(TRAPHANDLER)\""
+
+TARGET_SIM   ?= vsim -work $(VSIM_WORK)
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) -c -quiet tb_top_vopt -do 'run -all; exit -f' \
+        +firmware=$(work_dir_isa)/$<.bin \
+	+maxcycles=10000 \
+	+signature=$(work_dir_isa)/$(*).signature.output
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_NM       ?= $(RISCV_PREFIX)nm
+RISCV_READELF  ?= $(RISCV_PREFIX)readelf
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles $(RVTEST_DEFINES)
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		$(DEFINES) -T$(LDSCRIPT) $$< \
+		-o $(work_dir_isa)/$$@; \
+    $$(RISCV_OBJDUMP) -D $(work_dir_isa)/$$@ > $(work_dir_isa)/$$@.objdump; \
+    $$(RISCV_READELF) -a $(work_dir_isa)/$$@ > $(work_dir_isa)/$$@.readelf; \
+    $$(RISCV_NM) $(work_dir_isa)/$$@ > $(work_dir_isa)/$$@.nm; \
+    $$(RISCV_OBJCOPY) -O verilog $(work_dir_isa)/$$@ $(work_dir_isa)/$$@.bin;

@@ -1,0 +1,44 @@
+ifndef FORMALSPEC_DIR
+    $(error FORMALSPEC_DIR is undefined)
+endif
+
+TARGET_SIM   ?= $(FORMALSPEC_DIR)/obj_dir/Vsystem
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+calc_sign_size=$$(expr $$(expr $$((16\#$$(grep end_signature $(work_dir_isa)/$<.readelf | awk '{print $$2}')))\
+							 - $$((16\#$$(grep begin_signature $(work_dir_isa)/$<.readelf | awk '{print $$2}')))) / 4)
+
+RUN_TARGET=\
+	$(TARGET_SIM) $(TARGET_FLAGS) \
+		+pass_address=$$(grep pass $(work_dir_isa)/$<.readelf | awk '{print $$2}') \
+		+pass_address=$$(grep pass $(work_dir_isa)/$<.readelf | awk '{print $$2}') \
+    +test_program=$(work_dir_isa)/$< \
+		+testfile=$(work_dir_isa)/$<.hex \
+  	+signature=$(work_dir_isa)/$(*).signature.output \
+		+sign_size=1024 \
+  	$(work_dir_isa)/$< 2> $(work_dir_isa)/$@; \
+		head -$(calc_sign_size) $(work_dir_isa)/$(*).signature.output > temp; \
+	 	mv temp	$(work_dir_isa)/$(*).signature.output;
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_READELF  ?= $(RISCV_PREFIX)readelf
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/formalspec-env/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/formalspec-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		-T$(TARGETDIR)/$(RISCV_TARGET)/formalspec-env/p/link.ld $$< \
+		-o $(work_dir_isa)/$$@; \
+	$$(RISCV_OBJCOPY) -O binary $(work_dir_isa)/$$@ $(work_dir_isa)/$$@.bin; \
+	$$(RISCV_OBJCOPY) -O verilog $(work_dir_isa)/$$@ $(work_dir_isa)/$$@.hex; \
+	sed -i 's/@800/@000/g;' $(work_dir_isa)/$$@.hex &> /dev/null || gsed -i 's/@800/@000/g;' $(work_dir_isa)/$$@.hex; \
+	$$(RISCV_READELF) -a $(work_dir_isa)/$$@ > $(work_dir_isa)/$$@.readelf; \
+	$$(RISCV_OBJDUMP) -D $(work_dir_isa)/$$@ > $(work_dir_isa)/$$@.objdump

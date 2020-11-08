@@ -1,0 +1,48 @@
+ifeq ($(OS),Windows_NT)
+    ARCH := Windows64
+else
+    ARCH := Linux64
+endif
+
+TARGET_SIM   ?= $(ROOTDIR)/riscv-ovpsim/bin/$(ARCH)/riscvOVPsim.exe
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+COVERTYPE ?= basic
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) \
+        --variant RV64I --program $(<) \
+        --signaturedump --customcontrol \
+        --cover ${COVERTYPE} \
+        --startcover begin_testcode --finishcover end_testcode \
+        --outputfile $(*).${COVERTYPE}.coverage.yaml \
+        --extensions RV64I \
+        --override riscvOVPsim/cpu/sigdump/SignatureFile=$(*).signature.output \
+        --override riscvOVPsim/cpu/sigdump/ResultReg=3 \
+        --override riscvOVPsim/cpu/simulateexceptions=T \
+        --override riscvOVPsim/cpu/defaultsemihost=F \
+        --logfile $(@) \
+        --override riscvOVPsim/cpu/user_version=2.3 \
+        --override riscvOVPsim/cpu/priv_version=1.11 $(REDIR1); \
+            cat $(*).signature.output | \
+            sed 's/.\{8\}/& /g' | \
+            awk '{print $$4 " " $$3 " " $$2 " " $$1}' | \
+            sed 's/ /\n/g' > $(*).temp; \
+            mv $(*).temp $(*).signature.output;
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles $(RVTEST_DEFINES)
+
+COMPILE_TARGET=\
+    $$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
+        -I$(ROOTDIR)/riscv-test-env/ \
+        -I$(ROOTDIR)/riscv-test-env/p/ \
+        -I$(TARGETDIR)/$(RISCV_TARGET)/ \
+        -T$(ROOTDIR)/riscv-test-env/p/link.ld $$(<) \
+        -o $$(@); \
+    $$(RISCV_OBJDUMP) -D $$(@) > $$(@).objdump

@@ -1,0 +1,27 @@
+#=======================================================================
+# Makefrag for rv64ui tests
+#-----------------------------------------------------------------------
+
+rv64ui_sc_tests = \
+	add addi addiw addw \
+	and andi \
+	auipc \
+	beq bge bgeu blt bltu bne \
+	simple \
+	fence_i \
+	jal jalr \
+	lb lbu lh lhu lw lwu ld \
+	lui \
+	or ori \
+	sb sh sw sd \
+	sll slli slliw sllw \
+	slt slti sltiu sltu \
+	sra srai sraiw sraw \
+	srl srli srliw srlw \
+	sub subw \
+	xor xori \
+
+rv64ui_p_tests = $(addprefix rv64ui-p-, $(rv64ui_sc_tests))
+rv64ui_v_tests = $(addprefix rv64ui-v-, $(rv64ui_sc_tests))
+
+spike_tests += $(rv64ui_p_tests) $(rv64ui_v_tests)

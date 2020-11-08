@@ -1,0 +1,17 @@
+RISCV_ISA=rv64i
+act_dir=./work/$(RISCV_ISA)/bin_log
+SRC=$(wildcard $(act_dir)/*.log)
+OBJ=$(patsubst %.log,%.signature_output,$(SRC))
+
+all:$(OBJ)
+	@echo -e '/*\nSignature_files are ready!\n*/'
+
+$(OBJ):%.signature_output:%.log
+ifeq ($(RISCV_ISA),rv32i)
+	@grep 'ensbuffer' $^ | awk '{print $$9}' | cut -b 3-10 | sed -n '1,32p' > $@
+else
+	@grep 'ensbuffer' $^ | awk '{print $$9"\n  00000000"}' | cut -b 3-10 | sed -n '1,50p' > $@
+endif
+.PHONY:clean
+clean:
+	rm -r $(act_dir)/*.signature_output

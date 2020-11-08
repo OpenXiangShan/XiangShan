@@ -1,0 +1,11 @@
+#=======================================================================
+# Makefrag for rv32uc tests
+#-----------------------------------------------------------------------
+
+rv32uc_sc_tests = \
+	rvc \
+
+rv32uc_p_tests = $(addprefix rv32uc-p-, $(rv32uc_sc_tests))
+rv32uc_v_tests = $(addprefix rv32uc-v-, $(rv32uc_sc_tests))
+
+spike32_tests += $(rv32uc_p_tests) $(rv32uc_v_tests)

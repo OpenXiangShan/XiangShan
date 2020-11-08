@@ -1,0 +1,28 @@
+TARGET_SIM   ?= spike
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) --isa=rv32imc \
+        +signature=$(*).signature.output \
+        $< 2> $@; \
+				cat $(*).signature.output | sed 's/.\{8\}/& /g' | \
+				awk '{print $$4 " " $$3 " " $$2 " " $$1}' | sed 's/ /\n/g' > temp; \
+				mv temp $(*).signature.output;
+
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		-T$(ROOTDIR)/riscv-test-env/p/link.ld $$(<) \
+		-o $$@; \
+	$$(RISCV_OBJDUMP) -D $$@ > $$@.objdump

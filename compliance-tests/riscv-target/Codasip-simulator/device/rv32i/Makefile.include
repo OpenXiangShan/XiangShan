@@ -1,0 +1,25 @@
+# TBD
+
+TARGET_SIM   ?= codix_berkelium-ia-isimulator
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+RUN_TARGET=\
+    $(TARGET_SIM) $(TARGET_FLAGS) -r --info 5 \
+    $(work_dir_isa)/$< 2> $(work_dir_isa)/$@ 1>$(work_dir_isa)/$(*).signature.output
+#        +signature=$(work_dir_isa)/$(*).signature.output \
+#        $(work_dir_isa)/$< 2> $(work_dir_isa)/$@
+
+RISCV_PREFIX   ?= codix_berkelium-ia-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_GCC_OPTS ?= -nostdlib -nodefaultlibs
+
+COMPILE_TARGET=\
+	$$(RISCV_GCC) $(2) $$(RISCV_GCC_OPTS) \
+		-I$(ROOTDIR)/riscv-test-env/ \
+		-I$(ROOTDIR)/riscv-test-env/p/ \
+		-I$(TARGETDIR)/$(RISCV_TARGET)/ \
+		$$< -o $(work_dir_isa)/$$@

@@ -1,0 +1,21 @@
+RISCV_PREFIX   ?= riscv64-linux-gnu-
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_GNU      ?= $(RISCV_PREFIX)gnu
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)objcopy
+RISCV_ld       ?= $(RISCV_PREFIX)ld
+RISCV_OBJDUMP  ?= $(RISCV_PREFIX)objdump
+
+SRC=$(wildcard *.S)
+OBJ_1=$(patsubst %.S,%.log,$(SRC))
+
+all:$(OBJ_1)
+	@echo -e '/*\nlogs are ready!\n*/'
+
+
+$(OBJ_1):%.signature_output:%.bin
+	make -C /home/tjz/work/XiangShan emu B=0 E=4000 IMAGE="/home/tjz/work/XiangShan/compliance-tests/riscv-test-suite/rv32i/src/$^" DATAWIDTH=64 > $@ 2>&1
+
+
+.PHONY:clean
+clean:
+	rm -r *.log

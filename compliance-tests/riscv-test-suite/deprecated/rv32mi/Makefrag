@@ -1,0 +1,18 @@
+rv32mi_sc_tests =    \
+	breakpoint \
+	ma_fetch \
+	ma_addr \
+	scall \
+	sbreak \
+	shamt \
+	csr \
+	mcsr \
+ 	illegal
+
+ifeq ($(RISCV_TARGET),riscvOVPsim)
+    rv32mi_sc_tests := $(subst breakpoint,,$(rv32mi_sc_tests))
+endif
+
+rv32mi_tests = $(addsuffix .elf, $(rv32mi_sc_tests))
+
+target_tests += $(rv32mi_tests)

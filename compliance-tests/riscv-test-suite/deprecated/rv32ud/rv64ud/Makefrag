@@ -1,0 +1,12 @@
+#=======================================================================
+# Makefrag for rv64ud tests
+#-----------------------------------------------------------------------
+
+rv64ud_sc_tests = \
+	fadd fdiv fclass fcmp fcvt fcvt_w fmadd fmin \
+	ldst move structural recoding \
+
+rv64ud_p_tests = $(addprefix rv64ud-p-, $(rv64ud_sc_tests))
+rv64ud_v_tests = $(addprefix rv64ud-v-, $(rv64ud_sc_tests))
+
+spike_tests += $(rv64ud_p_tests) $(rv64ud_v_tests)

@@ -1,0 +1,21 @@
+make: Entering directory '/home/tjz/work/XiangShan'
+make -C /home/tjz/work/NEMU ISA=riscv64 SHARE=1
+make[1]: Entering directory '/home/tjz/work/NEMU'
+Building riscv64-nemu-interpreter
+make[1]: Nothing to be done for 'app'.
+make[1]: Leaving directory '/home/tjz/work/NEMU'
+CPPFLAGS=-DREF_SO=\\\"/home/tjz/work/NEMU/build/riscv64-nemu-interpreter-so\\\" make VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C /home/tjz/work/XiangShan/build/emu-compile -f /home/tjz/work/XiangShan/build/emu-compile/VXSSimTop.mk
+make[1]: Entering directory '/home/tjz/work/XiangShan/build/emu-compile'
+make[1]: Nothing to be done for 'default'.
+make[1]: Leaving directory '/home/tjz/work/XiangShan/build/emu-compile'
+####{./build/emu -i /home/tjz/work/XiangShan/compliance-tests/riscv-test-suite/wip/rv64i/src/ADDW.bin -s 882 -b 0 -e 4000  }
+ls build
+emu
+emu-compile
+firrtl_black_box_resource_files.f
+plusarg_reader.v
+SDHelper.v
+XSSimTop.anno.json
+XSSimTop.fir
+XSSimTop.v
+./build/emu -i /home/tjz/work/XiangShan/compliance-tests/riscv-test-suite/wip/rv64i/src/ADDW.bin -s 8420 -b 0 -e 4000  

@@ -1,0 +1,15 @@
+#=======================================================================
+# Makefrag for rv32si tests
+#-----------------------------------------------------------------------
+
+rv32si_sc_tests = \
+	csr \
+	dirty \
+	ma_fetch \
+	scall \
+	sbreak \
+	wfi \
+
+rv32si_p_tests = $(addprefix rv32si-p-, $(rv32si_sc_tests))
+
+spike32_tests += $(rv32si_p_tests)

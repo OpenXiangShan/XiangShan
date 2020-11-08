@@ -1,0 +1,20 @@
+rv32ud_sc_tests =    \
+	fadd \
+	fdiv \
+	fclass \
+	fcmp \
+	fcvt \
+	fmadd \
+	fmin  \
+	ldst \
+	recoding \
+	
+# 	fcvt_w   fails to asm
+
+# TODO: use this line instead of the last of the previous once move and structural tests have been implemented
+#        ldst move structural recoding \
+
+rv32ud_tests = $(addsuffix .elf, $(rv32ud_sc_tests))
+
+target_tests += $(rv32ud_tests)
+

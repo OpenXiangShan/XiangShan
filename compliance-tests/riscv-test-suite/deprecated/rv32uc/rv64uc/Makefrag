@@ -1,0 +1,11 @@
+#=======================================================================
+# Makefrag for rv64uc tests
+#-----------------------------------------------------------------------
+
+rv64uc_sc_tests = \
+	rvc \
+
+rv64uc_p_tests = $(addprefix rv64uc-p-, $(rv64uc_sc_tests))
+rv64uc_v_tests = $(addprefix rv64uc-v-, $(rv64uc_sc_tests))
+
+spike_tests += $(rv64uc_p_tests) $(rv64uc_v_tests)

@@ -1,0 +1,54 @@
+ifeq ($(OS),Windows_NT)
+    ARCH := Windows64
+else
+    ARCH := Linux64
+endif
+
+TARGET_SIM   ?= $(ROOTDIR)/riscv-ovpsim/bin/$(ARCH)/riscvOVPsim.exe
+TARGET_FLAGS ?= $(RISCV_TARGET_FLAGS)
+ifeq ($(shell command -v $(TARGET_SIM) 2> /dev/null),)
+    $(error Target simulator executable '$(TARGET_SIM)` not found)
+endif
+
+COVERTYPE ?= basic
+
+RUN_TARGET=\
+    make -C $(NOOP_HOME) emu \
+	B=0 E=4000 \
+	IMAGE="$(AM_HOME)/tests/cputest/build/$(<).bin" DATAWIDTH=64 \
+	> $(*).log 2>&1; \
+	make -C -k $(NOOP_HOME) emu \
+	B=0 E=4000 \
+	IMAGE="$(AM_HOME)/tests/cputest/build/$(<).bin" DATAWIDTH=64; \
+		grep 'paddr 00800004' $(*).log | \
+		awk '{print $18}' | cut -b 1-8 \
+		> $(*).signature.output;
+    -rm -f $(*).log       
+
+RISCV_PREFIX   ?= riscv32-unknown-elf-
+RISCV_GCC      ?= $(RISCV_PREFIX)gnu
+RISCV_OBJCOPY  ?= $(RISCV_PREFIX)-obcopy
+RISCV_GCC_OPTS ?= -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles $(RVTEST_DEFINES)
+
+COMPILE_TARGET_O_TO_BIN=\
+	$$(RISCV_GCC)ld -melf64lriscv \
+		-L $(AM_HOME)/am/src/nemu/ldscript \
+		-T $(AM_HOME)/am/src/nemu/isa/riscv/boot/loader64.ld \
+		--gc-sections -o $$(@).elf \
+		--start-group $$(<).o \
+		$(AM_HOME)/am/build/am-riscv64-noop.a \
+		$(AM_HOME)/libs/klib/build/klib-riscv64-noop.a \
+		--end-group; \
+	$$(RISCV_OBJCOPY) -S --set-section-flags .bss=alloc,contents \
+	-O binary $$(@).elf > $$(@).bin
+
+COMPILE_TARGET_S_TO_O=\
+	$$(RISCV_GCC) -fno-pic -march=rv64g -mcmodel=medany -O0 -DMAINARGS=\"\" -MMD \
+	-I$(AM_HOME)/am/include/ \
+	-I$(AM_HOME)/libs/klib/include/ \
+	-I$(AM_HOME)/am/ \
+	-I$(AM_HOME)/am/include \
+	-I$(NOOP_HOME)/compliance-tests/riscv-test-env/ \
+	-I$(NOOP_HOME)/compliance-tests/riscv-target/XiangShan/ \
+	-T$(NOOP_HOME)/compliance-testsu/riscv-test-env/p/link.ld \
+	-c -o $$(@) $$(<)
