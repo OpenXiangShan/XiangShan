@@ -2,7 +2,6 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import xiangshan.FuType._
 import utils._
@@ -77,6 +76,7 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := aluRes
+  io.csrOnly <> DontCare
 
   XSDebug(io.in.valid || io.redirect.valid,
     "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",
@@ -91,8 +91,6 @@ class AluExeUnit extends Exu(Exu.aluExeUnitCfg) {
     io.redirect.bits.brTag.flag,
     io.redirect.bits.brTag.value
   )
-  XSDebug(io.in.valid, "src1:%x src2:%x offset:%x func:%b pc:%x\n",
-    src1, src2, offset, func, pc)
-  XSDebug(io.out.valid, "res:%x aluRes:%x isRVC:%d isBranch:%d target:%x taken:%d\n",
-     io.out.bits.data, aluRes, isRVC, isBranch, target, taken)
+  XSDebug(io.in.valid, p"src1:${Hexadecimal(src1)} src2:${Hexadecimal(src2)} offset:${Hexadecimal(offset)} func:${Binary(func)} pc:${Hexadecimal(pc)} roqIdx:${uop.roqIdx}\n")
+  XSDebug(io.out.valid, p"res:${Hexadecimal(io.out.bits.data)} aluRes:${Hexadecimal(aluRes)} isRVC:${isRVC} isBranch:${isBranch} target:${Hexadecimal(target)} taken:${taken}\n")
 }

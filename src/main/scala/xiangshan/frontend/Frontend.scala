@@ -33,6 +33,8 @@ class Frontend extends XSModule {
   //itlb to ptw
   io.ptw <> TLB(
     in = Seq(io.icacheToTlb),
+    sfence = io.backend.sfence,
+    csr = io.backend.tlbCsrIO,
     width = 1,
     isDtlb = false,
     shouldBlock = true

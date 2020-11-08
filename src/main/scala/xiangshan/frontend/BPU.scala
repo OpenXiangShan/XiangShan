@@ -330,6 +330,7 @@ class BPUStage3 extends BPUStage {
     ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
     ras.io.callIdx.bits := callIdx
     ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
+    ras.io.isLastHalfRVI := !io.predecode.bits.isFetchpcEqualFirstpc
     ras.io.recover := io.recover
 
     for(i <- 0 until PredictWidth){
@@ -337,8 +338,16 @@ class BPUStage3 extends BPUStage {
       io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
       io.out.bits.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
     }
-    takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)|| rets(i)))
-    when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
+    takens := VecInit((0 until PredictWidth).map(i => {
+      ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
+          jals(i) ||
+          (!ras.io.out.bits.specEmpty && rets(i)) ||
+          (ras.io.out.bits.specEmpty && btbHits(i))
+      }
+    ))
+    when(ras.io.is_ret && ras.io.out.valid){
+      targetSrc(retIdx) :=  ras.io.out.bits.target
+    }
   }
 
 

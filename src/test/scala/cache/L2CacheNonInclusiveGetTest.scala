@@ -151,7 +151,6 @@ class L2NonInclusiveGetTest extends FlatSpec with ChiselScalatestTester with Mat
           c.io.l1plus.flush.poke(false.B)
           c.io.l2Flush.req.valid.poke(false.B)
           c.io.l2Flush.resp.ready.poke(false.B)
-          c.io.l2Flush.s1_kill.poke(false.B)
         }
 
         def mmio_read(addr: BigInt): BigInt = {
