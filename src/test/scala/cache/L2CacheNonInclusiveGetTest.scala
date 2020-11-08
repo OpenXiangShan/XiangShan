@@ -154,14 +154,6 @@ class L2NonInclusiveGetTest extends FlatSpec with ChiselScalatestTester with Mat
           c.io.l2Flush.s1_kill.poke(false.B)
         }
 
-        def flush_l1plus() = {
-          c.io.l1plus.flush.poke(true.B)
-          while (!c.io.l1plus.empty.peek().litToBoolean) {
-            c.clock.step()
-          }
-          c.io.l1plus.flush.poke(false.B)
-        }
-
         def mmio_read(addr: BigInt): BigInt = {
           // send req
           val req = c.io.l2Flush.req
@@ -255,6 +247,14 @@ class L2NonInclusiveGetTest extends FlatSpec with ChiselScalatestTester with Mat
           println(f"L2 flush block: $addr%x")
         }
 
+        def flush_l1plus() = {
+          c.io.l1plus.flush.poke(true.B)
+          while (!c.io.l1plus.empty.peek().litToBoolean) {
+            c.clock.step()
+          }
+          c.io.l1plus.flush.poke(false.B)
+        }
+
         def flush_l2_range(begin: BigInt, end: BigInt) = {
           var addr = begin >> block_bits << block_bits
           while (addr < end) {
@@ -275,8 +275,7 @@ class L2NonInclusiveGetTest extends FlatSpec with ChiselScalatestTester with Mat
 
         // ----------------------------------------
         // scan test
-        // write every memory block and then read out every memory cell
-        def scan_test() = {
+        def populate_memory() = {
           println(s"scan test")
           init()
           // first, initialize every memory block with random numbers
@@ -292,9 +291,13 @@ class L2NonInclusiveGetTest extends FlatSpec with ChiselScalatestTester with Mat
           }
           // execute reqs
           evaluate()
+        }
 
+        def flush_memory() = {
           flush_l2_range(0, (nblocks - 1)* block_size)
+        }
 
+        def read_memory() = {
           // read them out
           for (i <- 0 until nblocks) {
             val addr = i * 64
@@ -306,7 +309,18 @@ class L2NonInclusiveGetTest extends FlatSpec with ChiselScalatestTester with Mat
           evaluate()
         }
 
-        scan_test()
+        for (i <- 0 until 10) {
+          populate_memory()
+          flush_memory()
+          // these loads should cause get miss
+          flush_l1plus()
+          read_memory()
+
+          populate_memory()
+          // these loads should not miss
+          flush_l1plus()
+          read_memory()
+        }
       }
   }
 }
