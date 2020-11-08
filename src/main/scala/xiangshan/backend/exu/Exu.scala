@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.FuType._
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.{CertainLatency, FuConfig, HasFuLatency, NexusLatency, UncertainLatency}
 import utils.ParallelOR
 import xiangshan.backend.fu.FunctionUnit._
 
@@ -44,6 +44,27 @@ case class ExuConfig
   val writeFpRf = supportedFuncUnits.map(_.writeFpRf).reduce(_||_)
   val hasRedirect = supportedFuncUnits.map(_.hasRedirect).reduce(_||_)
 
+  val latency: HasFuLatency = {
+    val lats = supportedFuncUnits.map(_.latency)
+    val latencyValue = lats.collectFirst{
+      case x if x.latencyVal.nonEmpty =>
+        x.latencyVal.get
+    }
+    val hasUncertain = lats.exists(x => x.latencyVal.isEmpty)
+    if(latencyValue.nonEmpty){
+      if(hasUncertain) NexusLatency(latencyValue.get) else CertainLatency(latencyValue.get)
+    } else UncertainLatency()
+  }
+  val hasCertainLatency = latency.latencyVal.nonEmpty
+  val hasUncertainlatency = latency match {
+    case _: UncertainLatency =>
+      true
+    case _: NexusLatency =>
+      true
+    case _ =>
+      false
+  }
+
   def canAccept(fuType: UInt): Bool = {
     ParallelOR(supportedFuncUnits.map(_.fuType === fuType))
   }
@@ -51,8 +72,8 @@ case class ExuConfig
 
 abstract class Exu(val config: ExuConfig) extends XSModule {
   val io = IO(new ExuIO)
-  io.dmem <> DontCare
   io.out.bits.brUpdate <> DontCare
+  io.out.bits.fflags <> DontCare
   io.out.bits.debug.isMMIO := false.B
 }
 
@@ -62,6 +83,7 @@ object Exu {
   val mulExeUnitCfg = ExuConfig("MulExu", Array(mulCfg), enableBypass = false)
   val divExeUnitCfg = ExuConfig("DivExu", Array(divCfg), enableBypass = false)
   val fenceExeUnitCfg = ExuConfig("FenceCfg", Array(fenceCfg), enableBypass = false)
+  val i2fExeUnitCfg = ExuConfig("I2fExu", Array(i2fCfg), enableBypass = false)
   val mulDivExeUnitCfg = ExuConfig("MulDivExu", Array(mulCfg, divCfg), enableBypass = false)
   val mulDivFenceExeUnitCfg = ExuConfig("MulDivFenceExu", Array(mulCfg, divCfg, fenceCfg), enableBypass = false)
   val ldExeUnitCfg = ExuConfig("LoadExu", Array(lduCfg), enableBypass = false)

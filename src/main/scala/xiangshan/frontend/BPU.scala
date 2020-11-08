@@ -337,8 +337,16 @@ class BPUStage3 extends BPUStage {
       io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
       io.out.bits.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
     }
-    takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)|| rets(i)))
-    when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
+    takens := VecInit((0 until PredictWidth).map(i => {
+      ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
+          jals(i) ||
+          (!ras.io.out.bits.specEmpty && rets(i)) ||
+          (ras.io.out.bits.specEmpty && btbHits(i))
+      }
+    ))
+    when(ras.io.is_ret && ras.io.out.valid){
+      targetSrc(retIdx) :=  ras.io.out.bits.target
+    }
   }
 
 

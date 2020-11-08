@@ -82,9 +82,9 @@ object GenMask {
   // generate w/r mask
   def apply(high: Int, low: Int) = {
     require(high > low)
-    VecInit(List.fill(high+1)(true.B)).asUInt >> low << low
+    (VecInit(List.fill(high+1)(true.B)).asUInt >> low << low).asUInt()
   }
   def apply(pos: Int) = {
-    1.U << pos
+    (1.U << pos).asUInt()
   }
 }

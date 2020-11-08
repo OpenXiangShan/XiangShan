@@ -28,14 +28,17 @@ class DivExeUnit extends Exu(Exu.divExeUnitCfg) {
     x
   )
 
-  divider.io.redirect := io.redirect
+  val dividerInputBits = divider.io.in.bits
+  val dividerInputCtrl = dividerInputBits.ext.get
+
+  divider.io.redirectIn := io.redirect
   divider.io.in.valid := io.in.valid
-  divider.io.in.bits.ctrl.uop := io.in.bits.uop
-  divider.io.in.bits.ctrl.sign := isDivSign
-  divider.io.in.bits.ctrl.isW := isW
-  divider.io.in.bits.ctrl.isHi := isH
-  divider.io.in.bits.src1 := divInputFunc(src1)
-  divider.io.in.bits.src2 := divInputFunc(src2)
+  dividerInputBits.uop := io.in.bits.uop
+  dividerInputCtrl.sign := isDivSign
+  dividerInputCtrl.isW := isW
+  dividerInputCtrl.isHi := isH
+  dividerInputBits.src(0) := divInputFunc(src1)
+  dividerInputBits.src(1) := divInputFunc(src2)
   divider.io.out.ready := io.out.ready
 
   io.in.ready := divider.io.in.ready
@@ -44,7 +47,7 @@ class DivExeUnit extends Exu(Exu.divExeUnitCfg) {
   io.out.bits.data := divider.io.out.bits.data
   io.out.bits.redirectValid := false.B
   io.out.bits.redirect <> DontCare
-  io.dmem <> DontCare
+  io.csrOnly <> DontCare
   io.out.bits.debug <> DontCare
 
   XSDebug(io.in.valid || io.redirect.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",

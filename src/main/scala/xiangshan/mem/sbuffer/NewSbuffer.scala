@@ -371,6 +371,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     XSDebug(valid_tag_match,
       p"valid tag match: forward [$i] <> buf[$valid_forward_idx]\n"
     )
+    XSDebug(inflight_tag_match || valid_tag_match,
+      p"[$i] forward paddr:${Hexadecimal(forward.paddr)}\n"
+    )
   }
 }
 
