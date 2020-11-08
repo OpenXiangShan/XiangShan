@@ -38,11 +38,14 @@ case class L1plusCacheParameters
 
 trait HasL1plusCacheParameters extends HasL1CacheParameters {
   val cacheParams = l1plusCacheParameters
+  val icacheParams = icacheParameters
   val cfg = cacheParams
+  val icfg = icacheParams
 
   def encRowBits = cacheParams.dataCode.width(rowBits)
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
+  def icachemisQueueEntryIdWidth = log2Up(icfg.nMissEntries)
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -180,6 +183,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
       valid_array(i) := 0.U
     }
   }
+  XSDebug("valid_array:%x   flush:%d\n",valid_array.asUInt,io.flush)
 
   val wen = io.write.valid && !reset.toBool && !io.flush
   when (wen) {
@@ -232,13 +236,13 @@ class L1plusCacheReq extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val id   = UInt(missQueueEntryIdWidth.W)
+  val id   = UInt(icachemisQueueEntryIdWidth.W)
 }
 
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
-  val id   = UInt(missQueueEntryIdWidth.W)
+  val id   = UInt(icachemisQueueEntryIdWidth.W)
 }
 
 class L1plusCacheIO extends L1plusCacheBundle
