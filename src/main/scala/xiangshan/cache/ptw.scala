@@ -5,9 +5,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
-import xiangshan.backend.decode.XSTrap
-import xiangshan.mem._
 import chisel3.ExcitingUtils._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLClientNode, TLMasterParameters, TLMasterPortParameters}
@@ -108,6 +105,8 @@ class PtwResp extends PtwBundle {
 
 class PtwIO extends PtwBundle {
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
+  val sfence = Input(new SfenceBundle)
+  val csr = Input(new TlbCsrBundle)
 }
 
 object ValidHold {
@@ -159,12 +158,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val validOneCycle = OneCycleValid(arb.io.out.fire())
   arb.io.out.ready := !valid// || resp(arbChosen).fire()
 
-  val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
-  val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
+  val sfence = io.sfence
+  val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
-  BoringUtils.addSink(sfence, "SfenceBundle")
-  BoringUtils.addSink(csr, "TLBCSRIO")
 
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb

@@ -11,6 +11,7 @@ class RAS extends BasePredictor
     class RASResp extends Resp
     {
         val target =UInt(VAddrBits.W)
+        val specEmpty = Bool()
     }
 
     class RASBranchInfo extends Meta
@@ -25,6 +26,7 @@ class RAS extends BasePredictor
         val is_ret = Input(Bool())
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
+        val isLastHalfRVI = Input(Bool())
         val recover =  Flipped(ValidIO(new BranchUpdateInfo))
         val out = ValidIO(new RASResp)
         val branchInfo = Output(new RASBranchInfo)
@@ -138,7 +140,7 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = WireInit(io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U))
+    val spec_new_addr = WireInit(io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U))))
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
