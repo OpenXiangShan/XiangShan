@@ -11,6 +11,7 @@ class RAS extends BasePredictor
     class RASResp extends Resp
     {
         val target =UInt(VAddrBits.W)
+        val specEmpty = Bool()
     }
 
     class RASBranchInfo extends Meta
@@ -65,6 +66,7 @@ class RAS extends BasePredictor
     io.branchInfo.rasToqAddr := DontCare
 
     io.out.valid := !spec_is_empty && io.is_ret
+    io.out.bits.specEmpty := spec_is_empty
 
     // update spec RAS
     // speculative update RAS

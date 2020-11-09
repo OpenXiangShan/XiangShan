@@ -1,7 +1,5 @@
 package top
 
-import noop._
-import bus.simplebus._
 import device._
 import utils._
 

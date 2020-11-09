@@ -2,7 +2,6 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 
 import utils.{XSDebug}
 
@@ -69,7 +68,7 @@ class AtomicsPipe extends DCacheModule
   // ---------------------------------------
   // stage 2
   val s2_req   = RegNext(s1_req)
-  val s2_valid = RegNext(s1_valid && !io.lsu.s1_kill, init = false.B)
+  val s2_valid = RegNext(s1_valid, init = false.B)
 
   dump_pipeline_reqs("AtomicsPipe s2", s2_valid, s2_req)
 
@@ -121,8 +120,6 @@ class AtomicsPipe extends DCacheModule
   val s2_lrsc_addr_match = lrsc_valid && lrsc_addr === get_block_addr(s2_req.addr)
   val s2_sc_fail = s2_sc && !s2_lrsc_addr_match
   val s2_sc_resp = Mux(s2_sc_fail, 1.U, 0.U)
-
-  // BoringUtils.addSource(RegEnable(lrsc_addr, s2_valid && s2_lr), "difftestLrscAddr")
 
   // we have permission on this block
   // but we can not finish in this pass
