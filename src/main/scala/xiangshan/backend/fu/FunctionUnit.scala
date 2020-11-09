@@ -129,7 +129,7 @@ trait HasPipelineReg { this: FunctionUnit =>
 
 object FunctionUnit extends HasXSParameter {
 
-  def multiplier = new ArrayMultiplier(XLEN+1)
+  def multiplier = new ArrayMultiplier(XLEN+1, Seq(0, 2))
   def divider = new Divider(XLEN)
   def alu = new Alu
 
