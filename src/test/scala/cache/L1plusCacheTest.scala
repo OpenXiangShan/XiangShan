@@ -201,21 +201,24 @@ class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers 
 }
 
 // emulated queue
-class IdPool(val nReqIds: Int) {
+class IdPool(val nReqIds: Int, name: String) {
   val freeIds = new Array[Boolean](nReqIds)
 
   def allocate(): Int = {
     for (i <- 0 until freeIds.size) {
       if (freeIds(i)) {
+        println(f"$name allocate: $i")
         freeIds(i) = false
         return i
       }
     }
     // no free id to allocate
+    println(f"$name allocate failed")
     return -1
   }
 
   def free(id: Int): Unit = {
+    println(f"$name free: $id")
     assert(!freeIds(id))
     freeIds(id) = true
   }
@@ -248,7 +251,7 @@ case class QueueEntry(
 class Queue(nEntries: Int, name: String) {
   // Queue
   // ---------------------------------------
-  val idPool = new IdPool(nEntries)
+  val idPool = new IdPool(nEntries, name + "IdPool")
   val queue = new ArrayBuffer[QueueEntry]()
   def enq(req: Req) = {
     // for unissued reqs, they have id = -1
@@ -313,48 +316,51 @@ class StoreQueue(nEntries: Int) extends Queue(nEntries, "StoreQueue") {
   def sendReq(port: DCacheLineIO): Unit = {
     val req = port.req
     // has last cycle's req been fired?
-    if (reqWaiting && req.ready.peek().litToBoolean) {
-      reqWaiting = false
-      // no requests waiting on line
-      // reset valid signal
-      req.valid.poke(false.B)
-    }
-
     // can we send a new request in this cycle
-    val reqIdx = select()
-    if (reqWaiting || reqIdx == -1) {
-      return
+    if (!reqWaiting) {
+      val reqIdx = select()
+      if (reqIdx == -1) {
+        // no more request to send
+        req.valid.poke(false.B)
+        return
+      }
+
+      val tId = idPool.allocate()
+      if (tId == -1) {
+        // no more request to send
+        req.valid.poke(false.B)
+        return
+      }
+
+      // try sending a new request in this cycle
+      // select a  req to issue
+
+      reqWaiting = true
+
+      issue(reqIdx, tId)
+
+      val CMD_WRITE = MemoryOpConstants.M_XWR
+      val FULL_MASK = BigInt("ffffffffffffffff", 16).U
+
+      val r = queue(reqIdx).req
+      req.valid.poke(true.B)
+      req.bits.cmd.poke(CMD_WRITE)
+      req.bits.addr.poke(r.addr.U)
+      req.bits.data.poke(r.data.U)
+      req.bits.mask.poke(FULL_MASK)
+      req.bits.meta.id.poke(tId.U)
+      req.bits.meta.vaddr.poke(r.addr.U)
+      req.bits.meta.paddr.poke(r.addr.U)
+      // req.bits.meta.uop.poke(0.U.asTypeOf(new MicroOp))
+      req.bits.meta.mmio.poke(false.B)
+      req.bits.meta.tlb_miss.poke(false.B)
+      req.bits.meta.mask.poke(FULL_MASK)
+      req.bits.meta.replay.poke(false.B)
     }
 
-    val tId = idPool.allocate()
-    if (tId == -1) {
-      return
+    if (req.valid.peek().litToBoolean && req.ready.peek().litToBoolean) {
+      reqWaiting = false
     }
-
-    // try sending a new request in this cycle
-    // select a  req to issue
-
-    reqWaiting = true
-
-    issue(reqIdx, tId)
-
-    val CMD_WRITE = MemoryOpConstants.M_XWR
-    val FULL_MASK = BigInt("ffffffffffffffff", 16).U
-
-    val r = queue(reqIdx).req
-    req.valid.poke(true.B)
-    req.bits.cmd.poke(CMD_WRITE)
-    req.bits.addr.poke(r.addr.U)
-    req.bits.data.poke(r.data.U)
-    req.bits.mask.poke(FULL_MASK)
-    req.bits.meta.id.poke(tId.U)
-    req.bits.meta.vaddr.poke(r.addr.U)
-    req.bits.meta.paddr.poke(r.addr.U)
-    // req.bits.meta.uop.poke(0.U.asTypeOf(new MicroOp))
-    req.bits.meta.mmio.poke(false.B)
-    req.bits.meta.tlb_miss.poke(false.B)
-    req.bits.meta.mask.poke(FULL_MASK)
-    req.bits.meta.replay.poke(false.B)
   }
 
   def handleResp(port: DCacheLineIO) = {
@@ -380,37 +386,40 @@ class LoadQueue(nEntries: Int) extends Queue(nEntries, "LoadQueue") {
   def sendReq(port: L1plusCacheIO): Unit = {
     val req = port.req
     // has last cycle's req been fired?
-    if (reqWaiting && req.ready.peek().litToBoolean) {
-      reqWaiting = false
-      // no requests waiting on line
-      // reset valid signal
-      req.valid.poke(false.B)
-    }
-
     // can we send a new request in this cycle
-    val reqIdx = select()
-    if (reqWaiting || reqIdx == -1) {
-      return
+    if (!reqWaiting) {
+      val reqIdx = select()
+      if (reqIdx == -1) {
+        // no more request to send
+        req.valid.poke(false.B)
+        return
+      }
+
+      val tId = idPool.allocate()
+      if (tId == -1) {
+        // no more request to send
+        req.valid.poke(false.B)
+        return
+      }
+
+      // try sending a new request in this cycle
+      // select a  req to issue
+
+      reqWaiting = true
+      issue(reqIdx, tId)
+
+      val CMD_READ = MemoryOpConstants.M_XRD
+
+      val r = queue(reqIdx).req
+      req.valid.poke(true.B)
+      req.bits.cmd.poke(CMD_READ)
+      req.bits.addr.poke(r.addr.U)
+      req.bits.id.poke(tId.U)
     }
 
-    val tId = idPool.allocate()
-    if (tId == -1) {
-      return
+    if (req.valid.peek().litToBoolean && req.ready.peek().litToBoolean) {
+      reqWaiting = false
     }
-
-    // try sending a new request in this cycle
-    // select a  req to issue
-
-    reqWaiting = true
-    issue(reqIdx, tId)
-
-    val CMD_READ = MemoryOpConstants.M_XRD
-
-    val r = queue(reqIdx).req
-    req.valid.poke(true.B)
-    req.bits.cmd.poke(CMD_READ)
-    req.bits.addr.poke(r.addr.U)
-    req.bits.id.poke(tId.U)
   }
 
   def handleResp(port: L1plusCacheIO) = {
