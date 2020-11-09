@@ -70,7 +70,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   val buffer = Mem(StoreBufferSize, new SbufferLine)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
-  val lru = new TrueLRU(StoreBufferSize)
+  //val lru = new SbufferLRU(StoreBufferSize)
+  val lru = new SbufferLRU(StoreBufferSize)
   // 2 * enq + 1 * deq
   val lruAccessWays = Wire(Vec(io.in.getWidth+1, new Valid(UInt(SbufferIndexWidth.W))))
   for(w <- lruAccessWays){
@@ -217,7 +218,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   val do_eviction = Wire(Bool())
   val empty = Cat(stateVec.map(s => s===s_invalid)).andR() && !Cat(io.in.map(_.valid)).orR()
-  val replaceIdx = lru.way
+  val replaceIdx = lru.way(stateVec.map(s => s===s_valid))
   val firstValidEntry = PriorityEncoder(stateVec.map(s => s===s_valid))
 
   val evictor = Module(new NaiveEvictor(StoreBufferSize-4))
@@ -248,6 +249,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
   XSDebug(p"sbuffer state:${sbuffer_state} do eviction:${do_eviction} empty:${empty}\n")
 
+  //XSDebug(p"replaceIdx:${replaceIdx}\n")
+  //val evictionIdxWire = replaceIdx
   val evictionIdxWire = Mux(stateVec(replaceIdx)===s_valid, replaceIdx, firstValidEntry)
   val evictionIdxEnqReq = Wire(DecoupledIO(UInt(SbufferIndexWidth.W)))
   val evictionIdxQueue = Module(new Queue(UInt(SbufferIndexWidth.W), StoreBufferSize, pipe = true, flow = false))
@@ -367,6 +370,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     )
     XSDebug(valid_tag_match,
       p"valid tag match: forward [$i] <> buf[$valid_forward_idx]\n"
+    )
+    XSDebug(inflight_tag_match || valid_tag_match,
+      p"[$i] forward paddr:${Hexadecimal(forward.paddr)}\n"
     )
   }
 }

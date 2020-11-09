@@ -11,6 +11,7 @@ class RAS extends BasePredictor
     class RASResp extends Resp
     {
         val target =UInt(VAddrBits.W)
+        val specEmpty = Bool()
     }
 
     class RASBranchInfo extends Meta
@@ -25,6 +26,7 @@ class RAS extends BasePredictor
         val is_ret = Input(Bool())
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
+        val isLastHalfRVI = Input(Bool())
         val recover =  Flipped(ValidIO(new BranchUpdateInfo))
         val out = ValidIO(new RASResp)
         val branchInfo = Output(new RASBranchInfo)
@@ -64,12 +66,13 @@ class RAS extends BasePredictor
     io.branchInfo.rasToqAddr := DontCare
 
     io.out.valid := !spec_is_empty && io.is_ret
+    io.out.bits.specEmpty := spec_is_empty
 
     // update spec RAS
     // speculative update RAS
     val spec_push = !spec_is_full && io.callIdx.valid && io.pc.valid
     val spec_pop = !spec_is_empty && io.is_ret && io.pc.valid
-    val spec_new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,4.U)
+    val spec_new_addr = io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U))
     val spec_ras_write = WireInit(0.U.asTypeOf(rasEntry()))
     val sepc_alloc_new = spec_new_addr =/= spec_ras_top_addr
     when (spec_push) {
@@ -104,7 +107,7 @@ class RAS extends BasePredictor
     //update commit ras
     val commit_push = !commit_is_full && io.recover.valid && io.recover.bits.pd.isCall
     val commit_pop = !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
-    val commit_new_addr = io.recover.bits.pc + 4.U  //TODO: consider RVC
+    val commit_new_addr = Mux(io.recover.bits.pd.isRVC,io.recover.bits.pc + 2.U,io.recover.bits.pc + 4.U) 
     val commit_ras_write = WireInit(0.U.asTypeOf(rasEntry()))
     val commit_alloc_new = commit_new_addr =/= commit_ras_top_addr
     when (commit_push) {

@@ -85,14 +85,14 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
 
-  Debug(false) {
-    when (wen) {
-      printf("%d: SRAMTemplate: write %x to idx = %d\n", GTimer(), wdata.asUInt, setIdx)
-    }
-    when (RegNext(realRen)) {
-      printf("%d: SRAMTemplate: read %x at idx = %d\n", GTimer(), VecInit(rdata).asUInt, RegNext(io.r.req.bits.setIdx))
-    }
-  }
+  // Debug(false) {
+  //   when (wen) {
+  //     printf("%d: SRAMTemplate: write %x to idx = %d\n", GTimer(), wdata.asUInt, setIdx)
+  //   }
+  //   when (RegNext(realRen)) {
+  //     printf("%d: SRAMTemplate: read %x at idx = %d\n", GTimer(), VecInit(rdata).asUInt, RegNext(io.r.req.bits.setIdx))
+  //   }
+  // }
 }
 
 class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int = 1,
