@@ -11,8 +11,8 @@ import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils._
 
@@ -247,29 +247,85 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
-  // TODO: refactor these params
+  // L1 to L2 network
+  // -------------------------------------------------
+  val L1BusWidth = 256
+  val L2Size = 512 * 1024 // 512KB
+  val L2BlockSize = 64
+  val L2NWays = 8
+  val L2NSets = L2Size / L2BlockSize / L2NWays
+
+  private val l2_xbar = TLXbar()
+
   private val l2 = LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
-      ways = 4,
-      sets = 512 * 1024 / (64 * 4),
-      blockBytes = 64,
-      beatBytes = 32 // beatBytes = l1BusDataWidth / 8
+      ways = L2NWays,
+      sets = L2NSets,
+      blockBytes = L2BlockSize,
+      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
+      cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 8
     )
   ))
 
-  private val xbar = TLXbar()
+  l2_xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := ptw.node
+  l2.node := TLBuffer() := DebugIdentityNode() := l2_xbar
 
-  xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := ptw.node
 
-  l2.node := xbar
+  // L2 to L3 network
+  // -------------------------------------------------
+  val L2BusWidth = 256
+  val L3Size = 4 * 1024 * 1024 // 4MB
+  val L3BlockSize = 64
+  val L3NBanks = 4
+  val L3NWays = 8
+  val L3NSets = L3Size / L3BlockSize / L3NBanks / L3NWays
 
-  mem := TLBuffer() := TLCacheCork() := TLBuffer() := l2.node
+  private val l3_xbar = TLXbar()
+
+  private val l3_banks = (0 until L3NBanks) map (i =>
+      LazyModule(new InclusiveCache(
+        CacheParameters(
+          level = 3,
+          ways = L3NWays,
+          sets = L3NSets,
+          blockBytes = L3BlockSize,
+          beatBytes = L2BusWidth / 8,
+          cacheName = s"L3_$i"
+        ),
+      InclusiveCacheMicroParameters(
+        writeBytes = 8
+      )
+    )))
+
+  l3_xbar := TLBuffer() := DebugIdentityNode() := l2.node
+
+  def bankFilter(bank: Int) = AddressSet(
+    base = bank * L3BlockSize,
+    mask = ~BigInt((L3NBanks -1) * L3BlockSize))
+
+  for(i <- 0 until L3NBanks) {
+    val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
+    l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
+  }
+
+
+  // L3 to memory network
+  // -------------------------------------------------
+  val L3BusWidth = 256
+
+  private val memory_xbar = TLXbar()
+
+  for(i <- 0 until L3NBanks) {
+    memory_xbar := TLBuffer() := TLCacheCork() := TLBuffer() := DebugIdentityNode() := l3_banks(i).node
+  }
+
+  mem := TLBuffer() := TLWidthWidget(L3BusWidth / 8) := memory_xbar
 
   lazy val module = new XSCoreImp(this)
 }
