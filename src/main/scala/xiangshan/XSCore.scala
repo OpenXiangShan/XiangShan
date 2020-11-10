@@ -167,8 +167,6 @@ trait HasXSParameter {
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
 
-  val l1BusDataWidth = 256
-
   val icacheParameters = ICacheParameters(
     nMissEntries = 2
   )
@@ -188,6 +186,28 @@ trait HasXSParameter {
   )
 
   val LRSCCycles = 100
+
+
+  // cache hierarchy configurations
+  val l1BusDataWidth = 256
+
+  // L2 configurations
+  val L1BusWidth = 256
+  val L2Size = 512 * 1024 // 512KB
+  val L2BlockSize = 64
+  val L2NWays = 8
+  val L2NSets = L2Size / L2BlockSize / L2NWays
+
+  // L3 configurations
+  val L2BusWidth = 256
+  val L3Size = 4 * 1024 * 1024 // 4MB
+  val L3BlockSize = 64
+  val L3NBanks = 4
+  val L3NWays = 8
+  val L3NSets = L3Size / L3BlockSize / L3NBanks / L3NWays
+
+  // on chip network configurations
+  val L3BusWidth = 256
 }
 
 trait HasXSLog { this: RawModule =>
@@ -238,24 +258,20 @@ object AddressSpace extends HasXSParameter {
 
 
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule {
+class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
 
+  // inner nodes
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
+  // out facing nodes
   val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
   // L1 to L2 network
   // -------------------------------------------------
-  val L1BusWidth = 256
-  val L2Size = 512 * 1024 // 512KB
-  val L2BlockSize = 64
-  val L2NWays = 8
-  val L2NSets = L2Size / L2BlockSize / L2NWays
-
   private val l2_xbar = TLXbar()
 
   private val l2 = LazyModule(new InclusiveCache(
@@ -280,13 +296,6 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   // L2 to L3 network
   // -------------------------------------------------
-  val L2BusWidth = 256
-  val L3Size = 4 * 1024 * 1024 // 4MB
-  val L3BlockSize = 64
-  val L3NBanks = 4
-  val L3NWays = 8
-  val L3NSets = L3Size / L3BlockSize / L3NBanks / L3NWays
-
   private val l3_xbar = TLXbar()
 
   private val l3_banks = (0 until L3NBanks) map (i =>
@@ -318,8 +327,6 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
 
   // L3 to memory network
   // -------------------------------------------------
-  val L3BusWidth = 256
-
   private val memory_xbar = TLXbar()
 
   for(i <- 0 until L3NBanks) {
