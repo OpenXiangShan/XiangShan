@@ -165,6 +165,7 @@ object TestMain extends App {
     else if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
     else Parameters.debugParameters // open log
   )
+
   implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
