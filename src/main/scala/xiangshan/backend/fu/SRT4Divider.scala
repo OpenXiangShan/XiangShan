@@ -33,7 +33,7 @@ class SRT4Divider(len: Int) extends AbstractDivider(len) {
   val divZero = b === 0.U
   val divZeroReg = RegEnable(divZero, newReq)
 
-  val kill = uopReg.roqIdx.needFlush(io.redirectIn)
+  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)
 
   switch(state){
     is(s_idle){
