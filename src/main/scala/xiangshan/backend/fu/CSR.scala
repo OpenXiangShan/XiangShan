@@ -808,10 +808,10 @@ class CSR extends XSModule
     "ICacheReq"   -> (0xb28, "perfCntIcacheReqCnt"     ),
     "ICacheMiss"   -> (0xb29, "perfCntIcacheMissCnt"     ),
     "FetchFromICache" -> (0xb2a, "CntFetchFromICache"),
-    "FetchFromLoopBuffer" -> (0xb2b, "CntFetchFromLoopBuffer"),
-    "ExitLoop1" -> (0xb2c, "CntExitLoop1"),
-    "ExitLoop2" -> (0xb2d, "CntExitLoop2"),
-    "ExitLoop3" -> (0xb2e, "CntExitLoop3")
+    "FetchFromLoopBuffer" -> (0xb2b, "CntFetchFromLoopBuffer")//,
+    // "ExitLoop1" -> (0xb2c, "CntExitLoop1"),
+    // "ExitLoop2" -> (0xb2d, "CntExitLoop2"),
+    // "ExitLoop3" -> (0xb2e, "CntExitLoop3")
 //    "Custom1"     -> (0xb1b, "Custom1"             ),
 //    "Custom2"     -> (0xb1c, "Custom2"             ),
 //    "Custom3"     -> (0xb1d, "Custom3"             ),

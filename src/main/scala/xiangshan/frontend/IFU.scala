@@ -48,7 +48,7 @@ class IFU extends XSModule with HasIFUConst
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
   val pd = Module(new PreDecode)
-  val loopBuffer = Module(new NewLoopBuffer)
+  val loopBuffer = if(EnableLB) { Module(new NewLoopBuffer) } else { Module(new FakeLoopBuffer) }
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
   val if1_flush, if2_flush, if3_flush, if4_flush = WireInit(false.B)
@@ -57,7 +57,7 @@ class IFU extends XSModule with HasIFUConst
   val inLoop = WireInit(loopBuffer.io.out.valid)
   val icacheResp = WireInit(Mux(inLoop, loopBuffer.io.out.bits, io.icacheResp.bits))
 
-  if4_flush := io.redirect.valid || loopBufPar.LBredirect.valid
+  if4_flush := io.redirect.valid// || loopBufPar.LBredirect.valid
   if3_flush := if4_flush || if4_redirect
   if2_flush := if3_flush || if3_redirect
   if1_flush := if2_flush || if2_redirect
@@ -350,9 +350,9 @@ class IFU extends XSModule with HasIFUConst
     }
   }
 
-  when (loopBufPar.LBredirect.valid) {
-    if1_npc := loopBufPar.LBredirect.bits
-  }
+  // when (loopBufPar.LBredirect.valid) {
+  //   if1_npc := loopBufPar.LBredirect.bits
+  // }
 
   when (io.redirect.valid) {
     if1_npc := io.redirect.bits.target
