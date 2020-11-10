@@ -140,7 +140,7 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = WireInit(io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U))))
+    val spec_new_addr = WireInit(io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U)))
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
@@ -169,6 +169,7 @@ class RAS extends BasePredictor
 
     io.out.valid := !spec_is_empty && io.is_ret
     io.out.bits.target := spec_top_addr
+    io.out.bits.specEmpty := spec_is_empty
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 
