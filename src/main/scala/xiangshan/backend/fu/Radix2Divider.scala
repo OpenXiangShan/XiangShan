@@ -4,11 +4,16 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend._
 
-import xiangshan.backend.fu.FunctionUnit._
+abstract class AbstractDivider(len: Int) extends FunctionUnit(
+  FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false, UncertainLatency()),
+  len
+){
+  val ctrl = IO(Input(new MulDivCtrl))
+  val sign = ctrl.sign
+}
 
-class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl) {
+class Radix2Divider(len: Int) extends AbstractDivider(len) {
 
   def abs(a: UInt, sign: Bool): (Bool, UInt) = {
     val s = a(len - 1) && sign
@@ -27,8 +32,6 @@ class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl)
   val hi = shiftReg(len * 2, len)
   val lo = shiftReg(len - 1, 0)
 
-  val ctrl = io.in.bits.ext.get
-  val sign = io.in.bits.ext.get.sign
   val uop = io.in.bits.uop
 
   val (aSign, aVal) = abs(a, sign)
@@ -71,7 +74,8 @@ class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl)
     }
   }
 
-  when(state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)){
+  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)
+  when(kill){
     state := s_idle
   }
 
@@ -84,6 +88,6 @@ class Divider(len: Int) extends FunctionUnit(divCfg, 64, extIn = new MulDivCtrl)
   io.out.bits.data := Mux(ctrlReg.isW, SignExt(res(31,0),xlen), res)
   io.out.bits.uop := uopReg
 
-  io.out.valid := state === s_finish
+  io.out.valid := state === s_finish && !kill
   io.in.ready := state === s_idle
 }

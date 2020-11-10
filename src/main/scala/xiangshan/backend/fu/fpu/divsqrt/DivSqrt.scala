@@ -3,10 +3,13 @@ package xiangshan.backend.fu.fpu.divsqrt
 import xiangshan.backend.fu.fpu._
 import chisel3._
 import chisel3.util._
+import xiangshan.FuType
+import xiangshan.backend.fu.{FuConfig, UncertainLatency}
 import xiangshan.backend.fu.fpu.util.{FPUDebug, ORTree, ShiftRightJam}
-import xiangshan.backend.fu.FunctionUnit.fDivSqrtCfg
 
-class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
+class DivSqrt extends FPUSubModule(
+  FuConfig(FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency())
+) {
 
   def SEXP_WIDTH: Int = Float64.expWidth + 2
   def D_MANT_WIDTH: Int = Float64.mantWidth + 1
@@ -18,6 +21,7 @@ class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
 
 
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
+  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)
   val rmReg = RegEnable(rm, io.in.fire())
   val isDiv = !op(0)
   val isDivReg = RegEnable(isDiv, io.in.fire())
@@ -236,9 +240,12 @@ class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
       state := s_finish
     }
     is(s_finish){
-      state := s_idle
+      when(io.out.fire()){
+        state := s_idle
+      }
     }
   }
+  when(kill){ state := s_idle }
 
   switch(state){
     is(s_idle){
@@ -281,7 +288,7 @@ class DivSqrt extends FPUSubModule(fDivSqrtCfg) {
   )
 
   io.in.ready := (state === s_idle) && io.out.ready
-  io.out.valid := state === s_finish
+  io.out.valid := (state === s_finish) && !kill
   io.out.bits.data := Mux(specialCaseHappenReg,
     specialResult,
     Mux(overflowReg,

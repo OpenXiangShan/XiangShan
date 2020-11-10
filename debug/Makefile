@@ -4,7 +4,7 @@ SINGLETEST = ALL=min3
 
 B ?= 0
 E ?= 0
-V ?= ALL
+V ?= OFF
 #V ?= OFF
 EMU_ARGS = B=$(B) E=$(E) V=$(V)
 
@@ -13,7 +13,8 @@ EMU_ARGS = B=$(B) E=$(E) V=$(V)
 # ------------------------------------------------------------------
 
 cache:
-	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 2>&1 | tee > loader.log
+	$(MAKE) -C $(AM_HOME)/tests/cachetest $(ARCH) ALL=loader $(EMU_ARGS) run 
+	#2>&1 | tee > loader.log
 	#2>&1 | tee > loader.log
 
 cpu:
@@ -40,6 +41,7 @@ amtest:
 
 microbench:
 	$(MAKE) -C $(AM_HOME)/apps/microbench $(ARCH) $(EMU_ARGS) mainargs=test run 
+	#2>&1 | tee > microbench.log
 	#2 > microbench.log
 	cat microbench.log | grep IPC
 

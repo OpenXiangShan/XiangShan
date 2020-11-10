@@ -13,6 +13,7 @@ import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
 import utils.ParallelOR
+import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
 
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
@@ -30,24 +31,29 @@ class Backend extends XSModule
 
 
   val aluExeUnits =Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
-  val jmpExeUnit = Module(new JmpExeUnit)
-  val mulExeUnits = Array.tabulate(exuParameters.MulCnt)(_ => Module(new MulExeUnit))
+  val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
   val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new FmacExeUnit))
   val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new FmiscExeUnit))
-  // val fmiscDivSqrtExeUnits = Array.tabulate(exuParameters.FmiscDivSqrtCnt)(_ => Module(new FmiscDivSqrtExeUnit))
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mulExeUnits ++ mduExeUnits ++ fmacExeUnits ++ fmiscExeUnits)
+  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mduExeUnits ++ fmacExeUnits ++ fmiscExeUnits)
   exeUnits.foreach(_.io.csrOnly := DontCare)
   exeUnits.foreach(_.io.mcommit := DontCare)
 
   fmacExeUnits.foreach(_.frm := jmpExeUnit.frm)
   fmiscExeUnits.foreach(_.frm := jmpExeUnit.frm)
 
+  val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
+  val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch)
+  val dispatch = Module(new Dispatch(
+    jmpExeUnit.config, aluExeUnits(0).config, mduExeUnits(0).config,
+    fmacExeUnits(0).config, fmiscExeUnits(0).config,
+    ldExeUnitCfg, stExeUnitCfg
+  ))
   val roq = Module(new Roq)
   val intRf = Module(new Regfile(
     numReadPorts = NRIntReadPorts,
@@ -74,9 +80,11 @@ class Backend extends XSModule
   io.frontend.redirect := redirect
   io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
 
+
+
   val memConfigs =
-    Seq.fill(exuParameters.LduCnt)(Exu.ldExeUnitCfg) ++
-    Seq.fill(exuParameters.StuCnt)(Exu.stExeUnitCfg)
+    Seq.fill(exuParameters.LduCnt)(ldExeUnitCfg) ++
+    Seq.fill(exuParameters.StuCnt)(stExeUnitCfg)
 
   val exuConfigs = exeUnits.map(_.config) ++ memConfigs
 
@@ -104,7 +112,7 @@ class Backend extends XSModule
       .map(_._2)
     val extraListenPortsCnt = extraListenPorts.length
 
-    val feedback = (cfg == Exu.ldExeUnitCfg) || (cfg == Exu.stExeUnitCfg)
+    val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
     
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
   
@@ -122,13 +130,15 @@ class Backend extends XSModule
     }
 
     cfg match {
-      case Exu.ldExeUnitCfg =>
-      case Exu.stExeUnitCfg =>
+      case `ldExeUnitCfg` =>
+      case `stExeUnitCfg` =>
       case otherCfg =>
         exeUnits(i).io.in <> rs.io.deq
         exeUnits(i).io.redirect <> redirect
         rs.io.tlbFeedback := DontCare
     }
+
+    rs.suggestName(s"rs_${cfg.name}")
 
     rs
   })
@@ -142,8 +152,8 @@ class Backend extends XSModule
   io.mem.commits <> roq.io.commits
   io.mem.roqDeqPtr := roq.io.roqDeqPtr
 
-  io.mem.ldin <> reservedStations.filter(_.exuCfg == Exu.ldExeUnitCfg).map(_.io.deq)
-  io.mem.stin <> reservedStations.filter(_.exuCfg == Exu.stExeUnitCfg).map(_.io.deq)
+  io.mem.ldin <> reservedStations.filter(_.exuCfg == ldExeUnitCfg).map(_.io.deq)
+  io.mem.stin <> reservedStations.filter(_.exuCfg == stExeUnitCfg).map(_.io.deq)
   jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
   jmpExeUnit.fflags := roq.io.fflags
@@ -160,7 +170,7 @@ class Backend extends XSModule
   io.mem.exceptionAddr.isStore := CommitType.lsInstIsStore(roq.io.exception.ctrl.commitType)
 
   io.mem.tlbFeedback <> reservedStations.filter(
-	x => x.exuCfg == Exu.ldExeUnitCfg || x.exuCfg == Exu.stExeUnitCfg
+    x => x.exuCfg == ldExeUnitCfg || x.exuCfg == stExeUnitCfg
   ).map(_.io.tlbFeedback)
 
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo

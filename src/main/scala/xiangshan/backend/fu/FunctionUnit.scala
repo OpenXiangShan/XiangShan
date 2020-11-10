@@ -3,6 +3,9 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.fu.fpu.divsqrt.DivSqrt
+import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.fpu.fma.FMA
 
 /*
     XiangShan Function Unit
@@ -21,10 +24,6 @@ case class UncertainLatency() extends HasFuLatency {
   override val latencyVal: Option[Int] = None
 }
 
-case class NexusLatency(value: Int) extends HasFuLatency {
-  override val latencyVal: Option[Int] = Some(value)
-}
-
 
 
 case class FuConfig
@@ -40,18 +39,23 @@ case class FuConfig
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }
 
+
+
+class FuOutput extends XSBundle {
+  val data = UInt(XLEN.W)
+  val uop = new MicroOp
+}
+
+
 class FunctionUnitIO[TI <: Data, TO <: Data]
 (
   cfg: FuConfig,
-  len: Int,
-  extIn: => TI = null,
-  extOut: => TO = null
+  len: Int
 ) extends XSBundle
 {
   val in = Flipped(DecoupledIO(new Bundle() {
     val src = Vec(cfg.srcCnt, UInt(len.W))
     val uop = new MicroOp
-    val ext = if(extIn == null) None else Some(extIn.cloneType)
 
     def connectToExuInput(exuIn: ExuInput): Unit = {
       val exuSrcIn = Seq(exuIn.src1, exuIn.src2, exuIn.src3)
@@ -60,33 +64,28 @@ class FunctionUnitIO[TI <: Data, TO <: Data]
     }
   }))
 
-  val out = DecoupledIO(new Bundle() {
-    val data = UInt(XLEN.W)
-    val uop = new MicroOp
-    val ext = if(extOut == null) None else Some(extOut.cloneType)
-  })
+  val out = DecoupledIO(new FuOutput)
 
   val redirectIn = Flipped(ValidIO(new Redirect))
 
   override def cloneType: FunctionUnitIO.this.type =
-    new FunctionUnitIO(cfg, len, extIn, extOut).asInstanceOf[this.type]
+    new FunctionUnitIO(cfg, len).asInstanceOf[this.type]
 }
 
-abstract class FunctionUnit[TI <: Data, TO <: Data]
+abstract class FunctionUnit
 (
-  cfg: FuConfig,
-  len: Int = 64,
-  extIn: => TI = null,
-  extOut: => TO = null,
-  val latency: Int = 0
+  val cfg: FuConfig,
+  val len: Int = 64
 ) extends XSModule {
 
-  val io = IO(new FunctionUnitIO[TI, TO](cfg, len, extIn, extOut))
+  val io = IO(new FunctionUnitIO(cfg, len))
 
 }
 
-trait HasPipelineReg[TI <: Data, TO <: Data] {
-  this: FunctionUnit[TI, TO] =>
+trait HasPipelineReg { this: FunctionUnit =>
+
+  require(cfg.latency.latencyVal.nonEmpty && cfg.latency.latencyVal.get > 0)
+  val latency = cfg.latency.latencyVal.get
 
   val validVec = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   val rdyVec = Array.fill(latency)(Wire(Bool())) :+ io.out.ready
@@ -128,32 +127,29 @@ trait HasPipelineReg[TI <: Data, TO <: Data] {
   def S5Reg[TT <: Data](next: TT): TT = PipelineReg[TT](5)(next)
 }
 
-object FunctionUnit {
+object FunctionUnit extends HasXSParameter {
 
-  val csrCfg =
-    FuConfig(FuType.csr, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false)
+  def divider = new SRT4Divider(XLEN)
+  def multiplier = new ArrayMultiplier(XLEN+1, Seq(0, 2))
 
-  val jmpCfg =
-    FuConfig(FuType.jmp, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = true)
+  def alu = new Alu
 
-  val i2fCfg =
-    FuConfig(FuType.i2f, 1, 0, writeIntRf = false, writeFpRf = true, hasRedirect = false)
+  def jmp = new Jump
+  def fence = new Fence
+  def csr = new CSR
+  def i2f = new IntToFloatSingleCycle
 
-  val aluCfg =
-    FuConfig(FuType.alu, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = true)
+  def fmac = new FMA
+  def fcmp = new FCMP
+  def fmv = new FMV(XLEN)
+  def f2i = new FloatToInt
+  def f32toF64 = new F32toF64
+  def f64toF32 = new F64toF32
+  def fdivSqrt = new DivSqrt
 
-  val mulCfg =
-    FuConfig(FuType.mul, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false,
-      UncertainLatency()// CertainLatency(3)
-    )
-
-  val divCfg =
-    FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false,
-      UncertainLatency()
-    )
-
-  val fenceCfg = 
-    FuConfig(FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false/*NOTE: need redirect but when commit*/)
+  def fmiscSel(fu: String)(x: FPUSubModule): Bool = {
+    x.io.in.bits.uop.ctrl.fuOpType.head(4) === s"b$fu".U
+  }
 
   val lduCfg =
     FuConfig(FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true, hasRedirect = false,
@@ -169,19 +165,4 @@ object FunctionUnit {
     FuConfig(FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
       UncertainLatency()
   )
-
-  val fmacCfg =
-    FuConfig(FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false,
-      CertainLatency(5)
-    )
-
-  val fmiscCfg =
-    FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = true, hasRedirect = false,
-      UncertainLatency()
-    )
-
-  val fDivSqrtCfg =
-    FuConfig(FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false,
-      UncertainLatency()
-    )
 }

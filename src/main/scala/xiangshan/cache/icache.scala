@@ -7,12 +7,6 @@ import xiangshan._
 import xiangshan.frontend._
 import utils._
 import chisel3.ExcitingUtils._
-import chipsalliance.rocketchip.config.Parameters
-
-import freechips.rocketchip.tilelink.{TLBundleA,TLBundleD,TLBundleE,TLEdgeOut}
-import freechips.rocketchip.diplomacy.{AddressSet,IdRange,LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink.{TLClientNode, TLClientParameters, TLMasterParameters, TLMasterPortParameters, TLArbiter}
-import bus.tilelink.{TLParameters, TLPermissions, ClientMetadata}
 
 case class ICacheParameters(
     nSets: Int = 64,
@@ -23,6 +17,7 @@ case class ICacheParameters(
     dataECC: Option[String] = None,
     nSDQ: Int = 17,
     nRPQ: Int = 16,
+    nMissEntries: Int = 1,
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
@@ -39,8 +34,16 @@ trait HasICacheParameters extends HasL1CacheParameters {
   def cacheID = 0
   // RVC instruction length
   def RVCInsLen = 16
-  val groupAlign = log2Up(FetchWidth * 4 * 2)
+
+  // icache Queue
+  val groupAlign = log2Up(cacheParams.blockBytes)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  
+  //ECC encoding
+  def encRowBits = cacheParams.dataCode.width(rowBits)
+  def encTagBits = cacheParams.tagCode.width(tagBits)
+
+  // ICache MSHR settings
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -53,21 +56,25 @@ trait HasICacheParameters extends HasL1CacheParameters {
 abstract class ICacheBundle extends XSBundle
   with HasICacheParameters
 
-abstract class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
-  with HasICacheParameters 
-  with HasXSLog
+abstract class ICacheModule extends XSModule
+  with HasICacheParameters
   with ICacheBase
 
+abstract class ICacheArray extends XSModule
+  with HasICacheParameters
 
-sealed class ICacheMetaBundle extends ICacheBundle
-{
-  val tag = UInt(tagBits.W)
-}
+abstract class ICachArray extends XSModule
+  with HasICacheParameters
 
-sealed class ICacheDataBundle extends ICacheBundle
-{
-  val data = UInt(wordBits.W)
-}
+// sealed class ICacheMetaBundle extends ICacheBundle
+// {
+//   val tag = UInt(tagBits.W)
+// }
+
+// sealed class ICacheDataBundle extends ICacheBundle
+// {
+//   val data = UInt(encRowBits.W)
+// }
 
 class ICacheReq extends ICacheBundle
 {
@@ -84,12 +91,15 @@ class ICacheResp extends ICacheBundle
 }
 
 
-class ICacheIO(edge: TLEdgeOut) extends ICacheBundle
+class ICacheIO extends ICacheBundle
 {
   val req = Flipped(DecoupledIO(new ICacheReq))
   val resp = DecoupledIO(new ICacheResp)
+  val mem_acquire = DecoupledIO(new L1plusCacheReq)
+  val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
   val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
+  val l1plusflush = Output(Bool())
   val fencei = Input(Bool())
 }
 
@@ -126,29 +136,105 @@ trait ICacheBase extends HasICacheParameters
 
 }
 
-/* ------------------------------------------------------------
- * This module is the Top tilelink module of Icache
- * ------------------------------------------------------------
- */
-class ICache()(implicit p: Parameters) extends LazyModule
-  with HasICacheParameters
+class ICacheMetaWriteBundle extends ICacheBundle
 {
-  val clientParameters = TLMasterPortParameters.v1(
-    Seq(TLMasterParameters.v1(
-      name = "icache"))
-  )
-  val clientNode = TLClientNode(Seq(clientParameters))
-  lazy val module = new ICacheImp(this)
-  
+  val virIdx = UInt(idxBits.W)
+  val phyTag = UInt(tagBits.W)
+  val waymask = UInt(nWays.W)
+
+  def apply(tag:UInt, idx:UInt, waymask:UInt){
+    this.virIdx := idx
+    this.phyTag := tag
+    this.waymask := waymask
+  }
+
 }
 
+class ICacheDataWriteBundle extends ICacheBundle
+{
+  val virIdx = UInt(idxBits.W)
+  val data = UInt(blockBits.W)
+  val waymask = UInt(nWays.W)
+
+  def apply(data:UInt, idx:UInt, waymask:UInt){
+    this.virIdx := idx
+    this.data := data
+    this.waymask := waymask
+  }
+
+}
+
+class ICacheMetaArray extends ICachArray
+{
+  val io=IO{new Bundle{
+    val write = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
+    val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
+    val readResp = Output(Vec(nWays,UInt(tagBits.W)))
+  }}
+
+  val metaArray = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays, shouldReset = true))
+
+  //read 
+  metaArray.io.r.req.valid := io.read.valid
+  io.read.ready := metaArray.io.r.req.ready
+  io.write.ready := DontCare
+  metaArray.io.r.req.bits.apply(setIdx=io.read.bits)
+
+  val rtag = metaArray.io.r.resp.asTypeOf(Vec(nWays,UInt(encTagBits.W)))
+  val tag_encoded = VecInit(rtag.map(wtag => cacheParams.tagCode.decode(wtag).corrected))
+  io.readResp :=tag_encoded.asTypeOf(Vec(nWays,UInt(tagBits.W)))
+  //write
+  val write = io.write.bits
+  val wdata_encoded = cacheParams.tagCode.encode(write.phyTag.asUInt)
+  metaArray.io.w.req.valid := io.write.valid
+  metaArray.io.w.req.bits.apply(data=wdata_encoded, setIdx=write.virIdx, waymask=write.waymask)
+
+
+}
+
+class ICacheDataArray extends ICachArray
+{
+  val io=IO{new Bundle{
+    val write = Flipped(DecoupledIO(new ICacheDataWriteBundle))
+    val read  = Flipped(DecoupledIO(UInt(idxBits.W)))
+    val readResp = Output(Vec(blockWords,Vec(nWays,UInt(encRowBits.W))))
+  }}
+
+  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(UInt(encRowBits.W), set=nSets, way = nWays))}
+
+  //read 
+  //do ECC decoding after way choose
+  for(b <- 0 until blockWords){
+    dataArray(b).io.r.req.valid := io.read.valid
+    dataArray(b).io.r.req.bits.apply(setIdx=io.read.bits)
+  }
+  val dataArrayReadyVec = dataArray.map(b => b.io.r.req.ready)
+
+  io.read.ready := ParallelOR(dataArrayReadyVec)
+  io.write.ready := DontCare
+  io.readResp := VecInit(dataArray.map(b => b.io.r.resp.asTypeOf(Vec(nWays,UInt(encRowBits.W)))))
+
+  //write
+  val write = io.write.bits
+  val write_data = write.data.asTypeOf(Vec(blockWords,UInt(rowBits.W)))
+  val write_data_encoded = write_data.map(wdata => cacheParams.tagCode.encode(wdata))
+
+  for(b <- 0 until blockWords){
+    dataArray(b).io.w.req.valid := io.write.valid
+    dataArray(b).io.w.req.bits.apply(   setIdx=write.virIdx, 
+                                        data=write_data_encoded(b), 
+                                        waymask=write.waymask)
+
+  }
+
+}
 
 /* ------------------------------------------------------------
  * This module is a SRAM with 4-way associated mapping
  * The hardware implementation of ICache
  * ------------------------------------------------------------
  */
-class ICacheImp(outer: ICache) extends ICacheModule(outer)
+class ICache extends ICacheModule
 {
   // cut a cacheline into a fetch packet
   def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
@@ -174,16 +260,13 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   }
 
 
-  val (bus, edge) = outer.clientNode.out.head
-  require(bus.d.bits.data.getWidth == l1BusDataWidth, "ICache: tilelink width does not match")
-  val io = IO(new ICacheIO(edge))
-  val (_, _, refill_done, refill_cnt) = edge.count(bus.d)
+  val io = IO(new ICacheIO)
 
   //----------------------------
   //    Memory Part
   //----------------------------
-  val metaArray = Module(new SRAMTemplate(new ICacheMetaBundle, set=nSets, way=nWays, shouldReset = true))
-  val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(new ICacheDataBundle, set=nSets, way = nWays))}
+  val metaArray = Module(new ICacheMetaArray)
+  val dataArray = Module(new ICacheDataArray)
   // 256-bit valid
   val validArray = RegInit(0.U((nSets * nWays).W)) 
 
@@ -198,12 +281,11 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
-  metaArray.io.r.req.valid := s1_valid
-  metaArray.io.r.req.bits.apply(setIdx=s1_idx)
-  for(b <- 0 until blockWords){
-    dataArray(b).io.r.req.valid := s1_valid
-    dataArray(b).io.r.req.bits.apply(setIdx=s1_idx)
-  }
+  metaArray.io.read.valid := s1_valid
+  metaArray.io.read.bits  :=s1_idx
+  dataArray.io.read.valid := s1_valid
+  dataArray.io.read.bits  :=s1_idx
+
   XSDebug("[Stage 1] v : r : f  (%d  %d  %d)  request pc: 0x%x  mask: %b\n",s1_valid,s2_ready,s1_fire,s1_req_pc,s1_req_mask)
   XSDebug("[Stage 1] index: %d\n",s1_idx)
   
@@ -221,13 +303,13 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   .elsewhen(s2_fire) { s2_valid := false.B}
 
   // SRAM(Meta and Data) read reseponse
-  val metas = metaArray.io.r.resp.asTypeOf(Vec(nWays,new ICacheMetaBundle))
-  val datas =dataArray.map(b => RegEnable(next=b.io.r.resp.asTypeOf(Vec(nWays,new ICacheDataBundle)), enable=s2_fire))
+  val metas = metaArray.io.readResp
+  val datas =RegEnable(next=dataArray.io.readResp, enable=s2_fire)
 
   val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
-  val hitVec = VecInit((0 until nWays).map{w => metas(w).tag === s2_tag && validMeta(w) === 1.U})
+  val hitVec = VecInit((0 until nWays).map{w => metas(w)=== s2_tag && validMeta(w) === 1.U})
   val victimWayMask = (1.U << LFSR64()(log2Up(nWays)-1,0))
   val invalidVec = ~validMeta
   val hasInvalidWay = invalidVec.orR
@@ -254,133 +336,86 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   val s3_hit = RegEnable(next=s2_hit,init=false.B,enable=s2_fire)
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
+  val s3_idx = get_idx(s3_req_pc)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
   // icache hit 
+  // data ECC encoding
   // simply cut the hit cacheline
-  val dataHitWay = s3_data.map(b => Mux1H(s3_wayMask,b).asUInt)
+  val dataHitWay = VecInit(s3_data.map(b => Mux1H(s3_wayMask,b).asUInt))
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
-  outPacket := cutHelper(VecInit(dataHitWay),s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
+  val dataHitWayDecoded = VecInit(   
+    (0 until blockWords).map{r => 
+      val row = dataHitWay.asTypeOf(Vec(blockWords,UInt(encRowBits.W)))(r)
+      val decodedRow = cacheParams.dataCode.decode(row)
+      assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
+      decodedRow.corrected
+    }
+  )
+  outPacket := cutHelper(dataHitWay,s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
+  
+  //ICache MissQueue
+  val icacheMissQueue = Module(new IcacheMissQueue)
+  val blocking = RegInit(false.B)
+  val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
+  icacheMissQueue.io.req.valid := s3_miss && !io.flush(1) && !blocking//TODO: specificate flush condition
+  icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
+  icacheMissQueue.io.resp.ready := io.resp.ready
+  icacheMissQueue.io.flush := io.flush(1)
 
-  //icache miss
-  val s_idle :: s_memReadReq :: s_memReadResp :: s_wait_resp :: Nil = Enum(4)
-  val state = RegInit(s_idle)
-  val readBeatCnt = Counter(refillCycles)
+  when(icacheMissQueue.io.req.fire()){blocking := true.B}
+  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) || io.flush(1)) ){blocking := false.B}
 
-  //pipeline flush register
-  val needFlush = RegInit(false.B)
-  when(io.flush(1) && (state =/= s_idle) && (state =/= s_wait_resp)){ needFlush := true.B }
-  .elsewhen((state=== s_wait_resp) && needFlush){ needFlush := false.B }
-
+  XSDebug(blocking && io.flush(1),"check for icache non-blocking")
   //cache flush register
   val icacheFlush = io.fencei
   val cacheflushed = RegInit(false.B)
   XSDebug("[Fence.i] icacheFlush:%d, cacheflushed:%d\n",icacheFlush,cacheflushed)
-  when(icacheFlush && (state =/= s_idle) && (state =/= s_wait_resp)){ cacheflushed := true.B}
-  .elsewhen((state=== s_wait_resp) && cacheflushed) {cacheflushed := false.B }
+  when(icacheFlush && blocking && !isICacheResp){ cacheflushed := true.B}
+  .elsewhen(isICacheResp && cacheflushed) {cacheflushed := false.B }
 
-  val waitForRefillDone = needFlush || cacheflushed
-
-  // state change to wait for a cacheline refill
-  val countFull = readBeatCnt.value === (refillCycles - 1).U
-  switch(state){
-    is(s_idle){
-      when(s3_miss && io.flush === 0.U){
-        state := s_memReadReq
-        readBeatCnt.value := 0.U
-      }
-    }
-
-
-    // memory request
-    is(s_memReadReq){ 
-      when(bus.a.fire()){ 
-        state := s_memReadResp
-      }
-    }
-
-    is(s_memReadResp){
-      when (edge.hasData(bus.d.bits) && bus.d.fire()) {
-        readBeatCnt.inc()
-	      refillDataReg(readBeatCnt.value) := bus.d.bits.data
-        when(countFull){
-          assert(refill_done, "refill not done!")
-          state := s_wait_resp
-        }
-      }
-    }
-
-    is(s_wait_resp){
-      when(io.resp.fire() || needFlush ){state := s_idle}
-    }
-
-  }
-
+  //TODO: Prefetcher
 
   //refill write
-  val metaWrite = Wire(new ICacheMetaBundle)
-  val refillFinalOneBeat = (state === s_memReadResp) && bus.d.fire() && refill_done
-  val wayNum = OHToUInt(s3_wayMask.asTypeOf(Vec(nWays,Bool())))
-  val validPtr = Cat(get_idx(s3_req_pc),wayNum)
-  metaWrite.tag := s3_tag
-  metaArray.io.w.req.valid := refillFinalOneBeat
-  metaArray.io.w.req.bits.apply(data=metaWrite, setIdx=get_idx(s3_req_pc), waymask=s3_wayMask)
+  val metaWriteReq = icacheMissQueue.io.meta_write.bits
+  icacheMissQueue.io.meta_write.ready := true.B
+  metaArray.io.write.valid := icacheMissQueue.io.meta_write.valid 
+  metaArray.io.write.bits.apply(tag=metaWriteReq.meta_write_tag, 
+                                idx=metaWriteReq.meta_write_idx, 
+                                waymask=metaWriteReq.meta_write_waymask)
 
-  if(beatBits == 64){
-    for(b <- 0 until blockWords){
-      val writeOneBeat = (state === s_memReadResp) && bus.d.fire() && (b.U === readBeatCnt.value)
-      dataArray(b).io.w.req.valid := writeOneBeat
-      dataArray(b).io.w.req.bits.apply(   setIdx=get_idx(s3_req_pc), 
-                                          data=bus.d.bits.data.asTypeOf(new ICacheDataBundle), 
-                                          waymask=s3_wayMask)
-
-    }
-  }
-  else{
-    val writeFirstHalf = (state === s_memReadResp) && bus.d.fire() && (readBeatCnt.value === 0.U)
-    (0 until blockWords/2).foreach{ b =>
-      dataArray(b).io.w.req.valid := writeFirstHalf
-      dataArray(b).io.w.req.bits.apply( setIdx=get_idx(s3_req_pc),
-                                        data=bus.d.bits.data(b * 64 +63, b*64).asTypeOf(new ICacheDataBundle),
-                                          waymask=s3_wayMask)
-
-    }
-    val writeLastHalf = (state === s_memReadResp) && bus.d.fire() && (readBeatCnt.value === 1.U)
-    (blockWords/2 until blockWords).foreach{ b =>
-      val index = b - blockWords/2
-      dataArray(b).io.w.req.valid := writeLastHalf
-      dataArray(b).io.w.req.bits.apply( setIdx=get_idx(s3_req_pc),
-                                          data=bus.d.bits.data(index * 64 +63, index*64).asTypeOf(new ICacheDataBundle), 
-                                          waymask=s3_wayMask)
-
-    }
-
- }
-
-  when(refillFinalOneBeat && !cacheflushed){
+  val wayNum = OHToUInt(metaWriteReq.meta_write_waymask.asTypeOf(Vec(nWays,Bool())))
+  val validPtr = Cat(metaWriteReq.meta_write_idx,wayNum)
+  when(icacheMissQueue.io.meta_write.valid && !cacheflushed){
     validArray := validArray.bitSet(validPtr, true.B)
   }
+
+  //data
+  icacheMissQueue.io.refill.ready := true.B
+  val refillReq = icacheMissQueue.io.refill.bits
+  dataArray.io.write.valid := icacheMissQueue.io.refill.valid 
+  dataArray.io.write.bits.apply(data=refillReq.refill_data,
+                                idx=refillReq.refill_idx,
+                                waymask=refillReq.refill_waymask)
 
   //icache flush: only flush valid Array register
   when(icacheFlush){ validArray := 0.U }
 
-  val refillDataVec = refillDataReg.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
+  val refillDataVec = icacheMissQueue.io.resp.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
 
-  s3_ready := ((io.resp.fire() || !s3_valid) && !waitForRefillDone) || (waitForRefillDone && state === s_wait_resp)
+  s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.valid)
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr)
-  XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x \n",s3_hit,s3_miss,s3_wayMask.asUInt)
-  XSDebug("[Stage 3] state: %d\n",state)
-  XSDebug("[Stage 3] needflush:%d, refilldone:%d\n",needFlush,refill_done)
+  XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x blocking:%d\n",s3_hit,s3_miss,s3_wayMask.asUInt,blocking)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
   XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}\n")
-  XSDebug("[Chanel A] valid:%d  ready:%d\n",bus.a.valid,bus.a.ready)
-  XSDebug("[Chanel D] valid:%d  ready:%d  data:%x  readBeatcnt:%d \n",bus.d.valid,bus.d.ready,bus.d.bits.data,readBeatCnt.value)
+  XSDebug("[mem_acquire] valid:%d  ready:%d\n",io.mem_acquire.valid,io.mem_acquire.ready)
+  XSDebug("[mem_grant] valid:%d  ready:%d  data:%x id:%d \n",io.mem_grant.valid,io.mem_grant.ready,io.mem_grant.bits.data,io.mem_grant.bits.id)
   XSDebug("[Stage 3] ---------Hit Way--------- \n")
   for(i <- 0 until blockWords){
       XSDebug("[Stage 3] %x\n",dataHitWay(i))
@@ -392,11 +427,10 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   //    Out Put
   //----------------------------
   //icache request
-  val dataArrayReadyVec = dataArray.map(b => b.io.r.req.ready)
-  io.req.ready := metaArray.io.r.req.ready && ParallelOR(dataArrayReadyVec) && s2_ready
+  io.req.ready := metaArray.io.read.ready && dataArray.io.read.ready && s2_ready
   
   //icache response: to pre-decoder
-  io.resp.valid := s3_valid && (s3_hit || state === s_wait_resp)
+  io.resp.valid := s3_valid && (s3_hit || icacheMissQueue.io.resp.valid)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
@@ -411,24 +445,18 @@ class ICacheImp(outer: ICache) extends ICacheModule(outer)
   io.tlb.req.bits.debug.pc := s2_req_pc
   io.tlb.req.bits.debug.lsroqIdx := DontCare
   
-  //tilelink
-  bus.b.ready := true.B
-  bus.c.valid := false.B
-  bus.e.valid := false.B
-  bus.a.valid := (state === s_memReadReq)
-  val memTileReq  = edge.Get(
-    fromSource      = cacheID.U,
-    toAddress       = groupPC(s3_tlb_resp.paddr),
-    lgSize          = (log2Up(cacheParams.blockBytes)).U )._2 
-  bus.a.bits :=   memTileReq
-  bus.d.ready := true.B
+  //To L1 plus
+  io.mem_acquire <> icacheMissQueue.io.mem_acquire
+  icacheMissQueue.io.mem_grant <> io.mem_grant
+
+  io.l1plusflush := icacheFlush
 
   XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
 
   //Performance Counter
   if (!env.FPGAPlatform ) {
-    ExcitingUtils.addSource( s3_valid && (state === s_idle), "perfCntIcacheReqCnt", Perf)
-    ExcitingUtils.addSource( s3_valid && (state === s_idle) && s3_miss, "perfCntIcacheMissCnt", Perf)
+    ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
+    ExcitingUtils.addSource( s3_valid && !blocking && s3_miss, "perfCntIcacheMissCnt", Perf)
   }
 }
 

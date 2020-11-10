@@ -2,10 +2,13 @@ package xiangshan.backend.fu.fpu
 
 import chisel3._
 import chisel3.util._
-import xiangshan.backend.fu.FunctionUnit.fmiscCfg
+import xiangshan.FuType
+import xiangshan.backend.fu.{CertainLatency, FuConfig}
 import xiangshan.backend.fu.fpu.util.ShiftRightJam
 
-class F64toF32 extends FPUPipelineModule(fmiscCfg, 2) {
+class F64toF32 extends FPUPipelineModule(
+  FuConfig(FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2))
+){
   def SEXP_WIDTH = Float64.expWidth + 2
 
   val a = io.in.bits.src(0)
