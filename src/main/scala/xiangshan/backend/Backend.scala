@@ -198,10 +198,10 @@ class Backend extends XSModule
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.in <> decBuf.io.out
-  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr) ++ dispatch.io.memIntRf.map(_.addr)
-  rename.io.intPregRdy <> dispatch.io.intPregRdy ++ dispatch.io.intMemRegRdy
-  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr) ++ dispatch.io.memFpRf.map(_.addr)
-  rename.io.fpPregRdy <> dispatch.io.fpPregRdy ++ dispatch.io.fpMemRegRdy
+  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr)
+  rename.io.intPregRdy <> dispatch.io.intPregRdy
+  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr)
+  rename.io.fpPregRdy <> dispatch.io.fpPregRdy
   rename.io.replayPregReq <> dispatch.io.replayPregReq
   dispatch.io.redirect <> redirect
   dispatch.io.fromRename <> rename.io.out
@@ -219,8 +219,8 @@ class Backend extends XSModule
   dispatch.io.dequeueRoqIndex.bits := Mux(io.mem.oldestStore.valid, io.mem.oldestStore.bits, roq.io.commitRoqIndex.bits)
 
 
-  intRf.io.readPorts <> dispatch.io.readIntRf ++ dispatch.io.memIntRf
-  fpRf.io.readPorts <> dispatch.io.readFpRf ++ dispatch.io.memFpRf
+  intRf.io.readPorts <> dispatch.io.readIntRf
+  fpRf.io.readPorts <> dispatch.io.readFpRf
 
   io.mem.redirect <> redirect
 
