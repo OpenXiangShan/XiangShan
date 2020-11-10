@@ -70,7 +70,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
 
   val soc = LazyModule(new XSSoc())
   val axiRam = LazyModule(new AXI4RAM(
-    memAddressSet,
+    Seq(memAddressSet),
     memByte = 128 * 1024 * 1024,
     useBlackBox = true
   ))

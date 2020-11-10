@@ -20,7 +20,7 @@ class RAMHelper(memByte: BigInt) extends BlackBox with HasXSParameter {
 
 class AXI4RAM
 (
-  address: AddressSet,
+  address: Seq[AddressSet],
   memByte: Long,
   useBlackBox: Boolean = false,
   executable: Boolean = true,
