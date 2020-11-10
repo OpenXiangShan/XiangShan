@@ -145,13 +145,15 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
       ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
       ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
     }
-    
+
     io.trap := trap
 
-    val timer = GTimer()
-    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-    ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-    ExcitingUtils.addSource(timer, "logTimestamp")
+    if (env.EnableDebug) {
+      val timer = GTimer()
+      val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+      ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+      ExcitingUtils.addSource(timer, "logTimestamp")
+    }
 
     // Check and dispaly all source and sink connections
     ExcitingUtils.checkAndDisplay()

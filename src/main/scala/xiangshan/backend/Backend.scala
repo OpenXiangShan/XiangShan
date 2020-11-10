@@ -246,13 +246,14 @@ class Backend extends XSModule
   roq.io.exeWbResults.take(exeWbReqs.length).zip(wbu.io.toRoq).foreach(x => x._1 := x._2)
   roq.io.exeWbResults.last := brq.io.out
 
-
-  val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-  ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
-  ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
-  val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
   if (!env.FPGAPlatform) {
-    ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
+    val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
+    ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
+    ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
+    val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
+    }
   }
 
 }
