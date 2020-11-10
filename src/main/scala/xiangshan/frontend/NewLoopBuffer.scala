@@ -8,17 +8,10 @@ import utils._
 import xiangshan._
 import xiangshan.cache._
 
-trait HasLoopBufferCst extends HasXSParameter {
-  val preFetchBufferSize = 2
-}
-
 class LoopBufferParameters extends XSBundle {
-  // val LBredirect = ValidIO(UInt(VAddrBits.W))
+  val LBredirect = ValidIO(UInt(VAddrBits.W))
   val fetchReq = Input(UInt(VAddrBits.W))
   val noTakenMask = Input(UInt(PredictWidth.W))
-  // val preFetchPC = DecoupledIO(UInt(VAddrBits.W))
-  // val preFetchResp = Flipped(DecoupledIO(new ICacheResp))
-  // val preFetchSend = DecoupledIO(new ICacheResp)
 }
 
 class LoopBufferIO extends XSBundle {
@@ -28,7 +21,7 @@ class LoopBufferIO extends XSBundle {
   val loopBufPar = new LoopBufferParameters
 }
 
-class FakeLoopBuffer extends XSModule with HasLoopBufferCst{
+class FakeLoopBuffer extends XSModule {
   val io = IO(new LoopBufferIO)
 
   io.out <> DontCare
@@ -38,7 +31,7 @@ class FakeLoopBuffer extends XSModule with HasLoopBufferCst{
   io.loopBufPar.LBredirect.valid := false.B
 }
 
-class NewLoopBuffer extends XSModule with HasLoopBufferCst{
+class NewLoopBuffer extends XSModule {
   val io = IO(new LoopBufferIO)
 
   // FSM state define
@@ -95,7 +88,7 @@ class NewLoopBuffer extends XSModule with HasLoopBufferCst{
   val buffer = Mem(IBufSize*2, new LBufEntry)
   val bufferValid = RegInit(VecInit(Seq.fill(IBufSize*2)(false.B)))
 
-  val redirect_pc = io.in.bits.pnpc(PredictWidth.U - PriorityEncoder(Reverse(io.in.bits.mask)) - 1.U)
+  val redirect_pc = io.in.bits.pnpc(PriorityMux(Reverse(io.noTakenMask), (PredictWidth-1 to 0 by -1).map(i => i.U)))
 
   def flush() = {
     XSDebug("Loop Buffer Flushed.\n")
@@ -181,27 +174,27 @@ class NewLoopBuffer extends XSModule with HasLoopBufferCst{
         when(hasTsbb && !tsbbTaken) {
           XSDebug("tsbb not taken, State change: IDLE\n")
           LBstate := s_idle
-          // io.loopBufPar.LBredirect.valid := true.B
-          // io.loopBufPar.LBredirect.bits := redirect_pc
-          // XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
+          io.loopBufPar.LBredirect.valid := true.B
+          io.loopBufPar.LBredirect.bits := redirect_pc
+          XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
           flush()
         }
 
         when(brTaken && !tsbbTaken) {
           XSDebug("cof by other inst, State change: IDLE\n")
           LBstate := s_idle
-          // io.loopBufPar.LBredirect.valid := true.B
-          // io.loopBufPar.LBredirect.bits := redirect_pc
-          // XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
+          io.loopBufPar.LBredirect.valid := true.B
+          io.loopBufPar.LBredirect.bits := redirect_pc
+          XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
           flush()
         }
 
         when(hasTsbb && brTaken && !tsbbTaken) {
           XSDebug("tsbb and cof, State change: IDLE\n")
           LBstate := s_idle
-          // io.loopBufPar.LBredirect.valid := true.B
-          // io.loopBufPar.LBredirect.bits := redirect_pc
-          // XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
+          io.loopBufPar.LBredirect.valid := true.B
+          io.loopBufPar.LBredirect.bits := redirect_pc
+          XSDebug(p"redirect pc=${Hexadecimal(redirect_pc)}\n")
           flush()
         }
       }
