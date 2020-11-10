@@ -426,7 +426,7 @@ class CSR extends FunctionUnit(FuConfig(
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfCntsLoMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb00 + i, perfCnts(i)))
   val perfCntsHiMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb80 + i, perfCnts(i)(63, 32)))
-
+  println(s"CSR: hasPerfCnt:${hasPerfCnt}")
   // CSR reg map
   val mapping = Map(
 
@@ -668,9 +668,11 @@ class CSR extends FunctionUnit(FuConfig(
   val raiseExceptionVec = exception.bits.cf.exceptionVec.asUInt()
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
-  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-  ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-  ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+  // if (!env.FPGAPlatform) {
+    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+    ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
+    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+  // }
 
   val raiseExceptionIntr = exception.valid
   val retTarget = Wire(UInt(VAddrBits.W))
