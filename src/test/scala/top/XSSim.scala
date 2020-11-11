@@ -83,7 +83,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     dramRange,
     memByte = 128 * 1024 * 1024,
     useBlackBox = true,
-    beatBytes = 8
+    beatBytes = L3BusWidth / 8
   ))
 
   val xbar = AXI4Xbar()
