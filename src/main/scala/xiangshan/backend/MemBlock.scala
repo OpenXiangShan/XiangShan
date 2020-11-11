@@ -3,6 +3,8 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.roq.{Roq, RoqPtr}
+import xiangshan.backend.exu._
 
 
 class LsBlockToCtrlIO extends XSBundle {
@@ -21,6 +23,7 @@ class MemBlock extends XSModule {
     val toCtrlBlock = new LsBlockToCtrlIO
   })
 
-  io <> DontCare
+  // TODO: dcache should be inside MemBlock
+  // TODO: move instances in Memend here
 
 }
