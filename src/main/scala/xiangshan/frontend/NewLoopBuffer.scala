@@ -88,7 +88,7 @@ class NewLoopBuffer extends XSModule {
   val buffer = Mem(IBufSize*2, new LBufEntry)
   val bufferValid = RegInit(VecInit(Seq.fill(IBufSize*2)(false.B)))
 
-  val redirect_pc = io.in.bits.pnpc(PriorityMux(Reverse(io.noTakenMask), (PredictWidth-1 to 0 by -1).map(i => i.U)))
+  val redirect_pc = io.in.bits.pnpc(PredictWidth.U - PriorityEncoder(Reverse(io.in.bits.mask)) - 1.U)
 
   def flush() = {
     XSDebug("Loop Buffer Flushed.\n")
