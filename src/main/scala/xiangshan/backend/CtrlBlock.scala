@@ -14,14 +14,6 @@ import xiangshan.backend.roq.{Roq, RoqPtr}
 import xiangshan.mem._
 import xiangshan.backend.fu.FunctionUnit._
 
-
-class FpBlockToCtrlIO extends XSBundle {
-  // TODO: should not be FpExuCnt
-  val wbIntRegs = Vec(exuParameters.FpExuCnt, Flipped(ValidIO(new ExuOutput)))
-  val wbFpRegs = Vec(exuParameters.FpExuCnt, Flipped(ValidIO(new ExuOutput)))
-  val numExist = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
-}
-
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
