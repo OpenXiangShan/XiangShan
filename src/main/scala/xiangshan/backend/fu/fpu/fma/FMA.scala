@@ -2,12 +2,15 @@ package xiangshan.backend.fu.fpu.fma
 
 import chisel3._
 import chisel3.util._
+import xiangshan.FuType
+import xiangshan.backend.fu.{CertainLatency, FuConfig}
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, ShiftRightJam}
-import xiangshan.backend.fu.FunctionUnit.fmacCfg
 
 
-class FMA extends FPUPipelineModule(fmacCfg, 5) {
+class FMA extends FPUPipelineModule(
+  FuConfig(FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(5))
+) {
 
   def UseRealArraryMult = false
 
