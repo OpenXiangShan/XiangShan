@@ -12,8 +12,10 @@ import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
+import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
+import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanker, AXI4Fragmenter, AXI4IdIndexer, AXI4Deinterleaver}
 import utils._
 
 case class XSCoreParameters
@@ -267,7 +269,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   val ptw = LazyModule(new PTW())
 
   // out facing nodes
-  val mem = TLIdentityNode()
+  val mem = Seq.fill(L3NBanks)(AXI4IdentityNode())
+  val dma = AXI4IdentityNode()
   val mmio = uncache.clientNode
 
   // L1 to L2 network
@@ -315,6 +318,29 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
 
   l3_xbar := TLBuffer() := DebugIdentityNode() := l2.node
 
+  // DMA should not go to MMIO
+  val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
+  // AXI4ToTL needs a TLError device to route error requests,
+  // add one here to make it happy.
+  val tlErrorParams = DevNullParams(
+    address = Seq(mmioRange),
+    maxAtomic = 8,
+    maxTransfer = 64)
+  val tlError = LazyModule(new TLError(params = tlErrorParams, beatBytes = L2BusWidth / 8))
+  private val tlError_xbar = TLXbar()
+  tlError_xbar :=
+    AXI4ToTL() :=
+    AXI4UserYanker(Some(1)) :=
+    AXI4Fragmenter() :=
+    AXI4IdIndexer(1) :=
+    dma
+  tlError.node := tlError_xbar
+
+  l3_xbar :=
+    TLBuffer() :=
+    DebugIdentityNode() :=
+    tlError_xbar
+
   def bankFilter(bank: Int) = AddressSet(
     base = bank * L3BlockSize,
     mask = ~BigInt((L3NBanks -1) * L3BlockSize))
@@ -330,10 +356,13 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   private val memory_xbar = TLXbar()
 
   for(i <- 0 until L3NBanks) {
-    memory_xbar := TLBuffer() := TLCacheCork() := TLBuffer() := DebugIdentityNode() := l3_banks(i).node
+    mem(i) :=
+      AXI4UserYanker() :=
+      TLToAXI4() :=
+      TLWidthWidget(L3BusWidth / 8) :=
+      TLCacheCork() :=
+      l3_banks(i).node
   }
-
-  mem := TLBuffer() := TLWidthWidget(L3BusWidth / 8) := memory_xbar
 
   lazy val module = new XSCoreImp(this)
 }

@@ -6,9 +6,9 @@ import chisel3.util._
 import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
-import freechips.rocketchip.amba.axi4.{AXI4Fragmenter, AXI4UserYanker}
+import freechips.rocketchip.amba.axi4.{AXI4UserYanker, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLFragmenter, TLFuzzer, TLToAXI4, TLXbar}
+import freechips.rocketchip.tilelink.{TLToAXI4}
 import xiangshan._
 import utils._
 import ExcitingUtils.Debug
@@ -66,23 +66,42 @@ class TrapIO extends XSBundle {
 
 class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
 
-  val memAddressSet = AddressSet(0x0L, 0xffffffffffL)
+  // address space[0G - 1024G)
+  val fullRange = AddressSet(0x0L, 0xffffffffffL)
+  // MMIO address space[0G - 2G)
+  val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
+  // DRAM address range[2G - 1024G)
+  val dramRange = fullRange.subtract(mmioRange)
+
+  val L3BusWidth = 256
+  val L3BlockSize = 512
 
   val soc = LazyModule(new XSSoc())
+  // AXIRam
+  // -----------------------------------
   val axiRam = LazyModule(new AXI4RAM(
-    Seq(memAddressSet),
+    dramRange,
     memByte = 128 * 1024 * 1024,
-    useBlackBox = true
+    useBlackBox = true,
+    beatBytes = 8
   ))
-  val axiMMIO = LazyModule(new SimMMIO())
 
+  val xbar = AXI4Xbar()
+  soc.mem.map{mem => xbar := mem}
   axiRam.node :=
-    AXI4UserYanker() :=
-    TLToAXI4() :=
-    TLBuffer(BufferParams.default) :=
-    DebugIdentityNode() :=
-    soc.mem
+    xbar
 
+  // AXI DMA
+  // -----------------------------------
+  val burst = LazyModule(new AXI4BurstMaster(
+    startAddr = 0x80000000L,
+    nOp = 0,
+    beatBytes = L3BusWidth / 8))
+  soc.dma := burst.node
+
+  // AXI MMIO
+  // -----------------------------------
+  val axiMMIO = LazyModule(new SimMMIO())
   axiMMIO.axiBus :=
     AXI4UserYanker() :=
     TLToAXI4() :=

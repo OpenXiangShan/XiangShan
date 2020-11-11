@@ -43,6 +43,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   // only mem and extDev visible externally
   val mem = xsCore.mem
+  val dma = xsCore.dma
   val extDev = TLIdentityNode()
 
   private val mmioXbar = TLXbar()
