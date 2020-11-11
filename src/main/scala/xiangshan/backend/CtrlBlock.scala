@@ -17,13 +17,13 @@ import xiangshan.backend.fu.FunctionUnit._
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
-  val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
+  val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
 }
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
-  val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+  val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
 }
 
 class CtrlToLsBlockIO extends XSBundle {
@@ -32,7 +32,16 @@ class CtrlToLsBlockIO extends XSBundle {
   val lsqIdxReq = Vec(RenameWidth, DecoupledIO(new MicroOp))
 }
 
-class CtrlBlock extends XSModule {
+class CtrlBlock
+(
+  jmpCfg: ExuConfig,
+  aluCfg: ExuConfig,
+  mduCfg: ExuConfig,
+  fmacCfg: ExuConfig,
+  fmiscCfg: ExuConfig,
+  ldCfg: ExuConfig,
+  stCfg: ExuConfig
+) extends XSModule {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val fromIntBlock = Flipped(new IntBlockToCtrlIO)
@@ -48,9 +57,9 @@ class CtrlBlock extends XSModule {
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch(
-    jmpExeUnit.config, aluExeUnits(0).config, mduExeUnits(0).config,
-    fmacExeUnits(0).config, fmiscExeUnits(0).config,
-    ldExeUnitCfg, stExeUnitCfg
+    jmpCfg, aluCfg, mduCfg,
+    fmacCfg, fmiscCfg,
+    ldCfg, stCfg
   ))
   // TODO: move busyTable to dispatch1
   // val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
@@ -97,12 +106,12 @@ class CtrlBlock extends XSModule {
   dispatch.io.toLsroq <> io.toLsBlock.lsqIdxReq
   dispatch.io.lsIdxs <> io.fromLsBlock.lsqIdxResp
   dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.fromLsBlock.oldestStore.valid
-  dispatch.io.dequeueRoqIndex.bits = Mux(io.fromLsBlock.oldestStore.valid, io.fromLsBlock.oldestStore.bits, roq.io.commitRoqIndex.bits)
-  dispatch.io.readIntRf <> io.toIntBlock.rfReadPorts
-  dispatch.io.readFpRf <> io.toFpBlock.rfReadPorts
+  dispatch.io.dequeueRoqIndex.bits := Mux(io.fromLsBlock.oldestStore.valid, io.fromLsBlock.oldestStore.bits, roq.io.commitRoqIndex.bits)
+  dispatch.io.readIntRf <> io.toIntBlock.readRf
+  dispatch.io.readFpRf <> io.toFpBlock.readRf
   dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
-  dispatch.io.enqIQCtrl <> io.toIntBlock.enqIQCtrl ++ io.toFpBlock.enqIQCtrl ++ io.toLsBlock.enqIQCtrl
-  dispatch.io.enqIqData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
+  dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
+  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
   // val flush = redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe)
   // fpBusyTable.flush := flush
