@@ -21,7 +21,25 @@ class TLCScalaA
   var address : BigInt = 0,
   var mask : BigInt = 0,
   var data : BigInt = 0,
-)extends TLCScalaMessage
+)extends TLCScalaMessage{
+  def copy(
+            newOpcode: BigInt = opcode,
+            newParam: BigInt = param,
+            newSize: BigInt = size,
+            newSource: BigInt = source,
+            newAddress: BigInt = address,
+            newMask: BigInt = mask,
+            newData: BigInt = data,
+          ): TLCScalaA = new TLCScalaA(
+    opcode = newOpcode,
+    param = newParam,
+    size = newSize,
+    source = newSource,
+    address = newAddress,
+    mask = newMask,
+    data = newData,
+    )
+}
 
 class TLCScalaC
 (
@@ -31,12 +49,34 @@ class TLCScalaC
   var source : BigInt = 0,
   var address : BigInt = 0,
   var data : BigInt = 0,
-)extends TLCScalaMessage
+)extends TLCScalaMessage{
+  def copy(
+            newOpcode: BigInt = opcode,
+            newParam: BigInt = param,
+            newSize: BigInt = size,
+            newSource: BigInt = source,
+            newAddress: BigInt = address,
+            newData: BigInt = data,
+          ): TLCScalaC = new TLCScalaC(
+    opcode = newOpcode,
+    param = newParam,
+    size = newSize,
+    source = newSource,
+    address = newAddress,
+    data = newData,
+  )
+}
 
 class TLCScalaE
 (
   var sink : BigInt = 0,
-)extends TLCScalaMessage
+)extends TLCScalaMessage{
+  def copy(
+          newSink: BigInt = sink
+          ): TLCScalaE = new TLCScalaE(
+    sink = newSink
+  )
+}
 
 class TLCScalaB
 (
@@ -47,7 +87,25 @@ class TLCScalaB
   var address : BigInt = 0,
   var mask : BigInt = 0,
   var data : BigInt = 0,
-)extends TLCScalaMessage
+)extends TLCScalaMessage{
+  def copy(
+            newOpcode: BigInt = opcode,
+            newParam: BigInt = param,
+            newSize: BigInt = size,
+            newSource: BigInt = source,
+            newAddress: BigInt = address,
+            newMask: BigInt = mask,
+            newData: BigInt = data,
+          ): TLCScalaB = new TLCScalaB(
+    opcode = newOpcode,
+    param = newParam,
+    size = newSize,
+    source = newSource,
+    address = newAddress,
+    mask = newMask,
+    data = newData,
+  )
+}
 
 class TLCScalaD
 (
@@ -58,7 +116,25 @@ class TLCScalaD
   var sink: BigInt = 0,
   var denied: Boolean = false,
   var data: BigInt = 0,
-)extends TLCScalaMessage
+)extends TLCScalaMessage{
+  def copy(
+            newOpcode: BigInt = opcode,
+            newParam: BigInt = param,
+            newSize: BigInt = size,
+            newSource: BigInt = source,
+            newSink: BigInt = sink,
+            newDenied: Boolean = denied,
+            newData: BigInt = data,
+          ): TLCScalaD = new TLCScalaD(
+    opcode = newOpcode,
+    param = newParam,
+    size = newSize,
+    source = newSource,
+    sink = newSink,
+    denied = newDenied,
+    data = newData,
+  )
+}
 
 trait TLCOp{
   //make BigInt parameters
@@ -104,23 +180,8 @@ trait TLCOp{
   val nothing = toN
 }
 
-//Transaction meta data will hide in start message
-abstract class TLCTrans extends TLCOp{
-  val blockSizel2 = BigInt(6)
-  val beatFullMask = BigInt(0xffffffff)
-}
-trait TLCCallerTrans extends TLCTrans{
-  var transDepend : Option[TLCTrans] = None
-}
-trait TLCCalleeTrans extends TLCTrans{
-  var recursiveTrans : Option[ListBuffer[TLCTrans]] = None
-}
 
-//Acquire
-class AcquireTrans extends TLCTrans{
-  var a : Option[TLCScalaA] = None
-  var d : Option[TLCScalaD] = None
-  var e : Option[TLCScalaE] = None
+trait PermissionTransition extends TLCOp {
   def growTarget(param : BigInt) : BigInt = {
     param match {
       case NtoB => toB
@@ -149,6 +210,65 @@ class AcquireTrans extends TLCTrans{
     else
       BtoT
   }
+
+  def shrinkTarget(param : BigInt) : BigInt = {
+    param match {
+      case TtoB => toB
+      case TtoN => toN
+      case BtoN => toN
+      case TtoT => toT
+      case BtoB => toB
+      case NtoN => toN
+    }
+  }
+  def shrinkFrom(param : BigInt) : BigInt = {
+    param match {
+      case TtoB => trunk
+      case TtoN => trunk
+      case BtoN => branch
+      case TtoT => trunk
+      case BtoB => branch
+      case NtoN => nothing
+    }
+  }
+  def shrinkParam(from:BigInt, to:BigInt) : BigInt = {
+    assert(from <= to,"shrink to higher permission")
+    if(from == trunk){
+      if(to == trunk)
+        TtoT
+      else if(to == branch)
+        TtoB
+      else
+        TtoN
+    }else if(from == branch){
+      if(to == branch)
+        BtoB
+      else
+        BtoN
+    }
+    else
+      NtoN
+  }
+}
+
+//Transaction meta data will hide in start message
+abstract class TLCTrans extends TLCOp with PermissionTransition {
+  val blockSizel2 = BigInt(6)
+  val beatFullMask = BigInt(0xffffffff)
+}
+trait TLCCallerTrans extends TLCTrans{
+  var transDepend : Option[TLCTrans] = None
+}
+trait TLCCalleeTrans extends TLCTrans{
+  var recursiveTrans : Option[ListBuffer[TLCTrans]] = None
+}
+
+//Acquire
+class AcquireTrans extends TLCTrans{
+  var a : Option[TLCScalaA] = None
+  var d : Option[TLCScalaD] = None
+  var e : Option[TLCScalaE] = None
+
 }
 case class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
   var acquireIssued : Option[Boolean] = None
@@ -251,47 +371,7 @@ case class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
 }
 
 //probe
-trait reportShrink extends TLCOp {
-  def shrinkTarget(param : BigInt) : (Boolean,BigInt) = {
-    param match {
-      case TtoB => (true,toB)
-      case TtoN => (true,toN)
-      case BtoN => (true,toN)
-      case TtoT => (false,toT)
-      case BtoB => (false,toB)
-      case NtoN => (false,toN)
-    }
-  }
-  def shrinkFrom(param : BigInt) : BigInt = {
-    param match {
-      case TtoB => trunk
-      case TtoN => trunk
-      case BtoN => branch
-      case TtoT => trunk
-      case BtoB => branch
-      case NtoN => nothing
-    }
-  }
-  def shrinkParam(from:BigInt, to:BigInt) : BigInt = {
-    assert(from <= to,"shrink to higher permission")
-    if(from == trunk){
-      if(to == trunk)
-        TtoT
-      else if(to == branch)
-        TtoB
-      else
-        TtoN
-    }else if(from == branch){
-      if(to == branch)
-        BtoB
-      else
-        BtoN
-    }
-    else
-      NtoN
-  }
-}
-class ProbeTrans extends TLCTrans with reportShrink {
+class ProbeTrans extends TLCTrans with PermissionTransition {
   var b : Option[TLCScalaB] = None
   var c : Option[TLCScalaC] = None
 }
@@ -313,7 +393,7 @@ case class ProbeCallerTrans() extends ProbeTrans with TLCCallerTrans {
     probeIssued = Some(false)
   }
 
-  def issueProbe(sourceMapId:BigInt, nowPerm:BigInt) : TLCScalaB = {
+  def issueProbe() : TLCScalaB = {
     probeIssued = Some(true)
     probeAckPending = Some(true)
     b.get
@@ -362,7 +442,7 @@ case class ProbeCalleeTrans() extends ProbeTrans with TLCCalleeTrans {
 }
 
 
-class ReleaseTrans extends TLCTrans with reportShrink {
+class ReleaseTrans extends TLCTrans with PermissionTransition {
   var c : Option[TLCScalaC] = None
   var d : Option[TLCScalaD] = None
 }
