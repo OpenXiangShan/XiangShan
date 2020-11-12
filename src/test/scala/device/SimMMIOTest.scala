@@ -4,9 +4,10 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chiseltest._
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4UserYanker, AXI4Xbar}
-import org.scalatest.{FlatSpec, Matchers}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import top.SimMMIO
 import utils.DebugIdentityNode
 
@@ -29,7 +30,7 @@ class SimMMIOTestTop()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class SimMMIOTest extends FlatSpec with ChiselScalatestTester with Matchers {
+class SimMMIOTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   it should "run" in {
     implicit val p = Parameters.empty
     test(LazyModule(new SimMMIOTestTop()).module){c =>
