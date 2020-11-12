@@ -25,7 +25,7 @@ jobs:
           echo ::set-env name=AM_HOME::/home/ci-runner/xsenv/nexus-am
       - name: Build EMU
         run:
-          make ./build/emu SIM_ARGS=--disable-log EMU_THREADS=16 NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j60
+          numactl -m 1 -N 1 make ./build/emu SIM_ARGS=--disable-all EMU_THREADS=16 NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j60
       - name: Run cputest
         run: |
           CPU_TEST_DIR=$AM_HOME/tests/cputest
