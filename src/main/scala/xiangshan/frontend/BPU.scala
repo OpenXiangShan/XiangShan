@@ -9,9 +9,9 @@ import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
-  val EnableCFICommitLog = false
-  val EnbaleCFIPredLog = false
-  val EnableBPUTimeRecord = false
+  val EnableCFICommitLog = true
+  val EnbaleCFIPredLog = true
+  val EnableBPUTimeRecord = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
