@@ -54,7 +54,7 @@ class StoreMissEntry extends DCacheModule
 
 
   when (state =/= s_invalid) {
-    XSDebug("entry: %d state: %d\n", io.id, state)
+    XSDebug("entry: %d state: %d idx: %x tag: %x\n", io.id, state, io.idx.bits, io.tag.bits)
   }
 
   // --------------------------------------------
@@ -158,12 +158,13 @@ class StoreMissQueue extends DCacheModule
   val replay_arb      = Module(new Arbiter(new DCacheLineReq,  cfg.nStoreMissEntries))
   val resp_arb        = Module(new Arbiter(new DCacheLineResp, cfg.nStoreMissEntries))
 
-  val idx_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
-  val tag_matches = Wire(Vec(cfg.nLoadMissEntries, Bool()))
+  val idx_matches = Wire(Vec(cfg.nStoreMissEntries, Bool()))
+  val tag_matches = Wire(Vec(cfg.nStoreMissEntries, Bool()))
 
   val tag_match   = Mux1H(idx_matches, tag_matches)
   val idx_match   = idx_matches.reduce(_||_)
 
+  XSDebug("idx_match: %b tag_match: %b\n", idx_match, tag_match)
 
   val req             = io.lsu.req
   val entry_alloc_idx = Wire(UInt())
