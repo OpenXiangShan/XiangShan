@@ -21,8 +21,6 @@ class IntegerBlock extends XSModule {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
     val toCtrlBlock = new IntBlockToCtrlIO
-    // val writebackFromFpLs = 
-
     // TODO: ramdonly set 5
     val writebackData = Vec(5, Input(UInt(XLEN.W)))
     val extraListenPorts = Vec(5, Flipped(DecoupledIO(new ExuOutput)))
@@ -70,6 +68,6 @@ class IntegerBlock extends XSModule {
     rs
   })
 
-  // connect writeback
+  // TODO: connect writeback
   // val wbArbiter = 
 }
