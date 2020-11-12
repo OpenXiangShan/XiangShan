@@ -18,18 +18,21 @@ class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
+  val redirect = ValidIO(new Redirect)
 }
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
   val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+  val redirect = ValidIO(new Redirect)
 }
 
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
   val lsqIdxReq = Vec(RenameWidth, DecoupledIO(new MicroOp))
+  val redirect = ValidIO(new Redirect)
 }
 
 class CtrlBlock
@@ -78,6 +81,13 @@ class CtrlBlock
       io.fromLsBlock.replay
     )
   )
+
+  io.frontend.redirect := redirect
+  io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
+  io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
+  io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
+  io.frontend.sfence <> io.fromIntBlock.sfence
+  io.frontend.tlbCsrIO <> io.fromIntBlock.tlbCsrIO
 
   decode.io.in <> io.frontend.cfVec
   decode.io.toBrq <> brq.io.enqReqs
