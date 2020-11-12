@@ -2,8 +2,6 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
-import chisel3.ExcitingUtils._
 import utils._
 import xiangshan._
 import xiangshan.cache._
@@ -94,7 +92,7 @@ class LoopBuffer extends XSModule {
     XSDebug("Loop Buffer Flushed.\n")
     LBstate := s_idle
     for(i <- 0 until IBufSize*2) {
-      buffer(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
+      // buffer(i).inst := 0.U // TODO: This is to make the debugging information clearer, this can be deleted
       bufferValid(i) := false.B
     }
   }

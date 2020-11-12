@@ -30,9 +30,9 @@ object AddSinks {
       "perfCntCondMbpIRight",
       "perfCntCondMbpIWrong",
       "perfCntCondMbpRRight",
-      "perfCntCondMbpRWrong",
-      "CntFetchFromICache",
-      "CntFetchFromLoopBuffer"//,
+      "perfCntCondMbpRWrong"//,
+      // "CntFetchFromICache",
+      // "CntFetchFromLoopBuffer",
       // "CntExitLoop1",
       // "CntExitLoop2",
       // "CntExitLoop3"

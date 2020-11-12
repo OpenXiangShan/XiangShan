@@ -2,12 +2,10 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
-import chisel3.ExcitingUtils._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -362,8 +360,6 @@ class IFU extends XSModule with HasIFUConst
     io.icacheReq.valid := if4_flush
   }.otherwise {
     io.icacheReq.valid := if1_valid && if2_ready
-    // io.icacheResp.ready := if3_ready
-  //io.icacheResp.ready := if3_valid
   }
   io.icacheResp.ready := if4_ready
   io.icacheReq.bits.addr := if1_npc
@@ -434,10 +430,10 @@ class IFU extends XSModule with HasIFUConst
   }
 
   //Performance Counter
-  if (!env.FPGAPlatform ) {
-    ExcitingUtils.addSource(io.fetchPacket.fire && !inLoop, "CntFetchFromICache", Perf)
-    ExcitingUtils.addSource(io.fetchPacket.fire && inLoop, "CntFetchFromLoopBuffer", Perf)
-  }
+  // if (!env.FPGAPlatform ) {
+  //   ExcitingUtils.addSource(io.fetchPacket.fire && !inLoop, "CntFetchFromICache", Perf)
+  //   ExcitingUtils.addSource(io.fetchPacket.fire && inLoop, "CntFetchFromLoopBuffer", Perf)
+  // }
 
   val fetchPacketValid = if4_valid && !io.redirect.valid
   val fetchPacketWire = Wire(new FetchPacket)
