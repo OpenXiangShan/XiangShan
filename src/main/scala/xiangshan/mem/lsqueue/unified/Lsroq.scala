@@ -8,6 +8,7 @@ import xiangshan.cache._
 import chisel3.ExcitingUtils._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.boxF32ToF64
 import xiangshan.backend.roq.RoqPtr
 
 class LsRoqEntry extends XSBundle {
@@ -46,6 +47,7 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
+    val exceptionAddr = new ExceptionAddrIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
   
@@ -324,6 +326,7 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
         LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
         LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
+        LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0)),
         LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
         LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
         LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
@@ -333,6 +336,7 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
     io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.uop.lsroqIdx := loadWbSel(i)
     io.ldout(i).bits.data := rdataPartialLoad
+    io.ldout(i).bits.fflags := DontCare
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
@@ -370,6 +374,7 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
     io.stout(i).bits.uop.lsroqIdx := storeWbSel(i)
     io.stout(i).bits.uop.cf.exceptionVec := data(storeWbSel(i)).exception.asBools
     io.stout(i).bits.data := data(storeWbSel(i)).data
+    io.stout(i).bits.fflags := DontCare
     io.stout(i).bits.redirectValid := false.B
     io.stout(i).bits.redirect := DontCare
     io.stout(i).bits.brUpdate := DontCare
@@ -699,10 +704,7 @@ class Lsroq extends XSModule with HasDCacheParameters with HasCircularQueuePtrHe
   }
 
   // Read vaddr for mem exception
-  val mexcLsroqIdx = WireInit(0.U(LsroqIdxWidth.W))
-  val memExceptionAddr = WireInit(data(mexcLsroqIdx(InnerLsroqIdxWidth - 1, 0)).vaddr)
-  ExcitingUtils.addSink(mexcLsroqIdx, "EXECPTION_LSROQIDX")
-  ExcitingUtils.addSource(memExceptionAddr, "EXECPTION_VADDR")
+  io.exceptionAddr.vaddr := data(io.exceptionAddr.lsIdx.lsroqIdx(InnerLsroqIdxWidth - 1, 0)).vaddr
 
   // misprediction recovery / exception redirect
   // invalidate lsroq term using robIdx

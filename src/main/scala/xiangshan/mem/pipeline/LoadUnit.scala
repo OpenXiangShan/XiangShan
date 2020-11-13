@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.cache._
 // import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
 class LoadToLsroqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -143,7 +144,7 @@ class LoadUnit_S1 extends XSModule {
     io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
   )
 
-  io.out.valid := io.in.valid && !s1_uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid && !s1_tlb_miss &&  !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -197,7 +198,8 @@ class LoadUnit_S2 extends XSModule {
       LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+      LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
   ))
 
   // TODO: ECC check
@@ -251,7 +253,7 @@ class LoadUnit extends XSModule {
   io.sbuffer <> load_s1.io.sbuffer
   io.lsroq.forward <> load_s1.io.lsroq
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire(), false.B)
+  PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire() || load_s1.io.out.bits.tlbMiss, false.B)
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
@@ -276,6 +278,7 @@ class LoadUnit extends XSModule {
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare
   hitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
+  hitLoadOut.bits.fflags := DontCare
 
   // TODO: arbiter
   // if hit, writeback result to CDB
