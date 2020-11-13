@@ -3,8 +3,10 @@ package xiangshan.frontend
 import chisel3._
 import chiseltest._
 import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 
-class PDtest extends FlatSpec with ChiselScalatestTester with Matchers{
+class PDtest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
   val cacheLine2 = ("b" +
     "100_1_00001_00000_10" +  //rvc jalr
     "100_0_00001_00000_10" +  //rvc jr
