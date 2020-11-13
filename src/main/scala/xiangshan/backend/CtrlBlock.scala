@@ -33,6 +33,10 @@ class CtrlToLsBlockIO extends XSBundle {
   val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
   val lsqIdxReq = Vec(RenameWidth, DecoupledIO(new MicroOp))
   val redirect = ValidIO(new Redirect)
+  // from roq: send commits info to lsq
+  val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
+  // from roq: the newest roqDeqPtr
+  val roqDeqPtr = Input(new RoqPtr)
 }
 
 class CtrlBlock
