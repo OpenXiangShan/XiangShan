@@ -342,6 +342,7 @@ hs_err_pid*
 .vscode
 .metals
 .bloop
+.bsp
 .coursier
 mill.rdiB
 
