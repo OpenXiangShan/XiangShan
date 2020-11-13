@@ -280,9 +280,11 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
     val externalInterrupt = new ExternalInterruptIO
   })
 
-  val front = Module(new Frontend)
-  val backend = Module(new Backend)
-  val mem = Module(new Memend)
+  val frontend = Module(new Frontend)
+  val ctrlBlock = Module(new CtrlBlock)
+  val integerBlock = Module(new IntegerBlock)
+  val floatBlock = Module(new FloatBlock)
+  val memBlock = Module(new MemBlock)
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
@@ -290,29 +292,35 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   val ptw = outer.ptw.module
   val icache = Module(new ICache)
 
-  front.io.backend <> backend.io.frontend
-  front.io.icacheResp <> icache.io.resp
-  front.io.icacheToTlb <> icache.io.tlb
-  icache.io.req <> front.io.icacheReq
-  icache.io.flush <> front.io.icacheFlush
+  frontend.io.backend <> ctrlBlock.io.frontend
+  frontend.io.icacheResp <> icache.io.resp
+  frontend.io.icacheToTlb <> icache.io.tlb
+  icache.io.req <> frontend.io.icacheReq
+  icache.io.flush <> frontend.io.icacheFlush
 
   icache.io.mem_acquire <> l1pluscache.io.req
   l1pluscache.io.resp <> icache.io.mem_grant
   l1pluscache.io.flush := icache.io.l1plusflush
-  icache.io.fencei := backend.io.fencei
+  icache.io.fencei := integerBlock.io.fencei
 
-  mem.io.backend   <> backend.io.mem
-  io.externalInterrupt <> backend.io.externalInterrupt
+  ctrlBlock.io.fromIntBlock <> integerBlock.io.toCtrlBlock
+  ctrlBlock.io.fromFpBlock <> floatBlock.io.toCtrlBlock
+  ctrlBlock.io.fromLsBlock <> memBlock.io.toCtrlBlock
+  ctrlBlock.io.toIntBlock <> integerBlock.io.fromCtrlBlock
+  ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
+  ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
-  ptw.io.tlb(0) <> mem.io.ptw
-  ptw.io.tlb(1) <> front.io.ptw
-  ptw.io.sfence <> backend.io.sfence
-  ptw.io.csr <> backend.io.tlbCsrIO
+  io.externalInterrupt <> integerBlock.io.externalInterrupt
 
-  dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
-  dcache.io.lsu.lsroq   <> mem.io.loadMiss
-  dcache.io.lsu.atomics <> mem.io.atomics
-  dcache.io.lsu.store   <> mem.io.sbufferToDcache
-  uncache.io.lsroq      <> mem.io.uncache
+  ptw.io.tlb(0) <> memBlock.io.ptw
+  ptw.io.tlb(1) <> frontend.io.ptw
+  ptw.io.sfence <> integerBlock.io.sfence
+  ptw.io.csr <> integerBlock.io.tlbCsrIO
+
+  dcache.io.lsu.load    <> memBlock.io.dcache.loadUnitToDcacheVec
+  dcache.io.lsu.lsroq   <> memBlock.io.dcache.loadMiss
+  dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
+  dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
+  uncache.io.lsroq      <> memBlock.io.dcache.uncache
 
 }

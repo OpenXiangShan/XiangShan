@@ -44,8 +44,10 @@ class MemBlock extends XSModule {
     // TODO: dcache should be inside MemBlock
     val dcache = new MemBlockToDcacheIO
     val csr = new MemBlockCSRIO
+    // writeback from other blocks
     val writebackData = Vec(5, Input(UInt(XLEN.W)))
     val extraListenPorts = Vec(5, Flipped(DecoupledIO(new ExuOutput)))
+    // output writeback
   })
 
   val loadUnits = Array.tabulate(exuParameters.LduCnt)(_ => Module(new LoadUnit))

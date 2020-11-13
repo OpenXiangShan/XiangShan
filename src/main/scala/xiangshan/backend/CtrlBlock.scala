@@ -10,7 +10,7 @@ import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.ReservationStationNew
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqPtr}
+import xiangshan.backend.roq.{Roq, RoqPtr, RoqCSRIO}
 import xiangshan.mem._
 import xiangshan.backend.fu.FunctionUnit._
 
@@ -19,6 +19,7 @@ class CtrlToIntBlockIO extends XSBundle {
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
   val redirect = ValidIO(new Redirect)
+  val roqToCSR = new RoqCSRIO
 }
 
 class CtrlToFpBlockIO extends XSBundle {
@@ -127,6 +128,7 @@ class CtrlBlock
   dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
   dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
+  io.toIntBlock.roqToCSR <> roq.io.csr
   // val flush = redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe)
   // fpBusyTable.flush := flush
   // intBusyTable.flush := flush

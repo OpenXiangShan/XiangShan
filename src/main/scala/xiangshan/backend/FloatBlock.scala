@@ -20,8 +20,11 @@ class FloatBlock extends XSModule {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
     // TODO: ramdonly set 5
+    // writeback from other blocks
     val writebackData = Vec(5, Input(UInt(XLEN.W)))
     val extraListenPorts = Vec(5, Flipped(DecoupledIO(new ExuOutput)))
+    // output writeback (wakeup other blocks)
+    // val 
   })
 
   // floating-point regfile

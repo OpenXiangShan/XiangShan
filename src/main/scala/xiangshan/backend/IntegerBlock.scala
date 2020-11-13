@@ -17,13 +17,21 @@ class IntBlockToCtrlIO extends XSBundle {
   val tlbCsrIO = Output(new TlbCsrBundle)
 }
 
+
 class IntegerBlock extends XSModule {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
     val toCtrlBlock = new IntBlockToCtrlIO
     // TODO: ramdonly set 5
+    // writeback from other blocks
     val writebackData = Vec(5, Input(UInt(XLEN.W)))
     val extraListenPorts = Vec(5, Flipped(DecoupledIO(new ExuOutput)))
+    // output writeback (wakeup other blocks)
+    // val 
+    val externalInterrupt = new ExternalInterruptIO
+    val sfence = Output(new SfenceBundle)
+    val fencei = Output(Bool())
+    val tlbCsrIO = Output(new TlbCsrBundle)
   })
 
   // integer regfile
@@ -45,7 +53,6 @@ class IntegerBlock extends XSModule {
   val extraListenPorts = exuConfigs.zip(exeWbReqs).filter(x => x._1.hasUncertainlatency && x._1.writeIntRf).map(_._2)
 
   val rsConfigs = Seq(0, -1, -1, 0, 0, 0, 0)
-
   val reservationStations  = exuConfigs.zipWithIndex.map({ case (cfg, i) =>
     val rs = Module(new ReservationStationNew(cfg, 5, 6, fixedDelay = rsConfigs(i), feedback = false))
 
@@ -67,6 +74,20 @@ class IntegerBlock extends XSModule {
     rs.suggestName(s"rs_${cfg.name}")
     rs
   })
+
+  // IOs for special execution units
+  // CSR is in jmpExeUnit
+  io.fromCtrlBlock.roqToCSR.intrBitSet := jmpExeUnit.io.csrOnly.interrupt
+  io.fromCtrlBlock.roqToCSR.trapTarget := jmpExeUnit.io.csrOnly.trapTarget
+  jmpExeUnit.fflags := io.fromCtrlBlock.roqToCSR.fflags
+  jmpExeUnit.dirty_fs := io.fromCtrlBlock.roqToCSR.dirty_fs
+
+  jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
+  jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
+
+  jmpExeUnit.io.csrOnly.externalInterrupt := io.externalInterrupt
+  jmpExeUnit.io.csrOnly.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  jmpExeUnit.fenceToSbuffer <> io.mem.fenceToSbuffer
 
   // TODO: connect writeback
   // val wbArbiter = 
