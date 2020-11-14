@@ -306,7 +306,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw
-  ptw.io.sfence <> backend.io.sfence
+  ptw.io.sfence <> backend.io.mem.sfence//sfence
   ptw.io.csr <> backend.io.tlbCsrIO
 
   dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
