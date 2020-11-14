@@ -270,7 +270,6 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
 
   // out facing nodes
   val mem = TLIdentityNode()
-  val dma = AXI4IdentityNode()
   val mmio = uncache.clientNode
 
   // L1 to L2 network

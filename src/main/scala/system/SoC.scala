@@ -42,12 +42,12 @@ class DummyCore()(implicit p: Parameters) extends LazyModule {
 
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
+  val numCores = 1
 
-  private val xsCore = LazyModule(new XSCore())
+  private val cores = Seq.fill(numCores)(LazyModule(new XSCore()))
 
   // only mem and extDev visible externally
-  val cores = xsCore.mem
-  val dma = xsCore.dma
+  val dma = AXI4IdentityNode()
   val extDev = TLIdentityNode()
 
   // L2 to L3 network
@@ -69,7 +69,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       )
     )))
 
-  l3_xbar := TLBuffer() := DebugIdentityNode() := cores
+  cores.foreach(core => l3_xbar := TLBuffer() := DebugIdentityNode() := core.mem)
 
   // DMA should not go to MMIO
   val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
@@ -124,10 +124,12 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     sim = !env.FPGAPlatform
   ))
 
-  mmioXbar :=
+  cores.foreach(core =>
+    mmioXbar :=
     TLBuffer() :=
     DebugIdentityNode() :=
-    xsCore.mmio
+    core.mmio
+  )
 
   clint.node :=
     mmioXbar
@@ -140,9 +142,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       val meip = Input(Bool())
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
-    xsCore.module.io.externalInterrupt.mtip := clint.module.io.mtip
-    xsCore.module.io.externalInterrupt.msip := clint.module.io.msip
-    xsCore.module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
+    cores.foreach(core => {
+      core.module.io.externalInterrupt.mtip := clint.module.io.mtip
+      core.module.io.externalInterrupt.msip := clint.module.io.msip
+      core.module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
+    })
   }
 
 }
