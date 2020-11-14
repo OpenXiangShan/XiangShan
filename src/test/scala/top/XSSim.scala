@@ -179,7 +179,10 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
 object TestMain extends App {
   // set parameters
   Parameters.set(
-    if(args.contains("--fpga-platform")) Parameters()
+    if(args.contains("--fpga-platform")) {
+      if (args.contains("--dual-core")) Parameters.dualCoreParameters
+      else Parameters()
+    }
     else if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
     else Parameters.debugParameters // open log
   )
@@ -187,7 +190,7 @@ object TestMain extends App {
   implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
-    args.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform"),
+    args.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core"),
     Seq(
       ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
     )
