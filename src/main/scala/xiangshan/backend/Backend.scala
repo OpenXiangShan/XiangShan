@@ -179,6 +179,7 @@ class Backend extends XSModule
   io.frontend.tlbCsrIO <> jmpExeUnit.tlbCsrIO
 
   io.fencei := jmpExeUnit.fencei
+  io.sfence := jmpExeUnit.sfence
   io.tlbCsrIO := jmpExeUnit.tlbCsrIO
 
   decode.io.in <> io.frontend.cfVec

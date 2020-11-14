@@ -3,10 +3,12 @@ package xiangshan.frontend
 import chisel3._
 import chiseltest._
 import org.scalatest._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import xiangshan.testutils._
 
 
-class RASTest extends FlatSpec 
+class RASTest extends AnyFlatSpec
 with ChiselScalatestTester 
 with Matchers 
 with ParallelTestExecution
