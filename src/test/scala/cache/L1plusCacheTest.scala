@@ -14,11 +14,12 @@ import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
 import xiangshan.{HasXSLog, MicroOp}
-import xiangshan.cache.{DCache, L1plusCache, DCacheLineIO, L1plusCacheIO, MemoryOpConstants}
+import xiangshan.cache.{DCache, DCacheLineIO, L1plusCache, L1plusCacheIO, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
@@ -83,7 +84,7 @@ class L1plusTestTop()(implicit p: Parameters) extends LazyModule{
 
 }
 
-class L1plusCacheTest extends FlatSpec with ChiselScalatestTester with Matchers {
+class L1plusCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   behavior of "L1plusCache"
 
   val mem_size = 128 * 1024 * 1024

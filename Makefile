@@ -130,11 +130,15 @@ cache:
 	$(MAKE) emu IMAGE=Makefile
 
 clean:
-	rm -rf $(BUILD_DIR)
+	git submodule foreach git clean -fdx
+	git clean -fd
 
 init:
 	git submodule update --init
-	@# do not use a recursive init to pull some not used submodules
-	cd ./rocket-chip/ && git submodule update --init api-config-chipsalliance hardfloat
 
-.PHONY: verilog emu clean help init $(REF_SO)
+bump:
+	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
+
+bsp:
+	mill -i mill.contrib.BSP/install
+.PHONY: verilog emu clean help init bump bsp $(REF_SO)

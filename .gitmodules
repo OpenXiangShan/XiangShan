@@ -1,3 +1,15 @@
+[submodule "chisel3"]
+	path = chisel3
+	url = https://github.com/ucb-bar/chisel3
+[submodule "firrtl"]
+	path = firrtl
+	url = https://github.com/ucb-bar/firrtl
+[submodule "treadle"]
+	path = treadle
+	url = https://github.com/ucb-bar/treadle
+[submodule "hardfloat"]
+        path = hardfloat
+        url = https://github.com/ucb-bar/berkeley-hardfloat
 [submodule "rocket-chip"]
 	path = rocket-chip
 	url = https://github.com/chipsalliance/rocket-chip.git
@@ -10,3 +22,9 @@
 	path = chiseltest
 	url = https://github.com/ucb-bar/chisel-testers2.git
 	branch = 3e3ecc5b25b7b6bc48341ec07c7a54b7ad53bcb7
+[submodule "api-config-chipsalliance"]
+	path = api-config-chipsalliance
+	url = https://github.com/chipsalliance/api-config-chipsalliance
+[submodule "berkeley-hardfloat"]
+	path = berkeley-hardfloat
+	url = https://github.com/ucb-bar/berkeley-hardfloat
