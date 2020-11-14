@@ -8,7 +8,11 @@ import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLFuzzer, TLIdentityNode, TLXbar}
 import utils.DebugIdentityNode
 import xiangshan.{HasXSParameter, XSCore}
-
+import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
+import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
+import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanker, AXI4Fragmenter, AXI4IdIndexer, AXI4Deinterleaver}
 
 case class SoCParameters
 (
@@ -42,9 +46,77 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   private val xsCore = LazyModule(new XSCore())
 
   // only mem and extDev visible externally
-  val mem = xsCore.mem
+  val cores = xsCore.mem
   val dma = xsCore.dma
   val extDev = TLIdentityNode()
+
+  // L2 to L3 network
+  // -------------------------------------------------
+  private val l3_xbar = TLXbar()
+
+  private val l3_banks = (0 until L3NBanks) map (i =>
+      LazyModule(new InclusiveCache(
+        CacheParameters(
+          level = 3,
+          ways = L3NWays,
+          sets = L3NSets,
+          blockBytes = L3BlockSize,
+          beatBytes = L2BusWidth / 8,
+          cacheName = s"L3_$i"
+        ),
+      InclusiveCacheMicroParameters(
+        writeBytes = 8
+      )
+    )))
+
+  l3_xbar := TLBuffer() := DebugIdentityNode() := cores
+
+  // DMA should not go to MMIO
+  val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
+  // AXI4ToTL needs a TLError device to route error requests,
+  // add one here to make it happy.
+  val tlErrorParams = DevNullParams(
+    address = Seq(mmioRange),
+    maxAtomic = 8,
+    maxTransfer = 64)
+  val tlError = LazyModule(new TLError(params = tlErrorParams, beatBytes = L2BusWidth / 8))
+  private val tlError_xbar = TLXbar()
+  tlError_xbar :=
+    AXI4ToTL() :=
+    AXI4UserYanker(Some(1)) :=
+    AXI4Fragmenter() :=
+    AXI4IdIndexer(1) :=
+    dma
+  tlError.node := tlError_xbar
+
+  l3_xbar :=
+    TLBuffer() :=
+    DebugIdentityNode() :=
+    tlError_xbar
+
+  def bankFilter(bank: Int) = AddressSet(
+    base = bank * L3BlockSize,
+    mask = ~BigInt((L3NBanks -1) * L3BlockSize))
+
+  for(i <- 0 until L3NBanks) {
+    val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
+    l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
+  }
+
+
+  // L3 to memory network
+  // -------------------------------------------------
+  private val memory_xbar = TLXbar()
+
+  val mem = Seq.fill(L3NBanks)(AXI4IdentityNode())
+  for(i <- 0 until L3NBanks) {
+    mem(i) :=
+      AXI4UserYanker() :=
+      TLToAXI4() :=
+      TLWidthWidget(L3BusWidth / 8) :=
+      TLCacheCork() :=
+      l3_banks(i).node
+  }
 
   private val mmioXbar = TLXbar()
   private val clint = LazyModule(new TLTimer(
