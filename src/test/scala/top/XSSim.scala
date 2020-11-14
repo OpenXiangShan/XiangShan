@@ -73,9 +73,6 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
   // DRAM address range[2G - 1024G)
   val dramRange = fullRange.subtract(mmioRange)
 
-  val L3BusWidth = 256
-  val L3BlockSize = 512
-
   val soc = LazyModule(new XSSoc())
   // AXIRam
   // -----------------------------------
