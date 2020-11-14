@@ -33,6 +33,7 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
     ((exuOutToRfReq(x._1._1, fp = false), x._1._2), x._2))
 
   val wbIntReq = wbInt.map(_._1)
+  XSPerf("intRFFanout", PopCount(wbIntReq.map(_._1.valid)))
 
   val wbFp = io.in.zip(exuConfigs).zipWithIndex.
     filter(_._1._2.writeFpRf).map(x =>

@@ -174,6 +174,13 @@ class Backend extends XSModule
   dispatch.io.fromRename <> rename.io.out
   dispatch.io.fromRename.foreach(_.bits.debugInfo.renameTime := timer)
 
+  XSPerf("Ibuf2Dec", PopCount(decode.io.in.map(_.fire())))
+  XSPerf("Dec2Decbuf", PopCount(decBuf.io.in.map(_.fire())))
+  XSPerf("Decbuf2Rename", PopCount(rename.io.in.map(_.fire())))
+  XSPerf("db2reVnR", PopCount(rename.io.in.map(q => q.valid && !q.ready)))
+  XSPerf("Rename2Dispatch", PopCount(dispatch.io.fromRename.map(_.fire())))
+  XSPerf("re2dVnR", PopCount(dispatch.io.fromRename.map(q => q.valid && !q.ready)))
+
   roq.io.memRedirect <> io.mem.replayAll
   roq.io.brqRedirect <> brq.io.redirect
   roq.io.dp1Req <> dispatch.io.toRoq
@@ -225,6 +232,8 @@ class Backend extends XSModule
   val storeIssueToCommit = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE, commitTime - c.bits.uop.debugInfo.issueTime, 0.U))//.reduce(_ + _)
   val storeIssueToWriteback = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE, c.bits.uop.debugInfo.writebackTime - c.bits.uop.debugInfo.issueTime, 0.U))//.reduce(_ + _)
 
+  val commitFuType = roq.io.commits.map(c => Mux(c.valid && !c.bits.isWalk, c.bits.uop.ctrl.fuType+"b10000".U, 0.U))
+
   for (i <- 0 until CommitWidth) {
     XSPerf("renameToCommit"+i.toString, renameToCommit(i))
     XSPerf("dispatchToCommit"+i.toString, dispatchToCommit(i))
@@ -234,6 +243,8 @@ class Backend extends XSModule
     XSPerf("loadIssueToWriteback"+i.toString, loadIssueToWriteback(i))
     XSPerf("storeIssueToCommit"+i.toString, storeIssueToCommit(i))
     XSPerf("storeIssueToWriteback"+i.toString, storeIssueToWriteback(i))
+
+    XSPerf("commitFuType"+i.toString, commitFuType(i))
   }
 
   // TODO: Remove sink and source
