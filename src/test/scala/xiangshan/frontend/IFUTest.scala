@@ -2,9 +2,10 @@ package xiangshan.frontend
 
 import chisel3._
 import chiseltest._
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 
-class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
+class IFUTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   behavior of "IFU Test"
 
   it should "test IFU pipeline" in {

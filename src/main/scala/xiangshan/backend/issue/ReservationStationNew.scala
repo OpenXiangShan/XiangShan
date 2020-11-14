@@ -295,7 +295,7 @@ class ReservationStationNew
   val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
   val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
 
-  val enqPtr = Mux(tailPtr.head(1).asBool, selectedIdxReg, tailPtr.tail(1))
+  val enqPtr = Mux(tailPtr.head(1).asBool, deqIdx, tailPtr.tail(1))
   val enqIdx_data = idxQueue(enqPtr)
   val enqIdx_ctrl = tailAfterRealDeq.tail(1)
   val enqIdxNext = RegNext(enqIdx_data) 

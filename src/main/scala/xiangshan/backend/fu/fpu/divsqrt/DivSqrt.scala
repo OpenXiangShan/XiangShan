@@ -21,7 +21,7 @@ class DivSqrt extends FPUSubModule(
 
 
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
-  val kill = uopReg.roqIdx.needFlush(io.redirectIn)
+  val kill = state=/=s_idle && uopReg.roqIdx.needFlush(io.redirectIn)
   val rmReg = RegEnable(rm, io.in.fire())
   val isDiv = !op(0)
   val isDivReg = RegEnable(isDiv, io.in.fire())

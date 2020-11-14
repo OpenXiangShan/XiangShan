@@ -6,13 +6,15 @@ import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import xiangshan._
 import xiangshan.testutils._
 import xiangshan.testutils.TestCaseGenerator._
 
 import scala.util.Random
 
-class AluTest extends FlatSpec
+class AluTest extends AnyFlatSpec
   with ChiselScalatestTester
   with Matchers
   with ParallelTestExecution
