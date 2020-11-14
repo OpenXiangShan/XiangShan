@@ -7,7 +7,13 @@ import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
 import xiangshan.backend.fu.fpu.Fflags
-
+object roqDebugId extends Function0[Integer] {
+  var x = 0
+  def apply(): Integer = {
+    x = x + 1
+    return x
+  }
+}
 
 class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
   def needFlush(redirect: Valid[Redirect]): Bool = {
@@ -341,10 +347,11 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
   
+  val id = roqDebugId()
   val difftestIntrNO = WireInit(0.U(XLEN.W))
   val difftestCause = WireInit(0.U(XLEN.W))
-  ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
-  ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
+  ExcitingUtils.addSink(difftestIntrNO, s"difftestIntrNOfromCSR$id")
+  ExcitingUtils.addSink(difftestCause, s"difftestCausefromCSR$id")
   
   if(!env.FPGAPlatform){ 
 

@@ -9,6 +9,14 @@ import xiangshan._
 import xiangshan.backend._
 import utils.XSDebug
 
+object debugId extends Function0[Integer] {
+  var x = 0
+  def apply(): Integer = {
+    x = x + 1
+    return x
+  }
+}
+
 trait HasCSRConst {
   // User Trap Setup
   val Ustatus       = 0x000
@@ -669,9 +677,10 @@ class CSR extends FunctionUnit(FuConfig(
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
   // if (!env.FPGAPlatform) {
+    val id = debugId()
     val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-    ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+    ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
+    ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
   // }
 
   val raiseExceptionIntr = exception.valid
