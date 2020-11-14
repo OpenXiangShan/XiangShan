@@ -64,7 +64,7 @@ class TrapIO extends XSBundle {
 }
 
 
-class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
+class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
 
   // address space[0G - 1024G)
   val fullRange = AddressSet(0x0L, 0xffffffffffL)
@@ -119,52 +119,60 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     soc.module.io.meip := false.B
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
-    ExcitingUtils.addSink(difftest.commit, "difftestCommit", Debug)
-    ExcitingUtils.addSink(difftest.thisPC, "difftestThisPC", Debug)
-    ExcitingUtils.addSink(difftest.thisINST, "difftestThisINST", Debug)
-    ExcitingUtils.addSink(difftest.skip, "difftestSkip", Debug)
-    ExcitingUtils.addSink(difftest.isRVC, "difftestIsRVC", Debug)
-    ExcitingUtils.addSink(difftest.wen, "difftestWen", Debug)
-    ExcitingUtils.addSink(difftest.wdata, "difftestWdata", Debug)
-    ExcitingUtils.addSink(difftest.wdst, "difftestWdst", Debug)
-    ExcitingUtils.addSink(difftest.wpc, "difftestWpc", Debug)
-    ExcitingUtils.addSink(difftest.intrNO, "difftestIntrNO", Debug)
-    ExcitingUtils.addSink(difftest.cause, "difftestCause", Debug)
-    ExcitingUtils.addSink(difftest.r, "difftestRegs", Debug)
-    ExcitingUtils.addSink(difftest.priviledgeMode, "difftestMode", Debug)
-    ExcitingUtils.addSink(difftest.mstatus, "difftestMstatus", Debug)
-    ExcitingUtils.addSink(difftest.sstatus, "difftestSstatus", Debug)
-    ExcitingUtils.addSink(difftest.mepc, "difftestMepc", Debug)
-    ExcitingUtils.addSink(difftest.sepc, "difftestSepc", Debug)
-    ExcitingUtils.addSink(difftest.mtval, "difftestMtval", Debug)
-    ExcitingUtils.addSink(difftest.stval, "difftestStval", Debug)
-    ExcitingUtils.addSink(difftest.mtvec, "difftestMtvec", Debug)
-    ExcitingUtils.addSink(difftest.stvec, "difftestStvec", Debug)
-    ExcitingUtils.addSink(difftest.mcause, "difftestMcause", Debug)
-    ExcitingUtils.addSink(difftest.scause, "difftestScause", Debug)
-    ExcitingUtils.addSink(difftest.satp, "difftestSatp", Debug)
-    ExcitingUtils.addSink(difftest.mip, "difftestMip", Debug)
-    ExcitingUtils.addSink(difftest.mie, "difftestMie", Debug)
-    ExcitingUtils.addSink(difftest.mscratch, "difftestMscratch", Debug)
-    ExcitingUtils.addSink(difftest.sscratch, "difftestSscratch", Debug)
-    ExcitingUtils.addSink(difftest.mideleg, "difftestMideleg", Debug)
-    ExcitingUtils.addSink(difftest.medeleg, "difftestMedeleg", Debug)
-    ExcitingUtils.addSink(difftest.scFailed, "difftestScFailed", Debug)
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSink(difftest.commit, "difftestCommit", Debug)
+      ExcitingUtils.addSink(difftest.thisPC, "difftestThisPC", Debug)
+      ExcitingUtils.addSink(difftest.thisINST, "difftestThisINST", Debug)
+      ExcitingUtils.addSink(difftest.skip, "difftestSkip", Debug)
+      ExcitingUtils.addSink(difftest.isRVC, "difftestIsRVC", Debug)
+      ExcitingUtils.addSink(difftest.wen, "difftestWen", Debug)
+      ExcitingUtils.addSink(difftest.wdata, "difftestWdata", Debug)
+      ExcitingUtils.addSink(difftest.wdst, "difftestWdst", Debug)
+      ExcitingUtils.addSink(difftest.wpc, "difftestWpc", Debug)
+      ExcitingUtils.addSink(difftest.intrNO, "difftestIntrNO", Debug)
+      ExcitingUtils.addSink(difftest.cause, "difftestCause", Debug)
+      ExcitingUtils.addSink(difftest.r, "difftestRegs", Debug)
+      ExcitingUtils.addSink(difftest.priviledgeMode, "difftestMode", Debug)
+      ExcitingUtils.addSink(difftest.mstatus, "difftestMstatus", Debug)
+      ExcitingUtils.addSink(difftest.sstatus, "difftestSstatus", Debug)
+      ExcitingUtils.addSink(difftest.mepc, "difftestMepc", Debug)
+      ExcitingUtils.addSink(difftest.sepc, "difftestSepc", Debug)
+      ExcitingUtils.addSink(difftest.mtval, "difftestMtval", Debug)
+      ExcitingUtils.addSink(difftest.stval, "difftestStval", Debug)
+      ExcitingUtils.addSink(difftest.mtvec, "difftestMtvec", Debug)
+      ExcitingUtils.addSink(difftest.stvec, "difftestStvec", Debug)
+      ExcitingUtils.addSink(difftest.mcause, "difftestMcause", Debug)
+      ExcitingUtils.addSink(difftest.scause, "difftestScause", Debug)
+      ExcitingUtils.addSink(difftest.satp, "difftestSatp", Debug)
+      ExcitingUtils.addSink(difftest.mip, "difftestMip", Debug)
+      ExcitingUtils.addSink(difftest.mie, "difftestMie", Debug)
+      ExcitingUtils.addSink(difftest.mscratch, "difftestMscratch", Debug)
+      ExcitingUtils.addSink(difftest.sscratch, "difftestSscratch", Debug)
+      ExcitingUtils.addSink(difftest.mideleg, "difftestMideleg", Debug)
+      ExcitingUtils.addSink(difftest.medeleg, "difftestMedeleg", Debug)
+      ExcitingUtils.addSink(difftest.scFailed, "difftestScFailed", Debug)
+    }
+    
     // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
     io.difftest := difftest
 
     val trap = WireInit(0.U.asTypeOf(new TrapIO))
-    ExcitingUtils.addSink(trap.valid, "trapValid")
-    ExcitingUtils.addSink(trap.code, "trapCode")
-    ExcitingUtils.addSink(trap.pc, "trapPC")
-    ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
-    ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSink(trap.valid, "trapValid")
+      ExcitingUtils.addSink(trap.code, "trapCode")
+      ExcitingUtils.addSink(trap.pc, "trapPC")
+      ExcitingUtils.addSink(trap.cycleCnt, "trapCycleCnt")
+      ExcitingUtils.addSink(trap.instrCnt, "trapInstrCnt")
+    }
+
     io.trap := trap
 
-    val timer = GTimer()
-    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-    ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-    ExcitingUtils.addSource(timer, "logTimestamp")
+    if (env.EnableDebug) {
+      val timer = GTimer()
+      val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+      ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
+      ExcitingUtils.addSource(timer, "logTimestamp")
+    }
 
     // Check and dispaly all source and sink connections
     ExcitingUtils.checkAndDisplay()
@@ -174,13 +182,15 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
 object TestMain extends App {
   // set parameters
   Parameters.set(
-    if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
+    if(args.contains("--fpga-platform")) Parameters()
+    else if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
     else Parameters.debugParameters // open log
   )
+
   implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
-    args.filterNot(_ == "--disable-log"),
+    args.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform"),
     Seq(
       ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
     )

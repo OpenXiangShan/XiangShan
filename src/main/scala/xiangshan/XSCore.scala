@@ -372,6 +372,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
     val externalInterrupt = new ExternalInterruptIO
   })
 
+  println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+
   val front = Module(new Frontend)
   val backend = Module(new Backend)
   val mem = Module(new Memend)
