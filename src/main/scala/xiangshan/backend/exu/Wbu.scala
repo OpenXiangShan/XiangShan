@@ -67,14 +67,13 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
       io.in(i).ready := true.B
     }
 
-    exuConfigs(i) match {
-      case Exu.aluExeUnitCfg =>
-        io.toRoq(i).valid := io.in(i).fire() && !io.in(i).bits.redirectValid
-      case Exu.jmpExeUnitCfg =>
-        io.toRoq(i).valid := io.in(i).fire() && !io.in(i).bits.redirectValid
-      case _ =>
-        io.toRoq(i).valid := io.in(i).fire()
+    if(exuConfigs(i).hasRedirect){
+      // aluExeUnit, jmpExeUnit
+      io.toRoq(i).valid := io.in(i).fire() && !io.in(i).bits.redirectValid
+    } else {
+      io.toRoq(i).valid := io.in(i).fire()
     }
+
     io.toRoq(i).bits := io.in(i).bits
   }
 
@@ -86,10 +85,15 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
 
   def splitN[T](in: Seq[T], n: Int): Seq[Option[Seq[T]]] = {
     require(n > 0)
-    if(in.size < n) Seq(Some(in)) ++ Seq.fill(n-1)(None)
-    else {
-      val m = in.size/n
-      Some(in.take(m)) +: splitN(in.drop(m), n-1)
+    if(n == 1){
+      return Seq(Some(in))
+    } else {
+      if(in.size < n ){
+        Seq(Some(in)) ++ Seq.fill(n-1)(None)
+      } else {
+        val m = in.size / n
+        Some(in.take(m)) +: splitN(in.drop(m), n-1)
+      }
     }
   }
 
@@ -104,12 +108,10 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
       io.toIntRf.drop(wbIntReq.size).foreach(_ <> DontCare)
     }
   } else {
-    val directReq = wbIntReq.filter(w => Seq(Exu.ldExeUnitCfg, Exu.aluExeUnitCfg).contains(w._2))
-    val mulReq = wbIntReq.filter(w => Seq(Exu.mulExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulDivFenceExeUnitCfg).contains(w._2))
+    val directReq = wbIntReq.filter(w => w._2.wbIntPriority == 0)
+    val mulReq = wbIntReq.filter(w => w._2.wbIntPriority == 1)
     val otherReq = splitN(
-      wbIntReq.filterNot(w => Seq(
-        Exu.ldExeUnitCfg, Exu.aluExeUnitCfg, Exu.mulDivExeUnitCfg, Exu.mulExeUnitCfg, Exu.mulDivFenceExeUnitCfg
-      ).contains(w._2)),
+      wbIntReq.filterNot(w => w._2.wbIntPriority <= 1),
       mulReq.size
     )
     require(directReq.size + mulReq.size <= NRIntWritePorts)
@@ -138,12 +140,10 @@ class Wbu(exuConfigs: Array[ExuConfig]) extends XSModule{
       io.toFpRf.drop(wbFpReq.size).foreach(_ <> DontCare)
     }
   } else {
-    val directReq = wbFpReq.filter(w => Seq(Exu.ldExeUnitCfg, Exu.fmacExeUnitCfg).contains(w._2))
-    val fmiscReq = wbFpReq.filter(w => Seq(Exu.fmiscExeUnitCfg, Exu.fmiscDivExeUnitCfg).contains(w._2))
+    val directReq = wbFpReq.filter(w => w._2.wbFpPriority == 0)
+    val fmiscReq = wbFpReq.filter(w => w._2.wbFpPriority == 1)
     val otherReq = splitN(
-      wbFpReq.filterNot(w => Seq(
-        Exu.ldExeUnitCfg, Exu.fmacExeUnitCfg, Exu.fmiscExeUnitCfg, Exu.fmiscDivExeUnitCfg
-      ).contains(w._2)),
+      wbFpReq.filterNot(w => w._2.wbFpPriority <= 1),
       fmiscReq.size
     )
     require(directReq.size + fmiscReq.size <= NRFpWritePorts)

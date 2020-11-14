@@ -5,6 +5,7 @@ import chisel3.util._
 
 object ParallelOperation {
   def apply[T <: Data](xs: Seq[T], func: (T, T) => T): T = {
+    require(xs.nonEmpty)
     xs match {
       case Seq(a) => a
       case Seq(a, b) => func(a, b)
@@ -36,5 +37,17 @@ object ParallelMux {
 object ParallelLookUp {
   def apply[T<:Data](key: UInt, mapping:Seq[(UInt,T)]): T = {
     ParallelMux(mapping.map(m => (m._1===key) -> m._2))
+  }
+}
+
+object ParallelMax {
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt() > b.asUInt(),a, b).asTypeOf(xs.head))
+  }
+}
+
+object ParallelMin {
+  def apply[T <: Data](xs: Seq[T]): T = {
+    ParallelOperation(xs, (a: T, b:T) => Mux(a.asUInt() < b.asUInt(),a, b).asTypeOf(xs.head))
   }
 }

@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
 import chiseltest._
-import noop.MDUOpType
 import xiangshan._
 import xiangshan.backend._
 

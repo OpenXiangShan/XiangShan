@@ -6,6 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
+import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.roq.RoqPtr
 
 case class DispatchParameters
@@ -22,7 +23,16 @@ case class DispatchParameters
   LsDqReplayWidth: Int
 )
 
-class Dispatch extends XSModule {
+class Dispatch
+(
+  jmpCfg: ExuConfig,
+  aluCfg: ExuConfig,
+  mduCfg: ExuConfig,
+  fmacCfg: ExuConfig,
+  fmiscCfg: ExuConfig,
+  ldCfg: ExuConfig,
+  stCfg: ExuConfig
+) extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
@@ -101,7 +111,7 @@ class Dispatch extends XSModule {
   lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
 
   // Int dispatch queue to Int reservation stations
-  val intDispatch = Module(new Dispatch2Int)
+  val intDispatch = Module(new Dispatch2Int(jmpCfg, aluCfg, mduCfg))
   intDispatch.io.fromDq <> intDq.io.deq
   intDispatch.io.readRf <> io.readIntRf
   intDispatch.io.regRdy := io.intPregRdy
@@ -111,7 +121,7 @@ class Dispatch extends XSModule {
 
   // TODO: Fp dispatch queue to Fp reservation stations
   if (exuParameters.FpExuCnt > 0) {
-    val fpDispatch = Module(new Dispatch2Fp)
+    val fpDispatch = Module(new Dispatch2Fp(fmacCfg, fmiscCfg))
     fpDispatch.io.fromDq <> fpDq.io.deq
     fpDispatch.io.readRf <> io.readFpRf
     fpDispatch.io.regRdy <> io.fpPregRdy
@@ -125,7 +135,7 @@ class Dispatch extends XSModule {
   }
   
   // Load/store dispatch queue to load/store issue queues
-  val lsDispatch = Module(new Dispatch2Ls)
+  val lsDispatch = Module(new Dispatch2Ls(ldCfg, stCfg))
   lsDispatch.io.fromDq <> lsDq.io.deq
   lsDispatch.io.readIntRf <> io.memIntRf
   lsDispatch.io.readFpRf <> io.memFpRf
