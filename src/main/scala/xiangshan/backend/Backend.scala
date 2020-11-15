@@ -8,7 +8,7 @@ import xiangshan.backend.rename.Rename
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.ReservationStationNew
+import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
@@ -96,7 +96,7 @@ class Backend extends XSModule
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
-  val reservedStations  = exuConfigs.zipWithIndex.map({ case (cfg, i) =>
+  val rs = exuConfigs.zipWithIndex.map({ case (cfg, i) =>
 
     // NOTE: exu could have certern and uncertaion latency
     // but could not have multiple certern latency
@@ -115,45 +115,60 @@ class Backend extends XSModule
     val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
     
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
-  
-    val rs = Module(new ReservationStationNew(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
 
-    rs.io.redirect <> redirect
-    rs.io.numExist <> dispatch.io.numExist(i)
-    rs.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
-    rs.io.enqData <> dispatch.io.enqIQData(i)
+    val rs_ctrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
+    val rs_data = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt))
 
-    rs.io.writeBackedData <> writeBackedData
-    for((x, y) <- rs.io.extraListenPorts.zip(extraListenPorts)){
-      x.valid := y.fire()
-      x.bits := y.bits
+    rs_ctrl.io.toData <> rs_data.io.fromCtrl
+    rs_ctrl.io.redirect <> redirect
+    rs_ctrl.io.numExist <> dispatch.io.numExist(i)
+    rs_ctrl.io.enqCtrl <> dispatch.io.enqIQCtrl(i)
+    rs_data.io.enqData <> dispatch.io.enqIQData(i)
+
+    rs_data.io.writeBackedData <> writeBackedData
+    for(((x, y), z) <- rs_ctrl.io.extraListenPorts.zip(rs_data.io.extraListenPorts).zip(extraListenPorts)){
+      x.valid := z.fire()
+      x.bits  := z.bits
+      y       := z.bits.data
     }
+
 
     cfg match {
       case `ldExeUnitCfg` =>
       case `stExeUnitCfg` =>
       case otherCfg =>
-        exeUnits(i).io.in <> rs.io.deq
+        exeUnits(i).io.in <> rs_ctrl.io.deq
+        exeUnits(i).io.in.bits := rs_data.io.deq
         exeUnits(i).io.redirect <> redirect
-        rs.io.tlbFeedback := DontCare
+        rs_ctrl.io.tlbFeedback := DontCare
     }
 
-    rs.suggestName(s"rs_${cfg.name}")
-
-    rs
+    rs_ctrl.suggestName(s"rs_ctrl_${cfg.name}")
+    rs_data.suggestName(s"rs_data_${cfg.name}")
+    (rs_ctrl, rs_data)
   })
+  val rsCtrls = rs.map(_._1)
+  val rsDatas = rs.map(_._2)
 
-  for(rs <- reservedStations){
-    rs.io.broadcastedUops <> reservedStations.
-      filter(x => x.exuCfg.hasCertainLatency && needData(rs.exuCfg, x.exuCfg)).
+  for(rs_ctrl <- rsCtrls) {
+    rs_ctrl.io.broadcastedUops <> rsCtrls.
+      filter(x => x.exuCfg.hasCertainLatency && needData(rs_ctrl.exuCfg, x.exuCfg)).
       map(_.io.selectedUop)
   }
 
   io.mem.commits <> roq.io.commits
   io.mem.roqDeqPtr := roq.io.roqDeqPtr
 
-  io.mem.ldin <> reservedStations.filter(_.exuCfg == ldExeUnitCfg).map(_.io.deq)
-  io.mem.stin <> reservedStations.filter(_.exuCfg == stExeUnitCfg).map(_.io.deq)
+  // io.mem.ldin <> reservedStations.filter(_.exuCfg == ldExeUnitCfg).map(_.io.deq)
+  // io.mem.stin <> reservedStations.filter(_.exuCfg == stExeUnitCfg).map(_.io.deq)
+  io.mem.ldin <> rsCtrls.filter(_.exuCfg == ldExeUnitCfg).map(_.io.deq)
+  io.mem.ldin.zip(rsDatas.filter(_.exuCfg == ldExeUnitCfg).map(_.io.deq)).map{
+    case (l,r) => l.bits := r
+  }
+  io.mem.stin <> rsCtrls.filter(_.exuCfg == stExeUnitCfg).map(_.io.deq)
+  io.mem.stin.zip(rsDatas.filter(_.exuCfg == stExeUnitCfg).map(_.io.deq)).map{
+    case (l,r) => l.bits := r
+  }
   jmpExeUnit.io.csrOnly.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
   jmpExeUnit.io.csrOnly.exception.bits := roq.io.exception
   jmpExeUnit.fflags := roq.io.fflags
@@ -169,7 +184,7 @@ class Backend extends XSModule
   io.mem.exceptionAddr.lsIdx.sqIdx := roq.io.exception.sqIdx
   io.mem.exceptionAddr.isStore := CommitType.lsInstIsStore(roq.io.exception.ctrl.commitType)
 
-  io.mem.tlbFeedback <> reservedStations.filter(
+  io.mem.tlbFeedback <> rsCtrls.filter(
     x => x.exuCfg == ldExeUnitCfg || x.exuCfg == stExeUnitCfg
   ).map(_.io.tlbFeedback)
 

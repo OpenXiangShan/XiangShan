@@ -78,7 +78,7 @@ class BypassQueue(number: Int) extends XSModule {
   }
 }
 
-class ReservationStationNew
+class ReservationStationCtrl
 (
   val exuCfg: ExuConfig,
   wakeupCnt: Int,
@@ -99,8 +99,6 @@ class ReservationStationNew
 
     // enq Ctrl sigs at dispatch-2
     val enqCtrl = Flipped(DecoupledIO(new MicroOp))
-    // enq Data at next cycle (regfile has 1 cycle latency)
-    val enqData = Input(new ExuInput)
 
     // broadcast selected uop to other issue queues
     val selectedUop = ValidIO(new MicroOp)
@@ -108,13 +106,13 @@ class ReservationStationNew
     // send to exu
     val deq = DecoupledIO(new ExuInput)
 
+    // to DataPart
+    val toData = Output(new RSCtrlDataBundle(wakeupCnt, extraListenPortsCnt))
+
     // recv broadcasted uops form any relative issue queue,
     // to simplify wake up logic, the uop broadcasted by this queue self
     // are also in 'boradcastedUops'
     val broadcastedUops = Vec(wakeupCnt, Flipped(ValidIO(new MicroOp)))
-
-    // listen to write back data bus
-    val writeBackedData = Vec(wakeupCnt, Input(UInt(XLEN.W)))
 
     // for some function units with uncertain latency,
     // we have to wake up relative uops until those function units write back
@@ -127,21 +125,6 @@ class ReservationStationNew
     val tlbFeedback = Flipped(ValidIO(new TlbFeedback)) // TODO: change its name
   })
 
-//  io <> DontCare
-
-  // GOAL: 
-  // 1. divide control part and data part
-  // 2. store control signal in sending RS and send out when after paticular cycles
-  // 3. one RS only have one paticular delay
-  // 4. remove the issue stage
-  // 5. support replay will cause one or two more latency for state machine change
-  //    so would not support replay in current edition.
-
-  // here is three logial part:
-  // control part: psrc(5.W)*3 srcState(1.W)*3 fuOpType/Latency(3.W) roqIdx
-  // data part: data(64.W)*3
-  // other part: lsroqIdx and many other signal in uop. may set them to control part(close to dispatch)
-
   // control part:
 
   val s_idle :: s_valid :: s_wait :: s_replay :: Nil = Enum(4)
@@ -153,18 +136,18 @@ class ReservationStationNew
   val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, new SrcBundle)))
   val cntQueue      = Reg(Vec(iqSize, UInt(log2Up(replayDelay).W)))
 
-  // data part:
-  val data          = Reg(Vec(iqSize, Vec(3, UInt(XLEN.W))))
-
   // other part:
-  val uop           = Reg(Vec(iqSize, new MicroOp))
+  val uop           = Reg(Vec(iqSize, new MicroOp)) // TODO: save uop here to use roqIdx for redirect, the other domain is useless and should not be used.
 
   // rs queue part:
   val tailPtr       = RegInit(0.U((iqIdxWidth+1).W))
   val idxQueue      = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
   val readyQueue    = VecInit(srcQueue.map(a => ParallelAND(a.map(_.state === SrcState.rdy)).asBool).
   zip(validQueue).map{ case (a,b) => a&b })
-  
+
+  io.toData.wback <> DontCare // NOTE: need check later
+  io.toData.extra <> DontCare
+
   // select ready
   // for no replay, select just equal to deq (attached)
   // with   replay, select is just two stage with deq.
@@ -278,10 +261,7 @@ class ReservationStationNew
 
   // output
   io.deq.valid := selReg && !uop(idxQueue(selectedIdxReg)).roqIdx.needFlush(io.redirect)// TODO: read it and add assert for rdyQueue
-  io.deq.bits.uop := uop(idxQueue(selectedIdxReg))
-  io.deq.bits.src1 := data(idxQueue(selectedIdxReg))(0)
-  if(srcNum > 1) { io.deq.bits.src2 := data(idxQueue(selectedIdxReg))(1) }
-  if(srcNum > 2) { io.deq.bits.src3 := data(idxQueue(selectedIdxReg))(2) } // TODO: beautify it
+  io.deq.bits := DontCare // NOTE: Data part
 
   // enq
   val tailAfterRealDeq = tailPtr - (io.deq.fire() && !needFeedback|| bubReg)
@@ -293,16 +273,16 @@ class ReservationStationNew
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcStateSeq = Seq(enqUop.src1State, enqUop.src2State, enqUop.src3State)
-  val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
+  // val srcDataSeq = Seq(io.enqData.src1, io.enqData.src2, io.enqData.src3)
 
   val enqPtr = Mux(tailPtr.head(1).asBool, deqIdx, tailPtr.tail(1))
   val enqIdx_data = idxQueue(enqPtr)
   val enqIdx_ctrl = tailAfterRealDeq.tail(1)
   val enqIdxNext = RegNext(enqIdx_data) 
-  val enqBpVec = (0 until srcNum).map(i => bypass(SrcBundle(srcSeq(i), srcStateSeq(i), srcTypeSeq(i)), true.B))
+  val enqBpVec = (0 until srcNum).map(i => wakeup(SrcBundle(srcSeq(i), srcStateSeq(i), srcTypeSeq(i)), true.B))
 
   when (io.enqCtrl.fire()) {
-    uop(enqIdx_data) := enqUop 
+    uop(enqIdx_data) := enqUop
     stateQueue(enqIdx_ctrl) := s_valid
     srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s,i) =>
       s := SrcBundle.check(srcSeq(i), Mux(enqBpVec(i)._1, SrcState.rdy, srcStateSeq(i)), srcTypeSeq(i)) }
@@ -310,45 +290,91 @@ class ReservationStationNew
     XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)} enqBpHit:${enqBpVec(0)._1}${enqBpVec(1)._1}${enqBpVec(2)._1}\n")
   }
   when (RegNext(io.enqCtrl.fire())) {
-    for(i <- data(0).indices) { data(enqIdxNext)(i) := Mux(enqBpVec(i)._2, enqBpVec(i)._3, srcDataSeq(i)) }
+    // for(i <- data(0).indices) { data(enqIdxNext)(i) := Mux(enqBpVec(i)._2, enqBpVec(i)._3, srcDataSeq(i)) }
+    
+    for (i <- 0 until 3) { // TODO: beautify it
+      when(RegNext(enqBpVec(i)._1)) { io.toData.wback(enqIdxNext)(i) := enqBpVec(i)._2 }
+    }
 
-    XSDebug(p"EnqDataFire: idx:${enqIdxNext} src1:0x${Hexadecimal(srcDataSeq(0))} src2:0x${Hexadecimal(srcDataSeq(1))} src3:0x${Hexadecimal(srcDataSeq(2))} enqBpHit:(${enqBpVec(0)._2}|0x${Hexadecimal(enqBpVec(0)._3)})(${enqBpVec(1)._2}|0x${Hexadecimal(enqBpVec(1)._3)})(${enqBpVec(2)._2}|0x${Hexadecimal(enqBpVec(2)._3)}\n")
+    // XSDebug(p"EnqDataFire: idx:${enqIdxNext} src1:0x${Hexadecimal(srcDataSeq(0))} src2:0x${Hexadecimal(srcDataSeq(1))} src3:0x${Hexadecimal(srcDataSeq(2))} enqBpHit:(${enqBpVec(0)._2}|0x${Hexadecimal(enqBpVec(0)._3)})(${enqBpVec(1)._2}|0x${Hexadecimal(enqBpVec(1)._3)})(${enqBpVec(2)._2}|0x${Hexadecimal(enqBpVec(2)._3)}\n")
   }
 
   // wakeup and bypass
-  def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
-    val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
-    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+  // def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
+  //   val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
+  //   assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
 
-    val hit = ParallelOR(hitVec) && valid
-    (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
-  }
+  //   val hit = ParallelOR(hitVec) && valid
+  //   (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
+  // }
 
-  def bypass(src: SrcBundle, valid: Bool) : (Bool, Bool, UInt) = {
-    val hitVec = io.broadcastedUops.map(port => src.hit(port.bits) && port.valid)
-    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+  // def bypass(src: SrcBundle, valid: Bool) : (Bool, Bool, UInt) = {
+  //   val hitVec = io.broadcastedUops.map(port => src.hit(port.bits) && port.valid)
+  //   assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
 
-    val hit = ParallelOR(hitVec) && valid
-    (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
-  }
+  //   val hit = ParallelOR(hitVec) && valid
+  //   (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
+  // }
   
+  // for (i <- 0 until iqSize) {
+  //   for (j <- 0 until srcNum) {
+  //     val (wuHit, wuData) = wakeup(srcQueue(i)(j), validQueue(i))
+  //     val (bpHit, bpHitReg, bpData) = bypass(srcQueue(i)(j), validQueue(i))
+  //     when (wuHit || bpHit) { srcQueue(i.U - moveMask(i))(j).state := SrcState.rdy }
+  //     when (wuHit) { data(idxQueue(i))(j) := wuData }
+  //     when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
+
+  //     XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${idxQueue(i)}\n")
+  //     XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) Ctrl idx:${idxQueue(i)}\n")
+  //     XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${idxQueue(i)}\n")
+  //   }
+  // }
+  // def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
+  //   val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
+  //   assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+
+  //   val hit = ParallelOR(hitVec) && valid
+  //   (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
+  // }
+
+  def extra(src: SrcBundle, valid: Bool) : (Bool, Seq[Bool]) = {
+    val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid && valid)
+    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+
+    val hit = ParallelOR(hitVec)
+    (hit, hitVec)
+  }
+
+  def wakeup(src: SrcBundle, valid: Bool) : (Bool, Seq[Bool]) = {
+    val hitVec = io.broadcastedUops.map(port => src.hit(port.bits) && port.valid && valid)
+    assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
+
+    val hit = ParallelOR(hitVec)
+    (hit, hitVec.map(RegNext(_)))
+  }
+
   for (i <- 0 until iqSize) {
     for (j <- 0 until srcNum) {
-      val (wuHit, wuData) = wakeup(srcQueue(i)(j), validQueue(i))
-      val (bpHit, bpHitReg, bpData) = bypass(srcQueue(i)(j), validQueue(i))
-      when (wuHit || bpHit) { srcQueue(i.U - moveMask(i))(j).state := SrcState.rdy }
-      when (wuHit) { data(idxQueue(i))(j) := wuData }
-      when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
+      val (exHit, exHitVec) = extra(srcQueue(i)(j), validQueue(i))
+      val (bpHit, bpHitVecReg) = wakeup(srcQueue(i)(j), validQueue(i))
+      when (exHit || bpHit) { srcQueue(i.U - moveMask(i))(j).state := SrcState.rdy }
+      when (bpHit) { io.toData.wback(i)(j) := bpHitVecReg }
+      when (exHit) { io.toData.extra(i)(j) := exHitVec }
 
-      XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${idxQueue(i)}\n")
+      XSDebug(exHit, p"WUHit: (${i.U})(${j.U}) idx:${idxQueue(i)}\n")
       XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) Ctrl idx:${idxQueue(i)}\n")
-      XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${idxQueue(i)}\n")
     }
   }
 
+  // other to Data
+  io.toData.enqPtr := enqIdx_ctrl
+  io.toData.deqPtr := selectedIdxReg
+  io.toData.enqCtrl.valid := io.enqCtrl.fire
+  io.toData.enqCtrl.bits  := io.enqCtrl.bits
+
   // other io
   io.numExist := tailPtr
-  
+
   // assert
   assert(tailPtr <= iqSize.U)
 
@@ -364,14 +390,100 @@ class ReservationStationNew
   val broadcastedUops = io.broadcastedUops
   val extraListenPorts = io.extraListenPorts
   for (i <- broadcastedUops.indices) {
-    XSDebug(broadcastedUops(i).valid && print, p"BpUops(${i.U}): pc:0x${Hexadecimal(broadcastedUops(i).bits.cf.pc)} roqIdx:${broadcastedUops(i).bits.roqIdx} idxQueue:${selectedIdxWire} pdest:${broadcastedUops(i).bits.pdest} rfWen:${broadcastedUops(i).bits.ctrl.rfWen} fpWen:${broadcastedUops(i).bits.ctrl.fpWen} data(last):0x${Hexadecimal(io.writeBackedData(i))}\n")
-    XSDebug(RegNext(broadcastedUops(i).valid && print),  p"BpUopData(${i.U}): data(last):0x${Hexadecimal(io.writeBackedData(i))}\n")
+    XSDebug(broadcastedUops(i).valid && print, p"BpUops(${i.U}): pc:0x${Hexadecimal(broadcastedUops(i).bits.cf.pc)} roqIdx:${broadcastedUops(i).bits.roqIdx} idxQueue:${selectedIdxWire} pdest:${broadcastedUops(i).bits.pdest} rfWen:${broadcastedUops(i).bits.ctrl.rfWen} fpWen:${broadcastedUops(i).bits.ctrl.fpWen} \n")
   }
   for (i <- extraListenPorts.indices) {
-    XSDebug(extraListenPorts(i).valid && print, p"WakeUp(${i.U}): pc:0x${Hexadecimal(extraListenPorts(i).bits.uop.cf.pc)} roqIdx:${extraListenPorts(i).bits.uop.roqIdx} pdest:${extraListenPorts(i).bits.uop.pdest} rfWen:${extraListenPorts(i).bits.uop.ctrl.rfWen} fpWen:${extraListenPorts(i).bits.uop.ctrl.fpWen} data:0x${Hexadecimal(extraListenPorts(i).bits.data)}\n")
+    XSDebug(extraListenPorts(i).valid && print, p"WakeUp(${i.U}): pc:0x${Hexadecimal(extraListenPorts(i).bits.uop.cf.pc)} roqIdx:${extraListenPorts(i).bits.uop.roqIdx} pdest:${extraListenPorts(i).bits.uop.pdest} rfWen:${extraListenPorts(i).bits.uop.ctrl.rfWen} fpWen:${extraListenPorts(i).bits.uop.ctrl.fpWen}\n")
   }
   XSDebug(print, " :IQ|s|r|cnt| src1 |src2 | src3|pdest(rf|fp)| roqIdx|pc\n")
   for(i <- 0 until iqSize) {
-    XSDebug(print, p"${i.U}: ${idxQueue(i)}|${stateQueue(i)}|${readyQueue(i)}| ${cntQueue(idxQueue(i))}|${srcQueue(i)(0)} 0x${Hexadecimal(data(idxQueue(i))(0))}|${srcQueue(i)(1)} 0x${Hexadecimal(data(idxQueue(i))(1))}|${srcQueue(i)(2)} 0x${Hexadecimal(data(idxQueue(i))(2))}|${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
+    XSDebug(print, p"${i.U}: ${idxQueue(i)}|${stateQueue(i)}|${readyQueue(i)}| ${cntQueue(idxQueue(i))}|${srcQueue(i)(0)}|${srcQueue(i)(1)} |${srcQueue(i)(2)} |${uop(idxQueue(i)).pdest}(${uop(idxQueue(i)).ctrl.rfWen}|${uop(idxQueue(i)).ctrl.fpWen})|${uop(idxQueue(i)).roqIdx}|${Hexadecimal(uop(idxQueue(i)).cf.pc)}\n")
   }
+}
+
+class RSCtrlDataBundle(wakeupCnt: Int, extraCnt: Int) extends XSBundle {
+  // TODO: current: Ctrl to Data, next: Data to Ctrl
+  val wback = Vec(IssQueSize, Vec(3, Vec(wakeupCnt, Bool()))) // UInt(wakeupCnt.W)
+  val extra = Vec(IssQueSize, Vec(3, Vec(extraCnt, Bool()))) // UInt(extraCnt.W )
+  val enqPtr = UInt(log2Up(IssQueSize).W)
+  val deqPtr = UInt(log2Up(IssQueSize).W)
+  val enqCtrl = Flipped(ValidIO(new MicroOp))
+
+  override def cloneType: this.type = (new RSCtrlDataBundle(wakeupCnt, extraCnt)).asInstanceOf[this.type]
+}
+
+class ReservationStationData
+(
+  val exuCfg: ExuConfig,
+  wakeupCnt: Int,
+  extraListenPortsCnt: Int,
+  srcNum: Int = 3
+) extends XSModule {
+  
+  val iqSize = IssQueSize
+  val iqIdxWidth = log2Up(iqSize)
+
+  val io = IO(new XSBundle {
+    // flush
+    // val redirect = Flipped(ValidIO(new Redirect))
+
+    // enq Data at next cycle (regfile has 1 cycle latency)
+    val enqData = Input(new ExuInput)
+    // val enqCtrl = ... // TODO: enqCtrl.bits from Dp, valid from Ctrl
+
+    // send to exu
+    val deq = Output(new ExuInput)
+
+    // listen to RSCtrl
+    val fromCtrl = Input(new RSCtrlDataBundle(wakeupCnt, extraListenPortsCnt))
+
+    // listen to write back data bus(certain latency)
+    // and extra wrtie back(uncertan latency) 
+    val writeBackedData = Vec(wakeupCnt, Input(UInt(XLEN.W)))
+    val extraListenPorts = Vec(extraListenPortsCnt, Input(UInt(XLEN.W)))
+  })
+  // TODO: may move selectUop here, check it
+
+  val uop     = Reg(Vec(iqSize, new MicroOp))
+  val data    = Reg(Vec(iqSize, Vec(3, UInt(XLEN.W))))
+  // TODO: change data's number
+
+  val wback = io.fromCtrl.wback
+  val extra = io.fromCtrl.extra
+  val enq   = io.fromCtrl.enqPtr
+  val deq   = io.fromCtrl.deqPtr
+  val enqCtrl = io.fromCtrl.enqCtrl
+
+  val enqPtr = enq(log2Up(IssQueSize)-1,0)
+  val enqPtrReg = RegEnable(enqPtr, enqCtrl.fire())
+  when (enqCtrl.fire()) {
+    uop(enqPtr) := enqCtrl.bits
+  }
+
+  when (RegNext(enqCtrl.fire())) { // TODO: turn to srcNum, not the 3
+    data(enqPtrReg)(0) := io.enqData.src1
+    data(enqPtrReg)(1) := io.enqData.src2
+    data(enqPtrReg)(2) := io.enqData.src3
+  }
+
+  wback.zipWithIndex.map{ case (e,i) => {
+    data(i).zipWithIndex.map{ case (s, j) => {
+      when (Cat(e(j)).orR) { 
+        data(i)(j) := ParallelMux(e(j) zip io.writeBackedData) 
+      }
+    }}
+  }}
+
+  extra.zipWithIndex.map{ case (e,i) => {
+    data(i).zipWithIndex.map{ case (s, j) => {
+      when (Cat(e(j)).orR) { 
+        data(i)(j) := ParallelMux(e(j) zip io.extraListenPorts) 
+      }
+    }}
+  }}
+
+  io.deq := DontCare
+  io.deq.src1 := data(deq)(0)
+  io.deq.src2 := data(deq)(1)
+  io.deq.src3 := data(deq)(2)
 }
