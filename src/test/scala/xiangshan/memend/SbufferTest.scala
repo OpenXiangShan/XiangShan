@@ -5,6 +5,8 @@ import chiseltest._
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import xiangshan._
 import xiangshan.cache.{DCacheLineIO, DCacheWordReq}
 import xiangshan.mem.{LoadForwardQueryIO, NewSbuffer}
@@ -31,7 +33,7 @@ class SbufferWapper extends XSModule {
   sbuffer.io.dcache.resp.bits.meta.id := RegNext(RegNext(RegNext(RegNext(sbuffer.io.dcache.req.bits.meta.id))))
 }
 
-class SbufferTest extends FlatSpec
+class SbufferTest extends AnyFlatSpec
   with ChiselScalatestTester
   with Matchers
   with HasXSParameter

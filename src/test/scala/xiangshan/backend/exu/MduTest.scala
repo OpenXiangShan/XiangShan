@@ -4,6 +4,8 @@ import org.scalatest._
 import chiseltest._
 import chisel3._
 import chisel3.experimental.BundleLiterals._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import top.Parameters
 import utils.XSLog
 import xiangshan.testutils._
@@ -14,7 +16,7 @@ import scala.util.Random
 
 
 
-class MduTest extends FlatSpec
+class MduTest extends AnyFlatSpec
   with ChiselScalatestTester
   with Matchers
   with ParallelTestExecution
