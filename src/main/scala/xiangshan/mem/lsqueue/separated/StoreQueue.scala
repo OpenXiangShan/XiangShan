@@ -154,6 +154,24 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     (selValid, selVec)
   }
 
+  def selectFirstTwoRoughly(valid: Vec[Bool]) = {
+    // TODO: do not select according to seq, just select 2 valid bit randomly
+    val firstSelVec = valid
+    val notFirstVec = Wire(Vec(valid.length, Bool()))
+    (0 until valid.length).map(i => 
+      notFirstVec(i) := (if(i != 0) { valid(i) || !notFirstVec(i) } else { false.B })
+    )
+    val secondSelVec = VecInit((0 until valid.length).map(i => valid(i) && !notFirstVec(i)))
+
+    val selVec = Wire(Vec(2, UInt(log2Up(valid.length).W)))
+    val selValid = Wire(Vec(2, Bool()))
+    selVec(0) := PriorityEncoder(firstSelVec)
+    selVec(1) := PriorityEncoder(secondSelVec)
+    selValid(0) := Cat(firstSelVec).orR
+    selValid(1) := Cat(secondSelVec).orR
+    (selValid, selVec)
+  }
+
   // select the last writebacked instruction
   val validStoreVec = VecInit((0 until StoreQueueSize).map(i => !(allocated(i) && valid(i))))
   val storeNotValid = SqPtr(false.B, getFirstOne(validStoreVec, tailMask))
