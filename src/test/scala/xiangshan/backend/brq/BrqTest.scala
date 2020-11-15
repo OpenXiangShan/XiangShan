@@ -7,6 +7,8 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.VerilatorBackendAnnotation
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import top.Parameters
 import utils.XSLog
 import xiangshan._
@@ -15,7 +17,7 @@ import xiangshan.testutils.TestCaseGenerator._
 
 import scala.util.Random
 
-class BrqTest extends FlatSpec
+class BrqTest extends AnyFlatSpec
   with ChiselScalatestTester
   with Matchers
   with ParallelTestExecution
