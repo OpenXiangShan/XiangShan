@@ -19,7 +19,7 @@ class ExceptionAddrIO extends XSBundle {
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 //
 // By using this Wrapper, interface of unified lsroq and ldq / stq are the same 
-class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
+class LsqWrappper extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
@@ -144,6 +144,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters with NeedImpl {
       storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid && prevCanIn
       loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
       storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
+      io.lsIdxs(i).lsroqIdx := DontCare
       io.dp1Req(i).ready := storeQueue.io.dp1Req(i).ready && loadQueue.io.dp1Req(i).ready
     })
   }

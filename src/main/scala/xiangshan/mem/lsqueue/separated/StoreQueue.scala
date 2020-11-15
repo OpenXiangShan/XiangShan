@@ -263,42 +263,83 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     })
   })
 
+  // CommitedStoreQueue for timing opt
+  // send commited store inst to sbuffer
+  // select up to 2 writebacked store insts
+  val commitedStoreQueue = Module(new MIMOQueue(
+    UInt(log2Up(StoreQueueSize).W),
+    entries = 64, //FIXME
+    inCnt = 6,
+    outCnt = 2,
+    mem = false,
+    perf = true
+  ))
+  commitedStoreQueue.io.flush := false.B
+
+  // When store commited, mark it as commited (will not be influenced by redirect),
+  // then add store's sq ptr into commitedStoreQueue
   (0 until CommitWidth).map(i => {
     when(storeCommit(i)) {
       commited(mcommitIdx(i)) := true.B
       XSDebug("store commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
     }
+    commitedStoreQueue.io.enq(i).valid := storeCommit(i)
+    commitedStoreQueue.io.enq(i).bits := mcommitIdx(i)
+    // We assume commitedStoreQueue.io.enq(i).ready === true.B,
+    // for commitedStoreQueue.size = 64
   })
 
-  val storeCommitSelVec = VecInit((0 until StoreQueueSize).map(i => {
-    allocated(i) && commited(i)
-  }))
-  val (storeCommitValid, storeCommitSel) = selectFirstTwo(storeCommitSelVec, tailMask)
-  
-  // get no more than 2 commited store from storeCommitedQueue
-  // send selected store inst to sbuffer
-  (0 until 2).map(i => {
-    val ptr = storeCommitSel(i)
-    val mmio = data(ptr).mmio
-    io.sbuffer(i).valid := storeCommitValid(i) && !mmio
-    io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr := data(ptr).paddr
-    io.sbuffer(i).bits.data := data(ptr).data
-    io.sbuffer(i).bits.mask := data(ptr).mask
-    io.sbuffer(i).bits.meta          := DontCare
-    io.sbuffer(i).bits.meta.tlb_miss := false.B
-    io.sbuffer(i).bits.meta.uop      := uop(ptr)
-    io.sbuffer(i).bits.meta.mmio     := mmio
-    io.sbuffer(i).bits.meta.mask     := data(ptr).mask
-    
-    XSDebug(io.sbuffer(i).fire(), "[SBUFFER STORE REQ] pa %x data %x\n", data(ptr).paddr, data(ptr).data)
+  class SbufferCandidateEntry extends XSBundle{
+    val sbuffer = new DCacheWordReq
+    val sqIdx = UInt(log2Up(StoreQueueSize).W)
+  }
 
-    // update sq meta if store inst is send to sbuffer
-    when(storeCommitValid(i) && (mmio || io.sbuffer(i).ready)) {
+  val ensbufferCandidateQueue = Module(new MIMOQueue(
+    new SbufferCandidateEntry,
+    entries = 2,
+    inCnt = 2,
+    outCnt = 2,
+    mem = false,
+    perf = true
+  ))
+  ensbufferCandidateQueue.io.flush := false.B
+
+  val sbufferCandidate = Wire(Vec(2, Decoupled(new SbufferCandidateEntry)))
+  (0 until 2).map(i => {
+    val ptr = commitedStoreQueue.io.deq(i).bits
+    val mmio = data(ptr).mmio
+    sbufferCandidate(i).valid := commitedStoreQueue.io.deq(i).valid && !mmio
+    sbufferCandidate(i).bits.sqIdx := ptr
+    sbufferCandidate(i).bits.sbuffer.cmd  := MemoryOpConstants.M_XWR
+    sbufferCandidate(i).bits.sbuffer.addr := data(ptr).paddr
+    sbufferCandidate(i).bits.sbuffer.data := data(ptr).data
+    sbufferCandidate(i).bits.sbuffer.mask := data(ptr).mask
+    sbufferCandidate(i).bits.sbuffer.meta          := DontCare
+    sbufferCandidate(i).bits.sbuffer.meta.tlb_miss := false.B
+    sbufferCandidate(i).bits.sbuffer.meta.uop      := DontCare
+    sbufferCandidate(i).bits.sbuffer.meta.mmio     := mmio
+    sbufferCandidate(i).bits.sbuffer.meta.mask     := data(ptr).mask
+
+    when(mmio && commitedStoreQueue.io.deq(i).valid) {
       allocated(ptr) := false.B
     }
+
+    commitedStoreQueue.io.deq(i).ready := sbufferCandidate(i).fire() || mmio
+    sbufferCandidate(i).ready := ensbufferCandidateQueue.io.enq(i).ready
+    ensbufferCandidateQueue.io.enq(i).valid := sbufferCandidate(i).valid
+    ensbufferCandidateQueue.io.enq(i).bits.sqIdx := sbufferCandidate(i).bits.sqIdx
+    ensbufferCandidateQueue.io.enq(i).bits.sbuffer := sbufferCandidate(i).bits.sbuffer
+    
+    ensbufferCandidateQueue.io.deq(i).ready := io.sbuffer(i).fire()
+    io.sbuffer(i).valid := ensbufferCandidateQueue.io.deq(i).valid
+    io.sbuffer(i).bits  := ensbufferCandidateQueue.io.deq(i).bits.sbuffer
+
+    // update sq meta if store inst is send to sbuffer
+    when(ensbufferCandidateQueue.io.deq(i).valid && io.sbuffer(i).ready) {
+      allocated(ensbufferCandidateQueue.io.deq(i).bits.sqIdx) := false.B
+    }
   })
-  
+
   // Memory mapped IO / other uncached operations
   
   // setup misc mem access req
