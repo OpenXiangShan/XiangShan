@@ -28,6 +28,8 @@ object LqPtr extends HasXSParameter {
 class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+    val lqReady = Output(Vec(RenameWidth, Bool()))
+    val sqReady = Input(Vec(RenameWidth, Bool()))
     val lqIdxs = Output(Vec(RenameWidth, new LqPtr)) // LSIdx will be assembled in LSQWrapper
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -91,7 +93,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       // data(index).bwdMask := 0.U(8.W).asBools
     }
     val numTryEnqueue = offset +& io.dp1Req(i).valid
-    io.dp1Req(i).ready := numTryEnqueue <= emptyEntries
+    io.lqReady(i) := numTryEnqueue <= emptyEntries
+    io.dp1Req(i).ready := io.lqReady(i) &* io.sqReady(i)
     io.lqIdxs(i) := lqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }

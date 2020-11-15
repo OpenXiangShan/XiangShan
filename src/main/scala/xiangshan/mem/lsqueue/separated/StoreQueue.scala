@@ -25,6 +25,8 @@ object SqPtr extends HasXSParameter {
 class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+    val lqReady = Input(Vec(RenameWidth, Bool()))
+    val sqReady = Output(Vec(RenameWidth, Bool()))
     val sqIdxs = Output(Vec(RenameWidth, new SqPtr))
     val brqRedirect = Input(Valid(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -87,7 +89,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       // data(index).bwdMask := 0.U(8.W).asBools
     }
     val numTryEnqueue = offset +& io.dp1Req(i).valid
-    io.dp1Req(i).ready := numTryEnqueue <= emptyEntries
+    io.sqReady(i) := numTryEnqueue <= emptyEntries
+    io.dp1Req(i).ready := io.lqReady(i) && io.sqReady(i)
     io.sqIdxs(i) := sqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }

@@ -13,7 +13,6 @@ import xiangshan.backend.roq.RoqPtr
 class LsRoqEntry extends XSBundle {
   val vaddr = UInt(VAddrBits.W) // TODO: need opt
   val paddr = UInt(PAddrBits.W)
-  val op = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(16.W) // TODO: opt size
