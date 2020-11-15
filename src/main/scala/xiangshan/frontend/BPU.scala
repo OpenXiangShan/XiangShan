@@ -254,6 +254,9 @@ class BPUStage1 extends BPUStage {
   io.out.bits.resp <> io.in.bits.resp
   io.out.bits.brInfo := io.in.bits.brInfo
 
+  // we do not need to compare target in stage1
+  io.pred.bits.redirect := taken
+
   if (BPUDebug) {
     XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
       ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ~ubtbResp.takens.asUInt & brMask.asUInt, ubtbResp.is_RVC.asUInt)
@@ -588,7 +591,7 @@ class BPU extends BaseBPU {
   s1.io.in.valid := io.in.valid
   s1.io.in.bits.pc := io.in.bits.pc
   s1.io.in.bits.mask := io.in.bits.inMask
-  s1.io.in.bits.target := npc(io.in.bits.pc, PopCount(io.in.bits.inMask)) // Deault target npc
+  s1.io.in.bits.target := DontCare
   s1.io.in.bits.resp <> s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
   s1.io.in.bits.saveHalfRVI := false.B
