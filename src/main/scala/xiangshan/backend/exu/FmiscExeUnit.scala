@@ -22,43 +22,52 @@ class FmiscExeUnit extends Exu(
   },
   wbIntPriority = Int.MaxValue,
   wbFpPriority = 1
-){
+) {
 
   val frm = IO(Input(UInt(3.W)))
 
   val fcmp :: fmv :: f2i :: f32toF64 :: f64toF32 :: fdivSqrt :: Nil = supportedFunctionUnits
+  val toFpUnits = Seq(fcmp, f32toF64, f64toF32, fdivSqrt)
+  val toIntUnits = Seq(fmv, f2i)
 
-  val fuOp = io.in.bits.uop.ctrl.fuOpType
+  val input = io.fromFp
+  val fuOp = input.bits.uop.ctrl.fuOpType
   assert(fuOp.getWidth == 7) // when fuOp's WIDTH change, here must change too
   val fu = fuOp.head(4)
   val op = fuOp.tail(4)
-  val isRVF = io.in.bits.uop.ctrl.isRVF
+  val isRVF = input.bits.uop.ctrl.isRVF
+  val instr_rm = input.bits.uop.cf.instr(14, 12)
+  val (src1, src2) = (input.bits.src1, input.bits.src2)
 
-  val instr_rm = io.in.bits.uop.cf.instr(14, 12)
-
-  supportedFunctionUnits.foreach{ module =>
+  supportedFunctionUnits.foreach { module =>
     module.io.in.bits.src(0) := Mux(
-      (isRVF && fuOp=/=d2s && fuOp=/=fmv_f2i) || fuOp===s2d,
+      (isRVF && fuOp =/= d2s && fuOp =/= fmv_f2i) || fuOp === s2d,
       unboxF64ToF32(src1),
       src1
     )
-    if(module.cfg.srcCnt > 1){
+    if (module.cfg.srcCnt > 1) {
       module.io.in.bits.src(1) := Mux(isRVF, unboxF64ToF32(src2), src2)
     }
     module.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   }
 
-  val arbiter = outputArb.get
-
-  io.out.bits.fflags := Mux1H(arbiter.io.in.zip(supportedFunctionUnits).map(
+  io.toFp.bits.fflags := Mux1H(fpArb.io.in.zip(toFpUnits).map(
     x => x._1.fire() -> x._2.fflags
   ))
-  val outCtrl = io.out.bits.uop.ctrl
-  io.out.bits.data := Mux(outCtrl.isRVF && outCtrl.fpWen,
-    boxF32ToF64(arbiter.io.out.bits.data),
-    Mux( (outCtrl.isRVF && outCtrl.fuOpType===fmv_f2i) || outCtrl.fuOpType===f2w || outCtrl.fuOpType===f2wu,
-      SignExt(arbiter.io.out.bits.data(31, 0), XLEN),
-      arbiter.io.out.bits.data
-    )
+  val fpOutCtrl = io.toFp.bits.uop.ctrl
+  io.toFp.bits.data := Mux(fpOutCtrl.isRVF,
+    boxF32ToF64(fpArb.io.out.bits.data),
+    fpArb.io.out.bits.data
   )
+  val intOutCtrl = io.toInt.bits.uop.ctrl
+  io.toInt.bits.data := Mux(
+    (intOutCtrl.isRVF && intOutCtrl.fuOpType === fmv_i2f) ||
+      intOutCtrl.fuOpType === f2w ||
+      intOutCtrl.fuOpType === f2wu,
+    SignExt(intArb.io.out.bits.data(31, 0), XLEN),
+    intArb.io.out.bits.data
+  )
+  io.toInt.bits.fflags := Mux1H(intArb.io.in.zip(toIntUnits).map(
+    x => x._1.fire() -> x._2.fflags
+  ))
 }

@@ -197,12 +197,12 @@ class DebugBundle extends XSBundle{
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
-  val src1, src2, src3 = UInt(XLEN.W)
+  val src1, src2, src3 = UInt((XLEN+1).W)
 }
 
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
-  val data = UInt(XLEN.W)
+  val data = UInt((XLEN+1).W)
   val fflags  = new Fflags
   val redirectValid = Bool()
   val redirect = new Redirect
@@ -225,14 +225,14 @@ class CSRSpecialIO extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class ExuIO extends XSBundle {
-  val in = Flipped(DecoupledIO(new ExuInput))
-  val redirect = Flipped(ValidIO(new Redirect))
-  val out = DecoupledIO(new ExuOutput)
-  // for csr
-  val csrOnly = new CSRSpecialIO
-  val mcommit = Input(UInt(3.W))
-}
+//class ExuIO extends XSBundle {
+//  val in = Flipped(DecoupledIO(new ExuInput))
+//  val redirect = Flipped(ValidIO(new Redirect))
+//  val out = DecoupledIO(new ExuOutput)
+//  // for csr
+//  val csrOnly = new CSRSpecialIO
+//  val mcommit = Input(UInt(3.W))
+//}
 
 class RoqCommit extends XSBundle {
   val uop = new MicroOp

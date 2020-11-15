@@ -25,7 +25,7 @@ object RoqPtr extends HasXSParameter {
 }
 
 
-class Roq extends XSModule with HasCircularQueuePtrHelper {
+class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val memRedirect = Input(Valid(new Redirect))
@@ -34,7 +34,7 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     val redirect = Output(Valid(new Redirect))
     val exception = Output(new MicroOp)
     // exu + brq
-    val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
+    val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
     val commitRoqIndex = Output(Valid(new RoqPtr))
@@ -45,8 +45,6 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     val fflags = Output(new Fflags)
     val dirty_fs = Output(Bool())
   })
-
-  val numWbPorts = io.exeWbResults.length
 
   val microOp = Mem(RoqSize, new MicroOp)
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))

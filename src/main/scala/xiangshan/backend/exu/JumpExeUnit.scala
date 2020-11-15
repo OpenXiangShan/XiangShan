@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.fpu.FPUOpType.FU_I2F
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
-import xiangshan.{FuType, SfenceBundle, TlbCsrBundle}
+import xiangshan.{CSRSpecialIO, FuType, SfenceBundle, TlbCsrBundle}
 import xiangshan.backend.fu.fpu.{Fflags, IntToFloatSingleCycle, boxF32ToF64}
 
 class JumpExeUnit extends Exu(
@@ -30,6 +30,8 @@ class JumpExeUnit extends Exu(
 
   val tlbCsrIO = IO(Output(new TlbCsrBundle))
 
+  val csrOnly = IO(new CSRSpecialIO)
+
   val jmp = supportedFunctionUnits.collectFirst{
     case j: Jump => j
   }.get
@@ -44,7 +46,7 @@ class JumpExeUnit extends Exu(
   }.get
 
 
-  val uop = io.in.bits.uop
+  val uop = io.fromInt.bits.uop
 
   fenceToSbuffer <> fence.toSbuffer
   sfence <> fence.sfence
@@ -58,14 +60,16 @@ class JumpExeUnit extends Exu(
 
   csr.perf <> DontCare
 
-  csr.exception := io.csrOnly.exception
+  csr.exception := csrOnly.exception
   csr.isInterrupt := io.redirect.bits.isFlushPipe
-  csr.memExceptionVAddr := io.csrOnly.memExceptionVAddr
-  csr.mtip := io.csrOnly.externalInterrupt.mtip
-  csr.msip := io.csrOnly.externalInterrupt.msip
-  csr.meip := io.csrOnly.externalInterrupt.meip
-  io.csrOnly.trapTarget := csr.trapTarget
-  io.csrOnly.interrupt := csr.interrupt
+  csr.memExceptionVAddr := csrOnly.memExceptionVAddr
+  csr.mtip := csrOnly.externalInterrupt.mtip
+  csr.msip := csrOnly.externalInterrupt.msip
+  csr.meip := csrOnly.externalInterrupt.meip
+  csrOnly.trapTarget := csr.trapTarget
+  csrOnly.interrupt := csr.interrupt
+
+  fence.io.out.ready := true.B
 
   val instr_rm = uop.cf.instr(14, 12)
   i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.fpu_csr.frm)
@@ -74,28 +78,28 @@ class JumpExeUnit extends Exu(
 
   when(i2f.io.in.valid){
     when(uop.ctrl.fuOpType.head(4)===s"b$FU_I2F".U){
-      io.out.bits.data := Mux(isDouble, i2f.io.out.bits.data, boxF32ToF64(i2f.io.out.bits.data))
-      io.out.bits.fflags := i2f.fflags
+      io.toFp.bits.data := Mux(isDouble, i2f.io.out.bits.data, boxF32ToF64(i2f.io.out.bits.data))
+      io.toFp.bits.fflags := i2f.fflags
     }.otherwise({
       // a mov.(s/d).x instruction
-      io.out.bits.data := Mux(isDouble, io.in.bits.src1, boxF32ToF64(io.in.bits.src1))
-      io.out.bits.fflags := 0.U.asTypeOf(new Fflags)
+      io.toFp.bits.data := Mux(isDouble, io.fromInt.bits.src1, boxF32ToF64(io.fromInt.bits.src1))
+      io.toFp.bits.fflags := 0.U.asTypeOf(new Fflags)
     })
   }
 
   when(csr.io.out.valid){
-    io.out.bits.redirectValid := csr.redirectOutValid
-    io.out.bits.redirect.brTag := uop.brTag
-    io.out.bits.redirect.isException := false.B
-    io.out.bits.redirect.isMisPred := false.B
-    io.out.bits.redirect.isFlushPipe := false.B
-    io.out.bits.redirect.isReplay := false.B
-    io.out.bits.redirect.roqIdx := uop.roqIdx
-    io.out.bits.redirect.target := csr.redirectOut.target
-    io.out.bits.redirect.pc := uop.cf.pc
+    io.toInt.bits.redirectValid := csr.redirectOutValid
+    io.toInt.bits.redirect.brTag := uop.brTag
+    io.toInt.bits.redirect.isException := false.B
+    io.toInt.bits.redirect.isMisPred := false.B
+    io.toInt.bits.redirect.isFlushPipe := false.B
+    io.toInt.bits.redirect.isReplay := false.B
+    io.toInt.bits.redirect.roqIdx := uop.roqIdx
+    io.toInt.bits.redirect.target := csr.redirectOut.target
+    io.toInt.bits.redirect.pc := uop.cf.pc
   }.elsewhen(jmp.io.out.valid){
-    io.out.bits.redirectValid := jmp.redirectOutValid
-    io.out.bits.redirect := jmp.redirectOut
-    io.out.bits.brUpdate := jmp.brUpdate
+    io.toInt.bits.redirectValid := jmp.redirectOutValid
+    io.toInt.bits.redirect := jmp.redirectOut
+    io.toInt.bits.brUpdate := jmp.brUpdate
   }
 }

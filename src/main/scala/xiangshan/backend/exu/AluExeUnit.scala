@@ -21,7 +21,7 @@ class AluExeUnit extends Exu(
     case a: Alu => a
   }.get
 
-  io.out.bits.redirectValid := alu.redirectOutValid
-  io.out.bits.redirect := alu.redirectOut
-  io.out.bits.brUpdate := alu.brUpdate
+  io.toInt.bits.redirectValid := alu.redirectOutValid
+  io.toInt.bits.redirect := alu.redirectOut
+  io.toInt.bits.brUpdate := alu.brUpdate
 }

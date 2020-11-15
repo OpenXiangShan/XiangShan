@@ -19,13 +19,19 @@ case class ExuParameters
   FmiscDivSqrtCnt: Int,
   LduCnt: Int,
   StuCnt: Int
-){
+) {
   assert(JmpCnt == 1, "Only support 1 JmpUnit now!")
+
   def IntExuCnt = AluCnt + MulCnt + MduCnt + JmpCnt
+
   def FpExuCnt = FmacCnt + FmiscCnt + FmiscDivSqrtCnt
+
   def LsExuCnt = LduCnt + StuCnt
+
   def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
+
   def NRFuType = 9
+
   def FuOpWidth = 7
 }
 
@@ -35,23 +41,24 @@ case class ExuConfig
   supportedFuncUnits: Seq[FuConfig],
   wbIntPriority: Int,
   wbFpPriority: Int
-){
-  def max(in: Seq[Int]): Int = in.reduce((x, y) => if(x > y) x else y)
+) {
+  def max(in: Seq[Int]): Int = in.reduce((x, y) => if (x > y) x else y)
+
   val intSrcCnt = max(supportedFuncUnits.map(_.numIntSrc))
   val fpSrcCnt = max(supportedFuncUnits.map(_.numFpSrc))
   val readIntRf = intSrcCnt > 0
   val readFpRf = fpSrcCnt > 0
-  val writeIntRf = supportedFuncUnits.map(_.writeIntRf).reduce(_||_)
-  val writeFpRf = supportedFuncUnits.map(_.writeFpRf).reduce(_||_)
-  val hasRedirect = supportedFuncUnits.map(_.hasRedirect).reduce(_||_)
+  val writeIntRf = supportedFuncUnits.map(_.writeIntRf).reduce(_ || _)
+  val writeFpRf = supportedFuncUnits.map(_.writeFpRf).reduce(_ || _)
+  val hasRedirect = supportedFuncUnits.map(_.hasRedirect).reduce(_ || _)
 
   val latency: HasFuLatency = {
     val lats = supportedFuncUnits.map(_.latency)
-    if(lats.exists(x => x.latencyVal.isEmpty)){
+    if (lats.exists(x => x.latencyVal.isEmpty)) {
       UncertainLatency()
     } else {
       val x = lats.head
-      for(l <- lats.drop(1)){
+      for (l <- lats.drop(1)) {
         require(x.latencyVal.get == l.latencyVal.get)
       }
       x
@@ -73,13 +80,6 @@ abstract class Exu[T <: FunctionUnit]
   val wbFpPriority: Int
 ) extends XSModule {
 
-  val io = IO(new ExuIO)
-
-  val src1 = io.in.bits.src1
-  val src2 = io.in.bits.src2
-  val src3 = io.in.bits.src3
-  val func = io.in.bits.uop.ctrl.fuOpType
-
   val supportedFunctionUnits = fuGen.map(_._1).map(gen => Module(gen()))
 
   val fuSel = supportedFunctionUnits.zip(fuGen.map(_._2)).map(x => x._2(x._1))
@@ -91,81 +91,121 @@ abstract class Exu[T <: FunctionUnit]
   }
 
   require(fuGen.nonEmpty)
-  require(fuSel.size == fuGen.length)
+  require(!fuConfigs.exists(c => {
+    (c.numIntSrc > 0) && (c.numFpSrc > 0)
+  }))
 
-  if(fuSel == null){
-    println("fu sel is null")
-  }
-  if(supportedFunctionUnits == null){
-    println("supported fu is null")
-  }
-  for((fu, sel) <- supportedFunctionUnits.zip(fuSel)){
-    if(fu == null) println("aaa")
-    if(sel == null) println("bbb")
-    fu.io.in.valid := io.in.valid && sel
-    fu.io.in.bits.uop := io.in.bits.uop
-    if(fu.cfg.srcCnt > 0){
+  //  val io = IO(new ExuIO)
+
+  val io = IO(new Bundle() {
+    val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
+    val fromFp = if (config.readFpRf) Flipped(DecoupledIO(new ExuInput)) else null
+    val redirect = Flipped(ValidIO(new Redirect))
+    val toInt = if (config.writeIntRf) DecoupledIO(new ExuOutput) else null
+    val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
+  })
+
+  for ((fu, sel) <- supportedFunctionUnits.zip(fuSel)) {
+
+    val in = if (fu.cfg.numIntSrc > 0) {
+      assert(fu.cfg.numFpSrc == 0)
+      io.fromInt
+    } else {
+      assert(fu.cfg.numFpSrc > 0)
+      io.fromFp
+    }
+
+    val src1 = in.bits.src1
+    val src2 = in.bits.src2
+    val src3 = in.bits.src3
+
+    fu.io.in.valid := in.valid && sel
+    fu.io.in.bits.uop := in.bits.uop
+    if (fu.cfg.srcCnt > 0) {
       fu.io.in.bits.src(0) := src1
     }
-    if(fu.cfg.srcCnt > 1){
+    if (fu.cfg.srcCnt > 1) {
       fu.io.in.bits.src(1) := src2
     }
-    if(fu.cfg.srcCnt > 2){
+    if (fu.cfg.srcCnt > 2) {
       fu.io.in.bits.src(2) := src3
     }
     fu.io.redirectIn := io.redirect
   }
 
-  val outputArb = if(config.latency.latencyVal.nonEmpty && (config.latency.latencyVal.get == 0)){
-    // do not need an arbiter
-    println(config.name)
-    io.in.ready := Cat(supportedFunctionUnits.map(_.io.in.ready)).andR()
-    for(fu <- supportedFunctionUnits){
-      fu.io.out.ready := io.out.ready
-    }
-    val out = Mux1H(supportedFunctionUnits.map(x => x.io.out.valid -> x.io.out))
-    io.out.bits.data := out.bits.data
-    io.out.bits.uop := out.bits.uop
-    io.out.valid := out.valid
-    None
-  } else {
-    io.in.ready := (if(supportedFunctionUnits.length > 1) {
-      Cat(
-        fuSel.zip(supportedFunctionUnits).map(x => x._1 && x._2.io.in.ready)
-      ).orR()
+
+  val needArbiter = !(config.latency.latencyVal.nonEmpty && (config.latency.latencyVal.get == 0))
+
+  def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Arbiter[FuOutput] = {
+    if (needArbiter) {
+      val arb = Module(new Arbiter(new FuOutput, in.size))
+      arb.io.in <> in
+      arb.io.out.ready := out.ready
+      out.bits.data := arb.io.out.bits.data
+      out.bits.uop := arb.io.out.bits.uop
+      out.valid := arb.io.out.valid
+      arb
     } else {
-      supportedFunctionUnits.head.io.in.ready
-    })
-    val outputArb = Module(new Arbiter(new FuOutput, supportedFunctionUnits.length))
-    outputArb.io.in <> VecInit(supportedFunctionUnits.map(_.io.out))
-    io.out.bits.data := outputArb.io.out.bits.data
-    io.out.bits.uop := outputArb.io.out.bits.uop
-    io.out.valid := outputArb.io.out.valid
-    outputArb.io.out.ready := io.out.ready
-    Some(outputArb)
+      in.foreach(_.ready := out.ready)
+      val sel = Mux1H(in.map(x => x.valid -> x))
+      out.bits.data := sel.bits.data
+      out.bits.uop := sel.bits.uop
+      out.valid := sel.valid
+      null
+    }
   }
 
-  io.out.bits.brUpdate <> DontCare
-  io.out.bits.fflags <> DontCare
-  io.out.bits.debug.isMMIO := false.B
-  io.out.bits.debug <> DontCare
-  io.out.bits.redirect <> DontCare
-  io.out.bits.redirectValid := false.B
-  io.csrOnly <> DontCare
-}
+  val intArb = if (config.writeIntRf) writebackArb(
+    supportedFunctionUnits.filter(_.cfg.writeIntRf).map(_.io.out),
+    io.toInt
+  ) else null
 
-//object Exu {
-//  val jmpExeUnitCfg = ExuConfig("JmpExu", Array(jmpCfg, i2fCfg, csrCfg, fenceCfg))
-//  val aluExeUnitCfg = ExuConfig("AluExu", Array(aluCfg))
-//  val mulExeUnitCfg = ExuConfig("MulExu", Array(mulCfg))
-//  val divExeUnitCfg = ExuConfig("DivExu", Array(divCfg))
-//  val fenceExeUnitCfg = ExuConfig("FenceCfg", Array(fenceCfg))
-//  val i2fExeUnitCfg = ExuConfig("I2fExu", Array(i2fCfg))
-//  val mulDivExeUnitCfg = ExuConfig("MulDivExu", Array(mulCfg, divCfg))
-//  val mulDivFenceExeUnitCfg = ExuConfig("MulDivFenceExu", Array(mulCfg, divCfg, fenceCfg))
-//  val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), requestFastWriteBack = true, uniqueInArbiter = false)
-//  val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), requestFastWriteBack = false, uniqueInArbiter = false)
-//  val fmacExeUnitCfg = ExuConfig("FmacExu", Array(fmacCfg))
-//  val fmiscExeUnitCfg = ExuConfig("FmiscExu", Array(fmiscCfg))
-//  val fmiscDivExeUnitCfg = ExuConfig("FmiscDivExu", Array(fmiscCfg, fDivSqrtCfg))
-//}
+  val fpArb = if (config.writeFpRf) writebackArb(
+    supportedFunctionUnits.filter(_.cfg.writeFpRf).map(_.io.out),
+    io.toFp
+  ) else null
+
+  val readIntFu = supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numIntSrc > 0)
+  val readFpFu = supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numFpSrc > 0)
+
+  def inReady(s: Seq[(T, Bool)]): Bool = {
+    if (s.size == 1) {
+      s.head._1.io.in.ready
+    } else {
+      if(needArbiter){
+        Cat(s.map(x => x._1.io.in.ready && x._2)).orR()
+      } else {
+        Cat(s.map(x => x._1.io.in.ready)).andR()
+      }
+    }
+  }
+
+
+  if (config.readIntRf) {
+    io.fromInt.ready := inReady(
+      supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numIntSrc > 0)
+    )
+  }
+
+  if (config.readFpRf) {
+    io.fromFp.ready := inReady(
+      supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numFpSrc > 0)
+    )
+  }
+
+  def assignDontCares(out: ExuOutput) = {
+    out.brUpdate := DontCare
+    out.fflags := DontCare
+    out.debug <> DontCare
+    out.debug.isMMIO := false.B
+    out.redirect <> DontCare
+    out.redirectValid := false.B
+  }
+
+  if(config.writeFpRf){
+    assignDontCares(io.toFp.bits)
+  }
+  if(config.writeIntRf){
+    assignDontCares(io.toInt.bits)
+  }
+}

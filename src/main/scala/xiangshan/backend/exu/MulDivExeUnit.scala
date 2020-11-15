@@ -26,6 +26,13 @@ class MulDivExeUnit(hasDiv: Boolean = true) extends Exu(
   wbFpPriority = Int.MaxValue
 )
 {
+
+  val func = io.fromInt.bits.uop.ctrl.fuOpType
+  val (src1, src2) = (
+    io.fromInt.bits.src1(XLEN-1, 0),
+	io.fromInt.bits.src2(XLEN-1, 0)
+  )
+
   val mul = supportedFunctionUnits.collectFirst {
     case m: ArrayMultiplier => m
   }.get
@@ -77,17 +84,17 @@ class MulDivExeUnit(hasDiv: Boolean = true) extends Exu(
     div.ctrl.sign := isDivSign
   }
 
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
-    io.in.valid, io.in.ready,
-    io.out.valid, io.out.ready,
+  XSDebug(io.fromInt.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+    io.fromInt.valid, io.fromInt.ready,
+    io.toInt.valid, io.toInt.ready,
     io.redirect.valid,
     io.redirect.bits.isException,
     io.redirect.bits.isFlushPipe,
     io.redirect.bits.brTag.value
   )
-  XSDebug(io.in.valid, "src1:%x src2:%x pc:%x\n", src1, src2, io.in.bits.uop.cf.pc)
-  XSDebug(io.out.valid, "Out(%d %d) res:%x pc:%x\n",
-    io.out.valid, io.out.ready, io.out.bits.data, io.out.bits.uop.cf.pc
+  XSDebug(io.fromInt.valid, "src1:%x src2:%x pc:%x\n", src1, src2, io.fromInt.bits.uop.cf.pc)
+  XSDebug(io.toInt.valid, "Out(%d %d) res:%x pc:%x\n",
+    io.toInt.valid, io.toInt.ready, io.toInt.bits.data, io.toInt.bits.uop.cf.pc
   )
 }
 
