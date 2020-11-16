@@ -290,13 +290,9 @@ class ReservationStationCtrl
     XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)} enqBpHit:${enqBpVec(0)._1}${enqBpVec(1)._1}${enqBpVec(2)._1}\n")
   }
   when (RegNext(io.enqCtrl.fire())) {
-    // for(i <- data(0).indices) { data(enqIdxNext)(i) := Mux(enqBpVec(i)._2, enqBpVec(i)._3, srcDataSeq(i)) }
-    
     for (i <- 0 until 3) { // TODO: beautify it
       when(RegNext(enqBpVec(i)._1)) { io.toData.wback(enqIdxNext)(i) := enqBpVec(i)._2 }
     }
-
-    // XSDebug(p"EnqDataFire: idx:${enqIdxNext} src1:0x${Hexadecimal(srcDataSeq(0))} src2:0x${Hexadecimal(srcDataSeq(1))} src3:0x${Hexadecimal(srcDataSeq(2))} enqBpHit:(${enqBpVec(0)._2}|0x${Hexadecimal(enqBpVec(0)._3)})(${enqBpVec(1)._2}|0x${Hexadecimal(enqBpVec(1)._3)})(${enqBpVec(2)._2}|0x${Hexadecimal(enqBpVec(2)._3)}\n")
   }
 
   def extra(src: SrcBundle, valid: Bool) : (Bool, Seq[Bool]) = {
@@ -330,7 +326,8 @@ class ReservationStationCtrl
 
   // other to Data
   io.toData.enqPtr := enqIdx_ctrl
-  io.toData.deqPtr := selectedIdxReg
+  io.toData.deqPtr.valid  := selValid
+  io.toData.deqPtr.bits   := idxQueue(selectedIdxWire)
   io.toData.enqCtrl.valid := io.enqCtrl.fire
   io.toData.enqCtrl.bits  := io.enqCtrl.bits
   io.toData.deqValid := io.deq.valid // Note: just for debug
@@ -369,7 +366,7 @@ class RSCtrlDataBundle(wakeupCnt: Int, extraCnt: Int) extends XSBundle {
   val wback = Vec(IssQueSize, Vec(3, Vec(wakeupCnt, Bool()))) // UInt(wakeupCnt.W)
   val extra = Vec(IssQueSize, Vec(3, Vec(extraCnt, Bool()))) // UInt(extraCnt.W )
   val enqPtr = UInt(log2Up(IssQueSize).W)
-  val deqPtr = UInt(log2Up(IssQueSize).W)
+  val deqPtr = Valid(UInt(log2Up(IssQueSize).W)) // one cycle earlier
   val enqCtrl = Valid(new MicroOp)
 
   val deqValid = Bool() // Note: just for debug
@@ -394,7 +391,6 @@ class ReservationStationData
 
     // enq Data at next cycle (regfile has 1 cycle latency)
     val enqData = Input(new ExuInput)
-    // val enqCtrl = ... // TODO: enqCtrl.bits from Dp, valid from Ctrl
 
     // send to exu
     val deq = Output(new ExuInput)
@@ -416,25 +412,29 @@ class ReservationStationData
   val wback = io.fromCtrl.wback
   val extra = io.fromCtrl.extra
   val enq   = io.fromCtrl.enqPtr
-  val deq   = io.fromCtrl.deqPtr
+  val deq   = RegEnable(io.fromCtrl.deqPtr.bits, io.fromCtrl.deqPtr.fire())
   val enqCtrl = io.fromCtrl.enqCtrl
 
   val enqPtr = enq(log2Up(IssQueSize)-1,0)
   val enqPtrReg = RegEnable(enqPtr, enqCtrl.fire())
   when (enqCtrl.fire()) {
     uop(enqPtr) := enqCtrl.bits
+    XSDebug(p"enqCtrlFire: enqPtr:${enqPtr} pc:0x${Hexadecimal(enqCtrl.bits.cf.pc)} roqIdx:${enqCtrl.bits.roqIdx}\n")
   }
 
   when (RegNext(enqCtrl.fire())) { // TODO: turn to srcNum, not the 3
     data(enqPtrReg)(0) := io.enqData.src1
     data(enqPtrReg)(1) := io.enqData.src2
     data(enqPtrReg)(2) := io.enqData.src3
+    XSDebug(p"enqDataFire: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
   }
 
   wback.zipWithIndex.map{ case (e,i) => {
     data(i).zipWithIndex.map{ case (s, j) => {
-      when (Cat(e(j)).orR) { 
-        data(i)(j) := ParallelMux(e(j) zip io.writeBackedData) 
+      when (Cat(e(j)).orR) {
+        val wbdata = ParallelMux(e(j) zip io.writeBackedData)
+        data(i)(j) := wbdata
+        XSDebug(p"WbackData:(${i.U})(${j}): ${Hexadecimal(wbdata)}\n")
       }
     }}
   }}
@@ -442,7 +442,9 @@ class ReservationStationData
   extra.zipWithIndex.map{ case (e,i) => {
     data(i).zipWithIndex.map{ case (s, j) => {
       when (Cat(e(j)).orR) { 
-        data(i)(j) := ParallelMux(e(j) zip io.extraListenPorts) 
+        val exdata = ParallelMux(e(j) zip io.extraListenPorts)
+        data(i)(j) := exdata
+        XSDebug(p"ExData:(${i.U})(${j}): ${Hexadecimal(exdata)}\n")
       }
     }}
   }}
@@ -452,7 +454,9 @@ class ReservationStationData
   io.deq.src2 := data(deq)(1)
   io.deq.src3 := data(deq)(2)
 
-  XSDebug(enqCtrl.fire(), p"enqCtrlFire: enqPtr:${enqPtr} pc:0x${Hexadecimal(enqCtrl.bits.cf.pc)} roqIdx:${enqCtrl.bits.roqIdx}\n")
-  XSDebug(RegNext(enqCtrl.fire()), p"enqDataFire: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
   XSDebug(io.fromCtrl.deqValid, p"Deq: pc:${Hexadecimal(io.deq.uop.cf.pc)} roqIdx:${io.deq.uop.roqIdx} src1:${Hexadecimal(io.deq.src1)} src2:${Hexadecimal(io.deq.src2)} src3:${Hexadecimal(io.deq.src3)}\n")
+  XSDebug(p"Data:  | src1 | src2 | src3| roqIdx | pc\n")
+  for(i <- data.indices) {
+    XSDebug(p"${i.U} ${Hexadecimal(data(i)(0))}|${Hexadecimal(data(i)(1))}|${Hexadecimal(data(i)(2))}|${uop(i).roqIdx} | ${Hexadecimal(uop(i).cf.pc)}\n")
+  }
 }
