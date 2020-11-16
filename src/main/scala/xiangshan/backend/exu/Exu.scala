@@ -70,11 +70,11 @@ case class ExuConfig
   }
 }
 
-abstract class Exu[T <: FunctionUnit](val config: ExuConfig) extends XSModule {
+abstract class Exu(val config: ExuConfig) extends XSModule {
 
   val supportedFunctionUnits = config.fuConfigs.map(_.fuGen).map(gen => Module(gen()))
 
-  val fuSel = supportedFunctionUnits.zip(config.fuConfigs.map(_.fuSel)).map{
+  val fuSel = supportedFunctionUnits.zip(config.fuConfigs.map(_.fuSel)).map {
     case (fu, sel) => sel(fu)
   }
 
@@ -161,7 +161,7 @@ abstract class Exu[T <: FunctionUnit](val config: ExuConfig) extends XSModule {
     if (s.size == 1) {
       s.head._1.io.in.ready
     } else {
-      if(needArbiter){
+      if (needArbiter) {
         Cat(s.map(x => x._1.io.in.ready && x._2)).orR()
       } else {
         Cat(s.map(x => x._1.io.in.ready)).andR()
@@ -187,10 +187,10 @@ abstract class Exu[T <: FunctionUnit](val config: ExuConfig) extends XSModule {
     out.redirectValid := false.B
   }
 
-  if(config.writeFpRf){
+  if (config.writeFpRf) {
     assignDontCares(io.toFp.bits)
   }
-  if(config.writeIntRf){
+  if (config.writeIntRf) {
     assignDontCares(io.toInt.bits)
   }
 }
@@ -209,5 +209,11 @@ object Exu {
   val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
   val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 
+  val exuConfigs: Seq[ExuConfig] = jumpExeUnitCfg +: (
+      Seq.fill(exuParameters.AluCnt)(aluExeUnitCfg) ++
+      Seq.fill(exuParameters.MduCnt)(mulDivExeUnitCfg) ++
+      Seq.fill(exuParameters.FmacCnt)(fmacExeUnitCfg) ++
+      Seq.fill(exuParameters.FmiscCnt)(fmiscExeUnitCfg)
+    )
 
 }

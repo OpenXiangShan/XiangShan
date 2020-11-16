@@ -6,7 +6,6 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
-import xiangshan.backend.exu.ExuConfig
 import xiangshan.backend.roq.RoqPtr
 
 case class DispatchParameters
@@ -23,16 +22,7 @@ case class DispatchParameters
   LsDqReplayWidth: Int
 )
 
-class Dispatch
-(
-  jmpCfg: ExuConfig,
-  aluCfg: ExuConfig,
-  mduCfg: ExuConfig,
-  fmacCfg: ExuConfig,
-  fmiscCfg: ExuConfig,
-  ldCfg: ExuConfig,
-  stCfg: ExuConfig
-) extends XSModule {
+class Dispatch extends XSModule {
   val io = IO(new Bundle() {
     // flush or replay
     val redirect = Flipped(ValidIO(new Redirect))
@@ -111,7 +101,7 @@ class Dispatch
   }
 
   // Int dispatch queue to Int reservation stations
-  val intDispatch = Module(new Dispatch2Int(jmpCfg, aluCfg, mduCfg))
+  val intDispatch = Module(new Dispatch2Int)
   intDispatch.io.fromDq <> intDq.io.deq
   intDispatch.io.readRf.zipWithIndex.map({case (r, i) => r <> io.readIntRf(i)})
   intDispatch.io.regRdy.zipWithIndex.map({case (r, i) => r <> io.intPregRdy(i)})
@@ -120,7 +110,7 @@ class Dispatch
   intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
 
   // Fp dispatch queue to Fp reservation stations
-  val fpDispatch = Module(new Dispatch2Fp(fmacCfg, fmiscCfg))
+  val fpDispatch = Module(new Dispatch2Fp)
   fpDispatch.io.fromDq <> fpDq.io.deq
   fpDispatch.io.readRf.zipWithIndex.map({case (r, i) => r <> io.readFpRf(i)})
   fpDispatch.io.regRdy.zipWithIndex.map({case (r, i) => r <> io.fpPregRdy(i)})
@@ -129,7 +119,7 @@ class Dispatch
   fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
   
   // Load/store dispatch queue to load/store issue queues
-  val lsDispatch = Module(new Dispatch2Ls(ldCfg, stCfg))
+  val lsDispatch = Module(new Dispatch2Ls)
   lsDispatch.io.fromDq <> lsDq.io.deq
   lsDispatch.io.readIntRf.zipWithIndex.map({case (r, i) => r <> io.readIntRf(i + 8)})
   lsDispatch.io.readFpRf.zipWithIndex.map({case (r, i) => r <> io.readFpRf(i + 12)})

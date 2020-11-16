@@ -63,11 +63,7 @@ class Backend extends XSModule
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch(
-    jmpExeUnit.config, aluExeUnits(0).config, mduExeUnits(0).config,
-    fmacExeUnits(0).config, fmiscExeUnits(0).config,
-    ldExeUnitCfg, stExeUnitCfg
-  ))
+  val dispatch = Module(new Dispatch)
   val roq = Module(new Roq(wbSize))
   val intRf = Module(new Regfile(
     numReadPorts = NRIntReadPorts,

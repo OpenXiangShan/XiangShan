@@ -8,11 +8,9 @@ import xiangshan.backend.rename.Rename
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.ReservationStationNew
+import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.roq.{Roq, RoqPtr, RoqCSRIO}
-import xiangshan.mem._
-import xiangshan.backend.fu.FunctionUnit._
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
@@ -40,16 +38,7 @@ class CtrlToLsBlockIO extends XSBundle {
   val roqDeqPtr = Input(new RoqPtr)
 }
 
-class CtrlBlock
-(
-  jmpCfg: ExuConfig,
-  aluCfg: ExuConfig,
-  mduCfg: ExuConfig,
-  fmacCfg: ExuConfig,
-  fmiscCfg: ExuConfig,
-  ldCfg: ExuConfig,
-  stCfg: ExuConfig
-) extends XSModule {
+class CtrlBlock extends XSModule {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val fromIntBlock = Flipped(new IntBlockToCtrlIO)
@@ -64,18 +53,17 @@ class CtrlBlock
   val brq = Module(new Brq)
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
-  val dispatch = Module(new Dispatch(
-    jmpCfg, aluCfg, mduCfg,
-    fmacCfg, fmiscCfg,
-    ldCfg, stCfg
-  ))
+  val dispatch = Module(new Dispatch)
   // TODO: move busyTable to dispatch1
   // val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
   // val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
-  val roq = Module(new Roq)
 
-  val fromExeBlock = (io.fromIntBlock, io.fromFpBlock, io.fromLsBlock)
-  val toExeBlock = (io.toIntBlock, io.toFpBlock, io.toLsBlock)
+  val fpWbSize = exuConfigs.count(_.writeFpRf)
+  val intWbSize = exuConfigs.count(_.writeIntRf)
+  // wb int exu + wb fp exu + ldu / stu + brq
+  val roqWbSize = intWbSize + fpWbSize + exuParameters.LduCnt + exuParameters.StuCnt + 1
+
+  val roq = Module(new Roq(roqWbSize))
 
   val redirect = Mux(
     roq.io.redirect.valid,
