@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.MDUOpType
-import xiangshan.backend.fu.{ArrayMultiplier, Divider, FunctionUnit}
+import xiangshan.backend.fu.{AbstractDivider, ArrayMultiplier, FunctionUnit, Radix2Divider}
 
 class MulDivExeUnit(hasDiv: Boolean = true) extends Exu(
   exuName = if(hasDiv) "MulDivExeUnit" else "MulExeUnit",
@@ -38,7 +38,7 @@ class MulDivExeUnit(hasDiv: Boolean = true) extends Exu(
   }.get
 
   val div = supportedFunctionUnits.collectFirst {
-    case d: Divider => d
+    case d: AbstractDivider => d
   }.orNull
 
   // override inputs
