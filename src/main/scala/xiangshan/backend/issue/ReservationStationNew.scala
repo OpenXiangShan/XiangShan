@@ -299,44 +299,6 @@ class ReservationStationCtrl
     // XSDebug(p"EnqDataFire: idx:${enqIdxNext} src1:0x${Hexadecimal(srcDataSeq(0))} src2:0x${Hexadecimal(srcDataSeq(1))} src3:0x${Hexadecimal(srcDataSeq(2))} enqBpHit:(${enqBpVec(0)._2}|0x${Hexadecimal(enqBpVec(0)._3)})(${enqBpVec(1)._2}|0x${Hexadecimal(enqBpVec(1)._3)})(${enqBpVec(2)._2}|0x${Hexadecimal(enqBpVec(2)._3)}\n")
   }
 
-  // wakeup and bypass
-  // def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
-  //   val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
-  //   assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
-
-  //   val hit = ParallelOR(hitVec) && valid
-  //   (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
-  // }
-
-  // def bypass(src: SrcBundle, valid: Bool) : (Bool, Bool, UInt) = {
-  //   val hitVec = io.broadcastedUops.map(port => src.hit(port.bits) && port.valid)
-  //   assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
-
-  //   val hit = ParallelOR(hitVec) && valid
-  //   (hit, RegNext(hit), ParallelMux(hitVec.map(RegNext(_)) zip io.writeBackedData))
-  // }
-  
-  // for (i <- 0 until iqSize) {
-  //   for (j <- 0 until srcNum) {
-  //     val (wuHit, wuData) = wakeup(srcQueue(i)(j), validQueue(i))
-  //     val (bpHit, bpHitReg, bpData) = bypass(srcQueue(i)(j), validQueue(i))
-  //     when (wuHit || bpHit) { srcQueue(i.U - moveMask(i))(j).state := SrcState.rdy }
-  //     when (wuHit) { data(idxQueue(i))(j) := wuData }
-  //     when (bpHitReg) { data(RegNext(idxQueue(i)))(j) := bpData }
-
-  //     XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${idxQueue(i)}\n")
-  //     XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) Ctrl idx:${idxQueue(i)}\n")
-  //     XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${idxQueue(i)}\n")
-  //   }
-  // }
-  // def wakeup(src: SrcBundle, valid: Bool) : (Bool, UInt) = {
-  //   val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid)
-  //   assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
-
-  //   val hit = ParallelOR(hitVec) && valid
-  //   (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
-  // }
-
   def extra(src: SrcBundle, valid: Bool) : (Bool, Seq[Bool]) = {
     val hitVec = io.extraListenPorts.map(port => src.hit(port.bits.uop) && port.valid && valid)
     assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
@@ -482,7 +444,7 @@ class ReservationStationData
     }}
   }}
 
-  io.deq := DontCare
+  io.deq.uop  := uop(deq)
   io.deq.src1 := data(deq)(0)
   io.deq.src2 := data(deq)(1)
   io.deq.src3 := data(deq)(2)
