@@ -5,7 +5,6 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 trait BimParams extends HasXSParameter {
