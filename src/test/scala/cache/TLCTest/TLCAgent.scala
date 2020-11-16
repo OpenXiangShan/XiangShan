@@ -202,8 +202,8 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     addrState.pendingGrantAck || addrState.pendingProbeAck
   }
 
-  //Due to no backup pressure in channel E, the handle function is integrated into tick function
-  def tickE(inE: TLCScalaE): Unit = {
+  //Due to no backup pressure in channel E, the handle function is integrated into fire function
+  def fireE(inE: TLCScalaE): Unit = {
     require(sinkIdMap.contains(inE.sink), "no sinkId for GrantAck")
     val acq = sinkIdMap(inE.sink)
     acq.pairGrantAck(inE)
