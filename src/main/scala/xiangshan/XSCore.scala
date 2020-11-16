@@ -6,6 +6,7 @@ import top.Parameters
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
+import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
@@ -280,17 +281,55 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
     val externalInterrupt = new ExternalInterruptIO
   })
 
+  // to fast wake up fp, mem rs
+  val intBlockFastWakeUpFp = intExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeFpRf)
+  val intBlockSlowWakeUpFp = intExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeFpRf)
+  val intBlockFastWakeUpInt = intExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeIntRf)
+  val intBlockSlowWakeUpInt = intExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeIntRf)
+
+  val fpBlockFastWakeUpFp = fpExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeFpRf)
+  val fpBlockSlowWakeUpFp = fpExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeFpRf)
+  val fpBlockFastWakeUpInt = fpExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeIntRf)
+  val fpBlockSlowWakeUpInt = fpExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeIntRf)
+
   val frontend = Module(new Frontend)
   val ctrlBlock = Module(new CtrlBlock)
-  val integerBlock = Module(new IntegerBlock)
-  val floatBlock = Module(new FloatBlock)
-  val memBlock = Module(new MemBlock)
+  val integerBlock = Module(new IntegerBlock(
+    fastWakeUpInCnt = fpBlockFastWakeUpInt,
+    slowWakeUpInCnt = fpBlockSlowWakeUpInt + exuParameters.LduCnt,
+    fastFpOutCnt = intBlockFastWakeUpFp,
+    slowFpOutCnt = intBlockSlowWakeUpFp,
+    fastIntOutCnt = intBlockFastWakeUpInt,
+    slowIntOutCnt = intBlockSlowWakeUpInt
+  ))
+  val floatBlock = Module(new FloatBlock(
+    fastWakeUpInCnt = intBlockFastWakeUpFp,
+    slowWakeUpInCnt = intBlockSlowWakeUpFp + exuParameters.LduCnt,
+    fastFpOutCnt = fpBlockFastWakeUpFp,
+    slowFpOutCnt = fpBlockSlowWakeUpFp,
+    fastIntOutCnt = fpBlockFastWakeUpInt,
+    slowIntOutCnt = fpBlockSlowWakeUpInt
+  ))
+  val memBlock = Module(new MemBlock(
+    fastWakeUpInCnt = intBlockFastWakeUpInt + intBlockFastWakeUpFp + fpBlockFastWakeUpInt + fpBlockFastWakeUpFp,
+    slowWakeUpInCnt = intBlockSlowWakeUpInt + intBlockSlowWakeUpFp + fpBlockSlowWakeUpInt + fpBlockSlowWakeUpFp,
+    fastFpOutCnt = 0,
+    slowFpOutCnt = exuParameters.LduCnt,
+    fastIntOutCnt = 0,
+    slowIntOutCnt = exuParameters.LduCnt
+  ))
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val icache = Module(new ICache)
+
+  //TODO: remove following code
+  memBlock.io <> DontCare
+  integerBlock.io <> DontCare
+  floatBlock.io <> DontCare
+
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.icacheResp <> icache.io.resp
@@ -310,6 +349,27 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
+  integerBlock.io.wakeUpIn.fast <> floatBlock.io.wakeUpIntOut.fast
+  integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlock.io.wakeUpIntOut.slow
+
+  floatBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpFpOut.fast
+  floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlock.io.wakeUpFpOut.slow
+
+  memBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpIntOut.fast ++
+    integerBlock.io.wakeUpFpOut.fast ++
+    floatBlock.io.wakeUpIntOut.fast ++
+    floatBlock.io.wakeUpFpOut.fast
+
+  memBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpIntOut.slow ++
+    integerBlock.io.wakeUpFpOut.slow ++
+    floatBlock.io.wakeUpIntOut.slow ++
+    floatBlock.io.wakeUpFpOut.slow
+
+  integerBlock.io.csrOnly.memExceptionVAddr := memBlock.io.csr.exceptionAddr.vaddr
+  integerBlock.io.csrOnly.externalInterrupt := io.externalInterrupt
+  integerBlock.io.csrOnly.isInterrupt := DontCare //TODO: fix it
+
+
   io.externalInterrupt <> integerBlock.io.externalInterrupt
 
   ptw.io.tlb(0) <> memBlock.io.ptw
@@ -322,5 +382,14 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
   dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
   dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
   uncache.io.lsroq      <> memBlock.io.dcache.uncache
+
+  val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
+  ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
+  ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
+  val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
+  if (!env.FPGAPlatform) {
+    ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
+  }
+
 
 }

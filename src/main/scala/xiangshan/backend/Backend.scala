@@ -264,29 +264,28 @@ class Backend extends XSModule
 
   val wbIntArbiter = Module(new Wb(
     wbIntExus.map(_.config.wbIntPriority) ++ ldConfigs.map(_.wbIntPriority),
-    NRIntWritePorts,
-    wen = (e: ExuOutput)=>e.uop.ctrl.rfWen
+    NRIntWritePorts
   ))
 
   val wbFpArbiter = Module(new Wb(
     wbFpExus.map(_.config.wbFpPriority) ++ ldConfigs.map(_.wbFpPriority),
-    NRFpWritePorts,
-    wen = (e: ExuOutput) => e.uop.ctrl.fpWen
+    NRFpWritePorts
   ))
 
   wbIntArbiter.io.in <> wbIntExus.map(_.io.toInt) ++ ldIntOut
   wbFpArbiter.io.in <> wbFpExus.map(_.io.toFp) ++ ldFpOut
 
-  def exuOutToRfWrite(x: Valid[ExuOutput]): RfWritePort = {
+  def exuOutToRfWrite(x: Valid[ExuOutput], fp: Boolean): RfWritePort = {
     val rfWrite = Wire(new RfWritePort)
-    rfWrite.wen := x.valid
+    val wen = if(fp) x.bits.uop.ctrl.rfWen else  x.bits.uop.ctrl.fpWen
+    rfWrite.wen := x.valid && wen
     rfWrite.addr := x.bits.uop.pdest
     rfWrite.data := x.bits.data
     rfWrite
   }
 
-  intRf.io.writePorts <> wbIntArbiter.io.out.map(exuOutToRfWrite)
-  fpRf.io.writePorts <> wbFpArbiter.io.out.map(exuOutToRfWrite)
+  intRf.io.writePorts <> wbIntArbiter.io.out.map(w => exuOutToRfWrite(w, fp = false))
+  fpRf.io.writePorts <> wbFpArbiter.io.out.map(w => exuOutToRfWrite(w, fp = true))
 
   rename.io.wbIntResults <> wbIntArbiter.io.out
   rename.io.wbFpResults <> wbFpArbiter.io.out

@@ -35,7 +35,7 @@ class CtrlToLsBlockIO extends XSBundle {
   // from roq: send commits info to lsq
   val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
   // from roq: the newest roqDeqPtr
-  val roqDeqPtr = Input(new RoqPtr)
+  val roqDeqPtr = Output(new RoqPtr)
 }
 
 class CtrlBlock extends XSModule {
@@ -58,10 +58,7 @@ class CtrlBlock extends XSModule {
   // val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
   // val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
 
-  val fpWbSize = exuConfigs.count(_.writeFpRf)
-  val intWbSize = exuConfigs.count(_.writeIntRf)
-  // wb int exu + wb fp exu + ldu / stu + brq
-  val roqWbSize = intWbSize + fpWbSize + exuParameters.LduCnt + exuParameters.StuCnt + 1
+  val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt + 1
 
   val roq = Module(new Roq(roqWbSize))
 
@@ -87,6 +84,12 @@ class CtrlBlock extends XSModule {
   decode.io.brTags <> brq.io.brTags
   decode.io.out <> decBuf.io.in
 
+  brq.io.roqRedirect <> roq.io.redirect
+  brq.io.memRedirect <> io.fromLsBlock.replay
+  brq.io.bcommit <> roq.io.bcommit
+  brq.io.enqReqs <> decode.io.toBrq
+  brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
+
   decBuf.io.isWalking := roq.io.commits(0).valid && roq.io.commits(0).bits.isWalk
   decBuf.io.redirect <> redirect
   decBuf.io.out <> rename.io.in
@@ -94,8 +97,8 @@ class CtrlBlock extends XSModule {
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   // they should be moved to busytables
-  rename.io.wbIntResults <> io.fromIntBlock.wbIntRegs ++ io.fromFpBlock.wbIntRegs ++ io.fromLsBlock.wbIntRegs
-  rename.io.wbFpResults <> io.fromIntBlock.wbFpRegs ++ io.fromFpBlock.wbFpRegs ++ io.fromLsBlock.wbFpRegs
+  rename.io.wbIntResults <> io.fromIntBlock.wbRegs
+  rename.io.wbFpResults <> io.fromFpBlock.wbRegs
   rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr)
   rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr)
   rename.io.intPregRdy <> dispatch.io.intPregRdy
@@ -109,18 +112,40 @@ class CtrlBlock extends XSModule {
   dispatch.io.toLsroq <> io.toLsBlock.lsqIdxReq
   dispatch.io.lsIdxs <> io.fromLsBlock.lsqIdxResp
   dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.fromLsBlock.oldestStore.valid
-  dispatch.io.dequeueRoqIndex.bits := Mux(io.fromLsBlock.oldestStore.valid, io.fromLsBlock.oldestStore.bits, roq.io.commitRoqIndex.bits)
+  dispatch.io.dequeueRoqIndex.bits := Mux(io.fromLsBlock.oldestStore.valid,
+    io.fromLsBlock.oldestStore.bits,
+    roq.io.commitRoqIndex.bits
+  )
   dispatch.io.readIntRf <> io.toIntBlock.readRf
   dispatch.io.readFpRf <> io.toFpBlock.readRf
   dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
   dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
   dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
+
+  roq.io.memRedirect <> io.fromLsBlock.replay
+  roq.io.brqRedirect <> brq.io.redirect
+  roq.io.dp1Req <> dispatch.io.toRoq
+
+
+  roq.io.exeWbResults.take(roqWbSize-1).zip(
+    io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
+  ).foreach{
+    case(x, y) =>
+      x.bits := y.bits
+      x.valid := y.valid && !y.bits.redirectValid
+  }
+  roq.io.exeWbResults.last := brq.io.out
+
+  io.toIntBlock.redirect := redirect
   io.toIntBlock.roqToCSR <> roq.io.csr
-  // val flush = redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe)
-  // fpBusyTable.flush := flush
-  // intBusyTable.flush := flush
-  // busytable io
-  // maybe update busytable in dispatch1?
+
+  io.toFpBlock.redirect := redirect
+
+  io.toLsBlock.redirect := redirect
+  io.toLsBlock.roqDeqPtr := roq.io.roqDeqPtr
+  io.toLsBlock.commits := roq.io.commits
+
+
 
 }

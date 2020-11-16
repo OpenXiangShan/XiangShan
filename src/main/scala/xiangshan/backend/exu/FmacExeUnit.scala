@@ -4,12 +4,13 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.exu.Exu.fmacExeUnitCfg
 import xiangshan.backend.fu.fpu._
+import xiangshan.backend.fu.fpu.fma.FMA
 
 class FmacExeUnit extends Exu(fmacExeUnitCfg)
 {
   val frm = IO(Input(UInt(3.W)))
 
-  val fma = supportedFunctionUnits.head
+  val fma = supportedFunctionUnits.head.asInstanceOf[FMA]
 
   val input = io.fromFp.bits
   val fmaOut = fma.io.out.bits

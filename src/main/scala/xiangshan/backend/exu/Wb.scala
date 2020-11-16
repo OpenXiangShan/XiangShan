@@ -6,23 +6,23 @@ import xiangshan._
 import utils._
 
 
-class Wb(priorities: Seq[Int], numOut: Int, wen: ExuOutput => Bool) extends XSModule {
+class Wb(priorities: Seq[Int], numOut: Int) extends XSModule {
   val io = IO(new Bundle() {
     val in = Vec(priorities.size, Flipped(DecoupledIO(new ExuOutput)))
     val out = Vec(numOut, ValidIO(new ExuOutput))
   })
 
 
-  def exuOutToRfReq(exuOut: DecoupledIO[ExuOutput]): DecoupledIO[ExuOutput] = {
-    val req = WireInit(exuOut)
-    req.valid := exuOut.valid && wen(exuOut.bits)
-    exuOut.ready := Mux(req.valid, req.ready, true.B)
-    req
-  }
+//  def exuOutToRfReq(exuOut: DecoupledIO[ExuOutput]): DecoupledIO[ExuOutput] = {
+//    val req = WireInit(exuOut)
+//    req.valid := exuOut.valid && wen(exuOut.bits)
+//    exuOut.ready := Mux(req.valid, req.ready, true.B)
+//    req
+//  }
 
-  val directConnect = io.in.zip(priorities).filter(x => x._2 == 0).map(_._1).map(exuOutToRfReq)
-  val mulReq = io.in.zip(priorities).filter(x => x._2 == 1).map(_._1).map(exuOutToRfReq)
-  val otherReq = io.in.zip(priorities).filter(x => x._2 > 1).map(_._1).map(exuOutToRfReq)
+  val directConnect = io.in.zip(priorities).filter(x => x._2 == 0).map(_._1)
+  val mulReq = io.in.zip(priorities).filter(x => x._2 == 1).map(_._1)
+  val otherReq = io.in.zip(priorities).filter(x => x._2 > 1).map(_._1)
 
   val portUsed = directConnect.size + mulReq.size
   require(portUsed <= numOut)

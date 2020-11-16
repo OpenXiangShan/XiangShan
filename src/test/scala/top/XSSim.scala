@@ -148,6 +148,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule {
     ExcitingUtils.addSource(timer, "logTimestamp")
 
     // Check and dispaly all source and sink connections
+    ExcitingUtils.fixConnections()
     ExcitingUtils.checkAndDisplay()
   }
 }
