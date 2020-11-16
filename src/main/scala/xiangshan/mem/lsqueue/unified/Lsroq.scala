@@ -21,6 +21,88 @@ class LsRoqEntry extends XSBundle {
   val fwdData = Vec(8, UInt(8.W))
 }
 
+class LSQueueData(size: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle() {
+    val wb = Vec(2, new Bundle() {
+      val wen = Input(Bool())
+      val index = Input(UInt(log2Up(size).W))
+      val wdata = Input(new LsRoqEntry)
+    })
+    val uncache = new Bundle() {
+      val wen = Input(Bool())
+      val index = Input(UInt(log2Up(size).W))
+      val wdata = Input(UInt(XLEN.W))
+    }
+    val refill = new Bundle() {
+      val wen = Input(Vec(size, Bool()))
+      val dcache = Input(new DCacheLineResp)
+    }
+    val rdata = Output(Vec(size, new LsRoqEntry))
+    
+    // val debug = new Bundle() {
+    //   val debug_data = Vec(LoadQueueSize, new LsRoqEntry)
+    // }
+
+    def wbWrite(channel: Int, index: UInt, wdata: LsRoqEntry): Unit = {
+      require(channel < 2 && channel >= 0)
+      // need extra "this.wb(channel).wen := true.B"
+      this.wb(channel).index := index
+      this.wb(channel).wdata := wdata
+    }
+
+    def uncacheWrite(index: UInt, wdata: UInt): Unit = {
+      // need extra "this.uncache.wen := true.B"
+      this.uncache.index := index
+      this.uncache.wdata := wdata
+    }
+    
+    // def refillWrite(ldIdx: Int): Unit = {
+    // }
+    // use "this.refill.wen(ldIdx) := true.B" instead
+  })
+
+  io := DontCare
+
+  val data = Reg(Vec(size, new LsRoqEntry))
+
+  // writeback to lq/sq
+  (0 until 2).map(i => {
+    when(io.wb(i).wen){
+      data(io.wb(i).index) := io.wb(i).wdata
+    }
+  })
+
+  when(io.uncache.wen){
+    data(io.uncache.index).data := io.uncache.wdata
+  }
+
+  // refill missed load
+  def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
+    val res = Wire(Vec(8, UInt(8.W)))
+    (0 until 8).foreach(i => {
+      res(i) := Mux(fwdMask(i), fwd(8 * (i + 1) - 1, 8 * i), refill(8 * (i + 1) - 1, 8 * i))
+    })
+    res.asUInt
+  }
+
+  // split dcache result into words
+  val words = VecInit((0 until blockWords) map { i =>
+    io.refill.dcache.data(DataBits * (i + 1) - 1, DataBits * i)
+  })
+
+
+  (0 until size).map(i => {
+    when(io.refill.wen(i)){
+      val refillData = words(get_word(data(i).paddr))
+      data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
+      XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
+    }
+  })
+
+  io.rdata := data
+  // io.debug.debug_data := data
+}
+
 // inflight miss block reqs
 class InflightBlockInfo extends XSBundle {
   val block_addr = UInt(PAddrBits.W)
