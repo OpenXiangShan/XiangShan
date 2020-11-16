@@ -3,26 +3,13 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import utils._
+import xiangshan.backend.exu.Exu.fmiscExeUnitCfg
 import xiangshan.backend.fu.FunctionUnit
 import xiangshan.backend.fu.FunctionUnit.fmiscSel
 import xiangshan.backend.fu.fpu.FPUOpType._
 import xiangshan.backend.fu.fpu._
 
-class FmiscExeUnit extends Exu(
-  exuName = "FmiscExeUnit",
-  fuGen = {
-    Seq[(() => FPUSubModule, FPUSubModule => Bool)](
-      (FunctionUnit.fcmp _, fmiscSel(FU_FCMP)),
-      (FunctionUnit.fmv _, fmiscSel(FU_FMV)),
-      (FunctionUnit.f2i _, fmiscSel(FU_F2I)),
-      (FunctionUnit.f32toF64 _, fmiscSel(FU_S2D)),
-      (FunctionUnit.f64toF32 _, fmiscSel(FU_D2S)),
-      (FunctionUnit.fdivSqrt _, fmiscSel(FU_DIVSQRT))
-    )
-  },
-  wbIntPriority = Int.MaxValue,
-  wbFpPriority = 1
-) {
+class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
 
   val frm = IO(Input(UInt(3.W)))
 
@@ -45,14 +32,12 @@ class FmiscExeUnit extends Exu(
       unboxF64ToF32(src1),
       src1
     )
-    if (module.cfg.srcCnt > 1) {
-      module.io.in.bits.src(1) := Mux(isRVF, unboxF64ToF32(src2), src2)
-    }
-    module.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
+    module.io.in.bits.src(1) := Mux(isRVF, unboxF64ToF32(src2), src2)
+    module.asInstanceOf[FPUSubModule].rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   }
 
   io.toFp.bits.fflags := Mux1H(fpArb.io.in.zip(toFpUnits).map(
-    x => x._1.fire() -> x._2.fflags
+    x => x._1.fire() -> x._2.asInstanceOf[FPUSubModule].fflags
   ))
   val fpOutCtrl = io.toFp.bits.uop.ctrl
   io.toFp.bits.data := Mux(fpOutCtrl.isRVF,
@@ -68,6 +53,6 @@ class FmiscExeUnit extends Exu(
     intArb.io.out.bits.data
   )
   io.toInt.bits.fflags := Mux1H(intArb.io.in.zip(toIntUnits).map(
-    x => x._1.fire() -> x._2.fflags
+    x => x._1.fire() -> x._2.asInstanceOf[FPUSubModule].fflags
   ))
 }

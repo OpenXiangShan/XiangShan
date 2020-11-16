@@ -3,22 +3,13 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.FPUOpType.FU_I2F
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
 import xiangshan.{CSRSpecialIO, FuType, SfenceBundle, TlbCsrBundle}
 import xiangshan.backend.fu.fpu.{Fflags, IntToFloatSingleCycle, boxF32ToF64}
 
-class JumpExeUnit extends Exu(
-  exuName = "JmpExeUnit",
-  fuGen = Seq(
-    (FunctionUnit.jmp _, (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.jmp),
-    (FunctionUnit.csr _, (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.csr),
-    (FunctionUnit.fence _, (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence),
-    (FunctionUnit.i2f _, (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.i2f)
-  ),
-  wbIntPriority = 2,
-  wbFpPriority = Int.MaxValue
-)
+class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
   val fflags = IO(Input(new Fflags))
   val dirty_fs = IO(Input(Bool()))

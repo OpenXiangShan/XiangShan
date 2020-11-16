@@ -2,17 +2,10 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
-import xiangshan.backend.fu.FunctionUnit
+import xiangshan.backend.exu.Exu.fmacExeUnitCfg
 import xiangshan.backend.fu.fpu._
 
-class FmacExeUnit extends Exu(
-  exuName = "FmacExeUnit",
-  fuGen = Seq(
-    (FunctionUnit.fmac _, (_:FunctionUnit) => true.B)
-  ),
-  wbIntPriority = Int.MaxValue,
-  wbFpPriority = 0
-)
+class FmacExeUnit extends Exu(fmacExeUnitCfg)
 {
   val frm = IO(Input(UInt(3.W)))
 

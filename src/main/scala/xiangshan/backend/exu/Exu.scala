@@ -3,10 +3,8 @@ package xiangshan.backend.exu
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.FuType._
-import xiangshan.backend.fu.{CertainLatency, FuConfig, FuOutput, FunctionUnit, HasFuLatency, UncertainLatency}
-import utils.ParallelOR
 import xiangshan.backend.fu.FunctionUnit._
+import xiangshan.backend.fu.{FuConfig, FuOutput, FunctionUnit, HasFuLatency, UncertainLatency}
 
 case class ExuParameters
 (
@@ -38,22 +36,22 @@ case class ExuParameters
 case class ExuConfig
 (
   name: String,
-  supportedFuncUnits: Seq[FuConfig],
+  fuConfigs: Seq[FuConfig],
   wbIntPriority: Int,
   wbFpPriority: Int
 ) {
   def max(in: Seq[Int]): Int = in.reduce((x, y) => if (x > y) x else y)
 
-  val intSrcCnt = max(supportedFuncUnits.map(_.numIntSrc))
-  val fpSrcCnt = max(supportedFuncUnits.map(_.numFpSrc))
+  val intSrcCnt = max(fuConfigs.map(_.numIntSrc))
+  val fpSrcCnt = max(fuConfigs.map(_.numFpSrc))
   val readIntRf = intSrcCnt > 0
   val readFpRf = fpSrcCnt > 0
-  val writeIntRf = supportedFuncUnits.map(_.writeIntRf).reduce(_ || _)
-  val writeFpRf = supportedFuncUnits.map(_.writeFpRf).reduce(_ || _)
-  val hasRedirect = supportedFuncUnits.map(_.hasRedirect).reduce(_ || _)
+  val writeIntRf = fuConfigs.map(_.writeIntRf).reduce(_ || _)
+  val writeFpRf = fuConfigs.map(_.writeFpRf).reduce(_ || _)
+  val hasRedirect = fuConfigs.map(_.hasRedirect).reduce(_ || _)
 
   val latency: HasFuLatency = {
-    val lats = supportedFuncUnits.map(_.latency)
+    val lats = fuConfigs.map(_.latency)
     if (lats.exists(x => x.latencyVal.isEmpty)) {
       UncertainLatency()
     } else {
@@ -68,34 +66,17 @@ case class ExuConfig
   val hasUncertainlatency = latency.latencyVal.isEmpty
 
   def canAccept(fuType: UInt): Bool = {
-    Cat(supportedFuncUnits.map(_.fuType === fuType)).orR()
+    Cat(fuConfigs.map(_.fuType === fuType)).orR()
   }
 }
 
-abstract class Exu[T <: FunctionUnit]
-(
-  val exuName: String,
-  val fuGen: Seq[(() => T, T => Bool)],
-  val wbIntPriority: Int,
-  val wbFpPriority: Int
-) extends XSModule {
+abstract class Exu[T <: FunctionUnit](val config: ExuConfig) extends XSModule {
 
-  val supportedFunctionUnits = fuGen.map(_._1).map(gen => Module(gen()))
+  val supportedFunctionUnits = config.fuConfigs.map(_.fuGen).map(gen => Module(gen()))
 
-  val fuSel = supportedFunctionUnits.zip(fuGen.map(_._2)).map(x => x._2(x._1))
-
-  def fuConfigs = supportedFunctionUnits.map(_.cfg)
-
-  def config: ExuConfig = {
-    ExuConfig(exuName, fuConfigs, wbIntPriority, wbFpPriority)
+  val fuSel = supportedFunctionUnits.zip(config.fuConfigs.map(_.fuSel)).map{
+    case (fu, sel) => sel(fu)
   }
-
-  require(fuGen.nonEmpty)
-  require(!fuConfigs.exists(c => {
-    (c.numIntSrc > 0) && (c.numFpSrc > 0)
-  }))
-
-  //  val io = IO(new ExuIO)
 
   val io = IO(new Bundle() {
     val fromInt = if (config.readIntRf) Flipped(DecoupledIO(new ExuInput)) else null
@@ -105,13 +86,13 @@ abstract class Exu[T <: FunctionUnit]
     val toFp = if (config.writeFpRf) DecoupledIO(new ExuOutput) else null
   })
 
-  for ((fu, sel) <- supportedFunctionUnits.zip(fuSel)) {
+  for ((fuCfg, (fu, sel)) <- config.fuConfigs.zip(supportedFunctionUnits.zip(fuSel))) {
 
-    val in = if (fu.cfg.numIntSrc > 0) {
-      assert(fu.cfg.numFpSrc == 0)
+    val in = if (fuCfg.numIntSrc > 0) {
+      assert(fuCfg.numFpSrc == 0)
       io.fromInt
     } else {
-      assert(fu.cfg.numFpSrc > 0)
+      assert(fuCfg.numFpSrc > 0)
       io.fromFp
     }
 
@@ -121,13 +102,14 @@ abstract class Exu[T <: FunctionUnit]
 
     fu.io.in.valid := in.valid && sel
     fu.io.in.bits.uop := in.bits.uop
-    if (fu.cfg.srcCnt > 0) {
+    fu.io.in.bits.src.foreach(_ <> DontCare)
+    if (fuCfg.srcCnt > 0) {
       fu.io.in.bits.src(0) := src1
     }
-    if (fu.cfg.srcCnt > 1) {
+    if (fuCfg.srcCnt > 1) {
       fu.io.in.bits.src(1) := src2
     }
-    if (fu.cfg.srcCnt > 2) {
+    if (fuCfg.srcCnt > 2) {
       fu.io.in.bits.src(2) := src3
     }
     fu.io.redirectIn := io.redirect
@@ -156,19 +138,26 @@ abstract class Exu[T <: FunctionUnit]
   }
 
   val intArb = if (config.writeIntRf) writebackArb(
-    supportedFunctionUnits.filter(_.cfg.writeIntRf).map(_.io.out),
+    supportedFunctionUnits.zip(config.fuConfigs).filter(x => x._2.writeIntRf).map(_._1.io.out),
     io.toInt
   ) else null
 
   val fpArb = if (config.writeFpRf) writebackArb(
-    supportedFunctionUnits.filter(_.cfg.writeFpRf).map(_.io.out),
+    supportedFunctionUnits.zip(config.fuConfigs).filter(x => x._2.writeFpRf).map(_._1.io.out),
     io.toFp
   ) else null
 
-  val readIntFu = supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numIntSrc > 0)
-  val readFpFu = supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numFpSrc > 0)
+  val readIntFu = config.fuConfigs
+    .zip(supportedFunctionUnits.zip(fuSel))
+    .filter(_._1.numIntSrc > 0)
+    .map(_._2)
 
-  def inReady(s: Seq[(T, Bool)]): Bool = {
+  val readFpFu = config.fuConfigs
+    .zip(supportedFunctionUnits.zip(fuSel))
+    .filter(_._1.numFpSrc > 0)
+    .map(_._2)
+
+  def inReady(s: Seq[(FunctionUnit, Bool)]): Bool = {
     if (s.size == 1) {
       s.head._1.io.in.ready
     } else {
@@ -182,15 +171,11 @@ abstract class Exu[T <: FunctionUnit]
 
 
   if (config.readIntRf) {
-    io.fromInt.ready := inReady(
-      supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numIntSrc > 0)
-    )
+    io.fromInt.ready := inReady(readIntFu)
   }
 
   if (config.readFpRf) {
-    io.fromFp.ready := inReady(
-      supportedFunctionUnits.zip(fuSel).filter(p => p._1.cfg.numFpSrc > 0)
-    )
+    io.fromFp.ready := inReady(readFpFu)
   }
 
   def assignDontCares(out: ExuOutput) = {
@@ -208,4 +193,21 @@ abstract class Exu[T <: FunctionUnit]
   if(config.writeIntRf){
     assignDontCares(io.toInt.bits)
   }
+}
+
+object Exu {
+
+  val aluExeUnitCfg = ExuConfig("AluExeUnit", Seq(aluCfg), 0, Int.MaxValue)
+  val jumpExeUnitCfg = ExuConfig("JmpExeUnit", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
+  val mulDivExeUnitCfg = ExuConfig("MulDivExeUnit", Seq(mulCfg, divCfg), 1, Int.MaxValue)
+  val fmacExeUnitCfg = ExuConfig("FmacExeUnit", Seq(fmacCfg), Int.MaxValue, 0)
+  val fmiscExeUnitCfg = ExuConfig(
+    "FmiscExeUnit",
+    Seq(fcmpCfg, fmvCfg, f2iCfg, s2dCfg, d2sCfg, fdivSqrtCfg),
+    Int.MaxValue, 1
+  )
+  val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
+  val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
+
+
 }

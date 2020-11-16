@@ -38,7 +38,8 @@ class IntegerBlock extends XSModule {
   val regfile = Module(new Regfile(
     numReadPorts = NRIntReadPorts,
     numWirtePorts = NRIntWritePorts,
-    hasZero = true
+    hasZero = true,
+    XLEN
   ))
 
   val jmpExeUnit = Module(new JumpExeUnit)

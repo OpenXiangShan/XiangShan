@@ -168,14 +168,7 @@ class PerfCounterIO extends XSBundle {
   val value = Input(UInt(XLEN.W))
 }
 
-class CSR extends FunctionUnit(FuConfig(
-  fuType = FuType.csr,
-  numIntSrc = 1,
-  numFpSrc = 0,
-  writeIntRf = true,
-  writeFpRf = false,
-  hasRedirect = false
-)) with HasCSRConst
+class CSR extends FunctionUnit with HasCSRConst
 {
 
   val redirectOut = IO(Output(new Redirect))

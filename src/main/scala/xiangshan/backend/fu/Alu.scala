@@ -6,14 +6,7 @@ import utils.{LookupTree, LookupTreeDefault, SignExt, XSDebug, ZeroExt}
 import xiangshan._
 import xiangshan.backend.ALUOpType
 
-class Alu extends FunctionUnit(FuConfig(
-  fuType = FuType.alu,
-  numIntSrc = 2,
-  numFpSrc = 0,
-  writeIntRf = true,
-  writeFpRf = false,
-  hasRedirect = true
-)) with HasRedirectOut {
+class Alu extends FunctionUnit with HasRedirectOut {
 
   val (src1, src2, offset, func, pc, uop) = (
     io.in.bits.src(0),

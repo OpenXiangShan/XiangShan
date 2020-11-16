@@ -13,7 +13,7 @@ import xiangshan.backend.regfile.{Regfile, RfWritePort}
 import xiangshan.backend.roq.Roq
 import xiangshan.mem._
 import utils.ParallelOR
-import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
+import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
 
 /** Backend Pipeline:
   * Decode -> Rename -> Dispatch-1 -> Dispatch-2 -> Issue -> Exe
@@ -45,8 +45,6 @@ class Backend extends XSModule
   // wb int exu + wb fp exu + ldu / stu + brq
   val wbSize = wbIntExus.length + wbFpExus.length + exuParameters.LduCnt + exuParameters.StuCnt + 1
 
-  val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
-  val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 
   val ldIntOut = io.mem.ldout.map(x => {
     val raw = WireInit(x)
