@@ -1,10 +1,10 @@
-package cache
+package cache.TLCTest
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.diplomacy.{AddressSet, IdRange, LazyModule, LazyModuleImp, RegionType, SimpleDevice, TransferSizes}
-import freechips.rocketchip.tilelink.{TLClientNode, TLManagerNode, TLMasterParameters, TLMasterPortParameters, TLSlaveParameters, TLSlavePortParameters}
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType, SimpleDevice, TransferSizes}
+import freechips.rocketchip.tilelink.{TLClientNode, TLManagerNode, TLSlaveParameters, TLSlavePortParameters}
 import xiangshan.HasXSLog
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
  

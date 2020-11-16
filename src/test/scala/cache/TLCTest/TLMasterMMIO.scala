@@ -1,4 +1,4 @@
-package cache
+package cache.TLCTest
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._

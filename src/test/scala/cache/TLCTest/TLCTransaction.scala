@@ -1,12 +1,8 @@
-package cache
+package cache.TLCTest
 
-import Chisel.UInt
-import chipsalliance.rocketchip.config.{Field, Parameters}
-import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLDelayer, TLMessages, TLPermissions, TLToAXI4, TLXbar}
+import freechips.rocketchip.tilelink.TLMessages
 
 import scala.collection.mutable.{Map, Seq, ListBuffer}
-
-import scala.util.Random
 
 class TLCScalaMessage{
   var trans : Option[TLCTrans] = None
@@ -253,7 +249,7 @@ trait PermissionTransition extends TLCOp {
 
 //Transaction meta data will hide in start message
 abstract class TLCTrans extends TLCOp with PermissionTransition {
-  val blockSizel2 = BigInt(6)
+  val blockSizeL2 = BigInt(6)
   val beatFullMask = BigInt(0xffffffff)
 }
 trait TLCCallerTrans extends TLCTrans{
@@ -279,7 +275,7 @@ case class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
   //record metaData in Acquire Message
   def prepareAcquire(reqAddr:BigInt, reqTargetPerm:BigInt) : Unit = {
     val genA = new TLCScalaA(
-      size = blockSizel2,
+      size = blockSizeL2,
       address = reqAddr,
       mask = beatFullMask,
     )
@@ -314,7 +310,7 @@ case class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
   }
 
   def issueGrantAck() : TLCScalaE = {
-    assert(!d.isEmpty,"miss grant in AcquireTransaction")
+    assert(d.isDefined,"miss grant in AcquireTransaction")
     val genE = new TLCScalaE(sink = d.get.sink)
     e = Some(genE)
     grantAckIssued = Some(true)
@@ -332,7 +328,7 @@ case class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
   }
 
   def issueGrant(sinkMapId : BigInt) : TLCScalaD = {
-    assert(!a.isEmpty,"miss acquire in AcquireTransaction")
+    assert(a.isDefined,"miss acquire in AcquireTransaction")
     val genD = new TLCScalaD(
       opcode = Grant,
       param = growTarget(a.get.param),
@@ -347,7 +343,7 @@ case class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
     d.get
   }
   def issueGrantData(sinkMapId : BigInt, inData : BigInt) : TLCScalaD = {
-    assert(!a.isEmpty,"miss acquire in AcquireTransaction")
+    assert(a.isDefined,"miss acquire in AcquireTransaction")
     val genD = new TLCScalaD(
       opcode = GrantData,
       param = growTarget(a.get.param),
@@ -384,7 +380,7 @@ case class ProbeCallerTrans() extends ProbeTrans with TLCCallerTrans {
     val genB = new TLCScalaB(
       opcode = Probe,
       param = reqTargetPerm,
-      size = blockSizel2,
+      size = blockSizeL2,
       source = targetSource,
       address = reqAddr,
       mask = beatFullMask,
@@ -413,7 +409,7 @@ case class ProbeCalleeTrans() extends ProbeTrans with TLCCalleeTrans {
   }
 
   def issueProbeAck(from:BigInt, to:BigInt) : TLCScalaC = {
-    assert(!b.isEmpty,"miss probe in ProbeTransaction")
+    assert(b.isDefined,"miss probe in ProbeTransaction")
     val genC = new TLCScalaC(
       opcode = ProbeAck,
       param = shrinkParam(from,to),
@@ -426,7 +422,7 @@ case class ProbeCalleeTrans() extends ProbeTrans with TLCCalleeTrans {
     c.get
   }
   def issueProbeAckData(from:BigInt, to:BigInt, inData:BigInt) : TLCScalaC = {
-    assert(!b.isEmpty,"miss probe in ProbeTransaction")
+    assert(b.isDefined,"miss probe in ProbeTransaction")
     val genC = new TLCScalaC(
       opcode = ProbeAckData,
       param = shrinkParam(from,to),
@@ -454,7 +450,7 @@ case class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
   //record metaData in Release Message
   def prepareRelease(reqAddr:BigInt, reqTargetPerm:BigInt) : Unit = {
     val genC = new TLCScalaC(
-      size = blockSizel2,
+      size = blockSizeL2,
       address = reqAddr,
     )
     c = Some(genC)
@@ -492,7 +488,7 @@ case class ReleaseCalleeTrans() extends ReleaseTrans with TLCCalleeTrans {
     releaseAckIssued = Some(false)
   }
   def issueReleaseAck() : TLCScalaD = {
-    assert(!c.isEmpty,"miss release in ReleaseTransaction")
+    assert(c.isDefined,"miss release in ReleaseTransaction")
     d = Some(new TLCScalaD(
       opcode = ReleaseAck,
       param = 0,
@@ -503,4 +499,14 @@ case class ReleaseCalleeTrans() extends ReleaseTrans with TLCCalleeTrans {
     releaseAckIssued = Some(true)
     d.get
   }
+}
+
+class FakeTrans(val addr:BigInt) extends TLCTrans with BigIntExtract {
+  var data:BigInt = 0
+}
+class FakeReadTrans(addr:BigInt) extends FakeTrans(addr) {
+
+}
+class FakeWriteTrans(addr:BigInt) extends FakeTrans(addr) {
+  var newData:BigInt = 0
 }

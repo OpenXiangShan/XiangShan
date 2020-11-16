@@ -1,7 +1,7 @@
-package cache
+package cache.TLCTest
 
 import scala.collection.mutable
-import scala.collection.mutable.{ListBuffer, Map, Queue, Seq, ArrayBuffer}
+import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map, Queue}
 
 class AddrState extends TLCOp {
   val callerTrans: ListBuffer[TLCCallerTrans] = ListBuffer()
@@ -92,7 +92,7 @@ class FireQueue[T <: TLCScalaMessage]() {
     if (beatCnt == headCnt) {
       q.dequeue()
       beatCnt = 0
-      if (!q.isEmpty) {
+      if (q.nonEmpty) {
         headCnt = q.head._2
       }
     }
@@ -124,7 +124,7 @@ trait BigIntExtract {
   }
 }
 
-class TLCAgent(addrStateMap: Map[BigInt, AddrState]) extends TLCOp with BigIntExtract with PermissionTransition {
+class TLCAgent(addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[TLCTrans]) extends TLCOp with BigIntExtract with PermissionTransition {
   val beatNum = TLCCacheTestKey.default.get.blockBytes / TLCCacheTestKey.default.get.beatBytes
   val beatBits = TLCCacheTestKey.default.get.beatBytes * 8
 
@@ -137,12 +137,12 @@ class TLCAgent(addrStateMap: Map[BigInt, AddrState]) extends TLCOp with BigIntEx
   }
 }
 
-class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], serialList: ListBuffer[TLCTrans]) extends TLCAgent(addrStateMap) {
+class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[TLCTrans]) extends TLCAgent(addrStateMap,serialList) {
   val innerAcquire = ListBuffer[AcquireCalleeTrans]()
   val innerRelease = ListBuffer[ReleaseCalleeTrans]()
   val innerProbe = ListBuffer[ProbeCallerTrans]()
 
-  val sinkIdMap = Map[BigInt, AcquireCalleeTrans]()
+  val sinkIdMap = mutable.Map[BigInt, AcquireCalleeTrans]()
 
   val aList = ListBuffer[TLCScalaA]()
   val cList = ListBuffer[TLCScalaC]()
@@ -190,17 +190,18 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
         val addr = r.c.get.address
         val state = getState(addr)
         state.masterPerm = shrinkTarget(r.c.get.param)
-        if (r.c.get.opcode == ReleaseData)
+        if (r.c.get.opcode == ReleaseData) {
           state.data = r.c.get.data
+        }
         //serialization point
         serialList.append(r)
         //remove from addrList and agentList
         state.calleeTrans -= r
-        true //condition to remove from agent list safetly
+        true //condition to remove from agent list safely
       }
     }
     if (sinkIdMap.size < maxSink) { //fast check available ID
-      val sinkQ = Queue() ++ List.tabulate(maxSink)(a => BigInt(a)).filterNot(k => sinkIdMap.contains(k))
+      val sinkQ = mutable.Queue() ++ List.tabulate(maxSink)(a => BigInt(a)).filterNot(k => sinkIdMap.contains(k))
       //search Grant to issue
       innerAcquire.foreach { acq =>
         //TODO:check recursive trans completion before issue
@@ -208,16 +209,18 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
           val a_acq = acq.a.get
           val addr = a_acq.address
           val state = getState(addr)
-          if (!sinkQ.isEmpty && !banIssueGrant(addr)) { //has empty sinkid and ok to issue
+          if (sinkQ.nonEmpty && !banIssueGrant(addr)) { //has empty sinkid and ok to issue
             val allocId = sinkQ.dequeue()
             if (a_acq.opcode == AcquirePerm) {
               dQueue.enqMessage(acq.issueGrant(allocId))
             }
             else { //is AcquireBlock
-              if (a_acq.param == BtoT)
+              if (a_acq.param == BtoT) {
                 dQueue.enqMessage(acq.issueGrant(allocId))
-              else
+              }
+              else {
                 dQueue.enqMessage(acq.issueGrantData(allocId, state.data),cnt = beatNum)
+              }
             }
             //update state
             state.masterPerm = growTarget(a_acq.param)
@@ -255,12 +258,14 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
       else { //burst beat
         tmpC.data = tmpC.data | inC.data << (beatBits * c_cnt)
         c_cnt += 1
-        if (c_cnt == beatNum)
+        if (c_cnt == beatNum) {
           handleC(tmpC)
+        }
       }
     }
-    else
+    else {
       handleC(inC)
+    }
   }
 
   def handleC(c: TLCScalaC): Unit = {
@@ -302,7 +307,7 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
         val addr = c.address
         val state = getState(addr)
         val acq_list = state.calleeTrans.filter(_.isInstanceOf[AcquireCalleeTrans])
-        assert(acq_list.filterNot(a => a.asInstanceOf[AcquireCalleeTrans].grantIssued.getOrElse(true)).isEmpty, "Detect master issue Release when pending Grant")
+        assert(acq_list.forall(a => a.asInstanceOf[AcquireCalleeTrans].grantIssued.getOrElse(true)), "Detect master issue Release when pending Grant")
         //TODO:only support one master for now
         cList.append(c)
       }
@@ -310,7 +315,7 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
         val addr = c.address
         val state = getState(addr)
         val acq_list = state.calleeTrans.filter(_.isInstanceOf[AcquireCalleeTrans])
-        assert(acq_list.filterNot(a => a.asInstanceOf[AcquireCalleeTrans].grantIssued.getOrElse(true)).isEmpty, "Detect master issue Release when pending Grant")
+        assert(acq_list.forall(a => a.asInstanceOf[AcquireCalleeTrans].grantIssued.getOrElse(true)), "Detect master issue Release when pending Grant")
         //TODO:only support one master for now
         cList.append(c)
       }
@@ -379,7 +384,7 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
       else { //not blocking
         val transA = AcquireCalleeTrans()
         transA.pairAcquire(a)
-        //serilization point
+        //serialization point
         serialList.append(transA)
         //add to addr list and agent list
         innerAcquire.append(transA)
@@ -391,13 +396,13 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: Map[BigInt, AddrState], seri
 
 }
 
-class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], serialList: ListBuffer[TLCTrans]) extends TLCAgent(addrStateMap) {
+class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[TLCTrans]) extends TLCAgent(addrStateMap,serialList) {
   val outerAcquire: ListBuffer[AcquireCallerTrans] = ListBuffer()
   val outerRelease: ListBuffer[ReleaseCallerTrans] = ListBuffer()
   val outerProbe: ListBuffer[ProbeCalleeTrans] = ListBuffer()
 
-  val sourceAMap = Map[BigInt, AcquireCallerTrans]()
-  val sourceCMap = Map[BigInt, ReleaseCallerTrans]()
+  val sourceAMap = mutable.Map[BigInt, AcquireCallerTrans]()
+  val sourceCMap = mutable.Map[BigInt, ReleaseCallerTrans]()
 
   val bList = ListBuffer[TLCScalaB]()
 
@@ -408,7 +413,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], s
   val cQueue = new FireQueue[TLCScalaC]()
   val eQueue = new FireQueue[TLCScalaE]()
 
-  def banIssueAcuqire(addr: BigInt): Boolean = {
+  def banIssueAcquire(addr: BigInt): Boolean = {
     val addrState = getState(addr)
     addrState.pendingGrant || addrState.pendingReleaseAck
   }
@@ -439,19 +444,21 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], s
 
   def fireD(inD: TLCScalaD): Unit = {
     if (inD.opcode == GrantData) {
-      if (d_cnt == 0) { //start busrt
+      if (d_cnt == 0) { //start burst
         tmpD = inD.copy()
         d_cnt += 1
       }
       else {
         tmpD.data = tmpD.data | inD.data << (beatBits * d_cnt)
         d_cnt += 1
-        if (d_cnt == beatNum)
+        if (d_cnt == beatNum) {
           handleD(tmpD)
+        }
       }
     }
-    else
+    else {
       handleD(inD)
+    }
   }
 
   def handleD(d: TLCScalaD): Unit = {
@@ -471,7 +478,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], s
         //remove from addrList and agentList
         state.callerTrans -= rel
         outerRelease -= rel
-        //TODO: notify fater transaction here
+        //TODO: notify father transaction here
       }
       case Grant => {
         require(sourceAMap.contains(d.source), "no sourceID for Grant")
@@ -545,8 +552,9 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], s
           //assume all probe is ProbeBlock
           if (state.dirty) { //need write back
             cQueue.enqMessage(p.issueProbeAckData(myperm, targetPerm, state.data),cnt = beatNum)
-            if (targetPerm != trunk)
+            if (targetPerm != trunk) {
               state.dirty = false
+            }
           }
           else {
             cQueue.enqMessage(p.issueProbeAck(myperm, targetPerm))
@@ -560,22 +568,24 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], s
 
     //search Release here
     if (sourceCMap.size < maxSource) { //fast check available ID
-      val sourceQ = Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
+      val sourceQ = mutable.Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
       outerRelease.foreach { r =>
         if (!r.releaseIssued.getOrElse(true)) { //haven't issue release
           val addr = r.c.get.address
           val state = getState(addr)
-          if (!sourceQ.isEmpty && !banIssueRelease(addr)) { //has empty source ID and ok to issue
+          if (sourceQ.nonEmpty && !banIssueRelease(addr)) { //has empty source ID and ok to issue
             val allocId = sourceQ.dequeue()
             //TODO: random decide to report or not when target perm is higher than me
-            if (r.targetPerm < state.myPerm) //if target is higher
+            if (r.targetPerm < state.myPerm) {//if target is higher
               r.targetPerm = state.myPerm
+            }
             if (state.dirty) {
               cQueue.enqMessage(r.issueReleaseData(allocId,state.myPerm,state.data),cnt = beatNum)
               state.dirty = false
             }
-            else
+            else {
               cQueue.enqMessage(r.issueRelease(allocId,state.myPerm))
+            }
             //serialization point
             serialList.append(r)
             //append to addr caller list
@@ -634,13 +644,13 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: Map[BigInt, AddrState], s
   def issueA(): Unit = {
     val abandonList = ListBuffer[AcquireCallerTrans]()
     if (sourceAMap.size < maxSource) { //fast check available ID
-      val sourceQ = Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
+      val sourceQ = mutable.Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
       outerAcquire.foreach { acq =>
         if (!acq.acquireIssued.getOrElse(true)) { //haven't issue acquire
           val addr = acq.a.get.address
           val state = getState(addr)
           if (acq.checkNeedGrow(state.myPerm)) { //really need grow
-            if (!sourceQ.isEmpty && !banIssueAcuqire(addr)) { //has empty sourceid and ok to issue
+            if (sourceQ.nonEmpty && !banIssueAcquire(addr)) { //has empty sourceid and ok to issue
               //TODO:decide to make full write here, use acqblock for now
               val allocId = sourceQ.dequeue()
               aQueue.enqMessage(acq.issueAcquireBlock(allocId, state.myPerm))
