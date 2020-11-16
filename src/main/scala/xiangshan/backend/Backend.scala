@@ -143,8 +143,8 @@ class Backend extends XSModule
         rs_ctrl.io.tlbFeedback := DontCare
     }
 
-    rs_ctrl.suggestName(s"rs_ctrl_${cfg.name}")
-    rs_data.suggestName(s"rs_data_${cfg.name}")
+    rs_ctrl.suggestName(s"rsc_${cfg.name.toLowerCase.toCharArray.take(4).toString}")
+    rs_data.suggestName(s"rsd_${cfg.name.toLowerCase.toCharArray.take(4).toString}")
     (rs_ctrl, rs_data)
   })
   val rsCtrls = rs.map(_._1)

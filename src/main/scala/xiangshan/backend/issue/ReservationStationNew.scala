@@ -333,6 +333,7 @@ class ReservationStationCtrl
   io.toData.deqPtr := selectedIdxReg
   io.toData.enqCtrl.valid := io.enqCtrl.fire
   io.toData.enqCtrl.bits  := io.enqCtrl.bits
+  io.toData.deqValid := io.deq.valid // Note: just for debug
 
   // other io
   io.numExist := tailPtr
@@ -369,7 +370,9 @@ class RSCtrlDataBundle(wakeupCnt: Int, extraCnt: Int) extends XSBundle {
   val extra = Vec(IssQueSize, Vec(3, Vec(extraCnt, Bool()))) // UInt(extraCnt.W )
   val enqPtr = UInt(log2Up(IssQueSize).W)
   val deqPtr = UInt(log2Up(IssQueSize).W)
-  val enqCtrl = Flipped(ValidIO(new MicroOp))
+  val enqCtrl = Valid(new MicroOp)
+
+  val deqValid = Bool() // Note: just for debug
 
   override def cloneType: this.type = (new RSCtrlDataBundle(wakeupCnt, extraCnt)).asInstanceOf[this.type]
 }
@@ -448,4 +451,8 @@ class ReservationStationData
   io.deq.src1 := data(deq)(0)
   io.deq.src2 := data(deq)(1)
   io.deq.src3 := data(deq)(2)
+
+  XSDebug(enqCtrl.fire(), p"enqCtrlFire: enqPtr:${enqPtr} pc:0x${Hexadecimal(enqCtrl.bits.cf.pc)} roqIdx:${enqCtrl.bits.roqIdx}\n")
+  XSDebug(RegNext(enqCtrl.fire()), p"enqDataFire: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
+  XSDebug(io.fromCtrl.deqValid, p"Deq: pc:${Hexadecimal(io.deq.uop.cf.pc)} roqIdx:${io.deq.uop.roqIdx} src1:${Hexadecimal(io.deq.src1)} src2:${Hexadecimal(io.deq.src2)} src3:${Hexadecimal(io.deq.src3)}\n")
 }
