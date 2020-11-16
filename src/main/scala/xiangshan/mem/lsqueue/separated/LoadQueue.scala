@@ -47,7 +47,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
-  val dataModule = Module(new LSQueueData(LoadQueueSize))
+  val dataModule = Module(new LSQueueData(LoadQueueSize, LoadPipelineWidth))
   dataModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val valid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid

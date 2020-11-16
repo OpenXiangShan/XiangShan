@@ -21,9 +21,9 @@ class LsRoqEntry extends XSBundle {
   val fwdData = Vec(8, UInt(8.W))
 }
 
-class LSQueueData(size: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val wb = Vec(2, new Bundle() {
+    val wb = Vec(nchannel, new Bundle() {
       val wen = Input(Bool())
       val index = Input(UInt(log2Up(size).W))
       val wdata = Input(new LsRoqEntry)
@@ -37,6 +37,8 @@ class LSQueueData(size: Int) extends XSModule with HasDCacheParameters with HasC
       val wen = Input(Vec(size, Bool()))
       val dcache = Input(new DCacheLineResp)
     }
+    val needForward = Input(Vec(nchannel, Vec(2, UInt(size.W))))
+    val forward = Vec(nchannel, Flipped(new LoadForwardQueryIO))
     val rdata = Output(Vec(size, new LsRoqEntry))
     
     // val debug = new Bundle() {
@@ -44,7 +46,7 @@ class LSQueueData(size: Int) extends XSModule with HasDCacheParameters with HasC
     // }
 
     def wbWrite(channel: Int, index: UInt, wdata: LsRoqEntry): Unit = {
-      require(channel < 2 && channel >= 0)
+      require(channel < nchannel && channel >= 0)
       // need extra "this.wb(channel).wen := true.B"
       this.wb(channel).index := index
       this.wb(channel).wdata := wdata
@@ -54,6 +56,12 @@ class LSQueueData(size: Int) extends XSModule with HasDCacheParameters with HasC
       // need extra "this.uncache.wen := true.B"
       this.uncache.index := index
       this.uncache.wdata := wdata
+    }
+
+    def forwardQuery(channel: Int, paddr: UInt, needForward1: Data, needForward2: Data): Unit = {
+      this.needForward(channel)(0) := needForward1
+      this.needForward(channel)(1) := needForward2
+      this.forward(channel).paddr := paddr
     }
     
     // def refillWrite(ldIdx: Int): Unit = {
@@ -99,6 +107,50 @@ class LSQueueData(size: Int) extends XSModule with HasDCacheParameters with HasC
     }
   })
 
+  // forwarding
+  // Compare ringBufferTail (deqPtr) and forward.sqIdx, we have two cases:
+  // (1) if they have the same flag, we need to check range(tail, sqIdx)
+  // (2) if they have different flags, we need to check range(tail, LoadQueueSize) and range(0, sqIdx)
+  // Forward1: Mux(same_flag, range(tail, sqIdx), range(tail, LoadQueueSize))
+  // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
+  // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
+
+  // entry with larger index should have higher priority since it's data is younger
+  (0 until nchannel).map(i => {
+
+    val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
+    val forwardData1 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+    val forwardMask2 = WireInit(VecInit(Seq.fill(8)(false.B)))
+    val forwardData2 = WireInit(VecInit(Seq.fill(8)(0.U(8.W))))
+
+    for (j <- 0 until size) {
+      val needCheck = io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+      (0 until XLEN / 8).foreach(k => {
+        when (needCheck && data(j).mask(k)) {
+          when (io.needForward(i)(0)(j)) {
+            forwardMask1(k) := true.B
+            forwardData1(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+          }
+          when (io.needForward(i)(1)(j)) {
+            forwardMask2(k) := true.B
+            forwardData2(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+          }
+          XSDebug(io.needForward(i)(0)(j) || io.needForward(i)(1)(j),
+            p"forwarding $k-th byte ${Hexadecimal(data(j).data(8 * (k + 1) - 1, 8 * k))} " +
+            p"from ptr $j\n")
+        }
+      })
+    }
+
+    // merge forward lookup results
+    // forward2 is younger than forward1 and should have higher priority
+    (0 until XLEN / 8).map(k => {
+      io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
+      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
+    })
+  })
+
+  // data read
   io.rdata := data
   // io.debug.debug_data := data
 }
