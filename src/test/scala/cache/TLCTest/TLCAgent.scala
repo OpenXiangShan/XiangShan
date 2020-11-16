@@ -11,6 +11,9 @@ class AddrState extends TLCOp {
   var data: BigInt = 0
   var dirty: Boolean = false
 
+  //for validation only
+  var version: Int = 0
+
   var pendingGrant = false
   var pendingGrantAck = false
   var pendingReleaseAck = false
@@ -75,7 +78,7 @@ class AddrState extends TLCOp {
 }
 
 class FireQueue[T <: TLCScalaMessage]() {
-  val q = mutable.Queue[(T, Int)]()
+  val q: mutable.Queue[(T, Int)] = mutable.Queue[(T, Int)]()
   var headCnt = 0
   var beatCnt = 0
 
@@ -100,7 +103,7 @@ class FireQueue[T <: TLCScalaMessage]() {
 }
 
 trait BigIntExtract {
-  val prefix = Array(0.toByte)
+  val prefix: Array[Byte] = Array(0.toByte)
 
   def extract256Bit(n: BigInt, index: Int): BigInt = {
     val mask256 = BigInt(prefix ++ Array.fill(32)(0xff.toByte))
@@ -119,12 +122,14 @@ trait BigIntExtract {
     }
   }
 
-  def extractBitField(i: BigInt): BigInt = {
-    0
+  def extractByte(n: BigInt, start: Int, len: Int): BigInt = {
+    val mask = BigInt(prefix ++ Array.fill(len)(0xff.toByte))
+    (n >> (start * 8)) & mask
   }
 }
 
-class TLCAgent(addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[TLCTrans]) extends TLCOp with BigIntExtract with PermissionTransition {
+class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
+  extends TLCOp with BigIntExtract with PermissionTransition {
   val beatNum = TLCCacheTestKey.default.get.blockBytes / TLCCacheTestKey.default.get.beatBytes
   val beatBits = TLCCacheTestKey.default.get.beatBytes * 8
 
@@ -135,9 +140,44 @@ class TLCAgent(addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBu
     }
     state
   }
+
+  def appendSerial(t: TLCTrans): Unit = {
+    serialList.synchronized {
+      serialList.append((ID, t))
+    }
+  }
+
+  def insertWrite(addr: BigInt): Unit = {
+    val addrState = getState(addr)
+    val fakew = new FakeWriteTrans(addr)
+    fakew.data = addrState.data
+    //check last data
+    val lastWrite = extractByte(fakew.data, ID * 16 + addrState.version % 16, 1)
+    require(lastWrite == addrState.version, s"agent $ID data has been changed, Addr: $addr, version: ${addrState.version}, data: ${addrState.data}")
+    //new version
+    addrState.version = (addrState.version + 1) % 256
+    addrState.data = replaceNBytes(addrState.data, BigInt(addrState.version), ID * 16 + addrState.version % 16, 1)
+    addrState.dirty = true
+    fakew.newData = addrState.data
+    //append to serial list
+    appendSerial(fakew)
+  }
+
+  def insertRead(addr: BigInt): Unit = {
+    val addrState = getState(addr)
+    val faker = new FakeReadTrans(addr)
+    faker.data = addrState.data
+    //check last data
+    val lastWrite = extractByte(faker.data, ID * 16 + addrState.version % 16, 1)
+    require(lastWrite == addrState.version, s"agent $ID data has been changed, Addr: $addr, version: ${addrState.version}, data: ${addrState.data}")
+    //append to serial list
+    appendSerial(faker)
+  }
+
 }
 
-class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[TLCTrans]) extends TLCAgent(addrStateMap,serialList) {
+class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
+  extends TLCAgent(ID, addrStateMap, serialList) {
   val innerAcquire = ListBuffer[AcquireCalleeTrans]()
   val innerRelease = ListBuffer[ReleaseCalleeTrans]()
   val innerProbe = ListBuffer[ProbeCallerTrans]()
@@ -192,9 +232,20 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrStat
         state.masterPerm = shrinkTarget(r.c.get.param)
         if (r.c.get.opcode == ReleaseData) {
           state.data = r.c.get.data
+          if (state.masterPerm == nothing){
+            insertWrite(addr)//modify data when master is invalid
+          }
+          else {
+            insertRead(addr)
+          }
+        }
+        else {
+          if (state.masterPerm == nothing){
+            insertWrite(addr)//modify data when master is invalid
+          }
         }
         //serialization point
-        serialList.append(r)
+        appendSerial(r)
         //remove from addrList and agentList
         state.calleeTrans -= r
         true //condition to remove from agent list safely
@@ -219,7 +270,7 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrStat
                 dQueue.enqMessage(acq.issueGrant(allocId))
               }
               else {
-                dQueue.enqMessage(acq.issueGrantData(allocId, state.data),cnt = beatNum)
+                dQueue.enqMessage(acq.issueGrantData(allocId, state.data), cnt = beatNum)
               }
             }
             //update state
@@ -271,24 +322,32 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrStat
   def handleC(c: TLCScalaC): Unit = {
     c.opcode match {
       case ProbeAck => {
-        val state = getState(c.address)
-        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == c.address && p.b.get.source == c.source).head
+        val addr = c.address
+        val state = getState(addr)
+        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == addr && p.b.get.source == c.source).head
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
         assert(state.masterPerm == shrinkFrom(c.param))
         state.masterPerm = shrinkTarget(c.param)
         state.slaveUpdatePendingProbeAck()
+        if (state.masterPerm == nothing){
+          insertWrite(addr)//modify data when master is invalid
+        }
+        else {
+          insertRead(addr)
+        }
         //serialization point
-        serialList.append(probeT)
+        appendSerial(probeT)
         //remove from addrList and agentList
         state.callerTrans -= probeT
         innerProbe -= probeT
         //TODO:update father trans call list after completion
       }
       case ProbeAckData => {
-        val state = getState(c.address)
-        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == c.address && p.b.get.source == c.source).head
+        val addr = c.address
+        val state = getState(addr)
+        val probeT = innerProbe.filter(p => p.probeAckPending.getOrElse(false)).filter(p => p.b.get.address == addr && p.b.get.source == c.source).head
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
@@ -296,8 +355,14 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrStat
         state.masterPerm = shrinkTarget(c.param)
         state.data = c.data
         state.slaveUpdatePendingProbeAck()
+        if (state.masterPerm == nothing){
+          insertWrite(addr)//modify data when master is invalid
+        }
+        else {
+          insertRead(addr)
+        }
         //serialization point
-        serialList.append(probeT)
+        appendSerial(probeT)
         //remove from addrList and agentList
         state.callerTrans -= probeT
         innerProbe -= probeT
@@ -385,7 +450,7 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrStat
         val transA = AcquireCalleeTrans()
         transA.pairAcquire(a)
         //serialization point
-        serialList.append(transA)
+        appendSerial(transA)
         //add to addr list and agent list
         innerAcquire.append(transA)
         state.calleeTrans.append(transA)
@@ -396,7 +461,8 @@ class TLCSlaveAgent(val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrStat
 
 }
 
-class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[TLCTrans]) extends TLCAgent(addrStateMap,serialList) {
+class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
+  extends TLCAgent(ID, addrStateMap, serialList) {
   val outerAcquire: ListBuffer[AcquireCallerTrans] = ListBuffer()
   val outerRelease: ListBuffer[ReleaseCallerTrans] = ListBuffer()
   val outerProbe: ListBuffer[ProbeCalleeTrans] = ListBuffer()
@@ -489,6 +555,12 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
         val state = getState(addr)
         if (!d.denied) {
           state.myPerm = d.param
+          if (state.myPerm == trunk) {
+            insertWrite(addr)//modify data when trunk
+          }
+          else {
+            insertRead(addr)
+          }
         }
         //issue GrantAck
         eQueue.enqMessage(acq.issueGrantAck())
@@ -497,7 +569,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
         //free sourceID
         sourceAMap.remove(d.source)
         //serialization point
-        serialList.append(acq)
+        appendSerial(acq)
         //remove from addrList and agentList
         state.callerTrans -= acq
         outerAcquire -= acq
@@ -512,6 +584,12 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
         if (!d.denied) {
           state.myPerm = d.param
           state.data = d.data
+          if (state.myPerm == trunk) {
+            insertWrite(addr)//modify data when trunk
+          }
+          else {
+            insertRead(addr)
+          }
         }
         //issue GrantAck
         eQueue.enqMessage(acq.issueGrantAck())
@@ -520,7 +598,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
         //free sourceID
         sourceAMap.remove(d.source)
         //serialization point
-        serialList.append(acq)
+        appendSerial(acq)
         //remove from addrList and agentList
         state.callerTrans -= acq
         outerAcquire -= acq
@@ -551,7 +629,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
           }
           //assume all probe is ProbeBlock
           if (state.dirty) { //need write back
-            cQueue.enqMessage(p.issueProbeAckData(myperm, targetPerm, state.data),cnt = beatNum)
+            cQueue.enqMessage(p.issueProbeAckData(myperm, targetPerm, state.data), cnt = beatNum)
             if (targetPerm != trunk) {
               state.dirty = false
             }
@@ -576,18 +654,18 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
           if (sourceQ.nonEmpty && !banIssueRelease(addr)) { //has empty source ID and ok to issue
             val allocId = sourceQ.dequeue()
             //TODO: random decide to report or not when target perm is higher than me
-            if (r.targetPerm < state.myPerm) {//if target is higher
+            if (r.targetPerm < state.myPerm) { //if target is higher
               r.targetPerm = state.myPerm
             }
             if (state.dirty) {
-              cQueue.enqMessage(r.issueReleaseData(allocId,state.myPerm,state.data),cnt = beatNum)
+              cQueue.enqMessage(r.issueReleaseData(allocId, state.myPerm, state.data), cnt = beatNum)
               state.dirty = false
             }
             else {
-              cQueue.enqMessage(r.issueRelease(allocId,state.myPerm))
+              cQueue.enqMessage(r.issueRelease(allocId, state.myPerm))
             }
             //serialization point
-            serialList.append(r)
+            appendSerial(r)
             //append to addr caller list
             state.callerTrans.append(r)
             //update state
@@ -631,7 +709,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
         val pro = ProbeCalleeTrans()
         pro.pairProbe(b)
         //serialization point
-        serialList.append(pro)
+        appendSerial(pro)
         //TODO: add recursive call when probed
         //add to addr list and agent list
         outerProbe.append(pro)
@@ -655,7 +733,7 @@ class TLCMasterAgent(val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrS
               val allocId = sourceQ.dequeue()
               aQueue.enqMessage(acq.issueAcquireBlock(allocId, state.myPerm))
               //serialization point
-              serialList.append(acq)
+              appendSerial(acq)
               //append to addr caller list
               state.callerTrans.append(acq)
               //update state
