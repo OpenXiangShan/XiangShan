@@ -48,7 +48,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   // only mem and extDev visible externally
   val dma = AXI4IdentityNode()
-  val extDev = TLIdentityNode()
+  val extDev = AXI4IdentityNode()
 
   // L2 to L3 network
   // -------------------------------------------------
@@ -135,6 +135,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     mmioXbar
 
   extDev :=
+    AXI4UserYanker() :=
+    TLToAXI4() :=
     mmioXbar
 
   lazy val module = new LazyModuleImp(this){

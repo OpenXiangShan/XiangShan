@@ -99,10 +99,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
   // AXI MMIO
   // -----------------------------------
   val axiMMIO = LazyModule(new SimMMIO())
-  axiMMIO.axiBus :=
-    AXI4UserYanker() :=
-    TLToAXI4() :=
-    soc.extDev
+  axiMMIO.axiBus := soc.extDev
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
