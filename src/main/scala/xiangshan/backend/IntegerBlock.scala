@@ -70,6 +70,7 @@ class IntegerBlock
     val tlbCsrIO = Output(new TlbCsrBundle)
     val csrOnly = new CSRSpecialIO
     val fenceToSbuffer = new FenceToSbuffer
+    val frm = Output(UInt(3.W))
   })
 
   val redirect = io.fromCtrlBlock.redirect
@@ -184,6 +185,7 @@ class IntegerBlock
   io.csrOnly <> jmpExeUnit.csrOnly
   io.toCtrlBlock.sfence <> jmpExeUnit.sfence
   io.toCtrlBlock.tlbCsrIO <> jmpExeUnit.tlbCsrIO
+  io.frm <> jmpExeUnit.frm
   jmpExeUnit.fflags <> io.fromCtrlBlock.roqToCSR.fflags
   jmpExeUnit.dirty_fs <> io.fromCtrlBlock.roqToCSR.dirty_fs
   jmpExeUnit.fenceToSbuffer <> io.fenceToSbuffer

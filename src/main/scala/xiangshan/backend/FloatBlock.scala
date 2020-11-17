@@ -29,6 +29,9 @@ class FloatBlock
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
+
+    // from csr
+    val frm = Input(UInt(3.W))
   })
 
   val redirect = io.fromCtrlBlock.redirect
@@ -42,6 +45,9 @@ class FloatBlock
 
   val fmacExeUnits = Array.tabulate(exuParameters.FmacCnt)(_ => Module(new FmacExeUnit))
   val fmiscExeUnits = Array.tabulate(exuParameters.FmiscCnt)(_ => Module(new FmiscExeUnit))
+
+  fmacExeUnits.foreach(_.frm := io.frm)
+  fmiscExeUnits.foreach(_.frm := io.frm)
 
   val exeUnits = fmacExeUnits ++ fmiscExeUnits
 
@@ -88,7 +94,7 @@ class FloatBlock
     }
 
     exeUnits(i).io.redirect <> redirect
-    exeUnits(i).io.fromInt <> rs.io.deq
+    exeUnits(i).io.fromFp <> rs.io.deq
     rs.io.tlbFeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
@@ -132,11 +138,11 @@ class FloatBlock
   ).map(_.io.toInt)
 
 
-  // read int rf from ctrl block
+  // read fp rf from ctrl block
   fpRf.io.readPorts <> io.fromCtrlBlock.readRf
-  // write int rf arbiter
+  // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbIntPriority),
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbFpPriority),
     NRFpWritePorts
   ))
   fpWbArbiter.io.in <> exeUnits.map(_.io.toFp) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
