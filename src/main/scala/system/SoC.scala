@@ -149,6 +149,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       core.module.io.externalInterrupt.msip := clint.module.io.msip
       core.module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
     })
+    // do not let dma AXI signals optimized out
+    chisel3.dontTouch(dma.out.head._1)
+    chisel3.dontTouch(extDev.out.head._1)
   }
 
 }
