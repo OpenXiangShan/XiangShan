@@ -276,47 +276,50 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule {
   lazy val module = new XSCoreImp(this)
 }
 
-class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
+class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
+  with HasXSParameter
+  with HasExeBlockHelper
+{
   val io = IO(new Bundle {
     val externalInterrupt = new ExternalInterruptIO
   })
 
   // to fast wake up fp, mem rs
-  val intBlockFastWakeUpFp = intExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeFpRf)
-  val intBlockSlowWakeUpFp = intExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeFpRf)
-  val intBlockFastWakeUpInt = intExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeIntRf)
-  val intBlockSlowWakeUpInt = intExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeIntRf)
+  val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
+  val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
+  val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
+  val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
 
-  val fpBlockFastWakeUpFp = fpExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeFpRf)
-  val fpBlockSlowWakeUpFp = fpExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeFpRf)
-  val fpBlockFastWakeUpInt = fpExuConfigs.count(cfg => cfg.hasCertainLatency && cfg.writeIntRf)
-  val fpBlockSlowWakeUpInt = fpExuConfigs.count(cfg => cfg.hasUncertainlatency && cfg.writeIntRf)
+  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
+  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
+  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
+  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
   val frontend = Module(new Frontend)
   val ctrlBlock = Module(new CtrlBlock)
   val integerBlock = Module(new IntegerBlock(
-    fastWakeUpInCnt = fpBlockFastWakeUpInt,
-    slowWakeUpInCnt = fpBlockSlowWakeUpInt + exuParameters.LduCnt,
-    fastFpOutCnt = intBlockFastWakeUpFp,
-    slowFpOutCnt = intBlockSlowWakeUpFp,
-    fastIntOutCnt = intBlockFastWakeUpInt,
-    slowIntOutCnt = intBlockSlowWakeUpInt
+    fastWakeUpIn = fpBlockFastWakeUpInt,
+    slowWakeUpIn = fpBlockSlowWakeUpInt ++ loadExuConfigs,
+    fastFpOut = intBlockFastWakeUpFp,
+    slowFpOut = intBlockSlowWakeUpFp,
+    fastIntOut = intBlockFastWakeUpInt,
+    slowIntOut = intBlockSlowWakeUpInt
   ))
   val floatBlock = Module(new FloatBlock(
-    fastWakeUpInCnt = intBlockFastWakeUpFp,
-    slowWakeUpInCnt = intBlockSlowWakeUpFp + exuParameters.LduCnt,
-    fastFpOutCnt = fpBlockFastWakeUpFp,
-    slowFpOutCnt = fpBlockSlowWakeUpFp,
-    fastIntOutCnt = fpBlockFastWakeUpInt,
-    slowIntOutCnt = fpBlockSlowWakeUpInt
+    fastWakeUpIn = intBlockFastWakeUpFp,
+    slowWakeUpIn = intBlockSlowWakeUpFp ++ loadExuConfigs,
+    fastFpOut = fpBlockFastWakeUpFp,
+    slowFpOut = fpBlockSlowWakeUpFp,
+    fastIntOut = fpBlockFastWakeUpInt,
+    slowIntOut = fpBlockSlowWakeUpInt
   ))
   val memBlock = Module(new MemBlock(
-    fastWakeUpInCnt = intBlockFastWakeUpInt + intBlockFastWakeUpFp + fpBlockFastWakeUpInt + fpBlockFastWakeUpFp,
-    slowWakeUpInCnt = intBlockSlowWakeUpInt + intBlockSlowWakeUpFp + fpBlockSlowWakeUpInt + fpBlockSlowWakeUpFp,
-    fastFpOutCnt = 0,
-    slowFpOutCnt = exuParameters.LduCnt,
-    fastIntOutCnt = 0,
-    slowIntOutCnt = exuParameters.LduCnt
+    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
+    slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
+    fastFpOut = Seq(),
+    slowFpOut = loadExuConfigs,
+    fastIntOut = Seq(),
+    slowIntOut = loadExuConfigs
   ))
 
   val dcache = outer.dcache.module

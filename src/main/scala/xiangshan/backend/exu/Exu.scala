@@ -209,6 +209,9 @@ object Exu {
   val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)
   val stExeUnitCfg = ExuConfig("StoreExu", Seq(stuCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue)
 
+  val loadExuConfigs = Seq.fill(exuParameters.LduCnt)(ldExeUnitCfg)
+  val storeExuConfigs = Seq.fill(exuParameters.StuCnt)(stExeUnitCfg)
+
   val intExuConfigs = jumpExeUnitCfg +: (
     Seq.fill(exuParameters.AluCnt)(aluExeUnitCfg) ++
       Seq.fill(exuParameters.MduCnt)(mulDivExeUnitCfg)

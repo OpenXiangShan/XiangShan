@@ -15,19 +15,19 @@ class FpBlockToCtrlIO extends XSBundle {
 
 class FloatBlock
 (
-  fastWakeUpInCnt: Int,
-  slowWakeUpInCnt: Int,
-  fastFpOutCnt: Int,
-  slowFpOutCnt: Int,
-  fastIntOutCnt: Int,
-  slowIntOutCnt: Int
+  fastWakeUpIn: Seq[ExuConfig],
+  slowWakeUpIn: Seq[ExuConfig],
+  fastFpOut: Seq[ExuConfig],
+  slowFpOut: Seq[ExuConfig],
+  fastIntOut: Seq[ExuConfig],
+  slowIntOut: Seq[ExuConfig]
 ) extends XSModule with NeedImpl {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
 
-    val wakeUpIn = new WakeUpBundle(fastWakeUpInCnt, slowWakeUpInCnt)
-    val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOutCnt, slowFpOutCnt))
-    val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOutCnt, slowIntOutCnt))
+    val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
+    val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
+    val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
   })
 }
