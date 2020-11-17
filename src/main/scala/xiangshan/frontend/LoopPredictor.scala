@@ -196,7 +196,7 @@ class LTBColumn extends LTBModule {
   }
 
   // speculatively update specCnt
-  ltb.swen := io.req.valid && if4_entry.tag === if4_tag || doingReset
+  ltb.swen := valid && if4_entry.tag === if4_tag || doingReset
   ltb.swIdx := Mux(doingReset, resetIdx, if4_idx)
   val swEntry = WireInit(if4_entry)
   ltb.swdata := Mux(doingReset, 0.U.asTypeOf(new LoopEntry), swEntry)
@@ -227,7 +227,7 @@ class LTBColumn extends LTBModule {
     }
   }
   when (io.repair && !doingReset && valid) {
-    swEntry.specCnt := if3_entry.nSpecCnt
+    swEntry.specCnt := if4_entry.nSpecCnt
   }
 
   if (BPUDebug && debug) {
