@@ -315,12 +315,12 @@ inline char* Emulator::timestamp_filename(time_t t, char *buf) {
 }
 
 #ifdef __ENABLESNAPSHOT__
-  inline char* Emulator::snapshot_filename(time_t t) {
-    static char buf[1024];
-    char *p = timestamp_filename(t, buf);
-    strcpy(p, ".snapshot");
-    return buf;
-  }
+inline char* Emulator::snapshot_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".snapshot");
+  return buf;
+}
 #endif
 
 inline char* Emulator::waveform_filename(time_t t) {
@@ -356,83 +356,83 @@ void Emulator::display_trapinfo() {
 }
 
 #ifdef __ENABLESNAPSHOT__
-  void Emulator::snapshot_save(const char *filename) {
-    static int last_slot = 0;
-    VerilatedSaveMem &stream = snapshot_slot[last_slot];
-    last_slot = !last_slot;
+void Emulator::snapshot_save(const char *filename) {
+  static int last_slot = 0;
+  VerilatedSaveMem &stream = snapshot_slot[last_slot];
+  last_slot = !last_slot;
 
-    stream.init(filename);
-    stream << *dut_ptr;
-    stream.flush();
+  stream.init(filename);
+  stream << *dut_ptr;
+  stream.flush();
 
-    long size = get_ram_size();
-    stream.unbuf_write(&size, sizeof(size));
-    stream.unbuf_write(get_ram_start(), size);
+  long size = get_ram_size();
+  stream.unbuf_write(&size, sizeof(size));
+  stream.unbuf_write(get_ram_start(), size);
 
-    uint64_t ref_r[DIFFTEST_NR_REG];
-    ref_difftest_getregs(&ref_r);
-    stream.unbuf_write(ref_r, sizeof(ref_r));
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  ref_difftest_getregs(&ref_r);
+  stream.unbuf_write(ref_r, sizeof(ref_r));
 
-    uint64_t nemu_this_pc = get_nemu_this_pc();
-    stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
+  uint64_t nemu_this_pc = get_nemu_this_pc();
+  stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
-    char *buf = new char[size];
-    ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
-    stream.unbuf_write(buf, size);
-    delete buf;
+  char *buf = new char[size];
+  ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
+  stream.unbuf_write(buf, size);
+  delete buf;
 
-    struct SyncState sync_mastate;
-    ref_difftest_get_mastatus(&sync_mastate);
-    stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
+  struct SyncState sync_mastate;
+  ref_difftest_get_mastatus(&sync_mastate);
+  stream.unbuf_write(&sync_mastate, sizeof(struct SyncState));
 
-    uint64_t csr_buf[4096];
-    ref_difftest_get_csr(csr_buf);
-    stream.unbuf_write(&csr_buf, sizeof(csr_buf));
+  uint64_t csr_buf[4096];
+  ref_difftest_get_csr(csr_buf);
+  stream.unbuf_write(&csr_buf, sizeof(csr_buf));
 
-    long sdcard_offset;
-    if(fp)
-      sdcard_offset = ftell(fp);
-    else
-      sdcard_offset = 0;
-    stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
+  long sdcard_offset;
+  if(fp)
+    sdcard_offset = ftell(fp);
+  else
+    sdcard_offset = 0;
+  stream.unbuf_write(&sdcard_offset, sizeof(sdcard_offset));
 
-    // actually write to file in snapshot_finalize()
-  }
+  // actually write to file in snapshot_finalize()
+}
 
-  void Emulator::snapshot_load(const char *filename) {
-    VerilatedRestore stream;
-    stream.open(filename);
-    stream >> *dut_ptr;
+void Emulator::snapshot_load(const char *filename) {
+  VerilatedRestore stream;
+  stream.open(filename);
+  stream >> *dut_ptr;
 
-    long size;
-    stream.read(&size, sizeof(size));
-    assert(size == get_ram_size());
-    stream.read(get_ram_start(), size);
+  long size;
+  stream.read(&size, sizeof(size));
+  assert(size == get_ram_size());
+  stream.read(get_ram_start(), size);
 
-    uint64_t ref_r[DIFFTEST_NR_REG];
-    stream.read(ref_r, sizeof(ref_r));
-    ref_difftest_setregs(&ref_r);
+  uint64_t ref_r[DIFFTEST_NR_REG];
+  stream.read(ref_r, sizeof(ref_r));
+  ref_difftest_setregs(&ref_r);
 
-    uint64_t nemu_this_pc;
-    stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
-    set_nemu_this_pc(nemu_this_pc);
+  uint64_t nemu_this_pc;
+  stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
+  set_nemu_this_pc(nemu_this_pc);
 
-    char *buf = new char[size];
-    stream.read(buf, size);
-    ref_difftest_memcpy_from_dut(0x80000000, buf, size);
-    delete buf;
+  char *buf = new char[size];
+  stream.read(buf, size);
+  ref_difftest_memcpy_from_dut(0x80000000, buf, size);
+  delete buf;
 
-    struct SyncState sync_mastate;
-    stream.read(&sync_mastate, sizeof(struct SyncState));
-    ref_difftest_set_mastatus(&sync_mastate);
+  struct SyncState sync_mastate;
+  stream.read(&sync_mastate, sizeof(struct SyncState));
+  ref_difftest_set_mastatus(&sync_mastate);
 
-    uint64_t csr_buf[4096];
-    stream.read(&csr_buf, sizeof(csr_buf));
-    ref_difftest_set_csr(csr_buf);
+  uint64_t csr_buf[4096];
+  stream.read(&csr_buf, sizeof(csr_buf));
+  ref_difftest_set_csr(csr_buf);
 
-    long sdcard_offset = 0;
-    stream.read(&sdcard_offset, sizeof(sdcard_offset));
-    if(fp)
-      fseek(fp, sdcard_offset, SEEK_SET);
-  }
+  long sdcard_offset = 0;
+  stream.read(&sdcard_offset, sizeof(sdcard_offset));
+  if(fp)
+    fseek(fp, sdcard_offset, SEEK_SET);
+}
 #endif
