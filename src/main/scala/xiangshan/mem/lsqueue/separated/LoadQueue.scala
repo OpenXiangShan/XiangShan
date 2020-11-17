@@ -107,6 +107,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   // writeback load
   (0 until LoadPipelineWidth).map(i => {
+    dataModule.io.wb(i).wen := false.B
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
@@ -234,6 +235,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   (0 until LoadQueueSize).map(i => {
     val blockMatch = get_block_addr(dataModule.io.rdata(i).paddr) === io.dcache.resp.bits.meta.paddr
+    dataModule.io.refill.wen(i) := false.B
     when(allocated(i) && listening(i) && blockMatch && io.dcache.resp.fire()) {
       dataModule.io.refill.wen(i) := true.B
       valid(i) := true.B
@@ -497,6 +499,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     pending(ringBufferTail) := false.B
   }
 
+  dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
     valid(ringBufferTail) := true.B
     dataModule.io.uncacheWrite(ringBufferTail, io.uncache.resp.bits.data(XLEN-1, 0))

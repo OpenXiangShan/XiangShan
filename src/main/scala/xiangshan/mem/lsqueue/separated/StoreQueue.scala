@@ -105,6 +105,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     
   // writeback store
   (0 until StorePipelineWidth).map(i => {
+    dataModule.io.wb(i).wen := false.B
     when(io.storeIn(i).fire()) {
       val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
       valid(stWbIndex) := !io.storeIn(i).bits.mmio

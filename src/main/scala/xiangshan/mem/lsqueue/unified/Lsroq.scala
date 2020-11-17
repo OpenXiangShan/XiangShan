@@ -100,7 +100,7 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
 
 
   (0 until size).map(i => {
-    when(io.refill.wen(i)){
+    when(io.refill.wen(i) ){
       val refillData = words(get_word(data(i).paddr))
       data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
       XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
