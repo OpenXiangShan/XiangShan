@@ -41,6 +41,9 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
   })
 
   val (in, edge) = outer.node.in.head
+  // do not let MMIO AXI signals optimized out
+  chisel3.dontTouch(in)
+
 
 //  val timer = GTimer()
   when(in.ar.fire()){
