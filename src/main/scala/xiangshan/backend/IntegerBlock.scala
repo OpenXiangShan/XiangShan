@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu.{AluExeUnit, ExuConfig, JumpExeUnit, MulDivExeUnit, Wb}
+import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.ReservationStationNew
 import xiangshan.backend.regfile.Regfile
 
@@ -68,6 +69,7 @@ class IntegerBlock
     val fencei = Output(Bool())
     val tlbCsrIO = Output(new TlbCsrBundle)
     val csrOnly = new CSRSpecialIO
+    val fenceToSbuffer = new FenceToSbuffer
   })
 
   val redirect = io.fromCtrlBlock.redirect
@@ -182,6 +184,9 @@ class IntegerBlock
   io.csrOnly <> jmpExeUnit.csrOnly
   io.toCtrlBlock.sfence <> jmpExeUnit.sfence
   io.toCtrlBlock.tlbCsrIO <> jmpExeUnit.tlbCsrIO
+  jmpExeUnit.fflags <> io.fromCtrlBlock.roqToCSR.fflags
+  jmpExeUnit.dirty_fs <> io.fromCtrlBlock.roqToCSR.dirty_fs
+  jmpExeUnit.fenceToSbuffer <> io.fenceToSbuffer
 
   // read int rf from ctrl block
   intRf.io.readPorts <> io.fromCtrlBlock.readRf

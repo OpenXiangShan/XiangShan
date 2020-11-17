@@ -44,7 +44,7 @@ class NaiveMultiplier(len: Int, val latency: Int)
 
 class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len) with HasPipelineReg {
 
-  override val latency = doReg.size
+  override def latency = doReg.size
 
   val doRegSorted = doReg.sortWith(_ < _)
   println(doRegSorted)

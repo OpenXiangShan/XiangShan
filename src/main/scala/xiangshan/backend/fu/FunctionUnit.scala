@@ -72,7 +72,7 @@ abstract class FunctionUnit(len: Int = 64) extends XSModule {
 trait HasPipelineReg {
   this: FunctionUnit =>
 
-  val latency: Int
+  def latency: Int
 
   require(latency > 0)
 
