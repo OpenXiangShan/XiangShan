@@ -10,7 +10,7 @@ import xiangshan.backend.fu.fpu.util.{CSA3_2, FPUDebug, ORTree, ShiftLeftJam, Sh
 
 class FMA extends FPUPipelineModule {
 
-  override val latency = FunctionUnit.fmacCfg.latency.latencyVal.get
+  override def latency = FunctionUnit.fmacCfg.latency.latencyVal.get
 
   def UseRealArraryMult = false
 

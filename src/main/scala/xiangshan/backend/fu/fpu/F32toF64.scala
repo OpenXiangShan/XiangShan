@@ -8,7 +8,7 @@ import xiangshan.backend.fu.FunctionUnit._
 
 class F32toF64 extends FPUPipelineModule {
 
-  override val latency: Int = FunctionUnit.s2dCfg.latency.latencyVal.get
+  override def latency: Int = FunctionUnit.s2dCfg.latency.latencyVal.get
 
   val a = io.in.bits.src(0)
   val f32 = Float32(a)

@@ -7,7 +7,7 @@ import xiangshan.backend.fu.{CertainLatency, FuConfig, FunctionUnit}
 
 class FMV(XLEN: Int) extends FPUPipelineModule {
 
-  override val latency = FunctionUnit.fmvCfg.latency.latencyVal.get
+  override def latency = FunctionUnit.fmvCfg.latency.latencyVal.get
 
   val src = io.in.bits.src.map(x =>
     Mux(isDouble || op(2,1)==="b00".U, x, extF32ToF64(x))

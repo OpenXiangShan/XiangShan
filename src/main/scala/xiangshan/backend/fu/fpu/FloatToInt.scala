@@ -13,7 +13,7 @@ import xiangshan.backend.fu.fpu.util.{ORTree, ShiftRightJam}
 
 class FloatToInt extends FPUPipelineModule {
 
-  override val latency = FunctionUnit.f2iCfg.latency.latencyVal.get
+  override def latency = FunctionUnit.f2iCfg.latency.latencyVal.get
 
   def SEXP_WIDTH = Float64.expWidth + 2
 

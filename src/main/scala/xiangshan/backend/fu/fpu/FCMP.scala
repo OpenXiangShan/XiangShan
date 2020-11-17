@@ -8,7 +8,7 @@ import xiangshan.backend.fu.FunctionUnit._
 
 class FCMP extends FPUPipelineModule {
 
-  override val latency = FunctionUnit.fcmpCfg.latency.latencyVal.get
+  override def latency = FunctionUnit.fcmpCfg.latency.latencyVal.get
 
   val src = io.in.bits.src.map(x => Mux(isDouble, x, extF32ToF64(x)))
   val sign = src.map(_(63))

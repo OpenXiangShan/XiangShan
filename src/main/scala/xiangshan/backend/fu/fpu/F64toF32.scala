@@ -8,7 +8,7 @@ import xiangshan.backend.fu.fpu.util.ShiftRightJam
 
 class F64toF32 extends FPUPipelineModule {
 
-  override val latency = FunctionUnit.d2sCfg.latency.latencyVal.get
+  override def latency = FunctionUnit.d2sCfg.latency.latencyVal.get
 
   def SEXP_WIDTH = Float64.expWidth + 2
 
