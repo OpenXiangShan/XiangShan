@@ -38,7 +38,7 @@ trait HasTageParameter extends HasXSParameter with HasBPUParameter{
 }
 
 abstract class TageBundle extends XSBundle with HasTageParameter with PredictorUtils
-abstract class TageModule extends XSModule with HasTageParameter with PredictorUtils { val debug = true }
+abstract class TageModule extends XSModule with HasTageParameter with PredictorUtils { val debug = false }
 
 
 
@@ -376,7 +376,7 @@ class Tage extends BaseTage {
   val useThreshold = WireInit(scThreshold.thres)
   val updateThreshold = WireInit((useThreshold << 3) + 21.U)
 
-  override val debug = true
+  // override val debug = true
 
   // Keep the table responses to process in s3
   val resps = VecInit(tables.map(t => RegEnable(t.io.resp, enable=io.s3Fire)))
