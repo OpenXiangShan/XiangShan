@@ -55,7 +55,6 @@ case class XSCoreParameters
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8, 
-  EnableUnifiedLSQ: Boolean = false,
   LsroqSize: Int = 16,
   LoadQueueSize: Int = 12,
   StoreQueueSize: Int = 10,
@@ -143,10 +142,7 @@ trait HasXSParameter {
   val NRPhyRegs = core.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RoqSize = core.RoqSize
-  val EnableUnifiedLSQ = core.EnableUnifiedLSQ
   val LsroqSize = core.LsroqSize // 64
-  val InnerLsroqIdxWidth = log2Up(LsroqSize)
-  val LsroqIdxWidth = InnerLsroqIdxWidth + 1
   val LoadQueueSize = core.LoadQueueSize
   val StoreQueueSize = core.StoreQueueSize
   val dpParams = core.dpParams
@@ -379,7 +375,6 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   memBlock.io.lsqio.commits <> ctrlBlock.io.roqio.commits
   memBlock.io.lsqio.roqDeqPtr <> ctrlBlock.io.roqio.roqDeqPtr
   memBlock.io.lsqio.oldestStore <> ctrlBlock.io.oldestStore
-  memBlock.io.lsqio.exceptionAddr.lsIdx.lsroqIdx := ctrlBlock.io.roqio.exception.bits.lsroqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.lqIdx
   memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.sqIdx
   memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.ctrl.commitType)

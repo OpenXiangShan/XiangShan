@@ -116,7 +116,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       val wbIdx = wbIdxExt.value
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
-      microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
       microOp(wbIdx).lqIdx := io.exeWbResults(i).bits.uop.lqIdx
       microOp(wbIdx).sqIdx := io.exeWbResults(i).bits.uop.sqIdx
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe

@@ -16,7 +16,6 @@ class LsBlockToCtrlIO extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val lsqIdxResp = Vec(RenameWidth, Output(new LSIdx))
-  
   val replay = ValidIO(new Redirect)
 }
 
@@ -189,7 +188,7 @@ class MemBlock
   lsroq.io.commits     <> io.lsqio.commits
   lsroq.io.dp1Req      <> io.fromCtrlBlock.lsqIdxReq
   lsroq.io.oldestStore <> io.lsqio.oldestStore
-  lsroq.io.lsIdxs   <> io.toCtrlBlock.lsqIdxResp
+  lsroq.io.lsIdxs      <> io.toCtrlBlock.lsqIdxResp
   lsroq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsroq.io.roqDeqPtr := io.lsqio.roqDeqPtr
 

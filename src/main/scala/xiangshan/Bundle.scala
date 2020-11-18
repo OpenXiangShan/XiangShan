@@ -144,15 +144,8 @@ class CfCtrl extends XSBundle {
 
 // Load / Store Index
 //
-// When using unified lsroq, lsIdx serves as lsroqIdx,
 // while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
-// All lsroqIdx will be replaced by new lsIdx in the future.
 trait HasLSIdx { this: HasXSParameter =>
-  
-  // if(EnableUnifiedLSQ){
-  // Unified LSQ
-  val lsroqIdx = UInt(LsroqIdxWidth.W)
-  // } else {
   // Separate LSQ
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr

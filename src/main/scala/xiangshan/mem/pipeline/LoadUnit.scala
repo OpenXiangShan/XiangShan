@@ -40,7 +40,6 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
-  io.dtlbReq.bits.debug.lsroqIdx := s0_uop.lsroqIdx
   
   // feedback tlb result to RS
   // Note: can be moved to s1
@@ -116,7 +115,6 @@ class LoadUnit_S1 extends XSModule {
   io.sbuffer.paddr := s1_paddr
   io.sbuffer.uop := s1_uop
   io.sbuffer.sqIdx := s1_uop.sqIdx
-  io.sbuffer.lsroqIdx := s1_uop.lsroqIdx
   io.sbuffer.mask := s1_mask
   io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
   
@@ -124,7 +122,6 @@ class LoadUnit_S1 extends XSModule {
   io.lsroq.paddr := s1_paddr
   io.lsroq.uop := s1_uop
   io.lsroq.sqIdx := s1_uop.sqIdx
-  io.lsroq.lsroqIdx := s1_uop.lsroqIdx
   io.lsroq.mask := s1_mask
   io.lsroq.pc := s1_uop.cf.pc // FIXME: remove it
 
