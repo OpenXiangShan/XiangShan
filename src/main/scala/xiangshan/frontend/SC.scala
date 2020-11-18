@@ -35,7 +35,7 @@ abstract class BaseSCTable(val r: Int = 1024, val cb: Int = 6, val h: Int = 0) e
 }
 
 class FakeSCTable extends BaseSCTable {
-  io.resp := Wire(0.U.asTypeOf(Vec(TageBanks, new SCResp)))
+  io.resp := 0.U.asTypeOf(Vec(TageBanks, new SCResp))
 }
 
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSCTable(nRows, ctrBits, histLen) {
