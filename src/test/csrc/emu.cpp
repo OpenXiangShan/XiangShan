@@ -107,7 +107,7 @@ Emulator::Emulator(int argc, const char *argv[]):
   enable_waveform = false;
 #endif
 
-#ifdef __ENABLESNAPSHOT__
+#ifdef VM_SAVABLE
   if (args.snapshot_path != NULL) {
     printf("loading from snapshot `%s`...\n", args.snapshot_path);
     snapshot_load(args.snapshot_path);
@@ -122,7 +122,7 @@ Emulator::Emulator(int argc, const char *argv[]):
 }
 
 Emulator::~Emulator() {
-#ifdef __ENABLESNAPSHOT__
+#ifdef VM_SAVABLE
   snapshot_slot[0].save();
   snapshot_slot[1].save();
   printf("Please remove unused snapshots manually\n");
@@ -281,7 +281,7 @@ uint64_t Emulator::execute(uint64_t n) {
       poll_event();
       lasttime_poll = t;
     }
-#ifdef __ENABLESNAPSHOT__
+#ifdef VM_SAVABLE
     static int snapshot_count = 0;
     if (trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
       // save snapshot every 10s
@@ -314,7 +314,7 @@ inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   return buf + len;
 }
 
-#ifdef __ENABLESNAPSHOT__
+#ifdef VM_SAVABLE
 inline char* Emulator::snapshot_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);
@@ -355,7 +355,7 @@ void Emulator::display_trapinfo() {
       instrCnt, cycleCnt, ipc);
 }
 
-#ifdef __ENABLESNAPSHOT__
+#ifdef VM_SAVABLE
 void Emulator::snapshot_save(const char *filename) {
   static int last_slot = 0;
   VerilatedSaveMem &stream = snapshot_slot[last_slot];
