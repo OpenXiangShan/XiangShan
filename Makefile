@@ -52,14 +52,22 @@ EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
 EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
 EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
-EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
+EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
-EMU_THREADS   = 1
-ifeq ($(EMU_THREADS), 1)
-	VTHREAD_FLAGS = --threads 1 
-else 
-	VTHREAD_FLAGS = --threads $(EMU_THREADS) --threads-dpi none
+
+# Verilator trace support
+VEXTRA_FLAGS  = --trace
+
+# Verilator multi-thread support
+EMU_THREADS  ?= 1
+VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+
+# Verilator savable
+EMU_SNAPSHOT ?= 0
+ifeq ($(EMU_SNAPSHOT),1)
+VEXTRA_FLAGS += --savable
+EMU_CXXFLAGS += -DVM_SAVABLE
 endif
 
 # --trace
@@ -68,10 +76,8 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
-  $(VTHREAD_FLAGS) \
-  --trace \
+  $(VEXTRA_FLAGS) \
   --assert \
-  --savable \
   --stats-vars \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
@@ -108,7 +114,6 @@ SEED ?= $(shell shuf -i 1-10000 -n 1)
 B ?= 0
 E ?= -1
 SNAPSHOT ?=
-ENABLESNAPSHOT ?= 0
 
 # enable this runtime option if you want to generate a vcd file
 # use 'emu -h' to see more details
@@ -120,10 +125,6 @@ else
 SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
 endif
 
-
-ifeq ($(ENABLESNAPSHOT),1)
-EMU_CXXFLAGS += -D__ENABLESNAPSHOT__
-endif
 
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
