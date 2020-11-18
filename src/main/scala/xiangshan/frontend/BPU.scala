@@ -8,7 +8,7 @@ import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = false
+  val BPUDebug = true
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = true

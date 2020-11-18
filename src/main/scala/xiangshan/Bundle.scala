@@ -47,7 +47,7 @@ class SCMeta(val useSC: Boolean) extends XSBundle with HasTageParameter {
   val scPred    = if (useSC) Bool() else UInt(0.W)
   // Suppose ctrbits of all tables are identical
   val ctrs      = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
-  val sum       = if (useSC) SInt(sumCtrBits.W) else SInt(0.W)
+  val sumAbs    = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
 }
 
 class TageMeta extends XSBundle with HasTageParameter {
@@ -56,6 +56,7 @@ class TageMeta extends XSBundle with HasTageParameter {
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  val taken = Bool()
   val scMeta = new SCMeta(EnableSC)
 }
 

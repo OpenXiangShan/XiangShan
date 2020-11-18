@@ -31,7 +31,7 @@ class SCTableIO extends TageBundle {
 
 abstract class BaseSCTable(val r: Int = 1024, val cb: Int = 6, val h: Int = 0) extends TageModule {
   val io = IO(new SCTableIO)
-  def getCenteredValue(ctr: SInt): SInt = (ctr << 1) + 1.S
+  def getCenteredValue(ctr: SInt): SInt = (ctr << 1).asSInt + 1.S
 }
 
 class FakeSCTable extends BaseSCTable {
@@ -103,13 +103,35 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSC
     io.resp(b).ctr := table_r(bankIdxInOrder(b))
   })
 
+  if (BPUDebug && debug) {
+    val u = io.update
+    val b = PriorityEncoder(u.mask)
+    XSDebug(io.req.valid, p"scTableReq: pc=0x${io.req.bits.pc}%x, idx=${idx}%d, hist=${io.req.bits.hist}%x, baseBank=${baseBank}%d, mask=${io.req.bits.mask}%b, realMask=${realMask}%b\n")
+    for (i <- 0 until TageBanks) {
+      XSDebug(RegNext(io.req.valid), p"scTableResp[${i.U}]: idx=${idxLatch}%d, ctr:${io.resp(i).ctr}\n")
+    }
+    XSDebug(io.update.mask.reduce(_||_), p"update Table: pc:${u.pc}%x, fetchIdx:${u.fetchIdx}%d, hist:${u.hist}%x, bank:${b}%d, tageTaken:${u.tagePred}%d, taken:${u.taken}%d, oldCtr:${u.oldCtr}%d\n")
+  }
+
 }
 
-class SCThreshold(val ctrBits: Int = 5, val initVal: Int = 5) extends TageBundle {
-  val thres = UInt(ctrBits.W)
+class SCThreshold(val ctrBits: Int = 5) extends TageBundle {
+  val ctr = UInt(ctrBits.W)
+  def satPos(ctr: UInt = this.ctr) = ctr === ((1.U << ctrBits) - 1.U)
+  def satNeg(ctr: UInt = this.ctr) = ctr === 0.U
+  def neutralVal = (1.U << (ctrBits - 1))
+  val thres = UInt(5.W)
+  def minThres = 5.U
+  def maxThres = 31.U
   def update(cause: Bool): SCThreshold = {
     val res = Wire(new SCThreshold(this.ctrBits))
-    res.thres := satUpdate(this.thres, this.ctrBits, cause)
+    val newCtr = satUpdate(this.ctr, this.ctrBits, cause)
+    val newThres = Mux(res.satPos(newCtr), this.thres + 1.U,
+                      Mux(res.satNeg(newCtr), this.thres - 1.U,
+                      this.thres))
+    res.thres := newThres
+    res.ctr := Mux(res.satPos(newCtr) || res.satNeg(newCtr), res.neutralVal, newCtr)
+    // XSDebug(true.B, p"scThres Update: cause${cause} newCtr ${newCtr} newThres ${newThres}\n")
     res
   }
 }
@@ -117,6 +139,8 @@ class SCThreshold(val ctrBits: Int = 5, val initVal: Int = 5) extends TageBundle
 object SCThreshold {
   def apply(bits: Int) = {
     val t = Wire(new SCThreshold(ctrBits=bits))
+    t.ctr := t.neutralVal
+    t.thres := t.minThres
     t
   }
 }
