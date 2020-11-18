@@ -3,25 +3,30 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
+import xiangshan._
 import xiangshan.backend.exu.Exu.jumpExeUnitCfg
 import xiangshan.backend.fu.fpu.FPUOpType.FU_I2F
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
-import xiangshan.{CSRSpecialIO, FuType, SfenceBundle, TlbCsrBundle}
 import xiangshan.backend.fu.fpu.{Fflags, IntToFloatSingleCycle, boxF32ToF64}
 
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
-  val fflags = IO(Input(new Fflags))
-  val dirty_fs = IO(Input(Bool()))
-  val frm = IO(Output(UInt(3.W)))
-
-  val fenceToSbuffer = IO(new FenceToSbuffer)
-  val sfence = IO(Output(new SfenceBundle))
-  val fencei = IO(Output(Bool()))
-
-  val tlbCsrIO = IO(Output(new TlbCsrBundle))
-
-  val csrOnly = IO(new CSRSpecialIO)
+  val csrio = IO(new Bundle {
+    val fflags = Input(new Fflags)
+    val dirty_fs = Input(Bool())
+    val exception = Flipped(ValidIO(new MicroOp))
+    val isInterrupt = Input(Bool())
+    val trapTarget = Output(UInt(VAddrBits.W))
+    val interrupt = Output(Bool())
+    val memExceptionVAddr = Input(UInt(VAddrBits.W))
+    val externalInterrupt = new ExternalInterruptIO
+    val tlb = Output(new TlbCsrBundle)
+  })
+  val fenceio = IO(new Bundle {
+    val sfence = IO(Output(new SfenceBundle))
+    val fencei = IO(Output(Bool()))
+    val sbuffer = IO(new FenceToSbuffer)
+  })
 
   val jmp = supportedFunctionUnits.collectFirst{
     case j: Jump => j
@@ -36,34 +41,26 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     case i: IntToFloatSingleCycle => i
   }.get
 
+  csr.csrio.perf <> DontCare
+  csr.csrio.fpu.fflags := csrio.fflags
+  csr.csrio.fpu.isIllegal := false.B
+  csr.csrio.fpu.dirty_fs := csrio.dirty_fs
+  csr.csrio.exception <> csrio.exception
+  csr.csrio.isInterrupt <> csrio.isInterrupt
+  csr.csrio.trapTarget <> csrio.trapTarget
+  csr.csrio.interrupt <> csrio.interrupt
+  csr.csrio.memExceptionVAddr <> csrio.memExceptionVAddr
+  csr.csrio.externalInterrupt <> csrio.externalInterrupt
+  csr.csrio.tlb <> csrio.tlb
 
-  val uop = io.fromInt.bits.uop
-
-  fenceToSbuffer <> fence.toSbuffer
-  sfence <> fence.sfence
-  fencei := fence.fencei
-  frm := csr.fpu_csr.frm
-  tlbCsrIO := csr.tlbCsrIO
-
-  csr.fpu_csr.fflags := fflags
-  csr.fpu_csr.isIllegal := false.B // TODO: check illegal rounding mode
-  csr.fpu_csr.dirty_fs := dirty_fs
-
-  csr.perf <> DontCare
-
-  csr.exception := csrOnly.exception
-  csr.isInterrupt := io.redirect.bits.isFlushPipe
-  csr.memExceptionVAddr := csrOnly.memExceptionVAddr
-  csr.mtip := csrOnly.externalInterrupt.mtip
-  csr.msip := csrOnly.externalInterrupt.msip
-  csr.meip := csrOnly.externalInterrupt.meip
-  csrOnly.trapTarget := csr.trapTarget
-  csrOnly.interrupt := csr.interrupt
-
+  fenceio.sfence <> fence.sfence
+  fenceio.fencei <> fence.fencei
+  fenceio.sbuffer <> fence.toSbuffer
   fence.io.out.ready := true.B
 
+  val uop = io.fromInt.bits.uop
   val instr_rm = uop.cf.instr(14, 12)
-  i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.fpu_csr.frm)
+  i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.csrio.fpu.frm)
 
   val isDouble = !uop.ctrl.isRVF
 
@@ -79,14 +76,14 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   }
 
   when(csr.io.out.valid){
-    io.toInt.bits.redirectValid := csr.redirectOutValid
+    io.toInt.bits.redirectValid := csr.csrio.redirectOut.valid
     io.toInt.bits.redirect.brTag := uop.brTag
     io.toInt.bits.redirect.isException := false.B
     io.toInt.bits.redirect.isMisPred := false.B
     io.toInt.bits.redirect.isFlushPipe := false.B
     io.toInt.bits.redirect.isReplay := false.B
     io.toInt.bits.redirect.roqIdx := uop.roqIdx
-    io.toInt.bits.redirect.target := csr.redirectOut.target
+    io.toInt.bits.redirect.target := csr.csrio.redirectOut.bits
     io.toInt.bits.redirect.pc := uop.cf.pc
   }.elsewhen(jmp.io.out.valid){
     io.toInt.bits.redirectValid := jmp.redirectOutValid

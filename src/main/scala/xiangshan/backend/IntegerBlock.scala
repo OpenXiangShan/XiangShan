@@ -8,6 +8,7 @@ import xiangshan.backend.exu.{AluExeUnit, ExuConfig, JumpExeUnit, MulDivExeUnit,
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.ReservationStationNew
 import xiangshan.backend.regfile.Regfile
+import xiangshan.backend.fu.fpu.Fflags
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -22,13 +23,9 @@ class IntBlockToCtrlIO extends XSBundle {
   // write back regfile signals after arbiter
   // used to update busytable and roq state
   val wbRegs = Vec(NRIntWritePorts, ValidIO(new ExuOutput))
-
   // write back to brq
   val exuRedirect = Vec(exuParameters.AluCnt+exuParameters.JmpCnt, ValidIO(new ExuOutput))
-
   val numExist = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
-  val sfence = Output(new SfenceBundle)
-  val tlbCsrIO = Output(new TlbCsrBundle)
 }
 
 trait HasExeBlockHelper {
@@ -64,13 +61,22 @@ class IntegerBlock
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
 
-    val externalInterrupt = new ExternalInterruptIO
-    val sfence = Output(new SfenceBundle)
-    val fencei = Output(Bool())
-    val tlbCsrIO = Output(new TlbCsrBundle)
-    val csrOnly = new CSRSpecialIO
-    val fenceToSbuffer = new FenceToSbuffer
-    val frm = Output(UInt(3.W))
+    val csrio = new Bundle {
+      val fflags = Input(new Fflags) // from roq
+      val dirty_fs = Input(Bool()) // from roq
+      val exception = Flipped(ValidIO(new MicroOp)) // from roq
+      val isInterrupt = Input(Bool()) // from roq
+      val trapTarget = Output(UInt(VAddrBits.W)) // to roq
+      val interrupt = Output(Bool()) // to roq
+      val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
+      val externalInterrupt = new ExternalInterruptIO  // from outside
+      val tlb = Output(new TlbCsrBundle) // from tlb
+    }
+    val fenceio = new Bundle {
+      val sfence = IO(Output(new SfenceBundle)) // to front,mem
+      val fencei = IO(Output(Bool()))           // to icache
+      val sbuffer = IO(new FenceToSbuffer)      // to mem
+    }
   })
 
   val redirect = io.fromCtrlBlock.redirect
@@ -94,7 +100,7 @@ class IntegerBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
-  val reservedStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
+  val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
       certainLatency = cfg.latency.latencyVal.get
@@ -138,8 +144,8 @@ class IntegerBlock
     rs
   })
 
-  for(rs <- reservedStations){
-    val inBlockUops = reservedStations.filter(x =>
+  for(rs <- reservationStations){
+    val inBlockUops = reservationStations.filter(x =>
       x.exuCfg.hasCertainLatency && x.exuCfg.writeIntRf
     ).map(x => {
       val raw = WireInit(x.io.selectedUop)
@@ -149,7 +155,7 @@ class IntegerBlock
     rs.io.broadcastedUops <> inBlockUops ++ io.wakeUpIn.fastUops
   }
 
-  io.wakeUpFpOut.fastUops <> reservedStations.filter(
+  io.wakeUpFpOut.fastUops <> reservationStations.filter(
     rs => fpFastFilter(rs.exuCfg)
   ).map(_.io.selectedUop)
 
@@ -161,7 +167,7 @@ class IntegerBlock
     x => fpSlowFilter(x.config)
   ).map(_.io.toFp)
 
-  io.wakeUpIntOut.fastUops <> reservedStations.filter(
+  io.wakeUpIntOut.fastUops <> reservationStations.filter(
     rs => intFastFilter(rs.exuCfg)
   ).map(_.io.selectedUop)
 
@@ -182,13 +188,8 @@ class IntegerBlock
       x.bits := y.bits
   }
 
-  io.csrOnly <> jmpExeUnit.csrOnly
-  io.toCtrlBlock.sfence <> jmpExeUnit.sfence
-  io.toCtrlBlock.tlbCsrIO <> jmpExeUnit.tlbCsrIO
-  io.frm <> jmpExeUnit.frm
-  jmpExeUnit.fflags <> io.fromCtrlBlock.roqToCSR.fflags
-  jmpExeUnit.dirty_fs <> io.fromCtrlBlock.roqToCSR.dirty_fs
-  jmpExeUnit.fenceToSbuffer <> io.fenceToSbuffer
+  jmpExeUnit.csrio <> io.csrio
+  jmpExeUnit.fenceio <> io.fenceio
 
   // read int rf from ctrl block
   intRf.io.readPorts <> io.fromCtrlBlock.readRf
