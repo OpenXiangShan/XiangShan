@@ -51,7 +51,7 @@ class IntegerBlock
   slowFpOut: Seq[ExuConfig],
   fastIntOut: Seq[ExuConfig],
   slowIntOut: Seq[ExuConfig]
-) extends XSModule with HasExeBlockHelper with NeedImpl
+) extends XSModule with HasExeBlockHelper
 {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
@@ -64,6 +64,7 @@ class IntegerBlock
     val csrio = new Bundle {
       val fflags = Input(new Fflags) // from roq
       val dirty_fs = Input(Bool()) // from roq
+      val frm = Output(UInt(3.W)) // to float
       val exception = Flipped(ValidIO(new MicroOp)) // from roq
       val isInterrupt = Input(Bool()) // from roq
       val trapTarget = Output(UInt(VAddrBits.W)) // to roq
@@ -73,9 +74,9 @@ class IntegerBlock
       val tlb = Output(new TlbCsrBundle) // from tlb
     }
     val fenceio = new Bundle {
-      val sfence = IO(Output(new SfenceBundle)) // to front,mem
-      val fencei = IO(Output(Bool()))           // to icache
-      val sbuffer = IO(new FenceToSbuffer)      // to mem
+      val sfence = Output(new SfenceBundle) // to front,mem
+      val fencei = Output(Bool())           // to icache
+      val sbuffer = new FenceToSbuffer      // to mem
     }
   })
 

@@ -328,22 +328,17 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val ptw = outer.ptw.module
   val icache = Module(new ICache)
 
-  //TODO: remove following code
-  memBlock.io <> DontCare
-  integerBlock.io <> DontCare
-  floatBlock.io <> DontCare
-
-
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.icacheResp <> icache.io.resp
   frontend.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> frontend.io.icacheReq
   icache.io.flush <> frontend.io.icacheFlush
+  integerBlock.io.fenceio.sfence <> frontend.io.sfence
 
   icache.io.mem_acquire <> l1pluscache.io.req
   l1pluscache.io.resp <> icache.io.mem_grant
   l1pluscache.io.flush := icache.io.l1plusflush
-  icache.io.fencei := integerBlock.io.fencei
+  icache.io.fencei := integerBlock.io.fenceio.fencei
 
   ctrlBlock.io.fromIntBlock <> integerBlock.io.toCtrlBlock
   ctrlBlock.io.fromFpBlock <> floatBlock.io.toCtrlBlock
@@ -368,17 +363,31 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     floatBlock.io.wakeUpIntOut.slow ++
     floatBlock.io.wakeUpFpOut.slow
 
-  integerBlock.io.csrOnly.memExceptionVAddr := memBlock.io.csr.exceptionAddr.vaddr
-  integerBlock.io.csrOnly.externalInterrupt := io.externalInterrupt
-  integerBlock.io.csrOnly.isInterrupt := DontCare //TODO: fix it
+  integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
+  integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs
+  integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
+  integerBlock.io.csrio.isInterrupt <> ctrlBlock.io.roqio.isInterrupt
+  integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
+  integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
+  integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
+  integerBlock.io.csrio.tlb <> memBlock.io.tlbCsr
+  integerBlock.io.fenceio.sfence <> memBlock.io.sfence
+  integerBlock.io.fenceio.sbuffer <> memBlock.io.fenceToSbuffer
 
+  floatBlock.io.frm <> integerBlock.io.csrio.frm
 
-  io.externalInterrupt <> integerBlock.io.externalInterrupt
+  memBlock.io.lsqio.commits <> ctrlBlock.io.roqio.commits
+  memBlock.io.lsqio.roqDeqPtr <> ctrlBlock.io.roqio.roqDeqPtr
+  memBlock.io.lsqio.oldestStore <> ctrlBlock.io.oldestStore
+  memBlock.io.lsqio.exceptionAddr.lsIdx.lsroqIdx := ctrlBlock.io.roqio.exception.bits.lsroqIdx
+  memBlock.io.lsqio.exceptionAddr.lsIdx.lqIdx := ctrlBlock.io.roqio.exception.bits.lqIdx
+  memBlock.io.lsqio.exceptionAddr.lsIdx.sqIdx := ctrlBlock.io.roqio.exception.bits.sqIdx
+  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.roqio.exception.bits.ctrl.commitType)
 
   ptw.io.tlb(0) <> memBlock.io.ptw
   ptw.io.tlb(1) <> frontend.io.ptw
-  ptw.io.sfence <> integerBlock.io.sfence
-  ptw.io.csr <> integerBlock.io.tlbCsrIO
+  ptw.io.sfence <> integerBlock.io.fenceio.sfence
+  ptw.io.csr <> integerBlock.io.csrio.tlb
 
   dcache.io.lsu.load    <> memBlock.io.dcache.loadUnitToDcacheVec
   dcache.io.lsu.lsroq   <> memBlock.io.dcache.loadMiss

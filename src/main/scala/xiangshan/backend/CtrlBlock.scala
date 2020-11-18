@@ -17,7 +17,6 @@ class CtrlToIntBlockIO extends XSBundle {
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
   val redirect = ValidIO(new Redirect)
-  val roqToCSR = new RoqCSRIO
 }
 
 class CtrlToFpBlockIO extends XSBundle {
@@ -32,10 +31,6 @@ class CtrlToLsBlockIO extends XSBundle {
   val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
   val lsqIdxReq = Vec(RenameWidth, DecoupledIO(new MicroOp))
   val redirect = ValidIO(new Redirect)
-  // from roq: send commits info to lsq
-  val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
-  // from roq: the newest roqDeqPtr
-  val roqDeqPtr = Output(new RoqPtr)
 }
 
 class CtrlBlock extends XSModule {
@@ -47,6 +42,16 @@ class CtrlBlock extends XSModule {
     val toIntBlock = new CtrlToIntBlockIO
     val toFpBlock = new CtrlToFpBlockIO
     val toLsBlock = new CtrlToLsBlockIO
+    val roqio = new Bundle {
+      // to int block
+      val toCSR = new RoqCSRIO
+      val exception = ValidIO(new MicroOp)
+      val isInterrupt = Output(Bool())
+      // to mem block
+      val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
+      val roqDeqPtr = Output(new RoqPtr)
+    }
+    val oldestStore = Input(Valid(new RoqPtr))
   })
 
   val decode = Module(new DecodeStage)
@@ -76,8 +81,6 @@ class CtrlBlock extends XSModule {
   io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
-  io.frontend.sfence <> io.fromIntBlock.sfence
-  io.frontend.tlbCsrIO <> io.fromIntBlock.tlbCsrIO
 
   decode.io.in <> io.frontend.cfVec
   decode.io.toBrq <> brq.io.enqReqs
@@ -111,9 +114,9 @@ class CtrlBlock extends XSModule {
   dispatch.io.roqIdxs <> roq.io.roqIdxs
   dispatch.io.toLsroq <> io.toLsBlock.lsqIdxReq
   dispatch.io.lsIdxs <> io.fromLsBlock.lsqIdxResp
-  dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.fromLsBlock.oldestStore.valid
-  dispatch.io.dequeueRoqIndex.bits := Mux(io.fromLsBlock.oldestStore.valid,
-    io.fromLsBlock.oldestStore.bits,
+  dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.oldestStore.valid
+  dispatch.io.dequeueRoqIndex.bits := Mux(io.oldestStore.valid,
+    io.oldestStore.bits,
     roq.io.commitRoqIndex.bits
   )
   dispatch.io.readIntRf <> io.toIntBlock.readRf
@@ -138,14 +141,15 @@ class CtrlBlock extends XSModule {
   roq.io.exeWbResults.last := brq.io.out
 
   io.toIntBlock.redirect := redirect
-  io.toIntBlock.roqToCSR <> roq.io.csr
-
   io.toFpBlock.redirect := redirect
-
   io.toLsBlock.redirect := redirect
-  io.toLsBlock.roqDeqPtr := roq.io.roqDeqPtr
-  io.toLsBlock.commits := roq.io.commits
 
-
-
+  // roq to int block
+  io.roqio.toCSR <> roq.io.csr
+  io.roqio.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
+  io.roqio.exception.bits := roq.io.exception
+  io.roqio.isInterrupt := roq.io.redirect.bits.isFlushPipe
+  // roq to mem block
+  io.roqio.roqDeqPtr := roq.io.roqDeqPtr
+  io.roqio.commits := roq.io.commits
 }

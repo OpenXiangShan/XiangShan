@@ -21,7 +21,7 @@ class FloatBlock
   slowFpOut: Seq[ExuConfig],
   fastIntOut: Seq[ExuConfig],
   slowIntOut: Seq[ExuConfig]
-) extends XSModule with HasExeBlockHelper with NeedImpl {
+) extends XSModule with HasExeBlockHelper {
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO

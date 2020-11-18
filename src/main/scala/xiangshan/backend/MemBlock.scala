@@ -16,7 +16,7 @@ class LsBlockToCtrlIO extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val lsqIdxResp = Vec(RenameWidth, Output(new LSIdx))
-  val oldestStore = Output(Valid(new RoqPtr))
+  
   val replay = ValidIO(new Redirect)
 }
 
@@ -28,13 +28,6 @@ class MemBlockToDcacheIO extends XSBundle {
   val uncache = new DCacheWordIO
 }
 
-class MemBlockCSRIO extends XSBundle {
-  val exceptionAddr = new ExceptionAddrIO
-  val fenceToSbuffer = Flipped(new FenceToSbuffer)
-  val sfence = Input(new SfenceBundle)
-  val tlbInfo = Input(new TlbCsrBundle)
-}
-
 class MemBlock
 (
   fastWakeUpIn: Seq[ExuConfig],
@@ -43,7 +36,7 @@ class MemBlock
   slowFpOut: Seq[ExuConfig],
   fastIntOut: Seq[ExuConfig],
   slowIntOut: Seq[ExuConfig]
-) extends XSModule with HasExeBlockHelper with NeedImpl {
+) extends XSModule with HasExeBlockHelper {
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
@@ -56,7 +49,16 @@ class MemBlock
     val ptw = new TlbPtwIO
     // TODO: dcache should be inside MemBlock
     val dcache = new MemBlockToDcacheIO
-    val csr = new MemBlockCSRIO
+    val sfence = Input(new SfenceBundle)
+    val tlbCsr = Input(new TlbCsrBundle)
+    val fenceToSbuffer = Flipped(new FenceToSbuffer)
+
+    val lsqio = new Bundle {
+      val exceptionAddr = new ExceptionAddrIO // to csr
+      val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit))) // to lsq
+      val roqDeqPtr = Input(new RoqPtr) // to lsq
+      val oldestStore = Output(Valid(new RoqPtr)) // to dispatch
+    }
   })
 
   val redirect = io.fromCtrlBlock.redirect
@@ -151,8 +153,8 @@ class MemBlock
 
   // dtlb
   io.ptw <> dtlb.io.ptw
-  dtlb.io.sfence <> io.csr.sfence
-  dtlb.io.csr <> io.csr.tlbInfo
+  dtlb.io.sfence <> io.sfence
+  dtlb.io.csr <> io.tlbCsr
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -184,12 +186,12 @@ class MemBlock
   }
 
   // Lsroq
-  lsroq.io.commits     <> io.fromCtrlBlock.commits
+  lsroq.io.commits     <> io.lsqio.commits
   lsroq.io.dp1Req      <> io.fromCtrlBlock.lsqIdxReq
-  lsroq.io.oldestStore <> io.toCtrlBlock.oldestStore
+  lsroq.io.oldestStore <> io.lsqio.oldestStore
   lsroq.io.lsIdxs   <> io.toCtrlBlock.lsqIdxResp
   lsroq.io.brqRedirect := io.fromCtrlBlock.redirect
-  lsroq.io.roqDeqPtr := io.fromCtrlBlock.roqDeqPtr
+  lsroq.io.roqDeqPtr := io.lsqio.roqDeqPtr
 
   io.toCtrlBlock.replay <> lsroq.io.rollback
 
@@ -203,9 +205,9 @@ class MemBlock
   sbuffer.io.dcache <> io.dcache.sbufferToDcache
 
   // flush sbuffer
-  val fenceFlush = io.csr.fenceToSbuffer.flushSb
+  val fenceFlush = io.fenceToSbuffer.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
-  io.csr.fenceToSbuffer.sbIsEmpty := sbuffer.io.flush.empty
+  io.fenceToSbuffer.sbIsEmpty := sbuffer.io.flush.empty
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush))
@@ -256,8 +258,8 @@ class MemBlock
     loadUnits(0).io.ldout.ready := false.B
   }
 
-  lsroq.io.exceptionAddr.lsIdx := io.csr.exceptionAddr.lsIdx
-  lsroq.io.exceptionAddr.isStore := io.csr.exceptionAddr.isStore
-  io.csr.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsroq.io.exceptionAddr.vaddr)
+  lsroq.io.exceptionAddr.lsIdx := io.lsqio.exceptionAddr.lsIdx
+  lsroq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
+  io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsroq.io.exceptionAddr.vaddr)
 
 }

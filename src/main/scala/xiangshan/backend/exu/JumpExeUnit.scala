@@ -14,6 +14,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   val csrio = IO(new Bundle {
     val fflags = Input(new Fflags)
     val dirty_fs = Input(Bool())
+    val frm = Output(UInt(3.W))
     val exception = Flipped(ValidIO(new MicroOp))
     val isInterrupt = Input(Bool())
     val trapTarget = Output(UInt(VAddrBits.W))
@@ -23,9 +24,9 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val tlb = Output(new TlbCsrBundle)
   })
   val fenceio = IO(new Bundle {
-    val sfence = IO(Output(new SfenceBundle))
-    val fencei = IO(Output(Bool()))
-    val sbuffer = IO(new FenceToSbuffer)
+    val sfence = Output(new SfenceBundle)
+    val fencei = Output(Bool())
+    val sbuffer = new FenceToSbuffer
   })
 
   val jmp = supportedFunctionUnits.collectFirst{
@@ -42,9 +43,10 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   }.get
 
   csr.csrio.perf <> DontCare
-  csr.csrio.fpu.fflags := csrio.fflags
+  csr.csrio.fpu.fflags <> csrio.fflags
   csr.csrio.fpu.isIllegal := false.B
-  csr.csrio.fpu.dirty_fs := csrio.dirty_fs
+  csr.csrio.fpu.dirty_fs <> csrio.dirty_fs
+  csr.csrio.fpu.frm <> csrio.frm
   csr.csrio.exception <> csrio.exception
   csr.csrio.isInterrupt <> csrio.isInterrupt
   csr.csrio.trapTarget <> csrio.trapTarget

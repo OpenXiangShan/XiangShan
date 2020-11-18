@@ -6,7 +6,7 @@ import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
-import xiangshan.{HasXSLog, MicroOp, NeedImpl, Redirect}
+import xiangshan.{HasXSLog, MicroOp, Redirect}
 
 // One miss entry deals with one mmio request
 class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
