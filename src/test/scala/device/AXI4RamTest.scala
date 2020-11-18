@@ -4,9 +4,10 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chiseltest._
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4UserYanker}
-import org.scalatest.{FlatSpec, Matchers}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import utils.DebugIdentityNode
 
 class AXI4RamFuzzTest()(implicit p: Parameters) extends LazyModule {
@@ -70,7 +71,7 @@ class AXI4RamTLBurstTest()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class AXI4RamTest extends FlatSpec with ChiselScalatestTester with Matchers {
+class AXI4RamTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   it should "run with fuzz" in {
     implicit val p = Parameters.empty
     test(LazyModule(new AXI4RamFuzzTest()).module){ c =>

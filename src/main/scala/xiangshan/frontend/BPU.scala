@@ -9,9 +9,9 @@ import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
-  val EnableCFICommitLog = false
-  val EnbaleCFIPredLog = false
-  val EnableBPUTimeRecord = false
+  val EnableCFICommitLog = true
+  val EnbaleCFIPredLog = true
+  val EnableBPUTimeRecord = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -79,6 +79,7 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
     val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val outFire = Input(Bool())
   }
 
   val io = new DefaultBasePredictorIO
@@ -608,7 +609,11 @@ class BPU extends BaseBPU {
   loop.io.pc.valid := s2.io.out.fire()
   loop.io.pc.bits := s2.io.out.bits.pc
   loop.io.inMask := s2.io.out.bits.mask
-  
+  loop.io.outFire := s3.io.pred.fire()
+  loop.io.respIn.taken := s3.io.pred.bits.taken
+  loop.io.respIn.jmpIdx := s3.io.pred.bits.jmpIdx
+
+
   s3.io.in.bits.resp.tage <> tage.io.resp
   s3.io.in.bits.resp.loop <> loop.io.resp
   for (i <- 0 until PredictWidth) {

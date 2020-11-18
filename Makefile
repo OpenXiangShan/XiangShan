@@ -108,6 +108,7 @@ SEED ?= $(shell shuf -i 1-10000 -n 1)
 B ?= 0
 E ?= -1
 SNAPSHOT ?=
+ENABLESNAPSHOT ?= 0
 
 # enable this runtime option if you want to generate a vcd file
 # use 'emu -h' to see more details
@@ -117,6 +118,11 @@ ifeq ($(SNAPSHOT),)
 SNAPSHOT_OPTION = 
 else
 SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
+endif
+
+
+ifeq ($(ENABLESNAPSHOT),1)
+EMU_CXXFLAGS += -D__ENABLESNAPSHOT__
 endif
 
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
@@ -129,11 +135,15 @@ cache:
 	$(MAKE) emu IMAGE=Makefile
 
 clean:
-	rm -rf $(BUILD_DIR)
+	git submodule foreach git clean -fdx
+	git clean -fd
 
 init:
 	git submodule update --init
-	@# do not use a recursive init to pull some not used submodules
-	cd ./rocket-chip/ && git submodule update --init api-config-chipsalliance hardfloat
 
-.PHONY: verilog emu clean help init $(REF_SO)
+bump:
+	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
+
+bsp:
+	mill -i mill.contrib.BSP/install
+.PHONY: verilog emu clean help init bump bsp $(REF_SO)

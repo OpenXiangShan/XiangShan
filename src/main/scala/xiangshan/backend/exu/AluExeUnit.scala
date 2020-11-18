@@ -24,4 +24,17 @@ class AluExeUnit extends Exu(
   io.out.bits.redirectValid := alu.redirectOutValid
   io.out.bits.redirect := alu.redirectOut
   io.out.bits.brUpdate := alu.brUpdate
+
+  XSDebug(io.in.valid || io.redirect.valid,
+    p"In(${io.in.valid} ${io.in.ready}) Out(${io.out.valid} ${io.out.ready})" + 
+      p"Redirect:(${io.redirect.valid} ${io.redirect.bits.isException}${io.redirect.bits.isFlushPipe}${io.redirect.bits.isMisPred}${io.redirect.bits.isReplay}) roqIdx:${io.redirect.bits.roqIdx}\n",
+  )
+  XSDebug(io.in.valid,
+    p"src1:${Hexadecimal(src1)} src2:${Hexadecimal(src2)} " +
+      p"src3:${Hexadecimal(src3)} func:${Binary(func)} " +
+      p"pc:${Hexadecimal(io.in.bits.uop.cf.pc)} roqIdx:${io.in.bits.uop.roqIdx}\n"
+  )
+  XSDebug(io.out.valid,
+    p"res:${Hexadecimal(io.out.bits.data)}\n"
+  )
 }

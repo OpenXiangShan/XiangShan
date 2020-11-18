@@ -204,7 +204,7 @@ int difftest_step(DiffState *s) {
           ds.exceptionNo = s->cause;
           ds.mtval = s->reg_scala[DIFFTEST_MTVAL];
           ds.stval = s->reg_scala[DIFFTEST_STVAL];
-          ref_disambiguate_exec(&s->cause);
+          ref_disambiguate_exec(&ds);
         }else{
           ref_difftest_exec(1);
         }

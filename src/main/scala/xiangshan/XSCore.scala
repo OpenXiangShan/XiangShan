@@ -35,8 +35,8 @@ case class XSCoreParameters
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
-  EnableLB: Boolean = false,
-  EnableLoop: Boolean = false,
+  EnableLB: Boolean = true,
+  EnableLoop: Boolean = true,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -399,7 +399,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw
-  ptw.io.sfence <> backend.io.sfence
+  ptw.io.sfence <> backend.io.mem.sfence//sfence
   ptw.io.csr <> backend.io.tlbCsrIO
 
   dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
