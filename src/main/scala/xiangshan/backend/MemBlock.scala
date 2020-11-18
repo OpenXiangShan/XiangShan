@@ -145,7 +145,7 @@ class MemBlock
   })
 
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
-  val lsroq = Module(new LsqWrappper)
+  val lsq = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
@@ -165,12 +165,12 @@ class MemBlock
     // dcache access
     loadUnits(i).io.dcache        <> io.dcache.loadUnitToDcacheVec(i)
     // forward
-    loadUnits(i).io.lsroq.forward <> lsroq.io.forward(i)
+    loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
 
-    // passdown to lsroq
-    lsroq.io.loadIn(i)            <> loadUnits(i).io.lsroq.loadIn
-    lsroq.io.ldout(i)             <> loadUnits(i).io.lsroq.ldout
+    // passdown to lsq
+    lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
+    lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
   }
 
   // StoreUnit
@@ -180,27 +180,27 @@ class MemBlock
     storeUnits(i).io.dtlb         <> dtlb.io.requestor(exuParameters.LduCnt + i)
     // get input form dispatch
     storeUnits(i).io.stin         <> reservationStations(exuParameters.LduCnt + i).io.deq
-    // passdown to lsroq
-    storeUnits(i).io.lsroq        <> lsroq.io.storeIn(i)
-    io.toCtrlBlock.stOut(i).valid := lsroq.io.stout(i).valid
-    io.toCtrlBlock.stOut(i).bits  := lsroq.io.stout(i).bits
+    // passdown to lsq
+    storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
+    io.toCtrlBlock.stOut(i).valid := lsq.io.stout(i).valid
+    io.toCtrlBlock.stOut(i).bits  := lsq.io.stout(i).bits
   }
 
-  // Lsroq
-  lsroq.io.commits     <> io.lsqio.commits
-  lsroq.io.dp1Req      <> io.fromCtrlBlock.lsqIdxReq
-  lsroq.io.oldestStore <> io.lsqio.oldestStore
-  lsroq.io.lsIdxs      <> io.toCtrlBlock.lsqIdxResp
-  lsroq.io.brqRedirect := io.fromCtrlBlock.redirect
-  lsroq.io.roqDeqPtr := io.lsqio.roqDeqPtr
+  // Lsq
+  lsq.io.commits     <> io.lsqio.commits
+  lsq.io.dp1Req      <> io.fromCtrlBlock.lsqIdxReq
+  lsq.io.oldestStore <> io.lsqio.oldestStore
+  lsq.io.lsIdxs      <> io.toCtrlBlock.lsqIdxResp
+  lsq.io.brqRedirect := io.fromCtrlBlock.redirect
+  lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
 
-  io.toCtrlBlock.replay <> lsroq.io.rollback
+  io.toCtrlBlock.replay <> lsq.io.rollback
 
-  lsroq.io.dcache      <> io.dcache.loadMiss
-  lsroq.io.uncache     <> io.dcache.uncache
+  lsq.io.dcache      <> io.dcache.loadMiss
+  lsq.io.uncache     <> io.dcache.uncache
 
-  // LSROQ to store buffer
-  lsroq.io.sbuffer     <> sbuffer.io.in
+  // LSQ to store buffer
+  lsq.io.sbuffer     <> sbuffer.io.in
 
   // Sbuffer
   sbuffer.io.dcache    <> io.dcache.sbufferToDcache
@@ -259,8 +259,8 @@ class MemBlock
     loadUnits(0).io.ldout.ready := false.B
   }
 
-  lsroq.io.exceptionAddr.lsIdx := io.lsqio.exceptionAddr.lsIdx
-  lsroq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
-  io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsroq.io.exceptionAddr.vaddr)
+  lsq.io.exceptionAddr.lsIdx := io.lsqio.exceptionAddr.lsIdx
+  lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
+  io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
 
 }

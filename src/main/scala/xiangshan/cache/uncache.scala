@@ -119,7 +119,7 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 }
 
 class UncacheIO extends DCacheBundle {
-  val lsroq = Flipped(new DCacheWordIO)
+  val lsq = Flipped(new DCacheWordIO)
 }
 
 // convert DCacheIO to TileLink
@@ -152,8 +152,8 @@ class UncacheImp(outer: Uncache)
 
   val resp_arb = Module(new Arbiter(new DCacheWordResp, cfg.nMMIOEntries))
 
-  val req  = io.lsroq.req
-  val resp = io.lsroq.resp
+  val req  = io.lsq.req
+  val resp = io.lsq.resp
   val mem_acquire = bus.a
   val mem_grant   = bus.d
 

@@ -140,7 +140,7 @@ class ReservationStationNew
   // here is three logial part:
   // control part: psrc(5.W)*3 srcState(1.W)*3 fuOpType/Latency(3.W) roqIdx
   // data part: data(64.W)*3
-  // other part: lsroqIdx and many other signal in uop. may set them to control part(close to dispatch)
+  // other part: lsqIdx and many other signal in uop. may set them to control part(close to dispatch)
 
   // control part:
 

@@ -17,7 +17,7 @@ class ExceptionAddrIO extends XSBundle {
 }
 
 
-class LsRoqEntry extends XSBundle {
+class LsqEntry extends XSBundle {
   val vaddr = UInt(VAddrBits.W) // TODO: need opt
   val paddr = UInt(PAddrBits.W)
   val op = UInt(6.W)
@@ -36,8 +36,6 @@ class InflightBlockInfo extends XSBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-//
-// By using this Wrapper, interface of unified lsroq and ldq / stq are the same
 class LsqWrappper extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))

@@ -54,8 +54,7 @@ case class XSCoreParameters
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
-  NRFpWritePorts: Int = 8, 
-  LsroqSize: Int = 16,
+  NRFpWritePorts: Int = 8,
   LoadQueueSize: Int = 12,
   StoreQueueSize: Int = 10,
   RoqSize: Int = 32,
@@ -142,7 +141,6 @@ trait HasXSParameter {
   val NRPhyRegs = core.NRPhyRegs
   val PhyRegIdxWidth = log2Up(NRPhyRegs)
   val RoqSize = core.RoqSize
-  val LsroqSize = core.LsroqSize // 64
   val LoadQueueSize = core.LoadQueueSize
   val StoreQueueSize = core.StoreQueueSize
   val dpParams = core.dpParams
@@ -385,10 +383,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.csr <> integerBlock.io.csrio.tlb
 
   dcache.io.lsu.load    <> memBlock.io.dcache.loadUnitToDcacheVec
-  dcache.io.lsu.lsroq   <> memBlock.io.dcache.loadMiss
+  dcache.io.lsu.lsq   <> memBlock.io.dcache.loadMiss
   dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
   dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
-  uncache.io.lsroq      <> memBlock.io.dcache.uncache
+  uncache.io.lsq      <> memBlock.io.dcache.uncache
 
   val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
   ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)

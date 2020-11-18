@@ -32,8 +32,8 @@ class Dispatch extends XSModule {
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
-    // enq Lsroq
-    val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // enq Lsq
+    val toLsq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsIdx
     val lsIdxs = Input(Vec(RenameWidth, new LSIdx))
     val dequeueRoqIndex = Input(Valid(new RoqPtr))
@@ -66,7 +66,7 @@ class Dispatch extends XSModule {
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.toRoq <> io.toRoq
   dispatch1.io.roqIdxs <> io.roqIdxs
-  dispatch1.io.toLsroq <> io.toLsroq
+  dispatch1.io.toLsq <> io.toLsq
   dispatch1.io.lsIdx <> io.lsIdxs
   dispatch1.io.toIntDq <> intDq.io.enq
   dispatch1.io.toFpDq <> fpDq.io.enq

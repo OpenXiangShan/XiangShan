@@ -112,7 +112,7 @@ class CtrlBlock extends XSModule {
   dispatch.io.redirect <> redirect
   dispatch.io.toRoq <> roq.io.dp1Req
   dispatch.io.roqIdxs <> roq.io.roqIdxs
-  dispatch.io.toLsroq <> io.toLsBlock.lsqIdxReq
+  dispatch.io.toLsq <> io.toLsBlock.lsqIdxReq
   dispatch.io.lsIdxs <> io.fromLsBlock.lsqIdxResp
   dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.oldestStore.valid
   dispatch.io.dequeueRoqIndex.bits := Mux(io.oldestStore.valid,

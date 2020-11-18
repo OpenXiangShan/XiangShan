@@ -110,7 +110,7 @@ class DCacheLineIO extends DCacheBundle
 
 class DCacheToLsuIO extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
-  val lsroq = Flipped(new DCacheLineIO)  // lsroq load/store
+  val lsq = Flipped(new DCacheLineIO)  // lsq load/store
   val store = Flipped(new DCacheLineIO) // for sbuffer
   val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
 }
@@ -273,7 +273,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   // load miss queue
-  loadMissQueue.io.lsu <> io.lsu.lsroq
+  loadMissQueue.io.lsu <> io.lsu.lsq
 
   //----------------------------------------
   // store pipe and store miss queue
