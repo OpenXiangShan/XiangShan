@@ -77,28 +77,4 @@ class Alu extends FunctionUnit with HasRedirectOut {
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := aluRes
-
-  XSDebug(io.in.valid || io.redirectIn.valid,
-    "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",
-    io.in.valid,
-    io.in.ready,
-    io.out.valid,
-    io.out.ready,
-    io.redirectIn.valid,
-    io.redirectIn.bits.isException,
-    io.redirectIn.bits.isFlushPipe,
-    redirectHit,
-    io.redirectIn.bits.brTag.flag,
-    io.redirectIn.bits.brTag.value
-  )
-  XSDebug(io.in.valid,
-    p"src1:${Hexadecimal(src1)} src2:${Hexadecimal(src2)} " +
-      p"offset:${Hexadecimal(offset)} func:${Binary(func)} " +
-      p"pc:${Hexadecimal(pc)} roqIdx:${uop.roqIdx}\n"
-  )
-  XSDebug(io.out.valid,
-    p"res:${Hexadecimal(io.out.bits.data)} aluRes:${Hexadecimal(aluRes)} " +
-      p"isRVC:${isRVC} isBranch:${isBranch} " +
-      p"target:${Hexadecimal(target)} taken:${taken}\n"
-  )
 }

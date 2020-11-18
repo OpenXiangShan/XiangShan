@@ -114,5 +114,8 @@ object XiangShan extends CommonModule with SbtModule {
     def testFrameworks = Seq(
       "org.scalatest.tools.Framework"
     )
+    def testOnly(args: String*) = T.command {
+      super.runMain("org.scalatest.tools.Runner", args: _*)
+    }
   }
 }

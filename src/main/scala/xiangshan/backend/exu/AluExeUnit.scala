@@ -2,6 +2,7 @@ package xiangshan.backend.exu
 
 import chisel3._
 import chisel3.util._
+import utils._
 import xiangshan.backend.exu.Exu.aluExeUnitCfg
 import xiangshan.backend.fu.Alu
 
