@@ -361,6 +361,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
       TLToAXI4() :=
       TLWidthWidget(L3BusWidth / 8) :=
       TLCacheCork() :=
+      DebugIdentityNode() :=
       l3_banks(i).node
   }
 
