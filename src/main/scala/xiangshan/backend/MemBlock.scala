@@ -119,7 +119,7 @@ class MemBlock
       x.bits := y.bits
     }
 
-    rs.io.tlbFeedback := DontCare // TODO: connect tlb miss
+    rs.io.tlbFeedback := DontCare
 
     rs.suggestName(s"rs_${cfg.name}")
 
@@ -157,9 +157,9 @@ class MemBlock
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
-    loadUnits(i).io.redirect <> io.fromCtrlBlock.redirect
-    loadUnits(i).io.tlbFeedback <> reservationStations(i).io.tlbFeedback
-    loadUnits(i).io.dtlb <> dtlb.io.requestor(i)
+    loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
+    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.tlbFeedback
+    loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
     // dcache access
@@ -175,13 +175,15 @@ class MemBlock
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
-    storeUnits(i).io.redirect <> io.fromCtrlBlock.redirect
-    storeUnits(i).io.tlbFeedback <> reservationStations(exuParameters.LduCnt + i).io.tlbFeedback
-    storeUnits(i).io.dtlb <> dtlb.io.requestor(exuParameters.LduCnt + i)
+    storeUnits(i).io.redirect     <> io.fromCtrlBlock.redirect
+    storeUnits(i).io.tlbFeedback  <> reservationStations(exuParameters.LduCnt + i).io.tlbFeedback
+    storeUnits(i).io.dtlb         <> dtlb.io.requestor(exuParameters.LduCnt + i)
     // get input form dispatch
-    storeUnits(i).io.stin        <> reservationStations(exuParameters.LduCnt + i).io.deq
+    storeUnits(i).io.stin         <> reservationStations(exuParameters.LduCnt + i).io.deq
     // passdown to lsroq
-    storeUnits(i).io.lsroq       <> lsroq.io.storeIn(i)
+    storeUnits(i).io.lsroq        <> lsroq.io.storeIn(i)
+    io.toCtrlBlock.stOut(i).valid := lsroq.io.stout(i).valid
+    io.toCtrlBlock.stOut(i).bits  := lsroq.io.stout(i).bits
   }
 
   // Lsroq
@@ -201,7 +203,7 @@ class MemBlock
   lsroq.io.sbuffer     <> sbuffer.io.in
 
   // Sbuffer
-  sbuffer.io.dcache <> io.dcache.sbufferToDcache
+  sbuffer.io.dcache    <> io.dcache.sbufferToDcache
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
