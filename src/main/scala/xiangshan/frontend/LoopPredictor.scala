@@ -77,7 +77,48 @@ class LTBColumn extends LTBModule {
     val repair = Input(Bool()) // roll back specCnts in the other 15 LTBs
   })
 
-  val ltb = Reg(Vec(nRows, new LoopEntry))
+  class LTBMem extends LTBModule {
+    val io = IO(new Bundle {
+      val rIdx = Input(UInt(idxLen.W))
+      val rdata = Output(new LoopEntry)
+      val urIdx = Input(UInt(idxLen.W))
+      val urdata = Output(new LoopEntry)
+      val wen = Input(Bool())
+      val wIdx = Input(UInt(idxLen.W))
+      val wdata = Input(new LoopEntry)
+      val swen = Input(Bool())
+      val swIdx = Input(UInt(idxLen.W))
+      val swdata = Input(new LoopEntry)
+      val copyCnt = Input(Vec(nRows, Bool()))
+    })
+    
+    // val mem = RegInit(0.U.asTypeOf(Vec(nRows, new LoopEntry)))
+    val mem = Mem(nRows, new LoopEntry)
+    io.rdata  := mem(io.rIdx)
+    io.urdata := mem(io.urIdx)
+    val wdata = WireInit(io.wdata)
+    val swdata = WireInit(io.swdata)
+    for (i <- 0 until nRows) {
+      val copyValid = io.copyCnt(i)
+      when (copyValid && io.swIdx === i.U && io.swen) {
+        swdata.specCnt := mem(i).nSpecCnt
+      }
+      val wd = WireInit(mem(i)) // default for copycnt
+      val wen = WireInit(io.copyCnt(i) || io.wen && io.wIdx === i.U || io.swen && io.swIdx === i.U)
+      when (!copyValid) {
+        when (io.swen) {
+          wd := swdata
+        }.elsewhen (io.wen) {
+          wd := wdata
+        }
+      }
+      when (wen) {
+        mem.write(i.U, wd)
+      }
+    }
+  }
+  // val ltb = Reg(Vec(nRows, new LoopEntry))
+  val ltb = Module(new LTBMem).io
   val ltbAddr = new TableAddr(idxLen + 4, PredictWidth)
   val updateIdx = ltbAddr.getBankIdx(io.update.bits.pc)
   val updateTag = ltbAddr.getTag(io.update.bits.pc)(tagLen - 1, 0)
@@ -92,7 +133,8 @@ class LTBColumn extends LTBModule {
   val if4_idx = io.req.idx
   val if4_tag = io.req.tag
   val if4_pc = io.req.pc // only for debug
-  val if4_entry = WireInit(ltb(if4_idx))
+  ltb.rIdx := if4_idx
+  val if4_entry = WireInit(ltb.rdata)
 
   val valid = RegInit(false.B)
   when (io.if4_fire) { valid := false.B }
@@ -104,10 +146,15 @@ class LTBColumn extends LTBModule {
   io.resp.exit := if4_tag === if4_entry.tag && (if4_entry.specCnt + 1.U) === if4_entry.tripCnt && valid && if4_entry.isConf
 
   // when resolving a branch
-  val entry = ltb(updateIdx)
+  ltb.urIdx := updateIdx
+  val entry = ltb.urdata
   val tagMatch = entry.tag === updateTag
   val cntMatch = entry.tripCnt === io.update.bits.meta
   val wEntry = WireInit(entry)
+
+  ltb.wIdx := updateIdx
+  ltb.wdata := wEntry
+  ltb.wen := false.B
 
   when (io.update.valid && !doingReset) {
     // When a branch resolves and is found to not be in the LTB,
@@ -121,7 +168,8 @@ class LTBColumn extends LTBModule {
       wEntry.nSpecCnt := Mux(io.update.bits.taken, 1.U, 0.U)
       wEntry.brTag := updateBrTag
       wEntry.unusable := false.B
-      ltb(updateIdx) := wEntry
+      // ltb(updateIdx) := wEntry
+      ltb.wen := true.B
     }.elsewhen (tagMatch) {
       // During resolution, a taken branch found in the LTB has its nSpecCnt incremented by one.
       when (io.update.bits.taken) {
@@ -142,40 +190,44 @@ class LTBColumn extends LTBModule {
         wEntry.brTag := updateBrTag
         wEntry.unusable := io.update.bits.misPred && (io.update.bits.meta > entry.tripCnt)
       }
-      ltb(updateIdx) := wEntry
+      // ltb(updateIdx) := wEntry
+      ltb.wen := true.B
     }
   }
 
+  // speculatively update specCnt
+  ltb.swen := valid && if4_entry.tag === if4_tag || doingReset
+  ltb.swIdx := Mux(doingReset, resetIdx, if4_idx)
+  val swEntry = WireInit(if4_entry)
+  ltb.swdata := Mux(doingReset, 0.U.asTypeOf(new LoopEntry), swEntry)
   when (io.if4_fire && if4_entry.tag === if4_tag && io.outMask) {
-    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt) {
-      ltb(if4_idx).age := 7.U
-      ltb(if4_idx).specCnt := 0.U
+    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt/* && if4_entry.isConf*/) {
+      swEntry.age := 7.U
+      swEntry.specCnt := 0.U
     }.otherwise {
-      ltb(if4_idx).age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
-      ltb(if4_idx).specCnt := if4_entry.specCnt + 1.U
+      swEntry.age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
+      swEntry.specCnt := if4_entry.specCnt + 1.U
     }
   }
 
   // Reseting
-  when (doingReset) {
-    ltb(resetIdx) := 0.U.asTypeOf(new LoopEntry)
-  }
+  // when (doingReset) {
+  //   ltb(resetIdx) := 0.U.asTypeOf(new LoopEntry)
+  // }
 
   // when a branch misprediction occurs, all of the nSpecCnts copy their values into the specCnts
   for (i <- 0 until nRows) {
-    when (io.update.valid && io.update.bits.misPred && i.U =/= updateIdx || io.repair) {
-      ltb(i).specCnt := ltb(i).nSpecCnt
-    }
+    ltb.copyCnt(i) := io.update.valid && io.update.bits.misPred && i.U =/= updateIdx || io.repair
   }
 
   // bypass for if4_entry.specCnt
   when (io.update.valid && !doingReset && valid && updateIdx === if4_idx) {
     when (!tagMatch && io.update.bits.misPred || tagMatch) {
-      if4_entry.specCnt := wEntry.specCnt
+      swEntry.specCnt := wEntry.specCnt
     }
   }
   when (io.repair && !doingReset && valid) {
-    if4_entry.specCnt := if4_entry.nSpecCnt
+    swEntry.specCnt := if4_entry.nSpecCnt
   }
 
   if (BPUDebug && debug) {

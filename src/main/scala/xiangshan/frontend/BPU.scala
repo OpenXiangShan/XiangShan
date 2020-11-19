@@ -11,7 +11,7 @@ trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
-  val EnableBPUTimeRecord = true
+  val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -63,7 +63,42 @@ class PredictorResponse extends XSBundle {
   val loop = new LoopResp
 }
 
-abstract class BasePredictor extends XSModule with HasBPUParameter{
+trait PredictorUtils {
+  // circular shifting
+  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << shamt
+    val lower = source >> (len.U - shamt)
+    res := higher | lower
+    res
+  }
+
+  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
+    val res = Wire(UInt(len.W))
+    val higher = source << (len.U - shamt)
+    val lower = source >> shamt
+    res := higher | lower
+    res
+  }
+
+  // To be verified
+  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
+    val oldSatTaken = old === ((1 << len)-1).U
+    val oldSatNotTaken = old === 0.U
+    Mux(oldSatTaken && taken, ((1 << len)-1).U,
+      Mux(oldSatNotTaken && !taken, 0.U,
+        Mux(taken, old + 1.U, old - 1.U)))
+  }
+
+  def signedSatUpdate(old: SInt, len: Int, taken: Bool): SInt = {
+    val oldSatTaken = old === ((1 << (len-1))-1).S
+    val oldSatNotTaken = old === (-(1 << (len-1))).S
+    Mux(oldSatTaken && taken, ((1 << (len-1))-1).S,
+      Mux(oldSatNotTaken && !taken, (-(1 << (len-1))).S,
+        Mux(taken, old + 1.S, old - 1.S)))
+  }
+}
+abstract class BasePredictor extends XSModule with HasBPUParameter with PredictorUtils {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
@@ -85,23 +120,6 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
   val io = new DefaultBasePredictorIO
 
   val debug = false
-
-  // circular shifting
-  def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
-    val res = Wire(UInt(len.W))
-    val higher = source << shamt
-    val lower = source >> (len.U - shamt)
-    res := higher | lower
-    res
-  }
-
-  def circularShiftRight(source: UInt, len: Int, shamt: UInt): UInt = {
-    val res = Wire(UInt(len.W))
-    val higher = source << (len.U - shamt)
-    val lower = source >> shamt
-    res := higher | lower
-    res
-  }
 }
 
 class BPUStageIO extends XSBundle {
@@ -236,6 +254,9 @@ class BPUStage1 extends BPUStage {
   // so it does not need to be latched
   io.out.bits.resp <> io.in.bits.resp
   io.out.bits.brInfo := io.in.bits.brInfo
+
+  // we do not need to compare target in stage1
+  io.pred.bits.redirect := taken
 
   if (BPUDebug) {
     XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
@@ -571,7 +592,7 @@ class BPU extends BaseBPU {
   s1.io.in.valid := io.in.valid
   s1.io.in.bits.pc := io.in.bits.pc
   s1.io.in.bits.mask := io.in.bits.inMask
-  s1.io.in.bits.target := npc(io.in.bits.pc, PopCount(io.in.bits.inMask)) // Deault target npc
+  s1.io.in.bits.target := DontCare
   s1.io.in.bits.resp <> s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
   s1.io.in.bits.saveHalfRVI := false.B
