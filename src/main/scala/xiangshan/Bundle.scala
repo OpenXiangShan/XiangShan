@@ -10,6 +10,7 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
+import scala.math.max
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -37,12 +38,26 @@ object ValidUndirectioned {
   }
 }
 
+class SCMeta(val useSC: Boolean) extends XSBundle with HasTageParameter {
+  def maxVal = 8 * ((1 << TageCtrBits) - 1) + SCTableInfo.map{case (_,cb,_) => (1 << cb) - 1}.reduce(_+_)
+  def minVal = -(8 * (1 << TageCtrBits) + SCTableInfo.map{case (_,cb,_) => 1 << cb}.reduce(_+_))
+  def sumCtrBits = max(log2Ceil(-minVal), log2Ceil(maxVal+1)) + 1
+  val tageTaken = if (useSC) Bool() else UInt(0.W)
+  val scUsed    = if (useSC) Bool() else UInt(0.W)
+  val scPred    = if (useSC) Bool() else UInt(0.W)
+  // Suppose ctrbits of all tables are identical
+  val ctrs      = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
+  val sumAbs    = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
+}
+
 class TageMeta extends XSBundle with HasTageParameter {
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  val taken = Bool()
+  val scMeta = new SCMeta(EnableSC)
 }
 
 class BranchPrediction extends XSBundle {
