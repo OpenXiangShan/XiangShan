@@ -6,7 +6,7 @@ import xiangshan.FuType
 import xiangshan.backend.fu.{CertainLatency, FuConfig}
 
 class FMV(XLEN: Int) extends FPUPipelineModule(
-  FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = true, hasRedirect = false, CertainLatency(1))
+  FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(1))
 ) {
 
   val src = io.in.bits.src.map(x =>

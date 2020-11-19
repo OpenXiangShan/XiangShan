@@ -27,8 +27,11 @@ class FmiscExeUnit extends Exu(
   val frm = IO(Input(UInt(3.W)))
 
   val fcmp :: fmv :: f2i :: f32toF64 :: f64toF32 :: fdivSqrt :: Nil = supportedFunctionUnits
-  val toFpUnits = Seq(fcmp, f32toF64, f64toF32, fdivSqrt)
-  val toIntUnits = Seq(fmv, f2i)
+  val toFpUnits = Seq(f32toF64, f64toF32, fdivSqrt)
+  val toIntUnits = Seq(fcmp, fmv, f2i)
+
+  assert(fpArb.io.in.length == toFpUnits.size)
+  assert(intArb.io.in.length == toIntUnits.size)
 
   val input = io.fromFp
   val fuOp = input.bits.uop.ctrl.fuOpType
@@ -51,9 +54,10 @@ class FmiscExeUnit extends Exu(
     module.rm := Mux(instr_rm =/= 7.U, instr_rm, frm)
   }
 
-  io.toFp.bits.fflags := Mux1H(fpArb.io.in.zip(toFpUnits).map(
-    x => x._1.fire() -> x._2.fflags
-  ))
+  io.toFp.bits.fflags := MuxCase(
+    0.U.asTypeOf(new Fflags),
+    toFpUnits.map(x => x.io.out.fire() -> x.fflags)
+  )
   val fpOutCtrl = io.toFp.bits.uop.ctrl
   io.toFp.bits.data := Mux(fpOutCtrl.isRVF,
     boxF32ToF64(fpArb.io.out.bits.data),
@@ -67,7 +71,8 @@ class FmiscExeUnit extends Exu(
     SignExt(intArb.io.out.bits.data(31, 0), XLEN),
     intArb.io.out.bits.data
   )
-  io.toInt.bits.fflags := Mux1H(intArb.io.in.zip(toIntUnits).map(
-    x => x._1.fire() -> x._2.fflags
-  ))
+  io.toInt.bits.fflags := MuxCase(
+    0.U.asTypeOf(new Fflags),
+    toIntUnits.map(x => x.io.out.fire() -> x.fflags)
+  )
 }
