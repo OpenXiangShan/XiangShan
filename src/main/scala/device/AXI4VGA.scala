@@ -54,7 +54,7 @@ class VGACtrlBundle extends Bundle {
 
 class VGACtrl
 (
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, _extra = new VGACtrlBundle, executable = false) with HasVGAParameter {
   override lazy val module = new AXI4SlaveModuleImp[VGACtrlBundle](this) {
@@ -106,8 +106,8 @@ class FBHelper extends BlackBox with HasBlackBoxInline {
 class AXI4VGA
 (
   sim: Boolean = false,
-  fbAddress: AddressSet,
-  ctrlAddress: AddressSet
+  fbAddress: Seq[AddressSet],
+  ctrlAddress: Seq[AddressSet]
 )(implicit p: Parameters)
   extends LazyModule with HasVGAParameter {
 

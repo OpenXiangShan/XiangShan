@@ -52,7 +52,7 @@ class L2NonInclusiveGetTestTop()(implicit p: Parameters) extends LazyModule {
       beatBytes = 8))))
 
   val ram = LazyModule(new AXI4RAM(
-    AddressSet(0x0L, 0x7ffffffL),
+    Seq(AddressSet(0x0L, 0x7ffffffL)),
     memByte = 128 * 1024 * 1024,
     useBlackBox = false
   ))

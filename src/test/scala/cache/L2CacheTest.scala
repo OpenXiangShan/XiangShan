@@ -101,7 +101,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
   ))
 
   val ram = LazyModule(new AXI4RAM(
-    AddressSet(0x0L, 0xffffffffffL),
+    Seq(AddressSet(0x0L, 0xffffffffffL)),
     memByte = 128 * 1024 * 1024,
     useBlackBox = false
   ))

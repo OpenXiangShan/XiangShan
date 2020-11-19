@@ -12,7 +12,7 @@ class TimerIO extends Bundle {
 class AXI4Timer
 (
   sim: Boolean = false,
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new TimerIO)
 {
