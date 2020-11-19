@@ -350,22 +350,26 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlock.io.wakeUpFpOut.slow
 
 
-  memBlock.io.wakeUpIn.fastUops <> Seq(
+  integerBlock.io.wakeUpIntOut.fast.map(_.ready := true.B)
+  integerBlock.io.wakeUpIntOut.slow.map(_.ready := true.B)
+  floatBlock.io.wakeUpFpOut.fast.map(_.ready := true.B)
+  floatBlock.io.wakeUpFpOut.slow.map(_.ready := true.B)
+
+  val wakeUpMem = Seq(
     integerBlock.io.wakeUpIntOut,
     integerBlock.io.wakeUpFpOut,
     floatBlock.io.wakeUpIntOut,
     floatBlock.io.wakeUpFpOut
-  ).flatMap(_.fastUops)
-
-  memBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpIntOut.fast ++
-    integerBlock.io.wakeUpFpOut.fast ++
-    floatBlock.io.wakeUpIntOut.fast ++
-    floatBlock.io.wakeUpFpOut.fast
-
-  memBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpIntOut.slow ++
-    integerBlock.io.wakeUpFpOut.slow ++
-    floatBlock.io.wakeUpIntOut.slow ++
-    floatBlock.io.wakeUpFpOut.slow
+  )
+  memBlock.io.wakeUpIn.fastUops <> wakeUpMem.flatMap(_.fastUops)
+  memBlock.io.wakeUpIn.fast <> wakeUpMem.flatMap(w => w.fast.map(f => {
+	val raw = WireInit(f)
+	raw
+  }))
+  memBlock.io.wakeUpIn.slow <> wakeUpMem.flatMap(w => w.slow.map(s => {
+	val raw = WireInit(s)
+	raw
+  }))
 
   integerBlock.io.csrio.fflags <> ctrlBlock.io.roqio.toCSR.fflags
   integerBlock.io.csrio.dirty_fs <> ctrlBlock.io.roqio.toCSR.dirty_fs

@@ -132,6 +132,10 @@ class MemBlock
       .map(_._2)
   }
 
+  // TODO: make this better
+  io.wakeUpIn.fast.foreach(_.ready := true.B)
+  io.wakeUpIn.slow.foreach(_.ready := true.B)
+
   io.wakeUpFpOut.slow <> exeWbReqs.map(x => {
     val raw = WireInit(x)
     raw.valid := x.valid && x.bits.uop.ctrl.fpWen
@@ -143,6 +147,9 @@ class MemBlock
     raw.valid := x.valid && x.bits.uop.ctrl.rfWen
     raw
   })
+
+  // load always ready
+  exeWbReqs.foreach(_.ready := true.B)
 
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq = Module(new LsqWrappper)
@@ -184,6 +191,7 @@ class MemBlock
     storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
     io.toCtrlBlock.stOut(i).valid := lsq.io.stout(i).valid
     io.toCtrlBlock.stOut(i).bits  := lsq.io.stout(i).bits
+	lsq.io.stout(i).ready := true.B
   }
 
   // Lsq
