@@ -269,8 +269,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   val ptw = LazyModule(new PTW())
 
   // out facing nodes
-  val mem = Seq.fill(L3NBanks)(AXI4IdentityNode())
-  val dma = AXI4IdentityNode()
+  val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
   // L1 to L2 network
@@ -296,74 +295,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   l2_xbar := TLBuffer() := DebugIdentityNode() := ptw.node
   l2.node := TLBuffer() := DebugIdentityNode() := l2_xbar
 
-
-  // L2 to L3 network
-  // -------------------------------------------------
-  private val l3_xbar = TLXbar()
-
-  private val l3_banks = (0 until L3NBanks) map (i =>
-      LazyModule(new InclusiveCache(
-        CacheParameters(
-          level = 3,
-          ways = L3NWays,
-          sets = L3NSets,
-          blockBytes = L3BlockSize,
-          beatBytes = L2BusWidth / 8,
-          cacheName = s"L3_$i"
-        ),
-      InclusiveCacheMicroParameters(
-        writeBytes = 8
-      )
-    )))
-
-  l3_xbar := TLBuffer() := DebugIdentityNode() := l2.node
-
-  // DMA should not go to MMIO
-  val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
-  // AXI4ToTL needs a TLError device to route error requests,
-  // add one here to make it happy.
-  val tlErrorParams = DevNullParams(
-    address = Seq(mmioRange),
-    maxAtomic = 8,
-    maxTransfer = 64)
-  val tlError = LazyModule(new TLError(params = tlErrorParams, beatBytes = L2BusWidth / 8))
-  private val tlError_xbar = TLXbar()
-  tlError_xbar :=
-    AXI4ToTL() :=
-    AXI4UserYanker(Some(1)) :=
-    AXI4Fragmenter() :=
-    AXI4IdIndexer(1) :=
-    dma
-  tlError.node := tlError_xbar
-
-  l3_xbar :=
-    TLBuffer() :=
-    DebugIdentityNode() :=
-    tlError_xbar
-
-  def bankFilter(bank: Int) = AddressSet(
-    base = bank * L3BlockSize,
-    mask = ~BigInt((L3NBanks -1) * L3BlockSize))
-
-  for(i <- 0 until L3NBanks) {
-    val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
-    l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
-  }
-
-
-  // L3 to memory network
-  // -------------------------------------------------
-  private val memory_xbar = TLXbar()
-
-  for(i <- 0 until L3NBanks) {
-    mem(i) :=
-      AXI4UserYanker() :=
-      TLToAXI4() :=
-      TLWidthWidget(L3BusWidth / 8) :=
-      TLCacheCork() :=
-      DebugIdentityNode() :=
-      l3_banks(i).node
-  }
+  mem := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
