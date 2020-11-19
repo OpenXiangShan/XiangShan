@@ -341,11 +341,21 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ctrlBlock.io.toFpBlock <> floatBlock.io.fromCtrlBlock
   ctrlBlock.io.toLsBlock <> memBlock.io.fromCtrlBlock
 
+  integerBlock.io.wakeUpIn.fastUops <> floatBlock.io.wakeUpIntOut.fastUops
   integerBlock.io.wakeUpIn.fast <> floatBlock.io.wakeUpIntOut.fast
   integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlock.io.wakeUpIntOut.slow
 
+  floatBlock.io.wakeUpIn.fastUops <> integerBlock.io.wakeUpFpOut.fastUops
   floatBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpFpOut.fast
   floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlock.io.wakeUpFpOut.slow
+
+
+  memBlock.io.wakeUpIn.fastUops <> Seq(
+    integerBlock.io.wakeUpIntOut,
+    integerBlock.io.wakeUpFpOut,
+    floatBlock.io.wakeUpIntOut,
+    floatBlock.io.wakeUpFpOut
+  ).flatMap(_.fastUops)
 
   memBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpIntOut.fast ++
     integerBlock.io.wakeUpFpOut.fast ++
