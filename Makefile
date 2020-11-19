@@ -144,6 +144,7 @@ cache:
 clean:
 	git submodule foreach git clean -fdx
 	git clean -fd
+	rm -rf ./build
 
 init:
 	git submodule update --init
