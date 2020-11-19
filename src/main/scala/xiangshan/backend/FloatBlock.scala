@@ -115,7 +115,7 @@ class FloatBlock
 
   io.wakeUpFpOut.fastUops <> reservedStations.filter(
     rs => fpFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop)
+  ).map(_.io.selectedUop).map(fpValid)
 
   io.wakeUpFpOut.fast <> exeUnits.filter(
     x => fpFastFilter(x.config)
@@ -127,7 +127,7 @@ class FloatBlock
 
   io.wakeUpIntOut.fastUops <> reservedStations.filter(
     rs => intFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop)
+  ).map(_.io.selectedUop).map(intValid)
 
   io.wakeUpIntOut.fast <> exeUnits.filter(
     x => intFastFilter(x.config)

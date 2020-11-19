@@ -41,6 +41,16 @@ trait HasExeBlockHelper {
   def intSlowFilter(cfg: ExuConfig): Boolean = {
     cfg.hasUncertainlatency && cfg.writeIntRf
   }
+  def fpValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
+	val uop = WireInit(x)
+	uop.valid := x.valid && x.bits.ctrl.fpWen
+	uop
+  }
+  def intValid(x: ValidIO[MicroOp]): ValidIO[MicroOp] = {
+	val uop = WireInit(x)
+	uop.valid := x.valid && x.bits.ctrl.rfWen
+	uop
+  }
 }
 
 class IntegerBlock
@@ -158,7 +168,7 @@ class IntegerBlock
 
   io.wakeUpFpOut.fastUops <> reservationStations.filter(
     rs => fpFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop)
+  ).map(_.io.selectedUop).map(fpValid)
 
   io.wakeUpFpOut.fast <> exeUnits.filter(
     x => fpFastFilter(x.config)
@@ -170,7 +180,7 @@ class IntegerBlock
 
   io.wakeUpIntOut.fastUops <> reservationStations.filter(
     rs => intFastFilter(rs.exuCfg)
-  ).map(_.io.selectedUop)
+  ).map(_.io.selectedUop).map(intValid)
 
   io.wakeUpIntOut.fast <> exeUnits.filter(
     x => intFastFilter(x.config)
