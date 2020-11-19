@@ -354,7 +354,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   frontend.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> frontend.io.icacheReq
   icache.io.flush <> frontend.io.icacheFlush
-  integerBlock.io.fenceio.sfence <> frontend.io.sfence
+  frontend.io.sfence <> integerBlock.io.fenceio.sfence
+  frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
 
   icache.io.mem_acquire <> l1pluscache.io.req
   l1pluscache.io.resp <> icache.io.mem_grant
@@ -403,6 +404,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.csrio.exception <> ctrlBlock.io.roqio.exception
   integerBlock.io.csrio.isInterrupt <> ctrlBlock.io.roqio.isInterrupt
   integerBlock.io.csrio.trapTarget <> ctrlBlock.io.roqio.toCSR.trapTarget
+  integerBlock.io.csrio.interrupt <> ctrlBlock.io.roqio.toCSR.intrBitSet
   integerBlock.io.csrio.memExceptionVAddr <> memBlock.io.lsqio.exceptionAddr.vaddr
   integerBlock.io.csrio.externalInterrupt <> io.externalInterrupt
   integerBlock.io.csrio.tlb <> memBlock.io.tlbCsr
