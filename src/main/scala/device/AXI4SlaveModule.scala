@@ -10,7 +10,7 @@ import xiangshan.HasXSLog
 
 abstract class AXI4SlaveModule[T <: Data]
 (
-  address: AddressSet,
+  address: Seq[AddressSet],
   executable: Boolean = true,
   beatBytes: Int = 8,
   burstLen: Int = 1,
@@ -19,7 +19,7 @@ abstract class AXI4SlaveModule[T <: Data]
 
   val node = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
     Seq(AXI4SlaveParameters(
-      Seq(address),
+      address,
       regionType = RegionType.UNCACHED,
       executable = executable,
       supportsWrite = TransferSizes(1, beatBytes * burstLen),
