@@ -12,9 +12,11 @@ import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
+import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
+import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanker, AXI4Fragmenter, AXI4IdIndexer, AXI4Deinterleaver}
 import utils._
 
 case class XSCoreParameters
@@ -36,6 +38,7 @@ case class XSCoreParameters
   EnableRAS: Boolean = true,
   EnableLB: Boolean = true,
   EnableLoop: Boolean = true,
+  EnableSC: Boolean = false,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -118,6 +121,7 @@ trait HasXSParameter {
   val EnableRAS = core.EnableRAS
   val EnableLB = core.EnableLB
   val EnableLoop = core.EnableLoop
+  val EnableSC = core.EnableSC
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
   // val BtbWays = 4
@@ -162,8 +166,6 @@ trait HasXSParameter {
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
 
-  val l1BusDataWidth = 256
-
   val icacheParameters = ICacheParameters(
     nMissEntries = 2
   )
@@ -183,6 +185,28 @@ trait HasXSParameter {
   )
 
   val LRSCCycles = 100
+
+
+  // cache hierarchy configurations
+  val l1BusDataWidth = 256
+
+  // L2 configurations
+  val L1BusWidth = 256
+  val L2Size = 512 * 1024 // 512KB
+  val L2BlockSize = 64
+  val L2NWays = 8
+  val L2NSets = L2Size / L2BlockSize / L2NWays
+
+  // L3 configurations
+  val L2BusWidth = 256
+  val L3Size = 4 * 1024 * 1024 // 4MB
+  val L3BlockSize = 64
+  val L3NBanks = 4
+  val L3NWays = 8
+  val L3NSets = L3Size / L3BlockSize / L3NBanks / L3NWays
+
+  // on chip network configurations
+  val L3BusWidth = 256
 }
 
 trait HasXSLog { this: RawModule =>
@@ -233,39 +257,42 @@ object AddressSpace extends HasXSParameter {
 
 
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule {
+class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
 
+  // inner nodes
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
+  // out facing nodes
   val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
-  // TODO: refactor these params
+  // L1 to L2 network
+  // -------------------------------------------------
+  private val l2_xbar = TLXbar()
+
   private val l2 = LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
-      ways = 4,
-      sets = 512 * 1024 / (64 * 4),
-      blockBytes = 64,
-      beatBytes = 32 // beatBytes = l1BusDataWidth / 8
+      ways = L2NWays,
+      sets = L2NSets,
+      blockBytes = L2BlockSize,
+      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
+      cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 8
     )
   ))
 
-  private val xbar = TLXbar()
+  l2_xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := ptw.node
+  l2.node := TLBuffer() := DebugIdentityNode() := l2_xbar
 
-  xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := ptw.node
-
-  l2.node := xbar
-
-  mem := TLBuffer() := TLCacheCork() := TLBuffer() := l2.node
+  mem := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
