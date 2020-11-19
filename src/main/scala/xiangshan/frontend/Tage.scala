@@ -426,7 +426,7 @@ class Tage extends BaseTage {
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
-    val tageTaken = WireInit(false.B)
+    val tageTaken = WireInit(s3_bim.ctrs(w)(1).asBool)
     var altPred = s3_bim.ctrs(w)(1)
     val finalAltPred = WireInit(s3_bim.ctrs(w)(1))
     var provided = false.B
