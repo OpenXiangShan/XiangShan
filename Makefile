@@ -73,6 +73,17 @@ VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
 endif
 
+# co-simulation with DRAMsim3
+USE_DRAMSIM3 ?= 0
+ifeq ($(USE_DRAMSIM3),1)
+ifndef DRAMSIM3_HOME
+$(error DRAMSIM3_HOME is not set)
+endif
+EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
+EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/XiangShan.ini\\\" -DDRAMSIM3_OUTDIR=\\\"$(BUILD_DIR)\\\"
+EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
+endif
+
 # --trace
 VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+VERILATOR=1 \
@@ -98,6 +109,9 @@ $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
 
+ifndef NEMU_HOME
+$(error NEMU_HOME is not set)
+endif
 REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
@@ -128,7 +142,9 @@ else
 SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
 endif
 
-
+ifndef NOOP_HOME
+$(error NOOP_HOME is not set)
+endif
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
