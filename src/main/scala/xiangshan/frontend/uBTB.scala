@@ -149,6 +149,11 @@ class MicroBTB extends BasePredictor
     val uBTBMeta = VecInit(metas.map(m => m.rdata))
     val uBTB     = VecInit(datas.map(d => d.rdata))
 
+    val do_reset = RegInit(true.B)
+    val reset_way = RegInit(0.U(log2Ceil(nWays).W))
+    when (do_reset) { reset_way := reset_way + 1.U }
+    when (reset_way === nWays.U) { do_reset := false.B }
+
     //uBTB read
     //tag is bank align
     val read_valid = io.pc.valid
@@ -258,9 +263,9 @@ class MicroBTB extends BasePredictor
     //     uBTB(update_write_way)(update_bank).offset := update_taget_offset
     // }
     for (b <- 0 until PredictWidth) {
-        datas(b).wen := entry_write_valid && b.U === update_bank
-        datas(b).wWay := update_write_way
-        datas(b).wdata := update_taget_offset.asTypeOf(new MicroBTBEntry)
+        datas(b).wen := do_reset || (entry_write_valid && b.U === update_bank)
+        datas(b).wWay := Mux(do_reset, reset_way, update_write_way)
+        datas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBEntry), update_taget_offset.asTypeOf(new MicroBTBEntry))
     }
 
 
@@ -278,9 +283,9 @@ class MicroBTB extends BasePredictor
                                 )
 
     for (b <- 0 until PredictWidth) {
-        metas(b).wen := meta_write_valid && b.U === update_bank
-        metas(b).wWay := update_write_way
-        metas(b).wdata := update_write_meta
+        metas(b).wen := do_reset || (meta_write_valid && b.U === update_bank)
+        metas(b).wWay := Mux(do_reset, reset_way, update_write_way)
+        metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
     }
     // when(meta_write_valid)
     // {
