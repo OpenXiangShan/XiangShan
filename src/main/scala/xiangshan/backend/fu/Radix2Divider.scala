@@ -5,10 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-abstract class AbstractDivider(len: Int) extends FunctionUnit(
-  FuConfig(FuType.div, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false, UncertainLatency()),
-  len
-){
+abstract class AbstractDivider(len: Int) extends FunctionUnit(len){
   val ctrl = IO(Input(new MulDivCtrl))
   val sign = ctrl.sign
 }

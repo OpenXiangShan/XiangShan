@@ -169,6 +169,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
     }
 
     // Check and dispaly all source and sink connections
+    ExcitingUtils.fixConnections()
     ExcitingUtils.checkAndDisplay()
   }
 }

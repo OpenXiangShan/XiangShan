@@ -6,27 +6,28 @@ import xiangshan._
 
 class RfReadPort extends XSBundle {
   val addr = Input(UInt(PhyRegIdxWidth.W))
-  val data = Output(UInt(XLEN.W))
+  val data = Output(UInt((XLEN + 1).W))
 }
 
 class RfWritePort extends XSBundle {
   val wen = Input(Bool())
   val addr = Input(UInt(PhyRegIdxWidth.W))
-  val data = Input(UInt(XLEN.W))
+  val data = Input(UInt((XLEN + 1).W))
 }
 
 class Regfile
 (
   numReadPorts: Int,
   numWirtePorts: Int,
-  hasZero: Boolean
+  hasZero: Boolean,
+  len: Int
 ) extends XSModule {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort)
     val writePorts = Vec(numWirtePorts, new RfWritePort)
   })
 
-  val mem = Mem(NRPhyRegs, UInt(XLEN.W))
+  val mem = Mem(NRPhyRegs, UInt(len.W))
   
   for(r <- io.readPorts){
     val addr_reg = RegNext(r.addr)

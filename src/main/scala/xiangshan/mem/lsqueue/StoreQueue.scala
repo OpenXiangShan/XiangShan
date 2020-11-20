@@ -40,7 +40,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   })
   
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
-  val data = Reg(Vec(StoreQueueSize, new LsRoqEntry)) // FIXME: use StoreQueueEntry instead
+  val data = Reg(Vec(StoreQueueSize, new LsqEntry)) // FIXME: use StoreQueueEntry instead
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
   val valid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // inst has been writebacked to CDB
