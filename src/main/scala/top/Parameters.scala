@@ -20,7 +20,7 @@ case class Parameters
 }
 
 object Parameters {
-  val defaultParameters = Parameters()
+  val dualCoreParameters = Parameters(socParameters = SoCParameters(NumCores = 2))
   val simParameters = Parameters(envParameters = EnviromentParameters(FPGAPlatform = false)) // sim only, disable log
   val debugParameters = Parameters(envParameters = simParameters.envParameters.copy(EnableDebug = true)) // open log
 

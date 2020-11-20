@@ -244,7 +244,7 @@ class UnalignedGetTestTop()(implicit p: Parameters) extends LazyModule{
     dcache.module.io <> DontCare
     uncache.module.io <> DontCare
 
-    val flushPort = uncache.module.io.lsroq
+    val flushPort = uncache.module.io.lsq
     val storePort = dcache.module.io.lsu.store
     val loadPort  = getGenerator.module.io
 

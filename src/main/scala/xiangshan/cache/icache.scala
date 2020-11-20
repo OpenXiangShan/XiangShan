@@ -443,7 +443,6 @@ class ICache extends ICacheModule
   io.tlb.req.bits.cmd := TlbCmd.exec
   io.tlb.req.bits.roqIdx := DontCare
   io.tlb.req.bits.debug.pc := s2_req_pc
-  io.tlb.req.bits.debug.lsroqIdx := DontCare
   
   //To L1 plus
   io.mem_acquire <> icacheMissQueue.io.mem_acquire
