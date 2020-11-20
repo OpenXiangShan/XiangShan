@@ -240,7 +240,7 @@ object FunctionUnit extends HasXSParameter {
   val fmvCfg = FuConfig(
     fuGen = fmv _,
     fuSel = fmiscSel(FU_FMV),
-    FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = true, hasRedirect = false, CertainLatency(1)
+    FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(1)
   )
 
   val f2iCfg = FuConfig(
