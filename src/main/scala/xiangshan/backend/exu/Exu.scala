@@ -138,7 +138,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
   }
 
   val intArb = if (config.writeIntRf) writebackArb(
-    supportedFunctionUnits.zip(config.fuConfigs).filter(x => x._2.writeIntRf).map(_._1.io.out),
+    supportedFunctionUnits.zip(config.fuConfigs).filter(x => !x._2.writeFpRf).map(_._1.io.out),
     io.toInt
   ) else null
 
