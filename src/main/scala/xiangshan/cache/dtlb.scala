@@ -4,10 +4,9 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
+import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem._
-import bus.simplebus._
 import xiangshan.backend.fu.HasCSRConst
 import chisel3.ExcitingUtils._
 
@@ -62,11 +61,12 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   }
 }
 
-class comBundle extends TlbBundle with HasRoqIdx{
+class comBundle extends TlbBundle with HasCircularQueuePtrHelper{
+  val roqIdx = new RoqPtr
   val valid = Bool()
   val bits = new PtwReq
   def isPrior(that: comBundle): Bool = {
-    (this.valid && !that.valid) || (this.valid && that.valid && (that isAfter this))
+    (this.valid && !that.valid) || (this.valid && that.valid && isAfter(that.roqIdx, this.roqIdx))
   }
 }
 object Compare {
@@ -128,10 +128,10 @@ object TlbCmd {
 class TlbReq extends TlbBundle {
   val vaddr = UInt(VAddrBits.W)
   val cmd = TlbCmd()
-  val roqIdx = UInt(RoqIdxWidth.W)
+  val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
-    val lsroqIdx = UInt(LsroqIdxWidth.W)
+    val lsroqIdx = UInt(LsroqIdxWidth.W) // FIXME: need update
   }
 
   override def toPrintable: Printable = {
@@ -174,6 +174,8 @@ class TlbPtwIO extends TlbBundle {
 class TlbIO(Width: Int) extends TlbBundle {
   val requestor = Vec(Width, Flipped(new TlbRequestIO))
   val ptw = new TlbPtwIO
+  val sfence = Input(new SfenceBundle)
+  val csr = Input(new TlbCsrBundle)
 
   override def cloneType: this.type = (new TlbIO(Width)).asInstanceOf[this.type]
 }
@@ -186,16 +188,14 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val resp   = io.requestor.map(_.resp)
   val ptw    = io.ptw
 
-  val sfence = WireInit(0.U.asTypeOf(new SfenceBundle))
-  val csr    = WireInit(0.U.asTypeOf(new TlbCsrBundle))
+  val sfence = io.sfence
+  val csr    = io.csr
   val satp   = csr.satp
   val priv   = csr.priv
   val ifecth = if (isDtlb) false.B else true.B
   val mode   = if (isDtlb) priv.dmode else priv.imode
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = satp.mode === 8.U && (mode < ModeM)
-  BoringUtils.addSink(sfence, "SfenceBundle")
-  BoringUtils.addSink(csr, "TLBCSRIO")
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle))
   val cmd     = req.map(_.bits.cmd)
@@ -395,10 +395,21 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 }
 
 object TLB {
-  def apply(in: Seq[BlockTlbRequestIO], width: Int, isDtlb: Boolean, shouldBlock: Boolean) = {
+  def apply
+  (
+    in: Seq[BlockTlbRequestIO],
+    sfence: SfenceBundle,
+    csr: TlbCsrBundle,
+    width: Int,
+    isDtlb: Boolean,
+    shouldBlock: Boolean
+  ) = {
     require(in.length == width)
     
     val tlb = Module(new TLB(width, isDtlb))
+
+    tlb.io.sfence <> sfence
+    tlb.io.csr <> csr
     
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {

@@ -11,9 +11,9 @@ class Rename extends XSModule {
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
     val wbIntResults = Vec(NRIntWritePorts, Flipped(ValidIO(new ExuOutput)))
     val wbFpResults = Vec(NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val intRfReadAddr = Vec(NRIntReadPorts + NRMemReadPorts, Input(UInt(PhyRegIdxWidth.W)))
+    val intRfReadAddr = Vec(NRIntReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val intPregRdy = Vec(NRIntReadPorts + NRMemReadPorts, Output(Bool()))
+    val intPregRdy = Vec(NRIntReadPorts, Output(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
     // set preg to busy when replay
     val replayPregReq = Vec(ReplayWidth, Input(new ReplayPregReq))
@@ -44,7 +44,7 @@ class Rename extends XSModule {
   val fpRat = Module(new RenameTable(float = true)).io
   val intRat = Module(new RenameTable(float = false)).io
   val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts)).io
-  val intBusyTable = Module(new BusyTable(NRIntReadPorts+NRMemReadPorts, NRIntWritePorts)).io
+  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts)).io
 
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
@@ -68,8 +68,11 @@ class Rename extends XSModule {
     uop.src2State := DontCare
     uop.src3State := DontCare
     uop.roqIdx := DontCare
-    uop.lsroqIdx := DontCare
     uop.diffTestDebugLrScValid := DontCare
+
+    uop.lsroqIdx := DontCare
+    uop.lqIdx := DontCare
+    uop.sqIdx := DontCare
   })
 
   var lastReady = WireInit(io.out(0).ready)

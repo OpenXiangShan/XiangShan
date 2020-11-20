@@ -1,8 +1,30 @@
+[submodule "chisel3"]
+	path = chisel3
+	url = https://github.com/ucb-bar/chisel3
+[submodule "firrtl"]
+	path = firrtl
+	url = https://github.com/ucb-bar/firrtl
+[submodule "treadle"]
+	path = treadle
+	url = https://github.com/ucb-bar/treadle
+[submodule "hardfloat"]
+        path = hardfloat
+        url = https://github.com/ucb-bar/berkeley-hardfloat
 [submodule "rocket-chip"]
 	path = rocket-chip
 	url = https://github.com/chipsalliance/rocket-chip.git
-	branch = 2bdb03dbca3f77ad4c378cc1b95ab4961bc1448a
+	branch = d6bd3c61993637c3f10544c59e861fae8af29f39
 [submodule "block-inclusivecache-sifive"]
 	path = block-inclusivecache-sifive
-	url = https://github.com/sifive/block-inclusivecache-sifive.git
-	branch = d4db623ff534f775ffc49f59c4a9ef24d5d759d0
+	url = https://github.com/RISCVERS/block-inclusivecache-sifive.git
+	branch = 5491dcc937ed3c6f7722bef9db448653daab75e8
+[submodule "chiseltest"]
+	path = chiseltest
+	url = https://github.com/ucb-bar/chisel-testers2.git
+	branch = 3e3ecc5b25b7b6bc48341ec07c7a54b7ad53bcb7
+[submodule "api-config-chipsalliance"]
+	path = api-config-chipsalliance
+	url = https://github.com/chipsalliance/api-config-chipsalliance
+[submodule "berkeley-hardfloat"]
+	path = berkeley-hardfloat
+	url = https://github.com/ucb-bar/berkeley-hardfloat

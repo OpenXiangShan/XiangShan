@@ -76,6 +76,7 @@ class TrueLRU(n_ways: Int) {
     nextState.zipWithIndex.tail.foldLeft((nextState.head.apply(n_ways-1,1),0)) { case ((pe,pi),(ce,ci)) => (Cat(ce.apply(n_ways-1,ci+1), pe), ci) }._1
   }
 
+
   def get_next_state(state: UInt, touch_ways: Seq[Valid[UInt]]): UInt = {
     touch_ways.foldLeft(state)((prev, touch_way) => Mux(touch_way.valid, get_next_state(prev, touch_way.bits), prev))
   }
@@ -161,4 +162,67 @@ class SeqPLRU(n_sets: Int, n_ways: Int) extends SeqReplacementPolicy {
   }
 
   def way = plru_way
+}
+
+class SbufferLRU(n_ways: Int) {
+
+  def nBits = n_ways * n_ways
+  private val state_reg = RegInit(0.U(nBits.W))
+  def state_read = WireDefault(state_reg)
+
+  def get_next_state(state: UInt, touch_way: UInt): UInt = {
+    val nextState     = Wire(Vec(n_ways, UInt(n_ways.W)))
+    val moreRecentVec = state.asTypeOf(Vec(n_ways, UInt(n_ways.W)))
+    val wayDec        = UIntToOH(touch_way, n_ways)
+    val wayUpd        = (~wayDec).asUInt()
+
+    nextState.zipWithIndex.foreach { case (e, i) =>
+      e := Mux(i.U === touch_way,
+        wayUpd,
+        moreRecentVec(i) & wayUpd
+      )
+    }
+    nextState.asUInt()
+  }
+
+
+  def get_next_state(state: UInt, touch_ways: Seq[Valid[UInt]]): UInt = {
+    touch_ways.foldLeft(state)((prev, touch_way) => Mux(touch_way.valid, get_next_state(prev, touch_way.bits), prev))
+  }
+
+  def access(touch_way: UInt) {
+    state_reg := get_next_state(state_reg, touch_way)
+  }
+  def access(touch_ways: Seq[Valid[UInt]]) {
+    when (ParallelOR(touch_ways.map(_.valid))) {
+      state_reg := get_next_state(state_reg, touch_ways)
+    }
+  }
+
+  def get_min_value(xs: Seq[(UInt,UInt)]): (UInt,UInt)= {
+    xs match {
+      case Seq(a) => a
+      case Seq(a, b) => (Mux(a._1<b._1,a._1,b._1),Mux(a._1<b._1,a._2,b._2))
+      case _ =>
+        get_min_value(Seq(get_min_value(xs take xs.size/2), get_min_value(xs drop xs.size/2)))
+    }
+  }
+
+  def get_replace_way(state: UInt, sbufferState:Seq[Bool]): UInt = {
+    val moreRecentVec = state.asTypeOf(Vec(n_ways, UInt(n_ways.W)))
+    val count = Wire(Vec(n_ways, UInt(log2Up(n_ways).W)))
+    for(i <- 0 until n_ways){
+      count(i) := Mux(sbufferState(i), PopCount(moreRecentVec(i)), ((1<<n_ways)-1).U)
+    }
+    count.zip((0 until n_ways).map(_.U))
+    get_min_value(count.zip((0 until n_ways).map(_.U)))._2
+  }
+
+  def way(sbufferState:Seq[Bool]) = get_replace_way(state_reg,sbufferState)
+  //def miss = access(way)
+  def hit = {}
+  def flush() = { state_reg := 0.U(nBits.W) }
+
+  //@deprecated("replace 'replace' with 'way' from abstract class ReplacementPolicy","Rocket Chip 2020.05")
+  //def replace: UInt = way
 }

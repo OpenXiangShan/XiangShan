@@ -52,14 +52,22 @@ EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
 EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
 EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
-EMU_CXXFLAGS  = -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
+EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
-EMU_THREADS   = 1
-ifeq ($(EMU_THREADS), 1)
-	VTHREAD_FLAGS = 
-else 
-	VTHREAD_FLAGS = --threads $(EMU_THREADS) --threads-dpi none
+
+# Verilator trace support
+VEXTRA_FLAGS  = --trace
+
+# Verilator multi-thread support
+EMU_THREADS  ?= 1
+VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+
+# Verilator savable
+EMU_SNAPSHOT ?= 0
+ifeq ($(EMU_SNAPSHOT),1)
+VEXTRA_FLAGS += --savable
+EMU_CXXFLAGS += -DVM_SAVABLE
 endif
 
 # --trace
@@ -68,9 +76,8 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
   +define+RANDOMIZE_MEM_INIT \
-  $(VTHREAD_FLAGS) \
+  $(VEXTRA_FLAGS) \
   --assert \
-  --savable \
   --stats-vars \
   --output-split 5000 \
   --output-split-cfuncs 5000 \
@@ -96,7 +103,7 @@ $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j250 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j200 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
 endif
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
@@ -118,6 +125,7 @@ else
 SNAPSHOT_OPTION = --load-snapshot=$(SNAPSHOT)
 endif
 
+
 EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 
 emu: $(EMU)
@@ -128,11 +136,15 @@ cache:
 	$(MAKE) emu IMAGE=Makefile
 
 clean:
-	rm -rf $(BUILD_DIR)
+	git submodule foreach git clean -fdx
+	git clean -fd
 
 init:
 	git submodule update --init
-	# do not use a recursive init to pull some not used submodules
-	cd ./rocket-chip/ && git submodule update --init api-config-chipsalliance hardfloat
 
-.PHONY: verilog emu clean help init $(REF_SO)
+bump:
+	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
+
+bsp:
+	mill -i mill.contrib.BSP/install
+.PHONY: verilog emu clean help init bump bsp $(REF_SO)

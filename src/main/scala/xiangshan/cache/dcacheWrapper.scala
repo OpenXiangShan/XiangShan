@@ -25,7 +25,19 @@ class DCacheMeta extends DCacheBundle {
   val replay  = Bool() // whether it's a replayed request?
 }
 
-// ordinary load and special memory operations(lr/sc, atomics)
+// for load from load unit
+// cycle 0: vaddr
+// cycle 1: paddr
+class DCacheLoadReq  extends DCacheBundle
+{
+  val cmd    = UInt(M_SZ.W)
+  val addr   = UInt(VAddrBits.W)
+  val data   = UInt(DataBits.W)
+  val mask   = UInt((DataBits/8).W)
+  val meta   = new DCacheMeta
+}
+
+// special memory operations(lr/sc, atomics)
 class DCacheWordReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
@@ -43,6 +55,16 @@ class DCacheLineReq  extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val meta   = new DCacheMeta
+}
+
+class DCacheLoadResp extends DCacheBundle
+{
+  val data         = UInt(DataBits.W)
+  val meta         = new DCacheMeta
+  // cache req missed, send it to miss queue
+  val miss   = Bool()
+  // cache req nacked, replay it later
+  val nack         = Bool()
 }
 
 class DCacheWordResp extends DCacheBundle
@@ -65,12 +87,19 @@ class DCacheLineResp extends DCacheBundle
   val nack   = Bool()
 }
 
-class DCacheWordIO extends DCacheBundle
+class DCacheLoadIO extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReq )
+  val req  = DecoupledIO(new DCacheWordReq)
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
   // kill previous cycle's req
-  val s1_kill = Output(Bool())
+  val s1_kill  = Output(Bool())
+  val s1_paddr   = Output(UInt(PAddrBits.W))
+}
+
+class DCacheWordIO extends DCacheBundle
+{
+  val req  = DecoupledIO(new DCacheWordReq)
+  val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
 class DCacheLineIO extends DCacheBundle
@@ -80,7 +109,7 @@ class DCacheLineIO extends DCacheBundle
 }
 
 class DCacheToLsuIO extends DCacheBundle {
-  val load  = Vec(LoadPipelineWidth, Flipped(new DCacheWordIO)) // for speculative load
+  val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsroq = Flipped(new DCacheLineIO)  // lsroq load/store
   val store = Flipped(new DCacheLineIO) // for sbuffer
   val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
@@ -229,6 +258,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (w <- 0 until LoadPipelineWidth) {
     val load_w_nack = nack_load(io.lsu.load(w).req.bits.addr)
     ldu(w).io.lsu.req <> io.lsu.load(w).req
+    ldu(w).io.lsu.s1_paddr <> io.lsu.load(w).s1_paddr
     ldu(w).io.nack := load_w_nack
     XSDebug(load_w_nack, s"LoadUnit $w nacked\n")
 
@@ -289,8 +319,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     "MMIO requests should not go to cache")
   assert(!(atomicsReq.fire() && atomicsReq.bits.meta.tlb_miss),
     "TLB missed requests should not go to cache")
-  assert(!io.lsu.atomics.s1_kill, "Lsroq should never use s1 kill on atomics")
-
 
   //----------------------------------------
   // miss queue
@@ -396,13 +424,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // sync with prober
   missQueue.io.probe_wb_req.valid := prober.io.wb_req.fire()
   missQueue.io.probe_wb_req.bits  := prober.io.wb_req.bits
-  missQueue.io.probe_active       := prober.io.probe_active
+  missQueue.io.probe_active       := prober.io.inflight_req_block_addr
 
   //----------------------------------------
   // prober
-  prober.io.block := block_probe(prober.io.inflight_req_block_addr.bits)
-  prober.io.req <> bus.b
-  XSDebug(prober.io.block, "prober blocked\n")
+  prober.io.req.valid := bus.b.valid && !block_probe(get_block_addr(bus.b.bits.address))
+  bus.b.ready         := prober.io.req.ready && !block_probe(get_block_addr(bus.b.bits.address))
+  prober.io.req.bits  := bus.b.bits
 
   //----------------------------------------
   // wb
