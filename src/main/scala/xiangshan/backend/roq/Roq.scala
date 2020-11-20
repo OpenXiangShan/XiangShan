@@ -5,9 +5,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.LSUOpType
-import xiangshan.backend.decode.isa.Privileged.WFI
+import xiangshan.backend.fu.fpu.Fflags
 
 
 class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
@@ -40,6 +39,11 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     val bcommit = Output(UInt(BrTagWidth.W))
     val commitRoqIndex = Output(Valid(new RoqPtr))
     val roqDeqPtr = Output(new RoqPtr)
+    val intrBitSet = Input(Bool())
+    val trapTarget = Input(UInt(VAddrBits.W))
+
+    val fflags = Output(new Fflags)
+    val dirty_fs = Output(Bool())
   })
 
   val numWbPorts = io.exeWbResults.length
@@ -49,6 +53,7 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val writebacked = Reg(Vec(RoqSize, Bool()))
 
+  val exuFflags = Mem(RoqSize, new Fflags)
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
 
@@ -116,6 +121,7 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
       microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
       exuData(wbIdx) := io.exeWbResults(i).bits.data
+      exuFflags(wbIdx) := io.exeWbResults(i).bits.fflags
       exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
       val debugUop = microOp(wbIdx)
@@ -128,24 +134,25 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // roq redirect only used for exception
-  val intrBitSet = WireInit(false.B)
-  ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
-  val trapTarget = WireInit(0.U(VAddrBits.W))
-  ExcitingUtils.addSink(trapTarget, "trapTarget")
+  // val intrBitSet = WireInit(false.B)
+  // ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
+  // val trapTarget = WireInit(0.U(VAddrBits.W))
+  // ExcitingUtils.addSink(trapTarget, "trapTarget")
 
   val deqUop = microOp(deqPtr)
   val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
-  val intrEnable = intrBitSet && !isEmpty && !hasNoSpec &&
+  val intrEnable = io.intrBitSet && !isEmpty && !hasNoSpec &&
     deqUop.ctrl.commitType =/= CommitType.STORE && deqUop.ctrl.commitType =/= CommitType.LOAD// TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
   io.redirect := DontCare
   io.redirect.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)// TODO: add fence flush to flush the whole pipe
   io.redirect.bits.isException := intrEnable || exceptionEnable
-  io.redirect.bits.isFlushPipe := isFlushPipe
-  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, trapTarget)
+  // reuse isFlushPipe to represent interrupt for CSR
+  io.redirect.bits.isFlushPipe := isFlushPipe || intrEnable
+  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.trapTarget)
   io.exception := deqUop
-  XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
+  XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
 
   // Commit uop to Rename (walk)
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
@@ -168,6 +175,9 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
 
   val storeCommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val cfiCommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  // wiring to csr
+  val fflags = WireInit(0.U.asTypeOf(new Fflags))
+  val dirty_fs = WireInit(false.B)
   for(i <- 0 until CommitWidth){
     io.commits(i) := DontCare
     switch(state){
@@ -187,15 +197,28 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
         cfiCommitVec(i) := io.commits(i).valid &&
           !commitUop.cf.brUpdate.pd.notCFI
 
+        val commitFflags = exuFflags(commitIdx)
+        when(io.commits(i).valid){
+          when(commitFflags.asUInt.orR()){
+            // update fflags
+            fflags := exuFflags(commitIdx)
+          }
+          when(commitUop.ctrl.fpWen){
+            // set fs to dirty
+            dirty_fs := true.B
+          }
+        }
+
         when(io.commits(i).valid){v := false.B}
         XSInfo(io.commits(i).valid,
-          "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x\n",
+          "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x fflags: %b\n",
           commitUop.cf.pc,
           commitUop.ctrl.rfWen,
           commitUop.ctrl.ldest,
           commitUop.pdest,
           commitUop.old_pdest,
-          exuData(commitIdx)
+          exuData(commitIdx),
+          exuFflags(commitIdx).asUInt
         )
         XSInfo(io.commits(i).valid && exuDebug(commitIdx).isMMIO,
           "difftest skiped pc0x%x\n",
@@ -236,6 +259,9 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     io.commits(i).bits.isWalk := state =/= s_idle
   }
 
+  io.fflags := fflags
+  io.dirty_fs := dirty_fs
+
   val validCommit = io.commits.map(_.valid)
   when(state===s_walk) {
     //exit walk state when all roq entry is commited
@@ -255,14 +281,11 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
   val commitOffset = PriorityEncoder((validCommit :+ false.B).map(!_))
-  io.commitRoqIndex.valid := io.commits(0).valid && !io.commits(0).bits.isWalk
+  io.commitRoqIndex.valid := state === s_idle
   io.commitRoqIndex.bits := deqPtrExt + commitOffset
 
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
-
-  val hasWFI = io.commits.map(c => c.valid && state===s_idle && c.bits.uop.cf.instr===WFI).reduce(_||_)
-  ExcitingUtils.addSource(hasWFI, "isWFI")
 
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
@@ -369,19 +392,18 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
   val retireInstFix = Mux(io.redirect.valid, microOp(deqPtr).cf.instr, microOp(firstValidCommit).cf.instr)
   if(!env.FPGAPlatform){
-    BoringUtils.addSource(RegNext(retireCounterFix), "difftestCommit")
-    BoringUtils.addSource(RegNext(retirePCFix), "difftestThisPC")//first valid PC
-    BoringUtils.addSource(RegNext(retireInstFix), "difftestThisINST")//first valid inst
-    BoringUtils.addSource(RegNext(skip.asUInt), "difftestSkip")
-    // BoringUtils.addSource(RegNext(false.B), "difftestIsRVC")//FIXIT
-    BoringUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC")
-    BoringUtils.addSource(RegNext(wen.asUInt), "difftestWen")
-    BoringUtils.addSource(RegNext(wpc), "difftestWpc")
-    BoringUtils.addSource(RegNext(wdata), "difftestWdata")
-    BoringUtils.addSource(RegNext(wdst), "difftestWdst")
-    BoringUtils.addSource(RegNext(scFailed), "difftestScFailed")
-    BoringUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO")
-    BoringUtils.addSource(RegNext(difftestCause), "difftestCause")
+    ExcitingUtils.addSource(RegNext(retireCounterFix), "difftestCommit", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
+    ExcitingUtils.addSource(RegNext(retireInstFix), "difftestThisINST", ExcitingUtils.Debug)//first valid inst
+    ExcitingUtils.addSource(RegNext(skip.asUInt), "difftestSkip", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(isRVC.asUInt), "difftestIsRVC", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wen.asUInt), "difftestWen", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wpc), "difftestWpc", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wdata), "difftestWdata", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wdst), "difftestWdst", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(scFailed), "difftestScFailed", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(difftestIntrNO), "difftestIntrNO", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(difftestCause), "difftestCause", ExcitingUtils.Debug)
 
     val hitTrap = trapVec.reduce(_||_)
     val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))

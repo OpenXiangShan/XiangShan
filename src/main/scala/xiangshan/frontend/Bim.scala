@@ -5,7 +5,6 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
-import chisel3.util.experimental.BoringUtils
 import xiangshan.backend.decode.XSTrap
 
 trait BimParams extends HasXSParameter {
@@ -30,15 +29,6 @@ class BIM extends BasePredictor with BimParams{
   }
 
   override val io = IO(new BIMIO)
-  // Update logic
-  // 1 calculate new 2-bit saturated counter value
-  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
-    val oldSatTaken = old === ((1 << len)-1).U
-    val oldSatNotTaken = old === 0.U
-    Mux(oldSatTaken && taken, ((1 << len)-1).U,
-      Mux(oldSatNotTaken && !taken, 0.U,
-        Mux(taken, old + 1.U, old - 1.U)))
-  }
 
   val bimAddr = new TableAddr(log2Up(BimSize), BimBanks)
 

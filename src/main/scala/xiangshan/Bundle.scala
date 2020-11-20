@@ -2,14 +2,15 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
+import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
+import scala.math.max
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -22,6 +23,7 @@ class FetchPacket extends XSBundle {
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val crossPageIPFFix = Bool()
+  val predTaken = Bool()
 }
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -36,12 +38,26 @@ object ValidUndirectioned {
   }
 }
 
+class SCMeta(val useSC: Boolean) extends XSBundle with HasTageParameter {
+  def maxVal = 8 * ((1 << TageCtrBits) - 1) + SCTableInfo.map{case (_,cb,_) => (1 << cb) - 1}.reduce(_+_)
+  def minVal = -(8 * (1 << TageCtrBits) + SCTableInfo.map{case (_,cb,_) => 1 << cb}.reduce(_+_))
+  def sumCtrBits = max(log2Ceil(-minVal), log2Ceil(maxVal+1)) + 1
+  val tageTaken = if (useSC) Bool() else UInt(0.W)
+  val scUsed    = if (useSC) Bool() else UInt(0.W)
+  val scPred    = if (useSC) Bool() else UInt(0.W)
+  // Suppose ctrbits of all tables are identical
+  val ctrs      = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
+  val sumAbs    = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
+}
+
 class TageMeta extends XSBundle with HasTageParameter {
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  val taken = Bool()
+  val scMeta = new SCMeta(EnableSC)
 }
 
 class BranchPrediction extends XSBundle {
@@ -203,10 +219,26 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt(XLEN.W)
+  val fflags  = new Fflags
   val redirectValid = Bool()
   val redirect = new Redirect
   val brUpdate = new BranchUpdateInfo
   val debug = new DebugBundle
+}
+
+class ExternalInterruptIO extends XSBundle {
+  val mtip = Input(Bool())
+  val msip = Input(Bool())
+  val meip = Input(Bool())
+}
+
+class CSRSpecialIO extends XSBundle {
+  val exception = Flipped(ValidIO(new MicroOp))
+  val isInterrupt = Input(Bool())
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val externalInterrupt = new ExternalInterruptIO
+  val interrupt = Output(Bool())
 }
 
 class ExuIO extends XSBundle {
@@ -214,9 +246,7 @@ class ExuIO extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val out = DecoupledIO(new ExuOutput)
   // for csr
-  val exception = Flipped(ValidIO(new MicroOp))
-  // for Lsu
-  val dmem = new SimpleBusUC
+  val csrOnly = new CSRSpecialIO
   val mcommit = Input(UInt(3.W))
 }
 
@@ -237,6 +267,8 @@ class FrontendToBackendIO extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  val sfence = Input(new SfenceBundle)
+  val tlbCsrIO = Input(new TlbCsrBundle)
 }
 
 class TlbCsrBundle extends XSBundle {

@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import bus.axi4._
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.util.experimental.BoringUtils
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
 
@@ -21,7 +20,7 @@ class UARTIO extends Bundle {
 
 class AXI4UART
 (
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new UARTIO)
 {

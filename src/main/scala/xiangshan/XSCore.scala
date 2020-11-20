@@ -2,18 +2,20 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import noop.{Cache, CacheConfig, HasExceptionNO, TLB, TLBConfig}
 import top.Parameters
 import xiangshan.backend._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExuParameters
 import xiangshan.frontend._
 import xiangshan.mem._
-import xiangshan.cache.{ICache, DCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.backend.fu.HasExceptionNO
+import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
+import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
+import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
+import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanker, AXI4Fragmenter, AXI4IdIndexer, AXI4Deinterleaver}
 import utils._
 
 case class XSCoreParameters
@@ -28,13 +30,14 @@ case class XSCoreParameters
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
   PAddrBits: Int = 40,
-  HasFPU: Boolean = false,
+  HasFPU: Boolean = true,
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
-  EnableLB: Boolean = false,
-  EnableLoop: Boolean = false,
+  EnableLB: Boolean = true,
+  EnableLoop: Boolean = true,
+  EnableSC: Boolean = false,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,
@@ -49,8 +52,8 @@ case class XSCoreParameters
   CommitWidth: Int = 6,
   BrqSize: Int = 12,
   IssQueSize: Int = 8,
-  NRPhyRegs: Int = 72,
-  NRIntReadPorts: Int = 8,
+  NRPhyRegs: Int = 128,
+  NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8, 
@@ -76,8 +79,8 @@ case class XSCoreParameters
     AluCnt = 4,
     MulCnt = 0,
     MduCnt = 2,
-    FmacCnt = 0,
-    FmiscCnt = 0,
+    FmacCnt = 4,
+    FmiscCnt = 2,
     FmiscDivSqrtCnt = 0,
     LduCnt = 2,
     StuCnt = 2
@@ -89,7 +92,8 @@ case class XSCoreParameters
   TlbEntrySize: Int = 32,
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
-  PtwL2EntrySize: Int = 256
+  PtwL2EntrySize: Int = 256,
+  NumPerfCounters: Int = 16
 )
 
 trait HasXSParameter {
@@ -118,6 +122,7 @@ trait HasXSParameter {
   val EnableRAS = core.EnableRAS
   val EnableLB = core.EnableLB
   val EnableLoop = core.EnableLoop
+  val EnableSC = core.EnableSC
   val HistoryLength = core.HistoryLength
   val BtbSize = core.BtbSize
   // val BtbWays = 4
@@ -164,10 +169,10 @@ trait HasXSParameter {
   val TlbL2EntrySize = core.TlbL2EntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
-
-  val l1BusDataWidth = 256
+  val NumPerfCounters = core.NumPerfCounters
 
   val icacheParameters = ICacheParameters(
+    nMissEntries = 2
   )
 
   val l1plusCacheParameters = L1plusCacheParameters(
@@ -185,20 +190,46 @@ trait HasXSParameter {
   )
 
   val LRSCCycles = 100
+
+
+  // cache hierarchy configurations
+  val l1BusDataWidth = 256
+
+  // L2 configurations
+  val L1BusWidth = 256
+  val L2Size = 512 * 1024 // 512KB
+  val L2BlockSize = 64
+  val L2NWays = 8
+  val L2NSets = L2Size / L2BlockSize / L2NWays
+
+  // L3 configurations
+  val L2BusWidth = 256
+  val L3Size = 4 * 1024 * 1024 // 4MB
+  val L3BlockSize = 64
+  val L3NBanks = 4
+  val L3NWays = 8
+  val L3NSets = L3Size / L3BlockSize / L3NBanks / L3NWays
+
+  // on chip network configurations
+  val L3BusWidth = 256
 }
 
 trait HasXSLog { this: RawModule =>
   implicit val moduleName: String = this.name
 }
 
-abstract class XSModule extends Module
+abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
+{
+  def io: Record
+}
 
 //remove this trait after impl module logic
-trait NeedImpl { this: Module =>
+trait NeedImpl { this: RawModule =>
   override protected def IO[T <: Data](iodef: T): T = {
+    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.experimental.IO(iodef)
     io <> DontCare
     io
@@ -231,44 +262,50 @@ object AddressSpace extends HasXSParameter {
 
 
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule {
+class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
 
+  // inner nodes
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
-  val icache = LazyModule(new ICache())
+  val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
+  // out facing nodes
   val mem = TLIdentityNode()
   val mmio = uncache.clientNode
 
-  // TODO: refactor these params
+  // L1 to L2 network
+  // -------------------------------------------------
+  private val l2_xbar = TLXbar()
+
   private val l2 = LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
-      ways = 4,
-      sets = 512 * 1024 / (64 * 4),
-      blockBytes = 64,
-      beatBytes = 32 // beatBytes = l1BusDataWidth / 8
+      ways = L2NWays,
+      sets = L2NSets,
+      blockBytes = L2BlockSize,
+      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
+      cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
       writeBytes = 8
     )
   ))
 
-  private val xbar = TLXbar()
+  l2_xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := ptw.node
+  l2.node := TLBuffer() := DebugIdentityNode() := l2_xbar
 
-  xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := icache.clientNode
-  xbar := TLBuffer() := DebugIdentityNode() := ptw.node
-
-  l2.node := xbar
-
-  mem := TLBuffer() := TLCacheCork() := TLBuffer() := l2.node
+  mem := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
 
 class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter {
+  val io = IO(new Bundle {
+    val externalInterrupt = new ExternalInterruptIO
+  })
 
   val front = Module(new Frontend)
   val backend = Module(new Backend)
@@ -276,20 +313,28 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer) with HasXSParameter 
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
-  val icache = outer.icache.module
+  val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-
-  // TODO: connect this
+  val icache = Module(new ICache)
 
   front.io.backend <> backend.io.frontend
   front.io.icacheResp <> icache.io.resp
   front.io.icacheToTlb <> icache.io.tlb
   icache.io.req <> front.io.icacheReq
   icache.io.flush <> front.io.icacheFlush
+
+  icache.io.mem_acquire <> l1pluscache.io.req
+  l1pluscache.io.resp <> icache.io.mem_grant
+  l1pluscache.io.flush := icache.io.l1plusflush
+  icache.io.fencei := backend.io.fencei
+
   mem.io.backend   <> backend.io.mem
+  io.externalInterrupt <> backend.io.externalInterrupt
 
   ptw.io.tlb(0) <> mem.io.ptw
   ptw.io.tlb(1) <> front.io.ptw
+  ptw.io.sfence <> backend.io.mem.sfence//sfence
+  ptw.io.csr <> backend.io.tlbCsrIO
 
   dcache.io.lsu.load    <> mem.io.loadUnitToDcacheVec
   dcache.io.lsu.lsroq   <> mem.io.loadMiss

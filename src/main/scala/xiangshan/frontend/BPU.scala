@@ -9,9 +9,9 @@ import xiangshan.backend.JumpOpType
 
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
-  val EnableCFICommitLog = false
-  val EnbaleCFIPredLog = false
-  val EnableBPUTimeRecord = false
+  val EnableCFICommitLog = true
+  val EnbaleCFIPredLog = true
+  val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
@@ -63,28 +63,7 @@ class PredictorResponse extends XSBundle {
   val loop = new LoopResp
 }
 
-abstract class BasePredictor extends XSModule with HasBPUParameter{
-  val metaLen = 0
-
-  // An implementation MUST extend the IO bundle with a response
-  // and the special input from other predictors, as well as
-  // the metas to store in BRQ
-  abstract class Resp extends XSBundle {}
-  abstract class FromOthers extends XSBundle {}
-  abstract class Meta extends XSBundle {}
-
-  class DefaultBasePredictorIO extends XSBundle {
-    val flush = Input(Bool())
-    val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
-    val hist = Input(UInt(HistoryLength.W))
-    val inMask = Input(UInt(PredictWidth.W))
-    val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
-  }
-
-  val io = new DefaultBasePredictorIO
-
-  val debug = false
-
+trait PredictorUtils {
   // circular shifting
   def circularShiftLeft(source: UInt, len: Int, shamt: UInt): UInt = {
     val res = Wire(UInt(len.W))
@@ -101,6 +80,46 @@ abstract class BasePredictor extends XSModule with HasBPUParameter{
     res := higher | lower
     res
   }
+
+  // To be verified
+  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
+    val oldSatTaken = old === ((1 << len)-1).U
+    val oldSatNotTaken = old === 0.U
+    Mux(oldSatTaken && taken, ((1 << len)-1).U,
+      Mux(oldSatNotTaken && !taken, 0.U,
+        Mux(taken, old + 1.U, old - 1.U)))
+  }
+
+  def signedSatUpdate(old: SInt, len: Int, taken: Bool): SInt = {
+    val oldSatTaken = old === ((1 << (len-1))-1).S
+    val oldSatNotTaken = old === (-(1 << (len-1))).S
+    Mux(oldSatTaken && taken, ((1 << (len-1))-1).S,
+      Mux(oldSatNotTaken && !taken, (-(1 << (len-1))).S,
+        Mux(taken, old + 1.S, old - 1.S)))
+  }
+}
+abstract class BasePredictor extends XSModule with HasBPUParameter with PredictorUtils {
+  val metaLen = 0
+
+  // An implementation MUST extend the IO bundle with a response
+  // and the special input from other predictors, as well as
+  // the metas to store in BRQ
+  abstract class Resp extends XSBundle {}
+  abstract class FromOthers extends XSBundle {}
+  abstract class Meta extends XSBundle {}
+
+  class DefaultBasePredictorIO extends XSBundle {
+    val flush = Input(Bool())
+    val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
+    val hist = Input(UInt(HistoryLength.W))
+    val inMask = Input(UInt(PredictWidth.W))
+    val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val outFire = Input(Bool())
+  }
+
+  val io = new DefaultBasePredictorIO
+
+  val debug = false
 }
 
 class BPUStageIO extends XSBundle {
@@ -236,6 +255,9 @@ class BPUStage1 extends BPUStage {
   io.out.bits.resp <> io.in.bits.resp
   io.out.bits.brInfo := io.in.bits.brInfo
 
+  // we do not need to compare target in stage1
+  io.pred.bits.redirect := taken
+
   if (BPUDebug) {
     XSDebug(io.pred.fire(), "outPred using ubtb resp: hits:%b, takens:%b, notTakens:%b, isRVC:%b\n",
       ubtbResp.hits.asUInt, ubtbResp.takens.asUInt, ~ubtbResp.takens.asUInt & brMask.asUInt, ubtbResp.is_RVC.asUInt)
@@ -330,6 +352,7 @@ class BPUStage3 extends BPUStage {
     ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.predecode.valid
     ras.io.callIdx.bits := callIdx
     ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
+    ras.io.isLastHalfRVI := !io.predecode.bits.isFetchpcEqualFirstpc
     ras.io.recover := io.recover
 
     for(i <- 0 until PredictWidth){
@@ -337,8 +360,16 @@ class BPUStage3 extends BPUStage {
       io.out.bits.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
       io.out.bits.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
     }
-    takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)|| rets(i)))
-    when(ras.io.is_ret && ras.io.out.valid){targetSrc(retIdx) :=  ras.io.out.bits.target}
+    takens := VecInit((0 until PredictWidth).map(i => {
+      ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
+          jals(i) ||
+          (!ras.io.out.bits.specEmpty && rets(i)) ||
+          (ras.io.out.bits.specEmpty && btbHits(i))
+      }
+    ))
+    when(ras.io.is_ret && ras.io.out.valid){
+      targetSrc(retIdx) :=  ras.io.out.bits.target
+    }
   }
 
 
@@ -561,7 +592,7 @@ class BPU extends BaseBPU {
   s1.io.in.valid := io.in.valid
   s1.io.in.bits.pc := io.in.bits.pc
   s1.io.in.bits.mask := io.in.bits.inMask
-  s1.io.in.bits.target := npc(io.in.bits.pc, PopCount(io.in.bits.inMask)) // Deault target npc
+  s1.io.in.bits.target := DontCare
   s1.io.in.bits.resp <> s1_resp_in
   s1.io.in.bits.brInfo <> s1_brInfo_in
   s1.io.in.bits.saveHalfRVI := false.B
@@ -599,7 +630,11 @@ class BPU extends BaseBPU {
   loop.io.pc.valid := s2.io.out.fire()
   loop.io.pc.bits := s2.io.out.bits.pc
   loop.io.inMask := s2.io.out.bits.mask
-  
+  loop.io.outFire := s3.io.pred.fire()
+  loop.io.respIn.taken := s3.io.pred.bits.taken
+  loop.io.respIn.jmpIdx := s3.io.pred.bits.jmpIdx
+
+
   s3.io.in.bits.resp.tage <> tage.io.resp
   s3.io.in.bits.resp.loop <> loop.io.resp
   for (i <- 0 until PredictWidth) {

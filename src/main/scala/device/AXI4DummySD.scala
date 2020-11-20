@@ -53,7 +53,7 @@ class SDHelper extends BlackBox with HasBlackBoxInline {
 
 class AXI4DummySD
 (
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false) with HasSDConst
 {
