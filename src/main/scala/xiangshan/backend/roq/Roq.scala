@@ -7,7 +7,13 @@ import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
 import xiangshan.backend.fu.fpu.Fflags
-
+object roqDebugId extends Function0[Integer] {
+  var x = 0
+  def apply(): Integer = {
+    x = x + 1
+    return x
+  }
+}
 
 class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
   def needFlush(redirect: Valid[Redirect]): Bool = {
@@ -337,58 +343,61 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     XSDebug(false, valid(i) && !writebacked(i), "v ")
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
-
-  //difftest signals
-  val firstValidCommit = deqPtr + PriorityMux(validCommit, VecInit(List.tabulate(CommitWidth)(_.U)))
-
-  val skip = Wire(Vec(CommitWidth, Bool()))
-  val wen = Wire(Vec(CommitWidth, Bool()))
-  val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
-  val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
-  val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
-  val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
-  val trapVec = Wire(Vec(CommitWidth, Bool()))
-  val isRVC = Wire(Vec(CommitWidth, Bool()))
-  for(i <- 0 until CommitWidth){
-    // io.commits(i).valid
-    val idx = deqPtr+i.U
-    val uop = io.commits(i).bits.uop
-    val DifftestSkipSC = false
-    if(!DifftestSkipSC){
-      skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
-    }else{
-      skip(i) := (
-          exuDebug(idx).isMMIO || 
-          uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
-          uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
-        ) && io.commits(i).valid
-    }
-    wen(i) := io.commits(i).valid && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
-    wdata(i) := exuData(idx)
-    wdst(i) := uop.ctrl.ldest
-    diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
-    wpc(i) := SignExt(uop.cf.pc, XLEN)
-    trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
-    isRVC(i) := uop.cf.brUpdate.pd.isRVC
-  }
-
-  val scFailed = !diffTestDebugLrScValid(0) && 
-    io.commits(0).bits.uop.ctrl.fuType === FuType.mou &&
-    (io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_d || io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_w)
-
-  val instrCnt = RegInit(0.U(64.W))
-  instrCnt := instrCnt + retireCounter
-
+  
+  val id = roqDebugId()
   val difftestIntrNO = WireInit(0.U(XLEN.W))
   val difftestCause = WireInit(0.U(XLEN.W))
-  ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
-  ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
+  ExcitingUtils.addSink(difftestIntrNO, s"difftestIntrNOfromCSR$id")
+  ExcitingUtils.addSink(difftestCause, s"difftestCausefromCSR$id")
+  
+  if(!env.FPGAPlatform){ 
 
-  XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
-  val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
-  val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
-  val retireInstFix = Mux(io.redirect.valid, microOp(deqPtr).cf.instr, microOp(firstValidCommit).cf.instr)
-  if(!env.FPGAPlatform){
+    //difftest signals
+    val firstValidCommit = deqPtr + PriorityMux(validCommit, VecInit(List.tabulate(CommitWidth)(_.U)))
+
+    val skip = Wire(Vec(CommitWidth, Bool()))
+    val wen = Wire(Vec(CommitWidth, Bool()))
+    val wdata = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+    val wdst = Wire(Vec(CommitWidth, UInt(32.W)))
+    val diffTestDebugLrScValid = Wire(Vec(CommitWidth, Bool()))
+    val wpc = Wire(Vec(CommitWidth, UInt(XLEN.W)))
+    val trapVec = Wire(Vec(CommitWidth, Bool()))
+    val isRVC = Wire(Vec(CommitWidth, Bool()))
+    for(i <- 0 until CommitWidth){
+      // io.commits(i).valid
+      val idx = deqPtr+i.U
+      val uop = io.commits(i).bits.uop
+      val DifftestSkipSC = false
+      if(!DifftestSkipSC){
+        skip(i) := exuDebug(idx).isMMIO && io.commits(i).valid
+      }else{
+        skip(i) := (
+            exuDebug(idx).isMMIO || 
+            uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
+            uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
+          ) && io.commits(i).valid
+      }
+      wen(i) := io.commits(i).valid && uop.ctrl.rfWen && uop.ctrl.ldest =/= 0.U
+      wdata(i) := exuData(idx)
+      wdst(i) := uop.ctrl.ldest
+      diffTestDebugLrScValid(i) := uop.diffTestDebugLrScValid
+      wpc(i) := SignExt(uop.cf.pc, XLEN)
+      trapVec(i) := io.commits(i).valid && (state===s_idle) && uop.ctrl.isXSTrap
+      isRVC(i) := uop.cf.brUpdate.pd.isRVC
+    }
+
+    val scFailed = !diffTestDebugLrScValid(0) && 
+      io.commits(0).bits.uop.ctrl.fuType === FuType.mou &&
+      (io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_d || io.commits(0).bits.uop.ctrl.fuOpType === LSUOpType.sc_w)
+
+    val instrCnt = RegInit(0.U(64.W))
+    instrCnt := instrCnt + retireCounter
+
+    XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
+    val retireCounterFix = Mux(io.redirect.valid, 1.U, retireCounter)
+    val retirePCFix = SignExt(Mux(io.redirect.valid, microOp(deqPtr).cf.pc, microOp(firstValidCommit).cf.pc), XLEN)
+    val retireInstFix = Mux(io.redirect.valid, microOp(deqPtr).cf.instr, microOp(firstValidCommit).cf.instr)
+
     ExcitingUtils.addSource(RegNext(retireCounterFix), "difftestCommit", ExcitingUtils.Debug)
     ExcitingUtils.addSource(RegNext(retirePCFix), "difftestThisPC", ExcitingUtils.Debug)//first valid PC
     ExcitingUtils.addSource(RegNext(retireInstFix), "difftestThisINST", ExcitingUtils.Debug)//first valid inst

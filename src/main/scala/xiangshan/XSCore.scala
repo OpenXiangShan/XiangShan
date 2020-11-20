@@ -305,6 +305,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
   })
 
+  println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+
   // to fast wake up fp, mem rs
   val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
   val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
