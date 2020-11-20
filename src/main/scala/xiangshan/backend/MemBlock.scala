@@ -69,8 +69,9 @@ class MemBlock
   val atomicsUnit = Module(new AtomicsUnit)
 
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
-  val ldOut0 = WireInit(loadUnits.head.io.ldout)
-  ldOut0.bits := loadWritebackOverride
+  val ldOut0 = Wire(Decoupled(new ExuOutput))
+  ldOut0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
+  ldOut0.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
@@ -201,9 +202,7 @@ class MemBlock
   lsq.io.lsIdxs      <> io.toCtrlBlock.lsqIdxResp
   lsq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
-
   io.toCtrlBlock.replay <> lsq.io.rollback
-
   lsq.io.dcache      <> io.dcache.loadMiss
   lsq.io.uncache     <> io.dcache.uncache
 
@@ -233,7 +232,6 @@ class MemBlock
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
-  atomicsUnit.io.out.ready       := false.B
 
   // dispatch 0 takes priority
   atomicsUnit.io.in.valid := st0_atomics
@@ -244,7 +242,7 @@ class MemBlock
   }
 
   when(atomicsUnit.io.dtlb.req.valid) {
-    dtlb.io.requestor(0) <> atomicsUnit.io.dtlb // TODO: check it later
+    dtlb.io.requestor(0) <> atomicsUnit.io.dtlb
     // take load unit 0's tlb port
     // make sure not to disturb loadUnit
     assert(!loadUnits(0).io.dtlb.req.valid)
