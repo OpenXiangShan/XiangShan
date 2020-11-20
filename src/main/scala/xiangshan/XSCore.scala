@@ -305,6 +305,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     val externalInterrupt = new ExternalInterruptIO
   })
 
+  println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+
   // to fast wake up fp, mem rs
   val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
   val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
@@ -431,13 +433,12 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
   uncache.io.lsq      <> memBlock.io.dcache.uncache
 
-  val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
-  ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
-  ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
-  val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
   if (!env.FPGAPlatform) {
+    val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
+    ExcitingUtils.addSink(debugIntReg, "DEBUG_INT_ARCH_REG", ExcitingUtils.Debug)
+    ExcitingUtils.addSink(debugFpReg, "DEBUG_FP_ARCH_REG", ExcitingUtils.Debug)
+    val debugArchReg = WireInit(VecInit(debugIntReg ++ debugFpReg))
     ExcitingUtils.addSource(debugArchReg, "difftestRegs", ExcitingUtils.Debug)
   }
-
 
 }
