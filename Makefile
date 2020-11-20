@@ -59,12 +59,19 @@ EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 
+VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
+
 # Verilator trace support
-VEXTRA_FLAGS  = --trace
+EMU_TRACE    ?= 0
+ifeq ($(EMU_TRACE),1)
+VEXTRA_FLAGS += --trace
+endif
 
 # Verilator multi-thread support
 EMU_THREADS  ?= 1
+ifneq ($(EMU_THREADS),1)
 VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+endif
 
 # Verilator savable
 EMU_SNAPSHOT ?= 0
@@ -83,10 +90,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   --assert \
   --stats-vars \
   --output-split 5000 \
-  --output-split-cfuncs 5000 \
-  -I$(abspath $(BUILD_DIR)) \
-  --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
-  -LDFLAGS "$(EMU_LDFLAGS)"
+  --output-split-cfuncs 5000
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(SIM_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
