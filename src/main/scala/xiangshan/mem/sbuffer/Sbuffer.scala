@@ -10,7 +10,6 @@ import utils.TrueLRU
 
 class SbufferUserBundle extends XSBundle {
   val pc = UInt(VAddrBits.W) //for debug
-  val lsroqId = UInt(log2Up(LsroqSize).W)
 }
 
 trait HasSBufferConst extends HasXSParameter {
@@ -87,7 +86,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
 
   val lru_accessed = WireInit(VecInit(Seq.fill(StorePipelineWidth)(false.B)))
 
-  // Get retired store from lsroq
+  // Get retired store from lsq
   //--------------------------------------------------------------------------------------------------------------------
   for (storeIdx <- 0 until StorePipelineWidth) {
     io.in(storeIdx).ready := false.B // when there is empty line or target address already in this buffer, assert true
@@ -457,7 +456,7 @@ class Sbuffer extends XSModule with HasSBufferConst {
         // send data with mask in this line
         // this mask is not 'mask for cache line' and we need to check low bits of paddr
         // to get certain part of one line
-        // P.S. data in io.in will be manipulated by lsroq
+        // P.S. data in io.in will be manipulated by lsq
         (0 until XLEN / 8).foreach(i => {
           when (cache(sBufIdx).mask(i.U + getByteOffset(io.forward(loadIdx).paddr)) && io.forward(loadIdx).mask(i)) {
             io.forward(loadIdx).forwardData(i) := cache(sBufIdx).data(i.U + getByteOffset(io.forward(loadIdx).paddr))

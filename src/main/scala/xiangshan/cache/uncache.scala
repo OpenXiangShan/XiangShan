@@ -6,7 +6,7 @@ import utils.{HasTLDump, PriorityMuxWithFlag, XSDebug}
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
-import xiangshan.{HasXSLog, MicroOp, NeedImpl, Redirect}
+import xiangshan.{HasXSLog, MicroOp, Redirect}
 
 // One miss entry deals with one mmio request
 class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
@@ -119,7 +119,7 @@ class MMIOEntry(edge: TLEdgeOut) extends DCacheModule
 }
 
 class UncacheIO extends DCacheBundle {
-  val lsroq = Flipped(new DCacheWordIO)
+  val lsq = Flipped(new DCacheWordIO)
 }
 
 // convert DCacheIO to TileLink
@@ -152,8 +152,8 @@ class UncacheImp(outer: Uncache)
 
   val resp_arb = Module(new Arbiter(new DCacheWordResp, cfg.nMMIOEntries))
 
-  val req  = io.lsroq.req
-  val resp = io.lsroq.resp
+  val req  = io.lsq.req
+  val resp = io.lsq.resp
   val mem_acquire = bus.a
   val mem_grant   = bus.d
 

@@ -19,16 +19,17 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
-	$(MEM_GEN) $(@D)/$(@F).conf >> $@
-	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform $(SIM_ARGS)
+	# mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
+	# $(MEM_GEN) $(@D)/$(@F).conf >> $@
+	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+	# @git log -n 1 >> .__head__
+	# @git diff >> .__diff__
+	# @sed -i 's/^/\/\// ' .__head__
+	# @sed -i 's/^/\/\//' .__diff__
+	# @cat .__head__ .__diff__ $@ > .__out__
+	# @mv .__out__ $@
+	# @rm .__head__ .__diff__
 
 deploy: build/top.zip
 
@@ -58,12 +59,19 @@ EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 
+VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
+
 # Verilator trace support
-VEXTRA_FLAGS  = --trace
+EMU_TRACE    ?= 0
+ifeq ($(EMU_TRACE),1)
+VEXTRA_FLAGS += --trace
+endif
 
 # Verilator multi-thread support
 EMU_THREADS  ?= 1
+ifneq ($(EMU_THREADS),1)
 VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+endif
 
 # Verilator savable
 EMU_SNAPSHOT ?= 0
@@ -82,10 +90,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   --assert \
   --stats-vars \
   --output-split 5000 \
-  --output-split-cfuncs 5000 \
-  -I$(abspath $(BUILD_DIR)) \
-  --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
-  -LDFLAGS "$(EMU_LDFLAGS)"
+  --output-split-cfuncs 5000
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(SIM_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
