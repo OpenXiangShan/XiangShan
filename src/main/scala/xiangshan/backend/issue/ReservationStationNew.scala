@@ -214,7 +214,7 @@ class ReservationStationCtrl
     srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s, i) =>
       s := Mux(io.data.srcUpdate(IssQueSize)(i) || stateCheck(srcSeq(i), srcTypeSeq(i)), SrcState.rdy, srcStateSeq(i))
     }
-    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} " +
+    XSDebug(p"EnqCtrl: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} " +
       p"src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} " +
       p" state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} " +
       p"type:${srcTypeSeq(2)}\n")
@@ -239,6 +239,23 @@ class ReservationStationCtrl
 
   // assert
   assert(tailPtr <= iqSize.U)
+
+  val print = !(tailPtr===0.U) && io.enqCtrl.valid
+  XSDebug(print, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issValid} ${io.data.fuReady})\n")
+  XSDebug(print , p"tailPtr:${tailPtr} tailPtrAdq:${tailAfterRealDeq} isFull:${isFull} " +
+    p"needFeed:${needFeedback} vQue:${Binary(VecInit(validQueue).asUInt)} rQue:${Binary(readyQueue.asUInt)}\n")
+  XSDebug(print && Cat(redHitVec).orR, p"Redirect: ${Hexadecimal(redHitVec.asUInt)}\n")
+  XSDebug(print && Cat(fbMatchVec).orR, p"Feedback: ${Hexadecimal(VecInit(fbMatchVec).asUInt)} Hit:${fbHit}\n")
+  XSDebug(print, p"moveMask:${Binary(moveMask)} selMask:${Binary(selectMask.asUInt)} haveBub:${haveBubble}\n")
+  XSDebug(print, p"selIdxWire:${selectedIdxWire} selected:${selected} redSel:${redSel}" +
+    p"selV:${selValid} selReg:${selReg} selIdxReg:${selectedIdxReg} selIdxRegOH:${Binary(selectedIdxRegOH)}\n")
+  XSDebug(print, p"bubMask:${Binary(bubMask.asUInt)} firstBub:${firstBubble} findBub:${findBubble} " +
+    p"bubReg:${bubReg} bubIdxReg:${bubIdxReg} bubIdxRegOH:${Binary(bubIdxRegOH)}\n")
+  XSDebug(p" : Idx |v|r|s |cnt|s1:s2:s3\n")
+  for(i <- srcQueue.indices) {
+    XSDebug(p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${stateQueue(i)}|" +
+      p"${cntQueue(i)}|${srcQueue(0)}:${srcQueue(1)}:${srcQueue(2)}\n")
+  }
 }
 
 class ReservationStationData
@@ -299,14 +316,14 @@ class ReservationStationData
   val enqPtrReg = RegEnable(enqPtr, enqCtrl.fire())
   when (enqCtrl.fire()) {
     uop(enqPtr) := enqUop
-    XSDebug(p"enqCtrlFire: enqPtr:${enqPtr} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
+    XSDebug(p"enqCtrl: enqPtr:${enqPtr} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
 
   when (RegNext(enqCtrl.fire())) { // TODO: turn to srcNum, not the 3
     data(enqPtrReg)(0) := io.enqData.src1
     data(enqPtrReg)(1) := io.enqData.src2
     data(enqPtrReg)(2) := io.enqData.src3
-    XSDebug(p"enqDataFire: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
+    XSDebug(p"enqData: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
             p" src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
   }
 
@@ -397,12 +414,16 @@ class ReservationStationData
       p"rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
   }
 
-  XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
+  // log
+  XSDebug(io.feedback.valid, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")
+  XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): deqPtr:${deq} pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
     p" roqIdx:${io.deq.bits.uop.roqIdx} src1:${Hexadecimal(io.deq.bits.src1)} " +
     p" src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
-  XSDebug(p"Data:  | src1 | src2 | src3| roqIdx | pc\n")
+  XSDebug(p"Data:  | src1:data | src2:data | src3:data |hit|pdest:rf:fp| roqIdx | pc\n")
   for(i <- data.indices) {
-    XSDebug(p"${i.U}: ${Hexadecimal(data(i)(0))}|${Hexadecimal(data(i)(1))}| " +
-      p"${Hexadecimal(data(i)(2))}|${uop(i).roqIdx} | ${Hexadecimal(uop(i).cf.pc)}\n")
+    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(data(i)(0))}|${uop(i).psrc2}:" +
+      p"${Hexadecimal(data(i)(1))}|${uop(i).psrc3}:${Hexadecimal(data(i)(2))}|" +
+      p"${Binary(io.ctrl.srcUpdate(i).asUInt)}|${uop(i).pdest}:${uop(i).ctrl.rfWen}:" +
+      p"${uop(i).ctrl.fpWen}|${uop(i).roqIdx} |${Hexadecimal(uop(i).cf.pc)}\n")
   }
 }
