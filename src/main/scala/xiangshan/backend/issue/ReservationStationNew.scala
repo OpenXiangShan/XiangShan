@@ -19,7 +19,7 @@ class BypassQueue(number: Int) extends XSModule {
     io.out.bits := DontCare
   } else if(number == 0) {
     io.in <> io.out
-    io.out.valid := io.in.valid// && !io.out.bits.roqIdx.needFlush(io.redirect) 
+    io.out.valid := io.in.valid// && !io.out.bits.roqIdx.needFlush(io.redirect)
   } else {
     val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()
@@ -27,7 +27,7 @@ class BypassQueue(number: Int) extends XSModule {
     })))
     queue(0).valid := io.in.valid
     queue(0).bits  := io.in.bits
-    (0 until (number-1)).map{i => 
+    (0 until (number-1)).map{i =>
       queue(i+1) := queue(i)
       queue(i+1).valid := queue(i).valid && !queue(i).bits.roqIdx.needFlush(io.redirect)
     }
@@ -35,7 +35,7 @@ class BypassQueue(number: Int) extends XSModule {
     io.out.bits := queue(number-1).bits
     for (i <- 0 until number) {
       XSDebug(queue(i).valid, p"BPQue(${i.U}): pc:${Hexadecimal(queue(i).bits.cf.pc)} roqIdx:${queue(i).bits.roqIdx}" +
-             p" pdest:${queue(i).bits.pdest} rfWen:${queue(i).bits.ctrl.rfWen} fpWen${queue(i).bits.ctrl.fpWen}\n")
+        p" pdest:${queue(i).bits.pdest} rfWen:${queue(i).bits.ctrl.rfWen} fpWen${queue(i).bits.ctrl.fpWen}\n")
     }
   }
 }
@@ -82,16 +82,13 @@ class ReservationStationCtrl
   // control part:
 
   val s_idle :: s_valid :: s_wait :: s_replay :: Nil = Enum(4)
-  
+
   val needFeedback  = if (feedback) true.B else false.B
   val stateQueue    = RegInit(VecInit(Seq.fill(iqSize)(s_idle)))
   val validQueue    = stateQueue.map(_ === s_valid)
   val emptyQueue    = stateQueue.map(_ === s_idle)
   val srcQueue      = Reg(Vec(iqSize, Vec(srcNum, Bool())))
   val cntQueue      = Reg(Vec(iqSize, UInt(log2Up(replayDelay).W)))
-
-  // other part:
-  // val uop           = Reg(Vec(iqSize, new MicroOp)) // TODO: save uop here to use roqIdx for redirect, the other domain is useless and should not be used.
 
   // rs queue part:
   val tailPtr       = RegInit(0.U((iqIdxWidth+1).W))
@@ -100,8 +97,8 @@ class ReservationStationCtrl
 
   // redirect
   val redHitVec   = VecInit((0 until iqSize).map(i => io.data.redVec(idxQueue(i))))
-  val fbMatchVec  = (0 until iqSize).map(i => needFeedback && io.data.feedback(idxQueue(i)) && 
-                    (stateQueue(i) === s_wait || stateQueue(i)===s_valid)) 
+  val fbMatchVec  = (0 until iqSize).map(i => needFeedback && io.data.feedback(idxQueue(i)) &&
+                    (stateQueue(i) === s_wait || stateQueue(i)===s_valid))
   val fbHit       = io.data.feedback(IssQueSize)
 
   // select ready
@@ -112,7 +109,7 @@ class ReservationStationCtrl
   val selectedIdxRegOH = Wire(UInt(iqSize.W))
   val selectMask = WireInit(VecInit(
     (0 until iqSize).map(i =>
-      readyQueue(i) && !(selectedIdxRegOH(i) && issFire) 
+      readyQueue(i) && !(selectedIdxRegOH(i) && issFire)
       // TODO: add redirect here, may cause long latency , change it
     )
   ))
@@ -217,12 +214,15 @@ class ReservationStationCtrl
     srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s, i) =>
       s := Mux(io.data.srcUpdate(IssQueSize)(i) || stateCheck(srcSeq(i), srcTypeSeq(i)), SrcState.rdy, srcStateSeq(i))
     }
-    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} type:${srcTypeSeq(2)}\n")
+    XSDebug(p"EnqCtrlFire: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} " +
+      p"src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} " +
+      p" state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} " +
+      p"type:${srcTypeSeq(2)}\n")
   }
 
   // wakeup
   srcQueue.zipWithIndex.map{ case (src, i) =>
-    src.zipWithIndex.map{ case (s, j) => 
+    src.zipWithIndex.map{ case (s, j) =>
       when (io.data.srcUpdate(i)(j)) { s := true.B }
     }
   }
@@ -249,7 +249,7 @@ class ReservationStationData
   fixedDelay: Int,
   srcNum: Int = 3
 ) extends XSModule {
-  
+
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
 
@@ -275,7 +275,7 @@ class ReservationStationData
     val broadcastedUops = Vec(wakeupCnt, Flipped(ValidIO(new MicroOp)))
 
     // listen to write back data bus(certain latency)
-    // and extra wrtie back(uncertan latency) 
+    // and extra wrtie back(uncertan latency)
     val writeBackedData = Vec(wakeupCnt, Input(UInt(XLEN.W)))
     val extraListenPorts = Vec(extraListenPortsCnt, Flipped(ValidIO(new ExuOutput)))
 
@@ -306,11 +306,12 @@ class ReservationStationData
     data(enqPtrReg)(0) := io.enqData.src1
     data(enqPtrReg)(1) := io.enqData.src2
     data(enqPtrReg)(2) := io.enqData.src3
-    XSDebug(p"enqDataFire: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
+    XSDebug(p"enqDataFire: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
+            p" src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
   }
 
   def wbHit(uop: MicroOp, src: UInt, srctype: UInt): Bool = {
-    (src === uop.pdest) && 
+    (src === uop.pdest) &&
     ((srctype === SrcType.reg && uop.ctrl.rfWen && src=/=0.U) ||
      (srctype === SrcType.fp  && uop.ctrl.fpWen))
   }
@@ -368,7 +369,8 @@ class ReservationStationData
   }
   io.ctrl.fuReady  := io.deq.ready
   io.ctrl.redVec   := VecInit(uop.map(_.roqIdx.needFlush(io.redirect))).asUInt
-  (0 until IssQueSize).map(i => io.ctrl.feedback(i) := uop(i).roqIdx.asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid)
+  (0 until IssQueSize).map(i =>
+    io.ctrl.feedback(i) := uop(i).roqIdx.asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid)
   io.ctrl.feedback(IssQueSize) := io.feedback.bits.hit
 
   // bypass send
@@ -389,12 +391,17 @@ class ReservationStationData
   io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits) && !bpQueue.io.out.bits.uop.roqIdx.needFlush(io.redirect)
   io.selectedUop.bits  := bpQueue.io.out.bits
   if(fixedDelay > 0) {
-    XSDebug(io.selectedUop.valid, p"SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)} roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
+    XSDebug(io.selectedUop.valid, p"SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
+      p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
+      p"rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
   }
 
-  XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): pc:${Hexadecimal(io.deq.bits.uop.cf.pc)} roqIdx:${io.deq.bits.uop.roqIdx} src1:${Hexadecimal(io.deq.bits.src1)} src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
+  XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
+    p" roqIdx:${io.deq.bits.uop.roqIdx} src1:${Hexadecimal(io.deq.bits.src1)} " +
+    p" src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
   XSDebug(p"Data:  | src1 | src2 | src3| roqIdx | pc\n")
   for(i <- data.indices) {
-    XSDebug(p"${i.U} ${Hexadecimal(data(i)(0))}|${Hexadecimal(data(i)(1))}|${Hexadecimal(data(i)(2))}|${uop(i).roqIdx} | ${Hexadecimal(uop(i).cf.pc)}\n")
+    XSDebug(p"${i.U}: ${Hexadecimal(data(i)(0))}|${Hexadecimal(data(i)(1))}| " +
+      p"${Hexadecimal(data(i)(2))}|${uop(i).roqIdx} | ${Hexadecimal(uop(i).cf.pc)}\n")
   }
 }
