@@ -212,7 +212,8 @@ class ReservationStationCtrl
   when (io.enqCtrl.fire()) {
     stateQueue(enqIdx_ctrl) := s_valid
     srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s, i) =>
-      s := Mux(io.data.srcUpdate(IssQueSize)(i) || stateCheck(srcSeq(i), srcTypeSeq(i)), SrcState.rdy, srcStateSeq(i))
+      s := Mux(io.data.srcUpdate(IssQueSize)(i) || stateCheck(srcSeq(i), srcTypeSeq(i)), true.B,
+               srcStateSeq(i)===SrcState.rdy)
     }
     XSDebug(p"EnqCtrl: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} " +
       p"src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} " +
