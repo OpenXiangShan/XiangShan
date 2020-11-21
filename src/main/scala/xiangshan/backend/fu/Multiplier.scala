@@ -12,15 +12,14 @@ class MulDivCtrl extends Bundle{
   val isHi = Bool() // return hi bits of result ?
 }
 
-class AbstractMultiplier(len: Int, latency: Int = 2) extends FunctionUnit(
-  FuConfig(FuType.mul, 2, 0, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(latency)),
+class AbstractMultiplier(len: Int) extends FunctionUnit(
   len
 ){
   val ctrl = IO(Input(new MulDivCtrl))
 }
 
-class NaiveMultiplier(len: Int, latency: Int = 3)
-  extends AbstractMultiplier(len, latency)
+class NaiveMultiplier(len: Int, val latency: Int)
+  extends AbstractMultiplier(len)
   with HasPipelineReg
 {
 
@@ -43,7 +42,9 @@ class NaiveMultiplier(len: Int, latency: Int = 3)
   XSDebug(p"validVec:${Binary(Cat(validVec))} flushVec:${Binary(Cat(flushVec))}\n")
 }
 
-class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len, doReg.size) with HasPipelineReg {
+class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len) with HasPipelineReg {
+
+  override def latency = doReg.size
 
   val doRegSorted = doReg.sortWith(_ < _)
   println(doRegSorted)

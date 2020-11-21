@@ -4,12 +4,10 @@ import xiangshan.backend.fu.fpu._
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
-import xiangshan.backend.fu.{FuConfig, UncertainLatency}
+import xiangshan.backend.fu.{FuConfig, FunctionUnit, UncertainLatency}
 import xiangshan.backend.fu.fpu.util.{FPUDebug, ORTree, ShiftRightJam}
 
-class DivSqrt extends FPUSubModule(
-  FuConfig(FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency())
-) {
+class DivSqrt extends FPUSubModule {
 
   def SEXP_WIDTH: Int = Float64.expWidth + 2
   def D_MANT_WIDTH: Int = Float64.mantWidth + 1

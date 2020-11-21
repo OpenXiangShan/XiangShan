@@ -27,6 +27,8 @@ class AXI4BurstMaster
     })
 
     val (out, edge) = node.out.head
+    // do not let dma AXI signals optimized out
+    chisel3.dontTouch(out)
     val cnt = RegInit(nOp.U)
     val addr = RegInit(startAddr.U)
     val s_idle :: s_addr :: s_data :: Nil = Enum(3)

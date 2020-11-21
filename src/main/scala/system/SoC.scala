@@ -16,6 +16,7 @@ import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanke
 
 case class SoCParameters
 (
+  NumCores: Integer = 1,
   EnableILA: Boolean = false,
   HasL2Cache: Boolean = false,
   HasPrefetch: Boolean = false
@@ -23,6 +24,7 @@ case class SoCParameters
 
 trait HasSoCParameter extends HasXSParameter{
   val soc = top.Parameters.get.socParameters
+  val NumCores = soc.NumCores
   val EnableILA = soc.EnableILA
   val HasL2cache = soc.HasL2Cache
   val HasPrefetch = soc.HasPrefetch
@@ -42,13 +44,11 @@ class DummyCore()(implicit p: Parameters) extends LazyModule {
 
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
-  val numCores = 1
-
-  private val cores = Seq.fill(numCores)(LazyModule(new XSCore()))
+  private val cores = Seq.fill(NumCores)(LazyModule(new XSCore()))
 
   // only mem and extDev visible externally
   val dma = AXI4IdentityNode()
-  val extDev = TLIdentityNode()
+  val extDev = AXI4IdentityNode()
 
   // L2 to L3 network
   // -------------------------------------------------
@@ -135,6 +135,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     mmioXbar
 
   extDev :=
+    AXI4UserYanker() :=
+    TLToAXI4() :=
     mmioXbar
 
   lazy val module = new LazyModuleImp(this){
@@ -147,41 +149,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       core.module.io.externalInterrupt.msip := clint.module.io.msip
       core.module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
     })
+    // do not let dma AXI signals optimized out
+    chisel3.dontTouch(dma.out.head._1)
+    chisel3.dontTouch(extDev.out.head._1)
   }
 
 }
-
-
-//class XSSoc extends Module with HasSoCParameter {
-//  val io = IO(new Bundle{
-//    val mem = new TLCached(l1BusParams)
-//    val mmio = new TLCached(l1BusParams)
-//    val frontend = Flipped(new AXI4) //TODO: do we need it ?
-//    val meip = Input(Bool())
-//    val ila = if (env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
-//  })
-//
-//  val xsCore = Module(new XSCore)
-//
-//  io.frontend <> DontCare
-//
-//  io.mem <> xsCore.io.mem
-//
-//  val addrSpace = List(
-//    (0x40000000L, 0x40000000L), // external devices
-//    (0x38000000L, 0x00010000L)  // CLINT
-//  )
-//  val mmioXbar = Module(new NaiveTL1toN(addrSpace, xsCore.io.mem.params))
-//  mmioXbar.io.in <> xsCore.io.mmio
-//
-//  val extDev = mmioXbar.io.out(0)
-//  val clint = Module(new AXI4Timer(sim = !env.FPGAPlatform))
-//  clint.io.in <> AXI4ToAXI4Lite(MMIOTLToAXI4(mmioXbar.io.out(1)))
-//
-//  io.mmio <> extDev
-//
-//  val mtipSync = clint.io.extra.get.mtip
-//  val meipSync = RegNext(RegNext(io.meip))
-//  ExcitingUtils.addSource(mtipSync, "mtip")
-//  ExcitingUtils.addSource(meipSync, "meip")
-//}
