@@ -388,7 +388,8 @@ class ReservationStationData
   bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
   bpQueue.io.in.bits := uop(sel.bits)
   bpQueue.io.redirect := io.redirect
-  io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits) && !bpQueue.io.out.bits.uop.roqIdx.needFlush(io.redirect)
+  io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits) &&
+                         !bpQueue.io.out.bits.roqIdx.needFlush(io.redirect)
   io.selectedUop.bits  := bpQueue.io.out.bits
   if(fixedDelay > 0) {
     XSDebug(io.selectedUop.valid, p"SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
