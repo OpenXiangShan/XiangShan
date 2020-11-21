@@ -15,6 +15,8 @@ class Frontend extends XSModule {
     val icacheToTlb = Flipped(new BlockTlbRequestIO)
     val ptw = new TlbPtwIO
     val backend = new FrontendToBackendIO
+    val sfence = Input(new SfenceBundle)
+    val tlbCsr = Input(new TlbCsrBundle)
   })
 
   val ifu = Module(new IFU)
@@ -33,8 +35,8 @@ class Frontend extends XSModule {
   //itlb to ptw
   io.ptw <> TLB(
     in = Seq(io.icacheToTlb),
-    sfence = io.backend.sfence,
-    csr = io.backend.tlbCsrIO,
+    sfence = io.sfence,
+    csr = io.tlbCsr,
     width = 1,
     isDtlb = false,
     shouldBlock = true

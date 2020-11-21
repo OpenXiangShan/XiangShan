@@ -5,9 +5,9 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.exu._
+import xiangshan.backend.exu.Exu._
 
-class Dispatch2Fp(fmacCfg: ExuConfig, fmiscCfg: ExuConfig) extends XSModule {
+class Dispatch2Fp extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp)))
     val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
@@ -26,8 +26,8 @@ class Dispatch2Fp(fmacCfg: ExuConfig, fmiscCfg: ExuConfig) extends XSModule {
   val fmacPriority = PriorityGen((0 until exuParameters.FmacCnt).map(i => io.numExist(i)))
   val fmiscPriority = PriorityGen((0 until exuParameters.FmiscCnt).map(i => io.numExist(i+exuParameters.FmacCnt)))
   for (i <- 0 until dpParams.FpDqDeqWidth) {
-    fmacIndexGen.io.validBits(i) := io.fromDq(i).valid && fmacCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    fmiscIndexGen.io.validBits(i) := io.fromDq(i).valid && fmiscCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    fmacIndexGen.io.validBits(i) := io.fromDq(i).valid && fmacExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    fmiscIndexGen.io.validBits(i) := io.fromDq(i).valid && fmiscExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
     // XSDebug(io.fromDq(i).valid,
     //   p"fp dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")

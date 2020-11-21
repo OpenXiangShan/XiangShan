@@ -11,9 +11,7 @@ class FenceToSbuffer extends XSBundle {
   val sbIsEmpty = Input(Bool())
 }
 
-class Fence extends FunctionUnit(FuConfig(
-  FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false
-)){
+class Fence extends FunctionUnit{
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))
