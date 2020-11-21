@@ -15,10 +15,6 @@ ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
-
-EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
-EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/XiangShan.ini\\\" -DDRAMSIM3_OUTDIR=\\\"$(BUILD_DIR)\\\"
-EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
 endif
 
 # remote machine with more cores to speedup c++ build
@@ -53,22 +49,24 @@ build/top.zip: $(TOP_V)
 
 verilog: $(TOP_V)
 
-SIM_TOP = XSSimTop
+SIM_TOP   = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	date -R
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
+	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
 	date -R
 
+EMU_TOP      = XSSimSoC
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
 EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
 EMU_CXXFILES = $(shell find $(EMU_CSRC_DIR) -name "*.cpp")
-EMU_VFILES = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
+EMU_VFILES   = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
 EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
-EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
+EMU_LDFLAGS  += -lpthread -lSDL2 -ldl
 
 VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
 
@@ -89,8 +87,15 @@ VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
 endif
 
+# co-simulation with DRAMsim3
+ifeq ($(WITH_DRAMSIM3),1)
+EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
+EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/XiangShan.ini\\\" -DDRAMSIM3_OUTDIR=\\\"$(BUILD_DIR)\\\"
+EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
+endif
+
 # --trace
-VERILATOR_FLAGS = --top-module $(SIM_TOP) \
+VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
   +define+RANDOMIZE_REG_INIT \
@@ -101,7 +106,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   --output-split 5000 \
   --output-split-cfuncs 5000
 
-EMU_MK := $(BUILD_DIR)/emu-compile/V$(SIM_TOP).mk
+EMU_MK := $(BUILD_DIR)/emu-compile/V$(EMU_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
 EMU_HEADERS := $(shell find $(EMU_CSRC_DIR) -name "*.h")
 EMU := $(BUILD_DIR)/emu
