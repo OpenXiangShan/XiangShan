@@ -105,17 +105,22 @@ class L1plusCacheDataArray extends L1plusCacheModule {
     val resp  = Output(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
   })
 
+  val singlePort = true
+
   // write is always ready
   io.write.ready := true.B
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   val raddr = (io.read.bits.addr >> blockOffBits).asUInt()
-  // raddr === waddr is undefined behavior!
-  // block read in this case
-  io.read.ready := !io.write.valid || raddr =/= waddr
+
+  // for single port SRAM, do not allow read and write in the same cycle
+  // for dual port SRAM, raddr === waddr is undefined behavior
+  val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
+  io.read.ready := !rwhazard
+
   for (w <- 0 until nWays) {
     for (r <- 0 until blockRows) {
       val array = Module(new SRAMTemplate(Bits(encRowBits.W), set=nSets, way=1,
-        shouldReset=false, holdRead=false, singlePort=true))
+        shouldReset=false, holdRead=false, singlePort=singlePort))
       // data write
       array.io.w.req.valid := io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid
       array.io.w.req.bits.apply(
@@ -217,6 +222,8 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
     io.resp(i).tag   := rtags(i)
   }
 
+  // we use single port SRAM
+  // do not allow read and write in the same cycle
   io.read.ready  := !io.write.valid && !reset.toBool && !io.flush && tag_array.io.r.req.ready
   io.write.ready := !reset.toBool && !io.flush && tag_array.io.w.req.ready
 

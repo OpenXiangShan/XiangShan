@@ -178,14 +178,18 @@ abstract class AbstractDataArray extends DCacheModule {
 
 class DuplicatedDataArray extends AbstractDataArray
 {
+  val singlePort = true
   // write is always ready
   io.write.ready := true.B
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   for (j <- 0 until LoadPipelineWidth) {
     val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
-    // raddr === waddr is undefined behavior!
-    // block read in this case
-    io.read(j).ready := !io.write.valid || raddr =/= waddr
+
+    // for single port SRAM, do not allow read and write in the same cycle
+    // for dual port SRAM, raddr === waddr is undefined behavior
+    val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
+    io.read(j).ready := !rwhazard
+
     for (w <- 0 until nWays) {
       for (r <- 0 until blockRows) {
         val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
@@ -193,7 +197,7 @@ class DuplicatedDataArray extends AbstractDataArray
 
         for (k <- 0 until rowWords) {
           val array = Module(new SRAMTemplate(Bits(encWordBits.W), set=nSets, way=1,
-            shouldReset=false, holdRead=false, singlePort=true))
+            shouldReset=false, holdRead=false, singlePort=singlePort))
           // data write
           val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)(k)
           array.io.w.req.valid := wen
@@ -249,7 +253,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   io.resp := tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
 
-  io.read.ready := !wen && !rst
+  io.read.ready := !wen
   io.write.ready := !rst
 
   def dumpRead() = {
