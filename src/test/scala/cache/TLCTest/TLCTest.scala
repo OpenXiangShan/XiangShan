@@ -1,14 +1,16 @@
 package cache.TLCTest
 
+import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
+import chiseltest.internal.{LineCoverageAnnotation, VerilatorBackendAnnotation}
 import chiseltest._
 import chiseltest.ChiselScalatestTester
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLDelayer, TLXbar}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, XSDebug}
 import xiangshan.HasXSLog
@@ -87,7 +89,7 @@ class TLCCacheTestTopWrapper()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class TLCCacheTest extends FlatSpec with ChiselScalatestTester with Matchers with TLCOp {
+class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers with TLCOp {
   val slave_safe = 0
   val slave_granting = 1
   val slave_probing = 2
@@ -118,7 +120,7 @@ class TLCCacheTest extends FlatSpec with ChiselScalatestTester with Matchers wit
     }
 
     test(LazyModule(new TLCCacheTestTopWrapper()).module)
-      .withAnnotations(Seq(VerilatorBackendAnnotation)) { c =>
+      .withAnnotations(Seq(VerilatorBackendAnnotation, LineCoverageAnnotation)) { c =>
         c.io.mastersIO.foreach { mio =>
           mio.AChannel.initSource().setSourceClock(c.clock)
           mio.CChannel.initSource().setSourceClock(c.clock)
@@ -143,182 +145,98 @@ class TLCCacheTest extends FlatSpec with ChiselScalatestTester with Matchers wit
         }.toMap
         val slaveAgent = new TLCSlaveAgent(2, 8, slaveState, serialList)
 
+        //must set order here
         fork {
-          val mio = mastersIO(0)
-          val masterAgent = masterAgentList(0)
           while (true) {
-            var AChannel_valid = false
-            var CChannel_valid = false
-            var EChannel_valid = false
-            val BChannel_ready = true
-            val DChannel_ready = true
+            for (i <- 0 to 1){
+              val mio = mastersIO(i)
+              val masterAgent = masterAgentList(i)
+              var AChannel_valid = false
+              var CChannel_valid = false
+              var EChannel_valid = false
+              val BChannel_ready = true
+              val DChannel_ready = true
 
-            //E channel
-            val EChannel_ready = peekBoolean(mio.EChannel.ready)
-            val tmpE = masterAgent.peekE()
-            if (tmpE.isDefined){
-              EChannel_valid = true
-              if (EChannel_valid && EChannel_ready) {
-                mio.EChannel.bits.sink.poke(tmpE.get.sink.U)
-                masterAgent.fireE()
+              //E channel
+              val EChannel_ready = peekBoolean(mio.EChannel.ready)
+              val tmpE = masterAgent.peekE()
+              if (tmpE.isDefined) {
+                EChannel_valid = true
+                if (EChannel_valid && EChannel_ready) {
+                  mio.EChannel.bits.sink.poke(tmpE.get.sink.U)
+                  masterAgent.fireE()
+                }
               }
-            }
-            mio.EChannel.valid.poke(EChannel_valid.B)
-            //D channel
-            mio.DChannel.ready.poke(DChannel_ready.B)
-            val DChannel_valid = peekBoolean(mio.DChannel.valid)
-            if (DChannel_valid && DChannel_ready){ //fire
-              val dCh = new TLCScalaD()
-              dCh.opcode = peekBigInt(mio.DChannel.bits.opcode)
-              dCh.param = peekBigInt(mio.DChannel.bits.param)
-              dCh.size = peekBigInt(mio.DChannel.bits.size)
-              dCh.source = peekBigInt(mio.DChannel.bits.source)
-              dCh.sink = peekBigInt(mio.DChannel.bits.sink)
-              dCh.denied = peekBoolean(mio.DChannel.bits.denied)
-              dCh.data = peekBigInt(mio.DChannel.bits.data)
-              masterAgent.fireD(dCh)
-            }
-            //C channel
-            val CChannel_ready = peekBoolean(mio.CChannel.ready)
-            masterAgent.issueC()
-            val tmpC = masterAgent.peekC()
-            if (tmpC.isDefined){
-              CChannel_valid = true
-              if (CChannel_valid && CChannel_ready) {
-                mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
-                mio.CChannel.bits.param.poke(tmpC.get.param.U)
-                mio.CChannel.bits.size.poke(tmpC.get.size.U)
-                mio.CChannel.bits.source.poke(tmpC.get.source.U)
-                mio.CChannel.bits.address.poke(tmpC.get.address.U)
-                mio.CChannel.bits.data.poke(tmpC.get.data.U)
-                masterAgent.fireC()
+              mio.EChannel.valid.poke(EChannel_valid.B)
+              //D channel
+              mio.DChannel.ready.poke(DChannel_ready.B)
+              val DChannel_valid = peekBoolean(mio.DChannel.valid)
+              if (DChannel_valid && DChannel_ready) { //fire
+                val dCh = new TLCScalaD()
+                dCh.opcode = peekBigInt(mio.DChannel.bits.opcode)
+                dCh.param = peekBigInt(mio.DChannel.bits.param)
+                dCh.size = peekBigInt(mio.DChannel.bits.size)
+                dCh.source = peekBigInt(mio.DChannel.bits.source)
+                dCh.sink = peekBigInt(mio.DChannel.bits.sink)
+                dCh.denied = peekBoolean(mio.DChannel.bits.denied)
+                dCh.data = peekBigInt(mio.DChannel.bits.data)
+                masterAgent.fireD(dCh)
               }
-            }
-            mio.CChannel.valid.poke(CChannel_valid.B)
-            //B channel
-            mio.BChannel.ready.poke(BChannel_ready.B)
-            val BChannel_valid = peekBoolean(mio.BChannel.valid)
-            if (BChannel_valid && BChannel_ready){ //fire
-              val bCh = new TLCScalaB()
-              bCh.opcode = peekBigInt(mio.BChannel.bits.opcode)
-              bCh.param = peekBigInt(mio.BChannel.bits.param)
-              bCh.size = peekBigInt(mio.BChannel.bits.size)
-              bCh.source = peekBigInt(mio.BChannel.bits.source)
-              bCh.address = peekBigInt(mio.BChannel.bits.address)
-              bCh.mask = peekBigInt(mio.BChannel.bits.mask)
-              bCh.data = peekBigInt(mio.BChannel.bits.data)
-              masterAgent.fireB(bCh)
-            }
-            masterAgent.tickB()
-            //A channel
-            val AChannel_ready = peekBoolean(mio.AChannel.ready)
-            masterAgent.issueA()
-            val tmpA = masterAgent.peekA()
-            if (tmpA.isDefined){
-              AChannel_valid = true
-              if (AChannel_valid && AChannel_ready) {
-                mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
-                mio.AChannel.bits.param.poke(tmpA.get.param.U)
-                mio.AChannel.bits.size.poke(tmpA.get.size.U)
-                mio.AChannel.bits.source.poke(tmpA.get.source.U)
-                mio.AChannel.bits.address.poke(tmpA.get.address.U)
-                mio.AChannel.bits.data.poke(tmpA.get.data.U)
-                masterAgent.fireA()
+              //C channel
+              val CChannel_ready = peekBoolean(mio.CChannel.ready)
+              masterAgent.issueC()
+              val tmpC = masterAgent.peekC()
+              if (tmpC.isDefined) {
+                CChannel_valid = true
+                if (CChannel_valid && CChannel_ready) {
+                  mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
+                  mio.CChannel.bits.param.poke(tmpC.get.param.U)
+                  mio.CChannel.bits.size.poke(tmpC.get.size.U)
+                  mio.CChannel.bits.source.poke(tmpC.get.source.U)
+                  mio.CChannel.bits.address.poke(tmpC.get.address.U)
+                  mio.CChannel.bits.data.poke(tmpC.get.data.U)
+                  masterAgent.fireC()
+                }
               }
+              mio.CChannel.valid.poke(CChannel_valid.B)
+              //B channel
+              mio.BChannel.ready.poke(BChannel_ready.B)
+              val BChannel_valid = peekBoolean(mio.BChannel.valid)
+              if (BChannel_valid && BChannel_ready) { //fire
+                val bCh = new TLCScalaB()
+                bCh.opcode = peekBigInt(mio.BChannel.bits.opcode)
+                bCh.param = peekBigInt(mio.BChannel.bits.param)
+                bCh.size = peekBigInt(mio.BChannel.bits.size)
+                bCh.source = peekBigInt(mio.BChannel.bits.source)
+                bCh.address = peekBigInt(mio.BChannel.bits.address)
+                bCh.mask = peekBigInt(mio.BChannel.bits.mask)
+                bCh.data = peekBigInt(mio.BChannel.bits.data)
+                masterAgent.fireB(bCh)
+              }
+              masterAgent.tickB()
+              //A channel
+              val AChannel_ready = peekBoolean(mio.AChannel.ready)
+              masterAgent.issueA()
+              val tmpA = masterAgent.peekA()
+              if (tmpA.isDefined) {
+                AChannel_valid = true
+                if (AChannel_valid && AChannel_ready) {
+                  mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
+                  mio.AChannel.bits.param.poke(tmpA.get.param.U)
+                  mio.AChannel.bits.size.poke(tmpA.get.size.U)
+                  mio.AChannel.bits.source.poke(tmpA.get.source.U)
+                  mio.AChannel.bits.address.poke(tmpA.get.address.U)
+                  mio.AChannel.bits.data.poke(tmpA.get.data.U)
+                  masterAgent.fireA()
+                }
+              }
+              mio.AChannel.valid.poke(AChannel_valid.B)
             }
-            mio.AChannel.valid.poke(AChannel_valid.B)
-
             c.clock.step()
           }
+        }
 
-        }.fork {
-          val mio = mastersIO(1)
-          val masterAgent = masterAgentList(1)
-          while (true) {
-            var AChannel_valid = false
-            var CChannel_valid = false
-            var EChannel_valid = false
-            val BChannel_ready = true
-            val DChannel_ready = true
-
-            //E channel
-            val EChannel_ready = peekBoolean(mio.EChannel.ready)
-            val tmpE = masterAgent.peekE()
-            if (tmpE.isDefined){
-              EChannel_valid = true
-              if (EChannel_valid && EChannel_ready) {
-                mio.EChannel.bits.sink.poke(tmpE.get.sink.U)
-                masterAgent.fireE()
-              }
-            }
-            mio.EChannel.valid.poke(EChannel_valid.B)
-            //D channel
-            mio.DChannel.ready.poke(DChannel_ready.B)
-            val DChannel_valid = peekBoolean(mio.DChannel.valid)
-            if (DChannel_valid && DChannel_ready){ //fire
-              val dCh = new TLCScalaD()
-              dCh.opcode = peekBigInt(mio.DChannel.bits.opcode)
-              dCh.param = peekBigInt(mio.DChannel.bits.param)
-              dCh.size = peekBigInt(mio.DChannel.bits.size)
-              dCh.source = peekBigInt(mio.DChannel.bits.source)
-              dCh.sink = peekBigInt(mio.DChannel.bits.sink)
-              dCh.denied = peekBoolean(mio.DChannel.bits.denied)
-              dCh.data = peekBigInt(mio.DChannel.bits.data)
-              masterAgent.fireD(dCh)
-            }
-            //C channel
-            val CChannel_ready = peekBoolean(mio.CChannel.ready)
-            masterAgent.issueC()
-            val tmpC = masterAgent.peekC()
-            if (tmpC.isDefined){
-              CChannel_valid = true
-              if (CChannel_valid && CChannel_ready) {
-                mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
-                mio.CChannel.bits.param.poke(tmpC.get.param.U)
-                mio.CChannel.bits.size.poke(tmpC.get.size.U)
-                mio.CChannel.bits.source.poke(tmpC.get.source.U)
-                mio.CChannel.bits.address.poke(tmpC.get.address.U)
-                mio.CChannel.bits.data.poke(tmpC.get.data.U)
-                masterAgent.fireC()
-              }
-            }
-            mio.CChannel.valid.poke(CChannel_valid.B)
-            //B channel
-            mio.BChannel.ready.poke(BChannel_ready.B)
-            val BChannel_valid = peekBoolean(mio.BChannel.valid)
-            if (BChannel_valid && BChannel_ready){ //fire
-              val bCh = new TLCScalaB()
-              bCh.opcode = peekBigInt(mio.BChannel.bits.opcode)
-              bCh.param = peekBigInt(mio.BChannel.bits.param)
-              bCh.size = peekBigInt(mio.BChannel.bits.size)
-              bCh.source = peekBigInt(mio.BChannel.bits.source)
-              bCh.address = peekBigInt(mio.BChannel.bits.address)
-              bCh.mask = peekBigInt(mio.BChannel.bits.mask)
-              bCh.data = peekBigInt(mio.BChannel.bits.data)
-              masterAgent.fireB(bCh)
-            }
-            masterAgent.tickB()
-            //A channel
-            val AChannel_ready = peekBoolean(mio.AChannel.ready)
-            masterAgent.issueA()
-            val tmpA = masterAgent.peekA()
-            if (tmpA.isDefined){
-              AChannel_valid = true
-              if (AChannel_valid && AChannel_ready) {
-                mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
-                mio.AChannel.bits.param.poke(tmpA.get.param.U)
-                mio.AChannel.bits.size.poke(tmpA.get.size.U)
-                mio.AChannel.bits.source.poke(tmpA.get.source.U)
-                mio.AChannel.bits.address.poke(tmpA.get.address.U)
-                mio.AChannel.bits.data.poke(tmpA.get.data.U)
-                masterAgent.fireA()
-              }
-            }
-            mio.AChannel.valid.poke(AChannel_valid.B)
-
-            c.clock.step()
-          }
-        }.fork {
+        fork {
           val sio = slaveIO
           while (true) {
 
@@ -374,7 +292,7 @@ class TLCCacheTest extends FlatSpec with ChiselScalatestTester with Matchers wit
             val tmpB = slaveAgent.peekB()
             if (tmpB.isDefined) {
               BChannel_valid = true
-              if (BChannel_valid && BChannel_ready){
+              if (BChannel_valid && BChannel_ready) {
                 sio.BChannel.bits.opcode.poke(tmpB.get.opcode.U)
                 sio.BChannel.bits.param.poke(tmpB.get.param.U)
                 sio.BChannel.bits.size.poke(tmpB.get.size.U)

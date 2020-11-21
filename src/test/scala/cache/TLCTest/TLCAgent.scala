@@ -2,6 +2,7 @@ package cache.TLCTest
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map, Queue}
+import chipsalliance.rocketchip.config.{Field, Parameters}
 
 class AddrState extends TLCOp {
   val callerTrans: ListBuffer[TLCCallerTrans] = ListBuffer()
@@ -129,9 +130,11 @@ trait BigIntExtract {
 }
 
 class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
+              (implicit p:Parameters)
   extends TLCOp with BigIntExtract with PermissionTransition {
-  val beatNum = TLCCacheTestKey.default.get.blockBytes / TLCCacheTestKey.default.get.beatBytes
-  val beatBits = TLCCacheTestKey.default.get.beatBytes * 8
+  val l2params = p(TLCCacheTestKey)
+  val beatNum = l2params.blockBytes / l2params.beatBytes
+  val beatBits = l2params.beatBytes * 8
 
   def getState(addr: BigInt): AddrState = {
     val state = addrStateMap.getOrElse(addr, new AddrState())
@@ -177,6 +180,7 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
 }
 
 class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
+                   (implicit p: Parameters)
   extends TLCAgent(ID, addrStateMap, serialList) {
   val innerAcquire = ListBuffer[AcquireCalleeTrans]()
   val innerRelease = ListBuffer[ReleaseCalleeTrans]()
@@ -462,6 +466,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
 }
 
 class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
+                    (implicit p: Parameters)
   extends TLCAgent(ID, addrStateMap, serialList) {
   val outerAcquire: ListBuffer[AcquireCallerTrans] = ListBuffer()
   val outerRelease: ListBuffer[ReleaseCallerTrans] = ListBuffer()
