@@ -93,7 +93,7 @@ class ReservationStationCtrl
   // rs queue part:
   val tailPtr       = RegInit(0.U((iqIdxWidth+1).W))
   val idxQueue      = RegInit(VecInit((0 until iqSize).map(_.U(iqIdxWidth.W))))
-  val readyQueue    = VecInit(srcQueue.zip(validQueue).map{ case (a,b) => Cat(a).orR & b })
+  val readyQueue    = VecInit(srcQueue.zip(validQueue).map{ case (a,b) => Cat(a).andR & b })
 
   // redirect
   val redHitVec   = VecInit((0 until iqSize).map(i => io.data.redVec(idxQueue(i))))
@@ -241,7 +241,7 @@ class ReservationStationCtrl
   // assert
   assert(tailPtr <= iqSize.U)
 
-  val print = !(tailPtr===0.U) && io.enqCtrl.valid
+  val print = !(tailPtr===0.U) || io.enqCtrl.valid
   XSDebug(print, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issValid} ${io.data.fuReady})\n")
   XSDebug(print , p"tailPtr:${tailPtr} tailPtrAdq:${tailAfterRealDeq} isFull:${isFull} " +
     p"needFeed:${needFeedback} vQue:${Binary(VecInit(validQueue).asUInt)} rQue:${Binary(readyQueue.asUInt)}\n")
@@ -362,9 +362,9 @@ class ReservationStationData
       when (wuHit) { data(i)(j) := wuData }
       when (bpHitReg) { data(RegNext(i.U))(j) := bpData }
 
-      XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} idx:${i.U}\n")
-      XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) idx:${i.U}\n")
-      XSDebug(bpHitReg, p"BPHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} idx:${i.U}\n")
+      XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} i:${i.U} j:${j.U}\n")
+      XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) i:${i.U} j:${j.U}\n")
+      XSDebug(bpHitReg, p"BPHitData: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} i:${i.U} j:${j.U}\n")
     }
   }
 
