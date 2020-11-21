@@ -337,16 +337,16 @@ class ReservationStationData
   }
 
   // wakeup and bypass
-  def wakeup(src: UInt, srcType: UInt) : (Bool, UInt) = {
-    val hitVec = io.extraListenPorts.map(port => wbHit(port.bits.uop, src, srcType) && port.valid)
+  def wakeup(src: UInt, srcType: UInt, valid: Bool = true.B) : (Bool, UInt) = {
+    val hitVec = io.extraListenPorts.map(port => wbHit(port.bits.uop, src, srcType) && port.valid && valid)
     assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
 
     val hit = ParallelOR(hitVec)
     (hit, ParallelMux(hitVec zip io.extraListenPorts.map(_.bits.data)))
   }
 
-  def bypass(src: UInt, srcType: UInt) : (Bool, Bool, UInt) = {
-    val hitVec = io.broadcastedUops.map(port => wbHit(port.bits, src, srcType) && port.valid)
+  def bypass(src: UInt, srcType: UInt, valid: Bool = true.B) : (Bool, Bool, UInt) = {
+    val hitVec = io.broadcastedUops.map(port => wbHit(port.bits, src, srcType) && port.valid && valid)
     assert(RegNext(PopCount(hitVec)===0.U || PopCount(hitVec)===1.U))
 
     val hit = ParallelOR(hitVec)
@@ -381,7 +381,7 @@ class ReservationStationData
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
-    val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i))
+    val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.fire())
     when (bpHitReg) { data(enqPtrReg)(i) := bpData }
     h := bpHit
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
@@ -411,11 +411,9 @@ class ReservationStationData
   io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits) &&
                          !bpQueue.io.out.bits.roqIdx.needFlush(io.redirect)
   io.selectedUop.bits  := bpQueue.io.out.bits
-  if(fixedDelay > 0) {
-    XSDebug(io.selectedUop.valid, p"SelBypass: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
-      p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
-      p"rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
-  }
+  XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
+    p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
+    p"rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
 
   // log
   XSDebug(io.feedback.valid, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")
