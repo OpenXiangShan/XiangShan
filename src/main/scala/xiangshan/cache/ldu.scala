@@ -69,7 +69,7 @@ class LoadPipe extends DCacheModule
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
 
   assert(!(s1_valid && s1_req.meta.replay && io.lsu.s1_kill),
-    "lsroq tried to kill an replayed request!")
+    "lsq tried to kill an replayed request!")
 
   // stage 2
   val s2_req   = RegNext(s1_req)

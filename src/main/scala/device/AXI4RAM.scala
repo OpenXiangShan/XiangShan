@@ -9,13 +9,14 @@ import utils.{MaskExpand}
 
 class RAMHelper(memByte: BigInt) extends BlackBox with HasXSParameter {
   val io = IO(new Bundle {
-    val clk = Input(Clock())
-    val rIdx = Input(UInt(DataBits.W))
+    val clk   = Input(Clock())
+    val en    = Input(Bool())
+    val rIdx  = Input(UInt(DataBits.W))
     val rdata = Output(UInt(DataBits.W))
-    val wIdx = Input(UInt(DataBits.W))
+    val wIdx  = Input(UInt(DataBits.W))
     val wdata = Input(UInt(DataBits.W))
     val wmask = Input(UInt(DataBits.W))
-    val wen = Input(Bool())
+    val wen   = Input(Bool())
   })
 }
 
@@ -51,12 +52,13 @@ class AXI4RAM
     val rdata = if (useBlackBox) {
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
-        mem.io.clk := clock
-        mem.io.rIdx := rIdx
-        mem.io.wIdx := wIdx
+        mem.io.clk   := clock
+        mem.io.en    := !reset.asBool()
+        mem.io.rIdx  := (rIdx << log2Up(split)) + i.U
+        mem.io.wIdx  := (wIdx << log2Up(split)) + i.U
         mem.io.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
         mem.io.wmask := MaskExpand(in.w.bits.strb((i + 1) * 8 - 1, i * 8))
-        mem.io.wen := wen
+        mem.io.wen   := wen
       }
       val rdata = mems.map {mem => mem.io.rdata}
       Cat(rdata.reverse)

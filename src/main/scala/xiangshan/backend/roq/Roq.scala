@@ -30,8 +30,15 @@ object RoqPtr extends HasXSParameter {
   }
 }
 
+class RoqCSRIO extends XSBundle {
+  val intrBitSet = Input(Bool())
+  val trapTarget = Input(UInt(VAddrBits.W))
 
-class Roq extends XSModule with HasCircularQueuePtrHelper {
+  val fflags = Output(new Fflags)
+  val dirty_fs = Output(Bool())
+}
+
+class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val memRedirect = Input(Valid(new Redirect))
@@ -40,19 +47,13 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     val redirect = Output(Valid(new Redirect))
     val exception = Output(new MicroOp)
     // exu + brq
-    val exeWbResults = Vec(exuParameters.ExuCnt + 1, Flipped(ValidIO(new ExuOutput)))
+    val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
     val commitRoqIndex = Output(Valid(new RoqPtr))
     val roqDeqPtr = Output(new RoqPtr)
-    val intrBitSet = Input(Bool())
-    val trapTarget = Input(UInt(VAddrBits.W))
-
-    val fflags = Output(new Fflags)
-    val dirty_fs = Output(Bool())
+    val csr = new RoqCSRIO
   })
-
-  val numWbPorts = io.exeWbResults.length
 
   val microOp = Mem(RoqSize, new MicroOp)
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
@@ -121,7 +122,6 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
       val wbIdx = wbIdxExt.value
       writebacked(wbIdx) := true.B
       microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
-      microOp(wbIdx).lsroqIdx := io.exeWbResults(i).bits.uop.lsroqIdx
       microOp(wbIdx).lqIdx := io.exeWbResults(i).bits.uop.lqIdx
       microOp(wbIdx).sqIdx := io.exeWbResults(i).bits.uop.sqIdx
       microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
@@ -139,15 +139,9 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  // roq redirect only used for exception
-  // val intrBitSet = WireInit(false.B)
-  // ExcitingUtils.addSink(intrBitSet, "intrBitSetIDU")
-  // val trapTarget = WireInit(0.U(VAddrBits.W))
-  // ExcitingUtils.addSink(trapTarget, "trapTarget")
-
   val deqUop = microOp(deqPtr)
   val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
-  val intrEnable = io.intrBitSet && !isEmpty && !hasNoSpec &&
+  val intrEnable = io.csr.intrBitSet && !isEmpty && !hasNoSpec &&
     deqUop.ctrl.commitType =/= CommitType.STORE && deqUop.ctrl.commitType =/= CommitType.LOAD// TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
@@ -156,9 +150,12 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
   io.redirect.bits.isException := intrEnable || exceptionEnable
   // reuse isFlushPipe to represent interrupt for CSR
   io.redirect.bits.isFlushPipe := isFlushPipe || intrEnable
-  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.trapTarget)
+  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.csr.trapTarget)
   io.exception := deqUop
-  XSDebug(io.redirect.valid, "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n", io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.trapTarget, Cat(microOp(deqPtr).cf.exceptionVec))
+  XSDebug(io.redirect.valid,
+    "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n",
+    io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.csr.trapTarget,
+    Cat(microOp(deqPtr).cf.exceptionVec))
 
   // Commit uop to Rename (walk)
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
@@ -265,8 +262,8 @@ class Roq extends XSModule with HasCircularQueuePtrHelper {
     io.commits(i).bits.isWalk := state =/= s_idle
   }
 
-  io.fflags := fflags
-  io.dirty_fs := dirty_fs
+  io.csr.fflags := fflags
+  io.csr.dirty_fs := dirty_fs
 
   val validCommit = io.commits.map(_.valid)
   when(state===s_walk) {

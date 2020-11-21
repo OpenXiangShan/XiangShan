@@ -131,11 +131,10 @@ class TlbReq extends TlbBundle {
   val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
-    val lsroqIdx = UInt(LsroqIdxWidth.W) // FIXME: need update
   }
 
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx} lsroqIdx:${debug.lsroqIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx}"
   }
 }
 

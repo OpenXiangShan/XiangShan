@@ -46,7 +46,9 @@ SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
 SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
+	date -R
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
+	date -R
 
 EMU_CSRC_DIR = $(abspath ./src/test/csrc)
 EMU_VSRC_DIR = $(abspath ./src/test/vsrc)
@@ -57,12 +59,19 @@ EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
 EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 
+VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
+
 # Verilator trace support
-VEXTRA_FLAGS  = --trace
+EMU_TRACE    ?= 0
+ifeq ($(EMU_TRACE),1)
+VEXTRA_FLAGS += --trace
+endif
 
 # Verilator multi-thread support
 EMU_THREADS  ?= 1
+ifneq ($(EMU_THREADS),1)
 VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+endif
 
 # Verilator savable
 EMU_SNAPSHOT ?= 0
@@ -92,10 +101,7 @@ VERILATOR_FLAGS = --top-module $(SIM_TOP) \
   --assert \
   --stats-vars \
   --output-split 5000 \
-  --output-split-cfuncs 5000 \
-  -I$(abspath $(BUILD_DIR)) \
-  --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" \
-  -LDFLAGS "$(EMU_LDFLAGS)"
+  --output-split-cfuncs 5000
 
 EMU_MK := $(BUILD_DIR)/emu-compile/V$(SIM_TOP).mk
 EMU_DEPS := $(EMU_VFILES) $(EMU_CXXFILES)
@@ -104,8 +110,10 @@ EMU := $(BUILD_DIR)/emu
 
 $(EMU_MK): $(SIM_TOP_V) | $(EMU_DEPS)
 	@mkdir -p $(@D)
+	date -R
 	verilator --cc --exe $(VERILATOR_FLAGS) \
 		-o $(abspath $(EMU)) -Mdir $(@D) $^ $(EMU_DEPS)
+	date -R
 
 ifndef NEMU_HOME
 $(error NEMU_HOME is not set)
@@ -115,11 +123,13 @@ $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
 $(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
+	date -R
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j200 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j128 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
 endif
+	date -R
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
@@ -155,6 +165,7 @@ cache:
 clean:
 	git submodule foreach git clean -fdx
 	git clean -fd
+	rm -rf ./build
 
 init:
 	git submodule update --init

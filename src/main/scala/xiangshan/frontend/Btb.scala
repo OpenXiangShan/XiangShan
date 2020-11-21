@@ -1,6 +1,7 @@
 package xiangshan.frontend
 
 import chisel3._
+import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType

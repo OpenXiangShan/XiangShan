@@ -44,7 +44,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   })
   
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
-  val data = Reg(Vec(LoadQueueSize, new LsRoqEntry)) // FIXME: use LoadQueueEntry instead
+  val data = Reg(Vec(LoadQueueSize, new LsqEntry)) // FIXME: use LoadQueueEntry instead
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val valid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
