@@ -252,10 +252,10 @@ class ReservationStationCtrl
     p"selV:${selValid} selReg:${selReg} selIdxReg:${selectedIdxReg} selIdxRegOH:${Binary(selectedIdxRegOH)}\n")
   XSDebug(print, p"bubMask:${Binary(bubMask.asUInt)} firstBub:${firstBubble} findBub:${findBubble} " +
     p"bubReg:${bubReg} bubIdxReg:${bubIdxReg} bubIdxRegOH:${Binary(bubIdxRegOH)}\n")
-  XSDebug(p" : Idx |v|r|s |cnt|s1:s2:s3\n")
+  XSDebug(p" :Idx|v|r|s |cnt|s1:s2:s3\n")
   for(i <- srcQueue.indices) {
     XSDebug(p"${i.U}: ${idxQueue(i)}|${validQueue(i)}|${readyQueue(i)}|${stateQueue(i)}|" +
-      p"${cntQueue(i)}|${srcQueue(0)}:${srcQueue(1)}:${srcQueue(2)}\n")
+      p"${cntQueue(i)}|${srcQueue(i)(0)}:${srcQueue(i)(1)}:${srcQueue(i)(2)}\n")
   }
 }
 
