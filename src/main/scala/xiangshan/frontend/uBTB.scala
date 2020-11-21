@@ -287,36 +287,23 @@ class MicroBTB extends BasePredictor
         metas(b).wWay := Mux(do_reset, reset_way, update_write_way)
         metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
     }
-    // when(meta_write_valid)
-    // {
-    //     //commit update
-    //     uBTBMeta(update_write_way)(update_bank).is_Br := u.pd.brType === BrType.branch
-    //     uBTBMeta(update_write_way)(update_bank).is_RVC := u.pd.isRVC
-    //     //(0 until PredictWidth).foreach{b =>  uBTBMeta(update_write_way)(b).valid := false.B}
-    //     uBTBMeta(update_write_way)(update_bank).valid := true.B
-    //     uBTBMeta(update_write_way)(update_bank).tag := update_tag
-    //     uBTBMeta(update_write_way)(update_bank).pred := 
-    //     Mux(!update_hits,
-    //         Mux(update_taken,3.U,0.U),
-    //         satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)
-    //     )
-    // }
 
     if (BPUDebug && debug) {
-        // XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
-        // XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
-        // for(i <- 0 until PredictWidth) {
-        //     XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",
-        //                             i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).is_Br,read_resp(i).target,out_ubtb_br_info.writeWay(i))
-        // }
+        XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
+        XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
+        for(i <- 0 until PredictWidth) {
+            XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",
+                                    i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).is_Br,read_resp(i).target,out_ubtb_br_info.writeWay(i))
+        }
 
-        // XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n "
-        //             ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_taget_offset(offsetSize-1,0))
-        // XSDebug(meta_write_valid, "uBTB update: update_taken:%d | old_pred:%b | new_pred:%b\n",
-        //     update_taken, uBTBMeta(update_write_way)(update_bank).pred,
-        //     Mux(!update_hits,
-        //         Mux(update_taken,3.U,0.U),
-        //         satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)))
+        XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n "
+                    ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_taget_offset(offsetSize-1,0))
+        XSDebug(meta_write_valid, "uBTB update: update_taken:%d | old_pred:%b | new_pred:%b\n",
+            update_taken, metas(update_bank).rpred,
+            Mux(!update_hits,
+                    Mux(update_taken,3.U,0.U),
+                    satUpdate( metas(update_bank).rpred,2,update_taken)
+                )
 
     }
    
