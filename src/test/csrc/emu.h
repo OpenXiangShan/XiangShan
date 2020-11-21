@@ -29,7 +29,9 @@ class Emulator {
   VXSSimTop *dut_ptr;
   VerilatedVcdC* tfp;
   bool enable_waveform;
+#ifdef VM_SAVABLE
   VerilatedSaveMem snapshot_slot[2];
+#endif
   EmuArgs args;
 
   enum {

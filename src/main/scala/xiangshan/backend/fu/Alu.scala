@@ -6,14 +6,7 @@ import utils.{LookupTree, LookupTreeDefault, SignExt, XSDebug, ZeroExt}
 import xiangshan._
 import xiangshan.backend.ALUOpType
 
-class Alu extends FunctionUnit(FuConfig(
-  fuType = FuType.alu,
-  numIntSrc = 2,
-  numFpSrc = 0,
-  writeIntRf = true,
-  writeFpRf = false,
-  hasRedirect = true
-)) with HasRedirectOut {
+class Alu extends FunctionUnit with HasRedirectOut {
 
   val (src1, src2, offset, func, pc, uop) = (
     io.in.bits.src(0),
@@ -84,28 +77,4 @@ class Alu extends FunctionUnit(FuConfig(
   io.out.valid := valid
   io.out.bits.uop <> io.in.bits.uop
   io.out.bits.data := aluRes
-
-  XSDebug(io.in.valid || io.redirectIn.valid,
-    "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:f:%d v:%d\n",
-    io.in.valid,
-    io.in.ready,
-    io.out.valid,
-    io.out.ready,
-    io.redirectIn.valid,
-    io.redirectIn.bits.isException,
-    io.redirectIn.bits.isFlushPipe,
-    redirectHit,
-    io.redirectIn.bits.brTag.flag,
-    io.redirectIn.bits.brTag.value
-  )
-  XSDebug(io.in.valid,
-    p"src1:${Hexadecimal(src1)} src2:${Hexadecimal(src2)} " +
-      p"offset:${Hexadecimal(offset)} func:${Binary(func)} " +
-      p"pc:${Hexadecimal(pc)} roqIdx:${uop.roqIdx}\n"
-  )
-  XSDebug(io.out.valid,
-    p"res:${Hexadecimal(io.out.bits.data)} aluRes:${Hexadecimal(aluRes)} " +
-      p"isRVC:${isRVC} isBranch:${isBranch} " +
-      p"target:${Hexadecimal(target)} taken:${taken}\n"
-  )
 }

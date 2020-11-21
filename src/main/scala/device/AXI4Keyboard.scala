@@ -14,7 +14,7 @@ class KeyboardIO extends Bundle {
 // this Module is not tested
 class AXI4Keyboard
 (
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new KeyboardIO)
 {

@@ -84,10 +84,13 @@ class IFU extends XSModule with HasIFUConst
   shiftPtr := false.B
   newPtr := if1_histPtr
 
-
-
-  val if1_GHInfo = Wire(new GlobalHistoryInfo())
-  if1_GHInfo := 0.U.asTypeOf(new GlobalHistoryInfo)
+  def wrapGHInfo(bp: BranchPrediction) = {
+    val ghi = Wire(new GlobalHistoryInfo())
+    ghi.sawNTBr     := bp.hasNotTakenBrs
+    ghi.takenOnBr   := bp.takenOnBr
+    ghi.saveHalfRVI := bp.saveHalfRVI
+    ghi
+  }
 
   //********************** IF2 ****************************//
   val if2_valid = RegEnable(next = if1_valid, init = false.B, enable = if1_fire)
@@ -95,7 +98,6 @@ class IFU extends XSModule with HasIFUConst
   val if2_fire = if2_valid && if3_ready && !if2_flush
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
-  val if2_GHInfo = RegEnable(if1_GHInfo, if1_fire)
   val if2_predHistPtr = RegEnable(ptr, enable=if1_fire)
   if2_ready := if2_fire || !if2_valid || if2_flush
   when (if2_flush) { if2_valid := if1_fire }
@@ -118,17 +120,14 @@ class IFU extends XSModule with HasIFUConst
     if1_npc := if2_bp.target
   }
 
-  val if2_realGHInfo = Wire(new GlobalHistoryInfo())
-  if2_realGHInfo.sawNTBr     := if2_bp.hasNotTakenBrs
-  if2_realGHInfo.takenOnBr   := if2_bp.takenOnBr
-  if2_realGHInfo.saveHalfRVI := if2_bp.saveHalfRVI
+  val if2_GHInfo = wrapGHInfo(if2_bp)
 
-  when (if2_fire && if2_realGHInfo.shifted) {
+  when (if2_fire && if2_GHInfo.shifted) {
     shiftPtr := true.B
     newPtr := if2_newPtr
   }
-  when (if2_realGHInfo.shifted && if2_newPtr >= ptr) {
-    hist(if2_newPtr-ptr) := if2_realGHInfo.takenOnBr.asUInt
+  when (if2_GHInfo.shifted && if2_newPtr >= ptr) {
+    hist(if2_newPtr-ptr) := if2_GHInfo.takenOnBr.asUInt
   }
 
 
@@ -138,7 +137,6 @@ class IFU extends XSModule with HasIFUConst
   val if4_ready = WireInit(false.B)
   val if3_fire = if3_valid && if4_ready && (inLoop || io.icacheResp.valid) && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
-  val if3_GHInfo = RegEnable(if2_realGHInfo, if2_fire)
   val if3_predHistPtr = RegEnable(if2_predHistPtr, enable=if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
   when (if3_flush) { if3_valid := false.B }
@@ -147,10 +145,7 @@ class IFU extends XSModule with HasIFUConst
 
   val if3_bp = bpu.io.out(1).bits
 
-  val if3_realGHInfo = Wire(new GlobalHistoryInfo())
-  if3_realGHInfo.sawNTBr     := if3_bp.hasNotTakenBrs
-  if3_realGHInfo.takenOnBr   := if3_bp.takenOnBr
-  if3_realGHInfo.saveHalfRVI := if3_bp.saveHalfRVI
+  val if3_GHInfo = wrapGHInfo(if3_bp)
 
   class PrevHalfInstr extends Bundle {
     val valid = Bool()
@@ -189,7 +184,7 @@ class IFU extends XSModule with HasIFUConst
   when (if3_redirect) {
     when (!(if3_hasPrevHalfInstr && prevHalfInstr.taken)) {
       if1_npc := if3_bp.target
-      when (if3_realGHInfo.shifted){
+      when (if3_GHInfo.shifted){
         shiftPtr := true.B
         newPtr := if3_newPtr
       }
@@ -197,8 +192,8 @@ class IFU extends XSModule with HasIFUConst
   }
 
   // when it does not redirect, we still need to modify hist(wire)
-  when(if3_realGHInfo.shifted && if3_newPtr >= ptr) {
-    hist(if3_newPtr-ptr) := if3_realGHInfo.takenOnBr
+  when(if3_GHInfo.shifted && if3_newPtr >= ptr) {
+    hist(if3_newPtr-ptr) := if3_GHInfo.takenOnBr
   }
   when (if3_hasPrevHalfInstr && prevHalfInstr.ghInfo.shifted && prevHalfInstr.newPtr >= ptr) {
     hist(prevHalfInstr.newPtr-ptr) := prevHalfInstr.ghInfo.takenOnBr
@@ -212,7 +207,6 @@ class IFU extends XSModule with HasIFUConst
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
 
-  val if4_GHInfo = RegEnable(if3_realGHInfo, if3_fire)
   val if4_predHistPtr = RegEnable(if3_predHistPtr, enable=if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
@@ -222,11 +216,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2).bits
 
-  val if4_realGHInfo = Wire(new GlobalHistoryInfo())
-  if4_realGHInfo.sawNTBr     := if4_bp.hasNotTakenBrs
-  if4_realGHInfo.takenOnBr   := if4_bp.takenOnBr
-  if4_realGHInfo.saveHalfRVI := if4_bp.saveHalfRVI
-
+  val if4_GHInfo = wrapGHInfo(if4_bp)
 
   val if4_cfi_jal = if4_pd.instrs(if4_bp.jmpIdx)
   val if4_cfi_jal_tgt = if4_pd.pc(if4_bp.jmpIdx) + Mux(if4_pd.pd(if4_bp.jmpIdx).isRVC,
@@ -239,7 +229,7 @@ class IFU extends XSModule with HasIFUConst
   when (bpu.io.out(2).valid && if4_fire && if4_bp.saveHalfRVI) {
     if4_prevHalfInstr.valid := true.B
     if4_prevHalfInstr.taken := if4_bp.taken
-    if4_prevHalfInstr.ghInfo := if4_realGHInfo
+    if4_prevHalfInstr.ghInfo := if4_GHInfo
     // Make sure shifted can work
     if4_prevHalfInstr.ghInfo.saveHalfRVI := false.B
     if4_prevHalfInstr.newPtr := if4_newPtr
@@ -260,14 +250,6 @@ class IFU extends XSModule with HasIFUConst
       if1_npc := if4_bp.target
     }
   }
-  // }.elsewhen (bpu.io.out(2).valid && if4_fire/* && !if4_bp.redirect*/) {
-  //   // We redirect the pipeline to the next fetch packet,
-  //   // which contains the last half of the RVI instruction
-  //   when (if4_bp.saveHalfRVI && if4_bp.taken) {
-  //     if4_redirect := true.B
-  //     if1_npc := snpc(if4_pc)
-  //   }
-  // }
 
   // This should cover the if4 redirect to snpc when saveHalfRVI
   when (if3_redirect) {
@@ -280,20 +262,10 @@ class IFU extends XSModule with HasIFUConst
   when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
     shiftPtr := true.B
     newPtr := if4_newPtr
-  // }.elsewhen (bpu.io.out(2).valid && if4_fire/* && !if4_bp.redirect*/) {
-  //   // only if we hasn't seen not taken branches and 
-  //   // see a not taken branch in if4 should we tell 
-  //   // if3 and if4 to update histptr
-  //   // We do not shift global history pointer unless we have the full
-  //   // RVI instruction
-  //   when (if4_newSawNTBrs && !if4_bp.takenOnBr) {
-  //     shiftPtr := true.B
-  //     // newPtr := if4_realGHInfo.newPtr
-  //   }
   }
 
-  when (if4_realGHInfo.shifted && if4_newPtr >= ptr) {
-    hist(if4_newPtr-ptr) := if4_realGHInfo.takenOnBr
+  when (if4_GHInfo.shifted && if4_newPtr >= ptr) {
+    hist(if4_newPtr-ptr) := if4_GHInfo.takenOnBr
   }
 
   when (if3_redirect) {
@@ -306,8 +278,8 @@ class IFU extends XSModule with HasIFUConst
   }
 
   // modify GHR at the end of a prediction lifetime
-  when (if4_fire && if4_realGHInfo.shifted) {
-    extHist(if4_newPtr) := if4_realGHInfo.takenOnBr
+  when (if4_fire && if4_GHInfo.shifted) {
+    extHist(if4_newPtr) := if4_GHInfo.takenOnBr
   }
 
   // This is a histPtr which is only modified when a prediction
@@ -315,17 +287,17 @@ class IFU extends XSModule with HasIFUConst
   val finalPredHistPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
   if4_histPtr := finalPredHistPtr
   if4_newPtr  := if3_histPtr
-  when (if4_fire && if4_realGHInfo.shifted) {
+  when (if4_fire && if4_GHInfo.shifted) {
     finalPredHistPtr := if4_newPtr
   }
 
-  if3_histPtr := Mux(if4_realGHInfo.shifted && if4_valid && !if4_flush, if4_histPtr - 1.U, if4_histPtr)
+  if3_histPtr := Mux(if4_GHInfo.shifted && if4_valid && !if4_flush, if4_histPtr - 1.U, if4_histPtr)
   if3_newPtr  := if2_histPtr
 
-  if2_histPtr := Mux(if3_realGHInfo.shifted && if3_valid && !if3_flush, if3_histPtr - 1.U, if3_histPtr)
+  if2_histPtr := Mux(if3_GHInfo.shifted && if3_valid && !if3_flush, if3_histPtr - 1.U, if3_histPtr)
   if2_newPtr  := if1_histPtr
 
-  if1_histPtr := Mux(if2_realGHInfo.shifted && if2_valid && !if2_flush, if2_histPtr - 1.U, if2_histPtr)
+  if1_histPtr := Mux(if2_GHInfo.shifted && if2_valid && !if2_flush, if2_histPtr - 1.U, if2_histPtr)
 
 
 
@@ -473,16 +445,15 @@ class IFU extends XSModule with HasIFUConst
 
     XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x ptr=%d mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, ptr, mask(if1_npc))
     XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_histPtr, if2_snpc)
-    XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, if3_histPtr, crossPageIPF, if3_realGHInfo.sawNTBr)
-    XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_histPtr, if4_crossPageIPF, if4_realGHInfo.sawNTBr)
+    XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, if3_histPtr, crossPageIPF, if3_GHInfo.sawNTBr)
+    XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_histPtr, if4_crossPageIPF, if4_GHInfo.sawNTBr)
     XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", io.icacheReq.valid, io.icacheReq.ready, io.icacheReq.bits.addr)
     XSDebug("[IF1][ghr] headPtr=%d shiftPtr=%d newPtr=%d ptr=%d\n", if1_histPtr, shiftPtr, newPtr, ptr)
     XSDebug("[IF1][ghr] hist=%b\n", hist.asUInt)
     XSDebug("[IF1][ghr] extHist=%b\n\n", extHist.asUInt)
 
     XSDebug("[IF2][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n\n", if2_bp.redirect, if2_bp.taken, if2_bp.jmpIdx, if2_bp.hasNotTakenBrs, if2_bp.target, if2_bp.saveHalfRVI)
-    // XSDebug("[IF2][GHInfo]: %s\n", if2_realGHInfo)
-    if2_realGHInfo.debug
+    if2_GHInfo.debug
 
     XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
     XSDebug("[IF3][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if3_bp.redirect, if3_bp.taken, if3_bp.jmpIdx, if3_bp.hasNotTakenBrs, if3_bp.target, if3_bp.saveHalfRVI)
@@ -492,16 +463,14 @@ class IFU extends XSModule with HasIFUConst
       prevHalfInstr.valid, prevHalfInstr.taken, prevHalfInstr.fetchpc, prevHalfInstr.idx, prevHalfInstr.pc, prevHalfInstr.target, prevHalfInstr.instr, prevHalfInstr.ipf)
     XSDebug("[IF3][if3_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n\n",
       if3_prevHalfInstr.valid, if3_prevHalfInstr.taken, if3_prevHalfInstr.fetchpc, if3_prevHalfInstr.idx, if3_prevHalfInstr.pc, if3_prevHalfInstr.target, if3_prevHalfInstr.instr, if3_prevHalfInstr.ipf)
-    // XSDebug("[IF3][GHInfo]: %s\n", if3_realGHInfo)
-    if3_realGHInfo.debug
+    if3_GHInfo.debug
 
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
     XSDebug("[IF4][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.redirect, if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
     XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_cfi_jal, if4_cfi_jal_tgt)
     XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
       if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr, if4_prevHalfInstr.ipf)
-    // XSDebug("[IF4][GHInfo]: %s\n", if4_realGHInfo)
-    if4_realGHInfo.debug
+    if4_GHInfo.debug
     XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d crossPageIPF=%d\n",
       io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask, io.fetchPacket.bits.ipf, io.fetchPacket.bits.crossPageIPFFix)
     for (i <- 0 until PredictWidth) {

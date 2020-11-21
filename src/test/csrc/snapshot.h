@@ -1,3 +1,7 @@
+#ifndef SNAPSHOT_H
+#define SNAPSHOT_H
+
+#ifdef VM_SAVABLE
 #include "VXSSimTop.h"
 #include <verilated_save.h>
 
@@ -28,3 +32,6 @@ public:
   void flush();
   void save();
 };
+#endif
+
+#endif
