@@ -9,6 +9,18 @@ MEM_GEN = ./scripts/vlsi_mem_gen
 SIMTOP = top.TestMain
 IMAGE ?= temp
 
+# co-simulation with DRAMsim3
+ifeq ($(WITH_DRAMSIM3),1)
+ifndef DRAMSIM3_HOME
+$(error DRAMSIM3_HOME is not set)
+endif
+override SIM_ARGS += --with-dramsim3
+
+EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
+EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/XiangShan.ini\\\" -DDRAMSIM3_OUTDIR=\\\"$(BUILD_DIR)\\\"
+EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
+endif
+
 # remote machine with more cores to speedup c++ build
 REMOTE ?= localhost
 
@@ -43,7 +55,6 @@ verilog: $(TOP_V)
 
 SIM_TOP = XSSimTop
 SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
-SIM_ARGS =
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	date -R
@@ -62,7 +73,6 @@ EMU_LDFLAGS   = -lpthread -lSDL2 -ldl
 VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
 
 # Verilator trace support
-EMU_TRACE    ?= 0
 ifeq ($(EMU_TRACE),1)
 VEXTRA_FLAGS += --trace
 endif
@@ -74,21 +84,9 @@ VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
 endif
 
 # Verilator savable
-EMU_SNAPSHOT ?= 0
 ifeq ($(EMU_SNAPSHOT),1)
 VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
-endif
-
-# co-simulation with DRAMsim3
-USE_DRAMSIM3 ?= 0
-ifeq ($(USE_DRAMSIM3),1)
-ifndef DRAMSIM3_HOME
-$(error DRAMSIM3_HOME is not set)
-endif
-EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
-EMU_CXXFLAGS += -DWITH_DRAMSIM3 -DDRAMSIM3_CONFIG=\\\"$(DRAMSIM3_HOME)/configs/XiangShan.ini\\\" -DDRAMSIM3_OUTDIR=\\\"$(BUILD_DIR)\\\"
-EMU_LDFLAGS  += $(DRAMSIM3_HOME)/build/libdramsim3.a
 endif
 
 # --trace
