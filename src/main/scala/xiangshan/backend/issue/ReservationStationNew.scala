@@ -222,11 +222,13 @@ class ReservationStationCtrl
   }
 
   // wakeup
-  srcQueue.zipWithIndex.map{ case (src, i) =>
+  for(i <- 0 until IssQueSize) {
     val hitVec = io.data.srcUpdate(idxQueue(i))
-    src.zipWithIndex.map{ case (s, j) =>
-      when (hitVec(j) && validQueue(i)) { s := true.B }
-      XSDebug(validQueue(i) && hitVec(j), p"srcHit: i:${i.U} j:${j.U}\n")
+    for(j <- 0 until srcNum) {
+      when (hitVec(j) && validQueue(i)) {
+        srcQueue(i.U - moveMask(i))(j) := true.B
+        XSDebug(p"srcHit: i:${i.U} j:${j.U}\n")
+      }
     }
   }
 
