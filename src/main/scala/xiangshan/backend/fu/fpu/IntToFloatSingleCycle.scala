@@ -65,7 +65,7 @@ class IntToFloatSingleCycle extends FPUSubModule {
   )
   val resD = Cat(aSignReg, expRounded, mantRounded)
 
-  io.in.ready := true.B
+  io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.data := Mux(aIsZeroReg, 0.U, Mux(isDoubleReg, resD, resS))
