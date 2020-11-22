@@ -143,7 +143,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         // allocated(loadWbIndex) := io.loadIn(i).bits.miss // if hit, lq entry can be recycled
         
-        val loadWbData = Wire(new LsRoqEntry)
+        val loadWbData = Wire(new LsqEntry)
         loadWbData.paddr := io.loadIn(i).bits.paddr
         loadWbData.vaddr := io.loadIn(i).bits.vaddr
         loadWbData.mask := io.loadIn(i).bits.mask

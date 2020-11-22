@@ -20,7 +20,6 @@ class ExceptionAddrIO extends XSBundle {
 class LsqEntry extends XSBundle {
   val vaddr = UInt(VAddrBits.W) // TODO: need opt
   val paddr = UInt(PAddrBits.W)
-  val op = UInt(6.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(16.W) // TODO: opt size
@@ -35,7 +34,7 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
     val wb = Vec(nchannel, new Bundle() {
       val wen = Input(Bool())
       val index = Input(UInt(log2Up(size).W))
-      val wdata = Input(new LsRoqEntry)
+      val wdata = Input(new LsqEntry)
     })
     val uncache = new Bundle() {
       val wen = Input(Bool())
@@ -48,13 +47,13 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
     }
     val needForward = Input(Vec(nchannel, Vec(2, UInt(size.W))))
     val forward = Vec(nchannel, Flipped(new LoadForwardQueryIO))
-    val rdata = Output(Vec(size, new LsRoqEntry))
+    val rdata = Output(Vec(size, new LsqEntry))
     
     // val debug = new Bundle() {
-    //   val debug_data = Vec(LoadQueueSize, new LsRoqEntry)
+    //   val debug_data = Vec(LoadQueueSize, new LsqEntry)
     // }
 
-    def wbWrite(channel: Int, index: UInt, wdata: LsRoqEntry): Unit = {
+    def wbWrite(channel: Int, index: UInt, wdata: LsqEntry): Unit = {
       require(channel < nchannel && channel >= 0)
       // need extra "this.wb(channel).wen := true.B"
       this.wb(channel).index := index
@@ -80,7 +79,7 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
 
   io := DontCare
 
-  val data = Reg(Vec(size, new LsRoqEntry))
+  val data = Reg(Vec(size, new LsqEntry))
 
   // writeback to lq/sq
   (0 until 2).map(i => {
@@ -267,16 +266,14 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && uncacheState === s_idle))
 
   // fix valid, allocate lq / sq index
-    (0 until RenameWidth).map(i => {
-      val isStore = CommitType.lsInstIsStore(io.dp1Req(i).bits.ctrl.commitType)
-      loadQueue.io.dp1Req(i).valid := !isStore && io.dp1Req(i).valid
-      storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid
-      loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
-      storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
-      loadQueue.io.lqReady <> storeQueue.io.lqReady
-      loadQueue.io.sqReady <> storeQueue.io.sqReady
-      io.lsIdxs(i).lsroqIdx := DontCare
-      io.dp1Req(i).ready := storeQueue.io.dp1Req(i).ready && loadQueue.io.dp1Req(i).ready
-    })
-  }
+  (0 until RenameWidth).map(i => {
+    val isStore = CommitType.lsInstIsStore(io.dp1Req(i).bits.ctrl.commitType)
+    loadQueue.io.dp1Req(i).valid := !isStore && io.dp1Req(i).valid
+    storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid
+    loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
+    storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
+    loadQueue.io.lqReady <> storeQueue.io.lqReady
+    loadQueue.io.sqReady <> storeQueue.io.sqReady
+    io.dp1Req(i).ready := storeQueue.io.dp1Req(i).ready && loadQueue.io.dp1Req(i).ready
+  })
 }

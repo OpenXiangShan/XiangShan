@@ -42,7 +42,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   })
   
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
-  // val data = Reg(Vec(StoreQueueSize, new LsRoqEntry))
+  // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
   val dataModule = Module(new LSQueueData(StoreQueueSize, StorePipelineWidth))
   dataModule.io := DontCare 
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
@@ -112,7 +112,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       miss(stWbIndex) := io.storeIn(i).bits.miss
       pending(stWbIndex) := io.storeIn(i).bits.mmio
 
-      val storeWbData = Wire(new LsRoqEntry)
+      val storeWbData = Wire(new LsqEntry)
       storeWbData := DontCare
       storeWbData.paddr := io.storeIn(i).bits.paddr
       storeWbData.vaddr := io.storeIn(i).bits.vaddr
