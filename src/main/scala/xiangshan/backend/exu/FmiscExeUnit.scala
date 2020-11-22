@@ -4,8 +4,6 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan.backend.exu.Exu.fmiscExeUnitCfg
-import xiangshan.backend.fu.FunctionUnit
-import xiangshan.backend.fu.FunctionUnit.fmiscSel
 import xiangshan.backend.fu.fpu.FPUOpType._
 import xiangshan.backend.fu.fpu._
 
@@ -13,8 +11,8 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
 
   val frm = IO(Input(UInt(3.W)))
 
-  val fcmp :: fmv :: f2i :: f32toF64 :: f64toF32 :: fdivSqrt :: Nil = supportedFunctionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
-  val toFpUnits = Seq(f32toF64, f64toF32, fdivSqrt)
+  val fcmp :: fmin :: fmv :: fsgnj :: f2i :: f32toF64 :: f64toF32 :: fdivSqrt :: Nil = supportedFunctionUnits.map(fu => fu.asInstanceOf[FPUSubModule])
+  val toFpUnits = Seq(fmin, fsgnj, f32toF64, f64toF32, fdivSqrt)
   val toIntUnits = Seq(fcmp, fmv, f2i)
 
   assert(fpArb.io.in.length == toFpUnits.size)
@@ -50,7 +48,7 @@ class FmiscExeUnit extends Exu(fmiscExeUnitCfg) {
   )
   val intOutCtrl = io.toInt.bits.uop.ctrl
   io.toInt.bits.data := Mux(
-    (intOutCtrl.isRVF && intOutCtrl.fuOpType === fmv_i2f) ||
+    (intOutCtrl.isRVF && intOutCtrl.fuOpType === fmv_f2i) ||
       intOutCtrl.fuOpType === f2w ||
       intOutCtrl.fuOpType === f2wu,
     SignExt(intArb.io.out.bits.data(31, 0), XLEN),

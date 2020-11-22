@@ -81,7 +81,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.roqDeqPtr := deqPtrExt
 
   // Dispatch
-  val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.noSpecExec)
+  val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.blockBackward)
   val hasNoSpec = RegInit(false.B)
   when(isEmpty){ hasNoSpec:= false.B }
   val validDispatch = io.dp1Req.map(_.valid)
