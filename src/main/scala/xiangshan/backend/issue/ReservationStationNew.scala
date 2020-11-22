@@ -59,11 +59,14 @@ class ReservationStationCtrl
   extraListenPortsCnt: Int,
   srcNum: Int = 3,
   feedback: Boolean,
+  fixedDelay: Int,
   replayDelay: Int = 10
 ) extends XSModule {
 
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
+  val fastWakeup = fixedDelay > 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
+  val nonBlocked = fastWakeup
 
   val io = IO(new XSBundle {
     // flush
@@ -84,6 +87,7 @@ class ReservationStationCtrl
   val s_idle :: s_valid :: s_wait :: s_replay :: Nil = Enum(4)
 
   val needFeedback  = if (feedback) true.B else false.B
+  val notBlock      = if (nonBlocked) true.B else false.B
   val stateQueue    = RegInit(VecInit(Seq.fill(iqSize)(s_idle)))
   val validQueue    = stateQueue.map(_ === s_valid)
   val emptyQueue    = stateQueue.map(_ === s_idle)
@@ -109,8 +113,8 @@ class ReservationStationCtrl
   val selectedIdxRegOH = Wire(UInt(iqSize.W))
   val selectMask = WireInit(VecInit(
     (0 until iqSize).map(i =>
-      readyQueue(i) && !(selectedIdxRegOH(i) && issFire)
-      // TODO: add redirect here, may cause long latency , change it
+      readyQueue(i) && Mux(notBlock, true.B, !(selectedIdxRegOH(i) && (issFire)))
+      // NOTE: if nonBlocked, then change state at sel stage
     )
   ))
   val haveBubble = Wire(Bool())
@@ -125,8 +129,9 @@ class ReservationStationCtrl
   // TODO:
   val bubIdxRegOH = Wire(UInt(iqSize.W))
   val bubMask = WireInit(VecInit(
-    (0 until iqSize).map(i => emptyQueue(i) && !bubIdxRegOH(i))
-  ))
+    (0 until iqSize).map(i => emptyQueue(i) && !bubIdxRegOH(i) &&
+                              Mux(notBlock, !selectedIdxRegOH(i), true.B)
+  )))
   val (firstBubble, findBubble) = PriorityEncoderWithFlag(bubMask)
   haveBubble := findBubble && (firstBubble < tailPtr)
   val bubValid = haveBubble
@@ -142,6 +147,7 @@ class ReservationStationCtrl
     (Fill(iqSize, 1.U(1.W)) << deqIdx)(iqSize-1, 0)
   } & Fill(iqSize, deqValid)
 
+  // move
   for(i <- 0 until iqSize-1){
     when(moveMask(i)){
       idxQueue(i)   := idxQueue(i+1)
@@ -149,15 +155,20 @@ class ReservationStationCtrl
       stateQueue(i) := stateQueue(i+1)
     }
   }
+  when (notBlock && selValid) { // if notBlock, disable at select stage
+    stateQueue(selectedIdxWire - moveMask(selectedIdxWire)) := s_idle
+    // TODO: may have long latency
+  }
   when(deqValid){
     idxQueue.last := idxQueue(deqIdx)
     stateQueue.last := s_idle
   }
-
   when (issFire && needFeedback) {
     stateQueue(selectedIdxReg) := s_wait
   }
 
+
+  // redirect and feedback
   for (i <- 0 until iqSize) {
     val cnt = cntQueue(idxQueue(i))
 
@@ -188,7 +199,8 @@ class ReservationStationCtrl
 
   // output
   val issValid = selReg && !redHitVec(selectedIdxReg)
-  issFire := issValid && io.data.fuReady
+  issFire := issValid && Mux(notBlock, true.B, io.data.fuReady)
+  if (nonBlocked) { assert(io.data.fuReady, "if fu wanna fast wakeup, it should not block")}
 
   // enq
   val tailAfterRealDeq = tailPtr - (issFire && !needFeedback|| bubReg)
@@ -269,11 +281,15 @@ class ReservationStationData
   wakeupCnt: Int,
   extraListenPortsCnt: Int,
   fixedDelay: Int,
+  feedback: Boolean,
   srcNum: Int = 3
 ) extends XSModule {
 
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
+  val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
+  val nonBlocked = fastWakeup
+  val notBlock   = if (nonBlocked) true.B else false.B
 
   val io = IO(new XSBundle {
     // flush
@@ -384,6 +400,7 @@ class ReservationStationData
   io.deq.bits.src2 := data(deq)(1)
   io.deq.bits.src3 := data(deq)(2)
   io.deq.valid := RegNext(sel.valid)
+  if (nonBlocked) { assert(io.deq.ready, "if fu wanna fast wakeup, it should not block")}
 
   // to ctrl
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
@@ -396,33 +413,32 @@ class ReservationStationData
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
     XSDebug(bpHitReg, p"EnqBPHitData: (${i.U}) data:${Hexadecimal(bpData)}\n")
   }
-  io.ctrl.fuReady  := io.deq.ready
+  io.ctrl.fuReady  := Mux(notBlock, true.B, io.deq.ready)
   io.ctrl.redVec   := VecInit(uop.map(_.roqIdx.needFlush(io.redirect))).asUInt
-  (0 until IssQueSize).map(i =>
-    io.ctrl.feedback(i) := uop(i).roqIdx.asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid)
-  io.ctrl.feedback(IssQueSize) := io.feedback.bits.hit
+
+  io.ctrl.feedback := DontCare
+  if (feedback) {
+    (0 until IssQueSize).map(i =>
+      io.ctrl.feedback(i) := uop(i).roqIdx.asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid)
+    io.ctrl.feedback(IssQueSize) := io.feedback.bits.hit
+  }
+
 
   // bypass send
-  // store selected uops and send out one cycle before result back
-  def bpSelCheck(uop: MicroOp): Bool = { // TODO: wanna a map from FunctionUnit.scala
-    val fuType = uop.ctrl.fuType
-    (fuType === FuType.alu) ||
-    (fuType === FuType.jmp) ||
-    (fuType === FuType.i2f) ||
-    (fuType === FuType.csr) ||
-    (fuType === FuType.fence) ||
-    (fuType === FuType.fmac)
-    // TODO: bpSelCheck may not necessary, to check it by fixedDelay and Backend
+  io.selectedUop <> DontCare
+  if (fastWakeup) {
+    val bpQueue = Module(new BypassQueue(fixedDelay))
+    bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
+    bpQueue.io.in.bits := uop(sel.bits)
+    bpQueue.io.redirect := io.redirect
+    io.selectedUop.valid := bpQueue.io.out.valid
+    io.selectedUop.bits  := bpQueue.io.out.bits
+
+    XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
+      p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
+      p"rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
   }
-  val bpQueue = Module(new BypassQueue(fixedDelay))
-  bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
-  bpQueue.io.in.bits := uop(sel.bits)
-  bpQueue.io.redirect := io.redirect
-  io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits)
-  io.selectedUop.bits  := bpQueue.io.out.bits
-  XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
-    p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
-    p"rfWen:${io.selectedUop.bits.ctrl.rfWen} fpWen:${io.selectedUop.bits.ctrl.fpWen}\n" )
+
 
   // log
   XSDebug(io.feedback.valid, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")

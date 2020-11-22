@@ -113,11 +113,12 @@ class Backend extends XSModule
     val extraListenPortsCnt = extraListenPorts.length
 
     val feedback = (cfg == ldExeUnitCfg) || (cfg == stExeUnitCfg)
-    
-    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs_ctrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, feedback = feedback))
-    val rs_data = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency))
+    println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: " +
+      s"${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
+
+    val rs_ctrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
+    val rs_data = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
 
     rs_ctrl.io.data <> rs_data.io.ctrl
     rs_ctrl.io.redirect <> redirect // TODO: remove it
