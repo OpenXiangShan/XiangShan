@@ -321,7 +321,9 @@ class ReservationStationData
   val enqPtrReg = RegEnable(enqPtr, enqCtrl.fire())
   when (enqCtrl.fire()) {
     uop(enqPtr) := enqUop
-    XSDebug(p"enqCtrl: enqPtr:${enqPtr} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
+    XSDebug(p"enqCtrl: enqPtr:${enqPtr} src1:${enqUop.psrc1}|${enqUop.src1State}|${enqUop.ctrl.src1Type}" +
+      p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
+      p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
 
   when (RegNext(enqCtrl.fire())) { // TODO: turn to srcNum, not the 3
