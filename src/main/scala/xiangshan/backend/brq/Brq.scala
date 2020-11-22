@@ -184,20 +184,19 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // branch insts enq
-  var full = WireInit(isFull(headPtrNext, tailPtr))
-  var tailPtrNext = WireInit(tailPtr)
-  for((enq, brTag) <- io.enqReqs.zip(io.brTags)){
-    enq.ready := !full
-    brTag := tailPtrNext
-    when(enq.fire()){
-      brQueue(tailPtrNext.value).npc := enq.bits.cf.brUpdate.pnpc
-      brQueue(tailPtrNext.value).ptrFlag := tailPtrNext.flag
+  for(i <- 0 until DecodeWidth){
+    val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
+    val brTag = tailPtr + offset
+    val idx = brTag.value
+    io.enqReqs(i).ready := stateQueue(idx).isIdle
+    io.brTags(i) := brTag
+    when(io.enqReqs(i).fire()){
+      brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc
+      brQueue(idx).ptrFlag := brTag.flag
     }
-
-    tailPtrNext = tailPtrNext + enq.fire()
-    full = isFull(tailPtrNext, headPtrNext)
   }
-  tailPtr := tailPtrNext
+  val enqCnt = PopCount(io.enqReqs.map(_.fire()))
+  tailPtr := tailPtr + enqCnt
 
   // exu write back
   for(exuWb <- io.exuRedirect){
