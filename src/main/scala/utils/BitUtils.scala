@@ -78,6 +78,18 @@ object HigherMask {
   }
 }
 
+object LowerMaskFromLowest {
+  def apply(a: UInt) = {
+    LowerMask(PriorityEncoderOH(a))
+  }
+}
+
+object HigherMaskFromHighest {
+  def apply(a: UInt) = {
+    Reverse(LowerMask(PriorityEncoderOH(Reverse(a))))
+  }
+}
+
 object LowestBit {
   def apply(a: UInt, len: Int) = {
     Mux(a(0), 1.U(len.W), Reverse((ParallelOR((0 until len).map(i => Reverse(a(len - 1, 0)) >> i.U)) + 1.U) >> 1.U))
