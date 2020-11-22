@@ -110,6 +110,9 @@ void init_ram(const char *img) {
 
   fseek(fp, 0, SEEK_END);
   img_size = ftell(fp);
+  if (img_size > RAMSIZE) {
+    img_size = RAMSIZE;
+  }
 
   fseek(fp, 0, SEEK_SET);
   int ret = fread(ram, img_size, 1, fp);
