@@ -200,7 +200,7 @@ class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val logCtrl = new LogCtrlIO
       val trap = new TrapIO
       val uart = new UARTIO
-      val memAXI = chiselTypeOf(axiSimRam.module.io)
+      val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
     })
 
     io.difftest <> dut.module.io.difftest
