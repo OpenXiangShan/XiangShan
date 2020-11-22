@@ -143,8 +143,8 @@ class CtrlSignals extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val isXSTrap = Bool()
-  val noSpecExec = Bool()  // This inst can not be speculated
-  val isBlocked  = Bool()  // This inst requires pipeline to be blocked
+  val noSpecExec = Bool()  // wait forward
+  val blockBackward  = Bool()  // block backward
   val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
   val imm = UInt(XLEN.W)

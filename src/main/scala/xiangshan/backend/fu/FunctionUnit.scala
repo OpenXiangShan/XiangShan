@@ -233,13 +233,25 @@ object FunctionUnit extends HasXSParameter {
 
   val fcmpCfg = FuConfig(
     fuGen = fcmp _,
-    fuSel = fmiscSel(FU_FCMP),
+    fuSel = (x: FunctionUnit) => fmiscSel(FU_FCMP)(x) && x.io.in.bits.uop.ctrl.rfWen,
     FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
+  )
+
+  val fminCfg = FuConfig(
+    fuGen = fcmp _,
+    fuSel = (x: FunctionUnit) => fmiscSel(FU_FCMP)(x) && x.io.in.bits.uop.ctrl.fpWen,
+    FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
+  )
+
+  val fsgnjCfg = FuConfig(
+    fuGen = fmv _,
+    fuSel = (x: FunctionUnit) => fmiscSel(FU_FMV)(x) && x.io.in.bits.uop.ctrl.fpWen,
+    FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(1)
   )
 
   val fmvCfg = FuConfig(
     fuGen = fmv _,
-    fuSel = fmiscSel(FU_FMV),
+    fuSel = (x: FunctionUnit) => fmiscSel(FU_FMV)(x) && x.io.in.bits.uop.ctrl.rfWen,
     FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(1)
   )
 
