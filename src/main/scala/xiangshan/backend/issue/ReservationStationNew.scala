@@ -319,14 +319,15 @@ class ReservationStationData
   // enq
   val enqPtr = enq(log2Up(IssQueSize)-1,0)
   val enqPtrReg = RegEnable(enqPtr, enqCtrl.fire())
-  when (enqCtrl.fire()) {
+  val enqEn  = enqCtrl.fire()
+  val enqEnReg = RegNext(enqEn)
+  when (enqEn) {
     uop(enqPtr) := enqUop
     XSDebug(p"enqCtrl: enqPtr:${enqPtr} src1:${enqUop.psrc1}|${enqUop.src1State}|${enqUop.ctrl.src1Type}" +
       p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
-
-  when (RegNext(enqCtrl.fire())) { // TODO: turn to srcNum, not the 3
+  when (enqEnReg) { // TODO: turn to srcNum, not the 3
     data(enqPtrReg)(0) := io.enqData.src1
     data(enqPtrReg)(1) := io.enqData.src2
     data(enqPtrReg)(2) := io.enqData.src3
@@ -366,7 +367,7 @@ class ReservationStationData
       val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
       when (wuHit) { data(i)(j) := wuData }
-      when (bpHitReg && (enqPtrReg=/=i.U)) { data(i)(j) := bpData }
+      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { data(i)(j) := bpData }
       // NOTE: the hit is from data's info, so there is an erro that:
       //       when enq, hit use last instr's info not the enq info.
       //       it will be long latency to add correct here, so add it to ctrl or somewhere else
