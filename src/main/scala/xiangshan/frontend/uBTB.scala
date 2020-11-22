@@ -183,7 +183,7 @@ class MicroBTB extends BasePredictor
     // val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
     
 
-    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways(PredictWidth.U - read_bank_inOrder(b)))
+    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways((b.U + PredictWidth.U - read_req_basebank)(log2Up(PredictWidth)-1, 0)))
 
     val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => metas(read_bank_inOrder(b)).rdata))
     val  btb_resp = VecInit((0 until PredictWidth).map(b => datas(read_bank_inOrder(b)).rdata))  
