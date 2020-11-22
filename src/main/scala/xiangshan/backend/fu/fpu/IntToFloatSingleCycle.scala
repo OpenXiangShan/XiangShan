@@ -3,12 +3,10 @@ package xiangshan.backend.fu.fpu
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
-import xiangshan.backend.fu.{CertainLatency, FuConfig}
+import xiangshan.backend.fu.{CertainLatency, FuConfig, FunctionUnit}
 import xiangshan.backend.fu.fpu.util.ORTree
 
-class IntToFloatSingleCycle extends FPUSubModule(
-  FuConfig(FuType.i2f, 1, 0, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(0))
-) {
+class IntToFloatSingleCycle extends FPUSubModule {
 
   val a = io.in.bits.src(0)
   val aNeg = (~a).asUInt()
@@ -67,7 +65,7 @@ class IntToFloatSingleCycle extends FPUSubModule(
   )
   val resD = Cat(aSignReg, expRounded, mantRounded)
 
-  io.in.ready := true.B
+  io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.data := Mux(aIsZeroReg, 0.U, Mux(isDoubleReg, resD, resS))

@@ -9,6 +9,14 @@ import xiangshan._
 import xiangshan.backend._
 import utils.XSDebug
 
+object debugId extends Function0[Integer] {
+  var x = 0
+  def apply(): Integer = {
+    x = x + 1
+    return x
+  }
+}
+
 trait HasCSRConst {
   // User Trap Setup
   val Ustatus       = 0x000
@@ -168,34 +176,27 @@ class PerfCounterIO extends XSBundle {
   val value = Input(UInt(XLEN.W))
 }
 
-class CSR extends FunctionUnit(FuConfig(
-  fuType = FuType.csr,
-  numIntSrc = 1,
-  numFpSrc = 0,
-  writeIntRf = true,
-  writeFpRf = false,
-  hasRedirect = false
-)) with HasCSRConst
+class CSR extends FunctionUnit with HasCSRConst
 {
-
-  val redirectOut = IO(Output(new Redirect))
-  val redirectOutValid = IO(Output(Bool()))
-  val fpu_csr = IO(Flipped(new FpuCsrIO))
-  // from rob
-  val exception = IO(Flipped(ValidIO(new MicroOp)))
-  val isInterrupt = IO(Input(Bool()))
-  // for exception check
-  // for differential testing
-  //  val intrNO = Output(UInt(XLEN.W))
-  val wenFix = IO(Output(Bool()))
-  val perf = IO(Vec(NumPerfCounters, new PerfCounterIO))
-  val memExceptionVAddr = IO(Input(UInt(VAddrBits.W)))
-  val trapTarget = IO(Output(UInt(VAddrBits.W)))
-  val mtip = IO(Input(Bool()))
-  val msip = IO(Input(Bool()))
-  val meip = IO(Input(Bool()))
-  val interrupt = IO(Output(Bool()))
-  val tlbCsrIO = IO(Output(new TlbCsrBundle))
+  val csrio = IO(new Bundle {
+    // output (for func === CSROpType.jmp)
+    val redirectOut = ValidIO(UInt(VAddrBits.W))
+    val perf = Vec(NumPerfCounters, new PerfCounterIO)
+    // to FPU
+    val fpu = Flipped(new FpuCsrIO)
+    // from rob
+    val exception = Flipped(ValidIO(new MicroOp))
+    val isInterrupt = Input(Bool())
+    // to ROB
+    val trapTarget = Output(UInt(VAddrBits.W))
+    val interrupt = Output(Bool())
+    // from LSQ
+    val memExceptionVAddr = Input(UInt(VAddrBits.W))
+    // from outside cpu,externalInterrupt
+    val externalInterrupt = new ExternalInterruptIO
+    // TLB
+    val tlb = Output(new TlbCsrBundle)
+  })
 
   val cfIn = io.in.bits.uop.cf
   val cfOut = Wire(new CtrlFlow)
@@ -361,7 +362,7 @@ class CSR extends FunctionUnit(FuConfig(
 
   val tlbBundle = Wire(new TlbCsrBundle)
   tlbBundle.satp := satp.asTypeOf(new SatpStruct)
-  tlbCsrIO := tlbBundle
+  csrio.tlb := tlbBundle
 
   // User-Level CSRs
   val uepc = Reg(UInt(XLEN.W))
@@ -426,7 +427,7 @@ class CSR extends FunctionUnit(FuConfig(
   val perfCnts = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfCntsLoMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb00 + i, perfCnts(i)))
   val perfCntsHiMapping = (0 until nrPerfCnts).map(i => MaskedRegMap(0xb80 + i, perfCnts(i)(63, 32)))
-
+  println(s"CSR: hasPerfCnt:${hasPerfCnt}")
   // CSR reg map
   val mapping = Map(
 
@@ -537,17 +538,17 @@ class CSR extends FunctionUnit(FuConfig(
   val rdataDummy = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
 
-  when(fpu_csr.fflags.asUInt() =/= 0.U){
-    fcsr := fflags_wfn(fpu_csr.fflags.asUInt())
+  when(csrio.fpu.fflags.asUInt() =/= 0.U){
+    fcsr := fflags_wfn(csrio.fpu.fflags.asUInt())
   }
   // set fs and sd in mstatus
-  when(csrw_dirty_fp_state || fpu_csr.dirty_fs){
+  when(csrw_dirty_fp_state || csrio.fpu.dirty_fs){
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
     mstatus := mstatusNew.asUInt()
   }
-  fpu_csr.frm := fcsr.asTypeOf(new FcsrStruct).frm
+  csrio.fpu.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
   // CSR inst decode
   val isEbreak = addr === privEbreak && func === CSROpType.jmp
@@ -596,21 +597,21 @@ class CSR extends FunctionUnit(FuConfig(
   tlbBundle.priv.imode := priviledgeMode
   tlbBundle.priv.dmode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
 
-  val hasInstrPageFault = exception.bits.cf.exceptionVec(instrPageFault) && exception.valid
-  val hasLoadPageFault = exception.bits.cf.exceptionVec(loadPageFault) && exception.valid
-  val hasStorePageFault = exception.bits.cf.exceptionVec(storePageFault) && exception.valid
-  val hasStoreAddrMisaligned = exception.bits.cf.exceptionVec(storeAddrMisaligned) && exception.valid
-  val hasLoadAddrMisaligned = exception.bits.cf.exceptionVec(loadAddrMisaligned) && exception.valid
+  val hasInstrPageFault = csrio.exception.bits.cf.exceptionVec(instrPageFault) && csrio.exception.valid
+  val hasLoadPageFault = csrio.exception.bits.cf.exceptionVec(loadPageFault) && csrio.exception.valid
+  val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && csrio.exception.valid
+  val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && csrio.exception.valid
+  val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && csrio.exception.valid
 
   // mtval write logic
-  val memExceptionAddr = SignExt(memExceptionVAddr, XLEN)
+  val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
   when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
     val tval = Mux(
       hasInstrPageFault,
       Mux(
-        exception.bits.cf.crossPageIPFFix,
-        SignExt(exception.bits.cf.pc + 2.U, XLEN),
-        SignExt(exception.bits.cf.pc, XLEN)
+        csrio.exception.bits.cf.crossPageIPFFix,
+        SignExt(csrio.exception.bits.cf.pc + 2.U, XLEN),
+        SignExt(csrio.exception.bits.cf.pc, XLEN)
       ),
       memExceptionAddr
     )
@@ -638,14 +639,14 @@ class CSR extends FunctionUnit(FuConfig(
   intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
   val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
   val intrBitSet = intrVec.orR()
-  interrupt := intrBitSet
+  csrio.interrupt := intrBitSet
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  val raiseIntr = intrBitSet && exception.valid && isInterrupt
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", exception.bits.cf.pc, intrNO)
+  val raiseIntr = intrBitSet && csrio.exception.valid && csrio.isInterrupt
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.cf.pc, intrNO)
 
-  mipWire.t.m := mtip
-  mipWire.s.m := msip
-  mipWire.e.m := meip
+  mipWire.t.m := csrio.externalInterrupt.mtip
+  mipWire.s.m := csrio.externalInterrupt.msip
+  mipWire.e.m := csrio.externalInterrupt.meip
 
   // exceptions
   val csrExceptionVec = Wire(Vec(16, Bool()))
@@ -663,35 +664,36 @@ class CSR extends FunctionUnit(FuConfig(
   val iduExceptionVec = cfIn.exceptionVec
   val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
-  wenFix := DontCare
 
-  val raiseExceptionVec = exception.bits.cf.exceptionVec.asUInt()
+  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec.asUInt()
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
-  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-  ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
-  ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
+  // if (!env.FPGAPlatform) {
+    val id = debugId()
+    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+    ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
+    ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
+  // }
 
-  val raiseExceptionIntr = exception.valid
+  val raiseExceptionIntr = csrio.exception.valid
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  redirectOut := DontCare
-  redirectOutValid := valid && func === CSROpType.jmp && !isEcall
-  redirectOut.target := retTarget
+  csrio.redirectOut.valid := valid && func === CSROpType.jmp && !isEcall
+  csrio.redirectOut.bits := retTarget
   flushPipe := resetSatp
 
-  XSDebug(redirectOutValid, "redirect to %x, pc=%x\n", redirectOut.target, cfIn.pc)
+  XSDebug(csrio.redirectOut.valid, "redirect to %x, pc=%x\n", csrio.redirectOut.bits, cfIn.pc)
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    exception.bits.cf.pc,
+    csrio.exception.bits.cf.pc,
     intrNO,
-    exception.bits.cf.intrVec.asUInt,
+    csrio.exception.bits.cf.intrVec.asUInt,
     exceptionNO,
     raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
-    exception.bits.cf.pc,
+    csrio.exception.bits.cf.pc,
     mstatus,
     mideleg,
     medeleg,
@@ -705,7 +707,7 @@ class CSR extends FunctionUnit(FuConfig(
   val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
   val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
 
-  trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+  csrio.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   retTarget := DontCare
   // val illegalEret = TODO
 
@@ -752,7 +754,7 @@ class CSR extends FunctionUnit(FuConfig(
 
     when (delegS) {
       scause := causeNO
-      sepc := SignExt(exception.bits.cf.pc, XLEN)
+      sepc := SignExt(csrio.exception.bits.cf.pc, XLEN)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -761,7 +763,7 @@ class CSR extends FunctionUnit(FuConfig(
       // trapTarget := stvec(VAddrBits-1. 0)
     }.otherwise {
       mcause := causeNO
-      mepc := SignExt(exception.bits.cf.pc, XLEN)
+      mepc := SignExt(csrio.exception.bits.cf.pc, XLEN)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
@@ -777,9 +779,9 @@ class CSR extends FunctionUnit(FuConfig(
   io.out.valid := valid
 
 
-  XSDebug(redirectOutValid,
+  XSDebug(csrio.redirectOut.valid,
     "Rediret %x raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d\n",
-    redirectOut.target,
+    csrio.redirectOut.bits,
     raiseExceptionIntr,
     isSret,
     retTarget,
@@ -791,8 +793,8 @@ class CSR extends FunctionUnit(FuConfig(
   )
   XSDebug(raiseExceptionIntr && delegS,
     "Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d\n",
-    redirectOutValid,
-    redirectOut.target,
+    csrio.redirectOut.valid,
+    csrio.redirectOut.bits,
     raiseExceptionIntr,
     isSret,
     retTarget,

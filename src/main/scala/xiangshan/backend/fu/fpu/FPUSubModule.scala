@@ -35,7 +35,7 @@ trait HasFPUSigs { this: FPUSubModule =>
   val isDouble = !io.in.bits.uop.ctrl.isRVF
 }
 
-abstract class FPUSubModule(cfg: FuConfig) extends FunctionUnit(cfg)
+abstract class FPUSubModule extends FunctionUnit
   with HasUIntToSIntHelper
   with HasFPUSigs
 {
@@ -43,6 +43,6 @@ abstract class FPUSubModule(cfg: FuConfig) extends FunctionUnit(cfg)
   val fflags = IO(Output(new Fflags))
 }
 
-abstract class FPUPipelineModule(cfg: FuConfig)
-  extends FPUSubModule(cfg)
+abstract class FPUPipelineModule
+  extends FPUSubModule
   with HasPipelineReg

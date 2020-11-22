@@ -3,7 +3,7 @@ package xiangshan.backend.fu.fpu
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
-import xiangshan.backend.fu.{CertainLatency, FuConfig}
+import xiangshan.backend.fu.{CertainLatency, FuConfig, FunctionUnit}
 import xiangshan.backend.fu.fpu.util.{ORTree, ShiftRightJam}
 
 //def f2w:UInt    = FpuOp("011", "000")
@@ -11,9 +11,9 @@ import xiangshan.backend.fu.fpu.util.{ORTree, ShiftRightJam}
 //def f2l:UInt    = FpuOp("011", "010")
 //def f2lu:UInt   = FpuOp("011", "011")
 
-class FloatToInt extends FPUPipelineModule(
-  FuConfig(FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2))
-){
+class FloatToInt extends FPUPipelineModule {
+
+  override def latency = FunctionUnit.f2iCfg.latency.latencyVal.get
 
   def SEXP_WIDTH = Float64.expWidth + 2
 
