@@ -170,35 +170,30 @@ class SbufferLRU(n_ways: Int) {
   private val state_reg = RegInit(0.U(nBits.W))
   def state_read = WireDefault(state_reg)
 
-  def get_next_state(state: UInt, touch_way: UInt): UInt = {
+
+
+  // set the row touched with 1, column with 0
+  def get_next_state(state: UInt, touch_ways: Seq[Valid[UInt]]): UInt = {
     val nextState     = Wire(Vec(n_ways, UInt(n_ways.W)))
     val moreRecentVec = state.asTypeOf(Vec(n_ways, UInt(n_ways.W)))
-    val wayDec        = UIntToOH(touch_way, n_ways)
+    val wayDecs       = touch_ways.map( w => Mux(w.valid, UIntToOH(w.bits, n_ways), 0.U) )
+    val wayDec        = ParallelOR(wayDecs)
     val wayUpd        = (~wayDec).asUInt()
 
     nextState.zipWithIndex.foreach { case (e, i) =>
-      e := Mux(i.U === touch_way,
-        wayUpd,
-        moreRecentVec(i) & wayUpd
-      )
+      e := Mux(wayDec(i), wayUpd, moreRecentVec(i) & wayUpd )
     }
     nextState.asUInt()
   }
 
-
-  def get_next_state(state: UInt, touch_ways: Seq[Valid[UInt]]): UInt = {
-    touch_ways.foldLeft(state)((prev, touch_way) => Mux(touch_way.valid, get_next_state(prev, touch_way.bits), prev))
-  }
-
-  def access(touch_way: UInt) {
-    state_reg := get_next_state(state_reg, touch_way)
-  }
+  // update the stateRect
   def access(touch_ways: Seq[Valid[UInt]]) {
     when (ParallelOR(touch_ways.map(_.valid))) {
       state_reg := get_next_state(state_reg, touch_ways)
     }
   }
 
+  // get the index of the smallest value from a set of numbers
   def get_min_value(xs: Seq[(UInt,UInt)]): (UInt,UInt)= {
     xs match {
       case Seq(a) => a
@@ -208,6 +203,7 @@ class SbufferLRU(n_ways: Int) {
     }
   }
 
+  // get the way which is valid and has the least 1
   def get_replace_way(state: UInt, sbufferState:Seq[Bool]): UInt = {
     val moreRecentVec = state.asTypeOf(Vec(n_ways, UInt(n_ways.W)))
     val count = Wire(Vec(n_ways, UInt(log2Up(n_ways).W)))
@@ -218,11 +214,7 @@ class SbufferLRU(n_ways: Int) {
     get_min_value(count.zip((0 until n_ways).map(_.U)))._2
   }
 
-  def way(sbufferState:Seq[Bool]) = get_replace_way(state_reg,sbufferState)
-  //def miss = access(way)
+  def way(sbufferState:Seq[Bool]) = get_replace_way(state_reg, sbufferState)
   def hit = {}
   def flush() = { state_reg := 0.U(nBits.W) }
-
-  //@deprecated("replace 'replace' with 'way' from abstract class ReplacementPolicy","Rocket Chip 2020.05")
-  //def replace: UInt = way
 }

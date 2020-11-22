@@ -357,6 +357,8 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
    */
   ptwl2.io.w.req <> DontCare
   tlbl2.io.w.req <> DontCare
+  ptwl2.io.w.req.valid := false.B
+  tlbl2.io.w.req.valid := false.B
   assert(!memRespFire || (state===state_wait_resp || sfenceLatch))
   when (memRespFire && !memPte.isPf() && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {

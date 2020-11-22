@@ -1,15 +1,3 @@
-[submodule "chisel3"]
-	path = chisel3
-	url = https://github.com/ucb-bar/chisel3
-[submodule "firrtl"]
-	path = firrtl
-	url = https://github.com/ucb-bar/firrtl
-[submodule "treadle"]
-	path = treadle
-	url = https://github.com/ucb-bar/treadle
-[submodule "hardfloat"]
-        path = hardfloat
-        url = https://github.com/ucb-bar/berkeley-hardfloat
 [submodule "rocket-chip"]
 	path = rocket-chip
 	url = https://github.com/chipsalliance/rocket-chip.git

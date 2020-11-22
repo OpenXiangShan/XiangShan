@@ -3,11 +3,11 @@ package xiangshan.backend.fu.fpu
 import chisel3._
 import chisel3.util._
 import xiangshan.FuType
-import xiangshan.backend.fu.{CertainLatency, FuConfig}
+import xiangshan.backend.fu.{CertainLatency, FuConfig, FunctionUnit}
 
-class FMV(XLEN: Int) extends FPUPipelineModule(
-  FuConfig(FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = true, hasRedirect = false, CertainLatency(1))
-) {
+class FMV(XLEN: Int) extends FPUPipelineModule {
+
+  override def latency = FunctionUnit.fmvCfg.latency.latencyVal.get
 
   val src = io.in.bits.src.map(x =>
     Mux(isDouble || op(2,1)==="b00".U, x, extF32ToF64(x))
