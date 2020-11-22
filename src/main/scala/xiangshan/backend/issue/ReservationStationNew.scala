@@ -200,7 +200,7 @@ class ReservationStationCtrl
   // output
   val issValid = selReg && !redHitVec(selectedIdxReg)
   issFire := issValid && Mux(notBlock, true.B, io.data.fuReady)
-  if (nonBlocked) { assert(io.data.fuReady, "if fu wanna fast wakeup, it should not block")}
+  if (nonBlocked) { assert(RegNext(io.data.fuReady), "if fu wanna fast wakeup, it should not block")}
 
   // enq
   val tailAfterRealDeq = tailPtr - (issFire && !needFeedback|| bubReg)
@@ -255,10 +255,10 @@ class ReservationStationCtrl
   io.numExist := tailPtr
 
   // assert
-  assert(tailPtr <= iqSize.U)
+  assert(RegNext(tailPtr <= iqSize.U))
 
   val print = !(tailPtr===0.U) || io.enqCtrl.valid
-  XSDebug(print, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issValid} ${io.data.fuReady})\n")
+  XSDebug(print || true.B, p"In(${io.enqCtrl.valid} ${io.enqCtrl.ready}) Out(${issValid} ${io.data.fuReady})\n")
   XSDebug(print , p"tailPtr:${tailPtr} tailPtrAdq:${tailAfterRealDeq} isFull:${isFull} " +
     p"needFeed:${needFeedback} vQue:${Binary(VecInit(validQueue).asUInt)} rQue:${Binary(readyQueue.asUInt)}\n")
   XSDebug(print && Cat(redHitVec).orR, p"Redirect: ${Hexadecimal(redHitVec.asUInt)}\n")
@@ -400,7 +400,7 @@ class ReservationStationData
   io.deq.bits.src2 := data(deq)(1)
   io.deq.bits.src3 := data(deq)(2)
   io.deq.valid := RegNext(sel.valid)
-  if (nonBlocked) { assert(io.deq.ready, "if fu wanna fast wakeup, it should not block")}
+  if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
 
   // to ctrl
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
@@ -442,6 +442,7 @@ class ReservationStationData
 
   // log
   XSDebug(io.feedback.valid, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")
+  XSDebug(true.B, p"out(${io.deq.valid} ${io.deq.ready})\n")
   XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): deqPtr:${deq} pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
     p" roqIdx:${io.deq.bits.uop.roqIdx} src1:${Hexadecimal(io.deq.bits.src1)} " +
     p" src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
