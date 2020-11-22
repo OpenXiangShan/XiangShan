@@ -19,7 +19,7 @@ class BypassQueue(number: Int) extends XSModule {
     io.out.bits := DontCare
   } else if(number == 0) {
     io.in <> io.out
-    io.out.valid := io.in.valid// && !io.out.bits.roqIdx.needFlush(io.redirect)
+    io.out.valid := io.in.valid
   } else {
     val queue = Seq.fill(number)(RegInit(0.U.asTypeOf(new Bundle{
       val valid = Bool()
@@ -31,7 +31,7 @@ class BypassQueue(number: Int) extends XSModule {
       queue(i+1) := queue(i)
       queue(i+1).valid := queue(i).valid && !queue(i).bits.roqIdx.needFlush(io.redirect)
     }
-    io.out.valid := queue(number-1).valid && !queue(number-1).bits.roqIdx.needFlush(io.redirect)
+    io.out.valid := queue(number-1).valid
     io.out.bits := queue(number-1).bits
     for (i <- 0 until number) {
       XSDebug(queue(i).valid, p"BPQue(${i.U}): pc:${Hexadecimal(queue(i).bits.cf.pc)} roqIdx:${queue(i).bits.roqIdx}" +
@@ -383,7 +383,7 @@ class ReservationStationData
   io.deq.bits.src1 := data(deq)(0)
   io.deq.bits.src2 := data(deq)(1)
   io.deq.bits.src3 := data(deq)(2)
-  io.deq.valid := RegNext(sel.valid) && !uop(deq).roqIdx.needFlush(io.redirect)
+  io.deq.valid := RegNext(sel.valid)
 
   // to ctrl
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
@@ -412,13 +412,13 @@ class ReservationStationData
     (fuType === FuType.csr) ||
     (fuType === FuType.fence) ||
     (fuType === FuType.fmac)
+    // TODO: bpSelCheck may not necessary, to check it by fixedDelay and Backend
   }
   val bpQueue = Module(new BypassQueue(fixedDelay))
   bpQueue.io.in.valid := sel.valid // FIXME: error when function is blocked => fu should not be blocked
   bpQueue.io.in.bits := uop(sel.bits)
   bpQueue.io.redirect := io.redirect
-  io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits) &&
-                         !bpQueue.io.out.bits.roqIdx.needFlush(io.redirect)
+  io.selectedUop.valid := bpQueue.io.out.valid && bpSelCheck(bpQueue.io.out.bits)
   io.selectedUop.bits  := bpQueue.io.out.bits
   XSDebug(io.selectedUop.valid, p"SelUop: pc:0x${Hexadecimal(io.selectedUop.bits.cf.pc)}" +
     p" roqIdx:${io.selectedUop.bits.roqIdx} pdest:${io.selectedUop.bits.pdest} " +
