@@ -364,8 +364,11 @@ class ReservationStationData
       val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
       when (wuHit) { data(i)(j) := wuData }
-      when (bpHitReg) { data(RegNext(i.U))(j) := bpData }
-
+      when (bpHitReg && (enqPtrReg=/=i.U)) { data(i)(j) := bpData }
+      // NOTE: the hit is from data's info, so there is an erro that:
+      //       when enq, hit use last instr's info not the enq info.
+      //       it will be long latency to add correct here, so add it to ctrl or somewhere else
+      //       enq bp is done at below
       XSDebug(wuHit, p"WUHit: (${i.U})(${j.U}) Data:0x${Hexadecimal(wuData)} i:${i.U} j:${j.U}\n")
       XSDebug(bpHit, p"BPHit: (${i.U})(${j.U}) i:${i.U} j:${j.U}\n")
       XSDebug(bpHitReg, p"BPHitData: (${i.U})(${j.U}) Data:0x${Hexadecimal(bpData)} i:${i.U} j:${j.U}\n")
@@ -386,6 +389,7 @@ class ReservationStationData
     val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.fire())
     when (bpHitReg) { data(enqPtrReg)(i) := bpData }
     h := bpHit
+    // NOTE: enq bp is done here
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
     XSDebug(bpHitReg, p"EnqBPHitData: (${i.U}) data:${Hexadecimal(bpData)}\n")
   }
