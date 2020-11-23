@@ -153,7 +153,7 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
     (c.value, in.w.bits.last)
   }
 
-  in.aw.ready := state === s_idle
+  in.aw.ready := state === s_idle && !in.ar.valid
   in.w.ready := state === s_wdata
 
   in.b.bits.resp := AXI4Parameters.RESP_OKAY

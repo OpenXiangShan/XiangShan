@@ -445,6 +445,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   TLArbiter.lowestFromSeq(edge, bus.c, Seq(prober.io.rep, wb.io.release))
 
+  // dcache should only deal with DRAM addresses
+  when (bus.a.fire()) {
+    assert(bus.a.bits.address >= 0x80000000L.U)
+  }
+  when (bus.b.fire()) {
+    assert(bus.b.bits.address >= 0x80000000L.U)
+  }
+  when (bus.c.fire()) {
+    assert(bus.c.bits.address >= 0x80000000L.U)
+  }
+
   // synchronization stuff
   def nack_load(addr: UInt) = {
     val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))

@@ -2,7 +2,7 @@
 #define SNAPSHOT_H
 
 #ifdef VM_SAVABLE
-#include "VXSSimTop.h"
+#include "VXSSimSoC.h"
 #include <verilated_save.h>
 
 class VerilatedSaveMem : public VerilatedSave {
