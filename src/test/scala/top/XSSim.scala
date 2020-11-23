@@ -113,6 +113,11 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       val uart = new UARTIO
     })
 
+    dontTouch(io.difftest)
+    dontTouch(io.logCtrl)
+    dontTouch(io.trap)
+    dontTouch(io.uart)
+
     io.uart <> axiMMIO.module.io.uart
     soc.module.io.meip := false.B
 
