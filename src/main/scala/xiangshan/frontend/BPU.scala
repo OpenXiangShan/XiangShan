@@ -137,6 +137,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter{
     val flush = Input(Bool())
     val in = Input(new BPUStageIO)
     val inFire = Input(Bool())
+    val stageValid = Input(Bool())
     val pred = Output(new BranchPrediction) // to ifu
     val out = Output(new BPUStageIO)        // to the next stage
     val outFire = Input(Bool())
@@ -324,8 +325,8 @@ class BPUStage3 extends BPUStage {
     ras.io <> DontCare
     ras.io.pc.bits := inLatch.pc 
     ras.io.pc.valid := io.outFire//predValid
-    ras.io.is_ret := rets.orR  && (retIdx === jmpIdx) && io.inFire
-    ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.inFire
+    ras.io.is_ret := rets.orR  && (retIdx === jmpIdx) && io.stageValid
+    ras.io.callIdx.valid := calls.orR && (callIdx === jmpIdx) && io.stageValid
     ras.io.callIdx.bits := callIdx
     ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
     ras.io.isLastHalfRVI := !io.predecode.isFetchpcEqualFirstpc
@@ -434,6 +435,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     // from if1
     val in = Input(new BPUReq)
     val inFire = Input(Vec(4, Bool()))
+    val stageValid = Input(Vec(3, Bool()))
     // to if2/if3/if4
     val out = Vec(3, Output(new BranchPrediction))
     // from if4
@@ -471,6 +473,10 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   s1.io.outFire := s2_fire
   s2.io.outFire := s3_fire
   s3.io.outFire := s4_fire
+
+  s1.io.stageValid := io.stageValid(0)
+  s2.io.stageValid := io.stageValid(1)
+  s3.io.stageValid := io.stageValid(2)
 
   io.out(0) <> s1.io.pred
   io.out(1) <> s2.io.pred
