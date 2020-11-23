@@ -161,7 +161,7 @@ object FunctionUnit extends HasXSParameter {
       UncertainLatency()
     )
 
-  val mouCfg = 
+  val mouCfg =
     FuConfig(FuType.mou, 2, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
       UncertainLatency()
   )
