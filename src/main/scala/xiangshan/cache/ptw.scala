@@ -175,7 +175,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
   val tlbl2 = Module(new SRAMTemplate(new TlbEntry, set = TlbL2EntrySize))
   val tlbv  = RegInit(0.U(TlbL2EntrySize.W)) // valid
-  val tlbg  = RegInit(0.U(TlbL2EntrySize.W)) // global
+  val tlbg  = Reg(UInt(TlbL2EntrySize.W)) // global
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = tagLen1)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   // val l1g   = VecInit((ptwl1.map(_.perm.g))).asUInt
@@ -183,7 +183,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
   val ptwl2 = Module(new SRAMTemplate(new PtwEntry(tagLen = tagLen2), set = PtwL2EntrySize))
   val l2v   = RegInit(0.U(PtwL2EntrySize.W)) // valid
-  val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
+  val l2g   = Reg(UInt(PtwL2EntrySize.W)) // global
 
   // mem alias
   // val memRdata = mem.d.bits.data
