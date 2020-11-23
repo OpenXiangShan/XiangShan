@@ -2,6 +2,7 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
+#include "ram.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -70,7 +71,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
 
 
 Emulator::Emulator(int argc, const char *argv[]):
-  dut_ptr(new VXSSimTop),
+  dut_ptr(new VXSSimSoC),
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
@@ -85,7 +86,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   reset_ncycles(10);
 
   // init ram
-  extern void init_ram(const char *img);
   init_ram(args.image);
 
   // init device
@@ -122,6 +122,9 @@ Emulator::Emulator(int argc, const char *argv[]):
 }
 
 Emulator::~Emulator() {
+#ifdef WITH_DRAMSIM3
+  dramsim3_finish();
+#endif
 #ifdef VM_SAVABLE
   snapshot_slot[0].save();
   snapshot_slot[1].save();
@@ -185,6 +188,13 @@ inline void Emulator::reset_ncycles(size_t cycles) {
 
 inline void Emulator::single_cycle() {
   dut_ptr->clock = 0;
+#ifdef WITH_DRAMSIM3
+  axi_channel axi;
+  axi_copy_from_dut_ptr(dut_ptr, axi);
+  dramsim3_helper(axi);
+  axi_set_dut_ptr(dut_ptr, axi);
+#endif
+
   dut_ptr->eval();
 
   dut_ptr->clock = 1;
