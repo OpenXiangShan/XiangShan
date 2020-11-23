@@ -6,7 +6,7 @@ import chisel3.util._
 import chipsalliance.rocketchip.config
 import chisel3.stage.ChiselGeneratorAnnotation
 import device._
-import freechips.rocketchip.amba.axi4.{AXI4UserYanker, AXI4Xbar}
+import freechips.rocketchip.amba.axi4.{AXI4UserYanker, AXI4Xbar, AXI4IdentityNode}
 import freechips.rocketchip.diplomacy.{AddressSet, BufferParams, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLToAXI4}
 import xiangshan._
@@ -63,9 +63,7 @@ class TrapIO extends XSBundle {
   val instrCnt = Output(UInt(XLEN.W))
 }
 
-
-class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
-
+class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
   // address space[0G - 1024G)
   val fullRange = AddressSet(0x0L, 0xffffffffffL)
   // MMIO address space[0G - 2G)
@@ -74,19 +72,25 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
   val dramRange = fullRange.subtract(mmioRange)
 
   val soc = LazyModule(new XSSoc())
-  // AXIRam
-  // -----------------------------------
-  val axiRam = LazyModule(new AXI4RAM(
-    dramRange,
-    memByte = 128 * 1024 * 1024,
-    useBlackBox = true,
-    beatBytes = L3BusWidth / 8
-  ))
 
+  // 4x1 crossbar
   val xbar = AXI4Xbar()
   soc.mem.map{mem => xbar := mem}
-  axiRam.node :=
-    xbar
+
+  // AXIRam
+  // -----------------------------------
+  val axiMem = {
+    if (axiSim)
+      AXI4IdentityNode()
+    else
+      LazyModule(new AXI4RAM(
+        dramRange,
+        memByte = 128 * 1024 * 1024,
+        useBlackBox = true,
+        beatBytes = L3BusWidth / 8
+      )).node
+  }
+  axiMem := xbar
 
   // AXI DMA
   // -----------------------------------
@@ -146,7 +150,7 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
       ExcitingUtils.addSink(difftest.medeleg, "difftestMedeleg", Debug)
       ExcitingUtils.addSink(difftest.scFailed, "difftestScFailed", Debug)
     }
-    
+
     // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
     io.difftest := difftest
 
@@ -174,23 +178,65 @@ class XSSimTop()(implicit p: config.Parameters) extends LazyModule with HasXSPar
   }
 }
 
+class XSSimTop(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
+  println(axiSim)
+  val dut = LazyModule(new XSSimSoC(axiSim))
+  val axiSimRam = {
+    if (axiSim) LazyModule(new AXI4RAM(
+      dut.dramRange,
+      memByte = 128 * 1024 * 1024,
+      useBlackBox = true,
+      beatBytes = L3BusWidth / 8
+    ))
+    else null
+  }
+  if (axiSim) {
+    axiSimRam.node := dut.axiMem
+  }
+
+  lazy val module = new LazyModuleImp(this) {
+    val io = IO(new Bundle {
+      val difftest = new DiffTestIO
+      val logCtrl = new LogCtrlIO
+      val trap = new TrapIO
+      val uart = new UARTIO
+      val memAXI = if (axiSim) chiselTypeOf(axiSimRam.module.io) else Input(Bool())
+    })
+
+    io.difftest <> dut.module.io.difftest
+    io.logCtrl <> dut.module.io.logCtrl
+    io.trap <> dut.module.io.trap
+    io.uart <> dut.module.io.uart
+    if (axiSim) {
+      io.memAXI <> axiSimRam.module.io
+    }
+    else {
+      io.memAXI <> DontCare
+    }
+  }
+}
+
 object TestMain extends App {
-  // set parameters
+  val axiSim = args.contains("--with-dramsim3")
+
+  // set soc parameters
+  val socArgs = args.filterNot(_ == "--with-dramsim3")
   Parameters.set(
-    if(args.contains("--fpga-platform")) {
-      if (args.contains("--dual-core")) Parameters.dualCoreParameters
+    if(socArgs.contains("--fpga-platform")) {
+      if (socArgs.contains("--dual-core")) Parameters.dualCoreParameters
       else Parameters()
     }
-    else if(args.contains("--disable-log")) Parameters.simParameters // sim only, disable log
+    else if(socArgs.contains("--disable-log")) Parameters.simParameters // sim only, disable log
     else Parameters.debugParameters // open log
   )
 
+  val otherArgs = socArgs.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core")
   implicit val p = config.Parameters.empty
   // generate verilog
   XiangShanStage.execute(
-    args.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core"),
+    otherArgs,
     Seq(
-      ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop).module)
+      ChiselGeneratorAnnotation(() => LazyModule(new XSSimTop(axiSim)).module)
     )
   )
 }

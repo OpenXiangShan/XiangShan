@@ -17,4 +17,8 @@
 
 #define eprintf(...) fprintf(stdout, ## __VA_ARGS__)
 
+#ifdef WITH_DRAMSIM3
+#include "cosimulation.h"
+#endif
+
 #endif // __COMMON_H
