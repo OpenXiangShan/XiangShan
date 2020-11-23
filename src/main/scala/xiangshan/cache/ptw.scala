@@ -57,7 +57,7 @@ class PteBundle extends PtwBundle{
 class PtwEntry(tagLen: Int) extends PtwBundle {
   val tag = UInt(tagLen.W)
   val ppn = UInt(ppnLen.W)
-  val perm = new PermBundle
+  // val perm = new PermBundle
 
   // TODO: add superpage
   def hit(addr: UInt) = {
@@ -68,21 +68,22 @@ class PtwEntry(tagLen: Int) extends PtwBundle {
   def refill(addr: UInt, pte: UInt) {
     tag := addr(PAddrBits-1, PAddrBits-tagLen)
     ppn := pte.asTypeOf(pteBundle).ppn
-    perm := pte.asTypeOf(pteBundle).perm
+    // perm := pte.asTypeOf(pteBundle).perm
   }
 
   def genPtwEntry(addr: UInt, pte: UInt) = {
     val e = Wire(new PtwEntry(tagLen))
     e.tag := addr(PAddrBits-1, PAddrBits-tagLen)
     e.ppn := pte.asTypeOf(pteBundle).ppn
-    e.perm := pte.asTypeOf(pteBundle).perm
+    // e.perm := pte.asTypeOf(pteBundle).perm
     e
   }
 
   override def cloneType: this.type = (new PtwEntry(tagLen)).asInstanceOf[this.type]
 
   override def toPrintable: Printable = {
-    p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
+    // p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)} perm:${perm}"
+    p"tag:0x${Hexadecimal(tag)} ppn:0x${Hexadecimal(ppn)}"
   }
 }
 
@@ -177,12 +178,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val tlbg  = RegInit(0.U(TlbL2EntrySize.W)) // global
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = tagLen1)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
-  val l1g   = VecInit((ptwl1.map(_.perm.g))).asUInt
+  // val l1g   = VecInit((ptwl1.map(_.perm.g))).asUInt
+  val l1g   = Reg(UInt(PtwL1EntrySize.W))
   // val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
   val ptwl2 = Module(new SRAMTemplate(new PtwEntry(tagLen = tagLen2), set = PtwL2EntrySize))
   val l2v   = RegInit(0.U(PtwL2EntrySize.W)) // valid
   val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
-  
+
   // mem alias
   // val memRdata = mem.d.bits.data
   val memRdata = Wire(UInt(XLEN.W))
@@ -239,7 +241,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val (l2Hit, l2HitData) = { // TODO: add excp
     val readRam = (l1Hit && level===0.U && state===state_req) || (memRespFire && state===state_wait_resp && level===0.U)
     val ridx = l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8))
-    
+
     assert(ptwl2.io.r.req.ready)
     ptwl2.io.r.req.valid := readRam
     ptwl2.io.r.req.bits.apply(setIdx = ridx)
@@ -331,7 +333,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     lgSize     = log2Up(l1BusDataWidth/8).U
   )._2
   mem.a.bits  := pteRead
-  mem.a.valid := state === state_req && 
+  mem.a.valid := state === state_req &&
                ((level===0.U && !tlbHit && !l1Hit) ||
                 (level===1.U && !l2Hit) ||
                 (level===2.U)) && !sfenceLatch && !sfence.valid
@@ -365,27 +367,28 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
       ptwl1(refillIdx).refill(l1addr, memRdata)
       l1v := l1v | UIntToOH(refillIdx)
+      l1g := (l1g & ~UIntToOH(refillIdx)) | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
     }
     when (level===1.U && !memPte.isLeaf) {
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
-      
+
       assert(ptwl2.io.w.req.ready)
       // ptwl2.io.w.req.valid := true.B
       ptwl2.io.w.apply(valid = true.B, setIdx = refillIdx, data = new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata), waymask = -1.S.asUInt)
       // ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
       l2v := l2v | UIntToOH(refillIdx)
-      l2g := l2g | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
+      l2g := (l2g & ~UIntToOH(refillIdx)) | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
     }
     when (memPte.isLeaf()) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
-      
+
       assert(tlbl2.io.w.req.ready)
       // tlbl2.io.w.req.valid := true.B
       tlbl2.io.w.apply(valid = true.B, setIdx = refillIdx, data = new TlbEntry().genTlbEntry(memRdata, level, req.vpn), waymask = -1.S.asUInt)
       // tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
       tlbv := tlbv | UIntToOH(refillIdx)
-      tlbg := tlbg | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
+      tlbg := (tlbg & ~UIntToOH(refillIdx)) | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
     }
   }
 
