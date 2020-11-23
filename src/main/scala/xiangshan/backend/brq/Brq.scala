@@ -67,24 +67,21 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     val exuOut = new ExuOutput
   }
 
-  val s_idle :: s_wb :: s_commited :: Nil  =
-    List.tabulate(3)(i => (1 << i).U(3.W).asTypeOf(new StateQueueEntry))
+  val s_invalid :: s_idle :: s_wb :: s_commited :: Nil  =
+    List.tabulate(4)(i => (1 << i).U(4.W).asTypeOf(new StateQueueEntry))
 
   class StateQueueEntry extends Bundle{
     val isCommit = Bool()
     val isWb = Bool()
     val isIdle = Bool()
+    val isInvalid = Bool()
   }
 
   val brCommitCnt = RegInit(0.U(BrTagWidth.W))
   val brQueue = Mem(BrqSize, new BrqEntry) //Reg(Vec(BrqSize, new BrqEntry))
-  val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
+  val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_invalid)))
 
   val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
-
-//  def isEmpty(ptr1: BrqPtr, ptr2: BrqPtr): Bool = ptr1 === ptr2
-//  def isFull(ptr1: BrqPtr, ptr2: BrqPtr): Bool = (ptr1.flag=/=ptr2.flag) && (ptr1.value===ptr2.value)
-
 
   // dequeue
   val headIdx = headPtr.value
@@ -147,7 +144,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
   stateQueue.reverse.map(s =>{
-    XSDebug(false, s.isIdle, "-")
+    XSDebug(false, s.isInvalid, "-")
+    XSDebug(false, s.isIdle, "i")
     XSDebug(false, s.isWb, "w")
     XSDebug(false, s.isCommit, "c")
   })
@@ -159,7 +157,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     stateQueue(commitIdx) := s_commited
   }
   when(deqValid){
-    stateQueue(headIdx) := s_idle
+    stateQueue(headIdx) := s_invalid
   }
   assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
@@ -188,11 +186,12 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := stateQueue(idx).isIdle
+    io.enqReqs(i).ready := stateQueue(idx).isInvalid
     io.brTags(i) := brTag
     when(io.enqReqs(i).fire()){
       brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc
       brQueue(idx).ptrFlag := brTag.flag
+      stateQueue(idx) := s_idle
     }
   }
   val enqCnt = PopCount(io.enqReqs.map(_.fire()))
@@ -217,7 +216,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   when(io.roqRedirect.valid){
     // exception
-    stateQueue.foreach(_ := s_idle)
+    stateQueue.foreach(_ := s_invalid)
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
     brCommitCnt := 0.U
@@ -229,7 +228,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
         (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
           (s.isWb && brQueue(i).exuOut.uop.roqIdx.needFlush(io.memRedirect))
       ){
-        s := s_idle
+        s := s_invalid
       }
     })
     when(io.redirect.valid){ // Only Br Mispred reset tailPtr, replay does not
