@@ -93,16 +93,16 @@ class IFU extends XSModule with HasIFUConst
   }
 
   //********************** IF2 ****************************//
-  val if2_valid = RegEnable(next = if1_valid, init = false.B, enable = if1_fire)
+  val if2_valid = RegInit(init = false.B)
   val if3_ready = WireInit(false.B)
   val if2_fire = if2_valid && if3_ready && !if2_flush
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
   val if2_predHistPtr = RegEnable(ptr, enable=if1_fire)
   if2_ready := if2_fire || !if2_valid || if2_flush
-  when (if2_flush) { if2_valid := if1_fire }
-  .elsewhen (if1_fire) { if2_valid := if1_valid }
-  .elsewhen (if2_fire) { if2_valid := false.B }
+  when (if1_fire)       { if2_valid := if1_valid }
+  .elsewhen (if2_flush) { if2_valid := false.B }
+  .elsewhen (if2_fire)  { if2_valid := false.B }
 
   when (RegNext(reset.asBool) && !reset.asBool) {
     if1_npc := resetVector.U(VAddrBits.W)
@@ -133,14 +133,14 @@ class IFU extends XSModule with HasIFUConst
 
 
   //********************** IF3 ****************************//
-  val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
+  val if3_valid = RegInit(init = false.B)
   val if4_ready = WireInit(false.B)
   val if3_fire = if3_valid && if4_ready && (inLoop || io.icacheResp.valid) && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHistPtr = RegEnable(if2_predHistPtr, enable=if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
-  when (if3_flush) { if3_valid := false.B }
-  .elsewhen (if2_fire) { if3_valid := if2_valid }
+  when (if3_flush)     { if3_valid := false.B }
+  .elsewhen (if2_fire) { if3_valid := true.B }
   .elsewhen (if3_fire) { if3_valid := false.B }
 
   val if3_bp = bpu.io.out(1)
@@ -210,8 +210,8 @@ class IFU extends XSModule with HasIFUConst
   val if4_predHistPtr = RegEnable(if3_predHistPtr, enable=if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
-  .elsewhen (if3_fire) { if4_valid := if3_valid }
-  .elsewhen(if4_fire)  { if4_valid := false.B }
+  .elsewhen (if3_fire) { if4_valid := true.B }
+  .elsewhen (if4_fire) { if4_valid := false.B }
 
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
