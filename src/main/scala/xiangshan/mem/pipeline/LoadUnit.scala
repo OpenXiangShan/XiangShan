@@ -268,7 +268,7 @@ class LoadUnit extends XSModule {
   io.lsq.loadIn.bits := load_s2.io.out.bits
 
   val hitLoadOut = Wire(Valid(new ExuOutput))
-  hitLoadOut.valid := load_s2.io.out.valid && !load_s2.io.out.bits.miss
+  hitLoadOut.valid := load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
   hitLoadOut.bits.uop := load_s2.io.out.bits.uop
   hitLoadOut.bits.data := load_s2.io.out.bits.data
   hitLoadOut.bits.redirectValid := false.B
