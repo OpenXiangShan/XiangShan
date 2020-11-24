@@ -93,16 +93,16 @@ class IFU extends XSModule with HasIFUConst
   }
 
   //********************** IF2 ****************************//
-  val if2_valid = RegEnable(next = if1_valid, init = false.B, enable = if1_fire)
+  val if2_valid = RegInit(init = false.B)
   val if3_ready = WireInit(false.B)
   val if2_fire = if2_valid && if3_ready && !if2_flush
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
   val if2_predHistPtr = RegEnable(ptr, enable=if1_fire)
   if2_ready := if2_fire || !if2_valid || if2_flush
-  when (if2_flush) { if2_valid := if1_fire }
-  .elsewhen (if1_fire) { if2_valid := if1_valid }
-  .elsewhen (if2_fire) { if2_valid := false.B }
+  when (if1_fire)       { if2_valid := if1_valid }
+  .elsewhen (if2_flush) { if2_valid := false.B }
+  .elsewhen (if2_fire)  { if2_valid := false.B }
 
   when (RegNext(reset.asBool) && !reset.asBool) {
     if1_npc := resetVector.U(VAddrBits.W)
@@ -112,10 +112,10 @@ class IFU extends XSModule with HasIFUConst
     if1_npc := RegNext(if1_npc)
   }
 
-  val if2_bp = bpu.io.out(0).bits
+  val if2_bp = bpu.io.out(0)
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
-  if2_redirect := if2_fire && bpu.io.out(0).valid && if2_bp.redirect && !if2_bp.saveHalfRVI
+  if2_redirect := if2_fire && if2_bp.redirect && !if2_bp.saveHalfRVI
   when (if2_redirect) {
     if1_npc := if2_bp.target
   }
@@ -133,17 +133,17 @@ class IFU extends XSModule with HasIFUConst
 
 
   //********************** IF3 ****************************//
-  val if3_valid = RegEnable(next = if2_valid, init = false.B, enable = if2_fire)
+  val if3_valid = RegInit(init = false.B)
   val if4_ready = WireInit(false.B)
   val if3_fire = if3_valid && if4_ready && (inLoop || io.icacheResp.valid) && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHistPtr = RegEnable(if2_predHistPtr, enable=if2_fire)
   if3_ready := if3_fire || !if3_valid || if3_flush
-  when (if3_flush) { if3_valid := false.B }
-  .elsewhen (if2_fire) { if3_valid := if2_valid }
+  when (if3_flush)     { if3_valid := false.B }
+  .elsewhen (if2_fire) { if3_valid := true.B }
   .elsewhen (if3_fire) { if3_valid := false.B }
 
-  val if3_bp = bpu.io.out(1).bits
+  val if3_bp = bpu.io.out(1)
 
   val if3_GHInfo = wrapGHInfo(if3_bp)
 
@@ -179,7 +179,7 @@ class IFU extends XSModule with HasIFUConst
 
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
-  if3_redirect := if3_fire && bpu.io.out(1).valid && (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.redirect && (if3_bp.taken && !if3_bp.saveHalfRVI || !if3_bp.taken) )
+  if3_redirect := if3_fire && (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.redirect && (if3_bp.taken && !if3_bp.saveHalfRVI || !if3_bp.taken) )
 
   when (if3_redirect) {
     when (!(if3_hasPrevHalfInstr && prevHalfInstr.taken)) {
@@ -210,11 +210,11 @@ class IFU extends XSModule with HasIFUConst
   val if4_predHistPtr = RegEnable(if3_predHistPtr, enable=if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
-  .elsewhen (if3_fire) { if4_valid := if3_valid }
-  .elsewhen(if4_fire)  { if4_valid := false.B }
+  .elsewhen (if3_fire) { if4_valid := true.B }
+  .elsewhen (if4_fire) { if4_valid := false.B }
 
   val if4_bp = Wire(new BranchPrediction)
-  if4_bp := bpu.io.out(2).bits
+  if4_bp := bpu.io.out(2)
 
   val if4_GHInfo = wrapGHInfo(if4_bp)
 
@@ -222,11 +222,11 @@ class IFU extends XSModule with HasIFUConst
   val if4_cfi_jal_tgt = if4_pd.pc(if4_bp.jmpIdx) + Mux(if4_pd.pd(if4_bp.jmpIdx).isRVC,
     SignExt(Cat(if4_cfi_jal(12), if4_cfi_jal(8), if4_cfi_jal(10, 9), if4_cfi_jal(6), if4_cfi_jal(7), if4_cfi_jal(2), if4_cfi_jal(11), if4_cfi_jal(5, 3), 0.U(1.W)), XLEN),
     SignExt(Cat(if4_cfi_jal(31), if4_cfi_jal(19, 12), if4_cfi_jal(20), if4_cfi_jal(30, 21), 0.U(1.W)), XLEN))
-  if4_bp.target := Mux(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, if4_cfi_jal_tgt, bpu.io.out(2).bits.target)
-  if4_bp.redirect := bpu.io.out(2).bits.redirect || if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken && if4_cfi_jal_tgt =/= bpu.io.out(2).bits.target
+  if4_bp.target := Mux(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, if4_cfi_jal_tgt, bpu.io.out(2).target)
+  if4_bp.redirect := bpu.io.out(2).redirect || if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken && if4_cfi_jal_tgt =/= bpu.io.out(2).target
 
   if4_prevHalfInstr := 0.U.asTypeOf(new PrevHalfInstr)
-  when (bpu.io.out(2).valid && if4_fire && if4_bp.saveHalfRVI) {
+  when (if4_fire && if4_bp.saveHalfRVI) {
     if4_prevHalfInstr.valid := true.B
     if4_prevHalfInstr.taken := if4_bp.taken
     if4_prevHalfInstr.ghInfo := if4_GHInfo
@@ -242,7 +242,7 @@ class IFU extends XSModule with HasIFUConst
   }
 
   // Redirect and npc logic for if4
-  when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
+  when (if4_fire && if4_bp.redirect) {
     if4_redirect := true.B
     when (if4_bp.saveHalfRVI) {
       if1_npc := snpc(if4_pc)
@@ -259,7 +259,7 @@ class IFU extends XSModule with HasIFUConst
   }
 
   // history logic for if4
-  when (bpu.io.out(2).valid && if4_fire && if4_bp.redirect) {
+  when (if4_fire && if4_bp.redirect) {
     shiftPtr := true.B
     newPtr := if4_newPtr
   }
@@ -361,20 +361,20 @@ class IFU extends XSModule with HasIFUConst
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
-  bpu.io.cacheValid := (inLoop || io.icacheResp.valid)
-  bpu.io.in.valid := if1_fire
-  bpu.io.in.bits.pc := if1_npc
-  bpu.io.in.bits.hist := hist.asUInt
-  bpu.io.in.bits.histPtr := ptr
-  bpu.io.in.bits.inMask := mask(if1_npc)
-  bpu.io.out(0).ready := if2_fire
-  bpu.io.out(1).ready := if3_fire
-  bpu.io.out(2).ready := if4_fire
-  bpu.io.predecode.valid := if4_valid
-  bpu.io.predecode.bits.mask := if4_pd.mask
-  bpu.io.predecode.bits.pd := if4_pd.pd
-  bpu.io.predecode.bits.isFetchpcEqualFirstpc := if4_pc === if4_pd.pc(0)
-  bpu.io.branchInfo.ready := if4_fire
+  bpu.io.inFire(0) := if1_fire
+  bpu.io.inFire(1) := if2_fire
+  bpu.io.inFire(2) := if3_fire
+  bpu.io.inFire(3) := if4_fire
+  bpu.io.stageValid(0) := if2_valid
+  bpu.io.stageValid(1) := if3_valid
+  bpu.io.stageValid(2) := if4_valid
+  bpu.io.in.pc := if1_npc
+  bpu.io.in.hist := hist.asUInt
+  bpu.io.in.histPtr := ptr
+  bpu.io.in.inMask := mask(if1_npc)
+  bpu.io.predecode.mask := if4_pd.mask
+  bpu.io.predecode.pd := if4_pd.pd
+  bpu.io.predecode.isFetchpcEqualFirstpc := if4_pc === if4_pd.pc(0)
 
   pd.io.in := icacheResp
   when(inLoop) {
@@ -419,7 +419,7 @@ class IFU extends XSModule with HasIFUConst
   when (if4_bp.taken) {
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
-  fetchPacketWire.brInfo := bpu.io.branchInfo.bits
+  fetchPacketWire.brInfo := bpu.io.branchInfo
   (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).histPtr := finalPredHistPtr)
   (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).predHistPtr := if4_predHistPtr)
   fetchPacketWire.pd := if4_pd.pd
