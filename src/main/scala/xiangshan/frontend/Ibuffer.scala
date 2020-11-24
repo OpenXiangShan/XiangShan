@@ -75,17 +75,14 @@ class Ibuffer extends XSModule {
   }
 
   // Deque
-
   when(deqValid) {
-    var deq_idx = head_ptr
-
     for(i <- 0 until DecodeWidth) {
-      var outWire = WireInit(ibuf(deq_idx))
+      val head_wire = head_ptr + i.U
+      val outWire = WireInit(ibuf(head_wire))
 
-      io.out(i).valid := ibuf_valid(deq_idx)
-      // Only when the entry is valid can it be set invalid
-      when (ibuf_valid(deq_idx)) { ibuf_valid(deq_idx) := !io.out(i).fire }
-      
+      io.out(i).valid := ibuf_valid(head_wire)
+      when (ibuf_valid(head_wire)) { ibuf_valid(head_wire) := !io.out(i).fire }
+
       io.out(i).bits.instr := outWire.inst
       io.out(i).bits.pc := outWire.pc
       // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
@@ -98,10 +95,8 @@ class Ibuffer extends XSModule {
       io.out(i).bits.brUpdate.pd := outWire.pd
       io.out(i).bits.brUpdate.brInfo := outWire.brInfo
       io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
-
-      deq_idx = deq_idx + io.out(i).fire
     }
-    head_ptr := deq_idx
+    head_ptr := head_ptr + io.out.map(_.fire).fold(0.U(log2Up(DecodeWidth).W))(_+_)
   }.otherwise {
     io.out.foreach(_.valid := false.B)
     io.out.foreach(_.bits <> DontCare)
