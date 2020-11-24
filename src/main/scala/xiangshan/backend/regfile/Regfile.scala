@@ -62,7 +62,7 @@ class Regfile
     )
   } else {
 
-	val regfile = Module(new RegfileBlackBox)
+	val regfile = Module(new regfile_160x64_10w16r_sim)
 
 	regfile.io.clk := this.clock
 	regfile.io.gpr := hasZero.B
@@ -143,7 +143,7 @@ class Regfile
 
 }
 
-class RegfileBlackBox extends BlackBox with HasBlackBoxResource {
+class regfile_160x64_10w16r_sim extends BlackBox with HasBlackBoxResource {
 
   val io = IO(new Bundle{
 	val clk = Input(Clock())
