@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, DCache, L1plusCache, DCachePrefetcher, DCacheParameters, DCachePrefetcherParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
@@ -184,6 +184,10 @@ trait HasXSParameter {
     nStoreMissEntries = 8
   )
 
+  val dcachePrefetcherParameters = DCachePrefetcherParameters(
+    nMaxPrefetchRequests = 8
+  )
+
   val LRSCCycles = 100
 
 
@@ -264,6 +268,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
+  val dcachePrefetcher = LazyModule(new DCachePrefetcher())
 
   // out facing nodes
   val mem = TLIdentityNode()
@@ -273,7 +278,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   // -------------------------------------------------
   private val l2_xbar = TLXbar()
 
-  private val l2 = LazyModule(new InclusiveCache(
+  val l2 = LazyModule(new InclusiveCache(
     CacheParameters(
       level = 2,
       ways = L2NWays,
@@ -288,6 +293,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   ))
 
   l2_xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
+  l2_xbar := TLBuffer() := DebugIdentityNode() := dcachePrefetcher.clientNode
   l2_xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
   l2_xbar := TLBuffer() := DebugIdentityNode() := ptw.node
   l2.node := TLBuffer() := DebugIdentityNode() := l2_xbar
@@ -346,6 +352,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ))
 
   val dcache = outer.dcache.module
+  val dcachePrefetcher = outer.dcachePrefetcher.module
+  val l2 = outer.l2.module
   val uncache = outer.uncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
@@ -432,6 +440,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
   dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
   uncache.io.lsq      <> memBlock.io.dcache.uncache
+
+  // connect dcache prefetcher feedbacks
+  dcachePrefetcher.io <> l2.io
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
