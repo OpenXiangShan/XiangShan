@@ -10,6 +10,7 @@ import scala.math.min
 trait MicroBTBPatameter{
     val nWays = 16
     val lowerBitsSize = 20
+    val tagSize = 20
 
     val extended_stat = false
 }
@@ -18,8 +19,7 @@ class MicroBTB extends BasePredictor
     with MicroBTBPatameter
 {
     // val tagSize = VAddrBits - log2Ceil(PredictWidth) - 1
-    val untaggedBits = lowerBitsSize + 1
-    val tagSize = VAddrBits - untaggedBits
+    val untaggedBits = PredictWidth + 1
 
     class MicroBTBResp extends Resp
     {
@@ -48,7 +48,7 @@ class MicroBTB extends BasePredictor
     override val io = IO(new MicroBTBIO)
     io.uBTBBranchInfo <> out_ubtb_br_info
 
-    def getTag(pc: UInt) = (pc >> untaggedBits).asUInt()
+    def getTag(pc: UInt) = (pc >> untaggedBits)(tagSize-1, 0)
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
 
     class MicroBTBMeta extends XSBundle
