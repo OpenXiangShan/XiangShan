@@ -102,8 +102,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     dataModule.io.wb(i).wen := false.B
     when(io.storeIn(i).fire()) {
       val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
-      datavalid(stWbIndex) := !io.storeIn(i).bits.mmio
-      pending(stWbIndex) := io.storeIn(i).bits.mmio
+      val hasException = io.storeIn(i).bits.uop.cf.exceptionVec.asUInt.orR
+      datavalid(stWbIndex) := !io.storeIn(i).bits.mmio || hasException
+      pending(stWbIndex) := io.storeIn(i).bits.mmio && !hasException
 
       val storeWbData = Wire(new LsqEntry)
       storeWbData := DontCare
