@@ -217,7 +217,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   // TailPtr fast recovery
   val tailRecycle = VecInit(List(
-    io.uncache.req.fire() || io.sbuffer(0).fire(),
+    io.uncache.resp.fire() || io.sbuffer(0).fire(),
     io.sbuffer(1).fire()
   ))
 
