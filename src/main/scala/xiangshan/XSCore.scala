@@ -244,8 +244,8 @@ object AddressSpace extends HasXSParameter {
   // (start, size)
   // address out of MMIO will be considered as DRAM
   def mmio = List(
-    (0x30000000L, 0x10000000L),  // internal devices, such as CLINT and PLIC
-    (0x40000000L, 0x40000000L) // external devices
+    (0x00000000L, 0x40000000L),  // internal devices, such as CLINT and PLIC
+    (0x40000000L, 0x40000000L)   // external devices
   )
 
   def isMMIO(addr: UInt): Bool = mmio.map(range => {
