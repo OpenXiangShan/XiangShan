@@ -28,6 +28,8 @@ object LqPtr extends HasXSParameter {
 class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+    val lqReady = Output(Vec(RenameWidth, Bool()))
+    val sqReady = Input(Vec(RenameWidth, Bool()))
     val lqIdxs = Output(Vec(RenameWidth, new LqPtr)) // LSIdx will be assembled in LSQWrapper
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -44,7 +46,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   })
   
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
-  val data = Reg(Vec(LoadQueueSize, new LsRoqEntry)) // FIXME: use LoadQueueEntry instead
+  // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
+  val dataModule = Module(new LSQueueData(LoadQueueSize, LoadPipelineWidth))
+  dataModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val valid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
@@ -70,8 +74,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val enqDeqMask1 = tailMask ^ headMask
   val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
 
-  // TODO: misc arbitor
-
   // Enqueue at dispatch
   val emptyEntries = LoadQueueSize.U - distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
   XSDebug("(ready, valid): ")
@@ -88,10 +90,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       miss(index) := false.B
       listening(index) := false.B
       pending(index) := false.B
-      // data(index).bwdMask := 0.U(8.W).asBools
     }
     val numTryEnqueue = offset +& io.dp1Req(i).valid
-    io.dp1Req(i).ready := numTryEnqueue <= emptyEntries
+    io.lqReady(i) := numTryEnqueue <= emptyEntries
+    io.dp1Req(i).ready := io.lqReady(i) && io.sqReady(i)
     io.lqIdxs(i) := lqIdx
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }
@@ -105,6 +107,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   // writeback load
   (0 until LoadPipelineWidth).map(i => {
+    dataModule.io.wb(i).wen := false.B
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
@@ -139,14 +142,19 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         valid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         // allocated(loadWbIndex) := io.loadIn(i).bits.miss // if hit, lq entry can be recycled
-        data(loadWbIndex).paddr := io.loadIn(i).bits.paddr
-        data(loadWbIndex).vaddr := io.loadIn(i).bits.vaddr
-        data(loadWbIndex).mask := io.loadIn(i).bits.mask
-        data(loadWbIndex).data := io.loadIn(i).bits.data // for mmio / misc / debug
-        data(loadWbIndex).mmio := io.loadIn(i).bits.mmio
-        data(loadWbIndex).fwdMask := io.loadIn(i).bits.forwardMask
-        data(loadWbIndex).fwdData := io.loadIn(i).bits.forwardData
-        data(loadWbIndex).exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+        
+        val loadWbData = Wire(new LsqEntry)
+        loadWbData.paddr := io.loadIn(i).bits.paddr
+        loadWbData.vaddr := io.loadIn(i).bits.vaddr
+        loadWbData.mask := io.loadIn(i).bits.mask
+        loadWbData.data := io.loadIn(i).bits.data // for mmio / misc / debug
+        loadWbData.mmio := io.loadIn(i).bits.mmio
+        loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
+        loadWbData.fwdData := io.loadIn(i).bits.forwardData
+        loadWbData.exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+        dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
+        dataModule.io.wb(i).wen := true.B
+
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         miss(loadWbIndex) := dcacheMissed
         listening(loadWbIndex) := dcacheMissed
@@ -161,30 +169,30 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   val missRefillSelVec = VecInit(
     (0 until LoadQueueSize).map{ i =>
-      val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(data(i).paddr)).reduce(_||_)
+      val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(dataModule.io.rdata(i).paddr)).reduce(_||_)
       allocated(i) && miss(i) && !inflight
     })
 
   val missRefillSel = getFirstOne(missRefillSelVec, tailMask)
-  val missRefillBlockAddr = get_block_addr(data(missRefillSel).paddr)
+  val missRefillBlockAddr = get_block_addr(dataModule.io.rdata(missRefillSel).paddr)
   io.dcache.req.valid := missRefillSelVec.asUInt.orR
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
   io.dcache.req.bits.addr := missRefillBlockAddr
   io.dcache.req.bits.data := DontCare
   io.dcache.req.bits.mask := DontCare
 
-  io.dcache.req.bits.meta.id       := DontCare // TODO: // FIXME
-  io.dcache.req.bits.meta.vaddr    := DontCare // data(missRefillSel).vaddr
+  io.dcache.req.bits.meta.id       := DontCare
+  io.dcache.req.bits.meta.vaddr    := DontCare // dataModule.io.rdata(missRefillSel).vaddr
   io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
   io.dcache.req.bits.meta.uop      := uop(missRefillSel)
-  io.dcache.req.bits.meta.mmio     := false.B // data(missRefillSel).mmio
+  io.dcache.req.bits.meta.mmio     := false.B // dataModule.io.rdata(missRefillSel).mmio
   io.dcache.req.bits.meta.tlb_miss := false.B
   io.dcache.req.bits.meta.mask     := DontCare
   io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
 
-  assert(!(data(missRefillSel).mmio && io.dcache.req.valid))
+  assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
 
   when(io.dcache.req.fire()) {
     miss(missRefillSel) := false.B
@@ -223,27 +231,15 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   // Refill 64 bit in a cycle
   // Refill data comes back from io.dcache.resp
-  def mergeRefillData(refill: UInt, fwd: UInt, fwdMask: UInt): UInt = {
-    val res = Wire(Vec(8, UInt(8.W)))
-    (0 until 8).foreach(i => {
-      res(i) := Mux(fwdMask(i), fwd(8 * (i + 1) - 1, 8 * i), refill(8 * (i + 1) - 1, 8 * i))
-    })
-    res.asUInt
-  }
+  dataModule.io.refill.dcache := io.dcache.resp.bits
 
   (0 until LoadQueueSize).map(i => {
-    val blockMatch = get_block_addr(data(i).paddr) === io.dcache.resp.bits.meta.paddr
+    val blockMatch = get_block_addr(dataModule.io.rdata(i).paddr) === io.dcache.resp.bits.meta.paddr
+    dataModule.io.refill.wen(i) := false.B
     when(allocated(i) && listening(i) && blockMatch && io.dcache.resp.fire()) {
-      // split them into words
-      val words = VecInit((0 until blockWords) map { i =>
-        io.dcache.resp.bits.data(DataBits * (i + 1) - 1, DataBits * i)
-      })
-
-      val refillData = words(get_word(data(i).paddr))
-      data(i).data := mergeRefillData(refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt)
+      dataModule.io.refill.wen(i) := true.B
       valid(i) := true.B
       listening(i) := false.B
-      XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).fwdData.asUInt, data(i).fwdMask.asUInt) 
     }
   })
 
@@ -262,9 +258,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   loadWbSelV(1) := lselvec1.orR
   (0 until StorePipelineWidth).map(i => {
     // data select
-    val rdata = data(loadWbSel(i)).data
+    val rdata = dataModule.io.rdata(loadWbSel(i)).data
     val func = uop(loadWbSel(i)).ctrl.fuOpType
-    val raddr = data(loadWbSel(i)).paddr
+    val raddr = dataModule.io.rdata(loadWbSel(i)).paddr
     val rdataSel = LookupTree(raddr(2, 0), List(
       "b000".U -> rdata(63, 0),
       "b001".U -> rdata(63, 8),
@@ -286,13 +282,13 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
     ))
     io.ldout(i).bits.uop := uop(loadWbSel(i))
-    io.ldout(i).bits.uop.cf.exceptionVec := data(loadWbSel(i)).exception.asBools
+    io.ldout(i).bits.uop.cf.exceptionVec := dataModule.io.rdata(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
-    io.ldout(i).bits.debug.isMMIO := data(loadWbSel(i)).mmio
+    io.ldout(i).bits.debug.isMMIO := dataModule.io.rdata(loadWbSel(i)).mmio
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
     when(io.ldout(i).fire()) {
@@ -301,9 +297,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         io.ldout(i).bits.uop.roqIdx.asUInt,
         io.ldout(i).bits.uop.lqIdx.asUInt,
         io.ldout(i).bits.uop.cf.pc,
-        data(loadWbSel(i)).paddr,
-        data(loadWbSel(i)).data,
-        data(loadWbSel(i)).mmio
+        dataModule.io.rdata(loadWbSel(i)).paddr,
+        dataModule.io.rdata(loadWbSel(i)).data,
+        dataModule.io.rdata(loadWbSel(i)).mmio
       )
     }
   })
@@ -391,10 +387,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       // check if load already in lq needs to be rolledback
       val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
         val addrMatch = allocated(j) &&
-          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+          io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === dataModule.io.rdata(j).paddr(PAddrBits - 1, 3)
         val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (valid(j) || listening(j) || miss(j))
         // TODO: update refilled data
-        val violationVec = (0 until 8).map(k => data(j).mask(k) && io.storeIn(i).bits.mask(k))
+        val violationVec = (0 until 8).map(k => dataModule.io.rdata(j).mask(k) && io.storeIn(i).bits.mask(k))
         Cat(violationVec).orR() && entryNeedCheck
       }))
       val lqViolation = lqViolationVec.asUInt().orR()
@@ -484,17 +480,17 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     !io.commits(0).bits.isWalk
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
-  io.uncache.req.bits.addr := data(ringBufferTail).paddr 
-  io.uncache.req.bits.data := data(ringBufferTail).data
-  io.uncache.req.bits.mask := data(ringBufferTail).mask
+  io.uncache.req.bits.addr := dataModule.io.rdata(ringBufferTail).paddr 
+  io.uncache.req.bits.data := dataModule.io.rdata(ringBufferTail).data
+  io.uncache.req.bits.mask := dataModule.io.rdata(ringBufferTail).mask
 
   io.uncache.req.bits.meta.id       := DontCare // TODO: // FIXME
   io.uncache.req.bits.meta.vaddr    := DontCare
-  io.uncache.req.bits.meta.paddr    := data(ringBufferTail).paddr
+  io.uncache.req.bits.meta.paddr    := dataModule.io.rdata(ringBufferTail).paddr
   io.uncache.req.bits.meta.uop      := uop(ringBufferTail)
-  io.uncache.req.bits.meta.mmio     := true.B // data(ringBufferTail).mmio
+  io.uncache.req.bits.meta.mmio     := true.B // dataModule.io.rdata(ringBufferTail).mmio
   io.uncache.req.bits.meta.tlb_miss := false.B
-  io.uncache.req.bits.meta.mask     := data(ringBufferTail).mask
+  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(ringBufferTail).mask
   io.uncache.req.bits.meta.replay   := false.B
 
   io.uncache.resp.ready := true.B
@@ -503,9 +499,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     pending(ringBufferTail) := false.B
   }
 
+  dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
     valid(ringBufferTail) := true.B
-    data(ringBufferTail).data := io.uncache.resp.bits.data(XLEN-1, 0)
+    dataModule.io.uncacheWrite(ringBufferTail, io.uncache.resp.bits.data(XLEN-1, 0))
+    dataModule.io.uncache.wen := true.B
     // TODO: write back exception info
   }
 
@@ -524,7 +522,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := data(io.exceptionAddr.lsIdx.lqIdx.value).vaddr
+  io.exceptionAddr.vaddr := dataModule.io.rdata(io.exceptionAddr.lsIdx.lqIdx.value).vaddr
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
@@ -565,7 +563,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   for (i <- 0 until LoadQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, data(i).paddr)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, dataModule.io.rdata(i).paddr)
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && valid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

@@ -18,8 +18,8 @@ class Dispatch1 extends XSModule {
     val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
-    // enq Lsroq
-    val toLsroq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
+    // enq Lsq
+    val toLsq = Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsIdx
     val lsIdx = Input(Vec(RenameWidth, new LSIdx))
     // to dispatch queue
@@ -55,7 +55,7 @@ class Dispatch1 extends XSModule {
   }
 
   /**
-    * Part 2: acquire ROQ (all) and LSROQ (load/store only) indexes
+    * Part 2: acquire ROQ (all) and LSQ (load/store only) indexes
     */
   val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid && !io.redirect.bits.isReplay)))
 
@@ -65,46 +65,41 @@ class Dispatch1 extends XSModule {
   val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
   val lsIndexReg = Reg(Vec(RenameWidth, new LSIdx))
   val lsIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val lsroqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toLsroq(i).ready || lsIndexRegValid(i))))
+  val lsqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toLsq(i).ready || lsIndexRegValid(i))))
 
   for (i <- 0 until RenameWidth) {
-    // input for ROQ and LSROQ
+    // input for ROQ and LSQ
     val commitType = Cat(isLs(i), isStore(i) | isFp(i))
 
     io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
     io.toRoq(i).bits := io.fromRename(i).bits
     io.toRoq(i).bits.ctrl.commitType := commitType
 
-    io.toLsroq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !cancelled(i)
-    io.toLsroq(i).bits := io.fromRename(i).bits
-    io.toLsroq(i).bits.ctrl.commitType := commitType
-    io.toLsroq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
+    io.toLsq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !cancelled(i)
+    io.toLsq(i).bits := io.fromRename(i).bits
+    io.toLsq(i).bits.ctrl.commitType := commitType
+    io.toLsq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
 
-    // receive indexes from ROQ and LSROQ
+    // receive indexes from ROQ and LSQ
     when(io.toRoq(i).fire() && !io.recv(i)) {
       roqIndexReg(i) := io.roqIdxs(i)
       roqIndexRegValid(i) := true.B
     }.elsewhen(io.recv(i)) {
       roqIndexRegValid(i) := false.B
     }
-    when(io.toLsroq(i).fire() && !io.recv(i)) {
+    when(io.toLsq(i).fire() && !io.recv(i)) {
       lsIndexReg(i) := io.lsIdx(i)
       lsIndexRegValid(i) := true.B
     }.elsewhen(io.recv(i)) {
       lsIndexRegValid(i) := false.B
     }
 
-    // append ROQ and LSROQ indexed to uop
+    // append ROQ and LSQ indexed to uop
     uopWithIndex(i) := io.fromRename(i).bits
     uopWithIndex(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
-    if(EnableUnifiedLSQ){
-      uopWithIndex(i).lsroqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).lsroqIdx
-      XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lsroq ${io.lsIdx(i).lsroqIdx}\n")
-    } else {
-      uopWithIndex(i).lqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).lqIdx
-      uopWithIndex(i).sqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).sqIdx
-      XSDebug(io.toLsroq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx}\n")
-    }
+    uopWithIndex(i).lqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).lqIdx
+    uopWithIndex(i).sqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).sqIdx
+    XSDebug(io.toLsq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx}\n")
 
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
     if (i > 0) {
@@ -120,7 +115,7 @@ class Dispatch1 extends XSModule {
   var prevCanEnqueue = true.B
   for (i <- 0 until RenameWidth) {
     orderedEnqueue(i) := prevCanEnqueue
-    canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsroqIndexAcquired(i))
+    canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsqIndexAcquired(i))
     val enqReady = (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
       (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && fpIndex.io.reverseMapping(i).valid) ||
       (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && lsIndex.io.reverseMapping(i).valid)
@@ -159,17 +154,10 @@ class Dispatch1 extends XSModule {
     io.fromRename(i).ready := Cat(readyVector).andR()
 
     // TODO: add print method for lsIdx
-    if(EnableUnifiedLSQ){
-      XSInfo(io.recv(i) && !cancelled(i),
-        p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-          p"roq ${uopWithIndex(i).roqIdx} lsroq ${uopWithIndex(i).lsroqIdx} is accepted by dispatch queue " +
-          p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
-    }else{
-      XSInfo(io.recv(i) && !cancelled(i),
-        p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-          p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx}" +
-          p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
-    }
+    XSInfo(io.recv(i) && !cancelled(i),
+      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
+      p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx}" +
+      p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
 
     XSInfo(io.recv(i) && cancelled(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} with brTag ${io.fromRename(i).bits.brTag.value} cancelled\n")

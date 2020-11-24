@@ -4,9 +4,10 @@ import chipsalliance.rocketchip.config._
 import chisel3._
 import chiseltest._
 import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4UserYanker}
-import org.scalatest.{FlatSpec, Matchers}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.diplomacy._
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import utils.DebugIdentityNode
 
 class AXI4RamFuzzTest()(implicit p: Parameters) extends LazyModule {
@@ -19,7 +20,7 @@ class AXI4RamFuzzTest()(implicit p: Parameters) extends LazyModule {
     inFlight = 10
   ))
   val ident = LazyModule(new DebugIdentityNode())
-  val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
+  val axiRam = LazyModule(new AXI4RAM(Seq(addressSet), memByte = 1024))
 
   axiRam.node :=
     AXI4UserYanker() :=
@@ -38,7 +39,7 @@ class AXI4RamBurstTest()(implicit p: Parameters) extends LazyModule {
 
   val addressSet = AddressSet(0x38000000L, 0x0000ffffL)
   val burst = LazyModule(new AXI4BurstMaster(startAddr = addressSet.base.toLong, nOp = 3))
-  val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
+  val axiRam = LazyModule(new AXI4RAM(Seq(addressSet), memByte = 1024))
 
   axiRam.node := burst.node
 
@@ -55,7 +56,7 @@ class AXI4RamTLBurstTest()(implicit p: Parameters) extends LazyModule {
 
   val tlburst = LazyModule(new TLBurstMaster(startAddr = addressSet.base.toLong, nOp = 1, burstLen = 32))
   val ident = LazyModule(new DebugIdentityNode())
-  val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
+  val axiRam = LazyModule(new AXI4RAM(Seq(addressSet), memByte = 1024))
 
   axiRam.node :=
     AXI4UserYanker() :=
@@ -70,7 +71,7 @@ class AXI4RamTLBurstTest()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class AXI4RamTest extends FlatSpec with ChiselScalatestTester with Matchers {
+class AXI4RamTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   it should "run with fuzz" in {
     implicit val p = Parameters.empty
     test(LazyModule(new AXI4RamFuzzTest()).module){ c =>

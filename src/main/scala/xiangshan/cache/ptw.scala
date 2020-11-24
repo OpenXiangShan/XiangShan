@@ -171,13 +171,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // Reg/Mem/SyncReadMem is not sure now
   val tagLen1 = PAddrBits - log2Up(XLEN/8)
   val tagLen2 = PAddrBits - log2Up(XLEN/8) - log2Up(PtwL2EntrySize)
-  val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
+  // val tlbl2 = SyncReadMem(TlbL2EntrySize, new TlbEntry)
+  val tlbl2 = Module(new SRAMTemplate(new TlbEntry, set = TlbL2EntrySize))
   val tlbv  = RegInit(0.U(TlbL2EntrySize.W)) // valid
   val tlbg  = RegInit(0.U(TlbL2EntrySize.W)) // global
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = tagLen1)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   val l1g   = VecInit((ptwl1.map(_.perm.g))).asUInt
-  val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
+  // val ptwl2 = SyncReadMem(PtwL2EntrySize, new PtwEntry(tagLen = tagLen2)) // NOTE: the Mem could be only single port(r&w)
+  val ptwl2 = Module(new SRAMTemplate(new PtwEntry(tagLen = tagLen2), set = PtwL2EntrySize))
   val l2v   = RegInit(0.U(PtwL2EntrySize.W)) // valid
   val l2g   = RegInit(0.U(PtwL2EntrySize.W)) // global
   
@@ -205,7 +207,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val (tlbHit, tlbHitData) = {
     // tlbl2 is by addr
     // TODO: optimize tlbl2'l2 tag len
-    val ramData = tlbl2.read(req.vpn(log2Up(TlbL2EntrySize)-1, 0), validOneCycle)
+    assert(tlbl2.io.r.req.ready)
+    tlbl2.io.r.req.valid := validOneCycle
+    tlbl2.io.r.req.bits.apply(setIdx = req.vpn(log2Up(TlbL2EntrySize-1), 0))
+    val ramData = tlbl2.io.r.resp.data(0)
+    // val ramData = tlbl2.r(req.vpn(log2Up(TlbL2EntrySize)-1, 0), validOneCycle)
     val vidx = RegEnable(tlbv(req.vpn(log2Up(TlbL2EntrySize)-1, 0)), validOneCycle)
     (ramData.hit(req.vpn) && vidx, ramData) // TODO: optimize tag
     // TODO: add exception and refill
@@ -233,7 +239,12 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val (l2Hit, l2HitData) = { // TODO: add excp
     val readRam = (l1Hit && level===0.U && state===state_req) || (memRespFire && state===state_wait_resp && level===0.U)
     val ridx = l2addr(log2Up(PtwL2EntrySize)-1+log2Up(XLEN/8), log2Up(XLEN/8))
-    val ramData = ptwl2.read(ridx, readRam)
+    
+    assert(ptwl2.io.r.req.ready)
+    ptwl2.io.r.req.valid := readRam
+    ptwl2.io.r.req.bits.apply(setIdx = ridx)
+    val ramData = ptwl2.io.r.resp.data(0)
+    // val ramData = ptwl2.read(ridx, readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
     (ramData.hit(l2addr) && vidx, ramData) // TODO: optimize tag
   }
@@ -344,6 +355,10 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   /*
    * refill
    */
+  ptwl2.io.w.req <> DontCare
+  tlbl2.io.w.req <> DontCare
+  ptwl2.io.w.req.valid := false.B
+  tlbl2.io.w.req.valid := false.B
   assert(!memRespFire || (state===state_wait_resp || sfenceLatch))
   when (memRespFire && !memPte.isPf() && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {
@@ -354,13 +369,21 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     when (level===1.U && !memPte.isLeaf) {
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
       val refillIdx = getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
-      ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
+      
+      assert(ptwl2.io.w.req.ready)
+      // ptwl2.io.w.req.valid := true.B
+      ptwl2.io.w.apply(valid = true.B, setIdx = refillIdx, data = new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata), waymask = -1.S.asUInt)
+      // ptwl2.write(refillIdx, new PtwEntry(tagLen2).genPtwEntry(l2addrStore, memRdata))
       l2v := l2v | UIntToOH(refillIdx)
       l2g := l2g | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
     }
     when (memPte.isLeaf()) {
       val refillIdx = getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
-      tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
+      
+      assert(tlbl2.io.w.req.ready)
+      // tlbl2.io.w.req.valid := true.B
+      tlbl2.io.w.apply(valid = true.B, setIdx = refillIdx, data = new TlbEntry().genTlbEntry(memRdata, level, req.vpn), waymask = -1.S.asUInt)
+      // tlbl2.write(refillIdx, new TlbEntry().genTlbEntry(memRdata, level, req.vpn))
       tlbv := tlbv | UIntToOH(refillIdx)
       tlbg := tlbg | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
     }

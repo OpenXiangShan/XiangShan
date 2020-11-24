@@ -30,11 +30,17 @@ object AddSinks {
       "perfCntCondMbpIRight",
       "perfCntCondMbpIWrong",
       "perfCntCondMbpRRight",
-      "perfCntCondMbpRWrong"
+      "perfCntCondMbpRWrong"//,
+      // "CntFetchFromICache",
+      // "CntFetchFromLoopBuffer",
+      // "CntExitLoop1",
+      // "CntExitLoop2",
+      // "CntExitLoop3"
     )
     for (s <- sinks){ BoringUtils.addSink(tmp, s) }
 
-    val disp_enable = WireInit(dispBegin.S(64.W).asUInt() < dispEnd.S(64.W).asUInt())
+    // val disp_enable = WireInit(dispBegin.S(64.W).asUInt() < dispEnd.S(64.W).asUInt())
+    val disp_enable = WireInit(true.B)
     val time = GTimer()
     BoringUtils.addSource(disp_enable, "DISPLAY_LOG_ENABLE")
     BoringUtils.addSource(time, "logTimestamp")

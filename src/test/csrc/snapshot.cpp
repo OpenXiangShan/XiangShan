@@ -1,5 +1,6 @@
 #include "snapshot.h"
 
+#ifdef VM_SAVABLE
 void VerilatedSaveMem::flush() {
   long flush_size = m_cp - m_bufp;
   assert(buf_size - size > flush_size);
@@ -19,3 +20,4 @@ void VerilatedSaveMem::save() {
   size = 0;
   printf("save snapshot to %s...\n", m_filename.c_str());
 }
+#endif

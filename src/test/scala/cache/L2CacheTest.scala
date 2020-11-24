@@ -14,7 +14,8 @@ import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
 import xiangshan.HasXSLog
@@ -100,7 +101,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
   ))
 
   val ram = LazyModule(new AXI4RAM(
-    AddressSet(0x0L, 0xffffffffffL),
+    Seq(AddressSet(0x0L, 0xffffffffffL)),
     memByte = 128 * 1024 * 1024,
     useBlackBox = false
   ))
@@ -252,7 +253,7 @@ class L2TestTopWrapper()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
+class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
 
   top.Parameters.set(top.Parameters.debugParameters)
 

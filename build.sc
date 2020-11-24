@@ -1,6 +1,9 @@
 import os.Path
 import mill._
 import mill.modules.Util
+import $ivy.`com.lihaoyi::mill-contrib-buildinfo:$MILL_VERSION`
+import $ivy.`com.lihaoyi::mill-contrib-bsp:$MILL_VERSION`
+import mill.contrib.buildinfo.BuildInfo
 import scalalib._
 import coursier.maven.MavenRepository
 
@@ -29,6 +32,15 @@ val chisel = Agg(
   ivy"edu.berkeley.cs::chisel3:3.4.0"
 )
 
+object `api-config-chipsalliance` extends CommonModule {
+  override def millSourcePath = super.millSourcePath / "design" / "craft"
+}
+
+object hardfloat extends SbtModule with CommonModule {
+  override def millSourcePath = os.pwd / "berkeley-hardfloat"
+  override def ivyDeps = super.ivyDeps() ++ chisel
+}
+
 object `rocket-chip` extends SbtModule with CommonModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
@@ -36,16 +48,7 @@ object `rocket-chip` extends SbtModule with CommonModule {
     ivy"org.json4s::json4s-jackson:3.6.1"
   ) ++ chisel
 
-
-  object `api-config-chipsalliance` extends CommonModule {
-    override def millSourcePath = super.millSourcePath / 'design / 'craft
-  }
-
   object macros extends SbtModule with CommonModule
-
-  object hardfloat extends SbtModule with CommonModule {
-    override def ivyDeps = super.ivyDeps() ++ chisel
-  }
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     `api-config-chipsalliance`, macros, hardfloat
@@ -63,13 +66,13 @@ object `block-inclusivecache-sifive` extends CommonModule {
 
 object chiseltest extends CommonModule with SbtModule {
   override def ivyDeps = super.ivyDeps() ++ Agg(
-	ivy"edu.berkeley.cs::treadle:1.3.0",
-	ivy"org.scalatest::scalatest:3.0.8",
-	ivy"com.lihaoyi::utest:0.7.4"
+    ivy"edu.berkeley.cs::treadle:1.3.0",
+    ivy"org.scalatest::scalatest:3.2.0",
+    ivy"com.lihaoyi::utest:0.7.4"
   ) ++ chisel
   object test extends Tests {
-	def ivyDeps = Agg(ivy"org.scalacheck::scalacheck:1.14.3")
-	def testFrameworks = Seq("org.scalatest.tools.Framework")
+    def ivyDeps = Agg(ivy"org.scalacheck::scalacheck:1.14.3")
+    def testFrameworks = Seq("org.scalatest.tools.Framework")
   }
 }
 
@@ -81,15 +84,14 @@ object XiangShan extends CommonModule with SbtModule {
 
   override def ivyDeps = super.ivyDeps() ++ chisel
   override def moduleDeps = super.moduleDeps ++ Seq(
-    `rocket-chip`, 
-	`block-inclusivecache-sifive`,
-	chiseltest
+    `rocket-chip`,
+    `block-inclusivecache-sifive`,
+    chiseltest
   )
 
   object test extends Tests {
     override def ivyDeps = super.ivyDeps() ++ Agg(
-      ivy"org.scalatest::scalatest:3.0.4",
-      ivy"edu.berkeley.cs::chisel-iotesters:1.2+",
+      ivy"org.scalatest::scalatest:3.2.0"
     )
 
     def testFrameworks = Seq(
@@ -102,4 +104,3 @@ object XiangShan extends CommonModule with SbtModule {
   }
 
 }
-
