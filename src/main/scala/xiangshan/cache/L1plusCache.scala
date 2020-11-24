@@ -45,7 +45,7 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   def encRowBits = cacheParams.dataCode.width(rowBits)
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
-  def icachemisQueueEntryIdWidth = log2Up(icfg.nMissEntries)
+  def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -259,13 +259,13 @@ class L1plusCacheReq extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val id   = UInt(icachemisQueueEntryIdWidth.W)
+  val id   = UInt(icacheMissQueueEntryIdWidth.W)
 }
 
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
-  val id   = UInt(icachemisQueueEntryIdWidth.W)
+  val id   = UInt(icacheMissQueueEntryIdWidth.W)
 }
 
 class L1plusCacheIO extends L1plusCacheBundle
