@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, RandomReplacement, HasTLDump, XSDebug}
+import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMTemplate}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -105,24 +105,33 @@ class L1plusCacheDataArray extends L1plusCacheModule {
     val resp  = Output(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
   })
 
+  val singlePort = true
+
   // write is always ready
   io.write.ready := true.B
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   val raddr = (io.read.bits.addr >> blockOffBits).asUInt()
-  // raddr === waddr is undefined behavior!
-  // block read in this case
-  io.read.ready := !io.write.valid || raddr =/= waddr
+
+  // for single port SRAM, do not allow read and write in the same cycle
+  // for dual port SRAM, raddr === waddr is undefined behavior
+  val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
+  io.read.ready := !rwhazard
+
   for (w <- 0 until nWays) {
     for (r <- 0 until blockRows) {
-      val array = SyncReadMem(nSets, Bits(encRowBits.W))
+      val array = Module(new SRAMTemplate(Bits(encRowBits.W), set=nSets, way=1,
+        shouldReset=false, holdRead=false, singlePort=singlePort))
       // data write
-      when (io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid) {
-        val data = io.write.bits.data(r)
-        array.write(waddr, data)
-      }
+      array.io.w.req.valid := io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid
+      array.io.w.req.bits.apply(
+        setIdx=waddr,
+        data=io.write.bits.data(r),
+        waymask=1.U)
+
       // data read
-      io.resp(w)(r) := RegNext(array.read(raddr, io.read.bits.way_en(w)
-        && io.read.bits.rmask(r) && io.read.valid).asUInt)
+      array.io.r.req.valid := io.read.bits.way_en(w) && io.read.bits.rmask(r) && io.read.valid
+      array.io.r.req.bits.apply(setIdx=raddr)
+      io.resp(w)(r) := RegNext(array.io.r.resp.data(0))
     }
   }
 
@@ -176,7 +185,8 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
   def encTagBits = cacheParams.tagCode.width(tagBits)
-  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(encTagBits.W)))
+  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
+    shouldReset=false, holdRead=false, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
     for (i <- 0 until nSets) {
@@ -185,24 +195,37 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   }
   XSDebug("valid_array:%x   flush:%d\n",valid_array.asUInt,io.flush)
 
+  // tag write
   val wen = io.write.valid && !reset.toBool && !io.flush
+  tag_array.io.w.req.valid := wen
+  tag_array.io.w.req.bits.apply(
+    setIdx=waddr,
+    data=cacheParams.tagCode.encode(wtag),
+    waymask=VecInit(wmask).asUInt)
+
   when (wen) {
-    tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wtag))), wmask)
     when (wvalid) {
       valid_array(waddr) := valid_array(waddr) | io.write.bits.way_en
     } .otherwise {
       valid_array(waddr) := valid_array(waddr) & ~io.write.bits.way_en
     }
   }
-  val rtags = tag_array.read(io.read.bits.idx, io.read.fire()).map(rdata =>
+
+  // tag read
+  tag_array.io.r.req.valid := io.read.fire()
+  tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
+  val rtags = tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected)
+
   for (i <- 0 until nWays) {
     io.resp(i).valid := RegNext(valid_array(io.read.bits.idx)(i))
     io.resp(i).tag   := rtags(i)
   }
 
-  io.read.ready  := !io.write.valid && !reset.toBool && !io.flush
-  io.write.ready := !reset.toBool && !io.flush
+  // we use single port SRAM
+  // do not allow read and write in the same cycle
+  io.read.ready  := !io.write.valid && !reset.toBool && !io.flush && tag_array.io.r.req.ready
+  io.write.ready := !reset.toBool && !io.flush && tag_array.io.w.req.ready
 
   def dumpRead() = {
     when (io.read.fire()) {

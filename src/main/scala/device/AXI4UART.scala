@@ -20,7 +20,7 @@ class UARTIO extends Bundle {
 
 class AXI4UART
 (
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new UARTIO)
 {

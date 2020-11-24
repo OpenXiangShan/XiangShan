@@ -19,13 +19,13 @@ jobs:
         run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: Set env
         run: |
-          echo ::set-env name=NEMU_HOME::/home/ci-runner/xsenv/NEMU
-          echo ::set-env name=NOOP_HOME::$GITHUB_WORKSPACE
-          echo ::set-env name=RVTEST_HOME::/home/ci-runner/xsenv/riscv-tests
-          echo ::set-env name=AM_HOME::/home/ci-runner/xsenv/nexus-am
+          echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "RVTEST_HOME=/home/ci-runner/xsenv/riscv-tests" >> $GITHUB_ENV
+          echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
       - name: Build EMU
         run:
-          numactl -m 1 -N 1 make ./build/emu SIM_ARGS=--disable-all EMU_THREADS=16 NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j60
+          make ./build/emu SIM_ARGS=--disable-all NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j60
       - name: Run cputest
         run: |
           CPU_TEST_DIR=$AM_HOME/tests/cputest
@@ -35,7 +35,7 @@ jobs:
           do
               t=${test%.c}
               echo $t
-              numactl -m 1 -N 1 make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2>/dev/null | grep "HIT GOOD TRAP"
+              make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2>/dev/null | grep "HIT GOOD TRAP"
               if [[ $? == 1 ]];
               then
                   echo $t fail
@@ -45,7 +45,7 @@ jobs:
           exit $ret
       - name: Run riscv-tests
         run: |
-          numactl -m 1 -N 1 make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run 2> /dev/null
+          make -C $RVTEST_HOME/isa/ SUITES+=rv64ui SUITES+=rv64um SUITES+=rv64ua SUITES+=rv64uf SUITES+=rv64ud NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME noop_run 2> /dev/null
       - name: Run microbench
         run: |
-          numactl -m 1 -N 1 make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null
+          make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null

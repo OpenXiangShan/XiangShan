@@ -1,4 +1,8 @@
-#include "VXSSimTop.h"
+#ifndef SNAPSHOT_H
+#define SNAPSHOT_H
+
+#ifdef VM_SAVABLE
+#include "VXSSimSoC.h"
 #include <verilated_save.h>
 
 class VerilatedSaveMem : public VerilatedSave {
@@ -28,3 +32,6 @@ public:
   void flush();
   void save();
 };
+#endif
+
+#endif

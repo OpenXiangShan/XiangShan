@@ -12,7 +12,7 @@ class StoreUnit extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
-    val lsroq = ValidIO(new LsPipelineBundle)
+    val lsq = ValidIO(new LsPipelineBundle)
   })
 
   //-------------------------------------------------------
@@ -44,12 +44,12 @@ class StoreUnit extends XSModule {
   printPipeLine(s3_in.bits, s3_in.valid, "S3")
 
 
-  
+
   //-------------------------------------------------------
   // ST Pipeline Stage 2
   // Generate addr, use addr to query DTLB
   //-------------------------------------------------------
-  
+
   // send req to dtlb
   val saddr = io.stin.bits.src1 + io.stin.bits.uop.ctrl.imm
 
@@ -58,7 +58,6 @@ class StoreUnit extends XSModule {
   io.dtlb.req.bits.cmd := TlbCmd.write
   io.dtlb.req.bits.roqIdx := io.stin.bits.uop.roqIdx
   io.dtlb.req.bits.debug.pc := io.stin.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.lsroqIdx := io.stin.bits.uop.lsroqIdx // FIXME: need update
   io.dtlb.resp.ready := s2_out.ready
 
   s2_out.bits := DontCare
@@ -84,27 +83,27 @@ class StoreUnit extends XSModule {
   PipelineConnect(s2_out, s3_in, true.B, false.B)
   //-------------------------------------------------------
   // ST Pipeline Stage 3
-  // Write paddr to LSROQ
+  // Write paddr to LSQ
   //-------------------------------------------------------
 
   // Send TLB feedback to store issue queue
   io.tlbFeedback.valid := RegNext(io.stin.valid && s2_out.ready)
   io.tlbFeedback.bits.hit := RegNext(!s2_out.bits.miss)
   io.tlbFeedback.bits.roqIdx := RegNext(s2_out.bits.uop.roqIdx)
-  XSDebug(io.tlbFeedback.valid, 
+  XSDebug(io.tlbFeedback.valid,
     "S3 Store: tlbHit: %d roqIdx: %d\n",
     io.tlbFeedback.bits.hit,
     io.tlbFeedback.bits.roqIdx.asUInt
   )
 
   // get paddr from dtlb, check if rollback is needed
-  // writeback store inst to lsroq
-  // writeback to LSROQ
+  // writeback store inst to lsq
+  // writeback to LSQ
   s3_in.ready := true.B
-  io.lsroq.bits := s3_in.bits
-  io.lsroq.bits.miss := false.B
-  io.lsroq.bits.mmio := AddressSpace.isMMIO(s3_in.bits.paddr)
-  io.lsroq.valid := s3_in.fire()
+  io.lsq.bits := s3_in.bits
+  io.lsq.bits.miss := false.B
+  io.lsq.bits.mmio := AddressSpace.isMMIO(s3_in.bits.paddr)
+  io.lsq.valid := s3_in.fire()
 
   //-------------------------------------------------------
   // ST Pipeline Stage 4

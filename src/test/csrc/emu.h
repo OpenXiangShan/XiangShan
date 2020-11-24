@@ -1,6 +1,6 @@
 #include "common.h"
 #include "snapshot.h"
-#include "VXSSimTop.h"
+#include "VXSSimSoC.h"
 #include <verilated_vcd_c.h>	// Trace file format header
 
 #define DIFFTEST_WIDTH 6
@@ -26,10 +26,12 @@ struct EmuArgs {
 };
 
 class Emulator {
-  VXSSimTop *dut_ptr;
+  VXSSimSoC *dut_ptr;
   VerilatedVcdC* tfp;
   bool enable_waveform;
+#ifdef VM_SAVABLE
   VerilatedSaveMem snapshot_slot[2];
+#endif
   EmuArgs args;
 
   enum {

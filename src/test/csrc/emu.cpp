@@ -2,6 +2,7 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
+#include "ram.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -70,7 +71,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
 
 
 Emulator::Emulator(int argc, const char *argv[]):
-  dut_ptr(new VXSSimTop),
+  dut_ptr(new VXSSimSoC),
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
@@ -85,7 +86,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   reset_ncycles(10);
 
   // init ram
-  extern void init_ram(const char *img);
   init_ram(args.image);
 
   // init device
@@ -107,12 +107,14 @@ Emulator::Emulator(int argc, const char *argv[]):
   enable_waveform = false;
 #endif
 
+#ifdef VM_SAVABLE
   if (args.snapshot_path != NULL) {
     printf("loading from snapshot `%s`...\n", args.snapshot_path);
     snapshot_load(args.snapshot_path);
     printf("model cycleCnt = %" PRIu64 "\n", dut_ptr->io_trap_cycleCnt);
     hascommit = 1;
   }
+#endif
 
   // set log time range and log level
   dut_ptr->io_logCtrl_log_begin = args.log_begin;
@@ -120,9 +122,14 @@ Emulator::Emulator(int argc, const char *argv[]):
 }
 
 Emulator::~Emulator() {
+#ifdef WITH_DRAMSIM3
+  dramsim3_finish();
+#endif
+#ifdef VM_SAVABLE
   snapshot_slot[0].save();
   snapshot_slot[1].save();
   printf("Please remove unused snapshots manually\n");
+#endif
 }
 
 inline void Emulator::read_emu_regs(uint64_t *r) {
@@ -181,6 +188,13 @@ inline void Emulator::reset_ncycles(size_t cycles) {
 
 inline void Emulator::single_cycle() {
   dut_ptr->clock = 0;
+#ifdef WITH_DRAMSIM3
+  axi_channel axi;
+  axi_copy_from_dut_ptr(dut_ptr, axi);
+  dramsim3_helper(axi);
+  axi_set_dut_ptr(dut_ptr, axi);
+#endif
+
   dut_ptr->eval();
 
   dut_ptr->clock = 1;
@@ -277,8 +291,9 @@ uint64_t Emulator::execute(uint64_t n) {
       poll_event();
       lasttime_poll = t;
     }
+#ifdef VM_SAVABLE
     static int snapshot_count = 0;
-    if (t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
+    if (trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
       // save snapshot every 10s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
@@ -290,6 +305,7 @@ uint64_t Emulator::execute(uint64_t n) {
         snapshot_count = 0;
       }
     }
+#endif
   }
 
 #if VM_TRACE == 1
@@ -308,12 +324,14 @@ inline char* Emulator::timestamp_filename(time_t t, char *buf) {
   return buf + len;
 }
 
+#ifdef VM_SAVABLE
 inline char* Emulator::snapshot_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);
   strcpy(p, ".snapshot");
   return buf;
 }
+#endif
 
 inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
@@ -347,6 +365,7 @@ void Emulator::display_trapinfo() {
       instrCnt, cycleCnt, ipc);
 }
 
+#ifdef VM_SAVABLE
 void Emulator::snapshot_save(const char *filename) {
   static int last_slot = 0;
   VerilatedSaveMem &stream = snapshot_slot[last_slot];
@@ -426,3 +445,4 @@ void Emulator::snapshot_load(const char *filename) {
   if(fp)
     fseek(fp, sdcard_offset, SEEK_SET);
 }
+#endif

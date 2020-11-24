@@ -20,7 +20,7 @@ class AXI4RamFuzzTest()(implicit p: Parameters) extends LazyModule {
     inFlight = 10
   ))
   val ident = LazyModule(new DebugIdentityNode())
-  val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
+  val axiRam = LazyModule(new AXI4RAM(Seq(addressSet), memByte = 1024))
 
   axiRam.node :=
     AXI4UserYanker() :=
@@ -39,7 +39,7 @@ class AXI4RamBurstTest()(implicit p: Parameters) extends LazyModule {
 
   val addressSet = AddressSet(0x38000000L, 0x0000ffffL)
   val burst = LazyModule(new AXI4BurstMaster(startAddr = addressSet.base.toLong, nOp = 3))
-  val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
+  val axiRam = LazyModule(new AXI4RAM(Seq(addressSet), memByte = 1024))
 
   axiRam.node := burst.node
 
@@ -56,7 +56,7 @@ class AXI4RamTLBurstTest()(implicit p: Parameters) extends LazyModule {
 
   val tlburst = LazyModule(new TLBurstMaster(startAddr = addressSet.base.toLong, nOp = 1, burstLen = 32))
   val ident = LazyModule(new DebugIdentityNode())
-  val axiRam = LazyModule(new AXI4RAM(addressSet, memByte = 1024))
+  val axiRam = LazyModule(new AXI4RAM(Seq(addressSet), memByte = 1024))
 
   axiRam.node :=
     AXI4UserYanker() :=

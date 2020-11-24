@@ -8,7 +8,7 @@ import utils._
 
 class AXI4Flash
 (
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false)
 {

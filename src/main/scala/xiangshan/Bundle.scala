@@ -10,6 +10,7 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
+import scala.math.max
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -37,12 +38,26 @@ object ValidUndirectioned {
   }
 }
 
+class SCMeta(val useSC: Boolean) extends XSBundle with HasTageParameter {
+  def maxVal = 8 * ((1 << TageCtrBits) - 1) + SCTableInfo.map{case (_,cb,_) => (1 << cb) - 1}.reduce(_+_)
+  def minVal = -(8 * (1 << TageCtrBits) + SCTableInfo.map{case (_,cb,_) => 1 << cb}.reduce(_+_))
+  def sumCtrBits = max(log2Ceil(-minVal), log2Ceil(maxVal+1)) + 1
+  val tageTaken = if (useSC) Bool() else UInt(0.W)
+  val scUsed    = if (useSC) Bool() else UInt(0.W)
+  val scPred    = if (useSC) Bool() else UInt(0.W)
+  // Suppose ctrbits of all tables are identical
+  val ctrs      = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
+  val sumAbs    = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
+}
+
 class TageMeta extends XSBundle with HasTageParameter {
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  val taken = Bool()
+  val scMeta = new SCMeta(EnableSC)
 }
 
 class BranchPrediction extends XSBundle {
@@ -128,8 +143,8 @@ class CtrlSignals extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val isXSTrap = Bool()
-  val noSpecExec = Bool()  // This inst can not be speculated
-  val isBlocked  = Bool()  // This inst requires pipeline to be blocked
+  val noSpecExec = Bool()  // wait forward
+  val blockBackward  = Bool()  // block backward
   val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
@@ -144,15 +159,8 @@ class CfCtrl extends XSBundle {
 
 // Load / Store Index
 //
-// When using unified lsroq, lsIdx serves as lsroqIdx,
 // while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
-// All lsroqIdx will be replaced by new lsIdx in the future.
 trait HasLSIdx { this: HasXSParameter =>
-  
-  // if(EnableUnifiedLSQ){
-  // Unified LSQ
-  val lsroqIdx = UInt(LsroqIdxWidth.W)
-  // } else {
   // Separate LSQ
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
@@ -198,12 +206,12 @@ class DebugBundle extends XSBundle{
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
-  val src1, src2, src3 = UInt(XLEN.W)
+  val src1, src2, src3 = UInt((XLEN+1).W)
 }
 
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
-  val data = UInt(XLEN.W)
+  val data = UInt((XLEN+1).W)
   val fflags  = new Fflags
   val redirectValid = Bool()
   val redirect = new Redirect
@@ -226,14 +234,14 @@ class CSRSpecialIO extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class ExuIO extends XSBundle {
-  val in = Flipped(DecoupledIO(new ExuInput))
-  val redirect = Flipped(ValidIO(new Redirect))
-  val out = DecoupledIO(new ExuOutput)
-  // for csr
-  val csrOnly = new CSRSpecialIO
-  val mcommit = Input(UInt(3.W))
-}
+//class ExuIO extends XSBundle {
+//  val in = Flipped(DecoupledIO(new ExuInput))
+//  val redirect = Flipped(ValidIO(new Redirect))
+//  val out = DecoupledIO(new ExuOutput)
+//  // for csr
+//  val csrOnly = new CSRSpecialIO
+//  val mcommit = Input(UInt(3.W))
+//}
 
 class RoqCommit extends XSBundle {
   val uop = new MicroOp
@@ -252,8 +260,6 @@ class FrontendToBackendIO extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-  val sfence = Input(new SfenceBundle)
-  val tlbCsrIO = Input(new TlbCsrBundle)
 }
 
 class TlbCsrBundle extends XSBundle {

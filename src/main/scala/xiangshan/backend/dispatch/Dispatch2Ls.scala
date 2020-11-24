@@ -5,9 +5,9 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.exu._
+import xiangshan.backend.exu.Exu._
 
-class Dispatch2Ls(ldCfg: ExuConfig, stCfg: ExuConfig) extends XSModule {
+class Dispatch2Ls extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
     val readIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
@@ -29,8 +29,8 @@ class Dispatch2Ls(ldCfg: ExuConfig, stCfg: ExuConfig) extends XSModule {
   val loadPriority = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
   val storePriority = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
   for (i <- 0 until dpParams.LsDqDeqWidth) {
-    loadIndexGen.io.validBits(i) := io.fromDq(i).valid && ldCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    storeIndexGen.io.validBits(i) := io.fromDq(i).valid && stCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    loadIndexGen.io.validBits(i) := io.fromDq(i).valid && ldExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    storeIndexGen.io.validBits(i) := io.fromDq(i).valid && stExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
 
     // XSDebug(io.fromDq(i).valid,
     //   p"ls dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")

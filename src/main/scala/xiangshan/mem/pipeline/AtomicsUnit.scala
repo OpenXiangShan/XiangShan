@@ -79,8 +79,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
-    io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx // FIXME: need update
-    io.dtlb.resp.ready := true.B
 
     when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
       // exception handling
@@ -146,7 +144,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       LSUOpType.amomaxu_d -> M_XA_MAXU
     ))
 
-    io.dcache.req.bits.addr := paddr 
+    io.dcache.req.bits.addr := paddr
     io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))

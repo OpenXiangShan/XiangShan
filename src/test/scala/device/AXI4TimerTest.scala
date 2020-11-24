@@ -16,7 +16,7 @@ class AXI4TimerTestTop(implicit p: Parameters) extends LazyModule {
   val addressSet = AddressSet(0x38000000L, 0x0000ffffL)
   val fuzz = LazyModule(new TLFuzzer(nOperations = 10, overrideAddress = Some(addressSet), inFlight = 1))
   val ident = LazyModule(new DebugIdentityNode())
-  val axiTimer = LazyModule(new AXI4Timer(sim = true, addressSet))
+  val axiTimer = LazyModule(new AXI4Timer(sim = true, Seq(addressSet)))
 
   axiTimer.node :=
     AXI4UserYanker() :=
