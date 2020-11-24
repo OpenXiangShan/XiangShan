@@ -132,8 +132,34 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val idxLatch = RegEnable(idx, enable=io.req.valid)
   val tagLatch = RegEnable(tag, enable=io.req.valid)
 
-  val hi_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
-  val lo_us = List.fill(TageBanks)(Module(new SRAMTemplate(Bool(), set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
+  class HL_Bank (val nRows: Int = nRows) extends TageModule {
+    val io = IO(new Bundle {
+      val r = new Bundle {
+        val req = Flipped(ValidIO(new Bundle {
+          val setIdx = UInt(log2Ceil(nRows).W)
+        }))
+        val resp = new Bundle {
+          val data = Output(Bool())
+        }
+      }
+      val w = new Bundle {
+        val req = Flipped(ValidIO(new Bundle {
+          val setIdx = UInt(log2Ceil(nRows).W)
+          val data = Bool()
+        }))
+      }
+    })
+
+    val mem = Mem(nRows, Bool())
+    // 1-cycle latency just as SyncReadMem
+    io.r.resp.data := RegEnable(mem.read(io.r.req.bits.setIdx), enable=io.r.req.valid)
+    when (io.w.req.valid) {
+      mem.write(io.w.req.bits.setIdx, io.w.req.bits.data)
+    }
+  }
+
+  val hi_us = List.fill(TageBanks)(Module(new HL_Bank(nRows)))
+  val lo_us = List.fill(TageBanks)(Module(new HL_Bank(nRows)))
   val table = List.fill(TageBanks)(Module(new SRAMTemplate(new TageEntry, set=nRows, shouldReset=false, holdRead=true, singlePort=false)))
 
   val hi_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
@@ -148,18 +174,22 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val realMask = circularShiftLeft(io.req.bits.mask, TageBanks, baseBank)
   val maskLatch = RegEnable(io.req.bits.mask, enable=io.req.valid)
 
+
+
   (0 until TageBanks).map(
     b => {
-      Seq(hi_us, lo_us, table).map(
-        t => {
-          t(b).reset := reset.asBool
-          t(b).io.r.req.valid := io.req.valid && realMask(b)
-          t(b).io.r.req.bits.setIdx := idx
-        }
-      )
+      hi_us(b).io.r.req.valid := io.req.valid && realMask(b)
+      hi_us(b).io.r.req.bits.setIdx := idx
 
-      hi_us_r(b) := hi_us(b).io.r.resp.data(0)
-      lo_us_r(b) := lo_us(b).io.r.resp.data(0)
+      lo_us(b).io.r.req.valid := io.req.valid && realMask(b)
+      lo_us(b).io.r.req.bits.setIdx := idx
+
+      table(b).reset := reset.asBool
+      table(b).io.r.req.valid := io.req.valid && realMask(b)
+      table(b).io.r.req.bits.setIdx := idx
+
+      hi_us_r(b) := hi_us(b).io.r.resp.data
+      lo_us_r(b) := lo_us(b).io.r.resp.data
       table_r(b) := table(b).io.r.resp.data(0)
     }
   )
