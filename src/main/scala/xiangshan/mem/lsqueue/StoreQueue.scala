@@ -271,7 +271,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   })
 
   (0 until 2).map(i => {
-    val ptr = ringBufferTail + i.U
+    val ptr = (ringBufferTailExtended + i.U).value
     val mmio = dataModule.io.rdata(ptr).mmio
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
@@ -286,8 +286,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
     when(io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
+      XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
-    // TODO: move tailptr immediately
   })
 
   // Memory mapped IO / other uncached operations
