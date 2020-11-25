@@ -23,9 +23,12 @@ class Dispatch1 extends XSModule {
     // get LsIdx
     val lsIdx = Input(Vec(RenameWidth, new LSIdx))
     // to dispatch queue
-    val toIntDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
-    val toFpDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
-    val toLsDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
+    val toIntDqReady = Input(Bool())
+    val toIntDq = Vec(dpParams.DqEnqWidth, ValidIO(new MicroOp))
+    val toFpDqReady = Input(Bool())
+    val toFpDq = Vec(dpParams.DqEnqWidth, ValidIO(new MicroOp))
+    val toLsDqReady = Input(Bool())
+    val toLsDq = Vec(dpParams.DqEnqWidth, ValidIO(new MicroOp))
   })
   /**
     * Part 1: choose the target dispatch queue and the corresponding write ports
@@ -116,9 +119,9 @@ class Dispatch1 extends XSModule {
   for (i <- 0 until RenameWidth) {
     orderedEnqueue(i) := prevCanEnqueue
     canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsqIndexAcquired(i))
-    val enqReady = (io.toIntDq(intIndex.io.reverseMapping(i).bits).ready && intIndex.io.reverseMapping(i).valid) ||
-      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).ready && fpIndex.io.reverseMapping(i).valid) ||
-      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).ready && lsIndex.io.reverseMapping(i).valid)
+    val enqReady = (io.toIntDqReady && intIndex.io.reverseMapping(i).valid) ||
+      (io.toFpDqReady && fpIndex.io.reverseMapping(i).valid) ||
+      (io.toLsDqReady && lsIndex.io.reverseMapping(i).valid)
     prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || (canEnqueue(i) && enqReady))
   }
   for (i <- 0 until dpParams.DqEnqWidth) {
@@ -147,16 +150,16 @@ class Dispatch1 extends XSModule {
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   for (i <- 0 until RenameWidth) {
-    val enqFire = (io.toIntDq(intIndex.io.reverseMapping(i).bits).fire() && intIndex.io.reverseMapping(i).valid) ||
-      (io.toFpDq(fpIndex.io.reverseMapping(i).bits).fire() && fpIndex.io.reverseMapping(i).valid) ||
-      (io.toLsDq(lsIndex.io.reverseMapping(i).bits).fire() && lsIndex.io.reverseMapping(i).valid)
+    val enqFire = (io.toIntDqReady && intIndex.io.reverseMapping(i).valid) ||
+      (io.toFpDqReady && fpIndex.io.reverseMapping(i).valid) ||
+      (io.toLsDqReady && lsIndex.io.reverseMapping(i).valid)
     io.recv(i) := enqFire || cancelled(i)
     io.fromRename(i).ready := Cat(readyVector).andR()
 
     // TODO: add print method for lsIdx
     XSInfo(io.recv(i) && !cancelled(i),
-      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}) " +
-      p"roq ${uopWithIndex(i).roqIdx} lq ${uopWithIndex(i).lqIdx} sq ${uopWithIndex(i).sqIdx}" +
+      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +
+      p"roq ${uopWithIndex(i).roqIdx}, lq ${uopWithIndex(i).lqIdx}, sq ${uopWithIndex(i).sqIdx}, " +
       p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
 
     XSInfo(io.recv(i) && cancelled(i),
@@ -165,6 +168,6 @@ class Dispatch1 extends XSModule {
       io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
   val renameFireCnt = PopCount(io.recv)
-  val enqFireCnt = PopCount(io.toIntDq.map(_.fire)) + PopCount(io.toFpDq.map(_.fire)) + PopCount(io.toLsDq.map(_.fire))
+  val enqFireCnt = PopCount(io.toIntDq.map(_.valid && io.toIntDqReady)) + PopCount(io.toFpDq.map(_.valid && io.toFpDqReady)) + PopCount(io.toLsDq.map(_.valid && io.toLsDqReady))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 }

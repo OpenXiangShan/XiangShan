@@ -68,8 +68,11 @@ class Dispatch extends XSModule {
   dispatch1.io.roqIdxs <> io.roqIdxs
   dispatch1.io.toLsq <> io.toLsq
   dispatch1.io.lsIdx <> io.lsIdxs
+  dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq
+  dispatch1.io.toFpDqReady <> fpDq.io.enqReady
   dispatch1.io.toFpDq <> fpDq.io.enq
+  dispatch1.io.toLsDqReady <> lsDq.io.enqReady
   dispatch1.io.toLsDq <> lsDq.io.enq
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues

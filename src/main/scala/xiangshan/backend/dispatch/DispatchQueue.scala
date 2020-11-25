@@ -8,7 +8,8 @@ import xiangshan._
 import xiangshan.backend.roq.RoqPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int, replayWidth: Int) extends XSBundle {
-  val enq = Vec(enqnum, Flipped(DecoupledIO(new MicroOp)))
+  val enq = Vec(enqnum, Flipped(ValidIO(new MicroOp)))
+  val enqReady = Output(Bool())
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val dequeueRoqIndex = Input(Valid(new RoqPtr))
   val redirect = Flipped(ValidIO(new Redirect))
@@ -73,7 +74,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     */
   // enqueue: from s_invalid to s_valid
   for (i <- 0 until enqnum) {
-    when (io.enq(i).fire()) {
+    when (io.enq(i).valid && io.enqReady) {
       uopEntries(enqIndex(i)) := io.enq(i).bits
       stateEntries(enqIndex(i)) := s_valid
     }
@@ -240,8 +241,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     * head: commit
     */
   // enqueue
-  val numEnqTry = Mux(emptyEntries > enqnum.U, enqnum.U, emptyEntries)
-  val numEnq = PriorityEncoder(io.enq.map(!_.fire()) :+ true.B)
+  val numEnq = Mux(io.enqReady, PriorityEncoder(io.enq.map(!_.valid) :+ true.B), 0.U)
   XSError(numEnq =/= 0.U && (mispredictionValid || exceptionValid), "should not enqueue when redirect\n")
   tailPtr := Mux(exceptionValid,
     0.U.asTypeOf(new CircularQueuePtr(size)),
@@ -271,11 +271,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   /**
     * Part 4: set output and input
     */
+  // TODO: remove this when replay moves to roq
   val allWalkDone = !inReplayWalk && io.otherWalkDone
-  val enqReadyBits = (1.U << numEnqTry).asUInt() - 1.U
-  for (i <- 0 until enqnum) {
-    io.enq(i).ready := enqReadyBits(i).asBool() && allWalkDone
-  }
+  io.enqReady := emptyEntries >= enqnum.U && allWalkDone
 
   for (i <- 0 until deqnum) {
     io.deq(i).bits := uopEntries(deqIndex(i))
