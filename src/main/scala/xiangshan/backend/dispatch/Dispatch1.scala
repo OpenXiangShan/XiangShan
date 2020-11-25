@@ -150,9 +150,9 @@ class Dispatch1 extends XSModule {
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   for (i <- 0 until RenameWidth) {
-    val enqFire = (io.toIntDqReady && intIndex.io.reverseMapping(i).valid) ||
-      (io.toFpDqReady && fpIndex.io.reverseMapping(i).valid) ||
-      (io.toLsDqReady && lsIndex.io.reverseMapping(i).valid)
+    val enqFire = (io.toIntDqReady && io.toIntDq(intIndex.io.reverseMapping(i).bits).valid && intIndex.io.reverseMapping(i).valid) ||
+      (io.toFpDqReady && io.toFpDq(fpIndex.io.reverseMapping(i).bits).valid && fpIndex.io.reverseMapping(i).valid) ||
+      (io.toLsDqReady && io.toLsDq(lsIndex.io.reverseMapping(i).bits).valid && lsIndex.io.reverseMapping(i).valid)
     io.recv(i) := enqFire || cancelled(i)
     io.fromRename(i).ready := Cat(readyVector).andR()
 
