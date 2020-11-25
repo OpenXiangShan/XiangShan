@@ -60,7 +60,7 @@ class Dispatch1 extends XSModule {
   /**
     * Part 2: acquire ROQ (all) and LSQ (load/store only) indexes
     */
-  val cancelled = WireInit(VecInit(Seq.fill(RenameWidth)(io.redirect.valid && !io.redirect.bits.isReplay)))
+  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
   val roqIndexReg = Reg(Vec(RenameWidth, new RoqPtr))
@@ -78,7 +78,7 @@ class Dispatch1 extends XSModule {
     io.toRoq(i).bits := io.fromRename(i).bits
     io.toRoq(i).bits.ctrl.commitType := commitType
 
-    io.toLsq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !cancelled(i)
+    io.toLsq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !redirectValid
     io.toLsq(i).bits := io.fromRename(i).bits
     io.toLsq(i).bits.ctrl.commitType := commitType
     io.toLsq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
@@ -118,7 +118,7 @@ class Dispatch1 extends XSModule {
   var prevCanEnqueue = true.B
   for (i <- 0 until RenameWidth) {
     orderedEnqueue(i) := prevCanEnqueue
-    canEnqueue(i) := !cancelled(i) && roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsqIndexAcquired(i))
+    canEnqueue(i) := roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsqIndexAcquired(i))
     val enqReady = (io.toIntDqReady && intIndex.io.reverseMapping(i).valid) ||
       (io.toFpDqReady && fpIndex.io.reverseMapping(i).valid) ||
       (io.toLsDqReady && lsIndex.io.reverseMapping(i).valid)
@@ -153,16 +153,16 @@ class Dispatch1 extends XSModule {
     val enqFire = (io.toIntDqReady && io.toIntDq(intIndex.io.reverseMapping(i).bits).valid && intIndex.io.reverseMapping(i).valid) ||
       (io.toFpDqReady && io.toFpDq(fpIndex.io.reverseMapping(i).bits).valid && fpIndex.io.reverseMapping(i).valid) ||
       (io.toLsDqReady && io.toLsDq(lsIndex.io.reverseMapping(i).bits).valid && lsIndex.io.reverseMapping(i).valid)
-    io.recv(i) := enqFire || cancelled(i)
+    io.recv(i) := enqFire || redirectValid
     io.fromRename(i).ready := Cat(readyVector).andR()
 
     // TODO: add print method for lsIdx
-    XSInfo(io.recv(i) && !cancelled(i),
+    XSInfo(io.recv(i) && !redirectValid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +
       p"roq ${uopWithIndex(i).roqIdx}, lq ${uopWithIndex(i).lqIdx}, sq ${uopWithIndex(i).sqIdx}, " +
       p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
 
-    XSInfo(io.recv(i) && cancelled(i),
+    XSInfo(io.recv(i) && redirectValid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} with brTag ${io.fromRename(i).bits.brTag.value} cancelled\n")
     XSDebug(io.fromRename(i).valid, "v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
       io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)

@@ -273,7 +273,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     */
   // TODO: remove this when replay moves to roq
   val allWalkDone = !inReplayWalk && io.otherWalkDone
-  io.enqReady := emptyEntries >= enqnum.U && allWalkDone
+  io.enqReady := emptyEntries >= enqnum.U && allWalkDone && !(exceptionValid || mispredictionValid)
 
   for (i <- 0 until deqnum) {
     io.deq(i).bits := uopEntries(deqIndex(i))
