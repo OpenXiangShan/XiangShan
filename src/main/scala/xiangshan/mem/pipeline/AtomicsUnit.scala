@@ -76,6 +76,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src1
     io.dtlb.req.bits.roqIdx := in.uop.roqIdx
+    io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
