@@ -6,7 +6,7 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu.{AluExeUnit, ExuConfig, JumpExeUnit, MulDivExeUnit, Wb}
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.backend.issue.ReservationStationNew
+import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.fu.fpu.Fflags
 
@@ -131,28 +131,33 @@ class IntegerBlock
 
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStationNew(
-      cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback
-    ))
+    // val rs = Module(new ReservationStationNew(
+    //   cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback
+    // ))
+    val rsCtrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
+    val rsData = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
 
-    rs.io.redirect <> redirect
-    rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rs.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsCtrl.io.data <> rsData.io.ctrl
+    rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
+    rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsData.io.redirect <> redirect
 
-    rs.io.writeBackedData <> writeBackData
-    for ((x, y) <- rs.io.extraListenPorts.zip(extraListenPorts)) {
+    rsData.io.writeBackedData <> writeBackData
+    for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
       x.valid := y.fire()
       x.bits := y.bits
     }
 
     exeUnits(i).io.redirect <> redirect
-    exeUnits(i).io.fromInt <> rs.io.deq
-    rs.io.tlbFeedback := DontCare
+    exeUnits(i).io.fromInt <> rsData.io.deq
+    rsData.io.feedback := DontCare
 
-    rs.suggestName(s"rs_${cfg.name}")
+    rsCtrl.suggestName(s"rsc_${cfg.name}")
+    rsData.suggestName(s"rsd_${cfg.name}")
 
-    rs
+    rsData
   })
 
   for(rs <- reservationStations){
