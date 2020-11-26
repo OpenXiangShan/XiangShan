@@ -1,7 +1,9 @@
 #include "common.h"
 #include "ram.h"
 
-#define RAMSIZE (128 * 1024 * 1024)
+#include <zlib.h>
+
+#define RAMSIZE (256 * 1024 * 1024)
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
@@ -98,26 +100,85 @@ void addpageSv39() {
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*PTENUM), pte, PAGESIZE*PTENUM);
 }
 
+// Return whether the file is a gz file
+int isGzFile(const char *img) {
+  assert(img != NULL && strlen(img) >= 4);
+  return !strcmp(img + (strlen(img) - 3), ".gz");
+}
+
+// Read binary from .gz file
+int readFromGz(void* ptr, const char *file_name) {
+  gzFile compressed_mem = gzopen(file_name, "rb");
+
+  if(compressed_mem == NULL) {
+    printf("Can't open compressed binary file '%s'", file_name);
+    return -1;
+  }
+
+  uint64_t curr_size = 0;
+  const uint32_t chunk_size = 16384;
+  long *temp_page = new long[chunk_size];
+  long *pmem_current = (long*)ptr;
+
+  while (curr_size < RAMSIZE) {
+    uint32_t bytes_read = gzread(compressed_mem, temp_page, chunk_size);
+    if (bytes_read == 0) { break; }
+    assert(bytes_read % sizeof(long) == 0);
+    for (uint32_t x = 0; x < bytes_read / sizeof(long); x++) {
+      if (*(temp_page + x) != 0) {
+        pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
+        *pmem_current = *(temp_page + x);
+      }
+    }
+    curr_size += bytes_read;
+  }
+  printf("Read %lu bytes from gz stream in total", curr_size);
+
+  delete [] temp_page;
+
+  if(gzclose(compressed_mem)) {
+    printf("Error closing '%s'\n", file_name);
+    return -1;
+  }
+  return curr_size;
+}
+
 void init_ram(const char *img) {
   assert(img != NULL);
-  FILE *fp = fopen(img, "rb");
-  if (fp == NULL) {
-    printf("Can not open '%s'\n", img);
-    assert(0);
-  }
 
   printf("The image is %s\n", img);
 
-  fseek(fp, 0, SEEK_END);
-  img_size = ftell(fp);
-  if (img_size > RAMSIZE) {
-    img_size = RAMSIZE;
-  }
+  int ret;
+  if (isGzFile(img)) {
+    printf("Read from gz file\n");
+    img_size = readFromGz(ram, img);
+    if (img_size > RAMSIZE) {
+      img_size = RAMSIZE;
+    }
 
-  fseek(fp, 0, SEEK_SET);
-  int ret = fread(ram, img_size, 1, fp);
-  assert(ret == 1);
-  fclose(fp);
+    assert(img_size >= 0);
+  }
+  else {
+    printf("Read from bin file\n");
+
+    FILE *fp = fopen(img, "rb");
+    if (fp == NULL) {
+      printf("Can not open '%s'\n", img);
+      assert(0);
+    }
+
+    fseek(fp, 0, SEEK_END);
+    img_size = ftell(fp);
+    if (img_size > RAMSIZE) {
+      img_size = RAMSIZE;
+    }
+
+    fseek(fp, 0, SEEK_SET);
+    ret = fread(ram, img_size, 1, fp);
+
+    assert(ret == 1);
+    fclose(fp); 
+  }
 
   //new add
   addpageSv39();
