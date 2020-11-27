@@ -29,9 +29,12 @@ class Dispatch extends XSModule {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     // enq Roq
-    val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get RoqIdx
-    val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
+    val enqRoq = new Bundle {
+      val canAccept = Input(Bool())
+      val extraWalk = Vec(RenameWidth, Output(Bool()))
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+      val resp = Vec(RenameWidth, Input(new RoqPtr))
+    }
     // enq Lsq
     val enqLsq = new Bundle() {
       val canAccept = Input(Bool())
@@ -67,8 +70,7 @@ class Dispatch extends XSModule {
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
   dispatch1.io.redirect <> io.redirect
-  dispatch1.io.toRoq <> io.toRoq
-  dispatch1.io.roqIdxs <> io.roqIdxs
+  dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
   dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq

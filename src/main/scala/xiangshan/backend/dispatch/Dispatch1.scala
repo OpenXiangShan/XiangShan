@@ -15,9 +15,13 @@ class Dispatch1 extends XSModule {
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val recv = Output(Vec(RenameWidth, Bool()))
     // enq Roq
-    val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get RoqIdx
-    val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
+    val enqRoq = new Bundle {
+      val canAccept = Input(Bool())
+      // if set, Roq needs extra walk
+      val extraWalk = Vec(RenameWidth, Output(Bool()))
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+      val resp = Vec(RenameWidth, Input(new RoqPtr))
+    }
     // enq Lsq
     val enqLsq = new Bundle() {
       val canAccept = Input(Bool())
@@ -65,7 +69,7 @@ class Dispatch1 extends XSModule {
     *   only set valid when all of them provides enough entries
     */
   val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
-  val allResourceReady = io.enqLsq.canAccept && Cat(io.toRoq.map(_.ready)).andR && io.toIntDqReady && io.toFpDqReady && io.toLsDqReady
+  val allResourceReady = io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDqReady && io.toFpDqReady && io.toLsDqReady
 
   // Instructions should enter dispatch queues in order.
   // When RenameWidth > DqEnqWidth, it's possible that some instructions cannot enter dispatch queue
@@ -94,37 +98,32 @@ class Dispatch1 extends XSModule {
   val thisCanActualOut = (0 until RenameWidth).map(i => allResourceReady && thisCanOut(i) && prevCanOut(i))
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
-  val roqIndexReg = Reg(Vec(RenameWidth, new RoqPtr))
-  val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
 
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSQ
     val commitType = Cat(isLs(i), isStore(i) | isFp(i))
 
-    io.toRoq(i).valid := io.fromRename(i).valid && thisCanActualOut(i)
-    io.toRoq(i).bits := io.fromRename(i).bits
-    io.toRoq(i).bits.ctrl.commitType := commitType
+    io.enqRoq.extraWalk(i) := io.fromRename(i).valid && !thisCanActualOut(i)
+    io.enqRoq.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i)
+    io.enqRoq.req(i).bits := io.fromRename(i).bits
+    io.enqRoq.req(i).bits.ctrl.commitType := commitType
 
     val shouldEnqLsq = isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou
     io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && !redirectValid && thisCanActualOut(i)
     io.enqLsq.req(i).bits := io.fromRename(i).bits
     io.enqLsq.req(i).bits.ctrl.commitType := commitType
-    io.enqLsq.req(i).bits.roqIdx := io.roqIdxs(i)
+    io.enqLsq.req(i).bits.roqIdx := io.enqRoq.resp(i)
 
     // append ROQ and LSQ indexed to uop
     uopWithIndex(i) := io.fromRename(i).bits
-    uopWithIndex(i).roqIdx := io.roqIdxs(i)
+    uopWithIndex(i).roqIdx := io.enqRoq.resp(i)
     uopWithIndex(i).lqIdx := io.enqLsq.resp(i).lqIdx
     uopWithIndex(i).sqIdx := io.enqLsq.resp(i).sqIdx
 
     XSDebug(io.enqLsq.req(i).valid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.enqLsq.resp(i).lqIdx} sq ${io.enqLsq.resp(i).sqIdx}\n")
 
-    XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
-    if (i > 0) {
-      XSError(io.toRoq(i).fire() && !io.toRoq(i - 1).ready && io.toRoq(i - 1).valid, p"roq handshake not continuous $i")
-    }
+    XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
   }
 
   // send uops with correct indexes to dispatch queues
