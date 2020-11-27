@@ -48,19 +48,8 @@ class LoadUnit_S0 extends XSModule {
   io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
   io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
 
-}
-
-// Load Pipeline Stage 1
-// TLB resp (send paddr to dcache)
-class StoreUnit_S1 extends XSModule {
-  val io = IO(new Bundle() {
-    val in = Flipped(Decoupled(new LsPipelineBundle))
-    val out = Decoupled(new LsPipelineBundle)
-    val redirect = Flipped(ValidIO(new Redirect))
-    val tlbFeedback = ValidIO(new TlbFeedback)
-  })
-
   // Send TLB feedback to store issue queue
+  // TODO: should be moved to S1
   io.tlbFeedback.valid := RegNext(io.in.valid && io.out.ready)
   io.tlbFeedback.bits.hit := RegNext(!io.out.bits.miss)
   io.tlbFeedback.bits.roqIdx := RegNext(io.out.bits.uop.roqIdx)
@@ -69,6 +58,17 @@ class StoreUnit_S1 extends XSModule {
     io.tlbFeedback.bits.hit,
     io.tlbFeedback.bits.roqIdx.asUInt
   )
+}
+
+// Load Pipeline Stage 1
+// TLB resp (send paddr to dcache)
+class StoreUnit_S1 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
+    val out = Decoupled(new LsPipelineBundle)
+    // val fp_out = Decoupled(new LsPipelineBundle)
+    val redirect = Flipped(ValidIO(new Redirect))
+  })
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
@@ -77,9 +77,25 @@ class StoreUnit_S1 extends XSModule {
   io.lsq.bits := io.in.bits
   io.lsq.bits.miss := false.B
   io.lsq.bits.mmio := AddressSpace.isMMIO(io.in.bits.paddr)
-  io.lsq.valid := io.in.fire()
+  io.lsq.valid := io.in.fire() // TODO: && ! FP
+
+  // if fp
+  // io.fp_out.valid := ...
+  // io.fp_out.bits := ...
 
 }
+
+// class StoreUnit_S2 extends XSModule {
+//   val io = IO(new Bundle() {
+//     val in = Flipped(Decoupled(new LsPipelineBundle))
+//     val out = Decoupled(new LsPipelineBundle)
+//     val redirect = Flipped(ValidIO(new Redirect))
+//   })
+
+//   io.in.ready := true.B
+//   io.out.bits := io.in.bits
+//   io.out.valid := io.in.valid && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
+// }
 
 class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
@@ -92,16 +108,18 @@ class StoreUnit extends XSModule {
 
   val store_s0 = Module(new StoreUnit_S0)
   val store_s1 = Module(new StoreUnit_S1)
+  // val store_s2 = Module(new StoreUnit_S2)
 
   store_s0.io.in <> io.stin
   store_s0.io.redirect <> io.redirect
   store_s0.io.dtlbReq <> io.dtlb.req
   store_s0.io.dtlbResp <> io.dtlbResp
+  store_s0.io.tlbFeedback <> io.tlbFeedback
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, false.B)
+  // PipelineConnect(store_s1.io.fp_out, store_s2.io.in, true.B, false.B)
 
   store_s1.io.redirect <> io.redirect
-  store_s1.io.tlbFeedback <> io.tlbFeedback
   // send result to sq
   io.lsq.valid := store_s1.io.out.valid
   io.lsq.bits := store_s1.io.out.bits

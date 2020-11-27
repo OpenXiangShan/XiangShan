@@ -219,6 +219,17 @@ class LoadUnit_S2 extends XSModule {
 
 }
 
+// class LoadUnit_S3 extends XSModule {
+//   val io = IO(new Bundle() {
+//     val in = Flipped(Decoupled(new LsPipelineBundle))
+//     val out = Decoupled(new LsPipelineBundle)
+//     val redirect = Flipped(ValidIO(new Redirect))
+//   })
+
+//   io.in.ready := true.B
+//   io.out.bits := io.in.bits
+//   io.out.valid := io.in.valid && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
+// }
 
 class LoadUnit extends XSModule {
   val io = IO(new Bundle() {
@@ -235,6 +246,7 @@ class LoadUnit extends XSModule {
   val load_s0 = Module(new LoadUnit_S0)
   val load_s1 = Module(new LoadUnit_S1)
   val load_s2 = Module(new LoadUnit_S2)
+  // val load_s3 = Module(new LoadUnit_S3)
 
   load_s0.io.in <> io.ldin
   load_s0.io.redirect <> io.redirect
@@ -255,6 +267,9 @@ class LoadUnit extends XSModule {
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
+
+  // PipelineConnect(load_s2.io.fp_out, load_s3.io.in, true.B, false.B)
+  // load_s3.io.redirect <> io.redirect
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
