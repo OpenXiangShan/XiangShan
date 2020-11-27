@@ -72,6 +72,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // uop.ctrl.commitType (wb) (commit) (L/S)
   // exceptionVec (wb) (commit)
   // roqIdx (dispatch) (commit)
+  // crossPageIPFFix (dispatch) (commit)
 
   // uop field used when walk
   // ctrl.fpWen (dispatch) (walk)
@@ -94,6 +95,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val isEmpty = enqPtr === deqPtr && enqPtrExt.flag ===deqPtrExt.flag
   val isFull = enqPtr === deqPtr && enqPtrExt.flag =/= deqPtrExt.flag
   val notFull = !isFull
+
+  val emptyEntries = RoqSize.U - distanceBetween(enqPtrExt, deqPtrExt)
 
   val s_idle :: s_walk :: s_extrawalk :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -131,7 +134,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       debug_microOp(roqIdx) := io.dp1Req(i).bits
       when(noSpecEnq(i)){ hasNoSpec := true.B }
     }
-    io.dp1Req(i).ready := (notFull && !valid(roqIdx) && state === s_idle) &&
+    val numTryEnqueue = offset +& io.dp1Req(i).valid
+    io.dp1Req(i).ready := numTryEnqueue <= emptyEntries &&
+      state === s_idle &&
       (!noSpecEnq(i) || isEmpty) &&
       !hasNoSpec
     io.roqIdxs(i) := roqIdxExt
