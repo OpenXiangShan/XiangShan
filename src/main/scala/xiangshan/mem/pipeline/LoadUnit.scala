@@ -105,7 +105,7 @@ class LoadUnit_S1 extends XSModule {
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.in.bits.paddr
   val s1_tlb_miss = io.in.bits.tlbMiss
-  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
+  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr) && !io.out.bits.uop.cf.exceptionVec.asUInt.orR
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
@@ -269,7 +269,7 @@ class LoadUnit extends XSModule {
   io.lsq.loadIn.bits := load_s2.io.out.bits
 
   val hitLoadOut = Wire(Valid(new ExuOutput))
-  hitLoadOut.valid := load_s2.io.out.valid && !load_s2.io.out.bits.miss
+  hitLoadOut.valid := load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
   hitLoadOut.bits.uop := load_s2.io.out.bits.uop
   hitLoadOut.bits.data := load_s2.io.out.bits.data
   hitLoadOut.bits.redirectValid := false.B
