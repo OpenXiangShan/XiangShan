@@ -3,8 +3,8 @@
 
 #include "common.h"
 
-// #define WITH_DRAMSIM3
 void init_ram(const char *img);
+void ram_finish();
 
 #ifdef WITH_DRAMSIM3
 // 4*64 bits
