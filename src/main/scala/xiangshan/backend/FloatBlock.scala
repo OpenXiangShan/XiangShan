@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
-import xiangshan.backend.issue.ReservationStationNew
+import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 
 
 class FpBlockToCtrlIO extends XSBundle {
@@ -78,28 +78,30 @@ class FloatBlock
       s"delay:${certainLatency}"
     )
 
-    val rs = Module(new ReservationStationNew(
-      cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = false
-    ))
+    val rsCtrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = false))
+    val rsData = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = false))
 
-    rs.io.redirect <> redirect
-    rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rs.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsCtrl.io.data <> rsData.io.ctrl
+    rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
+    rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsData.io.redirect <> redirect
 
-    rs.io.writeBackedData <> writeBackData
-    for ((x, y) <- rs.io.extraListenPorts.zip(extraListenPorts)) {
+    rsData.io.writeBackedData <> writeBackData
+    for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
       x.valid := y.fire()
       x.bits := y.bits
     }
 
     exeUnits(i).io.redirect <> redirect
-    exeUnits(i).io.fromFp <> rs.io.deq
-    rs.io.tlbFeedback := DontCare
+    exeUnits(i).io.fromFp <> rsData.io.deq
+    rsData.io.feedback := DontCare
 
-    rs.suggestName(s"rs_${cfg.name}")
+    rsCtrl.suggestName(s"rsc_${cfg.name}")
+    rsData.suggestName(s"rsd_${cfg.name}")
 
-    rs
+    rsData
   })
 
   for(rs <- reservedStations){

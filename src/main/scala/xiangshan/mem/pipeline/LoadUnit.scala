@@ -22,8 +22,8 @@ class LoadUnit_S0 extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val dtlbReq = Valid(new TlbReq)
-    val dtlbResp = Flipped(Valid(new TlbResp))
+    val dtlbReq = DecoupledIO(new TlbReq)
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
@@ -40,6 +40,7 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbResp.ready := io.out.ready // TODO: check it: io.out.fire()?
 
   // feedback tlb result to RS
   // Note: can be moved to s1
@@ -104,7 +105,7 @@ class LoadUnit_S1 extends XSModule {
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.in.bits.paddr
   val s1_tlb_miss = io.in.bits.tlbMiss
-  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
+  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr) && !io.out.bits.uop.cf.exceptionVec.asUInt.orR
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
