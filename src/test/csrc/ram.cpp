@@ -116,23 +116,28 @@ int readFromGz(void* ptr, const char *file_name) {
   }
 
   uint64_t curr_size = 0;
+  // read 16KB each time
   const uint32_t chunk_size = 16384;
-  long *temp_page = new long[chunk_size];
-  long *pmem_current = (long*)ptr;
+  if ((RAMSIZE % chunk_size) != 0) {
+    printf("RAMSIZE must be divisible by chunk_size\n");
+    assert(0);
+  }
+  uint64_t *temp_page = new uint64_t[chunk_size];
+  uint64_t *pmem_current = (uint64_t *)ptr;
 
   while (curr_size < RAMSIZE) {
     uint32_t bytes_read = gzread(compressed_mem, temp_page, chunk_size);
     if (bytes_read == 0) { break; }
-    assert(bytes_read % sizeof(long) == 0);
-    for (uint32_t x = 0; x < bytes_read / sizeof(long); x++) {
+    assert(bytes_read % sizeof(uint64_t) == 0);
+    for (uint32_t x = 0; x < bytes_read / sizeof(uint64_t); x++) {
       if (*(temp_page + x) != 0) {
-        pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
+        pmem_current = (uint64_t*)((uint8_t*)ptr + curr_size + x * sizeof(uint64_t));
         *pmem_current = *(temp_page + x);
       }
     }
     curr_size += bytes_read;
   }
-  printf("Read %lu bytes from gz stream in total", curr_size);
+  // printf("Read 0x%lx bytes from gz stream in total.\n", curr_size);
 
   delete [] temp_page;
 
@@ -150,17 +155,11 @@ void init_ram(const char *img) {
 
   int ret;
   if (isGzFile(img)) {
-    printf("Read from gz file\n");
+    printf("Gzip file detected. Loading image from extracted gz file.\n");
     img_size = readFromGz(ram, img);
-    if (img_size > RAMSIZE) {
-      img_size = RAMSIZE;
-    }
-
     assert(img_size >= 0);
   }
   else {
-    printf("Read from bin file\n");
-
     FILE *fp = fopen(img, "rb");
     if (fp == NULL) {
       printf("Can not open '%s'\n", img);
