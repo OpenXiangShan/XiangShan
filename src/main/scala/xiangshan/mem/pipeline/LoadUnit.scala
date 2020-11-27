@@ -71,7 +71,8 @@ class LoadUnit_S0 extends XSModule {
     "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
 
-  io.out.valid := io.dcacheReq.fire() // dcache may not accept load request
+  io.out.valid := io.dcacheReq.fire() && // dcache may not accept load request
+    !io.in.bits.uop.roqIdx.needFlush(io.redirect)
   io.out.bits := DontCare
   io.out.bits.vaddr := s0_vaddr
   io.out.bits.paddr := s0_paddr
@@ -141,7 +142,7 @@ class LoadUnit_S1 extends XSModule {
     io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
   )
 
-  io.out.valid := io.in.valid && !s1_tlb_miss &&  !s1_uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -242,7 +243,7 @@ class LoadUnit extends XSModule {
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire() || load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect), false.B)
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, false.B)
 
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
@@ -250,7 +251,7 @@ class LoadUnit extends XSModule {
   io.sbuffer <> load_s1.io.sbuffer
   io.lsq.forward <> load_s1.io.lsq
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire() || load_s1.io.out.bits.tlbMiss, false.B)
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, false.B)
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
