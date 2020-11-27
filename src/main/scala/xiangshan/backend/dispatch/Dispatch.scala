@@ -33,9 +33,11 @@ class Dispatch extends XSModule {
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
     // enq Lsq
-    val toLsq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get LsIdx
-    val lsIdxs = Input(Vec(RenameWidth, new LSIdx))
+    val enqLsq = new Bundle() {
+      val canAccept = Input(Bool())
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+      val resp = Vec(RenameWidth, Input(new LSIdx))
+    }
     val dequeueRoqIndex = Input(Valid(new RoqPtr))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
@@ -58,16 +60,16 @@ class Dispatch extends XSModule {
 
   // pipeline between rename and dispatch
   // accepts all at once
+  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
+    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), redirectValid)
   }
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
   dispatch1.io.redirect <> io.redirect
   dispatch1.io.toRoq <> io.toRoq
   dispatch1.io.roqIdxs <> io.roqIdxs
-  dispatch1.io.toLsq <> io.toLsq
-  dispatch1.io.lsIdx <> io.lsIdxs
+  dispatch1.io.enqLsq <> io.enqLsq
   dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq
   dispatch1.io.toFpDqReady <> fpDq.io.enqReady

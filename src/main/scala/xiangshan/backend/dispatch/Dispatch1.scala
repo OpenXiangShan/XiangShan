@@ -19,9 +19,11 @@ class Dispatch1 extends XSModule {
     // get RoqIdx
     val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
     // enq Lsq
-    val toLsq = Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get LsIdx
-    val lsIdx = Input(Vec(RenameWidth, new LSIdx))
+    val enqLsq = new Bundle() {
+      val canAccept = Input(Bool())
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+      val resp = Vec(RenameWidth, Input(new LSIdx))
+    }
     // to dispatch queue
     val toIntDqReady = Input(Bool())
     val toIntDq = Vec(dpParams.DqEnqWidth, ValidIO(new MicroOp))
@@ -58,51 +60,66 @@ class Dispatch1 extends XSModule {
   }
 
   /**
-    * Part 2: acquire ROQ (all) and LSQ (load/store only) indexes
+    * Part 2:
+    *   acquire ROQ (all), LSQ (load/store only) and dispatch queue slots
+    *   only set valid when all of them provides enough entries
     */
   val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
+  val allResourceReady = io.enqLsq.canAccept && Cat(io.toRoq.map(_.ready)).andR && io.toIntDqReady && io.toFpDqReady && io.toLsDqReady
+
+  // Instructions should enter dispatch queues in order.
+  // When RenameWidth > DqEnqWidth, it's possible that some instructions cannot enter dispatch queue
+  // because previous instructions cannot enter dispatch queue.
+  // The reason is that although ROB and LSQ have enough empty slots, dispatch queue has limited enqueue ports.
+  // Thus, for i >= dpParams.DqEnqWidth, we have to check whether it's previous instructions (and the instruction itself) can enqueue.
+  // However, since, for instructions with indices less than dpParams.DqEnqWidth,
+  // they can always enter dispatch queue when ROB and LSQ are ready, we don't need to check whether they can enqueue.
+  // prevCanOut: previous instructions can enqueue
+  // thisCanOut: this instruction can enqueue
+  val thisCanOut = (0 until RenameWidth).map(i =>
+    // For i in [0, DqEnqWidth), they can always enqueue when ROB and LSQ are ready
+    if (i < dpParams.DqEnqWidth) true.B
+    else Cat(Seq(intIndex, fpIndex, lsIndex).map(_.io.reverseMapping(i).valid)).orR
+  )
+  val prevCanOut = VecInit((0 until RenameWidth).map(i =>
+    // For i in [0, DqEnqWidth], previous instructions can always enqueue when ROB and LSQ are ready
+    if (i <= dpParams.DqEnqWidth) true.B
+    // They need to check their previous ones
+    else Cat((dpParams.DqEnqWidth until i).map(thisCanOut(_))).andR
+  ))
+
+  // this instruction can actually dequeue: 3 conditions
+  // (1) resources are ready
+  // (2) previous instructions are ready
+  val thisCanActualOut = (0 until RenameWidth).map(i => allResourceReady && thisCanOut(i) && prevCanOut(i))
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
   val roqIndexReg = Reg(Vec(RenameWidth, new RoqPtr))
   val roqIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
   val roqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toRoq(i).ready || roqIndexRegValid(i))))
-  val lsIndexReg = Reg(Vec(RenameWidth, new LSIdx))
-  val lsIndexRegValid = RegInit(VecInit(Seq.fill(RenameWidth)(false.B)))
-  val lsqIndexAcquired = WireInit(VecInit(Seq.tabulate(RenameWidth)(i => io.toLsq(i).ready || lsIndexRegValid(i))))
 
   for (i <- 0 until RenameWidth) {
     // input for ROQ and LSQ
     val commitType = Cat(isLs(i), isStore(i) | isFp(i))
 
-    io.toRoq(i).valid := io.fromRename(i).valid && !roqIndexRegValid(i)
+    io.toRoq(i).valid := io.fromRename(i).valid && thisCanActualOut(i)
     io.toRoq(i).bits := io.fromRename(i).bits
     io.toRoq(i).bits.ctrl.commitType := commitType
 
-    io.toLsq(i).valid := io.fromRename(i).valid && !lsIndexRegValid(i) && isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou && roqIndexAcquired(i) && !redirectValid
-    io.toLsq(i).bits := io.fromRename(i).bits
-    io.toLsq(i).bits.ctrl.commitType := commitType
-    io.toLsq(i).bits.roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
-
-    // receive indexes from ROQ and LSQ
-    when(io.toRoq(i).fire() && !io.recv(i)) {
-      roqIndexReg(i) := io.roqIdxs(i)
-      roqIndexRegValid(i) := true.B
-    }.elsewhen(io.recv(i)) {
-      roqIndexRegValid(i) := false.B
-    }
-    when(io.toLsq(i).fire() && !io.recv(i)) {
-      lsIndexReg(i) := io.lsIdx(i)
-      lsIndexRegValid(i) := true.B
-    }.elsewhen(io.recv(i)) {
-      lsIndexRegValid(i) := false.B
-    }
+    val shouldEnqLsq = isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou
+    io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && !redirectValid && thisCanActualOut(i)
+    io.enqLsq.req(i).bits := io.fromRename(i).bits
+    io.enqLsq.req(i).bits.ctrl.commitType := commitType
+    io.enqLsq.req(i).bits.roqIdx := io.roqIdxs(i)
 
     // append ROQ and LSQ indexed to uop
     uopWithIndex(i) := io.fromRename(i).bits
-    uopWithIndex(i).roqIdx := Mux(roqIndexRegValid(i), roqIndexReg(i), io.roqIdxs(i))
-    uopWithIndex(i).lqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).lqIdx
-    uopWithIndex(i).sqIdx := Mux(lsIndexRegValid(i), lsIndexReg(i), io.lsIdx(i)).sqIdx
-    XSDebug(io.toLsq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.lsIdx(i).lqIdx} sq ${io.lsIdx(i).sqIdx}\n")
+    uopWithIndex(i).roqIdx := io.roqIdxs(i)
+    uopWithIndex(i).lqIdx := io.enqLsq.resp(i).lqIdx
+    uopWithIndex(i).sqIdx := io.enqLsq.resp(i).sqIdx
+
+    XSDebug(io.enqLsq.req(i).valid,
+      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.enqLsq.resp(i).lqIdx} sq ${io.enqLsq.resp(i).sqIdx}\n")
 
     XSDebug(io.toRoq(i).fire(), p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.roqIdxs(i)}\n")
     if (i > 0) {
@@ -110,62 +127,37 @@ class Dispatch1 extends XSModule {
     }
   }
 
-  /**
-    * Part 3: send uop (should not be cancelled) with correct indexes to dispatch queues
-    */
-  val orderedEnqueue = Wire(Vec(RenameWidth, Bool()))
-  val canEnqueue = Wire(Vec(RenameWidth, Bool()))
-  var prevCanEnqueue = true.B
-  for (i <- 0 until RenameWidth) {
-    orderedEnqueue(i) := prevCanEnqueue
-    canEnqueue(i) := roqIndexAcquired(i) && (!isLs(i) || io.fromRename(i).bits.ctrl.fuType === FuType.mou || lsqIndexAcquired(i))
-    val enqReady = (io.toIntDqReady && intIndex.io.reverseMapping(i).valid) ||
-      (io.toFpDqReady && fpIndex.io.reverseMapping(i).valid) ||
-      (io.toLsDqReady && lsIndex.io.reverseMapping(i).valid)
-    prevCanEnqueue = prevCanEnqueue && (!io.fromRename(i).valid || (canEnqueue(i) && enqReady))
-  }
+  // send uops with correct indexes to dispatch queues
+  // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
+  // We use prevCanOut here since mapping(i).valid implies there's a valid instruction that can enqueue,
+  // thus we don't need to check thisCanOut.
   for (i <- 0 until dpParams.DqEnqWidth) {
     io.toIntDq(i).bits := uopWithIndex(intIndex.io.mapping(i).bits)
-    io.toIntDq(i).valid := intIndex.io.mapping(i).valid &&
-      canEnqueue(intIndex.io.mapping(i).bits) &&
-      orderedEnqueue(intIndex.io.mapping(i).bits)
+    io.toIntDq(i).valid := intIndex.io.mapping(i).valid && allResourceReady && prevCanOut(intIndex.io.mapping(i).bits)
 
     io.toFpDq(i).bits := uopWithIndex(fpIndex.io.mapping(i).bits)
-    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid &&
-      canEnqueue(fpIndex.io.mapping(i).bits) &&
-      orderedEnqueue(fpIndex.io.mapping(i).bits)
+    io.toFpDq(i).valid := fpIndex.io.mapping(i).valid && allResourceReady && prevCanOut(fpIndex.io.mapping(i).bits)
 
     io.toLsDq(i).bits := uopWithIndex(lsIndex.io.mapping(i).bits)
-    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid &&
-      canEnqueue(lsIndex.io.mapping(i).bits) &&
-      orderedEnqueue(lsIndex.io.mapping(i).bits)
+    io.toLsDq(i).valid := lsIndex.io.mapping(i).valid && allResourceReady && prevCanOut(lsIndex.io.mapping(i).bits)
 
-    // XSDebug(io.toIntDq(i).valid, p"pc 0x${Hexadecimal(io.toIntDq(i).bits.cf.pc)} int index $i\n")
-    // XSDebug(io.toFpDq(i).valid , p"pc 0x${Hexadecimal(io.toFpDq(i).bits.cf.pc )} fp  index $i\n")
-    // XSDebug(io.toLsDq(i).valid , p"pc 0x${Hexadecimal(io.toLsDq(i).bits.cf.pc )} ls  index $i\n")
+    XSDebug(io.toIntDq(i).valid, p"pc 0x${Hexadecimal(io.toIntDq(i).bits.cf.pc)} int index $i\n")
+    XSDebug(io.toFpDq(i).valid , p"pc 0x${Hexadecimal(io.toFpDq(i).bits.cf.pc )} fp  index $i\n")
+    XSDebug(io.toLsDq(i).valid , p"pc 0x${Hexadecimal(io.toLsDq(i).bits.cf.pc )} ls  index $i\n")
   }
 
   /**
-    * Part 4: send response to rename when dispatch queue accepts the uop
+    * Part 3: send response to rename when dispatch queue accepts the uop
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   for (i <- 0 until RenameWidth) {
-    val enqFire = (io.toIntDqReady && io.toIntDq(intIndex.io.reverseMapping(i).bits).valid && intIndex.io.reverseMapping(i).valid) ||
-      (io.toFpDqReady && io.toFpDq(fpIndex.io.reverseMapping(i).bits).valid && fpIndex.io.reverseMapping(i).valid) ||
-      (io.toLsDqReady && io.toLsDq(lsIndex.io.reverseMapping(i).bits).valid && lsIndex.io.reverseMapping(i).valid)
-    io.recv(i) := enqFire || redirectValid
+    io.recv(i) := thisCanActualOut(i)
     io.fromRename(i).ready := Cat(readyVector).andR()
 
-    // TODO: add print method for lsIdx
-    XSInfo(io.recv(i) && !redirectValid,
+    XSInfo(io.recv(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +
       p"roq ${uopWithIndex(i).roqIdx}, lq ${uopWithIndex(i).lqIdx}, sq ${uopWithIndex(i).sqIdx}, " +
       p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
-
-    XSInfo(io.recv(i) && redirectValid,
-      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} with brTag ${io.fromRename(i).bits.brTag.value} cancelled\n")
-    XSDebug(io.fromRename(i).valid, "v:%d r:%d pc 0x%x of type %b is in %d-th slot\n",
-      io.fromRename(i).valid, io.fromRename(i).ready, io.fromRename(i).bits.cf.pc, io.fromRename(i).bits.ctrl.fuType, i.U)
   }
   val renameFireCnt = PopCount(io.recv)
   val enqFireCnt = PopCount(io.toIntDq.map(_.valid && io.toIntDqReady)) + PopCount(io.toFpDq.map(_.valid && io.toFpDqReady)) + PopCount(io.toLsDq.map(_.valid && io.toLsDqReady))

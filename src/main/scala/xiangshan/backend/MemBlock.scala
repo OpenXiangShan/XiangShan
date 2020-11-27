@@ -15,7 +15,6 @@ import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
 class LsBlockToCtrlIO extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
-  val lsqIdxResp = Vec(RenameWidth, Output(new LSIdx))
   val replay = ValidIO(new Redirect)
 }
 
@@ -196,14 +195,13 @@ class MemBlock
     storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
     io.toCtrlBlock.stOut(i).valid := lsq.io.stout(i).valid
     io.toCtrlBlock.stOut(i).bits  := lsq.io.stout(i).bits
-	lsq.io.stout(i).ready := true.B
+    lsq.io.stout(i).ready         := true.B
   }
 
   // Lsq
   lsq.io.commits     <> io.lsqio.commits
-  lsq.io.dp1Req      <> io.fromCtrlBlock.lsqIdxReq
+  lsq.io.enq         <> io.fromCtrlBlock.enqLsq
   lsq.io.oldestStore <> io.lsqio.oldestStore
-  lsq.io.lsIdxs      <> io.toCtrlBlock.lsqIdxResp
   lsq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback

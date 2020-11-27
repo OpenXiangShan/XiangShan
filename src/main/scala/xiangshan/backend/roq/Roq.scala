@@ -81,6 +81,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.roqDeqPtr := deqPtrExt
 
   // Dispatch
+  val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
   val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.blockBackward)
   val hasNoSpec = RegInit(false.B)
   when(isEmpty){ hasNoSpec:= false.B }
@@ -98,9 +99,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       writebacked(roqIdx) := false.B
       when(noSpecEnq(i)){ hasNoSpec := true.B }
     }
-    io.dp1Req(i).ready := (notFull && !valid(roqIdx) && state === s_idle) &&
-      (!noSpecEnq(i) || isEmpty) &&
-      !hasNoSpec
+    io.dp1Req(i).ready := validEntries <= (RoqSize - RenameWidth).U
     io.roqIdxs(i) := roqIdxExt
     XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
   }

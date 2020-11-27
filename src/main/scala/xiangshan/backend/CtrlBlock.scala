@@ -29,7 +29,11 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
-  val lsqIdxReq = Vec(RenameWidth, DecoupledIO(new MicroOp))
+  val enqLsq = new Bundle() {
+    val canAccept = Input(Bool())
+    val req = Vec(RenameWidth, ValidIO(new MicroOp))
+    val resp = Vec(RenameWidth, Input(new LSIdx))
+  }
   val redirect = ValidIO(new Redirect)
 }
 
@@ -112,8 +116,7 @@ class CtrlBlock extends XSModule {
   dispatch.io.redirect <> redirect
   dispatch.io.toRoq <> roq.io.dp1Req
   dispatch.io.roqIdxs <> roq.io.roqIdxs
-  dispatch.io.toLsq <> io.toLsBlock.lsqIdxReq
-  dispatch.io.lsIdxs <> io.fromLsBlock.lsqIdxResp
+  dispatch.io.enqLsq <> io.toLsBlock.enqLsq
   dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.oldestStore.valid
   dispatch.io.dequeueRoqIndex.bits := Mux(io.oldestStore.valid,
     io.oldestStore.bits,
