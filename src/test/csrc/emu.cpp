@@ -15,6 +15,7 @@ static inline void print_help(const char *file) {
   printf("\n");
   printf("  -s, --seed=NUM        use this seed\n");
   printf("  -C, --max-cycles=NUM  execute at most NUM cycles\n");
+  printf("  -I, --max-instr=NUM   execute at most NUM instructions\n");
   printf("  -i, --image=FILE      run with this image file\n");
   printf("  -b, --log-begin=NUM   display log from NUM th cycle\n");
   printf("  -e, --log-end=NUM     stop display log at NUM th cycle\n");
@@ -32,6 +33,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
     { "dump-wave",      0, NULL,  0  },
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
+    { "max-instr",      1, NULL, 'I' },
     { "image",          1, NULL, 'i' },
     { "log-begin",      1, NULL, 'b' },
     { "log-end",        1, NULL, 'e' },
@@ -41,7 +43,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
 
   int o;
   while ( (o = getopt_long(argc, const_cast<char *const*>(argv),
-          "-s:C:hi:m:b:e:", long_options, &long_index)) != -1) {
+          "-s:C:I:hi:m:b:e:", long_options, &long_index)) != -1) {
     switch (o) {
       case 0:
         switch (long_index) {
@@ -59,6 +61,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
         }
         break;
       case 'C': args.max_cycles = atoll(optarg);  break;
+      case 'I': args.max_instr = atoll(optarg);  break;
       case 'i': args.image = optarg; break;
       case 'b': args.log_begin = atoll(optarg);  break;
       case 'e': args.log_end = atoll(optarg); break;
@@ -122,9 +125,8 @@ Emulator::Emulator(int argc, const char *argv[]):
 }
 
 Emulator::~Emulator() {
-#ifdef WITH_DRAMSIM3
-  dramsim3_finish();
-#endif
+  ram_finish();
+
 #ifdef VM_SAVABLE
   snapshot_slot[0].save();
   snapshot_slot[1].save();
@@ -222,12 +224,13 @@ inline void Emulator::single_cycle() {
   cycles ++;
 }
 
-uint64_t Emulator::execute(uint64_t n) {
+uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
   extern uint32_t uptime(void);
   uint32_t lasttime_poll = 0;
   uint32_t lasttime_snapshot = 0;
-  uint64_t lastcommit = n;
+  uint64_t lastcommit = max_cycle;
+  uint64_t instr_left_last_cycle = max_instr;
   const int stuck_limit = 2000;
 
   uint32_t wdst[DIFFTEST_WIDTH];
@@ -240,14 +243,19 @@ uint64_t Emulator::execute(uint64_t n) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
-  while (trapCode == STATE_RUNNING && n > 0) {
+  while (trapCode == STATE_RUNNING) {
+    if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
+      trapCode = STATE_LIMIT_EXCEEDED;
+      break;
+    }
+
     single_cycle();
-    n --;
+    max_cycle --;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
     if (trapCode != STATE_RUNNING) break;
 
-    if (lastcommit - n > stuck_limit && hascommit) {
+    if (lastcommit - max_cycle > stuck_limit && hascommit) {
       eprintf("No instruction commits for %d cycles, maybe get stuck\n"
           "(please also check whether a fence.i instruction requires more than %d cycles to flush the icache)\n",
           stuck_limit, stuck_limit);
@@ -283,7 +291,11 @@ uint64_t Emulator::execute(uint64_t n) {
       if (difftest_step(&diff)) {
         trapCode = STATE_ABORT;
       }
-      lastcommit = n;
+      lastcommit = max_cycle;
+
+      // update instr_cnt
+      instr_left_last_cycle = max_instr;
+      max_instr -= diff.commit;
     }
 
     uint32_t t = uptime();
@@ -354,6 +366,9 @@ void Emulator::display_trapinfo() {
       break;
     case STATE_ABORT:
       eprintf(ANSI_COLOR_RED "ABORT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
+      break;
+    case STATE_LIMIT_EXCEEDED:
+      eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
