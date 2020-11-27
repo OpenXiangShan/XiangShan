@@ -6,6 +6,81 @@ import utils._
 import xiangshan._
 import xiangshan.cache.{TlbRequestIO, TlbCmd}
 
+// Store Pipeline Stage 0
+// Generate addr, use addr to query DCache and DTLB
+class LoadUnit_S0 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new ExuInput))
+    val out = Decoupled(new LsPipelineBundle)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val dtlbReq = Valid(new TlbReq)
+    val dtlbResp = Flipped(Valid(new TlbResp))
+    val tlbFeedback = ValidIO(new TlbFeedback)
+    val dcacheReq = DecoupledIO(new DCacheLoadReq)
+  })
+
+  // send req to dtlb
+  val saddr = io.in.bits.src1 + io.in.bits.uop.ctrl.imm
+
+  io.dtlbReq.bits.vaddr := saddr
+  io.dtlbReq.valid := io.in.valid
+  io.dtlbReq.bits.cmd := TlbCmd.write
+  io.dtlbReq.bits.roqIdx := io.in.bits.uop.roqIdx
+  io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
+
+  io.out.bits := DontCare
+  io.out.bits.vaddr := saddr
+  io.out.bits.paddr := io.dtlbResp.bits.paddr
+  io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.bits.uop := io.in.bits.uop
+  io.out.bits.miss := io.dtlbResp.bits.miss
+  io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
+  io.out.valid := io.in.valid && !io.dtlbResp.bits.miss && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
+  io.in.ready := io.out.ready
+
+  // exception check
+  val addrAligned = LookupTree(io.in.bits.uop.ctrl.fuOpType(1,0), List(
+    "b00".U   -> true.B,              //b
+    "b01".U   -> (io.out.bits.vaddr(0) === 0.U),   //h
+    "b10".U   -> (io.out.bits.vaddr(1,0) === 0.U), //w
+    "b11".U   -> (io.out.bits.vaddr(2,0) === 0.U)  //d
+  ))
+  io.out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
+  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
+
+}
+
+// Load Pipeline Stage 1
+// TLB resp (send paddr to dcache)
+class StoreUnit_S1 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
+    val out = Decoupled(new LsPipelineBundle)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val tlbFeedback = ValidIO(new TlbFeedback)
+  })
+
+  // Send TLB feedback to store issue queue
+  io.tlbFeedback.valid := RegNext(io.in.valid && io.out.ready)
+  io.tlbFeedback.bits.hit := RegNext(!io.out.bits.miss)
+  io.tlbFeedback.bits.roqIdx := RegNext(io.out.bits.uop.roqIdx)
+  XSDebug(io.tlbFeedback.valid,
+    "S1 Store: tlbHit: %d roqIdx: %d\n",
+    io.tlbFeedback.bits.hit,
+    io.tlbFeedback.bits.roqIdx.asUInt
+  )
+
+  // get paddr from dtlb, check if rollback is needed
+  // writeback store inst to lsq
+  // writeback to LSQ
+  io.in.ready := true.B
+  io.lsq.bits := io.in.bits
+  io.lsq.bits.miss := false.B
+  io.lsq.bits.mmio := AddressSpace.isMMIO(io.in.bits.paddr)
+  io.lsq.valid := io.in.fire()
+
+}
+
 class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
     val stin = Flipped(Decoupled(new ExuInput))
@@ -15,13 +90,22 @@ class StoreUnit extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle)
   })
 
-  //-------------------------------------------------------
-  // Store Pipeline
-  //-------------------------------------------------------
-  val s2_out = Wire(Decoupled(new LsPipelineBundle))
-  val s3_in  = Wire(Decoupled(new LsPipelineBundle))
+  val store_s0 = Module(new StoreUnit_S0)
+  val store_s1 = Module(new StoreUnit_S1)
 
+  store_s0.io.in <> io.stin
+  store_s0.io.redirect <> io.redirect
+  store_s0.io.dtlbReq <> io.dtlb.req
+  store_s0.io.dtlbResp <> io.dtlbResp
 
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, false.B)
+
+  store_s1.io.redirect <> io.redirect
+  store_s1.io.tlbFeedback <> io.tlbFeedback
+  // send result to sq
+  io.lsq.valid := store_s1.io.out.valid
+  io.lsq.bits := store_s1.io.out.bits
+  
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
       p"$name" + p" pc ${Hexadecimal(pipeline.uop.cf.pc)} " +
@@ -32,106 +116,7 @@ class StoreUnit extends XSModule {
     )
   }
 
-  printPipeLine(s2_out.bits, s2_out.valid, "S2")
-  // TODO: is this nesscary ?
-  XSDebug(s2_out.fire(), "store req: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x\n",
-    s2_out.bits.uop.cf.pc,
-    s2_out.bits.vaddr,
-    s2_out.bits.paddr,
-    s2_out.bits.uop.ctrl.fuOpType,
-    s2_out.bits.data
-  )
-  printPipeLine(s3_in.bits, s3_in.valid, "S3")
-
-
-
-  //-------------------------------------------------------
-  // ST Pipeline Stage 2
-  // Generate addr, use addr to query DTLB
-  //-------------------------------------------------------
-
-  // send req to dtlb
-  val saddr = io.stin.bits.src1 + io.stin.bits.uop.ctrl.imm
-
-  io.dtlb.req.bits.vaddr := saddr
-  io.dtlb.req.valid := io.stin.valid
-  io.dtlb.req.bits.cmd := TlbCmd.write
-  io.dtlb.req.bits.roqIdx := io.stin.bits.uop.roqIdx
-  io.dtlb.req.bits.debug.pc := io.stin.bits.uop.cf.pc
-
-  s2_out.bits := DontCare
-  s2_out.bits.vaddr := saddr
-  s2_out.bits.paddr := io.dtlb.resp.bits.paddr
-  s2_out.bits.data := genWdata(io.stin.bits.src2, io.stin.bits.uop.ctrl.fuOpType(1,0))
-  s2_out.bits.uop := io.stin.bits.uop
-  s2_out.bits.miss := io.dtlb.resp.bits.miss
-  s2_out.bits.mask := genWmask(s2_out.bits.vaddr, io.stin.bits.uop.ctrl.fuOpType(1,0))
-  s2_out.valid := io.stin.valid && !io.dtlb.resp.bits.miss && !s2_out.bits.uop.roqIdx.needFlush(io.redirect)
-  io.stin.ready := s2_out.ready
-
-  // exception check
-  val addrAligned = LookupTree(io.stin.bits.uop.ctrl.fuOpType(1,0), List(
-    "b00".U   -> true.B,              //b
-    "b01".U   -> (s2_out.bits.vaddr(0) === 0.U),   //h
-    "b10".U   -> (s2_out.bits.vaddr(1,0) === 0.U), //w
-    "b11".U   -> (s2_out.bits.vaddr(2,0) === 0.U)  //d
-  ))
-  s2_out.bits.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
-  s2_out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlb.resp.bits.excp.pf.st
-
-  PipelineConnect(s2_out, s3_in, true.B, false.B)
-  //-------------------------------------------------------
-  // ST Pipeline Stage 3
-  // Write paddr to LSQ
-  //-------------------------------------------------------
-
-  // Send TLB feedback to store issue queue
-  io.tlbFeedback.valid := RegNext(io.stin.valid && s2_out.ready)
-  io.tlbFeedback.bits.hit := RegNext(!s2_out.bits.miss)
-  io.tlbFeedback.bits.roqIdx := RegNext(s2_out.bits.uop.roqIdx)
-  XSDebug(io.tlbFeedback.valid,
-    "S3 Store: tlbHit: %d roqIdx: %d\n",
-    io.tlbFeedback.bits.hit,
-    io.tlbFeedback.bits.roqIdx.asUInt
-  )
-
-  // get paddr from dtlb, check if rollback is needed
-  // writeback store inst to lsq
-  // writeback to LSQ
-  s3_in.ready := true.B
-  io.lsq.bits := s3_in.bits
-  io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := AddressSpace.isMMIO(s3_in.bits.paddr)
-  io.lsq.valid := s3_in.fire()
-
-  //-------------------------------------------------------
-  // ST Pipeline Stage 4
-  // Store writeback, send store request to store buffer
-  //-------------------------------------------------------
-
-  // Writeback to CDB
-  // (0 until LoadPipelineWidth).map(i => {
-  //   io.ldout <> hitLoadOut
-  // })
-
-  //-------------------------------------------------------
-  // ST Pipeline Async Stage 1
-  // Read paddr from store buffer, query DTAG in DCache
-  //-------------------------------------------------------
-
-
-  //-------------------------------------------------------
-  // ST Pipeline Async Stage 2
-  // DTAG compare, write data to DCache
-  //-------------------------------------------------------
-
-  // Done in DCache
-
-  //-------------------------------------------------------
-  // ST Pipeline Async Stage 2
-  // DCache miss / Shared cache wirte
-  //-------------------------------------------------------
-
-  // update store buffer according to store fill buffer
+  printPipeLine(store_s0.io.in.bits, store_s0.io.in.bits, "S0")
+  printPipeLine(store_s1.io.in.bits, store_s1.io.in.bits, "S1")
 
 }
