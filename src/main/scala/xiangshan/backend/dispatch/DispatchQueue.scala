@@ -60,6 +60,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
   val dispatchedMask = rangeMask(headPtr, dispatchPtr)
 
+  val allWalkDone = !io.inReplayWalk && io.otherWalkDone
+  val canEnqueue = validEntries <= (size - enqnum).U && allWalkDone
+  val canActualEnqueue = canEnqueue && !(io.redirect.valid && !io.redirect.bits.isReplay)
+
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
     *
@@ -73,8 +77,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     * (5) redirect (replay): from s_dispatched to s_valid (re-dispatch)
     */
   // enqueue: from s_invalid to s_valid
+  io.enqReady := canEnqueue
   for (i <- 0 until enqnum) {
-    when (io.enq(i).valid && io.enqReady) {
+    when (io.enq(i).valid && canActualEnqueue) {
       uopEntries(enqIndex(i)) := io.enq(i).bits
       stateEntries(enqIndex(i)) := s_valid
     }
@@ -241,7 +246,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     * head: commit
     */
   // enqueue
-  val numEnq = Mux(io.enqReady, PriorityEncoder(io.enq.map(!_.valid) :+ true.B), 0.U)
+  val numEnq = Mux(canActualEnqueue, PriorityEncoder(io.enq.map(!_.valid) :+ true.B), 0.U)
   XSError(numEnq =/= 0.U && (mispredictionValid || exceptionValid), "should not enqueue when redirect\n")
   tailPtr := Mux(exceptionValid,
     0.U.asTypeOf(new CircularQueuePtr(size)),
@@ -272,9 +277,6 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
     * Part 4: set output and input
     */
   // TODO: remove this when replay moves to roq
-  val allWalkDone = !inReplayWalk && io.otherWalkDone
-  io.enqReady := emptyEntries >= enqnum.U && allWalkDone && !(exceptionValid || mispredictionValid)
-
   for (i <- 0 until deqnum) {
     io.deq(i).bits := uopEntries(deqIndex(i))
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
