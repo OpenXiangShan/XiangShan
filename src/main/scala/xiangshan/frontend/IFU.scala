@@ -177,10 +177,12 @@ class IFU extends XSModule with HasIFUConst
     if3_prevHalfInstr.valid := false.B
   }
 
+  val if4_takenPrevHalf = RegInit(false.B)
+  
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
   if3_redirect := if3_fire && (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.redirect && (if3_bp.taken && !if3_bp.saveHalfRVI || !if3_bp.taken) )
-
+  
   when (if3_redirect) {
     when (!(if3_hasPrevHalfInstr && prevHalfInstr.taken)) {
       if1_npc := if3_bp.target
@@ -190,7 +192,7 @@ class IFU extends XSModule with HasIFUConst
       }
     }
   }
-
+  
   // when it does not redirect, we still need to modify hist(wire)
   when(if3_GHInfo.shifted && if3_newPtr >= ptr) {
     hist(if3_newPtr-ptr) := if3_GHInfo.takenOnBr
@@ -198,7 +200,7 @@ class IFU extends XSModule with HasIFUConst
   when (if3_hasPrevHalfInstr && prevHalfInstr.ghInfo.shifted && prevHalfInstr.newPtr >= ptr) {
     hist(prevHalfInstr.newPtr-ptr) := prevHalfInstr.ghInfo.takenOnBr
   }
-
+  
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
   val if4_ipf = RegEnable(icacheResp.ipf || if3_hasPrevHalfInstr && prevHalfInstr.ipf, if3_fire)
@@ -206,16 +208,16 @@ class IFU extends XSModule with HasIFUConst
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
-
+  
   val if4_predHistPtr = RegEnable(if3_predHistPtr, enable=if3_fire)
   if4_ready := (if4_fire || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
   .elsewhen (if3_fire) { if4_valid := true.B }
   .elsewhen (if4_fire) { if4_valid := false.B }
-
+  
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
-
+  
   val if4_GHInfo = wrapGHInfo(if4_bp)
 
   val if4_cfi_jal = if4_pd.instrs(if4_bp.jmpIdx)
@@ -239,6 +241,12 @@ class IFU extends XSModule with HasIFUConst
     if4_prevHalfInstr.target := if4_bp.target
     if4_prevHalfInstr.instr := if4_pd.instrs(if4_prevHalfInstr.idx)(15, 0)
     if4_prevHalfInstr.ipf := if4_ipf
+  }
+
+  when (if3_hasPrevHalfInstr && if3_fire && prevHalfInstr.taken) {
+    if4_takenPrevHalf := true.B
+  }.elsewhen (if4_fire || if4_flush) {
+    if4_takenPrevHalf := false.B
   }
 
   // Redirect and npc logic for if4
@@ -412,7 +420,10 @@ class IFU extends XSModule with HasIFUConst
 
   // io.fetchPacket.valid := if4_valid && !io.redirect.valid
   fetchPacketWire.instrs := if4_pd.instrs
-  fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
+  fetchPacketWire.mask := Mux(if4_takenPrevHalf,
+                                1.U(PredictWidth.W),
+                                if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx))))
+
   loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
   (0 until PredictWidth).foreach(i => fetchPacketWire.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
