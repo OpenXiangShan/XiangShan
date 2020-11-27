@@ -9,10 +9,25 @@ import xiangshan.cache._
 
 trait HasIFUConst { this: XSModule =>
   val resetVector = 0x80000000L//TODO: set reset vec
-  val groupAlign = log2Up(FetchWidth * 4 * 2)
-  def groupPC(pc: UInt): UInt = Cat(pc(VAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
+  val groupBytes = FetchWidth * 4 * 2 // correspond to cache line size
+  val groupOffsetBits = log2Ceil(groupBytes)
+  val nBanks = 4
+  val bankBytes = PredictWidth
+  val bankWidth = bankBytes / 2
+  val bankOffsetBits = log2Ceil(bankBytes)
+  // (0, nBanks-1)
+  def bankInGroup(pc: UInt) = pc(groupOffsetBits-1,bankOffsetBits)
+  def isInLastBank(pc: UInt) = bankInGroup(pc) === (nBanks-1).U
+  // (0, bankBytes/2-1)
+  def offsetInBank(pc: UInt) = pc(bankOffsetBits-1,1)
+  def bankAligned(pc: UInt)  = align(pc, bankBytes)
+  def groupAligned(pc: UInt) = align(pc, groupBytes)
   // each 1 bit in mask stands for 2 Bytes
-  def mask(pc: UInt): UInt = (Fill(PredictWidth * 2, 1.U(1.W)) >> pc(groupAlign - 1, 1))(PredictWidth - 1, 0)
+  // 8 bits, in which only the first 7 bits could be 0
+  def maskFirstHalf(pc: UInt): UInt = ((~(0.U(bankWidth.W))) >> offsetInBank(pc))(bankWidth-1,0)
+  def maskLastHalf(pc: UInt): UInt = Mux(isInLastBank, 0.U(bankWidth.W), ~0.U(bankWidth.W))
+  def mask(pc: UInt): UInt = Cat(maskFirstHalf(pc), maskLastHalf(pc))
   def snpc(pc: UInt): UInt = pc + (PopCount(mask(pc)) << 1)
   
   val IFUDebug = true
