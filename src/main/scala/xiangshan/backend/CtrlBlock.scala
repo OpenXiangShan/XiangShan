@@ -114,7 +114,7 @@ class CtrlBlock extends XSModule {
   dispatch.io.readFpRf <> io.toFpBlock.readRf
   dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
     intBusyTable.io.allocPregs(i).valid := preg.isInt
-    fpBusyTable.io.allocPregs(i).valid := preg.isInt
+    fpBusyTable.io.allocPregs(i).valid := preg.isFp
     intBusyTable.io.allocPregs(i).bits := preg.preg
     fpBusyTable.io.allocPregs(i).bits := preg.preg
   }
