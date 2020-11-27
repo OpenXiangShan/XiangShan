@@ -66,7 +66,7 @@ EMU_VFILES   = $(shell find $(EMU_VSRC_DIR) -name "*.v" -or -name "*.sv")
 
 EMU_CXXFLAGS += -std=c++11 -static -Wall -I$(EMU_CSRC_DIR)
 EMU_CXXFLAGS += -DVERILATOR -Wno-maybe-uninitialized
-EMU_LDFLAGS  += -lpthread -lSDL2 -ldl
+EMU_LDFLAGS  += -lpthread -lSDL2 -ldl -lz
 
 VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
 
