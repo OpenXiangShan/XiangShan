@@ -55,15 +55,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val csr = new RoqCSRIO
   })
 
-  val microOp = Mem(RoqSize, new MicroOp)
+  // instvalid field
   val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
-  val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+
+  // status
   val writebacked = Reg(Vec(RoqSize, Bool()))
 
+  // data for redirect, exception, etc.
+  val microOp = Mem(RoqSize, new MicroOp)
+  val flag = RegInit(VecInit(List.fill(RoqSize)(false.B)))
   val exuFflags = Mem(RoqSize, new Fflags)
+
+  // data for debug
   val exuData = Reg(Vec(RoqSize, UInt(XLEN.W)))//for debug
   val exuDebug = Reg(Vec(RoqSize, new DebugBundle))//for debug
 
+  // ptr
   val enqPtrExt = RegInit(0.U.asTypeOf(new RoqPtr))
   val deqPtrExt = RegInit(0.U.asTypeOf(new RoqPtr))
   val walkPtrExt = Reg(new RoqPtr)
@@ -80,6 +87,22 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   io.roqDeqPtr := deqPtrExt
 
+  // common signal
+  val enqPtrValPlus = Wire(Vec(RenameWidth, UInt(log2Up(RoqSize).W)))
+  val enqPtrFlagPlus = Wire(Vec(RenameWidth, Bool()))
+  for (i <- 0 until RenameWidth) {
+    val offset = PopCount(io.dp1Req.map(_.valid).take(i))
+    val roqIdxExt = enqPtrExt + offset
+    enqPtrValPlus(i) := roqIdxExt.value
+    enqPtrFlagPlus(i) := roqIdxExt.flag
+  }
+
+  val deqPtrExtPlus = Wire(Vec(RenameWidth, UInt(log2Up(RoqSize).W)))
+  for(i <- 0 until CommitWidth){
+    val roqIdxExt = deqPtrExt + i.U
+    deqPtrExtPlus(i) := roqIdxExt.value
+  }
+
   // Dispatch
   val noSpecEnq = io.dp1Req.map(i => i.bits.ctrl.blockBackward)
   val hasNoSpec = RegInit(false.B)
@@ -93,7 +116,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
     when(io.dp1Req(i).fire()){
       microOp(roqIdx) := io.dp1Req(i).bits
-      valid(roqIdx) := true.B
       flag(roqIdx) := roqIdxExt.flag
       writebacked(roqIdx) := false.B
       when(noSpecEnq(i)){ hasNoSpec := true.B }
@@ -212,7 +234,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
           }
         }
 
-        when(io.commits(i).valid){v := false.B}
         XSInfo(io.commits(i).valid,
           "retired pc %x wen %d ldest %d pdest %x old_pdest %x data %x fflags: %b\n",
           commitUop.cf.pc,
@@ -235,9 +256,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
         val walkUop = microOp(idx)
         io.commits(i).valid := v && shouldWalkVec(i)
         io.commits(i).bits.uop := walkUop
-        when(shouldWalkVec(i)){
-          v := false.B
-        }
         XSInfo(io.commits(i).valid && shouldWalkVec(i), "walked pc %x wen %d ldst %d data %x\n",
           walkUop.cf.pc,
           walkUop.ctrl.rfWen,
@@ -320,6 +338,41 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   when (io.redirect.valid) { // TODO: need check for flushPipe
     enqPtrExt := 0.U.asTypeOf(new RoqPtr)
     deqPtrExt := 0.U.asTypeOf(new RoqPtr)
+  }
+
+  
+  // instvalid field
+  
+  // write
+  // enqueue logic writes 6 valid
+  for (i <- 0 until RenameWidth) {
+    when(io.dp1Req(i).fire()){
+      valid(enqPtrValPlus(i)) := true.B
+    }
+  }
+  // dequeue/walk logic writes 6 valid, dequeue and walk will not happen at the same time
+  for(i <- 0 until CommitWidth){
+    switch(state){
+      is(s_idle){
+        when(io.commits(i).valid){valid(deqPtrExtPlus(i)) := false.B}
+      }
+      is(s_walk){
+        val idx = walkPtrVec(i).value
+        when(shouldWalkVec(i)){
+          valid(idx) := false.B
+        }
+      }
+    }
+  }
+
+  // read 
+  // enqueue logic reads 6 valid
+  // dequeue/walk logic reads 6 valid, dequeue and walk will not happen at the same time
+  // rollback reads all valid? is it necessary?
+
+  // reset
+  // when exception, reset all valid to false
+  when (io.redirect.valid) {
     for (i <- 0 until RoqSize) {
       valid(i) := false.B
     }
