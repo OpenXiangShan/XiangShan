@@ -85,7 +85,7 @@ class Dispatch1 extends XSModule {
     // For i in [0, DqEnqWidth], previous instructions can always enqueue when ROB and LSQ are ready
     if (i <= dpParams.DqEnqWidth) true.B
     // They need to check their previous ones
-    else Cat((dpParams.DqEnqWidth until i).map(thisCanOut(_))).andR
+    else Cat((dpParams.DqEnqWidth until i).map(j => thisCanOut(j) || !io.fromRename(j).valid)).andR
   ))
 
   // this instruction can actually dequeue: 3 conditions
