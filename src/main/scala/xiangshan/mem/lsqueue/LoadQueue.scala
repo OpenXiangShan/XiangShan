@@ -45,7 +45,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val exceptionAddr = new ExceptionAddrIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
-  
+
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
   val dataModule = Module(new LSQueueData(LoadQueueSize, LoadPipelineWidth))
@@ -57,7 +57,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
-  
+
   val ringBufferHeadExtended = RegInit(0.U.asTypeOf(new LqPtr))
   val ringBufferTailExtended = RegInit(0.U.asTypeOf(new LqPtr))
   val ringBufferHead = ringBufferHeadExtended.value
@@ -66,7 +66,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferSameFlag
   val ringBufferFull = ringBufferHead === ringBufferTail && !ringBufferSameFlag
   val ringBufferAllowin = !ringBufferFull
-  
+
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lqIdx.value)
 
@@ -140,8 +140,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
         valid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        // allocated(loadWbIndex) := io.loadIn(i).bits.miss // if hit, lq entry can be recycled
-        
+        allocated(loadWbIndex) := !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
+
         val loadWbData = Wire(new LsqEntry)
         loadWbData.paddr := io.loadIn(i).bits.paddr
         loadWbData.vaddr := io.loadIn(i).bits.vaddr
@@ -225,7 +225,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     XSDebug("miss resp: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x data %x\n",
       io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx.asUInt, io.dcache.resp.bits.meta.uop.lqIdx.asUInt,
       io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data
-    ) 
+    )
   }
 
   // Refill 64 bit in a cycle
@@ -472,14 +472,14 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   // setup misc mem access req
   // mask / paddr / data can be get from lq.data
-  val commitType = io.commits(0).bits.uop.ctrl.commitType 
+  val commitType = io.commits(0).bits.uop.ctrl.commitType
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
-    commitType === CommitType.LOAD && 
-    io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
+    commitType === CommitType.LOAD &&
+    io.roqDeqPtr === uop(ringBufferTail).roqIdx &&
     !io.commits(0).bits.isWalk
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
-  io.uncache.req.bits.addr := dataModule.io.rdata(ringBufferTail).paddr 
+  io.uncache.req.bits.addr := dataModule.io.rdata(ringBufferTail).paddr
   io.uncache.req.bits.data := dataModule.io.rdata(ringBufferTail).data
   io.uncache.req.bits.mask := dataModule.io.rdata(ringBufferTail).mask
 
@@ -517,7 +517,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   when(io.uncache.resp.fire()){
-    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
+    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data)
   }
 
   // Read vaddr for mem exception
