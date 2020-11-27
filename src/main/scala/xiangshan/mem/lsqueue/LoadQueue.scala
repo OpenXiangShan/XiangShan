@@ -57,29 +57,29 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
-  val ringBufferHeadExtended = RegInit(0.U.asTypeOf(new LqPtr))
-  val ringBufferTailExtended = RegInit(0.U.asTypeOf(new LqPtr))
-  val ringBufferHead = ringBufferHeadExtended.value
-  val ringBufferTail = ringBufferTailExtended.value
-  val ringBufferSameFlag = ringBufferHeadExtended.flag === ringBufferTailExtended.flag
-  val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferSameFlag
-  val ringBufferFull = ringBufferHead === ringBufferTail && !ringBufferSameFlag
-  val ringBufferAllowin = !ringBufferFull
+  val enqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val enqPtr = enqPtrExt.value
+  val deqPtr = deqPtrExt.value
+  val sameFlag = enqPtrExt.flag === deqPtrExt.flag
+  val isEmpty = enqPtr === deqPtr && sameFlag
+  val isFull = enqPtr === deqPtr && !sameFlag
+  val allowIn = !isFull
 
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lqIdx.value)
 
-  val tailMask = (((1.U((LoadQueueSize + 1).W)) << ringBufferTail).asUInt - 1.U)(LoadQueueSize - 1, 0)
-  val headMask = (((1.U((LoadQueueSize + 1).W)) << ringBufferHead).asUInt - 1.U)(LoadQueueSize - 1, 0)
+  val tailMask = (((1.U((LoadQueueSize + 1).W)) << deqPtr).asUInt - 1.U)(LoadQueueSize - 1, 0)
+  val headMask = (((1.U((LoadQueueSize + 1).W)) << enqPtr).asUInt - 1.U)(LoadQueueSize - 1, 0)
   val enqDeqMask1 = tailMask ^ headMask
-  val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
+  val enqDeqMask = Mux(sameFlag, enqDeqMask1, ~enqDeqMask1)
 
   // Enqueue at dispatch
-  val emptyEntries = LoadQueueSize.U - distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
+  val emptyEntries = LoadQueueSize.U - distanceBetween(enqPtrExt, deqPtrExt)
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount((0 until i).map(io.dp1Req(_).valid))
-    val lqIdx = ringBufferHeadExtended + offset
+    val lqIdx = enqPtrExt + offset
     val index = lqIdx.value
     when(io.dp1Req(i).fire()) {
       uop(index) := io.dp1Req(i).bits
@@ -101,7 +101,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
   when(firedDispatch.orR) {
-    ringBufferHeadExtended := ringBufferHeadExtended + PopCount(firedDispatch)
+    enqPtrExt := enqPtrExt + PopCount(firedDispatch)
     XSInfo("dispatched %d insts to lq\n", PopCount(firedDispatch))
   }
 
@@ -307,10 +307,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   // move tailPtr
   // allocatedMask: dequeuePtr can go to the next 1-bit
   val allocatedMask = VecInit((0 until LoadQueueSize).map(i => allocated(i) || !enqDeqMask(i)))
-  // find the first one from deqPtr (ringBufferTail)
-  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, ringBufferTailExtended.flag)
-  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, ringBufferHeadExtended)
-  ringBufferTailExtended := nextTail
+  // find the first one from deqPtr (deqPtr)
+  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, deqPtrExt.flag)
+  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, enqPtrExt)
+  deqPtrExt := nextTail
 
   // When load commited, mark it as !allocated, this entry will be recycled later
   (0 until CommitWidth).map(i => {
@@ -381,7 +381,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       val startIndex = io.storeIn(i).bits.uop.lqIdx.value
       val lqIdxMask = ((1.U((LoadQueueSize + 1).W) << startIndex).asUInt - 1.U)(LoadQueueSize - 1, 0)
       val xorMask = lqIdxMask ^ headMask
-      val sameFlag = io.storeIn(i).bits.uop.lqIdx.flag === ringBufferHeadExtended.flag
+      val sameFlag = io.storeIn(i).bits.uop.lqIdx.flag === enqPtrExt.flag
       val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
 
       // check if load already in lq needs to be rolledback
@@ -474,42 +474,42 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   // setup misc mem access req
   // mask / paddr / data can be get from lq.data
   val commitType = io.commits(0).bits.uop.ctrl.commitType
-  io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
+  io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
     commitType === CommitType.LOAD &&
-    io.roqDeqPtr === uop(ringBufferTail).roqIdx &&
+    io.roqDeqPtr === uop(deqPtr).roqIdx &&
     !io.commits(0).bits.isWalk
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
-  io.uncache.req.bits.addr := dataModule.io.rdata(ringBufferTail).paddr
-  io.uncache.req.bits.data := dataModule.io.rdata(ringBufferTail).data
-  io.uncache.req.bits.mask := dataModule.io.rdata(ringBufferTail).mask
+  io.uncache.req.bits.addr := dataModule.io.rdata(deqPtr).paddr
+  io.uncache.req.bits.data := dataModule.io.rdata(deqPtr).data
+  io.uncache.req.bits.mask := dataModule.io.rdata(deqPtr).mask
 
   io.uncache.req.bits.meta.id       := DontCare // TODO: // FIXME
   io.uncache.req.bits.meta.vaddr    := DontCare
-  io.uncache.req.bits.meta.paddr    := dataModule.io.rdata(ringBufferTail).paddr
-  io.uncache.req.bits.meta.uop      := uop(ringBufferTail)
-  io.uncache.req.bits.meta.mmio     := true.B // dataModule.io.rdata(ringBufferTail).mmio
+  io.uncache.req.bits.meta.paddr    := dataModule.io.rdata(deqPtr).paddr
+  io.uncache.req.bits.meta.uop      := uop(deqPtr)
+  io.uncache.req.bits.meta.mmio     := true.B // dataModule.io.rdata(deqPtr).mmio
   io.uncache.req.bits.meta.tlb_miss := false.B
-  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(ringBufferTail).mask
+  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(deqPtr).mask
   io.uncache.req.bits.meta.replay   := false.B
 
   io.uncache.resp.ready := true.B
 
   when(io.uncache.req.fire()){
-    pending(ringBufferTail) := false.B
+    pending(deqPtr) := false.B
   }
 
   dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
-    valid(ringBufferTail) := true.B
-    dataModule.io.uncacheWrite(ringBufferTail, io.uncache.resp.bits.data(XLEN-1, 0))
+    valid(deqPtr) := true.B
+    dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
     dataModule.io.uncache.wen := true.B
     // TODO: write back exception info
   }
 
   when(io.uncache.req.fire()){
     XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
-      uop(ringBufferTail).cf.pc,
+      uop(deqPtr).cf.pc,
       io.uncache.req.bits.addr,
       io.uncache.req.bits.data,
       io.uncache.req.bits.cmd,
@@ -542,7 +542,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     }
   }
   when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {
-    ringBufferHeadExtended := ringBufferHeadExtended - PopCount(needCancel)
+    enqPtrExt := enqPtrExt - PopCount(needCancel)
   }
 
   // assert(!io.rollback.valid)
@@ -551,7 +551,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d\n", ringBufferHeadExtended.flag, ringBufferHead, ringBufferTailExtended.flag, ringBufferTail)
+  XSDebug("head %d:%d tail %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
