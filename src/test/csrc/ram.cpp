@@ -1,22 +1,24 @@
+#include <sys/mman.h>
+#include <zlib.h>
+
 #include "common.h"
 #include "ram.h"
 
-#include <zlib.h>
-
-#define RAMSIZE (256 * 1024 * 1024)
+#define RAMSIZE (256 * 1024 * 1024UL)
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
 CoDRAMsim3 *dram = NULL;
 #endif
 
-static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
+static uint64_t *ram;
 static long img_size = 0;
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
 void* get_ram_start() { return &ram[0]; }
 long get_ram_size() { return RAMSIZE; }
 
+#ifdef TLB_UNITTEST
 void addpageSv39() {
 //three layers
 //addr range: 0x0000000080000000 - 0x0000000088000000 for 128MB from 2GB - 2GB128MB
@@ -99,6 +101,7 @@ void addpageSv39() {
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDENUM)), pde, PAGESIZE*PDENUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*PTENUM), pte, PAGESIZE*PTENUM);
 }
+#endif
 
 // Return whether the file is a gz file
 int isGzFile(const char *img) {
@@ -153,9 +156,17 @@ void init_ram(const char *img) {
 
   printf("The image is %s\n", img);
 
+  // initialize memory using Linux mmap
+  printf("Using simulated %luMB RAM\n", RAMSIZE / (1024 * 1024));
+  ram = (uint64_t *)mmap(NULL, RAMSIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  if (ram == (uint64_t *)MAP_FAILED) {
+    printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+    assert(0);
+  }
+
   int ret;
   if (isGzFile(img)) {
-    printf("Gzip file detected. Loading image from extracted gz file.\n");
+    printf("Gzip file detected and loading image from extracted gz file\n");
     img_size = readFromGz(ram, img);
     assert(img_size >= 0);
   }
@@ -179,9 +190,11 @@ void init_ram(const char *img) {
     fclose(fp); 
   }
 
+#ifdef TLB_UNITTEST
   //new add
   addpageSv39();
   //new end
+#endif
 
 #ifdef WITH_DRAMSIM3
   #if !defined(DRAMSIM3_CONFIG) || !defined(DRAMSIM3_OUTDIR)
@@ -191,6 +204,13 @@ void init_ram(const char *img) {
   dram = new CoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
 #endif
 
+}
+
+void ram_finish() {
+  munmap(ram, RAMSIZE);
+#ifdef WITH_DRAMSIM3
+  dramsim3_finish();
+#endif
 }
 
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
