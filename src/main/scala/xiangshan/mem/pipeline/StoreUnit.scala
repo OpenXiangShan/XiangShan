@@ -13,8 +13,8 @@ class StoreUnit_S0 extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val dtlbReq = Valid(new TlbReq)
-    val dtlbResp = Flipped(Valid(new TlbResp))
+    val dtlbReq = DecoupledIO(new TlbReq)
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
   })
 
@@ -26,6 +26,7 @@ class StoreUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.write
   io.dtlbReq.bits.roqIdx := io.in.bits.uop.roqIdx
   io.dtlbReq.bits.debug.pc := io.in.bits.uop.cf.pc
+  io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
 
   io.out.bits := DontCare
   io.out.bits.vaddr := saddr
