@@ -56,7 +56,7 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   if (hasV) { val v = Bool() }
 
   override def toPrintable: Printable = {
-    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// + 
+    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
     //(if(hasV) (p"v:${v}") else p"")
   }
 }
@@ -112,6 +112,66 @@ class TlbEntry extends TlbBundle {
   override def toPrintable: Printable = {
     p"vpn:0x${Hexadecimal(vpn)} ppn:0x${Hexadecimal(ppn)} level:${level} perm:${perm}"
   }
+}
+
+class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
+  require(log2Up(num)==log2Down(num))
+  /* vpn can be divide into three part */
+  // vpn: tagPart + addrPart
+  val cutLen  = log2Up(num)
+
+  val tag     = UInt(tagLen.W) // NOTE: high part of vpn
+  val level   = UInt(log2Up(Level).W)
+  val ppns    = Vec(num, UInt(ppnLen.W))
+  val perms    = Vec(num, new PermBundle(hasV = false))
+  val vs      = Vec(num, Bool())
+
+  def tagClip(vpn: UInt, level: UInt) = { // full vpn => tagLen
+    Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2+cutLen)),
+    Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1+cutLen)),
+                     Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0+cutLen))))(tagLen-1, 0)
+  }
+
+  // NOTE: get insize idx
+  def idxClip(vpn: UInt, level: UInt) = {
+    Mux(level===0.U, vpn(vpnnLen*2+cutLen-1, vpnnLen*2),
+    Mux(level===1.U, vpn(vpnnLen*1+cutLen-1, vpnnLen*1),
+                     vpn(vpnnLen*0+cutLen-1, vpnnLen*0)))
+  }
+
+  def hit(vpn: UInt) = {
+    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level))
+  }
+
+  def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntires = {
+    require((data.getWidth / XLEN) == num,
+      "input data length must be multiple of pte length")
+    assert(level=/=3.U, "level should not be 3")
+
+    val ts = Wire(new TlbEntires(num, tagLen))
+    ts.tag := tagClip(vpn, level)
+    ts.level := level
+    for (i <- 0 until num) {
+      val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      ts.ppns(i) := pte.ppn
+      ts.perms(i):= pte.perm // this.perms has no v
+      ts.vs(i)   := !pte.isPf(level) && pte.isLeaf() // legal and leaf, store to l2Tlb
+    }
+
+    ts
+  }
+
+  def get(vpn: UInt): TlbEntry = {
+    val t = Wire(new TlbEntry())
+    val idx = idxClip(vpn, level)
+    t.vpn := vpn // Note: Use input vpn, not vpn in TlbL2
+    t.ppn := ppns(idx)
+    t.level := level
+    t.perm := perms(idx)
+    t
+  }
+
+  override def cloneType: this.type = (new TlbEntires(num, tagLen)).asInstanceOf[this.type]
 }
 
 object TlbCmd {
@@ -388,7 +448,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   //     assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt)
   //   } // FIXME: remove me when tlb may be ok
   // }
-  
+
   // assert((v&pf)===0.U, "v and pf can't be true at same time: v:0x%x pf:0x%x", v, pf)
 }
 
@@ -403,12 +463,12 @@ object TLB {
     shouldBlock: Boolean
   ) = {
     require(in.length == width)
-    
+
     val tlb = Module(new TLB(width, isDtlb))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
-    
+
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {
         tlb.io.requestor(i) <> in(i)
