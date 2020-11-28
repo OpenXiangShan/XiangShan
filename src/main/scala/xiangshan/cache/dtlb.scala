@@ -251,8 +251,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val priv   = csr.priv
   val ifecth = if (isDtlb) false.B else true.B
   val mode   = if (isDtlb) priv.dmode else priv.imode
-  // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
-  val vmEnable = satp.mode === 8.U && (mode < ModeM)
+  val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
+  // val vmEnable = satp.mode === 8.U && (mode < ModeM)
 
   val reqAddr = req.map(_.bits.vaddr.asTypeOf(vaBundle))
   val cmd     = req.map(_.bits.cmd)
