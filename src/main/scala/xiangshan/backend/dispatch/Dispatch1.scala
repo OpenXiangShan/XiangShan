@@ -22,6 +22,7 @@ class Dispatch1 extends XSModule {
     val toLsq = Vec(RenameWidth, DecoupledIO(new MicroOp))
     // get LsIdx
     val lsIdx = Input(Vec(RenameWidth, new LSIdx))
+    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to dispatch queue
     val toIntDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
     val toFpDq = Vec(dpParams.DqEnqWidth, DecoupledIO(new MicroOp))
@@ -147,6 +148,10 @@ class Dispatch1 extends XSModule {
     */
   val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
   for (i <- 0 until RenameWidth) {
+    io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U)
+    io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.fpWen
+    io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
+
     val enqFire = (io.toIntDq(intIndex.io.reverseMapping(i).bits).fire() && intIndex.io.reverseMapping(i).valid) ||
       (io.toFpDq(fpIndex.io.reverseMapping(i).bits).fire() && fpIndex.io.reverseMapping(i).valid) ||
       (io.toLsDq(lsIndex.io.reverseMapping(i).bits).fire() && lsIndex.io.reverseMapping(i).valid)
