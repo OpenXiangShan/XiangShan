@@ -269,6 +269,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     tlbl2.io.r.req.valid := validOneCycle
     tlbl2.io.r.req.bits.apply(setIdx = ridx)
 
+    XSDebug(tlbl2.io.r.req.valid, p"tlbl2 rIdx:${Hexadecimal(ridx)}\n")
     val ramData = tlbl2.io.r.resp.data(0)
     (ramData.hit(req.vpn) && vidx, ramData.get(req.vpn))
   }
@@ -301,6 +302,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     ptwl2.io.r.req.valid := readRam
     ptwl2.io.r.req.bits.apply(setIdx = ridx)
 
+    XSDebug(ptwl2.io.r.req.valid, p"ptwl2 rIdx:${Hexadecimal(ridx)}")
     val ramData = ptwl2.io.r.resp.data(0)
     (ramData.hit(idx, l2addr) && vidx, ramData.get(idx)._2) // TODO: optimize tag
   }
@@ -441,6 +443,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       )
       l2v := l2v | UIntToOH(refillIdx)
       l2g := (l2g & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
+      XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)}\n")
     }
     when (memPte.isLeaf()) {
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
@@ -456,6 +459,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       )
       tlbv := tlbv | UIntToOH(refillIdx)
       tlbg := (tlbg & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
+      XSDebug(p"tlbl2 refillIdx:${Hexadecimal(refillIdx)}\n")
     }
   }
 
@@ -517,18 +521,25 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   XSDebug(false, validOneCycle, p"(v:${validOneCycle} r:${arb.io.out.ready}) vpn:0x${Hexadecimal(req.vpn)}\n")
   XSDebug(resp(arbChosen).fire(), "**Ptw Resp to ")
   PrintFlag(resp(arbChosen).fire(), arbChosen===0.U, "DTLB**:\n", "ITLB**\n")
-  XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready}) entry:${resp(arbChosen).bits.entry} pf:${resp(arbChosen).bits.pf}\n")
+  XSDebug(resp(arbChosen).fire(), p"(v:${resp(arbChosen).valid} r:${resp(arbChosen).ready})" +
+    p" entry:${resp(arbChosen).bits.entry} pf:${resp(arbChosen).bits.pf}\n")
 
   XSDebug(sfence.valid, p"Sfence: sfence instr here ${sfence.bits}\n")
   XSDebug(valid, p"CSR: ${csr}\n")
 
-  XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))} vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
-  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit} l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit}  l3addr:0x${Hexadecimal(l3addr)} memReq(v:${mem.a.valid} r:${mem.a.ready})\n")
+  XSDebug(valid, p"vpn2:0x${Hexadecimal(getVpnn(req.vpn, 2))} vpn1:0x${Hexadecimal(getVpnn(req.vpn, 1))}" +
+    p" vpn0:0x${Hexadecimal(getVpnn(req.vpn, 0))}\n")
+  XSDebug(valid, p"state:${state} level:${level} tlbHit:${tlbHit} l1addr:0x${Hexadecimal(l1addr)} l1Hit:${l1Hit}" +
+    p" l2addr:0x${Hexadecimal(l2addr)} l2Hit:${l2Hit} l3addr:0x${Hexadecimal(l3addr)} memReq(v:${mem.a.valid} r:${mem.a.ready})\n")
 
   XSDebug(memReqFire, p"mem req fire addr:0x${Hexadecimal(memAddr)}\n")
-  XSDebug(memRespFire, p"mem resp fire rdata:0x${Hexadecimal(mem.d.bits.data)} Pte:${memPte}\n")
+  XSDebug(memRespFire, p"mem resp fire: \n")
+  for(i <- 0 until (MemBandWidth/XLEN)) {
+    XSDebug(memRespFire, p"            ${i.U}: ${memPtes(i)} isPf:${memPtes(i).isPf(level)} isLeaf:${memPtes(i).isLeaf}\n")
+  }
 
-  XSDebug(sfenceLatch, p"ptw has a flushed req waiting for resp... state:${state} mem.a(${mem.a.valid} ${mem.a.ready}) d($memValid} ${memRespReady})\n")
+  XSDebug(sfenceLatch, p"ptw has a flushed req waiting for resp... " +
+    p"state:${state} mem.a(${mem.a.valid} ${mem.a.ready}) d($memValid} ${memRespReady})\n")
 
   // TODO: add ptw perf cnt
 }
