@@ -50,6 +50,7 @@ class Dispatch extends XSModule {
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
     // replay: set preg status to not ready
     val replayPregReq = Output(Vec(ReplayWidth, new ReplayPregReq))
+    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
@@ -78,6 +79,7 @@ class Dispatch extends XSModule {
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDqReady <> lsDq.io.enqReady
   dispatch1.io.toLsDq <> lsDq.io.enq
+  dispatch1.io.allocPregs <> io.allocPregs
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops

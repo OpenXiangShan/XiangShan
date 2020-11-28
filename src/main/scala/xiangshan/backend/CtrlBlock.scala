@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
-import xiangshan.backend.rename.Rename
+import xiangshan.backend.rename.{Rename, BusyTable}
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
@@ -63,9 +63,8 @@ class CtrlBlock extends XSModule {
   val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
-  // TODO: move busyTable to dispatch1
-  // val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
-  // val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
+  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
+  val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
 
   val roqWbSize = NRIntWritePorts + NRFpWritePorts + exuParameters.StuCnt + 1
 
@@ -103,14 +102,6 @@ class CtrlBlock extends XSModule {
 
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
-  // they should be moved to busytables
-  rename.io.wbIntResults <> io.fromIntBlock.wbRegs
-  rename.io.wbFpResults <> io.fromFpBlock.wbRegs
-  rename.io.intRfReadAddr <> dispatch.io.readIntRf.map(_.addr)
-  rename.io.fpRfReadAddr <> dispatch.io.readFpRf.map(_.addr)
-  rename.io.intPregRdy <> dispatch.io.intPregRdy
-  rename.io.fpPregRdy <> dispatch.io.fpPregRdy
-  rename.io.replayPregReq <> dispatch.io.replayPregReq
   rename.io.out <> dispatch.io.fromRename
 
   dispatch.io.redirect <> redirect
@@ -123,10 +114,38 @@ class CtrlBlock extends XSModule {
   )
   dispatch.io.readIntRf <> io.toIntBlock.readRf
   dispatch.io.readFpRf <> io.toFpBlock.readRf
+  dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
+    intBusyTable.io.allocPregs(i).valid := preg.isInt
+    fpBusyTable.io.allocPregs(i).valid := preg.isFp
+    intBusyTable.io.allocPregs(i).bits := preg.preg
+    fpBusyTable.io.allocPregs(i).bits := preg.preg
+  }
   dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
   dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
   dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
+
+  val flush = redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe)
+  fpBusyTable.io.flush := flush
+  intBusyTable.io.flush := flush
+  for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
+    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen && (wb.bits.uop.ctrl.ldest =/= 0.U)
+    setPhyRegRdy.bits := wb.bits.uop.pdest
+  }
+  for((wb, setPhyRegRdy) <- io.fromFpBlock.wbRegs.zip(fpBusyTable.io.wbPregs)){
+    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.fpWen
+    setPhyRegRdy.bits := wb.bits.uop.pdest
+  }
+  intBusyTable.io.rfReadAddr <> dispatch.io.readIntRf.map(_.addr)
+  intBusyTable.io.pregRdy <> dispatch.io.intPregRdy
+  fpBusyTable.io.rfReadAddr <> dispatch.io.readFpRf.map(_.addr)
+  fpBusyTable.io.pregRdy <> dispatch.io.fpPregRdy
+  for(i <- 0 until ReplayWidth){
+    intBusyTable.io.replayPregs(i).valid := dispatch.io.replayPregReq(i).isInt
+    fpBusyTable.io.replayPregs(i).valid := dispatch.io.replayPregReq(i).isFp
+    intBusyTable.io.replayPregs(i).bits := dispatch.io.replayPregReq(i).preg
+    fpBusyTable.io.replayPregs(i).bits := dispatch.io.replayPregReq(i).preg
+  }
 
   roq.io.memRedirect <> io.fromLsBlock.replay
   roq.io.brqRedirect <> brq.io.redirect

@@ -28,6 +28,7 @@ class Dispatch1 extends XSModule {
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
       val resp = Vec(RenameWidth, Input(new LSIdx))
     }
+    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to dispatch queue
     val toIntDqReady = Input(Bool())
     val toIntDq = Vec(dpParams.DqEnqWidth, ValidIO(new MicroOp))
@@ -156,7 +157,12 @@ class Dispatch1 extends XSModule {
     XSInfo(io.recv(i),
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +
       p"roq ${uopWithIndex(i).roqIdx}, lq ${uopWithIndex(i).lqIdx}, sq ${uopWithIndex(i).sqIdx}, " +
-      p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n")
+      p"(${intIndex.io.reverseMapping(i).bits}, ${fpIndex.io.reverseMapping(i).bits}, ${lsIndex.io.reverseMapping(i).bits})\n"
+    )
+
+    io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.rfWen && (io.fromRename(i).bits.ctrl.ldest =/= 0.U)
+    io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.ctrl.fpWen
+    io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.recv)
   val enqFireCnt = PopCount(io.toIntDq.map(_.valid && io.toIntDqReady)) + PopCount(io.toFpDq.map(_.valid && io.toFpDqReady)) + PopCount(io.toLsDq.map(_.valid && io.toLsDqReady))
