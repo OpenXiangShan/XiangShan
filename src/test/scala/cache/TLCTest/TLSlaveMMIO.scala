@@ -29,9 +29,9 @@ class TLCSlaveMMIO()(implicit p: Parameters) extends LazyModule
     Seq(TLSlaveParameters.v1(
       address            = List(AddressSet(0x0L, 0xffffffffffL)),
       resources          = device.reg,
-      regionType         = RegionType.UNCACHED,
+      regionType         = RegionType.CACHED,
       supportsGet        = TransferSizes(1, blockBytes),
-      supportsPutPartial = TransferSizes(1, blockBytes),
+//      supportsPutPartial = TransferSizes(1, blockBytes),
       supportsPutFull    = TransferSizes(1, blockBytes),
       supportsAcquireT   = TransferSizes(1, blockBytes),
       supportsAcquireB   = TransferSizes(1, blockBytes),

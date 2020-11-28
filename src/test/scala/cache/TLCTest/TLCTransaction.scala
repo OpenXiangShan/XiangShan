@@ -248,9 +248,9 @@ trait PermissionTransition extends TLCOp {
 }
 
 //Transaction meta data will hide in start message
-abstract class TLCTrans extends TLCOp with PermissionTransition {
+abstract class TLCTrans extends TLCOp with PermissionTransition with BigIntExtract{
   val blockSizeL2 = BigInt(6)
-  val beatFullMask = BigInt(0xffffffff)
+  val beatFullMask = BigInt(prefix ++ Array.fill(4)(0xff.toByte))
 }
 trait TLCCallerTrans extends TLCTrans{
   var transDepend : Option[TLCTrans] = None

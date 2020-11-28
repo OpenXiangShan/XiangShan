@@ -162,8 +162,8 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val tmpE = masterAgent.peekE()
               if (tmpE.isDefined) {
                 EChannel_valid = true
+                mio.EChannel.bits.sink.poke(tmpE.get.sink.U)
                 if (EChannel_valid && EChannel_ready) {
-                  mio.EChannel.bits.sink.poke(tmpE.get.sink.U)
                   masterAgent.fireE()
                 }
               }
@@ -188,13 +188,13 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val tmpC = masterAgent.peekC()
               if (tmpC.isDefined) {
                 CChannel_valid = true
+                mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
+                mio.CChannel.bits.param.poke(tmpC.get.param.U)
+                mio.CChannel.bits.size.poke(tmpC.get.size.U)
+                mio.CChannel.bits.source.poke(tmpC.get.source.U)
+                mio.CChannel.bits.address.poke(tmpC.get.address.U)
+                mio.CChannel.bits.data.poke(tmpC.get.data.U)
                 if (CChannel_valid && CChannel_ready) {
-                  mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
-                  mio.CChannel.bits.param.poke(tmpC.get.param.U)
-                  mio.CChannel.bits.size.poke(tmpC.get.size.U)
-                  mio.CChannel.bits.source.poke(tmpC.get.source.U)
-                  mio.CChannel.bits.address.poke(tmpC.get.address.U)
-                  mio.CChannel.bits.data.poke(tmpC.get.data.U)
                   masterAgent.fireC()
                 }
               }
@@ -220,13 +220,15 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val tmpA = masterAgent.peekA()
               if (tmpA.isDefined) {
                 AChannel_valid = true
+                println(s"master $i A valid:$AChannel_valid addr:${tmpA.get.address}")
+                mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
+                mio.AChannel.bits.param.poke(tmpA.get.param.U)
+                mio.AChannel.bits.size.poke(tmpA.get.size.U)
+                mio.AChannel.bits.source.poke(tmpA.get.source.U)
+                mio.AChannel.bits.address.poke(tmpA.get.address.U)
+                mio.AChannel.bits.mask.poke(tmpA.get.mask.U)
+                mio.AChannel.bits.data.poke(tmpA.get.data.U)
                 if (AChannel_valid && AChannel_ready) {
-                  mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
-                  mio.AChannel.bits.param.poke(tmpA.get.param.U)
-                  mio.AChannel.bits.size.poke(tmpA.get.size.U)
-                  mio.AChannel.bits.source.poke(tmpA.get.source.U)
-                  mio.AChannel.bits.address.poke(tmpA.get.address.U)
-                  mio.AChannel.bits.data.poke(tmpA.get.data.U)
                   masterAgent.fireA()
                 }
               }
@@ -260,14 +262,14 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             val tmpD = slaveAgent.peekD()
             if (tmpD.isDefined) {
               DChannel_valid = true
+              sio.DChannel.bits.opcode.poke(tmpD.get.opcode.U)
+              sio.DChannel.bits.param.poke(tmpD.get.param.U)
+              sio.DChannel.bits.size.poke(tmpD.get.size.U)
+              sio.DChannel.bits.source.poke(tmpD.get.source.U)
+              sio.DChannel.bits.sink.poke(tmpD.get.sink.U)
+              sio.DChannel.bits.denied.poke(tmpD.get.denied.B)
+              sio.DChannel.bits.data.poke(tmpD.get.data.U)
               if (DChannel_valid && DChannel_ready) { //fire
-                sio.DChannel.bits.opcode.poke(tmpD.get.opcode.U)
-                sio.DChannel.bits.param.poke(tmpD.get.param.U)
-                sio.DChannel.bits.size.poke(tmpD.get.size.U)
-                sio.DChannel.bits.source.poke(tmpD.get.source.U)
-                sio.DChannel.bits.sink.poke(tmpD.get.sink.U)
-                sio.DChannel.bits.denied.poke(tmpD.get.denied.B)
-                sio.DChannel.bits.data.poke(tmpD.get.data.U)
                 slaveAgent.fireD()
               }
             }
@@ -292,14 +294,14 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             val tmpB = slaveAgent.peekB()
             if (tmpB.isDefined) {
               BChannel_valid = true
+              sio.BChannel.bits.opcode.poke(tmpB.get.opcode.U)
+              sio.BChannel.bits.param.poke(tmpB.get.param.U)
+              sio.BChannel.bits.size.poke(tmpB.get.size.U)
+              sio.BChannel.bits.source.poke(tmpB.get.source.U)
+              sio.BChannel.bits.address.poke(tmpB.get.address.U)
+              sio.BChannel.bits.mask.poke(tmpB.get.mask.U)
+              sio.BChannel.bits.data.poke(tmpB.get.data.U)
               if (BChannel_valid && BChannel_ready) {
-                sio.BChannel.bits.opcode.poke(tmpB.get.opcode.U)
-                sio.BChannel.bits.param.poke(tmpB.get.param.U)
-                sio.BChannel.bits.size.poke(tmpB.get.size.U)
-                sio.BChannel.bits.source.poke(tmpB.get.source.U)
-                sio.BChannel.bits.address.poke(tmpB.get.address.U)
-                sio.BChannel.bits.mask.poke(tmpB.get.mask.U)
-                sio.BChannel.bits.data.poke(tmpB.get.data.U)
                 slaveAgent.fireB()
               }
             }
@@ -315,13 +317,14 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               aCh.source = peekBigInt(sio.AChannel.bits.source)
               aCh.address = peekBigInt(sio.AChannel.bits.address)
               aCh.mask = peekBigInt(sio.AChannel.bits.mask)
+              aCh.data = peekBigInt(sio.AChannel.bits.data)
               slaveAgent.fireA(aCh)
             }
             slaveAgent.tickA()
 
             c.clock.step()
           }
-        }.join
+        }.join()
 
         c.clock.setTimeout(1000)
       }

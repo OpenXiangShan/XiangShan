@@ -1,14 +1,14 @@
 package cache.TLCTest
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map, Queue}
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
+import chipsalliance.rocketchip.config.Parameters
 
 class AddrState extends TLCOp {
   val callerTrans: ListBuffer[TLCCallerTrans] = ListBuffer()
   val calleeTrans: ListBuffer[TLCCalleeTrans] = ListBuffer()
   var masterPerm: BigInt = nothing
-  var myPerm: BigInt = trunk
+  var myPerm: BigInt = nothing
   var data: BigInt = 0
   var dirty: Boolean = false
 
@@ -130,7 +130,7 @@ trait BigIntExtract {
 }
 
 class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
-              (implicit p:Parameters)
+              (implicit p: Parameters)
   extends TLCOp with BigIntExtract with PermissionTransition {
   val l2params = p(TLCCacheTestKey)
   val beatNum = l2params.blockBytes / l2params.beatBytes
@@ -236,16 +236,16 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         state.masterPerm = shrinkTarget(r.c.get.param)
         if (r.c.get.opcode == ReleaseData) {
           state.data = r.c.get.data
-          if (state.masterPerm == nothing){
-            insertWrite(addr)//modify data when master is invalid
+          if (state.masterPerm == nothing) {
+            insertWrite(addr) //modify data when master is invalid
           }
           else {
             insertRead(addr)
           }
         }
         else {
-          if (state.masterPerm == nothing){
-            insertWrite(addr)//modify data when master is invalid
+          if (state.masterPerm == nothing) {
+            insertWrite(addr) //modify data when master is invalid
           }
         }
         //serialization point
@@ -335,8 +335,8 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         assert(state.masterPerm == shrinkFrom(c.param))
         state.masterPerm = shrinkTarget(c.param)
         state.slaveUpdatePendingProbeAck()
-        if (state.masterPerm == nothing){
-          insertWrite(addr)//modify data when master is invalid
+        if (state.masterPerm == nothing) {
+          insertWrite(addr) //modify data when master is invalid
         }
         else {
           insertRead(addr)
@@ -359,8 +359,8 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         state.masterPerm = shrinkTarget(c.param)
         state.data = c.data
         state.slaveUpdatePendingProbeAck()
-        if (state.masterPerm == nothing){
-          insertWrite(addr)//modify data when master is invalid
+        if (state.masterPerm == nothing) {
+          insertWrite(addr) //modify data when master is invalid
         }
         else {
           insertRead(addr)
@@ -463,6 +463,11 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     }
   }
 
+  def addProbe(addr:BigInt,targetPerm:BigInt): Unit = {
+    val pro = ProbeCallerTrans()
+    pro.prepareProbe(addr,targetPerm)
+    innerProbe.append(pro)
+  }
 }
 
 class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)])
@@ -561,7 +566,7 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         if (!d.denied) {
           state.myPerm = d.param
           if (state.myPerm == trunk) {
-            insertWrite(addr)//modify data when trunk
+            insertWrite(addr) //modify data when trunk
           }
           else {
             insertRead(addr)
@@ -590,7 +595,7 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
           state.myPerm = d.param
           state.data = d.data
           if (state.myPerm == trunk) {
-            insertWrite(addr)//modify data when trunk
+            insertWrite(addr) //modify data when trunk
           }
           else {
             insertRead(addr)
@@ -727,15 +732,18 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
   def issueA(): Unit = {
     val abandonList = ListBuffer[AcquireCallerTrans]()
     if (sourceAMap.size < maxSource) { //fast check available ID
+      println(sourceAMap)
       val sourceQ = mutable.Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
       outerAcquire.foreach { acq =>
         if (!acq.acquireIssued.getOrElse(true)) { //haven't issue acquire
           val addr = acq.a.get.address
           val state = getState(addr)
+          println(s"check issue acquire addr: $addr")
           if (acq.checkNeedGrow(state.myPerm)) { //really need grow
             if (sourceQ.nonEmpty && !banIssueAcquire(addr)) { //has empty sourceid and ok to issue
               //TODO:decide to make full write here, use acqblock for now
               val allocId = sourceQ.dequeue()
+              println(s"issue acquire addr: $addr, souceID = $allocId")
               aQueue.enqMessage(acq.issueAcquireBlock(allocId, state.myPerm))
               //serialization point
               appendSerial(acq)
@@ -768,6 +776,18 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
 
   def fireA(): Unit = {
     aQueue.fireHead()
+  }
+
+  def addAcquire(addr: BigInt, targetPerm: BigInt): Unit = {
+    val acq = AcquireCallerTrans()
+    acq.prepareAcquire(addr, targetPerm)
+    outerAcquire.append(acq)
+  }
+
+  def addRelease(addr: BigInt, targetPerm: BigInt): Unit = {
+    val rel = ReleaseCallerTrans()
+    rel.prepareRelease(addr, targetPerm)
+    outerRelease.append(rel)
   }
 
 
