@@ -4,11 +4,11 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{TlbRequestIO, TlbCmd}
+import xiangshan.cache._
 
 // Store Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class LoadUnit_S0 extends XSModule {
+class StoreUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
@@ -16,7 +16,6 @@ class LoadUnit_S0 extends XSModule {
     val dtlbReq = Valid(new TlbReq)
     val dtlbResp = Flipped(Valid(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
 
   // send req to dtlb
@@ -74,10 +73,10 @@ class StoreUnit_S1 extends XSModule {
   // writeback store inst to lsq
   // writeback to LSQ
   io.in.ready := true.B
-  io.lsq.bits := io.in.bits
-  io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := AddressSpace.isMMIO(io.in.bits.paddr)
-  io.lsq.valid := io.in.fire() // TODO: && ! FP
+  io.out.bits := io.in.bits
+  io.out.bits.miss := false.B
+  io.out.bits.mmio := AddressSpace.isMMIO(io.in.bits.paddr)
+  io.out.valid := io.in.fire() // TODO: && ! FP
 
   // if fp
   // io.fp_out.valid := ...
@@ -113,7 +112,7 @@ class StoreUnit extends XSModule {
   store_s0.io.in <> io.stin
   store_s0.io.redirect <> io.redirect
   store_s0.io.dtlbReq <> io.dtlb.req
-  store_s0.io.dtlbResp <> io.dtlbResp
+  store_s0.io.dtlbResp <> io.dtlb.resp
   store_s0.io.tlbFeedback <> io.tlbFeedback
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, false.B)
@@ -123,6 +122,8 @@ class StoreUnit extends XSModule {
   // send result to sq
   io.lsq.valid := store_s1.io.out.valid
   io.lsq.bits := store_s1.io.out.bits
+
+  store_s1.io.out.ready := true.B
   
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
@@ -134,7 +135,7 @@ class StoreUnit extends XSModule {
     )
   }
 
-  printPipeLine(store_s0.io.in.bits, store_s0.io.in.bits, "S0")
-  printPipeLine(store_s1.io.in.bits, store_s1.io.in.bits, "S1")
+  printPipeLine(store_s0.io.out.bits, store_s0.io.out.valid, "S0")
+  printPipeLine(store_s1.io.out.bits, store_s1.io.out.valid, "S1")
 
 }
