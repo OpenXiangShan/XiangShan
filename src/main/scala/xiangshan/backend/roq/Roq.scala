@@ -44,6 +44,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val memRedirect = Input(Valid(new Redirect))
     val enq = new Bundle {
       val canAccept = Output(Bool())
+      val isEmpty = Output(Bool())
       val extraWalk = Vec(RenameWidth, Input(Bool()))
       val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
       val resp = Vec(RenameWidth, Output(new RoqPtr))
@@ -85,14 +86,13 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.roqDeqPtr := deqPtrExt
 
   // Dispatch
-  val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
-  val firedDispatch = Cat(io.enq.req.map(_.valid))
-  io.enq.canAccept := validEntries <= (RoqSize - RenameWidth).U
-  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(firedDispatch)}\n")
+  val hasBlockBackward = RegInit(false.B)
+  val hasNoSpecExec = RegInit(false.B)
+  val blockBackwardCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.blockBackward)).orR
+  val noSpecExecCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR
+  when(blockBackwardCommit){ hasBlockBackward:= false.B }
+  when(noSpecExecCommit){ hasNoSpecExec:= false.B }
 
-  val noSpecEnq = io.enq.req.map(i => i.bits.ctrl.blockBackward)
-  val hasNoSpec = RegInit(false.B)
-  when(isEmpty){ hasNoSpec:= false.B }
   val validDispatch = io.enq.req.map(_.valid)
   XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
@@ -100,19 +100,30 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val roqIdxExt = enqPtrExt + offset
     val roqIdx = roqIdxExt.value
 
-    when(io.enq.req(i).valid){
+    when(io.enq.req(i).valid) {
       microOp(roqIdx) := io.enq.req(i).bits
       valid(roqIdx) := true.B
       flag(roqIdx) := roqIdxExt.flag
       writebacked(roqIdx) := false.B
-      when(noSpecEnq(i)){ hasNoSpec := true.B }
+      when(io.enq.req(i).bits.ctrl.blockBackward) {
+        hasBlockBackward := true.B
+      }
+      when(io.enq.req(i).bits.ctrl.noSpecExec) {
+        hasNoSpecExec := true.B
+      }
     }
     io.enq.resp(i) := roqIdxExt
   }
 
+  val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
+  val firedDispatch = Cat(io.enq.req.map(_.valid))
+  io.enq.canAccept := (validEntries <= (RoqSize - RenameWidth).U) && !hasBlockBackward
+  io.enq.isEmpty   := isEmpty
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(firedDispatch)}\n")
+
   val dispatchCnt = PopCount(firedDispatch)
+  enqPtrExt := enqPtrExt + PopCount(firedDispatch)
   when (firedDispatch.orR) {
-    enqPtrExt := enqPtrExt + dispatchCnt
     XSInfo("dispatched %d insts\n", dispatchCnt)
   }
 
@@ -144,7 +155,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   val deqUop = microOp(deqPtr)
   val deqPtrWritebacked = writebacked(deqPtr) && valid(deqPtr)
-  val intrEnable = io.csr.intrBitSet && !isEmpty && !hasNoSpec &&
+  val intrEnable = io.csr.intrBitSet && !isEmpty && !hasNoSpecExec &&
     deqUop.ctrl.commitType =/= CommitType.STORE && deqUop.ctrl.commitType =/= CommitType.LOAD// TODO: wanna check why has hasCsr(hasNoSpec)
   val exceptionEnable = deqPtrWritebacked && Cat(deqUop.cf.exceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe

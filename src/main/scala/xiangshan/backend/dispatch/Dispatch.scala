@@ -31,6 +31,7 @@ class Dispatch extends XSModule {
     // enq Roq
     val enqRoq = new Bundle {
       val canAccept = Input(Bool())
+      val isEmpty = Input(Bool())
       val extraWalk = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
       val resp = Vec(RenameWidth, Input(new RoqPtr))
