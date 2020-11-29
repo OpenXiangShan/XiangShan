@@ -27,10 +27,11 @@ object LqPtr extends HasXSParameter {
 // Load Queue
 class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lqReady = Output(Vec(RenameWidth, Bool()))
-    val sqReady = Input(Vec(RenameWidth, Bool()))
-    val lqIdxs = Output(Vec(RenameWidth, new LqPtr)) // LSIdx will be assembled in LSQWrapper
+    val enq = new Bundle() {
+      val canAccept = Output(Bool())
+      val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
+      val resp = Vec(RenameWidth, Output(new LqPtr))
+    }
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
@@ -75,14 +76,16 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
 
   // Enqueue at dispatch
-  val emptyEntries = LoadQueueSize.U - distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
-  XSDebug("(ready, valid): ")
+  val validEntries = distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
+  val firedDispatch = io.enq.req.map(_.valid)
+  io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
-    val offset = if (i == 0) 0.U else PopCount((0 until i).map(io.dp1Req(_).valid))
+    val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
     val lqIdx = ringBufferHeadExtended + offset
     val index = lqIdx.value
-    when(io.dp1Req(i).fire()) {
-      uop(index) := io.dp1Req(i).bits
+    when(io.enq.req(i).valid) {
+      uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       valid(index) := false.B
       writebacked(index) := false.B
@@ -91,16 +94,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       listening(index) := false.B
       pending(index) := false.B
     }
-    val numTryEnqueue = offset +& io.dp1Req(i).valid
-    io.lqReady(i) := numTryEnqueue <= emptyEntries
-    io.dp1Req(i).ready := io.lqReady(i) && io.sqReady(i)
-    io.lqIdxs(i) := lqIdx
-    XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
-  }
-  XSDebug(false, true.B, "\n")
+    io.enq.resp(i) := lqIdx
 
-  val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
-  when(firedDispatch.orR) {
+    XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not valid when not ready\n")
+  }
+
+  when(Cat(firedDispatch).orR) {
     ringBufferHeadExtended := ringBufferHeadExtended + PopCount(firedDispatch)
     XSInfo("dispatched %d insts to lq\n", PopCount(firedDispatch))
   }

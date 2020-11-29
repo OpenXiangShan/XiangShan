@@ -224,10 +224,10 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     // misprediction or replay
     stateQueue.zipWithIndex.foreach({case(s, i) =>
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      when(
-        (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
-          (s.isWb && brQueue(i).exuOut.uop.roqIdx.needFlush(io.memRedirect))
-      ){
+      when(s.isWb && brQueue(i).exuOut.uop.roqIdx.needFlush(io.memRedirect)){
+        s := s_idle
+      }
+      when(io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)){
         s := s_invalid
       }
     })
