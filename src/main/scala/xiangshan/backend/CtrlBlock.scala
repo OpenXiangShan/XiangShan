@@ -80,8 +80,8 @@ class CtrlBlock extends XSModule {
     )
   )
 
-  io.frontend.redirect := redirect
-  io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
+  io.frontend.redirect.valid := roq.io.redirect.valid || brq.io.redirect.valid
+  io.frontend.redirect.bits := Mux(brq.io.redirect.valid, brq.io.redirect.bits.target, roq.io.redirect.bits.target)
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
 
