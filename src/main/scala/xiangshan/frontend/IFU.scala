@@ -14,7 +14,7 @@ trait HasIFUConst { this: XSModule =>
   // each 1 bit in mask stands for 2 Bytes
   def mask(pc: UInt): UInt = (Fill(PredictWidth * 2, 1.U(1.W)) >> pc(groupAlign - 1, 1))(PredictWidth - 1, 0)
   def snpc(pc: UInt): UInt = pc + (PopCount(mask(pc)) << 1)
-  
+
   val IFUDebug = true
 }
 
@@ -177,6 +177,8 @@ class IFU extends XSModule with HasIFUConst
     if3_prevHalfInstr.valid := false.B
   }
 
+  val if4_takenPrevHalf = RegInit(false.B)
+
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
   if3_redirect := if3_fire && (if3_hasPrevHalfInstr && prevHalfInstr.taken || if3_bp.redirect && (if3_bp.taken && !if3_bp.saveHalfRVI || !if3_bp.taken) )
@@ -239,6 +241,12 @@ class IFU extends XSModule with HasIFUConst
     if4_prevHalfInstr.target := if4_bp.target
     if4_prevHalfInstr.instr := if4_pd.instrs(if4_prevHalfInstr.idx)(15, 0)
     if4_prevHalfInstr.ipf := if4_ipf
+  }
+
+  when (if3_hasPrevHalfInstr && if3_fire && prevHalfInstr.taken) {
+    if4_takenPrevHalf := true.B
+  }.elsewhen (if4_fire || if4_flush) {
+    if4_takenPrevHalf := false.B
   }
 
   // Redirect and npc logic for if4
@@ -347,9 +355,9 @@ class IFU extends XSModule with HasIFUConst
   //   XSDebug(p"snpc(if4_pc)=${Hexadecimal(snpc(if4_pc))}\n")
   // }
   loopBufPar.fetchReq := if3_pc
-  
+
   io.icacheReq.bits.mask := mask(if1_npc)
-  
+
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
   val inOrderBrHist = Wire(Vec(HistoryLength, UInt(1.W)))
@@ -412,7 +420,10 @@ class IFU extends XSModule with HasIFUConst
 
   // io.fetchPacket.valid := if4_valid && !io.redirect.valid
   fetchPacketWire.instrs := if4_pd.instrs
-  fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
+  fetchPacketWire.mask := Mux(if4_takenPrevHalf,
+                                1.U(PredictWidth.W),
+                                if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx))))
+
   loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
   (0 until PredictWidth).foreach(i => fetchPacketWire.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
