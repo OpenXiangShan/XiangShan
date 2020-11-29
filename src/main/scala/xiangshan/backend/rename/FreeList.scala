@@ -107,14 +107,13 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
   XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
 
-
-  if(env.EnableDebug){
-	for( i <- 0 until FL_SIZE){
-	  for(j <- i+1 until FL_SIZE){
-		assert(freeList(i) != freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
-	  }
-	}
+  val enableFreelistCheck = false
+  if(env.EnableDebug && enableFreelistCheck){
+    for( i <- 0 until FL_SIZE){
+      for(j <- i+1 until FL_SIZE){
+      assert(freeList(i) != freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
+      }
+    }
   }
-
 
 }
