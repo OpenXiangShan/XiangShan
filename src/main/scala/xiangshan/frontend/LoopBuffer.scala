@@ -29,7 +29,7 @@ class FakeLoopBuffer extends XSModule {
   io.loopBufPar.LBredirect.valid := false.B
 }
 
-class LoopBuffer extends XSModule {
+class LoopBuffer extends XSModule with HasIFUConst{
   val io = IO(new LoopBufferIO)
 
   // FSM state define
@@ -118,9 +118,10 @@ class LoopBuffer extends XSModule {
 
   // Provide ICacheResp to IFU
   when(LBstate === s_active) {
+    val offsetInBankWire = offsetInBank(io.loopBufPar.fetchReq)
     io.out.bits.pc   := io.loopBufPar.fetchReq
-    io.out.bits.data := Cat((31 to 0 by -1).map(i => buffer(io.loopBufPar.fetchReq(7,1) + i.U).inst))
-    io.out.bits.mask := Cat((31 to 0 by -1).map(i => bufferValid(io.loopBufPar.fetchReq(7,1) + i.U)))
+    io.out.bits.data := Cat((15 to 0 by -1).map(i => buffer(io.loopBufPar.fetchReq(7,1) + i.U).inst)) >> Cat(offsetInBankWire, 0.U(4.W))
+    io.out.bits.mask := Cat((15 to 0 by -1).map(i => bufferValid(io.loopBufPar.fetchReq(7,1) + i.U))) >> offsetInBankWire
     io.out.bits.ipf  := false.B
   }
 
