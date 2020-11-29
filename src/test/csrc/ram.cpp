@@ -215,7 +215,7 @@ void ram_finish() {
 
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
   if (en && rIdx >= RAMSIZE / sizeof(uint64_t)) {
-    printf("ERROR: ram idx = 0x%lx out of bound!\n", rIdx);
+    printf("ERROR: ram rIdx = 0x%lx out of bound!\n", rIdx);
     assert(rIdx < RAMSIZE / sizeof(uint64_t));
   }
   return (en) ? ram[rIdx] : 0;
@@ -223,6 +223,7 @@ extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
 
 extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
   if (wen) {
+    printf("ERROR: ram wIdx = 0x%lx out of bound!\n", wIdx);
     assert(wIdx < RAMSIZE / sizeof(uint64_t));
     ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask);
   }

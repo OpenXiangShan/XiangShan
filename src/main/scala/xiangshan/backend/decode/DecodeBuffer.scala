@@ -43,10 +43,11 @@ class DecodeBuffer extends XSModule {
     if(i > 0 ){
       io.out(i).valid := validVec(i) &&
         !flush &&
-        Mux(r.ctrl.noSpecExec,
-          !ParallelOR(validVec.take(i)),
-          !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec))
-        ) && !io.isWalking
+        // Mux(r.ctrl.noSpecExec,
+          !ParallelOR(validVec.take(i))//,
+          // !ParallelOR(io.out.zip(validVec).take(i).map(x => x._2 && x._1.bits.ctrl.noSpecExec))
+        //) &&
+        !io.isWalking
     } else {
       require( i == 0)
       io.out(i).valid := validVec(i) && !flush && !io.isWalking
