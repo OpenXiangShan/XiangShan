@@ -459,4 +459,6 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   XSDebug(memRespFire, p"mem resp fire rdata:0x${Hexadecimal(mem.d.bits.data)} Pte:${memPte}\n")
 
   XSDebug(sfenceLatch, p"ptw has a flushed req waiting for resp... state:${state} mem.a(${mem.a.valid} ${mem.a.ready}) d($memValid} ${memRespReady})\n")
+
+  // TODO: add ptw perf cnt
 }

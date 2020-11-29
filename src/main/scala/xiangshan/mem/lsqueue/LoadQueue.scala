@@ -27,10 +27,11 @@ object LqPtr extends HasXSParameter {
 // Load Queue
 class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lqReady = Output(Vec(RenameWidth, Bool()))
-    val sqReady = Input(Vec(RenameWidth, Bool()))
-    val lqIdxs = Output(Vec(RenameWidth, new LqPtr)) // LSIdx will be assembled in LSQWrapper
+    val enq = new Bundle() {
+      val canAccept = Output(Bool())
+      val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
+      val resp = Vec(RenameWidth, Output(new LqPtr))
+    }
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
@@ -44,7 +45,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val exceptionAddr = new ExceptionAddrIO
     // val refill = Flipped(Valid(new DCacheLineReq ))
   })
-  
+
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
   val dataModule = Module(new LSQueueData(LoadQueueSize, LoadPipelineWidth))
@@ -56,7 +57,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
   val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
-  
+
   val ringBufferHeadExtended = RegInit(0.U.asTypeOf(new LqPtr))
   val ringBufferTailExtended = RegInit(0.U.asTypeOf(new LqPtr))
   val ringBufferHead = ringBufferHeadExtended.value
@@ -65,7 +66,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val ringBufferEmpty = ringBufferHead === ringBufferTail && ringBufferSameFlag
   val ringBufferFull = ringBufferHead === ringBufferTail && !ringBufferSameFlag
   val ringBufferAllowin = !ringBufferFull
-  
+
   val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lqIdx.value)
 
@@ -75,14 +76,16 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val enqDeqMask = Mux(ringBufferSameFlag, enqDeqMask1, ~enqDeqMask1)
 
   // Enqueue at dispatch
-  val emptyEntries = LoadQueueSize.U - distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
-  XSDebug("(ready, valid): ")
+  val validEntries = distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
+  val firedDispatch = io.enq.req.map(_.valid)
+  io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
-    val offset = if (i == 0) 0.U else PopCount((0 until i).map(io.dp1Req(_).valid))
+    val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
     val lqIdx = ringBufferHeadExtended + offset
     val index = lqIdx.value
-    when(io.dp1Req(i).fire()) {
-      uop(index) := io.dp1Req(i).bits
+    when(io.enq.req(i).valid) {
+      uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       valid(index) := false.B
       writebacked(index) := false.B
@@ -91,16 +94,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       listening(index) := false.B
       pending(index) := false.B
     }
-    val numTryEnqueue = offset +& io.dp1Req(i).valid
-    io.lqReady(i) := numTryEnqueue <= emptyEntries
-    io.dp1Req(i).ready := io.lqReady(i) && io.sqReady(i)
-    io.lqIdxs(i) := lqIdx
-    XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
-  }
-  XSDebug(false, true.B, "\n")
+    io.enq.resp(i) := lqIdx
 
-  val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
-  when(firedDispatch.orR) {
+    XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not valid when not ready\n")
+  }
+
+  when(Cat(firedDispatch).orR) {
     ringBufferHeadExtended := ringBufferHeadExtended + PopCount(firedDispatch)
     XSInfo("dispatched %d insts to lq\n", PopCount(firedDispatch))
   }
@@ -141,8 +140,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
         valid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        // allocated(loadWbIndex) := io.loadIn(i).bits.miss // if hit, lq entry can be recycled
-        
+        allocated(loadWbIndex) := !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
+
         val loadWbData = Wire(new LsqEntry)
         loadWbData.paddr := io.loadIn(i).bits.paddr
         loadWbData.vaddr := io.loadIn(i).bits.vaddr
@@ -226,7 +225,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     XSDebug("miss resp: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x data %x\n",
       io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx.asUInt, io.dcache.resp.bits.meta.uop.lqIdx.asUInt,
       io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data
-    ) 
+    )
   }
 
   // Refill 64 bit in a cycle
@@ -473,14 +472,14 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   // setup misc mem access req
   // mask / paddr / data can be get from lq.data
-  val commitType = io.commits(0).bits.uop.ctrl.commitType 
+  val commitType = io.commits(0).bits.uop.ctrl.commitType
   io.uncache.req.valid := pending(ringBufferTail) && allocated(ringBufferTail) &&
-    commitType === CommitType.LOAD && 
-    io.roqDeqPtr === uop(ringBufferTail).roqIdx && 
+    commitType === CommitType.LOAD &&
+    io.roqDeqPtr === uop(ringBufferTail).roqIdx &&
     !io.commits(0).bits.isWalk
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
-  io.uncache.req.bits.addr := dataModule.io.rdata(ringBufferTail).paddr 
+  io.uncache.req.bits.addr := dataModule.io.rdata(ringBufferTail).paddr
   io.uncache.req.bits.data := dataModule.io.rdata(ringBufferTail).data
   io.uncache.req.bits.mask := dataModule.io.rdata(ringBufferTail).mask
 
@@ -518,7 +517,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   when(io.uncache.resp.fire()){
-    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data) 
+    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data)
   }
 
   // Read vaddr for mem exception

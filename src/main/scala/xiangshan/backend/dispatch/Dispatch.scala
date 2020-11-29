@@ -29,13 +29,19 @@ class Dispatch extends XSModule {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     // enq Roq
-    val toRoq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get RoqIdx
-    val roqIdxs = Input(Vec(RenameWidth, new RoqPtr))
+    val enqRoq = new Bundle {
+      val canAccept = Input(Bool())
+      val isEmpty = Input(Bool())
+      val extraWalk = Vec(RenameWidth, Output(Bool()))
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+      val resp = Vec(RenameWidth, Input(new RoqPtr))
+    }
     // enq Lsq
-    val toLsq =  Vec(RenameWidth, DecoupledIO(new MicroOp))
-    // get LsIdx
-    val lsIdxs = Input(Vec(RenameWidth, new LSIdx))
+    val enqLsq = new Bundle() {
+      val canAccept = Input(Bool())
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+      val resp = Vec(RenameWidth, Input(new LSIdx))
+    }
     val dequeueRoqIndex = Input(Valid(new RoqPtr))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
@@ -45,6 +51,7 @@ class Dispatch extends XSModule {
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
     // replay: set preg status to not ready
     val replayPregReq = Output(Vec(ReplayWidth, new ReplayPregReq))
+    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
@@ -58,19 +65,22 @@ class Dispatch extends XSModule {
 
   // pipeline between rename and dispatch
   // accepts all at once
+  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), false.B)
+    PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), redirectValid)
   }
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
   dispatch1.io.redirect <> io.redirect
-  dispatch1.io.toRoq <> io.toRoq
-  dispatch1.io.roqIdxs <> io.roqIdxs
-  dispatch1.io.toLsq <> io.toLsq
-  dispatch1.io.lsIdx <> io.lsIdxs
+  dispatch1.io.enqRoq <> io.enqRoq
+  dispatch1.io.enqLsq <> io.enqLsq
+  dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq
+  dispatch1.io.toFpDqReady <> fpDq.io.enqReady
   dispatch1.io.toFpDq <> fpDq.io.enq
+  dispatch1.io.toLsDqReady <> lsDq.io.enqReady
   dispatch1.io.toLsDq <> lsDq.io.enq
+  dispatch1.io.allocPregs <> io.allocPregs
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops

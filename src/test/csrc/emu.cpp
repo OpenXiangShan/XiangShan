@@ -125,9 +125,8 @@ Emulator::Emulator(int argc, const char *argv[]):
 }
 
 Emulator::~Emulator() {
-#ifdef WITH_DRAMSIM3
-  dramsim3_finish();
-#endif
+  ram_finish();
+
 #ifdef VM_SAVABLE
   snapshot_slot[0].save();
   snapshot_slot[1].save();

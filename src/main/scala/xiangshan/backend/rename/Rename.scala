@@ -9,14 +9,6 @@ class Rename extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
-    val wbIntResults = Vec(NRIntWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val wbFpResults = Vec(NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val intRfReadAddr = Vec(NRIntReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val intPregRdy = Vec(NRIntReadPorts, Output(Bool()))
-    val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
-    // set preg to busy when replay
-    val replayPregReq = Vec(ReplayWidth, Input(new ReplayPregReq))
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
@@ -43,8 +35,6 @@ class Rename extends XSModule {
   val fpFreeList, intFreeList = Module(new FreeList).io
   val fpRat = Module(new RenameTable(float = true)).io
   val intRat = Module(new RenameTable(float = false)).io
-  val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts)).io
-  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts)).io
 
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
@@ -52,8 +42,6 @@ class Rename extends XSModule {
   val flush = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe) // TODO: need check by JiaWei
   fpRat.flush := flush
   intRat.flush := flush
-  fpBusyTable.flush := flush
-  intBusyTable.flush := flush
 
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
@@ -125,7 +113,6 @@ class Rename extends XSModule {
     def writeRat(fp: Boolean) = {
       val rat = if(fp) fpRat else intRat
       val freeList = if(fp) fpFreeList else intFreeList
-      val busyTable = if(fp) fpBusyTable else intBusyTable
       // speculative inst write
       val specWen = freeList.allocReqs(i) && freeList.canAlloc(i)
       // walk back write
@@ -153,9 +140,6 @@ class Rename extends XSModule {
       freeList.deallocReqs(i) := rat.archWritePorts(i).wen
       freeList.deallocPregs(i) := io.roqCommits(i).bits.uop.old_pdest
 
-      // set phy reg status to busy
-      busyTable.allocPregs(i).valid := specWen
-      busyTable.allocPregs(i).bits := freeList.pdests(i)
     }
 
     writeRat(fp = false)
@@ -190,26 +174,5 @@ class Rename extends XSModule {
   }
 
 
-  def updateBusyTable(fp: Boolean) = {
-    val wbResults = if(fp) io.wbFpResults else io.wbIntResults
-    val busyTable = if(fp) fpBusyTable else intBusyTable
-    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs)){
-      setPhyRegRdy.valid := wb.valid && needDestReg(fp, wb.bits.uop)
-      setPhyRegRdy.bits := wb.bits.uop.pdest
-    }
-  }
 
-  updateBusyTable(false)
-  updateBusyTable(true)
-
-  intBusyTable.rfReadAddr <> io.intRfReadAddr
-  intBusyTable.pregRdy <> io.intPregRdy
-  for(i <- io.replayPregReq.indices){
-    intBusyTable.replayPregs(i).valid := io.replayPregReq(i).isInt
-    fpBusyTable.replayPregs(i).valid := io.replayPregReq(i).isFp
-    intBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
-    fpBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
-  }
-  fpBusyTable.rfReadAddr <> io.fpRfReadAddr
-  fpBusyTable.pregRdy <> io.fpPregRdy
 }

@@ -70,7 +70,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   tailPtr := tailPtrNext
 
   // allocate new pregs to rename instructions
-  val freeRegs = distanceBetween(headPtr, tailPtr)
+  val freeRegs = distanceBetween(tailPtr, headPtr)
   val hasEnoughRegs = RegNext(freeRegs >= RenameWidth.U, true.B)
   XSDebug(p"free regs: $freeRegs\n")
 
@@ -107,6 +107,14 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
   XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
 
+
+  if(env.EnableDebug){
+	for( i <- 0 until FL_SIZE){
+	  for(j <- i+1 until FL_SIZE){
+		assert(freeList(i) != freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
+	  }
+	}
+  }
 
 
 }
