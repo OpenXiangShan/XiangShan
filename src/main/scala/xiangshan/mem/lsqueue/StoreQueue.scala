@@ -24,10 +24,11 @@ object SqPtr extends HasXSParameter {
 // Store Queue
 class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lqReady = Input(Vec(RenameWidth, Bool()))
-    val sqReady = Output(Vec(RenameWidth, Bool()))
-    val sqIdxs = Output(Vec(RenameWidth, new SqPtr))
+    val enq = new Bundle() {
+      val canAccept = Output(Bool())
+      val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
+      val resp = Vec(RenameWidth, Output(new SqPtr))
+    }
     val brqRedirect = Input(Valid(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
@@ -69,30 +70,28 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val enqDeqMask = Mux(sameFlag, enqDeqMask1, ~enqDeqMask1)
 
   // Enqueue at dispatch
-  val emptyEntries = StoreQueueSize.U - distanceBetween(enqPtrExt, deqPtrExt)
-  XSDebug("(ready, valid): ")
+  val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
+  val firedDispatch = io.enq.req.map(_.valid)
+  io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
-    val offset = if (i == 0) 0.U else PopCount((0 until i).map(io.dp1Req(_).valid))
+    val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
     val sqIdx = enqPtrExt + offset
     val index = sqIdx.value
-    when(io.dp1Req(i).fire()) {
-      uop(index) := io.dp1Req(i).bits
+    when(io.enq.req(i).valid) {
+      uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
       writebacked(index) := false.B
       commited(index) := false.B
       pending(index) := false.B
     }
-    val numTryEnqueue = offset +& io.dp1Req(i).valid
-    io.sqReady(i) := numTryEnqueue <= emptyEntries
-    io.dp1Req(i).ready := io.lqReady(i) && io.sqReady(i)
-    io.sqIdxs(i) := sqIdx
-    XSDebug(false, true.B, "(%d, %d) ", io.dp1Req(i).ready, io.dp1Req(i).valid)
-  }
-  XSDebug(false, true.B, "\n")
+    io.enq.resp(i) := sqIdx
 
-  val firedDispatch = VecInit((0 until CommitWidth).map(io.dp1Req(_).fire())).asUInt
-  when(firedDispatch.orR) {
+    XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not valid when not ready\n")
+  }
+
+  when(Cat(firedDispatch).orR) {
     enqPtrExt := enqPtrExt + PopCount(firedDispatch)
     XSInfo("dispatched %d insts to sq\n", PopCount(firedDispatch))
   }
