@@ -200,6 +200,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.stout(i).valid := storeWbSelVec(storeWbSel(i)) && storeWbValid(i)
     when(io.stout(i).fire()) {
       writebacked(storeWbSel(i)) := true.B
+      when(dataModule.io.rdata(storeWbSel(i)).mmio) {
+        allocated(storeWbSel(i)) := false.B // potential opt: move deqPtr immediately
+      }
     }
     io.stout(i).bits.fflags := DontCare
   })
@@ -216,13 +219,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   deqPtrExt := nextTail
 
   // TailPtr fast recovery
-  val tailRecycle = VecInit(List(
-    io.uncache.resp.fire() || io.sbuffer(0).fire(),
-    io.sbuffer(1).fire()
-  ))
+  // val tailRecycle = VecInit(List(
+  //   io.uncache.resp.fire() || io.sbuffer(0).fire(),
+  //   io.sbuffer(1).fire()
+  // ))
 
-  when(tailRecycle.asUInt.orR){
-    deqPtrExt := deqPtrExt + PopCount(tailRecycle.asUInt)
+  when(io.sbuffer(0).fire()){
+    deqPtrExt := deqPtrExt + Mux(io.sbuffer(1).fire(), 2.U, 1.U)
   }
 
   // load forward query
