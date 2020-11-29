@@ -12,8 +12,8 @@ trait HasIFUConst { this: XSModule =>
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
   val groupBytes = FetchWidth * 4 * 2 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
-  val nBanks = 4
   val bankBytes = PredictWidth
+  val nBanks = groupBytes / bankBytes
   val bankWidth = bankBytes / 2
   val bankOffsetBits = log2Ceil(bankBytes)
   // (0, nBanks-1)
@@ -39,6 +39,12 @@ class GlobalHistoryInfo() extends XSBundle {
   val saveHalfRVI = Bool()
   def shifted = takenOnBr || sawNTBr
   def newPtr(ptr: UInt) = Mux(shifted, ptr - 1.U, ptr)
+
+  final def === (that: GlobalHistoryInfo): Bool = {
+    this.shifted === that.shifted &&
+    this.takenOnBr === that.takenOnBr
+  }
+
   implicit val name = "IFU"
   def debug = XSDebug("[GHInfo] sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d\n", sawNTBr, takenOnBr, saveHalfRVI)
   // override def toString(): String = "histPtr=%d, sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d".format(histPtr, sawNTBr, takenOnBr, saveHalfRVI)
