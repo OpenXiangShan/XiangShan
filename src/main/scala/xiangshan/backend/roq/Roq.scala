@@ -195,16 +195,15 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     Cat(debug_microOp(deqPtr).cf.exceptionVec))
 
   // Commit uop to Rename (walk)
+  val walkCounter = Reg(UInt(log2Up(RoqSize).W))
   val shouldWalkVec = Wire(Vec(CommitWidth, Bool()))
-  val walkPtrMatchVec  = Wire(Vec(CommitWidth, Bool()))
   val walkPtrVec = Wire(Vec(CommitWidth, new RoqPtr))
   for(i <- shouldWalkVec.indices){
     walkPtrVec(i) := walkPtrExt - i.U
-    walkPtrMatchVec(i) := walkPtrVec(i) === walkTgtExt
-    if(i == 0) shouldWalkVec(i) := !walkPtrMatchVec(i)
-    else shouldWalkVec(i) := shouldWalkVec(i-1) && !walkPtrMatchVec(i)
+    shouldWalkVec(i) := i.U < walkCounter
   }
-  val walkFinished = Cat(walkPtrMatchVec).orR()
+  val walkFinished = walkCounter <= CommitWidth.U && // walk finish in this cycle
+    !io.brqRedirect.valid // no new redirect comes and update walkptr
 
   // extra space is used weh roq has no enough space, but mispredict recovery needs such info to walk regmap
   val needExtraSpaceForMPR = WireInit(VecInit(
@@ -302,18 +301,18 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.csr.dirty_fs := dirty_fs
 
   val validCommit = io.commits.map(_.valid)
+  val commitCnt = PopCount(validCommit)
   when(state===s_walk) {
     //exit walk state when all roq entry is commited
     when(walkFinished) {
       state := s_idle
     }
     walkPtrExt := walkPtrExt - CommitWidth.U
-    // ringBufferWalkExtended := ringBufferWalkExtended - validCommit
-    XSInfo("rolling back: enqPtr %d deqPtr %d walk %d:%d\n", enqPtr, deqPtr, walkPtrExt.flag, walkPtr)
+    walkCounter := walkCounter - commitCnt
+    XSInfo("rolling back: enqPtr %d deqPtr %d walk %d:%d walkcnt %d\n", enqPtr, deqPtr, walkPtrExt.flag, walkPtr, walkCounter)
   }
 
   // move tail ptr
-  val commitCnt = PopCount(validCommit)
   when(state === s_idle){
     deqPtrExt := deqPtrExt + commitCnt
   }
@@ -330,7 +329,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk
     walkPtrExt := Mux(state === s_walk && !walkFinished, walkPtrExt - CommitWidth.U, Mux(state === s_extrawalk, walkPtrExt, enqPtrExt - 1.U + dispatchCnt))
-    walkTgtExt := io.brqRedirect.bits.roqIdx
+    // walkTgtExt := io.brqRedirect.bits.roqIdx
+    walkCounter := Mux(state === s_walk, 
+      distanceBetween(walkPtrExt, io.brqRedirect.bits.roqIdx) - commitCnt, 
+      distanceBetween(enqPtrExt, io.brqRedirect.bits.roqIdx) + dispatchCnt -1.U,
+    )
     enqPtrExt := io.brqRedirect.bits.roqIdx + 1.U
   }
 
