@@ -72,7 +72,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // Enqueue at dispatch
   val validEntries = distanceBetween(ringBufferHeadExtended, ringBufferTailExtended)
   val firedDispatch = io.enq.req.map(_.valid)
-  io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
+  io.enq.canAccept := validEntries <= (StoreQueueSize - RenameWidth).U
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
