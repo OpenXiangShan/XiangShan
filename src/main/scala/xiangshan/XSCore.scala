@@ -53,7 +53,7 @@ case class XSCoreParameters
   CommitWidth: Int = 6,
   BrqSize: Int = 32,
   IssQueSize: Int = 8,
-  NRPhyRegs: Int = 180,
+  NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
