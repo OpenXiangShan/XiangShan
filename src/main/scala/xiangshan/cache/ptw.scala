@@ -301,7 +301,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val l1Res = Mux(l1Hit, l1HitData.ppn, RegEnable(memPte.ppn, l1MemBack))
   val l2addr = MakeAddr(l1Res, getVpnn(req.vpn, 1))
   val (l2Hit, l2HitPPN) = {
-    val readRam = (l1Hit && level===0.U && state===state_req) || (memRespFire && state===state_wait_resp && level===0.U)
+    val readRam = (!tlbHit && l1Hit && level===0.U && state===state_req) || (memRespFire && state===state_wait_resp && level===0.U)
     val ridx = genPtwL2Idx(l2addr)
     val idx  = RegEnable(l2addr(log2Up(PtwL2LineSize)+log2Up(XLEN/8)-1, log2Up(XLEN/8)), readRam)
     val vidx = RegEnable(l2v(ridx), readRam)
