@@ -313,7 +313,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
 
     XSDebug(ptwl2.io.r.req.valid, p"ptwl2 rIdx:${Hexadecimal(ridx)}\n")
     XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 RamData:${ramData}\n")
-    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 v:${vidx} hit:${ramData.hit(idx, l2addr)} Pte:${ramData.get(idx)}\n")
+    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 v:${vidx} hit:${ramData.hit(idx, l2addr)}\n")
     (ramData.hit(idx, l2addr) && vidx, ramData.get(idx)._2) // TODO: optimize tag
   }
 
