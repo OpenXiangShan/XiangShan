@@ -26,7 +26,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   }
 
   def genTlbL2Idx(vpn: UInt) = {
-    vpn(log2Up(TlbL2LineNum)-1, 0)
+    vpn(log2Up(TlbL2LineNum)-1+log2Up(TlbL2LineSize), 0+log2Up(TlbL2LineSize))
   }
 
   def MakeAddr(ppn: UInt, off: UInt) = {
