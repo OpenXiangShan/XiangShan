@@ -6,6 +6,7 @@ import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.decode.XDecode
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
@@ -149,6 +150,16 @@ class CtrlSignals extends XSBundle {
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
   val commitType = CommitType()
+
+  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
+    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
+    val signals = 
+      Seq(src1Type, src2Type, src3Type, /* lsrc1, lsrc2, lsrc3, ldest, */
+          fuType, fuOpType, rfWen, fpWen, /* isXSTrap, noSpecExec, blockBackward, flushPipe, */
+          /* isRVF, imm, commitType */)
+    signals zip decoder map { case(s, d) => s := d }
+    this
+  }
 }
 
 class CfCtrl extends XSBundle {
