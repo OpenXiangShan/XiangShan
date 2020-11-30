@@ -179,7 +179,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
-    val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val rollback = Output(Valid(new Redirect))
@@ -212,7 +212,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.storeIn <> io.storeIn
   storeQueue.io.sbuffer <> io.sbuffer
-  storeQueue.io.stout <> io.stout
+  storeQueue.io.mmioStout <> io.mmioStout
   storeQueue.io.commits <> io.commits
   storeQueue.io.roqDeqPtr <> io.roqDeqPtr
   storeQueue.io.oldestStore <> io.oldestStore

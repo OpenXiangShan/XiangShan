@@ -31,7 +31,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val brqRedirect = Input(Valid(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
-    val stout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
     val uncache = new DCacheWordIO
@@ -103,8 +103,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     when(io.storeIn(i).fire()) {
       val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
       val hasException = io.storeIn(i).bits.uop.cf.exceptionVec.asUInt.orR
-      datavalid(stWbIndex) := !io.storeIn(i).bits.mmio || hasException
-      pending(stWbIndex) := io.storeIn(i).bits.mmio && !hasException
+      val hasWritebacked = !io.storeIn(i).bits.mmio || hasException
+      datavalid(stWbIndex) := hasWritebacked
+      writebacked(stWbIndex) := hasWritebacked
+      pending(stWbIndex) := !hasWritebacked // valid mmio require
 
       val storeWbData = Wire(new LsqEntry)
       storeWbData := DontCare
@@ -184,29 +186,21 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.oldestStore.valid := allocated(deqPtrExt.value) && datavalid(deqPtrExt.value) && !commited(storeValidIndex)
   io.oldestStore.bits := uop(storeValidIndex).roqIdx
 
-  // writeback up to 2 store insts to CDB
-  // choose the first two valid store requests from deqPtr
-  val storeWbSelVec = VecInit((0 until StoreQueueSize).map(i => allocated(i) && datavalid(i) && !writebacked(i)))
-  val (storeWbValid, storeWbSel) = selectFirstTwo(storeWbSelVec, tailMask)
-
-  (0 until StorePipelineWidth).map(i => {
-    io.stout(i).bits.uop := uop(storeWbSel(i))
-    io.stout(i).bits.uop.sqIdx := storeWbSel(i).asTypeOf(new SqPtr)
-    io.stout(i).bits.uop.cf.exceptionVec := dataModule.io.rdata(storeWbSel(i)).exception.asBools
-    io.stout(i).bits.data := dataModule.io.rdata(storeWbSel(i)).data
-    io.stout(i).bits.redirectValid := false.B
-    io.stout(i).bits.redirect := DontCare
-    io.stout(i).bits.brUpdate := DontCare
-    io.stout(i).bits.debug.isMMIO := dataModule.io.rdata(storeWbSel(i)).mmio
-    io.stout(i).valid := storeWbSelVec(storeWbSel(i)) && storeWbValid(i)
-    when(io.stout(i).fire()) {
-      writebacked(storeWbSel(i)) := true.B
-      when(dataModule.io.rdata(storeWbSel(i)).mmio) {
-        allocated(storeWbSel(i)) := false.B // potential opt: move deqPtr immediately
-      }
-    }
-    io.stout(i).bits.fflags := DontCare
-  })
+  // writeback finished mmio store
+  io.mmioStout.bits.uop := uop(deqPtr)
+  io.mmioStout.bits.uop.sqIdx := deqPtrExt
+  io.mmioStout.bits.uop.cf.exceptionVec := dataModule.io.rdata(deqPtr).exception.asBools
+  io.mmioStout.bits.data := dataModule.io.rdata(deqPtr).data
+  io.mmioStout.bits.redirectValid := false.B
+  io.mmioStout.bits.redirect := DontCare
+  io.mmioStout.bits.brUpdate := DontCare
+  io.mmioStout.bits.debug.isMMIO := true.B
+  io.mmioStout.bits.fflags := DontCare
+  io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr) // finished mmio store
+  when(io.mmioStout.fire()) {
+    writebacked(deqPtr) := true.B
+    allocated(deqPtr) := false.B // potential opt: move deqPtr immediately
+  }
 
   // remove retired insts from sq, add retired store to sbuffer
 
