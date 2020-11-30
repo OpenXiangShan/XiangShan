@@ -88,8 +88,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // Dispatch
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
-  val blockBackwardCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.blockBackward)).orR
+  val blockBackwardCommit = Cat(io.commits.map(c => c.valid && c.bits.uop.ctrl.blockBackward)).orR
   val noSpecExecCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR
+  XSError(Cat(io.commits.map(c => c.valid && c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR, "noSpecExec should not walk\n")
   when(blockBackwardCommit){ hasBlockBackward:= false.B }
   when(noSpecExecCommit){ hasNoSpecExec:= false.B }
 
