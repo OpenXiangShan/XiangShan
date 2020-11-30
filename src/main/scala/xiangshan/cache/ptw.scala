@@ -121,7 +121,7 @@ class PtwEntries(num: Int, tagLen: Int) extends PtwBundle {
   }
 
   def hit(idx: UInt, addr: UInt) = {
-    require(idx.getWidth == log2Up(num), "error idx width")
+    require(idx.getWidth == log2Up(num), s"PtwEntries.hit: error idx width idxWidth:${idx.getWidth} num:${num}")
 
     (tag === tagClip(addr)) && vs(idx)
   }
@@ -142,12 +142,18 @@ class PtwEntries(num: Int, tagLen: Int) extends PtwBundle {
   }
 
   def get(idx: UInt) = {
-    require(idx.getWidth == log2Up(num), "error idx width")
+    require(idx.getWidth == log2Up(num), s"PtwEntries.get: error idx width idxWidth:${idx.getWidth} num:${num}")
 
     (vs(idx), ppns(idx))
   }
 
   override def cloneType: this.type = (new PtwEntries(num, tagLen)).asInstanceOf[this.type]
+  override def toPrintable: Printable = {
+    require(num == 4, "if num is not 4, please comment this toPrintable")
+    // NOTE: if num is not 4, please comment this toPrintable
+    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} vs:${Binary(vs.asUInt)}"
+  }
 }
 
 class PtwReq extends PtwBundle {
@@ -268,9 +274,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     val vidx = RegEnable(tlbv(ridx), validOneCycle)
     tlbl2.io.r.req.valid := validOneCycle
     tlbl2.io.r.req.bits.apply(setIdx = ridx)
-
-    XSDebug(tlbl2.io.r.req.valid, p"tlbl2 rIdx:${Hexadecimal(ridx)}\n")
     val ramData = tlbl2.io.r.resp.data(0)
+
+    XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
+    XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 RamData:${ramData}\n")
+    XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${ramData.hit(req.vpn)} tlbPte:${ramData.get(req.vpn)}\n")
     (ramData.hit(req.vpn) && vidx, ramData.get(req.vpn))
   }
 
@@ -301,9 +309,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     assert(ptwl2.io.r.req.ready)
     ptwl2.io.r.req.valid := readRam
     ptwl2.io.r.req.bits.apply(setIdx = ridx)
-
-    XSDebug(ptwl2.io.r.req.valid, p"ptwl2 rIdx:${Hexadecimal(ridx)}")
     val ramData = ptwl2.io.r.resp.data(0)
+
+    XSDebug(ptwl2.io.r.req.valid, p"ptwl2 rIdx:${Hexadecimal(ridx)}\n")
+    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 RamData:${ramData}\n")
+    XSDebug(RegNext(ptwl2.io.r.req.valid), p"ptwl2 v:${vidx} hit:${ramData.hit(idx, l2addr)} Pte:${ramData.get(idx)}\n")
     (ramData.hit(idx, l2addr) && vidx, ramData.get(idx)._2) // TODO: optimize tag
   }
 
@@ -443,7 +453,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       )
       l2v := l2v | UIntToOH(refillIdx)
       l2g := (l2g & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
-      XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)}\n")
+      XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)} ps:${ps}\n")
     }
     when (memPte.isLeaf()) {
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
@@ -459,7 +469,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       )
       tlbv := tlbv | UIntToOH(refillIdx)
       tlbg := (tlbg & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
-      XSDebug(p"tlbl2 refillIdx:${Hexadecimal(refillIdx)}\n")
+      XSDebug(p"tlbl2 refillIdx:${Hexadecimal(refillIdx)} ts:${ts}\n")
     }
   }
 

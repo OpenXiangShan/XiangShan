@@ -172,6 +172,13 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   }
 
   override def cloneType: this.type = (new TlbEntires(num, tagLen)).asInstanceOf[this.type]
+  override def toPrintable: Printable = {
+    require(num == 4, "if num is not 4, please comment this toPrintable")
+    // NOTE: if num is not 4, please comment this toPrintable
+    p"tag:${Hexadecimal(tag)} level:${level} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
+    p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
+  }
 }
 
 object TlbCmd {
