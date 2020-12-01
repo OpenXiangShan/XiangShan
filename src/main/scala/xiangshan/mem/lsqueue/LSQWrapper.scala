@@ -172,8 +172,11 @@ class InflightBlockInfo extends XSBundle {
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 class LsqWrappper extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
-    val dp1Req = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
-    val lsIdxs = Output(Vec(RenameWidth, new LSIdx))
+    val enq = new Bundle() {
+      val canAccept = Output(Bool())
+      val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
+      val resp = Vec(RenameWidth, Output(new LSIdx))
+    }
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
@@ -193,8 +196,23 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   val loadQueue = Module(new LoadQueue)
   val storeQueue = Module(new StoreQueue)
 
+  // io.enq logic
+  // LSQ: send out canAccept when both load queue and store queue are ready
+  // Dispatch: send instructions to LSQ only when they are ready
+  io.enq.canAccept := loadQueue.io.enq.canAccept && storeQueue.io.enq.canAccept
+  for (i <- 0 until RenameWidth) {
+    val isStore = CommitType.lsInstIsStore(io.enq.req(i).bits.ctrl.commitType)
+    loadQueue.io.enq.req(i).valid  := !isStore && io.enq.req(i).valid
+    storeQueue.io.enq.req(i).valid :=  isStore && io.enq.req(i).valid
+    loadQueue.io.enq.req(i).bits  := io.enq.req(i).bits
+    storeQueue.io.enq.req(i).bits := io.enq.req(i).bits
+    io.enq.resp(i).lqIdx := loadQueue.io.enq.resp(i)
+    io.enq.resp(i).sqIdx := storeQueue.io.enq.resp(i)
+
+    XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not enqueue LSQ when not")
+  }
+
   // load queue wiring
-  loadQueue.io.dp1Req <> io.dp1Req
   loadQueue.io.brqRedirect <> io.brqRedirect
   loadQueue.io.loadIn <> io.loadIn
   loadQueue.io.storeIn <> io.storeIn
@@ -208,7 +226,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
 
   // store queue wiring
   // storeQueue.io <> DontCare
-  storeQueue.io.dp1Req <> io.dp1Req
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.storeIn <> io.storeIn
   storeQueue.io.sbuffer <> io.sbuffer
@@ -265,15 +282,4 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   assert(!((loadQueue.io.uncache.resp.valid || storeQueue.io.uncache.resp.valid) && uncacheState === s_idle))
 
-  // fix valid, allocate lq / sq index
-  (0 until RenameWidth).map(i => {
-    val isStore = CommitType.lsInstIsStore(io.dp1Req(i).bits.ctrl.commitType)
-    loadQueue.io.dp1Req(i).valid := !isStore && io.dp1Req(i).valid
-    storeQueue.io.dp1Req(i).valid := isStore && io.dp1Req(i).valid
-    loadQueue.io.lqIdxs(i) <> io.lsIdxs(i).lqIdx
-    storeQueue.io.sqIdxs(i) <> io.lsIdxs(i).sqIdx
-    loadQueue.io.lqReady <> storeQueue.io.lqReady
-    loadQueue.io.sqReady <> storeQueue.io.sqReady
-    io.dp1Req(i).ready := storeQueue.io.dp1Req(i).ready && loadQueue.io.dp1Req(i).ready
-  })
 }

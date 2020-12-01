@@ -175,7 +175,8 @@ object FunctionUnit extends HasXSParameter {
   val fenceCfg = FuConfig(
     fuGen = fence _,
     fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.fence,
-    FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false
+    FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,
+    UncertainLatency() // TODO: need rewrite latency structure, not just this value
   )
 
   val csrCfg = FuConfig(

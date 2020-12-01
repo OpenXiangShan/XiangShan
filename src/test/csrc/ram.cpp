@@ -1,20 +1,24 @@
+#include <sys/mman.h>
+#include <zlib.h>
+
 #include "common.h"
 #include "ram.h"
 
-#define RAMSIZE (128 * 1024 * 1024)
+#define RAMSIZE (256 * 1024 * 1024UL)
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
 CoDRAMsim3 *dram = NULL;
 #endif
 
-static uint64_t ram[RAMSIZE / sizeof(uint64_t)];
+static uint64_t *ram;
 static long img_size = 0;
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
 void* get_ram_start() { return &ram[0]; }
 long get_ram_size() { return RAMSIZE; }
 
+#ifdef TLB_UNITTEST
 void addpageSv39() {
 //three layers
 //addr range: 0x0000000080000000 - 0x0000000088000000 for 128MB from 2GB - 2GB128MB
@@ -97,31 +101,100 @@ void addpageSv39() {
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*(PTENUM+PDENUM)), pde, PAGESIZE*PDENUM);
   memcpy((char *)ram+(RAMSIZE-PAGESIZE*PTENUM), pte, PAGESIZE*PTENUM);
 }
+#endif
+
+// Return whether the file is a gz file
+int isGzFile(const char *img) {
+  assert(img != NULL && strlen(img) >= 4);
+  return !strcmp(img + (strlen(img) - 3), ".gz");
+}
+
+// Read binary from .gz file
+int readFromGz(void* ptr, const char *file_name) {
+  gzFile compressed_mem = gzopen(file_name, "rb");
+
+  if(compressed_mem == NULL) {
+    printf("Can't open compressed binary file '%s'", file_name);
+    return -1;
+  }
+
+  uint64_t curr_size = 0;
+  // read 16KB each time
+  const uint32_t chunk_size = 16384;
+  if ((RAMSIZE % chunk_size) != 0) {
+    printf("RAMSIZE must be divisible by chunk_size\n");
+    assert(0);
+  }
+  uint64_t *temp_page = new uint64_t[chunk_size];
+  uint64_t *pmem_current = (uint64_t *)ptr;
+
+  while (curr_size < RAMSIZE) {
+    uint32_t bytes_read = gzread(compressed_mem, temp_page, chunk_size);
+    if (bytes_read == 0) { break; }
+    assert(bytes_read % sizeof(uint64_t) == 0);
+    for (uint32_t x = 0; x < bytes_read / sizeof(uint64_t); x++) {
+      if (*(temp_page + x) != 0) {
+        pmem_current = (uint64_t*)((uint8_t*)ptr + curr_size + x * sizeof(uint64_t));
+        *pmem_current = *(temp_page + x);
+      }
+    }
+    curr_size += bytes_read;
+  }
+  // printf("Read 0x%lx bytes from gz stream in total.\n", curr_size);
+
+  delete [] temp_page;
+
+  if(gzclose(compressed_mem)) {
+    printf("Error closing '%s'\n", file_name);
+    return -1;
+  }
+  return curr_size;
+}
 
 void init_ram(const char *img) {
   assert(img != NULL);
-  FILE *fp = fopen(img, "rb");
-  if (fp == NULL) {
-    printf("Can not open '%s'\n", img);
-    assert(0);
-  }
 
   printf("The image is %s\n", img);
 
-  fseek(fp, 0, SEEK_END);
-  img_size = ftell(fp);
-  if (img_size > RAMSIZE) {
-    img_size = RAMSIZE;
+  // initialize memory using Linux mmap
+  printf("Using simulated %luMB RAM\n", RAMSIZE / (1024 * 1024));
+  ram = (uint64_t *)mmap(NULL, RAMSIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  if (ram == (uint64_t *)MAP_FAILED) {
+    printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+    assert(0);
   }
 
-  fseek(fp, 0, SEEK_SET);
-  int ret = fread(ram, img_size, 1, fp);
-  assert(ret == 1);
-  fclose(fp);
+  int ret;
+  if (isGzFile(img)) {
+    printf("Gzip file detected and loading image from extracted gz file\n");
+    img_size = readFromGz(ram, img);
+    assert(img_size >= 0);
+  }
+  else {
+    FILE *fp = fopen(img, "rb");
+    if (fp == NULL) {
+      printf("Can not open '%s'\n", img);
+      assert(0);
+    }
 
+    fseek(fp, 0, SEEK_END);
+    img_size = ftell(fp);
+    if (img_size > RAMSIZE) {
+      img_size = RAMSIZE;
+    }
+
+    fseek(fp, 0, SEEK_SET);
+    ret = fread(ram, img_size, 1, fp);
+
+    assert(ret == 1);
+    fclose(fp); 
+  }
+
+#ifdef TLB_UNITTEST
   //new add
   addpageSv39();
   //new end
+#endif
 
 #ifdef WITH_DRAMSIM3
   #if !defined(DRAMSIM3_CONFIG) || !defined(DRAMSIM3_OUTDIR)
@@ -133,9 +206,16 @@ void init_ram(const char *img) {
 
 }
 
+void ram_finish() {
+  munmap(ram, RAMSIZE);
+#ifdef WITH_DRAMSIM3
+  dramsim3_finish();
+#endif
+}
+
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
   if (en && rIdx >= RAMSIZE / sizeof(uint64_t)) {
-    printf("ERROR: ram idx = 0x%lx out of bound!\n", rIdx);
+    printf("ERROR: ram rIdx = 0x%lx out of bound!\n", rIdx);
     assert(rIdx < RAMSIZE / sizeof(uint64_t));
   }
   return (en) ? ram[rIdx] : 0;
@@ -143,6 +223,7 @@ extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
 
 extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
   if (wen) {
+    printf("ERROR: ram wIdx = 0x%lx out of bound!\n", wIdx);
     assert(wIdx < RAMSIZE / sizeof(uint64_t));
     ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask);
   }
