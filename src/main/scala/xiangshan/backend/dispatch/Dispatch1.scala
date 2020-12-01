@@ -82,20 +82,22 @@ class Dispatch1 extends XSModule {
   // Thus, for i >= dpParams.DqEnqWidth, we have to check whether it's previous instructions (and the instruction itself) can enqueue.
   // However, since, for instructions with indices less than dpParams.DqEnqWidth,
   // they can always enter dispatch queue when ROB and LSQ are ready, we don't need to check whether they can enqueue.
-  // thisIsBlocked: this instruction is blocked by itself
-  // thisCanOut: this instruction can enqueue
-  // nextCanOut: next instructions can out
+  // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
+  // thisCanOut: this instruction can enqueue (based on resource)
+  // nextCanOut: next instructions can out (based on blockBackward and previous instructions)
   // notBlockedByPrevious: previous instructions can enqueue
-  val thisIsBlocked = VecInit((0 until RenameWidth).map(i =>
-    isNoSpecExec(i) && !io.enqRoq.isEmpty
-  ))
+  val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
+    // for i > 0, when Roq is empty but dispatch1 have valid instructions to enqueue, it's blocked
+    if (i > 0) isNoSpecExec(i) && (!io.enqRoq.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)
+    else isNoSpecExec(i) && !io.enqRoq.isEmpty
+  }))
   val thisCanOut = VecInit((0 until RenameWidth).map(i => {
     // For i in [0, DqEnqWidth), they can always enqueue when ROB and LSQ are ready
-    if (i < dpParams.DqEnqWidth) !thisIsBlocked(i)
-    else Cat(Seq(intIndex, fpIndex, lsIndex).map(_.io.reverseMapping(i).valid)).orR && !thisIsBlocked(i)
+    if (i < dpParams.DqEnqWidth) true.B
+    else Cat(Seq(intIndex, fpIndex, lsIndex).map(_.io.reverseMapping(i).valid)).orR
   }))
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
-    (thisCanOut(i) && !isBlockBackward(i)) || !io.fromRename(i).valid
+    (thisCanOut(i) && !isNoSpecExec(i) && !isBlockBackward(i)) || !io.fromRename(i).valid
   ))
   val notBlockedByPrevious = VecInit((0 until RenameWidth).map(i =>
     if (i == 0) true.B
@@ -105,7 +107,7 @@ class Dispatch1 extends XSModule {
   // this instruction can actually dequeue: 3 conditions
   // (1) resources are ready
   // (2) previous instructions are ready
-  val thisCanActualOut = (0 until RenameWidth).map(i => allResourceReady && thisCanOut(i) && notBlockedByPrevious(i))
+  val thisCanActualOut = (0 until RenameWidth).map(i => allResourceReady && thisCanOut(i) && !thisIsBlocked(i) && notBlockedByPrevious(i))
 
   val uopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
 
