@@ -81,7 +81,9 @@ class Ibuffer extends XSModule {
       val outWire = WireInit(ibuf(head_wire))
 
       io.out(i).valid := ibuf_valid(head_wire)
-      when (ibuf_valid(head_wire)) { ibuf_valid(head_wire) := !io.out(i).fire }
+      when(ibuf_valid(head_wire) && io.out(i).ready) {
+        ibuf_valid(head_wire) := false.B
+      }
 
       io.out(i).bits.instr := outWire.inst
       io.out(i).bits.pc := outWire.pc
