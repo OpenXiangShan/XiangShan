@@ -103,6 +103,7 @@ class CtrlBlock extends XSModule {
   rename.io.redirect <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
+  rename.io.renameBypass <> dispatch.io.renameBypass
 
   dispatch.io.redirect <> redirect
   dispatch.io.enqRoq <> roq.io.enq

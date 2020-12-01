@@ -67,6 +67,7 @@ class StoreUnit_S1 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     // val fp_out = Decoupled(new LsPipelineBundle)
+    val stout = DecoupledIO(new ExuOutput) // writeback store
     val redirect = Flipped(ValidIO(new Redirect))
   })
 
@@ -78,6 +79,18 @@ class StoreUnit_S1 extends XSModule {
   io.out.bits.miss := false.B
   io.out.bits.mmio := AddressSpace.isMMIO(io.in.bits.paddr)
   io.out.valid := io.in.fire() // TODO: && ! FP
+
+  io.stout.bits.uop := io.in.bits.uop
+  // io.stout.bits.uop.cf.exceptionVec := // TODO: update according to TLB result
+  io.stout.bits.data := DontCare
+  io.stout.bits.redirectValid := false.B
+  io.stout.bits.redirect := DontCare
+  io.stout.bits.brUpdate := DontCare
+  io.stout.bits.debug.isMMIO := io.out.bits.mmio
+  io.stout.bits.fflags := DontCare
+
+  val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
+  io.stout.valid := io.in.fire() && (!io.out.bits.mmio || hasException) // mmio inst will be writebacked immediately
 
   // if fp
   // io.fp_out.valid := ...
@@ -104,6 +117,7 @@ class StoreUnit extends XSModule {
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dtlb = new TlbRequestIO()
     val lsq = ValidIO(new LsPipelineBundle)
+    val stout = DecoupledIO(new ExuOutput) // writeback store
   })
 
   val store_s0 = Module(new StoreUnit_S0)
@@ -120,6 +134,7 @@ class StoreUnit extends XSModule {
   // PipelineConnect(store_s1.io.fp_out, store_s2.io.in, true.B, false.B)
 
   store_s1.io.redirect <> io.redirect
+  store_s1.io.stout <> io.stout
   // send result to sq
   io.lsq.valid := store_s1.io.out.valid
   io.lsq.bits := store_s1.io.out.bits
