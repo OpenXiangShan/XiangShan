@@ -243,7 +243,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
-  while (trapCode == STATE_RUNNING) {
+  while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
       trapCode = STATE_LIMIT_EXCEEDED;
       break;
@@ -318,6 +318,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 #endif
+  }
+
+  if (Verilated::gotFinish()) {
+    eprintf("The simulation stopped. There might be some assertion failed.\n");
+    trapCode = STATE_ABORT;
   }
 
 #if VM_TRACE == 1
