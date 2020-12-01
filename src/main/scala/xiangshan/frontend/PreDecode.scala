@@ -2,7 +2,7 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import utils.XSDebug
+import utils._
 import xiangshan._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.cache._
@@ -75,7 +75,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
 
   val insts = Wire(Vec(PredictWidth, UInt(32.W)))
   val instsMask = Wire(Vec(PredictWidth, Bool()))
-  val isntsEndMask = Wire(Vec(PredictWidth, Bool()))
+  val instsEndMask = Wire(Vec(PredictWidth, Bool()))
   val instsRVC = Wire(Vec(PredictWidth,Bool()))
   val instsPC = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
 
@@ -88,7 +88,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     val inst = WireInit(rawInsts(i))
     val validStart = Wire(Bool()) // is the beginning of a valid inst
     val validEnd = Wire(Bool())  // is the end of a valid inst
-    val pc = bankAlignedpc + (i << 1).U - Mux(io.prev.valid && (i.U === firstValidIdx), 2.U, 0.U)
+    val pc = bankAlignedPC + (i << 1).U - Mux(io.prev.valid && (i.U === firstValidIdx), 2.U, 0.U)
 
     val isFirstInPacket = i.U === firstValidIdx
     val isLastInPacket = i.U === lastHalfInstrIdx

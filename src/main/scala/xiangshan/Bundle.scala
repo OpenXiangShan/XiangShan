@@ -10,6 +10,8 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
+import xiangshan.frontend.HasIFUConst
+import utils._
 import scala.math.max
 
 // Fetch FetchWidth x 32-bit insts from Icache
@@ -60,14 +62,51 @@ class TageMeta extends XSBundle with HasTageParameter {
   val scMeta = new SCMeta(EnableSC)
 }
 
-class BranchPrediction extends XSBundle {
-  val redirect = Bool()
-  val taken = Bool()
-  val jmpIdx = UInt(log2Up(PredictWidth).W)
-  val hasNotTakenBrs = Bool()
-  val target = UInt(VAddrBits.W)
-  val saveHalfRVI = Bool()
-  val takenOnBr = Bool()
+class BranchPrediction extends XSBundle with HasIFUConst {
+  // val redirect = Bool()
+  val takens = UInt(PredictWidth.W)
+  // val jmpIdx = UInt(log2Up(PredictWidth).W)
+  val brMask = UInt(PredictWidth.W)
+  val jalMask = UInt(PredictWidth.W)
+  val targets = Vec(PredictWidth, UInt(VAddrBits.W))
+
+  // marks the last 2 bytes of this fetch packet
+  // val endsAtTheEndOfFirstBank = Bool()
+  // val endsAtTheEndOfLastBank = Bool()
+
+  // half RVI could only start at the end of a bank
+  val firstBankHasHalfRVI = Bool()
+  val lastBankHasHalfRVI = Bool()
+
+  def lastHalfRVIMask = Mux(firstBankHasHalfRVI, UIntToOH((bankWidth-1).U(PredictWidth.W)),
+                          Mux(lastBankHasHalfRVI, UIntToOH((PredictWidth-1).U(PredictWidth.W)),
+                            0.U(PredictWidth.W)
+                          )
+                        )
+
+  def lastHalfRVIClearMask = ~lastHalfRVIMask
+  // is taken from half RVI
+  def lastHalfRVITaken = (takens & lastHalfRVIMask).orR
+
+  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
+  // should not be used if not lastHalfRVITaken
+  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1))
+  
+  def realTakens  = takens  & lastHalfRVIClearMask
+  def realBrMask  = brMask  & lastHalfRVIClearMask
+  def realJalMask = jalMask & lastHalfRVIClearMask
+
+  def brNotTakens = ~realTakens & realBrMask
+  def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
+                       (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
+  def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
+  def saveHalfRVI = firstBankHasHalfRVI || lastBankHasHalfRVI
+  // could get PredictWidth-1 when only the first bank is valid
+  def jmpIdx = PriorityEncoder(realTakens)
+  // only used when taken
+  def target = targets(jmpIdx)
+  def taken = realTakens.orR
+  def takenOnBr = taken && realBrMask(jmpIdx)
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
@@ -102,7 +141,7 @@ class BranchInfo extends XSBundle with HasBPUParameter {
 }
 
 class Predecode extends XSBundle {
-  val isFetchpcEqualFirstpc = Bool()
+  val hasLastHalfRVI = Bool()
   val mask = UInt((FetchWidth*2).W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
