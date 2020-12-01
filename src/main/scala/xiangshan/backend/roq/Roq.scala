@@ -101,7 +101,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   XSError(state =/= s_extrawalk && walkNoSpecExec, "noSpecExec should not walk\n")
 
   val validDispatch = io.enq.req.map(_.valid)
-  XSDebug("(ready, valid): ")
   for (i <- 0 until RenameWidth) {
     val offset = PopCount(validDispatch.take(i))
     val roqIdxExt = enqPtrExt + offset
