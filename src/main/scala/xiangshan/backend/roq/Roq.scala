@@ -88,11 +88,17 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // Dispatch
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
-  val blockBackwardCommit = Cat(io.commits.map(c => c.valid && c.bits.uop.ctrl.blockBackward)).orR
+  // When blockBackward instruction leaves Roq (commit or walk), hasBlockBackward should be set to false.B
+  val blockBackwardLeave = Cat(io.commits.map(c => c.valid && c.bits.uop.ctrl.blockBackward)).orR
+  when(blockBackwardLeave){ hasBlockBackward:= false.B }
+  // When noSpecExec instruction commits (it should not be walked except when it has not entered Roq),
+  // hasNoSpecExec should be set to false.B
   val noSpecExecCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR
-  XSError(Cat(io.commits.map(c => c.valid && c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR, "noSpecExec should not walk\n")
-  when(blockBackwardCommit){ hasBlockBackward:= false.B }
   when(noSpecExecCommit){ hasNoSpecExec:= false.B }
+  // Assertion on that noSpecExec should never be walked since it's the only instruction in Roq.
+  // Extra walk should be ok since noSpecExec has not enter Roq.
+  val walkNoSpecExec = Cat(io.commits.map(c => c.valid && c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR
+  XSError(state =/= s_extrawalk && walkNoSpecExec, "noSpecExec should not walk\n")
 
   val validDispatch = io.enq.req.map(_.valid)
   XSDebug("(ready, valid): ")
