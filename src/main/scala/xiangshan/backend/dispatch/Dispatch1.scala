@@ -112,10 +112,6 @@ class Dispatch1 extends XSModule {
     updatedUop(i).psrc2 := updatedPsrc2(i)
     updatedUop(i).psrc3 := updatedPsrc3(i)
     updatedUop(i).old_pdest := updatedOldPdest(i)
-    XSError(updatedUop(i).psrc1 =/= io.fromRename(i).bits.psrc1, "psrc1 bypass not working correctly\n")
-    XSError(updatedUop(i).psrc2 =/= io.fromRename(i).bits.psrc2, "psrc2 bypass not working correctly\n")
-    XSError(updatedUop(i).psrc3 =/= io.fromRename(i).bits.psrc3, "psrc3 bypass not working correctly\n")
-    XSError(updatedUop(i).old_pdest =/= io.fromRename(i).bits.old_pdest, "old_pdest bypass not working correctly\n")
     // update commitType
     updatedUop(i).ctrl.commitType := updatedCommitType(i)
   }
