@@ -56,7 +56,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	date -R
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
 	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
-	sed -i -e 's/$$fatal/$$stop/g' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
 	date -R
 
 EMU_TOP      = XSSimSoC
