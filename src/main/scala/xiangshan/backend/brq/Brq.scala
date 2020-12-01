@@ -187,7 +187,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := validEntries <= (BrqSize - DecodeWidth).U
+    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
     io.brTags(i) := brTag
     when(io.enqReqs(i).fire()){
       brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc

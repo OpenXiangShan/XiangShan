@@ -44,8 +44,8 @@ class DecodeStage extends XSModule {
     val isMret = decoders(i).io.out.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
     val isSret = decoders(i).io.out.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
     val thisBrqValid = !decoders(i).io.out.cf.brUpdate.pd.notCFI || isMret || isSret
-    io.in(i).ready    := io.out(i).ready && io.toBrq(0).ready
-    io.out(i).valid   := io.in(i).valid && io.toBrq(0).ready
+    io.in(i).ready    := io.out(i).ready && io.toBrq(i).ready
+    io.out(i).valid   := io.in(i).valid && io.toBrq(i).ready
     io.toBrq(i).valid := io.in(i).valid && thisBrqValid && io.out(i).ready
 
     XSDebug(io.in(i).valid || io.out(i).valid || io.toBrq(i).valid, "i:%d In(%d %d) Out(%d %d) ToBrq(%d %d) pc:%x instr:%x\n", i.U, io.in(i).valid, io.in(i).ready, io.out(i).valid, io.out(i).ready, io.toBrq(i).valid, io.toBrq(i).ready, io.in(i).bits.pc, io.in(i).bits.instr)
