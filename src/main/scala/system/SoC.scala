@@ -44,11 +44,26 @@ class DummyCore()(implicit p: Parameters) extends LazyModule {
 
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
-  private val cores = Seq.fill(NumCores)(LazyModule(new XSCore()))
+  // CPU Cores
+  private val xs_core = Seq.fill(NumCores)(LazyModule(new XSCore()))
 
-  // only mem and extDev visible externally
-  val dma = AXI4IdentityNode()
-  val extDev = AXI4IdentityNode()
+  // L1 to L2 network
+  // -------------------------------------------------
+  private val l2_xbar = Seq.fill(NumCores)(TLXbar())
+
+  private val l2cache = Seq.fill(NumCores)(LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 2,
+      ways = L2NWays,
+      sets = L2NSets,
+      blockBytes = L2BlockSize,
+      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
+      cacheName = s"L2"
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = 8
+    )
+  )))
 
   // L2 to L3 network
   // -------------------------------------------------
@@ -69,7 +84,26 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       )
     )))
 
-  cores.foreach(core => l3_xbar := TLBuffer() := DebugIdentityNode() := core.mem)
+  // L3 to memory network
+  // -------------------------------------------------
+  private val memory_xbar = TLXbar()
+  private val mmioXbar = TLXbar()
+
+  // only mem, dma and extDev are visible externally
+  val mem = Seq.fill(L3NBanks)(AXI4IdentityNode())
+  val dma = AXI4IdentityNode()
+  val extDev = AXI4IdentityNode()
+
+  // connections
+  // -------------------------------------------------
+  for (i <- 0 until NumCores) {
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).dcache.clientNode
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
+    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).uncache.clientNode
+    l2cache(i).node := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
+    l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
+  }
 
   // DMA should not go to MMIO
   val mmioRange = AddressSet(base = 0x0000000000L, mask = 0x007fffffffL)
@@ -103,12 +137,6 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
   }
 
-
-  // L3 to memory network
-  // -------------------------------------------------
-  private val memory_xbar = TLXbar()
-
-  val mem = Seq.fill(L3NBanks)(AXI4IdentityNode())
   for(i <- 0 until L3NBanks) {
     mem(i) :=
       AXI4UserYanker() :=
@@ -118,37 +146,24 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       l3_banks(i).node
   }
 
-  private val mmioXbar = TLXbar()
   private val clint = LazyModule(new TLTimer(
     Seq(AddressSet(0x38000000L, 0x0000ffffL)),
     sim = !env.FPGAPlatform
   ))
 
-  cores.foreach(core =>
-    mmioXbar :=
-    TLBuffer() :=
-    DebugIdentityNode() :=
-    core.mmio
-  )
-
-  clint.node :=
-    mmioXbar
-
-  extDev :=
-    AXI4UserYanker() :=
-    TLToAXI4() :=
-    mmioXbar
+  clint.node := mmioXbar
+  extDev := AXI4UserYanker() := TLToAXI4() := mmioXbar
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
       val meip = Input(Bool())
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
-    cores.foreach(core => {
-      core.module.io.externalInterrupt.mtip := clint.module.io.mtip
-      core.module.io.externalInterrupt.msip := clint.module.io.msip
-      core.module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
-    })
+    for (i <- 0 until NumCores) {
+      xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip
+      xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip
+      xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
+    }
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)
     chisel3.dontTouch(extDev.out.head._1)

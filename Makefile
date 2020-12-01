@@ -56,6 +56,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	date -R
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
 	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
 	date -R
 
 EMU_TOP      = XSSimSoC
@@ -71,6 +72,7 @@ EMU_LDFLAGS  += -lpthread -lSDL2 -ldl -lz
 VEXTRA_FLAGS  = -I$(abspath $(BUILD_DIR)) --x-assign unique -O3 -CFLAGS "$(EMU_CXXFLAGS)" -LDFLAGS "$(EMU_LDFLAGS)"
 
 # Verilator trace support
+EMU_TRACE ?=
 ifeq ($(EMU_TRACE),1)
 VEXTRA_FLAGS += --trace
 endif
@@ -82,6 +84,7 @@ VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
 endif
 
 # Verilator savable
+EMU_SNAPSHOT ?=
 ifeq ($(EMU_SNAPSHOT),1)
 VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
