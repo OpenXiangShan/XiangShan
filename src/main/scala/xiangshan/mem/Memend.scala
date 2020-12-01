@@ -53,7 +53,7 @@ class LoadForwardQueryIO extends XSBundle {
   val uop = Output(new MicroOp) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool()) //for debug
-  
+
   val forwardMask = Input(Vec(8, Bool()))
   val forwardData = Input(Vec(8, UInt(8.W)))
 

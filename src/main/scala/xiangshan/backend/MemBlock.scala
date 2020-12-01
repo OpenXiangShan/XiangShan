@@ -9,13 +9,12 @@ import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.backend.issue.ReservationStationNew
+import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
 
 class LsBlockToCtrlIO extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
-  val lsqIdxResp = Vec(RenameWidth, Output(new LSIdx))
   val replay = ValidIO(new Redirect)
 }
 
@@ -105,26 +104,30 @@ class MemBlock
 
     println(s"${i}: exu:${cfg.name} wakeupCnt: ${wakeupCnt} extraListenPorts: ${extraListenPortsCnt} delay:${certainLatency} feedback:${feedback}")
 
-    val rs = Module(new ReservationStationNew(
-      cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback
-    ))
+    val rsCtrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
+    val rsData = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
 
-    rs.io.redirect <> redirect
-    rs.io.numExist <> io.toCtrlBlock.numExist(i)
-    rs.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rs.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsCtrl.io.data <> rsData.io.ctrl
+    rsCtrl.io.redirect <> redirect // TODO: remove it
+    rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
+    rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsData.io.redirect <> redirect
 
-    rs.io.writeBackedData <> writeBackData
-    for ((x, y) <- rs.io.extraListenPorts.zip(extraListenPorts)) {
+    rsData.io.writeBackedData <> writeBackData
+    for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
       x.valid := y.fire()
       x.bits := y.bits
     }
 
-    rs.io.tlbFeedback := DontCare
+    // exeUnits(i).io.redirect <> redirect
+    // exeUnits(i).io.fromInt <> rsData.io.deq
+    rsData.io.feedback := DontCare
 
-    rs.suggestName(s"rs_${cfg.name}")
+    rsCtrl.suggestName(s"rsc_${cfg.name}")
+    rsData.suggestName(s"rsd_${cfg.name}")
 
-    rs
+    rsData
   })
 
   for(rs <- reservationStations){
@@ -166,7 +169,7 @@ class MemBlock
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect      <> io.fromCtrlBlock.redirect
-    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.tlbFeedback
+    loadUnits(i).io.tlbFeedback   <> reservationStations(i).io.feedback
     loadUnits(i).io.dtlb          <> dtlb.io.requestor(i)
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
@@ -184,7 +187,7 @@ class MemBlock
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
     storeUnits(i).io.redirect     <> io.fromCtrlBlock.redirect
-    storeUnits(i).io.tlbFeedback  <> reservationStations(exuParameters.LduCnt + i).io.tlbFeedback
+    storeUnits(i).io.tlbFeedback  <> reservationStations(exuParameters.LduCnt + i).io.feedback
     storeUnits(i).io.dtlb         <> dtlb.io.requestor(exuParameters.LduCnt + i)
     // get input form dispatch
     storeUnits(i).io.stin         <> reservationStations(exuParameters.LduCnt + i).io.deq
@@ -192,14 +195,13 @@ class MemBlock
     storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
     io.toCtrlBlock.stOut(i).valid := lsq.io.stout(i).valid
     io.toCtrlBlock.stOut(i).bits  := lsq.io.stout(i).bits
-	lsq.io.stout(i).ready := true.B
+    lsq.io.stout(i).ready         := true.B
   }
 
   // Lsq
   lsq.io.commits     <> io.lsqio.commits
-  lsq.io.dp1Req      <> io.fromCtrlBlock.lsqIdxReq
+  lsq.io.enq         <> io.fromCtrlBlock.enqLsq
   lsq.io.oldestStore <> io.lsqio.oldestStore
-  lsq.io.lsIdxs      <> io.toCtrlBlock.lsqIdxResp
   lsq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
@@ -232,6 +234,7 @@ class MemBlock
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
+  atomicsUnit.io.dtlb.req.ready := dtlb.io.requestor(0).req.ready
 
   // dispatch 0 takes priority
   atomicsUnit.io.in.valid := st0_atomics
@@ -251,7 +254,7 @@ class MemBlock
 
   when(atomicsUnit.io.tlbFeedback.valid) {
     assert(!storeUnits(0).io.tlbFeedback.valid)
-    atomicsUnit.io.tlbFeedback <> reservationStations(exuParameters.LduCnt + 0).io.tlbFeedback
+    atomicsUnit.io.tlbFeedback <> reservationStations(exuParameters.LduCnt + 0).io.feedback
   }
 
   atomicsUnit.io.dcache        <> io.dcache.atomics

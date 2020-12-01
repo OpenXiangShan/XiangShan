@@ -100,7 +100,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     val src2 = in.bits.src2
     val src3 = in.bits.src3
 
-    fu.io.in.valid := in.valid && sel
+    fu.io.in.valid := in.valid && sel && !in.bits.uop.roqIdx.needFlush(io.redirect)
     fu.io.in.bits.uop := in.bits.uop
     fu.io.in.bits.src.foreach(_ <> DontCare)
     if (fuCfg.srcCnt > 0) {

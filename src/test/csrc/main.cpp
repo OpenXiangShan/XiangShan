@@ -19,7 +19,7 @@ int main(int argc, const char** argv) {
   };
 
   auto args = emu->get_args();
-  uint64_t cycles = emu->execute(args.max_cycles);
+  uint64_t cycles = emu->execute(args.max_cycles, args.max_instr);
   bool is_good_trap = emu->is_good_trap();
   delete emu;
 
