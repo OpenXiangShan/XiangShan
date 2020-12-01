@@ -79,15 +79,14 @@ class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
   // --------------------------------------------
   // refill
   // TODO: determine 'lgSize' in memend
-  val out = edge.Get(
-    fromSource      = io.id,
-    toAddress       = req.addr,
-    lgSize          = log2Up(8).U
-  )._2
 
   when (state === s_refill_req) {
     io.mem_acquire.valid := true.B
-    io.mem_acquire.bits  := out
+    io.mem_acquire.bits  :=  edge.Get(
+          fromSource      = io.id,
+          toAddress       = req.addr + refillCounter.value << 2.U,
+          lgSize          = log2Up(8).U
+        )._2
 
     when (io.mem_acquire.fire()) {
       state := s_refill_resp
@@ -102,7 +101,7 @@ class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
     when (io.mem_grant.fire()) {
       respDataReg(refillCounter.value) := io.mem_grant.bits.data
       assert(refill_done, "MMIO response should be one beat only!")
-      state := Mux(needFlush || io.flush,s_invalid,Mux(refillCounter.value === (MMIOBeats - 1).U,s_send_resp,s_refill_resp))
+      state := Mux(needFlush || io.flush,s_invalid,Mux(refillCounter.value === (MMIOBeats - 1).U,s_send_resp,s_refill_req))
       refillCounter.inc()
     }
   }

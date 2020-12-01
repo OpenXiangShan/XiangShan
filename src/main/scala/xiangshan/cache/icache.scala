@@ -422,7 +422,7 @@ class ICache extends ICacheModule
   val mmio_mask = VecInit(Seq.fill(PredictWidth){true.B}).asUInt
   val mmioDataOut = cutHelper(io.mmio_grant.bits.data,s3_req_pc(5,1),mmio_mask)
 
-  s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && (icacheMissQueue.io.resp.fire() || io.mem_grant.fire()))
+  s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && (icacheMissQueue.io.resp.fire() || io.mmio_grant.fire()))
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr)
@@ -437,6 +437,7 @@ class ICache extends ICacheModule
   }
   XSDebug("[Stage 3] outPacket :%x\n",outPacket)
   XSDebug("[Stage 3] refillDataOut :%x\n",refillDataOut)
+  XSDebug("[Stage 3] refillDataOutVec :%x startPtr:%d\n",refillDataVec.asUInt, s3_req_pc(5,1).asUInt)
 
   //----------------------------
   //    Out Put
