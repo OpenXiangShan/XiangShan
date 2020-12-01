@@ -308,7 +308,6 @@ class IFU extends XSModule with HasIFUConst
       if4_bp.targets(i) := if4_jal_tgts(i)
     }
   }
-  // if4_bp.redirect := bpu.io.out(2).redirect || if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken && if4_cfi_jal_tgt =/= bpu.io.out(2).target
   
   // we need this to tell BPU the prediction of prev half
   // because the prediction is with the start of each inst
@@ -376,65 +375,6 @@ class IFU extends XSModule with HasIFUConst
     newPtr := if4_newPtr
     extHist(if4_newPtr) := if4_GHInfo.takenOnBr.asUInt
   }
-  // // Redirect and npc logic for if4
-  // when (if4_fire && if4_bp.redirect) {
-  //   if4_redirect := true.B
-  //   when (if4_bp.saveHalfRVI) {
-  //     if1_npc := snpc(if4_pc)
-  //   }.otherwise {
-  //     if1_npc := if4_bp.target
-  //   }
-  // }
-
-  // // This should cover the if4 redirect to snpc when saveHalfRVI
-  // when (if3_redirect) {
-  //   when (if3_hasPrevHalfInstr && prevHalfInstr.taken) {
-  //     if1_npc := prevHalfInstr.target
-  //   }
-  // }
-
-  // // history logic for if4
-  // when (if4_fire && if4_bp.redirect) {
-  //   updatePtr := true.B
-  //   newPtr := if4_newPtr
-  // }
-
-  // when (if4_GHInfo.shifted && if4_newPtr >= ptr) {
-  //   hist(if4_newPtr-ptr) := if4_GHInfo.takenOnBr
-  // }
-
-  // when (if3_redirect) {
-  //   // when redirect and if3_hasPrevHalfInstr, this prevHalfInstr should only be taken
-  //   when (if3_hasPrevHalfInstr && prevHalfInstr.ghInfo.shifted) {
-  //     updatePtr := true.B
-  //     newPtr := prevHalfInstr.newPtr
-  //     extHist(prevHalfInstr.newPtr) := prevHalfInstr.ghInfo.takenOnBr
-  //   }
-  // }
-
-  // // modify GHR at the end of a prediction lifetime
-  // when (if4_fire && if4_GHInfo.shifted) {
-  //   extHist(if4_newPtr) := if4_GHInfo.takenOnBr
-  // }
-
-  // This is a histPtr which is only modified when a prediction
-  // is sent, so that it can get the final prediction info
-  // val finalPredHistPtr = RegInit(0.U(log2Up(ExtHistoryLength).W))
-  // if4_histPtr := finalPredHistPtr
-  // if4_newPtr  := if3_histPtr
-  // when (if4_fire && if4_GHInfo.shifted) {
-  //   finalPredHistPtr := if4_newPtr
-  // }
-
-  // if3_histPtr := Mux(if4_GHInfo.shifted && if4_valid && !if4_flush, if4_histPtr - 1.U, if4_histPtr)
-  // if3_newPtr  := if2_histPtr
-
-  // if2_histPtr := Mux(if3_GHInfo.shifted && if3_valid && !if3_flush, if3_histPtr - 1.U, if3_histPtr)
-  // if2_newPtr  := if1_histPtr
-
-  // if1_histPtr := Mux(if2_GHInfo.shifted && if2_valid && !if2_flush, if2_histPtr - 1.U, if2_histPtr)
-
-
 
 
   when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
