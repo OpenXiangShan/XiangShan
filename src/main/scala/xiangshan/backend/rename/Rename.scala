@@ -5,6 +5,13 @@ import chisel3.util._
 import xiangshan._
 import utils.XSInfo
 
+class RenameBypassInfo extends XSBundle {
+  val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+}
+
 class Rename extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
@@ -13,6 +20,7 @@ class Rename extends XSModule {
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
+    val renameBypass = Output(new RenameBypassInfo)
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -61,6 +69,8 @@ class Rename extends XSModule {
     uop.sqIdx := DontCare
   })
 
+  val needFpDest = Wire(Vec(RenameWidth, Bool()))
+  val needIntDest = Wire(Vec(RenameWidth, Bool()))
   var lastReady = WireInit(io.out(0).ready)
   // debug assert
   val outRdy = Cat(io.out.map(_.ready))
@@ -73,17 +83,17 @@ class Rename extends XSModule {
     val inValid = io.in(i).valid
 
     // alloc a new phy reg
-    val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
-    val needIntDest = inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocReqs(i) := needFpDest && lastReady
-    intFreeList.allocReqs(i) := needIntDest && lastReady
+    needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
+    needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
+    fpFreeList.allocReqs(i) := needFpDest(i) && lastReady
+    intFreeList.allocReqs(i) := needIntDest(i) && lastReady
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
     val this_can_alloc = Mux(
-      needIntDest,
+      needIntDest(i),
       intCanAlloc,
       Mux(
-        needFpDest,
+        needFpDest(i),
         fpCanAlloc,
         true.B
       )
@@ -98,7 +108,7 @@ class Rename extends XSModule {
 
     lastReady = io.in(i).ready
 
-    uops(i).pdest := Mux(needIntDest,
+    uops(i).pdest := Mux(needIntDest(i),
       intFreeList.pdests(i),
       Mux(
         uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen,
@@ -173,6 +183,28 @@ class Rename extends XSModule {
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
   }
 
-
-
+  // We don't bypass the old_pdest from valid instructions with the same ldest currently in rename stage.
+  // Instead, we determine whether there're some dependences between the valid instructions.
+  for (i <- 1 until RenameWidth) {
+    io.renameBypass.lsrc1_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src1Type === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src1Type === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc1
+    }).reverse)
+    io.renameBypass.lsrc2_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src2Type === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src2Type === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc2
+    }).reverse)
+    io.renameBypass.lsrc3_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src3Type === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src3Type === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc3
+    }).reverse)
+    io.renameBypass.ldest_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && needFpDest(i)
+      val intMatch = needIntDest(j) && needIntDest(i)
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
+    }).reverse)
+  }
 }

@@ -7,6 +7,7 @@ import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.rename.RenameBypassInfo
 
 case class DispatchParameters
 (
@@ -28,6 +29,7 @@ class Dispatch extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+    val renameBypass = Input(new RenameBypassInfo)
     // enq Roq
     val enqRoq = new Bundle {
       val canAccept = Input(Bool())
@@ -72,6 +74,7 @@ class Dispatch extends XSModule {
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
   dispatch1.io.redirect <> io.redirect
+  dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
   dispatch1.io.toIntDqReady <> intDq.io.enqReady
