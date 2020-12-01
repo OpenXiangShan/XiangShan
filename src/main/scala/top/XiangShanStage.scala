@@ -55,11 +55,25 @@ object DisableAllPrintAnnotation extends HasShellOptions {
   )
 }
 
+case class RemoveAssertAnnotation() extends NoTargetAnnotation
+
+object RemoveAssertAnnotation extends HasShellOptions{
+  val options = Seq(
+    new ShellOption[Unit](
+      longOption = "remove-assert",
+      toAnnotationSeq = _ => Seq(RemoveAssertAnnotation()),
+      helpText = "All the 'assert' will be removed\n",
+      shortOption = None
+    )
+  )
+}
+
 trait XiangShanCli { this: Shell =>
   parser.note("XiangShan Options")
   DisablePrintfAnnotation.addOptions(parser)
   EnablePrintfAnnotation.addOptions(parser)
   DisableAllPrintAnnotation.addOptions(parser)
+  RemoveAssertAnnotation.addOptions(parser)
 }
 
 class XiangShanStage extends chisel3.stage.ChiselStage {
