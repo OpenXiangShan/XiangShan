@@ -1,12 +1,12 @@
 package cache.TLCTest
 
-import chipsalliance.rocketchip.config
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.{LineCoverageAnnotation, VerilatorBackendAnnotation}
 import chiseltest._
 import chiseltest.ChiselScalatestTester
+import firrtl.stage.RunFirrtlTransformAnnotation
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLDelayer, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
@@ -15,6 +15,7 @@ import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveC
 import utils.{DebugIdentityNode, XSDebug}
 import xiangshan.HasXSLog
 import xiangshan.testutils.AddSinks
+import xstransforms.PrintModuleName
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map, Queue, Seq}
@@ -89,13 +90,29 @@ class TLCCacheTestTopWrapper()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers with TLCOp {
+trait RandomSampleUtil {
+  def getRandomElement[A](l: List[A], r: scala.util.Random): A = {
+    l(r.nextInt(l.length))
+  }
+
+  final def sample[A](dist: Map[A, Double], r: scala.util.Random): A = {
+    val p = r.nextDouble
+    val it = dist.iterator
+    var accum = 0.0
+    while (it.hasNext) {
+      val (item, itemProb) = it.next
+      accum += itemProb
+      if (accum >= p)
+        return item // return so that we don't have to search through the whole distribution
+    }
+    sys.error(f"this should never happen") // needed so it will compile
+  }
+}
+
+class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers with TLCOp with RandomSampleUtil {
   val slave_safe = 0
   val slave_granting = 1
   val slave_probing = 2
-
-  def getRandomElement[A](l: List[A], random: Random): A =
-    l(random.nextInt(l.length))
 
   top.Parameters.set(top.Parameters.debugParameters)
 
@@ -106,10 +123,15 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         TLCCacheTestParams()
     })
 
+    val rand = new Random(0xbeef)
+
     val addr_pool = {
-      for (_ <- 0 to 128) yield BigInt(Random.nextInt(0xfffc) << 6)
+      for (_ <- 0 to 32) yield BigInt(rand.nextInt(0xfffc) << 6)
     }.distinct.toList // align to block size
     val addr_list_len = addr_pool.length
+    val acquireProbMap = Map(branch -> 0.3, trunk -> 0.7)
+    val releaseProbMap = Map(nothing -> 0.4, branch -> 0.5, trunk -> 0.1)
+    val probeProbMap = Map(nothing -> 0.4, branch -> 0.5, trunk -> 0.1)
 
     def peekBigInt(source: Data): BigInt = {
       source.peek().litValue()
@@ -120,7 +142,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     }
 
     test(LazyModule(new TLCCacheTestTopWrapper()).module)
-      .withAnnotations(Seq(VerilatorBackendAnnotation, LineCoverageAnnotation)) { c =>
+      .withAnnotations(Seq(VerilatorBackendAnnotation, LineCoverageAnnotation, RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
         c.io.mastersIO.foreach { mio =>
           mio.AChannel.initSource().setSourceClock(c.clock)
           mio.CChannel.initSource().setSourceClock(c.clock)
@@ -144,13 +166,33 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           addr_pool zip List.fill(addr_list_len)(new AddrState())
         }.toMap
         val slaveAgent = new TLCSlaveAgent(2, 8, slaveState, serialList)
-
         //must set order here
         fork {
           while (true) {
-            for (i <- 0 to 1){
+            for (i <- 0 to 1) {
               val mio = mastersIO(i)
               val masterAgent = masterAgentList(i)
+
+              //randomly add when size is small
+              if (masterAgent.outerAcquire.size <= 4) {
+                if (true) {
+                  for (i <- 0 until 16) {
+                    val addr = getRandomElement(addr_pool, rand)
+                    val targetPerm = sample(acquireProbMap, rand)
+                    masterAgent.addAcquire(addr, targetPerm)
+                  }
+                }
+              }
+              if (masterAgent.outerRelease.size <= 4) {
+                if (true) {
+                  for (i <- 0 until 16) {
+                    val addr = getRandomElement(addr_pool, rand)
+                    val targetPerm = sample(releaseProbMap, rand)
+                    masterAgent.addRelease(addr, targetPerm)
+                  }
+                }
+              }
+
               var AChannel_valid = false
               var CChannel_valid = false
               var EChannel_valid = false
@@ -233,6 +275,8 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
                 }
               }
               mio.AChannel.valid.poke(AChannel_valid.B)
+              //handle some ID
+              masterAgent.freeSource()
             }
             c.clock.step()
           }
@@ -241,6 +285,17 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         fork {
           val sio = slaveIO
           while (true) {
+
+            //            //randomly add when empty
+            //            if (slaveAgent.innerProbe.size <= 4) {
+            //              if (Random.nextBoolean()) {
+            //                for (i <- 0 until 8) {
+            //                  val addr = getRandomElement(addr_pool)
+            //                  val targetPerm = sample(probeProbMap)
+            //                  slaveAgent.addProbe(addr, targetPerm)
+            //                }
+            //              }
+            //            }
 
             val AChannel_ready = true
             val CChannel_ready = true
@@ -322,6 +377,9 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             }
             slaveAgent.tickA()
 
+            //handle some ID
+            slaveAgent.freeSink()
+            
             c.clock.step()
           }
         }.join()

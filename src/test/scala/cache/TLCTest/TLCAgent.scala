@@ -187,6 +187,13 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
   val innerProbe = ListBuffer[ProbeCallerTrans]()
 
   val sinkIdMap = mutable.Map[BigInt, AcquireCalleeTrans]()
+  val sinkFreeQueue = mutable.Queue[BigInt]()
+  def freeSink(): Unit = {
+    sinkFreeQueue.dequeueAll{ ID =>
+      sinkIdMap.remove(ID)
+      true
+    }
+  }
 
   val aList = ListBuffer[TLCScalaA]()
   val cList = ListBuffer[TLCScalaC]()
@@ -216,7 +223,8 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     //update state
     state.slaveUpdatePendingGrantAck()
     //free sinkId
-    sinkIdMap.remove(inE.sink)
+//    sinkIdMap.remove(inE.sink)
+    sinkFreeQueue.enqueue(inE.sink)
     //remove from addrList and agentList
     state.calleeTrans -= acq
     innerAcquire -= acq
@@ -257,6 +265,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     }
     if (sinkIdMap.size < maxSink) { //fast check available ID
       val sinkQ = mutable.Queue() ++ List.tabulate(maxSink)(a => BigInt(a)).filterNot(k => sinkIdMap.contains(k))
+      println(sinkIdMap)
       //search Grant to issue
       innerAcquire.foreach { acq =>
         //TODO:check recursive trans completion before issue
@@ -315,6 +324,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         c_cnt += 1
         if (c_cnt == beatNum) {
           handleC(tmpC)
+          c_cnt = 0
         }
       }
     }
@@ -463,9 +473,9 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     }
   }
 
-  def addProbe(addr:BigInt,targetPerm:BigInt): Unit = {
+  def addProbe(addr: BigInt, targetPerm: BigInt): Unit = {
     val pro = ProbeCallerTrans()
-    pro.prepareProbe(addr,targetPerm)
+    pro.prepareProbe(addr, targetPerm)
     innerProbe.append(pro)
   }
 }
@@ -479,6 +489,18 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
 
   val sourceAMap = mutable.Map[BigInt, AcquireCallerTrans]()
   val sourceCMap = mutable.Map[BigInt, ReleaseCallerTrans]()
+  val sourceAFreeQueue = mutable.Queue[BigInt]()
+  val sourceCFreeQueue = mutable.Queue[BigInt]()
+  def freeSource(): Unit = {
+    sourceAFreeQueue.dequeueAll{ id =>
+      sourceAMap.remove(id)
+      true
+    }
+    sourceCFreeQueue.dequeueAll{ id =>
+      sourceCMap.remove(id)
+      true
+    }
+  }
 
   val bList = ListBuffer[TLCScalaB]()
 
@@ -529,6 +551,7 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         d_cnt += 1
         if (d_cnt == beatNum) {
           handleD(tmpD)
+          d_cnt = 0
         }
       }
     }
@@ -550,7 +573,8 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         //update state
         state.masterUpdatePendingReleaseAck()
         //free sourceID
-        sourceCMap.remove(d.source)
+//        sourceCMap.remove(d.source)
+        sourceCFreeQueue.enqueue(d.source)
         //remove from addrList and agentList
         state.callerTrans -= rel
         outerRelease -= rel
@@ -577,7 +601,8 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         //update state
         state.masterUpdatePendingGrant()
         //free sourceID
-        sourceAMap.remove(d.source)
+//        sourceAMap.remove(d.source)
+        sourceAFreeQueue.enqueue(d.source)
         //serialization point
         appendSerial(acq)
         //remove from addrList and agentList
@@ -606,7 +631,8 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         //update state
         state.masterUpdatePendingGrant()
         //free sourceID
-        sourceAMap.remove(d.source)
+//        sourceAMap.remove(d.source)
+        sourceAFreeQueue.enqueue(d.source)
         //serialization point
         appendSerial(acq)
         //remove from addrList and agentList
@@ -655,36 +681,44 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
     }
 
     //search Release here
+    val abandonList = ListBuffer[ReleaseCallerTrans]()
     if (sourceCMap.size < maxSource) { //fast check available ID
-      val sourceQ = mutable.Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
+      val sourceQ = mutable.Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceCMap.contains(k))
       outerRelease.foreach { r =>
         if (!r.releaseIssued.getOrElse(true)) { //haven't issue release
           val addr = r.c.get.address
           val state = getState(addr)
-          if (sourceQ.nonEmpty && !banIssueRelease(addr)) { //has empty source ID and ok to issue
-            val allocId = sourceQ.dequeue()
-            //TODO: random decide to report or not when target perm is higher than me
-            if (r.targetPerm < state.myPerm) { //if target is higher
-              r.targetPerm = state.myPerm
+          if (state.myPerm != nothing) { //have some thing to report
+            if (sourceQ.nonEmpty && !banIssueRelease(addr)) { //has empty source ID and ok to issue
+              val allocId = sourceQ.dequeue()
+              //TODO: random decide to report or not when target perm is higher than me
+              if (r.targetPerm < state.myPerm) { //if target is higher
+                r.targetPerm = state.myPerm
+              }
+              if (state.dirty) {
+                cQueue.enqMessage(r.issueReleaseData(allocId, state.myPerm, state.data), cnt = beatNum)
+                state.dirty = false
+              }
+              else {
+                cQueue.enqMessage(r.issueRelease(allocId, state.myPerm))
+              }
+              //serialization point
+              appendSerial(r)
+              //append to addr caller list
+              state.callerTrans.append(r)
+              //update state
+              state.masterUpdatePendingReleaseAck()
+              //mark ID allocated
+              sourceCMap(allocId) = r
             }
-            if (state.dirty) {
-              cQueue.enqMessage(r.issueReleaseData(allocId, state.myPerm, state.data), cnt = beatNum)
-              state.dirty = false
-            }
-            else {
-              cQueue.enqMessage(r.issueRelease(allocId, state.myPerm))
-            }
-            //serialization point
-            appendSerial(r)
-            //append to addr caller list
-            state.callerTrans.append(r)
-            //update state
-            state.masterUpdatePendingReleaseAck()
-            //mark ID allocated
-            sourceCMap(allocId) = r
+          }
+          else { // no need to report/shrink. Delete from release trans list
+            abandonList += r
+            //TODO: check father here
           }
         }
       }
+      outerRelease --= abandonList
     }
   }
 
@@ -732,18 +766,15 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
   def issueA(): Unit = {
     val abandonList = ListBuffer[AcquireCallerTrans]()
     if (sourceAMap.size < maxSource) { //fast check available ID
-      println(sourceAMap)
       val sourceQ = mutable.Queue() ++ List.tabulate(maxSource)(a => BigInt(a)).filterNot(k => sourceAMap.contains(k))
       outerAcquire.foreach { acq =>
         if (!acq.acquireIssued.getOrElse(true)) { //haven't issue acquire
           val addr = acq.a.get.address
           val state = getState(addr)
-          println(s"check issue acquire addr: $addr")
           if (acq.checkNeedGrow(state.myPerm)) { //really need grow
             if (sourceQ.nonEmpty && !banIssueAcquire(addr)) { //has empty sourceid and ok to issue
               //TODO:decide to make full write here, use acqblock for now
               val allocId = sourceQ.dequeue()
-              println(s"issue acquire addr: $addr, souceID = $allocId")
               aQueue.enqMessage(acq.issueAcquireBlock(allocId, state.myPerm))
               //serialization point
               appendSerial(acq)
@@ -761,8 +792,8 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
           }
         }
       }
+      outerAcquire --= abandonList
     }
-    outerAcquire --= abandonList
   }
 
   def peekA(): Option[TLCScalaA] = {
