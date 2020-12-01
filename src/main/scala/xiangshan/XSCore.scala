@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{ICache, icacheUncache,DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
@@ -262,16 +262,22 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   // inner nodes
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
+  val icacheUncache = LazyModule(new icacheUncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
 
   // out facing nodes
   val mem = TLIdentityNode()
-  val mmio = uncache.clientNode
+  val mmio = TLIdentityNode()
 
   // L1 to L2 network
   // -------------------------------------------------
   private val l2_xbar = TLXbar()
+  private val mmio_xbar = TLXbar()
+
+  mmio_xbar := TLBuffer() := DebugIdentityNode() := uncache.clientNode
+  mmio_xbar := TLBuffer() := DebugIdentityNode() := icacheUncache.clientNode
+  mmio := TLBuffer() := DebugIdentityNode() := mmio_xbar
 
   private val l2 = LazyModule(new InclusiveCache(
     CacheParameters(
@@ -347,6 +353,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
 
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
+  val icacheUncache = outer.icacheUncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val icache = Module(new ICache)
@@ -432,6 +439,9 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
   dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
   uncache.io.lsq      <> memBlock.io.dcache.uncache
+  icacheUncache.io.req   <> icache.io.mmio_acquire
+  icache.io.mmio_grant   <> icacheUncache.io.resp
+  icacheUncache.io.flush <> icache.io.mmio_flush
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
