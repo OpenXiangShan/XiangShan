@@ -128,11 +128,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val hasBlockBackward = RegInit(false.B)
   val hasNoSpecExec = RegInit(false.B)
   // When blockBackward instruction leaves Roq (commit or walk), hasBlockBackward should be set to false.B
-  val blockBackwardLeave = Cat(io.commits.map(c => c.valid && c.bits.uop.ctrl.blockBackward)).orR
+  val blockBackwardLeave = Cat(io.commits.map(c => c.valid && c.bits.uop.ctrl.blockBackward)).orR || io.redirect.valid
   when(blockBackwardLeave){ hasBlockBackward:= false.B }
   // When noSpecExec instruction commits (it should not be walked except when it has not entered Roq),
   // hasNoSpecExec should be set to false.B
-  val noSpecExecCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR
+  val noSpecExecCommit = Cat(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.noSpecExec)).orR || io.redirect.valid
   when(noSpecExecCommit){ hasNoSpecExec:= false.B }
   // Assertion on that noSpecExec should never be walked since it's the only instruction in Roq.
   // Extra walk should be ok since noSpecExec has not enter Roq.
