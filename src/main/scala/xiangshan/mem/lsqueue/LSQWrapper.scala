@@ -153,8 +153,8 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
     // merge forward lookup results
     // forward2 is younger than forward1 and should have higher priority
     (0 until XLEN / 8).map(k => {
-      io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
-      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
+      io.forward(i).forwardMask(k) := RegNext(forwardMask1(k) || forwardMask2(k))
+      io.forward(i).forwardData(k) := RegNext(Mux(forwardMask2(k), forwardData2(k), forwardData1(k)))
     })
   })
 
