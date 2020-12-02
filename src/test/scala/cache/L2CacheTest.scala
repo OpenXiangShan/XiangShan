@@ -58,7 +58,7 @@ case object L3CacheTestKey extends Field[L3CacheTestParams]
 class L2TestTopIO extends Bundle {
   val in = Flipped(DecoupledIO(new Bundle() {
     val wdata = Input(UInt(64.W))
-    val waddr = Input(UInt(20.W))
+    val waddr = Input(UInt(40.W))
     val hartId = Input(UInt(1.W))
   }))
   val out = DecoupledIO(new Bundle() {
@@ -281,7 +281,9 @@ class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
         c.clock.step(100)
 
         for(i <- 0 until 100000){
-          val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
+          // DRAM AddressSet is above 0x80000000L
+          // also, note that, + has higher priority than & !!!
+          val addr = (Random.nextInt(0x7fffffff).toLong & 0xfffffe00L) + 0x80000000L // align to block size
           val data = Random.nextLong() & 0x7fffffffffffffffL
           c.io.in.enqueue(chiselTypeOf(c.io.in.bits).Lit(
             _.waddr -> addr.U,
