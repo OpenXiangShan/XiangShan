@@ -4,8 +4,7 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
-import chiseltest.internal.LineCoverageAnnotation
+import chiseltest.internal.{VerilatorBackendAnnotation, LineCoverageAnnotation, ToggleCoverageAnnotation, UserCoverageAnnotation, StructuralCoverageAnnotation}
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -260,6 +259,9 @@ class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
   val annos = Seq(
     VerilatorBackendAnnotation,
     LineCoverageAnnotation,
+    ToggleCoverageAnnotation,
+    UserCoverageAnnotation,
+    StructuralCoverageAnnotation,
     RunFirrtlTransformAnnotation(new PrintModuleName)
   )
 
