@@ -76,7 +76,7 @@ class BIM extends BasePredictor with BimParams{
   for (b <- 0 until BimBanks) {
     val realBank = (if (b < bankWidth) Mux(startsAtOddBankLatch, (b+bankWidth).U, b.U)
                     else Mux(startsAtOddBankLatch, (b-bankWidth).U, b.U))
-    val ctr = bimRead(realBank(b))
+    val ctr = bimRead(realBank)
     io.resp.ctrs(b)  := ctr
     io.meta.ctrs(b)  := ctr
   }

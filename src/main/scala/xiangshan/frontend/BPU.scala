@@ -166,9 +166,9 @@ abstract class BPUStage extends XSModule with HasBPUParameter with HasIFUConst {
   val lastBankHasInst = WireInit(inLatch.mask(PredictWidth-1, bankWidth).orR)
 
   io.pred <> DontCare
-  io.pred.takens := takens
-  io.pred.brMask := brMask
-  io.pred.jalMask := jalMask
+  io.pred.takens := takens.asUInt
+  io.pred.brMask := brMask.asUInt
+  io.pred.jalMask := jalMask.asUInt
   io.pred.targets := targets
   io.pred.firstBankHasHalfRVI := firstBankHasHalfRVI
   io.pred.lastBankHasHalfRVI  := lastBankHasHalfRVI
@@ -199,7 +199,7 @@ class BPUStage1 extends BPUStage {
   // so we use io.in instead of inLatch
   val ubtbResp = io.in.resp.ubtb
   // the read operation is already masked, so we do not need to mask here
-  takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.takens(i))).asUInt
+  takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.takens(i)))
   // notTakens := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && !ubtbResp.takens(i) && ubtbResp.brMask(i)))
   brMask := ubtbResp.brMask
   jalMask := DontCare
@@ -226,9 +226,9 @@ class BPUStage2 extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
   val bimResp = inLatch.resp.bim
-  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) =/= BTBtype.B))).asUInt
+  takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) =/= BTBtype.B)))
   targets := btbResp.targets
-  brMask  := VecInit(btbResp.types.map(_ === BTBtype.B)).asUInt
+  brMask  := VecInit(btbResp.types.map(_ === BTBtype.B))
   jalMask := DontCare
 
   firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, btbResp.hits(bankWidth-1) && !btbResp.isRVC(bankWidth-1) && inLatch.mask(bankWidth-1))
@@ -244,13 +244,14 @@ class BPUStage2 extends BPUStage {
 }
 
 class BPUStage3 extends BPUStage {
-  class S3IO extends DefaultIO {
+  class S3IO extends XSBundle {
+
     val predecode = Input(new Predecode)
     val realMask = Input(UInt(PredictWidth.W))
     val prevHalf = Input(new PrevHalfInstr)
     val recover =  Flipped(ValidIO(new BranchUpdateInfo))
   }
-  override val io = new S3IO
+  val s3IO = IO(new S3IO)
   // TAGE has its own pipelines and the
   // response comes directly from s3,
   // so we do not use those from inLatch
@@ -260,8 +261,8 @@ class BPUStage3 extends BPUStage {
   val loopResp = io.in.resp.loop.exit
 
   // realMask is in it
-  val pdMask = io.predecode.mask
-  val pds    = io.predecode.pd
+  val pdMask = s3IO.predecode.mask
+  val pds    = s3IO.predecode.pd
 
   val btbResp   = inLatch.resp.btb
   val btbHits   = btbResp.hits.asUInt
@@ -277,10 +278,12 @@ class BPUStage3 extends BPUStage {
   val callIdx = PriorityEncoder(calls)
   val retIdx  = PriorityEncoder(rets)
   
-  val brPred = (if(EnableBPD) tageTakens else bimTakens)
-  val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 1.U(1.W))))
-  val prevHalfTaken = io.prevHalf.valid && io.prevHalf.taken 
-  val brTakens = VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
+  val brPred = (if(EnableBPD) tageTakens else bimTakens).asUInt
+  val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 1.U(1.W)))).asUInt
+  val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.taken
+  val prevHalfTakenMask = prevHalfTaken.asUInt
+  val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
+  // VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
 
   // predict taken only if btb has a target, jal targets will be provided by IFU
   takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
@@ -300,13 +303,13 @@ class BPUStage3 extends BPUStage {
   // targets would be lost as well, since it is from btb
   // unless it is a ret, which target is from ras
   when (prevHalfTaken && !rets(0)) {
-    targets(0) := io.prevHalf.target
+    targets(0) := s3IO.prevHalf.target
   }
   brMask  := WireInit(brs.asTypeOf(Vec(PredictWidth, Bool())))
   jalMask := WireInit(jals.asTypeOf(Vec(PredictWidth, Bool())))
 
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, io.realMask(bankWidth-1) && !pdMask(bankWidth-1))
-  lastBankHasHalfRVI  := io.realMask(PredictWidth-1) && !pdMask(PredictWidth-1)
+  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, s3IO.realMask(bankWidth-1) && !pdMask(bankWidth-1))
+  lastBankHasHalfRVI  := s3IO.realMask(PredictWidth-1) && !pdMask(PredictWidth-1)
 
   //RAS
   if(EnableRAS){
@@ -318,8 +321,8 @@ class BPUStage3 extends BPUStage {
     ras.io.callIdx.valid := calls.orR && (callIdx === io.pred.jmpIdx)
     ras.io.callIdx.bits := callIdx
     ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
-    ras.io.isLastHalfRVI := io.predecode.hasLastHalfRVI
-    ras.io.recover := io.recover
+    ras.io.isLastHalfRVI := s3IO.predecode.hasLastHalfRVI
+    ras.io.recover := s3IO.recover
 
     for(i <- 0 until PredictWidth){
       io.out.brInfo(i).rasSp :=  ras.io.branchInfo.rasSp
@@ -348,10 +351,10 @@ class BPUStage3 extends BPUStage {
   }
 
   if (BPUDebug) {
-    XSDebug(io.inFire, "predecode: pc:%x, mask:%b\n", inLatch.pc, io.predecode.mask)
+    XSDebug(io.inFire, "predecode: pc:%x, mask:%b\n", inLatch.pc, s3IO.predecode.mask)
     for (i <- 0 until PredictWidth) {
-      val p = io.predecode.pd(i)
-      XSDebug(io.inFire && io.predecode.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
+      val p = s3IO.predecode.pd(i)
+      XSDebug(io.inFire && s3IO.predecode.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
         i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
     }
   }
@@ -452,16 +455,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   io.out(1) <> s2.io.pred
   io.out(2) <> s3.io.pred
 
-  s3.io.predecode <> io.predecode
-
-  s3.io.realMask := io.realMask
-
-  s3.io.prevHalf := io.prevHalf
-
   io.branchInfo := s3.io.out.brInfo
-
-  s3.io.recover.valid <> io.inOrderBrInfo.valid
-  s3.io.recover.bits <> io.inOrderBrInfo.bits.ui
   
   if (BPUDebug) {
     XSDebug(io.inFire(3), "branchInfo sent!\n")
@@ -591,6 +585,15 @@ class BPU extends BaseBPU {
     s3.io.in.brInfo(i).tageMeta := tage.io.meta(i)
     s3.io.in.brInfo(i).specCnt := loop.io.meta.specCnts(i)
   }
+
+  s3.s3IO.predecode <> io.predecode
+
+  s3.s3IO.realMask := io.realMask
+
+  s3.s3IO.prevHalf := io.prevHalf
+
+  s3.s3IO.recover.valid <> io.inOrderBrInfo.valid
+  s3.s3IO.recover.bits <> io.inOrderBrInfo.bits.ui
 
   if (BPUDebug) {
     if (debug_verbose) {

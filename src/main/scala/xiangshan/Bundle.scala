@@ -78,8 +78,8 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val firstBankHasHalfRVI = Bool()
   val lastBankHasHalfRVI = Bool()
 
-  def lastHalfRVIMask = Mux(firstBankHasHalfRVI, UIntToOH((bankWidth-1).U(PredictWidth.W)),
-                          Mux(lastBankHasHalfRVI, UIntToOH((PredictWidth-1).U(PredictWidth.W)),
+  def lastHalfRVIMask = Mux(firstBankHasHalfRVI, UIntToOH((bankWidth-1).U),
+                          Mux(lastBankHasHalfRVI, UIntToOH((PredictWidth-1).U),
                             0.U(PredictWidth.W)
                           )
                         )

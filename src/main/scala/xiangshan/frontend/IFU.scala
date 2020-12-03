@@ -41,7 +41,7 @@ class GlobalHistoryInfo() extends XSBundle {
   val nowPtr = UInt(log2Ceil(ExtHistoryLength).W)
   val sawNTBr = Bool()
   val takenOnBr = Bool()
-  val saveHalfRVI = Bool()
+  // val saveHalfRVI = Bool()
   def shifted = takenOnBr || sawNTBr
   def newPtr(ptr: UInt = nowPtr): UInt = Mux(shifted, ptr - 1.U, ptr)
 
@@ -53,17 +53,17 @@ class GlobalHistoryInfo() extends XSBundle {
 
   final def =/= (that: GlobalHistoryInfo): Bool = !(this === that)
 
-  def update(): GlobalHistoryInfo = {
-    val g = WireInit(this)
-    g.nowPtr := nowPtr - Mux(shifted, 1.U, 0.U)
-    g.sawNTBr := Mux(saveHalfRVI, sawNTBr, false.B)
-    g.takenOnBr := Mux(saveHalfRVI, takenOnBr, false.B)
-    g.saveHalfRVI := false.B
-    g
-  }
+  // def update(): GlobalHistoryInfo = {
+  //   val g = WireInit(this)
+  //   g.nowPtr := nowPtr - Mux(shifted, 1.U, 0.U)
+  //   g.sawNTBr := Mux(saveHalfRVI, sawNTBr, false.B)
+  //   g.takenOnBr := Mux(saveHalfRVI, takenOnBr, false.B)
+  //   // g.saveHalfRVI := false.B
+  //   g
+  // }
 
   implicit val name = "IFU"
-  def debug = XSDebug("[GHInfo] sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d\n", sawNTBr, takenOnBr, saveHalfRVI)
+  def debug = XSDebug("[GHInfo] sawNTBr=%d, takenOnBr=%d\n", sawNTBr, takenOnBr)
   // override def toString(): String = "histPtr=%d, sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d".format(histPtr, sawNTBr, takenOnBr, saveHalfRVI)
 }
 
@@ -120,12 +120,12 @@ class IFU extends XSModule with HasIFUConst
   val if1_fire = if1_valid && (if2_ready || if1_flush) && (inLoop || io.icacheReq.ready)
 
 
-  val if1_histPtr, if2_histPtr, if3_histPtr, if4_histPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
-  val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
-
+  // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
+  
   val extHist = RegInit(VecInit(Seq.fill(ExtHistoryLength)(0.U(1.W))))
   val updatePtr = WireInit(false.B)
   val newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
+  val if1_histPtr = RegEnable(next=newPtr, init=0.U(log2Up(ExtHistoryLength).W), enable=updatePtr)
   val ptr = Mux(updatePtr, newPtr, if1_histPtr)
   val hist = Wire(Vec(HistoryLength, UInt(1.W)))
   for (i <- 0 until HistoryLength) {
@@ -135,11 +135,13 @@ class IFU extends XSModule with HasIFUConst
   updatePtr := false.B
   newPtr := if1_histPtr
 
+  
+
   def wrapGHInfo(bp: BranchPrediction, ptr: UInt) = {
     val ghi = Wire(new GlobalHistoryInfo())
     ghi.sawNTBr     := bp.hasNotTakenBrs
     ghi.takenOnBr   := bp.takenOnBr
-    ghi.saveHalfRVI := bp.saveHalfRVI
+    // ghi.saveHalfRVI := bp.saveHalfRVI
     ghi.nowPtr      := ptr
     ghi
   }
@@ -448,6 +450,7 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.predecode.pd := if4_pd.pd
   bpu.io.predecode.hasLastHalfRVI := if4_pc =/= if4_pd.pc(0)
   bpu.io.realMask := if4_mask
+  bpu.io.prevHalf := if4_prevHalfInstr
 
   pd.io.in := icacheResp
   when(inLoop) {
@@ -518,15 +521,15 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits.target)} brTag=${io.redirect.bits.brTag}\n")
 
     XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x ptr=%d mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, ptr, mask(if1_npc))
-    XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_histPtr, if2_snpc)
-    XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, if3_histPtr, crossPageIPF, if3_GHInfo.sawNTBr)
-    XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_histPtr, if4_crossPageIPF, if4_GHInfo.sawNTBr)
+    XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_predHistPtr, if2_snpc)
+    XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, if3_predHistPtr, crossPageIPF, if3_GHInfo.sawNTBr)
+    XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_predHistPtr, if4_crossPageIPF, if4_GHInfo.sawNTBr)
     XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", io.icacheReq.valid, io.icacheReq.ready, io.icacheReq.bits.addr)
     XSDebug("[IF1][ghr] headPtr=%d updatePtr=%d newPtr=%d ptr=%d\n", if1_histPtr, updatePtr, newPtr, ptr)
     XSDebug("[IF1][ghr] hist=%b\n", hist.asUInt)
     XSDebug("[IF1][ghr] extHist=%b\n\n", extHist.asUInt)
 
-    XSDebug("[IF2][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n\n", if2_bp.taken, if2_bp.jmpIdx, if2_bp.hasNotTakenBrs, if2_bp.target, if2_bp.saveHalfRVI)
+    XSDebug("[IF2][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n\n", if2_bp.taken, if2_bp.jmpIdx, if2_bp.hasNotTakenBrs, if2_bp.target, if2_bp.saveHalfRVI)
     if2_GHInfo.debug
 
     XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
@@ -540,7 +543,7 @@ class IFU extends XSModule with HasIFUConst
     if3_GHInfo.debug
 
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
-    XSDebug("[IF4][bp] redirect=%d taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
+    XSDebug("[IF4][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
     XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_instrs(if4_bp.jmpIdx), if4_jal_tgts(if4_bp.jmpIdx))
     XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
       if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr, if4_prevHalfInstr.ipf)
