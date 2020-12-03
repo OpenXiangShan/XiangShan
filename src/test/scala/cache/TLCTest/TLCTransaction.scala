@@ -266,7 +266,7 @@ class AcquireTrans extends TLCTrans{
   var e : Option[TLCScalaE] = None
 
 }
-case class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
+class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
   var acquireIssued : Option[Boolean] = None
   var grantPending : Option[Boolean] = None
   var grantAckIssued : Option[Boolean] = None
@@ -318,7 +318,7 @@ case class AcquireCallerTrans() extends AcquireTrans with TLCCallerTrans {
   }
 
 }
-case class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
+class AcquireCalleeTrans() extends AcquireTrans with TLCCalleeTrans {
   var grantIssued : Option[Boolean] = None
   var grantAckPending : Option[Boolean] = None
 
@@ -371,7 +371,7 @@ class ProbeTrans extends TLCTrans with PermissionTransition {
   var b : Option[TLCScalaB] = None
   var c : Option[TLCScalaC] = None
 }
-case class ProbeCallerTrans() extends ProbeTrans with TLCCallerTrans {
+class ProbeCallerTrans() extends ProbeTrans with TLCCallerTrans {
   var probeIssued : Option[Boolean] = None
   var probeAckPending : Option[Boolean] = None
 
@@ -442,7 +442,7 @@ class ReleaseTrans extends TLCTrans with PermissionTransition {
   var c : Option[TLCScalaC] = None
   var d : Option[TLCScalaD] = None
 }
-case class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
+class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
   var releaseIssued : Option[Boolean] = None
   var releaseAckPending : Option[Boolean] = None
 
@@ -481,7 +481,7 @@ case class ReleaseCallerTrans() extends ReleaseTrans with TLCCallerTrans {
   }
 
 }
-case class ReleaseCalleeTrans() extends ReleaseTrans with TLCCalleeTrans {
+class ReleaseCalleeTrans() extends ReleaseTrans with TLCCalleeTrans {
   var releaseAckIssued : Option[Boolean] = None
   def pairRelease(inC : TLCScalaC) : Unit ={
     c = Some(inC)

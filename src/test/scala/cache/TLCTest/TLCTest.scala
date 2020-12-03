@@ -262,7 +262,6 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val tmpA = masterAgent.peekA()
               if (tmpA.isDefined) {
                 AChannel_valid = true
-                println(s"master $i A valid:$AChannel_valid addr:${tmpA.get.address}")
                 mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
                 mio.AChannel.bits.param.poke(tmpA.get.param.U)
                 mio.AChannel.bits.size.poke(tmpA.get.size.U)

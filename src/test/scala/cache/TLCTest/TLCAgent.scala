@@ -54,9 +54,9 @@ class AddrState extends TLCOp {
   }
 
   def slaveUpdatePendingProbeAck(): Unit = {
-    pendingProbeAck = calleeTrans.foldLeft(false)((res, callee) => {
+    pendingProbeAck = callerTrans.foldLeft(false)((res, caller) => {
       res || {
-        callee match {
+        caller match {
           case pro: ProbeCallerTrans => pro.probeAckPending.getOrElse(false)
           case _ => false
         }
@@ -112,9 +112,9 @@ trait BigIntExtract {
   }
 
   def replaceNBytes(n: BigInt, in: BigInt, start: Int, len: Int): BigInt = {
-    val inArray = in.toByteArray
-    val nArray = n.toByteArray
-    require(inArray.size <= len, "given insert value longer than len")
+    val inArray = in.toByteArray.dropWhile(_ == 0)
+    val nArray = n.toByteArray.dropWhile(_ == 0)
+    require(inArray.size <= len, s"given insert value:$in, inArray: ${inArray.mkString("Array(", ", ", ")")} longer than len: $len")
     if (nArray.size <= start) {
       BigInt(prefix ++ inArray ++ Array.fill(start - nArray.size)(0.toByte) ++ nArray)
     }
@@ -188,8 +188,9 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
 
   val sinkIdMap = mutable.Map[BigInt, AcquireCalleeTrans]()
   val sinkFreeQueue = mutable.Queue[BigInt]()
+
   def freeSink(): Unit = {
-    sinkFreeQueue.dequeueAll{ ID =>
+    sinkFreeQueue.dequeueAll { ID =>
       sinkIdMap.remove(ID)
       true
     }
@@ -223,7 +224,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     //update state
     state.slaveUpdatePendingGrantAck()
     //free sinkId
-//    sinkIdMap.remove(inE.sink)
+    //    sinkIdMap.remove(inE.sink)
     sinkFreeQueue.enqueue(inE.sink)
     //remove from addrList and agentList
     state.calleeTrans -= acq
@@ -265,7 +266,6 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
     }
     if (sinkIdMap.size < maxSink) { //fast check available ID
       val sinkQ = mutable.Queue() ++ List.tabulate(maxSink)(a => BigInt(a)).filterNot(k => sinkIdMap.contains(k))
-      println(sinkIdMap)
       //search Grant to issue
       innerAcquire.foreach { acq =>
         //TODO:check recursive trans completion before issue
@@ -342,7 +342,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
-        assert(state.masterPerm == shrinkFrom(c.param))
+        assert(state.masterPerm == shrinkFrom(c.param), f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(c.param)
         state.slaveUpdatePendingProbeAck()
         if (state.masterPerm == nothing) {
@@ -365,7 +365,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
-        assert(state.masterPerm == shrinkFrom(c.param))
+        assert(state.masterPerm == shrinkFrom(c.param), f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(c.param)
         state.data = c.data
         state.slaveUpdatePendingProbeAck()
@@ -409,7 +409,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         false
       }
       else {
-        val rel = ReleaseCalleeTrans()
+        val rel = new ReleaseCalleeTrans()
         rel.pairRelease(c)
         //add to addr list and agent list
         innerRelease.append(rel)
@@ -461,7 +461,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         false
       }
       else { //not blocking
-        val transA = AcquireCalleeTrans()
+        val transA = new AcquireCalleeTrans()
         transA.pairAcquire(a)
         //serialization point
         appendSerial(transA)
@@ -474,7 +474,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
   }
 
   def addProbe(addr: BigInt, targetPerm: BigInt): Unit = {
-    val pro = ProbeCallerTrans()
+    val pro = new ProbeCallerTrans()
     pro.prepareProbe(addr, targetPerm)
     innerProbe.append(pro)
   }
@@ -491,12 +491,13 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
   val sourceCMap = mutable.Map[BigInt, ReleaseCallerTrans]()
   val sourceAFreeQueue = mutable.Queue[BigInt]()
   val sourceCFreeQueue = mutable.Queue[BigInt]()
+
   def freeSource(): Unit = {
-    sourceAFreeQueue.dequeueAll{ id =>
+    sourceAFreeQueue.dequeueAll { id =>
       sourceAMap.remove(id)
       true
     }
-    sourceCFreeQueue.dequeueAll{ id =>
+    sourceCFreeQueue.dequeueAll { id =>
       sourceCMap.remove(id)
       true
     }
@@ -573,7 +574,7 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         //update state
         state.masterUpdatePendingReleaseAck()
         //free sourceID
-//        sourceCMap.remove(d.source)
+        //        sourceCMap.remove(d.source)
         sourceCFreeQueue.enqueue(d.source)
         //remove from addrList and agentList
         state.callerTrans -= rel
@@ -601,7 +602,7 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         //update state
         state.masterUpdatePendingGrant()
         //free sourceID
-//        sourceAMap.remove(d.source)
+        //        sourceAMap.remove(d.source)
         sourceAFreeQueue.enqueue(d.source)
         //serialization point
         appendSerial(acq)
@@ -631,7 +632,7 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
         //update state
         state.masterUpdatePendingGrant()
         //free sourceID
-//        sourceAMap.remove(d.source)
+        //        sourceAMap.remove(d.source)
         sourceAFreeQueue.enqueue(d.source)
         //serialization point
         appendSerial(acq)
@@ -673,6 +674,8 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
           else {
             cQueue.enqMessage(p.issueProbeAck(myperm, targetPerm))
           }
+          //change state permission
+          state.myPerm = targetPerm
           //remove from addr list and agent list
           state.calleeTrans -= p
           true //condition to remove from agent list
@@ -810,13 +813,13 @@ class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigI
   }
 
   def addAcquire(addr: BigInt, targetPerm: BigInt): Unit = {
-    val acq = AcquireCallerTrans()
+    val acq = new AcquireCallerTrans()
     acq.prepareAcquire(addr, targetPerm)
     outerAcquire.append(acq)
   }
 
   def addRelease(addr: BigInt, targetPerm: BigInt): Unit = {
-    val rel = ReleaseCallerTrans()
+    val rel = new ReleaseCallerTrans()
     rel.prepareRelease(addr, targetPerm)
     outerRelease.append(rel)
   }
