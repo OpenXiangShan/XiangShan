@@ -2,11 +2,13 @@ import chisel3._
 import chisel3.util._
 
 package object xiangshan {
-  object SrcType {
+  object SrcType { // FIXME duplicate SrcType object
     def reg = "b00".U
     def pc  = "b01".U
     def imm = "b01".U
     def fp  = "b10".U
+
+    def DC = BitPat.dontCare(2)
 
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc

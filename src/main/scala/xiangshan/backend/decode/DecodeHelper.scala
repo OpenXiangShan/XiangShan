@@ -1,6 +1,7 @@
 package xiangshan.backend.decode
 
 import chisel3._
+import chisel3.util.BitPat
 import xiangshan.{FuType, HasXSParameter}
 import xiangshan.backend._
 import xiangshan.backend.decode.isa._
@@ -37,6 +38,9 @@ object SrcType {
   def pc  = "b01".U
   def imm = "b01".U
   def fp  = "b10".U
+
+  def DC = BitPat.dontCare(2)
+
   def apply() = UInt(2.W)
 }
 

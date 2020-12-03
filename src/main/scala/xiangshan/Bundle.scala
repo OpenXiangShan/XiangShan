@@ -153,11 +153,11 @@ class CtrlSignals extends XSBundle {
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
-    val signals = 
-      Seq(src1Type, src2Type, src3Type, /* lsrc1, lsrc2, lsrc3, ldest, */
-          fuType, fuOpType, rfWen, fpWen, /* isXSTrap, noSpecExec, blockBackward, flushPipe, */
-          /* isRVF, imm, commitType */)
+    val signals =
+      Seq(src1Type, src2Type, src3Type, fuType, fuOpType, rfWen, fpWen, 
+          isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF)
     signals zip decoder map { case(s, d) => s := d }
+    commitType := DontCare
     this
   }
 }
