@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
+import chisel3.experimental.chiselName
 
 import scala.math.min
 
@@ -15,6 +16,7 @@ trait MicroBTBPatameter{
     val extended_stat = false
 }
 
+@chiselName
 class MicroBTB extends BasePredictor
     with MicroBTBPatameter
 {
@@ -98,6 +100,7 @@ class MicroBTB extends BasePredictor
         val pred = UInt(2.W)
     }
 
+    @chiselName
     class UBTBMetaBank(nWays: Int) extends XSModule {
         val io = IO(new Bundle {
             val wen = Input(Bool())
@@ -131,6 +134,7 @@ class MicroBTB extends BasePredictor
         }
     }
 
+    @chiselName
     class UBTBDataBank(nWays: Int) extends XSModule {
         val io = IO(new Bundle {
             val wen = Input(Bool())

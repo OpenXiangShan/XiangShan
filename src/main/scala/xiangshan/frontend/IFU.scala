@@ -6,6 +6,7 @@ import device.RAMHelper
 import xiangshan._
 import utils._
 import xiangshan.cache._
+import chisel3.experimental.chiselName
 
 trait HasIFUConst extends HasXSParameter {
   val resetVector = 0x80000000L//TODO: set reset vec
@@ -93,6 +94,7 @@ class PrevHalfInstr extends XSBundle {
   val newPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
+@chiselName
 class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)

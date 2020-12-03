@@ -5,7 +5,9 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
+import chisel3.experimental.chiselName
 
+@chiselName
 class RAS extends BasePredictor
 {
     class RASResp extends Resp
@@ -50,6 +52,7 @@ class RAS extends BasePredictor
 
     override val io = IO(new RASIO)
 
+    @chiselName
     class RASStack(val rasSize: Int) extends XSModule {
         val io = IO(new Bundle {
             val push_valid = Input(Bool())
@@ -64,7 +67,7 @@ class RAS extends BasePredictor
             val copy_out_mem = Output(Vec(rasSize, rasEntry()))
             val copy_out_sp  = Output(UInt(log2Up(rasSize).W))
         })
-
+        @chiselName
         class Stack(val size: Int) extends XSModule {
             val io = IO(new Bundle {
                 val rIdx = Input(UInt(log2Up(size).W))

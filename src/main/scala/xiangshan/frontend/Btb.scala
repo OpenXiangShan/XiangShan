@@ -7,6 +7,8 @@ import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
 import xiangshan.backend.decode.XSTrap
+import chisel3.experimental.chiselName
+
 
 import scala.math.min
 

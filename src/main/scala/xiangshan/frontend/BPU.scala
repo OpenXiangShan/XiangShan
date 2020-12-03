@@ -6,6 +6,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import xiangshan.backend.JumpOpType
+import chisel3.experimental.chiselName
 
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
@@ -193,6 +194,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter with HasIFUConst {
   }
 }
 
+@chiselName
 class BPUStage1 extends BPUStage {
 
   // ubtb is accessed with inLatch pc in s1, 
@@ -221,7 +223,7 @@ class BPUStage1 extends BPUStage {
     io.out.brInfo.map(_.debug_ubtb_cycle := GTimer())
   }
 }
-
+@chiselName
 class BPUStage2 extends BPUStage {
   // Use latched response from s1
   val btbResp = inLatch.resp.btb
@@ -242,7 +244,7 @@ class BPUStage2 extends BPUStage {
     io.out.brInfo.map(_.debug_btb_cycle := GTimer())
   }
 }
-
+@chiselName
 class BPUStage3 extends BPUStage {
   class S3IO extends XSBundle {
 
@@ -482,7 +484,7 @@ class FakeBPU extends BaseBPU {
   })
   io.branchInfo <> DontCare
 }
-
+@chiselName
 class BPU extends BaseBPU {
 
   //**********************Stage 1****************************//

@@ -6,6 +6,7 @@ import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
 import xiangshan.backend.decode.XSTrap
+import chisel3.experimental.chiselName
 
 trait BimParams extends HasXSParameter {
   val BimBanks = PredictWidth
@@ -14,6 +15,7 @@ trait BimParams extends HasXSParameter {
   val bypassEntries = 4
 }
 
+@chiselName
 class BIM extends BasePredictor with BimParams{
   class BIMResp extends Resp {
     val ctrs = Vec(PredictWidth, UInt(2.W))

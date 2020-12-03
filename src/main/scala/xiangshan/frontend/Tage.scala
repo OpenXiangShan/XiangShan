@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import chisel3.experimental.chiselName
 
 import scala.math.min
 
@@ -77,7 +78,7 @@ class FakeTageTable() extends TageModule {
   io.resp := DontCare
 
 }
-
+@chiselName
 class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int) extends TageModule with HasIFUConst {
   val io = IO(new Bundle() {
     val req = Input(Valid(new TageReq))
@@ -401,7 +402,7 @@ class FakeTage extends BaseTage {
   io.meta <> DontCare
 }
 
-
+@chiselName
 class Tage extends BaseTage {
 
   val tables = TableInfo.map {
