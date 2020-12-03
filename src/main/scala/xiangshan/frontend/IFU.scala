@@ -36,6 +36,7 @@ trait HasIFUConst extends HasXSParameter {
   def mask(pc: UInt, inLoop: Bool = false.B): UInt = Reverse(Cat(maskFirstHalf(pc), maskLastHalf(pc, inLoop)))
   def snpc(pc: UInt, inLoop: Bool = false.B): UInt = pc + (PopCount(mask(pc, inLoop)) << 1)
 
+  val enableGhistRepair = false
   val IFUDebug = true
 }
 
@@ -235,7 +236,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_predTakenRedirect    = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
   val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(snpc(if3_pc, inLoop))
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
-  val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo
+  val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
 
   if3_redirect := if3_fire && (
                     // prevHalf is consumed but the next packet is not where it meant to be
@@ -352,7 +353,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.pc+2.U)
   val if4_predTakenRedirect = !hasPrevHalfInstrReq && if4_bp.taken && if4_nextValidPCNotEquals(if4_bp.target)
   val if4_predNotTakenRedirect = !hasPrevHalfInstrReq && !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
-  val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo
+  val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo && enableGhistRepair.B
 
   if4_redirect := if4_fire && (
                     // when if4 has a lastHalfRVI, but the next fetch packet is not snpc
