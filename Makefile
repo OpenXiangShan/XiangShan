@@ -139,6 +139,7 @@ endif
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
+VME_SOURCE ?= $(shell pwd)
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
@@ -164,6 +165,23 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 emu: $(EMU)
 	ls build
 	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+
+# extract verilog module from sim_top.v
+# usage: make vme VME_MODULE=Roq
+vme: $(SIM_TOP_V)
+	cd $(VME_HOME) && sbt "run -s $(VME_SOURCE)/build/XSSimTop.v -o $(VME_SOURCE)/build/extracted -m $(VME_MODULE)"
+
+# usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
+phy_evaluate: vme
+	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
+	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build/rpts
+
+# usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
+phy_evaluate_atc: vme
+	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
+	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build/rpts
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
