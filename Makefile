@@ -169,7 +169,7 @@ emu: $(EMU)
 # extract verilog module from sim_top.v
 # usage: make vme VME_MODULE=Roq
 vme: $(SIM_TOP_V)
-	cd $(VME_HOME) && sbt "run -s $(VME_SOURCE)/build/XSSimTop.v -o $(VME_SOURCE)/build/extracted -m $(VME_MODULE)"
+	cd ./scripts/vme && sbt "run -s $(VME_SOURCE)/build/XSSimTop.v -o $(VME_SOURCE)/build/extracted -m $(VME_MODULE)"
 
 # usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
 phy_evaluate: vme
