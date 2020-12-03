@@ -425,14 +425,14 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
   // rollback: write all 
   // when rollback, reset writebacked entry to valid
-  when(io.memRedirect.valid) { // TODO: opt timing
-    for (i <- 0 until RoqSize) {
-      val recRoqIdx = RoqPtr(flagBkup(i), i.U)
-      when (valid(i) && isAfter(recRoqIdx, io.memRedirect.bits.roqIdx)) {
-        writebacked(i) := false.B
-      }
-    }
-  }
+  // when(io.memRedirect.valid) { // TODO: opt timing
+  //   for (i <- 0 until RoqSize) {
+  //     val recRoqIdx = RoqPtr(flagBkup(i), i.U)
+  //     when (valid(i) && isAfter(recRoqIdx, io.memRedirect.bits.roqIdx)) {
+  //       writebacked(i) := false.B
+  //     }
+  //   }
+  // }
 
   // read
   // deqPtrWritebacked

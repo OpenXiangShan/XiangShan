@@ -62,7 +62,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
 
   val allWalkDone = !io.inReplayWalk && io.otherWalkDone
   val canEnqueue = validEntries <= (size - enqnum).U && allWalkDone
-  val canActualEnqueue = canEnqueue && !(io.redirect.valid && !io.redirect.bits.isReplay)
+  val canActualEnqueue = canEnqueue && !(io.redirect.valid /*&& !io.redirect.bits.isReplay*/)
 
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -109,7 +109,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
 
   // redirect: cancel uops currently in the queue
-  val mispredictionValid = io.redirect.valid && io.redirect.bits.isMisPred
+  val mispredictionValid = io.redirect.valid //&& io.redirect.bits.isMisPred
   val exceptionValid = io.redirect.valid && io.redirect.bits.isException
   val flushPipeValid = io.redirect.valid && io.redirect.bits.isFlushPipe
   val roqNeedFlush = Wire(Vec(size, Bool()))
@@ -128,7 +128,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, replayWidth: Int) exten
   }
 
   // replay: from s_dispatched to s_valid
-  val replayValid = io.redirect.valid && io.redirect.bits.isReplay
+  val replayValid = false.B//io.redirect.valid && io.redirect.bits.isReplay
   val needReplay = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
     needReplay(i) := roqNeedFlush(i) && stateEntries(i) === s_dispatched && replayValid

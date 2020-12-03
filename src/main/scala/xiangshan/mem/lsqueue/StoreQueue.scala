@@ -340,13 +340,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
-      when(io.brqRedirect.bits.isReplay){
-        datavalid(i) := false.B
-        writebacked(i) := false.B
-        pending(i) := false.B
-      }.otherwise{
+      // when(io.brqRedirect.bits.isReplay){
+      //   datavalid(i) := false.B
+      //   writebacked(i) := false.B
+      //   pending(i) := false.B
+      // }.otherwise{
         allocated(i) := false.B
-      }
+      // }
     }
   }
   when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {
