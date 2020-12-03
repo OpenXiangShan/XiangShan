@@ -22,8 +22,8 @@ class LoadUnit_S0 extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val dtlbReq = Valid(new TlbReq)
-    val dtlbResp = Flipped(Valid(new TlbResp))
+    val dtlbReq = DecoupledIO(new TlbReq)
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
@@ -40,6 +40,7 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbResp.ready := io.out.ready // TODO: check it: io.out.fire()?
 
   // feedback tlb result to RS
   // Note: can be moved to s1
@@ -71,7 +72,8 @@ class LoadUnit_S0 extends XSModule {
     "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
 
-  io.out.valid := io.dcacheReq.fire() // dcache may not accept load request
+  io.out.valid := io.dcacheReq.fire() && // dcache may not accept load request
+    !io.in.bits.uop.roqIdx.needFlush(io.redirect)
   io.out.bits := DontCare
   io.out.bits.vaddr := s0_vaddr
   io.out.bits.paddr := s0_paddr
@@ -104,7 +106,7 @@ class LoadUnit_S1 extends XSModule {
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.in.bits.paddr
   val s1_tlb_miss = io.in.bits.tlbMiss
-  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
+  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr) && !io.out.bits.uop.cf.exceptionVec.asUInt.orR
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
@@ -141,7 +143,7 @@ class LoadUnit_S1 extends XSModule {
     io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
   )
 
-  io.out.valid := io.in.valid && !s1_tlb_miss &&  !s1_uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -218,6 +220,17 @@ class LoadUnit_S2 extends XSModule {
 
 }
 
+// class LoadUnit_S3 extends XSModule {
+//   val io = IO(new Bundle() {
+//     val in = Flipped(Decoupled(new LsPipelineBundle))
+//     val out = Decoupled(new LsPipelineBundle)
+//     val redirect = Flipped(ValidIO(new Redirect))
+//   })
+
+//   io.in.ready := true.B
+//   io.out.bits := io.in.bits
+//   io.out.valid := io.in.valid && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
+// }
 
 class LoadUnit extends XSModule {
   val io = IO(new Bundle() {
@@ -234,6 +247,7 @@ class LoadUnit extends XSModule {
   val load_s0 = Module(new LoadUnit_S0)
   val load_s1 = Module(new LoadUnit_S1)
   val load_s2 = Module(new LoadUnit_S2)
+  // val load_s3 = Module(new LoadUnit_S3)
 
   load_s0.io.in <> io.ldin
   load_s0.io.redirect <> io.redirect
@@ -242,7 +256,7 @@ class LoadUnit extends XSModule {
   load_s0.io.dcacheReq <> io.dcache.req
   load_s0.io.tlbFeedback <> io.tlbFeedback
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, load_s1.io.out.fire() || load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect), false.B)
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, false.B)
 
   io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
@@ -250,10 +264,13 @@ class LoadUnit extends XSModule {
   io.sbuffer <> load_s1.io.sbuffer
   io.lsq.forward <> load_s1.io.lsq
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, load_s2.io.out.fire() || load_s1.io.out.bits.tlbMiss, false.B)
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, false.B)
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
+
+  // PipelineConnect(load_s2.io.fp_out, load_s3.io.in, true.B, false.B)
+  // load_s3.io.redirect <> io.redirect
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
@@ -268,7 +285,7 @@ class LoadUnit extends XSModule {
   io.lsq.loadIn.bits := load_s2.io.out.bits
 
   val hitLoadOut = Wire(Valid(new ExuOutput))
-  hitLoadOut.valid := load_s2.io.out.valid && !load_s2.io.out.bits.miss
+  hitLoadOut.valid := load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
   hitLoadOut.bits.uop := load_s2.io.out.bits.uop
   hitLoadOut.bits.data := load_s2.io.out.bits.data
   hitLoadOut.bits.redirectValid := false.B

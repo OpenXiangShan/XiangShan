@@ -348,3 +348,4 @@ mill.rdiB
 
 stale_outputs_checked
 
+*.snapshot
