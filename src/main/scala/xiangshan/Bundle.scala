@@ -100,7 +100,8 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
                        (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
   def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
-  def saveHalfRVI = firstBankHasHalfRVI || lastBankHasHalfRVI
+  def saveHalfRVI = (firstBankHasHalfRVI && (jmpIdx === (bankWidth-1).U || !(takens.orR))) ||
+                    (lastBankHasHalfRVI  &&  jmpIdx === (PredictWidth-1).U)
   // could get PredictWidth-1 when only the first bank is valid
   def jmpIdx = PriorityEncoder(realTakens)
   // only used when taken
@@ -140,9 +141,10 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   def fromUInt(x: UInt) = x.asTypeOf(this)
 }
 
-class Predecode extends XSBundle {
+class Predecode extends XSBundle with HasIFUConst {
   val hasLastHalfRVI = Bool()
   val mask = UInt((FetchWidth*2).W)
+  val endMask = UInt(nBanksInPacket.W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
 

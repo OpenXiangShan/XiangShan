@@ -45,10 +45,12 @@ class PreDecodeInfo extends XSBundle {  // 8 bit
   def notCFI = brType === BrType.notBr
 }
 
-class PreDecodeResp extends XSBundle {
+class PreDecodeResp extends XSBundle with HasIFUConst {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val mask = UInt(PredictWidth.W)
+  // one for the first bank
+  val endMask = UInt(nBanksInPacket.W)
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
@@ -103,8 +105,8 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
 
     insts(i) := inst
     instsRVC(i) := isRVC(inst)
-    instsMask(i) := mask(i) && (if (i == 0) Mux(io.prev.valid, validEnd, validStart) else validStart)
-    instsEndMask(i) := mask(i) && validEnd
+    instsMask(i) := (if (i == 0) Mux(io.prev.valid, validEnd, validStart) else validStart)
+    instsEndMask(i) := validEnd
     instsPC(i) := pc
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -117,12 +119,15 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     io.out.pc(i) := instsPC(i)
     
   }
-  io.out.mask := instsMask.asUInt
+  io.out.mask := instsMask.asUInt & mask
+  io.out.endMask := Cat(instsEndMask(PredictWidth-1) & mask(PredictWidth-1),
+                        instsEndMask(bankWidth-1)    & mask(bankWidth-1))
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,
       p"instr ${Hexadecimal(io.out.instrs(i))}, " +
       p"mask ${Binary(instsMask(i))}, " +
+      p"endMask ${Binary(instsEndMask(i))}, " +
       p"pc ${Hexadecimal(io.out.pc(i))}, " +
       p"isRVC ${Binary(io.out.pd(i).isRVC)}, " +
       p"brType ${Binary(io.out.pd(i).brType)}, " +

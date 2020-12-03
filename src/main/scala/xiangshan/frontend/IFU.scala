@@ -12,13 +12,14 @@ trait HasIFUConst extends HasXSParameter {
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
   val groupBytes = FetchWidth * 4 * 2 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
-  val bankBytes = PredictWidth
-  val nBanks = groupBytes / bankBytes
-  val bankWidth = bankBytes / 2
+  val nBanksInPacket = 2
+  val bankBytes = PredictWidth * 2 / nBanksInPacket
+  val nBanksInGroup = groupBytes / bankBytes
+  val bankWidth = PredictWidth / nBanksInPacket
   val bankOffsetBits = log2Ceil(bankBytes)
-  // (0, nBanks-1)
+  // (0, nBanksInGroup-1)
   def bankInGroup(pc: UInt) = pc(groupOffsetBits-1,bankOffsetBits)
-  def isInLastBank(pc: UInt) = bankInGroup(pc) === (nBanks-1).U
+  def isInLastBank(pc: UInt) = bankInGroup(pc) === (nBanksInGroup-1).U
   // (0, bankBytes/2-1)
   def offsetInBank(pc: UInt) = pc(bankOffsetBits-1,1)
   def bankAligned(pc: UInt)  = align(pc, bankBytes)
@@ -31,7 +32,7 @@ trait HasIFUConst extends HasXSParameter {
   // we may make predictions on more instructions than we could get from loop buffer
   // and this will be handled in if4
   def maskLastHalf(pc: UInt, inLoop: Bool = false.B): UInt = Mux(isInLastBank(pc) && !inLoop, 0.U(bankWidth.W), ~0.U(bankWidth.W))
-  def mask(pc: UInt, inLoop: Bool = false.B): UInt = Cat(maskFirstHalf(pc), maskLastHalf(pc, inLoop))
+  def mask(pc: UInt, inLoop: Bool = false.B): UInt = Reverse(Cat(maskFirstHalf(pc), maskLastHalf(pc, inLoop)))
   def snpc(pc: UInt, inLoop: Bool = false.B): UInt = pc + (PopCount(mask(pc, inLoop)) << 1)
 
   val IFUDebug = true
@@ -348,7 +349,7 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.pc+2.U)
   val if4_predTakenRedirect = !hasPrevHalfInstrReq && if4_bp.taken && if4_nextValidPCNotEquals(if4_bp.target)
-  val if4_predNotTakenRedirect = !hasPrevHalfInstrReq && if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
+  val if4_predNotTakenRedirect = !hasPrevHalfInstrReq && !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
   val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo
 
   if4_redirect := if4_fire && (
@@ -447,6 +448,7 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.in.histPtr := ptr
   bpu.io.in.inMask := mask(if1_npc)
   bpu.io.predecode.mask := if4_pd.mask
+  bpu.io.predecode.endMask := if4_pd.endMask
   bpu.io.predecode.pd := if4_pd.pd
   bpu.io.predecode.hasLastHalfRVI := if4_pc =/= if4_pd.pc(0)
   bpu.io.realMask := if4_mask
@@ -534,6 +536,7 @@ class IFU extends XSModule with HasIFUConst
 
     XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
     XSDebug("[IF3][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if3_bp.taken, if3_bp.jmpIdx, if3_bp.hasNotTakenBrs, if3_bp.target, if3_bp.saveHalfRVI)
+    XSDebug("[IF3][redirect]: v=%d, prevMet=%d, prevNMet=%d, predT=%d, predNT=%d, ghInfo=%d\n", if3_redirect, if3_prevHalfMetRedirect, if3_prevHalfNotMetRedirect, if3_predTakenRedirect, if3_predNotTakenRedirect, if3_ghInfoNotIdenticalRedirect)
     // XSDebug("[IF3][prevHalfInstr] v=%d redirect=%d fetchpc=%x idx=%d tgt=%x taken=%d instr=%x\n\n",
     //   prev_half_valid, prev_half_redirect, prev_half_fetchpc, prev_half_idx, prev_half_tgt, prev_half_taken, prev_half_instr)
     XSDebug("[IF3][    prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
@@ -543,7 +546,9 @@ class IFU extends XSModule with HasIFUConst
     if3_GHInfo.debug
 
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
+    XSDebug("[IF4][snpc]: %x, realMask=%b\n", if4_snpc, if4_mask)
     XSDebug("[IF4][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
+    XSDebug("[IF4][redirect]: v=%d, prevNotMet=%d, predT=%d, predNT=%d, ghInfo=%d\n", if4_redirect, if4_prevHalfNextNotMet, if4_predTakenRedirect, if4_predNotTakenRedirect, if4_ghInfoNotIdenticalRedirect)
     XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_instrs(if4_bp.jmpIdx), if4_jal_tgts(if4_bp.jmpIdx))
     XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
       if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr, if4_prevHalfInstr.ipf)
