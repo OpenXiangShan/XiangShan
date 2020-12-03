@@ -85,7 +85,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     else
       LazyModule(new AXI4RAM(
         dramRange,
-        memByte = 128 * 1024 * 1024,
+        memByte = 64 * 1024 * 1024 * 1024,
         useBlackBox = true,
         beatBytes = L3BusWidth / 8
       )).node

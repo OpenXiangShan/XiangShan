@@ -39,8 +39,7 @@ class AXI4RAM
     val offsetBits = log2Up(memByte)
     val offsetMask = (1 << offsetBits) - 1
 
-
-    def index(addr: UInt) = ((addr & offsetMask.U) >> log2Ceil(beatBytes)).asUInt()
+    def index(addr: UInt) = (((addr - 0x80000000L.U) & offsetMask.U) >> log2Ceil(beatBytes)).asUInt()
 
     def inRange(idx: UInt) = idx < (memByte / beatBytes).U
 
