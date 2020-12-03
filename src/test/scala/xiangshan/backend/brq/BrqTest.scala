@@ -93,9 +93,9 @@ class BrqTest extends AnyFlatSpec
           c.clock.step(1)
         }
       }
-      c.io.bcommit.poke((misPred+1).U)
+      // c.io.bcommit.poke((misPred+1).U)
       c.clock.step(1)
-      c.io.bcommit.poke(0.U)
+      // c.io.bcommit.poke(0.U)
       while (deqTags.size != misPred+1) {
         checkCommit
         checkDeq

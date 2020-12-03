@@ -92,7 +92,7 @@ class CtrlBlock extends XSModule {
 
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.memRedirect <> io.fromLsBlock.replay
-  brq.io.bcommit <> roq.io.bcommit
+  // brq.io.bcommit <> roq.io.bcommit
   brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
