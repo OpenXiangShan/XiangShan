@@ -10,8 +10,8 @@ import chisel3.experimental.chiselName
 
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = false
-  val EnableCFICommitLog = true
-  val EnbaleCFIPredLog = true
+  val EnableCFICommitLog = false
+  val EnbaleCFIPredLog = false
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
@@ -282,7 +282,7 @@ class BPUStage3 extends BPUStage {
   val retIdx  = PriorityEncoder(rets)
   
   val brPred = (if(EnableBPD) tageTakens else bimTakens).asUInt
-  val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 1.U(1.W)))).asUInt
+  val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 0.U(1.W)))).asUInt
   val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.taken
   val prevHalfTakenMask = prevHalfTaken.asUInt
   val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
@@ -291,23 +291,9 @@ class BPUStage3 extends BPUStage {
   // predict taken only if btb has a target, jal targets will be provided by IFU
   takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))
 
-  // we should provide the prediction for the first half RVI of the end of a fetch packet
-  // branch taken information would be lost in the prediction of the next packet,
-  // so we preserve this information here
-  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B) {
-    takens(bankWidth-1) := brPred(bankWidth-1) && !loopRes(bankWidth-1)
-  }
-  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B) {
-    takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
-  }
 
   targets := inLatch.resp.btb.targets
 
-  // targets would be lost as well, since it is from btb
-  // unless it is a ret, which target is from ras
-  when (prevHalfTaken && !rets(0)) {
-    targets(0) := s3IO.prevHalf.target
-  }
   brMask  := WireInit(brs.asTypeOf(Vec(PredictWidth, Bool())))
   jalMask := WireInit(jals.asTypeOf(Vec(PredictWidth, Bool())))
 
@@ -343,6 +329,23 @@ class BPUStage3 extends BPUStage {
     when(ras.io.is_ret && ras.io.out.valid){
       targets(retIdx) :=  ras.io.out.bits.target
     }
+  }
+
+
+  // we should provide the prediction for the first half RVI of the end of a fetch packet
+  // branch taken information would be lost in the prediction of the next packet,
+  // so we preserve this information here
+  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B) {
+    takens(bankWidth-1) := brPred(bankWidth-1) && !loopRes(bankWidth-1)
+  }
+  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B) {
+    takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
+  }
+
+  // targets would be lost as well, since it is from btb
+  // unless it is a ret, which target is from ras
+  when (prevHalfTaken && !rets(0)) {
+    targets(0) := s3IO.prevHalf.target
   }
 
   // Wrap tage resp and tage meta in
