@@ -35,9 +35,9 @@ class RenameTable(float: Boolean) extends XSModule {
 
   for((r, i) <- io.readPorts.zipWithIndex){
     r.rdata := spec_table(r.addr)
-    for(w <- io.specWritePorts.take(i/{if(float) 4 else 3})){ // bypass
-      when(w.wen && (w.addr === r.addr)){ r.rdata := w.wdata }
-    }
+    // for(w <- io.specWritePorts.take(i/{if(float) 4 else 3})){ // bypass
+    //   when(w.wen && (w.addr === r.addr)){ r.rdata := w.wdata }
+    // }
   }
 
   for(w <- io.archWritePorts){

@@ -193,9 +193,17 @@ class MemBlock
     storeUnits(i).io.stin         <> reservationStations(exuParameters.LduCnt + i).io.deq
     // passdown to lsq
     storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
-    io.toCtrlBlock.stOut(i).valid := lsq.io.stout(i).valid
-    io.toCtrlBlock.stOut(i).bits  := lsq.io.stout(i).bits
-    lsq.io.stout(i).ready         := true.B
+    io.toCtrlBlock.stOut(i).valid := storeUnits(i).io.stout.valid
+    io.toCtrlBlock.stOut(i).bits  := storeUnits(i).io.stout.bits
+	  storeUnits(i).io.stout.ready := true.B
+  }
+
+  // mmio store writeback will use store writeback port 0
+  lsq.io.mmioStout.ready := false.B
+  when(lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
+    io.toCtrlBlock.stOut(0).valid := true.B
+    lsq.io.mmioStout.ready := true.B
+    io.toCtrlBlock.stOut(0).bits  := lsq.io.mmioStout.bits
   }
 
   // Lsq
