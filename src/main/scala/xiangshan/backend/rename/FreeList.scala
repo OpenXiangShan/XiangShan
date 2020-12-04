@@ -70,7 +70,10 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   tailPtr := tailPtrNext
 
   // allocate new pregs to rename instructions
-  val freeRegs = distanceBetween(headPtr, tailPtr)
+
+  // number of free regs in freelist
+  val freeRegs = Wire(UInt())
+  // use RegNext for better timing
   val hasEnoughRegs = RegNext(freeRegs >= RenameWidth.U, true.B)
   XSDebug(p"free regs: $freeRegs\n")
 
@@ -91,6 +94,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
     XSDebug(p"req:${io.allocReqs(i)} canAlloc:$hasEnoughRegs pdest:${io.pdests(i)}\n")
   }
   val headPtrNext = Mux(hasEnoughRegs, newHeadPtrs.last, headPtr)
+  freeRegs := distanceBetween(tailPtr, headPtrNext)
 
   headPtr := Mux(io.redirect.valid, // mispredict or exception happen
     Mux(io.redirect.bits.isException || io.redirect.bits.isFlushPipe, // TODO: need check by JiaWei
@@ -107,6 +111,13 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
   XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
 
-
+  val enableFreelistCheck = false
+  if(env.EnableDebug && enableFreelistCheck){
+    for( i <- 0 until FL_SIZE){
+      for(j <- i+1 until FL_SIZE){
+      assert(freeList(i) != freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
+      }
+    }
+  }
 
 }
