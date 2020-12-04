@@ -78,19 +78,38 @@ class DecodeUnitDiffTest
         CtrlFlowGenerator.genCtrlFlow(c.io.in)
         c.clock.step(1)
 
-        // ctrl signals
-        c.io.out_dut.ctrl.expect(c.io.out_ref.ctrl.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
-        // branch tag: ignore
-        // ctrl flow: ignore brUpdate
-        c.io.out_dut.cf.instr.expect(c.io.out_ref.cf.instr.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
-        c.io.out_dut.cf.pc.expect(c.io.out_ref.cf.pc.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // 1. Ctrl Flow
+        // do not care about brUpdate and crossPageIPFFix and instr
+        c.io.out_dut.cf.pc.expect(c.io.out_ref.cf.pc.peek())
         c.io.out_dut.cf.exceptionVec.indices.foreach(i => {
           c.io.out_dut.cf.exceptionVec(i).expect(c.io.out_ref.cf.exceptionVec(i).peek())
         })
         c.io.out_dut.cf.intrVec.indices.foreach(i => {
           c.io.out_dut.cf.intrVec(i).expect(c.io.out_ref.cf.intrVec(i).peek())
         })
-        c.io.out_dut.cf.crossPageIPFFix.expect(c.io.out_ref.cf.crossPageIPFFix.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+
+        // 2. Ctrl Signals
+        // ignore isRVF and ldest and commitType
+        c.io.out_dut.ctrl.src1Type.expect(c.io.out_ref.ctrl.src1Type.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.src2Type.expect(c.io.out_ref.ctrl.src2Type.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.src3Type.expect(c.io.out_ref.ctrl.src3Type.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.lsrc1.expect(c.io.out_ref.ctrl.lsrc1.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.lsrc2.expect(c.io.out_ref.ctrl.lsrc2.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.lsrc3.expect(c.io.out_ref.ctrl.lsrc3.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.ldest.expect(c.io.out_ref.ctrl.ldest.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.fuType.expect(c.io.out_ref.ctrl.fuType.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.fuOpType.expect(c.io.out_ref.ctrl.fuOpType.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.rfWen.expect(c.io.out_ref.ctrl.rfWen.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.fpWen.expect(c.io.out_ref.ctrl.fpWen.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.isXSTrap.expect(c.io.out_ref.ctrl.isXSTrap.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.noSpecExec.expect(c.io.out_ref.ctrl.noSpecExec.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.blockBackward.expect(c.io.out_ref.ctrl.blockBackward.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        c.io.out_dut.ctrl.flushPipe.expect(c.io.out_ref.ctrl.flushPipe.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.isRVF.expect(c.io.out_ref.ctrl.isRVF.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.imm.expect(c.io.out_ref.ctrl.imm.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+        // c.io.out_dut.ctrl.commitType.expect(c.io.out_ref.ctrl.commitType.peek(), s"Bad Instr: ${CtrlFlowGenerator.inst.toHexString}")
+
+        // 3. Branch Tag: ignore
       }
     }
   }

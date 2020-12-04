@@ -164,4 +164,16 @@ package object backend {
 
     def apply() = UInt(2.W)
   }
+
+  object SelImm {
+    def IMM_X  = BitPat("b???")
+    def IMM_S  = "b000".U
+    def IMM_SB = "b001".U
+    def IMM_U  = "b010".U
+    def IMM_UJ = "b011".U
+    def IMM_I  = "b100".U
+    def IMM_Z  = "b101".U
+
+    def apply() = UInt(3.W)
+  }
 }
