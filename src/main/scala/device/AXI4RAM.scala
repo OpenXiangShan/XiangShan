@@ -37,9 +37,11 @@ class AXI4RAM
     val split = beatBytes / 8
     val bankByte = memByte / split
     val offsetBits = log2Up(memByte)
-    val offsetMask = (1 << offsetBits) - 1
 
-    def index(addr: UInt) = (((addr - 0x80000000L.U) & offsetMask.U) >> log2Ceil(beatBytes)).asUInt()
+    require(address.length >= 1)
+    val baseAddress = address(0).base
+
+    def index(addr: UInt) = ((addr - baseAddress.U)(offsetBits - 1, 0) >> log2Ceil(beatBytes)).asUInt()
 
     def inRange(idx: UInt) = idx < (memByte / beatBytes).U
 
@@ -52,7 +54,7 @@ class AXI4RAM
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
         mem.io.clk   := clock
-        mem.io.en    := !reset.asBool()
+        mem.io.en    := !reset.asBool() && (state === s_rdata)
         mem.io.rIdx  := (rIdx << log2Up(split)) + i.U
         mem.io.wIdx  := (wIdx << log2Up(split)) + i.U
         mem.io.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
