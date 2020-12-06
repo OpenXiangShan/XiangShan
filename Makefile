@@ -175,13 +175,13 @@ vme: $(SIM_TOP_V)
 phy_evaluate: vme
 	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
 	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build/rpts
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
 
 # usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
 phy_evaluate_atc: vme
 	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
 	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
-	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build/rpts
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
