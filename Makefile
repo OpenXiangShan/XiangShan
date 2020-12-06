@@ -140,6 +140,7 @@ endif
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
 VME_SOURCE ?= $(shell pwd)
+VME_MODULE ?= 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
@@ -169,7 +170,7 @@ emu: $(EMU)
 # extract verilog module from sim_top.v
 # usage: make vme VME_MODULE=Roq
 vme: $(SIM_TOP_V)
-	cd ./scripts/vme && sbt "run -s $(VME_SOURCE)/build/XSSimTop.v -o $(VME_SOURCE)/build/extracted -m $(VME_MODULE)"
+	mill XiangShan.runMain utils.ExtractVerilogModules -m $(VME_MODULE)
 
 # usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
 phy_evaluate: vme
