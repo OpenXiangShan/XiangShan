@@ -29,7 +29,7 @@ class LoadUnit_S0 extends XSModule {
   })
 
   val s0_uop = io.in.bits.uop
-  val s0_vaddr = io.in.bits.src1 + s0_uop.ctrl.imm
+  val s0_vaddr = io.in.bits.src1 + io.in.bits.src2
   val s0_paddr = io.dtlbResp.bits.paddr
   val s0_tlb_miss = io.dtlbResp.bits.miss
   val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
