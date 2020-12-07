@@ -51,7 +51,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val dataModule = Module(new LSQueueData(LoadQueueSize, LoadPipelineWidth))
   dataModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
-  val valid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
+  val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
   val commited = Reg(Vec(LoadQueueSize, Bool())) // inst has been writebacked to CDB
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
@@ -87,7 +87,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     when(io.enq.req(i).valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
-      valid(index) := false.B
+      datavalid(index) := false.B
       writebacked(index) := false.B
       commited(index) := false.B
       miss(index) := false.B
@@ -138,7 +138,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
           )
         }
         val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
-        valid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
+        datavalid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         allocated(loadWbIndex) := !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
 
@@ -237,7 +237,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     dataModule.io.refill.wen(i) := false.B
     when(allocated(i) && listening(i) && blockMatch && io.dcache.resp.fire()) {
       dataModule.io.refill.wen(i) := true.B
-      valid(i) := true.B
+      datavalid(i) := true.B
       listening(i) := false.B
     }
   })
@@ -245,7 +245,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   // writeback up to 2 missed load insts to CDB
   // just randomly pick 2 missed load (data refilled), write them back to cdb
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && valid(i) && !writebacked(i)
+    allocated(i) && datavalid(i) && !writebacked(i)
   })).asUInt() // use uint instead vec to reduce verilog lines
   val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelV= Wire(Vec(StorePipelineWidth, Bool()))
@@ -387,7 +387,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
         val addrMatch = allocated(j) &&
           io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === dataModule.io.rdata(j).paddr(PAddrBits - 1, 3)
-        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (valid(j) || listening(j) || miss(j))
+        val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (datavalid(j) || listening(j) || miss(j))
         // TODO: update refilled data
         val violationVec = (0 until 8).map(k => dataModule.io.rdata(j).mask(k) && io.storeIn(i).bits.mask(k))
         Cat(violationVec).orR() && entryNeedCheck
@@ -500,7 +500,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
-    valid(deqPtr) := true.B
+    datavalid(deqPtr) := true.B
     dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
     dataModule.io.uncache.wen := true.B
     // TODO: write back exception info
@@ -530,7 +530,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
       when(io.brqRedirect.bits.isReplay){
-        valid(i) := false.B
+        datavalid(i) := false.B
         writebacked(i) := false.B
         listening(i) := false.B
         miss(i) := false.B
@@ -564,7 +564,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     if (i % 4 == 0) XSDebug("")
     XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, dataModule.io.rdata(i).paddr)
     PrintFlag(allocated(i), "a")
-    PrintFlag(allocated(i) && valid(i), "v")
+    PrintFlag(allocated(i) && datavalid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")
     PrintFlag(allocated(i) && commited(i), "c")
     PrintFlag(allocated(i) && miss(i), "m")
