@@ -51,21 +51,21 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
-  BrqSize: Int = 12,
-  IssQueSize: Int = 8,
-  NRPhyRegs: Int = 128,
+  BrqSize: Int = 32,
+  IssQueSize: Int = 12,
+  NRPhyRegs: Int = 160,
   NRIntReadPorts: Int = 14,
   NRIntWritePorts: Int = 8,
   NRFpReadPorts: Int = 14,
   NRFpWritePorts: Int = 8,
-  LoadQueueSize: Int = 12,
-  StoreQueueSize: Int = 10,
-  RoqSize: Int = 32,
+  LoadQueueSize: Int = 64,
+  StoreQueueSize: Int = 48,
+  RoqSize: Int = 192,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
-    IntDqSize = 24,
-    FpDqSize = 16,
-    LsDqSize = 16,
+    IntDqSize = 128,
+    FpDqSize = 128,
+    LsDqSize = 96,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4,
@@ -259,40 +259,11 @@ object AddressSpace extends HasXSParameter {
 
 class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
 
-  // inner nodes
+  // outer facing nodes
   val dcache = LazyModule(new DCache())
   val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
-
-  // out facing nodes
-  val mem = TLIdentityNode()
-  val mmio = uncache.clientNode
-
-  // L1 to L2 network
-  // -------------------------------------------------
-  private val l2_xbar = TLXbar()
-
-  private val l2 = LazyModule(new InclusiveCache(
-    CacheParameters(
-      level = 2,
-      ways = L2NWays,
-      sets = L2NSets,
-      blockBytes = L2BlockSize,
-      beatBytes = L1BusWidth / 8, // beatBytes = l1BusDataWidth / 8
-      cacheName = s"L2"
-    ),
-    InclusiveCacheMicroParameters(
-      writeBytes = 8
-    )
-  ))
-
-  l2_xbar := TLBuffer() := DebugIdentityNode() := dcache.clientNode
-  l2_xbar := TLBuffer() := DebugIdentityNode() := l1pluscache.clientNode
-  l2_xbar := TLBuffer() := DebugIdentityNode() := ptw.node
-  l2.node := TLBuffer() := DebugIdentityNode() := l2_xbar
-
-  mem := l2.node
 
   lazy val module = new XSCoreImp(this)
 }
