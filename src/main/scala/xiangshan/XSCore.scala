@@ -35,7 +35,7 @@ case class XSCoreParameters
   FectchWidth: Int = 8,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
-  EnableRAS: Boolean = true,
+  EnableRAS: Boolean = false,
   EnableLB: Boolean = false,
   EnableLoop: Boolean = false,
   EnableSC: Boolean = false,

@@ -16,7 +16,7 @@ trait BimParams extends HasXSParameter {
 }
 
 @chiselName
-class BIM extends BasePredictor with BimParams{
+class BIM extends BasePredictor with BimParams {
   class BIMResp extends Resp {
     val ctrs = Vec(PredictWidth, UInt(2.W))
   }
@@ -31,6 +31,7 @@ class BIM extends BasePredictor with BimParams{
   }
 
   override val io = IO(new BIMIO)
+  override val debug = true
 
   val bimAddr = new TableAddr(log2Up(BimSize), BimBanks)
 
@@ -49,13 +50,11 @@ class BIM extends BasePredictor with BimParams{
   // this bank means cache bank
   val startsAtOddBank = bankInGroup(bankAlignedPC)(0)
 
-  val baseBank = bimAddr.getBank(bankAlignedPC)
   val realMask = Mux(startsAtOddBank,
                       Cat(io.inMask(bankWidth-1,0), io.inMask(PredictWidth-1, bankWidth)),
                       io.inMask)
 
   
-  // those banks whose indexes are less than baseBank are in the next row
   val isInNextRow = VecInit((0 until BimBanks).map(i => Mux(startsAtOddBank, (i < bankWidth).B, false.B)))
 
   val baseRow = bimAddr.getBankIdx(bankAlignedPC)
@@ -65,14 +64,12 @@ class BIM extends BasePredictor with BimParams{
   val realRowLatch = VecInit(realRow.map(RegEnable(_, enable=io.pc.valid)))
 
   for (b <- 0 until BimBanks) {
-    bim(b).reset                := reset.asBool
     bim(b).io.r.req.valid       := realMask(b) && io.pc.valid
     bim(b).io.r.req.bits.setIdx := realRow(b)
   }
 
   val bimRead = VecInit(bim.map(_.io.r.resp.data(0)))
 
-  val baseBankLatch = bimAddr.getBank(pcLatch)
   val startsAtOddBankLatch = bankInGroup(pcLatch)(0)
   
   for (b <- 0 until BimBanks) {

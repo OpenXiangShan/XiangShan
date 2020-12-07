@@ -9,8 +9,8 @@ import xiangshan.backend.JumpOpType
 import chisel3.experimental.chiselName
 
 trait HasBPUParameter extends HasXSParameter {
-  val BPUDebug = false
-  val EnableCFICommitLog = false
+  val BPUDebug = true
+  val EnableCFICommitLog = true
   val EnbaleCFIPredLog = false
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
@@ -322,12 +322,15 @@ class BPUStage3 extends BPUStage {
     takens := VecInit((0 until PredictWidth).map(i => {
       ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
           jals(i) ||
-          (!ras.io.out.bits.specEmpty && rets(i)) ||
-          (ras.io.out.bits.specEmpty && btbHits(i))
+          (ras.io.out.valid && rets(i)) ||
+          (!ras.io.out.valid && rets(i) && btbHits(i))
       }
     ))
-    when(ras.io.is_ret && ras.io.out.valid){
-      targets(retIdx) :=  ras.io.out.bits.target
+
+    for (i <- 0 until PredictWidth) {
+      when(rets(i) && ras.io.out.valid){
+        targets(i) := ras.io.out.bits.target
+      }
     }
   }
 
@@ -335,10 +338,10 @@ class BPUStage3 extends BPUStage {
   // we should provide the prediction for the first half RVI of the end of a fetch packet
   // branch taken information would be lost in the prediction of the next packet,
   // so we preserve this information here
-  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B) {
+  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B && btbHits(bankWidth-1)) {
     takens(bankWidth-1) := brPred(bankWidth-1) && !loopRes(bankWidth-1)
   }
-  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B) {
+  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B && btbHits(PredictWidth-1)) {
     takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
   }
 

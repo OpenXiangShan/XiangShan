@@ -13,7 +13,6 @@ class RAS extends BasePredictor
     class RASResp extends Resp
     {
         val target =UInt(VAddrBits.W)
-        val specEmpty = Bool()
     }
 
     class RASBranchInfo extends Meta
@@ -170,9 +169,8 @@ class RAS extends BasePredictor
     commit_pop  := !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
 
 
-    io.out.valid := !spec_is_empty && io.is_ret
+    io.out.valid := !spec_is_empty
     io.out.bits.target := spec_top_addr
-    io.out.bits.specEmpty := spec_is_empty
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 

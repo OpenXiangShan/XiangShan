@@ -101,7 +101,6 @@ class BTB extends BasePredictor with BTBParams{
 
   val realMaskLatch = RegEnable(realMask, io.pc.valid)
 
-  // those banks whose indexes are less than baseBank are in the next row
   val isInNextRow = VecInit((0 until BtbBanks).map(i => Mux(startsAtOddBank, (i < bankWidth).B, false.B)))
 
   val baseRow = btbAddr.getBankIdx(bankAlignedPC)
@@ -114,16 +113,13 @@ class BTB extends BasePredictor with BTBParams{
 
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
-      meta(w)(b).reset                := reset.asBool
       meta(w)(b).io.r.req.valid       := realMask(b) && io.pc.valid
       meta(w)(b).io.r.req.bits.setIdx := realRow(b)
-      data(w)(b).reset                := reset.asBool
       data(w)(b).io.r.req.valid       := realMask(b) && io.pc.valid
       data(w)(b).io.r.req.bits.setIdx := realRow(b)
     }
   }
   for (b <- 0 to 1) {
-    edata(b).reset                := reset.asBool
     edata(b).io.r.req.valid       := io.pc.valid
     val row = if (b == 0) { Mux(startsAtOddBank, realRow(bankWidth), realRow(0)) }
               else { Mux(startsAtOddBank, realRow(0), realRow(bankWidth))}
@@ -179,8 +175,6 @@ class BTB extends BasePredictor with BTBParams{
     b => Mux(bankHits(b), bankHitWays(b), allocWays(b))
   ))
 
-  // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-  val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch +& b.U)(log2Up(BtbBanks)-1,0)))
 
 
   for (b <- 0 until BtbBanks) {
@@ -225,7 +219,7 @@ class BTB extends BasePredictor with BTBParams{
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
   val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && updateType === BTBtype.J
-  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered || !u.isMisPred && u.pd.isBr)
+  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered)
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
@@ -266,6 +260,9 @@ class BTB extends BasePredictor with BTBParams{
         }
       }
     }
+    // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
+    val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (baseBankLatch +& b.U)(log2Up(BtbBanks)-1,0)))
+
     for (i <- 0 until BtbBanks) {
       val idx = bankIdxInOrder(i)
       XSDebug(validLatch && bankHits(bankIdxInOrder(i)), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
