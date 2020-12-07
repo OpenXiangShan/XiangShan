@@ -166,6 +166,7 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
     })
 
     // parallel fwd logic
+    val paddrMatch = Wire(Vec(size, Bool()))
     val matchResultVec = Wire(Vec(size * 2, new FwdEntry))
 
     def parallelFwd(xs: Seq[Data]): Data = {
@@ -182,16 +183,21 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
     }
 
     for (j <- 0 until size) {
-      val needCheck = io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+      paddrMatch(j) := io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+    }
+
+    for (j <- 0 until size) {
+      val needCheck0 = RegNext(paddrMatch(j) && io.needForward(i)(0)(j))
+      val needCheck1 = RegNext(paddrMatch(j) && io.needForward(i)(1)(j))
       (0 until XLEN / 8).foreach(k => {
-        matchResultVec(j).mask(k) := io.needForward(i)(0)(j) && needCheck && data(j).mask(k)
+        matchResultVec(j).mask(k) := needCheck0 && data(j).mask(k)
         matchResultVec(j).data(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
-        matchResultVec(size + j).mask(k) := io.needForward(i)(1)(j) && needCheck && data(j).mask(k)
+        matchResultVec(size + j).mask(k) := needCheck1 && data(j).mask(k)
         matchResultVec(size + j).data(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
       })
     }
 
-    val parallelFwdResult = RegNext(parallelFwd(matchResultVec).asTypeOf(new FwdEntry))
+    val parallelFwdResult = parallelFwd(matchResultVec).asTypeOf(new FwdEntry)
 
     io.forward(i).forwardMask := parallelFwdResult.mask
     io.forward(i).forwardData := parallelFwdResult.data
