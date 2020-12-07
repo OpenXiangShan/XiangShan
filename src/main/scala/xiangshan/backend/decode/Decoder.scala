@@ -86,12 +86,6 @@ class Decoder extends XSModule with HasInstrType {
   // make non-register addressing to zero, since isu.sb.isBusy(0) === false.B
   val rfWen = isrfWen(instrType) && fuType=/=FuType.fence // NOTE: fence instr use instrU but do not wb
   val fpWen = isfpWen(instrType)
-  io.out.ctrl.lsrc1 := Mux(src1Type === SrcType.pc, 0.U, rfSrc1)
-  io.out.ctrl.lsrc2 := Mux(src2Type === SrcType.imm, 0.U, rfSrc2)
-  io.out.ctrl.lsrc3 := rfSrc3
-  io.out.ctrl.rfWen := rfWen
-  io.out.ctrl.fpWen := fpWen
-  io.out.ctrl.ldest := Mux(fpWen || rfWen, rfDest, 0.U)
 
   val imm = LookupTree(instrType, List(
     InstrI  -> SignExt(instr(31, 20), XLEN),
@@ -122,6 +116,12 @@ class Decoder extends XSModule with HasInstrType {
     RVCInstr.ImmADD4SPN-> ZeroExt(Cat(instr(10,7), instr(12,11), instr(5), instr(6), 0.U(2.W)), XLEN)
   ))
   io.out.ctrl.imm := Mux(isRVC, immrvc, imm)
+  io.out.ctrl.lsrc1 := Mux(src1Type === SrcType.pc, 0.U, rfSrc1)
+  io.out.ctrl.lsrc2 := Mux(src2Type === SrcType.imm, imm, rfSrc2)
+  io.out.ctrl.lsrc3 := rfSrc3
+  io.out.ctrl.rfWen := rfWen
+  io.out.ctrl.fpWen := fpWen
+  io.out.ctrl.ldest := Mux(fpWen || rfWen, rfDest, 0.U)
 
  when (fuType === FuType.jmp) {
    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
