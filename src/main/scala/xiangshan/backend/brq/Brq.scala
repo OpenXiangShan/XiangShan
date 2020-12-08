@@ -53,7 +53,7 @@ class BrqIO extends XSBundle{
   val redirect = Output(Valid(new Redirect))
   val outOfOrderBrInfo = ValidIO(new BranchUpdateInfo)
   // commit cnt of branch instr
-  // val bcommit = Input(UInt(BrTagWidth.W))
+  val bcommit = Input(UInt(BrTagWidth.W))
   // in order dequeue to train bpd
   val inOrderBrInfo = ValidIO(new BranchUpdateInfo)
 }
@@ -86,7 +86,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   // dequeue
   val headIdx = headPtr.value
 
-  // val skipMask = Cat(stateQueue.map(_.isCommit).reverse)
+  val skipMask = Cat(stateQueue.map(_.isCommit).reverse)
 
   /*
       example: headIdx       = 2
@@ -98,16 +98,40 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
                commitIdxLo   =        0
                commitIdx     =  6
    */
-  val deqValid = stateQueue(headIdx).isWb// && brCommitCnt=/=0.U
-  val deqEntry = brQueue(headIdx)
-  val deqIsMisPred = deqEntry.exuOut.redirect.isMisPred
+  val headIdxOH = UIntToOH(headIdx)
+  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
+  for(i <- headIdxMaskHiVec.indices){
+    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
+  }
+  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
+  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
 
-  // brCommitCnt := brCommitCnt + io.bcommit - deqValid
+  val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
+  val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
 
-  // XSDebug(p"brCommitCnt:$brCommitCnt\n")
-  // assert(brCommitCnt+io.bcommit >= deqValid)
-  io.inOrderBrInfo.valid := deqValid
-  io.inOrderBrInfo.bits := deqEntry.exuOut.brUpdate
+  val skipHi = (skipMask | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
+  val useLo = skipHi && findLo
+
+
+  val commitIdx = Mux(stateQueue(commitIdxHi).isWb,
+    commitIdxHi,
+    Mux(useLo && stateQueue(commitIdxLo).isWb,
+      commitIdxLo,
+      headIdx
+    )
+  )
+
+  val deqValid = stateQueue(headIdx).isCommit && brCommitCnt=/=0.U
+  val commitValid = stateQueue(commitIdx).isWb
+  val commitEntry = brQueue(commitIdx)
+  val commitIsMisPred = commitEntry.exuOut.redirect.isMisPred
+
+  brCommitCnt := brCommitCnt + io.bcommit - deqValid
+
+  XSDebug(p"brCommitCnt:$brCommitCnt\n")
+  assert(brCommitCnt+io.bcommit >= deqValid)
+  io.inOrderBrInfo.valid := commitValid
+  io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
   XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
 
 //  XSDebug(
@@ -116,41 +140,41 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 //  XSDebug(
 //    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
 //  )
-  // XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
+  XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
   stateQueue.reverse.map(s =>{
     XSDebug(false, s.isInvalid, "-")
     XSDebug(false, s.isIdle, "i")
     XSDebug(false, s.isWb, "w")
-    // XSDebug(false, s.isCommit, "c")
+    XSDebug(false, s.isCommit, "c")
   })
   XSDebug(false, true.B, "\n")
 
   val headPtrNext = WireInit(headPtr + deqValid)
 
-  // when(deqValid){
-  //   stateQueue(commitIdx) := s_commited
-  // }
+  when(commitValid){
+    stateQueue(commitIdx) := s_commited
+  }
   when(deqValid){
     stateQueue(headIdx) := s_invalid
   }
-  // assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
+  assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
   headPtr := headPtrNext
-  io.redirect.valid := deqValid &&
-    deqIsMisPred// &&
-    // !io.roqRedirect.valid &&
-    // !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
+  io.redirect.valid := commitValid &&
+    commitIsMisPred &&
+    !io.roqRedirect.valid &&
+    !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
-  io.redirect.bits := deqEntry.exuOut.redirect
-  io.out.valid := deqValid
-  io.out.bits := deqEntry.exuOut
-  io.outOfOrderBrInfo.valid := deqValid
-  io.outOfOrderBrInfo.bits := deqEntry.exuOut.brUpdate
+  io.redirect.bits := commitEntry.exuOut.redirect
+  io.out.valid := commitValid
+  io.out.bits := commitEntry.exuOut
+  io.outOfOrderBrInfo.valid := commitValid
+  io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
 
   when (io.redirect.valid) {
-    deqEntry.npc := io.redirect.bits.target
+    commitEntry.npc := io.redirect.bits.target
   }
 
   XSInfo(io.out.valid,
@@ -234,16 +258,16 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   XSInfo(debug_brq_redirect, p"brq redirect, target:${Hexadecimal(io.redirect.bits.target)}\n")
 
   val fire = io.out.fire()
-  val predRight = fire && !deqIsMisPred
-  val predWrong = fire && deqIsMisPred
+  val predRight = fire && !commitIsMisPred
+  val predWrong = fire && commitIsMisPred
   // val isBType = commitEntry.exuOut.brUpdate.btbType===BTBtype.B
-  val isBType = deqEntry.exuOut.brUpdate.pd.isBr
+  val isBType = commitEntry.exuOut.brUpdate.pd.isBr
   // val isJType = commitEntry.exuOut.brUpdate.btbType===BTBtype.J
-  val isJType = deqEntry.exuOut.brUpdate.pd.isJal
+  val isJType = commitEntry.exuOut.brUpdate.pd.isJal
   // val isIType = commitEntry.exuOut.brUpdate.btbType===BTBtype.I
-  val isIType = deqEntry.exuOut.brUpdate.pd.isJalr
+  val isIType = commitEntry.exuOut.brUpdate.pd.isJalr
   // val isRType = commitEntry.exuOut.brUpdate.btbType===BTBtype.R
-  val isRType = deqEntry.exuOut.brUpdate.pd.isRet
+  val isRType = commitEntry.exuOut.brUpdate.pd.isRet
   val mbpInstr = fire
   val mbpRight = predRight
   val mbpWrong = predWrong
