@@ -163,9 +163,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   headPtr := headPtrNext
   io.redirect.valid := commitValid &&
-    commitIsMisPred &&
-    !io.roqRedirect.valid &&
-    !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
+    commitIsMisPred //&&
+    // !io.roqRedirect.valid &&
+    // !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
@@ -220,23 +220,18 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
     brCommitCnt := 0.U
-  }.elsewhen(io.redirect.valid || io.memRedirect.valid){
+  }.elsewhen(io.memRedirect.valid){
     // misprediction or replay
     stateQueue.zipWithIndex.foreach({case(s, i) =>
+      // replay should flush brTag
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      when(io.memRedirect.valid && ptr.needBrFlush(io.memRedirect.bits.brTag)){
-        s := s_idle
-      }
-      when(io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)){
+      val replayMatch = io.memRedirect.bits.isReplay && ptr === io.memRedirect.bits.brTag
+      when(io.memRedirect.valid && (ptr.needBrFlush(io.memRedirect.bits.brTag) || replayMatch)){
         s := s_invalid
       }
     })
-    when(io.redirect.valid || io.memRedirect.valid){
-      when (!io.memRedirect.valid || isAfter(io.memRedirect.bits.brTag, io.redirect.bits.brTag)) {
-        tailPtr := io.redirect.bits.brTag + 1.U
-      }.otherwise {
-        tailPtr := io.memRedirect.bits.brTag + 1.U
-      }
+    when(io.memRedirect.valid){
+      tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.isReplay, 0.U, 1.U)
     }
 
   }
