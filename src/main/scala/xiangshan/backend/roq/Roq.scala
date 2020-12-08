@@ -220,8 +220,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     walkPtrVec(i) := walkPtrExt - i.U
     shouldWalkVec(i) := i.U < walkCounter
   }
-  val walkFinished = walkCounter <= CommitWidth.U && // walk finish in this cycle
-    !io.brqRedirect.valid // no new redirect comes and update walkptr
+  val walkFinished = walkCounter <= CommitWidth.U //&& // walk finish in this cycle
+    //!io.brqRedirect.valid // no new redirect comes and update walkptr
 
   // extra space is used weh roq has no enough space, but mispredict recovery needs such info to walk regmap
   val needExtraSpaceForMPR = WireInit(VecInit(
@@ -346,7 +346,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk
-    walkPtrExt := Mux(state === s_walk && !walkFinished, walkPtrExt - CommitWidth.U, Mux(state === s_extrawalk, walkPtrExt, enqPtrExt - 1.U + dispatchCnt))
+    walkPtrExt := Mux(state === s_walk,
+      walkPtrExt - Mux(walkFinished, walkCounter, CommitWidth.U),
+      Mux(state === s_extrawalk, walkPtrExt, enqPtrExt - 1.U + dispatchCnt))
     // walkTgtExt := io.brqRedirect.bits.roqIdx
     walkCounter := Mux(state === s_walk, 
       distanceBetween(walkPtrExt, io.brqRedirect.bits.roqIdx) - commitCnt, 
