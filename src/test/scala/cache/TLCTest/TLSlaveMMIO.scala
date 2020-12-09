@@ -38,7 +38,7 @@ class TLCSlaveMMIO()(implicit p: Parameters) extends LazyModule
 
     )), // requests are handled in order
     beatBytes  = beatBytes,
-    minLatency = 1,
+    minLatency = 0,
     endSinkId = 8,
   )))
 

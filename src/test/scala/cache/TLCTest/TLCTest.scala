@@ -18,8 +18,9 @@ import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, ListBuffer, Map, Queue, Seq}
+import scala.collection.mutable.{ArrayBuffer, Seq}
 import scala.util.Random
+import scala.collection.mutable.ListBuffer
 
 case class TLCCacheTestParams
 (
@@ -42,6 +43,7 @@ class TLCCacheTestTopIO extends Bundle {
 class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
 
   val masters = Array.fill(2)(LazyModule(new TLCMasterMMIO()))
+  //  val master = LazyModule(new TLCMasterMMIO())
 
   val l2params = p(TLCCacheTestKey)
 
@@ -58,15 +60,20 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
     )
   ))
 
+  val masters_ident = Array.fill(2)(LazyModule(new DebugIdentityNode()))
+  val xbar_ident = LazyModule(new DebugIdentityNode())
+  val slave_ident = LazyModule(new DebugIdentityNode())
+
   val xbar = TLXbar()
 
-  for (master <- masters) {
-    xbar := TLDelayer(0.2) := DebugIdentityNode() := master.node
+  for ((master, ident) <- (masters zip masters_ident)) {
+    xbar := ident.node := master.node
   }
-  l2.node := TLBuffer() := DebugIdentityNode() := xbar
+  l2.node := TLBuffer() := xbar_ident.node := xbar
+  //  l2.node := TLBuffer() := master_ident.node := master.node
 
   val slave = LazyModule(new TLCSlaveMMIO())
-  slave.node := TLDelayer(0.2) := DebugIdentityNode() := l2.node
+  slave.node := slave_ident.node := TLBuffer() := l2.node
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
 
@@ -76,6 +83,8 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
     masters zip io.mastersIO map { case (m, i) =>
       m.module.io <> i
     }
+    //    master.module.io <> io.mastersIO(0)
+    //    io.mastersIO(1) <> DontCare
   }
 }
 
@@ -156,6 +165,13 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.slaveIO.BChannel.initSource().setSourceClock(c.clock)
         c.io.slaveIO.DChannel.initSource().setSourceClock(c.clock)
 
+        val total_clock = 50000
+
+        c.reset.poke(true.B)
+        c.clock.step(1000)
+        c.reset.poke(false.B)
+        c.clock.step(100)
+
         val mastersIO = c.io.mastersIO
         val slaveIO = c.io.slaveIO
 
@@ -168,7 +184,13 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         val slaveAgent = new TLCSlaveAgent(2, 8, slaveState, serialList)
         //must set order here
         fork {
-          while (true) {
+          for (_ <- 0 to total_clock) {
+            val AChannel_valids = ArrayBuffer.fill(2)(false)
+            val CChannel_valids = ArrayBuffer.fill(2)(false)
+            val EChannel_valids = ArrayBuffer.fill(2)(false)
+            val BChannel_readys = ArrayBuffer.fill(2)(true)
+            val DChannel_readys = ArrayBuffer.fill(2)(true)
+
             for (i <- 0 to 1) {
               val mio = mastersIO(i)
               val masterAgent = masterAgentList(i)
@@ -193,27 +215,57 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
                 }
               }
 
-              var AChannel_valid = false
-              var CChannel_valid = false
-              var EChannel_valid = false
-              val BChannel_ready = true
-              val DChannel_ready = true
-
               //E channel
-              val EChannel_ready = peekBoolean(mio.EChannel.ready)
               val tmpE = masterAgent.peekE()
               if (tmpE.isDefined) {
-                EChannel_valid = true
+                EChannel_valids(i) = true
                 mio.EChannel.bits.sink.poke(tmpE.get.sink.U)
-                if (EChannel_valid && EChannel_ready) {
-                  masterAgent.fireE()
-                }
               }
-              mio.EChannel.valid.poke(EChannel_valid.B)
+              mio.EChannel.valid.poke(EChannel_valids(i).B)
               //D channel
-              mio.DChannel.ready.poke(DChannel_ready.B)
+              mio.DChannel.ready.poke(DChannel_readys(i).B)
+              //C channel
+              masterAgent.issueC()
+              val tmpC = masterAgent.peekC()
+              if (tmpC.isDefined) {
+                CChannel_valids(i) = true
+                mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
+                mio.CChannel.bits.param.poke(tmpC.get.param.U)
+                mio.CChannel.bits.size.poke(tmpC.get.size.U)
+                mio.CChannel.bits.source.poke(tmpC.get.source.U)
+                mio.CChannel.bits.address.poke(tmpC.get.address.U)
+                mio.CChannel.bits.data.poke(tmpC.get.data.U)
+              }
+              mio.CChannel.valid.poke(CChannel_valids(i).B)
+              //B channel
+              mio.BChannel.ready.poke(BChannel_readys(i).B)
+              //A channel
+              masterAgent.issueA()
+              val tmpA = masterAgent.peekA()
+              if (tmpA.isDefined) {
+                AChannel_valids(i) = true
+                mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
+                mio.AChannel.bits.param.poke(tmpA.get.param.U)
+                mio.AChannel.bits.size.poke(tmpA.get.size.U)
+                mio.AChannel.bits.source.poke(tmpA.get.source.U)
+                mio.AChannel.bits.address.poke(tmpA.get.address.U)
+                mio.AChannel.bits.mask.poke(tmpA.get.mask.U)
+                mio.AChannel.bits.data.poke(tmpA.get.data.U)
+              }
+              mio.AChannel.valid.poke(AChannel_valids(i).B)
+            }
+
+            for (i <- 0 to 1) {
+              val mio = mastersIO(i)
+              val masterAgent = masterAgentList(i)
+              //E channel
+              val EChannel_ready = peekBoolean(mio.EChannel.ready)
+              if (EChannel_valids(i) && EChannel_ready) {
+                masterAgent.fireE()
+              }
+              //D channel
               val DChannel_valid = peekBoolean(mio.DChannel.valid)
-              if (DChannel_valid && DChannel_ready) { //fire
+              if (DChannel_valid && DChannel_readys(i)) { //fire
                 val dCh = new TLCScalaD()
                 dCh.opcode = peekBigInt(mio.DChannel.bits.opcode)
                 dCh.param = peekBigInt(mio.DChannel.bits.param)
@@ -226,25 +278,12 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               }
               //C channel
               val CChannel_ready = peekBoolean(mio.CChannel.ready)
-              masterAgent.issueC()
-              val tmpC = masterAgent.peekC()
-              if (tmpC.isDefined) {
-                CChannel_valid = true
-                mio.CChannel.bits.opcode.poke(tmpC.get.opcode.U)
-                mio.CChannel.bits.param.poke(tmpC.get.param.U)
-                mio.CChannel.bits.size.poke(tmpC.get.size.U)
-                mio.CChannel.bits.source.poke(tmpC.get.source.U)
-                mio.CChannel.bits.address.poke(tmpC.get.address.U)
-                mio.CChannel.bits.data.poke(tmpC.get.data.U)
-                if (CChannel_valid && CChannel_ready) {
-                  masterAgent.fireC()
-                }
+              if (CChannel_valids(i) && CChannel_ready) {
+                masterAgent.fireC()
               }
-              mio.CChannel.valid.poke(CChannel_valid.B)
               //B channel
-              mio.BChannel.ready.poke(BChannel_ready.B)
               val BChannel_valid = peekBoolean(mio.BChannel.valid)
-              if (BChannel_valid && BChannel_ready) { //fire
+              if (BChannel_valid && BChannel_readys(i)) { //fire
                 val bCh = new TLCScalaB()
                 bCh.opcode = peekBigInt(mio.BChannel.bits.opcode)
                 bCh.param = peekBigInt(mio.BChannel.bits.param)
@@ -258,39 +297,26 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               masterAgent.tickB()
               //A channel
               val AChannel_ready = peekBoolean(mio.AChannel.ready)
-              masterAgent.issueA()
-              val tmpA = masterAgent.peekA()
-              if (tmpA.isDefined) {
-                AChannel_valid = true
-                mio.AChannel.bits.opcode.poke(tmpA.get.opcode.U)
-                mio.AChannel.bits.param.poke(tmpA.get.param.U)
-                mio.AChannel.bits.size.poke(tmpA.get.size.U)
-                mio.AChannel.bits.source.poke(tmpA.get.source.U)
-                mio.AChannel.bits.address.poke(tmpA.get.address.U)
-                mio.AChannel.bits.mask.poke(tmpA.get.mask.U)
-                mio.AChannel.bits.data.poke(tmpA.get.data.U)
-                if (AChannel_valid && AChannel_ready) {
-                  masterAgent.fireA()
-                }
+              if (AChannel_valids(i) && AChannel_ready) {
+                masterAgent.fireA()
               }
-              mio.AChannel.valid.poke(AChannel_valid.B)
               //handle some ID
               masterAgent.freeSource()
             }
+
             c.clock.step()
           }
         }
 
         fork {
           val sio = slaveIO
-          while (true) {
-
+          for (_ <- 0 to total_clock) {
             //            //randomly add when empty
             //            if (slaveAgent.innerProbe.size <= 4) {
-            //              if (Random.nextBoolean()) {
-            //                for (i <- 0 until 8) {
-            //                  val addr = getRandomElement(addr_pool)
-            //                  val targetPerm = sample(probeProbMap)
+            //              if (true) {
+            //                for (i <- 0 until 16) {
+            //                  val addr = getRandomElement(addr_pool,rand)
+            //                  val targetPerm = sample(probeProbMap,rand)
             //                  slaveAgent.addProbe(addr, targetPerm)
             //                }
             //              }
@@ -304,14 +330,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
             //E channel
             sio.EChannel.ready.poke(EChannel_ready.B)
-            val EChannel_valid = peekBoolean(sio.EChannel.valid)
-            if (EChannel_valid && EChannel_ready) {
-              val eCh = new TLCScalaE()
-              eCh.sink = peekBigInt(sio.EChannel.bits.sink)
-              slaveAgent.fireE(eCh)
-            }
             //D channel
-            val DChannel_ready = peekBoolean(sio.DChannel.ready)
             slaveAgent.issueD()
             val tmpD = slaveAgent.peekD()
             if (tmpD.isDefined) {
@@ -323,13 +342,42 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               sio.DChannel.bits.sink.poke(tmpD.get.sink.U)
               sio.DChannel.bits.denied.poke(tmpD.get.denied.B)
               sio.DChannel.bits.data.poke(tmpD.get.data.U)
-              if (DChannel_valid && DChannel_ready) { //fire
-                slaveAgent.fireD()
-              }
             }
             sio.DChannel.valid.poke(DChannel_valid.B)
             //C channel
             sio.CChannel.ready.poke(CChannel_ready.B)
+            //B channel
+            slaveAgent.issueB()
+            val tmpB = slaveAgent.peekB()
+            if (tmpB.isDefined) {
+              BChannel_valid = true
+              sio.BChannel.bits.opcode.poke(tmpB.get.opcode.U)
+              sio.BChannel.bits.param.poke(tmpB.get.param.U)
+              sio.BChannel.bits.size.poke(tmpB.get.size.U)
+              sio.BChannel.bits.source.poke(tmpB.get.source.U)
+              sio.BChannel.bits.address.poke(tmpB.get.address.U)
+              sio.BChannel.bits.mask.poke(tmpB.get.mask.U)
+              sio.BChannel.bits.data.poke(tmpB.get.data.U)
+            }
+            sio.BChannel.valid.poke(BChannel_valid.B)
+            //A channel
+            sio.AChannel.ready.poke(AChannel_ready.B)
+
+
+            //E channel
+            val EChannel_valid = peekBoolean(sio.EChannel.valid)
+            if (EChannel_valid && EChannel_ready) {
+              val eCh = new TLCScalaE()
+              eCh.sink = peekBigInt(sio.EChannel.bits.sink)
+              slaveAgent.fireE(eCh)
+            }
+            //D channel
+            val DChannel_ready = peekBoolean(sio.DChannel.ready)
+            if (DChannel_valid && DChannel_ready) { //fire
+              slaveAgent.fireD()
+            }
+
+            //C channel
             val CChannel_valid = peekBoolean(sio.CChannel.valid)
             if (CChannel_valid && CChannel_ready) { //fire
               val cCh = new TLCScalaC()
@@ -344,24 +392,10 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             slaveAgent.tickC()
             //B channel
             val BChannel_ready = peekBoolean(sio.BChannel.ready)
-            slaveAgent.issueB()
-            val tmpB = slaveAgent.peekB()
-            if (tmpB.isDefined) {
-              BChannel_valid = true
-              sio.BChannel.bits.opcode.poke(tmpB.get.opcode.U)
-              sio.BChannel.bits.param.poke(tmpB.get.param.U)
-              sio.BChannel.bits.size.poke(tmpB.get.size.U)
-              sio.BChannel.bits.source.poke(tmpB.get.source.U)
-              sio.BChannel.bits.address.poke(tmpB.get.address.U)
-              sio.BChannel.bits.mask.poke(tmpB.get.mask.U)
-              sio.BChannel.bits.data.poke(tmpB.get.data.U)
-              if (BChannel_valid && BChannel_ready) {
-                slaveAgent.fireB()
-              }
+            if (BChannel_valid && BChannel_ready) {
+              slaveAgent.fireB()
             }
-            sio.BChannel.valid.poke(BChannel_valid.B)
             //A channel
-            sio.AChannel.ready.poke(AChannel_ready.B)
             val AChannel_valid = peekBoolean(sio.AChannel.valid)
             if (AChannel_valid && AChannel_ready) { //fire
               val aCh = new TLCScalaA()
@@ -378,7 +412,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
             //handle some ID
             slaveAgent.freeSink()
-            
+
             c.clock.step()
           }
         }.join()

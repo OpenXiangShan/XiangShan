@@ -100,6 +100,9 @@ SUITE = cache.L2CacheTest
 unit-test:
 	cd .. && mill XiangShan.test.testOnly -o -s $(SUITE)
 
+tlc-test:
+	cd .. && mill XiangShan.test.testOnly -o -s cache.TLCTest.TLCCacheTest
+
 unit-test-all:
 	cd .. && mill XiangShan.test.test -P$(P)
 
