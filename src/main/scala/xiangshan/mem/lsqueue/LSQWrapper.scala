@@ -28,6 +28,11 @@ class LsqEntry extends XSBundle {
   val fwdData = Vec(8, UInt(8.W))
 }
 
+class FwdEntry extends XSBundle {
+  val mask = Vec(8, Bool())
+  val data = Vec(8, UInt(8.W))
+}
+
 
 class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
@@ -124,6 +129,8 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
   // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
 
   // entry with larger index should have higher priority since it's data is younger
+
+  // FIXME: old fwd logic for assertion, remove when rtl freeze
   (0 until nchannel).map(i => {
 
     val forwardMask1 = WireInit(VecInit(Seq.fill(8)(false.B)))
@@ -152,10 +159,63 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
 
     // merge forward lookup results
     // forward2 is younger than forward1 and should have higher priority
+    val oldFwdResult = Wire(new FwdEntry)
     (0 until XLEN / 8).map(k => {
-      io.forward(i).forwardMask(k) := forwardMask1(k) || forwardMask2(k)
-      io.forward(i).forwardData(k) := Mux(forwardMask2(k), forwardData2(k), forwardData1(k))
+      oldFwdResult.mask(k) := RegNext(forwardMask1(k) || forwardMask2(k))
+      oldFwdResult.data(k) := RegNext(Mux(forwardMask2(k), forwardData2(k), forwardData1(k)))
     })
+
+    // parallel fwd logic
+    val paddrMatch = Wire(Vec(size, Bool()))
+    val matchResultVec = Wire(Vec(size * 2, new FwdEntry))
+
+    def parallelFwd(xs: Seq[Data]): Data = {
+      ParallelOperation(xs, (a: Data, b: Data) => {
+        val l = a.asTypeOf(new FwdEntry)
+        val r = b.asTypeOf(new FwdEntry)
+        val res = Wire(new FwdEntry)
+        (0 until 8).map(p => {
+          res.mask(p) := l.mask(p) || r.mask(p)
+          res.data(p) := Mux(r.mask(p), r.data(p), l.data(p))
+        })
+        res
+      })
+    }
+
+    for (j <- 0 until size) {
+      paddrMatch(j) := io.forward(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+    }
+
+    for (j <- 0 until size) {
+      val needCheck0 = RegNext(paddrMatch(j) && io.needForward(i)(0)(j))
+      val needCheck1 = RegNext(paddrMatch(j) && io.needForward(i)(1)(j))
+      (0 until XLEN / 8).foreach(k => {
+        matchResultVec(j).mask(k) := needCheck0 && data(j).mask(k)
+        matchResultVec(j).data(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+        matchResultVec(size + j).mask(k) := needCheck1 && data(j).mask(k)
+        matchResultVec(size + j).data(k) := data(j).data(8 * (k + 1) - 1, 8 * k)
+      })
+    }
+
+    val parallelFwdResult = parallelFwd(matchResultVec).asTypeOf(new FwdEntry)
+
+    io.forward(i).forwardMask := parallelFwdResult.mask
+    io.forward(i).forwardData := parallelFwdResult.data
+
+    when(
+      oldFwdResult.mask.asUInt =/= parallelFwdResult.mask.asUInt
+    ){
+      printf("%d: mask error: right: %b false %b\n", GTimer(), oldFwdResult.mask.asUInt, parallelFwdResult.mask.asUInt)
+    }
+
+    for (p <- 0 until 8) {
+      when(
+        oldFwdResult.data(p) =/= parallelFwdResult.data(p) && oldFwdResult.mask(p)
+      ){
+        printf("%d: data "+p+" error: right: %x false %x\n", GTimer(), oldFwdResult.data(p), parallelFwdResult.data(p))
+      }
+    }
+
   })
 
   // data read

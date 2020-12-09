@@ -129,19 +129,6 @@ class LoadUnit_S1 extends XSModule {
 
   io.out.bits.forwardMask := io.sbuffer.forwardMask
   io.out.bits.forwardData := io.sbuffer.forwardData
-  // generate XLEN/8 Muxs
-  for (i <- 0 until XLEN / 8) {
-    when(io.lsq.forwardMask(i)) {
-      io.out.bits.forwardMask(i) := true.B
-      io.out.bits.forwardData(i) := io.lsq.forwardData(i)
-    }
-  }
-
-  XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
-    s1_uop.cf.pc,
-    io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
-    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt
-  )
 
   io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
   io.out.bits.paddr := s1_paddr
@@ -161,6 +148,7 @@ class LoadUnit_S2 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
+    val lsq = new LoadForwardQueryIO
   })
 
   val s2_uop = io.in.bits.uop
@@ -173,9 +161,15 @@ class LoadUnit_S2 extends XSModule {
   io.dcacheResp.ready := true.B
   assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
 
-  val forwardMask = io.in.bits.forwardMask
-  val forwardData = io.in.bits.forwardData
+  val forwardMask = io.out.bits.forwardMask
+  val forwardData = io.out.bits.forwardData
   val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U
+
+  XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
+    s2_uop.cf.pc,
+    io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
+    io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
+  )
 
   // data merge
   val rdata = VecInit((0 until XLEN / 8).map(j =>
@@ -213,9 +207,19 @@ class LoadUnit_S2 extends XSModule {
 
   io.in.ready := io.out.ready || !io.in.valid
 
+  // merge forward result
+  io.lsq := DontCare
+  // generate XLEN/8 Muxs
+  for (i <- 0 until XLEN / 8) {
+    when(io.lsq.forwardMask(i)) {
+      io.out.bits.forwardMask(i) := true.B
+      io.out.bits.forwardData(i) := io.lsq.forwardData(i)
+    }
+  }
+
   XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
-    io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
+    io.out.bits.forwardData.asUInt, io.out.bits.forwardMask.asUInt
   )
 
 }
@@ -268,6 +272,9 @@ class LoadUnit extends XSModule {
 
   load_s2.io.redirect <> io.redirect
   load_s2.io.dcacheResp <> io.dcache.resp
+  load_s2.io.lsq := DontCare 
+  load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData 
+  load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask 
 
   // PipelineConnect(load_s2.io.fp_out, load_s3.io.in, true.B, false.B)
   // load_s3.io.redirect <> io.redirect
