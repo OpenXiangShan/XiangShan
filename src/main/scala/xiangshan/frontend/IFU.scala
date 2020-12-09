@@ -66,7 +66,7 @@ class GlobalHistoryInfo() extends XSBundle {
   // }
 
   implicit val name = "IFU"
-  def debug = XSDebug("[GHInfo] sawNTBr=%d, takenOnBr=%d\n", sawNTBr, takenOnBr)
+  def debug(where: String) = XSDebug(p"[${where}_GHInfo] sawNTBr=${sawNTBr}, takenOnBr=${takenOnBr}\n")
   // override def toString(): String = "histPtr=%d, sawNTBr=%d, takenOnBr=%d, saveHalfRVI=%d".format(histPtr, sawNTBr, takenOnBr, saveHalfRVI)
 }
 
@@ -542,7 +542,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF1][ghr] extHist=%b\n\n", extHist.asUInt)
 
     XSDebug("[IF2][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n\n", if2_bp.taken, if2_bp.jmpIdx, if2_bp.hasNotTakenBrs, if2_bp.target, if2_bp.saveHalfRVI)
-    if2_GHInfo.debug
+    if2_GHInfo.debug("if2")
 
     XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
     XSDebug("[IF3][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if3_bp.taken, if3_bp.jmpIdx, if3_bp.hasNotTakenBrs, if3_bp.target, if3_bp.saveHalfRVI)
@@ -553,7 +553,7 @@ class IFU extends XSModule with HasIFUConst
       if3_prevHalfInstr.valid, if3_prevHalfInstr.taken, if3_prevHalfInstr.fetchpc, if3_prevHalfInstr.idx, if3_prevHalfInstr.pc, if3_prevHalfInstr.target, if3_prevHalfInstr.instr, if3_prevHalfInstr.ipf)
     XSDebug("[IF3][if3_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n\n",
       if3_prevHalfInstr.valid, if3_prevHalfInstr.taken, if3_prevHalfInstr.fetchpc, if3_prevHalfInstr.idx, if3_prevHalfInstr.pc, if3_prevHalfInstr.target, if3_prevHalfInstr.instr, if3_prevHalfInstr.ipf)
-    if3_GHInfo.debug
+    if3_GHInfo.debug("if3")
 
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
     XSDebug("[IF4][snpc]: %x, realMask=%b\n", if4_snpc, if4_mask)
@@ -562,7 +562,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_instrs(if4_bp.jmpIdx), if4_jal_tgts(if4_bp.jmpIdx))
     XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
       if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr, if4_prevHalfInstr.ipf)
-    if4_GHInfo.debug
+    if4_GHInfo.debug("if4")
     XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d crossPageIPF=%d\n",
       io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask, io.fetchPacket.bits.ipf, io.fetchPacket.bits.crossPageIPFFix)
     for (i <- 0 until PredictWidth) {
