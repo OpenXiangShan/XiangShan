@@ -15,4 +15,5 @@
 	url = https://github.com/chipsalliance/api-config-chipsalliance
 [submodule "berkeley-hardfloat"]
 	path = berkeley-hardfloat
-	url = https://github.com/ucb-bar/berkeley-hardfloat
+	url = https://github.com/RISCVERS/berkeley-hardfloat.git
+	branch = 759d99d90dc119d071a5fdbf35ee4578d0613a2f
