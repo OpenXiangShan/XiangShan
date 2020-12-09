@@ -71,9 +71,12 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   val roq = Module(new Roq(roqWbSize))
 
-  val lsqIsAfterBrq = isAfter(io.fromLsBlock.replay.bits.roqIdx, brq.io.redirect.bits.roqIdx)
-  val redirectArb = Mux(brq.io.redirect.valid && (!io.fromLsBlock.replay.valid || lsqIsAfterBrq),
-    brq.io.redirect.bits, io.fromLsBlock.replay.bits)
+  // When replay and mis-prediction have the same roqIdx,
+  // mis-prediction should have higher priority, since mis-prediction flushes the load instruction.
+  // Thus, only when mis-prediction roqIdx is after replay roqIdx, replay should be valid.
+  val brqIsAfterLsq = isAfter(brq.io.redirect.bits.roqIdx, io.fromLsBlock.replay.bits.roqIdx)
+  val redirectArb = Mux(io.fromLsBlock.replay.valid && (!brq.io.redirect.valid || brqIsAfterLsq),
+    io.fromLsBlock.replay.bits, brq.io.redirect.bits)
   val redirectValid = roq.io.redirect.valid || brq.io.redirect.valid || io.fromLsBlock.replay.valid
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect.bits, redirectArb)
 
