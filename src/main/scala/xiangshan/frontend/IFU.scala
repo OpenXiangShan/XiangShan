@@ -36,7 +36,7 @@ trait HasIFUConst extends HasXSParameter {
   def mask(pc: UInt, inLoop: Bool = false.B): UInt = Reverse(Cat(maskFirstHalf(pc), maskLastHalf(pc, inLoop)))
   def snpc(pc: UInt, inLoop: Bool = false.B): UInt = pc + (PopCount(mask(pc, inLoop)) << 1)
 
-  val enableGhistRepair = false
+  val enableGhistRepair = true
   val IFUDebug = true
 }
 
@@ -251,20 +251,24 @@ class IFU extends XSModule with HasIFUConst
                     // GHInfo from last pred does not corresponds with this packet
                     if3_ghInfoNotIdenticalRedirect
                   )
+  
+  val if3_target = WireInit(snpc(if3_pc))
+
+  /* when (prevHalfMetRedirect) {
+    if1_npc := if3_prevHalfInstr.target
+  }.else */
+  when (if3_prevHalfNotMetRedirect) {
+    if3_target := if3_prevHalfInstr.pc + 2.U
+  }.elsewhen (if3_predTakenRedirect) {
+    if3_target := if3_bp.target
+  }.elsewhen (if3_predNotTakenRedirect) {
+    if3_target := snpc(if3_pc)
+  }.elsewhen (if3_ghInfoNotIdenticalRedirect) {
+    if3_target := Mux(if3_bp.taken, if3_bp.target, snpc(if3_pc))
+  }
 
   when (if3_redirect) {
-    /* when (prevHalfMetRedirect) {
-      if1_npc := if3_prevHalfInstr.target
-    }.else */
-    when (if3_prevHalfNotMetRedirect) {
-      if1_npc := if3_prevHalfInstr.pc + 2.U
-    }.elsewhen (if3_predTakenRedirect) {
-      if1_npc := if3_bp.target
-    }.elsewhen (if3_predNotTakenRedirect) {
-      if1_npc := snpc(if3_pc)
-    }.elsewhen (if3_ghInfoNotIdenticalRedirect) {
-      if1_npc := Mux(if3_bp.taken, if3_bp.target, snpc(if3_pc))
-    }
+    if1_npc := if3_target
     val if3_newPtr = if3_GHInfo.newPtr()
     updatePtr := true.B
     newPtr := if3_newPtr
@@ -366,16 +370,19 @@ class IFU extends XSModule with HasIFUConst
                     if4_ghInfoNotIdenticalRedirect
                   )
 
+  val if4_target = WireInit(if4_snpc)
+
+  when (if4_prevHalfNextNotMet) {
+    if4_target := prevHalfInstrReq.pc+2.U
+  }.elsewhen (if4_predTakenRedirect) {
+    if4_target := if4_bp.target
+  }.elsewhen (if4_predNotTakenRedirect) {
+    if4_target := if4_snpc
+  }.elsewhen (if4_ghInfoNotIdenticalRedirect) {
+    if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
+  }
   when (if4_redirect) {
-    when (if4_prevHalfNextNotMet) {
-      if1_npc := prevHalfInstrReq.pc+2.U
-    }.elsewhen (if4_predTakenRedirect) {
-      if1_npc := if4_bp.target
-    }.elsewhen (if4_predNotTakenRedirect) {
-      if1_npc := if4_snpc
-    }.elsewhen (if4_ghInfoNotIdenticalRedirect) {
-      if1_npc := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
-    }
+    if1_npc := if4_target
     val if4_newPtr = if4_GHInfo.newPtr()
     updatePtr := true.B
     newPtr := if4_newPtr
