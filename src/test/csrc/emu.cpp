@@ -3,6 +3,7 @@
 #include "difftest.h"
 #include <getopt.h>
 #include "ram.h"
+#include "zlib.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -312,7 +313,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       lasttime_snapshot = t;
       // dump snapshot to file every 10 minutes
       snapshot_count++;
-      if (snapshot_count == 60) {
+      if (snapshot_count == 2) {
         snapshot_slot[0].save();
         snapshot_count = 0;
       }
@@ -395,9 +396,16 @@ void Emulator::snapshot_save(const char *filename) {
   stream << *dut_ptr;
   stream.flush();
 
-  long size = get_ram_size();
+  Byte comp_ram[get_ram_size()*8];
+  long comp_size = get_ram_size()*8;
+  long compLen = get_ram_size();
+  compress(comp_ram, &comp_size, (const Bytef*)get_ram_start(), get_ram_size*8L);
+  // long size = get_ram_size();
+  // stream.unbuf_write(&size, sizeof(size));
+  // stream.unbuf_write(get_ram_start(), size);
+  long size = comp_size/8;
   stream.unbuf_write(&size, sizeof(size));
-  stream.unbuf_write(get_ram_start(), size);
+  stream.unbuf_write(comp_ram, size);
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   ref_difftest_getregs(&ref_r);
@@ -434,10 +442,17 @@ void Emulator::snapshot_load(const char *filename) {
   stream.open(filename);
   stream >> *dut_ptr;
 
+  Byte comp_ram[get_ram_size()*8];
+  long comp_size = get_ram_size()*8;
+  uLong uncompLen;
   long size;
+
   stream.read(&size, sizeof(size));
-  assert(size == get_ram_size());
-  stream.read(get_ram_start(), size);
+  assert(size <= get_ram_size());
+  stream.read(comp_ram, size);
+
+  uncompress((Bytef*)get_ram_start(), &uncompLen, comp_ram, size);
+  assert(size <= get_ram_size());
 
   uint64_t ref_r[DIFFTEST_NR_REG];
   stream.read(ref_r, sizeof(ref_r));
