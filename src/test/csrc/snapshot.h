@@ -2,10 +2,10 @@
 #define SNAPSHOT_H
 
 #ifdef VM_SAVABLE
-#include "VXSSimTop.h"
+#include "VXSSimSoC.h"
 #include <verilated_save.h>
 
-class VerilatedSaveMem : public VerilatedSave {
+class VerilatedSaveMem : public VerilatedSerialize {
   const static long buf_size = 1024 * 1024 * 1024;
   uint8_t *buf;
   long size;

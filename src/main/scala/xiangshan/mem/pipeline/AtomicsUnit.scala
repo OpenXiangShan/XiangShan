@@ -46,6 +46,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
+  io.dtlb.resp.ready   := false.B
 
   io.flush_sbuffer.valid := false.B
 
@@ -75,12 +76,12 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dtlb.req.valid       := true.B
     io.dtlb.req.bits.vaddr  := in.src1
     io.dtlb.req.bits.roqIdx := in.uop.roqIdx
+    io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
     io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
-    io.dtlb.req.bits.debug.lsroqIdx := in.uop.lsroqIdx // FIXME: need update
 
-    when(io.dtlb.resp.valid && !io.dtlb.resp.bits.miss){
+    when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
       // exception handling
       val addrAligned = LookupTree(in.uop.ctrl.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -144,7 +145,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       LSUOpType.amomaxu_d -> M_XA_MAXU
     ))
 
-    io.dcache.req.bits.addr := paddr 
+    io.dcache.req.bits.addr := paddr
     io.dcache.req.bits.data := genWdata(in.src2, in.uop.ctrl.fuOpType(1,0))
     // TODO: atomics do need mask: fix mask
     io.dcache.req.bits.mask := genWmask(paddr, in.uop.ctrl.fuOpType(1,0))

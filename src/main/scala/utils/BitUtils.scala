@@ -62,13 +62,37 @@ object OneHot {
 
 object LowerMask {
   def apply(a: UInt, len: Int) = {
-    (0 until len).map(i => a >> i.U).reduce(_|_)
+    ParallelOR((0 until len).map(i => a >> i.U))
+  }
+  def apply(a: UInt): UInt = {
+    apply(a, a.getWidth)
+  }
+}
+
+object HigherMask {
+  def apply(a: UInt, len: Int) = {
+    Reverse(LowerMask(Reverse(a), len))
+  }
+  def apply(a: UInt): UInt = {
+    apply(a, a.getWidth)
+  }
+}
+
+object LowerMaskFromLowest {
+  def apply(a: UInt) = {
+    LowerMask(PriorityEncoderOH(a))
+  }
+}
+
+object HigherMaskFromHighest {
+  def apply(a: UInt) = {
+    Reverse(LowerMask(PriorityEncoderOH(Reverse(a))))
   }
 }
 
 object LowestBit {
   def apply(a: UInt, len: Int) = {
-    Mux(a(0), 1.U(len.W), Reverse(((0 until len).map(i => Reverse(a(len - 1, 0)) >> i.U).reduce(_|_) + 1.U) >> 1.U))
+    Mux(a(0), 1.U(len.W), Reverse((ParallelOR((0 until len).map(i => Reverse(a(len - 1, 0)) >> i.U)) + 1.U) >> 1.U))
   }
 }
 

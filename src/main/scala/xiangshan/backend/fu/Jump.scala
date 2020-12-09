@@ -14,9 +14,7 @@ trait HasRedirectOut { this: RawModule =>
   val brUpdate = IO(Output(new BranchUpdateInfo))
 }
 
-class Jump extends FunctionUnit(
-  FuConfig(FuType.jmp, 1, 0, writeIntRf = true, writeFpRf = false, hasRedirect = true)
-) with HasRedirectOut {
+class Jump extends FunctionUnit with HasRedirectOut {
 
   val (src1, offset, func, pc, uop) = (
     io.in.bits.src(0),

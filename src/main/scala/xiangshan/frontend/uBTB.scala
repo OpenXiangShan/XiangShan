@@ -9,13 +9,17 @@ import scala.math.min
 
 trait MicroBTBPatameter{
     val nWays = 16
-    val offsetSize = 20
+    val lowerBitsSize = 20
+    val tagSize = 20
+
+    val extended_stat = false
 }
 
 class MicroBTB extends BasePredictor
     with MicroBTBPatameter
 {
-    val tagSize = VAddrBits - log2Ceil(PredictWidth) - 1
+    // val tagSize = VAddrBits - log2Ceil(PredictWidth) - 1
+    val untaggedBits = PredictWidth + 1
 
     class MicroBTBResp extends Resp
     {
@@ -44,7 +48,7 @@ class MicroBTB extends BasePredictor
     override val io = IO(new MicroBTBIO)
     io.uBTBBranchInfo <> out_ubtb_br_info
 
-    def getTag(pc: UInt) = (pc >> (log2Ceil(PredictWidth) + 1)).asUInt()
+    def getTag(pc: UInt) = (pc >> untaggedBits)(tagSize-1, 0)
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
 
     class MicroBTBMeta extends XSBundle
@@ -58,7 +62,7 @@ class MicroBTB extends BasePredictor
 
     class MicroBTBEntry extends XSBundle
     {
-        val offset = SInt(offsetSize.W)
+        val lower = UInt(lowerBitsSize.W)
     }
 
     // val uBTBMeta = RegInit((0.U).asTypeOf(Vec(nWays, Vec(PredictWidth, new MicroBTBMeta))))
@@ -149,6 +153,11 @@ class MicroBTB extends BasePredictor
     val uBTBMeta = VecInit(metas.map(m => m.rdata))
     val uBTB     = VecInit(datas.map(d => d.rdata))
 
+    val do_reset = RegInit(true.B)
+    val reset_way = RegInit(0.U(log2Ceil(nWays).W))
+    when (do_reset) { reset_way := reset_way + 1.U }
+    when (reset_way === nWays.U) { do_reset := false.B }
+
     //uBTB read
     //tag is bank align
     val read_valid = io.pc.valid
@@ -168,9 +177,9 @@ class MicroBTB extends BasePredictor
     val read_resp = Wire(Vec(PredictWidth,new ReadRespEntry))
 
     val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(log2Up(PredictWidth)-1,0) ))
-    val isInNextRow = VecInit((0 until PredictWidth).map(_.U < read_req_basebank))
+    // val isInNextRow = VecInit((0 until PredictWidth).map(_.U < read_req_basebank))
     
-    (0 until PredictWidth).map{ b => metas(b).rtag := Mux(isInNextRow(b),read_req_tag + 1.U,read_req_tag) }
+    (0 until PredictWidth).map{ b => metas(b).rtag := read_req_tag }
     val read_hit_ohs = read_bank_inOrder.map{ b => metas(b).hit_ohs }
     val read_hit_vec = VecInit(read_hit_ohs.map{oh => ParallelOR(oh).asBool})
     val read_hit_ways = VecInit(read_hit_ohs.map{oh => PriorityEncoder(oh)})
@@ -178,7 +187,7 @@ class MicroBTB extends BasePredictor
     // val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
     
 
-    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways(PredictWidth.U - read_bank_inOrder(b)))
+    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways((b.U + PredictWidth.U - read_req_basebank)(log2Up(PredictWidth)-1, 0)))
 
     val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => metas(read_bank_inOrder(b)).rdata))
     val  btb_resp = VecInit((0 until PredictWidth).map(b => datas(read_bank_inOrder(b)).rdata))  
@@ -188,7 +197,7 @@ class MicroBTB extends BasePredictor
         read_resp(i).valid := read_hit_vec(i) && io.inMask(i)
         read_resp(i).taken := read_resp(i).valid && uBTBMeta_resp(i).pred(1)
         read_resp(i).is_Br  := read_resp(i).valid && uBTBMeta_resp(i).is_Br
-        read_resp(i).target := ((io.pc.bits).asSInt + (i<<1).S + btb_resp(i).offset).asUInt
+        read_resp(i).target := Cat(io.pc.bits(VAddrBits-1, lowerBitsSize+1), btb_resp(i).asUInt, 0.U(1.W))
         read_resp(i).is_RVC := read_resp(i).valid && uBTBMeta_resp(i).is_RVC
 
         out_ubtb_br_info.hits(i) := read_hit_vec(i)
@@ -245,7 +254,7 @@ class MicroBTB extends BasePredictor
     val update_base_bank = getBank(update_fetch_pc)
     val update_tag = getTag(update_br_pc)
     val update_target = Mux(u.pd.isBr, u.brTarget, u.target)
-    val update_taget_offset =  update_target.asSInt - update_br_pc.asSInt
+    val update_target_lower = update_target(lowerBitsSize, 1)
     val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
   
   
@@ -255,12 +264,12 @@ class MicroBTB extends BasePredictor
     //write btb target when miss prediction
     // when(entry_write_valid)
     // {
-    //     uBTB(update_write_way)(update_bank).offset := update_taget_offset
+    //     uBTB(update_write_way)(update_bank).offset := update_target_offset
     // }
     for (b <- 0 until PredictWidth) {
-        datas(b).wen := entry_write_valid && b.U === update_bank
-        datas(b).wWay := update_write_way
-        datas(b).wdata := update_taget_offset.asTypeOf(new MicroBTBEntry)
+        datas(b).wen := do_reset || (entry_write_valid && b.U === update_bank)
+        datas(b).wWay := Mux(do_reset, reset_way, update_write_way)
+        datas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBEntry), update_target_lower.asTypeOf(new MicroBTBEntry))
     }
 
 
@@ -278,41 +287,33 @@ class MicroBTB extends BasePredictor
                                 )
 
     for (b <- 0 until PredictWidth) {
-        metas(b).wen := meta_write_valid && b.U === update_bank
-        metas(b).wWay := update_write_way
-        metas(b).wdata := update_write_meta
+        metas(b).wen := do_reset || (meta_write_valid && b.U === update_bank)
+        metas(b).wWay := Mux(do_reset, reset_way, update_write_way)
+        metas(b).wdata := Mux(do_reset, 0.U.asTypeOf(new MicroBTBMeta), update_write_meta)
     }
-    // when(meta_write_valid)
-    // {
-    //     //commit update
-    //     uBTBMeta(update_write_way)(update_bank).is_Br := u.pd.brType === BrType.branch
-    //     uBTBMeta(update_write_way)(update_bank).is_RVC := u.pd.isRVC
-    //     //(0 until PredictWidth).foreach{b =>  uBTBMeta(update_write_way)(b).valid := false.B}
-    //     uBTBMeta(update_write_way)(update_bank).valid := true.B
-    //     uBTBMeta(update_write_way)(update_bank).tag := update_tag
-    //     uBTBMeta(update_write_way)(update_bank).pred := 
-    //     Mux(!update_hits,
-    //         Mux(update_taken,3.U,0.U),
-    //         satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)
-    //     )
-    // }
 
     if (BPUDebug && debug) {
-        // XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
-        // XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
-        // for(i <- 0 until PredictWidth) {
-        //     XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",
-        //                             i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).is_Br,read_resp(i).target,out_ubtb_br_info.writeWay(i))
-        // }
+        XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
+        XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
+        for(i <- 0 until PredictWidth) {
+            XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",
+                                    i.U,read_hit_vec(i),read_hit_ways(i),read_resp(i).valid,read_resp(i).is_RVC,read_resp(i).taken,read_resp(i).is_Br,read_resp(i).target,out_ubtb_br_info.writeWay(i))
+        }
 
-        // XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | upadate_offset 0x%x\n "
-        //             ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_taget_offset(offsetSize-1,0))
-        // XSDebug(meta_write_valid, "uBTB update: update_taken:%d | old_pred:%b | new_pred:%b\n",
-        //     update_taken, uBTBMeta(update_write_way)(update_bank).pred,
-        //     Mux(!update_hits,
-        //         Mux(update_taken,3.U,0.U),
-        //         satUpdate( uBTBMeta(update_write_way)(update_bank).pred,2,update_taken)))
+        XSDebug(meta_write_valid,"uBTB update: update | pc:0x%x  | update hits:%b | | update_write_way:%d  | update_bank: %d| update_br_index:%d | update_tag:%x | update_lower 0x%x\n "
+                    ,update_br_pc,update_hits,update_write_way,update_bank,update_br_idx,update_tag,update_target_lower(lowerBitsSize-1,0))
+        XSDebug(meta_write_valid, "uBTB update: update_taken:%d | old_pred:%b | new_pred:%b\n",
+            update_taken, metas(update_bank).rpred,
+            Mux(!update_hits,
+                    Mux(update_taken,3.U,0.U),
+                    satUpdate( metas(update_bank).rpred,2,update_taken)
+                ))
 
+    }
+
+    if (extended_stat) {
+        val high_identical = update_target(VAddrBits-1, lowerBitsSize) =/= update_fetch_pc(VAddrBits-1, lowerBitsSize)
+        XSDebug(io.update.valid, "extended_stat: identical %d\n", high_identical)
     }
    
    //bypass:read-after-write 

@@ -5,22 +5,22 @@ import chisel3.util._
 import xiangshan._
 import utils.XSInfo
 
+class RenameBypassInfo extends XSBundle {
+  val lsrc1_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val lsrc2_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val lsrc3_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+  val ldest_bypass = MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))
+}
+
 class Rename extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
-    val wbIntResults = Vec(NRIntWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val wbFpResults = Vec(NRFpWritePorts, Flipped(ValidIO(new ExuOutput)))
-    val intRfReadAddr = Vec(NRIntReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val fpRfReadAddr = Vec(NRFpReadPorts, Input(UInt(PhyRegIdxWidth.W)))
-    val intPregRdy = Vec(NRIntReadPorts, Output(Bool()))
-    val fpPregRdy = Vec(NRFpReadPorts, Output(Bool()))
-    // set preg to busy when replay
-    val replayPregReq = Vec(ReplayWidth, Input(new ReplayPregReq))
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new MicroOp))
+    val renameBypass = Output(new RenameBypassInfo)
   })
 
   def printRenameInfo(in: DecoupledIO[CfCtrl], out: DecoupledIO[MicroOp]) = {
@@ -43,8 +43,6 @@ class Rename extends XSModule {
   val fpFreeList, intFreeList = Module(new FreeList).io
   val fpRat = Module(new RenameTable(float = true)).io
   val intRat = Module(new RenameTable(float = false)).io
-  val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts)).io
-  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts)).io
 
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
@@ -52,8 +50,6 @@ class Rename extends XSModule {
   val flush = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe) // TODO: need check by JiaWei
   fpRat.flush := flush
   intRat.flush := flush
-  fpBusyTable.flush := flush
-  intBusyTable.flush := flush
 
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
@@ -69,12 +65,12 @@ class Rename extends XSModule {
     uop.src3State := DontCare
     uop.roqIdx := DontCare
     uop.diffTestDebugLrScValid := DontCare
-
-    uop.lsroqIdx := DontCare
     uop.lqIdx := DontCare
     uop.sqIdx := DontCare
   })
 
+  val needFpDest = Wire(Vec(RenameWidth, Bool()))
+  val needIntDest = Wire(Vec(RenameWidth, Bool()))
   var lastReady = WireInit(io.out(0).ready)
   // debug assert
   val outRdy = Cat(io.out.map(_.ready))
@@ -87,17 +83,17 @@ class Rename extends XSModule {
     val inValid = io.in(i).valid
 
     // alloc a new phy reg
-    val needFpDest = inValid && needDestReg(fp = true, io.in(i).bits)
-    val needIntDest = inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocReqs(i) := needFpDest && lastReady
-    intFreeList.allocReqs(i) := needIntDest && lastReady
+    needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
+    needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
+    fpFreeList.allocReqs(i) := needFpDest(i) && lastReady
+    intFreeList.allocReqs(i) := needIntDest(i) && lastReady
     val fpCanAlloc = fpFreeList.canAlloc(i)
     val intCanAlloc = intFreeList.canAlloc(i)
     val this_can_alloc = Mux(
-      needIntDest,
+      needIntDest(i),
       intCanAlloc,
       Mux(
-        needFpDest,
+        needFpDest(i),
         fpCanAlloc,
         true.B
       )
@@ -112,7 +108,7 @@ class Rename extends XSModule {
 
     lastReady = io.in(i).ready
 
-    uops(i).pdest := Mux(needIntDest,
+    uops(i).pdest := Mux(needIntDest(i),
       intFreeList.pdests(i),
       Mux(
         uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen,
@@ -127,7 +123,6 @@ class Rename extends XSModule {
     def writeRat(fp: Boolean) = {
       val rat = if(fp) fpRat else intRat
       val freeList = if(fp) fpFreeList else intFreeList
-      val busyTable = if(fp) fpBusyTable else intBusyTable
       // speculative inst write
       val specWen = freeList.allocReqs(i) && freeList.canAlloc(i)
       // walk back write
@@ -155,9 +150,6 @@ class Rename extends XSModule {
       freeList.deallocReqs(i) := rat.archWritePorts(i).wen
       freeList.deallocPregs(i) := io.roqCommits(i).bits.uop.old_pdest
 
-      // set phy reg status to busy
-      busyTable.allocPregs(i).valid := specWen
-      busyTable.allocPregs(i).bits := freeList.pdests(i)
     }
 
     writeRat(fp = false)
@@ -191,27 +183,28 @@ class Rename extends XSModule {
     uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, intOldPdest, fpOldPdest)
   }
 
-
-  def updateBusyTable(fp: Boolean) = {
-    val wbResults = if(fp) io.wbFpResults else io.wbIntResults
-    val busyTable = if(fp) fpBusyTable else intBusyTable
-    for((wb, setPhyRegRdy) <- wbResults.zip(busyTable.wbPregs)){
-      setPhyRegRdy.valid := wb.valid && needDestReg(fp, wb.bits.uop)
-      setPhyRegRdy.bits := wb.bits.uop.pdest
-    }
+  // We don't bypass the old_pdest from valid instructions with the same ldest currently in rename stage.
+  // Instead, we determine whether there're some dependences between the valid instructions.
+  for (i <- 1 until RenameWidth) {
+    io.renameBypass.lsrc1_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src1Type === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src1Type === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc1
+    }).reverse)
+    io.renameBypass.lsrc2_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src2Type === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src2Type === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc2
+    }).reverse)
+    io.renameBypass.lsrc3_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && io.in(i).bits.ctrl.src3Type === SrcType.fp
+      val intMatch = needIntDest(j) && io.in(i).bits.ctrl.src3Type === SrcType.reg
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.lsrc3
+    }).reverse)
+    io.renameBypass.ldest_bypass(i-1) := Cat((0 until i).map(j => {
+      val fpMatch  = needFpDest(j) && needFpDest(i)
+      val intMatch = needIntDest(j) && needIntDest(i)
+      (fpMatch || intMatch) && io.in(j).bits.ctrl.ldest === io.in(i).bits.ctrl.ldest
+    }).reverse)
   }
-
-  updateBusyTable(false)
-  updateBusyTable(true)
-
-  intBusyTable.rfReadAddr <> io.intRfReadAddr
-  intBusyTable.pregRdy <> io.intPregRdy
-  for(i <- io.replayPregReq.indices){
-    intBusyTable.replayPregs(i).valid := io.replayPregReq(i).isInt
-    fpBusyTable.replayPregs(i).valid := io.replayPregReq(i).isFp
-    intBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
-    fpBusyTable.replayPregs(i).bits := io.replayPregReq(i).preg
-  }
-  fpBusyTable.rfReadAddr <> io.fpRfReadAddr
-  fpBusyTable.pregRdy <> io.fpPregRdy
 }

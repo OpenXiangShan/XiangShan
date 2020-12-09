@@ -56,7 +56,7 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   if (hasV) { val v = Bool() }
 
   override def toPrintable: Printable = {
-    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// + 
+    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
     //(if(hasV) (p"v:${v}") else p"")
   }
 }
@@ -114,6 +114,73 @@ class TlbEntry extends TlbBundle {
   }
 }
 
+class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
+  require(log2Up(num)==log2Down(num))
+  /* vpn can be divide into three part */
+  // vpn: tagPart + addrPart
+  val cutLen  = log2Up(num)
+
+  val tag     = UInt(tagLen.W) // NOTE: high part of vpn
+  val level   = UInt(log2Up(Level).W)
+  val ppns    = Vec(num, UInt(ppnLen.W))
+  val perms    = Vec(num, new PermBundle(hasV = false))
+  val vs      = Vec(num, Bool())
+
+  def tagClip(vpn: UInt, level: UInt) = { // full vpn => tagLen
+    Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2+cutLen)),
+    Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1+cutLen)),
+                     Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0+cutLen))))(tagLen-1, 0)
+  }
+
+  // NOTE: get insize idx
+  def idxClip(vpn: UInt, level: UInt) = {
+    Mux(level===0.U, vpn(vpnnLen*2+cutLen-1, vpnnLen*2),
+    Mux(level===1.U, vpn(vpnnLen*1+cutLen-1, vpnnLen*1),
+                     vpn(vpnnLen*0+cutLen-1, vpnnLen*0)))
+  }
+
+  def hit(vpn: UInt) = {
+    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level))
+  }
+
+  def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntires = {
+    require((data.getWidth / XLEN) == num,
+      "input data length must be multiple of pte length")
+    assert(level=/=3.U, "level should not be 3")
+
+    val ts = Wire(new TlbEntires(num, tagLen))
+    ts.tag := tagClip(vpn, level)
+    ts.level := level
+    for (i <- 0 until num) {
+      val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      ts.ppns(i) := pte.ppn
+      ts.perms(i):= pte.perm // this.perms has no v
+      ts.vs(i)   := !pte.isPf(level) && pte.isLeaf() // legal and leaf, store to l2Tlb
+    }
+
+    ts
+  }
+
+  def get(vpn: UInt): TlbEntry = {
+    val t = Wire(new TlbEntry())
+    val idx = idxClip(vpn, level)
+    t.vpn := vpn // Note: Use input vpn, not vpn in TlbL2
+    t.ppn := ppns(idx)
+    t.level := level
+    t.perm := perms(idx)
+    t
+  }
+
+  override def cloneType: this.type = (new TlbEntires(num, tagLen)).asInstanceOf[this.type]
+  override def toPrintable: Printable = {
+    require(num == 4, "if num is not 4, please comment this toPrintable")
+    // NOTE: if num is not 4, please comment this toPrintable
+    p"tag:${Hexadecimal(tag)} level:${level} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
+    p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
+  }
+}
+
 object TlbCmd {
   def read  = "b00".U
   def write = "b01".U
@@ -131,11 +198,10 @@ class TlbReq extends TlbBundle {
   val roqIdx = new RoqPtr
   val debug = new Bundle {
     val pc = UInt(XLEN.W)
-    val lsroqIdx = UInt(LsroqIdxWidth.W) // FIXME: need update
   }
 
   override def toPrintable: Printable = {
-    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx} lsroqIdx:${debug.lsroqIdx}"
+    p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} pc:0x${Hexadecimal(debug.pc)} roqIdx:${roqIdx}"
   }
 }
 
@@ -155,10 +221,8 @@ class TlbResp extends TlbBundle {
 }
 
 class TlbRequestIO() extends TlbBundle {
-  val req = Valid(new TlbReq)
-  val resp = Flipped(Valid(new TlbResp))
-
-  // override def cloneType: this.type = (new TlbRequestIO(Width)).asInstanceOf[this.type]
+  val req = DecoupledIO(new TlbReq)
+  val resp = Flipped(DecoupledIO(new TlbResp))
 }
 
 class BlockTlbRequestIO() extends TlbBundle {
@@ -232,6 +296,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       2.U -> Cat(hitppn(i), reqAddr(i).off)
     ))
 
+    req(i).ready := resp(i).ready
     resp(i).valid := valid(i)
     resp(i).bits.paddr := Mux(vmEnable, paddr, SignExt(req(i).bits.vaddr, PAddrBits))
     resp(i).bits.miss := miss(i)
@@ -280,7 +345,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
 
   // reset pf when pf hit
-  val pfHitReset = ParallelOR(widthMap{i => Mux(valid(i), VecInit(pfHitVec(i)).asUInt, 0.U) })
+  val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVec(i)).asUInt, 0.U) })
   val pfHitRefill = ParallelOR(pfHitReset.asBools)
 
   // refill
@@ -357,8 +422,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // Log
   for(i <- 0 until Width) {
-    XSDebug(req(i).valid, p"req(${i.U}): ${req(i).bits}\n")
-    XSDebug(resp(i).valid, p"resp(${i.U}): ${resp(i).bits}\n")
+    XSDebug(req(i).valid, p"req(${i.U}): (${req(i).valid} ${req(i).ready}) ${req(i).bits}\n")
+    XSDebug(resp(i).valid, p"resp(${i.U}): (${resp(i).valid} ${resp(i).ready}) ${resp(i).bits}\n")
   }
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
@@ -390,7 +455,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   //     assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt)
   //   } // FIXME: remove me when tlb may be ok
   // }
-  
+
   // assert((v&pf)===0.U, "v and pf can't be true at same time: v:0x%x pf:0x%x", v, pf)
 }
 
@@ -405,35 +470,32 @@ object TLB {
     shouldBlock: Boolean
   ) = {
     require(in.length == width)
-    
+
     val tlb = Module(new TLB(width, isDtlb))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
-    
+
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {
-        tlb.io.requestor(i).req.valid := in(i).req.valid
-        tlb.io.requestor(i).req.bits := in(i).req.bits
-        in(i).req.ready := DontCare
+        tlb.io.requestor(i) <> in(i)
+        // tlb.io.requestor(i).req.valid := in(i).req.valid
+        // tlb.io.requestor(i).req.bits := in(i).req.bits
+        // in(i).req.ready := tlb.io.requestor(i).req.ready
 
-        in(i).resp.valid := tlb.io.requestor(i).resp.valid
-        in(i).resp.bits := tlb.io.requestor(i).resp.bits
+        // in(i).resp.valid := tlb.io.requestor(i).resp.valid
+        // in(i).resp.bits := tlb.io.requestor(i).resp.bits
+        // tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
     } else { // itlb
       require(width == 1)
       tlb.io.requestor(0).req.valid := in(0).req.valid
       tlb.io.requestor(0).req.bits := in(0).req.bits
-      in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready
-
-      // val pf = LookupTree(tlb.io.requestor(0).req.bits.cmd, List(
-      //   TlbCmd.read -> tlb.io.requestor(0).resp.bits.excp.pf.ld,
-      //   TlbCmd.write -> tlb.io.requestor(0).resp.bits.excp.pf.st,
-      //   TlbCmd.exec -> tlb.io.requestor(0).resp.bits.excp.pf.instr
-      // ))
+      in(0).req.ready := !tlb.io.requestor(0).resp.bits.miss && in(0).resp.ready && tlb.io.requestor(0).req.ready
 
       in(0).resp.valid := tlb.io.requestor(0).resp.valid && !tlb.io.requestor(0).resp.bits.miss
       in(0).resp.bits := tlb.io.requestor(0).resp.bits
+      tlb.io.requestor(0).resp.ready := in(0).resp.ready
     }
 
     tlb.io.ptw

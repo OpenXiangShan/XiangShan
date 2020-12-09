@@ -11,9 +11,10 @@ class FenceToSbuffer extends XSBundle {
   val sbIsEmpty = Input(Bool())
 }
 
-class Fence extends FunctionUnit(FuConfig(
-  FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false
-)){
+// class Fence extends FunctionUnit(FuConfig(
+  // /*FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,*/ latency = UncertainLatency()
+// )){
+class Fence extends FunctionUnit{ // TODO: check it
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))
@@ -45,7 +46,7 @@ class Fence extends FunctionUnit(FuConfig(
   when (state === s_sb && valid && func === FenceOpType.fencei && !sbEmpty) { state := s_icache }
   when (state === s_sb && valid && func === FenceOpType.sfence && !sbEmpty) { state := s_tlb }
   when (state === s_sb && valid && func === FenceOpType.fence  && !sbEmpty) { state := s_none }
-  when (state =/= s_sb && sbEmpty) { state := s_sb } 
+  when (state =/= s_sb && sbEmpty) { state := s_sb }
 
   assert(!(io.out.valid && io.out.bits.uop.ctrl.rfWen))
   io.in.ready := state === s_sb

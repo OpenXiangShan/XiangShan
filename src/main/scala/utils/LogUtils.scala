@@ -24,9 +24,9 @@ object XSLog {
   {
     val logEnable = WireInit(false.B)
     val logTimestamp = WireInit(0.U(64.W))
-    ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
-    ExcitingUtils.addSink(logTimestamp, "logTimestamp")
     if(Parameters.get.envParameters.EnableDebug){
+      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
       when (cond && logEnable) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)
@@ -39,9 +39,9 @@ object XSLog {
 
   def displayLog: Bool = {
     val logEnable = WireInit(false.B)
-    ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
     val ret = WireInit(false.B)
     if(Parameters.get.envParameters.EnableDebug) {
+      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
       ret := logEnable
     }
     ret
