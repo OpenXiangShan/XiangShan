@@ -100,8 +100,9 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
                        (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
   def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
-  def saveHalfRVI = (firstBankHasHalfRVI && (jmpIdx === (bankWidth-1).U || !(takens.orR))) ||
-                    (lastBankHasHalfRVI  &&  jmpIdx === (PredictWidth-1).U)
+  def unmaskedJmpIdx = PriorityEncoder(takens)
+  def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(takens.orR))) ||
+                    (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
   // could get PredictWidth-1 when only the first bank is valid
   def jmpIdx = PriorityEncoder(realTakens)
   // only used when taken
