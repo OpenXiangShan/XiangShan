@@ -75,9 +75,9 @@ class AXI4SlaveModuleImp[T<:Data](outer: AXI4SlaveModule[T])
     assert(in.ar.bits.burst === AXI4Parameters.BURST_INCR, "only support busrt ince!")
   }
 
-  private val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)
+  val s_idle :: s_rdata :: s_wdata :: s_wresp :: Nil = Enum(4)
 
-  private val state = RegInit(s_idle)
+  val state = RegInit(s_idle)
 
   switch(state){
     is(s_idle){
