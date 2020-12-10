@@ -311,16 +311,16 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         fork {
           val sio = slaveIO
           for (_ <- 0 to total_clock) {
-            //            //randomly add when empty
-            //            if (slaveAgent.innerProbe.size <= 4) {
-            //              if (true) {
-            //                for (i <- 0 until 16) {
-            //                  val addr = getRandomElement(addr_pool,rand)
-            //                  val targetPerm = sample(probeProbMap,rand)
-            //                  slaveAgent.addProbe(addr, targetPerm)
-            //                }
-            //              }
-            //            }
+            //randomly add when empty
+            if (slaveAgent.innerProbe.size <= 4) {
+              if (true) {
+                for (i <- 0 until 16) {
+                  val addr = getRandomElement(addr_pool, rand)
+                  val targetPerm = sample(probeProbMap, rand)
+                  slaveAgent.addProbe(addr, targetPerm)
+                }
+              }
+            }
 
             val AChannel_ready = true
             val CChannel_ready = true

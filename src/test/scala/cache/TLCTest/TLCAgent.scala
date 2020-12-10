@@ -279,7 +279,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
               dQueue.enqMessage(acq.issueGrant(allocId))
             }
             else { //is AcquireBlock
-              if (a_acq.param == BtoT) {
+              if (state.masterPerm == branch) { //grow from branch
                 dQueue.enqMessage(acq.issueGrant(allocId))
               }
               else {
