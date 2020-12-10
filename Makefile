@@ -27,7 +27,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert $(SIM_ARGS)
 	# mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
 	# $(MEM_GEN) $(@D)/$(@F).conf >> $@
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
@@ -139,6 +139,8 @@ endif
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
+VME_SOURCE ?= $(shell pwd)
+VME_MODULE ?= 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
@@ -164,6 +166,23 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 emu: $(EMU)
 	ls build
 	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+
+# extract verilog module from sim_top.v
+# usage: make vme VME_MODULE=Roq
+vme: $(SIM_TOP_V)
+	mill XiangShan.runMain utils.ExtractVerilogModules -m $(VME_MODULE)
+
+# usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
+phy_evaluate: vme
+	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
+	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
+
+# usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
+phy_evaluate_atc: vme
+	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
+	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
