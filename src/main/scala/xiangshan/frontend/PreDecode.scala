@@ -50,7 +50,7 @@ class PreDecodeResp extends XSBundle with HasIFUConst {
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val mask = UInt(PredictWidth.W)
   // one for the first bank
-  val endMask = UInt(nBanksInPacket.W)
+  val lastHalf = UInt(nBanksInPacket.W)
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
@@ -85,6 +85,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
                                                          else data(i*16+31, i*16)))
   // val nextHalf = Wire(UInt(16.W))
 
+  val lastHalf = Wire(Vec(nBanksInPacket, UInt(1.W)))
 
   for (i <- 0 until PredictWidth) {
     val inst = WireInit(rawInsts(i))
@@ -101,7 +102,9 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     inst := Mux(io.prev.valid && i.U === 0.U, Cat(rawInsts(i)(15,0), io.prev.bits), rawInsts(i))
 
     validStart := lastIsValidEnd && !(isLastInPacket && !currentRVC)
-    validEnd := validStart && currentRVC || !validStart
+    validEnd := validStart && currentRVC || !validStart && !(isLastInPacket && !currentRVC)
+
+    val currentLastHalf = lastIsValidEnd && (isLastInPacket && !currentRVC)
 
     insts(i) := inst
     instsRVC(i) := isRVC(inst)
@@ -117,11 +120,12 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     io.out.pd(i).excType := ExcType.notExc
     io.out.instrs(i) := insts(i)
     io.out.pc(i) := instsPC(i)
-    
+
+    if (i == bankWidth-1)    { lastHalf(0) := currentLastHalf }
+    if (i == PredictWidth-1) { lastHalf(1) := currentLastHalf }
   }
   io.out.mask := instsMask.asUInt & mask
-  io.out.endMask := Cat(instsEndMask(PredictWidth-1) & mask(PredictWidth-1),
-                        instsEndMask(bankWidth-1)    & mask(bankWidth-1))
+  io.out.lastHalf := lastHalf.asUInt
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,

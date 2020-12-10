@@ -263,9 +263,9 @@ class BPUStage3 extends BPUStage {
   val loopResp = io.in.resp.loop.exit
 
   // realMask is in it
-  val pdMask    = s3IO.predecode.mask
-  val pdEndMask = s3IO.predecode.endMask
-  val pds       = s3IO.predecode.pd
+  val pdMask     = s3IO.predecode.mask
+  val pdLastHalf = s3IO.predecode.lastHalf
+  val pds        = s3IO.predecode.pd
 
   val btbResp   = inLatch.resp.btb
   val btbHits   = btbResp.hits.asUInt
@@ -298,8 +298,8 @@ class BPUStage3 extends BPUStage {
   jalMask := WireInit(jals.asTypeOf(Vec(PredictWidth, Bool())))
 
   lastBankHasInst := s3IO.realMask(PredictWidth-1, bankWidth).orR
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, s3IO.realMask(bankWidth-1) && !pdMask(bankWidth-1) && !pdEndMask(0))
-  lastBankHasHalfRVI  := s3IO.realMask(PredictWidth-1) && !pdMask(PredictWidth-1) && !pdEndMask(1)
+  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, pdLastHalf(0))
+  lastBankHasHalfRVI  := pdLastHalf(1)
 
   //RAS
   if(EnableRAS){

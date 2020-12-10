@@ -144,7 +144,7 @@ class BranchInfo extends XSBundle with HasBPUParameter {
 class Predecode extends XSBundle with HasIFUConst {
   val hasLastHalfRVI = Bool()
   val mask = UInt((FetchWidth*2).W)
-  val endMask = UInt(nBanksInPacket.W)
+  val lastHalf = UInt(nBanksInPacket.W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
 

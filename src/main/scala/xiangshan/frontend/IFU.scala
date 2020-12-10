@@ -458,7 +458,7 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.in.histPtr := ptr
   bpu.io.in.inMask := mask(if1_npc)
   bpu.io.predecode.mask := if4_pd.mask
-  bpu.io.predecode.endMask := if4_pd.endMask
+  bpu.io.predecode.lastHalf := if4_pd.lastHalf
   bpu.io.predecode.pd := if4_pd.pd
   bpu.io.predecode.hasLastHalfRVI := if4_pc =/= if4_pd.pc(0)
   bpu.io.realMask := if4_mask
