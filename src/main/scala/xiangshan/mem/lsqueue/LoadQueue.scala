@@ -433,6 +433,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       rollback(i).bits.isMisPred := false.B
       rollback(i).bits.isException := false.B
       rollback(i).bits.isFlushPipe := false.B
+      rollback(i).bits.target := rollbackUop.cf.pc
+      rollback(i).bits.brTag := rollbackUop.brTag
 
       XSDebug(
         l1Violation,
@@ -529,15 +531,15 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   for (i <- 0 until LoadQueueSize) {
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
-      when(io.brqRedirect.bits.isReplay){
-        datavalid(i) := false.B
-        writebacked(i) := false.B
-        listening(i) := false.B
-        miss(i) := false.B
-        pending(i) := false.B
-      }.otherwise{
+      // when(io.brqRedirect.bits.isReplay){
+      //   valid(i) := false.B
+      //   writebacked(i) := false.B
+      //   listening(i) := false.B
+      //   miss(i) := false.B
+      //   pending(i) := false.B
+      // }.otherwise{
         allocated(i) := false.B
-      }
+      // }
     }
   }
   when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {

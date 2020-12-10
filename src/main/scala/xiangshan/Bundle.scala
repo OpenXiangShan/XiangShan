@@ -257,7 +257,7 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
 }

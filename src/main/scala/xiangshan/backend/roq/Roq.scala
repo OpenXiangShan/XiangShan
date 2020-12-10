@@ -164,7 +164,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(firedDispatch)}\n")
 
   val dispatchCnt = PopCount(firedDispatch)
-  enqPtrExt := enqPtrExt + PopCount(firedDispatch)
+  enqPtrExt := enqPtrExt + dispatchCnt
   when (firedDispatch.orR) {
     XSInfo("dispatched %d insts\n", dispatchCnt)
   }
@@ -220,8 +220,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     walkPtrVec(i) := walkPtrExt - i.U
     shouldWalkVec(i) := i.U < walkCounter
   }
-  val walkFinished = walkCounter <= CommitWidth.U && // walk finish in this cycle
-    !io.brqRedirect.valid // no new redirect comes and update walkptr
+  val walkFinished = walkCounter <= CommitWidth.U //&& // walk finish in this cycle
+    //!io.brqRedirect.valid // no new redirect comes and update walkptr
 
   // extra space is used weh roq has no enough space, but mispredict recovery needs such info to walk regmap
   val needExtraSpaceForMPR = WireInit(VecInit(
@@ -346,12 +346,13 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk
-    walkPtrExt := Mux(state === s_walk && !walkFinished, walkPtrExt - CommitWidth.U, Mux(state === s_extrawalk, walkPtrExt, enqPtrExt - 1.U + dispatchCnt))
+    val nextEnqPtr = (enqPtrExt - 1.U) + dispatchCnt
+    walkPtrExt := Mux(state === s_walk,
+      walkPtrExt - Mux(walkFinished, walkCounter, CommitWidth.U),
+      Mux(state === s_extrawalk, walkPtrExt, nextEnqPtr))
     // walkTgtExt := io.brqRedirect.bits.roqIdx
-    walkCounter := Mux(state === s_walk, 
-      distanceBetween(walkPtrExt, io.brqRedirect.bits.roqIdx) - commitCnt, 
-      distanceBetween(enqPtrExt, io.brqRedirect.bits.roqIdx) + dispatchCnt -1.U,
-    )
+    val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtrExt, nextEnqPtr)
+    walkCounter := distanceBetween(currentWalkPtr, io.brqRedirect.bits.roqIdx) - Mux(state === s_walk, commitCnt, 0.U)
     enqPtrExt := io.brqRedirect.bits.roqIdx + 1.U
   }
 
@@ -425,14 +426,14 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
   // rollback: write all 
   // when rollback, reset writebacked entry to valid
-  when(io.memRedirect.valid) { // TODO: opt timing
-    for (i <- 0 until RoqSize) {
-      val recRoqIdx = RoqPtr(flagBkup(i), i.U)
-      when (valid(i) && isAfter(recRoqIdx, io.memRedirect.bits.roqIdx)) {
-        writebacked(i) := false.B
-      }
-    }
-  }
+  // when(io.memRedirect.valid) { // TODO: opt timing
+  //   for (i <- 0 until RoqSize) {
+  //     val recRoqIdx = RoqPtr(flagBkup(i), i.U)
+  //     when (valid(i) && isAfter(recRoqIdx, io.memRedirect.bits.roqIdx)) {
+  //       writebacked(i) := false.B
+  //     }
+  //   }
+  // }
 
   // read
   // deqPtrWritebacked
