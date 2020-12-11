@@ -244,9 +244,10 @@ class ICache extends ICacheModule
         sourceVec_16bit(i*4 + j) := sourceVec(i)(j*16+15, j*16)
       }
     }
-    val cutPacket = WireInit(VecInit(Seq.fill(blockWords * 2){0.U(RVCInsLen.W)}))
-    (0 until blockWords * 2).foreach{ i =>
-      cutPacket(i) := Mux(mask(i).asBool,sourceVec_16bit(startPtr + i.U),0.U)
+    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(RVCInsLen.W)}))
+    val start = Cat(startPtr(4,3),0.U(3.W))
+    (0 until PredictWidth ).foreach{ i =>
+      cutPacket(i) := Mux(mask(i).asBool,sourceVec_16bit(start + i.U),0.U)
     }
     cutPacket.asUInt
   }
