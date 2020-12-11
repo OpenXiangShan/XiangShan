@@ -67,7 +67,7 @@ class Dispatch extends XSModule {
 
   // pipeline between rename and dispatch
   // accepts all at once
-  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
+  val redirectValid = io.redirect.valid// && !io.redirect.bits.isReplay
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), redirectValid)
   }

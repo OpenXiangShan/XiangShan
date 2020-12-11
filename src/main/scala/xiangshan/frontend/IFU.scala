@@ -32,7 +32,7 @@ class GlobalHistoryInfo() extends XSBundle {
 class IFUIO extends XSBundle
 {
   val fetchPacket = DecoupledIO(new FetchPacket)
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val icacheReq = DecoupledIO(new ICacheReq)
@@ -333,7 +333,7 @@ class IFU extends XSModule with HasIFUConst
   }
 
   when (io.redirect.valid) {
-    if1_npc := io.redirect.bits.target
+    if1_npc := io.redirect.bits
   }
 
   when(inLoop) {
@@ -450,9 +450,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
     XSDebug(io.icacheFlush(0).asBool, "Flush icache stage2...\n")
     XSDebug(io.icacheFlush(1).asBool, "Flush icache stage3...\n")
-    XSDebug(io.redirect.valid, "Redirect from backend! isExcp=%d isFpp:%d isMisPred=%d isReplay=%d pc=%x\n",
-      io.redirect.bits.isException, io.redirect.bits.isFlushPipe, io.redirect.bits.isMisPred, io.redirect.bits.isReplay, io.redirect.bits.pc)
-    XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits.target)} brTag=${io.redirect.bits.brTag}\n")
+    XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits)}\n")
 
     XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x ptr=%d mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, ptr, mask(if1_npc))
     XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x ptr=%d snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_histPtr, if2_snpc)

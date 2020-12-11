@@ -54,6 +54,11 @@ class Rename extends XSModule {
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
+  val walkValid = Cat(io.roqCommits.map(_.valid)).orR && io.roqCommits(0).bits.isWalk
+  fpFreeList.walk.valid := walkValid
+  intFreeList.walk.valid := walkValid
+  fpFreeList.walk.bits := PopCount(io.roqCommits.map(c => c.valid && needDestReg(true, c.bits.uop)))
+  intFreeList.walk.bits := PopCount(io.roqCommits.map(c => c.valid && needDestReg(false, c.bits.uop)))
 
   val uops = Wire(Vec(RenameWidth, new MicroOp))
 

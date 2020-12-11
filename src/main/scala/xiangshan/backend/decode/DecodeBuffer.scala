@@ -24,7 +24,7 @@ class DecodeBuffer extends XSModule {
     })
   )
 
-  val flush = io.redirect.valid && !io.redirect.bits.isReplay
+  val flush = io.redirect.valid// && !io.redirect.bits.isReplay
 
   for( i <- 0 until RenameWidth){
     when(io.out(i).fire()){
