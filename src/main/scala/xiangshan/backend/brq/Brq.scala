@@ -99,12 +99,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
                commitIdx     =  6
    */
   val headIdxOH = UIntToOH(headIdx)
-  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
-  for(i <- headIdxMaskHiVec.indices){
-    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
-  }
-  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
-  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
+  val headIdxMaskLo = headIdxOH - 1.U
+  val headIdxMaskHi = ~headIdxMaskLo
 
   val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
   val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
@@ -182,11 +178,12 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // branch insts enq
+  val validEntries = distanceBetween(tailPtr, headPtr)
   for(i <- 0 until DecodeWidth){
     val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := stateQueue(idx).isInvalid
+    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
     io.brTags(i) := brTag
     when(io.enqReqs(i).fire()){
       brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc

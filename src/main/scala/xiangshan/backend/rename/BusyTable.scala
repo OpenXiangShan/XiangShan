@@ -12,8 +12,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // set preg state to ready (write back regfile + roq walk)
     val wbPregs = Vec(numWritePorts, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
-    // set preg state to busy when replay
-    val replayPregs = Vec(ReplayWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     // read preg state
     val rfReadAddr = Vec(numReadPorts, Input(UInt(PhyRegIdxWidth.W)))
     val pregRdy = Vec(numReadPorts, Output(Bool()))
@@ -27,17 +25,15 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int) extends XSModule {
 
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
-  val replayMask = reqVecToMask(io.replayPregs)
 
   val tableAfterWb = table & (~wbMask).asUInt
   val tableAfterAlloc = tableAfterWb | allocMask
-  val tableAfterReplay = tableAfterAlloc | replayMask
 
   for((raddr, rdy) <- io.rfReadAddr.zip(io.pregRdy)){
     rdy := !tableAfterWb(raddr)
   }
 
-  table := tableAfterReplay
+  table := tableAfterAlloc
 
 //  for((alloc, i) <- io.allocPregs.zipWithIndex){
 //    when(alloc.valid){
