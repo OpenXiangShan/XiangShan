@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import chisel3.experimental.chiselName
 
 import scala.math.min
 
@@ -38,6 +39,7 @@ class FakeSCTable extends BaseSCTable {
   io.resp := 0.U.asTypeOf(Vec(TageBanks, new SCResp))
 }
 
+@chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int) extends BaseSCTable(nRows, ctrBits, histLen) {
 
   val table = List.fill(TageBanks) {

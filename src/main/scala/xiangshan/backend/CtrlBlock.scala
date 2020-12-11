@@ -2,6 +2,7 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
+import utils._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
 import xiangshan.backend.rename.{Rename, BusyTable}
@@ -37,7 +38,7 @@ class CtrlToLsBlockIO extends XSBundle {
   val redirect = ValidIO(new Redirect)
 }
 
-class CtrlBlock extends XSModule {
+class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val frontend = Flipped(new FrontendToBackendIO)
     val fromIntBlock = Flipped(new IntBlockToCtrlIO)
@@ -55,7 +56,6 @@ class CtrlBlock extends XSModule {
       val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
       val roqDeqPtr = Output(new RoqPtr)
     }
-    val oldestStore = Input(Valid(new RoqPtr))
   })
 
   val decode = Module(new DecodeStage)
@@ -70,18 +70,17 @@ class CtrlBlock extends XSModule {
 
   val roq = Module(new Roq(roqWbSize))
 
-  val redirect = Mux(
-    roq.io.redirect.valid,
-    roq.io.redirect,
-    Mux(
-      brq.io.redirect.valid,
-      brq.io.redirect,
-      io.fromLsBlock.replay
-    )
-  )
+  // When replay and mis-prediction have the same roqIdx,
+  // mis-prediction should have higher priority, since mis-prediction flushes the load instruction.
+  // Thus, only when mis-prediction roqIdx is after replay roqIdx, replay should be valid.
+  val brqIsAfterLsq = isAfter(brq.io.redirect.bits.roqIdx, io.fromLsBlock.replay.bits.roqIdx)
+  val redirectArb = Mux(io.fromLsBlock.replay.valid && (!brq.io.redirect.valid || brqIsAfterLsq),
+    io.fromLsBlock.replay.bits, brq.io.redirect.bits)
+  val redirectValid = roq.io.redirect.valid || brq.io.redirect.valid || io.fromLsBlock.replay.valid
+  val redirect = Mux(roq.io.redirect.valid, roq.io.redirect.bits, redirectArb)
 
-  io.frontend.redirect := redirect
-  io.frontend.redirect.valid := redirect.valid && !redirect.bits.isReplay
+  io.frontend.redirect.valid := redirectValid
+  io.frontend.redirect.bits := Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target)
   io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
   io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
 
@@ -91,28 +90,27 @@ class CtrlBlock extends XSModule {
   decode.io.out <> decBuf.io.in
 
   brq.io.roqRedirect <> roq.io.redirect
-  brq.io.memRedirect <> io.fromLsBlock.replay
+  brq.io.memRedirect.valid := brq.io.redirect.valid || io.fromLsBlock.replay.valid
+  brq.io.memRedirect.bits <> redirectArb
   brq.io.bcommit <> roq.io.bcommit
   brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
   decBuf.io.isWalking := roq.io.commits(0).valid && roq.io.commits(0).bits.isWalk
-  decBuf.io.redirect <> redirect
+  decBuf.io.redirect.valid <> redirectValid
+  decBuf.io.redirect.bits <> redirect
   decBuf.io.out <> rename.io.in
 
-  rename.io.redirect <> redirect
+  rename.io.redirect.valid <> redirectValid
+  rename.io.redirect.bits <> redirect
   rename.io.roqCommits <> roq.io.commits
   rename.io.out <> dispatch.io.fromRename
   rename.io.renameBypass <> dispatch.io.renameBypass
 
-  dispatch.io.redirect <> redirect
+  dispatch.io.redirect.valid <> redirectValid
+  dispatch.io.redirect.bits <> redirect
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.toLsBlock.enqLsq
-  dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.oldestStore.valid
-  dispatch.io.dequeueRoqIndex.bits := Mux(io.oldestStore.valid,
-    io.oldestStore.bits,
-    roq.io.commitRoqIndex.bits
-  )
   dispatch.io.readIntRf <> io.toIntBlock.readRf
   dispatch.io.readFpRf <> io.toFpBlock.readRf
   dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
@@ -126,7 +124,7 @@ class CtrlBlock extends XSModule {
   dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
-  val flush = redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe)
+  val flush = redirectValid && (redirect.isException || redirect.isFlushPipe)
   fpBusyTable.io.flush := flush
   intBusyTable.io.flush := flush
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
@@ -141,15 +139,11 @@ class CtrlBlock extends XSModule {
   intBusyTable.io.pregRdy <> dispatch.io.intPregRdy
   fpBusyTable.io.rfReadAddr <> dispatch.io.readFpRf.map(_.addr)
   fpBusyTable.io.pregRdy <> dispatch.io.fpPregRdy
-  for(i <- 0 until ReplayWidth){
-    intBusyTable.io.replayPregs(i).valid := dispatch.io.replayPregReq(i).isInt
-    fpBusyTable.io.replayPregs(i).valid := dispatch.io.replayPregReq(i).isFp
-    intBusyTable.io.replayPregs(i).bits := dispatch.io.replayPregReq(i).preg
-    fpBusyTable.io.replayPregs(i).bits := dispatch.io.replayPregReq(i).preg
-  }
 
-  roq.io.memRedirect <> io.fromLsBlock.replay
-  roq.io.brqRedirect <> brq.io.redirect
+  roq.io.memRedirect := DontCare
+  roq.io.memRedirect.valid := false.B
+  roq.io.brqRedirect.valid := brq.io.redirect.valid || io.fromLsBlock.replay.valid
+  roq.io.brqRedirect.bits <> redirectArb
   roq.io.exeWbResults.take(roqWbSize-1).zip(
     io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
   ).foreach{
@@ -159,9 +153,12 @@ class CtrlBlock extends XSModule {
   }
   roq.io.exeWbResults.last := brq.io.out
 
-  io.toIntBlock.redirect := redirect
-  io.toFpBlock.redirect := redirect
-  io.toLsBlock.redirect := redirect
+  io.toIntBlock.redirect.valid := redirectValid
+  io.toIntBlock.redirect.bits := redirect
+  io.toFpBlock.redirect.valid := redirectValid
+  io.toFpBlock.redirect.bits := redirect
+  io.toLsBlock.redirect.valid := redirectValid
+  io.toLsBlock.redirect.bits := redirect
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
