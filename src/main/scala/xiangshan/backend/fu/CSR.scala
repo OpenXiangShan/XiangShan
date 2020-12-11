@@ -823,7 +823,6 @@ class CSR extends FunctionUnit with HasCSRConst
     "MbpIWrong"   -> (0xb0b, "perfCntCondMbpIWrong"   ),
     "MbpRRight"   -> (0xb0c, "perfCntCondMbpRRight"   ),
     "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"   ),
-    "DpqReplay"   -> (0xb0e, "perfCntCondDpqReplay"   ),
     "RoqWalk"     -> (0xb0f, "perfCntCondRoqWalk"     ),
     "RoqWaitInt"  -> (0xb10, "perfCntCondRoqWaitInt"  ),
     "RoqWaitFp"   -> (0xb11, "perfCntCondRoqWaitFp"   ),

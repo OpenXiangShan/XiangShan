@@ -56,7 +56,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
       val roqDeqPtr = Output(new RoqPtr)
     }
-    val oldestStore = Input(Valid(new RoqPtr))
   })
 
   val decode = Module(new DecodeStage)
@@ -112,11 +111,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   dispatch.io.redirect.bits <> redirect
   dispatch.io.enqRoq <> roq.io.enq
   dispatch.io.enqLsq <> io.toLsBlock.enqLsq
-  dispatch.io.dequeueRoqIndex.valid := roq.io.commitRoqIndex.valid || io.oldestStore.valid
-  dispatch.io.dequeueRoqIndex.bits := Mux(io.oldestStore.valid,
-    io.oldestStore.bits,
-    roq.io.commitRoqIndex.bits
-  )
   dispatch.io.readIntRf <> io.toIntBlock.readRf
   dispatch.io.readFpRf <> io.toFpBlock.readRf
   dispatch.io.allocPregs.zipWithIndex.foreach { case (preg, i) =>
@@ -145,12 +139,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   intBusyTable.io.pregRdy <> dispatch.io.intPregRdy
   fpBusyTable.io.rfReadAddr <> dispatch.io.readFpRf.map(_.addr)
   fpBusyTable.io.pregRdy <> dispatch.io.fpPregRdy
-  for(i <- 0 until ReplayWidth){
-    intBusyTable.io.replayPregs(i).valid := dispatch.io.replayPregReq(i).isInt
-    fpBusyTable.io.replayPregs(i).valid := dispatch.io.replayPregReq(i).isFp
-    intBusyTable.io.replayPregs(i).bits := dispatch.io.replayPregReq(i).preg
-    fpBusyTable.io.replayPregs(i).bits := dispatch.io.replayPregReq(i).preg
-  }
 
   roq.io.memRedirect := DontCare
   roq.io.memRedirect.valid := false.B
