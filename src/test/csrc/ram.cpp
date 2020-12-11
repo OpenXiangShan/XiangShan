@@ -4,7 +4,7 @@
 #include "common.h"
 #include "ram.h"
 
-#define RAMSIZE (64 * 1024 * 1024 * 1024UL)
+#define RAMSIZE (256 * 1024 * 1024UL)
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
@@ -104,9 +104,9 @@ void addpageSv39() {
 #endif
 
 // Return whether the file is a gz file
-int isGzFile(const char *img) {
-  assert(img != NULL && strlen(img) >= 4);
-  return !strcmp(img + (strlen(img) - 3), ".gz");
+int isGzFile(const char *filename) {
+  assert(filename != NULL && strlen(filename) >= 4);
+  return !strcmp(filename + (strlen(filename) - 3), ".gz");
 }
 
 // Read binary from .gz file

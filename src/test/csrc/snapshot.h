@@ -32,6 +32,29 @@ public:
   void flush();
   void save();
 };
+
+class VerilatedRestoreMem : public VerilatedDeserialize {
+  const static long buf_size = (1024 * 1024 * 1024UL);
+  uint8_t *buf;
+  long size, buf_ptr;
+  // gzFile compressed_mem;
+
+public:
+  VerilatedRestoreMem() {
+    buf = new uint8_t[buf_size];
+    size = 0;
+  }
+  ~VerilatedRestoreMem() { close(); delete buf; }
+
+  void open(const char* filenamep) VL_MT_UNSAFE_ONE;
+  void open(const std::string& filename) VL_MT_UNSAFE_ONE { open(filename.c_str()); }
+
+  int unbuf_read(uint8_t* dest, long rsize);
+
+  void close();
+  void flush() {}
+  void fill();
+};
 #endif
 
 #endif

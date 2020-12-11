@@ -430,7 +430,7 @@ void Emulator::snapshot_save(const char *filename) {
 }
 
 void Emulator::snapshot_load(const char *filename) {
-  VerilatedRestore stream;
+  VerilatedRestoreMem stream;
   stream.open(filename);
   stream >> *dut_ptr;
 
