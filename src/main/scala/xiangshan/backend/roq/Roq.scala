@@ -55,7 +55,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val exeWbResults = Vec(numWbPorts, Flipped(ValidIO(new ExuOutput)))
     val commits = Vec(CommitWidth, Valid(new RoqCommit))
     val bcommit = Output(UInt(BrTagWidth.W))
-    val commitRoqIndex = Output(Valid(new RoqPtr))
     val roqDeqPtr = Output(new RoqPtr)
     val csr = new RoqCSRIO
   })
@@ -336,9 +335,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
   val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
   XSInfo(retireCounter > 0.U, "retired %d insts\n", retireCounter)
-  val commitOffset = PriorityEncoder((validCommit :+ false.B).map(!_))
-  io.commitRoqIndex.valid := state === s_idle
-  io.commitRoqIndex.bits := deqPtrExt + commitOffset
 
   // commit branch to brq
   io.bcommit := PopCount(cfiCommitVec)
