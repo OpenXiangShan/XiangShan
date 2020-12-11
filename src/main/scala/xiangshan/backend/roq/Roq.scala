@@ -484,7 +484,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   XSPerf("commitInstrLoad", PopCount(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.LOAD)))
   XSPerf("commitInstrStore", PopCount(io.commits.map(c => c.valid && !c.bits.isWalk && c.bits.uop.ctrl.commitType === CommitType.STORE)))
   XSPerf("writeback", PopCount((0 until RoqSize).map(i => valid(i) && writebacked(i))))
-  // XSPerf("enqInstr", PopCount(io.enq.map(_.fire())))
+  // XSPerf("enqInstr", PopCount(io.dp1Req.map(_.fire())))
+  // XSPerf("d2rVnR", PopCount(io.dp1Req.map(p => p.valid && !p.ready)))
   XSPerf("walkInstr", PopCount(io.commits.map(c => c.valid && c.bits.isWalk)))
   XSPerf("walkCycle", state === s_walk || state === s_extrawalk)
   val deqNotWritebacked = valid(deqPtr) && !writebacked(deqPtr)
@@ -493,6 +494,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   XSPerf("waitFpCycle", deqNotWritebacked && deqUopCommitType === CommitType.FP)
   XSPerf("waitLoadCycle", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
   XSPerf("waitStoreCycle", deqNotWritebacked && deqUopCommitType === CommitType.STORE)
+  XSPerf("roqHeadPC", deqUop.cf.pc)
 
   val id = roqDebugId()
   val difftestIntrNO = WireInit(0.U(XLEN.W))
