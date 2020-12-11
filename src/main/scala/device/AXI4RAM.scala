@@ -54,7 +54,7 @@ class AXI4RAM
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
         mem.io.clk   := clock
-        mem.io.en    := !reset.asBool() && (state === s_rdata)
+        mem.io.en    := !reset.asBool() && ((state === s_rdata) || (state === s_wdata))
         mem.io.rIdx  := (rIdx << log2Up(split)) + i.U
         mem.io.wIdx  := (wIdx << log2Up(split)) + i.U
         mem.io.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
