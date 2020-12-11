@@ -78,7 +78,7 @@ class StoreUnit_S1 extends XSModule {
   io.out.bits := io.in.bits
   io.out.bits.miss := false.B
   io.out.bits.mmio := AddressSpace.isMMIO(io.in.bits.paddr)
-  io.out.valid := io.in.fire() // TODO: && ! FP
+  io.out.valid := io.in.valid // TODO: && ! FP
 
   io.stout.bits.uop := io.in.bits.uop
   // io.stout.bits.uop.cf.exceptionVec := // TODO: update according to TLB result
@@ -90,7 +90,7 @@ class StoreUnit_S1 extends XSModule {
   io.stout.bits.fflags := DontCare
 
   val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
-  io.stout.valid := io.in.fire() && (!io.out.bits.mmio || hasException) // mmio inst will be writebacked immediately
+  io.stout.valid := io.in.valid && (!io.out.bits.mmio || hasException) // mmio inst will be writebacked immediately
 
   // if fp
   // io.fp_out.valid := ...
