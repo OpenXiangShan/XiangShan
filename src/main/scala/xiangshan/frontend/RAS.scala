@@ -5,13 +5,14 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
+import chisel3.experimental.chiselName
 
+@chiselName
 class RAS extends BasePredictor
 {
     class RASResp extends Resp
     {
         val target =UInt(VAddrBits.W)
-        val specEmpty = Bool()
     }
 
     class RASBranchInfo extends Meta
@@ -50,6 +51,7 @@ class RAS extends BasePredictor
 
     override val io = IO(new RASIO)
 
+    @chiselName
     class RASStack(val rasSize: Int) extends XSModule {
         val io = IO(new Bundle {
             val push_valid = Input(Bool())
@@ -64,7 +66,7 @@ class RAS extends BasePredictor
             val copy_out_mem = Output(Vec(rasSize, rasEntry()))
             val copy_out_sp  = Output(UInt(log2Up(rasSize).W))
         })
-
+        @chiselName
         class Stack(val size: Int) extends XSModule {
             val io = IO(new Bundle {
                 val rIdx = Input(UInt(log2Up(size).W))
@@ -140,7 +142,7 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = WireInit(io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U)))
+    val spec_new_addr = WireInit(bankAligned(io.pc.bits) + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U)))
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
@@ -167,9 +169,8 @@ class RAS extends BasePredictor
     commit_pop  := !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
 
 
-    io.out.valid := !spec_is_empty && io.is_ret
+    io.out.valid := !spec_is_empty
     io.out.bits.target := spec_top_addr
-    io.out.bits.specEmpty := spec_is_empty
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 

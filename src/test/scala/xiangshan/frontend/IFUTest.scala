@@ -41,7 +41,7 @@ class IFUTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
       // Cycle 5
       //-----------------
       c.io.redirect.valid.poke(true.B)
-      c.io.redirect.bits.target.poke("h80002800".U)
+      c.io.redirect.bits.poke("h80002800".U)
       c.clock.step()
       //-----------------
       // Cycle 6
