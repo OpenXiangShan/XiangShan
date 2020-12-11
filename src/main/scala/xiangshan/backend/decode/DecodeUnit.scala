@@ -32,7 +32,7 @@ abstract trait DecodeConstants {
     //   |            |            |            |           |           |  |  |  |  |  flushPipe
     //   |            |            |            |           |           |  |  |  |  |  |  isRVF
     //   |            |            |            |           |           |  |  |  |  |  |  |  selImm
-    List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, Y, Y, Y, N, N, N, N, SelImm.IMM_X)
+    List(SrcType.DC, SrcType.DC, SrcType.DC, FuType.alu, ALUOpType.sll, N, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
   
     val table: Array[(BitPat, List[BitPat])]
 }
@@ -386,7 +386,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
 
   // fill in exception vector
   cf_ctrl.cf.exceptionVec.map(_ := false.B)
-  cf_ctrl.cf.exceptionVec(illegalInstr) := cs.rfWen && cs.fpWen && cs.isXSTrap
+  cf_ctrl.cf.exceptionVec(illegalInstr) := cs.imm === SelImm.INVALID_INSTR
   cf_ctrl.cf.exceptionVec(instrPageFault) := io.enq.ctrl_flow.exceptionVec(instrPageFault)
   
   // fix frflags

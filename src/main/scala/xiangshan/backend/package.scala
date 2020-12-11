@@ -173,6 +173,7 @@ package object backend {
     def IMM_UJ = "b011".U
     def IMM_I  = "b100".U
     def IMM_Z  = "b101".U
+    def INVALID_INSTR = "b110".U
 
     def apply() = UInt(3.W)
   }

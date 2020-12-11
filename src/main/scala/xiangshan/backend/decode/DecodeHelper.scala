@@ -33,18 +33,6 @@ trait HasInstrType {
   ).map(_===instrType).reduce(_||_)
 }
 
-object SrcType {
-  def reg = "b00".U
-  def pc  = "b01".U
-  def imm = "b01".U
-  def fp  = "b10".U
-
-  def DC = BitPat.dontCare(2)
-
-  def apply() = UInt(2.W)
-}
-
-
 object FuOpType {
   def apply() = UInt(6.W)
 }

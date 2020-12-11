@@ -19,7 +19,7 @@ class DecodeStage extends XSModule {
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
   })
-  val decoders = Seq.fill(DecodeWidth)(Module(new Decoder))
+  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
   val decoderToBrq = Wire(Vec(DecodeWidth, new CfCtrl)) // without brTag and brMask
   val decoderToDecBuffer = Wire(Vec(DecodeWidth, new CfCtrl)) // with brTag and brMask
 
@@ -32,19 +32,19 @@ class DecodeStage extends XSModule {
   //    Second, assert out(i).valid iff in(i).valid and instruction is valid (not implemented) and toBrq(i).ready
 
   for (i <- 0 until DecodeWidth) {
-    decoders(i).io.in <> io.in(i).bits
-    decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
+    decoders(i).io.enq.ctrl_flow <> io.in(i).bits
+    decoderToBrq(i) := decoders(i).io.deq.cf_ctrl // CfCtrl without bfTag and brMask
     decoderToBrq(i).brTag := DontCare
     io.toBrq(i).bits := decoderToBrq(i)
 
-    decoderToDecBuffer(i) := decoders(i).io.out
+    decoderToDecBuffer(i) := decoders(i).io.deq.cf_ctrl
     decoderToDecBuffer(i).brTag := io.brTags(i)
     io.out(i).bits := decoderToDecBuffer(i)
 
     val thisReady = io.out(i).ready && io.toBrq(i).ready
-    val isMret = decoders(i).io.out.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
-    val isSret = decoders(i).io.out.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
-    val thisBrqValid = io.in(i).valid && (!decoders(i).io.out.cf.brUpdate.pd.notCFI || isMret || isSret) && io.out(i).ready
+    val isMret = decoders(i).io.deq.cf_ctrl.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
+    val isSret = decoders(i).io.deq.cf_ctrl.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
+    val thisBrqValid = io.in(i).valid && (!decoders(i).io.deq.cf_ctrl.cf.brUpdate.pd.notCFI || isMret || isSret) && io.out(i).ready
     val thisOutValid =  io.in(i).valid && io.toBrq(i).ready
     io.in(i).ready    := { if (i == 0) thisReady    else io.in(i-1).ready && thisReady }
     io.out(i).valid   := { if (i == 0) thisOutValid else io.in(i-1).ready && thisOutValid }
