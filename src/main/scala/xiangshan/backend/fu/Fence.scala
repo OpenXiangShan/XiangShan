@@ -1,28 +1,40 @@
-package xiangshan.backend.exu
+package xiangshan.backend.fu
 
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import chisel3.util.experimental.BoringUtils
-
 import xiangshan.backend.FenceOpType
 
-class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
-  val (valid, src1, src2, uop, func, lsrc1, lsrc2) = 
-    (io.in.valid, io.in.bits.src1, io.in.bits.src2, io.in.bits.uop, io.in.bits.uop.ctrl.fuOpType, io.in.bits.uop.ctrl.lsrc1, io.in.bits.uop.ctrl.lsrc2)
+class FenceToSbuffer extends XSBundle {
+  val flushSb = Output(Bool())
+  val sbIsEmpty = Input(Bool())
+}
+
+// class Fence extends FunctionUnit(FuConfig(
+  // /*FuType.fence, 1, 0, writeIntRf = false, writeFpRf = false, hasRedirect = false,*/ latency = UncertainLatency()
+// )){
+class Fence extends FunctionUnit{ // TODO: check it
+
+  val sfence = IO(Output(new SfenceBundle))
+  val fencei = IO(Output(Bool()))
+  val toSbuffer = IO(new FenceToSbuffer)
+
+  val (valid, src1, uop, func, lsrc1, lsrc2) = (
+    io.in.valid,
+    io.in.bits.src(0),
+    io.in.bits.uop,
+    io.in.bits.uop.ctrl.fuOpType,
+    io.in.bits.uop.ctrl.lsrc1,
+    io.in.bits.uop.ctrl.lsrc2
+  )
 
   val s_sb :: s_tlb :: s_icache :: s_none :: Nil = Enum(4)
   val state = RegInit(s_sb)
 
-  val sfence  = WireInit(0.U.asTypeOf(new SfenceBundle))
-  val sbuffer = WireInit(false.B)
-  val fencei  = WireInit(false.B)
-  val sbEmpty = WireInit(false.B)
-  BoringUtils.addSource(sbuffer, "FenceUnitSbufferFlush")
-  BoringUtils.addSource(sfence, "SfenceBundle")
-  BoringUtils.addSource(fencei,  "FenceI")
-  BoringUtils.addSink(sbEmpty, "SBufferEmpty")
+  val sbuffer = toSbuffer.flushSb
+  val sbEmpty = toSbuffer.sbIsEmpty
+
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := valid && state === s_sb && !sbEmpty
   fencei       := (state === s_icache && sbEmpty) || (state === s_sb && valid && sbEmpty && func === FenceOpType.fencei)
@@ -34,16 +46,13 @@ class FenceExeUnit extends Exu(Exu.fenceExeUnitCfg) {
   when (state === s_sb && valid && func === FenceOpType.fencei && !sbEmpty) { state := s_icache }
   when (state === s_sb && valid && func === FenceOpType.sfence && !sbEmpty) { state := s_tlb }
   when (state === s_sb && valid && func === FenceOpType.fence  && !sbEmpty) { state := s_none }
-  when (state =/= s_sb && sbEmpty) { state := s_sb } 
+  when (state =/= s_sb && sbEmpty) { state := s_sb }
 
   assert(!(io.out.valid && io.out.bits.uop.ctrl.rfWen))
   io.in.ready := state === s_sb
   io.out.valid := (state =/= s_sb && sbEmpty) || (state === s_sb && sbEmpty && valid)
   io.out.bits.data := DontCare
   io.out.bits.uop := Mux(state === s_sb, uop, RegEnable(uop, io.in.fire()))
-  io.out.bits.redirect <> DontCare
-  io.out.bits.redirectValid := false.B
-  io.out.bits.debug <> DontCare
 
   assert(!(valid || state =/= s_sb) || io.out.ready) // NOTE: fence instr must be the first(only one) instr, so io.out.ready must be true
 

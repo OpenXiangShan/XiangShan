@@ -8,9 +8,7 @@ import scala.collection.mutable
 
 class ShowPrintTransform extends Transform with DependencyAPIMigration {
 
-  // The first transform to run
-  override def prerequisites = firrtl.stage.Forms.ChirrtlForm
-  // Invalidates everything
+  override def optionalPrerequisiteOf = firrtl.stage.Forms.MinimalHighForm
   override def invalidates(a: Transform) = true
 
   override protected def execute(state: CircuitState): CircuitState = {
@@ -24,6 +22,10 @@ class ShowPrintTransform extends Transform with DependencyAPIMigration {
     }
     val disableAll = state.annotations.collectFirst {
       case DisableAllPrintAnnotation() => true
+    }.nonEmpty
+
+    val removeAssert = state.annotations.collectFirst{
+      case RemoveAssertAnnotation() => true
     }.nonEmpty
 
     assert(
@@ -56,26 +58,37 @@ class ShowPrintTransform extends Transform with DependencyAPIMigration {
     }
 
     def processModule(m: DefModule): DefModule = {
-      def disableModulePrint = {
+      def disableModulePrint(mod: DefModule) = {
         def disableStmtPrint(s: Statement): Statement = s match {
           case _: Print =>
             EmptyStmt
           case other =>
             other.mapStmt(disableStmtPrint)
         }
-        m.mapStmt(disableStmtPrint)
+        mod.mapStmt(disableStmtPrint)
       }
+      def removeModuleAssert(mod: DefModule)= {
+        def removeStmtAssert(s: Statement): Statement = s match {
+          case _: Stop =>
+            EmptyStmt
+          case other =>
+            other.mapStmt(removeStmtAssert)
+        }
+        mod.mapStmt(removeStmtAssert)
+      }
+
       val isInBlackList = blackList.nonEmpty && (
         blackList.contains(m.name) || blackList.map( b => ancestors(m.name).contains(b)).reduce(_||_)
       )
       val isInWhiteList = whiteList.isEmpty || (
         whiteList.nonEmpty && (whiteList.contains(m.name) || whiteList.map( x => ancestors(m.name).contains(x)).reduce(_||_))
       ) 
-      if( disableAll || isInBlackList || !isInWhiteList ){
-        disableModulePrint
+      val tmpMod = if(disableAll || isInBlackList || !isInWhiteList){
+        disableModulePrint(m)
       } else {
         m
       }
+      if(removeAssert) removeModuleAssert(tmpMod) else tmpMod
     }
 
     state.copy(c.mapModule(processModule))

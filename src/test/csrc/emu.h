@@ -1,6 +1,6 @@
 #include "common.h"
 #include "snapshot.h"
-#include "VXSSimTop.h"
+#include "VXSSimSoC.h"
 #include <verilated_vcd_c.h>	// Trace file format header
 
 #define DIFFTEST_WIDTH 6
@@ -9,6 +9,7 @@
 struct EmuArgs {
   uint32_t seed;
   uint64_t max_cycles;
+  uint64_t max_instr;
   uint64_t log_begin, log_end;
   const char *image;
   const char *snapshot_path;
@@ -17,6 +18,7 @@ struct EmuArgs {
   EmuArgs() {
     seed = 0;
     max_cycles = -1;
+    max_instr = -1;
     log_begin = 1;
     log_end = -1;
     snapshot_path = NULL;
@@ -26,16 +28,19 @@ struct EmuArgs {
 };
 
 class Emulator {
-  VXSSimTop *dut_ptr;
+  VXSSimSoC *dut_ptr;
   VerilatedVcdC* tfp;
   bool enable_waveform;
+#ifdef VM_SAVABLE
   VerilatedSaveMem snapshot_slot[2];
+#endif
   EmuArgs args;
 
   enum {
     STATE_GOODTRAP = 0,
     STATE_BADTRAP,
     STATE_ABORT,
+    STATE_LIMIT_EXCEEDED,
     STATE_RUNNING = -1
   };
 
@@ -58,7 +63,7 @@ class Emulator {
 public:
   Emulator(int argc, const char *argv[]);
   ~Emulator();
-  uint64_t execute(uint64_t n);
+  uint64_t execute(uint64_t max_cycle, uint64_t max_instr);
   uint64_t get_cycles() const { return cycles; }
   EmuArgs get_args() const { return args; }
   bool is_good_trap() { return trapCode == STATE_GOODTRAP; };

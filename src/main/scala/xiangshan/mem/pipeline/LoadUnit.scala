@@ -4,259 +4,177 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants}
+import xiangshan.cache._
+// import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
+import xiangshan.backend.fu.fpu.boxF32ToF64
 
-class LoadToLsroqIO extends XSBundle {
+class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
   val ldout = Flipped(DecoupledIO(new ExuOutput))
   val forward = new LoadForwardQueryIO
 }
 
-class LoadUnit extends XSModule {
+// Load Pipeline Stage 0
+// Generate addr, use addr to query DCache and DTLB
+class LoadUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
-    val ldin = Flipped(Decoupled(new ExuInput))
-    val ldout = Decoupled(new ExuOutput)
+    val in = Flipped(Decoupled(new ExuInput))
+    val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
+    val dtlbReq = DecoupledIO(new TlbReq)
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val dcache = new DCacheWordIO
-    val dtlb = new TlbRequestIO()
-    val sbuffer = new LoadForwardQueryIO
-    val lsroq = new LoadToLsroqIO
+    val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
-  
-  when(io.ldin.valid){
-    XSDebug("load enpipe %x iw %x fw %x\n", io.ldin.bits.uop.cf.pc, io.ldin.bits.uop.ctrl.rfWen, io.ldin.bits.uop.ctrl.fpWen)
-  }
 
-  //-------------------------------------------------------
-  // Load Pipeline
-  //-------------------------------------------------------
+  val s0_uop = io.in.bits.uop
+  val s0_vaddr = io.in.bits.src1 + s0_uop.ctrl.imm
+  val s0_paddr = io.dtlbResp.bits.paddr
+  val s0_tlb_miss = io.dtlbResp.bits.miss
+  val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
-  val l2_out = Wire(Decoupled(new LsPipelineBundle))
-  val l4_out = Wire(Decoupled(new LsPipelineBundle))
-  val l5_in  = Wire(Flipped(Decoupled(new LsPipelineBundle)))
+  // query DTLB
+  io.dtlbReq.valid := io.out.valid
+  io.dtlbReq.bits.vaddr := s0_vaddr
+  io.dtlbReq.bits.cmd := TlbCmd.read
+  io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
+  io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
+  io.dtlbResp.ready := io.out.ready // TODO: check it: io.out.fire()?
 
-  //-------------------------------------------------------
-  // LD Pipeline Stage 2
-  // Generate addr, use addr to query DCache Tag and DTLB
-  //-------------------------------------------------------
+  // feedback tlb result to RS
+  // Note: can be moved to s1
+  io.tlbFeedback.valid := io.out.valid
+  io.tlbFeedback.bits.hit := !s0_tlb_miss
+  io.tlbFeedback.bits.roqIdx := s0_uop.roqIdx
 
-  val l2_dtlb_hit  = Wire(new Bool())
-  val l2_dtlb_miss = Wire(new Bool())
-  val l2_dcache = Wire(new Bool())
-  val l2_mmio = Wire(new Bool())
-  val isMMIOReq = Wire(new Bool())
+  // query DCache
+  io.dcacheReq.valid := io.in.valid && !s0_uop.roqIdx.needFlush(io.redirect)
+  io.dcacheReq.bits.cmd  := MemoryOpConstants.M_XRD
+  io.dcacheReq.bits.addr := s0_vaddr
+  io.dcacheReq.bits.mask := s0_mask
+  io.dcacheReq.bits.data := DontCare
 
-  // send req to dtlb
-  io.dtlb.req.valid := l2_out.valid
-  io.dtlb.req.bits.vaddr := l2_out.bits.vaddr
-  io.dtlb.req.bits.cmd := TlbCmd.read
-  io.dtlb.req.bits.roqIdx := l2_out.bits.uop.roqIdx
-  io.dtlb.req.bits.debug.pc := l2_out.bits.uop.cf.pc
-  io.dtlb.req.bits.debug.lsroqIdx := l2_out.bits.uop.lsroqIdx // FIXME: need update
+  // TODO: update cache meta
+  io.dcacheReq.bits.meta.id       := DontCare
+  io.dcacheReq.bits.meta.vaddr    := s0_vaddr
+  io.dcacheReq.bits.meta.paddr    := DontCare
+  io.dcacheReq.bits.meta.uop      := s0_uop
+  io.dcacheReq.bits.meta.mmio     := false.B
+  io.dcacheReq.bits.meta.tlb_miss := false.B
+  io.dcacheReq.bits.meta.mask     := s0_mask
+  io.dcacheReq.bits.meta.replay   := false.B
 
-  l2_dtlb_hit  := io.dtlb.resp.valid && !io.dtlb.resp.bits.miss
-  l2_dtlb_miss := io.dtlb.resp.valid && io.dtlb.resp.bits.miss
-  isMMIOReq := AddressSpace.isMMIO(io.dtlb.resp.bits.paddr)
-  l2_dcache := l2_dtlb_hit && !isMMIOReq
-  l2_mmio   := l2_dtlb_hit && isMMIOReq
-
-  // l2_out is used to generate dcache req
-  l2_out.bits := DontCare
-  l2_out.bits.vaddr := io.ldin.bits.src1 + io.ldin.bits.uop.ctrl.imm
-  l2_out.bits.paddr := io.dtlb.resp.bits.paddr
-  l2_out.bits.mask  := genWmask(l2_out.bits.vaddr, io.ldin.bits.uop.ctrl.fuOpType(1,0))
-  l2_out.bits.uop   := io.ldin.bits.uop
-  l2_out.bits.miss  := false.B
-  l2_out.bits.mmio  := l2_mmio
-  l2_out.valid := io.ldin.valid && !io.ldin.bits.uop.roqIdx.needFlush(io.redirect)
-  // when we are sure it's a MMIO req, we do not need to wait for cache ready
-  l2_out.ready := (l2_dcache && io.dcache.req.ready) || l2_mmio || l2_dtlb_miss
-  io.ldin.ready := l2_out.ready
-
-  // exception check
-  val addrAligned = LookupTree(io.ldin.bits.uop.ctrl.fuOpType(1,0), List(
-    "b00".U   -> true.B,              //b
-    "b01".U   -> (l2_out.bits.vaddr(0) === 0.U),   //h
-    "b10".U   -> (l2_out.bits.vaddr(1,0) === 0.U), //w
-    "b11".U   -> (l2_out.bits.vaddr(2,0) === 0.U)  //d
+  val addrAligned = LookupTree(s0_uop.ctrl.fuOpType(1, 0), List(
+    "b00".U   -> true.B,                   //b
+    "b01".U   -> (s0_vaddr(0)    === 0.U), //h
+    "b10".U   -> (s0_vaddr(1, 0) === 0.U), //w
+    "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
-  l2_out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
-  l2_out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlb.resp.bits.excp.pf.ld
 
-  // send result to dcache
-  // never send tlb missed or MMIO reqs to dcache
-  io.dcache.req.valid     := l2_dcache
+  io.out.valid := io.dcacheReq.fire() && // dcache may not accept load request
+    !io.in.bits.uop.roqIdx.needFlush(io.redirect)
+  io.out.bits := DontCare
+  io.out.bits.vaddr := s0_vaddr
+  io.out.bits.paddr := s0_paddr
+  io.out.bits.tlbMiss := io.dtlbResp.bits.miss
+  io.out.bits.mask := s0_mask
+  io.out.bits.uop := s0_uop
+  io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
+  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
-  io.dcache.req.bits.cmd  := MemoryOpConstants.M_XRD
-  // TODO: vaddr
-  io.dcache.req.bits.addr := io.dtlb.resp.bits.paddr 
-  io.dcache.req.bits.data := DontCare
-  io.dcache.req.bits.mask := l2_out.bits.mask
+  io.in.ready := io.out.fire()
 
-  io.dcache.req.bits.meta.id       := DontCare
-  io.dcache.req.bits.meta.vaddr    := l2_out.bits.vaddr
-  io.dcache.req.bits.meta.paddr    := io.dtlb.resp.bits.paddr
-  io.dcache.req.bits.meta.uop      := l2_out.bits.uop
-  io.dcache.req.bits.meta.mmio     := isMMIOReq
-  io.dcache.req.bits.meta.tlb_miss := io.dtlb.resp.bits.miss
-  io.dcache.req.bits.meta.mask     := l2_out.bits.mask
-  io.dcache.req.bits.meta.replay   := false.B
-
-
-  val l2_tlbFeedback = Wire(new TlbFeedback)
-  l2_tlbFeedback.hit := !io.dtlb.resp.bits.miss
-  l2_tlbFeedback.roqIdx := l2_out.bits.uop.roqIdx
-
-  // dump l2
-  XSDebug(l2_out.valid, "L2: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
-    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr,
-    l2_out.bits.uop.ctrl.fuOpType, l2_out.bits.data, l2_out.bits.mask,
-    l2_dtlb_miss, l2_dcache, l2_mmio)
-
-  XSDebug(l2_out.fire(), "load req: pc 0x%x addr 0x%x -> 0x%x op %b\n",
-    l2_out.bits.uop.cf.pc, l2_out.bits.vaddr, l2_out.bits.paddr, l2_out.bits.uop.ctrl.fuOpType)
-
-  XSDebug(io.dcache.req.valid, p"dcache req(${io.dcache.req.valid} ${io.dcache.req.ready}): pc:0x${Hexadecimal(io.dcache.req.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.req.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.req.bits.meta.uop.lsroqIdx} addr:0x${Hexadecimal(io.dcache.req.bits.addr)} vaddr:0x${Hexadecimal(io.dcache.req.bits.meta.vaddr)} paddr:0x${Hexadecimal(io.dcache.req.bits.meta.paddr)} mmio:${io.dcache.req.bits.meta.mmio} tlb_miss:${io.dcache.req.bits.meta.tlb_miss} mask:${io.dcache.req.bits.meta.mask}\n")
-
-  //-------------------------------------------------------
-  // LD Pipeline Stage 3
-  // Compare tag, use addr to query DCache Data
-  //-------------------------------------------------------
-
-  val l3_valid = RegNext(l2_out.fire(), false.B)
-  val l3_dtlb_miss = RegEnable(next = l2_dtlb_miss, enable = l2_out.fire(), init = false.B)
-  val l3_dcache = RegEnable(next = l2_dcache, enable = l2_out.fire(), init = false.B)
-  val l3_tlbFeedback = RegEnable(next = l2_tlbFeedback, enable = l2_out.fire())
-  val l3_bundle = RegEnable(next = l2_out.bits, enable = l2_out.fire())
-  val l3_uop = l3_bundle.uop
-  // dltb miss reqs ends here
-  val l3_passdown = l3_valid && !l3_dtlb_miss && !l3_uop.roqIdx.needFlush(io.redirect)
-
-  io.tlbFeedback.valid := l3_valid
-  io.tlbFeedback.bits := l3_tlbFeedback
-  io.dcache.s1_kill := l3_valid && l3_dcache && l3_uop.roqIdx.needFlush(io.redirect)
-
-  // dump l3
-  XSDebug(l3_valid, "l3: pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x dltb_miss %b dcache %b mmio %b\n",
-    l3_bundle.uop.cf.pc, l3_bundle.vaddr, l3_bundle.paddr,
-    l3_bundle.uop.ctrl.fuOpType, l3_bundle.data, l3_bundle.mask,
-    l3_dtlb_miss, l3_dcache, l3_bundle.mmio)
-
-  XSDebug(io.tlbFeedback.valid, "tlbFeedback: hit %b roqIdx %d\n",
-    io.tlbFeedback.bits.hit, io.tlbFeedback.bits.roqIdx.asUInt)
-
-  XSDebug(io.dcache.s1_kill, "l3: dcache s1_kill\n")
-
-  // Done in Dcache
-
-  //-------------------------------------------------------
-  // LD Pipeline Stage 4
-  // Dcache return result, do tag ecc check and forward check
-  //-------------------------------------------------------
-
-  val l4_valid = RegNext(l3_passdown, false.B)
-  val l4_dcache = RegNext(l3_dcache, false.B)
-  val l4_bundle = RegNext(l3_bundle)
-
-  val fullForward = Wire(Bool())
-
-  assert(!(io.dcache.resp.ready && !io.dcache.resp.valid), "DCache response got lost")
-  io.dcache.resp.ready := l4_valid && l4_dcache
-  when (io.dcache.resp.fire()) {
-    l4_out.bits := DontCare
-    l4_out.bits.data  := io.dcache.resp.bits.data
-    l4_out.bits.paddr := io.dcache.resp.bits.meta.paddr
-    l4_out.bits.uop   := io.dcache.resp.bits.meta.uop
-    l4_out.bits.mmio  := io.dcache.resp.bits.meta.mmio
-    l4_out.bits.mask  := io.dcache.resp.bits.meta.mask
-    // when we can get the data completely from forward
-    // we no longer need to access dcache
-    // treat nack as miss
-    l4_out.bits.miss  := Mux(fullForward, false.B,
-      io.dcache.resp.bits.miss || io.dcache.resp.bits.nack)
-    XSDebug(io.dcache.resp.fire(), p"DcacheResp(l4): data:0x${Hexadecimal(io.dcache.resp.bits.data)} paddr:0x${Hexadecimal(io.dcache.resp.bits.meta.paddr)} pc:0x${Hexadecimal(io.dcache.resp.bits.meta.uop.cf.pc)} roqIdx:${io.dcache.resp.bits.meta.uop.roqIdx} lsroqIdx:${io.dcache.resp.bits.meta.uop.lsroqIdx} miss:${io.dcache.resp.bits.miss}\n")
-  } .otherwise {
-    l4_out.bits := l4_bundle
-  }
-  l4_out.valid := l4_valid && !l4_out.bits.uop.roqIdx.needFlush(io.redirect)
-
-  // Store addr forward match
-  // If match, get data / fmask from store queue / store buffer
-
-  // io.lsroq.forward := DontCare
-  io.lsroq.forward.paddr := l4_out.bits.paddr
-  io.lsroq.forward.mask := io.dcache.resp.bits.meta.mask
-  io.lsroq.forward.lsroqIdx := l4_out.bits.uop.lsroqIdx
-  io.lsroq.forward.sqIdx := l4_out.bits.uop.sqIdx
-  io.lsroq.forward.uop := l4_out.bits.uop
-  io.lsroq.forward.pc := l4_out.bits.uop.cf.pc
-  io.lsroq.forward.valid := io.dcache.resp.valid //TODO: opt timing
-
-  io.sbuffer.paddr := l4_out.bits.paddr
-  io.sbuffer.mask := io.dcache.resp.bits.meta.mask
-  io.sbuffer.lsroqIdx := l4_out.bits.uop.lsroqIdx
-  io.sbuffer.sqIdx := l4_out.bits.uop.sqIdx
-  io.sbuffer.uop := DontCare
-  io.sbuffer.pc := l4_out.bits.uop.cf.pc
-  io.sbuffer.valid := l4_out.valid
-
-  val forwardVec = WireInit(io.sbuffer.forwardData)
-  val forwardMask = WireInit(io.sbuffer.forwardMask)
-  // generate XLEN/8 Muxs
-  (0 until XLEN/8).map(j => {
-    when(io.lsroq.forward.forwardMask(j)) {
-      forwardMask(j) := true.B
-      forwardVec(j) := io.lsroq.forward.forwardData(j)
-    }
-  })
-  l4_out.bits.forwardMask := forwardMask
-  l4_out.bits.forwardData := forwardVec
-  fullForward := (~l4_out.bits.forwardMask.asUInt & l4_out.bits.mask) === 0.U
-
-  PipelineConnect(l4_out, l5_in, io.ldout.fire() || (l5_in.bits.miss || l5_in.bits.mmio) && l5_in.valid, false.B)
-
-  XSDebug(l4_valid, "l4: out.valid:%d pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x dcache %b mmio %b miss:%d\n",
-    l4_out.valid, l4_out.bits.uop.cf.pc, l4_out.bits.vaddr, l4_out.bits.paddr,
-    l4_out.bits.uop.ctrl.fuOpType, l4_out.bits.data, l4_out.bits.mask,
-    l4_out.bits.forwardData.asUInt, l4_out.bits.forwardMask.asUInt, l4_dcache, l4_out.bits.mmio, l4_out.bits.miss)
-
-  XSDebug(l5_in.valid, "L5(%d %d): pc 0x%x addr 0x%x -> 0x%x op %b data 0x%x mask %x forwardData: 0x%x forwardMask: %x\n",
-    l5_in.valid, l5_in.ready, l5_in.bits.uop.cf.pc,  l5_in.bits.vaddr, l5_in.bits.paddr,
-    l5_in.bits.uop.ctrl.fuOpType , l5_in.bits.data,  l5_in.bits.mask,
-    l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt)
-
-  XSDebug(l4_valid, "l4: sbuffer forwardData: 0x%x forwardMask: %x\n",
-    io.sbuffer.forwardData.asUInt, io.sbuffer.forwardMask.asUInt)
-
-  XSDebug(l4_valid, "l4: lsroq forwardData: 0x%x forwardMask: %x\n",
-    io.lsroq.forward.forwardData.asUInt, io.lsroq.forward.forwardMask.asUInt)
-
-  XSDebug(io.redirect.valid,
-    p"Redirect: excp:${io.redirect.bits.isException} flushPipe:${io.redirect.bits.isFlushPipe} misp:${io.redirect.bits.isMisPred} " +
-    p"replay:${io.redirect.bits.isReplay} pc:0x${Hexadecimal(io.redirect.bits.pc)} target:0x${Hexadecimal(io.redirect.bits.target)} " +
-    p"brTag:${io.redirect.bits.brTag} l2:${io.ldin.bits.uop.roqIdx.needFlush(io.redirect)} l3:${l3_uop.roqIdx.needFlush(io.redirect)} " +
-    p"l4:${l4_out.bits.uop.roqIdx.needFlush(io.redirect)}\n"
+  XSDebug(io.dcacheReq.fire(), "[DCACHE LOAD REQ] pc %x vaddr %x paddr will be %x\n",
+    s0_uop.cf.pc, s0_vaddr, s0_paddr
   )
-  //-------------------------------------------------------
-  // LD Pipeline Stage 5
-  // Do data ecc check, merge result and write back to LS ROQ
-  // If cache hit, return writeback result to CDB
-  //-------------------------------------------------------
+}
 
-  val loadWriteBack = l5_in.fire()
+
+// Load Pipeline Stage 1
+// TLB resp (send paddr to dcache)
+class LoadUnit_S1 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
+    val out = Decoupled(new LsPipelineBundle)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val s1_paddr = Output(UInt(PAddrBits.W))
+    val sbuffer = new LoadForwardQueryIO
+    val lsq = new LoadForwardQueryIO
+  })
+
+  val s1_uop = io.in.bits.uop
+  val s1_paddr = io.in.bits.paddr
+  val s1_tlb_miss = io.in.bits.tlbMiss
+  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr) && !io.out.bits.uop.cf.exceptionVec.asUInt.orR
+  val s1_mask = io.in.bits.mask
+
+  io.out.bits := io.in.bits // forwardXX field will be updated in s1
+  io.s1_paddr :=  s1_paddr
+
+  // load forward query datapath
+  io.sbuffer.valid := io.in.valid
+  io.sbuffer.paddr := s1_paddr
+  io.sbuffer.uop := s1_uop
+  io.sbuffer.sqIdx := s1_uop.sqIdx
+  io.sbuffer.mask := s1_mask
+  io.sbuffer.pc := s1_uop.cf.pc // FIXME: remove it
+
+  io.lsq.valid := io.in.valid
+  io.lsq.paddr := s1_paddr
+  io.lsq.uop := s1_uop
+  io.lsq.sqIdx := s1_uop.sqIdx
+  io.lsq.mask := s1_mask
+  io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
+
+  io.out.bits.forwardMask := io.sbuffer.forwardMask
+  io.out.bits.forwardData := io.sbuffer.forwardData
+
+  io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
+  io.out.bits.paddr := s1_paddr
+  io.out.bits.mmio := s1_mmio
+  io.out.bits.tlbMiss := s1_tlb_miss
+
+  io.in.ready := io.out.ready || !io.in.valid
+
+}
+
+
+// Load Pipeline Stage 2
+// DCache resp
+class LoadUnit_S2 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
+    val out = Decoupled(new LsPipelineBundle)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
+    val lsq = new LoadForwardQueryIO
+  })
+
+  val s2_uop = io.in.bits.uop
+  val s2_mask = io.in.bits.mask
+  val s2_paddr = io.in.bits.paddr
+  val s2_cache_miss = io.dcacheResp.bits.miss
+  val s2_cache_nack = io.dcacheResp.bits.nack
+
+
+  io.dcacheResp.ready := true.B
+  assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
+
+  val forwardMask = io.out.bits.forwardMask
+  val forwardData = io.out.bits.forwardData
+  val fullForward = (~forwardMask.asUInt & s2_mask) === 0.U
+
+  XSDebug(io.out.fire(), "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
+    s2_uop.cf.pc,
+    io.lsq.forwardData.asUInt, io.lsq.forwardMask.asUInt,
+    io.in.bits.forwardData.asUInt, io.in.bits.forwardMask.asUInt
+  )
 
   // data merge
-  val rdata = VecInit((0 until 8).map(j => {
-    Mux(l5_in.bits.forwardMask(j),
-      l5_in.bits.forwardData(j),
-      l5_in.bits.data(8*(j+1)-1, 8*j)
-    )
-  })).asUInt
-  val func = l5_in.bits.uop.ctrl.fuOpType
-  val raddr = l5_in.bits.paddr
-  val rdataSel = LookupTree(raddr(2, 0), List(
+  val rdata = VecInit((0 until XLEN / 8).map(j =>
+    Mux(forwardMask(j), forwardData(j), io.dcacheResp.bits.data(8*(j+1)-1, 8*j)))).asUInt
+  val rdataSel = LookupTree(s2_paddr(2, 0), List(
     "b000".U -> rdata(63, 0),
     "b001".U -> rdata(63, 8),
     "b010".U -> rdata(63, 16),
@@ -266,49 +184,135 @@ class LoadUnit extends XSModule {
     "b110".U -> rdata(63, 48),
     "b111".U -> rdata(63, 56)
   ))
-  val rdataPartialLoad = LookupTree(func, List(
+  val rdataPartialLoad = LookupTree(s2_uop.ctrl.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
       LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
       LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
       LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN)
+      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
+      LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
   ))
 
-  // ecc check
-  // TODO
+  // TODO: ECC check
 
-  // if hit, writeback result to CDB
-  // val ldout = Vec(2, Decoupled(new ExuOutput))
-  // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
-  val hitLoadOut = Wire(Decoupled(new ExuOutput))
-  hitLoadOut.bits.uop := l5_in.bits.uop
-  hitLoadOut.bits.data := rdataPartialLoad
+  io.out.valid := io.in.valid // && !s2_uop.needFlush(io.redirect) will cause comb. loop
+  // Inst will be canceled in store queue / lsq,
+  // so we do not need to care about flush in load / store unit's out.valid
+  io.out.bits := io.in.bits
+  io.out.bits.data := rdataPartialLoad
+  io.out.bits.miss := (s2_cache_miss || s2_cache_nack) && !fullForward
+  io.out.bits.mmio := io.in.bits.mmio
+
+  io.in.ready := io.out.ready || !io.in.valid
+
+  // merge forward result
+  io.lsq := DontCare
+  // generate XLEN/8 Muxs
+  for (i <- 0 until XLEN / 8) {
+    when(io.lsq.forwardMask(i)) {
+      io.out.bits.forwardMask(i) := true.B
+      io.out.bits.forwardData(i) := io.lsq.forwardData(i)
+    }
+  }
+
+  XSDebug(io.out.fire(), "[DCACHE LOAD RESP] pc %x rdata %x <- D$ %x + fwd %x(%b)\n",
+    s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
+    io.out.bits.forwardData.asUInt, io.out.bits.forwardMask.asUInt
+  )
+
+}
+
+// class LoadUnit_S3 extends XSModule {
+//   val io = IO(new Bundle() {
+//     val in = Flipped(Decoupled(new LsPipelineBundle))
+//     val out = Decoupled(new LsPipelineBundle)
+//     val redirect = Flipped(ValidIO(new Redirect))
+//   })
+
+//   io.in.ready := true.B
+//   io.out.bits := io.in.bits
+//   io.out.valid := io.in.valid && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
+// }
+
+class LoadUnit extends XSModule {
+  val io = IO(new Bundle() {
+    val ldin = Flipped(Decoupled(new ExuInput))
+    val ldout = Decoupled(new ExuOutput)
+    val redirect = Flipped(ValidIO(new Redirect))
+    val tlbFeedback = ValidIO(new TlbFeedback)
+    val dcache = new DCacheLoadIO
+    val dtlb = new TlbRequestIO()
+    val sbuffer = new LoadForwardQueryIO
+    val lsq = new LoadToLsqIO
+  })
+
+  val load_s0 = Module(new LoadUnit_S0)
+  val load_s1 = Module(new LoadUnit_S1)
+  val load_s2 = Module(new LoadUnit_S2)
+  // val load_s3 = Module(new LoadUnit_S3)
+
+  load_s0.io.in <> io.ldin
+  load_s0.io.redirect <> io.redirect
+  load_s0.io.dtlbReq <> io.dtlb.req
+  load_s0.io.dtlbResp <> io.dtlb.resp
+  load_s0.io.dcacheReq <> io.dcache.req
+  load_s0.io.tlbFeedback <> io.tlbFeedback
+
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, false.B)
+
+  io.dcache.s1_paddr := load_s1.io.out.bits.paddr
+  load_s1.io.redirect <> io.redirect
+  io.dcache.s1_kill := DontCare // FIXME
+  io.sbuffer <> load_s1.io.sbuffer
+  io.lsq.forward <> load_s1.io.lsq
+
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, false.B)
+
+  load_s2.io.redirect <> io.redirect
+  load_s2.io.dcacheResp <> io.dcache.resp
+  load_s2.io.lsq := DontCare 
+  load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData 
+  load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask 
+
+  // PipelineConnect(load_s2.io.fp_out, load_s3.io.in, true.B, false.B)
+  // load_s3.io.redirect <> io.redirect
+
+  XSDebug(load_s0.io.out.valid,
+    p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
+    p"vaddr ${Hexadecimal(load_s0.io.out.bits.vaddr)}, mask ${Hexadecimal(load_s0.io.out.bits.mask)}\n")
+  XSDebug(load_s1.io.out.valid,
+    p"S1: pc ${Hexadecimal(load_s1.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s1.io.out.bits.uop.lqIdx.asUInt)}, tlb_miss ${io.dtlb.resp.bits.miss}, " +
+    p"paddr ${Hexadecimal(load_s1.io.out.bits.paddr)}, mmio ${load_s1.io.out.bits.mmio}\n")
+
+  // writeback to LSQ
+  // Current dcache use MSHR
+  io.lsq.loadIn.valid := load_s2.io.out.valid
+  io.lsq.loadIn.bits := load_s2.io.out.bits
+
+  val hitLoadOut = Wire(Valid(new ExuOutput))
+  hitLoadOut.valid := load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
+  hitLoadOut.bits.uop := load_s2.io.out.bits.uop
+  hitLoadOut.bits.data := load_s2.io.out.bits.data
   hitLoadOut.bits.redirectValid := false.B
   hitLoadOut.bits.redirect := DontCare
   hitLoadOut.bits.brUpdate := DontCare
-  hitLoadOut.bits.debug.isMMIO := l5_in.bits.mmio
-  hitLoadOut.valid := l5_in.valid && !l5_in.bits.mmio && !l5_in.bits.miss // MMIO will be done in lsroq
-  XSDebug(hitLoadOut.fire(), "load writeback: pc %x data %x (%x + %x(%b))\n",
-    hitLoadOut.bits.uop.cf.pc, rdataPartialLoad, l5_in.bits.data,
-    l5_in.bits.forwardData.asUInt, l5_in.bits.forwardMask.asUInt
-  )
+  hitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
+  hitLoadOut.bits.fflags := DontCare
 
-  // writeback to LSROQ
-  // Current dcache use MSHR
-
-  io.lsroq.loadIn.bits := l5_in.bits
-  io.lsroq.loadIn.bits.data := rdataPartialLoad // for debug
-  io.lsroq.loadIn.valid := loadWriteBack
-
-  // pipeline control
-  l5_in.ready := io.ldout.ready
-
-  val cdbArb = Module(new Arbiter(new ExuOutput, 2))
-  io.ldout <> cdbArb.io.out
-  hitLoadOut <> cdbArb.io.in(0)
-  io.lsroq.ldout <> cdbArb.io.in(1) // missLoadOut
+  // TODO: arbiter
+  // if hit, writeback result to CDB
+  // val ldout = Vec(2, Decoupled(new ExuOutput))
+  // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
+  // val cdbArb = Module(new Arbiter(new ExuOutput, 2))
+  // io.ldout <> cdbArb.io.out
+  // hitLoadOut <> cdbArb.io.in(0)
+  // io.lsq.ldout <> cdbArb.io.in(1) // missLoadOut
+  load_s2.io.out.ready := true.B
+  io.lsq.ldout.ready := !hitLoadOut.valid
+  io.ldout.bits := Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits)
+  io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
 
   when(io.ldout.fire()){
     XSDebug("ldout %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)

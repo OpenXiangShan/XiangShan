@@ -15,10 +15,12 @@ class Frontend extends XSModule {
     val icacheToTlb = Flipped(new BlockTlbRequestIO)
     val ptw = new TlbPtwIO
     val backend = new FrontendToBackendIO
+    val sfence = Input(new SfenceBundle)
+    val tlbCsr = Input(new TlbCsrBundle)
   })
 
   val ifu = Module(new IFU)
-  val ibuffer =  if(EnableLB) Module(new LoopBuffer) else Module(new Ibuffer)
+  val ibuffer =  Module(new Ibuffer)
 
   val needFlush = io.backend.redirect.valid
 
@@ -33,6 +35,8 @@ class Frontend extends XSModule {
   //itlb to ptw
   io.ptw <> TLB(
     in = Seq(io.icacheToTlb),
+    sfence = io.sfence,
+    csr = io.tlbCsr,
     width = 1,
     isDtlb = false,
     shouldBlock = true

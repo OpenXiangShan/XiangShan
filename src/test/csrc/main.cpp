@@ -8,6 +8,8 @@ std::function<double()> get_sc_time_stamp = []() -> double { return 0; };
 double sc_time_stamp() { return get_sc_time_stamp(); }
 
 int main(int argc, const char** argv) {
+  printf("Emu compiled at %s, %s\n", __DATE__, __TIME__);
+
   setbuf(stderr, mybuf);
 
   auto emu = new Emulator(argc, argv);
@@ -17,7 +19,7 @@ int main(int argc, const char** argv) {
   };
 
   auto args = emu->get_args();
-  uint64_t cycles = emu->execute(args.max_cycles);
+  uint64_t cycles = emu->execute(args.max_cycles, args.max_instr);
   bool is_good_trap = emu->is_good_trap();
   delete emu;
 

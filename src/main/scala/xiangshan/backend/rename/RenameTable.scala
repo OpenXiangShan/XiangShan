@@ -2,7 +2,6 @@ package xiangshan.backend.rename
 
 import chisel3._
 import chisel3.util._
-import chisel3.util.experimental.BoringUtils
 import xiangshan._
 
 class RatReadPort extends XSBundle {
@@ -36,9 +35,9 @@ class RenameTable(float: Boolean) extends XSModule {
 
   for((r, i) <- io.readPorts.zipWithIndex){
     r.rdata := spec_table(r.addr)
-    for(w <- io.specWritePorts.take(i/{if(float) 4 else 3})){ // bypass
-      when(w.wen && (w.addr === r.addr)){ r.rdata := w.wdata }
-    }
+    // for(w <- io.specWritePorts.take(i/{if(float) 4 else 3})){ // bypass
+    //   when(w.wen && (w.addr === r.addr)){ r.rdata := w.wdata }
+    // }
   }
 
   for(w <- io.archWritePorts){
@@ -52,5 +51,11 @@ class RenameTable(float: Boolean) extends XSModule {
     }
   }
 
-  BoringUtils.addSource(arch_table, if(float) "DEBUG_FP_ARCH_RAT" else "DEBUG_INI_ARCH_RAT")
+  if (!env.FPGAPlatform) {
+    ExcitingUtils.addSource(
+      arch_table,
+      if(float) "DEBUG_FP_ARCH_RAT" else "DEBUG_INI_ARCH_RAT",
+      ExcitingUtils.Debug
+    )
+  }
 }

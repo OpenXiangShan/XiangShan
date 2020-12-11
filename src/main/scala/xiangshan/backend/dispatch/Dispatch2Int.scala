@@ -4,14 +4,15 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.exu.Exu._
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.exu._
 
 class Dispatch2Int extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
-    val regRdy = Vec(NRIntReadPorts, Input(Bool()))
+    val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort))
+    val regRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
     val numExist = Input(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
@@ -27,9 +28,9 @@ class Dispatch2Int extends XSModule {
   val aluPriority = PriorityGen((0 until exuParameters.AluCnt).map(i => io.numExist(i+exuParameters.JmpCnt)))
   val mduPriority = PriorityGen((0 until exuParameters.MduCnt).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.jmpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    aluIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    mduIndexGen.io.validBits(i) := io.fromDq(i).valid && Exu.mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && jumpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    aluIndexGen.io.validBits(i) := io.fromDq(i).valid && aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+    mduIndexGen.io.validBits(i) := io.fromDq(i).valid && mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
     // XSDebug(io.fromDq(i).valid,
     //   p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
   }

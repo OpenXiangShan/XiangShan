@@ -2,14 +2,17 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import bus.simplebus._
 import xiangshan.backend.brq.BrqPtr
+import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
+import xiangshan.frontend.HasIFUConst
+import utils._
+import scala.math.max
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -22,6 +25,7 @@ class FetchPacket extends XSBundle {
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val crossPageIPFFix = Bool()
+  val predTaken = Bool()
 }
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
@@ -36,22 +40,75 @@ object ValidUndirectioned {
   }
 }
 
+class SCMeta(val useSC: Boolean) extends XSBundle with HasTageParameter {
+  def maxVal = 8 * ((1 << TageCtrBits) - 1) + SCTableInfo.map{case (_,cb,_) => (1 << cb) - 1}.reduce(_+_)
+  def minVal = -(8 * (1 << TageCtrBits) + SCTableInfo.map{case (_,cb,_) => 1 << cb}.reduce(_+_))
+  def sumCtrBits = max(log2Ceil(-minVal), log2Ceil(maxVal+1)) + 1
+  val tageTaken = if (useSC) Bool() else UInt(0.W)
+  val scUsed    = if (useSC) Bool() else UInt(0.W)
+  val scPred    = if (useSC) Bool() else UInt(0.W)
+  // Suppose ctrbits of all tables are identical
+  val ctrs      = if (useSC) Vec(SCNTables, SInt(SCCtrBits.W)) else Vec(SCNTables, SInt(0.W))
+  val sumAbs    = if (useSC) UInt(sumCtrBits.W) else UInt(0.W)
+}
+
 class TageMeta extends XSBundle with HasTageParameter {
   val provider = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
   val altDiffers = Bool()
   val providerU = UInt(2.W)
   val providerCtr = UInt(3.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(TageNTables).W))
+  val taken = Bool()
+  val scMeta = new SCMeta(EnableSC)
 }
 
-class BranchPrediction extends XSBundle {
-  val redirect = Bool()
-  val taken = Bool()
-  val jmpIdx = UInt(log2Up(PredictWidth).W)
-  val hasNotTakenBrs = Bool()
-  val target = UInt(VAddrBits.W)
-  val saveHalfRVI = Bool()
-  val takenOnBr = Bool()
+class BranchPrediction extends XSBundle with HasIFUConst {
+  // val redirect = Bool()
+  val takens = UInt(PredictWidth.W)
+  // val jmpIdx = UInt(log2Up(PredictWidth).W)
+  val brMask = UInt(PredictWidth.W)
+  val jalMask = UInt(PredictWidth.W)
+  val targets = Vec(PredictWidth, UInt(VAddrBits.W))
+
+  // marks the last 2 bytes of this fetch packet
+  // val endsAtTheEndOfFirstBank = Bool()
+  // val endsAtTheEndOfLastBank = Bool()
+
+  // half RVI could only start at the end of a bank
+  val firstBankHasHalfRVI = Bool()
+  val lastBankHasHalfRVI = Bool()
+
+  def lastHalfRVIMask = Mux(firstBankHasHalfRVI, UIntToOH((bankWidth-1).U),
+                          Mux(lastBankHasHalfRVI, UIntToOH((PredictWidth-1).U),
+                            0.U(PredictWidth.W)
+                          )
+                        )
+
+  def lastHalfRVIClearMask = ~lastHalfRVIMask
+  // is taken from half RVI
+  def lastHalfRVITaken = (takens & lastHalfRVIMask).orR
+
+  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
+  // should not be used if not lastHalfRVITaken
+  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1))
+  
+  def realTakens  = takens  & lastHalfRVIClearMask
+  def realBrMask  = brMask  & lastHalfRVIClearMask
+  def realJalMask = jalMask & lastHalfRVIClearMask
+
+  def brNotTakens = ~realTakens & realBrMask
+  def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
+                       (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
+  def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
+  def unmaskedJmpIdx = PriorityEncoder(takens)
+  def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(takens.orR))) ||
+                    (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
+  // could get PredictWidth-1 when only the first bank is valid
+  def jmpIdx = PriorityEncoder(realTakens)
+  // only used when taken
+  def target = targets(jmpIdx)
+  def taken = realTakens.orR
+  def takenOnBr = taken && realBrMask(jmpIdx)
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
@@ -85,9 +142,10 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   def fromUInt(x: UInt) = x.asTypeOf(this)
 }
 
-class Predecode extends XSBundle {
-  val isFetchpcEqualFirstpc = Bool()
+class Predecode extends XSBundle with HasIFUConst {
+  val hasLastHalfRVI = Bool()
   val mask = UInt((FetchWidth*2).W)
+  val lastHalf = UInt(nBanksInPacket.W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
 
@@ -127,8 +185,8 @@ class CtrlSignals extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val isXSTrap = Bool()
-  val noSpecExec = Bool()  // This inst can not be speculated
-  val isBlocked  = Bool()  // This inst requires pipeline to be blocked
+  val noSpecExec = Bool()  // wait forward
+  val blockBackward  = Bool()  // block backward
   val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
@@ -153,15 +211,8 @@ class PerfDebugInfo extends XSBundle {
 
 // Load / Store Index
 //
-// When using unified lsroq, lsIdx serves as lsroqIdx,
 // while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
-// All lsroqIdx will be replaced by new lsIdx in the future.
 trait HasLSIdx { this: HasXSParameter =>
-  
-  // if(EnableUnifiedLSQ){
-  // Unified LSQ
-  val lsroqIdx = UInt(LsroqIdxWidth.W)
-  // } else {
   // Separate LSQ
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
@@ -208,28 +259,42 @@ class DebugBundle extends XSBundle{
 
 class ExuInput extends XSBundle {
   val uop = new MicroOp
-  val src1, src2, src3 = UInt(XLEN.W)
+  val src1, src2, src3 = UInt((XLEN+1).W)
 }
 
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
-  val data = UInt(XLEN.W)
+  val data = UInt((XLEN+1).W)
+  val fflags  = new Fflags
   val redirectValid = Bool()
   val redirect = new Redirect
   val brUpdate = new BranchUpdateInfo
   val debug = new DebugBundle
 }
 
-class ExuIO extends XSBundle {
-  val in = Flipped(DecoupledIO(new ExuInput))
-  val redirect = Flipped(ValidIO(new Redirect))
-  val out = DecoupledIO(new ExuOutput)
-  // for csr
-  val exception = Flipped(ValidIO(new MicroOp))
-  // for Lsu
-  val dmem = new SimpleBusUC
-  val mcommit = Input(UInt(3.W))
+class ExternalInterruptIO extends XSBundle {
+  val mtip = Input(Bool())
+  val msip = Input(Bool())
+  val meip = Input(Bool())
 }
+
+class CSRSpecialIO extends XSBundle {
+  val exception = Flipped(ValidIO(new MicroOp))
+  val isInterrupt = Input(Bool())
+  val memExceptionVAddr = Input(UInt(VAddrBits.W))
+  val trapTarget = Output(UInt(VAddrBits.W))
+  val externalInterrupt = new ExternalInterruptIO
+  val interrupt = Output(Bool())
+}
+
+//class ExuIO extends XSBundle {
+//  val in = Flipped(DecoupledIO(new ExuInput))
+//  val redirect = Flipped(ValidIO(new Redirect))
+//  val out = DecoupledIO(new ExuOutput)
+//  // for csr
+//  val csrOnly = new CSRSpecialIO
+//  val mcommit = Input(UInt(3.W))
+//}
 
 class RoqCommit extends XSBundle {
   val uop = new MicroOp
@@ -245,7 +310,7 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
 }

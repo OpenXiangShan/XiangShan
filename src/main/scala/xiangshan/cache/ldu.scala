@@ -8,7 +8,7 @@ import utils.XSDebug
 class LoadPipe extends DCacheModule
 {
   val io = IO(new DCacheBundle{
-    val lsu       = Flipped(new DCacheWordIO)
+    val lsu       = Flipped(new DCacheLoadIO)
     val data_read = DecoupledIO(new L1DataReadReq)
     val data_resp = Input(Vec(nWays, Vec(blockRows, Bits(encRowBits.W))))
     val meta_read = DecoupledIO(new L1MetaReadReq)
@@ -56,7 +56,8 @@ class LoadPipe extends DCacheModule
   // stage 1
   val s1_req = RegNext(s0_req)
   val s1_valid = RegNext(s0_valid, init = false.B)
-  val s1_addr = s1_req.addr
+  // in stage 1, load unit gets the physical address
+  val s1_addr = io.lsu.s1_paddr
   val s1_nack = RegNext(io.nack)
 
   dump_pipeline_reqs("LoadPipe s1", s1_valid, s1_req)
@@ -68,7 +69,7 @@ class LoadPipe extends DCacheModule
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
 
   assert(!(s1_valid && s1_req.meta.replay && io.lsu.s1_kill),
-    "lsroq tried to kill an replayed request!")
+    "lsq tried to kill an replayed request!")
 
   // stage 2
   val s2_req   = RegNext(s1_req)
@@ -76,6 +77,7 @@ class LoadPipe extends DCacheModule
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
 
+  val s2_addr = RegNext(s1_addr)
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = s2_tag_match_way.orR
   val s2_hit_state     = Mux1H(s2_tag_match_way, wayMap((w: Int) => RegNext(meta_resp(w).coh)))
@@ -96,12 +98,12 @@ class LoadPipe extends DCacheModule
   val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
   val data_resp = io.data_resp
   for (w <- 0 until nWays) {
-    s2_data(w) := data_resp(w)(get_row(s2_req.addr))
+    s2_data(w) := data_resp(w)(get_row(s2_addr))
   }
 
   val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
   // the index of word in a row, in case rowBits != wordBits
-  val s2_word_idx   = if (rowWords == 1) 0.U else s2_req.addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
+  val s2_word_idx   = if (rowWords == 1) 0.U else s2_addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
 
   val s2_nack_hit    = RegNext(s1_nack)
   // Can't allocate MSHR for same set currently being written back

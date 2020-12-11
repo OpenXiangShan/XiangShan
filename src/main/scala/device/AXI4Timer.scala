@@ -1,7 +1,6 @@
 package device
 
 import chisel3._
-import chisel3.util.experimental.BoringUtils
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
@@ -13,7 +12,7 @@ class TimerIO extends Bundle {
 class AXI4Timer
 (
   sim: Boolean = false,
-  address: AddressSet
+  address: Seq[AddressSet]
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new TimerIO)
 {
@@ -30,12 +29,6 @@ class AXI4Timer
     cnt := Mux(nextCnt < freq, nextCnt, 0.U)
     val tick = (nextCnt === freq)
     when (tick) { mtime := mtime + inc }
-
-    if (sim) {
-      val isWFI = WireInit(false.B)
-      BoringUtils.addSink(isWFI, "isWFI")
-      when (isWFI) { mtime := mtime + 100000.U }
-    }
 
     val mapping = Map(
       RegMap(0x4000, mtimecmp),

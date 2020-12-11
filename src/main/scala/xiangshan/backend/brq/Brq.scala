@@ -67,24 +67,21 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     val exuOut = new ExuOutput
   }
 
-  val s_idle :: s_wb :: s_commited :: Nil  =
-    List.tabulate(3)(i => (1 << i).U(3.W).asTypeOf(new StateQueueEntry))
+  val s_invalid :: s_idle :: s_wb :: s_commited :: Nil  =
+    List.tabulate(4)(i => (1 << i).U(4.W).asTypeOf(new StateQueueEntry))
 
   class StateQueueEntry extends Bundle{
     val isCommit = Bool()
     val isWb = Bool()
     val isIdle = Bool()
+    val isInvalid = Bool()
   }
 
   val brCommitCnt = RegInit(0.U(BrTagWidth.W))
   val brQueue = Mem(BrqSize, new BrqEntry) //Reg(Vec(BrqSize, new BrqEntry))
-  val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
+  val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_invalid)))
 
   val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
-
-//  def isEmpty(ptr1: BrqPtr, ptr2: BrqPtr): Bool = ptr1 === ptr2
-//  def isFull(ptr1: BrqPtr, ptr2: BrqPtr): Bool = (ptr1.flag=/=ptr2.flag) && (ptr1.value===ptr2.value)
-
 
   // dequeue
   val headIdx = headPtr.value
@@ -102,12 +99,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
                commitIdx     =  6
    */
   val headIdxOH = UIntToOH(headIdx)
-  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
-  for(i <- headIdxMaskHiVec.indices){
-    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
-  }
-  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
-  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
+  val headIdxMaskLo = headIdxOH - 1.U
+  val headIdxMaskHi = ~headIdxMaskLo
 
   val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
   val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
@@ -147,7 +140,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
   stateQueue.reverse.map(s =>{
-    XSDebug(false, s.isIdle, "-")
+    XSDebug(false, s.isInvalid, "-")
+    XSDebug(false, s.isIdle, "i")
     XSDebug(false, s.isWb, "w")
     XSDebug(false, s.isCommit, "c")
   })
@@ -159,15 +153,15 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     stateQueue(commitIdx) := s_commited
   }
   when(deqValid){
-    stateQueue(headIdx) := s_idle
+    stateQueue(headIdx) := s_invalid
   }
   assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
   headPtr := headPtrNext
   io.redirect.valid := commitValid &&
-    commitIsMisPred &&
-    !io.roqRedirect.valid &&
-    !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
+    commitIsMisPred //&&
+    // !io.roqRedirect.valid &&
+    // !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
@@ -184,20 +178,21 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // branch insts enq
-  var full = WireInit(isFull(headPtrNext, tailPtr))
-  var tailPtrNext = WireInit(tailPtr)
-  for((enq, brTag) <- io.enqReqs.zip(io.brTags)){
-    enq.ready := !full
-    brTag := tailPtrNext
-    when(enq.fire()){
-      brQueue(tailPtrNext.value).npc := enq.bits.cf.brUpdate.pnpc
-      brQueue(tailPtrNext.value).ptrFlag := tailPtrNext.flag
+  val validEntries = distanceBetween(tailPtr, headPtr)
+  for(i <- 0 until DecodeWidth){
+    val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
+    val brTag = tailPtr + offset
+    val idx = brTag.value
+    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
+    io.brTags(i) := brTag
+    when(io.enqReqs(i).fire()){
+      brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc
+      brQueue(idx).ptrFlag := brTag.flag
+      stateQueue(idx) := s_idle
     }
-
-    tailPtrNext = tailPtrNext + enq.fire()
-    full = isFull(tailPtrNext, headPtrNext)
   }
-  tailPtr := tailPtrNext
+  val enqCnt = PopCount(io.enqReqs.map(_.fire()))
+  tailPtr := tailPtr + enqCnt
 
   // exu write back
   for(exuWb <- io.exuRedirect){
@@ -218,24 +213,24 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   when(io.roqRedirect.valid){
     // exception
-    stateQueue.foreach(_ := s_idle)
+    stateQueue.foreach(_ := s_invalid)
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
     brCommitCnt := 0.U
-  }.elsewhen(io.redirect.valid || io.memRedirect.valid){
+  }.elsewhen(io.memRedirect.valid){
     // misprediction or replay
     stateQueue.zipWithIndex.foreach({case(s, i) =>
+      // replay should flush brTag
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      when(
-        (io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)) ||
-          (s.isWb && brQueue(i).exuOut.uop.roqIdx.needFlush(io.memRedirect))
-      ){
-        s := s_idle
+      val replayMatch = io.memRedirect.bits.isReplay && ptr === io.memRedirect.bits.brTag
+      when(io.memRedirect.valid && (ptr.needBrFlush(io.memRedirect.bits.brTag) || replayMatch)){
+        s := s_invalid
       }
     })
-    when(io.redirect.valid){ // Only Br Mispred reset tailPtr, replay does not
-      tailPtr := io.redirect.bits.brTag + true.B
+    when(io.memRedirect.valid){
+      tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.isReplay, 0.U, 1.U)
     }
+
   }
 
 

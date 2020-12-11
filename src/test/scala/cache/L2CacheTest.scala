@@ -4,8 +4,7 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.VerilatorBackendAnnotation
-import chiseltest.internal.LineCoverageAnnotation
+import chiseltest.internal.{VerilatorBackendAnnotation, LineCoverageAnnotation, ToggleCoverageAnnotation, UserCoverageAnnotation, StructuralCoverageAnnotation}
 import chiseltest._
 import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -14,7 +13,8 @@ import device.AXI4RAM
 import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
 import xiangshan.HasXSLog
@@ -57,7 +57,7 @@ case object L3CacheTestKey extends Field[L3CacheTestParams]
 class L2TestTopIO extends Bundle {
   val in = Flipped(DecoupledIO(new Bundle() {
     val wdata = Input(UInt(64.W))
-    val waddr = Input(UInt(20.W))
+    val waddr = Input(UInt(40.W))
     val hartId = Input(UInt(1.W))
   }))
   val out = DecoupledIO(new Bundle() {
@@ -100,7 +100,7 @@ class L2TestTop()(implicit p: Parameters) extends LazyModule{
   ))
 
   val ram = LazyModule(new AXI4RAM(
-    AddressSet(0x0L, 0xffffffffffL),
+    Seq(AddressSet(0x0L, 0xffffffffffL)),
     memByte = 128 * 1024 * 1024,
     useBlackBox = false
   ))
@@ -252,13 +252,16 @@ class L2TestTopWrapper()(implicit p: Parameters) extends LazyModule {
   }
 }
 
-class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
+class L2CacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers{
 
   top.Parameters.set(top.Parameters.debugParameters)
 
   val annos = Seq(
     VerilatorBackendAnnotation,
     LineCoverageAnnotation,
+    ToggleCoverageAnnotation,
+    UserCoverageAnnotation,
+    StructuralCoverageAnnotation,
     RunFirrtlTransformAnnotation(new PrintModuleName)
   )
 
@@ -280,7 +283,9 @@ class L2CacheTest extends FlatSpec with ChiselScalatestTester with Matchers{
         c.clock.step(100)
 
         for(i <- 0 until 100000){
-          val addr = Random.nextInt(0xfffff) & 0xffe00 // align to block size
+          // DRAM AddressSet is above 0x80000000L
+          // also, note that, + has higher priority than & !!!
+          val addr = (Random.nextInt(0x7fffffff).toLong & 0xfffffe00L) + 0x80000000L // align to block size
           val data = Random.nextLong() & 0x7fffffffffffffffL
           c.io.in.enqueue(chiselTypeOf(c.io.in.bits).Lit(
             _.waddr -> addr.U,

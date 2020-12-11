@@ -2,9 +2,10 @@ package xiangshan.frontend
 
 import chisel3._
 import chiseltest._
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.must.Matchers
 
-class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
+class IFUTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
   behavior of "IFU Test"
 
   it should "test IFU pipeline" in {
@@ -40,7 +41,7 @@ class IFUTest extends FlatSpec with ChiselScalatestTester with Matchers {
       // Cycle 5
       //-----------------
       c.io.redirect.valid.poke(true.B)
-      c.io.redirect.bits.target.poke("h80002800".U)
+      c.io.redirect.bits.poke("h80002800".U)
       c.clock.step()
       //-----------------
       // Cycle 6

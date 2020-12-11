@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, RandomReplacement, XSDebug}
+import utils.{Code, RandomReplacement, XSDebug, SRAMTemplate}
 
 import scala.math.max
 
@@ -178,25 +178,40 @@ abstract class AbstractDataArray extends DCacheModule {
 
 class DuplicatedDataArray extends AbstractDataArray
 {
+  val singlePort = true
   // write is always ready
   io.write.ready := true.B
   val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
   for (j <- 0 until LoadPipelineWidth) {
     val raddr = (io.read(j).bits.addr >> blockOffBits).asUInt()
-    // raddr === waddr is undefined behavior!
-    // block read in this case
-    io.read(j).ready := !io.write.valid || raddr =/= waddr
+
+    // for single port SRAM, do not allow read and write in the same cycle
+    // for dual port SRAM, raddr === waddr is undefined behavior
+    val rwhazard = if(singlePort) io.write.valid else io.write.valid && waddr === raddr
+    io.read(j).ready := !rwhazard
+
     for (w <- 0 until nWays) {
       for (r <- 0 until blockRows) {
-        val array = SyncReadMem(nSets, Vec(rowWords, Bits(encWordBits.W)))
-        // data write
-        when (io.write.bits.way_en(w) && io.write.valid) {
-          val data = VecInit((0 until rowWords) map (i => io.write.bits.data(r)(encWordBits*(i+1)-1,encWordBits*i)))
-          array.write(waddr, data, io.write.bits.wmask(r).asBools)
+        val resp = Seq.fill(rowWords)(Wire(Bits(encWordBits.W)))
+        io.resp(j)(w)(r) := Cat((0 until rowWords).reverse map (k => resp(k)))
+
+        for (k <- 0 until rowWords) {
+          val array = Module(new SRAMTemplate(Bits(encWordBits.W), set=nSets, way=1,
+            shouldReset=false, holdRead=false, singlePort=singlePort))
+          // data write
+          val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)(k)
+          array.io.w.req.valid := wen
+          array.io.w.req.bits.apply(
+            setIdx=waddr,
+            data=io.write.bits.data(r)(encWordBits*(k+1)-1,encWordBits*k),
+            waymask=1.U)
+
+          // data read
+          val ren = io.read(j).valid && io.read(j).bits.way_en(w) && io.read(j).bits.rmask(r)
+          array.io.r.req.valid := ren
+          array.io.r.req.bits.apply(setIdx=raddr)
+          resp(k) := RegNext(array.io.r.resp.data(0))
         }
-        // data read
-        io.resp(j)(w)(r) := RegNext(array.read(raddr, io.read(j).bits.way_en(w)
-          && io.read(j).bits.rmask(r) && io.read(j).valid).asUInt)
       }
     }
     io.nacks(j) := false.B
@@ -221,12 +236,21 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
 
-  val tag_array = SyncReadMem(nSets, Vec(nWays, UInt(encMetaBits.W)))
+  val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set=nSets, way=nWays,
+    shouldReset=false, holdRead=false, singlePort=true))
+
+  // tag write
   val wen = rst || io.write.valid
-  when (wen) {
-    tag_array.write(waddr, VecInit(Array.fill(nWays)(cacheParams.tagCode.encode(wdata))), wmask)
-  }
-  io.resp := tag_array.read(io.read.bits.idx, io.read.fire()).map(rdata =>
+  tag_array.io.w.req.valid := wen
+  tag_array.io.w.req.bits.apply(
+    setIdx=waddr,
+    data=cacheParams.tagCode.encode(wdata),
+    waymask=VecInit(wmask).asUInt)
+
+  // tag read
+  tag_array.io.r.req.valid := io.read.fire()
+  tag_array.io.r.req.bits.apply(setIdx=io.read.bits.idx)
+  io.resp := tag_array.io.r.resp.data.map(rdata =>
       cacheParams.tagCode.decode(rdata).corrected.asTypeOf(rstVal))
 
   io.read.ready := !wen
