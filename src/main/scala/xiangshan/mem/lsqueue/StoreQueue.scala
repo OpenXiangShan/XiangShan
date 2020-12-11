@@ -38,7 +38,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
     // val refill = Flipped(Valid(new DCacheLineReq ))
-    val oldestStore = Output(Valid(new RoqPtr))
     val exceptionAddr = new ExceptionAddrIO
   })
   
@@ -177,13 +176,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     selValid(1) := Cat(secondSelVec).orR
     (selValid, selVec)
   }
-
-  // select the last writebacked instruction
-  val validStoreVec = VecInit((0 until StoreQueueSize).map(i => !(allocated(i) && datavalid(i))))
-  val storeNotValid = SqPtr(false.B, getFirstOne(validStoreVec, tailMask))
-  val storeValidIndex = (storeNotValid - 1.U).value
-  io.oldestStore.valid := allocated(deqPtrExt.value) && datavalid(deqPtrExt.value) && !commited(storeValidIndex)
-  io.oldestStore.bits := uop(storeValidIndex).roqIdx
 
   // writeback finished mmio store
   io.mmioStout.bits.uop := uop(deqPtr)
@@ -340,13 +332,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
-      when(io.brqRedirect.bits.isReplay){
-        datavalid(i) := false.B
-        writebacked(i) := false.B
-        pending(i) := false.B
-      }.otherwise{
+      // when(io.brqRedirect.bits.isReplay){
+      //   datavalid(i) := false.B
+      //   writebacked(i) := false.B
+      //   pending(i) := false.B
+      // }.otherwise{
         allocated(i) := false.B
-      }
+      // }
     }
   }
   when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {

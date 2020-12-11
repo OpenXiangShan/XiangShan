@@ -112,3 +112,7 @@ object GenMask {
     (1.U << pos).asUInt()
   }
 }
+
+object UIntToMask {
+  def apply(ptr: UInt) = UIntToOH(ptr) - 1.U
+}

@@ -17,10 +17,7 @@ case class DispatchParameters
   LsDqSize: Int,
   IntDqDeqWidth: Int,
   FpDqDeqWidth: Int,
-  LsDqDeqWidth: Int,
-  IntDqReplayWidth: Int,
-  FpDqReplayWidth: Int,
-  LsDqReplayWidth: Int
+  LsDqDeqWidth: Int
 )
 
 class Dispatch extends XSModule {
@@ -30,6 +27,8 @@ class Dispatch extends XSModule {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val renameBypass = Input(new RenameBypassInfo)
+    // to busytable: set pdest to busy (not ready) when they are dispatched
+    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // enq Roq
     val enqRoq = new Bundle {
       val canAccept = Input(Bool())
@@ -44,16 +43,12 @@ class Dispatch extends XSModule {
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
       val resp = Vec(RenameWidth, Input(new LSIdx))
     }
-    val dequeueRoqIndex = Input(Valid(new RoqPtr))
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
-    // replay: set preg status to not ready
-    val replayPregReq = Output(Vec(ReplayWidth, new ReplayPregReq))
-    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
@@ -61,13 +56,13 @@ class Dispatch extends XSModule {
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, dpParams.IntDqReplayWidth))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, dpParams.FpDqReplayWidth))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, dpParams.LsDqReplayWidth))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth))
 
   // pipeline between rename and dispatch
   // accepts all at once
-  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
+  val redirectValid = io.redirect.valid// && !io.redirect.bits.isReplay
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), redirectValid)
   }
@@ -88,30 +83,8 @@ class Dispatch extends XSModule {
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
-  intDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
-  intDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
-    io.replayPregReq(i) <> replay
-  }
-  intDq.io.otherWalkDone := !fpDq.io.inReplayWalk && !lsDq.io.inReplayWalk
-
   fpDq.io.redirect <> io.redirect
-  fpDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
-  fpDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
-    io.replayPregReq(i + dpParams.IntDqReplayWidth) <> replay
-  }
-  fpDq.io.otherWalkDone := !intDq.io.inReplayWalk && !lsDq.io.inReplayWalk
-
   lsDq.io.redirect <> io.redirect
-  lsDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
-  lsDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
-    io.replayPregReq(i + dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth) <> replay
-  }
-  lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
-
-  if (!env.FPGAPlatform) {
-    val inWalk = intDq.io.inReplayWalk || fpDq.io.inReplayWalk || lsDq.io.inReplayWalk
-    ExcitingUtils.addSource(inWalk, "perfCntCondDpqReplay", Perf)
-  }
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)
