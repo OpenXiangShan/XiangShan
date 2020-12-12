@@ -6,7 +6,7 @@
 #include <verilated_save.h>
 #include <sys/mman.h>
 
-#define RAMSIZE (3 * 1 * 1024 * 1024 * 1024UL)
+#define RAMSIZE (3 * 8 * 1024 * 1024 * 1024UL)
 
 class VerilatedSaveMem : public VerilatedSerialize {
   const static long buf_size = RAMSIZE;
@@ -35,6 +35,8 @@ public:
     this->size += size;
   }
 
+  long compressToFile(uint8_t *ptr, const char *filename, long buf_size);
+
   void close() { }
   void flush();
   void save();
@@ -62,6 +64,12 @@ public:
   void open(const std::string& filename) VL_MT_UNSAFE_ONE { open(filename.c_str()); }
 
   long unbuf_read(uint8_t* dest, long rsize);
+
+  // Return whether the file is a gz file
+  int isGzFile(const char *filename);
+
+  // Read binary from .gz file
+  long readFromGz(void* ptr, const char *file_name, long buf_size);
 
   void close() override VL_MT_UNSAFE_ONE;
   void flush() override VL_MT_UNSAFE_ONE {}

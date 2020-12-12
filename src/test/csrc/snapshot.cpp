@@ -3,7 +3,13 @@
 
 #ifdef VM_SAVABLE
 
-long compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
+// Return whether the file is a gz file
+int VerilatedRestoreMem::isGzFile(const char *filename) {
+  assert(filename != NULL && strlen(filename) >= 4);
+  return !strcmp(filename + (strlen(filename) - 3), ".gz");
+}
+
+long VerilatedSaveMem::compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
   gzFile compressed_mem = gzopen(filename, "wb");
 
   if(compressed_mem == NULL) {
@@ -17,12 +23,12 @@ long compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
   long *pmem_current = (long*)ptr;
 
   while (curr_size < buf_size) {
-    // memset(temp_page, 0, chunk_size * sizeof(long));
+    memset(temp_page, 0, chunk_size * sizeof(long));
     for (uint32_t x = 0; x < chunk_size / sizeof(long); x++) {
-      // if (*(pmem_current + x) != 0) {
-        pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
+      pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
+      if (*pmem_current != 0) {
         *(temp_page + x) = *pmem_current;
-      // }
+      }
     }
     uint32_t bytes_write = gzwrite(compressed_mem, temp_page, chunk_size);
     if (bytes_write <= 0) { printf("Compress failed\n"); break; }
@@ -41,8 +47,7 @@ long compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
   return curr_size;
 }
 
-// Read binary from .gz file
-long readFromGz(void* ptr, const char *file_name, long buf_size) {
+long VerilatedRestoreMem::readFromGz(void* ptr, const char *file_name, long buf_size) {
   assert(buf_size > 0);
   gzFile compressed_mem = gzopen(file_name, "rb");
 
@@ -98,11 +103,6 @@ void VerilatedSaveMem::save() {
     fclose(fp);
   } else {
     compressToFile(buf, (m_filename + ".gz").c_str(), size);
-
-    FILE *fp = fopen("./build/unzip", "w");
-    assert(fp != NULL);
-    fwrite(buf, size, 1, fp);
-    fclose(fp);
   }
   size = 0;
   printf("save snapshot to %s...\n", m_filename.c_str());
@@ -151,8 +151,15 @@ void VerilatedRestoreMem::open(const char* filename) {
   if (VL_UNCOVERABLE(filename[0] == '|')) {
       assert(0);  // LCOV_EXCL_LINE // Not supported yet.
   } else {
+    if(isGzFile(filename)) {
       size = readFromGz(buf, filename, buf_size);
       assert(size > 0);
+    } else {
+      FILE *fp = fopen(filename, "w");
+      assert(fp != NULL);
+      size = fread(buf, size, 1, fp);
+      fclose(fp);
+    }
   }
   m_isOpen = true;
   m_filename = filename;
