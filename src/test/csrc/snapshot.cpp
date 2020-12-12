@@ -1,7 +1,15 @@
 #include "snapshot.h"
 #include <zlib.h>
+#include<sys/time.h>
 
 #ifdef VM_SAVABLE
+
+double calcTime(timeval s, timeval e) {
+  double sec, usec;
+  sec = e.tv_sec - s.tv_sec;
+  usec = e.tv_usec - s.tv_usec;
+  return 1000*sec + usec/1000.0;
+}
 
 // Return whether the file is a gz file
 int VerilatedRestoreMem::isGzFile(const char *filename) {
@@ -102,7 +110,11 @@ void VerilatedSaveMem::save() {
     fwrite(buf, size, 1, fp);
     fclose(fp);
   } else {
+    timeval s, e;
+    gettimeofday(&s, NULL);
     compressToFile(buf, (m_filename + ".gz").c_str(), size);
+    gettimeofday(&e, NULL);
+    printf("Compress cost time (msec.usec): %lf\n", calcTime(s, e));
   }
   size = 0;
   printf("save snapshot to %s...\n", m_filename.c_str());
@@ -152,7 +164,11 @@ void VerilatedRestoreMem::open(const char* filename) {
       assert(0);  // LCOV_EXCL_LINE // Not supported yet.
   } else {
     if(isGzFile(filename)) {
+      timeval s, e;
+      gettimeofday(&s, NULL);
       size = readFromGz(buf, filename, buf_size);
+      gettimeofday(&e, NULL);
+      printf("Uncompress cost time (msec.usec): %lf\n", calcTime(s, e));
       assert(size > 0);
     } else {
       FILE *fp = fopen(filename, "r");
