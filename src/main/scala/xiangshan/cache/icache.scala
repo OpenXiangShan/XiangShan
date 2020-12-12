@@ -283,22 +283,17 @@ class ICache extends ICacheModule
   s1_req_mask := io.req.bits.mask
   s2_ready := WireInit(false.B)
   s1_fire := s1_valid && (s2_ready || io.flush(0))
-
-  //address < 0x80000000
-  //TODO: May have bugs
-  val s1_access_fault = (s1_req_pc(31,0) < accessBorder.U(31,0)) && s1_valid
   
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
 
-  metaArray.io.read.valid := s1_valid && !s1_access_fault
+  metaArray.io.read.valid := s1_valid
   metaArray.io.read.bits  :=s1_idx
-  dataArray.io.read.valid := s1_valid && !s1_access_fault
+  dataArray.io.read.valid := s1_valid
   dataArray.io.read.bits  :=s1_idx
 
   XSDebug("[Stage 1] v : r : f  (%d  %d  %d)  request pc: 0x%x  mask: %b\n",s1_valid,s2_ready,s1_fire,s1_req_pc,s1_req_mask)
   XSDebug("[Stage 1] index: %d\n",s1_idx)
-  XSDebug("[Stage 1] access fault: %d\n",s1_access_fault)
   
   
   //----------------------------
@@ -308,11 +303,15 @@ class ICache extends ICacheModule
   val s2_tlb_resp = WireInit(io.tlb.resp.bits)
   val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
-  val s2_access_fault = RegEnable(s1_access_fault,init=false.B,enable=s1_fire)
+  val s2_access_fault = WireInit(false.B)
   s2_fire := s2_valid && s3_ready && !io.flush(0) && io.tlb.resp.fire()
   when(io.flush(0)) {s2_valid := s1_fire}
   .elsewhen(s1_fire) { s2_valid := s1_valid}
   .elsewhen(s2_fire) { s2_valid := false.B}
+
+  //physical address < 0x80000000
+  //TODO: May have bugs
+  s2_access_fault := (s2_tlb_resp.paddr(31,0) < accessBorder.U(31,0)) && s2_valid
 
   // SRAM(Meta and Data) read reseponse
   val metas = metaArray.io.readResp
