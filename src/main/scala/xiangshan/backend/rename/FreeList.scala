@@ -36,10 +36,16 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
 
-    // alloc new phy regs
-    val allocReqs = Input(Vec(RenameWidth, Bool()))
-    val pdests = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-    val canAlloc = Output(Vec(RenameWidth, Bool()))
+    val req = new Bundle {
+      // need to alloc (not actually do the allocation)
+      val allocReqs = Vec(RenameWidth, Input(Bool()))
+      // response pdest according to alloc
+      val pdests = Vec(RenameWidth, Output(UInt(PhyRegIdxWidth.W)))
+      // alloc new phy regs// freelist can alloc
+      val canAlloc = Output(Bool())
+      // actually do the allocation
+      val doAlloc = Input(Bool())
+    }
 
     // do checkpoints
     val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
@@ -75,26 +81,25 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   // number of free regs in freelist
   val freeRegs = Wire(UInt())
   // use RegNext for better timing
-  val hasEnoughRegs = RegNext(freeRegs >= RenameWidth.U, true.B)
+  io.req.canAlloc := RegNext(freeRegs >= RenameWidth.U)
   XSDebug(p"free regs: $freeRegs\n")
 
 
   val newHeadPtrs = ((0 until RenameWidth) map {i =>
-    if(i == 0) headPtr else headPtr + PopCount(io.allocReqs.take(i))
-  }) :+ (headPtr + PopCount(io.allocReqs))
+    if(i == 0) headPtr else headPtr + PopCount(io.req.allocReqs.take(i))
+  }) :+ (headPtr + PopCount(io.req.allocReqs))
 
   for(i <- 0 until RenameWidth){
     val ptr = newHeadPtrs(i)
     val idx = ptr.value
-    io.canAlloc(i) := hasEnoughRegs
-    io.pdests(i) := freeList(idx)
+    io.req.pdests(i) := freeList(idx)
     when(io.cpReqs(i).valid){
       checkPoints(io.cpReqs(i).bits.value) := newHeadPtrs(i+1)
       XSDebug(p"do checkPt at BrqIdx=${io.cpReqs(i).bits.value} ${newHeadPtrs(i+1)}\n")
     }
-    XSDebug(p"req:${io.allocReqs(i)} canAlloc:$hasEnoughRegs pdest:${io.pdests(i)}\n")
+    XSDebug(p"req:${io.req.allocReqs(i)} canAlloc:${io.req.canAlloc} pdest:${io.req.pdests(i)}\n")
   }
-  val headPtrNext = Mux(hasEnoughRegs, newHeadPtrs.last, headPtr)
+  val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, newHeadPtrs.last, headPtr)
   freeRegs := distanceBetween(tailPtr, headPtrNext)
 
   // when mispredict or exception happens, reset headPtr to tailPtr (freelist is full).

@@ -59,6 +59,8 @@ class Rename extends XSModule {
   intFreeList.walk.valid := walkValid
   fpFreeList.walk.bits := PopCount(io.roqCommits.map(c => c.valid && needDestReg(true, c.bits.uop)))
   intFreeList.walk.bits := PopCount(io.roqCommits.map(c => c.valid && needDestReg(false, c.bits.uop)))
+  fpFreeList.req.doAlloc := intFreeList.req.canAlloc && io.out(0).ready
+  intFreeList.req.doAlloc := fpFreeList.req.canAlloc && io.out(0).ready
 
   val uops = Wire(Vec(RenameWidth, new MicroOp))
 
@@ -76,10 +78,6 @@ class Rename extends XSModule {
 
   val needFpDest = Wire(Vec(RenameWidth, Bool()))
   val needIntDest = Wire(Vec(RenameWidth, Bool()))
-  var lastReady = WireInit(io.out(0).ready)
-  // debug assert
-  val outRdy = Cat(io.out.map(_.ready))
-  assert(outRdy===0.U || outRdy.andR())
   for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
@@ -90,20 +88,10 @@ class Rename extends XSModule {
     // alloc a new phy reg
     needFpDest(i) := inValid && needDestReg(fp = true, io.in(i).bits)
     needIntDest(i) := inValid && needDestReg(fp = false, io.in(i).bits)
-    fpFreeList.allocReqs(i) := needFpDest(i) && lastReady
-    intFreeList.allocReqs(i) := needIntDest(i) && lastReady
-    val fpCanAlloc = fpFreeList.canAlloc(i)
-    val intCanAlloc = intFreeList.canAlloc(i)
-    val this_can_alloc = Mux(
-      needIntDest(i),
-      intCanAlloc,
-      Mux(
-        needFpDest(i),
-        fpCanAlloc,
-        true.B
-      )
-    )
-    io.in(i).ready := lastReady && this_can_alloc
+    fpFreeList.req.allocReqs(i) := needFpDest(i)
+    intFreeList.req.allocReqs(i) := needIntDest(i)
+
+    io.in(i).ready := io.out(i).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc
 
     // do checkpoints when a branch inst come
     for(fl <- Seq(fpFreeList, intFreeList)){
@@ -111,17 +99,15 @@ class Rename extends XSModule {
       fl.cpReqs(i).bits := io.in(i).bits.brTag
     }
 
-    lastReady = io.in(i).ready
-
     uops(i).pdest := Mux(needIntDest(i),
-      intFreeList.pdests(i),
+      intFreeList.req.pdests(i),
       Mux(
         uops(i).ctrl.ldest===0.U && uops(i).ctrl.rfWen,
-        0.U, fpFreeList.pdests(i)
+        0.U, fpFreeList.req.pdests(i)
       )
     )
 
-    io.out(i).valid := io.in(i).fire()
+    io.out(i).valid := io.in(i).valid && intFreeList.req.canAlloc && fpFreeList.req.canAlloc
     io.out(i).bits := uops(i)
 
     // write rename table
@@ -129,14 +115,14 @@ class Rename extends XSModule {
       val rat = if(fp) fpRat else intRat
       val freeList = if(fp) fpFreeList else intFreeList
       // speculative inst write
-      val specWen = freeList.allocReqs(i) && freeList.canAlloc(i)
+      val specWen = freeList.req.allocReqs(i) && freeList.req.canAlloc && freeList.req.doAlloc
       // walk back write
       val commitDestValid = io.roqCommits(i).valid && needDestReg(fp, io.roqCommits(i).bits.uop)
       val walkWen = commitDestValid && io.roqCommits(i).bits.isWalk
 
       rat.specWritePorts(i).wen := specWen || walkWen
       rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
-      rat.specWritePorts(i).wdata := Mux(specWen, freeList.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
+      rat.specWritePorts(i).wdata := Mux(specWen, freeList.req.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
 
       XSInfo(walkWen,
         {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
