@@ -278,6 +278,7 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
   val if4_ipf = RegEnable(icacheResp.ipf || if3_prevHalfInstrMet && if3_prevHalfInstr.ipf, if3_fire)
+  val if4_acf = RegEnable(icacheResp.acf, if3_fire)
   val if4_crossPageIPF = RegEnable(crossPageIPF, if3_fire)
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
@@ -513,6 +514,7 @@ class IFU extends XSModule with HasIFUConst
   (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).predHistPtr := if4_predHistPtr)
   fetchPacketWire.pd := if4_pd.pd
   fetchPacketWire.ipf := if4_ipf
+  fetchPacketWire.acf := if4_acf
   fetchPacketWire.crossPageIPFFix := if4_crossPageIPF
 
   // predTaken Vec
@@ -561,8 +563,8 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
       if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr, if4_prevHalfInstr.ipf)
     if4_GHInfo.debug("if4")
-    XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d crossPageIPF=%d\n",
-      io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask, io.fetchPacket.bits.ipf, io.fetchPacket.bits.crossPageIPFFix)
+    XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d acf=%d crossPageIPF=%d\n",
+      io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask, io.fetchPacket.bits.ipf,io.fetchPacket.bits.acf , io.fetchPacket.bits.crossPageIPFFix)
     for (i <- 0 until PredictWidth) {
       XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] %b %x pc=%x pnpc=%x pd: rvc=%d brType=%b call=%d ret=%d\n",
         io.fetchPacket.bits.mask(i),
