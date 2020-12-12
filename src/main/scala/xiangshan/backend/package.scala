@@ -166,7 +166,7 @@ package object backend {
   }
 
   object SelImm {
-    def IMM_X  = BitPat("b???")
+    def IMM_X  = "b111".U
     def IMM_S  = "b000".U
     def IMM_SB = "b001".U
     def IMM_U  = "b010".U
