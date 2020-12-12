@@ -3,51 +3,47 @@
 
 #ifdef VM_SAVABLE
 
-int compressToFile(uint8_t *buf, const char *filename, long size) {
-  gzFile gzfp = gzopen(filename, "wb");
-  assert(gzfp != NULL);
+long compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
+  gzFile compressed_mem = gzopen(filename, "wb");
 
-  assert(gzwrite(gzfp, buf, size) > 0);
+  if(compressed_mem == NULL) {
+    printf("Can't open compressed binary file '%s'", filename);
+    return -1;
+  }
 
-  gzclose(gzfp);
-  return 0;
+  long curr_size = 0;
+  const uint32_t chunk_size = 16384;
+  long *temp_page = new long[chunk_size];
+  long *pmem_current = (long*)ptr;
 
-  // gzFile compressed_mem = gzopen(filename, "wb");
+  while (curr_size < buf_size) {
+    // memset(temp_page, 0, chunk_size * sizeof(long));
+    for (uint32_t x = 0; x < chunk_size / sizeof(long); x++) {
+      // if (*(pmem_current + x) != 0) {
+        pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
+        *(temp_page + x) = *pmem_current;
+      // }
+    }
+    uint32_t bytes_write = gzwrite(compressed_mem, temp_page, chunk_size);
+    if (bytes_write <= 0) { printf("Compress failed\n"); break; }
+    curr_size += bytes_write;
+    // assert(bytes_write % sizeof(long) == 0);
 
-  // if(compressed_mem == NULL) {
-  //   printf("Can't open compressed binary file '%s'", filename);
-  //   return -1;
-  // }
+  }
+  printf("Write %lu bytes from gz stream in total\n", curr_size);
 
-  // uint64_t curr_size = 0;
-  // const uint32_t chunk_size = 16384;
-  // long *temp_page = new long[chunk_size];
-  // long *pmem_current = (long*)ptr;
+  delete [] temp_page;
 
-  // while (curr_size < buf_size) {
-  //   uint32_t bytes_write = gzwrite(compressed_mem, temp_page, chunk_size);
-  //   if (bytes_write == 0) { break; }
-  //   for (uint32_t x = 0; x < bytes_write / sizeof(long) + 1; x++) {
-  //     if (*(temp_page + x) != 0) {
-  //       pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
-  //       *pmem_current = *(temp_page + x);
-  //     }
-  //   }
-  //   curr_size += bytes_write;
-  // }
-  // printf("Write %lu bytes from gz stream in total\n", curr_size);
-
-  // delete [] temp_page;
-
-  // if(gzclose(compressed_mem)) {
-  //   printf("Error closing '%s'\n", filename);
-  //   return -1;
-  // }
-  // return curr_size;
+  if(gzclose(compressed_mem)) {
+    printf("Error closing '%s'\n", filename);
+    return -1;
+  }
+  return curr_size;
 }
 
 // Read binary from .gz file
-int readFromGz(void* ptr, const char *file_name, long buf_size) {
+long readFromGz(void* ptr, const char *file_name, long buf_size) {
+  assert(buf_size > 0);
   gzFile compressed_mem = gzopen(file_name, "rb");
 
   if(compressed_mem == NULL) {
@@ -102,6 +98,11 @@ void VerilatedSaveMem::save() {
     fclose(fp);
   } else {
     compressToFile(buf, (m_filename + ".gz").c_str(), size);
+
+    FILE *fp = fopen("./build/unzip", "w");
+    assert(fp != NULL);
+    fwrite(buf, size, 1, fp);
+    fclose(fp);
   }
   size = 0;
   printf("save snapshot to %s...\n", m_filename.c_str());
@@ -151,6 +152,7 @@ void VerilatedRestoreMem::open(const char* filename) {
       assert(0);  // LCOV_EXCL_LINE // Not supported yet.
   } else {
       size = readFromGz(buf, filename, buf_size);
+      assert(size > 0);
   }
   m_isOpen = true;
   m_filename = filename;
@@ -166,11 +168,14 @@ void VerilatedRestoreMem::close() {
     m_isOpen = false;
 }
 
-int VerilatedRestoreMem::unbuf_read(uint8_t* dest, long rsize) {
+long VerilatedRestoreMem::unbuf_read(uint8_t* dest, long rsize) {
+  assert(rsize > 0);
+  assert(buf_size > 0);
+  assert(buf_ptr >= 0);
   if(buf_ptr + rsize > size) {
     rsize = size - buf_ptr;
   }
-  for(int i = 0; i < rsize; i++) {
+  for(long i = 0; i < rsize; i++) {
     dest[i] = buf[buf_ptr + i];
   }
   buf_ptr += rsize;

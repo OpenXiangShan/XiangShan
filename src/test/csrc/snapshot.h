@@ -4,18 +4,25 @@
 #ifdef VM_SAVABLE
 #include "VXSSimSoC.h"
 #include <verilated_save.h>
+#include <sys/mman.h>
+
+#define RAMSIZE (3 * 1 * 1024 * 1024 * 1024UL)
 
 class VerilatedSaveMem : public VerilatedSerialize {
-  const static long buf_size = 1024 * 1024 * 1024;
+  const static long buf_size = RAMSIZE;
   uint8_t *buf;
   long size;
 
 public:
   VerilatedSaveMem() {
-    buf = new uint8_t[buf_size];
+    buf = (uint8_t*)mmap(NULL, buf_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    if (buf == (uint8_t *)MAP_FAILED) {
+      printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+      assert(0);
+    }
     size = 0;
   }
-  ~VerilatedSaveMem() { delete buf; }
+  ~VerilatedSaveMem() { }
 
   void init(const char *filename) {
     size = 0;
@@ -34,26 +41,31 @@ public:
 };
 
 class VerilatedRestoreMem : public VerilatedDeserialize {
-  const static long buf_size = (1024 * 1024 * 1024UL);
+  const static long buf_size = RAMSIZE;
   uint8_t *buf;
   long size, buf_ptr;
   // gzFile compressed_mem;
 
 public:
   VerilatedRestoreMem() {
-    buf = new uint8_t[buf_size];
+    buf = (uint8_t*)mmap(NULL, buf_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    if (buf == (uint8_t *)MAP_FAILED) {
+      printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+      assert(0);
+    }
     size = 0;
+    buf_ptr = 0;
   }
-  ~VerilatedRestoreMem() { close(); delete buf; }
+  ~VerilatedRestoreMem() { close(); }
 
   void open(const char* filenamep) VL_MT_UNSAFE_ONE;
   void open(const std::string& filename) VL_MT_UNSAFE_ONE { open(filename.c_str()); }
 
-  int unbuf_read(uint8_t* dest, long rsize);
+  long unbuf_read(uint8_t* dest, long rsize);
 
-  void close();
-  void flush() {}
-  void fill();
+  void close() override VL_MT_UNSAFE_ONE;
+  void flush() override VL_MT_UNSAFE_ONE {}
+  void fill() override VL_MT_UNSAFE_ONE;
 };
 #endif
 
