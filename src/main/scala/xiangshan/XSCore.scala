@@ -63,9 +63,9 @@ case class XSCoreParameters
   RoqSize: Int = 192,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
-    IntDqSize = 32,
-    FpDqSize = 32,
-    LsDqSize = 32,
+    IntDqSize = 24,
+    FpDqSize = 24,
+    LsDqSize = 24,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
