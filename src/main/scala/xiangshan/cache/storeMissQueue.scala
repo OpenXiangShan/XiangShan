@@ -139,6 +139,15 @@ class StoreMissEntry extends DCacheModule
       state := s_invalid
     }
   }
+
+  // debug output
+  when (io.lsu.req.fire()) {
+    XSDebug(s"StoreMissEntryTransaction req %d\n", io.id)
+  }
+
+  when (io.lsu.resp.fire()) {
+    XSDebug(s"StoreMissEntryTransaction resp %d\n", io.id)
+  }
 }
 
 

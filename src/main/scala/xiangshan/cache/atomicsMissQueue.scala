@@ -155,4 +155,12 @@ class AtomicsMissQueue extends DCacheModule
   val miss_finish = io.miss_finish
   XSDebug(miss_finish.fire(), "miss_finish client_id: %d entry_id: %d\n",
     miss_finish.bits.client_id, miss_finish.bits.entry_id)
+
+  when (io.lsu.req.fire()) {
+    XSDebug(s"AtomicsMissEntryTransaction req 0\n")
+  }
+
+  when (io.lsu.resp.fire()) {
+    XSDebug(s"AtomicsMissEntryTransaction resp 0\n")
+  }
 }
