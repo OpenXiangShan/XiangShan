@@ -313,7 +313,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       lasttime_snapshot = t;
       // dump snapshot to file every 10 minutes
       snapshot_count++;
-      if (snapshot_count == 2) {
+      if (snapshot_count == 60) {
         snapshot_slot[0].save();
         snapshot_count = 0;
       }

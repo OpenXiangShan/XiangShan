@@ -6,10 +6,10 @@
 #include <verilated_save.h>
 #include <sys/mman.h>
 
-#define RAMSIZE (3 * 8 * 1024 * 1024 * 1024UL)
+#define SNAPSHOT_SIZE (3 * 8 * 1024 * 1024 * 1024UL)
 
 class VerilatedSaveMem : public VerilatedSerialize {
-  const static long buf_size = RAMSIZE;
+  const static long buf_size = SNAPSHOT_SIZE;
   uint8_t *buf;
   long size;
 
@@ -17,7 +17,7 @@ public:
   VerilatedSaveMem() {
     buf = (uint8_t*)mmap(NULL, buf_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     if (buf == (uint8_t *)MAP_FAILED) {
-      printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+      printf("Cound not mmap 0x%lx bytes\n", SNAPSHOT_SIZE);
       assert(0);
     }
     size = 0;
@@ -43,7 +43,7 @@ public:
 };
 
 class VerilatedRestoreMem : public VerilatedDeserialize {
-  const static long buf_size = RAMSIZE;
+  const static long buf_size = SNAPSHOT_SIZE;
   uint8_t *buf;
   long size, buf_ptr;
   // gzFile compressed_mem;
@@ -52,7 +52,7 @@ public:
   VerilatedRestoreMem() {
     buf = (uint8_t*)mmap(NULL, buf_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     if (buf == (uint8_t *)MAP_FAILED) {
-      printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+      printf("Cound not mmap 0x%lx bytes\n", SNAPSHOT_SIZE);
       assert(0);
     }
     size = 0;
