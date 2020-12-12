@@ -188,6 +188,25 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val enqCnt = PopCount(io.enqReqs.map(_.fire()))
   tailPtr := tailPtr + enqCnt
 
+  // exu write back
+  for(exuWb <- io.exuRedirect){
+    when(exuWb.valid){
+      val wbIdx = exuWb.bits.redirect.brTag.value
+      XSInfo(
+        p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
+          p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
+      )
+      when(stateQueue(wbIdx).isIdle){
+        stateQueue(wbIdx) := s_wb
+      }
+      val exuOut = WireInit(exuWb.bits)
+      val isMisPred = brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
+      exuOut.redirect.isMisPred := isMisPred
+      exuOut.brUpdate.isMisPred := isMisPred
+      brQueue(wbIdx).exuOut := exuOut
+    }
+  }
+
   when(io.roqRedirect.valid){
     // exception
     stateQueue.foreach(_ := s_invalid)
@@ -209,27 +228,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     }
 
   }
-
-  // exu write back
-  for(exuWb <- io.exuRedirect){
-    when(exuWb.valid){
-      val wbIdx = exuWb.bits.redirect.brTag.value
-      XSInfo(
-        p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
-          p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
-      )
-      when(stateQueue(wbIdx).isIdle){
-        stateQueue(wbIdx) := s_wb
-      }
-      val exuOut = WireInit(exuWb.bits)
-      val isMisPred = brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
-      exuOut.redirect.isMisPred := isMisPred
-      exuOut.brUpdate.isMisPred := isMisPred
-      brQueue(wbIdx).exuOut := exuOut
-    }
-  }
-
-
 
   // Debug info
   val debug_roq_redirect = io.roqRedirect.valid
