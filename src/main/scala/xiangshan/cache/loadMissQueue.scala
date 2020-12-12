@@ -153,6 +153,15 @@ class LoadMissEntry extends DCacheModule
       state := s_invalid
     }
   }
+
+  // debug output
+  when (io.lsu.req.fire()) {
+    XSDebug(s"LoadMissEntryTransaction req %d\n", io.id)
+  }
+
+  when (io.lsu.resp.fire()) {
+    XSDebug(s"LoadMissEntryTransaction resp %d\n", io.id)
+  }
 }
 
 
