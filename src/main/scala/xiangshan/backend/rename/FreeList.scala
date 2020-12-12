@@ -48,7 +48,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
     }
 
     // do checkpoints
-    val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
+    // val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
     val walk = Flipped(ValidIO(UInt(log2Up(RenameWidth).W)))
 
     // dealloc phy regs
@@ -93,10 +93,10 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
     val ptr = newHeadPtrs(i)
     val idx = ptr.value
     io.req.pdests(i) := freeList(idx)
-    when(io.cpReqs(i).valid){
-      checkPoints(io.cpReqs(i).bits.value) := newHeadPtrs(i+1)
-      XSDebug(p"do checkPt at BrqIdx=${io.cpReqs(i).bits.value} ${newHeadPtrs(i+1)}\n")
-    }
+    // when(io.cpReqs(i).valid){
+    //   checkPoints(io.cpReqs(i).bits.value) := newHeadPtrs(i+1)
+    //   XSDebug(p"do checkPt at BrqIdx=${io.cpReqs(i).bits.value} ${newHeadPtrs(i+1)}\n")
+    // }
     XSDebug(p"req:${io.req.allocReqs(i)} canAlloc:${io.req.canAlloc} pdest:${io.req.pdests(i)}\n")
   }
   val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, newHeadPtrs.last, headPtr)

@@ -94,10 +94,10 @@ class Rename extends XSModule {
     io.in(i).ready := io.out(i).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc
 
     // do checkpoints when a branch inst come
-    for(fl <- Seq(fpFreeList, intFreeList)){
-      fl.cpReqs(i).valid := inValid
-      fl.cpReqs(i).bits := io.in(i).bits.brTag
-    }
+    // for(fl <- Seq(fpFreeList, intFreeList)){
+    //   fl.cpReqs(i).valid := inValid
+    //   fl.cpReqs(i).bits := io.in(i).bits.brTag
+    // }
 
     uops(i).pdest := Mux(needIntDest(i),
       intFreeList.req.pdests(i),
