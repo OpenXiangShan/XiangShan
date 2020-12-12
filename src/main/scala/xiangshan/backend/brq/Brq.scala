@@ -90,16 +90,13 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   /*
       example: headIdx       = 2
-               headIdxOH     = 00000100
-               headIdxMaskHI = 11111100
+               headIdxMaskHi = 11111100
                headIdxMaskLo = 00000011
-               skipMask      = 00111101
                commitIdxHi   =  6
                commitIdxLo   =        0
                commitIdx     =  6
    */
-  val headIdxOH = UIntToOH(headIdx)
-  val headIdxMaskLo = headIdxOH - 1.U
+  val headIdxMaskLo = UIntToMask(headIdx, BrqSize)
   val headIdxMaskHi = ~headIdxMaskLo
 
   val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
