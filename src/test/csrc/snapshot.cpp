@@ -155,9 +155,13 @@ void VerilatedRestoreMem::open(const char* filename) {
       size = readFromGz(buf, filename, buf_size);
       assert(size > 0);
     } else {
-      FILE *fp = fopen(filename, "w");
+      FILE *fp = fopen(filename, "r");
       assert(fp != NULL);
-      size = fread(buf, size, 1, fp);
+
+      fseek(fp, 0, SEEK_END);
+      size = ftell(fp);
+      rewind(fp);
+      assert(fread(buf, size, 1, fp) > 0);
       fclose(fp);
     }
   }
