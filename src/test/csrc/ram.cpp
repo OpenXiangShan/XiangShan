@@ -4,7 +4,7 @@
 #include "common.h"
 #include "ram.h"
 
-#define RAMSIZE (8 * 1024 * 1024 * 1024UL)
+#define RAMSIZE (256 * 1024 * 1024UL)
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"

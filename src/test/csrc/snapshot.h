@@ -6,7 +6,7 @@
 #include <verilated_save.h>
 #include <sys/mman.h>
 
-#define SNAPSHOT_SIZE (3 * 8 * 1024 * 1024 * 1024UL)
+#define SNAPSHOT_SIZE (3 * 16 * 1024 * 1024 * 1024UL)
 
 class VerilatedSaveMem : public VerilatedSerialize {
   const static long buf_size = SNAPSHOT_SIZE;
