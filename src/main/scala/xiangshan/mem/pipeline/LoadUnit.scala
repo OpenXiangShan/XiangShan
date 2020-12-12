@@ -142,7 +142,7 @@ class LoadUnit_S1 extends XSModule {
 
 // Load Pipeline Stage 2
 // DCache resp
-class LoadUnit_S2 extends XSModule {
+class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -184,16 +184,7 @@ class LoadUnit_S2 extends XSModule {
     "b110".U -> rdata(63, 48),
     "b111".U -> rdata(63, 56)
   ))
-  val rdataPartialLoad = LookupTree(s2_uop.ctrl.fuOpType, List(
-      LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
-      LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
-      LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-      LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
-  ))
+  val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
 
   // TODO: ECC check
 

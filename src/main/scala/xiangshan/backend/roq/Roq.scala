@@ -176,12 +176,14 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     when(io.exeWbResults(i).fire()){
       val wbIdxExt = io.exeWbResults(i).bits.uop.roqIdx
       val wbIdx = wbIdxExt.value
-      microOp(wbIdx).cf.exceptionVec := io.exeWbResults(i).bits.uop.cf.exceptionVec
-      microOp(wbIdx).lqIdx := io.exeWbResults(i).bits.uop.lqIdx
-      microOp(wbIdx).sqIdx := io.exeWbResults(i).bits.uop.sqIdx
-      microOp(wbIdx).ctrl.flushPipe := io.exeWbResults(i).bits.uop.ctrl.flushPipe
-      microOp(wbIdx).diffTestDebugLrScValid := io.exeWbResults(i).bits.uop.diffTestDebugLrScValid
-      debug_exuData(wbIdx) := io.exeWbResults(i).bits.data
+	  val wbUop = io.exeWbResults(i).bits.uop
+	  val wbData = io.exeWbResults(i).bits.data
+      microOp(wbIdx).cf.exceptionVec := wbUop.cf.exceptionVec
+      microOp(wbIdx).lqIdx := wbUop.lqIdx
+      microOp(wbIdx).sqIdx := wbUop.sqIdx
+      microOp(wbIdx).ctrl.flushPipe := wbUop.ctrl.flushPipe
+      microOp(wbIdx).diffTestDebugLrScValid := wbUop.diffTestDebugLrScValid
+      debug_exuData(wbIdx) := Mux(wbUop.ctrl.fpWen, ieee(wbData), wbData)
       debug_exuDebug(wbIdx) := io.exeWbResults(i).bits.debug
 
       val debug_Uop = microOp(wbIdx)

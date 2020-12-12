@@ -2,10 +2,11 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tile.HasFPUParameters
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
@@ -23,9 +24,32 @@ object LqPtr extends HasXSParameter {
   }
 }
 
+trait HasLoadHelper { this: XSModule =>
+  def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
+    val lwIntData = SignExt(rdata(31, 0), XLEN)
+    val ldIntData = SignExt(rdata(63, 0), XLEN)
+    val lwFpData = recode(rdata(31, 0), S)
+    val ldFpData = recode(rdata(63, 0), D)
+    val fpWen = uop.ctrl.fpWen
+    LookupTree(uop.ctrl.fuOpType, List(
+      LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
+      LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
+      LSUOpType.lw   -> Mux(fpWen, lwFpData, lwIntData),
+      LSUOpType.ld   -> Mux(fpWen, ldFpData, ldIntData),
+      LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
+      LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+    ))
+  }
+}
+
 
 // Load Queue
-class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class LoadQueue extends XSModule
+  with HasDCacheParameters
+  with HasCircularQueuePtrHelper
+  with HasLoadHelper
+{
   val io = IO(new Bundle() {
     val enq = new Bundle() {
       val canAccept = Output(Bool())
@@ -270,16 +294,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       "b110".U -> rdata(63, 48),
       "b111".U -> rdata(63, 56)
     ))
-    val rdataPartialLoad = LookupTree(func, List(
-        LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
-        LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
-        LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-        LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
-    ))
+    val rdataPartialLoad = rdataHelper(uop(loadWbSel(i)), rdataSel)
     io.ldout(i).bits.uop := uop(loadWbSel(i))
     io.ldout(i).bits.uop.cf.exceptionVec := dataModule.io.rdata(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)

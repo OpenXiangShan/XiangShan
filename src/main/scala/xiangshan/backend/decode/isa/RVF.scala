@@ -41,7 +41,7 @@ object RVFInstr extends HasXSParameter with HasInstrType {
   def FNMADD_S           = BitPat("b?????00??????????????????1001111")
 
   val table = Array(
-    FLW -> List(InstrFI, ldu, LSUOpType.flw),
+    FLW -> List(InstrFI, ldu, LSUOpType.lw),
     FSW -> List(InstrFS, stu, LSUOpType.sw),
 
     // FR

@@ -201,6 +201,8 @@ class Decoder extends XSModule with HasInstrType {
 
   io.out.ctrl.isRVF := instr(26, 25) === 0.U
 
+  io.out.ctrl.fpu := DontCare
+
 
   XSDebug("in:  instr=%x pc=%x excepVec=%b intrVec=%b crossPageIPFFix=%d\n",
     io.in.instr, io.in.pc, io.in.exceptionVec.asUInt, io.in.intrVec.asUInt, io.in.crossPageIPFFix)

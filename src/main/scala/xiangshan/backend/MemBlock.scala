@@ -186,16 +186,24 @@ class MemBlock
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
-    storeUnits(i).io.redirect     <> io.fromCtrlBlock.redirect
-    storeUnits(i).io.tlbFeedback  <> reservationStations(exuParameters.LduCnt + i).io.feedback
-    storeUnits(i).io.dtlb         <> dtlb.io.requestor(exuParameters.LduCnt + i)
-    // get input form dispatch
-    storeUnits(i).io.stin         <> reservationStations(exuParameters.LduCnt + i).io.deq
-    // passdown to lsq
-    storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
-    io.toCtrlBlock.stOut(i).valid := storeUnits(i).io.stout.valid
-    io.toCtrlBlock.stOut(i).bits  := storeUnits(i).io.stout.bits
-	  storeUnits(i).io.stout.ready := true.B
+	val stu = storeUnits(i)
+	val rs = reservationStations(exuParameters.LduCnt + i)
+	val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
+
+	stu.io.redirect <> io.fromCtrlBlock.redirect
+	stu.io.tlbFeedback <> rs.io.feedback
+	stu.io.dtlb <> dtlbReq
+
+	// get input from dispatch
+	stu.io.stin <> rs.io.deq
+	when(rs.io.deq.bits.uop.ctrl.src2Type === SrcType.fp){
+	  stu.io.stin.bits.src2 := ieee(rs.io.deq.bits.src2)
+	}
+	// passdown to lsq
+	stu.io.lsq <> lsq.io.storeIn(i)
+	io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
+	io.toCtrlBlock.stOut(i).bits := stu.io.stout.bits
+	stu.io.stout.ready := true.B
   }
 
   // mmio store writeback will use store writeback port 0

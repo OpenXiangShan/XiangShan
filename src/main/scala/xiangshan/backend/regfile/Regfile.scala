@@ -53,7 +53,9 @@ class Regfile
     )
 
     val debugArchReg = WireInit(VecInit(debugArchRat.zipWithIndex.map(
-      x => if(hasZero && x._2==0) 0.U else mem(x._1)
+	  x => if(hasZero){
+	    if(x._2 == 0) 0.U else mem(x._1)
+	  } else ieee(mem(x._1))
     )))
     ExcitingUtils.addSource(
       debugArchReg,

@@ -133,6 +133,12 @@ class CtrlFlow extends XSBundle {
   val crossPageIPFFix = Bool()
 }
 
+
+class FPUCtrlSignals extends XSBundle {
+	val tagIn = UInt(2.W)
+	val tagOut = UInt(2.W)
+}
+
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals extends XSBundle {
   val src1Type, src2Type, src3Type = SrcType()
@@ -149,6 +155,7 @@ class CtrlSignals extends XSBundle {
   val isRVF = Bool()
   val imm = UInt(XLEN.W)
   val commitType = CommitType()
+  val fpu = new FPUCtrlSignals
 }
 
 class CfCtrl extends XSBundle {
