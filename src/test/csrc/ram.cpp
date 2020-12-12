@@ -215,8 +215,7 @@ void ram_finish() {
 
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
   if (en && rIdx >= RAMSIZE / sizeof(uint64_t)) {
-    printf("ERROR: ram rIdx = 0x%lx out of bound!\n", rIdx);
-    assert(rIdx < RAMSIZE / sizeof(uint64_t));
+    rIdx %= RAMSIZE / sizeof(uint64_t);
   }
   return (en) ? ram[rIdx] : 0;
 }
