@@ -30,6 +30,9 @@ case class ICacheParameters(
 trait HasICacheParameters extends HasL1CacheParameters {
   val cacheParams = icacheParameters
 
+  //TODO: temp set
+  def accessBorder =  0x80000000L
+
   // the width of inner CPU data interface
   def cacheID = 0
   // RVC instruction length
@@ -283,7 +286,7 @@ class ICache extends ICacheModule
 
   //address < 0x80000000
   //TODO: May have bugs
-  val s1_access_fault = (s1_req_pc(31) === 0.U) && s1_valid
+  val s1_access_fault = (s1_req_pc(31,0) < accessBorder.U(31,0)) && s1_valid
   
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
