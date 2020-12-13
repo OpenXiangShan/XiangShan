@@ -18,6 +18,7 @@ import scala.util.Random._
 import scala.collection.mutable
 import scala.io.Source.fromFile
 import scala.io.BufferedSource
+import xiangshan.SrcType
 
 class DualDecodeUnitDut extends XSModule {
   val io = IO(new Bundle {
@@ -116,30 +117,34 @@ class DecodeUnitDiffTest
         c.io.out_dut.cf.exceptionVec.indices.foreach(i => {
           c.io.out_dut.cf.exceptionVec(i).expect(c.io.out_ref.cf.exceptionVec(i).peek())
         })
-        // c.io.out_dut.cf.intrVec.indices.foreach(i => {
-        //   c.io.out_dut.cf.intrVec(i).expect(c.io.out_ref.cf.intrVec(i).peek())
-        // })
+        c.io.out_dut.cf.intrVec.indices.foreach(i => {
+          c.io.out_dut.cf.intrVec(i).expect(c.io.out_ref.cf.intrVec(i).peek())
+        })
 
         // 2. Ctrl Signals
         // ignore isRVF and ldest and commitType
-        // c.io.out_dut.ctrl.src1Type.expect(c.io.out_ref.ctrl.src1Type.peek())
-        // c.io.out_dut.ctrl.src2Type.expect(c.io.out_ref.ctrl.src2Type.peek())
-        // c.io.out_dut.ctrl.src3Type.expect(c.io.out_ref.ctrl.src3Type.peek())
-        // c.io.out_dut.ctrl.lsrc1.expect(c.io.out_ref.ctrl.lsrc1.peek())
-        // c.io.out_dut.ctrl.lsrc2.expect(c.io.out_ref.ctrl.lsrc2.peek())
-        // c.io.out_dut.ctrl.lsrc3.expect(c.io.out_ref.ctrl.lsrc3.peek())
+        c.io.out_dut.ctrl.src1Type.expect(c.io.out_ref.ctrl.src1Type.peek())
+        c.io.out_dut.ctrl.src2Type.expect(c.io.out_ref.ctrl.src2Type.peek())
+        c.io.out_dut.ctrl.src3Type.expect(c.io.out_ref.ctrl.src3Type.peek())
+        c.io.out_dut.ctrl.lsrc1.expect(c.io.out_ref.ctrl.lsrc1.peek())
+        if (c.io.out_ref.ctrl.src2Type.peek() == SrcType.reg) {
+          c.io.out_dut.ctrl.lsrc2.expect(c.io.out_ref.ctrl.lsrc2.peek())
+        }
+        c.io.out_dut.ctrl.lsrc3.expect(c.io.out_ref.ctrl.lsrc3.peek())
         // c.io.out_dut.ctrl.ldest.expect(c.io.out_ref.ctrl.ldest.peek())
-        // c.io.out_dut.ctrl.fuType.expect(c.io.out_ref.ctrl.fuType.peek())
-        // c.io.out_dut.ctrl.fuOpType.expect(c.io.out_ref.ctrl.fuOpType.peek())
-        // c.io.out_dut.ctrl.rfWen.expect(c.io.out_ref.ctrl.rfWen.peek())
-        // c.io.out_dut.ctrl.fpWen.expect(c.io.out_ref.ctrl.fpWen.peek())
-        // c.io.out_dut.ctrl.isXSTrap.expect(c.io.out_ref.ctrl.isXSTrap.peek())
-        // c.io.out_dut.ctrl.noSpecExec.expect(c.io.out_ref.ctrl.noSpecExec.peek())
-        // c.io.out_dut.ctrl.blockBackward.expect(c.io.out_ref.ctrl.blockBackward.peek())
-        // c.io.out_dut.ctrl.flushPipe.expect(c.io.out_ref.ctrl.flushPipe.peek())
+        c.io.out_dut.ctrl.fuType.expect(c.io.out_ref.ctrl.fuType.peek())
+        c.io.out_dut.ctrl.fuOpType.expect(c.io.out_ref.ctrl.fuOpType.peek())
+        c.io.out_dut.ctrl.rfWen.expect(c.io.out_ref.ctrl.rfWen.peek())
+        c.io.out_dut.ctrl.fpWen.expect(c.io.out_ref.ctrl.fpWen.peek())
+        c.io.out_dut.ctrl.isXSTrap.expect(c.io.out_ref.ctrl.isXSTrap.peek())
+        c.io.out_dut.ctrl.noSpecExec.expect(c.io.out_ref.ctrl.noSpecExec.peek())
+        c.io.out_dut.ctrl.blockBackward.expect(c.io.out_ref.ctrl.blockBackward.peek())
+        c.io.out_dut.ctrl.flushPipe.expect(c.io.out_ref.ctrl.flushPipe.peek())
         // c.io.out_dut.ctrl.isRVF.expect(c.io.out_ref.ctrl.isRVF.peek())
-        // c.io.out_dut.ctrl.imm.expect(c.io.out_ref.ctrl.imm.peek())
-        // c.io.out_dut.ctrl.commitType.expect(c.io.out_ref.ctrl.commitType.peek())
+        if (c.io.out_ref.ctrl.src2Type.peek() == SrcType.imm) {
+          c.io.out_dut.ctrl.imm.expect(c.io.out_ref.ctrl.imm.peek())
+        }
+        c.io.out_dut.ctrl.commitType.expect(c.io.out_ref.ctrl.commitType.peek())
 
         // 3. Branch Tag: ignore
       }

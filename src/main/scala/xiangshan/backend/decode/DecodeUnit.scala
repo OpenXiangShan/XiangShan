@@ -362,6 +362,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   }
 
   // save rvc decode info
+  // TODO maybe rvc_info are useless?
   val rvc_info = Wire(new ExpandedInstruction())
   val is_rvc = Wire(Bool())
   rvc_info := exp.io.out
@@ -374,20 +375,12 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cf_ctrl.brTag := DontCare
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
 
-  when (is_rvc) {
-    cs.lsrc1 := rvc_info.rs1
-    cs.lsrc2 := rvc_info.rs2
-    cs.lsrc3 := rvc_info.rs3
-
-    cs.ldest := rvc_info.rd
-
-  } .otherwise {
-    cs.lsrc1 := ctrl_flow.instr(RS1_MSB,RS1_LSB)
-    cs.lsrc2 := ctrl_flow.instr(RS2_MSB,RS2_LSB)
-    cs.lsrc3 := ctrl_flow.instr(RS3_MSB,RS3_LSB)
-
-    cs.ldest := ctrl_flow.instr(RD_MSB,RD_LSB)
-  }
+  // read src1~3 location
+  cs.lsrc1 := Mux(ctrl_flow.instr === LUI || cs.src1Type === SrcType.pc, 0.U, ctrl_flow.instr(RS1_MSB,RS1_LSB))
+  cs.lsrc2 := ctrl_flow.instr(RS2_MSB,RS2_LSB)
+  cs.lsrc3 := ctrl_flow.instr(RS3_MSB,RS3_LSB)
+  // read dest location
+  cs.ldest := Mux(cs.fpWen || cs.rfWen, ctrl_flow.instr(RD_MSB,RD_LSB), 0.U)
 
   // fill in exception vector
   cf_ctrl.cf.exceptionVec.map(_ := false.B)
