@@ -40,7 +40,7 @@ class DecodeBuffer extends XSModule {
     val r = RegEnable(io.in(i).bits, io.in(i).fire())
     io.in(i).ready := leftCanIn
     io.out(i).bits <> r
-    io.out(i).valid := validVec(i) && !flush && !io.isWalking
+    io.out(i).valid := validVec(i) && !flush //&& !io.isWalking
   }
 
   for(in <- io.in){

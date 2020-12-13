@@ -96,7 +96,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
-  decBuf.io.isWalking := roq.io.commits.hasWalkInstr
+  decBuf.io.isWalking := roq.io.commits.isWalk
   decBuf.io.redirect.valid <> redirectValid
   decBuf.io.redirect.bits <> redirect
   decBuf.io.out <> rename.io.in

@@ -54,11 +54,11 @@ class Rename extends XSModule {
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
-  val walkValid = io.roqCommits.hasWalkInstr
-  fpFreeList.walk.valid := walkValid
-  intFreeList.walk.valid := walkValid
+  fpFreeList.walk.valid := io.roqCommits.isWalk
+  intFreeList.walk.valid := io.roqCommits.isWalk
   fpFreeList.walk.bits := PopCount((0 until CommitWidth).map(i => io.roqCommits.valid(i) && needDestReg(true, io.roqCommits.uop(i))))
   intFreeList.walk.bits := PopCount((0 until CommitWidth).map(i => io.roqCommits.valid(i) && needDestReg(false, io.roqCommits.uop(i))))
+  // walk has higher priority than allocation and thus we don't use isWalk here
   fpFreeList.req.doAlloc := intFreeList.req.canAlloc && io.out(0).ready
   intFreeList.req.doAlloc := fpFreeList.req.canAlloc && io.out(0).ready
 
@@ -91,7 +91,7 @@ class Rename extends XSModule {
     fpFreeList.req.allocReqs(i) := needFpDest(i)
     intFreeList.req.allocReqs(i) := needIntDest(i)
 
-    io.in(i).ready := io.out(i).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc
+    io.in(i).ready := !io.in(i).valid || (io.out(i).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
 
     // do checkpoints when a branch inst come
     // for(fl <- Seq(fpFreeList, intFreeList)){
@@ -107,7 +107,7 @@ class Rename extends XSModule {
       )
     )
 
-    io.out(i).valid := io.in(i).valid && intFreeList.req.canAlloc && fpFreeList.req.canAlloc
+    io.out(i).valid := io.in(i).valid && intFreeList.req.canAlloc && fpFreeList.req.canAlloc && !io.roqCommits.isWalk
     io.out(i).bits := uops(i)
 
     // write rename table
@@ -115,7 +115,7 @@ class Rename extends XSModule {
       val rat = if(fp) fpRat else intRat
       val freeList = if(fp) fpFreeList else intFreeList
       // speculative inst write
-      val specWen = freeList.req.allocReqs(i) && freeList.req.canAlloc && freeList.req.doAlloc
+      val specWen = freeList.req.allocReqs(i) && freeList.req.canAlloc && freeList.req.doAlloc && !io.roqCommits.isWalk
       // walk back write
       val commitDestValid = io.roqCommits.valid(i) && needDestReg(fp, io.roqCommits.uop(i))
       val walkWen = commitDestValid && io.roqCommits.isWalk
