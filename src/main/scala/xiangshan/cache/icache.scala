@@ -30,6 +30,9 @@ case class ICacheParameters(
 trait HasICacheParameters extends HasL1CacheParameters {
   val cacheParams = icacheParameters
 
+  //TODO: temp set
+  def accessBorder =  0x80000000L
+
   // the width of inner CPU data interface
   def cacheID = 0
   // RVC instruction length
@@ -88,6 +91,7 @@ class ICacheResp extends ICacheBundle
   val data = UInt((FetchWidth * 32).W)
   val mask = UInt(PredictWidth.W)
   val ipf = Bool()
+  val acf = Bool()
 }
 
 
@@ -282,6 +286,7 @@ class ICache extends ICacheModule
   
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
+
   metaArray.io.read.valid := s1_valid
   metaArray.io.read.bits  :=s1_idx
   dataArray.io.read.valid := s1_valid
@@ -298,10 +303,15 @@ class ICache extends ICacheModule
   val s2_tlb_resp = WireInit(io.tlb.resp.bits)
   val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
+  val s2_access_fault = WireInit(false.B)
   s2_fire := s2_valid && s3_ready && !io.flush(0) && io.tlb.resp.fire()
   when(io.flush(0)) {s2_valid := s1_fire}
   .elsewhen(s1_fire) { s2_valid := s1_valid}
   .elsewhen(s2_fire) { s2_valid := false.B}
+
+  //physical address < 0x80000000
+  //TODO: May have bugs
+  s2_access_fault := (s2_tlb_resp.paddr(31,0) < accessBorder.U(31,0)) && s2_valid
 
   // SRAM(Meta and Data) read reseponse
   val metas = metaArray.io.readResp
@@ -318,10 +328,10 @@ class ICache extends ICacheModule
   
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
  
-  s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr
+  s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
-  XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask)
+  XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b acf:%d\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_access_fault)
   XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}\n")
   XSDebug(p"[Stage 2] tlb resp: v ${io.tlb.resp.valid} r ${io.tlb.resp.ready} ${s2_tlb_resp}\n")
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
@@ -338,6 +348,7 @@ class ICache extends ICacheModule
   val s3_wayMask = RegEnable(next=waymask,init=0.U,enable=s2_fire)
   val s3_miss = s3_valid && !s3_hit
   val s3_idx = get_idx(s3_req_pc)
+  val s3_access_fault = RegEnable(s2_access_fault,init=false.B,enable=s2_fire)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B } 
@@ -411,7 +422,7 @@ class ICache extends ICacheModule
   s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.fire())
 
   //TODO: coherence
-  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d\n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr)
+  XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
   XSDebug("[Stage 3] hit:%d  miss:%d  waymask:%x blocking:%d\n",s3_hit,s3_miss,s3_wayMask.asUInt,blocking)
   XSDebug("[Stage 3] tag: %x    idx: %d\n",s3_tag,get_idx(s3_req_pc))
   XSDebug(p"[Stage 3] tlb resp: ${s3_tlb_resp}\n")
@@ -436,6 +447,7 @@ class ICache extends ICacheModule
   io.resp.bits.mask := s3_req_mask
   io.resp.bits.pc := s3_req_pc
   io.resp.bits.ipf := s3_tlb_resp.excp.pf.instr
+  io.resp.bits.acf := s3_access_fault
 
   //to itlb
   io.tlb.resp.ready := s3_ready
