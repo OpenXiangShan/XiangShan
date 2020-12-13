@@ -385,7 +385,7 @@ class IFU extends XSModule with HasIFUConst
     val sawNTBr = b.brInfo.sawNotTakenBranch
     val isBr = b.pd.isBr
     val taken = b.taken
-    val updatedGh = oldGh.update(isBr && taken, sawNTBr)
+    val updatedGh = oldGh.update(sawNTBr, isBr && taken)
     final_gh := updatedGh
     final_gh_bypass := updatedGh
     flush_final_gh := true.B
