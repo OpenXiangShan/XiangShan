@@ -84,22 +84,19 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   io.req.canAlloc := RegNext(freeRegs >= RenameWidth.U)
   XSDebug(p"free regs: $freeRegs\n")
 
-
-  val newHeadPtrs = ((0 until RenameWidth) map {i =>
-    if(i == 0) headPtr else headPtr + PopCount(io.req.allocReqs.take(i))
-  }) :+ (headPtr + PopCount(io.req.allocReqs))
+  val allocatePtrs = (0 until RenameWidth).map(i => headPtr + i.U)
+  val allocatePdests = VecInit(allocatePtrs.map(ptr => freeList(ptr.value)))
 
   for(i <- 0 until RenameWidth){
-    val ptr = newHeadPtrs(i)
-    val idx = ptr.value
-    io.req.pdests(i) := freeList(idx)
+    io.req.pdests(i) := allocatePdests(/*if (i == 0) 0.U else */PopCount(io.req.allocReqs.take(i)))
     // when(io.cpReqs(i).valid){
     //   checkPoints(io.cpReqs(i).bits.value) := newHeadPtrs(i+1)
     //   XSDebug(p"do checkPt at BrqIdx=${io.cpReqs(i).bits.value} ${newHeadPtrs(i+1)}\n")
     // }
     XSDebug(p"req:${io.req.allocReqs(i)} canAlloc:${io.req.canAlloc} pdest:${io.req.pdests(i)}\n")
   }
-  val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, newHeadPtrs.last, headPtr)
+  val headPtrAllocate = headPtr + PopCount(io.req.allocReqs)
+  val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, headPtrAllocate, headPtr)
   freeRegs := distanceBetween(tailPtr, headPtrNext)
 
   // when mispredict or exception happens, reset headPtr to tailPtr (freelist is full).
