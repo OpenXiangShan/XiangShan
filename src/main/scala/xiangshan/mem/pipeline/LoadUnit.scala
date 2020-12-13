@@ -23,15 +23,11 @@ class LoadUnit_S0 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
     val dtlbReq = DecoupledIO(new TlbReq)
-    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
-    val tlbFeedback = ValidIO(new TlbFeedback)
     val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
 
   val s0_uop = io.in.bits.uop
   val s0_vaddr = io.in.bits.src1 + s0_uop.ctrl.imm
-  val s0_paddr = io.dtlbResp.bits.paddr
-  val s0_tlb_miss = io.dtlbResp.bits.miss
   val s0_mask = genWmask(s0_vaddr, s0_uop.ctrl.fuOpType(1,0))
 
   // query DTLB
@@ -40,13 +36,6 @@ class LoadUnit_S0 extends XSModule {
   io.dtlbReq.bits.cmd := TlbCmd.read
   io.dtlbReq.bits.roqIdx := s0_uop.roqIdx
   io.dtlbReq.bits.debug.pc := s0_uop.cf.pc
-  io.dtlbResp.ready := true.B
-
-  // feedback tlb result to RS
-  // Note: can be moved to s1
-  io.tlbFeedback.valid := io.out.valid
-  io.tlbFeedback.bits.hit := !s0_tlb_miss
-  io.tlbFeedback.bits.roqIdx := s0_uop.roqIdx
 
   // query DCache
   io.dcacheReq.valid := io.in.valid
@@ -76,18 +65,14 @@ class LoadUnit_S0 extends XSModule {
 
   io.out.bits := DontCare
   io.out.bits.vaddr := s0_vaddr
-  io.out.bits.paddr := s0_paddr
-  io.out.bits.tlbMiss := io.dtlbResp.bits.miss
   io.out.bits.mask := s0_mask
   io.out.bits.uop := s0_uop
   io.out.bits.uop.cf.exceptionVec(loadAddrMisaligned) := !addrAligned
-  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
   io.in.ready := !io.in.valid || (io.out.ready && io.dcacheReq.ready)
 
   XSDebug(io.dcacheReq.fire(),
-    p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, " +
-    p"vaddr ${Hexadecimal(s0_vaddr)}, paddr will be ${Hexadecimal(s0_paddr)}\n"
+    p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
 }
 
@@ -99,19 +84,28 @@ class LoadUnit_S1 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val redirect = Flipped(ValidIO(new Redirect))
-    val s1_paddr = Output(UInt(PAddrBits.W))
+    val dtlbResp = Flipped(DecoupledIO(new TlbResp))
+    val tlbFeedback = ValidIO(new TlbFeedback)
+    val dcachePAddr = Output(UInt(PAddrBits.W))
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadForwardQueryIO
   })
 
   val s1_uop = io.in.bits.uop
-  val s1_paddr = io.in.bits.paddr
-  val s1_tlb_miss = io.in.bits.tlbMiss
+  val s1_paddr = io.dtlbResp.bits.paddr
+  val s1_tlb_miss = io.dtlbResp.bits.miss
   val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr) && !io.out.bits.uop.cf.exceptionVec.asUInt.orR
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
-  io.s1_paddr :=  s1_paddr
+
+  io.dtlbResp.ready := true.B
+  // feedback tlb result to RS
+  io.tlbFeedback.valid := io.in.valid
+  io.tlbFeedback.bits.hit := !s1_tlb_miss
+  io.tlbFeedback.bits.roqIdx := s1_uop.roqIdx
+
+  io.dcachePAddr := s1_paddr
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid
@@ -135,6 +129,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
+  io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
   io.in.ready := !io.in.valid || io.out.ready
 
@@ -243,14 +238,14 @@ class LoadUnit extends XSModule {
   load_s0.io.in <> io.ldin
   load_s0.io.redirect <> io.redirect
   load_s0.io.dtlbReq <> io.dtlb.req
-  load_s0.io.dtlbResp <> io.dtlb.resp
   load_s0.io.dcacheReq <> io.dcache.req
-  load_s0.io.tlbFeedback <> io.tlbFeedback
 
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, false.B)
 
-  io.dcache.s1_paddr := load_s1.io.out.bits.paddr
   load_s1.io.redirect <> io.redirect
+  load_s1.io.dtlbResp <> io.dtlb.resp
+  load_s1.io.tlbFeedback <> io.tlbFeedback
+  io.dcache.s1_paddr <> load_s1.io.dcachePAddr
   io.dcache.s1_kill := DontCare // FIXME
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
@@ -258,9 +253,9 @@ class LoadUnit extends XSModule {
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, false.B)
 
   load_s2.io.dcacheResp <> io.dcache.resp
-  load_s2.io.lsq := DontCare 
-  load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData 
-  load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask 
+  load_s2.io.lsq := DontCare
+  load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
+  load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +

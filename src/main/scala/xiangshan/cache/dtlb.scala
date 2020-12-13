@@ -275,11 +275,17 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   def TLBRead(i: Int) = {
     val entryHitVec = VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
-    val hitVec  = (v.asBools zip entryHitVec).map{ case (a,b) => a&b }
-    val pfHitVec   = (pf.asBools zip entryHitVec).map{ case (a,b) => a&b }
-    val pfArray = ParallelOR(pfHitVec).asBool && valid(i) && vmEnable
-    val hit     = ParallelOR(hitVec).asBool && valid(i) && vmEnable && ~pfArray
-    val miss    = !hit && valid(i) && vmEnable && ~pfArray
+
+    val reqAddrReg = if (isDtlb) RegNext(reqAddr(i)) else reqAddr(i)
+    val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
+    val validReg = if (isDtlb) RegNext(valid(i)) else valid(i)
+    val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
+
+    val hitVec  = (v.asBools zip entryHitVecReg).map{ case (a,b) => a&b }
+    val pfHitVec   = (pf.asBools zip entryHitVecReg).map{ case (a,b) => a&b }
+    val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
+    val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
+    val miss    = !hit && validReg && vmEnable && ~pfArray
     val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn))
     val hitPerm = ParallelMux(hitVec zip entry.map(_.perm))
     val hitLevel= ParallelMux(hitVec zip entry.map(_.level))
@@ -290,23 +296,23 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
 
     // resp  // TODO: A/D has not being concerned
-    val paddr = LookupTreeDefault(hitLevel, Cat(hitppn, reqAddr(i).off), List(
-      0.U -> Cat(hitppn(ppnLen - 1, 2*vpnnLen), reqAddr(i).vpn(2*vpnnLen - 1, 0), reqAddr(i).off),
-      1.U -> Cat(hitppn(ppnLen - 1, vpnnLen), reqAddr(i).vpn(vpnnLen - 1, 0), reqAddr(i).off),
-      2.U -> Cat(hitppn, reqAddr(i).off)
+    val paddr = LookupTreeDefault(hitLevel, Cat(hitppn, reqAddrReg.off), List(
+      0.U -> Cat(hitppn(ppnLen - 1, 2*vpnnLen), reqAddrReg.vpn(2*vpnnLen - 1, 0), reqAddrReg.off),
+      1.U -> Cat(hitppn(ppnLen - 1, vpnnLen), reqAddrReg.vpn(vpnnLen - 1, 0), reqAddrReg.off),
+      2.U -> Cat(hitppn, reqAddrReg.off)
     ))
 
     req(i).ready := resp(i).ready
-    resp(i).valid := valid(i)
-    resp(i).bits.paddr := Mux(vmEnable, paddr, SignExt(req(i).bits.vaddr, PAddrBits))
+    resp(i).valid := validReg
+    resp(i).bits.paddr := Mux(vmEnable, paddr, RegNext(SignExt(req(i).bits.vaddr, PAddrBits)))
     resp(i).bits.miss := miss
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
-    val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmd(i))) // update A/D through exception
+    val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = (pfArray && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
-    val stPf = (pfArray && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
-    val instrPf = (pfArray && TlbCmd.isExec(cmd(i))) || hit && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    val ldPf = (pfArray && TlbCmd.isRead(cmdReg) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/*!isAMO*/) // TODO: handle isAMO
+    val stPf = (pfArray && TlbCmd.isWrite(cmdReg) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
+    val instrPf = (pfArray && TlbCmd.isExec(cmdReg)) || hit && !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
     resp(i).bits.excp.pf.ld    := ldPf || update
     resp(i).bits.excp.pf.st    := stPf || update
     resp(i).bits.excp.pf.instr := instrPf || update
@@ -332,9 +338,9 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
   val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
   for (i <- 0 until Width) {
-    ptwReqSeq(i).valid := valid(i) && missVec(i)
-    ptwReqSeq(i).roqIdx := req(i).bits.roqIdx
-    ptwReqSeq(i).bits.vpn := reqAddr(i).vpn
+    ptwReqSeq(i).valid := ((if (isDtlb) RegNext(valid(i)) else valid(i)) && missVec(i))
+    ptwReqSeq(i).roqIdx := (if (isDtlb) RegNext(req(i).bits.roqIdx) else req(i).bits.roqIdx)
+    ptwReqSeq(i).bits.vpn := (if (isDtlb) RegNext(reqAddr(i).vpn) else reqAddr(i).vpn)
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
 
