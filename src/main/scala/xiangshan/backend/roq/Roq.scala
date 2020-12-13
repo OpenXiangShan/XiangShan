@@ -186,7 +186,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       val debug_Uop = microOp(wbIdx)
       XSInfo(true.B,
         p"writebacked pc 0x${Hexadecimal(debug_Uop.cf.pc)} wen ${debug_Uop.ctrl.rfWen} " +
-        p"data 0x${Hexadecimal(io.exeWbResults(i).bits.data)} ldst ${debug_Uop.ctrl.ldest} pdst ${debug_Uop.ctrl.ldest} " +
+        p"data 0x${Hexadecimal(io.exeWbResults(i).bits.data)} ldst ${debug_Uop.ctrl.ldest} pdst ${debug_Uop.pdest} " +
         p"skip ${io.exeWbResults(i).bits.debug.isMMIO} roqIdx: ${wbIdxExt}\n"
       )
     }
