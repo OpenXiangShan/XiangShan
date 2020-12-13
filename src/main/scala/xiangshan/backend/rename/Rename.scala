@@ -15,7 +15,7 @@ class RenameBypassInfo extends XSBundle {
 class Rename extends XSModule {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val roqCommits = Vec(CommitWidth, Flipped(ValidIO(new RoqCommit)))
+    val roqCommits = Flipped(new RoqCommitIO)
     // from decode buffer
     val in = Vec(RenameWidth, Flipped(DecoupledIO(new CfCtrl)))
     // to dispatch1
@@ -54,11 +54,11 @@ class Rename extends XSModule {
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
   }
-  val walkValid = Cat(io.roqCommits.map(_.valid)).orR && io.roqCommits(0).bits.isWalk
+  val walkValid = io.roqCommits.hasWalkInstr
   fpFreeList.walk.valid := walkValid
   intFreeList.walk.valid := walkValid
-  fpFreeList.walk.bits := PopCount(io.roqCommits.map(c => c.valid && needDestReg(true, c.bits.uop)))
-  intFreeList.walk.bits := PopCount(io.roqCommits.map(c => c.valid && needDestReg(false, c.bits.uop)))
+  fpFreeList.walk.bits := PopCount((0 until CommitWidth).map(i => io.roqCommits.valid(i) && needDestReg(true, io.roqCommits.uop(i))))
+  intFreeList.walk.bits := PopCount((0 until CommitWidth).map(i => io.roqCommits.valid(i) && needDestReg(false, io.roqCommits.uop(i))))
   fpFreeList.req.doAlloc := intFreeList.req.canAlloc && io.out(0).ready
   intFreeList.req.doAlloc := fpFreeList.req.canAlloc && io.out(0).ready
 
@@ -117,21 +117,21 @@ class Rename extends XSModule {
       // speculative inst write
       val specWen = freeList.req.allocReqs(i) && freeList.req.canAlloc && freeList.req.doAlloc
       // walk back write
-      val commitDestValid = io.roqCommits(i).valid && needDestReg(fp, io.roqCommits(i).bits.uop)
-      val walkWen = commitDestValid && io.roqCommits(i).bits.isWalk
+      val commitDestValid = io.roqCommits.valid(i) && needDestReg(fp, io.roqCommits.uop(i))
+      val walkWen = commitDestValid && io.roqCommits.isWalk
 
       rat.specWritePorts(i).wen := specWen || walkWen
-      rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits(i).bits.uop.ctrl.ldest)
-      rat.specWritePorts(i).wdata := Mux(specWen, freeList.req.pdests(i), io.roqCommits(i).bits.uop.old_pdest)
+      rat.specWritePorts(i).addr := Mux(specWen, uops(i).ctrl.ldest, io.roqCommits.uop(i).ctrl.ldest)
+      rat.specWritePorts(i).wdata := Mux(specWen, freeList.req.pdests(i), io.roqCommits.uop(i).old_pdest)
 
       XSInfo(walkWen,
-        {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits(i).bits.uop.cf.pc)}" +
+        {if(fp) p"fp" else p"int "} + p"walk: pc:${Hexadecimal(io.roqCommits.uop(i).cf.pc)}" +
           p" ldest:${rat.specWritePorts(i).addr} old_pdest:${rat.specWritePorts(i).wdata}\n"
       )
 
-      rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits(i).bits.isWalk
-      rat.archWritePorts(i).addr := io.roqCommits(i).bits.uop.ctrl.ldest
-      rat.archWritePorts(i).wdata := io.roqCommits(i).bits.uop.pdest
+      rat.archWritePorts(i).wen := commitDestValid && !io.roqCommits.isWalk
+      rat.archWritePorts(i).addr := io.roqCommits.uop(i).ctrl.ldest
+      rat.archWritePorts(i).wdata := io.roqCommits.uop(i).pdest
 
       XSInfo(rat.archWritePorts(i).wen,
         {if(fp) p"fp" else p"int "} + p" rat arch: ldest:${rat.archWritePorts(i).addr}" +
@@ -139,7 +139,7 @@ class Rename extends XSModule {
       )
 
       freeList.deallocReqs(i) := rat.archWritePorts(i).wen
-      freeList.deallocPregs(i) := io.roqCommits(i).bits.uop.old_pdest
+      freeList.deallocPregs(i) := io.roqCommits.uop(i).old_pdest
 
     }
 

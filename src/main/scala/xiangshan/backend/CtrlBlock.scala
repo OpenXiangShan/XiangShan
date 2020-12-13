@@ -53,7 +53,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
       val exception = ValidIO(new MicroOp)
       val isInterrupt = Output(Bool())
       // to mem block
-      val commits = Vec(CommitWidth, ValidIO(new RoqCommit))
+      val commits = new RoqCommitIO
       val roqDeqPtr = Output(new RoqPtr)
     }
   })
@@ -96,7 +96,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
-  decBuf.io.isWalking := roq.io.commits(0).valid && roq.io.commits(0).bits.isWalk
+  decBuf.io.isWalking := roq.io.commits.hasWalkInstr
   decBuf.io.redirect.valid <> redirectValid
   decBuf.io.redirect.bits <> redirect
   decBuf.io.out <> rename.io.in
