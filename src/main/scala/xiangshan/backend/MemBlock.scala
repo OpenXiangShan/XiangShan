@@ -55,7 +55,6 @@ class MemBlock
       val exceptionAddr = new ExceptionAddrIO // to csr
       val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit))) // to lsq
       val roqDeqPtr = Input(new RoqPtr) // to lsq
-      val oldestStore = Output(Valid(new RoqPtr)) // to dispatch
     }
   })
 
@@ -209,7 +208,6 @@ class MemBlock
   // Lsq
   lsq.io.commits     <> io.lsqio.commits
   lsq.io.enq         <> io.fromCtrlBlock.enqLsq
-  lsq.io.oldestStore <> io.lsqio.oldestStore
   lsq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback

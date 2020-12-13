@@ -90,21 +90,14 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   /*
       example: headIdx       = 2
-               headIdxOH     = 00000100
-               headIdxMaskHI = 11111100
+               headIdxMaskHi = 11111100
                headIdxMaskLo = 00000011
-               skipMask      = 00111101
                commitIdxHi   =  6
                commitIdxLo   =        0
                commitIdx     =  6
    */
-  val headIdxOH = UIntToOH(headIdx)
-  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
-  for(i <- headIdxMaskHiVec.indices){
-    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
-  }
-  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
-  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
+  val headIdxMaskLo = UIntToMask(headIdx, BrqSize)
+  val headIdxMaskHi = ~headIdxMaskLo
 
   val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
   val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
@@ -134,12 +127,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
   XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
 
-//  XSDebug(
-//    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
-//  )
-//  XSDebug(
-//    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
-//  )
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
@@ -182,11 +169,12 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // branch insts enq
+  val validEntries = distanceBetween(tailPtr, headPtr)
   for(i <- 0 until DecodeWidth){
     val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := stateQueue(idx).isInvalid
+    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
     io.brTags(i) := brTag
     when(io.enqReqs(i).fire()){
       brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc
@@ -205,7 +193,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
         p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
           p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
       )
-      stateQueue(wbIdx) := s_wb
+      when(stateQueue(wbIdx).isIdle){
+        stateQueue(wbIdx) := s_wb
+      }
       val exuOut = WireInit(exuWb.bits)
       val isMisPred = brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
       exuOut.redirect.isMisPred := isMisPred
@@ -235,9 +225,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     }
 
   }
-
-
-
 
   // Debug info
   val debug_roq_redirect = io.roqRedirect.valid
