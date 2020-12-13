@@ -38,7 +38,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   // icache Queue
   val groupAlign = log2Up(cacheParams.blockBytes)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
-  
+
   //ECC encoding
   def encRowBits = cacheParams.dataCode.width(rowBits)
   def encTagBits = cacheParams.tagCode.width(tagBits)
@@ -174,7 +174,7 @@ class ICacheMetaArray extends ICachArray
 
   val metaArray = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays, shouldReset = true))
 
-  //read 
+  //read
   metaArray.io.r.req.valid := io.read.valid
   io.read.ready := metaArray.io.r.req.ready
   io.write.ready := DontCare
@@ -202,7 +202,7 @@ class ICacheDataArray extends ICachArray
 
   val dataArray = List.fill(blockWords){ Module(new SRAMTemplate(UInt(encRowBits.W), set=nSets, way = nWays))}
 
-  //read 
+  //read
   //do ECC decoding after way choose
   for(b <- 0 until blockWords){
     dataArray(b).io.r.req.valid := io.read.valid
@@ -221,8 +221,8 @@ class ICacheDataArray extends ICachArray
 
   for(b <- 0 until blockWords){
     dataArray(b).io.w.req.valid := io.write.valid
-    dataArray(b).io.w.req.bits.apply(   setIdx=write.virIdx, 
-                                        data=write_data_encoded(b), 
+    dataArray(b).io.w.req.bits.apply(   setIdx=write.virIdx,
+                                        data=write_data_encoded(b),
                                         waymask=write.waymask)
 
   }
@@ -269,7 +269,7 @@ class ICache extends ICacheModule
   val metaArray = Module(new ICacheMetaArray)
   val dataArray = Module(new ICacheDataArray)
   // 256-bit valid
-  val validArray = RegInit(0.U((nSets * nWays).W)) 
+  val validArray = RegInit(0.U((nSets * nWays).W))
 
   //----------------------------
   //    Stage 1
@@ -279,7 +279,7 @@ class ICache extends ICacheModule
   s1_req_mask := io.req.bits.mask
   s2_ready := WireInit(false.B)
   s1_fire := s1_valid && (s2_ready || io.flush(0))
-  
+
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
   metaArray.io.read.valid := s1_valid
@@ -289,8 +289,8 @@ class ICache extends ICacheModule
 
   XSDebug("[Stage 1] v : r : f  (%d  %d  %d)  request pc: 0x%x  mask: %b\n",s1_valid,s2_ready,s1_fire,s1_req_pc,s1_req_mask)
   XSDebug("[Stage 1] index: %d\n",s1_idx)
-  
-  
+
+
   //----------------------------
   //    Stage 2
   //----------------------------
@@ -315,9 +315,9 @@ class ICache extends ICacheModule
   val invalidVec = ~validMeta
   val hasInvalidWay = invalidVec.orR
   val refillInvalidWaymask = PriorityMask(invalidVec)
-  
+
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
- 
+
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr
   s2_ready := s2_fire || !s2_valid || io.flush(0)
 
@@ -326,8 +326,8 @@ class ICache extends ICacheModule
   XSDebug(p"[Stage 2] tlb resp: v ${io.tlb.resp.valid} r ${io.tlb.resp.ready} ${s2_tlb_resp}\n")
   XSDebug("[Stage 2] tag: %x  hit:%d\n",s2_tag,s2_hit)
   XSDebug("[Stage 2] validMeta: %b  victimWayMaks:%b   invalidVec:%b    hitVec:%b    waymask:%b \n",validMeta,victimWayMask,invalidVec.asUInt,hitVec.asUInt,waymask.asUInt)
-  
-  
+
+
   //----------------------------
   //    Stage 3
   //----------------------------
@@ -340,16 +340,16 @@ class ICache extends ICacheModule
   val s3_idx = get_idx(s3_req_pc)
   when(io.flush(1)) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
-  .elsewhen(io.resp.fire()) { s3_valid := false.B } 
+  .elsewhen(io.resp.fire()) { s3_valid := false.B }
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
-  // icache hit 
+  // icache hit
   // data ECC encoding
   // simply cut the hit cacheline
   val dataHitWay = VecInit(s3_data.map(b => Mux1H(s3_wayMask,b).asUInt))
   val outPacket =  Wire(UInt((FetchWidth * 32).W))
-  val dataHitWayDecoded = VecInit(   
-    (0 until blockWords).map{r => 
+  val dataHitWayDecoded = VecInit(
+    (0 until blockWords).map{r =>
       val row = dataHitWay.asTypeOf(Vec(blockWords,UInt(encRowBits.W)))(r)
       val decodedRow = cacheParams.dataCode.decode(row)
       assert(!(s3_valid && s3_hit && decodedRow.uncorrectable))
@@ -357,7 +357,7 @@ class ICache extends ICacheModule
     }
   )
   outPacket := cutHelper(dataHitWay,s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
-  
+
   //ICache MissQueue
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
@@ -383,9 +383,9 @@ class ICache extends ICacheModule
   //refill write
   val metaWriteReq = icacheMissQueue.io.meta_write.bits
   icacheMissQueue.io.meta_write.ready := true.B
-  metaArray.io.write.valid := icacheMissQueue.io.meta_write.valid 
-  metaArray.io.write.bits.apply(tag=metaWriteReq.meta_write_tag, 
-                                idx=metaWriteReq.meta_write_idx, 
+  metaArray.io.write.valid := icacheMissQueue.io.meta_write.valid
+  metaArray.io.write.bits.apply(tag=metaWriteReq.meta_write_tag,
+                                idx=metaWriteReq.meta_write_idx,
                                 waymask=metaWriteReq.meta_write_waymask)
 
   val wayNum = OHToUInt(metaWriteReq.meta_write_waymask.asTypeOf(Vec(nWays,Bool())))
@@ -397,7 +397,7 @@ class ICache extends ICacheModule
   //data
   icacheMissQueue.io.refill.ready := true.B
   val refillReq = icacheMissQueue.io.refill.bits
-  dataArray.io.write.valid := icacheMissQueue.io.refill.valid 
+  dataArray.io.write.valid := icacheMissQueue.io.refill.valid
   dataArray.io.write.bits.apply(data=refillReq.refill_data,
                                 idx=refillReq.refill_idx,
                                 waymask=refillReq.refill_waymask)
@@ -429,7 +429,7 @@ class ICache extends ICacheModule
   //----------------------------
   //icache request
   io.req.ready := metaArray.io.read.ready && dataArray.io.read.ready && s2_ready
-  
+
   //icache response: to pre-decoder
   io.resp.valid := s3_valid && (s3_hit || icacheMissQueue.io.resp.valid)
   io.resp.bits.data := Mux((s3_valid && s3_hit),outPacket,refillDataOut)
@@ -444,7 +444,7 @@ class ICache extends ICacheModule
   io.tlb.req.bits.cmd := TlbCmd.exec
   io.tlb.req.bits.roqIdx := DontCare
   io.tlb.req.bits.debug.pc := s2_req_pc
-  
+
   //To L1 plus
   io.mem_acquire <> icacheMissQueue.io.mem_acquire
   icacheMissQueue.io.mem_grant <> io.mem_grant

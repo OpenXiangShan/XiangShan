@@ -125,7 +125,7 @@ class IFU extends XSModule with HasIFUConst
 
 
   // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
-  
+
   val extHist = RegInit(VecInit(Seq.fill(ExtHistoryLength)(0.U(1.W))))
   val updatePtr = WireInit(false.B)
   val newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -139,7 +139,7 @@ class IFU extends XSModule with HasIFUConst
   updatePtr := false.B
   newPtr := if1_histPtr
 
-  
+
 
   def wrapGHInfo(bp: BranchPrediction, ptr: UInt) = {
     val ghi = Wire(new GlobalHistoryInfo())
@@ -171,7 +171,7 @@ class IFU extends XSModule with HasIFUConst
   }
 
   val if2_bp = bpu.io.out(0)
-  
+
   val if2_GHInfo = wrapGHInfo(if2_bp, if2_predHistPtr)
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
@@ -213,9 +213,9 @@ class IFU extends XSModule with HasIFUConst
   // val if4_prevHalfInstr = Wire(new PrevHalfInstr)
   // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
   val crossPageIPF = WireInit(false.B)
-  
+
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
-  
+
   // the previous half of RVI instruction waits until it meets its last half
   val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && (if3_prevHalfInstr.pc + 2.U) === if3_pc && if3_valid
   // set to invalid once consumed or redirect from backend
@@ -251,7 +251,7 @@ class IFU extends XSModule with HasIFUConst
                     // GHInfo from last pred does not corresponds with this packet
                     if3_ghInfoNotIdenticalRedirect
                   )
-  
+
   val if3_target = WireInit(snpc(if3_pc))
 
   /* when (prevHalfMetRedirect) {
@@ -287,22 +287,22 @@ class IFU extends XSModule with HasIFUConst
   val if4_mask = RegEnable(icacheResp.mask, if3_fire)
   val if4_snpc = Mux(inLoop, if4_pc + (PopCount(if4_mask) << 1), snpc(if4_pc))
 
-  
+
   val if4_predHistPtr = RegEnable(if3_predHistPtr, enable=if3_fire)
   // wait until prevHalfInstr written into reg
   if4_ready := (if4_fire && !hasPrevHalfInstrReq || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
   .elsewhen (if3_fire) { if4_valid := true.B }
   .elsewhen (if4_fire) { if4_valid := false.B }
-  
+
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
   if4_bp.takens  := bpu.io.out(2).takens & if4_mask
   if4_bp.brMask  := bpu.io.out(2).brMask & if4_mask
   if4_bp.jalMask := bpu.io.out(2).jalMask & if4_mask
-  
+
   val if4_GHInfo = wrapGHInfo(if4_bp, if4_predHistPtr)
-  
+
   def cal_jal_tgt(inst: UInt, rvc: Bool): UInt = {
     Mux(rvc,
       SignExt(Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)), XLEN),
@@ -318,7 +318,7 @@ class IFU extends XSModule with HasIFUConst
       if4_bp.targets(i) := if4_jal_tgts(i)
     }
   }
-  
+
   // we need this to tell BPU the prediction of prev half
   // because the prediction is with the start of each inst
   val if4_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
