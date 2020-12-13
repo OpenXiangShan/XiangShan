@@ -1,96 +1,7 @@
 #include "snapshot.h"
-#include <zlib.h>
-#include<sys/time.h>
+#include "compress.h"
 
 #ifdef VM_SAVABLE
-
-double calcTime(timeval s, timeval e) {
-  double sec, usec;
-  sec = e.tv_sec - s.tv_sec;
-  usec = e.tv_usec - s.tv_usec;
-  return 1000*sec + usec/1000.0;
-}
-
-// Return whether the file is a gz file
-int VerilatedRestoreMem::isGzFile(const char *filename) {
-  assert(filename != NULL && strlen(filename) >= 4);
-  return !strcmp(filename + (strlen(filename) - 3), ".gz");
-}
-
-long VerilatedSaveMem::compressToFile(uint8_t *ptr, const char *filename, long buf_size) {
-  gzFile compressed_mem = gzopen(filename, "wb");
-
-  if(compressed_mem == NULL) {
-    printf("Can't open compressed binary file '%s'", filename);
-    return -1;
-  }
-
-  long curr_size = 0;
-  const uint32_t chunk_size = 16384;
-  long *temp_page = new long[chunk_size];
-  long *pmem_current = (long*)ptr;
-
-  while (curr_size < buf_size) {
-    memset(temp_page, 0, chunk_size * sizeof(long));
-    for (uint32_t x = 0; x < chunk_size / sizeof(long); x++) {
-      pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
-      if (*pmem_current != 0) {
-        *(temp_page + x) = *pmem_current;
-      }
-    }
-    uint32_t bytes_write = gzwrite(compressed_mem, temp_page, chunk_size);
-    if (bytes_write <= 0) { printf("Compress failed\n"); break; }
-    curr_size += bytes_write;
-    // assert(bytes_write % sizeof(long) == 0);
-
-  }
-  printf("Write %lu bytes from gz stream in total\n", curr_size);
-
-  delete [] temp_page;
-
-  if(gzclose(compressed_mem)) {
-    printf("Error closing '%s'\n", filename);
-    return -1;
-  }
-  return curr_size;
-}
-
-long VerilatedRestoreMem::readFromGz(void* ptr, const char *file_name, long buf_size) {
-  assert(buf_size > 0);
-  gzFile compressed_mem = gzopen(file_name, "rb");
-
-  if(compressed_mem == NULL) {
-    printf("Can't open compressed binary file '%s'", file_name);
-    return -1;
-  }
-
-  uint64_t curr_size = 0;
-  const uint32_t chunk_size = 16384;
-  long *temp_page = new long[chunk_size];
-  long *pmem_current = (long*)ptr;
-
-  while (curr_size < buf_size) {
-    uint32_t bytes_read = gzread(compressed_mem, temp_page, chunk_size);
-    if (bytes_read == 0) { break; }
-    // assert(bytes_read % sizeof(long) == 0);
-    for (uint32_t x = 0; x < bytes_read / sizeof(long) + 1; x++) {
-      if (*(temp_page + x) != 0) {
-        pmem_current = (long*)((uint8_t*)ptr + curr_size + x * sizeof(long));
-        *pmem_current = *(temp_page + x);
-      }
-    }
-    curr_size += bytes_read;
-  }
-  printf("Read %lu bytes from gz stream in total\n", curr_size);
-
-  delete [] temp_page;
-
-  if(gzclose(compressed_mem)) {
-    printf("Error closing '%s'\n", file_name);
-    return -1;
-  }
-  return curr_size;
-}
 
 void VerilatedSaveMem::flush() {
   long flush_size = m_cp - m_bufp;
@@ -112,7 +23,7 @@ void VerilatedSaveMem::save() {
   } else {
     timeval s, e;
     gettimeofday(&s, NULL);
-    compressToFile(buf, (m_filename + ".gz").c_str(), size);
+    snapshot_compressToFile(buf, (m_filename + ".gz").c_str(), size);
     gettimeofday(&e, NULL);
     printf("Compress cost time (msec.usec): %lf\n", calcTime(s, e));
   }
@@ -166,7 +77,7 @@ void VerilatedRestoreMem::open(const char* filename) {
     if(isGzFile(filename)) {
       timeval s, e;
       gettimeofday(&s, NULL);
-      size = readFromGz(buf, filename, buf_size);
+      size = readFromGz(buf, filename, buf_size, LOAD_SNAPSHOT);
       gettimeofday(&e, NULL);
       printf("Uncompress cost time (msec.usec): %lf\n", calcTime(s, e));
       assert(size > 0);
