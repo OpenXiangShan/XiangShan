@@ -24,6 +24,7 @@ class FetchPacket extends XSBundle {
   val brInfo = Vec(PredictWidth, new BranchInfo)
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
+  val acf = Bool()
   val crossPageIPFFix = Bool()
   val predTaken = Bool()
 }
