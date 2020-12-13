@@ -114,5 +114,5 @@ object GenMask {
 }
 
 object UIntToMask {
-  def apply(ptr: UInt) = UIntToOH(ptr) - 1.U
+  def apply(ptr: UInt, length: Integer) = UIntToOH(ptr)(length - 1, 0) - 1.U
 }
