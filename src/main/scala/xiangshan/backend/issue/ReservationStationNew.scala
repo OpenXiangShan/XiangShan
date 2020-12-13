@@ -323,7 +323,7 @@ class ReservationStationData
   })
 
   val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt(XLEN.W))))
+  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt((XLEN+1).W))))
 
   // TODO: change srcNum
 
