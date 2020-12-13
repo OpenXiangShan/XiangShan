@@ -386,6 +386,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cf_ctrl.cf.exceptionVec.map(_ := false.B)
   cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
   cf_ctrl.cf.exceptionVec(instrPageFault) := io.enq.ctrl_flow.exceptionVec(instrPageFault)
+  cf_ctrl.cf.exceptionVec(instrAccessFault) := io.enq.ctrl_flow.exceptionVec(instrAccessFault)
   
   // fix frflags
   //                           fflags    zero csrrs rd    csr
