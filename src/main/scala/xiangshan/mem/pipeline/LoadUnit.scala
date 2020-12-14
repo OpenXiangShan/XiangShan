@@ -21,7 +21,6 @@ class LoadUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
-    val redirect = Flipped(ValidIO(new Redirect))
     val dtlbReq = DecoupledIO(new TlbReq)
     val dcacheReq = DecoupledIO(new DCacheLoadReq)
   })
@@ -61,7 +60,7 @@ class LoadUnit_S0 extends XSModule {
     "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
 
-  io.out.valid := io.in.valid && io.dcacheReq.ready && !s0_uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid && io.dcacheReq.ready
 
   io.out.bits := DontCare
   io.out.bits.vaddr := s0_vaddr
@@ -83,7 +82,6 @@ class LoadUnit_S1 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
-    val redirect = Flipped(ValidIO(new Redirect))
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcachePAddr = Output(UInt(PAddrBits.W))
@@ -125,7 +123,7 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits.forwardMask := io.sbuffer.forwardMask
   io.out.bits.forwardData := io.sbuffer.forwardData
 
-  io.out.valid := io.in.valid && !s1_tlb_miss && !s1_uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -236,13 +234,11 @@ class LoadUnit extends XSModule {
   val load_s2 = Module(new LoadUnit_S2)
 
   load_s0.io.in <> io.ldin
-  load_s0.io.redirect <> io.redirect
   load_s0.io.dtlbReq <> io.dtlb.req
   load_s0.io.dcacheReq <> io.dcache.req
 
-  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, false.B)
+  PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
-  load_s1.io.redirect <> io.redirect
   load_s1.io.dtlbResp <> io.dtlb.resp
   load_s1.io.tlbFeedback <> io.tlbFeedback
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
@@ -250,7 +246,7 @@ class LoadUnit extends XSModule {
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
 
-  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, false.B)
+  PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq := DontCare

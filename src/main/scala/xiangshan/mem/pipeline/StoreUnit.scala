@@ -12,7 +12,6 @@ class StoreUnit_S0 extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
-    val redirect = Flipped(ValidIO(new Redirect))
     val dtlbReq = DecoupledIO(new TlbReq)
   })
 
@@ -32,7 +31,7 @@ class StoreUnit_S0 extends XSModule {
   io.out.bits.uop := io.in.bits.uop
 
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
-  io.out.valid := io.in.valid && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
+  io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 
   // exception check
@@ -56,7 +55,6 @@ class StoreUnit_S1 extends XSModule {
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val stout = DecoupledIO(new ExuOutput) // writeback store
-    val redirect = Flipped(ValidIO(new Redirect))
   })
 
   val s1_paddr = io.dtlbResp.bits.paddr
@@ -133,13 +131,11 @@ class StoreUnit extends XSModule {
   // val store_s2 = Module(new StoreUnit_S2)
 
   store_s0.io.in <> io.stin
-  store_s0.io.redirect <> io.redirect
   store_s0.io.dtlbReq <> io.dtlb.req
 
-  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, false.B)
+  PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
   // PipelineConnect(store_s1.io.fp_out, store_s2.io.in, true.B, false.B)
 
-  store_s1.io.redirect <> io.redirect
   store_s1.io.stout <> io.stout
   store_s1.io.dtlbResp <> io.dtlb.resp
   store_s1.io.tlbFeedback <> io.tlbFeedback
