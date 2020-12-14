@@ -47,9 +47,10 @@ class Rename extends XSModule {
   fpFreeList.redirect := io.redirect
   intFreeList.redirect := io.redirect
 
-  val flush = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe) // TODO: need check by JiaWei
-  fpRat.flush := flush
-  intRat.flush := flush
+  fpRat.redirect := io.redirect
+  intRat.redirect := io.redirect
+  fpRat.walkWen := io.roqCommits.isWalk
+  intRat.walkWen := io.roqCommits.isWalk
 
   def needDestReg[T <: CfCtrl](fp: Boolean, x: T): Bool = {
     {if(fp) x.ctrl.fpWen else x.ctrl.rfWen && (x.ctrl.ldest =/= 0.U)}
@@ -78,6 +79,8 @@ class Rename extends XSModule {
 
   val needFpDest = Wire(Vec(RenameWidth, Bool()))
   val needIntDest = Wire(Vec(RenameWidth, Bool()))
+  val hasValid = Cat(io.in.map(_.valid)).orR
+  val canOut = io.out(0).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk
   for(i <- 0 until RenameWidth) {
     uops(i).cf := io.in(i).bits.cf
     uops(i).ctrl := io.in(i).bits.ctrl
@@ -91,7 +94,7 @@ class Rename extends XSModule {
     fpFreeList.req.allocReqs(i) := needFpDest(i)
     intFreeList.req.allocReqs(i) := needIntDest(i)
 
-    io.in(i).ready := !io.in(i).valid || (io.out(i).ready && fpFreeList.req.canAlloc && intFreeList.req.canAlloc && !io.roqCommits.isWalk)
+    io.in(i).ready := !hasValid || canOut
 
     // do checkpoints when a branch inst come
     // for(fl <- Seq(fpFreeList, intFreeList)){

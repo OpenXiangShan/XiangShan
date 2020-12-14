@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
-import xiangshan.backend.decode.{DecodeBuffer, DecodeStage}
+import xiangshan.backend.decode.DecodeStage
 import xiangshan.backend.rename.{Rename, BusyTable}
 import xiangshan.backend.brq.Brq
 import xiangshan.backend.dispatch.Dispatch
@@ -60,7 +60,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   val decode = Module(new DecodeStage)
   val brq = Module(new Brq)
-  val decBuf = Module(new DecodeBuffer)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
   val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
@@ -87,7 +86,6 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   decode.io.in <> io.frontend.cfVec
   decode.io.toBrq <> brq.io.enqReqs
   decode.io.brTags <> brq.io.brTags
-  decode.io.out <> decBuf.io.in
 
   brq.io.roqRedirect <> roq.io.redirect
   brq.io.memRedirect.valid := brq.io.redirect.valid || io.fromLsBlock.replay.valid
@@ -96,10 +94,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
-  decBuf.io.isWalking := roq.io.commits.isWalk
-  decBuf.io.redirect.valid <> redirectValid
-  decBuf.io.redirect.bits <> redirect
-  decBuf.io.out <> rename.io.in
+  // pipeline between decode and dispatch
+  for (i <- 0 until RenameWidth) {
+    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirectValid)
+  }
 
   rename.io.redirect.valid <> redirectValid
   rename.io.redirect.bits <> redirect
