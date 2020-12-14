@@ -213,15 +213,15 @@ object FDecode extends DecodeConstants{
   FMV_W_X -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.i2f, FPUOpType.fmv_i2f, N, Y, N, N, N, N, Y, SelImm.IMM_X),
 
   FSGNJ_S -> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnj, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FSGNJ_D -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fsgnj, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FSGNJ_D -> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnj, N, Y, N, N, N, N, N, SelImm.IMM_X),
   FSGNJX_S-> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnjx, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FSGNJX_D-> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fsgnjx, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FSGNJX_D-> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnjx, N, Y, N, N, N, N, N, SelImm.IMM_X),
   FSGNJN_S-> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnjn, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FSGNJN_D-> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fsgnjn, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FSGNJN_D-> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnjn, N, Y, N, N, N, N, N, SelImm.IMM_X),
 
   // FP to FP
-  FCVT_S_D-> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.d2s, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FCVT_D_S-> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.s2d, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FCVT_S_D-> List(SrcType.fp, SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.d2s, N, Y, N, N, N, N, Y, SelImm.IMM_X),
+  FCVT_D_S-> List(SrcType.fp, SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.s2d, N, Y, N, N, N, N, N, SelImm.IMM_X),
 
   // Int to FP
   FCVT_S_W-> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.i2f, FPUOpType.w2f, N, Y, N, N, N, N, Y, SelImm.IMM_X),
@@ -256,24 +256,24 @@ object FDecode extends DecodeConstants{
 
   FMIN_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fmin, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FMAX_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fmax, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FMIN_D   ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fmin, N, Y, N, N, N, N, N, SelImm.IMM_X),
-  FMAX_D   ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fmax, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FMIN_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fmin, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FMAX_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fmax, N, Y, N, N, N, N, N, SelImm.IMM_X),
 
   FADD_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FPUOpType.fadd, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FSUB_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FPUOpType.fsub, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FMUL_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FPUOpType.fmul, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FADD_D   ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmac, FPUOpType.fadd, N, Y, N, N, N, N, N, SelImm.IMM_X),
-  FSUB_D   ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmac, FPUOpType.fsub, N, Y, N, N, N, N, N, SelImm.IMM_X),
-  FMUL_D   ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmac, FPUOpType.fmul, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FADD_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FPUOpType.fadd, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FSUB_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FPUOpType.fsub, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FMUL_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FPUOpType.fmul, N, Y, N, N, N, N, N, SelImm.IMM_X),
 
   FMADD_S  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fmadd, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FMSUB_S  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fmsub, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FNMADD_S ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fnmadd, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FNMSUB_S ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fnmsub, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FMADD_D  ->List(SrcType.reg, SrcType.reg, SrcType.fp, FuType.fmac, FPUOpType.fmadd, N, Y, N, N, N, N, N, SelImm.IMM_X),
-  FMSUB_D  ->List(SrcType.reg, SrcType.reg, SrcType.fp, FuType.fmac, FPUOpType.fmsub, N, Y, N, N, N, N, N, SelImm.IMM_X),
-  FNMADD_D ->List(SrcType.reg, SrcType.reg, SrcType.fp, FuType.fmac, FPUOpType.fnmadd, N, Y, N, N, N, N, N, SelImm.IMM_X),
-  FNMSUB_D ->List(SrcType.reg, SrcType.reg, SrcType.fp, FuType.fmac, FPUOpType.fnmsub, N, Y, N, N, N, N, N, SelImm.IMM_X)
+  FMADD_D  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fmadd, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FMSUB_D  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fmsub, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FNMADD_D ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fnmadd, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FNMSUB_D ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FPUOpType.fnmsub, N, Y, N, N, N, N, N, SelImm.IMM_X)
   )
 }
 
@@ -283,9 +283,9 @@ object FDecode extends DecodeConstants{
 object FDivSqrtDecode extends DecodeConstants {
   val table: Array[(BitPat, List[BitPat])] = Array(
   FDIV_S    ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fdiv, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FDIV_D    ->List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fdiv, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FDIV_D    ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fdiv, N, Y, N, N, N, N, N, SelImm.IMM_X),
   FSQRT_S   ->List(SrcType.fp,  SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fsqrt, N, Y, N, N, N, N, Y, SelImm.IMM_X),
-  FSQRT_D   ->List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fsqrt, N, Y, N, N, N, N, N, SelImm.IMM_X)
+  FSQRT_D   ->List(SrcType.fp,  SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fsqrt, N, Y, N, N, N, N, N, SelImm.IMM_X)
   )
 }
 

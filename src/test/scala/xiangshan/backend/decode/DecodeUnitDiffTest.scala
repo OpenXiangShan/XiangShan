@@ -156,19 +156,4 @@ class DecodeUnitDiffTest
       generator.close
     }
   }
-
-  // it should "refer to `legacy` decoder output" in {
-  //   test(new Decoder) { c =>
-  //     c.clock.step(1)
-  //     // print output
-  //     println("[input]")
-  //     println(s"instr=${c.io.in.instr.peek()} pc=${c.io.in.pc.peek()} crossPageIPFFix=${c.io.in.crossPageIPFFix.peek()}")
-  //     println("[output]")
-  //     println(s"src1Type=${c.io.out.ctrl.src1Type.peek()} src2Type=${c.io.out.ctrl.src2Type.peek()} src3Type=${c.io.out.ctrl.src3Type.peek()}")
-  //     println(s"lsrc1=${c.io.out.ctrl.lsrc1.peek()} lsrc2=${c.io.out.ctrl.lsrc2.peek()} lsrc3=${c.io.out.ctrl.lsrc3.peek()} ldest=${c.io.out.ctrl.ldest.peek()}")
-  //     println(s"fuType=${c.io.out.ctrl.fuType.peek()} fuOpType=${c.io.out.ctrl.fuOpType.peek()}")
-  //     println(s"rfWen=${c.io.out.ctrl.rfWen.peek()} fpWen=${c.io.out.ctrl.fpWen.peek()} isXSTrap=${c.io.out.ctrl.isXSTrap.peek()} noSpecExec=${c.io.out.ctrl.noSpecExec.peek()}")
-  //     println(s"isBlocked=${c.io.out.ctrl.blockBackward.peek()} flushPipe=${c.io.out.ctrl.flushPipe.peek()} isRVF=${c.io.out.ctrl.isRVF.peek()} imm=${c.io.out.ctrl.imm.peek()}")
-  //   }
-  // }
 }

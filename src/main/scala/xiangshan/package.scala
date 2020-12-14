@@ -2,7 +2,7 @@ import chisel3._
 import chisel3.util._
 
 package object xiangshan {
-  object SrcType { // FIXME duplicate SrcType object
+  object SrcType {
     def reg = "b00".U
     def pc  = "b01".U
     def imm = "b01".U
