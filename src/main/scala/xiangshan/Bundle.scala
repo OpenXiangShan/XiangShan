@@ -286,9 +286,13 @@ class CSRSpecialIO extends XSBundle {
 //  val mcommit = Input(UInt(3.W))
 //}
 
-class RoqCommit extends XSBundle {
-  val uop = new MicroOp
-  val isWalk = Bool()
+class RoqCommitIO extends XSBundle {
+  val isWalk = Output(Bool())
+  val valid = Vec(CommitWidth, Output(Bool()))
+  val uop = Vec(CommitWidth, Output(new MicroOp))
+
+  def hasWalkInstr = isWalk && valid.asUInt.orR
+  def hasCommitInstr = !isWalk && valid.asUInt.orR
 }
 
 class TlbFeedback extends XSBundle {
