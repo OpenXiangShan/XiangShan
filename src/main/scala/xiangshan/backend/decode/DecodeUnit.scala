@@ -199,9 +199,9 @@ object XDecode extends DecodeConstants {
 object FDecode extends DecodeConstants{
   val table: Array[(BitPat, List[BitPat])] = Array(
 
-  FLW     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.flw, N, Y, N, N, N, N, N, SelImm.IMM_I),
+  FLW     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.flw, N, Y, N, N, N, N, Y, SelImm.IMM_I),
   FLD     -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.ldu, LSUOpType.ld, N, Y, N, N, N, N, N, SelImm.IMM_I),
-  FSW     -> List(SrcType.reg, SrcType.fp, SrcType.DC, FuType.stu, LSUOpType.sw, N, N, N, N, N, N, N, SelImm.IMM_S),
+  FSW     -> List(SrcType.reg, SrcType.fp, SrcType.DC, FuType.stu, LSUOpType.sw, N, N, N, N, N, N, Y, SelImm.IMM_S),
   FSD     -> List(SrcType.reg, SrcType.fp, SrcType.DC, FuType.stu, LSUOpType.sd, N, N, N, N, N, N, N, SelImm.IMM_S),
 
   FCLASS_S-> List(SrcType.fp , SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fclass, Y, N, N, N, N, N, Y, SelImm.IMM_X),
@@ -209,8 +209,8 @@ object FDecode extends DecodeConstants{
 
   FMV_D_X -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.i2f, FPUOpType.fmv_i2f, N, Y, N, N, N, N, N, SelImm.IMM_X),
   FMV_X_D -> List(SrcType.fp , SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fmv_f2i, Y, N, N, N, N, N, N, SelImm.IMM_X),
-  FMV_X_W -> List(SrcType.fp , SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fmv_f2i, Y, N, N, N, N, N, N, SelImm.IMM_X),
-  FMV_W_X -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.i2f, FPUOpType.fmv_i2f, N, Y, N, N, N, N, N, SelImm.IMM_X),
+  FMV_X_W -> List(SrcType.fp , SrcType.imm, SrcType.DC, FuType.fmisc, FPUOpType.fmv_f2i, Y, N, N, N, N, N, Y, SelImm.IMM_X),
+  FMV_W_X -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.i2f, FPUOpType.fmv_i2f, N, Y, N, N, N, N, Y, SelImm.IMM_X),
 
   FSGNJ_S -> List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmisc, FPUOpType.fsgnj, N, Y, N, N, N, N, Y, SelImm.IMM_X),
   FSGNJ_D -> List(SrcType.reg, SrcType.reg, SrcType.DC, FuType.fmisc, FPUOpType.fsgnj, N, Y, N, N, N, N, N, SelImm.IMM_X),
