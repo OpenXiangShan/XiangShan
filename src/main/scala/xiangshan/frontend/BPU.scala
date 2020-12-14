@@ -560,14 +560,6 @@ class BPU extends BaseBPU {
   s2.io.debug_hist := s2_hist
   s3.io.debug_hist := s3_hist
 
-  // val s1_histPtr = RegEnable(io.in.histPtr, enable=s1_fire)
-  // val s2_histPtr = RegEnable(s1_histPtr, enable=s2_fire)
-  // val s3_histPtr = RegEnable(s2_histPtr, enable=s3_fire)
-
-  // s1.io.debug_histPtr := s1_histPtr
-  // s2.io.debug_histPtr := s2_histPtr
-  // s3.io.debug_histPtr := s3_histPtr
-
   //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
   tage.io.pc.valid := s2_fire

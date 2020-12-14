@@ -159,14 +159,6 @@ class IFU extends XSModule with HasIFUConst
   }
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
-  // when (if2_fire && if2_GHInfo.shifted) {
-  //   val if2_newPtr = if2_GHInfo.newPtr()
-  //   updatePtr := true.B
-  //   newPtr := if2_newPtr
-  //   extHist(if2_newPtr) := if2_GHInfo.takenOnBr.asUInt
-  // }
-
-
 
   //********************** IF3 ****************************//
   val if3_valid = RegInit(init = false.B)
@@ -361,11 +353,6 @@ class IFU extends XSModule with HasIFUConst
   when (if4_redirect) {
     if1_npc := if4_target
   }
-  //   val if4_newPtr = if4_GHInfo.newPtr()
-  //   updatePtr := true.B
-  //   newPtr := if4_newPtr
-  //   extHist(if4_newPtr) := if4_GHInfo.takenOnBr.asUInt
-  // }
 
   when (if4_fire) {
     final_gh := if4_predicted_gh
