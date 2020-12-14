@@ -101,7 +101,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def brNotTakens = ~realTakens & realBrMask
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
                        (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
-  def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
+  // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
   def unmaskedJmpIdx = PriorityEncoder(takens)
   def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(takens.orR))) ||
   (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
@@ -111,7 +111,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def target = targets(jmpIdx)
   def taken = realTakens.orR
   def takenOnBr = taken && realBrMask(jmpIdx)
-  // def hasNotTakenBrs = Mux(taken, sawNotTakenBr(jmpIdx), brNotTakens.orR)
+  def hasNotTakenBrs = Mux(taken, sawNotTakenBr(jmpIdx), brNotTakens.orR)
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
