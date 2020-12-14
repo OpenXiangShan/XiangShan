@@ -11,6 +11,7 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
 import xiangshan.frontend.HasIFUConst
+import xiangshan.frontend.GlobalHistory
 import utils._
 import scala.math.max
 
@@ -100,16 +101,17 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def brNotTakens = ~realTakens & realBrMask
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
                        (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
-  def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
+  // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
   def unmaskedJmpIdx = PriorityEncoder(takens)
   def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(takens.orR))) ||
-                    (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
+  (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
   // could get PredictWidth-1 when only the first bank is valid
   def jmpIdx = PriorityEncoder(realTakens)
   // only used when taken
   def target = targets(jmpIdx)
   def taken = realTakens.orR
   def takenOnBr = taken && realBrMask(jmpIdx)
+  def hasNotTakenBrs = Mux(taken, sawNotTakenBr(jmpIdx), brNotTakens.orR)
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
@@ -118,27 +120,28 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val btbWriteWay = UInt(log2Up(BtbWays).W)
   val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
-  val histPtr = UInt(log2Up(ExtHistoryLength).W)
-  val predHistPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val rasToqAddr = UInt(VAddrBits.W)
   val fetchIdx = UInt(log2Up(PredictWidth).W)
   val specCnt = UInt(10.W)
+  // for global history
+  val hist = new GlobalHistory
+  val predHist = new GlobalHistory
   val sawNotTakenBranch = Bool()
 
   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
-  def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
-    this.histPtr := histPtr
-    this.tageMeta := tageMeta
-    this.rasSp := rasSp
-    this.rasTopCtr := rasTopCtr
-    this.asUInt
-  }
+  // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
+  //   this.histPtr := histPtr
+  //   this.tageMeta := tageMeta
+  //   this.rasSp := rasSp
+  //   this.rasTopCtr := rasTopCtr
+  //   this.asUInt
+  // }
   def size = 0.U.asTypeOf(this).getWidth
   def fromUInt(x: UInt) = x.asTypeOf(this)
 }
