@@ -3,6 +3,7 @@
 #include "difftest.h"
 #include <getopt.h>
 #include "ram.h"
+#include "zlib.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -430,7 +431,7 @@ void Emulator::snapshot_save(const char *filename) {
 }
 
 void Emulator::snapshot_load(const char *filename) {
-  VerilatedRestore stream;
+  VerilatedRestoreMem stream;
   stream.open(filename);
   stream >> *dut_ptr;
 

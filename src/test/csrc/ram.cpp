@@ -1,8 +1,8 @@
 #include <sys/mman.h>
-#include <zlib.h>
 
 #include "common.h"
 #include "ram.h"
+#include "compress.h"
 
 #define RAMSIZE (256 * 1024 * 1024UL)
 
@@ -103,54 +103,6 @@ void addpageSv39() {
 }
 #endif
 
-// Return whether the file is a gz file
-int isGzFile(const char *img) {
-  assert(img != NULL && strlen(img) >= 4);
-  return !strcmp(img + (strlen(img) - 3), ".gz");
-}
-
-// Read binary from .gz file
-int readFromGz(void* ptr, const char *file_name) {
-  gzFile compressed_mem = gzopen(file_name, "rb");
-
-  if(compressed_mem == NULL) {
-    printf("Can't open compressed binary file '%s'", file_name);
-    return -1;
-  }
-
-  uint64_t curr_size = 0;
-  // read 16KB each time
-  const uint32_t chunk_size = 16384;
-  if ((RAMSIZE % chunk_size) != 0) {
-    printf("RAMSIZE must be divisible by chunk_size\n");
-    assert(0);
-  }
-  uint64_t *temp_page = new uint64_t[chunk_size];
-  uint64_t *pmem_current = (uint64_t *)ptr;
-
-  while (curr_size < RAMSIZE) {
-    uint32_t bytes_read = gzread(compressed_mem, temp_page, chunk_size);
-    if (bytes_read == 0) { break; }
-    assert(bytes_read % sizeof(uint64_t) == 0);
-    for (uint32_t x = 0; x < bytes_read / sizeof(uint64_t); x++) {
-      if (*(temp_page + x) != 0) {
-        pmem_current = (uint64_t*)((uint8_t*)ptr + curr_size + x * sizeof(uint64_t));
-        *pmem_current = *(temp_page + x);
-      }
-    }
-    curr_size += bytes_read;
-  }
-  // printf("Read 0x%lx bytes from gz stream in total.\n", curr_size);
-
-  delete [] temp_page;
-
-  if(gzclose(compressed_mem)) {
-    printf("Error closing '%s'\n", file_name);
-    return -1;
-  }
-  return curr_size;
-}
-
 void init_ram(const char *img) {
   assert(img != NULL);
 
@@ -167,7 +119,7 @@ void init_ram(const char *img) {
   int ret;
   if (isGzFile(img)) {
     printf("Gzip file detected and loading image from extracted gz file\n");
-    img_size = readFromGz(ram, img);
+    img_size = readFromGz(ram, img, RAMSIZE, LOAD_RAM);
     assert(img_size >= 0);
   }
   else {
@@ -215,9 +167,7 @@ void ram_finish() {
 
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
   if (en && rIdx >= RAMSIZE / sizeof(uint64_t)) {
-    printf("WARN: ram rIdx = 0x%lx out of bound!\n", rIdx);
-    // assert(rIdx < RAMSIZE / sizeof(uint64_t));
-    return 0x12345678deadbeafULL;
+    rIdx %= RAMSIZE / sizeof(uint64_t);
   }
   return (en) ? ram[rIdx] : 0;
 }
