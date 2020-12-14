@@ -19,6 +19,7 @@ import scala.collection.mutable
 import scala.io.Source.fromFile
 import scala.io.BufferedSource
 import xiangshan.SrcType
+import xiangshan.FuType
 
 class DualDecodeUnitDut extends XSModule {
   val io = IO(new Bundle {
@@ -82,7 +83,7 @@ class CtrlFlowGenerator(fileName: String) extends HasExceptionNO {
     x.crossPageIPFFix.poke(nextBoolean().B)
     // input: instrPageFault -> true or false  others: false
     // output: may modify illegalInstr , others : false , instrPageFault: hold
-    x.exceptionVec.map(_.poke(nextBoolean().B))
+    x.exceptionVec.map(_.poke(false.B))
     x.intrVec.map(_.poke(nextBoolean().B))
     true
   }
@@ -140,7 +141,11 @@ class DecodeUnitDiffTest
         c.io.out_dut.ctrl.noSpecExec.expect(c.io.out_ref.ctrl.noSpecExec.peek())
         c.io.out_dut.ctrl.blockBackward.expect(c.io.out_ref.ctrl.blockBackward.peek())
         c.io.out_dut.ctrl.flushPipe.expect(c.io.out_ref.ctrl.flushPipe.peek())
-        // c.io.out_dut.ctrl.isRVF.expect(c.io.out_ref.ctrl.isRVF.peek())
+        if (c.io.out_ref.ctrl.fuType.peek() == FuType.fmac  ||
+            c.io.out_ref.ctrl.fuType.peek() == FuType.fmisc ||
+            c.io.out_ref.ctrl.fuType.peek() == FuType.fDivSqrt) {
+          c.io.out_dut.ctrl.isRVF.expect(c.io.out_ref.ctrl.isRVF.peek())
+        }
         if (c.io.out_ref.ctrl.src2Type.peek() == SrcType.imm) {
           c.io.out_dut.ctrl.imm.expect(c.io.out_ref.ctrl.imm.peek())
         }
