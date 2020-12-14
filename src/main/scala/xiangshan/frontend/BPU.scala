@@ -11,7 +11,7 @@ import chisel3.experimental.chiselName
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = true
   val EnableCFICommitLog = true
-  val EnbaleCFIPredLog = false
+  val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
@@ -368,6 +368,9 @@ class BPUStage3 extends BPUStage {
       XSDebug(io.inFire && s3IO.predecode.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
         i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
     }
+    XSDebug(p"brs:${Binary(brs)} jals:${Binary(jals)} jalrs:${Binary(jalrs)} calls:${Binary(calls)} rets:${Binary(rets)} rvcs:${Binary(RVCs)}\n")
+    XSDebug(p"callIdx:${callIdx} retIdx:${retIdx}\n")
+    XSDebug(p"brPred:${Binary(brPred)} loopRes:${Binary(loopRes)} prevHalfTaken:${prevHalfTaken} brTakens:${Binary(brTakens)}\n")
   }
 
   if (EnbaleCFIPredLog) {
