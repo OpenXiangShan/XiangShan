@@ -81,6 +81,7 @@ class StoreUnit_S1 extends XSModule {
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
   io.lsq.bits.mmio := AddressSpace.isMMIO(s1_paddr)
+  io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
 
   // mmio inst with exception will be writebacked immediately
   val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
@@ -103,7 +104,6 @@ class StoreUnit_S2 extends XSModule {
 
   io.stout.valid := io.in.valid
   io.stout.bits.uop := io.in.bits.uop
-  // io.stout.bits.uop.cf.exceptionVec := // TODO: update according to TLB result
   io.stout.bits.data := DontCare
   io.stout.bits.redirectValid := false.B
   io.stout.bits.redirect := DontCare
