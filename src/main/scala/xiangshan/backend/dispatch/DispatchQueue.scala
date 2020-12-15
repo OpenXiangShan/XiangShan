@@ -3,7 +3,6 @@ package xiangshan.backend.dispatch
 import chisel3._
 import chisel3.util._
 import utils._
-import xiangshan.backend.decode.SrcType
 import xiangshan._
 import xiangshan.backend.roq.RoqPtr
 

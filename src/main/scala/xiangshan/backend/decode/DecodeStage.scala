@@ -19,7 +19,7 @@ class DecodeStage extends XSModule {
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
   })
-  val decoders = Seq.fill(DecodeWidth)(Module(new Decoder))
+  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
   val decoderToBrq = Wire(Vec(DecodeWidth, new CfCtrl)) // without brTag and brMask
   val decoderToDecBuffer = Wire(Vec(DecodeWidth, new CfCtrl)) // with brTag and brMask
 
@@ -32,18 +32,18 @@ class DecodeStage extends XSModule {
   //    Second, assert out(i).valid iff in(i).valid and instruction is valid (not implemented) and toBrq(i).ready
 
   for (i <- 0 until DecodeWidth) {
-    decoders(i).io.in <> io.in(i).bits
-    decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
+    decoders(i).io.enq.ctrl_flow <> io.in(i).bits
+    decoderToBrq(i) := decoders(i).io.deq.cf_ctrl // CfCtrl without bfTag and brMask
     decoderToBrq(i).brTag := DontCare
     io.toBrq(i).bits := decoderToBrq(i)
 
-    decoderToDecBuffer(i) := decoders(i).io.out
+    decoderToDecBuffer(i) := decoders(i).io.deq.cf_ctrl
     decoderToDecBuffer(i).brTag := io.brTags(i)
     io.out(i).bits := decoderToDecBuffer(i)
 
-    val isMret = decoders(i).io.out.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
-    val isSret = decoders(i).io.out.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
-    val thisBrqValid = !decoders(i).io.out.cf.brUpdate.pd.notCFI || isMret || isSret
+    val isMret = decoders(i).io.deq.cf_ctrl.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
+    val isSret = decoders(i).io.deq.cf_ctrl.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
+    val thisBrqValid = !decoders(i).io.deq.cf_ctrl.cf.brUpdate.pd.notCFI || isMret || isSret
     io.in(i).ready    := io.out(i).ready && io.toBrq(i).ready
     io.out(i).valid   := io.in(i).valid && io.toBrq(i).ready
     io.toBrq(i).valid := io.in(i).valid && thisBrqValid && io.out(i).ready
