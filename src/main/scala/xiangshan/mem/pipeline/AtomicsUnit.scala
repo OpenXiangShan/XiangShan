@@ -64,7 +64,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  io.tlbFeedback.valid       := RegNext(io.in.valid)
+  io.tlbFeedback.valid       := RegNext(RegNext(io.in.valid))
   io.tlbFeedback.bits.hit    := true.B
   io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
 

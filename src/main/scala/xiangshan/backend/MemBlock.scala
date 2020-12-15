@@ -229,49 +229,67 @@ class MemBlock
   assert(!(fenceFlush && atomicsFlush))
   sbuffer.io.flush.valid := fenceFlush || atomicsFlush
 
-  // TODO: make 0/1 configurable
-  // AtomicsUnit
-  // AtomicsUnit will override other control signials,
+  // AtomicsUnit: AtomicsUnit will override other control signials,
   // as atomics insts (LR/SC/AMO) will block the pipeline
-  val st0_atomics = reservationStations(2).io.deq.valid && reservationStations(2).io.deq.bits.uop.ctrl.fuType === FuType.mou
-  val st1_atomics = reservationStations(3).io.deq.valid && reservationStations(3).io.deq.bits.uop.ctrl.fuType === FuType.mou
-  // amo should always go through store issue queue 0
-  assert(!st1_atomics)
+  val s_normal :: s_atomics_0 :: s_atomics_1 :: Nil = Enum(3)
+  val state = RegInit(s_normal)
+
+  val atomic_rs0 = exuParameters.LduCnt + 0
+  val atomic_rs1 = exuParameters.LduCnt + 1
+  val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType === FuType.mou
+  val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType === FuType.mou
+
+  when (st0_atomics) {
+    reservationStations(atomic_rs0).io.deq.ready := atomicsUnit.io.in.ready
+    storeUnits(0).io.stin.valid := false.B
+
+    state := s_atomics_0
+    assert(!st1_atomics)
+  }
+  when (st1_atomics) {
+    reservationStations(atomic_rs1).io.deq.ready := atomicsUnit.io.in.ready
+    storeUnits(1).io.stin.valid := false.B
+
+    state := s_atomics_1
+    assert(!st0_atomics)
+  }
+  when (atomicsUnit.io.out.valid) {
+    assert(state === s_atomics_0 || state === s_atomics_1)
+    state := s_normal
+  }
+
+  atomicsUnit.io.in.valid := st0_atomics || st1_atomics
+  atomicsUnit.io.in.bits  := Mux(st0_atomics, reservationStations(atomic_rs0).io.deq.bits, reservationStations(atomic_rs1).io.deq.bits)
+  atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready := dtlb.io.requestor(0).req.ready
 
-  // dispatch 0 takes priority
-  atomicsUnit.io.in.valid := st0_atomics
-  atomicsUnit.io.in.bits  := reservationStations(2).io.deq.bits
-  when (st0_atomics) {
-    reservationStations(0).io.deq.ready := atomicsUnit.io.in.ready
-    storeUnits(0).io.stin.valid := false.B
-  }
-
-  when(atomicsUnit.io.dtlb.req.valid) {
-    dtlb.io.requestor(0) <> atomicsUnit.io.dtlb
-    // take load unit 0's tlb port
-    // make sure not to disturb loadUnit
-    assert(!loadUnits(0).io.dtlb.req.valid)
-    loadUnits(0).io.dtlb.resp.valid := false.B
-  }
-
-  when(atomicsUnit.io.tlbFeedback.valid) {
-    assert(!storeUnits(0).io.tlbFeedback.valid)
-    atomicsUnit.io.tlbFeedback <> reservationStations(exuParameters.LduCnt + 0).io.feedback
-  }
-
   atomicsUnit.io.dcache        <> io.dcache.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
-  atomicsUnit.io.redirect <> io.fromCtrlBlock.redirect
+  // for atomicsUnit, it uses loadUnit(0)'s TLB port
+  when (state === s_atomics_0 || state === s_atomics_1) {
+    atomicsUnit.io.dtlb <> dtlb.io.requestor(0)
 
-  when(atomicsUnit.io.out.valid){
-    // take load unit 0's write back port
-    assert(!loadUnits(0).io.ldout.valid)
+    loadUnits(0).io.dtlb.resp.valid := false.B
     loadUnits(0).io.ldout.ready := false.B
+
+    // make sure there's no in-flight uops in load unit
+    assert(!loadUnits(0).io.dtlb.req.valid)
+    assert(!loadUnits(0).io.ldout.valid)
+  }
+
+  when (state === s_atomics_0) {
+    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs0).io.feedback
+
+    assert(!storeUnits(0).io.tlbFeedback.valid)
+  }
+  when (state === s_atomics_1) {
+    atomicsUnit.io.tlbFeedback <> reservationStations(atomic_rs1).io.feedback
+
+    assert(!storeUnits(1).io.tlbFeedback.valid)
   }
 
   lsq.io.exceptionAddr.lsIdx := io.lsqio.exceptionAddr.lsIdx
