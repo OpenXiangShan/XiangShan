@@ -301,10 +301,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       1.U -> Cat(hitppn(ppnLen - 1, vpnnLen), reqAddrReg.vpn(vpnnLen - 1, 0), reqAddrReg.off),
       2.U -> Cat(hitppn, reqAddrReg.off)
     ))
+    val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
 
     req(i).ready := resp(i).ready
     resp(i).valid := validReg
-    resp(i).bits.paddr := Mux(vmEnable, paddr, RegNext(SignExt(req(i).bits.vaddr, PAddrBits)))
+    resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
     resp(i).bits.miss := miss
 
     val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
