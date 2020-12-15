@@ -53,7 +53,7 @@ class MemBlock
 
     val lsqio = new Bundle {
       val exceptionAddr = new ExceptionAddrIO // to csr
-      val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit))) // to lsq
+      val commits = Flipped(new RoqCommitIO) // to lsq
       val roqDeqPtr = Input(new RoqPtr) // to lsq
     }
   })

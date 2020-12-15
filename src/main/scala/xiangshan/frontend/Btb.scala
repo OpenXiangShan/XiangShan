@@ -159,7 +159,7 @@ class BTB extends BasePredictor with BTBParams{
       val chunks = (0 until nChunks).map( i => 
         tags(min((i+1)*l, tags.getWidth)-1, i*l)
       )
-      w := Mux(valid, chunks.reduce(_^_), (if (randomAlloc) {LFSR64()(log2Up(BtbWays)-1,0)} else {PriorityEncoder(~valids)}))
+      w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(BtbWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
       w
     } else {
       val w = WireInit(0.U)
