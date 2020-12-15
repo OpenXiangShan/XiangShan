@@ -37,7 +37,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
+    val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
@@ -67,8 +67,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val isFull = enqPtr === deqPtr && !sameFlag
   val allowIn = !isFull
 
-  val loadCommit = (0 until CommitWidth).map(i => io.commits(i).valid && !io.commits(i).bits.isWalk && io.commits(i).bits.uop.ctrl.commitType === CommitType.LOAD)
-  val mcommitIdx = (0 until CommitWidth).map(i => io.commits(i).bits.uop.lqIdx.value)
+  val loadCommit = (0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.uop(i).ctrl.commitType === CommitType.LOAD)
+  val mcommitIdx = (0 until CommitWidth).map(i => io.commits.uop(i).lqIdx.value)
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
@@ -480,11 +480,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   // setup misc mem access req
   // mask / paddr / data can be get from lq.data
-  val commitType = io.commits(0).bits.uop.ctrl.commitType
+  val commitType = io.commits.uop(0).ctrl.commitType
   io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
     commitType === CommitType.LOAD &&
     io.roqDeqPtr === uop(deqPtr).roqIdx &&
-    !io.commits(0).bits.isWalk
+    !io.commits.isWalk
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.addr := dataModule.io.rdata(deqPtr).paddr

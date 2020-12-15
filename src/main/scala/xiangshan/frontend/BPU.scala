@@ -144,7 +144,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter with HasIFUConst {
     val outFire = Input(Bool())
 
     val debug_hist = Input(UInt((if (BPUDebug) (HistoryLength) else 0).W))
-    val debug_histPtr = Input(UInt((if (BPUDebug) (ExtHistoryLength) else 0).W))
+    // val debug_histPtr = Input(UInt((if (BPUDebug) (ExtHistoryLength) else 0).W))
   }
   val io = IO(new DefaultIO)
 
@@ -230,7 +230,7 @@ class BPUStage2 extends BPUStage {
   val bimResp = inLatch.resp.bim
   takens    := VecInit((0 until PredictWidth).map(i => btbResp.hits(i) && (btbResp.types(i) === BTBtype.B && bimResp.ctrs(i)(1) || btbResp.types(i) =/= BTBtype.B)))
   targets := btbResp.targets
-  brMask  := VecInit(btbResp.types.map(_ === BTBtype.B))
+  brMask  := VecInit((0 until PredictWidth).map(i => btbResp.types(i) === BTBtype.B && btbResp.hits(i)))
   jalMask := DontCare
 
   firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, btbResp.hits(bankWidth-1) && !btbResp.isRVC(bankWidth-1) && inLatch.mask(bankWidth-1))
@@ -343,6 +343,7 @@ class BPUStage3 extends BPUStage {
   }
   when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B && btbHits(PredictWidth-1)) {
     takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
+
   }
 
   // targets would be lost as well, since it is from btb
@@ -371,7 +372,7 @@ class BPUStage3 extends BPUStage {
 
   if (EnbaleCFIPredLog) {
     val out = io.out
-    XSDebug(io.outFire, p"cfi_pred: fetchpc(${Hexadecimal(out.pc)}) mask(${out.mask}) brmask(${brMask.asUInt}) hist(${Hexadecimal(io.debug_hist)}) histPtr(${io.debug_histPtr})\n")
+    XSDebug(io.outFire, p"cfi_pred: fetchpc(${Hexadecimal(out.pc)}) mask(${out.mask}) brmask(${brMask.asUInt}) hist(${Hexadecimal(io.debug_hist)})\n")
   }
 
   if (EnableBPUTimeRecord) {
@@ -394,7 +395,7 @@ class BPUReq extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val inMask = UInt(PredictWidth.W)
-  val histPtr = UInt(log2Up(ExtHistoryLength).W) // only for debug
+  // val histPtr = UInt(log2Up(ExtHistoryLength).W) // only for debug
 }
 
 class BranchUpdateInfoWithHist extends XSBundle {
@@ -559,13 +560,13 @@ class BPU extends BaseBPU {
   s2.io.debug_hist := s2_hist
   s3.io.debug_hist := s3_hist
 
-  val s1_histPtr = RegEnable(io.in.histPtr, enable=s1_fire)
-  val s2_histPtr = RegEnable(s1_histPtr, enable=s2_fire)
-  val s3_histPtr = RegEnable(s2_histPtr, enable=s3_fire)
+  // val s1_histPtr = RegEnable(io.in.histPtr, enable=s1_fire)
+  // val s2_histPtr = RegEnable(s1_histPtr, enable=s2_fire)
+  // val s3_histPtr = RegEnable(s2_histPtr, enable=s3_fire)
 
-  s1.io.debug_histPtr := s1_histPtr
-  s2.io.debug_histPtr := s2_histPtr
-  s3.io.debug_histPtr := s3_histPtr
+  // s1.io.debug_histPtr := s1_histPtr
+  // s2.io.debug_histPtr := s2_histPtr
+  // s3.io.debug_histPtr := s3_histPtr
 
   //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
