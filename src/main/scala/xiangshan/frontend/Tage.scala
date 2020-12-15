@@ -666,8 +666,8 @@ class Tage extends BaseTage {
     for (i <- 0 until TageNTables) {
       XSDebug(RegNext(io.s3Fire), "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(resps(i).map(_.valid)).asUInt, Cat(resps(i).map(_.bits.ctr)), Cat(resps(i).map(_.bits.u)))
     }
-    XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, histPtr:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-      u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.histPtr, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
+    XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
+      u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
     XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
   }
