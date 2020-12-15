@@ -2,10 +2,12 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.SelImm
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.decode.XDecode
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
@@ -193,8 +195,19 @@ class CtrlSignals extends XSBundle {
   val blockBackward  = Bool()  // block backward
   val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
+  val selImm = SelImm()
   val imm = UInt(XLEN.W)
   val commitType = CommitType()
+
+  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
+    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
+    val signals =
+      Seq(src1Type, src2Type, src3Type, fuType, fuOpType, rfWen, fpWen, 
+          isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+    signals zip decoder map { case(s, d) => s := d }
+    commitType := DontCare
+    this
+  }
 }
 
 class CfCtrl extends XSBundle {
@@ -289,9 +302,13 @@ class CSRSpecialIO extends XSBundle {
 //  val mcommit = Input(UInt(3.W))
 //}
 
-class RoqCommit extends XSBundle {
-  val uop = new MicroOp
-  val isWalk = Bool()
+class RoqCommitIO extends XSBundle {
+  val isWalk = Output(Bool())
+  val valid = Vec(CommitWidth, Output(Bool()))
+  val uop = Vec(CommitWidth, Output(new MicroOp))
+
+  def hasWalkInstr = isWalk && valid.asUInt.orR
+  def hasCommitInstr = !isWalk && valid.asUInt.orR
 }
 
 class TlbFeedback extends XSBundle {
