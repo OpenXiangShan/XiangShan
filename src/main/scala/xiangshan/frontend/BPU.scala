@@ -11,7 +11,7 @@ import chisel3.experimental.chiselName
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = true
   val EnableCFICommitLog = true
-  val EnbaleCFIPredLog = false
+  val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
@@ -368,6 +368,9 @@ class BPUStage3 extends BPUStage {
       XSDebug(io.inFire && s3IO.predecode.mask(i), "predecode(%d): brType:%d, br:%d, jal:%d, jalr:%d, call:%d, ret:%d, RVC:%d, excType:%d\n",
         i.U, p.brType, p.isBr, p.isJal, p.isJalr, p.isCall, p.isRet, p.isRVC, p.excType)
     }
+    XSDebug(p"brs:${Binary(brs)} jals:${Binary(jals)} jalrs:${Binary(jalrs)} calls:${Binary(calls)} rets:${Binary(rets)} rvcs:${Binary(RVCs)}\n")
+    XSDebug(p"callIdx:${callIdx} retIdx:${retIdx}\n")
+    XSDebug(p"brPred:${Binary(brPred)} loopRes:${Binary(loopRes)} prevHalfTaken:${prevHalfTaken} brTakens:${Binary(brTakens)}\n")
   }
 
   if (EnbaleCFIPredLog) {
@@ -559,14 +562,6 @@ class BPU extends BaseBPU {
   s1.io.debug_hist := s1_hist
   s2.io.debug_hist := s2_hist
   s3.io.debug_hist := s3_hist
-
-  // val s1_histPtr = RegEnable(io.in.histPtr, enable=s1_fire)
-  // val s2_histPtr = RegEnable(s1_histPtr, enable=s2_fire)
-  // val s3_histPtr = RegEnable(s2_histPtr, enable=s3_fire)
-
-  // s1.io.debug_histPtr := s1_histPtr
-  // s2.io.debug_histPtr := s2_histPtr
-  // s3.io.debug_histPtr := s3_histPtr
 
   //**********************Stage 2****************************//
   tage.io.flush := io.flush(1) // TODO: fix this
