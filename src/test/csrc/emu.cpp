@@ -329,6 +329,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
 #endif
+  save_coverage();
   display_trapinfo();
   return cycles;
 }
@@ -357,6 +358,19 @@ inline char* Emulator::waveform_filename(time_t t) {
   strcpy(p, ".vcd");
   return buf;
 }
+
+
+inline void Emulator::save_coverage(void) {
+  char *noop_home = getenv("NOOP_HOME");
+  assert(noop_home != NULL);
+
+  char buf[1024];
+  snprintf(buf, 1024, "%s/build/logs", noop_home);
+  Verilated::mkdir(buf);
+  snprintf(buf, 1024, "%s/build/logs/coverage.dat", noop_home);
+  VerilatedCov::write(buf);
+}
+
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
