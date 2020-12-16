@@ -74,7 +74,9 @@ long readFromGz(void* ptr, const char *file_name, long buf_size, uint8_t load_ty
 
   while (curr_size < buf_size) {
     uint32_t bytes_read = gzread(compressed_mem, temp_page, chunk_size);
-    if (bytes_read == 0) { printf("Hello\n"); break; }
+    if (bytes_read == 0) {
+      break;
+    }
     assert(load_type != LOAD_RAM || bytes_read % sizeof(long) == 0);
     for (uint32_t x = 0; x < bytes_read / sizeof(long) + 1; x++) {
       if (*(temp_page + x) != 0) {
