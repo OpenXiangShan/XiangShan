@@ -104,7 +104,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   def isOneOf(key: UInt, seq: Seq[UInt]): Bool =
     if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR()
 
-  def witdhMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
+  def widthMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
 
 
   def maskData(mask: UInt, data: UInt): UInt = {
@@ -160,7 +160,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
     def stateCanMerge(s: UInt): Bool = isOneOf(s, Seq(s_valid, s_inflight_req))
 
-    val mergeMask = witdhMap(i =>
+    val mergeMask = widthMap(i =>
       req.valid && stateCanMerge(state_old(i)) && getTag(req.bits.addr)===mem_old(i).tag
     )
     val canMerge = Cat(mergeMask).orR()
@@ -257,7 +257,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   def noSameBlockInflight(idx: UInt): Bool = {
     val tag = updatedSbufferLine(idx).tag
-    !Cat(witdhMap(i => {
+    !Cat(widthMap(i => {
       // stateVec(idx) itself must not be s_inflight*
       isOneOf(stateVec(i), Seq(s_inflight_req, s_inflight_resp)) &&
         tag===updatedSbufferLine(i).tag
@@ -342,9 +342,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
 
   for((forward, i) <- io.forward.zipWithIndex){
-    val tag_matches = witdhMap(i => bufferRead(i).tag===getTag(forward.paddr))
-    val valid_tag_matches = witdhMap(i => tag_matches(i) && stateVec(i)===s_valid)
-    val inflight_tag_matches = witdhMap(i =>
+    val tag_matches = widthMap(i => bufferRead(i).tag===getTag(forward.paddr))
+    val valid_tag_matches = widthMap(i => tag_matches(i) && stateVec(i)===s_valid)
+    val inflight_tag_matches = widthMap(i =>
       tag_matches(i) && (stateVec(i)===s_inflight_req || stateVec(i)===s_inflight_resp)
     )
     val (valid_forward_idx, valid_tag_match) = PriorityEncoderWithFlag(valid_tag_matches)
