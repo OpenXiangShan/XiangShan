@@ -140,23 +140,15 @@ class IFU extends XSModule with HasIFUConst
   .elsewhen (if2_flush) { if2_valid := false.B }
   .elsewhen (if2_fire)  { if2_valid := false.B }
 
-  when (RegNext(reset.asBool) && !reset.asBool) {
-    if1_npc := resetVector.U(VAddrBits.W)
-  }.elsewhen (if2_fire) {
-    if1_npc := if2_snpc
-  }.otherwise {
-    if1_npc := RegNext(if1_npc)
-  }
-
+  val npcGen = new PriorityMuxGenerator[UInt]
+  npcGen.register(true.B, RegNext(if1_npc))
+  npcGen.register(if2_fire, if2_snpc)
   val if2_bp = bpu.io.out(0)
   
-  // val if2_GHInfo = wrapGHInfo(if2_bp, if2_predHist)
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
   if2_redirect := if2_fire && if2_bp.taken
-  when (if2_redirect) {
-    if1_npc := if2_bp.target
-  }
+  npcGen.register(if2_redirect, if2_bp.target)
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
 
@@ -166,7 +158,6 @@ class IFU extends XSModule with HasIFUConst
   val if3_fire = if3_valid && if4_ready && (inLoop || io.icacheResp.valid) && !if3_flush
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
-  // val if3_nextValidPC = Mux(if2_valid)
   if3_ready := if3_fire || !if3_valid || if3_flush
   when (if3_flush)     { if3_valid := false.B }
   .elsewhen (if2_fire) { if3_valid := true.B }
@@ -181,7 +172,7 @@ class IFU extends XSModule with HasIFUConst
   val hasPrevHalfInstrReq = prevHalfInstrReq.valid
 
   val if3_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
-  // val if4_prevHalfInstr = Wire(new PrevHalfInstr)
+
   // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
   val crossPageIPF = WireInit(false.B)
   
@@ -238,10 +229,11 @@ class IFU extends XSModule with HasIFUConst
   // }.elsewhen (if3_ghInfoNotIdenticalRedirect) {
   //   if3_target := Mux(if3_bp.taken, if3_bp.target, snpc(if3_pc))
   // }
+  npcGen.register(if3_redirect, if3_target)
 
-  when (if3_redirect) {
-    if1_npc := if3_target
-  }
+  // when (if3_redirect) {
+  //   if1_npc := if3_target
+  // }
 
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
@@ -350,9 +342,7 @@ class IFU extends XSModule with HasIFUConst
   // }.elsewhen (if4_ghInfoNotIdenticalRedirect) {
   //   if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
   // }
-  when (if4_redirect) {
-    if1_npc := if4_target
-  }
+  npcGen.register(if4_redirect, if4_target)
 
   when (if4_fire) {
     final_gh := if4_predicted_gh
@@ -378,13 +368,11 @@ class IFU extends XSModule with HasIFUConst
     flush_final_gh := true.B
   }
 
-  when (loopBufPar.LBredirect.valid) {
-    if1_npc := loopBufPar.LBredirect.bits
-  }
+  npcGen.register(loopBufPar.LBredirect.valid, loopBufPar.LBredirect.bits)
+  npcGen.register(io.redirect.valid, io.redirect.bits)
+  npcGen.register(RegNext(reset.asBool) && !reset.asBool, resetVector.U(VAddrBits.W))
 
-  when (io.redirect.valid) {
-    if1_npc := io.redirect.bits
-  }
+  if1_npc := npcGen()
 
   when(inLoop) {
     io.icacheReq.valid := if4_flush
