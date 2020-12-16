@@ -466,7 +466,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val lastCycleRedirect = RegNext(io.brqRedirect)
 
   io.rollback := DontCare
-  io.rollback.valid := rollbackSelected.valid && (!lastCycleRedirect.valid || isAfter(lastCycleRedirect.bits.roqIdx, rollbackSelected.bits.roqIdx))
+  // Note that we use roqIdx - 1.U to flush the load instruction itself.
+  // Thus, here if last cycle's roqIdx equals to this cycle's roqIdx, it still triggers the redirect.
+  io.rollback.valid := rollbackSelected.valid && (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx))
 
   io.rollback.bits.roqIdx := rollbackSelected.bits.roqIdx - 1.U
   io.rollback.bits.isReplay := true.B
