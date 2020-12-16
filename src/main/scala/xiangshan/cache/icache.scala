@@ -311,7 +311,7 @@ class ICache extends ICacheModule
 
   //physical address < 0x80000000
   //TODO: May have bugs
-  s2_access_fault := (s2_tlb_resp.paddr(31,0) < accessBorder.U(31,0)) && s2_valid
+  s2_access_fault := (s2_tlb_resp.paddr < accessBorder.U) && s2_valid
 
   // SRAM(Meta and Data) read reseponse
   val metas = metaArray.io.readResp
