@@ -326,6 +326,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
   if (Verilated::gotFinish()) {
+    difftest_display(dut_ptr->io_difftest_priviledgeMode);
     eprintf("The simulation stopped. There might be some assertion failed.\n");
     trapCode = STATE_ABORT;
   }
