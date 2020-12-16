@@ -184,7 +184,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     state_new.zip(mem_new)
   }
 
-  val bufferRead = VecInit((0 until StoreBufferSize) map (i => buffer.read(i.U)))
+  val bufferRead = VecInit((0 until StoreBufferSize) map (i => buffer(i)))
   val initialSbuffer = stateVec.zip(bufferRead)
   val updatedSbuffer = io.in.zipWithIndex.foldLeft[Seq[SbufferEntry]](initialSbuffer)(enqSbuffer)
   val updatedState = updatedSbuffer.map(_._1)
@@ -205,8 +205,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     XSDebug(req.fire(),
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
-        p"mask:${Binary(req.bits.mask)} " + 
-        p"data:${Hexadecimal(req.bits.data)}\n" 
+        p"mask:${Binary(req.bits.mask)} " +
+        p"data:${Hexadecimal(req.bits.data)}\n"
     )
     XSDebug(req.valid && !req.ready,
       p"req [$i] blocked by sbuffer\n"
@@ -316,62 +316,42 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   // ---------------------- Load Data Forward ---------------------
 
-  // (buff, do_forward)
-  // pass 'do_forward' here to avoid duplicated tag compare
-  type ForwardBuf = (SbufferLine, Bool)
-
-  def forwardQuery(forward: LoadForwardQueryIO, buff: ForwardBuf): LoadForwardQueryIO = {
-    val bufLine = buff._1
-    val do_forward = buff._2
-    val forwardWire = WireInit(forward)
-    val forwardMask = forwardWire.forwardMask
-    val forwardData = forwardWire.forwardData
-    val dataVec = VecInit((0 until CacheLineBytes).map(i =>
-      bufLine.data(i*8+7, i*8)
-    ))
-    when(do_forward){
-      (0 until DataBytes).map(i => {
-        val lineOffset = Cat(getWordOffset(forward.paddr), i.U(3.W))
-        when(bufLine.mask(lineOffset) && forward.mask(i)){
-          forwardMask(i) := true.B
-          forwardData(i) := dataVec(lineOffset)
-        }
-      })
-    }
-    forwardWire
-  }
-
-  for((forward, i) <- io.forward.zipWithIndex){
+  for ((forward, i) <- io.forward.zipWithIndex) {
     val tag_matches = widthMap(i => bufferRead(i).tag===getTag(forward.paddr))
     val valid_tag_matches = widthMap(i => tag_matches(i) && stateVec(i)===s_valid)
     val inflight_tag_matches = widthMap(i =>
       tag_matches(i) && (stateVec(i)===s_inflight_req || stateVec(i)===s_inflight_resp)
     )
-    val (valid_forward_idx, valid_tag_match) = PriorityEncoderWithFlag(valid_tag_matches)
-    val (inflight_forwad_idx, inflight_tag_match) = PriorityEncoderWithFlag(inflight_tag_matches)
+    val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
-    val valid_line = bufferRead(valid_forward_idx)
-    val inflight_line = bufferRead(inflight_forwad_idx)
+    val valid_tag_match_reg = valid_tag_matches.map(RegNext(_))
+    val inflight_tag_match_reg = inflight_tag_matches.map(RegNext(_))
+    val line_offset_reg = RegNext(line_offset_mask)
 
-    val initialForward = WireInit(forward)
-    initialForward.forwardMask := 0.U.asTypeOf(Vec(DataBytes, Bool()))
-    initialForward.forwardData := DontCare
+    val selectedValidLine = Mux1H(valid_tag_match_reg, bufferRead)
+    val selectedValidMask = Mux1H(line_offset_reg, selectedValidLine.mask.asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val selectedValidData = Mux1H(line_offset_reg, selectedValidLine.data.asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
 
-    val forwardResult = Seq(
-      (inflight_line, inflight_tag_match),
-      (valid_line, valid_tag_match)
-    ).foldLeft(initialForward)(forwardQuery)
+    val selectedInflightLine = Mux1H(inflight_tag_match_reg, bufferRead)
+    val selectedInflightMask = Mux1H(line_offset_reg, selectedInflightLine.mask.asTypeOf(Vec(CacheLineWords, Vec(DataBytes, Bool()))))
+    val selectedInflightData = Mux1H(line_offset_reg, selectedInflightLine.data.asTypeOf(Vec(CacheLineWords, Vec(DataBytes, UInt(8.W)))))
 
-    forward.forwardMask := forwardResult.forwardMask
-    forward.forwardData := forwardResult.forwardData
+    for (j <- 0 until DataBytes) {
+      forward.forwardMask(j) := false.B
+      forward.forwardData(j) := DontCare
 
-    XSDebug(inflight_tag_match, 
-      p"inflight tag match: forward [$i] <> buf[$inflight_forwad_idx]\n"
-    )
-    XSDebug(valid_tag_match,
-      p"valid tag match: forward [$i] <> buf[$valid_forward_idx]\n"
-    )
-    XSDebug(inflight_tag_match || valid_tag_match,
+      // valid entries have higher priority than inflight entries
+      when (selectedInflightMask(j)) {
+        forward.forwardMask(j) := true.B
+        forward.forwardData(j) := selectedInflightData(j)
+      }
+      when (selectedValidMask(j)) {
+        forward.forwardMask(j) := true.B
+        forward.forwardData(j) := selectedValidData(j)
+      }
+    }
+
+    XSDebug(Cat(inflight_tag_matches).orR || Cat(valid_tag_matches).orR,
       p"[$i] forward paddr:${Hexadecimal(forward.paddr)}\n"
     )
   }
