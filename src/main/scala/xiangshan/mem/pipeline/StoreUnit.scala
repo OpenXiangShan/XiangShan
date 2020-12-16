@@ -29,7 +29,7 @@ class StoreUnit_S0 extends XSModule {
 
   io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.bits.uop := io.in.bits.uop
-
+  io.out.bits.miss := DontCare
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
@@ -52,51 +52,41 @@ class StoreUnit_S1 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     // val fp_out = Decoupled(new LsPipelineBundle)
+    val lsq = ValidIO(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
     val tlbFeedback = ValidIO(new TlbFeedback)
-    val stout = DecoupledIO(new ExuOutput) // writeback store
   })
 
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  // get paddr from dtlb, check if rollback is needed
-  // writeback store inst to lsq
-  // writeback to LSQ
+
   io.in.ready := true.B
 
   io.dtlbResp.ready := true.B // TODO: why dtlbResp needs a ready?
 
   // Send TLB feedback to store issue queue
-  // TODO: should be moved to S1
-  io.tlbFeedback.valid := RegNext(io.in.valid && io.out.ready)
-  io.tlbFeedback.bits.hit := RegNext(!io.out.bits.miss)
-  io.tlbFeedback.bits.roqIdx := RegNext(io.out.bits.uop.roqIdx)
+  io.tlbFeedback.valid := io.in.valid
+  io.tlbFeedback.bits.hit := !s1_tlb_miss
+  io.tlbFeedback.bits.roqIdx := io.in.bits.uop.roqIdx
   XSDebug(io.tlbFeedback.valid,
     "S1 Store: tlbHit: %d roqIdx: %d\n",
     io.tlbFeedback.bits.hit,
     io.tlbFeedback.bits.roqIdx.asUInt
   )
 
-  io.out.bits := io.in.bits
-  io.out.bits.miss := false.B
-  io.out.bits.mmio := AddressSpace.isMMIO(s1_paddr)
-  io.out.bits.paddr := s1_paddr
-  io.out.bits.miss := s1_tlb_miss
-  io.out.valid := io.in.valid && !s1_tlb_miss// TODO: && ! FP
-  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
+  // get paddr from dtlb, check if rollback is needed
+  // writeback store inst to lsq
+  io.lsq.valid := io.in.valid // TODO: && ! FP
+  io.lsq.bits := io.in.bits
+  io.lsq.bits.paddr := s1_paddr
+  io.lsq.bits.miss := false.B
+  io.lsq.bits.mmio := AddressSpace.isMMIO(s1_paddr)
+  io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
 
-  io.stout.bits.uop := io.in.bits.uop
-  io.stout.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
-  io.stout.bits.data := DontCare
-  io.stout.bits.redirectValid := false.B
-  io.stout.bits.redirect := DontCare
-  io.stout.bits.brUpdate := DontCare
-  io.stout.bits.debug.isMMIO := io.out.bits.mmio
-  io.stout.bits.fflags := DontCare
-
-  val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
   // mmio inst with exception will be writebacked immediately
-  io.stout.valid := io.in.valid && (!io.out.bits.mmio || hasException) && !s1_tlb_miss
+  val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
+  io.out.valid := io.in.valid && (!io.out.bits.mmio || hasException) && !s1_tlb_miss
+  io.out.bits := io.lsq.bits
 
   // if fp
   // io.fp_out.valid := ...
@@ -104,17 +94,24 @@ class StoreUnit_S1 extends XSModule {
 
 }
 
-// class StoreUnit_S2 extends XSModule {
-//   val io = IO(new Bundle() {
-//     val in = Flipped(Decoupled(new LsPipelineBundle))
-//     val out = Decoupled(new LsPipelineBundle)
-//     val redirect = Flipped(ValidIO(new Redirect))
-//   })
+class StoreUnit_S2 extends XSModule {
+  val io = IO(new Bundle() {
+    val in = Flipped(Decoupled(new LsPipelineBundle))
+    val stout = DecoupledIO(new ExuOutput) // writeback store
+  })
 
-//   io.in.ready := true.B
-//   io.out.bits := io.in.bits
-//   io.out.valid := io.in.valid && !io.out.bits.uop.roqIdx.needFlush(io.redirect)
-// }
+  io.in.ready := true.B
+
+  io.stout.valid := io.in.valid
+  io.stout.bits.uop := io.in.bits.uop
+  io.stout.bits.data := DontCare
+  io.stout.bits.redirectValid := false.B
+  io.stout.bits.redirect := DontCare
+  io.stout.bits.brUpdate := DontCare
+  io.stout.bits.debug.isMMIO := io.in.bits.mmio
+  io.stout.bits.fflags := DontCare
+
+}
 
 class StoreUnit extends XSModule {
   val io = IO(new Bundle() {
@@ -128,22 +125,20 @@ class StoreUnit extends XSModule {
 
   val store_s0 = Module(new StoreUnit_S0)
   val store_s1 = Module(new StoreUnit_S1)
-  // val store_s2 = Module(new StoreUnit_S2)
+  val store_s2 = Module(new StoreUnit_S2)
 
   store_s0.io.in <> io.stin
   store_s0.io.dtlbReq <> io.dtlb.req
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
-  // PipelineConnect(store_s1.io.fp_out, store_s2.io.in, true.B, false.B)
 
-  store_s1.io.stout <> io.stout
+  store_s1.io.lsq <> io.lsq // send result to sq
   store_s1.io.dtlbResp <> io.dtlb.resp
   store_s1.io.tlbFeedback <> io.tlbFeedback
-  // send result to sq
-  io.lsq.valid := store_s1.io.out.valid
-  io.lsq.bits := store_s1.io.out.bits
 
-  store_s1.io.out.ready := true.B
+  PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+
+  store_s2.io.stout <> io.stout
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
