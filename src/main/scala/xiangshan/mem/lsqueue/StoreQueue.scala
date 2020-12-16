@@ -63,8 +63,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val storeCommit = (0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.uop(i).ctrl.commitType === CommitType.STORE)
   val mcommitIdx = (0 until CommitWidth).map(i => io.commits.uop(i).sqIdx.value)
 
-  val tailMask = (((1.U((StoreQueueSize + 1).W)) << deqPtr).asUInt - 1.U)(StoreQueueSize - 1, 0)
-  val headMask = (((1.U((StoreQueueSize + 1).W)) << enqPtr).asUInt - 1.U)(StoreQueueSize - 1, 0)
+  val tailMask = UIntToMask(deqPtr, StoreQueueSize)
+  val headMask = UIntToMask(enqPtr, StoreQueueSize)
   val enqDeqMask1 = tailMask ^ headMask
   val enqDeqMask = Mux(sameFlag, enqDeqMask1, ~enqDeqMask1)
 
@@ -228,7 +228,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
 
     val differentFlag = deqPtrExt.flag =/= io.forward(i).sqIdx.flag
-    val forwardMask = ((1.U((StoreQueueSize + 1).W)) << io.forward(i).sqIdx.value).asUInt - 1.U
+    val forwardMask = UIntToMask(io.forward(i).sqIdx.value, StoreQueueSize)
     val storeWritebackedVec = WireInit(VecInit(Seq.fill(StoreQueueSize)(false.B)))
     for (j <- 0 until StoreQueueSize) {
       storeWritebackedVec(j) := datavalid(j) && allocated(j) // all datavalid terms need to be checked

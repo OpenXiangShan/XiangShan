@@ -120,9 +120,6 @@ class LoadUnit_S1 extends XSModule {
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
 
-  io.out.bits.forwardMask := io.sbuffer.forwardMask
-  io.out.bits.forwardData := io.sbuffer.forwardData
-
   io.out.valid := io.in.valid && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
@@ -142,6 +139,7 @@ class LoadUnit_S2 extends XSModule {
     val out = Decoupled(new LsPipelineBundle)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val lsq = new LoadForwardQueryIO
+    val sbuffer = new LoadForwardQueryIO
   })
 
   val s2_uop = io.in.bits.uop
@@ -201,10 +199,16 @@ class LoadUnit_S2 extends XSModule {
   io.in.ready := io.out.ready || !io.in.valid
 
   // merge forward result
+  // lsq has higher priority than sbuffer
   io.lsq := DontCare
+  io.sbuffer := DontCare
   // generate XLEN/8 Muxs
   for (i <- 0 until XLEN / 8) {
-    when(io.lsq.forwardMask(i)) {
+    when (io.sbuffer.forwardMask(i)) {
+      io.out.bits.forwardMask(i) := true.B
+      io.out.bits.forwardData(i) := io.sbuffer.forwardData(i)
+    }
+    when (io.lsq.forwardMask(i)) {
       io.out.bits.forwardMask(i) := true.B
       io.out.bits.forwardData(i) := io.lsq.forwardData(i)
     }
@@ -249,9 +253,10 @@ class LoadUnit extends XSModule {
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
   load_s2.io.dcacheResp <> io.dcache.resp
-  load_s2.io.lsq := DontCare
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
+  load_s2.io.sbuffer.forwardData <> io.sbuffer.forwardData
+  load_s2.io.sbuffer.forwardMask <> io.sbuffer.forwardMask
 
   XSDebug(load_s0.io.out.valid,
     p"S0: pc ${Hexadecimal(load_s0.io.out.bits.uop.cf.pc)}, lId ${Hexadecimal(load_s0.io.out.bits.uop.lqIdx.asUInt)}, " +
