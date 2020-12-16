@@ -121,7 +121,7 @@ class IFU extends XSModule with HasIFUConst
 
 
   // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
-  
+
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
   val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
@@ -175,9 +175,9 @@ class IFU extends XSModule with HasIFUConst
 
   // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
   val crossPageIPF = WireInit(false.B)
-  
+
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
-  
+
   // the previous half of RVI instruction waits until it meets its last half
   val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && (if3_prevHalfInstr.pc + 2.U) === if3_pc && if3_valid
   // set to invalid once consumed or redirect from backend
@@ -213,7 +213,7 @@ class IFU extends XSModule with HasIFUConst
                     // GHInfo from last pred does not corresponds with this packet
                     // if3_ghInfoNotIdenticalRedirect
                   )
-  
+
   val if3_target = WireInit(snpc(if3_pc))
 
   /* when (prevHalfMetRedirect) {
@@ -247,14 +247,14 @@ class IFU extends XSModule with HasIFUConst
   val if4_mask = RegEnable(icacheResp.mask, if3_fire)
   val if4_snpc = Mux(inLoop, if4_pc + (PopCount(if4_mask) << 1), snpc(if4_pc))
 
-  
+
   val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
   // wait until prevHalfInstr written into reg
   if4_ready := (if4_fire && !hasPrevHalfInstrReq || !if4_valid || if4_flush) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
   .elsewhen (if3_fire) { if4_valid := true.B }
   .elsewhen (if4_fire) { if4_valid := false.B }
-  
+
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
   if4_bp.takens  := bpu.io.out(2).takens & if4_mask
@@ -278,7 +278,7 @@ class IFU extends XSModule with HasIFUConst
       if4_bp.targets(i) := if4_jal_tgts(i)
     }
   }
-  
+
   // we need this to tell BPU the prediction of prev half
   // because the prediction is with the start of each inst
   val if4_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))

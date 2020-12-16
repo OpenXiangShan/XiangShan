@@ -273,65 +273,81 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   val g = VecInit(entry.map(_.perm.g)).asUInt // TODO: need check if reverse is needed
 
-  val entryHitVec = widthMapSeq{i => VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/))) }
-  val hitVec  = widthMapSeq{ i => (v.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
-  val pfHitVec   = widthMapSeq{ i => (pf.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
-  val pfArray = widthMap{ i => ParallelOR(pfHitVec(i)).asBool && valid(i) && vmEnable }
-  val hit     = widthMap{ i => ParallelOR(hitVec(i)).asBool && valid(i) && vmEnable && ~pfArray(i) }
-  val miss    = widthMap{ i => !hit(i) && valid(i) && vmEnable && ~pfArray(i) }
-  val hitppn  = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
-  val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
-  val hitLevel= widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.level)) }
-  val multiHit = {
-    val hitSum = widthMap{ i => PopCount(hitVec(i)) }
-    val pfHitSum = widthMap{ i => PopCount(pfHitVec(i)) }
-    ParallelOR(widthMap{ i => !(hitSum(i)===0.U || hitSum(i)===1.U) || !(pfHitSum(i)===0.U || pfHitSum(i)===1.U)})
-  }
+  def TLBRead(i: Int) = {
+    val entryHitVec = VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
 
-  // resp  // TODO: A/D has not being concerned
-  for(i <- 0 until Width) {
-    val paddr = LookupTreeDefault(hitLevel(i), Cat(hitppn(i), reqAddr(i).off), List(
-      0.U -> Cat(hitppn(i)(ppnLen - 1, 2*vpnnLen), reqAddr(i).vpn(2*vpnnLen - 1, 0), reqAddr(i).off),
-      1.U -> Cat(hitppn(i)(ppnLen - 1, vpnnLen), reqAddr(i).vpn(vpnnLen - 1, 0), reqAddr(i).off),
-      2.U -> Cat(hitppn(i), reqAddr(i).off)
+    val reqAddrReg = if (isDtlb) RegNext(reqAddr(i)) else reqAddr(i)
+    val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
+    val validReg = if (isDtlb) RegNext(valid(i)) else valid(i)
+    val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
+
+    val hitVec  = (v.asBools zip entryHitVecReg).map{ case (a,b) => a&b }
+    val pfHitVec   = (pf.asBools zip entryHitVecReg).map{ case (a,b) => a&b }
+    val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
+    val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
+    val miss    = !hit && validReg && vmEnable && ~pfArray
+    val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn))
+    val hitPerm = ParallelMux(hitVec zip entry.map(_.perm))
+    val hitLevel= ParallelMux(hitVec zip entry.map(_.level))
+    val multiHit = {
+      val hitSum = PopCount(hitVec)
+      val pfHitSum = PopCount(pfHitVec)
+      !(hitSum===0.U || hitSum===1.U) || !(pfHitSum===0.U || pfHitSum===1.U)
+    }
+
+    // resp  // TODO: A/D has not being concerned
+    val paddr = LookupTreeDefault(hitLevel, Cat(hitppn, reqAddrReg.off), List(
+      0.U -> Cat(hitppn(ppnLen - 1, 2*vpnnLen), reqAddrReg.vpn(2*vpnnLen - 1, 0), reqAddrReg.off),
+      1.U -> Cat(hitppn(ppnLen - 1, vpnnLen), reqAddrReg.vpn(vpnnLen - 1, 0), reqAddrReg.off),
+      2.U -> Cat(hitppn, reqAddrReg.off)
     ))
+    val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
 
     req(i).ready := resp(i).ready
-    resp(i).valid := valid(i)
-    resp(i).bits.paddr := Mux(vmEnable, paddr, SignExt(req(i).bits.vaddr, PAddrBits))
-    resp(i).bits.miss := miss(i)
+    resp(i).valid := validReg
+    resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
+    resp(i).bits.miss := miss
 
-    val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
-    val update = false.B && hit(i) && (!hitPerm(i).a || !hitPerm(i).d && TlbCmd.isWrite(cmd(i))) // update A/D through exception
+    val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
+    val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = (pfArray(i) && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
-    val stPf = (pfArray(i) && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
-    val instrPf = (pfArray(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    val ldPf = (pfArray && TlbCmd.isRead(cmdReg) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/*!isAMO*/) // TODO: handle isAMO
+    val stPf = (pfArray && TlbCmd.isWrite(cmdReg) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
+    val instrPf = (pfArray && TlbCmd.isExec(cmdReg)) || hit && !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
     resp(i).bits.excp.pf.ld    := ldPf || update
     resp(i).bits.excp.pf.st    := stPf || update
     resp(i).bits.excp.pf.instr := instrPf || update
+
+    (hit, miss, pfHitVec, multiHit)
   }
+
+  val readResult = (0 until Width).map(TLBRead(_))
+  val hitVec = readResult.map(res => res._1)
+  val missVec = readResult.map(res => res._2)
+  val pfHitVecVec = readResult.map(res => res._3)
+  val multiHitVec = readResult.map(res => res._4)
+  val hasMissReq = Cat(missVec).orR
 
   // ptw
   val state_idle :: state_wait :: Nil = Enum(2)
   val state = RegInit(state_idle)
 
   ptw <> DontCare // TODO: need check it
-  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle && !sfence.valid
+  ptw.req.valid := hasMissReq && state===state_idle && !sfence.valid
   ptw.resp.ready := state===state_wait
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
   val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
   for (i <- 0 until Width) {
-    ptwReqSeq(i).valid := valid(i) && miss(i)
-    ptwReqSeq(i).roqIdx := req(i).bits.roqIdx
-    ptwReqSeq(i).bits.vpn := reqAddr(i).vpn
+    ptwReqSeq(i).valid := ((if (isDtlb) RegNext(valid(i)) else valid(i)) && missVec(i))
+    ptwReqSeq(i).roqIdx := (if (isDtlb) RegNext(req(i).bits.roqIdx) else req(i).bits.roqIdx)
+    ptwReqSeq(i).bits.vpn := (if (isDtlb) RegNext(reqAddr(i).vpn) else reqAddr(i).vpn)
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
 
   switch (state) {
     is (state_idle) {
-      when (ParallelOR(miss).asBool && ptw.req.fire()) {
+      when (hasMissReq && ptw.req.fire()) {
         state := state_wait
       }
       assert(!ptw.resp.valid)
@@ -345,7 +361,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
 
   // reset pf when pf hit
-  val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVec(i)).asUInt, 0.U) })
+  val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
   val pfHitRefill = ParallelOR(pfHitReset.asBools)
 
   // refill
@@ -409,15 +425,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     ExcitingUtils.addSource(valid(1)/* && vmEnable*/, "perfCntDtlbReqCnt1", Perf)
     ExcitingUtils.addSource(valid(2)/* && vmEnable*/, "perfCntDtlbReqCnt2", Perf)
     ExcitingUtils.addSource(valid(3)/* && vmEnable*/, "perfCntDtlbReqCnt3", Perf)
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntDtlbMissCnt0", Perf)
-    ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && miss(1), "perfCntDtlbMissCnt1", Perf)
-    ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && miss(2), "perfCntDtlbMissCnt2", Perf)
-    ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && miss(3), "perfCntDtlbMissCnt3", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && missVec(0), "perfCntDtlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && missVec(1), "perfCntDtlbMissCnt1", Perf)
+    ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && missVec(2), "perfCntDtlbMissCnt2", Perf)
+    ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && missVec(3), "perfCntDtlbMissCnt3", Perf)
   }
 
   if (!env.FPGAPlatform && !isDtlb) {
     ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntItlbReqCnt0", Perf)
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntItlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && missVec(0), "perfCntItlbMissCnt0", Perf)
   }
 
   // Log
@@ -428,7 +444,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
-  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)} state:${state}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)} state:${state}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
@@ -437,7 +453,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   //   assert((hit(i)&pfArray(i))===false.B, "hit(%d):%d pfArray(%d):%d v:0x%x pf:0x%x", i.U, hit(i), i.U, pfArray(i), v, pf)
   // }
   // for(i <- 0 until Width) {
-  //   XSDebug(multiHit, p"vpn:0x${Hexadecimal(reqAddr(i).vpn)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)} pfHitVec:0x${Hexadecimal(VecInit(pfHitVec(i)).asUInt)}\n")
+  //   XSDebug(multiHit, p"vpn:0x${Hexadecimal(reqAddr(i).vpn)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)} pfHitVecVec:0x${Hexadecimal(VecInit(pfHitVecVec(i)).asUInt)}\n")
   // }
   // for(i <- 0 until TlbEntrySize) {
   //   XSDebug(multiHit, p"entry(${i.U}): v:${v(i)} ${entry(i)}\n")
