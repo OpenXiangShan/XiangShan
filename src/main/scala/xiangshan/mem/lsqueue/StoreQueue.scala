@@ -52,8 +52,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
   require(StoreQueueSize > RenameWidth)
-  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(i =>i.U.asTypeOf(new SqPtr))))
-  val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(i => i.U.asTypeOf(new SqPtr))))
+  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
+  val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
   val sameFlag = enqPtrExt(0).flag === deqPtrExt(0).flag

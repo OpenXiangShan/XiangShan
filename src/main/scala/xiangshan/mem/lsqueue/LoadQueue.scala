@@ -58,11 +58,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
-  val enqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
-  val enqPtr = enqPtrExt.value
+  val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt.value
-  val sameFlag = enqPtrExt.flag === deqPtrExt.flag
+  val sameFlag = enqPtrExt(0).flag === deqPtrExt.flag
   val isEmpty = enqPtr === deqPtr && sameFlag
   val isFull = enqPtr === deqPtr && !sameFlag
   val allowIn = !isFull
@@ -76,13 +76,13 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val enqDeqMask = Mux(sameFlag, enqDeqMask1, ~enqDeqMask1)
 
   // Enqueue at dispatch
-  val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
+  val validEntries = distanceBetween(enqPtrExt(0), deqPtrExt)
   val firedDispatch = io.enq.req.map(_.valid)
   io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
-    val lqIdx = enqPtrExt + offset
+    val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
     when(io.enq.req(i).valid) {
       uop(index) := io.enq.req(i).bits
@@ -100,8 +100,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   when(Cat(firedDispatch).orR) {
-    enqPtrExt := enqPtrExt + PopCount(firedDispatch)
-    XSInfo("dispatched %d insts to lq\n", PopCount(firedDispatch))
+    val enqNumber = PopCount(firedDispatch)
+    enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
+    XSInfo("dispatched %d insts to lq\n", enqNumber)
   }
 
   // writeback load
@@ -365,7 +366,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val startIndex = io.storeIn(i).bits.uop.lqIdx.value
     val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
     val xorMask = lqIdxMask ^ enqMask
-    val sameFlag = io.storeIn(i).bits.uop.lqIdx.flag === enqPtrExt.flag
+    val sameFlag = io.storeIn(i).bits.uop.lqIdx.flag === enqPtrExt(0).flag
     val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
 
     // check if load already in lq needs to be rolledback
@@ -539,7 +540,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     enqPtrExt := enqPtrExt
   }
   when (lastCycleRedirect.valid) {
-    enqPtrExt := enqPtrExt - PopCount(needCancelReg)
+    val cancelCount = PopCount(needCancelReg)
+    enqPtrExt := VecInit(enqPtrExt.map(_ - cancelCount))
   }
 
   // assert(!io.rollback.valid)
@@ -548,7 +550,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // debug info
-  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
+  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
