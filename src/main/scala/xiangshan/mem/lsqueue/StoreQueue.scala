@@ -191,27 +191,15 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   when(io.mmioStout.fire()) {
     writebacked(deqPtr) := true.B
     allocated(deqPtr) := false.B // potential opt: move deqPtr immediately
+    deqPtrExt := deqPtrExt + 1.U
   }
 
   // remove retired insts from sq, add retired store to sbuffer
-
-  // move tailPtr
-  // TailPtr slow recovery: recycle bubbles in store queue
-  // allocatedMask: dequeuePtr can go to the next 1-bit
-  val allocatedMask = VecInit((0 until StoreQueueSize).map(i => allocated(i) || !enqDeqMask(i)))
-  // find the first one from deqPtr (deqPtr)
-  val nextTail1 = getFirstOneWithFlag(allocatedMask, tailMask, deqPtrExt.flag)
-  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, enqPtrExt)
-  deqPtrExt := nextTail
-
-  // TailPtr fast recovery
-  // val tailRecycle = VecInit(List(
-  //   io.uncache.resp.fire() || io.sbuffer(0).fire(),
-  //   io.sbuffer(1).fire()
-  // ))
-
-  when(io.sbuffer(0).fire()){
+  when(Cat(io.sbuffer.map(_.fire())).orR) {
     deqPtrExt := deqPtrExt + Mux(io.sbuffer(1).fire(), 2.U, 1.U)
+    when (io.sbuffer(1).fire()) {
+      assert(io.sbuffer(0).fire())
+    }
   }
 
   // load forward query
@@ -332,21 +320,20 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
-      // when(io.brqRedirect.bits.isReplay){
-      //   datavalid(i) := false.B
-      //   writebacked(i) := false.B
-      //   pending(i) := false.B
-      // }.otherwise{
         allocated(i) := false.B
-      // }
     }
   }
-  when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {
-    enqPtrExt := enqPtrExt - PopCount(needCancel)
+  val lastCycleRedirectValid = RegNext(io.brqRedirect.valid)
+  val needCancelReg = RegNext(needCancel)
+  when (io.brqRedirect.valid) {
+    enqPtrExt := enqPtrExt
+  }
+  when (lastCycleRedirectValid) {
+    enqPtrExt := enqPtrExt - PopCount(needCancelReg)
   }
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
+  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
