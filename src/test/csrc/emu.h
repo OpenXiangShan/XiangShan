@@ -56,11 +56,12 @@ class Emulator {
   void display_trapinfo();
   inline char* timestamp_filename(time_t t, char *buf);
   inline char* snapshot_filename(time_t t);
+  inline char* coverage_filename(time_t t);
   void snapshot_save(const char *filename);
   void snapshot_load(const char *filename);
   inline char* waveform_filename(time_t t);
 #ifdef VM_COVERAGE
-  inline void save_coverage(void);
+  inline void save_coverage(time_t t);
 #endif
 
 public:

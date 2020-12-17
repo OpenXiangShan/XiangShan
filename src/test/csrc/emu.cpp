@@ -244,6 +244,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
+#ifdef VM_COVERAGE
+  // we dump coverage into files at the end
+  // since we are not sure when an emu will stop
+  // we distinguish multiple dat files by emu start time
+  time_t start_time = time(NULL);
+#endif
+
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
       trapCode = STATE_LIMIT_EXCEEDED;
@@ -331,7 +338,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
 #ifdef VM_COVERAGE
-  save_coverage();
+  save_coverage(start_time);
 #endif
 
   display_trapinfo();
@@ -365,15 +372,16 @@ inline char* Emulator::waveform_filename(time_t t) {
 
 
 #ifdef VM_COVERAGE
-inline void Emulator::save_coverage(void) {
-  char *noop_home = getenv("NOOP_HOME");
-  assert(noop_home != NULL);
+inline char* Emulator::coverage_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".coverage.dat");
+  return buf;
+}
 
-  char buf[1024];
-  snprintf(buf, 1024, "%s/build/logs", noop_home);
-  Verilated::mkdir(buf);
-  snprintf(buf, 1024, "%s/build/logs/coverage.dat", noop_home);
-  VerilatedCov::write(buf);
+inline void Emulator::save_coverage(time_t t) {
+  char *p = coverage_filename(t);
+  VerilatedCov::write(p);
 }
 #endif
 
