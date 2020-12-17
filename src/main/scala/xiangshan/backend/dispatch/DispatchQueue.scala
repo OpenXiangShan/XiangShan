@@ -27,18 +27,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
   // head: first valid entry (dispatched entry)
-  val headPtr = RegInit(0.U.asTypeOf(new CircularQueuePtr(size)))
-  val headPtrMask = UIntToMask(headPtr.value, size)
+  val headPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
+  val headPtrMask = UIntToMask(headPtr(0).value, size)
   // tail: first invalid entry (free entry)
   val tailPtr = RegInit(VecInit((0 until deqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
   val tailPtrMask = UIntToMask(tailPtr(0).value, size)
 
-  // TODO: make ptr a vector to reduce latency?
-  // deq: starting from head ptr
-  val deqIndex = (0 until deqnum).map(i => headPtr + i.U).map(_.value)
-  // enq: starting from tail ptr
-
-  val validEntries = distanceBetween(tailPtr(0), headPtr)
+  val validEntries = distanceBetween(tailPtr(0), headPtr(0))
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR
   val canEnqueue = validEntries <= (size - enqnum).U
   val canActualEnqueue = canEnqueue && !(io.redirect.valid /*&& !io.redirect.bits.isReplay*/)
@@ -67,9 +62,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   // dequeue: from s_valid to s_dispatched
   for (i <- 0 until deqnum) {
     when (io.deq(i).fire() && !io.redirect.valid) {
-      stateEntries(deqIndex(i)) := s_invalid
+      stateEntries(headPtr(i).value) := s_invalid
 
-      XSError(stateEntries(deqIndex(i)) =/= s_valid, "state of the dispatch entry is not s_valid\n")
+      XSError(stateEntries(headPtr(i).value) =/= s_valid, "state of the dispatch entry is not s_valid\n")
     }
   }
 
@@ -105,12 +100,15 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     // For dequeue, the first entry should never be s_invalid
     // Otherwise, there should be a redirect and tail walks back
     // in this case, we set numDeq to 0
-    !deq.fire() && (if (i == 0) true.B else stateEntries(deqIndex(i)) =/= s_invalid)
+    !deq.fire() && (if (i == 0) true.B else stateEntries(headPtr(i).value) =/= s_invalid)
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // agreement with reservation station: don't dequeue when redirect.valid
-  val headPtrNext = Mux(mispredictionValid, headPtr, headPtr + numDeq)
-  headPtr := Mux(exceptionValid, 0.U.asTypeOf(new CircularQueuePtr(size)), headPtrNext)
+  for (i <- 0 until enqnum) {
+    headPtr(i) := Mux(exceptionValid,
+      i.U.asTypeOf(new CircularQueuePtr(size)),
+      Mux(mispredictionValid, headPtr(i), headPtr(i) + numDeq))
+  }
 
   // For branch mis-prediction or memory violation replay,
   // we delay updating the indices for one clock cycle.
@@ -123,7 +121,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val flippedFlag = loValidBitVec.orR
   val lastOneIndex = size.U - PriorityEncoder(Mux(loValidBitVec.orR, loValidBitVec, hiValidBitVec))
   val walkedTailPtr = Wire(new CircularQueuePtr(size))
-  walkedTailPtr.flag := flippedFlag ^ headPtr.flag
+  walkedTailPtr.flag := flippedFlag ^ headPtr(0).flag
   walkedTailPtr.value := lastOneIndex
 
   // enqueue
@@ -132,7 +130,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   tailPtr(0) := Mux(exceptionValid,
     0.U.asTypeOf(new CircularQueuePtr(size)),
     Mux(lastCycleMisprediction,
-      Mux(isTrueEmpty, headPtr, walkedTailPtr),
+      Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
       tailPtr(0) + numEnq)
   )
   val lastCycleException = RegNext(exceptionValid)
@@ -152,13 +150,13 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     */
   // TODO: remove this when replay moves to roq
   for (i <- 0 until deqnum) {
-    io.deq(i).bits := uopEntries(deqIndex(i))
+    io.deq(i).bits := uopEntries(headPtr(i).value)
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
-    io.deq(i).valid := stateEntries(deqIndex(i)) === s_valid && !lastCycleMisprediction// && !io.redirect.valid
+    io.deq(i).valid := stateEntries(headPtr(i).value) === s_valid && !lastCycleMisprediction
   }
 
   // debug: dump dispatch queue states
-  XSDebug(p"head: $headPtr, tail: ${tailPtr(0)}\n")
+  XSDebug(p"head: ${headPtr(0)}, tail: ${tailPtr(0)}\n")
   XSDebug(p"state: ")
   stateEntries.reverse.foreach { s =>
     XSDebug(false, s === s_invalid, "-")
@@ -167,11 +165,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   XSDebug(false, true.B, "\n")
   XSDebug(p"ptr:   ")
   (0 until size).reverse.foreach { i =>
-    val isPtr = i.U === headPtr.value || i.U === tailPtr(0).value
+    val isPtr = i.U === headPtr(0).value || i.U === tailPtr(0).value
     XSDebug(false, isPtr, "^")
     XSDebug(false, !isPtr, " ")
   }
   XSDebug(false, true.B, "\n")
 
-  XSError(isAfter(headPtr, tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: $headPtr) failed\n")
+  XSError(isAfter(headPtr(0), tailPtr(0)), p"assert greaterOrEqualThan(tailPtr: ${tailPtr(0)}, headPtr: ${headPtr(0)}) failed\n")
 }
