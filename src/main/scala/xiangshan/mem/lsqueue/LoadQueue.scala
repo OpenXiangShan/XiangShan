@@ -140,7 +140,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
         datavalid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        allocated(loadWbIndex) := !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
 
         val loadWbData = Wire(new LsqEntry)
         loadWbData.paddr := io.loadIn(i).bits.paddr
@@ -155,9 +154,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         dataModule.io.wb(i).wen := true.B
 
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        miss(loadWbIndex) := dcacheMissed
+        miss(loadWbIndex) := dcacheMissed && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
         listening(loadWbIndex) := dcacheMissed
-        pending(loadWbIndex) := io.loadIn(i).bits.mmio
+        pending(loadWbIndex) := io.loadIn(i).bits.mmio && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
       }
     })
 
@@ -303,14 +302,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     }
   })
 
-  // move tailPtr
-  // allocatedMask: dequeuePtr can go to the next 1-bit
-  val allocatedMask = VecInit((0 until LoadQueueSize).map(i => allocated(i) || !enqDeqMask(i)))
-  // find the first one from deqPtr (deqPtr)
-  val nextTail1 = getFirstOneWithFlag(allocatedMask, deqMask, deqPtrExt.flag)
-  val nextTail = Mux(Cat(allocatedMask).orR, nextTail1, enqPtrExt)
-  deqPtrExt := nextTail
-
   // When load commited, mark it as !allocated, this entry will be recycled later
   (0 until CommitWidth).map(i => {
     when(loadCommit(i)) {
@@ -318,6 +309,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       XSDebug("load commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
     }
   })
+  deqPtrExt := deqPtrExt + PopCount(loadCommit)
 
   def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
     val length = mask.length
@@ -539,19 +531,15 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   for (i <- 0 until LoadQueueSize) {
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
     when(needCancel(i)) {
-      // when(io.brqRedirect.bits.isReplay){
-      //   valid(i) := false.B
-      //   writebacked(i) := false.B
-      //   listening(i) := false.B
-      //   miss(i) := false.B
-      //   pending(i) := false.B
-      // }.otherwise{
         allocated(i) := false.B
-      // }
     }
   }
-  when (io.brqRedirect.valid && io.brqRedirect.bits.isMisPred) {
-    enqPtrExt := enqPtrExt - PopCount(needCancel)
+  val needCancelReg = RegNext(needCancel)
+  when (io.brqRedirect.valid) {
+    enqPtrExt := enqPtrExt
+  }
+  when (lastCycleRedirect.valid) {
+    enqPtrExt := enqPtrExt - PopCount(needCancelReg)
   }
 
   // assert(!io.rollback.valid)
@@ -560,7 +548,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // debug info
-  XSDebug("head %d:%d tail %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
+  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
