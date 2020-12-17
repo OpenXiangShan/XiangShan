@@ -51,11 +51,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val commited = Reg(Vec(StoreQueueSize, Bool())) // inst has been commited by roq
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
-  val enqPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
-  val deqPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
-  val enqPtr = enqPtrExt.value
-  val deqPtr = deqPtrExt.value
-  val sameFlag = enqPtrExt.flag === deqPtrExt.flag
+  require(StoreQueueSize > RenameWidth)
+  val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(i =>i.U.asTypeOf(new SqPtr))))
+  val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(i => i.U.asTypeOf(new SqPtr))))
+  val enqPtr = enqPtrExt(0).value
+  val deqPtr = deqPtrExt(0).value
+  val sameFlag = enqPtrExt(0).flag === deqPtrExt(0).flag
   val isEmpty = enqPtr === deqPtr && sameFlag
   val isFull = enqPtr === deqPtr && !sameFlag
   val allowIn = !isFull
@@ -69,13 +70,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val enqDeqMask = Mux(sameFlag, enqDeqMask1, ~enqDeqMask1)
 
   // Enqueue at dispatch
-  val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
+  val validEntries = distanceBetween(enqPtrExt(0), deqPtrExt(0))
   val firedDispatch = io.enq.req.map(_.valid)
   io.enq.canAccept := validEntries <= (StoreQueueSize - RenameWidth).U
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
-    val sqIdx = enqPtrExt + offset
+    val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
     when(io.enq.req(i).valid) {
       uop(index) := io.enq.req(i).bits
@@ -91,8 +92,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   when(Cat(firedDispatch).orR) {
-    enqPtrExt := enqPtrExt + PopCount(firedDispatch)
-    XSInfo("dispatched %d insts to sq\n", PopCount(firedDispatch))
+    val enqNumber = PopCount(firedDispatch)
+    enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
+    XSInfo("dispatched %d insts to sq\n", enqNumber)
   }
 
   // writeback store
@@ -179,7 +181,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   // writeback finished mmio store
   io.mmioStout.bits.uop := uop(deqPtr)
-  io.mmioStout.bits.uop.sqIdx := deqPtrExt
+  io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.uop.cf.exceptionVec := dataModule.io.rdata(deqPtr).exception.asBools
   io.mmioStout.bits.data := dataModule.io.rdata(deqPtr).data
   io.mmioStout.bits.redirectValid := false.B
@@ -191,12 +193,13 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   when(io.mmioStout.fire()) {
     writebacked(deqPtr) := true.B
     allocated(deqPtr) := false.B // potential opt: move deqPtr immediately
-    deqPtrExt := deqPtrExt + 1.U
+    deqPtrExt := VecInit(deqPtrExt.map(_ + 1.U))
   }
 
   // remove retired insts from sq, add retired store to sbuffer
   when(Cat(io.sbuffer.map(_.fire())).orR) {
-    deqPtrExt := deqPtrExt + Mux(io.sbuffer(1).fire(), 2.U, 1.U)
+    val stepForward = Mux(io.sbuffer(1).fire(), 2.U, 1.U)
+    deqPtrExt := VecInit(deqPtrExt.map(_ + stepForward))
     when (io.sbuffer(1).fire()) {
       assert(io.sbuffer(0).fire())
     }
@@ -215,7 +218,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     // Forward2: Mux(same_flag, 0.U,                   range(0, sqIdx)    )
     // i.e. forward1 is the target entries with the same flag bits and forward2 otherwise
 
-    val differentFlag = deqPtrExt.flag =/= io.forward(i).sqIdx.flag
+    val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
     val forwardMask = UIntToMask(io.forward(i).sqIdx.value, StoreQueueSize)
     val storeWritebackedVec = WireInit(VecInit(Seq.fill(StoreQueueSize)(false.B)))
     for (j <- 0 until StoreQueueSize) {
@@ -247,7 +250,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   })
 
   (0 until 2).map(i => {
-    val ptr = (deqPtrExt + i.U).value
+    val ptr = deqPtrExt(i).value
     val mmio = dataModule.io.rdata(ptr).mmio
     io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
@@ -329,11 +332,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     enqPtrExt := enqPtrExt
   }
   when (lastCycleRedirectValid) {
-    enqPtrExt := enqPtrExt - PopCount(needCancelReg)
+    val cancelCount = PopCount(needCancelReg)
+    enqPtrExt := VecInit(enqPtrExt.map(_ - cancelCount))
   }
 
   // debug info
-  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt.flag, enqPtr, deqPtrExt.flag, deqPtr)
+  XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt(0).flag, deqPtr)
 
   def PrintFlag(flag: Bool, name: String): Unit = {
     when(flag) {
