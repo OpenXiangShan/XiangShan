@@ -3,6 +3,7 @@
 #include "difftest.h"
 #include <getopt.h>
 #include "ram.h"
+#include "zlib.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -78,7 +79,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
-  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
@@ -193,7 +193,11 @@ inline void Emulator::single_cycle() {
 #ifdef WITH_DRAMSIM3
   axi_channel axi;
   axi_copy_from_dut_ptr(dut_ptr, axi);
+  axi.aw.addr -= 0x80000000UL;
+  axi.ar.addr -= 0x80000000UL;
   dramsim3_helper(axi);
+  axi.aw.addr += 0x80000000UL;
+  axi.ar.addr += 0x80000000UL;
   axi_set_dut_ptr(dut_ptr, axi);
 #endif
 
@@ -321,6 +325,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
   if (Verilated::gotFinish()) {
+    difftest_display(dut_ptr->io_difftest_priviledgeMode);
     eprintf("The simulation stopped. There might be some assertion failed.\n");
     trapCode = STATE_ABORT;
   }
@@ -430,7 +435,7 @@ void Emulator::snapshot_save(const char *filename) {
 }
 
 void Emulator::snapshot_load(const char *filename) {
-  VerilatedRestore stream;
+  VerilatedRestoreMem stream;
   stream.open(filename);
   stream >> *dut_ptr;
 

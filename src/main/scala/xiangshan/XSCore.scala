@@ -63,9 +63,9 @@ case class XSCoreParameters
   RoqSize: Int = 192,
   dpParams: DispatchParameters = DispatchParameters(
     DqEnqWidth = 4,
-    IntDqSize = 128,
-    FpDqSize = 128,
-    LsDqSize = 96,
+    IntDqSize = 24,
+    FpDqSize = 24,
+    LsDqSize = 24,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
@@ -316,20 +316,16 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val uncache = outer.uncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-  val icache = Module(new ICache)
+  
 
   frontend.io.backend <> ctrlBlock.io.frontend
-  frontend.io.icacheResp <> icache.io.resp
-  frontend.io.icacheToTlb <> icache.io.tlb
-  icache.io.req <> frontend.io.icacheReq
-  icache.io.flush <> frontend.io.icacheFlush
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
   frontend.io.tlbCsr <> integerBlock.io.csrio.tlb
 
-  icache.io.mem_acquire <> l1pluscache.io.req
-  l1pluscache.io.resp <> icache.io.mem_grant
-  l1pluscache.io.flush := icache.io.l1plusflush
-  icache.io.fencei := integerBlock.io.fenceio.fencei
+  frontend.io.icacheMemAcq <> l1pluscache.io.req
+  l1pluscache.io.resp <> frontend.io.icacheMemGrant
+  l1pluscache.io.flush := frontend.io.l1plusFlush
+  frontend.io.fencei := integerBlock.io.fenceio.fencei
 
   ctrlBlock.io.fromIntBlock <> integerBlock.io.toCtrlBlock
   ctrlBlock.io.fromFpBlock <> floatBlock.io.toCtrlBlock

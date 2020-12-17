@@ -8,6 +8,8 @@ package object xiangshan {
     def imm = "b01".U
     def fp  = "b10".U
 
+    def DC = imm // Don't Care
+
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm

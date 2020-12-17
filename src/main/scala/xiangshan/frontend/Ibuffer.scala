@@ -23,6 +23,7 @@ class Ibuffer extends XSModule {
     val brInfo = new BranchInfo
     val pd = new PreDecodeInfo
     val ipf = Bool()
+    val acf = Bool()
     val crossPageIPFFix = Bool()
   }
 
@@ -65,6 +66,7 @@ class Ibuffer extends XSModule {
       inWire.brInfo := io.in.bits.brInfo(i)
       inWire.pd := io.in.bits.pd(i)
       inWire.ipf := io.in.bits.ipf
+      inWire.acf := io.in.bits.acf
       inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
 
       ibuf(enq_idx) := inWire
@@ -90,6 +92,7 @@ class Ibuffer extends XSModule {
       // io.out(i).bits.exceptionVec := Mux(outWire.ipf, UIntToOH(instrPageFault.U), 0.U)
       io.out(i).bits.exceptionVec := 0.U.asTypeOf(Vec(16, Bool()))
       io.out(i).bits.exceptionVec(instrPageFault) := outWire.ipf
+      io.out(i).bits.exceptionVec(instrAccessFault) := outWire.acf
       // io.out(i).bits.brUpdate := outWire.brInfo
       io.out(i).bits.brUpdate := DontCare
       io.out(i).bits.brUpdate.pc := outWire.pc
