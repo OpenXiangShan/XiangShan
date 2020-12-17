@@ -162,7 +162,7 @@ class MicroBTB extends BasePredictor
     val do_reset = RegInit(true.B)
     val reset_way = RegInit(0.U(log2Ceil(nWays).W))
     when (do_reset) { reset_way := reset_way + 1.U }
-    when (reset_way === nWays.U) { do_reset := false.B }
+    when (reset_way === (nWays-1).U) { do_reset := false.B }
 
     //uBTB read
     //tag is bank align
