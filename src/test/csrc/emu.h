@@ -60,7 +60,7 @@ class Emulator {
   void snapshot_save(const char *filename);
   void snapshot_load(const char *filename);
   inline char* waveform_filename(time_t t);
-#ifdef VM_COVERAGE
+#if VM_COVERAGE == 1
   inline void save_coverage(time_t t);
 #endif
 

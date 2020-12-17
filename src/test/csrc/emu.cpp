@@ -194,7 +194,11 @@ inline void Emulator::single_cycle() {
 #ifdef WITH_DRAMSIM3
   axi_channel axi;
   axi_copy_from_dut_ptr(dut_ptr, axi);
+  axi.aw.addr -= 0x80000000UL;
+  axi.ar.addr -= 0x80000000UL;
   dramsim3_helper(axi);
+  axi.aw.addr += 0x80000000UL;
+  axi.ar.addr += 0x80000000UL;
   axi_set_dut_ptr(dut_ptr, axi);
 #endif
 
@@ -244,7 +248,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
-#ifdef VM_COVERAGE
+#if VM_COVERAGE == 1
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
   // we distinguish multiple dat files by emu start time
@@ -329,6 +333,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
   if (Verilated::gotFinish()) {
+    difftest_display(dut_ptr->io_difftest_priviledgeMode);
     eprintf("The simulation stopped. There might be some assertion failed.\n");
     trapCode = STATE_ABORT;
   }
@@ -337,7 +342,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   if (enable_waveform) tfp->close();
 #endif
 
-#ifdef VM_COVERAGE
+#if VM_COVERAGE == 1
   save_coverage(start_time);
 #endif
 
@@ -371,7 +376,7 @@ inline char* Emulator::waveform_filename(time_t t) {
 }
 
 
-#ifdef VM_COVERAGE
+#if VM_COVERAGE == 1
 inline char* Emulator::coverage_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);

@@ -365,6 +365,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   // when exception occurs, cancels all
   when (io.redirect.valid) { // TODO: need check for flushPipe
+    state := s_idle
     enqPtrExt := 0.U.asTypeOf(new RoqPtr)
     deqPtrExt := 0.U.asTypeOf(new RoqPtr)
   }

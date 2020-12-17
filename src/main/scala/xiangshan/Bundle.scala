@@ -90,7 +90,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
 
   def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
-  def lastHalfRVITaken = (takens & lastHalfRVIMask).orR
+  def lastHalfRVITaken = ParallelORR(takens & lastHalfRVIMask)
 
   def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
   // should not be used if not lastHalfRVITaken
@@ -102,18 +102,18 @@ class BranchPrediction extends XSBundle with HasIFUConst {
 
   def brNotTakens = ~realTakens & realBrMask
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
-                       (if (i == 0) false.B else brNotTakens(i-1,0).orR)))
+                       (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0)))))
   // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
-  def unmaskedJmpIdx = PriorityEncoder(takens)
-  def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(takens.orR))) ||
+  def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
+  def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(ParallelORR(takens)))) ||
   (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
   // could get PredictWidth-1 when only the first bank is valid
-  def jmpIdx = PriorityEncoder(realTakens)
+  def jmpIdx = ParallelPriorityEncoder(realTakens)
   // only used when taken
-  def target = targets(jmpIdx)
-  def taken = realTakens.orR
-  def takenOnBr = taken && realBrMask(jmpIdx)
-  def hasNotTakenBrs = Mux(taken, sawNotTakenBr(jmpIdx), brNotTakens.orR)
+  def target = ParallelPriorityMux(realTakens, targets)
+  def taken = ParallelORR(realTakens)
+  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools)
+  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
