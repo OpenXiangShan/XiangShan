@@ -330,7 +330,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   if (enable_waveform) tfp->close();
 #endif
 
-#ifdef VM_COVERAGE
+#if VM_COVERAGE == 1
   save_coverage();
 #endif
 
@@ -364,7 +364,7 @@ inline char* Emulator::waveform_filename(time_t t) {
 }
 
 
-#ifdef VM_COVERAGE
+#if VM_COVERAGE == 1
 inline void Emulator::save_coverage(void) {
   char *noop_home = getenv("NOOP_HOME");
   assert(noop_home != NULL);
