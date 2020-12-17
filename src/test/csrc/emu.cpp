@@ -79,7 +79,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
-  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
