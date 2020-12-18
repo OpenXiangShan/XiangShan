@@ -461,10 +461,13 @@ class IFU extends XSModule with HasIFUConst
 
   loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
-  (0 until PredictWidth).foreach(i => fetchPacketWire.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
-  when (if4_bp.taken) {
-    fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
-  }
+  (0 until PredictWidth).foreach(i => 
+    fetchPacketWire.pnpc(i) := Mux(if4_bp.taken && if4_bp.jmpIdx === i.U,
+                                    if4_bp.target,
+                                    Mux(if4_pendingPrevHalfInstr,
+                                      (if (i == 0) Cat(bankAligned(if4_pd.pc(1))(VAddrBits-1, bankBytes), 2.U(bankBytes.W))
+                                      else Cat(bankAligned(if4_pd.pc(1))(VAddrBits-1, bankBytes), (i << 1).U(bankBytes.W) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))),
+                                      Cat(bankAligned(if4_pd.pc(0))(VAddrBits-1, bankBytes), (i << 1).U(bankBytes.W) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U)))))
   fetchPacketWire.brInfo := bpu.io.branchInfo
   (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).hist := final_gh)
   (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
