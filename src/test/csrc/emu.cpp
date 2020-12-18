@@ -79,7 +79,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
-  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
@@ -275,6 +274,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       long get_img_size();
       ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
       ref_difftest_setregs(reg);
+      printf("The first instruction has commited. Difftest enabled. \n");
     }
 
     // difftest
