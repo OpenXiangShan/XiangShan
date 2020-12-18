@@ -21,6 +21,7 @@ import scala.math.max
 class FetchPacket extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
+  val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))

@@ -470,6 +470,7 @@ class IFU extends XSModule with HasIFUConst
   // io.fetchPacket.valid := if4_valid && !io.redirect.valid
   fetchPacketWire.instrs := if4_pd.instrs
   fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
+  fetchPacketWire.pdmask := if4_pd.mask
 
   loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
