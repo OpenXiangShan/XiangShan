@@ -60,10 +60,10 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   val tail_ptr = RegInit(IbufPtr(false.B, 0.U))
 
   val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
-  val emptyEntries = IBufSize.U - validEntries
+  // val emptyEntries = IBufSize.U - validEntries
 
   // enqValid := !ibuf_valid(tail_ptr.value + PredictWidth.U - 1.U)
-  val enqValid = emptyEntries >= PredictWidth.U
+  val enqValid = IBufSize.U - PredictWidth.U >= validEntries
   // deqValid := ibuf_valid(head_ptr.value)
   val deqValid = validEntries > 0.U
 
@@ -71,9 +71,6 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   io.in.ready := enqValid
 
   val enq_vec = Wire(Vec(PredictWidth, UInt(log2Up(IBufSize).W)))
-  for(i <- 0 unitl PredictWidth) {
-    enq_vec(i) := tail_ptr + i.U
-  }
   for(i <- 0 until PredictWidth) {
     if (i == 0) {
       enq_vec(i) := tail_ptr.value
@@ -97,7 +94,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
         inWire.ipf := io.in.bits.ipf
         inWire.acf := io.in.bits.acf
         inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
-        ibuf(enq_vec(PopCount(i, 0))) := inWire
+        ibuf(enq_vec(i)) := inWire
       }
     }
 
