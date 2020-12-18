@@ -159,16 +159,16 @@ class BranchUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)
-  val target = UInt(VAddrBits.W)
-  val brTarget = UInt(VAddrBits.W)
-  val taken = Bool()
   val fetchIdx = UInt(log2Up(FetchWidth*2).W)
-  val isMisPred = Bool()
-  val brTag = new BrqPtr
-
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val brInfo = new BranchInfo
+
+  // need pipeline update
+  val target = UInt(VAddrBits.W)
+  val taken = Bool()
+  val isMisPred = Bool()
+  val brTag = new BrqPtr
 }
 
 // Dequeue DecodeWidth insts from Ibuffer

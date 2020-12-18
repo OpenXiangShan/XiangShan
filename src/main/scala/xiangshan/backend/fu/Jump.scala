@@ -44,7 +44,6 @@ class Jump extends FunctionUnit with HasRedirectOut {
   brUpdate := uop.cf.brUpdate
   brUpdate.pc := uop.cf.pc
   brUpdate.target := target
-  brUpdate.brTarget := target // DontCare
   brUpdate.taken := true.B
 
   // Output

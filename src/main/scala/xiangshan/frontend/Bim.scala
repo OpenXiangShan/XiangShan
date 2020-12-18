@@ -126,7 +126,7 @@ class BIM extends BasePredictor with BimParams {
 
   if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
-    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x brTgt=%x\n", io.update.valid, u.pc, u.pnpc, u.target, u.brTarget)
+    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x", io.update.valid, u.pc, u.pnpc, u.target)
     XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)
     XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.brInfo.bimCtr)}\n")
     XSDebug("needToUpdate=%d updateBank=%x updateRow=%x newCtr=%b oldCtr=%b\n", needToUpdate, updateBank, updateRow, newCtr, oldCtr)
