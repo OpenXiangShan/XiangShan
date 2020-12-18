@@ -97,10 +97,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     *
     * Most store instructions writeback to regfile in the previous cycle.
     * However,
-    *   (1) For a mmio instruction with exceptions, we need to mark it as datavalid
+    *   (1) For an mmio instruction with exceptions, we need to mark it as datavalid
     * (in this way it will trigger an exception when it reaches ROB's head)
     * instead of pending to avoid sending them to lower level.
-    *   (2) For a mmio instruction without exceptions, we mark it as pending.
+    *   (2) For an mmio instruction without exceptions, we mark it as pending.
     * When the instruction reaches ROB's head, StoreQueue sends it to uncache channel.
     * Upon receiving the response, StoreQueue writes back the instruction 
     * through arbiter with store units. It will later commit as normal.

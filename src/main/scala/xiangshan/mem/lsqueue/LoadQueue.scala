@@ -36,14 +36,13 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
-    val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+    val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
     val exceptionAddr = new ExceptionAddrIO
-    // val refill = Flipped(Valid(new DCacheLineReq ))
   })
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
@@ -72,10 +71,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
-  val enqDeqMask1 = deqMask ^ enqMask
-  val enqDeqMask = Mux(sameFlag, enqDeqMask1, ~enqDeqMask1)
 
-  // Enqueue at dispatch
+  /**
+    * Enqueue at dispatch
+    *
+    * Currently, LoadQueue only allows enqueue when #emptyEntries > RenameWidth(EnqWidth)
+    */
   val validEntries = distanceBetween(enqPtrExt(0), deqPtrExt)
   val firedDispatch = io.enq.req.map(_.valid)
   io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
@@ -99,14 +100,26 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not valid when not ready\n")
   }
 
-  when(Cat(firedDispatch).orR) {
+  // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
+  when (Cat(firedDispatch).orR && !io.brqRedirect.valid) {
     val enqNumber = PopCount(firedDispatch)
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
     XSInfo("dispatched %d insts to lq\n", enqNumber)
   }
 
-  // writeback load
-  (0 until LoadPipelineWidth).map(i => {
+  /**
+    * Writeback load from load units
+    *
+    * Most load instructions writeback to regfile at the same time.
+    * However,
+    *   (1) For an mmio instruction with exceptions, it writes back to ROB immediately.
+    *   (2) For an mmio instruction without exceptions, it does not write back.
+    * The mmio instruction will be sent to lower level when it reaches ROB's head.
+    * After uncache response, it will write back through arbiter with loadUnit.
+    *   (3) For cache misses, it is marked miss and sent to dcache later.
+    * After cache refills, it will write back through arbiter with loadUnit.
+    */
+  for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb(i).wen := false.B
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
@@ -159,9 +172,16 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         listening(loadWbIndex) := dcacheMissed
         pending(loadWbIndex) := io.loadIn(i).bits.mmio && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
       }
-    })
+    }
 
-  // cache miss request
+  /**
+    * Cache miss request
+    *
+    * (1) writeback: miss
+    * (2) send to dcache: listing
+    * (3) dcache response: datavalid
+    * (4) writeback to ROB: writeback
+    */
   val inflightReqs = RegInit(VecInit(Seq.fill(cfg.nLoadMissEntries)(0.U.asTypeOf(new InflightBlockInfo))))
   val inflightReqFull = inflightReqs.map(req => req.valid).reduce(_&&_)
   val reqBlockIndex = PriorityEncoder(~VecInit(inflightReqs.map(req => req.valid)).asUInt)
@@ -303,7 +323,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     }
   })
 
-  // When load commited, mark it as !allocated, this entry will be recycled later
+  /**
+    * Load commits
+    *
+    * When load commited, mark it as !allocated and move deqPtrExt forward.
+    */
   (0 until CommitWidth).map(i => {
     when(loadCommit(i)) {
       allocated(mcommitIdx(i)) := false.B
@@ -317,15 +341,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
     val highBitsUint = Cat(highBits.reverse)
     PriorityEncoder(Mux(highBitsUint.orR(), highBitsUint, mask.asUInt))
-  }
-
-  def getFirstOneWithFlag(mask: Vec[Bool], startMask: UInt, startFlag: Bool) = {
-    val length = mask.length
-    val highBits = (0 until length).map(i => mask(i) & ~startMask(i))
-    val highBitsUint = Cat(highBits.reverse)
-    val changeDirection = !highBitsUint.orR()
-    val index = PriorityEncoder(Mux(!changeDirection, highBitsUint, mask.asUInt))
-    LqPtr(startFlag ^ changeDirection, index)
   }
 
   def getOldestInTwo(valid: Seq[Bool], uop: Seq[MicroOp]) = {
@@ -348,20 +363,20 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     })
   }
 
-  def rangeMask(start: LqPtr, end: LqPtr): UInt = {
-    val startMask = (1.U((LoadQueueSize + 1).W) << start.value).asUInt - 1.U
-    val endMask = (1.U((LoadQueueSize + 1).W) << end.value).asUInt - 1.U
-    val xorMask = startMask(LoadQueueSize - 1, 0) ^ endMask(LoadQueueSize - 1, 0)
-    Mux(start.flag === end.flag, xorMask, ~xorMask)
-  }
-
-  // ignore data forward
-  (0 until LoadPipelineWidth).foreach(i => {
-    io.forward(i).forwardMask := DontCare
-    io.forward(i).forwardData := DontCare
-  })
-
-  // store backward query and rollback
+  /**
+    * Memory violation detection
+    *
+    * When store writes back, it searches LoadQueue for younger load instructions
+    * with the same load physical address. They loaded wrong data and need re-execution.
+    *
+    * Cycle 0: Store Writeback
+    *   Generate match vector for store address with rangeMask(stPtr, enqPtr).
+    *   Besides, load instructions in LoadUnit_S1 and S2 are also checked.
+    * Cycle 1: Redirect Generation
+    *   There're three possible types of violations. Choose the oldest load.
+    *   Set io.redirect according to the detected violation.
+    */
+  io.load_s1 := DontCare
   def detectRollback(i: Int) = {
     val startIndex = io.storeIn(i).bits.uop.lqIdx.value
     val lqIdxMask = UIntToMask(startIndex, LoadQueueSize)
@@ -398,13 +413,13 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
     // check if rollback is needed for load in l1
     val l1ViolationVec = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
-      io.forward(j).valid && // L1 valid
-        isAfter(io.forward(j).uop.roqIdx, io.storeIn(i).bits.uop.roqIdx) &&
-        io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.forward(j).paddr(PAddrBits - 1, 3) &&
-        (io.storeIn(i).bits.mask & io.forward(j).mask).orR
+      io.load_s1(j).valid && // L1 valid
+        isAfter(io.load_s1(j).uop.roqIdx, io.storeIn(i).bits.uop.roqIdx) &&
+        io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === io.load_s1(j).paddr(PAddrBits - 1, 3) &&
+        (io.storeIn(i).bits.mask & io.load_s1(j).mask).orR
     })))
     val l1Violation = l1ViolationVec.asUInt().orR()
-    val l1ViolationUop = getOldestInTwo(l1ViolationVec, RegNext(VecInit(io.forward.map(_.uop))))
+    val l1ViolationUop = getOldestInTwo(l1ViolationVec, RegNext(VecInit(io.load_s1.map(_.uop))))
     XSDebug(l1Violation, p"${Binary(Cat(l1ViolationVec))}, $l1ViolationUop\n")
 
     val rollbackValidVec = Seq(lqViolation, wbViolation, l1Violation)
@@ -458,23 +473,27 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val rollbackSelected = ParallelOperation(rollback, rollbackSel)
   val lastCycleRedirect = RegNext(io.brqRedirect)
 
-  io.rollback := DontCare
   // Note that we use roqIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's roqIdx equals to this cycle's roqIdx, it still triggers the redirect.
-  io.rollback.valid := rollbackSelected.valid && (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx))
-
+  io.rollback.valid := rollbackSelected.valid &&
+    (!lastCycleRedirect.valid || !isAfter(rollbackSelected.bits.roqIdx, lastCycleRedirect.bits.roqIdx))
   io.rollback.bits.roqIdx := rollbackSelected.bits.roqIdx - 1.U
   io.rollback.bits.isReplay := true.B
   io.rollback.bits.isMisPred := false.B
   io.rollback.bits.isException := false.B
   io.rollback.bits.isFlushPipe := false.B
+  io.rollback.bits.pc := DontCare
   io.rollback.bits.target := rollbackSelected.bits.cf.pc
   io.rollback.bits.brTag := rollbackSelected.bits.brTag
 
-  // Memory mapped IO / other uncached operations
+  when(io.rollback.valid) {
+    XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx.asUInt)
+  }
 
-  // setup misc mem access req
-  // mask / paddr / data can be get from lq.data
+  /**
+    * Memory mapped IO / other uncached operations
+    *
+    */
   val commitType = io.commits.uop(0).ctrl.commitType
   io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
     commitType === CommitType.LOAD &&
@@ -486,11 +505,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   io.uncache.req.bits.data := dataModule.io.rdata(deqPtr).data
   io.uncache.req.bits.mask := dataModule.io.rdata(deqPtr).mask
 
-  io.uncache.req.bits.meta.id       := DontCare // TODO: // FIXME
+  io.uncache.req.bits.meta.id       := DontCare
   io.uncache.req.bits.meta.vaddr    := DontCare
   io.uncache.req.bits.meta.paddr    := dataModule.io.rdata(deqPtr).paddr
   io.uncache.req.bits.meta.uop      := uop(deqPtr)
-  io.uncache.req.bits.meta.mmio     := true.B // dataModule.io.rdata(deqPtr).mmio
+  io.uncache.req.bits.meta.mmio     := true.B
   io.uncache.req.bits.meta.tlb_miss := false.B
   io.uncache.req.bits.meta.mask     := dataModule.io.rdata(deqPtr).mask
   io.uncache.req.bits.meta.replay   := false.B
@@ -499,17 +518,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   when (io.uncache.req.fire()) {
     pending(deqPtr) := false.B
-  }
 
-  dataModule.io.uncache.wen := false.B
-  when(io.uncache.resp.fire()){
-    datavalid(deqPtr) := true.B
-    dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
-    dataModule.io.uncache.wen := true.B
-    // TODO: write back exception info
-  }
-
-  when(io.uncache.req.fire()){
     XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
       uop(deqPtr).cf.pc,
       io.uncache.req.bits.addr,
@@ -519,7 +528,12 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     )
   }
 
+  dataModule.io.uncache.wen := false.B
   when(io.uncache.resp.fire()){
+    datavalid(deqPtr) := true.B
+    dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
+    dataModule.io.uncache.wen := true.B
+
     XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data)
   }
 
@@ -531,22 +545,15 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val needCancel = Wire(Vec(LoadQueueSize, Bool()))
   for (i <- 0 until LoadQueueSize) {
     needCancel(i) := uop(i).roqIdx.needFlush(io.brqRedirect) && allocated(i) && !commited(i)
-    when(needCancel(i)) {
+    when (needCancel(i)) {
         allocated(i) := false.B
     }
   }
+  // we recover the pointers in the next cycle after redirect
   val needCancelReg = RegNext(needCancel)
-  when (io.brqRedirect.valid) {
-    enqPtrExt := enqPtrExt
-  }
   when (lastCycleRedirect.valid) {
     val cancelCount = PopCount(needCancelReg)
     enqPtrExt := VecInit(enqPtrExt.map(_ - cancelCount))
-  }
-
-  // assert(!io.rollback.valid)
-  when(io.rollback.valid) {
-    XSDebug("Mem rollback: pc %x roqidx %d\n", io.rollback.bits.pc, io.rollback.bits.roqIdx.asUInt)
   }
 
   // debug info
