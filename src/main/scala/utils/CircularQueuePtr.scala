@@ -45,6 +45,8 @@ trait HasCircularQueuePtrHelper {
     }
 
     final def === (that_ptr: T): Bool = ptr.asUInt()===that_ptr.asUInt()
+
+    final def =/= (that_ptr: T): Bool = ptr.asUInt()=/=that_ptr.asUInt()
   }
 
 

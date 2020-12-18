@@ -189,6 +189,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val updatedSbuffer = io.in.zipWithIndex.foldLeft[Seq[SbufferEntry]](initialSbuffer)(enqSbuffer)
   val updatedState = updatedSbuffer.map(_._1)
   val updatedSbufferLine = VecInit(updatedSbuffer.map(_._2))
+  when (!io.in(0).ready) {
+    io.in(1).ready := false.B
+  }
 
   for(i <- 0 until StoreBufferSize){
     buffer.write(i.U, updatedSbufferLine(i))
