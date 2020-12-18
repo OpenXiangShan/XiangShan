@@ -51,11 +51,9 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
-  val outOfOrderBrInfo = ValidIO(new BranchUpdateInfo)
+  val brInfo = ValidIO(new BranchUpdateInfo)
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
-  // in order dequeue to train bpd
-  val inOrderBrInfo = ValidIO(new BranchUpdateInfo)
 }
 
 class Brq extends XSModule with HasCircularQueuePtrHelper {
@@ -123,9 +121,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
-  io.inOrderBrInfo.valid := commitValid
-  io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
-  XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
+  XSDebug(io.brInfo.valid, "inOrderValid: pc=%x\n", io.brInfo.bits.pc)
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
@@ -157,8 +153,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
-  io.outOfOrderBrInfo.valid := commitValid
-  io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
+  val brTagRead = RegNext(Mux(io.memRedirect.bits.isReplay, io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
+  io.brInfo.valid := RegNext(io.memRedirect.valid)
+  io.brInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
 
   when (io.redirect.valid) {
     commitEntry.npc := io.redirect.bits.target

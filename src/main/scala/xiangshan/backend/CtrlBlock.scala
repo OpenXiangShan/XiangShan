@@ -78,10 +78,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val redirectValid = roq.io.redirect.valid || brq.io.redirect.valid || io.fromLsBlock.replay.valid
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect.bits, redirectArb)
 
-  io.frontend.redirect.valid := redirectValid
-  io.frontend.redirect.bits := Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target)
-  io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
-  io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
+  io.frontend.redirect.valid := RegNext(redirectValid)
+  io.frontend.redirect.bits := RegNext(Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target))
+  io.frontend.outOfOrderBrInfo <> brq.io.brInfo
+  io.frontend.inOrderBrInfo <> brq.io.brInfo
 
   decode.io.in <> io.frontend.cfVec
   decode.io.toBrq <> brq.io.enqReqs
@@ -95,8 +95,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
   // pipeline between decode and dispatch
+  val lastCycleRedirect = RegNext(redirectValid)
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirectValid)
+    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirectValid || lastCycleRedirect)
   }
 
   rename.io.redirect.valid <> redirectValid
