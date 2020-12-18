@@ -247,6 +247,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
+#if VM_COVERAGE == 1
+  // we dump coverage into files at the end
+  // since we are not sure when an emu will stop
+  // we distinguish multiple dat files by emu start time
+  time_t start_time = time(NULL);
+#endif
+
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
       trapCode = STATE_LIMIT_EXCEEDED;
@@ -334,6 +341,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
 #endif
+
+#if VM_COVERAGE == 1
+  save_coverage(start_time);
+#endif
+
   display_trapinfo();
   return cycles;
 }
@@ -362,6 +374,22 @@ inline char* Emulator::waveform_filename(time_t t) {
   strcpy(p, ".vcd");
   return buf;
 }
+
+
+#if VM_COVERAGE == 1
+inline char* Emulator::coverage_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".coverage.dat");
+  return buf;
+}
+
+inline void Emulator::save_coverage(time_t t) {
+  char *p = coverage_filename(t);
+  VerilatedCov::write(p);
+}
+#endif
+
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
