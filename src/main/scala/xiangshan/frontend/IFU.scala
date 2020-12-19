@@ -355,9 +355,9 @@ class IFU extends XSModule with HasIFUConst
 
 
 
-
-  when (io.cfiUpdateInfo.valid && io.cfiUpdateInfo.bits.isMisPred) {
-    val b = io.cfiUpdateInfo.bits
+  val cfiUpdate = io.cfiUpdateInfo
+  when (cfiUpdate.valid && (cfiUpdate.bits.isMisPred || cfiUpdate.bits.isReplay)) {
+    val b = cfiUpdate.bits
     val oldGh = b.bpuMeta.hist
     val sawNTBr = b.bpuMeta.sawNotTakenBranch
     val isBr = b.pd.isBr
