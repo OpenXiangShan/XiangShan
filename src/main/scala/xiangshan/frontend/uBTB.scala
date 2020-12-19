@@ -43,12 +43,12 @@ class MicroBTB extends BasePredictor
     class MicroBTBIO extends DefaultBasePredictorIO
     {
         val out = Output(new MicroBTBResp)   //
-        val uBTBBranchInfo = Output(new MicroBTBBranchInfo)
+        val uBTBMeta = Output(new MicroBTBBranchInfo)
     }
 
     override val debug = true
     override val io = IO(new MicroBTBIO)
-    io.uBTBBranchInfo <> out_ubtb_br_info
+    io.uBTBMeta <> out_ubtb_br_info
 
     def getTag(pc: UInt) = (pc >> untaggedBits)(tagSize-1, 0)
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)

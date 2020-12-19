@@ -461,7 +461,7 @@ class IFU extends XSModule with HasIFUConst
   when (if4_bp.taken) {
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
-  fetchPacketWire.bpuMeta := bpu.io.branchInfo
+  fetchPacketWire.bpuMeta := bpu.io.bpuMeta
   (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).hist := final_gh)
   (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
   fetchPacketWire.pd := if4_pd.pd

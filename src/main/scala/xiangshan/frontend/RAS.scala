@@ -30,7 +30,7 @@ class RAS extends BasePredictor
         val isLastHalfRVI = Input(Bool())
         val recover =  Flipped(ValidIO(new CfiUpdateInfo))
         val out = ValidIO(new RASResp)
-        val branchInfo = Output(new RASBranchInfo)
+        val meta = Output(new RASBranchInfo)
     }
 
     class RASEntry() extends XSBundle {
@@ -197,9 +197,9 @@ class RAS extends BasePredictor
     commit_ras.copy_in_sp  := DontCare
 
     //no need to pass the ras branchInfo
-    io.branchInfo.rasSp := DontCare
-    io.branchInfo.rasTopCtr := DontCare
-    io.branchInfo.rasToqAddr := DontCare
+    io.meta.rasSp := DontCare
+    io.meta.rasTopCtr := DontCare
+    io.meta.rasToqAddr := DontCare
 
     if (BPUDebug && debug) {
         val spec_debug = spec.debugIO

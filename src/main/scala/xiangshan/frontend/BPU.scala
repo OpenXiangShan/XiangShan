@@ -315,9 +315,9 @@ class BPUStage3 extends BPUStage {
     ras.io.recover := s3IO.recover
 
     for(i <- 0 until PredictWidth){
-      io.out.brInfo(i).rasSp :=  ras.io.branchInfo.rasSp
-      io.out.brInfo(i).rasTopCtr := ras.io.branchInfo.rasTopCtr
-      io.out.brInfo(i).rasToqAddr := ras.io.branchInfo.rasToqAddr
+      io.out.brInfo(i).rasSp :=  ras.io.meta.rasSp
+      io.out.brInfo(i).rasTopCtr := ras.io.meta.rasTopCtr
+      io.out.brInfo(i).rasToqAddr := ras.io.meta.rasToqAddr
     }
     takens := VecInit((0 until PredictWidth).map(i => {
       ((brTakens(i) || jalrs(i)) && btbHits(i)) ||
@@ -432,7 +432,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     val realMask = Input(UInt(PredictWidth.W))
     val prevHalf = Input(new PrevHalfInstr)
     // to if4, some bpu info used for updating
-    val branchInfo = Output(Vec(PredictWidth, new BpuMeta))
+    val bpuMeta = Output(Vec(PredictWidth, new BpuMeta))
   })
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
@@ -469,12 +469,12 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   io.out(1) <> s2.io.pred
   io.out(2) <> s3.io.pred
 
-  io.branchInfo := s3.io.out.brInfo
+  io.bpuMeta := s3.io.out.brInfo
   
   if (BPUDebug) {
-    XSDebug(io.inFire(3), "branchInfo sent!\n")
+    XSDebug(io.inFire(3), "bpuMeta sent!\n")
     for (i <- 0 until PredictWidth) {
-      val b = io.branchInfo(i)
+      val b = io.bpuMeta(i)
       XSDebug(io.inFire(3), "brInfo(%d): ubtbWrWay:%d, ubtbHit:%d, btbWrWay:%d, btbHitJal:%d, bimCtr:%d, fetchIdx:%d\n",
         i.U, b.ubtbWriteWay, b.ubtbHits, b.btbWriteWay, b.btbHitJal, b.bimCtr, b.fetchIdx)
       val t = b.tageMeta
@@ -492,7 +492,7 @@ class FakeBPU extends BaseBPU {
     i <> DontCare
     i.takens := 0.U
   })
-  io.branchInfo <> DontCare
+  io.bpuMeta <> DontCare
 }
 @chiselName
 class BPU extends BaseBPU {
@@ -518,8 +518,8 @@ class BPU extends BaseBPU {
   // Wrap ubtb response into resp_in and brInfo_in
   s1_resp_in.ubtb <> ubtb.io.out
   for (i <- 0 until PredictWidth) {
-    s1_brInfo_in(i).ubtbWriteWay := ubtb.io.uBTBBranchInfo.writeWay(i)
-    s1_brInfo_in(i).ubtbHits := ubtb.io.uBTBBranchInfo.hits(i)
+    s1_brInfo_in(i).ubtbWriteWay := ubtb.io.uBTBMeta.writeWay(i)
+    s1_brInfo_in(i).ubtbHits := ubtb.io.uBTBMeta.hits(i)
   }
 
   btb.io.flush := io.flush(0) // TODO: fix this
