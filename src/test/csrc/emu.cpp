@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include "ram.h"
 #include "zlib.h"
+#include "compress.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -128,8 +129,10 @@ Emulator::~Emulator() {
   ram_finish();
 
 #ifdef VM_SAVABLE
-  snapshot_slot[0].save();
-  snapshot_slot[1].save();
+  if (trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
+    snapshot_slot[0].save();
+    snapshot_slot[1].save();
+  }
   printf("Please remove unused snapshots manually\n");
 #endif
 }
@@ -317,8 +320,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 #ifdef VM_SAVABLE
     static int snapshot_count = 0;
-    if (trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
-      // save snapshot every 10s
+    if (trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 6000 * SNAPSHOT_INTERVAL) {
+      // save snapshot every 60s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
       lasttime_snapshot = t;
@@ -443,7 +446,7 @@ void Emulator::snapshot_save(const char *filename) {
   char *buf = new char[size];
   ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
   stream.unbuf_write(buf, size);
-  delete buf;
+  delete [] buf;
 
   struct SyncState sync_mastate;
   ref_difftest_get_mastatus(&sync_mastate);
@@ -484,7 +487,7 @@ void Emulator::snapshot_load(const char *filename) {
   char *buf = new char[size];
   stream.read(buf, size);
   ref_difftest_memcpy_from_dut(0x80000000, buf, size);
-  delete buf;
+  delete [] buf;
 
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));

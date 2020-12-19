@@ -15,20 +15,23 @@ void VerilatedSaveMem::save() {
   if (size == 0) return;
   trailer();
   flush();
-  if(size <= (512 * 1024 * 1024UL)){
-    FILE *fp = fopen(m_filename.c_str(), "w");
+  auto saved_filename = m_filename;
+  if (size <= (512 * 1024 * 1024UL)) {
+    FILE *fp = fopen(saved_filename.c_str(), "w");
     assert(fp != NULL);
     fwrite(buf, size, 1, fp);
     fclose(fp);
+
   } else {
-    timeval s, e;
-    gettimeofday(&s, NULL);
-    snapshot_compressToFile(buf, (m_filename + ".gz").c_str(), size);
-    gettimeofday(&e, NULL);
-    printf("Compress cost time (msec.usec): %lf\n", calcTime(s, e));
+    saved_filename = saved_filename + ".gz";
+    // timeval s, e;
+    // gettimeofday(&s, NULL);
+    snapshot_compressToFile(buf, saved_filename.c_str(), size);
+    // gettimeofday(&e, NULL);
+    // printf("Compress cost time (msec.usec): %lf\n", calcTime(s, e));
   }
   size = 0;
-  printf("save snapshot to %s...\n", m_filename.c_str());
+  printf("save snapshot to %s...\n", saved_filename.c_str());
 }
 
 void VerilatedRestoreMem::fill() {
@@ -79,7 +82,7 @@ void VerilatedRestoreMem::open(const char* filename) {
       gettimeofday(&s, NULL);
       size = readFromGz(buf, filename, buf_size, LOAD_SNAPSHOT);
       gettimeofday(&e, NULL);
-      printf("Uncompress cost time (msec.usec): %lf\n", calcTime(s, e));
+      // printf("Uncompress cost time (msec.usec): %lf\n", calcTime(s, e));
       assert(size > 0);
     } else {
       FILE *fp = fopen(filename, "r");

@@ -5,33 +5,40 @@
 #include "VXSSimSoC.h"
 #include <verilated_save.h>
 #include <sys/mman.h>
+#include "compress.h"
+#include "ram.h"
 
-#define SNAPSHOT_SIZE (3 * 16 * 1024 * 1024 * 1024UL)
+#define SNAPSHOT_SIZE (3UL * EMU_RAM_SIZE)
 
 class VerilatedSaveMem : public VerilatedSerialize {
   const static long buf_size = SNAPSHOT_SIZE;
-  uint8_t *buf;
+  uint8_t *buf = NULL;
   long size;
 
 public:
   VerilatedSaveMem() {
+    buf = NULL;
+    size = 0;
+  }
+  ~VerilatedSaveMem() { }
+
+  void init(const char *filename) {
+    if (buf != NULL) {
+      munmap(buf, SNAPSHOT_SIZE);
+      buf = NULL;
+    }
     buf = (uint8_t*)mmap(NULL, buf_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     if (buf == (uint8_t *)MAP_FAILED) {
       printf("Cound not mmap 0x%lx bytes\n", SNAPSHOT_SIZE);
       assert(0);
     }
     size = 0;
-  }
-  ~VerilatedSaveMem() { }
-
-  void init(const char *filename) {
-    size = 0;
     m_filename = filename;
     header();
   }
 
   void unbuf_write(const void* __restrict datap, size_t size) VL_MT_UNSAFE_ONE {
-    memcpy(buf + this->size, datap, size);
+    nonzero_large_memcpy(buf + this->size, datap, size);
     this->size += size;
   }
 
