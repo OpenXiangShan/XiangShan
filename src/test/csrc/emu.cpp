@@ -15,15 +15,16 @@ void set_nemu_this_pc(uint64_t pc);
 static inline void print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
   printf("\n");
-  printf("  -s, --seed=NUM        use this seed\n");
-  printf("  -C, --max-cycles=NUM  execute at most NUM cycles\n");
-  printf("  -I, --max-instr=NUM   execute at most NUM instructions\n");
-  printf("  -i, --image=FILE      run with this image file\n");
-  printf("  -b, --log-begin=NUM   display log from NUM th cycle\n");
-  printf("  -e, --log-end=NUM     stop display log at NUM th cycle\n");
+  printf("  -s, --seed=NUM             use this seed\n");
+  printf("  -C, --max-cycles=NUM       execute at most NUM cycles\n");
+  printf("  -I, --max-instr=NUM        execute at most NUM instructions\n");
+  printf("  -i, --image=FILE           run with this image file\n");
+  printf("  -b, --log-begin=NUM        display log from NUM th cycle\n");
+  printf("  -e, --log-end=NUM          stop display log at NUM th cycle\n");
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
-  printf("      --dump-wave       dump waveform when log is enabled\n");
-  printf("  -h, --help            print program help info\n");
+  printf("      --no-snapshot          disable saving snapshots\n");
+  printf("      --dump-wave            dump waveform when log is enabled\n");
+  printf("  -h, --help                 print program help info\n");
   printf("\n");
 }
 
@@ -33,6 +34,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
   const struct option long_options[] = {
     { "load-snapshot",  1, NULL,  0  },
     { "dump-wave",      0, NULL,  0  },
+    { "no-snapshot",    0, NULL,  0  },
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
     { "max-instr",      1, NULL, 'I' },
@@ -51,6 +53,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
         switch (long_index) {
           case 0: args.snapshot_path = optarg; continue;
           case 1: args.enable_waveform = true; continue;
+          case 2: args.enable_snapshot = false; continue;
         }
         // fall through
       default:
@@ -129,7 +132,7 @@ Emulator::~Emulator() {
   ram_finish();
 
 #ifdef VM_SAVABLE
-  if (trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
+  if (args.enable_snapshot && trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
     printf("Saving snapshots to file system. Please wait.\n");
     snapshot_slot[0].save();
     snapshot_slot[1].save();
@@ -321,7 +324,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 #ifdef VM_SAVABLE
     static int snapshot_count = 0;
-    if (trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 6000 * SNAPSHOT_INTERVAL) {
+    if (args.enable_snapshot && trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 6000 * SNAPSHOT_INTERVAL) {
       // save snapshot every 60s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
