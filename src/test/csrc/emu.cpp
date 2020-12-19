@@ -130,6 +130,7 @@ Emulator::~Emulator() {
 
 #ifdef VM_SAVABLE
   if (trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
+    printf("Saving snapshots to file system. Please wait.\n");
     snapshot_slot[0].save();
     snapshot_slot[1].save();
     printf("Please remove unused snapshots manually\n");

@@ -40,7 +40,7 @@ long snapshot_compressToFile(uint8_t *ptr, const char *filename, long buf_size) 
     // assert(bytes_write % sizeof(long) == 0);
 
   }
-  printf("Write %lu bytes from gz stream in total\n", curr_size);
+  // printf("Write %lu bytes from gz stream in total\n", curr_size);
 
   delete [] temp_page;
 

@@ -21,8 +21,8 @@ void VerilatedSaveMem::save() {
     assert(fp != NULL);
     fwrite(buf, size, 1, fp);
     fclose(fp);
-
-  } else {
+  }
+  else {
     saved_filename = saved_filename + ".gz";
     // timeval s, e;
     // gettimeofday(&s, NULL);
