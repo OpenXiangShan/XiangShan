@@ -166,9 +166,11 @@ class BranchUpdateInfo extends XSBundle {
 
   // need pipeline update
   val target = UInt(VAddrBits.W)
+  val brTarget = UInt(VAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
   val brTag = new BrqPtr
+  val isReplay = Bool()
 }
 
 // Dequeue DecodeWidth insts from Ibuffer

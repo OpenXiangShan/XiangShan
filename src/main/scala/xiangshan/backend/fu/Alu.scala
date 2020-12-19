@@ -69,6 +69,7 @@ class Alu extends FunctionUnit with HasRedirectOut {
   // override brUpdate
   brUpdate.pc := uop.cf.pc
   brUpdate.target := Mux(!taken && isBranch, snpc, target)
+  brUpdate.brTarget := target
   brUpdate.taken := isBranch && taken
   brUpdate.brTag := uop.brTag
 

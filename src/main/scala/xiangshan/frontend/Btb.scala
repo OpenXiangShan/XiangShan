@@ -205,7 +205,7 @@ class BTB extends BasePredictor with BTBParams{
 
   val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
   val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
-  val new_target = u.target
+  val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
   val new_offset = (new_target.asSInt - u.pc.asSInt)
   val new_extended = (new_offset > max_offset || new_offset < min_offset)
 
