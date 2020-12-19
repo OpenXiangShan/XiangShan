@@ -5,7 +5,7 @@ import chisel3.util._
 import chisel3.ExcitingUtils._
 import xiangshan._
 import utils.{XSDebug, XSError, XSInfo}
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
 
 // read rob and enqueue
@@ -16,14 +16,7 @@ class Dispatch1 extends XSModule {
     val renameBypass = Input(new RenameBypassInfo)
     val recv = Output(Vec(RenameWidth, Bool()))
     // enq Roq
-    val enqRoq = new Bundle {
-      val canAccept = Input(Bool())
-      val isEmpty = Input(Bool())
-      // if set, Roq needs extra walk
-      val extraWalk = Vec(RenameWidth, Output(Bool()))
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new RoqPtr))
-    }
+    val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
     val enqLsq = new Bundle() {
       val canAccept = Input(Bool())
@@ -132,33 +125,24 @@ class Dispatch1 extends XSModule {
   // this instruction can actually dequeue: 3 conditions
   // (1) resources are ready
   // (2) previous instructions are ready
-  val thisCanActualOut = (0 until RenameWidth).map(i => allResourceReady && !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
 
   // input for ROQ and LSQ
-  // note that LSQ needs roqIdx
+  // (1) LSQ needs roqIdx; (2) DPQ needs roqIdx and lsIdx
+  val updateUopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
   for (i <- 0 until RenameWidth) {
-    io.enqRoq.extraWalk(i) := io.fromRename(i).valid && !thisCanActualOut(i)
-    io.enqRoq.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i)
+    io.enqRoq.needAlloc(i) := io.fromRename(i).valid
+    io.enqRoq.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.enqLsq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqRoq.req(i).bits := updatedUop(i)
+    XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
 
     val shouldEnqLsq = isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou
-    io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && thisCanActualOut(i)
+    io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqLsq.req(i).bits := updatedUop(i)
     io.enqLsq.req(i).bits.roqIdx := io.enqRoq.resp(i)
-
     XSDebug(io.enqLsq.req(i).valid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives lq ${io.enqLsq.resp(i).lqIdx} sq ${io.enqLsq.resp(i).sqIdx}\n")
 
-    XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
-  }
-
-
-  /**
-    * Part 4:
-    *   append ROQ and LSQ indexed to uop, and send them to dispatch queue
-    */
-  val updateUopWithIndex = Wire(Vec(RenameWidth, new MicroOp))
-  for (i <- 0 until RenameWidth) {
     updateUopWithIndex(i)        := updatedUop(i)
     updateUopWithIndex(i).roqIdx := io.enqRoq.resp(i)
     updateUopWithIndex(i).lqIdx  := io.enqLsq.resp(i).lqIdx
@@ -168,18 +152,16 @@ class Dispatch1 extends XSModule {
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
     // We use notBlockedByPrevious here.
     io.toIntDq.req(i).bits  := updateUopWithIndex(i)
-    io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && allResourceReady &&
-                           !thisIsBlocked(i) && notBlockedByPrevious(i)
+    io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && thisCanActualOut(i) &&
+                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
-    // NOTE: floating point instructions are not noSpecExec currently
-    // remove commit /**/ when fp instructions are possible to be noSpecExec
     io.toFpDq.req(i).bits   := updateUopWithIndex(i)
-    io.toFpDq.req(i).valid  := io.fromRename(i).valid && isFp(i) && allResourceReady &&
-                           /*!thisIsBlocked(i) && */notBlockedByPrevious(i)
+    io.toFpDq.req(i).valid  := io.fromRename(i).valid && isFp(i) && thisCanActualOut(i) &&
+                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toLsDq.canAccept
 
     io.toLsDq.req(i).bits   := updateUopWithIndex(i)
-    io.toLsDq.req(i).valid  := io.fromRename(i).valid && isLs(i) && allResourceReady &&
-                           !thisIsBlocked(i) && notBlockedByPrevious(i)
+    io.toLsDq.req(i).valid  := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) &&
+                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept
 
     XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")
     XSDebug(io.toFpDq.req(i).valid , p"pc 0x${Hexadecimal(io.toFpDq.req(i).bits.cf.pc )} fp  index $i\n")
@@ -187,12 +169,12 @@ class Dispatch1 extends XSModule {
   }
 
   /**
-    * Part 3: send response to rename when dispatch queue accepts the uop
+    * Part 4: send response to rename when dispatch queue accepts the uop
     */
-  val readyVector = (0 until RenameWidth).map(i => !io.fromRename(i).valid || io.recv(i))
+  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && (isBlockBackward(i) || isNoSpecExec(i)))).orR
   for (i <- 0 until RenameWidth) {
-    io.recv(i) := thisCanActualOut(i)
-    io.fromRename(i).ready := Cat(readyVector).andR()
+    io.recv(i) := thisCanActualOut(i) && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.fromRename(i).ready := !hasSpecialInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
     XSInfo(io.recv(i) && io.fromRename(i).valid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +

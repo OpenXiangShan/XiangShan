@@ -6,7 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
 
 case class DispatchParameters
@@ -29,13 +29,7 @@ class Dispatch extends XSModule {
     // to busytable: set pdest to busy (not ready) when they are dispatched
     val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // enq Roq
-    val enqRoq = new Bundle {
-      val canAccept = Input(Bool())
-      val isEmpty = Input(Bool())
-      val extraWalk = Vec(RenameWidth, Output(Bool()))
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new RoqPtr))
-    }
+    val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
     val enqLsq = new Bundle() {
       val canAccept = Input(Bool())

@@ -38,17 +38,20 @@ class RoqCSRIO extends XSBundle {
   val dirty_fs = Output(Bool())
 }
 
+class RoqEnqIO extends XSBundle {
+  val canAccept = Output(Bool())
+  val isEmpty = Output(Bool())
+  // valid vector, for roqIdx gen and walk
+  val needAlloc = Vec(RenameWidth, Input(Bool()))
+  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(RenameWidth, Output(new RoqPtr))
+}
+
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val brqRedirect = Input(Valid(new Redirect))
     val memRedirect = Input(Valid(new Redirect))
-    val enq = new Bundle {
-      val canAccept = Output(Bool())
-      val isEmpty = Output(Bool())
-      val extraWalk = Vec(RenameWidth, Input(Bool()))
-      val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-      val resp = Vec(RenameWidth, Output(new RoqPtr))
-    }
+    val enq = new RoqEnqIO
     val redirect = Output(Valid(new Redirect))
     val exception = Output(new MicroOp)
     // exu + brq
@@ -108,14 +111,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.roqDeqPtr := deqPtrExt
 
   // common signal
-  val enqPtrValPlus = Wire(Vec(RenameWidth, UInt(log2Up(RoqSize).W)))
-  val enqPtrFlagPlus = Wire(Vec(RenameWidth, Bool()))
-  for (i <- 0 until RenameWidth) {
-    val offset = PopCount(io.enq.req.map(_.valid).take(i))
-    val roqIdxExt = enqPtrExt + offset
-    enqPtrValPlus(i) := roqIdxExt.value
-    enqPtrFlagPlus(i) := roqIdxExt.flag
-  }
+  val enqPtrVec = WireInit(VecInit((0 until RenameWidth).map(i => enqPtrExt + PopCount(io.enq.needAlloc.take(i)))))
 
   val deqPtrExtPlus = Wire(Vec(RenameWidth, UInt(log2Up(RoqSize).W)))
   for(i <- 0 until CommitWidth){
@@ -138,14 +134,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val walkNoSpecExec = io.commits.isWalk && Cat((0 until CommitWidth).map(i => io.commits.valid(i) && io.commits.uop(i).ctrl.noSpecExec)).orR
   XSError(state =/= s_extrawalk && walkNoSpecExec, "noSpecExec should not walk\n")
 
-  val validDispatch = io.enq.req.map(_.valid)
   for (i <- 0 until RenameWidth) {
-    val offset = PopCount(validDispatch.take(i))
-    val roqIdxExt = enqPtrExt + offset
-    val roqIdx = roqIdxExt.value
-
-    when(io.enq.req(i).valid) {
-      microOp(roqIdx) := io.enq.req(i).bits
+    when(io.enq.req(i).valid && io.enq.canAccept) {
+      microOp(enqPtrVec(i).value) := io.enq.req(i).bits
       when(io.enq.req(i).bits.ctrl.blockBackward) {
         hasBlockBackward := true.B
       }
@@ -153,19 +144,18 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
         hasNoSpecExec := true.B
       }
     }
-    io.enq.resp(i) := roqIdxExt
+    io.enq.resp(i) := enqPtrVec(i)
   }
 
   val validEntries = distanceBetween(enqPtrExt, deqPtrExt)
-  val firedDispatch = Cat(io.enq.req.map(_.valid))
+  val firedDispatch = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
   io.enq.canAccept := (validEntries <= (RoqSize - RenameWidth).U) && !hasBlockBackward
   io.enq.isEmpty   := isEmpty
-  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(firedDispatch)}\n")
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
 
-  val dispatchCnt = PopCount(firedDispatch)
-  enqPtrExt := enqPtrExt + dispatchCnt
-  when (firedDispatch.orR) {
-    XSInfo("dispatched %d insts\n", dispatchCnt)
+  enqPtrExt := enqPtrExt + firedDispatch
+  when (firedDispatch =/= 0.U) {
+    XSInfo("dispatched %d insts\n", firedDispatch)
   }
 
   // Writeback
@@ -224,7 +214,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   // extra space is used weh roq has no enough space, but mispredict recovery needs such info to walk regmap
   val needExtraSpaceForMPR = WireInit(VecInit(
-    List.tabulate(RenameWidth)(i => io.brqRedirect.valid && io.enq.extraWalk(i))
+    List.tabulate(RenameWidth)(i => io.brqRedirect.valid && io.enq.needAlloc(i))
   ))
   val extraSpaceForMPR = Reg(Vec(RenameWidth, new MicroOp))
   val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
@@ -345,12 +335,12 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // when redirect, walk back roq entries
   when(io.brqRedirect.valid){ // TODO: need check if consider exception redirect?
     state := s_walk
-    val nextEnqPtr = (enqPtrExt - 1.U) + dispatchCnt
+    val walkPtrStart = enqPtrExt - 1.U
     walkPtrExt := Mux(state === s_walk,
       walkPtrExt - Mux(walkFinished, walkCounter, CommitWidth.U),
-      Mux(state === s_extrawalk, walkPtrExt, nextEnqPtr))
+      Mux(state === s_extrawalk, walkPtrExt, walkPtrStart))
     // walkTgtExt := io.brqRedirect.bits.roqIdx
-    val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtrExt, nextEnqPtr)
+    val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtrExt, walkPtrStart)
     walkCounter := distanceBetween(currentWalkPtr, io.brqRedirect.bits.roqIdx) - Mux(state === s_walk, commitCnt, 0.U)
     enqPtrExt := io.brqRedirect.bits.roqIdx + 1.U
   }
@@ -375,8 +365,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // write
   // enqueue logic writes 6 valid
   for (i <- 0 until RenameWidth) {
-    when(io.enq.req(i).fire()){
-      valid(enqPtrValPlus(i)) := true.B
+    when(io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid){
+      valid(enqPtrVec(i).value) := true.B
     }
   }
   // dequeue/walk logic writes 6 valid, dequeue and walk will not happen at the same time
@@ -412,8 +402,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // write
   // enqueue logic set 6 writebacked to false
   for (i <- 0 until RenameWidth) {
-    when(io.enq.req(i).fire()){
-      writebacked(enqPtrValPlus(i)) := false.B
+    when(io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid){
+      writebacked(enqPtrVec(i).value) := false.B
     }
   }
   // writeback logic set numWbPorts writebacked to true
@@ -443,8 +433,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // write: update when enqueue
   // enqueue logic set 6 flagBkup at most
   for (i <- 0 until RenameWidth) {
-    when(io.enq.req(i).fire()){
-      flagBkup(enqPtrValPlus(i)) := enqPtrFlagPlus(i)
+    when(io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid){
+      flagBkup(enqPtrVec(i).value) := enqPtrVec(i).flag
     }
   }
   // read: used in rollback logic
