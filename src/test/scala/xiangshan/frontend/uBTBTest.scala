@@ -17,14 +17,14 @@ with HasPartialDecoupledDriver {
     test(new MicroBTB) { c =>
         def genUpdateReq(pc: Long,target: Long,taken: Boolean,fetchIdx: Int,isMiss: Boolean,write_way: Int,hit: Boolean) = {
           c.io.update.valid.poke(true.B)
-          c.io.update.bits.ui.pc.poke(pc.U)
-          c.io.update.bits.ui.target.poke(target.U)
-          c.io.update.bits.ui.taken.poke(taken.B)
-          c.io.update.bits.ui.fetchIdx.poke(fetchIdx.U)
-          c.io.update.bits.ui.isMisPred.poke(isMiss.B)
-          c.io.update.bits.ui.bpuMeta.ubtbWriteWay.poke(write_way.U)
-          c.io.update.bits.ui.bpuMeta.ubtbHits.poke(hit.B)
-          c.io.update.bits.ui.pd.brType.poke(BrType.branch)
+          c.io.update.bits.pc.poke(pc.U)
+          c.io.update.bits.target.poke(target.U)
+          c.io.update.bits.taken.poke(taken.B)
+          c.io.update.bits.fetchIdx.poke(fetchIdx.U)
+          c.io.update.bits.isMisPred.poke(isMiss.B)
+          c.io.update.bits.bpuMeta.ubtbWriteWay.poke(write_way.U)
+          c.io.update.bits.bpuMeta.ubtbHits.poke(hit.B)
+          c.io.update.bits.pd.brType.poke(BrType.branch)
         }
 
         def genReadReq(fetchpc: Long){

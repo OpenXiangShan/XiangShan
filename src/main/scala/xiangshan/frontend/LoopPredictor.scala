@@ -309,13 +309,13 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.req.idx := Mux(isInNextRow(i), baseRow + 1.U, baseRow)
     ltbs(i).io.req.tag := realTags(i)
     // ltbs(i).io.outMask := outMask(i)
-    ltbs(i).io.update.valid := i.U === ltbAddr.getBank(io.update.bits.ui.pc) && io.update.valid && io.update.bits.ui.pd.isBr
-    ltbs(i).io.update.bits.misPred := io.update.bits.ui.isMisPred
-    ltbs(i).io.update.bits.pc := io.update.bits.ui.pc
-    ltbs(i).io.update.bits.meta := io.update.bits.ui.bpuMeta.specCnt
-    ltbs(i).io.update.bits.taken := io.update.bits.ui.taken
-    ltbs(i).io.update.bits.brTag := io.update.bits.ui.brTag
-    ltbs(i).io.repair := i.U =/= ltbAddr.getBank(io.update.bits.ui.pc) && io.update.valid && io.update.bits.ui.isMisPred
+    ltbs(i).io.update.valid := i.U === ltbAddr.getBank(io.update.bits.pc) && io.update.valid && io.update.bits.pd.isBr
+    ltbs(i).io.update.bits.misPred := io.update.bits.isMisPred
+    ltbs(i).io.update.bits.pc := io.update.bits.pc
+    ltbs(i).io.update.bits.meta := io.update.bits.bpuMeta.specCnt
+    ltbs(i).io.update.bits.taken := io.update.bits.taken
+    ltbs(i).io.update.bits.brTag := io.update.bits.brTag
+    ltbs(i).io.repair := i.U =/= ltbAddr.getBank(io.update.bits.pc) && io.update.valid && io.update.bits.isMisPred
   }
 
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))

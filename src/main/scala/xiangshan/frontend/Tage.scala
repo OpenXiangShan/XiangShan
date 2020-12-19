@@ -448,9 +448,9 @@ class Tage extends BaseTage {
   val debug_hist_s2 = RegEnable(io.hist, enable=io.pc.valid)
   val debug_hist_s3 = RegEnable(debug_hist_s2, enable=io.s3Fire)
 
-  val u = io.update.bits.ui
+  val u = io.update.bits
   val updateValid = io.update.valid
-  val updateHist = io.update.bits.hist
+  val updateHist = u.bpuMeta.predHist.asUInt
 
   val updateIsBr = u.pd.isBr
   val updateMeta = u.bpuMeta.tageMeta

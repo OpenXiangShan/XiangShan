@@ -251,7 +251,7 @@ class MicroBTB extends BasePredictor
 
     //uBTB update 
     //backend should send fetch pc to update
-    val u = io.update.bits.ui
+    val u = io.update.bits
     val update_br_pc  = u.pc
     val update_br_idx = u.fetchIdx
     val update_br_offset = (update_br_idx << 1).asUInt()

@@ -201,7 +201,7 @@ class BTB extends BasePredictor with BTBParams{
     when (pd.isBr)   { t := BTBtype.B}
     t
   }
-  val u = io.update.bits.ui
+  val u = io.update.bits
 
   val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
   val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt

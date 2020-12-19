@@ -398,11 +398,7 @@ class IFU extends XSModule with HasIFUConst
 
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
-  val inOrderBrHist = io.cfiUpdateInfo.bits.bpuMeta.predHist
-  bpu.io.cfiUpdateInfo.valid := io.cfiUpdateInfo.valid
-  bpu.io.cfiUpdateInfo.bits := CfiUpdateInfoWithHist(io.cfiUpdateInfo.bits, inOrderBrHist.asUInt)
-  bpu.io.cfiUpdateInfo.valid := io.cfiUpdateInfo.valid
-  bpu.io.cfiUpdateInfo.bits := CfiUpdateInfoWithHist(io.cfiUpdateInfo.bits, inOrderBrHist.asUInt) // Dont care about hist
+  bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)

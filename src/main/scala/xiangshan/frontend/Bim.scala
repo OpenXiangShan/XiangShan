@@ -80,7 +80,7 @@ class BIM extends BasePredictor with BimParams {
     io.meta.ctrs(b)  := ctr
   }
 
-  val u = io.update.bits.ui
+  val u = io.update.bits
 
   val updateBank = bimAddr.getBank(u.pc)
   val updateRow = bimAddr.getBankIdx(u.pc)
