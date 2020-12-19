@@ -153,7 +153,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.out.bits := commitEntry.exuOut
 
   val brTagRead = RegNext(Mux(io.memRedirect.bits.isReplay, io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
-  io.cfiInfo.valid := RegNext(io.memRedirect.valid)
+  io.cfiInfo.valid := RegNext(io.memRedirect.valid || commitValid)
   io.cfiInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
   io.cfiInfo.bits.brTag := brTagRead
   io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
