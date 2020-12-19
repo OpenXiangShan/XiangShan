@@ -132,8 +132,8 @@ Emulator::~Emulator() {
   if (trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
     snapshot_slot[0].save();
     snapshot_slot[1].save();
+    printf("Please remove unused snapshots manually\n");
   }
-  printf("Please remove unused snapshots manually\n");
 #endif
 }
 
