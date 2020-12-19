@@ -101,7 +101,7 @@ class BIM extends BasePredictor with BimParams {
   val newCtr = satUpdate(oldCtr, 2, newTaken)
   // val oldSaturated = newCtr === oldCtr
   
-  val needToUpdate = io.update.valid && u.pd.isBr
+  val needToUpdate = io.update.valid && u.pd.isBr && !u.isReplay
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   

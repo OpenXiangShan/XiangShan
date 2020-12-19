@@ -187,7 +187,7 @@ class RAS extends BasePredictor
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 
-    val copy_valid = io.recover.valid && io.recover.bits.isMisPred
+    val copy_valid = io.recover.valid && (io.recover.bits.isMisPred || io.recover.bits.isReplay)
     val copy_next = RegNext(copy_valid)
     spec_ras.copy_valid := copy_next
     spec_ras.copy_in_mem := commit_ras.copy_out_mem
