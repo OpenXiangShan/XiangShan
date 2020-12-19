@@ -11,7 +11,6 @@ import xiangshan.backend.rename.RenameBypassInfo
 
 case class DispatchParameters
 (
-  DqEnqWidth: Int,
   IntDqSize: Int,
   FpDqSize: Int,
   LsDqSize: Int,
@@ -56,9 +55,9 @@ class Dispatch extends XSModule {
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
 
   // pipeline between rename and dispatch
   // accepts all at once
@@ -68,15 +67,12 @@ class Dispatch extends XSModule {
   }
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
-  dispatch1.io.redirect <> io.redirect
+  // dispatch1.io.redirect <> io.redirect
   dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
-  dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq
-  dispatch1.io.toFpDqReady <> fpDq.io.enqReady
   dispatch1.io.toFpDq <> fpDq.io.enq
-  dispatch1.io.toLsDqReady <> lsDq.io.enqReady
   dispatch1.io.toLsDq <> lsDq.io.enq
   dispatch1.io.allocPregs <> io.allocPregs
 

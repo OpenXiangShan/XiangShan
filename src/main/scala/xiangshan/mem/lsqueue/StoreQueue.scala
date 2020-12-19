@@ -73,7 +73,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
-    when(io.enq.req(i).valid) {
+    when (io.enq.req(i).valid && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -86,7 +86,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not valid when not ready\n")
   }
 
-  when(Cat(firedDispatch).orR && !io.brqRedirect.valid) {
+  when (Cat(firedDispatch).orR && !io.brqRedirect.valid) {
     val enqNumber = PopCount(firedDispatch)
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
     XSInfo("dispatched %d insts to sq\n", enqNumber)

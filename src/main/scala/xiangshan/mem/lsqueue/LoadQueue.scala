@@ -85,7 +85,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
-    when(io.enq.req(i).valid) {
+    when (io.enq.req(i).valid && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B

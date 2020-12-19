@@ -7,8 +7,10 @@ import xiangshan._
 import xiangshan.backend.roq.RoqPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
-  val enq = Vec(enqnum, Flipped(ValidIO(new MicroOp)))
-  val enqReady = Output(Bool())
+  val enq = new Bundle {
+    val canAccept = Output(Bool())
+    val req = Vec(enqnum, Flipped(ValidIO(new MicroOp)))
+  }
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
   val redirect = Flipped(ValidIO(new Redirect))
   override def cloneType: DispatchQueueIO.this.type =
@@ -27,16 +29,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
   // head: first valid entry (dispatched entry)
-  val headPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
+  val headPtr = RegInit(VecInit((0 until deqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
   val headPtrMask = UIntToMask(headPtr(0).value, size)
   // tail: first invalid entry (free entry)
-  val tailPtr = RegInit(VecInit((0 until deqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
+  val tailPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
   val tailPtrMask = UIntToMask(tailPtr(0).value, size)
 
   val validEntries = distanceBetween(tailPtr(0), headPtr(0))
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR
   val canEnqueue = validEntries <= (size - enqnum).U
-  val canActualEnqueue = canEnqueue && !(io.redirect.valid /*&& !io.redirect.bits.isReplay*/)
+  val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
     * Part 1: update states and uops when enqueue, dequeue, commit, redirect/replay
@@ -51,11 +53,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     * (5) redirect (replay): from s_dispatched to s_valid (re-dispatch)
     */
   // enqueue: from s_invalid to s_valid
-  io.enqReady := canEnqueue
+  io.enq.canAccept := canEnqueue
   for (i <- 0 until enqnum) {
-    when (io.enq(i).valid && canActualEnqueue) {
-      uopEntries(tailPtr(i).value) := io.enq(i).bits
-      stateEntries(tailPtr(i).value) := s_valid
+    when (io.enq.req(i).valid && canActualEnqueue) {
+      val sel = if (i == 0) 0.U else PopCount(io.enq.req.take(i).map(_.valid))
+      uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
+      stateEntries(tailPtr(sel).value) := s_valid
     }
   }
 
@@ -69,7 +72,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   }
 
   // redirect: cancel uops currently in the queue
-  val mispredictionValid = io.redirect.valid //&& io.redirect.bits.isMisPred
+  val mispredictionValid = io.redirect.valid
   val exceptionValid = io.redirect.valid && io.redirect.bits.isException
   val flushPipeValid = io.redirect.valid && io.redirect.bits.isFlushPipe
   val roqNeedFlush = Wire(Vec(size, Bool()))
@@ -104,7 +107,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // agreement with reservation station: don't dequeue when redirect.valid
-  for (i <- 0 until enqnum) {
+  for (i <- 0 until deqnum) {
     headPtr(i) := Mux(exceptionValid,
       i.U.asTypeOf(new CircularQueuePtr(size)),
       Mux(mispredictionValid, headPtr(i), headPtr(i) + numDeq))
@@ -125,23 +128,26 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   walkedTailPtr.value := lastOneIndex
 
   // enqueue
-  val numEnq = Mux(canActualEnqueue, PriorityEncoder(io.enq.map(!_.valid) :+ true.B), 0.U)
-  XSError(numEnq =/= 0.U && (mispredictionValid || exceptionValid), "should not enqueue when redirect\n")
+  val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   tailPtr(0) := Mux(exceptionValid,
     0.U.asTypeOf(new CircularQueuePtr(size)),
-    Mux(lastCycleMisprediction,
-      Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
-      tailPtr(0) + numEnq)
+    Mux(io.redirect.valid,
+      tailPtr(0),
+      Mux(lastCycleMisprediction,
+        Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
+        tailPtr(0) + numEnq))
   )
   val lastCycleException = RegNext(exceptionValid)
   val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
-  for (i <- 1 until deqnum) {
+  for (i <- 1 until enqnum) {
     tailPtr(i) := Mux(exceptionValid,
       i.U.asTypeOf(new CircularQueuePtr(size)),
-      Mux(lastLastCycleMisprediction,
-        tailPtr(0) + i.U,
-        tailPtr(i) + numEnq)
-    )
+      Mux(io.redirect.valid,
+        tailPtr(i),
+        Mux(lastLastCycleMisprediction,
+          tailPtr(0) + i.U,
+          tailPtr(i) + numEnq))
+      )
   }
 
 
