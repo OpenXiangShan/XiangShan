@@ -31,7 +31,7 @@ class TLCSlaveMMIO()(implicit p: Parameters) extends LazyModule
       resources          = device.reg,
       regionType         = RegionType.CACHED,
       supportsGet        = TransferSizes(1, blockBytes),
-//      supportsPutPartial = TransferSizes(1, blockBytes),
+      supportsPutPartial = TransferSizes(1, blockBytes),
       supportsPutFull    = TransferSizes(1, blockBytes),
       supportsAcquireT   = TransferSizes(1, blockBytes),
       supportsAcquireB   = TransferSizes(1, blockBytes),
