@@ -453,7 +453,7 @@ class Tage extends BaseTage {
   val updateHist = io.update.bits.hist
 
   val updateIsBr = u.pd.isBr
-  val updateMeta = u.brInfo.tageMeta
+  val updateMeta = u.bpuMeta.tageMeta
   val updateMisPred = u.isMisPred && updateIsBr
 
   val updateMask = WireInit(0.U.asTypeOf(Vec(TageNTables, Vec(TageBanks, Bool()))))
@@ -475,7 +475,7 @@ class Tage extends BaseTage {
   scUpdateTaken := DontCare
   scUpdateOldCtrs := DontCare
 
-  val updateSCMeta = u.brInfo.tageMeta.scMeta
+  val updateSCMeta = u.bpuMeta.tageMeta.scMeta
   val updateTageMisPred = updateMeta.taken =/= u.taken && updateIsBr
 
   val updateBank = u.pc(log2Ceil(TageBanks), 1)
@@ -641,7 +641,7 @@ class Tage extends BaseTage {
     // use fetch pc instead of instruction pc
     tables(i).io.update.pc := u.pc
     tables(i).io.update.hist := updateHist
-    tables(i).io.update.fetchIdx := u.brInfo.fetchIdx
+    tables(i).io.update.fetchIdx := u.bpuMeta.fetchIdx
   }
 
   for (i <- 0 until SCNTables) {
@@ -651,14 +651,14 @@ class Tage extends BaseTage {
     scTables(i).io.update.oldCtr   := scUpdateOldCtrs(i)
     scTables(i).io.update.pc := u.pc
     scTables(i).io.update.hist := updateHist
-    scTables(i).io.update.fetchIdx := u.brInfo.fetchIdx
+    scTables(i).io.update.fetchIdx := u.bpuMeta.fetchIdx
   }
 
 
 
   if (BPUDebug && debug) {
     val m = updateMeta
-    val bri = u.brInfo
+    val bri = u.bpuMeta
     XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
     XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
     XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",

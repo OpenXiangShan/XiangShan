@@ -256,8 +256,8 @@ class MicroBTB extends BasePredictor
     val update_br_idx = u.fetchIdx
     val update_br_offset = (update_br_idx << 1).asUInt()
     val update_fetch_pc = update_br_pc - update_br_offset
-    val update_write_way = u.brInfo.ubtbWriteWay
-    val update_hits = u.brInfo.ubtbHits
+    val update_write_way = u.bpuMeta.ubtbWriteWay
+    val update_hits = u.bpuMeta.ubtbHits
     val update_taken = u.taken
 
     val update_bank = getBank(update_br_pc)
@@ -268,7 +268,7 @@ class MicroBTB extends BasePredictor
     val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
   
   
-    val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && (u.pd.brType === BrType.jal)
+    val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && (u.pd.brType === BrType.jal)
     val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
     val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
     //write btb target when miss prediction

@@ -28,7 +28,7 @@ class RAS extends BasePredictor
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
         val isLastHalfRVI = Input(Bool())
-        val recover =  Flipped(ValidIO(new BranchUpdateInfo))
+        val recover =  Flipped(ValidIO(new CfiUpdateInfo))
         val out = ValidIO(new RASResp)
         val branchInfo = Output(new RASBranchInfo)
     }

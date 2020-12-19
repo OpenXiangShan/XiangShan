@@ -80,8 +80,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   io.frontend.redirect.valid := RegNext(redirectValid)
   io.frontend.redirect.bits := RegNext(Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target))
-  io.frontend.outOfOrderBrInfo <> brq.io.brInfo
-  io.frontend.inOrderBrInfo <> brq.io.brInfo
+  // io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
+  io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
 
   decode.io.in <> io.frontend.cfVec
   decode.io.toBrq <> brq.io.enqReqs

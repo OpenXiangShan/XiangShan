@@ -11,7 +11,7 @@ import xiangshan.backend.decode.isa._
 trait HasRedirectOut { this: RawModule =>
   val redirectOutValid = IO(Output(Bool()))
   val redirectOut = IO(Output(new Redirect))
-  val brUpdate = IO(Output(new BranchUpdateInfo))
+  val brUpdate = IO(Output(new CfiUpdateInfo))
 }
 
 class Jump extends FunctionUnit with HasRedirectOut {

@@ -210,7 +210,7 @@ class BTB extends BasePredictor with BTBParams{
   val new_extended = (new_offset > max_offset || new_offset < min_offset)
 
 
-  val updateWay = u.brInfo.btbWriteWay
+  val updateWay = u.bpuMeta.btbWriteWay
   val updateBankIdx = btbAddr.getBank(u.pc)
   val updateEBank = updateBankIdx(log2Ceil(BtbBanks)-1) // highest bit of bank idx
   val updateRow = btbAddr.getBankIdx(u.pc)
@@ -218,7 +218,7 @@ class BTB extends BasePredictor with BTBParams{
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && updateType === BTBtype.J
+  val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && updateType === BTBtype.J
   val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered)
   // Update btb
   for (w <- 0 until BtbWays) {
@@ -269,7 +269,7 @@ class BTB extends BasePredictor with BTBParams{
         i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
     }
     XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-      u.brInfo.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+      u.bpuMeta.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
     for (i <- 0 until BtbBanks) {
       // Conflict when not hit and allocating a valid entry
       val conflict = if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i)

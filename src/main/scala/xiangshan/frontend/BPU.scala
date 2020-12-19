@@ -115,7 +115,7 @@ abstract class BasePredictor extends XSModule
     val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
-    val update = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val update = Flipped(ValidIO(new CfiUpdateInfoWithHist))
     val outFire = Input(Bool())
   }
 
@@ -129,7 +129,7 @@ class BPUStageIO extends XSBundle {
   val mask = UInt(PredictWidth.W)
   val resp = new PredictorResponse
   // val target = UInt(VAddrBits.W)
-  val brInfo = Vec(PredictWidth, new BranchInfo)
+  val brInfo = Vec(PredictWidth, new BpuMeta)
   // val saveHalfRVI = Bool()
 }
 
@@ -251,7 +251,7 @@ class BPUStage3 extends BPUStage {
     val predecode = Input(new Predecode)
     val realMask = Input(UInt(PredictWidth.W))
     val prevHalf = Input(new PrevHalfInstr)
-    val recover =  Flipped(ValidIO(new BranchUpdateInfo))
+    val recover =  Flipped(ValidIO(new CfiUpdateInfo))
   }
   val s3IO = IO(new S3IO)
   // TAGE has its own pipelines and the
@@ -401,14 +401,14 @@ class BPUReq extends XSBundle {
   // val histPtr = UInt(log2Up(ExtHistoryLength).W) // only for debug
 }
 
-class BranchUpdateInfoWithHist extends XSBundle {
-  val ui = new BranchUpdateInfo
+class CfiUpdateInfoWithHist extends XSBundle {
+  val ui = new CfiUpdateInfo
   val hist = UInt(HistoryLength.W)
 }
 
-object BranchUpdateInfoWithHist {
-  def apply (brInfo: BranchUpdateInfo, hist: UInt) = {
-    val b = Wire(new BranchUpdateInfoWithHist)
+object CfiUpdateInfoWithHist {
+  def apply (brInfo: CfiUpdateInfo, hist: UInt) = {
+    val b = Wire(new CfiUpdateInfoWithHist)
     b.ui <> brInfo
     b.hist := hist
     b
@@ -418,8 +418,8 @@ object BranchUpdateInfoWithHist {
 abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasBPUParameter{
   val io = IO(new Bundle() {
     // from backend
-    val inOrderBrInfo    = Flipped(ValidIO(new BranchUpdateInfoWithHist))
-    val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfoWithHist))
+    val cfiUpdateInfo    = Flipped(ValidIO(new CfiUpdateInfoWithHist))
+    // val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
     // from if1
@@ -432,13 +432,13 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     val realMask = Input(UInt(PredictWidth.W))
     val prevHalf = Input(new PrevHalfInstr)
     // to if4, some bpu info used for updating
-    val branchInfo = Output(Vec(PredictWidth, new BranchInfo))
+    val branchInfo = Output(Vec(PredictWidth, new BpuMeta))
   })
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
-  preds.map(_.io.update <> io.outOfOrderBrInfo)
-  tage.io.update <> io.inOrderBrInfo
+  preds.map(_.io.update <> io.cfiUpdateInfo)
+  // tage.io.update <> io.cfiUpdateInfo
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
@@ -500,7 +500,7 @@ class BPU extends BaseBPU {
   //**********************Stage 1****************************//
 
   val s1_resp_in = Wire(new PredictorResponse)
-  val s1_brInfo_in = Wire(Vec(PredictWidth, new BranchInfo))
+  val s1_brInfo_in = Wire(Vec(PredictWidth, new BpuMeta))
 
   s1_resp_in.tage := DontCare
   s1_resp_in.loop := DontCare
@@ -598,8 +598,8 @@ class BPU extends BaseBPU {
 
   s3.s3IO.prevHalf := io.prevHalf
 
-  s3.s3IO.recover.valid <> io.inOrderBrInfo.valid
-  s3.s3IO.recover.bits <> io.inOrderBrInfo.bits.ui
+  s3.s3IO.recover.valid <> io.cfiUpdateInfo.valid
+  s3.s3IO.recover.bits <> io.cfiUpdateInfo.bits.ui
 
   if (BPUDebug) {
     if (debug_verbose) {
@@ -615,11 +615,11 @@ class BPU extends BaseBPU {
 
 
   if (EnableCFICommitLog) {
-    val buValid = io.inOrderBrInfo.valid
-    val buinfo  = io.inOrderBrInfo.bits.ui
+    val buValid = io.cfiUpdateInfo.valid
+    val buinfo  = io.cfiUpdateInfo.bits.ui
     val pd = buinfo.pd
-    val tage_cycle = buinfo.brInfo.debug_tage_cycle
-    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred}) cycle($tage_cycle) hist(${Hexadecimal(io.inOrderBrInfo.bits.hist)})\n")
+    val tage_cycle = buinfo.bpuMeta.debug_tage_cycle
+    XSDebug(buValid, p"cfi_update: isBr(${pd.isBr}) pc(${Hexadecimal(buinfo.pc)}) taken(${buinfo.taken}) mispred(${buinfo.isMisPred}) cycle($tage_cycle) hist(${Hexadecimal(io.cfiUpdateInfo.bits.hist)})\n")
   }
 
 }

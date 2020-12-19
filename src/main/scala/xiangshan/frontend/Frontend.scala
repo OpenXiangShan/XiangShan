@@ -27,8 +27,8 @@ class Frontend extends XSModule {
 
   //backend
   ifu.io.redirect <> io.backend.redirect
-  ifu.io.inOrderBrInfo <> io.backend.inOrderBrInfo
-  ifu.io.outOfOrderBrInfo <> io.backend.outOfOrderBrInfo
+  ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
+  // ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
   //icache
   ifu.io.icacheResp <> icache.io.resp
   icache.io.req <> ifu.io.icacheReq

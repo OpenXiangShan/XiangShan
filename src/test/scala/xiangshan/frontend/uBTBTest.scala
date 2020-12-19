@@ -22,8 +22,8 @@ with HasPartialDecoupledDriver {
           c.io.update.bits.ui.taken.poke(taken.B)
           c.io.update.bits.ui.fetchIdx.poke(fetchIdx.U)
           c.io.update.bits.ui.isMisPred.poke(isMiss.B)
-          c.io.update.bits.ui.brInfo.ubtbWriteWay.poke(write_way.U)
-          c.io.update.bits.ui.brInfo.ubtbHits.poke(hit.B)
+          c.io.update.bits.ui.bpuMeta.ubtbWriteWay.poke(write_way.U)
+          c.io.update.bits.ui.bpuMeta.ubtbHits.poke(hit.B)
           c.io.update.bits.ui.pd.brType.poke(BrType.branch)
         }
 

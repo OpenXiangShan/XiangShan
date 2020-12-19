@@ -51,7 +51,7 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
-  val brInfo = ValidIO(new BranchUpdateInfo)
+  val cfiInfo = ValidIO(new CfiUpdateInfo)
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
 }
@@ -120,7 +120,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
-  XSDebug(io.brInfo.valid, "inOrderValid: pc=%x\n", io.brInfo.bits.pc)
+  XSDebug(io.cfiInfo.valid, "inOrderValid: pc=%x\n", io.cfiInfo.bits.pc)
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
@@ -153,10 +153,10 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.out.bits := commitEntry.exuOut
 
   val brTagRead = RegNext(Mux(io.memRedirect.bits.isReplay, io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
-  io.brInfo.valid := RegNext(io.memRedirect.valid)
-  io.brInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
-  io.brInfo.bits.brTag := brTagRead
-  io.brInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
+  io.cfiInfo.valid := RegNext(io.memRedirect.valid)
+  io.cfiInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
+  io.cfiInfo.bits.brTag := brTagRead
+  io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
 
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
@@ -176,7 +176,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       brQueue(idx).exuOut.brUpdate.pnpc := io.enqReqs(i).bits.cf.brUpdate.pnpc
       brQueue(idx).exuOut.brUpdate.fetchIdx := io.enqReqs(i).bits.cf.brUpdate.fetchIdx
       brQueue(idx).exuOut.brUpdate.pd := io.enqReqs(i).bits.cf.brUpdate.pd
-      brQueue(idx).exuOut.brUpdate.brInfo := io.enqReqs(i).bits.cf.brUpdate.brInfo
+      brQueue(idx).exuOut.brUpdate.bpuMeta := io.enqReqs(i).bits.cf.brUpdate.bpuMeta
       stateQueue(idx) := s_idle
     }
   }
