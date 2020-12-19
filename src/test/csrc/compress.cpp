@@ -91,7 +91,7 @@ long readFromGz(void* ptr, const char *file_name, long buf_size, uint8_t load_ty
     printf("File size is larger than buf_size!\n");
     assert(0);
   }
-  printf("Read %lu bytes from gz stream in total\n", curr_size);
+  // printf("Read %lu bytes from gz stream in total\n", curr_size);
 
   delete [] temp_page;
 
