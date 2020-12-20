@@ -21,14 +21,17 @@ object SqPtr extends HasXSParameter {
   }
 }
 
+class SqEnqIO extends XSBundle {
+  val canAccept = Output(Bool())
+  val needAlloc = Vec(RenameWidth, Input(Bool()))
+  val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
+  val resp = Vec(RenameWidth, Output(new SqPtr))
+}
+
 // Store Queue
 class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val enq = new Bundle() {
-      val canAccept = Output(Bool())
-      val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
-      val resp = Vec(RenameWidth, Output(new SqPtr))
-    }
+    val enq = new SqEnqIO
     val brqRedirect = Input(Valid(new Redirect))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
@@ -70,10 +73,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.enq.canAccept := validEntries <= (StoreQueueSize - RenameWidth).U
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
   for (i <- 0 until RenameWidth) {
-    val offset = if (i == 0) 0.U else PopCount((0 until i).map(firedDispatch(_)))
+    val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
-    when (io.enq.req(i).valid && !io.brqRedirect.valid) {
+    when (io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -82,11 +85,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       pending(index) := false.B
     }
     io.enq.resp(i) := sqIdx
-
-    XSError(!io.enq.canAccept && io.enq.req(i).valid, "should not valid when not ready\n")
   }
 
-  when (Cat(firedDispatch).orR && !io.brqRedirect.valid) {
+  when (Cat(firedDispatch).orR && io.enq.canAccept && !io.brqRedirect.valid) {
     val enqNumber = PopCount(firedDispatch)
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
     XSInfo("dispatched %d insts to sq\n", enqNumber)

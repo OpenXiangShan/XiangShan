@@ -8,6 +8,7 @@ import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
+import xiangshan.mem.LsqEnqIO
 
 case class DispatchParameters
 (
@@ -31,11 +32,7 @@ class Dispatch extends XSModule {
     // enq Roq
     val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
-    val enqLsq = new Bundle() {
-      val canAccept = Input(Bool())
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new LSIdx))
-    }
+    val enqLsq = Flipped(new LsqEnqIO)
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))

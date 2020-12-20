@@ -7,6 +7,7 @@ import xiangshan._
 import utils.{XSDebug, XSError, XSInfo}
 import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
+import xiangshan.mem.LsqEnqIO
 
 // read rob and enqueue
 class Dispatch1 extends XSModule {
@@ -18,11 +19,7 @@ class Dispatch1 extends XSModule {
     // enq Roq
     val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
-    val enqLsq = new Bundle() {
-      val canAccept = Input(Bool())
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new LSIdx))
-    }
+    val enqLsq = Flipped(new LsqEnqIO)
     val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to dispatch queue
     val toIntDq = new Bundle {
@@ -137,6 +134,7 @@ class Dispatch1 extends XSModule {
     XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
 
     val shouldEnqLsq = isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou
+    io.enqLsq.needAlloc(i) := io.fromRename(i).valid && shouldEnqLsq
     io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqLsq.req(i).bits := updatedUop(i)
     io.enqLsq.req(i).bits.roqIdx := io.enqRoq.resp(i)

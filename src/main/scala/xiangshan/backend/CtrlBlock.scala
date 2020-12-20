@@ -12,6 +12,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.roq.{Roq, RoqPtr, RoqCSRIO}
+import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
@@ -30,11 +31,7 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
-  val enqLsq = new Bundle() {
-    val canAccept = Input(Bool())
-    val req = Vec(RenameWidth, ValidIO(new MicroOp))
-    val resp = Vec(RenameWidth, Input(new LSIdx))
-  }
+  val enqLsq = Flipped(new LsqEnqIO)
   val redirect = ValidIO(new Redirect)
 }
 
