@@ -70,8 +70,8 @@ class IFUIO extends XSBundle
 {
   val fetchPacket = DecoupledIO(new FetchPacket)
   val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
-  val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-  val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  // val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
+  val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
   val icacheReq = DecoupledIO(new ICacheReq)
   val icacheResp = Flipped(DecoupledIO(new ICacheResp))
   val icacheFlush = Output(UInt(2.W))
@@ -355,11 +355,11 @@ class IFU extends XSModule with HasIFUConst
 
 
 
-
-  when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
-    val b = io.outOfOrderBrInfo.bits
-    val oldGh = b.brInfo.hist
-    val sawNTBr = b.brInfo.sawNotTakenBranch
+  val cfiUpdate = io.cfiUpdateInfo
+  when (cfiUpdate.valid && (cfiUpdate.bits.isMisPred || cfiUpdate.bits.isReplay)) {
+    val b = cfiUpdate.bits
+    val oldGh = b.bpuMeta.hist
+    val sawNTBr = b.bpuMeta.sawNotTakenBranch
     val isBr = b.pd.isBr
     val taken = b.taken
     val updatedGh = oldGh.update(sawNTBr, isBr && taken)
@@ -398,11 +398,7 @@ class IFU extends XSModule with HasIFUConst
 
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
-  val inOrderBrHist = io.inOrderBrInfo.bits.brInfo.predHist
-  bpu.io.inOrderBrInfo.valid := io.inOrderBrInfo.valid
-  bpu.io.inOrderBrInfo.bits := BranchUpdateInfoWithHist(io.inOrderBrInfo.bits, inOrderBrHist.asUInt)
-  bpu.io.outOfOrderBrInfo.valid := io.outOfOrderBrInfo.valid
-  bpu.io.outOfOrderBrInfo.bits := BranchUpdateInfoWithHist(io.outOfOrderBrInfo.bits, inOrderBrHist.asUInt) // Dont care about hist
+  bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
@@ -465,9 +461,9 @@ class IFU extends XSModule with HasIFUConst
   when (if4_bp.taken) {
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
-  fetchPacketWire.brInfo := bpu.io.branchInfo
-  (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).hist := final_gh)
-  (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
+  fetchPacketWire.bpuMeta := bpu.io.bpuMeta
+  (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).hist := final_gh)
+  (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
   fetchPacketWire.pd := if4_pd.pd
   fetchPacketWire.ipf := if4_ipf
   fetchPacketWire.acf := if4_acf
