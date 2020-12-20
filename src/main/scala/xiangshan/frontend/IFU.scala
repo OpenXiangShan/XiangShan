@@ -85,6 +85,7 @@ class PrevHalfInstr extends XSBundle {
   val fetchpc = UInt(VAddrBits.W) // only for debug
   val idx = UInt(VAddrBits.W) // only for debug
   val pc = UInt(VAddrBits.W)
+  val npc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
   val instr = UInt(16.W)
   val ipf = Bool()
@@ -117,7 +118,8 @@ class IFU extends XSModule with HasIFUConst
   val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
-  val if1_fire = if1_valid && (if2_ready || if1_flush) && (inLoop || io.icacheReq.ready)
+  val if2_allReady = WireInit(if2_ready && (inLoop || io.icacheReq.ready))
+  val if1_fire = if1_valid && (if2_allReady || if1_flush)
 
 
   // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -131,12 +133,12 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF2 ****************************//
   val if2_valid = RegInit(init = false.B)
   val if3_ready = WireInit(false.B)
-  val if2_fire = if2_valid && if3_ready && !if2_flush
+  val if2_fire = if2_valid && if3_ready
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc, inLoop)
   val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_fire)
-  if2_ready := if2_fire || !if2_valid || if2_flush
-  when (if1_fire)       { if2_valid := if1_valid }
+  if2_ready := if3_ready || !if2_valid
+  when (if1_fire)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
   .elsewhen (if2_fire)  { if2_valid := false.B }
 
@@ -147,7 +149,7 @@ class IFU extends XSModule with HasIFUConst
   
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
-  if2_redirect := if2_fire && if2_bp.taken
+  if2_redirect := if2_valid && if2_bp.taken
   npcGen.register(if2_redirect, if2_bp.target)
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
@@ -155,10 +157,11 @@ class IFU extends XSModule with HasIFUConst
   //********************** IF3 ****************************//
   val if3_valid = RegInit(init = false.B)
   val if4_ready = WireInit(false.B)
-  val if3_fire = if3_valid && if4_ready && (inLoop || io.icacheResp.valid) && !if3_flush
+  val if3_allValid = if3_valid && (inLoop || io.icacheResp.valid)
+  val if3_fire = if3_allValid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
-  if3_ready := if3_fire || !if3_valid || if3_flush
+  if3_ready := if4_ready || !if3_valid
   when (if3_flush)     { if3_valid := false.B }
   .elsewhen (if2_fire) { if3_valid := true.B }
   .elsewhen (if3_fire) { if3_valid := false.B }
@@ -179,7 +182,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
 
   // the previous half of RVI instruction waits until it meets its last half
-  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && (if3_prevHalfInstr.pc + 2.U) === if3_pc && if3_valid && (inLoop || io.icacheResp.valid)
+  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.npc === if3_pc && if3_allValid
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
@@ -200,7 +203,7 @@ class IFU extends XSModule with HasIFUConst
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
   // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
 
-  if3_redirect := if3_fire && (
+  if3_redirect := if3_allValid && (
                     // prevHalf is consumed but the next packet is not where it meant to be
                     // we do not handle this condition because of the burden of building a correct GHInfo
                     // prevHalfMetRedirect ||
@@ -250,7 +253,7 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
   // wait until prevHalfInstr written into reg
-  if4_ready := (if4_fire && !hasPrevHalfInstrReq || !if4_valid || if4_flush) && GTimer() > 500.U
+  if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq || !if4_valid) && GTimer() > 500.U
   when (if4_flush)     { if4_valid := false.B }
   .elsewhen (if3_fire) { if4_valid := true.B }
   .elsewhen (if4_fire) { if4_valid := false.B }
@@ -283,7 +286,7 @@ class IFU extends XSModule with HasIFUConst
   // because the prediction is with the start of each inst
   val if4_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
   val if4_pendingPrevHalfInstr = if4_prevHalfInstr.valid
-  val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && (if4_prevHalfInstr.pc + 2.U) === if4_pc && if4_valid
+  val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && if4_prevHalfInstr.npc === if4_pc && if4_valid
   val if4_prevHalfConsumed = if4_prevHalfInstrMet && if4_fire
   val if4_prevHalfFlush = if4_flush
 
@@ -305,6 +308,7 @@ class IFU extends XSModule with HasIFUConst
     prevHalfInstrReq.fetchpc := if4_pc
     prevHalfInstrReq.idx := idx
     prevHalfInstrReq.pc := if4_pd.pc(idx)
+    prevHalfInstrReq.npc := if4_pd.pc(idx) + 2.U
     prevHalfInstrReq.target := if4_bp.lastHalfRVITarget
     prevHalfInstrReq.instr := if4_pd.instrs(idx)(15, 0)
     prevHalfInstrReq.ipf := if4_ipf
@@ -319,9 +323,9 @@ class IFU extends XSModule with HasIFUConst
   val if4_predNotTakenRedirect = !hasPrevHalfInstrReq && !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
   // val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo && enableGhistRepair.B
 
-  if4_redirect := if4_fire && (
+  if4_redirect := if4_valid && (
                     // when if4 has a lastHalfRVI, but the next fetch packet is not snpc
-                    if4_prevHalfNextNotMet ||
+                    // if4_prevHalfNextNotMet ||
                     // when if4 preds taken, but the pc of next fetch packet is not the target
                     if4_predTakenRedirect ||
                     // when if4 preds not taken, but the pc of next fetch packet is not snpc
@@ -332,9 +336,10 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_target = WireInit(if4_snpc)
 
-  when (if4_prevHalfNextNotMet) {
-    if4_target := prevHalfInstrReq.pc+2.U
-  }.elsewhen (if4_predTakenRedirect) {
+  // when (if4_prevHalfNextNotMet) {
+  //   if4_target := prevHalfInstrReq.pc+2.U
+  // }.else
+  when (if4_predTakenRedirect) {
     if4_target := if4_bp.target
   }.elsewhen (if4_predNotTakenRedirect) {
     if4_target := if4_snpc
