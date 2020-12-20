@@ -45,6 +45,7 @@ class Dispatch1 extends XSModule {
   val isFp    = VecInit(io.fromRename.map(req => FuType.isFpExu (req.bits.ctrl.fuType)))
   val isLs    = VecInit(io.fromRename.map(req => FuType.isMemExu(req.bits.ctrl.fuType)))
   val isStore = VecInit(io.fromRename.map(req => FuType.isStoreExu(req.bits.ctrl.fuType)))
+  val isAMO = VecInit(io.fromRename.map(req => req.bits.ctrl.fuType === FuType.mou))
   val isBlockBackward = VecInit(io.fromRename.map(_.bits.ctrl.blockBackward))
   val isNoSpecExec    = VecInit(io.fromRename.map(_.bits.ctrl.noSpecExec))
 
@@ -60,7 +61,7 @@ class Dispatch1 extends XSModule {
   val updatedOldPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i), isStore(i) | isFp(i))
+    updatedCommitType(i) := Cat(isLs(i) && !isAMO(i), isStore(i) | isFp(i))
     updatedPsrc1(i) := io.fromRename.take(i).map(_.bits.pdest)
       .zip(if (i == 0) Seq() else io.renameBypass.lsrc1_bypass(i-1).asBools)
       .foldLeft(io.fromRename(i).bits.psrc1) {
@@ -133,7 +134,7 @@ class Dispatch1 extends XSModule {
     io.enqRoq.req(i).bits := updatedUop(i)
     XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
 
-    val shouldEnqLsq = isLs(i) && io.fromRename(i).bits.ctrl.fuType =/= FuType.mou
+    val shouldEnqLsq = isLs(i) && !isAMO(i)
     io.enqLsq.needAlloc(i) := io.fromRename(i).valid && shouldEnqLsq
     io.enqLsq.req(i).valid := io.fromRename(i).valid && shouldEnqLsq && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqLsq.req(i).bits := updatedUop(i)
