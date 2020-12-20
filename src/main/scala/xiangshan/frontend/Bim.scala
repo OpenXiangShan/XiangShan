@@ -80,7 +80,7 @@ class BIM extends BasePredictor with BimParams {
     io.meta.ctrs(b)  := ctr
   }
 
-  val u = io.update.bits.ui
+  val u = io.update.bits
 
   val updateBank = bimAddr.getBank(u.pc)
   val updateRow = bimAddr.getBankIdx(u.pc)
@@ -96,12 +96,12 @@ class BIM extends BasePredictor with BimParams {
   val wrbypass_hit = wrbypass_hits.reduce(_||_)
   val wrbypass_hit_idx = PriorityEncoder(wrbypass_hits)
 
-  val oldCtr = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank), wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.brInfo.bimCtr)
+  val oldCtr = Mux(wrbypass_hit && wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank), wrbypass_ctrs(wrbypass_hit_idx)(updateBank), u.bpuMeta.bimCtr)
   val newTaken = u.taken
   val newCtr = satUpdate(oldCtr, 2, newTaken)
   // val oldSaturated = newCtr === oldCtr
   
-  val needToUpdate = io.update.valid && u.pd.isBr
+  val needToUpdate = io.update.valid && u.pd.isBr && !u.isReplay
 
   when (reset.asBool) { wrbypass_ctr_valids.foreach(_.foreach(_ := false.B))}
   
@@ -126,9 +126,9 @@ class BIM extends BasePredictor with BimParams {
 
   if (BPUDebug && debug) {
     XSDebug(doing_reset, "Reseting...\n")
-    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x brTgt=%x\n", io.update.valid, u.pc, u.pnpc, u.target, u.brTarget)
+    XSDebug("[update] v=%d pc=%x pnpc=%x tgt=%x", io.update.valid, u.pc, u.pnpc, u.target)
     XSDebug("[update] taken=%d isMisPred=%d", u.taken, u.isMisPred)
-    XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.brInfo.bimCtr)}\n")
+    XSDebug(false, true.B, p"brTag=${u.brTag} pd.isBr=${u.pd.isBr} brInfo.bimCtr=${Binary(u.bpuMeta.bimCtr)}\n")
     XSDebug("needToUpdate=%d updateBank=%x updateRow=%x newCtr=%b oldCtr=%b\n", needToUpdate, updateBank, updateRow, newCtr, oldCtr)
     XSDebug("[wrbypass] hit=%d hits=%b\n", wrbypass_hit, wrbypass_hits.asUInt)
   }
