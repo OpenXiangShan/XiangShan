@@ -6,7 +6,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
-import xiangshan.backend.fu.fpu.Fflags
 object roqDebugId extends Function0[Integer] {
   var x = 0
   def apply(): Integer = {
@@ -34,7 +33,7 @@ class RoqCSRIO extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(UInt(VAddrBits.W))
 
-  val fflags = Output(new Fflags)
+  val fflags = Output(Valid(UInt(5.W)))
   val dirty_fs = Output(Bool())
 }
 
@@ -67,7 +66,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   // data for redirect, exception, etc.
   val flagBkup = RegInit(VecInit(List.fill(RoqSize)(false.B)))
-  val exuFflags = Mem(RoqSize, new Fflags)
+  val exuFflags = Mem(RoqSize, UInt(5.W))
 
   // uop field used when commit
   // flushPipe (wb) (commit) (used in roq)
@@ -234,7 +233,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val storeCommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val cfiCommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   // wiring to csr
-  val fflags = WireInit(0.U.asTypeOf(new Fflags))
+  val fflags = Wire(new Valid(UInt(5.W)))
+  fflags.valid := false.B
+  fflags.bits := 0.U
   val dirty_fs = WireInit(false.B)
 
   io.commits.isWalk := state =/= s_idle
@@ -261,9 +262,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
         val commitFflags = exuFflags(commitIdx)
         when(io.commits.valid(i)){
-          when(commitFflags.asUInt.orR()){
+          when(commitUop.ctrl.fpu.wflags){
             // update fflags
-            fflags := exuFflags(commitIdx)
+            fflags.bits := exuFflags(commitIdx)
+            fflags.valid := true.B
           }
           when(commitUop.ctrl.fpWen){
             // set fs to dirty

@@ -5,7 +5,6 @@ import xiangshan.backend._
 import xiangshan.HasXSParameter
 import xiangshan.FuType._
 import xiangshan.backend.decode._
-import xiangshan.backend.fu.fpu.FPUOpType._
 
 object RVFInstr extends HasXSParameter with HasInstrType {
 
@@ -43,39 +42,39 @@ object RVFInstr extends HasXSParameter with HasInstrType {
   val table = Array(
     FLW -> List(InstrFI, ldu, LSUOpType.lw),
     FSW -> List(InstrFS, stu, LSUOpType.sw),
-
-    // FR
-    FADD_S    -> List(InstrFR, fmac,  fadd),
-    FSUB_S    -> List(InstrFR, fmac,  fsub),
-    FMUL_S    -> List(InstrFR, fmac,  fmul),
-    FDIV_S    -> List(InstrFR, fmisc, fdiv),
-    FMIN_S    -> List(InstrFR, fmisc, fmin),
-    FMAX_S    -> List(InstrFR, fmisc, fmax),
-    FSGNJ_S   -> List(InstrFR, fmisc, fsgnj),
-    FSGNJN_S  -> List(InstrFR, fmisc, fsgnjn),
-    FSGNJX_S  -> List(InstrFR, fmisc, fsgnjx),
-    FSQRT_S   -> List(InstrFR, fmisc, fsqrt),
-    FMADD_S   -> List(InstrFR, fmac,  fmadd),
-    FNMADD_S  -> List(InstrFR, fmac,  fnmadd),
-    FMSUB_S   -> List(InstrFR, fmac,  fmsub),
-    FNMSUB_S  -> List(InstrFR, fmac,  fnmsub),
-
-    // F -> G
-    FCLASS_S  -> List(InstrFtoG, fmisc, fclass),
-    FMV_X_W   -> List(InstrFtoG, fmisc, fmv_f2i),
-    FCVT_W_S  -> List(InstrFtoG, fmisc, f2w),
-    FCVT_WU_S -> List(InstrFtoG, fmisc, f2wu),
-    FCVT_L_S  -> List(InstrFtoG, fmisc, f2l),
-    FCVT_LU_S -> List(InstrFtoG, fmisc, f2lu),
-    FLE_S     -> List(InstrFtoG, fmisc, fle),
-    FLT_S     -> List(InstrFtoG, fmisc, flt),
-    FEQ_S     -> List(InstrFtoG, fmisc, feq),
-
-    // G -> F
-    FMV_W_X   -> List(InstrGtoF, i2f, fmv_i2f),
-    FCVT_S_W  -> List(InstrGtoF, i2f, w2f),
-    FCVT_S_WU -> List(InstrGtoF, i2f, wu2f),
-    FCVT_S_L  -> List(InstrGtoF, i2f, l2f),
-    FCVT_S_LU -> List(InstrGtoF, i2f, lu2f)
+//
+//    // FR
+//    FADD_S    -> List(InstrFR, fmac,  fadd),
+//    FSUB_S    -> List(InstrFR, fmac,  fsub),
+//    FMUL_S    -> List(InstrFR, fmac,  fmul),
+//    FDIV_S    -> List(InstrFR, fmisc, fdiv),
+//    FMIN_S    -> List(InstrFR, fmisc, fmin),
+//    FMAX_S    -> List(InstrFR, fmisc, fmax),
+//    FSGNJ_S   -> List(InstrFR, fmisc, fsgnj),
+//    FSGNJN_S  -> List(InstrFR, fmisc, fsgnjn),
+//    FSGNJX_S  -> List(InstrFR, fmisc, fsgnjx),
+//    FSQRT_S   -> List(InstrFR, fmisc, fsqrt),
+//    FMADD_S   -> List(InstrFR, fmac,  fmadd),
+//    FNMADD_S  -> List(InstrFR, fmac,  fnmadd),
+//    FMSUB_S   -> List(InstrFR, fmac,  fmsub),
+//    FNMSUB_S  -> List(InstrFR, fmac,  fnmsub),
+//
+//    // F -> G
+//    FCLASS_S  -> List(InstrFtoG, fmisc, fclass),
+//    FMV_X_W   -> List(InstrFtoG, fmisc, fmv_f2i),
+//    FCVT_W_S  -> List(InstrFtoG, fmisc, f2w),
+//    FCVT_WU_S -> List(InstrFtoG, fmisc, f2wu),
+//    FCVT_L_S  -> List(InstrFtoG, fmisc, f2l),
+//    FCVT_LU_S -> List(InstrFtoG, fmisc, f2lu),
+//    FLE_S     -> List(InstrFtoG, fmisc, fle),
+//    FLT_S     -> List(InstrFtoG, fmisc, flt),
+//    FEQ_S     -> List(InstrFtoG, fmisc, feq),
+//
+//    // G -> F
+//    FMV_W_X   -> List(InstrGtoF, i2f, fmv_i2f),
+//    FCVT_S_W  -> List(InstrGtoF, i2f, w2f),
+//    FCVT_S_WU -> List(InstrGtoF, i2f, wu2f),
+//    FCVT_S_L  -> List(InstrGtoF, i2f, l2f),
+//    FCVT_S_LU -> List(InstrGtoF, i2f, lu2f)
   )
 }

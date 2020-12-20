@@ -203,7 +203,7 @@ object Exu {
   val fmacExeUnitCfg = ExuConfig("FmacExeUnit", Seq(fmacCfg), Int.MaxValue, 0)
   val fmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
-    Seq(fcmpCfg, fminCfg, fmvCfg, fsgnjCfg, f2iCfg, s2dCfg, d2sCfg, fdivSqrtCfg),
+    Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
   val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)

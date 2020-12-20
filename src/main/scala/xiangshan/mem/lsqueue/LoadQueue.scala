@@ -10,7 +10,6 @@ import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbReques
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.fu.fpu.boxF32ToF64
 
 
 class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }

@@ -7,7 +7,6 @@ import xiangshan._
 import xiangshan.cache._
 // import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
-import xiangshan.backend.fu.fpu.boxF32ToF64
 
 class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)

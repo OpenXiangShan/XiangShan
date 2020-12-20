@@ -4,15 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.MDUOpType
-import xiangshan.backend.fu.fpu.FPUOpType.{FU_D2S, FU_DIVSQRT, FU_F2I, FU_FCMP, FU_FMV, FU_S2D}
-import xiangshan.backend.fu.fpu.divsqrt.DivSqrt
 import xiangshan.backend.fu.fpu._
-import xiangshan.backend.fu.fpu.fma.FMA
-
-/*
-    XiangShan Function Unit
-    A Exu can have one or more function units
- */
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
@@ -130,24 +122,36 @@ object FunctionUnit extends HasXSParameter {
 
   def csr = new CSR
 
-  def i2f = new IntToFloatSingleCycle
+  def i2f = new IntToFP
 
   def fmac = new FMA
 
-  def fcmp = new FCMP
+  def f2i = new FPToInt
 
-  def fmv = new FMV(XLEN)
+  def f2f = new FPToFP
 
-  def f2i = new FloatToInt
-
-  def f32toF64 = new F32toF64
-
-  def f64toF32 = new F64toF32
-
-  def fdivSqrt = new DivSqrt
+  def fdivSqrt = new FDIvSqrt
 
   def fmiscSel(fu: String)(x: FunctionUnit): Bool = {
     x.io.in.bits.uop.ctrl.fuOpType.head(4) === s"b$fu".U
+  }
+
+  def f2iSel(x: FunctionUnit): Bool = {
+    x.io.in.bits.uop.ctrl.fuType === FuType.i2f
+  }
+
+  def i2fSel(x: FunctionUnit): Bool = {
+    x.io.in.bits.uop.ctrl.fpu.fromInt
+  }
+
+  def f2fSel(x: FunctionUnit): Bool = {
+    val ctrl = x.io.in.bits.uop.ctrl.fpu
+    ctrl.fpWen && !ctrl.div && !ctrl.sqrt
+  }
+
+  def fdivSqrtSel(x: FunctionUnit): Bool = {
+    val ctrl = x.io.in.bits.uop.ctrl.fpu
+    ctrl.div || ctrl.sqrt
   }
 
   val aluCfg = FuConfig(
@@ -192,7 +196,7 @@ object FunctionUnit extends HasXSParameter {
 
   val i2fCfg = FuConfig(
     fuGen = i2f _,
-    fuSel = (x: FunctionUnit) => x.io.in.bits.uop.ctrl.fuType === FuType.i2f,
+    fuSel = i2fSel,
     FuType.i2f,
     numIntSrc = 1,
     numFpSrc = 0,
@@ -232,51 +236,21 @@ object FunctionUnit extends HasXSParameter {
     FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(5)
   )
 
-  val fcmpCfg = FuConfig(
-    fuGen = fcmp _,
-    fuSel = (x: FunctionUnit) => fmiscSel(FU_FCMP)(x) && x.io.in.bits.uop.ctrl.rfWen,
-    FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
-  )
-
-  val fminCfg = FuConfig(
-    fuGen = fcmp _,
-    fuSel = (x: FunctionUnit) => fmiscSel(FU_FCMP)(x) && x.io.in.bits.uop.ctrl.fpWen,
-    FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
-  )
-
-  val fsgnjCfg = FuConfig(
-    fuGen = fmv _,
-    fuSel = (x: FunctionUnit) => fmiscSel(FU_FMV)(x) && x.io.in.bits.uop.ctrl.fpWen,
-    FuType.fmisc, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(1)
-  )
-
-  val fmvCfg = FuConfig(
-    fuGen = fmv _,
-    fuSel = (x: FunctionUnit) => fmiscSel(FU_FMV)(x) && x.io.in.bits.uop.ctrl.rfWen,
-    FuType.fmisc, 0, 2, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(1)
-  )
-
   val f2iCfg = FuConfig(
     fuGen = f2i _,
-    fuSel = fmiscSel(FU_F2I),
+    fuSel = f2iSel,
     FuType.fmisc, 0, 1, writeIntRf = true, writeFpRf = false, hasRedirect = false, CertainLatency(2)
   )
 
-  val s2dCfg = FuConfig(
-    fuGen = f32toF64 _,
-    fuSel = fmiscSel(FU_S2D),
-    FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
-  )
-
-  val d2sCfg = FuConfig(
-    fuGen = f64toF32 _,
-    fuSel = fmiscSel(FU_D2S),
+  val f2fCfg = FuConfig(
+    fuGen = f2f _,
+    fuSel = f2iSel,
     FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
   )
 
   val fdivSqrtCfg = FuConfig(
     fuGen = fdivSqrt _,
-    fuSel = fmiscSel(FU_DIVSQRT),
+    fuSel = fdivSqrtSel,
     FuType.fDivSqrt, 0, 2, writeIntRf = false, writeFpRf = true, hasRedirect = false, UncertainLatency()
   )
 

@@ -3,7 +3,6 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
-import fpu.Fflags
 import utils._
 import xiangshan._
 import xiangshan.backend._
@@ -165,7 +164,7 @@ trait HasExceptionNO {
 }
 
 class FpuCsrIO extends XSBundle {
-  val fflags = Output(new Fflags)
+  val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
@@ -538,8 +537,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val rdataDummy = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
 
-  when(csrio.fpu.fflags.asUInt() =/= 0.U){
-    fcsr := fflags_wfn(csrio.fpu.fflags.asUInt())
+  when(csrio.fpu.fflags.valid){
+    fcsr := fflags_wfn(csrio.fpu.fflags.bits)
   }
   // set fs and sd in mstatus
   when(csrw_dirty_fp_state || csrio.fpu.dirty_fs){

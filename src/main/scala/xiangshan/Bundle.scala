@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
 import xiangshan.backend.brq.BrqPtr
-import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.decode.XDecode
@@ -290,7 +289,7 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt((XLEN+1).W)
-  val fflags  = new Fflags
+  val fflags  = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect
   val brUpdate = new BranchUpdateInfo
