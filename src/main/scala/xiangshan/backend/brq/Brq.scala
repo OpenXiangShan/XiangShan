@@ -51,11 +51,9 @@ class BrqIO extends XSBundle{
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
   val redirect = Output(Valid(new Redirect))
-  val outOfOrderBrInfo = ValidIO(new BranchUpdateInfo)
+  val cfiInfo = ValidIO(new CfiUpdateInfo)
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
-  // in order dequeue to train bpd
-  val inOrderBrInfo = ValidIO(new BranchUpdateInfo)
 }
 
 class Brq extends XSModule with HasCircularQueuePtrHelper {
@@ -63,7 +61,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   class BrqEntry extends Bundle {
     val ptrFlag = Bool()
-    val npc = UInt(VAddrBits.W)
     val exuOut = new ExuOutput
   }
 
@@ -117,15 +114,13 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val deqValid = stateQueue(headIdx).isCommit && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
-  val commitIsMisPred = commitEntry.exuOut.redirect.isMisPred
+  val commitIsMisPred = commitEntry.exuOut.brUpdate.isMisPred
 
   brCommitCnt := brCommitCnt + io.bcommit - deqValid
 
   XSDebug(p"brCommitCnt:$brCommitCnt\n")
   assert(brCommitCnt+io.bcommit >= deqValid)
-  io.inOrderBrInfo.valid := commitValid
-  io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
-  XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
+  XSDebug(io.cfiInfo.valid, "inOrderValid: pc=%x\n", io.cfiInfo.bits.pc)
 
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
@@ -149,20 +144,19 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
   headPtr := headPtrNext
-  io.redirect.valid := commitValid &&
-    commitIsMisPred //&&
-    // !io.roqRedirect.valid &&
-    // !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
+  io.redirect.valid := commitValid && commitIsMisPred
   io.redirect.bits := commitEntry.exuOut.redirect
+  io.redirect.bits.brTag := BrqPtr(commitEntry.ptrFlag, commitIdx)
+
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
-  io.outOfOrderBrInfo.valid := commitValid
-  io.outOfOrderBrInfo.bits := commitEntry.exuOut.brUpdate
 
-  when (io.redirect.valid) {
-    commitEntry.npc := io.redirect.bits.target
-  }
+  val brTagRead = RegNext(Mux(io.memRedirect.bits.isReplay, io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
+  io.cfiInfo.valid := RegNext(io.memRedirect.valid || commitValid)
+  io.cfiInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
+  io.cfiInfo.bits.brTag := brTagRead
+  io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
 
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
@@ -176,9 +170,13 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     val idx = brTag.value
     io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
     io.brTags(i) := brTag
-    when(io.enqReqs(i).fire()){
-      brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc
+    when (io.enqReqs(i).fire()) {
       brQueue(idx).ptrFlag := brTag.flag
+      brQueue(idx).exuOut.brUpdate.pc := io.enqReqs(i).bits.cf.brUpdate.pc
+      brQueue(idx).exuOut.brUpdate.pnpc := io.enqReqs(i).bits.cf.brUpdate.pnpc
+      brQueue(idx).exuOut.brUpdate.fetchIdx := io.enqReqs(i).bits.cf.brUpdate.fetchIdx
+      brQueue(idx).exuOut.brUpdate.pd := io.enqReqs(i).bits.cf.brUpdate.pd
+      brQueue(idx).exuOut.brUpdate.bpuMeta := io.enqReqs(i).bits.cf.brUpdate.bpuMeta
       stateQueue(idx) := s_idle
     }
   }
@@ -187,20 +185,29 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   // exu write back
   for(exuWb <- io.exuRedirect){
-    when(exuWb.valid){
+    when (exuWb.valid) {
       val wbIdx = exuWb.bits.redirect.brTag.value
       XSInfo(
         p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
-          p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
+        p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} " +
+        p"pnpc=${Hexadecimal(brQueue(wbIdx).exuOut.brUpdate.pnpc)} " +
+        p"target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
       )
-      when(stateQueue(wbIdx).isIdle){
+      when (stateQueue(wbIdx).isIdle) {
         stateQueue(wbIdx) := s_wb
       }
-      val exuOut = WireInit(exuWb.bits)
-      val isMisPred = brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
-      exuOut.redirect.isMisPred := isMisPred
-      exuOut.brUpdate.isMisPred := isMisPred
-      brQueue(wbIdx).exuOut := exuOut
+      val isMisPred = brQueue(wbIdx).exuOut.brUpdate.pnpc =/= exuWb.bits.redirect.target
+      // only writeback necessary information
+      brQueue(wbIdx).exuOut.uop := exuWb.bits.uop
+      brQueue(wbIdx).exuOut.data := exuWb.bits.data
+      brQueue(wbIdx).exuOut.fflags := exuWb.bits.fflags
+      brQueue(wbIdx).exuOut.redirectValid := exuWb.bits.redirectValid
+      brQueue(wbIdx).exuOut.redirect := exuWb.bits.redirect
+      brQueue(wbIdx).exuOut.debug := exuWb.bits.debug
+      brQueue(wbIdx).exuOut.brUpdate.target := exuWb.bits.brUpdate.target
+      brQueue(wbIdx).exuOut.brUpdate.brTarget := exuWb.bits.brUpdate.brTarget
+      brQueue(wbIdx).exuOut.brUpdate.taken := exuWb.bits.brUpdate.taken
+      brQueue(wbIdx).exuOut.brUpdate.isMisPred := isMisPred
     }
   }
 

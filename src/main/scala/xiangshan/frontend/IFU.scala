@@ -70,8 +70,8 @@ class IFUIO extends XSBundle
 {
   val fetchPacket = DecoupledIO(new FetchPacket)
   val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
-  val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-  val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  // val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
+  val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
   val icacheReq = DecoupledIO(new ICacheReq)
   val icacheResp = Flipped(DecoupledIO(new ICacheResp))
   val icacheFlush = Output(UInt(2.W))
@@ -179,7 +179,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
 
   // the previous half of RVI instruction waits until it meets its last half
-  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && (if3_prevHalfInstr.pc + 2.U) === if3_pc && if3_valid
+  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && (if3_prevHalfInstr.pc + 2.U) === if3_pc && if3_valid && (inLoop || io.icacheResp.valid)
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
@@ -355,11 +355,11 @@ class IFU extends XSModule with HasIFUConst
 
 
 
-
-  when (io.outOfOrderBrInfo.valid && io.outOfOrderBrInfo.bits.isMisPred) {
-    val b = io.outOfOrderBrInfo.bits
-    val oldGh = b.brInfo.hist
-    val sawNTBr = b.brInfo.sawNotTakenBranch
+  val cfiUpdate = io.cfiUpdateInfo
+  when (cfiUpdate.valid && (cfiUpdate.bits.isMisPred || cfiUpdate.bits.isReplay)) {
+    val b = cfiUpdate.bits
+    val oldGh = b.bpuMeta.hist
+    val sawNTBr = b.bpuMeta.sawNotTakenBranch
     val isBr = b.pd.isBr
     val taken = b.taken
     val updatedGh = oldGh.update(sawNTBr, isBr && taken)
@@ -398,11 +398,7 @@ class IFU extends XSModule with HasIFUConst
 
   io.icacheFlush := Cat(if3_flush, if2_flush)
 
-  val inOrderBrHist = io.inOrderBrInfo.bits.brInfo.predHist
-  bpu.io.inOrderBrInfo.valid := io.inOrderBrInfo.valid
-  bpu.io.inOrderBrInfo.bits := BranchUpdateInfoWithHist(io.inOrderBrInfo.bits, inOrderBrHist.asUInt)
-  bpu.io.outOfOrderBrInfo.valid := io.outOfOrderBrInfo.valid
-  bpu.io.outOfOrderBrInfo.bits := BranchUpdateInfoWithHist(io.outOfOrderBrInfo.bits, inOrderBrHist.asUInt) // Dont care about hist
+  bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
   // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
@@ -461,16 +457,13 @@ class IFU extends XSModule with HasIFUConst
 
   loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
-  (0 until PredictWidth).foreach(i => 
-    fetchPacketWire.pnpc(i) := Mux(if4_bp.taken && if4_bp.jmpIdx === i.U,
-                                    if4_bp.target,
-                                    Mux(if4_pendingPrevHalfInstr,
-                                      (if (i == 0) Cat(bankAligned(if4_pd.pc(1))(VAddrBits-1, bankBytes), 2.U(bankBytes.W))
-                                      else Cat(bankAligned(if4_pd.pc(1))(VAddrBits-1, bankBytes), (i << 1).U(bankBytes.W) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))),
-                                      Cat(bankAligned(if4_pd.pc(0))(VAddrBits-1, bankBytes), (i << 1).U(bankBytes.W) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U)))))
-  fetchPacketWire.brInfo := bpu.io.branchInfo
-  (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).hist := final_gh)
-  (0 until PredictWidth).foreach(i => fetchPacketWire.brInfo(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
+  (0 until PredictWidth).foreach(i => fetchPacketWire.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
+  when (if4_bp.taken) {
+    fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
+  }
+  fetchPacketWire.bpuMeta := bpu.io.bpuMeta
+  (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).hist := final_gh)
+  (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
   fetchPacketWire.pd := if4_pd.pd
   fetchPacketWire.ipf := if4_ipf
   fetchPacketWire.acf := if4_acf

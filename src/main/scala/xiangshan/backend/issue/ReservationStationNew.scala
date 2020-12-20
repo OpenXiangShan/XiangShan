@@ -170,7 +170,7 @@ class ReservationStationCtrl
   // redirect and feedback
   for (i <- 0 until iqSize) {
     val cnt = cntQueue(idxQueue(i))
-
+    when (!(deqIdx === i.U && deqValid)) {
     if (i != 0) { // TODO: combine the two case
       val nextIdx = i.U - moveMask(i-1)
       when (stateQueue(i)===s_replay) {
@@ -194,6 +194,7 @@ class ReservationStationCtrl
       }
       when (redHitVec(i)) { stateQueue(nextIdx) := s_idle }
     }}
+    }
   }
 
   // output

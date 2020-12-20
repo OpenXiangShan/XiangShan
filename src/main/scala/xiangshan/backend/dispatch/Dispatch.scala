@@ -6,12 +6,12 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
 import xiangshan.backend.rename.RenameBypassInfo
+import xiangshan.mem.LsqEnqIO
 
 case class DispatchParameters
 (
-  DqEnqWidth: Int,
   IntDqSize: Int,
   FpDqSize: Int,
   LsDqSize: Int,
@@ -30,19 +30,9 @@ class Dispatch extends XSModule {
     // to busytable: set pdest to busy (not ready) when they are dispatched
     val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // enq Roq
-    val enqRoq = new Bundle {
-      val canAccept = Input(Bool())
-      val isEmpty = Input(Bool())
-      val extraWalk = Vec(RenameWidth, Output(Bool()))
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new RoqPtr))
-    }
+    val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
-    val enqLsq = new Bundle() {
-      val canAccept = Input(Bool())
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new LSIdx))
-    }
+    val enqLsq = Flipped(new LsqEnqIO)
     // read regfile
     val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
     val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
@@ -56,9 +46,9 @@ class Dispatch extends XSModule {
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
 
   // pipeline between rename and dispatch
   // accepts all at once
@@ -68,15 +58,12 @@ class Dispatch extends XSModule {
   }
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
-  dispatch1.io.redirect <> io.redirect
+  // dispatch1.io.redirect <> io.redirect
   dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
-  dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq
-  dispatch1.io.toFpDqReady <> fpDq.io.enqReady
   dispatch1.io.toFpDq <> fpDq.io.enq
-  dispatch1.io.toLsDqReady <> lsDq.io.enqReady
   dispatch1.io.toLsDq <> lsDq.io.enq
   dispatch1.io.allocPregs <> io.allocPregs
 

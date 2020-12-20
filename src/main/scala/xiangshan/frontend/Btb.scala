@@ -63,7 +63,7 @@ class BTB extends BasePredictor with BTBParams{
     val hitJal = Vec(PredictWidth, Bool())
   }
   class BTBFromOthers extends FromOthers {}
-  
+
   class BTBIO extends DefaultBasePredictorIO {
     val resp = Output(new BTBResp)
     val meta = Output(new BTBMeta)
@@ -104,7 +104,7 @@ class BTB extends BasePredictor with BTBParams{
   val if1_isInNextRow = VecInit((0 until BtbBanks).map(i => Mux(if1_startsAtOddBank, (i < bankWidth).B, false.B)))
 
   val if1_baseRow = btbAddr.getBankIdx(if1_bankAlignedPC)
-  
+
   val if1_nextRowStartsUp = if1_baseRow.andR
 
   val if1_realRow = VecInit((0 until BtbBanks).map(b => Mux(if1_isInNextRow(b), (if1_baseRow+1.U)(log2Up(nRows)-1, 0), if1_baseRow)))
@@ -138,7 +138,7 @@ class BTB extends BasePredictor with BTBParams{
   val if2_tagIncremented = VecInit((0 until BtbBanks).map(b => RegEnable(if1_isInNextRow(b.U) && if1_nextRowStartsUp, io.pc.valid)))
   val if2_realTags = VecInit((0 until BtbBanks).map(b => Mux(if2_tagIncremented(b), if2_baseTag + 1.U, if2_baseTag)))
 
-  val if2_totalHits = VecInit((0 until BtbBanks).map( b => 
+  val if2_totalHits = VecInit((0 until BtbBanks).map( b =>
     VecInit((0 until BtbWays).map( w =>
       // This should correspond to the real mask from last valid cycle!
       if2_metaRead(w)(b).tag === if2_realTags(b) && if2_metaRead(w)(b).valid && if2_realMask(b)
@@ -156,7 +156,7 @@ class BTB extends BasePredictor with BTBParams{
       val tags = Cat(meta_tags, req_tag)
       val l = log2Up(BtbWays)
       val nChunks = (tags.getWidth + l - 1) / l
-      val chunks = (0 until nChunks).map( i => 
+      val chunks = (0 until nChunks).map( i =>
         tags(min((i+1)*l, tags.getWidth)-1, i*l)
       )
       w := Mux(valid, if (randomAlloc) {LFSR64()(log2Up(BtbWays)-1,0)} else {chunks.reduce(_^_)}, PriorityEncoder(~valids))
@@ -166,7 +166,7 @@ class BTB extends BasePredictor with BTBParams{
       w
     }
   }
-  val allocWays = VecInit((0 until BtbBanks).map(b => 
+  val allocWays = VecInit((0 until BtbBanks).map(b =>
     allocWay(VecInit(if2_metaRead.map(w => w(b).valid)).asUInt,
              VecInit(if2_metaRead.map(w => w(b).tag)).asUInt,
              if2_realTags(b))))
@@ -201,8 +201,8 @@ class BTB extends BasePredictor with BTBParams{
     when (pd.isBr)   { t := BTBtype.B}
     t
   }
-  val u = io.update.bits.ui
-  
+  val u = io.update.bits
+
   val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
   val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
   val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
@@ -210,7 +210,7 @@ class BTB extends BasePredictor with BTBParams{
   val new_extended = (new_offset > max_offset || new_offset < min_offset)
 
 
-  val updateWay = u.brInfo.btbWriteWay
+  val updateWay = u.bpuMeta.btbWriteWay
   val updateBankIdx = btbAddr.getBank(u.pc)
   val updateEBank = updateBankIdx(log2Ceil(BtbBanks)-1) // highest bit of bank idx
   val updateRow = btbAddr.getBankIdx(u.pc)
@@ -218,8 +218,8 @@ class BTB extends BasePredictor with BTBParams{
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
   val dataWrite = BtbDataEntry(new_offset, new_extended)
 
-  val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && updateType === BTBtype.J
-  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered)
+  val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && updateType === BTBtype.J
+  val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay
   // Update btb
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
@@ -231,7 +231,7 @@ class BTB extends BasePredictor with BTBParams{
       data(w)(b).io.w.req.bits.data := dataWrite
     }
   }
-  
+
   for (b <- 0 to 1) {
     edata(b).io.w.req.valid := updateValid && new_extended && b.U === updateEBank
     edata(b).io.w.req.bits.setIdx := updateRow
@@ -241,7 +241,7 @@ class BTB extends BasePredictor with BTBParams{
 
   if (BPUDebug && debug) {
     val debug_verbose = true
-    
+
     XSDebug("isInNextRow: ")
     (0 until BtbBanks).foreach(i => {
       XSDebug(false, true.B, "%d ", if1_isInNextRow(i))
@@ -269,13 +269,13 @@ class BTB extends BasePredictor with BTBParams{
         i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
     }
     XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-      u.brInfo.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+      u.bpuMeta.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
     for (i <- 0 until BtbBanks) {
       // Conflict when not hit and allocating a valid entry
       val conflict = if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i)
       XSDebug(conflict, "bank(%d) is trying to allocate a valid way(%d)\n", i.U, allocWays(i))
       // There is another circumstance when a branch is on its way to update while another
-      // branch chose the same way to udpate, then after the first branch is wrote in, 
+      // branch chose the same way to udpate, then after the first branch is wrote in,
       // the second branch will overwrite the first branch
   }
 

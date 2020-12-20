@@ -117,7 +117,7 @@ class TlbEntry extends TlbBundle {
 class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   require(log2Up(num)==log2Down(num))
   /* vpn can be divide into three part */
-  // vpn: tagPart + addrPart
+  // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
   val cutLen  = log2Up(num)
 
   val tag     = UInt(tagLen.W) // NOTE: high part of vpn
@@ -127,9 +127,10 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   val vs      = Vec(num, Bool())
 
   def tagClip(vpn: UInt, level: UInt) = { // full vpn => tagLen
-    Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2+cutLen)),
-    Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1+cutLen)),
-                     Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0+cutLen))))(tagLen-1, 0)
+    val tmp = Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2)),
+              Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1)),
+                               Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0))))
+    tmp(tmp.getWidth-1, tmp.getWidth-tagLen)
   }
 
   // NOTE: get insize idx
@@ -273,8 +274,32 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   val g = VecInit(entry.map(_.perm.g)).asUInt // TODO: need check if reverse is needed
 
+  /**
+    * PTW refill
+    */
+  val refill = ptw.resp.fire()
+  val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
+  val priorIdx = PriorityEncoder(~(v|pf))
+  val tlbfull = ParallelAND((v|pf).asBools)
+  val refillIdx = Mux(tlbfull, randIdx, priorIdx)
+  val refillIdxOH = UIntToOH(refillIdx)
+  when (refill) {
+    v := Mux(ptw.resp.bits.pf, v & ~refillIdxOH, v | refillIdxOH)
+    entry(refillIdx) := ptw.resp.bits.entry
+    XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
+  }
+
+  /**
+    * L1 TLB read
+    */
+  val tlb_read_mask = Mux(refill, refillIdxOH, 0.U(TlbEntrySize.W))
   def TLBRead(i: Int) = {
-    val entryHitVec = VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
+    val entryHitVec = (
+      if (isDtlb)
+        VecInit((tlb_read_mask.asBools zip entry).map{ case (r, e) => !r && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
+      else
+        VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
+    )
 
     val reqAddrReg = if (isDtlb) RegNext(reqAddr(i)) else reqAddr(i)
     val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
@@ -364,25 +389,12 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
   val pfHitRefill = ParallelOR(pfHitReset.asBools)
 
-  // refill
-  val refill = ptw.resp.fire()
-  val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
-  val priorIdx = PriorityEncoder(~(v|pf))
-  val tlbfull = ParallelAND((v|pf).asBools)
-  val refillIdx = Mux(tlbfull, randIdx, priorIdx)
-  val re2OH = UIntToOH(refillIdx)
-  when (refill) {
-    v := Mux(ptw.resp.bits.pf, v & ~re2OH, v | re2OH)
-    entry(refillIdx) := ptw.resp.bits.entry
-    XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
-  }
-
   // pf update
   when (refill) {
     when (pfHitRefill) {
-      pf := Mux(ptw.resp.bits.pf, pf | re2OH, pf & ~re2OH) & ~pfHitReset
+      pf := Mux(ptw.resp.bits.pf, pf | refillIdxOH, pf & ~refillIdxOH) & ~pfHitReset
     } .otherwise {
-      pf := Mux(ptw.resp.bits.pf, pf | re2OH, pf & ~re2OH)
+      pf := Mux(ptw.resp.bits.pf, pf | refillIdxOH, pf & ~refillIdxOH)
     }
   } .otherwise {
     when (pfHitRefill) {
@@ -390,7 +402,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
   }
   when (PopCount(pf) > 10.U) { // when too much pf, just clear
-    pf := Mux(refill && ptw.resp.bits.pf, re2OH, 0.U)
+    pf := Mux(refill && ptw.resp.bits.pf, refillIdxOH, 0.U)
   }
 
   // sfence (flush)

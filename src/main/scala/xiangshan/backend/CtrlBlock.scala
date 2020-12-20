@@ -12,6 +12,7 @@ import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
 import xiangshan.backend.roq.{Roq, RoqPtr, RoqCSRIO}
+import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
@@ -30,11 +31,7 @@ class CtrlToFpBlockIO extends XSBundle {
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
-  val enqLsq = new Bundle() {
-    val canAccept = Input(Bool())
-    val req = Vec(RenameWidth, ValidIO(new MicroOp))
-    val resp = Vec(RenameWidth, Input(new LSIdx))
-  }
+  val enqLsq = Flipped(new LsqEnqIO)
   val redirect = ValidIO(new Redirect)
 }
 
@@ -78,10 +75,10 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val redirectValid = roq.io.redirect.valid || brq.io.redirect.valid || io.fromLsBlock.replay.valid
   val redirect = Mux(roq.io.redirect.valid, roq.io.redirect.bits, redirectArb)
 
-  io.frontend.redirect.valid := redirectValid
-  io.frontend.redirect.bits := Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target)
-  io.frontend.outOfOrderBrInfo <> brq.io.outOfOrderBrInfo
-  io.frontend.inOrderBrInfo <> brq.io.inOrderBrInfo
+  io.frontend.redirect.valid := RegNext(redirectValid)
+  io.frontend.redirect.bits := RegNext(Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target))
+  // io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
+  io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
 
   decode.io.in <> io.frontend.cfVec
   decode.io.toBrq <> brq.io.enqReqs
@@ -95,8 +92,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   brq.io.exuRedirect <> io.fromIntBlock.exuRedirect
 
   // pipeline between decode and dispatch
+  val lastCycleRedirect = RegNext(redirectValid)
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirectValid)
+    PipelineConnect(decode.io.out(i), rename.io.in(i), rename.io.in(i).ready, redirectValid || lastCycleRedirect)
   }
 
   rename.io.redirect.valid <> redirectValid

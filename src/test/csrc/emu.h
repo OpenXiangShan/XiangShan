@@ -14,6 +14,7 @@ struct EmuArgs {
   const char *image;
   const char *snapshot_path;
   bool enable_waveform;
+  bool enable_snapshot;
 
   EmuArgs() {
     seed = 0;
@@ -24,6 +25,7 @@ struct EmuArgs {
     snapshot_path = NULL;
     image = NULL;
     enable_waveform = false;
+    enable_snapshot = true;
   }
 };
 
@@ -56,9 +58,13 @@ class Emulator {
   void display_trapinfo();
   inline char* timestamp_filename(time_t t, char *buf);
   inline char* snapshot_filename(time_t t);
+  inline char* coverage_filename(time_t t);
   void snapshot_save(const char *filename);
   void snapshot_load(const char *filename);
   inline char* waveform_filename(time_t t);
+#if VM_COVERAGE == 1
+  inline void save_coverage(time_t t);
+#endif
 
 public:
   Emulator(int argc, const char *argv[]);

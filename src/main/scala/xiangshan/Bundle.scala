@@ -24,7 +24,7 @@ class FetchPacket extends XSBundle {
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
-  val brInfo = Vec(PredictWidth, new BranchInfo)
+  val bpuMeta = Vec(PredictWidth, new BpuMeta)
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
   val acf = Bool()
@@ -114,7 +114,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
 }
 
-class BranchInfo extends XSBundle with HasBPUParameter {
+class BpuMeta extends XSBundle with HasBPUParameter {
   val ubtbWriteWay = UInt(log2Up(UBtbWays).W)
   val ubtbHits = Bool()
   val btbWriteWay = UInt(log2Up(BtbWays).W)
@@ -153,20 +153,22 @@ class Predecode extends XSBundle with HasIFUConst {
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
 
-class BranchUpdateInfo extends XSBundle {
+class CfiUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)
+  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
+  // frontend -> backend -> frontend
+  val pd = new PreDecodeInfo
+  val bpuMeta = new BpuMeta
+
+  // need pipeline update
   val target = UInt(VAddrBits.W)
   val brTarget = UInt(VAddrBits.W)
   val taken = Bool()
-  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
   val isMisPred = Bool()
   val brTag = new BrqPtr
-
-  // frontend -> backend -> frontend
-  val pd = new PreDecodeInfo
-  val brInfo = new BranchInfo
+  val isReplay = Bool()
 }
 
 // Dequeue DecodeWidth insts from Ibuffer
@@ -175,7 +177,7 @@ class CtrlFlow extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val exceptionVec = Vec(16, Bool())
   val intrVec = Vec(12, Bool())
-  val brUpdate = new BranchUpdateInfo
+  val brUpdate = new CfiUpdateInfo
   val crossPageIPFFix = Bool()
 }
 
@@ -272,7 +274,7 @@ class ExuOutput extends XSBundle {
   val fflags  = new Fflags
   val redirectValid = Bool()
   val redirect = new Redirect
-  val brUpdate = new BranchUpdateInfo
+  val brUpdate = new CfiUpdateInfo
   val debug = new DebugBundle
 }
 
@@ -319,8 +321,8 @@ class FrontendToBackendIO extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
   val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
-  val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
-  val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
+  // val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
+  val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
 }
 
 class TlbCsrBundle extends XSBundle {

@@ -76,7 +76,7 @@ class StoreUnit_S1 extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.lsq.valid := io.in.valid // TODO: && ! FP
+  io.lsq.valid := io.in.valid && !s1_tlb_miss// TODO: && ! FP
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
