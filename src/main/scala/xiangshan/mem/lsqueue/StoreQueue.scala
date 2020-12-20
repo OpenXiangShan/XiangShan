@@ -278,6 +278,18 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     }
   })
 
+  if(!env.FPGAPlatform) {
+    val storeCommit = PopCount(io.sbuffer.map(_.fire()))
+    val waddr = VecInit(io.sbuffer.map(req => SignExt(req.bits.addr, 64)))
+    val wdata = VecInit(io.sbuffer.map(req => req.bits.data & MaskExpand(req.bits.mask)))
+    val wmask = VecInit(io.sbuffer.map(_.bits.mask))
+
+    ExcitingUtils.addSource(RegNext(storeCommit), "difftestStoreCommit", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(waddr), "difftestStoreAddr", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wdata), "difftestStoreData", ExcitingUtils.Debug)
+    ExcitingUtils.addSource(RegNext(wmask), "difftestStoreMask", ExcitingUtils.Debug)
+  }
+
   // Memory mapped IO / other uncached operations
 
   // setup misc mem access req

@@ -53,6 +53,7 @@ class Emulator {
 
   inline void read_emu_regs(uint64_t *r);
   inline void read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wdst);
+  inline void read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
   inline void reset_ncycles(size_t cycles);
   inline void single_cycle();
   void display_trapinfo();
