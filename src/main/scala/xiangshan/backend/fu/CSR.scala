@@ -828,7 +828,6 @@ class CSR extends FunctionUnit with HasCSRConst
     "RoqWaitFp"   -> (0xb11, "perfCntCondRoqWaitFp"   ),
     "RoqWaitLoad" -> (0xb12, "perfCntCondRoqWaitLoad" ),
     "RoqWaitStore"-> (0xb13, "perfCntCondRoqWaitStore"),
-    "Dp1Empty"    -> (0xb14, "perfCntCondDp1Empty"    ),
     "DTlbReqCnt0" -> (0xb15, "perfCntDtlbReqCnt0"     ),
     "DTlbReqCnt1" -> (0xb16, "perfCntDtlbReqCnt1"     ),
     "DTlbReqCnt2" -> (0xb17, "perfCntDtlbReqCnt2"     ),
