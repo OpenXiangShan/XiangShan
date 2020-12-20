@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
+import chisel3.experimental.chiselName
 
 import scala.math.min
 
@@ -15,11 +16,12 @@ trait MicroBTBPatameter{
     val extended_stat = false
 }
 
+@chiselName
 class MicroBTB extends BasePredictor
     with MicroBTBPatameter
 {
     // val tagSize = VAddrBits - log2Ceil(PredictWidth) - 1
-    val untaggedBits = PredictWidth + 1
+    val untaggedBits = log2Up(PredictWidth) + 1
 
     class MicroBTBResp extends Resp
     {
@@ -98,6 +100,7 @@ class MicroBTB extends BasePredictor
         val pred = UInt(2.W)
     }
 
+    @chiselName
     class UBTBMetaBank(nWays: Int) extends XSModule {
         val io = IO(new Bundle {
             val wen = Input(Bool())
@@ -106,6 +109,7 @@ class MicroBTB extends BasePredictor
             val rtag = Input(UInt(tagSize.W))
             val rdata = Output(new MetaOutput)
             val hit_ohs = Output(Vec(nWays, Bool()))
+            val hit_way = Output(UInt(log2Up(nWays).W))
             val allocatable_way = Valid(UInt(log2Up(nWays).W))
             val rWay = Input(UInt(log2Up(nWays).W))
             val rpred = Output(UInt(2.W))
@@ -116,6 +120,7 @@ class MicroBTB extends BasePredictor
         val hit_way = PriorityEncoder(hit_ohs)
         val hit_entry = rentries(hit_way)
         io.hit_ohs := hit_ohs
+        io.hit_way := hit_way
         io.rdata.is_Br  := hit_entry.is_Br
         io.rdata.is_RVC := hit_entry.is_RVC
         io.rdata.pred   := hit_entry.pred
@@ -129,6 +134,7 @@ class MicroBTB extends BasePredictor
         }
     }
 
+    @chiselName
     class UBTBDataBank(nWays: Int) extends XSModule {
         val io = IO(new Bundle {
             val wen = Input(Bool())
@@ -160,9 +166,14 @@ class MicroBTB extends BasePredictor
 
     //uBTB read
     //tag is bank align
+    val bankAlignedPC = bankAligned(io.pc.bits)
+    val startsAtOddBank = bankInGroup(bankAlignedPC)(0).asBool
+    
+
+
     val read_valid = io.pc.valid
-    val read_req_tag = getTag(io.pc.bits)
-    val read_req_basebank = getBank(io.pc.bits)
+    val read_req_tag = getTag(bankAlignedPC)
+    val next_tag = read_req_tag + 1.U
     // val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
     
@@ -175,22 +186,21 @@ class MicroBTB extends BasePredictor
         val is_Br = Bool()
     }
     val read_resp = Wire(Vec(PredictWidth,new ReadRespEntry))
-
-    val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(log2Up(PredictWidth)-1,0) ))
+    //val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(log2Up(PredictWidth)-1,0) ))
     // val isInNextRow = VecInit((0 until PredictWidth).map(_.U < read_req_basebank))
     
-    (0 until PredictWidth).map{ b => metas(b).rtag := read_req_tag }
-    val read_hit_ohs = read_bank_inOrder.map{ b => metas(b).hit_ohs }
+    (0 until PredictWidth).map{ b => metas(b).rtag := Mux(startsAtOddBank && (b > PredictWidth).B,next_tag,read_req_tag) }
+    val read_hit_ohs = (0 until PredictWidth).map{ b => metas(b).hit_ohs }
     val read_hit_vec = VecInit(read_hit_ohs.map{oh => ParallelOR(oh).asBool})
-    val read_hit_ways = VecInit(read_hit_ohs.map{oh => PriorityEncoder(oh)})
+    val read_hit_ways = (0 until PredictWidth).map{ b => metas(b).hit_way }
     // val read_hit =  ParallelOR(read_hit_vec).asBool
     // val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
     
 
-    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways((b.U + PredictWidth.U - read_req_basebank)(log2Up(PredictWidth)-1, 0)))
+    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways(b))
 
-    val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => metas(read_bank_inOrder(b)).rdata))
-    val  btb_resp = VecInit((0 until PredictWidth).map(b => datas(read_bank_inOrder(b)).rdata))  
+    val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => metas(b).rdata))
+    val  btb_resp = VecInit((0 until PredictWidth).map(b => datas(b).rdata))  
 
     for(i <- 0 until PredictWidth){
         // do not need to decide whether to produce results\
@@ -224,7 +234,7 @@ class MicroBTB extends BasePredictor
         
     // }
 
-    val alloc_ways = read_bank_inOrder.map{ b => 
+    val alloc_ways = (0 until PredictWidth).map{ b => 
         Mux(metas(b).allocatable_way.valid, metas(b).allocatable_way.bits, LFSR64()(log2Ceil(nWays)-1,0))}
     (0 until PredictWidth).map(i => out_ubtb_br_info.writeWay(i) := Mux(read_hit_vec(i).asBool,read_hit_ways(i),alloc_ways(i)))
 
@@ -259,8 +269,8 @@ class MicroBTB extends BasePredictor
   
   
     val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && (u.pd.brType === BrType.jal)
-    val entry_write_valid = io.update.valid && (u.isMisPred || !u.isMisPred && u.pd.isBr || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
-    val meta_write_valid = io.update.valid && (u.isMisPred || !u.isMisPred && u.pd.isBr || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
+    val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
+    val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
     //write btb target when miss prediction
     // when(entry_write_valid)
     // {
@@ -293,7 +303,7 @@ class MicroBTB extends BasePredictor
     }
 
     if (BPUDebug && debug) {
-        XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  basebank:%d\n",io.pc.bits,read_req_tag,read_req_basebank)
+        XSDebug(read_valid,"uBTB read req: pc:0x%x, tag:%x  startAtOdd:%d\n",io.pc.bits,read_req_tag,startsAtOddBank)
         XSDebug(read_valid,"uBTB read resp:   read_hit_vec:%b, \n",read_hit_vec.asUInt)
         for(i <- 0 until PredictWidth) {
             XSDebug(read_valid,"bank(%d)   hit:%d   way:%d   valid:%d  is_RVC:%d  taken:%d   isBr:%d   target:0x%x  alloc_way:%d\n",

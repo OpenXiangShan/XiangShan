@@ -122,7 +122,7 @@ class Dispatch1 extends XSModule {
     *   acquire ROQ (all), LSQ (load/store only) and dispatch queue slots
     *   only set valid when all of them provides enough entries
     */
-  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
+  val redirectValid = io.redirect.valid// && !io.redirect.bits.isReplay
   val allResourceReady = io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDqReady && io.toFpDqReady && io.toLsDqReady
 
   // Instructions should enter dispatch queues in order.

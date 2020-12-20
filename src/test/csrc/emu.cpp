@@ -3,6 +3,7 @@
 #include "difftest.h"
 #include <getopt.h>
 #include "ram.h"
+#include "zlib.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -78,7 +79,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
-  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
@@ -193,7 +193,11 @@ inline void Emulator::single_cycle() {
 #ifdef WITH_DRAMSIM3
   axi_channel axi;
   axi_copy_from_dut_ptr(dut_ptr, axi);
+  axi.aw.addr -= 0x80000000UL;
+  axi.ar.addr -= 0x80000000UL;
   dramsim3_helper(axi);
+  axi.aw.addr += 0x80000000UL;
+  axi.ar.addr += 0x80000000UL;
   axi_set_dut_ptr(dut_ptr, axi);
 #endif
 
@@ -243,6 +247,13 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   diff.wdata = wdata;
   diff.wdst = wdst;
 
+#if VM_COVERAGE == 1
+  // we dump coverage into files at the end
+  // since we are not sure when an emu will stop
+  // we distinguish multiple dat files by emu start time
+  time_t start_time = time(NULL);
+#endif
+
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
       trapCode = STATE_LIMIT_EXCEEDED;
@@ -270,6 +281,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       long get_img_size();
       ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
       ref_difftest_setregs(reg);
+      printf("The first instruction has commited. Difftest enabled. \n");
     }
 
     // difftest
@@ -321,6 +333,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
   if (Verilated::gotFinish()) {
+    difftest_display(dut_ptr->io_difftest_priviledgeMode);
     eprintf("The simulation stopped. There might be some assertion failed.\n");
     trapCode = STATE_ABORT;
   }
@@ -328,6 +341,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
 #endif
+
+#if VM_COVERAGE == 1
+  save_coverage(start_time);
+#endif
+
   display_trapinfo();
   return cycles;
 }
@@ -356,6 +374,22 @@ inline char* Emulator::waveform_filename(time_t t) {
   strcpy(p, ".vcd");
   return buf;
 }
+
+
+#if VM_COVERAGE == 1
+inline char* Emulator::coverage_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".coverage.dat");
+  return buf;
+}
+
+inline void Emulator::save_coverage(time_t t) {
+  char *p = coverage_filename(t);
+  VerilatedCov::write(p);
+}
+#endif
+
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
@@ -430,7 +464,7 @@ void Emulator::snapshot_save(const char *filename) {
 }
 
 void Emulator::snapshot_load(const char *filename) {
-  VerilatedRestore stream;
+  VerilatedRestoreMem stream;
   stream.open(filename);
   stream >> *dut_ptr;
 

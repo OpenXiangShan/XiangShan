@@ -90,21 +90,14 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   /*
       example: headIdx       = 2
-               headIdxOH     = 00000100
-               headIdxMaskHI = 11111100
+               headIdxMaskHi = 11111100
                headIdxMaskLo = 00000011
-               skipMask      = 00111101
                commitIdxHi   =  6
                commitIdxLo   =        0
                commitIdx     =  6
    */
-  val headIdxOH = UIntToOH(headIdx)
-  val headIdxMaskHiVec = Wire(Vec(BrqSize, Bool()))
-  for(i <- headIdxMaskHiVec.indices){
-    headIdxMaskHiVec(i) := { if(i==0) headIdxOH(i) else headIdxMaskHiVec(i-1) || headIdxOH(i) }
-  }
-  val headIdxMaskHi = headIdxMaskHiVec.asUInt()
-  val headIdxMaskLo = (~headIdxMaskHi).asUInt()
+  val headIdxMaskLo = UIntToMask(headIdx, BrqSize)
+  val headIdxMaskHi = ~headIdxMaskLo
 
   val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
   val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
@@ -134,12 +127,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.inOrderBrInfo.bits := commitEntry.exuOut.brUpdate
   XSDebug(io.inOrderBrInfo.valid, "inOrderValid: pc=%x\n", io.inOrderBrInfo.bits.pc)
 
-//  XSDebug(
-//    p"commitIdxHi:$commitIdxHi ${Binary(headIdxMaskHi)} ${Binary(skipMask)}\n"
-//  )
-//  XSDebug(
-//    p"commitIdxLo:$commitIdxLo ${Binary(headIdxMaskLo)} ${Binary(skipMask)}\n"
-//  )
   XSDebug(p"headIdx:$headIdx commitIdx:$commitIdx\n")
   XSDebug(p"headPtr:$headPtr tailPtr:$tailPtr\n")
   XSDebug("")
@@ -163,9 +150,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   headPtr := headPtrNext
   io.redirect.valid := commitValid &&
-    commitIsMisPred &&
-    !io.roqRedirect.valid &&
-    !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
+    commitIsMisPred //&&
+    // !io.roqRedirect.valid &&
+    // !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
   io.redirect.bits := commitEntry.exuOut.redirect
   io.out.valid := commitValid
@@ -182,11 +169,12 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // branch insts enq
+  val validEntries = distanceBetween(tailPtr, headPtr)
   for(i <- 0 until DecodeWidth){
     val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := stateQueue(idx).isInvalid
+    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
     io.brTags(i) := brTag
     when(io.enqReqs(i).fire()){
       brQueue(idx).npc := io.enqReqs(i).bits.cf.brUpdate.pnpc
@@ -205,7 +193,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
         p"exu write back: brTag:${exuWb.bits.redirect.brTag}" +
           p" pc=${Hexadecimal(exuWb.bits.uop.cf.pc)} pnpc=${Hexadecimal(brQueue(wbIdx).npc)} target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
       )
-      stateQueue(wbIdx) := s_wb
+      when(stateQueue(wbIdx).isIdle){
+        stateQueue(wbIdx) := s_wb
+      }
       val exuOut = WireInit(exuWb.bits)
       val isMisPred = brQueue(wbIdx).npc =/= exuWb.bits.redirect.target
       exuOut.redirect.isMisPred := isMisPred
@@ -220,24 +210,21 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
     brCommitCnt := 0.U
-  }.elsewhen(io.redirect.valid || io.memRedirect.valid){
+  }.elsewhen(io.memRedirect.valid){
     // misprediction or replay
     stateQueue.zipWithIndex.foreach({case(s, i) =>
+      // replay should flush brTag
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      when(s.isWb && brQueue(i).exuOut.uop.roqIdx.needFlush(io.memRedirect)){
-        s := s_idle
-      }
-      when(io.redirect.valid && ptr.needBrFlush(io.redirect.bits.brTag)){
+      val replayMatch = io.memRedirect.bits.isReplay && ptr === io.memRedirect.bits.brTag
+      when(io.memRedirect.valid && (ptr.needBrFlush(io.memRedirect.bits.brTag) || replayMatch)){
         s := s_invalid
       }
     })
-    when(io.redirect.valid){ // Only Br Mispred reset tailPtr, replay does not
-      tailPtr := io.redirect.bits.brTag + true.B
+    when(io.memRedirect.valid){
+      tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.isReplay, 0.U, 1.U)
     }
+
   }
-
-
-
 
   // Debug info
   val debug_roq_redirect = io.roqRedirect.valid

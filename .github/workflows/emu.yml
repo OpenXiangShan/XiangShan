@@ -49,3 +49,6 @@ jobs:
       - name: Run microbench
         run: |
           make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null
+      - name: Run coremark
+        run: |
+          make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> /dev/null

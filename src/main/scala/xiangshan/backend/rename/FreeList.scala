@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{CircularQueuePtr, HasCircularQueuePtrHelper, XSDebug}
+import utils._
 import xiangshan.backend.brq.BrqPtr
 
 trait HasFreeListConsts extends HasXSParameter {
@@ -36,13 +36,20 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
 
-    // alloc new phy regs
-    val allocReqs = Input(Vec(RenameWidth, Bool()))
-    val pdests = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-    val canAlloc = Output(Vec(RenameWidth, Bool()))
+    val req = new Bundle {
+      // need to alloc (not actually do the allocation)
+      val allocReqs = Vec(RenameWidth, Input(Bool()))
+      // response pdest according to alloc
+      val pdests = Vec(RenameWidth, Output(UInt(PhyRegIdxWidth.W)))
+      // alloc new phy regs// freelist can alloc
+      val canAlloc = Output(Bool())
+      // actually do the allocation
+      val doAlloc = Input(Bool())
+    }
 
     // do checkpoints
-    val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
+    // val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
+    val walk = Flipped(ValidIO(UInt(log2Up(RenameWidth).W)))
 
     // dealloc phy regs
     val deallocReqs = Input(Vec(CommitWidth, Bool()))
@@ -74,37 +81,32 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   // number of free regs in freelist
   val freeRegs = Wire(UInt())
   // use RegNext for better timing
-  val hasEnoughRegs = RegNext(freeRegs >= RenameWidth.U, true.B)
+  io.req.canAlloc := RegNext(freeRegs >= RenameWidth.U)
   XSDebug(p"free regs: $freeRegs\n")
 
-
-  val newHeadPtrs = ((0 until RenameWidth) map {i =>
-    if(i == 0) headPtr else headPtr + PopCount(io.allocReqs.take(i))
-  }) :+ (headPtr + PopCount(io.allocReqs))
+  val allocatePtrs = (0 until RenameWidth).map(i => headPtr + i.U)
+  val allocatePdests = VecInit(allocatePtrs.map(ptr => freeList(ptr.value)))
 
   for(i <- 0 until RenameWidth){
-    val ptr = newHeadPtrs(i)
-    val idx = ptr.value
-    io.canAlloc(i) := hasEnoughRegs
-    io.pdests(i) := freeList(idx)
-    when(io.cpReqs(i).valid){
-      checkPoints(io.cpReqs(i).bits.value) := newHeadPtrs(i+1)
-      XSDebug(p"do checkPt at BrqIdx=${io.cpReqs(i).bits.value} ${newHeadPtrs(i+1)}\n")
-    }
-    XSDebug(p"req:${io.allocReqs(i)} canAlloc:$hasEnoughRegs pdest:${io.pdests(i)}\n")
+    io.req.pdests(i) := allocatePdests(/*if (i == 0) 0.U else */PopCount(io.req.allocReqs.take(i)))
+    // when(io.cpReqs(i).valid){
+    //   checkPoints(io.cpReqs(i).bits.value) := newHeadPtrs(i+1)
+    //   XSDebug(p"do checkPt at BrqIdx=${io.cpReqs(i).bits.value} ${newHeadPtrs(i+1)}\n")
+    // }
+    XSDebug(p"req:${io.req.allocReqs(i)} canAlloc:${io.req.canAlloc} pdest:${io.req.pdests(i)}\n")
   }
-  val headPtrNext = Mux(hasEnoughRegs, newHeadPtrs.last, headPtr)
+  val headPtrAllocate = headPtr + PopCount(io.req.allocReqs)
+  val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, headPtrAllocate, headPtr)
   freeRegs := distanceBetween(tailPtr, headPtrNext)
 
-  headPtr := Mux(io.redirect.valid, // mispredict or exception happen
-    Mux(io.redirect.bits.isException || io.redirect.bits.isFlushPipe, // TODO: need check by JiaWei
-      FreeListPtr(!tailPtrNext.flag, tailPtrNext.value),
-      Mux(io.redirect.bits.isMisPred,
-        checkPoints(io.redirect.bits.brTag.value),
-        headPtrNext // replay
-      )
-    ),
-    headPtrNext
+  // when mispredict or exception happens, reset headPtr to tailPtr (freelist is full).
+  val resetHeadPtr = io.redirect.bits.isException || io.redirect.bits.isFlushPipe
+  // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
+  headPtr := Mux(io.redirect.valid && resetHeadPtr,
+    FreeListPtr(!tailPtrNext.flag, tailPtrNext.value),
+    Mux(io.walk.valid,
+      headPtr - io.walk.bits,
+      Mux(io.redirect.valid, headPtr, headPtrNext))
   )
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
@@ -112,10 +114,10 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
 
   val enableFreelistCheck = false
-  if(env.EnableDebug && enableFreelistCheck){
-    for( i <- 0 until FL_SIZE){
-      for(j <- i+1 until FL_SIZE){
-      assert(freeList(i) != freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
+  if (enableFreelistCheck) {
+    for (i <- 0 until FL_SIZE) {
+      for (j <- i+1 until FL_SIZE) {
+        XSError(freeList(i) === freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
       }
     }
   }

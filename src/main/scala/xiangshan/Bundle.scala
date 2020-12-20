@@ -2,14 +2,19 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.SelImm
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.decode.XDecode
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
 import xiangshan.frontend.HasTageParameter
+import xiangshan.frontend.HasIFUConst
+import xiangshan.frontend.GlobalHistory
+import utils._
 import scala.math.max
 
 // Fetch FetchWidth x 32-bit insts from Icache
@@ -22,6 +27,7 @@ class FetchPacket extends XSBundle {
   val brInfo = Vec(PredictWidth, new BranchInfo)
   val pd = Vec(PredictWidth, new PreDecodeInfo)
   val ipf = Bool()
+  val acf = Bool()
   val crossPageIPFFix = Bool()
   val predTaken = Bool()
 }
@@ -60,14 +66,54 @@ class TageMeta extends XSBundle with HasTageParameter {
   val scMeta = new SCMeta(EnableSC)
 }
 
-class BranchPrediction extends XSBundle {
-  val redirect = Bool()
-  val taken = Bool()
-  val jmpIdx = UInt(log2Up(PredictWidth).W)
-  val hasNotTakenBrs = Bool()
-  val target = UInt(VAddrBits.W)
-  val saveHalfRVI = Bool()
-  val takenOnBr = Bool()
+class BranchPrediction extends XSBundle with HasIFUConst {
+  // val redirect = Bool()
+  val takens = UInt(PredictWidth.W)
+  // val jmpIdx = UInt(log2Up(PredictWidth).W)
+  val brMask = UInt(PredictWidth.W)
+  val jalMask = UInt(PredictWidth.W)
+  val targets = Vec(PredictWidth, UInt(VAddrBits.W))
+
+  // marks the last 2 bytes of this fetch packet
+  // val endsAtTheEndOfFirstBank = Bool()
+  // val endsAtTheEndOfLastBank = Bool()
+
+  // half RVI could only start at the end of a bank
+  val firstBankHasHalfRVI = Bool()
+  val lastBankHasHalfRVI = Bool()
+
+  def lastHalfRVIMask = Mux(firstBankHasHalfRVI, UIntToOH((bankWidth-1).U),
+                          Mux(lastBankHasHalfRVI, UIntToOH((PredictWidth-1).U),
+                            0.U(PredictWidth.W)
+                          )
+                        )
+
+  def lastHalfRVIClearMask = ~lastHalfRVIMask
+  // is taken from half RVI
+  def lastHalfRVITaken = ParallelORR(takens & lastHalfRVIMask)
+
+  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
+  // should not be used if not lastHalfRVITaken
+  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1))
+  
+  def realTakens  = takens  & lastHalfRVIClearMask
+  def realBrMask  = brMask  & lastHalfRVIClearMask
+  def realJalMask = jalMask & lastHalfRVIClearMask
+
+  def brNotTakens = ~realTakens & realBrMask
+  def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
+                       (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0)))))
+  // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
+  def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
+  def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(ParallelORR(takens)))) ||
+  (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
+  // could get PredictWidth-1 when only the first bank is valid
+  def jmpIdx = ParallelPriorityEncoder(realTakens)
+  // only used when taken
+  def target = ParallelPriorityMux(realTakens, targets)
+  def taken = ParallelORR(realTakens)
+  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools)
+  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
 }
 
 class BranchInfo extends XSBundle with HasBPUParameter {
@@ -76,34 +122,36 @@ class BranchInfo extends XSBundle with HasBPUParameter {
   val btbWriteWay = UInt(log2Up(BtbWays).W)
   val btbHitJal = Bool()
   val bimCtr = UInt(2.W)
-  val histPtr = UInt(log2Up(ExtHistoryLength).W)
-  val predHistPtr = UInt(log2Up(ExtHistoryLength).W)
   val tageMeta = new TageMeta
   val rasSp = UInt(log2Up(RasSize).W)
   val rasTopCtr = UInt(8.W)
   val rasToqAddr = UInt(VAddrBits.W)
   val fetchIdx = UInt(log2Up(PredictWidth).W)
   val specCnt = UInt(10.W)
+  // for global history
+  val hist = new GlobalHistory
+  val predHist = new GlobalHistory
   val sawNotTakenBranch = Bool()
 
   val debug_ubtb_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
-  def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
-    this.histPtr := histPtr
-    this.tageMeta := tageMeta
-    this.rasSp := rasSp
-    this.rasTopCtr := rasTopCtr
-    this.asUInt
-  }
+  // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
+  //   this.histPtr := histPtr
+  //   this.tageMeta := tageMeta
+  //   this.rasSp := rasSp
+  //   this.rasTopCtr := rasTopCtr
+  //   this.asUInt
+  // }
   def size = 0.U.asTypeOf(this).getWidth
   def fromUInt(x: UInt) = x.asTypeOf(this)
 }
 
-class Predecode extends XSBundle {
-  val isFetchpcEqualFirstpc = Bool()
+class Predecode extends XSBundle with HasIFUConst {
+  val hasLastHalfRVI = Bool()
   val mask = UInt((FetchWidth*2).W)
+  val lastHalf = UInt(nBanksInPacket.W)
   val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
 }
 
@@ -153,9 +201,20 @@ class CtrlSignals extends XSBundle {
   val blockBackward  = Bool()  // block backward
   val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
+  val selImm = SelImm()
   val imm = UInt(XLEN.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
+
+  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
+    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
+    val signals =
+      Seq(src1Type, src2Type, src3Type, fuType, fuOpType, rfWen, fpWen, 
+          isXSTrap, noSpecExec, blockBackward, flushPipe, isRVF, selImm)
+    signals zip decoder map { case(s, d) => s := d }
+    commitType := DontCare
+    this
+  }
 }
 
 class CfCtrl extends XSBundle {
@@ -250,9 +309,13 @@ class CSRSpecialIO extends XSBundle {
 //  val mcommit = Input(UInt(3.W))
 //}
 
-class RoqCommit extends XSBundle {
-  val uop = new MicroOp
-  val isWalk = Bool()
+class RoqCommitIO extends XSBundle {
+  val isWalk = Output(Bool())
+  val valid = Vec(CommitWidth, Output(Bool()))
+  val uop = Vec(CommitWidth, Output(new MicroOp))
+
+  def hasWalkInstr = isWalk && valid.asUInt.orR
+  def hasCommitInstr = !isWalk && valid.asUInt.orR
 }
 
 class TlbFeedback extends XSBundle {
@@ -264,7 +327,7 @@ class FrontendToBackendIO extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   // from backend
-  val redirect = Flipped(ValidIO(new Redirect))
+  val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
   val outOfOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
   val inOrderBrInfo = Flipped(ValidIO(new BranchUpdateInfo))
 }

@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.brq.BrqPtr
+import chisel3.experimental.chiselName
 
 trait LTBParams extends HasXSParameter with HasBPUParameter {
   //  +-----------+---------+--------------+-----------+
@@ -64,6 +65,7 @@ class LTBColumnUpdate extends LTBBundle {
 }
 
 // each column/bank of Loop Termination Buffer
+@chiselName
 class LTBColumn extends LTBModule {
   val io = IO(new Bundle() {
     // if3 send req
@@ -251,6 +253,7 @@ class LTBColumn extends LTBModule {
 
 }
 
+@chiselName
 class LoopPredictor extends BasePredictor with LTBParams {
   class LoopResp extends Resp {
     val exit = Vec(PredictWidth, Bool())

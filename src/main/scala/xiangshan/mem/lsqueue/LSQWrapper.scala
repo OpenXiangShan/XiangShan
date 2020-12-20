@@ -244,12 +244,11 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
-    val commits = Flipped(Vec(CommitWidth, Valid(new RoqCommit)))
+    val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect))
     val dcache = new DCacheLineIO
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
-    val oldestStore = Output(Valid(new RoqPtr))
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -292,7 +291,6 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   storeQueue.io.mmioStout <> io.mmioStout
   storeQueue.io.commits <> io.commits
   storeQueue.io.roqDeqPtr <> io.roqDeqPtr
-  storeQueue.io.oldestStore <> io.oldestStore
   storeQueue.io.exceptionAddr.lsIdx := io.exceptionAddr.lsIdx
   storeQueue.io.exceptionAddr.isStore := DontCare
 
