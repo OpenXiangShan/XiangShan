@@ -14,6 +14,7 @@ struct EmuArgs {
   const char *image;
   const char *snapshot_path;
   bool enable_waveform;
+  bool enable_snapshot;
 
   EmuArgs() {
     seed = 0;
@@ -24,6 +25,7 @@ struct EmuArgs {
     snapshot_path = NULL;
     image = NULL;
     enable_waveform = false;
+    enable_snapshot = true;
   }
 };
 
