@@ -43,12 +43,12 @@ class MicroBTB extends BasePredictor
     class MicroBTBIO extends DefaultBasePredictorIO
     {
         val out = Output(new MicroBTBResp)   //
-        val uBTBBranchInfo = Output(new MicroBTBBranchInfo)
+        val uBTBMeta = Output(new MicroBTBBranchInfo)
     }
 
     override val debug = true
     override val io = IO(new MicroBTBIO)
-    io.uBTBBranchInfo <> out_ubtb_br_info
+    io.uBTBMeta <> out_ubtb_br_info
 
     def getTag(pc: UInt) = (pc >> untaggedBits)(tagSize-1, 0)
     def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
@@ -251,13 +251,13 @@ class MicroBTB extends BasePredictor
 
     //uBTB update 
     //backend should send fetch pc to update
-    val u = io.update.bits.ui
+    val u = io.update.bits
     val update_br_pc  = u.pc
     val update_br_idx = u.fetchIdx
     val update_br_offset = (update_br_idx << 1).asUInt()
     val update_fetch_pc = update_br_pc - update_br_offset
-    val update_write_way = u.brInfo.ubtbWriteWay
-    val update_hits = u.brInfo.ubtbHits
+    val update_write_way = u.bpuMeta.ubtbWriteWay
+    val update_hits = u.bpuMeta.ubtbHits
     val update_taken = u.taken
 
     val update_bank = getBank(update_br_pc)
@@ -268,9 +268,9 @@ class MicroBTB extends BasePredictor
     val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
   
   
-    val jalFirstEncountered = !u.isMisPred && !u.brInfo.btbHitJal && (u.pd.brType === BrType.jal)
-    val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
-    val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered)//io.update.valid //&& update_is_BR_or_JAL
+    val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && (u.pd.brType === BrType.jal)
+    val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay //io.update.valid //&& update_is_BR_or_JAL
+    val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay//io.update.valid //&& update_is_BR_or_JAL
     //write btb target when miss prediction
     // when(entry_write_valid)
     // {

@@ -20,7 +20,7 @@ class Ibuffer extends XSModule {
     val inst = UInt(32.W)
     val pc = UInt(VAddrBits.W)
     val pnpc = UInt(VAddrBits.W)
-    val brInfo = new BranchInfo
+    val brInfo = new BpuMeta
     val pd = new PreDecodeInfo
     val ipf = Bool()
     val acf = Bool()
@@ -63,7 +63,7 @@ class Ibuffer extends XSModule {
       inWire.inst := io.in.bits.instrs(i)
       inWire.pc := io.in.bits.pc(i)
       inWire.pnpc := io.in.bits.pnpc(i)
-      inWire.brInfo := io.in.bits.brInfo(i)
+      inWire.brInfo := io.in.bits.bpuMeta(i)
       inWire.pd := io.in.bits.pd(i)
       inWire.ipf := io.in.bits.ipf
       inWire.acf := io.in.bits.acf
@@ -98,7 +98,7 @@ class Ibuffer extends XSModule {
       io.out(i).bits.brUpdate.pc := outWire.pc
       io.out(i).bits.brUpdate.pnpc := outWire.pnpc
       io.out(i).bits.brUpdate.pd := outWire.pd
-      io.out(i).bits.brUpdate.brInfo := outWire.brInfo
+      io.out(i).bits.brUpdate.bpuMeta := outWire.brInfo
       io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
     }
     head_ptr := head_ptr + io.out.map(_.fire).fold(0.U(log2Up(DecodeWidth).W))(_+_)
