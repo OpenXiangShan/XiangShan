@@ -183,8 +183,20 @@ class CtrlFlow extends XSBundle {
 
 
 class FPUCtrlSignals extends XSBundle {
-	val tagIn = UInt(2.W)
-	val tagOut = UInt(2.W)
+  val isAddSub = Bool() // swap23
+	val typeTagIn = UInt(2.W)
+	val typeTagOut = UInt(2.W)
+  val fromInt = Bool()
+  val wflags = Bool()
+  val fpWen = Bool()
+  val fmaCmd = UInt(2.W)
+  val div = Bool()
+  val sqrt = Bool()
+  val fcvt = Bool()
+  val fma = Bool()
+  val typ = UInt(2.W)
+  val fmt = UInt(2.W)
+  val ren3 = Bool() //TODO: remove SrcType.fp
 }
 
 // Decode DecodeWidth insts at Decode Stage

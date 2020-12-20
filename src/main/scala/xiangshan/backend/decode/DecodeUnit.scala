@@ -375,7 +375,9 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   cf_ctrl.brTag := DontCare
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
 
-  cs.fpu := DontCare
+  val fpDecoder = Module(new FPDecoder)
+  fpDecoder.io.instr := io.enq.ctrl_flow.instr
+  cs.fpu := fpDecoder.io.fpCtrl
 
   // read src1~3 location
   cs.lsrc1 := Mux(ctrl_flow.instr === LUI || cs.src1Type === SrcType.pc, 0.U, ctrl_flow.instr(RS1_MSB,RS1_LSB))
