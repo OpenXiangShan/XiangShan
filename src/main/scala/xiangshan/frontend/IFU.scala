@@ -162,9 +162,13 @@ class IFU extends XSModule with HasIFUConst
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
   if3_ready := if4_ready || !if3_valid
-  when (if3_flush)     { if3_valid := false.B }
-  .elsewhen (if2_fire) { if3_valid := true.B }
-  .elsewhen (if3_fire) { if3_valid := false.B }
+  when (if3_flush) {
+    if3_valid := false.B
+  }.elsewhen (if2_fire && !if2_flush) {
+    if3_valid := true.B
+  }.elsewhen (if3_fire) {
+    if3_valid := false.B
+  }
 
   val if3_bp = bpu.io.out(1)
   if3_predicted_gh := if3_gh.update(if3_bp.hasNotTakenBrs, if3_bp.takenOnBr)
@@ -254,9 +258,13 @@ class IFU extends XSModule with HasIFUConst
   val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
   // wait until prevHalfInstr written into reg
   if4_ready := (io.fetchPacket.ready && !hasPrevHalfInstrReq || !if4_valid) && GTimer() > 500.U
-  when (if4_flush)     { if4_valid := false.B }
-  .elsewhen (if3_fire) { if4_valid := true.B }
-  .elsewhen (if4_fire) { if4_valid := false.B }
+  when (if4_flush) {
+    if4_valid := false.B
+  }.elsewhen (if3_fire && !if3_flush) {
+    if4_valid := true.B
+  }.elsewhen (if4_fire) {
+    if4_valid := false.B
+  }
 
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
