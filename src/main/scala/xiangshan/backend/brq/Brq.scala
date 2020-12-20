@@ -88,7 +88,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val deqValid = stateQueue(headIdx).isCommit && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
-  val commitIsMisPred = commitEntry.exuOut.brUpdate.isMisPred
+  val commitIsMisPred = commitEntry.exuOut.redirect.target =/= commitEntry.exuOut.brUpdate.pnpc
 
   brCommitCnt := brCommitCnt + io.bcommit - deqValid
 
@@ -134,6 +134,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.cfiInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
   io.cfiInfo.bits.brTag := brTagRead
   io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
+  io.cfiInfo.bits.isMisPred := RegNext(commitIsMisPred)
 
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
@@ -173,7 +174,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       when (stateQueue(wbIdx).isIdle) {
         stateQueue(wbIdx) := s_wb
       }
-      val isMisPred = brQueue(wbIdx).exuOut.brUpdate.pnpc =/= exuWb.bits.redirect.target
       // only writeback necessary information
       brQueue(wbIdx).exuOut.uop := exuWb.bits.uop
       brQueue(wbIdx).exuOut.data := exuWb.bits.data
@@ -184,7 +184,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       brQueue(wbIdx).exuOut.brUpdate.target := exuWb.bits.brUpdate.target
       brQueue(wbIdx).exuOut.brUpdate.brTarget := exuWb.bits.brUpdate.brTarget
       brQueue(wbIdx).exuOut.brUpdate.taken := exuWb.bits.brUpdate.taken
-      brQueue(wbIdx).exuOut.brUpdate.isMisPred := isMisPred
     }
   }
 
