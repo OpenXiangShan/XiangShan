@@ -118,10 +118,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
   headPtr := Mux(deqValid, headPtr + 1.U, headPtr)
-  io.redirect.valid := commitValid &&
-    commitIsMisPred //&&
-    // !io.roqRedirect.valid &&
-    // !io.redirect.bits.roqIdx.needFlush(io.memRedirect)
 
   io.redirect.valid := commitValid && commitIsMisPred
   io.redirect.bits := commitEntry.exuOut.redirect
