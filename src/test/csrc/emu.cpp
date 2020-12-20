@@ -340,6 +340,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
           printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
             diff.store_addr[i], diff.store_data[i], diff.store_mask[i]);
           trapCode = STATE_ABORT;
+          break;
         }
       }
     }
@@ -474,10 +475,10 @@ void Emulator::snapshot_save(const char *filename) {
   uint64_t nemu_this_pc = get_nemu_this_pc();
   stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
-  char *buf = new char[size];
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
   stream.unbuf_write(buf, size);
-  delete [] buf;
+  munmap(buf, size);
 
   struct SyncState sync_mastate;
   ref_difftest_get_mastatus(&sync_mastate);
@@ -515,10 +516,10 @@ void Emulator::snapshot_load(const char *filename) {
   stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
   set_nemu_this_pc(nemu_this_pc);
 
-  char *buf = new char[size];
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   stream.read(buf, size);
   ref_difftest_memcpy_from_dut(0x80000000, buf, size);
-  delete [] buf;
+  munmap(buf, size);
 
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));
