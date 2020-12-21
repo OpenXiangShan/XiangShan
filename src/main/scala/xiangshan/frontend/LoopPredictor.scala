@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import chisel3.ExcitingUtils._
 import xiangshan.backend.brq.BrqPtr
 import chisel3.experimental.chiselName
 
@@ -18,7 +19,7 @@ trait LTBParams extends HasXSParameter with HasBPUParameter {
 }
 
 abstract class LTBBundle extends XSBundle with LTBParams
-abstract class LTBModule extends XSModule with LTBParams { val debug = false }
+abstract class LTBModule extends XSModule with LTBParams { val debug = true }
 
 // class LoopMeta extends LTBBundle {
 // }
@@ -234,6 +235,7 @@ class LTBColumn extends LTBModule {
 
   if (BPUDebug && debug) {
     //debug info
+    XSDebug("This is ltbs\n")
     XSDebug(doingReset, "Reseting...\n")
     XSDebug("if3_fire=%d if4_fire=%d valid=%d\n", io.if3_fire, io.if4_fire,valid)
     XSDebug("[req] v=%d pc=%x idx=%x tag=%x\n", valid, io.req.pc, io.req.idx, io.req.tag)
@@ -279,8 +281,12 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val ltbAddr = new TableAddr(idxLen + 4, PredictWidth)
 
   // Latch for 1 cycle
-  val pc = RegEnable(io.pc.bits, io.pc.valid)
-  val inMask = RegEnable(io.inMask, io.pc.valid)
+  // val pc = RegEnable(io.pc.bits, io.pc.valid)
+  // val inMask = RegEnable(io.inMask, io.pc.valid)
+  val pc = io.pc.bits
+  val inMask = io.inMask
+  val if3_fire = io.pc.valid
+
   val baseBank = ltbAddr.getBank(pc)
   val baseRow = ltbAddr.getBankIdx(pc)
   val baseTag = ltbAddr.getTag(pc)
@@ -288,9 +294,21 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val isInNextRow = VecInit((0 until PredictWidth).map(_.U < baseBank))
   val tagIncremented = VecInit((0 until PredictWidth).map(i => isInNextRow(i.U) && nextRowStartsUp))
   val realTags = VecInit((0 until PredictWidth).map(i => Mux(tagIncremented(i), baseTag + 1.U, baseTag)(tagLen - 1, 0)))
-  val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBank +& i.U)(log2Up(PredictWidth) - 1, 0)))
-  val realMask = circularShiftLeft(inMask, PredictWidth, baseBank)
+  // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBank +& i.U)(log2Up(PredictWidth) - 1, 0)))
+  // val realMask = circularShiftLeft(inMask, PredictWidth, baseBank)
   val outMask = inMask & (Fill(PredictWidth, !io.respIn.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~io.respIn.jmpIdx)))
+  val realMask = Wire(UInt(PredictWidth.W))
+  val offsetIdx = offsetInBank(io.pc.bits) // 这个pc在一个bank中的第几位
+  val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => Mux(offsetIdx <= i.U, baseBank + i.U - offsetIdx, 0.U)(log2Up(PredictWidth) - 1, 0)))
+
+  when(offsetIdx === baseBank){
+    realMask := outMask
+  }.elsewhen(offsetIdx > baseBank) {
+    realMask := circularShiftRight(outMask, PredictWidth, offsetIdx - baseBank)
+  }.otherwise {
+    realMask := circularShiftLeft(outMask, PredictWidth, baseBank - offsetIdx)
+  }
+
 
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.req.pc := pc
@@ -298,7 +316,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     for (j <- 0 until PredictWidth) {
       when (Mux(isInNextRow(i), baseBank + j.U === (PredictWidth + i).U, baseBank + j.U === i.U)) {
         ltbs(i).io.req.pc := pc + (j.U << 1)
-        ltbs(i).io.outMask := outMask(j).asBool
+        ltbs(i).io.outMask := realMask(j).asBool
       }
     }
   }
@@ -322,6 +340,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(bankIdxInOrder(i)).exit)
   (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(bankIdxInOrder(i)).meta)
+
+  ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
 
   if (BPUDebug && debug) {
     // debug info

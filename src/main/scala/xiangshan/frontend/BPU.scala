@@ -11,7 +11,7 @@ import chisel3.experimental.chiselName
 trait HasBPUParameter extends HasXSParameter {
   val BPUDebug = true
   val EnableCFICommitLog = true
-  val EnbaleCFIPredLog = false
+  val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
@@ -121,7 +121,7 @@ abstract class BasePredictor extends XSModule
 
   val io = new DefaultBasePredictorIO
 
-  val debug = false
+  val debug = true
 }
 
 class BPUStageIO extends XSBundle {
