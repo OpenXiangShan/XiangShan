@@ -129,6 +129,7 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val fetchIdx = UInt(log2Up(PredictWidth).W)
   val specCnt = UInt(10.W)
   // for global history
+  val predTaken = Bool()
   val hist = new GlobalHistory
   val predHist = new GlobalHistory
   val sawNotTakenBranch = Bool()

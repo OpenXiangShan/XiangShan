@@ -79,42 +79,16 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_invalid)))
 
   val headPtr, tailPtr = RegInit(BrqPtr(false.B, 0.U))
+  val redirectPtr = RegInit(BrqPtr(false.B, 0.U))
 
-  // dequeue
   val headIdx = headPtr.value
 
-  val skipMask = Cat(stateQueue.map(_.isCommit).reverse)
-
-  /*
-      example: headIdx       = 2
-               headIdxMaskHi = 11111100
-               headIdxMaskLo = 00000011
-               commitIdxHi   =  6
-               commitIdxLo   =        0
-               commitIdx     =  6
-   */
-  val headIdxMaskLo = UIntToMask(headIdx, BrqSize)
-  val headIdxMaskHi = ~headIdxMaskLo
-
-  val commitIdxHi = PriorityEncoder((~skipMask).asUInt() & headIdxMaskHi)
-  val (commitIdxLo, findLo) = PriorityEncoderWithFlag((~skipMask).asUInt() & headIdxMaskLo)
-
-  val skipHi = (skipMask | headIdxMaskLo) === Fill(BrqSize, 1.U(1.W))
-  val useLo = skipHi && findLo
-
-
-  val commitIdx = Mux(stateQueue(commitIdxHi).isWb,
-    commitIdxHi,
-    Mux(useLo && stateQueue(commitIdxLo).isWb,
-      commitIdxLo,
-      headIdx
-    )
-  )
+  val commitIdx = redirectPtr.value
 
   val deqValid = stateQueue(headIdx).isCommit && brCommitCnt=/=0.U
   val commitValid = stateQueue(commitIdx).isWb
   val commitEntry = brQueue(commitIdx)
-  val commitIsMisPred = commitEntry.exuOut.brUpdate.isMisPred
+  val commitIsMisPred = commitEntry.exuOut.redirect.target =/= commitEntry.exuOut.brUpdate.pnpc
 
   brCommitCnt := brCommitCnt + io.bcommit - deqValid
 
@@ -143,7 +117,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   }
   assert(!(commitIdx===headIdx && commitValid && deqValid), "Error: deq and commit a same entry!")
 
-  headPtr := headPtrNext
+  headPtr := Mux(deqValid, headPtr + 1.U, headPtr)
 
   io.redirect.valid := commitValid && commitIsMisPred
   io.redirect.bits := commitEntry.exuOut.redirect
@@ -151,12 +125,16 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   io.out.valid := commitValid
   io.out.bits := commitEntry.exuOut
+  when (commitValid) {
+    redirectPtr := redirectPtr + 1.U
+  }
 
   val brTagRead = RegNext(Mux(io.memRedirect.bits.isReplay, io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
   io.cfiInfo.valid := RegNext(io.memRedirect.valid || commitValid)
   io.cfiInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
   io.cfiInfo.bits.brTag := brTagRead
   io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
+  io.cfiInfo.bits.isMisPred := RegNext(commitIsMisPred)
 
   XSInfo(io.out.valid,
     p"commit branch to roq, mispred:${io.redirect.valid} pc=${Hexadecimal(io.out.bits.uop.cf.pc)}\n"
@@ -196,7 +174,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       when (stateQueue(wbIdx).isIdle) {
         stateQueue(wbIdx) := s_wb
       }
-      val isMisPred = brQueue(wbIdx).exuOut.brUpdate.pnpc =/= exuWb.bits.redirect.target
       // only writeback necessary information
       brQueue(wbIdx).exuOut.uop := exuWb.bits.uop
       brQueue(wbIdx).exuOut.data := exuWb.bits.data
@@ -207,7 +184,6 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       brQueue(wbIdx).exuOut.brUpdate.target := exuWb.bits.brUpdate.target
       brQueue(wbIdx).exuOut.brUpdate.brTarget := exuWb.bits.brUpdate.brTarget
       brQueue(wbIdx).exuOut.brUpdate.taken := exuWb.bits.brUpdate.taken
-      brQueue(wbIdx).exuOut.brUpdate.isMisPred := isMisPred
     }
   }
 
@@ -216,6 +192,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     stateQueue.foreach(_ := s_invalid)
     headPtr := BrqPtr(false.B, 0.U)
     tailPtr := BrqPtr(false.B, 0.U)
+    redirectPtr := BrqPtr(false.B, 0.U)
     brCommitCnt := 0.U
   }.elsewhen(io.memRedirect.valid){
     // misprediction or replay
@@ -223,14 +200,14 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
       // replay should flush brTag
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
       val replayMatch = io.memRedirect.bits.isReplay && ptr === io.memRedirect.bits.brTag
-      when(io.memRedirect.valid && (ptr.needBrFlush(io.memRedirect.bits.brTag) || replayMatch)){
+      when(ptr.needBrFlush(io.memRedirect.bits.brTag) || replayMatch){
         s := s_invalid
       }
     })
-    when(io.memRedirect.valid){
-      tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.isReplay, 0.U, 1.U)
+    tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.isReplay, 0.U, 1.U)
+    when (io.memRedirect.bits.isReplay && (redirectPtr.needBrFlush(io.memRedirect.bits.brTag) || redirectPtr === io.memRedirect.bits.brTag)) {
+      redirectPtr := io.memRedirect.bits.brTag
     }
-
   }
 
   // Debug info
