@@ -68,8 +68,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val isFull = enqPtr === deqPtr && !sameFlag
   val allowIn = !isFull
 
-  val loadCommit = (0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.uop(i).ctrl.commitType === CommitType.LOAD)
-  val mcommitIdx = (0 until CommitWidth).map(i => io.commits.uop(i).lqIdx.value)
+  val loadCommit = (0 until CommitWidth).map(i => io.commits.valid(i) && !io.commits.isWalk && io.commits.info(i).commitType === CommitType.LOAD)
+  val mcommitIdx = (0 until CommitWidth).map(i => io.commits.info(i).lqIdx.value)
 
   val deqMask = UIntToMask(deqPtr, LoadQueueSize)
   val enqMask = UIntToMask(enqPtr, LoadQueueSize)
@@ -496,9 +496,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     * Memory mapped IO / other uncached operations
     *
     */
-  val commitType = io.commits.uop(0).ctrl.commitType
   io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
-    commitType === CommitType.LOAD &&
+    io.commits.info(0).commitType === CommitType.LOAD &&
     io.roqDeqPtr === uop(deqPtr).roqIdx &&
     !io.commits.isWalk
 
