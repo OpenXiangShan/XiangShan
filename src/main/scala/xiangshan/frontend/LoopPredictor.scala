@@ -283,79 +283,84 @@ class LoopPredictor extends BasePredictor with LTBParams {
   // Latch for 1 cycle
   // val pc = RegEnable(io.pc.bits, io.pc.valid)
   // val inMask = RegEnable(io.inMask, io.pc.valid)
+  // val pc = io.pc.bits
+  // val inMask = io.inMask
+  // val if3_fire = io.pc.valid
+
+  // val baseBank = ltbAddr.getBank(pc)
+  // val baseRow = ltbAddr.getBankIdx(pc)
+  // val baseTag = ltbAddr.getTag(pc)
+  // val nextRowStartsUp = baseRow.andR // TODO: use parallel andR
+  // val isInNextRow = VecInit((0 until PredictWidth).map(_.U < baseBank))
+  // val tagIncremented = VecInit((0 until PredictWidth).map(i => isInNextRow(i.U) && nextRowStartsUp))
+  // val realTags = VecInit((0 until PredictWidth).map(i => Mux(tagIncremented(i), baseTag + 1.U, baseTag)(tagLen - 1, 0)))
+  // // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBank +& i.U)(log2Up(PredictWidth) - 1, 0)))
+  // // val realMask = circularShiftLeft(inMask, PredictWidth, baseBank)
+  // val outMask = inMask & (Fill(PredictWidth, !io.respIn.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~io.respIn.jmpIdx)))
+  // val realMask = Wire(UInt(PredictWidth.W))
+  // val offsetIdx = offsetInBank(io.pc.bits) // 这个pc在一个bank中的第几位
+  // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => Mux(offsetIdx <= i.U, baseBank + i.U - offsetIdx, 0.U)(log2Up(PredictWidth) - 1, 0)))
+
   val pc = io.pc.bits
   val inMask = io.inMask
-  val if3_fire = io.pc.valid
+  val tag = ltbAddr.getTag(pc)
+  val bank = ltbAddr.getBank(pc)
+  val bankIdx = ltbAddr.getBankIdx(pc)
 
-  val baseBank = ltbAddr.getBank(pc)
-  val baseRow = ltbAddr.getBankIdx(pc)
-  val baseTag = ltbAddr.getTag(pc)
-  val nextRowStartsUp = baseRow.andR // TODO: use parallel andR
-  val isInNextRow = VecInit((0 until PredictWidth).map(_.U < baseBank))
-  val tagIncremented = VecInit((0 until PredictWidth).map(i => isInNextRow(i.U) && nextRowStartsUp))
-  val realTags = VecInit((0 until PredictWidth).map(i => Mux(tagIncremented(i), baseTag + 1.U, baseTag)(tagLen - 1, 0)))
-  // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => (baseBank +& i.U)(log2Up(PredictWidth) - 1, 0)))
-  // val realMask = circularShiftLeft(inMask, PredictWidth, baseBank)
-  val outMask = inMask & (Fill(PredictWidth, !io.respIn.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~io.respIn.jmpIdx)))
-  val realMask = Wire(UInt(PredictWidth.W))
-  val offsetIdx = offsetInBank(io.pc.bits) // 这个pc在一个bank中的第几位
-  val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => Mux(offsetIdx <= i.U, baseBank + i.U - offsetIdx, 0.U)(log2Up(PredictWidth) - 1, 0)))
+  val updatePC = io.update.bits.pc
+  val updateBank = ltbAddr.getBank(updatePC)
 
-  when(offsetIdx === baseBank){
-    realMask := outMask
-  }.elsewhen(offsetIdx > baseBank) {
-    realMask := circularShiftRight(outMask, PredictWidth, offsetIdx - baseBank)
-  }.otherwise {
-    realMask := circularShiftLeft(outMask, PredictWidth, baseBank - offsetIdx)
-  }
+  // 只要把同一个bankAligned PC的每一项传进16个ltb中即可
+  val bankAlignedPC = align(pc, PredictWidth)
+
+
+  // when(offsetIdx === baseBank){
+  //   realMask := outMask
+  // }.elsewhen(offsetIdx > baseBank) {
+  //   realMask := circularShiftRight(outMask, PredictWidth, offsetIdx - baseBank)
+  // }.otherwise {
+  //   realMask := circularShiftLeft(outMask, PredictWidth, baseBank - offsetIdx)
+  // }
 
 
   for (i <- 0 until PredictWidth) {
-    ltbs(i).io.req.pc := pc
-    ltbs(i).io.outMask := false.B
-    for (j <- 0 until PredictWidth) {
-      when (Mux(isInNextRow(i), baseBank + j.U === (PredictWidth + i).U, baseBank + j.U === i.U)) {
-        ltbs(i).io.req.pc := pc + (j.U << 1)
-        ltbs(i).io.outMask := realMask(j).asBool
-      }
-    }
+    ltbs(i).io.req.pc := bankAlignedPC
+    ltbs(i).io.outMask := inMask(i)
   }
 
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.if3_fire := io.pc.valid
     ltbs(i).io.if4_fire := io.outFire
-    ltbs(i).io.req.idx := Mux(isInNextRow(i), baseRow + 1.U, baseRow)
-    ltbs(i).io.req.tag := realTags(i)
+    ltbs(i).io.req.idx := bankIdx
+    ltbs(i).io.req.tag := tag
     // ltbs(i).io.outMask := outMask(i)
-    ltbs(i).io.update.valid := i.U === ltbAddr.getBank(io.update.bits.pc) && io.update.valid && io.update.bits.pd.isBr
+
+    ltbs(i).io.update.valid := i.U === updateBank && io.update.valid && io.update.bits.pd.isBr
     ltbs(i).io.update.bits.misPred := io.update.bits.isMisPred
-    ltbs(i).io.update.bits.pc := io.update.bits.pc
+    ltbs(i).io.update.bits.pc := updatePC
     ltbs(i).io.update.bits.meta := io.update.bits.bpuMeta.specCnt
     ltbs(i).io.update.bits.taken := io.update.bits.taken
     ltbs(i).io.update.bits.brTag := io.update.bits.brTag
-    ltbs(i).io.repair := i.U =/= ltbAddr.getBank(io.update.bits.pc) && io.update.valid && io.update.bits.isMisPred
+    ltbs(i).io.repair := i.U =/= updateBank && io.update.valid && io.update.bits.isMisPred
   }
 
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
-  (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(bankIdxInOrder(i)).exit)
-  (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(bankIdxInOrder(i)).meta)
+  (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(i).exit)
+  (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(i).meta)
 
   ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
 
   if (BPUDebug && debug) {
     // debug info
     XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", io.pc.valid, io.flush, io.pc.bits)
-    XSDebug("[IF4][req] fire=%d baseBank=%x baseRow=%x baseTag=%x\n", io.outFire, baseBank, baseRow, baseTag)
-    XSDebug("[IF4][req] isInNextRow=%b tagInc=%b\n", isInNextRow.asUInt, tagIncremented.asUInt)
-    for (i <- 0 until PredictWidth) {
-      XSDebug("[IF4][req] bank %d: realMask=%d pc=%x idx=%x tag=%x\n", i.U, realMask(i), ltbs(i).io.req.pc, ltbs(i).io.req.idx, ltbs(i).io.req.tag)
-    }
-    XSDebug("[IF4] baseBank=%x bankIdxInOrder=", baseBank)
-    for (i <- 0 until PredictWidth) {
-      XSDebug(false, true.B, "%x ", bankIdxInOrder(i))
-    }
-    XSDebug(false, true.B, "\n")
+    XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
+    XSDebug("[IF4][req] inMask=%b\n", inMask)
+
+    XSDebug("[IF4][req] updatePC=%x updateBank=%x, updateValid=%d, isBr=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr)
+    XSDebug("[IF4][req] isMisPred=%d updateSpecCnt=%d, taken=%d\n", io.update.bits.isMisPred, io.update.bits.bpuMeta.specCnt, io.update.bits.taken)
+
+    // XSDebug(false, true.B, "\n")
     for (i <- 0 until PredictWidth) {
       XSDebug(io.outFire && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
       XSDebug(false, io.outFire, " %d:%d %d", i.U, io.resp.exit(i), io.meta.specCnts(i))
