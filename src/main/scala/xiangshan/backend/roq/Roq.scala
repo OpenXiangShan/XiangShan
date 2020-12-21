@@ -240,6 +240,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.redirect.bits.isFlushPipe := isFlushPipe || intrEnable
   io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.csr.trapTarget)
   io.exception := deqUop
+  io.exception.ctrl.commitType := deqCommitData.commitType
+  io.exception.lqIdx := deqCommitData.lqIdx
+  io.exception.sqIdx := deqCommitData.sqIdx
   XSDebug(io.redirect.valid,
     "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n",
     io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.csr.trapTarget,
