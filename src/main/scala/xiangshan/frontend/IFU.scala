@@ -196,7 +196,7 @@ class IFU extends XSModule with HasIFUConst
     if3_prevHalfInstr.valid := false.B
   }
   when (hasPrevHalfInstrReq) {
-    if3_prevHalfInstr := prevHalfInstrReq
+    if3_prevHalfInstr.bits := prevHalfInstrReq.bits
   }
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
@@ -302,9 +302,13 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_takenPrevHalf = WireInit(if4_prevHalfInstrMet && if4_prevHalfInstr.bits.taken)
   when (if3_prevHalfConsumed) {
-    if4_prevHalfInstr := if3_prevHalfInstr
+    if4_prevHalfInstr.valid := if3_prevHalfInstr.valid
   }.elsewhen (if4_prevHalfConsumed || if4_prevHalfFlush) {
     if4_prevHalfInstr.valid := false.B
+  }
+
+  when (if3_prevHalfConsumed) {
+    if4_prevHalfInstr.bits := if3_prevHalfInstr.bits
   }
 
   prevHalfInstrReq.valid := if4_fire && if4_bp.saveHalfRVI
