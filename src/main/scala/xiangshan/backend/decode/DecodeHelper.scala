@@ -1,6 +1,7 @@
 package xiangshan.backend.decode
 
 import chisel3._
+import chisel3.util.BitPat
 import xiangshan.{FuType, HasXSParameter}
 import xiangshan.backend._
 import xiangshan.backend.decode.isa._
@@ -31,15 +32,6 @@ trait HasInstrType {
     InstrFI, InstrFR, InstrGtoF
   ).map(_===instrType).reduce(_||_)
 }
-
-object SrcType {
-  def reg = "b00".U
-  def pc  = "b01".U
-  def imm = "b01".U
-  def fp  = "b10".U
-  def apply() = UInt(2.W)
-}
-
 
 object FuOpType {
   def apply() = UInt(6.W)

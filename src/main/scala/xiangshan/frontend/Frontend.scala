@@ -9,10 +9,10 @@ import xiangshan.cache._
 
 class Frontend extends XSModule {
   val io = IO(new Bundle() {
-    val icacheReq = DecoupledIO(new ICacheReq)
-    val icacheResp = Flipped(DecoupledIO(new ICacheResp))
-    val icacheFlush = Output(UInt(2.W))
-    val icacheToTlb = Flipped(new BlockTlbRequestIO)
+    val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
+    val icacheMemGrant = Flipped(DecoupledIO(new L1plusCacheResp))
+    val l1plusFlush = Output(Bool())
+    val fencei = Input(Bool())
     val ptw = new TlbPtwIO
     val backend = new FrontendToBackendIO
     val sfence = Input(new SfenceBundle)
@@ -21,20 +21,25 @@ class Frontend extends XSModule {
 
   val ifu = Module(new IFU)
   val ibuffer =  Module(new Ibuffer)
+  val icache = Module(new ICache)
 
   val needFlush = io.backend.redirect.valid
 
   //backend
   ifu.io.redirect <> io.backend.redirect
-  ifu.io.inOrderBrInfo <> io.backend.inOrderBrInfo
-  ifu.io.outOfOrderBrInfo <> io.backend.outOfOrderBrInfo
+  ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
+  // ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
   //icache
-  io.icacheReq <> ifu.io.icacheReq
-  io.icacheFlush <> ifu.io.icacheFlush
-  ifu.io.icacheResp <> io.icacheResp
+  ifu.io.icacheResp <> icache.io.resp
+  icache.io.req <> ifu.io.icacheReq
+  icache.io.flush <> ifu.io.icacheFlush
+  icache.io.fencei := io.fencei
+  io.l1plusFlush := icache.io.l1plusflush
+  io.icacheMemAcq <> icache.io.mem_acquire
+  icache.io.mem_grant <> io.icacheMemGrant
   //itlb to ptw
   io.ptw <> TLB(
-    in = Seq(io.icacheToTlb),
+    in = Seq(icache.io.tlb),
     sfence = io.sfence,
     csr = io.tlbCsr,
     width = 1,
