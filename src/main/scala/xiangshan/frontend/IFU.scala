@@ -186,7 +186,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
 
   // the previous half of RVI instruction waits until it meets its last half
-  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.bits.npc === if3_pc && if3_allValid
+  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.bits.npc === if3_pc && if3_valid
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
