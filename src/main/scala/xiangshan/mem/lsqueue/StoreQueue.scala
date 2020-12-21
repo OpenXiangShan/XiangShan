@@ -23,6 +23,7 @@ object SqPtr extends HasXSParameter {
 
 class SqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
+  val lqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
   val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
   val resp = Vec(RenameWidth, Output(new SqPtr))
@@ -76,7 +77,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -87,7 +88,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.enq.resp(i) := sqIdx
   }
 
-  when (Cat(firedDispatch).orR && io.enq.canAccept && !io.brqRedirect.valid) {
+  when (Cat(firedDispatch).orR && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
     val enqNumber = PopCount(firedDispatch)
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
     XSInfo("dispatched %d insts to sq\n", enqNumber)
