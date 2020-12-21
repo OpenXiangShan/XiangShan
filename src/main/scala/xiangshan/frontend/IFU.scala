@@ -263,7 +263,7 @@ class IFU extends XSModule with HasIFUConst
   when (if4_flush) {
     if4_valid := false.B
   }.elsewhen (if3_fire && !if3_flush) {
-    if4_valid := true.B
+    if4_valid := Mux(if3_pendingPrevHalfInstr, if3_prevHalfInstrMet, true.B)
   }.elsewhen (if4_fire) {
     if4_valid := false.B
   }
