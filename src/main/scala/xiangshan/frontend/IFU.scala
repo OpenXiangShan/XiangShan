@@ -375,7 +375,7 @@ class IFU extends XSModule with HasIFUConst
     val oldGh = b.bpuMeta.hist
     val sawNTBr = b.bpuMeta.sawNotTakenBranch
     val isBr = b.pd.isBr
-    val taken = b.taken
+    val taken = Mux(cfiUpdate.bits.isReplay, b.bpuMeta.predTaken, b.taken)
     val updatedGh = oldGh.update(sawNTBr, isBr && taken)
     final_gh := updatedGh
     final_gh_bypass := updatedGh
@@ -477,8 +477,12 @@ class IFU extends XSModule with HasIFUConst
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
   fetchPacketWire.bpuMeta := bpu.io.bpuMeta
-  (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).hist := final_gh)
-  (0 until PredictWidth).foreach(i => fetchPacketWire.bpuMeta(i).predHist := if4_predHist.asTypeOf(new GlobalHistory))
+  (0 until PredictWidth).foreach(i => {
+    val meta = fetchPacketWire.bpuMeta(i)
+    meta.hist := final_gh
+    meta.predHist := if4_predHist.asTypeOf(new GlobalHistory)
+    meta.predTaken := if4_bp.takens(i)
+  })
   fetchPacketWire.pd := if4_pd.pd
   fetchPacketWire.ipf := if4_ipf
   fetchPacketWire.acf := if4_acf
