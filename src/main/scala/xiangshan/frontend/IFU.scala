@@ -158,7 +158,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_valid = RegInit(init = false.B)
   val if4_ready = WireInit(false.B)
   val if3_allValid = if3_valid && (inLoop || io.icacheResp.valid)
-  val if3_fire = if3_allValid && if4_ready
+  val if3_fire = if3_valid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
   if3_ready := if4_ready && (inLoop || io.icacheResp.valid) || !if3_valid
@@ -209,7 +209,7 @@ class IFU extends XSModule with HasIFUConst
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
   // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
 
-  if3_redirect := if3_allValid && (
+  if3_redirect := if3_valid && (
                     // prevHalf is consumed but the next packet is not where it meant to be
                     // we do not handle this condition because of the burden of building a correct GHInfo
                     // prevHalfMetRedirect ||
@@ -263,7 +263,7 @@ class IFU extends XSModule with HasIFUConst
   when (if4_flush) {
     if4_valid := false.B
   }.elsewhen (if3_fire && !if3_flush) {
-    if4_valid := true.B
+    if4_valid := if3_allValid
   }.elsewhen (if4_fire) {
     if4_valid := false.B
   }
