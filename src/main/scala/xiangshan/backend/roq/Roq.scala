@@ -148,6 +148,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     commitData.io.wdata(i).old_pdest := io.enq.req(i).bits.old_pdest
     commitData.io.wdata(i).lqIdx := io.enq.req(i).bits.lqIdx
     commitData.io.wdata(i).sqIdx := io.enq.req(i).bits.sqIdx
+    commitData.io.wdata(i).pc := io.enq.req(i).bits.cf.pc
   }
   for (i <- 0 until CommitWidth) {
     commitData.io.raddr(i) := walkPtrVec(i)
@@ -238,11 +239,12 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.redirect.bits.isException := intrEnable || exceptionEnable
   // reuse isFlushPipe to represent interrupt for CSR
   io.redirect.bits.isFlushPipe := isFlushPipe || intrEnable
-  io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.csr.trapTarget)
+  io.redirect.bits.target := Mux(isFlushPipe, deqCommitData.pc + 4.U, io.csr.trapTarget)
   io.exception := deqUop
   io.exception.ctrl.commitType := deqCommitData.commitType
   io.exception.lqIdx := deqCommitData.lqIdx
   io.exception.sqIdx := deqCommitData.sqIdx
+  io.exception.cf.pc := deqCommitData.pc
   XSDebug(io.redirect.valid,
     "generate redirect: pc 0x%x intr %d excp %d flushpp %d target:0x%x Traptarget 0x%x exceptionVec %b\n",
     io.exception.cf.pc, intrEnable, exceptionEnable, isFlushPipe, io.redirect.bits.target, io.csr.trapTarget,
