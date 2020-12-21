@@ -455,7 +455,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       l2g := (l2g & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
       XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)} ps:${ps}\n")
     }
-    when (memPte.isLeaf()) {
+    when (memPte.isLeaf() && (level===2.U)) {
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
       //TODO: check why the old refillIdx is right
 
