@@ -155,13 +155,14 @@ class IFU extends XSModule with HasIFUConst
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
 
   //********************** IF3 ****************************//
+  // if3 should wait for instructions resp to arrive
   val if3_valid = RegInit(init = false.B)
   val if4_ready = WireInit(false.B)
   val if3_allValid = if3_valid && (inLoop || io.icacheResp.valid)
   val if3_fire = if3_allValid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
-  if3_ready := if4_ready || !if3_valid
+  if3_ready := if4_ready && (inLoop || io.icacheResp.valid) || !if3_valid
   when (if3_flush) {
     if3_valid := false.B
   }.elsewhen (if2_fire && !if2_flush) {
@@ -390,7 +391,7 @@ class IFU extends XSModule with HasIFUConst
   when(inLoop) {
     io.icacheReq.valid := if4_flush
   }.otherwise {
-    io.icacheReq.valid := if1_valid && if2_ready
+    io.icacheReq.valid := if1_valid && (if2_ready || if1_flush)
   }
   io.icacheResp.ready := if4_ready
   io.icacheReq.bits.addr := if1_npc
