@@ -79,7 +79,6 @@ class IFUIO extends XSBundle
 }
 
 class PrevHalfInstr extends XSBundle {
-  val valid = Bool()
   val taken = Bool()
   val ghInfo = new GlobalHistory()
   val fetchpc = UInt(VAddrBits.W) // only for debug
@@ -175,11 +174,11 @@ class IFU extends XSModule with HasIFUConst
   if3_predicted_gh := if3_gh.update(if3_bp.hasNotTakenBrs, if3_bp.takenOnBr)
 
 
-  val prevHalfInstrReq = Wire(new PrevHalfInstr)
+  val prevHalfInstrReq = WireInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
   // only valid when if4_fire
   val hasPrevHalfInstrReq = prevHalfInstrReq.valid
 
-  val if3_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
+  val if3_prevHalfInstr = RegInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
 
   // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
   val crossPageIPF = WireInit(false.B)
@@ -187,22 +186,24 @@ class IFU extends XSModule with HasIFUConst
   val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
 
   // the previous half of RVI instruction waits until it meets its last half
-  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.npc === if3_pc && if3_allValid
+  val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.bits.npc === if3_pc && if3_allValid
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
-  when (hasPrevHalfInstrReq) {
-    if3_prevHalfInstr := prevHalfInstrReq
+  when (hasPrevHalfInstrReq && !if3_prevHalfFlush) {
+    if3_prevHalfInstr.valid := true.B
   }.elsewhen (if3_prevHalfConsumed || if3_prevHalfFlush) {
     if3_prevHalfInstr.valid := false.B
   }
-
+  when (hasPrevHalfInstrReq) {
+    if3_prevHalfInstr := prevHalfInstrReq
+  }
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
 
   def if3_nextValidPCNotEquals(pc: UInt) = !if2_valid || if2_valid && if2_pc =/= pc
-  val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.target)
-  val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.pc + 2.U)
+  val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.bits.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.target)
+  val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
   val if3_predTakenRedirect    = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
   val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(snpc(if3_pc, inLoop))
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
@@ -228,7 +229,7 @@ class IFU extends XSModule with HasIFUConst
     if1_npc := if3_prevHalfInstr.target
   }.else */
   when (if3_prevHalfNotMetRedirect) {
-    if3_target := if3_prevHalfInstr.pc + 2.U
+    if3_target := if3_prevHalfInstr.bits.npc
   }.elsewhen (if3_predTakenRedirect) {
     if3_target := if3_bp.target
   }.elsewhen (if3_predNotTakenRedirect) {
@@ -245,7 +246,7 @@ class IFU extends XSModule with HasIFUConst
 
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(pd.io.out, if3_fire)
-  val if4_ipf = RegEnable(icacheResp.ipf || if3_prevHalfInstrMet && if3_prevHalfInstr.ipf, if3_fire)
+  val if4_ipf = RegEnable(icacheResp.ipf || if3_prevHalfInstrMet && if3_prevHalfInstr.bits.ipf, if3_fire)
   val if4_acf = RegEnable(icacheResp.acf, if3_fire)
   val if4_crossPageIPF = RegEnable(crossPageIPF, if3_fire)
   val if4_valid = RegInit(false.B)
@@ -293,41 +294,39 @@ class IFU extends XSModule with HasIFUConst
 
   // we need this to tell BPU the prediction of prev half
   // because the prediction is with the start of each inst
-  val if4_prevHalfInstr = RegInit(0.U.asTypeOf(new PrevHalfInstr))
+  val if4_prevHalfInstr = RegInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
   val if4_pendingPrevHalfInstr = if4_prevHalfInstr.valid
-  val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && if4_prevHalfInstr.npc === if4_pc && if4_valid
+  val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && if4_prevHalfInstr.bits.npc === if4_pc && if4_valid
   val if4_prevHalfConsumed = if4_prevHalfInstrMet && if4_fire
   val if4_prevHalfFlush = if4_flush
 
-  val if4_takenPrevHalf = WireInit(if4_prevHalfInstrMet && if4_prevHalfInstr.taken)
+  val if4_takenPrevHalf = WireInit(if4_prevHalfInstrMet && if4_prevHalfInstr.bits.taken)
   when (if3_prevHalfConsumed) {
     if4_prevHalfInstr := if3_prevHalfInstr
   }.elsewhen (if4_prevHalfConsumed || if4_prevHalfFlush) {
     if4_prevHalfInstr.valid := false.B
   }
 
-  prevHalfInstrReq := 0.U.asTypeOf(new PrevHalfInstr)
-  when (if4_fire && if4_bp.saveHalfRVI) {
-    val idx = if4_bp.lastHalfRVIIdx
-    prevHalfInstrReq.valid := true.B
-    // this is result of the last half RVI
-    prevHalfInstrReq.taken := if4_bp.lastHalfRVITaken
-    prevHalfInstrReq.ghInfo := if4_gh
-    prevHalfInstrReq.newPtr := DontCare
-    prevHalfInstrReq.fetchpc := if4_pc
-    prevHalfInstrReq.idx := idx
-    prevHalfInstrReq.pc := if4_pd.pc(idx)
-    prevHalfInstrReq.npc := if4_pd.pc(idx) + 2.U
-    prevHalfInstrReq.target := if4_bp.lastHalfRVITarget
-    prevHalfInstrReq.instr := if4_pd.instrs(idx)(15, 0)
-    prevHalfInstrReq.ipf := if4_ipf
-  }
+  prevHalfInstrReq.valid := if4_fire && if4_bp.saveHalfRVI
+  val idx = if4_bp.lastHalfRVIIdx
+  
+  // this is result of the last half RVI
+  prevHalfInstrReq.bits.taken := if4_bp.lastHalfRVITaken
+  prevHalfInstrReq.bits.ghInfo := if4_gh
+  prevHalfInstrReq.bits.newPtr := DontCare
+  prevHalfInstrReq.bits.fetchpc := if4_pc
+  prevHalfInstrReq.bits.idx := idx
+  prevHalfInstrReq.bits.pc := if4_pd.pc(idx)
+  prevHalfInstrReq.bits.npc := if4_pd.pc(idx) + 2.U
+  prevHalfInstrReq.bits.target := if4_bp.lastHalfRVITarget
+  prevHalfInstrReq.bits.instr := if4_pd.instrs(idx)(15, 0)
+  prevHalfInstrReq.bits.ipf := if4_ipf
 
   def if4_nextValidPCNotEquals(pc: UInt) = if3_valid  && if3_pc =/= pc ||
                                            !if3_valid && (if2_valid && if2_pc =/= pc) ||
                                            !if3_valid && !if2_valid
 
-  val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.pc+2.U)
+  val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.bits.pc+2.U)
   val if4_predTakenRedirect = !hasPrevHalfInstrReq && if4_bp.taken && if4_nextValidPCNotEquals(if4_bp.target)
   val if4_predNotTakenRedirect = !hasPrevHalfInstrReq && !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
   // val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo && enableGhistRepair.B
@@ -441,19 +440,19 @@ class IFU extends XSModule with HasIFUConst
   }
 
   pd.io.prev.valid := if3_prevHalfInstrMet
-  pd.io.prev.bits := if3_prevHalfInstr.instr
+  pd.io.prev.bits := if3_prevHalfInstr.bits.instr
   // if a fetch packet triggers page fault, set the pf instruction to nop
   when (!if3_prevHalfInstrMet && icacheResp.ipf) {
     val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
     (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
     pd.io.in.data := instrs.asUInt
-  }.elsewhen (if3_prevHalfInstrMet && (if3_prevHalfInstr.ipf || icacheResp.ipf)) {
+  }.elsewhen (if3_prevHalfInstrMet && (if3_prevHalfInstr.bits.ipf || icacheResp.ipf)) {
     pd.io.prev.bits := ZeroExt("b0010011".U, 16)
     val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
     (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
     pd.io.in.data := instrs.asUInt
 
-    when (icacheResp.ipf && !if3_prevHalfInstr.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
+    when (icacheResp.ipf && !if3_prevHalfInstr.bits.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
   }
 
   //Performance Counter
@@ -519,19 +518,19 @@ class IFU extends XSModule with HasIFUConst
     XSDebug("[IF3][redirect]: v=%d, prevMet=%d, prevNMet=%d, predT=%d, predNT=%d\n", if3_redirect, if3_prevHalfMetRedirect, if3_prevHalfNotMetRedirect, if3_predTakenRedirect, if3_predNotTakenRedirect)
     // XSDebug("[IF3][prevHalfInstr] v=%d redirect=%d fetchpc=%x idx=%d tgt=%x taken=%d instr=%x\n\n",
     //   prev_half_valid, prev_half_redirect, prev_half_fetchpc, prev_half_idx, prev_half_tgt, prev_half_taken, prev_half_instr)
-    XSDebug("[IF3][    prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
-      if3_prevHalfInstr.valid, if3_prevHalfInstr.taken, if3_prevHalfInstr.fetchpc, if3_prevHalfInstr.idx, if3_prevHalfInstr.pc, if3_prevHalfInstr.target, if3_prevHalfInstr.instr, if3_prevHalfInstr.ipf)
-    XSDebug("[IF3][if3_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n\n",
-      if3_prevHalfInstr.valid, if3_prevHalfInstr.taken, if3_prevHalfInstr.fetchpc, if3_prevHalfInstr.idx, if3_prevHalfInstr.pc, if3_prevHalfInstr.target, if3_prevHalfInstr.instr, if3_prevHalfInstr.ipf)
+    XSDebug("[IF3][if3_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x npc=%x tgt=%x instr=%x ipf=%d\n\n",
+    if3_prevHalfInstr.valid, if3_prevHalfInstr.bits.taken, if3_prevHalfInstr.bits.fetchpc, if3_prevHalfInstr.bits.idx, if3_prevHalfInstr.bits.pc, if3_prevHalfInstr.bits.npc, if3_prevHalfInstr.bits.target, if3_prevHalfInstr.bits.instr, if3_prevHalfInstr.bits.ipf)
     if3_gh.debug("if3")
-
+    
     XSDebug("[IF4][predecode] mask=%b\n", if4_pd.mask)
     XSDebug("[IF4][snpc]: %x, realMask=%b\n", if4_snpc, if4_mask)
     XSDebug("[IF4][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if4_bp.taken, if4_bp.jmpIdx, if4_bp.hasNotTakenBrs, if4_bp.target, if4_bp.saveHalfRVI)
     XSDebug("[IF4][redirect]: v=%d, prevNotMet=%d, predT=%d, predNT=%d\n", if4_redirect, if4_prevHalfNextNotMet, if4_predTakenRedirect, if4_predNotTakenRedirect)
     XSDebug(if4_pd.pd(if4_bp.jmpIdx).isJal && if4_bp.taken, "[IF4] cfi is jal!  instr=%x target=%x\n", if4_instrs(if4_bp.jmpIdx), if4_jal_tgts(if4_bp.jmpIdx))
-    XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x tgt=%x instr=%x ipf=%d\n",
-      if4_prevHalfInstr.valid, if4_prevHalfInstr.taken, if4_prevHalfInstr.fetchpc, if4_prevHalfInstr.idx, if4_prevHalfInstr.pc, if4_prevHalfInstr.target, if4_prevHalfInstr.instr, if4_prevHalfInstr.ipf)
+    XSDebug("[IF4][ prevHalfInstrReq] v=%d taken=%d fetchpc=%x idx=%d pc=%x npc=%x tgt=%x instr=%x ipf=%d\n",
+      prevHalfInstrReq.valid, prevHalfInstrReq.bits.taken, prevHalfInstrReq.bits.fetchpc, prevHalfInstrReq.bits.idx, prevHalfInstrReq.bits.pc, prevHalfInstrReq.bits.npc, prevHalfInstrReq.bits.target, prevHalfInstrReq.bits.instr, prevHalfInstrReq.bits.ipf)
+    XSDebug("[IF4][if4_prevHalfInstr] v=%d taken=%d fetchpc=%x idx=%d pc=%x npc=%x tgt=%x instr=%x ipf=%d\n",
+      if4_prevHalfInstr.valid, if4_prevHalfInstr.bits.taken, if4_prevHalfInstr.bits.fetchpc, if4_prevHalfInstr.bits.idx, if4_prevHalfInstr.bits.pc, if4_prevHalfInstr.bits.npc, if4_prevHalfInstr.bits.target, if4_prevHalfInstr.bits.instr, if4_prevHalfInstr.bits.ipf)
     if4_gh.debug("if4")
     XSDebug(io.fetchPacket.fire(), "[IF4][fetchPacket] v=%d r=%d mask=%b ipf=%d acf=%d crossPageIPF=%d\n",
       io.fetchPacket.valid, io.fetchPacket.ready, io.fetchPacket.bits.mask, io.fetchPacket.bits.ipf, io.fetchPacket.bits.acf, io.fetchPacket.bits.crossPageIPFFix)
