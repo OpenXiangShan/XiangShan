@@ -65,12 +65,11 @@ class MulDivExeUnit extends Exu(mulDivExeUnitCfg) {
   div.ctrl.isW := isW
   div.ctrl.sign := isDivSign
 
-  XSDebug(io.fromInt.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
+  XSDebug(io.fromInt.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d) brTag:%x\n",
     io.fromInt.valid, io.fromInt.ready,
     io.toInt.valid, io.toInt.ready,
     io.redirect.valid,
-    io.redirect.bits.isException,
-    io.redirect.bits.isFlushPipe,
+    io.redirect.bits.level,
     io.redirect.bits.brTag.value
   )
   XSDebug(io.fromInt.valid, "src1:%x src2:%x pc:%x\n", src1, src2, io.fromInt.bits.uop.cf.pc)

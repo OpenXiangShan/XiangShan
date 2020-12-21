@@ -120,7 +120,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
-  val flush = redirectValid && (redirect.isException || redirect.isFlushPipe)
+  val flush = redirectValid && RedirectLevel.isUnconditional(redirect.level)
   fpBusyTable.io.flush := flush
   intBusyTable.io.flush := flush
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
@@ -158,9 +158,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
-  io.roqio.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException
+  io.roqio.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException()
   io.roqio.exception.bits := roq.io.exception
-  io.roqio.isInterrupt := roq.io.redirect.bits.isFlushPipe
+  io.roqio.isInterrupt := roq.io.redirect.bits.interrupt
   // roq to mem block
   io.roqio.roqDeqPtr := roq.io.roqDeqPtr
   io.roqio.commits := roq.io.commits

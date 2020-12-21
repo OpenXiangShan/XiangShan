@@ -240,13 +240,15 @@ class MicroOp extends CfCtrl with HasLSIdx {
 
 class Redirect extends XSBundle {
   val roqIdx = new RoqPtr
-  val isException = Bool()
-  val isMisPred = Bool()
-  val isReplay = Bool()
-  val isFlushPipe = Bool()
+  val level = RedirectLevel()
+  val interrupt = Bool()
   val pc = UInt(VAddrBits.W)
   val target = UInt(VAddrBits.W)
   val brTag = new BrqPtr
+
+  def isUnconditional() = RedirectLevel.isUnconditional(level)
+  def flushItself() = RedirectLevel.flushItself(level)
+  def isException() = RedirectLevel.isException(level)
 }
 
 class Dp1ToDp2IO extends XSBundle {

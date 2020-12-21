@@ -80,10 +80,8 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   when(csr.io.out.valid){
     io.toInt.bits.redirectValid := csr.csrio.redirectOut.valid
     io.toInt.bits.redirect.brTag := uop.brTag
-    io.toInt.bits.redirect.isException := false.B
-    io.toInt.bits.redirect.isMisPred := false.B
-    io.toInt.bits.redirect.isFlushPipe := false.B
-    io.toInt.bits.redirect.isReplay := false.B
+    io.toInt.bits.redirect.level := RedirectLevel.flushAfter
+    io.toInt.bits.redirect.interrupt := DontCare
     io.toInt.bits.redirect.roqIdx := uop.roqIdx
     io.toInt.bits.redirect.target := csr.csrio.redirectOut.bits
     io.toInt.bits.redirect.pc := uop.cf.pc

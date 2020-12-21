@@ -7,7 +7,7 @@ import utils._
 import chisel3.ExcitingUtils._
 
 
-class BrqPtr extends CircularQueuePtr(BrqPtr.BrqSize) {
+class BrqPtr extends CircularQueuePtr(BrqPtr.BrqSize) with HasCircularQueuePtrHelper {
 
   // this.age < that.age
   final def < (that: BrqPtr): Bool = {
@@ -17,10 +17,12 @@ class BrqPtr extends CircularQueuePtr(BrqPtr.BrqSize) {
     )
   }
 
-  def needBrFlush(redirectTag: BrqPtr): Bool = this < redirectTag
+  def needBrFlush(redirect: Valid[Redirect]): Bool = {
+    isAfter(this, redirect.bits.brTag) || (redirect.bits.flushItself() && redirect.bits.brTag === this)
+  }
 
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || needBrFlush(redirect.bits.brTag)) //TODO: discuss if (isException || isFlushPipe) need here?
+    redirect.bits.isUnconditional() || needBrFlush(redirect)
   }
 
   override def toPrintable: Printable = p"f:$flag v:$value"
@@ -129,11 +131,11 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     redirectPtr := redirectPtr + 1.U
   }
 
-  val brTagRead = RegNext(Mux(io.memRedirect.bits.isReplay, io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
+  val brTagRead = RegNext(Mux(io.memRedirect.bits.flushItself(), io.memRedirect.bits.brTag - 1.U, io.memRedirect.bits.brTag))
   io.cfiInfo.valid := RegNext(io.memRedirect.valid || commitValid)
   io.cfiInfo.bits := brQueue(brTagRead.value).exuOut.brUpdate
   io.cfiInfo.bits.brTag := brTagRead
-  io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.isReplay)
+  io.cfiInfo.bits.isReplay := RegNext(io.memRedirect.bits.flushItself())
   io.cfiInfo.bits.isMisPred := RegNext(commitIsMisPred)
 
   XSInfo(io.out.valid,
@@ -199,13 +201,12 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     stateQueue.zipWithIndex.foreach({case(s, i) =>
       // replay should flush brTag
       val ptr = BrqPtr(brQueue(i).ptrFlag, i.U)
-      val replayMatch = io.memRedirect.bits.isReplay && ptr === io.memRedirect.bits.brTag
-      when(ptr.needBrFlush(io.memRedirect.bits.brTag) || replayMatch){
+      when(ptr.needBrFlush(io.memRedirect)) {
         s := s_invalid
       }
     })
-    tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.isReplay, 0.U, 1.U)
-    when (io.memRedirect.bits.isReplay && (redirectPtr.needBrFlush(io.memRedirect.bits.brTag) || redirectPtr === io.memRedirect.bits.brTag)) {
+    tailPtr := io.memRedirect.bits.brTag + Mux(io.memRedirect.bits.flushItself(), 0.U, 1.U)
+    when (io.memRedirect.bits.flushItself() && redirectPtr.needBrFlush(io.memRedirect)) {
       redirectPtr := io.memRedirect.bits.brTag
     }
   }

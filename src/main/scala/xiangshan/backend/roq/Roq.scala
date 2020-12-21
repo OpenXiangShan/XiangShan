@@ -17,7 +17,8 @@ object roqDebugId extends Function0[Integer] {
 
 class RoqPtr extends CircularQueuePtr(RoqPtr.RoqSize) with HasCircularQueuePtrHelper {
   def needFlush(redirect: Valid[Redirect]): Bool = {
-    redirect.valid && (redirect.bits.isException || redirect.bits.isFlushPipe || isAfter(this, redirect.bits.roqIdx))
+    val flushItself = redirect.bits.flushItself() && this === redirect.bits.roqIdx
+    redirect.valid && (redirect.bits.isUnconditional() || flushItself || isAfter(this, redirect.bits.roqIdx))
   }
 }
 
@@ -191,9 +192,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val isFlushPipe = deqPtrWritebacked && deqUop.ctrl.flushPipe
   io.redirect := DontCare
   io.redirect.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)// TODO: add fence flush to flush the whole pipe
-  io.redirect.bits.isException := intrEnable || exceptionEnable
-  // reuse isFlushPipe to represent interrupt for CSR
-  io.redirect.bits.isFlushPipe := isFlushPipe || intrEnable
+  io.redirect.bits.level := Mux(isFlushPipe, RedirectLevel.flushAll, RedirectLevel.exception)
+  io.redirect.bits.interrupt := intrEnable
   io.redirect.bits.target := Mux(isFlushPipe, deqUop.cf.pc + 4.U, io.csr.trapTarget)
   io.exception := deqUop
   XSDebug(io.redirect.valid,
@@ -341,8 +341,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       Mux(state === s_extrawalk, walkPtrExt, walkPtrStart))
     // walkTgtExt := io.brqRedirect.bits.roqIdx
     val currentWalkPtr = Mux(state === s_walk || state === s_extrawalk, walkPtrExt, walkPtrStart)
-    walkCounter := distanceBetween(currentWalkPtr, io.brqRedirect.bits.roqIdx) - Mux(state === s_walk, commitCnt, 0.U)
-    enqPtrExt := io.brqRedirect.bits.roqIdx + 1.U
+    walkCounter := distanceBetween(currentWalkPtr, io.brqRedirect.bits.roqIdx) + io.brqRedirect.bits.flushItself() - Mux(state === s_walk, commitCnt, 0.U)
+    enqPtrExt := io.brqRedirect.bits.roqIdx + Mux(io.brqRedirect.bits.flushItself(), 0.U, 1.U)
   }
 
   // no enough space for walk, allocate extra space
