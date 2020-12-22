@@ -107,8 +107,8 @@ endif
 VERILATOR_FLAGS = --top-module $(EMU_TOP) \
   +define+VERILATOR=1 \
   +define+PRINTF_COND=1 \
-  +define+RANDOMIZE_MEM_INIT \
   +define+RANDOMIZE_REG_INIT \
+  +define+RANDOMIZE_MEM_INIT \
   $(VEXTRA_FLAGS) \
   --assert \
   --stats-vars \
