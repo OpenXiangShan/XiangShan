@@ -21,6 +21,7 @@ import scala.math.max
 class FetchPacket extends XSBundle {
   val instrs = Vec(PredictWidth, UInt(32.W))
   val mask = UInt(PredictWidth.W)
+  val pdmask = UInt(PredictWidth.W)
   // val pc = UInt(VAddrBits.W)
   val pc = Vec(PredictWidth, UInt(VAddrBits.W))
   val pnpc = Vec(PredictWidth, UInt(VAddrBits.W))
@@ -82,15 +83,12 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val firstBankHasHalfRVI = Bool()
   val lastBankHasHalfRVI = Bool()
 
-  def lastHalfRVIMask = Mux(firstBankHasHalfRVI, UIntToOH((bankWidth-1).U),
-                          Mux(lastBankHasHalfRVI, UIntToOH((PredictWidth-1).U),
-                            0.U(PredictWidth.W)
-                          )
-                        )
+  // assumes that only one of the two conditions could be true
+  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U(7.W), firstBankHasHalfRVI.asUInt, 0.U(7.W))
 
   def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
-  def lastHalfRVITaken = ParallelORR(takens & lastHalfRVIMask)
+  def lastHalfRVITaken = (takens(bankWidth-1) && firstBankHasHalfRVI) || (takens(PredictWidth-1) && lastBankHasHalfRVI)
 
   def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
   // should not be used if not lastHalfRVITaken
@@ -100,13 +98,14 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   def realBrMask  = brMask  & lastHalfRVIClearMask
   def realJalMask = jalMask & lastHalfRVIClearMask
 
-  def brNotTakens = ~realTakens & realBrMask
+  def brNotTakens = ~takens & realBrMask
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
                        (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0)))))
   // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
   def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
-  def saveHalfRVI = (firstBankHasHalfRVI && (unmaskedJmpIdx === (bankWidth-1).U || !(ParallelORR(takens)))) ||
-  (lastBankHasHalfRVI  &&  unmaskedJmpIdx === (PredictWidth-1).U)
+  // if not taken before the half RVI inst
+  def saveHalfRVI = (firstBankHasHalfRVI && !(ParallelORR(takens(bankWidth-2,0)))) ||
+  (lastBankHasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0))))
   // could get PredictWidth-1 when only the first bank is valid
   def jmpIdx = ParallelPriorityEncoder(realTakens)
   // only used when taken
