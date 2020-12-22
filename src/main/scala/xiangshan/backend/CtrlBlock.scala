@@ -72,11 +72,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   val brqIsAfterLsq = isAfter(brq.io.redirect.bits.roqIdx, io.fromLsBlock.replay.bits.roqIdx)
   val redirectArb = Mux(io.fromLsBlock.replay.valid && (!brq.io.redirect.valid || brqIsAfterLsq),
     io.fromLsBlock.replay.bits, brq.io.redirect.bits)
-  val redirectValid = roq.io.redirect.valid || brq.io.redirect.valid || io.fromLsBlock.replay.valid
-  val redirect = Mux(roq.io.redirect.valid, roq.io.redirect.bits, redirectArb)
+  val redirectValid = roq.io.redirectOut.valid || brq.io.redirect.valid || io.fromLsBlock.replay.valid
+  val redirect = Mux(roq.io.redirectOut.valid, roq.io.redirectOut.bits, redirectArb)
 
   io.frontend.redirect.valid := RegNext(redirectValid)
-  io.frontend.redirect.bits := RegNext(Mux(roq.io.redirect.valid, roq.io.redirect.bits.target, redirectArb.target))
+  io.frontend.redirect.bits := RegNext(Mux(roq.io.redirectOut.valid, roq.io.redirectOut.bits.target, redirectArb.target))
   // io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
   io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
 
@@ -84,7 +84,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   decode.io.toBrq <> brq.io.enqReqs
   decode.io.brTags <> brq.io.brTags
 
-  brq.io.roqRedirect <> roq.io.redirect
+  brq.io.roqRedirect <> roq.io.redirectOut
   brq.io.memRedirect.valid := brq.io.redirect.valid || io.fromLsBlock.replay.valid
   brq.io.memRedirect.bits <> redirectArb
   brq.io.bcommit <> roq.io.bcommit
@@ -136,10 +136,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.rfReadAddr <> dispatch.io.readFpRf.map(_.addr)
   fpBusyTable.io.pregRdy <> dispatch.io.fpPregRdy
 
-  roq.io.memRedirect := DontCare
-  roq.io.memRedirect.valid := false.B
-  roq.io.brqRedirect.valid := brq.io.redirect.valid || io.fromLsBlock.replay.valid
-  roq.io.brqRedirect.bits <> redirectArb
+  roq.io.redirect.valid := brq.io.redirect.valid || io.fromLsBlock.replay.valid
+  roq.io.redirect.bits <> redirectArb
   roq.io.exeWbResults.take(roqWbSize-1).zip(
     io.fromIntBlock.wbRegs ++ io.fromFpBlock.wbRegs ++ io.fromLsBlock.stOut
   ).foreach{
@@ -158,9 +156,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr
-  io.roqio.exception.valid := roq.io.redirect.valid && roq.io.redirect.bits.isException()
+  io.roqio.exception.valid := roq.io.redirectOut.valid && roq.io.redirectOut.bits.isException()
   io.roqio.exception.bits := roq.io.exception
-  io.roqio.isInterrupt := roq.io.redirect.bits.interrupt
+  io.roqio.isInterrupt := roq.io.redirectOut.bits.interrupt
   // roq to mem block
   io.roqio.roqDeqPtr := roq.io.roqDeqPtr
   io.roqio.commits := roq.io.commits
