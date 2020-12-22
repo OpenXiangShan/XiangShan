@@ -25,6 +25,7 @@ object LqPtr extends HasXSParameter {
 
 class LqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
+  val sqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
   val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
   val resp = Vec(RenameWidth, Output(new LqPtr))
@@ -87,7 +88,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
     val index = lqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -101,7 +102,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   }
 
   // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  when (Cat(firedDispatch).orR && io.enq.canAccept && !io.brqRedirect.valid) {
+  when (Cat(firedDispatch).orR && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
     val enqNumber = PopCount(firedDispatch)
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
     XSInfo("dispatched %d insts to lq\n", enqNumber)
