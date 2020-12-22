@@ -2,6 +2,8 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
+#include<signal.h>
+#include<unistd.h>
 #include "ram.h"
 #include "zlib.h"
 #include "compress.h"
@@ -244,6 +246,16 @@ inline void Emulator::single_cycle() {
   cycles ++;
 }
 
+#if VM_COVERAGE == 1
+uint64_t *max_cycle_ptr = NULL;
+// when interrupted, we set max_cycle to zero
+// so that the emulator will stop gracefully
+void sig_handler(int signo) {
+  if (signo == SIGINT)
+    *max_cycle_ptr = 0;
+}
+#endif
+
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
   extern uint32_t uptime(void);
@@ -268,6 +280,9 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   // since we are not sure when an emu will stop
   // we distinguish multiple dat files by emu start time
   time_t start_time = time(NULL);
+  max_cycle_ptr = &max_cycle;
+  if (signal(SIGINT, sig_handler) == SIG_ERR)
+    printf("\ncan't catch SIGINT\n");
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
