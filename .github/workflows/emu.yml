@@ -36,7 +36,7 @@ jobs:
               t=${test%.c}
               echo $t
               make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2>/dev/null | grep "HIT GOOD TRAP"
-              if [[ $? == 1 ]];
+              if [[ $? != 0 ]];
               then
                   echo $t fail
                   ret=1
