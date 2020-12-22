@@ -218,22 +218,18 @@ class CfCtrl extends XSBundle {
   val brTag = new BrqPtr
 }
 
-// Load / Store Index
-//
-// while separated lq and sq is used, lsIdx consists of lqIdx, sqIdx and l/s type.
-trait HasLSIdx { this: HasXSParameter =>
-  // Separate LSQ
+class LSIdx extends XSBundle {
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
 }
 
-class LSIdx extends XSBundle with HasLSIdx {}
-
 // CfCtrl -> MicroOp at Rename Stage
-class MicroOp extends CfCtrl with HasLSIdx {
+class MicroOp extends CfCtrl {
   val psrc1, psrc2, psrc3, pdest, old_pdest = UInt(PhyRegIdxWidth.W)
   val src1State, src2State, src3State = SrcState()
   val roqIdx = new RoqPtr
+  val lqIdx = new LqPtr
+  val sqIdx = new SqPtr
   val diffTestDebugLrScValid = Bool()
 }
 
@@ -295,19 +291,24 @@ class CSRSpecialIO extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-//class ExuIO extends XSBundle {
-//  val in = Flipped(DecoupledIO(new ExuInput))
-//  val redirect = Flipped(ValidIO(new Redirect))
-//  val out = DecoupledIO(new ExuOutput)
-//  // for csr
-//  val csrOnly = new CSRSpecialIO
-//  val mcommit = Input(UInt(3.W))
-//}
+class RoqCommitInfo extends XSBundle {
+  val ldest = UInt(5.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val commitType = CommitType()
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val old_pdest = UInt(PhyRegIdxWidth.W)
+  val lqIdx = new LqPtr
+  val sqIdx = new SqPtr
+
+  // these should be optimized for synthesis verilog
+  val pc = UInt(VAddrBits.W)
+}
 
 class RoqCommitIO extends XSBundle {
   val isWalk = Output(Bool())
   val valid = Vec(CommitWidth, Output(Bool()))
-  val uop = Vec(CommitWidth, Output(new MicroOp))
+  val info = Vec(CommitWidth, Output(new RoqCommitInfo))
 
   def hasWalkInstr = isWalk && valid.asUInt.orR
   def hasCommitInstr = !isWalk && valid.asUInt.orR
