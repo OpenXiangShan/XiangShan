@@ -54,7 +54,8 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   // Ibuffer define
   val ibuf = Mem(IBufSize, new IBufEntry)
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
-  val tail_ptr = RegInit(IbufPtr(false.B, 0.U))
+  val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
+  val tail_ptr = tail_vec(0)
 
   val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
 
@@ -64,12 +65,12 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   // Enque
   io.in.ready := enqValid
 
-  val enq_vec = Wire(Vec(PredictWidth, UInt(log2Up(IBufSize).W)))
+  val offset = Wire(Vec(PredictWidth, UInt(log2Up(PredictWidth).W)))
   for(i <- 0 until PredictWidth) {
     if (i == 0) {
-      enq_vec(i) := tail_ptr.value
+      offset(i) := 0.U
     } else {
-      enq_vec(i) := tail_ptr.value + PopCount(io.in.bits.pdmask(i-1, 0))
+      offset(i) := PopCount(io.in.bits.pdmask(i-1, 0))
     }
   }
 
@@ -87,11 +88,11 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
         inWire.ipf := io.in.bits.ipf
         inWire.acf := io.in.bits.acf
         inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
-        ibuf(enq_vec(i)) := inWire
+        ibuf(tail_vec(offset(i)).value) := inWire
       }
     }
 
-    tail_ptr := tail_ptr + PopCount(io.in.bits.mask)
+    tail_vec := VecInit(tail_vec.map(_ + PopCount(io.in.bits.mask)))
   }
 
   // Deque
@@ -127,8 +128,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   when(io.flush) {
     head_ptr.value := 0.U
     head_ptr.flag := false.B
-    tail_ptr.value := 0.U
-    tail_ptr.flag := false.B
+    tail_vec := VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr)))
   }
 
   // Debug info
@@ -164,7 +164,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   //   )
   // }
 
-  XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  XSDebug(p"validEntries=$validEntries, last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
   for(i <- 0 until IBufSize/8) {
     XSDebug("%x | %x | %x | %x | %x | %x | %x | %x\n",
       ibuf(i*8+0).inst,
