@@ -141,7 +141,7 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   }
 
   def hit(vpn: UInt) = {
-    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level))
+    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level)) && (level === 2.U)
   }
 
   def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntires = {

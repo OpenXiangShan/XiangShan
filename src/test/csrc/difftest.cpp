@@ -21,6 +21,7 @@ void (*ref_difftest_set_mastatus)(const void *s) = NULL;
 void (*ref_difftest_get_csr)(void *c) = NULL;
 void (*ref_difftest_set_csr)(const void *c) = NULL;
 vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para) = NULL;
+int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) = NULL;
 static void (*ref_difftest_exec)(uint64_t n) = NULL;
 static void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
 static void (*ref_isa_reg_display)(void) = NULL;
@@ -76,6 +77,9 @@ void init_difftest() {
 
   ref_disambiguate_exec = (vaddr_t (*)(void *))dlsym(handle, "disambiguate_exec");
   assert(ref_disambiguate_exec);
+
+  ref_difftest_store_commit = (int (*)(uint64_t*, uint64_t*, uint8_t*))dlsym(handle, "difftest_store_commit");
+  assert(ref_difftest_store_commit);
 
   ref_difftest_exec = (void (*)(uint64_t))dlsym(handle, "difftest_exec");
   assert(ref_difftest_exec);
@@ -248,4 +252,8 @@ int difftest_step(DiffState *s) {
     return 1;
   }
   return 0;
+}
+
+int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
+  return ref_difftest_store_commit(saddr, sdata, smask);
 }
