@@ -684,7 +684,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   XSDebug(csrio.redirectOut.valid, "redirect to %x, pc=%x\n", csrio.redirectOut.bits, cfIn.pc)
 
-  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d) exc: (%d):%x\n",
+  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
     csrio.exception.bits.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
