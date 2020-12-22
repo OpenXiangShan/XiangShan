@@ -95,4 +95,16 @@ package object xiangshan {
     def lsInstIsStore(commitType: UInt) = commitType(0)
     def isBranch(commitType: UInt) = commitType(0) && !commitType(1)
   }
+
+  object RedirectLevel {
+    def flushAfter = "b00".U
+    def flush      = "b01".U
+    def flushAll   = "b10".U
+    def exception  = "b11".U
+
+    def apply() = UInt(2.W)
+    def isUnconditional(level: UInt) = level(1)
+    def flushItself(level: UInt) = level(0)
+    def isException(level: UInt) = level(1) && level(0)
+  }
 }
