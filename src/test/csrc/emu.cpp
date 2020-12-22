@@ -184,6 +184,15 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
   dut_ptr_wpc(5); dut_ptr_wdata(5); dut_ptr_wdst(5); 
 }
 
+inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
+#define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
+#define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
+#define dut_ptr_smask(x) smask[x] = dut_ptr->io_difftest_storeMask_##x
+  dut_ptr_saddr(0); dut_ptr_saddr(1);
+  dut_ptr_sdata(0); dut_ptr_sdata(1);
+  dut_ptr_smask(0); dut_ptr_smask(1);
+}
+
 inline void Emulator::reset_ncycles(size_t cycles) {
   for(int i = 0; i < cycles; i++) {
     dut_ptr->reset = 1;
@@ -317,6 +326,25 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       max_instr -= diff.commit;
     }
 
+    if (dut_ptr->io_difftest_storeCommit) {
+      read_store_info(diff.store_addr, diff.store_data, diff.store_mask);
+
+      for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
+        auto addr = diff.store_addr[i];
+        auto data = diff.store_data[i];
+        auto mask = diff.store_mask[i];
+        if (difftest_store_step(&addr, &data, &mask)) {
+          difftest_display(dut_ptr->io_difftest_priviledgeMode);
+          printf("Mismatch for store commits: \n");
+          printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
+          printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
+            diff.store_addr[i], diff.store_data[i], diff.store_mask[i]);
+          trapCode = STATE_ABORT;
+          break;
+        }
+      }
+    }
+
     uint32_t t = uptime();
     if (t - lasttime_poll > 100) {
       poll_event();
@@ -447,10 +475,10 @@ void Emulator::snapshot_save(const char *filename) {
   uint64_t nemu_this_pc = get_nemu_this_pc();
   stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
-  char *buf = new char[size];
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
   stream.unbuf_write(buf, size);
-  delete [] buf;
+  munmap(buf, size);
 
   struct SyncState sync_mastate;
   ref_difftest_get_mastatus(&sync_mastate);
@@ -488,10 +516,10 @@ void Emulator::snapshot_load(const char *filename) {
   stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
   set_nemu_this_pc(nemu_this_pc);
 
-  char *buf = new char[size];
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   stream.read(buf, size);
   ref_difftest_memcpy_from_dut(0x80000000, buf, size);
-  delete [] buf;
+  munmap(buf, size);
 
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));

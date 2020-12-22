@@ -125,7 +125,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     io.brTags(i) := brTag
     when (io.enqReqs(i).fire()) {
       brQueue(idx).ptrFlag := brTag.flag
-      brQueue(idx).exuOut.brUpdate.pc := io.enqReqs(i).bits.cf.brUpdate.pc
+      brQueue(idx).exuOut.brUpdate.pc := io.enqReqs(i).bits.cf.pc
       brQueue(idx).exuOut.brUpdate.pnpc := io.enqReqs(i).bits.cf.brUpdate.pnpc
       brQueue(idx).exuOut.brUpdate.fetchIdx := io.enqReqs(i).bits.cf.brUpdate.fetchIdx
       brQueue(idx).exuOut.brUpdate.pd := io.enqReqs(i).bits.cf.brUpdate.pd
