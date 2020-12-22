@@ -23,6 +23,7 @@ object SqPtr extends HasXSParameter {
 
 class SqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
+  val lqCanAccept = Input(Bool())
   val needAlloc = Vec(RenameWidth, Input(Bool()))
   val req = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
   val resp = Vec(RenameWidth, Output(new SqPtr))
@@ -76,7 +77,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = sqIdx.value
-    when (io.enq.req(i).valid && io.enq.canAccept && !io.brqRedirect.valid) {
+    when (io.enq.req(i).valid && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
       uop(index) := io.enq.req(i).bits
       allocated(index) := true.B
       datavalid(index) := false.B
@@ -87,7 +88,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.enq.resp(i) := sqIdx
   }
 
-  when (Cat(firedDispatch).orR && io.enq.canAccept && !io.brqRedirect.valid) {
+  when (Cat(firedDispatch).orR && io.enq.canAccept && io.enq.lqCanAccept && !io.brqRedirect.valid) {
     val enqNumber = PopCount(firedDispatch)
     enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
     XSInfo("dispatched %d insts to sq\n", enqNumber)
@@ -194,9 +195,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (5) ROB commits the instruction: same as normal instructions
     */
   //(2) when they reach ROB's head, they can be sent to uncache channel
-  val commitType = io.commits.uop(0).ctrl.commitType
   io.uncache.req.valid := pending(deqPtr) && allocated(deqPtr) &&
-    commitType === CommitType.STORE &&
+    io.commits.info(0).commitType === CommitType.STORE &&
     io.roqDeqPtr === uop(deqPtr).roqIdx &&
     !io.commits.isWalk
 
@@ -256,10 +256,10 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * (2) They will not be cancelled and can be sent to lower level.
     */
   for (i <- 0 until CommitWidth) {
-    val storeCommit = !io.commits.isWalk && io.commits.valid(i) && io.commits.uop(i).ctrl.commitType === CommitType.STORE
+    val storeCommit = !io.commits.isWalk && io.commits.valid(i) && io.commits.info(i).commitType === CommitType.STORE
     when (storeCommit) {
-      commited(io.commits.uop(i).sqIdx.value) := true.B
-      XSDebug("store commit %d: idx %d %x\n", i.U, io.commits.uop(i).sqIdx.value, io.commits.uop(i).cf.pc)
+      commited(io.commits.info(i).sqIdx.value) := true.B
+      XSDebug("store commit %d: idx %d\n", i.U, io.commits.info(i).sqIdx.value)
     }
   }
 

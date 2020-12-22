@@ -262,6 +262,8 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
   // LSQ: send out canAccept when both load queue and store queue are ready
   // Dispatch: send instructions to LSQ only when they are ready
   io.enq.canAccept := loadQueue.io.enq.canAccept && storeQueue.io.enq.canAccept
+  loadQueue.io.enq.sqCanAccept := storeQueue.io.enq.canAccept
+  storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   for (i <- 0 until RenameWidth) {
     val isStore = CommitType.lsInstIsStore(io.enq.req(i).bits.ctrl.commitType)
 

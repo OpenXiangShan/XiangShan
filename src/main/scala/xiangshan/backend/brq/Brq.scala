@@ -143,12 +143,13 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   )
 
   // branch insts enq
+  val lastCycleRedirect = RegNext(io.memRedirect.valid || io.roqRedirect.valid)
   val validEntries = distanceBetween(tailPtr, headPtr)
   for(i <- 0 until DecodeWidth){
     val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U
+    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U && !lastCycleRedirect
     io.brTags(i) := brTag
     when (io.enqReqs(i).fire()) {
       brQueue(idx).ptrFlag := brTag.flag
