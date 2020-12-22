@@ -15,4 +15,6 @@ int isGzFile(const char *filename);
 long snapshot_compressToFile(uint8_t *ptr, const char *filename, long buf_size);
 long readFromGz(void* ptr, const char *file_name, long buf_size, uint8_t load_type);
 
+void nonzero_large_memcpy(const void* __restrict dest, const void* __restrict src, size_t n);
+
 #endif
