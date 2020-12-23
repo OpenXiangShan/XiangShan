@@ -408,18 +408,23 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
 
   val lastCycleRedirect = RegNext(io.redirect.valid)
-  val nextValidCounter = Mux(io.redirectOut.valid,
+  val trueValidCounter = Mux(lastCycleRedirect, distanceBetween(enqPtr, deqPtr), validCounter)
+
+  validCounter := Mux(io.redirectOut.valid,
     0.U,
-    Mux(lastCycleRedirect,
-      distanceBetween(enqPtr, deqPtr),
-      Mux(state === s_idle,
-        (validCounter - commitCnt) + firedDispatch,
-        validCounter
-      )
+    Mux(state === s_idle,
+      (validCounter - commitCnt) + firedDispatch,
+      trueValidCounter
     )
   )
-  validCounter := nextValidCounter
-  allowEnqueue := nextValidCounter <= (RoqSize - RenameWidth).U
+
+  allowEnqueue := Mux(io.redirectOut.valid,
+    true.B,
+    Mux(state === s_idle,
+      validCounter + firedDispatch <= (RoqSize - RenameWidth).U,
+      trueValidCounter <= (RoqSize - RenameWidth).U
+    )
+  )
 
   /**
     * States
