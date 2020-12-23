@@ -140,12 +140,13 @@ class IFU extends XSModule with HasIFUConst
 
   //********************** IF2 ****************************//
   val if2_valid = RegInit(init = false.B)
+  val if2_allValid = if2_valid && icache.io.tlb.resp.valid
   val if3_ready = WireInit(false.B)
-  val if2_fire = if2_valid && if3_ready
+  val if2_fire = if2_allValid && if3_ready
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
   val if2_snpc = snpc(if2_pc)
   val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_fire)
-  if2_ready := if3_ready || !if2_valid
+  if2_ready := if3_ready && icache.io.tlb.resp.valid || !if2_valid
   when (if1_fire)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
   .elsewhen (if2_fire)  { if2_valid := false.B }
