@@ -163,6 +163,8 @@ class LTBColumn extends LTBModule {
     // When a branch resolves and is found to not be in the LTB,
     // it is inserted into the LTB if determined to be a loop-branch and if it is mispredicted by the default predictor.
     when (!tagMatch && io.update.bits.misPred) {
+      // 没有判断conf是否等于0，以及age是否等于0
+      XSDebug("Repalce a entry\n")
       wEntry.tag := updateTag
       wEntry.conf := 0.U
       wEntry.age := 7.U
@@ -176,6 +178,7 @@ class LTBColumn extends LTBModule {
     }.elsewhen (tagMatch) {
       // During resolution, a taken branch found in the LTB has its nSpecCnt incremented by one.
       when (io.update.bits.taken) {
+        XSDebug("if MisPred, recover specCnt, otherwise, keep client\n")
         wEntry.nSpecCnt := entry.nSpecCnt + 1.U
         wEntry.specCnt := Mux(io.update.bits.misPred/* && !entry.brTag.needBrFlush(updateBrTag)*/, entry.nSpecCnt + 1.U, entry.specCnt)
         wEntry.conf := Mux(io.update.bits.misPred, 0.U, entry.conf)
@@ -183,12 +186,13 @@ class LTBColumn extends LTBModule {
         wEntry.tripCnt := Mux(io.update.bits.misPred, Fill(cntBits, 1.U(1.W)), entry.tripCnt)
       // A not-taken loop-branch found in the LTB during branch resolution updates its trip count and conf.
       }.otherwise {
+        XSDebug("Check tripCnt\n")
         // wEntry.conf := Mux(entry.nSpecCnt === entry.tripCnt, Mux(entry.isLearned, 7.U, entry.conf + 1.U), 0.U)
         // wEntry.conf := Mux(io.update.bits.misPred, 0.U, Mux(entry.isLearned, 7.U, entry.conf + 1.U))
         wEntry.conf := Mux((entry.nSpecCnt + 1.U) === entry.tripCnt, Mux(entry.isLearned, 7.U, entry.conf + 1.U), 0.U)
-        // wEntry.tripCnt := entry.nSpecCnt + 1.U
-        wEntry.tripCnt := io.update.bits.meta
-        wEntry.specCnt := Mux(io.update.bits.misPred, 0.U, entry.specCnt/* - entry.nSpecCnt - 1.U*/)
+        wEntry.tripCnt := entry.nSpecCnt + 1.U
+        // wEntry.tripCnt := io.update.bits.meta
+        wEntry.specCnt := Mux(io.update.bits.misPred, entry.specCnt - entry.nSpecCnt - 1.U, entry.specCnt/* - entry.nSpecCnt - 1.U*/)
         wEntry.nSpecCnt := 0.U
         wEntry.brTag := updateBrTag
         wEntry.unusable := io.update.bits.misPred && (io.update.bits.meta > entry.tripCnt)
@@ -204,7 +208,7 @@ class LTBColumn extends LTBModule {
   val swEntry = WireInit(if4_entry)
   ltb.swdata := Mux(doingReset, 0.U.asTypeOf(new LoopEntry), swEntry)
   when (io.if4_fire && if4_entry.tag === if4_tag && io.outMask) {
-    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt/* && if4_entry.isConf*/) {
+    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt && if4_entry.isConf) {
       swEntry.age := 7.U
       swEntry.specCnt := 0.U
     }.otherwise {
@@ -235,13 +239,13 @@ class LTBColumn extends LTBModule {
 
   if (BPUDebug && debug) {
     //debug info
-    XSDebug("This is ltbs\n")
     XSDebug(doingReset, "Reseting...\n")
     XSDebug("if3_fire=%d if4_fire=%d valid=%d\n", io.if3_fire, io.if4_fire,valid)
     XSDebug("[req] v=%d pc=%x idx=%x tag=%x\n", valid, io.req.pc, io.req.idx, io.req.tag)
     XSDebug("[if4_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", 
       if4_entry.tag, if4_entry.conf, if4_entry.age, if4_entry.tripCnt, if4_entry.specCnt, if4_entry.nSpecCnt)
     XSDebug(false, true.B, p" brTag=${if4_entry.brTag} unusable=${if4_entry.unusable}\n")
+    XSDebug("swen=%d, ltb.swIdx, io.if4_fire=%d, if4_entry.tag=%x, if4_tag=%x, io.outMask=%d\n", valid && if4_entry.tag === if4_tag || doingReset, io.if4_fire, if4_entry.tag, if4_tag, io.outMask)
     XSDebug(io.if4_fire && if4_entry.tag === if4_tag && io.outMask, "[speculative update] new specCnt=%d\n",
       Mux((if4_entry.specCnt + 1.U) === if4_entry.tripCnt, 0.U, if4_entry.specCnt + 1.U))
     XSDebug("[update] v=%d misPred=%d pc=%x idx=%x tag=%x meta=%d taken=%d tagMatch=%d cntMatch=%d", io.update.valid, io.update.bits.misPred, io.update.bits.pc, updateIdx, updateTag, io.update.bits.meta, io.update.bits.taken, tagMatch, cntMatch)
@@ -301,7 +305,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   // val offsetIdx = offsetInBank(io.pc.bits) // 这个pc在一个bank中的第几位
   // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => Mux(offsetIdx <= i.U, baseBank + i.U - offsetIdx, 0.U)(log2Up(PredictWidth) - 1, 0)))
 
-  val pc = io.pc.bits
+  val pc = RegEnable(io.pc.bits, io.pc.valid)
   val inMask = io.inMask
   val tag = ltbAddr.getTag(pc)
   val bank = ltbAddr.getBank(pc)
@@ -353,11 +357,11 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   if (BPUDebug && debug) {
     // debug info
-    XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", io.pc.valid, io.flush, io.pc.bits)
+    XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", io.pc.valid, io.flush, pc)
     XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
     XSDebug("[IF4][req] inMask=%b\n", inMask)
 
-    XSDebug("[IF4][req] updatePC=%x updateBank=%x, updateValid=%d, isBr=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr)
+    XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr)
     XSDebug("[IF4][req] isMisPred=%d updateSpecCnt=%d, taken=%d\n", io.update.bits.isMisPred, io.update.bits.bpuMeta.specCnt, io.update.bits.taken)
 
     // XSDebug(false, true.B, "\n")

@@ -579,7 +579,7 @@ class BPU extends BaseBPU {
   loop.io.flush := io.flush(2)
   loop.io.pc.valid := s3_fire
   loop.io.pc.bits := s3.io.in.pc
-  loop.io.inMask := s3.io.in.mask
+  loop.io.inMask := io.predecode.mask
   loop.io.outFire := s4_fire
   loop.io.respIn.taken := s3.io.pred.taken
   loop.io.respIn.jmpIdx := s3.io.pred.jmpIdx
