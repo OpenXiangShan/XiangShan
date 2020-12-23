@@ -52,18 +52,26 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // Ibuffer define
-  val ibuf = Mem(IBufSize, new IBufEntry)
+  val ibuf = Reg(Vec(IBufSize, new IBufEntry))
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
   val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
   val tail_ptr = tail_vec(0)
 
-  val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
+  // val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
+  val validEntries = RegInit(0.U((log2Up(IBufSize)+1).W))// valid entries
+  val allowEnq = RegInit(true.B)
 
-  val enqValid = IBufSize.U - PredictWidth.U >= validEntries
+  // val enqValid = (IBufSize.U - PredictWidth.U) >= validEntries
   val deqValid = validEntries > 0.U
 
+  val numEnq = Mux(io.in.fire, PopCount(io.in.bits.mask), 0.U)
+  val numDeq = Mux(deqValid, PopCount(io.out.map(_.fire)), 0.U)
+
+  validEntries := validEntries + numEnq - numDeq
+  allowEnq := (IBufSize.U - PredictWidth.U) >= (validEntries + numEnq)
+
   // Enque
-  io.in.ready := enqValid
+  io.in.ready := allowEnq
 
   val offset = Wire(Vec(PredictWidth, UInt(log2Up(PredictWidth).W)))
   for(i <- 0 until PredictWidth) {
@@ -126,6 +134,8 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Flush
   when(io.flush) {
+    validEntries := 0.U
+    allowEnq := true.B
     head_ptr.value := 0.U
     head_ptr.flag := false.B
     tail_vec := VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr)))
