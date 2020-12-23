@@ -31,6 +31,9 @@ class Frontend extends XSModule {
   // to icache
   ifu.io.icacheMemGrant <> io.icacheMemGrant
   ifu.io.fencei := io.fencei
+  // to tlb
+  ifu.io.sfence := io.sfence
+  ifu.io.tlbCsr := io.tlbCsr
   // from icache
   io.l1plusFlush := ifu.io.l1plusFlush
   io.icacheMemAcq <> ifu.io.icacheMemAcq

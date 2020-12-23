@@ -107,6 +107,8 @@ class IFU extends XSModule with HasIFUConst
   val icache = Module(new ICache)
   icache.io.mem_grant <> io.icacheMemGrant
   icache.io.fencei := io.fencei
+  io.icacheMemAcq <> icache.io.mem_acquire
+  io.l1plusFlush := icache.io.l1plusflush
   val pd = Module(new PreDecode)
   val loopBuffer = if(EnableLB) { Module(new LoopBuffer) } else { Module(new FakeLoopBuffer) }
   io.ptw <> TLB(
