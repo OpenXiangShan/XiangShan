@@ -41,7 +41,8 @@ trait BigIntExtract {
       )
       tmp_mask >>= 1
     }
-    val mask8 = BigInt(prefix ++ mask8_buffer.toArray)
+    val tmp = mask8_buffer.toArray
+    val mask8 = BigInt(prefix ++ tmp)
     ((old | mask8) ^ mask8) | (in & mask8)
   }
 }

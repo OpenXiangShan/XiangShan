@@ -9,7 +9,7 @@ import chisel3.util._
 
 import scala.math.pow
 
-class TLULMasterAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
+class TLULMasterAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
                       , scoreboard: mutable.Map[BigInt, BigInt])
                      (implicit p: Parameters)
   extends TLCAgent(ID, addrStateMap, serialList, scoreboard) {
@@ -25,12 +25,7 @@ class TLULMasterAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigIn
 
   def fireD(inD: TLCScalaD): Unit = {
     if (inD.opcode == AccessAckData) {
-      d_cnt_end = {
-        if (inD.size.pow(2) <= l2params.beatBytes)
-          1
-        else
-          (inD.size.pow(2) / l2params.beatBytes).toInt
-      }
+      d_cnt_end = countBeats(inD.size)
       if (d_cnt == 0) { //start burst
         tmpD = inD.copy()
         d_cnt += 1
@@ -62,13 +57,8 @@ class TLULMasterAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigIn
       handleA(inA)
     }
     else if (inA.opcode == PutFullData || inA.opcode == PutPartialData) {
-      if (a_cnt == 0) { //start burst
-        a_cnt_end = {
-          if (inA.size.pow(2) <= l2params.beatBytes)
-            1
-          else
-            (inA.size.pow(2) / l2params.beatBytes).toInt
-        }
+      if (a_cnt == 0) {//start burst
+        a_cnt_end = countBeats(inA.size)
         tmpA = inA.copy()
         a_cnt += 1
       }
@@ -90,8 +80,9 @@ class TLULMasterAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigIn
   def handleA(inA: TLCScalaA): Unit = {
     if (inA.opcode == Get) {
       val getT = new GetCallerTrans()
-      if (inA.size.pow(2) > l2params.beatBytes) { //fill n mask if there are n beats
-        inA.mask = (0 until (inA.size.pow(2) / l2params.beatBytes).toInt).foldLeft(BigInt(0))(
+      val beats = countBeats(inA.size)
+      if (beats > 1) { //fill n mask if there are n beats
+        inA.mask = (0 until beats).foldLeft(BigInt(0))(
           (cmask, i) => maskConcatBeat(cmask, inA.mask, i))
       }
       getT.pairGet(inA)

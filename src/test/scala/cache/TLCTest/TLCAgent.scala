@@ -111,6 +111,7 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
   val beatBits = l2params.beatBytes * 8
   val blockWords = l2params.blockBytes / 8
 
+  val blockAddrBits = log2Up(l2params.blockBytes)
   val beatAddrBits = log2Up(l2params.beatBytes)
   val fullBeatMask = BigInt(prefix ++ Array.fill(l2params.beatBytes)(0xff.toByte))
   val fullBlockMask = BigInt(prefix ++ Array.fill(l2params.blockBytes)(0xff.toByte))
@@ -126,12 +127,23 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
     state
   }
 
+  def countBeats(size: BigInt): Int = {
+    if ((1 << size.toInt) <= l2params.beatBytes)
+      1
+    else
+      ((1 << size.toInt) / l2params.beatBytes).toInt
+  }
+
   def addrAlignBlock(addr: BigInt): BigInt = {
-    (addr >> l2params.blockBytes) << l2params.blockBytes
+    (addr >> blockAddrBits) << blockAddrBits
   }
 
   def dataConcatBeat(oldData: BigInt, inData: BigInt, cnt: Int): BigInt = {
     oldData | (inData << (cnt * beatBits))
+  }
+
+  def dataOutofBeat(inData: BigInt, cnt: Int): BigInt = {
+    inData >> (cnt * beatBits)
   }
 
   def maskConcatBeat(oldMask: BigInt, inMask: BigInt, cnt: Int): BigInt = {
@@ -155,29 +167,30 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
   }
 
   //for Get
-  def insertMaskedRead(addr: BigInt, readData: BigInt, mask: BigInt): Unit = {
+  def insertMaskedRead(addr: BigInt, readData: BigInt, byteMask: BigInt): Unit = {
     //addr and mask must be aligned to block
     val alignAddr = addrAlignBlock(addr)
     val start_beat = beatInBlock(addr)
     val alignData = dataConcatBeat(0, readData, start_beat)
-    val alignMask = maskConcatBeat(0, mask, start_beat)
+    val alignMask = maskConcatBeat(0, byteMask, start_beat)
     val addrState = getState(alignAddr)
     addrState.data = writeMaskedData(addrState.data, alignData, alignMask)
     val sbData = scoreboardRead(alignAddr)
-    assert((alignData & alignMask) == (sbData & alignMask), f"agent $ID data has been changed, Addr: $alignAddr%x, " +
+    val checkWriteData = writeMaskedData(sbData, alignData, alignMask)
+    assert(sbData == checkWriteData, f"agent $ID data has been changed, Addr: $alignAddr%x, " +
       f"own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
   }
 
   //for Put
-  def insertMaskedWrite(addr: BigInt, newData: BigInt, mask: BigInt): Unit = {
+  def insertMaskedWrite(addr: BigInt, newData: BigInt, byteMask: BigInt): Unit = {
     //addr and mask must be aligned to block
     val alignAddr = addrAlignBlock(addr)
     val start_beat = beatInBlock(addr)
     val alignData = dataConcatBeat(0, newData, start_beat)
-    val alignMask = maskConcatBeat(0, mask, start_beat)
+    val alignMask = maskConcatBeat(0, byteMask, start_beat)
     val addrState = getState(alignAddr)
     //new data
-    val res = writeMaskedData(scoreboardRead(addr), alignData, alignMask)
+    val res = writeMaskedData(scoreboardRead(alignAddr), alignData, alignMask)
     addrState.dirty = true
     addrState.data = res
     scoreboardWrite(alignAddr, res)
@@ -213,6 +226,8 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
 
   def scoreboardRead(addr: BigInt): BigInt = {
     scoreboard.synchronized {
+      if (!scoreboard.contains(addr))
+        scoreboard(addr) = 0
       scoreboard(addr)
     }
   }
@@ -233,6 +248,9 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
   val innerRelease = ListBuffer[ReleaseCalleeTrans]()
   val innerProbe = ListBuffer[ProbeCallerTrans]()
 
+  val innerGet: mutable.Queue[GetCalleeTrans] = mutable.Queue[GetCalleeTrans]()
+  val innerPut: mutable.Queue[PutCalleeTrans] = mutable.Queue[PutCalleeTrans]()
+
   val sinkIdMap = mutable.Map[BigInt, AcquireCalleeTrans]()
   val sinkFreeQueue = mutable.Queue[BigInt]()
 
@@ -242,6 +260,10 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
       true
     }
   }
+
+  var tmpA = new TLCScalaA()
+  var a_cnt = 0
+  var a_cnt_end = 0
 
   val aList = ListBuffer[TLCScalaA]()
   val cList = ListBuffer[TLCScalaC]()
@@ -279,6 +301,23 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
   }
 
   def issueD(): Unit = {
+    //serach AccessAck(Data) to issue
+    innerGet.dequeueAll { g =>
+      val addr = g.a.get.address
+      val alignAddr = addrAlignBlock(addr)
+      val state = getState(alignAddr)
+      val start_beat = beatInBlock(addr)
+      val targetData = dataOutofBeat(state.data, start_beat)
+      println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
+        f"beats:${countBeats(g.a.get.size)}")
+      dQueue.enqMessage(g.issueAccessAckData(targetData), countBeats(g.a.get.size))
+      true
+    }
+    innerPut.dequeueAll { p =>
+      insertMaskedWrite(p.a.get.address, p.a.get.data, p.a.get.mask)
+      dQueue.enqMessage(p.issueAccessAck())
+      true
+    }
     //search ReleaseAck to issue
     innerRelease --= innerRelease.filter { r =>
       if (r.releaseAckIssued.getOrElse(true)) {
@@ -497,25 +536,61 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
   }
 
   def fireA(inA: TLCScalaA): Unit = {
-    aList.append(inA)
+    if (inA.opcode == PutFullData || inA.opcode == PutPartialData) {
+      if (a_cnt == 0) { //start burst
+        a_cnt_end = countBeats(inA.size)
+        tmpA = inA.copy()
+        a_cnt += 1
+      }
+      else {
+        tmpA.mask = maskConcatBeat(tmpA.mask, inA.mask, a_cnt)
+        tmpA.data = dataConcatBeat(tmpA.data, inA.data, a_cnt)
+        a_cnt += 1
+      }
+      if (a_cnt == a_cnt_end) {
+        a_cnt = 0
+        aList.append(tmpA)
+      }
+    }
+    else
+      aList.append(inA)
   }
 
   def tickA(): Unit = {
     aList --= aList.filter { a =>
-      val addr = a.address
-      val state = getState(addr)
-      if (state.blockInnerAcquire()) { //blocking
-        false
-      }
-      else { //not blocking
-        val transA = new AcquireCalleeTrans()
-        transA.pairAcquire(a)
-        //serialization point
-        appendSerial(transA)
-        //add to addr list and agent list
-        innerAcquire.append(transA)
-        state.calleeTrans.append(transA)
+      if (a.opcode == Get) {
+        val getT = new GetCalleeTrans()
+        val beats = countBeats(a.size)
+        if (beats > 1) { //fill n mask if there are n beats
+          a.mask = (0 until beats).foldLeft(BigInt(0))(
+            (cmask, i) => maskConcatBeat(cmask, a.mask, i))
+        }
+        getT.pairGet(a)
+        innerGet.enqueue(getT)
         true
+      }
+      else if (a.opcode == PutFullData || a.opcode == PutPartialData) {
+        val putT = new PutCalleeTrans()
+        putT.pairPut(a)
+        innerPut.enqueue(putT)
+        true
+      }
+      else {
+        val addr = a.address
+        val state = getState(addr)
+        if (state.blockInnerAcquire()) { //blocking
+          false
+        }
+        else { //not blocking
+          val transA = new AcquireCalleeTrans()
+          transA.pairAcquire(a)
+          //serialization point
+          appendSerial(transA)
+          //add to addr list and agent list
+          innerAcquire.append(transA)
+          state.calleeTrans.append(transA)
+          true
+        }
       }
     }
   }
