@@ -107,7 +107,6 @@ class IFU extends XSModule with HasIFUConst
   val icache = Module(new ICache)
   icache.io.mem_grant <> io.icacheMemGrant
   icache.io.fencei := io.fencei
-  icache.io.flush := Cat(if3_flush, if2_flush)
   val pd = Module(new PreDecode)
   val loopBuffer = if(EnableLB) { Module(new LoopBuffer) } else { Module(new FakeLoopBuffer) }
   io.ptw <> TLB(
@@ -432,6 +431,7 @@ class IFU extends XSModule with HasIFUConst
   loopBufPar.fetchReq := if3_pc
 
   icache.io.req.bits.mask := mask(if1_npc)
+  icache.io.flush := Cat(if3_flush, if2_flush)
 
   bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
