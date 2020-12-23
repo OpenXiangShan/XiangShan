@@ -52,7 +52,7 @@ object FixedLFSRNoiseMaker {
   * @param inFlight is the number of operations that can be in-flight to the DUT concurrently
   * @param noiseMaker is a function that supplies a random UInt of a given width every time inc is true
   */
-class FixedFuzzer(
+class FixedBlockFuzzer(
   nOperations: Int,
   inFlight: Int = 32,
   noiseMaker: (Int, Bool, Int) => UInt = {
@@ -85,6 +85,7 @@ class FixedFuzzer(
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {
       val finished = Bool(OUTPUT)
+      val blockAddr = Input(UInt(64.W))
     })
 
     val (out, edge) = node.out(0)
@@ -119,12 +120,13 @@ class FixedFuzzer(
     // Increment random number generation for the following subfields
     val inc = Wire(Bool())
     val inc_beat = Wire(Bool())
+    val blockAddrReg = RegEnable(io.blockAddr,0.U(64.W),inc)
     val arth_op_3 = noiseMaker(3, inc, 0)
     val arth_op   = Mux(arth_op_3 > UInt(4), UInt(4), arth_op_3)
     val log_op    = noiseMaker(2, inc, 0)
     val amo_size  = UInt(2) + noiseMaker(1, inc, 0) // word or dword
     val size      = noiseMaker(sizeBits, inc, 0)
-    val rawAddr   = noiseMaker(addressBits, inc, 2)
+    val rawAddr   = Cat(blockAddrReg(63,6),noiseMaker(addressBits, inc, 2)(5,0))
     val addr      = overrideAddress.map(_.legalize(rawAddr)).getOrElse(rawAddr) & ~UIntToOH1(size, addressBits)
     val mask      = noiseMaker(beatBytes, inc_beat, 2) & edge.mask(addr, size)
     val data      = noiseMaker(dataBits, inc_beat, 2)
@@ -199,7 +201,7 @@ class FixedFuzzer(
   }
 }
 
-object FixedFuzzer
+object FixedBlockFuzzer
 {
   def apply(
     nOperations: Int,
@@ -212,7 +214,7 @@ object FixedFuzzer
     overrideAddress: Option[AddressSet] = None,
     nOrdered: Option[Int] = None)(implicit p: Parameters): TLOutwardNode =
   {
-    val fuzzer = LazyModule(new FixedFuzzer(nOperations, inFlight, noiseMaker, noModify, overrideAddress, nOrdered))
+    val fuzzer = LazyModule(new FixedBlockFuzzer(nOperations, inFlight, noiseMaker, noModify, overrideAddress, nOrdered))
     fuzzer.node
   }
 }

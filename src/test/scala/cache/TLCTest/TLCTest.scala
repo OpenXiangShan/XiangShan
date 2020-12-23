@@ -39,6 +39,7 @@ class TLCCacheTestTopIO extends Bundle {
   val mastersIO = Vec(2, new TLCTestMasterMMIO())
   val ulIO = new TLULMMIO()
   val slaveIO = new TLCTestSlaveMMIO()
+  val fuzzerBlockAddr = Input(UInt(64.W))
 }
 
 class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
@@ -61,13 +62,14 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
       writeBytes = l2params.beatBytes
     )
   ))
+  val fuzz = LazyModule(new FixedBlockFuzzer(0))
 
   //  val masters_ident = Array.fill(2)(LazyModule(new DebugIdentityNode()))
   val xbar_ident = LazyModule(new DebugIdentityNode())
   val slave_ident = LazyModule(new DebugIdentityNode())
 
   val xbar = TLXbar()
-  xbar := ULmaster.node := FixedFuzzer(0, overrideAddress = Some(AddressSet(0x0, 0xfffff)))
+  xbar := ULmaster.node := fuzz.node
 
   //  for ((master, ident) <- (masters zip masters_ident)) {
   //    xbar := ident.node := master.node
@@ -82,6 +84,7 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
 
     val io = IO(new TLCCacheTestTopIO)
 
+    fuzz.module.io.blockAddr := io.fuzzerBlockAddr
     slave.module.io <> io.slaveIO
     io.ulIO <> ULmaster.module.io
     //    masters zip io.mastersIO map { case (m, i) =>
@@ -325,6 +328,8 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         }
         */
         fork {
+          val addr = getRandomElement(addr_pool, rand)
+          c.io.fuzzerBlockAddr.poke(addr.U)
           val ulio = ulIO
           for (_ <- 0 to total_clock) {
             if (peekBoolean(ulio.DFire)) {
