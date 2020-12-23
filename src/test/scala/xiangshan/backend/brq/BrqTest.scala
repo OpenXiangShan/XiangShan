@@ -74,7 +74,7 @@ class BrqTest extends AnyFlatSpec
 
 
       println("====Start random write back====")
-      val wbPort = c.io.exuRedirect.head
+      val wbPort = c.io.exuRedirectWb.head
       //-----------------write back-----------------//
       while (enqTags.nonEmpty) {
         val idx = Random.nextInt(enqTags.size)

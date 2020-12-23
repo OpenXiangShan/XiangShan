@@ -11,7 +11,7 @@ import xiangshan.backend.decode.isa._
 trait HasRedirectOut { this: RawModule =>
   val redirectOutValid = IO(Output(Bool()))
   val redirectOut = IO(Output(new Redirect))
-  val brUpdate = IO(Output(new BranchUpdateInfo))
+  val brUpdate = IO(Output(new CfiUpdateInfo))
 }
 
 class Jump extends FunctionUnit with HasRedirectOut {
@@ -35,16 +35,14 @@ class Jump extends FunctionUnit with HasRedirectOut {
   redirectOut.pc := uop.cf.pc
   redirectOut.target := target
   redirectOut.brTag := uop.brTag
-  redirectOut.isException := false.B
-  redirectOut.isFlushPipe := false.B
-  redirectOut.isMisPred := DontCare // check this in brq
-  redirectOut.isReplay := false.B
+  redirectOut.level := RedirectLevel.flushAfter
+  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
 
   brUpdate := uop.cf.brUpdate
   brUpdate.pc := uop.cf.pc
   brUpdate.target := target
-  brUpdate.brTarget := target // DontCare
+  brUpdate.brTarget := target
   brUpdate.taken := true.B
 
   // Output
@@ -56,14 +54,13 @@ class Jump extends FunctionUnit with HasRedirectOut {
   io.out.bits.data := res
 
   // NOTE: the debug info is for one-cycle exec, if FMV needs multi-cycle, may needs change it
-  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d %d) brTag:%x\n",
+  XSDebug(io.in.valid, "In(%d %d) Out(%d %d) Redirect:(%d %d %d) brTag:%x\n",
     io.in.valid,
     io.in.ready,
     io.out.valid,
     io.out.ready,
     io.redirectIn.valid,
-    io.redirectIn.bits.isException,
-    io.redirectIn.bits.isFlushPipe,
+    io.redirectIn.bits.level,
     redirectHit,
     io.redirectIn.bits.brTag.value
   )

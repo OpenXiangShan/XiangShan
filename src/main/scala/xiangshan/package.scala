@@ -8,6 +8,8 @@ package object xiangshan {
     def imm = "b01".U
     def fp  = "b10".U
 
+    def DC = imm // Don't Care
+
     def isReg(srcType: UInt) = srcType===reg
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
@@ -83,13 +85,26 @@ package object xiangshan {
   }
 
   object CommitType {
-    def INT   = "b00".U  // int
-    def FP    = "b01".U  // fp
-    def LOAD  = "b10".U  // load
-    def STORE = "b11".U  // store
+    def NORMAL = "b00".U  // int/fp
+    def BRANCH = "b01".U  // branch
+    def LOAD   = "b10".U  // load
+    def STORE  = "b11".U  // store
 
     def apply() = UInt(2.W)
     def isLoadStore(commitType: UInt) = commitType(1)
     def lsInstIsStore(commitType: UInt) = commitType(0)
+    def isBranch(commitType: UInt) = commitType(0) && !commitType(1)
+  }
+
+  object RedirectLevel {
+    def flushAfter = "b00".U
+    def flush      = "b01".U
+    def flushAll   = "b10".U
+    def exception  = "b11".U
+
+    def apply() = UInt(2.W)
+    def isUnconditional(level: UInt) = level(1)
+    def flushItself(level: UInt) = level(0)
+    def isException(level: UInt) = level(1) && level(0)
   }
 }
