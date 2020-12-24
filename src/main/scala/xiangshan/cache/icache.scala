@@ -280,7 +280,7 @@ class ICache extends ICacheModule
   //----------------------------
   //    Stage 1
   //----------------------------
-  s1_fire := io.req.fire()
+  s1_fire := io.req.valid
   s1_req_pc := io.req.bits.addr
   s1_req_mask := io.req.bits.mask
   s2_ready := WireInit(false.B)
