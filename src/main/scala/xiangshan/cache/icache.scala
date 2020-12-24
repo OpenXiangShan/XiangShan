@@ -267,6 +267,8 @@ class ICache extends ICacheModule
 
   val io = IO(new ICacheIO)
 
+  val s2_flush = io.flush(0)
+  val s3_flush = io.flush(1)
   //----------------------------
   //    Memory Part
   //----------------------------
@@ -282,7 +284,7 @@ class ICache extends ICacheModule
   s1_req_pc := io.req.bits.addr
   s1_req_mask := io.req.bits.mask
   s2_ready := WireInit(false.B)
-  s1_fire := s1_valid && (s2_ready || io.flush(0))
+  s1_fire := s1_valid && (s2_ready || s2_flush)
 
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
@@ -304,8 +306,8 @@ class ICache extends ICacheModule
   val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
   val s2_access_fault = WireInit(false.B)
-  s2_fire := s2_valid && s3_ready && !io.flush(0) && io.tlb.resp.fire()
-  when(io.flush(0)) {s2_valid := s1_fire}
+  s2_fire := s2_valid && s3_ready && !s2_flush && io.tlb.resp.fire()
+  when(s2_flush) {s2_valid := s1_fire}
   .elsewhen(s1_fire) { s2_valid := s1_valid}
   .elsewhen(s2_fire) { s2_valid := false.B}
 
@@ -329,7 +331,7 @@ class ICache extends ICacheModule
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
 
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
-  s2_ready := s2_fire || !s2_valid || io.flush(0)
+  s2_ready := s2_fire || !s2_valid || s2_flush
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b acf:%d\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_access_fault)
   XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}\n")
@@ -349,7 +351,7 @@ class ICache extends ICacheModule
   val s3_miss = s3_valid && !s3_hit
   val s3_idx = get_idx(s3_req_pc)
   val s3_access_fault = RegEnable(s2_access_fault,init=false.B,enable=s2_fire)
-  when(io.flush(1)) { s3_valid := false.B }
+  when(s3_flush) { s3_valid := false.B }
   .elsewhen(s2_fire) { s3_valid := s2_valid }
   .elsewhen(io.resp.fire()) { s3_valid := false.B }
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
@@ -373,15 +375,15 @@ class ICache extends ICacheModule
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
   val isICacheResp = icacheMissQueue.io.resp.valid && icacheMissQueue.io.resp.bits.clientID === cacheID.U(2.W)
-  icacheMissQueue.io.req.valid := s3_miss && !io.flush(1) && !blocking//TODO: specificate flush condition
+  icacheMissQueue.io.req.valid := s3_miss && !s3_flush && !blocking//TODO: specificate flush condition
   icacheMissQueue.io.req.bits.apply(missAddr=groupPC(s3_tlb_resp.paddr),missIdx=s3_idx,missWaymask=s3_wayMask,source=cacheID.U(2.W))
   icacheMissQueue.io.resp.ready := io.resp.ready
-  icacheMissQueue.io.flush := io.flush(1)
+  icacheMissQueue.io.flush := s3_flush
 
   when(icacheMissQueue.io.req.fire()){blocking := true.B}
-  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) || io.flush(1)) ){blocking := false.B}
+  .elsewhen(blocking && ((icacheMissQueue.io.resp.fire() && isICacheResp) || s3_flush) ){blocking := false.B}
 
-  XSDebug(blocking && io.flush(1),"check for icache non-blocking")
+  XSDebug(blocking && s3_flush,"check for icache non-blocking")
   //cache flush register
   val icacheFlush = io.fencei
   val cacheflushed = RegInit(false.B)
@@ -463,7 +465,7 @@ class ICache extends ICacheModule
 
   io.l1plusflush := icacheFlush
 
-  XSDebug("[flush] flush_0:%d  flush_1:%d\n",io.flush(0),io.flush(1))
+  XSDebug("[flush] flush_0:%d  flush_1:%d\n",s2_flush,s3_flush)
 
   //Performance Counter
   if (!env.FPGAPlatform ) {
