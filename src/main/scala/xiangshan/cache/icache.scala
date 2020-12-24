@@ -116,7 +116,7 @@ trait ICacheBase extends HasICacheParameters
   //----------------------------
   //    Stage 1
   //----------------------------
-  val s1_valid = WireInit(false.B)
+  // val s1_valid = WireInit(false.B)
   val s1_req_pc = Wire(UInt(VAddrBits.W))
   val s1_req_mask = Wire(UInt(PredictWidth.W))
   val s1_fire = WireInit(false.B)
@@ -280,21 +280,21 @@ class ICache extends ICacheModule
   //----------------------------
   //    Stage 1
   //----------------------------
-  s1_valid := io.req.fire()
+  s1_fire := io.req.fire()
   s1_req_pc := io.req.bits.addr
   s1_req_mask := io.req.bits.mask
   s2_ready := WireInit(false.B)
-  s1_fire := s1_valid && (s2_ready || s2_flush)
+  // s1_fire := s1_valid && (s2_ready || s2_flush)
 
   // SRAM(Meta and Data) read request
   val s1_idx = get_idx(s1_req_pc)
 
-  metaArray.io.read.valid := s1_valid
+  metaArray.io.read.valid := s1_fire
   metaArray.io.read.bits  :=s1_idx
-  dataArray.io.read.valid := s1_valid
+  dataArray.io.read.valid := s1_fire
   dataArray.io.read.bits  :=s1_idx
 
-  XSDebug("[Stage 1] v : r : f  (%d  %d  %d)  request pc: 0x%x  mask: %b\n",s1_valid,s2_ready,s1_fire,s1_req_pc,s1_req_mask)
+  XSDebug("[Stage 1] r : f  (%d  %d)  request pc: 0x%x  mask: %b\n",s2_ready,s1_fire,s1_req_pc,s1_req_mask)
   XSDebug("[Stage 1] index: %d\n",s1_idx)
 
 
@@ -306,10 +306,11 @@ class ICache extends ICacheModule
   val s2_tag = get_tag(s2_tlb_resp.paddr)
   val s2_hit = WireInit(false.B)
   val s2_access_fault = WireInit(false.B)
-  s2_fire := s2_valid && s3_ready && !s2_flush && io.tlb.resp.fire()
-  when(s2_flush) {s2_valid := s1_fire}
-  .elsewhen(s1_fire) { s2_valid := s1_valid}
-  .elsewhen(s2_fire) { s2_valid := false.B}
+  val s2_allValid = s2_valid && io.tlb.resp.valid
+  s2_fire := s2_allValid && s3_ready
+  when(s1_fire)       { s2_valid := true.B }
+  .elsewhen(s2_flush) { s2_valid := false.B }
+  .elsewhen(s2_fire)  { s2_valid := false.B }
 
   //physical address < 0x80000000
   //TODO: May have bugs
@@ -331,7 +332,7 @@ class ICache extends ICacheModule
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
 
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
-  s2_ready := s2_fire || !s2_valid || s2_flush
+  s2_ready := s3_ready && io.tlb.resp.valid || !s2_valid
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b acf:%d\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_access_fault)
   XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}\n")
@@ -351,9 +352,9 @@ class ICache extends ICacheModule
   val s3_miss = s3_valid && !s3_hit
   val s3_idx = get_idx(s3_req_pc)
   val s3_access_fault = RegEnable(s2_access_fault,init=false.B,enable=s2_fire)
-  when(s3_flush) { s3_valid := false.B }
-  .elsewhen(s2_fire) { s3_valid := s2_valid }
-  .elsewhen(io.resp.fire()) { s3_valid := false.B }
+  when(s3_flush)                  { s3_valid := false.B }
+  .elsewhen(s2_fire && !s2_flush) { s3_valid := true.B }
+  .elsewhen(io.resp.fire())       { s3_valid := false.B }
   val refillDataReg = Reg(Vec(refillCycles,UInt(beatBits.W)))
 
   // icache hit
@@ -421,7 +422,7 @@ class ICache extends ICacheModule
   val refillDataVec = icacheMissQueue.io.resp.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
 
-  s3_ready := ((io.resp.fire() || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.fire())
+  s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.valid && io.resp.ready)
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
@@ -441,7 +442,7 @@ class ICache extends ICacheModule
   //    Out Put
   //----------------------------
   //icache request
-  io.req.ready := metaArray.io.read.ready && dataArray.io.read.ready && s2_ready
+  io.req.ready := s2_ready
 
   //icache response: to pre-decoder
   io.resp.valid := s3_valid && (s3_hit || icacheMissQueue.io.resp.valid)
@@ -452,7 +453,7 @@ class ICache extends ICacheModule
   io.resp.bits.acf := s3_access_fault
 
   //to itlb
-  io.tlb.resp.ready := s3_ready
+  io.tlb.resp.ready := true.B // DontCare
   io.tlb.req.valid := s2_valid
   io.tlb.req.bits.vaddr := s2_req_pc
   io.tlb.req.bits.cmd := TlbCmd.exec
