@@ -62,6 +62,9 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
+  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize).W))
+  val allowEnqueue = RegInit(true.B)
+
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt.value
   val sameFlag = enqPtrExt(0).flag === deqPtrExt.flag
@@ -80,10 +83,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     *
     * Currently, LoadQueue only allows enqueue when #emptyEntries > RenameWidth(EnqWidth)
     */
-  val validEntries = distanceBetween(enqPtrExt(0), deqPtrExt)
-  val firedDispatch = io.enq.req.map(_.valid)
-  io.enq.canAccept := validEntries <= (LoadQueueSize - RenameWidth).U
-  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(firedDispatch))}\n")
+  io.enq.canAccept := allowEnqueue
+
   for (i <- 0 until RenameWidth) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val lqIdx = enqPtrExt(offset)
@@ -100,13 +101,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     }
     io.enq.resp(i) := lqIdx
   }
-
-  // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
-  when (Cat(firedDispatch).orR && io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid) {
-    val enqNumber = PopCount(firedDispatch)
-    enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
-    XSInfo("dispatched %d insts to lq\n", enqNumber)
-  }
+  XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
 
   /**
     * Writeback load from load units
@@ -335,7 +330,6 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       XSDebug("load commit %d: idx %d %x\n", i.U, mcommitIdx(i), uop(mcommitIdx(i)).cf.pc)
     }
   })
-  deqPtrExt := deqPtrExt + PopCount(loadCommit)
 
   def getFirstOne(mask: Vec[Bool], startMask: UInt) = {
     val length = mask.length
@@ -549,12 +543,37 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         allocated(i) := false.B
     }
   }
-  // we recover the pointers in the next cycle after redirect
-  val needCancelReg = RegNext(needCancel)
+
+  /**
+    * update pointers
+    */
+  val lastCycleCancelCount = PopCount(RegNext(needCancel))
+  // when io.brqRedirect.valid, we don't allow eneuque even though it may fire.
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept && !io.brqRedirect.valid, PopCount(io.enq.req.map(_.valid)), 0.U)
   when (lastCycleRedirect.valid) {
-    val cancelCount = PopCount(needCancelReg)
-    enqPtrExt := VecInit(enqPtrExt.map(_ - cancelCount))
+    // we recover the pointers in the next cycle after redirect
+    enqPtrExt := VecInit(enqPtrExt.map(_ - lastCycleCancelCount))
+  }.otherwise {
+    enqPtrExt := VecInit(enqPtrExt.map(_ + enqNumber))
   }
+
+  val commitCount = PopCount(loadCommit)
+  deqPtrExt := deqPtrExt + commitCount
+
+  val lastLastCycleRedirect = RegNext(lastCycleRedirect.valid)
+  val trueValidCounter = distanceBetween(enqPtrExt(0), deqPtrExt)
+  validCounter := Mux(lastLastCycleRedirect,
+    trueValidCounter,
+    validCounter + enqNumber - commitCount
+  )
+
+  allowEnqueue := Mux(io.brqRedirect.valid,
+    false.B,
+    Mux(lastLastCycleRedirect,
+      trueValidCounter <= (LoadQueueSize - RenameWidth).U,
+      validCounter + enqNumber <= (LoadQueueSize - RenameWidth).U
+    )
+  )
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtrExt.flag, deqPtr)
