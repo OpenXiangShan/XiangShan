@@ -59,10 +59,8 @@ class Alu extends FunctionUnit with HasRedirectOut {
   redirectOut.pc := uop.cf.pc
   redirectOut.target := Mux(!taken && isBranch, snpc, target)
   redirectOut.brTag := uop.brTag
-  redirectOut.isException := false.B
-  redirectOut.isMisPred := DontCare // check this in brq
-  redirectOut.isFlushPipe := false.B
-  redirectOut.isReplay := false.B
+  redirectOut.level := RedirectLevel.flushAfter
+  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
 
   brUpdate := uop.cf.brUpdate

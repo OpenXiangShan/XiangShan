@@ -408,7 +408,7 @@ class Tage extends BaseTage {
   val tables = TableInfo.map {
     case (nRows, histLen, tagLen) => {
       val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
-      t.io.req.valid := io.pc.valid && !io.flush
+      t.io.req.valid := io.pc.valid
       t.io.req.bits.pc := io.pc.bits
       t.io.req.bits.hist := io.hist
       t.io.req.bits.mask := io.inMask
@@ -420,7 +420,7 @@ class Tage extends BaseTage {
     case (nRows, ctrBits, histLen) => {
       val t = if (EnableSC) Module(new SCTable(nRows/TageBanks, ctrBits, histLen)) else Module(new FakeSCTable)
       val req = t.io.req
-      req.valid := io.pc.valid && !io.flush
+      req.valid := io.pc.valid
       req.bits.pc := io.pc.bits
       req.bits.hist := io.hist
       req.bits.mask := io.inMask

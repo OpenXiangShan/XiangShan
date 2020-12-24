@@ -67,6 +67,11 @@ struct DiffState {
   // lrscValid needs to be synced as nemu does not know 
   // how many cycles were used to finish a lr/sc pair, 
   // this will lead to different sc results.
+
+  int store_commit;
+  uint64_t store_addr[2];
+  uint64_t store_data[2];
+  uint8_t store_mask[2];
 };
 
 struct DisambiguationState {
@@ -84,9 +89,11 @@ extern void (*ref_difftest_set_mastatus)(const void *s);
 extern void (*ref_difftest_get_csr)(void *c);
 extern void (*ref_difftest_set_csr)(const void *c);
 extern vaddr_t (*ref_disambiguate_exec)(void *disambiguate_para);
+extern int (*ref_difftest_store_commit)(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
 
 void init_difftest();
 int difftest_step(DiffState *s);
+int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
 void difftest_display(uint8_t mode);
 
 #endif

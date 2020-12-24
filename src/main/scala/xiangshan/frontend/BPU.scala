@@ -250,7 +250,7 @@ class BPUStage3 extends BPUStage {
 
     val predecode = Input(new Predecode)
     val realMask = Input(UInt(PredictWidth.W))
-    val prevHalf = Input(new PrevHalfInstr)
+    val prevHalf = Flipped(ValidIO(new PrevHalfInstr))
     val recover =  Flipped(ValidIO(new CfiUpdateInfo))
   }
   val s3IO = IO(new S3IO)
@@ -283,7 +283,7 @@ class BPUStage3 extends BPUStage {
   
   val brPred = (if(EnableBPD) tageTakens else bimTakens).asUInt
   val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 0.U(1.W)))).asUInt
-  val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.taken
+  val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.bits.taken
   val prevHalfTakenMask = prevHalfTaken.asUInt
   val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
   // VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
@@ -349,7 +349,7 @@ class BPUStage3 extends BPUStage {
   // targets would be lost as well, since it is from btb
   // unless it is a ret, which target is from ras
   when (prevHalfTaken && !rets(0)) {
-    targets(0) := s3IO.prevHalf.target
+    targets(0) := s3IO.prevHalf.bits.target
   }
 
   // Wrap tage resp and tage meta in
@@ -430,7 +430,7 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     // from if4
     val predecode = Input(new Predecode)
     val realMask = Input(UInt(PredictWidth.W))
-    val prevHalf = Input(new PrevHalfInstr)
+    val prevHalf = Flipped(ValidIO(new PrevHalfInstr))
     // to if4, some bpu info used for updating
     val bpuMeta = Output(Vec(PredictWidth, new BpuMeta))
   })

@@ -49,7 +49,7 @@ class RenameTable(float: Boolean) extends XSModule {
     when(w.wen){ arch_table(w.addr) := w.wdata }
   }
 
-  val flush = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe)
+  val flush = io.redirect.valid && io.redirect.bits.isUnconditional()
   when (flush) {
     spec_table := arch_table
     // spec table needs to be updated when flushPipe
