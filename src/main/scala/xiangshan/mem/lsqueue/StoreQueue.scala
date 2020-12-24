@@ -334,15 +334,15 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val dequeueCount = Mux(io.sbuffer(1).fire(), 2.U, Mux(io.sbuffer(0).fire() || io.mmioStout.fire(), 1.U, 0.U))
   val trueValidCounter = distanceBetween(enqPtrExt(0), deqPtrExt(0))
   validCounter := Mux(lastLastCycleRedirect,
-    trueValidCounter,
+    trueValidCounter - dequeueCount,
     validCounter + enqNumber - dequeueCount
   )
 
   allowEnqueue := Mux(io.brqRedirect.valid,
     false.B,
     Mux(lastLastCycleRedirect,
-      trueValidCounter <= (LoadQueueSize - RenameWidth).U,
-      validCounter + enqNumber <= (LoadQueueSize - RenameWidth).U
+      trueValidCounter <= (StoreQueueSize - RenameWidth).U,
+      validCounter + enqNumber <= (StoreQueueSize - RenameWidth).U
     )
   )
 
