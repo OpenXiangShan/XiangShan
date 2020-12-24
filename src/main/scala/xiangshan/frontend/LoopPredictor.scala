@@ -192,7 +192,8 @@ class LTBColumn extends LTBModule {
         wEntry.conf := Mux((entry.nSpecCnt + 1.U) === entry.tripCnt, Mux(entry.isLearned, 7.U, entry.conf + 1.U), 0.U)
         wEntry.tripCnt := entry.nSpecCnt + 1.U
         // wEntry.tripCnt := io.update.bits.meta
-        wEntry.specCnt := Mux(io.update.bits.misPred, entry.specCnt - entry.nSpecCnt - 1.U, entry.specCnt/* - entry.nSpecCnt - 1.U*/)
+        wEntry.specCnt := Mux(io.update.bits.misPred, /*entry.specCnt - io.update.bits.meta*/0.U, entry.specCnt - io.update.bits.meta/* - entry.nSpecCnt - 1.U*/)
+
         wEntry.nSpecCnt := 0.U
         wEntry.brTag := updateBrTag
         wEntry.unusable := io.update.bits.misPred && (io.update.bits.meta > entry.tripCnt)
@@ -208,9 +209,9 @@ class LTBColumn extends LTBModule {
   val swEntry = WireInit(if4_entry)
   ltb.swdata := Mux(doingReset, 0.U.asTypeOf(new LoopEntry), swEntry)
   when (io.if4_fire && if4_entry.tag === if4_tag && io.outMask) {
-    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt && if4_entry.isConf) {
+    when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt && if4_entry.isConf) { // use nSpecCnts
       swEntry.age := 7.U
-      swEntry.specCnt := 0.U
+      swEntry.specCnt := if4_entry.specCnt + 1.U
     }.otherwise {
       swEntry.age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
       swEntry.specCnt := if4_entry.specCnt + 1.U
@@ -230,7 +231,7 @@ class LTBColumn extends LTBModule {
   // bypass for if4_entry.specCnt
   when (io.update.valid && !doingReset && valid && updateIdx === if4_idx) {
     when (!tagMatch && io.update.bits.misPred || tagMatch) {
-      swEntry.specCnt := wEntry.specCnt
+      swEntry.nSpecCnt := wEntry.nSpecCnt
     }
   }
   when (io.repair && !doingReset && valid) {
@@ -316,6 +317,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   // 只要把同一个bankAligned PC的每一项传进16个ltb中即可
   val bankAlignedPC = align(pc, PredictWidth)
+  val startsAtOddBank = bankInGroup(bankAlignedPC)(0).asBool
+  val reorderMask = Mux(startsAtOddBank, Cat(inMask(PredictWidth/2-1, 0), inMask(PredictWidth-1 ,PredictWidth/2)), inMask)
 
 
   // when(offsetIdx === baseBank){
@@ -329,7 +332,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.req.pc := bankAlignedPC
-    ltbs(i).io.outMask := inMask(i)
+    ltbs(i).io.outMask := reorderMask(i)
   }
 
   for (i <- 0 until PredictWidth) {
@@ -350,8 +353,29 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
-  (0 until PredictWidth).foreach(i => io.resp.exit(i) := ltbResps(i).exit)
-  (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := ltbResps(i).meta)
+  // (0 until PredictWidth).foreach(i => io.resp.exit(i) := Mux(startsAtOddBank, ltbResps(i + PredictWidth/2).exit, ltbResps(i).exit))
+  // (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := Mux(startsAtOddBank, ltbResps(i + PredictWidth/2).meta, ltbResps(i).exit))
+
+  for(i <- 0 until PredictWidth/2) {
+    when(startsAtOddBank) {
+      io.resp.exit(i) := ltbResps(i + PredictWidth/2).exit
+      io.meta.specCnts(i) := ltbResps(i + PredictWidth/2).meta
+    }.otherwise {
+      io.resp.exit(i) := ltbResps(i).exit
+      io.meta.specCnts(i) := ltbResps(i).meta
+
+    }
+  }
+
+  for(i <- PredictWidth/2 until PredictWidth) {
+    when(startsAtOddBank) {
+      io.resp.exit(i) := ltbResps(i - PredictWidth/2).exit
+      io.meta.specCnts(i) := ltbResps(i - PredictWidth/2).meta
+    }.otherwise {
+      io.resp.exit(i) := ltbResps(i).exit
+      io.meta.specCnts(i) := ltbResps(i).meta
+    }
+  }
 
   ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
 
@@ -359,7 +383,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     // debug info
     XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", io.pc.valid, io.flush, pc)
     XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
-    XSDebug("[IF4][req] inMask=%b\n", inMask)
+    XSDebug("[IF4][req] inMask=%b, reorderMask=%b\n", inMask, reorderMask)
 
     XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr)
     XSDebug("[IF4][req] isMisPred=%d updateSpecCnt=%d, taken=%d\n", io.update.bits.isMisPred, io.update.bits.bpuMeta.specCnt, io.update.bits.taken)
