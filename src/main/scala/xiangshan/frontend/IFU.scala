@@ -95,8 +95,8 @@ class PrevHalfInstr extends XSBundle {
   val newPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
-class IFU extends XSModule with HasIFUConst
 @chiselName
+class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
