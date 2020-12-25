@@ -9,10 +9,10 @@ import chisel3.util._
 
 import scala.math.pow
 
-class TLULMasterAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
+class TLULMasterAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
                       , scoreboard: mutable.Map[BigInt, BigInt])
                      (implicit p: Parameters)
-  extends TLCAgent(ID, addrStateMap, serialList, scoreboard) {
+  extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
   val outerGet: mutable.Map[BigInt, GetCallerTrans] = mutable.Map[BigInt, GetCallerTrans]()
   val outerPut: mutable.Map[BigInt, PutCallerTrans] = mutable.Map[BigInt, PutCallerTrans]()
 
@@ -57,7 +57,7 @@ class TLULMasterAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], ser
       handleA(inA)
     }
     else if (inA.opcode == PutFullData || inA.opcode == PutPartialData) {
-      if (a_cnt == 0) {//start burst
+      if (a_cnt == 0) { //start burst
         a_cnt_end = countBeats(inA.size)
         tmpA = inA.copy()
         a_cnt += 1

@@ -65,20 +65,21 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
   val fuzz = LazyModule(new FixedBlockFuzzer(0))
 
   //  val masters_ident = Array.fill(2)(LazyModule(new DebugIdentityNode()))
-  val xbar_ident = LazyModule(new DebugIdentityNode())
-  val slave_ident = LazyModule(new DebugIdentityNode())
+  val l1_xbar_ident = LazyModule(new DebugIdentityNode())
+  val l2_inner_ident = LazyModule(new DebugIdentityNode())
+  val l2_outer_ident = LazyModule(new DebugIdentityNode())
+  val l3_ident = LazyModule(new DebugIdentityNode())
 
-  val xbar = TLXbar()
-  xbar := ULmaster.node := fuzz.node
+  ULmaster.node := fuzz.node
 
   //  for ((master, ident) <- (masters zip masters_ident)) {
   //    xbar := ident.node := master.node
   //  }
-  l2.node := TLBuffer() := xbar_ident.node := xbar
+  l2.node := l2_inner_ident.node := TLBuffer() := l1_xbar_ident.node := ULmaster.node
   //  l2.node := TLBuffer() := master_ident.node := master.node
 
   val slave = LazyModule(new TLCSlaveMMIO())
-  slave.node := slave_ident.node := TLBuffer() := l2.node
+  slave.node := l3_ident.node := TLBuffer() := l2_outer_ident.node := l2.node
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
 
@@ -191,16 +192,16 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         val scoreboard = mutable.Map[BigInt, BigInt]()
         val serialList = ArrayBuffer[(Int, TLCTrans)]()
         val masterStateList = List.fill(2)(mutable.Map[BigInt, AddrState]())
-        val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i, 8, masterStateList(i)
+        val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i,f"l1_$i", 8, masterStateList(i)
           , serialList, scoreboard))
 
         val tlState = mutable.Map[BigInt, AddrState]()
-        val ulAgent = new TLULMasterAgent(3, tlState, serialList, scoreboard)
+        val ulAgent = new TLULMasterAgent(3,"l1_UL", tlState, serialList, scoreboard)
 
         val slaveState = mutable.Map() ++ {
           addr_pool zip List.fill(addr_list_len)(new AddrState())
         }.toMap
-        val slaveAgent = new TLCSlaveAgent(2, 8, slaveState, serialList, scoreboard)
+        val slaveAgent = new TLCSlaveAgent(2, name = "l3", 8, slaveState, serialList, scoreboard)
         //must set order here
         /*fork {
           for (_ <- 0 to total_clock) {
@@ -354,6 +355,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               aCh.data = peekBigInt(ulio.AChannel.data)
               ulAgent.fireA(aCh)
             }
+            ulAgent.step()
             c.clock.step()
           }
         }
@@ -463,6 +465,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             //handle some ID
             slaveAgent.freeSink()
 
+            slaveAgent.step()
             c.clock.step()
           }
         }.join()

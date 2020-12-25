@@ -102,7 +102,7 @@ class FireQueue[T <: TLCScalaMessage]() {
   }
 }
 
-class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)],
+class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)],
                scoreboard: mutable.Map[BigInt, BigInt])
               (implicit p: Parameters)
   extends TLCOp with BigIntExtract with PermissionTransition {
@@ -118,6 +118,20 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
   val offsetMask: Long = (1L << log2Up(l2params.blockBytes)) - 1
 
   val rand = new Random(0xdad)
+
+  var clock = 100
+
+  def step(i: Int = 1): Unit = {
+    clock += i
+  }
+
+  def debugPrefix(): String = {
+    f"[DEBUG][time= $clock%19d]  TLAgent$ID-$name: "
+  }
+
+  def debugPrintln(ins: String): Unit = {
+    println(debugPrefix() ++ ins)
+  }
 
   def getState(addr: BigInt): AddrState = {
     val state = addrStateMap.getOrElse(addr, new AddrState())
@@ -177,6 +191,7 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
     addrState.data = writeMaskedData(addrState.data, alignData, alignMask)
     val sbData = scoreboardRead(alignAddr)
     val checkWriteData = writeMaskedData(sbData, alignData, alignMask)
+    debugPrintln(f"MaskedRead, Addr: $alignAddr%x , own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
     assert(sbData == checkWriteData, f"agent $ID data has been changed, Addr: $alignAddr%x, " +
       f"own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
   }
@@ -190,10 +205,12 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
     val alignMask = maskConcatBeat(0, byteMask, start_beat)
     val addrState = getState(alignAddr)
     //new data
-    val res = writeMaskedData(scoreboardRead(alignAddr), alignData, alignMask)
+    val oldData = scoreboardRead(alignAddr)
+    val res = writeMaskedData(oldData, alignData, alignMask)
     addrState.dirty = true
     addrState.data = res
     scoreboardWrite(alignAddr, res)
+    debugPrintln(f"MaskedWrite, Addr: $alignAddr%x ,old sbData:$oldData%x , new sbData: $res%x , mask:$alignMask%x")
   }
 
   //full block read
@@ -202,6 +219,7 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
     val addrState = getState(addr)
     addrState.data = readData
     val sbData = scoreboardRead(addr)
+    debugPrintln(f"insertFullBlockRead, Addr: $addr%x ,own data: $readData%x")
     assert(readData == sbData, f"agent $ID data has been changed, Addr: $addr%x, " +
       f"own data: $readData%x , scoreboard data: $sbData%x , with full mask")
   }
@@ -214,6 +232,7 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
     addrState.dirty = true
     addrState.data = newData
     scoreboardWrite(addr, newData)
+    debugPrintln(f"insertFullBlockWrite, Addr: $addr%x ,new data: $newData%x")
   }
 
   //full block read & write, check old data before write new data
@@ -240,10 +259,10 @@ class TLCAgent(ID: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList
 
 }
 
-class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
+class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
                     , scoreboard: mutable.Map[BigInt, BigInt])
                    (implicit p: Parameters)
-  extends TLCAgent(ID, addrStateMap, serialList, scoreboard) {
+  extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
   val innerAcquire = ListBuffer[AcquireCalleeTrans]()
   val innerRelease = ListBuffer[ReleaseCalleeTrans]()
   val innerProbe = ListBuffer[ProbeCallerTrans]()
@@ -259,6 +278,15 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
       sinkIdMap.remove(ID)
       true
     }
+  }
+
+  def permAgainstMaster(masterPerm: BigInt): BigInt = {
+    if (masterPerm == trunk)
+      nothing
+    else if (masterPerm == branch)
+      branch
+    else
+      trunk
   }
 
   var tmpA = new TLCScalaA()
@@ -306,17 +334,32 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
       val addr = g.a.get.address
       val alignAddr = addrAlignBlock(addr)
       val state = getState(alignAddr)
-      val start_beat = beatInBlock(addr)
-      val targetData = dataOutofBeat(state.data, start_beat)
-      println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
-        f"beats:${countBeats(g.a.get.size)}")
-      dQueue.enqMessage(g.issueAccessAckData(targetData), countBeats(g.a.get.size))
-      true
+      if (state.myPerm == nothing) {
+        println(f"can't handle Get at $addr%x")
+        false
+      }
+      else {
+        val start_beat = beatInBlock(addr)
+        val targetData = dataOutofBeat(state.data, start_beat)
+        println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
+          f"beats:${countBeats(g.a.get.size)}")
+        dQueue.enqMessage(g.issueAccessAckData(targetData), countBeats(g.a.get.size))
+        true
+      }
     }
     innerPut.dequeueAll { p =>
-      insertMaskedWrite(p.a.get.address, p.a.get.data, p.a.get.mask)
-      dQueue.enqMessage(p.issueAccessAck())
-      true
+      val addr = p.a.get.address
+      val alignAddr = addrAlignBlock(addr)
+      val state = getState(alignAddr)
+      if (state.myPerm != trunk) {
+        println(f"can't handle Put at $addr%x")
+        false
+      }
+      else {
+        insertMaskedWrite(p.a.get.address, p.a.get.data, p.a.get.mask)
+        dQueue.enqMessage(p.issueAccessAck())
+        true
+      }
     }
     //search ReleaseAck to issue
     innerRelease --= innerRelease.filter { r =>
@@ -329,6 +372,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         val addr = r.c.get.address
         val state = getState(addr)
         state.masterPerm = shrinkTarget(r.c.get.param)
+        state.myPerm = permAgainstMaster(state.masterPerm)
         if (r.c.get.opcode == ReleaseData) {
           state.data = r.c.get.data
           if (state.masterPerm == nothing) {
@@ -374,6 +418,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
             }
             //update state
             state.masterPerm = growTarget(a_acq.param)
+            state.myPerm = permAgainstMaster(state.masterPerm)
             state.slaveUpdatePendingGrantAck()
             //mark Id allocated
             sinkIdMap(allocId) = acq
@@ -401,6 +446,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
 
   def fireC(inC: TLCScalaC): Unit = {
     if (inC.opcode == ReleaseData || inC.opcode == ProbeAckData) {
+      println(f"slave C fire opcode:${inC.opcode} addr:${inC.address}%x")
       if (c_cnt == 0) { //start burst
         tmpC = inC.copy()
         c_cnt += 1
@@ -430,6 +476,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         //update state
         assert(state.masterPerm == shrinkFrom(c.param), f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(c.param)
+        state.myPerm = permAgainstMaster(state.masterPerm)
         state.slaveUpdatePendingProbeAck()
         if (state.masterPerm == nothing) {
           insertReadWrite(addr, state.data, randomBlockData()) //modify data when master is invalid
@@ -453,6 +500,7 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
         //update state
         assert(state.masterPerm == shrinkFrom(c.param), f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(c.param)
+        state.myPerm = permAgainstMaster(state.masterPerm)
         state.data = c.data
         state.slaveUpdatePendingProbeAck()
         if (state.masterPerm == nothing) {
@@ -602,10 +650,10 @@ class TLCSlaveAgent(ID: Int, val maxSink: Int, addrStateMap: mutable.Map[BigInt,
   }
 }
 
-class TLCMasterAgent(ID: Int, val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
+class TLCMasterAgent(ID: Int, name: String = "", val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
                      , scoreboard: mutable.Map[BigInt, BigInt])
                     (implicit p: Parameters)
-  extends TLCAgent(ID, addrStateMap, serialList, scoreboard) {
+  extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
   val outerAcquire: ListBuffer[AcquireCallerTrans] = ListBuffer()
   val outerRelease: ListBuffer[ReleaseCallerTrans] = ListBuffer()
   val outerProbe: ListBuffer[ProbeCalleeTrans] = ListBuffer()
