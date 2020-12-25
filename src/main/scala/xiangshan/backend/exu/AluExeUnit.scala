@@ -19,7 +19,7 @@ class AluExeUnit extends Exu(aluExeUnitCfg)
 
   XSDebug(io.fromInt.valid || io.redirect.valid,
     p"fromInt(${io.fromInt.valid} ${io.fromInt.ready}) toInt(${io.toInt.valid} ${io.toInt.ready})" +
-      p"Redirect:(${io.redirect.valid} ${io.redirect.bits.isException}${io.redirect.bits.isFlushPipe}${io.redirect.bits.isMisPred}${io.redirect.bits.isReplay}) roqIdx:${io.redirect.bits.roqIdx}\n",
+      p"Redirect:(${io.redirect.valid}) roqIdx:${io.redirect.bits.roqIdx}\n",
   )
   XSDebug(io.fromInt.valid,
     p"src1:${Hexadecimal(io.fromInt.bits.src1)} src2:${Hexadecimal(io.fromInt.bits.src2)} " +

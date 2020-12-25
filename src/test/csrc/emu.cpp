@@ -2,8 +2,11 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
+#include<signal.h>
+#include<unistd.h>
 #include "ram.h"
 #include "zlib.h"
+#include "compress.h"
 
 void* get_ram_start();
 long get_ram_size();
@@ -14,15 +17,16 @@ void set_nemu_this_pc(uint64_t pc);
 static inline void print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
   printf("\n");
-  printf("  -s, --seed=NUM        use this seed\n");
-  printf("  -C, --max-cycles=NUM  execute at most NUM cycles\n");
-  printf("  -I, --max-instr=NUM   execute at most NUM instructions\n");
-  printf("  -i, --image=FILE      run with this image file\n");
-  printf("  -b, --log-begin=NUM   display log from NUM th cycle\n");
-  printf("  -e, --log-end=NUM     stop display log at NUM th cycle\n");
+  printf("  -s, --seed=NUM             use this seed\n");
+  printf("  -C, --max-cycles=NUM       execute at most NUM cycles\n");
+  printf("  -I, --max-instr=NUM        execute at most NUM instructions\n");
+  printf("  -i, --image=FILE           run with this image file\n");
+  printf("  -b, --log-begin=NUM        display log from NUM th cycle\n");
+  printf("  -e, --log-end=NUM          stop display log at NUM th cycle\n");
   printf("      --load-snapshot=PATH   load snapshot from PATH\n");
-  printf("      --dump-wave       dump waveform when log is enabled\n");
-  printf("  -h, --help            print program help info\n");
+  printf("      --no-snapshot          disable saving snapshots\n");
+  printf("      --dump-wave            dump waveform when log is enabled\n");
+  printf("  -h, --help                 print program help info\n");
   printf("\n");
 }
 
@@ -32,6 +36,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
   const struct option long_options[] = {
     { "load-snapshot",  1, NULL,  0  },
     { "dump-wave",      0, NULL,  0  },
+    { "no-snapshot",    0, NULL,  0  },
     { "seed",           1, NULL, 's' },
     { "max-cycles",     1, NULL, 'C' },
     { "max-instr",      1, NULL, 'I' },
@@ -50,6 +55,7 @@ inline EmuArgs parse_args(int argc, const char *argv[]) {
         switch (long_index) {
           case 0: args.snapshot_path = optarg; continue;
           case 1: args.enable_waveform = true; continue;
+          case 2: args.enable_snapshot = false; continue;
         }
         // fall through
       default:
@@ -79,7 +85,6 @@ Emulator::Emulator(int argc, const char *argv[]):
   cycles(0), hascommit(0), trapCode(STATE_RUNNING)
 {
   args = parse_args(argc, argv);
-  printf("Emu compiled at %s, %s UTC\n", __DATE__, __TIME__);
 
   // srand
   srand(args.seed);
@@ -129,9 +134,12 @@ Emulator::~Emulator() {
   ram_finish();
 
 #ifdef VM_SAVABLE
-  snapshot_slot[0].save();
-  snapshot_slot[1].save();
-  printf("Please remove unused snapshots manually\n");
+  if (args.enable_snapshot && trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
+    printf("Saving snapshots to file system. Please wait.\n");
+    snapshot_slot[0].save();
+    snapshot_slot[1].save();
+    printf("Please remove unused snapshots manually\n");
+  }
 #endif
 }
 
@@ -178,6 +186,15 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
   dut_ptr_wpc(5); dut_ptr_wdata(5); dut_ptr_wdst(5); 
 }
 
+inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
+#define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
+#define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
+#define dut_ptr_smask(x) smask[x] = dut_ptr->io_difftest_storeMask_##x
+  dut_ptr_saddr(0); dut_ptr_saddr(1);
+  dut_ptr_sdata(0); dut_ptr_sdata(1);
+  dut_ptr_smask(0); dut_ptr_smask(1);
+}
+
 inline void Emulator::reset_ncycles(size_t cycles) {
   for(int i = 0; i < cycles; i++) {
     dut_ptr->reset = 1;
@@ -194,7 +211,11 @@ inline void Emulator::single_cycle() {
 #ifdef WITH_DRAMSIM3
   axi_channel axi;
   axi_copy_from_dut_ptr(dut_ptr, axi);
+  axi.aw.addr -= 0x80000000UL;
+  axi.ar.addr -= 0x80000000UL;
   dramsim3_helper(axi);
+  axi.aw.addr += 0x80000000UL;
+  axi.ar.addr += 0x80000000UL;
   axi_set_dut_ptr(dut_ptr, axi);
 #endif
 
@@ -225,6 +246,16 @@ inline void Emulator::single_cycle() {
   cycles ++;
 }
 
+#if VM_COVERAGE == 1
+uint64_t *max_cycle_ptr = NULL;
+// when interrupted, we set max_cycle to zero
+// so that the emulator will stop gracefully
+void sig_handler(int signo) {
+  if (signo == SIGINT)
+    *max_cycle_ptr = 0;
+}
+#endif
+
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
   extern uint32_t uptime(void);
@@ -243,6 +274,16 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   diff.wpc = wpc;
   diff.wdata = wdata;
   diff.wdst = wdst;
+
+#if VM_COVERAGE == 1
+  // we dump coverage into files at the end
+  // since we are not sure when an emu will stop
+  // we distinguish multiple dat files by emu start time
+  time_t start_time = time(NULL);
+  max_cycle_ptr = &max_cycle;
+  if (signal(SIGINT, sig_handler) == SIG_ERR)
+    printf("\ncan't catch SIGINT\n");
+#endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
     if (!(max_cycle > 0 && max_instr > 0 && instr_left_last_cycle >= max_instr /* handle overflow */)) {
@@ -271,6 +312,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       long get_img_size();
       ref_difftest_memcpy_from_dut(0x80000000, get_img_start(), get_img_size());
       ref_difftest_setregs(reg);
+      printf("The first instruction has commited. Difftest enabled. \n");
     }
 
     // difftest
@@ -299,6 +341,25 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       max_instr -= diff.commit;
     }
 
+    if (dut_ptr->io_difftest_storeCommit) {
+      read_store_info(diff.store_addr, diff.store_data, diff.store_mask);
+
+      for (int i = 0; i < dut_ptr->io_difftest_storeCommit; i++) {
+        auto addr = diff.store_addr[i];
+        auto data = diff.store_data[i];
+        auto mask = diff.store_mask[i];
+        if (difftest_store_step(&addr, &data, &mask)) {
+          difftest_display(dut_ptr->io_difftest_priviledgeMode);
+          printf("Mismatch for store commits: \n");
+          printf("REF commits addr 0x%lx, data 0x%lx, mask 0x%x\n", addr, data, mask);
+          printf("DUT commits addr 0x%lx, data 0x%lx, mask 0x%x\n",
+            diff.store_addr[i], diff.store_data[i], diff.store_mask[i]);
+          trapCode = STATE_ABORT;
+          break;
+        }
+      }
+    }
+
     uint32_t t = uptime();
     if (t - lasttime_poll > 100) {
       poll_event();
@@ -306,8 +367,8 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 #ifdef VM_SAVABLE
     static int snapshot_count = 0;
-    if (trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
-      // save snapshot every 10s
+    if (args.enable_snapshot && trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 6000 * SNAPSHOT_INTERVAL) {
+      // save snapshot every 60s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
       lasttime_snapshot = t;
@@ -322,6 +383,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   }
 
   if (Verilated::gotFinish()) {
+    difftest_display(dut_ptr->io_difftest_priviledgeMode);
     eprintf("The simulation stopped. There might be some assertion failed.\n");
     trapCode = STATE_ABORT;
   }
@@ -329,6 +391,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
 #endif
+
+#if VM_COVERAGE == 1
+  save_coverage(start_time);
+#endif
+
   display_trapinfo();
   return cycles;
 }
@@ -357,6 +424,22 @@ inline char* Emulator::waveform_filename(time_t t) {
   strcpy(p, ".vcd");
   return buf;
 }
+
+
+#if VM_COVERAGE == 1
+inline char* Emulator::coverage_filename(time_t t) {
+  static char buf[1024];
+  char *p = timestamp_filename(t, buf);
+  strcpy(p, ".coverage.dat");
+  return buf;
+}
+
+inline void Emulator::save_coverage(time_t t) {
+  char *p = coverage_filename(t);
+  VerilatedCov::write(p);
+}
+#endif
+
 
 void Emulator::display_trapinfo() {
   uint64_t pc = dut_ptr->io_trap_pc;
@@ -407,10 +490,10 @@ void Emulator::snapshot_save(const char *filename) {
   uint64_t nemu_this_pc = get_nemu_this_pc();
   stream.unbuf_write(&nemu_this_pc, sizeof(nemu_this_pc));
 
-  char *buf = new char[size];
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   ref_difftest_memcpy_from_ref(buf, 0x80000000, size);
   stream.unbuf_write(buf, size);
-  delete buf;
+  munmap(buf, size);
 
   struct SyncState sync_mastate;
   ref_difftest_get_mastatus(&sync_mastate);
@@ -448,10 +531,10 @@ void Emulator::snapshot_load(const char *filename) {
   stream.read(&nemu_this_pc, sizeof(nemu_this_pc));
   set_nemu_this_pc(nemu_this_pc);
 
-  char *buf = new char[size];
+  char *buf = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   stream.read(buf, size);
   ref_difftest_memcpy_from_dut(0x80000000, buf, size);
-  delete buf;
+  munmap(buf, size);
 
   struct SyncState sync_mastate;
   stream.read(&sync_mastate, sizeof(struct SyncState));

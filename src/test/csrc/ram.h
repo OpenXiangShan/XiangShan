@@ -3,6 +3,9 @@
 
 #include "common.h"
 
+#define EMU_RAM_SIZE (256 * 1024 * 1024UL)
+// #define EMU_RAM_SIZE (8 * 1024 * 1024 * 1024UL)
+
 void init_ram(const char *img);
 void ram_finish();
 
