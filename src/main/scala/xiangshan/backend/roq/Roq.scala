@@ -74,6 +74,49 @@ class RoqWbData extends XSBundle {
   val flushPipe = Bool()
 }
 
+class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle {
+    // for commits/flush
+    val state = Input(UInt(2.W))
+    val deq_v = Vec(CommitWidth, Input(Bool()))
+    val deq_w = Vec(CommitWidth, Input(Bool()))
+    val deq_exceptionVec = Vec(CommitWidth, Input(UInt(16.W)))
+    val deq_flushPipe = Vec(CommitWidth, Input(Bool()))
+    // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
+    val intrBitSetReg = Input(Bool())
+    val hasNoSpecExec = Input(Bool())
+    val commitType = Input(CommitType())
+    // output: the CommitWidth deqPtr
+    val out = Vec(CommitWidth, Output(new RoqPtr))
+  })
+
+  val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr))))
+
+  // for exceptions (flushPipe included) and interrupts:
+  // only consider the first instruction
+  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
+  val exceptionEnable = io.deq_w(0) && (io.deq_exceptionVec(0).orR || io.deq_flushPipe(0))
+  val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
+
+  // for normal commits: only to consider when there're no exceptions
+  // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
+  val commitBlocked = VecInit((0 until CommitWidth).map(i => if (i == 0) false.B else io.deq_exceptionVec(i).orR || io.deq_flushPipe(i)))
+  val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !commitBlocked(i)))
+  val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
+  // when io.intrBitSetReg, only one instruction is allowed to commit
+  val commitCnt = Mux(io.intrBitSetReg, io.deq_v(0) && io.deq_w(0), normalCommitCnt)
+
+  when (redirectOutValid) {
+    deqPtrVec := VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr)))
+  }.elsewhen (io.state === 0.U) {
+    deqPtrVec := deqPtrVec.map(_ + commitCnt)
+    XSInfo(io.state === 0.U && commitCnt > 0.U, "retired %d insts\n", commitCnt)
+  }
+
+  io.out := deqPtrVec
+
+}
+
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Input(Valid(new Redirect))
@@ -104,7 +147,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtr = RegInit(0.U.asTypeOf(new RoqPtr))
-  val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr))))
+  val deqPtrVec = Wire(Vec(CommitWidth, new RoqPtr))
+
   val walkPtrVec = Reg(Vec(CommitWidth, new RoqPtr))
   val validCounter = RegInit(0.U(log2Ceil(RoqSize).W))
   val allowEnqueue = RegInit(true.B)
@@ -231,7 +275,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
   // However, we cannot determine whether a load/store instruction is MMIO.
   // Thus, we don't allow load/store instructions to trigger an interrupt.
-  val intrEnable = io.csr.intrBitSet && !isEmpty && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
+  val intrBitSetReg = RegNext(io.csr.intrBitSet)
+  val intrEnable = intrBitSetReg && valid(deqPtr.value) && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
   val exceptionEnable = deqPtrWritebacked && Cat(deqExceptionVec).orR()
   val isFlushPipe = deqPtrWritebacked && deqWritebackData.flushPipe
   io.redirectOut := DontCare
@@ -388,14 +433,18 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   /**
     * pointers and counters
     */
-  val commitCnt = PopCount(io.commits.valid)
-  when (io.redirectOut.valid) {
-    deqPtrVec := VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr)))
-  }.elsewhen (state === s_idle) {
-    deqPtrVec := deqPtrVec.map(_ + commitCnt)
-    XSInfo(commitCnt > 0.U, "retired %d insts\n", commitCnt)
-  }
+  val deqPtrGenModule = Module(new RoqDeqPtrWrapper)
+  deqPtrGenModule.io.state := state
+  deqPtrGenModule.io.deq_v := commit_v
+  deqPtrGenModule.io.deq_w := commit_w
+  deqPtrGenModule.io.deq_exceptionVec := VecInit(dispatchData.io.rdata.zip(writebackData.io.rdata).map{ case (d, w) => mergeExceptionVec(d, w).asUInt })
+  deqPtrGenModule.io.deq_flushPipe := writebackData.io.rdata.map(_.flushPipe)
+  deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
+  deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
+  deqPtrGenModule.io.commitType := deqDispatchData.commitType
+  deqPtrVec := deqPtrGenModule.io.out
 
+  val commitCnt = PopCount(io.commits.valid)
   when (io.redirectOut.valid) {
     enqPtr := 0.U.asTypeOf(new RoqPtr)
   }.elsewhen (io.redirect.valid) {
