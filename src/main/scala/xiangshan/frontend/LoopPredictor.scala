@@ -97,7 +97,7 @@ class LTBColumn extends LTBModule {
     
     // val mem = RegInit(0.U.asTypeOf(Vec(nRows, new LoopEntry)))
     val mem = Mem(nRows, new LoopEntry)
-    io.rdata  := mem(io.rIdx)
+    io.rdata  := RegNext(mem(io.rIdx))
     io.urdata := mem(io.urIdx)
     val wdata = WireInit(io.wdata)
     val swdata = WireInit(io.swdata)
@@ -133,10 +133,10 @@ class LTBColumn extends LTBModule {
   when (resetIdx === (nRows - 1).U) { doingReset := false.B }
 
   // during branch prediction
-  val if4_idx = io.req.idx
-  val if4_tag = io.req.tag
+  val if4_idx = RegNext(io.req.idx)
+  val if4_tag = RegNext(io.req.tag)
   val if4_pc = io.req.pc // only for debug
-  ltb.rIdx := if4_idx
+  ltb.rIdx := io.req.idx
   val if4_entry = WireInit(ltb.rdata)
 
   val valid = RegInit(false.B)
@@ -306,8 +306,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
   // val offsetIdx = offsetInBank(io.pc.bits) // 这个pc在一个bank中的第几位
   // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => Mux(offsetIdx <= i.U, baseBank + i.U - offsetIdx, 0.U)(log2Up(PredictWidth) - 1, 0)))
 
-  val pc = RegEnable(io.pc.bits, io.pc.valid)
-  val inMask = io.inMask
+  val pc = RegEnable(io.pc.bits, io.pc.valid) // This is if3_pc
+  val inMask = io.inMask // This is if4_mask
   val tag = ltbAddr.getTag(pc)
   val bank = ltbAddr.getBank(pc)
   val bankIdx = ltbAddr.getBankIdx(pc)
@@ -385,7 +385,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
     XSDebug("[IF4][req] inMask=%b, reorderMask=%b\n", inMask, reorderMask)
 
-    XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr)
+    XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d, isReplay=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr, io.update.bits.isReplay)
     XSDebug("[IF4][req] isMisPred=%d updateSpecCnt=%d, taken=%d\n", io.update.bits.isMisPred, io.update.bits.bpuMeta.specCnt, io.update.bits.taken)
 
     // XSDebug(false, true.B, "\n")
