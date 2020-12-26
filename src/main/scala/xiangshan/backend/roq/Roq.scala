@@ -168,7 +168,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
-  when (io.commits.valid.asUInt.orR) { hasNoSpecExec:= false.B }
+  when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
 
   for (i <- 0 until RenameWidth) {
     when(io.enq.req(i).valid && io.enq.canAccept) {
