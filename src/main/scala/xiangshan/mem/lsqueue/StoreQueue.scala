@@ -58,7 +58,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   require(StoreQueueSize > RenameWidth)
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
-  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize).W))
+  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrExt(0).value

@@ -115,7 +115,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val enqPtr = RegInit(0.U.asTypeOf(new RoqPtr))
   val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr))))
   val walkPtrVec = Reg(Vec(CommitWidth, new RoqPtr))
-  val validCounter = RegInit(0.U(log2Ceil(RoqSize).W))
+  val validCounter = RegInit(0.U(log2Ceil(RoqSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtrVec = VecInit((0 until RenameWidth).map(i => enqPtr + PopCount(io.enq.needAlloc.take(i))))
