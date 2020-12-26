@@ -20,7 +20,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
 class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new DispatchQueueIO(enqnum, deqnum))
-  val indexWidth = log2Ceil(size)
 
   val s_invalid :: s_valid:: Nil = Enum(2)
 
@@ -34,10 +33,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   // tail: first invalid entry (free entry)
   val tailPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
   val tailPtrMask = UIntToMask(tailPtr(0).value, size)
+  // valid entries counter
+  val validCounter = RegInit(0.U(log2Ceil(size).W))
+  val allowEnqueue = RegInit(true.B)
 
-  val validEntries = distanceBetween(tailPtr(0), headPtr(0))
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR
-  val canEnqueue = validEntries <= (size - enqnum).U
+  val canEnqueue = allowEnqueue
   val canActualEnqueue = canEnqueue && !io.redirect.valid
 
   /**
@@ -93,7 +94,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     */
 
   // dequeue
-  val numDeqTry = Mux(validEntries > deqnum.U, deqnum.U, validEntries)
+  val currentValidCounter = distanceBetween(tailPtr(0), headPtr(0))
+  val numDeqTry = Mux(currentValidCounter > deqnum.U, deqnum.U, currentValidCounter)
   val numDeqFire = PriorityEncoder(io.deq.zipWithIndex.map{case (deq, i) =>
     // For dequeue, the first entry should never be s_invalid
     // Otherwise, there should be a redirect and tail walks back
@@ -146,6 +148,28 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
       )
   }
 
+  // update valid counter and allowEnqueue reg
+  validCounter := Mux(exceptionValid,
+    0.U,
+    Mux(io.redirect.valid,
+      validCounter,
+      Mux(lastLastCycleMisprediction,
+        currentValidCounter,
+        validCounter + numEnq - numDeq)
+    )
+  )
+  allowEnqueue := Mux(io.redirect.valid,
+    false.B,
+    Mux(lastLastCycleMisprediction,
+      currentValidCounter <= (size - enqnum).U,
+      // To optimize timing, we don't use numDeq here.
+      // It affects cases when validCount + numEnq - numDeq <= (size - enqnum).U.
+      // For example, there're 10 empty entries with 6 enqueue and 2 dequeue.
+      // However, since dispatch queue size > (numEnq + numDeq),
+      // even if we allow enqueue, they cannot be dispatched immediately.
+      validCounter + numEnq <= (size - enqnum).U
+    )
+  )
 
   /**
     * Part 3: set output and input
