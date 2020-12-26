@@ -24,7 +24,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val s_invalid :: s_valid:: Nil = Enum(2)
 
   // queue data array
-  val uopEntries = Mem(size, new MicroOp)
+  val dataModule = Module(new DataModuleTemplate(new MicroOp, size, deqnum, enqnum))
+  val roqIdxEntries = Reg(Vec(size, new RoqPtr))
+  val debug_uopEntries = Mem(size, new MicroOp)
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
 
   // head: first valid entry (dispatched entry)
@@ -55,10 +57,16 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     */
   // enqueue: from s_invalid to s_valid
   io.enq.canAccept := canEnqueue
+  dataModule.io.wen   := VecInit((0 until enqnum).map(_ => false.B))
+  dataModule.io.waddr := DontCare
+  dataModule.io.wdata := VecInit(io.enq.req.map(_.bits))
   for (i <- 0 until enqnum) {
     when (io.enq.req(i).valid && canActualEnqueue) {
+      dataModule.io.wen(i) := true.B
       val sel = if (i == 0) 0.U else PopCount(io.enq.req.take(i).map(_.valid))
-      uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
+      dataModule.io.waddr(i) := tailPtr(sel).value
+      roqIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.roqIdx
+      debug_uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
       stateEntries(tailPtr(sel).value) := s_valid
     }
   }
@@ -75,14 +83,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   // redirect: cancel uops currently in the queue
   val needCancel = Wire(Vec(size, Bool()))
   for (i <- 0 until size) {
-    needCancel(i) := stateEntries(i) =/= s_invalid && uopEntries(i.U).roqIdx.needFlush(io.redirect)
+    needCancel(i) := stateEntries(i) =/= s_invalid && roqIdxEntries(i).needFlush(io.redirect)
 
     when (needCancel(i)) {
       stateEntries(i) := s_invalid
     }
 
-    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(uopEntries(i).cf.pc)}) " +
-      p"roqIndex 0x${Hexadecimal(uopEntries(i).roqIdx.asUInt)} " +
+    XSInfo(needCancel(i), p"valid entry($i)(pc = ${Hexadecimal(debug_uopEntries(i).cf.pc)}) " +
+      p"roqIndex ${roqIdxEntries(i)} " +
       p"cancelled with redirect roqIndex 0x${Hexadecimal(io.redirect.bits.roqIdx.asUInt)}\n")
   }
 
@@ -175,8 +183,11 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     * Part 3: set output and input
     */
   // TODO: remove this when replay moves to roq
+  dataModule.io.raddr := VecInit(headPtr.map(_.value))
   for (i <- 0 until deqnum) {
-    io.deq(i).bits := uopEntries(headPtr(i).value)
+    io.deq(i).bits := dataModule.io.rdata(i)
+    io.deq(i).bits.roqIdx := roqIdxEntries(headPtr(i).value)
+    // io.deq(i).bits := debug_uopEntries(headPtr(i).value)
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := stateEntries(headPtr(i).value) === s_valid && !lastCycleMisprediction
   }
