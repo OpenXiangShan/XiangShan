@@ -117,6 +117,50 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
 }
 
+class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle {
+    // for exceptions and interrupts
+    val state = Input(UInt(2.W))
+    val deq_v = Input(Bool())
+    val deq_w = Input(Bool())
+    val deq_exceptionVec = Input(UInt(16.W))
+    val deq_flushPipe = Input(Bool())
+    val intrBitSetReg = Input(Bool())
+    val hasNoSpecExec = Input(Bool())
+    val commitType = Input(CommitType())
+    // for input redirect
+    val redirect = Input(Valid(new Redirect))
+    // for enqueue
+    val allowEnqueue = Input(Bool())
+    val hasBlockBackward = Input(Bool())
+    val enq = Vec(RenameWidth, Input(Bool()))
+    val out = Output(new RoqPtr)
+  })
+
+  val enqPtr = RegInit(0.U.asTypeOf(new RoqPtr))
+
+  // for exceptions (flushPipe included) and interrupts:
+  // only consider the first instruction
+  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
+  val exceptionEnable = io.deq_w && (io.deq_exceptionVec.orR || io.deq_flushPipe)
+  val redirectOutValid = io.state === 0.U && io.deq_v && (intrEnable || exceptionEnable)
+
+  // enqueue
+  val canAccept = io.allowEnqueue && !io.hasBlockBackward
+  val dispatchNum = Mux(canAccept, PopCount(io.enq), 0.U)
+
+  when (redirectOutValid) {
+    enqPtr := 0.U.asTypeOf(new RoqPtr)
+  }.elsewhen (io.redirect.valid) {
+    enqPtr := io.redirect.bits.roqIdx + Mux(io.redirect.bits.flushItself(), 0.U, 1.U)
+  }.otherwise {
+    enqPtr := enqPtr + dispatchNum
+  }
+
+  io.out := enqPtr
+
+}
+
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Input(Valid(new Redirect))
@@ -146,7 +190,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
-  val enqPtr = RegInit(0.U.asTypeOf(new RoqPtr))
+  val enqPtr = Wire(new RoqPtr)
   val deqPtrVec = Wire(Vec(CommitWidth, new RoqPtr))
 
   val walkPtrVec = Reg(Vec(CommitWidth, new RoqPtr))
@@ -444,14 +488,20 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   deqPtrGenModule.io.commitType := deqDispatchData.commitType
   deqPtrVec := deqPtrGenModule.io.out
 
-  val commitCnt = PopCount(io.commits.valid)
-  when (io.redirectOut.valid) {
-    enqPtr := 0.U.asTypeOf(new RoqPtr)
-  }.elsewhen (io.redirect.valid) {
-    enqPtr := io.redirect.bits.roqIdx + Mux(io.redirect.bits.flushItself(), 0.U, 1.U)
-  }.otherwise {
-    enqPtr := enqPtr + dispatchNum
-  }
+  val enqPtrGenModule = Module(new RoqEnqPtrWrapper)
+  enqPtrGenModule.io.state := state
+  enqPtrGenModule.io.deq_v := commit_v(0)
+  enqPtrGenModule.io.deq_w := commit_w(0)
+  enqPtrGenModule.io.deq_exceptionVec := deqExceptionVec.asUInt
+  enqPtrGenModule.io.deq_flushPipe := writebackData.io.rdata(0).flushPipe
+  enqPtrGenModule.io.intrBitSetReg := intrBitSetReg
+  enqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
+  enqPtrGenModule.io.commitType := deqDispatchData.commitType
+  enqPtrGenModule.io.redirect := io.redirect
+  enqPtrGenModule.io.allowEnqueue := allowEnqueue
+  enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
+  enqPtrGenModule.io.enq := VecInit(io.enq.req.map(_.valid))
+  enqPtr := enqPtrGenModule.io.out
 
   val thisCycleWalkCount = Mux(walkFinished, walkCounter, CommitWidth.U)
   when (io.redirect.valid && state =/= s_extrawalk) {
@@ -465,7 +515,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
 
   val lastCycleRedirect = RegNext(io.redirect.valid)
   val trueValidCounter = Mux(lastCycleRedirect, distanceBetween(enqPtr, deqPtr), validCounter)
-
+  val commitCnt = PopCount(io.commits.valid)
   validCounter := Mux(io.redirectOut.valid,
     0.U,
     Mux(state === s_idle,
