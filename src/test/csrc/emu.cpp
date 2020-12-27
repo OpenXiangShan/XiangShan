@@ -422,6 +422,7 @@ inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);
   strcpy(p, ".vcd");
+  printf("dump wave to %s...\n", buf);
   return buf;
 }
 
