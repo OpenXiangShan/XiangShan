@@ -115,7 +115,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val enqPtr = RegInit(0.U.asTypeOf(new RoqPtr))
   val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr))))
   val walkPtrVec = Reg(Vec(CommitWidth, new RoqPtr))
-  val validCounter = RegInit(0.U(log2Ceil(RoqSize).W))
+  val validCounter = RegInit(0.U(log2Ceil(RoqSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtrVec = VecInit((0 until RenameWidth).map(i => enqPtr + PopCount(io.enq.needAlloc.take(i))))
@@ -170,7 +170,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
-  when (io.commits.valid.asUInt.orR) { hasNoSpecExec:= false.B }
+  when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
 
   for (i <- 0 until RenameWidth) {
     // we don't determine whether io.redirect.valid here since redirect has higher priority
