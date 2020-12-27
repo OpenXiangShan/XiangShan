@@ -71,6 +71,7 @@ class LTBColumn extends LTBModule {
   val io = IO(new Bundle() {
     // if3 send req
     val req = Input(new LTBColumnReq)
+    val if2_fire = Input(Bool())
     val if3_fire = Input(Bool())
     val if4_fire = Input(Bool())
     val outMask = Input(Bool())
@@ -97,7 +98,7 @@ class LTBColumn extends LTBModule {
     
     // val mem = RegInit(0.U.asTypeOf(Vec(nRows, new LoopEntry)))
     val mem = Mem(nRows, new LoopEntry)
-    io.rdata  := RegNext(mem(io.rIdx))
+    io.rdata  := mem(io.rIdx)
     io.urdata := mem(io.urIdx)
     val wdata = WireInit(io.wdata)
     val swdata = WireInit(io.swdata)
@@ -133,11 +134,17 @@ class LTBColumn extends LTBModule {
   when (resetIdx === (nRows - 1).U) { doingReset := false.B }
 
   // during branch prediction
-  val if4_idx = RegNext(io.req.idx)
-  val if4_tag = RegNext(io.req.tag)
-  val if4_pc = io.req.pc // only for debug
-  ltb.rIdx := io.req.idx
-  val if4_entry = WireInit(ltb.rdata)
+  val if3_idx = io.req.idx
+  val if3_tag = io.req.tag
+  val if3_pc = io.req.pc // only for debug
+  ltb.rIdx := if3_idx
+  val if3_entry = ltb.rdata
+
+
+  val if4_entry = RegEnable(if3_entry, io.if3_fire)
+  val if4_idx = RegEnable(if3_idx, io.if3_fire)
+  val if4_tag = RegEnable(if3_tag, io.if3_fire)
+  val if4_pc = RegEnable(if3_pc, io.if3_fire)
 
   val valid = RegInit(false.B)
   when (io.if4_fire) { valid := false.B }
@@ -242,7 +249,7 @@ class LTBColumn extends LTBModule {
     //debug info
     XSDebug(doingReset, "Reseting...\n")
     XSDebug("if3_fire=%d if4_fire=%d valid=%d\n", io.if3_fire, io.if4_fire,valid)
-    XSDebug("[req] v=%d pc=%x idx=%x tag=%x\n", valid, io.req.pc, io.req.idx, io.req.tag)
+    XSDebug("[req] v=%d pc=%x idx=%x tag=%x\n", valid, if3_pc, if3_idx, if3_tag)
     XSDebug("[if4_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", 
       if4_entry.tag, if4_entry.conf, if4_entry.age, if4_entry.tripCnt, if4_entry.specCnt, if4_entry.nSpecCnt)
     XSDebug(false, true.B, p" brTag=${if4_entry.brTag} unusable=${if4_entry.unusable}\n")
@@ -274,6 +281,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   }
 
   class LoopIO extends DefaultBasePredictorIO {
+    val if3_fire = Input(Bool())
     val respIn = Input(new LoopRespIn)
     val resp = Output(new LoopResp)
     val meta = Output(new LoopMeta)
@@ -306,8 +314,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
   // val offsetIdx = offsetInBank(io.pc.bits) // 这个pc在一个bank中的第几位
   // val bankIdxInOrder = VecInit((0 until PredictWidth).map(i => Mux(offsetIdx <= i.U, baseBank + i.U - offsetIdx, 0.U)(log2Up(PredictWidth) - 1, 0)))
 
-  val pc = RegEnable(io.pc.bits, io.pc.valid) // This is if3_pc
-  val inMask = io.inMask // This is if4_mask
+  // if3
+  val if2_fire = io.pc.valid
+  val pc = RegEnable(io.pc.bits, if2_fire) // This is if3_pc
   val tag = ltbAddr.getTag(pc)
   val bank = ltbAddr.getBank(pc)
   val bankIdx = ltbAddr.getBankIdx(pc)
@@ -317,26 +326,10 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   // 只要把同一个bankAligned PC的每一项传进16个ltb中即可
   val bankAlignedPC = align(pc, PredictWidth)
-  val startsAtOddBank = bankInGroup(bankAlignedPC)(0).asBool
-  val reorderMask = Mux(startsAtOddBank, Cat(inMask(PredictWidth/2-1, 0), inMask(PredictWidth-1 ,PredictWidth/2)), inMask)
-
-
-  // when(offsetIdx === baseBank){
-  //   realMask := outMask
-  // }.elsewhen(offsetIdx > baseBank) {
-  //   realMask := circularShiftRight(outMask, PredictWidth, offsetIdx - baseBank)
-  // }.otherwise {
-  //   realMask := circularShiftLeft(outMask, PredictWidth, baseBank - offsetIdx)
-  // }
-
 
   for (i <- 0 until PredictWidth) {
-    ltbs(i).io.req.pc := bankAlignedPC
-    ltbs(i).io.outMask := reorderMask(i)
-  }
-
-  for (i <- 0 until PredictWidth) {
-    ltbs(i).io.if3_fire := io.pc.valid
+    ltbs(i).io.if2_fire := io.pc.valid
+    ltbs(i).io.if3_fire := io.if3_fire
     ltbs(i).io.if4_fire := io.outFire
     ltbs(i).io.req.idx := bankIdx
     ltbs(i).io.req.tag := tag
@@ -351,10 +344,19 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.repair := i.U =/= updateBank && io.update.valid && io.update.bits.isMisPred
   }
 
-  val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
+  // if4
+  val if3_fire = io.if3_fire
+  val inMask = io.inMask // This is if4_mask
 
-  // (0 until PredictWidth).foreach(i => io.resp.exit(i) := Mux(startsAtOddBank, ltbResps(i + PredictWidth/2).exit, ltbResps(i).exit))
-  // (0 until PredictWidth).foreach(i => io.meta.specCnts(i) := Mux(startsAtOddBank, ltbResps(i + PredictWidth/2).meta, ltbResps(i).exit))
+  val startsAtOddBank = RegEnable(bankInGroup(bankAlignedPC)(0).asBool, if3_fire)
+  val reorderMask = Mux(startsAtOddBank, Cat(inMask(PredictWidth/2-1, 0), inMask(PredictWidth-1 ,PredictWidth/2)), inMask)
+
+  for (i <- 0 until PredictWidth) {
+    ltbs(i).io.req.pc := bankAlignedPC
+    ltbs(i).io.outMask := reorderMask(i)
+  }
+
+  val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
   for(i <- 0 until PredictWidth/2) {
     when(startsAtOddBank) {
@@ -381,7 +383,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   if (BPUDebug && debug) {
     // debug info
-    XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", io.pc.valid, io.flush, pc)
+    XSDebug("[IF2][req] fire=%d flush=%d fetchpc=%x\n", if2_fire, io.flush, io.pc.bits)
+    XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", if3_fire, io.flush, pc)
     XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
     XSDebug("[IF4][req] inMask=%b, reorderMask=%b\n", inMask, reorderMask)
 
@@ -391,7 +394,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     // XSDebug(false, true.B, "\n")
     for (i <- 0 until PredictWidth) {
       XSDebug(io.outFire && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
-      XSDebug(false, io.outFire, " %d:%d %d", i.U, io.resp.exit(i), io.meta.specCnts(i))
+      XSDebug(false, io.outFire, "[i:%d, e:%d, s:%d] ", i.U, io.resp.exit(i), io.meta.specCnts(i))
       XSDebug(false, io.outFire && (i.U === 7.U || i.U === 15.U), "\n")
     }
   }
