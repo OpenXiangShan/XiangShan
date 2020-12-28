@@ -127,7 +127,7 @@ class IFU extends XSModule with HasIFUConst
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
-  val if1_fire = if1_valid && (if2_allReady || if1_flush)
+  val if1_fire = if1_valid && (if2_allReady || if2_flush)
 
 
   // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -401,7 +401,7 @@ class IFU extends XSModule with HasIFUConst
   if1_npc := npcGen()
 
 
-  icache.io.req.valid := if1_valid && (if2_ready || if1_flush)
+  icache.io.req.valid := if1_valid && (if2_ready || if2_flush)
   icache.io.resp.ready := if4_ready
   icache.io.req.bits.addr := if1_npc
   icache.io.req.bits.mask := mask(if1_npc)
