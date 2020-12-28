@@ -406,6 +406,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       io.commits.info(i).ldest
     )
   }
+  if (!env.FPGAPlatform) {
+    io.commits.info.map(info => dontTouch(info.pc))
+  }
 
   io.csr.fflags := fflags
   io.csr.dirty_fs := dirty_fs
