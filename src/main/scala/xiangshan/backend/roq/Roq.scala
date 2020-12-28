@@ -227,10 +227,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // by default, let all exceptions be determined by dispatch.
     // mergeVec(instrAddrMisaligned) := dpData(instrAddrMisaligned)
     // mergeVec(instrAccessFault) := dpData(instrAccessFault)
-    // mergeVec(illegalInstr) := dpData(illegalInstr)
     // mergeVec(instrPageFault) := dpData(instrPageFault)
     val mergeVec = WireInit(dpData.exceptionVec)
     // these exceptions are determined in execution units
+    mergeVec(illegalInstr) := wbData.exceptionVec(illegalInstr)
     mergeVec(breakPoint) := wbData.exceptionVec(breakPoint)
     mergeVec(loadAddrMisaligned) := wbData.exceptionVec(loadAddrMisaligned)
     mergeVec(loadAccessFault) := wbData.exceptionVec(loadAccessFault)
