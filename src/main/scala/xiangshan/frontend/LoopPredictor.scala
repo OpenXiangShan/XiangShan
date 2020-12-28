@@ -138,13 +138,46 @@ class LTBColumn extends LTBModule {
   val if3_tag = io.req.tag
   val if3_pc = io.req.pc // only for debug
   ltb.rIdx := if3_idx
-  val if3_entry = ltb.rdata
+  val if3_entry = WireInit(ltb.rdata)
 
-
-  val if4_entry = RegEnable(if3_entry, io.if3_fire)
+  val if4_entry = Reg(new LoopEntry)
+  // val if4_entry_reg = RegEnable(if3_entry, io.if3_fire)
+  // val if4_entry = WireInit(if4_entry_reg)
   val if4_idx = RegEnable(if3_idx, io.if3_fire)
   val if4_tag = RegEnable(if3_tag, io.if3_fire)
   val if4_pc = RegEnable(if3_pc, io.if3_fire)
+
+  // val updateBypassValid = RegNext(io.update.valid)
+  // val updateBypass = RegNext(io.update.bits)
+  // val bypassTagMatch = if4_entry.tag === ltbAddr.getTag(updateBypass.pc)(tagLen - 1, 0)
+
+  // // Bypass
+  // when(updateBypassValid && !doingReset && ltbAddr.getBankIdx(updateBypass.pc) === if4_idx) {
+  //   when (!tagMatch && io.update.bits.misPred) {
+  //     // 没有判断conf是否等于0，以及age是否等于0
+  //     XSDebug("Repalce a entry\n")
+  //     wEntry.tag := updateTag
+  //     wEntry.conf := 0.U
+  //     wEntry.age := 7.U
+  //     wEntry.tripCnt := Fill(cntBits, 1.U(1.W))
+  //     wEntry.specCnt := Mux(io.update.bits.taken, 1.U, 0.U)
+  //     wEntry.nSpecCnt := Mux(io.update.bits.taken, 1.U, 0.U)
+  //     wEntry.brTag := updateBrTag
+  //     wEntry.unusable := false.B
+  //     // ltb(updateIdx) := wEntry
+  //     ltb.wen := true.B
+  //   }
+
+  //   XSDebug("if4_entry bypass\n")
+  //   when(updateBypass.taken) {
+  //     if4_entry.nSpecCnt := if4_entry.nSpecCnt + 1.U
+  //   }.otherwise {
+  //     if4_entry.conf := Mux((if4_entry_reg.nSpecCnt + 1.U) === if4_entry_reg.tripCnt, Mux(if4_entry_reg.isLearned, 7.U, if4_entry_reg.conf + 1.U), 0.U)
+  //     if4_entry.tripCnt := if4_entry.nSpecCnt + 1.U
+  //     if4_entry.specCnt := Mux(updateBypass.misPred, 0.U, if4_entry.specCnt - updateBypass.meta)
+  //     if4_entry.nSpecCnt := 0.U
+  //   }
+  // }
 
   val valid = RegInit(false.B)
   when (io.if4_fire) { valid := false.B }
@@ -225,6 +258,23 @@ class LTBColumn extends LTBModule {
     }
   }
 
+  // Bypass
+  when (ltb.swen && if3_idx === if4_idx) {
+    XSDebug("if3_entry := swEntry\n")
+    if3_entry := swEntry
+  }.elsewhen (ltb.wen && if3_idx === updateIdx) {
+    XSDebug("if3_entry := wEntry\n")
+    if3_entry := wEntry
+  }
+
+  when(io.if3_fire) {
+    if4_entry := if3_entry
+  }.elsewhen(ltb.swen) {
+    if4_entry := swEntry
+  }.elsewhen(ltb.wen && if4_idx === updateIdx) {
+    if4_entry := wEntry
+  }
+
   // Reseting
   // when (doingReset) {
   //   ltb(resetIdx) := 0.U.asTypeOf(new LoopEntry)
@@ -250,8 +300,10 @@ class LTBColumn extends LTBModule {
     XSDebug(doingReset, "Reseting...\n")
     XSDebug("if3_fire=%d if4_fire=%d valid=%d\n", io.if3_fire, io.if4_fire,valid)
     XSDebug("[req] v=%d pc=%x idx=%x tag=%x\n", valid, if3_pc, if3_idx, if3_tag)
-    XSDebug("[if4_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", 
+    XSDebug("[if4_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d\n", 
       if4_entry.tag, if4_entry.conf, if4_entry.age, if4_entry.tripCnt, if4_entry.specCnt, if4_entry.nSpecCnt)
+    XSDebug("[if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d\n", 
+      if3_entry.tag, if3_entry.conf, if3_entry.age, if3_entry.tripCnt, if3_entry.specCnt, if3_entry.nSpecCnt)
     XSDebug(false, true.B, p" brTag=${if4_entry.brTag} unusable=${if4_entry.unusable}\n")
     XSDebug("swen=%d, ltb.swIdx, io.if4_fire=%d, if4_entry.tag=%x, if4_tag=%x, io.outMask=%d\n", valid && if4_entry.tag === if4_tag || doingReset, io.if4_fire, if4_entry.tag, if4_tag, io.outMask)
     XSDebug(io.if4_fire && if4_entry.tag === if4_tag && io.outMask, "[speculative update] new specCnt=%d\n",
@@ -260,7 +312,7 @@ class LTBColumn extends LTBModule {
     XSDebug(false, true.B, p" brTag=${updateBrTag}\n")
     XSDebug("[entry ] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", entry.tag, entry.conf, entry.age, entry.tripCnt, entry.specCnt, entry.nSpecCnt)
     XSDebug(false, true.B, p" brTag=${entry.brTag} unusable=${entry.unusable}\n")
-    XSDebug("[wEntry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d", wEntry.tag, wEntry.conf, wEntry.age, wEntry.tripCnt, wEntry.specCnt, wEntry.nSpecCnt)
+    XSDebug("[wEntry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d, wen=%d", wEntry.tag, wEntry.conf, wEntry.age, wEntry.tripCnt, wEntry.specCnt, wEntry.nSpecCnt, ltb.wen)
     XSDebug(false, true.B, p" brTag=${wEntry.brTag} unusable=${wEntry.unusable}\n")
     XSDebug(io.update.valid && io.update.bits.misPred || io.repair, "MisPred or repairing, all of the nSpecCnts copy their values into the specCnts\n")
   }
