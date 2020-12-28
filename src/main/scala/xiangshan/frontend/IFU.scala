@@ -200,9 +200,11 @@ class IFU extends XSModule with HasIFUConst
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
-  when (hasPrevHalfInstrReq && !if3_prevHalfFlush) {
+  when (if3_prevHalfFlush) {
+    if3_prevHalfInstr.valid := false.B
+  }.elsewhen (hasPrevHalfInstrReq) {
     if3_prevHalfInstr.valid := true.B
-  }.elsewhen (if3_prevHalfConsumed || if3_prevHalfFlush) {
+  }.elsewhen (if3_prevHalfConsumed) {
     if3_prevHalfInstr.valid := false.B
   }
   when (hasPrevHalfInstrReq) {
@@ -311,9 +313,11 @@ class IFU extends XSModule with HasIFUConst
   val if4_prevHalfFlush = if4_flush
 
   val if4_takenPrevHalf = WireInit(if4_prevHalfInstrMet && if4_prevHalfInstr.bits.taken)
-  when (if3_prevHalfConsumed) {
+  when (if4_prevHalfFlush) {
+    if4_prevHalfInstr.valid := false.B
+  }.elsewhen (if3_prevHalfConsumed) {
     if4_prevHalfInstr.valid := if3_prevHalfInstr.valid
-  }.elsewhen (if4_prevHalfConsumed || if4_prevHalfFlush) {
+  }.elsewhen (if4_prevHalfConsumed) {
     if4_prevHalfInstr.valid := false.B
   }
 
