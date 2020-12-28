@@ -314,17 +314,16 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val deqWritebackData = writebackData.io.rdata(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
-  val deqPtrWritebacked = writebacked(deqPtr.value) && valid(deqPtr.value)
   val deqExceptionVec = mergeExceptionVec(deqDispatchData, deqWritebackData)
   // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
   // However, we cannot determine whether a load/store instruction is MMIO.
   // Thus, we don't allow load/store instructions to trigger an interrupt.
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && valid(deqPtr.value) && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
-  val exceptionEnable = deqPtrWritebacked && Cat(deqExceptionVec).orR()
-  val isFlushPipe = deqPtrWritebacked && deqWritebackData.flushPipe
+  val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
+  val exceptionEnable = writebacked(deqPtr.value) && Cat(deqExceptionVec).orR()
+  val isFlushPipe = writebacked(deqPtr.value) && deqWritebackData.flushPipe
   io.redirectOut := DontCare
-  io.redirectOut.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)
+  io.redirectOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
   io.redirectOut.bits.level := Mux(isFlushPipe, RedirectLevel.flushAll, RedirectLevel.exception)
   io.redirectOut.bits.interrupt := intrEnable
   io.redirectOut.bits.target := Mux(isFlushPipe, deqDispatchData.pc + 4.U, io.csr.trapTarget)
@@ -368,7 +367,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
-    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else false.B
+    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else intrEnable
     io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i)
     io.commits.info(i)  := dispatchData.io.rdata(i)
 
