@@ -36,7 +36,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val tailPtr = RegInit(VecInit((0 until enqnum).map(_.U.asTypeOf(new CircularQueuePtr(size)))))
   val tailPtrMask = UIntToMask(tailPtr(0).value, size)
   // valid entries counter
-  val validCounter = RegInit(0.U(log2Ceil(size).W))
+  val validCounter = RegInit(0.U(log2Ceil(size + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val isTrueEmpty = ~Cat((0 until size).map(i => stateEntries(i) === s_valid)).orR

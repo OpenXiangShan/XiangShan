@@ -367,12 +367,12 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     }
 #ifdef VM_SAVABLE
     static int snapshot_count = 0;
-    if (args.enable_snapshot && trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 6000 * SNAPSHOT_INTERVAL) {
+    if (args.enable_snapshot && trapCode != STATE_GOODTRAP && t - lasttime_snapshot > 1000 * SNAPSHOT_INTERVAL) {
       // save snapshot every 60s
       time_t now = time(NULL);
       snapshot_save(snapshot_filename(now));
       lasttime_snapshot = t;
-      // dump snapshot to file every 10 minutes
+      // dump one snapshot to file every 60 snapshots
       snapshot_count++;
       if (snapshot_count == 60) {
         snapshot_slot[0].save();
@@ -422,6 +422,7 @@ inline char* Emulator::waveform_filename(time_t t) {
   static char buf[1024];
   char *p = timestamp_filename(t, buf);
   strcpy(p, ".vcd");
+  printf("dump wave to %s...\n", buf);
   return buf;
 }
 

@@ -194,7 +194,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val deqPtrVec = Wire(Vec(CommitWidth, new RoqPtr))
 
   val walkPtrVec = Reg(Vec(CommitWidth, new RoqPtr))
-  val validCounter = RegInit(0.U(log2Ceil(RoqSize).W))
+  val validCounter = RegInit(0.U(log2Ceil(RoqSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtrVec = VecInit((0 until RenameWidth).map(i => enqPtr + PopCount(io.enq.needAlloc.take(i))))
@@ -227,10 +227,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     // by default, let all exceptions be determined by dispatch.
     // mergeVec(instrAddrMisaligned) := dpData(instrAddrMisaligned)
     // mergeVec(instrAccessFault) := dpData(instrAccessFault)
-    // mergeVec(illegalInstr) := dpData(illegalInstr)
     // mergeVec(instrPageFault) := dpData(instrPageFault)
     val mergeVec = WireInit(dpData.exceptionVec)
     // these exceptions are determined in execution units
+    mergeVec(illegalInstr) := wbData.exceptionVec(illegalInstr)
     mergeVec(breakPoint) := wbData.exceptionVec(breakPoint)
     mergeVec(loadAddrMisaligned) := wbData.exceptionVec(loadAddrMisaligned)
     mergeVec(loadAccessFault) := wbData.exceptionVec(loadAccessFault)
@@ -258,7 +258,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
   when (isEmpty) { hasBlockBackward:= false.B }
   // When any instruction commits, hasNoSpecExec should be set to false.B
-  when (io.commits.valid.asUInt.orR) { hasNoSpecExec:= false.B }
+  when (io.commits.valid.asUInt.orR  && state =/= s_extrawalk) { hasNoSpecExec:= false.B }
 
   io.enq.canAccept := allowEnqueue && !hasBlockBackward
   io.enq.isEmpty   := isEmpty
@@ -314,17 +314,16 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val deqWritebackData = writebackData.io.rdata(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
-  val deqPtrWritebacked = writebacked(deqPtr.value) && valid(deqPtr.value)
   val deqExceptionVec = mergeExceptionVec(deqDispatchData, deqWritebackData)
   // For MMIO instructions, they should not trigger interrupts since they may be sent to lower level before it writes back.
   // However, we cannot determine whether a load/store instruction is MMIO.
   // Thus, we don't allow load/store instructions to trigger an interrupt.
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && valid(deqPtr.value) && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
-  val exceptionEnable = deqPtrWritebacked && Cat(deqExceptionVec).orR()
-  val isFlushPipe = deqPtrWritebacked && deqWritebackData.flushPipe
+  val intrEnable = intrBitSetReg && !hasNoSpecExec && !CommitType.isLoadStore(deqDispatchData.commitType)
+  val exceptionEnable = writebacked(deqPtr.value) && Cat(deqExceptionVec).orR()
+  val isFlushPipe = writebacked(deqPtr.value) && deqWritebackData.flushPipe
   io.redirectOut := DontCare
-  io.redirectOut.valid := (state === s_idle) && (intrEnable || exceptionEnable || isFlushPipe)
+  io.redirectOut.valid := (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable || isFlushPipe)
   io.redirectOut.bits.level := Mux(isFlushPipe, RedirectLevel.flushAll, RedirectLevel.exception)
   io.redirectOut.bits.interrupt := intrEnable
   io.redirectOut.bits.target := Mux(isFlushPipe, deqDispatchData.pc + 4.U, io.csr.trapTarget)
@@ -367,7 +366,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i) || commit_exception(i) || writebackData.io.rdata(i).flushPipe))
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
-    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrEnable else false.B
+    // when intrBitSetReg, allow only one instruction to commit at each clock cycle
+    val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else intrEnable
     io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i)
     io.commits.info(i)  := dispatchData.io.rdata(i)
 
