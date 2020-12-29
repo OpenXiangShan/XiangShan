@@ -58,7 +58,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   val tail_ptr = tail_vec(0)
 
   // val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
-  val validEntries = RegInit(0.U((log2Up(IBufSize)+1).W))// valid entries
+  val validEntries = RegInit(0.U(log2Up(IBufSize + 1).W))// valid entries
   val allowEnq = RegInit(true.B)
 
   // val enqValid = (IBufSize.U - PredictWidth.U) >= validEntries
