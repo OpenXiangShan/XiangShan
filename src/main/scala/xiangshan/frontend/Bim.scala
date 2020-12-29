@@ -108,9 +108,9 @@ class BIM extends BasePredictor with BimParams {
   when (needToUpdate) {
     when (wrbypass_hit) {
       wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
-      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
+      wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank) := true.B
     } .otherwise {
-      wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := newCtr
+      wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := newCtr
       (0 until BimBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
       wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
       wrbypass_rows(wrbypass_enq_idx) := updateRow

@@ -267,8 +267,8 @@ class BPUStage3 extends BPUStage {
   val pdLastHalf = s3IO.predecode.lastHalf
   val pds        = s3IO.predecode.pd
 
-  val btbResp   = inLatch.resp.btb
-  val btbHits   = btbResp.hits.asUInt
+  val btbResp   = WireInit(inLatch.resp.btb)
+  val btbHits   = WireInit(btbResp.hits.asUInt)
   val bimTakens = VecInit(inLatch.resp.bim.ctrs.map(_(1)))
 
   val brs   = pdMask & Reverse(Cat(pds.map(_.isBr)))
@@ -287,6 +287,8 @@ class BPUStage3 extends BPUStage {
   val prevHalfTakenMask = prevHalfTaken.asUInt
   val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
   // VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
+  // we should provide btb resp as well
+  btbHits := btbResp.hits.asUInt | prevHalfTakenMask
 
   // predict taken only if btb has a target, jal targets will be provided by IFU
   takens := VecInit((0 until PredictWidth).map(i => (brTakens(i) || jalrs(i)) && btbHits(i) || jals(i)))

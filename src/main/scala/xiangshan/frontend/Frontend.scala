@@ -21,35 +21,29 @@ class Frontend extends XSModule {
 
   val ifu = Module(new IFU)
   val ibuffer =  Module(new Ibuffer)
-  val icache = Module(new ICache)
+  
 
   val needFlush = io.backend.redirect.valid
 
-  //backend
+  // from backend
   ifu.io.redirect <> io.backend.redirect
   ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
-  // ifu.io.cfiUpdateInfo <> io.backend.cfiUpdateInfo
-  //icache
-  ifu.io.icacheResp <> icache.io.resp
-  icache.io.req <> ifu.io.icacheReq
-  icache.io.flush <> ifu.io.icacheFlush
-  icache.io.fencei := io.fencei
-  io.l1plusFlush := icache.io.l1plusflush
-  io.icacheMemAcq <> icache.io.mem_acquire
-  icache.io.mem_grant <> io.icacheMemGrant
-  //itlb to ptw
-  io.ptw <> TLB(
-    in = Seq(icache.io.tlb),
-    sfence = io.sfence,
-    csr = io.tlbCsr,
-    width = 1,
-    isDtlb = false,
-    shouldBlock = true
-  )
-  //ibuffer
+  // to icache
+  ifu.io.icacheMemGrant <> io.icacheMemGrant
+  ifu.io.fencei := io.fencei
+  // to tlb
+  ifu.io.sfence := io.sfence
+  ifu.io.tlbCsr := io.tlbCsr
+  // from icache
+  io.l1plusFlush := ifu.io.l1plusFlush
+  io.icacheMemAcq <> ifu.io.icacheMemAcq
+  // itlb to ptw
+  io.ptw <> ifu.io.ptw
+  // ifu to ibuffer
   ibuffer.io.in <> ifu.io.fetchPacket
+  // backend to ibuffer
   ibuffer.io.flush := needFlush
-
+  // ibuffer to backend
   io.backend.cfVec <> ibuffer.io.out
 
   // for(out <- ibuffer.io.out){

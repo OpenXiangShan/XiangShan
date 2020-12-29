@@ -28,13 +28,9 @@ trait HasIFUConst extends HasXSParameter {
   // each 1 bit in mask stands for 2 Bytes
   // 8 bits, in which only the first 7 bits could be 0
   def maskFirstHalf(pc: UInt): UInt = ((~(0.U(bankWidth.W))) >> offsetInBank(pc))(bankWidth-1,0)
-  // when in loop(buffer), we need to make use of the full packet
-  // and get the real mask in iCacheResp from loop buffer
-  // we may make predictions on more instructions than we could get from loop buffer
-  // and this will be handled in if4
-  def maskLastHalf(pc: UInt, inLoop: Bool = false.B): UInt = Mux(isInLastBank(pc) && !inLoop, 0.U(bankWidth.W), ~0.U(bankWidth.W))
-  def mask(pc: UInt, inLoop: Bool = false.B): UInt = Reverse(Cat(maskFirstHalf(pc), maskLastHalf(pc, inLoop)))
-  def snpc(pc: UInt, inLoop: Bool = false.B): UInt = pc + (PopCount(mask(pc, inLoop)) << 1)
+  def maskLastHalf(pc: UInt): UInt = Mux(isInLastBank(pc), 0.U(bankWidth.W), ~0.U(bankWidth.W))
+  def mask(pc: UInt): UInt = Reverse(Cat(maskFirstHalf(pc), maskLastHalf(pc)))
+  def snpc(pc: UInt): UInt = bankAligned(pc) + Mux(isInLastBank(pc), bankBytes.U, (bankBytes*2).U)
 
   val enableGhistRepair = true
   val IFUDebug = true
@@ -68,14 +64,22 @@ class GlobalHistory extends XSBundle {
 
 class IFUIO extends XSBundle
 {
+  // to ibuffer
   val fetchPacket = DecoupledIO(new FetchPacket)
+  // from backend
   val redirect = Flipped(ValidIO(UInt(VAddrBits.W)))
-  // val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
   val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfo))
-  val icacheReq = DecoupledIO(new ICacheReq)
-  val icacheResp = Flipped(DecoupledIO(new ICacheResp))
-  val icacheFlush = Output(UInt(2.W))
-  // val loopBufPar = Flipped(new LoopBufferParameters)
+  // to icache
+  val icacheMemGrant = Flipped(DecoupledIO(new L1plusCacheResp))
+  val fencei = Input(Bool())
+  // from icache
+  val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
+  val l1plusFlush = Output(Bool())
+  // to tlb
+  val sfence = Input(new SfenceBundle)
+  val tlbCsr = Input(new TlbCsrBundle)
+  // from tlb
+  val ptw = new TlbPtwIO
 }
 
 class PrevHalfInstr extends XSBundle {
@@ -88,7 +92,8 @@ class PrevHalfInstr extends XSBundle {
   val target = UInt(VAddrBits.W)
   val instr = UInt(16.W)
   val ipf = Bool()
-  val newPtr = UInt(log2Up(ExtHistoryLength).W)
+  val meta = new BpuMeta
+  // val newPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
 @chiselName
@@ -96,29 +101,34 @@ class IFU extends XSModule with HasIFUConst
 {
   val io = IO(new IFUIO)
   val bpu = BPU(EnableBPU)
+  val icache = Module(new ICache)
+
   val pd = Module(new PreDecode)
-  val loopBuffer = if(EnableLB) { Module(new LoopBuffer) } else { Module(new FakeLoopBuffer) }
+  io.ptw <> TLB(
+    in = Seq(icache.io.tlb),
+    sfence = io.sfence,
+    csr = io.tlbCsr,
+    width = 1,
+    isDtlb = false,
+    shouldBlock = true
+  )
 
   val if2_redirect, if3_redirect, if4_redirect = WireInit(false.B)
   val if1_flush, if2_flush, if3_flush, if4_flush = WireInit(false.B)
 
-  val loopBufPar = loopBuffer.io.loopBufPar
-  val inLoop = WireInit(loopBuffer.io.out.valid)
-  val icacheResp = WireInit(Mux(inLoop, loopBuffer.io.out.bits, io.icacheResp.bits))
+  val icacheResp = icache.io.resp.bits
 
-  if4_flush := io.redirect.valid || loopBufPar.LBredirect.valid
+  if4_flush := io.redirect.valid
   if3_flush := if4_flush || if4_redirect
   if2_flush := if3_flush || if3_redirect
   if1_flush := if2_flush || if2_redirect
-
-  loopBuffer.io.flush := io.redirect.valid
 
   //********************** IF1 ****************************//
   val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
-  val if2_allReady = WireInit(if2_ready && (inLoop || io.icacheReq.ready))
-  val if1_fire = if1_valid && (if2_allReady || if1_flush)
+  val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
+  val if1_fire = if1_valid && (if2_allReady || if2_flush)
 
 
   // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
@@ -131,12 +141,13 @@ class IFU extends XSModule with HasIFUConst
 
   //********************** IF2 ****************************//
   val if2_valid = RegInit(init = false.B)
+  val if2_allValid = if2_valid && icache.io.tlb.resp.valid
   val if3_ready = WireInit(false.B)
-  val if2_fire = if2_valid && if3_ready
+  val if2_fire = if2_allValid && if3_ready
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
-  val if2_snpc = snpc(if2_pc, inLoop)
+  val if2_snpc = snpc(if2_pc)
   val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_fire)
-  if2_ready := if3_ready || !if2_valid
+  if2_ready := if3_ready && icache.io.tlb.resp.valid || !if2_valid
   when (if1_fire)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
   .elsewhen (if2_fire)  { if2_valid := false.B }
@@ -157,11 +168,11 @@ class IFU extends XSModule with HasIFUConst
   // if3 should wait for instructions resp to arrive
   val if3_valid = RegInit(init = false.B)
   val if4_ready = WireInit(false.B)
-  val if3_allValid = if3_valid && (inLoop || io.icacheResp.valid)
+  val if3_allValid = if3_valid && icache.io.resp.valid
   val if3_fire = if3_allValid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
-  if3_ready := if4_ready && (inLoop || io.icacheResp.valid) || !if3_valid
+  if3_ready := if4_ready && icache.io.resp.valid || !if3_valid
   when (if3_flush) {
     if3_valid := false.B
   }.elsewhen (if2_fire && !if2_flush) {
@@ -190,9 +201,11 @@ class IFU extends XSModule with HasIFUConst
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
-  when (hasPrevHalfInstrReq && !if3_prevHalfFlush) {
+  when (if3_prevHalfFlush) {
+    if3_prevHalfInstr.valid := false.B
+  }.elsewhen (hasPrevHalfInstrReq) {
     if3_prevHalfInstr.valid := true.B
-  }.elsewhen (if3_prevHalfConsumed || if3_prevHalfFlush) {
+  }.elsewhen (if3_prevHalfConsumed) {
     if3_prevHalfInstr.valid := false.B
   }
   when (hasPrevHalfInstrReq) {
@@ -205,7 +218,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.bits.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.target)
   val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
   val if3_predTakenRedirect    = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
-  val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(snpc(if3_pc, inLoop))
+  val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(snpc(if3_pc))
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
   // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
 
@@ -252,9 +265,9 @@ class IFU extends XSModule with HasIFUConst
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
-  // This is the real mask given from icache or loop buffer
+  // This is the real mask given from icache
   val if4_mask = RegEnable(icacheResp.mask, if3_fire)
-  val if4_snpc = Mux(inLoop, if4_pc + (PopCount(if4_mask) << 1), snpc(if4_pc))
+  val if4_snpc = snpc(if4_pc)
 
 
   val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
@@ -270,9 +283,9 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
-  if4_bp.takens  := bpu.io.out(2).takens & if4_mask
-  if4_bp.brMask  := bpu.io.out(2).brMask & if4_mask
-  if4_bp.jalMask := bpu.io.out(2).jalMask & if4_mask
+  // if4_bp.takens  := bpu.io.out(2).takens & if4_mask
+  // if4_bp.brMask  := bpu.io.out(2).brMask & if4_mask
+  // if4_bp.jalMask := bpu.io.out(2).jalMask & if4_mask
 
   if4_predicted_gh := if4_gh.update(if4_bp.hasNotTakenBrs, if4_bp.takenOnBr)
 
@@ -301,9 +314,11 @@ class IFU extends XSModule with HasIFUConst
   val if4_prevHalfFlush = if4_flush
 
   val if4_takenPrevHalf = WireInit(if4_prevHalfInstrMet && if4_prevHalfInstr.bits.taken)
-  when (if3_prevHalfConsumed) {
+  when (if4_prevHalfFlush) {
+    if4_prevHalfInstr.valid := false.B
+  }.elsewhen (if3_prevHalfConsumed) {
     if4_prevHalfInstr.valid := if3_prevHalfInstr.valid
-  }.elsewhen (if4_prevHalfConsumed || if4_prevHalfFlush) {
+  }.elsewhen (if4_prevHalfConsumed) {
     if4_prevHalfInstr.valid := false.B
   }
 
@@ -317,7 +332,6 @@ class IFU extends XSModule with HasIFUConst
   // this is result of the last half RVI
   prevHalfInstrReq.bits.taken := if4_bp.lastHalfRVITaken
   prevHalfInstrReq.bits.ghInfo := if4_gh
-  prevHalfInstrReq.bits.newPtr := DontCare
   prevHalfInstrReq.bits.fetchpc := if4_pc
   prevHalfInstrReq.bits.idx := idx
   prevHalfInstrReq.bits.pc := if4_pd.pc(idx)
@@ -325,6 +339,7 @@ class IFU extends XSModule with HasIFUConst
   prevHalfInstrReq.bits.target := if4_bp.lastHalfRVITarget
   prevHalfInstrReq.bits.instr := if4_pd.instrs(idx)(15, 0)
   prevHalfInstrReq.bits.ipf := if4_ipf
+  prevHalfInstrReq.bits.meta := bpu.io.bpuMeta(idx)
 
   def if4_nextValidPCNotEquals(pc: UInt) = if3_valid  && if3_pc =/= pc ||
                                            !if3_valid && (if2_valid && if2_pc =/= pc) ||
@@ -385,35 +400,21 @@ class IFU extends XSModule with HasIFUConst
     flush_final_gh := true.B
   }
 
-  npcGen.register(loopBufPar.LBredirect.valid, loopBufPar.LBredirect.bits)
   npcGen.register(io.redirect.valid, io.redirect.bits)
   npcGen.register(RegNext(reset.asBool) && !reset.asBool, resetVector.U(VAddrBits.W))
 
   if1_npc := npcGen()
 
-  when(inLoop) {
-    io.icacheReq.valid := if4_flush
-  }.otherwise {
-    io.icacheReq.valid := if1_valid && (if2_ready || if1_flush)
-  }
-  io.icacheResp.ready := if4_ready
-  io.icacheReq.bits.addr := if1_npc
 
-  // when(if4_bp.taken) {
-  //   when(if4_bp.saveHalfRVI) {
-  //     io.loopBufPar.LBReq := snpc(if4_pc)
-  //   }.otherwise {
-  //     io.loopBufPar.LBReq := if4_bp.target
-  //   }
-  // }.otherwise {
-  //   io.loopBufPar.LBReq := snpc(if4_pc)
-  //   XSDebug(p"snpc(if4_pc)=${Hexadecimal(snpc(if4_pc))}\n")
-  // }
-  loopBufPar.fetchReq := if3_pc
-
-  io.icacheReq.bits.mask := mask(if1_npc)
-
-  io.icacheFlush := Cat(if3_flush, if2_flush)
+  icache.io.req.valid := if1_valid && (if2_ready || if2_flush)
+  icache.io.resp.ready := if4_ready
+  icache.io.req.bits.addr := if1_npc
+  icache.io.req.bits.mask := mask(if1_npc)
+  icache.io.flush := Cat(if3_flush, if2_flush)
+  icache.io.mem_grant <> io.icacheMemGrant
+  icache.io.fencei := io.fencei
+  io.icacheMemAcq <> icache.io.mem_acquire
+  io.l1plusFlush := icache.io.l1plusflush
 
   bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
@@ -435,13 +436,6 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.prevHalf := if4_prevHalfInstr
 
   pd.io.in := icacheResp
-  when(inLoop) {
-    pd.io.in.mask := loopBuffer.io.out.bits.mask // TODO: Maybe this is unnecessary
-    // XSDebug("Fetch from LB\n")
-    // XSDebug(p"pc=${Hexadecimal(io.loopBufPar.LBResp.pc)}\n")
-    // XSDebug(p"data=${Hexadecimal(io.loopBufPar.LBResp.data)}\n")
-    // XSDebug(p"mask=${Hexadecimal(io.loopBufPar.LBResp.mask)}\n")
-  }
 
   pd.io.prev.valid := if3_prevHalfInstrMet
   pd.io.prev.bits := if3_prevHalfInstr.bits.instr
@@ -459,12 +453,6 @@ class IFU extends XSModule with HasIFUConst
     when (icacheResp.ipf && !if3_prevHalfInstr.bits.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
   }
 
-  //Performance Counter
-  // if (!env.FPGAPlatform ) {
-  //   ExcitingUtils.addSource(io.fetchPacket.fire && !inLoop, "CntFetchFromICache", Perf)
-  //   ExcitingUtils.addSource(io.fetchPacket.fire && inLoop, "CntFetchFromLoopBuffer", Perf)
-  // }
-
   val fetchPacketValid = if4_valid && !io.redirect.valid
   val fetchPacketWire = Wire(new FetchPacket)
 
@@ -473,13 +461,16 @@ class IFU extends XSModule with HasIFUConst
   fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
   fetchPacketWire.pdmask := if4_pd.mask
 
-  loopBufPar.noTakenMask := if4_pd.mask
   fetchPacketWire.pc := if4_pd.pc
   (0 until PredictWidth).foreach(i => fetchPacketWire.pnpc(i) := if4_pd.pc(i) + Mux(if4_pd.pd(i).isRVC, 2.U, 4.U))
   when (if4_bp.taken) {
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
   fetchPacketWire.bpuMeta := bpu.io.bpuMeta
+  // save it for update
+  when (if4_pendingPrevHalfInstr) {
+    fetchPacketWire.bpuMeta(0) := if4_prevHalfInstr.bits.meta
+  }
   (0 until PredictWidth).foreach(i => {
     val meta = fetchPacketWire.bpuMeta(i)
     meta.hist := final_gh
@@ -494,30 +485,28 @@ class IFU extends XSModule with HasIFUConst
   // predTaken Vec
   fetchPacketWire.predTaken := if4_bp.taken
 
-  loopBuffer.io.in.bits := fetchPacketWire
   io.fetchPacket.bits := fetchPacketWire
   io.fetchPacket.valid := fetchPacketValid
-  loopBuffer.io.in.valid := io.fetchPacket.fire
 
   // debug info
   if (IFUDebug) {
     XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")
-    XSDebug(io.icacheFlush(0).asBool, "Flush icache stage2...\n")
-    XSDebug(io.icacheFlush(1).asBool, "Flush icache stage3...\n")
+    XSDebug(icache.io.flush(0).asBool, "Flush icache stage2...\n")
+    XSDebug(icache.io.flush(1).asBool, "Flush icache stage3...\n")
     XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits)}\n")
 
     XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, mask(if1_npc))
     XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_snpc)
     XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
     XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_crossPageIPF, if4_bp.hasNotTakenBrs)
-    XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", io.icacheReq.valid, io.icacheReq.ready, io.icacheReq.bits.addr)
+    XSDebug("[IF1][icacheReq] v=%d r=%d addr=%x\n", icache.io.req.valid, icache.io.req.ready, icache.io.req.bits.addr)
     XSDebug("[IF1][ghr] hist=%b\n", if1_gh.asUInt)
     XSDebug("[IF1][ghr] extHist=%b\n\n", if1_gh.asUInt)
 
     XSDebug("[IF2][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n\n", if2_bp.taken, if2_bp.jmpIdx, if2_bp.hasNotTakenBrs, if2_bp.target, if2_bp.saveHalfRVI)
     if2_gh.debug("if2")
 
-    XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", io.icacheResp.valid, io.icacheResp.ready, io.icacheResp.bits.pc, io.icacheResp.bits.mask)
+    XSDebug("[IF3][icacheResp] v=%d r=%d pc=%x mask=%b\n", icache.io.resp.valid, icache.io.resp.ready, icache.io.resp.bits.pc, icache.io.resp.bits.mask)
     XSDebug("[IF3][bp] taken=%d jmpIdx=%d hasNTBrs=%d target=%x saveHalfRVI=%d\n", if3_bp.taken, if3_bp.jmpIdx, if3_bp.hasNotTakenBrs, if3_bp.target, if3_bp.saveHalfRVI)
     XSDebug("[IF3][redirect]: v=%d, prevMet=%d, prevNMet=%d, predT=%d, predNT=%d\n", if3_redirect, if3_prevHalfMetRedirect, if3_prevHalfNotMetRedirect, if3_predTakenRedirect, if3_predNotTakenRedirect)
     // XSDebug("[IF3][prevHalfInstr] v=%d redirect=%d fetchpc=%x idx=%d tgt=%x taken=%d instr=%x\n\n",

@@ -62,7 +62,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
-  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize).W))
+  val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
   val allowEnqueue = RegInit(true.B)
 
   val enqPtr = enqPtrExt(0).value

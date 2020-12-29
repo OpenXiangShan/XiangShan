@@ -140,6 +140,7 @@ class DivSqrt extends FPUSubModule {
 
   // 53 + 2 + 2 = 57 bits are needed, but 57 % log2(4) != 0, use 58 bits instead
   val mantDivSqrt = Module(new MantDivSqrt(D_MANT_WIDTH+2+2+1))
+  mantDivSqrt.io.kill := kill
   mantDivSqrt.io.out.ready := true.B
   mantDivSqrt.io.in.valid := state === s_start
   mantDivSqrt.io.in.bits.a := Mux(isDivReg || aIsOddExp, Cat(aMantReg, 0.U(5.W)), Cat(0.U(1.W), aMantReg, 0.U(4.W)))
