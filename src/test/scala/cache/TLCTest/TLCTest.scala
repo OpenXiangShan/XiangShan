@@ -3,7 +3,9 @@ package cache.TLCTest
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chiseltest.experimental.TestOptionBuilder._
-import chiseltest.internal.{LineCoverageAnnotation, VerilatorBackendAnnotation}
+import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
+import chiseltest.legacy.backends.verilator.VerilatorFlags
+
 import chiseltest._
 import chiseltest.ChiselScalatestTester
 import firrtl.stage.RunFirrtlTransformAnnotation
@@ -151,7 +153,11 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     }
 
     test(LazyModule(new TLCCacheTestTopWrapper()).module)
-      .withAnnotations(Seq(VerilatorBackendAnnotation, LineCoverageAnnotation, RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
+      .withAnnotations(Seq(VerilatorBackendAnnotation,
+        LineCoverageAnnotation,
+        ToggleCoverageAnnotation,
+        VerilatorFlags(Seq("--output-split 5000", "--output-split-cfuncs 5000")),
+        RunFirrtlTransformAnnotation(new PrintModuleName))) { c =>
         c.io.mastersIO.foreach { mio =>
           mio.AChannel.initSource().setSourceClock(c.clock)
           mio.CChannel.initSource().setSourceClock(c.clock)
