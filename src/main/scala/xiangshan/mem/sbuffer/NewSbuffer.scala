@@ -292,7 +292,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val do_eviction = Wire(Bool())
   val empty = Cat(stateVec.map(s => s===s_invalid)).andR() && !Cat(io.in.map(_.valid)).orR()
   val replaceIdx = lru.way(stateVec.map(s => s===s_valid))
-  val firstValidEntry = PriorityEncoder(stateVec.map(s => s===s_valid))
+  //val firstValidEntry = PriorityEncoder(stateVec.map(s => s===s_valid))
 
   //val evictor = Module(new NaiveEvictor(StoreBufferSize-4))
   //evictor.io.states := stateVec
@@ -325,7 +325,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   //XSDebug(p"replaceIdx:${replaceIdx}\n")
   //val evictionIdxWire = replaceIdx
-  val evictionIdxWire = Mux(stateVec(replaceIdx)===s_valid, replaceIdx, firstValidEntry)
+  val evictionIdxWire = replaceIdx
   val evictionIdxEnqReq = Wire(DecoupledIO(UInt(SbufferIndexWidth.W)))
   val evictionIdxQueue = Module(new Queue(UInt(SbufferIndexWidth.W), StoreBufferSize, pipe = false, flow = false))
 
