@@ -6,6 +6,45 @@ import chipsalliance.rocketchip.config.Parameters
 import scala.util.Random
 import chisel3.util._
 
+class ScoreboardData extends BigIntExtract {
+  var mainData: BigInt = 0
+  var mainVersion: BigInt = 0
+  val dataMap: mutable.Map[BigInt, BigInt] = mutable.Map[BigInt, BigInt]()
+  val refCntMap: mutable.Map[BigInt, Int] = mutable.Map[BigInt, Int]()
+
+  def writeNewData(in: BigInt): Unit = {
+    mainData = in
+    mainVersion = 0
+  }
+
+  def getReadDataVersion(): BigInt = {
+    if (!refCntMap.contains(mainVersion)) {
+      val freeSlot = (1 to 7).map(BigInt(_)).find(!refCntMap.contains(_))
+      mainVersion = freeSlot.get
+      refCntMap(mainVersion) = 1
+      dataMap(mainVersion) = mainData
+    }
+    else {
+      refCntMap(mainVersion) = refCntMap(mainVersion) + 1
+    }
+    mainVersion
+  }
+
+  def peekMatchVersion(ver: BigInt): BigInt = {
+    val cnt = refCntMap(ver)
+    assert(cnt >= 1, "SB has more consumer than reference")
+    val data = dataMap(ver)
+    if (cnt == 1) {
+      refCntMap.remove(ver)
+      dataMap.remove(ver)
+    }
+    else {
+      refCntMap(ver) = cnt - 1
+    }
+    data
+  }
+}
+
 class AddrState extends TLCOp {
   val callerTrans: ListBuffer[TLCCallerTrans] = ListBuffer()
   val calleeTrans: ListBuffer[TLCCalleeTrans] = ListBuffer()
@@ -103,7 +142,7 @@ class FireQueue[T <: TLCScalaMessage]() {
 }
 
 class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)],
-               scoreboard: mutable.Map[BigInt, BigInt])
+               scoreboard: mutable.Map[BigInt, ScoreboardData])
               (implicit p: Parameters)
   extends TLCOp with BigIntExtract with PermissionTransition {
   val l2params = p(TLCCacheTestKey)
@@ -180,8 +219,8 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     }
   }
 
-  //for Get
-  def insertMaskedRead(addr: BigInt, readData: BigInt, byteMask: BigInt): Unit = {
+  //only for master Get
+  def insertMaskedRead(addr: BigInt, readData: BigInt, byteMask: BigInt, ver: BigInt): Unit = {
     //addr and mask must be aligned to block
     val alignAddr = addrAlignBlock(addr)
     val start_beat = beatInBlock(addr)
@@ -189,9 +228,12 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     val alignMask = maskConcatBeat(0, byteMask, start_beat)
     val addrState = getState(alignAddr)
     addrState.data = writeMaskedData(addrState.data, alignData, alignMask)
-    val sbData = scoreboardRead(alignAddr)
+    val sbData = if (ver == 0) //from l2, just read scoreboard
+      scoreboardRead(alignAddr)
+    else //from l3, need match version
+      scoreboardPeekMatchData(alignAddr, ver)
     val checkWriteData = writeMaskedData(sbData, alignData, alignMask)
-    debugPrintln(f"MaskedRead, Addr: $alignAddr%x , own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
+    debugPrintln(f"MaskedRead, Addr: $alignAddr%x , own data: $alignData%x , sbData:$sbData%x , mask:$alignMask%x")
     assert(sbData == checkWriteData, f"agent $ID data has been changed, Addr: $alignAddr%x, " +
       f"own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
   }
@@ -232,7 +274,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     addrState.dirty = true
     addrState.data = newData
     scoreboardWrite(addr, newData)
-    debugPrintln(f"insertFullBlockWrite, Addr: $addr%x ,new data: $newData%x")
+    debugPrintln(f"insertFullBlockWrite, Addr: $addr%x ,new sbData: $newData%x")
   }
 
   //full block read & write, check old data before write new data
@@ -246,21 +288,34 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   def scoreboardRead(addr: BigInt): BigInt = {
     scoreboard.synchronized {
       if (!scoreboard.contains(addr))
-        scoreboard(addr) = 0
-      scoreboard(addr)
+        scoreboard(addr) = new ScoreboardData()
+      scoreboard(addr).mainData
+    }
+  }
+
+  //for master checking read data with version
+  def scoreboardPeekMatchData(addr: BigInt, ver: BigInt): BigInt = {
+    scoreboard.synchronized {
+      scoreboard(addr).peekMatchVersion(ver)
+    }
+  }
+
+  def scoreboardGetVer(addr: BigInt): BigInt = {
+    scoreboard.synchronized {
+      scoreboard(addr).getReadDataVersion()
     }
   }
 
   def scoreboardWrite(addr: BigInt, data: BigInt): Unit = {
     scoreboard.synchronized {
-      scoreboard(addr) = data
+      scoreboard(addr).writeNewData(data)
     }
   }
 
 }
 
 class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
-                    , scoreboard: mutable.Map[BigInt, BigInt])
+                    , scoreboard: mutable.Map[BigInt, ScoreboardData])
                    (implicit p: Parameters)
   extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
   val innerAcquire = ListBuffer[AcquireCalleeTrans]()
@@ -339,11 +394,12 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         false
       }
       else {
+        val ver = scoreboardGetVer(alignAddr)
         val start_beat = beatInBlock(addr)
         val targetData = dataOutofBeat(state.data, start_beat)
         println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
-          f"beats:${countBeats(g.a.get.size)}")
-        dQueue.enqMessage(g.issueAccessAckData(targetData), countBeats(g.a.get.size))
+          f"beats:${countBeats(g.a.get.size)}, ver:$ver")
+        dQueue.enqMessage(g.issueAccessAckData(targetData, ver), countBeats(g.a.get.size))
         true
       }
     }
@@ -651,7 +707,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
 }
 
 class TLCMasterAgent(ID: Int, name: String = "", val maxSource: Int, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
-                     , scoreboard: mutable.Map[BigInt, BigInt])
+                     , scoreboard: mutable.Map[BigInt, ScoreboardData])
                     (implicit p: Parameters)
   extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
   val outerAcquire: ListBuffer[AcquireCallerTrans] = ListBuffer()

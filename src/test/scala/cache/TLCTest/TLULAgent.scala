@@ -10,7 +10,7 @@ import chisel3.util._
 import scala.math.pow
 
 class TLULMasterAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
-                      , scoreboard: mutable.Map[BigInt, BigInt])
+                      , scoreboard: mutable.Map[BigInt, ScoreboardData])
                      (implicit p: Parameters)
   extends TLCAgent(ID, name, addrStateMap, serialList, scoreboard) {
   val outerGet: mutable.Map[BigInt, GetCallerTrans] = mutable.Map[BigInt, GetCallerTrans]()
@@ -38,13 +38,14 @@ class TLULMasterAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, A
         d_cnt = 0
         val getT = outerGet(inD.source)
         getT.pairAccessAckData(tmpD)
-        insertMaskedRead(getT.a.get.address, tmpD.data, getT.a.get.mask)
+        insertMaskedRead(getT.a.get.address, tmpD.data, getT.a.get.mask, tmpD.param)
         outerGet.remove(inD.source)
       }
     }
     else if (inD.opcode == AccessAck) {
       val putT = outerPut(inD.source)
-      insertMaskedWrite(putT.a.get.address, putT.a.get.data, putT.a.get.mask)
+      if (inD.param == 0) // if in l2
+        insertMaskedWrite(putT.a.get.address, putT.a.get.data, putT.a.get.mask)
       outerPut.remove(inD.source)
     }
     else {

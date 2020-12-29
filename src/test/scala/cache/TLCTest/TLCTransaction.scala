@@ -554,10 +554,10 @@ class GetCalleeTrans() extends GetTrans with TLCCalleeTrans {
   }
 
   //outD is concated
-  def issueAccessAckData(inData: BigInt): TLCScalaD = {
+  def issueAccessAckData(inData: BigInt, param:BigInt): TLCScalaD = {
     d = Some(new TLCScalaD(
       opcode = AccessAckData,
-      param = 0,
+      param = param,
       size = a.get.size,
       source = a.get.source,
       sink = 0,
@@ -600,7 +600,7 @@ class PutCalleeTrans() extends GetTrans with TLCCalleeTrans {
   def issueAccessAck(): TLCScalaD = {
     d = Some(new TLCScalaD(
       opcode = AccessAck,
-      param = 0,
+      param = 1,
       size = a.get.size,
       source = a.get.source,
       sink = 0,

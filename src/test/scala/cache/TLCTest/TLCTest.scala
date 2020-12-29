@@ -189,7 +189,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         val slaveIO = c.io.slaveIO
         val ulIO = c.io.ulIO
 
-        val scoreboard = mutable.Map[BigInt, BigInt]()
+        val scoreboard = mutable.Map[BigInt, ScoreboardData]()
         val serialList = ArrayBuffer[(Int, TLCTrans)]()
         val masterStateList = List.fill(2)(mutable.Map[BigInt, AddrState]())
         val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i,f"l1_$i", 8, masterStateList(i)
