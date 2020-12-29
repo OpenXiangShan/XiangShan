@@ -4,7 +4,7 @@
 #include <verilated_vcd_c.h>	// Trace file format header
 
 #define DIFFTEST_WIDTH 6
-#define SNAPSHOT_INTERVAL 10 // unit: second
+#define SNAPSHOT_INTERVAL 60 // unit: second
 
 struct EmuArgs {
   uint32_t seed;
