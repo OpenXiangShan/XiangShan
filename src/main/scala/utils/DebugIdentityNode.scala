@@ -31,7 +31,7 @@ class DebugIdentityNode()(implicit p: Parameters) extends LazyModule  {
         }
       )
     }
-    debug(in, true)
+    debug(in, false)
   }
 }
 

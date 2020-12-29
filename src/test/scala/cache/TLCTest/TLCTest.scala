@@ -9,7 +9,7 @@ import chiseltest.legacy.backends.verilator.VerilatorFlags
 import chiseltest._
 import chiseltest.ChiselScalatestTester
 import firrtl.stage.RunFirrtlTransformAnnotation
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLDelayer, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
@@ -39,13 +39,16 @@ case object TLCCacheTestKey extends Field[TLCCacheTestParams]
 
 class TLCCacheTestTopIO extends Bundle {
   val mastersIO = Vec(2, new TLCTestMasterMMIO())
+  val ulIO = new TLULMMIO()
   val slaveIO = new TLCTestSlaveMMIO()
+  val fuzzerBlockAddr = Input(UInt(64.W))
 }
 
 class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
 
-  val masters = Array.fill(2)(LazyModule(new TLCMasterMMIO()))
+  //  val masters = Array.fill(2)(LazyModule(new TLCMasterMMIO()))
   //  val master = LazyModule(new TLCMasterMMIO())
+  val ULmaster = LazyModule(new TLCSnoopMMIONode())
 
   val l2params = p(TLCCacheTestKey)
 
@@ -61,32 +64,38 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
       writeBytes = l2params.beatBytes
     )
   ))
+  val fuzz = LazyModule(new FixedBlockFuzzer(0))
 
-  val masters_ident = Array.fill(2)(LazyModule(new DebugIdentityNode()))
-  val xbar_ident = LazyModule(new DebugIdentityNode())
-  val slave_ident = LazyModule(new DebugIdentityNode())
+  //  val masters_ident = Array.fill(2)(LazyModule(new DebugIdentityNode()))
+  val l1_xbar_ident = LazyModule(new DebugIdentityNode())
+  val l2_inner_ident = LazyModule(new DebugIdentityNode())
+  val l2_outer_ident = LazyModule(new DebugIdentityNode())
+  val l3_ident = LazyModule(new DebugIdentityNode())
 
-  val xbar = TLXbar()
+  ULmaster.node := fuzz.node
 
-  for ((master, ident) <- (masters zip masters_ident)) {
-    xbar := ident.node := master.node
-  }
-  l2.node := TLBuffer() := xbar_ident.node := xbar
+  //  for ((master, ident) <- (masters zip masters_ident)) {
+  //    xbar := ident.node := master.node
+  //  }
+  l2.node := l2_inner_ident.node := TLBuffer() := l1_xbar_ident.node := ULmaster.node
   //  l2.node := TLBuffer() := master_ident.node := master.node
 
   val slave = LazyModule(new TLCSlaveMMIO())
-  slave.node := slave_ident.node := TLBuffer() := l2.node
+  slave.node := l3_ident.node := TLBuffer() := l2_outer_ident.node := l2.node
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
 
     val io = IO(new TLCCacheTestTopIO)
 
+    fuzz.module.io.blockAddr := io.fuzzerBlockAddr
     slave.module.io <> io.slaveIO
-    masters zip io.mastersIO map { case (m, i) =>
-      m.module.io <> i
-    }
+    io.ulIO <> ULmaster.module.io
+    //    masters zip io.mastersIO map { case (m, i) =>
+    //      m.module.io <> i
+    //    }
     //    master.module.io <> io.mastersIO(0)
-    //    io.mastersIO(1) <> DontCare
+    io.mastersIO(0) <> DontCare
+    io.mastersIO(1) <> DontCare
   }
 }
 
@@ -173,23 +182,34 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
         val total_clock = 50000
 
+        c.io.ulIO.isOn.poke(false.B)
         c.reset.poke(true.B)
         c.clock.step(1000)
         c.reset.poke(false.B)
         c.clock.step(100)
+        c.io.ulIO.isOn.poke(true.B)
+
+        c.clock.setTimeout(200)
 
         val mastersIO = c.io.mastersIO
         val slaveIO = c.io.slaveIO
+        val ulIO = c.io.ulIO
 
+        val scoreboard = mutable.Map[BigInt, ScoreboardData]()
         val serialList = ArrayBuffer[(Int, TLCTrans)]()
         val masterStateList = List.fill(2)(mutable.Map[BigInt, AddrState]())
-        val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i, 8, masterStateList(i), serialList))
+        val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i,f"l1_$i", 8, masterStateList(i)
+          , serialList, scoreboard))
+
+        val tlState = mutable.Map[BigInt, AddrState]()
+        val ulAgent = new TLULMasterAgent(3,"l1_UL", tlState, serialList, scoreboard)
+
         val slaveState = mutable.Map() ++ {
           addr_pool zip List.fill(addr_list_len)(new AddrState())
         }.toMap
-        val slaveAgent = new TLCSlaveAgent(2, 8, slaveState, serialList)
+        val slaveAgent = new TLCSlaveAgent(2, name = "l3", 8, slaveState, serialList, scoreboard)
         //must set order here
-        fork {
+        /*fork {
           for (_ <- 0 to total_clock) {
             val AChannel_valids = ArrayBuffer.fill(2)(false)
             val CChannel_valids = ArrayBuffer.fill(2)(false)
@@ -313,6 +333,38 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             c.clock.step()
           }
         }
+        */
+        fork {
+          val addr = getRandomElement(addr_pool, rand)
+          c.io.fuzzerBlockAddr.poke(addr.U)
+          val ulio = ulIO
+          for (_ <- 0 to total_clock) {
+            if (peekBoolean(ulio.DFire)) {
+              val dCh = new TLCScalaD()
+              dCh.opcode = peekBigInt(ulio.DChannel.opcode)
+              dCh.param = peekBigInt(ulio.DChannel.param)
+              dCh.size = peekBigInt(ulio.DChannel.size)
+              dCh.source = peekBigInt(ulio.DChannel.source)
+              dCh.sink = peekBigInt(ulio.DChannel.sink)
+              dCh.denied = peekBoolean(ulio.DChannel.denied)
+              dCh.data = peekBigInt(ulio.DChannel.data)
+              ulAgent.fireD(dCh)
+            }
+            if (peekBoolean(ulio.AFire)) {
+              val aCh = new TLCScalaA()
+              aCh.opcode = peekBigInt(ulio.AChannel.opcode)
+              aCh.param = peekBigInt(ulio.AChannel.param)
+              aCh.size = peekBigInt(ulio.AChannel.size)
+              aCh.source = peekBigInt(ulio.AChannel.source)
+              aCh.address = peekBigInt(ulio.AChannel.address)
+              aCh.mask = peekBigInt(ulio.AChannel.mask)
+              aCh.data = peekBigInt(ulio.AChannel.data)
+              ulAgent.fireA(aCh)
+            }
+            ulAgent.step()
+            c.clock.step()
+          }
+        }
 
         fork {
           val sio = slaveIO
@@ -419,11 +471,10 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             //handle some ID
             slaveAgent.freeSink()
 
+            slaveAgent.step()
             c.clock.step()
           }
         }.join()
-
-        c.clock.setTimeout(1000)
       }
   }
 

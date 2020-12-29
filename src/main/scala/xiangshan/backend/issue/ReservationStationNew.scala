@@ -5,8 +5,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.exu.{Exu, ExuConfig}
-import java.rmi.registry.Registry
-import java.{util => ju}
 
 class BypassQueue(number: Int) extends XSModule {
   val io = IO(new Bundle {
@@ -172,7 +170,7 @@ class ReservationStationCtrl
   // redirect and feedback
   for (i <- 0 until iqSize) {
     val cnt = cntQueue(idxQueue(i))
-
+    when (!(deqIdx === i.U && deqValid)) {
     if (i != 0) { // TODO: combine the two case
       val nextIdx = i.U - moveMask(i-1)
       when (stateQueue(i)===s_replay) {
@@ -196,6 +194,7 @@ class ReservationStationCtrl
       }
       when (redHitVec(i)) { stateQueue(nextIdx) := s_idle }
     }}
+    }
   }
 
   // output
@@ -206,9 +205,11 @@ class ReservationStationCtrl
   // enq
   val tailAfterRealDeq = tailPtr - (issFire && !needFeedback|| bubReg)
   val isFull = tailAfterRealDeq.flag // tailPtr===qsize.U
-  tailPtr := tailAfterRealDeq + io.enqCtrl.fire()
+  // agreement with dispatch: don't fire when io.redirect.valid
+  val enqFire = io.enqCtrl.fire() && !io.redirect.valid
+  tailPtr := tailAfterRealDeq + enqFire
 
-  io.enqCtrl.ready := !isFull && !io.redirect.valid // TODO: check this redirect && need more optimization
+  io.enqCtrl.ready := !isFull
   val enqUop      = io.enqCtrl.bits
   val srcSeq      = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq  = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
@@ -222,7 +223,7 @@ class ReservationStationCtrl
     (srcType === SrcType.reg && src === 0.U)
   }
 
-  when (io.enqCtrl.fire()) {
+  when (enqFire) {
     stateQueue(enqIdx_ctrl) := s_valid
     srcQueue(enqIdx_ctrl).zipWithIndex.map{ case (s, i) =>
       s := Mux(enqBpVec(i) || stateCheck(srcSeq(i), srcTypeSeq(i)), true.B,
@@ -249,7 +250,7 @@ class ReservationStationCtrl
   io.data.enqPtr := idxQueue(Mux(tailPtr.flag, deqIdx, tailPtr.value))
   io.data.deqPtr.valid  := selValid
   io.data.deqPtr.bits   := idxQueue(selectedIdxWire)
-  io.data.enqCtrl.valid := io.enqCtrl.fire
+  io.data.enqCtrl.valid := enqFire
   io.data.enqCtrl.bits  := io.enqCtrl.bits
 
   // other io
@@ -335,8 +336,8 @@ class ReservationStationData
 
   // enq
   val enqPtr = enq(log2Up(IssQueSize)-1,0)
-  val enqPtrReg = RegEnable(enqPtr, enqCtrl.fire())
-  val enqEn  = enqCtrl.fire()
+  val enqPtrReg = RegEnable(enqPtr, enqCtrl.valid)
+  val enqEn  = enqCtrl.valid
   val enqEnReg = RegNext(enqEn)
   when (enqEn) {
     uop(enqPtr) := enqUop
@@ -407,7 +408,7 @@ class ReservationStationData
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
-    val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.fire())
+    val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
     when (bpHitReg) { data(enqPtrReg)(i) := bpData }
     h := bpHit
     // NOTE: enq bp is done here

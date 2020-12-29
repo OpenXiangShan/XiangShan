@@ -685,11 +685,7 @@ class CSR extends FunctionUnit with HasCSRConst
   XSDebug(csrio.redirectOut.valid, "redirect to %x, pc=%x\n", csrio.redirectOut.bits, cfIn.pc)
 
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    csrio.exception.bits.cf.pc,
-    intrNO,
-    csrio.exception.bits.cf.intrVec.asUInt,
-    exceptionNO,
-    raiseExceptionVec.asUInt
+    csrio.exception.bits.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
   )
   XSDebug(raiseExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
@@ -823,13 +819,7 @@ class CSR extends FunctionUnit with HasCSRConst
     "MbpIWrong"   -> (0xb0b, "perfCntCondMbpIWrong"   ),
     "MbpRRight"   -> (0xb0c, "perfCntCondMbpRRight"   ),
     "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"   ),
-    "DpqReplay"   -> (0xb0e, "perfCntCondDpqReplay"   ),
     "RoqWalk"     -> (0xb0f, "perfCntCondRoqWalk"     ),
-    "RoqWaitInt"  -> (0xb10, "perfCntCondRoqWaitInt"  ),
-    "RoqWaitFp"   -> (0xb11, "perfCntCondRoqWaitFp"   ),
-    "RoqWaitLoad" -> (0xb12, "perfCntCondRoqWaitLoad" ),
-    "RoqWaitStore"-> (0xb13, "perfCntCondRoqWaitStore"),
-    "Dp1Empty"    -> (0xb14, "perfCntCondDp1Empty"    ),
     "DTlbReqCnt0" -> (0xb15, "perfCntDtlbReqCnt0"     ),
     "DTlbReqCnt1" -> (0xb16, "perfCntDtlbReqCnt1"     ),
     "DTlbReqCnt2" -> (0xb17, "perfCntDtlbReqCnt2"     ),

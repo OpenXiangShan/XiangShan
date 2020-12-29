@@ -90,6 +90,12 @@ VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
 endif
 
+# Verilator coverage
+EMU_COVERAGE ?=
+ifeq ($(EMU_COVERAGE),1)
+VEXTRA_FLAGS += --coverage-line --coverage-toggle
+endif
+
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
 EMU_CXXFLAGS += -I$(DRAMSIM3_HOME)/src
@@ -166,6 +172,11 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 emu: $(EMU)
 	ls build
 	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+
+coverage:
+	verilator_coverage --annotate build/logs/annotated --annotate-min 1 build/logs/coverage.dat
+	python3 scripts/coverage/coverage.py build/logs/annotated/XSSimTop.v build/XSSimTop_annotated.v
+	python3 scripts/coverage/statistics.py build/XSSimTop_annotated.v >build/coverage.log
 
 # extract verilog module from sim_top.v
 # usage: make vme VME_MODULE=Roq
