@@ -7,6 +7,7 @@ import utils._
 import chisel3.experimental.chiselName
 
 import scala.math.min
+import scala.util.matching.Regex
 
 trait HasTageParameter extends HasXSParameter with HasBPUParameter{
   //                   Sets  Hist   Tag
@@ -435,8 +436,11 @@ class Tage extends BaseTage {
   override val debug = true
 
   // Keep the table responses to process in s3
-  val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=io.s3Fire)
-  val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=io.s3Fire)
+  // val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=io.s3Fire)
+  // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=io.s3Fire)
+  
+  val if3_resps = VecInit(tables.map(t => t.io.resp))
+  val if3_scResps = VecInit(scTables.map(t => t.io.resp))
   // val flushLatch = RegNext(io.flush)
 
   val if3_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
@@ -482,37 +486,43 @@ class Tage extends BaseTage {
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
-    val if4_tageTaken = WireInit(if4_bim.ctrs(w)(1).asBool)
-    var if4_altPred = if4_bim.ctrs(w)(1)
-    val if4_finalAltPred = WireInit(if4_bim.ctrs(w)(1))
-    var if4_provided = false.B
-    var if4_provider = 0.U
-    io.resp.takens(w) := if4_bim.ctrs(w)(1)
+    val if3_tageTaken = WireInit(if3_bim.ctrs(w)(1).asBool)
+    var if3_altPred = if3_bim.ctrs(w)(1)
+    val if3_finalAltPred = WireInit(if3_bim.ctrs(w)(1))
+    var if3_provided = false.B
+    var if3_provider = 0.U
 
     for (i <- 0 until TageNTables) {
-      val hit = if4_resps(i)(w).valid
-      val ctr = if4_resps(i)(w).bits.ctr
+      val hit = if3_resps(i)(w).valid
+      val ctr = if3_resps(i)(w).bits.ctr
       when (hit) {
-        io.resp.takens(w) := Mux(ctr === 3.U || ctr === 4.U, if4_altPred, ctr(2)) // Use altpred on weak taken
-        if4_tageTaken := Mux(ctr === 3.U || ctr === 4.U, if4_altPred, ctr(2))
-        if4_finalAltPred := if4_altPred
+        if3_tageTaken := Mux(ctr === 3.U || ctr === 4.U, if3_altPred, ctr(2)) // Use altpred on weak taken
+        if3_finalAltPred := if3_altPred
       }
-      if4_provided = if4_provided || hit          // Once hit then provide
-      if4_provider = Mux(hit, i.U, if4_provider)  // Use the last hit as provider
-      if4_altPred = Mux(hit, ctr(2), if4_altPred) // Save current pred as potential altpred
+      if3_provided = if3_provided || hit          // Once hit then provide
+      if3_provider = Mux(hit, i.U, if3_provider)  // Use the last hit as provider
+      if3_altPred = Mux(hit, ctr(2), if3_altPred) // Save current pred as potential altpred
     }
+    val if4_provided = RegEnable(if3_provided, io.s3Fire)
+    val if4_provider = RegEnable(if3_provider, io.s3Fire)
+    val if4_finalAltPred = RegEnable(if3_finalAltPred, io.s3Fire)
+    val if4_tageTaken = RegEnable(if3_tageTaken, io.s3Fire)
+    val if4_providerU = RegEnable(if3_resps(if3_provider)(w).bits.u, io.s3Fire)
+    val if4_providerCtr = RegEnable(if3_resps(if3_provider)(w).bits.ctr, io.s3Fire)
+
     io.resp.hits(w) := if4_provided
+    io.resp.takens(w) := if4_tageTaken
     io.meta(w).provider.valid := if4_provided
     io.meta(w).provider.bits := if4_provider
     io.meta(w).altDiffers := if4_finalAltPred =/= io.resp.takens(w)
-    io.meta(w).providerU := if4_resps(if4_provider)(w).bits.u
-    io.meta(w).providerCtr := if4_resps(if4_provider)(w).bits.ctr
+    io.meta(w).providerU := if4_providerU
+    io.meta(w).providerCtr := if4_providerCtr
     io.meta(w).taken := if4_tageTaken
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
-    val allocatableSlots = (VecInit(if4_resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
-      ~(LowerMask(UIntToOH(if4_provider), TageNTables) & Fill(TageNTables, if4_provided.asUInt))
+    val allocatableSlots = RegEnable(VecInit(if3_resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
+      ~(LowerMask(UIntToOH(if3_provider), TageNTables) & Fill(TageNTables, if3_provided.asUInt)), io.s3Fire
     )
     val allocLFSR = LFSR64()(TageNTables - 1, 0)
     val firstEntry = PriorityEncoder(allocatableSlots)
@@ -530,7 +540,7 @@ class Tage extends BaseTage {
           // sum += pvdrCtrCentered
           if (EnableSC) {
             (0 until SCNTables) map { j => 
-              scTables(j).getCenteredValue(if4_scResps(j)(w).ctr(i))
+              scTables(j).getCenteredValue(RegEnable(if3_scResps(j)(w).ctr(i), io.s3Fire))
             } reduce (_+_) // TODO: rewrite with adder tree
           }
           else 0.S
@@ -544,15 +554,16 @@ class Tage extends BaseTage {
       scMeta.scPred := if4_tageTaken
       scMeta.sumAbs := 0.U
       when (if4_provided) {
-        val providerCtr = if4_resps(if4_provider)(w).bits.ctr.zext()
+        val providerCtr = if4_providerCtr.zext()
         val pvdrCtrCentered = ((((providerCtr - 4.S) << 1).asSInt + 1.S) << 3).asSInt
         val totalSum = scTableSums(if4_tageTaken.asUInt) + pvdrCtrCentered
         val sumAbs = totalSum.abs().asUInt
         val sumBelowThreshold = totalSum.abs.asUInt < useThreshold
         val scPred = totalSum >= 0.S
         scMeta.sumAbs := sumAbs
-        scMeta.ctrs   := VecInit(if4_scResps.map(r => r(w).ctr(if4_tageTaken.asUInt)))
+        scMeta.ctrs   := RegEnable(VecInit(if3_scResps.map(r => r(w).ctr(if3_tageTaken.asUInt))), io.s3Fire)
         for (i <- 0 until SCNTables) {
+          val if4_scResps = RegEnable(if3_scResps, io.s3Fire)
           XSDebug(RegNext(io.s3Fire), p"SCTable(${i.U})(${w.U}): ctr:(${if4_scResps(i)(w).ctr(0)},${if4_scResps(i)(w).ctr(1)})\n")
         }
         XSDebug(RegNext(io.s3Fire), p"SC(${w.U}): pvdCtr(${providerCtr}), pvdCentred(${pvdrCtrCentered}), totalSum(${totalSum}), abs(${sumAbs}) useThres(${useThreshold}), scPred(${scPred})\n")
@@ -659,6 +670,7 @@ class Tage extends BaseTage {
   if (BPUDebug && debug) {
     val m = updateMeta
     val bri = u.bpuMeta
+    val if4_resps = RegEnable(if3_resps, io.s3Fire)
     XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
     XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
     XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
