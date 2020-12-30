@@ -92,7 +92,8 @@ class PrevHalfInstr extends XSBundle {
   val target = UInt(VAddrBits.W)
   val instr = UInt(16.W)
   val ipf = Bool()
-  val newPtr = UInt(log2Up(ExtHistoryLength).W)
+  val meta = new BpuMeta
+  // val newPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
 @chiselName
@@ -200,9 +201,11 @@ class IFU extends XSModule with HasIFUConst
   // set to invalid once consumed or redirect from backend
   val if3_prevHalfConsumed = if3_prevHalfInstrMet && if3_fire
   val if3_prevHalfFlush = if4_flush
-  when (hasPrevHalfInstrReq && !if3_prevHalfFlush) {
+  when (if3_prevHalfFlush) {
+    if3_prevHalfInstr.valid := false.B
+  }.elsewhen (hasPrevHalfInstrReq) {
     if3_prevHalfInstr.valid := true.B
-  }.elsewhen (if3_prevHalfConsumed || if3_prevHalfFlush) {
+  }.elsewhen (if3_prevHalfConsumed) {
     if3_prevHalfInstr.valid := false.B
   }
   when (hasPrevHalfInstrReq) {
@@ -280,9 +283,9 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
-  if4_bp.takens  := bpu.io.out(2).takens & if4_mask
-  if4_bp.brMask  := bpu.io.out(2).brMask & if4_mask
-  if4_bp.jalMask := bpu.io.out(2).jalMask & if4_mask
+  // if4_bp.takens  := bpu.io.out(2).takens & if4_mask
+  // if4_bp.brMask  := bpu.io.out(2).brMask & if4_mask
+  // if4_bp.jalMask := bpu.io.out(2).jalMask & if4_mask
 
   if4_predicted_gh := if4_gh.update(if4_bp.hasNotTakenBrs, if4_bp.takenOnBr)
 
@@ -311,9 +314,11 @@ class IFU extends XSModule with HasIFUConst
   val if4_prevHalfFlush = if4_flush
 
   val if4_takenPrevHalf = WireInit(if4_prevHalfInstrMet && if4_prevHalfInstr.bits.taken)
-  when (if3_prevHalfConsumed) {
+  when (if4_prevHalfFlush) {
+    if4_prevHalfInstr.valid := false.B
+  }.elsewhen (if3_prevHalfConsumed) {
     if4_prevHalfInstr.valid := if3_prevHalfInstr.valid
-  }.elsewhen (if4_prevHalfConsumed || if4_prevHalfFlush) {
+  }.elsewhen (if4_prevHalfConsumed) {
     if4_prevHalfInstr.valid := false.B
   }
 
@@ -327,7 +332,6 @@ class IFU extends XSModule with HasIFUConst
   // this is result of the last half RVI
   prevHalfInstrReq.bits.taken := if4_bp.lastHalfRVITaken
   prevHalfInstrReq.bits.ghInfo := if4_gh
-  prevHalfInstrReq.bits.newPtr := DontCare
   prevHalfInstrReq.bits.fetchpc := if4_pc
   prevHalfInstrReq.bits.idx := idx
   prevHalfInstrReq.bits.pc := if4_pd.pc(idx)
@@ -335,6 +339,7 @@ class IFU extends XSModule with HasIFUConst
   prevHalfInstrReq.bits.target := if4_bp.lastHalfRVITarget
   prevHalfInstrReq.bits.instr := if4_pd.instrs(idx)(15, 0)
   prevHalfInstrReq.bits.ipf := if4_ipf
+  prevHalfInstrReq.bits.meta := bpu.io.bpuMeta(idx)
 
   def if4_nextValidPCNotEquals(pc: UInt) = if3_valid  && if3_pc =/= pc ||
                                            !if3_valid && (if2_valid && if2_pc =/= pc) ||
@@ -462,6 +467,10 @@ class IFU extends XSModule with HasIFUConst
     fetchPacketWire.pnpc(if4_bp.jmpIdx) := if4_bp.target
   }
   fetchPacketWire.bpuMeta := bpu.io.bpuMeta
+  // save it for update
+  when (if4_pendingPrevHalfInstr) {
+    fetchPacketWire.bpuMeta(0) := if4_prevHalfInstr.bits.meta
+  }
   (0 until PredictWidth).foreach(i => {
     val meta = fetchPacketWire.bpuMeta(i)
     meta.hist := final_gh
