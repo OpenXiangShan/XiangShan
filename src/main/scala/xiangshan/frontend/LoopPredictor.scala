@@ -259,20 +259,40 @@ class LTBColumn extends LTBModule {
   }
 
   // Bypass
-  when (ltb.swen && if3_idx === if4_idx) {
-    XSDebug("if3_entry := swEntry\n")
-    if3_entry := swEntry
-  }.elsewhen (ltb.wen && if3_idx === updateIdx) {
-    XSDebug("if3_entry := wEntry\n")
-    if3_entry := wEntry
-  }
+  // when (ltb.swen && if3_idx === if4_idx) {
+  //   XSDebug("if3_entry := swEntry\n")
+  //   if3_entry := swEntry
+  // }.elsewhen (ltb.wen && if3_idx === updateIdx) {
+  //   XSDebug("if3_entry := wEntry\n")
+  //   if3_entry := wEntry
+  // }
+
+  // when(io.if3_fire) {
+  //   if4_entry := if3_entry
+  // }.elsewhen(ltb.swen) {
+  //   if4_entry := swEntry
+  // }.elsewhen(ltb.wen && if4_idx === updateIdx) {
+  //   if4_entry := wEntry
+  // }
 
   when(io.if3_fire) {
-    if4_entry := if3_entry
-  }.elsewhen(ltb.swen) {
-    if4_entry := swEntry
-  }.elsewhen(ltb.wen && if4_idx === updateIdx) {
-    if4_entry := wEntry
+    when(ltb.swen && if3_idx === if4_idx) {
+      XSDebug("Bypass swEntry\n")
+      if4_entry := swEntry
+    }.elsewhen(ltb.wen && if3_idx === updateIdx) {
+      XSDebug("Bypass wEntry\n")
+      if4_entry := wEntry
+    }.otherwise {
+      if4_entry := if3_entry
+    }
+  }.otherwise {
+    when(ltb.swen) {
+      XSDebug("Bypass swEntry\n")
+      if4_entry := swEntry
+    }.elsewhen(ltb.wen && if4_idx === updateIdx) {
+      XSDebug("Bypass wEntry\n")
+      if4_entry := wEntry
+    }
   }
 
   // Reseting
