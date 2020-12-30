@@ -103,7 +103,6 @@ class IFU extends XSModule with HasIFUConst
   val bpu = BPU(EnableBPU)
   val icache = Module(new ICache)
 
-  val pd = Module(new PreDecode)
   io.ptw <> TLB(
     in = Seq(icache.io.tlb),
     sfence = io.sfence,
@@ -257,7 +256,7 @@ class IFU extends XSModule with HasIFUConst
   // }
 
   //********************** IF4 ****************************//
-  val if4_pd = RegEnable(pd.io.out, if3_fire)
+  val if4_pd = RegEnable(icache.io.pd_out, if3_fire)
   val if4_ipf = RegEnable(icacheResp.ipf || if3_prevHalfInstrMet && if3_prevHalfInstr.bits.ipf, if3_fire)
   val if4_acf = RegEnable(icacheResp.acf, if3_fire)
   val if4_crossPageIPF = RegEnable(crossPageIPF, if3_fire)
@@ -411,6 +410,8 @@ class IFU extends XSModule with HasIFUConst
   icache.io.flush := Cat(if3_flush, if2_flush)
   icache.io.mem_grant <> io.icacheMemGrant
   icache.io.fencei := io.fencei
+  icache.io.prev.valid := if3_prevHalfInstrMet
+  icache.io.prev.bits := if3_prevHalfInstr.bits.instr
   io.icacheMemAcq <> icache.io.mem_acquire
   io.l1plusFlush := icache.io.l1plusflush
 
@@ -433,22 +434,9 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.realMask := if4_mask
   bpu.io.prevHalf := if4_prevHalfInstr
 
-  pd.io.in := icacheResp
 
-  pd.io.prev.valid := if3_prevHalfInstrMet
-  pd.io.prev.bits := if3_prevHalfInstr.bits.instr
-  // if a fetch packet triggers page fault, set the pf instruction to nop
-  when (!if3_prevHalfInstrMet && icacheResp.ipf) {
-    val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
-    (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
-    pd.io.in.data := instrs.asUInt
-  }.elsewhen (if3_prevHalfInstrMet && (if3_prevHalfInstr.bits.ipf || icacheResp.ipf)) {
-    pd.io.prev.bits := ZeroExt("b0010011".U, 16)
-    val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
-    (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
-    pd.io.in.data := instrs.asUInt
-
-    when (icacheResp.ipf && !if3_prevHalfInstr.bits.ipf) { crossPageIPF := true.B } // higher 16 bits page fault
+  when (if3_prevHalfInstrMet && icacheResp.ipf && !if3_prevHalfInstr.bits.ipf) {
+    crossPageIPF := true.B // higher 16 bits page fault
   }
 
   val fetchPacketValid = if4_valid && !io.redirect.valid
