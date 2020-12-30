@@ -171,6 +171,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_allValid = if3_valid && icache.io.resp.valid
   val if3_fire = if3_allValid && if4_ready
   val if3_pc = RegEnable(if2_pc, if2_fire)
+  val if3_snpc = RegEnable(if2_snpc, if2_fire)
   val if3_predHist = RegEnable(if2_predHist, enable=if2_fire)
   if3_ready := if4_ready && icache.io.resp.valid || !if3_valid
   when (if3_flush) {
@@ -218,7 +219,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.bits.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.target)
   val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
   val if3_predTakenRedirect    = !if3_pendingPrevHalfInstr && if3_bp.taken && if3_nextValidPCNotEquals(if3_bp.target)
-  val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(snpc(if3_pc))
+  val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(if3_snpc)
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
   // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
 
@@ -236,18 +237,14 @@ class IFU extends XSModule with HasIFUConst
                     // if3_ghInfoNotIdenticalRedirect
                   )
 
-  val if3_target = WireInit(snpc(if3_pc))
+  val if3_target = WireInit(if3_snpc)
 
   /* when (prevHalfMetRedirect) {
     if1_npc := if3_prevHalfInstr.target
   }.else */
-  when (if3_prevHalfNotMetRedirect) {
-    if3_target := if3_prevHalfInstr.bits.npc
-  }.elsewhen (if3_predTakenRedirect) {
-    if3_target := if3_bp.target
-  }.elsewhen (if3_predNotTakenRedirect) {
-    if3_target := snpc(if3_pc)
-  }
+  if3_target := Mux1H(Seq((if3_prevHalfNotMetRedirect -> if3_prevHalfInstr.bits.npc),
+                          (if3_predTakenRedirect      -> if3_bp.target),
+                          (if3_predNotTakenRedirect   -> if3_snpc)))
   // }.elsewhen (if3_ghInfoNotIdenticalRedirect) {
   //   if3_target := Mux(if3_bp.taken, if3_bp.target, snpc(if3_pc))
   // }
@@ -265,9 +262,9 @@ class IFU extends XSModule with HasIFUConst
   val if4_valid = RegInit(false.B)
   val if4_fire = if4_valid && io.fetchPacket.ready
   val if4_pc = RegEnable(if3_pc, if3_fire)
+  val if4_snpc = RegEnable(if3_snpc, if3_fire)
   // This is the real mask given from icache
   val if4_mask = RegEnable(icacheResp.mask, if3_fire)
-  val if4_snpc = snpc(if4_pc)
 
 
   val if4_predHist = RegEnable(if3_predHist, enable=if3_fire)
@@ -283,9 +280,6 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_bp = Wire(new BranchPrediction)
   if4_bp := bpu.io.out(2)
-  // if4_bp.takens  := bpu.io.out(2).takens & if4_mask
-  // if4_bp.brMask  := bpu.io.out(2).brMask & if4_mask
-  // if4_bp.jalMask := bpu.io.out(2).jalMask & if4_mask
 
   if4_predicted_gh := if4_gh.update(if4_bp.hasNotTakenBrs, if4_bp.takenOnBr)
 
@@ -366,11 +360,12 @@ class IFU extends XSModule with HasIFUConst
   // when (if4_prevHalfNextNotMet) {
   //   if4_target := prevHalfInstrReq.pc+2.U
   // }.else
-  when (if4_predTakenRedirect) {
-    if4_target := if4_bp.target
-  }.elsewhen (if4_predNotTakenRedirect) {
-    if4_target := if4_snpc
-  }
+  if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
+  // when (if4_predTakenRedirect) {
+  //   if4_target := if4_bp.target
+  // }.elsewhen (if4_predNotTakenRedirect) {
+  //   if4_target := if4_snpc
+  // }
   // }.elsewhen (if4_ghInfoNotIdenticalRedirect) {
   //   if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
   // }
