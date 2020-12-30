@@ -291,6 +291,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     max_cycle --;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
+    if (assert_count > 0) {
+      difftest_display(dut_ptr->io_difftest_priviledgeMode);
+      eprintf("The simulation stopped. There might be some assertion failed.\n");
+      trapCode = STATE_ABORT;
+    }
     if (trapCode != STATE_RUNNING) break;
 
     if (lastcommit - max_cycle > stuck_limit && hascommit) {
@@ -376,12 +381,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       }
     }
 #endif
-  }
-
-  if (assert_count > 0) {
-    difftest_display(dut_ptr->io_difftest_priviledgeMode);
-    eprintf("The simulation stopped. There might be some assertion failed.\n");
-    trapCode = STATE_ABORT;
   }
 
 #if VM_TRACE == 1
