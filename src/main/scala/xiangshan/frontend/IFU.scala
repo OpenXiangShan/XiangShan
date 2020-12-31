@@ -412,6 +412,7 @@ class IFU extends XSModule with HasIFUConst
   icache.io.fencei := io.fencei
   icache.io.prev.valid := if3_prevHalfInstrMet
   icache.io.prev.bits := if3_prevHalfInstr.bits.instr
+  icache.io.prev_ipf := if3_prevHalfInstr.bits.ipf
   io.icacheMemAcq <> icache.io.mem_acquire
   io.l1plusFlush := icache.io.l1plusflush
 
