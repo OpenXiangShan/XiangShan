@@ -398,7 +398,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val walkFinished = walkCounter <= CommitWidth.U
 
   // extra space is used when roq has no enough space, but mispredict recovery needs such info to walk regmap
-  val needExtraSpaceForMPR = VecInit((0 until CommitWidth).map(i => io.redirect.valid && io.enq.needAlloc(i)))
+  require(RenameWidth <= CommitWidth)
+  val needExtraSpaceForMPR = VecInit((0 until RenameWidth).map(i => io.redirect.valid && io.enq.needAlloc(i)))
   val extraSpaceForMPR = Reg(Vec(RenameWidth, new RoqDispatchData))
   val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
 
@@ -427,8 +428,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     when (state === s_walk) {
       io.commits.valid(i) := commit_v(i) && shouldWalkVec(i)
     }.elsewhen(state === s_extrawalk) {
-      io.commits.valid(i) := usedSpaceForMPR(RenameWidth-i-1)
-      io.commits.info(i)  := extraSpaceForMPR(RenameWidth-i-1)
+      io.commits.valid(i) := (if (i < RenameWidth) usedSpaceForMPR(RenameWidth-i-1) else false.B)
+      io.commits.info(i)  := (if (i < RenameWidth) extraSpaceForMPR(RenameWidth-i-1) else DontCare)
       state := s_walk
     }
 
