@@ -8,12 +8,6 @@
 #include "zlib.h"
 #include "compress.h"
 
-void* get_ram_start();
-long get_ram_size();
-uint64_t get_nemu_this_pc();
-void set_nemu_this_pc(uint64_t pc);
-
-
 static inline void print_help(const char *file) {
   printf("Usage: %s [OPTION...]\n", file);
   printf("\n");
@@ -90,6 +84,7 @@ Emulator::Emulator(int argc, const char *argv[]):
   srand(args.seed);
   srand48(args.seed);
   Verilated::randReset(2);
+  assert_init();
 
   // init core
   reset_ncycles(10);
@@ -132,6 +127,7 @@ Emulator::Emulator(int argc, const char *argv[]):
 
 Emulator::~Emulator() {
   ram_finish();
+  assert_finish();
 
 #ifdef VM_SAVABLE
   if (args.enable_snapshot && trapCode != STATE_GOODTRAP && trapCode != STATE_LIMIT_EXCEEDED) {
@@ -295,6 +291,11 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
     max_cycle --;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
+    if (assert_count > 0) {
+      difftest_display(dut_ptr->io_difftest_priviledgeMode);
+      eprintf("The simulation stopped. There might be some assertion failed.\n");
+      trapCode = STATE_ABORT;
+    }
     if (trapCode != STATE_RUNNING) break;
 
     if (lastcommit - max_cycle > stuck_limit && hascommit) {
@@ -382,12 +383,6 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
   }
 
-  if (Verilated::gotFinish()) {
-    difftest_display(dut_ptr->io_difftest_priviledgeMode);
-    eprintf("The simulation stopped. There might be some assertion failed.\n");
-    trapCode = STATE_ABORT;
-  }
-
 #if VM_TRACE == 1
   if (enable_waveform) tfp->close();
 #endif
@@ -465,8 +460,8 @@ void Emulator::display_trapinfo() {
   }
 
   double ipc = (double)instrCnt / (cycleCnt-500);
-  eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %" PRIu64 "\n" ANSI_COLOR_RESET, instrCnt);
-  eprintf(ANSI_COLOR_MAGENTA "instrCnt = %" PRIu64 ", cycleCnt = %" PRIu64 ", IPC = %lf\n" ANSI_COLOR_RESET,
+  eprintf(ANSI_COLOR_MAGENTA "total guest instructions = %'" PRIu64 "\n" ANSI_COLOR_RESET, instrCnt);
+  eprintf(ANSI_COLOR_MAGENTA "instrCnt = %'" PRIu64 ", cycleCnt = %'" PRIu64 ", IPC = %lf\n" ANSI_COLOR_RESET,
       instrCnt, cycleCnt, ipc);
 }
 
