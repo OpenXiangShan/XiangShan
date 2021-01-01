@@ -12,6 +12,8 @@ CoDRAMsim3 *dram = NULL;
 
 static uint64_t *ram;
 static long img_size = 0;
+static pthread_mutex_t ram_mutex;
+
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
 void* get_ram_start() { return &ram[0]; }
@@ -155,6 +157,8 @@ void init_ram(const char *img) {
   dram = new CoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
 #endif
 
+  pthread_mutex_init(&ram_mutex, 0);
+
 }
 
 void ram_finish() {
@@ -162,13 +166,18 @@ void ram_finish() {
 #ifdef WITH_DRAMSIM3
   dramsim3_finish();
 #endif
+  pthread_mutex_destroy(&ram_mutex);
 }
+
 
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
   if (en && rIdx >= EMU_RAM_SIZE / sizeof(uint64_t)) {
     rIdx %= EMU_RAM_SIZE / sizeof(uint64_t);
   }
-  return (en) ? ram[rIdx] : 0;
+  pthread_mutex_lock(&ram_mutex);
+  uint64_t rdata = (en) ? ram[rIdx] : 0;
+  pthread_mutex_unlock(&ram_mutex);
+  return rdata;
 }
 
 extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
@@ -177,7 +186,9 @@ extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, 
       printf("ERROR: ram wIdx = 0x%lx out of bound!\n", wIdx);
       assert(wIdx < EMU_RAM_SIZE / sizeof(uint64_t));
     }
+    pthread_mutex_lock(&ram_mutex);
     ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask);
+    pthread_mutex_unlock(&ram_mutex);
   }
 }
 
