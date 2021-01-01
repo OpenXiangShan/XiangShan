@@ -37,7 +37,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val enq = new LqEnqIO
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
+    val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
@@ -57,7 +57,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
   val commited = Reg(Vec(LoadQueueSize, Bool())) // inst has been writebacked to CDB
   val miss = Reg(Vec(LoadQueueSize, Bool())) // load inst missed, waiting for miss queue to accept miss request
-  val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
+  // val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
@@ -96,7 +96,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       writebacked(index) := false.B
       commited(index) := false.B
       miss(index) := false.B
-      listening(index) := false.B
+      // listening(index) := false.B
       pending(index) := false.B
     }
     io.enq.resp(i) := lqIdx
@@ -165,7 +165,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         miss(loadWbIndex) := dcacheMissed && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
-        listening(loadWbIndex) := dcacheMissed
+        // listening(loadWbIndex) := dcacheMissed
         pending(loadWbIndex) := io.loadIn(i).bits.mmio && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
       }
     }
@@ -178,64 +178,64 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     * (3) dcache response: datavalid
     * (4) writeback to ROB: writeback
     */
-  val inflightReqs = RegInit(VecInit(Seq.fill(cfg.nLoadMissEntries)(0.U.asTypeOf(new InflightBlockInfo))))
-  val inflightReqFull = inflightReqs.map(req => req.valid).reduce(_&&_)
-  val reqBlockIndex = PriorityEncoder(~VecInit(inflightReqs.map(req => req.valid)).asUInt)
+  // val inflightReqs = RegInit(VecInit(Seq.fill(cfg.nLoadMissEntries)(0.U.asTypeOf(new InflightBlockInfo))))
+  // val inflightReqFull = inflightReqs.map(req => req.valid).reduce(_&&_)
+  // val reqBlockIndex = PriorityEncoder(~VecInit(inflightReqs.map(req => req.valid)).asUInt)
 
-  val missRefillSelVec = VecInit(
-    (0 until LoadQueueSize).map{ i =>
-      val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(dataModule.io.rdata(i).paddr)).reduce(_||_)
-      allocated(i) && miss(i) && !inflight
-    })
+  // val missRefillSelVec = VecInit(
+  //   (0 until LoadQueueSize).map{ i =>
+  //     val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(dataModule.io.rdata(i).paddr)).reduce(_||_)
+  //     allocated(i) && miss(i) && !inflight
+  //   })
 
-  val missRefillSel = getFirstOne(missRefillSelVec, deqMask)
-  val missRefillBlockAddr = get_block_addr(dataModule.io.rdata(missRefillSel).paddr)
-  io.dcache.req.valid := missRefillSelVec.asUInt.orR
-  io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
-  io.dcache.req.bits.addr := missRefillBlockAddr
-  io.dcache.req.bits.data := DontCare
-  io.dcache.req.bits.mask := DontCare
+  // val missRefillSel = getFirstOne(missRefillSelVec, deqMask)
+  // val missRefillBlockAddr = get_block_addr(dataModule.io.rdata(missRefillSel).paddr)
+  // io.dcache.req.valid := missRefillSelVec.asUInt.orR
+  // io.dcache.req.bits.cmd := MemoryOpConstants.M_XRD
+  // io.dcache.req.bits.addr := missRefillBlockAddr
+  // io.dcache.req.bits.data := DontCare
+  // io.dcache.req.bits.mask := DontCare
 
-  io.dcache.req.bits.meta.id       := DontCare
-  io.dcache.req.bits.meta.vaddr    := DontCare // dataModule.io.rdata(missRefillSel).vaddr
-  io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
-  io.dcache.req.bits.meta.uop      := uop(missRefillSel)
-  io.dcache.req.bits.meta.mmio     := false.B // dataModule.io.rdata(missRefillSel).mmio
-  io.dcache.req.bits.meta.tlb_miss := false.B
-  io.dcache.req.bits.meta.mask     := DontCare
-  io.dcache.req.bits.meta.replay   := false.B
+  // io.dcache.req.bits.meta.id       := DontCare
+  // io.dcache.req.bits.meta.vaddr    := DontCare // dataModule.io.rdata(missRefillSel).vaddr
+  // io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
+  // io.dcache.req.bits.meta.uop      := uop(missRefillSel)
+  // io.dcache.req.bits.meta.mmio     := false.B // dataModule.io.rdata(missRefillSel).mmio
+  // io.dcache.req.bits.meta.tlb_miss := false.B
+  // io.dcache.req.bits.meta.mask     := DontCare
+  // io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
 
-  assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
+  // assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
 
-  when(io.dcache.req.fire()) {
-    miss(missRefillSel) := false.B
-    listening(missRefillSel) := true.B
+  // when(io.dcache.req.fire()) {
+  //   miss(missRefillSel) := false.B
+    // listening(missRefillSel) := true.B
 
     // mark this block as inflight
-    inflightReqs(reqBlockIndex).valid := true.B
-    inflightReqs(reqBlockIndex).block_addr := missRefillBlockAddr
-    assert(!inflightReqs(reqBlockIndex).valid)
-  }
+  //   inflightReqs(reqBlockIndex).valid := true.B
+  //   inflightReqs(reqBlockIndex).block_addr := missRefillBlockAddr
+  //   assert(!inflightReqs(reqBlockIndex).valid)
+  // }
 
-  when(io.dcache.resp.fire()) {
-    val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)).reduce(_||_)
-    assert(inflight)
-    for (i <- 0 until cfg.nLoadMissEntries) {
-      when (inflightReqs(i).valid && inflightReqs(i).block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)) {
-        inflightReqs(i).valid := false.B
-      }
-    }
-  }
+  // when(io.dcache.resp.fire()) {
+  //   val inflight = inflightReqs.map(req => req.valid && req.block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)).reduce(_||_)
+  //   assert(inflight)
+  //   for (i <- 0 until cfg.nLoadMissEntries) {
+  //     when (inflightReqs(i).valid && inflightReqs(i).block_addr === get_block_addr(io.dcache.resp.bits.meta.paddr)) {
+  //       inflightReqs(i).valid := false.B
+  //     }
+  //   }
+  // }
 
 
-  when(io.dcache.req.fire()){
-    XSDebug("miss req: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x vaddr:0x%x\n",
-      io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx.asUInt, io.dcache.req.bits.meta.uop.lqIdx.asUInt,
-      io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr
-    )
-  }
+  // when(io.dcache.req.fire()){
+  //   XSDebug("miss req: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x vaddr:0x%x\n",
+  //     io.dcache.req.bits.meta.uop.cf.pc, io.dcache.req.bits.meta.uop.roqIdx.asUInt, io.dcache.req.bits.meta.uop.lqIdx.asUInt,
+  //     io.dcache.req.bits.addr, io.dcache.req.bits.meta.vaddr
+  //   )
+  // }
 
   when(io.dcache.resp.fire()){
     XSDebug("miss resp: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x data %x\n",
@@ -251,10 +251,10 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   (0 until LoadQueueSize).map(i => {
     val blockMatch = get_block_addr(dataModule.io.rdata(i).paddr) === io.dcache.resp.bits.meta.paddr
     dataModule.io.refill.wen(i) := false.B
-    when(allocated(i) && listening(i) && blockMatch && io.dcache.resp.fire()) {
+    when(allocated(i) && miss(i) && blockMatch && io.dcache.resp.fire()) {
       dataModule.io.refill.wen(i) := true.B
       datavalid(i) := true.B
-      listening(i) := false.B
+      miss(i) := false.B
     }
   })
 
@@ -383,7 +383,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val lqViolationVec = RegNext(VecInit((0 until LoadQueueSize).map(j => {
       val addrMatch = allocated(j) &&
         io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === dataModule.io.rdata(j).paddr(PAddrBits - 1, 3)
-      val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (datavalid(j) || listening(j) || miss(j))
+      val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (datavalid(j) || miss(j))
       // TODO: update refilled data
       val violationVec = (0 until 8).map(k => dataModule.io.rdata(j).mask(k) && io.storeIn(i).bits.mask(k))
       Cat(violationVec).orR() && entryNeedCheck
@@ -594,7 +594,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     PrintFlag(allocated(i) && writebacked(i), "w")
     PrintFlag(allocated(i) && commited(i), "c")
     PrintFlag(allocated(i) && miss(i), "m")
-    PrintFlag(allocated(i) && listening(i), "l")
+    // PrintFlag(allocated(i) && listening(i), "l")
     PrintFlag(allocated(i) && pending(i), "p")
     XSDebug(false, true.B, " ")
     if (i % 4 == 3 || i == LoadQueueSize - 1) XSDebug(false, true.B, "\n")
