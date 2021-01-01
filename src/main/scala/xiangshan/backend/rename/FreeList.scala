@@ -49,7 +49,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
     // do checkpoints
     // val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
-    val walk = Flipped(ValidIO(UInt(log2Up(RenameWidth).W)))
+    val walk = Flipped(ValidIO(UInt(log2Up(CommitWidth + 1).W)))
 
     // dealloc phy regs
     val deallocReqs = Input(Vec(CommitWidth, Bool()))
