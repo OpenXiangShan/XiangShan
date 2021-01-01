@@ -161,6 +161,46 @@ class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
 }
 
+// class RoqStateWrapper extends XSModule with HasCircularQueuePtrHelper {
+//   val io = IO(new Bundle {
+//     val redirect = ValidIO(new Redirect)
+//     val raddr = Vec(CommitWidth, Input(UInt(log2Up(numEntries).W)))
+//     val wen = Vec(RenameWidth, Input(Bool()))
+//     val waddr = Vec(RenameWidth)
+//   })
+
+//   val valid = Mme(RoqSize, Bool())
+//   val flagBkup = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+
+//   for (i <- 0 until RoqSize) {
+//     when (reset.asBool || io.redirectOut.valid) {
+//       valid(i) := false.B
+//     }.elsewhen (io.redirectOut.valid)
+//   }
+//   when (reset.asBool) {
+//     valid(i)
+//   }
+//   // enqueue logic writes 6 valid
+//   for (i <- 0 until RenameWidth) {
+//     when (canEnqueue(i) && !io.redirect.valid) {
+//       valid(enqPtrVec(i).value) := true.B
+//     }
+//   }
+//   // dequeue/walk logic writes 6 valid, dequeue and walk will not happen at the same time
+//   for (i <- 0 until CommitWidth) {
+//     when (io.commits.valid(i) && state =/= s_extrawalk) {
+//       valid(commitReadAddr(i)) := false.B
+//     }
+//   }
+//   // reset: when exception, reset all valid to false
+//   when (io.redirectOut.valid) {
+//     for (i <- 0 until RoqSize) {
+//       valid(i) := false.B
+//     }
+//   }
+
+// }
+
 class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Input(Valid(new Redirect))
@@ -176,11 +216,14 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   })
 
   // instvalid field
-  val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  // val valid = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  val valid = Mem(RoqSize, Bool())
   // writeback status
-  val writebacked = Reg(Vec(RoqSize, Bool()))
+  // val writebacked = Reg(Vec(RoqSize, Bool()))
+  val writebacked = Mem(RoqSize, Bool())
   // data for redirect, exception, etc.
-  val flagBkup = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  // val flagBkup = RegInit(VecInit(List.fill(RoqSize)(false.B)))
+  val flagBkup = Mem(RoqSize, Bool())
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -221,7 +264,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     * (2) write: write back from exe units
     */
   val dispatchData = Module(new DataModuleTemplate(new RoqDispatchData, RoqSize, CommitWidth, RenameWidth))
+  val dispatchDataRead = dispatchData.io.rdata
+
   val writebackData = Module(new DataModuleTemplate(new RoqWbData, RoqSize, CommitWidth, numWbPorts))
+  val writebackDataRead = writebackData.io.rdata
+
   def mergeExceptionVec(dpData: RoqDispatchData, wbData: RoqWbData) = {
     // these exceptions can be determined before dispatch.
     // by default, let all exceptions be determined by dispatch.
@@ -310,8 +357,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   /**
     * RedirectOut: Interrupt and Exceptions
     */
-  val deqDispatchData = dispatchData.io.rdata(0)
-  val deqWritebackData = writebackData.io.rdata(0)
+  val deqDispatchData = dispatchDataRead(0)
+  val deqWritebackData = writebackDataRead(0)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   val deqExceptionVec = mergeExceptionVec(deqDispatchData, deqWritebackData)
@@ -351,8 +398,9 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val walkFinished = walkCounter <= CommitWidth.U
 
   // extra space is used when roq has no enough space, but mispredict recovery needs such info to walk regmap
-  val needExtraSpaceForMPR = VecInit((0 until CommitWidth).map(i => io.redirect.valid && io.enq.needAlloc(i)))
-  val extraSpaceForMPR = Reg(Vec(RenameWidth, new RoqCommitInfo))
+  require(RenameWidth <= CommitWidth)
+  val needExtraSpaceForMPR = VecInit((0 until RenameWidth).map(i => io.redirect.valid && io.enq.needAlloc(i)))
+  val extraSpaceForMPR = Reg(Vec(RenameWidth, new RoqDispatchData))
   val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
 
   // wiring to csr
@@ -362,26 +410,26 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
   val commit_w = VecInit(deqPtrVec.map(ptr => writebacked(ptr.value)))
-  val commit_exception = dispatchData.io.rdata.zip(writebackData.io.rdata).map{ case (d, w) => mergeExceptionVec(d, w).asUInt.orR }
-  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i) || commit_exception(i) || writebackData.io.rdata(i).flushPipe))
+  val commit_exception = dispatchDataRead.zip(writebackDataRead).map{ case (d, w) => mergeExceptionVec(d, w).asUInt.orR }
+  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i) || commit_exception(i) || writebackDataRead(i).flushPipe))
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else intrEnable
     io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i)
-    io.commits.info(i)  := dispatchData.io.rdata(i)
+    io.commits.info(i)  := dispatchDataRead(i)
 
     when (state === s_idle) {
-      when (io.commits.valid(i) && writebackData.io.rdata(i).fflags.asUInt.orR()) {
-        fflags := writebackData.io.rdata(i).fflags
+      when (io.commits.valid(i) && writebackDataRead(i).fflags.asUInt.orR()) {
+        fflags := writebackDataRead(i).fflags
       }
     }
 
     when (state === s_walk) {
       io.commits.valid(i) := commit_v(i) && shouldWalkVec(i)
     }.elsewhen(state === s_extrawalk) {
-      io.commits.valid(i) := usedSpaceForMPR(RenameWidth-i-1)
-      io.commits.info(i)  := extraSpaceForMPR(RenameWidth-i-1)
+      io.commits.valid(i) := (if (i < RenameWidth) usedSpaceForMPR(RenameWidth-i-1) else false.B)
+      io.commits.info(i)  := (if (i < RenameWidth) extraSpaceForMPR(RenameWidth-i-1) else DontCare)
       state := s_walk
     }
 
@@ -393,7 +441,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       io.commits.info(i).pdest,
       io.commits.info(i).old_pdest,
       debug_exuData(deqPtrVec(i).value),
-      writebackData.io.rdata(i).fflags.asUInt
+      writebackDataRead(i).fflags.asUInt
     )
     XSInfo(state === s_walk && io.commits.valid(i), "walked pc %x wen %d ldst %d data %x\n",
       debug_microOp(walkPtrVec(i).value).cf.pc,
@@ -484,8 +532,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   deqPtrGenModule.io.state := state
   deqPtrGenModule.io.deq_v := commit_v
   deqPtrGenModule.io.deq_w := commit_w
-  deqPtrGenModule.io.deq_exceptionVec := VecInit(dispatchData.io.rdata.zip(writebackData.io.rdata).map{ case (d, w) => mergeExceptionVec(d, w).asUInt })
-  deqPtrGenModule.io.deq_flushPipe := writebackData.io.rdata.map(_.flushPipe)
+  deqPtrGenModule.io.deq_exceptionVec := VecInit(dispatchDataRead.zip(writebackDataRead).map{ case (d, w) => mergeExceptionVec(d, w).asUInt })
+  deqPtrGenModule.io.deq_flushPipe := writebackDataRead.map(_.flushPipe)
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
   deqPtrGenModule.io.commitType := deqDispatchData.commitType
@@ -496,7 +544,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   enqPtrGenModule.io.deq_v := commit_v(0)
   enqPtrGenModule.io.deq_w := commit_w(0)
   enqPtrGenModule.io.deq_exceptionVec := deqExceptionVec.asUInt
-  enqPtrGenModule.io.deq_flushPipe := writebackData.io.rdata(0).flushPipe
+  enqPtrGenModule.io.deq_flushPipe := writebackDataRead(0).flushPipe
   enqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   enqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
   enqPtrGenModule.io.commitType := deqDispatchData.commitType
@@ -569,6 +617,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   }
   // reset: when exception, reset all valid to false
   when (io.redirectOut.valid) {
+    for (i <- 0 until RoqSize) {
+      valid(i) := false.B
+    }
+  }
+  when (reset.asBool) {
     for (i <- 0 until RoqSize) {
       valid(i) := false.B
     }

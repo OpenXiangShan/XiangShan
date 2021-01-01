@@ -2,8 +2,8 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
-#include<signal.h>
-#include<unistd.h>
+#include <signal.h>
+#include <unistd.h>
 #include "ram.h"
 #include "zlib.h"
 #include "compress.h"
@@ -174,21 +174,45 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
 #define dut_ptr_wpc(x)  wpc[x] = dut_ptr->io_difftest_wpc_##x
 #define dut_ptr_wdata(x) wdata[x] = dut_ptr->io_difftest_wdata_##x
 #define dut_ptr_wdst(x)  wdst[x] = dut_ptr->io_difftest_wdst_##x
-  dut_ptr_wpc(0); dut_ptr_wdata(0); dut_ptr_wdst(0); 
-  dut_ptr_wpc(1); dut_ptr_wdata(1); dut_ptr_wdst(1); 
-  dut_ptr_wpc(2); dut_ptr_wdata(2); dut_ptr_wdst(2); 
-  dut_ptr_wpc(3); dut_ptr_wdata(3); dut_ptr_wdst(3); 
-  dut_ptr_wpc(4); dut_ptr_wdata(4); dut_ptr_wdst(4); 
-  dut_ptr_wpc(5); dut_ptr_wdata(5); dut_ptr_wdst(5); 
+#define dut_ptr_read_wb(x) dut_ptr_wpc(x); dut_ptr_wdata(x); dut_ptr_wdst(x);
+
+#if DIFFTEST_WIDTH >= 13 || DIFFTEST_WIDTH < 6
+#error "not supported difftest width"
+#endif
+
+  dut_ptr_read_wb(0);
+  dut_ptr_read_wb(1);
+  dut_ptr_read_wb(2);
+  dut_ptr_read_wb(3);
+  dut_ptr_read_wb(4);
+  dut_ptr_read_wb(5);
+#if DIFFTEST_WIDTH >= 7
+  dut_ptr_read_wb(6);
+#endif
+#if DIFFTEST_WIDTH >= 8
+  dut_ptr_read_wb(7);
+#endif
+#if DIFFTEST_WIDTH >= 9
+  dut_ptr_read_wb(8);
+#endif
+#if DIFFTEST_WIDTH >= 10
+  dut_ptr_read_wb(9);
+#endif
+#if DIFFTEST_WIDTH >= 11
+  dut_ptr_read_wb(10);
+#endif
+#if DIFFTEST_WIDTH >= 12
+  dut_ptr_read_wb(11);
+#endif
 }
 
 inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
 #define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
 #define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
 #define dut_ptr_smask(x) smask[x] = dut_ptr->io_difftest_storeMask_##x
-  dut_ptr_saddr(0); dut_ptr_saddr(1);
-  dut_ptr_sdata(0); dut_ptr_sdata(1);
-  dut_ptr_smask(0); dut_ptr_smask(1);
+#define dut_ptr_read_store(x) dut_ptr_saddr(x); dut_ptr_sdata(x); dut_ptr_smask(x);
+  dut_ptr_read_store(0);
+  dut_ptr_read_store(1);
 }
 
 inline void Emulator::reset_ncycles(size_t cycles) {
