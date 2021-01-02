@@ -3,7 +3,7 @@ package xiangshan.backend.rename
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils.{CircularQueuePtr, HasCircularQueuePtrHelper, XSDebug}
+import utils._
 import xiangshan.backend.brq.BrqPtr
 
 trait HasFreeListConsts extends HasXSParameter {
@@ -49,7 +49,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
     // do checkpoints
     // val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
-    val walk = Flipped(ValidIO(UInt(log2Up(RenameWidth).W)))
+    val walk = Flipped(ValidIO(UInt(log2Up(CommitWidth + 1).W)))
 
     // dealloc phy regs
     val deallocReqs = Input(Vec(CommitWidth, Bool()))
@@ -99,11 +99,12 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, headPtrAllocate, headPtr)
   freeRegs := distanceBetween(tailPtr, headPtrNext)
 
-  // when mispredict or exception happens, reset headPtr to tailPtr (freelist is full).
-  val resetHeadPtr = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe)
-  headPtr := Mux(resetHeadPtr,
+  // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
+  headPtr := Mux(io.redirect.valid && io.redirect.bits.isUnconditional(),
     FreeListPtr(!tailPtrNext.flag, tailPtrNext.value),
-    Mux(io.walk.valid, headPtr - io.walk.bits, headPtrNext)
+    Mux(io.walk.valid,
+      headPtr - io.walk.bits,
+      Mux(io.redirect.valid, headPtr, headPtrNext))
   )
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
@@ -111,10 +112,10 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   XSDebug(io.redirect.valid, p"redirect: brqIdx=${io.redirect.bits.brTag.value}\n")
 
   val enableFreelistCheck = false
-  if(env.EnableDebug && enableFreelistCheck){
-    for( i <- 0 until FL_SIZE){
-      for(j <- i+1 until FL_SIZE){
-      assert(freeList(i) != freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
+  if (enableFreelistCheck) {
+    for (i <- 0 until FL_SIZE) {
+      for (j <- i+1 until FL_SIZE) {
+        XSError(freeList(i) === freeList(j), s"Found same entry in freelist! (i=$i j=$j)")
       }
     }
   }

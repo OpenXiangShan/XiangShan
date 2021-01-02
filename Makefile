@@ -56,7 +56,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	date -R
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
 	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
-	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 	date -R
 
 EMU_TOP      = XSSimSoC
@@ -80,7 +80,7 @@ endif
 # Verilator multi-thread support
 EMU_THREADS  ?= 1
 ifneq ($(EMU_THREADS),1)
-VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi all
 endif
 
 # Verilator savable
@@ -88,6 +88,12 @@ EMU_SNAPSHOT ?=
 ifeq ($(EMU_SNAPSHOT),1)
 VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
+endif
+
+# Verilator coverage
+EMU_COVERAGE ?=
+ifeq ($(EMU_COVERAGE),1)
+VEXTRA_FLAGS += --coverage-line --coverage-toggle
 endif
 
 # co-simulation with DRAMsim3
@@ -166,6 +172,11 @@ EMU_FLAGS = -s $(SEED) -b $(B) -e $(E) $(SNAPSHOT_OPTION) $(WAVEFORM)
 emu: $(EMU)
 	ls build
 	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
+
+coverage:
+	verilator_coverage --annotate build/logs/annotated --annotate-min 1 build/logs/coverage.dat
+	python3 scripts/coverage/coverage.py build/logs/annotated/XSSimTop.v build/XSSimTop_annotated.v
+	python3 scripts/coverage/statistics.py build/XSSimTop_annotated.v >build/coverage.log
 
 # extract verilog module from sim_top.v
 # usage: make vme VME_MODULE=Roq

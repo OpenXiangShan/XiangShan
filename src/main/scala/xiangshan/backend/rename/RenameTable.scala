@@ -17,9 +17,10 @@ class RatWritePort extends XSBundle {
 
 class RenameTable(float: Boolean) extends XSModule {
   val io = IO(new Bundle() {
-    val flush = Input(Bool())
+    val redirect = Flipped(ValidIO(new Redirect))
+    val walkWen = Input(Bool())
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
-    val specWritePorts = Vec(RenameWidth, new RatWritePort)
+    val specWritePorts = Vec(CommitWidth, new RatWritePort)
     val archWritePorts = Vec(CommitWidth, new RatWritePort)
   })
 
@@ -29,8 +30,12 @@ class RenameTable(float: Boolean) extends XSModule {
   // arch state rename table
   val arch_table = RegInit(VecInit(Seq.tabulate(32)(i => i.U(PhyRegIdxWidth.W))))
 
+  // When redirect happens (mis-prediction), don't update the rename table
+  // However, when mis-prediction and walk happens at the same time, rename table needs to be updated
   for(w <- io.specWritePorts){
-    when(w.wen){ spec_table(w.addr) := w.wdata }
+    when(w.wen && (!io.redirect.valid || io.walkWen)) {
+      spec_table(w.addr) := w.wdata
+    }
   }
 
   for((r, i) <- io.readPorts.zipWithIndex){
@@ -44,9 +49,11 @@ class RenameTable(float: Boolean) extends XSModule {
     when(w.wen){ arch_table(w.addr) := w.wdata }
   }
 
-  when(io.flush){
+  val flush = io.redirect.valid && io.redirect.bits.isUnconditional()
+  when (flush) {
     spec_table := arch_table
-    for(w <- io.archWritePorts) {
+    // spec table needs to be updated when flushPipe
+    for (w <- io.archWritePorts) {
       when(w.wen){ spec_table(w.addr) := w.wdata }
     }
   }
