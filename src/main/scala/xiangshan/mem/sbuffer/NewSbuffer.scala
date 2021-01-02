@@ -73,8 +73,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
   //val lru = new SbufferLRU(StoreBufferSize)
   val lru = new SbufferLRU(StoreBufferSize)
-  // 2 * enq + 1 * deq
-  val lruAccessWays = Wire(Vec(io.in.getWidth+io.forward.getWidth, new Valid(UInt(SbufferIndexWidth.W))))
+  // 2 * enq
+  val lruAccessWays = Wire(Vec(io.in.getWidth, new Valid(UInt(SbufferIndexWidth.W))))
   for(w <- lruAccessWays){
     w.bits := DontCare
     w.valid := false.B
@@ -262,7 +262,6 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     }
   }
 
-
   for(i <- 0 until StoreBufferSize){
     buffer.write(i.U, bufferUpdate(i))
     stateVec(i) := stateUpdate(i)
@@ -344,6 +343,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
    */
   evictionIdxEnqReq.valid :=
     isOneOf(sbuffer_state, Seq(x_drain_sbuffer, x_replace)) &&
+      stateVec(evictionIdxWire)===s_valid &&
       noSameBlockInflight(evictionIdxWire)
 
   evictionIdxEnqReq.bits := evictionIdxWire
@@ -377,6 +377,12 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     XSDebug(p"recv cache resp: id=[$respId]\n")
   }
 
+  // update lru
+  lru.access(lruAccessWays)
+  when(sbuffer_state === x_drain_sbuffer && empty){
+    lru.flush()
+    XSDebug("drain sbuffer finish, flush lru\n")
+  }
 
   val needSpace = (io.in(0).fire && !canMerge(0)) +& (io.in(1).fire && !canMerge(1) && !sameTag)
   invalidCount := invalidCount - needSpace + io.dcache.resp.fire
@@ -387,10 +393,10 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   // ---------------------- Load Data Forward ---------------------
 
   for ((forward, i) <- io.forward.zipWithIndex) {
-    val tag_matches = widthMap(i => bufferRead(i).tag===getTag(forward.paddr))
-    val valid_tag_matches = widthMap(i => tag_matches(i) && stateVec(i)===s_valid)
+    val tag_matches = widthMap(i => bufferRead(i).tag === getTag(forward.paddr))
+    val valid_tag_matches = widthMap(i => tag_matches(i) && stateVec(i) === s_valid)
     val inflight_tag_matches = widthMap(i =>
-      tag_matches(i) && (stateVec(i)===s_inflight_req || stateVec(i)===s_inflight_resp)
+      tag_matches(i) && (stateVec(i) === s_inflight_req || stateVec(i) === s_inflight_resp)
     )
     val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
@@ -411,36 +417,15 @@ class NewSbuffer extends XSModule with HasSbufferCst {
       forward.forwardData(j) := DontCare
 
       // valid entries have higher priority than inflight entries
-      when (selectedInflightMask(j)) {
+      when(selectedInflightMask(j)) {
         forward.forwardMask(j) := true.B
         forward.forwardData(j) := selectedInflightData(j)
       }
-      when (selectedValidMask(j)) {
+      when(selectedValidMask(j)) {
         forward.forwardMask(j) := true.B
         forward.forwardData(j) := selectedValidData(j)
       }
     }
-
-    // forward lru
-    val lru_tag_matches = widthMap(i =>
-      tag_matches(i) && (stateVec(i)===s_valid || stateVec(i)===s_inflight_req)
-    )
-    val forward_lru = PriorityEncoderWithFlag(lru_tag_matches)
-    when(forward_lru._2){
-      lruAccessWays(io.in.getWidth + i).valid:= true.B
-      lruAccessWays(io.in.getWidth + i).bits := forward_lru._1
-    }
-
-    XSDebug(Cat(inflight_tag_matches).orR || Cat(valid_tag_matches).orR,
-      p"[$i] forward paddr:${Hexadecimal(forward.paddr)}\n"
-    )
-  }
-
-  // update lru
-  lru.access(lruAccessWays)
-  when(sbuffer_state === x_drain_sbuffer && empty){
-    lru.flush()
-    XSDebug("drain sbuffer finish, flush lru\n")
   }
 }
 
