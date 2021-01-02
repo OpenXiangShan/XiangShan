@@ -182,7 +182,7 @@ class LTBColumn extends LTBModule {
   // if4 update and write
   when (updateValid && !doingReset) {
     // When a branch resolves and is found to not be in the LTB,
-    // it is inserted into the LTB if determined to be a loop-branch and if it is mispredicted by the default predictor.
+    // it is inserted into the LTB if determined to be sa loop-branch and if it is mispredicted by the default predictor.
     when (!tagMatch && update.misPred) {
       // 没有判断conf是否等于0，以及age是否等于0
       XSDebug("Replace a entry\n")
@@ -213,7 +213,7 @@ class LTBColumn extends LTBModule {
         wEntry.conf := Mux((if4_uEntry.nSpecCnt + 1.U) === if4_uEntry.tripCnt, Mux(if4_uEntry.isLearned, 7.U, if4_uEntry.conf + 1.U), 0.U)
         wEntry.tripCnt := if4_uEntry.nSpecCnt + 1.U
         // wEntry.tripCnt := update.meta
-        wEntry.specCnt := Mux(update.misPred, /*entry.specCnt - update.meta*/0.U, if4_uEntry.specCnt - update.meta/* - entry.nSpecCnt - 1.U*/)
+        wEntry.specCnt := Mux(update.misPred, /*entry.specCnt - update.meta*/0.U, if4_uEntry.specCnt/* - entry.nSpecCnt - 1.U*/)
 
         wEntry.nSpecCnt := 0.U
         wEntry.brTag := updateBrTag
@@ -232,7 +232,8 @@ class LTBColumn extends LTBModule {
   when (io.if4_fire && if4_entry.tag === if4_tag && io.outMask) {
     when ((if4_entry.specCnt + 1.U) === if4_entry.tripCnt && if4_entry.isConf) { // use nSpecCnts
       swEntry.age := 7.U
-      swEntry.specCnt := if4_entry.specCnt + 1.U
+      // swEntry.specCnt := if4_entry.specCnt + 1.U
+      swEntry.specCnt := 0.U
     }.otherwise {
       swEntry.age := Mux(if4_entry.age === 7.U, 7.U, if4_entry.age + 1.U)
       swEntry.specCnt := if4_entry.specCnt + 1.U
@@ -240,27 +241,11 @@ class LTBColumn extends LTBModule {
   }
 
   // Bypass
-  // when (ltb.swen && if3_idx === if4_idx) {
-  //   XSDebug("if3_entry := swEntry\n")
-  //   if3_entry := swEntry
-  // }.elsewhen (ltb.wen && if3_idx === updateIdx) {
-  //   XSDebug("if3_entry := wEntry\n")
-  //   if3_entry := wEntry
-  // }
-
-  // when(io.if3_fire) {
-  //   if4_entry := if3_entry
-  // }.elsewhen(ltb.swen) {
-  //   if4_entry := swEntry
-  // }.elsewhen(ltb.wen && if4_idx === updateIdx) {
-  //   if4_entry := wEntry
-  // }
-
   when(io.if3_fire) {
     when(ltb.swen && if3_idx === if4_idx) {
       XSDebug("Bypass swEntry\n")
       if4_entry := swEntry
-    }.elsewhen(ltb.wen && if3_idx === updateIdx) {
+    }.elsewhen(ltb.wen && if3_idx === if4_uIdx) {
       XSDebug("Bypass wEntry\n")
       if4_entry := wEntry
     }.otherwise {
@@ -268,13 +253,36 @@ class LTBColumn extends LTBModule {
     }
   }.otherwise {
     when(ltb.swen) {
-      XSDebug("Bypass swEntry\n")
+      XSDebug("spec Update\n")
       if4_entry := swEntry
-    }.elsewhen(ltb.wen && if4_idx === updateIdx) {
-      XSDebug("Bypass wEntry\n")
+    }.elsewhen(ltb.wen && if4_idx === if4_uIdx) {
+      XSDebug("Keeping\n")
       if4_entry := wEntry
     }
   }
+
+  // if4_uEntry bypass
+  // when(io.if3_fire) {
+    when(ltb.swen && updateIdx === if4_idx) {
+      XSDebug("nSpec Bypass swEntry\n")
+      if4_uEntry := swEntry
+    }.elsewhen(ltb.wen && updateIdx === if4_uIdx) {
+      XSDebug("nSpec Bypass wEntry\n")
+      if4_uEntry := wEntry
+    }.otherwise {
+      if4_uEntry := if3_uEntry
+    }
+  // }.otherwise {
+  //   when(ltb.swen && if4_idx === if4_uIdx) {
+  //     XSDebug("Update spec update\n")
+  //     if4_uEntry := swEntry
+  //   }.elsewhen(ltb.wen) {
+  //     XSDebug("Update nSpec update\n")
+  //     if4_uEntry := wEntry
+  //   }
+  // }
+
+
 
   // Reseting
   // when (doingReset) {
@@ -287,7 +295,7 @@ class LTBColumn extends LTBModule {
   }
 
   // bypass for if4_entry.specCnt
-  when (updateValid && !doingReset && valid && updateIdx === if4_idx) {
+  when (updateValid && !doingReset && valid && if4_uIdx === if4_idx) {
     when (!tagMatch && update.misPred || tagMatch) {
       swEntry.nSpecCnt := wEntry.nSpecCnt
     }
