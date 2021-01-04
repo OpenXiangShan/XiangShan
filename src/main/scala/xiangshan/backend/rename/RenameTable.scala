@@ -20,7 +20,7 @@ class RenameTable(float: Boolean) extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val walkWen = Input(Bool())
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
-    val specWritePorts = Vec(RenameWidth, new RatWritePort)
+    val specWritePorts = Vec(CommitWidth, new RatWritePort)
     val archWritePorts = Vec(CommitWidth, new RatWritePort)
   })
 
@@ -49,7 +49,7 @@ class RenameTable(float: Boolean) extends XSModule {
     when(w.wen){ arch_table(w.addr) := w.wdata }
   }
 
-  val flush = io.redirect.valid && (io.redirect.bits.isException || io.redirect.bits.isFlushPipe)
+  val flush = io.redirect.valid && io.redirect.bits.isUnconditional()
   when (flush) {
     spec_table := arch_table
     // spec table needs to be updated when flushPipe

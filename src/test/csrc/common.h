@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <stdint.h>
 #include <assert.h>
+#include <pthread.h>
 
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"
@@ -20,5 +21,12 @@
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
 #endif
+
+extern int assert_count;
+void assert_init();
+void assert_finish();
+
+extern int signal_num;
+void sig_handler(int signo);
 
 #endif // __COMMON_H

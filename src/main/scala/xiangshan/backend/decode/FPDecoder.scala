@@ -3,8 +3,8 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
+import xiangshan.backend.decode.Instructions._
 import xiangshan.{FPUCtrlSignals, XSModule}
-import xiangshan.backend.decode.isa.RVFInstr._
 
 class FPDecoder extends XSModule{
   val io = IO(new Bundle() {

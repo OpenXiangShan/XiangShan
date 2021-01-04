@@ -49,7 +49,7 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
 
     // do checkpoints
     // val cpReqs = Vec(RenameWidth, Flipped(ValidIO(new BrqPtr)))
-    val walk = Flipped(ValidIO(UInt(log2Up(RenameWidth).W)))
+    val walk = Flipped(ValidIO(UInt(log2Up(CommitWidth + 1).W)))
 
     // dealloc phy regs
     val deallocReqs = Input(Vec(CommitWidth, Bool()))
@@ -99,10 +99,8 @@ class FreeList extends XSModule with HasFreeListConsts with HasCircularQueuePtrH
   val headPtrNext = Mux(io.req.canAlloc && io.req.doAlloc, headPtrAllocate, headPtr)
   freeRegs := distanceBetween(tailPtr, headPtrNext)
 
-  // when mispredict or exception happens, reset headPtr to tailPtr (freelist is full).
-  val resetHeadPtr = io.redirect.bits.isException || io.redirect.bits.isFlushPipe
   // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
-  headPtr := Mux(io.redirect.valid && resetHeadPtr,
+  headPtr := Mux(io.redirect.valid && io.redirect.bits.isUnconditional(),
     FreeListPtr(!tailPtrNext.flag, tailPtrNext.value),
     Mux(io.walk.valid,
       headPtr - io.walk.bits,

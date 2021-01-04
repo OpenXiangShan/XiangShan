@@ -4,7 +4,6 @@
 #include "ram.h"
 #include "compress.h"
 
-#define RAMSIZE (256 * 1024 * 1024UL)
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
@@ -13,10 +12,12 @@ CoDRAMsim3 *dram = NULL;
 
 static uint64_t *ram;
 static long img_size = 0;
+static pthread_mutex_t ram_mutex;
+
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
 void* get_ram_start() { return &ram[0]; }
-long get_ram_size() { return RAMSIZE; }
+long get_ram_size() { return EMU_RAM_SIZE; }
 
 #ifdef TLB_UNITTEST
 void addpageSv39() {
@@ -109,17 +110,17 @@ void init_ram(const char *img) {
   printf("The image is %s\n", img);
 
   // initialize memory using Linux mmap
-  printf("Using simulated %luMB RAM\n", RAMSIZE / (1024 * 1024));
-  ram = (uint64_t *)mmap(NULL, RAMSIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  printf("Using simulated %luMB RAM\n", EMU_RAM_SIZE / (1024 * 1024));
+  ram = (uint64_t *)mmap(NULL, EMU_RAM_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   if (ram == (uint64_t *)MAP_FAILED) {
-    printf("Cound not mmap 0x%lx bytes\n", RAMSIZE);
+    printf("Cound not mmap 0x%lx bytes\n", EMU_RAM_SIZE);
     assert(0);
   }
 
   int ret;
   if (isGzFile(img)) {
     printf("Gzip file detected and loading image from extracted gz file\n");
-    img_size = readFromGz(ram, img, RAMSIZE, LOAD_RAM);
+    img_size = readFromGz(ram, img, EMU_RAM_SIZE, LOAD_RAM);
     assert(img_size >= 0);
   }
   else {
@@ -131,8 +132,8 @@ void init_ram(const char *img) {
 
     fseek(fp, 0, SEEK_END);
     img_size = ftell(fp);
-    if (img_size > RAMSIZE) {
-      img_size = RAMSIZE;
+    if (img_size > EMU_RAM_SIZE) {
+      img_size = EMU_RAM_SIZE;
     }
 
     fseek(fp, 0, SEEK_SET);
@@ -156,29 +157,38 @@ void init_ram(const char *img) {
   dram = new CoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
 #endif
 
+  pthread_mutex_init(&ram_mutex, 0);
+
 }
 
 void ram_finish() {
-  munmap(ram, RAMSIZE);
+  munmap(ram, EMU_RAM_SIZE);
 #ifdef WITH_DRAMSIM3
   dramsim3_finish();
 #endif
+  pthread_mutex_destroy(&ram_mutex);
 }
 
+
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
-  if (en && rIdx >= RAMSIZE / sizeof(uint64_t)) {
-    rIdx %= RAMSIZE / sizeof(uint64_t);
+  if (en && rIdx >= EMU_RAM_SIZE / sizeof(uint64_t)) {
+    rIdx %= EMU_RAM_SIZE / sizeof(uint64_t);
   }
-  return (en) ? ram[rIdx] : 0;
+  pthread_mutex_lock(&ram_mutex);
+  uint64_t rdata = (en) ? ram[rIdx] : 0;
+  pthread_mutex_unlock(&ram_mutex);
+  return rdata;
 }
 
 extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
   if (wen) {
-    if (wIdx >= RAMSIZE / sizeof(uint64_t)) {
+    if (wIdx >= EMU_RAM_SIZE / sizeof(uint64_t)) {
       printf("ERROR: ram wIdx = 0x%lx out of bound!\n", wIdx);
-      assert(wIdx < RAMSIZE / sizeof(uint64_t));
+      assert(wIdx < EMU_RAM_SIZE / sizeof(uint64_t));
     }
+    pthread_mutex_lock(&ram_mutex);
     ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask);
+    pthread_mutex_unlock(&ram_mutex);
   }
 }
 
@@ -201,7 +211,7 @@ struct dramsim3_meta {
 };
 
 void axi_read_data(const axi_ar_channel &ar, dramsim3_meta *meta) {
-  uint64_t address = ar.addr % RAMSIZE;
+  uint64_t address = ar.addr % EMU_RAM_SIZE;
   uint64_t beatsize = 1 << ar.size;
   uint8_t  beatlen  = ar.len + 1;
   uint64_t transaction_size = beatsize * beatlen;
@@ -350,7 +360,7 @@ void dramsim3_helper(axi_channel &axi) {
     axi.b.id = meta->id;
     // assert(axi.b.ready == 1);
     for (int i = 0; i < meta->len; i++) {
-      uint64_t address = wait_resp_b->req->address % RAMSIZE;
+      uint64_t address = wait_resp_b->req->address % EMU_RAM_SIZE;
       ram[address / sizeof(uint64_t) + i] = meta->data[i];
     }
     // printf("axi b channel fired\n");

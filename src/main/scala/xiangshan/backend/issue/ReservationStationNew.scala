@@ -167,33 +167,58 @@ class ReservationStationCtrl
   }
 
 
-  // redirect and feedback
+  // redirect and feedback && wakeup
+  //
   for (i <- 0 until iqSize) {
     val cnt = cntQueue(idxQueue(i))
-
+    when (!(deqIdx === i.U && deqValid)) {
     if (i != 0) { // TODO: combine the two case
       val nextIdx = i.U - moveMask(i-1)
+      // cnt
       when (stateQueue(i)===s_replay) {
         when (cnt===0.U) { stateQueue(nextIdx) := s_valid }
         .otherwise { cnt := cnt - 1.U }
       }
+      // feedback
       when (fbMatchVec(i)) {
         stateQueue(nextIdx) := Mux(fbHit, s_idle, s_replay)
         cnt := Mux(fbHit, cnt, (replayDelay-1).U)
       }
+      // redirect
       when (redHitVec(i)) { stateQueue(nextIdx) := s_idle }
+      
+      // wakeup
+      val hitVec = io.data.srcUpdate(idxQueue(i))
+      for (j <- 0 until srcNum) {
+        when (hitVec(j) && validQueue(i)) {
+          srcQueue(nextIdx)(j) := true.B
+          XSDebug(p"srcHit: i:${i.U} j:${j.U} moveMask(${i.U}):${moveMask(i)} nextIdx:${nextIdx}")
+        }
+      }
     } else { when (!moveMask(i)) {
       val nextIdx = i
+      // cnt
       when (stateQueue(i)===s_replay) {
         when (cnt===0.U) { stateQueue(nextIdx) := s_valid }
         .otherwise { cnt := cnt - 1.U }
       }
+      // feedback
       when (fbMatchVec(i)) {
         stateQueue(nextIdx) := Mux(fbHit, s_idle, s_replay)
         cnt := Mux(fbHit, cnt, (replayDelay-1).U)
       }
+      // redirect
       when (redHitVec(i)) { stateQueue(nextIdx) := s_idle }
+      // wakeup
+      val hitVec = io.data.srcUpdate(idxQueue(i))
+      for (j <- 0 until srcNum) {
+        when (hitVec(j) && validQueue(i)) {
+          srcQueue(nextIdx)(j) := true.B
+          XSDebug(p"srcHit: i:${i.U} j:${j.U} moveMask(${i.U}):${moveMask(i)} nextIdx:${nextIdx}")    
+        }
+      }
     }}
+    }
   }
 
   // output
@@ -232,17 +257,6 @@ class ReservationStationCtrl
       p"src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} " +
       p" state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} " +
       p"type:${srcTypeSeq(2)}\n")
-  }
-
-  // wakeup
-  for(i <- 0 until IssQueSize) {
-    val hitVec = io.data.srcUpdate(idxQueue(i))
-    for(j <- 0 until srcNum) {
-      when (hitVec(j) && validQueue(i)) {
-        srcQueue(i.U - moveMask(i))(j) := true.B
-        XSDebug(p"srcHit: i:${i.U} j:${j.U}\n")
-      }
-    }
   }
 
   // other to Data

@@ -4,9 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.XSTrap
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.mem._
 import xiangshan.backend.fu.HasCSRConst
 import chisel3.ExcitingUtils._
 
@@ -117,7 +115,7 @@ class TlbEntry extends TlbBundle {
 class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   require(log2Up(num)==log2Down(num))
   /* vpn can be divide into three part */
-  // vpn: tagPart + addrPart
+  // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
   val cutLen  = log2Up(num)
 
   val tag     = UInt(tagLen.W) // NOTE: high part of vpn
@@ -127,9 +125,10 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   val vs      = Vec(num, Bool())
 
   def tagClip(vpn: UInt, level: UInt) = { // full vpn => tagLen
-    Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2+cutLen)),
-    Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1+cutLen)),
-                     Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0+cutLen))))(tagLen-1, 0)
+    val tmp = Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2)),
+              Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1)),
+                               Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0))))
+    tmp(tmp.getWidth-1, tmp.getWidth-tagLen)
   }
 
   // NOTE: get insize idx
@@ -140,7 +139,7 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   }
 
   def hit(vpn: UInt) = {
-    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level))
+    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level)) && (level === 2.U)
   }
 
   def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntires = {
@@ -386,7 +385,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // reset pf when pf hit
   val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
-  val pfHitRefill = ParallelOR(pfHitReset.asBools)
+  val pfHitRefill = false.B//ParallelOR(pfHitReset.asBools)
 
   // pf update
   when (refill) {
