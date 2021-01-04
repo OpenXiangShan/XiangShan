@@ -15,7 +15,7 @@ void assert_finish() {
 
 extern "C" void xs_assert(long long line) {
   pthread_mutex_lock(&assert_mutex);
-  printf("Assertion failed at line %lld\n.", line);
+  printf("Assertion failed at line %lld.\n", line);
   assert_count++;
   pthread_mutex_unlock(&assert_mutex);
 }
