@@ -1,3 +1,6 @@
+#ifndef __EMU_H
+#define __EMU_H
+
 #include "common.h"
 #include "snapshot.h"
 #include "VXSSimSoC.h"
@@ -42,6 +45,7 @@ class Emulator {
     STATE_BADTRAP = 1,
     STATE_ABORT = 2,
     STATE_LIMIT_EXCEEDED = 3,
+    STATE_SIG = 4,
     STATE_RUNNING = -1
   };
 
@@ -75,3 +79,5 @@ public:
   bool is_good_trap() { return trapCode == STATE_GOODTRAP; };
   int get_trapcode() { return trapCode; }  
 };
+
+#endif

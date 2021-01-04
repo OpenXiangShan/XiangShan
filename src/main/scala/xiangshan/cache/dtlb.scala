@@ -4,9 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.XSTrap
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.mem._
 import xiangshan.backend.fu.HasCSRConst
 import chisel3.ExcitingUtils._
 
