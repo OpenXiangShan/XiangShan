@@ -11,6 +11,7 @@ class MantDivSqrt(len: Int) extends Module{
       val a, b = UInt(len.W)
       val isDiv = Bool()
     }))
+	val kill = Input(Bool())
     val out = DecoupledIO(new Bundle() {
       val quotient = UInt(len.W)
       val isZeroRem = Bool()
@@ -45,6 +46,7 @@ class MantDivSqrt(len: Int) extends Module{
       when(io.out.fire()){ state := s_idle }
     }
   }
+  when(io.kill){ state := s_idle }
 
   val ws, wc = Reg(UInt((len+4).W))
 

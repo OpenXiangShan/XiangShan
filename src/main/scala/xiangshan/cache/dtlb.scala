@@ -387,7 +387,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // reset pf when pf hit
   val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
-  val pfHitRefill = ParallelOR(pfHitReset.asBools)
+  val pfHitRefill = false.B//ParallelOR(pfHitReset.asBools)
 
   // pf update
   when (refill) {
