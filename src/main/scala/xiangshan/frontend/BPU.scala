@@ -201,14 +201,14 @@ class BPUStage1 extends BPUStage {
   // so we use io.in instead of inLatch
   val ubtbResp = io.in.resp.ubtb
   // the read operation is already masked, so we do not need to mask here
-  takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && ubtbResp.takens(i)))
+  takens    := VecInit((0 until PredictWidth).map(i => ubtbResp.takens(i)))
   // notTakens := VecInit((0 until PredictWidth).map(i => ubtbResp.hits(i) && !ubtbResp.takens(i) && ubtbResp.brMask(i)))
   brMask := ubtbResp.brMask
   jalMask := DontCare
   targets := ubtbResp.targets
 
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, ubtbResp.hits(bankWidth-1) && !ubtbResp.is_RVC(bankWidth-1) && inLatch.mask(bankWidth-1))
-  lastBankHasHalfRVI  := ubtbResp.hits(PredictWidth-1) && !ubtbResp.is_RVC(PredictWidth-1) && inLatch.mask(PredictWidth-1)
+  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, ubtbResp.hits(bankWidth-1) && !ubtbResp.is_RVC(bankWidth-1))
+  lastBankHasHalfRVI  := ubtbResp.hits(PredictWidth-1) && !ubtbResp.is_RVC(PredictWidth-1)
 
   // resp and brInfo are from the components,
   // so it does not need to be latched

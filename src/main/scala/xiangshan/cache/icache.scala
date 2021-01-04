@@ -105,6 +105,9 @@ class ICacheIO extends ICacheBundle
   val flush = Input(UInt(2.W))
   val l1plusflush = Output(Bool())
   val fencei = Input(Bool())
+  val prev = Flipped(Valid(UInt(16.W)))
+  val prev_ipf = Input(Bool())
+  val pd_out = Output(new PreDecodeResp)
 }
 
 /* ------------------------------------------------------------
@@ -372,6 +375,8 @@ class ICache extends ICacheModule
   )
   outPacket := cutHelper(dataHitWay,s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
 
+
+
   //ICache MissQueue
   val icacheMissQueue = Module(new IcacheMissQueue)
   val blocking = RegInit(false.B)
@@ -423,6 +428,33 @@ class ICache extends ICacheModule
   val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
 
   s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.valid && io.resp.ready)
+
+
+  val pds = Seq.fill(nWays)(Module(new PreDecode))
+  for (i <- 0 until nWays) {
+    val wayResp = Wire(new ICacheResp)
+    val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc(5,1), s3_req_mask)
+    val refillData = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask)
+    wayResp.pc := s3_req_pc
+    wayResp.data := Mux(s3_valid && s3_hit, wayData, refillData)
+    wayResp.mask := s3_req_mask
+    wayResp.ipf := s3_tlb_resp.excp.pf.instr
+    wayResp.acf := s3_access_fault
+    pds(i).io.in := wayResp
+    pds(i).io.prev <> io.prev
+    // if a fetch packet triggers page fault, set the pf instruction to nop
+    when (!io.prev.valid && s3_tlb_resp.excp.pf.instr) {
+      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
+      (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
+      pds(i).io.in.data := instrs.asUInt
+    }.elsewhen (io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
+      pds(i).io.prev.bits := ZeroExt("b0010011".U, 16)
+      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
+      (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
+      pds(i).io.in.data := instrs.asUInt
+    }
+  }
+  io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
