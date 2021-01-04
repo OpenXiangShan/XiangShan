@@ -111,7 +111,7 @@ trait HasXSParameter {
   val DataBytes = DataBits / 8
   val HasFPU = core.HasFPU
   val FetchWidth = core.FectchWidth
-  val PredictWidth = FetchWidth * 2
+  val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
   val EnableBPU = core.EnableBPU
   val EnableBPD = core.EnableBPD // enable backing predictor(like Tage) in BPUStage3
   val EnableRAS = core.EnableRAS

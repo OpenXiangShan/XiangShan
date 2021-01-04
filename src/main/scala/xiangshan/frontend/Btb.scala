@@ -12,7 +12,7 @@ import chisel3.experimental.chiselName
 
 import scala.math.min
 
-trait BTBParams extends HasXSParameter {
+trait BTBParams extends HasXSParameter with HasIFUConst {
   val nRows = BtbSize / (PredictWidth * BtbWays)
   val offsetLen = 13
   val extendedNRows = nRows
@@ -35,7 +35,7 @@ object BtbDataEntry {
 class BtbMetaEntry() extends XSBundle with BTBParams {
   val valid = Bool()
   // TODO: don't need full length of tag
-  val tag = UInt((VAddrBits - log2Up(BtbSize) - 1).W)
+  val tag = UInt((VAddrBits - log2Up(BtbSize) - instOffsetBits).W)
   val btbType = UInt(2.W)
   val isRVC = Bool()
 }
@@ -185,7 +185,7 @@ class BTB extends BasePredictor with BTBParams{
     val edataBank = (if (b < bankWidth) Mux(if2_startsAtOddBank, 1.U, 0.U)
                      else Mux(if2_startsAtOddBank, 0.U, 1.U))
     // Use real pc to calculate the target
-    io.resp.targets(b) := Mux(data_entry.extended, if2_edataRead(edataBank), (if2_pc.asSInt + (b << 1).S + data_entry.offset).asUInt)
+    io.resp.targets(b) := Mux(data_entry.extended, if2_edataRead(edataBank), (if2_pc.asSInt + (b << instOffsetBits).S + data_entry.offset).asUInt)
     io.resp.hits(b)  := if2_bankHits(realBank)
     io.resp.types(b) := meta_entry.btbType
     io.resp.isRVC(b) := meta_entry.isRVC

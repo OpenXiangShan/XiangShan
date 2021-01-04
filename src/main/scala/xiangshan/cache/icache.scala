@@ -27,7 +27,7 @@ case class ICacheParameters(
   def replacement = new RandomReplacement(nWays)
 }
 
-trait HasICacheParameters extends HasL1CacheParameters {
+trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   val cacheParams = icacheParameters
 
   //TODO: temp set
@@ -443,11 +443,11 @@ class ICache extends ICacheModule
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
     // if a fetch packet triggers page fault, set the pf instruction to nop
-    when (!io.prev.valid && s3_tlb_resp.excp.pf.instr) {
+    when ((!(HasCExtension.B) || io.prev.valid) && s3_tlb_resp.excp.pf.instr ) {
       val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
       (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
       pds(i).io.in.data := instrs.asUInt
-    }.elsewhen (io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
+    }.elsewhen (HasCExtension.B && io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
       pds(i).io.prev.bits := ZeroExt("b0010011".U, 16)
       val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
       (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
