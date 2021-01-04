@@ -20,7 +20,7 @@ class RenameTable(float: Boolean) extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     val walkWen = Input(Bool())
     val readPorts = Vec({if(float) 4 else 3} * RenameWidth, new RatReadPort)
-    val specWritePorts = Vec(RenameWidth, new RatWritePort)
+    val specWritePorts = Vec(CommitWidth, new RatWritePort)
     val archWritePorts = Vec(CommitWidth, new RatWritePort)
   })
 
