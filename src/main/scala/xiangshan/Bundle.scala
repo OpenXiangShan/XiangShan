@@ -150,16 +150,16 @@ class BpuMeta extends XSBundle with HasBPUParameter {
 
 class Predecode extends XSBundle with HasIFUConst {
   val hasLastHalfRVI = Bool()
-  val mask = UInt((FetchWidth*2).W)
+  val mask = UInt(PredictWidth.W)
   val lastHalf = UInt(nBanksInPacket.W)
-  val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
+  val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
 class CfiUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)
-  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
+  val fetchIdx = UInt(log2Up(PredictWidth).W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val bpuMeta = new BpuMeta
