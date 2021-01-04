@@ -436,9 +436,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
     // XSDebug(false, true.B, "\n")
     for (i <- 0 until PredictWidth) {
-      XSDebug(io.outFire && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
+      XSDebug(io.outFire && (i.U === 0.U || i.U === 4.U || i.U === 8.U || i.U === 12.U), "[IF4][resps]")
       XSDebug(false, io.outFire, "[i:%d, e:%d, s:%d] ", i.U, io.resp.exit(i), io.meta.specCnts(i))
-      XSDebug(false, io.outFire && (i.U === 7.U || i.U === 15.U), "\n")
+      XSDebug(false, io.outFire && (i.U === 3.U || i.U === 7.U || i.U === 11.U || i.U === 15.U), "\n")
     }
   }
 }
