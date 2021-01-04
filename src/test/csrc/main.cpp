@@ -1,6 +1,7 @@
-#include "emu.h"
 #include <functional>
 #include <locale.h>
+#include <csignal>
+#include "emu.h"
 
 static char mybuf[BUFSIZ];
 
@@ -15,6 +16,10 @@ int main(int argc, const char** argv) {
 
   // enable thousands separator for printf()
   setlocale(LC_NUMERIC, "");
+
+  if (signal(SIGINT, sig_handler) == SIG_ERR) {
+    printf("\ncan't catch SIGINT\n");
+  }
 
   auto emu = new Emulator(argc, argv);
 
