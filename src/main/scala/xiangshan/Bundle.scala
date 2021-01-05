@@ -84,7 +84,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val lastBankHasHalfRVI = Bool()
 
   // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U(7.W), firstBankHasHalfRVI.asUInt, 0.U(7.W))
+  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W), firstBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W))
 
   def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
