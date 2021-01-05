@@ -162,6 +162,8 @@ trait HasXSParameter {
   val NumPerfCounters = core.NumPerfCounters
 
   val icacheParameters = ICacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
     nMissEntries = 2
   )
 
