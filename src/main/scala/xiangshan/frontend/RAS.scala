@@ -178,8 +178,8 @@ class RAS extends BasePredictor
     val commit_is_full = commit_ras.is_full
     val commit_top_addr = commit_ras.top_addr
 
-    commit_push := !commit_is_full  && io.recover.valid && io.recover.bits.pd.isCall
-    commit_pop  := !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
+    commit_push := !commit_is_full  && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isCall
+    commit_pop  := !commit_is_empty && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isRet
 
 
     io.out.valid := !spec_is_empty
