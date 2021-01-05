@@ -214,7 +214,22 @@ class IFU extends XSModule with HasIFUConst
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
 
-  def if3_nextValidPCNotEquals(pc: UInt) = !if2_valid || if2_valid && if2_pc =/= pc
+  class IF3_PC_COMP extends XSModule {
+    val io = IO(new Bundle {
+      val if2_pc = Input(UInt(VAddrBits.W))
+      val pc     = Input(UInt(VAddrBits.W))
+      val if2_valid = Input(Bool())
+      val res = Output(Bool())
+    })
+    io.res := !io.if2_valid || io.if2_valid && io.if2_pc =/= io.pc
+  }
+  def if3_nextValidPCNotEquals(pc: UInt) = {
+    val comp = Module(new IF3_PC_COMP)
+    comp.io.if2_pc := if2_pc
+    comp.io.pc     := pc
+    comp.io.if2_valid := if2_valid
+    comp.io.res
+  }
 
   val if3_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => !if3_pendingPrevHalfInstr && if3_bp.realTakens(i) && if3_nextValidPCNotEquals(if3_bp.targets(i))))
   val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.bits.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.target)
@@ -336,9 +351,29 @@ class IFU extends XSModule with HasIFUConst
   prevHalfInstrReq.bits.ipf := if4_ipf
   prevHalfInstrReq.bits.meta := bpu.io.bpuMeta(idx)
 
-  def if4_nextValidPCNotEquals(pc: UInt) = if3_valid  && if3_pc =/= pc ||
-                                           !if3_valid && (if2_valid && if2_pc =/= pc) ||
-                                           !if3_valid && !if2_valid
+  class IF4_PC_COMP extends XSModule {
+    val io = IO(new Bundle {
+      val if2_pc = Input(UInt(VAddrBits.W))
+      val if3_pc = Input(UInt(VAddrBits.W))
+      val pc     = Input(UInt(VAddrBits.W))
+      val if2_valid = Input(Bool())
+      val if3_valid = Input(Bool())
+      val res = Output(Bool())
+    })
+    io.res := io.if3_valid  && io.if3_pc =/= io.pc ||
+              !io.if3_valid && (io.if2_valid && io.if2_pc =/= io.pc) ||
+              !io.if3_valid && !io.if2_valid
+  }
+  def if4_nextValidPCNotEquals(pc: UInt) = {
+    val comp = Module(new IF4_PC_COMP)
+    comp.io.if2_pc := if2_pc
+    comp.io.if3_pc := if3_pc
+    comp.io.pc     := pc
+    comp.io.if2_valid := if2_valid
+    comp.io.if3_valid := if3_valid
+    comp.io.res
+  }
+
   val if4_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => if4_bp.realTakens(i) && if4_nextValidPCNotEquals(if4_bp.targets(i))))
 
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.bits.pc+2.U)
