@@ -479,7 +479,7 @@ class Tage extends BaseTage {
   val updateSCMeta = u.bpuMeta.tageMeta.scMeta
   val updateTageMisPred = updateMeta.taken =/= u.taken && updateIsBr
 
-  val updateBank = u.pc(log2Ceil(TageBanks), instOffsetBits)
+  val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
