@@ -8,6 +8,8 @@
 
 void init_ram(const char *img);
 void ram_finish();
+void* get_ram_start();
+long get_ram_size();
 
 #ifdef WITH_DRAMSIM3
 // 4*64 bits

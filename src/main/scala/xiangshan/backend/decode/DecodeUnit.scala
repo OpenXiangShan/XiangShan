@@ -16,7 +16,7 @@ import freechips.rocketchip.util.{uintToBitPat,UIntIsOneOf}
 import xiangshan._
 import utils._
 import xiangshan.backend._
-import xiangshan.backend.decode.AltInstructions._
+import xiangshan.backend.decode.Instructions._
 import xiangshan.backend.fu.fpu.FPUOpType
 import freechips.rocketchip.tile.RocketTile
 
