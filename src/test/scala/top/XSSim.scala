@@ -236,12 +236,13 @@ object TestMain extends App {
   // set soc parameters
   val socArgs = args.filterNot(_ == "--with-dramsim3")
   Parameters.set(
-    if(socArgs.contains("--fpga-platform")) {
-      if (socArgs.contains("--dual-core")) Parameters.dualCoreParameters
-      else Parameters()
+    (socArgs.contains("--fpga-platform"), socArgs.contains("--dual-core"), socArgs.contains("--disable-log")) match {
+      case (true, _, _)          => Parameters()
+      case (false,  true,  true) => println("dual"); Parameters.simDualCoreParameters
+      case (false, false,  true) => Parameters.simParameters
+      case (false,  true, false) => Parameters.debugDualCoreParameters
+      case (false, false, false) => Parameters.debugParameters
     }
-    else if(socArgs.contains("--disable-log")) Parameters.simParameters // sim only, disable log
-    else Parameters.debugParameters // open log
   )
 
   val otherArgs = socArgs.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core")
