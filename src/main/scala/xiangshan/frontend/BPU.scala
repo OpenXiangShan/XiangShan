@@ -15,12 +15,12 @@ trait HasBPUParameter extends HasXSParameter {
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
 }
 
-class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle {
-  def tagBits = VAddrBits - idxBits - 1
+class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle with HasIFUConst {
+  def tagBits = VAddrBits - idxBits - instOffsetBits
 
   val tag = UInt(tagBits.W)
   val idx = UInt(idxBits.W)
-  val offset = UInt(1.W)
+  val offset = UInt(instOffsetBits.W)
 
   def fromUInt(x: UInt) = x.asTypeOf(UInt(VAddrBits.W)).asTypeOf(this)
   def getTag(x: UInt) = fromUInt(x).tag
@@ -148,7 +148,7 @@ abstract class BPUStage extends XSModule with HasBPUParameter with HasIFUConst {
   }
   val io = IO(new DefaultIO)
 
-  def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
+  def npc(pc: UInt, instCount: UInt) = pc + (instCount << instOffsetBits.U)
 
   val inLatch = RegEnable(io.in, io.inFire)
 
@@ -207,8 +207,8 @@ class BPUStage1 extends BPUStage {
   jalMask := DontCare
   targets := ubtbResp.targets
 
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, ubtbResp.hits(bankWidth-1) && !ubtbResp.is_RVC(bankWidth-1))
-  lastBankHasHalfRVI  := ubtbResp.hits(PredictWidth-1) && !ubtbResp.is_RVC(PredictWidth-1)
+  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, ubtbResp.hits(bankWidth-1) && !ubtbResp.is_RVC(bankWidth-1)) && HasCExtension.B
+  lastBankHasHalfRVI  := ubtbResp.hits(PredictWidth-1) && !ubtbResp.is_RVC(PredictWidth-1) && HasCExtension.B
 
   // resp and brInfo are from the components,
   // so it does not need to be latched
@@ -233,8 +233,8 @@ class BPUStage2 extends BPUStage {
   brMask  := VecInit((0 until PredictWidth).map(i => btbResp.types(i) === BTBtype.B && btbResp.hits(i)))
   jalMask := DontCare
 
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, btbResp.hits(bankWidth-1) && !btbResp.isRVC(bankWidth-1) && inLatch.mask(bankWidth-1))
-  lastBankHasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && inLatch.mask(PredictWidth-1)
+  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, btbResp.hits(bankWidth-1) && !btbResp.isRVC(bankWidth-1) && inLatch.mask(bankWidth-1)) && HasCExtension.B
+  lastBankHasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && inLatch.mask(PredictWidth-1) && HasCExtension.B
 
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
@@ -276,14 +276,14 @@ class BPUStage3 extends BPUStage {
   val jalrs = pdMask & Reverse(Cat(pds.map(_.isJalr)))
   val calls = pdMask & Reverse(Cat(pds.map(_.isCall)))
   val rets  = pdMask & Reverse(Cat(pds.map(_.isRet)))
-  val RVCs = pdMask & Reverse(Cat(pds.map(_.isRVC)))
+  val RVCs  = pdMask & Reverse(Cat(pds.map(_.isRVC)))
 
   val callIdx = PriorityEncoder(calls)
   val retIdx  = PriorityEncoder(rets)
   
   val brPred = (if(EnableBPD) tageTakens else bimTakens).asUInt
   val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 0.U(1.W)))).asUInt
-  val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.bits.taken
+  val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.bits.taken && HasCExtension.B
   val prevHalfTakenMask = prevHalfTaken.asUInt
   val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
   // VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
@@ -300,8 +300,8 @@ class BPUStage3 extends BPUStage {
   jalMask := WireInit(jals.asTypeOf(Vec(PredictWidth, Bool())))
 
   lastBankHasInst := s3IO.realMask(PredictWidth-1, bankWidth).orR
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, pdLastHalf(0))
-  lastBankHasHalfRVI  := pdLastHalf(1)
+  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, pdLastHalf(0)) && HasCExtension.B
+  lastBankHasHalfRVI  := pdLastHalf(1) && HasCExtension.B
 
   //RAS
   if(EnableRAS){
@@ -340,17 +340,16 @@ class BPUStage3 extends BPUStage {
   // we should provide the prediction for the first half RVI of the end of a fetch packet
   // branch taken information would be lost in the prediction of the next packet,
   // so we preserve this information here
-  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B && btbHits(bankWidth-1)) {
+  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B && btbHits(bankWidth-1) && HasCExtension.B) {
     takens(bankWidth-1) := brPred(bankWidth-1) && !loopRes(bankWidth-1)
   }
-  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B && btbHits(PredictWidth-1)) {
+  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B && btbHits(PredictWidth-1) && HasCExtension.B) {
     takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
-
   }
 
   // targets would be lost as well, since it is from btb
   // unless it is a ret, which target is from ras
-  when (prevHalfTaken && !rets(0)) {
+  when (prevHalfTaken && !rets(0) && HasCExtension.B) {
     targets(0) := s3IO.prevHalf.bits.target
   }
 
@@ -617,7 +616,7 @@ class BPU extends BaseBPU {
 
 
   if (EnableCFICommitLog) {
-    val buValid = io.cfiUpdateInfo.valid
+    val buValid = io.cfiUpdateInfo.valid && !io.cfiUpdateInfo.bits.isReplay
     val buinfo  = io.cfiUpdateInfo.bits
     val pd = buinfo.pd
     val tage_cycle = buinfo.bpuMeta.debug_tage_cycle

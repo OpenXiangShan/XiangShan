@@ -84,7 +84,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val lastBankHasHalfRVI = Bool()
 
   // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U(7.W), firstBankHasHalfRVI.asUInt, 0.U(7.W))
+  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W), firstBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W))
 
   def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
@@ -150,16 +150,16 @@ class BpuMeta extends XSBundle with HasBPUParameter {
 
 class Predecode extends XSBundle with HasIFUConst {
   val hasLastHalfRVI = Bool()
-  val mask = UInt((FetchWidth*2).W)
+  val mask = UInt(PredictWidth.W)
   val lastHalf = UInt(nBanksInPacket.W)
-  val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
+  val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
 class CfiUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)
-  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
+  val fetchIdx = UInt(log2Up(PredictWidth).W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val bpuMeta = new BpuMeta

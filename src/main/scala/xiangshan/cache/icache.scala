@@ -10,7 +10,7 @@ import chisel3.ExcitingUtils._
 
 case class ICacheParameters(
     nSets: Int = 64,
-    nWays: Int = 4,
+    nWays: Int = 8,
     rowBits: Int = 64,
     nTLBEntries: Int = 32,
     tagECC: Option[String] = None,
@@ -27,7 +27,7 @@ case class ICacheParameters(
   def replacement = new RandomReplacement(nWays)
 }
 
-trait HasICacheParameters extends HasL1CacheParameters {
+trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   val cacheParams = icacheParameters
 
   //TODO: temp set
@@ -36,6 +36,7 @@ trait HasICacheParameters extends HasL1CacheParameters {
   // the width of inner CPU data interface
   def cacheID = 0
   // RVC instruction length
+  def insLen = if (HasCExtension) 16 else 32
   def RVCInsLen = 16
 
   // icache Queue
@@ -245,16 +246,16 @@ class ICache extends ICacheModule
 {
   // cut a cacheline into a fetch packet
   def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
-    val sourceVec_16bit = Wire(Vec(blockWords * 4,UInt(RVCInsLen.W)))
+    val sourceVec_inst = Wire(Vec(blockWords*wordBytes/instBytes,UInt(insLen.W)))
     (0 until blockWords).foreach{ i =>
-      (0 until 4).foreach{ j =>
-        sourceVec_16bit(i*4 + j) := sourceVec(i)(j*16+15, j*16)
+      (0 until wordBytes/instBytes).foreach{ j =>
+        sourceVec_inst(i*wordBytes/instBytes + j) := sourceVec(i)(j*insLen+insLen-1, j*insLen)
       }
     }
-    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(RVCInsLen.W)}))
-    val start = Cat(startPtr(4,3),0.U(3.W))
+    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
+    val start = Cat(startPtr(4,3),0.U(log2Ceil(bankWidth).W))
     (0 until PredictWidth ).foreach{ i =>
-      cutPacket(i) := Mux(mask(i).asBool,sourceVec_16bit(start + i.U),0.U)
+      cutPacket(i) := Mux(mask(i).asBool,sourceVec_inst(start + i.U),0.U)
     }
     cutPacket.asUInt
   }
@@ -323,7 +324,7 @@ class ICache extends ICacheModule
   val metas = metaArray.io.readResp
   val datas =RegEnable(next=dataArray.io.readResp, enable=s2_fire)
 
-  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
+  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(log2Ceil(nWays).W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
   val hitVec = VecInit((0 until nWays).map{w => metas(w)=== s2_tag && validMeta(w) === 1.U})
@@ -443,11 +444,11 @@ class ICache extends ICacheModule
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
     // if a fetch packet triggers page fault, set the pf instruction to nop
-    when (!io.prev.valid && s3_tlb_resp.excp.pf.instr) {
+    when ((!(HasCExtension.B) || io.prev.valid) && s3_tlb_resp.excp.pf.instr ) {
       val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
       (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
       pds(i).io.in.data := instrs.asUInt
-    }.elsewhen (io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
+    }.elsewhen (HasCExtension.B && io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
       pds(i).io.prev.bits := ZeroExt("b0010011".U, 16)
       val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
       (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))

@@ -171,6 +171,10 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
+  XSDebug(p"ValidEntries: ${validEntries}\n")
+  XSDebug(p"EnqNum: ${numEnq}\n")
+  XSDebug(p"DeqNum: ${numDeq}\n")
+
   // XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
   // for(i <- 0 until IBufSize/8) {
   //   XSDebug("%x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b\n",
