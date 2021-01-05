@@ -616,7 +616,7 @@ class BPU extends BaseBPU {
 
 
   if (EnableCFICommitLog) {
-    val buValid = io.cfiUpdateInfo.valid
+    val buValid = io.cfiUpdateInfo.valid && !io.cfiUpdateInfo.bits.isReplay
     val buinfo  = io.cfiUpdateInfo.bits
     val pd = buinfo.pd
     val tage_cycle = buinfo.bpuMeta.debug_tage_cycle

@@ -1,8 +1,9 @@
+#include <csignal>
 #include "common.h"
-#include "emu.h"
 
 int assert_count = 0;
 static pthread_mutex_t assert_mutex;
+int signal_num = 0;
 
 void assert_init() {
   pthread_mutex_init(&assert_mutex, 0);
@@ -14,7 +15,11 @@ void assert_finish() {
 
 extern "C" void xs_assert(long long line) {
   pthread_mutex_lock(&assert_mutex);
-  printf("Assertion failed at line %lld\n.", line);
+  printf("Assertion failed at line %lld.\n", line);
   assert_count++;
   pthread_mutex_unlock(&assert_mutex);
+}
+
+void sig_handler(int signo) {
+  signal_num = signo;
 }
