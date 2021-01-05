@@ -153,13 +153,13 @@ class IFU extends XSModule with HasIFUConst
 
   val npcGen = new PriorityMuxGenerator[UInt]
   npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
-  npcGen.register(if2_fire, if2_snpc, Some("if2_snpc"))
+  // npcGen.register(if2_fire, if2_snpc, Some("if2_snpc"))
   val if2_bp = bpu.io.out(0)
   
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
-  if2_redirect := if2_valid && if2_bp.taken
-  npcGen.register(if2_redirect, if2_bp.target, Some("if2_target"))
+  // if2_redirect := if2_valid
+  npcGen.register(if2_valid, Mux(if2_bp.taken, if2_bp.target, if2_snpc), Some("if2_target"))
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
 
