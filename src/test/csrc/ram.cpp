@@ -154,8 +154,8 @@ void init_ram(const char *img) {
   #error DRAMSIM3_CONFIG or DRAMSIM3_OUTDIR is not defined
   #endif
   assert(dram == NULL);
-  // dram = new CoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
-  dram = new SimpleCoDRAMsim3(90);
+  // dram = new ComplexCoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
+  dram = new SimpleCoDRAMsim3(10);
 #endif
 
   pthread_mutex_init(&ram_mutex, 0);

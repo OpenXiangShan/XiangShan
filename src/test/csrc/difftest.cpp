@@ -180,7 +180,7 @@ int difftest_step(DiffState *s) {
     // ref_difftest_exec(1);//TODO
   }
   else {
-    assert(s->commit > 0 && s->commit <= 6);
+    assert(s->commit > 0 && s->commit <= DIFFTEST_WIDTH);
     for(int i = 0; i < s->commit; i++){
       pc_wb_queue[wb_pointer] = s->wpc[i];
       wen_wb_queue[wb_pointer] = selectBit(s->wen, i);

@@ -2,8 +2,8 @@
 #include "sdcard.h"
 #include "difftest.h"
 #include <getopt.h>
-#include<signal.h>
-#include<unistd.h>
+#include <signal.h>
+#include <unistd.h>
 #include "ram.h"
 #include "zlib.h"
 #include "compress.h"
@@ -174,21 +174,45 @@ inline void Emulator::read_wb_info(uint64_t *wpc, uint64_t *wdata, uint32_t *wds
 #define dut_ptr_wpc(x)  wpc[x] = dut_ptr->io_difftest_wpc_##x
 #define dut_ptr_wdata(x) wdata[x] = dut_ptr->io_difftest_wdata_##x
 #define dut_ptr_wdst(x)  wdst[x] = dut_ptr->io_difftest_wdst_##x
-  dut_ptr_wpc(0); dut_ptr_wdata(0); dut_ptr_wdst(0); 
-  dut_ptr_wpc(1); dut_ptr_wdata(1); dut_ptr_wdst(1); 
-  dut_ptr_wpc(2); dut_ptr_wdata(2); dut_ptr_wdst(2); 
-  dut_ptr_wpc(3); dut_ptr_wdata(3); dut_ptr_wdst(3); 
-  dut_ptr_wpc(4); dut_ptr_wdata(4); dut_ptr_wdst(4); 
-  dut_ptr_wpc(5); dut_ptr_wdata(5); dut_ptr_wdst(5); 
+#define dut_ptr_read_wb(x) dut_ptr_wpc(x); dut_ptr_wdata(x); dut_ptr_wdst(x);
+
+#if DIFFTEST_WIDTH >= 13 || DIFFTEST_WIDTH < 6
+#error "not supported difftest width"
+#endif
+
+  dut_ptr_read_wb(0);
+  dut_ptr_read_wb(1);
+  dut_ptr_read_wb(2);
+  dut_ptr_read_wb(3);
+  dut_ptr_read_wb(4);
+  dut_ptr_read_wb(5);
+#if DIFFTEST_WIDTH >= 7
+  dut_ptr_read_wb(6);
+#endif
+#if DIFFTEST_WIDTH >= 8
+  dut_ptr_read_wb(7);
+#endif
+#if DIFFTEST_WIDTH >= 9
+  dut_ptr_read_wb(8);
+#endif
+#if DIFFTEST_WIDTH >= 10
+  dut_ptr_read_wb(9);
+#endif
+#if DIFFTEST_WIDTH >= 11
+  dut_ptr_read_wb(10);
+#endif
+#if DIFFTEST_WIDTH >= 12
+  dut_ptr_read_wb(11);
+#endif
 }
 
 inline void Emulator::read_store_info(uint64_t *saddr, uint64_t *sdata, uint8_t *smask) {
 #define dut_ptr_saddr(x)  saddr[x] = dut_ptr->io_difftest_storeAddr_##x
 #define dut_ptr_sdata(x) sdata[x] = dut_ptr->io_difftest_storeData_##x
 #define dut_ptr_smask(x) smask[x] = dut_ptr->io_difftest_storeMask_##x
-  dut_ptr_saddr(0); dut_ptr_saddr(1);
-  dut_ptr_sdata(0); dut_ptr_sdata(1);
-  dut_ptr_smask(0); dut_ptr_smask(1);
+#define dut_ptr_read_store(x) dut_ptr_saddr(x); dut_ptr_sdata(x); dut_ptr_smask(x);
+  dut_ptr_read_store(0);
+  dut_ptr_read_store(1);
 }
 
 inline void Emulator::reset_ncycles(size_t cycles) {
@@ -247,16 +271,6 @@ inline void Emulator::single_cycle() {
   cycles ++;
 }
 
-#if VM_COVERAGE == 1
-uint64_t *max_cycle_ptr = NULL;
-// when interrupted, we set max_cycle to zero
-// so that the emulator will stop gracefully
-void sig_handler(int signo) {
-  if (signo == SIGINT)
-    *max_cycle_ptr = 0;
-}
-#endif
-
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
   extern uint32_t uptime(void);
@@ -280,10 +294,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
   // we distinguish multiple dat files by emu start time
-  time_t start_time = time(NULL);
-  max_cycle_ptr = &max_cycle;
-  if (signal(SIGINT, sig_handler) == SIG_ERR)
-    printf("\ncan't catch SIGINT\n");
+  time_t coverage_start_time = time(NULL);
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
@@ -291,16 +302,21 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       trapCode = STATE_LIMIT_EXCEEDED;
       break;
     }
+    if (assert_count > 0) {
+      difftest_display(dut_ptr->io_difftest_priviledgeMode);
+      eprintf("The simulation stopped. There might be some assertion failed.\n");
+      trapCode = STATE_ABORT;
+      break;
+    }
+    if (signal_num != 0) {
+      trapCode = STATE_SIG;
+      break;
+    }
 
     single_cycle();
     max_cycle --;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
-    if (assert_count > 0) {
-      difftest_display(dut_ptr->io_difftest_priviledgeMode);
-      eprintf("The simulation stopped. There might be some assertion failed.\n");
-      trapCode = STATE_ABORT;
-    }
     if (trapCode != STATE_RUNNING) break;
 
     if (lastcommit - max_cycle > stuck_limit && hascommit) {
@@ -393,7 +409,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
 #if VM_COVERAGE == 1
-  save_coverage(start_time);
+  save_coverage(coverage_start_time);
 #endif
 
   display_trapinfo();
@@ -459,6 +475,9 @@ void Emulator::display_trapinfo() {
       break;
     case STATE_LIMIT_EXCEEDED:
       eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
+      break;
+    case STATE_SIG:
+      eprintf(ANSI_COLOR_YELLOW "SOME SIGNAL STOPS THE PROGRAM at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);

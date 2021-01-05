@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <string.h>
 
+#define DIFFTEST_WIDTH 6
+
 typedef uint64_t rtlreg_t;
 
 typedef uint64_t paddr_t;
