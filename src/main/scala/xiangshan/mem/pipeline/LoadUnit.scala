@@ -180,7 +180,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
 
   // TODO: ECC check
 
-  io.out.valid := io.in.valid
+  io.out.valid := io.in.valid && !s2_uop.ctrl.fpWen
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
