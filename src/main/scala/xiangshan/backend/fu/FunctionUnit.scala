@@ -89,9 +89,11 @@ trait HasPipelineReg {
   io.out.valid := validVec.last && !flushVec.last
   io.out.bits.uop := uopVec.last
 
+  def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
+
   def PipelineReg[TT <: Data](i: Int)(next: TT) = RegEnable(
     next,
-    enable = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
+    enable = regEnable(i)
   )
 
   def S1Reg[TT <: Data](next: TT): TT = PipelineReg[TT](1)(next)
