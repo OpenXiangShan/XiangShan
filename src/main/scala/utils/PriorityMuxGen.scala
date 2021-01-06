@@ -6,17 +6,15 @@ import Chisel.experimental.chiselName
 
 @chiselName
 class PriorityMuxModule[T <: Data](val gen: T)(val names: Seq[String]) extends MultiIOModule {
-    class InBundle(val n: String) extends Bundle {
+    class InBundle extends Bundle {
         val sel = Bool()
         val src = gen.cloneType
-        src.suggestName(n)
-        println("suggested name: "+n)
     }
     class OutBundle extends Bundle {
         val res = gen.cloneType
     }
     val ins = names.map(s => {
-        IO(Input(new InBundle(s)))
+        IO(Input(new InBundle)).suggestName(s)
     })
     val out = IO(Output(new OutBundle))
     out.res := ParallelPriorityMux(ins.map{i => (i.sel, i.src)})
