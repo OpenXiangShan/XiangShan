@@ -13,6 +13,24 @@ class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean) extends X
     val reverseMapping = Output(Vec(inWidth, ValidIO(UInt(log2Ceil(outWidth).W))))
   })
 
+  // find the ones in vector (assumed the vector is not one-hot)
+  def get_ones(vec: Vec[Bool], num: Int, zeros: Int = 0) : (Bool, UInt) = {
+    val maskedVec = if (zeros == 0) vec else VecInit(Seq.fill(zeros)(false.B) ++ vec.drop(zeros))
+    if (num == 1) {
+      (Cat(maskedVec).orR, PriorityEncoder(maskedVec))
+    }
+    else if (num + zeros == vec.size) {
+      (Cat(maskedVec).andR, (vec.size - 1).U)
+    }
+    else {
+      val tail_minus_1 = get_ones(vec, num - 1, zeros + 1)
+      val tail_orig = get_ones(vec, num, zeros + 1)
+      val valid = (tail_minus_1._1 && vec(zeros)) || tail_orig._1
+      val index = Mux(vec(zeros), tail_minus_1._2, tail_orig._2)
+      (valid, index)
+    }
+  }
+
   for (j <- 0 until inWidth) {
     io.reverseMapping(j).valid := false.B
     io.reverseMapping(j).bits := DontCare
@@ -20,12 +38,10 @@ class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean) extends X
 
   val unsortedMapping = Wire(Vec(outWidth, UInt(log2Ceil(inWidth).W)))
   val unsortedValid = Wire(Vec(outWidth, Bool()))
-  var maskedValidBits = (0 until inWidth).map(i => io.validBits(i))
   for (i <- 0 until outWidth) {
-    val onehot = PriorityEncoderOH(maskedValidBits)
-    unsortedValid(i) := Cat(onehot).orR()
-    unsortedMapping(i) := OHToUInt(onehot)
-    maskedValidBits = (0 until inWidth).map(i => maskedValidBits(i) && !onehot(i))
+    val (valid, map) = get_ones(io.validBits, i + 1)
+    unsortedValid(i) := valid
+    unsortedMapping(i) := map
 
     val index = if (withPriority) io.priority(i) else i.U
     io.mapping(i).valid := unsortedValid(index)
