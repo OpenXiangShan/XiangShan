@@ -93,7 +93,8 @@ class MicroBTB extends BasePredictor
         val hit_ohs = VecInit(rentries map (e => e.valid && e.tag === io.rtag))
         io.hit_and_taken := VecInit(rentries map (e => e.valid && e.tag === io.rtag && e.pred(1))).asUInt.orR
         val hit_way = OHToUInt(hit_ohs)
-        val hit_entry = rentries(hit_way)
+        //val hit_entry = rentries(hit_way)
+        val hit_entry = ParallelPriorityMux(hit_ohs, rentries)
 
         io.hit_ohs := hit_ohs
         io.hit_way := hit_way
@@ -116,12 +117,13 @@ class MicroBTB extends BasePredictor
             val wen = Input(Bool())
             val wWay = Input(UInt(log2Up(nWays).W))
             val wdata = Input(new MicroBTBEntry)
-            val rWay = Input(UInt(log2Up(nWays).W))
+            val rOHs = Input(Vec(nWays, Bool()))
             val rdata = Output(new MicroBTBEntry)
         })
         val mem = Mem(nWays, new MicroBTBEntry)
         val rentries = VecInit((0 until nWays) map (i => mem(i)))
-        io.rdata := rentries(io.rWay)
+        // io.rdata := rentries(io.rWay)
+        io.rdata := ParallelPriorityMux(io.rOHs, rentries)
         when (io.wen) {
             mem.write(io.wWay, io.wdata)
         }
@@ -149,7 +151,7 @@ class MicroBTB extends BasePredictor
 
     val read_valid = io.pc.valid
     val read_req_tag = getTag(bankAlignedPC)
-    val next_tag = read_req_tag + 1.U
+    val next_tag = getTag(bankAlignedPC) + 1.U
     // val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
     
@@ -173,7 +175,7 @@ class MicroBTB extends BasePredictor
     // val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
     
 
-    (0 until PredictWidth).map(b => datas(b).rWay := read_hit_ways(b))
+    (0 until PredictWidth).map(b => datas(b).rOHs := read_hit_ohs(b))
 
     val  uBTBMeta_resp = VecInit((0 until PredictWidth).map(b => metas(b).rdata))
     val  btb_resp = VecInit((0 until PredictWidth).map(b => datas(b).rdata))  
