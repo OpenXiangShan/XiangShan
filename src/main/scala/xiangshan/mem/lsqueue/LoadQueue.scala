@@ -25,19 +25,22 @@ object LqPtr extends HasXSParameter {
 
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
-    val lwIntData = SignExt(rdata(31, 0), XLEN)
-    val ldIntData = SignExt(rdata(63, 0), XLEN)
-    val lwFpData = recode(rdata(31, 0), S)
-    val ldFpData = recode(rdata(63, 0), D)
     val fpWen = uop.ctrl.fpWen
     LookupTree(uop.ctrl.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.lw   -> Mux(fpWen, lwFpData, lwIntData),
-      LSUOpType.ld   -> Mux(fpWen, ldFpData, ldIntData),
+      LSUOpType.lw   -> Mux(fpWen, rdata, SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+    ))
+  }
+
+  def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {
+    LookupTree(uop.ctrl.fuOpType, List(
+      LSUOpType.lw   -> recode(rdata(31, 0), S),
+      LSUOpType.ld   -> recode(rdata(63, 0), D)
     ))
   }
 }
@@ -61,7 +64,8 @@ class LoadQueue extends XSModule
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
+    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
+    val fpout = Vec(2, DecoupledIO(new ExuOutput)) // writeback fp load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
@@ -297,7 +301,8 @@ class LoadQueue extends XSModule
   (0 until StorePipelineWidth).map(i => {
     // data select
     val rdata = dataModule.io.rdata(loadWbSel(i)).data
-    val func = uop(loadWbSel(i)).ctrl.fuOpType
+    val seluop = uop(loadWbSel(i))
+    val func = seluop.ctrl.fuOpType
     val raddr = dataModule.io.rdata(loadWbSel(i)).paddr
     val rdataSel = LookupTree(raddr(2, 0), List(
       "b000".U -> rdata(63, 0),
@@ -309,8 +314,14 @@ class LoadQueue extends XSModule
       "b110".U -> rdata(63, 48),
       "b111".U -> rdata(63, 56)
     ))
-    val rdataPartialLoad = rdataHelper(uop(loadWbSel(i)), rdataSel)
-    io.ldout(i).bits.uop := uop(loadWbSel(i))
+    val rdataPartialLoad = rdataHelper(seluop, rdataSel)
+
+    val validWb = loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
+
+    // writeback missed int load
+    // 
+    // Int load writeback will finish (if not blocked) in one cycle
+    io.ldout(i).bits.uop := seluop
     io.ldout(i).bits.uop.cf.exceptionVec := dataModule.io.rdata(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)
     io.ldout(i).bits.data := rdataPartialLoad
@@ -319,16 +330,43 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := dataModule.io.rdata(loadWbSel(i)).mmio
     io.ldout(i).bits.fflags := DontCare
-    io.ldout(i).valid := loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
-    when(io.ldout(i).fire()) {
+    io.ldout(i).valid := validWb && !seluop.ctrl.fpWen
+    
+    // writeback missed fp load
+    // 
+    // That inst will be marked as writebacked in lq 1 cycle earilier
+    // By doing so, lq can use writebacked to find next valid writeback candidate
+    val fpoutGen = Wire(Decoupled(new ExuOutput))
+    val fpout = Wire(Decoupled(new ExuOutput))
+    fpoutGen.bits := io.ldout(i).bits
+    fpoutGen.valid := validWb && seluop.ctrl.fpWen
+    PipelineConnect(fpoutGen, fpout, io.fpout(i).ready, fpoutGen.bits.uop.roqIdx.needFlush(io.brqRedirect))
+    io.fpout(i) <> fpout
+    io.fpout(i).bits.data := fpRdataHelper(fpout.bits.uop, fpout.bits.data)
+
+    when(io.ldout(i).fire() || fpoutGen.fire()){
       writebacked(loadWbSel(i)) := true.B
-      XSInfo("load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
+    }
+
+    when(io.ldout(i).fire()) {
+      XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
         io.ldout(i).bits.uop.roqIdx.asUInt,
         io.ldout(i).bits.uop.lqIdx.asUInt,
         io.ldout(i).bits.uop.cf.pc,
         dataModule.io.rdata(loadWbSel(i)).paddr,
         dataModule.io.rdata(loadWbSel(i)).data,
         dataModule.io.rdata(loadWbSel(i)).mmio
+      )
+    }
+
+    when(io.fpout(i).fire()) {
+      XSInfo("fp load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
+        io.fpout(i).bits.uop.roqIdx.asUInt,
+        io.fpout(i).bits.uop.lqIdx.asUInt,
+        io.fpout(i).bits.uop.cf.pc,
+        RegNext(dataModule.io.rdata(loadWbSel(i)).paddr),
+        RegNext(dataModule.io.rdata(loadWbSel(i)).data),
+        RegNext(dataModule.io.rdata(loadWbSel(i)).mmio)
       )
     }
   })

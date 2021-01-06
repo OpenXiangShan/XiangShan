@@ -73,7 +73,8 @@ class MemBlock
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
-  val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  val intExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  val fpExeWbReqs = loadUnits.map(_.io.fpout)
 
   val reservationStations = (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
@@ -90,7 +91,7 @@ class MemBlock
       .map(_._2.bits.data)
     val wakeupCnt = writeBackData.length
 
-    val inBlockListenPorts = exeWbReqs
+    val inBlockListenPorts = intExeWbReqs ++ fpExeWbReqs
     val extraListenPorts = inBlockListenPorts ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
@@ -139,20 +140,12 @@ class MemBlock
   io.wakeUpIn.fast.foreach(_.ready := true.B)
   io.wakeUpIn.slow.foreach(_.ready := true.B)
 
-  io.wakeUpFpOut.slow <> exeWbReqs.map(x => {
-    val raw = WireInit(x)
-    raw.valid := x.valid && x.bits.uop.ctrl.fpWen
-    raw
-  })
-
-  io.wakeUpIntOut.slow <> exeWbReqs.map(x => {
-    val raw = WireInit(x)
-    raw.valid := x.valid && x.bits.uop.ctrl.rfWen
-    raw
-  })
+  io.wakeUpFpOut.slow <> fpExeWbReqs
+  io.wakeUpIntOut.slow <> intExeWbReqs
 
   // load always ready
-  exeWbReqs.foreach(_.ready := true.B)
+  fpExeWbReqs.foreach(_.ready := true.B)
+  intExeWbReqs.foreach(_.ready := true.B)
 
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq = Module(new LsqWrappper)
@@ -181,6 +174,7 @@ class MemBlock
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
+    lsq.io.fpout(i)               <> loadUnits(i).io.lsq.fpout
   }
 
   // StoreUnit
