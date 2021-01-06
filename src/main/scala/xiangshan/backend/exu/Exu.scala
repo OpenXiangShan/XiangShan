@@ -120,7 +120,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
 
   def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Arbiter[FuOutput] = {
     if (needArbiter) {
-      val arb = Module(new Arbiter(new FuOutput, in.size))
+      val arb = Module(new Arbiter(new FuOutput(in.head.bits.len), in.size))
       arb.io.in <> in
       arb.io.out.ready := out.ready
       out.bits.data := arb.io.out.bits.data

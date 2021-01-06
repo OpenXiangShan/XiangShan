@@ -35,24 +35,21 @@ case class FuConfig
 }
 
 
-class FuOutput extends XSBundle {
-  val data = UInt(XLEN.W)
+class FuOutput(val len: Int) extends XSBundle {
+  val data = UInt(len.W)
   val uop = new MicroOp
 }
 
 
-class FunctionUnitIO(len: Int) extends XSBundle {
+class FunctionUnitIO(val len: Int) extends XSBundle {
   val in = Flipped(DecoupledIO(new Bundle() {
     val src = Vec(3, UInt(len.W))
     val uop = new MicroOp
   }))
 
-  val out = DecoupledIO(new FuOutput)
+  val out = DecoupledIO(new FuOutput(len))
 
   val redirectIn = Flipped(ValidIO(new Redirect))
-
-  override def cloneType: FunctionUnitIO.this.type =
-    new FunctionUnitIO(len).asInstanceOf[this.type]
 }
 
 abstract class FunctionUnit(len: Int = 64) extends XSModule {
@@ -130,14 +127,10 @@ object FunctionUnit extends HasXSParameter {
 
   def f2f = new FPToFP
 
-  def fdivSqrt = new FDIvSqrt
-
-  def fmiscSel(fu: String)(x: FunctionUnit): Bool = {
-    x.io.in.bits.uop.ctrl.fuOpType.head(4) === s"b$fu".U
-  }
+  def fdivSqrt = new FDivSqrt
 
   def f2iSel(x: FunctionUnit): Bool = {
-    x.io.in.bits.uop.ctrl.fuType === FuType.i2f
+    x.io.in.bits.uop.ctrl.rfWen
   }
 
   def i2fSel(x: FunctionUnit): Bool = {
@@ -233,7 +226,7 @@ object FunctionUnit extends HasXSParameter {
   val fmacCfg = FuConfig(
     fuGen = fmac _,
     fuSel = _ => true.B,
-    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(5)
+    FuType.fmac, 0, 3, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(4)
   )
 
   val f2iCfg = FuConfig(
@@ -244,7 +237,7 @@ object FunctionUnit extends HasXSParameter {
 
   val f2fCfg = FuConfig(
     fuGen = f2f _,
-    fuSel = f2iSel,
+    fuSel = f2fSel,
     FuType.fmisc, 0, 1, writeIntRf = false, writeFpRf = true, hasRedirect = false, CertainLatency(2)
   )
 

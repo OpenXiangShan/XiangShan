@@ -194,7 +194,6 @@ class FPUCtrlSignals extends XSBundle {
   val div = Bool()
   val sqrt = Bool()
   val fcvt = Bool()
-  val fma = Bool()
   val typ = UInt(2.W)
   val fmt = UInt(2.W)
   val ren3 = Bool() //TODO: remove SrcType.fp

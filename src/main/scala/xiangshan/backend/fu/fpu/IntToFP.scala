@@ -13,7 +13,7 @@ class IntToFP extends FPUSubModule {
   val src1 = io.in.bits.src(0)(XLEN-1, 0)
 
   val mux = Wire(new Bundle() {
-    val data = UInt(XLEN.W)
+    val data = UInt((XLEN+1).W)
     val exc = UInt(5.W)
   })
   mux.data := recode(src1, tag)
@@ -40,7 +40,7 @@ class IntToFP extends FPUSubModule {
 
   fflags := mux.exc
   io.out.bits.uop := io.in.bits.uop
-  io.out.bits.data := mux.data
+  io.out.bits.data := box(mux.data, io.in.bits.uop.ctrl.fpu.typeTagOut)
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 }

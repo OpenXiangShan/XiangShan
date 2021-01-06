@@ -18,7 +18,7 @@ class FPDecoder extends XSModule{
   val s = BitPat(S)
   val d = BitPat(D)
 
-  val default = List(X,X,X,X,X,X,X,X,X)
+  val default = List(X,X,X,X,N,N,X,X,X)
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val single: Array[(BitPat, List[BitPat])] = Array(
@@ -52,7 +52,42 @@ class FPDecoder extends XSModule{
     FSQRT_S  -> List(N,s,s,N,Y,Y,N,Y,N)
   )
 
-  val table = single
+
+  // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
+  val double: Array[(BitPat, List[BitPat])] = Array(
+    FMV_D_X  -> List(N,d,d,Y,N,Y,N,N,N),
+    FCVT_D_W -> List(N,d,d,Y,Y,Y,N,N,Y),
+    FCVT_D_WU-> List(N,d,d,Y,Y,Y,N,N,Y),
+    FCVT_D_L -> List(N,d,d,Y,Y,Y,N,N,Y),
+    FCVT_D_LU-> List(N,d,d,Y,Y,Y,N,N,Y),
+    FMV_X_D  -> List(N,d,X,N,N,N,N,N,N),
+    FCLASS_D -> List(N,d,X,N,N,N,N,N,N),
+    FCVT_W_D -> List(N,d,X,N,Y,N,N,N,Y),
+    FCVT_WU_D-> List(N,d,X,N,Y,N,N,N,Y),
+    FCVT_L_D -> List(N,d,X,N,Y,N,N,N,Y),
+    FCVT_LU_D-> List(N,d,X,N,Y,N,N,N,Y),
+    FCVT_S_D -> List(N,d,s,N,Y,Y,N,N,Y),
+    FCVT_D_S -> List(N,s,d,N,Y,Y,N,N,Y),
+    FEQ_D    -> List(N,d,X,N,Y,N,N,N,N),
+    FLT_D    -> List(N,d,X,N,Y,N,N,N,N),
+    FLE_D    -> List(N,d,X,N,Y,N,N,N,N),
+    FSGNJ_D  -> List(N,d,d,N,N,Y,N,N,N),
+    FSGNJN_D -> List(N,d,d,N,N,Y,N,N,N),
+    FSGNJX_D -> List(N,d,d,N,N,Y,N,N,N),
+    FMIN_D   -> List(N,d,d,N,Y,Y,N,N,N),
+    FMAX_D   -> List(N,d,d,N,Y,Y,N,N,N),
+    FADD_D   -> List(Y,d,d,N,Y,Y,N,N,N),
+    FSUB_D   -> List(Y,d,d,N,Y,Y,N,N,N),
+    FMUL_D   -> List(N,d,d,N,Y,Y,N,N,N),
+    FMADD_D  -> List(N,d,d,N,Y,Y,N,N,N),
+    FMSUB_D  -> List(N,d,d,N,Y,Y,N,N,N),
+    FNMADD_D -> List(N,d,d,N,Y,Y,N,N,N),
+    FNMSUB_D -> List(N,d,d,N,Y,Y,N,N,N),
+    FDIV_D   -> List(N,d,d,N,Y,Y,Y,N,N),
+    FSQRT_D  -> List(N,d,d,N,Y,Y,N,Y,N)
+  )
+
+  val table = single ++ double
 
   val decoder = DecodeLogic(io.instr, default, table)
 
@@ -67,16 +102,23 @@ class FPDecoder extends XSModule{
   ctrl.fmt := io.instr(26,25)
 
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
-    FADD_S  -> List(BitPat("b00"),N,Y),
-    FSUB_S  -> List(BitPat("b01"),N,Y),
-    FMUL_S  -> List(BitPat("b00"),N,Y),
-    FMADD_S -> List(BitPat("b00"),Y,Y),
-    FMSUB_S -> List(BitPat("b01"),Y,Y),
-    FNMADD_S-> List(BitPat("b11"),Y,Y),
-    FNMSUB_S-> List(BitPat("b10"),Y,Y)
+    FADD_S  -> List(BitPat("b00"),N),
+    FADD_D  -> List(BitPat("b00"),N),
+    FSUB_S  -> List(BitPat("b01"),N),
+    FSUB_D  -> List(BitPat("b01"),N),
+    FMUL_S  -> List(BitPat("b00"),N),
+    FMUL_D  -> List(BitPat("b00"),N),
+    FMADD_S -> List(BitPat("b00"),Y),
+    FMADD_D -> List(BitPat("b00"),Y),
+    FMSUB_S -> List(BitPat("b01"),Y),
+    FMSUB_D -> List(BitPat("b01"),Y),
+    FNMADD_S-> List(BitPat("b11"),Y),
+    FNMADD_D-> List(BitPat("b11"),Y),
+    FNMSUB_S-> List(BitPat("b10"),Y),
+    FNMSUB_D-> List(BitPat("b10"),Y)
   )
-  val fmaDefault = List(BitPat("b??"), N, N)
-  Seq(ctrl.fmaCmd, ctrl.ren3, ctrl.fma).zip(
+  val fmaDefault = List(BitPat("b??"), N)
+  Seq(ctrl.fmaCmd, ctrl.ren3).zip(
     DecodeLogic(io.instr, fmaDefault, fmaTable)
   ).foreach({
     case (s, d) => s := d

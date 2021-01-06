@@ -16,8 +16,8 @@ class FPToInt extends FPUPipelineModule {
   val ctrl = io.in.bits.uop.ctrl.fpu
 
   val src1_s = unbox(src1, S, Some(FType.S))
-  val src1_d = unbox(src1, D, Some(FType.D))
-  val src2_d = unbox(src2, D, Some(FType.D))
+  val src1_d = unbox(src1, ctrl.typeTagIn, None)
+  val src2_d = unbox(src2, ctrl.typeTagIn, None)
 
   val src1_ieee = ieee(src1)
   val move_out = Mux(ctrl.typeTagIn === S, src1_ieee(31, 0), src1_ieee)
@@ -68,7 +68,8 @@ class FPToInt extends FPUPipelineModule {
     Mux(ctrl.fcvt, conv_out, dcmp_out),
     Mux(rm(0), classify_out, move_out)
   )
-  val intValue = Mux(ctrl.typ(1),
+  val doubleOut = Mux(ctrl.fcvt, ctrl.typ(1), ctrl.fmt(0))
+  val intValue = Mux(doubleOut,
     SignExt(intData, XLEN),
     SignExt(intData(31, 0), XLEN)
   )
