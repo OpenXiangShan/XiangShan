@@ -28,6 +28,9 @@ class StoreUnit_S0 extends XSModule {
   io.out.bits.vaddr := saddr
 
   io.out.bits.data := genWdata(io.in.bits.src2, io.in.bits.uop.ctrl.fuOpType(1,0))
+  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
+    io.out.bits.data := io.in.bits.src2
+  } // not not touch fp store raw data
   io.out.bits.uop := io.in.bits.uop
   io.out.bits.miss := DontCare
   io.out.bits.mask := genWmask(io.out.bits.vaddr, io.in.bits.uop.ctrl.fuOpType(1,0))
@@ -74,6 +77,7 @@ class StoreUnit_S1 extends XSModule {
     io.tlbFeedback.bits.roqIdx.asUInt
   )
 
+
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
   io.lsq.valid := io.in.valid && !s1_tlb_miss// TODO: && ! FP
@@ -88,9 +92,10 @@ class StoreUnit_S1 extends XSModule {
   io.out.valid := io.in.valid && (!io.out.bits.mmio || hasException) && !s1_tlb_miss
   io.out.bits := io.lsq.bits
 
-  // if fp
-  // io.fp_out.valid := ...
-  // io.fp_out.bits := ...
+  // encode data for fp store
+  when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
+	  io.lsq.bits.data := ieee(io.in.bits.data)
+	}
 
 }
 

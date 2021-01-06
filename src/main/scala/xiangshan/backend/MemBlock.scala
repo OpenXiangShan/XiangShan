@@ -189,9 +189,7 @@ class MemBlock
 
 	// get input from dispatch
 	stu.io.stin <> rs.io.deq
-	when(rs.io.deq.bits.uop.ctrl.src2Type === SrcType.fp){
-	  stu.io.stin.bits.src2 := ieee(rs.io.deq.bits.src2)
-	}
+
 	// passdown to lsq
 	stu.io.lsq <> lsq.io.storeIn(i)
 	io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
