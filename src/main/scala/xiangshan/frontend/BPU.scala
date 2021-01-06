@@ -99,8 +99,17 @@ trait PredictorUtils {
         Mux(taken, old + 1.S, old - 1.S)))
   }
 }
+
+trait HasIFUFire { this: MultiIOModule =>
+  val fires = IO(Input(Vec(4, Bool())))
+  val s1_fire  = fires(0)
+  val s2_fire  = fires(1)
+  val s3_fire  = fires(2)
+  val out_fire = fires(3)
+}
 abstract class BasePredictor extends XSModule
-  with HasBPUParameter with HasIFUConst with PredictorUtils {
+  with HasBPUParameter with HasIFUConst with PredictorUtils 
+  with HasIFUFire {
   val metaLen = 0
 
   // An implementation MUST extend the IO bundle with a response
@@ -119,13 +128,6 @@ abstract class BasePredictor extends XSModule
   }
 
   val io = new DefaultBasePredictorIO
-  val fires = IO(Input(Vec(4, Bool())))
-
-  val s1_fire  = fires(0)
-  val s2_fire  = fires(1)
-  val s3_fire  = fires(2)
-  val out_fire = fires(3)
-
   val debug = true
 }
 
@@ -139,7 +141,8 @@ class BPUStageIO extends XSBundle {
 }
 
 
-abstract class BPUStage extends XSModule with HasBPUParameter with HasIFUConst {
+abstract class BPUStage extends XSModule with HasBPUParameter
+  with HasIFUConst with HasIFUFire {
   class DefaultIO extends XSBundle {
     val flush = Input(Bool())
     val in = Input(new BPUStageIO)
@@ -320,6 +323,7 @@ class BPUStage3 extends BPUStage {
     ras.io.isRVC := (calls & RVCs).orR   //TODO: this is ugly
     ras.io.isLastHalfRVI := s3IO.predecode.hasLastHalfRVI
     ras.io.recover := s3IO.recover
+    ras.fires <> fires
 
     for(i <- 0 until PredictWidth){
       io.out.brInfo(i).rasSp :=  ras.io.meta.rasSp
@@ -453,6 +457,8 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
   val s3 = Module(new BPUStage3)
+
+  Seq(s1, s2, s3).foreach(s => s.fires <> io.inFire)
 
   val s1_fire = io.inFire(0)
   val s2_fire = io.inFire(1)
