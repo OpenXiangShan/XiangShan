@@ -24,8 +24,12 @@ object PipelineConnect {
     io.out.valid := valid //&& !isFlush
   }
 
-  def apply[T <: Data](left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool) = {
+  def apply[T <: Data]
+  (left: DecoupledIO[T], right: DecoupledIO[T], rightOutFire: Bool, isFlush: Bool,
+   moduleName: Option[String] = None
+  ){
     val pipelineConnect = Module(new PipelineConnectModule[T](left.bits.cloneType))
+    if(moduleName.nonEmpty) pipelineConnect.suggestName(moduleName.get)
     pipelineConnect.io.in <> left
     pipelineConnect.io.rightOutFire := rightOutFire
     pipelineConnect.io.isFlush := isFlush
