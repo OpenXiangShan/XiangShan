@@ -230,16 +230,11 @@ class LoadUnit_S3 extends XSModule with HasLoadHelper {
   })
 
   val s3_uop = io.in.bits.uop
-  val s3_mask = io.in.bits.mask
-  val s3_paddr = io.in.bits.paddr
-
   val fpdata = fpRdataHelper(s3_uop, io.in.bits.data)
 
   io.out.valid := io.in.valid
   io.out.bits := io.in.bits
   io.out.bits.data := fpdata
-  io.out.bits.miss := false.B
-  io.out.bits.mmio := io.in.bits.mmio
 
   io.in.ready := io.out.ready || !io.in.valid
 }
