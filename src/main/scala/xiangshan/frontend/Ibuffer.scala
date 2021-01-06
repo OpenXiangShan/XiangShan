@@ -52,24 +52,34 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // Ibuffer define
-  val ibuf = Mem(IBufSize, new IBufEntry)
+  // val ibuf = Reg(Vec(IBufSize, new IBufEntry))
+  val ibuf = Module(new DataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
-  val tail_ptr = RegInit(IbufPtr(false.B, 0.U))
+  val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
+  val tail_ptr = tail_vec(0)
 
-  val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
+  // val validEntries = distanceBetween(tail_ptr, head_ptr) // valid entries
+  val validEntries = RegInit(0.U(log2Up(IBufSize + 1).W))// valid entries
+  val allowEnq = RegInit(true.B)
 
-  val enqValid = IBufSize.U - PredictWidth.U >= validEntries
+  // val enqValid = (IBufSize.U - PredictWidth.U) >= validEntries
   val deqValid = validEntries > 0.U
 
-  // Enque
-  io.in.ready := enqValid
+  val numEnq = Mux(io.in.fire, PopCount(io.in.bits.mask), 0.U)
+  val numDeq = Mux(deqValid, PopCount(io.out.map(_.fire)), 0.U)
 
-  val enq_vec = Wire(Vec(PredictWidth, UInt(log2Up(IBufSize).W)))
+  validEntries := validEntries + numEnq - numDeq
+  allowEnq := (IBufSize.U - PredictWidth.U) >= (validEntries + numEnq)
+
+  // Enque
+  io.in.ready := allowEnq
+
+  val offset = Wire(Vec(PredictWidth, UInt(log2Up(PredictWidth).W)))
   for(i <- 0 until PredictWidth) {
     if (i == 0) {
-      enq_vec(i) := tail_ptr.value
+      offset(i) := 0.U
     } else {
-      enq_vec(i) := tail_ptr.value + PopCount(io.in.bits.pdmask(i-1, 0))
+      offset(i) := PopCount(io.in.bits.pdmask(i-1, 0))
     }
   }
 
@@ -87,21 +97,40 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
         inWire.ipf := io.in.bits.ipf
         inWire.acf := io.in.bits.acf
         inWire.crossPageIPFFix := io.in.bits.crossPageIPFFix
-        ibuf(enq_vec(i)) := inWire
+        // ibuf(tail_vec(offset(i)).value) := inWire
       }
+      ibuf.io.waddr(i) := tail_vec(offset(i)).value
+      ibuf.io.wdata(i) := inWire
+      ibuf.io.wen(i) := io.in.bits.mask(i)
+
     }
 
-    tail_ptr := tail_ptr + PopCount(io.in.bits.mask)
+    tail_vec := VecInit(tail_vec.map(_ + PopCount(io.in.bits.mask)))
+  }.otherwise {
+    ibuf.io.wen.foreach(_ := false.B)
+    ibuf.io.waddr := DontCare
+    ibuf.io.wdata := DontCare
   }
 
   // Deque
   when(deqValid) {
-    val validVec = UIntToMask(validEntries, DecodeWidth)
+    // val validVec = UIntToMask(validEntries, DecodeWidth)
+    val validVec = ParallelMux(Seq(
+      (validEntries === 0.U , 0.U(DecodeWidth.W)),
+      (validEntries === 1.U , 1.U(DecodeWidth.W)),
+      (validEntries === 2.U , 3.U(DecodeWidth.W)),
+      (validEntries === 3.U , 7.U(DecodeWidth.W)),
+      (validEntries === 4.U , 15.U(DecodeWidth.W)),
+      (validEntries === 5.U , 31.U(DecodeWidth.W)),
+      (validEntries >=  6.U , 63.U(DecodeWidth.W))
+    ))
+
     io.out.zipWithIndex.foreach{case (e, i) => e.valid := validVec(i)}
 
     for(i <- 0 until DecodeWidth) {
       val head_wire = head_ptr.value + i.U
-      val outWire = WireInit(ibuf(head_wire))
+      ibuf.io.raddr(i) := head_wire
+      val outWire = ibuf.io.rdata(i)
 
       io.out(i).bits.instr := outWire.inst
       io.out(i).bits.pc := outWire.pc
@@ -119,16 +148,18 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     }
     head_ptr := head_ptr + PopCount(io.out.map(_.fire))
   }.otherwise {
+    ibuf.io.raddr := DontCare
     io.out.foreach(_.valid := false.B)
     io.out.foreach(_.bits <> DontCare)
   }
 
   // Flush
   when(io.flush) {
+    validEntries := 0.U
+    allowEnq := true.B
     head_ptr.value := 0.U
     head_ptr.flag := false.B
-    tail_ptr.value := 0.U
-    tail_ptr.flag := false.B
+    tail_vec := VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr)))
   }
 
   // Debug info
@@ -150,6 +181,10 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
+  XSDebug(p"ValidEntries: ${validEntries}\n")
+  XSDebug(p"EnqNum: ${numEnq}\n")
+  XSDebug(p"DeqNum: ${numDeq}\n")
+
   // XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
   // for(i <- 0 until IBufSize/8) {
   //   XSDebug("%x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b | %x v:%b\n",
@@ -164,17 +199,17 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   //   )
   // }
 
-  XSDebug(p"last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
-  for(i <- 0 until IBufSize/8) {
-    XSDebug("%x | %x | %x | %x | %x | %x | %x | %x\n",
-      ibuf(i*8+0).inst,
-        ibuf(i*8+1).inst,
-        ibuf(i*8+2).inst,
-        ibuf(i*8+3).inst,
-        ibuf(i*8+4).inst,
-        ibuf(i*8+5).inst,
-        ibuf(i*8+6).inst,
-        ibuf(i*8+7).inst
-    )
-  }
+  // XSDebug(p"validEntries=$validEntries, last_head_ptr=$head_ptr  last_tail_ptr=$tail_ptr\n")
+  // for(i <- 0 until IBufSize/8) {
+  //   XSDebug("%x | %x | %x | %x | %x | %x | %x | %x\n",
+  //     ibuf(i*8+0).inst,
+  //       ibuf(i*8+1).inst,
+  //       ibuf(i*8+2).inst,
+  //       ibuf(i*8+3).inst,
+  //       ibuf(i*8+4).inst,
+  //       ibuf(i*8+5).inst,
+  //       ibuf(i*8+6).inst,
+  //       ibuf(i*8+7).inst
+  //   )
+  // }
 }

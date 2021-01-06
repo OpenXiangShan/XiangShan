@@ -7,8 +7,9 @@ import utils._
 import chisel3.experimental.chiselName
 
 import scala.math.min
+import scala.util.matching.Regex
 
-trait HasTageParameter extends HasXSParameter with HasBPUParameter{
+trait HasTageParameter extends HasXSParameter with HasBPUParameter with HasIFUConst {
   //                   Sets  Hist   Tag
   val TableInfo = Seq(( 128,    2,    7),
                       ( 128,    4,    7),
@@ -119,16 +120,15 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val ctr = UInt(TageCtrBits.W)
   }
 
-  val tageEntrySz = 1 + tagLen + TageCtrBits
+  val tageEntrySz = instOffsetBits + tagLen + TageCtrBits
 
   val if2_bankAlignedPC = bankAligned(io.req.bits.pc)
   // this bank means cache bank
   val if2_startsAtOddBank = bankInGroup(if2_bankAlignedPC)(0)
   // use real address to index
-  // val unhashed_idxes = VecInit((0 until TageBanks).map(b => ((io.req.bits.pc >> 1.U) + b.U) >> log2Up(TageBanks).U))
   val if2_unhashed_idx = Wire(Vec(2, UInt((log2Ceil(nRows)+tagLen).W)))
   // the first bank idx always correspond with pc
-  if2_unhashed_idx(0) := io.req.bits.pc >> (1+log2Ceil(TageBanks))
+  if2_unhashed_idx(0) := io.req.bits.pc >> (instOffsetBits+log2Ceil(TageBanks))
   // when pc is at odd bank, the second bank is at the next idx
   if2_unhashed_idx(1) := if2_unhashed_idx(0) + if2_startsAtOddBank
 
@@ -179,10 +179,8 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val if3_lo_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   val if3_table_r = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageEntry)))
 
-  val if2_baseBank = io.req.bits.pc(log2Up(TageBanks), 1)
+  val if2_baseBank = io.req.bits.pc(log2Up(TageBanks), instOffsetBits)
   val if3_baseBank = RegEnable(if2_baseBank, enable=io.req.valid)
-
-  val if3_bankIdxInOrder = VecInit((0 until TageBanks).map(b => (if3_baseBank +& b.U)(log2Up(TageBanks)-1, 0)))
 
   val if2_realMask = Mux(if2_startsAtOddBank,
                       Cat(io.req.bits.mask(bankWidth-1,0), io.req.bits.mask(PredictWidth-1, bankWidth)),
@@ -240,7 +238,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
 
   // Use fetchpc to compute hash
-  val (update_idx, update_tag) = compute_tag_and_hash((io.update.pc >> (1 + log2Ceil(TageBanks))), io.update.hist)
+  val (update_idx, update_tag) = compute_tag_and_hash((io.update.pc >> (instOffsetBits + log2Ceil(TageBanks))), io.update.hist)
 
   val update_wdata = Wire(Vec(TageBanks, new TageEntry))
 
@@ -320,7 +318,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   when (io.update.mask.reduce(_||_)) {
     when (wrbypass_hits.reduce(_||_)) {
       wrbypass_ctrs(wrbypass_hit_idx)(updateBank) := update_wdata(updateBank).ctr
-      wrbypass_ctr_valids(wrbypass_enq_idx)(updateBank) := true.B
+      wrbypass_ctr_valids(wrbypass_hit_idx)(updateBank) := true.B
     } .otherwise {
       wrbypass_ctrs(wrbypass_enq_idx)(updateBank) := update_wdata(updateBank).ctr
       (0 until TageBanks).foreach(b => wrbypass_ctr_valids(wrbypass_enq_idx)(b) := false.B) // reset valid bits
@@ -435,8 +433,11 @@ class Tage extends BaseTage {
   override val debug = true
 
   // Keep the table responses to process in s3
-  val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=io.s3Fire)
-  val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=io.s3Fire)
+  // val if4_resps = RegEnable(VecInit(tables.map(t => t.io.resp)), enable=io.s3Fire)
+  // val if4_scResps = RegEnable(VecInit(scTables.map(t => t.io.resp)), enable=io.s3Fire)
+  
+  val if3_resps = VecInit(tables.map(t => t.io.resp))
+  val if3_scResps = VecInit(scTables.map(t => t.io.resp))
   // val flushLatch = RegNext(io.flush)
 
   val if3_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
@@ -478,41 +479,47 @@ class Tage extends BaseTage {
   val updateSCMeta = u.bpuMeta.tageMeta.scMeta
   val updateTageMisPred = updateMeta.taken =/= u.taken && updateIsBr
 
-  val updateBank = u.pc(log2Ceil(TageBanks), 1)
+  val updateBank = u.pc(log2Ceil(TageBanks)+instOffsetBits-1, instOffsetBits)
 
   // access tag tables and output meta info
   for (w <- 0 until TageBanks) {
-    val if4_tageTaken = WireInit(if4_bim.ctrs(w)(1).asBool)
-    var if4_altPred = if4_bim.ctrs(w)(1)
-    val if4_finalAltPred = WireInit(if4_bim.ctrs(w)(1))
-    var if4_provided = false.B
-    var if4_provider = 0.U
-    io.resp.takens(w) := if4_bim.ctrs(w)(1)
+    val if3_tageTaken = WireInit(if3_bim.ctrs(w)(1).asBool)
+    var if3_altPred = if3_bim.ctrs(w)(1)
+    val if3_finalAltPred = WireInit(if3_bim.ctrs(w)(1))
+    var if3_provided = false.B
+    var if3_provider = 0.U
 
     for (i <- 0 until TageNTables) {
-      val hit = if4_resps(i)(w).valid
-      val ctr = if4_resps(i)(w).bits.ctr
+      val hit = if3_resps(i)(w).valid
+      val ctr = if3_resps(i)(w).bits.ctr
       when (hit) {
-        io.resp.takens(w) := Mux(ctr === 3.U || ctr === 4.U, if4_altPred, ctr(2)) // Use altpred on weak taken
-        if4_tageTaken := Mux(ctr === 3.U || ctr === 4.U, if4_altPred, ctr(2))
-        if4_finalAltPred := if4_altPred
+        if3_tageTaken := Mux(ctr === 3.U || ctr === 4.U, if3_altPred, ctr(2)) // Use altpred on weak taken
+        if3_finalAltPred := if3_altPred
       }
-      if4_provided = if4_provided || hit          // Once hit then provide
-      if4_provider = Mux(hit, i.U, if4_provider)  // Use the last hit as provider
-      if4_altPred = Mux(hit, ctr(2), if4_altPred) // Save current pred as potential altpred
+      if3_provided = if3_provided || hit          // Once hit then provide
+      if3_provider = Mux(hit, i.U, if3_provider)  // Use the last hit as provider
+      if3_altPred = Mux(hit, ctr(2), if3_altPred) // Save current pred as potential altpred
     }
+    val if4_provided = RegEnable(if3_provided, io.s3Fire)
+    val if4_provider = RegEnable(if3_provider, io.s3Fire)
+    val if4_finalAltPred = RegEnable(if3_finalAltPred, io.s3Fire)
+    val if4_tageTaken = RegEnable(if3_tageTaken, io.s3Fire)
+    val if4_providerU = RegEnable(if3_resps(if3_provider)(w).bits.u, io.s3Fire)
+    val if4_providerCtr = RegEnable(if3_resps(if3_provider)(w).bits.ctr, io.s3Fire)
+
     io.resp.hits(w) := if4_provided
+    io.resp.takens(w) := if4_tageTaken
     io.meta(w).provider.valid := if4_provided
     io.meta(w).provider.bits := if4_provider
     io.meta(w).altDiffers := if4_finalAltPred =/= io.resp.takens(w)
-    io.meta(w).providerU := if4_resps(if4_provider)(w).bits.u
-    io.meta(w).providerCtr := if4_resps(if4_provider)(w).bits.ctr
+    io.meta(w).providerU := if4_providerU
+    io.meta(w).providerCtr := if4_providerCtr
     io.meta(w).taken := if4_tageTaken
 
     // Create a mask fo tables which did not hit our query, and also contain useless entries
     // and also uses a longer history than the provider
-    val allocatableSlots = (VecInit(if4_resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
-      ~(LowerMask(UIntToOH(if4_provider), TageNTables) & Fill(TageNTables, if4_provided.asUInt))
+    val allocatableSlots = RegEnable(VecInit(if3_resps.map(r => !r(w).valid && r(w).bits.u === 0.U)).asUInt &
+      ~(LowerMask(UIntToOH(if3_provider), TageNTables) & Fill(TageNTables, if3_provided.asUInt)), io.s3Fire
     )
     val allocLFSR = LFSR64()(TageNTables - 1, 0)
     val firstEntry = PriorityEncoder(allocatableSlots)
@@ -530,7 +537,7 @@ class Tage extends BaseTage {
           // sum += pvdrCtrCentered
           if (EnableSC) {
             (0 until SCNTables) map { j => 
-              scTables(j).getCenteredValue(if4_scResps(j)(w).ctr(i))
+              scTables(j).getCenteredValue(RegEnable(if3_scResps(j)(w).ctr(i), io.s3Fire))
             } reduce (_+_) // TODO: rewrite with adder tree
           }
           else 0.S
@@ -544,15 +551,16 @@ class Tage extends BaseTage {
       scMeta.scPred := if4_tageTaken
       scMeta.sumAbs := 0.U
       when (if4_provided) {
-        val providerCtr = if4_resps(if4_provider)(w).bits.ctr.zext()
+        val providerCtr = if4_providerCtr.zext()
         val pvdrCtrCentered = ((((providerCtr - 4.S) << 1).asSInt + 1.S) << 3).asSInt
         val totalSum = scTableSums(if4_tageTaken.asUInt) + pvdrCtrCentered
         val sumAbs = totalSum.abs().asUInt
         val sumBelowThreshold = totalSum.abs.asUInt < useThreshold
         val scPred = totalSum >= 0.S
         scMeta.sumAbs := sumAbs
-        scMeta.ctrs   := VecInit(if4_scResps.map(r => r(w).ctr(if4_tageTaken.asUInt)))
+        scMeta.ctrs   := RegEnable(VecInit(if3_scResps.map(r => r(w).ctr(if3_tageTaken.asUInt))), io.s3Fire)
         for (i <- 0 until SCNTables) {
+          val if4_scResps = RegEnable(if3_scResps, io.s3Fire)
           XSDebug(RegNext(io.s3Fire), p"SCTable(${i.U})(${w.U}): ctr:(${if4_scResps(i)(w).ctr(0)},${if4_scResps(i)(w).ctr(1)})\n")
         }
         XSDebug(RegNext(io.s3Fire), p"SC(${w.U}): pvdCtr(${providerCtr}), pvdCentred(${pvdrCtrCentered}), totalSum(${totalSum}), abs(${sumAbs}) useThres(${useThreshold}), scPred(${scPred})\n")
@@ -659,6 +667,7 @@ class Tage extends BaseTage {
   if (BPUDebug && debug) {
     val m = updateMeta
     val bri = u.bpuMeta
+    val if4_resps = RegEnable(if3_resps, io.s3Fire)
     XSDebug(io.pc.valid, "req: pc=0x%x, hist=%x\n", io.pc.bits, io.hist)
     XSDebug(io.s3Fire, "s3Fire:%d, resp: pc=%x, hist=%x\n", io.s3Fire, debug_pc_s2, debug_hist_s2)
     XSDebug(RegNext(io.s3Fire), "s3FireOnLastCycle: resp: pc=%x, hist=%x, hits=%b, takens=%b\n",
@@ -667,7 +676,7 @@ class Tage extends BaseTage {
       XSDebug(RegNext(io.s3Fire), "TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b\n", i.U, VecInit(if4_resps(i).map(_.valid)).asUInt, Cat(if4_resps(i).map(_.bits.ctr)), Cat(if4_resps(i).map(_.bits.u)))
     }
     XSDebug(io.update.valid, "update: pc=%x, fetchpc=%x, cycle=%d, hist=%x, taken:%d, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-      u.pc, u.pc - (bri.fetchIdx << 1.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
+      u.pc, u.pc - (bri.fetchIdx << instOffsetBits.U), bri.debug_tage_cycle,  updateHist, u.taken, u.isMisPred, bri.bimCtr, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits)
     XSDebug(io.update.valid && updateIsBr, p"update: sc: ${updateSCMeta}\n")
     XSDebug(true.B, p"scThres: use(${useThreshold}), update(${updateThreshold})\n")
   }

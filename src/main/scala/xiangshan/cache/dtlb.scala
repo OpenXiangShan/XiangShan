@@ -4,9 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.XSTrap
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.mem._
 import xiangshan.backend.fu.HasCSRConst
 import chisel3.ExcitingUtils._
 
@@ -387,7 +385,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // reset pf when pf hit
   val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
-  val pfHitRefill = ParallelOR(pfHitReset.asBools)
+  val pfHitRefill = false.B//ParallelOR(pfHitReset.asBools)
 
   // pf update
   when (refill) {
