@@ -22,11 +22,14 @@ class TLULMasterAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, A
   var tmpD = new TLCScalaD()
   var d_cnt = 0
   var d_cnt_end = 0
+  var snapData: BigInt = 0
 
   def fireD(inD: TLCScalaD): Unit = {
     if (inD.opcode == AccessAckData) {
       d_cnt_end = countBeats(inD.size)
       if (d_cnt == 0) { //start burst
+        val getT = outerGet(inD.source)
+        snapData = insertVersionRead(getT.a.get.address, inD.param)
         tmpD = inD.copy()
         d_cnt += 1
       }
@@ -38,7 +41,7 @@ class TLULMasterAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, A
         d_cnt = 0
         val getT = outerGet(inD.source)
         getT.pairAccessAckData(tmpD)
-        insertMaskedRead(getT.a.get.address, tmpD.data, getT.a.get.mask, tmpD.param)
+        insertMaskedReadSnap(getT.a.get.address, tmpD.data, snapData, getT.a.get.mask)
         outerGet.remove(inD.source)
       }
     }

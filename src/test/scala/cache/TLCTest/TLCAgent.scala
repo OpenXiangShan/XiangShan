@@ -176,6 +176,9 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     val state = addrStateMap.getOrElse(addr, new AddrState())
     if (!addrStateMap.contains(addr)) { //alloc new state if need
       addrStateMap += (addr -> state)
+      if (!scoreboard.contains(addr)) { //alloc scoreboard if needed
+        scoreboard += (addr -> new ScoreboardData())
+      }
     }
     state
   }
@@ -220,7 +223,15 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   }
 
   //only for master Get
-  def insertMaskedRead(addr: BigInt, readData: BigInt, byteMask: BigInt, ver: BigInt): Unit = {
+  def insertVersionRead(addr: BigInt, ver: BigInt): BigInt = {
+    val alignAddr = addrAlignBlock(addr)
+    if (ver == 0) //from l2, just read scoreboard
+      scoreboardRead(alignAddr)
+    else //from l3, need match version
+      scoreboardPeekMatchData(alignAddr, ver)
+  }
+
+  def insertMaskedReadSnap(addr: BigInt, readData: BigInt, snapData: BigInt, byteMask: BigInt): Unit = {
     //addr and mask must be aligned to block
     val alignAddr = addrAlignBlock(addr)
     val start_beat = beatInBlock(addr)
@@ -228,10 +239,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     val alignMask = maskConcatBeat(0, byteMask, start_beat)
     val addrState = getState(alignAddr)
     addrState.data = writeMaskedData(addrState.data, alignData, alignMask)
-    val sbData = if (ver == 0) //from l2, just read scoreboard
-      scoreboardRead(alignAddr)
-    else //from l3, need match version
-      scoreboardPeekMatchData(alignAddr, ver)
+    val sbData = snapData
     val checkWriteData = writeMaskedData(sbData, alignData, alignMask)
     debugPrintln(f"MaskedRead, Addr: $alignAddr%x , own data: $alignData%x , sbData:$sbData%x , mask:$alignMask%x")
     assert(sbData == checkWriteData, f"agent $ID data has been changed, Addr: $alignAddr%x, " +
@@ -266,6 +274,16 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
       f"own data: $readData%x , scoreboard data: $sbData%x , with full mask")
   }
 
+  //read block with snapshot
+  def insertReadSnap(addr: BigInt, readData: BigInt, snapData: BigInt): Unit = {
+    val addrState = getState(addr)
+    addrState.data = readData
+    val sbData = snapData
+    debugPrintln(f"insertFullBlockRead, Addr: $addr%x ,own data: $readData%x")
+    assert(readData == sbData, f"agent $ID data has been changed, Addr: $addr%x, " +
+      f"own data: $readData%x , scoreboard data: $sbData%x , with full mask")
+  }
+
   //full block write, only write new data
   def insertFullWrite(addr: BigInt, newData: BigInt): Unit = {
     //Do not call masked write for performance
@@ -281,6 +299,13 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   def insertReadWrite(addr: BigInt, readData: BigInt, newData: BigInt): Unit = {
     //check old data
     insertRead(addr, readData)
+    //new data
+    insertFullWrite(addr, newData)
+  }
+
+  def insertReadSnapWrite(addr: BigInt, readData: BigInt, snapData: BigInt, newData: BigInt): Unit = {
+    //check old data
+    insertReadSnap(addr, readData, snapData)
     //new data
     insertFullWrite(addr, newData)
   }
@@ -333,6 +358,18 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       sinkIdMap.remove(ID)
       true
     }
+  }
+
+  override def getState(addr: BigInt): AddrState = {
+    val state = addrStateMap.getOrElse(addr, new AddrState())
+    if (!addrStateMap.contains(addr)) { //alloc new state if need
+      state.myPerm = trunk
+      addrStateMap += (addr -> state)
+      if (!scoreboard.contains(addr)) { //alloc scoreboard if needed
+        scoreboard += (addr -> new ScoreboardData())
+      }
+    }
+    state
   }
 
   def permAgainstMaster(masterPerm: BigInt): BigInt = {
@@ -500,10 +537,13 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
     dQueue.fireHead()
   }
 
+  var sbDataSnapshot: BigInt = 0
+
   def fireC(inC: TLCScalaC): Unit = {
     if (inC.opcode == ReleaseData || inC.opcode == ProbeAckData) {
       println(f"slave C fire opcode:${inC.opcode} addr:${inC.address}%x")
       if (c_cnt == 0) { //start burst
+        sbDataSnapshot = scoreboardRead(inC.address)
         tmpC = inC.copy()
         c_cnt += 1
       }
@@ -560,10 +600,10 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         state.data = c.data
         state.slaveUpdatePendingProbeAck()
         if (state.masterPerm == nothing) {
-          insertReadWrite(addr, c.data, randomBlockData()) //modify data when master is invalid
+          insertReadSnapWrite(addr, c.data, sbDataSnapshot, randomBlockData()) //modify data when master is invalid
         }
         else {
-          insertRead(addr, c.data)
+          insertReadSnap(addr, c.data, sbDataSnapshot)
         }
         //serialization point
         appendSerial(probeT)
