@@ -304,15 +304,15 @@ class IFU extends XSModule with HasIFUConst
 
   if4_predicted_gh := if4_gh.update(if4_bp.hasNotTakenBrs, if4_bp.takenOnBr)
 
-  def cal_jal_tgt(inst: UInt, rvc: Bool): UInt = {
+  def jal_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
-      SignExt(Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)), XLEN),
-      SignExt(Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)), XLEN)
-    )
+      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)),
+      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
+    ).asSInt()
   }
   val if4_instrs = if4_pd.instrs
   val if4_jals = if4_bp.jalMask
-  val if4_jal_tgts = VecInit((0 until PredictWidth).map(i => if4_pd.pc(i) + cal_jal_tgt(if4_instrs(i), if4_pd.pd(i).isRVC)))
+  val if4_jal_tgts = VecInit((0 until PredictWidth).map(i => (if4_pd.pc(i).asSInt + jal_offset(if4_instrs(i), if4_pd.pd(i).isRVC)).asUInt))
 
   (0 until PredictWidth).foreach {i =>
     when (if4_jals(i)) {
