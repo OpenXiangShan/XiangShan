@@ -11,7 +11,8 @@ case class StreamPrefetchParameters(
   streamCnt: Int,
   streamSize: Int,
   ageWidth: Int,
-  blockBytes: Int
+  blockBytes: Int,
+  reallocStreamOnMissInstantly: Boolean
 ) {
   def streamWidth = log2Up(streamCnt)
   def idxWidth = log2Up(streamSize)
@@ -30,6 +31,12 @@ class StreamPrefetchResp(p: StreamPrefetchParameters) extends PrefetchResp {
   
   def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
   def idx = id(p.idxWidth - 1, 0)
+}
+
+class StreamPrefetchIO(p: StreamPrefetchParameters) extends PrefetchBundle {
+  val train = Flipped(ValidIO(new PrefetchTrain))
+  val req = DecoupledIO(new StreamPrefetchReq(p))
+  val resp = Flipped(DecoupledIO(new StreamPrefetchResp(p)))
 }
 
 class StreamBufferUpdate(p: StreamPrefetchParameters) extends PrefetchBundle {
@@ -52,10 +59,11 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   def streamSize = p.streamSize
   def streamCnt = p.streamCnt
   def blockBytes = p.blockBytes
+  def getBlockAddr(addr: UInt) = addr & ~((blockBytes - 1).U)
 
-  val baseReq = RegInit(0.U.asTypeOf(Valid(new StreamPrefetchReq(p))))
-  val nextReq = RegInit(0.U.asTypeOf(new StreamPrefetchReq(p)))
-  val buf = RegInit(VecInit(Seq.fill(streamSize)(0.U.asTypeOf(new StreamPrefetchReq(p)))))
+  val baseReq = RegInit(0.U.asTypeOf(Valid(new PrefetchReq)))
+  val nextReq = RegInit(0.U.asTypeOf(new PrefetchReq))
+  val buf = RegInit(VecInit(Seq.fill(streamSize)(0.U.asTypeOf(new PrefetchReq))))
   val valid = RegInit(VecInit(Seq.fill(streamSize)(false.B)))
   val head = RegInit(0.U(log2Up(streamSize).W))
   val tail = RegInit(0.U(log2Up(streamCnt).W))
@@ -124,7 +132,9 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     }
 
     reqs(i).valid := state(i) === s_req
-    reqs(i).bits := buf(i)
+    reqs(i).bits.addr := buf(i).addr
+    reqs(i).bits.write := buf(i).write
+    reqs(i).bits.id := Cat(0.U(p.streamWidth.W), i.U(p.idxWidth.W))
     resps(i).ready := state(i) === s_resp
   }
 
@@ -146,27 +156,111 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val needRealloc = RegInit(false.B)
   when (io.alloc.valid) {
     needRealloc := true.B
-    reallocReq := io.alloc.bits
+    reallocReq := getBlockAddr(io.alloc.bits.addr)
   }.elsewhen (needRealloc && !isPrefetching.asUInt.orR) {
     baseReq.valid := true.B
     baseReq.bits := reallocReq
-    nextReq.bits.write := reallocReq.write
-    nextReq.bits.addr := reallocReq.addr + blockBytes.U
+    nextReq.write := reallocReq.write
+    nextReq.addr := reallocReq.addr + blockBytes.U
     head := 0.U
     tail := 0.U
     needRealloc := false.B
     valid.foreach(_ := false.B)
   }
+
+  for (i <- 0 until streamSize) {
+    io.addrs(i).valid := baseReq.valid && (valid(i) || state(i) =/= s_idle)
+    io.addrs(i).bits := getBlockAddr(buf(i).addr)
+  }
+}
+
+class CompareBundle(width: Int) extends PrefetchBundle {
+  val bits = UInt(width.W)
+  val idx = UInt()
+}
+
+object ParallelMin {
+  def apply[T <: Data](xs: Seq[CompareBundle]): CompareBundle = {
+    ParallelOperation(xs, (a: CompareBundle, b: CompareBundle) => Mux(a.bits < b.bits, a, b))
+  }
 }
 
 class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
-  val io = IO(new PrefetchIO)
+  val io = IO(new StreamPrefetchIO(p))
   
   // TODO: implement this
-  io.req.valid := false.B
-  io.req.bits := DontCare
-  io.resp.ready := true.B
+  def streamCnt = p.streamCnt
+  def streamSize = p.streamSize
+  def ageWidth = p.ageWidth
+  def getBlockAddr(addr: UInt) = addr & ~((p.blockBytes - 1).U)
+  val streamBufs = Seq.fill(streamCnt) { Module(new StreamBuffer(p)) }
+  val addrValids = Wire(Vec(streamCnt, Vec(streamSize, Bool())))
+  for (i <- 0 until streamCnt) {
+    for (j <- 0 until streamSize) {
+      addrValids(i)(j) := streamBufs(i).io.addrs(j).valid
+    }
+  }
+  val bufValids = WireInit(VecInit(addrValids.map(_.asUInt.orR)))
+  val ages = Seq.fill(streamCnt)(RegInit(0.U(ageWidth.W)))
+  val maxAge = -1.S(ageWidth.W).asUInt
 
-  val streamBufs = Seq.fill(p.streamCnt) { Module(new StreamBuffer(p)) }
-  
+  // assign default value
+  for (i <- 0 until streamCnt) {
+    streamBufs(i).io.update.valid := false.B
+    streamBufs(i).io.update.bits := DontCare
+    streamBufs(i).io.alloc.valid := false.B
+    streamBufs(i).io.alloc.bits := DontCare
+  }
+
+  // 1. streamBufs hit while l1i miss
+  val hit = WireInit(false.B)
+  for (i <- 0 until streamCnt) {
+    for (j <- 0 until streamSize) {
+      when (io.train.valid && addrValids(i)(j) && getBlockAddr(io.train.bits.addr) === streamBufs(i).io.addrs(j).bits) {
+        hit := true.B
+        streamBufs(i).io.update.valid := true.B
+        streamBufs(i).io.update.bits.hitIdx := j.U
+        ages(i) := maxAge
+      }
+    }
+  }
+
+  // 2. streamBufs miss
+  when (!hit && io.train.valid) {
+    (0 until streamCnt).foreach(i => ages(i) := Mux(ages(i) =/= 0.U, ages(i) - 1.U, 0.U))
+
+    // realloc an invalid or the eldest stream buffer with new one
+    val idx = Wire(UInt(log2Up(streamCnt).W))
+    when ((~bufValids.asUInt).orR) {
+      idx := PriorityMux(~bufValids.asUInt, VecInit(List.tabulate(streamCnt)(_.U)))
+    }.otherwise {
+      val ageCmp = Seq.fill(streamCnt)(Wire(new CompareBundle(ageWidth)))
+      (0 until streamCnt).foreach(i => ageCmp(i).bits := ages(i))
+      (0 until streamCnt).foreach(i => ageCmp(i).idx := i.U)
+      idx := ParallelMin(ageCmp).idx
+    }
+
+    for (i <- 0 until streamCnt) {
+      streamBufs(i).io.alloc.valid := idx === i.U
+      streamBufs(i).io.alloc.bits := DontCare
+      streamBufs(i).io.alloc.bits.addr := io.train.bits.addr
+      streamBufs(i).io.alloc.bits.write := io.train.bits.write
+      when (idx === i.U) { ages(i) := maxAge }
+    }
+  }
+
+  // 3. send reqs from streamBufs
+  val reqArb = Module(new Arbiter(new StreamPrefetchReq(p), streamCnt))
+  for (i <- 0 until streamCnt) {
+    reqArb.io.in(i).valid := streamBufs(i).io.req.valid
+    reqArb.io.in(i).bits := streamBufs(i).io.req.bits
+    reqArb.io.in(i).bits.id := Cat(i.U(p.streamWidth.W), streamBufs(i).io.req.bits.id(p.idxWidth - 1, 0))
+    streamBufs(i).io.req.ready := reqArb.io.in(i).ready
+
+    streamBufs(i).io.resp.valid := io.resp.valid && i.U === io.resp.bits.stream
+    streamBufs(i).io.resp.bits := io.resp.bits
+  }
+  io.req <> reqArb.io.out
+  io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>
+    i.U === io.resp.bits.stream && buf.io.resp.ready}).asUInt.orR
 }
