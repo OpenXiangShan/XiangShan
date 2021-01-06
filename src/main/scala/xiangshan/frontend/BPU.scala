@@ -408,22 +408,7 @@ class BPUReq extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val hist = UInt(HistoryLength.W)
   val inMask = UInt(PredictWidth.W)
-  // val histPtr = UInt(log2Up(ExtHistoryLength).W) // only for debug
 }
-
-// class CfiUpdateInfoWithHist extends XSBundle {
-//   val ui = new CfiUpdateInfo
-//   val hist = UInt(HistoryLength.W)
-// }
-
-// object CfiUpdateInfoWithHist {
-//   def apply (brInfo: CfiUpdateInfo, hist: UInt) = {
-//     val b = Wire(new CfiUpdateInfoWithHist)
-//     b.ui <> brInfo
-//     b.hist := hist
-//     b
-//   }
-// }
 
 abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasBPUParameter{
   val io = IO(new Bundle() {
@@ -451,8 +436,6 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     p.io.update <> io.cfiUpdateInfo
     p.fires <> io.inFire
   })
-
-  // tage.io.update <> io.cfiUpdateInfo
 
   val s1 = Module(new BPUStage1)
   val s2 = Module(new BPUStage2)
