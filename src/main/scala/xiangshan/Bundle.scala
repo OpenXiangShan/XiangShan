@@ -85,36 +85,43 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val firstBankHasHalfRVI = Bool()
   val lastBankHasHalfRVI = Bool()
 
+  def fBHHR = firstBankHasHalfRVI && HasCExtension.B
+  def lBHHR = lastBankHasHalfRVI  && HasCExtension.B
+
   // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W), firstBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W)).suggestName("lastHalfRVIMask")
+  def lastHalfRVIMask = Cat(lBHHR.asUInt, 0.U((bankWidth-1).W), fBHHR.asUInt, 0.U((bankWidth-1).W))
 
-  def lastHalfRVIClearMask = ~lastHalfRVIMask.suggestName("lastHalfRVIClearMask")
+  def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
-  def lastHalfRVITaken = ((takens(bankWidth-1) && firstBankHasHalfRVI) || (takens(PredictWidth-1) && lastBankHasHalfRVI)).suggestName("lastHalfRVITaken")
+  def lastHalfRVITaken = (takens(bankWidth-1) && fBHHR) || (takens(PredictWidth-1) && lBHHR)
 
-  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U).suggestName("lastHalfRVIIdx")
+  def lastHalfRVIIdx = Mux(fBHHR, (bankWidth-1).U, (PredictWidth-1).U)
   // should not be used if not lastHalfRVITaken
-  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1)).suggestName("lastHalfRVITarget")
+  def lastHalfRVITarget = Mux(fBHHR, targets(bankWidth-1), targets(PredictWidth-1))
   
-  def realTakens  = (takens  & lastHalfRVIClearMask).suggestName("realTakens")
-  def realBrMask  = (brMask  & lastHalfRVIClearMask).suggestName("realBrMask")
-  def realJalMask = (jalMask & lastHalfRVIClearMask).suggestName("realJalMask")
+  def realTakens  = takens  & lastHalfRVIClearMask
+  def realBrMask  = brMask  & lastHalfRVIClearMask
+  def realJalMask = jalMask & lastHalfRVIClearMask
 
-  def brNotTakens = (~takens & realBrMask).suggestName("brNotTakens")
+  def brNotTakens = (~takens & realBrMask)
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
-                       (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0))))).suggestName("sawNotTakenBr")
+                       (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0)))))
   // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
-  def unmaskedJmpIdx = ParallelPriorityEncoder(takens).suggestName("unmaskedJmpIdx")
+  def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
   // if not taken before the half RVI inst
-  def saveHalfRVI = ((firstBankHasHalfRVI && !(ParallelORR(takens(bankWidth-2,0)))) ||
-  (lastBankHasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0))))).suggestName("saveHalfRVI")
+  def saveHalfRVI = (fBHHR && !(ParallelORR(takens(bankWidth-2,0)))) ||
+  (lBHHR && !(ParallelORR(takens(PredictWidth-2,0))))
   // could get PredictWidth-1 when only the first bank is valid
-  def jmpIdx = ParallelPriorityEncoder(realTakens).suggestName("jmpIdx")
+  def jmpIdx = ParallelPriorityEncoder(realTakens)
   // only used when taken
-  def target = ParallelPriorityMux(realTakens, targets).suggestName("target")
-  def taken = ParallelORR(realTakens).suggestName("taken")
-  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools).suggestName("takenOnBr")
-  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens)).suggestName("hasNotTakenBrs")
+  def target = {
+    val generator = new PriorityMuxGenerator[UInt]
+    generator.register(realTakens.asBools, targets, List.fill(PredictWidth)(None))
+    generator()
+  }
+  def taken = ParallelORR(realTakens)
+  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools)
+  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
 }
 
 class BpuMeta extends XSBundle with HasBPUParameter {
