@@ -8,7 +8,11 @@ import xiangshan.backend.roq.RoqPtr
 
 class DispatchQueueIO(enqnum: Int, deqnum: Int) extends XSBundle {
   val enq = new Bundle {
+    // output: dispatch queue can accept new requests
     val canAccept = Output(Bool())
+    // input: need to allocate new entries (for address computing)
+    val needAlloc = Vec(enqnum, Input(Bool()))
+    // input: actually do the allocation (for write enable)
     val req = Vec(enqnum, Flipped(ValidIO(new MicroOp)))
   }
   val deq = Vec(deqnum, DecoupledIO(new MicroOp))
@@ -63,7 +67,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   for (i <- 0 until enqnum) {
     when (io.enq.req(i).valid && canActualEnqueue) {
       dataModule.io.wen(i) := true.B
-      val sel = if (i == 0) 0.U else PopCount(io.enq.req.take(i).map(_.valid))
+      val sel = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
       dataModule.io.waddr(i) := tailPtr(sel).value
       roqIdxEntries(tailPtr(sel).value) := io.enq.req(i).bits.roqIdx
       debug_uopEntries(tailPtr(sel).value) := io.enq.req(i).bits
