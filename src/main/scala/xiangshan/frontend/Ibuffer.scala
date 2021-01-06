@@ -114,7 +114,17 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Deque
   when(deqValid) {
-    val validVec = UIntToMask(validEntries, DecodeWidth)
+    // val validVec = UIntToMask(validEntries, DecodeWidth)
+    val validVec = ParallelMux(Seq(
+      (validEntries === 0.U , 0.U(DecodeWidth.W)),
+      (validEntries === 1.U , 1.U(DecodeWidth.W)),
+      (validEntries === 2.U , 3.U(DecodeWidth.W)),
+      (validEntries === 3.U , 7.U(DecodeWidth.W)),
+      (validEntries === 4.U , 15.U(DecodeWidth.W)),
+      (validEntries === 5.U , 31.U(DecodeWidth.W)),
+      (validEntries >=  6.U , 63.U(DecodeWidth.W))
+    ))
+
     io.out.zipWithIndex.foreach{case (e, i) => e.valid := validVec(i)}
 
     for(i <- 0 until DecodeWidth) {
