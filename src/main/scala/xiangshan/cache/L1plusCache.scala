@@ -41,11 +41,21 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   val icacheParams = icacheParameters
   val cfg = cacheParams
   val icfg = icacheParams
+  val pcfg = l1plusPrefetcherParameters
 
   def encRowBits = cacheParams.dataCode.width(rowBits)
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
+  // def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
+  // L1plusCache has 2 clients: ICacheMissQueue and L1plusPrefetcher
+  def nClients = 2
+  def icacheMissQueueId = 0
+  def l1plusPrefetcherId = 1
+  def clientIdWidth = log2Up(nClients)
   def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
+  def l1plusPrefetcherEntryIdWidth = log2Up(pcfg.nEntries)// TODO
+  def entryIdWidth = max(icacheMissQueueEntryIdWidth, l1plusPrefetcherEntryIdWidth)
+  def idWidth = clientIdWidth + entryIdWidth
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -259,13 +269,13 @@ class L1plusCacheReq extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val id   = UInt(icacheMissQueueEntryIdWidth.W)
+  val id   = UInt(idWidth.W)
 }
 
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
-  val id   = UInt(icacheMissQueueEntryIdWidth.W)
+  val id   = UInt(idWidth.W)
 }
 
 class L1plusCacheIO extends L1plusCacheBundle

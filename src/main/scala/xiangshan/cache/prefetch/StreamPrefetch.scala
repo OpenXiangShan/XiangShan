@@ -7,7 +7,6 @@ import xiangshan.cache._
 import utils._
 
 case class StreamPrefetchParameters(
-  _type: String,
   streamCnt: Int,
   streamSize: Int,
   ageWidth: Int,

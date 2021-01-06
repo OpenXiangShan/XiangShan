@@ -8,6 +8,7 @@ import utils._
 
 trait HasPrefetchParameters extends HasXSParameter {
   val l1plusParams = l1plusCacheParameters
+  val l1plusPrefetchParams = l1plusPrefetcherParameters
 }
 
 abstract class PrefetchModule extends XSModule with HasPrefetchParameters
@@ -25,7 +26,7 @@ class PrefetchResp extends PrefetchBundle {
 class PrefetchTrain extends PrefetchBundle {
   val addr = UInt(PAddrBits.W)
   val write = Bool()
-  val miss = Bool()
+  val miss = Bool() // TODO: delete this
 }
 
 class PrefetchIO extends PrefetchBundle {
@@ -34,12 +35,12 @@ class PrefetchIO extends PrefetchBundle {
   val resp = Flipped(DecoupledIO(new PrefetchResp))
 }
 
-class FakePrefetcher extends PrefetchModule {
-  val io = IO(new PrefetchIO)
+// class FakePrefetcher extends PrefetchModule {
+//   val io = IO(new PrefetchIO)
 
-  io.req.valid := false.B
-  io.req.bits := DontCare
-  io.resp.ready := true.B
+//   io.req.valid := false.B
+//   io.req.bits := DontCare
+//   io.resp.ready := true.B
 
-  assert(!io.resp.fire(), "FakePrefetcher should not receive resp")
-}
+//   assert(!io.resp.fire(), "FakePrefetcher should not receive resp")
+// }

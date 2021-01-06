@@ -171,6 +171,17 @@ trait HasXSParameter {
     nMissEntries = 8
   )
 
+  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
+    _type = "stream",
+    streamParams = StreamPrefetchParameters(
+      streamCnt = 4,
+      streamSize = 4,
+      ageWidth = 4,
+      blockBytes = l1plusCacheParameters.blockBytes,
+      reallocStreamOnMissInstantly = true
+    )
+  )
+
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
