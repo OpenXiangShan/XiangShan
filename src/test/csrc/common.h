@@ -26,4 +26,7 @@ extern int assert_count;
 void assert_init();
 void assert_finish();
 
+extern int signal_num;
+void sig_handler(int signo);
+
 #endif // __COMMON_H

@@ -7,14 +7,19 @@ import xiangshan._
 import utils._
 import xiangshan.cache._
 import chisel3.experimental.chiselName
+import freechips.rocketchip.tile.HasLazyRoCC
 
 trait HasIFUConst extends HasXSParameter {
   val resetVector = 0x80000000L//TODO: set reset vec
   def align(pc: UInt, bytes: Int): UInt = Cat(pc(VAddrBits-1, log2Ceil(bytes)), 0.U(log2Ceil(bytes).W))
-  val groupBytes = FetchWidth * 4 * 2 // correspond to cache line size
+  val instBytes = if (HasCExtension) 2 else 4
+  val instOffsetBits = log2Ceil(instBytes)
+  val groupBytes = 64 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
+  val groupWidth = groupBytes / instBytes
+  val FetchBytes = FetchWidth * instBytes
   val nBanksInPacket = 2
-  val bankBytes = PredictWidth * 2 / nBanksInPacket
+  val bankBytes = FetchBytes / nBanksInPacket
   val nBanksInGroup = groupBytes / bankBytes
   val bankWidth = PredictWidth / nBanksInPacket
   val bankOffsetBits = log2Ceil(bankBytes)
@@ -22,7 +27,7 @@ trait HasIFUConst extends HasXSParameter {
   def bankInGroup(pc: UInt) = pc(groupOffsetBits-1,bankOffsetBits)
   def isInLastBank(pc: UInt) = bankInGroup(pc) === (nBanksInGroup-1).U
   // (0, bankBytes/2-1)
-  def offsetInBank(pc: UInt) = pc(bankOffsetBits-1,1)
+  def offsetInBank(pc: UInt) = pc(bankOffsetBits-1,instOffsetBits)
   def bankAligned(pc: UInt)  = align(pc, bankBytes)
   def groupAligned(pc: UInt) = align(pc, groupBytes)
   // each 1 bit in mask stands for 2 Bytes
@@ -152,14 +157,14 @@ class IFU extends XSModule with HasIFUConst
   .elsewhen (if2_fire)  { if2_valid := false.B }
 
   val npcGen = new PriorityMuxGenerator[UInt]
-  npcGen.register(true.B, RegNext(if1_npc))
-  npcGen.register(if2_fire, if2_snpc)
+  npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
+  // npcGen.register(if2_fire, if2_snpc, Some("if2_snpc"))
   val if2_bp = bpu.io.out(0)
   
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
-  if2_redirect := if2_valid && if2_bp.taken
-  npcGen.register(if2_redirect, if2_bp.target)
+  // if2_redirect := if2_valid
+  npcGen.register(if2_valid, Mux(if2_bp.taken, if2_bp.target, if2_snpc), Some("if2_target"))
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
 
@@ -187,14 +192,14 @@ class IFU extends XSModule with HasIFUConst
 
   val prevHalfInstrReq = WireInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
   // only valid when if4_fire
-  val hasPrevHalfInstrReq = prevHalfInstrReq.valid
+  val hasPrevHalfInstrReq = prevHalfInstrReq.valid && HasCExtension.B
 
   val if3_prevHalfInstr = RegInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
 
   // 32-bit instr crosses 2 pages, and the higher 16-bit triggers page fault
   val crossPageIPF = WireInit(false.B)
 
-  val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid
+  val if3_pendingPrevHalfInstr = if3_prevHalfInstr.valid && HasCExtension.B
 
   // the previous half of RVI instruction waits until it meets its last half
   val if3_prevHalfInstrMet = if3_pendingPrevHalfInstr && if3_prevHalfInstr.bits.npc === if3_pc && if3_valid
@@ -214,7 +219,22 @@ class IFU extends XSModule with HasIFUConst
   // when bp signal a redirect, we distinguish between taken and not taken
   // if taken and saveHalfRVI is true, we do not redirect to the target
 
-  def if3_nextValidPCNotEquals(pc: UInt) = !if2_valid || if2_valid && if2_pc =/= pc
+  class IF3_PC_COMP extends XSModule {
+    val io = IO(new Bundle {
+      val if2_pc = Input(UInt(VAddrBits.W))
+      val pc     = Input(UInt(VAddrBits.W))
+      val if2_valid = Input(Bool())
+      val res = Output(Bool())
+    })
+    io.res := !io.if2_valid || io.if2_valid && io.if2_pc =/= io.pc
+  }
+  def if3_nextValidPCNotEquals(pc: UInt) = {
+    val comp = Module(new IF3_PC_COMP)
+    comp.io.if2_pc := if2_pc
+    comp.io.pc     := pc
+    comp.io.if2_valid := if2_valid
+    comp.io.res
+  }
 
   val if3_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => !if3_pendingPrevHalfInstr && if3_bp.realTakens(i) && if3_nextValidPCNotEquals(if3_bp.targets(i))))
   val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.bits.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.target)
@@ -229,7 +249,7 @@ class IFU extends XSModule with HasIFUConst
                     // we do not handle this condition because of the burden of building a correct GHInfo
                     // prevHalfMetRedirect ||
                     // prevHalf does not match if3_pc and the next fetch packet is not snpc
-                    if3_prevHalfNotMetRedirect ||
+                    if3_prevHalfNotMetRedirect && HasCExtension.B ||
                     // pred taken and next fetch packet is not the predicted target
                     if3_predTakenRedirect ||
                     // pred not taken and next fetch packet is not snpc
@@ -249,7 +269,7 @@ class IFU extends XSModule with HasIFUConst
   // }.elsewhen (if3_ghInfoNotIdenticalRedirect) {
   //   if3_target := Mux(if3_bp.taken, if3_bp.target, snpc(if3_pc))
   // }
-  npcGen.register(if3_redirect, if3_target)
+  npcGen.register(if3_redirect, if3_target, Some("if3_target"))
 
   // when (if3_redirect) {
   //   if1_npc := if3_target
@@ -303,7 +323,7 @@ class IFU extends XSModule with HasIFUConst
   // we need this to tell BPU the prediction of prev half
   // because the prediction is with the start of each inst
   val if4_prevHalfInstr = RegInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
-  val if4_pendingPrevHalfInstr = if4_prevHalfInstr.valid
+  val if4_pendingPrevHalfInstr = if4_prevHalfInstr.valid && HasCExtension.B
   val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && if4_prevHalfInstr.bits.npc === if4_pc && if4_valid
   val if4_prevHalfConsumed = if4_prevHalfInstrMet && if4_fire
   val if4_prevHalfFlush = if4_flush
@@ -321,10 +341,10 @@ class IFU extends XSModule with HasIFUConst
     if4_prevHalfInstr.bits := if3_prevHalfInstr.bits
   }
 
-  prevHalfInstrReq.valid := if4_fire && if4_bp.saveHalfRVI
+  prevHalfInstrReq.valid := if4_fire && if4_bp.saveHalfRVI && HasCExtension.B
   val idx = if4_bp.lastHalfRVIIdx
   
-  // this is result of the last half RVI
+  // // this is result of the last half RVI
   prevHalfInstrReq.bits.taken := if4_bp.lastHalfRVITaken
   prevHalfInstrReq.bits.ghInfo := if4_gh
   prevHalfInstrReq.bits.fetchpc := if4_pc
@@ -336,9 +356,29 @@ class IFU extends XSModule with HasIFUConst
   prevHalfInstrReq.bits.ipf := if4_ipf
   prevHalfInstrReq.bits.meta := bpu.io.bpuMeta(idx)
 
-  def if4_nextValidPCNotEquals(pc: UInt) = if3_valid  && if3_pc =/= pc ||
-                                           !if3_valid && (if2_valid && if2_pc =/= pc) ||
-                                           !if3_valid && !if2_valid
+  class IF4_PC_COMP extends XSModule {
+    val io = IO(new Bundle {
+      val if2_pc = Input(UInt(VAddrBits.W))
+      val if3_pc = Input(UInt(VAddrBits.W))
+      val pc     = Input(UInt(VAddrBits.W))
+      val if2_valid = Input(Bool())
+      val if3_valid = Input(Bool())
+      val res = Output(Bool())
+    })
+    io.res := io.if3_valid  && io.if3_pc =/= io.pc ||
+              !io.if3_valid && (io.if2_valid && io.if2_pc =/= io.pc) ||
+              !io.if3_valid && !io.if2_valid
+  }
+  def if4_nextValidPCNotEquals(pc: UInt) = {
+    val comp = Module(new IF4_PC_COMP)
+    comp.io.if2_pc := if2_pc
+    comp.io.if3_pc := if3_pc
+    comp.io.pc     := pc
+    comp.io.if2_valid := if2_valid
+    comp.io.if3_valid := if3_valid
+    comp.io.res
+  }
+
   val if4_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => if4_bp.realTakens(i) && if4_nextValidPCNotEquals(if4_bp.targets(i))))
 
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.bits.pc+2.U)
@@ -371,7 +411,7 @@ class IFU extends XSModule with HasIFUConst
   // }.elsewhen (if4_ghInfoNotIdenticalRedirect) {
   //   if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
   // }
-  npcGen.register(if4_redirect, if4_target)
+  npcGen.register(if4_redirect, if4_target, Some("if4_target"))
 
   when (if4_fire) {
     final_gh := if4_predicted_gh
@@ -397,8 +437,8 @@ class IFU extends XSModule with HasIFUConst
     flush_final_gh := true.B
   }
 
-  npcGen.register(io.redirect.valid, io.redirect.bits)
-  npcGen.register(RegNext(reset.asBool) && !reset.asBool, resetVector.U(VAddrBits.W))
+  npcGen.register(io.redirect.valid, io.redirect.bits, Some("backend_redirect"))
+  npcGen.register(RegNext(reset.asBool) && !reset.asBool, resetVector.U(VAddrBits.W), Some("reset_vector"))
 
   if1_npc := npcGen()
 

@@ -297,7 +297,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.outMask := false.B
     for (j <- 0 until PredictWidth) {
       when (Mux(isInNextRow(i), baseBank + j.U === (PredictWidth + i).U, baseBank + j.U === i.U)) {
-        ltbs(i).io.req.pc := pc + (j.U << 1)
+        ltbs(i).io.req.pc := pc + (j.U << instOffsetBits)
         ltbs(i).io.outMask := outMask(j).asBool
       }
     }

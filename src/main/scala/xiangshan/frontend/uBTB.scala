@@ -21,7 +21,7 @@ class MicroBTB extends BasePredictor
     with MicroBTBPatameter
 {
     // val tagSize = VAddrBits - log2Ceil(PredictWidth) - 1
-    val untaggedBits = log2Up(PredictWidth) + 1
+    val untaggedBits = log2Up(PredictWidth) + instOffsetBits
 
     class MicroBTBResp extends Resp
     {
@@ -51,7 +51,7 @@ class MicroBTB extends BasePredictor
     io.uBTBMeta <> out_ubtb_br_info
 
     def getTag(pc: UInt) = (pc >> untaggedBits)(tagSize-1, 0)
-    def getBank(pc: UInt) = pc(log2Ceil(PredictWidth) ,1)
+    def getBank(pc: UInt) = pc(log2Ceil(PredictWidth), instOffsetBits)
 
     class MicroBTBMeta extends XSBundle
     {
@@ -183,7 +183,7 @@ class MicroBTB extends BasePredictor
         read_resp(i).valid := io.inMask(i)
         read_resp(i).taken := read_resp(i).valid && metas(i).hit_and_taken
         read_resp(i).is_Br  := read_resp(i).valid && uBTBMeta_resp(i).is_Br
-        read_resp(i).target := Cat(io.pc.bits(VAddrBits-1, lowerBitsSize+1), btb_resp(i).asUInt, 0.U(1.W))
+        read_resp(i).target := Cat(io.pc.bits(VAddrBits-1, lowerBitsSize+instOffsetBits), btb_resp(i).asUInt, 0.U(instOffsetBits.W))
         read_resp(i).is_RVC := read_resp(i).valid && uBTBMeta_resp(i).is_RVC
 
         out_ubtb_br_info.hits(i) := read_hit_vec(i)
@@ -230,7 +230,7 @@ class MicroBTB extends BasePredictor
     val u = io.update.bits
     val update_br_pc  = u.pc
     val update_br_idx = u.fetchIdx
-    val update_br_offset = (update_br_idx << 1).asUInt()
+    val update_br_offset = (update_br_idx << instOffsetBits).asUInt()
     val update_fetch_pc = update_br_pc - update_br_offset
     val update_write_way = u.bpuMeta.ubtbWriteWay
     val update_hits = u.bpuMeta.ubtbHits
@@ -240,7 +240,7 @@ class MicroBTB extends BasePredictor
     val update_base_bank = getBank(update_fetch_pc)
     val update_tag = getTag(update_br_pc)
     val update_target = Mux(u.pd.isBr, u.brTarget, u.target)
-    val update_target_lower = update_target(lowerBitsSize, 1)
+    val update_target_lower = update_target(lowerBitsSize-1+instOffsetBits, instOffsetBits)
     val update_is_BR_or_JAL = (u.pd.brType === BrType.branch) || (u.pd.brType === BrType.jal) 
   
   

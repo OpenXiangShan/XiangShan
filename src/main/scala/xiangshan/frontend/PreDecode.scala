@@ -70,7 +70,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
   val isAligned = bankOffset === 0.U
 
   val firstValidIdx = bankOffset // io.prev.valid should only occur with firstValidIdx = 0
-  XSError(firstValidIdx =/= 0.U && io.prev.valid, p"pc:${io.in.pc}, mask:${io.in.mask}, prevhalfInst valid occurs on unaligned fetch packet\n")
+  XSError(firstValidIdx =/= 0.U && io.prev.valid && HasCExtension.B, p"pc:${io.in.pc}, mask:${io.in.mask}, prevhalfInst valid occurs on unaligned fetch packet\n")
   // val lastHalfInstrIdx = Mux(isInLastBank(pc), (bankWidth-1).U, (bankWidth*2-1).U)
   // in case loop buffer gives a packet ending at an unaligned position
   val lastHalfInstrIdx = PriorityMux(Reverse(mask), (PredictWidth-1 to 0 by -1).map(i => i.U))
@@ -81,8 +81,12 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
   val instsRVC = Wire(Vec(PredictWidth,Bool()))
   val instsPC = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
 
-  val rawInsts = VecInit((0 until PredictWidth).map(i => if (i == PredictWidth-1) Cat(0.U(16.W), data(i*16+15, i*16))
+  val rawInsts = if (HasCExtension) {
+                   VecInit((0 until PredictWidth).map(i => if (i == PredictWidth-1) Cat(0.U(16.W), data(i*16+15, i*16))
                                                          else data(i*16+31, i*16)))
+                 } else {
+                   VecInit((0 until PredictWidth).map(i => data(i*32+31, i*32)))
+                 }
   // val nextHalf = Wire(UInt(16.W))
 
   val lastHalf = Wire(Vec(nBanksInPacket, UInt(1.W)))
@@ -91,23 +95,24 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     val inst = WireInit(rawInsts(i))
     val validStart = Wire(Bool()) // is the beginning of a valid inst
     val validEnd = Wire(Bool())  // is the end of a valid inst
-    val pc = bankAlignedPC + (i << 1).U - Mux(io.prev.valid && (i.U === firstValidIdx), 2.U, 0.U)
+    val pc = bankAlignedPC + (i << instOffsetBits).U - Mux(io.prev.valid && (i.U === firstValidIdx) && HasCExtension.B, 2.U, 0.U)
 
     val isFirstInPacket = i.U === firstValidIdx
     val isLastInPacket = i.U === lastHalfInstrIdx
-    val currentRVC = isRVC(insts(i))
+    val currentRVC = isRVC(insts(i)) && HasCExtension.B
 
-    val lastIsValidEnd = if (i == 0) { !io.prev.valid } else { instsEndMask(i-1) || isFirstInPacket }
+    val lastIsValidEnd = (if (i == 0) { !io.prev.valid } else { instsEndMask(i-1) || isFirstInPacket }) || HasCExtension.B
     
-    inst := Mux(io.prev.valid && i.U === 0.U, Cat(rawInsts(i)(15,0), io.prev.bits), rawInsts(i))
+    inst := (if (HasCExtension) Mux(io.prev.valid && i.U === 0.U, Cat(rawInsts(i)(15,0), io.prev.bits), rawInsts(i))
+            else rawInsts(i))
 
-    validStart := lastIsValidEnd && !(isLastInPacket && !currentRVC)
-    validEnd := validStart && currentRVC || !validStart && !(isLastInPacket && !currentRVC)
+    validStart := lastIsValidEnd && !(isLastInPacket && !currentRVC) || !HasCExtension.B
+    validEnd := validStart && currentRVC || !validStart && !(isLastInPacket && !currentRVC) || !HasCExtension.B
 
-    val currentLastHalf = lastIsValidEnd && (isLastInPacket && !currentRVC)
+    val currentLastHalf = lastIsValidEnd && (isLastInPacket && !currentRVC) && HasCExtension.B
 
     insts(i) := inst
-    instsRVC(i) := isRVC(inst)
+    instsRVC(i) := isRVC(inst) && HasCExtension.B
     instsMask(i) := (if (i == 0) Mux(io.prev.valid, validEnd, validStart) else validStart)
     instsEndMask(i) := validEnd
     instsPC(i) := pc
@@ -125,7 +130,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     if (i == PredictWidth-1) { lastHalf(1) := currentLastHalf }
   }
   io.out.mask := instsMask.asUInt & mask
-  io.out.lastHalf := lastHalf.asUInt
+  io.out.lastHalf := (if (HasCExtension) lastHalf.asUInt else 0.U(2.W))
 
   for (i <- 0 until PredictWidth) {
     XSDebug(true.B,

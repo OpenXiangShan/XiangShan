@@ -4,9 +4,6 @@ import chisel3._
 import chisel3.util._
 import device.RAMHelper
 import xiangshan._
-import utils.{GTimer, XSDebug}
-import xiangshan.backend.decode.isa
-import xiangshan.backend.decode.Decoder
 
 trait HasICacheConst { this: XSModule =>
   // 4-byte align * FetchWidth-inst

@@ -154,7 +154,7 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = WireInit(bankAligned(io.pc.bits) + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U)))
+    val spec_new_addr = bankAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux(!io.isRVC && !io.isLastHalfRVI && HasCExtension.B, 2.U, 4.U)
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
@@ -170,7 +170,7 @@ class RAS extends BasePredictor
 
     val commit_push = WireInit(false.B)
     val commit_pop = WireInit(false.B)
-    val commit_new_addr = Mux(io.recover.bits.pd.isRVC,io.recover.bits.pc + 2.U,io.recover.bits.pc + 4.U)
+    val commit_new_addr = Mux(io.recover.bits.pd.isRVC && HasCExtension.B, io.recover.bits.pc + 2.U, io.recover.bits.pc + 4.U)
     commit_ras.push_valid := commit_push
     commit_ras.pop_valid  := commit_pop
     commit_ras.new_addr   := commit_new_addr
@@ -178,8 +178,8 @@ class RAS extends BasePredictor
     val commit_is_full = commit_ras.is_full
     val commit_top_addr = commit_ras.top_addr
 
-    commit_push := !commit_is_full  && io.recover.valid && io.recover.bits.pd.isCall
-    commit_pop  := !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
+    commit_push := !commit_is_full  && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isCall
+    commit_pop  := !commit_is_empty && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isRet
 
 
     io.out.valid := !spec_is_empty
