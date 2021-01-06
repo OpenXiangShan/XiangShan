@@ -94,7 +94,7 @@ class MicroBTB extends BasePredictor
         io.hit_and_taken := VecInit(rentries map (e => e.valid && e.tag === io.rtag && e.pred(1))).asUInt.orR
         val hit_way = OHToUInt(hit_ohs)
         //val hit_entry = rentries(hit_way)
-        val hit_entry = ParallelPriorityMux(hit_ohs, rentries)
+        val hit_entry = ParallelMux(hit_ohs zip rentries)
 
         io.hit_ohs := hit_ohs
         io.hit_way := hit_way
@@ -123,7 +123,7 @@ class MicroBTB extends BasePredictor
         val mem = Mem(nWays, new MicroBTBEntry)
         val rentries = VecInit((0 until nWays) map (i => mem(i)))
         // io.rdata := rentries(io.rWay)
-        io.rdata := ParallelPriorityMux(io.rOHs, rentries)
+        io.rdata := ParallelMux(io.rOHs zip rentries)
         when (io.wen) {
             mem.write(io.wWay, io.wdata)
         }
