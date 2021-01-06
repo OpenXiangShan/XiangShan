@@ -373,7 +373,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.if2_fire := io.pc.valid
     ltbs(i).io.if3_fire := io.if3_fire
-    ltbs(i).io.if4_fire := outFire
+    ltbs(i).io.if4_fire := out_fire
     ltbs(i).io.req.idx := bankIdx
     ltbs(i).io.req.tag := tag
     // ltbs(i).io.outMask := outMask(i)
@@ -428,7 +428,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     // debug info
     XSDebug("[IF2][req] fire=%d flush=%d fetchpc=%x\n", if2_fire, io.flush, io.pc.bits)
     XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", if3_fire, io.flush, pc)
-    XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
+    XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", out_fire, bank, bankAlignedPC, bankIdx, tag)
     XSDebug("[IF4][req] inMask=%b, reorderMask=%b\n", inMask, reorderMask)
 
     XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d, isReplay=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr, io.update.bits.isReplay)
