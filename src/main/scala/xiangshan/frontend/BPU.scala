@@ -116,10 +116,16 @@ abstract class BasePredictor extends XSModule
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
     val update = Flipped(ValidIO(new CfiUpdateInfo))
-    val outFire = Input(Bool())
   }
 
-  val io = new DefaultBasePredictorIO
+
+  val io = IO(new DefaultBasePredictorIO)
+  val fires = IO(Input(Vec(4, Bool())))
+
+  val s1_fire = fires(0)
+  val s2_fire = fires(1)
+  val s3_fire = fires(2)
+  val out_fire = fires(3)
 
   val debug = false
 }
@@ -438,7 +444,11 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
 
   def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
-  preds.map(_.io.update <> io.cfiUpdateInfo)
+  preds.map(p => {
+    p.io.update <> io.cfiUpdateInfo
+    p.fires <> io.inFire
+  })
+
   // tage.io.update <> io.cfiUpdateInfo
 
   val s1 = Module(new BPUStage1)
@@ -570,7 +580,7 @@ class BPU extends BaseBPU {
   tage.io.pc.bits := s2.io.in.pc // PC from s1
   tage.io.hist := s1_hist // The inst is from s1
   tage.io.inMask := s2.io.in.mask
-  tage.io.s3Fire := s3_fire // Tell tage to march 1 stage
+  // tage.io.s3Fire := s3_fire // Tell tage to march 1 stage
   tage.io.bim <> s1.io.out.resp.bim // Use bim results from s1
 
   //**********************Stage 3****************************//
@@ -581,7 +591,7 @@ class BPU extends BaseBPU {
   loop.io.pc.valid := s3_fire
   loop.io.pc.bits := s3.io.in.pc
   loop.io.inMask := s3.io.in.mask
-  loop.io.outFire := s4_fire
+  // loop.io.outFire := s4_fire
   loop.io.respIn.taken := s3.io.pred.taken
   loop.io.respIn.jmpIdx := s3.io.pred.jmpIdx
 

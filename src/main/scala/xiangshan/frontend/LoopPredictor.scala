@@ -305,7 +305,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.if3_fire := io.pc.valid
-    ltbs(i).io.if4_fire := io.outFire
+    ltbs(i).io.if4_fire := out_fire
     ltbs(i).io.req.idx := Mux(isInNextRow(i), baseRow + 1.U, baseRow)
     ltbs(i).io.req.tag := realTags(i)
     // ltbs(i).io.outMask := outMask(i)
@@ -326,7 +326,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   if (BPUDebug && debug) {
     // debug info
     XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", io.pc.valid, io.flush, io.pc.bits)
-    XSDebug("[IF4][req] fire=%d baseBank=%x baseRow=%x baseTag=%x\n", io.outFire, baseBank, baseRow, baseTag)
+    XSDebug("[IF4][req] fire=%d baseBank=%x baseRow=%x baseTag=%x\n", out_fire, baseBank, baseRow, baseTag)
     XSDebug("[IF4][req] isInNextRow=%b tagInc=%b\n", isInNextRow.asUInt, tagIncremented.asUInt)
     for (i <- 0 until PredictWidth) {
       XSDebug("[IF4][req] bank %d: realMask=%d pc=%x idx=%x tag=%x\n", i.U, realMask(i), ltbs(i).io.req.pc, ltbs(i).io.req.idx, ltbs(i).io.req.tag)
@@ -337,9 +337,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
     }
     XSDebug(false, true.B, "\n")
     for (i <- 0 until PredictWidth) {
-      XSDebug(io.outFire && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
-      XSDebug(false, io.outFire, " %d:%d %d", i.U, io.resp.exit(i), io.meta.specCnts(i))
-      XSDebug(false, io.outFire && (i.U === 7.U || i.U === 15.U), "\n")
+      XSDebug(out_fire && (i.U === 0.U || i.U === 8.U), "[IF4][resps]")
+      XSDebug(false, out_fire, " %d:%d %d", i.U, io.resp.exit(i), io.meta.specCnts(i))
+      XSDebug(false, out_fire && (i.U === 7.U || i.U === 15.U), "\n")
     }
   }
 }
