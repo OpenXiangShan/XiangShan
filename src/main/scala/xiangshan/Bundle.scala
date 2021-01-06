@@ -16,6 +16,7 @@ import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import utils._
 import scala.math.max
+import Chisel.experimental.chiselName
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -67,6 +68,7 @@ class TageMeta extends XSBundle with HasTageParameter {
   val scMeta = new SCMeta(EnableSC)
 }
 
+@chiselName
 class BranchPrediction extends XSBundle with HasIFUConst {
   // val redirect = Bool()
   val takens = UInt(PredictWidth.W)
@@ -84,35 +86,35 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   val lastBankHasHalfRVI = Bool()
 
   // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W), firstBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W))
+  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W), firstBankHasHalfRVI.asUInt, 0.U((bankWidth-1).W)).suggestName("lastHalfRVIMask")
 
-  def lastHalfRVIClearMask = ~lastHalfRVIMask
+  def lastHalfRVIClearMask = ~lastHalfRVIMask.suggestName("lastHalfRVIClearMask")
   // is taken from half RVI
-  def lastHalfRVITaken = (takens(bankWidth-1) && firstBankHasHalfRVI) || (takens(PredictWidth-1) && lastBankHasHalfRVI)
+  def lastHalfRVITaken = ((takens(bankWidth-1) && firstBankHasHalfRVI) || (takens(PredictWidth-1) && lastBankHasHalfRVI)).suggestName("lastHalfRVITaken")
 
-  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
+  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U).suggestName("lastHalfRVIIdx")
   // should not be used if not lastHalfRVITaken
-  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1))
+  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1)).suggestName("lastHalfRVITarget")
   
-  def realTakens  = takens  & lastHalfRVIClearMask
-  def realBrMask  = brMask  & lastHalfRVIClearMask
-  def realJalMask = jalMask & lastHalfRVIClearMask
+  def realTakens  = (takens  & lastHalfRVIClearMask).suggestName("realTakens")
+  def realBrMask  = (brMask  & lastHalfRVIClearMask).suggestName("realBrMask")
+  def realJalMask = (jalMask & lastHalfRVIClearMask).suggestName("realJalMask")
 
-  def brNotTakens = ~takens & realBrMask
+  def brNotTakens = (~takens & realBrMask).suggestName("brNotTakens")
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
-                       (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0)))))
+                       (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0))))).suggestName("sawNotTakenBr")
   // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
-  def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
+  def unmaskedJmpIdx = ParallelPriorityEncoder(takens).suggestName("unmaskedJmpIdx")
   // if not taken before the half RVI inst
-  def saveHalfRVI = (firstBankHasHalfRVI && !(ParallelORR(takens(bankWidth-2,0)))) ||
-  (lastBankHasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0))))
+  def saveHalfRVI = ((firstBankHasHalfRVI && !(ParallelORR(takens(bankWidth-2,0)))) ||
+  (lastBankHasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0))))).suggestName("saveHalfRVI")
   // could get PredictWidth-1 when only the first bank is valid
-  def jmpIdx = ParallelPriorityEncoder(realTakens)
+  def jmpIdx = ParallelPriorityEncoder(realTakens).suggestName("jmpIdx")
   // only used when taken
-  def target = ParallelPriorityMux(realTakens, targets)
-  def taken = ParallelORR(realTakens)
-  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools)
-  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
+  def target = ParallelPriorityMux(realTakens, targets).suggestName("target")
+  def taken = ParallelORR(realTakens).suggestName("taken")
+  def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools).suggestName("takenOnBr")
+  def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens)).suggestName("hasNotTakenBrs")
 }
 
 class BpuMeta extends XSBundle with HasBPUParameter {
