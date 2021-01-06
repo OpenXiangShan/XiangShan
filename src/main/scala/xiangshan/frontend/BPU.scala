@@ -118,13 +118,12 @@ abstract class BasePredictor extends XSModule
     val update = Flipped(ValidIO(new CfiUpdateInfo))
   }
 
-
-  val io = IO(new DefaultBasePredictorIO)
+  val io = new DefaultBasePredictorIO
   val fires = IO(Input(Vec(4, Bool())))
 
-  val s1_fire = fires(0)
-  val s2_fire = fires(1)
-  val s3_fire = fires(2)
+  val s1_fire  = fires(0)
+  val s2_fire  = fires(1)
+  val s3_fire  = fires(2)
   val out_fire = fires(3)
 
   val debug = true
