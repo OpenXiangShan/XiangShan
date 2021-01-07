@@ -96,9 +96,9 @@ class BTB extends BasePredictor with BTBParams{
   for (w <- 0 until BtbWays) {
     for (b <- 0 until BtbBanks) {
       meta(w)(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
-      meta(w)(b).io.r.req.bits.setIdx := if1_row(b)
+      meta(w)(b).io.r.req.bits.setIdx := if1_row
       data(w)(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
-      data(w)(b).io.r.req.bits.setIdx := if1_row(b)
+      data(w)(b).io.r.req.bits.setIdx := if1_row
     }
   }
   edata.io.r.req.valid       := io.pc.valid
