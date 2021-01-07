@@ -1,3 +1,6 @@
+// See LICENSE.Berkeley for license details.
+// See LICENSE.SiFive for license details.
+
 package xiangshan.backend.fu.fpu
 
 import chisel3._
