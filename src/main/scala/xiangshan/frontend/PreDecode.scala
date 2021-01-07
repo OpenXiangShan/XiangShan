@@ -88,7 +88,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
 
     val isFirstInPacket = i.U === firstValidIdx
     val isLastInPacket = (i == PredictWidth-1).B
-    val currentRVC = isRVC(insts(i)) && HasCExtension.B
+    val currentRVC = isRVC(inst) && HasCExtension.B
 
     val lastIsValidEnd = (if (i == 0) { !io.prev.valid } else { instsEndMask(i-1) || isFirstInPacket }) || HasCExtension.B
     
