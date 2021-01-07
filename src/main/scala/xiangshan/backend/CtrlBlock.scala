@@ -17,14 +17,14 @@ import xiangshan.mem.LsqEnqIO
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
-  val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
+  val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
   val redirect = ValidIO(new Redirect)
 }
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
-  val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+  val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
   val redirect = ValidIO(new Redirect)
 }
 
