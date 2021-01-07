@@ -14,18 +14,19 @@ import scala.math.min
 trait BTBParams extends HasXSParameter with HasIFUConst {
   val nRows = BtbSize / (PredictWidth * BtbWays)
   val offsetLen = 13
+  val lowerBitsSize = 13
   val extendedNRows = nRows
 }
 
 class BtbDataEntry extends XSBundle with BTBParams {
-  val offset = SInt(offsetLen.W)
+  val lower = UInt(lowerBitsSize.W)
   val extended = Bool()
 }
 
 object BtbDataEntry {
-  def apply(offset: SInt, extended: Bool) = {
+  def apply(lower: UInt, extended: Bool) = {
     val e = Wire(new BtbDataEntry)
-    e.offset := offset
+    e.lower := lower
     e.extended := extended
     e
   }
@@ -156,7 +157,7 @@ class BTB extends BasePredictor with BTBParams{
     val meta_entry = if2_metaRead(if2_bankHitWays(b))(b)
     val data_entry = if2_dataRead(if2_bankHitWays(b))(b)
     // Use real pc to calculate the target
-    io.resp.targets(b) := Mux(data_entry.extended, if2_edataRead, (if2_pc.asSInt + (b << instOffsetBits).S + data_entry.offset).asUInt)
+    io.resp.targets(b) := Mux(data_entry.extended, if2_edataRead, Cat(if2_pc(VAddrBits-1, lowerBitsSize+instOffsetBits), data_entry.lower, 0.U(instOffsetBits.W)))
     io.resp.hits(b)  := if2_bankHits(b)
     io.resp.types(b) := meta_entry.btbType
     io.resp.isRVC(b) := meta_entry.isRVC
@@ -174,11 +175,16 @@ class BTB extends BasePredictor with BTBParams{
   }
   val u = io.update.bits
 
-  val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
-  val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
+  // val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
+  // val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
+  // val new_offset = (new_target.asSInt - u.pc.asSInt)
   val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
-  val new_offset = (new_target.asSInt - u.pc.asSInt)
-  val new_extended = (new_offset > max_offset || new_offset < min_offset)
+  val new_lower = u.target(lowerBitsSize+instOffsetBits-1, instOffsetBits)
+  val update_pc_higher     = u.pc(VAddrBits-1, lowerBitsSize+instOffsetBits)
+  val update_target_higher = new_target(VAddrBits-1, lowerBitsSize+instOffsetBits)
+  val higher_identical = update_pc_higher === update_target_higher
+  // val new_extended = (new_offset > max_offset || new_offset < min_offset)
+  val new_extended = !higher_identical
 
 
   val updateWay = u.bpuMeta.btbWriteWay
@@ -187,7 +193,7 @@ class BTB extends BasePredictor with BTBParams{
   val updateRow = btbAddr.getBankIdx(u.pc)
   val updateType = pdInfoToBTBtype(u.pd)
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
-  val dataWrite = BtbDataEntry(new_offset, new_extended)
+  val dataWrite = BtbDataEntry(new_lower, new_extended)
 
   val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && updateType === BTBtype.J
   val updateValid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay
@@ -222,8 +228,8 @@ class BTB extends BasePredictor with BTBParams{
     if (debug_verbose) {
       for (i <- 0 until BtbBanks){
         for (j <- 0 until BtbWays) {
-          XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-          j.U, i.U, if2_row, if2_metaRead(j)(i).valid, if2_mask(i), if2_metaRead(j)(i).tag, if2_dataRead(j)(i).offset, if2_metaRead(j)(i).btbType, if2_dataRead(j)(i).extended, if2_metaRead(j)(i).isRVC)
+          XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, lower=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
+          j.U, i.U, if2_row, if2_metaRead(j)(i).valid, if2_mask(i), if2_metaRead(j)(i).tag, if2_dataRead(j)(i).lower, if2_metaRead(j)(i).btbType, if2_dataRead(j)(i).extended, if2_metaRead(j)(i).isRVC)
         }
       }
     }
@@ -234,8 +240,8 @@ class BTB extends BasePredictor with BTBParams{
       XSDebug(validLatch && if2_bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
         i.U, i.U, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
     }
-    XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
-      u.bpuMeta.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)
+    XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, lower=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
+      u.bpuMeta.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_lower, new_extended, updateWay, updateBankIdx, updateRow)
     for (i <- 0 until BtbBanks) {
       // Conflict when not hit and allocating a valid entry
       val conflict = if2_metaRead(allocWays(i))(i).valid && !if2_bankHits(i)
