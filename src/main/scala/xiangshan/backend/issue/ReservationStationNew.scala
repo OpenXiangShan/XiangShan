@@ -209,7 +209,6 @@ class ReservationStationCtrl
       when (hitVec(j) && validQueue(i)) {
         srcQueue(i)(j) := true.B
         XSDebug(p"srcHit: i:${i.U} j:${j.U} src:${srcQueue(i)(j)}\n")
-        assert(!srcQueue(i)(j), "listen hits but src already true")
       }
     }
     // redirect
