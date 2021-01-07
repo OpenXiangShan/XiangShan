@@ -50,7 +50,7 @@ class BIM extends BasePredictor with BimParams {
 
   for (b <- 0 until BimBanks) {
     bim(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
-    bim(b).io.r.req.bits.setIdx := if1_row(b)
+    bim(b).io.r.req.bits.setIdx := if1_row
   }
 
   val if2_bimRead = VecInit(bim.map(_.io.r.resp.data(0)))
