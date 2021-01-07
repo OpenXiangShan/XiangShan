@@ -174,7 +174,6 @@ class MemBlock
     // passdown to lsq
     lsq.io.loadIn(i)              <> loadUnits(i).io.lsq.loadIn
     lsq.io.ldout(i)               <> loadUnits(i).io.lsq.ldout
-    lsq.io.fpout(i)               <> loadUnits(i).io.lsq.fpout
   }
 
   // StoreUnit

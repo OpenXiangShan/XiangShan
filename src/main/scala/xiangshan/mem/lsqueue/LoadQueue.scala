@@ -65,7 +65,6 @@ class LoadQueue extends XSModule
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // FIXME: Valid() only
     val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
-    val fpout = Vec(2, DecoupledIO(new ExuOutput)) // writeback fp load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
@@ -318,7 +317,7 @@ class LoadQueue extends XSModule
 
     val validWb = loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
 
-    // writeback missed int load
+    // writeback missed int/fp load
     // 
     // Int load writeback will finish (if not blocked) in one cycle
     io.ldout(i).bits.uop := seluop
@@ -330,21 +329,9 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := dataModule.io.rdata(loadWbSel(i)).mmio
     io.ldout(i).bits.fflags := DontCare
-    io.ldout(i).valid := validWb && !seluop.ctrl.fpWen
+    io.ldout(i).valid := validWb
     
-    // writeback missed fp load
-    // 
-    // That inst will be marked as writebacked in lq 1 cycle earilier
-    // By doing so, lq can use writebacked to find next valid writeback candidate
-    val fpoutGen = Wire(Decoupled(new ExuOutput))
-    val fpout = Wire(Decoupled(new ExuOutput))
-    fpoutGen.bits := io.ldout(i).bits
-    fpoutGen.valid := validWb && seluop.ctrl.fpWen
-    PipelineConnect(fpoutGen, fpout, io.fpout(i).ready, fpoutGen.bits.uop.roqIdx.needFlush(io.brqRedirect))
-    io.fpout(i) <> fpout
-    io.fpout(i).bits.data := fpRdataHelper(fpout.bits.uop, fpout.bits.data)
-
-    when(io.ldout(i).fire() || fpoutGen.fire()){
+    when(io.ldout(i).fire()){
       writebacked(loadWbSel(i)) := true.B
     }
 
@@ -359,16 +346,6 @@ class LoadQueue extends XSModule
       )
     }
 
-    when(io.fpout(i).fire()) {
-      XSInfo("fp load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
-        io.fpout(i).bits.uop.roqIdx.asUInt,
-        io.fpout(i).bits.uop.lqIdx.asUInt,
-        io.fpout(i).bits.uop.cf.pc,
-        RegNext(dataModule.io.rdata(loadWbSel(i)).paddr),
-        RegNext(dataModule.io.rdata(loadWbSel(i)).data),
-        RegNext(dataModule.io.rdata(loadWbSel(i)).mmio)
-      )
-    }
   })
 
   /**
