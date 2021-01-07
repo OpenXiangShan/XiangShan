@@ -115,7 +115,7 @@ class PreDecode extends XSModule with HasPdconst with HasIFUConst {
     io.out.pd(i).isRet := isRet
     io.out.pd(i).excType := ExcType.notExc
     io.out.instrs(i) := inst
-    io.out.pc(i) := Mux(io.prev.valid && HasCExtension.B && (i==0).B, io.prev_pc, Cat(packetIdx(io.in.pc), (i << instOffsetBits).U))
+    io.out.pc(i) := Mux(io.prev.valid && HasCExtension.B && (i==0).B, io.prev_pc, Cat(packetIdx(io.in.pc), (i << instOffsetBits).U(log2Ceil(packetBytes.W))))
 
     if (i == PredictWidth-1) { io.out.lastHalf := currentLastHalf }
   }
