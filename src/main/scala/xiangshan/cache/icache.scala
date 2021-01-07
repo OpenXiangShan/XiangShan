@@ -29,25 +29,21 @@ case class ICacheParameters(
 
 trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   val cacheParams = icacheParameters
+  val groupAlign = log2Up(cacheParams.blockBytes)
+  val packetInstNum = packetBytes/instBytes
+  val packetInstNumBit = log2Up(packetInstNum)
+  val ptrHighBit = log2Up(groupBytes) - 1 
+  val ptrLowBit = log2Up(packetBytes)
 
-  //TODO: temp set
+
   def accessBorder =  0x80000000L
-
-  // the width of inner CPU data interface
   def cacheID = 0
-  // RVC instruction length
   def insLen = if (HasCExtension) 16 else 32
   def RVCInsLen = 16
-
-  // icache Queue
-  val groupAlign = log2Up(cacheParams.blockBytes)
   def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
 
-  //ECC encoding
   def encRowBits = cacheParams.dataCode.width(rowBits)
   def encTagBits = cacheParams.tagCode.width(tagBits)
-
-  // ICache MSHR settings
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -245,7 +241,7 @@ class ICacheDataArray extends ICachArray
 class ICache extends ICacheModule
 {
   // cut a cacheline into a fetch packet
-  def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
+  def cutHelper(sourceVec: Vec[UInt], pc: UInt, mask: UInt): UInt = {
     val sourceVec_inst = Wire(Vec(blockWords*wordBytes/instBytes,UInt(insLen.W)))
     (0 until blockWords).foreach{ i =>
       (0 until wordBytes/instBytes).foreach{ j =>
@@ -253,7 +249,7 @@ class ICache extends ICacheModule
       }
     }
     val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
-    val start = Cat(startPtr(4,3),0.U(log2Ceil(bankWidth).W))
+    val start = Cat(pc(ptrHighBit,ptrLowBit),0.U(packetInstNumBit.W))
     (0 until PredictWidth ).foreach{ i =>
       cutPacket(i) := Mux(mask(i).asBool,sourceVec_inst(start + i.U),0.U)
     }
@@ -267,7 +263,6 @@ class ICache extends ICacheModule
              Mux(sourceVec >= 2.U, "b0010".U, "b0001".U)))
     oneHot
   }
-
 
   val io = IO(new ICacheIO)
 
@@ -374,7 +369,7 @@ class ICache extends ICacheModule
       decodedRow.corrected
     }
   )
-  outPacket := cutHelper(dataHitWay,s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
+  outPacket := cutHelper(dataHitWay,s3_req_pc.asUInt,s3_req_mask.asUInt)
 
 
 
@@ -426,7 +421,7 @@ class ICache extends ICacheModule
   when(icacheFlush){ validArray := 0.U }
 
   val refillDataVec = icacheMissQueue.io.resp.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
-  val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
+  val refillDataOut = cutHelper(refillDataVec, s3_req_pc,s3_req_mask )
 
   s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.valid && io.resp.ready)
 
@@ -434,8 +429,8 @@ class ICache extends ICacheModule
   val pds = Seq.fill(nWays)(Module(new PreDecode))
   for (i <- 0 until nWays) {
     val wayResp = Wire(new ICacheResp)
-    val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc(5,1), s3_req_mask)
-    val refillData = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask)
+    val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc, s3_req_mask)
+    val refillData = cutHelper(refillDataVec, s3_req_pc,s3_req_mask)
     wayResp.pc := s3_req_pc
     wayResp.data := Mux(s3_valid && s3_hit, wayData, refillData)
     wayResp.mask := s3_req_mask
