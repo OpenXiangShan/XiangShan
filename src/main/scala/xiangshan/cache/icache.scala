@@ -101,6 +101,7 @@ class ICacheIO extends ICacheBundle
   val resp = DecoupledIO(new ICacheResp)
   val mem_acquire = DecoupledIO(new L1plusCacheReq)
   val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
+  val prefetchTrainReq = ValidIO(new IcacheMissReq)
   val tlb = new BlockTlbRequestIO
   val flush = Input(UInt(2.W))
   val l1plusflush = Output(Bool())
@@ -463,6 +464,11 @@ class ICache extends ICacheModule
   //To L1 plus
   io.mem_acquire <> icacheMissQueue.io.mem_acquire
   icacheMissQueue.io.mem_grant <> io.mem_grant
+  
+  // to train l1plus prefetcher
+  io.prefetchTrainReq.valid := s3_valid && icacheMissQueue.io.req.fire()
+  io.prefetchTrainReq.bits := DontCare
+  io.prefetchTrainReq.bits.addr := groupPC(s3_tlb_resp.paddr)
 
   io.l1plusflush := icacheFlush
 

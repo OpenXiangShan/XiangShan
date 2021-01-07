@@ -11,6 +11,7 @@ import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
 import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.prefetch._
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
@@ -47,6 +48,7 @@ case class XSCoreParameters
   CacheLineSize: Int = 512,
   UBtbWays: Int = 16,
   BtbWays: Int = 2,
+  EnableL1plusPrefetcher: Boolean = true,
   IBufSize: Int = 64,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -131,6 +133,7 @@ trait HasXSParameter {
   val ExtHistoryLength = HistoryLength + 64
   val UBtbWays = core.UBtbWays
   val BtbWays = core.BtbWays
+  val EnableL1plusPrefetcher = core.EnableL1plusPrefetcher
   val IBufSize = core.IBufSize
   val DecodeWidth = core.DecodeWidth
   val RenameWidth = core.RenameWidth
@@ -172,6 +175,7 @@ trait HasXSParameter {
   )
 
   val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
+    enable = true,
     _type = "stream",
     streamParams = StreamPrefetchParameters(
       streamCnt = 4,

@@ -23,6 +23,8 @@ class StreamPrefetchReq(p: StreamPrefetchParameters) extends PrefetchReq {
 
   def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
   def idx = id(p.idxWidth - 1, 0)
+
+  override def cloneType: this.type = (new StreamPrefetchReq(p)).asInstanceOf[this.type]
 }
 
 class StreamPrefetchResp(p: StreamPrefetchParameters) extends PrefetchResp {
@@ -30,19 +32,27 @@ class StreamPrefetchResp(p: StreamPrefetchParameters) extends PrefetchResp {
   
   def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
   def idx = id(p.idxWidth - 1, 0)
+
+  override def cloneType: this.type = (new StreamPrefetchResp(p)).asInstanceOf[this.type]
 }
 
 class StreamPrefetchIO(p: StreamPrefetchParameters) extends PrefetchBundle {
   val train = Flipped(ValidIO(new PrefetchTrain))
   val req = DecoupledIO(new StreamPrefetchReq(p))
   val resp = Flipped(DecoupledIO(new StreamPrefetchResp(p)))
+
+  override def cloneType: this.type = (new StreamPrefetchIO(p)).asInstanceOf[this.type]
 }
 
 class StreamBufferUpdate(p: StreamPrefetchParameters) extends PrefetchBundle {
   val hitIdx = UInt(log2Up(p.streamSize).W)
+
+  override def cloneType: this.type = (new StreamBufferUpdate(p)).asInstanceOf[this.type]
 }
 
-class StreamBufferAlloc(p: StreamPrefetchParameters) extends StreamPrefetchReq(p)
+class StreamBufferAlloc(p: StreamPrefetchParameters) extends StreamPrefetchReq(p) {
+  override def cloneType: this.type = (new StreamBufferAlloc(p)).asInstanceOf[this.type]
+}
 
 
 class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
@@ -69,7 +79,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val full = head === tail && valid(head)
   val empty = head === tail && !valid(head)
 
-  val s_idle :: s_req :: s_resp :: Nil = Enum(4)
+  val s_idle :: s_req :: s_resp :: Nil = Enum(3)
   val state = RegInit(VecInit(Seq.fill(streamSize)(s_idle)))
 
   val isPrefetching = VecInit(state.map(_ =/= s_idle))
@@ -89,12 +99,13 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     }
   }
 
-  val deqValid = Wire(Vec(streamSize, Bool()))
-  deqValid := DontCare
+  val deqValid = WireInit(VecInit(Seq.fill(streamSize)(false.B)))
   deqValid(head) := deqLater(head) && !isPrefetching(head)
+  var deq = deqLater(head) && !isPrefetching(head)
   for (i <- 1 until streamSize) {
     val idx = head + i.U
-    deqValid(idx) := deqLater(idx) && !isPrefetching(idx) && deqValid(head + (i-1).U)
+    deq = deq && deqLater(idx) && !isPrefetching(idx)
+    deqValid(idx) := deq
   }
 
   (0 until streamSize).foreach(i => valid(i) := valid(i) && !deqValid(i))
@@ -141,21 +152,23 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val prefetchPrior = Wire(Vec(streamSize, UInt(log2Up(streamSize).W)))
   val reqArb = Module(new Arbiter(new StreamPrefetchReq(p), streamSize))
   for (i <- 0 until streamSize) {
-    prefetchPrior := head + i.U
+    prefetchPrior(i) := head + i.U
+    reqs(i).ready := false.B
     reqs(prefetchPrior(i)) <> reqArb.io.in(i)
     resps(i).bits := io.resp.bits
     resps(i).valid := io.resp.valid && io.resp.bits.idx === i.U
   }
   reqArb.io.out <> io.req
   io.resp.ready := VecInit(resps.zipWithIndex.map{ case (r, i) =>
-    r.ready && i.U === io.resp.bits.idx})
+    r.ready && i.U === io.resp.bits.idx}).asUInt.orR
   
   // realloc this stream buffer for a newly-found stream
   val reallocReq = RegInit(0.U.asTypeOf(new StreamBufferAlloc(p)))
   val needRealloc = RegInit(false.B)
   when (io.alloc.valid) {
     needRealloc := true.B
-    reallocReq := getBlockAddr(io.alloc.bits.addr)
+    reallocReq := io.alloc.bits
+    reallocReq.addr := getBlockAddr(io.alloc.bits.addr)
   }.elsewhen (needRealloc && !isPrefetching.asUInt.orR) {
     baseReq.valid := true.B
     baseReq.bits := reallocReq
@@ -176,6 +189,8 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
 class CompareBundle(width: Int) extends PrefetchBundle {
   val bits = UInt(width.W)
   val idx = UInt()
+
+  override def cloneType: this.type = (new CompareBundle(width)).asInstanceOf[this.type]
 }
 
 object ParallelMin {

@@ -56,6 +56,8 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   def l1plusPrefetcherEntryIdWidth = log2Up(pcfg.nEntries)// TODO
   def entryIdWidth = max(icacheMissQueueEntryIdWidth, l1plusPrefetcherEntryIdWidth)
   def idWidth = clientIdWidth + entryIdWidth
+  def clientId(id: UInt) = id(idWidth - 1, entryIdWidth)
+  def entryId(id: UInt) = id(entryIdWidth - 1, 0)
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -463,7 +465,7 @@ class L1plusCachePipe extends L1plusCacheModule
 
   s0_passdown := s0_valid
 
-  assert(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD), "L1plusCachePipe only accepts read req")
+  assert(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR), "L1plusCachePipe only accepts read req")
 
   dump_pipeline_reqs("L1plusCachePipe s0", s0_valid, s0_req)
 // stage 1

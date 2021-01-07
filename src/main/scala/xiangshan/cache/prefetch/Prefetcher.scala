@@ -7,8 +7,7 @@ import xiangshan.cache._
 import utils._
 
 trait HasPrefetchParameters extends HasXSParameter {
-  val l1plusParams = l1plusCacheParameters
-  val l1plusPrefetchParams = l1plusPrefetcherParameters
+  
 }
 
 abstract class PrefetchModule extends XSModule with HasPrefetchParameters
