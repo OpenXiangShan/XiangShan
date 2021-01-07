@@ -64,13 +64,17 @@ class RAS extends BasePredictor
             val copy_valid = Input(Bool())
             val copy_in_mem  = Input(Vec(rasSize, rasEntry()))
             val copy_in_sp   = Input(UInt(log2Up(rasSize).W))
+            val copy_in_top  = Input(rasEntry())
             val copy_out_mem = Output(Vec(rasSize, rasEntry()))
             val copy_out_sp  = Output(UInt(log2Up(rasSize).W))
+            val copy_out_top  = Output(rasEntry())
+
         })
         val debugIO = IO(new Bundle{
             val write_entry = Output(rasEntry())
             val alloc_new = Output(Bool())
             val sp = Output(UInt(log2Up(rasSize).W))
+            //val topRegister = Output(rasEntry())
         })
         @chiselName
         class Stack(val size: Int) extends XSModule {
@@ -94,43 +98,62 @@ class RAS extends BasePredictor
                 (0 until size).foreach {i => mem(i) := io.copy_in(i) }
             }
         }
-        val sp = RegInit(0.U(log2Up(rasSize).W))
+        val sp = RegInit(RasSize.U((log2Up(rasSize) + 1).W))
+        val topRegister = RegInit(0.U.asTypeOf(new RASEntry))
         val stack = Module(new Stack(rasSize)).io
 
         stack.rIdx := sp - 1.U
-        val top_entry = stack.rdata
-        val top_addr = top_entry.retAddr
-        val top_ctr = top_entry.ctr
+        val top_addr = topRegister.retAddr
+        val top_ctr = topRegister.ctr
         val alloc_new = io.new_addr =/= top_addr
-        stack.wen := io.push_valid || io.pop_valid && top_ctr =/= 1.U
-        stack.wIdx := Mux(io.pop_valid && top_ctr =/= 1.U, sp - 1.U, Mux(alloc_new, sp, sp - 1.U))
-        val write_addr = Mux(io.pop_valid && top_ctr =/= 1.U, top_addr, io.new_addr)
-        val write_ctr  = Mux(io.pop_valid && top_ctr =/= 1.U, top_ctr - 1.U, Mux(alloc_new, 1.U, top_ctr + 1.U))
+        // stack.wen := io.push_valid || io.pop_valid && top_ctr =/= 1.U
+        // stack.wIdx := Mux(io.pop_valid && top_ctr =/= 1.U, sp - 1.U, Mux(alloc_new, sp, sp - 1.U))
+        // val write_addr = Mux(io.pop_valid && top_ctr =/= 1.U, top_addr, io.new_addr)
+        // val write_ctr  = Mux(io.pop_valid && top_ctr =/= 1.U, top_ctr - 1.U, Mux(alloc_new, 1.U, top_ctr + 1.U))
+
+        stack.wen := io.push_valid && !io.is_empty
+        stack.wIdx := sp
+        val write_addr = topRegister.retAddr
+        val write_ctr  = topRegister.ctr
+
         val write_entry = RASEntry(write_addr, write_ctr)
         stack.wdata := write_entry
         debugIO.write_entry := write_entry
         debugIO.alloc_new := alloc_new
         debugIO.sp := sp
+
+        val is_empty = sp === RasSize.U
+        val is_full  = sp === (RasSize - 1).U
         
         when (io.push_valid && alloc_new) {
-            sp := sp + 1.U
+            sp := Mux(is_full, sp, Mux(is_empty, 0.U,sp + 1.U))
+            top_addr := io.new_addr
+            top_ctr := 1.U
+        } .elsewhen(io.push_valid) {
+            top_ctr := top_ctr + 1.U
         }
 
         when (io.pop_valid && top_ctr === 1.U) {
-            sp := Mux(sp === 0.U, 0.U, sp - 1.U)
+            sp := Mux(is_empty, sp ,Mux(sp === 0.U, RasSize.U,sp - 1.U))
+            top_addr := stack.rdata.retAddr
+            top_ctr := stack.rdata.ctr
+        } .elsewhen(io.pop_valid) {
+            top_ctr := top_ctr - 1.U
         }
 
         io.copy_out_mem := stack.copy_out
         io.copy_out_sp  := sp
+        io.copy_out_top  := topRegister
         stack.copyen := io.copy_valid
         stack.copy_in := io.copy_in_mem
         when (io.copy_valid) {
             sp := io.copy_in_sp
+            topRegister := io.copy_in_top
         }
 
         io.top_addr := top_addr
-        io.is_empty := sp === 0.U
-        io.is_full  := sp === (RasSize - 1).U
+        io.is_empty := is_empty
+        io.is_full  := is_full
     }
 
     // val ras_0 = Reg(Vec(RasSize, rasEntry()))  //RegInit(0.U)asTypeOf(Vec(RasSize,rasEntry)) cause comb loop
@@ -192,9 +215,11 @@ class RAS extends BasePredictor
     spec_ras.copy_valid := copy_next
     spec_ras.copy_in_mem := commit_ras.copy_out_mem
     spec_ras.copy_in_sp  := commit_ras.copy_out_sp
+    spec_ras.copy_in_top := commit_ras.copy_out_top
     commit_ras.copy_valid := false.B
     commit_ras.copy_in_mem := DontCare
     commit_ras.copy_in_sp  := DontCare
+    commit_ras.copy_in_top := DontCare
 
     //no need to pass the ras branchInfo
     io.meta.rasSp := DontCare
