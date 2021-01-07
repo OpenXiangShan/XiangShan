@@ -46,8 +46,7 @@ class TLCCacheTestTopIO extends Bundle {
 
 class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
 
-  //  val masters = Array.fill(2)(LazyModule(new TLCMasterMMIO()))
-  //  val master = LazyModule(new TLCMasterMMIO())
+  val masters = Array.fill(2)(LazyModule(new TLCMasterMMIO()))
   val ULmaster = LazyModule(new TLCSnoopMMIONode())
 
   val l2params = p(TLCCacheTestKey)
@@ -58,7 +57,9 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
       ways = l2params.ways,
       sets = l2params.capacityKB * 1024 / (l2params.blockBytes * l2params.ways * l2params.banks),
       blockBytes = l2params.blockBytes,
-      beatBytes = l2params.beatBytes
+      beatBytes = l2params.beatBytes,
+      debug = true,
+      verification = true
     ),
     InclusiveCacheMicroParameters(
       writeBytes = l2params.beatBytes
@@ -66,19 +67,21 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
   ))
   val fuzz = LazyModule(new FixedBlockFuzzer(0))
 
-  //  val masters_ident = Array.fill(2)(LazyModule(new DebugIdentityNode()))
+  val l1_idents = Array.fill(2)(LazyModule(new DebugIdentityNode()))
+  val l1_ul_ident = LazyModule(new DebugIdentityNode())
   val l1_xbar_ident = LazyModule(new DebugIdentityNode())
   val l2_inner_ident = LazyModule(new DebugIdentityNode())
   val l2_outer_ident = LazyModule(new DebugIdentityNode())
   val l3_ident = LazyModule(new DebugIdentityNode())
 
-  ULmaster.node := fuzz.node
+  val xbar = TLXbar()
 
-  //  for ((master, ident) <- (masters zip masters_ident)) {
-  //    xbar := ident.node := master.node
-  //  }
-  l2.node := l2_inner_ident.node := TLBuffer() := l1_xbar_ident.node := ULmaster.node
-  //  l2.node := TLBuffer() := master_ident.node := master.node
+  xbar := l1_ul_ident.node := ULmaster.node := fuzz.node
+
+  for ((master, ident) <- (masters zip l1_idents)) {
+    xbar := ident.node := master.node
+  }
+  l2.node := l2_inner_ident.node := TLBuffer() := l1_xbar_ident.node := xbar
 
   val slave = LazyModule(new TLCSlaveMMIO())
   slave.node := l3_ident.node := TLBuffer() := l2_outer_ident.node := l2.node
@@ -90,12 +93,9 @@ class TLCCacheTestTop()(implicit p: Parameters) extends LazyModule {
     fuzz.module.io.blockAddr := io.fuzzerBlockAddr
     slave.module.io <> io.slaveIO
     io.ulIO <> ULmaster.module.io
-    //    masters zip io.mastersIO map { case (m, i) =>
-    //      m.module.io <> i
-    //    }
-    //    master.module.io <> io.mastersIO(0)
-    io.mastersIO(0) <> DontCare
-    io.mastersIO(1) <> DontCare
+    masters zip io.mastersIO map { case (m, i) =>
+      m.module.io <> i
+    }
   }
 }
 
@@ -146,12 +146,17 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
     val rand = new Random(0xbeef)
 
     val addr_pool = {
-      for (_ <- 0 to 32) yield BigInt(rand.nextInt(0xfffc) << 6)
+      for (_ <- 0 to 128) yield BigInt(rand.nextInt(0xffff) << 6)
     }.distinct.toList // align to block size
+    val ul_addr_pool = {
+      {
+        for (_ <- 0 to 64) yield BigInt(rand.nextInt(0xffff) << 6)
+      }.toList ++ addr_pool
+    }.distinct
     val addr_list_len = addr_pool.length
     val acquireProbMap = Map(branch -> 0.3, trunk -> 0.7)
-    val releaseProbMap = Map(nothing -> 0.4, branch -> 0.5, trunk -> 0.1)
-    val probeProbMap = Map(nothing -> 0.4, branch -> 0.5, trunk -> 0.1)
+    val releaseProbMap = Map(nothing -> 0.6, branch -> 0.3, trunk -> 0.1)
+    val probeProbMap = Map(nothing -> 0.5, branch -> 0.4, trunk -> 0.1)
 
     def peekBigInt(source: Data): BigInt = {
       source.peek().litValue()
@@ -180,7 +185,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.slaveIO.BChannel.initSource().setSourceClock(c.clock)
         c.io.slaveIO.DChannel.initSource().setSourceClock(c.clock)
 
-        val total_clock = 50000
+        val total_clock = 150000
 
         c.io.ulIO.isOn.poke(false.B)
         c.reset.poke(true.B)
@@ -198,19 +203,23 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         val scoreboard = mutable.Map[BigInt, ScoreboardData]()
         val serialList = ArrayBuffer[(Int, TLCTrans)]()
         val masterStateList = List.fill(2)(mutable.Map[BigInt, AddrState]())
-        val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i,f"l1_$i", 8, masterStateList(i)
+        val masterAgentList = List.tabulate(2)(i => new TLCMasterAgent(i, f"l1_$i", 8, masterStateList(i)
           , serialList, scoreboard))
 
         val tlState = mutable.Map[BigInt, AddrState]()
-        val ulAgent = new TLULMasterAgent(3,"l1_UL", tlState, serialList, scoreboard)
+        val ulAgent = new TLULMasterAgent(3, "l1_UL", tlState, serialList, scoreboard)
 
         val slaveState = mutable.Map() ++ {
           addr_pool zip List.fill(addr_list_len)(new AddrState())
         }.toMap
-        val slaveAgent = new TLCSlaveAgent(2, name = "l3", 8, slaveState, serialList, scoreboard)
+        val slaveAgent = new TLCSlaveAgent(2, name = "l3", 16, slaveState, serialList, scoreboard)
         //must set order here
-        /*fork {
+        fork {
           for (_ <- 0 to total_clock) {
+            val ulio = ulIO
+            val ulBlockAddr = getRandomElement(ul_addr_pool, rand)
+            c.io.fuzzerBlockAddr.poke(ulBlockAddr.U)
+
             val AChannel_valids = ArrayBuffer.fill(2)(false)
             val CChannel_valids = ArrayBuffer.fill(2)(false)
             val EChannel_valids = ArrayBuffer.fill(2)(false)
@@ -222,7 +231,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val masterAgent = masterAgentList(i)
 
               //randomly add when size is small
-              if (masterAgent.outerAcquire.size <= 4) {
+              if (masterAgent.outerAcquire.size <= 16) {
                 if (true) {
                   for (i <- 0 until 16) {
                     val addr = getRandomElement(addr_pool, rand)
@@ -231,7 +240,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
                   }
                 }
               }
-              if (masterAgent.outerRelease.size <= 4) {
+              if (masterAgent.outerRelease.size <= 16) {
                 if (true) {
                   for (i <- 0 until 16) {
                     val addr = getRandomElement(addr_pool, rand)
@@ -328,17 +337,9 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               }
               //handle some ID
               masterAgent.freeSource()
+              masterAgent.step()
             }
 
-            c.clock.step()
-          }
-        }
-        */
-        fork {
-          val addr = getRandomElement(addr_pool, rand)
-          c.io.fuzzerBlockAddr.poke(addr.U)
-          val ulio = ulIO
-          for (_ <- 0 to total_clock) {
             if (peekBoolean(ulio.DFire)) {
               val dCh = new TLCScalaD()
               dCh.opcode = peekBigInt(ulio.DChannel.opcode)
@@ -362,6 +363,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               ulAgent.fireA(aCh)
             }
             ulAgent.step()
+
             c.clock.step()
           }
         }
@@ -370,7 +372,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           val sio = slaveIO
           for (_ <- 0 to total_clock) {
             //randomly add when empty
-            if (slaveAgent.innerProbe.size <= 4) {
+            if (slaveAgent.innerProbe.size <= 8) {
               if (true) {
                 for (i <- 0 until 16) {
                   val addr = getRandomElement(addr_pool, rand)

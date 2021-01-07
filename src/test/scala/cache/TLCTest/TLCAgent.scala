@@ -427,15 +427,15 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       val alignAddr = addrAlignBlock(addr)
       val state = getState(alignAddr)
       if (state.myPerm == nothing) {
-        println(f"can't handle Get at $addr%x")
+        debugPrintln(f"can't handle Get at $addr%x")
         false
       }
       else {
         val ver = scoreboardGetVer(alignAddr)
         val start_beat = beatInBlock(addr)
         val targetData = dataOutofBeat(state.data, start_beat)
-        println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
-          f"beats:${countBeats(g.a.get.size)}, ver:$ver")
+//        println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
+//          f"beats:${countBeats(g.a.get.size)}, ver:$ver")
         dQueue.enqMessage(g.issueAccessAckData(targetData, ver), countBeats(g.a.get.size))
         true
       }
@@ -445,7 +445,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       val alignAddr = addrAlignBlock(addr)
       val state = getState(alignAddr)
       if (state.myPerm != trunk) {
-        println(f"can't handle Put at $addr%x")
+        debugPrintln(f"can't handle Put at $addr%x")
         false
       }
       else {
@@ -541,7 +541,6 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
 
   def fireC(inC: TLCScalaC): Unit = {
     if (inC.opcode == ReleaseData || inC.opcode == ProbeAckData) {
-      println(f"slave C fire opcode:${inC.opcode} addr:${inC.address}%x")
       if (c_cnt == 0) { //start burst
         sbDataSnapshot = scoreboardRead(inC.address)
         tmpC = inC.copy()
@@ -574,10 +573,10 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         state.masterPerm = shrinkTarget(c.param)
         state.myPerm = permAgainstMaster(state.masterPerm)
         state.slaveUpdatePendingProbeAck()
-        if (state.masterPerm == nothing) {
+        if (state.myPerm == trunk) {
           insertReadWrite(addr, state.data, randomBlockData()) //modify data when master is invalid
         }
-        else {
+        else if(state.myPerm == branch){
           insertRead(addr, state.data)
         }
         //serialization point
@@ -599,10 +598,10 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         state.myPerm = permAgainstMaster(state.masterPerm)
         state.data = c.data
         state.slaveUpdatePendingProbeAck()
-        if (state.masterPerm == nothing) {
+        if (state.myPerm == trunk) {
           insertReadSnapWrite(addr, c.data, sbDataSnapshot, randomBlockData()) //modify data when master is invalid
         }
-        else {
+        else if(state.myPerm == branch){
           insertReadSnap(addr, c.data, sbDataSnapshot)
         }
         //serialization point
