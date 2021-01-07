@@ -11,9 +11,9 @@ class FMA extends FPUPipelineModule {
   val fpCtrl = io.in.bits.uop.ctrl.fpu
   val typeTagIn = fpCtrl.typeTagIn
 
-  val src1 = unbox(io.in.bits.src(0), typeTagIn, Some(FType.D))
-  val src2 = unbox(io.in.bits.src(1), typeTagIn, Some(FType.D))
-  val src3 = unbox(io.in.bits.src(2), typeTagIn, Some(FType.D))
+  val src1 = unbox(io.in.bits.src(0), typeTagIn, None)
+  val src2 = unbox(io.in.bits.src(1), typeTagIn, None)
+  val src3 = unbox(io.in.bits.src(2), typeTagIn, None)
   val (in1, in2, in3) = (
     WireInit(src1), WireInit(src2), WireInit(Mux(fpCtrl.isAddSub, src2, src3))
   )
