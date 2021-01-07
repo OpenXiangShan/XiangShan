@@ -17,25 +17,24 @@ trait HasIFUConst extends HasXSParameter {
   val groupBytes = 64 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
   val groupWidth = groupBytes / instBytes
-  val FetchBytes = FetchWidth * instBytes
+  val packetBytes = FetchWidth * instBytes
   val nBanksInPacket = 2
-  val bankBytes = FetchBytes / nBanksInPacket
+  val bankBytes = packetBytes / nBanksInPacket
   val nBanksInGroup = groupBytes / bankBytes
   val bankWidth = PredictWidth / nBanksInPacket
   val bankOffsetBits = log2Ceil(bankBytes)
+  val packetOffsetBits = log2Ceil(packetBytes)
   // (0, nBanksInGroup-1)
   def bankInGroup(pc: UInt) = pc(groupOffsetBits-1,bankOffsetBits)
   def isInLastBank(pc: UInt) = bankInGroup(pc) === (nBanksInGroup-1).U
   // (0, bankBytes/2-1)
-  def offsetInBank(pc: UInt) = pc(bankOffsetBits-1,instOffsetBits)
-  def bankAligned(pc: UInt)  = align(pc, bankBytes)
-  def groupAligned(pc: UInt) = align(pc, groupBytes)
-  // each 1 bit in mask stands for 2 Bytes
-  // 8 bits, in which only the first 7 bits could be 0
-  def maskFirstHalf(pc: UInt): UInt = ((~(0.U(bankWidth.W))) >> offsetInBank(pc))(bankWidth-1,0)
-  def maskLastHalf(pc: UInt): UInt = Mux(isInLastBank(pc), 0.U(bankWidth.W), ~0.U(bankWidth.W))
-  def mask(pc: UInt): UInt = Reverse(Cat(maskFirstHalf(pc), maskLastHalf(pc)))
-  def snpc(pc: UInt): UInt = bankAligned(pc) + Mux(isInLastBank(pc), bankBytes.U, (bankBytes*2).U)
+  def offsetInBank(pc: UInt)   = pc(bankOffsetBits-1,instOffsetBits)
+  def offsetInPacket(pc: UInt) = pc(packetOffsetBits-1, instOffsetBits)
+  def bankAligned(pc: UInt)   = align(pc, bankBytes)
+  def groupAligned(pc: UInt)  = align(pc, groupBytes)
+  def packetAligned(pc: UInt) = align(pc, packetBytes)
+  def mask(pc: UInt): UInt = ((~(0.U(PredictWidth.W))) << offsetInPacket(pc))(PredictWidth-1,0)
+  def snpc(pc: UInt): UInt = packetAligned(pc) + packetBytes.U
 
   val enableGhistRepair = true
   val IFUDebug = true

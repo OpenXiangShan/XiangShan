@@ -122,28 +122,13 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   val tageEntrySz = instOffsetBits + tagLen + TageCtrBits
 
-  val if2_bankAlignedPC = bankAligned(io.req.bits.pc)
-  // this bank means cache bank
-  val if2_startsAtOddBank = bankInGroup(if2_bankAlignedPC)(0)
-  // use real address to index
-  val if2_unhashed_idx = Wire(Vec(2, UInt((log2Ceil(nRows)+tagLen).W)))
-  // the first bank idx always correspond with pc
-  if2_unhashed_idx(0) := io.req.bits.pc >> (instOffsetBits+log2Ceil(TageBanks))
-  // when pc is at odd bank, the second bank is at the next idx
-  if2_unhashed_idx(1) := if2_unhashed_idx(0) + if2_startsAtOddBank
+  def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
 
-  // val idxes_and_tags = (0 until TageBanks).map(b => compute_tag_and_hash(if2_unhashed_idxes(b.U), io.req.bits.hist))
-  // val (idx, tag) = compute_tag_and_hash(if2_unhashed_idx, io.req.bits.hist)
-  val if2_idxes_and_tags = if2_unhashed_idx.map(compute_tag_and_hash(_, io.req.bits.hist))
-  // val idxes = VecInit(if2_idxes_and_tags.map(_._1))
-  // val tags = VecInit(if2_idxes_and_tags.map(_._2))
+  val if2_packetAlignedPC = packetAligned(io.req.bits.pc)
+  val if2_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val if3_idxes = RegEnable(VecInit(if2_idxes_and_tags.map(_._1)), io.req.valid)
-  val if3_tags = RegEnable(VecInit(if2_idxes_and_tags.map(_._2)), io.req.valid)
-  // and_if3_tags = RegEnable(if2_idxes_and_tags, enable=io.req.valid)
-
-  // val idxLatch = RegEnable(idx, enable=io.req.valid)
-  // val tagLatch = RegEnable(tag, enable=io.req.valid)
+  val if2_idx_and_tag = compute_tag_and_hash(if2_unhashed_idx, io.req.bits.hist)
+  val if3_idx_and_tag = RegEnable(if2_idx_and_tag, io.req.valid)
 
   class HL_Bank (val nRows: Int = nRows) extends TageModule {
     val io = IO(new Bundle {
@@ -179,29 +164,23 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val if3_lo_us_r = WireInit(0.U.asTypeOf(Vec(TageBanks, Bool())))
   val if3_table_r = WireInit(0.U.asTypeOf(Vec(TageBanks, new TageEntry)))
 
-  val if2_baseBank = io.req.bits.pc(log2Up(TageBanks), instOffsetBits)
-  val if3_baseBank = RegEnable(if2_baseBank, enable=io.req.valid)
-
-  val if2_realMask = Mux(if2_startsAtOddBank,
-                      Cat(io.req.bits.mask(bankWidth-1,0), io.req.bits.mask(PredictWidth-1, bankWidth)),
-                      io.req.bits.mask)
-  val if3_realMask = RegEnable(if2_realMask, enable=io.req.valid)
+  val if2_mask = io.req.bits.mask
+  val if3_mask = RegEnable(if2_mask, enable=io.req.valid)
 
 
 
   (0 until TageBanks).map(
     b => {
       val idxes = VecInit(if2_idxes_and_tags.map(_._1))
-      val idx = (if (b < bankWidth) Mux(if2_startsAtOddBank, idxes(1), idxes(0))
-                 else Mux(if2_startsAtOddBank, idxes(0), idxes(1)))
-      hi_us(b).io.r.req.valid := io.req.valid && if2_realMask(b)
+      val idx = if2_idx_and_tag._1
+      hi_us(b).io.r.req.valid := io.req.valid && if2_mask(b)
       hi_us(b).io.r.req.bits.setIdx := idx
 
-      lo_us(b).io.r.req.valid := io.req.valid && if2_realMask(b)
+      lo_us(b).io.r.req.valid := io.req.valid && if2_mask(b)
       lo_us(b).io.r.req.bits.setIdx := idx
 
       table(b).reset := reset.asBool
-      table(b).io.r.req.valid := io.req.valid && if2_realMask(b)
+      table(b).io.r.req.valid := io.req.valid && if2_mask(b)
       table(b).io.r.req.bits.setIdx := idx
 
       if3_hi_us_r(b) := hi_us(b).io.r.resp.data
@@ -210,22 +189,15 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     }
   )
 
-  val if3_startsAtOddBank = RegEnable(if2_startsAtOddBank, io.req.valid)
-
   val if3_req_rhits = VecInit((0 until TageBanks).map(b => {
-    val tag = (if (b < bankWidth) Mux(if3_startsAtOddBank, if3_tags(1), if3_tags(0))
-               else Mux(if3_startsAtOddBank, if3_tags(0), if3_tags(1)))
-    val bank = (if (b < bankWidth) Mux(if3_startsAtOddBank, (b+bankWidth).U, b.U)
-                else Mux(if3_startsAtOddBank, (b-bankWidth).U, b.U))
-    if3_table_r(bank).valid && if3_table_r(bank).tag === tag
+    val tag = if3_idx_and_tag._2
+    if3_table_r(b).valid && if3_table_r(b).tag === tag
   }))
   
   (0 until TageBanks).map(b => {
-    val bank = (if (b < bankWidth) Mux(if3_startsAtOddBank, (b+bankWidth).U, b.U)
-                else Mux(if3_startsAtOddBank, (b-bankWidth).U, b.U))
-    io.resp(b).valid := if3_req_rhits(b) && if3_realMask(b)
-    io.resp(b).bits.ctr := if3_table_r(bank).ctr
-    io.resp(b).bits.u := Cat(if3_hi_us_r(bank),if3_lo_us_r(bank))
+    io.resp(b).valid := if3_req_rhits(b) && if3_mask(b)
+    io.resp(b).bits.ctr := if3_table_r(b).ctr
+    io.resp(b).bits.u := Cat(if3_hi_us_r(b),if3_lo_us_r(b))
   })
 
 
@@ -238,7 +210,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val clear_u_idx = clear_u_ctr >> log2Ceil(uBitPeriod)
 
   // Use fetchpc to compute hash
-  val (update_idx, update_tag) = compute_tag_and_hash((io.update.pc >> (instOffsetBits + log2Ceil(TageBanks))), io.update.hist)
+  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.hist)
 
   val update_wdata = Wire(Vec(TageBanks, new TageEntry))
 

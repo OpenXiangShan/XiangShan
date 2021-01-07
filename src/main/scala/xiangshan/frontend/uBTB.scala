@@ -144,14 +144,14 @@ class MicroBTB extends BasePredictor
 
     //uBTB read
     //tag is bank align
-    val bankAlignedPC = bankAligned(io.pc.bits)
-    val startsAtOddBank = bankInGroup(bankAlignedPC)(0).asBool
+    val packetAlignedPC = packetAligned(io.pc.bits)
+    // val startsAtOddBank = bankInGroup(bankAlignedPC)(0).asBool
     
 
 
     val read_valid = io.pc.valid
-    val read_req_tag = getTag(bankAlignedPC)
-    val next_tag = getTag(bankAlignedPC) + 1.U
+    val read_req_tag = getTag(packetAlignedPC)
+    // val next_tag = getTag(bankAlignedPC) + 1.U
     // val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
     
@@ -167,7 +167,7 @@ class MicroBTB extends BasePredictor
     //val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(log2Up(PredictWidth)-1,0) ))
     // val isInNextRow = VecInit((0 until PredictWidth).map(_.U < read_req_basebank))
     
-    (0 until PredictWidth).map{ b => metas(b).rtag := Mux(startsAtOddBank && (b > PredictWidth).B,next_tag,read_req_tag) }
+    (0 until PredictWidth).map{ b => metas(b).rtag := read_req_tag }
     val read_hit_ohs = (0 until PredictWidth).map{ b => metas(b).hit_ohs }
     val read_hit_vec = VecInit(read_hit_ohs.map{oh => ParallelOR(oh).asBool})
     val read_hit_ways = (0 until PredictWidth).map{ b => metas(b).hit_way }

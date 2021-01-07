@@ -368,7 +368,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val updateBank = ltbAddr.getBank(updatePC)
 
   // 只要把同一个bankAligned PC的每一项传进16个ltb中即可
-  val bankAlignedPC = align(pc, PredictWidth)
+  // val bankAlignedPC = align(pc, PredictWidth)
+  val packetAlignedPC = packetAligned(pc)
 
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.if2_fire := io.pc.valid
@@ -391,35 +392,16 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val if3_fire = io.if3_fire
   val inMask = io.inMask // This is if4_mask
 
-  val startsAtOddBank = RegEnable(bankInGroup(bankAlignedPC)(0).asBool, if3_fire)
-  val reorderMask = Mux(startsAtOddBank, Cat(inMask(PredictWidth/2-1, 0), inMask(PredictWidth-1 ,PredictWidth/2)), inMask)
-
   for (i <- 0 until PredictWidth) {
-    ltbs(i).io.req.pc := bankAlignedPC
-    ltbs(i).io.outMask := reorderMask(i)
+    ltbs(i).io.req.pc := packetAlignedPC
+    ltbs(i).io.outMask := inMask(i)
   }
 
   val ltbResps = VecInit((0 until PredictWidth).map(i => ltbs(i).io.resp))
 
-  for(i <- 0 until PredictWidth/2) {
-    when(startsAtOddBank) {
-      io.resp.exit(i) := ltbResps(i + PredictWidth/2).exit
-      io.meta.specCnts(i) := ltbResps(i + PredictWidth/2).meta
-    }.otherwise {
-      io.resp.exit(i) := ltbResps(i).exit
-      io.meta.specCnts(i) := ltbResps(i).meta
-
-    }
-  }
-
-  for(i <- PredictWidth/2 until PredictWidth) {
-    when(startsAtOddBank) {
-      io.resp.exit(i) := ltbResps(i - PredictWidth/2).exit
-      io.meta.specCnts(i) := ltbResps(i - PredictWidth/2).meta
-    }.otherwise {
-      io.resp.exit(i) := ltbResps(i).exit
-      io.meta.specCnts(i) := ltbResps(i).meta
-    }
+  for (i <- 0 until PredictWidth) {
+    io.resp.exit(i) := ltbResps(i).exit
+    io.meta.specCnts(i) := ltbResps(i).meta
   }
 
   ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
@@ -428,8 +410,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
     // debug info
     XSDebug("[IF2][req] fire=%d flush=%d fetchpc=%x\n", if2_fire, io.flush, io.pc.bits)
     XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", if3_fire, io.flush, pc)
-    XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%x tag=%x\n", out_fire, bank, bankAlignedPC, bankIdx, tag)
-    XSDebug("[IF4][req] inMask=%b, reorderMask=%b\n", inMask, reorderMask)
+    XSDebug("[IF4][req] fire=%d bank=%d packetAlignedPC=%x bankIdx=%x tag=%x\n", out_fire, bank, packetAlignedPC, bankIdx, tag)
+    XSDebug("[IF4][req] inMask=%b\n", inMask)
 
     XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d, isReplay=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr, io.update.bits.isReplay)
     XSDebug("[IF4][req] isMisPred=%d updateSpecCnt=%d, taken=%d\n", io.update.bits.isMisPred, io.update.bits.bpuMeta.specCnt, io.update.bits.taken)

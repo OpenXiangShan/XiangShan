@@ -154,7 +154,7 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = bankAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux(!io.isRVC && !io.isLastHalfRVI && HasCExtension.B, 2.U, 4.U)
+    val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux(!io.isRVC && !io.isLastHalfRVI && HasCExtension.B, 2.U, 4.U)
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr

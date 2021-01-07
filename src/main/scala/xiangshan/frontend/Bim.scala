@@ -33,9 +33,6 @@ class BIM extends BasePredictor with BimParams {
 
   val bimAddr = new TableAddr(log2Up(BimSize), BimBanks)
 
-  val if1_bankAlignedPC = bankAligned(io.pc.bits)
-  val if2_pc = RegEnable(if1_bankAlignedPC, io.pc.valid)
-
   val bim = List.fill(BimBanks) {
     Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = false, holdRead = true))
   }
@@ -45,37 +42,22 @@ class BIM extends BasePredictor with BimParams {
   resetRow := resetRow + doing_reset
   when (resetRow === (nRows-1).U) { doing_reset := false.B }
 
-  // this bank means cache bank
-  val if1_startsAtOddBank = bankInGroup(if1_bankAlignedPC)(0)
+  val if1_packetAlignedPC = packetAligned(io.pc.bits)
+  val if2_pc = RegEnable(if1_packetAlignedPC, io.pc.valid)
 
-  val if1_realMask = Mux(if1_startsAtOddBank,
-                      Cat(io.inMask(bankWidth-1,0), io.inMask(PredictWidth-1, bankWidth)),
-                      io.inMask)
-
-  
-  val if1_isInNextRow = VecInit((0 until BimBanks).map(i => Mux(if1_startsAtOddBank, (i < bankWidth).B, false.B)))
-
-  val if1_baseRow = bimAddr.getBankIdx(if1_bankAlignedPC)
-
-  val if1_realRow = VecInit((0 until BimBanks).map(b => Mux(if1_isInNextRow(b), (if1_baseRow+1.U)(log2Up(nRows)-1, 0), if1_baseRow)))
-
-  val if2_realRow = VecInit(if1_realRow.map(RegEnable(_, enable=io.pc.valid)))
+  val if1_mask = io.inMask
+  val if1_row  = bimAddr.getBankIdx(if1_packetAlignedPC)
 
   for (b <- 0 until BimBanks) {
-    bim(b).io.r.req.valid       := if1_realMask(b) && io.pc.valid
-    bim(b).io.r.req.bits.setIdx := if1_realRow(b)
+    bim(b).io.r.req.valid       := if1_mask(b) && io.pc.valid
+    bim(b).io.r.req.bits.setIdx := if1_row(b)
   }
 
   val if2_bimRead = VecInit(bim.map(_.io.r.resp.data(0)))
 
-  val if2_startsAtOddBank = bankInGroup(if2_pc)(0)
-  
   for (b <- 0 until BimBanks) {
-    val realBank = (if (b < bankWidth) Mux(if2_startsAtOddBank, (b+bankWidth).U, b.U)
-                    else Mux(if2_startsAtOddBank, (b-bankWidth).U, b.U))
-    val ctr = if2_bimRead(realBank)
-    io.resp.ctrs(b)  := ctr
-    io.meta.ctrs(b)  := ctr
+    io.resp.ctrs(b)  := if2_bimRead(b)
+    io.meta.ctrs(b)  := if2_bimRead(b)
   }
 
   val u = io.update.bits
