@@ -11,6 +11,7 @@ import xiangshan.mem._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
+import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
@@ -26,6 +27,14 @@ class MemBlockToDcacheIO extends XSBundle {
   val uncache = new DCacheWordIO
 }
 
+class IntBlockToMemBlockIO extends XSBundle {
+  val readIntRf = Vec(NRMemReadPorts, new RfReadPort)
+}
+
+class FpBlockToMemBlockIO extends XSBundle {
+  val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort)
+}
+
 class MemBlock
 (
   fastWakeUpIn: Seq[ExuConfig],
@@ -38,6 +47,8 @@ class MemBlock
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
+    val fromIntBlock = Flipped(new IntBlockToMemBlockIO)
+    val fromFpBlock = Flipped(new FpBlockToMemBlockIO)
     val toCtrlBlock = new LsBlockToCtrlIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
@@ -75,6 +86,7 @@ class MemBlock
 
   val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
 
+  val readPortIndex = Seq(0, 1, 2, 4)
   val reservationStations = (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -110,6 +122,9 @@ class MemBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.readPortIndex := readPortIndex(i).U
+    rsData.io.readIntRf <> io.fromIntBlock.readIntRf
+    rsData.io.readFpRf <> io.fromFpBlock.readFpRf
     rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 

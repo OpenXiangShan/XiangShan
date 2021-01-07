@@ -3,12 +3,12 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
-import xiangshan.backend.exu.{AluExeUnit, ExuConfig, JumpExeUnit, MulDivExeUnit, Wb}
+import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
+import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
+import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
-import xiangshan.backend.fu.fpu.Fflags
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -66,6 +66,7 @@ class IntegerBlock
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
     val toCtrlBlock = new IntBlockToCtrlIO
+    val toMemBlock = new IntBlockToMemBlockIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
@@ -141,6 +142,10 @@ class IntegerBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.readPortIndex := io.fromCtrlBlock.readPortIndex(i)
+    rsData.io.readIntRf.zipWithIndex.foreach({
+      case (port, i) => port.data := intRf.io.readPorts(i).data
+    })
     rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 
@@ -209,6 +214,7 @@ class IntegerBlock
 
   // read int rf from ctrl block
   intRf.io.readPorts <> io.fromCtrlBlock.readRf
+  (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(
     (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbIntPriority),

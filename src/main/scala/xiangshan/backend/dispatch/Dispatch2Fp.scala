@@ -15,6 +15,7 @@ class Dispatch2Fp extends XSModule {
     val numExist = Input(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
+    val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(NRFpReadPorts - exuParameters.StuCnt).W)))
   })
 
   /**
@@ -116,6 +117,7 @@ class Dispatch2Fp extends XSModule {
   val dataValidRegDebug = Reg(Vec(exuParameters.FpExuCnt, Bool()))
   for (i <- 0 until exuParameters.FpExuCnt) {
     readPortIndexReg(i) := readPortIndex(i)
+    io.readPortIndex(i) := readPortIndex(i) // FIXME
     uopReg(i) := io.enqIQCtrl(i).bits
     dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
 

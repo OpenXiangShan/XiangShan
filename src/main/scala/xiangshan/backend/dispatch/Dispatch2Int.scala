@@ -6,7 +6,6 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.Exu._
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.exu._
 
 class Dispatch2Int extends XSModule {
   val io = IO(new Bundle() {
@@ -16,6 +15,7 @@ class Dispatch2Int extends XSModule {
     val numExist = Input(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
+    val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(NRIntReadPorts).W)))
   })
 
   /**
@@ -118,6 +118,7 @@ class Dispatch2Int extends XSModule {
   val dataValidRegDebug = Reg(Vec(exuParameters.IntExuCnt, Bool()))
   for (i <- 0 until exuParameters.IntExuCnt) {
     readPortIndexReg(i) := readPortIndex(i)
+    io.readPortIndex(i) := readPortIndex(i) // FIXME
     uopReg(i) := io.enqIQCtrl(i).bits
     dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
 

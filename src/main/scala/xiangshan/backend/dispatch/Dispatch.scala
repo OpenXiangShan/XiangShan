@@ -43,6 +43,12 @@ class Dispatch extends XSModule {
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
     val enqIQData = Vec(exuParameters.ExuCnt, Output(new ExuInput))
+    // send reg file read port index to reservation stations
+    val readPortIndex = new Bundle {
+      val intIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(NRIntReadPorts).W)))
+      val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(NRFpReadPorts - exuParameters.StuCnt).W)))
+      // ls: hardwired to (0, 1, 2, 4)
+    }
   })
 
   val dispatch1 = Module(new Dispatch1)
@@ -81,6 +87,7 @@ class Dispatch extends XSModule {
   intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i)})
   intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i)})
   intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
+  intDispatch.io.readPortIndex <> io.readPortIndex.intIndex
 
   // Fp dispatch queue to Fp reservation stations
   val fpDispatch = Module(new Dispatch2Fp)
@@ -90,6 +97,7 @@ class Dispatch extends XSModule {
   fpDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i + exuParameters.IntExuCnt)})
   fpDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i + exuParameters.IntExuCnt)})
   fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
+  fpDispatch.io.readPortIndex <> io.readPortIndex.fpIndex
   
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)

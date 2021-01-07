@@ -25,6 +25,7 @@ class FloatBlock
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
+    val toMemBlock = new FpBlockToMemBlockIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
@@ -85,6 +86,10 @@ class FloatBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.readPortIndex := io.fromCtrlBlock.readPortIndex(i)
+    rsData.io.readFpRf.zipWithIndex.foreach({
+      case (port, i) => port.data := fpRf.io.readPorts(i).data
+    })
     rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 
@@ -142,6 +147,7 @@ class FloatBlock
 
   // read fp rf from ctrl block
   fpRf.io.readPorts <> io.fromCtrlBlock.readRf
+  (0 until exuParameters.StuCnt).foreach(i => io.toMemBlock.readFpRf(i).data := fpRf.io.readPorts(i + 12).data)
   // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
     (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbFpPriority),
