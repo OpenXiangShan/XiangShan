@@ -170,17 +170,14 @@ abstract class BPUStage extends XSModule with HasBPUParameter
 
   val targets = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
 
-  val firstBankHasHalfRVI = Wire(Bool())
-  val lastBankHasHalfRVI = Wire(Bool())
-  val lastBankHasInst = WireInit(inLatch.mask(PredictWidth-1, bankWidth).orR)
+  val hasHalfRVI = Wire(Bool())
 
   io.pred <> DontCare
   io.pred.takens := takens.asUInt
   io.pred.brMask := brMask.asUInt
   io.pred.jalMask := jalMask.asUInt
   io.pred.targets := targets
-  io.pred.firstBankHasHalfRVI := firstBankHasHalfRVI
-  io.pred.lastBankHasHalfRVI  := lastBankHasHalfRVI
+  io.pred.hasHalfRVI := hasHalfRVI
 
   io.out <> DontCare
   io.out.pc := inLatch.pc
@@ -195,8 +192,8 @@ abstract class BPUStage extends XSModule with HasBPUParameter
     val target = Mux(taken, io.pred.targets(jmpIdx), snpc(inLatch.pc))
     XSDebug("in(%d): pc=%x, mask=%b\n", io.inFire, io.in.pc, io.in.mask)
     XSDebug("inLatch: pc=%x, mask=%b\n", inLatch.pc, inLatch.mask)
-    XSDebug("out(%d): pc=%x, mask=%b, taken=%d, jmpIdx=%d, target=%x, firstHasHalfRVI=%d, lastHasHalfRVI=%d\n",
-      io.outFire, io.out.pc, io.out.mask, taken, jmpIdx, target, firstBankHasHalfRVI, lastBankHasHalfRVI)
+    XSDebug("out(%d): pc=%x, mask=%b, taken=%d, jmpIdx=%d, target=%x, hasHalfRVI=%d\n",
+      io.outFire, io.out.pc, io.out.mask, taken, jmpIdx, target, hasHalfRVI)
     XSDebug("flush=%d\n", io.flush)
     val p = io.pred
   }
@@ -215,8 +212,7 @@ class BPUStage1 extends BPUStage {
   jalMask := DontCare
   targets := ubtbResp.targets
 
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, ubtbResp.hits(bankWidth-1) && !ubtbResp.is_RVC(bankWidth-1)) && HasCExtension.B
-  lastBankHasHalfRVI  := ubtbResp.hits(PredictWidth-1) && !ubtbResp.is_RVC(PredictWidth-1) && HasCExtension.B
+  hasHalfRVI := ubtbResp.hits(PredictWidth-1) && !ubtbResp.is_RVC(PredictWidth-1) && HasCExtension.B
 
   // resp and brInfo are from the components,
   // so it does not need to be latched
@@ -241,8 +237,7 @@ class BPUStage2 extends BPUStage {
   brMask  := VecInit((0 until PredictWidth).map(i => btbResp.types(i) === BTBtype.B && btbResp.hits(i)))
   jalMask := DontCare
 
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, btbResp.hits(bankWidth-1) && !btbResp.isRVC(bankWidth-1) && inLatch.mask(bankWidth-1)) && HasCExtension.B
-  lastBankHasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && inLatch.mask(PredictWidth-1) && HasCExtension.B
+  hasHalfRVI  := btbResp.hits(PredictWidth-1) && !btbResp.isRVC(PredictWidth-1) && HasCExtension.B
 
   if (BPUDebug) {
     XSDebug(io.outFire, "outPred using btb&bim resp: hits:%b, ctrTakens:%b\n",
@@ -307,15 +302,13 @@ class BPUStage3 extends BPUStage {
   brMask  := WireInit(brs.asTypeOf(Vec(PredictWidth, Bool())))
   jalMask := WireInit(jals.asTypeOf(Vec(PredictWidth, Bool())))
 
-  lastBankHasInst := s3IO.realMask(PredictWidth-1, bankWidth).orR
-  firstBankHasHalfRVI := Mux(lastBankHasInst, false.B, pdLastHalf(0)) && HasCExtension.B
-  lastBankHasHalfRVI  := pdLastHalf(1) && HasCExtension.B
+  hasHalfRVI  := pdLastHalf && HasCExtension.B
 
   //RAS
   if(EnableRAS){
     val ras = Module(new RAS)
     ras.io <> DontCare
-    ras.io.pc.bits := bankAligned(inLatch.pc)
+    ras.io.pc.bits := packetAligned(inLatch.pc)
     ras.io.pc.valid := io.outFire//predValid
     ras.io.is_ret := rets.orR  && (retIdx === io.pred.jmpIdx)
     ras.io.callIdx.valid := calls.orR && (callIdx === io.pred.jmpIdx)
@@ -349,10 +342,7 @@ class BPUStage3 extends BPUStage {
   // we should provide the prediction for the first half RVI of the end of a fetch packet
   // branch taken information would be lost in the prediction of the next packet,
   // so we preserve this information here
-  when (firstBankHasHalfRVI && btbResp.types(bankWidth-1) === BTBtype.B && btbHits(bankWidth-1) && HasCExtension.B) {
-    takens(bankWidth-1) := brPred(bankWidth-1) && !loopRes(bankWidth-1)
-  }
-  when (lastBankHasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B && btbHits(PredictWidth-1) && HasCExtension.B) {
+  when (hasHalfRVI && btbResp.types(PredictWidth-1) === BTBtype.B && btbHits(PredictWidth-1) && HasCExtension.B) {
     takens(PredictWidth-1) := brPred(PredictWidth-1) && !loopRes(PredictWidth-1)
   }
 

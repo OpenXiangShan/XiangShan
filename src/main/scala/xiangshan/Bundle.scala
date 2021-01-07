@@ -81,23 +81,20 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   // val endsAtTheEndOfFirstBank = Bool()
   // val endsAtTheEndOfLastBank = Bool()
 
-  // half RVI could only start at the end of a bank
-  val firstBankHasHalfRVI = Bool()
-  val lastBankHasHalfRVI = Bool()
+  // half RVI could only start at the end of a packet
+  val hasHalfRVI = Bool()
 
-  def fBHHR = firstBankHasHalfRVI && HasCExtension.B
-  def lBHHR = lastBankHasHalfRVI  && HasCExtension.B
 
   // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(lBHHR.asUInt, 0.U((bankWidth-1).W), fBHHR.asUInt, 0.U((bankWidth-1).W))
+  def lastHalfRVIMask = Cat(hasHalfRVI.asUInt, 0.U((PredictWidth-1).W))
 
   def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
-  def lastHalfRVITaken = (takens(bankWidth-1) && fBHHR) || (takens(PredictWidth-1) && lBHHR)
+  def lastHalfRVITaken = takens(PredictWidth-1) && hasHalfRVI
 
-  def lastHalfRVIIdx = Mux(fBHHR, (bankWidth-1).U, (PredictWidth-1).U)
+  def lastHalfRVIIdx = (PredictWidth-1).U
   // should not be used if not lastHalfRVITaken
-  def lastHalfRVITarget = Mux(fBHHR, targets(bankWidth-1), targets(PredictWidth-1))
+  def lastHalfRVITarget = targets(PredictWidth-1)
   
   def realTakens  = takens  & lastHalfRVIClearMask
   def realBrMask  = brMask  & lastHalfRVIClearMask
@@ -109,8 +106,7 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
   def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
   // if not taken before the half RVI inst
-  def saveHalfRVI = (fBHHR && !(ParallelORR(takens(bankWidth-2,0)))) ||
-  (lBHHR && !(ParallelORR(takens(PredictWidth-2,0))))
+  def saveHalfRVI = hasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0)))
   // could get PredictWidth-1 when only the first bank is valid
   def jmpIdx = ParallelPriorityEncoder(realTakens)
   // only used when taken
@@ -160,7 +156,7 @@ class BpuMeta extends XSBundle with HasBPUParameter {
 class Predecode extends XSBundle with HasIFUConst {
   val hasLastHalfRVI = Bool()
   val mask = UInt(PredictWidth.W)
-  val lastHalf = UInt(nBanksInPacket.W)
+  val lastHalf = Bool()
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 

@@ -100,6 +100,7 @@ class ICacheIO extends ICacheBundle
   val l1plusflush = Output(Bool())
   val fencei = Input(Bool())
   val prev = Flipped(Valid(UInt(16.W)))
+  val prev_pc = Input(UInt(VAddrBits.W))
   val prev_ipf = Input(Bool())
   val pd_out = Output(new PreDecodeResp)
 }
@@ -441,6 +442,8 @@ class ICache extends ICacheModule
     wayResp.acf := s3_access_fault
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
+    pds(i).io.prev_ipf := io.prev_ipf
+    pds(i).io.prev_pc := io.prev_pc
     // if a fetch packet triggers page fault, set the pf instruction to nop
     when ((!(HasCExtension.B) || io.prev.valid) && s3_tlb_resp.excp.pf.instr ) {
       val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
