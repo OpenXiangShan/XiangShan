@@ -216,14 +216,14 @@ class BTB extends BasePredictor with BTBParams{
     //   if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
     // })
     val validLatch = RegNext(io.pc.valid)
-    XSDebug(io.pc.valid, "read: pc=0x%x, baseBank=%d, realMask=%b\n", if1_bankAlignedPC, if1_baseBank, if1_realMask)
+    XSDebug(io.pc.valid, "read: pc=0x%x, mask=%b\n", if1_packetAlignedPC, if1_mask)
     XSDebug(validLatch, "read_resp: pc=0x%x, readIdx=%d-------------------------------\n",
       if2_pc, btbAddr.getIdx(if2_pc))
     if (debug_verbose) {
       for (i <- 0 until BtbBanks){
         for (j <- 0 until BtbWays) {
           XSDebug(validLatch, "read_resp[w=%d][b=%d][r=%d] is valid(%d) mask(%d), tag=0x%x, offset=0x%x, type=%d, isExtend=%d, isRVC=%d\n",
-          j.U, i.U, if2_realRow(i), if2_metaRead(j)(i).valid, if2_realMask(i), if2_metaRead(j)(i).tag, if2_dataRead(j)(i).offset, if2_metaRead(j)(i).btbType, if2_dataRead(j)(i).extended, if2_metaRead(j)(i).isRVC)
+          j.U, i.U, if2_row, if2_metaRead(j)(i).valid, if2_mask(i), if2_metaRead(j)(i).tag, if2_dataRead(j)(i).offset, if2_metaRead(j)(i).btbType, if2_dataRead(j)(i).extended, if2_metaRead(j)(i).isRVC)
         }
       }
     }
@@ -231,9 +231,8 @@ class BTB extends BasePredictor with BTBParams{
     // val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (if2_baseBank +& b.U)(log2Up(BtbBanks)-1,0)))
 
     for (i <- 0 until BtbBanks) {
-      val idx = b
-      XSDebug(validLatch && if2_bankHits(b), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
-        i.U, idx, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
+      XSDebug(validLatch && if2_bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",
+        i.U, i.U, io.resp.targets(i), io.resp.isRVC(i), io.resp.types(i))
     }
     XSDebug(updateValid, "update_req: cycle=%d, pc=0x%x, target=0x%x, misPred=%d, offset=%x, extended=%d, way=%d, bank=%d, row=0x%x\n",
       u.bpuMeta.debug_btb_cycle, u.pc, new_target, u.isMisPred, new_offset, new_extended, updateWay, updateBankIdx, updateRow)

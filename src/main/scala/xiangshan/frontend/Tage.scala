@@ -127,8 +127,8 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   val if2_packetAlignedPC = packetAligned(io.req.bits.pc)
   val if2_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val if2_idx_and_tag = compute_tag_and_hash(if2_unhashed_idx, io.req.bits.hist)
-  val if3_idx_and_tag = RegEnable(if2_idx_and_tag, io.req.valid)
+  val (if2_idx, if2_tag) = compute_tag_and_hash(if2_unhashed_idx, io.req.bits.hist)
+  val (if3_idx, if3_tag) = (RegEnable(if2_idx, io.req.valid), RegEnable(if2_tag, io.req.valid))
 
   class HL_Bank (val nRows: Int = nRows) extends TageModule {
     val io = IO(new Bundle {
@@ -171,17 +171,15 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
 
   (0 until TageBanks).map(
     b => {
-      val idxes = VecInit(if2_idxes_and_tags.map(_._1))
-      val idx = if2_idx_and_tag._1
       hi_us(b).io.r.req.valid := io.req.valid && if2_mask(b)
-      hi_us(b).io.r.req.bits.setIdx := idx
+      hi_us(b).io.r.req.bits.setIdx := if2_idx
 
       lo_us(b).io.r.req.valid := io.req.valid && if2_mask(b)
-      lo_us(b).io.r.req.bits.setIdx := idx
+      lo_us(b).io.r.req.bits.setIdx := if2_idx
 
       table(b).reset := reset.asBool
       table(b).io.r.req.valid := io.req.valid && if2_mask(b)
-      table(b).io.r.req.bits.setIdx := idx
+      table(b).io.r.req.bits.setIdx := if2_idx
 
       if3_hi_us_r(b) := hi_us(b).io.r.resp.data
       if3_lo_us_r(b) := lo_us(b).io.r.resp.data
@@ -190,8 +188,7 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
   )
 
   val if3_req_rhits = VecInit((0 until TageBanks).map(b => {
-    val tag = if3_idx_and_tag._2
-    if3_table_r(b).valid && if3_table_r(b).tag === tag
+    if3_table_r(b).valid && if3_table_r(b).tag === if3_tag
   }))
   
   (0 until TageBanks).map(b => {
@@ -305,16 +302,16 @@ class TageTable(val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPerio
     val u = io.update
     val b = PriorityEncoder(u.mask)
     val ub = PriorityEncoder(u.uMask)
-    val idx = if2_idxes_and_tags.map(_._1)
-    val tag = if2_idxes_and_tags.map(_._2)
-    XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=(%d,%d), tag=(%x,%x), baseBank=%d, mask=%b, realMask=%b\n",
-      io.req.bits.pc, io.req.bits.hist, idx(0), idx(1), tag(0), tag(1), if2_baseBank, io.req.bits.mask, if2_realMask)
+    val idx = if2_idx
+    val tag = if2_tag
+    XSDebug(io.req.valid, "tableReq: pc=0x%x, hist=%x, idx=%d, tag=%x, mask=%b, mask=%b\n",
+      io.req.bits.pc, io.req.bits.hist, idx, tag, io.req.bits.mask, if2_mask)
     for (i <- 0 until TageBanks) {
-      XSDebug(RegNext(io.req.valid) && if3_req_rhits(i), "TageTableResp[%d]: idx=(%d,%d), hit:%d, ctr:%d, u:%d\n",
-        i.U, if3_idxes(0), if3_idxes(1), if3_req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
+      XSDebug(RegNext(io.req.valid) && if3_req_rhits(i), "TageTableResp[%d]: idx=%d, hit:%d, ctr:%d, u:%d\n",
+        i.U, if3_idx, if3_req_rhits(i), io.resp(i).bits.ctr, io.resp(i).bits.u)
     }
 
-    XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", if3_req_rhits.asUInt, if3_realMask)
+    XSDebug(RegNext(io.req.valid), "TageTableResp: hits:%b, maskLatch is %b\n", if3_req_rhits.asUInt, if3_mask)
     XSDebug(RegNext(io.req.valid) && !if3_req_rhits.reduce(_||_), "TageTableResp: no hits!\n")
 
     XSDebug(io.update.mask.reduce(_||_), "update Table: pc:%x, fetchIdx:%d, hist:%x, bank:%d, taken:%d, alloc:%d, oldCtr:%d\n",
