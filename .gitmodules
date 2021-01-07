@@ -5,7 +5,7 @@
 [submodule "block-inclusivecache-sifive"]
 	path = block-inclusivecache-sifive
 	url = https://github.com/RISCVERS/block-inclusivecache-sifive.git
-	branch = 5491dcc937ed3c6f7722bef9db448653daab75e8
+	branch = 0315ccf27963d7fe4b5e850c709fb66298f8390c
 [submodule "chiseltest"]
 	path = chiseltest
 	url = https://github.com/ucb-bar/chisel-testers2.git
