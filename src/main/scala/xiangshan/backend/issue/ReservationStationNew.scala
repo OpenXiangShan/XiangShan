@@ -212,6 +212,10 @@ class ReservationStationCtrl
         assert(!srcQueue(i)(j), "listen hits but src already true")
       }
     }
+    // redirect
+    when (redHit(i)) {
+      stateQueue(i) := s_idle
+    }
   }
 
   // output
@@ -451,6 +455,7 @@ class ReservationStationData
 
 
   // log
+  XSDebug(io.ctrl.redVec.orR, p"Red: ${Binary(io.ctrl.redVec)}\n")
   XSDebug(io.feedback.valid, p"feedback: roqIdx:${io.feedback.bits.roqIdx} hit:${io.feedback.bits.hit}\n")
   XSDebug(true.B, p"out(${io.deq.valid} ${io.deq.ready})\n")
   XSDebug(io.deq.valid, p"Deq(${io.deq.valid} ${io.deq.ready}): deqPtr:${deq} pc:${Hexadecimal(io.deq.bits.uop.cf.pc)}" +
