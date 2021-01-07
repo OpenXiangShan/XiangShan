@@ -373,7 +373,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   for (i <- 0 until PredictWidth) {
     ltbs(i).io.if2_fire := io.pc.valid
     ltbs(i).io.if3_fire := io.if3_fire
-    ltbs(i).io.if4_fire := io.outFire
+    ltbs(i).io.if4_fire := out_fire
     ltbs(i).io.req.idx := bankIdx
     ltbs(i).io.req.tag := tag
     // ltbs(i).io.outMask := outMask(i)
@@ -436,9 +436,9 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
     // XSDebug(false, true.B, "\n")
     for (i <- 0 until PredictWidth) {
-      XSDebug(io.outFire && (i.U === 0.U || i.U === 4.U || i.U === 8.U || i.U === 12.U), "[IF4][resps]")
-      XSDebug(false, io.outFire, "[i:%d, e:%d, s:%d] ", i.U, io.resp.exit(i), io.meta.specCnts(i))
-      XSDebug(false, io.outFire && (i.U === 3.U || i.U === 7.U || i.U === 11.U || i.U === 15.U), "\n")
+      XSDebug(out_fire && (i.U === 0.U || i.U === 4.U || i.U === 8.U || i.U === 12.U), "[IF4][resps]")
+      XSDebug(false, out_fire, "[i:%d, e:%d, s:%d] ", i.U, io.resp.exit(i), io.meta.specCnts(i))
+      XSDebug(false, out_fire && (i.U === 3.U || i.U === 7.U || i.U === 11.U || i.U === 15.U), "\n")
     }
   }
 }

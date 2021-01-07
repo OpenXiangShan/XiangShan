@@ -239,7 +239,7 @@ class IFU extends XSModule with HasIFUConst
   val if3_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => !if3_pendingPrevHalfInstr && if3_bp.realTakens(i) && if3_nextValidPCNotEquals(if3_bp.targets(i))))
   val if3_prevHalfMetRedirect    = if3_pendingPrevHalfInstr && if3_prevHalfInstrMet && if3_prevHalfInstr.bits.taken && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.target)
   val if3_prevHalfNotMetRedirect = if3_pendingPrevHalfInstr && !if3_prevHalfInstrMet && if3_nextValidPCNotEquals(if3_prevHalfInstr.bits.npc)
-  val if3_predTakenRedirect    = ParallelPriorityMux(if3_bp.realTakens, if3_predTakenRedirectVec)
+  val if3_predTakenRedirect    = ParallelOR(if3_predTakenRedirectVec)
   val if3_predNotTakenRedirect = !if3_pendingPrevHalfInstr && !if3_bp.taken && if3_nextValidPCNotEquals(if3_snpc)
   // when pendingPrevHalfInstr, if3_GHInfo is set to the info of last prev half instr
   // val if3_ghInfoNotIdenticalRedirect = !if3_pendingPrevHalfInstr && if3_GHInfo =/= if3_lastGHInfo && enableGhistRepair.B
@@ -304,15 +304,15 @@ class IFU extends XSModule with HasIFUConst
 
   if4_predicted_gh := if4_gh.update(if4_bp.hasNotTakenBrs, if4_bp.takenOnBr)
 
-  def cal_jal_tgt(inst: UInt, rvc: Bool): UInt = {
+  def jal_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
-      SignExt(Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)), XLEN),
-      SignExt(Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)), XLEN)
-    )
+      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)),
+      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
+    ).asSInt()
   }
   val if4_instrs = if4_pd.instrs
   val if4_jals = if4_bp.jalMask
-  val if4_jal_tgts = VecInit((0 until PredictWidth).map(i => if4_pd.pc(i) + cal_jal_tgt(if4_instrs(i), if4_pd.pd(i).isRVC)))
+  val if4_jal_tgts = VecInit((0 until PredictWidth).map(i => (if4_pd.pc(i).asSInt + jal_offset(if4_instrs(i), if4_pd.pd(i).isRVC)).asUInt))
 
   (0 until PredictWidth).foreach {i =>
     when (if4_jals(i)) {
@@ -382,7 +382,7 @@ class IFU extends XSModule with HasIFUConst
   val if4_predTakenRedirectVec = VecInit((0 until PredictWidth).map(i => if4_bp.realTakens(i) && if4_nextValidPCNotEquals(if4_bp.targets(i))))
 
   val if4_prevHalfNextNotMet = hasPrevHalfInstrReq && if4_nextValidPCNotEquals(prevHalfInstrReq.bits.pc+2.U)
-  val if4_predTakenRedirect = ParallelPriorityMux(if4_bp.realTakens, if4_predTakenRedirectVec)
+  val if4_predTakenRedirect = ParallelORR(if4_predTakenRedirectVec)
   val if4_predNotTakenRedirect = !if4_bp.taken && if4_nextValidPCNotEquals(if4_snpc)
   // val if4_ghInfoNotIdenticalRedirect = if4_GHInfo =/= if4_lastGHInfo && enableGhistRepair.B
 
