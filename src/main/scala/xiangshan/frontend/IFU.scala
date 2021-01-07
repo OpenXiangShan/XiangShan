@@ -17,7 +17,7 @@ trait HasIFUConst extends HasXSParameter {
   val groupBytes = 64 // correspond to cache line size
   val groupOffsetBits = log2Ceil(groupBytes)
   val groupWidth = groupBytes / instBytes
-  val packetBytes = FetchWidth * instBytes
+  val packetBytes = PredictWidth * instBytes
   val nBanksInPacket = 2
   val bankBytes = packetBytes / nBanksInPacket
   val nBanksInGroup = groupBytes / bankBytes
