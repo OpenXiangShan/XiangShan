@@ -94,7 +94,7 @@ class StoreUnit_S1 extends XSModule {
 
   // encode data for fp store
   when(io.in.bits.uop.ctrl.src2Type === SrcType.fp){
-	  io.lsq.bits.data := ieee(io.in.bits.data)
+	  io.lsq.bits.data := genWdata(ieee(io.in.bits.data), io.in.bits.uop.ctrl.fuOpType(1,0))
 	}
 
 }
