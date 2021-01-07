@@ -135,9 +135,7 @@ class BPUStageIO extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val mask = UInt(PredictWidth.W)
   val resp = new PredictorResponse
-  // val target = UInt(VAddrBits.W)
   val brInfo = Vec(PredictWidth, new BpuMeta)
-  // val saveHalfRVI = Bool()
 }
 
 
@@ -152,24 +150,17 @@ abstract class BPUStage extends XSModule with HasBPUParameter
     val outFire = Input(Bool())
 
     val debug_hist = Input(UInt((if (BPUDebug) (HistoryLength) else 0).W))
-    // val debug_histPtr = Input(UInt((if (BPUDebug) (ExtHistoryLength) else 0).W))
   }
   val io = IO(new DefaultIO)
-
-  def npc(pc: UInt, instCount: UInt) = pc + (instCount << instOffsetBits.U)
 
   val inLatch = RegEnable(io.in, io.inFire)
 
   // Each stage has its own logic to decide
-  // takens, notTakens and target
-
+  // takens, brMask, jalMask, targets and hasHalfRVI
   val takens = Wire(Vec(PredictWidth, Bool()))
-  // val notTakens = Wire(Vec(PredictWidth, Bool()))
   val brMask = Wire(Vec(PredictWidth, Bool()))
   val jalMask = Wire(Vec(PredictWidth, Bool()))
-
   val targets = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
-
   val hasHalfRVI = Wire(Bool())
 
   io.pred <> DontCare
@@ -289,7 +280,6 @@ class BPUStage3 extends BPUStage {
   val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.bits.taken && HasCExtension.B
   val prevHalfTakenMask = prevHalfTaken.asUInt
   val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
-  // VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
   // we should provide btb resp as well
   btbHits := btbResp.hits.asUInt | prevHalfTakenMask
 
@@ -404,7 +394,6 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   val io = IO(new Bundle() {
     // from backend
     val cfiUpdateInfo    = Flipped(ValidIO(new CfiUpdateInfo))
-    // val cfiUpdateInfo = Flipped(ValidIO(new CfiUpdateInfoWithHist))
     // from ifu, frontend redirect
     val flush = Input(Vec(3, Bool()))
     // from if1
@@ -419,8 +408,6 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
     // to if4, some bpu info used for updating
     val bpuMeta = Output(Vec(PredictWidth, new BpuMeta))
   })
-
-  def npc(pc: UInt, instCount: UInt) = pc + (instCount << 1.U)
 
   preds.map(p => {
     p.io.update <> io.cfiUpdateInfo
@@ -558,7 +545,6 @@ class BPU extends BaseBPU {
   tage.io.pc.bits := s2.io.in.pc // PC from s1
   tage.io.hist := s1_hist // The inst is from s1
   tage.io.inMask := s2.io.in.mask
-  // tage.io.s3Fire := s3_fire // Tell tage to march 1 stage
   tage.io.bim <> s1.io.out.resp.bim // Use bim results from s1
 
   //**********************Stage 3****************************//
@@ -570,7 +556,6 @@ class BPU extends BaseBPU {
   loop.io.if3_fire := s3_fire
   loop.io.pc.bits := s2.io.in.pc
   loop.io.inMask := io.predecode.mask
-  // loop.io.outFire := s4_fire
   loop.io.respIn.taken := s3.io.pred.taken
   loop.io.respIn.jmpIdx := s3.io.pred.jmpIdx
 

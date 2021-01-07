@@ -367,8 +367,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   val updatePC = io.update.bits.pc
   val updateBank = ltbAddr.getBank(updatePC)
 
-  // 只要把同一个bankAligned PC的每一项传进16个ltb中即可
-  // val bankAlignedPC = align(pc, PredictWidth)
+  // 只要把同一个packAligned PC的每一项传进16个ltb中即可
   val packetAlignedPC = packetAligned(pc)
 
   for (i <- 0 until PredictWidth) {

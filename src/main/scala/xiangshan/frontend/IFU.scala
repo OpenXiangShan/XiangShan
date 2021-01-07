@@ -32,11 +32,6 @@ trait HasIFUConst extends HasXSParameter {
 
 class GlobalHistory extends XSBundle {
   val predHist = UInt(HistoryLength.W)
-  // val sawNTBr = Bool()
-  // val takenOnBr = Bool()
-  // val saveHalfRVI = Bool()
-  // def shifted = takenOnBr || sawNTBr
-  // def newPtr(ptr: UInt = nowPtr): UInt = Mux(shifted, ptr - 1.U, ptr)
   def update(sawNTBr: Bool, takenOnBr: Bool, hist: UInt = predHist): GlobalHistory = {
     val g = Wire(new GlobalHistory)
     val shifted = takenOnBr || sawNTBr
@@ -87,7 +82,6 @@ class PrevHalfInstr extends XSBundle {
   val instr = UInt(16.W)
   val ipf = Bool()
   val meta = new BpuMeta
-  // val newPtr = UInt(log2Up(ExtHistoryLength).W)
 }
 
 @chiselName
@@ -123,9 +117,6 @@ class IFU extends XSModule with HasIFUConst
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
   val if1_fire = if1_valid && (if2_allReady || if2_flush)
 
-
-  // val if2_newPtr, if3_newPtr, if4_newPtr = Wire(UInt(log2Up(ExtHistoryLength).W))
-
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
   val final_gh = RegInit(0.U.asTypeOf(new GlobalHistory))
@@ -147,12 +138,11 @@ class IFU extends XSModule with HasIFUConst
 
   val npcGen = new PriorityMuxGenerator[UInt]
   npcGen.register(true.B, RegNext(if1_npc), Some("stallPC"))
-  // npcGen.register(if2_fire, if2_snpc, Some("if2_snpc"))
   val if2_bp = bpu.io.out(0)
   
   // if taken, bp_redirect should be true
   // when taken on half RVI, we suppress this redirect signal
-  // if2_redirect := if2_valid
+
   npcGen.register(if2_valid, Mux(if2_bp.taken, if2_bp.target, if2_snpc), Some("if2_target"))
 
   if2_predicted_gh := if2_gh.update(if2_bp.hasNotTakenBrs, if2_bp.takenOnBr)
@@ -249,20 +239,12 @@ class IFU extends XSModule with HasIFUConst
 
   val if3_target = WireInit(if3_snpc)
 
-  /* when (prevHalfMetRedirect) {
-    if1_npc := if3_prevHalfInstr.target
-  }.else */
   if3_target := Mux1H(Seq((if3_prevHalfNotMetRedirect -> if3_prevHalfInstr.bits.npc),
                           (if3_predTakenRedirect      -> if3_bp.target),
                           (if3_predNotTakenRedirect   -> if3_snpc)))
-  // }.elsewhen (if3_ghInfoNotIdenticalRedirect) {
-  //   if3_target := Mux(if3_bp.taken, if3_bp.target, snpc(if3_pc))
-  // }
+
   npcGen.register(if3_redirect, if3_target, Some("if3_target"))
 
-  // when (if3_redirect) {
-  //   if1_npc := if3_target
-  // }
 
   //********************** IF4 ****************************//
   val if4_pd = RegEnable(icache.io.pd_out, if3_fire)
@@ -388,18 +370,8 @@ class IFU extends XSModule with HasIFUConst
 
   val if4_target = WireInit(if4_snpc)
 
-  // when (if4_prevHalfNextNotMet) {
-  //   if4_target := prevHalfInstrReq.pc+2.U
-  // }.else
   if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
-  // when (if4_predTakenRedirect) {
-  //   if4_target := if4_bp.target
-  // }.elsewhen (if4_predNotTakenRedirect) {
-  //   if4_target := if4_snpc
-  // }
-  // }.elsewhen (if4_ghInfoNotIdenticalRedirect) {
-  //   if4_target := Mux(if4_bp.taken, if4_bp.target, if4_snpc)
-  // }
+
   npcGen.register(if4_redirect, if4_target, Some("if4_target"))
 
   when (if4_fire) {
@@ -448,7 +420,6 @@ class IFU extends XSModule with HasIFUConst
 
   bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
-  // bpu.io.flush := Cat(if4_flush, if3_flush, if2_flush)
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
   bpu.io.inFire(0) := if1_fire
   bpu.io.inFire(1) := if2_fire
@@ -456,7 +427,6 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.inFire(3) := if4_fire
   bpu.io.in.pc := if1_npc
   bpu.io.in.hist := if1_gh.asUInt
-  // bpu.io.in.histPtr := ptr
   bpu.io.in.inMask := mask(if1_npc)
   bpu.io.predecode.mask := if4_pd.mask
   bpu.io.predecode.lastHalf := if4_pd.lastHalf
@@ -473,7 +443,6 @@ class IFU extends XSModule with HasIFUConst
   val fetchPacketValid = if4_valid && !io.redirect.valid
   val fetchPacketWire = Wire(new FetchPacket)
 
-  // io.fetchPacket.valid := if4_valid && !io.redirect.valid
   fetchPacketWire.instrs := if4_pd.instrs
   fetchPacketWire.mask := if4_pd.mask & (Fill(PredictWidth, !if4_bp.taken) | (Fill(PredictWidth, 1.U(1.W)) >> (~if4_bp.jmpIdx)))
   fetchPacketWire.pdmask := if4_pd.mask

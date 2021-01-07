@@ -407,7 +407,6 @@ class Tage extends BaseTage {
   
   val if3_resps = VecInit(tables.map(t => t.io.resp))
   val if3_scResps = VecInit(scTables.map(t => t.io.resp))
-  // val flushLatch = RegNext(io.flush)
 
   val if3_bim = RegEnable(io.bim, enable=io.pc.valid) // actually it is s2Fire
   val if4_bim = RegEnable(if3_bim, enable=s3_fire)

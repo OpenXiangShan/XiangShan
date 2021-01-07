@@ -110,8 +110,6 @@ class BTB extends BasePredictor with BTBParams{
   val if2_dataRead = VecInit((0 until BtbWays).map(w => VecInit((0 until BtbBanks).map( b => data(w)(b).io.r.resp.data(0)))))
   val if2_edataRead = edata.io.r.resp.data(0)
 
-  // val if2_baseBank = btbAddr.getBank(if2_pc)
-  // val if2_startsAtOddBank = bankInGroup(if2_pc)(0)
   val if2_tag = btbAddr.getTag(if2_pc)
 
   val if2_totalHits = VecInit((0 until BtbBanks).map( b =>
@@ -175,21 +173,16 @@ class BTB extends BasePredictor with BTBParams{
   }
   val u = io.update.bits
 
-  // val max_offset = Cat(0.B, ~(0.U((offsetLen-1).W))).asSInt
-  // val min_offset = Cat(1.B,  (0.U((offsetLen-1).W))).asSInt
-  // val new_offset = (new_target.asSInt - u.pc.asSInt)
   val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
   val new_lower = u.target(lowerBitsSize+instOffsetBits-1, instOffsetBits)
   val update_pc_higher     = u.pc(VAddrBits-1, lowerBitsSize+instOffsetBits)
   val update_target_higher = new_target(VAddrBits-1, lowerBitsSize+instOffsetBits)
   val higher_identical = update_pc_higher === update_target_higher
-  // val new_extended = (new_offset > max_offset || new_offset < min_offset)
   val new_extended = !higher_identical
 
 
   val updateWay = u.bpuMeta.btbWriteWay
   val updateBankIdx = btbAddr.getBank(u.pc)
-  // val updateEBank = updateBankIdx(log2Ceil(BtbBanks)-1) // highest bit of bank idx
   val updateRow = btbAddr.getBankIdx(u.pc)
   val updateType = pdInfoToBTBtype(u.pd)
   val metaWrite = BtbMetaEntry(btbAddr.getTag(u.pc), updateType, u.pd.isRVC)
@@ -216,11 +209,6 @@ class BTB extends BasePredictor with BTBParams{
 
   if (BPUDebug && debug) {
     val debug_verbose = true
-    // XSDebug("isInNextRow: ")
-    // (0 until BtbBanks).foreach(i => {
-    //   XSDebug(false, true.B, "%d ", if1_isInNextRow(i))
-    //   if (i == BtbBanks-1) { XSDebug(false, true.B, "\n") }
-    // })
     val validLatch = RegNext(io.pc.valid)
     XSDebug(io.pc.valid, "read: pc=0x%x, mask=%b\n", if1_packetAlignedPC, if1_mask)
     XSDebug(validLatch, "read_resp: pc=0x%x, readIdx=%d-------------------------------\n",
@@ -233,8 +221,6 @@ class BTB extends BasePredictor with BTBParams{
         }
       }
     }
-    // e.g: baseBank == 5 => (5, 6,..., 15, 0, 1, 2, 3, 4)
-    // val bankIdxInOrder = VecInit((0 until BtbBanks).map(b => (if2_baseBank +& b.U)(log2Up(BtbBanks)-1,0)))
 
     for (i <- 0 until BtbBanks) {
       XSDebug(validLatch && if2_bankHits(i), "resp(%d): bank(%d) hits, tgt=%x, isRVC=%d, type=%d\n",

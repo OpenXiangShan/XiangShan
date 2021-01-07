@@ -143,18 +143,12 @@ class MicroBTB extends BasePredictor
     when (reset_way === (nWays-1).U) { do_reset := false.B }
 
     //uBTB read
-    //tag is bank align
+    //tag is packet aligned
     val packetAlignedPC = packetAligned(io.pc.bits)
-    // val startsAtOddBank = bankInGroup(bankAlignedPC)(0).asBool
-    
-
 
     val read_valid = io.pc.valid
     val read_req_tag = getTag(packetAlignedPC)
-    // val next_tag = getTag(bankAlignedPC) + 1.U
-    // val read_mask = circularShiftLeft(io.inMask, PredictWidth, read_req_basebank)
 
-    
     class ReadRespEntry extends XSBundle
     {
         val is_RVC = Bool()
@@ -164,16 +158,11 @@ class MicroBTB extends BasePredictor
         val is_Br = Bool()
     }
     val read_resp = Wire(Vec(PredictWidth,new ReadRespEntry))
-    //val read_bank_inOrder = VecInit((0 until PredictWidth).map(b => (read_req_basebank + b.U)(log2Up(PredictWidth)-1,0) ))
-    // val isInNextRow = VecInit((0 until PredictWidth).map(_.U < read_req_basebank))
     
     (0 until PredictWidth).map{ b => metas(b).rtag := read_req_tag }
     val read_hit_ohs = (0 until PredictWidth).map{ b => metas(b).hit_ohs }
     val read_hit_vec = VecInit(read_hit_ohs.map{oh => ParallelOR(oh).asBool})
     val read_hit_ways = (0 until PredictWidth).map{ b => metas(b).hit_way }
-    // val read_hit =  ParallelOR(read_hit_vec).asBool
-    // val read_hit_way = PriorityEncoder(ParallelOR(read_hit_ohs.map(_.asUInt)))
-    
 
     (0 until PredictWidth).map(b => datas(b).rOHs := read_hit_ohs(b))
 
@@ -204,13 +193,6 @@ class MicroBTB extends BasePredictor
         way := Mux(all_valid,chunks.reduce(_^_),PriorityEncoder(~valids))
         way
     }
-
-    // val alloc_ways = read_bank_inOrder.map{ b => 
-    //     alloc_way(VecInit(uBTBMeta.map(w => w(b).valid)).asUInt,
-    //               VecInit(uBTBMeta.map(w => w(b).tag)).asUInt,
-    //               Mux(isInNextRow(b).asBool,read_req_tag + 1.U,read_req_tag))
-        
-    // }
 
     val alloc_ways = (0 until PredictWidth).map{ b => 
         Mux(metas(b).allocatable_way.valid, metas(b).allocatable_way.bits, LFSR64()(log2Ceil(nWays)-1,0))}
@@ -249,11 +231,7 @@ class MicroBTB extends BasePredictor
     val jalFirstEncountered = !u.isMisPred && !u.bpuMeta.btbHitJal && (u.pd.brType === BrType.jal)
     val entry_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay //io.update.valid //&& update_is_BR_or_JAL
     val meta_write_valid = io.update.valid && (u.isMisPred || jalFirstEncountered) && !u.isReplay//io.update.valid //&& update_is_BR_or_JAL
-    //write btb target when miss prediction
-    // when(entry_write_valid)
-    // {
-    //     uBTB(update_write_way)(update_bank).offset := update_target_offset
-    // }
+
     for (b <- 0 until PredictWidth) {
         datas(b).wen := do_reset || (entry_write_valid && b.U === update_bank)
         datas(b).wWay := Mux(do_reset, reset_way, update_write_way)
