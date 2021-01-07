@@ -170,18 +170,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
         validCounter + numEnq - numDeq)
     )
   )
-  allowEnqueue := Mux(io.redirect.valid,
-    false.B,
-    Mux(lastLastCycleMisprediction,
-      currentValidCounter <= (size - enqnum).U,
-      // To optimize timing, we don't use numDeq here.
-      // It affects cases when validCount + numEnq - numDeq <= (size - enqnum).U.
-      // For example, there're 10 empty entries with 6 enqueue and 2 dequeue.
-      // However, since dispatch queue size > (numEnq + numDeq),
-      // even if we allow enqueue, they cannot be dispatched immediately.
-      validCounter + numEnq <= (size - enqnum).U
-    )
-  )
+  allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
 
   /**
     * Part 3: set output and input
