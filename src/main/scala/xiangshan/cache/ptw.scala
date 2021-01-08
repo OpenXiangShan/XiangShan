@@ -501,11 +501,11 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     } .otherwise {
       when (sfence.bits.rs2) {
         // specific leaf of addr && all asid
-        tlbv := tlbv & ~UIntToOH(sfence.bits.addr(log2Up(TlbL2EntrySize)-1+offLen, 0+offLen))
-        tlbg := tlbg & ~UIntToOH(sfence.bits.addr(log2Up(TlbL2EntrySize)-1+offLen, 0+offLen))
+        tlbv := tlbv & ~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
+        tlbg := tlbg & ~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
       } .otherwise {
         // specific leaf of addr && specific asid
-        tlbv := tlbv & (~UIntToOH(sfence.bits.addr(log2Up(TlbL2EntrySize)-1+offLen, 0+offLen)) | tlbg)
+        tlbv := tlbv & (~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))| tlbg)
       }
     }
   }
