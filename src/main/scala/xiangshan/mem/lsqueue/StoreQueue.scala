@@ -54,6 +54,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   val writebacked = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // inst has been writebacked to CDB
   val commited = Reg(Vec(StoreQueueSize, Bool())) // inst has been commited by roq
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
+  val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
 
   require(StoreQueueSize > RenameWidth)
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
@@ -118,11 +119,12 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       storeWbData.vaddr := io.storeIn(i).bits.vaddr
       storeWbData.mask := io.storeIn(i).bits.mask
       storeWbData.data := io.storeIn(i).bits.data
-      storeWbData.mmio := io.storeIn(i).bits.mmio
       storeWbData.exception := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
-
+      
       dataModule.io.wbWrite(i, stWbIndex, storeWbData)
       dataModule.io.wb(i).wen := true.B
+
+      mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       XSInfo("store write to sq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x exc %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
@@ -262,8 +264,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // remove retired insts from sq, add retired store to sbuffer
   for (i <- 0 until StorePipelineWidth) {
     val ptr = deqPtrExt(i).value
-    val mmio = dataModule.io.rdata(ptr).mmio
-    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio
+    val ismmio = mmio(ptr)
+    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !ismmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr := dataModule.io.rdata(ptr).paddr
     io.sbuffer(i).bits.data := dataModule.io.rdata(ptr).data
@@ -271,7 +273,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := DontCare
-    io.sbuffer(i).bits.meta.mmio     := mmio
+    io.sbuffer(i).bits.meta.mmio     := false.B
     io.sbuffer(i).bits.meta.mask     := dataModule.io.rdata(ptr).mask
 
     when (io.sbuffer(i).fire()) {

@@ -23,7 +23,6 @@ class LsqEntry extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(16.W) // TODO: opt size
-  val mmio = Bool()
   val fwdMask = Vec(8, Bool())
   val fwdData = Vec(8, UInt(8.W))
 }
