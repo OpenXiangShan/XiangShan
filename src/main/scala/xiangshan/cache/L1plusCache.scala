@@ -571,7 +571,7 @@ class L1plusCachePipe extends L1plusCacheModule
 class L1plusCacheMissReq extends L1plusCacheBundle
 {
   // transaction id
-  val id     = UInt(missQueueEntryIdWidth.W)
+  val id     = UInt(idWidth.W)
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
   val way_en = UInt(nWays.W)
