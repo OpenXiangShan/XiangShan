@@ -80,13 +80,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
 
   decode.io.in <> io.frontend.cfVec
-  decode.io.toBrq <> brq.io.enqReqs
-  decode.io.brTags <> brq.io.brTags
+  decode.io.enqBrq <> brq.io.enq
 
   brq.io.redirect.valid <> redirectValid
   brq.io.redirect.bits <> redirect
   brq.io.bcommit <> roq.io.bcommit
-  brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirectWb <> io.fromIntBlock.exuRedirect
 
   // pipeline between decode and dispatch
