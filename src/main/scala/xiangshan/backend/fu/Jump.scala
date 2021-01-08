@@ -25,7 +25,7 @@ class Jump extends FunctionUnit with HasRedirectOut {
   )
 
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
-  val valid = io.in.valid && !redirectHit
+  val valid = io.in.valid
 
   val isRVC = uop.cf.brUpdate.pd.isRVC
   val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)

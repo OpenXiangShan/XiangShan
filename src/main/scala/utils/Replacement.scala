@@ -6,6 +6,7 @@ package utils
 import chisel3._
 import chisel3.util._
 import chisel3.util.random.LFSR
+import xiangshan.{HasXSLog, XSCoreParameters}
 
 abstract class ReplacementPolicy {
   def way: UInt
@@ -206,9 +207,10 @@ class SbufferLRU(n_ways: Int) {
   // get the way which is valid and has the least 1
   def get_replace_way(state: UInt, sbufferState:Seq[Bool]): UInt = {
     val moreRecentVec = state.asTypeOf(Vec(n_ways, UInt(n_ways.W)))
-    val count = Wire(Vec(n_ways, UInt(log2Up(n_ways).W)))
+    val count = Wire(Vec(n_ways, UInt(log2Up(n_ways+1).W)))
     for(i <- 0 until n_ways){
-      count(i) := Mux(sbufferState(i), PopCount(moreRecentVec(i)), ((1<<n_ways)-1).U)
+      count(i) := Mux(sbufferState(i), PopCount(moreRecentVec(i)), n_ways.U)
+      //XSDebug("count %d\n",count(i))(" ")
     }
     count.zip((0 until n_ways).map(_.U))
     get_min_value(count.zip((0 until n_ways).map(_.U)))._2

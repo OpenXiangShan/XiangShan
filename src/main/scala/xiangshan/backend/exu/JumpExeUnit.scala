@@ -5,14 +5,13 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.exu.Exu.jumpExeUnitCfg
-import xiangshan.backend.fu.fpu.FPUOpType.FU_I2F
+import xiangshan.backend.fu.fpu.IntToFP
 import xiangshan.backend.fu.{CSR, Fence, FenceToSbuffer, FunctionUnit, Jump}
-import xiangshan.backend.fu.fpu.{Fflags, IntToFloatSingleCycle, boxF32ToF64}
 
 class JumpExeUnit extends Exu(jumpExeUnitCfg)
 {
   val csrio = IO(new Bundle {
-    val fflags = Input(new Fflags)
+    val fflags = Flipped(ValidIO(UInt(5.W)))
     val dirty_fs = Input(Bool())
     val frm = Output(UInt(3.W))
     val exception = Flipped(ValidIO(new MicroOp))
@@ -39,7 +38,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     case f: Fence => f
   }.get
   val i2f = supportedFunctionUnits.collectFirst {
-    case i: IntToFloatSingleCycle => i
+    case i: IntToFP => i
   }.get
 
   csr.csrio.perf <> DontCare
@@ -65,17 +64,6 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   i2f.rm := Mux(instr_rm =/= 7.U, instr_rm, csr.csrio.fpu.frm)
 
   val isDouble = !uop.ctrl.isRVF
-
-  when(i2f.io.in.valid){
-    when(uop.ctrl.fuOpType.head(4)===s"b$FU_I2F".U){
-      io.toFp.bits.data := Mux(isDouble, i2f.io.out.bits.data, boxF32ToF64(i2f.io.out.bits.data))
-      io.toFp.bits.fflags := i2f.fflags
-    }.otherwise({
-      // a mov.(s/d).x instruction
-      io.toFp.bits.data := Mux(isDouble, io.fromInt.bits.src1, boxF32ToF64(io.fromInt.bits.src1))
-      io.toFp.bits.fflags := 0.U.asTypeOf(new Fflags)
-    })
-  }
 
   when(csr.io.out.valid){
     io.toInt.bits.redirectValid := csr.csrio.redirectOut.valid

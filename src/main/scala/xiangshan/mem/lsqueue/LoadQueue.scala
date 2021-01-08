@@ -2,14 +2,14 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.tile.HasFPUParameters
 import utils._
 import xiangshan._
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, TlbRequestIO, MemoryOpConstants}
+import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants, TlbRequestIO}
 import xiangshan.backend.LSUOpType
 import xiangshan.mem._
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.fu.fpu.boxF32ToF64
 
 
 class LqPtr extends CircularQueuePtr(LqPtr.LoadQueueSize) { }
@@ -23,6 +23,28 @@ object LqPtr extends HasXSParameter {
   }
 }
 
+trait HasLoadHelper { this: XSModule =>
+  def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
+    val fpWen = uop.ctrl.fpWen
+    LookupTree(uop.ctrl.fuOpType, List(
+      LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
+      LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
+      LSUOpType.lw   -> Mux(fpWen, rdata, SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.ld   -> Mux(fpWen, rdata, SignExt(rdata(63, 0), XLEN)),
+      LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
+      LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+    ))
+  }
+
+  def fpRdataHelper(uop: MicroOp, rdata: UInt): UInt = {
+    LookupTree(uop.ctrl.fuOpType, List(
+      LSUOpType.lw   -> recode(rdata(31, 0), S),
+      LSUOpType.ld   -> recode(rdata(63, 0), D)
+    ))
+  }
+}
+
 class LqEnqIO extends XSBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
@@ -32,13 +54,17 @@ class LqEnqIO extends XSBundle {
 }
 
 // Load Queue
-class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class LoadQueue extends XSModule
+  with HasDCacheParameters
+  with HasCircularQueuePtrHelper
+  with HasLoadHelper
+{
   val io = IO(new Bundle() {
     val enq = new LqEnqIO
     val brqRedirect = Input(Valid(new Redirect))
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback load
+    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
@@ -274,7 +300,8 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   (0 until StorePipelineWidth).map(i => {
     // data select
     val rdata = dataModule.io.rdata(loadWbSel(i)).data
-    val func = uop(loadWbSel(i)).ctrl.fuOpType
+    val seluop = uop(loadWbSel(i))
+    val func = seluop.ctrl.fuOpType
     val raddr = dataModule.io.rdata(loadWbSel(i)).paddr
     val rdataSel = LookupTree(raddr(2, 0), List(
       "b000".U -> rdata(63, 0),
@@ -286,17 +313,14 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
       "b110".U -> rdata(63, 48),
       "b111".U -> rdata(63, 56)
     ))
-    val rdataPartialLoad = LookupTree(func, List(
-        LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
-        LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
-        LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
-        LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
-        LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-        LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-        LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
-    ))
-    io.ldout(i).bits.uop := uop(loadWbSel(i))
+    val rdataPartialLoad = rdataHelper(seluop, rdataSel)
+
+    val validWb = loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
+
+    // writeback missed int/fp load
+    // 
+    // Int load writeback will finish (if not blocked) in one cycle
+    io.ldout(i).bits.uop := seluop
     io.ldout(i).bits.uop.cf.exceptionVec := dataModule.io.rdata(loadWbSel(i)).exception.asBools
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)
     io.ldout(i).bits.data := rdataPartialLoad
@@ -305,10 +329,14 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := dataModule.io.rdata(loadWbSel(i)).mmio
     io.ldout(i).bits.fflags := DontCare
-    io.ldout(i).valid := loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
-    when(io.ldout(i).fire()) {
+    io.ldout(i).valid := validWb
+    
+    when(io.ldout(i).fire()){
       writebacked(loadWbSel(i)) := true.B
-      XSInfo("load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
+    }
+
+    when(io.ldout(i).fire()) {
+      XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
         io.ldout(i).bits.uop.roqIdx.asUInt,
         io.ldout(i).bits.uop.lqIdx.asUInt,
         io.ldout(i).bits.uop.cf.pc,
@@ -317,6 +345,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
         dataModule.io.rdata(loadWbSel(i)).mmio
       )
     }
+
   })
 
   /**

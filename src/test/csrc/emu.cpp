@@ -228,21 +228,26 @@ inline void Emulator::reset_ncycles(size_t cycles) {
 
 inline void Emulator::single_cycle() {
   dut_ptr->clock = 0;
+  dut_ptr->eval();
+
 #ifdef WITH_DRAMSIM3
   axi_channel axi;
   axi_copy_from_dut_ptr(dut_ptr, axi);
   axi.aw.addr -= 0x80000000UL;
   axi.ar.addr -= 0x80000000UL;
-  dramsim3_helper(axi);
-  axi.aw.addr += 0x80000000UL;
-  axi.ar.addr += 0x80000000UL;
-  axi_set_dut_ptr(dut_ptr, axi);
+  dramsim3_helper_rising(axi);
 #endif
-
-  dut_ptr->eval();
 
   dut_ptr->clock = 1;
   dut_ptr->eval();
+
+#ifdef WITH_DRAMSIM3
+  axi_copy_from_dut_ptr(dut_ptr, axi);
+  axi.aw.addr -= 0x80000000UL;
+  axi.ar.addr -= 0x80000000UL;
+  dramsim3_helper_falling(axi);
+  axi_set_dut_ptr(dut_ptr, axi);
+#endif
 
 #if VM_TRACE == 1
   if (enable_waveform) {
@@ -265,16 +270,6 @@ inline void Emulator::single_cycle() {
 
   cycles ++;
 }
-
-#if VM_COVERAGE == 1
-uint64_t *max_cycle_ptr = NULL;
-// when interrupted, we set max_cycle to zero
-// so that the emulator will stop gracefully
-void sig_handler(int signo) {
-  if (signo == SIGINT)
-    *max_cycle_ptr = 0;
-}
-#endif
 
 uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   extern void poll_event(void);
@@ -299,10 +294,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
   // we dump coverage into files at the end
   // since we are not sure when an emu will stop
   // we distinguish multiple dat files by emu start time
-  time_t start_time = time(NULL);
-  max_cycle_ptr = &max_cycle;
-  if (signal(SIGINT, sig_handler) == SIG_ERR)
-    printf("\ncan't catch SIGINT\n");
+  time_t coverage_start_time = time(NULL);
 #endif
 
   while (!Verilated::gotFinish() && trapCode == STATE_RUNNING) {
@@ -310,16 +302,21 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
       trapCode = STATE_LIMIT_EXCEEDED;
       break;
     }
+    if (assert_count > 0) {
+      difftest_display(dut_ptr->io_difftest_priviledgeMode);
+      eprintf("The simulation stopped. There might be some assertion failed.\n");
+      trapCode = STATE_ABORT;
+      break;
+    }
+    if (signal_num != 0) {
+      trapCode = STATE_SIG;
+      break;
+    }
 
     single_cycle();
     max_cycle --;
 
     if (dut_ptr->io_trap_valid) trapCode = dut_ptr->io_trap_code;
-    if (assert_count > 0) {
-      difftest_display(dut_ptr->io_difftest_priviledgeMode);
-      eprintf("The simulation stopped. There might be some assertion failed.\n");
-      trapCode = STATE_ABORT;
-    }
     if (trapCode != STATE_RUNNING) break;
 
     if (lastcommit - max_cycle > stuck_limit && hascommit) {
@@ -412,7 +409,7 @@ uint64_t Emulator::execute(uint64_t max_cycle, uint64_t max_instr) {
 #endif
 
 #if VM_COVERAGE == 1
-  save_coverage(start_time);
+  save_coverage(coverage_start_time);
 #endif
 
   display_trapinfo();
@@ -478,6 +475,9 @@ void Emulator::display_trapinfo() {
       break;
     case STATE_LIMIT_EXCEEDED:
       eprintf(ANSI_COLOR_YELLOW "EXCEEDING CYCLE/INSTR LIMIT at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
+      break;
+    case STATE_SIG:
+      eprintf(ANSI_COLOR_YELLOW "SOME SIGNAL STOPS THE PROGRAM at pc = 0x%" PRIx64 "\n" ANSI_COLOR_RESET, pc);
       break;
     default:
       eprintf(ANSI_COLOR_RED "Unknown trap code: %d\n", trapCode);
