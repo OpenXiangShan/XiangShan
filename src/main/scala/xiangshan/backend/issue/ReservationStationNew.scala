@@ -128,9 +128,11 @@ class ReservationStationCtrl
   // redirect
   val redVec      = io.data.redVec
   val redVecPtr   = widthMap(i => io.data.redVec(idxQueue(i)))
-  val fbMatchVec = 0.U(iqSize.W)
+  val fbMatchVec = Wire(UInt(iqSize.W))
   if (feedback) {
-    val fbMatchVec = widthMap(i => io.data.feedback(i) && (stateQueue(i) === s_wait || stateQueue(i)===s_valid))
+    fbMatchVec := widthMap(i => io.data.feedback(i) && (stateQueue(i) === s_wait || stateQueue(i)===s_valid)).asUInt
+  } else {
+    fbMatchVec := 0.U
   }
   val fbHit       = io.data.feedback(IssQueSize)
 
