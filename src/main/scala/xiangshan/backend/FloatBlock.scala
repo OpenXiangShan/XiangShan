@@ -92,7 +92,6 @@ class FloatBlock
     rsData.io.srcRegValue(0) := fpRf.io.readPorts(readPortIndex(i)).data
     rsData.io.srcRegValue(1) := fpRf.io.readPorts(readPortIndex(i) + 1.U).data
     rsData.io.srcRegValue(2) := fpRf.io.readPorts(readPortIndex(i) + 2.U).data
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

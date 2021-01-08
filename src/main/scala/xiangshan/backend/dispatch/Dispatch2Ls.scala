@@ -18,7 +18,6 @@ class Dispatch2Ls extends XSModule {
     val fpRegRdy = Vec(exuParameters.StuCnt, Input(Bool()))
     val numExist = Input(Vec(exuParameters.LsExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
   })
 
   /**
@@ -118,27 +117,27 @@ class Dispatch2Ls extends XSModule {
   /**
     * Part 5: the second stage of dispatch 2 (send data to reservation station)
     */
-  val uopReg = Reg(Vec(exuParameters.LsExuCnt, new MicroOp))
-  val dataValidRegDebug = Reg(Vec(exuParameters.LsExuCnt, Bool()))
-  for (i <- 0 until exuParameters.LsExuCnt) {
-    uopReg(i) := io.enqIQCtrl(i).bits
-    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
-
-    io.enqIQData(i) := DontCare
-    // assert(uopReg(i).ctrl.src1Type =/= SrcType.pc)
-    io.enqIQData(i).src1 := io.readIntRf(readPort(i)).data
-    if (i >= exuParameters.LduCnt) {
-      io.enqIQData(i).src2 := Mux(
-        uopReg(i).ctrl.src2Type === SrcType.imm,
-        uopReg(i).ctrl.imm,
-        Mux(uopReg(i).ctrl.src2Type === SrcType.fp,
-          io.readFpRf(i - exuParameters.LduCnt).data,
-          io.readIntRf(readPort(i) + 1).data))
-    }
-
-    XSDebug(dataValidRegDebug(i),
-      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-        p"(${readPort(i)  }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-        p"(${readPort(i)+1}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
-  }
+//  val uopReg = Reg(Vec(exuParameters.LsExuCnt, new MicroOp))
+//  val dataValidRegDebug = Reg(Vec(exuParameters.LsExuCnt, Bool()))
+//  for (i <- 0 until exuParameters.LsExuCnt) {
+//    uopReg(i) := io.enqIQCtrl(i).bits
+//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
+//
+//    io.enqIQData(i) := DontCare
+//    // assert(uopReg(i).ctrl.src1Type =/= SrcType.pc)
+//    io.enqIQData(i).src1 := io.readIntRf(readPort(i)).data
+//    if (i >= exuParameters.LduCnt) {
+//      io.enqIQData(i).src2 := Mux(
+//        uopReg(i).ctrl.src2Type === SrcType.imm,
+//        uopReg(i).ctrl.imm,
+//        Mux(uopReg(i).ctrl.src2Type === SrcType.fp,
+//          io.readFpRf(i - exuParameters.LduCnt).data,
+//          io.readIntRf(readPort(i) + 1).data))
+//    }
+//
+//    XSDebug(dataValidRegDebug(i),
+//      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
+//        p"(${readPort(i)  }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+//        p"(${readPort(i)+1}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
+//  }
 }

@@ -27,11 +27,11 @@ class MemBlockToDcacheIO extends XSBundle {
 }
 
 class IntBlockToMemBlockIO extends XSBundle {
-  val readIntRf = Vec(NRMemReadPorts, new RfReadPort)
+  val readIntRf = Vec(NRMemReadPorts, new RfReadPort(XLEN))
 }
 
 class FpBlockToMemBlockIO extends XSBundle {
-  val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort)
+  val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort(XLEN + 1))
 }
 
 class MemBlock
@@ -130,7 +130,6 @@ class MemBlock
     if (i >= exuParameters.LduCnt) {
       rsData.io.srcRegValue(1) := Mux(src2IsFp, io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data, io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data)
     }
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

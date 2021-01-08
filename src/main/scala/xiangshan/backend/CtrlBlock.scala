@@ -16,7 +16,6 @@ import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
-  val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(NRIntReadPorts).W)))
   val redirect = ValidIO(new Redirect)
@@ -24,7 +23,6 @@ class CtrlToIntBlockIO extends XSBundle {
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
-  val enqIqData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
   val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
   val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil(NRFpReadPorts - exuParameters.StuCnt).W)))
   val redirect = ValidIO(new Redirect)
@@ -32,7 +30,6 @@ class CtrlToFpBlockIO extends XSBundle {
 
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
-  val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
   val enqLsq = Flipped(new LsqEnqIO)
   val redirect = ValidIO(new Redirect)
 }
@@ -115,7 +112,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
   dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
-  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
+//  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
   val flush = redirectValid && RedirectLevel.isUnconditional(redirect.level)

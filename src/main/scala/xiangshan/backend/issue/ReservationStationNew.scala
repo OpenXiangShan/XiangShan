@@ -329,9 +329,6 @@ class ReservationStationData
     // flush
     val redirect = Flipped(ValidIO(new Redirect))
 
-    // enq Data at next cycle (regfile has 1 cycle latency)
-    val enqData = Input(new ExuInput)
-
     // send to exu
     val deq = DecoupledIO(new ExuInput)
 
@@ -388,19 +385,11 @@ class ReservationStationData
         // src2: imm or reg
         data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
 
-        XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg}\n")
-        XSDebug(p"newSrc1: ${Hexadecimal(io.srcRegValue(0))} newSrc2: ${Hexadecimal(io.srcRegValue(1))}\n")
-        XSDebug(p"src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)}\n")
-
       case Exu.jumpExeUnitCfg =>
         // src1: pc or reg
         data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
         // src2: imm
         data(enqPtrReg)(1) := uop(enqPtrReg).ctrl.imm
-
-        XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg}\n")
-        XSDebug(p"newSrc1: ${Hexadecimal(io.srcRegValue(0))} newSrc2: ${Hexadecimal(io.srcRegValue(1))}\n")
-        XSDebug(p"src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)}\n")
 
       case Exu.mulDivExeUnitCfg =>
         // src1: reg
@@ -408,28 +397,26 @@ class ReservationStationData
         // src2: reg
         data(enqPtrReg)(1) := io.srcRegValue(1)
 
-        XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg}\n")
-        XSDebug(p"newSrc1: ${Hexadecimal(io.srcRegValue(0))} newSrc2: ${Hexadecimal(io.srcRegValue(1))}\n")
-        XSDebug(p"src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)}\n")
-
       case Exu.fmacExeUnitCfg =>
         (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
-        XSDebug(p"New-src: src1: ${Hexadecimal(io.srcRegValue(0))} src2: ${Hexadecimal(io.srcRegValue(1))} src3: ${Hexadecimal(io.srcRegValue(2))}\n")
-        XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
-          p" src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src3)}\n")
 
       case Exu.fmiscExeUnitCfg =>
         (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+
       case Exu.ldExeUnitCfg =>
         data(enqPtrReg)(0) := io.srcRegValue(0)
         data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
+
       case Exu.stExeUnitCfg =>
         data(enqPtrReg)(0) := io.srcRegValue(0)
         data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
+
       // default
       case _ =>
         XSDebug(false.B, "Unhandled exu-config")
     }
+    XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
+    XSDebug(p"[srcRegValue] src1: ${Hexadecimal(io.srcRegValue(0))} src2: ${Hexadecimal(io.srcRegValue(1))} src3: ${Hexadecimal(io.srcRegValue(2))}\n")
   }
 
   def wbHit(uop: MicroOp, src: UInt, srctype: UInt): Bool = {

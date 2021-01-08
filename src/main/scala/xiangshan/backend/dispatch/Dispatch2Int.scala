@@ -14,7 +14,6 @@ class Dispatch2Int extends XSModule {
     val regRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
     val numExist = Input(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
     val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(NRIntReadPorts).W)))
   })
 
@@ -111,26 +110,26 @@ class Dispatch2Int extends XSModule {
   }
 
   /**
-    * Part 5: the second stage of dispatch 2 (send data to reservation station)
+    * Part 5: send read port index of register file to reservation station
     */
-  val readPortIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
-  val uopReg = Reg(Vec(exuParameters.IntExuCnt, new MicroOp))
-  val dataValidRegDebug = Reg(Vec(exuParameters.IntExuCnt, Bool()))
-  for (i <- 0 until exuParameters.IntExuCnt) {
-    readPortIndexReg(i) := readPortIndex(i)
-    io.readPortIndex(i) := readPortIndex(i) // FIXME
-    uopReg(i) := io.enqIQCtrl(i).bits
-    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
-
-    io.enqIQData(i) := DontCare
-    io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.src1Type === SrcType.pc,
-      SignExt(uopReg(i).cf.pc, XLEN), io.readRf(readPortIndexReg(i)).data)
-    io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.src2Type === SrcType.imm,
-      uopReg(i).ctrl.imm, io.readRf(readPortIndexReg(i) + 1.U).data)
-
-    XSDebug(dataValidRegDebug(i),
-      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
-        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
-  }
+  io.readPortIndex := readPortIndex
+//  val readPortIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
+//  val uopReg = Reg(Vec(exuParameters.IntExuCnt, new MicroOp))
+//  val dataValidRegDebug = Reg(Vec(exuParameters.IntExuCnt, Bool()))
+//  for (i <- 0 until exuParameters.IntExuCnt) {
+//    readPortIndexReg(i) := readPortIndex(i)
+//    uopReg(i) := io.enqIQCtrl(i).bits
+//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
+//
+//    io.enqIQData(i) := DontCare
+//    io.enqIQData(i).src1 := Mux(uopReg(i).ctrl.src1Type === SrcType.pc,
+//      SignExt(uopReg(i).cf.pc, XLEN), io.readRf(readPortIndexReg(i)).data)
+//    io.enqIQData(i).src2 := Mux(uopReg(i).ctrl.src2Type === SrcType.imm,
+//      uopReg(i).ctrl.imm, io.readRf(readPortIndexReg(i) + 1.U).data)
+//
+//    XSDebug(dataValidRegDebug(i),
+//      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
+//        p"(${readPortIndexReg(i)    }, ${uopReg(i).psrc1}, ${Hexadecimal(io.enqIQData(i).src1)}), " +
+//        p"(${readPortIndexReg(i)+1.U}, ${uopReg(i).psrc2}, ${Hexadecimal(io.enqIQData(i).src2)})\n")
+//  }
 }
