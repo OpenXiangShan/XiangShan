@@ -35,7 +35,7 @@ class LsPipelineBundle extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val func = UInt(6.W) //fixme???
   val mask = UInt(8.W)
-  val data = UInt(XLEN.W)
+  val data = UInt((XLEN+1).W)
   val uop = new MicroOp
 
   val miss = Bool()
