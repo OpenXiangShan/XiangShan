@@ -165,7 +165,7 @@ class ArrayMultiplier(len: Int, doReg: Seq[Int]) extends AbstractMultiplier(len)
   for(i <- 1 to latency){
     ctrlVec = ctrlVec :+ PipelineReg(i)(ctrlVec(i-1))
   }
-  val xlen = io.out.bits.data.getWidth
+  val xlen = len - 1
   val res = Mux(ctrlVec.last.isHi, result(2*xlen-1, xlen), result(xlen-1,0))
 
   io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
