@@ -74,7 +74,7 @@ class RAS extends BasePredictor
             val write_entry = Output(rasEntry())
             val alloc_new = Output(Bool())
             val sp = Output(UInt(log2Up(rasSize).W))
-            //val topRegister = Output(rasEntry())
+            val topRegister = Output(rasEntry())
         })
         @chiselName
         class Stack(val size: Int) extends XSModule {
@@ -121,6 +121,7 @@ class RAS extends BasePredictor
         debugIO.write_entry := write_entry
         debugIO.alloc_new := alloc_new
         debugIO.sp := sp
+        debugIO.topRegister := topRegister
 
         val is_empty = sp === RasSize.U
         val is_full  = sp === (RasSize - 1).U
@@ -177,7 +178,7 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux(!io.isRVC && !io.isLastHalfRVI && HasCExtension.B, 2.U, 4.U)
+    val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | io.isLastHalfRVI) && HasCExtension.B, 2.U, 4.U)
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
@@ -244,9 +245,9 @@ class RAS extends BasePredictor
             XSDebug(false,true.B,"\n")
         }
 
-        XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",spec_new_addr,spec_debug.write_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
+        XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",spec_new_addr,spec_debug.write_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt,spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
         XSDebug(spec_pop, "(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-        XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",commit_new_addr,commit_debug.write_entry.ctr,commit_debug.alloc_new,commit_debug.sp.asUInt)
+        XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",commit_new_addr,commit_debug.write_entry.ctr,commit_debug.alloc_new,commit_debug.sp.asUInt,commit_debug.topRegister.retAddr,commit_debug.topRegister.ctr)
         XSDebug(commit_pop, "(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
         XSDebug("copyValid:%d copyNext:%d \n",copy_valid,copy_next)
     }
