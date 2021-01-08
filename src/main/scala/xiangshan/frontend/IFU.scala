@@ -115,7 +115,8 @@ class IFU extends XSModule with HasIFUConst
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
-  val if1_fire = if1_valid && (if2_allReady || if2_flush)
+  val if1_fire = if1_valid &&  (if2_allReady || if2_flush)
+  val if1_can_go = if1_fire && icache.io.tlb.resp.valid                
 
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
@@ -128,11 +129,11 @@ class IFU extends XSModule with HasIFUConst
   val if2_allValid = if2_valid && icache.io.tlb.resp.valid
   val if3_ready = WireInit(false.B)
   val if2_fire = if2_allValid && if3_ready
-  val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_fire)
+  val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_can_go)
   val if2_snpc = snpc(if2_pc)
-  val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_fire)
-  if2_ready := if3_ready && icache.io.tlb.resp.valid || !if2_valid
-  when (if1_fire)       { if2_valid := true.B }
+  val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_can_go)
+  if2_ready := if3_ready || !if2_valid
+  when (if1_can_go)       { if2_valid := true.B }
   .elsewhen (if2_flush) { if2_valid := false.B }
   .elsewhen (if2_fire)  { if2_valid := false.B }
 
@@ -404,7 +405,7 @@ class IFU extends XSModule with HasIFUConst
   if1_npc := npcGen()
 
 
-  icache.io.req.valid := if1_valid && (if2_ready || if2_flush)
+  icache.io.req.valid := if1_can_go
   icache.io.resp.ready := if4_ready
   icache.io.req.bits.addr := if1_npc
   icache.io.req.bits.mask := mask(if1_npc)
@@ -421,7 +422,7 @@ class IFU extends XSModule with HasIFUConst
   bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
   bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
-  bpu.io.inFire(0) := if1_fire
+  bpu.io.inFire(0) := if1_can_go
   bpu.io.inFire(1) := if2_fire
   bpu.io.inFire(2) := if3_fire
   bpu.io.inFire(3) := if4_fire
@@ -481,7 +482,7 @@ class IFU extends XSModule with HasIFUConst
     XSDebug(icache.io.flush(1).asBool, "Flush icache stage3...\n")
     XSDebug(io.redirect.valid, p"Redirect from backend! target=${Hexadecimal(io.redirect.bits)}\n")
 
-    XSDebug("[IF1] v=%d     fire=%d            flush=%d pc=%x mask=%b\n", if1_valid, if1_fire, if1_flush, if1_npc, mask(if1_npc))
+    XSDebug("[IF1] v=%d     fire=%d  cango=%d          flush=%d pc=%x mask=%b\n", if1_valid, if1_fire,if1_can_go, if1_flush, if1_npc, mask(if1_npc))
     XSDebug("[IF2] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x snpc=%x\n", if2_valid, if2_ready, if2_fire, if2_redirect, if2_flush, if2_pc, if2_snpc)
     XSDebug("[IF3] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if3_valid, if3_ready, if3_fire, if3_redirect, if3_flush, if3_pc, crossPageIPF, if3_bp.hasNotTakenBrs)
     XSDebug("[IF4] v=%d r=%d fire=%d redirect=%d flush=%d pc=%x crossPageIPF=%d sawNTBrs=%d\n", if4_valid, if4_ready, if4_fire, if4_redirect, if4_flush, if4_pc, if4_crossPageIPF, if4_bp.hasNotTakenBrs)
