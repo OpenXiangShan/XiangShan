@@ -52,6 +52,9 @@ class IcacheMissReq extends ICacheBundle
       this.waymask := missWaymask
       this.clientID := source
     }
+    override def toPrintable: Printable = {
+      p"addr=0x${Hexadecimal(addr)} setIdx=0x${Hexadecimal(setIdx)} waymask=${Binary(waymask)} clientID=${Binary(clientID)}"
+    }
 }
 
 class IcacheMissResp extends ICacheBundle

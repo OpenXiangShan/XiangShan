@@ -272,12 +272,20 @@ class L1plusCacheReq extends L1plusCacheBundle
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
   val id   = UInt(idWidth.W)
+
+  override def toPrintable: Printable = {
+    p"cmd=${Binary(cmd)} addr=0x${Hexadecimal(addr)} id=${Binary(id)}"
+  }
 }
 
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
   val id   = UInt(idWidth.W)
+
+  override def toPrintable: Printable = {
+    p"id=${Binary(id)} data=${Hexadecimal(data)}"
+  }
 }
 
 class L1plusCacheIO extends L1plusCacheBundle
@@ -286,6 +294,11 @@ class L1plusCacheIO extends L1plusCacheBundle
   val resp = Flipped(DecoupledIO(new L1plusCacheResp))
   val flush = Output(Bool())
   val empty = Input(Bool())
+
+  override def toPrintable: Printable = {
+    p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
+      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
+  }
 }
 
 class L1plusCache()(implicit p: Parameters) extends LazyModule with HasL1plusCacheParameters {

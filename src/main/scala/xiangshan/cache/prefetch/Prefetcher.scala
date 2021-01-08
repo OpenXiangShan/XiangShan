@@ -16,6 +16,10 @@ abstract class PrefetchBundle extends XSBundle with HasPrefetchParameters
 class PrefetchReq extends PrefetchBundle {
   val addr = UInt(PAddrBits.W)
   val write = Bool()
+
+  override def toPrintable: Printable = {
+    p"addr=0x${Hexadecimal(addr)} w=${write}"
+  }
 }
 
 class PrefetchResp extends PrefetchBundle {
@@ -26,6 +30,10 @@ class PrefetchTrain extends PrefetchBundle {
   val addr = UInt(PAddrBits.W)
   val write = Bool()
   val miss = Bool() // TODO: delete this
+
+  override def toPrintable: Printable = {
+    p"addr=0x${Hexadecimal(addr)} w=${write} miss=${miss}"
+  }
 }
 
 class PrefetchIO extends PrefetchBundle {

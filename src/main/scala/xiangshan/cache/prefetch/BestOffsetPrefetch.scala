@@ -68,6 +68,7 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
     val w = Flipped(ValidIO(UInt(PAddrBits.W)))
     val r = Flipped(new TestOffsetBundle(p))
   })
+  def rrIdxBits = p.rrIdxBits
   // RR table is direct mapped, accessed through a hash function, each entry holding a partial tag.
   //        +----------+---------------+---------------+----------------------+
   // paddr: |  ......  |  8-bit hash2  |  8-bit hash1  |  6-bit cache offset  |
@@ -75,5 +76,7 @@ class RecentRequestTable(p: BOPParameters) extends PrefetchModule {
   //        +-------+------------------+---------------+----------------------+
   //    or: |  ...  |    12-bit tag    |  8-bit hash1  |  6-bit cache offset  |
   //        +-------+------------------+---------------+----------------------+
-
+  def lineAddr(addr: UInt) = addr(PAddrBits - 1, log2Up(p.blockBytes))
+  def hash1(addr: UInt) = lineAddr(addr)(rrIdxBits - 1, 0)
+  def hash2(addr: UInt) = lineAddr(addr)(2 * rrIdxBits - 1, rrIdxBits)
 }

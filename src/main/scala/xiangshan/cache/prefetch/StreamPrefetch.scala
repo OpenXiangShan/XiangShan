@@ -24,6 +24,9 @@ class StreamPrefetchReq(p: StreamPrefetchParameters) extends PrefetchReq {
   def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
   def idx = id(p.idxWidth - 1, 0)
 
+  override def toPrintable: Printable = {
+    p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
+  }
   override def cloneType: this.type = (new StreamPrefetchReq(p)).asInstanceOf[this.type]
 }
 
@@ -33,6 +36,9 @@ class StreamPrefetchResp(p: StreamPrefetchParameters) extends PrefetchResp {
   def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
   def idx = id(p.idxWidth - 1, 0)
 
+  override def toPrintable: Printable = {
+    p"id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
+  }
   override def cloneType: this.type = (new StreamPrefetchResp(p)).asInstanceOf[this.type]
 }
 
@@ -41,22 +47,32 @@ class StreamPrefetchIO(p: StreamPrefetchParameters) extends PrefetchBundle {
   val req = DecoupledIO(new StreamPrefetchReq(p))
   val resp = Flipped(DecoupledIO(new StreamPrefetchResp(p)))
 
+  override def toPrintable: Printable = {
+    p"train: v=${train.valid} ${train.bits} " +
+      p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
+      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
+  }
   override def cloneType: this.type = (new StreamPrefetchIO(p)).asInstanceOf[this.type]
 }
 
 class StreamBufferUpdate(p: StreamPrefetchParameters) extends PrefetchBundle {
   val hitIdx = UInt(log2Up(p.streamSize).W)
 
+  override def toPrintable: Printable = { p"hitIdx=${hitIdx}" }
   override def cloneType: this.type = (new StreamBufferUpdate(p)).asInstanceOf[this.type]
 }
 
 class StreamBufferAlloc(p: StreamPrefetchParameters) extends StreamPrefetchReq(p) {
+  override def toPrintable: Printable = {
+    p"addr=0x${Hexadecimal(addr)} w=${write} id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
+  }
   override def cloneType: this.type = (new StreamBufferAlloc(p)).asInstanceOf[this.type]
 }
 
 
 class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val io = IO(new Bundle {
+    val streamBufId = Input(UInt(log2Up(streamCnt).W))
     val addrs = Vec(p.streamSize, ValidIO(UInt(PAddrBits.W)))
     val update = Flipped(ValidIO(new StreamBufferUpdate(p)))
     val alloc = Flipped(ValidIO(new StreamBufferAlloc(p)))
@@ -184,6 +200,23 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     io.addrs(i).valid := baseReq.valid && (valid(i) || state(i) =/= s_idle)
     io.addrs(i).bits := getBlockAddr(buf(i).addr)
   }
+
+  // debug info
+  XSDebug(p"StreamBuf ${io.streamBufId} io.req:    v=${io.req.valid} r=${io.req.ready} ${io.req.bits}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} io.resp:   v=${io.resp.valid} r=${io.resp.ready} ${io.resp.bits}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} io.update: v=${io.update.valid} ${io.update.bits}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} io.alloc:  v=${io.alloc.valid} ${io.alloc.bits}\n")
+  for (i <- 0 until streamSize) {
+    XSDebug(p"StreamBuf ${io.streamBufId} [${i.U}] io.addrs: ${io.addrs(i).valid} 0x${Hexadecimal(io.addrs(i).bits)} " +
+      p"buf: ${buf(i)} valid: ${valid(i)} state: ${state(i)} isPfting: ${isPrefetching(i)} " +
+      p"deqLater: ${deqLater(i)} deqValid: ${deqValid(i)}\n")
+  }
+  XSDebug(p"StreamBuf ${io.streamBufId} head: ${head} tail: ${tail} full: ${full} empty: ${empty} nextHead: ${nextHead}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} baseReq: v=${baseReq.valid} ${baseReq.bits} nextReq: ${nextReq}\n")
+  XSDebug(needRealloc, p"StreamBuf ${io.streamBufId} needRealloc: ${needRealloc} reallocReq: ${reallocReq}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} prefetchPrior: ")
+  (0 until streamSize).foreach(i => XSDebug(false, true.B, p"${prefetchPrior(i)} "))
+  XSDebug(false, true.B, "\n")
 }
 
 class CompareBundle(width: Int) extends PrefetchBundle {
@@ -220,6 +253,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
 
   // assign default value
   for (i <- 0 until streamCnt) {
+    streamBufs(i).io.streamBufId := i.U
     streamBufs(i).io.update.valid := false.B
     streamBufs(i).io.update.bits := DontCare
     streamBufs(i).io.alloc.valid := false.B
@@ -277,4 +311,10 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   io.req <> reqArb.io.out
   io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>
     i.U === io.resp.bits.stream && buf.io.resp.ready}).asUInt.orR
+  
+  // debug info
+  XSDebug(p"io: ${io}\n")
+  XSDebug(p"bufValids: ${Binary(bufValids.asUInt)} hit: ${hit} ages: ")
+  (0 until streamCnt).foreach(i => XSDebug(false, true.B, p"${Hexadecimal(ages(i))} "))
+  XSDebug(false, true.B, "\n")
 }
