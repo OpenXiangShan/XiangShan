@@ -277,9 +277,9 @@ class IFU extends XSModule with HasIFUConst
 
   def jal_offset(inst: UInt, rvc: Bool): SInt = {
     Mux(rvc,
-      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)),
-      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W))
-    ).asSInt()
+      Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W)).asSInt(),
+      Cat(inst(31), inst(19, 12), inst(20), inst(30, 21), 0.U(1.W)).asSInt()
+    )
   }
   val if4_instrs = if4_pd.instrs
   val if4_jals = if4_bp.jalMask
