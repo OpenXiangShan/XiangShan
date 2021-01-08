@@ -331,7 +331,7 @@ class ICache extends ICacheModule
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
 
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
-  s2_ready := s3_ready && io.tlb.resp.valid || !s2_valid
+  s2_ready := s3_ready || !s2_valid
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b acf:%d\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_access_fault)
   XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}\n")
