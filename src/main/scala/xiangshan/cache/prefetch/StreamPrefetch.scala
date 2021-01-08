@@ -84,7 +84,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   def streamSize = p.streamSize
   def streamCnt = p.streamCnt
   def blockBytes = p.blockBytes
-  def getBlockAddr(addr: UInt) = addr & ~((blockBytes - 1).U)
+  def getBlockAddr(addr: UInt) = addr & ~((blockBytes - 1).U(addr.getWidth.W))
 
   val baseReq = RegInit(0.U.asTypeOf(Valid(new PrefetchReq)))
   val nextReq = RegInit(0.U.asTypeOf(new PrefetchReq))
@@ -92,14 +92,17 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val valid = RegInit(VecInit(Seq.fill(streamSize)(false.B)))
   val head = RegInit(0.U(log2Up(streamSize).W))
   val tail = RegInit(0.U(log2Up(streamCnt).W))
-  val full = head === tail && valid(head)
-  val empty = head === tail && !valid(head)
 
   val s_idle :: s_req :: s_resp :: Nil = Enum(3)
   val state = RegInit(VecInit(Seq.fill(streamSize)(s_idle)))
 
   val isPrefetching = VecInit(state.map(_ =/= s_idle))
+  val full = head === tail && (valid(head) || isPrefetching(head))
+  val empty = head === tail && !(valid(head) || isPrefetching(head))
   val deqLater = RegInit(VecInit(Seq.fill(streamSize)(false.B)))
+
+  val reallocReq = RegInit(0.U.asTypeOf(new StreamBufferAlloc(p)))
+  val needRealloc = RegInit(false.B)
 
   // dequeue
   val hitIdx = io.update.bits.hitIdx
@@ -134,7 +137,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   }
 
   // enqueue
-  when (!full && baseReq.valid) {
+  when (!full && baseReq.valid && !needRealloc) {
     state(tail) := s_req
     tail := tail + 1.U
     buf(tail) := nextReq
@@ -179,8 +182,6 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     r.ready && i.U === io.resp.bits.idx}).asUInt.orR
   
   // realloc this stream buffer for a newly-found stream
-  val reallocReq = RegInit(0.U.asTypeOf(new StreamBufferAlloc(p)))
-  val needRealloc = RegInit(false.B)
   when (io.alloc.valid) {
     needRealloc := true.B
     reallocReq := io.alloc.bits
@@ -193,6 +194,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     head := 0.U
     tail := 0.U
     needRealloc := false.B
+    state.foreach(_ := s_idle)
     valid.foreach(_ := false.B)
   }
 
@@ -239,7 +241,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   def streamCnt = p.streamCnt
   def streamSize = p.streamSize
   def ageWidth = p.ageWidth
-  def getBlockAddr(addr: UInt) = addr & ~((p.blockBytes - 1).U)
+  def getBlockAddr(addr: UInt) = addr & ~((p.blockBytes - 1).U(addr.getWidth.W))
   val streamBufs = Seq.fill(streamCnt) { Module(new StreamBuffer(p)) }
   val addrValids = Wire(Vec(streamCnt, Vec(streamSize, Bool())))
   for (i <- 0 until streamCnt) {
