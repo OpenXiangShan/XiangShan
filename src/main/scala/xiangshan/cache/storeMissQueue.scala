@@ -14,7 +14,6 @@ class StoreMissEntry extends DCacheModule
     val lsu         = Flipped(new DCacheLineIO)
     val replay      = new DCacheLineIO
 
-    val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
     val miss_finish = DecoupledIO(new MissFinish)
 
@@ -22,7 +21,7 @@ class StoreMissEntry extends DCacheModule
     val tag = Output(Valid(UInt()))
   })
 
-  val s_invalid :: s_replay_req :: s_replay_resp :: s_resp :: s_miss_req :: s_miss_resp :: s_miss_finish :: Nil = Enum(7)
+  val s_invalid :: s_replay_req :: s_replay_resp :: s_resp :: s_miss_resp :: s_miss_finish :: Nil = Enum(6)
   val state = RegInit(s_invalid)
 
   val req     = Reg(new DCacheLineReq )
@@ -42,10 +41,8 @@ class StoreMissEntry extends DCacheModule
   io.replay.req.bits   := DontCare
   io.replay.resp.ready := false.B
 
-  io.miss_req.valid      := false.B
-  io.miss_req.bits       := DontCare
-  io.miss_finish.valid   := false.B
-  io.miss_finish.bits    := DontCare
+  io.miss_finish.valid := false.B
+  io.miss_finish.bits  := DontCare
 
   io.idx.valid := state =/= s_invalid
   io.tag.valid := state =/= s_invalid
@@ -81,34 +78,30 @@ class StoreMissEntry extends DCacheModule
   when (state === s_replay_resp) {
     io.replay.resp.ready := true.B
     when (io.replay.resp.fire()) {
+      // req missed
       when (io.replay.resp.bits.miss) {
         // replayed reqs should not miss
         assert(!req.meta.replay)
-        when (!req.meta.replay) {
-          state := s_miss_req
+        // the req missed and did not enter mshr
+        // so replay it until it hits or enters mshr
+        when (io.replay.resp.bits.replay) {
+          state := s_replay_req
+        } .otherwise {
+          // the req missed and enters mshr
+          // wait for miss response
+          state := s_miss_resp
         }
       } .otherwise {
+        // req hits, everything OK
         resp := io.replay.resp.bits
         when (!req.meta.replay) {
           state := s_resp
         } .otherwise {
+          // if it's a replayed request
+          // we need to tell mshr, we are done
           state := s_miss_finish
         }
       }
-
-      assert(!io.replay.resp.bits.nack)
-    }
-  }
-
-  // --------------------------------------------
-  when (state === s_miss_req) {
-    io.miss_req.valid          := true.B
-    io.miss_req.bits.cmd       := req.cmd
-    io.miss_req.bits.addr      := req_block_addr
-    io.miss_req.bits.client_id := io.id
-
-    when (io.miss_req.fire()) {
-      state := s_miss_resp
     }
   }
 
@@ -157,12 +150,10 @@ class StoreMissQueue extends DCacheModule
     val lsu         = Flipped(new DCacheLineIO)
     val replay      = new DCacheLineIO
 
-    val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Flipped(ValidIO(new MissResp))
     val miss_finish = DecoupledIO(new MissFinish)
   })
 
-  val miss_req_arb    = Module(new Arbiter(new MissReq,    cfg.nStoreMissEntries))
   val miss_finish_arb = Module(new Arbiter(new MissFinish, cfg.nStoreMissEntries))
   val replay_arb      = Module(new Arbiter(new DCacheLineReq,  cfg.nStoreMissEntries))
   val resp_arb        = Module(new Arbiter(new DCacheLineResp, cfg.nStoreMissEntries))
@@ -222,7 +213,6 @@ class StoreMissQueue extends DCacheModule
       io.replay.resp.ready := entry_replay.resp.ready
     }
 
-    miss_req_arb.io.in(i)  <> entry.io.miss_req
     entry.io.miss_resp.valid := (i.U === io.miss_resp.bits.client_id) && io.miss_resp.valid
     entry.io.miss_resp.bits  := io.miss_resp.bits
 
@@ -236,7 +226,6 @@ class StoreMissQueue extends DCacheModule
   req.ready      := pri_rdy && !idx_match
   io.lsu.resp    <> resp_arb.io.out
   io.replay.req  <> replay_arb.io.out
-  io.miss_req    <> miss_req_arb.io.out
   io.miss_finish <> miss_finish_arb.io.out
 
   // debug output
@@ -253,13 +242,9 @@ class StoreMissQueue extends DCacheModule
 
   val resp = io.lsu.resp
   when (resp.fire()) {
-    XSDebug(s"resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
-      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
+    XSDebug(s"resp: data: %x id: %d replay: %b miss: %b replay: %b\n",
+      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.replay)
   }
-
-  val miss_req = io.miss_req
-  XSDebug(miss_req.fire(), "miss_req cmd: %x addr: %x client_id: %d\n",
-    miss_req.bits.cmd, miss_req.bits.addr, miss_req.bits.client_id)
 
   val miss_resp = io.miss_resp
   XSDebug(miss_resp.fire(), "miss_resp client_id: %d entry_id: %d\n",

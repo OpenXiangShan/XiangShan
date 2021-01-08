@@ -21,7 +21,7 @@ class LoadUnit_S0 extends XSModule {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbReq = DecoupledIO(new TlbReq)
-    val dcacheReq = DecoupledIO(new DCacheLoadReq)
+    val dcacheReq = DecoupledIO(new DCacheWordReq)
   })
 
   val s0_uop = io.in.bits.uop
@@ -145,7 +145,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_cache_miss = io.dcacheResp.bits.miss
-  val s2_cache_nack = io.dcacheResp.bits.nack
+  val s2_cache_replay = io.dcacheResp.bits.replay
 
 
   io.dcacheResp.ready := true.B
@@ -183,7 +183,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
-  io.out.bits.miss := (s2_cache_miss || s2_cache_nack) && !fullForward
+  io.out.bits.miss := (s2_cache_miss || s2_cache_replay) && !fullForward
   io.out.bits.mmio := io.in.bits.mmio
 
   io.in.ready := io.out.ready || !io.in.valid
