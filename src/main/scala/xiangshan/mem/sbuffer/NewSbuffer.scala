@@ -56,18 +56,23 @@ class SbufferLine extends SbufferBundle {
 class ChooseReplace(nWay: Int) extends XSModule {
   val io = IO(new Bundle{
     // val in = Vec(StorePipelineWidth, Input(UInt(nWay.W)))
-    val mask = Vec(StoreBufferSize, Input(Bool()))
+    val mask = Vec(nWay, Input(Bool()))
     val fire = Input(Bool())
     val way = Output(UInt(nWay.W))
     val flush = Input(Bool())
   })
   val wayReg = RegInit(0.U(log2Up(nWay).W))
-  val nextWay = (wayReg + 1.U)(log2Up(nWay)-1, 0)
+  val wayMask = ~((UIntToOH(wayReg)<<1.U)(nWay-1,0) - 1.U)
+  val stateMask = Cat(io.mask.reverse)
+  val loMask = (wayMask & stateMask)(nWay-1,0)
+
+  val nextWay = PriorityEncoder(Cat(stateMask, loMask))(log2Up(nWay)-1, 0)
+  XSDebug(p"ss[${Binary(Cat(stateMask, loMask))}] , nextWay[${nextWay}]  \n")
 
   io.way := wayReg
 
   when(io.fire){
-    wayReg := Mux(io.mask(nextWay), nextWay, 0.U)
+    wayReg := nextWay
   }
 
   when(io.flush){
@@ -373,10 +378,12 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val tagConflict = tagRead(evictionIdx) === tags(0) || tagRead(evictionIdx) === tags(1)
 
   io.dcache.req.valid :=
-    ((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer)) &&
+    ((do_eviction && sbuffer_state === x_replace) && !tagConflict || (sbuffer_state === x_drain_sbuffer)) &&
     stateVec(evictionIdx)===s_valid &&
-    noSameBlockInflight(evictionIdx) &&
-    !tagConflict
+    noSameBlockInflight(evictionIdx) 
+
+
+  XSDebug(p"1[${((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer))}] 2[${stateVec(evictionIdx)===s_valid}] 3[${noSameBlockInflight(evictionIdx)}] 4[${!tagConflict}]\n")
 
   io.dcache.req.bits.addr := getAddr(tagRead(evictionIdx))
   io.dcache.req.bits.data := bufferRead(evictionIdx).data
@@ -397,7 +404,6 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
   val respId = io.dcache.resp.bits.meta.id
   when(io.dcache.resp.fire()){
-    XSDebug("")
     stateVec(respId) := s_invalid
     assert(stateVec(respId) === s_inflight)
     XSDebug(p"recv cache resp: id=[$respId]\n")
