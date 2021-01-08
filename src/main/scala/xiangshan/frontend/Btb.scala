@@ -174,7 +174,7 @@ class BTB extends BasePredictor with BTBParams{
   val u = io.update.bits
 
   val new_target = Mux(u.pd.isBr, u.brTarget, u.target)
-  val new_lower = u.target(lowerBitsSize+instOffsetBits-1, instOffsetBits)
+  val new_lower = new_target(lowerBitsSize+instOffsetBits-1, instOffsetBits)
   val update_pc_higher     = u.pc(VAddrBits-1, lowerBitsSize+instOffsetBits)
   val update_target_higher = new_target(VAddrBits-1, lowerBitsSize+instOffsetBits)
   val higher_identical = update_pc_higher === update_target_higher
