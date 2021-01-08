@@ -287,7 +287,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     when(canMerge(1)){
       mergeWordReq(io.in(1).bits, mergeIdx(1), secondWord)
       // lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(mergeMask(1).reverse)
+      // lruAccessWays(1) := Cat(mergeMask(1).reverse)sameWord
       XSDebug(p"merge req 1 to line [${mergeIdx(1)}]\n")
     }.elsewhen(secondCanInsert){
       wordReqToBufLine(io.in(1).bits, tags(1), secondInsertIdx, secondWord, !sameTag)
@@ -375,12 +375,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 //
 //  evictionEntry.bits := evictionIdx
 
-  val tagConflict = tagRead(evictionIdx) === tags(0) || tagRead(evictionIdx) === tags(1)
+  val tagConflict = tagRead(evictionIdx) === tags(0) && canMerge(0) && io.in(0).valid ||
+    tagRead(evictionIdx) === tags(1) && canMerge(1) && io.in(1).valid
 
   io.dcache.req.valid :=
     ((do_eviction && sbuffer_state === x_replace) && !tagConflict || (sbuffer_state === x_drain_sbuffer)) &&
     stateVec(evictionIdx)===s_valid &&
-    noSameBlockInflight(evictionIdx) 
+    noSameBlockInflight(evictionIdx)
 
 
   XSDebug(p"1[${((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer))}] 2[${stateVec(evictionIdx)===s_valid}] 3[${noSameBlockInflight(evictionIdx)}] 4[${!tagConflict}]\n")
