@@ -210,7 +210,7 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
 
   io.dcache.resp.ready := true.B
 
-  assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
+  assert(!(debug_mmio(missRefillSel) && io.dcache.req.valid))
 
   when(io.dcache.req.fire()) {
     miss(missRefillSel) := false.B
