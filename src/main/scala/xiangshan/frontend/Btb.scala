@@ -115,7 +115,7 @@ class BTB extends BasePredictor with BTBParams{
   val if2_totalHits = VecInit((0 until BtbBanks).map( b =>
     VecInit((0 until BtbWays).map( w =>
       // This should correspond to the real mask from last valid cycle!
-      if2_metaRead(w)(b).tag === if2_tag(b) && if2_metaRead(w)(b).valid && if2_mask(b)
+      if2_metaRead(w)(b).tag === if2_tag && if2_metaRead(w)(b).valid && if2_mask(b)
     ))
   ))
   val if2_bankHits = VecInit(if2_totalHits.map(_.reduce(_||_)))
@@ -143,7 +143,7 @@ class BTB extends BasePredictor with BTBParams{
   val allocWays = VecInit((0 until BtbBanks).map(b =>
     allocWay(VecInit(if2_metaRead.map(w => w(b).valid)).asUInt,
              VecInit(if2_metaRead.map(w => w(b).tag)).asUInt,
-             if2_tag(b))))
+             if2_tag)))
 
   val writeWay = VecInit((0 until BtbBanks).map(
     b => Mux(if2_bankHits(b), if2_bankHitWays(b), allocWays(b))
