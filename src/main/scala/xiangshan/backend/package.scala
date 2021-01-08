@@ -124,9 +124,6 @@ package object backend {
     def isLoad(op: UInt): Bool = !op(3)
     def isStore(op: UInt): Bool = op(3)
 
-    // float/double load store
-    def flw  = "b010110".U
-
     // atomics
     // bit(1, 0) are size
     // since atomics use a different fu type
