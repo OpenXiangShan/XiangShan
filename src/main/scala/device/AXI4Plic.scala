@@ -79,8 +79,8 @@ class PlicIO extends Bundle with xiangshan.HasXSParameter {
 
 class AXI4Plic
 (
-  sim: Boolean = false,
-  address: Seq[AddressSet]
+  address: Seq[AddressSet],
+  sim: Boolean = false
 )(implicit p: Parameters)
   extends AXI4SlaveModule(address, executable = false, _extra = new PlicIO) with xiangshan.HasXSParameter
 {
