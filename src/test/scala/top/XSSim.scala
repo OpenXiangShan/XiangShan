@@ -124,7 +124,10 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     dontTouch(io.uart)
 
     io.uart <> axiMMIO.module.io.uart
-    soc.module.io.meip := false.B
+    val NumCores = top.Parameters.get.socParameters.NumCores
+    for (i <- 0 until NumCores) {
+      soc.module.io.meip(i) := false.B
+    }
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
     if (!env.FPGAPlatform) {

@@ -156,13 +156,13 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
-      val meip = Input(Bool())
+      val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
     for (i <- 0 until NumCores) {
       xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
       xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
-      xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
+      xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
     }
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)
