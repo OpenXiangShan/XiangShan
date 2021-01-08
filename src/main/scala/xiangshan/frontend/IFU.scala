@@ -114,9 +114,10 @@ class IFU extends XSModule with HasIFUConst
   val if1_valid = !reset.asBool && GTimer() > 500.U
   val if1_npc = WireInit(0.U(VAddrBits.W))
   val if2_ready = WireInit(false.B)
+  val if2_valid = RegInit(init = false.B)
   val if2_allReady = WireInit(if2_ready && icache.io.req.ready)
-  val if1_fire = if1_valid &&  (if2_allReady || if2_flush)
-  val if1_can_go = if1_fire && icache.io.tlb.resp.valid                
+  val if1_fire = (if1_valid &&  if2_allReady) && (icache.io.tlb.resp.valid || !if2_valid)
+  val if1_can_go = if1_fire || if2_flush
 
   val if1_gh, if2_gh, if3_gh, if4_gh = Wire(new GlobalHistory)
   val if2_predicted_gh, if3_predicted_gh, if4_predicted_gh = Wire(new GlobalHistory)
@@ -125,10 +126,9 @@ class IFU extends XSModule with HasIFUConst
   val flush_final_gh = WireInit(false.B)
 
   //********************** IF2 ****************************//
-  val if2_valid = RegInit(init = false.B)
   val if2_allValid = if2_valid && icache.io.tlb.resp.valid
   val if3_ready = WireInit(false.B)
-  val if2_fire = if2_allValid && if3_ready
+  val if2_fire = (if2_valid && if3_ready) && icache.io.tlb.resp.valid
   val if2_pc = RegEnable(next = if1_npc, init = resetVector.U, enable = if1_can_go)
   val if2_snpc = snpc(if2_pc)
   val if2_predHist = RegEnable(if1_gh.predHist, enable=if1_can_go)
