@@ -155,7 +155,7 @@ class ReservationStationCtrl
   // val bubIdx = ParallelMux(bubMask zip idxQueue) // NOTE: the idx in the idxQueue
   val (bubPtr, findBubble) = PriorityEncoderWithFlag(bubMask) // NOTE: the idx of the idxQueue
   haveBubble := findBubble && (bubPtr < tailPtr.asUInt)
-  val bubIdx = idxQueue(selPtr)
+  val bubIdx = idxQueue(bubPtr)
   val bubIdxReg = RegNext(bubIdx) // NOTE: may dup with other signal, fix it later
   val bubValid = haveBubble
   val bubReg = RegNext(bubValid)
