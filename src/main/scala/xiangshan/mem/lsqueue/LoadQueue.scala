@@ -68,7 +68,7 @@ class LoadQueue extends XSModule
     val load_s1 = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect)) // replay now starts from load instead of store
-    val dcache = new DCacheLineIO
+    val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
     val exceptionAddr = new ExceptionAddrIO
@@ -231,8 +231,6 @@ class LoadQueue extends XSModule
   // io.dcache.req.bits.meta.mask     := DontCare
   // io.dcache.req.bits.meta.replay   := false.B
 
-  io.dcache.resp.ready := true.B
-
   // assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
 
   // when(io.dcache.req.fire()) {
@@ -263,21 +261,18 @@ class LoadQueue extends XSModule
   //   )
   // }
 
-  when(io.dcache.resp.fire()){
-    XSDebug("miss resp: pc:0x%x roqIdx:%d lqIdx:%d (p)addr:0x%x data %x\n",
-      io.dcache.resp.bits.meta.uop.cf.pc, io.dcache.resp.bits.meta.uop.roqIdx.asUInt, io.dcache.resp.bits.meta.uop.lqIdx.asUInt,
-      io.dcache.resp.bits.meta.paddr, io.dcache.resp.bits.data
-    )
+  when(io.dcache.valid) {
+    XSDebug("miss resp: paddr:0x%x data %x\n", io.dcache.bits.addr, io.dcache.bits.data)
   }
 
   // Refill 64 bit in a cycle
   // Refill data comes back from io.dcache.resp
-  dataModule.io.refill.dcache := io.dcache.resp.bits
+  dataModule.io.refill.data := io.dcache.bits.data
 
   (0 until LoadQueueSize).map(i => {
-    val blockMatch = get_block_addr(dataModule.io.rdata(i).paddr) === io.dcache.resp.bits.meta.paddr
+    val blockMatch = get_block_addr(dataModule.io.rdata(i).paddr) === get_block_addr(io.dcache.bits.addr)
     dataModule.io.refill.wen(i) := false.B
-    when(allocated(i) && miss(i) && blockMatch && io.dcache.resp.fire()) {
+    when(allocated(i) && miss(i) && blockMatch && io.dcache.valid) {
       dataModule.io.refill.wen(i) := true.B
       datavalid(i) := true.B
       miss(i) := false.B
@@ -557,7 +552,7 @@ class LoadQueue extends XSModule
     dataModule.io.uncacheWrite(deqPtr, io.uncache.resp.bits.data(XLEN-1, 0))
     dataModule.io.uncache.wen := true.B
 
-    XSDebug("uncache resp: data %x\n", io.dcache.resp.bits.data)
+    XSDebug("uncache resp: data %x\n", io.dcache.bits.data)
   }
 
   // Read vaddr for mem exception

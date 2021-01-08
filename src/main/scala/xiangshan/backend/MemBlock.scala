@@ -18,14 +18,6 @@ class LsBlockToCtrlIO extends XSBundle {
   val replay = ValidIO(new Redirect)
 }
 
-class MemBlockToDcacheIO extends XSBundle {
-  val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
-  val loadMiss = new DCacheLineIO
-  val atomics  = new DCacheWordIO
-  val sbufferToDcache = new DCacheLineIO
-  val uncache = new DCacheWordIO
-}
-
 class MemBlock
 (
   fastWakeUpIn: Seq[ExuConfig],
@@ -46,7 +38,8 @@ class MemBlock
 
     val ptw = new TlbPtwIO
     // TODO: dcache should be inside MemBlock
-    val dcache = new MemBlockToDcacheIO
+    val dcache = Flipped(new DCacheToLsuIO)
+    val uncache = new DCacheWordIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -166,7 +159,7 @@ class MemBlock
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
     // dcache access
-    loadUnits(i).io.dcache        <> io.dcache.loadUnitToDcacheVec(i)
+    loadUnits(i).io.dcache        <> io.dcache.load(i)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
@@ -210,14 +203,14 @@ class MemBlock
   lsq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
-  lsq.io.dcache      <> io.dcache.loadMiss
-  lsq.io.uncache     <> io.dcache.uncache
+  lsq.io.dcache      <> io.dcache.lsq
+  lsq.io.uncache     <> io.uncache
 
   // LSQ to store buffer
   lsq.io.sbuffer     <> sbuffer.io.in
 
   // Sbuffer
-  sbuffer.io.dcache    <> io.dcache.sbufferToDcache
+  sbuffer.io.dcache    <> io.dcache.store
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb

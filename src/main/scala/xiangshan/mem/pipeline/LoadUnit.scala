@@ -82,8 +82,8 @@ class LoadUnit_S1 extends XSModule {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
     val dtlbResp = Flipped(DecoupledIO(new TlbResp))
-    val tlbFeedback = ValidIO(new TlbFeedback)
     val dcachePAddr = Output(UInt(PAddrBits.W))
+    val dcacheKill = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
     val lsq = new LoadForwardQueryIO
   })
@@ -97,12 +97,9 @@ class LoadUnit_S1 extends XSModule {
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
 
   io.dtlbResp.ready := true.B
-  // feedback tlb result to RS
-  io.tlbFeedback.valid := io.in.valid
-  io.tlbFeedback.bits.hit := !s1_tlb_miss
-  io.tlbFeedback.bits.roqIdx := s1_uop.roqIdx
 
   io.dcachePAddr := s1_paddr
+  io.dcacheKill := s1_tlb_miss
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid
@@ -119,7 +116,7 @@ class LoadUnit_S1 extends XSModule {
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
 
-  io.out.valid := io.in.valid && !s1_tlb_miss
+  io.out.valid := io.in.valid// && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr
   io.out.bits.mmio := s1_mmio
   io.out.bits.tlbMiss := s1_tlb_miss
@@ -136,6 +133,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
+    val tlbFeedback = ValidIO(new TlbFeedback)
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     val lsq = new LoadForwardQueryIO
     val sbuffer = new LoadForwardQueryIO
@@ -144,12 +142,18 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_uop = io.in.bits.uop
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
+  val s2_tlb_miss = io.in.bits.tlbMiss
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
 
   io.dcacheResp.ready := true.B
   assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
+
+  // feedback tlb result to RS
+  io.tlbFeedback.valid := io.in.valid
+  io.tlbFeedback.bits.hit := !s2_tlb_miss && !s2_cache_replay
+  io.tlbFeedback.bits.roqIdx := s2_uop.roqIdx
 
   val forwardMask = io.out.bits.forwardMask
   val forwardData = io.out.bits.forwardData
@@ -178,12 +182,12 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
 
   // TODO: ECC check
 
-  io.out.valid := io.in.valid
+  io.out.valid := io.in.valid && !s2_cache_replay
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
-  io.out.bits.miss := (s2_cache_miss || s2_cache_replay) && !fullForward
+  io.out.bits.miss := s2_cache_miss && !fullForward
   io.out.bits.mmio := io.in.bits.mmio
 
   io.in.ready := io.out.ready || !io.in.valid
@@ -234,14 +238,14 @@ class LoadUnit extends XSModule with HasLoadHelper {
   PipelineConnect(load_s0.io.out, load_s1.io.in, true.B, load_s0.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
   load_s1.io.dtlbResp <> io.dtlb.resp
-  load_s1.io.tlbFeedback <> io.tlbFeedback
   io.dcache.s1_paddr <> load_s1.io.dcachePAddr
-  io.dcache.s1_kill := DontCare // FIXME
+  io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
+  load_s2.io.tlbFeedback <> io.tlbFeedback
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask
