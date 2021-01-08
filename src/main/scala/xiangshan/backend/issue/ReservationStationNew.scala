@@ -239,14 +239,14 @@ class ReservationStationCtrl
   }
 
   // enq
-  val isFull = tailPtr.flag && !dequeue
+  val isFull = tailPtr.flag
   // agreement with dispatch: don't fire when io.redirect.valid
   val enqueue = io.enqCtrl.fire() && !io.redirect.valid
   val tailInc = tailPtr+1.U
   val tailDec = tailPtr-1.U
   tailPtr := Mux(dequeue === enqueue, tailPtr, Mux(dequeue, tailDec, tailInc))
 
-  io.enqCtrl.ready := !isFull
+  io.enqCtrl.ready := !isFull || dequeue
   val enqUop      = io.enqCtrl.bits
   val srcSeq      = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq  = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
