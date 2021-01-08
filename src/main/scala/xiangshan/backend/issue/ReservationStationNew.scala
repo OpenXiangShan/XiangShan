@@ -339,23 +339,7 @@ class ReservationStationData
     val ctrl = Flipped(new RSCtrlDataIO)
 
     // read src op value
-    // TODO: define index width as parameters
-    val readPortIndex: UInt = dispatchType(exuCfg) match {
-      case DispatchType.Disp2Int => Input(UInt(log2Ceil(NRIntReadPorts).W))
-      case DispatchType.Disp2Fp => Input(UInt(log2Ceil(NRFpReadPorts - exuParameters.StuCnt).W))
-      case DispatchType.Disp2Ls => Input(UInt(3.W))
-    }
-
-    val readIntRf: Vec[RfReadPort] = dispatchType(exuCfg) match {
-      case DispatchType.Disp2Fp => null
-      case DispatchType.Disp2Int => Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort))
-      case DispatchType.Disp2Ls => Vec(NRMemReadPorts, Flipped(new RfReadPort))
-    }
-    val readFpRf: Vec[RfReadPort] = dispatchType(exuCfg) match {
-      case DispatchType.Disp2Fp => Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
-      case DispatchType.Disp2Int => null
-      case DispatchType.Disp2Ls => Vec(exuParameters.StuCnt, Flipped(new RfReadPort))
-    }
+    val srcRegValue = Vec(srcNum, Input(UInt(XLEN.W)))
     // broadcast selected uop to other issue queues
     val selectedUop = ValidIO(new MicroOp)
 
@@ -384,12 +368,6 @@ class ReservationStationData
   val enqCtrl = io.ctrl.enqCtrl
   val enqUop = enqCtrl.bits
 
-  val readIntRf = io.readIntRf
-  if (readIntRf != null) readIntRf.foreach(_.addr := DontCare)
-  val readFpRf = io.readFpRf
-  if (readFpRf != null) readFpRf.foreach(_.addr := DontCare)
-  val readPortIndex = RegNext(io.readPortIndex)
-
   // enq
   val enqPtr = enq(log2Up(IssQueSize)-1,0)
   val enqPtrReg = RegEnable(enqPtr, enqCtrl.valid)
@@ -402,52 +380,55 @@ class ReservationStationData
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
 
-  val srcOp: Vec[UInt] = Wire(Vec(srcNum, UInt(XLEN.W)))
-  srcOp := DontCare
-
   when (enqEnReg) { // TODO: turn to srcNum, not the 3
     exuCfg match {
       case Exu.aluExeUnitCfg =>
         // src1: pc or reg
-        srcOp(0) := Mux(enqUop.ctrl.src1Type === SrcType.pc, SignExt(enqUop.cf.pc, XLEN), readIntRf(readPortIndex).data)
+        data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
         // src2: imm or reg
-        srcOp(1) := Mux(enqUop.ctrl.src2Type === SrcType.imm, enqUop.ctrl.imm, readIntRf(readPortIndex + 1.U).data)
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
 
         XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg}\n")
-        XSDebug(p"newSrc1: ${Hexadecimal(srcOp(0))} newSrc2: ${Hexadecimal(srcOp(1))}\n")
+        XSDebug(p"newSrc1: ${Hexadecimal(io.srcRegValue(0))} newSrc2: ${Hexadecimal(io.srcRegValue(1))}\n")
         XSDebug(p"src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)}\n")
 
       case Exu.jumpExeUnitCfg =>
         // src1: pc or reg
-        srcOp(0) := Mux(enqUop.ctrl.src1Type === SrcType.pc, SignExt(enqUop.cf.pc, XLEN), readIntRf(readPortIndex).data)
+        data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
         // src2: imm
-        srcOp(1) := enqUop.ctrl.imm
+        data(enqPtrReg)(1) := uop(enqPtrReg).ctrl.imm
 
         XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg}\n")
-        XSDebug(p"newSrc1: ${Hexadecimal(srcOp(0))} newSrc2: ${Hexadecimal(srcOp(1))}\n")
+        XSDebug(p"newSrc1: ${Hexadecimal(io.srcRegValue(0))} newSrc2: ${Hexadecimal(io.srcRegValue(1))}\n")
         XSDebug(p"src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)}\n")
 
       case Exu.mulDivExeUnitCfg =>
         // src1: reg
-        srcOp(0) := readIntRf(readPortIndex).data
+        data(enqPtrReg)(0) := io.srcRegValue(0)
         // src2: reg
-        srcOp(1) := readIntRf(readPortIndex + 1.U).data
+        data(enqPtrReg)(1) := io.srcRegValue(1)
 
         XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg}\n")
-        XSDebug(p"newSrc1: ${Hexadecimal(srcOp(0))} newSrc2: ${Hexadecimal(srcOp(1))}\n")
+        XSDebug(p"newSrc1: ${Hexadecimal(io.srcRegValue(0))} newSrc2: ${Hexadecimal(io.srcRegValue(1))}\n")
         XSDebug(p"src1:${Hexadecimal(io.enqData.src1)} src2:${Hexadecimal(io.enqData.src2)}\n")
 
+      case Exu.fmacExeUnitCfg =>
+        (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+        XSDebug(p"New-src: src1: ${Hexadecimal(io.srcRegValue(0))} src2: ${Hexadecimal(io.srcRegValue(1))} src3: ${Hexadecimal(io.srcRegValue(2))}\n")
+        XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
+          p" src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src3)}\n")
+
+      case Exu.fmiscExeUnitCfg =>
+        (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+      case Exu.ldExeUnitCfg =>
+        data(enqPtrReg)(0) := io.srcRegValue(0)
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
+      case Exu.stExeUnitCfg =>
+        data(enqPtrReg)(0) := io.srcRegValue(0)
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
       // default
       case _ =>
-        data(enqPtrReg)(0) := io.enqData.src1
-        data(enqPtrReg)(1) := io.enqData.src2
-        data(enqPtrReg)(2) := io.enqData.src3
-        XSDebug(p"${exuCfg.name}-enqData: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
-          p" src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src3)}\n")
-    }
-    // FIXME: this is temporary for  testing
-    if (dispatchType(exuCfg) == DispatchType.Disp2Int) {
-      (0 until 3).foreach(i => data(enqPtrReg)(i) := srcOp(i))
+        XSDebug(false.B, "Unhandled exu-config")
     }
   }
 

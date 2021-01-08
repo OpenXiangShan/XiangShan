@@ -10,7 +10,6 @@ import xiangshan.cache._
 import xiangshan.mem._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
-import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
 import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO extends XSBundle {
@@ -87,6 +86,8 @@ class MemBlock
   val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
 
   val readPortIndex = Seq(0, 1, 2, 4)
+  io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
+  io.fromFpBlock.readFpRf.foreach(_.addr := DontCare)
   val reservationStations = (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -122,9 +123,13 @@ class MemBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.readPortIndex := readPortIndex(i).U
-    rsData.io.readIntRf <> io.fromIntBlock.readIntRf
-    rsData.io.readFpRf <> io.fromFpBlock.readFpRf
+
+    val src2IsFp = RegNext(io.fromCtrlBlock.enqIqCtrl(i).bits.ctrl.src2Type === SrcType.fp)
+    rsData.io.srcRegValue := DontCare
+    rsData.io.srcRegValue(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
+    if (i >= exuParameters.LduCnt) {
+      rsData.io.srcRegValue(1) := Mux(src2IsFp, io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data, io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data)
+    }
     rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 

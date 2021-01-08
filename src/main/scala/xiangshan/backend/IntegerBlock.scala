@@ -112,6 +112,7 @@ class IntegerBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
+  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -142,10 +143,10 @@ class IntegerBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.readPortIndex := io.fromCtrlBlock.readPortIndex(i)
-    rsData.io.readIntRf.zipWithIndex.foreach({
-      case (port, i) => port.data := intRf.io.readPorts(i).data
-    })
+
+    rsData.io.srcRegValue := DontCare
+    rsData.io.srcRegValue(0) := intRf.io.readPorts(readPortIndex(i)).data
+    rsData.io.srcRegValue(1) := intRf.io.readPorts(readPortIndex(i) + 1.U).data
     rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 

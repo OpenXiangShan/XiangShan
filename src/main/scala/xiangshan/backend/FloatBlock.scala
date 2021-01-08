@@ -58,6 +58,7 @@ class FloatBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
+  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val reservedStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -86,10 +87,11 @@ class FloatBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.readPortIndex := io.fromCtrlBlock.readPortIndex(i)
-    rsData.io.readFpRf.zipWithIndex.foreach({
-      case (port, i) => port.data := fpRf.io.readPorts(i).data
-    })
+
+    rsData.io.srcRegValue := DontCare
+    rsData.io.srcRegValue(0) := fpRf.io.readPorts(readPortIndex(i)).data
+    rsData.io.srcRegValue(1) := fpRf.io.readPorts(readPortIndex(i) + 1.U).data
+    rsData.io.srcRegValue(2) := fpRf.io.readPorts(readPortIndex(i) + 2.U).data
     rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 
