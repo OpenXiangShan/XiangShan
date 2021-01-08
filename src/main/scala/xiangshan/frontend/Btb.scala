@@ -35,7 +35,7 @@ object BtbDataEntry {
 class BtbMetaEntry() extends XSBundle with BTBParams {
   val valid = Bool()
   // TODO: don't need full length of tag
-  val tag = UInt((VAddrBits - log2Up(BtbSize) - instOffsetBits).W)
+  val tag = UInt((VAddrBits - log2Ceil(nRows) - log2Ceil(PredictWidth) - instOffsetBits).W)
   val btbType = UInt(2.W)
   val isRVC = Bool()
 }
