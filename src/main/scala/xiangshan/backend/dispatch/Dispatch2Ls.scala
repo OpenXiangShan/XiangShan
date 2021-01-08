@@ -10,8 +10,8 @@ import xiangshan.backend.exu.Exu._
 class Dispatch2Ls extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort))
-    val readFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort))
+    val readIntRf = Vec(NRMemReadPorts, Flipped(new RfReadPort(XLEN)))
+    val readFpRf = Vec(exuParameters.StuCnt, Flipped(new RfReadPort(XLEN + 1)))
     // val intRegAddr = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     // val fpRegAddr = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val intRegRdy = Vec(NRMemReadPorts, Input(Bool()))
