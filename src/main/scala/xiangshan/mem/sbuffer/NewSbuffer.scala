@@ -271,13 +271,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.in(0).fire()){
     when(canMerge(0)){
       mergeWordReq(io.in(0).bits, mergeIdx(0), firstWord)
-      // lruAccessWays(0).valid := true.B
-      // lruAccessWays(0) := Cat(mergeMask(0).reverse)
       XSDebug(p"merge req 0 to line [${mergeIdx(0)}]\n")
     }.elsewhen(firstCanInsert){
       wordReqToBufLine(io.in(0).bits, tags(0), firstInsertIdx, firstWord, true.B)
-      //lruAccessWays(0).valid := true.B
-      // lruAccessWays(0) := Cat(firstInsertMask.reverse)
       XSDebug(p"insert req 0 to line[$firstInsertIdx]\n")
     }
   }
@@ -286,13 +282,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.in(1).fire()){
     when(canMerge(1)){
       mergeWordReq(io.in(1).bits, mergeIdx(1), secondWord)
-      // lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(mergeMask(1).reverse)sameWord
       XSDebug(p"merge req 1 to line [${mergeIdx(1)}]\n")
     }.elsewhen(secondCanInsert){
       wordReqToBufLine(io.in(1).bits, tags(1), secondInsertIdx, secondWord, !sameTag)
-      //lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(PriorityEncoderOH(secondInsertMask).reverse)
       XSDebug(p"insert req 1 to line[$secondInsertIdx]\n")
     }
   }
