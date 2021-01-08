@@ -130,7 +130,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val validBitVec = VecInit((0 until size).map(i => stateEntries(i) === s_valid))
   val loValidBitVec = Cat((0 until size).map(i => validBitVec(i) && headPtrMask(i)))
   val hiValidBitVec = Cat((0 until size).map(i => validBitVec(i) && ~headPtrMask(i)))
-  val flippedFlag = loValidBitVec.orR
+  val flippedFlag = loValidBitVec.orR || validBitVec(size - 1)
   val lastOneIndex = size.U - PriorityEncoder(Mux(loValidBitVec.orR, loValidBitVec, hiValidBitVec))
   val walkedTailPtr = Wire(new CircularQueuePtr(size))
   walkedTailPtr.flag := flippedFlag ^ headPtr(0).flag
