@@ -191,6 +191,7 @@ class RAS extends BasePredictor
     val copy_next = RegNext(copy_valid)
     spec_ras.copy_valid := copy_next
     spec_ras.copy_in_mem := commit_ras.copy_out_mem
+
     spec_ras.copy_in_sp  := commit_ras.copy_out_sp
     commit_ras.copy_valid := false.B
     commit_ras.copy_in_mem := DontCare

@@ -299,7 +299,7 @@ class LTBColumn extends LTBModule {
     when (!tagMatch && update.misPred || tagMatch) {
       swEntry.nSpecCnt := wEntry.nSpecCnt
     }
-  }
+  } 
   when (io.repair && !doingReset && valid) {
     swEntry.specCnt := if4_entry.nSpecCnt
   }
@@ -326,7 +326,7 @@ class LTBColumn extends LTBModule {
     XSDebug(false, true.B, p" brTag=${if4_uEntry.brTag} unusable=${if4_uEntry.unusable}\n")
     XSDebug("[wEntry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d, wen=%d\n", wEntry.tag, wEntry.conf, wEntry.age, wEntry.tripCnt, wEntry.specCnt, wEntry.nSpecCnt, ltb.wen)
     XSDebug(false, true.B, p" brTag=${wEntry.brTag} unusable=${wEntry.unusable}\n")
-    XSDebug(io.update.valid && io.update.bits.misPred || io.repair, "MisPred or repairing, all of the nSpecCnts copy their values into the specCnts\n")
+    XSDebug(io.update.valid && io.update.bits.1 || io.repair, "MisPred or repairing, all of the nSpecCnts copy their values into the specCnts\n")
   }
 
 }
@@ -423,12 +423,13 @@ class LoopPredictor extends BasePredictor with LTBParams {
   }
 
   ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
+  ExcitingUtils.addSource(io.update.bits.isReplay, "Replay", Perf)
 
   if (BPUDebug && debug) {
     // debug info
     XSDebug("[IF2][req] fire=%d flush=%d fetchpc=%x\n", if2_fire, io.flush, io.pc.bits)
     XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", if3_fire, io.flush, pc)
-    XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%d tag=%x\n", io.outFire, bank, bankAlignedPC, bankIdx, tag)
+    XSDebug("[IF4][req] fire=%d bank=%d bankAlignedPC=%x bankIdx=%d tag=%x\n", out_fire, bank, bankAlignedPC, bankIdx, tag)
     XSDebug("[IF4][req] inMask=%b, reorderMask=%b\n", inMask, reorderMask)
 
     XSDebug("[IF4][req] updatePC=%x updateBank=%d, updateValid=%d, isBr=%d, isReplay=%d\n", updatePC, updateBank, io.update.valid, io.update.bits.pd.isBr, io.update.bits.isReplay)
