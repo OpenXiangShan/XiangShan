@@ -421,7 +421,6 @@ class IFU extends XSModule with HasIFUConst
 
   bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
-  bpu.io.flush := VecInit(if2_flush, if3_flush, if4_flush)
   bpu.io.inFire(0) := if1_can_go
   bpu.io.inFire(1) := if2_fire
   bpu.io.inFire(2) := if3_fire

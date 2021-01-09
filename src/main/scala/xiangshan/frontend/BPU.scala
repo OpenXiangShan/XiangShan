@@ -120,7 +120,6 @@ abstract class BasePredictor extends XSModule
   abstract class Meta extends XSBundle {}
 
   class DefaultBasePredictorIO extends XSBundle {
-    val flush = Input(Bool())
     val pc = Flipped(ValidIO(UInt(VAddrBits.W)))
     val hist = Input(UInt(HistoryLength.W))
     val inMask = Input(UInt(PredictWidth.W))
@@ -142,7 +141,6 @@ class BPUStageIO extends XSBundle {
 abstract class BPUStage extends XSModule with HasBPUParameter
   with HasIFUConst with HasIFUFire {
   class DefaultIO extends XSBundle {
-    val flush = Input(Bool())
     val in = Input(new BPUStageIO)
     val inFire = Input(Bool())
     val pred = Output(new BranchPrediction) // to ifu
@@ -185,7 +183,6 @@ abstract class BPUStage extends XSModule with HasBPUParameter
     XSDebug("inLatch: pc=%x, mask=%b\n", inLatch.pc, inLatch.mask)
     XSDebug("out(%d): pc=%x, mask=%b, taken=%d, jmpIdx=%d, target=%x, hasHalfRVI=%d\n",
       io.outFire, io.out.pc, io.out.mask, taken, jmpIdx, target, hasHalfRVI)
-    XSDebug("flush=%d\n", io.flush)
     val p = io.pred
   }
 }
@@ -394,8 +391,6 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   val io = IO(new Bundle() {
     // from backend
     val cfiUpdateInfo    = Flipped(ValidIO(new CfiUpdateInfo))
-    // from ifu, frontend redirect
-    val flush = Input(Vec(3, Bool()))
     // from if1
     val in = Input(new BPUReq)
     val inFire = Input(Vec(4, Bool()))
@@ -424,10 +419,6 @@ abstract class BaseBPU extends XSModule with BranchPredictorComponents with HasB
   val s2_fire = io.inFire(1)
   val s3_fire = io.inFire(2)
   val s4_fire = io.inFire(3)
-
-  s1.io.flush := io.flush(0)
-  s2.io.flush := io.flush(1)
-  s3.io.flush := io.flush(2)
 
   s1.io.in <> DontCare
   s2.io.in <> s1.io.out
@@ -484,7 +475,6 @@ class BPU extends BaseBPU {
   (0 until PredictWidth).foreach(i => s1_brInfo_in(i).fetchIdx := i.U)
 
   val s1_inLatch = RegEnable(io.in, s1_fire)
-  ubtb.io.flush := io.flush(0) // TODO: fix this
   ubtb.io.pc.valid := s2_fire
   ubtb.io.pc.bits := s1_inLatch.pc
   ubtb.io.inMask := s1_inLatch.inMask
@@ -498,7 +488,6 @@ class BPU extends BaseBPU {
     s1_brInfo_in(i).ubtbHits := ubtb.io.uBTBMeta.hits(i)
   }
 
-  btb.io.flush := io.flush(0) // TODO: fix this
   btb.io.pc.valid := s1_fire
   btb.io.pc.bits := io.in.pc
   btb.io.inMask := io.in.inMask
@@ -512,7 +501,6 @@ class BPU extends BaseBPU {
     s1_brInfo_in(i).btbHitJal   := btb.io.meta.hitJal(i)
   }
 
-  bim.io.flush := io.flush(0) // TODO: fix this
   bim.io.pc.valid := s1_fire
   bim.io.pc.bits := io.in.pc
   bim.io.inMask := io.in.inMask
@@ -540,7 +528,6 @@ class BPU extends BaseBPU {
   s3.io.debug_hist := s3_hist
 
   //**********************Stage 2****************************//
-  tage.io.flush := io.flush(1) // TODO: fix this
   tage.io.pc.valid := s2_fire
   tage.io.pc.bits := s2.io.in.pc // PC from s1
   tage.io.hist := s1_hist // The inst is from s1
@@ -551,7 +538,6 @@ class BPU extends BaseBPU {
   // Wrap tage response and meta into s3.io.in.bits
   // This is ugly
 
-  loop.io.flush := io.flush(2)
   loop.io.pc.valid := s2_fire
   loop.io.if3_fire := s3_fire
   loop.io.pc.bits := s2.io.in.pc
