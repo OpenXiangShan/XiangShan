@@ -34,8 +34,8 @@ class Dispatch extends XSModule {
     // enq Lsq
     val enqLsq = Flipped(new LsqEnqIO)
     // read regfile
-    val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
-    val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+    val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
+    val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))

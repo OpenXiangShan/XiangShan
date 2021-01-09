@@ -134,12 +134,23 @@ REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
-$(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
+LOCK = /var/emu/emu.lock
+LOCK_BIN = $(abspath $(BUILD_DIR)/lock-emu)
+
+$(LOCK_BIN): ./scripts/utils/lock-emu.c
+	gcc $^ -o $@
+
+$(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
 	date -R
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j128 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	@echo "try to get emu.lock ..."
+	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
+	@echo "get lock"
+	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	@echo "release lock ..."
+	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 endif
 	date -R
 
@@ -197,6 +208,9 @@ phy_evaluate_atc: vme
 
 cache:
 	$(MAKE) emu IMAGE=Makefile
+
+release-lock:
+	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
 clean:
 	git submodule foreach git clean -fdx
