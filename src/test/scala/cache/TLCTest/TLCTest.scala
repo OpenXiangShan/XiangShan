@@ -231,7 +231,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val masterAgent = masterAgentList(i)
 
               //randomly add when size is small
-              if (masterAgent.outerAcquire.size <= 16) {
+              if (masterAgent.outerAcquire.size <= 6) {
                 if (true) {
                   for (i <- 0 until 16) {
                     val addr = getRandomElement(addr_pool, rand)
@@ -240,7 +240,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
                   }
                 }
               }
-              if (masterAgent.outerRelease.size <= 16) {
+              if (masterAgent.outerRelease.size <= 6) {
                 if (true) {
                   for (i <- 0 until 16) {
                     val addr = getRandomElement(addr_pool, rand)
@@ -372,7 +372,7 @@ class TLCCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           val sio = slaveIO
           for (_ <- 0 to total_clock) {
             //randomly add when empty
-            if (slaveAgent.innerProbe.size <= 8) {
+            if (slaveAgent.innerProbe.size <= 6) {
               if (true) {
                 for (i <- 0 until 16) {
                   val addr = getRandomElement(addr_pool, rand)

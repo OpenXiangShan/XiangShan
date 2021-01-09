@@ -150,6 +150,9 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   val beatBits = l2params.beatBytes * 8
   val blockWords = l2params.blockBytes / 8
 
+  val wordBits = 64
+  val wordBytes = 8
+  val wordAddrBits = 3
   val blockAddrBits = log2Up(l2params.blockBytes)
   val beatAddrBits = log2Up(l2params.beatBytes)
   val fullBeatMask = BigInt(prefix ++ Array.fill(l2params.beatBytes)(0xff.toByte))
@@ -160,8 +163,8 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
 
   var clock = 100
 
-  def step(i: Int = 1): Unit = {
-    clock += i
+  def step(): Unit = {
+    clock += 1
   }
 
   def debugPrefix(): String = {
@@ -198,16 +201,36 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     oldData | (inData << (cnt * beatBits))
   }
 
-  def dataOutofBeat(inData: BigInt, cnt: Int): BigInt = {
+  def dataConcatWord(oldData: BigInt, inData: BigInt, cnt: Int): BigInt = {
+    oldData | (inData << (cnt * wordBits))
+  }
+
+  def dataOutOfBeat(inData: BigInt, cnt: Int): BigInt = {
     inData >> (cnt * beatBits)
+  }
+
+  def dataOutOfWord(inData: BigInt, cnt: Int): BigInt = {
+    inData >> (cnt * wordBits)
   }
 
   def maskConcatBeat(oldMask: BigInt, inMask: BigInt, cnt: Int): BigInt = {
     oldMask | (inMask << (cnt * l2params.beatBytes))
   }
 
+  def maskConcatWord(oldMask: BigInt, inMask: BigInt, cnt: Int): BigInt = {
+    oldMask | (inMask << (cnt * wordBytes))
+  }
+
   def beatInBlock(addr: BigInt): Int = {
     ((addr & offsetMask) >> beatAddrBits).toInt
+  }
+
+  def wordInBlock(addr: BigInt): Int = {
+    ((addr & offsetMask) >> wordAddrBits).toInt
+  }
+
+  def genWordMaskInBlock(addr: BigInt, wordMask: BigInt): BigInt = {
+    maskConcatWord(0, wordMask, wordInBlock(addr))
   }
 
   def randomBlockData(): BigInt = {
@@ -217,9 +240,9 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   }
 
   def appendSerial(t: TLCTrans): Unit = {
-    serialList.synchronized {
+    /*serialList.synchronized {
       serialList.append((ID, t))
-    }
+    }*/
   }
 
   //only for master Get
@@ -244,6 +267,11 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
     debugPrintln(f"MaskedRead, Addr: $alignAddr%x , own data: $alignData%x , sbData:$sbData%x , mask:$alignMask%x")
     assert(sbData == checkWriteData, f"agent $ID data has been changed, Addr: $alignAddr%x, " +
       f"own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
+  }
+
+  //core Agent always read latest version
+  def insertMaskedRead(addr: BigInt, readData: BigInt, byteMask: BigInt): Unit = {
+    insertMaskedReadSnap(addr, readData, insertVersionRead(addr, 0), byteMask)
   }
 
   //for Put
@@ -433,9 +461,9 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
       else {
         val ver = scoreboardGetVer(alignAddr)
         val start_beat = beatInBlock(addr)
-        val targetData = dataOutofBeat(state.data, start_beat)
-//        println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
-//          f"beats:${countBeats(g.a.get.size)}, ver:$ver")
+        val targetData = dataOutOfBeat(state.data, start_beat)
+        //        println(f"issue AccessAckData, addr:$addr%x, data:$targetData, size:${g.a.get.size}, " +
+        //          f"beats:${countBeats(g.a.get.size)}, ver:$ver")
         dQueue.enqMessage(g.issueAccessAckData(targetData, ver), countBeats(g.a.get.size))
         true
       }
@@ -576,7 +604,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         if (state.myPerm == trunk) {
           insertReadWrite(addr, state.data, randomBlockData()) //modify data when master is invalid
         }
-        else if(state.myPerm == branch){
+        else if (state.myPerm == branch) {
           insertRead(addr, state.data)
         }
         //serialization point
@@ -601,7 +629,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         if (state.myPerm == trunk) {
           insertReadSnapWrite(addr, c.data, sbDataSnapshot, randomBlockData()) //modify data when master is invalid
         }
-        else if(state.myPerm == branch){
+        else if (state.myPerm == branch) {
           insertReadSnap(addr, c.data, sbDataSnapshot)
         }
         //serialization point
