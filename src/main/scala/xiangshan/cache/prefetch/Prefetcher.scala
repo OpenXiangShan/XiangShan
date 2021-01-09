@@ -26,6 +26,10 @@ class PrefetchResp extends PrefetchBundle {
   
 }
 
+class PrefetchFinish extends PrefetchBundle {
+  
+}
+
 class PrefetchTrain extends PrefetchBundle {
   val addr = UInt(PAddrBits.W)
   val write = Bool()

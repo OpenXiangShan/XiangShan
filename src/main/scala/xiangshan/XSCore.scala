@@ -180,6 +180,7 @@ trait HasXSParameter {
     nMissEntries = 8
   )
 
+  // icache prefetcher
   val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
     enable = true,
     _type = "stream",
@@ -188,6 +189,19 @@ trait HasXSParameter {
       streamSize = 4,
       ageWidth = 4,
       blockBytes = l1plusCacheParameters.blockBytes,
+      reallocStreamOnMissInstantly = true
+    )
+  )
+
+  // dcache prefetcher
+  val l2PrefetcherParameters = L2PrefetcherParameters(
+    enable = true,
+    _type = "stream",
+    streamParams = StreamPrefetchParameters(
+      streamCnt = 4,
+      streamSize = 4,
+      ageWidth = 4,
+      blockBytes = L2BlockSize,
       reallocStreamOnMissInstantly = true
     )
   )

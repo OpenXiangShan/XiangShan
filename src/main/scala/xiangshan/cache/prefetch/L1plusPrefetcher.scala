@@ -42,6 +42,8 @@ class L1plusPrefetcher extends PrefetchModule {
     pft.io.resp.bits.id := io.mem_grant.bits.id(streamParams.totalWidth - 1, 0)
     io.mem_grant.ready := pft.io.resp.ready
 
+    pft.io.finish.ready := true.B
+
     // debug info
     XSDebug(p"io.in:          v=${io.in.valid} r=${io.in.ready} ${io.in.bits}\n")
     XSDebug(p"io.mem_acquire: v=${io.mem_acquire.valid} r=${io.mem_acquire.ready} ${io.mem_acquire.bits}\n")

@@ -42,15 +42,29 @@ class StreamPrefetchResp(p: StreamPrefetchParameters) extends PrefetchResp {
   override def cloneType: this.type = (new StreamPrefetchResp(p)).asInstanceOf[this.type]
 }
 
+class StreamPrefetchFinish(p: StreamPrefetchParameters) extends PrefetchFinish {
+  val id = UInt(p.totalWidth.W)
+
+  def stream = id(p.totalWidth - 1, p.totalWidth - p.streamWidth)
+  def idx = id(p.idxWidth - 1, 0)
+
+  override def toPrintable: Printable = {
+    p"id=0x${Hexadecimal(id)} stream=${Binary(stream)} idxInAStream=${Binary(idx)}"
+  }
+  override def cloneType: this.type = (new StreamPrefetchFinish(p)).asInstanceOf[this.type]
+}
+
 class StreamPrefetchIO(p: StreamPrefetchParameters) extends PrefetchBundle {
   val train = Flipped(ValidIO(new PrefetchTrain))
   val req = DecoupledIO(new StreamPrefetchReq(p))
   val resp = Flipped(DecoupledIO(new StreamPrefetchResp(p)))
+  val finish = DecoupledIO(new StreamPrefetchFinish(p))
 
   override def toPrintable: Printable = {
     p"train: v=${train.valid} ${train.bits} " +
       p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
-      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
+      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}" +
+      p"finish: v=${finish.valid} r=${finish.ready} ${finish.bits}"
   }
   override def cloneType: this.type = (new StreamPrefetchIO(p)).asInstanceOf[this.type]
 }
@@ -79,6 +93,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     // prefetch req
     val req = DecoupledIO(new StreamPrefetchReq(p))
     val resp = Flipped(DecoupledIO(new StreamPrefetchResp(p)))
+    val finish = DecoupledIO(new StreamPrefetchFinish(p))
   })
 
   def streamSize = p.streamSize
@@ -93,7 +108,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val head = RegInit(0.U(log2Up(streamSize).W))
   val tail = RegInit(0.U(log2Up(streamCnt).W))
 
-  val s_idle :: s_req :: s_resp :: Nil = Enum(3)
+  val s_idle :: s_req :: s_resp :: s_finish :: Nil = Enum(3)
   val state = RegInit(VecInit(Seq.fill(streamSize)(s_idle)))
 
   val isPrefetching = VecInit(state.map(_ =/= s_idle))
@@ -146,6 +161,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
 
   val reqs = Wire(Vec(streamSize, Decoupled(new StreamPrefetchReq(p))))
   val resps = Wire(Vec(streamSize, Decoupled(new StreamPrefetchResp(p))))
+  val finishs = Wire(Vec(streamSize, DecoupledIO(new StreamPrefetchFinish(p))))
   (0 until streamSize).foreach{ i =>
     when (state(i) === s_req) {
       when (reqs(i).fire()) {
@@ -155,6 +171,12 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
 
     when (state(i) === s_resp) {
       when (resps(i).fire()) {
+        state(i) := s_finish
+      }
+    }
+
+    when (state(i) === s_finish) {
+      when (finishs(i).fire()) {
         state(i) := s_idle
         valid(i) := true.B
       }
@@ -165,19 +187,25 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     reqs(i).bits.write := buf(i).write
     reqs(i).bits.id := Cat(0.U(p.streamWidth.W), i.U(p.idxWidth.W))
     resps(i).ready := state(i) === s_resp
+    finishs(i).valid := state(i) === s_finish
+    finishs(i).bits.id := Cat(0.U(p.streamWidth.W), i.U(p.idxWidth.W))
   }
 
   // send req sequentially
   val prefetchPrior = Wire(Vec(streamSize, UInt(log2Up(streamSize).W)))
   val reqArb = Module(new Arbiter(new StreamPrefetchReq(p), streamSize))
+  val finishArb = Module(new Arbiter(new StreamPrefetchFinish(p), streamSize))
   for (i <- 0 until streamSize) {
     prefetchPrior(i) := head + i.U
     reqs(i).ready := false.B
-    reqs(prefetchPrior(i)) <> reqArb.io.in(i)
+    reqArb.io.in(i) <> reqs(prefetchPrior(i))
+    finishs(i).ready := false.B
+    finishArb.io.in(i) <> finishs(prefetchPrior(i))
     resps(i).bits := io.resp.bits
     resps(i).valid := io.resp.valid && io.resp.bits.idx === i.U
   }
-  reqArb.io.out <> io.req
+  io.req <> reqArb.io.out
+  io.finish <> finishArb.io.out
   io.resp.ready := VecInit(resps.zipWithIndex.map{ case (r, i) =>
     r.ready && i.U === io.resp.bits.idx}).asUInt.orR
   
@@ -206,6 +234,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   // debug info
   XSDebug(p"StreamBuf ${io.streamBufId} io.req:    v=${io.req.valid} r=${io.req.ready} ${io.req.bits}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} io.resp:   v=${io.resp.valid} r=${io.resp.ready} ${io.resp.bits}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} io.finish: v=${io.finish.valid} r=${io.finish.ready} ${io.finish.bits}")
   XSDebug(p"StreamBuf ${io.streamBufId} io.update: v=${io.update.valid} ${io.update.bits}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} io.alloc:  v=${io.alloc.valid} ${io.alloc.bits}\n")
   for (i <- 0 until streamSize) {
@@ -301,6 +330,7 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
 
   // 3. send reqs from streamBufs
   val reqArb = Module(new Arbiter(new StreamPrefetchReq(p), streamCnt))
+  val finishArb = Module(new Arbiter(new StreamPrefetchFinish(p), streamCnt))
   for (i <- 0 until streamCnt) {
     reqArb.io.in(i).valid := streamBufs(i).io.req.valid
     reqArb.io.in(i).bits := streamBufs(i).io.req.bits
@@ -309,8 +339,13 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
 
     streamBufs(i).io.resp.valid := io.resp.valid && i.U === io.resp.bits.stream
     streamBufs(i).io.resp.bits := io.resp.bits
+
+    finishArb.io.in(i).valid := streamBufs(i).io.finish.valid
+    finishArb.io.in(i).bits.id := Cat(i.U(p.streamWidth.W), streamBufs(i).io.finish.bits.id(p.idxWidth - 1, 0))
+    streamBufs(i).io.finish.ready := finishArb.io.in(i).ready
   }
   io.req <> reqArb.io.out
+  io.finish <> finishArb.io.out
   io.resp.ready := VecInit(streamBufs.zipWithIndex.map { case (buf, i) =>
     i.U === io.resp.bits.stream && buf.io.resp.ready}).asUInt.orR
   
