@@ -89,9 +89,10 @@ class FloatBlock
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
     rsData.io.srcRegValue := DontCare
-    rsData.io.srcRegValue(0) := fpRf.io.readPorts(readPortIndex(i)).data
-    rsData.io.srcRegValue(1) := fpRf.io.readPorts(readPortIndex(i) + 1.U).data
-    rsData.io.srcRegValue(2) := fpRf.io.readPorts(readPortIndex(i) + 2.U).data
+    val startIndex = readPortIndex(i) * 3.U
+    rsData.io.srcRegValue(0) := fpRf.io.readPorts(startIndex).data
+    rsData.io.srcRegValue(1) := fpRf.io.readPorts(startIndex + 1.U).data
+    rsData.io.srcRegValue(2) := fpRf.io.readPorts(startIndex + 2.U).data
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

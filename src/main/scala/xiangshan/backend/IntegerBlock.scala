@@ -145,8 +145,8 @@ class IntegerBlock
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
     rsData.io.srcRegValue := DontCare
-    rsData.io.srcRegValue(0) := intRf.io.readPorts(readPortIndex(i)).data
-    rsData.io.srcRegValue(1) := intRf.io.readPorts(readPortIndex(i) + 1.U).data
+    rsData.io.srcRegValue(0) := intRf.io.readPorts(Cat(readPortIndex(i), 0.U(1.W))).data // readPortIndex(i) * 2.U
+    rsData.io.srcRegValue(1) := intRf.io.readPorts(Cat(readPortIndex(i), 1.U(1.W))).data // readPortIndex(i) * 2.U + 1.U
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

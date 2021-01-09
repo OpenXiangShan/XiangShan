@@ -14,7 +14,7 @@ class Dispatch2Int extends XSModule {
     val regRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
     val numExist = Input(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
-    val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(NRIntReadPorts).W)))
+    val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
   })
 
   /**
@@ -112,7 +112,7 @@ class Dispatch2Int extends XSModule {
   /**
     * Part 5: send read port index of register file to reservation station
     */
-  io.readPortIndex := readPortIndex
+  io.readPortIndex := readPortIndex.map(_(2, 1))
 //  val readPortIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
 //  val uopReg = Reg(Vec(exuParameters.IntExuCnt, new MicroOp))
 //  val dataValidRegDebug = Reg(Vec(exuParameters.IntExuCnt, Bool()))
