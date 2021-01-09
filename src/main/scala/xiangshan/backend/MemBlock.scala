@@ -83,7 +83,8 @@ class MemBlock
   atomicsUnit.io.out.ready := ldOut0.ready
   loadUnits.head.io.ldout.ready := ldOut0.ready
 
-  val exeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  val intExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
+  val fpExeWbReqs = loadUnits.map(_.io.fpout)
 
   val readPortIndex = Seq(0, 1, 2, 4)
   io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
@@ -103,7 +104,7 @@ class MemBlock
       .map(_._2.bits.data)
     val wakeupCnt = writeBackData.length
 
-    val inBlockListenPorts = exeWbReqs
+    val inBlockListenPorts = intExeWbReqs ++ fpExeWbReqs
     val extraListenPorts = inBlockListenPorts ++
       slowWakeUpIn.zip(io.wakeUpIn.slow)
         .filter(x => (x._1.writeIntRf && readIntRf) || (x._1.writeFpRf && readFpRf))
@@ -158,20 +159,12 @@ class MemBlock
   io.wakeUpIn.fast.foreach(_.ready := true.B)
   io.wakeUpIn.slow.foreach(_.ready := true.B)
 
-  io.wakeUpFpOut.slow <> exeWbReqs.map(x => {
-    val raw = WireInit(x)
-    raw.valid := x.valid && x.bits.uop.ctrl.fpWen
-    raw
-  })
-
-  io.wakeUpIntOut.slow <> exeWbReqs.map(x => {
-    val raw = WireInit(x)
-    raw.valid := x.valid && x.bits.uop.ctrl.rfWen
-    raw
-  })
+  io.wakeUpFpOut.slow <> fpExeWbReqs
+  io.wakeUpIntOut.slow <> intExeWbReqs
 
   // load always ready
-  exeWbReqs.foreach(_.ready := true.B)
+  fpExeWbReqs.foreach(_.ready := true.B)
+  intExeWbReqs.foreach(_.ready := true.B)
 
   val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
   val lsq = Module(new LsqWrappper)
@@ -204,16 +197,22 @@ class MemBlock
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
-    storeUnits(i).io.redirect     <> io.fromCtrlBlock.redirect
-    storeUnits(i).io.tlbFeedback  <> reservationStations(exuParameters.LduCnt + i).io.feedback
-    storeUnits(i).io.dtlb         <> dtlb.io.requestor(exuParameters.LduCnt + i)
-    // get input form dispatch
-    storeUnits(i).io.stin         <> reservationStations(exuParameters.LduCnt + i).io.deq
-    // passdown to lsq
-    storeUnits(i).io.lsq          <> lsq.io.storeIn(i)
-    io.toCtrlBlock.stOut(i).valid := storeUnits(i).io.stout.valid
-    io.toCtrlBlock.stOut(i).bits  := storeUnits(i).io.stout.bits
-	  storeUnits(i).io.stout.ready := true.B
+	val stu = storeUnits(i)
+	val rs = reservationStations(exuParameters.LduCnt + i)
+	val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
+
+	stu.io.redirect <> io.fromCtrlBlock.redirect
+	stu.io.tlbFeedback <> rs.io.feedback
+	stu.io.dtlb <> dtlbReq
+
+	// get input from dispatch
+	stu.io.stin <> rs.io.deq
+
+	// passdown to lsq
+	stu.io.lsq <> lsq.io.storeIn(i)
+	io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
+	io.toCtrlBlock.stOut(i).bits := stu.io.stout.bits
+	stu.io.stout.ready := true.B
   }
 
   // mmio store writeback will use store writeback port 0

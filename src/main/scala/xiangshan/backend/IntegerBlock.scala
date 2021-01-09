@@ -6,7 +6,6 @@ import xiangshan._
 import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
 import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
-import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
 
@@ -73,7 +72,7 @@ class IntegerBlock
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
 
     val csrio = new Bundle {
-      val fflags = Input(new Fflags) // from roq
+      val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
       val exception = Flipped(ValidIO(new MicroOp)) // from roq
