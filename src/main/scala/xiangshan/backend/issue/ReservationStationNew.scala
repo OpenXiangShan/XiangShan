@@ -401,7 +401,10 @@ class ReservationStationData
         (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
 
       case Exu.fmiscExeUnitCfg =>
-        (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+        // src1: fp
+        data(enqPtrReg)(0) := io.srcRegValue(0)
+        // src2: fp or imm
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
 
       case Exu.ldExeUnitCfg =>
         data(enqPtrReg)(0) := io.srcRegValue(0)
