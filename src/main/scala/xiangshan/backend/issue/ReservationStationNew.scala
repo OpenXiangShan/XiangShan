@@ -329,7 +329,7 @@ class ReservationStationData
 
     // listen to write back data bus(certain latency)
     // and extra wrtie back(uncertan latency)
-    val writeBackedData = Vec(wakeupCnt, Input(UInt(XLEN.W)))
+    val writeBackedData = Vec(wakeupCnt, Input(UInt((XLEN+1).W)))
     val extraListenPorts = Vec(extraListenPortsCnt, Flipped(ValidIO(new ExuOutput)))
 
     // tlb feedback
@@ -337,7 +337,7 @@ class ReservationStationData
   })
 
   val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt(XLEN.W))))
+  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt((XLEN+1).W))))
 
   // TODO: change srcNum
 

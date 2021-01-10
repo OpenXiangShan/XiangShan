@@ -56,18 +56,23 @@ class SbufferLine extends SbufferBundle {
 class ChooseReplace(nWay: Int) extends XSModule {
   val io = IO(new Bundle{
     // val in = Vec(StorePipelineWidth, Input(UInt(nWay.W)))
-    val mask = Vec(StoreBufferSize, Input(Bool()))
+    val mask = Vec(nWay, Input(Bool()))
     val fire = Input(Bool())
     val way = Output(UInt(nWay.W))
     val flush = Input(Bool())
   })
   val wayReg = RegInit(0.U(log2Up(nWay).W))
-  val nextWay = (wayReg + 1.U)(log2Up(nWay)-1, 0)
+  val wayMask = ~((UIntToOH(wayReg)<<1.U)(nWay-1,0) - 1.U)
+  val stateMask = Cat(io.mask.reverse)
+  val loMask = (wayMask & stateMask)(nWay-1,0)
+
+  val nextWay = PriorityEncoder(Cat(stateMask, loMask))(log2Up(nWay)-1, 0)
+  XSDebug(p"ss[${Binary(Cat(stateMask, loMask))}] , nextWay[${nextWay}]  \n")
 
   io.way := wayReg
 
   when(io.fire){
-    wayReg := Mux(io.mask(nextWay), nextWay, 0.U)
+    wayReg := nextWay
   }
 
   when(io.flush){
@@ -266,13 +271,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.in(0).fire()){
     when(canMerge(0)){
       mergeWordReq(io.in(0).bits, mergeIdx(0), firstWord)
-      // lruAccessWays(0).valid := true.B
-      // lruAccessWays(0) := Cat(mergeMask(0).reverse)
       XSDebug(p"merge req 0 to line [${mergeIdx(0)}]\n")
     }.elsewhen(firstCanInsert){
       wordReqToBufLine(io.in(0).bits, tags(0), firstInsertIdx, firstWord, true.B)
-      //lruAccessWays(0).valid := true.B
-      // lruAccessWays(0) := Cat(firstInsertMask.reverse)
       XSDebug(p"insert req 0 to line[$firstInsertIdx]\n")
     }
   }
@@ -281,13 +282,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.in(1).fire()){
     when(canMerge(1)){
       mergeWordReq(io.in(1).bits, mergeIdx(1), secondWord)
-      // lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(mergeMask(1).reverse)
       XSDebug(p"merge req 1 to line [${mergeIdx(1)}]\n")
     }.elsewhen(secondCanInsert){
       wordReqToBufLine(io.in(1).bits, tags(1), secondInsertIdx, secondWord, !sameTag)
-      //lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(PriorityEncoderOH(secondInsertMask).reverse)
       XSDebug(p"insert req 1 to line[$secondInsertIdx]\n")
     }
   }
@@ -370,13 +367,16 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 //
 //  evictionEntry.bits := evictionIdx
 
-  val tagConflict = tagRead(evictionIdx) === tags(0) || tagRead(evictionIdx) === tags(1)
+  val tagConflict = tagRead(evictionIdx) === tags(0) && canMerge(0) && io.in(0).valid ||
+    tagRead(evictionIdx) === tags(1) && canMerge(1) && io.in(1).valid
 
   io.dcache.req.valid :=
-    ((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer)) &&
+    ((do_eviction && sbuffer_state === x_replace) && !tagConflict || (sbuffer_state === x_drain_sbuffer)) &&
     stateVec(evictionIdx)===s_valid &&
-    noSameBlockInflight(evictionIdx) &&
-    !tagConflict
+    noSameBlockInflight(evictionIdx)
+
+
+  XSDebug(p"1[${((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer))}] 2[${stateVec(evictionIdx)===s_valid}] 3[${noSameBlockInflight(evictionIdx)}] 4[${!tagConflict}]\n")
 
   io.dcache.req.bits.addr := getAddr(tagRead(evictionIdx))
   io.dcache.req.bits.data := bufferRead(evictionIdx).data
@@ -397,7 +397,6 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
   val respId = io.dcache.resp.bits.meta.id
   when(io.dcache.resp.fire()){
-    XSDebug("")
     stateVec(respId) := s_invalid
     assert(stateVec(respId) === s_inflight)
     XSDebug(p"recv cache resp: id=[$respId]\n")

@@ -17,14 +17,14 @@ import xiangshan.mem.LsqEnqIO
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
-  val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
+  val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
   val redirect = ValidIO(new Redirect)
 }
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
   val enqIqData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
-  val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+  val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
   val redirect = ValidIO(new Redirect)
 }
 
@@ -80,13 +80,11 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.frontend.cfiUpdateInfo <> brq.io.cfiInfo
 
   decode.io.in <> io.frontend.cfVec
-  decode.io.toBrq <> brq.io.enqReqs
-  decode.io.brTags <> brq.io.brTags
+  decode.io.enqBrq <> brq.io.enq
 
   brq.io.redirect.valid <> redirectValid
   brq.io.redirect.bits <> redirect
   brq.io.bcommit <> roq.io.bcommit
-  brq.io.enqReqs <> decode.io.toBrq
   brq.io.exuRedirectWb <> io.fromIntBlock.exuRedirect
 
   // pipeline between decode and dispatch

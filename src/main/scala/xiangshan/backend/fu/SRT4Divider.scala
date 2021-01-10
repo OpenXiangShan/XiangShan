@@ -3,7 +3,7 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.util._
 import utils.SignExt
-import xiangshan.backend.fu.fpu.util.CSA3_2
+import xiangshan.backend.fu.util.CSA3_2
 
 /** A Radix-4 SRT Integer Divider
   *

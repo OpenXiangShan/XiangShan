@@ -17,8 +17,7 @@ class Alu extends FunctionUnit with HasRedirectOut {
     io.in.bits.uop
   )
 
-  val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
-  val valid = io.in.valid && !redirectHit
+  val valid = io.in.valid
 
   val isAdderSub = (func =/= ALUOpType.add) && (func =/= ALUOpType.addw)
   val adderRes = (src1 +& (src2 ^ Fill(XLEN, isAdderSub))) + isAdderSub
