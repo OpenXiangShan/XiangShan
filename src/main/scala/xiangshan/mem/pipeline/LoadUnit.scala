@@ -90,16 +90,18 @@ class LoadUnit_S1 extends XSModule {
 
   val s1_uop = io.in.bits.uop
   val s1_paddr = io.dtlbResp.bits.paddr
+  val s1_exception = io.out.bits.uop.cf.exceptionVec.asUInt.orR
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr) && !io.out.bits.uop.cf.exceptionVec.asUInt.orR
+  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1
 
   io.dtlbResp.ready := true.B
 
+  // TOOD: PMA check
   io.dcachePAddr := s1_paddr
-  io.dcacheKill := s1_tlb_miss
+  io.dcacheKill := s1_tlb_miss || s1_exception || s1_mmio
 
   // load forward query datapath
   io.sbuffer.valid := io.in.valid
@@ -118,7 +120,7 @@ class LoadUnit_S1 extends XSModule {
 
   io.out.valid := io.in.valid// && !s1_tlb_miss
   io.out.bits.paddr := s1_paddr
-  io.out.bits.mmio := s1_mmio
+  io.out.bits.mmio := s1_mmio && !s1_exception
   io.out.bits.tlbMiss := s1_tlb_miss
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp.pf.ld
 
@@ -143,12 +145,15 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_mask = io.in.bits.mask
   val s2_paddr = io.in.bits.paddr
   val s2_tlb_miss = io.in.bits.tlbMiss
+  val s2_mmio = io.in.bits.mmio
+  val s2_exception = io.in.bits.uop.cf.exceptionVec.asUInt.orR
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
 
   io.dcacheResp.ready := true.B
-  assert(!(io.in.valid && !io.dcacheResp.valid), "DCache response got lost")
+  val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
+  assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
 
   // feedback tlb result to RS
   io.tlbFeedback.valid := io.in.valid
@@ -182,7 +187,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
 
   // TODO: ECC check
 
-  io.out.valid := io.in.valid && !s2_cache_replay
+  io.out.valid := io.in.valid && !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   // Inst will be canceled in store queue / lsq,
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
