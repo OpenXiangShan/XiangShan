@@ -13,16 +13,17 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
 
   val device = new SimpleDevice("clint", Seq("XiangShan", "clint"))
   val node = TLRegisterNode(address, device, beatBytes = 8)
+  val NumCores = top.Parameters.get.socParameters.NumCores
 
   lazy val module = new LazyModuleImp(this) with HasXSLog with HasTLDump{
     val io = IO(new Bundle() {
-      val mtip = Output(Bool())
-      val msip = Output(Bool())
+      val mtip = Output(Vec(NumCores, Bool()))
+      val msip = Output(Vec(NumCores, Bool()))
     })
 
     val mtime = RegInit(0.U(64.W))  // unit: us
-    val mtimecmp = RegInit(0.U(64.W))
-    val msip = RegInit(0.U(64.W))
+    val mtimecmp = Seq.fill(NumCores)(RegInit(0.U(64.W)))
+    val msip = Seq.fill(NumCores)(RegInit(0.U(32.W)))
 
     val clk = (if (!sim) 40 /* 40MHz / 1000000 */ else 100)
     val freq = RegInit(clk.U(16.W))
@@ -34,13 +35,19 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
     val tick = (nextCnt === freq)
     when (tick) { mtime := mtime + inc }
 
-    node.regmap( mapping =
-      0x0000 -> RegField.bytes(msip),
-      0x4000 -> RegField.bytes(mtimecmp),
+    var clintMapping = Seq(
       0x8000 -> RegField.bytes(freq),
       0x8008 -> RegField.bytes(inc),
-      0xbff8 -> RegField.bytes(mtime)
-    )
+      0xbff8 -> RegField.bytes(mtime))
+
+    for (i <- 0 until NumCores) {
+      clintMapping = clintMapping ++ Seq(
+        0x0000 + i*4 -> RegField.bytes(msip(i)),
+        0x4000 + i*8 -> RegField.bytes(mtimecmp(i))
+      )
+    }
+
+    node.regmap( mapping = clintMapping:_* )
 
     val in = node.in.head._1
     when(in.a.valid){
@@ -51,7 +58,9 @@ class TLTimer(address: Seq[AddressSet], sim: Boolean)(implicit p: Parameters) ex
 //    val gtime = GTimer()
 //    printf(p"[$gtime][Timer] mtime=$mtime cnt=$cnt freq=$freq\n")
 
-    io.mtip := RegNext(mtime >= mtimecmp)
-    io.msip := RegNext(msip =/= 0.U)
+    for (i <- 0 until NumCores) {
+      io.mtip(i) := RegNext(mtime >= mtimecmp(i))
+      io.msip(i) := RegNext(msip(i) =/= 0.U)
+    }
   }
 }
