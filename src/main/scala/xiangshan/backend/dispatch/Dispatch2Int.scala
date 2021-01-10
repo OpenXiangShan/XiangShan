@@ -21,47 +21,27 @@ class Dispatch2Int extends XSModule {
   /**
     * Part 1: generate indexes for reservation stations
     */
+  val jmpCanAccept = VecInit(io.fromDq.map(deq => deq.valid && jumpExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val aluCanAccept = VecInit(io.fromDq.map(deq => deq.valid && aluExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val mduCanAccept = VecInit(io.fromDq.map(deq => deq.valid && mulDivExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
   assert(exuParameters.JmpCnt == 1)
   val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.JmpCnt, false))
   val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.AluCnt, true))
   val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.MduCnt, true))
   val aluPriority = PriorityGen((0 until exuParameters.AluCnt).map(i => io.numExist(i+exuParameters.JmpCnt)))
   val mduPriority = PriorityGen((0 until exuParameters.MduCnt).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
-  for (i <- 0 until dpParams.IntDqDeqWidth) {
-    jmpIndexGen.io.validBits(i) := io.fromDq(i).valid && jumpExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    aluIndexGen.io.validBits(i) := io.fromDq(i).valid && aluExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    mduIndexGen.io.validBits(i) := io.fromDq(i).valid && mulDivExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    // XSDebug(io.fromDq(i).valid,
-    //   p"int dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
-  }
+  jmpIndexGen.io.validBits := jmpCanAccept
+  aluIndexGen.io.validBits := aluCanAccept
+  mduIndexGen.io.validBits := mduCanAccept
   jmpIndexGen.io.priority := DontCare
-  for (i <- 0 until exuParameters.AluCnt) {
-    aluIndexGen.io.priority(i) := aluPriority(i)
-  }
-  for (i <- 0 until exuParameters.MduCnt) {
-    mduIndexGen.io.priority(i) := mduPriority(i)
-  }
+  aluIndexGen.io.priority := aluPriority
+  mduIndexGen.io.priority := mduPriority
+
   val allIndexGen = Seq(jmpIndexGen, aluIndexGen, mduIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsValidVec = (0 until dpParams.IntDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
-  val rsIndexVec = (0 until dpParams.IntDqDeqWidth).map({i =>
-    val indexOffset = Seq(0, exuParameters.JmpCnt, exuParameters.JmpCnt + exuParameters.AluCnt)
-    allIndexGen.zipWithIndex.map{
-      case (index, j) => Mux(index.io.reverseMapping(i).valid,
-        ZeroExt(index.io.reverseMapping(i).bits, log2Ceil(exuParameters.IntExuCnt)) + indexOffset(j).U,
-        0.U)
-    }.reduce(_ | _)
-  })
-
   for (i <- validVec.indices) {
     // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
-  }
-  for (i <- rsValidVec.indices) {
-    // XSDebug(p"jmp reverse $i: valid ${jmpIndexGen.io.reverseMapping(i).valid} index ${jmpIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"alu reverse $i: valid ${aluIndexGen.io.reverseMapping(i).valid} index ${aluIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"mdu reverse $i: valid ${mduIndexGen.io.reverseMapping(i).valid} index ${mduIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
   }
 
   /**
@@ -86,9 +66,20 @@ class Dispatch2Int extends XSModule {
   /**
     * Part 3: dispatch to reservation stations
     */
+  val jmpReady = io.enqIQCtrl(0).ready
+  val aluReady = Cat(io.enqIQCtrl.take(exuParameters.JmpCnt + exuParameters.AluCnt).drop(exuParameters.JmpCnt).map(_.ready)).andR
+  val mduReady = Cat(io.enqIQCtrl.drop(exuParameters.JmpCnt + exuParameters.AluCnt).map(_.ready)).andR
   for (i <- 0 until exuParameters.IntExuCnt) {
     val enq = io.enqIQCtrl(i)
-    enq.valid := validVec(i)
+    if (i < exuParameters.JmpCnt) {
+      enq.valid := jmpIndexGen.io.mapping(i).valid// && jmpReady
+    }
+    else if (i < exuParameters.JmpCnt + exuParameters.AluCnt) {
+      enq.valid := aluIndexGen.io.mapping(i - exuParameters.JmpCnt).valid && aluReady
+    }
+    else {
+      enq.valid := mduIndexGen.io.mapping(i - (exuParameters.JmpCnt + exuParameters.AluCnt)).valid && mduReady
+    }
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.regRdy(readPortIndex(i))
     enq.bits.src2State := io.regRdy(readPortIndex(i) + 1.U)
@@ -101,14 +92,19 @@ class Dispatch2Int extends XSModule {
   /**
     * Part 4: response to dispatch queue
     */
+  val mdu2CanOut = !(mduCanAccept(0) && mduCanAccept(1))
+  val mdu3CanOut = !(mduCanAccept(0) && mduCanAccept(1) || mduCanAccept(0) && mduCanAccept(2) || mduCanAccept(1) && mduCanAccept(2))
   for (i <- 0 until dpParams.IntDqDeqWidth) {
-    io.fromDq(i).ready := rsValidVec(i) && io.enqIQCtrl(rsIndexVec(i)).ready
+    io.fromDq(i).ready := jmpCanAccept(i) && (if (i == 0) true.B else !Cat(jmpCanAccept.take(i)).orR) && jmpReady ||
+                          aluCanAccept(i) && aluReady ||
+                          mduCanAccept(i) && (if (i <= 1) true.B else if (i == 2) mdu2CanOut else mdu3CanOut) && mduReady
 
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Int dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Int dispatch queue with index $i\n")
   }
+  XSError(PopCount(io.fromDq.map(_.fire())) =/= PopCount(io.enqIQCtrl.map(_.fire())), "deq =/= enq\n")
 
   /**
     * Part 5: the second stage of dispatch 2 (send data to reservation station)
