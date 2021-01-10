@@ -336,7 +336,7 @@ class ReservationStationData
     val ctrl = Flipped(new RSCtrlDataIO)
 
     // read src op value
-    val srcRegValue = Vec(srcNum, Input(UInt(XLEN.W)))
+    val srcRegValue = Vec(srcNum, Input(UInt((XLEN + 1).W)))
     // broadcast selected uop to other issue queues
     val selectedUop = ValidIO(new MicroOp)
 

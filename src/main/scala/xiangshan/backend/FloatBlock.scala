@@ -3,6 +3,7 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import utils._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
@@ -89,10 +90,10 @@ class FloatBlock
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
     rsData.io.srcRegValue := DontCare
-    val startIndex = readPortIndex(i) * 3.U
-    rsData.io.srcRegValue(0) := fpRf.io.readPorts(startIndex).data
-    rsData.io.srcRegValue(1) := fpRf.io.readPorts(startIndex + 1.U).data
-    rsData.io.srcRegValue(2) := fpRf.io.readPorts(startIndex + 2.U).data
+    val srcIndex = (0 until 3).map(Range(_, 12, 3).map(_.U))
+    rsData.io.srcRegValue(0) := fpRf.io.readPorts(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(0)))).data
+    rsData.io.srcRegValue(1) := fpRf.io.readPorts(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(1)))).data
+    rsData.io.srcRegValue(2) := fpRf.io.readPorts(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(2)))).data
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

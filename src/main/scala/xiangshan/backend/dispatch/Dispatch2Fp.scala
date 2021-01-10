@@ -76,9 +76,9 @@ class Dispatch2Fp extends XSModule {
     io.readRf(3*i+1).addr := io.fromDq(index(fpReadPortSrc(i))).bits.psrc2
     io.readRf(3*i+2).addr := io.fromDq(index(fpReadPortSrc(i))).bits.psrc3
   }
-  val readPortIndex = Wire(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(NRFpReadPorts - exuParameters.StuCnt).W)))
-  fpStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := (3*i).U})
-  fpDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := 3.U * fpDynamicExuSrc(i)})
+  val readPortIndex = Wire(Vec(exuParameters.FpExuCnt, UInt(2.W)))
+  fpStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
+  fpDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := fpDynamicExuSrc(i)})
 
   /**
     * Part 3: dispatch to reservation stations
@@ -87,9 +87,10 @@ class Dispatch2Fp extends XSModule {
     val enq = io.enqIQCtrl(i)
     enq.valid := validVec(i)
     enq.bits := io.fromDq(indexVec(i)).bits
-    enq.bits.src1State := io.regRdy(readPortIndex(i))
-    enq.bits.src2State := io.regRdy(readPortIndex(i) + 1.U)
-    enq.bits.src3State := io.regRdy(readPortIndex(i) + 2.U)
+    val srcIndex = (0 until 3).map(Range(_, 12, 3).map(_.U))
+    enq.bits.src1State := io.regRdy(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(0))))
+    enq.bits.src2State := io.regRdy(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(1))))
+    enq.bits.src3State := io.regRdy(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(2))))
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State} ${enq.bits.src3State}) " +
@@ -111,7 +112,7 @@ class Dispatch2Fp extends XSModule {
   /**
     * Part 5: send read port index of register file to reservation station
     */
-  io.readPortIndex := readPortIndex.map(_ / 3.U)
+  io.readPortIndex := readPortIndex
 //  val readPortIndexReg = Reg(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(NRFpReadPorts - exuParameters.StuCnt).W)))
 //  val uopReg = Reg(Vec(exuParameters.FpExuCnt, new MicroOp))
 //  val dataValidRegDebug = Reg(Vec(exuParameters.FpExuCnt, Bool()))

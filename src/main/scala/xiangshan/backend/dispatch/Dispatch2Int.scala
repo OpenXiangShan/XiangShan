@@ -79,8 +79,8 @@ class Dispatch2Int extends XSModule {
     io.readRf(2*i+1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
   }
   val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
-  intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := (2*i).U})
-  intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := 2.U * intDynamicExuSrc(i)})
+  intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
+  intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := intDynamicExuSrc(i)})
 
   /**
     * Part 3: dispatch to reservation stations
@@ -89,8 +89,8 @@ class Dispatch2Int extends XSModule {
     val enq = io.enqIQCtrl(i)
     enq.valid := validVec(i)
     enq.bits := io.fromDq(indexVec(i)).bits
-    enq.bits.src1State := io.regRdy(readPortIndex(i))
-    enq.bits.src2State := io.regRdy(readPortIndex(i) + 1.U)
+    enq.bits.src1State := io.regRdy(Cat(readPortIndex(i), 0.U(1.W)))
+    enq.bits.src2State := io.regRdy(Cat(readPortIndex(i), 1.U(1.W)))
 
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State}) " +
@@ -112,7 +112,7 @@ class Dispatch2Int extends XSModule {
   /**
     * Part 5: send read port index of register file to reservation station
     */
-  io.readPortIndex := readPortIndex.map(_(2, 1))
+  io.readPortIndex := readPortIndex
 //  val readPortIndexReg = Reg(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
 //  val uopReg = Reg(Vec(exuParameters.IntExuCnt, new MicroOp))
 //  val dataValidRegDebug = Reg(Vec(exuParameters.IntExuCnt, Bool()))
