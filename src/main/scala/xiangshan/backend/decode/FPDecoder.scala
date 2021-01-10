@@ -18,7 +18,7 @@ class FPDecoder extends XSModule{
   val s = BitPat(S)
   val d = BitPat(D)
 
-  val default = List(X,X,X,X,N,N,X,X,X)
+  val default = List(X,X,X,N,N,N,X,X,X)
 
   // isAddSub tagIn tagOut fromInt wflags fpWen div sqrt fcvt
   val single: Array[(BitPat, List[BitPat])] = Array(
