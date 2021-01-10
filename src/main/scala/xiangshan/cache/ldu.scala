@@ -181,7 +181,7 @@ class LoadPipe extends DCacheModule
   // upper level does not need to replay request
   // they can sit in load queue and wait for refill
   resp.bits.miss := !s2_hit || s2_nack
-  resp.bits.replay := !io.miss_req.fire() || s2_nack
+  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits

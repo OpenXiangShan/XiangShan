@@ -186,7 +186,7 @@ class StorePipe extends DCacheModule
   resp.bits.data := DontCare
   resp.bits.meta := s2_req.meta
   resp.bits.miss := !s2_hit || s2_nack
-  resp.bits.replay := !io.miss_req.fire() || s2_nack
+  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits  := resp.bits

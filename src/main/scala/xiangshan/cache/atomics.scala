@@ -239,7 +239,7 @@ class AtomicsPipe extends DCacheModule
   // nemu use this to see whether lr sc counter is still valid
   resp.bits.meta.id := lrsc_valid
   resp.bits.miss := !s2_hit || s2_nack
-  resp.bits.replay := !io.miss_req.fire() || s2_nack
+  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
