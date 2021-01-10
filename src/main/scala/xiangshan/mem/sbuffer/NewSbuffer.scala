@@ -271,13 +271,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.in(0).fire()){
     when(canMerge(0)){
       mergeWordReq(io.in(0).bits, mergeIdx(0), firstWord)
-      // lruAccessWays(0).valid := true.B
-      // lruAccessWays(0) := Cat(mergeMask(0).reverse)
       XSDebug(p"merge req 0 to line [${mergeIdx(0)}]\n")
     }.elsewhen(firstCanInsert){
       wordReqToBufLine(io.in(0).bits, tags(0), firstInsertIdx, firstWord, true.B)
-      //lruAccessWays(0).valid := true.B
-      // lruAccessWays(0) := Cat(firstInsertMask.reverse)
       XSDebug(p"insert req 0 to line[$firstInsertIdx]\n")
     }
   }
@@ -286,13 +282,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   when(io.in(1).fire()){
     when(canMerge(1)){
       mergeWordReq(io.in(1).bits, mergeIdx(1), secondWord)
-      // lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(mergeMask(1).reverse)
       XSDebug(p"merge req 1 to line [${mergeIdx(1)}]\n")
     }.elsewhen(secondCanInsert){
       wordReqToBufLine(io.in(1).bits, tags(1), secondInsertIdx, secondWord, !sameTag)
-      //lruAccessWays(1).valid := true.B
-      // lruAccessWays(1) := Cat(PriorityEncoderOH(secondInsertMask).reverse)
       XSDebug(p"insert req 1 to line[$secondInsertIdx]\n")
     }
   }
@@ -375,12 +367,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 //
 //  evictionEntry.bits := evictionIdx
 
-  val tagConflict = tagRead(evictionIdx) === tags(0) || tagRead(evictionIdx) === tags(1)
+  val tagConflict = tagRead(evictionIdx) === tags(0) && canMerge(0) && io.in(0).valid ||
+    tagRead(evictionIdx) === tags(1) && canMerge(1) && io.in(1).valid
 
   io.dcache.req.valid :=
     ((do_eviction && sbuffer_state === x_replace) && !tagConflict || (sbuffer_state === x_drain_sbuffer)) &&
     stateVec(evictionIdx)===s_valid &&
-    noSameBlockInflight(evictionIdx) 
+    noSameBlockInflight(evictionIdx)
 
 
   XSDebug(p"1[${((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer))}] 2[${stateVec(evictionIdx)===s_valid}] 3[${noSameBlockInflight(evictionIdx)}] 4[${!tagConflict}]\n")
