@@ -61,7 +61,8 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       cacheName = s"L2"
     ),
     InclusiveCacheMicroParameters(
-      writeBytes = 8
+      writeBytes = 8,
+      portFactor = 4
     )
   )))
 
@@ -69,20 +70,21 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // -------------------------------------------------
   private val l3_xbar = TLXbar()
 
-  private val l3_banks = (0 until L3NBanks) map (i =>
-      LazyModule(new InclusiveCache(
-        CacheParameters(
-          level = 3,
-          ways = L3NWays,
-          sets = L3NSets,
-          blockBytes = L3BlockSize,
-          beatBytes = L2BusWidth / 8,
-          cacheName = s"L3_$i"
-        ),
-      InclusiveCacheMicroParameters(
-        writeBytes = 8
-      )
-    )))
+  private val l3_cache = LazyModule(new InclusiveCache(
+    CacheParameters(
+      level = 3,
+      ways = L3NWays,
+      sets = L3NSets,
+      blockBytes = L3BlockSize,
+      beatBytes = L2BusWidth / 8,
+      cacheName = "L3"
+    ),
+    InclusiveCacheMicroParameters(
+      writeBytes = 8,
+    )
+  )).node
+
+  private val l3_banks = Seq.fill(L3NBanks) { l3_cache }
 
   // L3 to memory network
   // -------------------------------------------------
@@ -133,17 +135,18 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     mask = ~BigInt((L3NBanks -1) * L3BlockSize))
 
   for(i <- 0 until L3NBanks) {
-    val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
-    l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
+    l3_banks(i) := TLBuffer() := DebugIdentityNode() := l3_xbar
   }
 
   for(i <- 0 until L3NBanks) {
+    val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
     mem(i) :=
       AXI4UserYanker() :=
       TLToAXI4() :=
       TLWidthWidget(L3BusWidth / 8) :=
       TLCacheCork() :=
-      l3_banks(i).node
+      filter :=
+      l3_banks(i)
   }
 
   private val clint = LazyModule(new TLTimer(
