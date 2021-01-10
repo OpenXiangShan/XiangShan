@@ -407,8 +407,8 @@ class LoopPredictor extends BasePredictor with LTBParams {
 
   if (BPUDebug && debug) {
     // debug info
-    XSDebug("[IF2][req] fire=%d flush=%d fetchpc=%x\n", if2_fire, io.flush, io.pc.bits)
-    XSDebug("[IF3][req] fire=%d flush=%d fetchpc=%x\n", if3_fire, io.flush, pc)
+    XSDebug("[IF2][req] fire=%d fetchpc=%x\n", if2_fire, io.pc.bits)
+    XSDebug("[IF3][req] fire=%d fetchpc=%x\n", if3_fire, pc)
     XSDebug("[IF4][req] fire=%d bank=%d packetAlignedPC=%x bankIdx=%x tag=%x\n", out_fire, bank, packetAlignedPC, bankIdx, tag)
     XSDebug("[IF4][req] inMask=%b\n", inMask)
 
