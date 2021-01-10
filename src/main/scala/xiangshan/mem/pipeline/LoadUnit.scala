@@ -293,7 +293,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
   io.fpout.bits.data := fpRdataHelper(fpLoadOutReg.bits.uop, fpLoadOutReg.bits.data) // recode
   io.fpout.valid := RegNext(fpLoadOut.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect))
 
-  io.lsq.ldout.ready := Mux(refillFpLoad, !fpLoadOut.valid, !intHitLoadOut.valid)
+  io.lsq.ldout.ready := Mux(refillFpLoad, !fpHitLoadOut.valid, !intHitLoadOut.valid)
 
   when(io.ldout.fire()){
     XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
