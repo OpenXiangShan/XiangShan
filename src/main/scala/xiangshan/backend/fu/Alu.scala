@@ -56,7 +56,7 @@ class Alu extends FunctionUnit with HasRedirectOut {
     ALUOpType.getBranchType(ALUOpType.bltu) -> sltu
   )
 
-  val isBranch = uop.cf.brUpdate.pd.isBr
+  val isBranch = ALUOpType.isBranch(func)
   val isRVC = uop.cf.brUpdate.pd.isRVC
   val taken = LookupTree(ALUOpType.getBranchType(func), branchOpTable) ^ ALUOpType.isBranchInvert(func)
   val target = (pc + offset)(VAddrBits-1,0)
