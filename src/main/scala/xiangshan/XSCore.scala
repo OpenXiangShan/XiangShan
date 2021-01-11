@@ -89,7 +89,8 @@ case class XSCoreParameters
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
-  NumPerfCounters: Int = 16
+  NumPerfCounters: Int = 16,
+  NrExtIntr: Int = 1
 )
 
 trait HasXSParameter {
@@ -164,6 +165,7 @@ trait HasXSParameter {
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
+  val NrExtIntr = core.NrExtIntr
 
   val icacheParameters = ICacheParameters(
     tagECC = Some("secded"),

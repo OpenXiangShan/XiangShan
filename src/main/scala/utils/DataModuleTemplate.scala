@@ -3,7 +3,7 @@ package utils
 import chisel3._
 import chisel3.util._
 
-class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, useBitVec: Boolean = false) extends Module {
+class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, useBitVec: Boolean = false, syncRead: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val raddr = Vec(numRead,  Input(UInt(log2Up(numEntries).W)))
     val rdata = Vec(numRead,  Output(gen))
@@ -15,8 +15,15 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
   val data = Mem(numEntries, gen)
 
   // read ports
+  // async read
   for (i <- 0 until numRead) {
     io.rdata(i) := data(io.raddr(i))
+  }
+  // sync read
+  if(syncRead){
+    for (i <- 0 until numRead) {
+      io.rdata(i) := data(RegNext(io.raddr(i)))
+    }
   }
 
   if (useBitVec) {
