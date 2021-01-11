@@ -99,7 +99,8 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   def streamSize = p.streamSize
   def streamCnt = p.streamCnt
   def blockBytes = p.blockBytes
-  def getBlockAddr(addr: UInt) = addr & ~((blockBytes - 1).U(addr.getWidth.W))
+  // def getBlockAddr(addr: UInt) = addr & ~((blockBytes - 1).U(addr.getWidth.W))
+  def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(p.blockBytes)), 0.U(log2Up(p.blockBytes).W))
 
   val baseReq = RegInit(0.U.asTypeOf(Valid(new PrefetchReq)))
   val nextReq = RegInit(0.U.asTypeOf(new PrefetchReq))
@@ -108,7 +109,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val head = RegInit(0.U(log2Up(streamSize).W))
   val tail = RegInit(0.U(log2Up(streamCnt).W))
 
-  val s_idle :: s_req :: s_resp :: s_finish :: Nil = Enum(3)
+  val s_idle :: s_req :: s_resp :: s_finish :: Nil = Enum(4)
   val state = RegInit(VecInit(Seq.fill(streamSize)(s_idle)))
 
   val isPrefetching = VecInit(state.map(_ =/= s_idle))
@@ -270,7 +271,8 @@ class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   def streamCnt = p.streamCnt
   def streamSize = p.streamSize
   def ageWidth = p.ageWidth
-  def getBlockAddr(addr: UInt) = addr & ~((p.blockBytes - 1).U(addr.getWidth.W))
+  // def getBlockAddr(addr: UInt) = addr & ~((p.blockBytes - 1).U(addr.getWidth.W))
+  def getBlockAddr(addr: UInt) = Cat(addr(PAddrBits - 1, log2Up(p.blockBytes)), 0.U(log2Up(p.blockBytes).W))
   val streamBufs = Seq.fill(streamCnt) { Module(new StreamBuffer(p)) }
   val addrValids = Wire(Vec(streamCnt, Vec(streamSize, Bool())))
   for (i <- 0 until streamCnt) {

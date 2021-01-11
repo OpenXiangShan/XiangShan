@@ -295,6 +295,7 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParam
   val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
+  val l2Prefetcher = LazyModule(new L2Prefetcher())
 
   lazy val module = new XSCoreImp(this)
 }
@@ -351,7 +352,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   val uncache = outer.uncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-  
+  val l2Prefetcher = outer.l2Prefetcher.module
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
@@ -429,6 +430,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
   dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
   uncache.io.lsq      <> memBlock.io.dcache.uncache
+
+  l2Prefetcher.io.in <> dcache.io.prefetch
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
