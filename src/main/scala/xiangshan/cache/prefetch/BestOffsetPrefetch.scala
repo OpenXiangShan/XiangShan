@@ -214,7 +214,7 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
       val newScore = oldScore + 1.U
       val offset = oldEntry.offset
       st(io.test.resp.bits.ptr).score := newScore
-      bestOffset := winner(ScoreTableEntry(p).apply(offset, newScore), bestOffset)
+      bestOffset := winner(new ScoreTableEntry(p).apply(offset, newScore), bestOffset)
       // (1) one of the score equals SCOREMAX
       when (newScore === scoreMax.U) {
         state := s_finish
@@ -233,7 +233,7 @@ class OffsetScoreTable(p: BOPParameters) extends PrefetchModule {
   }
 
   io.prefetchOffset := prefetchOffset
-  io.test.req.valid := state === s_learn && round =/= roundMax
+  io.test.req.valid := state === s_learn && round =/= roundMax.U
   io.test.req.bits.addr := DontCare // assign this outside the score table
   io.test.req.bits.testOffset := testOffset
   io.test.req.bits.ptr := ptr

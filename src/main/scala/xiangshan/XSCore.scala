@@ -184,7 +184,7 @@ trait HasXSParameter {
 
   // icache prefetcher
   val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
-    enable = true,
+    enable = false,
     _type = "stream",
     streamParams = StreamPrefetchParameters(
       streamCnt = 4,
@@ -197,7 +197,7 @@ trait HasXSParameter {
 
   // dcache prefetcher
   val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
+    enable = false,
     _type = "stream",
     streamParams = StreamPrefetchParameters(
       streamCnt = 4,
