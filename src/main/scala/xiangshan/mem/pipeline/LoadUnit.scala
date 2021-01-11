@@ -150,14 +150,13 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val s2_cache_miss = io.dcacheResp.bits.miss
   val s2_cache_replay = io.dcacheResp.bits.replay
 
-
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio)
   assert(!(io.in.valid && dcacheShouldResp && !io.dcacheResp.valid), "DCache response got lost")
 
   // feedback tlb result to RS
   io.tlbFeedback.valid := io.in.valid
-  io.tlbFeedback.bits.hit := !s2_tlb_miss && !s2_cache_replay
+  io.tlbFeedback.bits.hit := !s2_tlb_miss && (s2_cache_replay && !s2_mmio)
   io.tlbFeedback.bits.roqIdx := s2_uop.roqIdx
 
   val forwardMask = io.out.bits.forwardMask
@@ -193,7 +192,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
   io.out.bits.miss := s2_cache_miss && !fullForward
-  io.out.bits.mmio := io.in.bits.mmio
+  io.out.bits.mmio := s2_mmio
 
   io.in.ready := io.out.ready || !io.in.valid
 
