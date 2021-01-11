@@ -156,7 +156,7 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
 
   // feedback tlb result to RS
   io.tlbFeedback.valid := io.in.valid
-  io.tlbFeedback.bits.hit := !s2_tlb_miss && (s2_cache_replay && !s2_mmio)
+  io.tlbFeedback.bits.hit := !s2_tlb_miss && (!s2_cache_replay || s2_mmio)
   io.tlbFeedback.bits.roqIdx := s2_uop.roqIdx
 
   val forwardMask = io.out.bits.forwardMask
