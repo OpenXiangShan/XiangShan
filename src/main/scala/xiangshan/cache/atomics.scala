@@ -20,6 +20,9 @@ class AtomicsPipe extends DCacheModule
     val inflight_req_block_addrs = Output(Vec(3, Valid(UInt())))
     val block_probe_addr   = Output(Valid(UInt()))
     val wb_invalidate_lrsc = Input(Valid(UInt()))
+
+    // send miss request to miss queue
+    val miss_req    = DecoupledIO(new MissReq)
   })
 
   // LSU requests
@@ -63,6 +66,17 @@ class AtomicsPipe extends DCacheModule
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   val s1_tag_eq_way = wayMap((w: Int) => meta_resp(w).tag === (get_tag(s1_addr))).asUInt
   val s1_tag_match_way = wayMap((w: Int) => s1_tag_eq_way(w) && meta_resp(w).coh.isValid()).asUInt
+  val s1_tag_match = s1_tag_match_way.orR
+  val s1_hit_meta = Mux1H(s1_tag_match_way, wayMap((w: Int) => meta_resp(w)))
+  val s1_hit_state = s1_hit_meta.coh
+
+  // replacement policy
+  val replacer = cacheParams.replacement
+  val s1_repl_way_en = UIntToOH(replacer.way)
+  val s1_repl_meta = Mux1H(s1_repl_way_en, wayMap((w: Int) => meta_resp(w)))
+  when (io.miss_req.fire()) {
+    replacer.miss
+  }
 
 
   // ---------------------------------------
@@ -74,9 +88,17 @@ class AtomicsPipe extends DCacheModule
 
   val s2_tag_match_way = RegNext(s1_tag_match_way)
   val s2_tag_match     = s2_tag_match_way.orR
+
+  val s2_hit_meta      = RegNext(s1_hit_meta)
   val s2_hit_state     = Mux1H(s2_tag_match_way, wayMap((w: Int) => RegNext(meta_resp(w).coh)))
   val s2_has_permission = s2_hit_state.onAccess(s2_req.cmd)._1
   val s2_new_hit_state  = s2_hit_state.onAccess(s2_req.cmd)._3
+
+  val s2_repl_meta     = RegNext(s1_repl_meta)
+  val s2_repl_way_en   = RegNext(s1_repl_way_en)
+
+  val s2_old_meta      = Mux(s2_tag_match, s2_hit_meta, s2_repl_meta)
+  val s2_way_en        = Mux(s2_tag_match, s2_tag_match_way, s2_repl_way_en)
 
   // we not only need permissions
   // we also require that state does not change on hit
@@ -89,24 +111,19 @@ class AtomicsPipe extends DCacheModule
   // eg: write to exclusive but clean block
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_state === s2_new_hit_state
   val s2_nack = Wire(Bool())
-  val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
-  val data_resp = io.data_resp
-  for (w <- 0 until nWays) {
-    s2_data(w) := data_resp(w)(get_row(s2_req.addr))
-  }
 
-  val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
-  // the index of word in a row, in case rowBits != wordBits
-  val s2_word_idx   = if (rowWords == 1) 0.U else s2_req.addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
+  // when req got nacked, upper levels should replay this request
 
-  val s2_nack_hit    = RegNext(s1_nack)
-  // Can't allocate MSHR for same set currently being written back
   // the same set is busy
-  val s2_nack_set_busy  = s2_valid && false.B
+  val s2_nack_hit    = RegNext(s1_nack)
+  // can no allocate mshr for store miss
+  val s2_nack_no_mshr = io.miss_req.valid && !io.miss_req.ready
   // Bank conflict on data arrays
+  // For now, we use DuplicatedDataArray, so no bank conflicts
   val s2_nack_data   = false.B
 
-  s2_nack           := s2_nack_hit || s2_nack_set_busy || s2_nack_data
+  s2_nack   := s2_nack_hit || s2_nack_no_mshr || s2_nack_data
+
 
   // lr/sc
   val debug_sc_fail_addr = RegInit(0.U)
@@ -174,7 +191,8 @@ class AtomicsPipe extends DCacheModule
   dump_pipeline_valids("AtomicsPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("AtomicsPipe s2", "s2_nack", s2_valid && s2_nack)
   dump_pipeline_valids("AtomicsPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
-  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_set_busy", s2_valid && s2_nack_set_busy)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
+  dump_pipeline_valids("AtomicsPipe s2", "s2_nack_data", s2_valid && s2_nack_data)
   when (s2_valid) {
     XSDebug("lrsc_count: %d lrsc_valid: %b lrsc_addr: %x\n",
       lrsc_count, lrsc_valid, lrsc_addr)
@@ -185,6 +203,15 @@ class AtomicsPipe extends DCacheModule
   }
 
   // load data gen
+  val s2_data = Wire(Vec(nWays, UInt(encRowBits.W)))
+  val data_resp = io.data_resp
+  for (w <- 0 until nWays) {
+    s2_data(w) := data_resp(w)(get_row(s2_req.addr))
+  }
+
+  val s2_data_muxed = Mux1H(s2_tag_match_way, s2_data)
+  // the index of word in a row, in case rowBits != wordBits
+  val s2_word_idx   = if (rowWords == 1) 0.U else s2_req.addr(log2Up(rowWords*wordBytes)-1, log2Up(wordBytes))
   val s2_data_words = Wire(Vec(rowWords, UInt(encWordBits.W)))
   for (w <- 0 until rowWords) {
     s2_data_words(w) := s2_data_muxed(encWordBits * (w + 1) - 1, encWordBits * w)
@@ -195,6 +222,14 @@ class AtomicsPipe extends DCacheModule
   assert(!(s2_valid && s2_hit && !s2_nack && s2_decoded.uncorrectable))
 
 
+  // send load miss to miss queue
+  io.miss_req.valid          := s2_valid && !s2_nack_hit && !s2_nack_data && !s2_hit
+  io.miss_req.bits.cmd       := s2_req.cmd
+  io.miss_req.bits.addr      := get_block_addr(s2_req.addr)
+  io.miss_req.bits.tag_match := s2_tag_match
+  io.miss_req.bits.way_en    := s2_way_en
+  io.miss_req.bits.old_meta  := s2_old_meta
+  io.miss_req.bits.client_id := s2_req.meta.id
 
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid        := s2_valid
@@ -203,16 +238,16 @@ class AtomicsPipe extends DCacheModule
   // reuse this field to pass lr sc valid to commit
   // nemu use this to see whether lr sc counter is still valid
   resp.bits.meta.id := lrsc_valid
-  resp.bits.miss    := !s2_hit
-  resp.bits.nack    := s2_nack
+  resp.bits.miss := !s2_hit || s2_nack
+  resp.bits.replay := resp.bits.miss && (!io.miss_req.fire() || s2_nack)
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
   assert(!(resp.valid && !io.lsu.resp.ready))
 
   when (resp.valid) {
-    XSDebug(s"AtomicsPipe resp: data: %x id: %d replay: %b miss: %b nack: %b\n",
-      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.nack)
+    XSDebug(s"AtomicsPipe resp: data: %x id: %d replayed_req: %b miss: %b need_replay: %b\n",
+      resp.bits.data, resp.bits.meta.id, resp.bits.meta.replay, resp.bits.miss, resp.bits.replay)
   }
 
 

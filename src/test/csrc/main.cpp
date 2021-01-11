@@ -1,5 +1,7 @@
-#include "emu.h"
 #include <functional>
+#include <locale.h>
+#include <csignal>
+#include "emu.h"
 
 static char mybuf[BUFSIZ];
 
@@ -11,6 +13,13 @@ int main(int argc, const char** argv) {
   printf("Emu compiled at %s, %s\n", __DATE__, __TIME__);
 
   setbuf(stderr, mybuf);
+
+  // enable thousands separator for printf()
+  setlocale(LC_NUMERIC, "");
+
+  if (signal(SIGINT, sig_handler) == SIG_ERR) {
+    printf("\ncan't catch SIGINT\n");
+  }
 
   auto emu = new Emulator(argc, argv);
 
@@ -27,9 +36,9 @@ int main(int argc, const char** argv) {
   extern uint32_t uptime(void);
   uint32_t ms = uptime();
 
-  eprintf(ANSI_COLOR_BLUE "Seed=%d Guest cycle spent: %" PRIu64
+  eprintf(ANSI_COLOR_BLUE "Seed=%d Guest cycle spent: %'" PRIu64
       " (this will be different from cycleCnt if emu loads a snapshot)\n" ANSI_COLOR_RESET, args.seed, cycles);
-  eprintf(ANSI_COLOR_BLUE "Host time spent: %dms\n" ANSI_COLOR_RESET, ms);
+  eprintf(ANSI_COLOR_BLUE "Host time spent: %'dms\n" ANSI_COLOR_RESET, ms);
 
   // return !is_good_trap;
   return trapcode;

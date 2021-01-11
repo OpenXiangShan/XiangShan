@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <string.h>
 
+#define DIFFTEST_WIDTH 6
+
 typedef uint64_t rtlreg_t;
 
 typedef uint64_t paddr_t;
@@ -95,5 +97,8 @@ void init_difftest();
 int difftest_step(DiffState *s);
 int difftest_store_step(uint64_t *saddr, uint64_t *sdata, uint8_t *smask);
 void difftest_display(uint8_t mode);
+
+uint64_t get_nemu_this_pc();
+void set_nemu_this_pc(uint64_t pc);
 
 #endif

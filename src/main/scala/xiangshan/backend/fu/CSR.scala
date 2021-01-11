@@ -3,7 +3,6 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
-import fpu.Fflags
 import utils._
 import xiangshan._
 import xiangshan.backend._
@@ -165,7 +164,7 @@ trait HasExceptionNO {
 }
 
 class FpuCsrIO extends XSBundle {
-  val fflags = Output(new Fflags)
+  val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
@@ -386,11 +385,16 @@ class CSR extends FunctionUnit with HasCSRConst
   }
   def frm_rfn(rdata: UInt): UInt = rdata(7,5)
 
-  def fflags_wfn(wdata: UInt): UInt = {
-    val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
+  def fflags_wfn(update: Boolean)(wdata: UInt): UInt = {
+    val fcsrOld = fcsr.asTypeOf(new FcsrStruct)
+    val fcsrNew = WireInit(fcsrOld)
     csrw_dirty_fp_state := true.B
-    fcsrOld.fflags := wdata(4,0)
-    fcsrOld.asUInt()
+    if(update){
+      fcsrNew.fflags := wdata(4,0) | fcsrOld.fflags
+    } else {
+      fcsrNew.fflags := wdata(4,0)
+    }
+    fcsrNew.asUInt()
   }
   def fflags_rfn(rdata:UInt): UInt = rdata(4,0)
 
@@ -401,7 +405,7 @@ class CSR extends FunctionUnit with HasCSRConst
   }
 
   val fcsrMapping = Map(
-    MaskedRegMap(Fflags, fcsr, wfn = fflags_wfn, rfn = fflags_rfn),
+    MaskedRegMap(Fflags, fcsr, wfn = fflags_wfn(update = false), rfn = fflags_rfn),
     MaskedRegMap(Frm, fcsr, wfn = frm_wfn, rfn = frm_rfn),
     MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
   )
@@ -538,8 +542,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val rdataDummy = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
 
-  when(csrio.fpu.fflags.asUInt() =/= 0.U){
-    fcsr := fflags_wfn(csrio.fpu.fflags.asUInt())
+  when(csrio.fpu.fflags.valid){
+    fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
   }
   // set fs and sd in mstatus
   when(csrw_dirty_fp_state || csrio.fpu.dirty_fs){
@@ -597,113 +601,14 @@ class CSR extends FunctionUnit with HasCSRConst
   tlbBundle.priv.imode := priviledgeMode
   tlbBundle.priv.dmode := Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode)
 
-  val hasInstrPageFault = csrio.exception.bits.cf.exceptionVec(instrPageFault) && csrio.exception.valid
-  val hasLoadPageFault = csrio.exception.bits.cf.exceptionVec(loadPageFault) && csrio.exception.valid
-  val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && csrio.exception.valid
-  val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && csrio.exception.valid
-  val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && csrio.exception.valid
-
-  // mtval write logic
-  val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
-    val tval = Mux(
-      hasInstrPageFault,
-      Mux(
-        csrio.exception.bits.cf.crossPageIPFFix,
-        SignExt(csrio.exception.bits.cf.pc + 2.U, XLEN),
-        SignExt(csrio.exception.bits.cf.pc, XLEN)
-      ),
-      memExceptionAddr
-    )
-    when(priviledgeMode === ModeM){
-      mtval := tval
-    }.otherwise{
-      stval := tval
-    }
-  }
-
-  when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
-  {
-    mtval := memExceptionAddr
-  }
-
-  // Exception and Intr
-
-  // interrupts
-
-  val ideleg =  (mideleg & mip.asUInt)
-  def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
-    ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
-
-  val intrVecEnable = Wire(Vec(12, Bool()))
-  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
-  val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
-  val intrBitSet = intrVec.orR()
-  csrio.interrupt := intrBitSet
-  val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  val raiseIntr = intrBitSet && csrio.exception.valid && csrio.isInterrupt
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.cf.pc, intrNO)
-
-  mipWire.t.m := csrio.externalInterrupt.mtip
-  mipWire.s.m := csrio.externalInterrupt.msip
-  mipWire.e.m := csrio.externalInterrupt.meip
-
-  // exceptions
-  val csrExceptionVec = Wire(Vec(16, Bool()))
-  csrExceptionVec.map(_ := false.B)
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
-  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
-  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
-  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
-  // Trigger an illegal instr exception when:
-  // * unimplemented csr is being read/written
-  // * csr access is illegal
-  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
-  csrExceptionVec(loadPageFault) := hasLoadPageFault
-  csrExceptionVec(storePageFault) := hasStorePageFault
-  val iduExceptionVec = cfIn.exceptionVec
-  val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
-  cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
-
-  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec.asUInt()
-  val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
-  val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
-  // if (!env.FPGAPlatform) {
-    val id = debugId()
-    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-    ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
-    ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
-  // }
-
-  val raiseExceptionIntr = csrio.exception.valid
+  // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   csrio.redirectOut.valid := valid && func === CSROpType.jmp && !isEcall
   csrio.redirectOut.bits := retTarget
   flushPipe := resetSatp
-
   XSDebug(csrio.redirectOut.valid, "redirect to %x, pc=%x\n", csrio.redirectOut.bits, cfIn.pc)
 
-  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    csrio.exception.bits.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
-  )
-  XSDebug(raiseExceptionIntr,
-    "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
-    csrio.exception.bits.cf.pc,
-    mstatus,
-    mideleg,
-    medeleg,
-    priviledgeMode
-  )
-
-  // Branch control
-
-  val deleg = Mux(raiseIntr, mideleg , medeleg)
-  // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
-  val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
-  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
-
-  csrio.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
   retTarget := DontCare
   // val illegalEret = TODO
 
@@ -744,6 +649,113 @@ class CSR extends FunctionUnit with HasCSRConst
     retTarget := uepc(VAddrBits-1, 0)
   }
 
+  XSDebug(csrio.redirectOut.valid,
+    "Rediret %x isSret:%d retTarget:%x sepc:%x cfInpc:%x valid:%d\n",
+    csrio.redirectOut.bits, isSret, retTarget, sepc, cfIn.pc, valid
+  )
+
+  io.in.ready := true.B
+  io.out.valid := valid
+
+  /**
+    * Exception and Intr
+    */
+  val ideleg =  (mideleg & mip.asUInt)
+  def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
+    ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
+
+  // send interrupt information to ROQ
+  val intrVecEnable = Wire(Vec(12, Bool()))
+  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y)}
+  val intrVec = mie(11,0) & mip.asUInt & intrVecEnable.asUInt
+  val intrBitSet = intrVec.orR()
+  csrio.interrupt := intrBitSet
+  mipWire.t.m := csrio.externalInterrupt.mtip
+  mipWire.s.m := csrio.externalInterrupt.msip
+  mipWire.e.m := csrio.externalInterrupt.meip
+
+  // interrupts
+  val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
+  val raiseIntr = csrio.exception.valid && csrio.isInterrupt
+  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", csrio.exception.bits.cf.pc, intrNO)
+
+  // exceptions
+  val raiseException = csrio.exception.valid && !csrio.isInterrupt
+  val hasInstrPageFault = csrio.exception.bits.cf.exceptionVec(instrPageFault) && raiseException
+  val hasLoadPageFault = csrio.exception.bits.cf.exceptionVec(loadPageFault) && raiseException
+  val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && raiseException
+  val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && raiseException
+  val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && raiseException
+
+  val csrExceptionVec = Wire(Vec(16, Bool()))
+  csrExceptionVec.map(_ := false.B)
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
+  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
+  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
+  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
+  // Trigger an illegal instr exception when:
+  // * unimplemented csr is being read/written
+  // * csr access is illegal
+  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
+  csrExceptionVec(loadPageFault) := hasLoadPageFault
+  csrExceptionVec(storePageFault) := hasStorePageFault
+  val iduExceptionVec = cfIn.exceptionVec
+  val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
+  cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
+
+  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec.asUInt()
+  val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
+  // if (!env.FPGAPlatform) {
+    val id = debugId()
+    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+    ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
+    ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
+  // }
+
+  val raiseExceptionIntr = csrio.exception.valid
+  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
+    csrio.exception.bits.cf.pc, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+  )
+  XSDebug(raiseExceptionIntr,
+    "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
+    csrio.exception.bits.cf.pc,
+    mstatus,
+    mideleg,
+    medeleg,
+    priviledgeMode
+  )
+
+  // mtval write logic
+  val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
+  when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
+    val tval = Mux(
+      hasInstrPageFault,
+      Mux(
+        csrio.exception.bits.cf.crossPageIPFFix,
+        SignExt(csrio.exception.bits.cf.pc + 2.U, XLEN),
+        SignExt(csrio.exception.bits.cf.pc, XLEN)
+      ),
+      memExceptionAddr
+    )
+    when(priviledgeMode === ModeM){
+      mtval := tval
+    }.otherwise{
+      stval := tval
+    }
+  }
+
+  when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
+  {
+    mtval := memExceptionAddr
+  }
+
+  val deleg = Mux(raiseIntr, mideleg , medeleg)
+  // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
+  val delegS = (deleg(causeNO(3,0))) && (priviledgeMode < ModeM)
+  val tvalWen = !(hasInstrPageFault || hasLoadPageFault || hasStorePageFault || hasLoadAddrMisaligned || hasStoreAddrMisaligned) || raiseIntr // TODO: need check
+  csrio.trapTarget := Mux(delegS, stvec, mtvec)(VAddrBits-1, 0)
+
   when (raiseExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -771,40 +783,17 @@ class CSR extends FunctionUnit with HasCSRConst
     mstatus := mstatusNew.asUInt
   }
 
-  io.in.ready := true.B
-  io.out.valid := valid
-
-
-  XSDebug(csrio.redirectOut.valid,
-    "Rediret %x raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d\n",
-    csrio.redirectOut.bits,
-    raiseExceptionIntr,
-    isSret,
-    retTarget,
-    sepc,
-    delegS,
-    deleg,
-    cfIn.pc,
-    valid
-  )
   XSDebug(raiseExceptionIntr && delegS,
-    "Red(%d, %x) raiseExcepIntr:%d isSret:%d retTarget:%x sepc:%x delegs:%d deleg:%x cfInpc:%x valid:%d\n",
-    csrio.redirectOut.valid,
-    csrio.redirectOut.bits,
-    raiseExceptionIntr,
-    isSret,
-    retTarget,
-    sepc,
-    delegS,
-    deleg,
-    cfIn.pc,
-    valid
+    "Red(%d, %x) raiseExcepIntr:%d isSret:%d sepc:%x delegs:%d deleg:%x\n",
+    csrio.redirectOut.valid, csrio.redirectOut.bits, raiseExceptionIntr,
+    isSret, sepc, delegS, deleg
   )
   XSDebug(raiseExceptionIntr && delegS, "sepc is writen!!! pc:%x\n", cfIn.pc)
 
 
-  // perfcnt
-
+  /**
+    * Performance counters
+    */
   val perfCntList = Map(
 //    "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
 //    "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),

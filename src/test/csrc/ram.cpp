@@ -12,6 +12,8 @@ CoDRAMsim3 *dram = NULL;
 
 static uint64_t *ram;
 static long img_size = 0;
+static pthread_mutex_t ram_mutex;
+
 void* get_img_start() { return &ram[0]; }
 long get_img_size() { return img_size; }
 void* get_ram_start() { return &ram[0]; }
@@ -152,8 +154,11 @@ void init_ram(const char *img) {
   #error DRAMSIM3_CONFIG or DRAMSIM3_OUTDIR is not defined
   #endif
   assert(dram == NULL);
-  dram = new CoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
+  // dram = new ComplexCoDRAMsim3(DRAMSIM3_CONFIG, DRAMSIM3_OUTDIR);
+  dram = new SimpleCoDRAMsim3(10);
 #endif
+
+  pthread_mutex_init(&ram_mutex, 0);
 
 }
 
@@ -162,13 +167,18 @@ void ram_finish() {
 #ifdef WITH_DRAMSIM3
   dramsim3_finish();
 #endif
+  pthread_mutex_destroy(&ram_mutex);
 }
+
 
 extern "C" uint64_t ram_read_helper(uint8_t en, uint64_t rIdx) {
   if (en && rIdx >= EMU_RAM_SIZE / sizeof(uint64_t)) {
     rIdx %= EMU_RAM_SIZE / sizeof(uint64_t);
   }
-  return (en) ? ram[rIdx] : 0;
+  pthread_mutex_lock(&ram_mutex);
+  uint64_t rdata = (en) ? ram[rIdx] : 0;
+  pthread_mutex_unlock(&ram_mutex);
+  return rdata;
 }
 
 extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, uint8_t wen) {
@@ -177,7 +187,9 @@ extern "C" void ram_write_helper(uint64_t wIdx, uint64_t wdata, uint64_t wmask, 
       printf("ERROR: ram wIdx = 0x%lx out of bound!\n", wIdx);
       assert(wIdx < EMU_RAM_SIZE / sizeof(uint64_t));
     }
+    pthread_mutex_lock(&ram_mutex);
     ram[wIdx] = (ram[wIdx] & ~wmask) | (wdata & wmask);
+    pthread_mutex_unlock(&ram_mutex);
   }
 }
 
@@ -247,6 +259,7 @@ CoDRAMRequest *dramsim3_request(const axi_channel &axi, bool is_write) {
   // WRITE
   if (is_write) {
     meta->len = axi.aw.len + 1;
+    meta->size = 1 << axi.aw.size;
     meta->offset = 0;
     meta->id = axi.aw.id;
   }
@@ -260,34 +273,26 @@ CoDRAMRequest *dramsim3_request(const axi_channel &axi, bool is_write) {
   return req;
 }
 
-void dramsim3_helper(axi_channel &axi) {
+static CoDRAMResponse *wait_resp_r = NULL;
+static CoDRAMResponse *wait_resp_b = NULL;
+static CoDRAMRequest *wait_req_w = NULL;
+// currently only accept one in-flight read + one in-flight write
+static uint64_t raddr, roffset = 0, rlen;
+static uint64_t waddr, woffset = 0, wlen;
+
+void dramsim3_helper_rising(const axi_channel &axi) {
   // ticks DRAMsim3 according to CPU_FREQ:DRAM_FREQ
   dram->tick();
 
-  static CoDRAMResponse *wait_resp_r = NULL;
-  static CoDRAMResponse *wait_resp_b = NULL;
-  static CoDRAMRequest *wait_req_w = NULL;
-  // currently only accept one in-flight read + one in-flight write
-  static uint64_t raddr, roffset = 0, rlen;
-  static uint64_t waddr, woffset = 0, wlen;
-
-  // default branch to avoid wrong handshake
-  axi.aw.ready = 0;
-  axi.w.ready  = 1;
-  axi.b.valid  = 0;
-  axi.ar.ready = 0;
-  // axi.r.valid  = 0;
-
-  // AXI read
-  // first, check rdata in the last cycle
-  if (axi.r.ready && axi.r.valid) {
-    // printf("axi r channel fired data = %lx\n", axi.r.data[0]);
+  // read data fire: check the last read request
+  if (axi_check_rdata_fire(axi)) {
+    if (wait_resp_r == NULL) {
+      printf("ERROR: There's no in-flight read request.\n");
+      assert(wait_resp_r != NULL);
+    }
     dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_resp_r->req->meta);
     meta->offset++;
-    axi.r.valid = 0;
-  }
-  if (wait_resp_r) {
-    dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_resp_r->req->meta);
+    // check whether the last rdata response has finished
     if (meta->offset == meta->len) {
       delete meta;
       delete wait_resp_r->req;
@@ -295,68 +300,111 @@ void dramsim3_helper(axi_channel &axi) {
       wait_resp_r = NULL;
     }
   }
-  // second, check whether we response data in this cycle
-  if (!wait_resp_r)
-    wait_resp_r = dram->check_read_response();
-  if (wait_resp_r) {
-    dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_resp_r->req->meta);
-    // axi.r.data = meta->data[meta->offset];
-    // printf("meta->size %d offset %d\n", meta->size, meta->offset*meta->size/sizeof(uint64_t));
-    memcpy(axi.r.data, meta->data + meta->offset*meta->size/sizeof(uint64_t), meta->size);
-    axi.r.valid = 1;
-    axi.r.last = (meta->offset == meta->len - 1) ? 1 : 0;
-    axi.r.id = meta->id;
-  }
-  // third, check ar for next request's address
-  // put ar in the last since it should be at least one-cycle latency
-  if (axi.ar.valid && dram->will_accept(axi.ar.addr, false)) {
-    // printf("axi ar channel fired %lx\n", axi.ar.addr);
+
+  // read address fire: accept a new request
+  if (axi_check_raddr_fire(axi)) {
     dram->add_request(dramsim3_request(axi, false));
-    axi.ar.ready = 1;
   }
 
-  // AXI write
-  // first, check wdata in the last cycle
-  // aw channel
-  if (axi.aw.valid && dram->will_accept(axi.aw.addr, true)) {
-    assert(wait_req_w == NULL); // the last request has not finished
+  // the last write transaction is acknowledged
+  if (axi_check_wack_fire(axi)) {
+    if (wait_resp_b == NULL) {
+      printf("ERROR: write response fire for nothing in-flight.\n");
+      assert(wait_resp_b != NULL);
+    }
+    // flush data to memory
+    uint64_t waddr = wait_resp_b->req->address % EMU_RAM_SIZE;
+    dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_resp_b->req->meta);
+    void *start_addr = ram + (waddr / sizeof(uint64_t));
+    memcpy(start_addr, meta->data, meta->len * meta->size);
+    for (int i = 0; i < meta->len; i++) {
+    //   uint64_t address = wait_resp_b->req->address % EMU_RAM_SIZE;
+    //   ram[address / sizeof(uint64_t) + i] = meta->data[i];
+      // printf("flush write to memory[0x%ld] = 0x%lx\n", address)
+    }
+    delete meta;
+    delete wait_resp_b->req;
+    delete wait_resp_b;
+    wait_resp_b = NULL;
+  }
+
+  // write address fire: accept a new write request
+  if (axi_check_waddr_fire(axi)) {
+    if (wait_req_w != NULL) {
+      printf("ERROR: The last write request has not finished.\n");
+      assert(wait_req_w == NULL);
+    }
     wait_req_w = dramsim3_request(axi, true);
-    axi.aw.ready = 1;
-    // printf("axi aw channel fired %lx\n", axi.aw.addr);
-    assert(axi.aw.burst == 1 || (axi.aw.burst == 2 && ((axi.aw.addr & 0x3f) == 0)));
+    // printf("accept a new write request to addr = 0x%lx, len = %d\n", axi.aw.addr, axi.aw.len);
   }
 
-  // w channel: ack write data
-  if (axi.w.valid && axi.w.ready) {
-    // printf("axi w channel fired\n");
-    assert(wait_req_w);
+  // write data fire: for the last write transaction
+  if (axi_check_wdata_fire(axi)) {
+    if (wait_req_w == NULL) {
+      printf("ERROR: wdata fire for nothing in-flight.\n");
+      assert(wait_req_w != NULL);
+    }
     dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_req_w->meta);
-    // meta->data[meta->offset] = axi.w.data;
+    void *data_start = meta->data + meta->offset * meta->size / sizeof(uint64_t);
+    axi_get_wdata(axi, data_start, meta->size);
     meta->offset++;
+    // if this is the last beat
     if (meta->offset == meta->len) {
       assert(dram->will_accept(wait_req_w->address, true));
       dram->add_request(wait_req_w);
       wait_req_w = NULL;
     }
+    // printf("accept a new write data\n");
+  }
+}
+
+void dramsim3_helper_falling(axi_channel &axi) {
+  // default branch to avoid wrong handshake
+  axi.aw.ready = 0;
+  axi.w.ready  = 0;
+  axi.b.valid  = 0;
+  axi.ar.ready = 0;
+  axi.r.valid  = 0;
+
+  // RDATA: if finished, we try the next rdata response
+  if (!wait_resp_r)
+    wait_resp_r = dram->check_read_response();
+  // if there's some data response, put it onto axi bus
+  if (wait_resp_r) {
+    dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_resp_r->req->meta);
+    // printf("meta->size %d offset %d\n", meta->size, meta->offset*meta->size/sizeof(uint64_t));
+    void *data_start = meta->data + meta->offset*meta->size / sizeof(uint64_t);
+    axi_put_rdata(axi, data_start, meta->size, meta->offset == meta->len - 1, meta->id);
   }
 
-  // b channel: ack write
+  // RADDR: check whether the read request can be accepted
+  axi_addr_t raddr;
+  if (axi_get_raddr(axi, raddr) && dram->will_accept(raddr, false)) {
+    axi_accept_raddr(axi);
+    // printf("try to accept read request to 0x%lx\n", raddr);
+  }
+
+  // WREQ: check whether the write request can be accepted
+  // Note: block the next write here to simplify logic
+  axi_addr_t waddr;
+  if (wait_req_w == NULL && axi_get_waddr(axi, waddr) && dram->will_accept(waddr, false)) {
+    axi_accept_waddr(axi);
+    axi_accept_wdata(axi);
+    // printf("try to accept write request to 0x%lx\n", waddr);
+  }
+
+  // WDATA: check whether the write data can be accepted
+  if (wait_req_w != NULL) {
+    axi_accept_wdata(axi);
+  }
+
+  // WRESP: if finished, we try the next write response
   if (!wait_resp_b)
     wait_resp_b = dram->check_write_response();
+  // if there's some write response, put it onto axi bus
   if (wait_resp_b) {
     dramsim3_meta *meta = static_cast<dramsim3_meta *>(wait_resp_b->req->meta);
-    axi.b.valid = 1;
-    axi.b.id = meta->id;
-    // assert(axi.b.ready == 1);
-    for (int i = 0; i < meta->len; i++) {
-      uint64_t address = wait_resp_b->req->address % EMU_RAM_SIZE;
-      ram[address / sizeof(uint64_t) + i] = meta->data[i];
-    }
-    // printf("axi b channel fired\n");
-    delete meta;
-    delete wait_resp_b->req;
-    delete wait_resp_b;
-    wait_resp_b = NULL;
+    axi_put_wack(axi, meta->id);
   }
 }
 

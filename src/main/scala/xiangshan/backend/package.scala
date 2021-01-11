@@ -47,6 +47,10 @@ package object backend {
     def srlw = "b100101".U
     def sraw = "b101101".U
 
+    def isAddSub(func: UInt) = {
+      func === add || func === sub || func === addw || func === subw
+    }
+
     def isWordOp(func: UInt) = func(5)
 
     def beq  = "b010000".U
@@ -123,9 +127,6 @@ package object backend {
 
     def isLoad(op: UInt): Bool = !op(3)
     def isStore(op: UInt): Bool = op(3)
-
-    // float/double load store
-    def flw  = "b010110".U
 
     // atomics
     // bit(1, 0) are size
