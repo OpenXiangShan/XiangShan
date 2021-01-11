@@ -2,13 +2,16 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
+import chipsalliance.rocketchip.config.Parameters
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.tile.HasFPUParameters
 import xiangshan._
 import xiangshan.backend.exu.Exu.{loadExuConfigs, storeExuConfigs}
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.exu._
 import xiangshan.cache._
 import xiangshan.mem._
-import xiangshan.backend.fu.FenceToSbuffer
+import xiangshan.backend.fu.{HasExceptionNO, FenceToSbuffer}
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
 
@@ -18,7 +21,7 @@ class LsBlockToCtrlIO extends XSBundle {
   val replay = ValidIO(new Redirect)
 }
 
-class MemBlockToDcacheIO extends XSBundle {
+class MemBlockToCacheIO extends XSBundle {
   val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
   val loadMiss = new DCacheLineIO
   val atomics  = new DCacheWordIO
@@ -26,7 +29,24 @@ class MemBlockToDcacheIO extends XSBundle {
   val uncache = new DCacheWordIO
 }
 
-class MemBlock
+class MemBlock(
+  fastWakeUpIn: Seq[ExuConfig],
+  slowWakeUpIn: Seq[ExuConfig],
+  fastFpOut: Seq[ExuConfig],
+  slowFpOut: Seq[ExuConfig],
+  fastIntOut: Seq[ExuConfig],
+  slowIntOut: Seq[ExuConfig]
+)(implicit p: Parameters) extends LazyModule {
+
+  val dcache = LazyModule(new DCache())
+  val uncache = LazyModule(new Uncache())
+
+  lazy val module = new MemBlockImp(fastWakeUpIn, slowWakeUpIn, fastFpOut, slowFpOut, fastIntOut, slowIntOut)(this)
+}
+
+
+
+class MemBlockImp
 (
   fastWakeUpIn: Seq[ExuConfig],
   slowWakeUpIn: Seq[ExuConfig],
@@ -34,7 +54,13 @@ class MemBlock
   slowFpOut: Seq[ExuConfig],
   fastIntOut: Seq[ExuConfig],
   slowIntOut: Seq[ExuConfig]
-) extends XSModule with HasExeBlockHelper {
+) (outer: MemBlock) extends LazyModuleImp(outer)
+  with HasXSParameter
+  with HasExceptionNO
+  with HasXSLog
+  with HasFPUParameters
+  with HasExeBlockHelper
+{
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
@@ -45,8 +71,6 @@ class MemBlock
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
 
     val ptw = new TlbPtwIO
-    // TODO: dcache should be inside MemBlock
-    val dcache = new MemBlockToDcacheIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -57,6 +81,11 @@ class MemBlock
       val roqDeqPtr = Input(new RoqPtr) // to lsq
     }
   })
+
+  val cache = Wire(new MemBlockToCacheIO)
+
+  val dcache = outer.dcache.module
+  val uncache = outer.uncache.module
 
   val redirect = io.fromCtrlBlock.redirect
 
@@ -166,7 +195,7 @@ class MemBlock
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
     // dcache access
-    loadUnits(i).io.dcache        <> io.dcache.loadUnitToDcacheVec(i)
+    loadUnits(i).io.dcache        <> cache.loadUnitToDcacheVec(i)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
@@ -210,14 +239,14 @@ class MemBlock
   lsq.io.brqRedirect := io.fromCtrlBlock.redirect
   lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
-  lsq.io.dcache      <> io.dcache.loadMiss
-  lsq.io.uncache     <> io.dcache.uncache
+  lsq.io.dcache      <> cache.loadMiss
+  lsq.io.uncache     <> cache.uncache
 
   // LSQ to store buffer
   lsq.io.sbuffer     <> sbuffer.io.in
 
   // Sbuffer
-  sbuffer.io.dcache    <> io.dcache.sbufferToDcache
+  sbuffer.io.dcache    <> cache.sbufferToDcache
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
@@ -265,7 +294,7 @@ class MemBlock
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready := dtlb.io.requestor(0).req.ready
 
-  atomicsUnit.io.dcache        <> io.dcache.atomics
+  atomicsUnit.io.dcache        <> cache.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
@@ -295,4 +324,10 @@ class MemBlock
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
 
+  // connect to cache
+  dcache.io.lsu.load    <> cache.loadUnitToDcacheVec
+  dcache.io.lsu.lsq     <> cache.loadMiss
+  dcache.io.lsu.atomics <> cache.atomics
+  dcache.io.lsu.store   <> cache.sbufferToDcache
+  uncache.io.lsq        <> cache.uncache
 }
