@@ -56,6 +56,9 @@ class AtomicsMissQueue extends DCacheModule
   when (state === s_replay_req) {
     io.replay.req.valid := true.B
     io.replay.req.bits  := req
+    // use our own storeMissEntryId
+    // miss resp are routed by this id
+    io.replay.req.bits.meta.id := id
     when (io.replay.req.fire()) {
       state := s_replay_resp
     }
@@ -113,6 +116,8 @@ class AtomicsMissQueue extends DCacheModule
   when (state === s_resp) {
     io.lsu.resp.valid := true.B
     io.lsu.resp.bits  := resp
+    // response to sbuffer should carry the original request id
+    io.lsu.resp.bits.meta.id := req.meta.id
 
     when (io.lsu.resp.fire()) {
       state := s_invalid
