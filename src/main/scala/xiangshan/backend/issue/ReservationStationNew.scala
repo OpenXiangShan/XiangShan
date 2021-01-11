@@ -189,26 +189,13 @@ class ReservationStationCtrl
     stateQueue(bubIdx) := s_bubble
   }
 
-  when (stateQueue(selIdxReg) === s_selected) {
-    when (io.data.fuReady) {
-      if (feedback) {
-        stateQueue(selIdxReg) := s_wait
-      } else {
-        stateQueue(selIdxReg) := s_idle
-      }
-    }.otherwise { stateQueue(selIdxReg) := s_valid } // fu is not ready and re-select next cycle
-  }
-  when (stateQueue(bubIdxReg) === s_bubble) {
-    stateQueue(bubIdxReg) := s_idle // move the bubble to the last positon
-  }
-
   // redirect and feedback && wakeup
   for (i <- 0 until iqSize) {
     // replay
     val cnt = cntQueue(i)
     when (stateQueue(i) === s_replay) {
+      cnt := cnt - 1.U
       when (cnt === 0.U) { stateQueue(i) := s_valid }
-      .otherwise { cnt := cnt - 1.U }
     }
     // feedback
     when (fbMatchVec(i)) {
@@ -222,6 +209,20 @@ class ReservationStationCtrl
         srcQueue(i)(j) := true.B
         XSDebug(p"srcHit: i:${i.U} j:${j.U} src:${srcQueue(i)(j)}\n")
       }
+    }
+    // mask last selectet slot and deal with the mask
+    // TODO: state queu change may have long 'when' chain -> long latency
+    when (stateQueue(i) === s_selected) {
+      when (io.data.fuReady) {
+        if (feedback) {
+          stateQueue(i) := s_wait
+        }  else {
+          stateQueue(i) := s_idle
+        }
+      }.otherwise { stateQueue(i) := s_valid }
+    }
+    when (stateQueue(i) === s_bubble) {
+      stateQueue(i) := s_idle
     }
     // redirect
     when (redVec(i) && stateQueue(i) =/= s_idle) {
