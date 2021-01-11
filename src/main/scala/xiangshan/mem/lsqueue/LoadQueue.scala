@@ -270,9 +270,11 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
   val loadWbSelV= Wire(Vec(StorePipelineWidth, Bool()))
   val loadEvenSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i)}))
   val loadOddSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i+1)}))
-  loadWbSel(0) := Cat(PriorityEncoder(loadEvenSelVec.asUInt), 0.U(1.W))
+  val evenDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i)})).asUInt
+  val oddDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i+1)})).asUInt
+  loadWbSel(0) := Cat(getFirstOne(loadEvenSelVec, evenDeqMask), 0.U(1.W))
   loadWbSelV(0):= loadEvenSelVec.asUInt.orR
-  loadWbSel(1) := Cat(PriorityEncoder(loadOddSelVec.asUInt), 1.U(1.W))
+  loadWbSel(1) := Cat(getFirstOne(loadOddSelVec, oddDeqMask), 1.U(1.W))
   loadWbSelV(1) := loadOddSelVec.asUInt.orR
   (0 until StorePipelineWidth).map(i => {
     // data select
