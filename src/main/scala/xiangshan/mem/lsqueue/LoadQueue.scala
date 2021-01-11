@@ -86,6 +86,8 @@ class LoadQueue extends XSModule
   val listening = Reg(Vec(LoadQueueSize, Bool())) // waiting for refill result
   val pending = Reg(Vec(LoadQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
 
+  val debug_mmio = Reg(Vec(LoadQueueSize, Bool())) // mmio: inst is an mmio inst
+
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new LqPtr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new LqPtr))
   val validCounter = RegInit(0.U(log2Ceil(LoadQueueSize + 1).W))
@@ -182,13 +184,14 @@ class LoadQueue extends XSModule
         loadWbData.vaddr := io.loadIn(i).bits.vaddr
         loadWbData.mask := io.loadIn(i).bits.mask
         loadWbData.data := io.loadIn(i).bits.data // for mmio / misc / debug
-        loadWbData.mmio := io.loadIn(i).bits.mmio
         loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
         loadWbData.fwdData := io.loadIn(i).bits.forwardData
         loadWbData.exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
         dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
         dataModule.io.wb(i).wen := true.B
 
+        debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
+        
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         miss(loadWbIndex) := dcacheMissed && !io.loadIn(i).bits.uop.cf.exceptionVec.asUInt.orR
         listening(loadWbIndex) := dcacheMissed
@@ -226,14 +229,14 @@ class LoadQueue extends XSModule
   io.dcache.req.bits.meta.vaddr    := DontCare // dataModule.io.rdata(missRefillSel).vaddr
   io.dcache.req.bits.meta.paddr    := missRefillBlockAddr
   io.dcache.req.bits.meta.uop      := uop(missRefillSel)
-  io.dcache.req.bits.meta.mmio     := false.B // dataModule.io.rdata(missRefillSel).mmio
+  io.dcache.req.bits.meta.mmio     := false.B // mmio(missRefillSel)
   io.dcache.req.bits.meta.tlb_miss := false.B
   io.dcache.req.bits.meta.mask     := DontCare
   io.dcache.req.bits.meta.replay   := false.B
 
   io.dcache.resp.ready := true.B
 
-  assert(!(dataModule.io.rdata(missRefillSel).mmio && io.dcache.req.valid))
+  assert(!(debug_mmio(missRefillSel) && io.dcache.req.valid))
 
   when(io.dcache.req.fire()) {
     miss(missRefillSel) := false.B
@@ -327,7 +330,7 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.redirectValid := false.B
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
-    io.ldout(i).bits.debug.isMMIO := dataModule.io.rdata(loadWbSel(i)).mmio
+    io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := validWb
     
@@ -342,7 +345,7 @@ class LoadQueue extends XSModule
         io.ldout(i).bits.uop.cf.pc,
         dataModule.io.rdata(loadWbSel(i)).paddr,
         dataModule.io.rdata(loadWbSel(i)).data,
-        dataModule.io.rdata(loadWbSel(i)).mmio
+        debug_mmio(loadWbSel(i))
       )
     }
 
