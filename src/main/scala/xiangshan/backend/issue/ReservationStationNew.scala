@@ -142,13 +142,12 @@ class ReservationStationCtrl
   val issFire = Wire(Bool())
   val moveMask = WireInit(0.U(iqSize.W))
   val selectMask = WireInit(VecInit((0 until iqSize).map(i => readyIdxQue(i))))
-  val haveBubble = Wire(Bool())
   // val selIdx = ParallelMux(selectMask zip idxQueue) // NOTE: the idx in the idxQueue
   val (selPtr, haveReady) = PriorityEncoderWithFlag(selectMask) // NOTE: the idx of idxQueue
   val selIdx = idxQueue(selPtr)
   val selIdxReg = RegNext(selIdx) // NOTE: may dup with other signal, fix it later
   val redSel = redVec(selIdx)
-  val selValid = !redSel && haveReady && (if (feedback) true.B else !haveBubble)
+  val selValid = !redSel && haveReady
   val selReg = RegNext(selValid)
   val selPtrReg = RegNext(Mux(moveMask(selPtr), selPtr-1.U, selPtr))
 
@@ -156,10 +155,10 @@ class ReservationStationCtrl
   val bubMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i))))
   // val bubIdx = ParallelMux(bubMask zip idxQueue) // NOTE: the idx in the idxQueue
   val (bubPtr, findBubble) = PriorityEncoderWithFlag(bubMask) // NOTE: the idx of the idxQueue
-  haveBubble := findBubble && (bubPtr < tailPtr.asUInt)
+  val haveBubble = findBubble && (bubPtr < tailPtr.asUInt)
   val bubIdx = idxQueue(bubPtr)
   val bubIdxReg = RegNext(bubIdx) // NOTE: may dup with other signal, fix it later
-  val bubValid = haveBubble
+  val bubValid = haveBubble && (if (feedback) true.B else !selValid)
   val bubReg = RegNext(bubValid)
   val bubPtrReg = RegNext(Mux(moveMask(bubPtr), bubPtr-1.U, bubPtr))
 
@@ -167,7 +166,7 @@ class ReservationStationCtrl
   val dequeue = if (feedback) bubReg
                 else          bubReg || issFire
   val deqPtr =  if (feedback) bubPtrReg
-                else Mux(bubReg, bubPtrReg, selPtrReg)
+                else Mux(selReg, selPtrReg, bubPtrReg)
   moveMask := {
     (Fill(iqSize, 1.U(1.W)) << deqPtr)(iqSize-1, 0)
   } & Fill(iqSize, dequeue)
@@ -184,7 +183,7 @@ class ReservationStationCtrl
   when (selValid) {
     stateQueue(selIdx) := s_selected
   }
-  when (haveBubble) {
+  when (bubValid) {
     stateQueue(bubIdx) := s_bubble
   }
 
@@ -295,7 +294,7 @@ class ReservationStationCtrl
   XSDebug(print, p"moveMask:${Binary(moveMask)} selMask:${Binary(selectMask.asUInt)} bubMask:${Binary(bubMask.asUInt)}\n")
   XSDebug(print, p"selIdxWire:${selPtr} haveReady:${haveReady} redSel:${redSel}" +
     p"selV:${selValid} selReg:${selReg} selPtrReg:${selPtrReg} selIdx:${selIdx} selIdxReg:${selIdxReg}\n")
-  XSDebug(print, p"haveBub:${haveBubble} bubPtr:${bubPtr} findBub:${findBubble} " +
+  XSDebug(print, p"bubValid:${bubValid} haveBub:${haveBubble} bubPtr:${bubPtr} findBub:${findBubble} " +
     p"bubReg:${bubReg} bubPtrReg:${bubPtrReg} bubIdx:${bubIdx} bubIdxReg:${bubIdxReg}\n")
   XSDebug(print, p"issValid:${issValid} issueFire:${issFire} dequeue:${dequeue} deqPtr:${deqPtr}\n")
   XSDebug(p" :Idx|v|r|s |cnt|s1:s2:s3\n")
