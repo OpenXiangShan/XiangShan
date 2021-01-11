@@ -148,9 +148,9 @@ class ReservationStationCtrl
   val selIdx = idxQueue(selPtr)
   val selIdxReg = RegNext(selIdx) // NOTE: may dup with other signal, fix it later
   val redSel = redVec(selIdx)
-  val selValid = !redSel && haveReady && !haveBubble
+  val selValid = !redSel && haveReady && (if (feedback) true.B else !haveBubble)
   val selReg = RegNext(selValid)
-  val selPtrReg = RegNext(Mux(moveMask(selPtr), selPtr-1.U, selPtr)) // TODO: deal with the long latency
+  val selPtrReg = RegNext(Mux(moveMask(selPtr), selPtr-1.U, selPtr))
 
   // sel bubble
   val bubMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i))))
@@ -161,13 +161,13 @@ class ReservationStationCtrl
   val bubIdxReg = RegNext(bubIdx) // NOTE: may dup with other signal, fix it later
   val bubValid = haveBubble
   val bubReg = RegNext(bubValid)
-  val bubPtrReg = RegNext(Mux(moveMask(bubPtr), bubPtr-1.U, bubPtr)) // TODO: deal with the long latency
+  val bubPtrReg = RegNext(Mux(moveMask(bubPtr), bubPtr-1.U, bubPtr))
 
   // deq
-  // TODO: mem's rs will issue but not deq( the bub), so just divide issue and deq
-  // TODO: when need feadback, only deq when becomes bubble
-  val dequeue = if (feedback) bubReg else bubReg || issFire
-  val deqPtr = Mux(bubReg, bubPtrReg, selPtrReg)
+  val dequeue = if (feedback) bubReg
+                else          bubReg || issFire
+  val deqPtr =  if (feedback) bubPtrReg
+                else Mux(bubReg, bubPtrReg, selPtrReg)
   moveMask := {
     (Fill(iqSize, 1.U(1.W)) << deqPtr)(iqSize-1, 0)
   } & Fill(iqSize, dequeue)
@@ -183,7 +183,6 @@ class ReservationStationCtrl
   }
   when (selValid) {
     stateQueue(selIdx) := s_selected
-    // TODO: may have long latency
   }
   when (haveBubble) {
     stateQueue(bubIdx) := s_bubble
