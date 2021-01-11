@@ -385,14 +385,19 @@ class LoadQueue extends XSModule with HasDCacheParameters with HasCircularQueueP
     val toEnqPtrMask = Mux(sameFlag, xorMask, ~xorMask)
 
     // check if load already in lq needs to be rolledback
-    val lqViolationVec = RegNext(VecInit((0 until LoadQueueSize).map(j => {
-      val addrMatch = allocated(j) &&
+    val addrMatch = RegNext(VecInit((0 until LoadQueueSize).map(j => {
         io.storeIn(i).bits.paddr(PAddrBits - 1, 3) === dataModule.io.rdata(j).paddr(PAddrBits - 1, 3)
-      val entryNeedCheck = toEnqPtrMask(j) && addrMatch && (datavalid(j) || listening(j) || miss(j))
-      // TODO: update refilled data
-      val violationVec = (0 until 8).map(k => dataModule.io.rdata(j).mask(k) && io.storeIn(i).bits.mask(k))
-      Cat(violationVec).orR() && entryNeedCheck
     })))
+    val entryNeedCheck = RegNext(VecInit((0 until LoadQueueSize).map(j => {
+      allocated(j) && toEnqPtrMask(j) && (datavalid(j) || listening(j) || miss(j))
+    })))
+    val overlap = RegNext(VecInit((0 until LoadQueueSize).map(j => {
+      val overlapVec = (0 until 8).map(k => dataModule.io.rdata(j).mask(k) && io.storeIn(i).bits.mask(k))
+      Cat(overlapVec).orR()
+    })))
+    val lqViolationVec = VecInit((0 until LoadQueueSize).map(j => {
+      addrMatch(j) && entryNeedCheck(j) && overlap(j)
+    }))
     val lqViolation = lqViolationVec.asUInt().orR()
     val lqViolationIndex = getFirstOne(lqViolationVec, RegNext(lqIdxMask))
     val lqViolationUop = uop(lqViolationIndex)
