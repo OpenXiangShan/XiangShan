@@ -150,7 +150,7 @@ class ReservationStationCtrl
   val redSel = redVec(selIdx)
   val selValid = !redSel && haveReady && !haveBubble
   val selReg = RegNext(selValid)
-  val selPtrReg = RegNext(selPtr - moveMask(selPtr)) // TODO: deal with the long latency
+  val selPtrReg = RegNext(Mux(moveMask(selPtr), selPtr-1.U, selPtr)) // TODO: deal with the long latency
 
   // sel bubble
   val bubMask = WireInit(VecInit((0 until iqSize).map(i => emptyIdxQue(i))))
@@ -161,7 +161,7 @@ class ReservationStationCtrl
   val bubIdxReg = RegNext(bubIdx) // NOTE: may dup with other signal, fix it later
   val bubValid = haveBubble
   val bubReg = RegNext(bubValid)
-  val bubPtrReg = RegNext(bubPtr - moveMask(bubPtr)) // TODO: deal with the long latency
+  val bubPtrReg = RegNext(Mux(moveMask(bubPtr), bubPtr-1.U, bubPtr)) // TODO: deal with the long latency
 
   // deq
   // TODO: mem's rs will issue but not deq( the bub), so just divide issue and deq
