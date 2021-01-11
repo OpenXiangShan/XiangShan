@@ -289,12 +289,14 @@ class LoadQueue extends XSModule
   })).asUInt() // use uint instead vec to reduce verilog lines
   val loadWbSel = Wire(Vec(StorePipelineWidth, UInt(log2Up(LoadQueueSize).W)))
   val loadWbSelV= Wire(Vec(StorePipelineWidth, Bool()))
-  val lselvec0 = PriorityEncoderOH(loadWbSelVec)
-  val lselvec1 = PriorityEncoderOH(loadWbSelVec & (~lselvec0).asUInt)
-  loadWbSel(0) := OHToUInt(lselvec0)
-  loadWbSelV(0):= lselvec0.orR
-  loadWbSel(1) := OHToUInt(lselvec1)
-  loadWbSelV(1) := lselvec1.orR
+  val loadEvenSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i)}))
+  val loadOddSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i+1)}))
+  val evenDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i)})).asUInt
+  val oddDeqMask = VecInit((0 until LoadQueueSize/2).map(i => {deqMask(2*i+1)})).asUInt
+  loadWbSel(0) := Cat(getFirstOne(loadEvenSelVec, evenDeqMask), 0.U(1.W))
+  loadWbSelV(0):= loadEvenSelVec.asUInt.orR
+  loadWbSel(1) := Cat(getFirstOne(loadOddSelVec, oddDeqMask), 1.U(1.W))
+  loadWbSelV(1) := loadOddSelVec.asUInt.orR
   (0 until StorePipelineWidth).map(i => {
     // data select
     val rdata = dataModule.io.rdata(loadWbSel(i)).data
