@@ -7,7 +7,6 @@ import xiangshan._
 import xiangshan.cache._
 // import xiangshan.cache.{DCacheWordIO, TlbRequestIO, TlbCmd, MemoryOpConstants, TlbReq, DCacheLoadReq, DCacheWordResp}
 import xiangshan.backend.LSUOpType
-import xiangshan.backend.fu.fpu.boxF32ToF64
 
 class LoadToLsqIO extends XSBundle {
   val loadIn = ValidIO(new LsPipelineBundle)
@@ -133,7 +132,7 @@ class LoadUnit_S1 extends XSModule {
 
 // Load Pipeline Stage 2
 // DCache resp
-class LoadUnit_S2 extends XSModule {
+class LoadUnit_S2 extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -175,16 +174,7 @@ class LoadUnit_S2 extends XSModule {
     "b110".U -> rdata(63, 48),
     "b111".U -> rdata(63, 56)
   ))
-  val rdataPartialLoad = LookupTree(s2_uop.ctrl.fuOpType, List(
-      LSUOpType.lb   -> SignExt(rdataSel(7, 0) , XLEN),
-      LSUOpType.lh   -> SignExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lw   -> SignExt(rdataSel(31, 0), XLEN),
-      LSUOpType.ld   -> SignExt(rdataSel(63, 0), XLEN),
-      LSUOpType.lbu  -> ZeroExt(rdataSel(7, 0) , XLEN),
-      LSUOpType.lhu  -> ZeroExt(rdataSel(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdataSel(31, 0), XLEN),
-      LSUOpType.flw  -> boxF32ToF64(rdataSel(31, 0))
-  ))
+  val rdataPartialLoad = rdataHelper(s2_uop, rdataSel)
 
   // TODO: ECC check
 
@@ -218,13 +208,13 @@ class LoadUnit_S2 extends XSModule {
     s2_uop.cf.pc, rdataPartialLoad, io.dcacheResp.bits.data,
     io.out.bits.forwardData.asUInt, io.out.bits.forwardMask.asUInt
   )
-
 }
 
-class LoadUnit extends XSModule {
+class LoadUnit extends XSModule with HasLoadHelper {
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
+    val fpout = Decoupled(new ExuOutput)
     val redirect = Flipped(ValidIO(new Redirect))
     val tlbFeedback = ValidIO(new TlbFeedback)
     val dcache = new DCacheLoadIO
@@ -267,33 +257,49 @@ class LoadUnit extends XSModule {
 
   // writeback to LSQ
   // Current dcache use MSHR
+  // Load queue will be updated at s2 for both hit/miss int/fp load
   io.lsq.loadIn.valid := load_s2.io.out.valid
   io.lsq.loadIn.bits := load_s2.io.out.bits
+  val s2Valid = load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
+  val refillFpLoad = io.lsq.ldout.bits.uop.ctrl.fpWen
 
-  val hitLoadOut = Wire(Valid(new ExuOutput))
-  hitLoadOut.valid := load_s2.io.out.valid && (!load_s2.io.out.bits.miss || load_s2.io.out.bits.uop.cf.exceptionVec.asUInt.orR)
-  hitLoadOut.bits.uop := load_s2.io.out.bits.uop
-  hitLoadOut.bits.data := load_s2.io.out.bits.data
-  hitLoadOut.bits.redirectValid := false.B
-  hitLoadOut.bits.redirect := DontCare
-  hitLoadOut.bits.brUpdate := DontCare
-  hitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
-  hitLoadOut.bits.fflags := DontCare
+  // Int load, if hit, will be writebacked at s2
+  val intHitLoadOut = Wire(Valid(new ExuOutput))
+  intHitLoadOut.valid := s2Valid && !load_s2.io.out.bits.uop.ctrl.fpWen 
+  intHitLoadOut.bits.uop := load_s2.io.out.bits.uop
+  intHitLoadOut.bits.data := load_s2.io.out.bits.data
+  intHitLoadOut.bits.redirectValid := false.B
+  intHitLoadOut.bits.redirect := DontCare
+  intHitLoadOut.bits.brUpdate := DontCare
+  intHitLoadOut.bits.debug.isMMIO := load_s2.io.out.bits.mmio
+  intHitLoadOut.bits.fflags := DontCare
 
-  // TODO: arbiter
-  // if hit, writeback result to CDB
-  // val ldout = Vec(2, Decoupled(new ExuOutput))
-  // when io.loadIn(i).fire() && !io.io.loadIn(i).miss, commit load to cdb
-  // val cdbArb = Module(new Arbiter(new ExuOutput, 2))
-  // io.ldout <> cdbArb.io.out
-  // hitLoadOut <> cdbArb.io.in(0)
-  // io.lsq.ldout <> cdbArb.io.in(1) // missLoadOut
   load_s2.io.out.ready := true.B
-  io.lsq.ldout.ready := !hitLoadOut.valid
-  io.ldout.bits := Mux(hitLoadOut.valid, hitLoadOut.bits, io.lsq.ldout.bits)
-  io.ldout.valid := hitLoadOut.valid || io.lsq.ldout.valid
+
+  io.ldout.bits := Mux(intHitLoadOut.valid, intHitLoadOut.bits, io.lsq.ldout.bits)
+  io.ldout.valid := intHitLoadOut.valid || io.lsq.ldout.valid && !refillFpLoad
+  
+  // Fp load, if hit, will be send to recoder at s2, then it will be recoded & writebacked at s3
+  val fpHitLoadOut = Wire(Valid(new ExuOutput))
+  fpHitLoadOut.valid := s2Valid && load_s2.io.out.bits.uop.ctrl.fpWen
+  fpHitLoadOut.bits := intHitLoadOut.bits
+
+  val fpLoadOut = Wire(Valid(new ExuOutput))
+  fpLoadOut.bits := Mux(fpHitLoadOut.valid, fpHitLoadOut.bits, io.lsq.ldout.bits)
+  fpLoadOut.valid := fpHitLoadOut.valid || io.lsq.ldout.valid && refillFpLoad
+
+  val fpLoadOutReg = RegNext(fpLoadOut)
+  io.fpout.bits := fpLoadOutReg.bits
+  io.fpout.bits.data := fpRdataHelper(fpLoadOutReg.bits.uop, fpLoadOutReg.bits.data) // recode
+  io.fpout.valid := RegNext(fpLoadOut.valid && !load_s2.io.out.bits.uop.roqIdx.needFlush(io.redirect))
+
+  io.lsq.ldout.ready := Mux(refillFpLoad, !fpHitLoadOut.valid, !intHitLoadOut.valid)
 
   when(io.ldout.fire()){
-    XSDebug("ldout %x iw %x fw %x\n", io.ldout.bits.uop.cf.pc, io.ldout.bits.uop.ctrl.rfWen, io.ldout.bits.uop.ctrl.fpWen)
+    XSDebug("ldout %x\n", io.ldout.bits.uop.cf.pc)
+  }
+
+  when(io.fpout.fire()){
+    XSDebug("fpout %x\n", io.fpout.bits.uop.cf.pc)
   }
 }

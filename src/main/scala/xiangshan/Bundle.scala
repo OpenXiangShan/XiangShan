@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.SelImm
 import xiangshan.backend.brq.BrqPtr
-import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
 import xiangshan.backend.decode.XDecode
@@ -183,6 +182,23 @@ class CtrlFlow extends XSBundle {
   val crossPageIPFFix = Bool()
 }
 
+
+class FPUCtrlSignals extends XSBundle {
+  val isAddSub = Bool() // swap23
+	val typeTagIn = UInt(2.W)
+	val typeTagOut = UInt(2.W)
+  val fromInt = Bool()
+  val wflags = Bool()
+  val fpWen = Bool()
+  val fmaCmd = UInt(2.W)
+  val div = Bool()
+  val sqrt = Bool()
+  val fcvt = Bool()
+  val typ = UInt(2.W)
+  val fmt = UInt(2.W)
+  val ren3 = Bool() //TODO: remove SrcType.fp
+}
+
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals extends XSBundle {
   val src1Type, src2Type, src3Type = SrcType()
@@ -200,6 +216,7 @@ class CtrlSignals extends XSBundle {
   val selImm = SelImm()
   val imm = UInt(XLEN.W)
   val commitType = CommitType()
+  val fpu = new FPUCtrlSignals
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]) = {
     val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table)
@@ -271,7 +288,7 @@ class ExuInput extends XSBundle {
 class ExuOutput extends XSBundle {
   val uop = new MicroOp
   val data = UInt((XLEN+1).W)
-  val fflags  = new Fflags
+  val fflags  = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect
   val brUpdate = new CfiUpdateInfo
@@ -297,6 +314,7 @@ class RoqCommitInfo extends XSBundle {
   val ldest = UInt(5.W)
   val rfWen = Bool()
   val fpWen = Bool()
+  val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
