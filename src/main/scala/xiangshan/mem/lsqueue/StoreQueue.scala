@@ -45,16 +45,25 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     val exceptionAddr = new ExceptionAddrIO
   })
 
+  // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
-  val dataModule = Module(new LSQueueData(StoreQueueSize, StorePipelineWidth))
+  val dataModule = Module(new StoreQueueData(StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth, numForward = StorePipelineWidth))
   dataModule.io := DontCare
+  val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
+  vaddrModule.io := DontCare
+  val exceptionModule = Module(new AsyncDataModuleTemplate(UInt(16.W), StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth))
+  exceptionModule.io := DontCare
+
+  // state & misc
   val allocated = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // sq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio data is valid
   val writebacked = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // inst has been writebacked to CDB
   val commited = Reg(Vec(StoreQueueSize, Bool())) // inst has been commited by roq
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of roq
+  val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
 
+  // ptr
   require(StoreQueueSize > RenameWidth)
   val enqPtrExt = RegInit(VecInit((0 until RenameWidth).map(_.U.asTypeOf(new SqPtr))))
   val deqPtrExt = RegInit(VecInit((0 until StorePipelineWidth).map(_.U.asTypeOf(new SqPtr))))
@@ -66,6 +75,15 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   val tailMask = UIntToMask(deqPtr, StoreQueueSize)
   val headMask = UIntToMask(enqPtr, StoreQueueSize)
+
+  // Read dataModule
+  // deqPtr and deqPtr+1 entry will be read from dataModule
+  val dataModuleRead = dataModule.io.rdata
+  for (i <- 0 until StorePipelineWidth) {
+    dataModule.io.raddr(i) := deqPtrExt(i).value
+  }
+  vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.sqIdx.value
+  exceptionModule.io.raddr(0) := deqPtr // read exception
 
   /**
     * Enqueue at dispatch
@@ -103,7 +121,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     * through arbiter with store units. It will later commit as normal.
     */
   for (i <- 0 until StorePipelineWidth) {
-    dataModule.io.wb(i).wen := false.B
+    dataModule.io.wen(i) := false.B
+    vaddrModule.io.wen(i) := false.B
+    exceptionModule.io.wen(i) := false.B
     when(io.storeIn(i).fire()) {
       val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
       val hasException = io.storeIn(i).bits.uop.cf.exceptionVec.asUInt.orR
@@ -115,14 +135,21 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       val storeWbData = Wire(new LsqEntry)
       storeWbData := DontCare
       storeWbData.paddr := io.storeIn(i).bits.paddr
-      storeWbData.vaddr := io.storeIn(i).bits.vaddr
       storeWbData.mask := io.storeIn(i).bits.mask
       storeWbData.data := io.storeIn(i).bits.data
-      storeWbData.mmio := io.storeIn(i).bits.mmio
-      storeWbData.exception := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+      dataModule.io.waddr(i) := stWbIndex
+      dataModule.io.wdata(i) := storeWbData
+      dataModule.io.wen(i) := true.B
 
-      dataModule.io.wbWrite(i, stWbIndex, storeWbData)
-      dataModule.io.wb(i).wen := true.B
+      vaddrModule.io.waddr(i) := stWbIndex
+      vaddrModule.io.wdata(i) := io.storeIn(i).bits.vaddr
+      vaddrModule.io.wen(i) := true.B
+
+      exceptionModule.io.waddr(i) := stWbIndex
+      exceptionModule.io.wdata(i) := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+      exceptionModule.io.wen(i) := true.B
+
+      mmio(stWbIndex) := io.storeIn(i).bits.mmio
 
       XSInfo("store write to sq idx %d pc 0x%x vaddr %x paddr %x data %x mmio %x roll %x exc %x\n",
         io.storeIn(i).bits.uop.sqIdx.value,
@@ -169,7 +196,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
     // do real fwd query
     dataModule.io.forwardQuery(
-      channel = i,
+      numForward = i,
       paddr = io.forward(i).paddr,
       needForward1 = needForward1,
       needForward2 = needForward2
@@ -196,17 +223,17 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     !io.commits.isWalk
 
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
-  io.uncache.req.bits.addr := dataModule.io.rdata(deqPtr).paddr
-  io.uncache.req.bits.data := dataModule.io.rdata(deqPtr).data
-  io.uncache.req.bits.mask := dataModule.io.rdata(deqPtr).mask
+  io.uncache.req.bits.addr := dataModule.io.rdata(0).paddr // data(deqPtr) -> rdata(0)
+  io.uncache.req.bits.data := dataModule.io.rdata(0).data
+  io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
-  io.uncache.req.bits.meta.id       := DontCare // TODO: // FIXME
+  io.uncache.req.bits.meta.id       := DontCare
   io.uncache.req.bits.meta.vaddr    := DontCare
-  io.uncache.req.bits.meta.paddr    := dataModule.io.rdata(deqPtr).paddr
+  io.uncache.req.bits.meta.paddr    := dataModule.io.rdata(0).paddr
   io.uncache.req.bits.meta.uop      := uop(deqPtr)
   io.uncache.req.bits.meta.mmio     := true.B
   io.uncache.req.bits.meta.tlb_miss := false.B
-  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(deqPtr).mask
+  io.uncache.req.bits.meta.mask     := dataModule.io.rdata(0).mask
   io.uncache.req.bits.meta.replay   := false.B
 
   when(io.uncache.req.fire()){
@@ -231,8 +258,8 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.uop.cf.exceptionVec := dataModule.io.rdata(deqPtr).exception.asBools
-  io.mmioStout.bits.data := dataModule.io.rdata(deqPtr).data
+  io.mmioStout.bits.uop.cf.exceptionVec := exceptionModule.io.rdata(0).asBools
+  io.mmioStout.bits.data := dataModuleRead(0).data // dataModuleRead.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.brUpdate := DontCare
@@ -241,7 +268,6 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   when (io.mmioStout.fire()) {
     writebacked(deqPtr) := true.B
     allocated(deqPtr) := false.B
-
   }
 
   /**
@@ -262,17 +288,17 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // remove retired insts from sq, add retired store to sbuffer
   for (i <- 0 until StorePipelineWidth) {
     val ptr = deqPtrExt(i).value
-    val mmio = dataModule.io.rdata(ptr).mmio
-    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !mmio
+    val ismmio = mmio(ptr)
+    io.sbuffer(i).valid := allocated(ptr) && commited(ptr) && !ismmio
     io.sbuffer(i).bits.cmd  := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr := dataModule.io.rdata(ptr).paddr
-    io.sbuffer(i).bits.data := dataModule.io.rdata(ptr).data
-    io.sbuffer(i).bits.mask := dataModule.io.rdata(ptr).mask
+    io.sbuffer(i).bits.addr := dataModuleRead(i).paddr
+    io.sbuffer(i).bits.data := dataModuleRead(i).data
+    io.sbuffer(i).bits.mask := dataModuleRead(i).mask
     io.sbuffer(i).bits.meta          := DontCare
     io.sbuffer(i).bits.meta.tlb_miss := false.B
     io.sbuffer(i).bits.meta.uop      := DontCare
-    io.sbuffer(i).bits.meta.mmio     := mmio
-    io.sbuffer(i).bits.meta.mask     := dataModule.io.rdata(ptr).mask
+    io.sbuffer(i).bits.meta.mmio     := false.B
+    io.sbuffer(i).bits.meta.mask     := dataModuleRead(i).mask
 
     when (io.sbuffer(i).fire()) {
       allocated(ptr) := false.B
@@ -296,7 +322,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := dataModule.io.rdata(io.exceptionAddr.lsIdx.sqIdx.value).vaddr
+  io.exceptionAddr.vaddr := exceptionModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
@@ -359,7 +385,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
 
   for (i <- 0 until StoreQueueSize) {
     if (i % 4 == 0) XSDebug("")
-    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, dataModule.io.rdata(i).paddr)
+    XSDebug(false, true.B, "%x [%x] ", uop(i).cf.pc, dataModule.io.debug(i).paddr)
     PrintFlag(allocated(i), "a")
     PrintFlag(allocated(i) && datavalid(i), "v")
     PrintFlag(allocated(i) && writebacked(i), "w")

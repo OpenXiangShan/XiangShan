@@ -24,42 +24,22 @@ class Dispatch2Ls extends XSModule {
     * Part 1: generate indexes for reservation stations
     */
   val loadIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.LduCnt, true))
-  val storeIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.StuCnt, true))
+  val loadCanAccept = VecInit(io.fromDq.map(deq => deq.valid && ldExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
   val loadPriority = PriorityGen((0 until exuParameters.LduCnt).map(i => io.numExist(i)))
-  val storePriority = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
-  for (i <- 0 until dpParams.LsDqDeqWidth) {
-    loadIndexGen.io.validBits(i) := io.fromDq(i).valid && ldExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    storeIndexGen.io.validBits(i) := io.fromDq(i).valid && stExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+  loadIndexGen.io.validBits := loadCanAccept
+  loadIndexGen.io.priority := loadPriority
 
-    // XSDebug(io.fromDq(i).valid,
-    //   p"ls dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
-  }
-  for (i <- 0 until exuParameters.LduCnt) {
-    loadIndexGen.io.priority(i) := loadPriority(i)
-  }
-  for (i <- 0 until exuParameters.StuCnt) {
-    storeIndexGen.io.priority(i) := storePriority(i)
-  }
+  val storeIndexGen = Module(new IndexMapping(dpParams.LsDqDeqWidth, exuParameters.StuCnt, true))
+  val storeCanAccept = VecInit(io.fromDq.map(deq => deq.valid && stExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val storePriority = PriorityGen((0 until exuParameters.StuCnt).map(i => io.numExist(i+exuParameters.LduCnt)))
+  storeIndexGen.io.validBits := storeCanAccept
+  storeIndexGen.io.priority := storePriority
+
   val allIndexGen = Seq(loadIndexGen, storeIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsValidVec = (0 until dpParams.LsDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
-  val rsIndexVec = (0 until dpParams.LsDqDeqWidth).map({i =>
-    val indexOffset = Seq(0, exuParameters.LduCnt)
-    allIndexGen.zipWithIndex.map{
-      case (index, j) => Mux(index.io.reverseMapping(i).valid,
-        ZeroExt(index.io.reverseMapping(i).bits, log2Ceil(exuParameters.LsExuCnt)) + indexOffset(j).U,
-        0.U)
-    }.reduce(_ | _)
-  })
-
   for (i <- validVec.indices) {
     // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
-  }
-  for (i <- rsValidVec.indices) {
-    // XSDebug(p"load reverse $i: valid ${loadIndexGen.io.reverseMapping(i).valid} index ${loadIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"store reverse $i: valid ${storeIndexGen.io.reverseMapping(i).valid} index ${storeIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
   }
 
   /**
@@ -84,9 +64,16 @@ class Dispatch2Ls extends XSModule {
   /**
     * Part 3: dispatch to reservation stations
     */
+  val loadReady = Cat(io.enqIQCtrl.take(exuParameters.LduCnt).map(_.ready)).andR
+  val storeReady = Cat(io.enqIQCtrl.drop(exuParameters.LduCnt).map(_.ready)).andR
   for (i <- 0 until exuParameters.LsExuCnt) {
     val enq = io.enqIQCtrl(i)
-    enq.valid := validVec(i)
+    if (i < exuParameters.LduCnt) {
+      enq.valid := loadIndexGen.io.mapping(i).valid && loadReady
+    }
+    else {
+      enq.valid := storeIndexGen.io.mapping(i - exuParameters.LduCnt).valid && storeReady
+    }
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.intRegRdy(readPort(i))
     if (i < exuParameters.LduCnt) {
@@ -105,14 +92,20 @@ class Dispatch2Ls extends XSModule {
   /**
     * Part 4: response to dispatch queue
     */
+  val load2CanOut = !(loadCanAccept(0) && loadCanAccept(1))
+  val load3CanOut = !(loadCanAccept(0) && loadCanAccept(1) || loadCanAccept(0) && loadCanAccept(2) || loadCanAccept(1) && loadCanAccept(2))
+  val store2CanOut = !(storeCanAccept(0) && storeCanAccept(1))
+  val store3CanOut = !(storeCanAccept(0) && storeCanAccept(1) || storeCanAccept(0) && storeCanAccept(2) || storeCanAccept(1) && storeCanAccept(2))
   for (i <- 0 until dpParams.LsDqDeqWidth) {
-    io.fromDq(i).ready := rsValidVec(i) && io.enqIQCtrl(rsIndexVec(i)).ready
+    io.fromDq(i).ready := loadCanAccept(i) && (if (i <= 1) true.B else if (i == 2) load2CanOut else load3CanOut) && loadReady ||
+                          storeCanAccept(i) && (if (i <= 1) true.B else if (i == 2) store2CanOut else store3CanOut) && storeReady
 
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Ls dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index $i\n")
   }
+  XSError(PopCount(io.fromDq.map(_.fire())) =/= PopCount(io.enqIQCtrl.map(_.fire())), "deq =/= enq\n")
 
   /**
     * Part 5: the second stage of dispatch 2 (send data to reservation station)
