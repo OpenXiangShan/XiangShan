@@ -144,8 +144,10 @@ class IntegerBlock
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
     rsData.io.srcRegValue := DontCare
-    rsData.io.srcRegValue(0) := intRf.io.readPorts(Cat(readPortIndex(i), 0.U(1.W))).data // readPortIndex(i) * 2.U
-    rsData.io.srcRegValue(1) := intRf.io.readPorts(Cat(readPortIndex(i), 1.U(1.W))).data // readPortIndex(i) * 2.U + 1.U
+    val src1Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2).data))
+    val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
+    rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
+    rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData
