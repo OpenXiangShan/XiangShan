@@ -124,7 +124,10 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     dontTouch(io.uart)
 
     io.uart <> axiMMIO.module.io.uart
-    soc.module.io.meip := false.B
+    val NumCores = top.Parameters.get.socParameters.NumCores
+    for (i <- 0 until NrExtIntr) {
+      soc.module.io.extIntrs(i) := false.B
+    }
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
     if (!env.FPGAPlatform) {
@@ -236,12 +239,14 @@ object TestMain extends App {
   // set soc parameters
   val socArgs = args.filterNot(_ == "--with-dramsim3")
   Parameters.set(
-    if(socArgs.contains("--fpga-platform")) {
-      if (socArgs.contains("--dual-core")) Parameters.dualCoreParameters
-      else Parameters()
+    (socArgs.contains("--fpga-platform"), socArgs.contains("--dual-core"), socArgs.contains("--disable-log")) match {
+      case (true,  false, _)     => Parameters()
+      case (true,   true, _)     => Parameters.dualCoreParameters
+      case (false,  true,  true) => Parameters.simDualCoreParameters
+      case (false, false,  true) => Parameters.simParameters
+      case (false,  true, false) => Parameters.debugDualCoreParameters
+      case (false, false, false) => Parameters.debugParameters
     }
-    else if(socArgs.contains("--disable-log")) Parameters.simParameters // sim only, disable log
-    else Parameters.debugParameters // open log
   )
 
   val otherArgs = socArgs.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core")

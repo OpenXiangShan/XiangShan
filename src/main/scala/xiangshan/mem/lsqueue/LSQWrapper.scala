@@ -23,7 +23,6 @@ class LsqEntry extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(16.W) // TODO: opt size
-  val mmio = Bool()
   val fwdMask = Vec(8, Bool())
   val fwdData = Vec(8, UInt(8.W))
 }
@@ -48,7 +47,7 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
     }
     val refill = new Bundle() {
       val wen = Input(Vec(size, Bool()))
-      val dcache = Input(new DCacheLineResp)
+      val data = Input(UInt((cfg.blockBytes * 8).W))
     }
     val needForward = Input(Vec(nchannel, Vec(2, UInt(size.W))))
     val forward = Vec(nchannel, Flipped(new LoadForwardQueryIO))
@@ -107,9 +106,7 @@ class LSQueueData(size: Int, nchannel: Int) extends XSModule with HasDCacheParam
   }
 
   // split dcache result into words
-  val words = VecInit((0 until blockWords) map { i =>
-    io.refill.dcache.data(DataBits * (i + 1) - 1, DataBits * i)
-  })
+  val words = VecInit((0 until blockWords) map { i => io.refill.data(DataBits * (i + 1) - 1, DataBits * i)})
 
 
   (0 until size).map(i => {
@@ -249,7 +246,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)
     val rollback = Output(Valid(new Redirect))
-    val dcache = new DCacheLineIO
+    val dcache = Flipped(ValidIO(new Refill))
     val uncache = new DCacheWordIO
     val roqDeqPtr = Input(new RoqPtr)
     val exceptionAddr = new ExceptionAddrIO
