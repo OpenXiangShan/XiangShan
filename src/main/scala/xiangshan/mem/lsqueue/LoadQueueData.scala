@@ -68,9 +68,14 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
     // use "this.refill.wen(ldIdx) := true.B" instead
   })
 
-  io := DontCare
-
   val data = Reg(Vec(size, new LQDataEntry))
+
+  // read data
+  (0 until wbNumRead).map(i => {
+    io.wb.rdata(i) := data(io.wb.raddr(i))
+  })
+
+  io.uncache.rdata := data(io.uncache.raddr)
 
   // writeback to lq/sq
   (0 until wbNumWrite).map(i => {
