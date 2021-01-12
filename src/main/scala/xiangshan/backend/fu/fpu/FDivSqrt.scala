@@ -17,6 +17,7 @@ class FDivSqrt extends FPUSubModule {
   val tag = fpCtrl.typeTagIn
   val uopReg = RegEnable(io.in.bits.uop, io.in.fire())
   val single = RegEnable(tag === S, io.in.fire())
+  val rmReg = RegEnable(rm, io.in.fire())
   val kill = uopReg.roqIdx.needFlush(io.redirectIn)
   val killReg = RegInit(false.B)
 
@@ -63,7 +64,7 @@ class FDivSqrt extends FPUSubModule {
     rounder.io.invalidExc := divSqrt.io.invalidExc
     rounder.io.infiniteExc := divSqrt.io.infiniteExc
     rounder.io.in := divSqrt.io.rawOut
-    rounder.io.roundingMode := rm
+    rounder.io.roundingMode := rmReg
     rounder.io.detectTininess := hardfloat.consts.tininess_afterRounding
   }
 
