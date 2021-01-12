@@ -350,8 +350,6 @@ class LoadQueue extends XSModule
     ))
     val rdataPartialLoad = rdataHelper(seluop, rdataSel)
 
-    val validWb = loadWbSelVec(loadWbSel(i)) && loadWbSelV(i)
-
     // writeback missed int/fp load
     // 
     // Int load writeback will finish (if not blocked) in one cycle
@@ -364,7 +362,7 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
     io.ldout(i).bits.fflags := DontCare
-    io.ldout(i).valid := validWb
+    io.ldout(i).valid := loadWbSelV(i)
 
     when(io.ldout(i).fire()) {
       XSInfo("int load miss write to cbd roqidx %d lqidx %d pc 0x%x paddr %x data %x mmio %x\n",
