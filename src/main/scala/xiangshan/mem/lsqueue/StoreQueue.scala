@@ -132,7 +132,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       writebacked(stWbIndex) := hasWritebacked
       pending(stWbIndex) := !hasWritebacked // valid mmio require
 
-      val storeWbData = Wire(new LsqEntry)
+      val storeWbData = Wire(new SQDataEntry)
       storeWbData := DontCare
       storeWbData.paddr := io.storeIn(i).bits.paddr
       storeWbData.mask := io.storeIn(i).bits.mask

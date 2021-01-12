@@ -76,8 +76,10 @@ class LoadQueue extends XSModule
 
   val uop = Reg(Vec(LoadQueueSize, new MicroOp))
   // val data = Reg(Vec(LoadQueueSize, new LsRoqEntry))
-  val dataModule = Module(new LSQueueData(LoadQueueSize, LoadPipelineWidth))
+  val dataModule = Module(new LoadQueueData(LoadQueueSize, numRead = LoadPipelineWidth, numWrite = LoadPipelineWidth))
   dataModule.io := DontCare
+  val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), LoadQueueSize, numRead = 1, numWrite = LoadPipelineWidth))
+  vaddrModule.io := DontCare
   val allocated = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // lq entry has been allocated
   val datavalid = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // data is valid
   val writebacked = RegInit(VecInit(List.fill(LoadQueueSize)(false.B))) // inst has been writebacked to CDB
@@ -145,6 +147,7 @@ class LoadQueue extends XSModule
     */
   for (i <- 0 until LoadPipelineWidth) {
     dataModule.io.wb(i).wen := false.B
+    vaddrModule.io.wen(i) := false.B
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
         XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
@@ -179,16 +182,18 @@ class LoadQueue extends XSModule
         datavalid(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
         writebacked(loadWbIndex) := !io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
 
-        val loadWbData = Wire(new LsqEntry)
+        val loadWbData = Wire(new LQDataEntry)
         loadWbData.paddr := io.loadIn(i).bits.paddr
-        loadWbData.vaddr := io.loadIn(i).bits.vaddr
         loadWbData.mask := io.loadIn(i).bits.mask
-        loadWbData.data := io.loadIn(i).bits.data // for mmio / misc / debug
+        loadWbData.data := io.loadIn(i).bits.data // fwd data
         loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
-        loadWbData.fwdData := io.loadIn(i).bits.forwardData
         loadWbData.exception := io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
         dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
         dataModule.io.wb(i).wen := true.B
+
+        vaddrModule.io.waddr(i) := loadWbIndex
+        vaddrModule.io.wdata(i) := io.loadIn(i).bits.vaddr
+        vaddrModule.io.wen(i) := true.B
 
         debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
         
@@ -561,7 +566,8 @@ class LoadQueue extends XSModule
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := dataModule.io.rdata(io.exceptionAddr.lsIdx.lqIdx.value).vaddr
+  vaddrModule.io.raddr(0) := io.exceptionAddr.lsIdx.lqIdx.value
+  io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
