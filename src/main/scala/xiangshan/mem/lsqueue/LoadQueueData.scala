@@ -20,38 +20,46 @@ class LQDataEntry extends XSBundle {
 }
 
 
-class LoadQueueData(size: Int, numRead: Int, numWrite: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
+class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule with HasDCacheParameters with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
-    val wb = Vec(numWrite, new Bundle() {
-      val wen = Input(Bool())
-      val index = Input(UInt(log2Up(size).W))
-      val wdata = Input(new LQDataEntry)
-    })
+    val wb = new Bundle() {
+      val wen = Vec(wbNumWrite, Input(Bool()))
+      val waddr = Input(Vec(wbNumWrite, UInt(log2Up(size).W)))
+      val wdata = Input(Vec(wbNumWrite, new LQDataEntry))
+      val raddr = Input(Vec(wbNumRead, UInt(log2Up(size).W)))
+      val rdata = Output(Vec(wbNumRead, new LQDataEntry))
+    }
     val uncache = new Bundle() {
       val wen = Input(Bool())
-      val index = Input(UInt(log2Up(size).W))
-      val wdata = Input(UInt(XLEN.W))
+      val waddr = Input(UInt(log2Up(size).W))
+      val wdata = Input(UInt(XLEN.W)) // only write back uncache data
+      val raddr = Input(UInt(log2Up(size).W))
+      val rdata = Output(new LQDataEntry)
     }
     val refill = new Bundle() {
-      val wen = Input(Vec(size, Bool()))
+      val valid = Input(Bool())
+      val paddr = Input(UInt(PAddrBits.W))
       val data = Input(UInt((cfg.blockBytes * 8).W))
+      val refillMask = Input(Vec(size, Bool()))
+      val matchMask = Output(Vec(size, Bool()))
     }
-    val rdata = Output(Vec(size, new LQDataEntry))
+    val violation = Vec(StorePipelineWidth, new Bundle() {
+      val paddr = Input(UInt(PAddrBits.W))
+      val mask = Input(UInt(8.W))
+      val violationMask = Output(Vec(size, Bool()))
+    })
+    val debug = Output(Vec(size, new LQDataEntry))
 
-    // val debug = new Bundle() {
-    //   val debug_data = Vec(LoadQueueSize, new LQDataEntry)
-    // }
-
-    def wbWrite(channel: Int, index: UInt, wdata: LQDataEntry): Unit = {
-      require(channel < numWrite && numWrite >= 0)
+    def wbWrite(channel: Int, waddr: UInt, wdata: LQDataEntry): Unit = {
+      require(channel < wbNumWrite && wbNumWrite >= 0)
       // need extra "this.wb(channel).wen := true.B"
-      this.wb(channel).index := index
-      this.wb(channel).wdata := wdata
+      this.wb.waddr(channel) := waddr
+      this.wb.wdata(channel) := wdata
     }
 
-    def uncacheWrite(index: UInt, wdata: UInt): Unit = {
+    def uncacheWrite(waddr: UInt, wdata: UInt): Unit = {
       // need extra "this.uncache.wen := true.B"
-      this.uncache.index := index
+      this.uncache.waddr := waddr
       this.uncache.wdata := wdata
     }
 
@@ -65,14 +73,14 @@ class LoadQueueData(size: Int, numRead: Int, numWrite: Int) extends XSModule wit
   val data = Reg(Vec(size, new LQDataEntry))
 
   // writeback to lq/sq
-  (0 until 2).map(i => {
-    when(io.wb(i).wen){
-      data(io.wb(i).index) := io.wb(i).wdata
+  (0 until wbNumWrite).map(i => {
+    when(io.wb.wen(i)){
+      data(io.wb.waddr(i)) := io.wb.wdata(i)
     }
   })
 
   when(io.uncache.wen){
-    data(io.uncache.index).data := io.uncache.wdata
+    data(io.uncache.waddr).data := io.uncache.wdata
   }
 
   // refill missed load
@@ -87,16 +95,29 @@ class LoadQueueData(size: Int, numRead: Int, numWrite: Int) extends XSModule wit
   // split dcache result into words
   val words = VecInit((0 until blockWords) map { i => io.refill.data(DataBits * (i + 1) - 1, DataBits * i)})
 
-
+  // gen paddr match mask
   (0 until size).map(i => {
-    when(io.refill.wen(i) ){
+    io.refill.matchMask(i) := get_block_addr(data(i).paddr) === get_block_addr(io.refill.paddr)
+  })
+
+  // refill data according to matchMask, refillMask and refill.valid
+  (0 until size).map(i => {
+    when(io.refill.valid && io.refill.matchMask(i) && io.refill.refillMask(i)){
       val refillData = words(get_word(data(i).paddr))
       data(i).data := mergeRefillData(refillData, data(i).data.asUInt, data(i).fwdMask.asUInt)
       XSDebug("miss resp: pos %d addr %x data %x + %x(%b)\n", i.U, data(i).paddr, refillData, data(i).data.asUInt, data(i).fwdMask.asUInt)
     }
   })
 
-  // data read
-  io.rdata := data
-  // io.debug.debug_data := data
+  // mem access violation check, gen violationMask
+  (0 until StorePipelineWidth).map(i => {
+    io.violation(i).violationMask := VecInit((0 until size).map(j => {
+      val addrMatch = io.violation(i).paddr(PAddrBits - 1, 3) === data(j).paddr(PAddrBits - 1, 3)
+      val violationVec = (0 until 8).map(k => data(j).mask(k) && io.violation(i).mask(k))
+      Cat(violationVec).orR() && addrMatch
+    }))
+  })
+    
+  // debug data read
+  io.debug := data
 }
