@@ -290,14 +290,34 @@ object AddressSpace extends HasXSParameter {
 
 
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
+class XSCore()(implicit p: config.Parameters) extends LazyModule
+  with HasXSParameter
+  with HasExeBlockHelper
+{
+
+  // to fast wake up fp, mem rs
+  val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
+  val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
+  val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
+  val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
+
+  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
+  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
+  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
+  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
   // outer facing nodes
-  val dcache = LazyModule(new DCache())
-  val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
   val l2Prefetcher = LazyModule(new L2Prefetcher())
+  val memBlock = LazyModule(new MemBlock(
+    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
+    slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
+    fastFpOut = Seq(),
+    slowFpOut = loadExuConfigs,
+    fastIntOut = Seq(),
+    slowIntOut = loadExuConfigs
+  ))
 
   lazy val module = new XSCoreImp(this)
 }
@@ -341,17 +361,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     fastIntOut = fpBlockFastWakeUpInt,
     slowIntOut = fpBlockSlowWakeUpInt
   ))
-  val memBlock = Module(new MemBlock(
-    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
-    slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
-    fastFpOut = Seq(),
-    slowFpOut = loadExuConfigs,
-    fastIntOut = Seq(),
-    slowIntOut = loadExuConfigs
-  ))
 
-  val dcache = outer.dcache.module
-  val uncache = outer.uncache.module
+  val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val l2Prefetcher = outer.l2Prefetcher.module
@@ -429,10 +440,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr    <> integerBlock.io.csrio.tlb
 
-  dcache.io.lsu  <> memBlock.io.dcache
-  uncache.io.lsq <> memBlock.io.uncache
-
-  l2Prefetcher.io.in <> dcache.io.prefetch
+  l2Prefetcher.io.in <> memBlock.io.toDCachePrefetch
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
