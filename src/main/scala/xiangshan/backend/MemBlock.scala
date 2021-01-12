@@ -10,12 +10,20 @@ import xiangshan.cache._
 import xiangshan.mem._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
-import xiangshan.backend.fu.FunctionUnit.{lduCfg, mouCfg, stuCfg}
+import xiangshan.backend.regfile.RfReadPort
 
 class LsBlockToCtrlIO extends XSBundle {
   val stOut = Vec(exuParameters.StuCnt, ValidIO(new ExuOutput)) // write to roq
   val numExist = Vec(exuParameters.LsExuCnt, Output(UInt(log2Ceil(IssQueSize).W)))
   val replay = ValidIO(new Redirect)
+}
+
+class IntBlockToMemBlockIO extends XSBundle {
+  val readIntRf = Vec(NRMemReadPorts, new RfReadPort(XLEN))
+}
+
+class FpBlockToMemBlockIO extends XSBundle {
+  val readFpRf = Vec(exuParameters.StuCnt, new RfReadPort(XLEN + 1))
 }
 
 class MemBlock
@@ -30,6 +38,8 @@ class MemBlock
 
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToLsBlockIO)
+    val fromIntBlock = Flipped(new IntBlockToMemBlockIO)
+    val fromFpBlock = Flipped(new FpBlockToMemBlockIO)
     val toCtrlBlock = new LsBlockToCtrlIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
@@ -69,6 +79,9 @@ class MemBlock
   val intExeWbReqs = ldOut0 +: loadUnits.tail.map(_.io.ldout)
   val fpExeWbReqs = loadUnits.map(_.io.fpout)
 
+  val readPortIndex = Seq(0, 1, 2, 4)
+  io.fromIntBlock.readIntRf.foreach(_.addr := DontCare)
+  io.fromFpBlock.readFpRf.foreach(_.addr := DontCare)
   val reservationStations = (loadExuConfigs ++ storeExuConfigs).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -104,7 +117,13 @@ class MemBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+
+    val src2IsFp = RegNext(io.fromCtrlBlock.enqIqCtrl(i).bits.ctrl.src2Type === SrcType.fp)
+    rsData.io.srcRegValue := DontCare
+    rsData.io.srcRegValue(0) := io.fromIntBlock.readIntRf(readPortIndex(i)).data
+    if (i >= exuParameters.LduCnt) {
+      rsData.io.srcRegValue(1) := Mux(src2IsFp, io.fromFpBlock.readFpRf(i - exuParameters.LduCnt).data, io.fromIntBlock.readIntRf(readPortIndex(i) + 1).data)
+    }
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

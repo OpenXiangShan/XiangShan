@@ -50,9 +50,9 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
   val dataModule = Module(new StoreQueueData(StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth, numForward = StorePipelineWidth))
   dataModule.io := DontCare
-  val vaddrModule = Module(new DataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
+  val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
   vaddrModule.io := DontCare
-  val exceptionModule = Module(new DataModuleTemplate(UInt(16.W), StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth))
+  val exceptionModule = Module(new AsyncDataModuleTemplate(UInt(16.W), StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth))
   exceptionModule.io := DontCare
 
   // state & misc
