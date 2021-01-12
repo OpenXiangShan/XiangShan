@@ -78,7 +78,7 @@ class Dispatch2Int extends XSModule {
     io.readRf(2*i  ).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
     io.readRf(2*i+1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
   }
-  val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(NRIntReadPorts).W)))
+  val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(2.W)))
   intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
   intDynamicIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := intDynamicExuSrc(i)})
 

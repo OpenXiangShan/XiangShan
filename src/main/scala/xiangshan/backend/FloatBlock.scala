@@ -90,10 +90,10 @@ class FloatBlock
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
 
     rsData.io.srcRegValue := DontCare
-    val srcIndex = (0 until 3).map(Range(_, 12, 3).map(_.U))
-    rsData.io.srcRegValue(0) := fpRf.io.readPorts(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(0)))).data
-    rsData.io.srcRegValue(1) := fpRf.io.readPorts(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(1)))).data
-    rsData.io.srcRegValue(2) := fpRf.io.readPorts(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(2)))).data
+    val srcIndex = List.tabulate(3)(Range(_, 12, 3).map(_.U))
+    rsData.io.srcRegValue(0) := fpRf.io.readPorts(LookupTree(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(0)))).data
+    rsData.io.srcRegValue(1) := fpRf.io.readPorts(LookupTree(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(1)))).data
+    rsData.io.srcRegValue(2) := fpRf.io.readPorts(LookupTree(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(2)))).data
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

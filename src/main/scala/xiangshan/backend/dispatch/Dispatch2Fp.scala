@@ -87,11 +87,12 @@ class Dispatch2Fp extends XSModule {
     val enq = io.enqIQCtrl(i)
     enq.valid := validVec(i)
     enq.bits := io.fromDq(indexVec(i)).bits
-    val srcIndex = (0 until 3).map(Range(_, 12, 3).map(_.U))
-    enq.bits.src1State := io.regRdy(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(0))))
-    enq.bits.src2State := io.regRdy(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(1))))
-    enq.bits.src3State := io.regRdy(ParallelLookUp(readPortIndex(i), (0 until 4).map(_.U).zip(srcIndex(2))))
+    val srcIndex = List.tabulate(3)(Range(_, 12, 3).map(_.U)).map(table => LookupTree(readPortIndex(i), (0 until 4).map(_.U).zip(table)))
+    enq.bits.src1State := io.regRdy(srcIndex(0))
+    enq.bits.src2State := io.regRdy(srcIndex(1))
+    enq.bits.src3State := io.regRdy(srcIndex(2))
 
+    XSInfo(enq.fire(), p"srcIndices: ${srcIndex(0)} ${srcIndex(1)} ${srcIndex(2)}, readPortIndex: ${readPortIndex(i)}\n")
     XSInfo(enq.fire(), p"pc 0x${Hexadecimal(enq.bits.cf.pc)} with type ${enq.bits.ctrl.fuType} " +
       p"srcState(${enq.bits.src1State} ${enq.bits.src2State} ${enq.bits.src3State}) " +
       p"enters reservation station $i from ${indexVec(i)}\n")
