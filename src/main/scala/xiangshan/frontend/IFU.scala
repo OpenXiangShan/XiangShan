@@ -296,7 +296,7 @@ class IFU extends XSModule with HasIFUConst
   // because the prediction is with the start of each inst
   val if4_prevHalfInstr = RegInit(0.U.asTypeOf(ValidUndirectioned(new PrevHalfInstr)))
   val if4_pendingPrevHalfInstr = if4_prevHalfInstr.valid && HasCExtension.B
-  val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && if4_prevHalfInstr.bits.npc === if4_pc && if4_valid
+  val if4_prevHalfInstrMet = if4_pendingPrevHalfInstr && if4_valid
   val if4_prevHalfConsumed = if4_prevHalfInstrMet && if4_fire
   val if4_prevHalfFlush = if4_flush
 
