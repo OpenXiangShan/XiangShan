@@ -3,6 +3,7 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import utils._
 import xiangshan.backend.regfile.Regfile
 import xiangshan.backend.exu._
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
@@ -25,6 +26,7 @@ class FloatBlock
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToFpBlockIO)
     val toCtrlBlock = new FpBlockToCtrlIO
+    val toMemBlock = new FpBlockToMemBlockIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
@@ -57,6 +59,7 @@ class FloatBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
+  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val reservedStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -85,7 +88,15 @@ class FloatBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+
+    rsData.io.srcRegValue := DontCare
+    val src1Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3).data))
+    val src2Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 1).data))
+    val src3Value = VecInit((0 until 4).map(i => fpRf.io.readPorts(i * 3 + 2).data))
+    
+    rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
+    rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
+    rsData.io.srcRegValue(2) := src3Value(readPortIndex(i))
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData
@@ -142,6 +153,7 @@ class FloatBlock
 
   // read fp rf from ctrl block
   fpRf.io.readPorts <> io.fromCtrlBlock.readRf
+  (0 until exuParameters.StuCnt).foreach(i => io.toMemBlock.readFpRf(i).data := fpRf.io.readPorts(i + 12).data)
   // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
     (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbFpPriority),
