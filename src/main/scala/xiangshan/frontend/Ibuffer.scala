@@ -53,8 +53,9 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Ibuffer define
   // val ibuf = Reg(Vec(IBufSize, new IBufEntry))
-  val ibuf = Module(new DataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
+  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
+  val next_head_ptr = WireInit(head_ptr)
   val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
   val tail_ptr = tail_vec(0)
 
@@ -73,7 +74,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Enque
   io.in.ready := allowEnq
-
+ 
   val offset = Wire(Vec(PredictWidth, UInt(log2Up(PredictWidth).W)))
   for(i <- 0 until PredictWidth) {
     if (i == 0) {
@@ -114,22 +115,12 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Deque
   when(deqValid) {
-    // val validVec = UIntToMask(validEntries, DecodeWidth)
-    val validVec = ParallelMux(Seq(
-      (validEntries === 0.U , 0.U(DecodeWidth.W)),
-      (validEntries === 1.U , 1.U(DecodeWidth.W)),
-      (validEntries === 2.U , 3.U(DecodeWidth.W)),
-      (validEntries === 3.U , 7.U(DecodeWidth.W)),
-      (validEntries === 4.U , 15.U(DecodeWidth.W)),
-      (validEntries === 5.U , 31.U(DecodeWidth.W)),
-      (validEntries >=  6.U , 63.U(DecodeWidth.W))
-    ))
+    val validVec = UIntToMask(Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries), DecodeWidth)
 
     io.out.zipWithIndex.foreach{case (e, i) => e.valid := validVec(i)}
+    next_head_ptr := head_ptr + PopCount(io.out.map(_.fire))
 
     for(i <- 0 until DecodeWidth) {
-      val head_wire = head_ptr.value + i.U
-      ibuf.io.raddr(i) := head_wire
       val outWire = ibuf.io.rdata(i)
 
       io.out(i).bits.instr := outWire.inst
@@ -145,8 +136,11 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
       io.out(i).bits.brUpdate.pd := outWire.pd
       io.out(i).bits.brUpdate.bpuMeta := outWire.brInfo
       io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
+      
+      val head_wire = next_head_ptr.value + i.U
+      ibuf.io.raddr(i) := head_wire
     }
-    head_ptr := head_ptr + PopCount(io.out.map(_.fire))
+    head_ptr := next_head_ptr
   }.otherwise {
     ibuf.io.raddr := DontCare
     io.out.foreach(_.valid := false.B)
