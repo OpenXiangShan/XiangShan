@@ -49,6 +49,8 @@ class RSCtrlDataIO(srcNum: Int) extends XSBundle {
   val srcUpdate = Input(Vec(IssQueSize+1, Vec(srcNum, Bool()))) // Note: the last one for enq
   val redVec    = Input(UInt(IssQueSize.W))
   val feedback  = Input(Vec(IssQueSize+1, Bool())) // Note: the last one for hit
+
+  override def cloneType: RSCtrlDataIO.this.type = new RSCtrlDataIO(srcNum).asInstanceOf[this.type]
 }
 
 class ReservationStationCtrl
@@ -398,43 +400,7 @@ class ReservationStationData
   }
 
   when (enqEnReg) { // TODO: turn to srcNum, not the 3
-    exuCfg match {
-      case Exu.aluExeUnitCfg =>
-        // src1: pc or reg
-        data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
-        // src2: imm or reg
-        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
-
-      case Exu.jumpExeUnitCfg =>
-        // src1: pc or reg
-        data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
-        // src2: imm
-        data(enqPtrReg)(1) := uop(enqPtrReg).ctrl.imm
-
-      case Exu.mulDivExeUnitCfg =>
-        // src1: reg
-        data(enqPtrReg)(0) := io.srcRegValue(0)
-        // src2: reg
-        data(enqPtrReg)(1) := io.srcRegValue(1)
-
-      case Exu.fmacExeUnitCfg =>
-        (0 until exuCfg.fpSrcCnt).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
-
-      case Exu.fmiscExeUnitCfg =>
-        (0 until exuCfg.fpSrcCnt).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
-
-      case Exu.ldExeUnitCfg =>
-        data(enqPtrReg)(0) := io.srcRegValue(0)
-        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
-
-      case Exu.stExeUnitCfg =>
-        data(enqPtrReg)(0) := io.srcRegValue(0)
-        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
-
-      // default
-      case _ =>
-        XSDebug(false.B, "Unhandled exu-config")
-    }
+    (0 until (exuCfg.intSrcCnt + exuCfg.fpSrcCnt)).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
     XSDebug(p"[srcRegValue] src1: ${Hexadecimal(io.srcRegValue(0))} src2: ${Hexadecimal(io.srcRegValue(1))} src3: ${Hexadecimal(io.srcRegValue(2))}\n")
   }
@@ -483,10 +449,40 @@ class ReservationStationData
   }
 
   // deq
-  io.deq.bits.uop  := uop(deq)
-  io.deq.bits.src1 := data(deq)(0)
-  io.deq.bits.src2 := data(deq)(1)
-  io.deq.bits.src3 := data(deq)(2)
+  val exuInput = io.deq.bits
+  exuInput := DontCare
+  exuInput.uop := uop(deq)
+  exuCfg match {
+    // int
+    case Exu.aluExeUnitCfg =>
+      exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
+      exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
+    case Exu.jumpExeUnitCfg =>
+      exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
+      exuInput.src2 := uop(deq).ctrl.imm
+    case Exu.mulDivExeUnitCfg =>
+      exuInput.src1 := data(deq)(0)
+      exuInput.src2 := data(deq)(1)
+    // float point
+    case Exu.fmacExeUnitCfg =>
+      exuInput.src1 := data(deq)(0)
+      exuInput.src2 := data(deq)(1)
+      exuInput.src3 := data(deq)(2)
+    case Exu.fmiscExeUnitCfg =>
+      exuInput.src1 := data(deq)(0)
+      exuInput.src2 := data(deq)(1)
+      exuInput.src3 := data(deq)(2)
+    // load-store
+    case Exu.ldExeUnitCfg =>
+      exuInput.src1 := data(deq)(0)
+      exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
+    case Exu.stExeUnitCfg =>
+      exuInput.src1 := data(deq)(0)
+      exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
+    case _ =>
+      XSDebug(false.B, "Unhandled exu-config")
+  }
+
   io.deq.valid := RegNext(sel.valid)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
 
