@@ -9,6 +9,7 @@ import xiangshan.backend._
 import utils.XSDebug
 
 trait HasCSRConst {
+
   // User Trap Setup
   val Ustatus       = 0x000
   val Uie           = 0x004
@@ -82,8 +83,71 @@ trait HasCSRConst {
   // Machine Counter/Timers
   // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers
   // 0xB80 - 0x89F are also used as perfcnt csr
-
+  val Mcycle   = 0xb00
+  val Minstret = 0xb02
+  
+  val Mhpmcounter3  = 0xB03
+  val Mhpmcounter4  = 0xB04
+  val Mhpmcounter5  = 0xB05
+  val Mhpmcounter6  = 0xB06
+  val Mhpmcounter7  = 0xB07
+  val Mhpmcounter8  = 0xB08
+  val Mhpmcounter9  = 0xB09
+  val Mhpmcounter10 = 0xB0A
+  val Mhpmcounter11 = 0xB0B
+  val Mhpmcounter12 = 0xB0C
+  val Mhpmcounter13 = 0xB0D
+  val Mhpmcounter14 = 0xB0E
+  val Mhpmcounter15 = 0xB0F
+  val Mhpmcounter16 = 0xB10
+  val Mhpmcounter17 = 0xB11
+  val Mhpmcounter18 = 0xB12
+  val Mhpmcounter19 = 0xB13
+  val Mhpmcounter20 = 0xB14
+  val Mhpmcounter21 = 0xB15
+  val Mhpmcounter22 = 0xB16
+  val Mhpmcounter23 = 0xB17
+  val Mhpmcounter24 = 0xB18
+  val Mhpmcounter25 = 0xB19
+  val Mhpmcounter26 = 0xB1A
+  val Mhpmcounter27 = 0xB1B
+  val Mhpmcounter28 = 0xB1C
+  val Mhpmcounter29 = 0xB1D
+  val Mhpmcounter30 = 0xB1E
+  val Mhpmcounter31 = 0xB1F
+  
   // Machine Counter Setup (not implemented)
+  val Mcountinhibit = 0x320
+  val Mhpmevent3    = 0x323
+  val Mhpmevent4    = 0x324
+  val Mhpmevent5    = 0x325
+  val Mhpmevent6    = 0x326
+  val Mhpmevent7    = 0x327
+  val Mhpmevent8    = 0x328
+  val Mhpmevent9    = 0x329
+  val Mhpmevent10   = 0x32A
+  val Mhpmevent11   = 0x32B
+  val Mhpmevent12   = 0x32C
+  val Mhpmevent13   = 0x32D
+  val Mhpmevent14   = 0x32E
+  val Mhpmevent15   = 0x32F
+  val Mhpmevent16   = 0x330
+  val Mhpmevent17   = 0x331
+  val Mhpmevent18   = 0x332
+  val Mhpmevent19   = 0x333
+  val Mhpmevent20   = 0x334
+  val Mhpmevent21   = 0x335
+  val Mhpmevent22   = 0x336
+  val Mhpmevent23   = 0x337
+  val Mhpmevent24   = 0x338
+  val Mhpmevent25   = 0x339
+  val Mhpmevent26   = 0x33A
+  val Mhpmevent27   = 0x33B
+  val Mhpmevent28   = 0x33C
+  val Mhpmevent29   = 0x33D
+  val Mhpmevent30   = 0x33E
+  val Mhpmevent31   = 0x33F
+
   // Debug/Trace Registers (shared with Debug Mode) (not implemented)
   // Debug Mode Registers (not implemented)
 
