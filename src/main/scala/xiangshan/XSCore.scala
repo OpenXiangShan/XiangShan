@@ -397,13 +397,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.tlb(0) <> memBlock.io.ptw
   ptw.io.tlb(1) <> frontend.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.csr <> integerBlock.io.csrio.tlb
+  ptw.io.csr    <> integerBlock.io.csrio.tlb
 
-  dcache.io.lsu.load    <> memBlock.io.dcache.loadUnitToDcacheVec
-  dcache.io.lsu.lsq   <> memBlock.io.dcache.loadMiss
-  dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
-  dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
-  uncache.io.lsq      <> memBlock.io.dcache.uncache
+  dcache.io.lsu  <> memBlock.io.dcache
+  uncache.io.lsq <> memBlock.io.uncache
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
