@@ -353,20 +353,41 @@ class ReservationStationData
     val feedback = Flipped(ValidIO(new TlbFeedback))
   })
 
-  val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, 1, iqSize)))
-  data.foreach(_.io <> DontCare)
+  val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, 1, iqSize))
+  uopMem.io <> DontCare
+  uopMem.io.wen.foreach(_ := false.B)
 
-  // data read/write interface
+  val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, if (!env.FPGAPlatform) iqSize else 1, iqSize)))
+  data.foreach(_.io <> DontCare)
+  data.foreach(_.io.wen.foreach(_ := false.B))
+
+  // data/uop read/write interface
   def dataRead(iqIdx: UInt, srcIdx: Int): UInt = {
-    data(srcIdx).io.raddr(0) := iqIdx
-    data(srcIdx).io.rdata(0)
+    if (env.FPGAPlatform) {
+      data(srcIdx).io.raddr(0) := iqIdx
+      data(srcIdx).io.rdata(0)
+    } else {
+      data(srcIdx).io.raddr(iqIdx) := iqIdx
+      data(srcIdx).io.rdata(iqIdx)
+    }
   }
   def dataWrite(iqIdx: UInt, srcIdx: Int, wdata: UInt) = {
     data(srcIdx).io.waddr(iqIdx) := iqIdx
     data(srcIdx).io.wdata(iqIdx) := wdata
     data(srcIdx).io.wen(iqIdx) := true.B
   }
+  def uopRead(iqIdx: UInt): MicroOp = {
+    uopMem.io.raddr(iqIdx) := iqIdx
+    uopMem.io.rdata(iqIdx)
+  }
+  def uopWrite(iqIdx: UInt, wdata: MicroOp) = {
+    uopMem.io.waddr(0) := iqIdx
+    uopMem.io.wdata(0) := wdata
+    uopMem.io.wen(0) := true.B
+  }
+
+  val uop = WireInit(VecInit((0 until iqSize).map(i => uopRead(i.U))))
+  val debug_data = if (!env.FPGAPlatform) List.tabulate(srcNum)(i => WireInit(VecInit((0 until iqSize).map(j => dataRead(j.U, i))))) else null
 
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
@@ -380,7 +401,7 @@ class ReservationStationData
   val enqEn  = enqCtrl.valid
   val enqEnReg = RegNext(enqEn)
   when (enqEn) {
-    uop(enqPtr) := enqUop
+    uopWrite(enqPtr, enqUop)
     XSDebug(p"enqCtrl: enqPtr:${enqPtr} src1:${enqUop.psrc1}|${enqUop.src1State}|${enqUop.ctrl.src1Type}" +
       p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
@@ -493,9 +514,9 @@ class ReservationStationData
     p" roqIdx:${io.deq.bits.uop.roqIdx} src1:${Hexadecimal(io.deq.bits.src1)} " +
     p" src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
   XSDebug(p"Data:  | src1:data | src2:data | src3:data |hit|pdest:rf:fp| roqIdx | pc\n")
-  for(i <- data.indices) {
-    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(exuInput.src1)}|${uop(i).psrc2}:" +
-      (if (srcNum > 1) p"${Hexadecimal(exuInput.src2)}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(exuInput.src3)}" else p"null") + p"|" +
+  for (i <- 0 until iqSize) {
+    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(debug_data(0)(i))}|${uop(i).psrc2}:" +
+      (if (srcNum > 1) p"${Hexadecimal(debug_data(1)(i))}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(debug_data(2)(i))}" else p"null") + p"|" +
       p"${Binary(io.ctrl.srcUpdate(i).asUInt)}|${uop(i).pdest}:${uop(i).ctrl.rfWen}:" +
       p"${uop(i).ctrl.fpWen}|${uop(i).roqIdx} |${Hexadecimal(uop(i).cf.pc)}\n")
   }
