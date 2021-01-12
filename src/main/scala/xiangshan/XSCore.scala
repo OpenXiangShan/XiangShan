@@ -89,7 +89,8 @@ case class XSCoreParameters
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
-  NumPerfCounters: Int = 16
+  NumPerfCounters: Int = 16,
+  NrExtIntr: Int = 1
 )
 
 trait HasXSParameter {
@@ -164,6 +165,7 @@ trait HasXSParameter {
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
+  val NrExtIntr = core.NrExtIntr
 
   val icacheParameters = ICacheParameters(
     tagECC = Some("secded"),
@@ -403,7 +405,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.tlb(0) <> memBlock.io.ptw
   ptw.io.tlb(1) <> frontend.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.csr <> integerBlock.io.csrio.tlb
+  ptw.io.csr    <> integerBlock.io.csrio.tlb
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))

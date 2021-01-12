@@ -21,14 +21,6 @@ class LsBlockToCtrlIO extends XSBundle {
   val replay = ValidIO(new Redirect)
 }
 
-class MemBlockToCacheIO extends XSBundle {
-  val loadUnitToDcacheVec = Vec(exuParameters.LduCnt, new DCacheLoadIO)
-  val loadMiss = new DCacheLineIO
-  val atomics  = new DCacheWordIO
-  val sbufferToDcache = new DCacheLineIO
-  val uncache = new DCacheWordIO
-}
-
 class MemBlock(
   fastWakeUpIn: Seq[ExuConfig],
   slowWakeUpIn: Seq[ExuConfig],
@@ -82,8 +74,6 @@ class MemBlockImp
     }
   })
 
-  val cache = Wire(new MemBlockToCacheIO)
-
   val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
@@ -136,17 +126,17 @@ class MemBlockImp
     val rsCtrl = Module(new ReservationStationCtrl(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
     val rsData = Module(new ReservationStationData(cfg, wakeupCnt, extraListenPortsCnt, fixedDelay = certainLatency, feedback = feedback))
 
-    rsCtrl.io.data <> rsData.io.ctrl
+    rsCtrl.io.data     <> rsData.io.ctrl
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
-    rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+    rsCtrl.io.enqCtrl  <> io.fromCtrlBlock.enqIqCtrl(i)
+    rsData.io.enqData  <> io.fromCtrlBlock.enqIqData(i)
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData
     for ((x, y) <- rsData.io.extraListenPorts.zip(extraListenPorts)) {
       x.valid := y.fire()
-      x.bits := y.bits
+      x.bits  := y.bits
     }
 
     // exeUnits(i).io.redirect <> redirect
@@ -169,23 +159,23 @@ class MemBlockImp
   io.wakeUpIn.fast.foreach(_.ready := true.B)
   io.wakeUpIn.slow.foreach(_.ready := true.B)
 
-  io.wakeUpFpOut.slow <> fpExeWbReqs
+  io.wakeUpFpOut.slow  <> fpExeWbReqs
   io.wakeUpIntOut.slow <> intExeWbReqs
 
   // load always ready
   fpExeWbReqs.foreach(_.ready := true.B)
   intExeWbReqs.foreach(_.ready := true.B)
 
-  val dtlb = Module(new TLB(Width = DTLBWidth, isDtlb = true))
-  val lsq = Module(new LsqWrappper)
+  val dtlb    = Module(new TLB(Width = DTLBWidth, isDtlb = true))
+  val lsq     = Module(new LsqWrappper)
   val sbuffer = Module(new NewSbuffer)
   // if you wants to stress test dcache store, use FakeSbuffer
   // val sbuffer = Module(new FakeSbuffer)
 
   // dtlb
-  io.ptw <> dtlb.io.ptw
+  io.ptw         <> dtlb.io.ptw
   dtlb.io.sfence <> io.sfence
-  dtlb.io.csr <> io.tlbCsr
+  dtlb.io.csr    <> io.tlbCsr
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
@@ -195,7 +185,7 @@ class MemBlockImp
     // get input form dispatch
     loadUnits(i).io.ldin          <> reservationStations(i).io.deq
     // dcache access
-    loadUnits(i).io.dcache        <> cache.loadUnitToDcacheVec(i)
+    loadUnits(i).io.dcache        <> dcache.io.lsu.load(i)
     // forward
     loadUnits(i).io.lsq.forward   <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer       <> sbuffer.io.forward(i)
@@ -207,46 +197,43 @@ class MemBlockImp
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
-	val stu = storeUnits(i)
-	val rs = reservationStations(exuParameters.LduCnt + i)
-	val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
+    val stu = storeUnits(i)
+    val rs = reservationStations(exuParameters.LduCnt + i)
+    val dtlbReq = dtlb.io.requestor(exuParameters.LduCnt + i)
 
-	stu.io.redirect <> io.fromCtrlBlock.redirect
-	stu.io.tlbFeedback <> rs.io.feedback
-	stu.io.dtlb <> dtlbReq
+    stu.io.redirect    <> io.fromCtrlBlock.redirect
+    stu.io.tlbFeedback <> rs.io.feedback
+    stu.io.dtlb        <> dtlbReq
+    stu.io.stin        <> rs.io.deq
+    stu.io.lsq         <> lsq.io.storeIn(i)
 
-	// get input from dispatch
-	stu.io.stin <> rs.io.deq
-
-	// passdown to lsq
-	stu.io.lsq <> lsq.io.storeIn(i)
-	io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
-	io.toCtrlBlock.stOut(i).bits := stu.io.stout.bits
-	stu.io.stout.ready := true.B
+    io.toCtrlBlock.stOut(i).valid := stu.io.stout.valid
+    io.toCtrlBlock.stOut(i).bits  := stu.io.stout.bits
+    stu.io.stout.ready := true.B
   }
 
   // mmio store writeback will use store writeback port 0
   lsq.io.mmioStout.ready := false.B
-  when(lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
+  when (lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
     io.toCtrlBlock.stOut(0).valid := true.B
     lsq.io.mmioStout.ready := true.B
     io.toCtrlBlock.stOut(0).bits  := lsq.io.mmioStout.bits
   }
 
   // Lsq
-  lsq.io.commits     <> io.lsqio.commits
-  lsq.io.enq         <> io.fromCtrlBlock.enqLsq
-  lsq.io.brqRedirect := io.fromCtrlBlock.redirect
-  lsq.io.roqDeqPtr   := io.lsqio.roqDeqPtr
+  lsq.io.commits        <> io.lsqio.commits
+  lsq.io.enq            <> io.fromCtrlBlock.enqLsq
+  lsq.io.brqRedirect    <> io.fromCtrlBlock.redirect
+  lsq.io.roqDeqPtr      <> io.lsqio.roqDeqPtr
   io.toCtrlBlock.replay <> lsq.io.rollback
-  lsq.io.dcache      <> cache.loadMiss
-  lsq.io.uncache     <> cache.uncache
+  lsq.io.dcache         <> dcache.io.lsu.lsq
+  lsq.io.uncache        <> uncache.io.lsq
 
   // LSQ to store buffer
-  lsq.io.sbuffer     <> sbuffer.io.in
+  lsq.io.sbuffer        <> sbuffer.io.in
 
   // Sbuffer
-  sbuffer.io.dcache    <> cache.sbufferToDcache
+  sbuffer.io.dcache     <> dcache.io.lsu.store
 
   // flush sbuffer
   val fenceFlush = io.fenceToSbuffer.flushSb
@@ -262,8 +249,8 @@ class MemBlockImp
   val s_normal :: s_atomics_0 :: s_atomics_1 :: Nil = Enum(3)
   val state = RegInit(s_normal)
 
-  val atomic_rs0 = exuParameters.LduCnt + 0
-  val atomic_rs1 = exuParameters.LduCnt + 1
+  val atomic_rs0  = exuParameters.LduCnt + 0
+  val atomic_rs1  = exuParameters.LduCnt + 1
   val st0_atomics = reservationStations(atomic_rs0).io.deq.valid && reservationStations(atomic_rs0).io.deq.bits.uop.ctrl.fuType === FuType.mou
   val st1_atomics = reservationStations(atomic_rs1).io.deq.valid && reservationStations(atomic_rs1).io.deq.bits.uop.ctrl.fuType === FuType.mou
 
@@ -292,9 +279,9 @@ class MemBlockImp
 
   atomicsUnit.io.dtlb.resp.valid := false.B
   atomicsUnit.io.dtlb.resp.bits  := DontCare
-  atomicsUnit.io.dtlb.req.ready := dtlb.io.requestor(0).req.ready
+  atomicsUnit.io.dtlb.req.ready  := dtlb.io.requestor(0).req.ready
 
-  atomicsUnit.io.dcache        <> cache.atomics
+  atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty
 
   // for atomicsUnit, it uses loadUnit(0)'s TLB port
@@ -320,14 +307,7 @@ class MemBlockImp
     assert(!storeUnits(1).io.tlbFeedback.valid)
   }
 
-  lsq.io.exceptionAddr.lsIdx := io.lsqio.exceptionAddr.lsIdx
+  lsq.io.exceptionAddr.lsIdx  := io.lsqio.exceptionAddr.lsIdx
   lsq.io.exceptionAddr.isStore := io.lsqio.exceptionAddr.isStore
   io.lsqio.exceptionAddr.vaddr := Mux(atomicsUnit.io.exceptionAddr.valid, atomicsUnit.io.exceptionAddr.bits, lsq.io.exceptionAddr.vaddr)
-
-  // connect to cache
-  dcache.io.lsu.load    <> cache.loadUnitToDcacheVec
-  dcache.io.lsu.lsq     <> cache.loadMiss
-  dcache.io.lsu.atomics <> cache.atomics
-  dcache.io.lsu.store   <> cache.sbufferToDcache
-  uncache.io.lsq        <> cache.uncache
 }
