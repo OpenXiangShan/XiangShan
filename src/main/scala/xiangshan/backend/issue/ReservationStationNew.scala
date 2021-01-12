@@ -39,14 +39,14 @@ class BypassQueue(number: Int) extends XSModule {
   }
 }
 
-class RSCtrlDataIO extends XSBundle {
+class RSCtrlDataIO(srcNum: Int) extends XSBundle {
   // TODO: current: Ctrl to Data, next: Data to Ctrl
   val enqPtr = Output(UInt(log2Up(IssQueSize).W))
   val deqPtr = ValidIO(UInt(log2Up(IssQueSize).W)) // one cycle earlier
   val enqCtrl = ValidIO(new MicroOp)
 
   val fuReady   = Input(Bool())
-  val srcUpdate = Input(Vec(IssQueSize+1, Vec(3, Bool()))) // Note: the last one for enq
+  val srcUpdate = Input(Vec(IssQueSize+1, Vec(srcNum, Bool()))) // Note: the last one for enq
   val redVec    = Input(UInt(IssQueSize.W))
   val feedback  = Input(Vec(IssQueSize+1, Bool())) // Note: the last one for hit
 }
@@ -56,7 +56,6 @@ class ReservationStationCtrl
   val exuCfg: ExuConfig,
   wakeupCnt: Int,
   extraListenPortsCnt: Int,
-  srcNum: Int = 3,
   feedback: Boolean,
   fixedDelay: Int,
   replayDelay: Int = 10
@@ -66,6 +65,10 @@ class ReservationStationCtrl
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
   val nonBlocked = fastWakeup
+  // FIXME val srcNum = exuCfg.intSrcCnt + exuCfg.fpSrcCnt
+  val srcNum = 3
+  require(srcNum >= 1 && srcNum <= 3)
+  println(s"[RsCtrl]  ExuConfig: ${exuCfg.name} (srcNum = $srcNum)")
 
   val io = IO(new XSBundle {
     // flush
@@ -75,7 +78,7 @@ class ReservationStationCtrl
     val enqCtrl = Flipped(DecoupledIO(new MicroOp))
 
     // to DataPart
-    val data = new RSCtrlDataIO
+    val data = new RSCtrlDataIO(srcNum)
 
     // to Dispatch
     val numExist = Output(UInt(iqIdxWidth.W))
@@ -313,7 +316,6 @@ class ReservationStationData
   extraListenPortsCnt: Int,
   fixedDelay: Int,
   feedback: Boolean,
-  srcNum: Int = 3
 ) extends XSModule {
 
   object DispatchType extends Enumeration {
@@ -338,6 +340,10 @@ class ReservationStationData
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
   val nonBlocked = fastWakeup
+  // FIXME val srcNum = exuCfg.intSrcCnt + exuCfg.fpSrcCnt
+  val srcNum = 3
+  require(srcNum >= 1 && srcNum <= 3)
+  println(s"[RsData]  ExuConfig: ${exuCfg.name} (srcNum = $srcNum)")
 
   val io = IO(new XSBundle {
     // flush
@@ -347,7 +353,7 @@ class ReservationStationData
     val deq = DecoupledIO(new ExuInput)
 
     // listen to RSCtrl
-    val ctrl = Flipped(new RSCtrlDataIO)
+    val ctrl = Flipped(new RSCtrlDataIO(srcNum))
 
     // read src op value
     val srcRegValue = Vec(srcNum, Input(UInt((XLEN + 1).W)))
