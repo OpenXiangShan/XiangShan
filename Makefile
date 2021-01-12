@@ -1,6 +1,6 @@
 TOP = TopMain
 FPGATOP = FPGANOOP
-BUILD_DIR = ./build
+BUILD_DIR = $(shell pwd)/build
 TOP_V = $(BUILD_DIR)/$(TOP).v
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
@@ -189,10 +189,16 @@ coverage:
 	python3 scripts/coverage/coverage.py build/logs/annotated/XSSimTop.v build/XSSimTop_annotated.v
 	python3 scripts/coverage/statistics.py build/XSSimTop_annotated.v >build/coverage.log
 
-# extract verilog module from sim_top.v
-# usage: make vme VME_MODULE=Roq
-vme: $(SIM_TOP_V)
-	mill XiangShan.runMain utils.ExtractVerilogModules -m $(VME_MODULE)
+# extract verilog module from TopMain.v
+# usage: make vme VME_MODULES=Roq
+TIMING_SCRIPT_PATH = ./timingScripts
+vme: $(TOP_V)
+	make -C $(TIMING_SCRIPT_PATH) vme VME_SOURCE=$(TOP_V)
+
+# get and sort timing analysis with total delay(start+end) and max delay(start or end)
+# and print it out
+tap:
+	make -C $(TIMING_SCRIPT_PATH) tap
 
 # usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
 phy_evaluate: vme
