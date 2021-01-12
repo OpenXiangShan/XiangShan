@@ -63,9 +63,9 @@ case class XSCoreParameters
   StoreQueueSize: Int = 48,
   RoqSize: Int = 192,
   dpParams: DispatchParameters = DispatchParameters(
-    IntDqSize = 24,
-    FpDqSize = 24,
-    LsDqSize = 24,
+    IntDqSize = 32,
+    FpDqSize = 32,
+    LsDqSize = 32,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
     LsDqDeqWidth = 4
@@ -89,7 +89,8 @@ case class XSCoreParameters
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
-  NumPerfCounters: Int = 16
+  NumPerfCounters: Int = 16,
+  NrExtIntr: Int = 1
 )
 
 trait HasXSParameter {
@@ -164,6 +165,7 @@ trait HasXSParameter {
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
+  val NrExtIntr = core.NrExtIntr
 
   val icacheParameters = ICacheParameters(
     tagECC = Some("parity"),
@@ -259,13 +261,33 @@ object AddressSpace extends HasXSParameter {
 
 
 
-class XSCore()(implicit p: config.Parameters) extends LazyModule with HasXSParameter {
+class XSCore()(implicit p: config.Parameters) extends LazyModule
+  with HasXSParameter
+  with HasExeBlockHelper
+{
+
+  // to fast wake up fp, mem rs
+  val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)
+  val intBlockSlowWakeUpFp = intExuConfigs.filter(fpSlowFilter)
+  val intBlockFastWakeUpInt = intExuConfigs.filter(intFastFilter)
+  val intBlockSlowWakeUpInt = intExuConfigs.filter(intSlowFilter)
+
+  val fpBlockFastWakeUpFp = fpExuConfigs.filter(fpFastFilter)
+  val fpBlockSlowWakeUpFp = fpExuConfigs.filter(fpSlowFilter)
+  val fpBlockFastWakeUpInt = fpExuConfigs.filter(intFastFilter)
+  val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
   // outer facing nodes
-  val dcache = LazyModule(new DCache())
-  val uncache = LazyModule(new Uncache())
   val l1pluscache = LazyModule(new L1plusCache())
   val ptw = LazyModule(new PTW())
+  val memBlock = LazyModule(new MemBlock(
+    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
+    slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
+    fastFpOut = Seq(),
+    slowFpOut = loadExuConfigs,
+    fastIntOut = Seq(),
+    slowIntOut = loadExuConfigs
+  ))
 
   lazy val module = new XSCoreImp(this)
 }
@@ -309,20 +331,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     fastIntOut = fpBlockFastWakeUpInt,
     slowIntOut = fpBlockSlowWakeUpInt
   ))
-  val memBlock = Module(new MemBlock(
-    fastWakeUpIn = intBlockFastWakeUpInt ++ intBlockFastWakeUpFp ++ fpBlockFastWakeUpInt ++ fpBlockFastWakeUpFp,
-    slowWakeUpIn = intBlockSlowWakeUpInt ++ intBlockSlowWakeUpFp ++ fpBlockSlowWakeUpInt ++ fpBlockSlowWakeUpFp,
-    fastFpOut = Seq(),
-    slowFpOut = loadExuConfigs,
-    fastIntOut = Seq(),
-    slowIntOut = loadExuConfigs
-  ))
 
-  val dcache = outer.dcache.module
-  val uncache = outer.uncache.module
+  val memBlock = outer.memBlock.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
-  
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence <> integerBlock.io.fenceio.sfence
@@ -343,10 +355,12 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   integerBlock.io.wakeUpIn.fastUops <> floatBlock.io.wakeUpIntOut.fastUops
   integerBlock.io.wakeUpIn.fast <> floatBlock.io.wakeUpIntOut.fast
   integerBlock.io.wakeUpIn.slow <> floatBlock.io.wakeUpIntOut.slow ++ memBlock.io.wakeUpIntOut.slow
+  integerBlock.io.toMemBlock <> memBlock.io.fromIntBlock
 
   floatBlock.io.wakeUpIn.fastUops <> integerBlock.io.wakeUpFpOut.fastUops
   floatBlock.io.wakeUpIn.fast <> integerBlock.io.wakeUpFpOut.fast
   floatBlock.io.wakeUpIn.slow <> integerBlock.io.wakeUpFpOut.slow ++ memBlock.io.wakeUpFpOut.slow
+  floatBlock.io.toMemBlock <> memBlock.io.fromFpBlock
 
 
   integerBlock.io.wakeUpIntOut.fast.map(_.ready := true.B)
@@ -393,13 +407,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.tlb(0) <> memBlock.io.ptw
   ptw.io.tlb(1) <> frontend.io.ptw
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
-  ptw.io.csr <> integerBlock.io.csrio.tlb
-
-  dcache.io.lsu.load    <> memBlock.io.dcache.loadUnitToDcacheVec
-  dcache.io.lsu.lsq   <> memBlock.io.dcache.loadMiss
-  dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
-  dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
-  uncache.io.lsq      <> memBlock.io.dcache.uncache
+  ptw.io.csr    <> integerBlock.io.csrio.tlb
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))

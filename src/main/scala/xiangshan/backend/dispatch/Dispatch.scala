@@ -42,7 +42,12 @@ class Dispatch extends XSModule {
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.ExuCnt, Output(new ExuInput))
+    // send reg file read port index to reservation stations
+    val readPortIndex = new Bundle {
+      val intIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
+      val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
+      // ls: hardwired to (0, 1, 2, 4)
+    }
   })
 
   val dispatch1 = Module(new Dispatch1)
@@ -80,7 +85,8 @@ class Dispatch extends XSModule {
   intDispatch.io.regRdy.zipWithIndex.map({case (r, i) => r <> io.intPregRdy(i)})
   intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i)})
   intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i)})
-  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
+//  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
+  intDispatch.io.readPortIndex <> io.readPortIndex.intIndex
 
   // Fp dispatch queue to Fp reservation stations
   val fpDispatch = Module(new Dispatch2Fp)
@@ -89,7 +95,8 @@ class Dispatch extends XSModule {
   fpDispatch.io.regRdy.zipWithIndex.map({case (r, i) => r <> io.fpPregRdy(i)})
   fpDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i + exuParameters.IntExuCnt)})
   fpDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i + exuParameters.IntExuCnt)})
-  fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
+//  fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
+  fpDispatch.io.readPortIndex <> io.readPortIndex.fpIndex
   
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
@@ -100,5 +107,5 @@ class Dispatch extends XSModule {
   lsDispatch.io.fpRegRdy.zipWithIndex.map({case (r, i) => r <> io.fpPregRdy(i + 12)})
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
-  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+//  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 }

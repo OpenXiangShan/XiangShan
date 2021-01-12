@@ -1,7 +1,7 @@
 package system
 
 import chipsalliance.rocketchip.config.Parameters
-import device.{AXI4Timer, TLTimer}
+import device.{AXI4Timer, TLTimer, AXI4Plic}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
@@ -97,10 +97,10 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // connections
   // -------------------------------------------------
   for (i <- 0 until NumCores) {
-    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).dcache.clientNode
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
-    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).uncache.clientNode
+    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     l2cache(i).node := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
     l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
   }
@@ -154,15 +154,27 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   clint.node := mmioXbar
   extDev := AXI4UserYanker() := TLToAXI4() := mmioXbar
 
+  val plic = LazyModule(new AXI4Plic(
+    Seq(AddressSet(0x3c000000L, 0x03ffffffL)),
+    sim = !env.FPGAPlatform
+  ))
+  val plicIdentity = AXI4IdentityNode()
+  plic.node := plicIdentity := AXI4UserYanker() := TLToAXI4() := mmioXbar
+
   lazy val module = new LazyModuleImp(this){
     val io = IO(new Bundle{
-      val meip = Input(Bool())
+      val extIntrs = Input(Vec(NrExtIntr, Bool()))
+      // val meip = Input(Vec(NumCores, Bool()))
       val ila = if(env.FPGAPlatform && EnableILA) Some(Output(new ILABundle)) else None
     })
+
+    plic.module.io.extra.get.intrVec <> RegNext(RegNext(Cat(io.extIntrs)))
+
     for (i <- 0 until NumCores) {
-      xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip
-      xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip
-      xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip))
+      xs_core(i).module.io.externalInterrupt.mtip := clint.module.io.mtip(i)
+      xs_core(i).module.io.externalInterrupt.msip := clint.module.io.msip(i)
+      // xs_core(i).module.io.externalInterrupt.meip := RegNext(RegNext(io.meip(i)))
+      xs_core(i).module.io.externalInterrupt.meip := plic.module.io.extra.get.meip(i)
     }
     // do not let dma AXI signals optimized out
     chisel3.dontTouch(dma.out.head._1)

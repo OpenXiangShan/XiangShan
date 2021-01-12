@@ -24,14 +24,17 @@ class Dispatch1 extends XSModule {
     // to dispatch queue
     val toIntDq = new Bundle {
       val canAccept = Input(Bool())
+      val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
     val toFpDq = new Bundle {
       val canAccept = Input(Bool())
+      val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
     val toLsDq = new Bundle {
       val canAccept = Input(Bool())
+      val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
   })
@@ -148,14 +151,17 @@ class Dispatch1 extends XSModule {
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
     // We use notBlockedByPrevious here.
+    io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i)
     io.toIntDq.req(i).bits  := updatedUop(i)
     io.toIntDq.req(i).valid := io.fromRename(i).valid && isInt(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
+    io.toFpDq.needAlloc(i)  := io.fromRename(i).valid && isFp(i)
     io.toFpDq.req(i).bits   := updatedUop(i)
     io.toFpDq.req(i).valid  := io.fromRename(i).valid && isFp(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toLsDq.canAccept
 
+    io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isLs(i)
     io.toLsDq.req(i).bits   := updatedUop(i)
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) &&
                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept
