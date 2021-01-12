@@ -25,19 +25,7 @@ class DCacheMeta extends DCacheBundle {
   val replay  = Bool() // whether it's a replayed request?
 }
 
-// for load from load unit
-// cycle 0: vaddr
-// cycle 1: paddr
-class DCacheLoadReq  extends DCacheBundle
-{
-  val cmd    = UInt(M_SZ.W)
-  val addr   = UInt(VAddrBits.W)
-  val data   = UInt(DataBits.W)
-  val mask   = UInt((DataBits/8).W)
-  val meta   = new DCacheMeta
-}
-
-// special memory operations(lr/sc, atomics)
+// memory request in word granularity(load, mmio, lr/sc, atomics)
 class DCacheWordReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
@@ -47,7 +35,7 @@ class DCacheWordReq  extends DCacheBundle
   val meta   = new DCacheMeta
 }
 
-// ordinary store
+// memory request in word granularity(store)
 class DCacheLineReq  extends DCacheBundle
 {
   val cmd    = UInt(M_SZ.W)
@@ -57,16 +45,6 @@ class DCacheLineReq  extends DCacheBundle
   val meta   = new DCacheMeta
 }
 
-class DCacheLoadResp extends DCacheBundle
-{
-  val data         = UInt(DataBits.W)
-  val meta         = new DCacheMeta
-  // cache req missed, send it to miss queue
-  val miss   = Bool()
-  // cache req nacked, replay it later
-  val nack         = Bool()
-}
-
 class DCacheWordResp extends DCacheBundle
 {
   val data         = UInt(DataBits.W)
@@ -74,7 +52,7 @@ class DCacheWordResp extends DCacheBundle
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache req nacked, replay it later
-  val nack         = Bool()
+  val replay = Bool()
 }
 
 class DCacheLineResp extends DCacheBundle
@@ -84,22 +62,29 @@ class DCacheLineResp extends DCacheBundle
   // cache req missed, send it to miss queue
   val miss   = Bool()
   // cache req nacked, replay it later
-  val nack   = Bool()
+  val replay = Bool()
 }
 
-class DCacheLoadIO extends DCacheBundle
+class Refill extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReq)
-  val resp = Flipped(DecoupledIO(new DCacheWordResp))
-  // kill previous cycle's req
-  val s1_kill  = Output(Bool())
-  val s1_paddr   = Output(UInt(PAddrBits.W))
+  val addr   = UInt(PAddrBits.W)
+  val data   = UInt((cfg.blockBytes * 8).W)
 }
 
 class DCacheWordIO extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
+}
+
+// used by load unit
+class DCacheLoadIO extends DCacheWordIO
+{
+  // kill previous cycle's req
+  val s1_kill  = Output(Bool())
+  // cycle 0: virtual address: req.addr
+  // cycle 1: physical address: s1_paddr
+  val s1_paddr   = Output(UInt(PAddrBits.W))
 }
 
 class DCacheLineIO extends DCacheBundle
@@ -110,7 +95,7 @@ class DCacheLineIO extends DCacheBundle
 
 class DCacheToLsuIO extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
-  val lsq = Flipped(new DCacheLineIO)  // lsq load/store
+  val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val store = Flipped(new DCacheLineIO) // for sbuffer
   val atomics  = Flipped(new DCacheWordIO)  // atomics reqs
 }
@@ -156,7 +141,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val ldu = Seq.fill(LoadPipelineWidth) { Module(new LoadPipe) }
   val stu = Module(new StorePipe)
   val atomics = Module(new AtomicsPipe)
-  val loadMissQueue = Module(new LoadMissQueue)
   val storeMissQueue = Module(new StoreMissQueue)
   val atomicsMissQueue = Module(new AtomicsMissQueue)
   val missQueue = Module(new MissQueue(edge))
@@ -179,16 +163,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // To simplify port arbitration
   // MissQueue, Prober and StorePipe all use port 0
   // if contention got severe, considering load balancing on two ports?
-  val MetaReadPortCount = 5
-  val MissQueueMetaReadPort = 0
-  val ProberMetaReadPort = 1
-  val StorePipeMetaReadPort = 2
-  val LoadPipeMetaReadPort = 3
-  val AtomicsPipeMetaReadPort = 4
+  val MetaReadPortCount = 4
+  val ProberMetaReadPort = 0
+  val StorePipeMetaReadPort = 1
+  val LoadPipeMetaReadPort = 2
+  val AtomicsPipeMetaReadPort = 3
 
   val metaReadArb = Module(new Arbiter(new L1MetaReadReq, MetaReadPortCount))
 
-  metaReadArb.io.in(MissQueueMetaReadPort)    <> missQueue.io.meta_read
   metaReadArb.io.in(ProberMetaReadPort)       <> prober.io.meta_read
   metaReadArb.io.in(StorePipeMetaReadPort)    <> stu.io.meta_read
   metaReadArb.io.in(LoadPipeMetaReadPort)     <> ldu(0).io.meta_read
@@ -196,7 +178,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   metaArray.io.read(0) <> metaReadArb.io.out
 
-  missQueue.io.meta_resp <>  metaArray.io.resp(0)
   prober.io.meta_resp    <>  metaArray.io.resp(0)
   stu.io.meta_resp       <>  metaArray.io.resp(0)
   ldu(0).io.meta_resp    <>  metaArray.io.resp(0)
@@ -217,19 +198,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val dataWriteArb = Module(new Arbiter(new L1DataWriteReq, DataWritePortCount))
 
   dataWriteArb.io.in(StorePipeDataWritePort) <> stu.io.data_write
-  dataWriteArb.io.in(MissQueueDataWritePort) <> missQueue.io.refill
+  dataWriteArb.io.in(MissQueueDataWritePort) <> missQueue.io.data_write
   dataWriteArb.io.in(AtomicsPipeDataWritePort)  <> atomics.io.data_write
 
   dataArray.io.write <> dataWriteArb.io.out
 
   // To simplify port arbitration
   // WritebackUnit and StorePipe use port 0
-  val DataReadPortCount = 5
+  val DataReadPortCount = 4
   val WritebackDataReadPort = 0
   val StorePipeDataReadPort = 1
   val LoadPipeDataReadPort = 2
   val AtomicsPipeDataReadPort = 3
-  val LoadMissDataReadPort = 4
 
   val dataReadArb = Module(new Arbiter(new L1DataReadReq, DataReadPortCount))
 
@@ -237,14 +217,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   dataReadArb.io.in(StorePipeDataReadPort) <> stu.io.data_read
   dataReadArb.io.in(LoadPipeDataReadPort)  <> ldu(0).io.data_read
   dataReadArb.io.in(AtomicsPipeDataReadPort) <> atomics.io.data_read
-  dataReadArb.io.in(LoadMissDataReadPort)    <> loadMissQueue.io.data_req
 
   dataArray.io.read(0) <> dataReadArb.io.out
   dataArray.io.resp(0) <> wb.io.data_resp
   dataArray.io.resp(0) <> stu.io.data_resp
   dataArray.io.resp(0) <> atomics.io.data_resp
   dataArray.io.resp(0) <> ldu(0).io.data_resp
-  dataArray.io.resp(0) <> loadMissQueue.io.data_resp
 
   for (w <- 1 until LoadPipelineWidth) {
     dataArray.io.read(w) <> ldu(w).io.data_read
@@ -271,9 +249,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.mmio), "MMIO requests should not go to cache")
     assert(!(io.lsu.load(w).req.fire() && io.lsu.load(w).req.bits.meta.tlb_miss), "TLB missed requests should not go to cache")
   }
-
-  // load miss queue
-  loadMissQueue.io.lsu <> io.lsu.lsq
 
   //----------------------------------------
   // store pipe and store miss queue
@@ -322,34 +297,39 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // miss queue
-  val loadMissQueueClientId  = 0.U(clientIdWidth.W)
-  val storeMissQueueClientId = 1.U(clientIdWidth.W)
-  val atomicsMissQueueClientId  = 2.U(clientIdWidth.W)
+  require(LoadPipelineWidth == 2, "We hard code the number of load misses")
+  val loadMissQueueClientId_0  = 0.U(clientIdWidth.W)
+  val loadMissQueueClientId_1  = 1.U(clientIdWidth.W)
+  val storeMissQueueClientId   = 2.U(clientIdWidth.W)
+  val atomicsMissQueueClientId = 3.U(clientIdWidth.W)
 
   // Request
-  val missReqArb = Module(new Arbiter(new MissReq, 3))
+  val missReqArb = Module(new Arbiter(new MissReq, nClientMissQueues))
 
   val missReq      = missQueue.io.req
-  val loadMissReq  = loadMissQueue.io.miss_req
-  val storeMissReq = storeMissQueue.io.miss_req
-  val atomicsMissReq  = atomicsMissQueue.io.miss_req
+  val loadMissReq_0  = ldu(0).io.miss_req
+  val loadMissReq_1  = ldu(1).io.miss_req
+  val storeMissReq  = stu.io.miss_req
+  val atomicsMissReq  = atomics.io.miss_req
 
-  missReqArb.io.in(0).valid          := loadMissReq.valid
-  loadMissReq.ready                  := missReqArb.io.in(0).ready
-  missReqArb.io.in(0).bits           := loadMissReq.bits
-  missReqArb.io.in(0).bits.client_id := Cat(loadMissQueueClientId,
-    loadMissReq.bits.client_id(entryIdMSB, entryIdLSB))
+  missReqArb.io.in(0) <> loadMissReq_0
+  missReqArb.io.in(0).bits.client_id := Cat(loadMissQueueClientId_0,
+    loadMissReq_0.bits.client_id(entryIdMSB, entryIdLSB))
 
-  missReqArb.io.in(1).valid          := storeMissReq.valid
-  storeMissReq.ready                 := missReqArb.io.in(1).ready
-  missReqArb.io.in(1).bits           := storeMissReq.bits
-  missReqArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
+  missReqArb.io.in(1) <> loadMissReq_1
+  missReqArb.io.in(1).bits.client_id := Cat(loadMissQueueClientId_1,
+    loadMissReq_0.bits.client_id(entryIdMSB, entryIdLSB))
+
+  missReqArb.io.in(2).valid          := storeMissReq.valid
+  storeMissReq.ready                 := missReqArb.io.in(2).ready
+  missReqArb.io.in(2).bits           := storeMissReq.bits
+  missReqArb.io.in(2).bits.client_id := Cat(storeMissQueueClientId,
     storeMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
-  missReqArb.io.in(2).valid          := atomicsMissReq.valid
-  atomicsMissReq.ready                  := missReqArb.io.in(2).ready
-  missReqArb.io.in(2).bits           := atomicsMissReq.bits
-  missReqArb.io.in(2).bits.client_id := Cat(atomicsMissQueueClientId,
+  missReqArb.io.in(3).valid          := atomicsMissReq.valid
+  atomicsMissReq.ready               := missReqArb.io.in(3).ready
+  missReqArb.io.in(3).bits           := atomicsMissReq.bits
+  missReqArb.io.in(3).bits.client_id := Cat(atomicsMissQueueClientId,
     atomicsMissReq.bits.client_id(entryIdMSB, entryIdLSB))
 
   val miss_block = block_miss(missReqArb.io.out.bits.addr)
@@ -357,17 +337,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSDebug(miss_block, "MissQueue blocked\n")
 
   // Response
+  // store and atomics wait for miss queue responses
   val missResp        = missQueue.io.resp
-  val loadMissResp    = loadMissQueue.io.miss_resp
   val storeMissResp   = storeMissQueue.io.miss_resp
-  val atomicsMissResp    = atomicsMissQueue.io.miss_resp
+  val atomicsMissResp = atomicsMissQueue.io.miss_resp
 
   val clientId = missResp.bits.client_id(clientIdMSB, clientIdLSB)
-
-  val isLoadMissResp = clientId === loadMissQueueClientId
-  loadMissResp.valid := missResp.valid && isLoadMissResp
-  loadMissResp.bits  := missResp.bits
-  loadMissResp.bits.client_id := missResp.bits.client_id(entryIdMSB, entryIdLSB)
 
   val isStoreMissResp = clientId === storeMissQueueClientId
   storeMissResp.valid := missResp.valid && isStoreMissResp
@@ -381,30 +356,26 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // Finish
   val missFinish        = missQueue.io.finish
-  val loadMissFinish    = loadMissQueue.io.miss_finish
   val storeMissFinish   = storeMissQueue.io.miss_finish
-  val atomicsMissFinish    = atomicsMissQueue.io.miss_finish
+  val atomicsMissFinish = atomicsMissQueue.io.miss_finish
 
-  val missFinishArb = Module(new Arbiter(new MissFinish, 3))
-  missFinishArb.io.in(0).valid          := loadMissFinish.valid
-  loadMissFinish.ready                  := missFinishArb.io.in(0).ready
-  missFinishArb.io.in(0).bits.entry_id  := loadMissFinish.bits.entry_id
-  missFinishArb.io.in(0).bits.client_id := Cat(loadMissQueueClientId,
-    loadMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
+  val missFinishArb = Module(new Arbiter(new MissFinish, 2))
+  missFinishArb.io.in(0).valid          := storeMissFinish.valid
+  storeMissFinish.ready                 := missFinishArb.io.in(0).ready
+  missFinishArb.io.in(0).bits.entry_id  := storeMissFinish.bits.entry_id
+  missFinishArb.io.in(0).bits.client_id := Cat(storeMissQueueClientId,
+      storeMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
 
-  missFinishArb.io.in(1).valid          := storeMissFinish.valid
-  storeMissFinish.ready                 := missFinishArb.io.in(1).ready
-  missFinishArb.io.in(1).bits.entry_id  := storeMissFinish.bits.entry_id
-  missFinishArb.io.in(1).bits.client_id := Cat(storeMissQueueClientId,
-    storeMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
-
-  missFinishArb.io.in(2).valid          := atomicsMissFinish.valid
-  atomicsMissFinish.ready                  := missFinishArb.io.in(2).ready
-  missFinishArb.io.in(2).bits.entry_id  := atomicsMissFinish.bits.entry_id
-  missFinishArb.io.in(2).bits.client_id := Cat(atomicsMissQueueClientId,
+  missFinishArb.io.in(1).valid          := atomicsMissFinish.valid
+  atomicsMissFinish.ready                  := missFinishArb.io.in(1).ready
+  missFinishArb.io.in(1).bits.entry_id  := atomicsMissFinish.bits.entry_id
+  missFinishArb.io.in(1).bits.client_id := Cat(atomicsMissQueueClientId,
     atomicsMissFinish.bits.client_id(entryIdMSB, entryIdLSB))
 
   missFinish                            <> missFinishArb.io.out
+
+  // refill to load queue
+  io.lsu.lsq <> missQueue.io.refill
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
@@ -464,10 +435,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val atomics_addr_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val atomics_addr_match = atomics_addr_matches.reduce(_||_)
 
+    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
+
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_addr_match || atomics_addr_match || miss_idx_match
+    store_addr_match || atomics_addr_match || prober_addr_match || miss_idx_match
   }
 
   def block_store(addr: UInt) = {
@@ -487,18 +460,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   def block_miss(addr: UInt) = {
-    val store_idx_matches = VecInit(stu.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
-    val store_idx_match = store_idx_matches.reduce(_||_)
-
-    val atomics_idx_matches = VecInit(atomics.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
-    val atomics_idx_match = atomics_idx_matches.reduce(_||_)
-
     val prober_idx_match = prober.io.inflight_req_idx.valid && prober.io.inflight_req_idx.bits === get_idx(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_idx_match || atomics_idx_match || prober_idx_match || miss_idx_match
+    prober_idx_match || miss_idx_match
   }
 
   def block_probe(addr: UInt) = {

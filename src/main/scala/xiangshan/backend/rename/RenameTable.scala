@@ -6,13 +6,13 @@ import xiangshan._
 
 class RatReadPort extends XSBundle {
   val addr = Input(UInt(5.W))
-  val rdata = Output(UInt(XLEN.W))
+  val rdata = Output(UInt(PhyRegIdxWidth.W))
 }
 
 class RatWritePort extends XSBundle {
   val wen = Input(Bool())
   val addr = Input(UInt(5.W))
-  val wdata = Input(UInt(XLEN.W))
+  val wdata = Input(UInt(PhyRegIdxWidth.W))
 }
 
 class RenameTable(float: Boolean) extends XSModule {

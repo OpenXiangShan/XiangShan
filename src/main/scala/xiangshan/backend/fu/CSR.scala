@@ -16,6 +16,14 @@ object debugId extends Function0[Integer] {
   }
 }
 
+object hartId extends Function0[Int] {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    return x-1
+  }
+}
+
 trait HasCSRConst {
   // User Trap Setup
   val Ustatus       = 0x000
@@ -284,7 +292,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
-  val mhartid = RegInit(UInt(XLEN.W), 0.U) // the hardware thread running the code
+  val mhartNo = hartId()
+  val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)
   // val mstatus = RegInit(UInt(XLEN.W), "h8000c0100".U)
   // mstatus Value Table
