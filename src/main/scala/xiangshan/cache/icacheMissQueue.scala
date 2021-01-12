@@ -233,7 +233,7 @@ class IcacheMissQueue extends ICacheMissQueueModule
       ExcitingUtils.addSource(
         BoolStopWatch(
           start = entry.io.req.fire(),
-          stop = entry.io.resp.fire(),
+          stop = entry.io.resp.fire() || entry.io.flush,
           startHighPriority = true),
         "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
         Perf

@@ -6,6 +6,7 @@ import freechips.rocketchip.tilelink.ClientMetadata
 import xiangshan._
 import xiangshan.cache._
 import utils._
+import chisel3.ExcitingUtils._
 
 import chipsalliance.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, IdRange}
@@ -78,6 +79,22 @@ class L2PrefetcherImp(outer: L2Prefetcher) extends LazyModuleImp(outer) with Has
     bus.e.valid := false.B
     bus.e.bits := DontCare
     dPrefetch.io.finish.ready := true.B
+
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSource(bus.a.fire(), "perfCntL2PrefetchReqCnt", Perf)
+      def idWidth = log2Up(l2PrefetcherParameters.nEntries)
+      (0 until l2PrefetcherParameters.nEntries).foreach(i =>
+        ExcitingUtils.addSource(
+          BoolStopWatch(
+            start = bus.a.fire() && dPrefetch.io.req.bits.id(streamParams.totalWidth - 1, 0) === i.U,
+            stop = bus.d.fire() && bus.d.bits.source(streamParams.totalWidth - 1, 0) === i.U,
+            startHighPriority = true
+          ),
+          "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10),
+          Perf
+        )
+      )
+    }
 
   } else {
     bus.a.valid := false.B

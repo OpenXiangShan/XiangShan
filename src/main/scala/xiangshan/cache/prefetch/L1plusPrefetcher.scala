@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.cache._
 import utils._
+import chisel3.ExcitingUtils._
 
 case class L1plusPrefetcherParameters(
   enable: Boolean,
@@ -48,6 +49,22 @@ class L1plusPrefetcher extends PrefetchModule {
     XSDebug(p"io.in:          v=${io.in.valid} r=${io.in.ready} ${io.in.bits}\n")
     XSDebug(p"io.mem_acquire: v=${io.mem_acquire.valid} r=${io.mem_acquire.ready} ${io.mem_acquire.bits}\n")
     XSDebug(p"io.mem_grant:   v=${io.mem_grant.valid} r=${io.mem_grant.ready} ${io.mem_grant.bits}\n")
+
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSource(io.mem_acquire.fire(), "perfCntL1plusPrefetchReqCnt", Perf)
+      def idWidth: Int = log2Up(l1plusPrefetcherParameters.nEntries)
+      (0 until l1plusPrefetcherParameters.nEntries).foreach(i =>
+        ExcitingUtils.addSource(
+          BoolStopWatch(
+            start = io.mem_acquire.fire() && io.mem_acquire.bits.id(idWidth - 1, 0) === i.U,
+            stop = io.mem_grant.fire() && io.mem_grant.bits.id(idWidth - 1, 0) === i.U,
+            startHighPriority = true
+          ),
+          "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10),
+          Perf
+        )
+      )
+    }
 
   } else {
     io.in.ready := true.B

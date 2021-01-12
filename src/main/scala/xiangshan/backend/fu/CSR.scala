@@ -833,7 +833,9 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwL2TlbHit" -> (0xb27, "perfCntPtwL2TlbHit"     ),
     "ICacheReq"   -> (0xb28, "perfCntIcacheReqCnt"     ),
     "ICacheMiss"   -> (0xb29, "perfCntIcacheMissCnt"     ),
-    "DCacheMiss"  -> (0xb2a, "perfCntDCacheMiss"      )
+    "DCacheMiss"  -> (0xb2a, "perfCntDCacheMiss"      ),
+    "L1+PrefetchCnt"->(0xb2b, "perfCntL1plusPrefetchReqCnt"),
+    "L2PrefetchCnt"->(0xb2c, "perfCntL2PrefetchReqCnt")
     // "FetchFromICache" -> (0xb2a, "CntFetchFromICache"),
     // "FetchFromLoopBuffer" -> (0xb2b, "CntFetchFromLoopBuffer"),
     // "ExitLoop1" -> (0xb2c, "CntExitLoop1"),
@@ -850,11 +852,19 @@ class CSR extends FunctionUnit with HasCSRConst
 //    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i => 
-      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2b + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until icacheParameters.nMissEntries).map(i =>
-      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2b + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenalty" + Integer.toString(i, 10)))
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until l1plusPrefetcherParameters.nEntries).map(i =>
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until l2PrefetcherParameters.nEntries).map(i =>
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   )
 
