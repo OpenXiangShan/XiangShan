@@ -324,9 +324,13 @@ class CSR extends FunctionUnit with HasCSRConst
   // Emu perfcnt
   val hasEmuPerfCnt = !env.FPGAPlatform
   val nrEmuPerfCnts = if (hasEmuPerfCnt) 0x80 else 0x3
-  val emuPerfCnts = List.fill(nrEmuPerfCnts)(RegInit(0.U(XLEN.W)))
-  val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0xb00 + i, emuPerfCnts(i)))
-  val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0xb80 + i, emuPerfCnts(i)(63, 32)))
+  
+  val emuPerfCnts    = List.fill(nrEmuPerfCnts)(RegInit(0.U(XLEN.W)))
+  val emuPerfCntCond = List.fill(nrEmuPerfCnts)(WireInit(false.B))
+  (emuPerfCnts zip emuPerfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
+  
+  val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1000 + i, emuPerfCnts(i)))
+  val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1080 + i, emuPerfCnts(i)(63, 32)))
   println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
   
   // CSR reg map
@@ -689,48 +693,46 @@ class CSR extends FunctionUnit with HasCSRConst
     * Emu Performance counters
     */
   val emuPerfCntList = Map(
-//    "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
-//    "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),
-    "MbpInstr"    -> (0xb03, "perfCntCondMbpInstr" ),
-    "MbpRight"    -> (0xb04, "perfCntCondMbpRight" ),
-    "MbpWrong"    -> (0xb05, "perfCntCondMbpWrong" ),
-    "MbpBRight"   -> (0xb06, "perfCntCondMbpBRight"),
-    "MbpBWrong"   -> (0xb07, "perfCntCondMbpBWrong"),
-    "MbpJRight"   -> (0xb08, "perfCntCondMbpJRight"),
-    "MbpJWrong"   -> (0xb09, "perfCntCondMbpJWrong"),
-    "MbpIRight"   -> (0xb0a, "perfCntCondMbpIRight"),
-    "MbpIWrong"   -> (0xb0b, "perfCntCondMbpIWrong"),
-    "MbpRRight"   -> (0xb0c, "perfCntCondMbpRRight"),
-    "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"),
-    "RoqWalk"     -> (0xb0f, "perfCntCondRoqWalk"  ),
-    "DTlbReqCnt0" -> (0xb15, "perfCntDtlbReqCnt0"  ),
-    "DTlbReqCnt1" -> (0xb16, "perfCntDtlbReqCnt1"  ),
-    "DTlbReqCnt2" -> (0xb17, "perfCntDtlbReqCnt2"  ),
-    "DTlbReqCnt3" -> (0xb18, "perfCntDtlbReqCnt3"  ),
-    "DTlbMissCnt0"-> (0xb19, "perfCntDtlbMissCnt0" ),
-    "DTlbMissCnt1"-> (0xb20, "perfCntDtlbMissCnt1" ),
-    "DTlbMissCnt2"-> (0xb21, "perfCntDtlbMissCnt2" ),
-    "DTlbMissCnt3"-> (0xb22, "perfCntDtlbMissCnt3" ),
-    "ITlbReqCnt0" -> (0xb23, "perfCntItlbReqCnt0"  ),
-    "ITlbMissCnt0"-> (0xb24, "perfCntItlbMissCnt0" ),
-    "PtwReqCnt"   -> (0xb25, "perfCntPtwReqCnt"    ),
-    "PtwCycleCnt" -> (0xb26, "perfCntPtwCycleCnt"  ),
-    "PtwL2TlbHit" -> (0xb27, "perfCntPtwL2TlbHit"  ),
-    "ICacheReq"   -> (0xb28, "perfCntIcacheReqCnt" ),
-    "ICacheMiss"  -> (0xb29, "perfCntIcacheMissCnt")
-    // "FetchFromICache" -> (0xb2a, "CntFetchFromICache"),
-    // "FetchFromLoopBuffer" -> (0xb2b, "CntFetchFromLoopBuffer"),
-    // "ExitLoop1" -> (0xb2c, "CntExitLoop1"),
-    // "ExitLoop2" -> (0xb2d, "CntExitLoop2"),
-    // "ExitLoop3" -> (0xb2e, "CntExitLoop3")
-    // "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
+    // "Mcycle"    -> (0x1000, "perfCntCondMcycle"     ),
+    // "Minstret"  -> (0x1002, "perfCntCondMinstret"   ),
+    "MbpInstr"    -> (0x1003, "perfCntCondMbpInstr" ),
+    "MbpRight"    -> (0x1004, "perfCntCondMbpRight" ),
+    "MbpWrong"    -> (0x1005, "perfCntCondMbpWrong" ),
+    "MbpBRight"   -> (0x1006, "perfCntCondMbpBRight"),
+    "MbpBWrong"   -> (0x1007, "perfCntCondMbpBWrong"),
+    "MbpJRight"   -> (0x1008, "perfCntCondMbpJRight"),
+    "MbpJWrong"   -> (0x1009, "perfCntCondMbpJWrong"),
+    "MbpIRight"   -> (0x100a, "perfCntCondMbpIRight"),
+    "MbpIWrong"   -> (0x100b, "perfCntCondMbpIWrong"),
+    "MbpRRight"   -> (0x100c, "perfCntCondMbpRRight"),
+    "MbpRWrong"   -> (0x100d, "perfCntCondMbpRWrong"),
+    "RoqWalk"     -> (0x100f, "perfCntCondRoqWalk"  ),
+    "DTlbReqCnt0" -> (0x1015, "perfCntDtlbReqCnt0"  ),
+    "DTlbReqCnt1" -> (0x1016, "perfCntDtlbReqCnt1"  ),
+    "DTlbReqCnt2" -> (0x1017, "perfCntDtlbReqCnt2"  ),
+    "DTlbReqCnt3" -> (0x1018, "perfCntDtlbReqCnt3"  ),
+    "DTlbMissCnt0"-> (0x1019, "perfCntDtlbMissCnt0" ),
+    "DTlbMissCnt1"-> (0x1020, "perfCntDtlbMissCnt1" ),
+    "DTlbMissCnt2"-> (0x1021, "perfCntDtlbMissCnt2" ),
+    "DTlbMissCnt3"-> (0x1022, "perfCntDtlbMissCnt3" ),
+    "ITlbReqCnt0" -> (0x1023, "perfCntItlbReqCnt0"  ),
+    "ITlbMissCnt0"-> (0x1024, "perfCntItlbMissCnt0" ),
+    "PtwReqCnt"   -> (0x1025, "perfCntPtwReqCnt"    ),
+    "PtwCycleCnt" -> (0x1026, "perfCntPtwCycleCnt"  ),
+    "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
+    "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
+    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt")
+    // "FetchFromICache" -> (0x102a, "CntFetchFromICache"),
+    // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
+    // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
+    // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
+    // "ExitLoop3" -> (0x102e, "CntExitLoop3")
+    // "Ml2cacheHit" -> (0x1023, "perfCntCondMl2cacheHit")
   )
-  val emuPerfCntCond = List.fill(0x80)(WireInit(false.B))
-  (emuPerfCnts zip emuPerfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
 
   emuPerfCntList.foreach {
     case (_, (address, boringId)) =>
-      if(hasEmuPerfCnt){
+      if (hasEmuPerfCnt) {
         ExcitingUtils.addSink(emuPerfCntCond(address & 0x7f), boringId, ConnectionType.Perf)
       }
       // if (!hasEmuPerfCnt) {
@@ -742,7 +744,7 @@ class CSR extends FunctionUnit with HasCSRConst
   }
 
   val xstrap = WireInit(false.B)
-  if(!env.FPGAPlatform && EnableBPU){
+  if (!env.FPGAPlatform && EnableBPU) {
     ExcitingUtils.addSink(xstrap, "XSTRAP", ConnectionType.Debug)
   }
   def readWithScala(addr: Int): UInt = mapping(addr)._1
@@ -775,6 +777,5 @@ class CSR extends FunctionUnit with HasCSRConst
     ExcitingUtils.addSource(sscratch, "difftestSscratch", Debug)
     ExcitingUtils.addSource(mideleg, "difftestMideleg", Debug)
     ExcitingUtils.addSource(medeleg, "difftestMedeleg", Debug)
-  } else {
   }
 }
