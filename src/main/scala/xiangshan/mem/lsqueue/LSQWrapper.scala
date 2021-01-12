@@ -23,7 +23,6 @@ class LsqEntry extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
   val exception = UInt(16.W) // TODO: opt size
-  val mmio = Bool()
   val fwdMask = Vec(8, Bool())
   val fwdData = Vec(8, UInt(8.W))
 }
@@ -244,7 +243,7 @@ class LsqWrappper extends XSModule with HasDCacheParameters {
     val loadIn = Vec(LoadPipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     val sbuffer = Vec(StorePipelineWidth, Decoupled(new DCacheWordReq))
-    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback store
+    val ldout = Vec(2, DecoupledIO(new ExuOutput)) // writeback int load
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val commits = Flipped(new RoqCommitIO)

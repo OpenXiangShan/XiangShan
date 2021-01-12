@@ -17,11 +17,11 @@ import scala.math.max
 
 
 // L1plusCache specific parameters
-// L1 L1plusCache is 64set, 8way-associative, with 64byte block, a total of 32KB
+// L1 L1plusCache is 256 set, 8 way associative, with 64byte block, a total of 128KB
 // It's a virtually indexed, physically tagged cache.
 case class L1plusCacheParameters
 (
-    nSets: Int = 64,
+    nSets: Int = 256,
     nWays: Int = 8,
     rowBits: Int = 64,
     tagECC: Option[String] = None,

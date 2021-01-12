@@ -10,7 +10,7 @@ import xiangshan.backend.exu.Exu._
 class Dispatch2Fp extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort))
+    val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new RfReadPort(XLEN + 1)))
     val regRdy = Vec(NRFpReadPorts - exuParameters.StuCnt, Input(Bool()))
     val numExist = Input(Vec(exuParameters.FpExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))

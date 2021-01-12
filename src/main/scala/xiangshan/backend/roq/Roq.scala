@@ -6,7 +6,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.LSUOpType
-import xiangshan.backend.fu.fpu.Fflags
 import xiangshan.mem.{LqPtr, SqPtr}
 
 object roqDebugId extends Function0[Integer] {
@@ -37,7 +36,7 @@ class RoqCSRIO extends XSBundle {
   val intrBitSet = Input(Bool())
   val trapTarget = Input(UInt(VAddrBits.W))
 
-  val fflags = Output(new Fflags)
+  val fflags = Output(Valid(UInt(5.W)))
   val dirty_fs = Output(Bool())
 }
 
@@ -50,19 +49,7 @@ class RoqEnqIO extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RoqPtr))
 }
 
-class RoqDispatchData extends XSBundle {
-  // commit info
-  val ldest = UInt(5.W)
-  val rfWen = Bool()
-  val fpWen = Bool()
-  val commitType = CommitType()
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
-  val lqIdx = new LqPtr
-  val sqIdx = new SqPtr
-
-  // exception info
-  val pc = UInt(VAddrBits.W)
+class RoqDispatchData extends RoqCommitInfo {
   val crossPageIPFFix = Bool()
   val exceptionVec = Vec(16, Bool())
 }
@@ -70,7 +57,7 @@ class RoqDispatchData extends XSBundle {
 class RoqWbData extends XSBundle {
   // mostly for exceptions
   val exceptionVec = Vec(16, Bool())
-  val fflags = new Fflags
+  val fflags = UInt(5.W)
   val flushPipe = Bool()
 }
 
@@ -324,6 +311,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       }
     }
   }
+
   // debug info for enqueue (dispatch)
   val dispatchNum = Mux(io.enq.canAccept, PopCount(Cat(io.enq.req.map(_.valid))), 0.U)
   XSDebug(p"(ready, valid): ${io.enq.canAccept}, ${Binary(Cat(io.enq.req.map(_.valid)))}\n")
@@ -406,8 +394,17 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val usedSpaceForMPR = Reg(Vec(RenameWidth, Bool()))
 
   // wiring to csr
-  val fflags = WireInit(0.U.asTypeOf(new Fflags))
-  val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(io.commits.valid.zip(io.commits.info.map(_.fpWen)).map{case (v, w) => v & w}).orR)
+  val (wflags, fpWen) = (0 until CommitWidth).map(i => {
+    val v = io.commits.valid(i)
+    val info = io.commits.info(i)
+    (v & info.wflags, v & info.fpWen)
+  }).unzip
+  val fflags = Wire(Valid(UInt(5.W)))
+  fflags.valid := Mux(io.commits.isWalk, false.B, Cat(wflags).orR())
+  fflags.bits := wflags.zip(writebackDataRead.map(_.fflags)).map({
+    case (w, f) => Mux(w, f, 0.U)
+  }).reduce(_|_)
+  val dirty_fs = Mux(io.commits.isWalk, false.B, Cat(fpWen).orR())
 
   io.commits.isWalk := state =/= s_idle
   val commit_v = Mux(state === s_idle, VecInit(deqPtrVec.map(ptr => valid(ptr.value))), VecInit(walkPtrVec.map(ptr => valid(ptr.value))))
@@ -420,12 +417,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || intrBitSetReg else intrEnable
     io.commits.valid(i) := commit_v(i) && commit_w(i) && !isBlocked && !commit_exception(i)
     io.commits.info(i)  := dispatchDataRead(i)
-
-    when (state === s_idle) {
-      when (io.commits.valid(i) && writebackDataRead(i).fflags.asUInt.orR()) {
-        fflags := writebackDataRead(i).fflags
-      }
-    }
 
     when (state === s_walk) {
       io.commits.valid(i) := commit_v(i) && shouldWalkVec(i)
@@ -477,6 +468,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     wdata.ldest := req.ctrl.ldest
     wdata.rfWen := req.ctrl.rfWen
     wdata.fpWen := req.ctrl.fpWen
+    wdata.wflags := req.ctrl.fpu.wflags
     wdata.commitType := req.ctrl.commitType
     wdata.pdest := req.pdest
     wdata.old_pdest := req.old_pdest

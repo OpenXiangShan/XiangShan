@@ -10,13 +10,14 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-import xiangshan.cache.{ICache, DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
 import chipsalliance.rocketchip.config
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
-import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
-import freechips.rocketchip.devices.tilelink.{TLError, DevNullParams}
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
+import freechips.rocketchip.tilelink.{TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
+import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import freechips.rocketchip.amba.axi4.{AXI4ToTL, AXI4IdentityNode, AXI4UserYanker, AXI4Fragmenter, AXI4IdIndexer, AXI4Deinterleaver}
+import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, AXI4Fragmenter, AXI4IdIndexer, AXI4IdentityNode, AXI4ToTL, AXI4UserYanker}
+import freechips.rocketchip.tile.HasFPUParameters
 import utils._
 
 case class XSCoreParameters
@@ -88,7 +89,8 @@ case class XSCoreParameters
   TlbL2EntrySize: Int = 256, // or 512
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
-  NumPerfCounters: Int = 16
+  NumPerfCounters: Int = 16,
+  NrExtIntr: Int = 1
 )
 
 trait HasXSParameter {
@@ -96,7 +98,10 @@ trait HasXSParameter {
   val core = Parameters.get.coreParameters
   val env = Parameters.get.envParameters
 
-  val XLEN = core.XLEN
+  val XLEN = 64
+  val minFLen = 32
+  val fLen = 64
+  def xLen = 64
   val HasMExtension = core.HasMExtension
   val HasCExtension = core.HasCExtension
   val HasDiv = core.HasDiv
@@ -160,8 +165,11 @@ trait HasXSParameter {
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters
+  val NrExtIntr = core.NrExtIntr
 
   val icacheParameters = ICacheParameters(
+    tagECC = Some("secded"),
+    dataECC = Some("secded"),
     nMissEntries = 2
   )
 
@@ -212,6 +220,7 @@ abstract class XSModule extends MultiIOModule
   with HasXSParameter
   with HasExceptionNO
   with HasXSLog
+  with HasFPUParameters
 {
   def io: Record
 }

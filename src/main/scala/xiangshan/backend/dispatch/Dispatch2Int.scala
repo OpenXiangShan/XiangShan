@@ -11,7 +11,7 @@ import xiangshan.backend.exu._
 class Dispatch2Int extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort))
+    val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort(XLEN)))
     val regRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
     val numExist = Input(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))

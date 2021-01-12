@@ -38,14 +38,18 @@ object BrqPtr extends HasXSParameter {
   }
 }
 
+class BrqEnqIO extends XSBundle {
+  val needAlloc = Vec(RenameWidth, Input(Bool()))
+  val req = Vec(RenameWidth, Flipped(DecoupledIO(new CtrlFlow)))
+  val resp = Vec(RenameWidth, Output(new BrqPtr))
+}
+
 class BrqIO extends XSBundle{
   val redirect = Input(ValidIO(new Redirect))
   // receive branch/jump calculated target
   val exuRedirectWb = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
   // from decode, branch insts enq
-  val enqReqs = Vec(DecodeWidth, Flipped(DecoupledIO(new CfCtrl)))
-  // to decode
-  val brTags = Output(Vec(DecodeWidth, new BrqPtr))
+  val enq = new BrqEnqIO
   // to roq
   val out = ValidIO(new ExuOutput)
   // misprediction, flush pipeline
@@ -118,22 +122,22 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val lastCycleRedirect = RegNext(io.redirect.valid)
   val validEntries = distanceBetween(tailPtr, headPtr)
   for(i <- 0 until DecodeWidth){
-    val offset = if(i == 0) 0.U else PopCount(io.enqReqs.take(i).map(_.valid))
+    val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val brTag = tailPtr + offset
     val idx = brTag.value
-    io.enqReqs(i).ready := validEntries <= (BrqSize - (i + 1)).U && !lastCycleRedirect
-    io.brTags(i) := brTag
-    when (io.enqReqs(i).fire()) {
+    io.enq.req(i).ready := validEntries <= (BrqSize - (i + 1)).U && !lastCycleRedirect
+    io.enq.resp(i) := brTag
+    when (io.enq.req(i).fire()) {
       brQueue(idx).ptrFlag := brTag.flag
-      brQueue(idx).exuOut.brUpdate.pc := io.enqReqs(i).bits.cf.pc
-      brQueue(idx).exuOut.brUpdate.pnpc := io.enqReqs(i).bits.cf.brUpdate.pnpc
-      brQueue(idx).exuOut.brUpdate.fetchIdx := io.enqReqs(i).bits.cf.brUpdate.fetchIdx
-      brQueue(idx).exuOut.brUpdate.pd := io.enqReqs(i).bits.cf.brUpdate.pd
-      brQueue(idx).exuOut.brUpdate.bpuMeta := io.enqReqs(i).bits.cf.brUpdate.bpuMeta
+      brQueue(idx).exuOut.brUpdate.pc := io.enq.req(i).bits.pc
+      brQueue(idx).exuOut.brUpdate.pnpc := io.enq.req(i).bits.brUpdate.pnpc
+      brQueue(idx).exuOut.brUpdate.fetchIdx := io.enq.req(i).bits.brUpdate.fetchIdx
+      brQueue(idx).exuOut.brUpdate.pd := io.enq.req(i).bits.brUpdate.pd
+      brQueue(idx).exuOut.brUpdate.bpuMeta := io.enq.req(i).bits.brUpdate.bpuMeta
       stateQueue(idx) := s_idle
     }
   }
-  val enqCnt = PopCount(io.enqReqs.map(_.fire()))
+  val enqCnt = PopCount(io.enq.req.map(_.fire()))
   tailPtr := tailPtr + enqCnt
 
   /**
@@ -194,8 +198,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   for(i <- 0 until DecodeWidth){
     XSDebug(
       debug_normal_mode,
-      p"enq v:${io.enqReqs(i).valid} rdy:${io.enqReqs(i).ready} pc:${Hexadecimal(io.enqReqs(i).bits.cf.pc)}" +
-        p" brTag:${io.brTags(i)}\n"
+      p"enq v:${io.enq.req(i).valid} rdy:${io.enq.req(i).ready} pc:${Hexadecimal(io.enq.req(i).bits.pc)}" +
+        p" brTag:${io.enq.resp(i)}\n"
     )
   }
 

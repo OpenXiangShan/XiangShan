@@ -3,7 +3,6 @@ package xiangshan.backend.fu
 import chisel3._
 import chisel3.ExcitingUtils.{ConnectionType, Debug}
 import chisel3.util._
-import fpu.Fflags
 import utils._
 import xiangshan._
 import xiangshan.backend._
@@ -14,6 +13,14 @@ object debugId extends Function0[Integer] {
   def apply(): Integer = {
     x = x + 1
     return x
+  }
+}
+
+object hartId extends Function0[Int] {
+  var x = 0
+  def apply(): Int = {
+    x = x + 1
+    return x-1
   }
 }
 
@@ -165,7 +172,7 @@ trait HasExceptionNO {
 }
 
 class FpuCsrIO extends XSBundle {
-  val fflags = Output(new Fflags)
+  val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
@@ -285,7 +292,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val mvendorid = RegInit(UInt(XLEN.W), 0.U) // this is a non-commercial implementation
   val marchid = RegInit(UInt(XLEN.W), 0.U) // return 0 to indicate the field is not implemented
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
-  val mhartid = RegInit(UInt(XLEN.W), 0.U) // the hardware thread running the code
+  val mhartNo = hartId()
+  val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
   val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)
   // val mstatus = RegInit(UInt(XLEN.W), "h8000c0100".U)
   // mstatus Value Table
@@ -386,11 +394,16 @@ class CSR extends FunctionUnit with HasCSRConst
   }
   def frm_rfn(rdata: UInt): UInt = rdata(7,5)
 
-  def fflags_wfn(wdata: UInt): UInt = {
-    val fcsrOld = WireInit(fcsr.asTypeOf(new FcsrStruct))
+  def fflags_wfn(update: Boolean)(wdata: UInt): UInt = {
+    val fcsrOld = fcsr.asTypeOf(new FcsrStruct)
+    val fcsrNew = WireInit(fcsrOld)
     csrw_dirty_fp_state := true.B
-    fcsrOld.fflags := wdata(4,0)
-    fcsrOld.asUInt()
+    if(update){
+      fcsrNew.fflags := wdata(4,0) | fcsrOld.fflags
+    } else {
+      fcsrNew.fflags := wdata(4,0)
+    }
+    fcsrNew.asUInt()
   }
   def fflags_rfn(rdata:UInt): UInt = rdata(4,0)
 
@@ -401,7 +414,7 @@ class CSR extends FunctionUnit with HasCSRConst
   }
 
   val fcsrMapping = Map(
-    MaskedRegMap(Fflags, fcsr, wfn = fflags_wfn, rfn = fflags_rfn),
+    MaskedRegMap(Fflags, fcsr, wfn = fflags_wfn(update = false), rfn = fflags_rfn),
     MaskedRegMap(Frm, fcsr, wfn = frm_wfn, rfn = frm_rfn),
     MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
   )
@@ -538,8 +551,8 @@ class CSR extends FunctionUnit with HasCSRConst
   val rdataDummy = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
 
-  when(csrio.fpu.fflags.asUInt() =/= 0.U){
-    fcsr := fflags_wfn(csrio.fpu.fflags.asUInt())
+  when(csrio.fpu.fflags.valid){
+    fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
   }
   // set fs and sd in mstatus
   when(csrw_dirty_fp_state || csrio.fpu.dirty_fs){
