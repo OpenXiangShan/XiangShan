@@ -293,6 +293,7 @@ class BPUStage3 extends BPUStage {
   val loopRes = (if (EnableLoop) loopResp else VecInit(Fill(PredictWidth, 0.U(1.W)))).asUInt
   val prevHalfTaken = s3IO.prevHalf.valid && s3IO.prevHalf.bits.taken && HasCExtension.B
   val prevHalfTakenMask = prevHalfTaken.asUInt
+  // val brTakens = ((brs & brPred | prevHalfTakenMask) ^ loopRes)
   val brTakens = ((brs & brPred | prevHalfTakenMask) & ~loopRes)
   // VecInit((0 until PredictWidth).map(i => brs(i) && (brPred(i) || (if (i == 0) prevHalfTaken else false.B)) && !loopRes(i)))
   // we should provide btb resp as well
