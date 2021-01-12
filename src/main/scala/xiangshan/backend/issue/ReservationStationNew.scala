@@ -355,9 +355,7 @@ class ReservationStationData
   })
 
   val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = Reg(Vec(iqSize, Vec(3, UInt((XLEN+1).W)))) // TODO reduce data width
-
-  // TODO: change srcNum
+  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt((XLEN+1).W))))
 
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
@@ -377,7 +375,7 @@ class ReservationStationData
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
 
-  when (enqEnReg) { // TODO: turn to srcNum, not the 3
+  when (enqEnReg) {
     (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
     XSDebug("[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce(_ + " " + _) + "\n")
@@ -430,36 +428,9 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
-  exuCfg match {
-    // int
-    case Exu.aluExeUnitCfg =>
-      exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
-      exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
-    case Exu.jumpExeUnitCfg =>
-      exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
-      exuInput.src2 := uop(deq).ctrl.imm
-    case Exu.mulDivExeUnitCfg =>
-      exuInput.src1 := data(deq)(0)
-      exuInput.src2 := data(deq)(1)
-    // float point
-    case Exu.fmacExeUnitCfg =>
-      exuInput.src1 := data(deq)(0)
-      exuInput.src2 := data(deq)(1)
-      exuInput.src3 := data(deq)(2)
-    case Exu.fmiscExeUnitCfg =>
-      exuInput.src1 := data(deq)(0)
-      exuInput.src2 := data(deq)(1)
-      exuInput.src3 := data(deq)(2)
-    // load-store
-    case Exu.ldExeUnitCfg =>
-      exuInput.src1 := data(deq)(0)
-      exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
-    case Exu.stExeUnitCfg =>
-      exuInput.src1 := data(deq)(0)
-      exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
-    case _ =>
-      XSDebug(false.B, "Unhandled exu-config")
-  }
+  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
+  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
+  if (srcNum > 2) exuInput.src3 := data(deq)(2)
 
   io.deq.valid := RegNext(sel.valid)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
@@ -513,7 +484,7 @@ class ReservationStationData
   XSDebug(p"Data:  | src1:data | src2:data | src3:data |hit|pdest:rf:fp| roqIdx | pc\n")
   for(i <- data.indices) {
     XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(data(i)(0))}|${uop(i).psrc2}:" +
-      p"${Hexadecimal(data(i)(1))}|${uop(i).psrc3}:${Hexadecimal(data(i)(2))}|" +
+      (if (srcNum > 1) p"${Hexadecimal(data(i)(1))}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(data(i)(2))}" else p"null") + p"|" +
       p"${Binary(io.ctrl.srcUpdate(i).asUInt)}|${uop(i).pdest}:${uop(i).ctrl.rfWen}:" +
       p"${uop(i).ctrl.fpWen}|${uop(i).roqIdx} |${Hexadecimal(uop(i).cf.pc)}\n")
   }
