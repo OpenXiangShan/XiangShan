@@ -75,6 +75,7 @@ class LTBColumn extends LTBModule {
     val if3_fire = Input(Bool())
     val if4_fire = Input(Bool())
     val outMask = Input(Bool())
+    val taken = Input(Bool())
     // send out resp to if4
     val resp = Output(new LTBColumnResp)
     val update = Input(Valid(new LTBColumnUpdate))
@@ -115,6 +116,8 @@ class LTBColumn extends LTBModule {
         }.elsewhen (io.wen) {
           wd := wdata
         }
+      }.otherwise {
+        wd.specCnt := wd.nSpecCnt
       }
       when (wen) {
         mem.write(i.U, wd)
@@ -154,7 +157,10 @@ class LTBColumn extends LTBModule {
 
   io.resp.meta := if4_entry.specCnt + 1.U
   // io.resp.exit := if4_tag === if4_entry.tag && (if4_entry.specCnt + 1.U) === if4_entry.tripCnt && valid && !if4_entry.unusable
-  io.resp.exit := if4_tag === if4_entry.tag && (if4_entry.specCnt + 1.U) === if4_entry.tripCnt && valid && if4_entry.isConf
+  io.resp.exit := !if4_entry.unusable && if4_tag === if4_entry.tag && (if4_entry.specCnt + 1.U) === if4_entry.tripCnt && valid && if4_entry.isConf
+  // when(!if4_entry.unusable && if4_tag === if4_entry.tag && (if4_entry.specCnt + 1.U) === if4_entry.tripCnt && valid && if4_entry.isConf) {
+  //   io.resp.exit := !io.taken
+  // }
 
   // when resolving a branch
   val updateValid = RegNext(io.update.valid)
@@ -245,19 +251,24 @@ class LTBColumn extends LTBModule {
     when(ltb.swen && if3_idx === if4_idx) {
       XSDebug("Bypass swEntry\n")
       if4_entry := swEntry
+      when(io.repair) {if4_entry.specCnt := swEntry.nSpecCnt}
     }.elsewhen(ltb.wen && if3_idx === if4_uIdx) {
       XSDebug("Bypass wEntry\n")
       if4_entry := wEntry
+      when(io.repair) {if4_entry.specCnt := wEntry.nSpecCnt}
     }.otherwise {
       if4_entry := if3_entry
+      when(io.repair) {if4_entry.specCnt := if3_entry.nSpecCnt}
     }
   }.otherwise {
     when(ltb.swen) {
       XSDebug("spec Update\n")
       if4_entry := swEntry
+      when(io.repair) {if4_entry.specCnt := swEntry.nSpecCnt}
     }.elsewhen(ltb.wen && if4_idx === if4_uIdx) {
       XSDebug("Keeping\n")
       if4_entry := wEntry
+      when(io.repair) {if4_entry.specCnt := wEntry.nSpecCnt}
     }
   }
 
@@ -266,11 +277,14 @@ class LTBColumn extends LTBModule {
     when(ltb.swen && updateIdx === if4_idx) {
       XSDebug("nSpec Bypass swEntry\n")
       if4_uEntry := swEntry
+      when(io.repair) {if4_uEntry.specCnt := swEntry.nSpecCnt}
     }.elsewhen(ltb.wen && updateIdx === if4_uIdx) {
       XSDebug("nSpec Bypass wEntry\n")
       if4_uEntry := wEntry
+      when(io.repair) {if4_uEntry.specCnt := wEntry.nSpecCnt}
     }.otherwise {
       if4_uEntry := if3_uEntry
+      when(io.repair) {if4_uEntry.specCnt := if3_uEntry.nSpecCnt}
     }
   // }.otherwise {
   //   when(ltb.swen && if4_idx === if4_uIdx) {
@@ -282,6 +296,7 @@ class LTBColumn extends LTBModule {
   //   }
   // }
 
+  // 同一个bank中的if4_entry是否也要bypass
 
 
   // Reseting
@@ -298,8 +313,10 @@ class LTBColumn extends LTBModule {
   when (updateValid && !doingReset && valid && if4_uIdx === if4_idx) {
     when (!tagMatch && update.misPred || tagMatch) {
       swEntry.nSpecCnt := wEntry.nSpecCnt
+      swEntry.conf := wEntry.conf
+      swEntry.tripCnt := wEntry.tripCnt
     }
-  }
+  } 
   when (io.repair && !doingReset && valid) {
     swEntry.specCnt := if4_entry.nSpecCnt
   }
@@ -314,7 +331,7 @@ class LTBColumn extends LTBModule {
     XSDebug("[if3_entry] tag=%x conf=%d age=%d tripCnt=%d specCnt=%d nSpecCnt=%d\n", 
       if3_entry.tag, if3_entry.conf, if3_entry.age, if3_entry.tripCnt, if3_entry.specCnt, if3_entry.nSpecCnt)
     XSDebug(false, true.B, p" brTag=${if4_entry.brTag} unusable=${if4_entry.unusable}\n")
-    XSDebug("swen=%d, ltb.swIdx, io.if4_fire=%d, if4_entry.tag=%x, if4_tag=%x, io.outMask=%d\n", valid && if4_entry.tag === if4_tag || doingReset, io.if4_fire, if4_entry.tag, if4_tag, io.outMask)
+    XSDebug("swen=%d, ltb.swIdx=%d, io.if4_fire=%d, if4_entry.tag=%x, if4_tag=%x, io.outMask=%d\n", valid && if4_entry.tag === if4_tag || doingReset, ltb.swIdx, io.if4_fire, if4_entry.tag, if4_tag, io.outMask)
     XSDebug(io.if4_fire && if4_entry.tag === if4_tag && io.outMask, "[speculative update] new specCnt=%d\n",
       Mux((if4_entry.specCnt + 1.U) === if4_entry.tripCnt, 0.U, if4_entry.specCnt + 1.U))
     XSDebug("[if3_update] v=%d misPred=%d pc=%x idx=%x tag=%x meta=%d taken=%d tagMatch=%d cntMatch=%d\n", io.update.valid, io.update.bits.misPred, io.update.bits.pc, updateIdx, updateTag, io.update.bits.meta, io.update.bits.taken, tagMatch, cntMatch)
@@ -376,6 +393,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.if4_fire := out_fire
     ltbs(i).io.req.idx := bankIdx
     ltbs(i).io.req.tag := tag
+    ltbs(i).io.taken := io.respIn.taken
     // ltbs(i).io.outMask := outMask(i)
 
     ltbs(i).io.update.valid := i.U === updateBank && io.update.valid && io.update.bits.pd.isBr
@@ -384,7 +402,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
     ltbs(i).io.update.bits.meta := io.update.bits.bpuMeta.specCnt
     ltbs(i).io.update.bits.taken := io.update.bits.taken
     ltbs(i).io.update.bits.brTag := io.update.bits.brTag
-    ltbs(i).io.repair := i.U =/= updateBank && io.update.valid && io.update.bits.isMisPred
+    ltbs(i).io.repair := RegNext(i.U =/= updateBank && io.update.valid && io.update.bits.isMisPred)
   }
 
   // if4
@@ -404,6 +422,7 @@ class LoopPredictor extends BasePredictor with LTBParams {
   }
 
   ExcitingUtils.addSource(io.resp.exit.reduce(_||_), "perfCntLoopExit", Perf)
+  ExcitingUtils.addSource(io.update.valid && io.update.bits.isReplay, "Replay", Perf)
 
   if (BPUDebug && debug) {
     // debug info
