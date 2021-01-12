@@ -28,6 +28,7 @@ class FDivSqrt extends FPUSubModule {
       when(divSqrtRawValid){
         when(kill || killReg){
           state := s_idle
+          killReg := false.B
         }.otherwise({
           state := s_finish
         })
@@ -37,7 +38,6 @@ class FDivSqrt extends FPUSubModule {
     }
     is(s_finish){
       state := s_idle
-      killReg := false.B
     }
   }
 
