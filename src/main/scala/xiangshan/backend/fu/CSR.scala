@@ -860,11 +860,11 @@ class CSR extends FunctionUnit with HasCSRConst
     ).toMap
   ) ++ (
     (0 until l1plusPrefetcherParameters.nEntries).map(i =>
-      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l2PrefetcherParameters.nEntries).map(i =>
-      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   )
 
