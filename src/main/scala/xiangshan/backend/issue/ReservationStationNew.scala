@@ -354,7 +354,19 @@ class ReservationStationData
   })
 
   val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt((XLEN+1).W))))
+  val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, 1, iqSize)))
+  data.foreach(_.io <> DontCare)
+
+  // data read/write interface
+  def dataRead(iqIdx: UInt, srcIdx: Int): UInt = {
+    data(srcIdx).io.raddr(0) := iqIdx
+    data(srcIdx).io.rdata(0)
+  }
+  def dataWrite(iqIdx: UInt, srcIdx: Int, wdata: UInt) = {
+    data(srcIdx).io.waddr(iqIdx) := iqIdx
+    data(srcIdx).io.wdata(iqIdx) := wdata
+    data(srcIdx).io.wen(iqIdx) := true.B
+  }
 
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
@@ -375,7 +387,7 @@ class ReservationStationData
   }
 
   when (enqEnReg) {
-    (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+    (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
     XSDebug("[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce(_ + " " + _) + "\n")
   }
@@ -411,8 +423,8 @@ class ReservationStationData
       val (wuHit, wuData) = wakeup(srcSeq(j), srcTypeSeq(j))
       val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
-      when (wuHit) { data(i)(j) := wuData }
-      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { data(i)(j) := bpData }
+      when (wuHit) { /* data(i)(j) := wuData */dataWrite(i.U, j, wuData) }
+      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { /* data(i)(j) := bpData */dataWrite(i.U, j, bpData) }
       // NOTE: the hit is from data's info, so there is an erro that:
       //       when enq, hit use last instr's info not the enq info.
       //       it will be long latency to add correct here, so add it to ctrl or somewhere else
@@ -427,9 +439,9 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
-  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
-  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
-  if (srcNum > 2) exuInput.src3 := data(deq)(2)
+  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), dataRead(deq, 0))
+  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, dataRead(deq, 1))
+  if (srcNum > 2) exuInput.src3 := dataRead(deq, 2)
 
   io.deq.valid := RegNext(sel.valid)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
@@ -439,7 +451,7 @@ class ReservationStationData
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
     val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
-    when (bpHitReg) { data(enqPtrReg)(i) := bpData }
+    when (bpHitReg) { /* data(enqPtrReg)(i) := bpData */dataWrite(enqPtrReg, i, bpData) }
     h := bpHit
     // NOTE: enq bp is done here
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
@@ -482,8 +494,8 @@ class ReservationStationData
     p" src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
   XSDebug(p"Data:  | src1:data | src2:data | src3:data |hit|pdest:rf:fp| roqIdx | pc\n")
   for(i <- data.indices) {
-    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(data(i)(0))}|${uop(i).psrc2}:" +
-      (if (srcNum > 1) p"${Hexadecimal(data(i)(1))}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(data(i)(2))}" else p"null") + p"|" +
+    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(exuInput.src1)}|${uop(i).psrc2}:" +
+      (if (srcNum > 1) p"${Hexadecimal(exuInput.src2)}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(exuInput.src3)}" else p"null") + p"|" +
       p"${Binary(io.ctrl.srcUpdate(i).asUInt)}|${uop(i).pdest}:${uop(i).ctrl.rfWen}:" +
       p"${uop(i).ctrl.fpWen}|${uop(i).roqIdx} |${Hexadecimal(uop(i).cf.pc)}\n")
   }
