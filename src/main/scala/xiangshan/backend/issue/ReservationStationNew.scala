@@ -6,6 +6,7 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
+import scala.math.max
 
 class BypassQueue(number: Int) extends XSModule {
   val io = IO(new Bundle {
@@ -67,8 +68,7 @@ class ReservationStationCtrl
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
   val nonBlocked = fastWakeup
-  // FIXME val srcNum = exuCfg.intSrcCnt + exuCfg.fpSrcCnt
-  val srcNum = 3
+  val srcNum = max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   require(srcNum >= 1 && srcNum <= 3)
   println(s"[RsCtrl]  ExuConfig: ${exuCfg.name} (srcNum = $srcNum)")
 
@@ -274,9 +274,7 @@ class ReservationStationCtrl
                srcStateSeq(i)===SrcState.rdy)
     }
     XSDebug(p"EnqCtrl: roqIdx:${enqUop.roqIdx} pc:0x${Hexadecimal(enqUop.cf.pc)} " +
-      p"src1:${srcSeq(0)} state:${srcStateSeq(0)} type:${srcTypeSeq(0)} src2:${srcSeq(1)} " +
-      p" state:${srcStateSeq(1)} type:${srcTypeSeq(1)} src3:${srcSeq(2)} state:${srcStateSeq(2)} " +
-      p"type:${srcTypeSeq(2)}\n")
+      List.tabulate(srcNum)(i => p"<src$i: ${srcSeq(i)} state$i: ${srcStateSeq(i)} type$i: ${srcTypeSeq(i)}>").reduce(_ + " " + _) + "\n")
   }
 
   // other to Data
@@ -306,8 +304,8 @@ class ReservationStationCtrl
   XSDebug(print, p"issValid:${issValid} issueFire:${issFire} dequeue:${dequeue} deqPtr:${deqPtr}\n")
   XSDebug(p" :Idx|v|r|s |cnt|s1:s2:s3\n")
   for(i <- srcQueue.indices) {
-    XSDebug(p"${i.U}: ${idxQueue(i)}|${validIdxQue(i)}|${readyIdxQue(i)}|${stateIdxQue(i)}|" +
-      p"${cntIdxQue(i)}|${srcIdxQue(i)(0)}:${srcIdxQue(i)(1)}:${srcIdxQue(i)(2)}\n")
+    XSDebug(p"${i.U}: ${idxQueue(i)}|${validIdxQue(i)}|${readyIdxQue(i)}|${stateIdxQue(i)}|${cntIdxQue(i)}|" +
+      List.tabulate(srcNum)(j => p"${srcIdxQue(i)(j)}").reduce(_ + ":" + _) + "\n")
   }
 }
 
@@ -319,31 +317,11 @@ class ReservationStationData
   fixedDelay: Int,
   feedback: Boolean,
 ) extends XSModule {
-
-  object DispatchType extends Enumeration {
-    val Disp2Int, Disp2Fp, Disp2Ls = Value
-  }
-
-  def dispatchType(exuConfig: ExuConfig): DispatchType.Value = {
-    exuConfig match {
-      case Exu.aluExeUnitCfg => DispatchType.Disp2Int
-      case Exu.jumpExeUnitCfg => DispatchType.Disp2Int
-      case Exu.mulDivExeUnitCfg => DispatchType.Disp2Int
-
-      case Exu.fmacExeUnitCfg => DispatchType.Disp2Fp
-      case Exu.fmiscExeUnitCfg => DispatchType.Disp2Fp
-
-      case Exu.ldExeUnitCfg => DispatchType.Disp2Ls
-      case Exu.stExeUnitCfg => DispatchType.Disp2Ls
-    }
-  }
-
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
   val nonBlocked = fastWakeup
-  // FIXME val srcNum = exuCfg.intSrcCnt + exuCfg.fpSrcCnt
-  val srcNum = 3
+  val srcNum = max(exuCfg.intSrcCnt, exuCfg.fpSrcCnt)
   require(srcNum >= 1 && srcNum <= 3)
   println(s"[RsData]  ExuConfig: ${exuCfg.name} (srcNum = $srcNum)")
 
@@ -364,11 +342,11 @@ class ReservationStationData
 
     // recv broadcasted uops form any relative issue queue,
     // to simplify wake up logic, the uop broadcasted by this queue self
-    // are also in 'boradcastedUops'
+    // are also in 'broadcastedUops'
     val broadcastedUops = Vec(wakeupCnt, Flipped(ValidIO(new MicroOp)))
 
     // listen to write back data bus(certain latency)
-    // and extra wrtie back(uncertan latency)
+    // and extra write back(uncertain latency)
     val writeBackedData = Vec(wakeupCnt, Input(UInt((XLEN+1).W)))
     val extraListenPorts = Vec(extraListenPortsCnt, Flipped(ValidIO(new ExuOutput)))
 
@@ -377,7 +355,7 @@ class ReservationStationData
   })
 
   val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt((XLEN+1).W))))
+  val data    = Reg(Vec(iqSize, Vec(3, UInt((XLEN+1).W)))) // TODO reduce data width
 
   // TODO: change srcNum
 
@@ -400,9 +378,9 @@ class ReservationStationData
   }
 
   when (enqEnReg) { // TODO: turn to srcNum, not the 3
-    (0 until (exuCfg.intSrcCnt + exuCfg.fpSrcCnt)).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+    (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
-    XSDebug(p"[srcRegValue] src1: ${Hexadecimal(io.srcRegValue(0))} src2: ${Hexadecimal(io.srcRegValue(1))} src3: ${Hexadecimal(io.srcRegValue(2))}\n")
+    XSDebug("[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce(_ + " " + _) + "\n")
   }
 
   def wbHit(uop: MicroOp, src: UInt, srctype: UInt): Bool = {
@@ -432,7 +410,7 @@ class ReservationStationData
   for (i <- 0 until iqSize) {
     val srcSeq = Seq(uop(i).psrc1, uop(i).psrc2, uop(i).psrc3)
     val srcTypeSeq = Seq(uop(i).ctrl.src1Type, uop(i).ctrl.src2Type, uop(i).ctrl.src3Type)
-    for (j <- 0 until 3) {
+    for (j <- 0 until srcNum) {
       val (wuHit, wuData) = wakeup(srcSeq(j), srcTypeSeq(j))
       val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
