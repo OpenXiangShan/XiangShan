@@ -114,7 +114,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Deque
   when(deqValid) {
-    val validVec = UIntToMask(Mux(validEntries >= DecodeWidth.U, DecodeWidth.U(log2Up(DecodeWidth.W)), validEntries(log2Up(DecodeWidth.W))), DecodeWidth)
+    val validVec = UIntToMask(Mux(validEntries >= DecodeWidth.U, DecodeWidth.U(log2Up(DecodeWidth).W), validEntries(log2Up(DecodeWidth)-1, 0)), DecodeWidth)
 
     io.out.zipWithIndex.foreach{case (e, i) => e.valid := validVec(i)}
 
@@ -136,7 +136,7 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
       io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
       
       val head_wire = head_ptr + i.U + PopCount(io.out.map(_.fire))
-      ibuf.io.raddr(i) := head_wire
+      ibuf.io.raddr(i) := head_wire.value
     }
     head_ptr := head_ptr + PopCount(io.out.map(_.fire))
   }.otherwise {
