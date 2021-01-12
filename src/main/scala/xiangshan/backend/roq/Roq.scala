@@ -250,10 +250,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     * (1) read: commits/walk/exception
     * (2) write: write back from exe units
     */
-  val dispatchData = Module(new DataModuleTemplate(new RoqDispatchData, RoqSize, CommitWidth, RenameWidth))
+  val dispatchData = Module(new AsyncDataModuleTemplate(new RoqDispatchData, RoqSize, CommitWidth, RenameWidth))
   val dispatchDataRead = dispatchData.io.rdata
 
-  val writebackData = Module(new DataModuleTemplate(new RoqWbData, RoqSize, CommitWidth, numWbPorts))
+  val writebackData = Module(new AsyncDataModuleTemplate(new RoqWbData, RoqSize, CommitWidth, numWbPorts))
   val writebackDataRead = writebackData.io.rdata
 
   def mergeExceptionVec(dpData: RoqDispatchData, wbData: RoqWbData) = {

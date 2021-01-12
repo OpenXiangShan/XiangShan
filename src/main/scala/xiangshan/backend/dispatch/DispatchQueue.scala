@@ -28,7 +28,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   val s_invalid :: s_valid:: Nil = Enum(2)
 
   // queue data array
-  val dataModule = Module(new DataModuleTemplate(new MicroOp, size, deqnum, enqnum))
+  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, deqnum, enqnum))
   val roqIdxEntries = Reg(Vec(size, new RoqPtr))
   val debug_uopEntries = Mem(size, new MicroOp)
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
@@ -116,10 +116,12 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
   } :+ true.B)
   val numDeq = Mux(numDeqTry > numDeqFire, numDeqFire, numDeqTry)
   // agreement with reservation station: don't dequeue when redirect.valid
+  val nextHeadPtr = Wire(Vec(deqnum, new CircularQueuePtr(size)))
   for (i <- 0 until deqnum) {
-    headPtr(i) := Mux(io.redirect.valid && io.redirect.bits.isUnconditional(),
+    nextHeadPtr(i) := Mux(io.redirect.valid && io.redirect.bits.isUnconditional(),
       i.U.asTypeOf(new CircularQueuePtr(size)),
       Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq))
+    headPtr(i) := nextHeadPtr(i)
   }
 
   // For branch mis-prediction or memory violation replay,
@@ -176,7 +178,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int) extends XSModule with H
     * Part 3: set output and input
     */
   // TODO: remove this when replay moves to roq
-  dataModule.io.raddr := VecInit(headPtr.map(_.value))
+  dataModule.io.raddr := VecInit(nextHeadPtr.map(_.value))
   for (i <- 0 until deqnum) {
     io.deq(i).bits := dataModule.io.rdata(i)
     io.deq(i).bits.roqIdx := roqIdxEntries(headPtr(i).value)
