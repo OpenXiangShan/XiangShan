@@ -16,21 +16,22 @@ import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
-  val enqIqData = Vec(exuParameters.IntExuCnt, Output(new ExuInput))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
+  // int block only uses port 0~7
+  val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
 }
 
 class CtrlToFpBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.FpExuCnt, DecoupledIO(new MicroOp))
-  val enqIqData = Vec(exuParameters.FpExuCnt, Output(new ExuInput))
   val readRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
+  // fp block uses port 0~11
+  val readPortIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
   val redirect = ValidIO(new Redirect)
 }
 
 class CtrlToLsBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
-  val enqIqData = Vec(exuParameters.LsExuCnt, Output(new ExuInput))
   val enqLsq = Flipped(new LsqEnqIO)
   val redirect = ValidIO(new Redirect)
 }
@@ -113,14 +114,14 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   }
   dispatch.io.numExist <> io.fromIntBlock.numExist ++ io.fromFpBlock.numExist ++ io.fromLsBlock.numExist
   dispatch.io.enqIQCtrl <> io.toIntBlock.enqIqCtrl ++ io.toFpBlock.enqIqCtrl ++ io.toLsBlock.enqIqCtrl
-  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
+//  dispatch.io.enqIQData <> io.toIntBlock.enqIqData ++ io.toFpBlock.enqIqData ++ io.toLsBlock.enqIqData
 
 
   val flush = redirectValid && RedirectLevel.isUnconditional(redirect.level)
   fpBusyTable.io.flush := flush
   intBusyTable.io.flush := flush
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
-    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen && (wb.bits.uop.ctrl.ldest =/= 0.U)
+    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }
   for((wb, setPhyRegRdy) <- io.fromFpBlock.wbRegs.zip(fpBusyTable.io.wbPregs)){
@@ -149,6 +150,9 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   io.toFpBlock.redirect.bits := redirect
   io.toLsBlock.redirect.valid := redirectValid
   io.toLsBlock.redirect.bits := redirect
+
+  dispatch.io.readPortIndex.intIndex <> io.toIntBlock.readPortIndex
+  dispatch.io.readPortIndex.fpIndex <> io.toFpBlock.readPortIndex
 
   // roq to int block
   io.roqio.toCSR <> roq.io.csr

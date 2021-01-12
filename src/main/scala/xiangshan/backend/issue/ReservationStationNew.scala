@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend.exu.{Exu, ExuConfig}
+import xiangshan.backend.regfile.RfReadPort
 
 class BypassQueue(number: Int) extends XSModule {
   val io = IO(new Bundle {
@@ -314,6 +315,24 @@ class ReservationStationData
   srcNum: Int = 3
 ) extends XSModule {
 
+  object DispatchType extends Enumeration {
+    val Disp2Int, Disp2Fp, Disp2Ls = Value
+  }
+
+  def dispatchType(exuConfig: ExuConfig): DispatchType.Value = {
+    exuConfig match {
+      case Exu.aluExeUnitCfg => DispatchType.Disp2Int
+      case Exu.jumpExeUnitCfg => DispatchType.Disp2Int
+      case Exu.mulDivExeUnitCfg => DispatchType.Disp2Int
+
+      case Exu.fmacExeUnitCfg => DispatchType.Disp2Fp
+      case Exu.fmiscExeUnitCfg => DispatchType.Disp2Fp
+
+      case Exu.ldExeUnitCfg => DispatchType.Disp2Ls
+      case Exu.stExeUnitCfg => DispatchType.Disp2Ls
+    }
+  }
+
   val iqSize = IssQueSize
   val iqIdxWidth = log2Up(iqSize)
   val fastWakeup = fixedDelay >= 0 // NOTE: if do not enable fastWakeup(bypass), set fixedDelay to -1
@@ -323,15 +342,14 @@ class ReservationStationData
     // flush
     val redirect = Flipped(ValidIO(new Redirect))
 
-    // enq Data at next cycle (regfile has 1 cycle latency)
-    val enqData = Input(new ExuInput)
-
     // send to exu
     val deq = DecoupledIO(new ExuInput)
 
     // listen to RSCtrl
     val ctrl = Flipped(new RSCtrlDataIO)
 
+    // read src op value
+    val srcRegValue = Vec(srcNum, Input(UInt((XLEN + 1).W)))
     // broadcast selected uop to other issue queues
     val selectedUop = ValidIO(new MicroOp)
 
@@ -371,12 +389,47 @@ class ReservationStationData
       p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
+
   when (enqEnReg) { // TODO: turn to srcNum, not the 3
-    data(enqPtrReg)(0) := io.enqData.src1
-    data(enqPtrReg)(1) := io.enqData.src2
-    data(enqPtrReg)(2) := io.enqData.src3
-    XSDebug(p"enqData: enqPtrReg:${enqPtrReg} src1:${Hexadecimal(io.enqData.src1)}" +
-            p" src2:${Hexadecimal(io.enqData.src2)} src3:${Hexadecimal(io.enqData.src2)}\n")
+    exuCfg match {
+      case Exu.aluExeUnitCfg =>
+        // src1: pc or reg
+        data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
+        // src2: imm or reg
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
+
+      case Exu.jumpExeUnitCfg =>
+        // src1: pc or reg
+        data(enqPtrReg)(0) := Mux(uop(enqPtrReg).ctrl.src1Type === SrcType.pc, SignExt(uop(enqPtrReg).cf.pc, XLEN), io.srcRegValue(0))
+        // src2: imm
+        data(enqPtrReg)(1) := uop(enqPtrReg).ctrl.imm
+
+      case Exu.mulDivExeUnitCfg =>
+        // src1: reg
+        data(enqPtrReg)(0) := io.srcRegValue(0)
+        // src2: reg
+        data(enqPtrReg)(1) := io.srcRegValue(1)
+
+      case Exu.fmacExeUnitCfg =>
+        (0 until exuCfg.fpSrcCnt).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+
+      case Exu.fmiscExeUnitCfg =>
+        (0 until exuCfg.fpSrcCnt).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+
+      case Exu.ldExeUnitCfg =>
+        data(enqPtrReg)(0) := io.srcRegValue(0)
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
+
+      case Exu.stExeUnitCfg =>
+        data(enqPtrReg)(0) := io.srcRegValue(0)
+        data(enqPtrReg)(1) := Mux(uop(enqPtrReg).ctrl.src2Type === SrcType.imm, uop(enqPtrReg).ctrl.imm, io.srcRegValue(1))
+
+      // default
+      case _ =>
+        XSDebug(false.B, "Unhandled exu-config")
+    }
+    XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
+    XSDebug(p"[srcRegValue] src1: ${Hexadecimal(io.srcRegValue(0))} src2: ${Hexadecimal(io.srcRegValue(1))} src3: ${Hexadecimal(io.srcRegValue(2))}\n")
   }
 
   def wbHit(uop: MicroOp, src: UInt, srctype: UInt): Bool = {
