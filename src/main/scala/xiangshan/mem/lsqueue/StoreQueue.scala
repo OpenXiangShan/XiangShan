@@ -322,7 +322,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := exceptionModule.io.rdata(0)
+  io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
