@@ -7,16 +7,12 @@ import chiseltest.experimental.TestOptionBuilder._
 import chiseltest.internal.{LineCoverageAnnotation, ToggleCoverageAnnotation, VerilatorBackendAnnotation}
 import chiseltest.legacy.backends.verilator.VerilatorFlags
 import chiseltest._
-import chisel3.experimental.BundleLiterals._
 import firrtl.stage.RunFirrtlTransformAnnotation
 import chiseltest.ChiselScalatestTester
-import device.AXI4RAM
-import freechips.rocketchip.amba.axi4.AXI4UserYanker
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
 import xiangshan.HasXSLog
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheToLsuIO, DCacheWordReq, MemoryOpConstants}
@@ -90,26 +86,34 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.dcacheIO.load.foreach { l =>
           l.req.initSource().setSourceClock(c.clock)
           l.resp.initSink().setSinkClock(c.clock)
+          l.req.valid.poke(false.B)
+          l.resp.ready.poke(false.B)
         }
         val loadPortNum = c.io.dcacheIO.load.size
 
-        c.io.dcacheIO.lsq.req.initSource().setSourceClock(c.clock)
-        c.io.dcacheIO.lsq.resp.initSink().setSinkClock(c.clock)
+        c.io.dcacheIO.lsq.initSink().setSinkClock(c.clock)
         c.io.dcacheIO.store.req.initSource().setSourceClock(c.clock)
         c.io.dcacheIO.store.resp.initSink().setSinkClock(c.clock)
+        c.io.dcacheIO.store.req.valid.poke(false.B)
+        c.io.dcacheIO.store.resp.ready.poke(false.B)
 
         c.io.slaveIO.AChannel.initSink().setSinkClock(c.clock)
         c.io.slaveIO.CChannel.initSink().setSinkClock(c.clock)
         c.io.slaveIO.EChannel.initSink().setSinkClock(c.clock)
         c.io.slaveIO.BChannel.initSource().setSourceClock(c.clock)
         c.io.slaveIO.DChannel.initSource().setSourceClock(c.clock)
+        c.io.slaveIO.AChannel.ready.poke(false.B)
+        c.io.slaveIO.CChannel.ready.poke(false.B)
+        c.io.slaveIO.EChannel.ready.poke(false.B)
+        c.io.slaveIO.BChannel.valid.poke(false.B)
+        c.io.slaveIO.DChannel.valid.poke(false.B)
+
 
         val total_clock = 150000
 
         c.reset.poke(true.B)
-        c.clock.step(1000)
-        c.reset.poke(false.B)
         c.clock.step(100)
+        c.reset.poke(false.B)
         c.clock.setTimeout(200)
 
         val slaveIO = c.io.slaveIO
@@ -126,6 +130,24 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
         val sio = slaveIO
         for (_ <- 0 until total_clock) {
+          //========= core trans ===========
+          //randomly add when low size
+          if (coreAgent.outerLoad.size <= 6) {
+            if (true) {
+              for (i <- 0 until 16) {
+                val addr = getRandomElement(addr_pool, rand)
+                coreAgent.addLoad(addr)
+              }
+            }
+          }
+          if (coreAgent.outerStore.size <= 6) {
+            if (true) {
+              for (i <- 0 until 16) {
+                val addr = getRandomElement(addr_pool, rand)
+                coreAgent.addStore(addr)
+              }
+            }
+          }
           //========= core poke ============
           val loadPortsReqValid = ListBuffer.fill(loadPortNum)(false)
           val loadPortsRespReady = ListBuffer.fill(loadPortNum)(true)
@@ -145,7 +167,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             coreIO.load(i).s1_kill.poke(false.B)
           }
           var storePortReqValid = false
-          var storePortRespReady = true
+          val storePortRespReady = true
           coreAgent.issueStoreReq()
           val storeReq = coreAgent.peekStoreReq()
           if (storeReq.isDefined) {
@@ -158,9 +180,6 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           }
           coreIO.store.req.valid.poke(storePortReqValid.B)
           coreIO.store.resp.ready.poke(storePortRespReady.B)
-
-          var lsqRespReady = true
-          coreIO.lsq.resp.ready.poke(lsqRespReady.B)
 
           //========= slave ============
           //randomly add when empty
@@ -278,7 +297,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
               val loadM = new LitDCacheWordResp(
                 data = peekBigInt(coreIO.load(i).resp.bits.data),
                 miss = peekBoolean(coreIO.load(i).resp.bits.miss),
-                replay = peekBoolean(coreIO.load(i).resp.bits.nack),
+                replay = peekBoolean(coreIO.load(i).resp.bits.replay),
               )
               coreAgent.fireLoadResp(i, loadM)
             }
@@ -298,12 +317,12 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             coreAgent.fireStoreResp(storeM)
           }
 
-          val lsqRespValid = peekBoolean(coreIO.store.resp.valid)
-          if(lsqRespValid && lsqRespReady){
+          val lsqRespValid = peekBoolean(coreIO.lsq.valid)
+          if(lsqRespValid){
             val lsqM = new LitDCacheLineResp(
-              data = peekBigInt(coreIO.store.resp.bits.data),
-              paddr = peekBigInt(coreIO.store.resp.bits.meta.paddr),
-              id = peekBigInt(coreIO.store.resp.bits.meta.id)
+              data = peekBigInt(coreIO.lsq.bits.data),
+              paddr = peekBigInt(coreIO.lsq.bits.addr),
+              id = BigInt(0)
             )
             coreAgent.fireLsqResp(lsqM)
           }

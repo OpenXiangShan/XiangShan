@@ -1,126 +1,10 @@
 package cache.L1DTest
 
-import cache.TLCTest.{AddrState, BigIntExtract, ScoreboardData, TLCAgent, TLCCallerTrans, TLCTrans, RandomSampleUtil}
-import chipsalliance.rocketchip.config.{Field, Parameters}
-import chisel3._
-import chisel3.util._
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.must.Matchers
-import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
-import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.HasXSLog
-import xiangshan.cache.{DCache, DCacheLineReq, DCacheWordReq, MemoryOpConstants}
+import cache.TLCTest.{AddrState, ScoreboardData, TLCAgent, TLCTrans}
+import chipsalliance.rocketchip.config.Parameters
 
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
-
-class LitDCacheWordReq(
-                        val cmd: BigInt,
-                        val addr: BigInt,
-                        val mask: BigInt,
-                      ) {
-}
-
-class LitDCacheWordResp(
-                         val data: BigInt,
-                         val miss: Boolean,
-                         val replay: Boolean,
-                       ) {
-
-}
-
-class LitDCacheLineReq(
-                        val cmd: BigInt,
-                        val addr: BigInt,
-                        val data: BigInt,
-                        val mask: BigInt,
-                        var id: BigInt = 0
-                      ) {
-}
-
-class LitDCacheLineResp(
-                         val data: BigInt,
-                         val paddr: BigInt,
-                         val id: BigInt,
-                       ) {
-
-}
-
-trait LitMemOp {
-  val M_XRD = MemoryOpConstants.M_XRD.litValue()
-  val M_XWR = MemoryOpConstants.M_XWR.litValue()
-}
-
-class DCacheLoadTrans extends TLCTrans with LitMemOp {
-  var req: Option[LitDCacheWordReq] = None
-  var resp: Option[LitDCacheWordResp] = None
-  var lsqResp: Option[LitDCacheLineResp] = None
-}
-
-class DCacheLoadCallerTrans extends DCacheLoadTrans with TLCCallerTrans {
-  var reqIssued: Option[Boolean] = None
-
-  def prepareLoad(addr: BigInt, mask: BigInt): Unit = {
-    req = Some(
-      new LitDCacheWordReq(
-        cmd = M_XRD,
-        addr = addr,
-        mask = mask,
-      )
-    )
-    reqIssued = Some(false)
-  }
-
-  def issueReq(): LitDCacheWordReq = {
-    reqIssued = Some(true)
-    req.get
-  }
-
-  def replay(): Unit = {
-    reqIssued = Some(false)
-  }
-
-  def pairResp(inResp: LitDCacheWordResp): Unit = {
-    resp = Some(inResp)
-  }
-
-  def pairLsqResp(inResp: LitDCacheLineResp): Unit = {
-    lsqResp = Some(inResp)
-  }
-}
-
-class DCacheStoreTrans extends TLCTrans with LitMemOp {
-  var req: Option[LitDCacheLineReq] = None
-  var resp: Option[LitDCacheLineResp] = None
-}
-
-class DCacheStoreCallerTrans extends DCacheStoreTrans with TLCCallerTrans {
-  var reqIssued: Option[Boolean] = None
-
-  def prepareStore(addr: BigInt, data: BigInt, mask: BigInt): Unit = {
-    req = Some(
-      new LitDCacheLineReq(
-        cmd = M_XWR,
-        addr = addr,
-        data = data,
-        mask = mask,
-      )
-    )
-    reqIssued = Some(false)
-  }
-
-  def issueReq(allocId: BigInt): LitDCacheLineReq = {
-    req.get.id = allocId
-    reqIssued = Some(true)
-    req.get
-  }
-
-  def pairResp(inResp: LitDCacheLineResp): Unit = {
-    resp = Some(inResp)
-  }
-
-}
-
 
 class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrState], serialList: ArrayBuffer[(Int, TLCTrans)]
                 , scoreboard: mutable.Map[BigInt, ScoreboardData], portNum: Int = 2)
@@ -171,11 +55,11 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     val loadT = s2_loadTrans(i).get
     val loadAddr = loadT.req.get.addr
     loadT.pairResp(resp)
-    if (resp.miss == false) {
+    if (!resp.miss) {
       val wc = wordInBlock(loadAddr)
       insertMaskedRead(loadAddr, dataConcatWord(0, resp.data, wc), genWordMaskInBlock(loadAddr, loadT.req.get.mask))
     }
-    else if (resp.replay == true) {
+    else if (resp.replay) {
       outerLoad -= loadT //drop it
       loadT.replay() //mark replay
       outerLoad.append(loadT) //pushpack
@@ -218,7 +102,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
         if (allocId.isDefined) {
           //alloc & issue
           storePortReqMessage = Some(nextStore.get.issueReq(BigInt(allocId.get)))
-          storeIdMap(allocId) = nextStore.get
+          storeIdMap(BigInt(allocId.get)) = nextStore.get
         } else
           debugPrintln("cann't alloc ID for core store")
       }
@@ -269,7 +153,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     // generate mask from  raddr and rsize
     val mask = (BigInt(1) << rsize) - 1
     val wmask = mask << offset
-    loadT.prepareLoad(addr,wmask)
+    loadT.prepareLoad(laddr,wmask)
     outerLoad.append(loadT)
   }
 
