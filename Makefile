@@ -200,6 +200,8 @@ vme: $(TOP_V)
 tap:
 	make -C $(TIMING_SCRIPT_PATH) tap
 
+# run "make vme/tap help=1" to get help info
+
 # usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
 phy_evaluate: vme
 	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
