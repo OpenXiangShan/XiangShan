@@ -55,7 +55,6 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
   // val ibuf = Reg(Vec(IBufSize, new IBufEntry))
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, DecodeWidth, PredictWidth))
   val head_ptr = RegInit(IbufPtr(false.B, 0.U))
-  val next_head_ptr = WireInit(head_ptr)
   val tail_vec = RegInit(VecInit((0 until PredictWidth).map(_.U.asTypeOf(new IbufPtr))))
   val tail_ptr = tail_vec(0)
 
@@ -115,10 +114,9 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
 
   // Deque
   when(deqValid) {
-    val validVec = UIntToMask(Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries), DecodeWidth)
+    val validVec = UIntToMask(Mux(validEntries >= DecodeWidth.U, DecodeWidth.U(log2Up(DecodeWidth.W)), validEntries(log2Up(DecodeWidth.W))), DecodeWidth)
 
     io.out.zipWithIndex.foreach{case (e, i) => e.valid := validVec(i)}
-    next_head_ptr := head_ptr + PopCount(io.out.map(_.fire))
 
     for(i <- 0 until DecodeWidth) {
       val outWire = ibuf.io.rdata(i)
@@ -137,10 +135,10 @@ class Ibuffer extends XSModule with HasCircularQueuePtrHelper {
       io.out(i).bits.brUpdate.bpuMeta := outWire.brInfo
       io.out(i).bits.crossPageIPFFix := outWire.crossPageIPFFix
       
-      val head_wire = next_head_ptr.value + i.U
+      val head_wire = head_ptr + i.U + PopCount(io.out.map(_.fire))
       ibuf.io.raddr(i) := head_wire
     }
-    head_ptr := next_head_ptr
+    head_ptr := head_ptr + PopCount(io.out.map(_.fire))
   }.otherwise {
     ibuf.io.raddr := DontCare
     io.out.foreach(_.valid := false.B)
