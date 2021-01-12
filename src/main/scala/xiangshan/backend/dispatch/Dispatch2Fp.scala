@@ -20,44 +20,23 @@ class Dispatch2Fp extends XSModule {
   /**
     * Part 1: generate indexes for reservation stations
     */
-  assert(exuParameters.JmpCnt == 1)
   val fmacIndexGen = Module(new IndexMapping(dpParams.FpDqDeqWidth, exuParameters.FmacCnt, true))
-  val fmiscIndexGen = Module(new IndexMapping(dpParams.FpDqDeqWidth, exuParameters.FmiscCnt, true))
+  val fmacCanAccept = VecInit(io.fromDq.map(deq => deq.valid && fmacExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
   val fmacPriority = PriorityGen((0 until exuParameters.FmacCnt).map(i => io.numExist(i)))
-  val fmiscPriority = PriorityGen((0 until exuParameters.FmiscCnt).map(i => io.numExist(i+exuParameters.FmacCnt)))
-  for (i <- 0 until dpParams.FpDqDeqWidth) {
-    fmacIndexGen.io.validBits(i) := io.fromDq(i).valid && fmacExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
-    fmiscIndexGen.io.validBits(i) := io.fromDq(i).valid && fmiscExeUnitCfg.canAccept(io.fromDq(i).bits.ctrl.fuType)
+  fmacIndexGen.io.validBits := fmacCanAccept
+  fmacIndexGen.io.priority := fmacPriority
 
-    // XSDebug(io.fromDq(i).valid,
-    //   p"fp dp queue $i: ${Hexadecimal(io.fromDq(i).bits.cf.pc)} type ${Binary(io.fromDq(i).bits.ctrl.fuType)}\n")
-  }
-  for (i <- 0 until exuParameters.FmacCnt) {
-    fmacIndexGen.io.priority(i) := fmacPriority(i)
-  }
-  for (i <- 0 until exuParameters.FmiscCnt) {
-    fmiscIndexGen.io.priority(i) := fmiscPriority(i)
-  }
+  val fmiscIndexGen = Module(new IndexMapping(dpParams.FpDqDeqWidth, exuParameters.FmiscCnt, true))
+  val fmiscCanAccept = VecInit(io.fromDq.map(deq => deq.valid && fmiscExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
+  val fmiscPriority = PriorityGen((0 until exuParameters.FmiscCnt).map(i => io.numExist(i+exuParameters.FmacCnt)))
+  fmiscIndexGen.io.validBits := fmiscCanAccept
+  fmiscIndexGen.io.priority := fmiscPriority
+
   val allIndexGen = Seq(fmacIndexGen, fmiscIndexGen)
   val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
   val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  val rsValidVec = (0 until dpParams.FpDqDeqWidth).map(i => Cat(allIndexGen.map(_.io.reverseMapping(i).valid)).orR())
-  val rsIndexVec = (0 until dpParams.FpDqDeqWidth).map({i =>
-    val indexOffset = Seq(0, exuParameters.FmacCnt)
-    allIndexGen.zipWithIndex.map{
-      case (index, j) => Mux(index.io.reverseMapping(i).valid,
-        ZeroExt(index.io.reverseMapping(i).bits, log2Ceil(exuParameters.FpExuCnt)) + indexOffset(j).U,
-        0.U)
-    }.reduce(_ | _)
-  })
-
   for (i <- validVec.indices) {
     // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
-  }
-  for (i <- rsValidVec.indices) {
-    // XSDebug(p"fmac reverse $i: valid ${fmacIndexGen.io.reverseMapping(i).valid} index ${fmacIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"fmisc reverse $i: valid ${fmiscIndexGen.io.reverseMapping(i).valid} index ${fmiscIndexGen.io.reverseMapping(i).bits}\n")
-    // XSDebug(p"reverseMapping $i: valid ${rsValidVec(i)} index ${rsIndexVec(i)}\n")
   }
 
   /**
@@ -83,9 +62,16 @@ class Dispatch2Fp extends XSModule {
   /**
     * Part 3: dispatch to reservation stations
     */
+  val fmacReady = Cat(io.enqIQCtrl.take(exuParameters.FmacCnt).map(_.ready)).andR
+  val fmiscReady = Cat(io.enqIQCtrl.drop(exuParameters.FmacCnt).map(_.ready)).andR
   for (i <- 0 until exuParameters.FpExuCnt) {
     val enq = io.enqIQCtrl(i)
-    enq.valid := validVec(i)
+    if (i < exuParameters.FmacCnt) {
+      enq.valid := fmacIndexGen.io.mapping(i).valid && fmacReady
+    }
+    else {
+      enq.valid := fmiscIndexGen.io.mapping(i - exuParameters.FmacCnt).valid && fmiscReady
+    }
     enq.bits := io.fromDq(indexVec(i)).bits
     enq.bits.src1State := io.regRdy(readPortIndex(i))
     enq.bits.src2State := io.regRdy(readPortIndex(i) + 1.U)
@@ -99,14 +85,18 @@ class Dispatch2Fp extends XSModule {
   /**
     * Part 4: response to dispatch queue
     */
+  val fmisc2CanOut = !(fmiscCanAccept(0) && fmiscCanAccept(1))
+  val fmisc3CanOut = !(fmiscCanAccept(0) && fmiscCanAccept(1) || fmiscCanAccept(0) && fmiscCanAccept(2) || fmiscCanAccept(1) && fmiscCanAccept(2))
   for (i <- 0 until dpParams.FpDqDeqWidth) {
-    io.fromDq(i).ready := rsValidVec(i) && io.enqIQCtrl(rsIndexVec(i)).ready
+    io.fromDq(i).ready := fmacCanAccept(i) && fmacReady ||
+                          fmiscCanAccept(i) && (if (i <= 1) true.B else if (i == 2) fmisc2CanOut else fmisc3CanOut) && fmiscReady
 
     XSInfo(io.fromDq(i).fire(),
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} leaves Fp dispatch queue $i with nroq ${io.fromDq(i).bits.roqIdx}\n")
     XSDebug(io.fromDq(i).valid && !io.fromDq(i).ready,
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Fp dispatch queue with index $i\n")
   }
+  XSError(PopCount(io.fromDq.map(_.fire())) =/= PopCount(io.enqIQCtrl.map(_.fire())), "deq =/= enq\n")
 
   /**
     * Part 5: the second stage of dispatch 2 (send data to reservation station)

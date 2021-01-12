@@ -120,7 +120,7 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   fpBusyTable.io.flush := flush
   intBusyTable.io.flush := flush
   for((wb, setPhyRegRdy) <- io.fromIntBlock.wbRegs.zip(intBusyTable.io.wbPregs)){
-    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen && (wb.bits.uop.ctrl.ldest =/= 0.U)
+    setPhyRegRdy.valid := wb.valid && wb.bits.uop.ctrl.rfWen
     setPhyRegRdy.bits := wb.bits.uop.pdest
   }
   for((wb, setPhyRegRdy) <- io.fromFpBlock.wbRegs.zip(fpBusyTable.io.wbPregs)){
