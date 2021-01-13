@@ -353,15 +353,16 @@ class ReservationStationData
     val feedback = Flipped(ValidIO(new TlbFeedback))
   })
 
-  val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, 1, iqSize))
-  uopMem.io <> DontCare
-  uopMem.io.wen.foreach(_ := false.B)
-
+  // Data
+  // ------------------------
   val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, if (!env.FPGAPlatform) iqSize else 1, iqSize)))
   data.foreach(_.io <> DontCare)
   data.foreach(_.io.wen.foreach(_ := false.B))
 
   // data/uop read/write interface
+  // ! warning: reading has 1 cycle delay, so input addr is used in next cycle
+  // luckily, for fpga platform, read port has fixed value
+  // otherwise, read port has same value as read addr
   def dataRead(iqIdx: UInt, srcIdx: Int): UInt = {
     if (env.FPGAPlatform) {
       data(srcIdx).io.raddr(0) := iqIdx
@@ -376,8 +377,19 @@ class ReservationStationData
     data(srcIdx).io.wdata(iqIdx) := wdata
     data(srcIdx).io.wen(iqIdx) := true.B
   }
+  // debug data: only for XSDebug log printing!
+  val debug_data = if (!env.FPGAPlatform) List.tabulate(srcNum)(i => WireInit(VecInit((0 until iqSize).map(j => dataRead(j.U, i))))) else null
+
+  // Uop
+  // ------------------------
+  val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, iqSize, 1))
+  uopMem.io <> DontCare
+  uopMem.io.wen.foreach(_ := false.B)
+  
+  // uop -- read = iqSize write = 1
+  // uopMem 's read ports have fixed values
+  uopMem.io.raddr.zipWithIndex.foreach{ case(r, i) => r := i.U }
   def uopRead(iqIdx: UInt): MicroOp = {
-    uopMem.io.raddr(iqIdx) := iqIdx
     uopMem.io.rdata(iqIdx)
   }
   def uopWrite(iqIdx: UInt, wdata: MicroOp) = {
@@ -387,7 +399,6 @@ class ReservationStationData
   }
 
   val uop = WireInit(VecInit((0 until iqSize).map(i => uopRead(i.U))))
-  val debug_data = if (!env.FPGAPlatform) List.tabulate(srcNum)(i => WireInit(VecInit((0 until iqSize).map(j => dataRead(j.U, i))))) else null
 
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
@@ -410,7 +421,7 @@ class ReservationStationData
   when (enqEnReg) {
     (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
-    XSDebug("[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce(_ + " " + _) + "\n")
+    XSDebug(p"[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   }
 
   def wbHit(uop: MicroOp, src: UInt, srctype: UInt): Bool = {
@@ -460,9 +471,9 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
-  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), dataRead(deq, 0))
-  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, dataRead(deq, 1))
-  if (srcNum > 2) exuInput.src3 := dataRead(deq, 2)
+  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), dataRead(sel.bits, 0))
+  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, dataRead(sel.bits, 1))
+  if (srcNum > 2) exuInput.src3 := dataRead(sel.bits, 2)
 
   io.deq.valid := RegNext(sel.valid)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
