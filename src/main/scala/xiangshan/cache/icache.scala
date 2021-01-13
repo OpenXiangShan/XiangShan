@@ -27,26 +27,22 @@ case class ICacheParameters(
   def replacement = new RandomReplacement(nWays)
 }
 
-trait HasICacheParameters extends HasL1CacheParameters {
+trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   val cacheParams = icacheParameters
-
-  //TODO: temp set
-  def accessBorder =  0x80000000L
-
-  // the width of inner CPU data interface
-  def cacheID = 0
-  // RVC instruction length
-  def RVCInsLen = 16
-
-  // icache Queue
   val groupAlign = log2Up(cacheParams.blockBytes)
-  def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
+  val packetInstNum = packetBytes/instBytes
+  val packetInstNumBit = log2Up(packetInstNum)
+  val ptrHighBit = log2Up(groupBytes) - 1 
+  val ptrLowBit = log2Up(packetBytes)
 
-  //ECC encoding
+
+  def accessBorder =  0x80000000L
+  def cacheID = 0
+  def insLen = if (HasCExtension) 16 else 32
+  def RVCInsLen = 16
+  def groupPC(pc: UInt): UInt = Cat(pc(PAddrBits-1, groupAlign), 0.U(groupAlign.W))
   def encRowBits = cacheParams.dataCode.width(rowBits)
   def encTagBits = cacheParams.tagCode.width(tagBits)
-
-  // ICache MSHR settings
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -106,6 +102,10 @@ class ICacheIO extends ICacheBundle
   val flush = Input(UInt(2.W))
   val l1plusflush = Output(Bool())
   val fencei = Input(Bool())
+  val prev = Flipped(Valid(UInt(16.W)))
+  val prev_pc = Input(UInt(VAddrBits.W))
+  val prev_ipf = Input(Bool())
+  val pd_out = Output(new PreDecodeResp)
 }
 
 /* ------------------------------------------------------------
@@ -242,17 +242,17 @@ class ICacheDataArray extends ICachArray
 class ICache extends ICacheModule
 {
   // cut a cacheline into a fetch packet
-  def cutHelper(sourceVec: Vec[UInt], startPtr: UInt, mask: UInt): UInt = {
-    val sourceVec_16bit = Wire(Vec(blockWords * 4,UInt(RVCInsLen.W)))
+  def cutHelper(sourceVec: Vec[UInt], pc: UInt, mask: UInt): UInt = {
+    val sourceVec_inst = Wire(Vec(blockWords*wordBytes/instBytes,UInt(insLen.W)))
     (0 until blockWords).foreach{ i =>
-      (0 until 4).foreach{ j =>
-        sourceVec_16bit(i*4 + j) := sourceVec(i)(j*16+15, j*16)
+      (0 until wordBytes/instBytes).foreach{ j =>
+        sourceVec_inst(i*wordBytes/instBytes + j) := sourceVec(i)(j*insLen+insLen-1, j*insLen)
       }
     }
-    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(RVCInsLen.W)}))
-    val start = Cat(startPtr(4,3),0.U(3.W))
+    val cutPacket = WireInit(VecInit(Seq.fill(PredictWidth){0.U(insLen.W)}))
+    val start = Cat(pc(ptrHighBit,ptrLowBit),0.U(packetInstNumBit.W))
     (0 until PredictWidth ).foreach{ i =>
-      cutPacket(i) := Mux(mask(i).asBool,sourceVec_16bit(start + i.U),0.U)
+      cutPacket(i) := Mux(mask(i).asBool,sourceVec_inst(start + i.U),0.U)
     }
     cutPacket.asUInt
   }
@@ -264,7 +264,6 @@ class ICache extends ICacheModule
              Mux(sourceVec >= 2.U, "b0010".U, "b0001".U)))
     oneHot
   }
-
 
   val io = IO(new ICacheIO)
 
@@ -321,7 +320,7 @@ class ICache extends ICacheModule
   val metas = metaArray.io.readResp
   val datas =RegEnable(next=dataArray.io.readResp, enable=s2_fire)
 
-  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(2.W)))}.reverse).asUInt
+  val validMeta = Cat((0 until nWays).map{w => validArray(Cat(s2_idx, w.U(log2Ceil(nWays).W)))}.reverse).asUInt
 
   // hit check and generate victim cacheline mask
   val hitVec = VecInit((0 until nWays).map{w => metas(w)=== s2_tag && validMeta(w) === 1.U})
@@ -333,7 +332,7 @@ class ICache extends ICacheModule
   val waymask = Mux(s2_hit, hitVec.asUInt, Mux(hasInvalidWay, refillInvalidWaymask, victimWayMask))
 
   s2_hit := ParallelOR(hitVec) || s2_tlb_resp.excp.pf.instr || s2_access_fault
-  s2_ready := s3_ready && io.tlb.resp.valid || !s2_valid
+  s2_ready := s3_ready || !s2_valid
 
   XSDebug("[Stage 2] v : r : f  (%d  %d  %d)  pc: 0x%x  mask: %b acf:%d\n",s2_valid,s3_ready,s2_fire,s2_req_pc,s2_req_mask,s2_access_fault)
   XSDebug(p"[Stage 2] tlb req:  v ${io.tlb.req.valid} r ${io.tlb.req.ready} ${io.tlb.req.bits}\n")
@@ -371,7 +370,9 @@ class ICache extends ICacheModule
       decodedRow.corrected
     }
   )
-  outPacket := cutHelper(dataHitWay,s3_req_pc(5,1).asUInt,s3_req_mask.asUInt)
+  outPacket := cutHelper(dataHitWay,s3_req_pc.asUInt,s3_req_mask.asUInt)
+
+
 
   //ICache MissQueue
   val icacheMissQueue = Module(new IcacheMissQueue)
@@ -421,9 +422,37 @@ class ICache extends ICacheModule
   when(icacheFlush){ validArray := 0.U }
 
   val refillDataVec = icacheMissQueue.io.resp.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W)))
-  val refillDataOut = cutHelper(refillDataVec, s3_req_pc(5,1),s3_req_mask )
+  val refillDataOut = cutHelper(refillDataVec, s3_req_pc,s3_req_mask )
 
   s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && icacheMissQueue.io.resp.valid && io.resp.ready)
+
+
+  val pds = Seq.fill(nWays)(Module(new PreDecode))
+  for (i <- 0 until nWays) {
+    val wayResp = Wire(new ICacheResp)
+    val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc, s3_req_mask)
+    val refillData = cutHelper(refillDataVec, s3_req_pc,s3_req_mask)
+    wayResp.pc := s3_req_pc
+    wayResp.data := Mux(s3_valid && s3_hit, wayData, refillData)
+    wayResp.mask := s3_req_mask
+    wayResp.ipf := s3_tlb_resp.excp.pf.instr
+    wayResp.acf := s3_access_fault
+    pds(i).io.in := wayResp
+    pds(i).io.prev <> io.prev
+    pds(i).io.prev_pc := io.prev_pc
+    // if a fetch packet triggers page fault, set the pf instruction to nop
+    when ((!(HasCExtension.B) || io.prev.valid) && s3_tlb_resp.excp.pf.instr ) {
+      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
+      (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
+      pds(i).io.in.data := instrs.asUInt
+    }.elsewhen (HasCExtension.B && io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
+      pds(i).io.prev.bits := ZeroExt("b0010011".U, 16)
+      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
+      (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
+      pds(i).io.in.data := instrs.asUInt
+    }
+  }
+  io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
@@ -477,7 +506,7 @@ class ICache extends ICacheModule
   //Performance Counter
   if (!env.FPGAPlatform ) {
     ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
-    ExcitingUtils.addSource( s3_valid && !blocking && s3_miss, "perfCntIcacheMissCnt", Perf)
+    ExcitingUtils.addSource( s3_miss && blocking && io.resp.fire(), "perfCntIcacheMissCnt", Perf)
   }
 }
 
