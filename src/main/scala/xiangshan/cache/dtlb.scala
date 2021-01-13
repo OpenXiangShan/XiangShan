@@ -268,9 +268,9 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
   val v = RegInit(0.U(TlbEntrySize.W))
-  val pf = RegInit(0.U(TlbEntrySize.W)) // TODO: when ptw resp a pf(now only page not found), store here
+  val pf = RegInit(0.U(TlbEntrySize.W))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
-  val g = VecInit(entry.map(_.perm.g)).asUInt // TODO: need check if reverse is needed
+  val g = VecInit(entry.map(_.perm.g)).asUInt
 
   /**
     * PTW refill
@@ -418,32 +418,33 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         pf := pf & g
       }
     }.otherwise {
+      val sfenceVpn = sfence.bits.addr.asTypeOf(vaBundle).vpn
       when (sfence.bits.rs2) {
         // specific addr but all asid
-        v := v & ~VecInit(entry.map(_.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn))).asUInt
-        pf := pf & ~VecInit(entry.map(_.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn))).asUInt
+        v := v & ~VecInit(entry.map(_.hit(sfenceVpn))).asUInt
+        pf := pf & ~VecInit(entry.map(_.hit(sfenceVpn))).asUInt
       }.otherwise {
         // specific addr and specific asid
-        v := v & ~VecInit(entry.map(e => e.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
-        pf := pf & ~VecInit(entry.map(e => e.hit(sfence.bits.addr.asTypeOf(vaBundle).vpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+        v := v & ~VecInit(entry.map(e => e.hit(sfenceVpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+        pf := pf & ~VecInit(entry.map(e => e.hit(sfenceVpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
       }
     }
   }
 
   if (!env.FPGAPlatform && isDtlb) {
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntDtlbReqCnt0", Perf)
-    ExcitingUtils.addSource(valid(1)/* && vmEnable*/, "perfCntDtlbReqCnt1", Perf)
-    ExcitingUtils.addSource(valid(2)/* && vmEnable*/, "perfCntDtlbReqCnt2", Perf)
-    ExcitingUtils.addSource(valid(3)/* && vmEnable*/, "perfCntDtlbReqCnt3", Perf)
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && missVec(0), "perfCntDtlbMissCnt0", Perf)
-    ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && missVec(1), "perfCntDtlbMissCnt1", Perf)
-    ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && missVec(2), "perfCntDtlbMissCnt2", Perf)
-    ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && missVec(3), "perfCntDtlbMissCnt3", Perf)
+    ExcitingUtils.addSource(valid(0) && vmEnable, "perfCntDtlbReqCnt0", Perf)
+    ExcitingUtils.addSource(valid(1) && vmEnable, "perfCntDtlbReqCnt1", Perf)
+    ExcitingUtils.addSource(valid(2) && vmEnable, "perfCntDtlbReqCnt2", Perf)
+    ExcitingUtils.addSource(valid(3) && vmEnable, "perfCntDtlbReqCnt3", Perf)
+    ExcitingUtils.addSource(valid(0) && vmEnable && missVec(0), "perfCntDtlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(1) && vmEnable && missVec(1), "perfCntDtlbMissCnt1", Perf)
+    ExcitingUtils.addSource(valid(2) && vmEnable && missVec(2), "perfCntDtlbMissCnt2", Perf)
+    ExcitingUtils.addSource(valid(3) && vmEnable && missVec(3), "perfCntDtlbMissCnt3", Perf)
   }
 
   if (!env.FPGAPlatform && !isDtlb) {
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntItlbReqCnt0", Perf)
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && missVec(0), "perfCntItlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(0) && vmEnable, "perfCntItlbReqCnt0", Perf)
+    ExcitingUtils.addSource(valid(0) && vmEnable && missVec(0), "perfCntItlbMissCnt0", Perf)
   }
 
   // Log
@@ -457,32 +458,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)} state:${state}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
-
-  // // assert check, can be remove when tlb can work
-  // for(i <- 0 until Width) {
-  //   assert((hit(i)&pfArray(i))===false.B, "hit(%d):%d pfArray(%d):%d v:0x%x pf:0x%x", i.U, hit(i), i.U, pfArray(i), v, pf)
-  // }
-  // for(i <- 0 until Width) {
-  //   XSDebug(multiHit, p"vpn:0x${Hexadecimal(reqAddr(i).vpn)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)} pfHitVecVec:0x${Hexadecimal(VecInit(pfHitVecVec(i)).asUInt)}\n")
-  // }
-  // for(i <- 0 until TlbEntrySize) {
-  //   XSDebug(multiHit, p"entry(${i.U}): v:${v(i)} ${entry(i)}\n")
-  // }
-  // assert(!multiHit) // add multiHit here, later it should be removed (maybe), turn to miss and flush
-
-  // for (i <- 0 until Width) {
-  //   XSDebug(resp(i).valid && hit(i) && !(req(i).bits.vaddr===resp(i).bits.paddr), p"vaddr:0x${Hexadecimal(req(i).bits.vaddr)} paddr:0x${Hexadecimal(resp(i).bits.paddr)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)}}\n")
-  //   when (resp(i).valid && hit(i) && !(req(i).bits.vaddr===resp(i).bits.paddr)) {
-  //     for (j <- 0 until TlbEntrySize) {
-  //       XSDebug(true.B, p"TLBEntry(${j.U}): v:${v(j)} ${entry(j)}\n")
-  //     }
-  //   } // FIXME: remove me when tlb may be ok
-  //   when(resp(i).valid && hit(i)) {
-  //     assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt)
-  //   } // FIXME: remove me when tlb may be ok
-  // }
-
-  // assert((v&pf)===0.U, "v and pf can't be true at same time: v:0x%x pf:0x%x", v, pf)
 }
 
 object TLB {
