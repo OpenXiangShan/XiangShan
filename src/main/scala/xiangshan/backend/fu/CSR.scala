@@ -9,14 +9,6 @@ import xiangshan.backend._
 import xiangshan.backend.fu.util._
 import utils.XSDebug
 
-object debugId extends Function0[Integer] {
-  var x = 0
-  def apply(): Integer = {
-    x = x + 1
-    return x
-  }
-}
-
 object hartId extends Function0[Int] {
   var x = 0
   def apply(): Int = {
@@ -167,9 +159,9 @@ class CSR extends FunctionUnit with HasCSRConst
   def getMisaMxl(mxl: Int): UInt = {mxl.U << (XLEN-2)}.asUInt()
   def getMisaExt(ext: Char): UInt = {1.U << (ext.toInt - 'a'.toInt)}.asUInt()
   var extList = List('a', 's', 'i', 'u')
-  if(HasMExtension){ extList = extList :+ 'm'}
-  if(HasCExtension){ extList = extList :+ 'c'}
-  if(HasFPU){ extList = extList ++ List('f', 'd')}
+  if (HasMExtension) { extList = extList :+ 'm' }
+  if (HasCExtension) { extList = extList :+ 'c' }
+  if (HasFPU) { extList = extList ++ List('f', 'd') }
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0.U)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
   val misa = RegInit(UInt(XLEN.W), misaInitVal)
   
@@ -263,7 +255,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val uepc = Reg(UInt(XLEN.W))
 
   // fcsr
-  class FcsrStruct extends Bundle{
+  class FcsrStruct extends Bundle {
     val reserved = UInt((XLEN-3-5).W)
     val frm = UInt(3.W)
     val fflags = UInt(5.W)
@@ -285,7 +277,7 @@ class CSR extends FunctionUnit with HasCSRConst
     val fcsrOld = fcsr.asTypeOf(new FcsrStruct)
     val fcsrNew = WireInit(fcsrOld)
     csrw_dirty_fp_state := true.B
-    if(update){
+    if (update) {
       fcsrNew.fflags := wdata(4,0) | fcsrOld.fflags
     } else {
       fcsrNew.fflags := wdata(4,0)
@@ -313,7 +305,7 @@ class CSR extends FunctionUnit with HasCSRConst
   //  val lr = RegInit(Bool(), false.B)
   //  val lrAddr = RegInit(UInt(AddrBits.W), 0.U)
   //
-  //  when(setLr){
+  //  when (setLr) {
   //    lr := setLrVal
   //    lrAddr := setLrAddr
   //  }
@@ -334,52 +326,50 @@ class CSR extends FunctionUnit with HasCSRConst
   println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
   
   // CSR reg map
-  val mapping = Map(
+  val basicPrivMapping = Map(
 
-    // User Trap Setup
+    //--- User Trap Setup ---
     // MaskedRegMap(Ustatus, ustatus),
     // MaskedRegMap(Uie, uie, 0.U, MaskedRegMap.Unwritable),
     // MaskedRegMap(Utvec, utvec),
 
-    // User Trap Handling
+    //--- User Trap Handling ---
     // MaskedRegMap(Uscratch, uscratch),
     // MaskedRegMap(Uepc, uepc),
     // MaskedRegMap(Ucause, ucause),
     // MaskedRegMap(Utval, utval),
     // MaskedRegMap(Uip, uip),
 
-    // User Counter/Timers
+    //--- User Counter/Timers ---
     // MaskedRegMap(Cycle, cycle),
     // MaskedRegMap(Time, time),
     // MaskedRegMap(Instret, instret),
 
-    // Supervisor Trap Setup
+    //--- Supervisor Trap Setup ---
     MaskedRegMap(Sstatus, mstatus, sstatusWmask, mstatusUpdateSideEffect, sstatusRmask),
-
     // MaskedRegMap(Sedeleg, Sedeleg),
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec),
     MaskedRegMap(Scounteren, scounteren),
 
-    // Supervisor Trap Handling
+    //--- Supervisor Trap Handling ---
     MaskedRegMap(Sscratch, sscratch),
     MaskedRegMap(Sepc, sepc),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
     MaskedRegMap(Sip, mip.asUInt, sipMask, MaskedRegMap.Unwritable, sipMask),
 
-    // Supervisor Protection and Translation
+    //--- Supervisor Protection and Translation ---
     MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
 
-    // Machine Information Registers
+    //--- Machine Information Registers ---
     MaskedRegMap(Mvendorid, mvendorid, 0.U, MaskedRegMap.Unwritable),
     MaskedRegMap(Marchid, marchid, 0.U, MaskedRegMap.Unwritable),
     MaskedRegMap(Mimpid, mimpid, 0.U, MaskedRegMap.Unwritable),
     MaskedRegMap(Mhartid, mhartid, 0.U, MaskedRegMap.Unwritable),
 
-    // Machine Trap Setup
-    // MaskedRegMap(Mstatus, mstatus, "hffffffffffffffee".U, (x=>{printf("mstatus write: %x time: %d\n", x, GTimer()); x})),
+    //--- Machine Trap Setup ---
     MaskedRegMap(Mstatus, mstatus, mstatusMask, mstatusUpdateSideEffect, mstatusMask),
     MaskedRegMap(Misa, misa), // now MXL, EXT is not changeable
     MaskedRegMap(Medeleg, medeleg, "hf3ff".U),
@@ -388,14 +378,16 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(Mtvec, mtvec),
     MaskedRegMap(Mcounteren, mcounteren),
 
-    // Machine Trap Handling
+    //--- Machine Trap Handling ---
     MaskedRegMap(Mscratch, mscratch),
     MaskedRegMap(Mepc, mepc),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U, MaskedRegMap.Unwritable),
+  )
 
-    // Machine Memory Protection
+  // PMP is unimplemented yet
+  val pmpMapping = Map(
     MaskedRegMap(Pmpcfg0, pmpcfg0),
     MaskedRegMap(Pmpcfg1, pmpcfg1),
     MaskedRegMap(Pmpcfg2, pmpcfg2),
@@ -404,9 +396,13 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(PmpaddrBase + 1, pmpaddr1),
     MaskedRegMap(PmpaddrBase + 2, pmpaddr2),
     MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
-) ++ emuPerfCntsLoMapping ++ 
-     (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
-     (if (HasFPU) fcsrMapping else Nil)
+  )
+
+  val mapping = basicPrivMapping ++ 
+                pmpMapping ++ 
+                emuPerfCntsLoMapping ++ 
+                (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
+                (if (HasFPU) fcsrMapping else Nil)
     
   val addr = src2(11, 0)
   val rdata = Wire(UInt(XLEN.W))
@@ -442,11 +438,11 @@ class CSR extends FunctionUnit with HasCSRConst
   val rdataDummy = Wire(UInt(XLEN.W))
   MaskedRegMap.generate(fixMapping, addr, rdataDummy, wen, wdata)
 
-  when(csrio.fpu.fflags.valid){
+  when (csrio.fpu.fflags.valid) {
     fcsr := fflags_wfn(update = true)(csrio.fpu.fflags.bits)
   }
   // set fs and sd in mstatus
-  when(csrw_dirty_fp_state || csrio.fpu.dirty_fs){
+  when (csrw_dirty_fp_state || csrio.fpu.dirty_fs) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U
     mstatusNew.sd := true.B
@@ -456,10 +452,10 @@ class CSR extends FunctionUnit with HasCSRConst
 
   // CSR inst decode
   val isEbreak = addr === privEbreak && func === CSROpType.jmp
-  val isEcall = addr === privEcall && func === CSROpType.jmp
-  val isMret = addr === privMret   && func === CSROpType.jmp
-  val isSret = addr === privSret   && func === CSROpType.jmp
-  val isUret = addr === privUret   && func === CSROpType.jmp
+  val isEcall  = addr === privEcall  && func === CSROpType.jmp
+  val isMret   = addr === privMret   && func === CSROpType.jmp
+  val isSret   = addr === privSret   && func === CSROpType.jmp
+  val isUret   = addr === privUret   && func === CSROpType.jmp
 
   XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", cfIn.pc, addr, rdata, wdata, func)
   XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
@@ -521,7 +517,7 @@ class CSR extends FunctionUnit with HasCSRConst
     mstatusNew.mpp := ModeU
     mstatusNew.mprv := 0.U
     mstatus := mstatusNew.asUInt
-//    lr := false.B
+    // lr := false.B
     retTarget := mepc(VAddrBits-1, 0)
   }
 
@@ -607,7 +603,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
   // if (!env.FPGAPlatform) {
-    val id = debugId()
+    val id = hartId()
     val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
     ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
     ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
@@ -628,7 +624,7 @@ class CSR extends FunctionUnit with HasCSRConst
 
   // mtval write logic
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
-  when(hasInstrPageFault || hasLoadPageFault || hasStorePageFault){
+  when (hasInstrPageFault || hasLoadPageFault || hasStorePageFault) {
     val tval = Mux(
       hasInstrPageFault,
       Mux(
@@ -638,15 +634,14 @@ class CSR extends FunctionUnit with HasCSRConst
       ),
       memExceptionAddr
     )
-    when(priviledgeMode === ModeM){
+    when (priviledgeMode === ModeM) {
       mtval := tval
-    }.otherwise{
+    }.otherwise {
       stval := tval
     }
   }
 
-  when(hasLoadAddrMisaligned || hasStoreAddrMisaligned)
-  {
+  when (hasLoadAddrMisaligned || hasStoreAddrMisaligned) {
     mtval := memExceptionAddr
   }
 
@@ -667,7 +662,7 @@ class CSR extends FunctionUnit with HasCSRConst
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
       priviledgeMode := ModeS
-      when(tvalWen){stval := 0.U}
+      when (tvalWen) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
       mepc := SignExt(csrio.exception.bits.cf.pc, XLEN)
@@ -675,7 +670,7 @@ class CSR extends FunctionUnit with HasCSRConst
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
       priviledgeMode := ModeM
-      when(tvalWen){mtval := 0.U}
+      when (tvalWen) { mtval := 0.U }
     }
 
     mstatus := mstatusNew.asUInt
