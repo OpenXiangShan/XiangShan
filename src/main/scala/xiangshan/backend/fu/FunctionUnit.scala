@@ -29,7 +29,9 @@ case class FuConfig
   writeIntRf: Boolean,
   writeFpRf: Boolean,
   hasRedirect: Boolean,
-  latency: HasFuLatency = CertainLatency(0)
+  latency: HasFuLatency = CertainLatency(0),
+  usePc: Boolean = false,
+  useImm: Boolean = false
 ) {
   def srcCnt: Int = math.max(numIntSrc, numFpSrc)
 }
@@ -159,7 +161,9 @@ object FunctionUnit extends HasXSParameter {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = true
+    hasRedirect = true,
+    usePc = true,
+    useImm = true
   )
 
   val jmpCfg = FuConfig(
@@ -170,7 +174,9 @@ object FunctionUnit extends HasXSParameter {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    hasRedirect = true
+    hasRedirect = true,
+    usePc = true,
+    useImm = true
   )
 
   val fenceCfg = FuConfig(

@@ -405,6 +405,7 @@ class ReservationStationData
   val deq   = RegEnable(sel.bits, sel.valid)
   val enqCtrl = io.ctrl.enqCtrl
   val enqUop = enqCtrl.bits
+  val enqUopReg = RegEnable(enqUop, enqCtrl.fire())
 
   // enq
   val enqPtr = enq(log2Up(IssQueSize)-1,0)
@@ -419,7 +420,26 @@ class ReservationStationData
   }
 
   when (enqEnReg) {
-    (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
+    (0 until srcNum).foreach(i => {
+      val writeData = if(i == 0){
+        if(exuCfg.usePc)
+          Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+            SignExt(enqUopReg.cf.pc, XLEN),
+            io.srcRegValue(i)
+        )
+        else io.srcRegValue(i)
+      } else if(i == 1){
+        if(exuCfg.useImm)
+          Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
+            enqUopReg.ctrl.imm,
+            io.srcRegValue(i)
+          )
+        else io.srcRegValue(i)
+      } else {
+        io.srcRegValue(i)
+      }
+      dataWrite(enqPtrReg, i, writeData)
+    })
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
     XSDebug(p"[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   }
@@ -473,8 +493,8 @@ class ReservationStationData
   exuInput.uop := uop(deq)
   val regValues = List.tabulate(srcNum)(i => dataRead(/* Mux(sel.valid, sel.bits, deq), i */deq, i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
-  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), regValues(0))
-  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, regValues(1))
+  exuInput.src1 := regValues(0)
+  if (srcNum > 1) exuInput.src2 := regValues(1)
   if (srcNum > 2) exuInput.src3 := regValues(2)
 
   io.deq.valid := RegNext(sel.valid)
@@ -497,7 +517,7 @@ class ReservationStationData
 
   io.ctrl.feedback := DontCare
   if (feedback) {
-    (0 until IssQueSize).map(i =>
+    (0 until IssQueSize).foreach(i =>
       io.ctrl.feedback(i) := uop(i).roqIdx.asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid)
     io.ctrl.feedback(IssQueSize) := io.feedback.bits.hit
   }
