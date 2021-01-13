@@ -17,3 +17,6 @@
 	path = berkeley-hardfloat
 	url = https://github.com/RISCVERS/berkeley-hardfloat.git
 	branch = 759d99d90dc119d071a5fdbf35ee4578d0613a2f
+[submodule "timingScripts"]
+	path = timingScripts
+	url = https://github.com/RISCVERS/timingScripts.git
