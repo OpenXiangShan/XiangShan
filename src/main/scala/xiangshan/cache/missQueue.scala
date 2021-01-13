@@ -544,8 +544,11 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   XSDebug(finish.fire(), "finish client_id: %d entry_id: %d\n",
     finish.bits.client_id, finish.bits.entry_id)
 
+  // print refill
+  XSDebug(io.refill.fire(), "refill addr %x\n", io.refill.bits.addr)
+
   // print data_write
-  XSDebug(io.data_write.fire(), "refill addr %x\n", io.data_write.bits.addr)
+  XSDebug(io.data_write.fire(), "data_write addr %x\n", io.data_write.bits.addr)
 
   // print meta_write
   XSDebug(io.meta_write.fire(), "meta_write idx %x way_en: %x old_tag: %x new_coh: %d new_tag: %x\n",
