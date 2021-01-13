@@ -3,7 +3,8 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
-import utils.{HasTLDump, XSDebug}
+import utils.{HasTLDump, XSDebug, BoolStopWatch}
+import chisel3.ExcitingUtils._
 
 class MissReq extends DCacheBundle
 {
@@ -491,6 +492,17 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
     io.block_probe_idxes(i)        <> entry.io.block_probe_idx
     io.block_probe_addrs(i)        <> entry.io.block_probe_addr
 
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSource(
+        BoolStopWatch(
+          start = entry.io.req.fire(), 
+          stop = entry.io.resp.fire(),
+          startHighPriority = true),
+        "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
+        Perf
+      )
+    }
+
     entry
   }
 
@@ -558,5 +570,9 @@ class MissQueue(edge: TLEdgeOut) extends DCacheModule with HasTLDump
   when (io.mem_finish.fire()) {
     XSDebug("mem_finish ")
     io.mem_finish.bits.dump
+  }
+
+  if (!env.FPGAPlatform) {
+    ExcitingUtils.addSource(io.req.fire(), "perfCntDCacheMiss", Perf)
   }
 }
