@@ -103,6 +103,9 @@ unit-test:
 tlc-test:
 	cd .. && mill XiangShan.test.testOnly -o -s cache.TLCTest.TLCCacheTest
 
+l1-test:
+	cd .. && mill XiangShan.test.testOnly -o -s cache.L1DTest.L1DCacheTest
+
 unit-test-all:
 	cd .. && mill XiangShan.test.test -P$(P)
 

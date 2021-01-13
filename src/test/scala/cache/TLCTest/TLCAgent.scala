@@ -161,7 +161,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
 
   val rand = new Random(0xdad)
 
-  var clock = 100
+  var clock = 0
 
   def step(): Unit = {
     clock += 1

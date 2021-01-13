@@ -133,8 +133,13 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
   override def step(): Unit = {
     for (i <- 0 until portNum) {
       s2_loadTrans(i) = s1_loadTrans(i)
-      s1_loadTrans(i) = s0_loadTrans(i)
-      s0_loadTrans(i) = None
+      if (loadPortsReqMessage(i).isEmpty) { //if fired
+        s1_loadTrans(i) = s0_loadTrans(i)
+        s0_loadTrans(i) = None
+      }
+      else {
+        s1_loadTrans(i) = None
+      }
     }
     clock += 1
   }
@@ -149,18 +154,20 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     val rsize = 1 << lgSize
     // addr must be aligned to size
     val offset = (rand.nextInt(8) >> lgSize) << lgSize
-    val laddr = addr + wordCnt*8 + offset
+    val laddr = addr + wordCnt * 8 + offset
     // generate mask from  raddr and rsize
     val mask = (BigInt(1) << rsize) - 1
     val wmask = mask << offset
-    loadT.prepareLoad(laddr,wmask)
+    loadT.prepareLoad(laddr, wmask)
     outerLoad.append(loadT)
   }
 
   def addStore(addr: BigInt): Unit = {
     //addr is aligned to block
     val storeT = new DCacheStoreCallerTrans()
-    val blockMask = (BigInt(rand.nextInt().toLong) << 32) | BigInt(rand.nextInt().toLong)
+    val blockMask = (0 until 4).foldLeft(BigInt(0))(
+      (d, _) => (d << 16) | BigInt(rand.nextInt(0xffff))
+    )
     storeT.prepareStore(addr, randomBlockData(), blockMask)
     outerStore.append(storeT)
   }
