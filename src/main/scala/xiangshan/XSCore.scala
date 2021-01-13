@@ -182,32 +182,6 @@ trait HasXSParameter {
     nMissEntries = 8
   )
 
-  // icache prefetcher
-  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
-    enable = false,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = l1plusCacheParameters.blockBytes,
-      reallocStreamOnMissInstantly = true
-    )
-  )
-
-  // dcache prefetcher
-  val l2PrefetcherParameters = L2PrefetcherParameters(
-    enable = true,
-    _type = "stream",
-    streamParams = StreamPrefetchParameters(
-      streamCnt = 4,
-      streamSize = 4,
-      ageWidth = 4,
-      blockBytes = L2BlockSize,
-      reallocStreamOnMissInstantly = true
-    )
-  )
-
   val dcacheParameters = DCacheParameters(
     tagECC = Some("secded"),
     dataECC = Some("secded"),
@@ -239,6 +213,32 @@ trait HasXSParameter {
 
   // on chip network configurations
   val L3BusWidth = 256
+
+  // icache prefetcher
+  val l1plusPrefetcherParameters = L1plusPrefetcherParameters(
+    enable = false,
+    _type = "stream",
+    streamParams = StreamPrefetchParameters(
+      streamCnt = 4,
+      streamSize = 4,
+      ageWidth = 4,
+      blockBytes = l1plusCacheParameters.blockBytes,
+      reallocStreamOnMissInstantly = true
+    )
+  )
+
+  // dcache prefetcher
+  val l2PrefetcherParameters = L2PrefetcherParameters(
+    enable = true,
+    _type = "stream",
+    streamParams = StreamPrefetchParameters(
+      streamCnt = 4,
+      streamSize = 4,
+      ageWidth = 4,
+      blockBytes = L2BlockSize,
+      reallocStreamOnMissInstantly = true
+    )
+  )
 }
 
 trait HasXSLog { this: RawModule =>

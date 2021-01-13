@@ -235,7 +235,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   // debug info
   XSDebug(p"StreamBuf ${io.streamBufId} io.req:    v=${io.req.valid} r=${io.req.ready} ${io.req.bits}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} io.resp:   v=${io.resp.valid} r=${io.resp.ready} ${io.resp.bits}\n")
-  XSDebug(p"StreamBuf ${io.streamBufId} io.finish: v=${io.finish.valid} r=${io.finish.ready} ${io.finish.bits}")
+  XSDebug(p"StreamBuf ${io.streamBufId} io.finish: v=${io.finish.valid} r=${io.finish.ready} ${io.finish.bits}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} io.update: v=${io.update.valid} ${io.update.bits}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} io.alloc:  v=${io.alloc.valid} ${io.alloc.bits}\n")
   for (i <- 0 until streamSize) {
@@ -243,7 +243,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
       p"buf: ${buf(i)} valid: ${valid(i)} state: ${state(i)} isPfting: ${isPrefetching(i)} " +
       p"deqLater: ${deqLater(i)} deqValid: ${deqValid(i)}\n")
   }
-  XSDebug(p"StreamBuf ${io.streamBufId} head: ${head} tail: ${tail} full: ${full} empty: ${empty} nextHead: ${nextHead}\n")
+  XSDebug(p"StreamBuf ${io.streamBufId} head: ${head} tail: ${tail} full: ${full} empty: ${empty} nextHead: ${nextHead} blockBytes: ${blockBytes.U}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} baseReq: v=${baseReq.valid} ${baseReq.bits} nextReq: ${nextReq}\n")
   XSDebug(needRealloc, p"StreamBuf ${io.streamBufId} needRealloc: ${needRealloc} reallocReq: ${reallocReq}\n")
   XSDebug(p"StreamBuf ${io.streamBufId} prefetchPrior: ")
@@ -266,6 +266,8 @@ object ParallelMin {
 
 class StreamPrefetch(p: StreamPrefetchParameters) extends PrefetchModule {
   val io = IO(new StreamPrefetchIO(p))
+
+  require(p.blockBytes > 0)
   
   // TODO: implement this
   def streamCnt = p.streamCnt
