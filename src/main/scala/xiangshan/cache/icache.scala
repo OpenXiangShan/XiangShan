@@ -477,7 +477,7 @@ class ICache extends ICacheModule
   //Performance Counter
   if (!env.FPGAPlatform ) {
     ExcitingUtils.addSource( s3_valid && !blocking, "perfCntIcacheReqCnt", Perf)
-    ExcitingUtils.addSource( s3_valid && !blocking && s3_miss, "perfCntIcacheMissCnt", Perf)
+    ExcitingUtils.addSource( s3_miss && blocking && io.resp.fire(), "perfCntIcacheMissCnt", Perf)
   }
 }
 
