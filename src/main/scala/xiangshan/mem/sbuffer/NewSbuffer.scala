@@ -49,11 +49,8 @@ class ChooseReplace(nWay: Int) extends XSModule {
   val nextWay = PriorityEncoder(Cat(stateMask, loMask))(log2Up(nWay)-1, 0)
   XSDebug(p"nextWay[${nextWay}]\n")
 
+  wayReg := nextWay
   io.way := wayReg
-
-  when(io.fire){
-    wayReg := nextWay
-  }
 
   when(io.flush){
     wayReg := 0.U
