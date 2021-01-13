@@ -3,8 +3,8 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
-import xiangshan.backend.exu.{AluExeUnit, ExuConfig, JumpExeUnit, MulDivExeUnit, Wb}
+import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
+import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
@@ -65,6 +65,7 @@ class IntegerBlock
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
     val toCtrlBlock = new IntBlockToCtrlIO
+    val toMemBlock = new IntBlockToMemBlockIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
@@ -110,6 +111,7 @@ class IntegerBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
+  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -140,7 +142,12 @@ class IntegerBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+
+    rsData.io.srcRegValue := DontCare
+    val src1Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2).data))
+    val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
+    rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
+    if (cfg.intSrcCnt > 1) rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData
@@ -208,6 +215,7 @@ class IntegerBlock
 
   // read int rf from ctrl block
   intRf.io.readPorts <> io.fromCtrlBlock.readRf
+  (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(
     (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbIntPriority),

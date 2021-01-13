@@ -7,11 +7,30 @@ import utils._
 
 class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean) extends XSModule {
   val io = IO(new Bundle() {
-    val validBits = Input(Vec(inWidth, Bool()))
-    val priority = Input(Vec(outWidth, UInt(log2Ceil(outWidth).W)))
-    val mapping = Output(Vec(outWidth, ValidIO(UInt(log2Ceil(inWidth).W))))
-    val reverseMapping = Output(Vec(inWidth, ValidIO(UInt(log2Ceil(outWidth).W))))
+    val validBits = Vec(inWidth, Input(Bool()))
+    val priority = Vec(outWidth, Input(UInt(log2Ceil(outWidth).W)))
+    val mapping = Vec(outWidth, ValidIO(UInt(log2Ceil(inWidth).W)))
+    val reverseMapping = Vec(inWidth, ValidIO(UInt(log2Ceil(outWidth).W)))
   })
+
+  // find the ones in vector (assumed the vector is not one-hot)
+  def get_ones(vec: Vec[Bool], num: Int, zeros: Int = 0) : (Bool, UInt) = {
+    val vecLeft = vec.drop(zeros)
+    val maskedVec = VecInit(Seq.fill(zeros)(false.B) ++ vecLeft)
+    if (num == 1) {
+      (Cat(vecLeft).orR, PriorityEncoder(maskedVec))
+    }
+    else if (num + zeros == vec.size) {
+      (Cat(vecLeft).andR, (vec.size - 1).U)
+    }
+    else {
+      val tail_minus_1 = get_ones(vec, num - 1, zeros + 1)
+      val tail_orig = get_ones(vec, num, zeros + 1)
+      val valid = (tail_minus_1._1 && vec(zeros)) || tail_orig._1
+      val index = Mux(vec(zeros), tail_minus_1._2, tail_orig._2)
+      (valid, index)
+    }
+  }
 
   for (j <- 0 until inWidth) {
     io.reverseMapping(j).valid := false.B
@@ -20,12 +39,10 @@ class IndexMapping(inWidth: Int, outWidth: Int, withPriority: Boolean) extends X
 
   val unsortedMapping = Wire(Vec(outWidth, UInt(log2Ceil(inWidth).W)))
   val unsortedValid = Wire(Vec(outWidth, Bool()))
-  var maskedValidBits = (0 until inWidth).map(i => io.validBits(i))
   for (i <- 0 until outWidth) {
-    val onehot = PriorityEncoderOH(maskedValidBits)
-    unsortedValid(i) := Cat(onehot).orR()
-    unsortedMapping(i) := OHToUInt(onehot)
-    maskedValidBits = (0 until inWidth).map(i => maskedValidBits(i) && !onehot(i))
+    val (valid, map) = get_ones(io.validBits, i + 1)
+    unsortedValid(i) := valid
+    unsortedMapping(i) := map
 
     val index = if (withPriority) io.priority(i) else i.U
     io.mapping(i).valid := unsortedValid(index)
