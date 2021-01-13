@@ -353,8 +353,52 @@ class ReservationStationData
     val feedback = Flipped(ValidIO(new TlbFeedback))
   })
 
-  val uop     = Reg(Vec(iqSize, new MicroOp))
-  val data    = Reg(Vec(iqSize, Vec(srcNum, UInt((XLEN+1).W))))
+  // Data
+  // ------------------------
+  val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, if (!env.FPGAPlatform) iqSize else 1, iqSize)))
+  data.foreach(_.io <> DontCare)
+  data.foreach(_.io.wen.foreach(_ := false.B))
+
+  // data/uop read/write interface
+  // ! warning: reading has 1 cycle delay, so input addr is used in next cycle
+  // luckily, for fpga platform, read port has fixed value
+  // otherwise, read port has same value as read addr
+  def dataRead(iqIdx: UInt, srcIdx: Int): UInt = {
+    if (env.FPGAPlatform) {
+      data(srcIdx).io.raddr(0) := iqIdx
+      data(srcIdx).io.rdata(0)
+    } else {
+      data(srcIdx).io.raddr(iqIdx) := iqIdx
+      data(srcIdx).io.rdata(iqIdx)
+    }
+  }
+  def dataWrite(iqIdx: UInt, srcIdx: Int, wdata: UInt) = {
+    data(srcIdx).io.waddr(iqIdx) := iqIdx
+    data(srcIdx).io.wdata(iqIdx) := wdata
+    data(srcIdx).io.wen(iqIdx) := true.B
+  }
+  // debug data: only for XSDebug log printing!
+  val debug_data = if (!env.FPGAPlatform) List.tabulate(srcNum)(i => WireInit(VecInit((0 until iqSize).map(j => dataRead(j.U, i))))) else null
+
+  // Uop
+  // ------------------------
+  val uopMem     = Module(new SyncDataModuleTemplate(new MicroOp, iqSize, iqSize, 1))
+  uopMem.io <> DontCare
+  uopMem.io.wen.foreach(_ := false.B)
+  
+  // uop -- read = iqSize write = 1
+  // uopMem 's read ports have fixed values
+  uopMem.io.raddr.zipWithIndex.foreach{ case(r, i) => r := i.U }
+  def uopRead(iqIdx: UInt): MicroOp = {
+    uopMem.io.rdata(iqIdx)
+  }
+  def uopWrite(iqIdx: UInt, wdata: MicroOp) = {
+    uopMem.io.waddr(0) := iqIdx
+    uopMem.io.wdata(0) := wdata
+    uopMem.io.wen(0) := true.B
+  }
+
+  val uop = WireInit(VecInit((0 until iqSize).map(i => uopRead(i.U))))
 
   val enq   = io.ctrl.enqPtr
   val sel   = io.ctrl.deqPtr
@@ -368,16 +412,16 @@ class ReservationStationData
   val enqEn  = enqCtrl.valid
   val enqEnReg = RegNext(enqEn)
   when (enqEn) {
-    uop(enqPtr) := enqUop
+    uopWrite(enqPtr, enqUop)
     XSDebug(p"enqCtrl: enqPtr:${enqPtr} src1:${enqUop.psrc1}|${enqUop.src1State}|${enqUop.ctrl.src1Type}" +
       p" src2:${enqUop.psrc2}|${enqUop.src2State}|${enqUop.ctrl.src2Type} src3:${enqUop.psrc3}|" +
       p"${enqUop.src3State}|${enqUop.ctrl.src3Type} pc:0x${Hexadecimal(enqUop.cf.pc)} roqIdx:${enqUop.roqIdx}\n")
   }
 
   when (enqEnReg) {
-    (0 until srcNum).foreach(i => data(enqPtrReg)(i) := io.srcRegValue(i))
+    (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
-    XSDebug("[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce(_ + " " + _) + "\n")
+    XSDebug(p"[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   }
 
   def wbHit(uop: MicroOp, src: UInt, srctype: UInt): Bool = {
@@ -411,8 +455,8 @@ class ReservationStationData
       val (wuHit, wuData) = wakeup(srcSeq(j), srcTypeSeq(j))
       val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
-      when (wuHit) { data(i)(j) := wuData }
-      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { data(i)(j) := bpData }
+      when (wuHit) { /* data(i)(j) := wuData */dataWrite(i.U, j, wuData) }
+      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { /* data(i)(j) := bpData */dataWrite(i.U, j, bpData) }
       // NOTE: the hit is from data's info, so there is an erro that:
       //       when enq, hit use last instr's info not the enq info.
       //       it will be long latency to add correct here, so add it to ctrl or somewhere else
@@ -427,9 +471,11 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
-  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), data(deq)(0))
-  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, data(deq)(1))
-  if (srcNum > 2) exuInput.src3 := data(deq)(2)
+  val regValues = List.tabulate(srcNum)(i => dataRead(/* Mux(sel.valid, sel.bits, deq), i */deq, i))
+  XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
+  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), regValues(0))
+  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, regValues(1))
+  if (srcNum > 2) exuInput.src3 := regValues(2)
 
   io.deq.valid := RegNext(sel.valid)
   if (nonBlocked) { assert(RegNext(io.deq.ready), s"${name} if fu wanna fast wakeup, it should not block")}
@@ -439,7 +485,7 @@ class ReservationStationData
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
   io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
     val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
-    when (bpHitReg) { data(enqPtrReg)(i) := bpData }
+    when (bpHitReg) { /* data(enqPtrReg)(i) := bpData */dataWrite(enqPtrReg, i, bpData) }
     h := bpHit
     // NOTE: enq bp is done here
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
@@ -481,9 +527,9 @@ class ReservationStationData
     p" roqIdx:${io.deq.bits.uop.roqIdx} src1:${Hexadecimal(io.deq.bits.src1)} " +
     p" src2:${Hexadecimal(io.deq.bits.src2)} src3:${Hexadecimal(io.deq.bits.src3)}\n")
   XSDebug(p"Data:  | src1:data | src2:data | src3:data |hit|pdest:rf:fp| roqIdx | pc\n")
-  for(i <- data.indices) {
-    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(data(i)(0))}|${uop(i).psrc2}:" +
-      (if (srcNum > 1) p"${Hexadecimal(data(i)(1))}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(data(i)(2))}" else p"null") + p"|" +
+  for (i <- 0 until iqSize) {
+    XSDebug(p"${i.U}:|${uop(i).psrc1}:${Hexadecimal(debug_data(0)(i))}|${uop(i).psrc2}:" +
+      (if (srcNum > 1) p"${Hexadecimal(debug_data(1)(i))}" else p"null") + p"|${uop(i).psrc3}:" + (if (srcNum > 2) p"${Hexadecimal(debug_data(2)(i))}" else p"null") + p"|" +
       p"${Binary(io.ctrl.srcUpdate(i).asUInt)}|${uop(i).pdest}:${uop(i).ctrl.rfWen}:" +
       p"${uop(i).ctrl.fpWen}|${uop(i).roqIdx} |${Hexadecimal(uop(i).cf.pc)}\n")
   }
