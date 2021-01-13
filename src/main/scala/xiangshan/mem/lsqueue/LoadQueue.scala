@@ -295,7 +295,7 @@ class LoadQueue extends XSModule
   // Stage 0
   // Generate writeback indexes
   val loadWbSelVec = VecInit((0 until LoadQueueSize).map(i => {
-    allocated(i) && datavalid(i) && !writebacked(i)
+    allocated(i) && !writebacked(i) && (datavalid(i) || dataModule.io.refill.wen(i))
   })).asUInt() // use uint instead vec to reduce verilog lines
   val loadEvenSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i)}))
   val loadOddSelVec = VecInit((0 until LoadQueueSize/2).map(i => {loadWbSelVec(2*i+1)}))
