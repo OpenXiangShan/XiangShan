@@ -833,7 +833,10 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwL2TlbHit" -> (0xb27, "perfCntPtwL2TlbHit"     ),
     "ICacheReq"   -> (0xb28, "perfCntIcacheReqCnt"     ),
     "ICacheMiss"   -> (0xb29, "perfCntIcacheMissCnt"     ),
-    "LoopExit"   -> (0xb2a, "perfCntLoopExit"     )//,
+    "LoopExit"   -> (0xb2a, "perfCntLoopExit"     ),
+    "DCacheMiss"  -> (0xb2b, "perfCntDCacheMiss"      ),
+    "L1+PrefetchCnt"->(0xb2c, "perfCntL1plusPrefetchReqCnt"),
+    "L2PrefetchCnt"->(0xb2d, "perfCntL2PrefetchReqCnt")
     // "FetchFromICache" -> (0xb2a, "CntFetchFromICache"),
     // "FetchFromLoopBuffer" -> (0xb2b, "CntFetchFromLoopBuffer"),
     // "ExitLoop1" -> (0xb2c, "CntExitLoop1"),
@@ -848,7 +851,26 @@ class CSR extends FunctionUnit with HasCSRConst
 //    "Custom7"     -> (0xb21, "Custom7"             ),
 //    "Custom8"     -> (0xb22, "Custom8"             ),
 //    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
+  ) ++ (
+    (0 until dcacheParameters.nMissEntries).map(i => 
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until icacheParameters.nMissEntries).map(i =>
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until l1plusPrefetcherParameters.nEntries).map(i =>
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until l2PrefetcherParameters.nEntries).map(i =>
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0xb2d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
   )
+
+  // (0 until dcacheParameters.nMissEntries).foreach(i =>
+  //   perfCntList = perfCntList ++ Map(("DCacheMissQueuePenalty" + Integer.toString(i, 10)) -> (0xb2a + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10))))
   val perfCntCond = List.fill(0x80)(WireInit(false.B))
   (perfCnts zip perfCntCond).map { case (c, e) => when (e) { c := c + 1.U } }
 

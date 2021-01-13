@@ -147,7 +147,7 @@ class IntegerBlock
     val src1Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2).data))
     val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
     rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
-    rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
+    if (cfg.intSrcCnt > 1) rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

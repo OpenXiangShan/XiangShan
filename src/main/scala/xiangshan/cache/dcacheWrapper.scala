@@ -102,6 +102,7 @@ class DCacheToLsuIO extends DCacheBundle {
 
 class DCacheIO extends DCacheBundle {
   val lsu = new DCacheToLsuIO
+  val prefetch = DecoupledIO(new MissReq)
 }
 
 
@@ -132,8 +133,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
   val metaArray = Module(new DuplicatedMetaArray)
+  /*
   dataArray.dump()
   metaArray.dump()
+  */
 
 
   //----------------------------------------
@@ -426,6 +429,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   when (bus.c.fire()) {
     assert(bus.c.bits.address >= 0x80000000L.U)
   }
+
+  io.prefetch.valid := missQueue.io.req.fire()
+  io.prefetch.bits := missQueue.io.req.bits
 
   // synchronization stuff
   def nack_load(addr: UInt) = {

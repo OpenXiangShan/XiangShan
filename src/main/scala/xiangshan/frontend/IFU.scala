@@ -64,6 +64,7 @@ class IFUIO extends XSBundle
   // from icache
   val icacheMemAcq = DecoupledIO(new L1plusCacheReq)
   val l1plusFlush = Output(Bool())
+  val prefetchTrainReq = ValidIO(new IcacheMissReq)
   // to tlb
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
@@ -418,6 +419,7 @@ class IFU extends XSModule with HasIFUConst
   icache.io.prev_pc := if3_prevHalfInstr.bits.pc
   io.icacheMemAcq <> icache.io.mem_acquire
   io.l1plusFlush := icache.io.l1plusflush
+  io.prefetchTrainReq := icache.io.prefetchTrainReq
 
   bpu.io.cfiUpdateInfo <> io.cfiUpdateInfo
 
