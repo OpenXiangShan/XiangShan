@@ -52,7 +52,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   io.inflight_addr.valid := state =/= s_invalid
   io.inflight_addr.bits  := req.idx << blockOffBits
 
-  XSDebug("state: %d\n", state)
+  when (state =/= s_invalid) {
+    XSDebug("state: %d\n", state)
+  }
 
   when (state === s_invalid) {
     io.req.ready := true.B
