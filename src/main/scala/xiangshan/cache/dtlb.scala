@@ -112,6 +112,32 @@ class TlbEntry extends TlbBundle {
   }
 }
 
+// multi-read && single-write
+// input is data, output is hot-code(not one-hot)
+class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) extends TlbModule {
+  val io = IO(new Bundle {
+    val r = new Bundle {
+      val req = Input(Vec(readWidth, gen))
+      val resp = Output(Vec(readWidth, UInt(set.W)))
+    }
+    val w = Flipped(ValidIO(new Bundle {
+      val index = UInt(log2Up(set).W)
+      val data = gen
+    }))
+  })
+
+  val wordType = UInt(gen.getWidth.W)
+  val array = Reg(Vec(set, wordType))
+
+  io.r.resp.zipWithIndex.map{ case (a,i) =>
+    a := VecInit(array.map(io.r.req(i).asUInt === _)).asUInt
+  }
+
+  when (io.w.valid) {
+    array(io.w.bits.index) := io.w.bits.data
+  }
+}
+
 class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   require(log2Up(num)==log2Down(num))
   /* vpn can be divide into three part */
@@ -267,10 +293,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   def widthMapSeq[T <: Seq[Data]](f: Int => T) = (0 until Width).map(f)
   def widthMap[T <: Data](f: Int => T) = (0 until Width).map(f)
 
+  // normal page: 4k
   val v = RegInit(0.U(TlbEntrySize.W))
   val pf = RegInit(0.U(TlbEntrySize.W))
+  val tag = Reg(Vec(TlbEntrySize, new TlbEntry))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   val g = VecInit(entry.map(_.perm.g)).asUInt
+  // super page: 2M/1G
+  val sp_v = RegInit(0.U(TlbSPEntrySize.W))
+  // val pf = RegInit(0.U())
 
   /**
     * PTW refill
@@ -291,7 +322,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     * L1 TLB read
     */
   val tlb_read_mask = Mux(refill, refillIdxOH, 0.U(TlbEntrySize.W))
-  def TLBRead(i: Int) = {
+  def TLBNormalRead(i: Int) = {
     val entryHitVec = (
       if (isDtlb)
         VecInit((tlb_read_mask.asBools zip entry).map{ case (r, e) => !r && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
@@ -344,7 +375,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     (hit, miss, pfHitVec, multiHit)
   }
 
-  val readResult = (0 until Width).map(TLBRead(_))
+  val readResult = (0 until Width).map(TLBNormalRead(_))
   val hitVec = readResult.map(res => res._1)
   val missVec = readResult.map(res => res._2)
   val pfHitVecVec = readResult.map(res => res._3)
