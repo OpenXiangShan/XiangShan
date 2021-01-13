@@ -352,12 +352,9 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val hasMissReq = Cat(missVec).orR
 
   // ptw
-  val state_idle :: state_wait :: Nil = Enum(2)
-  val state = RegInit(state_idle)
-
   ptw <> DontCare // TODO: need check it
-  ptw.req.valid := hasMissReq && state===state_idle && !sfence.valid
-  ptw.resp.ready := state===state_wait
+  ptw.req.valid := hasMissReq && !sfence.valid
+  ptw.resp.ready := true.B
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
   val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
@@ -367,21 +364,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     ptwReqSeq(i).bits.vpn := (if (isDtlb) RegNext(reqAddr(i).vpn) else reqAddr(i).vpn)
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
-
-  switch (state) {
-    is (state_idle) {
-      when (hasMissReq && ptw.req.fire()) {
-        state := state_wait
-      }
-      assert(!ptw.resp.valid)
-    }
-
-    is (state_wait) {
-      when (ptw.resp.fire()) {
-        state := state_idle
-      }
-    }
-  }
 
   // reset pf when pf hit
   val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
@@ -405,7 +387,6 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   // sfence (flush)
   when (sfence.valid) {
-    state := state_idle
     ptw.req.valid := false.B
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
@@ -455,7 +436,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
-  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)} state:${state}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 }
