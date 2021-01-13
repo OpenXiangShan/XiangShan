@@ -73,20 +73,33 @@ object Compare {
   }
 }
 
-class TlbEntry extends TlbBundle {
-  val vpn = UInt(vpnLen.W) // tag is vpn
+class TlbEntryData extends TlbBundle {
   val ppn = UInt(ppnLen.W)
+  val perm = new PermBundle(hasV = false)
+  // TODO: change perm to every kinds of pf check
+
+  override def toPrintable: Printable = {
+    p"ppn:0x${Hexadecimal(ppn)} perm:${perm}"
+  }
+}
+
+class TlbEntry(superpage: Boolean = false, superpageOnly: Boolean = false) extends TlbBundle {
+  val tag = UInt(vpnLen.W) // tag is vpn
   val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
   // val asid = UInt(asidLen.W), asid maybe expensive to support, but useless
-  // val v = Bool() // v&g is special, may need sperate storage?
-  val perm = new PermBundle(hasV = false)
+  val data = new TlbEntryData
 
   def vpnHit(vpn: UInt):Bool = {
-    val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
-    val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
-      Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
-    val mask = maskLevel(level)
-    (mask&this.vpn) === (mask&vpn)
+    if (superpage) {
+      val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
+      val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
+        Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
+      val mask = maskLevel(level)
+      (mask&this.tag) === (mask&vpn)
+    } else {
+      tag === vpn
+    }
+
   }
 
   // def asidHit(asid: UInt) = {
@@ -97,19 +110,21 @@ class TlbEntry extends TlbBundle {
     vpnHit(vpn) // && asidHit(asid)
   }
 
-  def genTlbEntry(pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
-    val e = Wire(new TlbEntry)
-    e.ppn := pte.asTypeOf(pteBundle).ppn
-    e.level := level
-    e.vpn := vpn
-    e.perm := pte.asTypeOf(pteBundle).perm
+  def genTlbEntry(superPage: Boolean = false, superpageOnly: Boolean = false, pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
+    val e = Wire(new TlbEntry(superPage, superpageOnly))
+    if (superPage) { e.level := level }
+    e.tag := vpn
+    e.data.ppn := pte.asTypeOf(pteBundle).ppn
+    e.data.perm := pte.asTypeOf(pteBundle).perm
     // e.asid := asid
     e
   }
 
   override def toPrintable: Printable = {
-    p"vpn:0x${Hexadecimal(vpn)} ppn:0x${Hexadecimal(ppn)} level:${level} perm:${perm}"
+    p"vpn:0x${Hexadecimal(tag)} level:${level} data:${data}"
   }
+
+  override def cloneType: this.type = (new TlbEntry(superpage, superpageOnly)).asInstanceOf[this.type]
 }
 
 // multi-read && single-write
@@ -138,7 +153,7 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) exten
   }
 }
 
-class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
+class TlbEntries(superpage: Boolean = false, superpageOnly: Boolean = false, num: Int, tagLen: Int) extends TlbBundle {
   require(log2Up(num)==log2Down(num))
   /* vpn can be divide into three part */
   // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
@@ -168,12 +183,12 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
     (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level)) && (level === 2.U)
   }
 
-  def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntires = {
+  def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntries = {
     require((data.getWidth / XLEN) == num,
       "input data length must be multiple of pte length")
     assert(level=/=3.U, "level should not be 3")
 
-    val ts = Wire(new TlbEntires(num, tagLen))
+    val ts = Wire(new TlbEntries(false, false, num, tagLen))
     ts.tag := tagClip(vpn, level)
     ts.level := level
     for (i <- 0 until num) {
@@ -187,16 +202,16 @@ class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   }
 
   def get(vpn: UInt): TlbEntry = {
-    val t = Wire(new TlbEntry())
+    val t = Wire(new TlbEntry(superpage, superpageOnly))
     val idx = idxClip(vpn, level)
-    t.vpn := vpn // Note: Use input vpn, not vpn in TlbL2
-    t.ppn := ppns(idx)
-    t.level := level
-    t.perm := perms(idx)
+    t.tag := vpn // Note: Use input vpn, not vpn in TlbL2
+    if (superpage) { t.level := level }
+    t.data.ppn := ppns(idx)
+    t.data.perm := perms(idx)
     t
   }
 
-  override def cloneType: this.type = (new TlbEntires(num, tagLen)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new TlbEntries(superpage, superpageOnly, num, tagLen)).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
@@ -298,7 +313,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val pf = RegInit(0.U(TlbEntrySize.W))
   val tag = Reg(Vec(TlbEntrySize, new TlbEntry))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
-  val g = VecInit(entry.map(_.perm.g)).asUInt
+  val g = VecInit(entry.map(_.data.perm.g)).asUInt
   // super page: 2M/1G
   val sp_v = RegInit(0.U(TlbSPEntrySize.W))
   // val pf = RegInit(0.U())
@@ -340,8 +355,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
     val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
     val miss    = !hit && validReg && vmEnable && ~pfArray
-    val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn))
-    val hitPerm = ParallelMux(hitVec zip entry.map(_.perm))
+    val hitppn  = ParallelMux(hitVec zip entry.map(_.data.ppn))
+    val hitPerm = ParallelMux(hitVec zip entry.map(_.data.perm))
     val hitLevel= ParallelMux(hitVec zip entry.map(_.level))
     val multiHit = {
       val hitSum = PopCount(hitVec)
@@ -437,8 +452,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
         pf := pf & ~VecInit(entry.map(_.hit(sfenceVpn))).asUInt
       }.otherwise {
         // specific addr and specific asid
-        v := v & ~VecInit(entry.map(e => e.hit(sfenceVpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
-        pf := pf & ~VecInit(entry.map(e => e.hit(sfenceVpn) && (/*e.asid === sfence.bits.asid && */!e.perm.g))).asUInt
+        v := v & ~VecInit(entry.map(e => e.hit(sfenceVpn) && (/*e.asid === sfence.bits.asid && */!e.data.perm.g))).asUInt
+        pf := pf & ~VecInit(entry.map(e => e.hit(sfenceVpn) && (/*e.asid === sfence.bits.asid && */!e.data.perm.g))).asUInt
       }
     }
   }

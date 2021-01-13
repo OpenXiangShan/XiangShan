@@ -235,7 +235,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   // two level: l2-tlb-cache && pde/pte-cache
   // l2-tlb-cache is ram-larger-edition tlb
   // pde/pte-cache is cache of page-table, speeding up ptw
-  val tlbl2 = Module(new SRAMTemplate(new TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen), set = TlbL2LineNum)) // (total 256, one line is 4 => 64 lines)
+  val tlbl2 = Module(new SRAMTemplate(new TlbEntries(num = TlbL2LineSize, tagLen = TlbL2TagLen), set = TlbL2LineNum)) // (total 256, one line is 4 => 64 lines)
   val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
   val tlbg  = Reg(UInt(TlbL2LineNum.W)) // global
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
@@ -361,7 +361,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
             state := state_idle
           }.otherwise {
             state := state_wait_ready
-            latch.entry := new TlbEntry().genTlbEntry(memRdata, level, req.vpn)
+            latch.entry := new TlbEntry().genTlbEntry(false, false, memRdata, level, req.vpn)
             latch.pf := memPte.isPf(level)
           }
         }.otherwise {
@@ -418,7 +418,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   for(i <- 0 until PtwWidth) {
     resp(i).valid := valid && arbChosen===i.U && ptwFinish // TODO: add resp valid logic
     resp(i).bits.entry := Mux(tlbHit, tlbHitData,
-      Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(memSelData, Mux(level===3.U, 2.U, level), req.vpn)))
+      Mux(state===state_wait_ready, latch.entry, new TlbEntry().genTlbEntry(false, false, memSelData, Mux(level===3.U, 2.U, level), req.vpn)))
     resp(i).bits.pf  := Mux(level===3.U || notFound, true.B, Mux(tlbHit, false.B, Mux(state===state_wait_ready, latch.pf, memPte.isPf(level))))
     // TODO: the pf must not be correct, check it
   }
@@ -460,7 +460,7 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       //TODO: check why the old refillIdx is right
 
       assert(tlbl2.io.w.req.ready)
-      val ts = new TlbEntires(num = TlbL2LineSize, tagLen = TlbL2TagLen).genEntries(memRdata, level, req.vpn)
+      val ts = new TlbEntries(num = TlbL2LineSize, tagLen = TlbL2TagLen).genEntries(memRdata, level, req.vpn)
       tlbl2.io.w.apply(
         valid = true.B,
         setIdx = refillIdx,
