@@ -156,8 +156,9 @@ class FloatBlock
   (0 until exuParameters.StuCnt).foreach(i => io.toMemBlock.readFpRf(i).data := fpRf.io.readPorts(i + 12).data)
   // write fp rf arbiter
   val fpWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbFpPriority),
-    NRFpWritePorts
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    NRFpWritePorts,
+    isFp = true
   ))
   fpWbArbiter.io.in <> exeUnits.map(_.io.toFp) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
 
