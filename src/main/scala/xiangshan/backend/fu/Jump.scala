@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.FunctionUnit._
 import xiangshan.backend.decode.isa._
 
@@ -16,13 +17,18 @@ trait HasRedirectOut { this: RawModule =>
 
 class Jump extends FunctionUnit with HasRedirectOut {
 
-  val (src1, offset, func, pc, uop) = (
+  val (src1, immMin, func, pc, uop) = (
     io.in.bits.src(0),
     io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
     SignExt(io.in.bits.uop.cf.pc, AddrBits),
     io.in.bits.uop
   )
+
+  val offset = SignExt(Mux(JumpOpType.jumpOpIsJal(func),
+    ImmUnion.J.toImm32(immMin),
+    ImmUnion.I.toImm32(immMin)
+  ), XLEN)
 
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
   val valid = io.in.valid

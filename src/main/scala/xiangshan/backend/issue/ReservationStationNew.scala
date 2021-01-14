@@ -4,8 +4,10 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
+
 import scala.math.max
 
 class BypassQueue(number: Int) extends XSModule {
@@ -420,26 +422,29 @@ class ReservationStationData
   }
 
   when (enqEnReg) {
-    (0 until srcNum).foreach(i => {
-      val writeData = if(i == 0){
-        if(exuCfg.usePc)
-          Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
-            SignExt(enqUopReg.cf.pc, XLEN),
-            io.srcRegValue(i)
+    exuCfg match {
+      case Exu.jumpExeUnitCfg =>
+        val src1Data = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+          SignExt(enqUopReg.cf.pc, XLEN),
+          io.srcRegValue(0)
         )
-        else io.srcRegValue(i)
-      } else if(i == 1){
-        if(exuCfg.useImm)
-          Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
-            enqUopReg.ctrl.imm,
-            io.srcRegValue(i)
-          )
-        else io.srcRegValue(i)
-      } else {
-        io.srcRegValue(i)
-      }
-      dataWrite(enqPtrReg, i, writeData)
-    })
+        dataWrite(enqPtrReg, 0, src1Data)
+      case Exu.aluExeUnitCfg =>
+        dataWrite(enqPtrReg, 0, io.srcRegValue(0))
+        // TODO: opt this, a full map is not necesscary here
+        val imm32 = LookupTree(
+          enqUopReg.ctrl.selImm,
+          ImmUnion.immSelMap.map(x => x._1 -> x._2.toImm32(enqUopReg.ctrl.imm))
+        )
+        val imm64 = SignExt(imm32, XLEN)
+        val src2Mux = Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
+          imm64, io.srcRegValue(1)
+        )
+        dataWrite(enqPtrReg, 1, src2Mux)
+      case _ =>
+        (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
+    }
+
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
     XSDebug(p"[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   }

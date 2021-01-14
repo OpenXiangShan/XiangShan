@@ -19,8 +19,10 @@ package object backend {
   object JumpOpType {
     def jal  = "b11_000".U
     def jalr = "b11_010".U
-    def call = "b11_011".U
-    def ret  = "b11_100".U
+//    def call = "b11_011".U
+//    def ret  = "b11_100".U
+    def jumpOpIsJal(op: UInt) = !op(1)
+    def jumpOpisJalr(op: UInt) = op(1)
   }
 
   object FenceOpType {

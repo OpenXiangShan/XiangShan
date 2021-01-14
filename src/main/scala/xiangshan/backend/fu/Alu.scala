@@ -8,14 +8,15 @@ import xiangshan.backend.ALUOpType
 
 class Alu extends FunctionUnit with HasRedirectOut {
 
-  val (src1, src2, offset, func, pc, uop) = (
+  val (src1, src2, func, pc, uop) = (
     io.in.bits.src(0),
     io.in.bits.src(1),
-    io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
     SignExt(io.in.bits.uop.cf.pc, AddrBits),
     io.in.bits.uop
   )
+
+  val offset = src2
 
   val valid = io.in.valid
 
