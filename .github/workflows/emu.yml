@@ -3,11 +3,27 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, update-ci]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
 jobs:
+  generate-verilog:
+    runs-on: self-hosted
+    name: Generate Verilog
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Check Wiring
+        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
+      - name: set env
+        run: |
+          echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      - name: generate verilog file
+        run:
+          make verilog SIM_ARGS=--dual-core
   build-emu:
     runs-on: self-hosted
     name: Make EMU
@@ -15,8 +31,6 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
-      - name: Check Wiring
-        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: Set env
         run: |
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
