@@ -13,6 +13,10 @@ trait HasSbufferCst extends HasXSParameter {
   def s_prepare = 2.U(2.W)
   def s_inflight = 3.U(2.W)
 
+  val evictCycle = 8192
+  require(isPow2(evictCycle))
+  val countBits = 1 + log2Up(evictCycle)
+
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = tag + offset
   val CacheLineBytes: Int = CacheLineSize / 8
@@ -37,7 +41,6 @@ class SbufferLine extends SbufferBundle {
 class ChooseReplace(nWay: Int) extends XSModule {
   val io = IO(new Bundle{
     val mask = Vec(nWay, Input(Bool()))
-    val fire = Input(Bool())
     val way = Output(UInt(nWay.W))
     val flush = Input(Bool())
   })
@@ -113,11 +116,11 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   val buffer = Mem(StoreBufferSize, new SbufferLine)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(s_invalid)))
-
+  val cohCount = Reg(Vec(StoreBufferSize, UInt(countBits.W)))
   /*
        idle --[flush]--> drian_sbuffer --[buf empty]--> idle
             --[buf full]--> replace --[dcache resp]--> idle
-    */
+  */
   val x_idle :: x_drain_sbuffer :: x_replace :: Nil = Enum(3)
   val sbuffer_state = RegInit(x_idle)
 
@@ -147,7 +150,6 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val invalidCount = RegInit(StoreBufferSize.U((log2Up(StoreBufferSize) + 1).W))
   val validCount = RegInit(0.U((log2Up(StoreBufferSize) + 1).W))
   val full = invalidCount === 0.U
-  // val oneSpace = invalidCount === 1.U
 
   val bufferRead  = VecInit((0 until StoreBufferSize).map(i => buffer(i)))
   val stateRead   = VecInit((0 until StoreBufferSize).map(i => stateVec(i)))
@@ -168,8 +170,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   val lru = Module(new ChooseReplace(StoreBufferSize))
   val evictionIdx = lru.io.way
-  
-  lru.io.fire := false.B
+
   lru.io.mask := stateRead.map(_ === s_valid)
 
   val tags = io.in.map(in => getTag(in.bits.addr))
@@ -209,6 +210,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   def wordReqToBufLine(req: DCacheWordReq, tag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
     stateUpdate(insertIdx) := s_valid
     tagUpdate(insertIdx) := tag
+    cohCount(insertIdx) := 0.U
 
     when(flushMask){
       for(j <- 0 until CacheLineWords){
@@ -227,6 +229,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
 
   def mergeWordReq(req: DCacheWordReq, mergeIdx:UInt, wordOffset:UInt): Unit = {
+    cohCount(mergeIdx) := 0.U
     for(i <- 0 until DataBytes){
       when(req.mask(i)){
         maskUpdate(mergeIdx)(wordOffset)(i) := true.B
@@ -264,7 +267,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   for(i <- 0 until StoreBufferSize){
     XSDebug(stateVec(i)=/=s_invalid,
-      p"[$i] state:${stateVec(i)} buf:${bufferRead(i)}\n"
+      p"[$i] timeout:${cohCount(i)(countBits-1)} state:${stateVec(i)} buf:${bufferRead(i)}\n"
     )
   }
 
@@ -335,15 +338,13 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 //
 //  evictionEntry.bits := evictionIdx
 
-  val prepareValid = ((do_eviction && sbuffer_state === x_replace)|| (sbuffer_state === x_drain_sbuffer)) &&
+  val prepareValid = ((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer)) &&
                       stateVec(evictionIdx)===s_valid &&
                       noSameBlockInflight(evictionIdx)
 
   when(prepareValid){
     stateVec(evictionIdx) := s_prepare
-    lru.io.fire := true.B
   }
-
 
   val prepareMask = stateVec.map(s => s === s_prepare)
   val (prepareIdx, prepareEn) = PriorityEncoderWithFlag(prepareMask)
@@ -379,6 +380,21 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   validCount := validCount + needSpace - prepareValid
 
   XSDebug(p"needSpace[$needSpace] invalidCount[$invalidCount]  validCount[$validCount]\n")
+
+
+  //-------------------------cohCount-----------------------------
+  // insert and merge: cohCount=0
+  // every cycle cohCount+=1
+  // if cohCount(countBits-1)==1,evict
+  for(i <- 0 until StoreBufferSize){
+    when(stateVec(i) === s_valid){
+      when(cohCount(i)(countBits-1)){
+        assert(stateVec(i) === s_valid)
+        stateUpdate(i) := s_prepare
+      }
+      cohCount(i) := cohCount(i)+1.U
+    }
+  }
 
   // ---------------------- Load Data Forward ---------------------
 
