@@ -269,16 +269,16 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRWrong = predWrong && isRType
 
   if(!env.FPGAPlatform){
-    ExcitingUtils.addSource(mbpInstr, "perfCntCondMbpInstr", Perf)
-    ExcitingUtils.addSource(mbpRight, "perfCntCondMbpRight", Perf)
-    ExcitingUtils.addSource(mbpWrong, "perfCntCondMbpWrong", Perf)
-    ExcitingUtils.addSource(mbpBRight, "perfCntCondMbpBRight", Perf)
-    ExcitingUtils.addSource(mbpBWrong, "perfCntCondMbpBWrong", Perf)
-    ExcitingUtils.addSource(mbpJRight, "perfCntCondMbpJRight", Perf)
-    ExcitingUtils.addSource(mbpJWrong, "perfCntCondMbpJWrong", Perf)
-    ExcitingUtils.addSource(mbpIRight, "perfCntCondMbpIRight", Perf)
-    ExcitingUtils.addSource(mbpIWrong, "perfCntCondMbpIWrong", Perf)
-    ExcitingUtils.addSource(mbpRRight, "perfCntCondMbpRRight", Perf)
-    ExcitingUtils.addSource(mbpRWrong, "perfCntCondMbpRWrong", Perf)
+    ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
+    ExcitingUtils.addSource(mbpRight, "perfCntCondBpRight", Perf)
+    ExcitingUtils.addSource(mbpWrong, "perfCntCondBpWrong", Perf)
+    ExcitingUtils.addSource(mbpBRight, "perfCntCondBpBRight", Perf)
+    ExcitingUtils.addSource(mbpBWrong, "perfCntCondBpBWrong", Perf)
+    ExcitingUtils.addSource(mbpJRight, "perfCntCondBpJRight", Perf)
+    ExcitingUtils.addSource(mbpJWrong, "perfCntCondBpJWrong", Perf)
+    ExcitingUtils.addSource(mbpIRight, "perfCntCondBpIRight", Perf)
+    ExcitingUtils.addSource(mbpIWrong, "perfCntCondBpIWrong", Perf)
+    ExcitingUtils.addSource(mbpRRight, "perfCntCondBpRRight", Perf)
+    ExcitingUtils.addSource(mbpRWrong, "perfCntCondBpRWrong", Perf)
   }
 }

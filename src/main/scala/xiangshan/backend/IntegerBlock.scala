@@ -82,6 +82,9 @@ class IntegerBlock
       val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
       val externalInterrupt = new ExternalInterruptIO  // from outside
       val tlb = Output(new TlbCsrBundle) // from tlb
+      val perfinfo = new Bundle {
+        val retiredInstr = Input(UInt(3.W))
+      }
     }
     val fenceio = new Bundle {
       val sfence = Output(new SfenceBundle) // to front,mem
