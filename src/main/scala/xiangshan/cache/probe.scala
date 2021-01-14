@@ -53,7 +53,9 @@ class ProbeUnit(edge: TLEdgeOut) extends DCacheModule with HasTLDump {
   io.inflight_req_block_addr.valid := state =/= s_invalid
   io.inflight_req_block_addr.bits  := req_block_addr
 
-  XSDebug("state: %d\n", state)
+  when (state =/= s_invalid) {
+    XSDebug("state: %d\n", state)
+  }
 
   when (state === s_invalid) {
     io.req.ready := true.B

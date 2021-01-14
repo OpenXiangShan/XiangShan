@@ -7,7 +7,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLFuzzer, TLIdentityNode, TLXbar}
 import utils.DebugIdentityNode
-import xiangshan.{HasXSParameter, XSCore}
+import utils.XSInfo
+import xiangshan.{HasXSParameter, XSCore, HasXSLog}
 import sifive.blocks.inclusivecache.{CacheParameters, InclusiveCache, InclusiveCacheMicroParameters}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, AddressSet}
 import freechips.rocketchip.tilelink.{TLBundleParameters, TLCacheCork, TLBuffer, TLClientNode, TLIdentityNode, TLXbar, TLWidthWidget, TLFilter, TLToAXI4}
@@ -42,6 +43,51 @@ class DummyCore()(implicit p: Parameters) extends LazyModule {
   }
 }
 
+
+class BankAddressConvertor(index: Int, bankBits: Int, blockBits: Int, recover: Boolean = false)(implicit p: Parameters) extends LazyModule {
+  val node = TLIdentityNode()
+
+  def shrink(addr: UInt): UInt = {
+    val msb = addr.getWidth - 1
+    Cat(0.U(bankBits.W), addr(msb, bankBits + blockBits), addr(blockBits - 1, 0))
+  }
+
+  def extend(addr: UInt): UInt = {
+    val msb = addr.getWidth - 1
+    Cat(addr(msb - bankBits, blockBits), index.U(bankBits.W), addr(blockBits - 1, 0))
+  }
+
+  lazy val module = new LazyModuleImp(this) with HasXSLog {
+    (node.in zip node.out) foreach { case ((in, _), (out, _)) =>
+      out <> in
+      if (!recover) {
+        out.a.bits.address := shrink(in.a.bits.address)
+        out.c.bits.address := shrink(in.c.bits.address)
+        in.b.bits.address := shrink(out.b.bits.address)
+
+        XSInfo(out.a.fire(), s"before bank $index A in addr %x -> out addr %x\n", in.a.bits.address, out.a.bits.address)
+        XSInfo(out.b.fire(), s"before bank $index B out addr %x -> in addr %x\n", out.b.bits.address, in.b.bits.address)
+        XSInfo(out.c.fire(), s"before bank $index C in addr %x -> out addr %x\n", in.c.bits.address, out.c.bits.address)
+      }
+      else {
+        out.a.bits.address := extend(in.a.bits.address)
+        out.c.bits.address := extend(in.c.bits.address)
+        in.b.bits.address := extend(out.b.bits.address)
+
+        XSInfo(out.a.fire(), s"after bank $index A in addr %x -> out addr %x\n", in.a.bits.address, out.a.bits.address)
+        XSInfo(out.b.fire(), s"after bank $index B out addr %x -> out addr %x\n", out.b.bits.address, in.b.bits.address)
+        XSInfo(out.c.fire(), s"after bank $index C in addr %x -> out addr %x\n", in.c.bits.address, out.c.bits.address)
+      }
+    }
+  }
+}
+
+object BankAddressConvertor {
+  def apply(index: Int, bankBits: Int, blockBits: Int, recover: Boolean)(implicit p: Parameters) = {
+    val bankAddressConvertor = LazyModule(new BankAddressConvertor(index, bankBits, blockBits, recover))
+    bankAddressConvertor.node
+  }
+}
 
 class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
   // CPU Cores
@@ -100,6 +146,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
+    l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
     l2cache(i).node := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
     l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
@@ -130,11 +177,11 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
 
   def bankFilter(bank: Int) = AddressSet(
     base = bank * L3BlockSize,
-    mask = ~BigInt((L3NBanks -1) * L3BlockSize))
+    mask = ~BigInt((L3NBanks - 1) * L3BlockSize))
 
   for(i <- 0 until L3NBanks) {
     val filter = TLFilter(TLFilter.mSelectIntersect(bankFilter(i)))
-    l3_banks(i).node := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
+    l3_banks(i).node := BankAddressConvertor(i, log2Ceil(L3NBanks), log2Ceil(L3BlockSize), recover = false) := TLBuffer() := DebugIdentityNode() := filter := l3_xbar
   }
 
   for(i <- 0 until L3NBanks) {
@@ -143,6 +190,7 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
       TLToAXI4() :=
       TLWidthWidget(L3BusWidth / 8) :=
       TLCacheCork() :=
+      BankAddressConvertor(i, log2Ceil(L3NBanks), log2Ceil(L3BlockSize), recover = true) :=
       l3_banks(i).node
   }
 

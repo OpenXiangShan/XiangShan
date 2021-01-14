@@ -10,7 +10,8 @@ trait HasSbufferCst extends HasXSParameter {
 
   def s_invalid = 0.U(2.W)
   def s_valid = 1.U(2.W)
-  def s_inflight = 2.U(2.W)
+  def s_prepare = 2.U(2.W)
+  def s_inflight = 3.U(2.W)
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = tag + offset
@@ -33,29 +34,8 @@ class SbufferLine extends SbufferBundle {
   }
 }
 
-//class AbstractEvictor extends XSModule with HasSbufferCst{
-//  val io = IO(new Bundle{
-//    val states = Input(Vec(StoreBufferSize, UInt(s_invalid.getWidth.W)))
-//    val do_eviction = Output(Bool())
-//  })
-//}
-//
-//
-//class NaiveEvictor(threshold: Int) extends AbstractEvictor{
-//
-//  require(threshold >= 0 && threshold <= StoreBufferSize)
-//
-//  val entryCnt = PopCount(io.states.map(s => s=/=s_invalid))
-//
-//  io.do_eviction := entryCnt >= threshold.U((SbufferIndexWidth+1).W)
-//
-//  XSDebug("sbuffer entry cnt: %d\n", entryCnt)
-//
-//}
-
 class ChooseReplace(nWay: Int) extends XSModule {
   val io = IO(new Bundle{
-    // val in = Vec(StorePipelineWidth, Input(UInt(nWay.W)))
     val mask = Vec(nWay, Input(Bool()))
     val fire = Input(Bool())
     val way = Output(UInt(nWay.W))
@@ -67,7 +47,7 @@ class ChooseReplace(nWay: Int) extends XSModule {
   val loMask = (wayMask & stateMask)(nWay-1,0)
 
   val nextWay = PriorityEncoder(Cat(stateMask, loMask))(log2Up(nWay)-1, 0)
-  XSDebug(p"ss[${Binary(Cat(stateMask, loMask))}] , nextWay[${nextWay}]  \n")
+  XSDebug(p"nextWay[${nextWay}]\n")
 
   io.way := wayReg
 
@@ -78,7 +58,6 @@ class ChooseReplace(nWay: Int) extends XSModule {
   when(io.flush){
     wayReg := 0.U
   }
-
 }
 
 class SbufferLru(nWay: Int) extends XSModule {
@@ -171,7 +150,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val invalidCount = RegInit(StoreBufferSize.U((log2Up(StoreBufferSize) + 1).W))
   val validCount = RegInit(0.U((log2Up(StoreBufferSize) + 1).W))
   val full = invalidCount === 0.U
-  val oneSpace = invalidCount === 1.U
+  // val oneSpace = invalidCount === 1.U
 
   val bufferRead  = VecInit((0 until StoreBufferSize).map(i => buffer(i)))
   val stateRead   = VecInit((0 until StoreBufferSize).map(i => stateVec(i)))
@@ -191,9 +170,8 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   }
 
   val lru = Module(new ChooseReplace(StoreBufferSize))
-  // val lruAccessWays = WireInit(VecInit(Seq.fill(StorePipelineWidth)(0.U(StoreBufferSize.W))))  // 2 * enq
   val evictionIdx = lru.io.way
-  // lru.io.in := lruAccessWays
+  
   lru.io.fire := false.B
   lru.io.mask := stateRead.map(_ === s_valid)
 
@@ -209,14 +187,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val mergeIdx = mergeMask.map(PriorityEncoder(_))
   val canMerge = mergeMask.map(ParallelOR(_))
 
-
-  // merge should be block when the sameTag entry is inflight and will be inflight next cycle
   for(i <- 0 until StorePipelineWidth){
     mergeMask(i) := widthMap(j =>
-      Mux(tags(i) === tagRead(j) && stateRead(j) === s_valid , true.B, false.B))
-        //!(tagRead(j) === tagRead(evictionIdx) && io.dcache.req.fire()),    // entry should be block if it will be inflight next cycle
-//        true.B,
-//        false.B))
+      Mux(tags(i) === tagRead(j) && stateRead(j) === s_valid, true.B, false.B))
   }
 
   // insert confition
@@ -232,11 +205,9 @@ class NewSbuffer extends XSModule with HasSbufferCst {
   val (firstInsertIdx, firstCanInsert) = PriorityEncoderWithFlag(invalidMask)
   val (secondInsertIdx, secondCanInsert) = PriorityEncoderWithFlag(secondInsertMask)
 
-
   io.in(0).ready := firstCanInsert || canMerge(0)
   io.in(1).ready := (secondCanInsert || canMerge(1)) && !sameWord && io.in(0).ready
-  //XSDebug(p"firstCanInsert[$firstCanInsert], secondCanInsert[$secondCanInsert], sameWord[$sameWord]\n")
-  //XSDebug(p"first ready[${io.in(0).ready}], senond ready[${io.in(1).ready}]\n")
+
 
   def wordReqToBufLine(req: DCacheWordReq, tag: UInt, insertIdx: UInt, wordOffset: UInt, flushMask: Bool): Unit = {
     stateUpdate(insertIdx) := s_valid
@@ -349,7 +320,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     val tag = tagRead(idx)
     !Cat(widthMap(i => {
       // stateVec(idx) itself must not be s_inflight*
-      stateRead(i) === s_inflight &&
+      (stateRead(i) === s_inflight || stateRead(i) === s_prepare) &&
         tag === tagRead(i)
     })).orR()
   }
@@ -367,31 +338,35 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 //
 //  evictionEntry.bits := evictionIdx
 
-  val tagConflict = tagRead(evictionIdx) === tags(0) && canMerge(0) && io.in(0).valid ||
-    tagRead(evictionIdx) === tags(1) && canMerge(1) && io.in(1).valid
+  val prepareValid = ((do_eviction && sbuffer_state === x_replace)|| (sbuffer_state === x_drain_sbuffer)) &&
+                      stateVec(evictionIdx)===s_valid &&
+                      noSameBlockInflight(evictionIdx)
 
-  io.dcache.req.valid :=
-    ((do_eviction && sbuffer_state === x_replace) && !tagConflict || (sbuffer_state === x_drain_sbuffer)) &&
-    stateVec(evictionIdx)===s_valid &&
-    noSameBlockInflight(evictionIdx)
+  when(prepareValid){
+    stateVec(evictionIdx) := s_prepare
+    lru.io.fire := true.B
+  }
 
 
-  XSDebug(p"1[${((do_eviction && sbuffer_state === x_replace) || (sbuffer_state === x_drain_sbuffer))}] 2[${stateVec(evictionIdx)===s_valid}] 3[${noSameBlockInflight(evictionIdx)}] 4[${!tagConflict}]\n")
+  val prepareMask = stateVec.map(s => s === s_prepare)
+  val (prepareIdx, prepareEn) = PriorityEncoderWithFlag(prepareMask)
 
-  io.dcache.req.bits.addr := getAddr(tagRead(evictionIdx))
-  io.dcache.req.bits.data := bufferRead(evictionIdx).data
-  io.dcache.req.bits.mask := bufferRead(evictionIdx).mask
+
+  io.dcache.req.valid := prepareEn
+
+  io.dcache.req.bits.addr := getAddr(tagRead(prepareIdx))
+  io.dcache.req.bits.data := bufferRead(prepareIdx).data
+  io.dcache.req.bits.mask := bufferRead(prepareIdx).mask
   io.dcache.req.bits.cmd := MemoryOpConstants.M_XWR
   io.dcache.req.bits.meta := DontCare
-  io.dcache.req.bits.meta.id := evictionIdx
+  io.dcache.req.bits.meta.id := prepareIdx
   when(io.dcache.req.fire()){
-    lru.io.fire := true.B
-    stateVec(evictionIdx) := s_inflight
+    stateVec(prepareIdx) := s_inflight
   }
 //  evictionEntry.ready := io.dcache.req.ready
 
   XSDebug(io.dcache.req.fire(),
-    p"send buf [$evictionIdx] to Dcache, req fire\n"
+    p"send buf [$prepareIdx] to Dcache, req fire\n"
   )
 
   io.dcache.resp.ready := true.B // sbuffer always ready to recv dcache resp
@@ -404,7 +379,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
 
   val needSpace = (io.in(0).fire && !canMerge(0)) +& (io.in(1).fire && !canMerge(1) && !sameTag)
   invalidCount := invalidCount - needSpace + io.dcache.resp.fire()
-  validCount := validCount + needSpace - io.dcache.req.fire()
+  validCount := validCount + needSpace - prepareValid
 
   XSDebug(p"needSpace[$needSpace] invalidCount[$invalidCount]  validCount[$validCount]\n")
 
@@ -414,7 +389,7 @@ class NewSbuffer extends XSModule with HasSbufferCst {
     val tag_matches = widthMap(i => tagRead(i) === getTag(forward.paddr))
     val valid_tag_matches = widthMap(i => tag_matches(i) && stateVec(i) === s_valid)
     val inflight_tag_matches = widthMap(i =>
-      tag_matches(i) && (stateVec(i) === s_inflight)
+      tag_matches(i) && (stateVec(i) === s_inflight || stateVec(i) === s_prepare)
     )
     val line_offset_mask = UIntToOH(getWordOffset(forward.paddr))
 
