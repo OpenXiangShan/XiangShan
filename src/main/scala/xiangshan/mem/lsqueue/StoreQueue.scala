@@ -132,7 +132,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       writebacked(stWbIndex) := hasWritebacked
       pending(stWbIndex) := !hasWritebacked // valid mmio require
 
-      val storeWbData = Wire(new LsqEntry)
+      val storeWbData = Wire(new SQDataEntry)
       storeWbData := DontCare
       storeWbData.paddr := io.storeIn(i).bits.paddr
       storeWbData.mask := io.storeIn(i).bits.mask
@@ -322,7 +322,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := exceptionModule.io.rdata(0)
+  io.exceptionAddr.vaddr := vaddrModule.io.rdata(0)
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
