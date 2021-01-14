@@ -153,44 +153,37 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) exten
   }
 }
 
-class TlbEntries(superpage: Boolean = false, superpageOnly: Boolean = false, num: Int, tagLen: Int) extends TlbBundle {
+class TlbEntries(num: Int, tagLen: Int) extends TlbBundle {
   require(log2Up(num)==log2Down(num))
   /* vpn can be divide into three part */
   // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
   val cutLen  = log2Up(num)
 
   val tag     = UInt(tagLen.W) // NOTE: high part of vpn
-  val level   = UInt(log2Up(Level).W)
   val ppns    = Vec(num, UInt(ppnLen.W))
   val perms    = Vec(num, new PermBundle(hasV = false))
   val vs      = Vec(num, Bool())
 
-  def tagClip(vpn: UInt, level: UInt) = { // full vpn => tagLen
-    val tmp = Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2)),
-              Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1)),
-                               Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0))))
-    tmp(tmp.getWidth-1, tmp.getWidth-tagLen)
+  def tagClip(vpn: UInt) = { // full vpn => tagLen
+    vpn(vpn.getWidth-1, tagLen)
   }
 
   // NOTE: get insize idx
-  def idxClip(vpn: UInt, level: UInt) = {
-    Mux(level===0.U, vpn(vpnnLen*2+cutLen-1, vpnnLen*2),
-    Mux(level===1.U, vpn(vpnnLen*1+cutLen-1, vpnnLen*1),
-                     vpn(vpnnLen*0+cutLen-1, vpnnLen*0)))
+  def idxClip(vpn: UInt) = {
+    vpn(cutLen-1, 0)
   }
 
   def hit(vpn: UInt) = {
-    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level)) && (level === 2.U)
+    (tag === tagClip(vpn)) && vs(idxClip(vpn))
   }
 
   def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntries = {
     require((data.getWidth / XLEN) == num,
       "input data length must be multiple of pte length")
-    assert(level=/=3.U, "level should not be 3")
+    assert(level===2.U, "tlb entries only support 4K pages")
 
-    val ts = Wire(new TlbEntries(false, false, num, tagLen))
-    ts.tag := tagClip(vpn, level)
-    ts.level := level
+    val ts = Wire(new TlbEntries(num, tagLen))
+    ts.tag := tagClip(vpn)
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ts.ppns(i) := pte.ppn
@@ -202,20 +195,19 @@ class TlbEntries(superpage: Boolean = false, superpageOnly: Boolean = false, num
   }
 
   def get(vpn: UInt): TlbEntry = {
-    val t = Wire(new TlbEntry(superpage, superpageOnly))
-    val idx = idxClip(vpn, level)
+    val t = Wire(new TlbEntry(false, false))
+    val idx = idxClip(vpn)
     t.tag := vpn // Note: Use input vpn, not vpn in TlbL2
-    if (superpage) { t.level := level }
     t.data.ppn := ppns(idx)
     t.data.perm := perms(idx)
     t
   }
 
-  override def cloneType: this.type = (new TlbEntries(superpage, superpageOnly, num, tagLen)).asInstanceOf[this.type]
+  override def cloneType: this.type = (new TlbEntries(num, tagLen)).asInstanceOf[this.type]
   override def toPrintable: Printable = {
     require(num == 4, "if num is not 4, please comment this toPrintable")
     // NOTE: if num is not 4, please comment this toPrintable
-    p"tag:${Hexadecimal(tag)} level:${level} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+    p"tag:${Hexadecimal(tag)} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
     p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
     p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
   }
