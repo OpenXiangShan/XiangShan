@@ -39,7 +39,7 @@ jobs:
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
       - name: Build EMU
         run:
-          make ./build/emu SIM_ARGS=--disable-all NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j60
+          make ./build/emu SIM_ARGS=--disable-all NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j220
       - name: Run cputest
         run: |
           CPU_TEST_DIR=$AM_HOME/tests/cputest
