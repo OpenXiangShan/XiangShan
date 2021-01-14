@@ -219,8 +219,9 @@ class IntegerBlock
   (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbIntPriority),
-    NRIntWritePorts
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    NRIntWritePorts,
+    isFp = false
   ))
   intWbArbiter.io.in <> exeUnits.map(_.io.toInt) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
 

@@ -6,9 +6,12 @@ import xiangshan._
 import utils._
 
 
-class Wb(priorities: Seq[Int], numOut: Int) extends XSModule {
+class Wb(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean) extends XSModule {
+
+  val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
+
   val io = IO(new Bundle() {
-    val in = Vec(priorities.size, Flipped(DecoupledIO(new ExuOutput)))
+    val in = Vec(cfgs.size, Flipped(DecoupledIO(new ExuOutput)))
     val out = Vec(numOut, ValidIO(new ExuOutput))
   })
 
@@ -35,7 +38,7 @@ class Wb(priorities: Seq[Int], numOut: Int) extends XSModule {
   }
 
   def splitN[T](in: Seq[T], n: Int): Seq[Option[Seq[T]]] = {
-    require(n > 0)
+    if(n == 0) return Seq()
     if(n == 1){
       Seq(Some(in))
     } else {
@@ -48,24 +51,38 @@ class Wb(priorities: Seq[Int], numOut: Int) extends XSModule {
     }
   }
 
-  if(mulReq.nonEmpty){
-    val arbReq = splitN(
-      otherReq,
-      mulReq.size
-    )
-    for(i <- mulReq.indices){
-      val other = arbReq(i).getOrElse(Seq())
-      val arb = Module(new Arbiter(new ExuOutput, 1+other.size))
-      arb.io.in <> mulReq(i) +: other
-      val out = io.out(directConnect.size + i)
-      out.valid := arb.io.out.valid
-      out.bits := arb.io.out.bits
-      arb.io.out.ready := true.B
-    }
+  val arbReq = splitN(
+    otherReq,
+    mulReq.size
+  )
+
+  val arbiters = for(i <- mulReq.indices) yield {
+    val other = arbReq(i).getOrElse(Seq())
+    val arb = Module(new Arbiter(new ExuOutput, 1+other.size))
+    arb.io.in <> mulReq(i) +: other
+    val out = io.out(directConnect.size + i)
+    out.valid := arb.io.out.valid
+    out.bits := arb.io.out.bits
+    arb.io.out.ready := true.B
+    arb
   }
 
   if(portUsed < numOut){
     println(s"Warning: ${numOut - portUsed} ports are not used!")
     io.out.drop(portUsed).foreach(_ <> DontCare)
   }
+
+  val sb = new StringBuffer(s"\n${if(isFp) "fp" else "int"} wb arbiter:\n")
+  for((conn, i) <- directConnect.zipWithIndex){
+    sb.append(s"[ ${cfgs(io.in.indexOf(conn)).name} ] -> out #$i\n")
+  }
+  for(i <- mulReq.indices){
+    sb.append(s"[ ${cfgs(io.in.indexOf(mulReq(i))).name} ")
+    for(req <- arbReq(i).getOrElse(Nil)){
+      sb.append(s"${cfgs(io.in.indexOf(req)).name} ")
+    }
+    sb.append(s"] -> arb -> out #${directConnect.size + i}\n")
+  }
+  println(sb)
+
 }
