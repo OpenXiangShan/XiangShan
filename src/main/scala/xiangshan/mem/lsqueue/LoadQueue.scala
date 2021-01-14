@@ -364,6 +364,7 @@ class LoadQueue extends XSModule
     io.ldout(i).bits.redirect := DontCare
     io.ldout(i).bits.brUpdate := DontCare
     io.ldout(i).bits.debug.isMMIO := debug_mmio(loadWbSel(i))
+    io.ldout(i).bits.debug.isPerfCnt := false.B
     io.ldout(i).bits.fflags := DontCare
     io.ldout(i).valid := loadWbSelV(i)
 
