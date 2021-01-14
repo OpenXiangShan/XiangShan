@@ -15,7 +15,7 @@ class LQDataEntry extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
-  val exception = UInt(16.W) // TODO: opt size
+  val exception = ExceptionVec()
   val fwdMask = Vec(8, Bool())
 }
 
@@ -236,7 +236,7 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
   // data module
   val paddrModule = Module(new PaddrModule(size, numRead = 3, numWrite = 2))
   val maskModule = Module(new MaskModule(size, numRead = 3, numWrite = 2))
-  val exceptionModule = Module(new AsyncDataModuleTemplate(UInt(16.W), size, numRead = 3, numWrite = 2))
+  val exceptionModule = Module(new AsyncDataModuleTemplate(ExceptionVec(), size, numRead = 3, numWrite = 2))
   val coredataModule = Module(new CoredataModule(size, numRead = 3, numWrite = 3))
 
   // read data
@@ -262,8 +262,8 @@ class LoadQueueData(size: Int, wbNumRead: Int, wbNumWrite: Int) extends XSModule
 
   io.uncache.rdata.paddr := paddrModule.io.rdata(wbNumRead)
   io.uncache.rdata.mask := maskModule.io.rdata(wbNumRead)
-  io.uncache.rdata.data := exceptionModule.io.rdata(wbNumRead)
-  io.uncache.rdata.exception := coredataModule.io.rdata(wbNumRead)
+  io.uncache.rdata.data := coredataModule.io.rdata(wbNumRead)
+  io.uncache.rdata.exception := exceptionModule.io.rdata(wbNumRead)
   io.uncache.rdata.fwdMask := DontCare
   
   // write data

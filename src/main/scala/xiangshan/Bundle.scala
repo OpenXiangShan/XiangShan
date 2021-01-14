@@ -181,7 +181,7 @@ class CfiUpdateInfo extends XSBundle {
 class CtrlFlow extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
-  val exceptionVec = Vec(16, Bool())
+  val exceptionVec = ExceptionVec()
   val intrVec = Vec(12, Bool())
   val brUpdate = new CfiUpdateInfo
   val crossPageIPFFix = Bool()

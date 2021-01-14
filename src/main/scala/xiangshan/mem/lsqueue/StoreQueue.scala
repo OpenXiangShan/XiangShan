@@ -52,7 +52,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   dataModule.io := DontCare
   val vaddrModule = Module(new AsyncDataModuleTemplate(UInt(VAddrBits.W), StoreQueueSize, numRead = 1, numWrite = StorePipelineWidth))
   vaddrModule.io := DontCare
-  val exceptionModule = Module(new AsyncDataModuleTemplate(UInt(16.W), StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth))
+  val exceptionModule = Module(new AsyncDataModuleTemplate(ExceptionVec(), StoreQueueSize, numRead = StorePipelineWidth, numWrite = StorePipelineWidth))
   exceptionModule.io := DontCare
 
   // state & misc
@@ -126,7 +126,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
     exceptionModule.io.wen(i) := false.B
     when(io.storeIn(i).fire()) {
       val stWbIndex = io.storeIn(i).bits.uop.sqIdx.value
-      val hasException = io.storeIn(i).bits.uop.cf.exceptionVec.asUInt.orR
+      val hasException = selectStore(io.storeIn(i).bits.uop.cf.exceptionVec, false).asUInt.orR
       val hasWritebacked = !io.storeIn(i).bits.mmio || hasException
       datavalid(stWbIndex) := hasWritebacked
       writebacked(stWbIndex) := hasWritebacked
@@ -146,7 +146,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
       vaddrModule.io.wen(i) := true.B
 
       exceptionModule.io.waddr(i) := stWbIndex
-      exceptionModule.io.wdata(i) := io.storeIn(i).bits.uop.cf.exceptionVec.asUInt
+      exceptionModule.io.wdata(i) := selectStore(io.storeIn(i).bits.uop.cf.exceptionVec)
       exceptionModule.io.wen(i) := true.B
 
       mmio(stWbIndex) := io.storeIn(i).bits.mmio
@@ -258,7 +258,7 @@ class StoreQueue extends XSModule with HasDCacheParameters with HasCircularQueue
   io.mmioStout.valid := allocated(deqPtr) && datavalid(deqPtr) && !writebacked(deqPtr)
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.uop.cf.exceptionVec := exceptionModule.io.rdata(0).asBools
+  io.mmioStout.bits.uop.cf.exceptionVec := selectStore(exceptionModule.io.rdata(0))
   io.mmioStout.bits.data := dataModuleRead(0).data // dataModuleRead.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare

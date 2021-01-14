@@ -156,19 +156,69 @@ trait HasExceptionNO {
   def storePageFault      = 15
 
   val ExcPriority = Seq(
-      breakPoint, // TODO: different BP has different priority
-      instrPageFault,
-      instrAccessFault,
-      illegalInstr,
-      instrAddrMisaligned,
-      ecallM, ecallS, ecallU,
-      storePageFault,
-      loadPageFault,
-      storeAccessFault,
-      loadAccessFault,
-      storeAddrMisaligned,
-      loadAddrMisaligned
+    breakPoint, // TODO: different BP has different priority
+    instrPageFault,
+    instrAccessFault,
+    illegalInstr,
+    instrAddrMisaligned,
+    ecallM, ecallS, ecallU,
+    storePageFault,
+    loadPageFault,
+    storeAccessFault,
+    loadAccessFault,
+    storeAddrMisaligned,
+    loadAddrMisaligned
   )
+  val frontendSet = List(
+    // instrAddrMisaligned,
+    instrAccessFault,
+    illegalInstr,
+    instrPageFault
+  )
+  val csrSet = List(
+    illegalInstr,
+    breakPoint,
+    ecallU,
+    ecallS,
+    ecallM
+  )
+  val loadUnitSet = List(
+    loadAddrMisaligned,
+    loadAccessFault,
+    loadPageFault
+  )
+  val storeUnitSet = List(
+    storeAddrMisaligned,
+    storeAccessFault,
+    storePageFault
+  )
+  val atomicsUnitSet = (loadUnitSet ++ storeUnitSet).distinct
+  val allPossibleSet = (frontendSet ++ csrSet ++ loadUnitSet ++ storeUnitSet).distinct
+  def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true): Vec[Bool] = {
+    if (dontCareBits) {
+      val new_vec = Wire(ExceptionVec())
+      new_vec := DontCare
+      select.map(i => new_vec(i) := vec(i))
+      return new_vec
+    }
+    else {
+      val new_vec = Wire(Vec(select.length, Bool()))
+      select.zipWithIndex.map{ case(s, i) => new_vec(i) := vec(s) }
+      return new_vec
+    }
+  }
+  def selectFrontend(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
+    partialSelect(vec, frontendSet, dontCareBits)
+  def selectCSR(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
+    partialSelect(vec, csrSet, dontCareBits)
+  def selectLoad(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
+    partialSelect(vec, loadUnitSet, dontCareBits)
+  def selectStore(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
+    partialSelect(vec, storeUnitSet, dontCareBits)
+  def selectAtomics(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
+    partialSelect(vec, atomicsUnitSet, dontCareBits)
+  def selectAll(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
+    partialSelect(vec, allPossibleSet, dontCareBits)
 }
 
 class FpuCsrIO extends XSBundle {
@@ -666,6 +716,17 @@ class CSR extends FunctionUnit with HasCSRConst
   io.in.ready := true.B
   io.out.valid := valid
 
+  val csrExceptionVec = WireInit(cfIn.exceptionVec)
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
+  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
+  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
+  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
+  // Trigger an illegal instr exception when:
+  // * unimplemented csr is being read/written
+  // * csr access is illegal
+  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
+  cfOut.exceptionVec := csrExceptionVec
+
   /**
     * Exception and Intr
     */
@@ -696,23 +757,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && raiseException
   val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && raiseException
 
-  val csrExceptionVec = Wire(Vec(16, Bool()))
-  csrExceptionVec.map(_ := false.B)
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
-  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
-  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
-  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
-  // Trigger an illegal instr exception when:
-  // * unimplemented csr is being read/written
-  // * csr access is illegal
-  csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
-  csrExceptionVec(loadPageFault) := hasLoadPageFault
-  csrExceptionVec(storePageFault) := hasStorePageFault
-  val iduExceptionVec = cfIn.exceptionVec
-  val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
-  cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
-
-  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec.asUInt()
+  val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
   // if (!env.FPGAPlatform) {
@@ -852,7 +897,7 @@ class CSR extends FunctionUnit with HasCSRConst
 //    "Custom8"     -> (0xb22, "Custom8"             ),
 //    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
   ) ++ (
-    (0 until dcacheParameters.nMissEntries).map(i => 
+    (0 until dcacheParameters.nMissEntries).map(i =>
       ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (

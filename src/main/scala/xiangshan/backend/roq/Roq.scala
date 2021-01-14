@@ -51,12 +51,12 @@ class RoqEnqIO extends XSBundle {
 
 class RoqDispatchData extends RoqCommitInfo {
   val crossPageIPFFix = Bool()
-  val exceptionVec = Vec(16, Bool())
+  val exceptionVec = ExceptionVec()
 }
 
 class RoqWbData extends XSBundle {
   // mostly for exceptions
-  val exceptionVec = Vec(16, Bool())
+  val exceptionVec = ExceptionVec()
   val fflags = UInt(5.W)
   val flushPipe = Bool()
 }
@@ -67,7 +67,7 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
     val state = Input(UInt(2.W))
     val deq_v = Vec(CommitWidth, Input(Bool()))
     val deq_w = Vec(CommitWidth, Input(Bool()))
-    val deq_exceptionVec = Vec(CommitWidth, Input(UInt(16.W)))
+    val deq_exceptionVec = Vec(CommitWidth, Input(ExceptionVec()))
     val deq_flushPipe = Vec(CommitWidth, Input(Bool()))
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
@@ -80,15 +80,16 @@ class RoqDeqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
 
   val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RoqPtr))))
 
+  val possibleException = VecInit(io.deq_exceptionVec.map(selectAll(_, false)))
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
   val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
-  val exceptionEnable = io.deq_w(0) && (io.deq_exceptionVec(0).orR || io.deq_flushPipe(0))
+  val exceptionEnable = io.deq_w(0) && (possibleException(0).asUInt.orR || io.deq_flushPipe(0))
   val redirectOutValid = io.state === 0.U && io.deq_v(0) && (intrEnable || exceptionEnable)
 
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
-  val commitBlocked = VecInit((0 until CommitWidth).map(i => if (i == 0) false.B else io.deq_exceptionVec(i).orR || io.deq_flushPipe(i)))
+  val commitBlocked = VecInit((0 until CommitWidth).map(i => if (i == 0) false.B else possibleException(i).asUInt.orR || io.deq_flushPipe(i)))
   val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) && !commitBlocked(i)))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B)
   // when io.intrBitSetReg, only one instruction is allowed to commit
@@ -115,7 +116,7 @@ class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
     val state = Input(UInt(2.W))
     val deq_v = Input(Bool())
     val deq_w = Input(Bool())
-    val deq_exceptionVec = Input(UInt(16.W))
+    val deq_exceptionVec = Input(ExceptionVec())
     val deq_flushPipe = Input(Bool())
     val intrBitSetReg = Input(Bool())
     val hasNoSpecExec = Input(Bool())
@@ -134,7 +135,7 @@ class RoqEnqPtrWrapper extends XSModule with HasCircularQueuePtrHelper {
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
   val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && !CommitType.isLoadStore(io.commitType)
-  val exceptionEnable = io.deq_w && (io.deq_exceptionVec.orR || io.deq_flushPipe)
+  val exceptionEnable = io.deq_w && (selectAll(io.deq_exceptionVec, false).asUInt.orR || io.deq_flushPipe)
   val redirectOutValid = io.state === 0.U && io.deq_v && (intrEnable || exceptionEnable)
 
   // enqueue
@@ -261,6 +262,8 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   val writebackData = Module(new SyncDataModuleTemplate(new RoqWbData, RoqSize, CommitWidth, numWbPorts))
   val writebackDataRead = writebackData.io.rdata
 
+  // val exceptionVecWritePortNum = RenameWidth + 1 + 2 + 2 // CSR, 2*load, 2*store
+  // val exceptionData = Module(new SyncDataModuleTemplate(ExceptionVec(), RoqSize, CommitWidth, exceptionVecWritePortNum))
   def mergeExceptionVec(dpData: RoqDispatchData, wbData: RoqWbData) = {
     // these exceptions can be determined before dispatch.
     // by default, let all exceptions be determined by dispatch.
@@ -490,7 +493,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   deqPtrGenModule.io.state := state
   deqPtrGenModule.io.deq_v := commit_v
   deqPtrGenModule.io.deq_w := commit_w
-  deqPtrGenModule.io.deq_exceptionVec := VecInit(dispatchDataRead.zip(writebackDataRead).map{ case (d, w) => mergeExceptionVec(d, w).asUInt })
+  deqPtrGenModule.io.deq_exceptionVec := VecInit(dispatchDataRead.zip(writebackDataRead).map{ case (d, w) => mergeExceptionVec(d, w) })
   deqPtrGenModule.io.deq_flushPipe := writebackDataRead.map(_.flushPipe)
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec
@@ -502,7 +505,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   enqPtrGenModule.io.state := state
   enqPtrGenModule.io.deq_v := commit_v(0)
   enqPtrGenModule.io.deq_w := commit_w(0)
-  enqPtrGenModule.io.deq_exceptionVec := deqExceptionVec.asUInt
+  enqPtrGenModule.io.deq_exceptionVec := deqExceptionVec
   enqPtrGenModule.io.deq_flushPipe := writebackDataRead(0).flushPipe
   enqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   enqPtrGenModule.io.hasNoSpecExec := hasNoSpecExec

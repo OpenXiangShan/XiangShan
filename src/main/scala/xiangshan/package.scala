@@ -108,4 +108,8 @@ package object xiangshan {
     def flushItself(level: UInt) = level(0)
     def isException(level: UInt) = level(1) && level(0)
   }
+
+  object ExceptionVec {
+    def apply() = Vec(16, Bool())
+  }
 }
