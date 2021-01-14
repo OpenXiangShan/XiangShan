@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.ExcitingUtils._
+import xiangshan.backend.decode.ImmUnion
 
 
 class BrqPtr extends CircularQueuePtr(BrqPtr.BrqSize) with HasCircularQueuePtrHelper {
@@ -69,8 +70,14 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   val s_idle :: s_wb :: Nil = Enum(2)
 
+  class DecodeEnqBrqData extends Bundle {
+    val cfiUpdateInfo = new CfiUpdateInfo
+    // we use this to calculate branch target
+    val imm12 = UInt(12.W)
+  }
+
   // data and state
-  val decodeData = Module(new SyncDataModuleTemplate(new ExuOutput, BrqSize, 2, DecodeWidth))
+  val decodeData = Module(new SyncDataModuleTemplate(new DecodeEnqBrqData, BrqSize, 2, DecodeWidth))
   val writebackData = Module(new SyncDataModuleTemplate(new ExuOutput, BrqSize, 2, exuParameters.AluCnt + exuParameters.JmpCnt))
   val ptrFlagVec = Reg(Vec(BrqSize, Bool()))
   val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
@@ -109,9 +116,14 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   val brUpdateReadIdx = Mux(io.redirect.bits.flushItself(), io.redirect.bits.brTag - 1.U, io.redirect.bits.brTag)
-  val brUpdateReadEntry = Wire(new ExuOutput)
+  val brUpdateReadEntry = Wire(new CfiUpdateInfo)
   io.cfiInfo.valid := RegNext(io.redirect.valid || wbValid)
-  io.cfiInfo.bits := brUpdateReadEntry.brUpdate
+  io.cfiInfo.bits := brUpdateReadEntry
+  io.cfiInfo.bits.target := RegNext(Mux(io.redirect.bits.flushItself(),
+    io.redirect.bits.target,
+    wbEntry.brUpdate.target
+  ))
+  io.cfiInfo.bits.brTarget := io.cfiInfo.bits.target
   io.cfiInfo.bits.brTag := RegNext(brUpdateReadIdx)
   io.cfiInfo.bits.isReplay := RegNext(io.redirect.bits.flushItself())
   io.cfiInfo.bits.isMisPred := RegNext(wbIsMisPred)
@@ -183,19 +195,35 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     }
   }
 
-  def mergeDecodeWbData(dec: ExuOutput, wb: ExuOutput) : ExuOutput = {
+  def mergeWbEntry(dec: DecodeEnqBrqData, wb: ExuOutput) : ExuOutput = {
     val mergeData = Wire(new ExuOutput)
-    mergeData := dec
     // only writeback necessary information
     mergeData.uop := wb.uop
     mergeData.data := wb.data
     mergeData.fflags := wb.fflags
     mergeData.redirectValid := wb.redirectValid
+
+    // calculate target pc
+    val pc = dec.cfiUpdateInfo.pc
+    val offset = SignExt(ImmUnion.B.toImm32(dec.imm12), VAddrBits)
+    val snpc = pc + Mux(dec.cfiUpdateInfo.pd.isRVC, 2.U, 4.U)
+    val bnpc = pc + offset
+    val branch_pc = Mux(wb.brUpdate.taken, bnpc, snpc)
+    val redirectTarget = Mux(dec.cfiUpdateInfo.pd.isBr, branch_pc, wb.redirect.target)
+
     mergeData.redirect := wb.redirect
+    mergeData.redirect.target := redirectTarget
     mergeData.debug := wb.debug
-    mergeData.brUpdate.target := wb.brUpdate.target
-    mergeData.brUpdate.brTarget := wb.brUpdate.brTarget
+    mergeData.brUpdate := dec.cfiUpdateInfo
+    mergeData.brUpdate.target := redirectTarget
+    mergeData.brUpdate.brTarget := redirectTarget
     mergeData.brUpdate.taken := wb.brUpdate.taken
+    mergeData
+  }
+
+  def mergeBrUpdateEntry(dec: DecodeEnqBrqData, wb: ExuOutput): CfiUpdateInfo = {
+    val mergeData = WireInit(dec.cfiUpdateInfo)
+    mergeData.taken := wb.brUpdate.taken
     mergeData
   }
 
@@ -203,11 +231,11 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   decodeData.io.raddr(1) := brUpdateReadIdx.value
   decodeData.io.wen := VecInit(io.enq.req.map(_.fire()))
   decodeData.io.waddr := VecInit(enqBrTag.map(_.value))
-  decodeData.io.wdata.zip(io.enq.req).map{ case (wdata, req) => {
-    wdata := DontCare
-    wdata.brUpdate := req.bits.brUpdate
-    wdata.brUpdate.pc := req.bits.pc
-  }}
+  decodeData.io.wdata.zip(io.enq.req).foreach{ case (wdata, req) =>
+    wdata.cfiUpdateInfo := req.bits.brUpdate
+    wdata.cfiUpdateInfo.pc := req.bits.pc
+    wdata.imm12 := ImmUnion.B.minBitsFromInstr(req.bits.instr)
+  }
 
   writebackData.io.raddr(0) := writebackPtr_next.value
   writebackData.io.raddr(1) := brUpdateReadIdx.value
@@ -215,8 +243,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   writebackData.io.waddr := VecInit(io.exuRedirectWb.map(_.bits.redirect.brTag.value))
   writebackData.io.wdata := VecInit(io.exuRedirectWb.map(_.bits))
 
-  wbEntry := mergeDecodeWbData(decodeData.io.rdata(0), writebackData.io.rdata(0))
-  brUpdateReadEntry := mergeDecodeWbData(decodeData.io.rdata(1), writebackData.io.rdata(1))
+  wbEntry := mergeWbEntry(decodeData.io.rdata(0), writebackData.io.rdata(0))
+  brUpdateReadEntry := mergeBrUpdateEntry(decodeData.io.rdata(1), writebackData.io.rdata(1))
 
 
   // Debug info
