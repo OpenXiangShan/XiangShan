@@ -422,15 +422,15 @@ class ReservationStationData
   }
 
   when (enqEnReg) {
+    val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+      SignExt(enqUopReg.cf.pc, XLEN),
+      io.srcRegValue(0)
+    )
     exuCfg match {
       case Exu.jumpExeUnitCfg =>
-        val src1Data = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
-          SignExt(enqUopReg.cf.pc, XLEN),
-          io.srcRegValue(0)
-        )
-        dataWrite(enqPtrReg, 0, src1Data)
+        dataWrite(enqPtrReg, 0, src1Mux)
       case Exu.aluExeUnitCfg =>
-        dataWrite(enqPtrReg, 0, io.srcRegValue(0))
+        dataWrite(enqPtrReg, 0, src1Mux)
         // TODO: opt this, a full map is not necesscary here
         val imm32 = LookupTree(
           enqUopReg.ctrl.selImm,
