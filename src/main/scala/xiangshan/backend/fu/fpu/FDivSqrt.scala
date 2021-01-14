@@ -38,7 +38,9 @@ class FDivSqrt extends FPUSubModule {
       }
     }
     is(s_finish){
-      state := s_idle
+      when(io.out.fire() || kill){
+        state := s_idle
+      }
     }
   }
 
