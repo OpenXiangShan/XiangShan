@@ -58,6 +58,7 @@ class FpuCsrIO extends XSBundle {
 
 
 class PerfCounterIO extends XSBundle {
+  val retiredInstr = Input(UInt(3.W))
   val value = Input(UInt(XLEN.W))
 }
 
@@ -66,7 +67,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val csrio = IO(new Bundle {
     // output (for func === CSROpType.jmp)
     val redirectOut = ValidIO(UInt(VAddrBits.W))
-    val perf = Vec(NumPerfCounters, new PerfCounterIO)
+    val perf = new PerfCounterIO
     val isPerfCnt = Output(Bool())
     // to FPU
     val fpu = Flipped(new FpuCsrIO)
@@ -331,6 +332,10 @@ class CSR extends FunctionUnit with HasCSRConst
   val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfEvents = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val mcountinhibit = RegInit(0.U(XLEN.W))
+  val mcycle = RegInit(0.U(XLEN.W))
+  mcycle := mcycle + 1.U
+  val minstret = RegInit(0.U(XLEN.W))
+  minstret := minstret + RegNext(csrio.perf.retiredInstr)
   
   // CSR reg map
   val basicPrivMapping = Map(
@@ -405,7 +410,11 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
   )
 
-  var perfCntMapping = Map(MaskedRegMap(Mcountinhibit, mcountinhibit))
+  var perfCntMapping = Map(
+    MaskedRegMap(Mcountinhibit, mcountinhibit),
+    MaskedRegMap(Mcycle, mcycle),
+    MaskedRegMap(Minstret, minstret),
+  )
   val MhpmcounterStart = Mhpmcounter3
   val MhpmeventStart   = Mhpmevent3
   for (i <- 0 until nrPerfCnts) {
@@ -708,17 +717,17 @@ class CSR extends FunctionUnit with HasCSRConst
   val emuPerfCntList = Map(
     // "Mcycle"    -> (0x1000, "perfCntCondMcycle"     ),
     // "Minstret"  -> (0x1002, "perfCntCondMinstret"   ),
-    "MbpInstr"    -> (0x1003, "perfCntCondMbpInstr" ),
-    "MbpRight"    -> (0x1004, "perfCntCondMbpRight" ),
-    "MbpWrong"    -> (0x1005, "perfCntCondMbpWrong" ),
-    "MbpBRight"   -> (0x1006, "perfCntCondMbpBRight"),
-    "MbpBWrong"   -> (0x1007, "perfCntCondMbpBWrong"),
-    "MbpJRight"   -> (0x1008, "perfCntCondMbpJRight"),
-    "MbpJWrong"   -> (0x1009, "perfCntCondMbpJWrong"),
-    "MbpIRight"   -> (0x100a, "perfCntCondMbpIRight"),
-    "MbpIWrong"   -> (0x100b, "perfCntCondMbpIWrong"),
-    "MbpRRight"   -> (0x100c, "perfCntCondMbpRRight"),
-    "MbpRWrong"   -> (0x100d, "perfCntCondMbpRWrong"),
+    "BpInstr"     -> (0x1003, "perfCntCondBpInstr" ),
+    "BpRight"     -> (0x1004, "perfCntCondBpRight" ),
+    "BpWrong"     -> (0x1005, "perfCntCondBpWrong" ),
+    "BpBRight"    -> (0x1006, "perfCntCondBpBRight"),
+    "BpBWrong"    -> (0x1007, "perfCntCondBpBWrong"),
+    "BpJRight"    -> (0x1008, "perfCntCondBpJRight"),
+    "BpJWrong"    -> (0x1009, "perfCntCondBpJWrong"),
+    "BpIRight"    -> (0x100a, "perfCntCondBpIRight"),
+    "BpIWrong"    -> (0x100b, "perfCntCondBpIWrong"),
+    "BpRRight"    -> (0x100c, "perfCntCondBpRRight"),
+    "BpRWrong"    -> (0x100d, "perfCntCondBpRWrong"),
     "RoqWalk"     -> (0x100f, "perfCntCondRoqWalk"  ),
     "DTlbReqCnt0" -> (0x1015, "perfCntDtlbReqCnt0"  ),
     "DTlbReqCnt1" -> (0x1016, "perfCntDtlbReqCnt1"  ),
@@ -740,7 +749,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
     // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
     // "ExitLoop3" -> (0x102e, "CntExitLoop3")
-    // "Ml2cacheHit" -> (0x1023, "perfCntCondMl2cacheHit")
+    // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i => 
       ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))

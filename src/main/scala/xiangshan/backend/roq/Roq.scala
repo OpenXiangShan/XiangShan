@@ -38,6 +38,9 @@ class RoqCSRIO extends XSBundle {
 
   val fflags = Output(Valid(UInt(5.W)))
   val dirty_fs = Output(Bool())
+  val perfinfo = new Bundle {
+    val retiredInstr = Output(UInt(3.W))
+  }
 }
 
 class RoqEnqIO extends XSBundle {
@@ -721,6 +724,7 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val instrCnt = RegInit(0.U(64.W))
     val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
     instrCnt := instrCnt + retireCounter
+    io.csr.perfinfo.retiredInstr := RegNext(retireCounter);
 
     XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
     val retireCounterFix = Mux(io.redirectOut.valid, 1.U, retireCounter)

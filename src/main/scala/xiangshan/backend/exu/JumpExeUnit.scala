@@ -21,6 +21,9 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     val memExceptionVAddr = Input(UInt(VAddrBits.W))
     val externalInterrupt = new ExternalInterruptIO
     val tlb = Output(new TlbCsrBundle)
+    val perfinfo = new Bundle {
+      val retiredInstr = Input(UInt(3.W))
+    }
   })
   val fenceio = IO(new Bundle {
     val sfence = Output(new SfenceBundle)
@@ -42,6 +45,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
   }.get
 
   csr.csrio.perf <> DontCare
+  csr.csrio.perf.retiredInstr <> csrio.perfinfo.retiredInstr
   csr.csrio.fpu.fflags <> csrio.fflags
   csr.csrio.fpu.isIllegal := false.B
   csr.csrio.fpu.dirty_fs <> csrio.dirty_fs
