@@ -73,6 +73,7 @@ class JumpExeUnit extends Exu(jumpExeUnitCfg)
     io.toInt.bits.redirect.roqIdx := uop.roqIdx
     io.toInt.bits.redirect.target := csr.csrio.redirectOut.bits
     io.toInt.bits.redirect.pc := uop.cf.pc
+    io.toInt.bits.debug.isPerfCnt := csr.csrio.isPerfCnt
   }.elsewhen(jmp.io.out.valid){
     io.toInt.bits.redirectValid := jmp.redirectOutValid
     io.toInt.bits.redirect := jmp.redirectOut

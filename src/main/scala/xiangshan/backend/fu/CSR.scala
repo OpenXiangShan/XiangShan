@@ -9,11 +9,11 @@ import xiangshan.backend._
 import xiangshan.backend.fu.util._
 import utils.XSDebug
 
-object hartId extends Function0[Int] {
+object hartId extends (() => Int) {
   var x = 0
   def apply(): Int = {
     x = x + 1
-    return x-1
+    x-1
   }
 }
 
@@ -67,6 +67,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // output (for func === CSROpType.jmp)
     val redirectOut = ValidIO(UInt(VAddrBits.W))
     val perf = Vec(NumPerfCounters, new PerfCounterIO)
+    val isPerfCnt = Output(Bool())
     // to FPU
     val fpu = Flipped(new FpuCsrIO)
     // from rob
@@ -324,6 +325,12 @@ class CSR extends FunctionUnit with HasCSRConst
   val emuPerfCntsLoMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1000 + i, emuPerfCnts(i)))
   val emuPerfCntsHiMapping = (0 until nrEmuPerfCnts).map(i => MaskedRegMap(0x1080 + i, emuPerfCnts(i)(63, 32)))
   println(s"CSR: hasEmuPerfCnt:${hasEmuPerfCnt}")
+
+  // Perf Counter
+  val nrPerfCnts = 29  // 3...31
+  val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
+  val perfEvents = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
+  val mcountinhibit = RegInit(0.U(XLEN.W))
   
   // CSR reg map
   val basicPrivMapping = Map(
@@ -398,7 +405,16 @@ class CSR extends FunctionUnit with HasCSRConst
     MaskedRegMap(PmpaddrBase + 3, pmpaddr3)
   )
 
-  val mapping = basicPrivMapping ++ 
+  var perfCntMapping = Map(MaskedRegMap(Mcountinhibit, mcountinhibit))
+  val MhpmcounterStart = Mhpmcounter3
+  val MhpmeventStart   = Mhpmevent3
+  for (i <- 0 until nrPerfCnts) {
+    perfCntMapping += MaskedRegMap(MhpmcounterStart + i, perfCnts(i))
+    perfCntMapping += MaskedRegMap(MhpmeventStart + i, perfEvents(i))
+  }
+
+  val mapping = basicPrivMapping ++
+                perfCntMapping ++
                 pmpMapping ++ 
                 emuPerfCntsLoMapping ++ 
                 (if (XLEN == 32) emuPerfCntsHiMapping else Nil) ++
@@ -415,6 +431,8 @@ class CSR extends FunctionUnit with HasCSRConst
     CSROpType.seti -> (rdata | csri),
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
+
+  csrio.isPerfCnt := (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U)
 
   // satp wen check
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
@@ -749,7 +767,7 @@ class CSR extends FunctionUnit with HasCSRConst
     // display all perfcnt when nooptrap is executed
     when (xstrap) {
       printf("======== PerfCnt =========\n")
-      emuPerfCntList.toSeq.sortBy(_._2._1).foreach { case (str, (address, boringId)) =>
+      emuPerfCntList.toSeq.sortBy(_._2._1).foreach { case (str, (address, _)) =>
         printf("%d <- " + str + "\n", readWithScala(address))
       }
     }

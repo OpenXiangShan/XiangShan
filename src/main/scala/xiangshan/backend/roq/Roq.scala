@@ -696,10 +696,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       val uop = debug_microOp(idx)
       val DifftestSkipSC = false
       if(!DifftestSkipSC){
-        skip(i) := debug_exuDebug(idx).isMMIO && io.commits.valid(i)
+        skip(i) := (debug_exuDebug(idx).isMMIO || debug_exuDebug(idx).isPerfCnt) && io.commits.valid(i)
       }else{
         skip(i) := (
             debug_exuDebug(idx).isMMIO ||
+            debug_exuDebug(idx).isPerfCnt ||
             uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
             uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
           ) && io.commits.valid(i)
