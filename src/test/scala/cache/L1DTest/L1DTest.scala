@@ -32,15 +32,15 @@ class L1DTestTopIO extends Bundle {
 
 class L1DTestTop()(implicit p: Parameters) extends LazyModule {
   val dcache = LazyModule(new DCache())
-  val l2_ident = LazyModule(new DebugIdentityNode())
   val dcache_outer = LazyModule(new DebugIdentityNode())
   val slave = LazyModule(new TLCSlaveMMIO())
 
-  slave.node := l2_ident.node := dcache_outer.node := dcache.clientNode
+  slave.node := dcache_outer.node := dcache.clientNode
 
   lazy val module = new LazyModuleImp(this) with HasXSLog {
     val io = IO(new L1DTestTopIO())
     dcache.module.io.lsu <> io.dcacheIO
+    slave.module.io <> io.slaveIO
   }
 }
 
@@ -64,9 +64,10 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     val rand = new Random(0xbeef)
     val addr_pool = {
-      for (_ <- 0 to 32) yield BigInt(rand.nextInt(0xfffc) << 6) | 0x80000000L.U.litValue()
+      for (_ <- 0 until 10) yield BigInt(rand.nextInt(0xff) << 12) | 0x80000000L.U.litValue()
     }.distinct.toList // align to block size
     val addr_list_len = addr_pool.length
+    println(f"addr pool length: $addr_list_len")
     val probeProbMap = Map(nothing -> 0.4, branch -> 0.5, trunk -> 0.1)
 
     def peekBigInt(source: Data): BigInt = {
@@ -109,12 +110,12 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.slaveIO.DChannel.valid.poke(false.B)
 
 
-        val total_clock = 150000
+        val total_clock = 500
 
         c.reset.poke(true.B)
         c.clock.step(100)
         c.reset.poke(false.B)
-        c.clock.setTimeout(200)
+        c.clock.setTimeout(8192)
 
         val slaveIO = c.io.slaveIO
 
@@ -129,20 +130,20 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         val coreAgent = new CoreAgent(ID = 0, name = "core", coreStateList, serialList, scoreboard)
 
         val sio = slaveIO
-        for (_ <- 0 until total_clock) {
+        for (cl <- 0 until total_clock) {
           //========= core trans ===========
           //randomly add when low size
-          if (coreAgent.outerLoad.size <= 6) {
-            if (true) {
-              for (i <- 0 until 16) {
+          if (coreAgent.outerLoad.size <= 0) {
+            if (cl % 2048 == 0) {
+              for (i <- 0 until 4) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addLoad(addr)
               }
             }
           }
-          if (coreAgent.outerStore.size <= 6) {
-            if (true) {
-              for (i <- 0 until 16) {
+          if (coreAgent.outerStore.size <= 0) {
+            if (cl % 1024 == 0) {
+              for (i <- 0 until 9) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addStore(addr)
               }
@@ -183,9 +184,9 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
           //========= slave ============
           //randomly add when empty
-          if (slaveAgent.innerProbe.size <= 6) {
-            if (true) {
-              for (i <- 0 until 16) {
+          if (slaveAgent.innerProbe.size <= 0) {
+            if (cl % 4096 == 0) {
+              for (i <- 0 until 2) {
                 val addr = getRandomElement(addr_pool, rand)
                 val targetPerm = sample(probeProbMap, rand)
                 slaveAgent.addProbe(addr, targetPerm)
@@ -308,7 +309,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
             coreAgent.fireStoreReq()
           }
           val storePortRespValid = peekBoolean(coreIO.store.resp.valid)
-          if(storePortRespValid && storePortRespReady){
+          if (storePortRespValid && storePortRespReady) {
             val storeM = new LitDCacheLineResp(
               data = peekBigInt(coreIO.store.resp.bits.data),
               paddr = peekBigInt(coreIO.store.resp.bits.meta.paddr),
@@ -318,7 +319,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
           }
 
           val lsqRespValid = peekBoolean(coreIO.lsq.valid)
-          if(lsqRespValid){
+          if (lsqRespValid) {
             val lsqM = new LitDCacheLineResp(
               data = peekBigInt(coreIO.lsq.bits.data),
               paddr = peekBigInt(coreIO.lsq.bits.addr),

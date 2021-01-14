@@ -58,6 +58,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     if (!resp.miss) {
       val wc = wordInBlock(loadAddr)
       insertMaskedRead(loadAddr, dataConcatWord(0, resp.data, wc), genWordMaskInBlock(loadAddr, loadT.req.get.mask))
+      outerLoad -= loadT
     }
     else if (resp.replay) {
       outerLoad -= loadT //drop it
@@ -68,6 +69,14 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
       lsqWaiting.enqueue(loadT)
     }
 
+  }
+
+  def killS1(i: Int): Unit = {
+    val l = s1_loadTrans(i)
+    if (l.isDefined){
+      outerLoad -= l.get
+      s1_loadTrans(i) = None
+    }
   }
 
   def s1Paddr(i: Int): BigInt = {
