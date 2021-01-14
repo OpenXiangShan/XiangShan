@@ -680,6 +680,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
   ExcitingUtils.addSink(difftestIntrNO, s"difftestIntrNOfromCSR$id")
   ExcitingUtils.addSink(difftestCause, s"difftestCausefromCSR$id")
 
+  val instrCnt = RegInit(0.U(64.W))
+  val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
+  instrCnt := instrCnt + retireCounter
+  io.csr.perfinfo.retiredInstr := RegNext(retireCounter)
+
   if(!env.FPGAPlatform) {
 
     //difftest signals
@@ -720,11 +725,6 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     val scFailed = !diffTestDebugLrScValid(0) &&
       debug_deqUop.ctrl.fuType === FuType.mou &&
       (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
-
-    val instrCnt = RegInit(0.U(64.W))
-    val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
-    instrCnt := instrCnt + retireCounter
-    io.csr.perfinfo.retiredInstr := RegNext(retireCounter);
 
     XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
     val retireCounterFix = Mux(io.redirectOut.valid, 1.U, retireCounter)
