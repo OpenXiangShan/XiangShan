@@ -238,9 +238,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   val tlbl2 = Module(new SRAMTemplate(new TlbEntries(num = TlbL2LineSize, tagLen = TlbL2TagLen), set = TlbL2LineNum)) // (total 256, one line is 4 => 64 lines)
   val tlbv  = RegInit(0.U(TlbL2LineNum.W)) // valid
   val tlbg  = Reg(UInt(TlbL2LineNum.W)) // global
+
+  val sp = Reg(Vec(TlbL2SPEntrySize, new TlbEntry(true, true))) // (total 16, one is 4M or 1G)
+  val spv = RegInit(0.U(TlbL2SPEntrySize.W))
+  val spg = Reg(UInt(TlbL2SPEntrySize.W))
+
   val ptwl1 = Reg(Vec(PtwL1EntrySize, new PtwEntry(tagLen = PtwL1TagLen)))
   val l1v   = RegInit(0.U(PtwL1EntrySize.W)) // valid
   val l1g   = Reg(UInt(PtwL1EntrySize.W))
+
   val ptwl2 = Module(new SRAMTemplate(new PtwEntries(num = PtwL2LineSize, tagLen = PtwL2TagLen), set = PtwL2LineNum)) // (total 256, one line is 4 => 64 lines)
   val l2v   = RegInit(0.U(PtwL2LineNum.W)) // valid
   val l2g   = Reg(UInt(PtwL2LineNum.W)) // global
@@ -279,7 +285,18 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
     XSDebug(tlbl2.io.r.req.valid, p"tlbl2 Read rIdx:${Hexadecimal(ridx)}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 RamData:${ramData}\n")
     XSDebug(RegNext(tlbl2.io.r.req.valid), p"tlbl2 v:${vidx} hit:${ramData.hit(req.vpn)} tlbPte:${ramData.get(req.vpn)}\n")
-    (ramData.hit(req.vpn) && vidx, ramData.get(req.vpn))
+
+    val spHitVec = sp.zipWithIndex.map{ case (a,i) =>
+      RegNext(a.hit(req.vpn) && spv(i), validOneCycle)
+    }
+    val spHitData = ParallelMux(spHitVec zip sp)
+    val spHit = Cat(spHitVec).orR
+
+    XSDebug(RegNext(validOneCycle), p"tlbl2 sp: spHit:${spHit} spPte:${spHitData}\n")
+
+    assert(RegNext(!(ramData.hit(req.vpn) && spHit)), "pages should not be normal page and super page as well")
+
+    (ramData.hit(req.vpn) && vidx || spHit, Mux(spHit, spHitData, ramData.get(req.vpn)))
   }
 
   /*
@@ -434,13 +451,15 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
   when (memRespFire && !memPte.isPf(level) && !sfenceLatch) {
     when (level===0.U && !memPte.isLeaf) {
       val refillIdx = LFSR64()(log2Up(PtwL1EntrySize)-1,0) // TODO: may be LRU
+      val rfOH = UIntToOH(refillIdx)
       ptwl1(refillIdx).refill(l1addr, memSelData)
-      l1v := l1v | UIntToOH(refillIdx)
-      l1g := (l1g & ~UIntToOH(refillIdx)) | Mux(memPte.perm.g, UIntToOH(refillIdx), 0.U)
+      l1v := l1v | rfOH
+      l1g := (l1g & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
     }
     when (level===1.U && !memPte.isLeaf) {
       val l2addrStore = RegEnable(l2addr, memReqFire && state===state_req && level===1.U)
       val refillIdx = genPtwL2Idx(l2addrStore) //getVpnn(req.vpn, 1)(log2Up(PtwL2EntrySize)-1, 0)
+      val rfOH = UIntToOH(refillIdx)
       //TODO: check why the old refillIdx is right
 
       assert(ptwl2.io.w.req.ready)
@@ -451,12 +470,13 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         data = ps,
         waymask = -1.S.asUInt
       )
-      l2v := l2v | UIntToOH(refillIdx)
-      l2g := (l2g & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
+      l2v := l2v | rfOH
+      l2g := (l2g & ~rfOH) | Mux(Cat(memPtes.map(_.perm.g)).andR, rfOH, 0.U)
       XSDebug(p"ptwl2 RefillIdx:${Hexadecimal(refillIdx)} ps:${ps}\n")
     }
     when (memPte.isLeaf() && (level===2.U)) {
       val refillIdx = genTlbL2Idx(req.vpn)//getVpnn(req.vpn, 0)(log2Up(TlbL2EntrySize)-1, 0)
+      val rfOH = UIntToOH(refillIdx)
       //TODO: check why the old refillIdx is right
 
       assert(tlbl2.io.w.req.ready)
@@ -467,9 +487,16 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
         data = ts,
         waymask = -1.S.asUInt
       )
-      tlbv := tlbv | UIntToOH(refillIdx)
-      tlbg := (tlbg & ~UIntToOH(refillIdx)) | Mux(Cat(memPtes.map(_.perm.g)).andR, UIntToOH(refillIdx), 0.U)
+      tlbv := tlbv | rfOH
+      tlbg := (tlbg & ~rfOH) | Mux(Cat(memPtes.map(_.perm.g)).andR, rfOH, 0.U)
       XSDebug(p"tlbl2 refillIdx:${Hexadecimal(refillIdx)} ts:${ts}\n")
+    }
+    when (memPte.isLeaf() && (level===1.U || level===0.U)) {
+      val refillIdx = LFSR64()(log2Up(TlbL2SPEntrySize)-1,0) // TODO: may be LRU
+      val rfOH = UIntToOH(refillIdx)
+      sp(refillIdx) := new TlbEntry().genTlbEntry(false, false, memSelData, Mux(level===3.U, 2.U, level), req.vpn)
+      spv := spv | rfOH
+      spg := (spg & ~rfOH) | Mux(memPte.perm.g, rfOH, 0.U)
     }
   }
 
@@ -488,25 +515,29 @@ class PTWImp(outer: PTW) extends PtwModule(outer){
       when (sfence.bits.rs2) {
         // all va && all asid
         tlbv := 0.U
-        tlbg := 0.U
+        spv := 0.U
+        // tlbg := 0.U
         l1v  := 0.U
         l2v  := 0.U
-        l2g  := 0.U
+        // l2g  := 0.U
       } .otherwise {
         // all va && specific asid except global
         tlbv := tlbv & tlbg
+        spv  := spv  & spg
         l1v  := l1v  & l1g
         l2v  := l2v  & l2g
       }
     } .otherwise {
+      val sfenceTlbL2IdxOH = UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
       when (sfence.bits.rs2) {
         // specific leaf of addr && all asid
-        tlbv := tlbv & ~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
-        tlbg := tlbg & ~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
+        tlbv := tlbv & ~sfenceTlbL2IdxOH
+        tlbg := tlbg & ~sfenceTlbL2IdxOH
       } .otherwise {
         // specific leaf of addr && specific asid
-        tlbv := tlbv & (~UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))| tlbg)
+        tlbv := tlbv & (~sfenceTlbL2IdxOH| tlbg)
       }
+      spv := 0.U
     }
   }
 

@@ -90,6 +90,7 @@ case class XSCoreParameters
   TlbEntrySize: Int = 32,
   TlbSPEntrySize: Int = 4,
   TlbL2EntrySize: Int = 256, // or 512
+  TlbL2SPEntrySize: Int = 16,
   PtwL1EntrySize: Int = 16,
   PtwL2EntrySize: Int = 256,
   NumPerfCounters: Int = 16,
@@ -167,6 +168,7 @@ trait HasXSParameter {
   val TlbEntrySize = core.TlbEntrySize
   val TlbSPEntrySize = core.TlbSPEntrySize
   val TlbL2EntrySize = core.TlbL2EntrySize
+  val TlbL2SPEntrySize = core.TlbL2SPEntrySize
   val PtwL1EntrySize = core.PtwL1EntrySize
   val PtwL2EntrySize = core.PtwL2EntrySize
   val NumPerfCounters = core.NumPerfCounters

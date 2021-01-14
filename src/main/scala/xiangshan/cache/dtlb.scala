@@ -73,60 +73,6 @@ object Compare {
   }
 }
 
-class TlbEntryData extends TlbBundle {
-  val ppn = UInt(ppnLen.W)
-  val perm = new PermBundle(hasV = false)
-  // TODO: change perm to every kinds of pf check
-
-  override def toPrintable: Printable = {
-    p"ppn:0x${Hexadecimal(ppn)} perm:${perm}"
-  }
-}
-
-class TlbEntry(superpage: Boolean = false, superpageOnly: Boolean = false) extends TlbBundle {
-  val tag = UInt(vpnLen.W) // tag is vpn
-  val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
-  // val asid = UInt(asidLen.W), asid maybe expensive to support, but useless
-  val data = new TlbEntryData
-
-  def vpnHit(vpn: UInt):Bool = {
-    if (superpage) {
-      val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
-      val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
-        Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
-      val mask = maskLevel(level)
-      (mask&this.tag) === (mask&vpn)
-    } else {
-      tag === vpn
-    }
-
-  }
-
-  // def asidHit(asid: UInt) = {
-  //   this.asid === asid
-  // }
-
-  def hit(vpn: UInt/*, asid: UInt*/):Bool = {
-    vpnHit(vpn) // && asidHit(asid)
-  }
-
-  def genTlbEntry(superPage: Boolean = false, superpageOnly: Boolean = false, pte: UInt, level: UInt, vpn: UInt/*, asid: UInt*/) = {
-    val e = Wire(new TlbEntry(superPage, superpageOnly))
-    if (superPage) { e.level := level }
-    e.tag := vpn
-    e.data.ppn := pte.asTypeOf(pteBundle).ppn
-    e.data.perm := pte.asTypeOf(pteBundle).perm
-    // e.asid := asid
-    e
-  }
-
-  override def toPrintable: Printable = {
-    p"vpn:0x${Hexadecimal(tag)} level:${level} data:${data}"
-  }
-
-  override def cloneType: this.type = (new TlbEntry(superpage, superpageOnly)).asInstanceOf[this.type]
-}
-
 // multi-read && single-write
 // input is data, output is hot-code(not one-hot)
 class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) extends TlbModule {
@@ -151,6 +97,54 @@ class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int) exten
   when (io.w.valid) {
     array(io.w.bits.index) := io.w.bits.data
   }
+}
+
+class TlbEntryData extends TlbBundle {
+  val ppn = UInt(ppnLen.W)
+  val perm = new PermBundle(hasV = false)
+  // TODO: change perm to every kinds of pf check
+
+  override def toPrintable: Printable = {
+    p"ppn:0x${Hexadecimal(ppn)} perm:${perm}"
+  }
+}
+
+class TlbEntry(superpage: Boolean = false, superpageOnly: Boolean = false) extends TlbBundle {
+  val tag = UInt(vpnLen.W) // tag is vpn
+  val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
+  val data = new TlbEntryData
+
+  def vpnHit(vpn: UInt):Bool = {
+    if (superpage) {
+      val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
+      val maskLevel = VecInit((Level-1 to 0 by -1).map{i => // NOTE: level 2 for 4KB, 1 for 2MB, 0 for 1GB
+        Reverse(VecInit(Seq.fill(vpnLen-i*vpnnLen)(true.B) ++ Seq.fill(i*vpnnLen)(false.B)).asUInt)})
+      val mask = maskLevel(level)
+      (mask&this.tag) === (mask&vpn)
+    } else {
+      tag === vpn
+    }
+
+  }
+
+  def hit(vpn: UInt):Bool = {
+    vpnHit(vpn)
+  }
+
+  def genTlbEntry(superPage: Boolean = false, superpageOnly: Boolean = false, pte: UInt, level: UInt, vpn: UInt) = {
+    val e = Wire(new TlbEntry(superPage, superpageOnly))
+    e.tag := vpn
+    e.level := level
+    e.data.ppn := pte.asTypeOf(pteBundle).ppn
+    e.data.perm := pte.asTypeOf(pteBundle).perm
+    e
+  }
+
+  override def toPrintable: Printable = {
+    p"vpn:0x${Hexadecimal(tag)} level:${level} data:${data}"
+  }
+
+  override def cloneType: this.type = (new TlbEntry(superpage, superpageOnly)).asInstanceOf[this.type]
 }
 
 class TlbEntries(num: Int, tagLen: Int) extends TlbBundle {
@@ -198,6 +192,7 @@ class TlbEntries(num: Int, tagLen: Int) extends TlbBundle {
     val t = Wire(new TlbEntry(false, false))
     val idx = idxClip(vpn)
     t.tag := vpn // Note: Use input vpn, not vpn in TlbL2
+    t.level := 2.U
     t.data.ppn := ppns(idx)
     t.data.perm := perms(idx)
     t
@@ -303,12 +298,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   // normal page: 4k
   val v = RegInit(0.U(TlbEntrySize.W))
   val pf = RegInit(0.U(TlbEntrySize.W))
-  val tag = Reg(Vec(TlbEntrySize, new TlbEntry))
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   val g = VecInit(entry.map(_.data.perm.g)).asUInt
-  // super page: 2M/1G
-  val sp_v = RegInit(0.U(TlbSPEntrySize.W))
-  // val pf = RegInit(0.U())
 
   /**
     * PTW refill
