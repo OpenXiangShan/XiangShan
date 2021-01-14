@@ -96,7 +96,7 @@ class FloatBlock
     
     rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
     rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
-    rsData.io.srcRegValue(2) := src3Value(readPortIndex(i))
+    if (cfg.fpSrcCnt > 2) rsData.io.srcRegValue(2) := src3Value(readPortIndex(i))
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData

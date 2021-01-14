@@ -52,6 +52,9 @@ class IcacheMissReq extends ICacheBundle
       this.waymask := missWaymask
       this.clientID := source
     }
+    override def toPrintable: Printable = {
+      p"addr=0x${Hexadecimal(addr)} setIdx=0x${Hexadecimal(setIdx)} waymask=${Binary(waymask)} clientID=${Binary(clientID)}"
+    }
 }
 
 class IcacheMissResp extends ICacheBundle
@@ -225,6 +228,18 @@ class IcacheMissQueue extends ICacheMissQueueModule
     when (io.mem_grant.bits.id === i.U) {
       entry.io.mem_grant <> io.mem_grant
     }
+
+    if (!env.FPGAPlatform) {
+      ExcitingUtils.addSource(
+        BoolStopWatch(
+          start = entry.io.req.fire(),
+          stop = entry.io.resp.fire() || entry.io.flush,
+          startHighPriority = true),
+        "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10),
+        Perf
+      )
+    }
+
     entry
   }
 

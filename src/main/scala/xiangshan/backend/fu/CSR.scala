@@ -741,6 +741,22 @@ class CSR extends FunctionUnit with HasCSRConst
     // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
     // "ExitLoop3" -> (0x102e, "CntExitLoop3")
     // "Ml2cacheHit" -> (0x1023, "perfCntCondMl2cacheHit")
+  ) ++ (
+    (0 until dcacheParameters.nMissEntries).map(i => 
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until icacheParameters.nMissEntries).map(i =>
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until l1plusPrefetcherParameters.nEntries).map(i =>
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
+  ) ++ (
+    (0 until l2PrefetcherParameters.nEntries).map(i =>
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+    ).toMap
   )
 
   emuPerfCntList.foreach {
