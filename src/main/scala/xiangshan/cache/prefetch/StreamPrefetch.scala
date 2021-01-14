@@ -122,7 +122,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
 
   // dequeue
   val hitIdx = io.update.bits.hitIdx
-  when (io.update.valid && !empty && valid(hitIdx)) {
+  when (io.update.valid && !empty && (isPrefetching(hitIdx) || valid(hitIdx))) {
     val headBeforehitIdx = head <= hitIdx && (hitIdx < tail || tail <= head)
     val hitIdxBeforeHead = hitIdx < tail && tail <= head
     when (headBeforehitIdx) {
@@ -132,6 +132,8 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     when (hitIdxBeforeHead) {
       (0 until streamSize).foreach(i => deqLater(i) := Mux(i.U >= head || i.U <= hitIdx, true.B, deqLater(i)))
     }
+    
+    XSDebug(io.update.valid && !empty && (isPrefetching(hitIdx) || valid(hitIdx)), p"hitIdx=${hitIdx} headBeforehitIdx=${headBeforehitIdx} hitIdxBeforeHead=${hitIdxBeforeHead}\n")
   }
 
   val deqValid = WireInit(VecInit(Seq.fill(streamSize)(false.B)))
@@ -143,8 +145,15 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     deqValid(idx) := deq
   }
 
-  (0 until streamSize).foreach(i => valid(i) := valid(i) && !deqValid(i))
-  (0 until streamSize).foreach(i => deqLater(i) := deqLater(i) && !deqValid(i))
+  // (0 until streamSize).foreach(i => valid(i) := valid(i) && !deqValid(i))
+  // (0 until streamSize).foreach(i => deqLater(i) := deqLater(i) && !deqValid(i))
+  for (i <- 0 until streamSize) {
+    when (deqValid(i)) {
+      valid(i) := false.B
+      deqLater(i) := false.B
+    }
+  }
+
   val nextHead = head + PopCount(deqValid)
   when (deqValid.asUInt.orR) {
     head := nextHead
