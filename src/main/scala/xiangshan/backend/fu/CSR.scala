@@ -358,8 +358,8 @@ class CSR extends FunctionUnit with HasCSRConst
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
   val sipMask  = "h222".U & mideleg
-  val satp = RegInit(0.U(XLEN.W))
-  // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
+  // val satp = RegInit(0.U(XLEN.W))
+  val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
   val satpMask = "h80000fffffffffff".U // disable asid, mode can only be 8 / 0
   // val satp = RegInit(UInt(XLEN.W), 0.U)
   val sepc = RegInit(UInt(XLEN.W), 0.U)
@@ -851,7 +851,7 @@ class CSR extends FunctionUnit with HasCSRConst
 //    "Custom8"     -> (0xb22, "Custom8"             ),
 //    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
   ) ++ (
-    (0 until dcacheParameters.nMissEntries).map(i => 
+    (0 until dcacheParameters.nMissEntries).map(i =>
       ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0xb2d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
