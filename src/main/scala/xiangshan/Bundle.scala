@@ -284,6 +284,7 @@ class ReplayPregReq extends XSBundle {
 
 class DebugBundle extends XSBundle{
   val isMMIO = Bool()
+  val isPerfCnt = Bool()
 }
 
 class ExuInput extends XSBundle {

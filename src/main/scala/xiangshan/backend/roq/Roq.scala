@@ -38,6 +38,9 @@ class RoqCSRIO extends XSBundle {
 
   val fflags = Output(Valid(UInt(5.W)))
   val dirty_fs = Output(Bool())
+  val perfinfo = new Bundle {
+    val retiredInstr = Output(UInt(3.W))
+  }
 }
 
 class RoqEnqIO extends XSBundle {
@@ -671,11 +674,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
     if(i % 4 == 3) XSDebug(false, true.B, "\n")
   }
 
-  val id = roqDebugId()
-  val difftestIntrNO = WireInit(0.U(XLEN.W))
-  val difftestCause = WireInit(0.U(XLEN.W))
-  ExcitingUtils.addSink(difftestIntrNO, s"difftestIntrNOfromCSR$id")
-  ExcitingUtils.addSink(difftestCause, s"difftestCausefromCSR$id")
+  val instrCnt = RegInit(0.U(64.W))
+  val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
+  instrCnt := instrCnt + retireCounter
+  io.csr.perfinfo.retiredInstr := RegNext(retireCounter)
 
   if(!env.FPGAPlatform) {
 
@@ -696,10 +698,11 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       val uop = debug_microOp(idx)
       val DifftestSkipSC = false
       if(!DifftestSkipSC){
-        skip(i) := debug_exuDebug(idx).isMMIO && io.commits.valid(i)
+        skip(i) := (debug_exuDebug(idx).isMMIO || debug_exuDebug(idx).isPerfCnt) && io.commits.valid(i)
       }else{
         skip(i) := (
             debug_exuDebug(idx).isMMIO ||
+            debug_exuDebug(idx).isPerfCnt ||
             uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_d ||
             uop.ctrl.fuType === FuType.mou && uop.ctrl.fuOpType === LSUOpType.sc_w
           ) && io.commits.valid(i)
@@ -717,10 +720,10 @@ class Roq(numWbPorts: Int) extends XSModule with HasCircularQueuePtrHelper {
       debug_deqUop.ctrl.fuType === FuType.mou &&
       (debug_deqUop.ctrl.fuOpType === LSUOpType.sc_d || debug_deqUop.ctrl.fuOpType === LSUOpType.sc_w)
 
-    val instrCnt = RegInit(0.U(64.W))
-    val retireCounter = Mux(state === s_idle, commitCnt, 0.U)
-    instrCnt := instrCnt + retireCounter
-
+    val difftestIntrNO = WireInit(0.U(XLEN.W))
+    val difftestCause = WireInit(0.U(XLEN.W))
+    ExcitingUtils.addSink(difftestIntrNO, "difftestIntrNOfromCSR")
+    ExcitingUtils.addSink(difftestCause, "difftestCausefromCSR")
     XSDebug(difftestIntrNO =/= 0.U, "difftest intrNO set %x\n", difftestIntrNO)
     val retireCounterFix = Mux(io.redirectOut.valid, 1.U, retireCounter)
     val retirePCFix = SignExt(Mux(io.redirectOut.valid, debug_deqUop.cf.pc, debug_microOp(firstValidCommit).cf.pc), XLEN)

@@ -358,7 +358,7 @@ class ReservationStationData
 
   // Data
   // ------------------------
-  val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, if (!env.FPGAPlatform) iqSize else 1, iqSize)))
+  val data    = List.tabulate(srcNum)(_ => Module(new SyncDataModuleTemplate(UInt((XLEN + 1).W), iqSize, numRead = iqSize + 1, numWrite = iqSize)))
   data.foreach(_.io <> DontCare)
   data.foreach(_.io.wen.foreach(_ := false.B))
 
@@ -366,14 +366,13 @@ class ReservationStationData
   // ! warning: reading has 1 cycle delay, so input addr is used in next cycle
   // luckily, for fpga platform, read port has fixed value
   // otherwise, read port has same value as read addr
-  def dataRead(iqIdx: UInt, srcIdx: Int): UInt = {
-    if (env.FPGAPlatform) {
-      data(srcIdx).io.raddr(0) := iqIdx
-      data(srcIdx).io.rdata(0)
-    } else {
-      data(srcIdx).io.raddr(iqIdx) := iqIdx
-      data(srcIdx).io.rdata(iqIdx)
-    }
+  def dataDebugRead(iqIdx: UInt, srcIdx: Int): UInt = {
+    data(srcIdx).io.raddr(iqIdx + 1.U) := iqIdx
+    data(srcIdx).io.rdata(iqIdx + 1.U)
+  }
+  def dataRead(nextIqIdx: UInt, srcIdx: Int): UInt = {
+    data(srcIdx).io.raddr(0) := nextIqIdx
+    data(srcIdx).io.rdata(0)
   }
   def dataWrite(iqIdx: UInt, srcIdx: Int, wdata: UInt) = {
     data(srcIdx).io.waddr(iqIdx) := iqIdx
@@ -381,7 +380,7 @@ class ReservationStationData
     data(srcIdx).io.wen(iqIdx) := true.B
   }
   // debug data: only for XSDebug log printing!
-  val debug_data = if (!env.FPGAPlatform) List.tabulate(srcNum)(i => WireInit(VecInit((0 until iqSize).map(j => dataRead(j.U, i))))) else null
+  val debug_data = List.tabulate(srcNum)(i => WireInit(VecInit((0 until iqSize).map(j => dataDebugRead(j.U, i)))))
 
   // Uop
   // ------------------------
@@ -501,7 +500,7 @@ class ReservationStationData
   val exuInput = io.deq.bits
   exuInput := DontCare
   exuInput.uop := uop(deq)
-  val regValues = List.tabulate(srcNum)(i => dataRead(/* Mux(sel.valid, sel.bits, deq), i */deq, i))
+  val regValues = List.tabulate(srcNum)(i => dataRead(Mux(sel.valid, sel.bits, deq), i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   exuInput.src1 := regValues(0)
   if (srcNum > 1) exuInput.src2 := regValues(1)
