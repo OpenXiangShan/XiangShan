@@ -12,9 +12,6 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
     val wdata = Vec(numWrite, Input(gen))
   })
 
-  val n = if (isSync) "SyncDataModuleTemplate" else "AsyncDataModuleTemplate"
-  this.suggestName(n)
-
   val data = Mem(numEntries, gen)
 
   // read ports
