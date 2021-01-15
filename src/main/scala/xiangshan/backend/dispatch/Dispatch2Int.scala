@@ -6,12 +6,13 @@ import xiangshan._
 import utils._
 import xiangshan.backend.exu.Exu._
 import xiangshan.backend.regfile.RfReadPort
+import xiangshan.backend.rename.BusyTableReadIO
 
 class Dispatch2Int extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new RfReadPort(XLEN)))
-    val regRdy = Vec(NRIntReadPorts - NRMemReadPorts, Input(Bool()))
+    val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
+    val readState = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new BusyTableReadIO))
     val numExist = Input(Vec(exuParameters.IntExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
     val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
@@ -58,8 +59,10 @@ class Dispatch2Int extends XSModule {
   val intDynamicMapped = intDynamicIndex.map(i => indexVec(i))
   for (i <- intStaticIndex.indices) {
     val index = WireInit(VecInit(intStaticMapped(i) +: intDynamicMapped))
-    io.readRf(2*i  ).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
-    io.readRf(2*i+1).addr := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
+    io.readRf(2*i  ) := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
+    io.readRf(2*i+1) := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
+    io.readState(2*i  ).req := io.fromDq(index(intReadPortSrc(i))).bits.psrc1
+    io.readState(2*i+1).req := io.fromDq(index(intReadPortSrc(i))).bits.psrc2
   }
   val readPortIndex = Wire(Vec(exuParameters.IntExuCnt, UInt(2.W)))
   intStaticIndex.zipWithIndex.map({case (index, i) => readPortIndex(index) := i.U})
@@ -84,8 +87,8 @@ class Dispatch2Int extends XSModule {
     }
     enq.bits := io.fromDq(indexVec(i)).bits
     
-    val src1Ready = VecInit((0 until 4).map(i => io.regRdy(i * 2)))
-    val src2Ready = VecInit((0 until 4).map(i => io.regRdy(i * 2 + 1)))
+    val src1Ready = VecInit((0 until 4).map(i => io.readState(i * 2).resp))
+    val src2Ready = VecInit((0 until 4).map(i => io.readState(i * 2 + 1).resp))
     enq.bits.src1State := src1Ready(readPortIndex(i))
     enq.bits.src2State := src2Ready(readPortIndex(i))
 
