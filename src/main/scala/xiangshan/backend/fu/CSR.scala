@@ -629,12 +629,6 @@ class CSR extends FunctionUnit with HasCSRConst
   val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec.asUInt()
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
-  // if (!env.FPGAPlatform) {
-    val id = hartId()
-    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-    ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
-    ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
-  // }
 
   val raiseExceptionIntr = csrio.exception.valid
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
@@ -797,6 +791,9 @@ class CSR extends FunctionUnit with HasCSRConst
       }
     }
 
+    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+    ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
+    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
     ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
     ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)
