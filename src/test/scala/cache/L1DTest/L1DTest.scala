@@ -14,7 +14,7 @@ import freechips.rocketchip.tilelink.{TLBuffer, TLCacheCork, TLToAXI4, TLXbar}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import utils.{DebugIdentityNode, HoldUnless, XSDebug}
-import xiangshan.HasXSLog
+import xiangshan.{EnviromentParameters, HasXSLog}
 import xiangshan.cache.{DCache, DCacheLineReq, DCacheToLsuIO, DCacheWordReq, MemoryOpConstants}
 import xiangshan.testutils.AddSinks
 import xstransforms.PrintModuleName
@@ -64,7 +64,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
     val rand = new Random(0xbeef)
     val addr_pool = {
-      for (_ <- 0 until 10) yield BigInt(rand.nextInt(0xff) << 12) | 0x80000000L.U.litValue()
+      for (_ <- 0 until 16) yield BigInt(rand.nextInt(0xfff) << 12) | 0x80000000L.U.litValue()
     }.distinct.toList // align to block size
     val addr_list_len = addr_pool.length
     println(f"addr pool length: $addr_list_len")
@@ -110,7 +110,7 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         c.io.slaveIO.DChannel.valid.poke(false.B)
 
 
-        val total_clock = 500
+        val total_clock = 50000
 
         c.reset.poke(true.B)
         c.clock.step(100)
@@ -133,17 +133,17 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
         for (cl <- 0 until total_clock) {
           //========= core trans ===========
           //randomly add when low size
-          if (coreAgent.outerLoad.size <= 0) {
-            if (cl % 2048 == 0) {
-              for (i <- 0 until 4) {
+          if (coreAgent.outerLoad.size <= 4) {
+            if (true) {
+              for (i <- 0 until 8) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addLoad(addr)
               }
             }
           }
-          if (coreAgent.outerStore.size <= 0) {
-            if (cl % 1024 == 0) {
-              for (i <- 0 until 9) {
+          if (coreAgent.outerStore.size <= 4) {
+            if (true) {
+              for (i <- 0 until 8) {
                 val addr = getRandomElement(addr_pool, rand)
                 coreAgent.addStore(addr)
               }
@@ -184,9 +184,9 @@ class L1DCacheTest extends AnyFlatSpec with ChiselScalatestTester with Matchers 
 
           //========= slave ============
           //randomly add when empty
-          if (slaveAgent.innerProbe.size <= 0) {
-            if (cl % 4096 == 0) {
-              for (i <- 0 until 2) {
+          if (slaveAgent.innerProbe.size <= 2) {
+            if (true) {
+              for (i <- 0 until 8) {
                 val addr = getRandomElement(addr_pool, rand)
                 val targetPerm = sample(probeProbMap, rand)
                 slaveAgent.addProbe(addr, targetPerm)

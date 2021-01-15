@@ -168,7 +168,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   }
 
   def debugPrefix(): String = {
-    f"[DEBUG][time= $clock%19d]  TLAgent$ID-$name: "
+    f"[DEBUG][time= $clock%19d] TLAgent$ID-$name: "
   }
 
   def debugPrintln(ins: String): Unit = {
@@ -270,8 +270,19 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   }
 
   //core Agent always read latest version
-  def insertMaskedRead(addr: BigInt, readData: BigInt, byteMask: BigInt): Unit = {
-    insertMaskedReadSnap(addr, readData, insertVersionRead(addr, 0), byteMask)
+  def insertMaskedWordRead(addr: BigInt, readWordData: BigInt, wordByteMask: BigInt): Unit = {
+    //addr and mask must be aligned to block
+    val alignAddr = addrAlignBlock(addr)
+    val start_word = beatInBlock(addr)
+    val alignData = dataConcatWord(0, readWordData, start_word)
+    val alignMask = maskConcatWord(0, wordByteMask, start_word)
+    val addrState = getState(alignAddr)
+    addrState.data = writeMaskedData(addrState.data, alignData, alignMask)
+    val sbData = insertVersionRead(addr, 0)
+    val checkWriteData = writeMaskedData(sbData, alignData, alignMask)
+    debugPrintln(f"MaskedRead, Addr: $alignAddr%x , own data: $alignData%x , sbData:$sbData%x , mask:$alignMask%x")
+    assert(sbData == checkWriteData, f"agent $ID data has been changed, Addr: $alignAddr%x, " +
+      f"own data: $alignData%x , scoreboard data: $sbData%x , mask:$alignMask%x")
   }
 
   //for Put

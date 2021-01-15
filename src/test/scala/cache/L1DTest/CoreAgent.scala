@@ -57,7 +57,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
     loadT.pairResp(resp)
     if (!resp.miss) {
       val wc = wordInBlock(loadAddr)
-      insertMaskedRead(loadAddr, dataConcatWord(0, resp.data, wc), genWordMaskInBlock(loadAddr, loadT.req.get.mask))
+      insertMaskedWordRead(loadAddr, resp.data, loadT.req.get.mask)
       outerLoad -= loadT
     }
     else if (resp.replay) {
@@ -73,7 +73,7 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
 
   def killS1(i: Int): Unit = {
     val l = s1_loadTrans(i)
-    if (l.isDefined){
+    if (l.isDefined) {
       outerLoad -= l.get
       s1_loadTrans(i) = None
     }
@@ -94,7 +94,8 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
       val alignAddr = addrAlignBlock(loadAddr)
       if (alignAddr == respAddr) {
         q.pairLsqResp(resp)
-        insertMaskedRead(loadAddr, resp.data, genWordMaskInBlock(loadAddr, q.req.get.mask))
+        insertMaskedReadSnap(alignAddr, resp.data, insertVersionRead(loadAddr, 0),
+          genWordMaskInBlock(loadAddr, q.req.get.mask))
         outerLoad -= q
         true
       }
@@ -130,13 +131,14 @@ class CoreAgent(ID: Int, name: String, addrStateMap: mutable.Map[BigInt, AddrSta
   def fireStoreResp(resp: LitDCacheLineResp): Unit = {
     val storeId = resp.id
     val storeTrans = storeIdMap(storeId)
+    val storeReq = storeTrans.req.get
     storeTrans.pairResp(resp)
     //free resource
     storeIdMap.remove(storeId)
     //drop finished store
     outerStore -= storeTrans
     //confirm data write
-    insertMaskedWrite(storeTrans.req.get.addr, resp.data, storeTrans.req.get.mask)
+    insertMaskedWrite(storeReq.addr, storeReq.data, storeReq.mask)
   }
 
   override def step(): Unit = {
