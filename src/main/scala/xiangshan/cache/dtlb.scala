@@ -43,7 +43,7 @@ trait HasTlbConst extends HasXSParameter {
 abstract class TlbBundle extends XSBundle with HasTlbConst
 abstract class TlbModule extends XSModule with HasTlbConst
 
-class PermBundle(val hasV: Boolean = true) extends TlbBundle {
+class PtePermBundle extends TlbBundle {
   val d = Bool()
   val a = Bool()
   val g = Bool()
@@ -51,7 +51,6 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   val x = Bool()
   val w = Bool()
   val r = Bool()
-  if (hasV) { val v = Bool() }
 
   override def toPrintable: Printable = {
     p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
@@ -148,7 +147,7 @@ class TlbEntry(superpage: Boolean = false, superpageOnly: Boolean = false) exten
     this.tag := vpn
     this.level := level
     this.data.ppn := ppn
-    val ptePerm = perm.asTypeOf(new PermBundle)
+    val ptePerm = perm.asTypeOf(new PtePermBundle)
     this.data.perm.pf:= pf
     this.data.perm.d := ptePerm.d
     this.data.perm.a := ptePerm.a
@@ -280,7 +279,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
       vpn   = resp.entry.tag,
       ppn   = resp.entry.ppn,
       level = resp.entry.level,
-      perm  = Cat(VecInit(resp.entry.perm).asUInt, 0.U(1.W)).asUInt,
+      perm  = VecInit(resp.entry.perm).asUInt
       pf    = resp.pf
     )
     XSDebug(p"Refill: idx:${refillIdx} entry:${resp.entry} pf:${resp.pf}\n")

@@ -160,7 +160,7 @@ class L2TlbEntry extends TlbBundle {
   val tag = UInt(vpnLen.W) // tag is vpn
   val level = UInt(log2Up(Level).W) // 2 for 4KB, 1 for 2MB, 0 for 1GB
   val ppn = UInt(ppnLen.W)
-  val perm = new PermBundle(hasV = false)
+  val perm = new PtePermBundle
 
   def hit(vpn: UInt):Bool = {
     val fullMask = VecInit((Seq.fill(vpnLen)(true.B))).asUInt
@@ -191,7 +191,7 @@ class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
 
   val tag     = UInt(tagLen.W) // NOTE: high part of vpn
   val ppns    = Vec(num, UInt(ppnLen.W))
-  val perms    = Vec(num, new PermBundle(hasV = false))
+  val perms    = Vec(num, new PtePermBundle)
   val vs      = Vec(num, Bool())
 
   def tagClip(vpn: UInt) = { // full vpn => tagLen
