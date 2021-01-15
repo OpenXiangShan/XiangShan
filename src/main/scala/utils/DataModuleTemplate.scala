@@ -38,5 +38,5 @@ class DataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWr
   }
 }
 
-class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, isSync: Boolean = true) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, true)
-class AsyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int, isSync: Boolean = true) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, false)
+class SyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, true)
+class AsyncDataModuleTemplate[T <: Data](gen: T, numEntries: Int, numRead: Int, numWrite: Int) extends DataModuleTemplate(gen, numEntries, numRead, numWrite, false)
