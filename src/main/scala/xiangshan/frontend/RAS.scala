@@ -145,8 +145,13 @@ class RAS extends BasePredictor
         io.copy_out_mem := stack.copy_out
         io.copy_out_sp  := sp
         io.copy_out_top  := topRegister
-        stack.copyen := io.copy_valid
-        stack.copy_in := io.copy_in_mem
+        if(EnableCommit){
+            stack.copyen := io.copy_valid
+            stack.copy_in := io.copy_in_mem
+        } else {
+            stack.copyen := false.B
+            stack.copy_in := DontCare
+        }
         when (io.copy_valid) {
             sp := io.copy_in_sp
             topRegister := io.copy_in_top
@@ -178,7 +183,9 @@ class RAS extends BasePredictor
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | io.isLastHalfRVI) && HasCExtension.B, 2.U, 4.U)
+    val jump_is_first = io.callIdx.bits === 0.U
+    val call_is_last_half = io.isLastHalfRVI && jump_is_first
+    val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | call_is_last_half) && HasCExtension.B, 2.U, 4.U)
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
@@ -189,109 +196,97 @@ class RAS extends BasePredictor
     spec_push := !spec_is_full && io.callIdx.valid && io.pc.valid
     spec_pop  := !spec_is_empty && io.is_ret && io.pc.valid
 
-    val commit_cfi = io.redirect.bits.cfiUpdate
-    val commit = Module(new RASStack(RasSize))
-    val commit_ras = commit.io
+    val copy_valid = io.redirect.valid
+    val copy_next = RegNext(copy_valid)
+    // val copy_bits = RegNext(io.recover.bpuMeta)
 
-    val commit_push = WireInit(false.B)
-    val commit_pop = WireInit(false.B)
-    val commit_new_addr = Mux(commit_cfi.pd.isRVC && HasCExtension.B, commit_cfi.pc + 2.U, commit_cfi.pc + 4.U)
-    commit_ras.push_valid := commit_push
-    commit_ras.pop_valid  := commit_pop
-    commit_ras.new_addr   := commit_new_addr
-    val commit_is_empty = commit_ras.is_empty
-    val commit_is_full = commit_ras.is_full
-    val commit_top_addr = commit_ras.top_addr
+    if(EnableCommit){
+        val commit_cfi = io.redirect.bits.cfiUpdate
+        val commit = Module(new RASStack(RasSize))
+        val commit_ras = commit.io
 
-    val update_valid = io.update.valid
-    val update = io.update.bits
-    val update_call_valid = update_valid && update.cfiIsCall && update.cfiIndex.valid && update.valids(update.cfiIndex.bits)
-    val update_ret_valid  = update_valid && update.cfiIsRet && update.cfiIndex.valid && update.valids(update.cfiIndex.bits)
-    commit_push := !commit_is_full  && update_call_valid
-    commit_pop  := !commit_is_empty && update_ret_valid
+        val commit_push = WireInit(false.B)
+        val commit_pop = WireInit(false.B)
+        val commit_new_addr = Mux(commit_cfi.pd.isRVC && HasCExtension.B, commit_cfi.pc + 2.U, commit_cfi.pc + 4.U)
+        commit_ras.push_valid := commit_push
+        commit_ras.pop_valid  := commit_pop
+        commit_ras.new_addr   := commit_new_addr
+        val commit_is_empty = commit_ras.is_empty
+        val commit_is_full = commit_ras.is_full
+        val commit_top_addr = commit_ras.top_addr
 
+        val update_valid = io.update.valid
+        val update = io.update.bits
+        val update_call_valid = update_valid && update.cfiIsCall && update.cfiIndex.valid && update.valids(update.cfiIndex.bits)
+        val update_ret_valid  = update_valid && update.cfiIsRet && update.cfiIndex.valid && update.valids(update.cfiIndex.bits)
+        commit_push := !commit_is_full  && update_call_valid
+        commit_pop  := !commit_is_empty && update_ret_valid
+
+        commit_ras.copy_valid := false.B
+        commit_ras.copy_in_mem := DontCare
+        commit_ras.copy_in_sp  := DontCare
+        commit_ras.copy_in_top := DontCare
+
+        spec_ras.copy_valid := copy_next
+        spec_ras.copy_in_mem := commit_ras.copy_out_mem
+
+        spec_ras.copy_in_sp  := commit_ras.copy_out_sp
+        spec_ras.copy_in_top := commit_ras.copy_out_top
+
+        //no need to pass the ras branchInfo
+        io.meta.rasSp := DontCare
+        io.meta.rasTop := DontCare
+
+        if (BPUDebug && debug) {
+            val commit_debug = commit.debugIO
+            XSDebug("----------------RAS(commit)----------------\n")
+            XSDebug(" TopRegister: 0x%x   %d \n",commit_debug.topRegister.retAddr,commit_debug.topRegister.ctr)
+            XSDebug("  index       addr           ctr \n")
+            for(i <- 0 until RasSize){
+                XSDebug("  (%d)   0x%x      %d",i.U,commit_ras.copy_out_mem(i).retAddr,commit_ras.copy_out_mem(i).ctr)
+                when(i.U === commit_ras.copy_out_sp){XSDebug(false,true.B,"   <----sp")}
+                XSDebug(false,true.B,"\n")
+            }
+            XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",commit_new_addr,commit_debug.write_entry.ctr,commit_debug.alloc_new,commit_debug.sp.asUInt,commit_debug.topRegister.retAddr,commit_debug.topRegister.ctr)
+            XSDebug(commit_pop, "(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
+        }
+
+    } else {
+        val retMissPred = copy_valid && io.redirect.bits.level === 0.U && io.redirect.bits.cfiUpdate.pd.isRet
+        val recoverSp = io.redirect.bits.cfiUpdate.rasSp
+        val recoverTopAddr = io.redirect.bits.cfiUpdate.rasEntry.retAddr
+        val recoverTopCtr = io.redirect.bits.cfiUpdate.rasEntry.ctr
+        spec_ras.copy_valid := copy_valid
+        spec_ras.copy_in_mem := DontCare
+
+        spec_ras.copy_in_sp  := Mux(retMissPred && recoverTopCtr === 1.U ,recoverSp - 1.U,recoverSp)
+        spec_ras.copy_in_top.retAddr := recoverTopAddr
+        spec_ras.copy_in_top.ctr     := Mux(!retMissPred , recoverTopCtr, Mux(recoverTopCtr === 1.U,recoverTopCtr,  recoverTopCtr - 1.U))
+
+        io.meta.rasSp := spec_ras.copy_out_sp
+        io.meta.rasTop := spec.debugIO.topRegister
+
+    }
 
     io.out.valid := !spec_is_empty
     io.out.bits.target := spec_top_addr
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 
-    val copy_valid = io.redirect.valid
-    val copy_next = RegNext(copy_valid)
-    spec_ras.copy_valid := copy_next
-    spec_ras.copy_in_mem := commit_ras.copy_out_mem
-    spec_ras.copy_in_sp  := commit_ras.copy_out_sp
-    spec_ras.copy_in_top := commit_ras.copy_out_top
-    commit_ras.copy_valid := false.B
-    commit_ras.copy_in_mem := DontCare
-    commit_ras.copy_in_sp  := DontCare
-    commit_ras.copy_in_top := DontCare
-
-    //no need to pass the ras branchInfo
-    io.meta.rasSp := spec.debugIO.sp
-    io.meta.rasTop := spec.debugIO.topRegister
-
     if (BPUDebug && debug) {
         val spec_debug = spec.debugIO
-        val commit_debug = commit.debugIO
         XSDebug("----------------RAS(spec)----------------\n")
+        XSDebug(" TopRegister: 0x%x   %d \n",spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
         XSDebug("  index       addr           ctr \n")
         for(i <- 0 until RasSize){
             XSDebug("  (%d)   0x%x      %d",i.U,spec_ras.copy_out_mem(i).retAddr,spec_ras.copy_out_mem(i).ctr)
             when(i.U === spec_ras.copy_out_sp){XSDebug(false,true.B,"   <----sp")}
             XSDebug(false,true.B,"\n")
         }
-        XSDebug("----------------RAS(commit)----------------\n")
-        XSDebug("  index       addr           ctr \n")
-        for(i <- 0 until RasSize){
-            XSDebug("  (%d)   0x%x      %d",i.U,commit_ras.copy_out_mem(i).retAddr,commit_ras.copy_out_mem(i).ctr)
-            when(i.U === commit_ras.copy_out_sp){XSDebug(false,true.B,"   <----sp")}
-            XSDebug(false,true.B,"\n")
-        }
-
-        XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",spec_new_addr,spec_debug.write_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt,spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
+        XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",spec_new_addr,spec_debug.write_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt)
         XSDebug(spec_pop, "(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-        XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",commit_new_addr,commit_debug.write_entry.ctr,commit_debug.alloc_new,commit_debug.sp.asUInt,commit_debug.topRegister.retAddr,commit_debug.topRegister.ctr)
-        XSDebug(commit_pop, "(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-        XSDebug("copyValid:%d copyNext:%d \n",copy_valid,copy_next)
+
+        XSDebug("copyValid:%d copyNext:%d recover(SP:%d retAddr:%x ctr:%d) \n",copy_valid,copy_next,io.redirect.bits.cfiUpdate.rasSp,io.redirect.bits.cfiUpdate.rasEntry.retAddr,io.redirect.bits.cfiUpdate.rasEntry.ctr)
     }
-
-
-    // val recoverSp = io.recover.bits.brInfo.rasSp
-    // val recoverCtr = io.recover.bits.brInfo.rasTopCtr
-    // val recoverAddr = io.recover.bits.brInfo.rasToqAddr
-    // val recover_top = ras(recoverSp - 1.U)
-    // when (recover_valid) {
-    //     sp := recoverSp
-    //     recover_top.ctr := recoverCtr
-    //     recover_top.retAddr := recoverAddr
-    //     XSDebug("RAS update: SP:%d , Ctr:%d \n",recoverSp,recoverCtr)
-    // }
-    // val recover_and_push = recover_valid && push
-    // val recover_and_pop = recover_valid && pop
-    // val recover_alloc_new = new_addr =/= recoverAddr
-    // when(recover_and_push)
-    // {
-    //     when(recover_alloc_new){
-    //         sp := recoverSp + 1.U
-    //         ras(recoverSp).retAddr := new_addr
-    //         ras(recoverSp).ctr := 1.U
-    //         recover_top.retAddr := recoverAddr
-    //         recover_top.ctr := recoverCtr
-    //     } .otherwise{
-    //         sp := recoverSp
-    //         recover_top.ctr := recoverCtr + 1.U
-    //         recover_top.retAddr := recoverAddr
-    //     }
-    // } .elsewhen(recover_and_pop)
-    // {
-    //     io.out.bits.target := recoverAddr
-    //     when ( recover_top.ctr === 1.U) {
-    //         sp := recoverSp - 1.U
-    //     }.otherwise {
-    //         sp := recoverSp
-    //        recover_top.ctr := recoverCtr - 1.U
-    //     }
-    // }
 
 }

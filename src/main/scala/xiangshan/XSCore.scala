@@ -42,6 +42,8 @@ case class XSCoreParameters
   EnableLB: Boolean = false,
   EnableLoop: Boolean = false,
   EnableSC: Boolean = false,
+  EnableJal: Boolean = false,
+  EnableUBTB: Boolean = true,
   HistoryLength: Int = 64,
   BtbSize: Int = 2048,
   JbtacSize: Int = 1024,

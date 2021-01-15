@@ -13,6 +13,7 @@ trait HasBPUParameter extends HasXSParameter {
   val EnableCFICommitLog = true
   val EnbaleCFIPredLog = true
   val EnableBPUTimeRecord = EnableCFICommitLog || EnbaleCFIPredLog
+  val EnableCommit = true
 }
 
 class TableAddr(val idxBits: Int, val banks: Int) extends XSBundle with HasIFUConst {
