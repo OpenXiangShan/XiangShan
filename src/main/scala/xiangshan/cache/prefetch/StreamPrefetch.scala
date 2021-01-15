@@ -207,12 +207,16 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
   val finishArb = Module(new Arbiter(new StreamPrefetchFinish(p), streamSize))
   for (i <- 0 until streamSize) {
     prefetchPrior(i) := head + i.U
-    reqs(i).ready := false.B
     reqArb.io.in(i) <> reqs(prefetchPrior(i))
-    finishs(i).ready := false.B
+    reqs(i).ready := DontCare
     finishArb.io.in(i) <> finishs(prefetchPrior(i))
+    finishs(i).ready := DontCare
     resps(i).bits := io.resp.bits
     resps(i).valid := io.resp.valid && io.resp.bits.idx === i.U
+  }
+  for (i <- 0 until streamSize) {
+    reqs(prefetchPrior(i)).ready := reqArb.io.in(i).ready
+    finishs(prefetchPrior(i)).ready := finishArb.io.in(i).ready
   }
   io.req <> reqArb.io.out
   io.finish <> finishArb.io.out
@@ -234,6 +238,7 @@ class StreamBuffer(p: StreamPrefetchParameters) extends PrefetchModule {
     needRealloc := false.B
     state.foreach(_ := s_idle)
     valid.foreach(_ := false.B)
+    deqLater.foreach(_ := false.B)
   }
 
   for (i <- 0 until streamSize) {
