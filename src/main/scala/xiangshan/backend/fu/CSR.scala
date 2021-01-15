@@ -708,51 +708,6 @@ class CSR extends FunctionUnit with HasCSRConst
   /**
     * Emu Performance counters
     */
-<<<<<<< HEAD
-  val perfCntList = Map(
-//    "Mcycle"      -> (0xb00, "perfCntCondMcycle"     ),
-//    "Minstret"    -> (0xb02, "perfCntCondMinstret"   ),
-    "MbpInstr"    -> (0xb03, "perfCntCondMbpInstr"   ),
-    "MbpRight"    -> (0xb04, "perfCntCondMbpRight"   ),
-    "MbpWrong"    -> (0xb05, "perfCntCondMbpWrong"   ),
-    "MbpBRight"   -> (0xb06, "perfCntCondMbpBRight"   ),
-    "MbpBWrong"   -> (0xb07, "perfCntCondMbpBWrong"   ),
-    "MbpJRight"   -> (0xb08, "perfCntCondMbpJRight"   ),
-    "MbpJWrong"   -> (0xb09, "perfCntCondMbpJWrong"   ),
-    "MbpIRight"   -> (0xb0a, "perfCntCondMbpIRight"   ),
-    "MbpIWrong"   -> (0xb0b, "perfCntCondMbpIWrong"   ),
-    "MbpRRight"   -> (0xb0c, "perfCntCondMbpRRight"   ),
-    "MbpRWrong"   -> (0xb0d, "perfCntCondMbpRWrong"   ),
-    "DTlbReqCnt0" -> (0xb15, "perfCntDtlbReqCnt0"     ),
-    "DTlbReqCnt1" -> (0xb16, "perfCntDtlbReqCnt1"     ),
-    "DTlbReqCnt2" -> (0xb17, "perfCntDtlbReqCnt2"     ),
-    "DTlbReqCnt3" -> (0xb18, "perfCntDtlbReqCnt3"     ),
-    "DTlbMissCnt0"-> (0xb19, "perfCntDtlbMissCnt0"    ),
-    "DTlbMissCnt1"-> (0xb20, "perfCntDtlbMissCnt1"    ),
-    "DTlbMissCnt2"-> (0xb21, "perfCntDtlbMissCnt2"    ),
-    "DTlbMissCnt3"-> (0xb22, "perfCntDtlbMissCnt3"    ),
-    "ITlbReqCnt0" -> (0xb23, "perfCntItlbReqCnt0"     ),
-    "ITlbMissCnt0"-> (0xb24, "perfCntItlbMissCnt0"    ),
-    "PtwReqCnt"   -> (0xb25, "perfCntPtwReqCnt"       ),
-    "PtwCycleCnt" -> (0xb26, "perfCntPtwCycleCnt"     ),
-    "PtwL2TlbHit" -> (0xb27, "perfCntPtwL2TlbHit"     ),
-    "ICacheReq"   -> (0xb28, "perfCntIcacheReqCnt"     ),
-    "ICacheMiss"   -> (0xb29, "perfCntIcacheMissCnt"     )//,
-    // "FetchFromICache" -> (0xb2a, "CntFetchFromICache"),
-    // "FetchFromLoopBuffer" -> (0xb2b, "CntFetchFromLoopBuffer"),
-    // "ExitLoop1" -> (0xb2c, "CntExitLoop1"),
-    // "ExitLoop2" -> (0xb2d, "CntExitLoop2"),
-    // "ExitLoop3" -> (0xb2e, "CntExitLoop3")
-//    "Custom1"     -> (0xb1b, "Custom1"             ),
-//    "Custom2"     -> (0xb1c, "Custom2"             ),
-//    "Custom3"     -> (0xb1d, "Custom3"             ),
-//    "Custom4"     -> (0xb1e, "Custom4"             ),
-//    "Custom5"     -> (0xb1f, "Custom5"             ),
-//    "Custom6"     -> (0xb20, "Custom6"             ),
-//    "Custom7"     -> (0xb21, "Custom7"             ),
-//    "Custom8"     -> (0xb22, "Custom8"             ),
-//    "Ml2cacheHit" -> (0xb23, "perfCntCondMl2cacheHit")
-=======
   val emuPerfCntList = Map(
     // "Mcycle"    -> (0x1000, "perfCntCondMcycle"     ),
     // "Minstret"  -> (0x1002, "perfCntCondMinstret"   ),
@@ -805,7 +760,6 @@ class CSR extends FunctionUnit with HasCSRConst
     (0 until l2PrefetcherParameters.nEntries).map(i =>
       ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
->>>>>>> origin/master
   )
 
   emuPerfCntList.foreach {
