@@ -484,8 +484,8 @@ class ReservationStationData
       val (wuHit, wuData) = wakeup(srcSeq(j), srcTypeSeq(j))
       val (bpHit, bpHitReg, bpData) = bypass(srcSeq(j), srcTypeSeq(j))
       when (wuHit || bpHit) { io.ctrl.srcUpdate(i)(j) := true.B }
-      when (wuHit) { /* data(i)(j) := wuData */dataWrite(i.U, j, wuData) }
-      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { /* data(i)(j) := bpData */dataWrite(i.U, j, bpData) }
+      when (wuHit) { dataWrite(i.U, j, wuData) }
+      when (bpHitReg && !(enqPtrReg===i.U && enqEnReg)) { dataWrite(i.U, j, bpData) }
       // NOTE: the hit is from data's info, so there is an erro that:
       //       when enq, hit use last instr's info not the enq info.
       //       it will be long latency to add correct here, so add it to ctrl or somewhere else
@@ -512,13 +512,16 @@ class ReservationStationData
   // to ctrl
   val srcSeq = Seq(enqUop.psrc1, enqUop.psrc2, enqUop.psrc3)
   val srcTypeSeq = Seq(enqUop.ctrl.src1Type, enqUop.ctrl.src2Type, enqUop.ctrl.src3Type)
-  io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) =>
-    val (bpHit, bpHitReg, bpData)= bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
-    when (bpHitReg) { /* data(enqPtrReg)(i) := bpData */dataWrite(enqPtrReg, i, bpData) }
-    h := bpHit
+  io.ctrl.srcUpdate(IssQueSize).zipWithIndex.map{ case (h, i) => // h: port, i: 0~srcNum-1
+    val (bpHit, bpHitReg, bpData) = bypass(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    val (wuHit, wuData)           = wakeup(srcSeq(i), srcTypeSeq(i), enqCtrl.valid)
+    when (bpHitReg) { dataWrite(enqPtrReg, i, bpData) }
+    when (RegNext(wuHit)) { dataWrite(enqPtrReg, i, RegNext(wuData)) }
+    h := bpHit || wuHit
     // NOTE: enq bp is done here
     XSDebug(bpHit, p"EnqBPHit: (${i.U})\n")
     XSDebug(bpHitReg, p"EnqBPHitData: (${i.U}) data:${Hexadecimal(bpData)}\n")
+    XSDebug(wuHit, p"EnqWbHit: (${i.U}) data:${Hexadecimal(wuData)} data will be writen into data at next cycle\n")
   }
   if (nonBlocked) { io.ctrl.fuReady := true.B }
   else { io.ctrl.fuReady := io.deq.ready }
