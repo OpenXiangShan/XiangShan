@@ -86,6 +86,12 @@ object AddressSpace {
 
   def isDMMIO(addr: UInt): Bool = !PMAMode.dcache(memmapAddrMatch(addr)._1)
   def isIMMIO(addr: UInt): Bool = !PMAMode.icache(memmapAddrMatch(addr)._1)
+
+  def isConfigableAddr(addr: UInt): Bool = {
+    VecInit(MemMapList.map(i => {
+      i._1._1.U <= addr && addr < i._1._2.U && (i._2.get("mode").get.toUpperCase.indexOf("C") >= 0).B
+    }).toSeq).asUInt.orR
+  }
 }
 
 class PMAChecker extends XSModule with HasDCacheParameters
@@ -94,10 +100,16 @@ class PMAChecker extends XSModule with HasDCacheParameters
     val paddr = Input(UInt(VAddrBits.W))
     val mode = Output(PMAMode())
     val widthLimit = Output(UInt(8.W)) // TODO: fixme
+    val updateCConfig = Input(Valid(Bool()))
   })
 
+  val enableConfigableCacheZone = RegInit(false.B)
+  val updateCConfig = RegNext(RegNext(RegNext(io.updateCConfig)))
+  when(updateCConfig.valid) {
+    enableConfigableCacheZone := updateCConfig.bits
+  }
+
   val (mode, widthLimit) = AddressSpace.memmapAddrMatch(io.paddr)
-  // TODO: GPU mode fix
-  io.mode := mode
+  io.mode := Mux(AddressSpace.isConfigableAddr(io.paddr) && enableConfigableCacheZone, mode | PMAMode.D, mode)
   io.widthLimit := widthLimit
 }
