@@ -133,8 +133,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // core data structures
   val dataArray = Module(new DuplicatedDataArray)
   val metaArray = Module(new DuplicatedMetaArray)
+  /*
   dataArray.dump()
   metaArray.dump()
+  */
 
 
   //----------------------------------------
@@ -439,28 +441,28 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val atomics_addr_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
     val atomics_addr_match = atomics_addr_matches.reduce(_||_)
 
-    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
+    val prober_idx_match = prober.io.inflight_req_block_addr.valid && get_idx(prober.io.inflight_req_block_addr.bits) === get_idx(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
 
-    store_addr_match || atomics_addr_match || prober_addr_match || miss_idx_match
+    store_addr_match || atomics_addr_match || prober_idx_match || miss_idx_match
   }
 
   def block_store(addr: UInt) = {
-    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
+    val prober_idx_match = prober.io.inflight_req_block_addr.valid && get_idx(prober.io.inflight_req_block_addr.bits) === get_idx(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    prober_addr_match || miss_idx_match
+    prober_idx_match || miss_idx_match
   }
 
   def block_atomics(addr: UInt) = {
-    val prober_addr_match = prober.io.inflight_req_block_addr.valid && prober.io.inflight_req_block_addr.bits === get_block_addr(addr)
+    val prober_idx_match = prober.io.inflight_req_block_addr.valid && get_idx(prober.io.inflight_req_block_addr.bits) === get_idx(addr)
 
     val miss_idx_matches = VecInit(missQueue.io.inflight_req_idxes map (entry => entry.valid && entry.bits === get_idx(addr)))
     val miss_idx_match = miss_idx_matches.reduce(_||_)
-    prober_addr_match || miss_idx_match
+    prober_idx_match || miss_idx_match
   }
 
   def block_miss(addr: UInt) = {
@@ -473,11 +475,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   def block_probe(addr: UInt) = {
-    val store_addr_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val store_addr_match = store_addr_matches.reduce(_||_)
+    val store_idx_matches = VecInit(stu.io.inflight_req_block_addrs map (entry => entry.valid && get_idx(entry.bits) === get_idx(addr)))
+    val store_idx_match = store_idx_matches.reduce(_||_)
 
-    val atomics_addr_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && entry.bits === get_block_addr(addr)))
-    val atomics_addr_match = atomics_addr_matches.reduce(_||_)
+    val atomics_idx_matches = VecInit(atomics.io.inflight_req_block_addrs map (entry => entry.valid && get_idx(entry.bits) === get_idx(addr)))
+    val atomics_idx_match = atomics_idx_matches.reduce(_||_)
 
     val lrsc_addr_match = atomics.io.block_probe_addr.valid && atomics.io.block_probe_addr.bits === get_block_addr(addr)
 
@@ -487,7 +489,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // the missed req
     val miss_req_idx_match = missReq.fire() && get_idx(missReq.bits.addr) === get_idx(addr)
 
-    store_addr_match || atomics_addr_match || lrsc_addr_match || miss_idx_match || miss_req_idx_match
+    store_idx_match || atomics_idx_match || lrsc_addr_match || miss_idx_match || miss_req_idx_match
   }
 
   def block_decoupled[T <: Data](source: DecoupledIO[T], sink: DecoupledIO[T], block_signal: Bool) = {

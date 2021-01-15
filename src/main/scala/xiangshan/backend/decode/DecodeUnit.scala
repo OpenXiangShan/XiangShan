@@ -150,9 +150,9 @@ object XDecode extends DecodeConstants {
     CSRRS   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.set, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
     CSRRC   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.clr, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
 
-    CSRRWI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.wrti, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
-    CSRRSI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.seti, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
-    CSRRCI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.clri, Y, N, N, Y, Y, N, N, SelImm.IMM_I),
+    CSRRWI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.wrti, Y, N, N, Y, Y, N, N, SelImm.IMM_Z),
+    CSRRSI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.seti, Y, N, N, Y, Y, N, N, SelImm.IMM_Z),
+    CSRRCI  -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.clri, Y, N, N, Y, Y, N, N, SelImm.IMM_Z),
 
     SFENCE_VMA->List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.fence, FenceOpType.sfence, N, N, N, Y, Y, Y, N, SelImm.IMM_X),
     ECALL   -> List(SrcType.reg, SrcType.imm, SrcType.DC, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, N, SelImm.IMM_X),
@@ -316,25 +316,97 @@ class RVCExpander extends XSModule {
   }
 }
 
-object Imm32Gen {
-  def apply(sel: UInt, inst: UInt) = {
-    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
-    val b30_20 = Mux(sel === SelImm.IMM_U, inst(30,20).asSInt, sign)
-    val b19_12 = Mux(sel =/= SelImm.IMM_U && sel =/= SelImm.IMM_UJ, sign, inst(19,12).asSInt)
-    val b11 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.S,
-              Mux(sel === SelImm.IMM_UJ, inst(20).asSInt,
-              Mux(sel === SelImm.IMM_SB, inst(7).asSInt, sign)))
-    val b10_5 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.U(1.W), inst(30,25))
-    val b4_1 = Mux(sel === SelImm.IMM_U, 0.U(1.W),
-               Mux(sel === SelImm.IMM_S || sel === SelImm.IMM_SB, inst(11,8),
-               Mux(sel === SelImm.IMM_Z, inst(19,16), inst(24,21))))
-    val b0 = Mux(sel === SelImm.IMM_S, inst(7),
-             Mux(sel === SelImm.IMM_I, inst(20),
-             Mux(sel === SelImm.IMM_Z, inst(15), 0.U(1.W))))
+//object Imm32Gen {
+//  def apply(sel: UInt, inst: UInt) = {
+//    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
+//    val b30_20 = Mux(sel === SelImm.IMM_U, inst(30,20).asSInt, sign)
+//    val b19_12 = Mux(sel =/= SelImm.IMM_U && sel =/= SelImm.IMM_UJ, sign, inst(19,12).asSInt)
+//    val b11 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.S,
+//              Mux(sel === SelImm.IMM_UJ, inst(20).asSInt,
+//              Mux(sel === SelImm.IMM_SB, inst(7).asSInt, sign)))
+//    val b10_5 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.U(1.W), inst(30,25))
+//    val b4_1 = Mux(sel === SelImm.IMM_U, 0.U(1.W),
+//               Mux(sel === SelImm.IMM_S || sel === SelImm.IMM_SB, inst(11,8),
+//               Mux(sel === SelImm.IMM_Z, inst(19,16), inst(24,21))))
+//    val b0 = Mux(sel === SelImm.IMM_S, inst(7),
+//             Mux(sel === SelImm.IMM_I, inst(20),
+//             Mux(sel === SelImm.IMM_Z, inst(15), 0.U(1.W))))
+//
+//    Cat(sign, b30_20, b19_12, b11, b10_5, b4_1, b0)
+//  }
+//}
 
-    Cat(sign, b30_20, b19_12, b11, b10_5, b4_1, b0)
+abstract class Imm(val len: Int) extends Bundle {
+  def toImm32(minBits: UInt): UInt = do_toImm32(minBits(len - 1, 0))
+  def do_toImm32(minBits: UInt): UInt
+  def minBitsFromInstr(instr: UInt): UInt
+}
+
+case class Imm_I() extends Imm(12) {
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt =
+    Cat(instr(31, 20))
+}
+
+case class Imm_S() extends Imm(12) {
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt =
+    Cat(instr(31, 25), instr(11, 7))
+}
+
+case class Imm_B() extends Imm(12) {
+  override def do_toImm32(minBits: UInt): UInt = SignExt(Cat(minBits, 0.U(1.W)), 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt =
+    Cat(instr(31), instr(7), instr(30, 25), instr(11, 8))
+}
+
+case class Imm_U() extends Imm(20){
+  override def do_toImm32(minBits: UInt): UInt = Cat(minBits, 0.U(12.W))
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(31, 12)
   }
 }
+
+case class Imm_J() extends Imm(20){
+  override def do_toImm32(minBits: UInt): UInt = SignExt(Cat(minBits, 0.U(1.W)), 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    Cat(instr(31), instr(19, 12), instr(20), instr(30, 25), instr(24, 21))
+  }
+}
+
+case class Imm_Z() extends Imm(12 + 5){
+  override def do_toImm32(minBits: UInt): UInt = minBits
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    Cat(instr(19, 15), instr(31, 20))
+  }
+}
+
+object ImmUnion {
+  val I = Imm_I()
+  val S = Imm_S()
+  val B = Imm_B()
+  val U = Imm_U()
+  val J = Imm_J()
+  val Z = Imm_Z()
+  val imms = Seq(I, S, B, U, J, Z)
+  val maxLen = imms.maxBy(_.len).len
+  val immSelMap = Seq(
+    SelImm.IMM_I,
+    SelImm.IMM_S,
+    SelImm.IMM_SB,
+    SelImm.IMM_U,
+    SelImm.IMM_UJ,
+    SelImm.IMM_Z
+  ).zip(imms)
+  println(s"ImmUnion max len: $maxLen")
+}
+
 
 /**
  * IO bundle for the Decode unit
@@ -403,19 +475,27 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
     cs.lsrc1 := XSTrapDecode.lsrc1
   }
 
-  cs.imm := SignExt(Imm32Gen(cs.selImm, ctrl_flow.instr), XLEN)
+  val instr = io.enq.ctrl_flow.instr
+  cs.imm := LookupTree(cs.selImm, ImmUnion.immSelMap.map(
+    x => {
+      val minBits = x._2.minBitsFromInstr(instr)
+      require(minBits.getWidth == x._2.len)
+      x._1 -> minBits
+    }
+  ))
 
   cf_ctrl.ctrl := cs
 
+  // TODO: do we still need this?
   // fix ret and call
-  when (cs.fuType === FuType.jmp) {
-    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
-    when (isLink(cs.ldest) && cs.fuOpType === JumpOpType.jal) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
-    when (cs.fuOpType === JumpOpType.jalr) {
-      when (isLink(cs.lsrc1)) { cf_ctrl.ctrl.fuOpType := JumpOpType.ret  }
-      when (isLink(cs.ldest)) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
-    }
-  }
+//  when (cs.fuType === FuType.jmp) {
+//    def isLink(reg: UInt) = (reg === 1.U || reg === 5.U)
+//    when (isLink(cs.ldest) && cs.fuOpType === JumpOpType.jal) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
+//    when (cs.fuOpType === JumpOpType.jalr) {
+//      when (isLink(cs.lsrc1)) { cf_ctrl.ctrl.fuOpType := JumpOpType.ret  }
+//      when (isLink(cs.ldest)) { cf_ctrl.ctrl.fuOpType := JumpOpType.call }
+//    }
+//  }
 
   io.deq.cf_ctrl := cf_ctrl
 

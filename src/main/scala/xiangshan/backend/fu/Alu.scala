@@ -8,14 +8,15 @@ import xiangshan.backend.ALUOpType
 
 class Alu extends FunctionUnit with HasRedirectOut {
 
-  val (src1, src2, offset, func, pc, uop) = (
+  val (src1, src2, func, pc, uop) = (
     io.in.bits.src(0),
     io.in.bits.src(1),
-    io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
     SignExt(io.in.bits.uop.cf.pc, AddrBits),
     io.in.bits.uop
   )
+
+  val offset = src2
 
   val valid = io.in.valid
 
@@ -63,20 +64,29 @@ class Alu extends FunctionUnit with HasRedirectOut {
   val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
 
   redirectOutValid := io.out.valid && isBranch
-  redirectOut.pc := uop.cf.pc
-  redirectOut.target := Mux(!taken && isBranch, snpc, target)
+  // Only brTag, level, roqIdx are needed
+  // other infos are stored in brq
+  redirectOut := DontCare
   redirectOut.brTag := uop.brTag
   redirectOut.level := RedirectLevel.flushAfter
-  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
 
-  brUpdate := uop.cf.brUpdate
-  // override brUpdate
-  brUpdate.pc := uop.cf.pc
-  brUpdate.target := Mux(!taken && isBranch, snpc, target)
-  brUpdate.brTarget := target
+//  redirectOut.pc := DontCare//uop.cf.pc
+//  redirectOut.target := DontCare//Mux(!taken && isBranch, snpc, target)
+//  redirectOut.interrupt := DontCare//DontCare
+
+  // Only taken really needed, do we need brTag ?
+  brUpdate := DontCare
   brUpdate.taken := isBranch && taken
   brUpdate.brTag := uop.brTag
+
+//  brUpdate := uop.cf.brUpdate
+//  // override brUpdate
+//  brUpdate.pc := uop.cf.pc
+//  brUpdate.target := Mux(!taken && isBranch, snpc, target)
+//  brUpdate.brTarget := target
+//  brUpdate.taken := isBranch && taken
+//  brUpdate.brTag := uop.brTag
 
   io.in.ready := io.out.ready
   io.out.valid := valid

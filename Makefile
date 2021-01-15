@@ -156,8 +156,8 @@ endif
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
-VME_SOURCE ?= $(shell pwd)
-VME_MODULE ?= 
+VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
+VME_MODULES ?= 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
@@ -189,10 +189,19 @@ coverage:
 	python3 scripts/coverage/coverage.py build/logs/annotated/XSSimTop.v build/XSSimTop_annotated.v
 	python3 scripts/coverage/statistics.py build/XSSimTop_annotated.v >build/coverage.log
 
-# extract verilog module from sim_top.v
-# usage: make vme VME_MODULE=Roq
-vme: $(SIM_TOP_V)
-	mill XiangShan.runMain utils.ExtractVerilogModules -m $(VME_MODULE)
+#-----------------------timing scripts-------------------------
+# run "make vme/tap help=1" to get help info
+
+# extract verilog module from TopMain.v
+# usage: make vme VME_MODULES=Roq
+TIMING_SCRIPT_PATH = ./timingScripts
+vme: $(TOP_V)
+	make -C $(TIMING_SCRIPT_PATH) vme
+
+# get and sort timing analysis with total delay(start+end) and max delay(start or end)
+# and print it out
+tap:
+	make -C $(TIMING_SCRIPT_PATH) tap
 
 # usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
 phy_evaluate: vme
