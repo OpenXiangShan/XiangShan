@@ -332,6 +332,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
+  AddressSpace.printMemmap()
 
   // to fast wake up fp, mem rs
   val intBlockFastWakeUpFp = intExuConfigs.filter(fpFastFilter)

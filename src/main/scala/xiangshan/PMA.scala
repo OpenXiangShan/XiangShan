@@ -17,7 +17,7 @@ object MemMap {
 }
 
 object AddressSpace {
-  def MemMapList = Map(
+  def MemMapList = List(
     //     Base address      Top address       Width  Description    Mode (RWXIDSAC)
     MemMap("h00_0000_0000", "h00_0FFF_FFFF",   "h0", "Reserved",    ""),
     MemMap("h00_1000_0000", "h00_1FFF_FFFF",   "h0", "QSPI_Flash",  "RX"),
@@ -54,11 +54,11 @@ object AddressSpace {
   )
 
   def printMemmap(){
-    println("----- memory map -----")
+    println("-------------------- memory map --------------------")
     for(i <- MemMapList){
-      println(i._1._1 + "-" + i._1._2 + " width " + (if(i._2.get("width") == "0") "unlimited" else i._2.get("width")) + " " + i._2.get("description") + " [" + i._2.get("mode") + "]")
+      println(i._1._1 + "->" + i._1._2 + " width " + (if(i._2.get("width").get == "0") "unlimited" else i._2.get("width").get) + " " + i._2.get("description").get + " [" + i._2.get("mode").get + "]")
     }
-    println("----------------------")
+    println("----------------------------------------------------")
   }
 
   def genMemmapMatchVec(addr: UInt): UInt = {
@@ -95,8 +95,6 @@ class PMAChecker extends XSModule with HasDCacheParameters
     val mode = Output(PMAMode())
     val widthLimit = Output(UInt(8.W)) // TODO: fixme
   })
-
-  AddressSpace.printMemmap()
 
   val (mode, widthLimit) = AddressSpace.memmapAddrMatch(io.paddr)
   // TODO: GPU mode fix

@@ -110,14 +110,14 @@ package object xiangshan {
   }
 
   object PMAMode {
-    def R = "b1".U << 0
-    def W = "b1".U << 1
-    def X = "b1".U << 2
-    def I = "b1".U << 3
-    def D = "b1".U << 4
-    def S = "b1".U << 5
-    def A = "b1".U << 6
-    def C = "b1".U << 7
+    def R = "b1".U << 0 //readable
+    def W = "b1".U << 1 //writeable
+    def X = "b1".U << 2 //executable
+    def I = "b1".U << 3 //cacheable: icache
+    def D = "b1".U << 4 //cacheable: dcache
+    def S = "b1".U << 5 //enable speculative access
+    def A = "b1".U << 6 //enable atomic operation
+    def C = "b1".U << 7 //if it is cacheable is configable
     def Reserved = "b0".U
 
     def apply() = UInt(7.W)
