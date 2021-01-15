@@ -15,6 +15,7 @@ import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import utils._
 import scala.math.max
+import Chisel.experimental.chiselName
 
 // Fetch FetchWidth x 32-bit insts from Icache
 class FetchPacket extends XSBundle {
@@ -66,6 +67,7 @@ class TageMeta extends XSBundle with HasTageParameter {
   val scMeta = new SCMeta(EnableSC)
 }
 
+@chiselName
 class BranchPrediction extends XSBundle with HasIFUConst {
   // val redirect = Bool()
   val takens = UInt(PredictWidth.W)
@@ -78,37 +80,40 @@ class BranchPrediction extends XSBundle with HasIFUConst {
   // val endsAtTheEndOfFirstBank = Bool()
   // val endsAtTheEndOfLastBank = Bool()
 
-  // half RVI could only start at the end of a bank
-  val firstBankHasHalfRVI = Bool()
-  val lastBankHasHalfRVI = Bool()
+  // half RVI could only start at the end of a packet
+  val hasHalfRVI = Bool()
+
 
   // assumes that only one of the two conditions could be true
-  def lastHalfRVIMask = Cat(lastBankHasHalfRVI.asUInt, 0.U(7.W), firstBankHasHalfRVI.asUInt, 0.U(7.W))
+  def lastHalfRVIMask = Cat(hasHalfRVI.asUInt, 0.U((PredictWidth-1).W))
 
   def lastHalfRVIClearMask = ~lastHalfRVIMask
   // is taken from half RVI
-  def lastHalfRVITaken = (takens(bankWidth-1) && firstBankHasHalfRVI) || (takens(PredictWidth-1) && lastBankHasHalfRVI)
+  def lastHalfRVITaken = takens(PredictWidth-1) && hasHalfRVI
 
-  def lastHalfRVIIdx = Mux(firstBankHasHalfRVI, (bankWidth-1).U, (PredictWidth-1).U)
+  def lastHalfRVIIdx = (PredictWidth-1).U
   // should not be used if not lastHalfRVITaken
-  def lastHalfRVITarget = Mux(firstBankHasHalfRVI, targets(bankWidth-1), targets(PredictWidth-1))
+  def lastHalfRVITarget = targets(PredictWidth-1)
   
   def realTakens  = takens  & lastHalfRVIClearMask
   def realBrMask  = brMask  & lastHalfRVIClearMask
   def realJalMask = jalMask & lastHalfRVIClearMask
 
-  def brNotTakens = ~takens & realBrMask
+  def brNotTakens = (~takens & realBrMask)
   def sawNotTakenBr = VecInit((0 until PredictWidth).map(i =>
                        (if (i == 0) false.B else ParallelORR(brNotTakens(i-1,0)))))
   // def hasNotTakenBrs = (brNotTakens & LowerMaskFromLowest(realTakens)).orR
   def unmaskedJmpIdx = ParallelPriorityEncoder(takens)
   // if not taken before the half RVI inst
-  def saveHalfRVI = (firstBankHasHalfRVI && !(ParallelORR(takens(bankWidth-2,0)))) ||
-  (lastBankHasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0))))
+  def saveHalfRVI = hasHalfRVI && !(ParallelORR(takens(PredictWidth-2,0)))
   // could get PredictWidth-1 when only the first bank is valid
   def jmpIdx = ParallelPriorityEncoder(realTakens)
   // only used when taken
-  def target = ParallelPriorityMux(realTakens, targets)
+  def target = {
+    val generator = new PriorityMuxGenerator[UInt]
+    generator.register(realTakens.asBools, targets, List.fill(PredictWidth)(None))
+    generator()
+  }
   def taken = ParallelORR(realTakens)
   def takenOnBr = taken && ParallelPriorityMux(realTakens, realBrMask.asBools)
   def hasNotTakenBrs = Mux(taken, ParallelPriorityMux(realTakens, sawNotTakenBr), ParallelORR(brNotTakens))
@@ -149,16 +154,16 @@ class BpuMeta extends XSBundle with HasBPUParameter {
 
 class Predecode extends XSBundle with HasIFUConst {
   val hasLastHalfRVI = Bool()
-  val mask = UInt((FetchWidth*2).W)
-  val lastHalf = UInt(nBanksInPacket.W)
-  val pd = Vec(FetchWidth*2, (new PreDecodeInfo))
+  val mask = UInt(PredictWidth.W)
+  val lastHalf = Bool()
+  val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
 class CfiUpdateInfo extends XSBundle {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)
-  val fetchIdx = UInt(log2Up(FetchWidth*2).W)
+  val fetchIdx = UInt(log2Up(PredictWidth).W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val bpuMeta = new BpuMeta
@@ -289,6 +294,7 @@ class ReplayPregReq extends XSBundle {
 
 class DebugBundle extends XSBundle{
   val isMMIO = Bool()
+  val isPerfCnt = Bool()
 }
 
 class ExuInput extends XSBundle {
