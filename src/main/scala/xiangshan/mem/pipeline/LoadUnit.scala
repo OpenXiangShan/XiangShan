@@ -92,7 +92,7 @@ class LoadUnit_S1 extends XSModule {
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_exception = io.out.bits.uop.cf.exceptionVec.asUInt.orR
   val s1_tlb_miss = io.dtlbResp.bits.miss
-  val s1_mmio = !s1_tlb_miss && AddressSpace.isMMIO(s1_paddr)
+  val s1_mmio = !s1_tlb_miss && AddressSpace.isDMMIO(s1_paddr)
   val s1_mask = io.in.bits.mask
 
   io.out.bits := io.in.bits // forwardXX field will be updated in s1

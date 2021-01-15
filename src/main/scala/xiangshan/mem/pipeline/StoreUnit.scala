@@ -84,7 +84,7 @@ class StoreUnit_S1 extends XSModule {
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := AddressSpace.isMMIO(s1_paddr)
+  io.lsq.bits.mmio := AddressSpace.isDMMIO(s1_paddr)
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
 
   // mmio inst with exception will be writebacked immediately
