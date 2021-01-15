@@ -273,7 +273,7 @@ class TLCAgent(ID: Int, name: String = "", addrStateMap: mutable.Map[BigInt, Add
   def insertMaskedWordRead(addr: BigInt, readWordData: BigInt, wordByteMask: BigInt): Unit = {
     //addr and mask must be aligned to block
     val alignAddr = addrAlignBlock(addr)
-    val start_word = beatInBlock(addr)
+    val start_word = wordInBlock(addr)
     val alignData = dataConcatWord(0, readWordData, start_word)
     val alignMask = maskConcatWord(0, wordByteMask, start_word)
     val addrState = getState(alignAddr)
@@ -503,6 +503,9 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         //when releaseAck is issued, the meta & data will be changed
         val addr = r.c.get.address
         val state = getState(addr)
+        val c = r.c.get
+        assert(permCmp(shrinkFrom(c.param), state.masterPerm) <= 0,
+          f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(r.c.get.param)
         state.myPerm = permAgainstMaster(state.masterPerm)
         if (r.c.get.opcode == ReleaseData) {
@@ -608,7 +611,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
-        assert(state.masterPerm == shrinkFrom(c.param), f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
+        assert(permCmp(shrinkFrom(c.param), state.masterPerm) <= 0, f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(c.param)
         state.myPerm = permAgainstMaster(state.masterPerm)
         state.slaveUpdatePendingProbeAck()
@@ -632,7 +635,7 @@ class TLCSlaveAgent(ID: Int, name: String = "", val maxSink: Int, addrStateMap: 
         //pair ProbeAck
         probeT.pairProbeAck(c)
         //update state
-        assert(state.masterPerm == shrinkFrom(c.param), f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
+        assert(permCmp(shrinkFrom(c.param), state.masterPerm) <= 0, f"addr: $addr%x, recorded master perm: ${state.masterPerm}, param:${c.param} , shrink from ${shrinkFrom(c.param)}")
         state.masterPerm = shrinkTarget(c.param)
         state.myPerm = permAgainstMaster(state.masterPerm)
         state.data = c.data

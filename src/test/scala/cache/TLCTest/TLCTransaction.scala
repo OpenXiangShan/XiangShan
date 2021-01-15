@@ -250,6 +250,16 @@ trait PermissionTransition extends TLCOp {
     else
       NtoN
   }
+
+  //0 if same perm, -1 if b is higher, 1 if a is higer
+  def permCmp(aPerm: BigInt, bPerm: BigInt): Int = {
+    if (aPerm == bPerm)
+      0
+    else if (aPerm > bPerm)
+      -1
+    else
+      1
+  }
 }
 
 //Transaction meta data will hide in start message
@@ -554,7 +564,7 @@ class GetCalleeTrans() extends GetTrans with TLCCalleeTrans {
   }
 
   //outD is concated
-  def issueAccessAckData(inData: BigInt, param:BigInt): TLCScalaD = {
+  def issueAccessAckData(inData: BigInt, param: BigInt): TLCScalaD = {
     d = Some(new TLCScalaD(
       opcode = AccessAckData,
       param = param,
