@@ -85,7 +85,7 @@ object RegfileReadPortGen {
     val choiceCount = dynamicMappedValid.length + 1
     val readPortSrc = Wire(Vec(staticMappedValid.length, UInt(log2Ceil(choiceCount).W)))
     var hasAssigned = (0 until choiceCount).map(_ => false.B)
-    for (i <- 0 until staticMappedValid.length) {
+    for (i <- staticMappedValid.indices) {
       val valid = staticMappedValid(i) +: dynamicMappedValid
       val wantReadPort = (0 until choiceCount).map(j => valid(j) && ((j == 0).asBool() || !hasAssigned(j)))
       readPortSrc(i) := PriorityEncoder(wantReadPort)
@@ -93,8 +93,8 @@ object RegfileReadPortGen {
       hasAssigned = (0 until choiceCount).map(i => hasAssigned(i) || onehot(i))
     }
     val dynamicExuSrc = Wire(Vec(dynamicMappedValid.length, UInt(log2Ceil(staticMappedValid.length).W)))
-    for (i <- 0 until dynamicMappedValid.length) {
-      val targetMatch = (0 until staticMappedValid.length).map(j => readPortSrc(j) === (i + 1).U)
+    for (i <- dynamicMappedValid.indices) {
+      val targetMatch = staticMappedValid.indices.map(j => readPortSrc(j) === (i + 1).U)
       dynamicExuSrc(i) := PriorityEncoder(targetMatch)
     }
     (readPortSrc, dynamicExuSrc)
