@@ -430,13 +430,13 @@ class CSR extends FunctionUnit with HasCSRConst
                 (if (HasFPU) fcsrMapping else Nil)
     
   val addr = src2(11, 0)
+  val csri = src2(16, 12)
   val rdata = Wire(UInt(XLEN.W))
-  val csri = ZeroExt(cfIn.instr(19,15), XLEN) //unsigned imm for csri. [TODO]
   val wdata = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdata | src1),
     CSROpType.clr  -> (rdata & (~src1).asUInt()),
-    CSROpType.wrti -> csri, //TODO: csri --> src2
+    CSROpType.wrti -> csri,
     CSROpType.seti -> (rdata | csri),
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
