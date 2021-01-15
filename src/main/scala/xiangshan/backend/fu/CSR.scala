@@ -72,10 +72,16 @@ trait HasExceptionNO {
   )
   val atomicsUnitSet = (loadUnitSet ++ storeUnitSet).distinct
   val allPossibleSet = (frontendSet ++ csrSet ++ loadUnitSet ++ storeUnitSet).distinct
-  def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true): Vec[Bool] = {
+  def partialSelect(vec: Vec[Bool], select: Seq[Int], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] = {
     if (dontCareBits) {
       val new_vec = Wire(ExceptionVec())
       new_vec := DontCare
+      select.map(i => new_vec(i) := vec(i))
+      return new_vec
+    }
+    else if (falseBits) {
+      val new_vec = Wire(ExceptionVec())
+      new_vec.map(_ := false.B)
       select.map(i => new_vec(i) := vec(i))
       return new_vec
     }
@@ -85,18 +91,18 @@ trait HasExceptionNO {
       return new_vec
     }
   }
-  def selectFrontend(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
-    partialSelect(vec, frontendSet, dontCareBits)
-  def selectCSR(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
-    partialSelect(vec, csrSet, dontCareBits)
-  def selectLoad(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
-    partialSelect(vec, loadUnitSet, dontCareBits)
-  def selectStore(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
-    partialSelect(vec, storeUnitSet, dontCareBits)
-  def selectAtomics(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
-    partialSelect(vec, atomicsUnitSet, dontCareBits)
-  def selectAll(vec: Vec[Bool], dontCareBits: Boolean = true): Vec[Bool] =
-    partialSelect(vec, allPossibleSet, dontCareBits)
+  def selectFrontend(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, frontendSet, dontCareBits, falseBits)
+  def selectCSR(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, csrSet, dontCareBits, falseBits)
+  def selectLoad(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, loadUnitSet, dontCareBits, falseBits)
+  def selectStore(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, storeUnitSet, dontCareBits, falseBits)
+  def selectAtomics(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, atomicsUnitSet, dontCareBits, falseBits)
+  def selectAll(vec: Vec[Bool], dontCareBits: Boolean = true, falseBits: Boolean = false): Vec[Bool] =
+    partialSelect(vec, allPossibleSet, dontCareBits, falseBits)
 }
 
 class FpuCsrIO extends XSBundle {

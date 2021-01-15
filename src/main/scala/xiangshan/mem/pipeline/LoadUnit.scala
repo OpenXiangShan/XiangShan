@@ -191,7 +191,9 @@ class LoadUnit_S2 extends XSModule with HasLoadHelper {
   // so we do not need to care about flush in load / store unit's out.valid
   io.out.bits := io.in.bits
   io.out.bits.data := rdataPartialLoad
-  io.out.bits.miss := s2_cache_miss && !fullForward
+  // when exception occurs, set it to not miss and let it write back to roq (via int port)
+  io.out.bits.miss := s2_cache_miss && !fullForward && !s2_exception
+  io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   io.out.bits.mmio := s2_mmio
 
   io.in.ready := io.out.ready || !io.in.valid
@@ -268,13 +270,14 @@ class LoadUnit extends XSModule with HasLoadHelper {
   // Load queue will be updated at s2 for both hit/miss int/fp load
   io.lsq.loadIn.valid := load_s2.io.out.valid
   io.lsq.loadIn.bits := load_s2.io.out.bits
-  val s2_exception = selectLoad(load_s2.io.out.bits.uop.cf.exceptionVec, false).asUInt.orR
-  val s2Valid = load_s2.io.out.valid && (!load_s2.io.out.bits.miss || s2_exception)
+
+  // write to rob and writeback bus
+  val s2_wb_valid = load_s2.io.out.valid && !load_s2.io.out.bits.miss
   val refillFpLoad = io.lsq.ldout.bits.uop.ctrl.fpWen
 
   // Int load, if hit, will be writebacked at s2
   val intHitLoadOut = Wire(Valid(new ExuOutput))
-  intHitLoadOut.valid := s2Valid && !load_s2.io.out.bits.uop.ctrl.fpWen
+  intHitLoadOut.valid := s2_wb_valid && !load_s2.io.out.bits.uop.ctrl.fpWen
   intHitLoadOut.bits.uop := load_s2.io.out.bits.uop
   intHitLoadOut.bits.data := load_s2.io.out.bits.data
   intHitLoadOut.bits.redirectValid := false.B
@@ -291,7 +294,7 @@ class LoadUnit extends XSModule with HasLoadHelper {
 
   // Fp load, if hit, will be send to recoder at s2, then it will be recoded & writebacked at s3
   val fpHitLoadOut = Wire(Valid(new ExuOutput))
-  fpHitLoadOut.valid := s2Valid && load_s2.io.out.bits.uop.ctrl.fpWen
+  fpHitLoadOut.valid := s2_wb_valid && load_s2.io.out.bits.uop.ctrl.fpWen
   fpHitLoadOut.bits := intHitLoadOut.bits
 
   val fpLoadOut = Wire(Valid(new ExuOutput))

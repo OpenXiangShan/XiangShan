@@ -152,7 +152,7 @@ class LoadQueue extends XSModule
     vaddrModule.io.wen(i) := false.B
     when(io.loadIn(i).fire()) {
       when(io.loadIn(i).bits.miss) {
-        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
+        XSInfo(io.loadIn(i).valid, "load miss write to lq idx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
           io.loadIn(i).bits.uop.lqIdx.asUInt,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -161,12 +161,10 @@ class LoadQueue extends XSModule
           io.loadIn(i).bits.mask,
           io.loadIn(i).bits.forwardData.asUInt,
           io.loadIn(i).bits.forwardMask.asUInt,
-          io.loadIn(i).bits.mmio,
-          io.loadIn(i).bits.rollback,
-          io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+          io.loadIn(i).bits.mmio
           )
         }.otherwise {
-          XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x roll %x exc %x\n",
+          XSInfo(io.loadIn(i).valid, "load hit write to cbd lqidx %d pc 0x%x vaddr %x paddr %x data %x mask %x forwardData %x forwardMask: %x mmio %x\n",
           io.loadIn(i).bits.uop.lqIdx.asUInt,
           io.loadIn(i).bits.uop.cf.pc,
           io.loadIn(i).bits.vaddr,
@@ -175,9 +173,7 @@ class LoadQueue extends XSModule
           io.loadIn(i).bits.mask,
           io.loadIn(i).bits.forwardData.asUInt,
           io.loadIn(i).bits.forwardMask.asUInt,
-          io.loadIn(i).bits.mmio,
-          io.loadIn(i).bits.rollback,
-          io.loadIn(i).bits.uop.cf.exceptionVec.asUInt
+          io.loadIn(i).bits.mmio
           )
         }
         val loadWbIndex = io.loadIn(i).bits.uop.lqIdx.value
@@ -189,7 +185,6 @@ class LoadQueue extends XSModule
         loadWbData.mask := io.loadIn(i).bits.mask
         loadWbData.data := io.loadIn(i).bits.data // fwd data
         loadWbData.fwdMask := io.loadIn(i).bits.forwardMask
-        loadWbData.exception := selectLoad(io.loadIn(i).bits.uop.cf.exceptionVec)
         dataModule.io.wbWrite(i, loadWbIndex, loadWbData)
         dataModule.io.wb.wen(i) := true.B
 
@@ -200,9 +195,8 @@ class LoadQueue extends XSModule
         debug_mmio(loadWbIndex) := io.loadIn(i).bits.mmio
 
         val dcacheMissed = io.loadIn(i).bits.miss && !io.loadIn(i).bits.mmio
-        val hasException = selectLoad(io.loadIn(i).bits.uop.cf.exceptionVec, false).asUInt.orR
-        miss(loadWbIndex) := dcacheMissed && !hasException
-        pending(loadWbIndex) := io.loadIn(i).bits.mmio && !hasException
+        miss(loadWbIndex) := dcacheMissed
+        pending(loadWbIndex) := io.loadIn(i).bits.mmio
       }
     }
 
@@ -357,7 +351,6 @@ class LoadQueue extends XSModule
     //
     // Int load writeback will finish (if not blocked) in one cycle
     io.ldout(i).bits.uop := seluop
-    io.ldout(i).bits.uop.cf.exceptionVec := selectLoad(dataModule.io.wb.rdata(i).exception)
     io.ldout(i).bits.uop.lqIdx := loadWbSel(i).asTypeOf(new LqPtr)
     io.ldout(i).bits.data := rdataPartialLoad
     io.ldout(i).bits.redirectValid := false.B
