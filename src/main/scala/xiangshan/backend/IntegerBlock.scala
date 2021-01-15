@@ -102,11 +102,11 @@ class IntegerBlock
     len = XLEN
   ))
 
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
+  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
 
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mduExeUnits)
+  val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
 
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
