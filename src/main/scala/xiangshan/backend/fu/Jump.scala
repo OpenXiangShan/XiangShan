@@ -38,15 +38,16 @@ class Jump extends FunctionUnit with HasRedirectOut {
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   redirectOutValid := valid
-  redirectOut.pc := uop.cf.pc
+  redirectOut := DontCare
+//  redirectOut.pc := uop.cf.pc
   redirectOut.target := target
   redirectOut.brTag := uop.brTag
   redirectOut.level := RedirectLevel.flushAfter
-  redirectOut.interrupt := DontCare
+//  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
 
-  brUpdate := uop.cf.brUpdate
-  brUpdate.pc := uop.cf.pc
+  brUpdate := DontCare //uop.cf.brUpdate
+//  brUpdate.pc := uop.cf.pc
   brUpdate.target := target
   brUpdate.brTarget := target
   brUpdate.taken := true.B

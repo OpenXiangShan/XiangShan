@@ -45,6 +45,11 @@ class BrqEnqIO extends XSBundle {
   val resp = Vec(RenameWidth, Output(new BrqPtr))
 }
 
+class BrqPcRead extends XSBundle {
+  val brqIdx = Input(new BrqPtr)
+  val pc = Output(UInt(VAddrBits.W))
+}
+
 class BrqIO extends XSBundle{
   val redirect = Input(ValidIO(new Redirect))
   // receive branch/jump calculated target
@@ -58,6 +63,8 @@ class BrqIO extends XSBundle{
   val cfiInfo = ValidIO(new CfiUpdateInfo)
   // commit cnt of branch instr
   val bcommit = Input(UInt(BrTagWidth.W))
+  // read pc for jump unit
+  val pcReadReq = new BrqPcRead
 }
 
 class Brq extends XSModule with HasCircularQueuePtrHelper {
@@ -77,7 +84,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   }
 
   // data and state
-  val decodeData = Module(new SyncDataModuleTemplate(new DecodeEnqBrqData, BrqSize, 2, DecodeWidth))
+  val decodeData = Module(new SyncDataModuleTemplate(new DecodeEnqBrqData, BrqSize, 3, DecodeWidth))
   val writebackData = Module(new SyncDataModuleTemplate(new ExuOutput, BrqSize, 2, exuParameters.AluCnt + exuParameters.JmpCnt))
   val ptrFlagVec = Reg(Vec(BrqSize, Bool()))
   val stateQueue = RegInit(VecInit(Seq.fill(BrqSize)(s_idle)))
@@ -229,6 +236,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   decodeData.io.raddr(0) := writebackPtr_next.value
   decodeData.io.raddr(1) := brUpdateReadIdx.value
+  decodeData.io.raddr(2) := io.pcReadReq.brqIdx.value
   decodeData.io.wen := VecInit(io.enq.req.map(_.fire()))
   decodeData.io.waddr := VecInit(enqBrTag.map(_.value))
   decodeData.io.wdata.zip(io.enq.req).foreach{ case (wdata, req) =>
@@ -246,6 +254,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   wbEntry := mergeWbEntry(decodeData.io.rdata(0), writebackData.io.rdata(0))
   brUpdateReadEntry := mergeBrUpdateEntry(decodeData.io.rdata(1), writebackData.io.rdata(1))
 
+  io.pcReadReq.pc := decodeData.io.rdata(2).cfiUpdateInfo.pc
 
   // Debug info
   val debug_roq_redirect = io.redirect.valid && io.redirect.bits.isUnconditional()

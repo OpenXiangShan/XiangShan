@@ -338,6 +338,7 @@ class ReservationStationData
 
     // read src op value
     val srcRegValue = Vec(srcNum, Input(UInt((XLEN + 1).W)))
+    val jumpPc = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     // broadcast selected uop to other issue queues
     val selectedUop = ValidIO(new MicroOp)
 
@@ -422,14 +423,18 @@ class ReservationStationData
   }
 
   when (enqEnReg) {
-    val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
-      SignExt(enqUopReg.cf.pc, XLEN),
-      io.srcRegValue(0)
-    )
     exuCfg match {
       case Exu.jumpExeUnitCfg =>
+        val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+          SignExt(io.jumpPc, XLEN),
+          io.srcRegValue(0)
+        )
         dataWrite(enqPtrReg, 0, src1Mux)
       case Exu.aluExeUnitCfg =>
+        val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+          SignExt(enqUopReg.cf.pc, XLEN),
+          io.srcRegValue(0)
+        )
         dataWrite(enqPtrReg, 0, src1Mux)
         // TODO: opt this, a full map is not necesscary here
         val imm32 = LookupTree(
