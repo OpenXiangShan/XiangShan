@@ -196,6 +196,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     mergeData.brUpdate.target := wb.brUpdate.target
     mergeData.brUpdate.brTarget := wb.brUpdate.brTarget
     mergeData.brUpdate.taken := wb.brUpdate.taken
+    mergeData.brUpdate.bpuMeta.predictor:= wb.brUpdate.bpuMeta.predictor
     mergeData
   }
 
@@ -270,16 +271,16 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   val predictor = brUpdateReadEntry.brUpdate.bpuMeta.predictor
 
-  val ubtbRight = predRight && predictor === 0.U
+  val ubtbRight =  predRight && predictor === 0.U
   val ubtbWrong = !predRight && predictor === 0.U
 
-  val btbRight = predRight && predictor === 1.U
-  val btbWrong = !predRight && predictor === 1.U
+  val btbRight  =  predRight && predictor === 1.U
+  val btbWrong  = !predRight && predictor === 1.U
 
-  val tageRight = predRight && predictor === 2.U
+  val tageRight =  predRight && predictor === 2.U
   val tageWrong = !predRight && predictor === 2.U
 
-  val loopRight = predRight && predictor === 3.U
+  val loopRight =  predRight && predictor === 3.U
   val loopWrong = !predRight && predictor === 3.U
 
   if(!env.FPGAPlatform){
