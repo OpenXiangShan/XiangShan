@@ -52,7 +52,40 @@ class SRAMWriteBus[T <: Data](private val gen: T, val set: Int, val way: Int = 1
   }
 }
 
-class SRAMModule(set: Int, way: Int, width: Int) extends Module {
+abstract class SRAMTemplate extends Module {
+  def read(addr: UInt, ren: Bool): Vec[UInt]
+  def write(addr: UInt, wen: Bool, wdata: UInt, wmask: UInt): Unit
+}
+
+class SinglePortSRAM(set: Int, way: Int, width: Int) extends SRAMTemplate {
+  val io = IO(new Bundle() {
+    val addr = Input(UInt(log2Up(set).W))
+    val ren = Input(Bool())
+    val rdata = Output(Vec(way, UInt(width.W)))
+    val wdata = Input(UInt(width.W))
+    val wen = Input(Bool())
+    val wmask = Input(UInt(way.W))
+  })
+  val mem = SyncReadMem(set, Vec(way, UInt(width.W)))
+  io.rdata := mem.read(io.addr, io.ren)
+  when(io.wen){
+    mem.write(io.addr, VecInit(Seq.fill(way)(io.wdata)), io.wmask.asBools())
+  }
+
+  override def read(addr: UInt, ren: Bool): Vec[UInt] = {
+    io.addr := addr
+    io.ren := ren
+    io.rdata
+  }
+
+  override def write(addr: UInt, wen: Bool, wdata: UInt, wmask: UInt): Unit = {
+    io.addr := addr
+    io.wen := wen
+    io.wdata := wdata
+    io.wmask := wmask
+  }
+}
+class DualPortSRAM(set: Int, way: Int, width: Int) extends SRAMTemplate {
   val io = IO(new Bundle() {
     val raddr = Input(UInt(log2Up(set).W))
     val ren = Input(Bool())
@@ -66,6 +99,19 @@ class SRAMModule(set: Int, way: Int, width: Int) extends Module {
   io.rdata := mem.read(io.raddr, io.ren)
   when(io.wen){
     mem.write(io.waddr, VecInit(Seq.fill(way)(io.wdata)), io.wmask.asBools())
+  }
+
+  override def read(addr: UInt, ren: Bool): Vec[UInt] = {
+    io.raddr := addr
+    io.ren := ren
+    io.rdata
+  }
+
+  override def write(addr: UInt, wen: Bool, wdata: UInt, wmask: UInt): Unit = {
+    io.waddr := addr
+    io.wen := wen
+    io.wdata := wdata
+    io.wmask := wmask
   }
 }
 
@@ -84,7 +130,11 @@ class SRAMWrapper[T <: Data]
 
   val wordType = UInt(gen.getWidth.W)
 //  val array = SyncReadMem(set, Vec(way, wordType))
-  val array = Module(new SRAMModule(set, way, gen.getWidth))
+  val array: SRAMTemplate = if(singlePort) {
+    Module(new SinglePortSRAM(set, way, gen.getWidth))
+  } else {
+    Module(new DualPortSRAM(set, way, gen.getWidth))
+  }
   val (resetState, resetSet) = (WireInit(false.B), WireInit(0.U))
 
   if (shouldReset) {
@@ -99,29 +149,25 @@ class SRAMWrapper[T <: Data]
   val (ren, wen) = (io.r.req.valid, io.w.req.valid || resetState)
   val realRen = (if (singlePort) ren && !wen else ren)
 
-  val setIdx = Mux(resetState, resetSet, io.w.req.bits.setIdx)
+  val setIdx = Mux(resetState, resetSet,
+    if(singlePort) Mux(io.w.req.valid, io.w.req.bits.setIdx, io.r.req.bits.setIdx)
+    else io.w.req.bits.setIdx
+  )
   val wdataword = Mux(resetState, 0.U.asTypeOf(wordType), io.w.req.bits.data.asUInt)
   val waymask = Mux(resetState, Fill(way, "b1".U), io.w.req.bits.waymask.getOrElse("b1".U))
-//  val wdata = VecInit(Seq.fill(way)(wdataword))
-//  when (wen) { array.write(setIdx, wdata, waymask.asBools) }
-  array.io.wen := wen
-  array.io.waddr := setIdx
-  array.io.wdata := wdataword
-  array.io.wmask := waymask
+  array.write(setIdx, wen, wdataword, waymask)
 
-  array.io.raddr := io.r.req.bits.setIdx
-  array.io.ren := realRen
+  val rdataWire = if(singlePort) array.read(setIdx, realRen) else array.read(io.r.req.bits.setIdx, realRen)
 
-//  val rdata = (if (holdRead) ReadAndHold(array, io.r.req.bits.setIdx, realRen)
-//               else array.read(io.r.req.bits.setIdx, realRen)).map(_.asTypeOf(gen))
-  val rdata = (if(holdRead) HoldUnless(array.io.rdata, RegNext(realRen)) else array.io.rdata).map(_.asTypeOf(gen))
+  val rdata = (if(holdRead) HoldUnless(rdataWire, RegNext(realRen)) else rdataWire).map(_.asTypeOf(gen))
   io.r.resp.data := VecInit(rdata)
 
   io.r.req.ready := !resetState && (if (singlePort) !wen else true.B)
   io.w.req.ready := true.B
 
+  val prefix = if(singlePort) "SinglePortSRAM_" else "DualPortSRAM_"
   annotate(new ChiselAnnotation {
-    override def toFirrtl: Annotation = OverrideDesiredNameAnnotation("SRAMTemplate_" + sramName, array.toAbsoluteTarget)
+    override def toFirrtl: Annotation = OverrideDesiredNameAnnotation(s"$prefix$sramName", array.toAbsoluteTarget)
   })
 }
 
