@@ -268,6 +268,20 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
+  val predictor = brUpdateReadEntry.brUpdate.bpuMeta.predictor
+
+  val ubtbRight = predRight && predictor === 0.U
+  val ubtbWrong = !predRight && predictor === 0.U
+
+  val btbRight = predRight && predictor === 1.U
+  val btbWrong = !predRight && predictor === 1.U
+
+  val tageRight = predRight && predictor === 2.U
+  val tageWrong = !predRight && predictor === 2.U
+
+  val loopRight = predRight && predictor === 3.U
+  val loopWrong = !predRight && predictor === 3.U
+
   if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
     ExcitingUtils.addSource(mbpRight, "perfCntCondBpRight", Perf)
@@ -280,6 +294,15 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     ExcitingUtils.addSource(mbpIWrong, "perfCntCondBpIWrong", Perf)
     ExcitingUtils.addSource(mbpRRight, "perfCntCondBpRRight", Perf)
     ExcitingUtils.addSource(mbpRWrong, "perfCntCondBpRWrong", Perf)
+
+    ExcitingUtils.addSource(ubtbRight, "perfCntubtbRight", Perf)
+    ExcitingUtils.addSource(ubtbWrong, "perfCntubtbWrong", Perf)
+    ExcitingUtils.addSource(btbRight, "perfCntbtbRight", Perf)
+    ExcitingUtils.addSource(btbWrong, "perfCntbtbWrong", Perf)
+    ExcitingUtils.addSource(tageRight, "perfCnttageRight", Perf)
+    ExcitingUtils.addSource(tageWrong, "perfCnttageWrong", Perf)
+    ExcitingUtils.addSource(loopRight, "perfCntloopRight", Perf)
+    ExcitingUtils.addSource(loopWrong, "perfCntloopWrong", Perf)
   }
 
   val utilization = Mux(headPtr.flag === tailPtr.flag, tailPtr.value - headPtr.value, BrqSize.U + tailPtr.value - headPtr.value)

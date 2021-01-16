@@ -476,6 +476,16 @@ class IFU extends XSModule with HasIFUConst
   io.fetchPacket.bits := fetchPacketWire
   io.fetchPacket.valid := fetchPacketValid
 
+  if(IFUDebug) {
+    val predictor = PriorityMux(Seq(
+      if4_redirect -> 2.U,
+      if3_redirect -> 1.U,
+      true.B -> 0.U
+    ))
+
+    fetchPacketWire.bpuMeta.map(_.predictor := predictor)
+  }
+
   // debug info
   if (IFUDebug) {
     XSDebug(RegNext(reset.asBool) && !reset.asBool, "Reseting...\n")

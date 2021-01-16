@@ -141,6 +141,8 @@ class BpuMeta extends XSBundle with HasBPUParameter {
   val debug_btb_cycle  = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
   val debug_tage_cycle = if (EnableBPUTimeRecord) UInt(64.W) else UInt(0.W)
 
+  val predictor = if (BPUDebug) UInt(log2Up(4).W) else UInt(0.W) // Mark which component this prediction comes from {ubtb, btb, tage, loopPredictor}
+
   // def apply(histPtr: UInt, tageMeta: TageMeta, rasSp: UInt, rasTopCtr: UInt) = {
   //   this.histPtr := histPtr
   //   this.tageMeta := tageMeta
@@ -159,7 +161,7 @@ class Predecode extends XSBundle with HasIFUConst {
   val pd = Vec(PredictWidth, (new PreDecodeInfo))
 }
 
-class CfiUpdateInfo extends XSBundle {
+class CfiUpdateInfo extends XSBundle with HasBPUParameter {
   // from backend
   val pc = UInt(VAddrBits.W)
   val pnpc = UInt(VAddrBits.W)

@@ -737,12 +737,16 @@ class CSR extends FunctionUnit with HasCSRConst
     "PtwCycleCnt" -> (0x1026, "perfCntPtwCycleCnt"  ),
     "PtwL2TlbHit" -> (0x1027, "perfCntPtwL2TlbHit"  ),
     "ICacheReq"   -> (0x1028, "perfCntIcacheReqCnt" ),
-    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt")
-    // "FetchFromICache" -> (0x102a, "CntFetchFromICache"),
-    // "FetchFromLoopBuffer" -> (0x102b, "CntFetchFromLoopBuffer"),
-    // "ExitLoop1" -> (0x102c, "CntExitLoop1"),
-    // "ExitLoop2" -> (0x102d, "CntExitLoop2"),
-    // "ExitLoop3" -> (0x102e, "CntExitLoop3")
+    "ICacheMiss"  -> (0x1029, "perfCntIcacheMissCnt"),
+    
+    "ubtbRight"   -> (0x1030, "perfCntubtbRight"),
+    "ubtbWrong"   -> (0x1031, "perfCntubtbWrong"),
+    "btbRight"    -> (0x1032, "perfCntbtbRight"),
+    "btbWrong"    -> (0x1033, "perfCntbtbWrong"),
+    "tageRight"   -> (0x1034, "perfCnttageRight"),
+    "tageWrong"   -> (0x1035, "perfCnttageWrong"),
+    "loopRight"   -> (0x1036, "perfCntloopRight"),
+    "loopWrong"   -> (0x1037, "perfCntloopWrong")
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i => 
