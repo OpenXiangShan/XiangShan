@@ -126,14 +126,14 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   val id = cfg.nMissEntries
 
   val probeResponse = edge.ProbeAck(
-    fromSource = id.U,
+    fromSource = req.source,
     toAddress = r_address,
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param
   )
 
   val probeResponseData = edge.ProbeAck(
-    fromSource = id.U,
+    fromSource = req.source,
     toAddress = r_address,
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param,

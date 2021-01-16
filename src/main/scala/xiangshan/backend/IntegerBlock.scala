@@ -102,11 +102,11 @@ class IntegerBlock
     len = XLEN
   ))
 
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
+  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
 
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mduExeUnits)
+  val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
 
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
@@ -151,6 +151,7 @@ class IntegerBlock
     val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
     rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
     if (cfg.intSrcCnt > 1) rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
+    if (cfg == Exu.jumpExeUnitCfg) rsData.io.jumpPc := io.fromCtrlBlock.jumpPc
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData
@@ -221,8 +222,9 @@ class IntegerBlock
   (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbIntPriority),
-    NRIntWritePorts
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    NRIntWritePorts,
+    isFp = false
   ))
   intWbArbiter.io.in <> exeUnits.map(_.io.toInt) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
 

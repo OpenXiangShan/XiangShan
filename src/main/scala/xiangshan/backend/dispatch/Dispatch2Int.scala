@@ -17,37 +17,40 @@ class Dispatch2Int extends XSModule {
     val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
   })
 
+  val jmpCnt = exuParameters.JmpCnt
+  val mduCnt = exuParameters.MduCnt
+  val aluCnt = exuParameters.AluCnt
+
   /**
     * Part 1: generate indexes for reservation stations
     */
+  assert(jmpCnt == 1)
   val jmpCanAccept = VecInit(io.fromDq.map(deq => deq.valid && jumpExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
-  val aluCanAccept = VecInit(io.fromDq.map(deq => deq.valid && aluExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
   val mduCanAccept = VecInit(io.fromDq.map(deq => deq.valid && mulDivExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
-  assert(exuParameters.JmpCnt == 1)
-  val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.JmpCnt, false))
-  val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.AluCnt, true))
-  val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, exuParameters.MduCnt, true))
-  val aluPriority = PriorityGen((0 until exuParameters.AluCnt).map(i => io.numExist(i+exuParameters.JmpCnt)))
-  val mduPriority = PriorityGen((0 until exuParameters.MduCnt).map(i => io.numExist(i+exuParameters.JmpCnt+exuParameters.AluCnt)))
-  jmpIndexGen.io.validBits := jmpCanAccept
-  aluIndexGen.io.validBits := aluCanAccept
-  mduIndexGen.io.validBits := mduCanAccept
-  jmpIndexGen.io.priority := DontCare
-  aluIndexGen.io.priority := aluPriority
-  mduIndexGen.io.priority := mduPriority
+  val aluCanAccept = VecInit(io.fromDq.map(deq => deq.valid && aluExeUnitCfg.canAccept(deq.bits.ctrl.fuType)))
 
-  val allIndexGen = Seq(jmpIndexGen, aluIndexGen, mduIndexGen)
-  val validVec = allIndexGen.map(_.io.mapping.map(_.valid)).reduceLeft(_ ++ _)
-  val indexVec = allIndexGen.map(_.io.mapping.map(_.bits)).reduceLeft(_ ++ _)
-  for (i <- validVec.indices) {
-    // XSDebug(p"mapping $i: valid ${validVec(i)} index ${indexVec(i)}\n")
-  }
+  val jmpIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, jmpCnt, false))
+  val mduIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, mduCnt, true))
+  val aluIndexGen = Module(new IndexMapping(dpParams.IntDqDeqWidth, aluCnt, true))
+
+  val mduPriority = PriorityGen(io.numExist.slice(jmpCnt, jmpCnt + mduCnt))
+  val aluPriority = PriorityGen(io.numExist.drop(jmpCnt + mduCnt))
+  jmpIndexGen.io.validBits := jmpCanAccept
+  mduIndexGen.io.validBits := mduCanAccept
+  aluIndexGen.io.validBits := aluCanAccept
+  jmpIndexGen.io.priority := DontCare
+  mduIndexGen.io.priority := mduPriority
+  aluIndexGen.io.priority := aluPriority
+
+  val allIndexGen = Seq(jmpIndexGen, mduIndexGen, aluIndexGen)
+  val validVec = allIndexGen.flatMap(_.io.mapping.map(_.valid))
+  val indexVec = allIndexGen.flatMap(_.io.mapping.map(_.bits))
 
   /**
     * Part 2: assign regfile read ports
     */
-  val intStaticIndex = Seq(1, 2, 3, 4)
-  val intDynamicIndex = Seq(0, 5, 6)
+  val intStaticIndex = Seq(3, 4, 5, 6)
+  val intDynamicIndex = Seq(0, 1, 2)
   val intStaticMappedValid = intStaticIndex.map(i => validVec(i))
   val intDynamicMappedValid = intDynamicIndex.map(i => validVec(i))
   val (intReadPortSrc, intDynamicExuSrc) = RegfileReadPortGen(intStaticMappedValid, intDynamicMappedValid)
@@ -66,18 +69,18 @@ class Dispatch2Int extends XSModule {
     * Part 3: dispatch to reservation stations
     */
   val jmpReady = io.enqIQCtrl(0).ready
-  val aluReady = Cat(io.enqIQCtrl.take(exuParameters.JmpCnt + exuParameters.AluCnt).drop(exuParameters.JmpCnt).map(_.ready)).andR
-  val mduReady = Cat(io.enqIQCtrl.drop(exuParameters.JmpCnt + exuParameters.AluCnt).map(_.ready)).andR
+  val mduReady = Cat(io.enqIQCtrl.slice(jmpCnt, jmpCnt + mduCnt).map(_.ready)).andR
+  val aluReady = Cat(io.enqIQCtrl.drop(jmpCnt + mduCnt).map(_.ready)).andR
   for (i <- 0 until exuParameters.IntExuCnt) {
     val enq = io.enqIQCtrl(i)
-    if (i < exuParameters.JmpCnt) {
+    if (i < jmpCnt) {
       enq.valid := jmpIndexGen.io.mapping(i).valid// && jmpReady
     }
-    else if (i < exuParameters.JmpCnt + exuParameters.AluCnt) {
-      enq.valid := aluIndexGen.io.mapping(i - exuParameters.JmpCnt).valid && aluReady
+    else if (i < jmpCnt + mduCnt) {
+      enq.valid := mduIndexGen.io.mapping(i - jmpCnt).valid && mduReady
     }
-    else {
-      enq.valid := mduIndexGen.io.mapping(i - (exuParameters.JmpCnt + exuParameters.AluCnt)).valid && mduReady
+    else { // alu
+      enq.valid := aluIndexGen.io.mapping(i - (jmpCnt + mduCnt)).valid && aluReady
     }
     enq.bits := io.fromDq(indexVec(i)).bits
     
