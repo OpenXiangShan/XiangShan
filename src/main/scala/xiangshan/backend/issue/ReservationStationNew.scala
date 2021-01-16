@@ -4,8 +4,10 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
+
 import scala.math.max
 
 class BypassQueue(number: Int) extends XSModule {
@@ -336,6 +338,7 @@ class ReservationStationData
 
     // read src op value
     val srcRegValue = Vec(srcNum, Input(UInt((XLEN + 1).W)))
+    val jumpPc = if(exuCfg == Exu.jumpExeUnitCfg) Input(UInt(VAddrBits.W)) else null
     // broadcast selected uop to other issue queues
     val selectedUop = ValidIO(new MicroOp)
 
@@ -404,6 +407,7 @@ class ReservationStationData
   val deq   = RegEnable(sel.bits, sel.valid)
   val enqCtrl = io.ctrl.enqCtrl
   val enqUop = enqCtrl.bits
+  val enqUopReg = RegEnable(enqUop, enqCtrl.fire())
 
   // enq
   val enqPtr = enq(log2Up(IssQueSize)-1,0)
@@ -418,7 +422,33 @@ class ReservationStationData
   }
 
   when (enqEnReg) {
-    (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
+    exuCfg match {
+      case Exu.jumpExeUnitCfg =>
+        val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+          SignExt(io.jumpPc, XLEN),
+          io.srcRegValue(0)
+        )
+        dataWrite(enqPtrReg, 0, src1Mux)
+      case Exu.aluExeUnitCfg =>
+        val src1Mux = Mux(enqUopReg.ctrl.src1Type === SrcType.pc,
+          SignExt(enqUopReg.cf.pc, XLEN),
+          io.srcRegValue(0)
+        )
+        dataWrite(enqPtrReg, 0, src1Mux)
+        // TODO: opt this, a full map is not necesscary here
+        val imm32 = LookupTree(
+          enqUopReg.ctrl.selImm,
+          ImmUnion.immSelMap.map(x => x._1 -> x._2.toImm32(enqUopReg.ctrl.imm))
+        )
+        val imm64 = SignExt(imm32, XLEN)
+        val src2Mux = Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
+          imm64, io.srcRegValue(1)
+        )
+        dataWrite(enqPtrReg, 1, src2Mux)
+      case _ =>
+        (0 until srcNum).foreach(i => dataWrite(enqPtrReg, i, io.srcRegValue(i)))
+    }
+
     XSDebug(p"${exuCfg.name}: enqPtrReg:${enqPtrReg} pc: ${Hexadecimal(uop(enqPtrReg).cf.pc)}\n")
     XSDebug(p"[srcRegValue] " + List.tabulate(srcNum)(idx => p"src$idx: ${Hexadecimal(io.srcRegValue(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
   }
@@ -472,8 +502,8 @@ class ReservationStationData
   exuInput.uop := uop(deq)
   val regValues = List.tabulate(srcNum)(i => dataRead(Mux(sel.valid, sel.bits, deq), i))
   XSDebug(io.deq.fire(), p"[regValues] " + List.tabulate(srcNum)(idx => p"reg$idx: ${Hexadecimal(regValues(idx))}").reduce((p1, p2) => p1 + " " + p2) + "\n")
-  exuInput.src1 := Mux(uop(deq).ctrl.src1Type === SrcType.pc, SignExt(uop(deq).cf.pc, XLEN + 1), regValues(0))
-  if (srcNum > 1) exuInput.src2 := Mux(uop(deq).ctrl.src2Type === SrcType.imm, uop(deq).ctrl.imm, regValues(1))
+  exuInput.src1 := regValues(0)
+  if (srcNum > 1) exuInput.src2 := regValues(1)
   if (srcNum > 2) exuInput.src3 := regValues(2)
 
   io.deq.valid := RegNext(sel.valid)
@@ -496,7 +526,7 @@ class ReservationStationData
 
   io.ctrl.feedback := DontCare
   if (feedback) {
-    (0 until IssQueSize).map(i =>
+    (0 until IssQueSize).foreach(i =>
       io.ctrl.feedback(i) := uop(i).roqIdx.asUInt === io.feedback.bits.roqIdx.asUInt && io.feedback.valid)
     io.ctrl.feedback(IssQueSize) := io.feedback.bits.hit
   }
