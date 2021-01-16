@@ -68,6 +68,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   io.tlbFeedback.bits.hit    := true.B
   io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
 
+  val pmaMode = WireInit(AddressSpace.memmapAddrMatch(io.dtlb.resp.bits.paddr)._1)
 
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
@@ -92,6 +93,8 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       in.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
       in.uop.cf.exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
       in.uop.cf.exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
+      in.uop.cf.exceptionVec(loadAccessFault)     := !PMAMode.atomic(pmaMode) && is_lr // TODO: dtlb exception check
+      in.uop.cf.exceptionVec(storeAccessFault)    := !PMAMode.atomic(pmaMode) && !is_lr // TODO: dtlb exception check
       val exception = !addrAligned || io.dtlb.resp.bits.excp.pf.st || io.dtlb.resp.bits.excp.pf.ld
       when (exception) {
         // check for exceptions

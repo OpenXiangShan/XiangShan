@@ -63,6 +63,7 @@ class StoreUnit_S1 extends XSModule {
 
   val s1_paddr = io.dtlbResp.bits.paddr
   val s1_tlb_miss = io.dtlbResp.bits.miss
+  val s1_pmaMode = AddressSpace.memmapAddrMatch(s1_paddr)._1
 
   io.in.ready := true.B
 
@@ -85,8 +86,9 @@ class StoreUnit_S1 extends XSModule {
   io.lsq.bits := io.in.bits
   io.lsq.bits.paddr := s1_paddr
   io.lsq.bits.miss := false.B
-  io.lsq.bits.mmio := AddressSpace.isDMMIO(s1_paddr)
+  io.lsq.bits.mmio := !PMAMode.dcache(s1_pmaMode)
   io.lsq.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp.pf.st
+  io.lsq.bits.uop.cf.exceptionVec(storeAccessFault) := !PMAMode.write(s1_pmaMode)
 
   // mmio inst with exception will be writebacked immediately
   val hasException = io.out.bits.uop.cf.exceptionVec.asUInt.orR
