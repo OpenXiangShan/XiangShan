@@ -486,13 +486,13 @@ class CSR extends FunctionUnit with HasCSRConst
                 (if (HasFPU) fcsrMapping else Nil)
     
   val addr = src2(11, 0)
+  val csri = src2(16, 12)
   val rdata = Wire(UInt(XLEN.W))
-  val csri = ZeroExt(cfIn.instr(19,15), XLEN) //unsigned imm for csri. [TODO]
   val wdata = LookupTree(func, List(
     CSROpType.wrt  -> src1,
     CSROpType.set  -> (rdata | src1),
     CSROpType.clr  -> (rdata & (~src1).asUInt()),
-    CSROpType.wrti -> csri, //TODO: csri --> src2
+    CSROpType.wrti -> csri,
     CSROpType.seti -> (rdata | csri),
     CSROpType.clri -> (rdata & (~csri).asUInt())
   ))
@@ -680,12 +680,6 @@ class CSR extends FunctionUnit with HasCSRConst
   val raiseExceptionVec = csrio.exception.bits.cf.exceptionVec
   val exceptionNO = ExcPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
   val causeNO = (raiseIntr << (XLEN-1)).asUInt() | Mux(raiseIntr, intrNO, exceptionNO)
-  // if (!env.FPGAPlatform) {
-    val id = hartId()
-    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
-    ExcitingUtils.addSource(difftestIntrNO, s"difftestIntrNOfromCSR$id")
-    ExcitingUtils.addSource(causeNO, s"difftestCausefromCSR$id")
-  // }
 
   val raiseExceptionIntr = csrio.exception.valid
   XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
@@ -848,6 +842,9 @@ class CSR extends FunctionUnit with HasCSRConst
       }
     }
 
+    val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+    ExcitingUtils.addSource(difftestIntrNO, "difftestIntrNOfromCSR")
+    ExcitingUtils.addSource(causeNO, "difftestCausefromCSR")
     ExcitingUtils.addSource(priviledgeMode, "difftestMode", Debug)
     ExcitingUtils.addSource(mstatus, "difftestMstatus", Debug)
     ExcitingUtils.addSource(mstatus & sstatusRmask, "difftestSstatus", Debug)

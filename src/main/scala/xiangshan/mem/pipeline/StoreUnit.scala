@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import utils._
 import xiangshan._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.cache._
 
 // Store Pipeline Stage 0
@@ -16,7 +17,7 @@ class StoreUnit_S0 extends XSModule {
   })
 
   // send req to dtlb
-  val saddr = io.in.bits.src1 + io.in.bits.uop.ctrl.imm
+  val saddr = io.in.bits.src1 + SignExt(ImmUnion.S.toImm32(io.in.bits.uop.ctrl.imm), XLEN)
 
   io.dtlbReq.bits.vaddr := saddr
   io.dtlbReq.valid := io.in.valid
