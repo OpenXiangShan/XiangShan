@@ -5,18 +5,19 @@ import chisel3.util._
 import utils._
 import xiangshan._
 import xiangshan.backend.decode.DecodeStage
-import xiangshan.backend.rename.{Rename, BusyTable}
-import xiangshan.backend.brq.Brq
+import xiangshan.backend.rename.{BusyTable, Rename}
+import xiangshan.backend.brq.{Brq, BrqPcRead}
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.exu._
 import xiangshan.backend.exu.Exu.exuConfigs
 import xiangshan.backend.regfile.RfReadPort
-import xiangshan.backend.roq.{Roq, RoqPtr, RoqCSRIO}
+import xiangshan.backend.roq.{Roq, RoqCSRIO, RoqPtr}
 import xiangshan.mem.LsqEnqIO
 
 class CtrlToIntBlockIO extends XSBundle {
   val enqIqCtrl = Vec(exuParameters.IntExuCnt, DecoupledIO(new MicroOp))
   val readRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
+  val jumpPc = Output(UInt(VAddrBits.W))
   // int block only uses port 0~7
   val readPortIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W))) // TODO parameterize 8 here
   val redirect = ValidIO(new Redirect)
@@ -87,6 +88,8 @@ class CtrlBlock extends XSModule with HasCircularQueuePtrHelper {
   brq.io.redirect.bits <> redirect
   brq.io.bcommit <> roq.io.bcommit
   brq.io.exuRedirectWb <> io.fromIntBlock.exuRedirect
+  brq.io.pcReadReq.brqIdx := dispatch.io.enqIQCtrl(0).bits.brTag // jump
+  io.toIntBlock.jumpPc := brq.io.pcReadReq.pc
 
   // pipeline between decode and dispatch
   val lastCycleRedirect = RegNext(redirectValid)

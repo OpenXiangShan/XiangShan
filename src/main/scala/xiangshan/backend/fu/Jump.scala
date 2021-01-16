@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.backend._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.FunctionUnit._
 import xiangshan.backend.decode.isa._
 
@@ -16,13 +17,18 @@ trait HasRedirectOut { this: RawModule =>
 
 class Jump extends FunctionUnit with HasRedirectOut {
 
-  val (src1, offset, func, pc, uop) = (
+  val (src1, immMin, func, pc, uop) = (
     io.in.bits.src(0),
     io.in.bits.uop.ctrl.imm,
     io.in.bits.uop.ctrl.fuOpType,
     SignExt(io.in.bits.uop.cf.pc, AddrBits),
     io.in.bits.uop
   )
+
+  val offset = SignExt(Mux(JumpOpType.jumpOpIsJal(func),
+    ImmUnion.J.toImm32(immMin),
+    ImmUnion.I.toImm32(immMin)
+  ), XLEN)
 
   val redirectHit = uop.roqIdx.needFlush(io.redirectIn)
   val valid = io.in.valid
@@ -32,15 +38,16 @@ class Jump extends FunctionUnit with HasRedirectOut {
   val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   redirectOutValid := valid
-  redirectOut.pc := uop.cf.pc
+  redirectOut := DontCare
+//  redirectOut.pc := uop.cf.pc
   redirectOut.target := target
   redirectOut.brTag := uop.brTag
   redirectOut.level := RedirectLevel.flushAfter
-  redirectOut.interrupt := DontCare
+//  redirectOut.interrupt := DontCare
   redirectOut.roqIdx := uop.roqIdx
 
-  brUpdate := uop.cf.brUpdate
-  brUpdate.pc := uop.cf.pc
+  brUpdate := DontCare //uop.cf.brUpdate
+//  brUpdate.pc := uop.cf.pc
   brUpdate.target := target
   brUpdate.brTarget := target
   brUpdate.taken := true.B
