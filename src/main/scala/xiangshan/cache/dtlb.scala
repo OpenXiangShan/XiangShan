@@ -344,8 +344,8 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn(reqAddrReg.vpn)))
     val hitPerm = ParallelMux(hitVec zip entry.map(_.data.perm))
 
-    XSDebug(valid(i), p"entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
-    XSDebug(validReg, p"entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(VecInit(hitVec).asUInt)} pfHitVec:${Hexadecimal(VecInit(pfHitVec).asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
+    XSDebug(valid(i), p"(${i.U}) entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
+    XSDebug(validReg, p"(${i.U}) entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(VecInit(hitVec).asUInt)} pfHitVec:${Hexadecimal(VecInit(pfHitVec).asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
 
     val multiHit = {
       val hitSum = PopCount(hitVec)
@@ -461,11 +461,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   // NOTE: just for simple tlb debug, comment it after tlb's debug
   for (i <- 0 until Width) {
     if(isDtlb) {
-      XSDebug(!(!vmEnable || RegNext(req(i).bits.vaddr)===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss), p"Dtlb: vaddr:${Hexadecimal(RegNext(req(i).bits.vaddr))} paddr:${Hexadecimal(resp(i).bits.paddr)} should be equal\n")
-      assert(!vmEnable || RegNext(req(i).bits.vaddr)===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss)
+      XSDebug(!(!vmEnable || RegNext(req(i).bits.vaddr)===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR), p"Dtlb: vaddr:${Hexadecimal(RegNext(req(i).bits.vaddr))} paddr:${Hexadecimal(resp(i).bits.paddr)} should be equal\n")
+      assert(!vmEnable || RegNext(req(i).bits.vaddr)===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR)
     } else {
-      XSDebug(!(!vmEnable || req(i).bits.vaddr===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss), p"Itlb: vaddr:${Hexadecimal(RegNext(req(i).bits.vaddr))} paddr:${Hexadecimal(resp(i).bits.paddr)} should be equal\n")
-      assert(!vmEnable || req(i).bits.vaddr===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss)
+      XSDebug(!(!vmEnable || req(i).bits.vaddr===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR), p"Itlb: vaddr:${Hexadecimal(RegNext(req(i).bits.vaddr))} paddr:${Hexadecimal(resp(i).bits.paddr)} should be equal\n")
+      assert(!vmEnable || req(i).bits.vaddr===resp(i).bits.paddr || !resp(i).valid || resp(i).bits.miss || Cat(VecInit(resp(i).bits.excp.pf).asUInt).orR)
     }
   }
 }
