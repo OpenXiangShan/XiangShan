@@ -195,7 +195,7 @@ class L2TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
   val vs      = Vec(num, Bool())
 
   def tagClip(vpn: UInt) = { // full vpn => tagLen
-    vpn(vpn.getWidth-1, tagLen)
+    vpn(vpn.getWidth-1, vpn.getWidth-tagLen)
   }
 
   // NOTE: get insize idx

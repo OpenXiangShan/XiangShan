@@ -74,6 +74,9 @@ class TlbPermBundle extends TlbBundle {
   // val al = Bool() // Atomic Logical
   // val aa = Bool() // Atomic Arithmetic
   // TODO: add pma check
+  override def toPrintable: Printable = {
+    p"pf:${pf} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"
+  }
 }
 
 class comBundle extends TlbBundle with HasCircularQueuePtrHelper{
@@ -137,8 +140,10 @@ class TlbEntry(superpage: Boolean = false) extends TlbBundle {
       val insideLevel = level.getOrElse(0.U)
       val a = tag(vpnnLen*3-1, vpnnLen*2) === vpn(vpnnLen*3-1, vpnnLen*2)
       val b = tag(vpnnLen*2-1, vpnnLen*1) === vpn(vpnnLen*2-1, vpnnLen*1)
+      XSDebug(Mux(insideLevel.asBool, a&b, a), p"Hit superpage: hit:${Mux(insideLevel.asBool, a&b, a)} tag:${Hexadecimal(tag)} level:${insideLevel} data:${data} a:${a} b:${b} vpn:${Hexadecimal(vpn)}\n")("TlbEntrySuperpage")
       Mux(insideLevel.asBool, a&b, a)
     } else {
+      XSDebug(tag === vpn, p"Hit normalpage: hit:${tag === vpn} tag:${Hexadecimal(tag)} data:${data}  vpn:${Hexadecimal(vpn)}\n")("TlbEntryNormalpage")
       tag === vpn
     }
   }
@@ -338,6 +343,9 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     val miss    = !hit && validReg && vmEnable && ~pfArray
     val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn(reqAddrReg.vpn)))
     val hitPerm = ParallelMux(hitVec zip entry.map(_.data.perm))
+
+    XSDebug(valid(i), p"entryHit:${Hexadecimal(entryHitVec.asUInt)}\n")
+    XSDebug(validReg, p"entryHitReg:${Hexadecimal(entryHitVecReg.asUInt)} hitVec:${Hexadecimal(VecInit(hitVec).asUInt)} pfHitVec:${Hexadecimal(VecInit(pfHitVec).asUInt)} pfArray:${Hexadecimal(pfArray.asUInt)} hit:${hit} miss:${miss} hitppn:${Hexadecimal(hitppn)} hitPerm:${hitPerm}\n")
 
     val multiHit = {
       val hitSum = PopCount(hitVec)
