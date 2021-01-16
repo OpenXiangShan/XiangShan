@@ -447,6 +447,7 @@ class ICache extends ICacheModule
   io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
   val s3_noHit = s3_wayMask === 0.U
   when ((io.prev_ipf || s3_tlb_resp.excp.pf.instr) && s3_noHit) {
+    io.pd_out.pc := pds(0).out.pc
     io.pd_out.mask := 1.U(PredictWidth.W)
   }
 
