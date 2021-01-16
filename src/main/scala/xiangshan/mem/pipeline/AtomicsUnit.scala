@@ -28,6 +28,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   val atom_override_xtval = RegInit(false.B)
   // paddr after translation
   val paddr = Reg(UInt())
+  val is_mmio = Reg(Bool())
   // dcache response data
   val resp_data = Reg(UInt())
   val is_lrsc_valid = Reg(Bool())
@@ -68,8 +69,6 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
   io.tlbFeedback.bits.hit    := true.B
   io.tlbFeedback.bits.roqIdx := in.uop.roqIdx
 
-  val pmaMode = WireInit(AddressSpace.memmapAddrMatch(io.dtlb.resp.bits.paddr)._1)
-
   // tlb translation, manipulating signals && deal with exception
   when (state === s_tlb) {
     // send req to dtlb
@@ -79,7 +78,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.dtlb.req.bits.roqIdx := in.uop.roqIdx
     io.dtlb.resp.ready      := true.B
     val is_lr = in.uop.ctrl.fuOpType === LSUOpType.lr_w || in.uop.ctrl.fuOpType === LSUOpType.lr_d
-    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.read, TlbCmd.write)
+    io.dtlb.req.bits.cmd    := Mux(is_lr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.cf.pc
 
     when(io.dtlb.resp.fire && !io.dtlb.resp.bits.miss){
@@ -93,9 +92,14 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
       in.uop.cf.exceptionVec(storeAddrMisaligned) := !addrAligned
       in.uop.cf.exceptionVec(storePageFault)      := io.dtlb.resp.bits.excp.pf.st
       in.uop.cf.exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp.pf.ld
-      in.uop.cf.exceptionVec(loadAccessFault)     := !PMAMode.atomic(pmaMode) && is_lr // TODO: dtlb exception check
-      in.uop.cf.exceptionVec(storeAccessFault)    := !PMAMode.atomic(pmaMode) && !is_lr // TODO: dtlb exception check
-      val exception = !addrAligned || io.dtlb.resp.bits.excp.pf.st || io.dtlb.resp.bits.excp.pf.ld
+      in.uop.cf.exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp.af.st
+      in.uop.cf.exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp.af.ld
+      val exception = !addrAligned || 
+        io.dtlb.resp.bits.excp.pf.st ||
+        io.dtlb.resp.bits.excp.pf.ld ||
+        io.dtlb.resp.bits.excp.af.st ||
+        io.dtlb.resp.bits.excp.af.ld
+      is_mmio := io.dtlb.resp.bits.mmio
       when (exception) {
         // check for exceptions
         // if there are exceptions, no need to execute it
@@ -216,7 +220,7 @@ class AtomicsUnit extends XSModule with MemoryOpConstants{
     io.out.bits.redirectValid := false.B
     io.out.bits.redirect := DontCare
     io.out.bits.brUpdate := DontCare
-    io.out.bits.debug.isMMIO := AddressSpace.isDMMIO(paddr)
+    io.out.bits.debug.isMMIO := is_mmio
     when (io.out.fire()) {
       XSDebug("atomics writeback: pc %x data %x\n", io.out.bits.uop.cf.pc, io.dcache.resp.bits.data)
       state := s_invalid

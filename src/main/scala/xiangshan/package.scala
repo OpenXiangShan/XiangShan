@@ -116,7 +116,7 @@ package object xiangshan {
     def I = "b1".U << 3 //cacheable: icache
     def D = "b1".U << 4 //cacheable: dcache
     def S = "b1".U << 5 //enable speculative access
-    def A = "b1".U << 6 //enable atomic operation
+    def A = "b1".U << 6 //enable atomic operation, A imply R & W
     def C = "b1".U << 7 //if it is cacheable is configable
     def Reserved = "b0".U
 
