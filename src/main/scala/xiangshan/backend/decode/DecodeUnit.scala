@@ -447,7 +447,7 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
   val cs = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
 
   val fpDecoder = Module(new FPDecoder)
-  fpDecoder.io.instr := io.enq.ctrl_flow.instr
+  fpDecoder.io.instr := ctrl_flow.instr
   cs.fpu := fpDecoder.io.fpCtrl
 
   // read src1~3 location
@@ -473,10 +473,9 @@ class DecodeUnit extends XSModule with DecodeUnitConstants {
     cs.lsrc1 := XSTrapDecode.lsrc1
   }
 
-  val instr = io.enq.ctrl_flow.instr
   cs.imm := LookupTree(cs.selImm, ImmUnion.immSelMap.map(
     x => {
-      val minBits = x._2.minBitsFromInstr(instr)
+      val minBits = x._2.minBitsFromInstr(ctrl_flow.instr)
       require(minBits.getWidth == x._2.len)
       x._1 -> minBits
     }
