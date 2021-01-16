@@ -6,7 +6,7 @@ import xiangshan.backend.SelImm
 import xiangshan.backend.brq.BrqPtr
 import xiangshan.backend.rename.FreeListPtr
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.backend.decode.XDecode
+import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
@@ -14,6 +14,7 @@ import xiangshan.frontend.HasTageParameter
 import xiangshan.frontend.HasIFUConst
 import xiangshan.frontend.GlobalHistory
 import utils._
+
 import scala.math.max
 import Chisel.experimental.chiselName
 
@@ -221,7 +222,7 @@ class CtrlSignals extends XSBundle {
   val flushPipe  = Bool()  // This inst will flush all the pipe when commit, like exception but can commit
   val isRVF = Bool()
   val selImm = SelImm()
-  val imm = UInt(XLEN.W)
+  val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
 

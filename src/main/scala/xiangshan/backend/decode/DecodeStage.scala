@@ -36,7 +36,7 @@ class DecodeStage extends XSModule {
     val thisBrqValid = !io.in(i).bits.brUpdate.pd.notCFI || isMret || isSret
     io.enqBrq.needAlloc(i) := thisBrqValid
     io.enqBrq.req(i).valid := io.in(i).valid && thisBrqValid && io.out(i).ready
-    io.enqBrq.req(i).bits  := io.in(i).bits
+    io.enqBrq.req(i).bits  := decoders(i).io.deq.cf_ctrl.cf
 
     io.out(i).valid      := io.in(i).valid && io.enqBrq.req(i).ready
     io.out(i).bits       := decoders(i).io.deq.cf_ctrl
