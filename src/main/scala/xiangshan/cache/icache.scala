@@ -443,18 +443,12 @@ class ICache extends ICacheModule
   }
   
   
-  // if a fetch packet triggers page fault, set the predecode resp to nop
-  val ipf_pd_out = WireInit(0.U.asTypeOf(new PreDecodeResp))
-  for (i <- 0 until PredictWidth) {
-    ipf_pd_out.instrs(i) := ZeroExt("b0010011".U, 32) // nop
-    ipf_pd_out.pc(i) := Mux(io.prev.valid && HasCExtension.B && (i==0).B,
-                              io.prev_pc,
-                              Cat(packetIdx(s3_req_pc), (i << instOffsetBits).U(log2Ceil(packetBytes).W)))
+  // if a fetch packet triggers page fault, at least send a valid instruction
+  io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
+  val s3_noHit = s3_wayMask === 0.U
+  when ((io.prev_ipf || s3_tlb_resp.excp.pf.instr) && s3_noHit) {
+    io.pd_out.mask := 1.U(PredictWidth.W)
   }
-  ipf_pd_out.mask := Fill(PredictWidth, 1.U(1.W))
-  io.pd_out := Mux(io.prev_ipf || s3_tlb_resp.excp.pf.instr,
-                     ipf_pd_out,
-                     Mux1H(s3_wayMask, pds.map(_.io.out)))
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
