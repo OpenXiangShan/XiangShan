@@ -4,7 +4,7 @@
 #include "ram.h"
 #include "compress.h"
 
-#define TLB_UNITTEST
+// #define TLB_UNITTEST
 
 #ifdef WITH_DRAMSIM3
 #include "cosimulation.h"
