@@ -5,6 +5,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import chisel3.ExcitingUtils._
+import xiangshan.backend.JumpOpType
 import xiangshan.backend.decode.ImmUnion
 
 
@@ -75,7 +76,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     val exuOut = new ExuOutput
   }
 
-  val s_idle :: s_wb :: Nil = Enum(2)
+  val s_idle :: s_wb :: s_auipc_wb :: Nil = Enum(3)
 
   class DecodeEnqBrqData extends Bundle {
     val cfiUpdateInfo = new CfiUpdateInfo
@@ -107,7 +108,8 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   /**
     * write back
     */
-  val wbValid = stateQueue(writebackIdx) === s_wb
+  val wbState = stateQueue(writebackIdx)
+  val wbValid = wbState === s_wb
   val wbEntry = Wire(new ExuOutput)
   val wbIsMisPred = wbEntry.redirect.target =/= wbEntry.brUpdate.pnpc
 
@@ -117,7 +119,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
 
   io.out.valid := wbValid
   io.out.bits := wbEntry
-  when (wbValid) {
+  when (wbValid || wbState === s_auipc_wb) {
     stateQueue(writebackIdx) := s_idle
     writebackPtr_next := writebackPtr + 1.U
   }
@@ -164,7 +166,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   /**
     * exu write back
     */
-  for (exuWb <- io.exuRedirectWb) {
+  for ((exuWb, i) <- io.exuRedirectWb.zipWithIndex) {
     when (exuWb.valid) {
       val wbIdx = exuWb.bits.redirect.brTag.value
       XSInfo(
@@ -174,8 +176,14 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
         p"target=${Hexadecimal(exuWb.bits.redirect.target)}\n"
       )
       assert(stateQueue(wbIdx) === s_idle)
-
-      stateQueue(wbIdx) := s_wb
+      if(i == 0){ // jump
+        stateQueue(wbIdx) := Mux(JumpOpType.jumpOpisAuipc(exuWb.bits.uop.ctrl.fuOpType),
+          s_auipc_wb,
+          s_wb
+        )
+      } else { // alu
+        stateQueue(wbIdx) := s_wb
+      }
     }
   }
 
