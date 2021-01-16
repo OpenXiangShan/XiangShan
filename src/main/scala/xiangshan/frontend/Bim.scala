@@ -34,7 +34,7 @@ class BIM extends BasePredictor with BimParams {
   val bimAddr = new TableAddr(log2Up(BimSize), BimBanks)
 
   val bim = List.fill(BimBanks) {
-    Module(new SRAMTemplate(UInt(2.W), set = nRows, shouldReset = false, holdRead = true))
+    Module(new SRAMWrapper("Bim", UInt(2.W), set = nRows, shouldReset = false, holdRead = true))
   }
 
   val doing_reset = RegInit(true.B)

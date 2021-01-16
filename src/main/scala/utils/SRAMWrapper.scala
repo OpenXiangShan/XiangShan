@@ -121,7 +121,7 @@ class SRAMWrapper[T <: Data]
   io.w.req.ready := true.B
 
   annotate(new ChiselAnnotation {
-    override def toFirrtl: Annotation = OverrideDesiredNameAnnotation("SRAM_" + sramName, array.toAbsoluteTarget)
+    override def toFirrtl: Annotation = OverrideDesiredNameAnnotation("SRAMTemplate_" + sramName, array.toAbsoluteTarget)
   })
 }
 
