@@ -48,10 +48,11 @@ package object xiangshan {
 
     def apply() = UInt(log2Up(num).W)
 
-    def isIntExu(fuType: UInt) =  !fuType(3)
+    def isIntExu(fuType: UInt) = !fuType(3)
+    def isJumpExu(fuType: UInt) = fuType === jmp
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
-    def isLoadExu(fuType: UInt) = fuType === ldu || fuType===mou
+    def isLoadExu(fuType: UInt) = fuType === ldu || fuType === mou
     def isStoreExu(fuType: UInt) = fuType === stu
 
     val functionNameMap = Map(
