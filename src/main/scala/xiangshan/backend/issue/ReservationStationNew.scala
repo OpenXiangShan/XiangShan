@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.SelImm
+import xiangshan.backend.decode.{ImmUnion, Imm_U}
 import xiangshan.backend.exu.{Exu, ExuConfig}
 import xiangshan.backend.regfile.RfReadPort
 
@@ -435,10 +436,10 @@ class ReservationStationData
           io.srcRegValue(0)
         )
         dataWrite(enqPtrReg, 0, src1Mux)
-        // TODO: opt this, a full map is not necesscary here
-        val imm32 = LookupTree(
-          enqUopReg.ctrl.selImm,
-          ImmUnion.immSelMap.map(x => x._1 -> x._2.toImm32(enqUopReg.ctrl.imm))
+        // alu only need U type and I type imm
+        val imm32 = Mux(enqUopReg.ctrl.selImm === SelImm.IMM_U,
+          ImmUnion.U.toImm32(enqUopReg.ctrl.imm),
+          ImmUnion.I.toImm32(enqUopReg.ctrl.imm)
         )
         val imm64 = SignExt(imm32, XLEN)
         val src2Mux = Mux(enqUopReg.ctrl.src2Type === SrcType.imm,
