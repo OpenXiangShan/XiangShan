@@ -110,6 +110,7 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
     */
   val wbState = stateQueue(writebackIdx)
   val wbValid = wbState === s_wb
+  val wbIsAuipc = wbState === s_auipc_wb
   val wbEntry = Wire(new ExuOutput)
   val wbIsMisPred = wbEntry.redirect.target =/= wbEntry.brUpdate.pnpc
 
@@ -117,9 +118,9 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   io.redirectOut.bits := wbEntry.redirect
   io.redirectOut.bits.brTag := BrqPtr(ptrFlagVec(writebackIdx), writebackIdx)
 
-  io.out.valid := wbValid
+  io.out.valid := wbValid || wbIsAuipc
   io.out.bits := wbEntry
-  when (wbValid || wbState === s_auipc_wb) {
+  when (io.out.valid) {
     stateQueue(writebackIdx) := s_idle
     writebackPtr_next := writebackPtr + 1.U
   }
