@@ -5,6 +5,7 @@ import firrtl.AnnotationSeq
 import firrtl.annotations.NoTargetAnnotation
 import firrtl.options.{HasShellOptions, Shell, ShellOption}
 import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
+import freechips.rocketchip.transforms.naming.{OverrideDesiredNameAnnotation, RenameDesiredNames}
 import xstransforms.ShowPrintTransform
 import xstransforms.PrintModuleName
 
@@ -55,11 +56,25 @@ object DisableAllPrintAnnotation extends HasShellOptions {
   )
 }
 
+case class RemoveAssertAnnotation() extends NoTargetAnnotation
+
+object RemoveAssertAnnotation extends HasShellOptions{
+  val options = Seq(
+    new ShellOption[Unit](
+      longOption = "remove-assert",
+      toAnnotationSeq = _ => Seq(RemoveAssertAnnotation()),
+      helpText = "All the 'assert' will be removed\n",
+      shortOption = None
+    )
+  )
+}
+
 trait XiangShanCli { this: Shell =>
   parser.note("XiangShan Options")
   DisablePrintfAnnotation.addOptions(parser)
   EnablePrintfAnnotation.addOptions(parser)
   DisableAllPrintAnnotation.addOptions(parser)
+  RemoveAssertAnnotation.addOptions(parser)
 }
 
 class XiangShanStage extends chisel3.stage.ChiselStage {
@@ -79,7 +94,8 @@ object XiangShanStage {
       args,
       annotations ++ Seq(
         RunFirrtlTransformAnnotation(new ShowPrintTransform),
-        RunFirrtlTransformAnnotation(new PrintModuleName)
+        RunFirrtlTransformAnnotation(new PrintModuleName),
+        RunFirrtlTransformAnnotation(new RenameDesiredNames)
       )
     )
   }

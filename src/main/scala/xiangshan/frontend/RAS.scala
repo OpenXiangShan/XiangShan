@@ -5,13 +5,14 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.ALUOpType
 import utils._
+import chisel3.experimental.chiselName
 
+@chiselName
 class RAS extends BasePredictor
 {
     class RASResp extends Resp
     {
         val target =UInt(VAddrBits.W)
-        val specEmpty = Bool()
     }
 
     class RASBranchInfo extends Meta
@@ -27,9 +28,9 @@ class RAS extends BasePredictor
         val callIdx = Flipped(ValidIO(UInt(log2Ceil(PredictWidth).W)))
         val isRVC = Input(Bool())
         val isLastHalfRVI = Input(Bool())
-        val recover =  Flipped(ValidIO(new BranchUpdateInfo))
+        val recover =  Flipped(ValidIO(new CfiUpdateInfo))
         val out = ValidIO(new RASResp)
-        val branchInfo = Output(new RASBranchInfo)
+        val meta = Output(new RASBranchInfo)
     }
 
     class RASEntry() extends XSBundle {
@@ -49,7 +50,9 @@ class RAS extends BasePredictor
     }
 
     override val io = IO(new RASIO)
+    override val debug = true
 
+    @chiselName
     class RASStack(val rasSize: Int) extends XSModule {
         val io = IO(new Bundle {
             val push_valid = Input(Bool())
@@ -61,10 +64,19 @@ class RAS extends BasePredictor
             val copy_valid = Input(Bool())
             val copy_in_mem  = Input(Vec(rasSize, rasEntry()))
             val copy_in_sp   = Input(UInt(log2Up(rasSize).W))
+            val copy_in_top  = Input(rasEntry())
             val copy_out_mem = Output(Vec(rasSize, rasEntry()))
             val copy_out_sp  = Output(UInt(log2Up(rasSize).W))
-        })
+            val copy_out_top  = Output(rasEntry())
 
+        })
+        val debugIO = IO(new Bundle{
+            val write_entry = Output(rasEntry())
+            val alloc_new = Output(Bool())
+            val sp = Output(UInt(log2Up(rasSize).W))
+            val topRegister = Output(rasEntry())
+        })
+        @chiselName
         class Stack(val size: Int) extends XSModule {
             val io = IO(new Bundle {
                 val rIdx = Input(UInt(log2Up(size).W))
@@ -86,39 +98,63 @@ class RAS extends BasePredictor
                 (0 until size).foreach {i => mem(i) := io.copy_in(i) }
             }
         }
-        val sp = RegInit(0.U(log2Up(rasSize).W))
+        val sp = RegInit(RasSize.U((log2Up(rasSize) + 1).W))
+        val topRegister = RegInit(0.U.asTypeOf(new RASEntry))
         val stack = Module(new Stack(rasSize)).io
 
         stack.rIdx := sp - 1.U
-        val top_entry = stack.rdata
-        val top_addr = top_entry.retAddr
-        val top_ctr = top_entry.ctr
+        val top_addr = topRegister.retAddr
+        val top_ctr = topRegister.ctr
         val alloc_new = io.new_addr =/= top_addr
-        stack.wen := io.push_valid || io.pop_valid && top_ctr =/= 1.U
-        stack.wIdx := Mux(io.pop_valid && top_ctr =/= 1.U, sp - 1.U, Mux(alloc_new, sp, sp - 1.U))
-        stack.wdata := Mux(io.pop_valid && top_ctr =/= 1.U,
-                            RASEntry(top_addr, top_ctr - 1.U),
-                            Mux(alloc_new, RASEntry(io.new_addr, 1.U), RASEntry(top_addr, top_ctr + 1.U)))
+        // stack.wen := io.push_valid || io.pop_valid && top_ctr =/= 1.U
+        // stack.wIdx := Mux(io.pop_valid && top_ctr =/= 1.U, sp - 1.U, Mux(alloc_new, sp, sp - 1.U))
+        // val write_addr = Mux(io.pop_valid && top_ctr =/= 1.U, top_addr, io.new_addr)
+        // val write_ctr  = Mux(io.pop_valid && top_ctr =/= 1.U, top_ctr - 1.U, Mux(alloc_new, 1.U, top_ctr + 1.U))
+
+        stack.wen := io.push_valid && !io.is_empty
+        stack.wIdx := sp
+        val write_addr = topRegister.retAddr
+        val write_ctr  = topRegister.ctr
+
+        val write_entry = RASEntry(write_addr, write_ctr)
+        stack.wdata := write_entry
+        debugIO.write_entry := write_entry
+        debugIO.alloc_new := alloc_new
+        debugIO.sp := sp
+        debugIO.topRegister := topRegister
+
+        val is_empty = sp === RasSize.U
+        val is_full  = sp === (RasSize - 1).U
         
         when (io.push_valid && alloc_new) {
-            sp := sp + 1.U
+            sp := Mux(is_full, sp, Mux(is_empty, 0.U,sp + 1.U))
+            top_addr := io.new_addr
+            top_ctr := 1.U
+        } .elsewhen(io.push_valid) {
+            top_ctr := top_ctr + 1.U
         }
 
         when (io.pop_valid && top_ctr === 1.U) {
-            sp := Mux(sp === 0.U, 0.U, sp - 1.U)
+            sp := Mux(is_empty, sp ,Mux(sp === 0.U, RasSize.U,sp - 1.U))
+            top_addr := stack.rdata.retAddr
+            top_ctr := stack.rdata.ctr
+        } .elsewhen(io.pop_valid) {
+            top_ctr := top_ctr - 1.U
         }
 
         io.copy_out_mem := stack.copy_out
         io.copy_out_sp  := sp
+        io.copy_out_top  := topRegister
         stack.copyen := io.copy_valid
         stack.copy_in := io.copy_in_mem
         when (io.copy_valid) {
             sp := io.copy_in_sp
+            topRegister := io.copy_in_top
         }
 
         io.top_addr := top_addr
-        io.is_empty := sp === 0.U
-        io.is_full  := sp === (RasSize - 1).U
+        io.is_empty := is_empty
+        io.is_full  := is_full
     }
 
     // val ras_0 = Reg(Vec(RasSize, rasEntry()))  //RegInit(0.U)asTypeOf(Vec(RasSize,rasEntry)) cause comb loop
@@ -136,11 +172,13 @@ class RAS extends BasePredictor
     // val commit_ras = Reg(Vec(RasSize, rasEntry()))
     // val commit_sp = RegInit(0.U(log2Up(RasSize).W))
 
-    val spec_ras   = Module(new RASStack(RasSize)).io
+    val spec = Module(new RASStack(RasSize))
+    val spec_ras = spec.io
+
 
     val spec_push = WireInit(false.B)
     val spec_pop = WireInit(false.B)
-    val spec_new_addr = WireInit(io.pc.bits + (io.callIdx.bits << 1.U) + Mux(io.isRVC,2.U,Mux(io.isLastHalfRVI, 2.U, 4.U)))
+    val spec_new_addr = packetAligned(io.pc.bits) + (io.callIdx.bits << instOffsetBits.U) + Mux( (io.isRVC | io.isLastHalfRVI) && HasCExtension.B, 2.U, 4.U)
     spec_ras.push_valid := spec_push
     spec_ras.pop_valid  := spec_pop
     spec_ras.new_addr   := spec_new_addr
@@ -151,11 +189,12 @@ class RAS extends BasePredictor
     spec_push := !spec_is_full && io.callIdx.valid && io.pc.valid
     spec_pop  := !spec_is_empty && io.is_ret && io.pc.valid
 
-    val commit_ras = Module(new RASStack(RasSize)).io
+    val commit = Module(new RASStack(RasSize))
+    val commit_ras = commit.io
 
     val commit_push = WireInit(false.B)
     val commit_pop = WireInit(false.B)
-    val commit_new_addr = Mux(io.recover.bits.pd.isRVC,io.recover.bits.pc + 2.U,io.recover.bits.pc + 4.U)
+    val commit_new_addr = Mux(io.recover.bits.pd.isRVC && HasCExtension.B, io.recover.bits.pc + 2.U, io.recover.bits.pc + 4.U)
     commit_ras.push_valid := commit_push
     commit_ras.pop_valid  := commit_pop
     commit_ras.new_addr   := commit_new_addr
@@ -163,51 +202,54 @@ class RAS extends BasePredictor
     val commit_is_full = commit_ras.is_full
     val commit_top_addr = commit_ras.top_addr
 
-    commit_push := !commit_is_full  && io.recover.valid && io.recover.bits.pd.isCall
-    commit_pop  := !commit_is_empty && io.recover.valid && io.recover.bits.pd.isRet
+    commit_push := !commit_is_full  && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isCall
+    commit_pop  := !commit_is_empty && io.recover.valid && !io.recover.bits.isReplay && io.recover.bits.pd.isRet
 
 
-    io.out.valid := !spec_is_empty && io.is_ret
+    io.out.valid := !spec_is_empty
     io.out.bits.target := spec_top_addr
-    io.out.bits.specEmpty := spec_is_empty
     // TODO: back-up stack for ras
     // use checkpoint to recover RAS
 
-    val copy_valid = io.recover.valid && io.recover.bits.isMisPred
+    val copy_valid = io.recover.valid && (io.recover.bits.isMisPred || io.recover.bits.isReplay)
     val copy_next = RegNext(copy_valid)
     spec_ras.copy_valid := copy_next
     spec_ras.copy_in_mem := commit_ras.copy_out_mem
     spec_ras.copy_in_sp  := commit_ras.copy_out_sp
-    commit_ras.copy_valid := DontCare
+    spec_ras.copy_in_top := commit_ras.copy_out_top
+    commit_ras.copy_valid := false.B
     commit_ras.copy_in_mem := DontCare
     commit_ras.copy_in_sp  := DontCare
+    commit_ras.copy_in_top := DontCare
 
     //no need to pass the ras branchInfo
-    io.branchInfo.rasSp := DontCare
-    io.branchInfo.rasTopCtr := DontCare
-    io.branchInfo.rasToqAddr := DontCare
+    io.meta.rasSp := DontCare
+    io.meta.rasTopCtr := DontCare
+    io.meta.rasToqAddr := DontCare
 
     if (BPUDebug && debug) {
-        // XSDebug("----------------RAS(spec)----------------\n")
-        // XSDebug("  index       addr           ctr \n")
-        // for(i <- 0 until RasSize){
-        //     XSDebug("  (%d)   0x%x      %d",i.U,spec_ras(i).retAddr,spec_ras(i).ctr)
-        //     when(i.U === spec_sp){XSDebug(false,true.B,"   <----sp")}
-        //     XSDebug(false,true.B,"\n")
-        // }
-        // XSDebug("----------------RAS(commit)----------------\n")
-        // XSDebug("  index       addr           ctr \n")
-        // for(i <- 0 until RasSize){
-        //     XSDebug("  (%d)   0x%x      %d",i.U,commit_ras(i).retAddr,commit_ras(i).ctr)
-        //     when(i.U === commit_sp){XSDebug(false,true.B,"   <----sp")}
-        //     XSDebug(false,true.B,"\n")
-        // }
+        val spec_debug = spec.debugIO
+        val commit_debug = commit.debugIO
+        XSDebug("----------------RAS(spec)----------------\n")
+        XSDebug("  index       addr           ctr \n")
+        for(i <- 0 until RasSize){
+            XSDebug("  (%d)   0x%x      %d",i.U,spec_ras.copy_out_mem(i).retAddr,spec_ras.copy_out_mem(i).ctr)
+            when(i.U === spec_ras.copy_out_sp){XSDebug(false,true.B,"   <----sp")}
+            XSDebug(false,true.B,"\n")
+        }
+        XSDebug("----------------RAS(commit)----------------\n")
+        XSDebug("  index       addr           ctr \n")
+        for(i <- 0 until RasSize){
+            XSDebug("  (%d)   0x%x      %d",i.U,commit_ras.copy_out_mem(i).retAddr,commit_ras.copy_out_mem(i).ctr)
+            when(i.U === commit_ras.copy_out_sp){XSDebug(false,true.B,"   <----sp")}
+            XSDebug(false,true.B,"\n")
+        }
 
-        // XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",spec_ras_write.retAddr,spec_ras_write.ctr,sepc_alloc_new,spec_sp.asUInt)
-        // XSDebug(spec_pop, "(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-        // XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d \n",commit_ras_write.retAddr,commit_ras_write.ctr,sepc_alloc_new,commit_sp.asUInt)
-        // XSDebug(commit_pop, "(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
-        // XSDebug("copyValid:%d copyNext:%d \n",copy_valid,copy_next)
+        XSDebug(spec_push, "(spec_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",spec_new_addr,spec_debug.write_entry.ctr,spec_debug.alloc_new,spec_debug.sp.asUInt,spec_debug.topRegister.retAddr,spec_debug.topRegister.ctr)
+        XSDebug(spec_pop, "(spec_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
+        XSDebug(commit_push, "(commit_ras)push  inAddr: 0x%x  inCtr: %d |  allocNewEntry:%d |   sp:%d  | TopReg.addr %x ctr:%d\n",commit_new_addr,commit_debug.write_entry.ctr,commit_debug.alloc_new,commit_debug.sp.asUInt,commit_debug.topRegister.retAddr,commit_debug.topRegister.ctr)
+        XSDebug(commit_pop, "(commit_ras)pop outValid:%d  outAddr: 0x%x \n",io.out.valid,io.out.bits.target)
+        XSDebug("copyValid:%d copyNext:%d \n",copy_valid,copy_next)
     }
 
 

@@ -3,7 +3,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utils.{Code, RandomReplacement, XSDebug, SRAMTemplate}
+import utils.{Code, RandomReplacement, XSDebug, SRAMWrapper}
 
 import scala.math.max
 
@@ -57,7 +57,8 @@ trait HasDCacheParameters extends HasL1CacheParameters {
       storeMissQueueEntryIdWidth),
       miscMissQueueEntryIdWidth)
 
-  def nClientMissQueues = 3
+  // clients: ldu 0, ldu1, stu, atomics
+  def nClientMissQueues = 4
   def clientIdWidth = log2Up(nClientMissQueues)
   def missQueueClientIdWidth = clientIdWidth + clientMissQueueEntryIdWidth
   def clientIdMSB = missQueueClientIdWidth - 1
@@ -196,15 +197,23 @@ class DuplicatedDataArray extends AbstractDataArray
         io.resp(j)(w)(r) := Cat((0 until rowWords).reverse map (k => resp(k)))
 
         for (k <- 0 until rowWords) {
-          val array = Module(new SRAMTemplate(Bits(encWordBits.W), set=nSets, way=1,
-            shouldReset=false, holdRead=false, singlePort=singlePort))
+          val array = Module(new SRAMWrapper(
+            "Dcache_Data",
+            Bits(encWordBits.W),
+            set=nSets,
+            way=1,
+            shouldReset=false,
+            holdRead=false,
+            singlePort=singlePort
+          ))
           // data write
           val wen = io.write.valid && io.write.bits.way_en(w) && io.write.bits.wmask(r)(k)
           array.io.w.req.valid := wen
           array.io.w.req.bits.apply(
             setIdx=waddr,
             data=io.write.bits.data(r)(encWordBits*(k+1)-1,encWordBits*k),
-            waymask=1.U)
+            waymask=1.U
+          )
 
           // data read
           val ren = io.read(j).valid && io.read(j).bits.way_en(w) && io.read(j).bits.rmask(r)
@@ -236,7 +245,7 @@ class L1MetadataArray(onReset: () => L1Metadata) extends DCacheModule {
   val metaBits = rstVal.getWidth
   val encMetaBits = cacheParams.tagCode.width(metaBits)
 
-  val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set=nSets, way=nWays,
+  val tag_array = Module(new SRAMWrapper("Dcache_Meta", UInt(encMetaBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
 
   // tag write

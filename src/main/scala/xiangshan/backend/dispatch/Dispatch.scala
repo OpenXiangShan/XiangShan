@@ -6,20 +6,18 @@ import xiangshan._
 import utils._
 import xiangshan.backend.regfile.RfReadPort
 import chisel3.ExcitingUtils._
-import xiangshan.backend.roq.RoqPtr
+import xiangshan.backend.roq.{RoqPtr, RoqEnqIO}
+import xiangshan.backend.rename.RenameBypassInfo
+import xiangshan.mem.LsqEnqIO
 
 case class DispatchParameters
 (
-  DqEnqWidth: Int,
   IntDqSize: Int,
   FpDqSize: Int,
   LsDqSize: Int,
   IntDqDeqWidth: Int,
   FpDqDeqWidth: Int,
-  LsDqDeqWidth: Int,
-  IntDqReplayWidth: Int,
-  FpDqReplayWidth: Int,
-  LsDqReplayWidth: Int
+  LsDqDeqWidth: Int
 )
 
 class Dispatch extends XSModule {
@@ -28,87 +26,57 @@ class Dispatch extends XSModule {
     val redirect = Flipped(ValidIO(new Redirect))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
+    val renameBypass = Input(new RenameBypassInfo)
+    // to busytable: set pdest to busy (not ready) when they are dispatched
+    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // enq Roq
-    val enqRoq = new Bundle {
-      val canAccept = Input(Bool())
-      val isEmpty = Input(Bool())
-      val extraWalk = Vec(RenameWidth, Output(Bool()))
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new RoqPtr))
-    }
+    val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
-    val enqLsq = new Bundle() {
-      val canAccept = Input(Bool())
-      val req = Vec(RenameWidth, ValidIO(new MicroOp))
-      val resp = Vec(RenameWidth, Input(new LSIdx))
-    }
-    val dequeueRoqIndex = Input(Valid(new RoqPtr))
+    val enqLsq = Flipped(new LsqEnqIO)
     // read regfile
-    val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort))
-    val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort))
+    val readIntRf = Vec(NRIntReadPorts, Flipped(new RfReadPort(XLEN)))
+    val readFpRf = Vec(NRFpReadPorts, Flipped(new RfReadPort(XLEN + 1)))
     // read reg status (busy/ready)
     val intPregRdy = Vec(NRIntReadPorts, Input(Bool()))
     val fpPregRdy = Vec(NRFpReadPorts, Input(Bool()))
-    // replay: set preg status to not ready
-    val replayPregReq = Output(Vec(ReplayWidth, new ReplayPregReq))
-    val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
     // to reservation stations
     val numExist = Input(Vec(exuParameters.ExuCnt, UInt(log2Ceil(IssQueSize).W)))
     val enqIQCtrl = Vec(exuParameters.ExuCnt, DecoupledIO(new MicroOp))
-    val enqIQData = Vec(exuParameters.ExuCnt, Output(new ExuInput))
+    // send reg file read port index to reservation stations
+    val readPortIndex = new Bundle {
+      val intIndex = Vec(exuParameters.IntExuCnt, Output(UInt(log2Ceil(8 / 2).W)))
+      val fpIndex = Vec(exuParameters.FpExuCnt, Output(UInt(log2Ceil((NRFpReadPorts - exuParameters.StuCnt) / 3).W)))
+      // ls: hardwired to (0, 1, 2, 4)
+    }
   })
 
   val dispatch1 = Module(new Dispatch1)
-  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, dpParams.DqEnqWidth, dpParams.IntDqDeqWidth, dpParams.IntDqReplayWidth))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, dpParams.DqEnqWidth, dpParams.FpDqDeqWidth, dpParams.FpDqReplayWidth))
-  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, dpParams.DqEnqWidth, dpParams.LsDqDeqWidth, dpParams.LsDqReplayWidth))
+  val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
+  val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
 
   // pipeline between rename and dispatch
   // accepts all at once
-  val redirectValid = io.redirect.valid && !io.redirect.bits.isReplay
+  val redirectValid = io.redirect.valid// && !io.redirect.bits.isReplay
   for (i <- 0 until RenameWidth) {
     PipelineConnect(io.fromRename(i), dispatch1.io.fromRename(i), dispatch1.io.recv(i), redirectValid)
   }
 
   // dispatch 1: accept uops from rename and dispatch them to the three dispatch queues
-  dispatch1.io.redirect <> io.redirect
+  // dispatch1.io.redirect <> io.redirect
+  dispatch1.io.renameBypass := RegEnable(io.renameBypass, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
-  dispatch1.io.toIntDqReady <> intDq.io.enqReady
   dispatch1.io.toIntDq <> intDq.io.enq
-  dispatch1.io.toFpDqReady <> fpDq.io.enqReady
   dispatch1.io.toFpDq <> fpDq.io.enq
-  dispatch1.io.toLsDqReady <> lsDq.io.enqReady
   dispatch1.io.toLsDq <> lsDq.io.enq
   dispatch1.io.allocPregs <> io.allocPregs
 
   // dispatch queue: queue uops and dispatch them to different reservation stations or issue queues
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
-  intDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
-  intDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
-    io.replayPregReq(i) <> replay
-  }
-  intDq.io.otherWalkDone := !fpDq.io.inReplayWalk && !lsDq.io.inReplayWalk
-
   fpDq.io.redirect <> io.redirect
-  fpDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
-  fpDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
-    io.replayPregReq(i + dpParams.IntDqReplayWidth) <> replay
-  }
-  fpDq.io.otherWalkDone := !intDq.io.inReplayWalk && !lsDq.io.inReplayWalk
-
   lsDq.io.redirect <> io.redirect
-  lsDq.io.dequeueRoqIndex <> io.dequeueRoqIndex
-  lsDq.io.replayPregReq.zipWithIndex.map { case(replay, i) =>
-    io.replayPregReq(i + dpParams.IntDqReplayWidth + dpParams.FpDqReplayWidth) <> replay
-  }
-  lsDq.io.otherWalkDone := !intDq.io.inReplayWalk && !fpDq.io.inReplayWalk
-
-  if (!env.FPGAPlatform) {
-    val inWalk = intDq.io.inReplayWalk || fpDq.io.inReplayWalk || lsDq.io.inReplayWalk
-    ExcitingUtils.addSource(inWalk, "perfCntCondDpqReplay", Perf)
-  }
 
   // Int dispatch queue to Int reservation stations
   val intDispatch = Module(new Dispatch2Int)
@@ -117,7 +85,8 @@ class Dispatch extends XSModule {
   intDispatch.io.regRdy.zipWithIndex.map({case (r, i) => r <> io.intPregRdy(i)})
   intDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i)})
   intDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i)})
-  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
+//  intDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i)})
+  intDispatch.io.readPortIndex <> io.readPortIndex.intIndex
 
   // Fp dispatch queue to Fp reservation stations
   val fpDispatch = Module(new Dispatch2Fp)
@@ -126,7 +95,8 @@ class Dispatch extends XSModule {
   fpDispatch.io.regRdy.zipWithIndex.map({case (r, i) => r <> io.fpPregRdy(i)})
   fpDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(i + exuParameters.IntExuCnt)})
   fpDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(i + exuParameters.IntExuCnt)})
-  fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
+//  fpDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(i + exuParameters.IntExuCnt)})
+  fpDispatch.io.readPortIndex <> io.readPortIndex.fpIndex
   
   // Load/store dispatch queue to load/store issue queues
   val lsDispatch = Module(new Dispatch2Ls)
@@ -137,5 +107,5 @@ class Dispatch extends XSModule {
   lsDispatch.io.fpRegRdy.zipWithIndex.map({case (r, i) => r <> io.fpPregRdy(i + 12)})
   lsDispatch.io.numExist.zipWithIndex.map({case (num, i) => num := io.numExist(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
   lsDispatch.io.enqIQCtrl.zipWithIndex.map({case (enq, i) => enq <> io.enqIQCtrl(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
-  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
+//  lsDispatch.io.enqIQData.zipWithIndex.map({case (enq, i) => enq <> io.enqIQData(exuParameters.IntExuCnt + exuParameters.FpExuCnt + i)})
 }

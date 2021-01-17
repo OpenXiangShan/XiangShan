@@ -3,15 +3,13 @@ package xiangshan.backend.decode
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.brq.BrqPtr
+import xiangshan.backend.brq.BrqEnqIO
 import utils._
 
 class DecodeStage extends XSModule {
   val io = IO(new Bundle() {
     // enq Brq
-    val toBrq = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
-    // get brMask/brTag
-    val brTags = Input(Vec(DecodeWidth, new BrqPtr))
+    val enqBrq = Flipped(new BrqEnqIO)
 
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))
@@ -19,9 +17,8 @@ class DecodeStage extends XSModule {
     // to DecBuffer
     val out = Vec(DecodeWidth, DecoupledIO(new CfCtrl))
   })
-  val decoders = Seq.fill(DecodeWidth)(Module(new Decoder))
-  val decoderToBrq = Wire(Vec(DecodeWidth, new CfCtrl)) // without brTag and brMask
-  val decoderToDecBuffer = Wire(Vec(DecodeWidth, new CfCtrl)) // with brTag and brMask
+
+  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
 
   // Handshake ---------------------
   // 1. if current instruction is valid, then:
@@ -32,24 +29,24 @@ class DecodeStage extends XSModule {
   //    Second, assert out(i).valid iff in(i).valid and instruction is valid (not implemented) and toBrq(i).ready
 
   for (i <- 0 until DecodeWidth) {
-    decoders(i).io.in <> io.in(i).bits
-    decoderToBrq(i) := decoders(i).io.out // CfCtrl without bfTag and brMask
-    decoderToBrq(i).brTag := DontCare
-    io.toBrq(i).bits := decoderToBrq(i)
+    decoders(i).io.enq.ctrl_flow <> io.in(i).bits
 
-    decoderToDecBuffer(i) := decoders(i).io.out
-    decoderToDecBuffer(i).brTag := io.brTags(i)
-    io.out(i).bits := decoderToDecBuffer(i)
+    val isMret = io.in(i).bits.instr === BitPat("b001100000010_00000_000_00000_1110011")
+    val isSret = io.in(i).bits.instr === BitPat("b000100000010_00000_000_00000_1110011")
+    val thisBrqValid = !io.in(i).bits.brUpdate.pd.notCFI || isMret || isSret
+    io.enqBrq.needAlloc(i) := thisBrqValid
+    io.enqBrq.req(i).valid := io.in(i).valid && thisBrqValid && io.out(i).ready
+    io.enqBrq.req(i).bits  := decoders(i).io.deq.cf_ctrl.cf
 
-    val thisReady = io.out(i).ready && io.toBrq(i).ready
-    val isMret = decoders(i).io.out.cf.instr === BitPat("b001100000010_00000_000_00000_1110011")
-    val isSret = decoders(i).io.out.cf.instr === BitPat("b000100000010_00000_000_00000_1110011")
-    val thisBrqValid = io.in(i).valid && (!decoders(i).io.out.cf.brUpdate.pd.notCFI || isMret || isSret) && io.out(i).ready
-    val thisOutValid =  io.in(i).valid && io.toBrq(i).ready
-    io.in(i).ready    := { if (i == 0) thisReady    else io.in(i-1).ready && thisReady }
-    io.out(i).valid   := { if (i == 0) thisOutValid else io.in(i-1).ready && thisOutValid }
-    io.toBrq(i).valid := { if (i == 0) thisBrqValid else io.in(i-1).ready && thisBrqValid }
+    io.out(i).valid      := io.in(i).valid && io.enqBrq.req(i).ready
+    io.out(i).bits       := decoders(i).io.deq.cf_ctrl
+    io.out(i).bits.brTag := io.enqBrq.resp(i)
 
-    XSDebug(io.in(i).valid || io.out(i).valid || io.toBrq(i).valid, "i:%d In(%d %d) Out(%d %d) ToBrq(%d %d) pc:%x instr:%x\n", i.U, io.in(i).valid, io.in(i).ready, io.out(i).valid, io.out(i).ready, io.toBrq(i).valid, io.toBrq(i).ready, io.in(i).bits.pc, io.in(i).bits.instr)
+    io.in(i).ready := io.out(i).ready && io.enqBrq.req(i).ready
+
+    XSDebug(io.in(i).valid || io.out(i).valid || io.enqBrq.req(i).valid,
+      "i:%d In(%d %d) Out(%d %d) ToBrq(%d %d) pc:%x instr:%x\n",
+      i.U, io.in(i).valid, io.in(i).ready, io.out(i).valid, io.out(i).ready,
+      io.enqBrq.req(i).valid, io.enqBrq.req(i).ready, io.in(i).bits.pc, io.in(i).bits.instr)
   }
 }

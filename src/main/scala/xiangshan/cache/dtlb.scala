@@ -4,10 +4,8 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
-import xiangshan.backend.decode.XSTrap
 import xiangshan.backend.roq.RoqPtr
-import xiangshan.mem._
-import xiangshan.backend.fu.HasCSRConst
+import xiangshan.backend.fu.util.HasCSRConst
 import chisel3.ExcitingUtils._
 
 trait HasTlbConst extends HasXSParameter {
@@ -56,7 +54,7 @@ class PermBundle(val hasV: Boolean = true) extends TlbBundle {
   if (hasV) { val v = Bool() }
 
   override def toPrintable: Printable = {
-    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// + 
+    p"d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r}"// +
     //(if(hasV) (p"v:${v}") else p"")
   }
 }
@@ -111,6 +109,74 @@ class TlbEntry extends TlbBundle {
 
   override def toPrintable: Printable = {
     p"vpn:0x${Hexadecimal(vpn)} ppn:0x${Hexadecimal(ppn)} level:${level} perm:${perm}"
+  }
+}
+
+class TlbEntires(num: Int, tagLen: Int) extends TlbBundle {
+  require(log2Up(num)==log2Down(num))
+  /* vpn can be divide into three part */
+  // vpn: tagPart(17bit) + addrPart(8bit) + cutLenPart(2bit)
+  val cutLen  = log2Up(num)
+
+  val tag     = UInt(tagLen.W) // NOTE: high part of vpn
+  val level   = UInt(log2Up(Level).W)
+  val ppns    = Vec(num, UInt(ppnLen.W))
+  val perms    = Vec(num, new PermBundle(hasV = false))
+  val vs      = Vec(num, Bool())
+
+  def tagClip(vpn: UInt, level: UInt) = { // full vpn => tagLen
+    val tmp = Mux(level===0.U, Cat(vpn(vpnLen-1, vpnnLen*2+cutLen), 0.U(vpnnLen*2)),
+              Mux(level===1.U, Cat(vpn(vpnLen-1, vpnnLen*1+cutLen), 0.U(vpnnLen*1)),
+                               Cat(vpn(vpnLen-1, vpnnLen*0+cutLen), 0.U(vpnnLen*0))))
+    tmp(tmp.getWidth-1, tmp.getWidth-tagLen)
+  }
+
+  // NOTE: get insize idx
+  def idxClip(vpn: UInt, level: UInt) = {
+    Mux(level===0.U, vpn(vpnnLen*2+cutLen-1, vpnnLen*2),
+    Mux(level===1.U, vpn(vpnnLen*1+cutLen-1, vpnnLen*1),
+                     vpn(vpnnLen*0+cutLen-1, vpnnLen*0)))
+  }
+
+  def hit(vpn: UInt) = {
+    (tag === tagClip(vpn, level)) && vs(idxClip(vpn, level)) && (level === 2.U)
+  }
+
+  def genEntries(data: UInt, level: UInt, vpn: UInt): TlbEntires = {
+    require((data.getWidth / XLEN) == num,
+      "input data length must be multiple of pte length")
+    assert(level=/=3.U, "level should not be 3")
+
+    val ts = Wire(new TlbEntires(num, tagLen))
+    ts.tag := tagClip(vpn, level)
+    ts.level := level
+    for (i <- 0 until num) {
+      val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      ts.ppns(i) := pte.ppn
+      ts.perms(i):= pte.perm // this.perms has no v
+      ts.vs(i)   := !pte.isPf(level) && pte.isLeaf() // legal and leaf, store to l2Tlb
+    }
+
+    ts
+  }
+
+  def get(vpn: UInt): TlbEntry = {
+    val t = Wire(new TlbEntry())
+    val idx = idxClip(vpn, level)
+    t.vpn := vpn // Note: Use input vpn, not vpn in TlbL2
+    t.ppn := ppns(idx)
+    t.level := level
+    t.perm := perms(idx)
+    t
+  }
+
+  override def cloneType: this.type = (new TlbEntires(num, tagLen)).asInstanceOf[this.type]
+  override def toPrintable: Printable = {
+    require(num == 4, "if num is not 4, please comment this toPrintable")
+    // NOTE: if num is not 4, please comment this toPrintable
+    p"tag:${Hexadecimal(tag)} level:${level} ppn(0):${Hexadecimal(ppns(0))} ppn(1):${Hexadecimal(ppns(1))}" +
+    p"ppn(2):${Hexadecimal(ppns(2))} ppn(3):${Hexadecimal(ppns(3))} " +
+    p"perms(0):${perms(0)} perms(1):${perms(1)} perms(2):${perms(2)} perms(3):${perms(3)} vs:${Binary(vs.asUInt)}"
   }
 }
 
@@ -206,65 +272,105 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   val entry = Reg(Vec(TlbEntrySize, new TlbEntry))
   val g = VecInit(entry.map(_.perm.g)).asUInt // TODO: need check if reverse is needed
 
-  val entryHitVec = widthMapSeq{i => VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/))) }
-  val hitVec  = widthMapSeq{ i => (v.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
-  val pfHitVec   = widthMapSeq{ i => (pf.asBools zip entryHitVec(i)).map{ case (a,b) => a&b } }
-  val pfArray = widthMap{ i => ParallelOR(pfHitVec(i)).asBool && valid(i) && vmEnable }
-  val hit     = widthMap{ i => ParallelOR(hitVec(i)).asBool && valid(i) && vmEnable && ~pfArray(i) }
-  val miss    = widthMap{ i => !hit(i) && valid(i) && vmEnable && ~pfArray(i) }
-  val hitppn  = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.ppn)) }
-  val hitPerm = widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.perm)) }
-  val hitLevel= widthMap{ i => ParallelMux(hitVec(i) zip entry.map(_.level)) }
-  val multiHit = {
-    val hitSum = widthMap{ i => PopCount(hitVec(i)) }
-    val pfHitSum = widthMap{ i => PopCount(pfHitVec(i)) }
-    ParallelOR(widthMap{ i => !(hitSum(i)===0.U || hitSum(i)===1.U) || !(pfHitSum(i)===0.U || pfHitSum(i)===1.U)})
+  /**
+    * PTW refill
+    */
+  val refill = ptw.resp.fire()
+  val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
+  val priorIdx = PriorityEncoder(~(v|pf))
+  val tlbfull = ParallelAND((v|pf).asBools)
+  val refillIdx = Mux(tlbfull, randIdx, priorIdx)
+  val refillIdxOH = UIntToOH(refillIdx)
+  when (refill) {
+    v := Mux(ptw.resp.bits.pf, v & ~refillIdxOH, v | refillIdxOH)
+    entry(refillIdx) := ptw.resp.bits.entry
+    XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
   }
 
-  // resp  // TODO: A/D has not being concerned
-  for(i <- 0 until Width) {
-    val paddr = LookupTreeDefault(hitLevel(i), Cat(hitppn(i), reqAddr(i).off), List(
-      0.U -> Cat(hitppn(i)(ppnLen - 1, 2*vpnnLen), reqAddr(i).vpn(2*vpnnLen - 1, 0), reqAddr(i).off),
-      1.U -> Cat(hitppn(i)(ppnLen - 1, vpnnLen), reqAddr(i).vpn(vpnnLen - 1, 0), reqAddr(i).off),
-      2.U -> Cat(hitppn(i), reqAddr(i).off)
+  /**
+    * L1 TLB read
+    */
+  val tlb_read_mask = Mux(refill, refillIdxOH, 0.U(TlbEntrySize.W))
+  def TLBRead(i: Int) = {
+    val entryHitVec = (
+      if (isDtlb)
+        VecInit((tlb_read_mask.asBools zip entry).map{ case (r, e) => !r && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
+      else
+        VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
+    )
+
+    val reqAddrReg = if (isDtlb) RegNext(reqAddr(i)) else reqAddr(i)
+    val cmdReg = if (isDtlb) RegNext(cmd(i)) else cmd(i)
+    val validReg = if (isDtlb) RegNext(valid(i)) else valid(i)
+    val entryHitVecReg = if (isDtlb) RegNext(entryHitVec) else entryHitVec
+
+    val hitVec  = (v.asBools zip entryHitVecReg).map{ case (a,b) => a&b }
+    val pfHitVec   = (pf.asBools zip entryHitVecReg).map{ case (a,b) => a&b }
+    val pfArray = ParallelOR(pfHitVec).asBool && validReg && vmEnable
+    val hit     = ParallelOR(hitVec).asBool && validReg && vmEnable && ~pfArray
+    val miss    = !hit && validReg && vmEnable && ~pfArray
+    val hitppn  = ParallelMux(hitVec zip entry.map(_.ppn))
+    val hitPerm = ParallelMux(hitVec zip entry.map(_.perm))
+    val hitLevel= ParallelMux(hitVec zip entry.map(_.level))
+    val multiHit = {
+      val hitSum = PopCount(hitVec)
+      val pfHitSum = PopCount(pfHitVec)
+      !(hitSum===0.U || hitSum===1.U) || !(pfHitSum===0.U || pfHitSum===1.U)
+    }
+
+    // resp  // TODO: A/D has not being concerned
+    val paddr = LookupTreeDefault(hitLevel, Cat(hitppn, reqAddrReg.off), List(
+      0.U -> Cat(hitppn(ppnLen - 1, 2*vpnnLen), reqAddrReg.vpn(2*vpnnLen - 1, 0), reqAddrReg.off),
+      1.U -> Cat(hitppn(ppnLen - 1, vpnnLen), reqAddrReg.vpn(vpnnLen - 1, 0), reqAddrReg.off),
+      2.U -> Cat(hitppn, reqAddrReg.off)
     ))
+    val vaddr = SignExt(req(i).bits.vaddr, PAddrBits)
 
     req(i).ready := resp(i).ready
-    resp(i).valid := valid(i)
-    resp(i).bits.paddr := Mux(vmEnable, paddr, SignExt(req(i).bits.vaddr, PAddrBits))
-    resp(i).bits.miss := miss(i)
+    resp(i).valid := validReg
+    resp(i).bits.paddr := Mux(vmEnable, paddr, if (isDtlb) RegNext(vaddr) else vaddr)
+    resp(i).bits.miss := miss
 
-    val perm = hitPerm(i) // NOTE: given the excp, the out module choose one to use?
-    val update = false.B && hit(i) && (!hitPerm(i).a || !hitPerm(i).d && TlbCmd.isWrite(cmd(i))) // update A/D through exception
+    val perm = hitPerm // NOTE: given the excp, the out module choose one to use?
+    val update = false.B && hit && (!hitPerm.a || !hitPerm.d && TlbCmd.isWrite(cmdReg)) // update A/D through exception
     val modeCheck = !(mode === ModeU && !perm.u || mode === ModeS && perm.u && (!priv.sum || ifecth))
-    val ldPf = (pfArray(i) && TlbCmd.isRead(cmd(i)) && true.B /*!isAMO*/) || hit(i) && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmd(i)) && true.B/*!isAMO*/) // TODO: handle isAMO
-    val stPf = (pfArray(i) && TlbCmd.isWrite(cmd(i)) || false.B /*isAMO*/ ) || hit(i) && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmd(i)) || false.B/*TODO isAMO. */)
-    val instrPf = (pfArray(i) && TlbCmd.isExec(cmd(i))) || hit(i) && !(modeCheck && perm.x) && TlbCmd.isExec(cmd(i))
+    val ldPf = (pfArray && TlbCmd.isRead(cmdReg) && true.B /*!isAMO*/) || hit && !(modeCheck && (perm.r || priv.mxr && perm.x)) && (TlbCmd.isRead(cmdReg) && true.B/*!isAMO*/) // TODO: handle isAMO
+    val stPf = (pfArray && TlbCmd.isWrite(cmdReg) || false.B /*isAMO*/ ) || hit && !(modeCheck && perm.w) && (TlbCmd.isWrite(cmdReg) || false.B/*TODO isAMO. */)
+    val instrPf = (pfArray && TlbCmd.isExec(cmdReg)) || hit && !(modeCheck && perm.x) && TlbCmd.isExec(cmdReg)
     resp(i).bits.excp.pf.ld    := ldPf || update
     resp(i).bits.excp.pf.st    := stPf || update
     resp(i).bits.excp.pf.instr := instrPf || update
+
+    (hit, miss, pfHitVec, multiHit)
   }
+
+  val readResult = (0 until Width).map(TLBRead(_))
+  val hitVec = readResult.map(res => res._1)
+  val missVec = readResult.map(res => res._2)
+  val pfHitVecVec = readResult.map(res => res._3)
+  val multiHitVec = readResult.map(res => res._4)
+  val hasMissReq = Cat(missVec).orR
 
   // ptw
   val state_idle :: state_wait :: Nil = Enum(2)
   val state = RegInit(state_idle)
 
   ptw <> DontCare // TODO: need check it
-  ptw.req.valid := ParallelOR(miss).asBool && state===state_idle && !sfence.valid
+  ptw.req.valid := hasMissReq && state===state_idle && !sfence.valid
   ptw.resp.ready := state===state_wait
 
   // val ptwReqSeq = Wire(Seq.fill(Width)(new comBundle()))
   val ptwReqSeq = Seq.fill(Width)(Wire(new comBundle()))
   for (i <- 0 until Width) {
-    ptwReqSeq(i).valid := valid(i) && miss(i)
-    ptwReqSeq(i).roqIdx := req(i).bits.roqIdx
-    ptwReqSeq(i).bits.vpn := reqAddr(i).vpn
+    ptwReqSeq(i).valid := ((if (isDtlb) RegNext(valid(i)) else valid(i)) && missVec(i))
+    ptwReqSeq(i).roqIdx := (if (isDtlb) RegNext(req(i).bits.roqIdx) else req(i).bits.roqIdx)
+    ptwReqSeq(i).bits.vpn := (if (isDtlb) RegNext(reqAddr(i).vpn) else reqAddr(i).vpn)
   }
   ptw.req.bits := Compare(ptwReqSeq).bits
 
   switch (state) {
     is (state_idle) {
-      when (ParallelOR(miss).asBool && ptw.req.fire()) {
+      when (hasMissReq && ptw.req.fire()) {
         state := state_wait
       }
       assert(!ptw.resp.valid)
@@ -278,28 +384,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   }
 
   // reset pf when pf hit
-  val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVec(i)).asUInt, 0.U) })
-  val pfHitRefill = ParallelOR(pfHitReset.asBools)
-
-  // refill
-  val refill = ptw.resp.fire()
-  val randIdx = LFSR64()(log2Up(TlbEntrySize)-1,0)
-  val priorIdx = PriorityEncoder(~(v|pf))
-  val tlbfull = ParallelAND((v|pf).asBools)
-  val refillIdx = Mux(tlbfull, randIdx, priorIdx)
-  val re2OH = UIntToOH(refillIdx)
-  when (refill) {
-    v := Mux(ptw.resp.bits.pf, v & ~re2OH, v | re2OH)
-    entry(refillIdx) := ptw.resp.bits.entry
-    XSDebug(p"Refill: idx:${refillIdx} entry:${ptw.resp.bits.entry}\n")
-  }
+  val pfHitReset = ParallelOR(widthMap{i => Mux(resp(i).fire(), VecInit(pfHitVecVec(i)).asUInt, 0.U) })
+  val pfHitRefill = false.B//ParallelOR(pfHitReset.asBools)
 
   // pf update
   when (refill) {
     when (pfHitRefill) {
-      pf := Mux(ptw.resp.bits.pf, pf | re2OH, pf & ~re2OH) & ~pfHitReset
+      pf := Mux(ptw.resp.bits.pf, pf | refillIdxOH, pf & ~refillIdxOH) & ~pfHitReset
     } .otherwise {
-      pf := Mux(ptw.resp.bits.pf, pf | re2OH, pf & ~re2OH)
+      pf := Mux(ptw.resp.bits.pf, pf | refillIdxOH, pf & ~refillIdxOH)
     }
   } .otherwise {
     when (pfHitRefill) {
@@ -307,7 +400,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     }
   }
   when (PopCount(pf) > 10.U) { // when too much pf, just clear
-    pf := Mux(refill && ptw.resp.bits.pf, re2OH, 0.U)
+    pf := Mux(refill && ptw.resp.bits.pf, refillIdxOH, 0.U)
   }
 
   // sfence (flush)
@@ -342,15 +435,15 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
     ExcitingUtils.addSource(valid(1)/* && vmEnable*/, "perfCntDtlbReqCnt1", Perf)
     ExcitingUtils.addSource(valid(2)/* && vmEnable*/, "perfCntDtlbReqCnt2", Perf)
     ExcitingUtils.addSource(valid(3)/* && vmEnable*/, "perfCntDtlbReqCnt3", Perf)
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntDtlbMissCnt0", Perf)
-    ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && miss(1), "perfCntDtlbMissCnt1", Perf)
-    ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && miss(2), "perfCntDtlbMissCnt2", Perf)
-    ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && miss(3), "perfCntDtlbMissCnt3", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && missVec(0), "perfCntDtlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(1)/* && vmEnable*/ && missVec(1), "perfCntDtlbMissCnt1", Perf)
+    ExcitingUtils.addSource(valid(2)/* && vmEnable*/ && missVec(2), "perfCntDtlbMissCnt2", Perf)
+    ExcitingUtils.addSource(valid(3)/* && vmEnable*/ && missVec(3), "perfCntDtlbMissCnt3", Perf)
   }
 
   if (!env.FPGAPlatform && !isDtlb) {
     ExcitingUtils.addSource(valid(0)/* && vmEnable*/, "perfCntItlbReqCnt0", Perf)
-    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && miss(0), "perfCntItlbMissCnt0", Perf)
+    ExcitingUtils.addSource(valid(0)/* && vmEnable*/ && missVec(0), "perfCntItlbMissCnt0", Perf)
   }
 
   // Log
@@ -361,7 +454,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
 
   XSDebug(sfence.valid, p"Sfence: ${sfence}\n")
   XSDebug(ParallelOR(valid)|| ptw.resp.valid, p"CSR: ${csr}\n")
-  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hit).asUInt)} miss:${Binary(VecInit(miss).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)} state:${state}\n")
+  XSDebug(ParallelOR(valid) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)} v:${Hexadecimal(v)} pf:${Hexadecimal(pf)} state:${state}\n")
   XSDebug(ptw.req.fire(), p"PTW req:${ptw.req.bits}\n")
   XSDebug(ptw.resp.valid, p"PTW resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
@@ -370,7 +463,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   //   assert((hit(i)&pfArray(i))===false.B, "hit(%d):%d pfArray(%d):%d v:0x%x pf:0x%x", i.U, hit(i), i.U, pfArray(i), v, pf)
   // }
   // for(i <- 0 until Width) {
-  //   XSDebug(multiHit, p"vpn:0x${Hexadecimal(reqAddr(i).vpn)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)} pfHitVec:0x${Hexadecimal(VecInit(pfHitVec(i)).asUInt)}\n")
+  //   XSDebug(multiHit, p"vpn:0x${Hexadecimal(reqAddr(i).vpn)} hitVec:0x${Hexadecimal(VecInit(hitVec(i)).asUInt)} pfHitVecVec:0x${Hexadecimal(VecInit(pfHitVecVec(i)).asUInt)}\n")
   // }
   // for(i <- 0 until TlbEntrySize) {
   //   XSDebug(multiHit, p"entry(${i.U}): v:${v(i)} ${entry(i)}\n")
@@ -388,7 +481,7 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   //     assert(req(i).bits.vaddr===resp(i).bits.paddr, "vaddr:0x%x paddr:0x%x hitVec:%x ", req(i).bits.vaddr, resp(i).bits.paddr, VecInit(hitVec(i)).asUInt)
   //   } // FIXME: remove me when tlb may be ok
   // }
-  
+
   // assert((v&pf)===0.U, "v and pf can't be true at same time: v:0x%x pf:0x%x", v, pf)
 }
 
@@ -403,12 +496,12 @@ object TLB {
     shouldBlock: Boolean
   ) = {
     require(in.length == width)
-    
+
     val tlb = Module(new TLB(width, isDtlb))
 
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
-    
+
     if (!shouldBlock) { // dtlb
       for (i <- 0 until width) {
         tlb.io.requestor(i) <> in(i)

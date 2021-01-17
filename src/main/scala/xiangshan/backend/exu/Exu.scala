@@ -120,7 +120,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
 
   def writebackArb(in: Seq[DecoupledIO[FuOutput]], out: DecoupledIO[ExuOutput]): Arbiter[FuOutput] = {
     if (needArbiter) {
-      val arb = Module(new Arbiter(new FuOutput, in.size))
+      val arb = Module(new Arbiter(new FuOutput(in.head.bits.len), in.size))
       arb.io.in <> in
       arb.io.out.ready := out.ready
       out.bits.data := arb.io.out.bits.data
@@ -183,6 +183,7 @@ abstract class Exu(val config: ExuConfig) extends XSModule {
     out.fflags := DontCare
     out.debug <> DontCare
     out.debug.isMMIO := false.B
+    out.debug.isPerfCnt := false.B
     out.redirect <> DontCare
     out.redirectValid := false.B
   }
@@ -203,7 +204,7 @@ object Exu {
   val fmacExeUnitCfg = ExuConfig("FmacExeUnit", Seq(fmacCfg), Int.MaxValue, 0)
   val fmiscExeUnitCfg = ExuConfig(
     "FmiscExeUnit",
-    Seq(fcmpCfg, fminCfg, fmvCfg, fsgnjCfg, f2iCfg, s2dCfg, d2sCfg, fdivSqrtCfg),
+    Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
   val ldExeUnitCfg = ExuConfig("LoadExu", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0)

@@ -48,6 +48,11 @@ class DiffTestIO extends XSBundle {
   val medeleg = Output(UInt(64.W))
 
   val scFailed = Output(Bool())
+
+  val storeCommit = Output(UInt(2.W))
+  val storeAddr   = Output(Vec(2, UInt(64.W)))
+  val storeData   = Output(Vec(2, UInt(64.W)))
+  val storeMask   = Output(Vec(2, UInt(8.W)))
 }
 
 class LogCtrlIO extends Bundle {
@@ -85,7 +90,7 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     else
       LazyModule(new AXI4RAM(
         dramRange,
-        memByte = 128 * 1024 * 1024,
+        memByte = 64L * 1024 * 1024 * 1024,
         useBlackBox = true,
         beatBytes = L3BusWidth / 8
       )).node
@@ -119,7 +124,10 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
     dontTouch(io.uart)
 
     io.uart <> axiMMIO.module.io.uart
-    soc.module.io.meip := false.B
+    val NumCores = top.Parameters.get.socParameters.NumCores
+    for (i <- 0 until NrExtIntr) {
+      soc.module.io.extIntrs(i) := false.B
+    }
 
     val difftest = WireInit(0.U.asTypeOf(new DiffTestIO))
     if (!env.FPGAPlatform) {
@@ -154,6 +162,10 @@ class XSSimSoC(axiSim: Boolean)(implicit p: config.Parameters) extends LazyModul
       ExcitingUtils.addSink(difftest.mideleg, "difftestMideleg", Debug)
       ExcitingUtils.addSink(difftest.medeleg, "difftestMedeleg", Debug)
       ExcitingUtils.addSink(difftest.scFailed, "difftestScFailed", Debug)
+      ExcitingUtils.addSink(difftest.storeCommit, "difftestStoreCommit", Debug)
+      ExcitingUtils.addSink(difftest.storeAddr, "difftestStoreAddr", Debug)
+      ExcitingUtils.addSink(difftest.storeData, "difftestStoreData", Debug)
+      ExcitingUtils.addSink(difftest.storeMask, "difftestStoreMask", Debug)
     }
 
     // BoringUtils.addSink(difftest.lrscAddr, "difftestLrscAddr")
@@ -227,12 +239,14 @@ object TestMain extends App {
   // set soc parameters
   val socArgs = args.filterNot(_ == "--with-dramsim3")
   Parameters.set(
-    if(socArgs.contains("--fpga-platform")) {
-      if (socArgs.contains("--dual-core")) Parameters.dualCoreParameters
-      else Parameters()
+    (socArgs.contains("--fpga-platform"), socArgs.contains("--dual-core"), socArgs.contains("--disable-log")) match {
+      case (true,  false, _)     => Parameters()
+      case (true,   true, _)     => Parameters.dualCoreParameters
+      case (false,  true,  true) => Parameters.simDualCoreParameters
+      case (false, false,  true) => Parameters.simParameters
+      case (false,  true, false) => Parameters.debugDualCoreParameters
+      case (false, false, false) => Parameters.debugParameters
     }
-    else if(socArgs.contains("--disable-log")) Parameters.simParameters // sim only, disable log
-    else Parameters.debugParameters // open log
   )
 
   val otherArgs = socArgs.filterNot(_ == "--disable-log").filterNot(_ == "--fpga-platform").filterNot(_ == "--dual-core")

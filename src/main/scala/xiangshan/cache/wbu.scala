@@ -52,7 +52,9 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   io.inflight_addr.valid := state =/= s_invalid
   io.inflight_addr.bits  := req.idx << blockOffBits
 
-  XSDebug("state: %d\n", state)
+  when (state =/= s_invalid) {
+    XSDebug("state: %d\n", state)
+  }
 
   when (state === s_invalid) {
     io.req.ready := true.B
@@ -124,14 +126,14 @@ class WritebackUnit(edge: TLEdgeOut) extends DCacheModule {
   val id = cfg.nMissEntries
 
   val probeResponse = edge.ProbeAck(
-    fromSource = id.U,
+    fromSource = req.source,
     toAddress = r_address,
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param
   )
 
   val probeResponseData = edge.ProbeAck(
-    fromSource = id.U,
+    fromSource = req.source,
     toAddress = r_address,
     lgSize = log2Ceil(cfg.blockBytes).U,
     reportPermissions = req.param,

@@ -27,7 +27,7 @@ help:
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform $(SIM_ARGS)
+	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) --disable-all --fpga-platform --remove-assert $(SIM_ARGS)
 	# mill XiangShan.runMain top.$(TOP) -X verilog -td $(@D) --output-file $(@F) --infer-rw $(FPGATOP) --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf
 	# $(MEM_GEN) $(@D)/$(@F).conf >> $@
 	# sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
@@ -56,7 +56,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	date -R
 	mill XiangShan.test.runMain $(SIMTOP) -X verilog -td $(@D) --full-stacktrace --output-file $(@F) $(SIM_ARGS)
 	sed -i '/module XSSimTop/,/endmodule/d' $(SIM_TOP_V)
-	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 	date -R
 
 EMU_TOP      = XSSimSoC
@@ -80,7 +80,7 @@ endif
 # Verilator multi-thread support
 EMU_THREADS  ?= 1
 ifneq ($(EMU_THREADS),1)
-VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi none
+VEXTRA_FLAGS += --threads $(EMU_THREADS) --threads-dpi all
 endif
 
 # Verilator savable
@@ -88,6 +88,12 @@ EMU_SNAPSHOT ?=
 ifeq ($(EMU_SNAPSHOT),1)
 VEXTRA_FLAGS += --savable
 EMU_CXXFLAGS += -DVM_SAVABLE
+endif
+
+# Verilator coverage
+EMU_COVERAGE ?=
+ifeq ($(EMU_COVERAGE),1)
+VEXTRA_FLAGS += --coverage-line --coverage-toggle
 endif
 
 # co-simulation with DRAMsim3
@@ -128,17 +134,30 @@ REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
 $(REF_SO):
 	$(MAKE) -C $(NEMU_HOME) ISA=riscv64 SHARE=1
 
-$(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO)
+LOCK = /var/emu/emu.lock
+LOCK_BIN = $(abspath $(BUILD_DIR)/lock-emu)
+
+$(LOCK_BIN): ./scripts/utils/lock-emu.c
+	gcc $^ -o $@
+
+$(EMU): $(EMU_MK) $(EMU_DEPS) $(EMU_HEADERS) $(REF_SO) $(LOCK_BIN)
 	date -R
 ifeq ($(REMOTE),localhost)
 	CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))
 else
-	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j128 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	@echo "try to get emu.lock ..."
+	ssh -tt $(REMOTE) '$(LOCK_BIN) $(LOCK)'
+	@echo "get lock"
+	ssh -tt $(REMOTE) 'CPPFLAGS=-DREF_SO=\\\"$(REF_SO)\\\" $(MAKE) -j230 VM_PARALLEL_BUILDS=1 OPT_FAST="-O3" -C $(abspath $(dir $(EMU_MK))) -f $(abspath $(EMU_MK))'
+	@echo "release lock ..."
+	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 endif
 	date -R
 
 SEED ?= $(shell shuf -i 1-10000 -n 1)
 
+VME_SOURCE ?= $(shell pwd)/build/$(TOP).v
+VME_MODULES ?= 
 
 # log will only be printed when (B<=GTimer<=E) && (L < loglevel)
 # use 'emu -h' to see more details
@@ -165,8 +184,42 @@ emu: $(EMU)
 	ls build
 	$(EMU) -i $(IMAGE) $(EMU_FLAGS)
 
+coverage:
+	verilator_coverage --annotate build/logs/annotated --annotate-min 1 build/logs/coverage.dat
+	python3 scripts/coverage/coverage.py build/logs/annotated/XSSimTop.v build/XSSimTop_annotated.v
+	python3 scripts/coverage/statistics.py build/XSSimTop_annotated.v >build/coverage.log
+
+#-----------------------timing scripts-------------------------
+# run "make vme/tap help=1" to get help info
+
+# extract verilog module from TopMain.v
+# usage: make vme VME_MODULES=Roq
+TIMING_SCRIPT_PATH = ./timingScripts
+vme: $(TOP_V)
+	make -C $(TIMING_SCRIPT_PATH) vme
+
+# get and sort timing analysis with total delay(start+end) and max delay(start or end)
+# and print it out
+tap:
+	make -C $(TIMING_SCRIPT_PATH) tap
+
+# usage: make phy_evaluate VME_MODULE=Roq REMOTE=100
+phy_evaluate: vme
+	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
+	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate DESIGN_NAME=$(VME_MODULE)'
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
+
+# usage: make phy_evaluate_atc VME_MODULE=Roq REMOTE=100
+phy_evaluate_atc: vme
+	scp -r ./build/extracted/* $(REMOTE):~/phy_evaluation/remote_run/rtl
+	ssh -tt $(REMOTE) 'cd ~/phy_evaluation/remote_run && $(MAKE) evaluate_atc DESIGN_NAME=$(VME_MODULE)'
+	scp -r  $(REMOTE):~/phy_evaluation/remote_run/rpts ./build
+
 cache:
 	$(MAKE) emu IMAGE=Makefile
+
+release-lock:
+	ssh -tt $(REMOTE) 'rm -f $(LOCK)'
 
 clean:
 	git submodule foreach git clean -fdx

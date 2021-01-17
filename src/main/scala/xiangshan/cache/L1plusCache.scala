@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMTemplate}
+import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMWrapper}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -17,11 +17,11 @@ import scala.math.max
 
 
 // L1plusCache specific parameters
-// L1 L1plusCache is 64set, 8way-associative, with 64byte block, a total of 32KB
+// L1 L1plusCache is 256 set, 8 way associative, with 64byte block, a total of 128KB
 // It's a virtually indexed, physically tagged cache.
 case class L1plusCacheParameters
 (
-    nSets: Int = 64,
+    nSets: Int = 256,
     nWays: Int = 8,
     rowBits: Int = 64,
     tagECC: Option[String] = None,
@@ -41,11 +41,23 @@ trait HasL1plusCacheParameters extends HasL1CacheParameters {
   val icacheParams = icacheParameters
   val cfg = cacheParams
   val icfg = icacheParams
+  val pcfg = l1plusPrefetcherParameters
 
   def encRowBits = cacheParams.dataCode.width(rowBits)
 
   def missQueueEntryIdWidth = log2Up(cfg.nMissEntries)
+  // def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
+  // L1plusCache has 2 clients: ICacheMissQueue and L1plusPrefetcher
+  def nClients = 2
+  def icacheMissQueueId = 0
+  def l1plusPrefetcherId = 1
+  def clientIdWidth = log2Up(nClients)
   def icacheMissQueueEntryIdWidth = log2Up(icfg.nMissEntries)
+  def l1plusPrefetcherEntryIdWidth = log2Up(pcfg.nEntries)// TODO
+  def entryIdWidth = max(icacheMissQueueEntryIdWidth, l1plusPrefetcherEntryIdWidth)
+  def idWidth = clientIdWidth + entryIdWidth
+  def clientId(id: UInt) = id(idWidth - 1, entryIdWidth)
+  def entryId(id: UInt) = id(entryIdWidth - 1, 0)
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -119,7 +131,7 @@ class L1plusCacheDataArray extends L1plusCacheModule {
 
   for (w <- 0 until nWays) {
     for (r <- 0 until blockRows) {
-      val array = Module(new SRAMTemplate(Bits(encRowBits.W), set=nSets, way=1,
+      val array = Module(new SRAMWrapper("L1Plus_Data", Bits(encRowBits.W), set=nSets, way=1,
         shouldReset=false, holdRead=false, singlePort=singlePort))
       // data write
       array.io.w.req.valid := io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid
@@ -185,7 +197,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
   def encTagBits = cacheParams.tagCode.width(tagBits)
-  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
+  val tag_array = Module(new SRAMWrapper("L1Plus_Meta", UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
@@ -259,13 +271,21 @@ class L1plusCacheReq extends L1plusCacheBundle
 {
   val cmd  = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
-  val id   = UInt(icacheMissQueueEntryIdWidth.W)
+  val id   = UInt(idWidth.W)
+
+  override def toPrintable: Printable = {
+    p"cmd=${Binary(cmd)} addr=0x${Hexadecimal(addr)} id=${Binary(id)}"
+  }
 }
 
 class L1plusCacheResp extends L1plusCacheBundle
 {
   val data = UInt((cfg.blockBytes * 8).W)
-  val id   = UInt(icacheMissQueueEntryIdWidth.W)
+  val id   = UInt(idWidth.W)
+
+  override def toPrintable: Printable = {
+    p"id=${Binary(id)} data=${Hexadecimal(data)}"
+  }
 }
 
 class L1plusCacheIO extends L1plusCacheBundle
@@ -274,6 +294,11 @@ class L1plusCacheIO extends L1plusCacheBundle
   val resp = Flipped(DecoupledIO(new L1plusCacheResp))
   val flush = Output(Bool())
   val empty = Input(Bool())
+
+  override def toPrintable: Printable = {
+    p"req: v=${req.valid} r=${req.ready} ${req.bits} " +
+      p"resp: v=${resp.valid} r=${resp.ready} ${resp.bits}"
+  }
 }
 
 class L1plusCache()(implicit p: Parameters) extends LazyModule with HasL1plusCacheParameters {
@@ -453,7 +478,7 @@ class L1plusCachePipe extends L1plusCacheModule
 
   s0_passdown := s0_valid
 
-  assert(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD), "L1plusCachePipe only accepts read req")
+  assert(!(s0_valid && s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR), "L1plusCachePipe only accepts read req")
 
   dump_pipeline_reqs("L1plusCachePipe s0", s0_valid, s0_req)
 // stage 1
@@ -546,7 +571,7 @@ class L1plusCachePipe extends L1plusCacheModule
 class L1plusCacheMissReq extends L1plusCacheBundle
 {
   // transaction id
-  val id     = UInt(missQueueEntryIdWidth.W)
+  val id     = UInt(idWidth.W)
   val cmd    = UInt(M_SZ.W)
   val addr   = UInt(PAddrBits.W)
   val way_en = UInt(nWays.W)

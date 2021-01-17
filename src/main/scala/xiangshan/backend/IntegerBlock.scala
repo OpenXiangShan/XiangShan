@@ -3,12 +3,11 @@ package xiangshan.backend
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.exu.Exu.{jumpExeUnitCfg, ldExeUnitCfg, stExeUnitCfg}
-import xiangshan.backend.exu.{AluExeUnit, ExuConfig, JumpExeUnit, MulDivExeUnit, Wb}
+import xiangshan.backend.exu.Exu.{ldExeUnitCfg, stExeUnitCfg}
+import xiangshan.backend.exu._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.backend.issue.{ReservationStationCtrl, ReservationStationData}
 import xiangshan.backend.regfile.Regfile
-import xiangshan.backend.fu.fpu.Fflags
 
 class WakeUpBundle(numFast: Int, numSlow: Int) extends XSBundle {
   val fastUops = Vec(numFast, Flipped(ValidIO(new MicroOp)))
@@ -66,13 +65,14 @@ class IntegerBlock
   val io = IO(new Bundle {
     val fromCtrlBlock = Flipped(new CtrlToIntBlockIO)
     val toCtrlBlock = new IntBlockToCtrlIO
+    val toMemBlock = new IntBlockToMemBlockIO
 
     val wakeUpIn = new WakeUpBundle(fastWakeUpIn.size, slowWakeUpIn.size)
     val wakeUpFpOut = Flipped(new WakeUpBundle(fastFpOut.size, slowFpOut.size))
     val wakeUpIntOut = Flipped(new WakeUpBundle(fastIntOut.size, slowIntOut.size))
 
     val csrio = new Bundle {
-      val fflags = Input(new Fflags) // from roq
+      val fflags = Flipped(Valid(UInt(5.W))) // from roq
       val dirty_fs = Input(Bool()) // from roq
       val frm = Output(UInt(3.W)) // to float
       val exception = Flipped(ValidIO(new MicroOp)) // from roq
@@ -82,6 +82,9 @@ class IntegerBlock
       val memExceptionVAddr = Input(UInt(VAddrBits.W)) // from lsq
       val externalInterrupt = new ExternalInterruptIO  // from outside
       val tlb = Output(new TlbCsrBundle) // from tlb
+      val perfinfo = new Bundle {
+        val retiredInstr = Input(UInt(3.W))
+      }
     }
     val fenceio = new Bundle {
       val sfence = Output(new SfenceBundle) // to front,mem
@@ -99,11 +102,11 @@ class IntegerBlock
     len = XLEN
   ))
 
-  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
   val jmpExeUnit = Module(new JumpExeUnit)
   val mduExeUnits = Array.tabulate(exuParameters.MduCnt)(_ => Module(new MulDivExeUnit))
+  val aluExeUnits = Array.tabulate(exuParameters.AluCnt)(_ => Module(new AluExeUnit))
 
-  val exeUnits = jmpExeUnit +: (aluExeUnits ++ mduExeUnits)
+  val exeUnits = jmpExeUnit +: (mduExeUnits ++ aluExeUnits)
 
   def needWakeup(cfg: ExuConfig): Boolean =
     (cfg.readIntRf && cfg.writeIntRf) || (cfg.readFpRf && cfg.writeFpRf)
@@ -111,6 +114,7 @@ class IntegerBlock
   def needData(a: ExuConfig, b: ExuConfig): Boolean =
     (a.readIntRf && b.writeIntRf) || (a.readFpRf && b.writeFpRf)
 
+  val readPortIndex = RegNext(io.fromCtrlBlock.readPortIndex)
   val reservationStations = exeUnits.map(_.config).zipWithIndex.map({ case (cfg, i) =>
     var certainLatency = -1
     if (cfg.hasCertainLatency) {
@@ -141,7 +145,13 @@ class IntegerBlock
     rsCtrl.io.redirect <> redirect // TODO: remove it
     rsCtrl.io.numExist <> io.toCtrlBlock.numExist(i)
     rsCtrl.io.enqCtrl <> io.fromCtrlBlock.enqIqCtrl(i)
-    rsData.io.enqData <> io.fromCtrlBlock.enqIqData(i)
+
+    rsData.io.srcRegValue := DontCare
+    val src1Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2).data))
+    val src2Value = VecInit((0 until 4).map(i => intRf.io.readPorts(i * 2 + 1).data))
+    rsData.io.srcRegValue(0) := src1Value(readPortIndex(i))
+    if (cfg.intSrcCnt > 1) rsData.io.srcRegValue(1) := src2Value(readPortIndex(i))
+    if (cfg == Exu.jumpExeUnitCfg) rsData.io.jumpPc := io.fromCtrlBlock.jumpPc
     rsData.io.redirect <> redirect
 
     rsData.io.writeBackedData <> writeBackData
@@ -209,10 +219,12 @@ class IntegerBlock
 
   // read int rf from ctrl block
   intRf.io.readPorts <> io.fromCtrlBlock.readRf
+  (0 until NRMemReadPorts).foreach(i => io.toMemBlock.readIntRf(i).data := intRf.io.readPorts(i + 8).data)
   // write int rf arbiter
   val intWbArbiter = Module(new Wb(
-    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn).map(_.wbIntPriority),
-    NRIntWritePorts
+    (exeUnits.map(_.config) ++ fastWakeUpIn ++ slowWakeUpIn),
+    NRIntWritePorts,
+    isFp = false
   ))
   intWbArbiter.io.in <> exeUnits.map(_.io.toInt) ++ io.wakeUpIn.fast ++ io.wakeUpIn.slow
 

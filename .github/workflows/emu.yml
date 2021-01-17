@@ -3,11 +3,27 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, update-ci]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
 jobs:
+  generate-verilog:
+    runs-on: self-hosted
+    name: Generate Verilog
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: Check Wiring
+        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
+      - name: set env
+        run: |
+          echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      - name: generate verilog file
+        run:
+          make verilog SIM_ARGS=--dual-core
   build-emu:
     runs-on: self-hosted
     name: Make EMU
@@ -15,8 +31,6 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
-      - name: Check Wiring
-        run: bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: Set env
         run: |
           echo "NEMU_HOME=/home/ci-runner/xsenv/NEMU" >> $GITHUB_ENV
@@ -25,7 +39,7 @@ jobs:
           echo "AM_HOME=/home/ci-runner/xsenv/nexus-am" >> $GITHUB_ENV
       - name: Build EMU
         run:
-          make ./build/emu SIM_ARGS=--disable-all NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j60
+          make ./build/emu SIM_ARGS=--disable-all NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME -j220
       - name: Run cputest
         run: |
           CPU_TEST_DIR=$AM_HOME/tests/cputest
@@ -36,7 +50,7 @@ jobs:
               t=${test%.c}
               echo $t
               make -C $CPU_TEST_DIR ALL=$t ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2>/dev/null | grep "HIT GOOD TRAP"
-              if [[ $? == 1 ]];
+              if [[ $? != 0 ]];
               then
                   echo $t fail
                   ret=1
@@ -49,3 +63,6 @@ jobs:
       - name: Run microbench
         run: |
           make -C $AM_HOME/apps/microbench ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME mainargs=test run 2> /dev/null
+      - name: Run coremark
+        run: |
+          make -C $AM_HOME/apps/coremark ARCH=riscv64-noop AM_HOME=$AM_HOME NEMU_HOME=$NEMU_HOME NOOP_HOME=$NOOP_HOME run 2> /dev/null
