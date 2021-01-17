@@ -2,7 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMTemplate}
+import utils.{Code, RandomReplacement, HasTLDump, XSDebug, SRAMWrapper}
 import xiangshan.{HasXSLog}
 
 import chipsalliance.rocketchip.config.Parameters
@@ -131,7 +131,7 @@ class L1plusCacheDataArray extends L1plusCacheModule {
 
   for (w <- 0 until nWays) {
     for (r <- 0 until blockRows) {
-      val array = Module(new SRAMTemplate(Bits(encRowBits.W), set=nSets, way=1,
+      val array = Module(new SRAMWrapper("L1Plus_Data", Bits(encRowBits.W), set=nSets, way=1,
         shouldReset=false, holdRead=false, singlePort=singlePort))
       // data write
       array.io.w.req.valid := io.write.bits.way_en(w) && io.write.bits.wmask(r).asBool && io.write.valid
@@ -197,7 +197,7 @@ class L1plusCacheMetadataArray extends L1plusCacheModule {
   val rmask = Mux((nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
 
   def encTagBits = cacheParams.tagCode.width(tagBits)
-  val tag_array = Module(new SRAMTemplate(UInt(encTagBits.W), set=nSets, way=nWays,
+  val tag_array = Module(new SRAMWrapper("L1Plus_Meta", UInt(encTagBits.W), set=nSets, way=nWays,
     shouldReset=false, holdRead=false, singlePort=true))
   val valid_array = Reg(Vec(nSets, UInt(nWays.W)))
   when (reset.toBool || io.flush) {
