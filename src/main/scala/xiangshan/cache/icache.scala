@@ -451,19 +451,16 @@ class ICache extends ICacheModule
     pds(i).io.in := wayResp
     pds(i).io.prev <> io.prev
     pds(i).io.prev_pc := io.prev_pc
-    // if a fetch packet triggers page fault, set the pf instruction to nop
-    when ((!(HasCExtension.B) || io.prev.valid) && s3_tlb_resp.excp.pf.instr ) {
-      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
-      (0 until FetchWidth).foreach(i => instrs(i) := ZeroExt("b0010011".U, 32)) // nop
-      pds(i).io.in.data := instrs.asUInt
-    }.elsewhen (HasCExtension.B && io.prev.valid && (io.prev_ipf || s3_tlb_resp.excp.pf.instr)) {
-      pds(i).io.prev.bits := ZeroExt("b0010011".U, 16)
-      val instrs = Wire(Vec(FetchWidth, UInt(32.W)))
-      (0 until FetchWidth).foreach(i => instrs(i) := Cat(ZeroExt("b0010011".U, 16), Fill(16, 0.U(1.W))))
-      pds(i).io.in.data := instrs.asUInt
-    }
   }
+  
+  
+  // if a fetch packet triggers page fault, at least send a valid instruction
   io.pd_out := Mux1H(s3_wayMask, pds.map(_.io.out))
+  val s3_noHit = s3_wayMask === 0.U
+  when ((io.prev_ipf || s3_tlb_resp.excp.pf.instr) && s3_noHit) {
+    io.pd_out.pc := pds(0).io.out.pc
+    io.pd_out.mask := 1.U(PredictWidth.W)
+  }
 
   //TODO: coherence
   XSDebug("[Stage 3] valid:%d   pc: 0x%x  mask: %b ipf:%d acf:%d \n",s3_valid,s3_req_pc,s3_req_mask,s3_tlb_resp.excp.pf.instr,s3_access_fault)
