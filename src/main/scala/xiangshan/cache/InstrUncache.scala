@@ -9,29 +9,29 @@ import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientN
 import xiangshan._
 import xiangshan.{HasXSLog, MicroOp, Redirect}
 
-class unCacheReq extends ICacheBundle
+class InsUncacheReq extends ICacheBundle
 {
-    val addr = UInt(VAddrBits.W)
+    val addr = UInt(PAddrBits.W)
     val id = UInt(3.W)
 }
 
-class unCacheResp extends ICacheBundle
+class InsUncacheResp extends ICacheBundle
 {
   val data = Vec(MMIOBeats,UInt(MMIOWordBits.W))
   val id   = UInt(3.W)
 }
 
 // One miss entry deals with one mmio request
-class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
+class InstrMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
 {
   val io = IO(new Bundle {
     val id = Input(UInt(log2Up(cacheParams.nMMIOs).W))
     // client requests
-    val req = Flipped(DecoupledIO(new unCacheReq ))
-    val resp = DecoupledIO(new unCacheResp)
+    val req = Flipped(DecoupledIO(new InsUncacheReq ))
+    val resp = DecoupledIO(new InsUncacheResp)
 
-    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-    val mem_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val mmio_acquire = DecoupledIO(new TLBundleA(edge.bundle))
+    val mmio_grant   = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     
     val flush = Input(Bool())
   })
@@ -41,7 +41,7 @@ class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
 
   val state = RegInit(s_invalid)
 
-  val req       = Reg(new unCacheReq )
+  val req       = Reg(new InsUncacheReq )
   val respDataReg = Reg(Vec(MMIOBeats,UInt(MMIOWordBits.W)))
   val refillCounter = Counter(MMIOBeats)
 
@@ -51,15 +51,14 @@ class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
   io.resp.valid          := false.B
   io.resp.bits           := DontCare
 
-  io.mem_acquire.valid   := false.B
-  io.mem_acquire.bits    := DontCare
+  io.mmio_acquire.valid   := false.B
+  io.mmio_acquire.bits    := DontCare
 
-  io.mem_grant.ready     := false.B
+  io.mmio_grant.ready     := false.B
 
 
   XSDebug("entry: %d state: %d\n", io.id, state)
 
-      //flush register
   val needFlush = RegInit(false.B)
   when(io.flush && (state =/= s_invalid) && (state =/= s_send_resp)){ needFlush := true.B }
   .elsewhen((state=== s_send_resp) && needFlush){ needFlush := false.B }
@@ -81,25 +80,25 @@ class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
   // TODO: determine 'lgSize' in memend
 
   when (state === s_refill_req) {
-    io.mem_acquire.valid := true.B
-    io.mem_acquire.bits  :=  edge.Get(
+    io.mmio_acquire.valid := true.B
+    io.mmio_acquire.bits  :=  edge.Get(
           fromSource      = io.id,
-          toAddress       = req.addr + refillCounter.value << 2.U,
-          lgSize          = log2Up(8).U
+          toAddress       = req.addr + refillCounter.value << log2Up(MMIOWorByte).U,
+          lgSize          = log2Up(MMIOWorByte).U
         )._2
 
-    when (io.mem_acquire.fire()) {
+    when (io.mmio_acquire.fire()) {
       state := s_refill_resp
     }
   }
 
-  val (_, _, refill_done, _) = edge.addr_inc(io.mem_grant)
+  val (_, _, refill_done, _) = edge.addr_inc(io.mmio_grant)
 
   when (state === s_refill_resp) {
-    io.mem_grant.ready := true.B
+    io.mmio_grant.ready := true.B
 
-    when (io.mem_grant.fire()) {
-      respDataReg(refillCounter.value) := io.mem_grant.bits.data
+    when (io.mmio_grant.fire()) {
+      respDataReg(refillCounter.value) := io.mmio_grant.bits.data
       assert(refill_done, "MMIO response should be one beat only!")
       state := Mux(needFlush || io.flush,s_invalid,Mux(refillCounter.value === (MMIOBeats - 1).U,s_send_resp,s_refill_req))
       refillCounter.inc()
@@ -119,8 +118,8 @@ class icacheMMIOEntry(edge: TLEdgeOut) extends XSModule with HasICacheParameters
 }
 
 class icacheUncacheIO extends DCacheBundle {
-    val req = Flipped(DecoupledIO(new unCacheReq ))
-    val resp = DecoupledIO(new unCacheResp)
+    val req = Flipped(DecoupledIO(new InsUncacheReq ))
+    val resp = DecoupledIO(new InsUncacheResp)
     val flush = Input(Bool())
 
 }
@@ -128,11 +127,11 @@ class icacheUncacheIO extends DCacheBundle {
 // convert DCacheIO to TileLink
 // for Now, we only deal with TL-UL
 
-class icacheUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
+class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
-      "icacheUncache",
+      "InstrUncache",
       sourceId = IdRange(0, cacheParams.nMMIOs)
     ))
   )
@@ -142,7 +141,7 @@ class icacheUncache()(implicit p: Parameters) extends LazyModule with HasICacheP
 
 }
 
-class icacheUncacheImp(outer: icacheUncache)
+class icacheUncacheImp(outer: InstrUncache)
   extends LazyModuleImp(outer)
     with HasICacheParameters
     with HasXSLog
@@ -153,12 +152,12 @@ class icacheUncacheImp(outer: icacheUncache)
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == wordBits, "Uncache: tilelink width does not match")
 
-  val resp_arb = Module(new Arbiter(new unCacheResp, cacheParams.nMMIOs))
+  val resp_arb = Module(new Arbiter(new InsUncacheResp, cacheParams.nMMIOs))
 
   val req  = io.req
   val resp = io.resp
-  val mem_acquire = bus.a
-  val mem_grant   = bus.d
+  val mmio_acquire = bus.a
+  val mmio_grant   = bus.d
 
   val entry_alloc_idx = Wire(UInt())
   val req_ready = WireInit(false.B)
@@ -172,7 +171,7 @@ class icacheUncacheImp(outer: icacheUncache)
   bus.e.bits  := DontCare
 
   val entries = (0 until cacheParams.nMMIOs) map { i =>
-    val entry = Module(new icacheMMIOEntry(edge))
+    val entry = Module(new InstrMMIOEntry(edge))
 
     entry.io.id := i.U(log2Up(cacheParams.nMMIOs).W)
     entry.io.flush := io.flush
@@ -187,10 +186,10 @@ class icacheUncacheImp(outer: icacheUncache)
     // entry resp
     resp_arb.io.in(i) <> entry.io.resp
 
-    entry.io.mem_grant.valid := false.B
-    entry.io.mem_grant.bits  := DontCare
-    when (mem_grant.bits.source === i.U) {
-      entry.io.mem_grant <> mem_grant
+    entry.io.mmio_grant.valid := false.B
+    entry.io.mmio_grant.bits  := DontCare
+    when (mmio_grant.bits.source === i.U) {
+      entry.io.mmio_grant <> mmio_grant
     }
     entry
   }
@@ -199,10 +198,6 @@ class icacheUncacheImp(outer: icacheUncache)
 
   req.ready  := req_ready
   resp          <> resp_arb.io.out
-  TLArbiter.lowestFromSeq(edge, mem_acquire, entries.map(_.io.mem_acquire))
+  TLArbiter.lowestFromSeq(edge, mmio_acquire, entries.map(_.io.mmio_acquire))
 
-
-  // print all input/output requests for debug purpose
-
-  // print req/resp
 }

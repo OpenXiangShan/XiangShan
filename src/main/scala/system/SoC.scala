@@ -99,13 +99,9 @@ class XSSoc()(implicit p: Parameters) extends LazyModule with HasSoCParameter {
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.dcache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l1pluscache.clientNode
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).ptw.node
-<<<<<<< HEAD
-    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).uncache.clientNode
-    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).icacheUncache.clientNode
-=======
     l2_xbar(i) := TLBuffer() := DebugIdentityNode() := xs_core(i).l2Prefetcher.clientNode
     mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).memBlock.uncache.clientNode
->>>>>>> master
+    mmioXbar   := TLBuffer() := DebugIdentityNode() := xs_core(i).instrUncache.clientNode
     l2cache(i).node := TLBuffer() := DebugIdentityNode() := l2_xbar(i)
     l3_xbar := TLBuffer() := DebugIdentityNode() := l2cache(i).node
   }

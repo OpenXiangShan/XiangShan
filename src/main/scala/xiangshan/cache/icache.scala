@@ -35,7 +35,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
   val ptrHighBit = log2Up(groupBytes) - 1 
   val ptrLowBit = log2Up(packetBytes)
 
-
   def accessBorder =  0x80000000L
   def cacheID = 0
   def insLen = if (HasCExtension) 16 else 32
@@ -46,8 +45,9 @@ trait HasICacheParameters extends HasL1CacheParameters with HasIFUConst {
 
   // ICache MSHR settings
 
-  def MMIOBeats = 8
   def MMIOWordBits = 64
+  def MMIOBeats = blockBits/MMIOWordBits
+  def MMIOWorByte  = MMIOWordBits / 8
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -70,15 +70,6 @@ abstract class ICacheArray extends XSModule
 abstract class ICachArray extends XSModule
   with HasICacheParameters
 
-// sealed class ICacheMetaBundle extends ICacheBundle
-// {
-//   val tag = UInt(tagBits.W)
-// }
-
-// sealed class ICacheDataBundle extends ICacheBundle
-// {
-//   val data = UInt(encRowBits.W)
-// }
 
 class ICacheReq extends ICacheBundle
 {
@@ -102,8 +93,8 @@ class ICacheIO extends ICacheBundle
   val resp = DecoupledIO(new ICacheResp)
   val mem_acquire = DecoupledIO(new L1plusCacheReq)
   val mem_grant   = Flipped(DecoupledIO(new L1plusCacheResp))
-  val mmio_acquire = DecoupledIO(new unCacheReq)
-  val mmio_grant  = Flipped(DecoupledIO(new unCacheResp))
+  val mmio_acquire = DecoupledIO(new InsUncacheReq)
+  val mmio_grant  = Flipped(DecoupledIO(new InsUncacheResp))
   val mmio_flush = Output(Bool())
   val prefetchTrainReq = ValidIO(new IcacheMissReq)
   val tlb = new BlockTlbRequestIO
@@ -451,10 +442,10 @@ class ICache extends ICacheModule
 
   //FIXME!!
   val mmio_mask = VecInit(Seq.fill(PredictWidth){true.B}).asUInt
-  val mmioDataOut = cutHelper(io.mmio_grant.bits.data,s3_req_pc(5,1),mmio_mask)
+  val mmioDataOut = cutHelper(io.mmio_grant.bits.data.asTypeOf(Vec(blockWords,UInt(wordBits.W))),s3_req_pc(5,1),mmio_mask)
 
 
-  s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.valid && io.resp.ready) || io.mmio_grant.fire()))
+  s3_ready := ((io.resp.ready && s3_hit || !s3_valid) && !blocking) || (blocking && ((icacheMissQueue.io.resp.fire()) || io.mmio_grant.fire()))
 
 
   val pds = Seq.fill(nWays)(Module(new PreDecode))
@@ -463,7 +454,7 @@ class ICache extends ICacheModule
     val wayData = cutHelper(VecInit(s3_data.map(b => b(i).asUInt)), s3_req_pc, s3_req_mask)
     val refillData = cutHelper(refillDataVec, s3_req_pc,s3_req_mask)
     wayResp.pc := s3_req_pc
-    wayResp.data := Mux(s3_valid && s3_hit, wayData, refillData)
+    wayResp.data := Mux(s3_valid && s3_hit, wayData, Mux(s3_valid && s3_mmio ,mmioDataOut ,refillData))
     wayResp.mask := s3_req_mask
     wayResp.ipf := s3_tlb_resp.excp.pf.instr
     wayResp.acf := s3_access_fault

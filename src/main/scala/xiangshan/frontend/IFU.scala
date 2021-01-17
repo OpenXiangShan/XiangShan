@@ -70,6 +70,10 @@ class IFUIO extends XSBundle
   val tlbCsr = Input(new TlbCsrBundle)
   // from tlb
   val ptw = new TlbPtwIO
+  // icache uncache
+  val mmio_acquire = DecoupledIO(new InsUncacheReq)
+  val mmio_grant  = Flipped(DecoupledIO(new InsUncacheResp))
+  val mmio_flush = Output(Bool())
 }
 
 class PrevHalfInstr extends XSBundle {
@@ -417,6 +421,9 @@ class IFU extends XSModule with HasIFUConst
   icache.io.prev.bits := if3_prevHalfInstr.bits.instr
   icache.io.prev_ipf := if3_prevHalfInstr.bits.ipf
   icache.io.prev_pc := if3_prevHalfInstr.bits.pc
+  icache.io.mmio_acquire <> io.mmio_acquire
+  icache.io.mmio_grant <> io.mmio_grant
+  icache.io.mmio_flush <> io.mmio_flush
   io.icacheMemAcq <> icache.io.mem_acquire
   io.l1plusFlush := icache.io.l1plusflush
   io.prefetchTrainReq := icache.io.prefetchTrainReq

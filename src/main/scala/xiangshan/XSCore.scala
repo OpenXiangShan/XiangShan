@@ -10,12 +10,8 @@ import xiangshan.backend.exu.Exu._
 import xiangshan.frontend._
 import xiangshan.mem._
 import xiangshan.backend.fu.HasExceptionNO
-<<<<<<< HEAD
-import xiangshan.cache.{ICache, icacheUncache,DCache, L1plusCache, DCacheParameters, ICacheParameters, L1plusCacheParameters, PTW, Uncache}
-=======
-import xiangshan.cache.{DCache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
+import xiangshan.cache.{DCache,InstrUncache, DCacheParameters, ICache, ICacheParameters, L1plusCache, L1plusCacheParameters, PTW, Uncache}
 import xiangshan.cache.prefetch._
->>>>>>> master
 import chipsalliance.rocketchip.config
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.{TLBuffer, TLBundleParameters, TLCacheCork, TLClientNode, TLFilter, TLIdentityNode, TLToAXI4, TLWidthWidget, TLXbar}
@@ -312,13 +308,8 @@ class XSCore()(implicit p: config.Parameters) extends LazyModule
   val fpBlockSlowWakeUpInt = fpExuConfigs.filter(intSlowFilter)
 
   // outer facing nodes
-<<<<<<< HEAD
-  val dcache = LazyModule(new DCache())
-  val uncache = LazyModule(new Uncache())
-  val icacheUncache = LazyModule(new icacheUncache())
-=======
->>>>>>> master
   val l1pluscache = LazyModule(new L1plusCache())
+  val instrUncache = LazyModule(new InstrUncache())
   val ptw = LazyModule(new PTW())
   val l2Prefetcher = LazyModule(new L2Prefetcher())
   val memBlock = LazyModule(new MemBlock(
@@ -373,13 +364,8 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
     slowIntOut = fpBlockSlowWakeUpInt
   ))
 
-<<<<<<< HEAD
-  val dcache = outer.dcache.module
-  val uncache = outer.uncache.module
-  val icacheUncache = outer.icacheUncache.module
-=======
   val memBlock = outer.memBlock.module
->>>>>>> master
+  val instrUncache = outer.instrUncache.module
   val l1pluscache = outer.l1pluscache.module
   val ptw = outer.ptw.module
   val l2Prefetcher = outer.l2Prefetcher.module
@@ -392,6 +378,10 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   l1pluscache.io.resp <> frontend.io.icacheMemGrant
   l1pluscache.io.flush := frontend.io.l1plusFlush
   frontend.io.fencei := integerBlock.io.fenceio.fencei
+
+  instrUncache.io.req <> frontend.io.mmio_acquire
+  instrUncache.io.resp <> frontend.io.mmio_grant
+  instrUncache.io.flush <> frontend.io.mmio_flush
 
   ctrlBlock.io.fromIntBlock <> integerBlock.io.toCtrlBlock
   ctrlBlock.io.fromFpBlock <> floatBlock.io.toCtrlBlock
@@ -458,18 +448,7 @@ class XSCoreImp(outer: XSCore) extends LazyModuleImp(outer)
   ptw.io.sfence <> integerBlock.io.fenceio.sfence
   ptw.io.csr    <> integerBlock.io.csrio.tlb
 
-<<<<<<< HEAD
-  dcache.io.lsu.load    <> memBlock.io.dcache.loadUnitToDcacheVec
-  dcache.io.lsu.lsq   <> memBlock.io.dcache.loadMiss
-  dcache.io.lsu.atomics <> memBlock.io.dcache.atomics
-  dcache.io.lsu.store   <> memBlock.io.dcache.sbufferToDcache
-  uncache.io.lsq      <> memBlock.io.dcache.uncache
-  icacheUncache.io.req   <> icache.io.mmio_acquire
-  icache.io.mmio_grant   <> icacheUncache.io.resp
-  icacheUncache.io.flush <> icache.io.mmio_flush
-=======
   l2Prefetcher.io.in <> memBlock.io.toDCachePrefetch
->>>>>>> master
 
   if (!env.FPGAPlatform) {
     val debugIntReg, debugFpReg = WireInit(VecInit(Seq.fill(32)(0.U(XLEN.W))))
