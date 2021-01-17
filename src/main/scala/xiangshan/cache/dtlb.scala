@@ -322,11 +322,11 @@ class TLB(Width: Int, isDtlb: Boolean) extends TlbModule with HasCSRConst{
   /**
     * L1 TLB read
     */
-  val tlb_read_mask = Mux(refill, (1<<(TlbEntrySize+TlbSPEntrySize)-1).U, 0.U((TlbEntrySize+TlbSPEntrySize).W))
+  // val tlb_read_mask = Mux(refill, ((1<<(TlbEntrySize+TlbSPEntrySize))-1).U, 0.U((TlbEntrySize+TlbSPEntrySize).W))
   def TLBNormalRead(i: Int) = {
     val entryHitVec = (
       if (isDtlb)
-        VecInit((tlb_read_mask.asBools zip entry).map{ case (r, e) => !r && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
+        VecInit(entry.map{ e => ~refill && e.hit(reqAddr(i).vpn/*, satp.asid*/)})
       else
         VecInit(entry.map(_.hit(reqAddr(i).vpn/*, satp.asid*/)))
     )
