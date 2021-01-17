@@ -175,7 +175,7 @@ class CSR extends FunctionUnit with HasCSRConst
   val mimpid = RegInit(UInt(XLEN.W), 0.U) // provides a unique encoding of the version of the processor implementation
   val mhartNo = hartId()
   val mhartid = RegInit(UInt(XLEN.W), mhartNo.asUInt) // the hardware thread running the code
-  val mstatus = RegInit(UInt(XLEN.W), "h00001800".U)  // another option: "h8000c0100".U
+  val mstatus = RegInit(UInt(XLEN.W), 0.U)
   
   // mstatus Value Table
   // | sd   |
