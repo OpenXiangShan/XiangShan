@@ -609,6 +609,9 @@ class CSR extends FunctionUnit with HasCSRConst
   val hasStorePageFault = csrio.exception.bits.cf.exceptionVec(storePageFault) && raiseException
   val hasStoreAddrMisaligned = csrio.exception.bits.cf.exceptionVec(storeAddrMisaligned) && raiseException
   val hasLoadAddrMisaligned = csrio.exception.bits.cf.exceptionVec(loadAddrMisaligned) && raiseException
+  val hasInstrAccessFault = csrio.exception.bits.cf.exceptionVec(instrAccessFault) && raiseException
+  val hasLoadAccessFault = csrio.exception.bits.cf.exceptionVec(loadAccessFault) && raiseException
+  val hasStoreAccessFault = csrio.exception.bits.cf.exceptionVec(storeAccessFault) && raiseException
 
   val csrExceptionVec = Wire(Vec(16, Bool()))
   csrExceptionVec.map(_ := false.B)
@@ -622,6 +625,8 @@ class CSR extends FunctionUnit with HasCSRConst
   csrExceptionVec(illegalInstr) := (isIllegalAddr || isIllegalAccess) && wen
   csrExceptionVec(loadPageFault) := hasLoadPageFault
   csrExceptionVec(storePageFault) := hasStorePageFault
+  csrExceptionVec(loadAccessFault) := hasLoadAccessFault
+  csrExceptionVec(storeAccessFault) := hasStoreAccessFault
   val iduExceptionVec = cfIn.exceptionVec
   val exceptionVec = csrExceptionVec.asUInt() | iduExceptionVec.asUInt()
   cfOut.exceptionVec.zipWithIndex.map{case (e, i) => e := exceptionVec(i) }
@@ -746,19 +751,19 @@ class CSR extends FunctionUnit with HasCSRConst
     // "L2cacheHit" -> (0x1023, "perfCntCondL2cacheHit")
   ) ++ (
     (0 until dcacheParameters.nMissEntries).map(i =>
-      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("DCacheMissQueuePenalty" + Integer.toString(i, 10), (0x102a + i, "perfCntDCacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until icacheParameters.nMissEntries).map(i =>
-      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
+      ("ICacheMissQueuePenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + i, "perfCntICacheMissQueuePenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l1plusPrefetcherParameters.nEntries).map(i =>
-      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L1+PrefetchPenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + i, "perfCntL1plusPrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   ) ++ (
     (0 until l2PrefetcherParameters.nEntries).map(i =>
-      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102d + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
+      ("L2PrefetchPenalty" + Integer.toString(i, 10), (0x102a + dcacheParameters.nMissEntries + icacheParameters.nMissEntries + l1plusPrefetcherParameters.nEntries + i, "perfCntL2PrefetchPenaltyEntry" + Integer.toString(i, 10)))
     ).toMap
   )
 
