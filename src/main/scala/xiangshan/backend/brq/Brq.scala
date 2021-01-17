@@ -306,19 +306,19 @@ class Brq extends XSModule with HasCircularQueuePtrHelper {
   val mbpRRight = predRight && isRType
   val mbpRWrong = predWrong && isRType
 
-  val predictor = brUpdateReadEntry.brUpdate.bpuMeta.predictor
+  val predictor = io.cfiInfo.bits.bpuMeta.predictor
 
-  val ubtbRight =  predRight && predictor === 0.U
-  val ubtbWrong = !predRight && predictor === 0.U
+  val ubtbRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
+  val ubtbWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 0.U
 
-  val btbRight  =  predRight && predictor === 1.U
-  val btbWrong  = !predRight && predictor === 1.U
+  val btbRight  = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
+  val btbWrong  =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 1.U
 
-  val tageRight =  predRight && predictor === 2.U
-  val tageWrong = !predRight && predictor === 2.U
+  val tageRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
+  val tageWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 2.U
 
-  val loopRight =  predRight && predictor === 3.U
-  val loopWrong = !predRight && predictor === 3.U
+  val loopRight = !io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
+  val loopWrong =  io.cfiInfo.bits.isMisPred && !io.cfiInfo.bits.isReplay && predictor === 3.U
 
   if(!env.FPGAPlatform){
     ExcitingUtils.addSource(mbpInstr, "perfCntCondBpInstr", Perf)
